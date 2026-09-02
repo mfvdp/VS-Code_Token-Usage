@@ -270,14 +270,20 @@ code --install-extension token-pace-0.9.0.vsix
 
 ## License
 
-**GPL-3.0-or-later.** Copyright © 2026 Frederik Marx. The full text is in [LICENSE](LICENSE);
+**AGPL-3.0-or-later.** Copyright © 2026 Frederik Marx. The full text is in [LICENSE](LICENSE);
 every source file carries an [SPDX](https://spdx.dev) identifier.
 
 Copyleft was chosen deliberately. This extension reads an access token, and the only
 meaningful assurance about what it does with it is that you can read the code. That
-assurance should survive being passed on: anyone who **distributes** a modified version — as
-another extension, as a `.vsix`, inside a product — has to publish its complete source under
-the same licence, so the next person gets the same guarantee.
+assurance should survive being passed on, by whichever route:
+
+* **Distributed** as another extension, a `.vsix`, or inside a product — the complete source
+  of the modified version has to be published under the same licence.
+* **Run as a network service** — section 13 extends the same duty to people who only ever
+  reach the software over a network, so a hosted dashboard built from this code owes its
+  users the source as well. That is the difference between the AGPL and the plain GPL, and
+  it is the reason for this choice: a quota dashboard is exactly the kind of thing that ends
+  up hosted rather than shipped.
 
 Using and modifying it for yourself carries no obligation whatsoever. The duty begins at
-distribution, never at use, and forking this repository is not distribution.
+distribution or at offering a service, never at use, and forking this repository is neither.

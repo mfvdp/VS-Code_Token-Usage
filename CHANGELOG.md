@@ -24,10 +24,11 @@ full re-scan of the transcripts instead of resuming. Nothing is lost; it just ta
 
 ### Relicensed
 
-From MIT to **GPL-3.0-or-later**. The extension reads an access token, and the assurance
+From MIT to **AGPL-3.0-or-later**. The extension reads an access token, and the assurance
 that it only does what it claims rests on the source being readable. Copyleft carries that
-assurance forward: a modified version that is distributed has to ship its source too.
-Private use and private modification stay unrestricted.
+assurance forward: a modified version has to ship its source whether it is distributed as
+software or merely offered as a network service. Private use and private modification stay
+unrestricted.
 
 ### Changed — please read before updating
 

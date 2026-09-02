@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Frederik Marx
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 export type Source = 'claude' | 'codex'
 
 /** One aggregate bucket: a source, a local day, a model, main or subagent. */

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Frederik Marx
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import * as fs from 'fs'
 import * as path from 'path'
 import { Worker } from 'worker_threads'

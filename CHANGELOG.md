@@ -22,6 +22,13 @@ with it, which matters only to anyone who ran a pre-release build:
 The persisted state lives under the extension id, so the first start after the rename does a
 full re-scan of the transcripts instead of resuming. Nothing is lost; it just takes a moment.
 
+### Relicensed
+
+From MIT to **GPL-3.0-or-later**. The extension reads an access token, and the assurance
+that it only does what it claims rests on the source being readable. Copyleft carries that
+assurance forward: a modified version that is distributed has to ship its source too.
+Private use and private modification stay unrestricted.
+
 ### Changed — please read before updating
 
 * **The extension no longer makes any network access on its own by default.**

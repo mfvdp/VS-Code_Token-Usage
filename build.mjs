@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Frederik Marx
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import * as esbuild from 'esbuild'
 import { readFileSync } from 'fs'
 

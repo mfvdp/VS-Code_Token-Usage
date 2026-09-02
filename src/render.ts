@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Frederik Marx
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /** Pure presentation helpers, with no dependency on vscode. */
 
 /** Left-aligned eighth blocks U+258F..U+2589 for the partial fill of the last cell. */

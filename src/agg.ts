@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Frederik Marx
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { ModelPrice, priceOf } from './prices'
 import {
   Bucket, Cursor, PendingMessage, Snapshot, Source,

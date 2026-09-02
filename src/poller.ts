@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Frederik Marx
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { spawn } from 'child_process'
 import * as fs from 'fs'
 import * as os from 'os'

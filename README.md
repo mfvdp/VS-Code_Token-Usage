@@ -267,3 +267,17 @@ npm install && npm run build      # dist/
 npm run package                   # .vsix
 code --install-extension token-pace-0.9.0.vsix
 ```
+
+## License
+
+**GPL-3.0-or-later.** Copyright © 2026 Frederik Marx. The full text is in [LICENSE](LICENSE);
+every source file carries an [SPDX](https://spdx.dev) identifier.
+
+Copyleft was chosen deliberately. This extension reads an access token, and the only
+meaningful assurance about what it does with it is that you can read the code. That
+assurance should survive being passed on: anyone who **distributes** a modified version — as
+another extension, as a `.vsix`, inside a product — has to publish its complete source under
+the same licence, so the next person gets the same guarantee.
+
+Using and modifying it for yourself carries no obligation whatsoever. The duty begins at
+distribution, never at use, and forking this repository is not distribution.

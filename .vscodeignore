@@ -1,0 +1,11 @@
+.vscode/**
+.gitignore
+.git/**
+src/**
+node_modules/**
+build.mjs
+tsconfig.json
+**/*.map
+# Entwurfsquellen des Store-Logos; ausgeliefert wird nur media/logo.png
+media/logo.svg
+media/logo-*

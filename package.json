@@ -1,0 +1,294 @@
+{
+  "name": "token-pace",
+  "displayName": "Token Pace — Claude Code & Codex",
+  "description": "Quota, tokens and API cost for Claude Code and Codex, permanently in the status bar — coloured by pace, not by level.",
+  "icon": "media/logo.png",
+  "galleryBanner": {
+    "color": "#1B2130",
+    "theme": "dark"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "codex",
+    "anthropic",
+    "openai",
+    "token",
+    "usage",
+    "quota",
+    "rate limit",
+    "cost",
+    "status bar",
+    "monitor"
+  ],
+  "pricing": "Free",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mfvdp/VS-Code_Token-Usage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mfvdp/VS-Code_Token-Usage/issues"
+  },
+  "homepage": "https://github.com/mfvdp/VS-Code_Token-Usage#readme",
+  "qna": "https://github.com/mfvdp/VS-Code_Token-Usage/issues",
+  "version": "0.9.0",
+  "publisher": "frederik",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "tokenPace",
+          "title": "Token Pace",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "tokenPace": [
+        {
+          "id": "tokenPace.dashboard",
+          "name": "Usage",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "tokenPace.showDashboard",
+        "title": "Token Pace: Open Dashboard"
+      },
+      {
+        "command": "tokenPace.rescan",
+        "title": "Token Pace: Re-read Token History"
+      },
+      {
+        "command": "tokenPace.showOutput",
+        "title": "Token Pace: Show Log"
+      },
+      {
+        "command": "tokenPace.refreshQuota",
+        "title": "Token Pace: Fetch Quota Now"
+      },
+      {
+        "command": "tokenPace.resetNetworkConsent",
+        "title": "Token Pace: Reset Network Access Decision"
+      }
+    ],
+    "configuration": {
+      "title": "Token Pace",
+      "properties": {
+        "tokenPace.statusBar.show": {
+          "type": "array",
+          "default": [
+            "claudeQuota",
+            "codexQuota",
+            "tokens"
+          ],
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "claudeQuota",
+              "codexQuota",
+              "extra",
+              "tokens",
+              "cost"
+            ],
+            "enumDescriptions": [
+              "Claude Code quota windows",
+              "Codex quota windows",
+              "Extra/purchased usage on top of the plan",
+              "Total tokens used today across both tools",
+              "Today's hypothetical API cost"
+            ]
+          },
+          "markdownDescription": "Which entries the status bar shows. Use `#tokenPace.windows#` to control how many quota windows each tool contributes.\n\nAn empty list hides the status bar entirely."
+        },
+        "tokenPace.dashboard.sections": {
+          "type": "array",
+          "default": [
+            "quota",
+            "tokens",
+            "chart",
+            "models"
+          ],
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "quota",
+              "tokens",
+              "chart",
+              "models"
+            ],
+            "enumDescriptions": [
+              "Quota bars with the elapsed-time tick",
+              "Token totals for today / 7 days / 30 days",
+              "Stacked chart of the last 14 days",
+              "Breakdown by model over 30 days"
+            ]
+          },
+          "markdownDescription": "Which sections the **Token Pace** panel shows, in fixed order."
+        },
+        "tokenPace.windows": {
+          "type": "string",
+          "enum": [
+            "all",
+            "leading"
+          ],
+          "default": "all",
+          "enumDescriptions": [
+            "Every quota window as its own entry — including model-scoped ones (e.g. “7 d · Fable”)",
+            "Only the most-utilised window per tool"
+          ],
+          "markdownDescription": "Which quota windows appear in the status bar."
+        },
+        "tokenPace.barWidth": {
+          "type": "number",
+          "default": 8,
+          "minimum": 0,
+          "maximum": 20,
+          "markdownDescription": "Bar width in characters. `0` hides the bars."
+        },
+        "tokenPace.barStyle": {
+          "type": "string",
+          "enum": [
+            "line",
+            "shade",
+            "none"
+          ],
+          "default": "line",
+          "enumDescriptions": [
+            "Thin baseline (▁) as the track — quiet, recommended",
+            "Dotted shading (░) — more contrast, grainy at small font sizes",
+            "No track, only the filled part"
+          ],
+          "markdownDescription": "How the **empty** part of the bar is drawn."
+        },
+        "tokenPace.showCost": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the **API cost** column: what this usage would have cost through the provider API at list prices.\n\nThis is a hypothetical figure. On a subscription you do **not** pay these amounts — there is no billing relationship."
+        },
+        "tokenPace.customPrices": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Custom or additional per-model prices, in **USD per 1M tokens**. Overrides the built-in table.\n\n```json\n\"tokenPace.customPrices\": {\n  \"gpt-5.6-sol\": {\n    \"input\": 4, \"output\": 20,\n    \"cacheRead\": 0.4, \"cacheWrite5m\": 0, \"cacheWrite1h\": 0\n  }\n}\n```",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "input",
+              "output",
+              "cacheRead",
+              "cacheWrite5m",
+              "cacheWrite1h"
+            ],
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "cacheRead": {
+                "type": "number"
+              },
+              "cacheWrite5m": {
+                "type": "number"
+              },
+              "cacheWrite1h": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "tokenPace.alignment": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "left",
+          "markdownDescription": "Right-aligned entries are hidden **without notice** when the window is narrow. `left` is recommended."
+        },
+        "tokenPace.staleAfterMinutes": {
+          "type": "number",
+          "default": 20,
+          "description": "Age from which a quota figure counts as stale and is greyed out."
+        },
+        "tokenPace.quotaSource": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "poll",
+            "cache"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Read the cache file; offer once to fetch if nothing is there (recommended)",
+            "Fetch directly from the provider — requires your one-time consent",
+            "Only read the cache file, never fetch and never ask"
+          ],
+          "markdownDescription": "Where the quota figures come from. Token counts come from local transcript files either way and never need network access.\n\n`auto` (default) reads only the cache file that an external poller (panel plugin, cron job) may write, and **makes no network access of its own**. If nothing is there, it offers once to switch to `poll`.\n\n`poll` fetches directly: the access token from `~/.claude/.credentials.json` goes to `api.anthropic.com`, and the local `codex app-server` is started. This happens only after you have explicitly agreed in a dialog that states exactly what is sent. The token is only read, **never refreshed**, and never logged.\n\n`cache` settles the question for good: cache file only, no offer."
+        },
+        "tokenPace.pollIntervalMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "markdownDescription": "Interval between the extension's own fetches, in minutes. Only applies where fetching actually happens (see `#tokenPace.quotaSource#`). Failures trigger a growing backoff (429: up to 2 h, network: up to 30 min)."
+        },
+        "tokenPace.claudeDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Claude Code's directory. Empty = `~/.claude` (on Windows `%USERPROFILE%\\\\.claude`), or `CLAUDE_CONFIG_DIR` if that was set when VS Code started.\n\nTakes effect after **Reload Window**."
+        },
+        "tokenPace.codexDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Codex's directory. Empty = `~/.codex`, or `CODEX_HOME` if that was set when VS Code started.\n\nTakes effect after **Reload Window**."
+        },
+        "tokenPace.claudeQuotaFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "JSON file holding the Claude quota state. Empty = `~/.cache/claude-usage/state.json`.\n\nThis file is written by an **external poller**, not by Claude Code itself."
+        },
+        "tokenPace.codexQuotaFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "JSON file holding the Codex quota state. Empty = `~/.cache/codex-usage/state.json`. See the note on `#tokenPace.claudeQuotaFile#`."
+        },
+        "tokenPace.codexBinary": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `codex` executable. Empty = `CODEX_CLI_PATH`, then `PATH`, then the binary bundled with the official IDE extension."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "package": "node build.mjs && vsce package --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.104.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0"
+  }
+}

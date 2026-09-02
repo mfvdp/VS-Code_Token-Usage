@@ -36,7 +36,7 @@
   "homepage": "https://github.com/mfvdp/VS-Code_Token-Usage#readme",
   "qna": "https://github.com/mfvdp/VS-Code_Token-Usage/issues",
   "version": "0.9.0",
-  "publisher": "frederik",
+  "publisher": "frederikmarx",
   "license": "AGPL-3.0-or-later",
   "engines": {
     "vscode": "^1.104.0"

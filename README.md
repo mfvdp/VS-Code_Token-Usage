@@ -199,8 +199,10 @@ code --install-extension token-pace-0.9.0.vsix
 
 or through the UI via *Extensions → … → Install from VSIX…*.
 
-Both halves work there: `~/.claude` resolves to `%USERPROFILE%\.claude`, and since Windows
-has no external poller, `quotaSource: "auto"` fetches the quota directly.
+Both halves work there: `~/.claude` resolves to `%USERPROFILE%\.claude`. Windows has no
+external poller writing the cache file, so the quota stays empty until you allow fetching —
+the extension offers that once, and [Consent](#consent) says what the dialog states. Token
+counts need none of that and appear straight away.
 
 If the directories have been relocated, set `tokenPace.claudeDir` / `tokenPace.codexDir`
 (or `CLAUDE_CONFIG_DIR` / `CODEX_HOME` — but those only apply when they were already set when

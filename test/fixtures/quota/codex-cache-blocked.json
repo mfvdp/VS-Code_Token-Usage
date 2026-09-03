@@ -1,0 +1,46 @@
+{
+ "schema_version": 1,
+ "fetched_at": 1699991000,
+ "blocked_until": 1700000600,
+ "fail_count": 3,
+ "body": {
+  "rateLimits": {
+   "planType": "plus",
+   "credits": {
+    "hasCredits": true,
+    "unlimited": false,
+    "balance": "12.50"
+   }
+  },
+  "rateLimitsByLimitId": {
+   "codex": {
+    "limitId": "codex",
+    "limitName": null,
+    "primary": {
+     "usedPercent": 33.5,
+     "windowDurationMins": 300,
+     "resetsAt": 1700006400
+    },
+    "secondary": {
+     "usedPercent": 71.2,
+     "windowDurationMins": 10080,
+     "resetsAt": 1700438400
+    }
+   },
+   "codex_bengalfox": {
+    "limitId": "codex_bengalfox",
+    "limitName": "GPT-5.3-Codex-Spark",
+    "primary": {
+     "usedPercent": 8.0,
+     "windowDurationMins": 300,
+     "resetsAt": 1700006400
+    },
+    "secondary": null
+   }
+  },
+  "rateLimitResetCredits": {
+   "availableCount": 2
+  },
+  "usageCreditsRemaining": 42
+ }
+}

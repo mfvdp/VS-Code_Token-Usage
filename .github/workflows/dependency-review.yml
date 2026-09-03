@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Frederik Marx
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Token Pace ships with zero runtime dependencies. This job is what keeps that true: any
+# pull request that adds one has to say so out loud.
+name: Dependency Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure

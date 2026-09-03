@@ -1,0 +1,39 @@
+{
+ "schema_version": 1,
+ "written_at": 1699999700000,
+ "payload": {
+  "model": {
+   "id": "claude-fable-1",
+   "display_name": "Fable"
+  },
+  "rate_limits": {
+   "five_hour": {
+    "used_percentage": 44.0,
+    "resets_at": 1700006400
+   },
+   "seven_day": {
+    "used_percentage": 64.0,
+    "resets_at": 1700438400
+   },
+   "spend_limit": {
+    "used_percentage": 10.0
+   }
+  },
+  "context_window": {
+   "total_input_tokens": 120000,
+   "total_output_tokens": 8000,
+   "context_window_size": 200000,
+   "used_percentage": 64.0,
+   "remaining_percentage": 36.0
+  },
+  "cost": {
+   "total_cost_usd": 1.2345
+  },
+  "prompt_cache": {
+   "warm": true,
+   "ttl": "5m",
+   "expires_at": 1700000300,
+   "hit_ratio": 0.82
+  }
+ }
+}

@@ -1,12 +1,81 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import * as vscode from 'vscode'
+/**
+ * The two questions the extension is allowed to ask, and the answers it keeps.
+ *
+ * Everything this tool does by default is local and read-only. The three
+ * exceptions — one network call and two writes outside `globalStorage` — each
+ * have their own dialog, their own memento key and their own revocation, so a
+ * yes to one is never a yes to another.
+ *
+ * The dialogs state what happens in concrete terms (which address, which file,
+ * which interval), because a consent dialog whose text is vaguer than the
+ * action it unlocks is a formality, not a decision.
+ */
+
+import { MementoLike } from './storage'
 
 const CONSENT_KEY = 'networkConsent'
 const OFFERED_KEY = 'networkConsentOffered'
 
 export type ConsentState = 'granted' | 'denied' | 'unasked'
+
+/**
+ * The one `vscode.window` method the dialogs need. Injectable so the classes
+ * can be exercised without an editor; the real module is required lazily.
+ */
+export interface ConsentUi {
+  showInformationMessage(
+    message: string,
+    options: { modal: boolean; detail?: string },
+    ...items: string[]
+  ): PromiseLike<string | undefined>
+}
+
+function windowUi(): ConsentUi {
+  const vscode = require('vscode') as typeof import('vscode')
+  return vscode.window
+}
+
+/** Default poll interval of the manifest — used when no live value is supplied. */
+const DEFAULT_INTERVAL_MINUTES = 30
+
+/**
+ * The network disclosure, with the interval the user has actually configured.
+ *
+ * A fixed "every 30 minutes" in the text was a small lie as soon as the setting
+ * moved, and the whole point of this dialog is that its numbers are true.
+ */
+export function disclosure(intervalMinutes: number): string {
+  const minutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0
+    ? Math.round(intervalMinutes)
+    : DEFAULT_INTERVAL_MINUTES
+  const cadence = minutes >= 60 && minutes % 60 === 0
+    ? `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}`
+    : `${minutes} minutes`
+  return [
+    'Token counts are read from local transcript files and need no network access. Quota percentages do.',
+    '',
+    `If you allow it, then at most every ${cadence} (tokenPace.pollIntervalMinutes):`,
+    '',
+    '• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from',
+    '  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,',
+    '  because the endpoint rate-limits other callers into a permanent 429.',
+    '• Codex — the local "codex app-server" is started and asked for its rate limits. No traffic',
+    '  of ours leaves the machine for this.',
+    '',
+    'That endpoint is undocumented: it is what Claude Code itself calls, it carries no stability',
+    'promise, and it may change or disappear at any time. Token Pace then shows no quota figures',
+    'rather than guessing any.',
+    '',
+    'The token is only read, never refreshed, and appears in no log line or error message. The',
+    'target address is hard-coded and cannot be configured. Nothing is sent anywhere else, and',
+    'no usage data is collected by this extension.',
+    '',
+    'You can change this later with "Token Pace: Reset Network Access Decision".',
+  ].join('\n')
+}
 
 /**
  * Gate in front of every network access the extension makes on its own.
@@ -24,8 +93,9 @@ export class NetworkConsent {
   private asking: Promise<boolean> | null = null
 
   constructor(
-    private memento: vscode.Memento,
+    private memento: MementoLike,
     private log: (msg: string) => void,
+    private opts: { intervalMinutes?: () => number; ui?: ConsentUi } = {},
   ) {}
 
   state(): ConsentState {
@@ -34,6 +104,11 @@ export class NetworkConsent {
 
   granted(): boolean {
     return this.state() === 'granted'
+  }
+
+  /** The text the dialog would show right now — also used by the onboarding card. */
+  disclosure(): string {
+    return disclosure(this.opts.intervalMinutes?.() ?? DEFAULT_INTERVAL_MINUTES)
   }
 
   /**
@@ -48,9 +123,10 @@ export class NetworkConsent {
   }
 
   private async ask(): Promise<boolean> {
-    const choice = await vscode.window.showInformationMessage(
+    const ui = this.opts.ui ?? windowUi()
+    const choice = await ui.showInformationMessage(
       'Allow Token Pace to fetch quota figures?',
-      { modal: true, detail: DISCLOSURE },
+      { modal: true, detail: this.disclosure() },
       'Allow',
       'Never',
     )
@@ -83,20 +159,140 @@ export class NetworkConsent {
   }
 }
 
-const DISCLOSURE = [
-  'Token counts are read from local transcript files and need no network access. Quota percentages do.',
-  '',
-  'If you allow it, then at most every 30 minutes:',
-  '',
-  '• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from',
-  '  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,',
-  '  because the endpoint rate-limits other callers into a permanent 429.',
-  '• Codex — the local "codex app-server" is started and asked for its rate limits. No traffic',
-  '  of ours leaves the machine for this.',
-  '',
-  'The token is only read, never refreshed, and appears in no log line or error message. The',
-  'target address is hard-coded and cannot be configured. Nothing is sent anywhere else, and',
-  'no usage data is collected by this extension.',
-  '',
-  'You can change this later with "Token Pace: Reset Network Access Decision".',
-].join('\n')
+export type WriteConsentKind = 'writeQuotaCache' | 'statusLine'
+
+/** Concrete paths for the disclosure text; every one of them is named in the dialog. */
+export interface WriteConsentPaths {
+  /** The external quota cache file the writer would create or replace. */
+  quotaCacheFile?: string
+  /** Claude Code's settings file the bridge would edit. */
+  settingsFile?: string
+  /** Where the bridge mirrors the status-line JSON (inside globalStorage). */
+  mirrorFile?: string
+}
+
+const WRITE_TITLES: Record<WriteConsentKind, string> = {
+  writeQuotaCache: 'Allow Token Pace to write the shared quota cache file?',
+  statusLine: 'Allow Token Pace to edit Claude Code\'s settings.json?',
+}
+
+/**
+ * The text for a write outside `globalStorage`.
+ *
+ * Both cases touch a file the user did not create for us, so the dialog names
+ * the exact path, what protects it (backup, never overwriting newer data) and
+ * how to undo it. Nothing here is reversible by us alone after the fact.
+ */
+export function writeConsentDisclosure(kind: WriteConsentKind, paths: WriteConsentPaths = {}): string {
+  if (kind === 'writeQuotaCache') {
+    const file = paths.quotaCacheFile ?? '~/.cache/claude-monitor/usage-<source>.json'
+    return [
+      'Token Pace writes only into its own storage — with this one exception, if you allow it.',
+      '',
+      `After each of its own quota polls it would write the result to:`,
+      `  ${file}`,
+      '',
+      'That file is the documented exchange format (schema_version 1) other tools read, so a',
+      'panel, a shell prompt and this extension can share one fetch instead of three.',
+      '',
+      'It contains the provider\'s quota response — percentages, reset times, plan type. It never',
+      'contains your access token. An existing file whose fetch time is newer than ours is never',
+      'overwritten, and the write is atomic (temp file plus rename), so a reader never sees half',
+      'a file.',
+      '',
+      'Switch it off again with the setting "tokenPace.writeQuotaCache".',
+    ].join('\n')
+  }
+  const settings = paths.settingsFile ?? '~/.claude/settings.json'
+  const mirror = paths.mirrorFile ?? '<globalStorage>/statusline-mirror.json'
+  return [
+    'Token Pace writes only into its own storage — with this one exception, if you allow it.',
+    '',
+    'To read quota figures without any network access, it can register a small script as Claude',
+    'Code\'s status line. Claude Code then runs that script on every status-line refresh and pipes',
+    'its status JSON into it; the script mirrors that JSON to a file and prints a status line.',
+    '',
+    'What changes:',
+    `  • ${settings} — the "statusLine" entry is set to the script.`,
+    `  • A backup is written first, next to it, as settings.json.token-pace-backup-<timestamp>.`,
+    `  • The mirrored JSON is stored at ${mirror}.`,
+    '',
+    'An existing status-line command is kept: it is called by the script with the same input and',
+    'its output is passed through unchanged. A settings.json that cannot be parsed is never',
+    'touched. The script never sends anything anywhere and never logs the piped JSON.',
+    '',
+    '"Token Pace: Disconnect Claude Status Line" restores the previous entry exactly — as long as',
+    'the entry is still the one we installed. It is not removed automatically when the extension',
+    'is uninstalled, so disconnect first if you plan to remove Token Pace.',
+  ].join('\n')
+}
+
+/**
+ * Consent for one kind of write outside `globalStorage`.
+ *
+ * Separate from the network consent and from each other: allowing a cache file
+ * to be shared says nothing about letting an editor rewrite Claude Code's own
+ * configuration, and the reverse is just as true.
+ */
+export class WriteConsent {
+  private asking: Promise<boolean> | null = null
+  private readonly key: string
+
+  constructor(
+    private memento: MementoLike,
+    readonly kind: WriteConsentKind,
+    private log: (msg: string) => void,
+    private opts: { ui?: ConsentUi; paths?: WriteConsentPaths } = {},
+  ) {
+    this.key = `writeConsent.${kind}`
+  }
+
+  /** The memento key this instance owns — the delete command lists it. */
+  mementoKey(): string {
+    return this.key
+  }
+
+  state(): ConsentState {
+    return this.memento.get<ConsentState>(this.key, 'unasked')
+  }
+
+  granted(): boolean {
+    return this.state() === 'granted'
+  }
+
+  disclosure(): string {
+    return writeConsentDisclosure(this.kind, this.opts.paths ?? {})
+  }
+
+  request(): Promise<boolean> {
+    if (this.granted()) return Promise.resolve(true)
+    if (this.asking) return this.asking
+    this.asking = this.ask().finally(() => { this.asking = null })
+    return this.asking
+  }
+
+  private async ask(): Promise<boolean> {
+    const ui = this.opts.ui ?? windowUi()
+    const choice = await ui.showInformationMessage(
+      WRITE_TITLES[this.kind],
+      { modal: true, detail: this.disclosure() },
+      'Allow',
+      'Never',
+    )
+    if (choice === 'Allow') {
+      await this.memento.update(this.key, 'granted')
+      this.log(`Write access allowed by the user: ${this.kind}.`)
+      return true
+    }
+    if (choice === 'Never') {
+      await this.memento.update(this.key, 'denied')
+      this.log(`Write access declined by the user: ${this.kind}.`)
+    }
+    return false
+  }
+
+  async reset(): Promise<void> {
+    await this.memento.update(this.key, undefined)
+    this.log(`Write access decision reset: ${this.kind}.`)
+  }
+}

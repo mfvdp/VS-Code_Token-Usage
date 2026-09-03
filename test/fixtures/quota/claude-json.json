@@ -1,0 +1,133 @@
+{
+ "oauthAccount": {
+  "emailAddress": "never-read@example.invalid",
+  "accountUuid": "00000000-dead-beef-0000-000000000000"
+ },
+ "projects": {
+  "/home/example/project": {
+   "lastCost": 1.5,
+   "lastDuration": 900
+  }
+ },
+ "cachedUsageUtilization": {
+  "fetchedAtMs": 1699998200000,
+  "accountUuid": "11111111-2222-3333-4444-555555555555",
+  "utilization": {
+   "five_hour": {
+    "utilization": 41.5,
+    "resets_at": "2023-11-15T00:00:00.000Z",
+    "limit_dollars": 12.5,
+    "used_dollars": 5.19,
+    "remaining_dollars": 7.31,
+    "locked_reason": null
+   },
+   "seven_day": {
+    "utilization": 63.25,
+    "resets_at": "2023-11-20T00:00:00.000Z",
+    "limit_dollars": 210.0,
+    "used_dollars": 132.8,
+    "remaining_dollars": 77.2,
+    "locked_reason": null
+   },
+   "seven_day_opus": {
+    "utilization": 12.0,
+    "resets_at": "2023-11-20T00:00:00.000Z"
+   },
+   "seven_day_oauth_apps": null,
+   "seven_day_sonnet": null,
+   "seven_day_cowork": null,
+   "seven_day_omelette": null,
+   "tangelo": null,
+   "iguana_necktie": null,
+   "omelette_promotional": null,
+   "nimbus_quill": {
+    "utilization": 0,
+    "resets_at": null
+   },
+   "cinder_cove": {
+    "utilization": 0,
+    "resets_at": null
+   },
+   "amber_ladder": null,
+   "juniper_tide": null,
+   "extra_usage": {
+    "is_enabled": true,
+    "monthly_limit": 5000,
+    "used_credits": 1250,
+    "utilization": 25.0,
+    "currency": "USD",
+    "decimal_places": 2,
+    "disabled_reason": null,
+    "user_disabled": false,
+    "spend_limit_reached": false,
+    "credits_ever_enabled": true,
+    "daily": {
+     "limit": 1000,
+     "used": 300
+    },
+    "weekly": {
+     "limit": 4000,
+     "used": 900
+    }
+   },
+   "limits": [
+    {
+     "kind": "session",
+     "group": "session",
+     "percent": 41.5,
+     "severity": "normal",
+     "resets_at": "2023-11-15T00:00:00.000Z",
+     "scope": null,
+     "is_active": true
+    },
+    {
+     "kind": "weekly_all",
+     "group": "weekly",
+     "percent": 63.25,
+     "severity": "normal",
+     "resets_at": "2023-11-20T00:00:00.000Z",
+     "scope": null,
+     "is_active": true
+    },
+    {
+     "kind": "weekly_scoped",
+     "group": "weekly",
+     "percent": 12.0,
+     "severity": "normal",
+     "resets_at": "2023-11-20T00:00:00.000Z",
+     "scope": {
+      "model": {
+       "id": "claude-fable-1",
+       "display_name": "Fable"
+      },
+      "surface": "code"
+     },
+     "is_active": true
+    }
+   ],
+   "spend": {
+    "used": {
+     "amount_minor": 1250,
+     "currency": "USD",
+     "exponent": 2
+    },
+    "limit": {
+     "amount_minor": 5000,
+     "currency": "USD",
+     "exponent": 2
+    },
+    "percent": 25.0,
+    "severity": "normal",
+    "enabled": true,
+    "disabled_reason": null,
+    "cap": null,
+    "balance": null,
+    "auto_reload": false,
+    "disclaimer": null,
+    "can_purchase_credits": true,
+    "can_toggle": true
+   },
+   "member_dashboard_available": false
+  }
+ }
+}

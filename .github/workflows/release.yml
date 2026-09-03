@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: 2026 Frederik Marx
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# One tag push publishes everywhere: GitHub release, Marketplace and Open VSX. Open VSX is
+# what makes the extension installable in VSCodium, Cursor and Windsurf at all.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build bundles
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Privacy check (http literals against the allow-list)
+        run: npm run check:privacy
+
+      - name: Package
+        run: npx --yes @vscode/vsce package --out token-pace-${{ github.ref_name }}.vsix
+
+      - name: GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: token-pace-${{ github.ref_name }}.vsix
+          generate_release_notes: true
+
+      # Each publish step is skipped rather than failed when its token is not configured,
+      # so a fork or a first release can produce the .vsix without any secrets.
+      - name: Publish to the Visual Studio Marketplace
+        if: env.VSCE_PAT != ''
+        run: npx --yes @vscode/vsce publish --packagePath token-pace-${{ github.ref_name }}.vsix
+
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        run: npx --yes ovsx publish token-pace-${{ github.ref_name }}.vsix --pat "$OVSX_PAT"

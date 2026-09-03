@@ -1,22 +1,159 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ModelPrice, priceOf } from './prices'
+import { createHash } from 'crypto'
+import * as path from 'path'
+import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
+import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  Bucket, Cursor, PendingMessage, Snapshot, Source,
-  bucketKey, emptyBucket, STATE_VERSION,
+  Attribution, Bucket, CodexRateLimitsSnapshot, Cursor, PendingMessage, Resolution, SessionRec,
+  Snapshot, Source, Tier, bucketKey, emptyBucket, STATE_VERSION,
 } from './types'
 
-/** Local day (not UTC!) as YYYY-MM-DD. Codex rollouts are UTC; on late evenings
- *  in UTC+2 that would put up to 495M tokens on the wrong day. */
+/** Per-file context the scanner hands to every ingest call. */
+export interface IngestContext {
+  isSub: boolean
+  file: string
+  attribution: Attribution
+  projectSalt: string
+  hashProjects: boolean
+}
+
+export interface BucketFilter {
+  source?: Source
+  models?: string[]
+  isSub?: boolean
+  tier?: Tier
+}
+
+export type Metric = 'usage' | 'output' | 'cacheRead' | 'requests' | 'reasoning' | 'cost'
+
+export interface CostSummary {
+  usd: number
+  listUsd: number
+  /** Billable tokens of models with no price at all. */
+  unpricedTokens: number
+  unpricedModels: string[]
+  /** Billable tokens of fast-mode requests whose model has no published fast rate. */
+  fastUnpricedTokens: number
+  familyPriced: string[]
+  custom: boolean
+}
+
+/** Local day (not UTC!) as YYYY-MM-DD in the machine zone. Codex rollouts are UTC; on late
+ *  evenings in UTC+2 that would put up to 495M tokens on the wrong day. Used at ingest so the
+ *  `day` of hour buckets stays monotone with their `hour`. */
 export function localDay(ms: number): string {
   const d = new Date(ms)
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+/** The figure that actually means "usage": fresh input plus output. Cache reads
+ *  otherwise dominate by a factor of ~1000 and make any total unreadable. */
+export function billable(b: Bucket): number {
+  const fresh = b.source === 'codex' ? Math.max(0, b.input - b.cacheRead) : b.input
+  return fresh + b.cacheWrite + b.output
+}
+
+const MS_HOUR = 3_600_000
+/** Eight days of per-session hour slices — one day more than the longest quota window. */
+const SESSION_HOUR_KEEP = 8 * 24
+
+/** Turn gaps per session are a bounded sample, not a log — 200 is enough for a P90. */
+const TURN_GAP_CAP = 200
+
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+
+/** Fast mode and US-only inference are independent surcharges, hence four tiers. */
+function tierOf(speed: unknown, geo: unknown): Tier {
+  const fast = speed === 'fast'
+  const us = geo === 'us'
+  if (fast && us) return 'fast-us'
+  if (fast) return 'fast'
+  if (us) return 'us'
+  return 'standard'
+}
+
+function timeKey(cfg: TimeConfig): string {
+  return `${cfg.zone}|${cfg.dayBoundaryHour}`
+}
+
+/** First and last calendar day of a YYYY-MM month, so a month bucket can be range-checked. */
+function monthBounds(month: string): { first: string; last: string } {
+  const first = `${month}-01`
+  const y = Number(month.slice(0, 4))
+  const m = Number(month.slice(5, 7))
+  const days = Number.isFinite(y) && Number.isFinite(m) ? new Date(Date.UTC(y, m, 0)).getUTCDate() : 31
+  return { first, last: `${month}-${String(days).padStart(2, '0')}` }
+}
+
+/**
+ * A pseudonym for a project that survives renames of nothing but is stable for one path:
+ * the salt is per installation, so two people with the same checkout path do not share it.
+ */
+function projectHashOf(salt: string, full: string): string {
+  return createHash('sha256').update(salt + full).digest('hex').slice(0, 12)
+}
+
+/**
+ * Reads the rate-limit block Codex writes into token_count events. Both the snake_case
+ * schema of the rollouts and the camelCase one of the app-server are accepted, because
+ * the block moved between the two across versions. Anything not a finite number is
+ * dropped rather than clamped: a window with an unusable percentage is no window.
+ */
+export function parseCodexRateLimits(rl: unknown, t: number): CodexRateLimitsSnapshot | null {
+  if (!rl || typeof rl !== 'object') return null
+  const r = rl as Record<string, unknown>
+  const pick = (a: string, b: string): unknown => (r[a] !== undefined ? r[a] : r[b])
+  const window = (w: unknown): CodexRateLimitsSnapshot['primary'] => {
+    if (!w || typeof w !== 'object') return null
+    const o = w as Record<string, unknown>
+    const used = o.used_percent !== undefined ? o.used_percent : o.usedPercent
+    if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) return null
+    const mins = o.window_minutes !== undefined ? o.window_minutes : o.windowMinutes
+    const reset = o.resets_at !== undefined ? o.resets_at : o.resetsAt
+    let resetsAt: number | null = null
+    if (typeof reset === 'number' && Number.isFinite(reset) && reset > 0) {
+      // Rollouts write epoch seconds; anything that already looks like milliseconds is kept.
+      resetsAt = reset < 1e12 ? Math.round(reset * 1000) : Math.round(reset)
+    }
+    return {
+      usedPercent: used,
+      windowMinutes: typeof mins === 'number' && Number.isFinite(mins) && mins > 0 ? mins : null,
+      resetsAt,
+    }
+  }
+  const creditsRaw = r.credits
+  let credits: CodexRateLimitsSnapshot['credits'] = null
+  if (creditsRaw && typeof creditsRaw === 'object') {
+    const c = creditsRaw as Record<string, unknown>
+    const bal = c.balance
+    credits = {
+      hasCredits: (c.has_credits !== undefined ? c.has_credits : c.hasCredits) === true,
+      unlimited: c.unlimited === true,
+      balance: typeof bal === 'string' ? bal : typeof bal === 'number' && Number.isFinite(bal) ? String(bal) : null,
+    }
+  }
+  const reached = pick('rate_limit_reached_type', 'rateLimitReachedType')
+  return {
+    t,
+    // The account-wide limit carries no id in older rollouts; "codex" is what the
+    // app-server names it, so both schemas end up under one key.
+    limitId: str(pick('limit_id', 'limitId')) ?? 'codex',
+    limitName: str(pick('limit_name', 'limitName')),
+    planType: str(pick('plan_type', 'planType')),
+    primary: window(r.primary),
+    secondary: window(r.secondary),
+    credits,
+    limitReached: reached !== null && reached !== undefined,
+  }
 }
 
 /**
@@ -29,23 +166,167 @@ function num(v: unknown): number {
  *
  * Codex: total_token_usage is cumulative and is inherited as a baseline on forks.
  * Only the positive increase over the previous event is counted.
+ *
+ * Buckets are keyed per UTC hour while young, and folded into local days and
+ * months by `rollup()`. Ingest and roll-up never overlap: the aggregator is
+ * single-threaded, and the extension runs the roll-up between scans, so a line
+ * can only ever see a consistent set of buckets.
  */
 export class Aggregator {
   private buckets = new Map<string, Bucket>()
   private pending = new Map<string, PendingMessage>()
+  private sessionMap = new Map<string, SessionRec>()
   cursors = new Map<string, Cursor>()
+  attribution: Attribution = 'none'
+  firstIngest: number | null = null
+  /** Zone used to address late lines into rolled-up buckets and to map hours to days. */
+  timeConfig: TimeConfig = SYSTEM_TIME_CONFIG
+  private rollupState = { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }
+  /** dayOfHour goes through Intl and is hit for every bucket on every query — memoised. */
+  private dayMemoKey = ''
+  private dayMemo = new Map<number, string>()
 
-  private bucket(source: Source, day: string, model: string, isSub: boolean): Bucket {
-    const k = bucketKey(source, day, model, isSub)
+  // ---------------------------------------------------------------- Buckets
+
+  private dayOfHourMemo(hour: number, cfg: TimeConfig): string {
+    const key = timeKey(cfg)
+    if (key !== this.dayMemoKey) {
+      this.dayMemoKey = key
+      this.dayMemo.clear()
+    }
+    let d = this.dayMemo.get(hour)
+    if (d === undefined) {
+      d = dayOfHour(hour, cfg)
+      this.dayMemo.set(hour, d)
+    }
+    return d
+  }
+
+  private get(source: Source, res: Resolution, hour: number | null, day: string, model: string, isSub: boolean, tier: Tier): Bucket {
+    const k = bucketKey({ source, res, hour, day, model, isSub, tier })
     let b = this.buckets.get(k)
-    if (!b) { b = emptyBucket(source, day, model, isSub); this.buckets.set(k, b) }
+    if (!b) {
+      b = emptyBucket(source, model, isSub, tier, res, hour, day)
+      this.buckets.set(k, b)
+    }
     return b
+  }
+
+  /** Hour index below which hour buckets have been folded into days; null before any roll-up. */
+  private hourHorizon(): number | null {
+    const r = this.rollupState
+    if (r.lastRun <= 0) return null
+    return hourIndex(r.lastRun) - r.hourRetentionDays * 24
+  }
+
+  /** Day below which day buckets have been folded into months; null before any roll-up. */
+  private dayHorizon(): string | null {
+    const r = this.rollupState
+    if (r.lastRun <= 0) return null
+    return addDays(dayOf(r.lastRun, this.timeConfig), -r.retentionDays)
+  }
+
+  /**
+   * The bucket a line belongs to. Normally the hour bucket; but a late line for an hour
+   * that the roll-up has already folded away must land in the day (or month) bucket that
+   * now holds that hour — otherwise the roll-up would silently resurrect hour buckets and
+   * the next roll-up would fold them again, double-shifting nothing but confusing sums.
+   */
+  bucketFor(source: Source, hour: number, day: string, model: string, isSub: boolean, tier: Tier): Bucket {
+    const hh = this.hourHorizon()
+    if (hh === null || hour >= hh) return this.get(source, 'h', hour, day, model, isSub, tier)
+    const rolledDay = this.dayOfHourMemo(hour, this.timeConfig)
+    const dh = this.dayHorizon()
+    if (dh === null || rolledDay >= dh) return this.get(source, 'd', null, rolledDay, model, isSub, tier)
+    return this.get(source, 'm', null, monthOf(rolledDay), model, isSub, tier)
+  }
+
+  private noteIngest(ts: number): void {
+    if (this.firstIngest === null || ts < this.firstIngest) this.firstIngest = ts
+  }
+
+  // --------------------------------------------------------------- Sessions
+
+  private sessionFor(file: string, ctx: IngestContext, make: () => SessionRec): SessionRec {
+    let s = this.sessionMap.get(file)
+    if (!s) {
+      s = make()
+      this.sessionMap.set(file, s)
+    }
+    // The snapshot records the setting its session table was collected under.
+    this.attribution = ctx.attribution
+    return s
+  }
+
+  private newSession(
+    source: Source, sessionId: string, label: string, full: string, isSub: boolean,
+    parent: string | null, ts: number, ctx: IngestContext,
+  ): SessionRec {
+    const projectHash = projectHashOf(ctx.projectSalt, full)
+    return {
+      source, sessionId,
+      project: ctx.hashProjects ? projectHash : label,
+      projectHash,
+      isSub, parent,
+      firstTs: ts, lastTs: ts,
+      models: [],
+      input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0,
+      requests: 0, outputFinal: 0,
+      lastCacheTtl: null, lastCacheWriteTs: null,
+      turnGapsMs: [],
+      hourUsage: {},
+    }
+  }
+
+  /**
+   * Credits one hour of a session with the tokens it was billed for.
+   *
+   * The lifetime counters cannot be sliced afterwards, so the slice is kept while the line
+   * is read. It is the same billable definition and the same UTC hour index the buckets use,
+   * so a per-window attribution and the window's own usage row add up to the same tokens.
+   */
+  private noteSessionHour(s: SessionRec, hour: number, tokens: number): void {
+    if (!Number.isFinite(hour) || !(tokens > 0)) return
+    const map = s.hourUsage ?? (s.hourUsage = {})
+    const k = String(hour)
+    map[k] = (map[k] ?? 0) + tokens
+  }
+
+  /** A new request in a session: its distance to the previous one approximates a turn. */
+  private noteTurn(s: SessionRec, ts: number, model: string): void {
+    if (ts > s.lastTs) {
+      s.turnGapsMs.push(ts - s.lastTs)
+      if (s.turnGapsMs.length > TURN_GAP_CAP) s.turnGapsMs.splice(0, s.turnGapsMs.length - TURN_GAP_CAP)
+      s.lastTs = ts
+    }
+    if (ts < s.firstTs) s.firstTs = ts
+    if (!s.models.includes(model)) s.models.push(model)
+  }
+
+  private noteCacheWrite(s: SessionRec, cacheWrite: number, cacheWrite1h: number, ts: number): void {
+    if (cacheWrite <= 0) return
+    s.lastCacheTtl = cacheWrite1h > 0 ? '1h' : '5m'
+    s.lastCacheWriteTs = ts
+  }
+
+  /**
+   * Where a Claude transcript sits tells what it is: `<projects>/<slug>/<sessionId>.jsonl`
+   * for a main session, `<projects>/<slug>/<sessionId>/subagents/<agent>.jsonl` for a
+   * subagent. The slug is the fallback project label when a line carries no cwd.
+   */
+  private static claudePlacement(file: string, isSub: boolean): { slug: string; parent: string | null } {
+    const dir = path.dirname(file)
+    if (isSub) {
+      const sessionDir = path.dirname(dir)
+      return { slug: path.basename(path.dirname(sessionDir)), parent: path.basename(sessionDir) }
+    }
+    return { slug: path.basename(dir), parent: null }
   }
 
   // ---------------------------------------------------------------- Claude
 
   /** Processes one line of a Claude transcript. Returns true if it was counted. */
-  addClaudeLine(raw: string, isSub: boolean): boolean {
+  addClaudeLine(raw: string, ctx: IngestContext): boolean {
     if (raw.indexOf('"usage"') < 0) return false
     let d: any
     try { d = JSON.parse(raw) } catch { return false }
@@ -59,10 +340,13 @@ export class Aggregator {
     const id = m.id
     if (typeof id !== 'string' || !id) return false
 
-    const ts = Date.parse(d.timestamp ?? '')
-    const day = localDay(Number.isFinite(ts) ? ts : Date.now())
-    const model = typeof m.model === 'string' ? m.model : 'unbekannt'
+    const parsed = Date.parse(d.timestamp ?? '')
+    const ts = Number.isFinite(parsed) ? parsed : Date.now()
+    const hour = hourIndex(ts)
+    const day = localDay(ts)
+    const model = typeof m.model === 'string' ? m.model : 'unknown'
     const final = m.stop_reason != null
+    const isSub = ctx.isSub
 
     const cand = {
       input: num(u.input_tokens),
@@ -72,43 +356,120 @@ export class Aggregator {
       cacheRead: num(u.cache_read_input_tokens),
       // iterations[] is already the total and must not be added on top.
       output: num(u.output_tokens),
+      // Thinking tokens are a subset of output: reported alongside, never added to it.
+      reasoning: num(u.output_tokens_details?.thinking_tokens),
+      webSearch: num(u.server_tool_use?.web_search_requests),
+      webFetch: num(u.server_tool_use?.web_fetch_requests),
     }
+
+    const cur = this.cursors.get(ctx.file)
+    if (cur) cur.lastTs = ts
+    this.noteIngest(ts)
 
     const prev = this.pending.get(id)
     if (!prev) {
-      const b = this.bucket('claude', day, model, isSub)
+      const tier = tierOf(u.speed, u.inference_geo)
+      const b = this.bucketFor('claude', hour, day, model, isSub, tier)
       b.input += cand.input
       b.cacheWrite += cand.cacheWrite
       b.cacheWrite1h += cand.cacheWrite1h
       b.cacheRead += cand.cacheRead
       b.output += cand.output
+      b.reasoning += cand.reasoning
+      b.webSearch += cand.webSearch
+      b.webFetch += cand.webFetch
       b.requests += 1
       if (final) b.outputFinal += 1
-      this.pending.set(id, { day, model, isSub, ...cand, final })
+      const p: PendingMessage = { hour, day, model, isSub, tier, ...cand, final }
+
+      if (ctx.attribution !== 'none') {
+        const place = Aggregator.claudePlacement(ctx.file, isSub)
+        const cwd = str(d.cwd)
+        const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
+          'claude',
+          str(d.sessionId) ?? path.basename(ctx.file, '.jsonl'),
+          cwd ? path.basename(cwd) : place.slug,
+          cwd ?? place.slug,
+          isSub, place.parent, ts, ctx,
+        ))
+        if (cur) { cur.sessionId = s.sessionId; cur.project = s.project }
+        this.noteTurn(s, ts, model)
+        s.input += cand.input
+        s.cacheWrite += cand.cacheWrite
+        s.cacheWrite1h += cand.cacheWrite1h
+        s.cacheRead += cand.cacheRead
+        s.output += cand.output
+        s.reasoning += cand.reasoning
+        s.requests += 1
+        if (final) s.outputFinal += 1
+        this.noteCacheWrite(s, cand.cacheWrite, cand.cacheWrite1h, ts)
+        this.noteSessionHour(s, hour, cand.input + cand.cacheWrite + cand.output)
+        p.session = ctx.file
+      }
+
+      this.pending.set(id, p)
       this.trimPending()
       return true
     }
 
-    // Known id: only add the difference to the running maximum.
-    const b = this.bucket('claude', prev.day, prev.model, prev.isSub)
+    // Known id: only add the difference to the running maximum. The bucket is looked up
+    // by the message's own hour, so a late line follows its message into a rolled-up bucket.
+    const b = this.bucketFor('claude', prev.hour, prev.day, prev.model, prev.isSub, prev.tier)
+    const prevReasoning = prev.reasoning ?? 0
     const next = {
       input: Math.max(prev.input, cand.input),
       cacheWrite: Math.max(prev.cacheWrite, cand.cacheWrite),
       cacheWrite1h: Math.max(prev.cacheWrite1h, cand.cacheWrite1h),
       cacheRead: Math.max(prev.cacheRead, cand.cacheRead),
       output: Math.max(prev.output, cand.output),
+      reasoning: Math.max(prevReasoning, cand.reasoning),
+      webSearch: Math.max(prev.webSearch, cand.webSearch),
+      webFetch: Math.max(prev.webFetch, cand.webFetch),
     }
-    b.input += next.input - prev.input
-    b.cacheWrite += next.cacheWrite - prev.cacheWrite
-    b.cacheWrite1h += next.cacheWrite1h - prev.cacheWrite1h
-    b.cacheRead += next.cacheRead - prev.cacheRead
-    b.output += next.output - prev.output
-    if (final && !prev.final) b.outputFinal += 1
+    const delta = {
+      input: next.input - prev.input,
+      cacheWrite: next.cacheWrite - prev.cacheWrite,
+      cacheWrite1h: next.cacheWrite1h - prev.cacheWrite1h,
+      cacheRead: next.cacheRead - prev.cacheRead,
+      output: next.output - prev.output,
+      reasoning: next.reasoning - prevReasoning,
+      webSearch: next.webSearch - prev.webSearch,
+      webFetch: next.webFetch - prev.webFetch,
+    }
+    const newlyFinal = final && !prev.final
+    b.input += delta.input
+    b.cacheWrite += delta.cacheWrite
+    b.cacheWrite1h += delta.cacheWrite1h
+    b.cacheRead += delta.cacheRead
+    b.output += delta.output
+    b.reasoning += delta.reasoning
+    b.webSearch += delta.webSearch
+    b.webFetch += delta.webFetch
+    if (newlyFinal) b.outputFinal += 1
+
+    const s = prev.session ? this.sessionMap.get(prev.session) : undefined
+    if (s) {
+      s.input += delta.input
+      s.cacheWrite += delta.cacheWrite
+      s.cacheWrite1h += delta.cacheWrite1h
+      s.cacheRead += delta.cacheRead
+      s.output += delta.output
+      s.reasoning += delta.reasoning
+      if (newlyFinal) s.outputFinal += 1
+      if (ts > s.lastTs) s.lastTs = ts
+      this.noteCacheWrite(s, delta.cacheWrite, delta.cacheWrite1h, ts)
+      // The message's hour, not the late line's: the bucket above follows the same rule.
+      this.noteSessionHour(s, prev.hour, delta.input + delta.cacheWrite + delta.output)
+    }
+
     prev.input = next.input
     prev.cacheWrite = next.cacheWrite
     prev.cacheWrite1h = next.cacheWrite1h
     prev.cacheRead = next.cacheRead
     prev.output = next.output
+    prev.reasoning = next.reasoning
+    prev.webSearch = next.webSearch
+    prev.webFetch = next.webFetch
     prev.final = prev.final || final
     return true
   }
@@ -126,14 +487,24 @@ export class Aggregator {
 
   // ----------------------------------------------------------------- Codex
 
-   /**
-   * Processes one line of a Codex rollout, advancing `cur` as it goes:
-   * startTs/forked drive replay-prefix detection, lastTotal drives delta computation.
+  /**
+   * Processes one line of a Codex rollout, advancing `cur` as it goes: startTs/forked
+   * drive replay-prefix detection, lastTotal drives delta computation.
+   *
+   * Replay prefix of a forked file: the parent's history is copied in, complete with its
+   * token_count events. Preferred signal is the first `task_started` event — everything
+   * before it is replay and only sets the baseline. Rollouts written by versions that do
+   * not persist that marker fall back to the timestamp heuristic: replayed events sit
+   * within 2 s of the file's first record. Without look-ahead the two cannot be told
+   * apart on a single line, so a token_count that is neither at the fork point nor
+   * preceded by a marker is treated as real; the known cost is that a marker-less fork
+   * whose first real turn lands inside those 2 s loses that one turn to the baseline.
    */
-  addCodexLine(raw: string, cur: Cursor): boolean {
+  addCodexLine(raw: string, cur: Cursor, ctx: IngestContext): boolean {
     let d: any
     try { d = JSON.parse(raw) } catch { return false }
-    const ts = Date.parse(d?.timestamp ?? '')
+    const parsed = Date.parse(d?.timestamp ?? '')
+    const ts = Number.isFinite(parsed) ? parsed : NaN
     if (cur.startTs === undefined && Number.isFinite(ts)) cur.startTs = ts
 
     const type = d?.type
@@ -141,14 +512,40 @@ export class Aggregator {
 
     if (type === 'session_meta') {
       // A forked thread carries the parent thread's complete history with it.
-      if (p && (p.forked_from_id || p.thread_source === 'subagent')) cur.forked = true
+      const forkedFrom = p ? str(p.forked_from_id) : null
+      if (p && (forkedFrom || p.thread_source === 'subagent')) cur.forked = true
+      if (ctx.attribution !== 'none' && p && typeof p === 'object') {
+        const cwd = str(p.cwd)
+        const sessionId = str(p.id) ?? path.basename(ctx.file, '.jsonl')
+        const at = Number.isFinite(ts) ? ts : Date.now()
+        const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
+          'codex', sessionId,
+          cwd ? path.basename(cwd) : path.basename(path.dirname(ctx.file)),
+          cwd ?? ctx.file,
+          !!cur.forked, forkedFrom, at, ctx,
+        ))
+        cur.sessionId = s.sessionId
+        cur.project = s.project
+      }
       return false
     }
     if (type === 'turn_context') {
       if (p && typeof p.model === 'string') cur.model = p.model
       return false
     }
-    if (type !== 'event_msg' || p?.type !== 'token_count') return false
+    if (type !== 'event_msg' || !p || typeof p !== 'object') return false
+
+    if (p.type === 'task_started') {
+      // The first turn of this file begins here; whatever came before was copied history.
+      cur.replayDone = true
+      return false
+    }
+    if (p.type !== 'token_count') return false
+
+    // The rate-limit block is a reading in its own right, worth keeping even when the
+    // token figures of the line are a duplicate or replay.
+    const rl = parseCodexRateLimits(p.rate_limits ?? p.rateLimits, Number.isFinite(ts) ? ts : Date.now())
+    if (rl && (!cur.lastRateLimits || rl.t >= cur.lastRateLimits.t)) cur.lastRateLimits = rl
 
     const info = p.info
     if (!info || typeof info !== 'object') return false
@@ -158,8 +555,8 @@ export class Aggregator {
 
     const totalTokens = num(total.total_tokens)
 
-    // Replay prefix: leading events whose timestamp sits at the fork point.
     if (!cur.replayDone) {
+      // Replay prefix without a marker: leading events whose timestamp sits at the fork point.
       const atStart =
         cur.startTs !== undefined && Number.isFinite(ts) && Math.abs(ts - cur.startTs) <= 2000
       if (cur.forked && atStart) {
@@ -167,29 +564,73 @@ export class Aggregator {
         return false
       }
       cur.replayDone = true
-      if (cur.lastTotal === undefined) {
-        // First real event: the difference total-last is the inherited baseline.
-        const lastTotalTokens = last ? num(last.total_tokens) : 0
-        cur.lastTotal = Math.max(0, totalTokens - lastTotalTokens)
-      }
+    }
+    if (cur.lastTotal === undefined) {
+      // First real event: the difference total-last is the inherited baseline.
+      const lastTotalTokens = last && typeof last === 'object' ? num(last.total_tokens) : 0
+      cur.lastTotal = Math.max(0, totalTokens - lastTotalTokens)
     }
 
-    const prevTotal = cur.lastTotal ?? 0
+    const prevTotal = cur.lastTotal
     if (totalTokens <= prevTotal) return false // duplicate or post-compaction marker
     cur.lastTotal = totalTokens
 
     // When total rises, the delta is field-wise identical to last_token_usage.
     const src = last && typeof last === 'object' ? last : total
-    const day = localDay(Number.isFinite(ts) ? ts : Date.now())
-    const b = this.bucket('codex', day, cur.model || 'unbekannt', !!cur.forked)
-    b.input += num(src.input_tokens)
-    b.cacheRead += num(src.cached_input_tokens)
-    b.cacheWrite += num(src.cache_write_input_tokens)
-    b.output += num(src.output_tokens)
-    b.reasoning += num(src.reasoning_output_tokens)
+    const at = Number.isFinite(ts) ? ts : Date.now()
+    const model = cur.model || 'unknown'
+    const isSub = !!cur.forked
+    const b = this.bucketFor('codex', hourIndex(at), localDay(at), model, isSub, 'standard')
+    const add = {
+      input: num(src.input_tokens),
+      cacheRead: num(src.cached_input_tokens),
+      cacheWrite: num(src.cache_write_input_tokens),
+      output: num(src.output_tokens),
+      reasoning: num(src.reasoning_output_tokens),
+    }
+    b.input += add.input
+    b.cacheRead += add.cacheRead
+    b.cacheWrite += add.cacheWrite
+    b.output += add.output
+    b.reasoning += add.reasoning
     b.requests += 1
     b.outputFinal += 1 // Codex reports final values, not a streaming snapshot
+    cur.lastTs = at
+    this.noteIngest(at)
+
+    if (ctx.attribution !== 'none') {
+      const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
+        'codex', path.basename(ctx.file, '.jsonl'), path.basename(path.dirname(ctx.file)),
+        ctx.file, isSub, null, at, ctx,
+      ))
+      if (cur.sessionId === undefined) { cur.sessionId = s.sessionId; cur.project = s.project }
+      this.noteTurn(s, at, model)
+      s.input += add.input
+      s.cacheRead += add.cacheRead
+      s.cacheWrite += add.cacheWrite
+      s.output += add.output
+      s.reasoning += add.reasoning
+      s.requests += 1
+      s.outputFinal += 1
+      this.noteCacheWrite(s, add.cacheWrite, 0, at)
+      // Codex reports cached tokens inside input_tokens; only the fresh part is billable.
+      this.noteSessionHour(
+        s, hourIndex(at), Math.max(0, add.input - add.cacheRead) + add.cacheWrite + add.output,
+      )
+    }
     return true
+  }
+
+  /** Newest rate-limit reading per limit id across every rollout — the network-free Codex quota. */
+  codexRateLimits(): CodexRateLimitsSnapshot[] {
+    const best = new Map<string, CodexRateLimitsSnapshot>()
+    for (const cur of this.cursors.values()) {
+      const s = cur.lastRateLimits
+      if (!s) continue
+      const have = best.get(s.limitId)
+      if (!have || s.t > have.t) best.set(s.limitId, s)
+    }
+    return [...best.values()].sort((a, b) => a.limitId.localeCompare(b.limitId))
   }
 
   // ----------------------------------------------------------- Persistence
@@ -200,106 +641,288 @@ export class Aggregator {
       buckets: [...this.buckets.values()],
       cursors: Object.fromEntries(this.cursors),
       pending: Object.fromEntries(this.pending),
+      sessions: Object.fromEntries(this.sessionMap),
+      attribution: this.attribution,
+      rollup: { ...this.rollupState },
+      firstIngest: this.firstIngest,
     }
   }
 
-  static fromSnapshot(s: Snapshot | undefined): Aggregator {
+  /**
+   * Restores a snapshot for the given attribution setting. A schema mismatch yields an
+   * empty aggregator, which is the signal for a cold scan. The same happens when the
+   * setting now asks for session records the snapshot was never collecting (none →
+   * project/session): those can only come from a re-read. The other direction just
+   * drops the table; project and session share one record shape and switch freely.
+   */
+  static fromSnapshot(s: Snapshot | undefined, attribution: Attribution = 'none'): Aggregator {
     const a = new Aggregator()
+    a.attribution = attribution
     if (!s || s.version !== STATE_VERSION) return a
+    const stored: Attribution = s.attribution ?? 'none'
+    if (attribution !== 'none' && stored === 'none') return a
     for (const b of s.buckets ?? []) {
-      a.buckets.set(bucketKey(b.source, b.day, b.model, b.isSub), b)
+      if (!b || typeof b !== 'object' || !b.source || !b.res) continue
+      a.buckets.set(bucketKey(b), b)
     }
     for (const [k, v] of Object.entries(s.cursors ?? {})) a.cursors.set(k, v)
     for (const [k, v] of Object.entries(s.pending ?? {})) a.pending.set(k, v)
+    if (attribution !== 'none') {
+      for (const [k, v] of Object.entries(s.sessions ?? {})) a.sessionMap.set(k, v)
+    } else {
+      a.dropSessionFields()
+    }
+    if (s.rollup && typeof s.rollup === 'object') {
+      a.rollupState = {
+        lastRun: num(s.rollup.lastRun),
+        hourRetentionDays: num(s.rollup.hourRetentionDays),
+        retentionDays: num(s.rollup.retentionDays),
+      }
+    }
+    a.firstIngest = typeof s.firstIngest === 'number' && Number.isFinite(s.firstIngest) ? s.firstIngest : null
     return a
+  }
+
+  /** Drops per-session data (attribution switched off). */
+  clearSessions(): void {
+    this.sessionMap.clear()
+    this.attribution = 'none'
+    this.dropSessionFields()
+  }
+
+  /** Session identifiers also live on cursors and open messages; off means gone everywhere. */
+  private dropSessionFields(): void {
+    for (const c of this.cursors.values()) { delete c.sessionId; delete c.project }
+    for (const p of this.pending.values()) delete p.session
   }
 
   all(): Bucket[] { return [...this.buckets.values()] }
 
-  /**
-   * Hypothetical API cost for a period. Computed per model, because the rates
-   * differ by a factor of 50. `unpricedTokens` reports the volume with no price
-   * on file — otherwise the total would silently come out too low.
-   */
-  cost(
-    fromDay: string,
-    toDay: string,
-    source?: Source,
-    overrides?: Record<string, ModelPrice>,
-  ): { usd: number; unpricedTokens: number; unpricedModels: string[] } {
-    let usd = 0
-    let unpricedTokens = 0
-    const unpriced = new Set<string>()
+  sessions(): SessionRec[] { return [...this.sessionMap.values()] }
+
+  stats(): {
+    buckets: number; files: number; oldestDay: string | null; newestDay: string | null
+    hourBuckets: number; dayBuckets: number; monthBuckets: number
+  } {
+    let oldest: string | null = null
+    let newest: string | null = null
+    let h = 0, d = 0, m = 0
     for (const b of this.buckets.values()) {
-      if (source && b.source !== source) continue
-      if (b.day < fromDay || b.day > toDay) continue
-      const c = costOf(b, overrides)
-      if (c === null) {
-        unpriced.add(b.model)
-        unpricedTokens += billable(b)
-      } else {
-        usd += c
+      if (b.res === 'h') h++
+      else if (b.res === 'd') d++
+      else m++
+      const day = b.res === 'm' ? monthBounds(b.day) : { first: b.day, last: b.day }
+      if (oldest === null || day.first < oldest) oldest = day.first
+      if (newest === null || day.last > newest) newest = day.last
+    }
+    return {
+      buckets: this.buckets.size, files: this.cursors.size, oldestDay: oldest, newestDay: newest,
+      hourBuckets: h, dayBuckets: d, monthBuckets: m,
+    }
+  }
+
+  // ---------------------------------------------------------------- Roll-up
+
+  /**
+   * Folds hour buckets older than `hourRetentionDays` into local-day buckets and day
+   * buckets older than `retentionDays` into month buckets. Sums are preserved exactly;
+   * running it twice changes nothing. The zone given here becomes the aggregator's
+   * `timeConfig`, so late lines are addressed with the same calendar the fold used.
+   *
+   * Must not run while a scan is feeding lines — the extension schedules it between
+   * scans; the worker never calls it.
+   */
+  rollup(
+    now: number, hourRetentionDays: number, retentionDays: number, tcfg: TimeConfig,
+  ): { hoursMerged: number; daysMerged: number } {
+    this.timeConfig = tcfg
+    const hourHorizon = hourIndex(now) - Math.max(0, Math.floor(hourRetentionDays)) * 24
+    const dayHorizon = addDays(dayOf(now, tcfg), -Math.max(0, Math.floor(retentionDays)))
+    let hoursMerged = 0
+    let daysMerged = 0
+
+    for (const [k, b] of [...this.buckets]) {
+      if (b.res !== 'h' || b.hour === null || b.hour >= hourHorizon) continue
+      const day = this.dayOfHourMemo(b.hour, tcfg)
+      this.buckets.delete(k)
+      mergeInto(this.get(b.source, 'd', null, day, b.model, b.isSub, b.tier), b)
+      hoursMerged++
+    }
+    for (const [k, b] of [...this.buckets]) {
+      if (b.res !== 'd' || b.day >= dayHorizon) continue
+      this.buckets.delete(k)
+      mergeInto(this.get(b.source, 'm', null, monthOf(b.day), b.model, b.isSub, b.tier), b)
+      daysMerged++
+    }
+    // The per-session hour slices exist for the quota windows only, and the longest of those
+    // is a week. Keeping them for the full hour-bucket retention would store months of them.
+    const sessionHorizon = Math.max(hourHorizon, hourIndex(now) - SESSION_HOUR_KEEP)
+    for (const s of this.sessionMap.values()) {
+      if (!s.hourUsage) continue
+      for (const k of Object.keys(s.hourUsage)) {
+        if (Number(k) < sessionHorizon) delete s.hourUsage[k]
       }
     }
-    return { usd, unpricedTokens, unpricedModels: [...unpriced].sort() }
+
+    this.rollupState = {
+      lastRun: now,
+      hourRetentionDays: Math.max(0, Math.floor(hourRetentionDays)),
+      retentionDays: Math.max(0, Math.floor(retentionDays)),
+    }
+    return { hoursMerged, daysMerged }
   }
 
-  /** Sums over a day range (inclusive), optionally per source. */
-  sum(fromDay: string, toDay: string, source?: Source): Bucket {
-    const out = emptyBucket(source ?? 'claude', fromDay, '*', false)
+  // ---------------------------------------------------------------- Queries
+
+  private matches(b: Bucket, f?: BucketFilter): boolean {
+    if (!f) return true
+    if (f.source && b.source !== f.source) return false
+    if (f.isSub !== undefined && b.isSub !== f.isSub) return false
+    if (f.tier && b.tier !== f.tier) return false
+    if (f.models && f.models.length && !f.models.includes(b.model)) return false
+    return true
+  }
+
+  /**
+   * Whether a bucket lies inside an inclusive local-day range. Hour buckets are placed
+   * by the configured zone; day buckets are final; a month bucket counts only when the
+   * whole month is inside — its days cannot be told apart any more, so a partial month
+   * would be a guess. Month buckets are at least `retentionDays` old, so the usual
+   * 7/30/90-day ranges never meet one.
+   */
+  private inRange(b: Bucket, from: string, to: string, tcfg: TimeConfig): boolean {
+    if (b.res === 'h') {
+      const day = this.dayOfHourMemo(b.hour ?? 0, tcfg)
+      return day >= from && day <= to
+    }
+    if (b.res === 'd') return b.day >= from && b.day <= to
+    const m = monthBounds(b.day)
+    return m.first >= from && m.last <= to
+  }
+
+  /** Sums over an inclusive local-day range; uses the time config to map hour buckets to days. */
+  sum(from: string, to: string, tcfg: TimeConfig, filter?: BucketFilter): Bucket {
+    const out = emptyBucket(filter?.source ?? 'claude', '*', false, 'standard', 'd', null, from)
     for (const b of this.buckets.values()) {
-      if (source && b.source !== source) continue
-      if (b.day < fromDay || b.day > toDay) continue
-      out.input += b.input
-      out.cacheWrite += b.cacheWrite
-      out.cacheWrite1h += b.cacheWrite1h
-      out.cacheRead += b.cacheRead
-      out.output += b.output
-      out.reasoning += b.reasoning
-      out.requests += b.requests
-      out.outputFinal += b.outputFinal
+      if (!this.matches(b, filter) || !this.inRange(b, from, to, tcfg)) continue
+      mergeInto(out, b)
     }
     return out
   }
 
-  /** Daily series for the sparkline: total per day, ascending. */
-  series(days: string[], source?: Source): number[] {
+  /**
+   * Hypothetical API cost for a period. Computed per bucket, because rates differ by
+   * model, day and tier. Tokens that could not be priced are reported, never folded
+   * into the total — a silently low figure is worse than a marked gap.
+   */
+  cost(from: string, to: string, tcfg: TimeConfig, pricing: PricingOptions, filter?: BucketFilter): CostSummary {
+    const out: CostSummary = {
+      usd: 0, listUsd: 0, unpricedTokens: 0, unpricedModels: [], fastUnpricedTokens: 0,
+      familyPriced: [], custom: isCustomPricing(pricing),
+    }
+    const unpriced = new Set<string>()
+    const family = new Set<string>()
+    for (const b of this.buckets.values()) {
+      if (!this.matches(b, filter) || !this.inRange(b, from, to, tcfg)) continue
+      const c = this.costOfBucket(b, tcfg, pricing)
+      if (c === null) {
+        unpriced.add(b.model)
+        out.unpricedTokens += billable(b)
+        continue
+      }
+      if (c.unpriced) {
+        out.fastUnpricedTokens += billable(b)
+        continue
+      }
+      out.usd += c.usd
+      out.listUsd += c.listUsd
+      if (c.confidence === 'family') family.add(b.model)
+      if (c.confidence === 'custom') out.custom = true
+    }
+    out.unpricedModels = [...unpriced].sort()
+    out.familyPriced = [...family].sort()
+    return out
+  }
+
+  /** The dated price rule is chosen by the bucket's day in the configured zone. */
+  private costOfBucket(b: Bucket, tcfg: TimeConfig, pricing: PricingOptions) {
+    const day = b.res === 'h' ? this.dayOfHourMemo(b.hour ?? 0, tcfg) : b.res === 'm' ? `${b.day}-01` : b.day
+    return costOfBucket(day === b.day ? b : { ...b, day }, pricing)
+  }
+
+  /**
+   * One value per day, ascending, for charts. `days` is a contiguous ascending list.
+   * A month bucket whose month lies inside the list is shown on the month's first day:
+   * its daily distribution no longer exists and spreading it evenly would invent one.
+   */
+  series(days: string[], tcfg: TimeConfig, filter?: BucketFilter, metric: Metric = 'usage', pricing?: PricingOptions): number[] {
+    const out = new Array<number>(days.length).fill(0)
+    if (days.length === 0) return out
     const idx = new Map(days.map((d, i) => [d, i]))
-    const out = new Array(days.length).fill(0)
+    const from = days[0]
+    const to = days[days.length - 1]
     for (const b of this.buckets.values()) {
-      if (source && b.source !== source) continue
-      const i = idx.get(b.day)
+      if (!this.matches(b, filter)) continue
+      let day: string
+      if (b.res === 'h') day = this.dayOfHourMemo(b.hour ?? 0, tcfg)
+      else if (b.res === 'd') day = b.day
+      else {
+        const m = monthBounds(b.day)
+        if (m.first < from || m.last > to) continue
+        day = m.first
+      }
+      const i = idx.get(day)
       if (i === undefined) continue
-      out[i] += billable(b)
+      out[i] += this.metricOf(b, metric, tcfg, pricing)
     }
     return out
   }
-}
 
-/** What a single bucket would have cost through the API, in USD. */
-export function costOf(b: Bucket, overrides?: Record<string, ModelPrice>): number | null {
-  const p = priceOf(b.model, overrides)
-  if (!p) return null
-  const M = 1e6
-  if (b.source === 'codex') {
-    // input_tokens already includes the cached tokens — otherwise they get paid for twice.
-    const fresh = Math.max(0, b.input - b.cacheRead)
-    return (fresh * p.input + b.cacheRead * p.cacheRead + b.output * p.output) / M
+  private metricOf(b: Bucket, metric: Metric, tcfg: TimeConfig, pricing?: PricingOptions): number {
+    switch (metric) {
+      case 'output': return b.output
+      case 'cacheRead': return b.cacheRead
+      case 'requests': return b.requests
+      case 'reasoning': return b.reasoning
+      case 'cost': {
+        const c = this.costOfBucket(b, tcfg, pricing ?? {})
+        return c && !c.unpriced ? c.usd : 0
+      }
+      default: return billable(b)
+    }
   }
-  const write5m = Math.max(0, b.cacheWrite - b.cacheWrite1h)
-  return (
-    (b.input * p.input +
-      write5m * p.cacheWrite5m +
-      b.cacheWrite1h * p.cacheWrite1h +
-      b.cacheRead * p.cacheRead +
-      b.output * p.output) /
-    M
-  )
+
+  /**
+   * Hour-resolution sums for [fromMs, toMs), hour-rounded outward. Only hour buckets
+   * take part; when the interval reaches below the roll-up horizon the answer is
+   * flagged incomplete instead of being padded with day-bucket guesses.
+   */
+  sumHours(fromMs: number, toMs: number, filter?: BucketFilter): { bucket: Bucket; complete: boolean } {
+    const out = emptyBucket(filter?.source ?? 'claude', '*', false, 'standard', 'h', null, localDay(fromMs))
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return { bucket: out, complete: true }
+    const fromHour = hourIndex(fromMs)
+    const toHour = Math.ceil(toMs / MS_HOUR)
+    for (const b of this.buckets.values()) {
+      if (b.res !== 'h' || b.hour === null) continue
+      if (b.hour < fromHour || b.hour >= toHour) continue
+      if (!this.matches(b, filter)) continue
+      mergeInto(out, b)
+    }
+    const hh = this.hourHorizon()
+    return { bucket: out, complete: hh === null || fromHour >= hh }
+  }
 }
 
-/** The figure that actually means "usage": fresh input plus output. Cache reads
- *  otherwise dominate by a factor of ~1000 and make any total unreadable. */
-export function billable(b: Bucket): number {
-  const fresh = b.source === 'codex' ? Math.max(0, b.input - b.cacheRead) : b.input
-  return fresh + b.cacheWrite + b.output
+/** Adds every counter of `src` onto `dst`; the identity fields of `dst` stay untouched. */
+function mergeInto(dst: Bucket, src: Bucket): void {
+  dst.input += src.input
+  dst.cacheWrite += src.cacheWrite
+  dst.cacheWrite1h += src.cacheWrite1h
+  dst.cacheRead += src.cacheRead
+  dst.output += src.output
+  dst.reasoning += src.reasoning
+  dst.requests += src.requests
+  dst.outputFinal += src.outputFinal
+  dst.webSearch += src.webSearch
+  dst.webFetch += src.webFetch
 }

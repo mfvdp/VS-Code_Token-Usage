@@ -1,11 +1,20 @@
-.vscode/**
-.gitignore
-.git/**
-src/**
-node_modules/**
-build.mjs
-tsconfig.json
-**/*.map
-# Entwurfsquellen des Store-Logos; ausgeliefert wird nur media/logo.png
-media/logo.svg
-media/logo-*
+# vsce keeps a file when no pattern matches it, or when a "!" pattern does. So: exclude
+# everything, then name exactly what ships. Nothing can slip into the .vsix by being added
+# to a directory that happens not to be listed.
+**
+
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!dist/*.js
+!media/logo.png
+!media/icon.svg
+!scripts/uninstall.js
+!docs/*.md
+
+# Deliberately not shipped, and not negated above:
+#   src/, test/, out/, out-test/, .github/, .vscode/, .git/, node_modules/
+#   build.mjs, tsconfig.json, package-lock.json, scripts/check-privacy.mjs
+#   dist/*.js.map, *.vsix
+#   media/logo.svg and media/logo-* (draft sources of the store logo)

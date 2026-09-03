@@ -385,6 +385,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } finally {
       scanning = false
       dirty = true
+      // The scan may have read newer Codex rate limits out of the transcripts; a memoised
+      // reading taken before it would show "unavailable" for up to five seconds.
+      quotaMgr.invalidate()
     }
   }
 
@@ -406,7 +409,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           // Counts only — a line is never logged, in no mode and to no sink.
           log.debug(`Ingest: ${files ? `${files.length} changed file(s)` : 'every known file'}`
             + ` → ${n} counted line(s)`)
-          if (n > 0) { dirty = true; render(true) }
+          // A counted Codex line can carry a fresh rate-limit block — same memo rule as the cold scan.
+          if (n > 0) { dirty = true; quotaMgr.invalidate(); render(true) }
         })
         .catch((err) => log.error(`Ingest failed: ${err}`))
         .finally(() => { ingesting = false })

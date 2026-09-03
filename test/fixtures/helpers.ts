@@ -12,11 +12,55 @@ import * as os from 'os'
 import * as path from 'path'
 import { IngestContext } from '../../src/agg'
 
-/** A fresh scratch directory; TOKEN_PACE_TEST_TMP relocates it (CI sandboxes, local scratchpads). */
-export function tmpDir(prefix: string): string {
-  const base = process.env.TOKEN_PACE_TEST_TMP || os.tmpdir()
-  fs.mkdirSync(base, { recursive: true })
-  return fs.mkdtempSync(path.join(base, `${prefix}-`))
+/** The local scratchpad the suite prefers over /tmp when it is present. */
+export const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
+
+const madeTempDirs: string[] = []
+let sweeperArmed = false
+
+/**
+ * The suite makes hundreds of scratch directories per run; nothing in a test can be
+ * trusted to delete its own (a failing assertion skips the rest of the test), so they
+ * are all swept once at process exit. `force` keeps a directory a test already removed
+ * from turning the sweep into an error.
+ */
+function track(dir: string): string {
+  madeTempDirs.push(dir)
+  if (!sweeperArmed) {
+    sweeperArmed = true
+    process.once('exit', () => {
+      for (const d of madeTempDirs) {
+        try {
+          fs.rmSync(d, { recursive: true, force: true })
+        } catch {
+          // A leftover directory must never change the exit code of the suite.
+        }
+      }
+    })
+  }
+  return dir
+}
+
+/**
+ * A fresh scratch directory, removed again when the process exits.
+ * TOKEN_PACE_TEST_TMP relocates it (CI sandboxes, local scratchpads); `base` overrides
+ * both, for callers that pick their own root.
+ */
+export function tmpDir(prefix: string, base?: string): string {
+  const root = base || process.env.TOKEN_PACE_TEST_TMP || os.tmpdir()
+  fs.mkdirSync(root, { recursive: true })
+  return track(fs.mkdtempSync(path.join(root, `${prefix}-`)))
+}
+
+/** Like tmpDir, but under the scratchpad when that exists — keeps churn out of /tmp. */
+export function scratchDir(prefix: string): string {
+  const base = process.env.TOKEN_PACE_TEST_TMP || (fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir())
+  return tmpDir(prefix, base)
+}
+
+/** A path inside a fresh scratch directory, for tests that need one named file. */
+export function scratchFile(prefix: string, name: string): string {
+  return path.join(scratchDir(prefix), name)
 }
 
 export function iso(ms: number): string {

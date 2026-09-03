@@ -43,16 +43,29 @@ function series(count: number, stepMs: number, startPercent: number, perHour: nu
   return out
 }
 
-test('no samples is state none, a full window is state full — both without text', () => {
+test('no samples is state none and says nothing at all', () => {
   const none = forecast([], win(10, NOW + 4 * H), NOW, CFG, 50)
   assert.equal(none.state, 'none')
   assert.equal(none.text, '')
   assert.equal(none.etaMs, null)
+})
 
+test('an exhausted window names the reset without counting it down, and invents none', () => {
   const full = forecast(series(13, 15 * MIN, 95, 2), win(99.7, NOW + 4 * H), NOW, CFG, 50)
   assert.equal(full.state, 'full')
-  assert.equal(full.text, '')
+  // No duration in the sentence: every view prints the window's own countdown right beside
+  // it, and the two duration formats disagreed about the same instant.
+  assert.equal(full.text, 'full until the reset')
+  assert.equal(/\d/.test(full.text), false)
+  // Nothing is projected: the rate and the ETA stay absent, only the sentence is filled in.
   assert.equal(full.ratePerHour, null)
+  assert.equal(full.etaMs, null)
+  assert.equal(full.endPercent, null)
+
+  // No stated reset, and a reset already past: the bare fact and nothing more.
+  assert.equal(forecast([], win(100, null), NOW, CFG, 50).text, 'full')
+  assert.equal(forecast([], win(100, NOW - MIN), NOW, CFG, 50).text, 'full')
+  assert.equal(forecast([], win(100, Number.NaN), NOW, CFG, 50).text, 'full')
 })
 
 test('an unlimited window never gets a projection', () => {

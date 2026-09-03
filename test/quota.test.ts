@@ -4,7 +4,6 @@
 import { strict as assert } from 'node:assert'
 import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
@@ -14,8 +13,8 @@ import {
 } from '../src/quota'
 import { credentialsPath, isCredentialsError, keychainService, loadCredentials } from '../src/credentials'
 import { CodexRateLimitsSnapshot } from '../src/types'
+import { scratchDir } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
 const BASE = 1_700_000_000_000
 const DAY = 86_400_000
 
@@ -34,11 +33,6 @@ const FIX = fixtures()
 
 function fixture(name: string): string {
   return path.join(FIX, name)
-}
-
-function tmpDir(prefix: string): string {
-  const root = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  return fs.mkdtempSync(path.join(root, prefix))
 }
 
 /** Environment variables are process-wide state; every test puts them back. */
@@ -210,7 +204,7 @@ test('a paused poller is named, for both providers', () => {
 })
 
 test('a missing file and an empty body are different problems', () => {
-  const dir = tmpDir('quota-missing-')
+  const dir = scratchDir('quota-missing')
   const gone = readClaudeQuota(path.join(dir, 'nope.json'), BASE)
   assert.equal(gone.problemKind, 'noFile')
   const file = path.join(dir, 'empty.json')
@@ -220,7 +214,7 @@ test('a missing file and an empty body are different problems', () => {
 })
 
 test('a cache file from a newer schema is refused rather than guessed at', () => {
-  const dir = tmpDir('quota-newer-')
+  const dir = scratchDir('quota-newer')
   const file = path.join(dir, 'state.json')
   fs.writeFileSync(file, JSON.stringify({ schema_version: 99, fetched_at: 1, body: {} }))
   const q = readClaudeQuota(file, BASE)
@@ -229,7 +223,7 @@ test('a cache file from a newer schema is refused rather than guessed at', () =>
 })
 
 test('the written cache file carries the contract fields and never overwrites a newer one', () => {
-  const dir = tmpDir('quota-write-')
+  const dir = scratchDir('quota-write')
   const file = path.join(dir, 'state.json')
   const body = JSON.parse(fs.readFileSync(fixture('claude-cache-v1.json'), 'utf8')).body
   assert.equal(writeQuotaCacheFile(file, 'claude', body, 1_700_000_000, 'token-pace/1.0.0'), true)
@@ -249,7 +243,7 @@ test('the written cache file carries the contract fields and never overwrites a 
 })
 
 test('providers_error marks the reading as partial', () => {
-  const dir = tmpDir('quota-partial-')
+  const dir = scratchDir('quota-partial')
   const file = path.join(dir, 'state.json')
   const body = JSON.parse(fs.readFileSync(fixture('claude-cache-v1.json'), 'utf8')).body
   fs.writeFileSync(file, JSON.stringify({
@@ -382,7 +376,7 @@ test('a status line without rate limits reports no windows instead of zeroes', (
 })
 
 test('a mirror file of an unknown schema is refused', () => {
-  const dir = tmpDir('quota-mirror-')
+  const dir = scratchDir('quota-mirror')
   const file = path.join(dir, 'mirror.json')
   fs.writeFileSync(file, JSON.stringify({ schema_version: 7, written_at: BASE, payload: {} }))
   assert.equal(readStatuslineMirror(file).state.problemKind, 'unknown')
@@ -393,7 +387,7 @@ test('a mirror file of an unknown schema is refused', () => {
 // the same subsystem, and its failures must stay describable without the token.
 
 test('credentialsPath honours the secure-storage directory before everything else', () => {
-  const dir = tmpDir('cred-path-')
+  const dir = scratchDir('cred-path')
   const secure = path.join(dir, 'secure')
   const config = path.join(dir, 'config')
   withEnv({ CLAUDE_SECURESTORAGE_CONFIG_DIR: secure, CLAUDE_CONFIG_DIR: config }, () => {
@@ -416,7 +410,7 @@ test('the keychain item name carries the config-dir hash only when that is set',
 })
 
 test('the environment token wins, and the file supplies the expiry', async () => {
-  const dir = tmpDir('cred-')
+  const dir = scratchDir('cred')
   fs.writeFileSync(path.join(dir, '.credentials.json'), JSON.stringify({
     claudeAiOauth: { accessToken: 'file-token', expiresAt: BASE + 3_600_000 },
   }))
@@ -436,7 +430,7 @@ test('the environment token wins, and the file supplies the expiry', async () =>
 })
 
 test('an expired token is reported as such, a missing one as missing — never with the value', async () => {
-  const dir = tmpDir('cred-exp-')
+  const dir = scratchDir('cred-exp')
   const file = path.join(dir, '.credentials.json')
   fs.writeFileSync(file, JSON.stringify({
     claudeAiOauth: { accessToken: 'secret-value-not-to-be-logged', expiresAt: BASE - 1 },

@@ -47,6 +47,12 @@ export type {
   TotalRow, WindowUsageRow,
 }
 
+/**
+ * The provider titles, re-exported so the text views name a window's provider from the same
+ * table the cards do: "5 h" alone is ambiguous the moment both providers report one.
+ */
+export { SOURCE_TITLE }
+
 // ---------------------------------------------------------------------------
 // UI state and the webview message protocol
 // ---------------------------------------------------------------------------
@@ -248,6 +254,17 @@ export interface WindowVm {
   elapsed: number | null
   reset: string
   resetAbsolute: string
+  /**
+   * The reset in words: 'reset due', 'resets <countdown>', or '' when the provider stated no
+   * reset. The only place in the whole extension that writes the verb — a view that prefixed
+   * its own would sooner or later print "resets reset due".
+   */
+  resetLine: string
+  /**
+   * `display` as a sentence fragment, already de-duplicated against the verdict and against
+   * `resetLine`, or '' when neither adds anything. Views print this instead of the enum.
+   */
+  stateText: string
   forecast: Forecast | null
   sustainable: string | null
   spark: number[]
@@ -355,7 +372,18 @@ export interface ViewModel {
   windowUsage: WindowUsageRow[]
   projects: { rows: ProjectRow[]; enabled: boolean }
   sessions: { rows: SessionRow[]; enabled: boolean; cacheStates: { session: string; text: string }[] }
-  attributionInWindow: { windowId: string; rows: AttributionRows['rows']; unexplained: string }[]
+  /**
+   * Per-window project split. `source` and `label` travel with the rows because two
+   * providers can both report a "5 h" window: a block headed by the raw id, or by a label
+   * with no provider, cannot be told apart from its twin.
+   */
+  attributionInWindow: {
+    source: Source
+    windowId: string
+    label: string
+    rows: AttributionRows['rows']
+    unexplained: string
+  }[]
   dataQuality: DataQuality
   unpricedModels: string[]
   familyPriced: string[]
@@ -466,7 +494,56 @@ const PROBLEM_ACTION: Partial<Record<ProblemKind, { label: string; command: stri
   unknown: { label: 'Show log', command: 'tokenPace.showOutput' },
 }
 
+/**
+ * Every window state in words. `normal` has nothing to add, and `resetDue` is left empty
+ * because `resetLine` already says "reset due" — printing both would say it twice in one row.
+ */
+const DISPLAY_WORD: Record<WindowDisplay, string> = {
+  normal: '',
+  exhausted: 'exhausted',
+  overflow: 'over the limit',
+  unlimited: 'unlimited',
+  limitReached: 'limit reached',
+  resetDue: '',
+}
+
+/**
+ * The state, unless the verdict standing next to it already contains the word — "exhausted ·
+ * exhausted" is not two facts.
+ */
+function stateTextOf(display: WindowDisplay, verdictText: string): string {
+  const w = DISPLAY_WORD[display] ?? ''
+  if (!w) return ''
+  return verdictText.toLowerCase().includes(w) ? '' : w
+}
+
+/**
+ * The reset with its verb attached, once, here.
+ *
+ * `formatReset` deliberately never says "resets"; it answers a countdown, or "reset due" once
+ * the stated time has passed. That second answer is already a whole sentence, so it keeps the
+ * verb away from it — both for a `resetDue` window and for the minutes after a fresh reading
+ * has caught up with a reset that just happened.
+ */
+function resetLineOf(display: WindowDisplay, reset: string): string {
+  if (display === 'resetDue') return 'reset due'
+  if (!reset) return ''
+  return reset.includes('reset due') ? reset : `resets ${reset}`
+}
+
+/**
+ * A window with no limit has no denominator, so every figure derived from its percentage is
+ * arithmetic on a number that means nothing: "99 points in reserve" beside "∞" is the same
+ * sentence contradicting itself, and a rate that "keeps it to the reset" budgets a limit that
+ * does not exist. Both are answered here, before the pace maths runs.
+ */
+function unlimitedVerdict(w: QuotaWindow): PaceVerdict | null {
+  if (!w.unlimited) return null
+  return { level: 'ok', points: null, ratio: null, measuring: false, text: 'unlimited' }
+}
+
 function sustainableText(w: QuotaWindow, now: number): string | null {
+  if (w.unlimited) return null
   const r = sustainableRate(w.percent, w.resetsAt, now)
   if (!r) return null
   return estimate(`${r.perHour.toFixed(1)} points/h keeps it to the reset`)
@@ -487,12 +564,13 @@ function quotaCard(
   const fp = input.fingerprints[q.source] ?? ''
   const windows: WindowVm[] = q.windows.map((w) => {
     const elapsed = elapsedOf(w, now)
-    const verdict = paceVerdict(w.percent, elapsed, paceCfg)
+    const verdict = unlimitedVerdict(w) ?? paceVerdict(w.percent, elapsed, paceCfg)
     const display = windowDisplay(w, fetchedMs, now)
     // The same rounding rule as the status bar, from the same function — two views that
     // disagree about whether 99.6 % is "100%" or "99%" would look like two readings.
     const pct = percentText(w.percent, cfg.percentMode, cfg.overflowDisplay)
     const text = w.unlimited ? 'unlimited' : display === 'resetDue' ? 'reset due' : `${pct} used`
+    const reset = formatReset(w.resetsAt, now, 'relative', tcfg)
     return {
       id: w.id,
       label: w.label,
@@ -502,15 +580,19 @@ function quotaCard(
       level: verdict.level,
       verdict,
       elapsed,
-      reset: formatReset(w.resetsAt, now, 'relative', tcfg),
+      reset,
       resetAbsolute: formatReset(w.resetsAt, now, 'absolute', tcfg),
+      resetLine: resetLineOf(display, reset),
+      stateText: stateTextOf(display, verdict.text),
       forecast: forecasts.get(`${q.source}:${w.id}`) ?? null,
       sustainable: sustainableText(w, now),
       spark: sparkOf(history.samples(q.source, w.id, fp, now - SPARK_WINDOW_MS), now),
       aria: {
         now: Number.isFinite(w.percent) ? Math.round(w.percent) : 0,
         max: 100,
-        text: `${w.label}: ${text}, ${verdict.text}`,
+        // "unlimited, unlimited" is the screen reader saying the same word twice: the
+        // unlimited verdict IS the state, so it is not repeated after it.
+        text: verdict.text === text ? `${w.label}: ${text}` : `${w.label}: ${text}, ${verdict.text}`,
       },
     }
   })
@@ -627,7 +709,11 @@ export function buildViewModel(input: VmInput): ViewModel {
       if (row) usageRows.push(row)
       if (cfg.attribution !== 'none') {
         const a = attributionInWindow(ctx, q.source, w)
-        if (a) attribution.push({ windowId: w.id, rows: a.rows, unexplained: a.unexplained })
+        if (a) {
+          attribution.push({
+            source: q.source, windowId: w.id, label: w.label, rows: a.rows, unexplained: a.unexplained,
+          })
+        }
       }
     }
   }
@@ -731,13 +817,23 @@ function forecastList(
 ): ViewModel['forecasts'] {
   const out: ViewModel['forecasts'] = []
   const labels = new Map<string, string>()
-  for (const c of cards) for (const w of c.windows) labels.set(`${c.source}:${w.id}`, w.label)
+  const displays = new Map<string, WindowDisplay>()
+  for (const c of cards) {
+    for (const w of c.windows) {
+      labels.set(`${c.source}:${w.id}`, w.label)
+      displays.set(`${c.source}:${w.id}`, w.display)
+    }
+  }
   for (const q of quotas) {
     const fp = fingerprints[q.source] ?? ''
     for (const w of q.windows) {
       const key = `${q.source}:${w.id}`
       const f = forecasts.get(key)
       if (!f) continue
+      // The quota card drops a "full" forecast once the stated reset has passed — the reading
+      // it rests on belongs to the window before the reset. The list beside it may not keep
+      // stating what the card refuses to; the three views do not disagree about one window.
+      if (f.state === 'full' && displays.get(key) === 'resetDue') continue
       const samples = history.samples(q.source, w.id, fp, now - SPARK_WINDOW_MS)
       const rf = resetForecast(f)
       out.push({
@@ -879,6 +975,8 @@ function footnotesFor(vm: ViewModel, cfg: Config): string[] {
   out.push('“Usage” = fresh input + cache write + output; cache reads are listed apart because '
     + 'they outnumber the rest by orders of magnitude.')
   if (vm.showCost) {
+    // The only place the price date is stated. Every view prints these footnotes verbatim, so
+    // a second "Prices as of" line anywhere else comes out as the same sentence twice.
     out.push('API cost is hypothetical: what this usage would have cost through the provider API. '
       + `On a subscription you do not pay it. Prices as of ${vm.pricing.asOf}.`)
     if (vm.pricing.custom) out.push('Costs use your configured rates, not the published list prices.')

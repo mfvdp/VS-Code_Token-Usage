@@ -9,17 +9,11 @@
 
 import { strict as assert } from 'node:assert'
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { deleteItems, formatBytes, inventory, MementoLike, StoredPaths, storedFile } from '../src/storage'
+import { scratchDir } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
-
-function tmpDir(): string {
-  const base = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  return fs.mkdtempSync(path.join(base, 'storage-'))
-}
 
 class FakeMemento implements MementoLike {
   store = new Map<string, unknown>()
@@ -46,7 +40,7 @@ function pathsIn(dir: string): StoredPaths {
 }
 
 test('the inventory names size and presence of every item', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('storage')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.state, '{"version":5}')
   fs.writeFileSync(paths.quota, '[]')
@@ -70,13 +64,13 @@ test('the inventory names size and presence of every item', () => {
 })
 
 test('the lease is not offered for deletion', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('storage')
   const items = inventory(pathsIn(dir), new FakeMemento())
   assert.ok(!items.some((i) => i.label.includes('leader')))
 })
 
 test('deleting a file removes its interrupted temp sibling too', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('storage')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.state, '{}')
   fs.writeFileSync(`${paths.state}.tmp`, '{"half":')
@@ -89,7 +83,7 @@ test('deleting a file removes its interrupted temp sibling too', async () => {
 })
 
 test('every temp shape the writers use is swept, and nothing else is', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('storage')
   const paths = pathsIn(dir)
   // One per writer: state.ts, statuslineBridge.ts, quotaHistory/lease/quota.ts, bridge.ts.
   const temps = [
@@ -112,14 +106,14 @@ test('every temp shape the writers use is swept, and nothing else is', async () 
 })
 
 test('a file that is already gone counts as deleted', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('storage')
   const result = await deleteItems(['quota', 'history', 'mirror'], pathsIn(dir), new FakeMemento())
   assert.deepEqual(result.deleted, ['quota', 'history', 'mirror'])
   assert.deepEqual(result.failed, [])
 })
 
 test('deleting the consent item clears every consent key, including the write consents', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('storage')
   const memento = new FakeMemento()
   memento.store.set('networkConsent', 'granted')
   memento.store.set('networkConsentOffered', true)
@@ -142,7 +136,7 @@ test('deleting the consent item clears every consent key, including the write co
 })
 
 test('a file that cannot be removed is reported, not swallowed', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('storage')
   const paths = pathsIn(dir)
   // A directory where a file is expected: unlink fails with EISDIR/EPERM.
   fs.mkdirSync(paths.quota)

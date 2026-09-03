@@ -13,8 +13,11 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { markdownDocument, quickPickItems } from '../src/textViews'
-import { ViewModel, buildViewModel } from '../src/viewModel'
-import { fillHistory, makeConfig, makeHistory, makeInput, buildAgg } from './fixtures/viewFixtures'
+import { SOURCE_TITLE, ViewModel, buildViewModel } from '../src/viewModel'
+import {
+  FINGERPRINT, NOW, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
+} from './fixtures/viewFixtures'
+import { deltaBadge } from '../src/render'
 
 function fullVm(): ViewModel {
   const history = makeHistory()
@@ -67,7 +70,9 @@ test('every totals row appears once in both renderings', () => {
     assert.equal(items.filter((i) => i.label.startsWith(`${t.title} · `)).length, t.rows.length)
     assert.equal(rowsOf(md, `## Tokens — ${t.title}`).length, t.rows.length)
   }
-  assert.equal(total, vm.totals.length * 8)
+  // Seven, not eight: the selected 30-day range is the fixed "Last 30 days" row, and one
+  // table must never print the same label twice.
+  assert.equal(total, vm.totals.length * 7)
 })
 
 test('every KPI appears once in both renderings', () => {
@@ -156,4 +161,218 @@ test('an empty install renders both views without inventing anything', () => {
   assert.ok(md.includes('_No quota reading._'))
   assert.equal(md.includes('$0.00'), false)
   assert.equal(md.includes('0 %'), false)
+})
+
+// ---------------------------------------------------------------------------
+// Wording: no identifiers, no doubled verb, no nameless window
+// ---------------------------------------------------------------------------
+
+/**
+ * Both providers report a window called "5 h", and the Claude one's stated reset has come and
+ * gone while the reading still predates it. That is the exact shape the flat views used to
+ * garble: two indistinguishable "5 h" rows, and a "resets reset due".
+ */
+function twinVm(): ViewModel {
+  const history = makeHistory()
+  fillHistory(history)
+  const claude = state('claude', {
+    windows: [
+      win({ resetsAt: NOW - 60_000 }),
+      win({
+        id: 'weekly_all:10080', kind: 'weekly', label: '7 d', shortLabel: '7d', percent: 62,
+        resetsAt: NOW + 3 * 86_400_000, windowMinutes: 10080,
+      }),
+    ],
+  })
+  return buildViewModel(makeInput({
+    history,
+    cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.calibration.show': true }),
+    agg: buildAgg('project'),
+    quotas: [claude, state('codex')],
+  }))
+}
+
+/** Everything a QuickPick actually shows, as one blob. */
+function pickText(vm: ViewModel): string {
+  return quickPickItems(vm)
+    .map((i) => [i.label, i.description, i.detail].filter(Boolean).join(' · '))
+    .join('\n')
+}
+
+test('neither text view ever prints the verb twice or an internal identifier', () => {
+  const vm = twinVm()
+  const due = vm.quotas[0].windows[0]
+  assert.equal(due.display, 'resetDue')
+
+  for (const [name, text] of [['QuickPick', pickText(vm)], ['markdown', markdownDocument(vm)]]) {
+    assert.equal(text.includes('resets reset due'), false, name)
+    assert.ok(text.includes('reset due'), name)
+    // The enum spellings that could only come from an identifier, never from prose.
+    assert.equal(/\b(resetDue|limitReached|resetsFirst)\b/.test(text), false, name)
+    assert.equal(/\bnormal\b/.test(text), false, name)
+  }
+  // The detail line joins the sustainable sentence and the reset time: "…to the reset · reset
+  // at 14:00" would say the word twice in a row.
+  for (const item of quickPickItems(vm)) {
+    assert.equal(/reset · reset\b/.test(item.detail ?? ''), false, item.detail)
+  }
+})
+
+test('every window row in the flat views names the provider it belongs to', () => {
+  const vm = twinVm()
+  // The premise: the label alone is ambiguous.
+  const fives = vm.forecasts.filter((f) => f.label === '5 h')
+  assert.equal(fives.length, 2)
+  assert.notEqual(fives[0].source, fives[1].source)
+
+  const named = /(Claude Code|Codex)/
+  const prefixes = ['Forecast ', 'Reset history ', 'Local usage in ']
+  const items = quickPickItems(vm)
+  for (const p of prefixes) {
+    const rows = items.filter((i) => i.label.startsWith(p))
+    assert.ok(rows.length >= 2, p)
+    for (const r of rows) assert.ok(named.test(r.label), r.label)
+  }
+  // Attribution items are headed by the window, so they carry the provider as well.
+  const attribution = items.filter((i) => i.label.includes(' · unexplained'))
+  assert.ok(attribution.length >= 2)
+  for (const a of attribution) assert.ok(named.test(a.label), a.label)
+
+  const md = markdownDocument(vm)
+  for (const a of vm.attributionInWindow) {
+    assert.ok(md.includes(`### Attribution — ${SOURCE_TITLE[a.source]} · ${a.label}`), a.label)
+  }
+  // The raw window id was what made the two blocks look alike; it is gone from the headings.
+  assert.equal(md.includes('### Attribution — session:300'), false)
+  for (const heading of ['## Forecast', '## Reset history', '## Local usage inside the current windows']) {
+    const start = md.indexOf(heading)
+    assert.notEqual(start, -1, heading)
+    // To the next heading of any level: the attribution blocks below are `###`.
+    const block = md.slice(start, md.indexOf('\n#', start + 1))
+    for (const line of block.split('\n')) {
+      if (!line.startsWith('| ') && !line.startsWith('- **')) continue
+      if (line.startsWith('| Window') || line.startsWith('|---')) continue
+      assert.ok(named.test(line), `${heading}: ${line}`)
+    }
+  }
+})
+
+test('a full reading from before the reset is not repeated as a fact about the new window', () => {
+  // The provider says the window reset a minute ago, but the newest reading is five minutes
+  // old and still reads 100 %. That "full" belongs to the cycle that has ended; the dashboard
+  // drops it, so the flat views drop it too — three views, one statement per window.
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude', { windows: [win({ percent: 100, resetsAt: NOW - 60_000 })] })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.display, 'resetDue')
+  assert.equal(w.forecast?.state, 'full')
+  assert.equal(w.forecast?.text, 'full')
+
+  const row = quickPickItems(vm).find((i) => i.label.startsWith('5 h '))
+  assert.ok(row)
+  assert.equal(row.description, 'exhausted · reset due')
+
+  const md = markdownDocument(vm)
+  const line = md.split('\n').find((l) => l.startsWith('| 5 h |'))
+  assert.ok(line)
+  assert.equal(/\bfull\b/.test(line), false, line)
+  // The forecast column keeps the dash it would show for any window with nothing to say.
+  assert.ok(line.trimEnd().endsWith('| – |'), line)
+})
+
+test('a full window that has not reset still says so in both views', () => {
+  // The mirror image of the case above: the same reading, a reset still ahead. Dropping the
+  // sentence there would lose the plainest fact the card has.
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude', { windows: [win({ percent: 100 })] })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.display, 'exhausted')
+  assert.equal(w.forecast?.text, 'full until the reset')
+  const row = quickPickItems(vm).find((i) => i.label.startsWith('5 h '))
+  assert.ok(row?.description?.includes('full until the reset'))
+  const line = markdownDocument(vm).split('\n').find((l) => l.startsWith('| 5 h |'))
+  assert.ok(line?.includes('full until the reset'), line)
+})
+
+test('every provider column in the flat views carries the name, not the internal id', () => {
+  const vm = fullVm()
+  const md = markdownDocument(vm)
+  const items = quickPickItems(vm)
+  const ids = /(^|\W)(claude|codex)(\W|$)/
+
+  for (const c of vm.cacheEconomy) {
+    const title = SOURCE_TITLE[c.source]
+    assert.ok(items.some((i) => i.label.startsWith(`Cache economy ${title}: `)), title)
+  }
+  for (const heading of ['## Cache economy', '## Composition']) {
+    const rows = rowsOf(md, heading)
+    assert.ok(rows.length > 0, heading)
+    for (const r of rows) {
+      const provider = r.split('|')[1].trim()
+      assert.ok(provider === SOURCE_TITLE.claude || provider === SOURCE_TITLE.codex, `${heading}: ${r}`)
+    }
+  }
+  // The models table heads the same column, and the plan comparison names the account too.
+  for (const r of rowsOf(md, '## Models')) {
+    const provider = r.split('|')[2].trim()
+    assert.ok(provider === SOURCE_TITLE.claude || provider === SOURCE_TITLE.codex, r)
+  }
+  for (const line of md.split('\n').filter((l) => l.startsWith('Plan comparison'))) {
+    assert.equal(ids.test(line.split(':')[0]), false, line)
+  }
+})
+
+test('a forecast with nothing to say prints a dash, never its state name', () => {
+  const vm = buildViewModel(makeInput())
+  const bare = vm.forecasts.find((f) => f.forecast.text === '')
+  assert.ok(bare, 'the fixture has a window without a series')
+  assert.equal(bare.forecast.state, 'none')
+  const item = quickPickItems(vm)
+    .find((i) => i.label.startsWith(`Forecast ${SOURCE_TITLE[bare.source]} · ${bare.label}:`))
+  assert.ok(item)
+  assert.ok(item.label.endsWith(': –'), item.label)
+})
+
+test('a stale reading after the reset says "reset due" once per row, not per column', () => {
+  // Sixty per cent, a reset a minute ago, the newest reading older than that: the window
+  // header already says "reset due", and the forecast for that state is the same two words.
+  // The forecast needs a series to judge, and the series must end before the stated reset —
+  // a reading taken after it would forecast the new window instead.
+  const history = makeHistory()
+  for (const minutes of [45, 30, 15, 5]) {
+    const t = NOW - minutes * 60_000
+    history.add(
+      state('claude', { fetchedAt: Math.round(t / 1000), windows: [win({ percent: 60 - minutes })] }),
+      FINGERPRINT,
+      t,
+    )
+  }
+  const vm = buildViewModel(makeInput({
+    history,
+    quotas: [state('claude', { windows: [win({ percent: 60, resetsAt: NOW - 60_000 })] })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.display, 'resetDue')
+  assert.equal(w.forecast?.text, 'reset due')
+
+  const row = quickPickItems(vm).find((i) => i.label.startsWith('5 h '))
+  assert.ok(row?.description, 'the window row is missing')
+  assert.equal(row.description.split('reset due').length - 1, 1, row.description)
+  assert.equal(row.description.includes('reset due · reset due'), false, row.description)
+
+  const line = markdownDocument(vm).split('\n').find((l) => l.startsWith('| 5 h |'))
+  assert.ok(line)
+  assert.equal(line.split('reset due').length - 1, 1, line)
+  assert.ok(line.trimEnd().endsWith('| – |'), line)
+})
+
+test('growth from nothing is announced as "new", never as "new new"', () => {
+  const vm = fullVm()
+  vm.kpis = vm.kpis.map((k) => ({ ...k, delta: deltaBadge(5, null) }))
+  for (const [name, text] of [['QuickPick', pickText(vm)], ['markdown', markdownDocument(vm)]]) {
+    assert.ok(/\bnew\b/.test(text), name)
+    assert.equal(/\bnew new\b/.test(text), false, name)
+  }
 })

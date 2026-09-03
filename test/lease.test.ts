@@ -3,18 +3,15 @@
 
 import { strict as assert } from 'node:assert'
 import * as fs from 'node:fs'
-import * as os from 'node:os'
-import * as path from 'node:path'
 import { test } from 'node:test'
 import { Lease } from '../src/lease'
+import { scratchFile } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
 const NOW = 1_700_000_000_000
 const TTL = 90_000
 
 function tmpFile(): string {
-  const root = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  return path.join(fs.mkdtempSync(path.join(root, 'lease-')), 'leader.json')
+  return scratchFile('lease', 'leader.json')
 }
 
 /** A pid that is certainly gone — needed for the "holder died" case. */

@@ -209,11 +209,12 @@ export function percentOf(num: number, den: number): string {
 export function deltaBadge(
   cur: number,
   prev: number | null,
-): { glyph: '▲' | '▼' | '•' | 'new'; text: string } {
+): { glyph: '▲' | '▼' | '•' | ''; text: string } {
   if (!Number.isFinite(cur) || (prev !== null && !Number.isFinite(prev))) {
     return { glyph: '•', text: '–' }
   }
-  if (prev === null || (prev === 0 && cur > 0)) return { glyph: 'new', text: 'new' }
+  // No glyph: "new" is the whole message, and a glyph that repeats it reads "new new".
+  if (prev === null || (prev === 0 && cur > 0)) return { glyph: '', text: 'new' }
   if (prev === 0) return { glyph: '•', text: '±0%' }
   const pct = ((cur - prev) / Math.abs(prev)) * 100
   const abs = Math.abs(pct)

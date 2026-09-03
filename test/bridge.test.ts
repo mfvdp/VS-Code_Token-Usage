@@ -9,7 +9,6 @@
 import { strict as assert } from 'node:assert'
 import { execFileSync } from 'node:child_process'
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
@@ -17,17 +16,12 @@ import {
   readSettings, resolveWriteTarget, restore, shellQuote, state, statusLineCommandOf,
 } from '../src/bridge'
 import { MementoLike } from '../src/storage'
+import { scratchDir } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
 const NOW = 1_700_000_000_000
 const NODE = '/usr/bin/node'
 const SCRIPT = '/ext/dist/statusline-bridge.js'
 const MIRROR = '/storage/statusline-mirror.json'
-
-function tmpDir(): string {
-  const base = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  return fs.mkdtempSync(path.join(base, 'bridge-'))
-}
 
 class FakeMemento implements MementoLike {
   store = new Map<string, unknown>()
@@ -56,7 +50,7 @@ const OURS = bridgeCommand(NODE, SCRIPT, MIRROR)
 // ---------------------------------------------------------------------------
 
 test('a missing, an empty and a broken settings file are three different answers', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const file = path.join(dir, 'settings.json')
   assert.equal(readSettings(file).kind, 'missing')
 
@@ -143,7 +137,7 @@ test('a shell tokenising our command hands the script the original command back'
     t.skip('the POSIX quoting is asserted on POSIX; the cmd.exe form is unit-tested above')
     return
   }
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   // Stands in for the bridge script: prints the argv it was actually given.
   const script = path.join(dir, 'argv.js')
   fs.writeFileSync(script, 'process.stdout.write(JSON.stringify(process.argv.slice(2)))\n')
@@ -179,7 +173,7 @@ function opts(memento: FakeMemento, over: Partial<Parameters<typeof install>[1]>
 }
 
 test('a full install writes the settings, a backup and the undo record', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.settingsFile, '{\n  "statusLine": { "type": "command", "command": "ccstatus" }\n}\n')
   const memento = new FakeMemento()
@@ -203,7 +197,7 @@ test('a full install writes the settings, a backup and the undo record', async (
 })
 
 test('an unparsable settings file is refused before anything is asked', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   const broken = '{ "statusLine": '
   fs.writeFileSync(paths.settingsFile, broken)
@@ -217,7 +211,7 @@ test('an unparsable settings file is refused before anything is asked', async ()
 })
 
 test('restricted mode and a refused consent both leave the file alone', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.settingsFile, '{}')
 
@@ -230,7 +224,7 @@ test('restricted mode and a refused consent both leave the file alone', async ()
 })
 
 test('without node on PATH the install explains itself instead of writing', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.settingsFile, '{}')
   const result = await install(
@@ -242,7 +236,7 @@ test('without node on PATH the install explains itself instead of writing', asyn
 })
 
 test('a second install is a no-op, not a second backup', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.settingsFile, '{}')
   const memento = new FakeMemento()
@@ -255,7 +249,7 @@ test('a second install is a no-op, not a second backup', async () => {
 })
 
 test('an install that cannot be recorded is rolled back', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   const original = '{\n  "statusLine": { "type": "command", "command": "ccstatus" }\n}\n'
   fs.writeFileSync(paths.settingsFile, original)
@@ -272,7 +266,7 @@ test('an install that cannot be recorded is rolled back', async () => {
 // ---------------------------------------------------------------------------
 
 test('restore puts back the exact previous value', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   const previous = { type: 'command', command: 'ccstatus --color', padding: 1 }
   fs.writeFileSync(paths.settingsFile, JSON.stringify({ statusLine: previous, model: 'opus' }))
@@ -289,7 +283,7 @@ test('restore puts back the exact previous value', async () => {
 })
 
 test('restore removes the key when there was nothing before', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.settingsFile, '{"model":"opus"}')
   const memento = new FakeMemento()
@@ -302,7 +296,7 @@ test('restore removes the key when there was nothing before', async () => {
 })
 
 test('restore refuses when the slot has been taken over since', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = pathsIn(dir)
   fs.writeFileSync(paths.settingsFile, '{}')
   const memento = new FakeMemento()
@@ -319,7 +313,7 @@ test('restore refuses when the slot has been taken over since', async () => {
 })
 
 test('restore without an install record changes nothing', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const result = await restore(pathsIn(dir), new FakeMemento())
   assert.equal(result.ok === false ? result.reason : '', 'notInstalled')
 })
@@ -329,7 +323,7 @@ test('restore without an install record changes nothing', async () => {
 // ---------------------------------------------------------------------------
 
 test('a local or managed status line shadows ours', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   assert.equal(detectShadowing(dir, []), 'none')
 
   fs.writeFileSync(path.join(dir, 'settings.local.json'), '{"model":"opus"}')
@@ -340,11 +334,11 @@ test('a local or managed status line shadows ours', () => {
 
   const managed = path.join(dir, 'managed-settings.json')
   fs.writeFileSync(managed, '{"statusLine":{"type":"command","command":"y"}}')
-  assert.equal(detectShadowing(tmpDir(), [managed]), 'configuration-shadowed')
+  assert.equal(detectShadowing(scratchDir('bridge'), [managed]), 'configuration-shadowed')
 })
 
 test('state answers installed, shadowed and mirror age', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const paths = { ...pathsIn(dir), mirror: path.join(dir, 'statusline-mirror.json') }
   fs.writeFileSync(paths.settingsFile, '{}')
   const memento = new FakeMemento()
@@ -364,7 +358,7 @@ test('state answers installed, shadowed and mirror age', async () => {
 // ---------------------------------------------------------------------------
 
 test('a symlinked settings.json is written through, not replaced', async (t) => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const real = path.join(dir, 'dotfiles', 'settings.json')
   fs.mkdirSync(path.dirname(real), { recursive: true })
   fs.writeFileSync(real, '{\n  "statusLine": { "type": "command", "command": "ccstatus" }\n}\n')
@@ -401,7 +395,7 @@ test('a symlinked settings.json is written through, not replaced', async (t) => 
 })
 
 test('a link whose target is gone is refused with an explanation', async (t) => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const link = path.join(dir, 'settings.json')
   try {
     fs.symlinkSync(path.join(dir, 'nowhere', 'settings.json'), link)
@@ -424,7 +418,7 @@ test('a link whose target is gone is refused with an explanation', async (t) => 
 })
 
 test('a settings file that is not there yet is written where we were told', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridge')
   const file = path.join(dir, 'settings.json')
   assert.deepEqual(resolveWriteTarget(file), { ok: true, file })
 })

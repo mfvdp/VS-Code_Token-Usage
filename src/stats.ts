@@ -33,7 +33,9 @@ export interface Kpi {
   label: string
   value: string
   provenance: Provenance
-  delta: { glyph: string; text: string } | null
+  // The badge's own type, so a hand-written badge cannot reintroduce a glyph the renderers
+  // would print beside the text ("new new").
+  delta: ReturnType<typeof deltaBadge> | null
   spark: number[]
   note: string | null
 }
@@ -410,7 +412,15 @@ export function totalRow(
   }
 }
 
-/** The eight rows of the token section, per provider. */
+/**
+ * The selected range, its predecessor and the fixed comparison rows, per provider.
+ *
+ * The selected range is frequently one of the fixed rows — "Last 30 days" with the 30 d
+ * preset picked. Printing both would put two rows with the same label and the same numbers
+ * in one table, which reads as a bug and invites a comparison that cannot differ. The
+ * identical twin is therefore dropped; when only the label collides (an "All time" whose
+ * first day is not the one the fixed row uses) both rows stay and the selected one says so.
+ */
 export function totalsFor(
   ctx: StatsCtx,
   source: Source,
@@ -420,16 +430,25 @@ export function totalsFor(
   showListPrice = false,
 ): TotalRow[] {
   const today = dayOf(ctx.now, ctx.tcfg)
-  const rows: TotalRow[] = [totalRow(ctx, range.label, range.from, range.to, source, showListPrice)]
+  const fixed: { label: string; from: string; to: string }[] = [
+    { label: 'Today', from: today, to: today },
+    { label: 'Last 7 days', from: addDays(today, -6), to: today },
+    { label: 'Last 30 days', from: addDays(today, -29), to: today },
+    { label: 'This week', from: addDays(today, -weekdayOf(today, ctx.tcfg)), to: today },
+    { label: 'This month', from: `${today.slice(0, 8)}01`, to: today },
+    { label: 'All time', from: firstDay ?? today, to: today },
+  ]
+  const twin = fixed.find((f) => f.label === range.label)
+  const same = twin !== undefined && twin.from === range.from && twin.to === range.to
+  const label = twin !== undefined && !same ? `Selected range (${range.label})` : range.label
+  const rows: TotalRow[] = [totalRow(ctx, label, range.from, range.to, source, showListPrice)]
   if (previous) {
     rows.push(totalRow(ctx, previous.label, previous.from, previous.to, source, showListPrice))
   }
-  rows.push(totalRow(ctx, 'Today', today, today, source, showListPrice))
-  rows.push(totalRow(ctx, 'Last 7 days', addDays(today, -6), today, source, showListPrice))
-  rows.push(totalRow(ctx, 'Last 30 days', addDays(today, -29), today, source, showListPrice))
-  rows.push(totalRow(ctx, 'This week', addDays(today, -weekdayOf(today, ctx.tcfg)), today, source, showListPrice))
-  rows.push(totalRow(ctx, 'This month', `${today.slice(0, 8)}01`, today, source, showListPrice))
-  rows.push(totalRow(ctx, 'All time', firstDay ?? today, today, source, showListPrice))
+  for (const f of fixed) {
+    if (same && f.label === range.label) continue
+    rows.push(totalRow(ctx, f.label, f.from, f.to, source, showListPrice))
+  }
   return rows
 }
 
@@ -497,7 +516,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
   const reqSpark = seriesOf(ctx, sparkDays, 'requests')
   const len = dayCount(range.from, range.to)
 
-  const delta = (c: number, p: number | null): { glyph: string; text: string } => deltaBadge(c, p)
+  const delta = (c: number, p: number | null): ReturnType<typeof deltaBadge> => deltaBadge(c, p)
   const hitRate = cur.hit.den > 0 ? cur.hit.num / cur.hit.den : null
   const prevHit = prev && prev.hit.den > 0 ? prev.hit.num / prev.hit.den : null
   const avg = cur.activeDays > 0 ? cur.usage / cur.activeDays : null
@@ -509,7 +528,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       label: 'Usage',
       value: tokens(cur.usage),
       provenance: 'measured',
-      delta: prev ? delta(cur.usage, prev.usage) : { glyph: 'new', text: 'new' },
+      delta: prev ? delta(cur.usage, prev.usage) : { glyph: '', text: 'new' },
       spark: usageSpark,
       note: 'fresh input + cache write + output',
     },
@@ -518,7 +537,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       label: 'Requests',
       value: tokens(cur.requests),
       provenance: 'measured',
-      delta: prev ? delta(cur.requests, prev.requests) : { glyph: 'new', text: 'new' },
+      delta: prev ? delta(cur.requests, prev.requests) : { glyph: '', text: 'new' },
       spark: reqSpark,
       note: 'a Codex token_count event is not necessarily one turn',
     },
@@ -527,7 +546,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       label: 'Cache hit',
       value: percentOf(cur.hit.num, cur.hit.den),
       provenance: 'derived',
-      delta: hitRate === null ? null : prevHit === null ? { glyph: 'new', text: 'new' } : delta(hitRate, prevHit),
+      delta: hitRate === null ? null : prevHit === null ? { glyph: '', text: 'new' } : delta(hitRate, prevHit),
       spark: seriesOf(ctx, sparkDays, 'cacheRead'),
       note: 'cache reads ÷ input',
     },
@@ -536,7 +555,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       label: 'Active days',
       value: len > 0 ? `${cur.activeDays} of ${len}` : '–',
       provenance: 'measured',
-      delta: prev ? delta(cur.activeDays, prev.activeDays) : { glyph: 'new', text: 'new' },
+      delta: prev ? delta(cur.activeDays, prev.activeDays) : { glyph: '', text: 'new' },
       spark: usageSpark.map((v) => (v > 0 ? 1 : 0)),
       note: null,
     },
@@ -545,7 +564,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       label: 'Ø per active day',
       value: avg === null ? '–' : compact(avg),
       provenance: 'derived',
-      delta: avg === null ? null : prevAvg === null ? { glyph: 'new', text: 'new' } : delta(avg, prevAvg),
+      delta: avg === null ? null : prevAvg === null ? { glyph: '', text: 'new' } : delta(avg, prevAvg),
       spark: usageSpark,
       note: null,
     },
@@ -556,7 +575,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       label: 'API equivalent',
       value: costText(cur.cost),
       provenance: 'estimated',
-      delta: prev ? delta(cur.cost, prev.cost) : { glyph: 'new', text: 'new' },
+      delta: prev ? delta(cur.cost, prev.cost) : { glyph: '', text: 'new' },
       spark: costSpark,
       note: 'hypothetical: what this usage would have cost through the API',
     })
@@ -712,6 +731,31 @@ function projectMonth(
 }
 
 /**
+ * The stated plan price, always to the cent.
+ *
+ * `usd` drops the cents from $100 up, which would print the same contract as "$200" here and
+ * "$20.00" for the smaller plan one line below. A plan price is a figure the user typed, so it
+ * is echoed back exactly as typed. This rule is for the plan price only: the month's cost goes
+ * through `usd` like every other cost in the view, or the same month would read "so far $1,235"
+ * on one line and "~$1,234.50" on the next.
+ */
+function planUsd(n: number): string {
+  if (n > 0 && n < 0.01) return '<$0.01'
+  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+/**
+ * The plan factor. Two decimals below 0.1, one from 0.1 up: "×0.4" is precise enough to act
+ * on, while a single decimal turns every light month into "×0.0" — a zero the user never
+ * spent. Below a hundredth the factor is stated as a bound for the same reason.
+ */
+function factorText(f: number): string {
+  if (!Number.isFinite(f) || f <= 0) return '×0'
+  if (f < 0.01) return '<×0.01'
+  return `×${f.toFixed(f < 0.1 ? 2 : 1)}`
+}
+
+/**
  * How the month's hypothetical API cost compares to what the plan costs.
  *
  * Only shown when the user stated a plan price — guessing one would be an invented number,
@@ -734,8 +778,9 @@ export function planFactors(
     out.push({
       source,
       text: c.usd > 0
-        ? `${estimate(usd(c.usd))} API equivalent this month ÷ ${usd(plan)} plan = ×${factor.toFixed(1)}`
-        : `no priced usage this month against the ${usd(plan)} plan`,
+        ? `${estimate(usd(c.usd))} API equivalent this month ÷ ${planUsd(plan)} plan `
+          + `= ${factorText(factor)}`
+        : `no priced usage this month against the ${planUsd(plan)} plan`,
       partial,
     })
   }

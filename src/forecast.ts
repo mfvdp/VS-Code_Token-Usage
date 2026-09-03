@@ -186,6 +186,21 @@ function sustainableOf(percent: number, resetsAt: number | null, now: number): n
 }
 
 /**
+ * What an exhausted window has to say. There is nothing to project, but an empty string
+ * leaves the views printing a dash where the plainest fact of all belongs. The reset is
+ * named only when the provider stated one and it is still ahead — an "until the reset" with
+ * no reset behind it would be the invented half of the sentence.
+ *
+ * Deliberately without a countdown: every view prints the window's own reset countdown right
+ * beside this sentence, and the two duration formats ("2h14m" against "2.2 h") disagreed on
+ * the same instant, which read as two different resets.
+ */
+function fullText(resetsAt: number | null, now: number): string {
+  if (resetsAt === null || !Number.isFinite(resetsAt) || resetsAt <= now) return 'full'
+  return 'full until the reset'
+}
+
+/**
  * Burn rate, exhaustion time and end-of-window projection for one quota window.
  *
  * Every answer is a named state, never a bare number: `none` (nothing measured), `full`
@@ -218,7 +233,7 @@ export function forecast(
   const sustainable = sustainableOf(percent, w.resetsAt, now)
   const withRate = (f: Forecast): Forecast => ({ ...f, sustainablePerHour: sustainable })
 
-  if (percent >= FULL_PERCENT) return withRate(blank('full', ''))
+  if (percent >= FULL_PERCENT) return withRate(blank('full', fullText(w.resetsAt, now)))
 
   const clean = usable(samples)
   if (clean.length === 0) return withRate(blank('none', ''))

@@ -185,9 +185,15 @@ const CSS = `
   --error: var(--vscode-charts-red);
   --claude: var(--vscode-charts-blue);
   --codex: var(--vscode-charts-purple);
-  --track: var(--vscode-editorWidget-background, rgba(127,127,127,.25));
+  /* Mixed from the foreground, not taken from a theme colour: editorWidget.background is the
+     sidebar background itself in the light themes, and a track that equals the page is no
+     track at all. A share of the foreground contrasts by construction in either theme. */
+  --track: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+  /* The same reasoning for the hairlines: panel.border is #e5e5e5 on white. */
+  --rule: color-mix(in srgb, var(--vscode-foreground) 28%, transparent);
   --line: var(--vscode-panel-border, rgba(127,127,127,.3));
   --dim: var(--vscode-descriptionForeground);
+  --bg: var(--vscode-sideBar-background, var(--vscode-editor-background, transparent));
 }
 body {
   font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
@@ -232,6 +238,10 @@ input[type=date] { cursor: text; }
         background: var(--vscode-foreground); opacity: .6; border-radius: 1px; }
 .mark.fc { background: var(--warn); opacity: .9; border-radius: 0; width: 2px;
            border-top: 2px solid var(--vscode-foreground); }
+/* A window label is one word to the reader: "7 d" must not be broken between the number and
+   the unit, and neither must the provider in front of it. The only break left in a heading
+   like "Claude Code · 7 d" is the separator itself. */
+.nobr { white-space: nowrap; }
 .win { margin-top: 8px; }
 .win-top { display: flex; justify-content: space-between; gap: 8px; font-size: 11px;
            color: var(--dim); margin-bottom: 3px; }
@@ -241,6 +251,9 @@ input[type=date] { cursor: text; }
 .verdict.warn, .verdict.warn2 { color: var(--warn); }
 .verdict.error { color: var(--error); }
 .scroll { overflow-x: auto; }
+/* Only ever shown when the browser has measured a table wider than its box — a hint about
+   columns that are all visible would be a lie. */
+.scrollhint { margin: 2px 0 6px; }
 table { border-collapse: collapse; width: 100%; font-size: 11px; font-variant-numeric: tabular-nums; }
 th { text-align: right; font-weight: 500; color: var(--dim); padding: 3px 0 3px 8px;
      white-space: nowrap; border-bottom: 1px solid var(--line); }
@@ -258,14 +271,33 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .kpi .d.down { color: var(--ok); }
 .spark { width: 100%; height: 18px; display: block; }
 .spark polyline { fill: none; stroke: var(--claude); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-.spark circle { fill: var(--claude); }
-.plot { position: relative; height: 120px; margin-top: 6px; border-bottom: 1px solid var(--line); }
-.grid { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--line); opacity: .5; }
-.grid span { position: absolute; right: 0; top: -14px; font-size: 9px; color: var(--dim); }
+/* A lone reading between two gaps is drawn as a hair-length stroke with a round cap: the
+   viewBox is stretched to the card width, and any shape with a geometric size would be
+   stretched with it — a 5 px dash that reads as a line where there is a single point. */
+.spark path.pt { fill: none; stroke: var(--claude); stroke-width: 3; stroke-linecap: round;
+                 vector-effect: non-scaling-stroke; }
+/* The plot keeps a gutter on its right for the tick labels. Inside the plot they either hide
+   behind the newest bars or, opaque, cut them into pieces that read as gaps in the data —
+   and the newest days are the ones worth reading. */
+.plot { position: relative; height: 120px; margin-top: 6px; margin-right: 38px;
+        border-bottom: 1px solid var(--rule); }
+.grid { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--rule); z-index: 2;
+        pointer-events: none; }
+.grid span { position: absolute; left: 100%; top: 1px; margin-left: 4px; font-size: 9px;
+             color: var(--dim); white-space: nowrap; }
 .chart { display: flex; align-items: flex-end; gap: 2px; height: 100%; position: relative; }
 .col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column;
        justify-content: flex-end; cursor: pointer; }
-.col .vlabel { font-size: 8px; color: var(--dim); text-align: center; }
+/* Positioned, so a label that spills into the neighbouring column is painted above that
+   column's bar instead of behind it. Centred by a flex container rather than by text-align:
+   a label wider than its column overflows to both sides that way, where text-align lets it
+   start at the left edge and paint itself over the next column instead. */
+.col .vlabel { font-size: 8px; color: var(--dim); white-space: nowrap;
+               display: flex; justify-content: center;
+               position: relative; text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg); }
+/* An explicit display beats the browser's [hidden] rule, which is how fitChart thins. */
+.col .vlabel[hidden] { display: none; }
+.col .vlabel i { font-style: normal; }
 .seg.claude { background: var(--claude); }
 .seg.codex { background: var(--codex); }
 .seg:first-of-type { border-radius: 2px 2px 0 0; }
@@ -273,7 +305,16 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .costline polyline { fill: none; stroke: var(--warn); stroke-width: 1.5;
                      vector-effect: non-scaling-stroke; }
 .axis { display: flex; gap: 2px; font-size: 9px; color: var(--dim); margin-top: 3px; }
-.axis span { flex: 1; text-align: center; min-width: 0; overflow: hidden; }
+/* The chart's own axis shares the plot's gutter, so every day label stays under its column;
+   the hour strip below has no gutter and keeps the plain rule. */
+.plot + .axis { margin-right: 38px; }
+/* Every slot keeps its width so the labels stay under their columns; the ones that are
+   shown may spill into the empty slots beside them rather than wrap to a second line. The
+   spill is centred on the slot — a label aligned to the slot's start ends up under its
+   neighbour once it outgrows the slot, which is the column it does not describe. */
+.axis span { flex: 1; min-width: 0; overflow: visible; white-space: nowrap;
+             display: flex; justify-content: center; }
+.axis span i { font-style: normal; white-space: nowrap; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: var(--dim); margin-top: 6px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
 .dot.claude { background: var(--claude); }
@@ -297,11 +338,26 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .cs.c1, .dot.c1 { background: var(--claude); }
 .cs.c2, .dot.c2 { background: color-mix(in srgb, var(--claude) 60%, var(--track)); }
 .cs.c3, .dot.c3 { background: color-mix(in srgb, var(--claude) 35%, var(--track)); }
-.cs.c4, .dot.c4 { background: var(--codex); }
-.cs.c5, .dot.c5 { background: color-mix(in srgb, var(--codex) 55%, var(--track)); }
-.cs.c6, .dot.c6 { background: var(--dim); }
-.hours { display: flex; align-items: flex-end; gap: 2px; height: 60px; }
-.hours .hb { flex: 1; background: var(--claude); min-height: 1px; border-radius: 2px 2px 0 0; }
+/* Neutral by construction, because every hue on this page is already spoken for: blue is
+   Claude, purple is Codex, and green/orange are the pace verdicts one card above. The
+   remaining parts are told apart by weight and by texture instead of by borrowing one. */
+.cs.c4, .dot.c4 { background: color-mix(in srgb, var(--vscode-foreground) 65%, transparent); }
+.cs.c5, .dot.c5 { background: color-mix(in srgb, var(--vscode-foreground) 38%, transparent); }
+.cs.c6, .dot.c6 { background: repeating-linear-gradient(45deg,
+                  color-mix(in srgb, var(--vscode-foreground) 65%, transparent),
+                  color-mix(in srgb, var(--vscode-foreground) 65%, transparent) 2px,
+                  transparent 2px, transparent 4px); }
+/* An explicit baseline, so an hour with no usage can be a gap rather than a 1 px rule that
+   reads as one. */
+.hours { display: flex; align-items: flex-end; gap: 2px; height: 60px;
+         border-bottom: 1px solid var(--rule); }
+.hours .hb { flex: 1; background: var(--claude); min-height: 3px; border-radius: 2px 2px 0 0; }
+/* The marker for an hour with nothing in it has to be the shortest thing in the strip, or
+   the emptiest hours read as the busiest ones: it is 1 px against a used hour's floor of
+   3 px. Mixed from the foreground rather than taken from --track, because at one pixel a
+   14 % tint on top of the baseline is not there at all in either theme. */
+.hours .hb.none { background: color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
+                  min-height: 1px; border-radius: 0; }
 .hgrid { display: grid; grid-template-columns: 28px repeat(6, 1fr); gap: 2px; font-size: 10px; }
 .hgrid i { height: 14px; border-radius: 2px; background: var(--track); display: block; }
 .hgrid i.l1 { background: color-mix(in srgb, var(--claude) 30%, var(--track)); }
@@ -325,7 +381,9 @@ ul { margin: 6px 0; padding-left: 18px; }
   thead { display: none; }
   tr { border-bottom: 1px solid var(--line); padding: 4px 0; }
   td { text-align: left; padding: 1px 0; }
-  td::before { content: attr(data-h) ": "; color: var(--dim); }
+  /* Only cells that carry a header: the sub-rows and the drill lines span the whole table
+     and would otherwise be prefixed with a bare ": ". */
+  td[data-h]::before { content: attr(data-h) ": "; color: var(--dim); }
 }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 `
@@ -338,6 +396,8 @@ const SCRIPT = `
 const vscode = acquireVsCodeApi();
 let vm = null;
 let costLine = false;
+/** The day the drill panel was last scrolled to, so a refresh of the same day stays put. */
+let shownDrill = null;
 const esc = (s) => String(s === null || s === undefined ? '' : s)
   .replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const post = (m) => vscode.postMessage(m);
@@ -373,10 +433,87 @@ function sparkSvg(values) {
   }
   if (cur.length) segs.push(cur);
   const body = segs.map(s => s.length === 1
-    ? '<circle cx="' + s[0].split(',')[0] + '" cy="' + s[0].split(',')[1] + '" r="1.2"/>'
+    ? '<path class="pt" d="M' + s[0].split(',')[0] + ' ' + s[0].split(',')[1] + 'h.01"/>'
     : '<polyline points="' + s.join(' ') + '"/>').join('');
   return '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" '
     + 'aria-hidden="true">' + body + '</svg>';
+}
+
+// -- words ------------------------------------------------------------------
+
+/** The provider titles the rest of the extension uses; kept in step with SOURCE_TITLE. */
+const SRC_TITLE = { claude: 'Claude Code', codex: 'Codex' };
+
+/**
+ * An own-property lookup with a string result. A bare map[key] answers "constructor" with a
+ * function, and a stray key must never turn into markup.
+ */
+function word(map, key) {
+  return typeof map[key] === 'string' ? map[key] : '';
+}
+
+/** The provider as the reader knows it; an unknown source keeps whatever it is called. */
+function srcName(source) {
+  return word(SRC_TITLE, source) || String(source === null || source === undefined ? '' : source);
+}
+
+/**
+ * "5 h" alone is ambiguous the moment both providers have one. The title goes in front of
+ * every window label that stands on its own — cards, list items, table rows — and each part
+ * is its own unbreakable span, so a 300 px sidebar breaks such a heading at the separator
+ * rather than between the "7" and the "d" of the label itself.
+ */
+function srcLabel(source, label) {
+  const l = label === null || label === undefined ? '' : String(label);
+  const t = word(SRC_TITLE, source);
+  const parts = [];
+  if (t) parts.push(t);
+  if (l) parts.push(l);
+  return parts.map(p => '<span class="nobr">' + esc(p) + '</span>').join(' · ');
+}
+
+/** The forecast states in words. */
+const STATE_WORD = {
+  none: '', measuring: 'measuring', idle: 'idle', resetsFirst: 'resets first',
+  eta: 'projected', stale: 'stale', full: 'full',
+};
+
+/**
+ * The window states in words, for the fallback below and nowhere else. The map has no
+ * fallback of its own on purpose — an unknown state prints nothing rather than leaking an
+ * identifier into the sentence — and "resetDue" is deliberately absent from it: the reset
+ * line is the one place that says a window has reset, and a card that said it twice, once in
+ * its header and once beside the verdict, is what this pair of helpers exists to prevent.
+ */
+const DISPLAY_WORD = {
+  normal: '', exhausted: 'exhausted', overflow: 'over the limit', unlimited: 'unlimited',
+  limitReached: 'limit reached',
+};
+
+/**
+ * resetLine and stateText are worded once, in the view model, so this card, the QuickPick
+ * and the markdown view cannot say the same window differently. The two functions below are
+ * only the fallback for a payload from a build that predates those fields; they follow the
+ * same rules and say nothing the view model would not.
+ */
+function fbResetLine(w) {
+  if (w.display === 'resetDue') return 'reset due';
+  const r = w.reset === null || w.reset === undefined ? '' : String(w.reset);
+  if (!r) return '';
+  // A reset text that already says the window has reset is a sentence, not a duration.
+  return r.indexOf('reset due') >= 0 ? r : 'resets ' + r;
+}
+
+function fbStateText(w) {
+  const s = word(DISPLAY_WORD, w.display);
+  if (!s) return '';
+  const said = w.verdict && typeof w.verdict.text === 'string' ? w.verdict.text : '';
+  return said.toLowerCase().indexOf(s) >= 0 ? '' : s;
+}
+
+/** A string the view model carries, or the fallback when this payload has none. */
+function orElse(value, fallback) {
+  return typeof value === 'string' ? value : fallback;
 }
 
 // -- controls ---------------------------------------------------------------
@@ -386,10 +523,18 @@ function controls() {
   const chips = r.presets.map(p => '<button data-act="range" data-preset="' + p + '" aria-pressed="'
     + (r.preset === p) + '">' + esc(p) + '</button>').join('');
   const providers = ['claude', 'codex'].map(s => '<button data-act="provider" data-src="' + s
-    + '" aria-pressed="' + (vm.ui.providers.indexOf(s) >= 0) + '">' + esc(s) + '</button>').join('');
-  const models = (vm.models.rows || []).slice(0, 12).map(m => '<button data-act="model" data-model="'
-    + esc(m.model) + '" aria-pressed="' + (vm.ui.models.indexOf(m.model) >= 0) + '">'
-    + esc(m.model) + '</button>').join('');
+    + '" aria-pressed="' + (vm.ui.providers.indexOf(s) >= 0) + '">' + esc(srcName(s))
+    + '</button>').join('');
+  // The table splits main and sub-agent rows per model; the filter does not, so the same
+  // name would otherwise appear twice as two chips that toggle the same thing.
+  const names = [];
+  for (const m of vm.models.rows || []) {
+    if (names.indexOf(m.model) < 0) names.push(m.model);
+    if (names.length >= 12) break;
+  }
+  const models = names.map(name => '<button data-act="model" data-model="'
+    + esc(name) + '" aria-pressed="' + (vm.ui.models.indexOf(name) >= 0) + '">'
+    + esc(name) + '</button>').join('');
   return '<div class="wrap">' + chips
     + '<button data-act="refresh" title="Rebuild from the transcripts and fetch the quota">refresh</button>'
     + '</div>'
@@ -428,13 +573,25 @@ function quotaCard(q) {
   for (const w of q.windows) {
     const f = w.forecast;
     const end = f && f.endPercent !== null && f.endPercent !== undefined ? f.endPercent : null;
+    const reset = orElse(w.resetLine, fbResetLine(w));
+    const state = orElse(w.stateText, fbStateText(w));
     h += '<div class="win"><div class="win-top"><span>' + esc(w.label)
-      + (w.reset ? ' · resets ' + esc(w.reset) : '') + '</span><b>' + esc(w.percentText) + '</b></div>'
+      + (reset ? ' · ' + esc(reset) : '') + '</span><b>' + esc(w.percentText) + '</b></div>'
       + bar(w.percent, w.display === 'resetDue' ? 'neutral' : w.level, w.elapsed, end, w.aria)
       + '<div class="verdict ' + esc(w.level) + '">'
       + (w.level === 'ok' ? '' : '▲ ') + esc(w.verdict.text)
-      + (w.display !== 'normal' ? ' · ' + esc(w.display) : '') + '</div>';
-    if (f && f.text) h += '<div class="meta">' + esc(f.text) + '</div>';
+      + (state ? ' · ' + esc(state) : '') + '</div>';
+    // A forecast that only repeats a word the card has already printed — in the verdict, in
+    // the state beside it or in the reset line — is not a second fact. A "full" forecast on a
+    // window that has just reset is dropped for a second reason: the reading it is built on
+    // belongs to the window before the reset, which is why the bar is neutral, not red.
+    const trusted = !(w.display === 'resetDue' && f && f.state === 'full');
+    // Word for word against each line already on the card, never as a substring: a forecast
+    // that merely contains a word said above it is still a sentence of its own.
+    const printed = [String(w.verdict.text).toLowerCase(), state.toLowerCase(), reset.toLowerCase()];
+    if (f && f.text && trusted && printed.indexOf(f.text.toLowerCase()) < 0) {
+      h += '<div class="meta">' + esc(f.text) + '</div>';
+    }
     if (w.sustainable) h += '<div class="meta">' + esc(w.sustainable) + '</div>';
     if (w.spark && w.spark.length > 1) h += sparkSvg(w.spark);
     h += '</div>';
@@ -467,7 +624,7 @@ function sKpis() {
   return '<div class="kpis">' + vm.kpis.map(k => {
     const d = k.delta
       ? '<span class="d ' + (k.delta.glyph === '▲' ? 'up' : k.delta.glyph === '▼' ? 'down' : '')
-        + '">' + esc(k.delta.glyph) + ' ' + esc(k.delta.text) + '</span>'
+        + '">' + [k.delta.glyph, k.delta.text].filter(Boolean).map(esc).join(' ') + '</span>'
       : '';
     return '<div class="kpi" title="' + esc([k.note, k.provenance].filter(Boolean).join(' · ')) + '">'
       + '<div class="l">' + esc(k.label) + '</div><div class="v">' + esc(k.value) + '</div>'
@@ -523,7 +680,7 @@ function compositionBar(c) {
   const segs = parts.map(p => '<i class="cs ' + cls(p) + '" data-w="'
     + ((p.tokens / total) * 100).toFixed(2) + '" title="' + esc(p.text) + ': '
     + Math.round(p.tokens).toLocaleString('en-US') + '"></i>').join('');
-  return '<div class="meta">' + esc(c.source) + ' composition</div>'
+  return '<div class="meta">' + esc(srcName(c.source)) + ' composition</div>'
     + '<div class="compbar">' + segs + '</div>'
     + '<div class="legend">' + parts.map(p => '<span><i class="dot ' + cls(p) + '"></i>'
       + esc(p.text) + '</span>').join('') + '</div>';
@@ -535,7 +692,7 @@ function sTokens() {
   if (vm.cacheEconomy.length) {
     h += '<div class="scroll"><table><thead><tr><th>Cache</th><th>Hit rate</th>'
       + '<th>Realised</th><th>Blended $/1M</th></tr></thead><tbody>'
-      + vm.cacheEconomy.map(c => '<tr><td data-h="Cache">' + esc(c.source) + '</td>'
+      + vm.cacheEconomy.map(c => '<tr><td data-h="Cache">' + esc(srcName(c.source)) + '</td>'
         + '<td data-h="Hit rate">' + esc(c.hitRate) + '</td><td data-h="Realised">'
         + esc(c.savedUsd) + (c.partial ? ' ⚠' : '') + '</td><td data-h="Blended">'
         + esc(c.blendedPerM) + '</td></tr>').join('')
@@ -575,13 +732,17 @@ function sChart() {
     const segs = c.series.map(s => {
       const v = s.values[i];
       if (v <= 0) return '';
+      // The tooltip names the provider the way the legend beside it does: a bar whose legend
+      // says "Claude Code" and whose title says "claude" is two names for one series.
       return '<div class="seg ' + s.source + '" data-bh="' + ((v / c.max) * 100).toFixed(2)
-        + '" title="' + esc(s.source + ' ' + d + ': ' + Math.round(v).toLocaleString('en-US')) + '"></div>';
+        + '" title="' + esc(srcName(s.source) + ' · ' + d + ': '
+          + Math.round(v).toLocaleString('en-US')) + '"></div>';
     }).join('');
     return '<div class="col" data-act="drill" data-day="' + esc(d) + '" tabindex="0" role="button" '
       + 'title="' + esc(d + ': ' + Math.round(totals[i]).toLocaleString('en-US')) + '">'
       + (showValues && totals[i] > 0
-         ? '<span class="vlabel">' + esc(short(totals[i])) + '</span>' : '')
+         ? '<span class="vlabel" data-i="' + i + '"><i>' + esc(short(totals[i]))
+            + '</i></span>' : '')
       + segs + '</div>';
   }).join('');
   const grids = c.ticks.map((t, i) => '<div class="grid" data-b="' + ((i + 1) * 25)
@@ -595,8 +756,10 @@ function sChart() {
     overlay = '<svg class="costline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'
       + '<polyline points="' + pts + '"/></svg>';
   }
-  const every = Math.max(1, Math.ceil(c.days.length / 12));
-  const labels = c.labels.map((l, i) => '<span>' + (i % every === 0 ? esc(l) : '') + '</span>').join('');
+  // Every label is rendered and carries its own text; which of them survive is decided by
+  // fitChart once the browser knows how wide a column actually is.
+  const labels = c.labels.map((l, i) => '<span data-i="' + i + '" data-l="' + esc(l) + '"><i>'
+    + esc(l) + '</i></span>').join('');
   return '<div class="row"><span class="meta">' + (c.weekly ? 'weekly bars' : 'daily bars')
     + ' · ' + c.days.length + ' columns</span><span class="wrap">' + sel
     + (c.costLine ? '<button data-act="costLine" aria-pressed="' + costLine + '">cost line</button>' : '')
@@ -604,7 +767,7 @@ function sChart() {
     + '<div class="plot">' + grids + '<div class="chart">' + cols + '</div>' + overlay + '</div>'
     + '<div class="axis">' + labels + '</div>'
     + '<div class="legend">' + c.series.map(s => '<span><i class="dot ' + s.source + '"></i>'
-      + esc(s.source) + '</span>').join('')
+      + esc(srcName(s.source)) + '</span>').join('')
     + (costLine && c.costLine ? '<span>— API cost (second axis)</span>' : '')
     + '<span>click a column for that day</span></div>';
 }
@@ -669,9 +832,13 @@ function sHeatmap() {
 function sHours() {
   const p = vm.hours;
   const max = Math.max.apply(null, p.profile.map(x => x.value).concat([0])) || 1;
-  const bars = p.profile.map(x => '<div class="hb" data-bh="'
-    + Math.max(1, (x.value / max) * 100).toFixed(2) + '" title="'
+  const bars = p.profile.map(x => '<div class="hb' + (x.value > 0 ? '' : ' none') + '" data-bh="'
+    + (x.value > 0 ? Math.max(1, (x.value / max) * 100).toFixed(2) : '0') + '" title="'
     + esc(String(x.hour).padStart(2, '0') + ':00 · ' + x.text) + '"></div>').join('');
+  // The strip needs its own hours: the 00–04 … row below belongs to the weekday grid and is
+  // offset by that grid's 28 px label column, so reading it as this axis is off by a block.
+  const hourAxis = '<div class="axis">' + p.profile.map((x, i) => '<span>'
+    + (i % 6 === 0 ? esc(String(x.hour).padStart(2, '0')) : '') + '</span>').join('') + '</div>';
   const gmax = Math.max.apply(null, p.grid.map(c => c.value || 0).concat([0])) || 1;
   const blocks = ['00–04', '04–08', '08–12', '12–16', '16–20', '20–24'];
   let grid = '<div class="hgrid"><span></span>'
@@ -694,8 +861,9 @@ function sHours() {
     + ' · ' + p.days + ' day(s)</span><span class="wrap">'
     + ['local', 'utc'].map(z => '<button data-act="hourZone" data-zone="' + z + '" aria-pressed="'
       + (p.zone === z) + '">' + z + '</button>').join('') + '</span></div>'
-    + '<div class="hours">' + bars + '</div>'
+    + '<div class="hours">' + bars + '</div>' + hourAxis
     + (p.note ? '<div class="meta">' + esc(p.note) + '</div>' : '')
+    + '<div class="meta">by weekday and four-hour block</div>'
     + grid;
 }
 
@@ -703,28 +871,49 @@ function sForecast() {
   let h = '';
   if (!vm.forecasts.length) h += '<p class="empty">No window to project.</p>';
   for (const f of vm.forecasts) {
-    h += '<div class="card"><div class="row"><span class="name">' + esc(f.label) + '</span>'
-      + '<span class="meta">' + esc(f.forecast.state)
-      + (f.forecast.confidence ? ' · ' + esc(f.forecast.confidence) + ' confidence' : '')
-      + '</span></div>'
-      + '<div>' + esc(f.forecast.text || '—') + '</div>'
-      + '<div class="meta">' + [f.sustainable, f.lockout, f.resetForecast].filter(Boolean)
-        .map(esc).join(' · ')
-      + (f.forecast.basis ? ' · ' + f.forecast.basis.samples + ' readings' : '')
-      + (f.gaps ? ' · ' + f.gaps + ' gap(s)' : '') + '</div>'
+    const fc = f.forecast || {};
+    const state = word(STATE_WORD, fc.state);
+    // The sentence is the forecast's own; the webview does not write one. "Full until the
+    // reset." used to stand in for a missing text, and it asserts a reset that a window
+    // without a known reset time does not have — the forecast says "full" for those and says
+    // "full until the reset" only when it knows one. An empty body is enough while the state
+    // in the head is the statement; an unlimited window and a fresh install both arrive here
+    // as the state "none", and a card with neither a state nor a body says nothing at all
+    // where the absence marker belongs.
+    const body = fc.text || (state ? '' : '–');
+    // The same rule the quota card applies to its forecast line: a head that repeats what the
+    // sentence below it already ends with ("~empty in 5 h (17:00) · medium confidence") is not a
+    // second fact. The confidence is printed once, wherever it is already said.
+    const conf = fc.confidence ? fc.confidence + ' confidence' : '';
+    // The state word goes the same way: "full" over a body that is exactly "full" (a window with
+    // no reset ahead) is the one word twice. Word for word, never as a substring.
+    const said = String(body).toLowerCase();
+    const head = [state && said !== state.toLowerCase() ? state : '',
+      conf && said.indexOf(conf.toLowerCase()) < 0 ? conf : ''].filter(Boolean);
+    // One list, one join: a separator in front of the first item is a missing item.
+    const meta = [f.sustainable, f.lockout, f.resetForecast].filter(Boolean);
+    if (fc.basis) meta.push(fc.basis.samples + ' readings');
+    if (f.gaps) meta.push(f.gaps + ' gap(s)');
+    h += '<div class="card"><div class="row"><span class="name">'
+      + srcLabel(f.source, f.label) + '</span>'
+      + '<span class="meta">' + esc(head.join(' · ')) + '</span></div>'
+      + (body ? '<div>' + esc(body) + '</div>' : '')
+      + (meta.length ? '<div class="meta">' + meta.map(esc).join(' · ') + '</div>' : '')
       + (f.spark.length > 1 ? sparkSvg(f.spark) : '') + '</div>';
   }
   if (vm.windowUsage.length) {
     h += '<div class="scroll"><table><thead><tr><th>Local usage in window</th><th>Usage</th>'
       + '<th>Req.</th>' + (vm.showCost ? '<th>API cost</th>' : '') + '</tr></thead><tbody>'
-      + vm.windowUsage.map(u => '<tr><td data-h="Window">' + esc(u.label)
+      + vm.windowUsage.map(u => '<tr><td data-h="Window">' + srcLabel(u.source, u.label)
         + (u.complete ? '' : ' <span title="hour buckets are rolled up for part of this window">≈</span>')
         + '</td><td data-h="Usage">' + esc(u.usage) + '</td><td data-h="Req.">' + esc(u.requests)
         + '</td>' + (vm.showCost ? '<td data-h="API cost">' + esc(u.cost) + '</td>' : '')
         + '</tr>').join('') + '</tbody></table></div>';
   }
   for (const a of vm.attributionInWindow) {
-    h += '<div class="card"><div class="name">' + esc(a.windowId) + '</div>'
+    // The label is the window as the user knows it ("5 h"); the id is a key, not a heading.
+    h += '<div class="card"><div class="name">'
+      + srcLabel(a.source, a.label || a.windowId) + '</div>'
       + '<div class="scroll"><table><tbody>'
       + a.rows.map(r => '<tr><td>' + esc(r.label) + '</td><td>' + esc(r.share) + '</td><td>'
         + esc(r.usage) + '</td></tr>').join('')
@@ -735,8 +924,8 @@ function sForecast() {
 
 function sHistory() {
   if (!vm.retro.length) return '<p class="empty">No cycles on file yet.</p>';
-  return '<ul>' + vm.retro.map(r => '<li><b>' + esc(r.label) + '</b>: ' + esc(r.text)
-    + '</li>').join('') + '</ul>';
+  return '<ul>' + vm.retro.map(r => '<li><b>' + srcLabel(r.source, r.label) + '</b>: '
+    + esc(r.text) + '</li>').join('') + '</ul>';
 }
 
 function sProjects() {
@@ -850,9 +1039,12 @@ function sControls() {
 }
 
 function sFooter() {
+  // The footnotes already carry the pricing sentence (and the one about configured rates);
+  // the line below is only the fallback for a model that does not, never a second copy.
+  const priced = vm.footnotes.some(f => String(f).indexOf('Prices as of') >= 0);
   return '<ul>' + vm.footnotes.map(f => '<li>' + esc(f) + '</li>').join('')
-    + '<li>Prices as of ' + esc(vm.pricing.asOf)
-    + (vm.pricing.custom ? ' · your configured rates' : '') + '.</li>'
+    + (priced ? '' : '<li>Prices as of ' + esc(vm.pricing.asOf)
+       + (vm.pricing.custom ? ' · your configured rates' : '') + '.</li>')
     + '<li>Generated ' + esc(vm.generatedAt) + '.</li></ul>';
 }
 
@@ -867,6 +1059,10 @@ function renderAll() {
   h += '<div class="foot" data-sec="footer" data-body="footer">' + sFooter() + '</div>';
   document.getElementById('root').innerHTML = h;
   applyStyles();
+  // The whole page was just written, drill panel included, so the day on screen is the day
+  // in hand. Without this every full render leaves the marker empty and the next section
+  // update mistakes a plain refresh for a new day — and scrolls away under the reader.
+  shownDrill = vm.drill ? vm.drill.day : null;
 }
 
 /**
@@ -878,6 +1074,16 @@ function renderSection(key) {
   if (!body || !RENDER[key]) { renderAll(); return; }
   body.innerHTML = RENDER[key]();
   applyStyles();
+  // A day opened from the chart lands a whole page below it. Only on a new day, so a table
+  // that merely refreshes cannot pull the page around under the reader.
+  if (key === 'drill') {
+    const day = vm.drill ? vm.drill.day : null;
+    if (day && day !== shownDrill) {
+      const sec = document.querySelector('[data-sec="drill"]');
+      if (sec && sec.scrollIntoView) sec.scrollIntoView({ block: 'nearest' });
+    }
+    shownDrill = day;
+  }
 }
 
 /** The CSP forbids inline style attributes; values set through the CSSOM are unaffected. */
@@ -886,6 +1092,88 @@ function applyStyles() {
   document.querySelectorAll('[data-bh]').forEach(el => { el.style.height = el.dataset.bh + '%'; });
   document.querySelectorAll('[data-x]').forEach(el => { el.style.left = el.dataset.x + '%'; });
   document.querySelectorAll('[data-b]').forEach(el => { el.style.bottom = el.dataset.b + '%'; });
+  applyFits();
+}
+
+/**
+ * The three decisions that need a measured page rather than a view model: which labels fit,
+ * which tables are cut off, and where the heat map should start.
+ */
+function applyFits() {
+  fitChart();
+  fitScroll();
+  scrollHeat();
+}
+
+/**
+ * Labels are thinned by the width one column actually has. A label per column is only
+ * readable above roughly 30 px; below that every n-th one is shown and the rest keep their
+ * slot empty, so the ones that remain still sit over their own column. No number is lost:
+ * every column carries its total in the title.
+ */
+function fitChart() {
+  const chart = document.querySelector('.chart');
+  if (!chart) return;
+  const n = chart.children.length;
+  const width = chart.clientWidth;
+  if (!n || width <= 0) return;
+  const per = (width - (n - 1) * 2) / n;
+  const values = chart.querySelectorAll('.vlabel');
+  const vEvery = per >= 30 ? 1 : Math.ceil(30 / Math.max(per, 1));
+  values.forEach(el => { el.hidden = (Number(el.dataset.i) % vEvery) !== 0; });
+  const axis = document.querySelector('.plot + .axis');
+  if (!axis) return;
+  const aEvery = per >= 34 ? 1 : Math.ceil(34 / Math.max(per, 1));
+  axis.querySelectorAll('span').forEach(el => {
+    // The text lives in the inner element that centres the overflow; writing it on the slot
+    // itself would throw that element away on the first resize.
+    const inner = el.firstElementChild || el;
+    inner.textContent = (Number(el.dataset.i) % aEvery) === 0 ? (el.dataset.l || '') : '';
+  });
+}
+
+/**
+ * A table wider than its box scrolls, but nothing said so: at sidebar width five of the
+ * twelve columns are simply not there. The hint is added only once the browser has measured
+ * an overflow, and removed again when there is none.
+ */
+function fitScroll() {
+  document.querySelectorAll('.scroll').forEach(el => {
+    const over = el.scrollWidth > el.clientWidth + 1;
+    const next = el.nextElementSibling;
+    const hint = next && next.classList && next.classList.contains('scrollhint') ? next : null;
+    if (hint) { hint.hidden = !over; return; }
+    if (!over) return;
+    el.insertAdjacentHTML('afterend',
+      '<div class="meta scrollhint">scroll sideways for the remaining columns →</div>');
+  });
+}
+
+/**
+ * A year of weeks does not fit a sidebar, and the left end is the oldest — for a fresh
+ * install that is a wall of empty squares. Start at the newest week; the strip still scrolls,
+ * and a reader who moved it is left alone.
+ *
+ * Pinning once was not enough. Narrowing the sidebar leaves the scroll offset where it is
+ * while the scrollable width grows underneath it, so the strip that was at its newest week
+ * ends up in the middle of last spring. The offset we set is remembered instead: as long as
+ * the strip is still where we left it — or already at its right end, which is where the
+ * browser clamps it when the sidebar is widened — it is pinned again on every render and
+ * every resize. Anywhere else is the reader's doing and is not touched.
+ */
+function scrollHeat() {
+  document.querySelectorAll('.heat').forEach(el => {
+    const max = el.scrollWidth - el.clientWidth;
+    if (max <= 0) { el.dataset.pin = ''; return; }
+    const pin = el.dataset.pin;
+    const ours = pin === undefined || pin === ''
+      || Math.abs(el.scrollLeft - Number(pin)) <= 1 || el.scrollLeft >= max - 1;
+    if (!ours) return;
+    el.scrollLeft = max;
+    // What the element actually took, not what we asked for: a browser that clamps or rounds
+    // the offset would otherwise look like a reader on the very next pass.
+    el.dataset.pin = String(el.scrollLeft);
+  });
 }
 
 // -- events -----------------------------------------------------------------
@@ -940,6 +1228,9 @@ document.addEventListener('change', (ev) => {
   const el = target(ev, '[data-act="metric"]');
   if (el && vm) post({ type: 'setMetric', metric: el.value });
 });
+
+// Dragging the sidebar wider is exactly the case where more labels fit than did before.
+window.addEventListener('resize', () => { if (vm) applyFits(); });
 
 window.addEventListener('message', (ev) => {
   const msg = ev.data;

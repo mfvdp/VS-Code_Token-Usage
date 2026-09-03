@@ -3,20 +3,14 @@
 
 import { strict as assert } from 'node:assert'
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { bestState, SourceInputs } from '../src/quotaSources'
 import { CodexRateLimitsSnapshot, QuotaState } from '../src/types'
+import { scratchDir } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
 const BASE = 1_700_000_000_000
 const MIN = 60_000
-
-function tmpDir(): string {
-  const root = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  return fs.mkdtempSync(path.join(root, 'qsrc-'))
-}
 
 const claudeBody = (percent: number) => ({
   limits: [
@@ -72,7 +66,7 @@ function inputs(dir: string, over: Partial<SourceInputs> = {}): SourceInputs {
 }
 
 test('the freshest reading wins, whatever the configured order says', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   writeCache(dir, 'claude-cache.json', (BASE - 40 * MIN) / 1000, 20)
   writeMirror(dir, BASE - 2 * MIN, 55)
   writeClaudeJson(dir, BASE - 20 * MIN, 33)
@@ -85,7 +79,7 @@ test('the freshest reading wins, whatever the configured order says', () => {
 })
 
 test('equally fresh readings are decided by the configured order', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   writeCache(dir, 'claude-cache.json', (BASE - 5 * MIN) / 1000, 20)
   writeMirror(dir, BASE - 5 * MIN, 55)
   const cacheFirst = bestState('claude', inputs(dir, { claudeOrder: ['cacheFile', 'statusline'] }), BASE)
@@ -95,7 +89,7 @@ test('equally fresh readings are decided by the configured order', () => {
 })
 
 test('a source that is not in the order is not consulted at all', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   writeCache(dir, 'claude-cache.json', (BASE - 5 * MIN) / 1000, 20)
   writeMirror(dir, BASE - MIN, 55)
   const r = bestState('claude', inputs(dir, { claudeOrder: ['cacheFile'] }), BASE)
@@ -104,7 +98,7 @@ test('a source that is not in the order is not consulted at all', () => {
 })
 
 test('mode cache never asks our own poll, mode auto only shows one that exists', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   const polledState: QuotaState = {
     source: 'claude', ok: true, origin: 'poll', fetchedAt: BASE / 1000, planType: 'max',
     windows: [{
@@ -132,7 +126,7 @@ test('mode cache never asks our own poll, mode auto only shows one that exists',
 })
 
 test('every enabled source appears among the candidates with its age and problem', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   writeCache(dir, 'claude-cache.json', (BASE - 3 * MIN) / 1000, 20)
   const r = bestState('claude', inputs(dir), BASE)
   assert.deepEqual(r.candidates.map((c) => c.id), ['cacheFile', 'statusline', 'claudeJson'])
@@ -144,7 +138,7 @@ test('every enabled source appears among the candidates with its age and problem
 })
 
 test('the account hint is taken from claude.json even when another source wins', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   writeMirror(dir, BASE - MIN, 55)
   writeClaudeJson(dir, BASE - 20 * MIN, 33)
   const r = bestState('claude', inputs(dir), BASE)
@@ -154,7 +148,7 @@ test('the account hint is taken from claude.json even when another source wins',
 })
 
 test('with nothing readable the highest-ranked source explains why', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   const r = bestState('claude', inputs(dir), BASE)
   assert.equal(r.state.ok, false)
   assert.equal(r.state.problemKind, 'noFile')
@@ -162,14 +156,14 @@ test('with nothing readable the highest-ranked source explains why', () => {
 })
 
 test('an empty order is reported as "no source enabled", not as a missing file', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   const r = bestState('claude', inputs(dir, { claudeOrder: [] }), BASE)
   assert.equal(r.state.problemKind, 'quotaOff')
   assert.deepEqual(r.candidates, [])
 })
 
 test('codex: the transcript snapshot competes with the cache file on age', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('qsrc')
   fs.writeFileSync(path.join(dir, 'codex-cache.json'), JSON.stringify({
     fetched_at: (BASE - 90 * MIN) / 1000, fail_count: 0,
     body: {

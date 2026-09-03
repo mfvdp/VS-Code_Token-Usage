@@ -12,6 +12,8 @@
  */
 
 import { DEFAULT_BAR, renderBar } from './render'
+import type { Forecast, Source } from './types'
+import { SOURCE_TITLE } from './viewModel'
 import type { ViewModel } from './viewModel'
 
 export interface PickItem {
@@ -38,10 +40,66 @@ function cell(s: string | null | undefined): string {
   return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
 }
 
-function windowLine(w: ViewModel['quotas'][number]['windows'][number]): string {
+/**
+ * "5 h" alone is ambiguous the moment both providers report a window of that length, and a
+ * flat list has no card around a row to say which account it belongs to. The dashboard
+ * prefixes the provider for exactly this reason; the fallback views do the same.
+ */
+function withSource(source: Source, label: string): string {
+  const title = SOURCE_TITLE[source]
+  if (!title) return label
+  return label ? `${title} · ${label}` : title
+}
+
+/**
+ * The forecast states in words. No fallback on purpose: an unknown state prints nothing
+ * rather than leaking an identifier like "resetsFirst" into a sentence.
+ */
+const FORECAST_WORD: Record<Forecast['state'], string> = {
+  none: '',
+  measuring: 'measuring',
+  idle: 'idle',
+  resetsFirst: 'resets first',
+  eta: 'projected',
+  stale: 'stale',
+  full: 'full',
+}
+
+/** The forecast sentence, or the bare state in words; '' when there is nothing to say. */
+function forecastText(f: Forecast): string {
+  return f.text || (FORECAST_WORD[f.state] ?? '')
+}
+
+type WindowVmOf = ViewModel['quotas'][number]['windows'][number]
+
+/**
+ * A forecast built on a reading older than the reset is not about the window on screen: a
+ * `resetDue` window is "full" only in the cycle that has already ended. The dashboard drops
+ * that line for the same reason, and the three views may not disagree about one window.
+ */
+function trustedForecast(w: WindowVmOf): Forecast | null {
+  const f = w.forecast
+  if (!f) return null
+  return w.display === 'resetDue' && f.state === 'full' ? null : f
+}
+
+/** True when the text is one of the segments already printed, compared whole and case-blind. */
+function repeats(text: string, said: (string | null | undefined)[]): boolean {
+  const t = text.trim().toLowerCase()
+  return said.some((s) => typeof s === 'string' && s.trim().toLowerCase() === t)
+}
+
+function windowLine(w: WindowVmOf): string {
   const parts = [w.verdict.text]
-  if (w.reset) parts.push(`resets ${w.reset}`)
-  if (w.forecast && w.forecast.text) parts.push(w.forecast.text)
+  // `stateText` and `resetLine` arrive already de-duplicated against each other and against
+  // the verdict, so appending them cannot repeat a word the line already carries.
+  if (w.stateText) parts.push(w.stateText)
+  if (w.resetLine) parts.push(w.resetLine)
+  const f = trustedForecast(w)
+  // A forecast that only repeats a segment already on the line ("reset due" beside "reset
+  // due") is not a second fact — compared segment for segment, never as a substring, so a
+  // real sentence that merely contains one of the words is kept.
+  if (f && f.text && !repeats(f.text, parts)) parts.push(f.text)
   return parts.join(' · ')
 }
 
@@ -82,10 +140,14 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
       items.push({
         label: `${w.label} ${bar(w.percent, w.elapsed)} ${w.percentText}`,
         description: windowLine(w),
+        // The sustainable sentence ends in "…keeps it to the reset", so after it the time alone
+        // is the whole statement; a window whose reset has passed says "reset due" in the
+        // description already and gets no time here.
         detail: [
           w.sustainable,
-          w.resetAbsolute ? `resets at ${w.resetAbsolute}` : null,
-          w.display === 'normal' ? null : w.display,
+          w.resetAbsolute && w.display !== 'resetDue'
+            ? (w.sustainable ? `at ${w.resetAbsolute}` : `reset at ${w.resetAbsolute}`)
+            : null,
         ].filter(Boolean).join(' · ') || undefined,
       })
     }
@@ -100,7 +162,7 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   for (const k of vm.kpis) {
     items.push({
       label: `${k.label}: ${k.value}`,
-      description: k.delta ? `${k.delta.glyph} ${k.delta.text}` : undefined,
+      description: k.delta ? [k.delta.glyph, k.delta.text].filter(Boolean).join(' ') : undefined,
       detail: [k.note, k.provenance].filter(Boolean).join(' · '),
     })
   }
@@ -119,7 +181,7 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
 
   for (const c of vm.cacheEconomy) {
     items.push({
-      label: `Cache economy ${c.source}: ${c.hitRate}`,
+      label: `Cache economy ${withSource(c.source, '')}: ${c.hitRate}`,
       description: `saved ${c.savedUsd} · blended ${c.blendedPerM}`,
       detail: c.note + (c.partial ? ' · some models unpriced' : ''),
     })
@@ -127,7 +189,7 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
 
   for (const f of vm.forecasts) {
     items.push({
-      label: `Forecast ${f.label}: ${f.forecast.text || f.forecast.state}`,
+      label: `Forecast ${withSource(f.source, f.label)}: ${forecastText(f.forecast) || '–'}`,
       description: [f.sustainable, f.lockout, f.resetForecast].filter(Boolean).join(' · '),
       detail: f.forecast.basis
         ? `${f.forecast.basis.samples} readings · ${f.gaps} gap(s) in the last 24 h`
@@ -135,21 +197,26 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     })
   }
 
-  for (const r of vm.retro) items.push({ label: `Reset history ${r.label}`, description: r.text })
+  for (const r of vm.retro) {
+    items.push({ label: `Reset history ${withSource(r.source, r.label)}`, description: r.text })
+  }
 
   for (const u of vm.windowUsage) {
     items.push({
-      label: `Local usage in ${u.label}: ${u.usage}`,
+      label: `Local usage in ${withSource(u.source, u.label)}: ${u.usage}`,
       description: `${u.requests} req · ${u.cost}`,
       detail: u.complete ? undefined : 'hour buckets are incomplete for this window',
     })
   }
 
   for (const a of vm.attributionInWindow) {
+    // Named like the markdown heading, so the block cannot be mistaken for a totals row of
+    // the provider it starts with.
+    const head = `Attribution ${withSource(a.source, a.label)}`
     for (const row of a.rows) {
-      items.push({ label: `${a.windowId} · ${row.label}: ${row.share}`, description: row.usage })
+      items.push({ label: `${head} · ${row.label}: ${row.share}`, description: row.usage })
     }
-    items.push({ label: `${a.windowId} · unexplained`, description: a.unexplained })
+    items.push({ label: `${head} · unexplained`, description: a.unexplained })
   }
 
   for (const m of vm.models.rows) {
@@ -266,9 +333,15 @@ export function markdownDocument(vm: ViewModel): string {
       L.push('| Window | Used | Elapsed | Pace | Resets | Forecast |')
       L.push('|---|---|---|---|---|---|')
       for (const w of q.windows) {
+        const f = trustedForecast(w)
+        // Same rule as the QuickPick line: the Forecast column stays empty when it would only
+        // repeat the Resets or Pace column of the same row.
+        const ft = f ? forecastText(f) : ''
+        const forecastCell = repeats(ft, [w.reset, w.stateText, w.verdict.text]) ? '' : ft
         L.push(`| ${cell(w.label)} | \`${bar(w.percent, w.elapsed)}\` ${cell(w.percentText)} | `
-          + `${w.elapsed === null ? '–' : `${Math.round(w.elapsed)} %`} | ${cell(w.verdict.text)} | `
-          + `${cell(w.reset)} | ${cell(w.forecast ? w.forecast.text : '')} |`)
+          + `${w.elapsed === null ? '–' : `${Math.round(w.elapsed)} %`} | `
+          + `${cell(w.verdict.text + (w.stateText ? ` · ${w.stateText}` : ''))} | `
+          + `${cell(w.reset)} | ${cell(forecastCell)} |`)
       }
       L.push('')
     }
@@ -286,7 +359,7 @@ export function markdownDocument(vm: ViewModel): string {
   L.push('| Figure | Value | Change | Basis |')
   L.push('|---|---|---|---|')
   for (const k of vm.kpis) {
-    L.push(`| ${cell(k.label)} | ${cell(k.value)} | ${k.delta ? cell(`${k.delta.glyph} ${k.delta.text}`) : '–'} | `
+    L.push(`| ${cell(k.label)} | ${cell(k.value)} | ${k.delta ? cell([k.delta.glyph, k.delta.text].filter(Boolean).join(' ')) : '–'} | `
       + `${cell([k.note, k.provenance].filter(Boolean).join(' · '))} |`)
   }
   L.push('')
@@ -309,7 +382,7 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('| Provider | Part | Tokens |')
     L.push('|---|---|---|')
     for (const c of vm.composition) {
-      for (const p of c.parts) L.push(`| ${cell(c.source)} | ${cell(p.text)} | ${p.tokens > 0 ? p.tokens.toLocaleString('en-US') : '–'} |`)
+      for (const p of c.parts) L.push(`| ${cell(withSource(c.source, ''))} | ${cell(p.text)} | ${p.tokens > 0 ? p.tokens.toLocaleString('en-US') : '–'} |`)
     }
     L.push('')
   }
@@ -318,7 +391,7 @@ export function markdownDocument(vm: ViewModel): string {
   L.push('| Provider | Hit rate | Realised saving | Blended $/1M | Basis |')
   L.push('|---|---|---|---|---|')
   for (const c of vm.cacheEconomy) {
-    L.push(`| ${cell(c.source)} | ${cell(c.hitRate)} | ${cell(c.savedUsd)}${c.partial ? ' ⚠' : ''} | `
+    L.push(`| ${cell(withSource(c.source, ''))} | ${cell(c.hitRate)} | ${cell(c.savedUsd)}${c.partial ? ' ⚠' : ''} | `
       + `${cell(c.blendedPerM)} | ${cell(c.note)} |`)
   }
   L.push('')
@@ -334,7 +407,7 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('')
     L.push(`Month projection: ${vm.calendar.thisMonth.projection} — ${vm.calendar.thisMonth.projectionBasis}`)
   }
-  for (const p of vm.planFactor) L.push('', `Plan comparison (${p.source}): ${p.text}${p.partial ? ' ⚠ lower bound' : ''}`)
+  for (const p of vm.planFactor) L.push('', `Plan comparison (${withSource(p.source, '')}): ${p.text}${p.partial ? ' ⚠ lower bound' : ''}`)
   L.push('')
 
   if (vm.models.rows.length > 0) {
@@ -343,7 +416,7 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('|---|---|---|---|---|---|---|---|---|---|')
     for (const m of vm.models.rows) {
       L.push(`| ${cell(m.model)}${m.isSub ? ' (sub)' : ''}${m.tier === 'standard' ? '' : ` [${m.tier}]`} | `
-        + `${cell(m.source)} | ${cell(m.usageText)} | ${cell(m.share)} | ${cell(m.output)} | `
+        + `${cell(withSource(m.source, ''))} | ${cell(m.usageText)} | ${cell(m.share)} | ${cell(m.output)} | `
         + `${cell(m.requests)} | ${cell(m.cacheHit)} | ${cell(m.costText)} | ${cell(m.costShare)} | `
         + `${cell(m.price)} |`)
     }
@@ -360,7 +433,7 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('| Window | State | Rate | Sustainable | Lockout | At reset | Basis |')
     L.push('|---|---|---|---|---|---|---|')
     for (const f of vm.forecasts) {
-      L.push(`| ${cell(f.label)} | ${cell(f.forecast.text || f.forecast.state)} | `
+      L.push(`| ${cell(withSource(f.source, f.label))} | ${cell(forecastText(f.forecast))} | `
         + `${f.forecast.ratePerHour === null ? '–' : `${f.forecast.ratePerHour.toFixed(1)} pp/h`} | `
         + `${cell(f.sustainable)} | ${cell(f.lockout)} | ${cell(f.resetForecast)} | `
         + `${f.forecast.basis ? `${f.forecast.basis.samples} readings, ${f.gaps} gap(s)` : '–'} |`)
@@ -370,7 +443,7 @@ export function markdownDocument(vm: ViewModel): string {
 
   if (vm.retro.length > 0) {
     L.push('## Reset history', '')
-    for (const r of vm.retro) L.push(`- **${r.label}**: ${r.text}`)
+    for (const r of vm.retro) L.push(`- **${withSource(r.source, r.label)}**: ${r.text}`)
     L.push('')
   }
 
@@ -379,14 +452,14 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('| Window | Usage | Requests | API cost | Complete |')
     L.push('|---|---|---|---|---|')
     for (const u of vm.windowUsage) {
-      L.push(`| ${cell(u.label)} | ${cell(u.usage)} | ${cell(u.requests)} | ${cell(u.cost)} | `
+      L.push(`| ${cell(withSource(u.source, u.label))} | ${cell(u.usage)} | ${cell(u.requests)} | ${cell(u.cost)} | `
         + `${u.complete ? 'yes' : 'no — hour buckets rolled up'} |`)
     }
     L.push('')
   }
 
   for (const a of vm.attributionInWindow) {
-    L.push(`### Attribution — ${a.windowId}`, '')
+    L.push(`### Attribution — ${withSource(a.source, a.label)}`, '')
     L.push('| Project | Share of local tokens | Usage |')
     L.push('|---|---|---|')
     for (const row of a.rows) L.push(`| ${cell(row.label)} | ${cell(row.share)} | ${cell(row.usage)} |`)

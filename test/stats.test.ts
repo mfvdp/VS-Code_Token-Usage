@@ -4,10 +4,11 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
+import { usd } from '../src/render'
 import {
   MIN_GRID_SAMPLES, MIN_P90_SAMPLES, StatsCtx, attributionInWindow, cacheEconomy, cacheHitParts,
   cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil, planFactors,
-  projectRows, sessionRows, totalRow, windowUsage,
+  projectRows, sessionRows, totalRow, totalsFor, windowUsage,
 } from '../src/stats'
 import { DayRange, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
@@ -334,8 +335,90 @@ test('the plan factor appears only when a plan price was stated', () => {
   const rows = planFactors(ctx, { claude: 100 })
   assert.equal(rows.length, 1)
   assert.equal(rows[0].source, 'claude')
-  assert.match(rows[0].text, /API equivalent this month ÷ \$100 plan = ×/)
+  assert.match(rows[0].text, /API equivalent this month ÷ \$100\.00 plan = /)
   assert.equal(rows[0].partial, true)
+})
+
+test('the plan price keeps its cents so two plans cannot look like two currencies', () => {
+  // One million input tokens of a $5/1M model: exactly $5 of hypothetical API cost.
+  const ctx = ctxOf(single({ input: 1_000_000, requests: 1, outputFinal: 1 }), { sources: ['claude'] })
+  // $200 keeps its cents here although `usd` would drop them — otherwise the Opus plan reads
+  // "$200" one line above the Codex plan's "$20.00" and the two look unrelated.
+  assert.equal(
+    planFactors(ctx, { claude: 200 })[0].text,
+    '~$5.00 API equivalent this month ÷ $200.00 plan = ×0.03',
+  )
+  assert.equal(
+    planFactors(ctx, { claude: 20 })[0].text,
+    '~$5.00 API equivalent this month ÷ $20.00 plan = ×0.3',
+  )
+  // The "no usage yet" sentence names the plan the same way.
+  const idle = ctxOf(single({ requests: 0 }), { sources: ['claude'] })
+  assert.equal(
+    planFactors(idle, { claude: 200 })[0].text,
+    'no priced usage this month against the $200.00 plan',
+  )
+})
+
+test('the month cost in the plan sentence follows the same rule as every other cost', () => {
+  // Thirty million input tokens of a $5/1M model: $150, i.e. over the $100 line where `usd`
+  // drops the cents. The plan sentence sits directly under the month projection's "so far
+  // …", so the same month must not be $150 there and $150.00 here.
+  const ctx = ctxOf(single({ input: 30_000_000, requests: 1, outputFinal: 1 }), { sources: ['claude'] })
+  assert.equal(
+    planFactors(ctx, { claude: 200 })[0].text,
+    '~$150 API equivalent this month ÷ $200.00 plan = ×0.8',
+  )
+  assert.equal(planFactors(ctx, { claude: 200 })[0].text.split(' API')[0], `~${usd(150)}`)
+})
+
+test('the plan factor never rounds a month of usage down to ×0.0', () => {
+  const ctx = ctxOf(single({ input: 1_000_000, requests: 1, outputFinal: 1 }), { sources: ['claude'] })
+  // Two decimals below 0.1, one from 0.1 up — and a bound below a hundredth, because
+  // "×0.0" would state that this month cost nothing against the plan.
+  const factor = (plan: number): string => String(planFactors(ctx, { claude: plan })[0].text.split('= ')[1])
+  assert.equal(factor(5000), '<×0.01')
+  assert.equal(factor(500), '×0.01')
+  assert.equal(factor(200), '×0.03')
+  assert.equal(factor(50), '×0.1')
+  assert.equal(factor(4), '×1.3')
+  for (const plan of [5000, 500, 200, 100, 50, 20, 4]) {
+    assert.notEqual(factor(plan), '×0.0')
+  }
+})
+
+test('the totals table never shows two rows with the same label', () => {
+  const ctx = ctxOf(buildAgg())
+  for (const preset of ['today', '7d', '30d', 'all'] as const) {
+    const r = rangeFor(preset, NOW, tcfg, '2026-07-01')
+    const rows = totalsFor(ctx, 'claude', r, null, '2026-07-01')
+    const labels = rows.map((row) => row.label)
+    assert.equal(new Set(labels).size, labels.length, `duplicate label for ${preset}`)
+  }
+  // The selected range *is* the fixed row, so the fixed one is dropped rather than printed
+  // twice: seven rows instead of eight, and the numbers stay where the reader expects them.
+  const thirty = totalsFor(ctx, 'claude', rangeFor('30d', NOW, tcfg), null, '2026-07-01')
+  assert.equal(thirty.length, 6)
+  assert.equal(thirty[0].label, 'Last 30 days')
+  assert.equal(thirty.filter((row) => row.label === 'Last 30 days').length, 1)
+
+  // A range of its own keeps every fixed row for comparison.
+  const custom = totalsFor(
+    ctx, 'claude', rangeFor({ from: '2026-08-01', to: '2026-08-15' }, NOW, tcfg), null, '2026-07-01',
+  )
+  assert.equal(custom.length, 6 + 1)
+  assert.equal(custom[0].label, '2026-08-01 → 2026-08-15')
+})
+
+test('a selected range that only shares a label with a fixed row says which one it is', () => {
+  const ctx = ctxOf(buildAgg())
+  // "All time" over a first day the fixed row does not use: two different spans, so both
+  // rows stay and the selected one is named rather than silently shadowing the other.
+  const rows = totalsFor(ctx, 'claude', rangeFor('all', NOW, tcfg, '2026-08-01'), null, '2026-07-01')
+  assert.equal(rows[0].label, 'Selected range (All time)')
+  assert.equal(rows[0].from, '2026-08-01')
+  assert.equal(rows.filter((r) => r.label === 'All time').length, 1)
+  assert.equal(rows.find((r) => r.label === 'All time')?.from, '2026-07-01')
 })
 
 test('the chart condenses to weekly bars beyond four months', () => {
@@ -374,7 +457,11 @@ test('a window without a clock gets no local usage row', () => {
 
 test('the KPI row reports "new" when there is no previous period to compare with', () => {
   const list = kpis(ctxOf(buildAgg()), range('30d'), null)
-  for (const k of list) assert.equal(k.delta?.text, 'new')
+  for (const k of list) {
+    assert.equal(k.delta?.text, 'new')
+    // "new" is the whole badge; a glyph beside it would be printed as "new new".
+    assert.equal(k.delta?.glyph, '')
+  }
   assert.deepEqual(list.map((k) => k.key),
     ['usage', 'cost', 'requests', 'cacheHit', 'activeDays', 'avgPerActiveDay'])
 })

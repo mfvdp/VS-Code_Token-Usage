@@ -9,12 +9,11 @@
 
 import { strict as assert } from 'node:assert'
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { BridgeIo, bridgeMain, minimalLine, shellFor, SpawnResult, writeMirror } from '../src/statuslineBridge'
+import { scratchDir } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
 
 const PAYLOAD = {
   model: { id: 'claude-opus-5', display_name: 'Opus' },
@@ -22,11 +21,6 @@ const PAYLOAD = {
     five_hour: { used_percentage: 25.4, resets_at: 1_700_006_400 },
     seven_day: { used_percentage: 61.2, resets_at: 1_700_438_400 },
   },
-}
-
-function tmpDir(): string {
-  const base = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  return fs.mkdtempSync(path.join(base, 'bridgescript-'))
 }
 
 interface Recorder extends BridgeIo {
@@ -58,7 +52,7 @@ function text(chunks: Buffer[]): string {
 }
 
 test('the payload is mirrored atomically and nothing is left behind', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const mirror = path.join(dir, 'nested', 'statusline-mirror.json')
   const io = recorder()
 
@@ -74,7 +68,7 @@ test('the payload is mirrored atomically and nothing is left behind', async () =
 })
 
 test('without a previous command the minimal line is printed', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const io = recorder()
   await bridgeMain(
     ['node', 'bridge.js', path.join(dir, 'm.json')],
@@ -86,7 +80,7 @@ test('without a previous command the minimal line is printed', async () => {
 })
 
 test('the previous command gets the same bytes and gives back its own', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const mirror = path.join(dir, 'm.json')
   const stdin = Buffer.from(JSON.stringify(PAYLOAD))
   const io = recorder({ code: 3, stdout: Buffer.from([0xf0, 0x9f, 0x92, 0xa1, 0x0a]), stderr: Buffer.from('warn\n') })
@@ -112,7 +106,7 @@ test('the previous command is handed to a shell as the one string it always was'
 })
 
 test('the previous command reaches the second shell byte for byte', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   // Quoted spaces and a quoted ';' — the two things a re-join would destroy.
   const previous = `python3 ~/.claude/sl.py --style "compact box" --label 'a; touch ${path.join(dir, 'PWNED')}'`
   const io = recorder()
@@ -129,7 +123,7 @@ test('the previous command reaches the second shell byte for byte', async () => 
 })
 
 test('anything after the single previous-command argument is ignored, not glued on', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const io = recorder()
   await bridgeMain(
     ['node', 'bridge.js', path.join(dir, 'm.json'), '--', 'ccstatus', 'stray', ''],
@@ -141,7 +135,7 @@ test('anything after the single previous-command argument is ignored, not glued 
 })
 
 test('input that is not JSON still passes through', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const mirror = path.join(dir, 'm.json')
   const stdin = Buffer.from('not json at all')
   const io = recorder({ code: 0, stdout: Buffer.from('old line\n'), stderr: Buffer.alloc(0) })
@@ -154,7 +148,7 @@ test('input that is not JSON still passes through', async () => {
 })
 
 test('a previous command that cannot be started never breaks the status line', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const io = recorder(new Error('spawn ENOENT'))
   const code = await bridgeMain(
     ['node', 'bridge.js', path.join(dir, 'm.json'), '--', 'missing-command'],
@@ -165,7 +159,7 @@ test('a previous command that cannot be started never breaks the status line', a
 })
 
 test('an unwritable mirror path is survivable', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const blocked = path.join(dir, 'blocker')
   fs.writeFileSync(blocked, 'not a directory')
   const io = recorder()
@@ -179,7 +173,7 @@ test('an unwritable mirror path is survivable', async () => {
 })
 
 test('empty input prints nothing at all', async () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const io = recorder()
   const code = await bridgeMain(['node', 'bridge.js', path.join(dir, 'm.json')], Buffer.alloc(0), io)
   assert.equal(code, 0)
@@ -198,7 +192,7 @@ test('the minimal line omits what is missing and invents nothing', () => {
 })
 
 test('writeMirror replaces an existing file in one step', () => {
-  const dir = tmpDir()
+  const dir = scratchDir('bridgescript')
   const file = path.join(dir, 'm.json')
   writeMirror(file, { a: 1 }, 1_000)
   writeMirror(file, { a: 2 }, 2_000)

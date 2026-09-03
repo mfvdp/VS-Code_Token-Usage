@@ -355,6 +355,12 @@ export function relativeTime(target: number, now = Date.now()): string {
  * The reset time as the status bar shows it. A window without a stated reset
  * gets an empty string: an invented countdown would be the most convincing
  * lie the extension could tell.
+ *
+ * The result never contains the word "resets" — a countdown reads as a duration
+ * ("2h14m"), and a reset that has come and gone reads "reset due" and nothing
+ * else. The verb is attached in exactly one place, `WindowVm.resetLine`, which
+ * also knows to leave "reset due" alone; a "resets" in here would come out of
+ * that as "resets reset due".
  */
 export function formatReset(
   resetsAt: number | null,

@@ -4,7 +4,6 @@
 import { strict as assert } from 'node:assert'
 import * as fs from 'node:fs'
 import { createRequire } from 'node:module'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { PollOptions, PollResult } from '../src/poller'
@@ -12,15 +11,10 @@ import {
   HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
 } from '../src/quotaManager'
 import { QuotaState, Source } from '../src/types'
+import { scratchDir } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
 const BASE = 1_700_000_000_000
 const MIN = 60_000
-
-function tmpDir(): string {
-  const root = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  return fs.mkdtempSync(path.join(root, 'qmgr-'))
-}
 
 function flush(): Promise<void> {
   return new Promise((r) => setImmediate(() => setImmediate(() => r())))
@@ -70,7 +64,7 @@ function harness(
       ? { state: claudeState(BASE / 1000), retryAfterSeconds: null, raw: { limits: [] } }
       : { state: null, retryAfterSeconds: null, problem: 'no binary', problemKind: 'noBinary' }),
 ): Harness {
-  const dir = tmpDir()
+  const dir = scratchDir('qmgr')
   let current = BASE
   const polls: Harness['polls'] = []
   const scheduled: Harness['scheduled'] = []

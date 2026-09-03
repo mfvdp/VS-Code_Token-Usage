@@ -165,6 +165,27 @@ test('formatReset: every format, and nothing at all without a reset time', () =>
   assert.equal(formatReset(soon, now, 'absolute', berlin), '08:00')
 })
 
+test('formatReset says "reset due" only once the reset is actually due', () => {
+  const now = Date.UTC(2026, 8, 3, 3, 46)
+  for (const ahead of [1, 1000, 60_000, 3_600_000]) {
+    assert.notEqual(formatReset(now + ahead, now, 'relative', utc), 'reset due')
+    assert.doesNotMatch(formatReset(now + ahead, now, 'both', utc), /reset due/)
+  }
+  assert.equal(formatReset(now, now, 'relative', utc), 'reset due')
+  assert.equal(formatReset(now - 1, now, 'relative', utc), 'reset due')
+})
+
+test('a reset string never carries the verb the views put in front of it', () => {
+  // The dashboard prints " · resets " before the countdown; a "resets" in here would come
+  // out as "resets reset due".
+  const now = Date.UTC(2026, 8, 3, 3, 46)
+  for (const at of [now - 60_000, now, now + 60_000, now + 5 * 86_400_000]) {
+    for (const fmt of ['relative', 'absolute', 'both'] as const) {
+      assert.doesNotMatch(formatReset(at, now, fmt, utc), /resets/)
+    }
+  }
+})
+
 test("hourCycle 'auto' follows the machine, and stays one of the two forms", () => {
   const t = Date.UTC(2026, 8, 3, 6, 0)
   const auto = formatTime(t, { ...utc, hourCycle: 'auto' })

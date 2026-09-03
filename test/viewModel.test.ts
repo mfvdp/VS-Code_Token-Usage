@@ -6,10 +6,10 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
-import { QuotaSample } from '../src/types'
+import { QuotaSample, QuotaWindow } from '../src/types'
 import {
-  SPARK_GAP, WEBVIEW_COMMANDS, applyMessage, buildViewModel, defaultUiState, forecastsFor,
-  parseWebviewMessage, sparkOf,
+  SOURCE_TITLE, SPARK_GAP, WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel,
+  defaultUiState, forecastsFor, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
@@ -41,9 +41,9 @@ test('the view model is built from the aggregator, the history and the quota sta
   assert.equal(vm.quotas[0].problem, null)
   assert.equal(vm.quotas[0].usagePageUrl, 'https://claude.ai/settings/usage')
 
-  // Every totals block carries the eight rows of §3.18: range, previous, today, 7d, 30d,
-  // this week, this month, all time.
-  for (const t of vm.totals) assert.equal(t.rows.length, 8)
+  // Range, previous, today, 7d, 30d, this week, this month, all time — minus the fixed row
+  // the selected 30-day range already is, which would otherwise appear twice.
+  for (const t of vm.totals) assert.equal(t.rows.length, 7)
   assert.equal(vm.kpis.length, 6)
   assert.ok(vm.digest.length >= 3 && vm.digest.length <= 5)
   assert.equal(vm.chart.days.length, 30)
@@ -159,6 +159,39 @@ test('projects and sessions stay empty until attribution is switched on', () => 
     on.attributionInWindow[0].unexplained,
     'server % cannot be split — shown share is of local tokens only',
   )
+})
+
+test('a window attribution block names its provider and its window', () => {
+  const on = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.attribution': 'project' }),
+    agg: buildAgg('project'),
+  }))
+  // Both providers report a "5 h" window: without the source a reader cannot tell the two
+  // blocks apart, and the raw id ("session:300") is not a label to show anyone.
+  for (const a of on.attributionInWindow) {
+    assert.ok(a.source === 'claude' || a.source === 'codex')
+    assert.ok(a.label.length > 0)
+    assert.notEqual(a.label, a.windowId)
+  }
+  const first = on.attributionInWindow[0]
+  assert.equal(first.source, 'claude')
+  assert.equal(first.windowId, 'session:300')
+  assert.equal(first.label, '5 h')
+})
+
+test('the price date is stated once, in the footnote that needs it', () => {
+  const vm = buildViewModel(makeInput())
+  const dated = vm.footnotes.filter((f) => f.includes('Prices as of'))
+  assert.equal(dated.length, 1)
+  assert.ok(dated[0].startsWith('API cost is hypothetical'))
+  assert.ok(dated[0].endsWith(`Prices as of ${vm.pricing.asOf}.`))
+  // Configured rates are a separate statement and stay beside it.
+  const custom = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.customPrices': { 'claude-opus-4-6': { input: 1, output: 2 } } }),
+  }))
+  assert.equal(custom.pricing.custom, true)
+  assert.equal(custom.footnotes.filter((f) => f.includes('Prices as of')).length, 1)
+  assert.equal(custom.footnotes.filter((f) => f.includes('configured rates')).length, 1)
 })
 
 test('the model filter and the provider filter reach every section', () => {
@@ -329,4 +362,146 @@ test('an unlimited window is never given a percentage it does not have', () => {
   assert.equal(w.display, 'unlimited')
   assert.equal(w.forecast?.state, 'none')
   assert.equal(w.sustainable, null)
+})
+
+test('an unlimited window with a stated reset is given no reserve and no budget', () => {
+  // Codex really reports this shape: no limit, a percentage of zero, and a reset in two hours.
+  // The clock alone used to be enough to turn that zero into "99 points in reserve" beside the
+  // "∞", and into a rate that "keeps it to the reset" — a budget for a limit that does not exist.
+  const vm = buildViewModel(makeInput({
+    quotas: [state('codex', {
+      windows: [win({ id: 'codex:10080', label: 'Opus 7 d', unlimited: true, percent: 0, resetsAt: NOW + 2 * 3_600_000, windowMinutes: 10080 })],
+    })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.percentText, '∞')
+  assert.equal(w.verdict.text, 'unlimited')
+  assert.equal(w.verdict.points, null)
+  assert.equal(w.verdict.ratio, null)
+  assert.equal(w.verdict.level, 'ok')
+  assert.equal(w.sustainable, null)
+  assert.equal(w.resetLine, 'resets 2h')
+  // The verdict is the state, so the state is not said a second time beside it.
+  assert.equal(w.stateText, '')
+  assert.equal(w.aria.text, 'Opus 7 d: unlimited')
+  // The forecast list reads the same window through its own path.
+  const f = vm.forecasts.find((x) => x.windowId === 'codex:10080')
+  assert.ok(f)
+  assert.equal(f.sustainable, null)
+  assert.equal(f.forecast.state, 'none')
+})
+
+// ---------------------------------------------------------------------------
+// Window wording: resetLine and stateText
+// ---------------------------------------------------------------------------
+
+/** Two hours ahead — a reset the provider states and that is still to come. */
+const AHEAD = NOW + 2 * 3_600_000
+/** Past, but older than the reading (fetchedAt is NOW − 5 min), so the window is not resetDue. */
+const GONE = NOW - 10 * 60_000
+/** Past and newer than the reading: the percentage belongs to a window that no longer exists. */
+const DUE = NOW - 60_000
+
+/** The one window of a one-window card, built through the real pipeline. */
+function windowOf(over: Partial<QuotaWindow>): WindowVm {
+  const vm = buildViewModel(makeInput({ quotas: [state('claude', { windows: [win(over)] })] }))
+  return vm.quotas[0].windows[0]
+}
+
+test('a stated reset is given its verb exactly once, and "reset due" keeps none', () => {
+  assert.equal(windowOf({ resetsAt: AHEAD }).resetLine, 'resets 2h')
+  // The countdown itself never carries the verb, so the two together are the whole line.
+  assert.equal(windowOf({ resetsAt: AHEAD }).reset, '2h')
+
+  // A reset that has come and gone is a whole sentence already: " · resets reset due" is not.
+  assert.equal(windowOf({ resetsAt: DUE }).display, 'resetDue')
+  assert.equal(windowOf({ resetsAt: DUE }).resetLine, 'reset due')
+  assert.equal(windowOf({ resetsAt: GONE }).display, 'normal')
+  assert.equal(windowOf({ resetsAt: GONE }).resetLine, 'reset due')
+
+  // No stated reset, no countdown, no verb — never an invented one.
+  assert.equal(windowOf({ resetsAt: null, windowMinutes: null }).resetLine, '')
+})
+
+test('every window state reaches the views as words, over all three reset situations', () => {
+  const states: Array<{ over: Partial<QuotaWindow>; display: string; word: string; verdict?: string }> = [
+    { over: { percent: 40 }, display: 'normal', word: '' },
+    // The verdict for a full window already says "exhausted"; saying it twice is not two facts.
+    { over: { percent: 99.7 }, display: 'exhausted', word: '' },
+    { over: { percent: 101 }, display: 'overflow', word: 'over the limit' },
+    // No denominator, so the pace verdict itself is the state; repeating it is not a fact.
+    { over: { unlimited: true }, display: 'unlimited', word: '', verdict: 'unlimited' },
+    { over: { limitReached: true }, display: 'limitReached', word: 'limit reached' },
+  ]
+  const resets: Array<{ name: string; resetsAt: number | null; line: string }> = [
+    { name: 'reset known', resetsAt: AHEAD, line: 'resets 2h' },
+    { name: 'reset passed', resetsAt: GONE, line: 'reset due' },
+    { name: 'no reset', resetsAt: null, line: '' },
+  ]
+  for (const st of states) {
+    for (const r of resets) {
+      const w = windowOf({
+        ...st.over,
+        resetsAt: r.resetsAt,
+        ...(r.resetsAt === null ? { windowMinutes: null } : {}),
+      })
+      const where = `${st.display} · ${r.name}`
+      assert.equal(w.display, st.display, where)
+      assert.equal(w.stateText, st.word, where)
+      assert.equal(w.resetLine, r.line, where)
+      if (st.verdict) assert.equal(w.verdict.text, st.verdict, where)
+    }
+  }
+
+  // The sixth state has no "reset known" or "no reset" variant by construction: resetDue only
+  // exists because a stated reset has passed. It says so through resetLine and stays silent.
+  const due = windowOf({ resetsAt: DUE })
+  assert.equal(due.display, 'resetDue')
+  assert.equal(due.stateText, '')
+  assert.equal(due.resetLine, 'reset due')
+})
+
+test('a window never hands a view an identifier or a doubled word to print', () => {
+  const overs: Partial<QuotaWindow>[] = [
+    { percent: 40 }, { percent: 99.7 }, { percent: 101 }, { unlimited: true },
+    { limitReached: true }, { resetsAt: DUE }, { resetsAt: null, windowMinutes: null },
+  ]
+  for (const over of overs) {
+    const w = windowOf(over)
+    const line = [w.verdict.text, w.stateText, w.resetLine].filter(Boolean).join(' · ')
+    // 'exhausted' and 'unlimited' are words as well as identifiers; these five are only ever
+    // identifiers, so finding one means a raw enum reached the sentence.
+    assert.equal(/\b(resetDue|limitReached|overflow|normal|resetsFirst)\b/.test(line), false, line)
+    assert.equal(line.includes('resets reset due'), false, line)
+    // The verb is written once or not at all — never twice in one line.
+    assert.ok(line.split('resets').length <= 2, line)
+  }
+})
+
+test('the provider titles are exported from the view model for the text views', () => {
+  assert.equal(SOURCE_TITLE.claude, 'Claude Code')
+  assert.equal(SOURCE_TITLE.codex, 'Codex')
+  assert.equal(buildViewModel(makeInput()).quotas[0].title, SOURCE_TITLE.claude)
+})
+
+test('the forecast list drops the "full" row the quota card beside it refuses', () => {
+  // A 100 % reading from before a reset that has passed: the card shows "reset due" on a neutral
+  // bar and prints no forecast for it. The list under the Forecast heading is built from the
+  // same reading through its own path and used to keep the row — one view stating what the
+  // other refuses. Three views, one statement per window.
+  const due = buildViewModel(makeInput({
+    quotas: [state('claude', { windows: [win({ percent: 100, resetsAt: DUE })] })],
+  }))
+  assert.equal(due.quotas[0].windows[0].display, 'resetDue')
+  assert.equal(due.forecasts.some((f) => f.source === 'claude' && f.forecast.state === 'full'), false)
+
+  // The mirror image keeps its row: the same reading with the reset still ahead is the plainest
+  // fact the list has.
+  const ahead = buildViewModel(makeInput({
+    quotas: [state('claude', { windows: [win({ percent: 100, resetsAt: AHEAD })] })],
+  }))
+  const row = ahead.forecasts.find((f) => f.source === 'claude')
+  assert.ok(row)
+  assert.equal(row.forecast.state, 'full')
+  assert.equal(row.forecast.text, 'full until the reset')
 })

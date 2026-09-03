@@ -118,8 +118,8 @@ test('provenance, ratio and percentOf refuse to invent a denominator', () => {
 })
 
 test('deltaBadge: growth from nothing is "new", noise is a dot', () => {
-  assert.deepEqual(deltaBadge(12, null), { glyph: 'new', text: 'new' })
-  assert.deepEqual(deltaBadge(12, 0), { glyph: 'new', text: 'new' })
+  assert.deepEqual(deltaBadge(12, null), { glyph: '', text: 'new' })
+  assert.deepEqual(deltaBadge(12, 0), { glyph: '', text: 'new' })
   assert.deepEqual(deltaBadge(0, 0), { glyph: '•', text: '±0%' })
   assert.deepEqual(deltaBadge(110, 100), { glyph: '▲', text: '+10%' })
   assert.deepEqual(deltaBadge(105, 100), { glyph: '▲', text: '+5.0%' })

@@ -3,21 +3,18 @@
 
 import * as assert from 'node:assert/strict'
 import * as fs from 'node:fs'
-import * as os from 'node:os'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { QuotaHistory, fingerprintFor } from '../src/quotaHistory'
 import { QuotaOrigin, QuotaState, QuotaWindow } from '../src/types'
+import { scratchFile } from './fixtures/helpers'
 
-const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
 const FP = 'abcd1234'
 const BASE = 1_700_000_000_000
 const H = 3_600_000
 
 function tmpFile(name: string): string {
-  const root = fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir()
-  const dir = fs.mkdtempSync(path.join(root, 'qh-'))
-  return path.join(dir, name)
+  return scratchFile('qh', name)
 }
 
 function win(id: string, percent: number, resetsAt: number | null): QuotaWindow {

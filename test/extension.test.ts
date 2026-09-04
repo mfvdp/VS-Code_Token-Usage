@@ -382,7 +382,7 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
     cursors: Record<string, unknown>
   }
   assert.equal(snap.version, STATE_VERSION)
-  assert.equal(snap.version, 5)
+  assert.equal(snap.version, 6)
   // Two Claude models plus one Codex model, all in the same hour.
   assert.equal(snap.buckets.length, 3)
   assert.equal(Object.keys(snap.cursors).length, 2)

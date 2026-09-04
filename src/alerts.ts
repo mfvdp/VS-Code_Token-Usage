@@ -19,11 +19,16 @@
  *  • Everything one provider has to say in one evaluation becomes one message:
  *    several thresholds, several windows on a fast pace, several forecasts. The
  *    first reading after a reset must not queue a chain of popups.
+ *  • Budgets follow the same rules with one difference: their subject is the
+ *    user's own limit for a period, and their number comes from the local
+ *    buckets rather than from a provider reading — so the freshness gate above
+ *    does not apply to them and a different one does (see `budgetDecisions`).
  *
  * The class has no vscode import: the notifier is injected, which is also what
  * makes the whole rule set testable.
  */
 
+import { BudgetPeriod, BudgetRow } from './budget'
 import { AlertConfig } from './config'
 import { MementoLike } from './storage'
 import { relativeShort } from './time'
@@ -38,14 +43,29 @@ export const ACTION_SNOOZE = 'Not today'
 /** The command the caller runs when the user picked the dashboard button. */
 export const DASHBOARD_COMMAND = 'tokenPace.showDashboard'
 
-export type AlertKind = 'threshold' | 'pace' | 'useItLoseIt' | 'forecast'
+export type AlertKind = 'threshold' | 'pace' | 'useItLoseIt' | 'forecast' | 'budget'
+
+/**
+ * Who an alert is about. A budget may span every provider at once, and calling that
+ * bundle "claude" would attribute a number to a provider that did not produce all of it.
+ */
+export type AlertSubject = Source | 'total'
+
+/**
+ * The alert settings this module reads. `budgetPercent` is declared optional so that the
+ * class keeps compiling — and behaving — before wave 2 adds `tokenPace.alerts.budgetPercent`
+ * to `AlertConfig`; absent means zero, and zero means off.
+ */
+export type AlertCfg = AlertConfig & { budgetPercent?: number }
 
 export interface AlertDecision {
   kind: AlertKind
-  source: Source
+  source: AlertSubject
   /** Identities covered — more than one when thresholds were consolidated. */
   identities: string[]
   windowIds: string[]
+  /** Budget keys (`scope:period:unit`) — empty for every other kind. */
+  budgetKeys?: string[]
   level: 'info' | 'warning'
   message: string
   /** Set when the user picked "Open Dashboard"; the caller executes it. */
@@ -62,6 +82,8 @@ export interface AlertEntry {
   useItWarned: boolean
   forecastWarned: boolean
   paceLevel?: PaceLevel
+  /** Highest budget percentage already announced for this period. */
+  budgetLevel?: number
   /** Last touch (ms) — old cycles are pruned, the memento is not an archive. */
   at: number
 }
@@ -90,8 +112,10 @@ export function nextLocalMidnight(now: number): number {
   return d.getTime() + 24 * 60 * 60 * 1000
 }
 
-function providerName(source: Source): string {
-  return source === 'claude' ? 'Claude' : 'Codex'
+function providerName(source: AlertSubject): string {
+  if (source === 'claude') return 'Claude'
+  if (source === 'codex') return 'Codex'
+  return 'All providers'
 }
 
 function pct(value: number): string {
@@ -111,6 +135,9 @@ function entryOf(state: AlertsState, identity: string): AlertEntry {
       useItWarned: found.useItWarned === true,
       forecastWarned: found.forecastWarned === true,
       paceLevel: found.paceLevel,
+      budgetLevel: typeof found.budgetLevel === 'number' && Number.isFinite(found.budgetLevel)
+        ? found.budgetLevel
+        : undefined,
       at: typeof found.at === 'number' ? found.at : 0,
     }
   }
@@ -155,6 +182,20 @@ interface Grouped {
   windowIds: string[]
 }
 
+/** What one period has to say about its budgets in this evaluation. */
+interface BudgetGroup {
+  parts: string[]
+  identities: string[]
+  keys: string[]
+  scopes: Set<BudgetRow['scope']>
+}
+
+const PERIOD_TITLE: Record<BudgetPeriod, string> = {
+  day: 'today',
+  week: 'this week',
+  month: 'this month',
+}
+
 /** Adds one window's sentence fragment to its provider's group. */
 function collect(bySource: Map<Source, Grouped>, c: Candidate, part: string): void {
   const group = bySource.get(c.source) ?? { parts: [], identities: [], windowIds: [] }
@@ -169,7 +210,7 @@ export class Alerts {
 
   constructor(
     private memento: MementoLike,
-    private cfg: AlertConfig,
+    private cfg: AlertCfg,
     private log: (msg: string) => void,
     private notify: Notify = defaultNotify,
     opts: { staleAfterMs?: number } = {},
@@ -177,7 +218,7 @@ export class Alerts {
     this.staleAfterMs = opts.staleAfterMs ?? DEFAULT_STALE_MS
   }
 
-  setConfig(cfg: AlertConfig): void {
+  setConfig(cfg: AlertCfg): void {
     this.cfg = cfg
   }
 
@@ -190,6 +231,13 @@ export class Alerts {
   enabled(): boolean {
     const c = this.cfg
     return c.thresholds.length > 0 || c.onPaceFast || c.useItLoseIt || c.forecastLeadMinutes > 0
+      || this.budgetPercent() > 0
+  }
+
+  /** The configured budget level, or 0 when the setting is absent, unusable or off. */
+  private budgetPercent(): number {
+    const raw = this.cfg.budgetPercent
+    return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : 0
   }
 
   snoozedUntil(): number | null {
@@ -227,19 +275,25 @@ export class Alerts {
    *
    * Returns what it decided, so the caller can execute the button command and
    * the log (and the tests) can see the reasoning without reading popups.
+   *
+   * `budgets` is optional so the quota-only caller keeps compiling. It must be
+   * left empty while a scan is still running: a half-ingested period would put
+   * a share on the screen that is only going to rise, and a budget alert from
+   * it would be an artefact of the read order.
    */
   async evaluate(
     states: QuotaState[],
     verdicts: Map<string, PaceVerdict>,
     forecasts: Map<string, Forecast>,
     now: number,
+    budgets: BudgetRow[] = [],
   ): Promise<AlertDecision[]> {
     if (!this.enabled()) return []
     const state = this.load()
     if (state.snoozedUntil !== undefined && state.snoozedUntil > now) return []
 
     const candidates = this.candidatesOf(states, verdicts, forecasts, now)
-    if (candidates.length === 0) return []
+    if (candidates.length === 0 && budgets.length === 0) return []
 
     const pending: AlertDecision[] = []
     const announced = new Set<string>()
@@ -248,6 +302,7 @@ export class Alerts {
     this.paceDecisions(candidates, state, now, pending, announced)
     this.forecastDecisions(candidates, state, now, pending, announced)
     this.useItDecisions(candidates, state, now, pending, announced)
+    this.budgetDecisions(budgets, state, now, pending, announced)
 
     if (pending.length === 0) return []
 
@@ -444,6 +499,69 @@ export class Alerts {
         windowIds: g.windowIds,
         level: 'warning',
         message: `${providerName(source)} — on this pace: ${g.parts.join(' · ')}`,
+      })
+    }
+  }
+
+  /**
+   * Budgets: the user's own limit for a period, judged against the local buckets.
+   *
+   * The staleness rule of `candidatesOf` deliberately does not apply here — there is no
+   * provider reading to be stale, and gating a budget on a quota response would tie the
+   * user's own number to a network call they may have declined. The gate is instead that
+   * the period has local data at all (`row.covered`), plus the caller's promise not to
+   * pass rows while a scan is in flight.
+   *
+   * Only an escalation speaks: the recorded level is the configured percentage that was
+   * breached, so raising the setting mid-period can speak again while the same setting
+   * never speaks twice. A new period is a new identity, so "once per period" needs no
+   * rule of its own. Everything one period has to say becomes one message.
+   */
+  private budgetDecisions(
+    budgets: BudgetRow[],
+    state: AlertsState,
+    now: number,
+    out: AlertDecision[],
+    announced: Set<string>,
+  ): void {
+    const level = this.budgetPercent()
+    if (!(level > 0) || budgets.length === 0) return
+    const byPeriod = new Map<BudgetPeriod, BudgetGroup>()
+
+    for (const r of budgets) {
+      if (!r.covered || r.share === null || !Number.isFinite(r.share)) continue
+      if (r.share < level) continue
+      const entry = entryOf(state, r.identity)
+      if (entry.budgetLevel !== undefined && level <= entry.budgetLevel) continue
+      entry.budgetLevel = level
+      entry.at = now
+      state.entries[r.identity] = entry
+      announced.add(r.identity)
+
+      const group = byPeriod.get(r.period)
+        ?? { parts: [], identities: [], keys: [], scopes: new Set<BudgetRow['scope']>() }
+      // The lower bound is stated, not rounded away: unpriced models make a money
+      // budget's used figure — and therefore its share — a floor, never the whole story.
+      group.parts.push(
+        `${r.label} — ${r.usedText} of ${r.limitText} (${r.shareText}${r.partial ? ', lower bound' : ''})`,
+      )
+      group.identities.push(r.identity)
+      group.keys.push(r.key)
+      group.scopes.add(r.scope)
+      byPeriod.set(r.period, group)
+    }
+
+    for (const [period, g] of byPeriod) {
+      // A message that mixes scopes belongs to no single provider.
+      const subject: AlertSubject = g.scopes.size === 1 ? [...g.scopes][0] : 'total'
+      out.push({
+        kind: 'budget',
+        source: subject,
+        identities: g.identities,
+        windowIds: [],
+        budgetKeys: g.keys,
+        level: 'warning',
+        message: `Budget ${PERIOD_TITLE[period]} — past ${pct(level)}: ${g.parts.join(' · ')}`,
       })
     }
   }

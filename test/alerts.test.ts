@@ -8,8 +8,11 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { ACTION_DASHBOARD, ACTION_SNOOZE, Alerts, DASHBOARD_COMMAND, nextLocalMidnight, usedThresholds } from '../src/alerts'
-import { AlertConfig } from '../src/config'
+import {
+  ACTION_DASHBOARD, ACTION_SNOOZE, AlertCfg, Alerts, DASHBOARD_COMMAND, nextLocalMidnight,
+  usedThresholds,
+} from '../src/alerts'
+import { BudgetRow, BudgetSpec, identityOfBudget } from '../src/budget'
 import { MementoLike } from '../src/storage'
 import { Forecast, PaceLevel, PaceVerdict, QuotaState, QuotaWindow } from '../src/types'
 
@@ -33,7 +36,7 @@ class FakeMemento implements MementoLike {
   }
 }
 
-function cfg(over: Partial<AlertConfig> = {}): AlertConfig {
+function cfg(over: Partial<AlertCfg> = {}): AlertCfg {
   return {
     thresholds: [],
     basis: 'used',
@@ -104,7 +107,7 @@ interface Harness {
   messages: string[]
 }
 
-function harness(c: AlertConfig, answer: string | undefined = undefined): Harness {
+function harness(c: AlertCfg, answer: string | undefined = undefined): Harness {
   const memento = new FakeMemento()
   const order: string[] = []
   const messages: string[] = []
@@ -422,4 +425,177 @@ test('a window that already spoke in one kind does not speak again in another', 
   assert.equal(out.length, 1)
   assert.equal(out[0].kind, 'threshold')
   assert.equal(h.messages.length, 1)
+})
+
+// ---------------------------------------------------------------------------
+// Budgets
+// ---------------------------------------------------------------------------
+
+const MONTH_START = '2026-09-01'
+
+/**
+ * A budget row as the model half hands it over. Written by hand rather than computed, so
+ * the alert rules are tested against the shape and not against the analytics.
+ */
+function budget(over: Partial<BudgetRow> = {}): BudgetRow {
+  const spec: BudgetSpec = {
+    scope: over.scope ?? 'total',
+    period: over.period ?? 'month',
+    unit: over.unit ?? 'usd',
+    limit: over.limit ?? 100,
+  }
+  const from = over.from ?? MONTH_START
+  return {
+    key: `${spec.scope}:${spec.period}:${spec.unit}`,
+    identity: identityOfBudget(spec, from),
+    label: 'All providers · this month',
+    scope: spec.scope,
+    period: spec.period,
+    unit: spec.unit,
+    from,
+    to: '2026-09-20',
+    last: '2026-09-30',
+    limit: spec.limit,
+    limitText: '$100',
+    used: 85,
+    usedText: '~$85',
+    share: 85,
+    shareText: '85 %',
+    over: false,
+    partial: false,
+    covered: true,
+    projected: null,
+    projectedText: null,
+    projectionBasis: null,
+    projectedOver: false,
+    text: 'All providers · this month: ~$85 of $100 · 85 %',
+    ...over,
+  }
+}
+
+test('a budget percentage alone switches the module on', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  const out = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])
+  assert.equal(out.length, 1)
+  assert.equal(out[0].kind, 'budget')
+  assert.equal(out[0].source, 'total')
+  assert.deepEqual(out[0].budgetKeys, ['total:month:usd'])
+  assert.match(out[0].message, /Budget this month — past 80 %/)
+  assert.match(out[0].message, /~\$85 of \$100 \(85 %\)/)
+})
+
+test('with no budget setting a budget row says nothing', async () => {
+  const h = harness(cfg())
+  assert.equal((await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])).length, 0)
+  const zero = harness(cfg({ budgetPercent: 0 }))
+  assert.equal((await zero.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])).length, 0)
+})
+
+test('a budget below the configured percentage stays quiet', async () => {
+  const h = harness(cfg({ budgetPercent: 90 }))
+  assert.equal((await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])).length, 0)
+})
+
+test('a budget speaks once per period, however often it is evaluated', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  assert.equal((await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])).length, 1)
+  const again = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW + HOUR, [budget({ share: 99, shareText: '99 %' })])
+  assert.equal(again.length, 0, 'the same period must not speak twice')
+  assert.equal(h.messages.length, 1)
+})
+
+test('a new period is a new subject', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])
+  const next = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW + 24 * HOUR, [budget({ from: '2026-10-01' })])
+  assert.equal(next.length, 1, 'a new period start is a new identity')
+})
+
+test('raising the budget percentage mid-period can speak again, lowering it cannot', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])
+  h.alerts.setConfig(cfg({ budgetPercent: 50 }))
+  const lower = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW + HOUR, [budget()])
+  assert.equal(lower.length, 0, 'only an escalation speaks')
+  h.alerts.setConfig(cfg({ budgetPercent: 84 }))
+  const higher = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW + 2 * HOUR, [budget()])
+  assert.equal(higher.length, 1)
+  assert.match(higher[0].message, /past 84 %/)
+})
+
+test('a period with no local data never speaks, however high the number looks', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  // The gate is the *local* buckets, not a provider reading: there is nothing to be stale.
+  const uncovered = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [
+    budget({ covered: false, share: 300, shareText: '300 %' }),
+    budget({ scope: 'claude', share: null, shareText: '–' }),
+  ])
+  assert.equal(uncovered.length, 0)
+})
+
+test('every budget of one period becomes one message', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  const out = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [
+    budget({ scope: 'claude', label: 'Claude Code · this month' }),
+    budget({ scope: 'codex', unit: 'tokens', label: 'Codex · this month', limitText: '5M', usedText: '4.6M', share: 92, shareText: '92 %' }),
+  ])
+  assert.equal(out.length, 1)
+  assert.equal(out[0].identities.length, 2)
+  assert.equal(out[0].source, 'total', 'a message that mixes scopes belongs to no one provider')
+  assert.match(out[0].message, /Claude Code · this month/)
+  assert.match(out[0].message, /Codex · this month/)
+  assert.equal(h.messages.length, 1)
+})
+
+test('two periods are two subjects and two messages', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  const out = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [
+    budget({ period: 'month' }),
+    budget({ period: 'week', from: '2026-09-14', scope: 'claude' }),
+  ])
+  assert.equal(out.length, 2)
+  assert.deepEqual(out.map((d) => d.source), ['total', 'claude'])
+  assert.match(out[0].message, /Budget this month/)
+  assert.match(out[1].message, /Budget this week/)
+})
+
+test('a money budget with unpriced models is announced as a lower bound', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  const out = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget({ partial: true })])
+  assert.match(out[0].message, /85 %, lower bound/)
+})
+
+test('a budget alert is persisted before it is shown', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }))
+  await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])
+  assert.deepEqual(h.order, ['update', 'notify'])
+})
+
+test('a snooze silences budgets too', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }), ACTION_SNOOZE)
+  const first = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])
+  assert.equal(first[0].snoozedUntil, nextLocalMidnight(NOW))
+  // A minute later, still the same local day: a new period does not lift a snooze.
+  const later = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW + 60_000, [budget({ from: '2026-10-01' })])
+  assert.equal(later.length, 0)
+})
+
+test('the dashboard button works for a budget like for a quota', async () => {
+  const h = harness(cfg({ budgetPercent: 80 }), ACTION_DASHBOARD)
+  const out = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])
+  assert.equal(out[0].command, DASHBOARD_COMMAND)
+})
+
+test('the quota-only caller keeps working unchanged', async () => {
+  const h = harness(cfg({ thresholds: [80], budgetPercent: 80 }))
+  // Four arguments, exactly as `extension.ts` calls it today.
+  const out = await h.alerts.evaluate([quota([win({ percent: 82 })])], noVerdicts, noForecasts, NOW)
+  assert.equal(out.length, 1)
+  assert.equal(out[0].kind, 'threshold')
+})
+
+test('a quota threshold and a budget in one evaluation stay two messages', async () => {
+  const h = harness(cfg({ thresholds: [80], budgetPercent: 80 }))
+  const out = await h.alerts.evaluate([quota([win({ percent: 82 })])], noVerdicts, noForecasts, NOW, [budget()])
+  assert.deepEqual(out.map((d) => d.kind), ['threshold', 'budget'])
 })

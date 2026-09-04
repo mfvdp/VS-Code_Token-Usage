@@ -8,7 +8,7 @@ import { usd } from '../src/render'
 import {
   MIN_GRID_SAMPLES, MIN_P90_SAMPLES, StatsCtx, attributionInWindow, cacheEconomy, cacheHitParts,
   cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil, planFactors,
-  projectRows, sessionRows, totalRow, totalsFor, windowUsage,
+  projectPeriod, projectRows, sessionRows, totalRow, totalsFor, windowUsage,
 } from '../src/stats'
 import { DayRange, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
@@ -327,6 +327,53 @@ test('the month projection stays silent below five active days and speaks above 
   const loud = calendar(ctxOf(agg, { now: Date.UTC(2026, 8, 20, 12, 0, 0) })).thisMonth
   assert.ok(loud.projection?.startsWith('~$'))
   assert.match(String(loud.projectionBasis), /^so far \$.* · Avg \$.*\/day · \d+ days left$/)
+})
+
+/** Five active days in a month that still has days left to project over. */
+function fiveActiveDays(): Aggregator {
+  const buckets: Bucket[] = []
+  for (let d = 1; d <= 5; d++) {
+    buckets.push({
+      ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, `2026-09-0${d}`),
+      input: 200_000, output: 10_000, requests: 4, outputFinal: 4,
+    })
+  }
+  return Aggregator.fromSnapshot({
+    version: 5, buckets, cursors: {}, pending: {}, sessions: {}, attribution: 'none',
+    rollup: { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }, firstIngest: Date.UTC(2026, 8, 1),
+  }, 'none')
+}
+
+test('the month card and any other period are projected by one implementation', () => {
+  const ctx = ctxOf(fiveActiveDays(), { now: Date.UTC(2026, 8, 20, 12, 0, 0) })
+  const card = calendar(ctx).thisMonth
+  const p = projectPeriod(ctx, '2026-09-01', '2026-09-20', '2026-09-30')
+  assert.equal(p.projection, card.projection)
+  assert.equal(p.projectionBasis, card.projectionBasis)
+  // The card prints the text; a budget row needs the same figure as a number.
+  assert.equal(p.remaining, 10)
+  assert.ok(p.total !== null && p.perDay !== null)
+  assert.ok(Math.abs((p.total ?? 0) - ((p.perDay ?? 0) * 30)) < 0.01)
+})
+
+test('a token projection does not wait for the cost switch, a cost projection does', () => {
+  const ctx = ctxOf(fiveActiveDays(), { now: Date.UTC(2026, 8, 20, 12, 0, 0), showCost: false })
+  assert.deepEqual(projectPeriod(ctx, '2026-09-01', '2026-09-20', '2026-09-30'),
+    { projection: null, projectionBasis: null, total: null, perDay: null, remaining: 0 })
+  const usage = projectPeriod(ctx, '2026-09-01', '2026-09-20', '2026-09-30', 'usage')
+  // Five days of 210K billable tokens, spread over twenty elapsed days and thirty days total.
+  assert.equal(usage.total, 1_575_000)
+  assert.equal(usage.projection, '~1.6M')
+  assert.equal(usage.projectionBasis, 'so far 1.1M · Avg 52.5K/day · 10 days left')
+})
+
+test('a period projection stays silent below five active days and on the last day', () => {
+  const quiet = projectPeriod(ctxOf(buildAgg()), '2026-09-01', TODAY, '2026-09-30')
+  assert.equal(quiet.projection, null)
+  assert.equal(quiet.total, null)
+  // Nothing left to project over is not a projection of zero.
+  const ctx = ctxOf(fiveActiveDays(), { now: Date.UTC(2026, 8, 30, 12, 0, 0) })
+  assert.equal(projectPeriod(ctx, '2026-09-01', '2026-09-30', '2026-09-30').projection, null)
 })
 
 test('the plan factor appears only when a plan price was stated', () => {

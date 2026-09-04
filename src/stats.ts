@@ -22,7 +22,7 @@ import {
   DayRange, TimeConfig, addDays, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
   localHourOfDay, weekdayOf,
 } from './time'
-import { Bucket, SessionRec, Source, Tier } from './types'
+import { Attribution, Bucket, SessionRec, Source, Tier } from './types'
 
 // ---------------------------------------------------------------------------
 // Shapes the view model hands on unchanged (it re-exports these types).
@@ -195,6 +195,36 @@ export interface HoursData {
   note: string | null
 }
 
+/** One line of a Records table. `cost` is '–' wherever a per-row cost cannot be derived. */
+export interface RecordEntry {
+  label: string
+  /** The second, quieter half of the label: the provider, the project, the session count. */
+  detail: string | null
+  usage: string
+  share: string
+  cost: string
+}
+
+/**
+ * The extremes of a range: its busiest day, its longest run of days with usage, and the
+ * three top-N tables. Every figure here is the range's own — nothing is compared against a
+ * limit, because none of these numbers has one.
+ */
+export interface RecordsData {
+  peakDay: { day: string; usage: string; cost: string } | null
+  /** Longest run of consecutive days with usage inside this range and inside coverage. */
+  streak: { days: number; from: string; to: string } | null
+  topModels: RecordEntry[]
+  topProjects: RecordEntry[]
+  topSessions: RecordEntry[]
+  /** False when attribution is off — the two lower tables are then empty by consent, not by chance. */
+  attributionOn: boolean
+  /** Rolled-up months that carry no day any more: named, never silently dropped. */
+  note: string | null
+  /** Why a project or session row can carry tokens from outside the range. */
+  sessionNote: string | null
+}
+
 export interface ChartData {
   days: string[]
   labels: string[]
@@ -214,6 +244,26 @@ export interface WindowUsageRow {
   cost: string
   requests: string
   complete: boolean
+}
+
+/**
+ * Local tokens over the last few hours — everything we can say when a provider tells us
+ * nothing. Deliberately without a percentage, a limit, a pace or a forecast: there is no
+ * denominator here, and inventing one would turn an estimate into a fake quota window.
+ */
+export interface LocalBlockRow {
+  source: Source
+  /** Length of the span in hours, so the sentence and the number cannot drift apart. */
+  hours: number
+  usage: string
+  cost: string
+  requests: string
+  /** Clock time of the first hour bucket with usage in the span, or null when there is none. */
+  firstAt: string | null
+  /** False when the span reaches past the kept hour buckets — every figure then carries '≈'. */
+  complete: boolean
+  /** The one sentence all three views print, so they cannot phrase it three ways. */
+  text: string
 }
 
 export interface AttributionRows {
@@ -246,6 +296,12 @@ export interface StatsCtx {
   /** Model filter; empty means every model. */
   models: string[]
   showCost: boolean
+  /**
+   * The attribution setting, when the caller states it. Left out it is inferred from the
+   * session table, which the aggregator only fills while attribution is on — so a caller
+   * that forgets the field loses no rows it was entitled to.
+   */
+  attribution?: Attribution
 }
 
 const MS_HOUR = 3_600_000
@@ -261,6 +317,8 @@ export const MIN_GRID_SAMPLES = 3
 export const MIN_P90_SAMPLES = 20
 /** Streaks and variability need at least a week of active days to mean anything. */
 export const MIN_VARIABILITY_DAYS = 7
+/** The rolling local block is five hours long, the shortest window every provider has. */
+export const LOCAL_BLOCK_HOURS = 5
 
 export const SOURCE_TITLE: Record<Source, string> = { claude: 'Claude Code', codex: 'Codex' }
 
@@ -754,32 +812,73 @@ export function calendar(ctx: StatsCtx): CalendarRows {
   }
 }
 
+/** Which figure a projection extrapolates. Tokens are counted, money is hypothetical. */
+export type ProjectionMetric = 'cost' | 'usage'
+
+export interface Projection {
+  /** The projected total, already formatted and marked as an estimate — or null. */
+  projection: string | null
+  /** How it was derived, so the number can be checked rather than believed. */
+  projectionBasis: string | null
+  /** The same total as a number, for a caller that has to compare it against a limit. */
+  total: number | null
+  /** Average per elapsed day, the slope the projection runs on. */
+  perDay: number | null
+  /** Days after `today` up to and including `last`. */
+  remaining: number
+}
+
+const NO_PROJECTION: Projection = {
+  projection: null, projectionBasis: null, total: null, perDay: null, remaining: 0,
+}
+
 /**
- * End-of-month projection with its derivation spelled out.
+ * End-of-period projection with its derivation spelled out.
  *
- * The average is per elapsed day, not per active day: a month is projected over its
+ * The average is per elapsed day, not per active day: a period is projected over its
  * calendar, and dividing by active days only would project a rate nobody keeps up. Below
  * five active days the projection stays silent rather than extrapolating from a weekend.
+ *
+ * One implementation for the month card and for a budget row — two projections of the same
+ * usage that disagreed by a rule would be two different answers to one question. The cost
+ * variant follows `showCost`, because a projected bill is still a bill; a token projection
+ * does not, because tokens are shown either way.
  */
+export function projectPeriod(
+  ctx: StatsCtx,
+  from: string,
+  today: string,
+  last: string,
+  metric: ProjectionMetric = 'cost',
+): Projection {
+  if (metric === 'cost' && !ctx.showCost) return NO_PROJECTION
+  const f = factsFor(ctx, from, today)
+  if (f.activeDays < MIN_PROJECTION_DAYS) return NO_PROJECTION
+  const elapsed = dayCount(from, today)
+  if (elapsed <= 0) return NO_PROJECTION
+  const remaining = dayCount(today, last) - 1
+  if (remaining <= 0) return NO_PROJECTION
+  const soFar = metric === 'cost' ? f.cost : f.usage
+  const perDay = soFar / elapsed
+  const total = soFar + perDay * remaining
+  const text = (n: number): string => (metric === 'cost' ? usd(n) : compact(n))
+  return {
+    projection: metric === 'cost' ? costText(total) : estimate(compact(total)),
+    projectionBasis: `so far ${text(soFar)} · Avg ${text(perDay)}/day · ${remaining} days left`,
+    total,
+    perDay,
+    remaining,
+  }
+}
+
+/** The month card's projection: the general rule, with the month's last day filled in. */
 function projectMonth(
   ctx: StatsCtx,
   from: string,
   today: string,
 ): { projection: string | null; projectionBasis: string | null } {
-  if (!ctx.showCost) return { projection: null, projectionBasis: null }
-  const f = factsFor(ctx, from, today)
-  if (f.activeDays < MIN_PROJECTION_DAYS) return { projection: null, projectionBasis: null }
-  const elapsed = dayCount(from, today)
-  if (elapsed <= 0) return { projection: null, projectionBasis: null }
-  const last = monthLast(from.slice(0, 7))
-  const remaining = dayCount(today, last) - 1
-  if (remaining <= 0) return { projection: null, projectionBasis: null }
-  const perDay = f.cost / elapsed
-  const total = f.cost + perDay * remaining
-  return {
-    projection: costText(total),
-    projectionBasis: `so far ${usd(f.cost)} · Avg ${usd(perDay)}/day · ${remaining} days left`,
-  }
+  const p = projectPeriod(ctx, from, today, monthLast(from.slice(0, 7)))
+  return { projection: p.projection, projectionBasis: p.projectionBasis }
 }
 
 /**
@@ -1172,6 +1271,195 @@ export function heatmap(
   }
 }
 
+/**
+ * Whether the per-session tables may be filled.
+ *
+ * The setting decides when the caller states it. Without it the session table answers for
+ * itself: the aggregator only ever writes session records while attribution is on, so an
+ * empty table and a switched-off setting are the same world.
+ */
+function attributionOn(ctx: StatsCtx): boolean {
+  if (ctx.attribution !== undefined) return ctx.attribution !== 'none'
+  return ctx.agg.sessions().length > 0
+}
+
+/** Sorts by usage, then by label — a stable order, so two equal rows do not swap on redraw. */
+function byUsageThenLabel(a: { usage: number; label: string }, b: { usage: number; label: string }): number {
+  return b.usage - a.usage || a.label.localeCompare(b.label)
+}
+
+function topOf(
+  list: { label: string; detail: string | null; usage: number; cost: string }[],
+  total: number,
+  cap: number,
+): RecordEntry[] {
+  return [...list]
+    .sort(byUsageThenLabel)
+    .slice(0, cap)
+    .map((e) => ({
+      label: e.label,
+      detail: e.detail,
+      usage: tokens(e.usage),
+      share: percentOf(e.usage, total),
+      cost: e.cost,
+    }))
+}
+
+/**
+ * The records of a range: its busiest day, its longest run, and who did the work.
+ *
+ * Month buckets are left out of every figure here. A rolled-up month has no day left in it,
+ * and placing it on the first of the month would hand the records a peak day nobody worked
+ * and a streak nobody kept — the same reason the hour profile leaves rolled-up buckets out.
+ * How many were dropped is stated rather than hidden.
+ *
+ * The streak is the longest run of *consecutive days with usage inside this range*, and a
+ * day before coverage began takes no part at all rather than counting as a zero: not having
+ * watched a day is not the same as having watched an idle one. That is the heatmap's rule,
+ * and it shapes the two day records only — the top tables count every bucket in the range,
+ * because a bucket is evidence of usage wherever it lies.
+ */
+export function records(
+  ctx: StatsCtx,
+  range: DayRange,
+  topN: number,
+  firstDay?: string | null,
+): RecordsData {
+  const today = dayOf(ctx.now, ctx.tcfg)
+  // Stated coverage wins; otherwise the first ingest is the only start we know. Null means
+  // "no coverage known", and then every day up to today counts as watched — claiming a day
+  // was unwatched without a date for it would be an invention of its own.
+  const coverage = firstDay !== undefined
+    ? firstDay
+    : ctx.agg.firstIngest !== null ? dayOf(ctx.agg.firstIngest, ctx.tcfg) : null
+
+  const usageByDay = new Map<string, number>()
+  const costByDay = new Map<string, number>()
+  const models = new Map<string, { label: string; detail: string | null; usage: number; cost: number; unpriced: boolean }>()
+  let totalUsage = 0
+  let excluded = 0
+  for (const b of bucketsIn(ctx, range.from, range.to)) {
+    if (b.res === 'm') {
+      excluded++
+      continue
+    }
+    const day = dayOfBucket(b, ctx.tcfg)
+    const use = billable(b)
+    usageByDay.set(day, (usageByDay.get(day) ?? 0) + use)
+    totalUsage += use
+    const c = costOfBucketOn(b, ctx)
+    const priced = c && !c.unpriced ? c.usd : 0
+    if (priced > 0) costByDay.set(day, (costByDay.get(day) ?? 0) + priced)
+    const key = `${b.source}|${b.model}`
+    let g = models.get(key)
+    if (!g) {
+      g = { label: b.model, detail: SOURCE_TITLE[b.source], usage: 0, cost: 0, unpriced: false }
+      models.set(key, g)
+    }
+    g.usage += use
+    if (c && !c.unpriced) g.cost += c.usd
+    else g.unpriced = true
+  }
+
+  let peakDay: RecordsData['peakDay'] = null
+  let peakValue = 0
+  let streak: RecordsData['streak'] = null
+  let run = 0
+  let runFrom = ''
+  for (const day of daysBetween(range.from, range.to)) {
+    // Same coverage rule as the heatmap: an unwatched day is neither a zero nor a break.
+    if (day > today || (coverage !== null && day < coverage)) continue
+    const value = usageByDay.get(day) ?? 0
+    if (value <= 0) {
+      run = 0
+      continue
+    }
+    if (run === 0) runFrom = day
+    run++
+    if (streak === null || run > streak.days) streak = { days: run, from: runFrom, to: day }
+    if (value > peakValue) {
+      peakValue = value
+      const c = costByDay.get(day) ?? 0
+      peakDay = {
+        day,
+        usage: tokens(value),
+        cost: ctx.showCost && c > 0 ? costText(c) : '–',
+      }
+    }
+  }
+
+  // An unusable topN caps nothing rather than emptying the tables.
+  const cap = (all: number): number => (Number.isFinite(topN) && topN > 0 ? Math.floor(topN) : all)
+  const topModels = topOf(
+    [...models.values()].map((g) => ({
+      label: g.label,
+      detail: g.detail,
+      usage: g.usage,
+      // A group with an unpriced bucket in it would print a total that is missing part of
+      // itself; a lower bound is not a cost, so it stays a dash.
+      cost: ctx.showCost && !g.unpriced ? costText(g.cost) : '–',
+    })),
+    totalUsage,
+    cap(models.size),
+  )
+
+  const on = attributionOn(ctx)
+  const projects = new Map<string, { usage: number; sessions: number }>()
+  const sessions: { label: string; detail: string | null; usage: number; cost: string }[] = []
+  let sessionTotal = 0
+  if (on) {
+    const filter = ctx.models.length > 0 ? new Set(ctx.models) : null
+    for (const rec of ctx.agg.sessions()) {
+      if (!ctx.sources.includes(rec.source)) continue
+      if (filter && !rec.models.some((m) => filter.has(m))) continue
+      // A session is in the range when it was running in it. Its counters are lifetime
+      // counters — the only per-hour slices it keeps are pruned to about a week — so the
+      // row is stated as a lifetime total rather than sliced into a number nobody measured.
+      if (dayOf(rec.lastTs, ctx.tcfg) < range.from || dayOf(rec.firstTs, ctx.tcfg) > range.to) continue
+      const use = billable(emptySession(rec))
+      if (use <= 0) continue
+      const g = projects.get(rec.project) ?? { usage: 0, sessions: 0 }
+      g.usage += use
+      g.sessions++
+      projects.set(rec.project, g)
+      // No per-day model split on a session record, so a per-session cost would be a guess.
+      sessions.push({ label: rec.sessionId, detail: rec.project, usage: use, cost: '–' })
+      sessionTotal += use
+    }
+  }
+
+  const note = excluded === 0
+    ? null
+    : excluded === 1
+      ? '1 rolled-up month bucket in this range has no day left and is not in these records'
+      : `${excluded} rolled-up month buckets in this range have no day left `
+        + 'and are not in these records'
+  return {
+    peakDay,
+    streak,
+    topModels,
+    // The shares below are shares of the listed sessions, never of the bucket total: session
+    // counters run over a lifetime and bucket sums over the range, and dividing one by the
+    // other would invent a percentage of two different things.
+    topProjects: topOf(
+      [...projects.entries()].map(([label, g]) => ({
+        label,
+        detail: `${g.sessions} session${g.sessions === 1 ? '' : 's'}`,
+        usage: g.usage,
+        cost: '–',
+      })),
+      sessionTotal,
+      cap(projects.size),
+    ),
+    topSessions: topOf(sessions, sessionTotal, cap(sessions.length)),
+    attributionOn: on,
+    note,
+    sessionNote: sessions.length > 0
+      ? 'projects and sessions count each session’s whole lifetime, which can reach outside this range'
+      : null,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Hour profile and weekday grid
 // ---------------------------------------------------------------------------
@@ -1256,6 +1544,37 @@ export function hours(ctx: StatsCtx, range: DayRange, zone: 'local' | 'utc'): Ho
 // Window usage and attribution
 // ---------------------------------------------------------------------------
 
+/**
+ * Cost of the hour buckets inside a half-open hour range.
+ *
+ * `sumHours` merges across models, so the merged bucket has no model of its own to price;
+ * the cost is summed from the individual buckets over exactly the same hours instead.
+ */
+function costOfHourSpan(ctx: StatsCtx, source: Source, fromHour: number, toHour: number): number {
+  let cost = 0
+  for (const one of ctx.agg.all()) {
+    if (one.res !== 'h' || one.hour === null || one.source !== source) continue
+    if (one.hour < fromHour || one.hour >= toHour) continue
+    if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue
+    const c = costOfBucketOn(one, ctx)
+    if (c && !c.unpriced) cost += c.usd
+  }
+  return cost
+}
+
+/** The earliest hour bucket with billable tokens in a half-open hour range, or null. */
+function firstUsedHour(ctx: StatsCtx, source: Source, fromHour: number, toHour: number): number | null {
+  let first: number | null = null
+  for (const one of ctx.agg.all()) {
+    if (one.res !== 'h' || one.hour === null || one.source !== source) continue
+    if (one.hour < fromHour || one.hour >= toHour) continue
+    if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue
+    if (billable(one) <= 0) continue
+    if (first === null || one.hour < first) first = one.hour
+  }
+  return first
+}
+
 /** Local usage since the window opened — hour buckets only, so the answer can be incomplete. */
 export function windowUsage(
   ctx: StatsCtx,
@@ -1268,18 +1587,7 @@ export function windowUsage(
   const toMs = Math.min(ctx.now, w.resetsAt)
   const { bucket, complete } = ctx.agg.sumHours(fromMs, toMs, filterFor(ctx, source))
   const b = { ...bucket, source }
-  // sumHours merges across models, so the merged bucket has no model of its own to price.
-  // The cost is summed from the individual buckets over exactly the same hour range.
-  const fromHour = Math.floor(fromMs / MS_HOUR)
-  const toHour = Math.ceil(toMs / MS_HOUR)
-  let cost = 0
-  for (const one of ctx.agg.all()) {
-    if (one.res !== 'h' || one.hour === null || one.source !== source) continue
-    if (one.hour < fromHour || one.hour >= toHour) continue
-    if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue
-    const c = costOfBucketOn(one, ctx)
-    if (c && !c.unpriced) cost += c.usd
-  }
+  const cost = costOfHourSpan(ctx, source, Math.floor(fromMs / MS_HOUR), Math.ceil(toMs / MS_HOUR))
   const mark = (s: string): string => (complete || s === '–' ? s : `≈${s}`)
   return {
     source,
@@ -1289,6 +1597,46 @@ export function windowUsage(
     cost: ctx.showCost ? mark(costText(cost)) : '–',
     requests: mark(tokens(b.requests)),
     complete,
+  }
+}
+
+/**
+ * What we can say about the last few hours when the provider says nothing at all.
+ *
+ * This is a count of local tokens and nothing else. It has no denominator — no limit is
+ * known for it, and none is guessed — so it carries no percentage, no bar, no pace and no
+ * forecast. The shape is deliberately too poor to be mistaken for a quota window: a reader
+ * who sees "84 %" beside a five-hour block will read it as the provider's, and that number
+ * would be ours. `≈` appears exactly when part of the span is older than the hour buckets
+ * still kept, the same rule the window rows use.
+ */
+export function localBlock(ctx: StatsCtx, source: Source, now: number = ctx.now): LocalBlockRow | null {
+  if (!Number.isFinite(now)) return null
+  const fromMs = now - LOCAL_BLOCK_HOURS * MS_HOUR
+  const { bucket, complete } = ctx.agg.sumHours(fromMs, now, filterFor(ctx, source))
+  const b = { ...bucket, source }
+  const use = billable(b)
+  // Nothing counted is nothing to say. An empty row would state a measured idle span, and
+  // the buckets cannot tell an idle hour from an unread one.
+  if (use <= 0 && b.requests <= 0) return null
+  const fromHour = Math.floor(fromMs / MS_HOUR)
+  const toHour = Math.ceil(now / MS_HOUR)
+  const cost = costOfHourSpan(ctx, source, fromHour, toHour)
+  const first = firstUsedHour(ctx, source, fromHour, toHour)
+  const mark = (t: string): string => (complete || t === '–' ? t : `≈${t}`)
+  const usage = mark(tokens(use))
+  const firstAt = first === null ? null : formatTime(first * MS_HOUR, ctx.tcfg)
+  return {
+    source,
+    hours: LOCAL_BLOCK_HOURS,
+    usage,
+    cost: ctx.showCost ? mark(costText(cost)) : '–',
+    requests: mark(tokens(b.requests)),
+    firstAt,
+    complete,
+    text: `Local estimate — ${usage} tokens in the last ${LOCAL_BLOCK_HOURS} h`
+      + (firstAt !== null ? `, first counted at ${firstAt}` : '')
+      + '. Not the provider’s window; no limit is known.',
   }
 }
 

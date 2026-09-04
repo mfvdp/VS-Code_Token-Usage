@@ -7,7 +7,8 @@ import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
   Attribution, Bucket, CodexRateLimitsSnapshot, Cursor, PendingMessage, Resolution, SessionRec,
-  Snapshot, Source, Tier, bucketKey, emptyBucket, STATE_VERSION,
+  Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
+  TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
 
 /** Per-file context the scanner hands to every ingest call. */
@@ -24,6 +25,25 @@ export interface BucketFilter {
   models?: string[]
   isSub?: boolean
   tier?: Tier
+}
+
+/**
+ * What the tool side table can be asked. It is keyed by source, day, model and name only:
+ * subagent and tier are bucket dimensions the table does not carry, and answering them
+ * would mean inventing a split, so they are not offered here.
+ */
+export interface ToolFilter {
+  source?: Source
+  models?: string[]
+}
+
+export interface ToolQuery {
+  /** Copies, sorted by day, source, name, model — the caller may not mutate the table. */
+  rows: ToolStat[]
+  /** A day inside the answer hit `TOOL_NAME_CAP`: its list of names is incomplete. */
+  truncated: boolean
+  /** Earliest day with a row in the answer — the "counted since" a view has to state. */
+  firstDay: string | null
 }
 
 export type Metric = 'usage' | 'output' | 'cacheRead' | 'requests' | 'reasoning' | 'cost'
@@ -62,6 +82,9 @@ const SESSION_HOUR_KEEP = 8 * 24
 
 /** Turn gaps per session are a bounded sample, not a log — 200 is enough for a P90. */
 const TURN_GAP_CAP = 200
+
+/** Recent Codex tool call ids kept for dedup; a few thousand span far more than one scan. */
+const TOOL_CALL_MEMORY = 4000
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
@@ -176,6 +199,17 @@ export class Aggregator {
   private buckets = new Map<string, Bucket>()
   private pending = new Map<string, PendingMessage>()
   private sessionMap = new Map<string, SessionRec>()
+  /** Tool side table, keyed `source|day|model|name`. */
+  private toolStats = new Map<string, ToolStat>()
+  /** Distinct names per `source|day`, for the cap; rebuilt from the rows on restore. */
+  private toolNames = new Map<string, Set<string>>()
+  /** `source|day` pairs whose name list is incomplete. */
+  private toolsTruncated = new Set<string>()
+  /**
+   * Codex tool call ids already counted. Bounded and not persisted: the cursors keep a
+   * region from being read twice within a run, so this only has to survive one scan.
+   */
+  private seenToolCalls = new Set<string>()
   cursors = new Map<string, Cursor>()
   attribution: Attribution = 'none'
   firstIngest: number | null = null
@@ -323,6 +357,95 @@ export class Aggregator {
     return { slug: path.basename(dir), parent: null }
   }
 
+  // ------------------------------------------------------------------ Tools
+
+  /**
+   * Credits `n` calls of one tool to a day.
+   *
+   * The cap counts distinct names per (source, day) across models: names come from the
+   * transcript and a generator that invents one per call would otherwise grow the state
+   * file without bound. Names beyond the cap are dropped and the day is flagged, because
+   * a short list that does not say it is short is a wrong list.
+   */
+  private addTool(source: Source, day: string, model: string, name: string, n: number): void {
+    if (!(n > 0) || !name || !day) return
+    const clean = name.length > TOOL_NAME_MAX_CHARS ? name.slice(0, TOOL_NAME_MAX_CHARS) : name
+    const k = toolKey({ source, day, model, name: clean })
+    const have = this.toolStats.get(k)
+    if (have) {
+      have.calls += n
+      return
+    }
+    const dayKey = toolDayKey(source, day)
+    let names = this.toolNames.get(dayKey)
+    if (!names) {
+      names = new Set<string>()
+      this.toolNames.set(dayKey, names)
+    }
+    if (!names.has(clean) && names.size >= TOOL_NAME_CAP) {
+      this.toolsTruncated.add(dayKey)
+      return
+    }
+    names.add(clean)
+    this.toolStats.set(k, { source, day, model, name: clean, calls: n })
+  }
+
+  /** True the first time a tool call id is seen; keeps the memory bounded (oldest first). */
+  private firstSightOfCall(id: string): boolean {
+    if (this.seenToolCalls.has(id)) return false
+    this.seenToolCalls.add(id)
+    if (this.seenToolCalls.size > TOOL_CALL_MEMORY) {
+      const drop = this.seenToolCalls.size - TOOL_CALL_MEMORY
+      let i = 0
+      for (const k of this.seenToolCalls) {
+        this.seenToolCalls.delete(k)
+        if (++i >= drop) break
+      }
+    }
+    return true
+  }
+
+  /**
+   * Counts the `tool_use` blocks of one Claude line onto its message.
+   *
+   * Claude writes one content block per line under a repeated `message.id`, so a message
+   * with two parallel `Read` calls arrives as two lines. Counting by block id makes those
+   * two calls, while a line read twice stays one; a block without an id falls back to the
+   * max-per-name rule, which never double counts but folds parallel calls of one tool into
+   * a single call. `p.day`/`p.model` place the count on the message, not on the late line.
+   */
+  private countClaudeTools(p: PendingMessage, content: unknown): void {
+    if (!Array.isArray(content)) return
+    const counts = new Map<string, number>()
+    for (const c of content) {
+      if (!c || typeof c !== 'object') continue
+      // Only real tool calls: a `server_tool_use` block is already counted as webSearch /
+      // webFetch on the bucket, and listing it here would report the same call twice.
+      if ((c as { type?: unknown }).type !== 'tool_use') continue
+      const name = str((c as { name?: unknown }).name)
+      if (!name) continue
+      const id = str((c as { id?: unknown }).id)
+      if (id) {
+        const ids = p.toolIds ?? (p.toolIds = [])
+        if (ids.includes(id)) continue
+        if (ids.length < TOOL_IDS_PER_MESSAGE) ids.push(id)
+        const tools = p.tools ?? (p.tools = {})
+        tools[name] = (tools[name] ?? 0) + 1
+        this.addTool('claude', p.day, p.model, name, 1)
+        continue
+      }
+      counts.set(name, (counts.get(name) ?? 0) + 1)
+    }
+    if (counts.size === 0) return
+    const tools = p.tools ?? (p.tools = {})
+    for (const [name, cand] of counts) {
+      const prev = tools[name] ?? 0
+      if (cand <= prev) continue
+      tools[name] = cand
+      this.addTool('claude', p.day, p.model, name, cand - prev)
+    }
+  }
+
   // ---------------------------------------------------------------- Claude
 
   /** Processes one line of a Claude transcript. Returns true if it was counted. */
@@ -381,6 +504,7 @@ export class Aggregator {
       b.requests += 1
       if (final) b.outputFinal += 1
       const p: PendingMessage = { hour, day, model, isSub, tier, ...cand, final }
+      this.countClaudeTools(p, m.content)
 
       if (ctx.attribution !== 'none') {
         const place = Aggregator.claudePlacement(ctx.file, isSub)
@@ -415,6 +539,9 @@ export class Aggregator {
     // Known id: only add the difference to the running maximum. The bucket is looked up
     // by the message's own hour, so a late line follows its message into a rolled-up bucket.
     const b = this.bucketFor('claude', prev.hour, prev.day, prev.model, prev.isSub, prev.tier)
+    // Claude puts each content block on its own line, so the tool calls of a message arrive
+    // on the *later* lines of its id: counting them only in the branch above would miss them.
+    this.countClaudeTools(prev, m.content)
     const prevReasoning = prev.reasoning ?? 0
     const next = {
       input: Math.max(prev.input, cand.input),
@@ -533,11 +660,35 @@ export class Aggregator {
       if (p && typeof p.model === 'string') cur.model = p.model
       return false
     }
+    if (type === 'response_item') {
+      // How the current builds record a tool call. `name` is a tool identifier
+      // ("exec", "send_message", an MCP tool); `arguments` is content and is not read.
+      if (p && typeof p === 'object' && (p.type === 'function_call' || p.type === 'custom_tool_call')) {
+        this.noteCodexTool(cur, ts, str(p.name), str(p.call_id) ?? str(p.id))
+      }
+      // A line that only names a tool is not a counted line: nothing about tokens changed.
+      return false
+    }
     if (type !== 'event_msg' || !p || typeof p !== 'object') return false
 
     if (p.type === 'task_started') {
       // The first turn of this file begins here; whatever came before was copied history.
       cur.replayDone = true
+      return false
+    }
+    // The begin events of older builds. `item_completed` is deliberately not read: it
+    // repeats the call the response item above already carried, and would double it.
+    if (p.type === 'exec_command_begin') {
+      // The command line is the user's content and is never read; every shell call is
+      // "exec", which is also the name the current builds put on the response item.
+      this.noteCodexTool(cur, ts, 'exec', str(p.call_id))
+      return false
+    }
+    if (p.type === 'mcp_tool_call_begin') {
+      const inv = p.invocation
+      const server = inv && typeof inv === 'object' ? str(inv.server) : null
+      const tool = inv && typeof inv === 'object' ? str(inv.tool) : null
+      this.noteCodexTool(cur, ts, server && tool ? `${server}.${tool}` : tool ?? server, str(p.call_id))
       return false
     }
     if (p.type !== 'token_count') return false
@@ -621,6 +772,20 @@ export class Aggregator {
     return true
   }
 
+  /**
+   * Counts one Codex tool call. Two rules keep it honest: the replay prefix of a forked
+   * rollout carries the parent's calls and is skipped exactly as its token_count events
+   * are, and a call id is counted once, so a build that writes both a begin event and a
+   * response item for the same call still reports one call.
+   */
+  private noteCodexTool(cur: Cursor, ts: number, name: string | null, callId: string | null): void {
+    if (!name) return
+    if (cur.forked && !cur.replayDone) return
+    if (callId && !this.firstSightOfCall(`codex|${callId}`)) return
+    const at = Number.isFinite(ts) ? ts : Date.now()
+    this.addTool('codex', localDay(at), cur.model || 'unknown', name, 1)
+  }
+
   /** Newest rate-limit reading per limit id across every rollout — the network-free Codex quota. */
   codexRateLimits(): CodexRateLimitsSnapshot[] {
     const best = new Map<string, CodexRateLimitsSnapshot>()
@@ -645,6 +810,8 @@ export class Aggregator {
       attribution: this.attribution,
       rollup: { ...this.rollupState },
       firstIngest: this.firstIngest,
+      tools: [...this.toolStats.values()],
+      toolsTruncated: [...this.toolsTruncated],
     }
   }
 
@@ -654,11 +821,15 @@ export class Aggregator {
    * setting now asks for session records the snapshot was never collecting (none →
    * project/session): those can only come from a re-read. The other direction just
    * drops the table; project and session share one record shape and switch freely.
+   *
+   * Version 5 is read as well: it differs from 6 only by the tool side table, which
+   * simply starts empty — a cold re-read of every transcript would be a steep price
+   * for a table that has no history yet either way.
    */
   static fromSnapshot(s: Snapshot | undefined, attribution: Attribution = 'none'): Aggregator {
     const a = new Aggregator()
     a.attribution = attribution
-    if (!s || s.version !== STATE_VERSION) return a
+    if (!s || !READABLE_STATE_VERSIONS.includes(s.version)) return a
     const stored: Attribution = s.attribution ?? 'none'
     if (attribution !== 'none' && stored === 'none') return a
     for (const b of s.buckets ?? []) {
@@ -667,6 +838,26 @@ export class Aggregator {
     }
     for (const [k, v] of Object.entries(s.cursors ?? {})) a.cursors.set(k, v)
     for (const [k, v] of Object.entries(s.pending ?? {})) a.pending.set(k, v)
+    for (const t of s.tools ?? []) {
+      if (!t || typeof t !== 'object' || !t.source || typeof t.day !== 'string' || typeof t.name !== 'string') continue
+      const row: ToolStat = {
+        source: t.source,
+        day: t.day,
+        model: typeof t.model === 'string' && t.model ? t.model : 'unknown',
+        name: t.name,
+        calls: num(t.calls),
+      }
+      const k = toolKey(row)
+      const have = a.toolStats.get(k)
+      // A file edited by hand can hold the same key twice; folding beats letting one win.
+      if (have) { have.calls += row.calls; continue }
+      a.toolStats.set(k, row)
+      const dayKey = toolDayKey(row.source, row.day)
+      let names = a.toolNames.get(dayKey)
+      if (!names) { names = new Set<string>(); a.toolNames.set(dayKey, names) }
+      names.add(row.name)
+    }
+    for (const k of s.toolsTruncated ?? []) if (typeof k === 'string' && k) a.toolsTruncated.add(k)
     if (attribution !== 'none') {
       for (const [k, v] of Object.entries(s.sessions ?? {})) a.sessionMap.set(k, v)
     } else {
@@ -699,6 +890,42 @@ export class Aggregator {
   all(): Bucket[] { return [...this.buckets.values()] }
 
   sessions(): SessionRec[] { return [...this.sessionMap.values()] }
+
+  /**
+   * The tool side table over an inclusive local-day range; both bounds are optional and
+   * an omitted one is open. The days are the ones stored at ingest, so no zone mapping
+   * happens here — unlike hour buckets, a tool row has no hour left to re-address.
+   */
+  tools(from?: string, to?: string, filter?: ToolFilter): ToolQuery {
+    const rows: ToolStat[] = []
+    let firstDay: string | null = null
+    let truncated = false
+    for (const t of this.toolStats.values()) {
+      if (from && t.day < from) continue
+      if (to && t.day > to) continue
+      if (filter?.source && t.source !== filter.source) continue
+      if (filter?.models && filter.models.length && !filter.models.includes(t.model)) continue
+      rows.push({ ...t })
+      if (firstDay === null || t.day < firstDay) firstDay = t.day
+    }
+    // The flag is per (source, day); a model filter cannot narrow it, so a filtered answer
+    // may call itself incomplete when the dropped names belonged to another model. Saying
+    // "incomplete" once too often is the harmless direction.
+    for (const k of this.toolsTruncated) {
+      const cut = k.indexOf('|')
+      const source = k.slice(0, cut)
+      const day = k.slice(cut + 1)
+      if (from && day < from) continue
+      if (to && day > to) continue
+      if (filter?.source && source !== filter.source) continue
+      truncated = true
+      break
+    }
+    rows.sort((a, b) =>
+      a.day.localeCompare(b.day) || a.source.localeCompare(b.source) ||
+      a.name.localeCompare(b.name) || a.model.localeCompare(b.model))
+    return { rows, truncated, firstDay }
+  }
 
   stats(): {
     buckets: number; files: number; oldestDay: string | null; newestDay: string | null
@@ -754,6 +981,20 @@ export class Aggregator {
       mergeInto(this.get(b.source, 'm', null, monthOf(b.day), b.model, b.isSub, b.tier), b)
       daysMerged++
     }
+    // The tool table has day resolution and no month step: folding tool names into months
+    // would keep a list of names for years, and no view asks for one. Past the day horizon
+    // the rows are dropped, exactly as far back as day buckets are kept.
+    for (const [k, t] of [...this.toolStats]) {
+      if (t.day >= dayHorizon) continue
+      this.toolStats.delete(k)
+      this.toolNames.delete(toolDayKey(t.source, t.day))
+      this.toolsTruncated.delete(toolDayKey(t.source, t.day))
+    }
+    for (const k of [...this.toolsTruncated]) {
+      // `source|day` — a flag whose day is gone has nothing left to qualify.
+      if (k.slice(k.indexOf('|') + 1) < dayHorizon) this.toolsTruncated.delete(k)
+    }
+
     // The per-session hour slices exist for the quota windows only, and the longest of those
     // is a week. Keeping them for the full hour-bucket retention would store months of them.
     const sessionHorizon = Math.max(hourHorizon, hourIndex(now) - SESSION_HOUR_KEEP)

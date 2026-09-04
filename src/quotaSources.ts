@@ -13,7 +13,7 @@
 
 import {
   readClaudeJsonUtilization, readClaudeQuota, readCodexQuota, readStatuslineMirror, codexStateFromTranscript,
-  CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE,
+  CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE, StatuslineReading,
 } from './quota'
 import { CodexRateLimitsSnapshot, QuotaState, Source } from './types'
 
@@ -44,17 +44,52 @@ export interface SourceInputs {
   mode: QuotaMode
 }
 
+/**
+ * The context window of ONE Claude Code session, as the status line reported it.
+ *
+ * Not an account figure and not comparable to a quota window: it describes the
+ * conversation the bridge last wrote about, which is why it never enters a
+ * `QuotaState` and carries its own timestamp — the mirror can be minutes older
+ * than the reading that won the quota race.
+ */
+export interface ContextReading {
+  used: number
+  /** The model's window size, when the payload named one; null means no denominator. */
+  size: number | null
+  usedPct: number | null
+  /** Epoch SECONDS of the status-line payload, as everywhere else in this module. */
+  fetchedAt: number | null
+}
+
+/**
+ * What the status line knows beyond the quota windows.
+ *
+ * Only the `statusline` reading ever fills this in. It is deliberately kept
+ * beside the state rather than inside it: merging it into a state that came from
+ * another source would splice two readings — possibly two accounts — into one
+ * figure that never existed anywhere.
+ */
+export interface SourceExtras {
+  context: ContextReading | null
+  cost: StatuslineReading['cost']
+  promptCache: StatuslineReading['promptCache']
+  model: StatuslineReading['model']
+}
+
 export interface BestState {
   state: QuotaState
   candidates: Candidate[]
   /** Non-secret account marker of the winning source, when it carries one. */
   identityHint: string | null
+  /** The status line's extras, whether or not it won; null when it was not read. */
+  extras: SourceExtras | null
 }
 
 interface Reading {
   id: SourceId
   state: QuotaState
   identityHint: string | null
+  extras?: SourceExtras
 }
 
 function ageSec(state: QuotaState, now: number): number | null {
@@ -82,7 +117,16 @@ function readClaude(id: ClaudeSourceId, inputs: SourceInputs, now: number): Read
       return { id, state: readClaudeQuota(inputs.claudeCacheFile ?? CLAUDE_QUOTA_FILE, now), identityHint: null }
     case 'statusline': {
       const r = readStatuslineMirror(inputs.mirrorFile)
-      return { id, state: r.state, identityHint: r.identityHint }
+      // The extras ride along even when the payload carried no rate limits at
+      // all: a context window without a quota window is still a fact the bridge
+      // observed, and dropping it would hide it behind an unrelated absence.
+      const extras: SourceExtras = {
+        context: r.context === null ? null : { ...r.context, fetchedAt: r.state.fetchedAt },
+        cost: r.cost,
+        promptCache: r.promptCache,
+        model: r.model,
+      }
+      return { id, state: r.state, identityHint: r.identityHint, extras }
     }
     case 'claudeJson': {
       const r = readClaudeJsonUtilization(inputs.claudeJsonFile, now)
@@ -150,12 +194,16 @@ export function bestState(source: Source, inputs: SourceInputs, now: number): Be
   // The identity marker is not tied to the winner: only `~/.claude.json` carries
   // one, and the history fingerprint should use it whenever it is readable.
   const hint = (r: Reading[]) => r.map((x) => x.identityHint).find((h) => h !== null) ?? null
-  if (best) return { state: best.state, candidates, identityHint: best.identityHint ?? hint(readings) }
+  // Same reasoning for the extras, and for the same reason they stay a field of
+  // their own: they answer a different question (this session) than the state
+  // (this account), so the winner of the quota race does not decide them.
+  const extras = readings.map((r) => r.extras).find((e) => e !== undefined) ?? null
+  if (best) return { state: best.state, candidates, identityHint: best.identityHint ?? hint(readings), extras }
 
   // Nothing worked: report the highest-ranked source's reason rather than the
   // last one tried, so the repair step matches what the user configured first.
   const first = readings[0]
-  if (first) return { state: first.state, candidates, identityHint: hint(readings) }
+  if (first) return { state: first.state, candidates, identityHint: hint(readings), extras }
   return {
     state: {
       source, ok: false, fetchedAt: null, planType: null, windows: [],
@@ -163,5 +211,6 @@ export function bestState(source: Source, inputs: SourceInputs, now: number): Be
     },
     candidates,
     identityHint: null,
+    extras: null,
   }
 }

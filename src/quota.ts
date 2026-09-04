@@ -40,6 +40,8 @@ const FAR_RESET_MS = 400 * DAY_MS
 const MAX_PLAUSIBLE_PERCENT = 200
 /** The drift list is a hint for the maintainer, not a dump — keep it readable. */
 const MAX_DRIFT = 40
+/** A plan name longer than this is not a plan name; it is refused, never cut. */
+const MAX_PLAN_NAME = 40
 /** Guards the walker against pathological input; real bodies are far below both. */
 const WALK_MAX_DEPTH = 8
 const WALK_MAX_LEAVES = 400
@@ -80,6 +82,26 @@ function pick(o: any, ...keys: string[]): unknown {
     if (o[k] !== undefined && o[k] !== null) return o[k]
   }
   return undefined
+}
+
+/**
+ * A plan name exactly as the provider spelled it — display only.
+ *
+ * No limit, no denominator and no forecast is ever derived from it: the name of
+ * a plan says nothing this build could verify, and a plan table would be an
+ * invented denominator. Some providers nest the name in an object, so that shape
+ * is accepted too; an implausibly long value is refused rather than truncated,
+ * because a cut-off plan name would be a figure we made up.
+ */
+function planLabel(v: unknown): string | null {
+  let s: string | null = null
+  if (typeof v === 'string') s = v.trim()
+  else if (v && typeof v === 'object') {
+    const inner = pick(v as any, 'name', 'display_name', 'displayName', 'type')
+    if (typeof inner === 'string') s = inner.trim()
+  }
+  if (s === null || s === '') return null
+  return s.length <= MAX_PLAN_NAME ? s : null
 }
 
 /**
@@ -364,7 +386,10 @@ export function claudeStateFromBody(
     source: 'claude',
     ok: windows.length > 0,
     fetchedAt,
-    planType: null,
+    // No Claude response seen so far names the plan; the field is read anyway so
+    // that one which does is shown instead of dropped. Deliberately NOT marked
+    // as consumed: a plan arriving as a number is drift, not a name.
+    planType: planLabel(pick(body, 'plan_type', 'subscription_type', 'planType')),
     windows,
     extra,
   }
@@ -709,6 +734,10 @@ export interface ClaudeJsonReading {
  * Everything else in that file (`oauthAccount`, project history, …) is none of
  * this extension's business and is never touched. The block is Claude Code's own
  * cache of the same usage response, so the existing body parser applies.
+ *
+ * That includes the plan name: `oauthAccount.subscriptionType` would name it,
+ * and reading it would break a published promise, so the plan stays absent until
+ * a usage response carries one — or the user names it in the settings.
  */
 export function readClaudeJsonUtilization(file: string, now = Date.now()): ClaudeJsonReading {
   let txt: string
@@ -802,7 +831,9 @@ export function claudeStateFromStatusline(payload: any, fetchedAt: number | null
     ok: windows.length > 0,
     origin: 'statusline',
     fetchedAt,
-    planType: null,
+    // Absent from every status-line payload seen so far — read defensively, so a
+    // future field appears rather than being silently dropped.
+    planType: planLabel(pick(payload, 'plan', 'subscription')),
     windows: sortClaude(windows),
     extra: spendPct !== null && plausiblePercent(spendPct)
       ? {

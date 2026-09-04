@@ -35,6 +35,11 @@ function fixture(name: string): string {
   return path.join(FIX, name)
 }
 
+/** A source file of this repository, read as text — for the promises only the code can keep. */
+function readSource(rel: string): string {
+  return fs.readFileSync(path.resolve(FIX, '..', '..', '..', rel), 'utf8')
+}
+
 /** Environment variables are process-wide state; every test puts them back. */
 function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
   const before = new Map(Object.keys(vars).map((k) => [k, process.env[k]]))
@@ -380,6 +385,71 @@ test('a mirror file of an unknown schema is refused', () => {
   const file = path.join(dir, 'mirror.json')
   fs.writeFileSync(file, JSON.stringify({ schema_version: 7, written_at: BASE, payload: {} }))
   assert.equal(readStatuslineMirror(file).state.problemKind, 'unknown')
+})
+
+// ---------------------------------------------------------------------------
+// The plan name: read where a provider states it, never derived and never taken
+// from the account block of ~/.claude.json.
+
+test('a plan name is read from a usage body when one is there, and stays absent otherwise', () => {
+  const body = {
+    plan_type: 'Max 20x',
+    limits: [{ kind: 'session', group: 'session', percent: 10, resets_at: null, scope: null }],
+  }
+  assert.equal(claudeStateFromBody(body, 1_700_000_000).planType, 'Max 20x')
+  assert.equal(claudeStateFromBody({ ...body, plan_type: undefined, subscription_type: 'Pro' },
+    1_700_000_000).planType, 'Pro')
+  // Today's real bodies name no plan — the field is an absence, not an empty string.
+  assert.equal(claudeStateFromBody({ ...body, plan_type: undefined }, 1_700_000_000).planType, null)
+  // A plan that is not a name is not a plan: no number, no object without a name,
+  // and no essay that would be cut off into something that was never written.
+  assert.equal(claudeStateFromBody({ ...body, plan_type: 5 }, 1_700_000_000).planType, null)
+  assert.equal(claudeStateFromBody({ ...body, plan_type: { tier: 3 } }, 1_700_000_000).planType, null)
+  assert.equal(claudeStateFromBody({ ...body, plan_type: 'x'.repeat(41) }, 1_700_000_000).planType, null)
+})
+
+test('the status line may name a plan, nested or plain, and does not today', () => {
+  const rl = { rate_limits: { five_hour: { used_percentage: 20, resets_at: null } } }
+  assert.equal(claudeStateFromStatusline(rl, 1_700_000_000).state.planType, null)
+  assert.equal(claudeStateFromStatusline({ ...rl, plan: 'Pro' }, 1_700_000_000).state.planType, 'Pro')
+  assert.equal(claudeStateFromStatusline({ ...rl, subscription: { display_name: 'Team' } },
+    1_700_000_000).state.planType, 'Team')
+  assert.equal(readStatuslineMirror(fixture('statusline-mirror.json')).state.planType, null)
+})
+
+test('claude.json is read for cachedUsageUtilization and for nothing else', () => {
+  // The fixture carries an e-mail address, an account uuid and a project history
+  // beside the cache block; none of it may reach the reading.
+  const raw = fs.readFileSync(fixture('claude-json.json'), 'utf8')
+  assert.ok(raw.includes('never-read@example.invalid'))
+  const r = readClaudeJsonUtilization(fixture('claude-json.json'), BASE)
+  const rendered = JSON.stringify(r)
+  for (const secret of ['never-read@example.invalid', '00000000-dead-beef', '/home/example/project', 'lastCost']) {
+    assert.ok(!rendered.includes(secret), `the reading leaked ${secret}`)
+  }
+
+  // A subscription named in oauthAccount is the obvious source for a plan name —
+  // and the one this build has promised never to open. It stays unread.
+  const dir = scratchDir('claude-json-plan')
+  const file = path.join(dir, 'claude.json')
+  fs.writeFileSync(file, JSON.stringify({
+    oauthAccount: { subscriptionType: 'max_20x', emailAddress: 'never-read@example.invalid' },
+    cachedUsageUtilization: {
+      fetchedAtMs: BASE - 60_000,
+      utilization: { limits: [{ kind: 'session', group: 'session', percent: 7, resets_at: null, scope: null }] },
+    },
+  }))
+  const plan = readClaudeJsonUtilization(file, BASE)
+  assert.equal(plan.state.ok, true)
+  assert.equal(plan.state.planType, null)
+
+  // And the reader itself touches no other key: the parsed file is only ever
+  // asked for cachedUsageUtilization.
+  const src = readSource('src/quota.ts')
+  const body = src.slice(src.indexOf('export function readClaudeJsonUtilization'))
+    .split('\n// ---')[0]
+  const touched = [...body.matchAll(/parsed\s*\??\.\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1])
+  assert.deepEqual([...new Set(touched)], ['cachedUsageUtilization'])
 })
 
 // ---------------------------------------------------------------------------

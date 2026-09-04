@@ -30,14 +30,19 @@ function writeCache(dir: string, name: string, fetchedAtSec: number, percent: nu
   return file
 }
 
-function writeMirror(dir: string, writtenAtMs: number, percent: number): string {
+function writeMirror(dir: string, writtenAtMs: number, percent: number, over: any = {}): string {
   const file = path.join(dir, 'mirror.json')
   fs.writeFileSync(file, JSON.stringify({
     schema_version: 1, written_at: writtenAtMs,
-    payload: { rate_limits: { five_hour: { used_percentage: percent, resets_at: 1_700_006_400 } } },
+    payload: {
+      rate_limits: { five_hour: { used_percentage: percent, resets_at: 1_700_006_400 } },
+      ...over,
+    },
   }))
   return file
 }
+
+const CONTEXT = { total_input_tokens: 120_000, total_output_tokens: 8_000, context_window_size: 200_000 }
 
 function writeClaudeJson(dir: string, fetchedAtMs: number, percent: number): string {
   const file = path.join(dir, 'claude.json')
@@ -182,4 +187,59 @@ test('codex: the transcript snapshot competes with the cache file on age', () =>
   assert.equal(r.state.origin, 'transcript')
   assert.equal(r.state.windows[0].percent, 42)
   assert.deepEqual(r.candidates.map((c) => c.id), ['cacheFile', 'transcript'])
+})
+
+// ---------------------------------------------------------------------------
+// The status line's extras: one session, carried beside the state, never in it.
+
+test('the context reading comes from the status line even when another source wins', () => {
+  const dir = scratchDir('qsrc')
+  writeCache(dir, 'claude-cache.json', (BASE - MIN) / 1000, 20)
+  writeMirror(dir, BASE - 12 * MIN, 55, { context_window: CONTEXT, cost: { total_cost_usd: 1.5 } })
+  const r = bestState('claude', inputs(dir), BASE)
+  // The cache file is fresher, so it decides the quota — and only the quota.
+  assert.equal(r.state.origin, 'cache')
+  assert.equal(r.state.windows[0].percent, 20)
+  assert.deepEqual(r.extras?.context,
+    { used: 128_000, size: 200_000, usedPct: 64, fetchedAt: (BASE - 12 * MIN) / 1000 })
+  assert.deepEqual(r.extras?.cost, { totalUsd: 1.5 })
+  // The extras keep their own age: the mirror is eleven minutes older than the winner.
+  assert.notEqual(r.extras?.context?.fetchedAt, r.state.fetchedAt)
+  // And nothing of them is spliced into the state.
+  assert.ok(!Object.keys(r.state).includes('context'))
+  assert.equal(JSON.stringify(r.state).includes('128000'), false)
+})
+
+test('a status line without rate limits still yields its context reading', () => {
+  const dir = scratchDir('qsrc')
+  fs.writeFileSync(path.join(dir, 'mirror.json'), JSON.stringify({
+    schema_version: 1, written_at: BASE - MIN, payload: { context_window: CONTEXT },
+  }))
+  const r = bestState('claude', inputs(dir), BASE)
+  assert.equal(r.state.ok, false)
+  assert.equal(r.extras?.context?.used, 128_000)
+})
+
+test('no status line means no context reading — never one derived from another source', () => {
+  const dir = scratchDir('qsrc')
+  writeCache(dir, 'claude-cache.json', (BASE - MIN) / 1000, 20)
+  // Mirror not in the order at all.
+  assert.equal(bestState('claude', inputs(dir, { claudeOrder: ['cacheFile'] }), BASE).extras, null)
+  // Mirror in the order but absent from disk: read, and empty.
+  const missing = bestState('claude', inputs(dir), BASE)
+  assert.deepEqual(missing.extras, { context: null, cost: null, promptCache: null, model: null })
+  // A mirror without a context block is an absence too, not a zero.
+  writeMirror(dir, BASE - MIN, 55)
+  assert.equal(bestState('claude', inputs(dir), BASE).extras?.context, null)
+  // Codex has no status line, and no extras are invented for it.
+  assert.equal(bestState('codex', inputs(dir), BASE).extras, null)
+})
+
+test('a context window without a size carries no percentage of its own', () => {
+  const dir = scratchDir('qsrc')
+  writeMirror(dir, BASE - MIN, 55, { context_window: { total_input_tokens: 40_000 } })
+  const ctx = bestState('claude', inputs(dir), BASE).extras?.context
+  assert.equal(ctx?.used, 40_000)
+  assert.equal(ctx?.size, null)
+  assert.equal(ctx?.usedPct, null)
 })

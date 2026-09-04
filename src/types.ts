@@ -79,7 +79,61 @@ export interface PendingMessage {
   final: boolean
   /** Session file key, when attribution is on. */
   session?: string
+  /**
+   * Tool calls already counted for this message, per tool name. Claude writes one content
+   * block per line under a repeated `message.id`, so the counter has to survive across
+   * lines; only the increase over this record is ever added, the same max-per-key rule the
+   * token fields use. Optional so version 5 snapshots still load.
+   */
+  tools?: Record<string, number>
+  /**
+   * Ids of the `tool_use` blocks already counted for this message (capped). They are what
+   * makes two parallel calls of the *same* tool two calls instead of one, while a re-read
+   * of a line stays a no-op. Ids only — a block's input is never read.
+   */
+  toolIds?: string[]
 }
+
+/** At most this many `toolIds` per message; beyond it the plain max-per-name rule decides. */
+export const TOOL_IDS_PER_MESSAGE = 64
+
+/**
+ * One day of one tool's calls, for one source and model.
+ *
+ * A side table, not a bucket dimension: a tool axis would multiply the buckets by
+ * models × tiers × hours and would make `bucketKey`, the CSV export and every existing
+ * sum ambiguous. Day resolution, names and counts only — a tool's input is content and
+ * is never read, let alone stored.
+ */
+export interface ToolStat {
+  source: Source
+  /** Local calendar day YYYY-MM-DD at ingest, like the `day` of a rolled-up bucket. */
+  day: string
+  model: string
+  /** The name as the transcript spells it: "Bash", "mcp__server__tool", "exec". */
+  name: string
+  calls: number
+}
+
+export function toolKey(t: Pick<ToolStat, 'source' | 'day' | 'model' | 'name'>): string {
+  return `${t.source}|${t.day}|${t.model}|${t.name}`
+}
+
+/** Key of the (source, day) pair the distinct-name cap and its truncation flag apply to. */
+export function toolDayKey(source: Source, day: string): string {
+  return `${source}|${day}`
+}
+
+/**
+ * Distinct tool names kept per source and day. Names come from the transcript, so a
+ * generated or per-call name would grow the state file without bound; beyond the cap
+ * further names are dropped and the day is flagged, so a view can say the list is
+ * incomplete instead of quietly showing a short one.
+ */
+export const TOOL_NAME_CAP = 100
+
+/** A tool name longer than this is stored cut to this length — display hygiene, nothing else. */
+export const TOOL_NAME_MAX_CHARS = 100
 
 /** The rate-limit block Codex writes into every token_count event (snake_case schema). */
 export interface CodexRateLimitsSnapshot {
@@ -172,9 +226,20 @@ export interface Snapshot {
   rollup: { lastRun: number; hourRetentionDays: number; retentionDays: number }
   /** First ingest (ms) — heatmap days before it are "outside coverage", not zero. */
   firstIngest: number | null
+  /** Tool-call side table. Absent in version 5 snapshots, which load with an empty one. */
+  tools?: ToolStat[]
+  /** `source|day` pairs that hit `TOOL_NAME_CAP` — shown as truncated, never silently dropped. */
+  toolsTruncated?: string[]
 }
 
-export const STATE_VERSION = 5
+export const STATE_VERSION = 6
+
+/**
+ * Snapshot versions this build can load. 5 differs from 6 only by the tool side table,
+ * so it maps forward to an empty one instead of forcing every user into a cold re-read
+ * for a table nobody has collected yet; tool counts then start at the next ingest.
+ */
+export const READABLE_STATE_VERSIONS: readonly number[] = [6, 5]
 
 export type WindowKind = 'session' | 'weekly' | 'other'
 

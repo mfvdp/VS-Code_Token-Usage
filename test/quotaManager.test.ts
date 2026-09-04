@@ -495,3 +495,38 @@ test('a changed setting or role is never answered from the memo', () => {
   h.mgr.setLeader(false)
   assert.equal(h.mgr.current(BASE + 900)[0].problemKind, 'follower')
 })
+
+test('the context reading is the status line\'s, kept beside the state and cleared with the rest', () => {
+  const h = harness()
+  // A fresher cache file wins the quota; the context still comes from the mirror.
+  h.writeClaudeCache((BASE - MIN) / 1000, 42, null)
+  fs.writeFileSync(h.files.mirrorFile, JSON.stringify({
+    schema_version: 1, written_at: BASE - 8 * MIN,
+    payload: {
+      rate_limits: { five_hour: { used_percentage: 55, resets_at: null } },
+      context_window: { total_input_tokens: 100_000, total_output_tokens: 20_000, context_window_size: 200_000 },
+    },
+  }))
+  // Nothing has been read yet, so there is nothing to report — not a zero.
+  assert.equal(h.mgr.contextReading(), null)
+
+  const states = h.mgr.current(BASE)
+  const claude = states.find((s) => s.source === 'claude')!
+  assert.equal(claude.origin, 'cache')
+  assert.equal(claude.windows[0].percent, 42)
+  const ctx = h.mgr.contextReading()
+  assert.equal(ctx?.used, 120_000)
+  assert.equal(ctx?.size, 200_000)
+  assert.equal(ctx?.usedPct, 60)
+  assert.equal(ctx?.fetchedAt, (BASE - 8 * MIN) / 1000)
+
+  h.mgr.clearPolled()
+  assert.equal(h.mgr.contextReading(), null)
+})
+
+test('without a status-line mirror there is no context reading at all', () => {
+  const h = harness()
+  h.writeClaudeCache((BASE - MIN) / 1000, 42, null)
+  h.mgr.current(BASE)
+  assert.equal(h.mgr.contextReading(), null)
+})

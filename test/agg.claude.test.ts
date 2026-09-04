@@ -265,8 +265,9 @@ test('snapshot round trip keeps everything; attribution rules on restore', () =>
   assert.equal(cold.all().length, 0)
   assert.equal(cold.attribution, 'session')
 
-  // Version mismatch → empty.
-  assert.equal(Aggregator.fromSnapshot({ ...snap, version: STATE_VERSION - 1 }, 'session').all().length, 0)
+  // Version mismatch → empty. 5 is the one older version that still loads (no tool table).
+  assert.equal(Aggregator.fromSnapshot({ ...snap, version: 4 }, 'session').all().length, 0)
+  assert.equal(Aggregator.fromSnapshot({ ...snap, version: STATE_VERSION + 1 }, 'session').all().length, 0)
   assert.equal(Aggregator.fromSnapshot(undefined).all().length, 0)
 
   // clearSessions drops the table and the identifiers everywhere.

@@ -91,6 +91,12 @@ export interface ClaudeUsage {
   geo?: 'us' | 'not_available' | null
 }
 
+/** A `tool_use` content block. `id: null` reproduces the (older) shape without a block id. */
+export interface ClaudeToolBlock {
+  name: string
+  id?: string | null
+}
+
 export interface ClaudeLineOpts {
   id: string
   ts: number
@@ -102,6 +108,8 @@ export interface ClaudeLineOpts {
   synthetic?: boolean
   error?: boolean
   type?: string
+  /** Content blocks of this line. Claude Code writes exactly one block per line. */
+  tools?: ClaudeToolBlock[]
 }
 
 /** One assistant line as Claude Code writes it, one content block per line. */
@@ -122,6 +130,13 @@ export function claudeLine(o: ClaudeLineOpts): string {
     iterations: [{ type: 'message', input_tokens: u.input ?? 0, output_tokens: u.output ?? 0 }],
     speed: u.speed === undefined ? 'standard' : u.speed,
   }
+  const content = o.tools
+    ? o.tools.map((t, i) => {
+      const block: Record<string, unknown> = { type: 'tool_use', name: t.name, input: {} }
+      if (t.id !== null) block.id = t.id ?? `toolu_${o.id}_${i}`
+      return block
+    })
+    : [{ type: 'text', text: 'synthetic fixture text' }]
   const line: Record<string, unknown> = {
     parentUuid: 'uuid-parent-0000',
     isSidechain: false,
@@ -130,7 +145,7 @@ export function claudeLine(o: ClaudeLineOpts): string {
       id: o.id,
       type: 'message',
       role: 'assistant',
-      content: [{ type: 'text', text: 'synthetic fixture text' }],
+      content,
       stop_reason: o.final ? 'end_turn' : null,
       stop_sequence: null,
       stop_details: null,
@@ -236,4 +251,55 @@ export function codexTokenCount(o: {
   }
   if (o.rateLimits !== 'absent') payload[o.camel ? 'rateLimits' : 'rate_limits'] = o.rateLimits ?? null
   return JSON.stringify({ timestamp: iso(o.ts), type: 'event_msg', payload })
+}
+
+/**
+ * A tool call as the current Codex builds record it: a `response_item` whose payload
+ * carries the tool `name` and a `call_id`. `custom` picks the `custom_tool_call` shape
+ * (what a shell call looks like) over the `function_call` one.
+ */
+export function codexToolCall(o: { ts: number; name: string; callId?: string; custom?: boolean; id?: string }): string {
+  const callId = o.callId ?? `call_${o.name}`
+  const payload: Record<string, unknown> = o.custom
+    ? { type: 'custom_tool_call', id: o.id ?? `item_${callId}`, status: 'completed', call_id: callId, name: o.name, input: '{"cmd":"synthetic"}' }
+    : { type: 'function_call', id: o.id ?? `item_${callId}`, name: o.name, namespace: null, arguments: '{"a":1}', call_id: callId }
+  return JSON.stringify({ timestamp: iso(o.ts), type: 'response_item', payload })
+}
+
+/** The begin event older Codex builds write for a shell call. */
+export function codexExecBegin(o: { ts: number; callId?: string }): string {
+  return JSON.stringify({
+    timestamp: iso(o.ts),
+    type: 'event_msg',
+    payload: { type: 'exec_command_begin', call_id: o.callId ?? 'call_exec', command: ['bash', '-lc', 'echo synthetic'], cwd: '/home/tester/proj-beta' },
+  })
+}
+
+/** The begin event older Codex builds write for an MCP tool call. */
+export function codexMcpBegin(o: { ts: number; server: string; tool: string; callId?: string }): string {
+  return JSON.stringify({
+    timestamp: iso(o.ts),
+    type: 'event_msg',
+    payload: {
+      type: 'mcp_tool_call_begin',
+      call_id: o.callId ?? `call_${o.server}_${o.tool}`,
+      invocation: { server: o.server, tool: o.tool, arguments: { q: 'synthetic' } },
+    },
+  })
+}
+
+/** The `item_completed` echo of a call — the same call, reported a second time. */
+export function codexItemCompleted(o: { ts: number; itemType: string; callId?: string }): string {
+  return JSON.stringify({
+    timestamp: iso(o.ts),
+    type: 'event_msg',
+    payload: {
+      type: 'item_completed',
+      thread_id: 'thread-0001',
+      turn_id: 'turn-0001',
+      item: { type: o.itemType, id: o.callId ?? 'call_exec', command: ['bash', '-lc', 'echo synthetic'], status: 'completed' },
+      started_at_ms: o.ts,
+      completed_at_ms: o.ts + 10,
+    },
+  })
 }

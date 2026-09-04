@@ -18,7 +18,7 @@ import { detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, po
 import { codexStateFromBody, quotaFileFor, writeQuotaCacheFile } from './quota'
 import { fingerprintFor } from './quotaHistory'
 import {
-  bestState, Candidate, ClaudeSourceId, CodexSourceId, QuotaMode, SourceInputs,
+  bestState, Candidate, ClaudeSourceId, CodexSourceId, ContextReading, QuotaMode, SourceExtras, SourceInputs,
 } from './quotaSources'
 import { CodexRateLimitsSnapshot, ProblemKind, QuotaState, Source } from './types'
 
@@ -139,6 +139,8 @@ export class QuotaManager {
 
   private lastStates: Partial<Record<Source, QuotaState>> = {}
   private lastCandidates: Record<Source, Candidate[]> = { claude: [], codex: [] }
+  /** What the status line knew beyond the windows; only Claude ever has one. */
+  private lastExtras: Partial<Record<Source, SourceExtras | null>> = {}
   /** The last `current()` answer, replayed for MEMO_MS. Null means "read the files". */
   private memo: { at: number; states: QuotaState[] } | null = null
   private identityHint: Partial<Record<Source, string | null>> = {}
@@ -253,6 +255,7 @@ export class QuotaManager {
       const r = bestState(src, this.inputs(), now)
       const state = this.enrich(src, r.state)
       this.lastCandidates[src] = r.candidates
+      this.lastExtras[src] = r.extras
       this.lastStates[src] = state
       if (r.identityHint) this.identityHint[src] = r.identityHint
       // Followers read the same files; only the leader writes the shared history.
@@ -278,6 +281,20 @@ export class QuotaManager {
 
   candidates(): Record<Source, Candidate[]> {
     return { claude: [...this.lastCandidates.claude], codex: [...this.lastCandidates.codex] }
+  }
+
+  /**
+   * The context window of the running Claude Code session, when the status-line
+   * bridge reported one — otherwise null, never a figure derived from buckets.
+   *
+   * Like `candidates()` this reports the last `current()` reading rather than
+   * re-reading the files, and it stays outside every `QuotaState`: it describes
+   * one session, not the account, and only the status line can know it. It is
+   * therefore shown even when a fresher source won the quota race — with its own
+   * timestamp, so a stale mirror says so instead of borrowing the winner's age.
+   */
+  contextReading(): ContextReading | null {
+    return this.lastExtras.claude?.context ?? null
   }
 
   driftReport(): Record<Source, string[]> {
@@ -347,6 +364,7 @@ export class QuotaManager {
     this.nextPollAt = { claude: 0, codex: 0 }
     this.lastStates = {}
     this.lastCandidates = { claude: [], codex: [] }
+    this.lastExtras = {}
     this.identityHint = {}
     this.historyAt.clear()
     this.resetTriggered.clear()

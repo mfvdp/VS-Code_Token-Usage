@@ -7,8 +7,8 @@
  * Three things this file is careful about. Everything it renders comes from the view model —
  * no number is computed here, so the webview cannot drift away from the QuickPick and the
  * markdown view. Everything the webview sends back goes through `parseWebviewMessage`: it is
- * the only untrusted input the extension has, and it may ask for a range or one of nine
- * named commands, never for a path or a setting. And updates are per section, so a
+ * the only untrusted input the extension has, and it may ask for a range, a fold or one of
+ * eleven named commands, never for a path or a setting. And updates are per section, so a
  * one-second refresh cannot reset a sort order or throw away the scroll position.
  *
  * No external resource of any kind: the CSP allows exactly the nonced inline style and
@@ -206,6 +206,16 @@ body {
 h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
      margin: 20px 0 8px; font-weight: 600; }
 h2:first-child { margin-top: 0; }
+/* A section head is a <summary>: the fold is the browser's, which means it is keyboard
+   reachable and announced as expandable without a word of ARIA from us. The heading inside
+   keeps its own margins, so a folded section looks exactly like an unfolded one above it. */
+summary { list-style: none; cursor: pointer; }
+summary::-webkit-details-marker { display: none; }
+summary h2 { display: flex; align-items: baseline; gap: 6px; }
+/* The twisty is drawn, not typed: a glyph in the markup would end up in the copied text. */
+summary h2::before { content: "▾"; font-size: 9px; line-height: 1; opacity: .7; }
+details:not([open]) summary h2::before { content: "▸"; }
+summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 p { margin: 6px 0; }
 .empty { color: var(--dim); font-style: italic; }
 .dim { color: var(--dim); }
@@ -273,8 +283,12 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .kpi { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
 .kpi .v { font-size: 15px; font-variant-numeric: tabular-nums; }
 .kpi .l { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
-.kpi .d.up { color: var(--warn); }
-.kpi .d.down { color: var(--ok); }
+/* Deltas are coloured from the figure's polarity, never from the arrow: more usage and more
+   money are warnings, a higher cache hit rate is good, and a count of days is neither. A red
+   arrow that means "you worked on more days" is a judgement nobody asked for. */
+.kpi .d.good { color: var(--ok); }
+.kpi .d.bad { color: var(--warn); }
+.kpi .d.neutral { color: var(--dim); }
 .spark { width: 100%; height: 18px; display: block; }
 .spark polyline { fill: none; stroke: var(--claude); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 /* A lone reading between two gaps is drawn as a hair-length stroke with a round cap: the
@@ -402,6 +416,10 @@ const SCRIPT = `
 const vscode = acquireVsCodeApi();
 let vm = null;
 let costLine = false;
+/** Model chips beyond the first four, shown on request. Local: a chip is not a setting. */
+let allModels = false;
+/** The two date fields, opened by the "custom…" chip. Also local — the range itself is not. */
+let showDates = false;
 /** The day the drill panel was last scrolled to, so a refresh of the same day stays put. */
 let shownDrill = null;
 const esc = (s) => String(s === null || s === undefined ? '' : s)
@@ -524,6 +542,9 @@ function orElse(value, fallback) {
 
 // -- controls ---------------------------------------------------------------
 
+/** Chips beyond this many are folded away; four is what fits a sidebar on one line. */
+const MODEL_CHIPS = 4;
+
 function controls() {
   const r = vm.range;
   const chips = r.presets.map(p => '<button data-act="range" data-preset="' + p + '" aria-pressed="'
@@ -538,20 +559,35 @@ function controls() {
     if (names.indexOf(m.model) < 0) names.push(m.model);
     if (names.length >= 12) break;
   }
-  const models = names.map(name => '<button data-act="model" data-model="'
+  // A filtered-on model is never folded away: a chip the reader cannot see is a filter they
+  // cannot switch off, and the table above it would look empty for no stated reason.
+  const shown = names.filter((n, i) => allModels || i < MODEL_CHIPS || vm.ui.models.indexOf(n) >= 0);
+  const rest = names.length - shown.length;
+  const models = shown.map(name => '<button data-act="model" data-model="'
     + esc(name) + '" aria-pressed="' + (vm.ui.models.indexOf(name) >= 0) + '">'
-    + esc(name) + '</button>').join('');
+    + esc(name) + '</button>').join('')
+    + (rest > 0 ? '<button data-act="moreModels">+' + rest + ' more</button>' : '')
+    + (allModels && names.length > MODEL_CHIPS ? '<button data-act="moreModels">fewer</button>' : '');
+  // The two date fields are the rarest control on the page and the widest; they stay folded
+  // until the range is one they belong to, or until the reader asks for them.
+  const custom = r.preset === 'custom' || r.preset === 'all' || showDates;
+  const dates = custom
+    ? '<div class="wrap"><label class="meta" for="tp-from">from</label>'
+      + '<input id="tp-from" type="date" data-role="from" value="' + esc(r.from) + '">'
+      + '<label class="meta" for="tp-to">to</label>'
+      + '<input id="tp-to" type="date" data-role="to" value="' + esc(r.to) + '">'
+      + '<button data-act="customRange">apply</button></div>'
+    : '';
   return '<div class="wrap">' + chips
+    + '<button data-act="customDates" aria-pressed="' + custom + '">custom…</button>'
     + '<button data-act="refresh" title="Rebuild from the transcripts and fetch the quota">refresh</button>'
     + '</div>'
-    + '<div class="wrap"><label class="meta" for="tp-from">from</label>'
-    + '<input id="tp-from" type="date" data-role="from" value="' + esc(r.from) + '">'
-    + '<label class="meta" for="tp-to">to</label>'
-    + '<input id="tp-to" type="date" data-role="to" value="' + esc(r.to) + '">'
-    + '<button data-act="customRange">apply</button>'
-    + '<span class="meta">' + esc(r.label) + ' · ' + esc(r.from) + ' → ' + esc(r.to) + '</span></div>'
+    + dates
+    + '<div class="wrap"><span class="meta">' + esc(r.label) + ' · ' + esc(r.from) + ' → '
+    + esc(r.to) + '</span></div>'
     + '<div class="wrap"><span class="meta">providers</span>' + providers
-    + (models ? '<span class="meta">models</span>' + models : '')
+    + (models ? '<span class="meta">models' + (names.length > MODEL_CHIPS ? ' (' + names.length + ')' : '')
+       + '</span>' + models : '')
     + (vm.ui.models.length ? '<button data-act="clearModels">clear</button>' : '')
     + '</div>';
 }
@@ -619,17 +655,72 @@ function quotaCard(q) {
   return h + '</div>';
 }
 
+/**
+ * The problem kinds the two exits below actually repair. A card that failed for any other
+ * reason — offline, a rejected token, a retry pending — keeps its own problem box: offering
+ * "fetch it now" to a window that is already fetching, or the status line to a token the
+ * provider refused, would name an exit that leads nowhere.
+ */
+var INVITE_KINDS = ['consentPending', 'modeCache', 'quotaOff', 'noFile', 'unknown'];
+
+/**
+ * No reading at all. The manager always builds one card per provider, so "no cards" is not
+ * the state a user is in: what they see is a card per provider with nothing in it. Both are
+ * the same situation and both end here — every card carries no window, no extra usage and a
+ * problem one of the two exits repairs.
+ */
+function noReadingYet() {
+  if (!vm.quotas.length) return true;
+  return vm.quotas.every(function (q) {
+    return (!q.windows || !q.windows.length) && !q.extra && !!q.problem
+      && INVITE_KINDS.indexOf(q.problemKind || 'unknown') >= 0;
+  });
+}
+
+/**
+ * A state with two exits, and naming them is the whole point: nothing here invents a
+ * percentage, it says how one could be read. What each provider is waiting for is kept as a
+ * line below, so the reason is not lost with the cards it replaces.
+ */
+function quotaInvitation() {
+  const why = vm.quotas.map(function (q) {
+    return q.problem ? esc(q.title) + ': ' + esc(q.problem) : '';
+  }).filter(Boolean).join(' · ');
+  return '<div class="box info" role="status">'
+    + 'No quota reading yet. There are two ways to get one: fetch it from the provider, '
+    + 'which asks for network access first, or connect the Claude Code status line, which '
+    + 'mirrors the figures Claude Code already has on this machine.'
+    + '<br><button data-act="cmd" data-id="tokenPace.refreshQuota">Fetch quota now</button> '
+    + '<button data-act="cmd" data-id="tokenPace.connectStatusLine">Connect the status line</button>'
+    + (why ? '<div class="meta">' + why + '</div>' : '')
+    + '</div>';
+}
+
 function sQuota() {
-  if (!vm.quotas.length) return '<p class="empty">No quota reading.</p>';
+  if (noReadingYet()) return quotaInvitation();
   return vm.quotas.map(quotaCard).join('')
     + '<div class="legend"><span><i class="dot time"></i>time elapsed</span>'
     + '<span><i class="dot fc"></i>projected at the reset</span></div>';
 }
 
+/**
+ * The colour of a delta, from the figure's polarity and from nothing else. An arrow with no
+ * direction to judge — "new", a rounding dot, a figure that is neither good nor bad up — is
+ * dim: a colour there would state a verdict the number does not carry.
+ */
+function deltaClass(k) {
+  const p = k.polarity;
+  const glyph = k.delta ? k.delta.glyph : '';
+  if (p !== 'upGood' && p !== 'upBad') return 'neutral';
+  if (glyph === '▲') return p === 'upGood' ? 'good' : 'bad';
+  if (glyph === '▼') return p === 'upGood' ? 'bad' : 'good';
+  return 'neutral';
+}
+
 function sKpis() {
   return '<div class="kpis">' + vm.kpis.map(k => {
     const d = k.delta
-      ? '<span class="d ' + (k.delta.glyph === '▲' ? 'up' : k.delta.glyph === '▼' ? 'down' : '')
+      ? '<span class="d ' + deltaClass(k)
         + '">' + [k.delta.glyph, k.delta.text].filter(Boolean).map(esc).join(' ') + '</span>'
       : '';
     return '<div class="kpi" title="' + esc([k.note, k.provenance].filter(Boolean).join(' · ')) + '">'
@@ -707,13 +798,13 @@ function sTokens() {
   }
   const cal = vm.calendar;
   h += '<div class="scroll"><table><thead><tr><th>Period</th><th>Usage</th>'
-    + (vm.showCost ? '<th>API cost</th>' : '') + '<th>Req.</th><th>Active</th><th>Ø/day</th>'
+    + (vm.showCost ? '<th>API cost</th>' : '') + '<th>Req.</th><th>Active</th><th>Avg/day</th>'
     + '</tr></thead><tbody>'
     + [cal.thisWeek, cal.thisMonth, cal.lastMonth, cal.year].map(p => '<tr>'
       + '<td data-h="Period">' + esc(p.label) + '</td><td data-h="Usage">' + esc(p.usage) + '</td>'
       + (vm.showCost ? '<td data-h="API cost">' + esc(p.cost) + '</td>' : '')
       + '<td data-h="Req.">' + esc(p.requests) + '</td><td data-h="Active">' + p.activeDays
-      + '</td><td data-h="Ø/day">' + esc(p.avgPerDay) + '</td></tr>').join('')
+      + '</td><td data-h="Avg/day">' + esc(p.avgPerDay) + '</td></tr>').join('')
     + '</tbody></table></div>';
   if (cal.thisMonth.projection) {
     h += '<div class="meta">month projection ' + esc(cal.thisMonth.projection) + ' · '
@@ -805,7 +896,7 @@ function sModels() {
     + '<td data-h="Share">' + esc(r.share) + '</td>'
     + '<td data-h="Price" title="' + esc(r.price) + '">' + esc(r.priced) + '</td>'
     + '</tr>' + (r.turnAvg
-      ? '<tr><td colspan="99" class="meta">Ø turn ' + esc(r.turnAvg)
+      ? '<tr><td colspan="99" class="meta">Avg turn ' + esc(r.turnAvg)
         + (r.turnP90 ? ' · P90 ' + esc(r.turnP90) : '') + '</td></tr>' : '')).join('');
   const more = m.hidden > 0
     ? '<tr class="more"><td colspan="99">' + m.hidden
@@ -1054,12 +1145,23 @@ function sFooter() {
     + '<li>Generated ' + esc(vm.generatedAt) + '.</li></ul>';
 }
 
+/** Folded away by the reader, as the view model remembers it. */
+function collapsed(key) {
+  const list = vm.ui && Array.isArray(vm.ui.collapsed) ? vm.ui.collapsed : [];
+  return list.indexOf(key) >= 0;
+}
+
 function renderAll() {
   let h = '<div data-sec="controls" data-body="controls">' + sControls() + '</div>';
   for (const key of vm.sections) {
     if (!RENDER[key]) continue;
-    h += '<section data-sec="' + key + '"><h2>' + esc(TITLE[key] || key) + '</h2>'
-      + '<div data-body="' + key + '">' + RENDER[key]() + '</div></section>';
+    // A native <details>: the fold is the browser's, so it is keyboard reachable and
+    // announced as expandable, and the body stays in the document either way — a section
+    // update writes into it whether the reader has it open or not.
+    h += '<section data-sec="' + key + '"><details' + (collapsed(key) ? '' : ' open') + '>'
+      + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(TITLE[key] || key)
+      + '</h2></summary>'
+      + '<div data-body="' + key + '">' + RENDER[key]() + '</div></details></section>';
   }
   h += '<div data-sec="drill" data-body="drill">' + sDrill() + '</div>';
   h += '<div class="foot" data-sec="footer" data-body="footer">' + sFooter() + '</div>';
@@ -1211,7 +1313,10 @@ function act(el) {
     post({ type: 'setFilter', providers: vm.ui.providers, models: list });
   } else if (a === 'clearModels') {
     post({ type: 'setFilter', providers: vm.ui.providers, models: [] });
-  } else if (a === 'heatmapMetric') post({ type: 'setHeatmapMetric', metric: el.dataset.metric });
+  } else if (a === 'moreModels') { allModels = !allModels; renderSection('controls'); }
+  else if (a === 'customDates') { showDates = !showDates; renderSection('controls'); }
+  else if (a === 'section') post({ type: 'toggleSection', key: el.dataset.key });
+  else if (a === 'heatmapMetric') post({ type: 'setHeatmapMetric', metric: el.dataset.metric });
   else if (a === 'hourZone') post({ type: 'setHourZone', zone: el.dataset.zone });
   else if (a === 'drill') post({ type: 'drill', day: el.dataset.day || null });
   else if (a === 'costLine') { costLine = !costLine; renderSection('chart'); }
@@ -1228,7 +1333,12 @@ document.addEventListener('click', (ev) => {
 document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter' && ev.key !== ' ') return;
   const el = target(ev, '[data-act]');
-  if (el && vm && el.tagName !== 'BUTTON' && el.tagName !== 'SELECT') { ev.preventDefault(); act(el); }
+  // A <summary> turns Enter and Space into a click of its own; acting here as well would
+  // toggle the section twice and leave the fold where it started.
+  if (el && vm && el.tagName !== 'BUTTON' && el.tagName !== 'SELECT' && el.tagName !== 'SUMMARY') {
+    ev.preventDefault();
+    act(el);
+  }
 });
 document.addEventListener('change', (ev) => {
   const el = target(ev, '[data-act="metric"]');

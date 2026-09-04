@@ -43,7 +43,7 @@ setting cannot carry a Linux path onto a Windows machine.
   "fetched_at": 1788451200,
   "fail_count": 0,
   "blocked_until": 0,
-  "writer": "token-pace/1.0.0",
+  "writer": "token-pace/1.1.0",
   "body": {},
   "providers_error": null
 }
@@ -56,7 +56,7 @@ setting cannot carry a Linux path onto a Windows machine.
 | `fetched_at` | number, **Unix seconds** | **yes** | When the body was obtained from the provider — not when the file was written. This is the number every "3 min old" label and every staleness rule is built on. Seconds, not milliseconds. |
 | `fail_count` | integer | optional | Consecutive failed attempts since the last success. Shown in the "empty response" message, so a reader can distinguish "never worked" from "worked an hour ago". |
 | `blocked_until` | number, Unix seconds | optional | The writer has paused itself until this time (rate limit, backoff). While it is in the future, Token Pace shows the state `$(clock) CC paused` (tooltip: *poller paused until …*) instead of pretending the old number is current. `0` or absent means "not paused". Honoured for both providers. |
-| `writer` | string | recommended | Who wrote the file, e.g. `"token-pace/1.0.0"` or `"xfce-claude-usage/2.3"`. Diagnostics only. |
+| `writer` | string | recommended | Who wrote the file, e.g. `"token-pace/1.1.0"` or `"xfce-claude-usage/2.3"`. Diagnostics only. |
 | `body` | object **or** string | **yes** | The provider response, verbatim. See below. |
 | `providers_error` | string \| null | optional | A partial failure: some of the response is present, some is not. A reader shows what it has and marks the rest as missing — it must never render the missing half as `0 %`. |
 

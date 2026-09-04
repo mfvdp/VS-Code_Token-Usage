@@ -133,7 +133,13 @@ export function scrubHome(text: string, home: string): string {
   if (typeof home !== 'string' || home.length === 0) return text
   const h = home.replace(/[\\/]+$/, '')
   if (h.length === 0) return text
-  return text.split(h).join('~')
+  let out = text.split(h).join('~')
+  // A Windows home inside already-serialised JSON has every separator doubled
+  // (`C:\\Users\\jane`), so the raw form above never matches it. Callers should
+  // scrub before serialising; this second pass is what saves the ones that do not.
+  const escaped = JSON.stringify(h).slice(1, -1)
+  if (escaped !== h) out = out.split(escaped).join('~')
+  return out
 }
 
 /**
@@ -249,18 +255,27 @@ function row(label: string, value: string): string {
   return `${label.padEnd(16)}${value}`
 }
 
+/**
+ * One setting as the report prints it.
+ *
+ * `tildify` handles the values that *are* a path; `scrubHome` handles everything
+ * else — a home directory inside a value under a key the path pattern does not
+ * match would otherwise be the one place where the report breaks its own promise.
+ *
+ * Both run inside the `JSON.stringify` replacer, i.e. on the raw strings and not
+ * on the serialised text: on Windows serialisation doubles every separator, so a
+ * scrub applied to the finished JSON would look for `C:\Users\jane` in a string
+ * that by then reads `C:\\Users\\jane` and leave the account name standing.
+ */
 function settingValue(key: string, value: unknown, home: string): string {
   const short = key.startsWith('tokenPace.') ? key.slice('tokenPace.'.length) : key
   if (SECRET_KEY_RE.test(short)) return '<redacted>'
   if (value === undefined) return 'undefined'
-  if (PATH_KEY_RE.test(short)) {
-    if (typeof value === 'string') return JSON.stringify(tildify(value, home))
-    if (Array.isArray(value)) {
-      return JSON.stringify(value.map((v) => (typeof v === 'string' ? tildify(v, home) : v)))
-    }
-  }
+  const isPath = PATH_KEY_RE.test(short)
+  const replacer = (_k: string, v: unknown): unknown =>
+    typeof v === 'string' ? scrubHome(isPath ? tildify(v, home) : v, home) : v
   try {
-    return JSON.stringify(value) ?? String(value)
+    return JSON.stringify(value, replacer) ?? String(value)
   } catch {
     return '<unserialisable>'
   }
@@ -306,7 +321,9 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
   lines.push('')
 
   lines.push('## Data')
-  lines.push(row('Roots', roots.length > 0 ? roots.map(safe).join(', ') : 'none'))
+  // The caller shortens the roots; scrubbing them again costs nothing and means the
+  // promise does not depend on a caller getting it right.
+  lines.push(row('Roots', roots.length > 0 ? roots.map((r) => safe(scrubHome(r, home))).join(', ') : 'none'))
   lines.push(row('Transcripts', `${fileCount} file(s)`))
   const buckets = Object.keys(snapshot.buckets)
     .map((res) => `${res}=${snapshot.buckets[res]}`)

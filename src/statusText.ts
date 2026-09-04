@@ -329,10 +329,33 @@ function statePrefix(display: WindowDisplay): string {
   return ''
 }
 
-export function windowValue(view: WindowView, cfg: Config): string {
+/**
+ * The two states that must survive every channel being switched off. `$(warning)` is an
+ * icon, `⛔` is an emoji and the alarm background is a colour — `indicator: color`,
+ * `colorMode: monochrome` and high-contrast themes each remove one of them, so the state is
+ * said in plain words as well. The wording is the one `viewModel.ts` uses.
+ */
+const STATE_WORD: Partial<Record<WindowDisplay, string>> = {
+  exhausted: 'exhausted',
+  limitReached: 'limit reached',
+}
+
+export function stateWord(display: WindowDisplay): string | null {
+  return STATE_WORD[display] ?? null
+}
+
+/**
+ * The figure plus, where there is one, the state in words: `25%`, `100% exhausted`, `∞`.
+ *
+ * `state: false` drops the word for a caller that already prints it in a column of its own;
+ * "100% exhausted … exhausted" is one fact stated twice, not two facts.
+ */
+export function windowValue(view: WindowView, cfg: Config, opts: { state?: boolean } = {}): string {
   if (view.display === 'unlimited') return '∞'
   if (view.display === 'resetDue') return 'reset due'
-  return percentText(view.w.percent, cfg.percentMode, cfg.overflowDisplay)
+  const figure = percentText(view.w.percent, cfg.percentMode, cfg.overflowDisplay)
+  const word = STATE_WORD[view.display]
+  return word === undefined || opts.state === false ? figure : `${figure} ${word}`
 }
 
 function barFor(view: WindowView, cfg: Config): string {
@@ -375,10 +398,10 @@ function resetSuffix(view: WindowView, cfg: Config, now: number, tcfg: TimeConfi
   if (view.display === 'resetDue') return ''
   const t = formatReset(view.w.resetsAt, now, cfg.resetFormat, tcfg)
   if (t === '') return ''
-  // At the top of the window the countdown is the only actionable number left, so it is
-  // named rather than left as a bare duration next to "100%".
-  const named = view.display === 'exhausted' || view.display === 'limitReached'
-  return named ? ` · resets ${t}` : ` · ${t}`
+  // Always named. A bare "· 42m" next to a percentage is unreadable beside the stale-age
+  // suffix, which is also a bare duration — one of the two has to say what it counts, and
+  // the age already carries `$(history)`, so the reset carries the word.
+  return ` · resets ${t}`
 }
 
 function ageSuffix(q: QuotaState, stale: boolean, cfg: Config, now: number): string {
@@ -485,7 +508,7 @@ export function problemView(q: QuotaState, cfg: Config, now: number): ProblemVie
       }
     case 'forbidden':
       return {
-        kind, icon: '$(lock)', message: '403', command: 'tokenPace.openUsagePage', args: [q.source],
+        kind, icon: '$(lock)', message: '403', command: 'tokenPace.showOutput',
         explain: 'The provider refused the usage endpoint (HTTP 403). This may mean a Team or Enterprise account without a usage endpoint — token counts keep working.',
         check: 'Check: the official usage page in the browser; if it works there and not here, the endpoint is not available for this account.',
       }
@@ -504,7 +527,7 @@ export function problemView(q: QuotaState, cfg: Config, now: number): ProblemVie
       }
     case 'noFile':
       return {
-        kind, icon: '', message: '–', command: 'tokenPace.openSettings',
+        kind, icon: '', message: '–', command: 'tokenPace.rescan',
         explain: 'The configured quota cache file does not exist.',
         check: 'Check: `tokenPace.claudeQuotaFile` / `tokenPace.codexQuotaFile`, or enable another source.',
       }
@@ -532,7 +555,7 @@ export function problemView(q: QuotaState, cfg: Config, now: number): ProblemVie
       }
     default:
       return {
-        kind: 'unknown', icon: '', message: '–', command: 'tokenPace.refreshQuota',
+        kind: 'unknown', icon: '', message: '–', command: 'tokenPace.showOutput',
         explain: q.problem ? 'The quota could not be read.' : 'No quota reading is available.',
         check: 'Check: the log holds the raw reason. Clicking here tries again.',
       }
@@ -578,7 +601,10 @@ function windowRow(view: WindowView, cfg: Config, now: number, tcfg: TimeConfig)
   })
   const painted = cfg.colorMode === 'theme' ? colorSpan(PACE_COLOR[view.level], bar) : bar
   const elapsed = view.elapsed === null ? '–' : `${Math.round(view.elapsed)} %`
-  return `| ${view.w.label} | ${painted} ${windowValue(view, cfg)} | ${elapsed} | ${view.verdict.text} | `
+  // The Pace column stands right beside the value here, so the state word is dropped from
+  // the value whenever that column already carries exactly it.
+  const value = windowValue(view, cfg, { state: stateWord(view.display) !== view.verdict.text })
+  return `| ${view.w.label} | ${painted} ${value} | ${elapsed} | ${view.verdict.text} | `
     + `${tooltipReset(view.w, cfg, now, tcfg)} |`
 }
 
@@ -733,7 +759,7 @@ function explanations(ctx: RenderContext, opts: { quota: boolean; codex: boolean
   const out: string[] = []
   if (opts.quota) {
     out.push('')
-    out.push('_“Elapsed” is how much of the window’s own time has passed. Usage above it means you are ahead of the clock; the verdict names the difference in points._')
+    out.push('_“Elapsed” is how much of the window’s own time has passed. Usage above it means you are ahead of the clock; the verdict names the difference in percent of the window._')
     out.push('')
     out.push('_The percentage comes from the provider and covers **all** clients (desktop app and browser included). It cannot be derived from the token counts below._')
   }
@@ -1072,7 +1098,9 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       const { from, to } = periodRange(ctx)
       let total = 0
       for (const s of scopeSources(cfg)) total += billableOf(ctx, from, to, s)
-      const suffix = cfg.summary.period === 'today' ? '' : ` · ${cfg.summary.period}`
+      // Always printed: "Σ 2.6M" alone is a number without a period, and today is the one
+      // period a reader is most likely to assume wrongly.
+      const suffix = ` · ${cfg.summary.period}`
       const click = clickCommand(cfg, null)
       return {
         id: 'tokenPace.tokens',
@@ -1097,7 +1125,9 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       }
       // Exactly zero is absence, not a bill: '–' rather than '$0.00'.
       const money = usdSum === 0 ? '–' : estimate(usd(usdSum))
-      const suffix = cfg.summary.period === 'today' ? '' : ` · ${cfg.summary.period}`
+      // Same rule as the tokens item: the period is always named, so "today" cannot be mistaken for
+      // the range of the dashboard.
+      const suffix = ` · ${cfg.summary.period}`
       const click = clickCommand(cfg, null)
       return {
         id: 'tokenPace.cost',

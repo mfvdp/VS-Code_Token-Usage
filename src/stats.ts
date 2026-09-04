@@ -28,6 +28,13 @@ import { Bucket, SessionRec, Source, Tier } from './types'
 // Shapes the view model hands on unchanged (it re-exports these types).
 // ---------------------------------------------------------------------------
 
+/**
+ * Which direction is the good one for this figure. The renderers colour a delta from this
+ * and from nothing else: "more" is bad for usage and for money, good for a cache hit rate,
+ * and neither for a count of days — a green arrow on a rising bill is a lie in one colour.
+ */
+export type KpiPolarity = 'upGood' | 'upBad' | 'neutral'
+
 export interface Kpi {
   key: string
   label: string
@@ -36,6 +43,8 @@ export interface Kpi {
   // The badge's own type, so a hand-written badge cannot reintroduce a glyph the renderers
   // would print beside the text ("new new").
   delta: ReturnType<typeof deltaBadge> | null
+  /** What a rise means. Never a colour: the three views each pick their own. */
+  polarity: KpiPolarity
   spark: number[]
   note: string | null
 }
@@ -506,6 +515,11 @@ function factsFor(ctx: StatsCtx, from: string, to: string): RangeFacts {
 /**
  * The KPI row: one figure per card, its change against the equally long previous period, and
  * a fourteen-day shape. A missing previous period yields "new" rather than an infinite rise.
+ *
+ * The first tile is deliberately not about the selected range: "today" is the figure someone
+ * opens the panel for, and a reader who has switched the range to last month should not have
+ * to switch back to see it. Its delta is against yesterday, the only comparison that makes
+ * "today" mean anything, and it says so in its note.
  */
 export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null): Kpi[] {
   const cur = factsFor(ctx, range.from, range.to)
@@ -523,12 +537,14 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
   const prevAvg = prev && prev.activeDays > 0 ? prev.usage / prev.activeDays : null
 
   const out: Kpi[] = [
+    todayKpi(ctx, delta),
     {
       key: 'usage',
       label: 'Usage',
       value: tokens(cur.usage),
       provenance: 'measured',
       delta: prev ? delta(cur.usage, prev.usage) : { glyph: '', text: 'new' },
+      polarity: 'upBad',
       spark: usageSpark,
       note: 'fresh input + cache write + output',
     },
@@ -538,6 +554,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       value: tokens(cur.requests),
       provenance: 'measured',
       delta: prev ? delta(cur.requests, prev.requests) : { glyph: '', text: 'new' },
+      polarity: 'upBad',
       spark: reqSpark,
       note: 'a Codex token_count event is not necessarily one turn',
     },
@@ -547,6 +564,7 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       value: percentOf(cur.hit.num, cur.hit.den),
       provenance: 'derived',
       delta: hitRate === null ? null : prevHit === null ? { glyph: '', text: 'new' } : delta(hitRate, prevHit),
+      polarity: 'upGood',
       spark: seriesOf(ctx, sparkDays, 'cacheRead'),
       note: 'cache reads ÷ input',
     },
@@ -556,31 +574,65 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       value: len > 0 ? `${cur.activeDays} of ${len}` : '–',
       provenance: 'measured',
       delta: prev ? delta(cur.activeDays, prev.activeDays) : { glyph: '', text: 'new' },
+      // Working on more days is neither good nor bad; it is a habit, not a budget.
+      polarity: 'neutral',
       spark: usageSpark.map((v) => (v > 0 ? 1 : 0)),
       note: null,
     },
     {
       key: 'avgPerActiveDay',
-      label: 'Ø per active day',
+      label: 'Avg per active day',
       value: avg === null ? '–' : compact(avg),
       provenance: 'derived',
       delta: avg === null ? null : prevAvg === null ? { glyph: '', text: 'new' } : delta(avg, prevAvg),
+      // A quotient of two figures that each have their own direction: a rise can be less
+      // usage on fewer days. Colouring it would name a winner that the number does not.
+      polarity: 'neutral',
       spark: usageSpark,
       note: null,
     },
   ]
   if (ctx.showCost) {
-    out.splice(1, 0, {
+    out.splice(2, 0, {
       key: 'cost',
       label: 'API equivalent',
       value: costText(cur.cost),
       provenance: 'estimated',
       delta: prev ? delta(cur.cost, prev.cost) : { glyph: '', text: 'new' },
+      polarity: 'upBad',
       spark: costSpark,
       note: 'hypothetical: what this usage would have cost through the API',
     })
   }
   return out
+}
+
+/**
+ * Today, whatever range is selected — with its hypothetical cost beside it when costs are
+ * shown, because those are the two numbers people check first.
+ *
+ * Absence stays absence: a day with nothing in it is a dash, and with no usage on either day
+ * there is no change to report rather than a "±0%" about two measurements nobody took.
+ */
+function todayKpi(
+  ctx: StatsCtx,
+  delta: (c: number, p: number | null) => ReturnType<typeof deltaBadge>,
+): Kpi {
+  const today = dayOf(ctx.now, ctx.tcfg)
+  const yesterday = addDays(today, -1)
+  const cur = factsFor(ctx, today, today)
+  const prev = factsFor(ctx, yesterday, yesterday)
+  const cost = ctx.showCost ? costText(cur.cost) : '–'
+  return {
+    key: 'today',
+    label: 'Today',
+    value: tokens(cur.usage) + (ctx.showCost && cost !== '–' ? ` · ${cost}` : ''),
+    provenance: 'measured',
+    delta: cur.usage === 0 && prev.usage === 0 ? null : delta(cur.usage, prev.usage),
+    polarity: 'upBad',
+    spark: seriesOf(ctx, lastDaysEndingAt(today, SPARK_POINTS), 'usage'),
+    note: 'since the day boundary · against yesterday',
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -726,7 +778,7 @@ function projectMonth(
   const total = f.cost + perDay * remaining
   return {
     projection: costText(total),
-    projectionBasis: `so far ${usd(f.cost)} · Ø ${usd(perDay)}/day · ${remaining} days left`,
+    projectionBasis: `so far ${usd(f.cost)} · Avg ${usd(perDay)}/day · ${remaining} days left`,
   }
 }
 

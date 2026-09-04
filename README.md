@@ -5,19 +5,30 @@ status bar, with a detailed tooltip, a dashboard in the secondary sidebar, and t
 views for the places a webview cannot go.
 
 The bars are coloured by **pace**, not by level: green while consumption stays at or below
-the share of the window that has already elapsed, yellow once it runs ahead of the clock,
+the share of the window that has already elapsed, yellow once it runs ahead of pace,
 red when the window is spent. A 60 % bar is reassuring an hour before the reset and alarming
 five minutes in — a fixed threshold cannot tell those apart.
 
 ```
-CC 5h ██┃▁▁▁▁▁ 25% · 2h14m   CC 7d █████┃▁▁ 69% ▲ · 4d 6h   CC Fable 7d █┃▁▁▁▁▁▁ 12% · 4d 6h
-CDX 5h ███┃▁▁▁▁ 33% · 1h05m   CDX 7d ██████┃▁ 71% ▲ · 5d 2h   Σ 4.6M   ~$1.23
+CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m      CC 7d █████┃▁▁ 69% ▲ · resets 4d 6h
+CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁▁▁▁▁ 12% · resets 4d 6h
+Σ 4.6M · today                         ~$1.23 · today
 ```
 
+![Token Pace in the VS Code status bar: one entry per quota window, each with a pace-coloured bar, an elapsed marker, the percentage and the countdown to its reset](media/screenshot-status-bar.png)
+
+![The Token Pace dashboard in the secondary sidebar: quota cards with forecast and sustainable rate, the KPI row, the daily chart and the model table](media/screenshot-dashboard.png)
+
+Both pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States*
+and a synthetic snapshot), not from anybody's real usage. The tooltip behind the bar is
+described in full under [Tooltip](#tooltip).
+
 One entry per quota window, including the model-scoped ones. `tokenPace.windowSelect` decides
-how many of them appear, `tokenPace.statusBar.show` decides which kinds of entry exist at all
-**and in which order**, and `tokenPace.density` decides how much text each one gets. Every
-state the bar can show is listed in [docs/status-bar-states.md](docs/status-bar-states.md).
+how many of them appear — out of the box `worstPace`, which gives each tool the single window
+that needs attention, while `all` puts every window in the bar. `tokenPace.statusBar.show`
+decides which kinds of entry exist at all **and in which order**, and `tokenPace.density`
+decides how much text each one gets. Every state the bar can show is listed in
+[docs/status-bar-states.md](docs/status-bar-states.md).
 
 **Out of the box this extension makes no network access at all.** Token counts are read from
 local transcript files. Quota percentages come from the provider, and out of the box they are
@@ -26,6 +37,12 @@ read from local sources somebody else wrote — a cache file, Claude Code's own 
 for once, in a dialog that states exactly what is sent where — see
 [Quota sources](#quota-sources). No usage data is collected, and nothing is written outside
 the extension's own storage unless you turn on one of the two opt-ins and confirm its dialog.
+
+**Requires VS Code 1.106 or newer.** The dashboard lives in the secondary sidebar, and
+`contributes.viewsContainers.secondarySidebar` only became a stable contribution point in
+1.106 (in 1.104 it was behind the `contribSecondarySideBar` proposed API). Editors built on an
+older VS Code base — Cursor and Windsurf currently are — cannot install it until they rebase;
+VSCodium tracks the VS Code releases and gets it from Open VSX.
 
 Not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI. “Claude” and “Codex”
 are the trademarks of their respective owners and are used here only to name the tools whose
@@ -65,6 +82,23 @@ Absence is never drawn as a number: a missing figure is `–`, never `0 %` or `$
 without a stated length gets no pace and no forecast rather than an invented denominator; a
 day with no data has no row in an export rather than a row of zeros.
 
+## Words used here
+
+Nine terms carry most of the meaning in this extension. Each is used in exactly one sense, in
+the status bar, the tooltip, the dashboard and the exports alike.
+
+| Term | What it means |
+|---|---|
+| **Window** | One quota bucket of a provider, with a length and a reset time: Claude's 5-hour session, its 7-day plan window, a model-scoped 7-day window, Codex's 5-hour and 7-day limits. Every figure belongs to a window; nothing is ever summed across two |
+| **Pace** | Consumption compared with the share of the window that has **already elapsed**, not with a fixed threshold. `ratio = (used ÷ limit) ÷ (elapsed ÷ window)`; `1.0` is exactly on pace |
+| **Ahead of pace / spare** | The same relation as a difference of percentages (`used % − elapsed %`). Above the line it reads `5 % ahead of pace`, below it `36 % of the window still spare`. The unit is percentage points of the window, written `%` — the same sign as the figure above it |
+| **Elapsed marker** | The `┃` inside the bar, at the position the window's own clock has reached. Fill left of it is spare, fill right of it is ahead of pace. It is what makes the verdict readable without colour |
+| **Sustainable rate** | The rate that would just last until the reset — `~18.8 %/h keeps it to the reset`. Arithmetic on the remaining share and the remaining hours, not a prediction, so it carries `~` |
+| **Lower bound** | A figure that is certainly *at least* this large but may be larger: output of Claude subagents, and of any response with no terminal line, is counted but cannot be counted completely. Marked `⚠` in the tooltip, the tables and the exports, and never quietly rounded up |
+| **Provenance** | Where a number came from and how sure it is. Every view carries it: `measured: quota, tokens · estimated: ~API cost`, and per model `exact` / `family` / `custom` / `none` |
+| **Poll vs cache** | *Poll* is a request Token Pace makes itself, with your access token, after consent. *Cache* is a reading somebody else already fetched — a cache file, Claude Code's status line, `~/.claude.json`, the Codex transcripts. Cache costs nothing and touches no network; its age is always shown |
+| **Forecast state** | The named answer a forecast gives instead of a bare number: `none`, `full`, `stale`, `measuring`, `idle`, `resetsFirst` (`~ends at 62 % when it resets`) or `eta` (`~empty in 3.2 h (15:42) · medium confidence`) |
+
 ## Pace, not level
 
 Each bar carries a tick marking how much of that window's own time has already passed, and
@@ -77,14 +111,15 @@ ratio = (used ÷ limit) ÷ (elapsed ÷ window)
 ```
 
 `1.0` is exactly on pace; above `1.0` you are consuming faster than the window refills. The
-same relation is stated in **percentage points** (`used % − elapsed %`), because that number
-stays readable near the start and the end of a window where the ratio explodes towards
-infinity. The tooltip always names the difference in points, tolerance or not.
+same relation is stated as a **difference of percentages** (`used % − elapsed %`), because that
+number stays readable near the start and the end of a window where the ratio explodes towards
+infinity. The unit is percentage points of the window, and it is written `%` — the same sign as
+the figure above it. The tooltip always names the difference, tolerance or not.
 
 Two guards keep the verdict honest:
 
-* **Tolerance band.** A window has to run more than *n* points ahead of the clock before it
-  is coloured at all — otherwise the bar would flip colour on rounding noise.
+* **Tolerance band.** A window has to run more than *n* points ahead of pace before it is
+  coloured at all — otherwise the bar would flip colour on rounding noise.
 * **Minimum elapsed.** Right after a reset `elapsed ≈ 0`, so the ratio explodes and the very
   first prompt would always look too fast. Below the minimum the verdict reads
   `measuring · window just reset` and stays green.
@@ -101,12 +136,12 @@ Two guards keep the verdict honest:
 | Colour | Meaning |
 |---|---|
 | 🟢 green | usage at or below the elapsed share plus the tolerance — on pace |
-| 🟡 yellow (▲) | usage ahead of the clock beyond the tolerance |
+| 🟡 yellow (▲) | usage ahead of pace beyond the tolerance |
 | 🟡 amber (▲▲) | more than three times the tolerance ahead — only with `pace.levels: graded` |
 | 🔴 red | the window is spent (≥ 99.5 %); the status bar entry also gets an alarm background |
 
 Exhaustion outranks everything: a full window is a fact, not a tendency. The verdict text is
-one of `on pace`, `N points ahead of the clock`, `N points in reserve`,
+one of `on pace`, `5 % ahead of pace`, `36 % of the window still spare`,
 `measuring · window just reset`, `no clock for this window`, `exhausted`.
 
 An absolute level says little on its own: 80 % used is comfortable six days into a weekly
@@ -122,16 +157,17 @@ Windows that report no reset time have nothing to compare against; they stay gre
 they are spent.
 
 **Sustainable rate.** For a window with a reset in the future, Token Pace also states the
-rate that would just last until then — `allowed 3.4 %/h` in the tooltip, and per hour and per
-day in the dashboard. It is arithmetic on the remaining share, not a prediction.
+rate that would just last until then — `allowed 3.4 %/h` in the tooltip and
+`~18.8 %/h keeps it to the reset` in the dashboard, per hour and per day. It is arithmetic on
+the remaining share, not a prediction, which is why it carries `~`.
 
 ## Status bar
 
 ### What an entry is made of
 
 ```
-[state glyph] LABEL WINDOW [bar] VALUE [indicator] [· reset] [$(history) age]
-   $(warning)   CC    5h   ██┃▁▁▁▁▁  25%     ▲        · 2h14m      $(history) 12m
+[state glyph] LABEL WINDOW [bar] VALUE [indicator] [· resets …] [$(history) age]
+   $(warning)   CC    5h   ██┃▁▁▁▁▁  25%     ▲      · resets 2h14m   $(history) 12m
 ```
 
 * **Entries.** `tokenPace.statusBar.show` is an ordered array of `claudeQuota`, `codexQuota`,
@@ -141,9 +177,10 @@ day in the dashboard. It is arithmetic on the remaining share, not a prediction.
 * **Density.** `full` (default) gives every window its own entry, `compact` folds a provider's
   windows into one item (`CC 25%·2h14m | 69%·6d`), `minimal` folds every provider into a
   single `TP 69% ▲`. Problem states are never folded — a named cause is the point.
-* **Window selection.** `tokenPace.windowSelect`: `all` (up to nine entries), `leading` (the
-  most-utilised window per tool), `worstPace` (the worst pace verdict, and within one verdict
-  the most-utilised of those windows), `session`, `weekly`, or `auto`. **The `auto` rule:** session windows only, unless *every*
+* **Window selection.** `tokenPace.windowSelect`: `worstPace` (the worst pace verdict, and within
+  one verdict the most-utilised of those windows — the default, so each tool contributes exactly
+  one entry), `all` (every window, up to nine entries), `leading` (the most-utilised window per
+  tool), `session`, `weekly`, or `auto`. **The `auto` rule:** session windows only, unless *every*
   session window is below **30 %**, in which case every window is shown. The tooltip states
   what `auto` decided and why. A filter that would match nothing falls back to the full list.
   *Token Pace: Cycle Status Bar Windows* steps through the values without opening settings.
@@ -156,7 +193,7 @@ day in the dashboard. It is arithmetic on the remaining share, not a prediction.
 * **Time marker.** `timeProgressStyle`: `marker` (the `┃` sits where the window's own clock
   stands — needs a width of at least 6), `bar` (a second track underneath), `none`. This is
   what makes pace readable **without colour**: fill left of the marker is reserve, fill right
-  of it is ahead of the clock.
+  of it is ahead of pace.
 * **Indicator.** `tokenPace.indicator` decides whether the verdict is signalled by `color`,
   `glyph` (`▲` / `▲▲`), `both` (default) or `none`. Colour alone is invisible to red-green
   colour blind readers and disappears in themes that tint the whole status bar.
@@ -166,8 +203,9 @@ day in the dashboard. It is arithmetic on the remaining share, not a prediction.
   there.
 * **Countdown.** `resetFormat`: `none`, `relative` (`45m`, `2h14m`, `3d 5h`), `absolute`
   (`06:00`, with a weekday prefix beyond a day), `both`. `resetHourCycle` picks 12- or
-  24-hour, `auto` follows the OS locale. A window whose provider states no reset time gets
-  **no** countdown, ever.
+  24-hour, `auto` follows the OS locale. The countdown is always introduced by the word
+  `resets` — a bare `· 2h14m` would read like the age suffix, and the two move in opposite
+  directions. A window whose provider states no reset time gets **no** countdown, ever.
 * **Age.** `showAgeInItem`: `never`, `whenStale` (default), `always`. The age is recomputed at
   every redraw, so it never freezes at the value it had when it was fetched. A reading older
   than `staleAfterMinutes` (default 20) is greyed with `tokenPace.stale`, marked in the
@@ -182,15 +220,15 @@ day in the dashboard. It is arithmetic on the remaining share, not a prediction.
 
 | Text | Meaning |
 |---|---|
-| `$(warning) CC 5h ██████┃█ 100% · resets 47m` | exhausted (≥ 99.5 %) — alarm background; the countdown is named so it cannot be read as a percentage |
-| `⛔ CC 5h ████████ 100%` | the provider itself reports the limit as reached — a flag, not a derivation |
+| `$(warning) CC 5h ██████┃█ 100% exhausted · resets 47m` | exhausted (≥ 99.5 %) — alarm background; the state is also said in words, because the icon and the background can both be switched off, and every countdown is named `resets`, so it can be read neither as a percentage nor as the reading age |
+| `⛔ CC 5h ████████ 100% limit reached` | the provider itself reports the limit as reached — a flag, not a derivation |
 | `CC 5h ████████ 111%` | above 100.5 %: usage billed beyond the plan. `overflowDisplay: clamp` shows `100%` instead — the figure is real, not a rounding error |
-| `CC 7d ∞ · 3d 5h` | a window or credit pot without a limit: no bar and no pace, because there is no denominator |
+| `CC 7d ∞ · resets 3d 5h` | a window or credit pot without a limit: no bar and no pace, because there is no denominator |
 | `CC 5h ▁▁▁▁▁▁▁▁ reset due` | the reset has passed and no reading newer than it has arrived. The gauge is never set to 0 by us; a re-poll is scheduled instead |
 | `CC extra $12.00 of $50.00 · 24 %` | extra usage, in its own blue |
 | `CC $(graph) 5h ~empty in 40m` | the forecast entry — an estimate, and it carries `~` |
-| `Σ 4.6M` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope` |
-| `~$1.23 ⚠` | hypothetical API cost; `⚠` means some tokens have no price and are missing from the sum |
+| `Σ 4.6M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope`; the period is always named |
+| `~$1.23 · today ⚠` | hypothetical API cost; `⚠` means some tokens have no price and are missing from the sum |
 | `$(shield) CC consent`, `$(key) CC no token`, `$(cloud-offline) CC offline`, … | a named cause replaces the figure, and the click performs the repair for *that* cause |
 
 The full matrix — every text, which state wins, which colour, and the one thing to check —
@@ -198,9 +236,11 @@ is [docs/status-bar-states.md](docs/status-bar-states.md).
 
 ### Clicking
 
-`tokenPace.clickAction` is `menu` (default), `dashboard`, `refresh` or `openWebsite`. In a
-problem state the click always performs the repair step instead. The menu is a QuickPick with
-every action; an action the current state cannot perform stays in the list and says why
+`tokenPace.clickAction` is `dashboard` (default), `menu`, `refresh` or `openWebsite`. In a
+problem state the click always performs the repair step for that cause instead — the table in
+[If the bar says …](#if-the-bar-says-) lists which. *Token Pace: Show Actions Menu* is a
+QuickPick with every action, including *Show usage as text (Markdown)*; an action the current
+state cannot perform stays in the list and says why
 (`disabled: another VS Code window holds the lease and polls`) rather than disappearing.
 
 ### Tooltip
@@ -211,8 +251,9 @@ twelve lines) or `off`. The full tooltip carries the window table
 explanation, extra usage, the freshness line (`Updated 3 min ago · cache file`), token tables
 for today / 7 days / 30 days, the composition and cache-hit line, a provenance line
 (`measured: quota, tokens · estimated: ~API cost`), the explanatory paragraphs, and the action
-footer. `tooltipExplanations: false` drops the explanations; the uncertainty markers (`~`,
-`⚠`) and the provenance line are never hidden by it.
+footer. `tooltipExplanations` is **off** by default — the paragraphs are worth reading once,
+not on every hover; `true` brings them back. The uncertainty markers (`~`, `⚠`) and the
+provenance line are never hidden by it.
 
 Only this extension's own argument-less commands are ever linked from the tooltip, and a link
 that would do nothing in the current state — *Fetch now* while consent is denied, in
@@ -225,8 +266,8 @@ Four contributed theme colours, overridable in `workbench.colorCustomizations`:
 
 ```jsonc
 "workbench.colorCustomizations": {
-  "tokenPace.paceOk":    "#89D185",  // on pace or in reserve            (dark default)
-  "tokenPace.paceWarn":  "#CCA700",  // ahead of the clock beyond the tolerance
+  "tokenPace.paceOk":    "#89D185",  // on pace, or spare left over       (dark default)
+  "tokenPace.paceWarn":  "#CCA700",  // ahead of pace beyond the tolerance
   "tokenPace.paceAhead": "#D18616",  // second level, only with pace.levels: graded
   "tokenPace.stale":     "#8B8B8B"   // reading older than staleAfterMinutes
 }                                    // stale defaults to descriptionForeground
@@ -248,15 +289,16 @@ writes no file, and never mixes with the live items.
 
 ## Dashboard
 
-*Token Pace: Open Dashboard* (`ctrl+alt+shift+t`, `cmd+alt+shift+t` on macOS) opens the panel
-in the secondary sidebar. `tokenPace.dashboard.sections` is an ordered array — the array order
-is the render order:
+*Token Pace: Open Dashboard* (`ctrl+alt+shift+t`, `cmd+alt+shift+t` on macOS, unless
+`tokenPace.keybindings` is off) opens the panel in the secondary sidebar. It needs
+**VS Code 1.106 or newer**, for the reason given at the top of this file.
+`tokenPace.dashboard.sections` is an ordered array — the array order is the render order:
 
 | Section | Contents |
 |---|---|
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
 | `quota` | One card per provider: bar with elapsed tick and a second tick for the projected value at the reset, verdict, reset, forecast line, sustainable rate, sparkline, extra usage, and a freshness row (last check · last data · last local event · next refresh · snapshot age) |
-| `kpis` | Usage, API equivalent, requests, cache hit, active days, Ø per active day — each with a delta against the previous period and a sparkline |
+| `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |
 | `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost), the composition bar, cache economy, calendar periods and the plan factor |
 | `chart` | Stacked daily (or weekly) bars for the selected range, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
 | `models` | Per-model breakdown with usage, output, requests, cache hit, cost, share and price provenance; sortable, with average and P90 turn length where enough samples exist |
@@ -273,14 +315,22 @@ attribution is switched on and say so instead of showing an empty table.
 
 **Ranges.** Chips for `today`, `yesterday`, `7d`, `30d`, `90d`, `thisWeek`, `thisMonth`,
 `lastMonth`, `year`, `all`, plus two date fields for a custom range (capped at five years, and
-a reversed range is swapped rather than returned empty). `dashboard.defaultRange` is the
+a reversed range is swapped rather than returned empty). The date fields stay hidden until you
+open them with the `custom…` chip, or until the range actually is a custom one, so the common
+case is chips only. `dashboard.defaultRange` is the
 starting point; the range you pick is remembered for the session. `all` starts at the first
 day actually ingested, never earlier.
 
-**Filters and sorting.** Provider toggles, up to twelve model chips, and a sortable model
-table (`model`, `usage`, `output`, `requests`, `cost`, `cacheHit`, ascending or descending).
+**Filters and sorting.** Provider toggles, up to twelve model chips — folded behind a
+`models (N)` toggle above four, because a long chip row pushes the figures off the panel — and a
+sortable model table (`model`, `usage`, `output`, `requests`, `cost`, `cacheHit`, ascending or descending).
 Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The heatmap
 switches between `usage` and `cost`; the hour profile between local time and UTC.
+
+**Collapsing.** Every section header is a toggle. What you collapse is remembered with the rest
+of the view state (range, sort, filters), so a panel you have trimmed to two sections opens that
+way again. `tokenPace.dashboard.sections` decides what exists at all; collapsing decides what
+you look at today.
 
 **Peak hours.** No fixed peak windows are built in. The profile is drawn from your own hour
 buckets and nothing else; a weekday × 4-hour cell stays empty below three distinct days of
@@ -298,7 +348,7 @@ only the current cycle, and restarts at a limit re-basing, so neither a reset no
 limit bends the slope.
 
 **Reset retrospective.** Over completed cycles: how often the window hit the limit, and the
-average number of points left unused at the reset. Below three complete cycles it says
+average share of the window left unused at the reset. Below three complete cycles it says
 `not enough data yet` and names how many it has. Incomplete cycles stay visible as incomplete
 rather than being counted — VS Code is not running all day, and a cycle seen through three
 readings would understate its peak.
@@ -312,10 +362,15 @@ of equal length. Growth from nothing reads `new`, not an infinite rise; a change
 point gets a neutral dot rather than an arrow that flips on noise. `all` has no predecessor and
 gets no delta.
 
+The colour of a delta comes from what the change **means**, never from its sign: more usage,
+more cost and more requests are marked as the bad direction, a higher cache hit rate as the good
+one, and active days and the per-day average carry no judgement at all and stay neutral. A green
+arrow therefore never has to be read twice.
+
 **Calendar periods and the month projection.** This week, this month, last month and this year,
-each with usage, cost, requests, active days and Ø/day. The month projection extrapolates the
+each with usage, cost, requests, active days and Avg/day. The month projection extrapolates the
 cost per *elapsed* day over the days left and shows its derivation
-(`so far $41.20 · Ø $2.06/day · 11 days left`). Below five active days it stays silent.
+(`so far $41.20 · Avg $2.06/day · 11 days left`). Below five active days it stays silent.
 
 **Plan factor.** With `tokenPace.planPriceUsd` set (`{"claude": 100, "codex": 20}`), one line
 says how many times over the hypothetical API cost exceeds what you pay. Leave it empty and the
@@ -336,8 +391,8 @@ model, so the numbers cannot drift apart, and a test counts the rows of one agai
 columns are focusable buttons. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
-range, a sort, a filter, a metric, a drill day or one of nine named commands — never a path and
-never a setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
+range, a sort, a filter, a metric, a drill day, a section toggle, or one of a fixed list of named
+commands — never a path and never a setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
 carry the same figures.
 
 ## Quota sources
@@ -663,15 +718,18 @@ sections with it.
 
 ## Alerts
 
-**Off by default: with `tokenPace.alerts.thresholds` empty, Token Pace shows no notifications at
-all.** A quota warning is only worth anything if it is rare, so every rule is deliberately quiet:
+**One threshold out of the box: `tokenPace.alerts.thresholds` is `[90]`.** A window that crosses
+90 % while it is also ahead of pace, more than an hour before its reset, and from a reading that
+is not stale, produces one notification. **Emptying the list switches notifications off
+entirely.** A quota warning is only worth anything if it is rare, so every rule is deliberately
+quiet:
 
 | Rule | Setting | Fires when |
 |---|---|---|
-| Threshold | `alerts.thresholds` (e.g. `[80, 95]`), `alerts.basis` | A window crosses a configured percentage upwards. Crossing 80 and 95 in one step produces **one** message, not two |
+| Threshold | `alerts.thresholds` (default `[90]`, e.g. `[80, 95]`), `alerts.basis` | A window crosses a configured percentage upwards. Crossing 80 and 95 in one step produces **one** message, not two |
 | Only when ahead | `alerts.requireAhead` (default on) | Reaching 80 % of a weekly window on day six is not news; on day two it is |
 | Too late to matter | `alerts.minRemainingMinutes` (default 60) | Suppresses a warning about a window that resets within the hour |
-| Pace flip | `alerts.onPaceFast` (default off) | A window changes from on pace to ahead of the clock — once per cycle |
+| Pace flip | `alerts.onPaceFast` (default off) | A window changes from on pace to ahead of pace — once per cycle |
 | Forecast | `alerts.forecastLeadMinutes` (default 0 = off) | The forecast expects the window to run out within *n* minutes. An estimate, labelled `~`, silent right after a reset, and never when the window resets before it would run out |
 | Use it or lose it | `alerts.useItLoseIt` (default off) | A weekly window below 60 % that resets within two days — unused allowance does not carry over |
 | Which windows | `alerts.windowCondition` | `any`, `sessionOnly` or `weeklyOnly` |
@@ -756,6 +814,38 @@ is the undo.
 extension's `globalStorage` directory, best effort, and only when the path ends in exactly
 `User/globalStorage/frederik.token-pace`.
 
+## If the bar says …
+
+A problem state replaces the figure with a **named cause**. It is never a silent dash where a
+number should be, and the click on the entry performs the repair for that cause instead of the
+configured `clickAction`. The same action appears in the tooltip footer and on the dashboard's
+problem card; `src/viewModel.ts` holds the mapping, and `test/docs.test.ts` compares it with
+this table.
+
+| The bar says | Kind | What happened | The click runs |
+|---|---|---|---|
+| `$(key) CC no token` | `noToken` | No credentials were found, so nothing could be fetched | **Show log** — it names the lookup that failed, never the token. Sign in to the CLI, or set `CLAUDE_CODE_OAUTH_TOKEN` |
+| `$(warning) CC token expired` | `tokenExpired` | The stored credentials are past their expiry. Token Pace never refreshes a token | **Show log**. Sign in again in the CLI; the next poll picks the new token up |
+| `$(shield) CC consent` | `consentPending` | Network access has not been granted yet, so no request was made | **Fetch quota now**, which asks first. One dialog, one answer, remembered |
+| `$(circle-slash) CC quota off` | `modeCache` | `quotaSource: cache`: local files only, the network is never used | **Open settings**. Point `claudeQuotaFile` / `codexQuotaFile` at a cache file, or switch back to `auto` |
+| `$(clock) CC retry 12m` | `retry` | The last attempt failed; the countdown is the scheduled next one | **Fetch quota now** to retry immediately. The log holds the reason |
+| `$(cloud-offline) CC offline` | `offline` | The request did not reach the provider — timeout, DNS or proxy | **Fetch quota now**. Check connectivity and `http.proxy`; *Copy Diagnostics* lists the proxy settings in effect |
+| `$(lock) CC 403` | `forbidden` | The provider refused the usage endpoint. Often a Team or Enterprise account without one | **Show log**. Token counts keep working, and the menu still offers the official usage page |
+| `$(key) CC sign in` | `unauthorized` | The provider rejected the credentials (HTTP 401) | **Show log**. Sign in again in the CLI |
+| `$(circle-slash) CDX no codex` | `noBinary` | The Codex CLI was not found on `PATH`, so its app-server could not be asked | **Open settings**. Set `tokenPace.codexBinary`, or install the CLI |
+| `$(circle-slash) CC quota off` | `quotaOff` | No quota source is enabled for this provider | **Open settings**. `claudeQuotaSources` / `codexQuotaSources` |
+| `CC –` | `noFile` | The configured quota cache file does not exist | **Re-read history**, which also picks up a file that has appeared since. Otherwise check `claudeQuotaFile` / `codexQuotaFile`, or enable another source |
+| `CC –` | `empty` | The source answered, but carried no window this build can read | **Re-read history**. Unknown window kinds are reported in the log and the data-quality section, not dropped |
+| `$(clock) CC paused` | `paused` | The **external** writer of the cache file is in backoff: its `blocked_until` is still in the future | **Fetch quota now**. Nothing here is broken; the figure returns when that writer resumes. In `quotaSource: cache` a fetch of our own is refused, and the link says so instead of pretending |
+| `CC –` | `follower` | Another VS Code window holds the lease and does the polling; this one displays what that window wrote | **Open dashboard**. Nothing to do — `leaderElection: false` makes every window poll on its own |
+| `CC –` | `unknown` | No reading, and no cause that can be named | **Show log**; it holds the raw reason |
+
+Two states that look like problems and are not: `CC 5h ▁▁▁▁▁▁▁▁ reset due` means the reset has
+passed and no reading newer than it has arrived — the gauge is never zeroed by us, a re-poll is
+scheduled instead — and `CC 7d ∞` means the window has no limit, so there is no denominator to
+divide by and no pace to compute. The full matrix is in
+[docs/status-bar-states.md](docs/status-bar-states.md).
+
 ## Privacy
 
 Only these are read: `~/.claude/projects/` (plus `~/.config/claude/projects/`, where some Claude
@@ -777,6 +867,11 @@ exactly two opt-in exceptions, each behind its own consent dialog and each with 
 never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
 status-line bridge. Both are off by default and both are disabled in Restricted Mode.
 
+One further write exists and is not an opt-in setting: the *Run Token Pace locally* button of
+the remote hint puts `remote.extensionKind` into your user `settings.json` — see
+[Windows, WSL and remote development](#windows-wsl-and-remote-development). It happens only on
+that click, only on a remote host with no transcripts, and it merges rather than replaces.
+
 The only outbound network access is the consent-gated quota fetch described above. That promise
 is checked mechanically: `npm run check:privacy` scans the shipped bundles for every `http(s)`
 literal and matches it against a small allow-list (`api.anthropic.com`, the two official usage
@@ -792,7 +887,7 @@ is no endpoint setting to point somewhere else.
 The `.vsix` is platform-independent (no native code) and installs with
 
 ```powershell
-code --install-extension token-pace-1.0.0.vsix
+code --install-extension token-pace-1.1.0.vsix
 ```
 
 or through the UI via *Extensions → … → Install from VSIX…*. Both halves work there:
@@ -813,6 +908,14 @@ example), tell VS Code to run this extension there:
 }
 ```
 
+**Or let the extension write it.** On a remote host where it finds no transcripts at all,
+Token Pace offers *Run Token Pace locally* once. That button writes
+`"remote.extensionKind": { "frederik.token-pace": ["ui"] }` into your **user** `settings.json`
+— merged into whatever is already there, so other extensions' entries are kept — and then
+offers a window reload. It is the one write outside the extension's own storage that has no
+dialog in front of it: the click is the decision, it happens at most once per machine, and it
+is undone by deleting that one key. The setting is yours afterwards; nothing rewrites it later.
+
 No rebuild is needed any more — this replaces the “edit `package.json` and repackage” advice of
 earlier versions. The alternative is to point `tokenPace.claudeDir` at
 `\\wsl$\<distro>\home\<user>\.claude`, which works but is slow, because every read goes through
@@ -827,32 +930,38 @@ take effect after **Reload Window**.
 
 The extension supports untrusted workspaces and virtual workspaces: it never reads, executes or
 evaluates workspace content at all. In Restricted Mode the two opt-in writes are disabled. On a
-machine with no transcripts it reports that it found none instead of showing zeros.
+machine with no transcripts it reports that it found none instead of showing zeros — and on a
+remote host it offers, once, to move itself to the local side by writing `remote.extensionKind`
+to your user settings (above).
 
 ## Settings
 
-Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
+Every key is `tokenPace.*`. Grouped and ordered exactly as they appear in the settings UI; the
+power-user settings sit at the end of their group.
 
 ### General
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `statusBar.show` | `["claudeQuota","codexQuota","tokens"]` | Which entries the status bar shows **and in which order**: `claudeQuota`, `codexQuota`, `extra`, `tokens`, `cost`, `forecast`. Empty hides the bar |
-| `windowSelect` | `all` | Which quota windows appear: `all`, `leading`, `worstPace`, `session`, `weekly`, `auto` |
-| `windows` | `all` | **Deprecated** — replaced by `windowSelect`. Still honoured while `windowSelect` is at its default |
+| `statusBar.show` | `["claudeQuota","codexQuota","tokens"]` | Which entries the status bar shows **and in which order**: `claudeQuota`, `codexQuota`, `extra`, `tokens`, `cost`, `forecast`. Empty hides the bar. `cost` needs `showCost`, `forecast` needs `quotaHistoryDays` above 0 |
+| `windowSelect` | `worstPace` | Which quota windows appear: `worstPace` (one entry per tool — the window that needs attention), `all`, `leading`, `session`, `weekly`, `auto` |
 | `density` | `full` | `full`, `compact` (one item per provider), `minimal` (one item in total) |
-| `clickAction` | `menu` | What a click does: `dashboard`, `menu`, `refresh`, `openWebsite`. A problem state always performs its repair instead |
+| `clickAction` | `dashboard` | What a click does: `dashboard`, `menu`, `refresh`, `openWebsite`. A problem state always performs its repair instead |
 | `usagePageLinks` | `true` | Make the tooltip title a link to the provider's official usage page and offer it in the menu. The extension never contacts those pages itself |
 | `alignment` | `left` | `left` or `right`. Right-aligned entries are hidden without notice when the window is narrow |
 | `staleAfterMinutes` | `20` | Age (1–1440) from which a reading counts as stale: greyed out, marked, and barred from raising alerts |
+| `timezone` | `system` | `system`, `utc`, or an IANA name. Governs the status bar summary as well as the dashboard. Display only — nothing is re-counted; an unusable value falls back |
+| `dayBoundaryHour` | `0` | The hour a “day” starts (0–23), for the status bar summary as well as the dashboard. `4` books work after midnight onto the previous day |
+| `keybindings` | `true` | Bind `ctrl+alt+shift+t` (`cmd+alt+shift+t`) to *Open Dashboard*. Off frees the chord without a `-` rule in `keybindings.json`; the Command Palette is unaffected |
+| `windows` | `all` | **Deprecated** — replaced by `windowSelect`. Still honoured while `windowSelect` is at its default `worstPace` |
 
 ### Pace
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `pace.sensitivity` | `normal` | `relaxed`, `normal`, `strict` or `custom` — see the preset table above |
-| `pace.tolerancePoints` | `5` | Dead band in percentage points (0–20). Only used with `sensitivity: custom` |
-| `pace.minElapsedPercent` | `3` | How much of a window must have elapsed before any colour (0–20). Only with `custom` |
+| `pace.tolerancePoints` | `5` | Only with `sensitivity: custom`. Dead band in percentage points (0–20) |
+| `pace.minElapsedPercent` | `3` | Only with `sensitivity: custom`. How much of a window must have elapsed before any colour (0–20) |
 | `pace.levels` | `binary` | `binary` or `graded` (a second warning level beyond three times the tolerance) |
 
 ### Status bar
@@ -860,22 +969,22 @@ Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
 | Setting | Default | Meaning |
 |---|---|---|
 | `barWidth` | `8` | Bar width in characters (0–20); `0` hides the bar. The time marker needs at least 6 |
-| `barStyle` | `line` | How the **empty** part is drawn: `line`, `shade`, `none`. `line` vs `shade` only bites for `barGlyphs: blocks` |
+| `barStyle` | `line` | Only bites for `barGlyphs: blocks`. How the **empty** part is drawn: `line`, `shade`, `none` |
 | `barGlyphs` | `blocks` | Glyph set: `blocks`, `shapes`, `dots`, `pie` — which looks right depends on your status bar font |
 | `timeProgressStyle` | `marker` | How elapsed time is shown: `marker`, `bar`, `none` |
 | `indicator` | `both` | How the verdict is signalled: `color`, `glyph`, `both`, `none` |
 | `colorMode` | `theme` | `theme` or `monochrome`. The four colours are overridable in `workbench.colorCustomizations` |
 | `percentMode` | `used` | Whether the number is what you used or what is left (`used` / `remaining`) |
-| `overflowDisplay` | `actual` | Above 100 %: show it (`actual`) or cap it (`clamp`) |
-| `resetFormat` | `relative` | Countdown suffix: `none`, `relative`, `absolute`, `both` |
-| `resetHourCycle` | `auto` | Clock format for absolute times: `auto`, `h12`, `h23` |
+| `resetFormat` | `relative` | Countdown suffix: `none`, `relative`, `absolute`, `both`. Always introduced by the word `resets` |
 | `showAgeInItem` | `whenStale` | Show the reading's age in the entry: `never`, `whenStale`, `always` |
 | `labels` | `{}` | Custom prefixes (`claude`, `codex`, `summary`) and window labels by id. Values over 40 characters are cut |
-| `labelMaxChars` | `0` | Truncate labels *we* generate to this many characters (0–40); `0` = no truncation |
-| `summary.period` | `today` | Which period the token and cost entries sum up: `today`, `7d`, `30d` |
+| `summary.period` | `today` | Which period the token and cost entries sum up: `today`, `7d`, `30d`. The period is always printed next to the figure |
 | `summary.scope` | `both` | Which tools they sum up: `both`, `claude`, `codex` |
 | `tooltip` | `full` | `full`, `compact`, `off` |
-| `tooltipExplanations` | `true` | Show the explanatory paragraphs. Uncertainty markers and provenance are never hidden by it |
+| `tooltipExplanations` | `false` | Show the explanatory paragraphs. Uncertainty markers and provenance are never hidden by it |
+| `overflowDisplay` | `actual` | Above 100 %: show it (`actual`) or cap it (`clamp`) |
+| `resetHourCycle` | `auto` | Clock format for absolute times: `auto`, `h12`, `h23` |
+| `labelMaxChars` | `0` | Truncate labels *we* generate to this many characters (0–40); `0` = no truncation |
 
 ### Dashboard
 
@@ -885,8 +994,6 @@ Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.mode` | `webview` | What *Open Dashboard* and a status bar click open: `webview`, `quickPick`, `markdown` |
-| `timezone` | `system` | `system`, `utc`, or an IANA name. Display only — nothing is re-counted; an unusable value falls back |
-| `dayBoundaryHour` | `0` | The hour a “day” starts (0–23). `4` books work after midnight onto the previous day |
 | `startOfWeek` | `monday` | First day of the week for the heatmap, the weekday grid and `thisWeek` |
 | `planPriceUsd` | `{}` | What you pay per month, per tool, e.g. `{"claude": 100}`. Used only for the plan-factor line |
 | `calibration.show` | `false` | Show local tokens per quota percentage point, derived from your own history |
@@ -895,27 +1002,27 @@ Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `showCost` | `true` | Show the hypothetical API cost column |
+| `showCost` | `true` | Show the hypothetical API cost column. With it off, the `cost` entry of `statusBar.show` is not created either |
 | `customPrices` | `{}` | Per-model rates in USD per 1M tokens, merged field-wise over the built-in table |
 | `pricing.multiplier` | `1` | Factor on every list price (0.01–10) for contract discounts |
-| `pricing.showListPrice` | `false` | Show the undiscounted list price as a second column |
 | `unknownModelPricing` | `strict` | `strict` (report a lower bound) or `family` (borrow a related model's price and say so) |
+| `pricing.showListPrice` | `false` | Show the undiscounted list price as a second column |
 
 ### Quota sources
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `quotaSource` | `auto` | `auto` (local sources only, offers once), `poll` (fetch, after consent), `cache` (local only, never asks) |
+| `quotaSource` | `auto` | `auto` (local sources only, offers once), `poll` (fetch, after consent), `cache` (local only, never asks). Machine-scoped, so a workspace cannot switch fetching on |
 | `pollIntervalMinutes` | `30` | Interval between our own fetches (5–1440). The consent dialog names the value you set |
 | `claudeQuotaSources` | `["cacheFile","statusline","claudeJson","poll"]` | Which Claude sources may be used; the order breaks ties, the freshest wins |
 | `codexQuotaSources` | `["cacheFile","transcript","poll"]` | Which Codex sources may be used |
 | `claudeQuotaFile` | `""` | JSON file with the Claude quota state; empty = `~/.cache/claude-usage/state.json` |
 | `codexQuotaFile` | `""` | The same for Codex; empty = `~/.cache/codex-usage/state.json` |
-| `writeQuotaCache` | `false` | Write our own fetches back to the cache file. **Opt-in, with its own consent dialog** |
-| `codexAppServer.mode` | `oneShot` | `oneShot` (spawn per poll) or `persistent` (one long-lived child, with pushes) |
+| `writeQuotaCache` | `false` | Write our own fetches back to the cache file. **Opt-in, with its own consent dialog**; machine-scoped |
 | `codexBinary` | `""` | Path to `codex`; empty = `CODEX_CLI_PATH`, then `PATH`, then the bundled IDE binary. Machine-scoped on purpose |
-| `userAgent` | `claudeCode` | `claudeCode` or `honest`. **`honest` gets rate-limited into a permanent 429** |
-| `credentials.keychain` | `true` | Also look in the OS keychain when the credentials file has no token |
+| `userAgent` | `claudeCode` | `claudeCode` or `honest`. **`honest` gets rate-limited into a permanent 429.** Machine-scoped |
+| `codexAppServer.mode` | `oneShot` | `oneShot` (spawn per poll) or `persistent` (one long-lived child, with pushes) |
+| `credentials.keychain` | `true` | Also look in the OS keychain when the credentials file has no token. Machine-scoped |
 | `pollOnlyWhenFocused` | `true` | Skip scheduled fetches after ten minutes in the background. A manual fetch always runs |
 | `leaderElection` | `true` | With several windows open, let one do the fetching and have the others follow its files |
 
@@ -932,7 +1039,7 @@ Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
 |---|---|---|
 | `hourRetentionDays` | `45` | How long hour buckets are kept (1–3650) before they are folded into days. Irreversible |
 | `retentionDays` | `400` | How long day buckets are kept (60–36500) before they are folded into months |
-| `quotaHistoryDays` | `30` | How long quota readings are kept as a time series (0–90). `0` disables forecasts and the retrospective |
+| `quotaHistoryDays` | `30` | How long quota readings are kept as a time series (0–90). `0` empties the `forecast` entry of `statusBar.show` and the `forecast` and `history` sections of the dashboard |
 | `attribution` | `none` | `none`, `project` or `session`. Changing it triggers a full re-scan |
 | `showProjectNames` | `basename` | `basename` or `hash` (salted, screen-share safe) |
 
@@ -940,13 +1047,13 @@ Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `alerts.thresholds` | `[]` | Percentages (1–100) at which a notification is shown. **Empty = no notifications at all** |
+| `alerts.thresholds` | `[90]` | Percentages (1–100) at which a notification is shown. **An empty list means no notifications at all** |
 | `alerts.basis` | `used` | Whether the thresholds mean used or remaining |
-| `alerts.requireAhead` | `true` | Only alert when the window is also ahead of the clock |
+| `alerts.requireAhead` | `true` | Only alert when the window is also ahead of pace |
 | `alerts.minRemainingMinutes` | `60` | Do not alert when the window resets within this many minutes (0–10080) |
 | `alerts.useItLoseIt` | `false` | Also notify about capacity about to expire unused |
 | `alerts.forecastLeadMinutes` | `0` | Notify when the forecast expects exhaustion within *n* minutes (0–1440); `0` = off |
-| `alerts.onPaceFast` | `false` | Notify once per cycle when a window goes from on pace to ahead of the clock |
+| `alerts.onPaceFast` | `false` | Notify once per cycle when a window goes from on pace to ahead of pace |
 | `alerts.windowCondition` | `any` | Which windows may alert: `any`, `sessionOnly`, `weeklyOnly` |
 
 ### Diagnostics
@@ -962,10 +1069,10 @@ Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
 | Command | Keybinding | Purpose |
 |---|---|---|
 | `Token Pace: Open Dashboard` | `ctrl+alt+shift+t` / `cmd+alt+shift+t` | The dashboard in the secondary sidebar |
-| `Token Pace: Fetch Quota Now` | `ctrl+alt+shift+q` / `cmd+alt+shift+q` | Immediate fetch, asking for consent if needed. Disabled in `quotaSource: cache` |
 | `Token Pace: Show Usage (Quick Pick)` | | The whole view model as a searchable flat list |
 | `Token Pace: Show Usage as Text` | | A read-only markdown document with the same figures |
-| `Token Pace: Menu` | | The QuickPick behind a status bar click |
+| `Token Pace: Show Actions Menu` | | The QuickPick behind a status bar click |
+| `Token Pace: Fetch Quota Now` | | Immediate fetch, asking for consent if needed. Disabled in `quotaSource: cache` |
 | `Token Pace: Re-read Token History` | | Full re-scan of all transcripts |
 | `Token Pace: Cycle Status Bar Windows` | | Steps `windowSelect` through its values |
 | `Token Pace: Preview Status Bar States` | | Synthetic renderings of every state, for 60 seconds |
@@ -981,8 +1088,21 @@ Every key is `tokenPace.*`. Grouped as they appear in the settings UI.
 | `Token Pace: Open Settings` | | The extension's settings |
 | `Token Pace: Show Log` | | The output channel |
 
+**One keybinding, and it can be switched off.** Only *Open Dashboard* claims a chord. A single
+small extension taking two global chords is greedy, and the second one — `ctrl+alt+shift+q` for
+*Fetch Quota Now* in earlier versions — bought nothing: fetching is reachable from the status
+bar click, the tooltip footer, the actions menu, the panel's title bar and the Command Palette.
+It has been removed. The remaining binding is gated on `tokenPace.keybindings`, so it can be
+freed from the settings UI instead of by writing a `-` rule into `keybindings.json`; every
+command stays available from the Command Palette either way.
+
 The dashboard's title bar carries *Fetch Quota Now*, *Re-read Token History*, *Show Log*,
 *Open Settings* and *Export CSV…*.
+
+**Walkthrough.** *Help → Get Started* lists **Get started with Token Pace**: what the bar and
+its colours mean, where the quota figures come from and what “poll” means, and the dashboard.
+Its three steps carry the buttons for *Preview Status Bar States*, *Fetch Quota Now*,
+*Connect Claude Status Line*, *Open Settings* and *Open Dashboard*.
 
 ## Building and testing
 
@@ -1008,7 +1128,9 @@ transcript readers touch paths, inodes and line endings, and Windows is where th
 the path handling actually differ. CodeQL, a dependency review and a gitleaks scan run alongside.
 Pushing a `v*` tag builds the `.vsix`, creates a GitHub release and publishes to both the Visual
 Studio Marketplace and **Open VSX** — the latter is what makes the extension installable in
-VSCodium, Cursor and Windsurf at all. Each publish step is skipped rather than failed when its
+VSCodium at all. Cursor and Windsurf are published to from the same registry, but they run an
+older VS Code base than the `^1.106.0` engine floor the secondary-sidebar contribution point
+needs, so they cannot install it until they rebase. Each publish step is skipped rather than failed when its
 token is not configured, so a fork can produce the `.vsix` without any secrets.
 
 ## Licence

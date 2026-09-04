@@ -8,8 +8,8 @@ import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
 import { QuotaSample, QuotaWindow } from '../src/types'
 import {
-  SOURCE_TITLE, SPARK_GAP, WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel,
-  defaultUiState, forecastsFor, parseWebviewMessage, sparkOf,
+  DASHBOARD_SECTION_KEYS, PROBLEM_ACTION, SOURCE_TITLE, SPARK_GAP, WEBVIEW_COMMANDS, WindowVm,
+  applyMessage, buildViewModel, defaultUiState, forecastsFor, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
@@ -44,7 +44,9 @@ test('the view model is built from the aggregator, the history and the quota sta
   // Range, previous, today, 7d, 30d, this week, this month, all time — minus the fixed row
   // the selected 30-day range already is, which would otherwise appear twice.
   for (const t of vm.totals) assert.equal(t.rows.length, 7)
-  assert.equal(vm.kpis.length, 6)
+  // Six figures over the range plus the "today" tile that opens the row.
+  assert.equal(vm.kpis.length, 7)
+  assert.equal(vm.kpis[0].key, 'today')
   assert.ok(vm.digest.length >= 3 && vm.digest.length <= 5)
   assert.equal(vm.chart.days.length, 30)
   assert.equal(vm.heatmap.weeks.length, 53)
@@ -59,13 +61,15 @@ test('a window carries its verdict, its clock and its accessibility text', () =>
   const w = vm.quotas[0].windows[0]
   assert.equal(w.percentText, '40%')
   assert.equal(w.elapsed, 60)
-  assert.equal(w.verdict.text, '20 points in reserve')
+  assert.equal(w.verdict.text, '20 % of the window still spare')
   assert.equal(w.level, 'ok')
   assert.equal(w.display, 'normal')
   assert.equal(w.reset, '2h')
   assert.ok(w.resetAbsolute.length > 0)
-  assert.deepEqual(w.aria, { now: 40, max: 100, text: '5 h: 40% used, 20 points in reserve' })
-  assert.ok(w.sustainable?.startsWith('~'))
+  assert.deepEqual(w.aria, { now: 40, max: 100, text: '5 h: 40% used, 20 % of the window still spare' })
+  // Percentage points of the window, printed with the unit the figure above it uses, and
+  // marked as the estimate it is.
+  assert.match(String(w.sustainable), /^~[\d.]+ %\/h keeps it to the reset$/)
 })
 
 test('an unreadable quota names its cause and offers exactly one repair step', () => {
@@ -295,16 +299,60 @@ test('parseWebviewMessage drops everything else', () => {
     { type: 'setHourZone', zone: 'mars' },
     { type: 'drill', day: 'yesterday' },
     { type: 'command', id: 'workbench.action.terminal.new' },
-    { type: 'command', id: 'tokenPace.connectStatusLine' },
+    { type: 'command', id: 'tokenPace.disconnectStatusLine' },
+    { type: 'toggleSection' },
+    { type: 'toggleSection', key: 'passwords' },
+    { type: 'toggleSection', key: 42 },
   ]
   for (const raw of bad) assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw) ?? 'undefined')
 })
 
-test('parseWebviewMessage keeps the command allow-list to nine harmless commands', () => {
-  assert.equal(WEBVIEW_COMMANDS.length, 9)
+test('parseWebviewMessage keeps the command allow-list to eleven harmless commands', () => {
+  // Eleven, not nine: the empty quota state offers the two ways to get a reading, and both
+  // of those commands ask before they act — connecting the status line goes through its own
+  // write consent and writes its own backup.
+  assert.equal(WEBVIEW_COMMANDS.length, 11)
   for (const id of WEBVIEW_COMMANDS) {
     assert.deepEqual(parseWebviewMessage({ type: 'command', id }), { type: 'command', id })
+    assert.match(id, /^tokenPace\./)
   }
+  // Nothing that undoes a user's setting behind their back.
+  assert.equal(WEBVIEW_COMMANDS.includes('tokenPace.disconnectStatusLine' as never), false)
+})
+
+test('every repair step a card offers is a command its own view can run', () => {
+  for (const [kind, action] of Object.entries(PROBLEM_ACTION)) {
+    assert.ok(
+      WEBVIEW_COMMANDS.includes(action.command as never),
+      `${kind}: ${action.command} is offered as a button the webview cannot send`,
+    )
+  }
+})
+
+test('every problem kind names one repair step, and the follower is sent to the dashboard', () => {
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(PROBLEM_ACTION).map(([k, a]) => [k, a.command])),
+    {
+      noToken: 'tokenPace.showOutput',
+      tokenExpired: 'tokenPace.showOutput',
+      consentPending: 'tokenPace.refreshQuota',
+      modeCache: 'tokenPace.openSettings',
+      retry: 'tokenPace.refreshQuota',
+      offline: 'tokenPace.refreshQuota',
+      forbidden: 'tokenPace.showOutput',
+      unauthorized: 'tokenPace.showOutput',
+      noBinary: 'tokenPace.openSettings',
+      quotaOff: 'tokenPace.openSettings',
+      noFile: 'tokenPace.rescan',
+      empty: 'tokenPace.rescan',
+      paused: 'tokenPace.refreshQuota',
+      follower: 'tokenPace.showDashboard',
+      unknown: 'tokenPace.showOutput',
+    },
+  )
+  const labels = new Set(Object.values(PROBLEM_ACTION).map((a) => a.label))
+  assert.deepEqual([...labels].sort(),
+    ['Fetch quota now', 'Open dashboard', 'Open settings', 'Re-read history', 'Show log'])
 })
 
 test('applyMessage folds a message into the UI state and nothing more', () => {
@@ -318,6 +366,7 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     heatmapMetric: 'usage',
     hourZone: 'local',
     drillDay: null,
+    collapsed: [],
   })
 
   const drilled = applyMessage(ui, { type: 'drill', day: '2026-09-01' })
@@ -338,6 +387,31 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
   // A refresh and a command change nothing, and say so by identity.
   assert.equal(applyMessage(ui, { type: 'refresh' }), ui)
   assert.equal(applyMessage(ui, { type: 'command', id: 'tokenPace.rescan' }), ui)
+})
+
+test('every section the dashboard can show can also be folded', () => {
+  // The other direction of the `satisfies` in the source: a section added to the config and
+  // forgotten here would render a summary whose click the parser drops.
+  const all = makeConfig({
+    'tokenPace.dashboard.sections': [...DASHBOARD_SECTION_KEYS],
+  }).dashboard.sections
+  assert.deepEqual([...all].sort(), [...DASHBOARD_SECTION_KEYS].sort())
+  for (const key of all) {
+    assert.deepEqual(parseWebviewMessage({ type: 'toggleSection', key }), { type: 'toggleSection', key })
+  }
+})
+
+test('a section fold is remembered, and the same click undoes it', () => {
+  const ui = defaultUiState(cfg)
+  const folded = applyMessage(ui, { type: 'toggleSection', key: 'models' })
+  assert.deepEqual(folded.collapsed, ['models'])
+  const two = applyMessage(folded, { type: 'toggleSection', key: 'chart' })
+  assert.deepEqual(two.collapsed, ['models', 'chart'])
+  assert.deepEqual(applyMessage(two, { type: 'toggleSection', key: 'models' }).collapsed, ['chart'])
+  // The fold is view state and nothing else: no section is dropped from the model.
+  assert.deepEqual(buildViewModel(makeInput({ ui: { collapsed: ['models'] } })).ui.collapsed, ['models'])
+  assert.deepEqual(buildViewModel(makeInput({ ui: { collapsed: ['models'] } })).sections,
+    cfg.dashboard.sections)
 })
 
 test('the default range follows the setting', () => {

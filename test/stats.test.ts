@@ -326,7 +326,7 @@ test('the month projection stays silent below five active days and speaks above 
   // Twenty days into the month: five active days, and days left to project over.
   const loud = calendar(ctxOf(agg, { now: Date.UTC(2026, 8, 20, 12, 0, 0) })).thisMonth
   assert.ok(loud.projection?.startsWith('~$'))
-  assert.match(String(loud.projectionBasis), /^so far \$.* · Ø \$.*\/day · \d+ days left$/)
+  assert.match(String(loud.projectionBasis), /^so far \$.* · Avg \$.*\/day · \d+ days left$/)
 })
 
 test('the plan factor appears only when a plan price was stated', () => {
@@ -457,13 +457,52 @@ test('a window without a clock gets no local usage row', () => {
 
 test('the KPI row reports "new" when there is no previous period to compare with', () => {
   const list = kpis(ctxOf(buildAgg()), range('30d'), null)
-  for (const k of list) {
+  // "Today" is not about the selected range and has its own comparison — yesterday — which
+  // exists whether or not the range has a period before it.
+  for (const k of list.filter((x) => x.key !== 'today')) {
     assert.equal(k.delta?.text, 'new')
     // "new" is the whole badge; a glyph beside it would be printed as "new new".
     assert.equal(k.delta?.glyph, '')
   }
   assert.deepEqual(list.map((k) => k.key),
-    ['usage', 'cost', 'requests', 'cacheHit', 'activeDays', 'avgPerActiveDay'])
+    ['today', 'usage', 'cost', 'requests', 'cacheHit', 'activeDays', 'avgPerActiveDay'])
+})
+
+test('the first tile is today, with its cost, whatever range is selected', () => {
+  const list = kpis(ctxOf(buildAgg()), range('all'), null)
+  const today = list[0]
+  assert.equal(today.key, 'today')
+  assert.equal(today.label, 'Today')
+  // Usage and the hypothetical amount in one tile — the amount keeps its estimate marker.
+  assert.match(today.value, /^[\d.]+[KMG]? · ~\$/)
+  assert.equal(today.provenance, 'measured')
+  // Without costs the tile is the token figure alone, never a bare separator.
+  const plain = kpis(ctxOf(buildAgg(), { showCost: false }), range('all'), null)[0]
+  assert.equal(plain.value.includes('·'), false)
+  assert.equal(plain.value.includes('$'), false)
+})
+
+test('a day with nothing on it is a dash with no change to report', () => {
+  // Neither today nor yesterday has usage: "±0%" would be a comparison of two measurements
+  // that were never taken, and "0" a usage figure nobody produced.
+  const empty = kpis(ctxOf(new Aggregator()), range('30d'), null)[0]
+  assert.equal(empty.key, 'today')
+  assert.equal(empty.value, '–')
+  assert.equal(empty.delta, null)
+})
+
+test('every KPI states which direction is the good one, and none states a colour', () => {
+  const list = kpis(ctxOf(buildAgg()), range('30d'), null)
+  const polarity = Object.fromEntries(list.map((k) => [k.key, k.polarity]))
+  assert.deepEqual(polarity, {
+    today: 'upBad',
+    usage: 'upBad',
+    cost: 'upBad',
+    requests: 'upBad',
+    cacheHit: 'upGood',
+    activeDays: 'neutral',
+    avgPerActiveDay: 'neutral',
+  })
 })
 
 test('the cache TTL countdown is an estimate and expires', () => {

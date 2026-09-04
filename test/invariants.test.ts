@@ -13,8 +13,10 @@ import { toMarkdownSummary } from '../src/exporter'
 import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { buildViewModel } from '../src/viewModel'
+import { QuotaHistory } from '../src/quotaHistory'
 import {
-  NOW, TODAY, buildAgg, makeConfig, makeInput, state, timeConfig, win,
+  FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
+  timeConfig, win,
 } from './fixtures/viewFixtures'
 
 const cfg = makeConfig()
@@ -51,6 +53,11 @@ test('absence is a dash — never 0 %, never $0.00', () => {
   // Active days is a count of days, not a measurement of usage — "0 of 30" is the truth.
   assert.equal(vm.kpis.find((k) => k.key === 'usage')?.value, '–')
   assert.equal(vm.kpis.find((k) => k.key === 'cacheHit')?.value, '–')
+  // A day with nothing on it is a dash and has no change to report: "±0%" would compare two
+  // measurements that were never taken.
+  const today = vm.kpis.find((k) => k.key === 'today')
+  assert.equal(today?.value, '–')
+  assert.equal(today?.delta, null)
 })
 
 test('a division without a denominator yields a dash in every rendering', () => {
@@ -190,4 +197,56 @@ test('nothing in the rendered views prints a zero where a measurement is missing
   for (const i of quickPickItems(vm)) {
     assert.equal(i.label.includes('$0.00'), false)
   }
+})
+
+/**
+ * Three complete cycles before the running one: four readings each, then a fall that no
+ * `resetsAt` announced — the only other honest evidence that a window turned over. Without
+ * them the retrospective says "not enough data" and asserts nothing about its wording.
+ */
+function fillCycles(history: QuotaHistory): void {
+  let t = NOW - 12 * 3_600_000
+  for (let cycle = 0; cycle < 3; cycle++) {
+    for (const percent of [20, 40, 60, 80]) {
+      history.add(
+        {
+          source: 'claude',
+          ok: true,
+          origin: 'poll',
+          fetchedAt: Math.round(t / 1000),
+          planType: null,
+          windows: [win({ percent })],
+        },
+        FINGERPRINT,
+        t,
+      )
+      t += 30 * 60_000
+    }
+  }
+}
+
+test('the pace unit is percent of the window — no view ever says "points"', () => {
+  // "Points" reads as a score on a scale of its own; the figure above every one of these
+  // sentences is a percentage, so the sentences say "%" too. This is a rule about what
+  // reaches the reader, so it is asserted on the three rendered views, not on the helpers.
+  const history = makeHistory()
+  fillCycles(history)
+  fillHistory(history)
+  const vm = buildViewModel(makeInput({
+    history, cfg: makeConfig({ 'tokenPace.calibration.show': true }),
+  }))
+  // The sentences that used to carry the word must actually have been rendered, or the
+  // assertion below would pass on a view that said nothing at all.
+  assert.ok(vm.retro.some((r) => r.text.includes('unused at the reset')), JSON.stringify(vm.retro))
+  assert.ok(vm.forecasts.some((f) => (f.resetForecast ?? '').includes('at the reset')))
+  const texts = [
+    markdownDocument(vm),
+    toMarkdownSummary(vm),
+    ...vm.retro.map((r) => r.text),
+    ...vm.dataQuality.calibration.map((c) => c.text),
+    ...vm.forecasts.flatMap((f) => [f.resetForecast ?? '', f.sustainable ?? '', f.lockout ?? '']),
+    ...vm.quotas.flatMap((q) => q.windows.map((w) => w.verdict.text)),
+    ...quickPickItems(vm).flatMap((i) => [i.label, i.description ?? '', i.detail ?? '']),
+  ]
+  for (const t of texts) assert.doesNotMatch(t, /\bpoints\b/i, t)
 })

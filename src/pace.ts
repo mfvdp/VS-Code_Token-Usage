@@ -80,11 +80,18 @@ export function windowElapsed(
   return Math.max(0, Math.min(100, ((now - (resetsAt - span)) / span) * 100))
 }
 
+/**
+ * The gap between consumption and the window's own clock, in words.
+ *
+ * The unit is percentage points of the window, but "points" reads as a score on a scale
+ * nobody was given: the figure standing directly above this sentence in every view is a
+ * percentage, so the sentence says "%" as well. "still spare" rather than "in reserve"
+ * for the same reason — it names what the number is, allowance that has not been used.
+ */
 function pointsText(points: number): string {
   const n = Math.round(Math.abs(points))
   if (n === 0) return 'on pace'
-  const unit = n === 1 ? 'point' : 'points'
-  return points > 0 ? `${n} ${unit} ahead of the clock` : `${n} ${unit} in reserve`
+  return points > 0 ? `${n} % ahead of pace` : `${n} % of the window still spare`
 }
 
 /**
@@ -121,7 +128,8 @@ export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceCo
 }
 
 /**
- * The rate that would just last until the reset, in points per hour and per day.
+ * The rate that would just last until the reset, in percentage points of the window per
+ * hour and per day (the renderers print it as "%/h").
  * Null without a reset time or once the reset has passed: a window whose clock
  * has run out has no remaining hours to spread anything over — and null past 100 %,
  * where the allowance is negative and no rate keeps the window to its reset.
@@ -136,7 +144,7 @@ export function sustainableRate(
   if (hours <= 0) return null
   const remaining = 100 - percent
   // An overflowed window has no allowance to spread: a clamped 0 pp/h would read as
-  // "0 points/h keeps it to the reset", and nothing keeps an overdrawn window to it.
+  // "0 %/h keeps it to the reset", and nothing keeps an overdrawn window to it.
   if (remaining < 0) return null
   const perHour = remaining / hours
   return { perHour, perDay: perHour * 24 }

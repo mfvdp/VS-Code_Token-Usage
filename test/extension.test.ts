@@ -30,6 +30,7 @@ import {
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
 } from './helpers/fakeVscode'
+import { BRIDGE_BLOCKS_DELETE } from '../src/storage'
 import { STATE_VERSION } from '../src/types'
 
 /** Never a real key: the string is asserted *absent* from every output this test reads. */
@@ -170,6 +171,9 @@ function settingsOf(fx: Fixture): Record<string, unknown> {
     'tokenPace.codexQuotaFile': fx.missingCodexCache,
     // A window wider than one day, so a run just after midnight still sees the fixtures.
     'tokenPace.summary.period': '7d',
+    // Every window on screen, not just the one the default picks: the assertions below
+    // are about what the status bar can render, not about which selection is the default.
+    'tokenPace.windowSelect': 'all',
     // Exercises the debug branches — and puts every debug line under the token check.
     'tokenPace.debug': true,
   }
@@ -211,10 +215,32 @@ const LIVE: FakeExtensionContext[] = []
  * `../src/extension` is required lazily and only after the stub is in place: a static
  * import at the top of this file would pull `vscode` in before any test could run.
  */
-async function activateHost(fx: Fixture, extensionPath: string): Promise<Host> {
-  state.reset(settingsOf(fx))
+interface ActivateOptions {
+  /** Merged over `settingsOf(fx)` — the settings this activation reads. */
+  settings?: Record<string, unknown>
+  /** A `globalState` that survives the activation, for the once-per-machine memories. */
+  globalState?: Map<string, unknown>
+  /** `vscode.env.remoteName`: undefined is a local window, a string is WSL/SSH. */
+  remoteName?: string
+  /**
+   * Answers for the dialogs of this activation, oldest first. They have to be queued
+   * here rather than before the call: `state.reset()` clears the queue.
+   */
+  answers?: unknown[]
+}
+
+async function activateHost(
+  fx: Fixture,
+  extensionPath: string,
+  opts: ActivateOptions = {},
+): Promise<Host> {
+  state.reset({ ...settingsOf(fx), ...(opts.settings ?? {}) })
+  // After the reset: it clears the remote name and the answer queue along with every
+  // other recording.
+  state.setRemoteName(opts.remoteName)
+  state.answers.push(...(opts.answers ?? []))
   const ext = require('../src/extension') as Extension
-  const ctx = createFakeContext({ storage: fx.storage, extensionPath })
+  const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState })
   LIVE.push(ctx)
   const started = Date.now()
   await ext.activate(ctx)
@@ -367,7 +393,9 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
     contributes: { commands: Array<{ command: string }> }
   }
   const declared = manifest.contributes.commands.map((c) => c.command).sort()
-  assert.equal(declared.length, 20)
+  // Not an exact count: the manifest grows. Every declared command must exist, and no
+  // command may be registered that the manifest does not declare.
+  assert.ok(declared.length >= 20, `only ${declared.length} commands are declared`)
   assert.deepEqual([...state.registered.keys()].sort(), declared)
   for (const [id, count] of state.registered) assert.equal(count, 1, `${id} was registered ${count} times`)
 
@@ -396,6 +424,21 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
   // An unknown preset is ignored rather than accepted as a custom range.
   await state.execute('tokenPace.setRange', 'not-a-range')
   assert.equal((ctx.globalState.get<{ range: string }>('tokenPace.ui') ?? { range: '' }).range, '7d')
+
+  // --- the QuickPick view -----------------------------------------------------
+  await state.execute('tokenPace.showUsageQuickPick')
+  const quickPick = state.quickPickControls[state.quickPickControls.length - 1]
+  assert.ok(quickPick, 'no QuickPick was created')
+  assert.ok(quickPick.items.length > 0, 'the QuickPick is empty')
+  assert.equal(quickPick.shown, true)
+  for (const item of quickPick.items) {
+    assert.equal(typeof item.label, 'string')
+    // A separator is a heading: it carries a label and nothing else.
+    if (item.kind === -1) {
+      assert.equal(item.command, undefined, `a separator carries a command: ${String(item.label)}`)
+      assert.equal(item.detail, undefined)
+    }
+  }
 
   // --- the status bar preview toggles ---------------------------------------
   await state.execute('tokenPace.previewStatusBar')
@@ -461,6 +504,113 @@ test('a live foreign lease makes the window a follower: no cold scan, no snapsho
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
   assert.equal(fs.existsSync(fx.stateFile), false, 'a follower wrote the snapshot on the way out')
+})
+
+/** The same fixture with both transcript roots removed: nothing to read anywhere. */
+function makeEmptyFixture(): Fixture {
+  const fx = makeFixture()
+  fs.rmSync(fx.claudeRoot, { recursive: true, force: true })
+  fs.rmSync(fx.codexRoot, { recursive: true, force: true })
+  return fx
+}
+
+test('on a remote host with no transcripts the hint writes remote.extensionKind and offers a reload', async () => {
+  const fx = makeEmptyFixture()
+  const shared = new Map<string, unknown>()
+
+  await activateHost(fx, REPO, {
+    remoteName: 'wsl',
+    globalState: shared,
+    answers: ['Run Token Pace locally', 'Reload Window'],
+    settings: {
+      // No offer to fetch: this test is about the remote hint, and a second dialog
+      // would eat the queued answers.
+      'tokenPace.quotaSource': 'cache',
+      // An unrelated entry that must survive: the setting is a map others share.
+      'remote.extensionKind': { 'some.other-extension': ['workspace'] },
+    },
+  })
+
+  await waitFor(
+    'the remote hint',
+    () => state.messages.some((m) => m.text.includes('remote "wsl"')),
+  )
+  const hint = state.messages.find((m) => m.text.includes('remote "wsl"'))!
+  assert.deepEqual(hint.actions, ['Run Token Pace locally', 'Open Settings', 'Not now'])
+
+  await waitFor('the reload prompt', () => state.executed.includes('workbench.action.reloadWindow'))
+  assert.deepEqual(state.settings.get('remote.extensionKind'), {
+    'some.other-extension': ['workspace'],
+    'frederik.token-pace': ['ui'],
+  })
+  assert.equal(shared.get('tokenPace.remoteHintShown'), true)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // --- once per machine, whatever the answer was --------------------------
+  await activateHost(fx, REPO, {
+    remoteName: 'wsl',
+    globalState: shared,
+    settings: { 'tokenPace.quotaSource': 'cache' },
+  })
+  await waitFor('the second bootstrap', () => state.logText().includes('Cold start done'))
+  await sleep(200)
+  assert.equal(
+    state.messages.some((m) => m.text.includes('remote "wsl"')),
+    false,
+    'the hint was shown a second time',
+  )
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('clear stored data lists the shared cache and says the bridge has to go first', async () => {
+  const fx = makeFixture()
+  // A status line that is ours: the record and the settings file agree.
+  const installed = 'node /opt/token-pace/dist/statusline-bridge.js'
+  fs.writeFileSync(
+    path.join(fx.claudeDir, 'settings.json'),
+    JSON.stringify({ statusLine: { type: 'command', command: installed } }),
+  )
+  const shared = new Map<string, unknown>([
+    // The opt-in was granted at some point, so the shared file is ours to offer.
+    ['writeConsent.writeQuotaCache', 'granted'],
+    ['tokenPace.bridge', { previous: undefined, installedCommand: installed, at: T }],
+  ])
+
+  await activateHost(fx, REPO, { globalState: shared })
+  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+
+  // --- the list itself ------------------------------------------------------
+  await state.execute('tokenPace.clearStoredData')
+  const offered = state.quickPicks[state.quickPicks.length - 1]
+  assert.ok(offered, 'no pick list was shown')
+  const cache = offered.items.find((i) => i.key === 'externalQuota')
+  assert.ok(cache, `the shared quota cache is missing: ${offered.items.map((i) => i.label).join(' | ')}`)
+  assert.ok(String(cache.detail).includes(fx.claudeCache), 'the Claude cache path is not named')
+  assert.ok(String(cache.detail).includes(fx.missingCodexCache), 'the Codex cache path is not named')
+
+  // The bridge line is a statement, not a deletable item: no key, and a separator above it.
+  const bridgeLine = offered.items.find((i) => i.detail === BRIDGE_BLOCKS_DELETE)
+  assert.ok(bridgeLine, 'the installed bridge is not mentioned')
+  assert.equal(bridgeLine.key, undefined)
+  assert.ok(String(bridgeLine.detail).includes('Disconnect Claude Status Line'))
+  assert.ok(offered.items.some((i) => i.kind === -1), 'the bridge line has no separator above it')
+
+  // --- picking only that line deletes nothing -------------------------------
+  const before = state.messages.length
+  state.answers.push([bridgeLine])
+  await state.execute('tokenPace.clearStoredData')
+  assert.equal(state.messages.length, before, 'a confirmation was asked for an empty selection')
+  assert.equal(fs.existsSync(fx.claudeCache), true)
+
+  // --- and the shared file really is deleted --------------------------------
+  state.answers.push([cache], 'Delete')
+  await state.execute('tokenPace.clearStoredData')
+  assert.equal(fs.existsSync(fx.claudeCache), false, 'the shared quota cache survived')
+  assert.equal(fs.existsSync(fx.stateFile), true, 'an item that was not picked was deleted')
+  const confirm = state.messages[state.messages.length - 1]
+  assert.match(confirm.text, /Delete 1 stored item/)
+
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
 function escapeRe(s: string): string {

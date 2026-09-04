@@ -91,12 +91,21 @@ async function showQuickPick(deps: NativeViewDeps): Promise<void> {
   pick.placeholder = 'Usage, quota windows and key figures (chart and heatmap need the dashboard)'
   pick.matchOnDescription = true
   pick.matchOnDetail = true
-  pick.items = quickPickItems(vm).map((i) => ({
-    label: i.label,
-    description: i.description,
-    detail: i.detail,
-    command: i.command,
-  }))
+  // A `separator: true` item is a heading, not a row: it carries no command and the
+  // QuickPick refuses to select it. Read defensively so an older `quickPickItems`
+  // that does not set the flag still renders exactly as before.
+  pick.items = quickPickItems(vm).map((i) => {
+    const item = i as typeof i & { separator?: boolean }
+    if (item.separator === true) {
+      return { label: item.label, kind: vscode.QuickPickItemKind.Separator }
+    }
+    return {
+      label: i.label,
+      description: i.description,
+      detail: i.detail,
+      command: i.command,
+    }
+  })
   pick.buttons = [
     { iconPath: new vscode.ThemeIcon('sync'), tooltip: 'Fetch quota now' },
     { iconPath: new vscode.ThemeIcon('history'), tooltip: 'Re-read token history' },

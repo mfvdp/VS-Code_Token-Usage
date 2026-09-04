@@ -185,6 +185,7 @@ export async function showMenu(
 
   const items: MenuItem[] = [
     { label: '$(dashboard) Open Dashboard', command: 'tokenPace.showDashboard' },
+    { label: '$(markdown) Show Usage as Text (Markdown)', command: 'tokenPace.showUsageMarkdown' },
     { label: '$(list-selection) Show Usage (Quick Pick)', command: 'tokenPace.showUsageQuickPick' },
     { label: '', kind: vscode.QuickPickItemKind.Separator },
     {

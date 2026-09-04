@@ -10,6 +10,12 @@
 !dist/*.js
 !media/logo.png
 !media/icon.svg
+# The walkthrough steps name these as their `media.markdown`; without them every step
+# opens with "Error reading markdown document" and an empty pane.
+!media/walkthrough/*.md
+# The README embeds these; shipping them keeps the pictures visible offline, in the
+# Extensions view's readme pane, and on a Marketplace page that is not rewritten.
+!media/screenshot-*.png
 !scripts/uninstall.js
 !docs/*.md
 

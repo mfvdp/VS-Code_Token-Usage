@@ -327,3 +327,99 @@ test('the buttons offered are always the same two', async () => {
   await alerts.evaluate([quota([win({ percent: 82 })])], noVerdicts, noForecasts, NOW)
   assert.deepEqual(seen, [[ACTION_DASHBOARD, ACTION_SNOOZE]])
 })
+
+// ---------------------------------------------------------------------------
+// Grouping: one message per provider and kind
+// ---------------------------------------------------------------------------
+
+test('several windows on a fast pace become one message per provider', async () => {
+  const h = harness(cfg({ onPaceFast: true }))
+  const session = win({ percent: 60 })
+  const weekly = win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 70, resetsAt: NOW + 40 * HOUR })
+  const fast = new Map([
+    ['claude:session:300', verdict('warn')],
+    ['claude:weekly_all:10080', verdict('warn2')],
+  ])
+
+  const out = await h.alerts.evaluate([quota([session, weekly])], fast, noForecasts, NOW)
+
+  assert.equal(out.length, 1, 'one window per popup would be a chain of dialogs')
+  assert.equal(out[0].kind, 'pace')
+  assert.deepEqual(out[0].windowIds, ['session:300', 'weekly_all:10080'])
+  assert.equal(out[0].identities.length, 2)
+  assert.equal(h.messages.length, 1)
+  assert.match(h.messages[0], /^Claude pace: /)
+  assert.match(h.messages[0], /5 h — /)
+  assert.match(h.messages[0], /7 d — /)
+})
+
+test('several forecasts become one message per provider', async () => {
+  const h = harness(cfg({ forecastLeadMinutes: 60 }))
+  const session = win({ percent: 70 })
+  const weekly = win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 80, resetsAt: NOW + 40 * HOUR })
+  const soon = new Map([
+    ['claude:session:300', forecast()],
+    ['claude:weekly_all:10080', forecast({ etaMs: NOW + 45 * 60_000 })],
+  ])
+
+  const out = await h.alerts.evaluate([quota([session, weekly])], noVerdicts, soon, NOW)
+
+  assert.equal(out.length, 1)
+  assert.equal(out[0].kind, 'forecast')
+  assert.deepEqual(out[0].windowIds, ['session:300', 'weekly_all:10080'])
+  assert.equal(h.messages.length, 1)
+  assert.match(h.messages[0], /^Claude — on this pace: /)
+  assert.match(h.messages[0], /5 h runs out/)
+  assert.match(h.messages[0], /7 d runs out/)
+})
+
+test('two barely used weekly windows become one friendly notice', async () => {
+  const h = harness(cfg({ useItLoseIt: true }))
+  const a = win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 30, resetsAt: NOW + 30 * HOUR })
+  const b = win({ id: 'weekly_opus:10080', kind: 'weekly', label: '7 d Opus', percent: 5, resetsAt: NOW + 30 * HOUR })
+
+  const out = await h.alerts.evaluate([quota([a, b])], noVerdicts, noForecasts, NOW)
+
+  assert.equal(out.length, 1)
+  assert.equal(out[0].kind, 'useItLoseIt')
+  assert.equal(out[0].level, 'info')
+  assert.deepEqual(out[0].windowIds, ['weekly_all:10080', 'weekly_opus:10080'])
+  assert.equal(h.messages.length, 1)
+  assert.match(h.messages[0], /unused allowance does not carry over/)
+  // Said once for the group, not once per window.
+  assert.equal(h.messages[0].split('unused allowance').length, 2)
+})
+
+test('the first reading after a reset says at most one thing per provider and kind', async () => {
+  const h = harness(cfg({ thresholds: [80], onPaceFast: true, forecastLeadMinutes: 60, useItLoseIt: true }))
+  const hot = win({ percent: 92 })
+  const alsoHot = win({ id: 'session_opus:300', label: '5 h Opus', percent: 88 })
+  const codexHot = win({ id: 'codex:300', label: '5 h', percent: 95 })
+  const codexWeek = win({ id: 'codex_weekly:10080', kind: 'weekly', label: '7 d', percent: 91, resetsAt: NOW + 40 * HOUR })
+
+  const out = await h.alerts.evaluate(
+    [quota([hot, alsoHot]), quota([codexHot, codexWeek], { source: 'codex' })],
+    noVerdicts,
+    noForecasts,
+    NOW,
+  )
+
+  // One per provider — four windows, two popups, no chain.
+  assert.equal(out.length, 2)
+  assert.deepEqual(out.map((d) => d.source), ['claude', 'codex'])
+  assert.equal(h.messages.length, 2)
+  assert.match(h.messages[0], /^Claude quota: /)
+  assert.match(h.messages[1], /^Codex quota: /)
+})
+
+test('a window that already spoke in one kind does not speak again in another', async () => {
+  const h = harness(cfg({ thresholds: [80], onPaceFast: true }))
+  const w = win({ percent: 95 })
+  const fast = new Map([['claude:session:300', verdict('error')]])
+
+  const out = await h.alerts.evaluate([quota([w])], fast, noForecasts, NOW)
+
+  assert.equal(out.length, 1)
+  assert.equal(out[0].kind, 'threshold')
+  assert.equal(h.messages.length, 1)
+})

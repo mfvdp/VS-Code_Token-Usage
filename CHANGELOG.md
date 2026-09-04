@@ -3,6 +3,124 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.1.0 — 2026-09-04
+
+A round about the first ten minutes: better defaults, words that say what they mean, and a
+place to look things up. No new data source, no new number — the same measurements, stated
+more plainly.
+
+**Your explicit settings are untouched.** Only defaults moved, and a default only applies
+where you never set the key yourself.
+
+### Please read before updating
+
+* **`engines.vscode` is now `^1.106.0`** (was `^1.104.0`). The dashboard lives in the
+  secondary sidebar, and `contributes.viewsContainers.secondarySidebar` only became a stable
+  contribution point in VS Code 1.106 — in 1.104 it was behind the `contribSecondarySideBar`
+  proposed API, so on 1.104 and 1.105 the container was never registered. The old floor was
+  simply wrong. Editors on an older VS Code base (Cursor and Windsurf at the time of writing)
+  cannot install this version; VSCodium tracks the VS Code releases and can.
+* **Four defaults changed**, each because the old one asked the user to configure their way to
+  the obvious behaviour:
+  * `tokenPace.windowSelect`: `all` → **`worstPace`**. Nine status bar entries were the first
+    thing most people turned off. `worstPace` gives each tool exactly one entry — the window
+    that needs attention. `all` is still there.
+  * `tokenPace.clickAction`: `menu` → **`dashboard`**. A click now opens the panel; the menu
+    is one command away and still the default target of a problem-free right-hand path.
+  * `tokenPace.alerts.thresholds`: `[]` → **`[90]`**. One notification, at 90 %, only while
+    the window is also ahead of pace, only more than an hour before its reset, and never from
+    a stale reading. **Emptying the list still switches notifications off entirely.**
+  * `tokenPace.tooltipExplanations`: `true` → **`false`**. The paragraphs are worth reading
+    once, not on every hover. The uncertainty markers (`~`, `⚠`) and the provenance line were
+    never covered by this setting and still are not.
+* **The `ctrl+alt+shift+q` keybinding for *Fetch Quota Now* is gone.** Two global chords for
+  one small extension is greedy, and fetching is reachable from the status bar click, the
+  tooltip footer, the actions menu, the panel title bar and the Command Palette. *Open
+  Dashboard* keeps `ctrl+alt+shift+t` / `cmd+alt+shift+t`, and the new boolean
+  `tokenPace.keybindings` switches it off from the settings UI instead of requiring a `-` rule
+  in `keybindings.json`.
+* **The remote hint now offers to do the move itself.** On a remote host with no transcripts,
+  the notification's *Run Token Pace locally* button writes `"remote.extensionKind"` into your
+  **user settings** (merged, so other extensions' entries stay) and offers a reload. That is a
+  third write outside the extension's own storage, and the only one that is not consent-gated
+  — the click *is* the consent. It is offered at most once per machine, only where nothing was
+  found at all, and the manual edit it replaces is still documented in the README.
+* **Four more settings are machine-scoped**, so a workspace can no longer make decisions about
+  credentials: `tokenPace.quotaSource`, `tokenPace.writeQuotaCache`, `tokenPace.userAgent` and
+  `tokenPace.credentials.keychain`. A synced or workspace-level value for these is ignored in
+  favour of the machine-level one.
+* **`tokenPace.timezone` and `tokenPace.dayBoundaryHour` moved from the Dashboard group to
+  General**, because they govern the status bar summary as well. The keys are unchanged.
+
+### Changed
+
+**Words**
+
+* The pace verdict is stated in the unit the figure above it uses: `5 % ahead of pace` instead
+  of `5 points ahead of the clock`, and `36 % of the window still spare` instead of
+  `36 points in reserve`. The sustainable rate reads `~18.8 %/h keeps it to the reset` instead
+  of `points/h`.
+* The KPI label `Ø per active day` is now `Avg per active day`, in all three views.
+* The command *Token Pace: Menu* is now *Token Pace: Show Actions Menu*, and the menu itself
+  gained *Show usage as text (Markdown)* directly after *Open dashboard*.
+
+**Status bar**
+
+* The token and cost entries always print their period: `Σ 2.6M · today`, `~$1.23 · today`.
+  A bare `Σ 2.6M` did not say what it summed.
+* Every countdown is introduced by the word `resets`: `· resets 6h45m`. A bare `· 6h45m` was
+  one glance away from the `$(history) 12m` age suffix, and the two move in opposite
+  directions.
+* **The two alarm states are said in words**, next to the figure: `100% exhausted` and
+  `100% limit reached`. The `$(warning)` icon, the `⛔` emoji and the alarm background are the
+  three channels that carried them, and `indicator: color`, `colorMode: monochrome` and a
+  high-contrast theme each remove one. The words survive all three.
+* The repair action of a problem state is now one table for all of it — status bar click,
+  tooltip footer, dashboard card, Quick Pick and text view. `403` and “no reading, no named
+  cause” now open the log (where the reason actually is) rather than a browser tab or another
+  fetch, and a missing cache file offers *Re-read history*, which also picks up a file that has
+  appeared since. The table is in `docs/status-bar-states.md` and in the README, and a test
+  compares both against the code.
+
+**Dashboard**
+
+* The KPI row starts with a **today** tile (usage today, with its cost while `showCost` is on).
+* KPI deltas are coloured by what the change means, not by its sign: more usage, cost and
+  requests read as the bad direction, a higher cache hit rate as the good one, and active days
+  and the per-day average carry no judgement and stay neutral.
+* **Sections collapse.** Every header is a toggle, and what you collapse is remembered with the
+  rest of the view state. The model chips fold behind a `models (N)` toggle above four, and the
+  custom date fields stay hidden until the range actually is a custom one or you open them with
+  the `custom…` chip.
+
+**Settings**
+
+* The groups are ordered the way they are used: the power-user settings (`labelMaxChars`,
+  `resetHourCycle`, `overflowDisplay`, `diagnostics.includeNetworkSetup`,
+  `codexAppServer.mode`, `credentials.keychain`, `leaderElection`, `pollOnlyWhenFocused`,
+  `calibration.show`, `pricing.showListPrice`) sit at the end of their group, and the
+  deprecated `tokenPace.windows` sits behind everything.
+* Descriptions say up front when a setting does nothing: `pace.tolerancePoints` and
+  `pace.minElapsedPercent` only apply with `pace.sensitivity: custom`, `barStyle` only bites
+  for `barGlyphs: blocks`. Cross-references were added where one setting silences another —
+  `showCost` ↔ the `cost` entry, `quotaHistoryDays` ↔ the `forecast` entry and the forecast and
+  history sections.
+
+### Added
+
+* **A walkthrough**, *Get started with Token Pace*, in *Help → Get Started*: what the bar and
+  its colours mean (with a *Preview status bar states* button), where the quota figures come
+  from and what “poll” means (with *Fetch quota now*, *Connect Claude status line* and
+  *Open settings*), and the dashboard. The second step quotes the network-consent disclosure
+  in full — the same text the dialog shows, including the sentence about identifying as the
+  Claude Code client — so the terms can be read before the dialog ever appears. A test
+  compares the two, line by line.
+* **`tokenPace.keybindings`** (default `true`) — see above.
+* **README:** screenshots of the status bar and of the dashboard (rendered from preview data,
+  never from real usage), which now also ship inside the `.vsix`; a *Words used here* glossary of the nine terms the
+  extension leans on; and an *If the bar says …* section covering every problem state with its
+  exact bar text, its cause and the action its click performs.
+
 ## 1.0.0 — 2026-09-03
 
 The 1.0 release. Everything the extension shows is now traceable to a source, a formula and a

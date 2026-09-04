@@ -14,7 +14,7 @@
  */
 
 import { Aggregator, Metric, billable } from './agg'
-import { Config, readPaceConfig, readTimeConfig } from './config'
+import { Config, DashboardSection, readPaceConfig, readTimeConfig } from './config'
 import { digest } from './digest'
 import {
   Calibration, ForecastConfig, calibration, forecast, lockoutText, resetForecast, retrospective,
@@ -66,6 +66,12 @@ export interface UiState {
   heatmapMetric: 'usage' | 'cost'
   hourZone: 'local' | 'utc'
   drillDay: string | null
+  /**
+   * Section keys the reader has folded away. Collapsed rather than hidden: the section stays
+   * in the list and in `dashboard.sections`, so nothing is lost and a fold is undone by the
+   * same click that made it.
+   */
+  collapsed: string[]
 }
 
 /** The commands the webview may ask for. Nothing outside this list is ever executed. */
@@ -79,6 +85,12 @@ export const WEBVIEW_COMMANDS = [
   'tokenPace.copySummary',
   'tokenPace.copyDiagnostics',
   'tokenPace.clearStoredData',
+  // The dashboard's own empty state offers the two ways to get a quota reading, and a card
+  // that follows another window offers the dashboard. Both commands ask before they act —
+  // connecting the status line goes through its own write consent and its own backup — so
+  // the webview can name them without being able to do anything by naming them.
+  'tokenPace.connectStatusLine',
+  'tokenPace.showDashboard',
 ] as const
 export type WebviewCommandId = (typeof WEBVIEW_COMMANDS)[number]
 
@@ -91,8 +103,22 @@ export type WebviewMessage =
   | { type: 'setHeatmapMetric'; metric: 'usage' | 'cost' }
   | { type: 'setHourZone'; zone: 'local' | 'utc' }
   | { type: 'drill'; day: string | null }
+  | { type: 'toggleSection'; key: DashboardSectionKey }
   | { type: 'refresh' }
   | { type: 'command'; id: WebviewCommandId }
+
+/**
+ * The sections that can be folded. Exactly the keys `dashboard.sections` knows: a fold is a
+ * piece of view state, and a key from anywhere else would grow the stored state without ever
+ * matching a section on screen.
+ */
+export const DASHBOARD_SECTION_KEYS = [
+  'summary', 'quota', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours', 'forecast',
+  'history', 'projects', 'sessions', 'dataQuality',
+  // `satisfies`, so a key that is not a section of the config is a compile error here; the
+  // other direction — a new section that nobody may fold — is asserted in the test.
+] as const satisfies readonly DashboardSection[]
+export type DashboardSectionKey = (typeof DASHBOARD_SECTION_KEYS)[number]
 
 export const RANGE_PRESETS: RangePreset[] = [
   'today', 'yesterday', '7d', '30d', '90d', 'thisWeek', 'thisMonth', 'lastMonth', 'year', 'all',
@@ -171,6 +197,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'drill':
       if (m.day === null) return { type: 'drill', day: null }
       return isCalendarDay(m.day) ? { type: 'drill', day: m.day } : null
+    case 'toggleSection':
+      return typeof m.key === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(m.key)
+        ? { type: 'toggleSection', key: m.key as DashboardSectionKey }
+        : null
     case 'refresh':
       return { type: 'refresh' }
     case 'command':
@@ -192,6 +222,7 @@ export function defaultUiState(cfg: Config): UiState {
     heatmapMetric: 'usage',
     hourZone: 'local',
     drillDay: null,
+    collapsed: [],
   }
 }
 
@@ -226,6 +257,13 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       return { ...ui, hourZone: m.zone }
     case 'drill':
       return { ...ui, drillDay: m.day }
+    case 'toggleSection': {
+      const on = ui.collapsed.includes(m.key)
+      return {
+        ...ui,
+        collapsed: on ? ui.collapsed.filter((k) => k !== m.key) : [...ui.collapsed, m.key],
+      }
+    }
     default:
       return ui
   }
@@ -476,8 +514,13 @@ const USAGE_PAGE: Record<Source, string> = {
   codex: 'https://chatgpt.com/codex/settings/usage',
 }
 
-/** One repair step per cause — a named problem with no way out is only half a diagnosis. */
-const PROBLEM_ACTION: Partial<Record<ProblemKind, { label: string; command: string }>> = {
+/**
+ * One repair step per cause — a named problem with no way out is only half a diagnosis.
+ *
+ * A full record, not a partial one: every kind the extension can report has an entry, so a
+ * new kind is a compile error here rather than a card with a dead end on it.
+ */
+export const PROBLEM_ACTION: Record<ProblemKind, { label: string; command: string }> = {
   noToken: { label: 'Show log', command: 'tokenPace.showOutput' },
   tokenExpired: { label: 'Show log', command: 'tokenPace.showOutput' },
   consentPending: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' },
@@ -491,6 +534,9 @@ const PROBLEM_ACTION: Partial<Record<ProblemKind, { label: string; command: stri
   noFile: { label: 'Re-read history', command: 'tokenPace.rescan' },
   empty: { label: 'Re-read history', command: 'tokenPace.rescan' },
   paused: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' },
+  // A follower window renders what the leader wrote; the numbers are there, the fetch is
+  // not this window's to make. The dashboard is where the reading it does have is shown.
+  follower: { label: 'Open dashboard', command: 'tokenPace.showDashboard' },
   unknown: { label: 'Show log', command: 'tokenPace.showOutput' },
 }
 
@@ -546,7 +592,8 @@ function sustainableText(w: QuotaWindow, now: number): string | null {
   if (w.unlimited) return null
   const r = sustainableRate(w.percent, w.resetsAt, now)
   if (!r) return null
-  return estimate(`${r.perHour.toFixed(1)} points/h keeps it to the reset`)
+  // Percentage points of the window, said the way the figure above it is said: "%".
+  return estimate(`${r.perHour.toFixed(1)} %/h keeps it to the reset`)
 }
 
 /**
@@ -857,8 +904,8 @@ function forecastList(
         resetForecast: rf === null
           ? null
           : estimate(rf.sign === '+'
-            ? `${rf.points.toFixed(0)} points spare at the reset`
-            : `${rf.points.toFixed(0)} points over before the reset`),
+            ? `${rf.points.toFixed(0)} % spare at the reset`
+            : `${rf.points.toFixed(0)} % over before the reset`),
         spark: sparkOf(samples, now),
         gaps: history.gaps(samples, SPARK_GAP_MS).length,
       })
@@ -895,8 +942,8 @@ function retroText(r: Retro): string {
     return `not enough data yet · ${n} complete cycle${n === 1 ? '' : 's'} on file`
   }
   const capped = r.cappedShare === null ? '–' : `${Math.round(r.cappedShare * 100)} %`
-  const unused = r.avgUnused === null ? '–' : `${Math.round(r.avgUnused)} points`
-  return `${capped} of the complete cycles hit the limit · Ø ${unused} unused at the reset`
+  const unused = r.avgUnused === null ? '–' : `${Math.round(r.avgUnused)} %`
+  return `${capped} of the complete cycles hit the limit · Avg ${unused} unused at the reset`
 }
 
 function dataQuality(
@@ -976,7 +1023,7 @@ function dataQuality(
 function calibrationText(c: Calibration | null): string {
   if (!c) return 'not enough data'
   return estimate(
-    `server counts ${c.factor.toFixed(1)} points per 1M local tokens `
+    `server counts ${c.factor.toFixed(1)} % of the window per 1M local tokens `
     + `(band ${c.low.toFixed(1)}–${c.high.toFixed(1)}, ${c.basisHours.toFixed(1)} h of basis)`,
   )
 }

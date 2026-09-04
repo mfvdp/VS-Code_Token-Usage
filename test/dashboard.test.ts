@@ -154,7 +154,7 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
     showCost: true,
     pricing: { asOf: '2026-09-02', custom: false, showList: false },
     range: { from: '2026-08-05', to: '2026-09-03', label: 'Last 30 days', preset: '30d', presets: ['7d', '30d'] },
-    ui: { providers: ['claude', 'codex'], models: [], metric: 'usage' },
+    ui: { providers: ['claude', 'codex'], models: [], metric: 'usage', collapsed: [] },
     quotas: [card()],
     digest: [],
     kpis: [],
@@ -846,6 +846,173 @@ test('the drill panel is scrolled to only when the day changes, never on a refre
   assert.equal(scrolls(), 1)
 })
 
+// ---------------------------------------------------------------------------
+// Folds, chips and the empty quota state
+// ---------------------------------------------------------------------------
+
+/** A context whose root node keeps whatever `renderAll` writes into it. */
+function pageCtx(): { c: nodeVm.Context; html: () => string } {
+  const root = { innerHTML: '', dataset: {}, style: {} }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: {
+      addEventListener: () => undefined,
+      getElementById: () => root,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+    window: { addEventListener: () => undefined },
+    console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  return { c, html: () => String(root.innerHTML) }
+}
+
+function renderPage(over: Record<string, unknown> = {}): string {
+  const { c, html } = pageCtx()
+  ;(c as Record<string, unknown>).fixture = model(over)
+  nodeVm.runInContext('vm = fixture; renderAll();', c)
+  return html()
+}
+
+test('every section is a fold the keyboard can reach, open unless the reader closed it', () => {
+  const open = renderPage({ sections: ['quota', 'forecast'] })
+  // A native <details>: focusable, announced as expandable, and toggled with Enter or Space
+  // without a line of ARIA from us.
+  assert.ok(open.indexOf('<details open><summary data-act="section" data-key="quota"><h2>Quota</h2></summary>') >= 0, open)
+  assert.equal(open.split('<details').length - 1, 2)
+
+  const folded = renderPage({ sections: ['quota', 'forecast'], ui: { providers: ['claude'], models: [], collapsed: ['quota'] } })
+  assert.ok(folded.indexOf('<details><summary data-act="section" data-key="quota"') >= 0, folded)
+  // Folded, not dropped: the body is still in the document, so a section update writes into
+  // it whether the reader has it open or not.
+  assert.ok(folded.indexOf('<div data-body="quota">') >= 0, folded)
+  assert.ok(folded.indexOf('<details open><summary data-act="section" data-key="forecast"') >= 0, folded)
+})
+
+test('a payload without the fold list renders every section open', () => {
+  // An older extension build sends no `collapsed`; the page may not fold everything away.
+  const html = renderPage({ sections: ['quota'], ui: { providers: ['claude'], models: [] } })
+  assert.ok(html.indexOf('<details open>') >= 0, html)
+})
+
+test('the fold is posted, and a summary is not toggled twice by one key press', () => {
+  assert.match(SCRIPT, /post\(\{ type: 'toggleSection', key: el\.dataset\.key \}\)/)
+  // The keydown fallback exists for the elements that are not natively activatable; a
+  // <summary> is, and acting on both events would fold and unfold in one press.
+  assert.match(SCRIPT, /el\.tagName !== 'SUMMARY'/)
+})
+
+test('a delta is coloured by what the figure means, never by the arrow alone', () => {
+  const kpi = (over: Record<string, unknown>) => ({
+    key: 'k', label: 'L', value: '1', provenance: 'measured', spark: [], note: null,
+    delta: { glyph: '▲', text: '+5%' }, polarity: 'upBad', ...over,
+  })
+  const cls = (over: Record<string, unknown>): string => {
+    const h = render('sKpis()', { kpis: [kpi(over)] })
+    const m = /<span class="d ([a-z]+)"/.exec(h)
+    return m ? m[1] : h
+  }
+  // More usage is a warning, less of it is good; a cache hit rate reads the other way round.
+  assert.equal(cls({}), 'bad')
+  assert.equal(cls({ delta: { glyph: '▼', text: '-5%' } }), 'good')
+  assert.equal(cls({ polarity: 'upGood' }), 'good')
+  assert.equal(cls({ polarity: 'upGood', delta: { glyph: '▼', text: '-5%' } }), 'bad')
+  // Neither direction is a verdict for a count of days, and "new" is not a direction at all.
+  assert.equal(cls({ polarity: 'neutral' }), 'neutral')
+  assert.equal(cls({ delta: { glyph: '', text: 'new' } }), 'neutral')
+  assert.equal(cls({ delta: { glyph: '•', text: '+0.1%' } }), 'neutral')
+  // The colours themselves are the theme's, and the old arrow-only rules are gone.
+  assert.match(STYLE, /\.kpi \.d\.good \{ color: var\(--ok\); \}/)
+  assert.match(STYLE, /\.kpi \.d\.bad \{ color: var\(--warn\); \}/)
+  assert.match(STYLE, /\.kpi \.d\.neutral \{ color: var\(--dim\); \}/)
+  assert.equal(/\.kpi \.d\.(up|down) \{/.test(STYLE), false)
+})
+
+test('with no quota card at all the section says how to get one, and invents nothing', () => {
+  const h = render('sQuota()', { quotas: [] })
+  assert.equal(/\d ?%/.test(h), false, h)
+  // Both ways out, each as a button the webview is allowed to send.
+  assert.ok(h.indexOf('data-id="tokenPace.refreshQuota"') >= 0, h)
+  assert.ok(h.indexOf('data-id="tokenPace.connectStatusLine"') >= 0, h)
+  assert.ok(h.indexOf('status line') >= 0, h)
+  // A card that exists but cannot be read keeps its own problem box instead.
+  const broken = render('sQuota()', {
+    quotas: [card({ problem: 'offline', problemKind: 'offline', windows: [],
+      problemAction: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' } })],
+  })
+  assert.equal(broken.indexOf('tokenPace.connectStatusLine') >= 0, false, broken)
+})
+
+test('a card per provider with nothing in it is the same state as no card at all', () => {
+  // The quota manager builds one card per provider whatever happens, so "vm.quotas is
+  // empty" is not the state a user is ever in: what they see is two cards with no window
+  // in them. Both reach the invitation, and the reason each provider gave is kept.
+  const waiting = [
+    card({ problem: 'network access not granted yet', problemKind: 'consentPending', windows: [],
+      problemAction: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' } }),
+    card({ source: 'codex', title: 'Codex', problem: 'quota reading is switched off',
+      problemKind: 'quotaOff', windows: [], problemAction: null }),
+  ]
+  const h = render('sQuota()', { quotas: waiting })
+  assert.ok(h.indexOf('No quota reading yet.') >= 0, h)
+  assert.ok(h.indexOf('data-id="tokenPace.connectStatusLine"') >= 0, h)
+  assert.ok(h.indexOf('Claude Code: network access not granted yet') >= 0, h)
+  assert.ok(h.indexOf('Codex: quota reading is switched off') >= 0, h)
+  assert.equal(/\d ?%/.test(h), false, h)
+  // One provider that does have a reading, and the cards win: there is something to show.
+  const half = render('sQuota()', { quotas: [waiting[0], card({ source: 'codex', title: 'Codex' })] })
+  assert.equal(half.indexOf('No quota reading yet.') >= 0, false, half)
+  // A kind neither exit repairs keeps its own box, even with no window on the card.
+  const offline = render('sQuota()', {
+    quotas: [card({ problem: 'offline', problemKind: 'offline', windows: [] }),
+      card({ source: 'codex', title: 'Codex', problem: 'offline', problemKind: 'offline', windows: [] })],
+  })
+  assert.equal(offline.indexOf('No quota reading yet.') >= 0, false, offline)
+})
+
+test('model chips fold behind a count once there are more than four', () => {
+  const row = (m: string) => ({
+    model: m, source: 'claude', isSub: false, tier: 'standard', usage: 1, usageText: '1',
+    output: '1', requests: '1', cost: 0, costText: '–', listCost: null, cacheHit: '–',
+    share: '100 %', costShare: '–', priced: 'exact', price: '–', turnAvg: null, turnP90: null,
+  })
+  const names = ['a', 'b', 'c', 'd', 'e', 'f']
+  const h = render('controls()', {
+    models: { rows: names.map(row), total: 6, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  assert.equal(h.split('data-act="model"').length - 1, 4, h)
+  assert.ok(h.indexOf('models (6)') >= 0, h)
+  assert.ok(h.indexOf('+2 more') >= 0, h)
+  // A model that is being filtered on is never folded away: a chip the reader cannot see is
+  // a filter they cannot switch off.
+  const filtered = render('controls()', {
+    models: { rows: names.map(row), total: 6, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+    ui: { providers: ['claude'], models: ['f'], collapsed: [] },
+  })
+  assert.ok(filtered.indexOf('data-model="f"') >= 0, filtered)
+  // Four or fewer and there is nothing to fold.
+  const few = render('controls()', {
+    models: { rows: names.slice(0, 3).map(row), total: 3, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  assert.equal(few.indexOf('more</button>') >= 0, false, few)
+  assert.ok(few.indexOf('<span class="meta">models</span>') >= 0, few)
+})
+
+test('the date fields stay out of the way until the range is a custom one', () => {
+  const preset = render('controls()')
+  assert.equal(preset.indexOf('data-role="from"') >= 0, false, preset)
+  assert.ok(preset.indexOf('data-act="customDates"') >= 0, preset)
+  for (const p of ['custom', 'all']) {
+    const h = render('controls()', {
+      range: { from: '2026-08-05', to: '2026-09-03', label: 'Custom', preset: p, presets: ['7d', '30d'] },
+    })
+    assert.ok(h.indexOf('data-role="from"') >= 0, p)
+    assert.ok(h.indexOf('data-role="to"') >= 0, p)
+    assert.ok(h.indexOf('data-act="customRange"') >= 0, p)
+  }
+})
+
 test('a clipped table is announced once the browser has measured it', () => {
   assert.match(SCRIPT, /scrollWidth > el\.clientWidth/)
   assert.match(SCRIPT, /class="meta scrollhint"/)
@@ -865,8 +1032,9 @@ test('no renderer invents a number or leaks an undefined', () => {
 })
 
 test('the message hooks the extension parses are all still in the page', () => {
-  for (const act of ['range', 'customRange', 'refresh', 'cmd', 'sort', 'provider', 'model',
-    'clearModels', 'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric']) {
+  for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
+    'model', 'clearModels', 'moreModels', 'section', 'heatmapMetric', 'hourZone', 'drill',
+    'costLine', 'metric']) {
     assert.ok(SCRIPT.indexOf('data-act="' + act + '"') >= 0, act)
   }
   for (const role of ['from', 'to']) {

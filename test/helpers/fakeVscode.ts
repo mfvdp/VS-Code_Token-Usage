@@ -52,6 +52,22 @@ export interface RecordedMessage {
   actions: string[]
 }
 
+/** One `showQuickPick` call: what it offered, so a test can assert the list itself. */
+export interface RecordedQuickPick {
+  items: Array<Record<string, unknown>>
+  options: Record<string, unknown>
+}
+
+/** A `createQuickPick()` control, kept so a test can read the items it was filled with. */
+export interface FakeQuickPick {
+  title: string
+  placeholder: string
+  items: Array<Record<string, unknown>>
+  buttons: unknown[]
+  selectedItems: unknown[]
+  shown: boolean
+}
+
 export interface FakeVscodeState {
   /** Every line the extension's output channel received, newest last. */
   log: LogLine[]
@@ -63,6 +79,9 @@ export interface FakeVscodeState {
   items: FakeStatusBarItem[]
   clipboard: string[]
   messages: RecordedMessage[]
+  quickPicks: RecordedQuickPick[]
+  /** Every `createQuickPick()` control, in creation order. */
+  quickPickControls: FakeQuickPick[]
   documents: Array<{ uri: string; text: string }>
   /** Answers `showQuickPick` / `showInformationMessage` hand out, oldest first. */
   answers: unknown[]
@@ -78,6 +97,8 @@ export interface FakeVscodeState {
   execute(id: string, ...args: unknown[]): Promise<unknown>
   logText(): string
   set(key: string, value: unknown): void
+  /** `vscode.env.remoteName` — undefined is a local window, a string is WSL/SSH/container. */
+  setRemoteName(name: string | undefined): void
   /**
    * Clears every recording and replaces the settings.
    *
@@ -187,6 +208,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const items: FakeStatusBarItem[] = []
   const clipboard: string[] = []
   const messages: RecordedMessage[] = []
+  const quickPicks: RecordedQuickPick[] = []
+  const quickPickControls: FakeQuickPick[] = []
   const documents: Array<{ uri: string; text: string }> = []
   const answers: unknown[] = []
   const values = new Map<string, unknown>(Object.entries(settings))
@@ -251,10 +274,12 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       has(key: string): boolean {
         return values.has(full(key))
       },
-      inspect(): undefined {
-        // Every value in this host is a "user" value; the diagnostics report only asks
-        // where `http.*` came from, and "default" is the honest answer for a fake.
-        return undefined
+      inspect<T>(key: string): { key: string; globalValue: T } | undefined {
+        // Every value in this host is a "user" value, so a key that was set reports itself as
+        // the user's own (globalValue); a key that was never set reports nothing, which is what
+        // the diagnostics report reads as "default".
+        const k = full(key)
+        return values.has(k) ? { key: k, globalValue: values.get(k) as T } : undefined
       },
       update(key: string, value: unknown): Promise<void> {
         values.set(full(key), value)
@@ -308,7 +333,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     },
 
     env: {
-      remoteName: undefined,
+      remoteName: undefined as string | undefined,
       appName: 'Token Pace Test Host',
       clipboard: {
         writeText(text: string): Promise<void> {
@@ -328,16 +353,21 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     window: {
       createOutputChannel: (): typeof channel => channel,
       createStatusBarItem,
-      createQuickPick: () => ({
-        title: '', placeholder: '', matchOnDescription: false, matchOnDetail: false,
-        items: [] as unknown[], buttons: [] as unknown[], selectedItems: [] as unknown[],
-        onDidTriggerButton: () => disposable(),
-        onDidAccept: () => disposable(),
-        onDidHide: () => disposable(),
-        show: () => { /* nothing is shown */ },
-        hide: () => { /* nothing to hide */ },
-        dispose: () => { /* nothing to release */ },
-      }),
+      createQuickPick: () => {
+        const control = {
+          title: '', placeholder: '', matchOnDescription: false, matchOnDetail: false,
+          items: [] as Array<Record<string, unknown>>, buttons: [] as unknown[],
+          selectedItems: [] as unknown[], shown: false,
+          onDidTriggerButton: () => disposable(),
+          onDidAccept: () => disposable(),
+          onDidHide: () => disposable(),
+          show(): void { this.shown = true },
+          hide: () => { /* nothing to hide */ },
+          dispose: () => { /* nothing to release */ },
+        }
+        quickPickControls.push(control)
+        return control
+      },
       registerWebviewViewProvider(viewType: string, provider: unknown): { dispose(): void } {
         webviewProviders.set(viewType, provider)
         return disposable(() => webviewProviders.delete(viewType))
@@ -352,7 +382,13 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
         record('warning', text, rest),
       showErrorMessage: (text: string, ...rest: unknown[]): Promise<unknown> =>
         record('error', text, rest),
-      showQuickPick: (): Promise<unknown> => Promise.resolve(nextAnswer()),
+      showQuickPick: (items: unknown, options: unknown): Promise<unknown> => {
+        quickPicks.push({
+          items: Array.isArray(items) ? (items as Array<Record<string, unknown>>) : [],
+          options: (options ?? {}) as Record<string, unknown>,
+        })
+        return Promise.resolve(nextAnswer())
+      },
       showSaveDialog: (): Promise<unknown> => Promise.resolve(nextAnswer()),
       showTextDocument: (doc: unknown): Promise<unknown> => Promise.resolve(doc),
       withProgress<T>(_options: unknown, task: (p: unknown, t: unknown) => PromiseLike<T>): PromiseLike<T> {
@@ -405,6 +441,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     items,
     clipboard,
     messages,
+    quickPicks,
+    quickPickControls,
     documents,
     answers,
     settings: values,
@@ -425,6 +463,9 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     set(key: string, value: unknown): void {
       values.set(key, value)
     },
+    setRemoteName(name: string | undefined): void {
+      api.env.remoteName = name
+    },
     reset(settings?: Record<string, unknown>): void {
       log.length = 0
       registered.clear()
@@ -433,7 +474,10 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       items.length = 0
       clipboard.length = 0
       messages.length = 0
+      quickPicks.length = 0
+      quickPickControls.length = 0
       documents.length = 0
+      api.env.remoteName = undefined
       answers.length = 0
       webviewProviders.clear()
       contentProviders.clear()

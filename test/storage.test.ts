@@ -11,7 +11,10 @@ import { strict as assert } from 'node:assert'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
-import { deleteItems, formatBytes, inventory, MementoLike, StoredPaths, storedFile } from '../src/storage'
+import {
+  BRIDGE_BLOCKS_DELETE, DELETE_WARNING_EXTERNAL, deleteItems, formatBytes, inventory, MementoLike,
+  StoredPaths, storedFile, storedFiles,
+} from '../src/storage'
 import { scratchDir } from './fixtures/helpers'
 
 
@@ -157,4 +160,77 @@ test('sizes are readable', () => {
   assert.equal(formatBytes(12_300), '12.3 kB')
   assert.equal(formatBytes(1_500_000), '1.5 MB')
   assert.equal(formatBytes(Number.NaN), '–')
+})
+
+// ---------------------------------------------------------------------------
+// The one file outside globalStorage
+// ---------------------------------------------------------------------------
+
+test('the shared quota cache is listed only when its paths are supplied', () => {
+  const dir = scratchDir('storage')
+  const bare = inventory(pathsIn(dir), new FakeMemento())
+  assert.equal(bare.some((i) => i.key === 'externalQuota'), false, 'a file we may not write was offered')
+
+  const claude = path.join(dir, 'claude-usage.json')
+  const codex = path.join(dir, 'codex-usage.json')
+  fs.writeFileSync(claude, '{"schema_version":1}')
+  const items = inventory(
+    { ...pathsIn(dir), externalQuota: [claude, codex] },
+    new FakeMemento(),
+    { externalQuota: `${claude} · ${codex}` },
+  )
+  const item = items.find((i) => i.key === 'externalQuota')
+  assert.ok(item, 'the shared cache is missing from the list')
+  // One of the two exists: the item is present, and its size is the sum.
+  assert.equal(item.present, true)
+  assert.equal(item.bytes, 20)
+  assert.ok(item.detail!.includes(codex), 'the picker line does not name both files')
+  // It comes after the extension's own files and before the memento items.
+  assert.deepEqual(
+    items.map((i) => i.key),
+    ['state', 'quota', 'history', 'mirror', 'externalQuota', 'consent', 'alerts', 'ui'],
+  )
+})
+
+test('an empty or missing path list is not an item at all', () => {
+  const dir = scratchDir('storage')
+  const empty = inventory({ ...pathsIn(dir), externalQuota: [] }, new FakeMemento())
+  assert.equal(empty.some((i) => i.key === 'externalQuota'), false)
+  const blank = inventory({ ...pathsIn(dir), externalQuota: ['', '  '.trim()] }, new FakeMemento())
+  assert.equal(blank.some((i) => i.key === 'externalQuota'), false)
+})
+
+test('deleting the shared cache removes both provider files and their temp siblings', async () => {
+  const dir = scratchDir('storage')
+  const claude = path.join(dir, 'claude-usage.json')
+  const codex = path.join(dir, 'codex-usage.json')
+  const temp = `${claude}.tmp`
+  const neighbour = path.join(dir, 'someone-elses.json')
+  for (const f of [claude, codex, temp, neighbour]) fs.writeFileSync(f, '{}')
+
+  const paths = { ...pathsIn(dir), externalQuota: [claude, codex] }
+  const result = await deleteItems(['externalQuota'], paths, new FakeMemento())
+
+  assert.deepEqual(result, { deleted: ['externalQuota'], failed: [] })
+  assert.equal(fs.existsSync(claude), false)
+  assert.equal(fs.existsSync(codex), false)
+  assert.equal(fs.existsSync(temp), false)
+  assert.equal(fs.existsSync(neighbour), true, 'an unrelated file in the same directory was deleted')
+})
+
+test('storedFiles lists both cache files where storedFile can only name one', () => {
+  const dir = scratchDir('storage')
+  const paths = { ...pathsIn(dir), externalQuota: ['/a/claude.json', '/a/codex.json'] }
+  assert.deepEqual(storedFiles('externalQuota', paths), ['/a/claude.json', '/a/codex.json'])
+  assert.equal(storedFile('externalQuota', paths), null)
+  assert.deepEqual(storedFiles('state', paths), [paths.state])
+  assert.equal(storedFiles('consent', paths), null)
+  assert.equal(storedFiles('externalQuota', pathsIn(dir)), null)
+})
+
+test('the two extra warnings say what deleting cannot undo', () => {
+  assert.match(DELETE_WARNING_EXTERNAL, /outside the extension storage/)
+  assert.match(DELETE_WARNING_EXTERNAL, /other tools/)
+  assert.match(BRIDGE_BLOCKS_DELETE, /Disconnect Claude Status Line/)
+  assert.match(BRIDGE_BLOCKS_DELETE, /settings\.json/)
 })

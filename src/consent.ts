@@ -163,13 +163,47 @@ export type WriteConsentKind = 'writeQuotaCache' | 'statusLine'
 
 /** Concrete paths for the disclosure text; every one of them is named in the dialog. */
 export interface WriteConsentPaths {
-  /** The external quota cache file the writer would create or replace. */
-  quotaCacheFile?: string
+  /**
+   * Every external quota cache file the writer would create or replace — one
+   * per provider. A dialog that named only the Claude file asked for less than
+   * the opt-in actually does, and the Codex path is configurable too.
+   */
+  quotaCacheFiles?: string[]
   /** Claude Code's settings file the bridge would edit. */
   settingsFile?: string
   /** Where the bridge mirrors the status-line JSON (inside globalStorage). */
   mirrorFile?: string
 }
+
+/** Supplied as a function wherever the paths follow a setting that can change. */
+export type WriteConsentPathsSource = WriteConsentPaths | (() => WriteConsentPaths)
+
+function resolvePaths(source: WriteConsentPathsSource | undefined): WriteConsentPaths {
+  if (typeof source === 'function') {
+    try {
+      return source() ?? {}
+    } catch {
+      // A path source that throws must not swallow the dialog; the defaults below
+      // still describe the shape of what is written.
+      return {}
+    }
+  }
+  return source ?? {}
+}
+
+/**
+ * The paths the writer uses when neither `tokenPace.claudeQuotaFile` nor
+ * `tokenPace.codexQuotaFile` is set — the defaults of `src/quota.ts`, repeated
+ * here in `~` form because that module resolves them against the real home.
+ *
+ * Named only when the live paths cannot be read (a settings lookup that throws).
+ * A dialog must never name a file the extension would not touch, so these stay
+ * in step with `DEFAULT_CLAUDE_QUOTA` / `DEFAULT_CODEX_QUOTA`.
+ */
+export const DEFAULT_QUOTA_CACHE_FILES: readonly string[] = [
+  '~/.cache/claude-usage/state.json',
+  '~/.cache/codex-usage/state.json',
+]
 
 const WRITE_TITLES: Record<WriteConsentKind, string> = {
   writeQuotaCache: 'Allow Token Pace to write the shared quota cache file?',
@@ -185,20 +219,22 @@ const WRITE_TITLES: Record<WriteConsentKind, string> = {
  */
 export function writeConsentDisclosure(kind: WriteConsentKind, paths: WriteConsentPaths = {}): string {
   if (kind === 'writeQuotaCache') {
-    const file = paths.quotaCacheFile ?? '~/.cache/claude-monitor/usage-<source>.json'
+    const files = (paths.quotaCacheFiles ?? []).filter((f) => typeof f === 'string' && f.trim() !== '')
+    const listed = files.length > 0 ? files : [...DEFAULT_QUOTA_CACHE_FILES]
     return [
       'Token Pace writes only into its own storage — with this one exception, if you allow it.',
       '',
-      `After each of its own quota polls it would write the result to:`,
-      `  ${file}`,
+      'After each of its own quota polls it would write the result to these files, one per',
+      'provider:',
+      ...listed.map((f) => `  ${f}`),
       '',
-      'That file is the documented exchange format (schema_version 1) other tools read, so a',
+      'Each of them is the documented exchange format (schema_version 1) other tools read, so a',
       'panel, a shell prompt and this extension can share one fetch instead of three.',
       '',
-      'It contains the provider\'s quota response — percentages, reset times, plan type. It never',
-      'contains your access token. An existing file whose fetch time is newer than ours is never',
-      'overwritten, and the write is atomic (temp file plus rename), so a reader never sees half',
-      'a file.',
+      'They contain the provider\'s quota response — percentages, reset times, plan type. They',
+      'never contain your access token. An existing file whose fetch time is newer than ours is',
+      'never overwritten, and the write is atomic (temp file plus rename), so a reader never',
+      'sees half a file.',
       '',
       'Switch it off again with the setting "tokenPace.writeQuotaCache".',
     ].join('\n')
@@ -242,7 +278,7 @@ export class WriteConsent {
     private memento: MementoLike,
     readonly kind: WriteConsentKind,
     private log: (msg: string) => void,
-    private opts: { ui?: ConsentUi; paths?: WriteConsentPaths } = {},
+    private opts: { ui?: ConsentUi; paths?: WriteConsentPathsSource } = {},
   ) {
     this.key = `writeConsent.${kind}`
   }
@@ -260,8 +296,15 @@ export class WriteConsent {
     return this.state() === 'granted'
   }
 
+  /**
+   * The text as it is right now.
+   *
+   * Resolved per call, not once at construction: the quota cache paths follow
+   * `tokenPace.claudeQuotaFile` / `tokenPace.codexQuotaFile`, and a dialog that
+   * named the path those settings had at activation would name the wrong file.
+   */
   disclosure(): string {
-    return writeConsentDisclosure(this.kind, this.opts.paths ?? {})
+    return writeConsentDisclosure(this.kind, resolvePaths(this.opts.paths))
   }
 
   request(): Promise<boolean> {

@@ -28,6 +28,9 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.usagePageLinks',
   'tokenPace.alignment',
   'tokenPace.staleAfterMinutes',
+  'tokenPace.timezone',
+  'tokenPace.dayBoundaryHour',
+  'tokenPace.keybindings',
   // Pace
   'tokenPace.pace.sensitivity',
   'tokenPace.pace.tolerancePoints',
@@ -56,8 +59,6 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.dashboard.defaultRange',
   'tokenPace.dashboard.modelRows',
   'tokenPace.dashboard.mode',
-  'tokenPace.timezone',
-  'tokenPace.dayBoundaryHour',
   'tokenPace.startOfWeek',
   'tokenPace.planPriceUsd',
   'tokenPace.calibration.show',
@@ -206,6 +207,8 @@ const DEFAULT_SECTIONS: readonly DashboardSection[] = [
 ]
 const DEFAULT_CLAUDE_SOURCES: readonly ClaudeSourceId[] = ['cacheFile', 'statusline', 'claudeJson', 'poll']
 const DEFAULT_CODEX_SOURCES: readonly CodexSourceId[] = ['cacheFile', 'transcript', 'poll']
+/** One threshold out of the box: 90 % is late enough to be rare and early enough to act on. */
+const DEFAULT_THRESHOLDS: readonly number[] = [90]
 
 /**
  * Per-model price override, in USD per 1M tokens. Every field is optional and merges
@@ -240,6 +243,8 @@ export interface Config {
   usagePageLinks: boolean
   alignment: Alignment
   staleAfterMinutes: number
+  /** Whether the manifest's one keybinding is active; read by VS Code, not by us. */
+  keybindings: boolean
 
   pace: {
     sensitivity: Sensitivity
@@ -452,8 +457,12 @@ function planPrices(raw: unknown): { claude?: number; codex?: number } {
   return out
 }
 
+/**
+ * A non-array (an unset setting, a hand-edited string) yields the manifest default; an
+ * explicit empty array stays empty, because "no notifications at all" is a choice.
+ */
 function alertThresholds(raw: unknown): number[] {
-  if (!Array.isArray(raw)) return []
+  if (!Array.isArray(raw)) return [...DEFAULT_THRESHOLDS]
   const out: number[] = []
   for (const v of raw) {
     if (typeof v !== 'number' || !Number.isFinite(v)) continue
@@ -475,22 +484,26 @@ function alertThresholds(raw: unknown): number[] {
 export function sanitize(raw: Record<string, unknown>): Config {
   const get = (key: string): unknown => raw[key]
 
-  // The deprecated `tokenPace.windows` only speaks while `windowSelect` is untouched at its
-  // default, so an existing "leading" configuration keeps working but never overrides a
-  // deliberate choice.
+  // The deprecated `tokenPace.windows` only speaks while `windowSelect` is untouched, so an
+  // existing "leading" configuration keeps working but never overrides a deliberate choice.
+  // The test is presence, not value: since 1.1 the default is 'worstPace', which is also a
+  // value people write out by hand, and comparing against it would silently discard theirs.
+  const rawSelect = get('tokenPace.windowSelect')
+  const selectIsSet = typeof rawSelect === 'string' && (WINDOW_SELECTS as readonly string[]).includes(rawSelect)
   const legacyWindows = pick(get('tokenPace.windows'), LEGACY_WINDOWS, 'all')
-  let windowSelect = pick(get('tokenPace.windowSelect'), WINDOW_SELECTS, 'all')
-  if (windowSelect === 'all' && legacyWindows === 'leading') windowSelect = 'leading'
+  let windowSelect = pick(rawSelect, WINDOW_SELECTS, 'worstPace')
+  if (!selectIsSet && legacyWindows === 'leading') windowSelect = 'leading'
 
   return {
     statusBar: { show: list(get('tokenPace.statusBar.show'), STATUS_BAR_ENTRIES, DEFAULT_STATUS_BAR) },
     windowSelect,
     windows: legacyWindows,
     density: pick(get('tokenPace.density'), DENSITIES, 'full'),
-    clickAction: pick(get('tokenPace.clickAction'), CLICK_ACTIONS, 'menu'),
+    clickAction: pick(get('tokenPace.clickAction'), CLICK_ACTIONS, 'dashboard'),
     usagePageLinks: bool(get('tokenPace.usagePageLinks'), true),
     alignment: pick(get('tokenPace.alignment'), ALIGNMENTS, 'left'),
     staleAfterMinutes: num(get('tokenPace.staleAfterMinutes'), 20, 1, 1440),
+    keybindings: bool(get('tokenPace.keybindings'), true),
 
     pace: {
       sensitivity: pick(get('tokenPace.pace.sensitivity'), SENSITIVITIES, 'normal'),
@@ -517,7 +530,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
       scope: pick(get('tokenPace.summary.scope'), SUMMARY_SCOPES, 'both'),
     },
     tooltip: pick(get('tokenPace.tooltip'), TOOLTIP_MODES, 'full'),
-    tooltipExplanations: bool(get('tokenPace.tooltipExplanations'), true),
+    tooltipExplanations: bool(get('tokenPace.tooltipExplanations'), false),
 
     dashboard: {
       sections: list(get('tokenPace.dashboard.sections'), DASHBOARD_SECTIONS, DEFAULT_SECTIONS),

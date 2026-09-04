@@ -79,6 +79,20 @@ test('path and binary settings are machine-scoped', () => {
   for (const key of machine) assert.equal(properties[key].scope, 'machine', `${key} must be machine-scoped`)
 })
 
+test('settings that can reach the credentials are machine-scoped too', () => {
+  // A workspace must not be able to switch on fetching, redirect the cache write, change
+  // the User-Agent or open the OS keychain — those decisions belong to the machine.
+  const machine = [
+    'tokenPace.quotaSource', 'tokenPace.writeQuotaCache',
+    'tokenPace.userAgent', 'tokenPace.credentials.keychain',
+  ]
+  for (const key of machine) assert.equal(properties[key].scope, 'machine', `${key} must be machine-scoped`)
+})
+
+test('the deprecated setting sits behind everything else in its section', () => {
+  assert.equal(properties['tokenPace.windows'].order, 99)
+})
+
 test('tokenPace.windows is marked deprecated and points at windowSelect', () => {
   const property = properties['tokenPace.windows']
   assert.ok(property.deprecationMessage, 'tokenPace.windows must carry a deprecationMessage')
@@ -151,7 +165,12 @@ test('arrays keep the user order, drop unknowns and drop duplicates', () => {
 
 test('legacy tokenPace.windows is honoured only while windowSelect is at its default', () => {
   assert.equal(sanitize({ 'tokenPace.windows': 'leading' }).windowSelect, 'leading')
-  assert.equal(sanitize({ 'tokenPace.windows': 'leading', 'tokenPace.windowSelect': 'all' }).windowSelect, 'leading')
+  // Presence decides, not the value: 'worstPace' is the 1.1 default *and* a value people
+  // write out, and an explicit one must win over the deprecated setting either way.
+  assert.equal(sanitize({ 'tokenPace.windows': 'leading', 'tokenPace.windowSelect': 'worstPace' }).windowSelect, 'worstPace')
+  assert.equal(sanitize({ 'tokenPace.windows': 'leading', 'tokenPace.windowSelect': 'all' }).windowSelect, 'all')
+  // A value that is not a WindowSelect is not a choice — the legacy setting speaks again.
+  assert.equal(sanitize({ 'tokenPace.windows': 'leading', 'tokenPace.windowSelect': 'garbage' }).windowSelect, 'leading')
   assert.equal(sanitize({ 'tokenPace.windows': 'leading', 'tokenPace.windowSelect': 'weekly' }).windowSelect, 'weekly')
   assert.equal(sanitize({ 'tokenPace.windows': 'all', 'tokenPace.windowSelect': 'all' }).windowSelect, 'all')
   // The raw legacy value stays readable for diagnostics.
@@ -204,8 +223,25 @@ test('labels are strings capped at 40 characters, planPriceUsd only finite posit
 test('alert thresholds are finite, in range, deduplicated and ascending', () => {
   const cfg = sanitize({ 'tokenPace.alerts.thresholds': [95, 80, 95, 0, -3, NaN, 'x', 500, 120] })
   assert.deepEqual(cfg.alerts.thresholds, [80, 95, 120])
-  // Off by default: nothing fires until the user puts a number in.
-  assert.deepEqual(sanitize({}).alerts.thresholds, [])
+  // One threshold out of the box …
+  assert.deepEqual(sanitize({}).alerts.thresholds, [90])
+  // … and an explicit empty list is still the way to switch notifications off entirely.
+  assert.deepEqual(sanitize({ 'tokenPace.alerts.thresholds': [] }).alerts.thresholds, [])
+  // A hand-edited non-array is not a choice, so it falls back to the default rather than off.
+  assert.deepEqual(sanitize({ 'tokenPace.alerts.thresholds': '90' }).alerts.thresholds, [90])
+})
+
+test('the defaults that changed in 1.1 are the ones the manifest advertises', () => {
+  const cfg = sanitize({})
+  assert.equal(cfg.windowSelect, 'worstPace')
+  assert.equal(cfg.clickAction, 'dashboard')
+  assert.equal(cfg.tooltipExplanations, false)
+  assert.deepEqual(cfg.alerts.thresholds, [90])
+  assert.equal(cfg.density, 'full')
+  // The keybinding switch is read by VS Code through its when-clause; we only validate it.
+  assert.equal(cfg.keybindings, true)
+  assert.equal(sanitize({ 'tokenPace.keybindings': false }).keybindings, false)
+  assert.equal(sanitize({ 'tokenPace.keybindings': 'no' }).keybindings, true)
 })
 
 test('the structural sub-configs mirror the settings', () => {

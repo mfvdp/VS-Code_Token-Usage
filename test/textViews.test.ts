@@ -79,11 +79,27 @@ test('every KPI appears once in both renderings', () => {
   const vm = fullVm()
   const items = quickPickItems(vm)
   const md = markdownDocument(vm)
-  assert.equal(rowsOf(md, '## Key figures').length, vm.kpis.length)
+  const figures = rowsOf(md, '## Key figures')
+  assert.equal(figures.length, vm.kpis.length)
   for (const k of vm.kpis) {
     assert.equal(items.filter((i) => i.label.startsWith(`${k.label}: `)).length, 1, k.label)
-    assert.equal(md.split('\n').filter((l) => l.startsWith(`| ${k.label} |`)).length, 1, k.label)
+    // Inside its own section: "Today" is also a period label in the token tables, and the
+    // two are the same word about two different figures.
+    assert.equal(figures.filter((l) => l.startsWith(`| ${k.label} |`)).length, 1, k.label)
   }
+})
+
+test('the day the panel is opened for is the first figure in all three renderings', () => {
+  const vm = fullVm()
+  const today = vm.kpis[0]
+  assert.equal(today.key, 'today')
+  // The QuickPick and the markdown table each carry it once, with the same value.
+  const item = quickPickItems(vm).find((i) => i.label.startsWith('Today: '))
+  assert.ok(item, 'the QuickPick has no today row')
+  assert.equal(item.label, `Today: ${today.value}`)
+  const row = rowsOf(markdownDocument(vm), '## Key figures')[0]
+  assert.ok(row.startsWith('| Today |'), row)
+  assert.ok(row.includes(today.value), row)
 })
 
 test('every forecast appears once in both renderings', () => {
@@ -129,6 +145,57 @@ test('projects and sessions reach both renderings when attribution is on', () =>
   assert.equal(items.filter((i) => i.label.startsWith('Session ')).length, vm.sessions.rows.length)
   assert.equal(rowsOf(md, '## Projects').length, vm.projects.rows.length)
   assert.equal(rowsOf(md, '## Sessions').length, vm.sessions.rows.length)
+})
+
+test('the flat list is grouped by headings that carry no command', () => {
+  const items = quickPickItems(fullVm())
+  const seps = items.filter((i) => i.separator === true)
+  // Every group the reader scrolls past is named, and a heading is never selectable.
+  assert.ok(seps.length >= 8, String(seps.length))
+  for (const s of seps) {
+    assert.equal(s.command, undefined)
+    assert.equal(s.description, undefined)
+    assert.equal(s.detail, undefined)
+  }
+  const labels = seps.map((s) => s.label)
+  for (const want of ['Quota', 'Key figures', 'Tokens', 'Forecast', 'Data quality', 'Actions']) {
+    assert.ok(labels.includes(want), want)
+  }
+  // A heading is only written when a row follows it: the last item is a row, never a divider.
+  assert.equal(items[items.length - 1].separator, undefined)
+})
+
+test('an empty group leaves no heading behind', () => {
+  const vm = buildViewModel(makeInput({ agg: new Aggregator(), quotas: [] }))
+  const items = quickPickItems(vm)
+  assert.equal(vm.projects.rows.length, 0)
+  assert.equal(items.some((i) => i.separator === true && i.label === 'Projects'), false)
+  // Two headings in a row would mean one of them is empty.
+  for (let i = 1; i < items.length; i++) {
+    assert.equal(items[i].separator === true && items[i - 1].separator === true, false, items[i].label)
+  }
+})
+
+test('the reset history is dropped from the list only when no window has a cycle yet', () => {
+  const vm = fullVm()
+  // The fixture has no complete cycle on file, so every row would say the same non-answer.
+  assert.ok(vm.retro.length > 0)
+  assert.ok(vm.retro.every((r) => r.text.startsWith('not enough data')))
+  assert.equal(quickPickItems(vm).some((i) => i.label.startsWith('Reset history ')), false)
+  assert.equal(quickPickItems(vm).some((i) => i.separator && i.label === 'Reset history'), false)
+  // The markdown document keeps them: it is read by scrolling, not by filtering.
+  assert.ok(markdownDocument(vm).includes('## Reset history'))
+
+  // One window with a real retrospective and the whole group comes back, named.
+  const answered = {
+    ...vm,
+    retro: vm.retro.map((r, i) => (i === 0
+      ? { ...r, text: '50 % of the complete cycles hit the limit · Avg 12 % unused at the reset' }
+      : r)),
+  }
+  const rows = quickPickItems(answered).filter((i) => i.label.startsWith('Reset history '))
+  assert.equal(rows.length, vm.retro.length)
+  for (const r of rows) assert.match(r.label, /(Claude Code|Codex)/)
 })
 
 test('the QuickPick only ever offers our own commands', () => {
@@ -226,7 +293,9 @@ test('every window row in the flat views names the provider it belongs to', () =
   assert.notEqual(fives[0].source, fives[1].source)
 
   const named = /(Claude Code|Codex)/
-  const prefixes = ['Forecast ', 'Reset history ', 'Local usage in ']
+  // Reset history is checked in the markdown block below: with no complete cycle on file the
+  // QuickPick leaves those rows out entirely (see the test that follows).
+  const prefixes = ['Forecast ', 'Local usage in ']
   const items = quickPickItems(vm)
   for (const p of prefixes) {
     const rows = items.filter((i) => i.label.startsWith(p))

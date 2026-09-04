@@ -10,14 +10,15 @@
  */
 
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { usedThresholds } from '../src/alerts'
 import { sanitize } from '../src/config'
+import { disclosure } from '../src/consent'
 import { priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
-import { selectWindows } from '../src/statusText'
+import { selectWindows, viewOf, windowValue } from '../src/statusText'
 import { formatReset, TimeConfig } from '../src/time'
 import { QuotaState, QuotaWindow } from '../src/types'
 
@@ -26,6 +27,7 @@ const readDoc = (name: string): string => readFileSync(join(ROOT, name), 'utf8')
 
 interface Property {
   type?: string
+  default?: unknown
   enum?: string[]
   enumDescriptions?: string[]
   markdownDescription?: string
@@ -38,6 +40,30 @@ const pkg = JSON.parse(readDoc('package.json')) as {
 const properties: Record<string, Property> = {}
 for (const section of pkg.contributes.configuration) {
   for (const [key, value] of Object.entries(section.properties)) properties[key] = value
+}
+
+/** The whole manifest, for the contribution points these tests pin. */
+const manifest = JSON.parse(readDoc('package.json')) as {
+  version: string
+  engines: { vscode: string }
+  devDependencies: Record<string, string>
+  keywords: string[]
+  contributes: {
+    commands: Array<{ command: string; title: string }>
+    keybindings: Array<{ command: string; key: string; mac?: string; when?: string }>
+    viewsContainers: Record<string, unknown>
+    walkthroughs: Array<{
+      id: string
+      title: string
+      steps: Array<{
+        id: string
+        title: string
+        description: string
+        media: { markdown: string }
+        completionEvents?: string[]
+      }>
+    }>
+  }
 }
 
 const README = readDoc('README.md')
@@ -246,4 +272,278 @@ test('the documented cause of "CC paused" is the one that can actually produce i
   assert.equal(/pollOnlyWhenFocused/.test(row as string), false, 'the focus gate never produces this state')
   // And the README says the same about the cache file.
   assert.match(README, /`blocked_until` in the future is reported as a paused state/)
+})
+
+// ---------------------------------------------------------------------------
+// Problem states: one repair action per cause, in the code and in both documents
+// ---------------------------------------------------------------------------
+
+/** The `ProblemKind` union, read out of src/types.ts so a new kind cannot be forgotten. */
+function problemKinds(): string[] {
+  const src = readDoc('src/types.ts')
+  const at = src.indexOf('export type ProblemKind =')
+  assert.ok(at >= 0, 'src/types.ts no longer declares ProblemKind')
+  const decl = src.slice(at, src.indexOf('\n\n', at))
+  const kinds = [...decl.matchAll(/'([A-Za-z]+)'/g)].map((m) => m[1])
+  assert.ok(kinds.length >= 15, `only ${kinds.length} problem kinds parsed`)
+  return kinds
+}
+
+/**
+ * `PROBLEM_ACTION` is module-private (it is an implementation detail of `buildViewModel`),
+ * so it is read from the source text rather than imported. That still fails loudly when the
+ * table drifts, which is the point.
+ */
+function problemActions(): Record<string, { label: string; command: string }> {
+  const src = readDoc('src/viewModel.ts')
+  const at = src.indexOf('const PROBLEM_ACTION')
+  assert.ok(at >= 0, 'src/viewModel.ts no longer defines PROBLEM_ACTION')
+  const body = src.slice(at, src.indexOf('\n}', at))
+  const out: Record<string, { label: string; command: string }> = {}
+  for (const m of body.matchAll(/(\w+):\s*\{\s*label:\s*'([^']*)'\s*,\s*command:\s*'([^']*)'\s*\}/g)) {
+    out[m[1]] = { label: m[2], command: m[3] }
+  }
+  return out
+}
+
+/** The contract of round 1.1: exactly one repair per cause, and this is the mapping. */
+const PROBLEM_TABLE: Array<[string, string, string]> = [
+  ['noToken', 'Show log', 'tokenPace.showOutput'],
+  ['tokenExpired', 'Show log', 'tokenPace.showOutput'],
+  ['consentPending', 'Fetch quota now', 'tokenPace.refreshQuota'],
+  ['modeCache', 'Open settings', 'tokenPace.openSettings'],
+  ['retry', 'Fetch quota now', 'tokenPace.refreshQuota'],
+  ['offline', 'Fetch quota now', 'tokenPace.refreshQuota'],
+  ['forbidden', 'Show log', 'tokenPace.showOutput'],
+  ['unauthorized', 'Show log', 'tokenPace.showOutput'],
+  ['noBinary', 'Open settings', 'tokenPace.openSettings'],
+  ['quotaOff', 'Open settings', 'tokenPace.openSettings'],
+  ['noFile', 'Re-read history', 'tokenPace.rescan'],
+  ['empty', 'Re-read history', 'tokenPace.rescan'],
+  ['paused', 'Fetch quota now', 'tokenPace.refreshQuota'],
+  ['follower', 'Open dashboard', 'tokenPace.showDashboard'],
+  ['unknown', 'Show log', 'tokenPace.showOutput'],
+]
+
+/** The rows of one markdown table, keyed by the `kind` cell they carry. */
+function rowsByKind(doc: string, from: string, to: string): Map<string, string> {
+  const section = doc.slice(doc.indexOf(from), doc.indexOf(to, doc.indexOf(from) + from.length))
+  assert.ok(section.length > 0, `${from} is missing`)
+  const out = new Map<string, string>()
+  for (const line of section.split('\n')) {
+    const m = line.match(/^\|[^|]*\|\s*`([A-Za-z]+)`\s*\|/)
+    if (m) out.set(m[1], line)
+  }
+  return out
+}
+
+test('every ProblemKind has exactly one repair action, and the code holds that table', () => {
+  const kinds = problemKinds()
+  assert.deepEqual(PROBLEM_TABLE.map((r) => r[0]).sort(), [...kinds].sort(),
+    'PROBLEM_TABLE and the ProblemKind union have drifted apart')
+
+  const actual = problemActions()
+  const expected: Record<string, { label: string; command: string }> = {}
+  for (const [kind, label, command] of PROBLEM_TABLE) expected[kind] = { label, command }
+  assert.deepEqual(actual, expected, 'PROBLEM_ACTION in src/viewModel.ts no longer matches the documented table')
+})
+
+test('docs/status-bar-states.md lists the same problem table', () => {
+  const rows = rowsByKind(STATES, '## Problem states', '\n## ')
+  for (const [kind, label] of PROBLEM_TABLE) {
+    const row = rows.get(kind)
+    assert.ok(row, `docs/status-bar-states.md has no row for the problem kind ${kind}`)
+    assert.ok((row as string).includes(label), `${kind}: the row does not name “${label}”`)
+  }
+})
+
+test('the README explains every problem state with its bar text and its click', () => {
+  const rows = rowsByKind(README, '## If the bar says', '\n## ')
+  for (const [kind, label] of PROBLEM_TABLE) {
+    const row = rows.get(kind)
+    assert.ok(row, `the README does not cover the problem kind ${kind}`)
+    assert.ok((row as string).includes(label), `${kind}: the README row does not name “${label}”`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The settings tables against the manifest
+// ---------------------------------------------------------------------------
+
+const SETTINGS = README.slice(README.indexOf('\n## Settings'), README.indexOf('\n## Commands and keybindings'))
+
+test('every contributed setting has a row in the README settings tables', () => {
+  assert.ok(SETTINGS.length > 0, 'the README has no Settings section any more')
+  for (const key of Object.keys(properties)) {
+    const short = key.replace(/^tokenPace\./, '')
+    assert.ok(SETTINGS.includes(`| \`${short}\` |`), `the README settings tables have no row for ${key}`)
+  }
+})
+
+test('the README states the defaults the manifest actually ships', () => {
+  const shown: Array<[string, string]> = [
+    ['tokenPace.windowSelect', 'worstPace'],
+    ['tokenPace.clickAction', 'dashboard'],
+    ['tokenPace.tooltipExplanations', 'false'],
+    ['tokenPace.density', 'full'],
+    ['tokenPace.alerts.thresholds', '[90]'],
+  ]
+  for (const [key, text] of shown) {
+    const short = key.replace(/^tokenPace\./, '')
+    assert.equal(JSON.stringify(properties[key].default).replace(/"/g, ''), text,
+      `${key} does not default to ${text} in package.json`)
+    assert.ok(SETTINGS.includes(`| \`${short}\` | \`${text}\` |`),
+      `the README settings table does not show ${short} defaulting to ${text}`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The engine floor the secondary sidebar needs
+// ---------------------------------------------------------------------------
+
+test('the engine floor and the version the README promises are the same', () => {
+  // contributes.viewsContainers.secondarySidebar was proposed API in 1.104 and only became a
+  // stable contribution point in 1.106, so anything lower would register no container at all.
+  assert.equal(manifest.engines.vscode, '^1.106.0')
+  assert.equal(manifest.devDependencies['@types/vscode'], '^1.106.0')
+  assert.ok(manifest.contributes.viewsContainers.secondarySidebar, 'the panel no longer lives in the secondary sidebar')
+  assert.match(README, /Requires VS Code 1\.106 or newer/)
+  // And the store keywords may not promise editors that cannot run it.
+  for (const fork of ['cursor', 'windsurf']) {
+    assert.equal(manifest.keywords.includes(fork), false, `keywords still advertise ${fork}`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The state words, the pictures, and what actually ships
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a repository path survives `.vscodeignore` into the `.vsix`.
+ *
+ * The file excludes `**` and then negates one path at a time, which is exactly the shape a
+ * new asset gets forgotten in: it is in git, the docs point at it, and the packaged
+ * extension has nothing there. `vsce` keeps a file when the last matching pattern is a
+ * negation, so the patterns are walked in order and the last match wins.
+ */
+function shipped(path: string): boolean {
+  const toRegExp = (pattern: string): RegExp => {
+    // `**` crosses directories, a single `*` does not; everything else is a literal.
+    const out = pattern
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\\?\*\\?\*/g, '\u0000')
+      .replace(/\*/g, '[^/]*')
+      .replace(/\u0000/g, '.*')
+    return new RegExp(`^${out}$`)
+  }
+  let keep = true
+  for (const raw of readDoc('.vscodeignore').split('\n')) {
+    const line = raw.trim()
+    if (line === '' || line.startsWith('#')) continue
+    const negated = line.startsWith('!')
+    if (toRegExp(negated ? line.slice(1) : line).test(path)) keep = negated
+  }
+  return keep
+}
+
+test('the two states that survive every switched-off channel are quoted with their words', () => {
+  const cfg = sanitize({ 'tokenPace.timezone': 'utc' })
+  const q: QuotaState = {
+    source: 'claude', ok: true, origin: 'poll', fetchedAt: Math.floor(NOW / 1000), planType: null,
+    windows: [
+      win({ percent: 100, resetsAt: NOW + 47 * 60_000 }),
+      win({ id: 'weekly_all:10080', percent: 100, limitReached: true }),
+    ],
+  }
+  const exhausted = windowValue(viewOf(q, q.windows[0], cfg, NOW), cfg)
+  const stopped = windowValue(viewOf(q, q.windows[1], cfg, NOW), cfg)
+  assert.equal(exhausted, '100% exhausted')
+  assert.equal(stopped, '100% limit reached')
+  // Both tables show the bar text; a row that still carries the bare figure is stale.
+  for (const [name, doc] of [['README.md', README], ['docs/status-bar-states.md', STATES]] as const) {
+    for (const [needle, marker] of [[exhausted, 'exhausted (≥ 99.5 %)'], [stopped, 'reports the limit as reached']] as const) {
+      const row = doc.split('\n').find((l) => l.startsWith('|') && l.includes(marker))
+      assert.ok(row, `${name} has no row for “${marker}”`)
+      assert.ok((row as string).includes(needle), `${name}: “${marker}” no longer prints “${needle}”`)
+    }
+  }
+})
+
+test('every picture the README embeds exists and is packaged', () => {
+  const links = [...README.matchAll(/!\[[^\]]*\]\((media\/[^)\s]+)\)/g)].map((m) => m[1])
+  assert.ok(links.length >= 2, 'the README embeds no screenshots any more')
+  for (const link of links) {
+    // vsce rewrites a relative image to the repository's raw URL, so a missing file is a
+    // permanent 404 on the Marketplace page — and nothing in the packaging warns about it.
+    assert.ok(existsSync(join(ROOT, link)), `README.md embeds ${link}, which is not in the repository`)
+    assert.ok(shipped(link), `${link} is excluded by .vscodeignore`)
+  }
+})
+
+test('.vscodeignore still keeps the things that must not ship', () => {
+  for (const path of ['src/extension.ts', 'test/docs.test.ts', 'dist/extension.js.map', 'media/logo.svg']) {
+    assert.equal(shipped(path), false, `${path} would be packaged`)
+  }
+  for (const path of ['package.json', 'README.md', 'dist/extension.js', 'media/logo.png', 'docs/status-bar-states.md']) {
+    assert.equal(shipped(path), true, `${path} would not be packaged`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Keybindings and the walkthrough
+// ---------------------------------------------------------------------------
+
+test('exactly one keybinding, and the setting that switches it off exists', () => {
+  assert.equal(manifest.contributes.keybindings.length, 1)
+  const [binding] = manifest.contributes.keybindings
+  assert.equal(binding.command, 'tokenPace.showDashboard')
+  assert.equal(binding.when, 'config.tokenPace.keybindings')
+  assert.equal(properties['tokenPace.keybindings'].type, 'boolean')
+  assert.equal(properties['tokenPace.keybindings'].default, true)
+  assert.match(README, /`ctrl\+alt\+shift\+t`/)
+  // The removed chord may still be named in prose (it explains why it went); what it may not
+  // do any more is stand in a table cell as if it still bound something.
+  assert.equal(/\|\s*`ctrl\+alt\+shift\+q`[^|]*\|/.test(README), false,
+    'the README still lists the removed chord as a binding')
+})
+
+test('the walkthrough only names commands that exist and media files that are there', () => {
+  const commands = new Set(manifest.contributes.commands.map((c) => c.command))
+  const walkthroughs = manifest.contributes.walkthroughs
+  assert.equal(walkthroughs.length, 1)
+  assert.equal(walkthroughs[0].steps.length, 3)
+  for (const step of walkthroughs[0].steps) {
+    assert.ok(step.title.length > 0 && step.description.length > 0, `${step.id} is incomplete`)
+    const media = join(ROOT, step.media.markdown)
+    assert.ok(existsSync(media), `${step.id} points at a missing media file: ${step.media.markdown}`)
+    // On disk is not enough: .vscodeignore excludes everything and negates one path at a
+    // time, so a step whose media is not negated ships as "Error reading markdown document".
+    assert.ok(shipped(step.media.markdown), `${step.media.markdown} is not negated in .vscodeignore`)
+    const links = [...step.description.matchAll(/\(command:([\w.]+)\)/g)].map((m) => m[1])
+    assert.ok(links.length > 0, `${step.id} has no button`)
+    for (const command of links) assert.ok(commands.has(command), `${step.id} links the unknown command ${command}`)
+    for (const event of step.completionEvents ?? []) {
+      const command = event.startsWith('onCommand:') ? event.slice('onCommand:'.length) : null
+      if (command) assert.ok(commands.has(command), `${step.id}: completionEvent names the unknown command ${command}`)
+    }
+  }
+})
+
+test('the quota step quotes the consent dialog, not a paraphrase of it', () => {
+  // The walkthrough invites the reader to read the terms before the dialog appears, so it
+  // has to be the terms — including the sentence about identifying as the Claude Code
+  // client, which src/consent.ts calls the part a user is least able to discover alone.
+  const step = readDoc('media/walkthrough/quota.md')
+  for (const line of disclosure(30).split('\n')) {
+    if (line.trim() === '') continue
+    assert.ok(step.includes(line), `media/walkthrough/quota.md no longer says: ${line}`)
+  }
+  // 30 minutes is the default the manifest declares; a different one would misquote it.
+  assert.equal(properties['tokenPace.pollIntervalMinutes'].default, 30)
+})
+
+test('the menu command is named after what it opens', () => {
+  const menu = manifest.contributes.commands.find((c) => c.command === 'tokenPace.menu')
+  assert.equal(menu?.title, 'Show Actions Menu')
+  assert.equal(/`Token Pace: Menu`/.test(README), false, 'the README still uses the old command title')
 })

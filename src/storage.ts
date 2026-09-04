@@ -30,7 +30,8 @@ export interface MementoLike {
   update(key: string, value: unknown): PromiseLike<void>
 }
 
-export type StoredKey = 'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'ui' | 'mirror'
+export type StoredKey =
+  'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'ui' | 'mirror' | 'externalQuota'
 
 /** Absolute paths of the extension's files in `globalStorage`. */
 export interface StoredPaths {
@@ -39,6 +40,14 @@ export interface StoredPaths {
   history: string
   leader: string
   mirror: string
+  /**
+   * The shared quota cache files outside `globalStorage`, one per provider.
+   *
+   * Only set by the caller when the `writeQuotaCache` opt-in was granted at some
+   * point: a file we were never allowed to write is not ours to offer for
+   * deletion, however plausible its path looks.
+   */
+  externalQuota?: string[]
 }
 
 export interface StoredItem {
@@ -63,29 +72,52 @@ const LABELS: Record<StoredKey, string> = {
   quota: 'Quota cache (quota.json)',
   history: 'Quota history (quotaHistory.json)',
   mirror: 'Status line mirror (statusline-mirror.json)',
+  externalQuota: 'Shared quota cache (outside the extension storage)',
   consent: 'Consent decisions',
   alerts: 'Alert state',
   ui: 'Dashboard view state',
 }
 
-/** The file behind a key, or null for the memento-backed items. */
-export function storedFile(key: StoredKey, paths: StoredPaths): string | null {
+/**
+ * The files behind a key, or null for the memento-backed items.
+ *
+ * A list rather than one path, because the shared quota cache is one file per
+ * provider and both of them belong to the same decision.
+ */
+export function storedFiles(key: StoredKey, paths: StoredPaths): string[] | null {
   switch (key) {
-    case 'state': return paths.state
-    case 'quota': return paths.quota
-    case 'history': return paths.history
-    case 'mirror': return paths.mirror
+    case 'state': return [paths.state]
+    case 'quota': return [paths.quota]
+    case 'history': return [paths.history]
+    case 'mirror': return [paths.mirror]
+    case 'externalQuota': {
+      const files = (paths.externalQuota ?? []).filter((f) => typeof f === 'string' && f !== '')
+      return files.length > 0 ? files : null
+    }
     default: return null
   }
 }
 
-function sizeOf(file: string): { bytes: number; present: boolean } {
-  try {
-    const st = fs.statSync(file)
-    return { bytes: st.isFile() ? st.size : 0, present: st.isFile() }
-  } catch {
-    return { bytes: 0, present: false }
+/** The single file behind a key — the shape the older callers and tests use. */
+export function storedFile(key: StoredKey, paths: StoredPaths): string | null {
+  const files = storedFiles(key, paths)
+  return files !== null && files.length === 1 ? files[0] : null
+}
+
+function sizeOf(files: string[]): { bytes: number; present: boolean } {
+  let bytes = 0
+  let present = false
+  for (const file of files) {
+    try {
+      const st = fs.statSync(file)
+      if (!st.isFile()) continue
+      bytes += st.size
+      present = true
+    } catch {
+      // A file that is not there contributes nothing and is not an error.
+    }
   }
+  return { bytes, present }
 }
 
 /** Serialised size of the memento values, so the dialog can name a number too. */
@@ -117,14 +149,19 @@ export function inventory(
   memento: MementoLike,
   details: Partial<Record<StoredKey, string>> = {},
 ): StoredItem[] {
-  const order: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'consent', 'alerts', 'ui']
-  return order.map((key) => {
-    const file = storedFile(key, paths)
-    const size = file !== null
-      ? sizeOf(file)
+  const order: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'externalQuota', 'consent', 'alerts', 'ui']
+  const out: StoredItem[] = []
+  for (const key of order) {
+    const files = storedFiles(key, paths)
+    // The shared cache is the one item that can be absent from the list entirely:
+    // without the opt-in there is no file of ours outside `globalStorage`.
+    if (files === null && key === 'externalQuota') continue
+    const size = files !== null
+      ? sizeOf(files)
       : mementoSize(STORED_MEMENTO_KEYS[key as 'consent' | 'alerts' | 'ui'], memento)
-    return { key, label: LABELS[key], bytes: size.bytes, detail: details[key] ?? null, present: size.present }
-  })
+    out.push({ key, label: LABELS[key], bytes: size.bytes, detail: details[key] ?? null, present: size.present })
+  }
+  return out
 }
 
 function unlinkIfPresent(file: string): void {
@@ -189,9 +226,9 @@ export async function deleteItems(
   const failed: StoredKey[] = []
   for (const key of keys) {
     try {
-      const file = storedFile(key, paths)
-      if (file !== null) {
-        unlinkWithTemps(file)
+      const files = storedFiles(key, paths)
+      if (files !== null) {
+        for (const file of files) unlinkWithTemps(file)
       } else {
         for (const k of STORED_MEMENTO_KEYS[key as 'consent' | 'alerts' | 'ui']) {
           await memento.update(k, undefined)
@@ -217,6 +254,24 @@ export async function deleteItems(
 export const DELETE_WARNING = 'The token snapshot is rebuilt from the transcript files that are '
   + 'still on disk. Claude Code deletes those after 30 days, so any usage history older than that '
   + 'is lost for good.'
+
+/**
+ * The extra sentence for the shared cache: it is the one file outside our own
+ * storage, and other tools read it — deleting it takes their figures away too.
+ */
+export const DELETE_WARNING_EXTERNAL = 'The shared quota cache lies outside the extension storage '
+  + 'and other tools may read it. Deleting it removes their last known figures as well; it is '
+  + 'written again on the next quota poll while the opt-in is on.'
+
+/**
+ * The line the delete list shows while Claude Code\'s status line is ours.
+ *
+ * Deleting the mirror file does not undo the settings.json entry, and a user who
+ * believed otherwise would be left with a status line pointing at a script whose
+ * data we just removed.
+ */
+export const BRIDGE_BLOCKS_DELETE = 'Run "Token Pace: Disconnect Claude Status Line" first — '
+  + 'clearing files here does not restore Claude Code\'s settings.json.'
 
 /** "12.3 kB" / "482 B" — for the pick list, where an exact byte count helps nobody. */
 export function formatBytes(bytes: number): string {

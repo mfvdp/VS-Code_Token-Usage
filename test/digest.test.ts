@@ -21,7 +21,7 @@ function input(over: Partial<DigestInput> = {}): DigestInput {
       title: 'Claude Code',
       windows: [
         { label: '5 h', percent: 22, display: 'normal', verdict: { text: 'on pace' } },
-        { label: '7 d', percent: 78, display: 'normal', verdict: { text: '12 points ahead of the clock' } },
+        { label: '7 d', percent: 78, display: 'normal', verdict: { text: '12 % ahead of pace' } },
       ],
     }],
     unpricedModels: [],
@@ -81,7 +81,7 @@ test('unpriced models are named as the reason the cost is a lower bound', () => 
 
 test('the fullest window is the one reported, with its verdict', () => {
   const s = digest(input()).find((x) => x.startsWith('The fullest quota window'))
-  assert.equal(s, 'The fullest quota window is Claude Code 7 d at 78 % — 12 points ahead of the clock.')
+  assert.equal(s, 'The fullest quota window is Claude Code 7 d at 78 % — 12 % ahead of pace.')
 })
 
 test('a window whose reset has passed is not reported as the fullest one', () => {
@@ -91,7 +91,7 @@ test('a window whose reset has passed is not reported as the fullest one', () =>
       windows: [
         // The last reading before a reset that has already happened: still the highest
         // number on file, and no longer a statement about a window that exists.
-        { label: '5 h', percent: 87, display: 'resetDue', verdict: { text: '13 points in reserve' } },
+        { label: '5 h', percent: 87, display: 'resetDue', verdict: { text: '13 % of the window still spare' } },
         { label: '7 d', percent: 40, display: 'normal', verdict: { text: 'on pace' } },
       ],
     }],

@@ -23,6 +23,12 @@ export interface PickItem {
   /** A command the item runs when picked; only our own argument-less commands appear here. */
   command?: string
   args?: unknown[]
+  /**
+   * A group heading rather than a row: `nativeViews.ts` turns it into a
+   * `QuickPickItemKind.Separator`, which carries no command and cannot be selected. A flat
+   * list of a hundred rows is a haystack; the headings are what make it a document.
+   */
+  separator?: boolean
 }
 
 /** Wide enough to read a quarter from a half, narrow enough for a QuickPick line. */
@@ -113,16 +119,31 @@ function windowLine(w: WindowVmOf): string {
  */
 export function quickPickItems(vm: ViewModel): PickItem[] {
   const items: PickItem[] = []
+  // A heading is only worth a line when something follows it, so it is held back until the
+  // next row actually arrives; a group that turns out to be empty leaves no stray divider.
+  let pending: string | null = null
+  const add = (i: PickItem): void => {
+    if (pending !== null) {
+      items.push({ label: pending, separator: true })
+      pending = null
+    }
+    items.push(i)
+  }
+  const group = (label: string): void => {
+    pending = label
+  }
 
-  items.push({
+  add({
     label: 'Open dashboard',
     description: `${vm.range.label} · ${vm.range.from} → ${vm.range.to}`,
     detail: `generated ${vm.generatedAt}`,
     command: 'tokenPace.showDashboard',
   })
 
-  for (const s of vm.digest) items.push({ label: s })
+  group('Summary')
+  for (const s of vm.digest) add({ label: s })
 
+  group('Quota')
   for (const q of vm.quotas) {
     const meta = [
       q.planType ? `plan ${q.planType}` : null,
@@ -130,14 +151,14 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
       q.ageText ? `updated ${q.ageText}` : null,
       q.stale ? 'stale' : null,
     ].filter(Boolean).join(' · ')
-    items.push({
+    add({
       label: q.title,
       description: meta,
       detail: q.problem ? `⚠ ${q.problem}` : undefined,
       command: q.problemAction?.command,
     })
     for (const w of q.windows) {
-      items.push({
+      add({
         label: `${w.label} ${bar(w.percent, w.elapsed)} ${w.percentText}`,
         description: windowLine(w),
         // The sustainable sentence ends in "…keeps it to the reset", so after it the time alone
@@ -152,24 +173,26 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
       })
     }
     if (q.extra) {
-      items.push({
+      add({
         label: `Extra usage: ${q.extra.text}`,
         description: q.extra.billed ? 'billed' : q.extra.enabled ? 'enabled' : 'off',
       })
     }
   }
 
+  group('Key figures')
   for (const k of vm.kpis) {
-    items.push({
+    add({
       label: `${k.label}: ${k.value}`,
       description: k.delta ? [k.delta.glyph, k.delta.text].filter(Boolean).join(' ') : undefined,
       detail: [k.note, k.provenance].filter(Boolean).join(' · '),
     })
   }
 
+  group('Tokens')
   for (const t of vm.totals) {
     for (const r of t.rows) {
-      items.push({
+      add({
         label: `${t.title} · ${r.label}: ${r.usage}`,
         description: `${r.requests} req · ${r.cost}${r.costPartial ? ' ⚠' : ''}`,
         detail: `fresh ${r.freshInput} · write5m ${r.cacheWrite5m} · write1h ${r.cacheWrite1h} · `
@@ -179,16 +202,18 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     }
   }
 
+  group('Cache')
   for (const c of vm.cacheEconomy) {
-    items.push({
+    add({
       label: `Cache economy ${withSource(c.source, '')}: ${c.hitRate}`,
       description: `saved ${c.savedUsd} · blended ${c.blendedPerM}`,
       detail: c.note + (c.partial ? ' · some models unpriced' : ''),
     })
   }
 
+  group('Forecast')
   for (const f of vm.forecasts) {
-    items.push({
+    add({
       label: `Forecast ${withSource(f.source, f.label)}: ${forecastText(f.forecast) || '–'}`,
       description: [f.sustainable, f.lockout, f.resetForecast].filter(Boolean).join(' · '),
       detail: f.forecast.basis
@@ -197,60 +222,68 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     })
   }
 
-  for (const r of vm.retro) {
-    items.push({ label: `Reset history ${withSource(r.source, r.label)}`, description: r.text })
+  group('Reset history')
+  for (const r of retroWorthShowing(vm)) {
+    add({ label: `Reset history ${withSource(r.source, r.label)}`, description: r.text })
   }
 
+  group('Usage inside the windows')
   for (const u of vm.windowUsage) {
-    items.push({
+    add({
       label: `Local usage in ${withSource(u.source, u.label)}: ${u.usage}`,
       description: `${u.requests} req · ${u.cost}`,
       detail: u.complete ? undefined : 'hour buckets are incomplete for this window',
     })
   }
 
+  group('Attribution')
   for (const a of vm.attributionInWindow) {
     // Named like the markdown heading, so the block cannot be mistaken for a totals row of
     // the provider it starts with.
     const head = `Attribution ${withSource(a.source, a.label)}`
     for (const row of a.rows) {
-      items.push({ label: `${head} · ${row.label}: ${row.share}`, description: row.usage })
+      add({ label: `${head} · ${row.label}: ${row.share}`, description: row.usage })
     }
-    items.push({ label: `${head} · unexplained`, description: a.unexplained })
+    add({ label: `${head} · unexplained`, description: a.unexplained })
   }
 
+  group('Models')
   for (const m of vm.models.rows) {
-    items.push({
+    add({
       label: `${m.model}${m.isSub ? ' (sub)' : ''}: ${m.usageText}`,
       description: `${m.costText} · ${m.share} of usage · hit ${m.cacheHit}`,
-      detail: `${m.price}${m.turnAvg ? ` · Ø turn ${m.turnAvg}` : ''}${m.turnP90 ? ` · P90 ${m.turnP90}` : ''}`,
+      detail: `${m.price}${m.turnAvg ? ` · Avg turn ${m.turnAvg}` : ''}${m.turnP90 ? ` · P90 ${m.turnP90}` : ''}`,
     })
   }
   if (vm.models.hidden > 0) {
-    items.push({
+    add({
       label: `${vm.models.hidden} more model rows`,
       description: 'raise tokenPace.dashboard.modelRows to see them',
       command: 'tokenPace.openSettings',
     })
   }
 
+  group('Projects')
   for (const p of vm.projects.rows) {
-    items.push({
+    add({
       label: `Project ${p.project}: ${p.usage}`,
       description: `${p.sessions} session(s) · hit ${p.cacheHit}`,
     })
   }
+  group('Sessions')
   for (const s of vm.sessions.rows) {
-    items.push({
+    add({
       label: `Session ${s.session}: ${s.usage}`,
       description: `${s.project} · ${s.duration} · ${s.requests} req`,
       detail: [s.models, s.cacheState].filter(Boolean).join(' · '),
     })
   }
 
-  for (const line of dataQualityLines(vm)) items.push({ label: line })
+  group('Data quality')
+  for (const line of dataQualityLines(vm)) add({ label: line })
 
-  items.push(
+  group('Actions')
+  for (const a of [
     { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' },
     { label: 'Re-read token history', command: 'tokenPace.rescan' },
     { label: 'Show log', command: 'tokenPace.showOutput' },
@@ -258,9 +291,23 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     { label: 'Export CSV…', command: 'tokenPace.exportCsv' },
     { label: 'Export JSON…', command: 'tokenPace.exportJson' },
     { label: 'Copy usage summary', command: 'tokenPace.copySummary' },
-  )
-  for (const f of vm.footnotes) items.push({ label: f })
+  ]) add(a)
+
+  group('Notes')
+  for (const f of vm.footnotes) add({ label: f })
   return items
+}
+
+/**
+ * The reset history, unless every window is still waiting for its first complete cycle.
+ *
+ * One "not enough data yet" row is a fact worth stating; four of them in a row are a wall
+ * that pushes the figures below it out of view, and they say nothing the first one did not.
+ * The markdown document keeps them all — it is read by scrolling, not by filtering.
+ */
+function retroWorthShowing(vm: ViewModel): ViewModel['retro'] {
+  const known = vm.retro.some((r) => !r.text.startsWith('not enough data'))
+  return known ? vm.retro : []
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +444,7 @@ export function markdownDocument(vm: ViewModel): string {
   L.push('')
 
   L.push('## Calendar', '')
-  L.push('| Period | Usage | API cost | Requests | Active days | Ø per active day |')
+  L.push('| Period | Usage | API cost | Requests | Active days | Avg per active day |')
   L.push('|---|---|---|---|---|---|')
   for (const p of [vm.calendar.thisWeek, vm.calendar.thisMonth, vm.calendar.lastMonth, vm.calendar.year]) {
     L.push(`| ${cell(p.label)} | ${cell(p.usage)} | ${cell(p.cost)} | ${cell(p.requests)} | `
@@ -434,7 +481,7 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('|---|---|---|---|---|---|---|')
     for (const f of vm.forecasts) {
       L.push(`| ${cell(withSource(f.source, f.label))} | ${cell(forecastText(f.forecast))} | `
-        + `${f.forecast.ratePerHour === null ? '–' : `${f.forecast.ratePerHour.toFixed(1)} pp/h`} | `
+        + `${f.forecast.ratePerHour === null ? '–' : `${f.forecast.ratePerHour.toFixed(1)} %/h`} | `
         + `${cell(f.sustainable)} | ${cell(f.lockout)} | ${cell(f.resetForecast)} | `
         + `${f.forecast.basis ? `${f.forecast.basis.samples} readings, ${f.gaps} gap(s)` : '–'} |`)
     }

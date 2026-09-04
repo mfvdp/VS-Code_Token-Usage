@@ -47,11 +47,14 @@ import { QuotaManager, QuotaOptions } from './quotaManager'
 import { scan, ScanContext } from './scan'
 import { Role, showMenu, StatusBar } from './statusbar'
 import { USAGE_PAGE } from './statusText'
-import { DELETE_WARNING, deleteItems, formatBytes, inventory, StoredKey, StoredPaths } from './storage'
+import {
+  BRIDGE_BLOCKS_DELETE, DELETE_WARNING, DELETE_WARNING_EXTERNAL, deleteItems, formatBytes, inventory,
+  StoredKey, StoredPaths,
+} from './storage'
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
 import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
 import {
-  applyMessage, buildViewModel, defaultUiState, forecastsFor, RANGE_PRESETS, UiState, ViewModel,
+  applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, RANGE_PRESETS, UiState, ViewModel,
   WebviewMessage,
 } from './viewModel'
 
@@ -77,6 +80,8 @@ const LOG_ROTATE_BYTES = 5 * 1024 * 1024
 const SALT_KEY = 'tokenPace.projectSalt'
 const UI_KEY = 'tokenPace.ui'
 const REMOTE_HINT_KEY = 'tokenPace.remoteHintShown'
+/** The one-click fix offered on a remote host with no transcripts. */
+const ACTION_RUN_LOCALLY = 'Run Token Pace locally'
 const EXTENSION_ID = 'frederik.token-pace'
 
 const WINDOW_SELECT_CYCLE = ['all', 'leading', 'worstPace', 'session', 'weekly', 'auto'] as const
@@ -140,8 +145,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const consent = new NetworkConsent(context.globalState, say, {
     intervalMinutes: () => readConfig().pollIntervalMinutes,
   })
+  // A function, not a value: both paths follow `tokenPace.claudeQuotaFile` /
+  // `tokenPace.codexQuotaFile`, so the dialog must read them when it is shown and
+  // not keep whatever they were at activation.
   const writeConsent = new WriteConsent(context.globalState, 'writeQuotaCache', say, {
-    paths: { quotaCacheFile: CLAUDE_QUOTA_FILE },
+    paths: () => ({ quotaCacheFiles: externalQuotaFiles() }),
   })
 
   const quotaMgr = new QuotaManager(
@@ -178,6 +186,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const pendingFiles = new Set<string>()
 
   // --------------------------------------------------------------- config helpers
+  /**
+   * Both external quota cache files, deduplicated and in the order the consent
+   * dialog and the delete list name them. Read on every call: the two settings
+   * behind them can change while the window is open.
+   */
+  function externalQuotaFiles(): string[] {
+    const all = [CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE].filter((f) => typeof f === 'string' && f !== '')
+    return all.filter((f, i) => all.indexOf(f) === i)
+  }
+
   function quotaOptions(c: Config): QuotaOptions {
     return {
       mode: c.quotaSource,
@@ -717,21 +735,69 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // --------------------------------------------------------------- first run / remote
+  /**
+   * Remote, WSL or SSH: the extension runs on one side of the connection and the
+   * transcripts are on the other, so there is nothing to read and nothing wrong.
+   *
+   * Asked at most once per machine, and only when there is genuinely nothing: a
+   * hint that repeats itself would be worse than the empty view it explains. The
+   * offer is the actual fix rather than a pointer at the documentation —
+   * `remote.extensionKind` is the one setting that decides the side, and it takes
+   * effect only after a reload, which is why the reload comes with it.
+   */
   async function remoteHint(): Promise<void> {
     if (agg.stats().files !== 0) return
     const remote = vscode.env.remoteName
     if (!remote) return
     if (context.globalState.get<boolean>(REMOTE_HINT_KEY, false)) return
+    // Remembered before the dialog is shown: a question closed unanswered was still asked,
+    // and "Not now" must be as final as any other answer.
     await context.globalState.update(REMOTE_HINT_KEY, true)
     const pick = await vscode.window.showInformationMessage(
       `Token Pace found no Claude Code or Codex transcripts on this host (remote "${remote}"). `
-      + 'The extension runs on one side only — set "remote.extensionKind" for frederik.token-pace '
-      + 'to ["ui"] or ["workspace"] to move it to the side your transcripts are on, or point '
+      + 'The extension runs on one side of the connection only. If your transcripts are on the '
+      + 'local machine, Token Pace can be moved there (one click writes "remote.extensionKind" into '
+      + 'your user settings and offers a reload); if they are on this host, point '
       + 'tokenPace.claudeDir / tokenPace.codexDir at them.',
+      ACTION_RUN_LOCALLY,
       'Open Settings',
-      'Dismiss',
+      'Not now',
     )
-    if (pick === 'Open Settings') void vscode.commands.executeCommand('tokenPace.openSettings')
+    if (pick === 'Open Settings') {
+      void vscode.commands.executeCommand('tokenPace.openSettings')
+      return
+    }
+    if (pick === ACTION_RUN_LOCALLY) await runLocally()
+  }
+
+  /**
+   * Writes `remote.extensionKind` for this extension into the user settings.
+   *
+   * Merged into whatever is already there: the setting is a map that other
+   * extensions share, and replacing it wholesale would move them too.
+   */
+  async function runLocally(): Promise<void> {
+    const config = vscode.workspace.getConfiguration()
+    // The user's own value, not the merged one: merging would copy VS Code's defaults and any
+    // workspace entry into the user settings file, which is not what the click asked for.
+    const own = config.inspect<Record<string, unknown>>('remote.extensionKind')?.globalValue
+    const merged = { ...(own !== null && typeof own === 'object' ? own : {}), [EXTENSION_ID]: ['ui'] }
+    try {
+      await config.update('remote.extensionKind', merged, vscode.ConfigurationTarget.Global)
+    } catch (err) {
+      log.warn(`remote.extensionKind could not be written: ${err}`)
+      void vscode.window.showWarningMessage(
+        'Token Pace: "remote.extensionKind" could not be written. Set it by hand in your user settings.',
+      )
+      return
+    }
+    log.info(`remote.extensionKind set: "${EXTENSION_ID}": ["ui"].`)
+    const reload = await vscode.window.showInformationMessage(
+      'Token Pace will run on the local machine after a window reload.',
+      'Reload Window',
+      'Later',
+    )
+    if (reload === 'Reload Window') void vscode.commands.executeCommand('workbench.action.reloadWindow')
   }
 
   // --------------------------------------------------------------- commands
@@ -823,33 +889,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   async function clearStoredData(): Promise<void> {
     const stats = agg.stats()
     const hist = history.size()
-    const items = inventory(paths, context.globalState, {
+    const home = os.homedir()
+    // Only a file we were actually allowed to write is ours to offer for deletion:
+    // without the opt-in the path may well hold another tool's cache.
+    const external = writeConsent.state() === 'granted' ? externalQuotaFiles() : []
+    const items = inventory({ ...paths, externalQuota: external }, context.globalState, {
       state: `${stats.files} file(s) · ${stats.oldestDay ?? '–'} … ${stats.newestDay ?? '–'}`,
       history: `${hist.samples} quota sample(s)`,
+      externalQuota: external.map((f) => tildify(f, home)).join(' · '),
       ui: 'range, sort and filters of the dashboard',
       consent: 'network and write decisions',
     })
-    const picks = items.map((i) => ({
+    const picks: Array<vscode.QuickPickItem & { key?: StoredKey }> = items.map((i) => ({
       label: i.label,
       description: formatBytes(i.bytes),
       detail: i.detail ?? undefined,
       key: i.key,
     }))
+    // Not an item to delete but the sentence that stops a wrong conclusion: the
+    // mirror file is deletable, the settings.json entry that feeds it is not.
+    const bridge = bridgeInfo()
+    if (bridge?.installed === true) {
+      picks.push(
+        { label: 'Status line bridge', kind: vscode.QuickPickItemKind.Separator },
+        { label: '$(warning) The Claude status line is still connected', detail: BRIDGE_BLOCKS_DELETE },
+      )
+    }
     const chosen = await vscode.window.showQuickPick(picks, {
       canPickMany: true,
       title: 'Token Pace — clear stored data',
       placeHolder: 'Pick what to delete',
     })
     if (!chosen || chosen.length === 0) return
+    const keys = chosen.map((c) => c.key).filter((k): k is StoredKey => k !== undefined)
+    // The bridge line is pickable in some hosts; picking only it deletes nothing.
+    if (keys.length === 0) return
+    const detail = keys.includes('externalQuota')
+      ? `${DELETE_WARNING}\n\n${DELETE_WARNING_EXTERNAL}`
+      : DELETE_WARNING
     const confirm = await vscode.window.showWarningMessage(
-      `Delete ${chosen.length} stored item(s)? This cannot be undone.`,
-      { modal: true, detail: DELETE_WARNING },
+      `Delete ${keys.length} stored item(s)? This cannot be undone.`,
+      { modal: true, detail },
       'Delete',
     )
     if (confirm !== 'Delete') return
 
-    const keys = chosen.map((c) => c.key as StoredKey)
-    const result = await deleteItems(keys, paths, context.globalState, say)
+    const result = await deleteItems(keys, { ...paths, externalQuota: external }, context.globalState, say)
     if (result.deleted.includes('history')) history.clear()
     if (result.deleted.includes('quota')) quotaMgr.clearPolled()
     if (result.deleted.includes('ui')) ui = defaultUiState(cfg)
@@ -1260,6 +1345,11 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
   if (raw.heatmapMetric === 'usage' || raw.heatmapMetric === 'cost') out.heatmapMetric = raw.heatmapMetric
   if (raw.hourZone === 'local' || raw.hourZone === 'utc') out.hourZone = raw.hourZone
   if (typeof raw.drillDay === 'string') out.drillDay = raw.drillDay
+  // Folded sections come back too; unknown keys (a section removed by an update) are dropped.
+  if (Array.isArray(raw.collapsed)) {
+    out.collapsed = raw.collapsed.filter((k): k is string =>
+      typeof k === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(k))
+  }
   return out
 }
 

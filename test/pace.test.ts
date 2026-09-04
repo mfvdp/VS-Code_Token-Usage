@@ -52,20 +52,20 @@ test('paceVerdict: the tolerance band decides the colour, the number stays exact
   const v = paceVerdict(50, 40, normal)
   assert.equal(v.level, 'warn')
   assert.equal(v.points, 10)
-  assert.equal(v.text, '10 points ahead of the clock')
+  assert.equal(v.text, '10 % ahead of pace')
   assert.equal(v.measuring, false)
   // Inside the band: no colour, but the figure is still reported honestly.
   const inBand = paceVerdict(42, 40, normal)
   assert.equal(inBand.level, 'ok')
-  assert.equal(inBand.text, '2 points ahead of the clock')
+  assert.equal(inBand.text, '2 % ahead of pace')
   const one = paceVerdict(41, 40, normal)
-  assert.equal(one.text, '1 point ahead of the clock')
+  assert.equal(one.text, '1 % ahead of pace')
   const onPace = paceVerdict(40.2, 40, normal)
   assert.equal(onPace.text, 'on pace')
   const reserve = paceVerdict(30, 40, normal)
   assert.equal(reserve.level, 'ok')
   assert.equal(reserve.points, -10)
-  assert.equal(reserve.text, '10 points in reserve')
+  assert.equal(reserve.text, '10 % of the window still spare')
   assert.equal(severityOf(reserve), 'ok')
 })
 
@@ -120,7 +120,7 @@ test('sustainableRate: null once there is no time left to spread anything over',
   assert.equal(sustainableRate(50, now, now), null)
   assert.equal(sustainableRate(50, now - 1000, now), null)
   // Overflow has no sustainable rate at all: a clamped 0 pp/h would print as
-  // "~0.0 points/h keeps it to the reset", and nothing keeps an overdrawn window to it.
+  // "~0.0 %/h keeps it to the reset", and nothing keeps an overdrawn window to it.
   assert.equal(sustainableRate(120, now + 2 * 3_600_000, now), null)
   assert.equal(sustainableRate(100.5, now + 2 * 3_600_000, now), null)
   // Exactly empty is still a real answer: zero left, and zero is what may be spent.
@@ -147,4 +147,21 @@ test('windowDisplay: a passed reset with a stale reading is resetDue, never a ma
   assert.equal(windowDisplay(win({ percent: 80, resetsAt }), null, now), 'resetDue')
   // A reset still in the future says nothing about staleness.
   assert.equal(windowDisplay(win({ percent: 80, resetsAt: now + 1000 }), null, now), 'normal')
+})
+
+test('the verdict speaks in percent, never in bare "points"', () => {
+  // The figure above the sentence is a percentage in every view; a second unit for the same
+  // quantity was the single most confusing thing about the old wording.
+  const texts = [
+    paceVerdict(50, 40, normal).text,
+    paceVerdict(30, 40, normal).text,
+    paceVerdict(41, 40, normal).text,
+    paceVerdict(40, 40, normal).text,
+  ]
+  for (const t of texts) {
+    assert.equal(/point|in reserve|clock/.test(t), false, t)
+  }
+  assert.deepEqual(texts, [
+    '10 % ahead of pace', '10 % of the window still spare', '1 % ahead of pace', 'on pace',
+  ])
 })

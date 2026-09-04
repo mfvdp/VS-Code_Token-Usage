@@ -16,7 +16,9 @@
  *    is closed while the popup is open must not produce the popup again.
  *  • Nothing is ever said from a stale reading: an old percentage crossing a
  *    threshold is not news, it is an artefact.
- *  • Several thresholds broken at once become one message per provider.
+ *  • Everything one provider has to say in one evaluation becomes one message:
+ *    several thresholds, several windows on a fast pace, several forecasts. The
+ *    first reading after a reset must not queue a chain of popups.
  *
  * The class has no vscode import: the notifier is injected, which is also what
  * makes the whole rule set testable.
@@ -144,6 +146,22 @@ interface Candidate {
   identity: string
   verdict: PaceVerdict | undefined
   forecast: Forecast | undefined
+}
+
+/** What one provider has to say about one kind of alert in this evaluation. */
+interface Grouped {
+  parts: string[]
+  identities: string[]
+  windowIds: string[]
+}
+
+/** Adds one window's sentence fragment to its provider's group. */
+function collect(bySource: Map<Source, Grouped>, c: Candidate, part: string): void {
+  const group = bySource.get(c.source) ?? { parts: [], identities: [], windowIds: [] }
+  group.parts.push(part)
+  group.identities.push(c.identity)
+  group.windowIds.push(c.window.id)
+  bySource.set(c.source, group)
 }
 
 export class Alerts {
@@ -310,7 +328,7 @@ export class Alerts {
   ): void {
     const levels = usedThresholds(this.cfg)
     if (levels.length === 0) return
-    const bySource = new Map<Source, { parts: string[]; identities: string[]; windowIds: string[] }>()
+    const bySource = new Map<Source, Grouped>()
 
     for (const c of candidates) {
       let breached: number | null = null
@@ -328,21 +346,17 @@ export class Alerts {
       state.entries[c.identity] = entry
       announced.add(c.identity)
 
-      const group = bySource.get(c.source) ?? { parts: [], identities: [], windowIds: [] }
-      group.parts.push(this.thresholdPart(c.window, breached))
-      group.identities.push(c.identity)
-      group.windowIds.push(c.window.id)
-      bySource.set(c.source, group)
+      collect(bySource, c, this.thresholdPart(c.window, breached))
     }
 
-    for (const [source, group] of bySource) {
+    for (const [source, g] of bySource) {
       out.push({
         kind: 'threshold',
         source,
-        identities: group.identities,
-        windowIds: group.windowIds,
+        identities: g.identities,
+        windowIds: g.windowIds,
         level: 'warning',
-        message: `${providerName(source)} quota: ${group.parts.join(' · ')}`,
+        message: `${providerName(source)} quota: ${g.parts.join(' · ')}`,
       })
     }
   }
@@ -364,6 +378,7 @@ export class Alerts {
     announced: Set<string>,
   ): void {
     if (!this.cfg.onPaceFast) return
+    const bySource = new Map<Source, Grouped>()
     for (const c of candidates) {
       if (announced.has(c.identity)) continue
       const v = c.verdict
@@ -377,13 +392,16 @@ export class Alerts {
       if (!fast || !wasOk || entry.paceWarned) continue
       entry.paceWarned = true
       announced.add(c.identity)
+      collect(bySource, c, `${c.window.label} — ${v.text} (${pct(c.window.percent)} used)`)
+    }
+    for (const [source, g] of bySource) {
       out.push({
         kind: 'pace',
-        source: c.source,
-        identities: [c.identity],
-        windowIds: [c.window.id],
+        source,
+        identities: g.identities,
+        windowIds: g.windowIds,
         level: 'warning',
-        message: `${providerName(c.source)} · ${c.window.label}: ${v.text} (${pct(c.window.percent)} used).`,
+        message: `${providerName(source)} pace: ${g.parts.join(' · ')}`,
       })
     }
   }
@@ -397,6 +415,7 @@ export class Alerts {
   ): void {
     const lead = this.cfg.forecastLeadMinutes
     if (!(lead > 0)) return
+    const bySource = new Map<Source, Grouped>()
     for (const c of candidates) {
       if (announced.has(c.identity)) continue
       const f = c.forecast
@@ -415,13 +434,16 @@ export class Alerts {
         ? `, before it resets (${relativeShort(c.window.resetsAt, now)})`
         : ''
       const when = f.etaMs > now ? `in ~${relativeShort(f.etaMs, now)}` : 'imminently'
+      collect(bySource, c, `${c.window.label} runs out ${when}${reset}`)
+    }
+    for (const [source, g] of bySource) {
       out.push({
         kind: 'forecast',
-        source: c.source,
-        identities: [c.identity],
-        windowIds: [c.window.id],
+        source,
+        identities: g.identities,
+        windowIds: g.windowIds,
         level: 'warning',
-        message: `${providerName(c.source)} · ${c.window.label}: on this pace it runs out ${when}${reset}.`,
+        message: `${providerName(source)} — on this pace: ${g.parts.join(' · ')}`,
       })
     }
   }
@@ -435,6 +457,7 @@ export class Alerts {
     announced: Set<string>,
   ): void {
     if (!this.cfg.useItLoseIt) return
+    const bySource = new Map<Source, Grouped>()
     for (const c of candidates) {
       if (announced.has(c.identity)) continue
       const w = c.window
@@ -448,13 +471,16 @@ export class Alerts {
       entry.at = now
       state.entries[c.identity] = entry
       announced.add(c.identity)
+      collect(bySource, c, `${w.label} is at ${pct(w.percent)} and resets in ${relativeShort(w.resetsAt, now)}`)
+    }
+    for (const [source, g] of bySource) {
       out.push({
         kind: 'useItLoseIt',
-        source: c.source,
-        identities: [c.identity],
-        windowIds: [w.id],
+        source,
+        identities: g.identities,
+        windowIds: g.windowIds,
         level: 'info',
-        message: `${providerName(c.source)} · ${w.label}: only ${pct(w.percent)} used and the window resets in ${relativeShort(w.resetsAt, now)} — unused allowance does not carry over.`,
+        message: `${providerName(source)} — unused allowance does not carry over: ${g.parts.join(' · ')}`,
       })
     }
   }

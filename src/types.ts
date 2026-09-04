@@ -282,7 +282,7 @@ export interface PaceVerdict {
   ratio: number | null
   /** Too early in the window to judge (below minElapsedPercent). */
   measuring: boolean
-  /** "12 points ahead of the clock" / "on pace" / "8 points in reserve" / "exhausted" */
+  /** "12 % ahead of pace" / "on pace" / "8 % of the window still spare" / "exhausted" */
   text: string
 }
 

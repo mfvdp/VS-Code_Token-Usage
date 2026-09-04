@@ -187,3 +187,50 @@ test('http settings report where the effective value comes from', () => {
 
   assert.deepEqual(collectSettings(api, ['proxy']), { proxy: 'http://p:8080' })
 })
+
+test('no route through the report can print the real home directory', () => {
+  const out = buildDiagnostics(input({
+    // A root the caller forgot to shorten, and a value under a key the path
+    // pattern does not match: the two ways the promise could have been broken.
+    roots: [`${HOME}/.claude/projects`, '/opt/claude/projects'],
+    settings: {
+      'tokenPace.claudeDir': [`${HOME}/.claude`],
+      'tokenPace.userAgent': `token-pace (${HOME})`,
+      'tokenPace.dashboard.mode': 'view',
+    },
+    quota: [{
+      source: 'codex',
+      candidates: [{ id: 'rollout', ok: false, ageSec: null, problem: `No sessions under ${HOME}/.codex` }],
+      backoffEndsAt: null,
+      drift: [`${HOME}/.codex/x`],
+    }],
+    proxyEnv: [{ name: 'HTTPS_PROXY', value: 'http://proxy.example:8080' }],
+  }))
+
+  assert.equal(out.includes(HOME), false, 'the home directory survived somewhere in the report')
+  assert.match(out, /~\/\.claude\/projects/)
+  assert.match(out, /token-pace \(~\)/)
+  assert.match(out, /No sessions under ~\/\.codex/)
+})
+
+test('a Windows home does not survive JSON escaping', () => {
+  // `JSON.stringify` doubles every separator, so a scrub applied to the finished
+  // JSON looks for `C:\Users\jane` in a string that reads `C:\\Users\\jane`.
+  const WIN = 'C:\\Users\\jane'
+  assert.equal(scrubHome(`"C:\\\\Users\\\\jane\\\\x"`, WIN), '"~\\\\x"')
+
+  const out = buildDiagnostics(input({
+    home: WIN,
+    roots: [`${WIN}\\.claude\\projects`],
+    quota: [],
+    settings: {
+      'tokenPace.claudeDir': [`${WIN}\\.claude`],
+      'tokenPace.userAgent': `token-pace (${WIN}\\x)`,
+      'tokenPace.dashboard.mode': 'view',
+    },
+  }))
+
+  assert.equal(out.includes('jane'), false, 'the account name survived somewhere in the report')
+  assert.ok(out.includes('tokenPace.claudeDir = ["~\\\\.claude"]'))
+  assert.ok(out.includes('tokenPace.userAgent = "token-pace (~\\\\x)"'))
+})

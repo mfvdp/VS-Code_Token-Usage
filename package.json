@@ -27,8 +27,6 @@
     "burn rate",
     "forecast",
     "dashboard",
-    "cursor",
-    "windsurf",
     "vscodium",
     "open vsx"
   ],
@@ -42,11 +40,11 @@
   },
   "homepage": "https://github.com/mfvdp/VS-Code_Token-Usage#readme",
   "qna": "https://github.com/mfvdp/VS-Code_Token-Usage/issues",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "frederik",
   "license": "AGPL-3.0-or-later",
   "engines": {
-    "vscode": "^1.104.0"
+    "vscode": "^1.106.0"
   },
   "extensionKind": [
     "ui",
@@ -145,7 +143,7 @@
       },
       {
         "command": "tokenPace.menu",
-        "title": "Menu",
+        "title": "Show Actions Menu",
         "category": "Token Pace"
       },
       {
@@ -274,12 +272,8 @@
       {
         "command": "tokenPace.showDashboard",
         "key": "ctrl+alt+shift+t",
-        "mac": "cmd+alt+shift+t"
-      },
-      {
-        "command": "tokenPace.refreshQuota",
-        "key": "ctrl+alt+shift+q",
-        "mac": "cmd+alt+shift+q"
+        "mac": "cmd+alt+shift+t",
+        "when": "config.tokenPace.keybindings"
       }
     ],
     "configuration": [
@@ -312,8 +306,8 @@
                 "Codex quota windows",
                 "Extra/purchased usage on top of the plan",
                 "Tokens used in the summary period",
-                "Hypothetical API cost for the summary period",
-                "Burn-rate forecast, e.g. “~empty in 40 min”"
+                "Hypothetical API cost for the summary period — needs tokenPace.showCost",
+                "Burn-rate forecast, e.g. “~empty in 40 min” — needs tokenPace.quotaHistoryDays above 0"
               ]
             },
             "markdownDescription": "Which entries the status bar shows — **and in which order**: the array order is the display order (drag the rows in the settings UI). The order *inside* one entry is fixed.\n\nAn empty list hides the status bar entirely. Use `#tokenPace.windowSelect#` to control how many quota windows each tool contributes and `#tokenPace.density#` to control how much text each one gets."
@@ -329,7 +323,7 @@
               "weekly",
               "auto"
             ],
-            "default": "all",
+            "default": "worstPace",
             "enumDescriptions": [
               "Every window as its own entry, including model-scoped ones — “CC 5h 25%”, “CC 7d 69%”, “CC Fable 7d 12%”",
               "Only the most-utilised window per tool — “CC 7d 69%”",
@@ -338,26 +332,11 @@
               "Only the 7-day window — “CC 7d 69%”",
               "Session window; the weekly window is added once the session window is below 30 % — “CC 5h 12% | 7d 69%”"
             ],
-            "markdownDescription": "Which quota windows appear in the status bar. `all` can produce up to nine entries.\n\nThe command *Token Pace: Cycle Status Bar Windows* steps through these values without opening the settings."
-          },
-          "tokenPace.windows": {
-            "type": "string",
-            "order": 3,
-            "enum": [
-              "all",
-              "leading"
-            ],
-            "default": "all",
-            "enumDescriptions": [
-              "Every quota window as its own entry",
-              "Only the most-utilised window per tool"
-            ],
-            "deprecationMessage": "Replaced by tokenPace.windowSelect, which has four more values. This setting is still honoured while tokenPace.windowSelect is at its default.",
-            "markdownDescription": "**Deprecated** — use `#tokenPace.windowSelect#`. Still read while `#tokenPace.windowSelect#` is at its default (`all`), so existing configurations keep working; setting `#tokenPace.windowSelect#` to anything overrides it."
+            "markdownDescription": "Which quota windows appear in the status bar. The default `worstPace` gives each tool **one** entry: the window that needs attention — the worst pace verdict, and within one verdict the most-utilised of those windows.\n\n`all` puts every window in the bar and can produce up to nine entries. The command *Token Pace: Cycle Status Bar Windows* steps through these values without opening the settings."
           },
           "tokenPace.density": {
             "type": "string",
-            "order": 4,
+            "order": 3,
             "enum": [
               "full",
               "compact",
@@ -373,31 +352,31 @@
           },
           "tokenPace.clickAction": {
             "type": "string",
-            "order": 5,
+            "order": 4,
             "enum": [
               "dashboard",
               "menu",
               "refresh",
               "openWebsite"
             ],
-            "default": "menu",
+            "default": "dashboard",
             "enumDescriptions": [
               "Open the Token Pace panel",
-              "Open a Quick Pick with dashboard, fetch, re-read, log and settings",
+              "Open a Quick Pick with dashboard, text view, fetch, re-read, log and settings",
               "Fetch the quota now (respects the backoff)",
               "Open the provider's official usage page in the browser"
             ],
-            "markdownDescription": "What a click on a status bar entry does.\n\nIn a problem state the click always performs the repair step instead — consent dialog, forced fetch, or the relevant setting."
+            "markdownDescription": "What a click on a status bar entry does. The default opens the dashboard; `menu` opens the Quick Pick with every action instead.\n\nIn a problem state the click always performs the repair step instead — consent dialog, forced fetch, or the relevant setting."
           },
           "tokenPace.usagePageLinks": {
             "type": "boolean",
-            "order": 6,
+            "order": 5,
             "default": true,
             "markdownDescription": "Make the tooltip title a link to the provider's official usage page (`https://claude.ai/settings/usage`, `https://chatgpt.com/codex/settings/usage`) and offer *Open Official Usage Page* in the menu.\n\nThe extension itself never contacts those pages; the link opens in your browser."
           },
           "tokenPace.alignment": {
             "type": "string",
-            "order": 7,
+            "order": 6,
             "enum": [
               "left",
               "right"
@@ -411,11 +390,46 @@
           },
           "tokenPace.staleAfterMinutes": {
             "type": "number",
-            "order": 8,
+            "order": 7,
             "default": 20,
             "minimum": 1,
             "maximum": 1440,
             "markdownDescription": "Age from which a quota reading counts as stale: it is greyed out with `tokenPace.stale`, marked in the tooltip, and no alert may fire from it."
+          },
+          "tokenPace.timezone": {
+            "type": "string",
+            "order": 8,
+            "default": "system",
+            "markdownDescription": "Which zone day and hour boundaries use: `system`, `utc`, or an IANA name such as `Europe/Berlin`. It governs the status bar summary as well as the dashboard.\n\nAn unusable value falls back to the system zone. This is a display decision only — nothing is re-counted."
+          },
+          "tokenPace.dayBoundaryHour": {
+            "type": "number",
+            "order": 9,
+            "default": 0,
+            "minimum": 0,
+            "maximum": 23,
+            "markdownDescription": "The hour at which a “day” starts, for the status bar summary as well as the dashboard. `4` books work between midnight and 04:00 onto the previous day. Display only."
+          },
+          "tokenPace.keybindings": {
+            "type": "boolean",
+            "order": 10,
+            "default": true,
+            "markdownDescription": "Bind `ctrl+alt+shift+t` (`cmd+alt+shift+t` on macOS) to *Token Pace: Open Dashboard*.\n\nTurn it off to free the chord without writing a `-` rule into `keybindings.json`. Every command stays available from the Command Palette either way; Token Pace claims no other shortcut."
+          },
+          "tokenPace.windows": {
+            "type": "string",
+            "order": 99,
+            "enum": [
+              "all",
+              "leading"
+            ],
+            "default": "all",
+            "enumDescriptions": [
+              "Every quota window as its own entry",
+              "Only the most-utilised window per tool"
+            ],
+            "deprecationMessage": "Replaced by tokenPace.windowSelect, which has four more values. This setting is still honoured while tokenPace.windowSelect is at its default.",
+            "markdownDescription": "**Deprecated** — use `#tokenPace.windowSelect#`. Still read while `#tokenPace.windowSelect#` is at its default (`worstPace`), so an existing `leading` keeps working; setting `#tokenPace.windowSelect#` to anything else overrides it."
           }
         }
       },
@@ -440,7 +454,7 @@
               "2 tolerance points, 1 % minimum elapsed — roughly ratio 1.05",
               "Use tokenPace.pace.tolerancePoints and tokenPace.pace.minElapsedPercent"
             ],
-            "markdownDescription": "How far ahead of the clock a window may run before Token Pace colours it.\n\nThe verdict compares consumption with elapsed time:\n\n`ratio = (used ÷ limit) ÷ (elapsed ÷ window)`\n\n`1.0` is exactly on pace, above `1.0` means you are consuming faster than the window refills. Token Pace states the same relation in percentage points (`used % − elapsed %`), because that number stays meaningful near the start and the end of a window; the tolerance below is measured in those points.\n\nPresets (tolerance points / minimum elapsed): `relaxed` 10 / 5 (≈ ratio 1.2), `normal` 5 / 3 (≈ ratio 1.12), `strict` 2 / 1 (≈ ratio 1.05). `custom` unlocks the two settings below."
+            "markdownDescription": "How far ahead of pace a window may run before Token Pace colours it.\n\nThe verdict compares consumption with elapsed time:\n\n`ratio = (used ÷ limit) ÷ (elapsed ÷ window)`\n\n`1.0` is exactly on pace, above `1.0` means you are consuming faster than the window refills. Token Pace states the same relation in percentage points (`used % − elapsed %`), because that number stays meaningful near the start and the end of a window; the tolerance below is measured in those points.\n\nPresets (tolerance points / minimum elapsed): `relaxed` 10 / 5 (≈ ratio 1.2), `normal` 5 / 3 (≈ ratio 1.12), `strict` 2 / 1 (≈ ratio 1.05). `custom` unlocks the two settings below."
           },
           "tokenPace.pace.tolerancePoints": {
             "type": "number",
@@ -448,7 +462,7 @@
             "default": 5,
             "minimum": 0,
             "maximum": 20,
-            "markdownDescription": "Dead band in **percentage points** between consumption and elapsed time before a window is coloured as ahead of the clock — with `ratio = (used ÷ limit) ÷ (elapsed ÷ window)`, 5 points at the window mid-point is about `ratio 1.12`.\n\nOnly used with `#tokenPace.pace.sensitivity#` set to `custom`. The exact difference is always in the tooltip, tolerance or not."
+            "markdownDescription": "Only used with `#tokenPace.pace.sensitivity#` set to `custom`.\n\nDead band in **percentage points** between consumption and elapsed time before a window is coloured as ahead of pace — with `ratio = (used ÷ limit) ÷ (elapsed ÷ window)`, 5 points at the window mid-point is about `ratio 1.12`. The exact difference is always in the tooltip, tolerance or not."
           },
           "tokenPace.pace.minElapsedPercent": {
             "type": "number",
@@ -456,7 +470,7 @@
             "default": 3,
             "minimum": 0,
             "maximum": 20,
-            "markdownDescription": "How much of a window must have elapsed before any pace colour is shown.\n\nRight after a reset `elapsed ≈ 0`, so `ratio = (used ÷ limit) ÷ (elapsed ÷ window)` explodes and the very first prompt would always look “too fast”. Below this value the verdict reads “measuring (window just reset)”.\n\nOnly used with `#tokenPace.pace.sensitivity#` set to `custom`."
+            "markdownDescription": "Only used with `#tokenPace.pace.sensitivity#` set to `custom`.\n\nHow much of a window must have elapsed before any pace colour is shown. Right after a reset `elapsed ≈ 0`, so `ratio = (used ÷ limit) ÷ (elapsed ÷ window)` explodes and the very first prompt would always look “too fast”. Below this value the verdict reads “measuring (window just reset)”."
           },
           "tokenPace.pace.levels": {
             "type": "string",
@@ -501,7 +515,7 @@
               "Dotted shading as the track — “██░░░░░░”, more contrast, grainy at small font sizes",
               "No track, only the filled part — “██”"
             ],
-            "markdownDescription": "How the **empty** part of the bar is drawn.\n\n`line` and `shade` differ only when `#tokenPace.barGlyphs#` is `blocks`. The `shapes` and `dots` sets bring their own empty glyph (`□`, `○`) so the bar stays inside one Unicode block, and `pie` has no empty part at all — for those three only `none` changes anything."
+            "markdownDescription": "Only applies to `#tokenPace.barGlyphs#` `blocks`: `line` and `shade` differ only there.\n\nHow the **empty** part of the bar is drawn. The `shapes` and `dots` sets bring their own empty glyph (`□`, `○`) so the bar stays inside one Unicode block, and `pie` has no empty part at all — for those three only `none` changes anything."
           },
           "tokenPace.barGlyphs": {
             "type": "string",
@@ -535,7 +549,7 @@
               "A second, thinner bar for elapsed time — “██▁▁▁▁▁▁ ▔▔▔▁▁▁▁▁”",
               "No time indication in the bar"
             ],
-            "markdownDescription": "How elapsed time is shown in the bar. This is what makes pace readable **without colour**: consumption left of the marker means reserve, right of it means ahead of the clock."
+            "markdownDescription": "How elapsed time is shown in the bar. This is what makes pace readable **without colour**: consumption left of the marker means reserve, right of it means ahead of pace."
           },
           "tokenPace.indicator": {
             "type": "string",
@@ -583,23 +597,9 @@
             ],
             "markdownDescription": "Whether the number is what you used or what is left. The choice is carried through item, bar direction, tooltip and legend consistently."
           },
-          "tokenPace.overflowDisplay": {
-            "type": "string",
-            "order": 8,
-            "enum": [
-              "clamp",
-              "actual"
-            ],
-            "default": "actual",
-            "enumDescriptions": [
-              "Cap at the limit — “100%”",
-              "Show the real value including paid overflow — “111%”"
-            ],
-            "markdownDescription": "What to do when a provider reports more than 100 % (extra usage or purchased credits on top of the plan)."
-          },
           "tokenPace.resetFormat": {
             "type": "string",
-            "order": 9,
+            "order": 8,
             "enum": [
               "none",
               "relative",
@@ -615,25 +615,9 @@
             ],
             "markdownDescription": "Countdown suffix behind the percentage, used identically in item, tooltip and dashboard.\n\nA window whose provider states no reset time gets **no** countdown — never an invented one. A reset that has passed without a fresh reading reads “reset due”, never a negative number."
           },
-          "tokenPace.resetHourCycle": {
-            "type": "string",
-            "order": 10,
-            "enum": [
-              "auto",
-              "h12",
-              "h23"
-            ],
-            "default": "auto",
-            "enumDescriptions": [
-              "Follow the display locale",
-              "12-hour clock — “06:00 AM”",
-              "24-hour clock — “06:00”"
-            ],
-            "markdownDescription": "Clock format for absolute reset times."
-          },
           "tokenPace.showAgeInItem": {
             "type": "string",
-            "order": 11,
+            "order": 9,
             "enum": [
               "never",
               "whenStale",
@@ -649,7 +633,7 @@
           },
           "tokenPace.labels": {
             "type": "object",
-            "order": 12,
+            "order": 10,
             "default": {},
             "additionalProperties": {
               "type": "string",
@@ -657,17 +641,9 @@
             },
             "markdownDescription": "Custom prefixes and window labels. Keys are either a tool prefix (`claude`, `codex`) or a stable window id: Claude `session:300`, `weekly_all:10080`, `weekly_scoped:10080:<model>` (e.g. `weekly_scoped:10080:fable`); Codex `<limitId>:<minutes>` (e.g. `codex:10080`, `codex:300`). The ids are listed in docs/status-bar-states.md and in **Token Pace: Copy Diagnostics**. Values longer than 40 characters are cut.\n\n```json\n\"tokenPace.labels\": {\n  \"claude\": \"CC\",\n  \"weekly_all:10080\": \"week\"\n}\n```"
           },
-          "tokenPace.labelMaxChars": {
-            "type": "number",
-            "order": 13,
-            "default": 0,
-            "minimum": 0,
-            "maximum": 40,
-            "markdownDescription": "Truncate generated window labels to this many characters. `0` means no truncation."
-          },
           "tokenPace.summary.period": {
             "type": "string",
-            "order": 14,
+            "order": 11,
             "enum": [
               "today",
               "7d",
@@ -683,7 +659,7 @@
           },
           "tokenPace.summary.scope": {
             "type": "string",
-            "order": 15,
+            "order": 12,
             "enum": [
               "both",
               "claude",
@@ -699,7 +675,7 @@
           },
           "tokenPace.tooltip": {
             "type": "string",
-            "order": 16,
+            "order": 13,
             "enum": [
               "full",
               "compact",
@@ -715,9 +691,47 @@
           },
           "tokenPace.tooltipExplanations": {
             "type": "boolean",
-            "order": 17,
-            "default": true,
-            "markdownDescription": "Show the explanatory paragraphs in the tooltip (what pace means, what the cost figure is and is not).\n\nUncertainty markers (`~`, `⚠`) and the provenance line are never hidden by this setting."
+            "order": 14,
+            "default": false,
+            "markdownDescription": "Show the explanatory paragraphs in the tooltip (what pace means, what the cost figure is and is not). **Off by default** — they are worth reading once, not on every hover.\n\nUncertainty markers (`~`, `⚠`) and the provenance line are never hidden by this setting."
+          },
+          "tokenPace.overflowDisplay": {
+            "type": "string",
+            "order": 90,
+            "enum": [
+              "clamp",
+              "actual"
+            ],
+            "default": "actual",
+            "enumDescriptions": [
+              "Cap at the limit — “100%”",
+              "Show the real value including paid overflow — “111%”"
+            ],
+            "markdownDescription": "What to do when a provider reports more than 100 % (extra usage or purchased credits on top of the plan)."
+          },
+          "tokenPace.resetHourCycle": {
+            "type": "string",
+            "order": 91,
+            "enum": [
+              "auto",
+              "h12",
+              "h23"
+            ],
+            "default": "auto",
+            "enumDescriptions": [
+              "Follow the display locale",
+              "12-hour clock — “06:00 AM”",
+              "24-hour clock — “06:00”"
+            ],
+            "markdownDescription": "Clock format for absolute reset times."
+          },
+          "tokenPace.labelMaxChars": {
+            "type": "number",
+            "order": 92,
+            "default": 0,
+            "minimum": 0,
+            "maximum": 40,
+            "markdownDescription": "Truncate generated window labels to this many characters. `0` means no truncation."
           }
         }
       },
@@ -762,14 +776,14 @@
               "enumDescriptions": [
                 "Rule-based summary sentences, each with its number and basis",
                 "Quota cards with bar, elapsed tick, verdict and reset",
-                "KPI row: usage, cost, requests, cache hit, active days, average per day",
+                "KPI row: today, usage, cost, requests, cache hit, active days, avg per active day",
                 "Token totals with fresh input, cache write 5m/1h, cache read, output, reasoning",
                 "Stacked daily chart of the selected range",
                 "Breakdown by model with cost, cache hit rate and share",
                 "Calendar heatmap of the last 53 weeks",
                 "Hour profile and weekday × 4-hour grid",
-                "Burn rate, exhaustion forecast and end-of-window projection",
-                "Reset retrospective: peak per cycle, unused at reset, capped share",
+                "Burn rate, exhaustion forecast and end-of-window projection — needs tokenPace.quotaHistoryDays above 0",
+                "Reset retrospective: peak per cycle, unused at reset, capped share — needs tokenPace.quotaHistoryDays above 0",
                 "Per-project breakdown (needs tokenPace.attribution)",
                 "Per-session breakdown (needs tokenPace.attribution set to session)",
                 "Data quality: roots, file counts, retention, quota origins, drift"
@@ -829,23 +843,9 @@
             ],
             "markdownDescription": "What *Open Dashboard* and a click on the status bar open. All three read the same view model, so the numbers cannot drift apart."
           },
-          "tokenPace.timezone": {
-            "type": "string",
-            "order": 5,
-            "default": "system",
-            "markdownDescription": "Which zone day and hour boundaries use: `system`, `utc`, or an IANA name such as `Europe/Berlin`.\n\nAn unusable value falls back to the system zone. This is a display decision only — nothing is re-counted."
-          },
-          "tokenPace.dayBoundaryHour": {
-            "type": "number",
-            "order": 6,
-            "default": 0,
-            "minimum": 0,
-            "maximum": 23,
-            "markdownDescription": "The hour at which a “day” starts. `4` books work between midnight and 04:00 onto the previous day. Display only."
-          },
           "tokenPace.startOfWeek": {
             "type": "string",
-            "order": 7,
+            "order": 5,
             "enum": [
               "monday",
               "tuesday",
@@ -860,7 +860,7 @@
           },
           "tokenPace.planPriceUsd": {
             "type": "object",
-            "order": 8,
+            "order": 6,
             "default": {},
             "properties": {
               "claude": {
@@ -879,7 +879,7 @@
           },
           "tokenPace.calibration.show": {
             "type": "boolean",
-            "order": 9,
+            "order": 90,
             "default": false,
             "markdownDescription": "Show how many local tokens correspond to one percentage point of a quota window, derived from your own history.\n\nThis is an observation about your data, not a published limit — the providers do not document the conversion, and it changes with model and cache mix. Off by default because it invites over-interpretation."
           }
@@ -894,7 +894,7 @@
             "type": "boolean",
             "order": 1,
             "default": true,
-            "markdownDescription": "Show the **API cost** column: what this usage would have cost through the provider API at list prices.\n\nThis is a hypothetical figure. On a subscription you do **not** pay these amounts — there is no billing relationship. Every such number is marked with `~`."
+            "markdownDescription": "Show the **API cost** column: what this usage would have cost through the provider API at list prices.\n\nThis is a hypothetical figure. On a subscription you do **not** pay these amounts — there is no billing relationship. Every such number is marked with `~`.\n\nWith this off, the `cost` entry of `#tokenPace.statusBar.show#` is not created either."
           },
           "tokenPace.customPrices": {
             "type": "object",
@@ -960,15 +960,9 @@
             "maximum": 10,
             "markdownDescription": "Factor applied to every list price, for contract discounts — `0.9` for 10 % off. Any value other than `1` marks the figures as “at your configured rates”."
           },
-          "tokenPace.pricing.showListPrice": {
-            "type": "boolean",
-            "order": 4,
-            "default": false,
-            "markdownDescription": "Show the undiscounted list price as a second column next to your own rates, in the manner of the `amount` / `list_amount` pair of the provider analytics APIs."
-          },
           "tokenPace.unknownModelPricing": {
             "type": "string",
-            "order": 5,
+            "order": 4,
             "enum": [
               "strict",
               "family"
@@ -979,6 +973,12 @@
               "Fall back to the newest priced model of the same family, marked “family price”"
             ],
             "markdownDescription": "What to do with a model that is not in the price table. `strict` reports a lower bound instead of inventing a number; `family` gives an estimate and says so."
+          },
+          "tokenPace.pricing.showListPrice": {
+            "type": "boolean",
+            "order": 90,
+            "default": false,
+            "markdownDescription": "Show the undiscounted list price as a second column next to your own rates, in the manner of the `amount` / `list_amount` pair of the provider analytics APIs."
           }
         }
       },
@@ -1001,7 +1001,8 @@
               "Fetch from the provider as well — requires your one-time consent",
               "Local sources only, never fetch and never ask"
             ],
-            "markdownDescription": "Where the quota figures come from. Token counts come from local transcript files either way and never need network access.\n\n**The trade-off:** local sources (cache file, Claude status line, `~/.claude.json`, Codex transcripts) cost nothing, need no credentials and touch no network — but they are as old as the last time something else wrote them, which can be hours. Fetching gets the current number from the provider, at the price of a network request with your access token and an undocumented endpoint that may change without notice.\n\n`auto` (default) reads only local sources and **makes no network access of its own**. If none of them has data, it offers once to switch to `poll`.\n\n`poll` fetches directly: the access token from `~/.claude/.credentials.json` goes to `https://api.anthropic.com/api/oauth/usage`, and the local `codex app-server` is started. This happens only after you have explicitly agreed in a dialog that states exactly what is sent. The token is only **read**, **never refreshed**, never logged, never put in an error message or in the diagnostics, and never sent anywhere else.\n\n`cache` settles the question for good: local sources only, no offer."
+            "markdownDescription": "Where the quota figures come from. Token counts come from local transcript files either way and never need network access.\n\n**The trade-off:** local sources (cache file, Claude status line, **~/.claude.json**, Codex transcripts) cost nothing, need no credentials and touch no network — but they are as old as the last time something else wrote them, which can be hours. Fetching gets the current number from the provider, at the price of a network request with your access token and an undocumented endpoint that may change without notice.\n\n`auto` (default) reads only local sources and **makes no network access of its own**. If none of them has data, it offers once to switch to `poll`.\n\n`poll` fetches directly: the access token from `~/.claude/.credentials.json` goes to `https://api.anthropic.com/api/oauth/usage`, and the local `codex app-server` is started. This happens only after you have explicitly agreed in a dialog that states exactly what is sent. The token is only **read**, **never refreshed**, never logged, never put in an error message or in the diagnostics, and never sent anywhere else.\n\n`cache` settles the question for good: local sources only, no offer.",
+            "scope": "machine"
           },
           "tokenPace.pollIntervalMinutes": {
             "type": "number",
@@ -1080,11 +1081,34 @@
             "type": "boolean",
             "order": 7,
             "default": false,
-            "markdownDescription": "After a successful own fetch, write the result back to the cache file so other tools (panel widgets, status lines, scripts) can read the same number without a second request.\n\nThis is one of exactly **two** writes Token Pace can make outside its own extension storage, and it is off by default: enabling it asks for a separate consent that names the file. An existing file with a newer `fetched_at` is never overwritten, and the write is atomic. Format: `docs/quota-cache-format.md`."
+            "markdownDescription": "After a successful own fetch, write the result back to the cache file so other tools (panel widgets, status lines, scripts) can read the same number without a second request.\n\nThis is one of exactly **two** writes Token Pace can make outside its own extension storage, and it is off by default: enabling it asks for a separate consent that names the file. An existing file with a newer `fetched_at` is never overwritten, and the write is atomic. Format: `docs/quota-cache-format.md`.",
+            "scope": "machine"
+          },
+          "tokenPace.codexBinary": {
+            "type": "string",
+            "order": 8,
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Path to the `codex` executable. Empty = `CODEX_CLI_PATH`, then `PATH`, then the binary bundled with the official IDE extension.\n\nMachine-scoped on purpose: a workspace must not be able to point this at an arbitrary program."
+          },
+          "tokenPace.userAgent": {
+            "type": "string",
+            "order": 9,
+            "enum": [
+              "claudeCode",
+              "honest"
+            ],
+            "default": "claudeCode",
+            "enumDescriptions": [
+              "claude-code/<version of your installed CLI> — the bucket the endpoint expects",
+              "token-pace/<extension version> — honest, but aggressively rate limited"
+            ],
+            "markdownDescription": "Which `User-Agent` the quota fetch sends.\n\n**Warning:** `honest` lands in an aggressively rate-limited bucket. Expect `429 Too Many Requests` within a few fetches, after which Token Pace backs off for up to two hours and shows nothing new. The endpoint is undocumented; this is an observation, not a documented rule.\n\n`claudeCode` sends the same string Claude Code itself sends, with the version detected from your installed CLI (a constant if it cannot be detected).",
+            "scope": "machine"
           },
           "tokenPace.codexAppServer.mode": {
             "type": "string",
-            "order": 8,
+            "order": 90,
             "enum": [
               "oneShot",
               "persistent"
@@ -1096,42 +1120,22 @@
             ],
             "markdownDescription": "How the local `codex app-server` is used when Codex is polled. The persistent mode is killed on deactivate and restarts with a backoff."
           },
-          "tokenPace.codexBinary": {
-            "type": "string",
-            "order": 9,
-            "default": "",
-            "scope": "machine",
-            "markdownDescription": "Path to the `codex` executable. Empty = `CODEX_CLI_PATH`, then `PATH`, then the binary bundled with the official IDE extension.\n\nMachine-scoped on purpose: a workspace must not be able to point this at an arbitrary program."
-          },
-          "tokenPace.userAgent": {
-            "type": "string",
-            "order": 10,
-            "enum": [
-              "claudeCode",
-              "honest"
-            ],
-            "default": "claudeCode",
-            "enumDescriptions": [
-              "claude-code/<version of your installed CLI> — the bucket the endpoint expects",
-              "token-pace/<extension version> — honest, but aggressively rate limited"
-            ],
-            "markdownDescription": "Which `User-Agent` the quota fetch sends.\n\n**Warning:** `honest` lands in an aggressively rate-limited bucket. Expect `429 Too Many Requests` within a few fetches, after which Token Pace backs off for up to two hours and shows nothing new. The endpoint is undocumented; this is an observation, not a documented rule.\n\n`claudeCode` sends the same string Claude Code itself sends, with the version detected from your installed CLI (a constant if it cannot be detected)."
-          },
           "tokenPace.credentials.keychain": {
             "type": "boolean",
-            "order": 11,
+            "order": 91,
             "default": true,
-            "markdownDescription": "Also look for the Claude access token in the OS keychain (`security` on macOS, `secret-tool` on Linux) when `~/.claude/.credentials.json` does not have it.\n\nOnly consulted while fetching is enabled and consent has been given. The token is read, used once and dropped — never cached, never logged."
+            "markdownDescription": "Also look for the Claude access token in the OS keychain (`security` on macOS, `secret-tool` on Linux) when `~/.claude/.credentials.json` does not have it.\n\nOnly consulted while fetching is enabled and consent has been given. The token is read, used once and dropped — never cached, never logged.",
+            "scope": "machine"
           },
           "tokenPace.pollOnlyWhenFocused": {
             "type": "boolean",
-            "order": 12,
+            "order": 92,
             "default": true,
             "markdownDescription": "Skip scheduled fetches while the window has been in the background for more than ten minutes. A manual *Fetch Quota Now* always runs."
           },
           "tokenPace.leaderElection": {
             "type": "boolean",
-            "order": 13,
+            "order": 93,
             "default": true,
             "markdownDescription": "With several VS Code windows open, let one window do the reading and fetching and have the others follow its files. Prevents duplicate requests and last-writer-wins damage to the stored history.\n\nOn any doubt (unreadable or stale lease file) a window acts as leader rather than showing nothing."
           }
@@ -1197,7 +1201,7 @@
             "default": 30,
             "minimum": 0,
             "maximum": 90,
-            "markdownDescription": "How long quota readings are kept as a time series. This is what makes burn rate, forecast, sparklines and the reset retrospective possible. `0` disables the history and those sections with it."
+            "markdownDescription": "How long quota readings are kept as a time series. This is what makes burn rate, forecast, sparklines and the reset retrospective possible. `0` disables the history and those sections with it.\n\nAt `0` the `forecast` entry of `#tokenPace.statusBar.show#` and the `forecast` and `history` sections of `#tokenPace.dashboard.sections#` have nothing left to show."
           },
           "tokenPace.attribution": {
             "type": "string",
@@ -1239,14 +1243,16 @@
           "tokenPace.alerts.thresholds": {
             "type": "array",
             "order": 1,
-            "default": [],
+            "default": [
+              90
+            ],
             "uniqueItems": true,
             "items": {
               "type": "number",
               "minimum": 1,
               "maximum": 100
             },
-            "markdownDescription": "Percentages at which a notification is shown, e.g. `[80, 95]`.\n\n**Empty by default: Token Pace shows no notifications at all.** Nothing here ever fires from a stale reading, at most once per window and reset cycle, and only upwards — crossing 80 % and 95 % in one step produces one message, not two."
+            "markdownDescription": "Percentages at which a notification is shown, e.g. `[80, 95]`.\n\nOne threshold (`90`) is set by default; **an empty list turns notifications off entirely**. Nothing here ever fires from a stale reading, at most once per window and reset cycle, and only upwards — crossing 80 % and 95 % in one step produces one message, not two."
           },
           "tokenPace.alerts.basis": {
             "type": "string",
@@ -1266,7 +1272,7 @@
             "type": "boolean",
             "order": 3,
             "default": true,
-            "markdownDescription": "Only alert when the window is also ahead of the clock. Reaching 80 % of a weekly window on day six is not news; reaching it on day two is.\n\nAlerts are off by default and never fire from a stale reading."
+            "markdownDescription": "Only alert when the window is also ahead of pace. Reaching 80 % of a weekly window on day six is not news; reaching it on day two is.\n\nA stale reading never raises an alert; an empty `#tokenPace.alerts.thresholds#` switches notifications off entirely."
           },
           "tokenPace.alerts.minRemainingMinutes": {
             "type": "number",
@@ -1294,7 +1300,7 @@
             "type": "boolean",
             "order": 7,
             "default": false,
-            "markdownDescription": "Notify once per cycle when a window changes from on pace to ahead of the clock.\n\nOff by default; a stale reading never triggers it."
+            "markdownDescription": "Notify once per cycle when a window changes from on pace to ahead of pace.\n\nOff by default; a stale reading never triggers it."
           },
           "tokenPace.alerts.windowCondition": {
             "type": "string",
@@ -1334,11 +1340,56 @@
           },
           "tokenPace.diagnostics.includeNetworkSetup": {
             "type": "boolean",
-            "order": 3,
+            "order": 90,
             "default": true,
             "markdownDescription": "Include the effective `http.proxy` settings and the six proxy environment variables in *Copy Diagnostics*. Credentials inside proxy URLs are replaced by `***` before anything is copied."
           }
         }
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "tokenPace.getStarted",
+        "title": "Get started with Token Pace",
+        "description": "What the status bar is telling you, where the quota figures come from, and where the detail lives.",
+        "steps": [
+          {
+            "id": "readTheBar",
+            "title": "Read the status bar",
+            "description": "An entry is one quota window: label, window, bar, percentage, and the countdown to its reset.\n\nThe colour compares consumption with the share of the window that has **already elapsed** — the ┃ marker in the bar. Fill left of the marker is spare, fill right of it is ahead of pace. A 60 % bar is calm an hour before the reset and loud five minutes in.\n\n[Preview status bar states](command:tokenPace.previewStatusBar)",
+            "media": {
+              "markdown": "media/walkthrough/status-bar.md"
+            },
+            "completionEvents": [
+              "onCommand:tokenPace.previewStatusBar"
+            ]
+          },
+          {
+            "id": "quotaSources",
+            "title": "Where the quota comes from",
+            "description": "Token counts are read from local transcript files. The **percentages** belong to the provider, and out of the box Token Pace only reads them from local sources somebody else already wrote — a cache file, Claude Code's own status line, **~/.claude.json**, the Codex transcripts.\n\n\"Poll\" means fetching the number ourselves: one request to the provider's usage endpoint, with your access token, on the interval you set. It never happens without a dialog that says exactly what is sent where, and the answer is remembered.\n\n[Fetch quota now](command:tokenPace.refreshQuota)\n[Connect Claude status line](command:tokenPace.connectStatusLine)\n[Open settings](command:tokenPace.openSettings)",
+            "media": {
+              "markdown": "media/walkthrough/quota.md"
+            },
+            "completionEvents": [
+              "onCommand:tokenPace.refreshQuota",
+              "onCommand:tokenPace.connectStatusLine",
+              "onSettingChanged:tokenPace.quotaSource"
+            ]
+          },
+          {
+            "id": "openDashboard",
+            "title": "Open the dashboard",
+            "description": "The panel in the secondary sidebar carries the detail: quota cards with forecast and sustainable rate, KPIs against the previous period, per-day and per-model breakdowns, the heatmap, and a data-quality section that names every source with its age.\n\nWhere a webview is unwanted, **tokenPace.dashboard.mode** switches the same view model to a Quick Pick or a read-only markdown document.\n\n[Open dashboard](command:tokenPace.showDashboard)",
+            "media": {
+              "markdown": "media/walkthrough/dashboard.md"
+            },
+            "completionEvents": [
+              "onCommand:tokenPace.showDashboard",
+              "onView:tokenPace.dashboard"
+            ]
+          }
+        ]
       }
     ]
   },
@@ -1353,7 +1404,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.104.0",
+    "@types/vscode": "^1.106.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.25.0",
     "typescript": "^5.6.0"

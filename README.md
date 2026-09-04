@@ -306,9 +306,9 @@ writes no file, and never mixes with the live items.
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |
 | `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost), the composition bar, cache economy, calendar periods and the plan factor |
 | `chart` | Stacked daily (or weekly) bars for the selected range, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
-| `models` | Per-model breakdown with usage, output, requests, cache hit, cost, share and price provenance; sortable, with average and P90 turn length where enough samples exist |
+| `models` | Per-model breakdown with the same columns as the totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) plus the share of the range; every column sortable, with average and P90 turn length where enough samples exist. Where the rates came from is the tooltip of the cost, not a column |
 | `heatmap` | Calendar heatmap of the last 53 weeks with current and longest streak, active days, peak day and a variability measure. Days outside the coverage are dotted, not empty |
-| `hours` | Hour-of-day profile and a weekday × 4-hour grid |
+| `hours` | Hour-of-day profile and a weekday × 4-hour grid, captioned with the weeks of usage days it stands on. A block nothing was ever done in is hatched |
 | `records` | Records of the selected range: peak day, longest run of days with usage, and the top models, projects and sessions (`dashboard.topN` rows each). Off by default; the two lower tables need `tokenPace.attribution` |
 | `tools` | Tool calls of the selected range by name, with the share of the calls counted in it and the models that made them (`dashboard.topN` rows). Off by default; names only, never a tool's input or its result, and the section states the day counting started |
 | `budget` | Your own limits from `tokenPace.budgets`: used, limit, share against **that** number, and the end-of-period projection. Off by default; a period with no local data shows a dash, and no budget is ever added to another |
@@ -332,7 +332,9 @@ day actually ingested, never earlier.
 
 **Filters and sorting.** Provider toggles, up to twelve model chips — folded behind a
 `models (N)` toggle above four, because a long chip row pushes the figures off the panel — and a
-sortable model table (`model`, `usage`, `output`, `requests`, `cost`, `cacheHit`, ascending or descending).
+model table sortable by every column it shows (`model`, `usage`, `freshInput`, `cacheWrite5m`,
+`cacheWrite1h`, `cacheRead`, `output`, `reasoning`, `requests`, `cacheHit`, `perRequest`, `cost`,
+`share`, ascending or descending).
 Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The heatmap
 switches between `usage` and `cost`; the hour profile between local time and UTC.
 
@@ -342,9 +344,14 @@ way again. `tokenPace.dashboard.sections` decides what exists at all; collapsing
 you look at today.
 
 **Peak hours.** No fixed peak windows are built in. The profile is drawn from your own hour
-buckets and nothing else; a weekday × 4-hour cell stays empty below three distinct days of
-samples rather than turning one afternoon into a habit, and rolled-up days that no longer have
-an hour are named as excluded instead of being folded into the picture.
+buckets and nothing else, and rolled-up days that no longer have an hour are named as excluded
+instead of being folded into the picture. The weekday × 4-hour grid draws every block a day of
+usage reached, however few days there are, and hatches the blocks no day reached — “hatched: no
+usage in that block”, said under the grid rather than left to be guessed. How thin the evidence
+is, is the caption: the days that carry usage, rounded up to whole weeks, as *based on 1 week — a
+record, not a habit* below three weeks and *based on 4 weeks* from three weeks on. The weeks are
+counted from your usage days, not from the length of the range: four working days inside a month
+are four days of evidence, not four weeks of them.
 
 **Forecast states.** Every answer is a named state, never a bare number: `none` (nothing
 measured), `full` (already exhausted), `stale` (the newest reading is too old to extrapolate),

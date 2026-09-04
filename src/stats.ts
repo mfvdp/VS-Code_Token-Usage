@@ -73,6 +73,15 @@ export interface TotalRow {
   provenance: Provenance
 }
 
+/**
+ * One model of the range.
+ *
+ * The counted fields are the same fields `TotalRow` carries, formatted by the same helpers:
+ * one model's row read against the totals row is a column-by-column comparison, and for a
+ * range with a single model in it the two are identical. The `…N` fields are the raw counts
+ * behind those strings — a compacted "1.2M" cannot be sorted on without reading a number
+ * back out of a rounded label.
+ */
 export interface ModelRow {
   model: string
   source: Source
@@ -80,8 +89,22 @@ export interface ModelRow {
   tier: Tier
   usage: number
   usageText: string
+  freshInput: string
+  cacheWrite5m: string
+  cacheWrite1h: string
+  cacheRead: string
   output: string
+  reasoning: string
   requests: string
+  perRequest: string
+  freshInputN: number
+  cacheWrite5mN: number
+  cacheWrite1hN: number
+  cacheReadN: number
+  outputN: number
+  reasoningN: number
+  requestsN: number
+  perRequestN: number
   cost: number
   costText: string
   listCost: string | null
@@ -188,7 +211,17 @@ export interface HeatmapData {
 export interface HoursData {
   profile: { hour: number; value: number; text: string }[]
   peakHour: number | null
+  /**
+   * The weekday × four-hour cells. `value` is what was measured in that cell, `samples` how
+   * many distinct days it came from; `value` is null only for a cell no day ever touched,
+   * which the views hatch.
+   */
   grid: { weekday: number; block: number; value: number | null; samples: number }[]
+  /**
+   * What the grid stands on, and the one sentence every view prints with it. Below three
+   * weeks the sentence says so itself, so a fortnight is not read as a routine.
+   */
+  basis: { weeks: number; days: number; text: string }
   /** Row labels of the grid, already rotated to `startOfWeek`. */
   weekdayLabels: string[]
   zone: 'local' | 'utc'
@@ -283,7 +316,10 @@ export interface DrillData {
   sessions: SessionRow[]
 }
 
-export const MODEL_SORT_KEYS = ['model', 'usage', 'output', 'requests', 'cost', 'cacheHit'] as const
+/** One key per column of the model table — the header a reader clicks is the key it sends. */
+export const MODEL_SORT_KEYS = ['model', 'usage', 'freshInput', 'cacheWrite5m', 'cacheWrite1h',
+  'cacheRead', 'output', 'reasoning', 'requests', 'cacheHit', 'perRequest', 'cost',
+  'share'] as const
 export type ModelSortKey = (typeof MODEL_SORT_KEYS)[number]
 
 export interface ModelSort {
@@ -317,8 +353,8 @@ export const WEEKLY_CHART_DAYS = 120
 export const SPARK_POINTS = 14
 /** Below this many active days a month projection would extrapolate from noise. */
 export const MIN_PROJECTION_DAYS = 5
-/** A weekday × 4-hour cell needs this many distinct days behind it before it says anything. */
-export const MIN_GRID_SAMPLES = 3
+/** From this many weeks of usage days on, the weekday grid is a habit rather than a record. */
+const GRID_HABIT_WEEKS = 3
 /** A P90 over fewer turn samples than this is the maximum with extra steps. */
 export const MIN_P90_SAMPLES = 20
 /** Streaks and variability need at least a week of active days to mean anything. */
@@ -1006,17 +1042,37 @@ function priceTextFor(model: string, day: string, ctx: StatsCtx): { priced: Mode
   return { priced: 'exact', text: `${rates}, list as of ${PRICES_AS_OF}` }
 }
 
+/**
+ * The number a numeric column sorts on. Every one of them is the raw count, not the cell:
+ * two rows whose usage both print as "1.2M" are still two different numbers.
+ *
+ * `share` is deliberately the usage: inside one table the share is the usage divided by the
+ * same total, so the two columns are one order under two names — deriving a percentage back
+ * out of its own label to sort it would only add rounding.
+ */
+const MODEL_SORT_VALUE: Record<Exclude<ModelSortKey, 'model' | 'cacheHit'>, (r: ModelRow) => number> = {
+  usage: (r) => r.usage,
+  freshInput: (r) => r.freshInputN,
+  cacheWrite5m: (r) => r.cacheWrite5mN,
+  cacheWrite1h: (r) => r.cacheWrite1hN,
+  cacheRead: (r) => r.cacheReadN,
+  output: (r) => r.outputN,
+  reasoning: (r) => r.reasoningN,
+  requests: (r) => r.requestsN,
+  perRequest: (r) => r.perRequestN,
+  cost: (r) => r.cost,
+  share: (r) => r.usage,
+}
+
 function sortRows(rows: ModelRow[], sort: ModelSort): ModelRow[] {
   const dir = sort.dir === 'asc' ? 1 : -1
   const key = sort.key
   return [...rows].sort((a, b) => {
     let d = 0
     if (key === 'model') d = a.model.localeCompare(b.model)
-    else if (key === 'cost') d = a.cost - b.cost
-    else if (key === 'usage') d = a.usage - b.usage
-    else if (key === 'output') d = numOf(a.output) - numOf(b.output)
-    else if (key === 'requests') d = numOf(a.requests) - numOf(b.requests)
-    else d = numOf(a.cacheHit) - numOf(b.cacheHit)
+    // The hit rate has no raw pair of its own on the row; it is read back off the cell.
+    else if (key === 'cacheHit') d = numOf(a.cacheHit) - numOf(b.cacheHit)
+    else d = MODEL_SORT_VALUE[key](a) - MODEL_SORT_VALUE[key](b)
     // A stable tie-break keeps rows from swapping places on every one-second redraw.
     return d !== 0 ? d * dir : a.model.localeCompare(b.model)
   })
@@ -1045,7 +1101,8 @@ export function modelTable(
   const sessions = ctx.agg.sessions()
   const groups = new Map<string, {
     model: string; source: Source; isSub: boolean; tier: Tier
-    usage: number; output: number; requests: number; cost: number; listUsd: number
+    usage: number; fresh: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
+    output: number; reasoning: number; requests: number; cost: number; listUsd: number
     hit: { num: number; den: number }; unpriced: boolean; unpricedReason: 'no price' | 'fast rate unknown' | null
   }>()
   let totalUsage = 0
@@ -1056,13 +1113,21 @@ export function modelTable(
     if (!g) {
       g = {
         model: b.model, source: b.source, isSub: b.isSub, tier: b.tier,
-        usage: 0, output: 0, requests: 0, cost: 0, listUsd: 0,
+        usage: 0, fresh: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
+        output: 0, reasoning: 0, requests: 0, cost: 0, listUsd: 0,
         hit: { num: 0, den: 0 }, unpriced: false, unpricedReason: null,
       }
       groups.set(key, g)
     }
     g.usage += billable(b)
+    // The write halves are kept apart and subtracted once at the end, exactly as `totalRow`
+    // does it, so the two tables cannot round the same tokens two ways.
+    g.fresh += freshInput(b)
+    g.cacheWrite += b.cacheWrite
+    g.cacheWrite1h += b.cacheWrite1h
+    g.cacheRead += b.cacheRead
     g.output += b.output
+    g.reasoning += b.reasoning
     g.requests += b.requests
     const parts = cacheHitParts(b)
     g.hit.num += parts.num
@@ -1084,6 +1149,7 @@ export function modelTable(
   const rows: ModelRow[] = [...groups.values()].map((g) => {
     const price = priceTextFor(g.model, range.to, ctx)
     const turns = turnStats(sessions, g.source, g.model)
+    const write5m = Math.max(0, g.cacheWrite - g.cacheWrite1h)
     return {
       model: g.model,
       source: g.source,
@@ -1091,8 +1157,23 @@ export function modelTable(
       tier: g.tier,
       usage: g.usage,
       usageText: tokens(g.usage),
+      freshInput: tokens(g.fresh),
+      cacheWrite5m: tokens(write5m),
+      cacheWrite1h: tokens(g.cacheWrite1h),
+      cacheRead: tokens(g.cacheRead),
       output: tokens(g.output),
+      reasoning: tokens(g.reasoning),
       requests: tokens(g.requests),
+      perRequest: g.requests > 0 ? compact(g.usage / g.requests) : '–',
+      freshInputN: g.fresh,
+      cacheWrite5mN: write5m,
+      cacheWrite1hN: g.cacheWrite1h,
+      cacheReadN: g.cacheRead,
+      outputN: g.output,
+      reasoningN: g.reasoning,
+      requestsN: g.requests,
+      // Zero, not a dash's stand-in: a model with no request sorts below one that has any.
+      perRequestN: g.requests > 0 ? g.usage / g.requests : 0,
       cost: g.cost,
       costText: ctx.showCost ? costText(g.cost) : '–',
       listCost: ctx.showCost && showListPrice && g.listUsd > 0 ? costText(g.listUsd) : null,
@@ -1489,11 +1570,32 @@ export function records(
 // ---------------------------------------------------------------------------
 
 /**
+ * How much the weekday grid stands on, in the one sentence every view prints under it.
+ *
+ * The honest denominator is the days that actually carry usage, not the length of the range:
+ * a 30-day range worked on four days is four days of evidence, and calling that "4 weeks"
+ * would sell a record as a habit. Those days are rounded up to whole weeks because a grid
+ * row is a weekday — one Tuesday is one week's worth of Tuesday, whatever else the range
+ * contains — and below three of them the sentence says outright what it is.
+ */
+function gridBasis(days: number): HoursData['basis'] {
+  const weeks = Math.ceil(days / 7)
+  if (days === 0) return { weeks: 0, days: 0, text: 'no day with usage in this range' }
+  const weekText = `based on ${weeks} week${weeks === 1 ? '' : 's'}`
+  return { weeks, days, text: weeks < GRID_HABIT_WEEKS ? `${weekText} — a record, not a habit` : weekText }
+}
+
+/**
  * Time-of-day profile, built from hour buckets only.
  *
  * Rolled-up data has no hour left in it; padding the profile with day sums would invent a
  * distribution. The number of days behind the profile is stated so a two-day sample is not
  * mistaken for a habit, and rolled-up days that had to be left out are named.
+ *
+ * The weekday grid draws every cell a day of usage reached, however few days that is, and
+ * hatches the ones no day reached; `basis` carries how thin the evidence is, in words. The
+ * threshold this used to apply instead hid the whole grid for any range under three weeks —
+ * a picture that is blank until week three teaches nothing about weeks one and two.
  */
 export function hours(ctx: StatsCtx, range: DayRange, zone: 'local' | 'utc'): HoursData {
   const profile = new Array(24).fill(0).map((_, hour) => ({ hour, value: 0, text: '–' }))
@@ -1544,8 +1646,9 @@ export function hours(ctx: StatsCtx, range: DayRange, zone: 'local' | 'utc'): Ho
       grid.push({
         weekday,
         block,
-        // Below the sample threshold a cell would be one afternoon pretending to be a habit.
-        value: samples >= MIN_GRID_SAMPLES ? (cellValue.get(key) ?? 0) : null,
+        // What was measured, from however many days there were. A cell no day ever touched
+        // has no value at all — it is hatched, not drawn as a zero.
+        value: samples > 0 ? (cellValue.get(key) ?? 0) : null,
         samples,
       })
     }
@@ -1555,6 +1658,7 @@ export function hours(ctx: StatsCtx, range: DayRange, zone: 'local' | 'utc'): Ho
     profile,
     peakHour,
     grid,
+    basis: gridBasis(seenDays.size),
     weekdayLabels: weekdayLabels(ctx.tcfg),
     zone,
     days: seenDays.size,

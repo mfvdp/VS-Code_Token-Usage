@@ -583,13 +583,19 @@ export function markdownDocument(vm: ViewModel): string {
 
   if (vm.models.rows.length > 0) {
     L.push('## Models', '')
-    L.push('| Model | Provider | Usage | Share | Output | Req. | Cache hit | API cost | Cost share | Price |')
-    L.push('|---|---|---|---|---|---|---|---|---|---|')
+    // The columns of the totals table above, in its order and with its words, so the two can
+    // be read against each other. No Price column: the rates are a provenance, not a figure,
+    // and they are named in the footnotes and in the QuickPick line for the same row.
+    L.push('| Model | Provider | Usage | Fresh input | Write 5m | Write 1h | Cache read | Output '
+      + '| Reasoning | Req. | Cache hit | Per req. | API cost | Share | Cost share |')
+    L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
     for (const m of vm.models.rows) {
       L.push(`| ${cell(m.model)}${m.isSub ? ' (sub)' : ''}${m.tier === 'standard' ? '' : ` [${m.tier}]`} | `
-        + `${cell(withSource(m.source, ''))} | ${cell(m.usageText)} | ${cell(m.share)} | ${cell(m.output)} | `
-        + `${cell(m.requests)} | ${cell(m.cacheHit)} | ${cell(m.costText)} | ${cell(m.costShare)} | `
-        + `${cell(m.price)} |`)
+        + `${cell(withSource(m.source, ''))} | ${cell(m.usageText)} | ${cell(m.freshInput)} | `
+        + `${cell(m.cacheWrite5m)} | ${cell(m.cacheWrite1h)} | ${cell(m.cacheRead)} | ${cell(m.output)} | `
+        + `${cell(m.reasoning)} | ${cell(m.requests)} | ${cell(m.cacheHit)} | ${cell(m.perRequest)} | `
+        + `${cell(m.costText)}${m.priced === 'family' ? ' ⚠' : ''} | ${cell(m.share)} | `
+        + `${cell(m.costShare)} |`)
     }
     if (vm.models.hidden > 0) {
       L.push('')
@@ -644,8 +650,11 @@ export function markdownDocument(vm: ViewModel): string {
     + (vm.heatmap.variability ? ` · CV ${vm.heatmap.variability.cv} · ${vm.heatmap.variability.spikyDays} spiky day(s)` : ''))
   L.push('')
   const peak = vm.hours.peakHour
+  // The same sentence the dashboard prints under the weekday grid: this document has no grid
+  // to draw, but the hours it does print stand on exactly those days.
   L.push(`Hours (${vm.hours.zone}, ${vm.hours.days} day(s)): peak `
     + `${peak === null ? '–' : `${String(peak).padStart(2, '0')}:00`}`
+    + ` · ${vm.hours.basis.text}`
     + (vm.hours.note ? ` · ${vm.hours.note}` : ''))
   L.push('')
   L.push('| Hour | Usage |')

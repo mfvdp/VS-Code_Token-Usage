@@ -128,6 +128,53 @@ test('cache economy, window usage and the digest survive into both renderings', 
   assert.equal(rowsOf(md, '## Models').length, vm.models.rows.length)
 })
 
+/** The header row of one markdown table, split into its column names. */
+function headOf(md: string, heading: string): string[] {
+  const lines = md.split('\n')
+  const start = lines.indexOf(heading)
+  assert.notEqual(start, -1, `section missing: ${heading}`)
+  const head = lines.slice(start).find((l) => l.startsWith('| '))
+  assert.ok(head, `no table under ${heading}`)
+  return head.split('|').slice(1, -1).map((c) => c.trim())
+}
+
+test('the models table names the same columns as the totals table, in the same order', () => {
+  const vm = fullVm()
+  const md = markdownDocument(vm)
+  const totals = headOf(md, `## Tokens — ${vm.totals[0].title}`)
+  const models = headOf(md, '## Models')
+  assert.deepEqual(models, ['Model', 'Provider', 'Usage', 'Fresh input', 'Write 5m', 'Write 1h',
+    'Cache read', 'Output', 'Reasoning', 'Req.', 'Cache hit', 'Per req.', 'API cost', 'Share',
+    'Cost share'])
+  // Column for column the totals table's own words, from "Usage" to "API cost".
+  assert.deepEqual(models.slice(2, 13), totals.slice(1))
+  // Every row has a cell for every column — a short row would shift the figures one over.
+  for (const row of rowsOf(md, '## Models')) {
+    assert.equal(row.split('|').slice(1, -1).length, models.length, row)
+  }
+})
+
+test('neither table has a Price column any more, and no row prints a bare provenance', () => {
+  const md = markdownDocument(fullVm())
+  assert.equal(headOf(md, '## Models').includes('Price'), false, md)
+  for (const row of rowsOf(md, '## Models')) {
+    for (const word of ['exact', 'family', 'custom', 'per 1M', 'no price on file']) {
+      assert.equal(row.includes(word), false, `${word} is still in ${row}`)
+    }
+  }
+  // The rates stay reachable in the QuickPick, which has no columns to lose them from.
+  const priced = quickPickItems(fullVm()).filter((i) => String(i.detail ?? '').includes('per 1M'))
+  assert.ok(priced.length > 0, 'the QuickPick lost the price provenance')
+})
+
+test('the hour profile states what the picture stands on, in the dashboard’s own words', () => {
+  const vm = fullVm()
+  const line = markdownDocument(vm).split('\n').find((l) => l.startsWith('Hours ('))
+  assert.ok(line, 'the markdown has no hours line')
+  assert.ok(line.includes(vm.hours.basis.text), line)
+  assert.match(line, / — a record, not a habit/)
+})
+
 test('the data-quality lines are identical in both renderings', () => {
   const vm = fullVm()
   const md = markdownDocument(vm)

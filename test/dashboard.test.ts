@@ -181,7 +181,12 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
     },
     hours: {
       profile: Array.from({ length: 24 }, (_, h) => ({ hour: h, value: h === 9 ? 100 : 0, text: 'none' })),
-      peakHour: 9, grid: [], weekdayLabels: ['Mon'], zone: 'local', days: 7, note: null,
+      peakHour: 9,
+      // One week of mornings: the cells that were worked in carry a value, the rest none.
+      grid: Array.from({ length: 7 }, (_, weekday) => ({ weekday, block: 2, value: 11000, samples: 1 })),
+      basis: { weeks: 1, days: 7, text: 'based on 1 week — a record, not a habit' },
+      weekdayLabels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      zone: 'local', days: 7, note: null,
     },
     forecasts: [forecastCard()],
     retro: [{ source: 'claude', windowId: 'session:300', label: '5 h', retro: null, text: 'peaked at 61 %' }],
@@ -733,6 +738,70 @@ test('the model chips are deduplicated', () => {
   assert.equal(h.split('data-model="gpt-5.2"').length - 1, 1, h)
 })
 
+/** One model row with every field the table reads — the shape `ModelRow` guarantees. */
+function modelRow(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    model: 'claude-opus-4-6', source: 'claude', isSub: false, tier: 'standard',
+    usage: 9000, usageText: '9.0K', freshInput: '4.0K', cacheWrite5m: '1.5K',
+    cacheWrite1h: '500', cacheRead: '90.0K', output: '3.0K', reasoning: '900',
+    requests: '4', perRequest: '2.3K', freshInputN: 4000, cacheWrite5mN: 1500,
+    cacheWrite1hN: 500, cacheReadN: 90000, outputN: 3000, reasoningN: 900, requestsN: 4,
+    perRequestN: 2250, cost: 1.5, costText: '~$1.50', listCost: null, cacheHit: '96 %',
+    share: '100 %', costShare: '100 %', priced: 'exact', price: '$15.00 / $75.00 per 1M, list as of 2026-09-02',
+    turnAvg: null, turnP90: null, ...over,
+  }
+}
+
+test('the models table carries every column of the totals table, in its order', () => {
+  const h = render('sModels()', {
+    models: { rows: [modelRow()], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  const heads = [...h.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]);
+  assert.deepEqual(heads, ['Model', 'Usage', 'Fresh in', 'Write 5m', 'Write 1h', 'Cache read',
+    'Output', 'Reasoning', 'Req.', 'Hit', 'Per req.', 'API cost', 'Share'])
+  // Every cell names its own header, so the ≤320 px layout can stack them.
+  for (const [head, value] of [['Fresh in', '4.0K'], ['Write 5m', '1.5K'], ['Write 1h', '500'],
+    ['Cache read', '90.0K'], ['Reasoning', '900'], ['Per req.', '2.3K']] as const) {
+    assert.ok(h.indexOf('<td data-h="' + head + '">' + value + '</td>') >= 0, head + ': ' + h)
+  }
+  // Every numeric column is sortable through the one mechanism the extension parses.
+  for (const key of ['usage', 'freshInput', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output',
+    'reasoning', 'requests', 'cacheHit', 'perRequest', 'cost', 'share']) {
+    assert.ok(h.indexOf('data-act="sort" data-key="' + key + '"') >= 0, key)
+  }
+  // The table scrolls sideways in a narrow sidebar, the way the totals table does.
+  assert.ok(h.startsWith('<div class="scroll">'), h)
+  assert.equal(/undefined|NaN|Infinity|\[object Object\]/.test(h), false, h)
+
+  // With the cost switched off the column goes, and the share stays where it was.
+  const free = render('sModels()', {
+    showCost: false,
+    models: { rows: [modelRow()], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  const bare = [...free.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]);
+  assert.equal(bare.includes('API cost'), false, free)
+  assert.equal(bare[bare.length - 1], 'Share')
+})
+
+test('the models table has no Price column, and hangs the provenance on the cost', () => {
+  const h = render('sModels()', {
+    models: {
+      rows: [modelRow(), modelRow({ model: 'claude-haiku-9', priced: 'family', costText: '~$0.30', price: '$1.00 / $5.00 per 1M, borrowed from claude-haiku-4-6' }),
+        modelRow({ model: 'claude-experimental-x', priced: 'none', costText: '–', price: 'no price on file' })],
+      total: 3, hidden: 0, sort: { key: 'usage', dir: 'desc' },
+    },
+  })
+  assert.equal(h.indexOf('>Price</th>'), -1, h)
+  assert.equal(h.indexOf('data-h="Price"'), -1, h)
+  assert.equal(h.indexOf('>exact<'), -1, h)
+  // The rates still travel with the number they made, and a borrowed rate is marked.
+  assert.ok(h.indexOf('title="$15.00 / $75.00 per 1M, list as of 2026-09-02"') >= 0, h)
+  assert.ok(h.indexOf('borrowed from claude-haiku-4-6') >= 0, h)
+  assert.equal(h.split('family fallback').length - 1, 1, h)
+  // An unpriced model keeps its dash — no cost, and no warning about a cost it never had.
+  assert.ok(h.indexOf('title="no price on file">–</td>') >= 0, h)
+})
+
 test('every axis label carries its text and index, so the browser can thin them', () => {
   const h = render('sChart()')
   assert.match(h, /<span data-i="0" data-l="09-01"><i>09-01<\/i><\/span>/)
@@ -751,6 +820,25 @@ test('the hour strip has an axis of its own and marks its empty hours', () => {
   assert.ok(strip.indexOf('>00</span>') >= 0 && strip.indexOf('>12</span>') >= 0, strip)
   // The four-hour blocks are labelled as belonging to the grid, not to the strip.
   assert.ok(h.indexOf('by weekday and four-hour block') >= 0, h)
+})
+
+test('the weekday grid draws the blocks it has, hatches the rest and says what it stands on', () => {
+  const h = render('sHours()')
+  const grid = h.slice(h.indexOf('<div class="hgrid">'))
+  // Seven cells with a level, thirty-five hatched — and nothing claiming a missing sample.
+  assert.equal(grid.split('<i class="l').length - 1, 7, grid)
+  assert.equal(grid.split('<i class="none"').length - 1, 35, grid)
+  assert.ok(grid.indexOf('title="no usage in this block"') >= 0, grid)
+  assert.ok(grid.indexOf('11,000 tokens over 1 day(s)') >= 0, grid)
+  // The caption carries the basis, and the hatch is named in a legend of its own.
+  assert.ok(h.indexOf('by weekday and four-hour block · based on 1 week — a record, not a habit') >= 0, h)
+  assert.ok(h.indexOf('hatched: no usage in that block') >= 0, h)
+  // Four weeks of days is a habit and drops the qualifier — the same one sentence, no glyphs.
+  const long = render('sHours()', {
+    hours: { ...(model().hours as Record<string, unknown>), basis: { weeks: 4, days: 26, text: 'based on 4 weeks' } },
+  })
+  assert.ok(long.indexOf('by weekday and four-hour block · based on 4 weeks') >= 0, long)
+  assert.equal(long.indexOf('a record, not a habit'), -1, long)
 })
 
 test('a lone sparkline sample is a point, not a stretched dash', () => {

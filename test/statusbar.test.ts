@@ -3,6 +3,7 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
+import type { BudgetRow } from '../src/budget'
 import { Config, sanitize } from '../src/config'
 import {
   autoExplain, buildItems, footerLine, itemModel, makeContext, previewItems, problemText,
@@ -776,4 +777,149 @@ test('the menu keeps a fetch it cannot perform, and says why', async () => {
   assert.ok(fetch, 'the fetch entry must stay in the list')
   assert.ok(String(fetch.label).startsWith('$(circle-slash)'), fetch.label)
   assert.ok(String(fetch.detail).includes('nothing is fetched over the network'), fetch.detail)
+})
+
+// ---------------------------------------------------------------------------
+// Context window entry
+// ---------------------------------------------------------------------------
+
+const CONTEXT = { used: 128_000, size: 200_000, usedPct: 64, fetchedAt: Math.floor(NOW / 1000) - 120 }
+
+test('the context entry appears only when it is asked for and a reading exists', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['context'] })
+  assert.deepEqual(textsOf({ cfg: on, context: CONTEXT }), ['ctx 64%'])
+  // No reading, no entry: there is no second way to learn a context window, so nothing is
+  // shown rather than a dash that suggests one could be fetched.
+  assert.deepEqual(textsOf({ cfg: on, context: null }), [])
+  assert.deepEqual(textsOf({ cfg: on }), [])
+  // Off by default.
+  assert.equal(textsOf({ context: CONTEXT }).some((t) => t.startsWith('ctx')), false)
+})
+
+test('the context entry shows tokens when the payload named no window size', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['context'] })
+  const [text] = textsOf({ cfg: on, context: { ...CONTEXT, size: null, usedPct: null } })
+  assert.equal(text, 'ctx 128K')
+  // A percentage with nothing to be a share of is exactly what this entry may not print.
+  assert.equal(text.includes('%'), false)
+})
+
+test('a stale context reading carries its age, a fresh one does not', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['context'] })
+  const old = { ...CONTEXT, fetchedAt: Math.floor(NOW / 1000) - 90 * 60 }
+  assert.deepEqual(textsOf({ cfg: on, context: old }), ['ctx 64% $(history) 2h'])
+  assert.deepEqual(textsOf({ cfg: on, context: CONTEXT }), ['ctx 64%'])
+})
+
+test('the context tooltip says whose window it is and never calls it a quota', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['context'] })
+  const tip = buildItems(input({ cfg: on, context: CONTEXT }))[0].tooltipMarkdown
+  assert.ok(tip.includes('**Context window**'), tip)
+  assert.ok(tip.includes('128,000 of 200,000 tokens · 64 %'), tip)
+  assert.ok(tip.includes('current session, via the status line'), tip)
+  assert.ok(tip.includes('not an account figure'), tip)
+  assert.ok(tip.includes('Status line updated 2 min ago'), tip)
+})
+
+test('a configured plan name reaches the tooltip title, marked as configured', () => {
+  const configured = cfg({ 'tokenPace.planName': { claude: 'Max 20x' } })
+  const tip = quotaTooltip(state({ planType: null }), makeContext(input({ cfg: configured })))
+  assert.ok(tip.startsWith('**[Claude Code](https://claude.ai/settings/usage)** · plan `Max 20x` (as configured)'), tip)
+  // What the provider itself said needs no such qualifier — and still wins over the setting.
+  const stated = quotaTooltip(state(), makeContext(input({ cfg: configured })))
+  assert.ok(stated.includes('· plan `max20`'), stated)
+  assert.equal(stated.includes('as configured'), false, stated)
+})
+
+test('a plan name never reaches the tooltip as markup', () => {
+  // The tooltip is a trusted MarkdownString with HTML enabled, and the name is a provider
+  // field or a settings string — so it is printed inside a code span, the same way every
+  // other borrowed string in this file is, and cannot bold or link anything around it.
+  const shouty = cfg({ 'tokenPace.planName': { claude: '**[x](http://e.example)**' } })
+  const tip = quotaTooltip(state({ planType: null }), makeContext(input({ cfg: shouty })))
+  assert.ok(tip.includes('plan `**[x](http://e.example)**` (as configured)'), tip)
+})
+
+test('the preview shows both context shapes and neither invents a share', () => {
+  const texts = previewItems(cfg({}), NOW).map((m) => m.text).filter((t) => t.includes('ctx '))
+  assert.deepEqual(texts, ['[preview] ctx 64%', '[preview] ctx 128K'])
+})
+
+// ---------------------------------------------------------------------------
+// Budget entry
+// ---------------------------------------------------------------------------
+
+function budget(over: Partial<BudgetRow> = {}): BudgetRow {
+  return {
+    key: 'total:month:usd', identity: 'budget:total:month:usd:2026-09-01',
+    label: 'All providers · this month', scope: 'total', period: 'month', unit: 'usd',
+    from: '2026-09-01', to: '2026-09-03', last: '2026-09-30',
+    limit: 200, limitText: '$200.00', used: 84, usedText: '~$84.00',
+    share: 42, shareText: '42 %', over: false, partial: false, covered: true,
+    projected: null, projectedText: null, projectionBasis: null, projectedOver: false,
+    unmeasurable: null,
+    text: 'All providers · this month: ~$84.00 of $200.00 · 42 %', ...over,
+  }
+}
+
+test('the budget entry appears only when it is asked for and a budget exists', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['budget'] })
+  assert.deepEqual(textsOf({ cfg: on, budgets: [budget()] }), ['budget ~42 %'])
+  // Nobody stated a limit, so there is nothing to be a share of — and no entry at all.
+  assert.deepEqual(textsOf({ cfg: on, budgets: [] }), [])
+  assert.deepEqual(textsOf({ cfg: on }), [])
+  // Off by default.
+  assert.equal(textsOf({ budgets: [budget()] }).some((t) => t.startsWith('budget')), false)
+})
+
+test('the bar shows the budget closest to its own limit, comparing shares and never values', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['budget'] })
+  const money = budget({ share: 42, shareText: '42 %' })
+  // Far more tokens than dollars, and a much smaller share of the user's own limit: the
+  // raw numbers are of two different kinds and may not decide which one is shown.
+  const tokens = budget({
+    key: 'claude:day:tokens', unit: 'tokens', label: 'Claude Code · today',
+    limit: 5_000_000, limitText: '5M', used: 400_000, usedText: '400K',
+    share: 8, shareText: '8 %', text: 'Claude Code · today: 400K of 5M · 8 %',
+  })
+  assert.deepEqual(textsOf({ cfg: on, budgets: [tokens, money] }), ['budget ~42 %'])
+  // A token budget keeps its plain share: only a hypothetical amount carries the marker.
+  assert.deepEqual(textsOf({ cfg: on, budgets: [tokens] }), ['budget 8 %'])
+})
+
+test('a budget over its own limit says so, and one with no data at all shows a dash', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['budget'] })
+  assert.deepEqual(
+    textsOf({ cfg: on, budgets: [budget({ share: 118, shareText: '118 %', over: true })] }),
+    ['budget ~118 % over'],
+  )
+  // Never "0 %": an unread period is not a quiet one, so a row without a share cannot win
+  // the comparison — and a lone row without one prints the dash rather than a number.
+  assert.deepEqual(textsOf({ cfg: on, budgets: [budget({ share: null, shareText: '–', covered: false })] }), [])
+  assert.equal(
+    itemModel({ kind: 'budget', b: budget({ share: null, shareText: '–', covered: false }) },
+      makeContext(input({ cfg: on }))).text,
+    'budget –',
+  )
+})
+
+test('the budget tooltip lists every budget and says what a dollar figure is not', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['budget'] })
+  const rows = [budget({ partial: true }), budget({ key: 'claude:day:tokens', label: 'Daily cap' })]
+  const tip = buildItems(input({ cfg: on, budgets: rows }))[0].tooltipMarkdown
+  assert.ok(tip.includes('**Budgets**'), tip)
+  for (const r of rows) assert.ok(tip.includes(r.text), r.text)
+  assert.ok(tip.includes('not a bill'), tip)
+  assert.ok(tip.includes('lower bound'), tip)
+  // A budget is not a quota: nothing here may name a window, a plan or a reset.
+  assert.equal(/\b(quota|plan|reset)\b/.test(tip), false, tip)
+})
+
+test('the preview shows a budget under and over its limit, and colours neither', () => {
+  const items = previewItems(cfg({}), NOW).filter((m) => m.text.includes('budget '))
+  assert.deepEqual(items.map((m) => m.text), ['[preview] budget ~38 %', '[preview] budget ~118 % over'])
+  for (const m of items) {
+    assert.equal(m.colorId, null)
+    assert.equal(m.alarm, false)
+  }
 })

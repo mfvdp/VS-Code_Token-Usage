@@ -18,6 +18,7 @@ import {
   FINGERPRINT, NOW, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
 } from './fixtures/viewFixtures'
 import { deltaBadge } from '../src/render'
+import { toolAgg } from './helpers/toolAgg'
 
 function fullVm(): ViewModel {
   const history = makeHistory()
@@ -444,4 +445,169 @@ test('growth from nothing is announced as "new", never as "new new"', () => {
     assert.ok(/\bnew\b/.test(text), name)
     assert.equal(/\bnew new\b/.test(text), false, name)
   }
+})
+
+test('the context window reaches both flat renderings exactly once, or neither', () => {
+  const history = makeHistory()
+  fillHistory(history)
+  const base = makeInput({ history })
+  const vm = buildViewModel({
+    ...base,
+    context: { used: 128_000, size: 200_000, usedPct: 64, fetchedAt: Math.round((NOW - 120_000) / 1000) },
+  })
+  const c = vm.context
+  assert.ok(c)
+
+  const rows = quickPickItems(vm).filter((i) => i.label.startsWith('Context window: '))
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].label, `Context window: ${c.text}`)
+  assert.equal(rows[0].description, c.note)
+
+  const md = markdownDocument(vm)
+  assert.equal(md.split('## Context window').length, 2)
+  assert.ok(md.includes(`${c.text} — ${c.note}`), md)
+
+  // No reading, no row and no heading — an empty section would be a promise of a figure.
+  const without = buildViewModel(base)
+  assert.equal(quickPickItems(without).some((i) => i.label.startsWith('Context window')), false)
+  assert.equal(markdownDocument(without).includes('## Context window'), false)
+})
+
+test('a plan name out of the settings is marked as configured in both flat views', () => {
+  const vm = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.planName': { claude: 'Max 20x' } }),
+    quotas: [state('claude', { planType: null })],
+  }))
+  const item = quickPickItems(vm).find((i) => i.label === SOURCE_TITLE.claude)
+  assert.ok(item)
+  assert.ok((item.description ?? '').startsWith('plan Max 20x (as configured)'), item.description)
+  assert.ok(markdownDocument(vm).includes('plan Max 20x (as configured)'))
+})
+
+test('every record row reaches both flat renderings exactly once', () => {
+  const vm = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.attribution': 'session', 'tokenPace.dashboard.topN': 3 }),
+    agg: buildAgg('session'),
+  }))
+  const r = vm.records
+  assert.ok(r.topModels.length > 0 && r.topProjects.length > 0 && r.topSessions.length > 0)
+  const items = quickPickItems(vm)
+  const md = markdownDocument(vm)
+
+  assert.equal(items.filter((i) => i.label.startsWith('Record peak day: ')).length, 1)
+  assert.equal(items.filter((i) => i.label.startsWith('Record streak: ')).length, 1)
+  assert.ok(r.peakDay)
+  assert.ok(md.includes(`Peak day: ${r.peakDay.day} — ${r.peakDay.usage}`), md)
+  assert.ok(md.includes(`Longest streak: ${r.streak?.days} days`), md)
+
+  for (const [kind, rows] of [
+    ['model', r.topModels], ['project', r.topProjects], ['session', r.topSessions],
+  ] as const) {
+    assert.equal(items.filter((i) => i.label.startsWith(`Top ${kind} `)).length, rows.length)
+    assert.equal(rowsOf(md, `## Records`).filter((l) => rows.some((e) => l.startsWith(`| ${e.label} |`))).length,
+      rows.length, `${kind} rows are missing from the markdown table`)
+  }
+  assert.equal(md.split('## Records').length, 2)
+})
+
+test('the local five-hour estimate is one sentence, the same one in both flat renderings', () => {
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude', { ok: false, problem: 'no token', problemKind: 'noToken', windows: [] })],
+  }))
+  const text = vm.quotas[0].localBlock?.text
+  assert.ok(text)
+  const items = quickPickItems(vm).filter((i) => i.label.startsWith('Local estimate'))
+  assert.equal(items.length, 1)
+  assert.equal(items[0].label, text)
+  const md = markdownDocument(vm)
+  assert.equal(md.split('Local estimate').length, 2)
+  assert.ok(md.includes(text), md)
+
+  // A provider that reports a window gets no such line anywhere.
+  const withWindow = buildViewModel(makeInput())
+  assert.equal(quickPickItems(withWindow).some((i) => i.label.startsWith('Local estimate')), false)
+  assert.equal(markdownDocument(withWindow).includes('Local estimate'), false)
+})
+
+test('every tool row reaches both flat renderings exactly once, with its notes', () => {
+  const t = toolAgg(NOW)
+  const vm = buildViewModel(makeInput({ agg: t.agg, range: t.range }))
+  const rows = vm.tools.rows
+  assert.ok(rows.length >= 4)
+
+  const items = quickPickItems(vm)
+  for (const r of rows) {
+    const found = items.filter((i) => i.label === `Tool ${r.name}: ${r.callsText}`)
+    assert.equal(found.length, 1, r.name)
+    assert.equal(found[0].description, `${r.share} of calls · ${r.models}`)
+  }
+  assert.equal(items.filter((i) => /^Tool .+: /.test(i.label)).length, rows.length)
+
+  const md = markdownDocument(vm)
+  assert.equal(md.split('## Tools').length, 2)
+  assert.equal(rowsOf(md, '## Tools').length, rows.length)
+  for (const r of rows) assert.ok(md.includes(`| ${r.name} |`), r.name)
+  // The sentence that says since when tool calls are counted travels with the table.
+  for (const n of vm.tools.notes) {
+    assert.ok(items.some((i) => i.label === n), n)
+    assert.ok(md.includes(n), n)
+  }
+})
+
+test('the tool cap is offered as a setting rather than silently swallowing rows', () => {
+  const t = toolAgg(NOW)
+  const vm = buildViewModel(makeInput({
+    agg: t.agg, range: t.range, cfg: makeConfig({ 'tokenPace.dashboard.topN': 1 }),
+  }))
+  assert.equal(vm.tools.hidden, 3)
+  const item = quickPickItems(vm).find((i) => i.label === '3 more tool row(s)')
+  assert.ok(item)
+  assert.equal(item.command, 'tokenPace.openSettings')
+  assert.ok(markdownDocument(vm).includes('3 more not listed'))
+})
+
+test('an install with no tool rows says so in both flat renderings', () => {
+  const vm = buildViewModel(makeInput({ agg: new Aggregator(), quotas: [] }))
+  const note = 'No tool call has been counted yet — counting starts with the next transcript read.'
+  assert.ok(quickPickItems(vm).some((i) => i.label === note))
+  const md = markdownDocument(vm)
+  assert.ok(md.includes(note), md)
+  // No table, no invented row, and no "0" pretending to be a count.
+  assert.equal(rowsOf(md, '## Tools').length, 0)
+})
+
+test('every budget row reaches both flat renderings exactly once', () => {
+  const vm = buildViewModel(makeInput({
+    agg: buildAgg(),
+    cfg: makeConfig({
+      'tokenPace.budgets': [
+        { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+        { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+      ],
+    }),
+  }))
+  const rows = vm.budgets
+  assert.equal(rows.length, 2)
+
+  const items = quickPickItems(vm)
+  for (const b of rows) {
+    // The label is the view model's own sentence, word for word: a budget may not read one
+    // way in the panel and another in the list.
+    const found = items.filter((i) => i.label === b.text)
+    assert.equal(found.length, 1, b.text)
+    assert.equal(found[0].description?.startsWith(`${b.from} → ${b.last}`), true, found[0].description)
+  }
+
+  const md = markdownDocument(vm)
+  assert.equal(md.split('## Budgets').length, 2)
+  assert.equal(rowsOf(md, '## Budgets').length, rows.length)
+  for (const b of rows) assert.ok(md.includes(`| ${b.label} |`) || md.includes(`| ${b.label} ⚠ |`), b.label)
+  assert.ok(md.includes('not a bill'), md)
+})
+
+test('no budget configured leaves no heading and no row behind', () => {
+  const vm = buildViewModel(makeInput({ agg: buildAgg() }))
+  assert.deepEqual(vm.budgets, [])
+  assert.equal(quickPickItems(vm).some((i) => i.label === 'Budgets'), false)
+  assert.equal(markdownDocument(vm).includes('## Budgets'), false)
 })

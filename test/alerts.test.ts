@@ -468,6 +468,7 @@ function budget(over: Partial<BudgetRow> = {}): BudgetRow {
     projectedText: null,
     projectionBasis: null,
     projectedOver: false,
+    unmeasurable: null,
     text: 'All providers · this month: ~$85 of $100 · 85 %',
     ...over,
   }
@@ -502,6 +503,45 @@ test('a budget speaks once per period, however often it is evaluated', async () 
   const again = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW + HOUR, [budget({ share: 99, shareText: '99 %' })])
   assert.equal(again.length, 0, 'the same period must not speak twice')
   assert.equal(h.messages.length, 1)
+})
+
+test('a month budget stays silent for the whole period, even when other alerts save in between', async () => {
+  // The "once per period" lives entirely in the state entry, so an entry that ages out
+  // mid-period would let a 31-day period announce itself twice. Eighteen days in, a quota
+  // threshold fires and rewrites the state; the month budget must survive that save.
+  const DAY = 24 * HOUR
+  const h = harness(cfg({ budgetPercent: 80, thresholds: [80] }))
+  const first = await h.alerts.evaluate([], noVerdicts, noForecasts, NOW, [budget()])
+  assert.deepEqual(first.map((d) => d.kind), ['budget'])
+
+  const later = NOW + 18 * DAY
+  const threshold = await h.alerts.evaluate(
+    [quotaAt(later, [win({ percent: 82 })])], noVerdicts, noForecasts, later, [budget()],
+  )
+  assert.deepEqual(threshold.map((d) => d.kind), ['threshold'], 'the budget has already spoken')
+
+  const after = NOW + 19 * DAY
+  const again = await h.alerts.evaluate([], noVerdicts, noForecasts, after, [budget({ share: 90, shareText: '90 %' })])
+  assert.equal(again.length, 0, 'the same month must not speak twice')
+  assert.equal(h.messages.length, 2)
+})
+
+test('a daily budget saving every day does not age out the month budget beside it', async () => {
+  const DAY = 24 * HOUR
+  const h = harness(cfg({ budgetPercent: 80 }))
+  let months = 0
+  for (let i = 0; i < 25; i++) {
+    const at = NOW + i * DAY
+    // A new day is a new identity, so the day budget speaks — and saves — every single day.
+    const day = budget({ period: 'day', from: `2026-09-${String(2 + i).padStart(2, '0')}`, label: 'All providers · today' })
+    const out = await h.alerts.evaluate([], noVerdicts, noForecasts, at, [day, budget()])
+    months += out.filter((d) => /this month/.test(d.message)).length
+  }
+  assert.equal(months, 1, 'the month period announces itself exactly once')
+  // The entry that keeps it quiet is kept current while the period runs, so no pruning
+  // rule can reach it: its timestamp follows the last evaluation, not the announcement.
+  const state = h.memento.store.get('tokenPace.alerts') as { entries: Record<string, { at: number }> }
+  assert.equal(state.entries[budget().identity].at, NOW + 24 * DAY)
 })
 
 test('a new period is a new subject', async () => {

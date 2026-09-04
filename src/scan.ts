@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { ADAPTERS, adapterFor } from './adapters'
 import { Aggregator, IngestContext } from './agg'
-import {
-  CLAUDE_ROOTS, CODEX_ROOTS, findTranscripts, isClaudeSubagent, isClaudeTranscript, isCodexRollout, rootOf,
-} from './discover'
+import { findTranscripts, rootOf, rootsFor } from './discover'
 import { newCursor, readNewLines } from './tail'
-import { Attribution, Cursor } from './types'
+import { Attribution, Source } from './types'
 
 export interface ScanProgress { done: number; total: number; file: string }
 
@@ -28,23 +27,23 @@ export interface ScanOptions {
 const NO_ATTRIBUTION: ScanContext = { attribution: 'none', projectSalt: '', hashProjects: true }
 
 /**
- * Reads all new lines from both tools. Used for the cold start (in the worker)
- * as well as for incremental updates — so the logic exists only once.
+ * Reads all new lines from every provider. Used for the cold start (in the worker)
+ * as well as for incremental updates — so the logic exists only once, and a provider
+ * contributes its roots, its file names and its line parser through its adapter.
  */
 export async function scan(agg: Aggregator, opts: ScanOptions = {}): Promise<number> {
   const scanCtx = opts.ctx ?? NO_ATTRIBUTION
-  const all: Array<{ file: string; source: 'claude' | 'codex' }> = []
+  const all: Array<{ file: string; source: Source }> = []
   if (opts.files) {
     for (const file of opts.files) {
       const r = rootOf(file)
       if (r) all.push({ file, source: r.source })
     }
   } else {
-    for (const root of CLAUDE_ROOTS) {
-      for (const file of await findTranscripts(root, isClaudeTranscript)) all.push({ file, source: 'claude' })
-    }
-    for (const root of CODEX_ROOTS) {
-      for (const file of await findTranscripts(root, isCodexRollout)) all.push({ file, source: 'codex' })
+    for (const a of ADAPTERS) {
+      for (const root of rootsFor(a.id)) {
+        for (const file of await findTranscripts(root, a.matches)) all.push({ file, source: a.id })
+      }
     }
   }
 
@@ -52,35 +51,20 @@ export async function scan(agg: Aggregator, opts: ScanOptions = {}): Promise<num
   let done = 0
 
   for (const { file, source } of all) {
-    let cur = agg.cursors.get(file)
-    if (!cur) { cur = newCursor(); agg.cursors.set(file, cur) }
-    const ctx: IngestContext = { ...scanCtx, file, isSub: source === 'claude' && isClaudeSubagent(file) }
+    const adapter = adapterFor(source)
+    let known = agg.cursors.get(file)
+    if (!known) { known = newCursor(); agg.cursors.set(file, known) }
+    // A `const` so the callbacks below close over a cursor the compiler knows is present.
+    const cur = known
+    const ctx: IngestContext = { ...scanCtx, file, isSub: adapter.isSub(file) }
 
-    if (source === 'claude') {
-      // A re-read from the start needs no reset here: message ids still in `pending`
-      // dedupe themselves, and there is no cumulative state to unwind.
-      await readNewLines(file, cur, (line) => { if (agg.addClaudeLine(line, ctx)) counted++ })
-    } else {
-      const codexCur = cur
-      await readNewLines(
-        file, codexCur,
-        (line) => { if (agg.addCodexLine(line, codexCur, ctx)) counted++ },
-        undefined,
-        () => resetCodexCursor(codexCur),
-      )
-    }
+    await readNewLines(
+      file, cur,
+      (line) => { if (adapter.ingest(line, cur, ctx, agg)) counted++ },
+      undefined,
+      () => adapter.resetCursor(cur),
+    )
     opts.onProgress?.({ done: ++done, total: all.length, file })
   }
   return counted
-}
-
-/**
- * Before a re-read from the start, the derived Codex fields must be neutral again —
- * a stale baseline would swallow every event of the rewritten file up to the old total.
- */
-function resetCodexCursor(cur: Cursor): void {
-  cur.lastTotal = undefined
-  cur.replayDone = false
-  cur.startTs = undefined
-  cur.forked = false
 }

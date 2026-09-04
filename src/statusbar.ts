@@ -11,6 +11,7 @@
  */
 
 import * as vscode from 'vscode'
+import { SOURCES, SOURCE_TITLE } from './adapters'
 import { Aggregator } from './agg'
 import { Config } from './config'
 import {
@@ -158,8 +159,6 @@ interface MenuItem extends vscode.QuickPickItem {
   args?: unknown[]
 }
 
-const SOURCE_TITLE: Record<'claude' | 'codex', string> = { claude: 'Claude Code', codex: 'Codex' }
-
 /**
  * The menu behind a click. Every entry is one of this extension's own commands; `run` does
  * the executing, so the menu itself stays testable and free of side effects.
@@ -181,7 +180,7 @@ export async function showMenu(
 
   const sources = input.quotas.length > 0
     ? [...new Set(input.quotas.map((q) => q.source))]
-    : (['claude', 'codex'] as const).slice()
+    : [...SOURCES]
 
   const items: MenuItem[] = [
     { label: '$(dashboard) Open Dashboard', command: 'tokenPace.showDashboard' },

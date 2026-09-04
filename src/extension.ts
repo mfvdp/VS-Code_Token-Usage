@@ -23,6 +23,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
+import { ADAPTERS, SOURCES } from './adapters'
 import { Aggregator } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
@@ -254,6 +255,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       fingerprints: quotaMgr.fingerprints(),
       forecastCfg: forecastConfig(),
       scanning,
+      // The accessor, not a second read: `current()` above (and in `render`) is what filled
+      // it, so the card and the status-bar item describe the same mirror.
+      context: quotaMgr.contextReading(),
       preview: statusBar.previewActive(),
     })
   }
@@ -273,16 +277,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   /** `force` marks an event (quota update, ingest, message, config change), not a tick. */
   function render(force = false): void {
     const now = Date.now()
+    let readingsOk = false
     try {
       quotas = quotaMgr.current(now)
       forecasts = forecastsFor(
         quotas, history, quotaMgr.fingerprints(), forecastConfig(), now, readPaceConfig(cfg), readTimeConfig(cfg),
       )
-      statusBar.update({ quotas, agg, cfg, now, forecasts, role, scanning, consent: consent.state() })
+      readingsOk = true
+    } catch (err) {
+      log.error(`Reading the current quota failed: ${err}`)
+    }
+    // The view model is built first so the status bar can take the budget rows from it
+    // rather than deriving them a second time; `rebuildVm` swallows its own errors, so a
+    // broken view still cannot take the bar down with it.
+    if (force || now - lastVmAt >= VM_MIN_INTERVAL_MS) rebuildVm(now)
+    if (!readingsOk) return
+    try {
+      statusBar.update({
+        quotas, agg, cfg, now, forecasts, role, scanning, consent: consent.state(),
+        context: quotaMgr.contextReading(),
+        budgets: latestVm?.budgets ?? [],
+      })
     } catch (err) {
       log.error(`Rendering the status bar failed: ${err}`)
     }
-    if (force || now - lastVmAt >= VM_MIN_INTERVAL_MS) rebuildVm(now)
   }
 
   /**
@@ -670,7 +688,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         )
       }
     }
-    void alerts.evaluate(quotas, verdicts, forecasts, now)
+    // A budget is measured on the local buckets, so a half-read history would announce a
+    // share that is only going to rise. The rows are the view model's own — one derivation.
+    const budgets = scanning ? [] : latestVm?.budgets ?? []
+    void alerts.evaluate(quotas, verdicts, forecasts, now, budgets)
       .then((decisions) => {
         for (const d of decisions) {
           log.info(`Alert (${d.kind}, ${d.source}): ${d.message}`)
@@ -950,13 +971,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   async function openUsagePage(arg?: unknown): Promise<void> {
-    let source: Source | null = arg === 'claude' || arg === 'codex' ? arg : null
+    let source: Source | null = SOURCES.some((s) => s === arg) ? (arg as Source) : null
     if (source === null) {
       const pick = await vscode.window.showQuickPick(
-        [
-          { label: 'Claude Code', description: USAGE_PAGE.claude, value: 'claude' as Source },
-          { label: 'Codex', description: USAGE_PAGE.codex, value: 'codex' as Source },
-        ],
+        ADAPTERS.map((a) => ({ label: a.title, description: a.usagePageUrl, value: a.id })),
         { title: 'Open the official usage page', placeHolder: 'Pick a provider' },
       )
       if (!pick) return

@@ -3,6 +3,115 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.2.0 — 2026-09-04
+
+### Added
+
+* **Context window of the current Claude Code session.** When the status line is connected,
+  the mirror already carries `context_window`; it is now shown as its own dashboard section
+  (`context`, not on by default), a Quick Pick row, a markdown section, and an optional status
+  bar entry (`context` in `tokenPace.statusBar.show`, e.g. `ctx 64%`). It is labelled *current
+  session, via the status line* everywhere it appears: it describes **one conversation**, not
+  the account, and it is not comparable to a quota window. Without a window size in the payload
+  there is no percentage and no bar — only the token count. Nothing here is derived from the
+  local token counts; no status line means no card, never an estimate.
+* **`tokenPace.planName`** — the plan name shown beside the provider title, per tool
+  (`{"claude": "Max 20x"}`, 40 characters max). Display only: Token Pace never derives a limit,
+  a window or a denominator from it. A name a provider states itself always wins, and a name
+  out of the settings prints as `plan Max 20x (as configured)` so the two can be told apart.
+  `~/.claude.json`'s `oauthAccount` is still never read.
+* **Records.** A new dashboard section (`records`, not on by default), a Quick Pick group and a
+  markdown section for the extremes of the selected range: its peak day, its longest run of
+  consecutive days with usage, and the top models, projects and sessions. `tokenPace.dashboard.topN`
+  (default 5, 1–20) caps how many rows each table lists — never what is counted, so the shares
+  beside the rows stay shares of the whole range. Rolled-up month buckets have no day left in
+  them and take part in neither day record; how many were left out is stated. A day before the
+  first ingest is unwatched, not idle, so it neither breaks a streak nor counts as a zero — the
+  same rule the heatmap follows. The two lower tables need `tokenPace.attribution` and say so
+  instead of standing empty.
+* **Local five-hour estimate where a provider reports no window.** One line on the quota card,
+  identical in all three views: *Local estimate — 412k tokens in the last 5 h, first counted at
+  09:00. Not the provider’s window; no limit is known.* It counts locally ingested tokens and
+  carries no percentage, no bar, no pace, no forecast and no alert — there is no limit behind
+  it, and inventing a denominator would turn an estimate into a fake quota window. It appears
+  only while that provider has no window at all, and the status bar is unchanged: a problem
+  state stays a problem state.
+* **Tool-usage statistics.** How often each tool was called, by name — a new dashboard section
+  (`tools`, not on by default), a Quick Pick group and a markdown section, capped by the same
+  `tokenPace.dashboard.topN` the records use. Every row carries the calls, the share of the
+  calls counted in the range and the models that made them; nothing carries a limit, because a
+  tool call has none. Names only: never an argument, a path or a result. Counting lives in a
+  side table beside the buckets, so no sum, no CSV column and no bucket key changes, and at
+  most 100 distinct names are kept per provider and day — a day that goes past that says so
+  instead of showing a short list as a complete one. The snapshot is version 6 and reads
+  version 5 forward with an empty table, so no upgrade forces a cold re-read; the section
+  states the first day it actually has rows for rather than showing a quiet week that was
+  never measured. The rows are kept for at most **90 days** — and for less when
+  `tokenPace.retentionDays` is shorter — because a table keyed by day × model × name cannot be
+  carried as far as a rolled-up bucket: on the default retention a `year` or `all` range shows
+  tokens for 400 days and tools for 90, and the section says which day its rows start at.
+* **Exports carry the tool table.** *Export CSV…* writes a second file beside the one you pick,
+  `….tools.csv` with `day, source, model, tool, calls`, announced in the save dialog before
+  anything is written — never a per-bucket column, which would be an invented split of a
+  figure nobody measured that way. *Export JSON…* gains `tools[]` and `toolsTruncated`, and its
+  `schema_version` is therefore `2`; everything version 1 wrote still means the same thing. Its
+  save dialog names the tool names too: both export paths make the same promise about the same
+  data, because the dialog is the last moment to say no.
+* **Budgets — a limit you state yourself.** `tokenPace.budgets` takes a list of
+  `{scope, period, unit, limit, label?}` entries (`total`/`claude`/`codex` × `day`/`week`/`month`
+  × `usd`/`tokens`), measured against the locally counted usage: a new dashboard section
+  (`budget`, not on by default), a Quick Pick group, a markdown table, a line in *Copy usage
+  summary*, and an optional status bar entry (`budget` in `tokenPace.statusBar.show`) showing
+  the budget closest to its own limit. **USD here is the hypothetical API equivalent, not a
+  bill**, and unpriced models make the spend — and therefore the share — a lower bound, marked
+  `⚠` like every other lower bound. A token budget and a money budget are never added, averaged
+  or ranked against each other; only their shares of *your* own limit are comparable. A period
+  with no local data shows a dash rather than 0 %, and the end-of-period projection is the same
+  rule the calendar card uses: per elapsed day, silent below five active days, always `~`.
+  Periods follow your zone, day boundary and start of week; an entry with an unknown scope,
+  period or unit — or without a finite limit above zero — is dropped whole rather than repaired.
+  A budget nothing can measure — `usd` while `tokenPace.showCost` is off — keeps its row with
+  a dash in every figure and names what is in the way, so no view can answer *No budget
+  configured* about a settings file that configures one.
+* **`tokenPace.alerts.budgetPercent`** (default `0` = off) notifies once per period when a
+  budget passes that share of its own limit. Upwards only, one message per period, and gated on
+  the transcript history having been read rather than on a quota reading's freshness — a budget
+  comes from the local buckets, so a provider's staleness rule says nothing about it.
+* **A German manifest.** Everything `package.json` contributes — the store listing, the display
+  name, all 20 command titles, the view and walkthrough texts and every one of the settings'
+  descriptions, enum descriptions and deprecation notices — now lives in `package.nls.json` as
+  269 `%key%` placeholders, with a complete German translation in `package.nls.de.json`. VS Code
+  picks the file that matches its display language and falls back to English for anything a
+  bundle does not have, so nothing can be missing at worst — only English. Setting ids, enum
+  values, file paths and the JSON examples inside the descriptions are the same in both
+  languages, because they are what a reader copies. What the extension *renders* — status bar,
+  tooltip, dashboard, text views, exports — stays English for now: those sentences are assembled
+  from fragments, de-duplicated against one another and asserted verbatim by the tests, so they
+  need a vocabulary seam rather than a search-and-replace. `test/nls.test.ts` checks that every
+  key the manifest uses resolves in both bundles, that neither bundle carries a key nobody uses,
+  and that no translation quietly drops a `#tokenPace.x#` setting link, a `command:` link or a
+  fenced example.
+
+### Changed
+
+* The privacy promise now states exactly what a tool call leaves behind: prompts, responses,
+  tool arguments and tool results are still never stored, logged, exported or displayed, and
+  the name of a tool with its day, model and count is what the new section is made of. The
+  `tokenPace.attribution` description says the same.
+
+### Fixed
+
+* At a sidebar narrower than 320 px the tables stack into `label: value` cards, and a long
+  value — the new tools section is the first with one — ran past the card edge instead of
+  wrapping, readable only by scrolling sideways through the layout that exists to avoid
+  exactly that. Stacked cells now wrap; real columns still never break mid-figure.
+* A stored snapshot whose bucket or tool row named a provider this build does not know — a
+  hand-edited or foreign `globalStorage` file — was restored as if it were real, and the first
+  read of it threw inside the view model. The views swallow that, so it showed as a blank
+  dashboard rather than as a stated absence. Such rows are now rejected where the rest of the
+  snapshot is validated, and the reading rule itself stays total: an unfamiliar provider gets
+  the plain input count instead of an exception.
+
 ## 1.1.0 — 2026-09-04
 
 A round about the first ten minutes: better defaults, words that say what they mean, and a

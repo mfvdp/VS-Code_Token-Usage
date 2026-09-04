@@ -95,6 +95,16 @@ export interface BudgetRow {
   projectedText: string | null
   projectionBasis: string | null
   projectedOver: boolean
+  /**
+   * Why nothing can be counted for this budget, or null while it can be.
+   *
+   * A budget the user typed into the settings is never dropped for being unmeasurable — a
+   * money budget with the cost column switched off, a provider budget for a provider that is
+   * not selected. The row stays, every figure on it is a dash, and this sentence says which
+   * setting is in the way. Silently removing it would let the panel answer "no budget
+   * configured" about a settings file that plainly configures one.
+   */
+  unmeasurable: string | null
   /** One line the three views share, so they cannot tell three different stories. */
   text: string
 }
@@ -287,26 +297,77 @@ function usedText(spec: BudgetSpec, used: number): string {
 }
 
 /**
- * One row per configured budget, in the user's order.
+ * Why a configured budget has nothing to measure, or null while it has.
  *
- * A budget is dropped — not shown at zero — when it cannot be measured at all: a money
- * budget while cost display is off, or a provider budget for a provider the user switched
- * off. Showing it would put a number on the screen that nobody is counting.
+ * Both cases are switches the reader can see in their own settings, so both are named by
+ * the setting that causes them rather than described in the abstract.
+ */
+function unmeasurableReason(ctx: StatsCtx, spec: BudgetSpec, sources: Source[]): string | null {
+  if (spec.unit === 'usd' && !ctx.showCost) return 'not measured while tokenPace.showCost is off'
+  // The provider selection is the panel's own filter, not a setting with a name to quote —
+  // and the budget list is built past it, so this half is reachable only for a caller that
+  // narrows the sources itself.
+  if (sources.length === 0) return `not measured while ${scopeTitle(spec.scope)} is not selected`
+  return null
+}
+
+/**
+ * One row per configured budget, in the user's order — every one of them, always.
+ *
+ * A budget that cannot be measured at all (a money budget while the cost column is off, a
+ * provider budget for a provider that is not selected) keeps its row with a dash in every
+ * figure and the reason beside it. It used to be dropped, and a dropped row made the panel
+ * say "No budget configured" to someone whose settings file configures one: a statement
+ * about the reader's own settings that was simply false. A dash is this extension's word for
+ * "not counted"; it is the honest half of the same restraint that keeps the number off the
+ * screen.
  */
 export function budgetRows(ctx: StatsCtx, budgets: BudgetSpec[], now: number = ctx.now): BudgetRow[] {
   const today = dayOf(now, ctx.tcfg)
   const out: BudgetRow[] = []
   for (const spec of budgets) {
-    if (spec.unit === 'usd' && !ctx.showCost) continue
     const sources: Source[] = spec.scope === 'total'
       ? [...ctx.sources]
       : ctx.sources.includes(spec.scope) ? [spec.scope] : []
-    if (sources.length === 0) continue
 
     const { from, last } = periodBounds(spec.period, today, ctx)
     // `to` is today, never the end of the period: a budget is measured over what has
     // happened, and counting an empty future would report a share that only falls.
     const to = today < last ? today : last
+    const unmeasurable = unmeasurableReason(ctx, spec, sources)
+    if (unmeasurable !== null) {
+      const label = spec.label ?? defaultBudgetLabel(spec)
+      const lim = limitText(spec)
+      out.push({
+        key: `${spec.scope}:${spec.period}:${spec.unit}`,
+        identity: identityOfBudget(spec, from),
+        label,
+        scope: spec.scope,
+        period: spec.period,
+        unit: spec.unit,
+        from,
+        to,
+        last,
+        limit: spec.limit,
+        limitText: lim,
+        // Not zero: nothing was counted, and `covered: false` keeps the alert and the status
+        // bar out of it exactly as a period without local data does.
+        used: 0,
+        usedText: '–',
+        share: null,
+        shareText: '–',
+        over: false,
+        partial: false,
+        covered: false,
+        projected: null,
+        projectedText: null,
+        projectionBasis: null,
+        projectedOver: false,
+        unmeasurable,
+        text: `${label}: – of ${lim} · ${unmeasurable}`,
+      })
+      continue
+    }
     const facts = factsOf(ctx, spec, from, to, sources)
     const share = facts.covered ? (facts.used / spec.limit) * 100 : null
     const projection = projectBudget(spec, facts, from, today, last)
@@ -340,6 +401,7 @@ export function budgetRows(ctx: StatsCtx, budgets: BudgetSpec[], now: number = c
       projectedText: projection.text,
       projectionBasis: projection.basis,
       projectedOver: projection.value !== null && projection.value > spec.limit,
+      unmeasurable: null,
       text: parts.join(' · '),
     })
   }

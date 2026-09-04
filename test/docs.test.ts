@@ -21,6 +21,7 @@ import { BarGlyphs, BarStyle, renderBar } from '../src/render'
 import { selectWindows, viewOf, windowValue } from '../src/statusText'
 import { formatReset, TimeConfig } from '../src/time'
 import { QuotaState, QuotaWindow } from '../src/types'
+import { readManifest } from './helpers/nls'
 
 const ROOT = join(__dirname, '..')
 const readDoc = (name: string): string => readFileSync(join(ROOT, name), 'utf8')
@@ -34,16 +35,20 @@ interface Property {
   items?: { minimum?: number; maximum?: number }
 }
 
-const pkg = JSON.parse(readDoc('package.json')) as {
+/**
+ * The manifest holds `%key%` placeholders since 1.2.0; the prose these tests pin lives in
+ * `package.nls.json`, so every read goes through the resolver.
+ */
+const pkg = readManifest<{
   contributes: { configuration: Array<{ properties: Record<string, Property> }> }
-}
+}>()
 const properties: Record<string, Property> = {}
 for (const section of pkg.contributes.configuration) {
   for (const [key, value] of Object.entries(section.properties)) properties[key] = value
 }
 
 /** The whole manifest, for the contribution points these tests pin. */
-const manifest = JSON.parse(readDoc('package.json')) as {
+const manifest = readManifest<{
   version: string
   engines: { vscode: string }
   devDependencies: Record<string, string>
@@ -64,7 +69,7 @@ const manifest = JSON.parse(readDoc('package.json')) as {
       }>
     }>
   }
-}
+}>()
 
 const README = readDoc('README.md')
 const STATES = readDoc('docs/status-bar-states.md')
@@ -257,6 +262,58 @@ test('the Privacy list names every file the extension opens', () => {
   // The claims that must stay: what is never touched.
   for (const never of ['ide/*.lock', 'sessions/*.key', 'oauthAccount']) {
     assert.ok(privacy.includes(never), `the Privacy section dropped the "never read" claim for ${never}`)
+  }
+})
+
+test('the promise about transcript contents matches what the tool table stores', () => {
+  const privacy = README.slice(README.indexOf('\n## Privacy'), README.indexOf('\n## ', README.indexOf('\n## Privacy') + 5))
+  // The tool side table stores a name, a day, a model and a count — so the sentence may not
+  // claim tool calls are never stored, and it has to say what is stored instead.
+  assert.equal(/tool calls — are never stored/.test(privacy), false,
+    'the Privacy section still promises that tool calls are never stored')
+  assert.match(privacy, /tool arguments and tool results — are never stored/)
+  assert.match(privacy, /\*\*name\*\* of a tool/)
+  // The attribution setting makes the same distinction, in the settings UI.
+  const attribution = String(properties['tokenPace.attribution'].markdownDescription)
+  assert.equal(/no tool call\./.test(attribution), false, attribution)
+  assert.match(attribution, /no tool argument and no tool result/)
+})
+
+test('both export dialogs say that tool names are about to leave the machine', () => {
+  // The README's rule for the save dialog: it names what is about to be written, because that
+  // is the last moment to say no. The tool table is the newest thing in both files — names as
+  // the transcript spells them, MCP names included — so neither dialog may stay quiet about it.
+  const src = readDoc('src/nativeViews.ts')
+  for (const command of ['tokenPace.exportCsv', 'tokenPace.exportJson']) {
+    const at = src.indexOf(`registerCommand('${command}'`)
+    assert.ok(at >= 0, `src/nativeViews.ts no longer registers ${command}`)
+    const block = src.slice(at, src.indexOf('}),', at))
+    assert.match(block, /[Tt]ool names/, `the ${command} save dialog does not mention tool names`)
+  }
+})
+
+test('the tool-table retention the README promises is the horizon the aggregator applies', () => {
+  const days = /TOOL_KEEP_DAYS = (\d+)/.exec(readDoc('src/agg.ts'))
+  assert.ok(days, 'src/agg.ts no longer states a TOOL_KEEP_DAYS')
+  const cap = (days as RegExpExecArray)[1]
+  const flat = (t: string): string => t.replace(/\s+/g, ' ')
+  assert.ok(flat(README).includes(`kept for at most ${cap} days`),
+    `the README does not state the ${cap}-day tool horizon`)
+  // The day buckets outlive the tool rows on the shipped default, so it is user-visible.
+  assert.ok(flat(readDoc('CHANGELOG.md')).includes(`at most **${cap} days**`),
+    `the CHANGELOG does not state the ${cap}-day tool horizon`)
+})
+
+test('the README states the snapshot version the code writes and the one it reads forward', () => {
+  const src = readDoc('src/types.ts')
+  const version = /STATE_VERSION = (\d+)/.exec(src)
+  assert.ok(version, 'src/types.ts no longer states a STATE_VERSION')
+  assert.ok(README.includes(`snapshot is schema version ${(version as RegExpExecArray)[1]}`),
+    `the README does not name schema version ${(version as RegExpExecArray)[1]}`)
+  const readable = /READABLE_STATE_VERSIONS[^=]*= \[([^\]]*)\]/.exec(src)
+  assert.ok(readable, 'src/types.ts no longer lists the readable versions')
+  for (const v of (readable as RegExpExecArray)[1].split(',').map((x) => x.trim()).filter(Boolean)) {
+    assert.match(README, new RegExp(`[Vv]ersion ${v}\\b`), `the README does not say version ${v} is still read`)
   }
 })
 
@@ -484,7 +541,8 @@ test('.vscodeignore still keeps the things that must not ship', () => {
   for (const path of ['src/extension.ts', 'test/docs.test.ts', 'dist/extension.js.map', 'media/logo.svg']) {
     assert.equal(shipped(path), false, `${path} would be packaged`)
   }
-  for (const path of ['package.json', 'README.md', 'dist/extension.js', 'media/logo.png', 'docs/status-bar-states.md']) {
+  for (const path of ['package.json', 'package.nls.json', 'package.nls.de.json', 'README.md',
+    'dist/extension.js', 'media/logo.png', 'docs/status-bar-states.md']) {
     assert.equal(shipped(path), true, `${path} would not be packaged`)
   }
 })
@@ -546,4 +604,30 @@ test('the menu command is named after what it opens', () => {
   const menu = manifest.contributes.commands.find((c) => c.command === 'tokenPace.menu')
   assert.equal(menu?.title, 'Show Actions Menu')
   assert.equal(/`Token Pace: Menu`/.test(README), false, 'the README still uses the old command title')
+})
+
+// ---------------------------------------------------------------------------
+// Budgets: the sentence that keeps a money budget from reading as a bill
+// ---------------------------------------------------------------------------
+
+test('every place a money budget is described says it is not a bill', () => {
+  const setting = String(properties['tokenPace.budgets'].markdownDescription)
+  assert.match(setting, /hypothetical API equivalent, not a bill/)
+  // And the same promise where a reader looks it up rather than hovers it.
+  const section = README.slice(README.indexOf('\n## Budgets'), README.indexOf('\n## ', README.indexOf('\n## Budgets') + 5))
+  assert.ok(section.length > 0, 'the README has no Budgets section')
+  assert.match(section, /hypothetical API equivalent, not a bill/)
+  // A budget must never be presented as something a provider stated.
+  assert.match(section, /limits \*\*you\*\* state/)
+  assert.match(section, /lower bound/)
+  assert.match(section, /shows a dash/)
+})
+
+test('the budget alert is off by default and says what it is judged on', () => {
+  assert.equal(properties['tokenPace.alerts.budgetPercent'].default, 0)
+  const d = String(properties['tokenPace.alerts.budgetPercent'].markdownDescription)
+  assert.match(d, /`0` disables it/)
+  assert.match(d, /once per period/)
+  // The freshness gate is a different one from the quota alerts', and the description says so.
+  assert.match(d, /locally counted usage/)
 })

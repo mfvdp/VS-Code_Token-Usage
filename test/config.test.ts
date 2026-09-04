@@ -3,11 +3,13 @@
 
 import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
-import { CONFIG_KEYS, sanitize, affects, readTimeConfig, readPaceConfig, readAlertConfig } from '../src/config'
+import {
+  CONFIG_KEYS, sanitize, affects, planNameOf, planText, readTimeConfig, readPaceConfig,
+  readAlertConfig,
+} from '../src/config'
 import type { Config } from '../src/config'
+import { readManifest } from './helpers/nls'
 
 interface Property {
   type?: string | string[]
@@ -23,9 +25,13 @@ interface Property {
   items?: { enum?: string[] }
 }
 
-const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')) as {
+/**
+ * Since 1.2.0 the manifest carries `%key%` placeholders and the prose lives in
+ * `package.nls.json`; these checks are about the words, so they read the resolved manifest.
+ */
+const pkg = readManifest<{
   contributes: { configuration: Array<{ title: string; properties: Record<string, Property> }> }
-}
+}>()
 
 const sections = pkg.contributes.configuration
 const properties: Record<string, Property> = {}
@@ -262,6 +268,9 @@ test('the structural sub-configs mirror the settings', () => {
   assert.deepEqual(readAlertConfig(cfg), {
     thresholds: [90], basis: 'used', requireAhead: true, minRemainingMinutes: 60,
     useItLoseIt: false, forecastLeadMinutes: 0, onPaceFast: false, windowCondition: 'weeklyOnly',
+    // Not part of AlertConfig — the budget level travels with it so `Alerts.enabled()` can
+    // see it without every hand-built test config having to name it.
+    budgetPercent: 0,
   })
 })
 
@@ -272,4 +281,110 @@ test('affects() accepts keys with and without the tokenPace prefix', () => {
   assert.equal(affects(event, ['tokenPace.barWidth']), true)
   assert.equal(affects(event, ['tokenPace.density', 'barWidth']), true)
   assert.equal(affects(event, ['density']), false)
+})
+
+test('planName is trimmed, cut at 40 characters and otherwise dropped', () => {
+  assert.deepEqual(sanitize({}).planName, {})
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: '  Max 20x  ' } }).planName, { claude: 'Max 20x' })
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: 'x'.repeat(60) } }).planName,
+    { claude: 'x'.repeat(40) })
+  // A blank name is no name, and neither is a number or a nested object.
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: '   ', codex: 5 } }).planName, {})
+  assert.deepEqual(sanitize({ 'tokenPace.planName': 'Pro' }).planName, {})
+  // Keys we do not know are not carried along.
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { gemini: 'Ultra' } }).planName, {})
+})
+
+test('the provider outranks the setting, and a configured name says that it is one', () => {
+  const cfg = sanitize({ 'tokenPace.planName': { claude: 'Max 20x' } })
+  assert.deepEqual(planNameOf(cfg, 'claude', 'max20'), { name: 'max20', from: 'provider' })
+  assert.deepEqual(planNameOf(cfg, 'claude', null), { name: 'Max 20x', from: 'configured' })
+  // A provider field that is present but empty is not an answer.
+  assert.deepEqual(planNameOf(cfg, 'claude', '   '), { name: 'Max 20x', from: 'configured' })
+  assert.equal(planNameOf(cfg, 'codex', null), null)
+  assert.equal(planText(null), null)
+  assert.equal(planText({ name: 'max20', from: 'provider' }), 'plan max20')
+  assert.equal(planText({ name: 'Max 20x', from: 'configured' }), 'plan Max 20x (as configured)')
+})
+
+test('the context entry and the context section are contributed but not switched on', () => {
+  const bar = properties['tokenPace.statusBar.show'].items?.enum ?? []
+  assert.ok(bar.includes('context'), 'statusBar.show cannot show the context window')
+  assert.equal((properties['tokenPace.statusBar.show'].default as string[]).includes('context'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.statusBar.show': ['context'] }).statusBar.show, ['context'])
+
+  const sections = properties['tokenPace.dashboard.sections'].items?.enum ?? []
+  assert.ok(sections.includes('context'), 'dashboard.sections cannot show the context window')
+  assert.equal((properties['tokenPace.dashboard.sections'].default as string[]).includes('context'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.dashboard.sections': ['context'] }).dashboard.sections, ['context'])
+})
+
+test('the tools section is contributed, off by default, and shares the topN cap', () => {
+  const sections = properties['tokenPace.dashboard.sections'].items?.enum ?? []
+  assert.ok(sections.includes('tools'), 'dashboard.sections cannot show the tool table')
+  assert.equal((properties['tokenPace.dashboard.sections'].default as string[]).includes('tools'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.dashboard.sections': ['tools'] }).dashboard.sections, ['tools'])
+  // One cap for both top tables, and the description has to name both of them.
+  assert.match(String(properties['tokenPace.dashboard.topN'].markdownDescription), /`records` and `tools`/)
+})
+
+test('the records section is contributed, off by default, and capped by dashboard.topN', () => {
+  const sections = properties['tokenPace.dashboard.sections'].items?.enum ?? []
+  assert.ok(sections.includes('records'), 'dashboard.sections cannot show the records')
+  assert.equal((properties['tokenPace.dashboard.sections'].default as string[]).includes('records'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.dashboard.sections': ['records'] }).dashboard.sections, ['records'])
+
+  assert.equal(sanitize({}).dashboard.topN, 5)
+  assert.equal(sanitize({ 'tokenPace.dashboard.topN': 12 }).dashboard.topN, 12)
+  // A top list of half a row does not exist; the value is a whole number of rows.
+  assert.equal(sanitize({ 'tokenPace.dashboard.topN': 7.6 }).dashboard.topN, 7)
+  // Out of range and nonsense both fall back to the documented bounds rather than to zero,
+  // which would be a table that lists nothing while the section promises rows.
+  assert.equal(sanitize({ 'tokenPace.dashboard.topN': 0 }).dashboard.topN, 1)
+  assert.equal(sanitize({ 'tokenPace.dashboard.topN': 400 }).dashboard.topN, 20)
+  assert.equal(sanitize({ 'tokenPace.dashboard.topN': 'many' }).dashboard.topN, 5)
+})
+
+test('the budget section and entry are contributed but not switched on', () => {
+  const bar = properties['tokenPace.statusBar.show'].items?.enum ?? []
+  assert.ok(bar.includes('budget'), 'statusBar.show cannot show a budget')
+  assert.equal((properties['tokenPace.statusBar.show'].default as string[]).includes('budget'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.statusBar.show': ['budget'] }).statusBar.show, ['budget'])
+
+  const sections = properties['tokenPace.dashboard.sections'].items?.enum ?? []
+  assert.ok(sections.includes('budget'), 'dashboard.sections cannot show the budgets')
+  assert.equal((properties['tokenPace.dashboard.sections'].default as string[]).includes('budget'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.dashboard.sections': ['budget'] }).dashboard.sections, ['budget'])
+})
+
+test('a budget the user did not state does not exist, and a broken one is dropped whole', () => {
+  assert.deepEqual(sanitize({}).budgets, [])
+  const cfg = sanitize({
+    'tokenPace.budgets': [
+      { scope: 'total', period: 'month', unit: 'usd', limit: 200 },
+      // Each of these is unusable in a different way; not one of them may be repaired into a
+      // number Token Pace invented.
+      { scope: 'anthropic', period: 'month', unit: 'usd', limit: 200 },
+      { scope: 'claude', period: 'fortnight', unit: 'usd', limit: 200 },
+      { scope: 'claude', period: 'day', unit: 'euro', limit: 200 },
+      { scope: 'claude', period: 'day', unit: 'tokens', limit: 0 },
+      { scope: 'claude', period: 'day', unit: 'tokens' },
+      'not an object',
+      { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000, label: '  Daily cap  ' },
+    ],
+  })
+  assert.deepEqual(cfg.budgets, [
+    { scope: 'total', period: 'month', unit: 'usd', limit: 200 },
+    { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000, label: 'Daily cap' },
+  ])
+})
+
+test('the budget alert level is off by default and clamped to the range the manifest shows', () => {
+  assert.equal(sanitize({}).alerts.budgetPercent, 0)
+  assert.equal(readAlertConfig(sanitize({})).budgetPercent, 0)
+  assert.equal(sanitize({ 'tokenPace.alerts.budgetPercent': 80 }).alerts.budgetPercent, 80)
+  assert.equal(sanitize({ 'tokenPace.alerts.budgetPercent': 900 }).alerts.budgetPercent, 200)
+  assert.equal(sanitize({ 'tokenPace.alerts.budgetPercent': -5 }).alerts.budgetPercent, 0)
+  assert.equal(sanitize({ 'tokenPace.alerts.budgetPercent': 'lots' }).alerts.budgetPercent, 0)
+  assert.equal(properties['tokenPace.alerts.budgetPercent'].default, 0)
 })

@@ -15,6 +15,7 @@
  * number that looks measured.
  */
 
+import { SOURCE_TITLE, maybeAdapterFor } from './adapters'
 import { Aggregator, BucketFilter, Metric, billable } from './agg'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, priceOf } from './prices'
 import { Provenance, compact, deltaBadge, estimate, percentOf, usd } from './render'
@@ -211,7 +212,12 @@ export interface RecordEntry {
  * limit, because none of these numbers has one.
  */
 export interface RecordsData {
-  peakDay: { day: string; usage: string; cost: string } | null
+  /**
+   * `cost` follows `TotalRow`: a day holding a model with no price prints the priced part
+   * and sets `costPartial`, so a view can mark it with ⚠ instead of passing a silent lower
+   * bound off as the day's cost. A day with no priced bucket at all prints '–'.
+   */
+  peakDay: { day: string; usage: string; cost: string; costPartial: boolean } | null
   /** Longest run of consecutive days with usage inside this range and inside coverage. */
   streak: { days: number; from: string; to: string } | null
   topModels: RecordEntry[]
@@ -320,7 +326,9 @@ export const MIN_VARIABILITY_DAYS = 7
 /** The rolling local block is five hours long, the shortest window every provider has. */
 export const LOCAL_BLOCK_HOURS = 5
 
-export const SOURCE_TITLE: Record<Source, string> = { claude: 'Claude Code', codex: 'Codex' }
+/** The provider titles, from the registry — re-exported so the views name a row's provider
+ * from the same table the model used. */
+export { SOURCE_TITLE }
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const WEEK_START_INDEX: Record<string, number> = {
@@ -386,9 +394,17 @@ export function costOfBucketOn(b: Bucket, ctx: StatsCtx) {
   return costOfBucket(day === b.day ? b : { ...b, day }, ctx.pricing)
 }
 
-/** Fresh input: Codex reports cached tokens inside `input_tokens`, Claude reports them apart. */
+/**
+ * Fresh input: Codex reports cached tokens inside `input_tokens`, Claude reports them apart.
+ *
+ * Total on purpose. A bucket can come back from a snapshot on disk carrying any string as its
+ * source, and every view sits behind a `try`: a throw here would blank the dashboard instead of
+ * stating an absence. An unknown provider gets the plain reading, exactly as `agg.billable`
+ * treats everything that is not Codex.
+ */
 export function freshInput(b: Bucket): number {
-  return b.source === 'codex' ? Math.max(0, b.input - b.cacheRead) : b.input
+  const a = maybeAdapterFor(b.source)
+  return a ? a.freshInput(b) : b.input
 }
 
 /**
@@ -1335,6 +1351,8 @@ export function records(
 
   const usageByDay = new Map<string, number>()
   const costByDay = new Map<string, number>()
+  /** Days holding at least one bucket of a model with no price: their cost is a floor. */
+  const unpricedDay = new Set<string>()
   const models = new Map<string, { label: string; detail: string | null; usage: number; cost: number; unpriced: boolean }>()
   let totalUsage = 0
   let excluded = 0
@@ -1350,6 +1368,9 @@ export function records(
     const c = costOfBucketOn(b, ctx)
     const priced = c && !c.unpriced ? c.usd : 0
     if (priced > 0) costByDay.set(day, (costByDay.get(day) ?? 0) + priced)
+    // Same rule as the model groups below: no price on file counts as unpriced too, so the
+    // day's total is missing part of itself. A bucket with nothing in it is missing nothing.
+    if (allTokens(b) > 0 && !(c && !c.unpriced)) unpricedDay.add(day)
     const key = `${b.source}|${b.model}`
     let g = models.get(key)
     if (!g) {
@@ -1380,10 +1401,13 @@ export function records(
     if (value > peakValue) {
       peakValue = value
       const c = costByDay.get(day) ?? 0
+      const shown = ctx.showCost && c > 0
       peakDay = {
         day,
         usage: tokens(value),
-        cost: ctx.showCost && c > 0 ? costText(c) : '–',
+        cost: shown ? costText(c) : '–',
+        // A dash already says "no cost known"; the flag only qualifies a figure that is shown.
+        costPartial: shown && unpricedDay.has(day),
       }
     }
   }

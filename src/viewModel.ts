@@ -13,8 +13,13 @@
  * so the whole model is reproducible in a test.
  */
 
+import { SOURCES, USAGE_PAGE } from './adapters'
 import { Aggregator, Metric, billable } from './agg'
-import { Config, DashboardSection, readPaceConfig, readTimeConfig } from './config'
+import { BudgetRow, budgetRows } from './budget'
+import {
+  Config, CONTEXT_NOTE, DashboardSection, PlanSource, planNameOf, planText, readPaceConfig,
+  readTimeConfig,
+} from './config'
 import { digest } from './digest'
 import {
   Calibration, ForecastConfig, calibration, forecast, lockoutText, resetForecast, retrospective,
@@ -22,15 +27,18 @@ import {
 } from './forecast'
 import { PaceConfig, effectivePace, paceVerdict, sustainableRate, windowDisplay, WindowDisplay } from './pace'
 import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
-import { ageMinutes, estimate, extraUsageText, percentOf, percentText } from './render'
+import { ageMinutes, estimate, extraUsageText, full, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
+// Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
+import type { ContextReading } from './quotaSources'
 import {
   AttributionRows, CacheEconomyRow, CalendarRows, ChartData, CompositionEntry, DrillData,
-  HeatmapData, HoursData, Kpi, ModelRow, ModelSort, ModelSortKey, MODEL_SORT_KEYS, PeriodRow,
-  PlanFactorRow, ProjectRow, SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, WindowUsageRow,
+  HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort, ModelSortKey,
+  MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SOURCE_TITLE,
+  SessionRow, StatsCtx, TotalRow, WindowUsageRow,
   attributionInWindow, cacheEconomy, cacheStates, calendar, chart, composition,
-  drill as drillStats, filterFor, heatmap, hours, kpis, modelTable, planFactors, projectRows,
-  sessionRows, totalsFor, windowUsage,
+  drill as drillStats, filterFor, heatmap, hours, kpis, localBlock, modelTable, planFactors,
+  projectRows, records as recordsOf, sessionRows, totalsFor, windowUsage,
 } from './stats'
 import {
   DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatReset, formatTime,
@@ -38,14 +46,17 @@ import {
 } from './time'
 import {
   Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaOrigin, QuotaSample,
-  QuotaState, QuotaWindow, Source,
+  QuotaState, QuotaWindow, Source, TOOL_NAME_CAP,
 } from './types'
 
 export type {
   CacheEconomyRow, CalendarRows, ChartData, CompositionEntry, DrillData, HeatmapData, HoursData,
-  Kpi, ModelRow, ModelSort, ModelSortKey, PeriodRow, PlanFactorRow, ProjectRow, SessionRow,
-  TotalRow, WindowUsageRow,
+  Kpi, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow, PlanFactorRow, ProjectRow,
+  RecordEntry, RecordsData, SessionRow, TotalRow, WindowUsageRow,
 }
+
+/** Re-exported so a view names a budget row from the model that produced it. */
+export type { BudgetRow }
 
 /**
  * The provider titles, re-exported so the text views name a window's provider from the same
@@ -113,8 +124,8 @@ export type WebviewMessage =
  * matching a section on screen.
  */
 export const DASHBOARD_SECTION_KEYS = [
-  'summary', 'quota', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours', 'forecast',
-  'history', 'projects', 'sessions', 'dataQuality',
+  'summary', 'quota', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours',
+  'records', 'tools', 'budget', 'forecast', 'history', 'projects', 'sessions', 'dataQuality',
   // `satisfies`, so a key that is not a section of the config is a compile error here; the
   // other direction — a new section that nobody may fold — is asserted in the test.
 ] as const satisfies readonly DashboardSection[]
@@ -124,7 +135,6 @@ export const RANGE_PRESETS: RangePreset[] = [
   'today', 'yesterday', '7d', '30d', '90d', 'thisWeek', 'thisMonth', 'lastMonth', 'year', 'all',
 ]
 const METRICS: Metric[] = ['usage', 'output', 'cacheRead', 'requests', 'reasoning', 'cost']
-const SOURCES: Source[] = ['claude', 'codex']
 /** Five years of days is already an absurd table; beyond it a custom range is a fuzz attempt. */
 const MAX_CUSTOM_DAYS = 1826
 const MAX_MODEL_FILTER = 50
@@ -312,7 +322,12 @@ export interface WindowVm {
 export interface QuotaCard {
   source: Source
   title: string
+  /** The provider's plan name, or the configured fallback; null when neither is known. */
   planType: string | null
+  /** Who named the plan. `configured` is what makes the "(as configured)" suffix honest. */
+  planSource: PlanSource | null
+  /** `planType` as the views print it, suffix included; null when there is no name. */
+  planText: string | null
   problem: string | null
   problemKind: ProblemKind | null
   problemAction: { label: string; command: string } | null
@@ -329,6 +344,37 @@ export interface QuotaCard {
   windows: WindowVm[]
   extra: { text: string; utilization: number | null; enabled: boolean; billed: boolean } | null
   usagePageUrl: string | null
+  /**
+   * Locally counted tokens of the last five hours, and only while this provider reports no
+   * window at all. It is not a window: it has no limit, no share and no forecast, and the one
+   * sentence it carries says so — see `stats.localBlock`. As soon as a real window arrives
+   * this is null again, because two five-hour figures side by side would invite the reader to
+   * treat ours as the provider's.
+   */
+  localBlock: LocalBlockRow | null
+}
+
+/**
+ * The context window of the Claude Code session the status line last wrote about.
+ *
+ * Built from the bridge's reading and from nothing else: there is no way to derive a context
+ * window from token buckets — they count what was sent, not what is still in the conversation —
+ * so an absent bridge is an absent card, never an estimate. It is also not an account figure,
+ * which is what `note` says wherever the card is drawn.
+ */
+export interface ContextCard {
+  used: number
+  /** The model's window size when the payload named one; null means no denominator. */
+  size: number | null
+  /** `–` whenever there is no size: a percentage of nothing cannot be checked. */
+  percentText: string
+  /** The whole figure as the views print it: "128,000 / 200,000 · 64 %". */
+  text: string
+  ageText: string | null
+  /** False only when the reading is older than `staleAfterMinutes`; an unknown age claims nothing. */
+  fresh: boolean
+  /** The one sentence that keeps this from being read as an account limit. */
+  note: string
 }
 
 export interface DataQuality {
@@ -373,6 +419,11 @@ export interface VmInput {
   forecastCfg: ForecastConfig
   /** A cold scan is still running — the first-run card says "reading history" instead of "empty". */
   scanning?: boolean
+  /**
+   * The status line's context reading, straight from `quotaManager.contextReading()`. Absent
+   * or null renders no card at all — this figure has no second source.
+   */
+  context?: ContextReading | null
 }
 
 export interface ViewModel {
@@ -384,6 +435,8 @@ export interface ViewModel {
   range: DayRange & { previous: DayRange | null; presets: RangePreset[] }
   ui: UiState
   quotas: QuotaCard[]
+  /** One Claude Code session's context window, or null when the status line said nothing. */
+  context: ContextCard | null
   digest: string[]
   kpis: Kpi[]
   composition: CompositionEntry[]
@@ -395,6 +448,18 @@ export interface ViewModel {
   models: { rows: ModelRow[]; total: number; hidden: number; sort: ModelSort }
   heatmap: HeatmapData
   hours: HoursData
+  /** Peak day, longest streak and the top tables of the selected range. */
+  records: RecordsData
+  /** The tools called in the selected range, busiest first. */
+  tools: ToolsData
+  /**
+   * The user's own budgets, in the order they were configured.
+   *
+   * Deliberately not filtered by the panel's provider and model chips: a budget is a
+   * standing limit, and a number that shrank because a chip was clicked would be a
+   * different question wearing the same label.
+   */
+  budgets: BudgetRow[]
   forecasts: {
     source: Source
     windowId: string
@@ -509,11 +574,6 @@ export function forecastsFor(
 // Quota cards
 // ---------------------------------------------------------------------------
 
-const USAGE_PAGE: Record<Source, string> = {
-  claude: 'https://claude.ai/settings/usage',
-  codex: 'https://chatgpt.com/codex/settings/usage',
-}
-
 /**
  * One repair step per cause — a named problem with no way out is only half a diagnosis.
  *
@@ -610,6 +670,7 @@ function cardForecast(f: Forecast | null, verdict: PaceVerdict): Forecast | null
 function quotaCard(
   q: QuotaState,
   input: VmInput,
+  ctx: StatsCtx,
   tcfg: TimeConfig,
   paceCfg: PaceConfig,
   forecasts: Map<string, Forecast>,
@@ -656,10 +717,16 @@ function quotaCard(
   })
 
   const extraText = extraUsageText(q.extra)
+  // The provider's word first, the configured name second, and the card remembers which it
+  // got: "Max 20x" read from a payload and "Max 20x" typed into a settings file are not the
+  // same claim, and only one of them is a reading.
+  const plan = planNameOf(cfg, q.source, q.planType)
   return {
     source: q.source,
     title: SOURCE_TITLE[q.source],
-    planType: q.planType,
+    planType: plan?.name ?? null,
+    planSource: plan?.from ?? null,
+    planText: planText(plan),
     problem: q.ok ? null : (q.problem ?? 'unavailable'),
     problemKind: q.ok ? null : (q.problemKind ?? 'unknown'),
     problemAction: q.ok ? null : (PROBLEM_ACTION[q.problemKind ?? 'unknown'] ?? null),
@@ -686,6 +753,10 @@ function quotaCard(
         billed: (q.extra?.used ?? null) !== null || (q.extra?.balance ?? null) !== null,
       },
     usagePageUrl: cfg.usagePageLinks ? USAGE_PAGE[q.source] : null,
+    // Only where the provider says nothing at all. A local count printed beside a real
+    // window would be read as a second opinion about that window — and it is not one: it
+    // counts what this machine ingested, the window counts what the account spent.
+    localBlock: !q.ok || q.windows.length === 0 ? localBlock(ctx, q.source, now) : null,
   }
 }
 
@@ -712,6 +783,154 @@ function newestSampleText(
 }
 
 // ---------------------------------------------------------------------------
+// Context window
+// ---------------------------------------------------------------------------
+
+/**
+ * The bridge's context reading as a card, or null.
+ *
+ * Two absences are kept apart. No reading at all is no card. A reading without a window size
+ * is a card with tokens and no percentage: `used / size` is the only honest way to a share
+ * here, and without the denominator the share does not exist — a "42 %" of an unknown window
+ * would be a number with nothing behind it.
+ */
+export function contextCard(
+  reading: ContextReading | null | undefined,
+  cfg: Config,
+  now: number,
+): ContextCard | null {
+  if (!reading || !Number.isFinite(reading.used)) return null
+  const size = reading.size !== null && Number.isFinite(reading.size) && reading.size > 0
+    ? reading.size
+    : null
+  const pct = size !== null && reading.usedPct !== null && Number.isFinite(reading.usedPct)
+    ? reading.usedPct
+    : null
+  const percentText = pct === null ? '–' : `${Math.round(pct)} %`
+  const age = ageMinutes(reading.fetchedAt, now)
+  return {
+    used: reading.used,
+    size,
+    percentText,
+    text: size === null
+      ? `${full(reading.used)} tokens`
+      : `${full(reading.used)} / ${full(size)}${pct === null ? '' : ` · ${percentText}`}`,
+    ageText: ageText(reading.fetchedAt, now),
+    // An unknown age is not a stale age: the mirror simply named no time, and marking that
+    // as stale would put a warning on a reading nobody has shown to be old.
+    fresh: !(age !== null && age > cfg.staleAfterMinutes),
+    note: CONTEXT_NOTE,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tool usage
+// ---------------------------------------------------------------------------
+
+/** How many model names a tool row prints before the rest becomes "+n more". */
+const TOOL_MODELS_SHOWN = 3
+
+export interface ToolRow {
+  name: string
+  calls: number
+  /** `calls` as the views print it. */
+  callsText: string
+  /** Share of every tool call counted in this range, not of the listed rows. */
+  share: string
+  /** The models that called it, at most `TOOL_MODELS_SHOWN` of them plus a count. */
+  models: string
+  /** The providers that called it, as their titles — "Bash" and "shell" are different tools. */
+  sources: string
+}
+
+export interface ToolsData {
+  /** The busiest tools first, capped by `dashboard.topN`. */
+  rows: ToolRow[]
+  /** Every counted call in the range, listed or not — the denominator of every share. */
+  total: number
+  totalText: string
+  /** How many distinct names were counted, and how many of them the cap left out. */
+  distinct: number
+  hidden: number
+  /** The first day that has a tool row at all, or null when none was ever counted. */
+  since: string | null
+  /** A (source, day) hit the per-day name cap: the rarest names of that day are missing. */
+  truncated: boolean
+  /** The sentences that qualify the table; views print them verbatim. */
+  notes: string[]
+}
+
+/**
+ * The tool table of a range, aggregated by name.
+ *
+ * Counted from the side table the ingest fills, which starts at state version 6: everything
+ * before the upgrade has tokens but no tool rows, so the table states the day it starts from
+ * instead of letting a short history look like a quiet week. Nothing here is compared against
+ * a limit — a tool call has none — and the shares are shares of the calls counted in this
+ * range, never of the rows the cap left on screen.
+ */
+export function toolRows(ctx: StatsCtx, range: DayRange, limit: number): ToolsData {
+  const groups = new Map<string, { name: string; calls: number; models: Set<string>; sources: Set<Source> }>()
+  let total = 0
+  let truncated = false
+  let since: string | null = null
+  const filter = ctx.models.length > 0 ? { models: ctx.models } : {}
+  for (const source of ctx.sources) {
+    const q = ctx.agg.tools(range.from, range.to, { source, ...filter })
+    truncated = truncated || q.truncated
+    for (const t of q.rows) {
+      let g = groups.get(t.name)
+      if (!g) {
+        g = { name: t.name, calls: 0, models: new Set(), sources: new Set() }
+        groups.set(t.name, g)
+      }
+      g.calls += t.calls
+      g.models.add(t.model)
+      g.sources.add(t.source)
+      total += t.calls
+    }
+    // The coverage day is a fact about the whole table, not about the range on screen: a
+    // range that starts before the first tool row must still be able to say why it is empty.
+    const all = ctx.agg.tools(undefined, undefined, { source, ...filter })
+    if (all.firstDay !== null && (since === null || all.firstDay < since)) since = all.firstDay
+  }
+
+  const sorted = [...groups.values()].sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name))
+  const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : sorted.length
+  const rows: ToolRow[] = sorted.slice(0, cap).map((g) => {
+    const models = [...g.models].sort()
+    const shown = models.slice(0, TOOL_MODELS_SHOWN)
+    const rest = models.length - shown.length
+    return {
+      name: g.name,
+      calls: g.calls,
+      callsText: full(g.calls),
+      share: percentOf(g.calls, total),
+      models: models.length === 0 ? '–' : shown.join(', ') + (rest > 0 ? ` +${rest} more` : ''),
+      sources: [...g.sources].sort().map((s) => SOURCE_TITLE[s]).join(', '),
+    }
+  })
+
+  const notes: string[] = []
+  if (since !== null) notes.push(`Tool calls counted since ${since}.`)
+  else notes.push('No tool call has been counted yet — counting starts with the next transcript read.')
+  if (truncated) {
+    notes.push(`More than ${TOOL_NAME_CAP} distinct tools were used on at least one day; `
+      + 'the rarest names of that day are not counted.')
+  }
+  return {
+    rows,
+    total,
+    totalText: total > 0 ? full(total) : '–',
+    distinct: sorted.length,
+    hidden: Math.max(0, sorted.length - rows.length),
+    since,
+    truncated,
+    notes,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // buildViewModel
 // ---------------------------------------------------------------------------
 
@@ -727,6 +946,9 @@ export function buildViewModel(input: VmInput): ViewModel {
   const sources: Source[] = ui.providers.length > 0 ? [...ui.providers] : ['claude', 'codex']
   const ctx: StatsCtx = {
     agg, tcfg, pricing, now, sources, models: ui.models, showCost: cfg.showCost,
+    // Stated rather than inferred: with attribution off the session table is empty, and the
+    // records must say "switched off" instead of "nothing worth showing".
+    attribution: cfg.attribution,
   }
   const range = input.range
   const previous = previousRange(range)
@@ -741,7 +963,7 @@ export function buildViewModel(input: VmInput): ViewModel {
   }
 
   const forecasts = forecastsFor(quotas, history, input.fingerprints, input.forecastCfg, now, paceCfg, tcfg)
-  const cards = quotas.map((q) => quotaCard(q, input, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay))
+  const cards = quotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay))
 
   const totals = sources.map((source) => ({
     source,
@@ -790,6 +1012,7 @@ export function buildViewModel(input: VmInput): ViewModel {
     range: { ...range, previous, presets: RANGE_PRESETS },
     ui,
     quotas: cards,
+    context: contextCard(input.context, cfg, now),
     digest: [],
     kpis: kpiRow,
     composition: composition(ctx, range),
@@ -801,6 +1024,15 @@ export function buildViewModel(input: VmInput): ViewModel {
     models,
     heatmap: heatmap(ctx, ui.heatmapMetric, firstDay),
     hours: hours(ctx, range, ui.hourZone),
+    // The same coverage day the heatmap gets: a day before the first ingest is unwatched in
+    // both, and a streak that disagreed with the calendar beside it would be a second answer.
+    records: recordsOf(ctx, range, cfg.dashboard.topN, firstDay),
+    // The same cap the records tables use: two "top n" tables on one page that disagree
+    // about n would look like two different measurements.
+    tools: toolRows(ctx, range, cfg.dashboard.topN),
+    // Every provider, no model filter: see `ViewModel.budgets`. The period bounds come from
+    // `now`, never from the selected range — a month budget is about the month.
+    budgets: budgetRows({ ...ctx, sources: [...SOURCES], models: [] }, cfg.budgets, now),
     forecasts: forecastRows,
     retro: retroRows,
     windowUsage: usageRows,

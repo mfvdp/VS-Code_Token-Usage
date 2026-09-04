@@ -142,6 +142,25 @@ test('the top models are shares of the range, and an unpriced model shows no cos
   const plain = records(ctxOf(buildAgg(), { showCost: false }), range('30d'), 5, '2026-07-01')
   for (const m of plain.topModels) assert.equal(m.cost, '–')
   assert.equal(plain.peakDay?.cost, '–')
+  assert.equal(plain.peakDay?.costPartial, false)
+})
+
+test("the peak day's cost says when it is only a lower bound", () => {
+  // One priced and one unpriced bucket on the same day: the figure is real but incomplete,
+  // so it is published exactly like a TotalRow — the value, plus the flag a view marks.
+  const priced = day(TODAY, 500_000)
+  const unpriced = day(TODAY, 500_000, 'claude-experimental-x')
+  const r = records(ctxOf(fromBuckets([priced, unpriced]), { sources: ['claude'] }), range('30d'), 5, '2026-07-01')
+  assert.equal(r.peakDay?.day, TODAY)
+  assert.match(String(r.peakDay?.cost), /^~\$/)
+  assert.equal(r.peakDay?.costPartial, true, 'an unpriced bucket makes the day a floor')
+  // The same day priced throughout carries no flag.
+  const whole = records(ctxOf(fromBuckets([priced]), { sources: ['claude'] }), range('30d'), 5, '2026-07-01')
+  assert.equal(whole.peakDay?.costPartial, false)
+  // Nothing priced at all is a dash, and a dash needs no qualifier.
+  const none = records(ctxOf(fromBuckets([unpriced]), { sources: ['claude'] }), range('30d'), 5, '2026-07-01')
+  assert.equal(none.peakDay?.cost, '–')
+  assert.equal(none.peakDay?.costPartial, false)
 })
 
 test('topN caps every table, and an unusable topN shows all of them', () => {

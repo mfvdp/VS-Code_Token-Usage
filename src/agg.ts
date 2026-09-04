@@ -3,6 +3,8 @@
 
 import { createHash } from 'crypto'
 import * as path from 'path'
+// Value import, and safe: `adapters` imports this module for types only, so the cycle is erased.
+import { isKnownSource } from './adapters'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
@@ -79,6 +81,19 @@ export function billable(b: Bucket): number {
 const MS_HOUR = 3_600_000
 /** Eight days of per-session hour slices — one day more than the longest quota window. */
 const SESSION_HOUR_KEEP = 8 * 24
+
+/**
+ * How far back the tool side table is kept, whatever `retentionDays` says.
+ *
+ * A day bucket past the horizon is folded into a month bucket — a handful of rows survive
+ * a year. A tool row cannot be: it is keyed day × model × name, so keeping it for the
+ * default 400 days would leave tens of thousands of rows in a snapshot that is
+ * JSON.stringify'd on every save and synchronously on shutdown (400 days × 3 models ×
+ * 40 names is already megabytes). Ninety days answers every range the views offer without
+ * that weight, and `ToolQuery.firstDay` makes the shorter horizon self-describing:
+ * the section states "tool calls counted since <firstDay>".
+ */
+const TOOL_KEEP_DAYS = 90
 
 /** Turn gaps per session are a bounded sample, not a log — 200 is enough for a P90. */
 const TURN_GAP_CAP = 200
@@ -833,13 +848,17 @@ export class Aggregator {
     const stored: Attribution = s.attribution ?? 'none'
     if (attribution !== 'none' && stored === 'none') return a
     for (const b of s.buckets ?? []) {
-      if (!b || typeof b !== 'object' || !b.source || !b.res) continue
+      // The source has to be a provider this build knows, not merely a non-empty string: the
+      // snapshot is a file a user can edit and another build can have written, and everything
+      // downstream looks the source up in the registry to decide how to read the bucket.
+      if (!b || typeof b !== 'object' || !isKnownSource(b.source) || !b.res) continue
       a.buckets.set(bucketKey(b), b)
     }
     for (const [k, v] of Object.entries(s.cursors ?? {})) a.cursors.set(k, v)
     for (const [k, v] of Object.entries(s.pending ?? {})) a.pending.set(k, v)
     for (const t of s.tools ?? []) {
-      if (!t || typeof t !== 'object' || !t.source || typeof t.day !== 'string' || typeof t.name !== 'string') continue
+      if (!t || typeof t !== 'object' || !isKnownSource(t.source)) continue
+      if (typeof t.day !== 'string' || typeof t.name !== 'string') continue
       const row: ToolStat = {
         source: t.source,
         day: t.day,
@@ -982,17 +1001,23 @@ export class Aggregator {
       daysMerged++
     }
     // The tool table has day resolution and no month step: folding tool names into months
-    // would keep a list of names for years, and no view asks for one. Past the day horizon
-    // the rows are dropped, exactly as far back as day buckets are kept.
+    // would keep a list of names for years, and no view asks for one. It also gets its own,
+    // shorter horizon (see TOOL_KEEP_DAYS): day × model × name cannot be carried as far as a
+    // rolled-up month bucket without turning the snapshot into megabytes of names. A
+    // retention shorter than the cap still wins — the table is never kept longer than buckets.
+    const toolHorizon = addDays(
+      dayOf(now, tcfg),
+      -Math.min(Math.max(0, Math.floor(retentionDays)), TOOL_KEEP_DAYS),
+    )
     for (const [k, t] of [...this.toolStats]) {
-      if (t.day >= dayHorizon) continue
+      if (t.day >= toolHorizon) continue
       this.toolStats.delete(k)
       this.toolNames.delete(toolDayKey(t.source, t.day))
       this.toolsTruncated.delete(toolDayKey(t.source, t.day))
     }
     for (const k of [...this.toolsTruncated]) {
       // `source|day` — a flag whose day is gone has nothing left to qualify.
-      if (k.slice(k.indexOf('|') + 1) < dayHorizon) this.toolsTruncated.delete(k)
+      if (k.slice(k.indexOf('|') + 1) < toolHorizon) this.toolsTruncated.delete(k)
     }
 
     // The per-session hour slices exist for the quota windows only, and the longest of those

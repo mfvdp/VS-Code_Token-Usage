@@ -242,4 +242,9 @@ test('a context window without a size carries no percentage of its own', () => {
   assert.equal(ctx?.used, 40_000)
   assert.equal(ctx?.size, null)
   assert.equal(ctx?.usedPct, null)
+
+  // Not even when the payload states one: the contract the views are written against is
+  // "no size, no percent", so a bare number cannot slip past it.
+  writeMirror(dir, BASE - MIN, 55, { context_window: { total_input_tokens: 40_000, used_percentage: 55 } })
+  assert.equal(bestState('claude', inputs(dir), BASE).extras?.context?.usedPct, null)
 })

@@ -125,13 +125,14 @@ function win(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 function card(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    source: 'claude', title: 'Claude Code', planType: 'max20', problem: null, problemKind: null,
+    source: 'claude', title: 'Claude Code', planType: 'max20', planSource: 'provider',
+    planText: 'plan max20', problem: null, problemKind: null,
     problemAction: null, ageText: '2 min ago', stale: false, origin: 'poll',
     freshness: {
       lastCheck: '2 min ago', lastData: '2 min ago', lastEvent: '1 min ago',
       nextRefresh: 'in 3 min', snapshotAge: '1 min ago',
     },
-    windows: [win()], extra: null, usagePageUrl: null, ...over,
+    windows: [win()], extra: null, usagePageUrl: null, localBlock: null, ...over,
   }
 }
 
@@ -156,6 +157,7 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
     range: { from: '2026-08-05', to: '2026-09-03', label: 'Last 30 days', preset: '30d', presets: ['7d', '30d'] },
     ui: { providers: ['claude', 'codex'], models: [], metric: 'usage', collapsed: [] },
     quotas: [card()],
+    context: null,
     digest: [],
     kpis: [],
     composition: [],
@@ -170,6 +172,9 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
       metric: 'usage', max: 30, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
     },
     models: { rows: [], total: 0, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+    records: null,
+    tools: null,
+    budgets: [],
     heatmap: {
       weeks: [{ days: [{ level: 0, text: '2026-09-01: none' }] }], metric: 'usage', streak: 1,
       longestStreak: 2, activeDays: 3, peakDay: null, variability: null, firstDay: '2026-07-21',
@@ -210,6 +215,18 @@ test('the stacked layout prefixes only the cells that carry a header', () => {
   assert.match(STYLE, /td\[data-h\]::before \{ content: attr\(data-h\)/)
   // A bare `td::before` would put ": " in front of every sub-row and drill line.
   assert.equal(/[^\]]td::before/.test(STYLE), false, STYLE)
+})
+
+test('the stacked layout lets a long cell wrap instead of running off the card', () => {
+  // A table cell is `white-space: nowrap` so real columns cannot break mid-figure. Once the
+  // narrow breakpoint turns the cells into blocks, that rule turns a long value — the tools
+  // section's model list is the first one long enough to see it — into text past the card
+  // edge, readable only by scrolling sideways through a layout that exists to avoid exactly
+  // that. The block must therefore release it.
+  const narrow = between(STYLE, /@media \(max-width: 320px\) \{/, '\n}')
+  assert.match(narrow, /td \{[^}]*white-space: normal/)
+  // And the base rule still holds outside it, where the columns are real columns.
+  assert.match(STYLE.slice(0, STYLE.indexOf('@media (max-width: 320px)')), /^td \{[^}]*white-space: nowrap/m)
 })
 
 test('the track and the hairlines are mixed from the foreground, not from a theme surface', () => {
@@ -1052,4 +1069,253 @@ test('long tokens break instead of widening the page, and a window header wraps 
   assert.ok(winTop, 'the header label rule is missing')
   assert.equal(winTop[0].includes('text-overflow'), false, winTop[0])
   assert.equal(winTop[0].includes('nowrap'), false, winTop[0])
+})
+
+// ---------------------------------------------------------------------------
+// Context window
+// ---------------------------------------------------------------------------
+
+function contextCard(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    used: 128_000, size: 200_000, percentText: '64 %', text: '128,000 / 200,000 · 64 %',
+    ageText: '2 min ago', fresh: true, note: 'current session, via the status line', ...over,
+  }
+}
+
+test('the context card names the session it describes and prints the figure once', () => {
+  const h = render('sContext()', { context: contextCard() })
+  assert.ok(h.includes('Context window'), h)
+  assert.ok(h.includes('128,000 / 200,000 · 64 %'), h)
+  assert.ok(h.includes('current session, via the status line'), h)
+  // One conversation, not an account: no verdict, no pace, no forecast on this card.
+  assert.equal(/pace|verdict|forecast|resets/i.test(h), false, h)
+  assert.ok(h.includes('<div class="track"'), h)
+})
+
+test('a context reading without a window size gets tokens and no bar at all', () => {
+  const h = render('sContext()', {
+    context: contextCard({ size: null, percentText: '–', text: '128,000 tokens' }),
+  })
+  assert.ok(h.includes('128,000 tokens'), h)
+  // A share needs a denominator: no size, no percentage and no bar to imply one.
+  assert.equal(h.includes('%'), false, h)
+  assert.equal(h.includes('<div class="track"'), false, h)
+})
+
+test('a stale context reading is marked, a fresh one is not', () => {
+  const stale = render('sContext()', { context: contextCard({ fresh: false, ageText: '3 h ago' }) })
+  assert.ok(stale.includes('⚠ stale'), stale)
+  assert.ok(stale.includes('updated 3 h ago'), stale)
+  assert.equal(render('sContext()', { context: contextCard() }).includes('stale'), false)
+})
+
+test('without a reading the context section offers the bridge instead of a number', () => {
+  const h = render('sContext()', { context: null })
+  assert.equal(/\d/.test(h), false, h)
+  assert.ok(h.includes('data-id="tokenPace.connectStatusLine"'), h)
+})
+
+test('a plan name from the settings says so on the quota card', () => {
+  const configured = render('sQuota()', {
+    quotas: [card({ planType: 'Max 20x', planSource: 'configured', planText: 'plan Max 20x (as configured)' })],
+  })
+  assert.ok(configured.includes('plan Max 20x (as configured)'), configured)
+  // And a name the provider stated carries no such qualifier.
+  const provided = render('sQuota()')
+  assert.ok(provided.includes('plan max20'), provided)
+  assert.equal(provided.includes('as configured'), false, provided)
+})
+
+// ---------------------------------------------------------------------------
+// Records and the local five-hour estimate
+// ---------------------------------------------------------------------------
+
+function entry(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return { label: 'claude-opus-4-6', detail: 'Claude Code', usage: '412k', share: '61 %', cost: '~$1.20', ...over }
+}
+
+function recordsData(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    peakDay: { day: '2026-09-03', usage: '412k', cost: '~$1.20', costPartial: false },
+    streak: { days: 3, from: '2026-09-01', to: '2026-09-03' },
+    topModels: [entry()],
+    topProjects: [entry({ label: 'token-pace', detail: '2 sessions', cost: '–' })],
+    topSessions: [entry({ label: 'sess-alpha', detail: 'token-pace', cost: '–' })],
+    attributionOn: true,
+    note: null,
+    sessionNote: null,
+    ...over,
+  }
+}
+
+test('the records section prints the peak day, the streak and the three tables', () => {
+  const h = render('sRecords()', { records: recordsData() })
+  assert.ok(h.includes('Peak day 2026-09-03 · 412k'), h)
+  assert.ok(h.includes('Longest streak 3 days · 2026-09-01 → 2026-09-03'), h)
+  for (const label of ['claude-opus-4-6', 'token-pace', 'sess-alpha']) {
+    assert.ok(h.includes(label), `${label} is missing from ${h}`)
+  }
+  // A record is a fact about the range, never a state to be warned about: no bar, no verdict,
+  // no pace and no limit anywhere in it.
+  assert.equal(h.includes('<div class="track"'), false, h)
+  // ("token-pace" is a project name in the fixture, so the word "pace" is matched with its
+  // sentence around it rather than on its own.)
+  assert.equal(/verdict|no limit|on pace|forecast/i.test(h), false, h)
+})
+
+test('a missing record is a dash, and the record tables need attribution to exist', () => {
+  const bare = render('sRecords()', {
+    records: recordsData({ peakDay: null, streak: null, topProjects: [], topSessions: [], attributionOn: false }),
+  })
+  assert.ok(bare.includes('Peak day –'), bare)
+  assert.ok(bare.includes('Longest streak –'), bare)
+  assert.ok(bare.includes('tokenPace.attribution'), bare)
+  // The models table comes from the buckets and stays.
+  assert.ok(bare.includes('claude-opus-4-6'), bare)
+})
+
+test('the records section states the buckets it had to leave out', () => {
+  const h = render('sRecords()', {
+    records: recordsData({ note: '2 rolled-up month buckets in this range have no day left' }),
+  })
+  assert.ok(h.includes('2 rolled-up month buckets'), h)
+})
+
+function toolsData(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    rows: [
+      { name: 'Read', calls: 3, callsText: '3', share: '43 %', models: 'claude-opus-4-6', sources: 'Claude Code' },
+      { name: 'exec', calls: 1, callsText: '1', share: '14 %', models: 'gpt-5.4', sources: 'Codex' },
+    ],
+    total: 7, totalText: '7', distinct: 4, hidden: 2, since: '2026-09-02', truncated: false,
+    notes: ['Tool calls counted since 2026-09-02.'],
+    ...over,
+  }
+}
+
+test('the tools section lists the calls, the share and the models, and no limit', () => {
+  const h = render('sTools()', { tools: toolsData() })
+  assert.ok(h.includes('data-h="Tool">Read <span class="meta">Claude Code</span>'), h)
+  assert.ok(h.includes('data-h="Calls">3<'), h)
+  assert.ok(h.includes('data-h="Share">43 %<'), h)
+  assert.ok(h.includes('claude-opus-4-6'), h)
+  assert.ok(h.includes('7 call(s) · 4 distinct tool(s) · 2 more not listed'), h)
+  assert.ok(h.includes('Tool calls counted since 2026-09-02.'), h)
+  // A tool call has no limit, so nothing here may look like one.
+  assert.equal(h.includes('<div class="track"'), false, h)
+  assert.equal(/verdict|forecast|limit/i.test(h), false, h)
+})
+
+test('an empty tool table says it is empty and still states since when it counts', () => {
+  const h = render('sTools()', {
+    tools: toolsData({ rows: [], total: 0, totalText: '–', distinct: 0, hidden: 0, since: null,
+      notes: ['No tool call has been counted yet — counting starts with the next transcript read.'] }),
+  })
+  assert.ok(h.includes('No tool call counted in this range.'), h)
+  assert.ok(h.includes('No tool call has been counted yet'), h)
+  assert.equal(h.includes('<table>'), false, h)
+})
+
+test('a truncated tool day is stated in the section, not silently dropped', () => {
+  const h = render('sTools()', {
+    tools: toolsData({ truncated: true, notes: ['More than 100 distinct tools were used on at least one day; the rarest names of that day are not counted.'] }),
+  })
+  assert.ok(h.includes('More than 100 distinct tools'), h)
+})
+
+test('a card without a window carries the local estimate, and no window ever does', () => {
+  const text = 'Local estimate — 412k tokens in the last 5 h, first counted at 09:00. '
+    + 'Not the provider’s window; no limit is known.'
+  const h = render('sQuota()', {
+    quotas: [card({
+      windows: [], problem: 'no token', problemKind: 'noToken',
+      problemAction: { label: 'Show log', command: 'tokenPace.showOutput' },
+      localBlock: { source: 'claude', hours: 5, usage: '412k', cost: '~$1.20', requests: '30', firstAt: '09:00', complete: true, text },
+    })],
+  })
+  assert.ok(h.includes(text), h)
+  // The sentence and nothing around it: no bar, no percentage, no pace beside a local count.
+  assert.equal(h.includes('<div class="track"'), false, h)
+  assert.equal(h.includes('%'), false, h)
+
+  // A card that has a window prints no local estimate — the view model never builds one there.
+  assert.equal(render('sQuota()').includes('Local estimate'), false)
+})
+
+function budgetRow(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    key: 'total:month:usd', identity: 'budget:total:month:usd:2026-09-01',
+    label: 'All providers · this month', scope: 'total', period: 'month', unit: 'usd',
+    from: '2026-09-01', to: '2026-09-03', last: '2026-09-30',
+    limit: 200, limitText: '$200.00', used: 84, usedText: '~$84.00',
+    share: 42, shareText: '42 %', over: false, partial: false, covered: true,
+    projected: 620, projectedText: '~$620.00', projectionBasis: 'so far ~$84.00 · Avg ~$28.00/day · 27 days left',
+    projectedOver: true, unmeasurable: null,
+    text: 'All providers · this month: ~$84.00 of $200.00 · 42 %', ...over,
+  }
+}
+
+test('a budget is drawn against the reader’s own limit, with its period on the card', () => {
+  const h = render('sBudget()', { budgets: [budgetRow()] })
+  assert.ok(h.includes('All providers · this month'), h)
+  assert.ok(h.includes('~$84.00 of $200.00'), h)
+  assert.ok(h.includes('42 %'), h)
+  assert.ok(h.includes('2026-09-01 → 2026-09-30'), h)
+  assert.ok(h.includes('<div class="track"'), h)
+  assert.ok(h.includes('projected ~$620.00 by 2026-09-30'), h)
+  assert.ok(h.includes('so far ~$84.00'), h)
+  // The limit is the reader's. Nothing here may borrow the vocabulary of a provider window.
+  assert.equal(/verdict|on pace|resets|quota/i.test(h), false, h)
+})
+
+test('a budget with no local data for the period gets a dash and no bar', () => {
+  const h = render('sBudget()', {
+    budgets: [budgetRow({ share: null, shareText: '–', covered: false, projected: null, projectedText: null, projectionBasis: null })],
+  })
+  assert.ok(h.includes('–'), h)
+  // A full-width bar would claim the period is spent, an empty one that it is untouched.
+  assert.equal(h.includes('<div class="track"'), false, h)
+  assert.equal(/\b0 %/.test(h), false, h)
+})
+
+test('a budget over its own limit is marked, and a lower bound says it is one', () => {
+  const over = render('sBudget()', { budgets: [budgetRow({ share: 118, shareText: '118 %', over: true })] })
+  assert.ok(over.includes('118 %'), over)
+  assert.ok(over.includes('· over'), over)
+  assert.ok(over.includes('fill warn'), over)
+  const partial = render('sBudget()', { budgets: [budgetRow({ partial: true })] })
+  assert.ok(partial.includes('All providers · this month ⚠'), partial)
+})
+
+test('no budget configured is an invitation, never a row with an invented limit', () => {
+  const h = render('sBudget()', { budgets: [] })
+  assert.ok(h.includes('No budget configured'), h)
+  assert.ok(h.includes('tokenPace.budgets'), h)
+  assert.equal(h.includes('<div class="track"'), false, h)
+})
+
+test('a budget nothing can measure keeps its card and names the setting in the way', () => {
+  // "No budget configured" is a statement about the reader's settings file, and it may only
+  // be made when that file configures none. A money budget with the cost column switched off
+  // configures one — so the card stands, with dashes where the figures would be.
+  const h = render('sBudget()', {
+    budgets: [budgetRow({
+      unmeasurable: 'not measured while tokenPace.showCost is off',
+      used: 0, usedText: '–', share: null, shareText: '–', covered: false, over: false,
+      projected: null, projectedText: null, projectionBasis: null, projectedOver: false,
+      text: 'All providers · this month: – of $200.00 · not measured while tokenPace.showCost is off',
+    })],
+  })
+  assert.equal(h.includes('No budget configured'), false, h)
+  assert.ok(h.includes('All providers · this month'), h)
+  assert.ok(h.includes('not measured while tokenPace.showCost is off'), h)
+  assert.ok(h.includes('– of $200.00'), h)
+  // No bar and no invented zero behind the dash.
+  assert.equal(h.includes('<div class="track"'), false, h)
+  assert.equal(/\b0 %/.test(h), false, h)
+})
+
+test('the budget section says what a dollar budget is not', () => {
+  const h = render('sBudget()', { budgets: [budgetRow()] })
+  assert.ok(h.includes('not a bill'), h)
 })

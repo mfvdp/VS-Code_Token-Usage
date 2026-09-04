@@ -248,6 +248,32 @@ test('rollup drops tool rows past the day retention, flags included', () => {
   assert.deepEqual(byName(agg.tools().rows), { Read: 1 })
 })
 
+test('the tool table is capped at its own horizon, however long buckets are kept', () => {
+  // Day buckets are folded into months and survive for years in a handful of rows; a tool
+  // row is keyed day x model x name, so it gets the shorter horizon of the two.
+  const agg = new Aggregator()
+  const now = Date.UTC(2026, 5, 1, 12, 0)
+  const within = now - 80 * DAY
+  const past = now - 120 * DAY
+  agg.addClaudeLine(claudeLine({ id: 'p', ts: past, usage: { input: 1, output: 1 }, tools: [{ name: 'Old' }] }), CTX)
+  agg.addClaudeLine(claudeLine({ id: 'w', ts: within, usage: { input: 1, output: 1 }, tools: [{ name: 'Recent' }] }), CTX)
+  assert.deepEqual(byName(agg.tools().rows), { Old: 1, Recent: 1 })
+
+  agg.rollup(now, 45, 400, utc)
+  assert.deepEqual(byName(agg.tools().rows), { Recent: 1 }, '120 days of tool names are not kept')
+  // The buckets themselves are untouched by that horizon — 400 days still means 400 days.
+  assert.equal(agg.all().some((b) => b.day === localDay(past)), true)
+  // "counted since" is what the views state, and it moves with the shorter horizon.
+  assert.equal(agg.tools().firstDay, localDay(within))
+
+  // A retention shorter than the cap still wins: the table is never kept longer than buckets.
+  const short = new Aggregator()
+  short.addClaudeLine(claudeLine({ id: 'a', ts: now - 20 * DAY, usage: { input: 1, output: 1 }, tools: [{ name: 'Gone' }] }), CTX)
+  short.addClaudeLine(claudeLine({ id: 'b', ts: now - 2 * DAY, usage: { input: 1, output: 1 }, tools: [{ name: 'Kept' }] }), CTX)
+  short.rollup(now, 2, 7, utc)
+  assert.deepEqual(byName(short.tools().rows), { Kept: 1 })
+})
+
 test('the tool table survives a snapshot round trip; a version 5 snapshot loads empty', () => {
   const agg = new Aggregator()
   agg.addClaudeLine(claudeLine({ id: 's1', ts: T0, usage: { input: 5, output: 1 } }), CTX)

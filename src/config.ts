@@ -17,6 +17,18 @@
  * in, lazily.
  */
 
+/**
+ * The one import this file makes.
+ *
+ * `budget.ts` owns the shape of a budget *and* the rules that make one usable, and those
+ * rules are the sanitising rules — a second copy here is exactly the drift the CONFIG_KEYS
+ * parity test exists to catch. It is a pure module (no vscode, no fs, no clock) and it does
+ * not import this file, so nothing circular follows from it.
+ */
+import { BudgetSpec, sanitizeBudgets } from './budget'
+
+export type { BudgetSpec }
+
 /** Every key this module reads, exactly as it appears in `contributes.configuration`. */
 export const CONFIG_KEYS: string[] = [
   // General
@@ -31,6 +43,7 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.timezone',
   'tokenPace.dayBoundaryHour',
   'tokenPace.keybindings',
+  'tokenPace.planName',
   // Pace
   'tokenPace.pace.sensitivity',
   'tokenPace.pace.tolerancePoints',
@@ -58,6 +71,7 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.dashboard.sections',
   'tokenPace.dashboard.defaultRange',
   'tokenPace.dashboard.modelRows',
+  'tokenPace.dashboard.topN',
   'tokenPace.dashboard.mode',
   'tokenPace.startOfWeek',
   'tokenPace.planPriceUsd',
@@ -68,6 +82,7 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.pricing.multiplier',
   'tokenPace.pricing.showListPrice',
   'tokenPace.unknownModelPricing',
+  'tokenPace.budgets',
   // Quota sources
   'tokenPace.quotaSource',
   'tokenPace.pollIntervalMinutes',
@@ -100,6 +115,7 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.alerts.forecastLeadMinutes',
   'tokenPace.alerts.onPaceFast',
   'tokenPace.alerts.windowCondition',
+  'tokenPace.alerts.budgetPercent',
   // Diagnostics
   'tokenPace.debug',
   'tokenPace.debugLogFile',
@@ -111,7 +127,9 @@ export const CONFIG_KEYS: string[] = [
 // array live. `sanitize` filters against these, the manifest repeats them.
 // ---------------------------------------------------------------------------
 
-export type StatusBarEntry = 'claudeQuota' | 'codexQuota' | 'extra' | 'tokens' | 'cost' | 'forecast'
+export type StatusBarEntry =
+  | 'claudeQuota' | 'codexQuota' | 'extra' | 'context' | 'tokens' | 'cost' | 'forecast'
+  | 'budget'
 export type WindowSelect = 'all' | 'leading' | 'worstPace' | 'session' | 'weekly' | 'auto'
 export type LegacyWindows = 'all' | 'leading'
 export type Density = 'full' | 'compact' | 'minimal'
@@ -136,8 +154,9 @@ export type SummaryScope = 'both' | 'claude' | 'codex'
 export type TooltipMode = 'full' | 'compact' | 'off'
 
 export type DashboardSection =
-  | 'summary' | 'quota' | 'kpis' | 'tokens' | 'chart' | 'models' | 'heatmap'
-  | 'hours' | 'forecast' | 'history' | 'projects' | 'sessions' | 'dataQuality'
+  | 'summary' | 'quota' | 'context' | 'kpis' | 'tokens' | 'chart' | 'models' | 'heatmap'
+  | 'hours' | 'records' | 'tools' | 'budget' | 'forecast' | 'history' | 'projects'
+  | 'sessions' | 'dataQuality'
 export type DefaultRange =
   | 'today' | '7d' | '30d' | '90d' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'year' | 'all'
 export type DashboardMode = 'webview' | 'quickPick' | 'markdown'
@@ -158,7 +177,9 @@ export type ProjectNameMode = 'basename' | 'hash'
 export type AlertBasis = 'used' | 'remaining'
 export type AlertWindowCondition = 'any' | 'sessionOnly' | 'weeklyOnly'
 
-const STATUS_BAR_ENTRIES: readonly StatusBarEntry[] = ['claudeQuota', 'codexQuota', 'extra', 'tokens', 'cost', 'forecast']
+const STATUS_BAR_ENTRIES: readonly StatusBarEntry[] = [
+  'claudeQuota', 'codexQuota', 'extra', 'context', 'tokens', 'cost', 'forecast', 'budget',
+]
 const WINDOW_SELECTS: readonly WindowSelect[] = ['all', 'leading', 'worstPace', 'session', 'weekly', 'auto']
 const LEGACY_WINDOWS: readonly LegacyWindows[] = ['all', 'leading']
 const DENSITIES: readonly Density[] = ['full', 'compact', 'minimal']
@@ -180,8 +201,9 @@ const SUMMARY_PERIODS: readonly SummaryPeriod[] = ['today', '7d', '30d']
 const SUMMARY_SCOPES: readonly SummaryScope[] = ['both', 'claude', 'codex']
 const TOOLTIP_MODES: readonly TooltipMode[] = ['full', 'compact', 'off']
 const DASHBOARD_SECTIONS: readonly DashboardSection[] = [
-  'summary', 'quota', 'kpis', 'tokens', 'chart', 'models', 'heatmap',
-  'hours', 'forecast', 'history', 'projects', 'sessions', 'dataQuality',
+  'summary', 'quota', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap',
+  'hours', 'records', 'tools', 'budget', 'forecast', 'history', 'projects', 'sessions',
+  'dataQuality',
 ]
 const DEFAULT_RANGES: readonly DefaultRange[] = [
   'today', '7d', '30d', '90d', 'thisWeek', 'thisMonth', 'lastMonth', 'year', 'all',
@@ -245,6 +267,8 @@ export interface Config {
   staleAfterMinutes: number
   /** Whether the manifest's one keybinding is active; read by VS Code, not by us. */
   keybindings: boolean
+  /** Display-only plan names, per provider. Never a limit and never a denominator. */
+  planName: { claude?: string; codex?: string }
 
   pace: {
     sensitivity: Sensitivity
@@ -274,6 +298,8 @@ export interface Config {
     sections: DashboardSection[]
     defaultRange: DefaultRange
     modelRows: number
+    /** Rows per Records table. A cap on a top list, never on what is counted. */
+    topN: number
     mode: DashboardMode
   }
   timezone: string
@@ -286,6 +312,8 @@ export interface Config {
   customPrices: Record<string, CustomPrice>
   pricing: { multiplier: number; showListPrice: boolean }
   unknownModelPricing: UnknownModelPricing
+  /** The user's own limits, already cleaned; an unusable entry was dropped whole. */
+  budgets: BudgetSpec[]
 
   quotaSource: QuotaSource
   pollIntervalMinutes: number
@@ -320,6 +348,8 @@ export interface Config {
     forecastLeadMinutes: number
     onPaceFast: boolean
     windowCondition: AlertWindowCondition
+    /** Percentage of a budget at which one notification is shown; `0` is off. */
+    budgetPercent: number
   }
 
   debug: boolean
@@ -447,6 +477,22 @@ function priceMap(raw: unknown): Record<string, CustomPrice> {
   return out
 }
 
+/**
+ * The plan names, trimmed and cut at 40 characters like `labels` — the same rule, because it
+ * is the same kind of value: a word the user chose that we print beside a provider title.
+ */
+function planNames(raw: unknown): { claude?: string; codex?: string } {
+  const out: { claude?: string; codex?: string } = {}
+  if (!isRecord(raw)) return out
+  for (const key of ['claude', 'codex'] as const) {
+    const v = raw[key]
+    if (typeof v !== 'string') continue
+    const t = v.trim().slice(0, 40)
+    if (t !== '') out[key] = t
+  }
+  return out
+}
+
 function planPrices(raw: unknown): { claude?: number; codex?: number } {
   const out: { claude?: number; codex?: number } = {}
   if (!isRecord(raw)) return out
@@ -504,6 +550,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
     alignment: pick(get('tokenPace.alignment'), ALIGNMENTS, 'left'),
     staleAfterMinutes: num(get('tokenPace.staleAfterMinutes'), 20, 1, 1440),
     keybindings: bool(get('tokenPace.keybindings'), true),
+    planName: planNames(get('tokenPace.planName')),
 
     pace: {
       sensitivity: pick(get('tokenPace.pace.sensitivity'), SENSITIVITIES, 'normal'),
@@ -536,6 +583,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
       sections: list(get('tokenPace.dashboard.sections'), DASHBOARD_SECTIONS, DEFAULT_SECTIONS),
       defaultRange: pick(get('tokenPace.dashboard.defaultRange'), DEFAULT_RANGES, '30d'),
       modelRows: num(get('tokenPace.dashboard.modelRows'), 12, 0, 500),
+      topN: Math.trunc(num(get('tokenPace.dashboard.topN'), 5, 1, 20)),
       mode: pick(get('tokenPace.dashboard.mode'), DASHBOARD_MODES, 'webview'),
     },
     timezone: text(get('tokenPace.timezone'), 'system'),
@@ -551,6 +599,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
       showListPrice: bool(get('tokenPace.pricing.showListPrice'), false),
     },
     unknownModelPricing: pick(get('tokenPace.unknownModelPricing'), UNKNOWN_MODEL_PRICING, 'strict'),
+    budgets: sanitizeBudgets(get('tokenPace.budgets')),
 
     quotaSource: pick(get('tokenPace.quotaSource'), QUOTA_SOURCES, 'auto'),
     pollIntervalMinutes: num(get('tokenPace.pollIntervalMinutes'), 30, 5, 1440),
@@ -584,6 +633,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
       forecastLeadMinutes: num(get('tokenPace.alerts.forecastLeadMinutes'), 0, 0, 1440),
       onPaceFast: bool(get('tokenPace.alerts.onPaceFast'), false),
       windowCondition: pick(get('tokenPace.alerts.windowCondition'), ALERT_WINDOW_CONDITIONS, 'any'),
+      budgetPercent: num(get('tokenPace.alerts.budgetPercent'), 0, 0, 200),
     },
 
     debug: bool(get('tokenPace.debug'), false),
@@ -617,6 +667,55 @@ export function affects(e: ConfigurationChangeLike, keys: string[]): boolean {
   return false
 }
 
+// ---------------------------------------------------------------------------
+// Wording that more than one renderer needs
+//
+// The view model and the status bar render independently — the bar is deliberately free of
+// the view model so it can be built without it — so a sentence both of them say has to live
+// somewhere both of them already import. That is this module, and the alternative is two
+// copies of one promise drifting apart.
+// ---------------------------------------------------------------------------
+
+/**
+ * What the context window is, said wherever it is shown.
+ *
+ * It describes one Claude Code conversation as the status line reported it: not the account,
+ * not comparable to a quota window, and not something Token Pace could count for itself.
+ */
+export const CONTEXT_NOTE = 'current session, via the status line'
+
+/** Where a plan name came from. A configured one is always labelled as such where it prints. */
+export type PlanSource = 'provider' | 'configured'
+
+/**
+ * The plan name to show for a provider, and who said it.
+ *
+ * The provider's own word always wins; `tokenPace.planName` is a fallback the user typed, and
+ * it is marked as configured everywhere it appears — a name someone wrote into a settings file
+ * is not a reading. Neither kind is ever turned into a limit: no plan name implies a quota
+ * here, which is why this returns a label and nothing else.
+ *
+ * One rule in one place: the quota card, the three views, the export and the status-bar
+ * tooltip all print the result of this function, so they cannot disagree about the suffix.
+ */
+export function planNameOf(
+  cfg: Config,
+  source: 'claude' | 'codex',
+  provided: string | null,
+): { name: string; from: PlanSource } | null {
+  if (typeof provided === 'string' && provided.trim() !== '') {
+    return { name: provided.trim(), from: 'provider' }
+  }
+  const configured = cfg.planName[source]
+  return configured ? { name: configured, from: 'configured' } : null
+}
+
+/** `plan Max 20x` or `plan Max 20x (as configured)`; null when no name is known. */
+export function planText(plan: { name: string; from: PlanSource } | null): string | null {
+  if (plan === null) return null
+  return plan.from === 'configured' ? `plan ${plan.name} (as configured)` : `plan ${plan.name}`
+}
+
 export function readTimeConfig(cfg: Config): TimeConfig {
   return {
     zone: cfg.timezone,
@@ -635,7 +734,14 @@ export function readPaceConfig(cfg: Config): PaceConfig {
   }
 }
 
-export function readAlertConfig(cfg: Config): AlertConfig {
+/**
+ * The alert settings, plus the budget level.
+ *
+ * `budgetPercent` is not part of `AlertConfig`: that interface describes the quota alerts,
+ * which every existing caller builds by hand. The intersection keeps the field required for
+ * whoever reads a real configuration and optional for whoever builds one in a test.
+ */
+export function readAlertConfig(cfg: Config): AlertConfig & { budgetPercent: number } {
   return {
     thresholds: [...cfg.alerts.thresholds],
     basis: cfg.alerts.basis,
@@ -645,5 +751,6 @@ export function readAlertConfig(cfg: Config): AlertConfig {
     forecastLeadMinutes: cfg.alerts.forecastLeadMinutes,
     onPaceFast: cfg.alerts.onPaceFast,
     windowCondition: cfg.alerts.windowCondition,
+    budgetPercent: cfg.alerts.budgetPercent,
   }
 }

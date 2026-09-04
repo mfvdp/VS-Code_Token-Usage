@@ -16,6 +16,7 @@
  */
 
 import * as vscode from 'vscode'
+import { SOURCE_TITLE } from './adapters'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { ViewModel } from './viewModel'
 
@@ -23,12 +24,16 @@ import type { ViewModel } from './viewModel'
 const SECTION_FIELDS: Record<string, (keyof ViewModel)[]> = {
   summary: ['digest'],
   quota: ['quotas'],
+  context: ['context'],
   kpis: ['kpis'],
   tokens: ['totals', 'composition', 'cacheEconomy', 'calendar', 'planFactor'],
   chart: ['chart'],
   models: ['models'],
   heatmap: ['heatmap'],
   hours: ['hours'],
+  records: ['records'],
+  tools: ['tools'],
+  budget: ['budgets'],
   forecast: ['forecasts', 'windowUsage', 'attributionInWindow'],
   history: ['retro'],
   projects: ['projects'],
@@ -400,7 +405,12 @@ ul { margin: 6px 0; padding-left: 18px; }
   table, thead, tbody, th, td, tr { display: block; }
   thead { display: none; }
   tr { border-bottom: 1px solid var(--line); padding: 4px 0; }
-  td { text-align: left; padding: 1px 0; }
+  /* A stacked cell is a block of its own width, so the base "white-space: nowrap" (which keeps
+     a real table's columns from breaking) turns a long value — the tools section's model list
+     is the first one long enough to notice — into text running past the card. Nothing is lost,
+     the wrapper still scrolls, but needing a sideways scroll to read one "label: value" line is
+     exactly what the stacked layout exists to avoid. */
+  td { text-align: left; padding: 1px 0; white-space: normal; }
   /* Only cells that carry a header: the sub-rows and the drill lines span the whole table
      and would otherwise be prefixed with a bare ": ". */
   td[data-h]::before { content: attr(data-h) ": "; color: var(--dim); }
@@ -465,8 +475,8 @@ function sparkSvg(values) {
 
 // -- words ------------------------------------------------------------------
 
-/** The provider titles the rest of the extension uses; kept in step with SOURCE_TITLE. */
-const SRC_TITLE = { claude: 'Claude Code', codex: 'Codex' };
+/** The provider titles, interpolated from the registry so the webview cannot drift from it. */
+const SRC_TITLE = ${JSON.stringify(SOURCE_TITLE)};
 
 /**
  * An own-property lookup with a string result. A bare map[key] answers "constructor" with a
@@ -602,7 +612,9 @@ function sSummary() {
 function quotaCard(q) {
   let h = '<div class="card"><div class="row"><span class="name">' + esc(q.title) + '</span>'
     + '<span class="meta' + (q.stale ? ' warn' : '') + '">'
-    + [q.planType ? 'plan ' + esc(q.planType) : '', q.origin ? esc(q.origin) : '',
+    // planText already carries the word "plan" and, for a name out of the settings, the
+    // "(as configured)" that keeps it apart from something a provider said.
+    + [q.planText ? esc(q.planText) : '', q.origin ? esc(q.origin) : '',
        q.ageText ? esc(q.ageText) : ''].filter(Boolean).join(' · ')
     + (q.stale ? ' ⚠ stale' : '') + '</span></div>';
   if (q.problem) {
@@ -646,6 +658,9 @@ function quotaCard(q) {
                { now: Math.round(q.extra.utilization), max: 100, text: q.extra.text }))
       + '</div>';
   }
+  // Only ever present when the provider reported no window at all. It is a count, not a
+  // window: no bar, no percentage, no pace — the sentence itself says what it is not.
+  if (q.localBlock) h += '<div class="box info" role="status">' + esc(q.localBlock.text) + '</div>';
   const f = q.freshness;
   h += '<div class="meta">last check ' + esc(f.lastCheck || '–') + ' · last data '
     + esc(f.lastData || '–') + ' · last local event ' + esc(f.lastEvent || '–')
@@ -701,6 +716,41 @@ function sQuota() {
   return vm.quotas.map(quotaCard).join('')
     + '<div class="legend"><span><i class="dot time"></i>time elapsed</span>'
     + '<span><i class="dot fc"></i>projected at the reset</span></div>';
+}
+
+/**
+ * One Claude Code session's context window.
+ *
+ * Deliberately not a quota card: no verdict, no pace, no forecast, and a dim bar rather than a
+ * coloured one — a full context window is a fact about a conversation, not a warning about an
+ * account. Without a window size there is no bar and no percentage at all, only the tokens.
+ */
+function sContext() {
+  const c = vm.context;
+  if (!c) {
+    return '<p class="empty">No context reading. The Claude Code status line is what reports it.'
+      + '<br><button data-act="cmd" data-id="tokenPace.connectStatusLine">'
+      + 'Connect the status line</button></p>';
+  }
+  const age = [c.ageText ? 'updated ' + esc(c.ageText) : '', c.fresh ? '' : '⚠ stale']
+    .filter(Boolean).join(' · ');
+  let h = '<div class="card"><div class="row"><span class="name">Context window</span>'
+    + '<span class="meta' + (c.fresh ? '' : ' warn') + '">' + age + '</span></div>'
+    + '<div class="win"><div class="win-top"><span>' + esc(c.note) + '</span><b>'
+    + esc(c.text) + '</b></div>';
+  // A bar needs a denominator. With none, the tokens stand alone — a full-width bar would
+  // claim the conversation is full, an empty one that it is empty.
+  if (c.size !== null && c.percentText !== '–') {
+    h += bar(pctOf(c), 'neutral', null, null,
+      { now: Math.round(pctOf(c)), max: 100, text: 'context window: ' + c.text });
+  }
+  return h + '</div></div>';
+}
+
+/** The share the card draws, read back from the text the view model already rounded. */
+function pctOf(c) {
+  const n = parseFloat(String(c.percentText));
+  return isFinite(n) ? n : 0;
 }
 
 /**
@@ -964,6 +1014,145 @@ function sHours() {
     + grid;
 }
 
+/**
+ * One Records table. The share is the share of the range, and the detail beside a label is
+ * the quieter half of it — the provider of a model, the session count of a project.
+ */
+function recordTable(head, rows) {
+  if (!rows.length) return '';
+  const cost = vm.showCost;
+  return '<div class="card"><div class="name">' + esc(head) + '</div>'
+    + '<div class="scroll"><table><thead><tr><th>' + esc(head) + '</th><th>Usage</th>'
+    + '<th>Share</th>' + (cost ? '<th>API cost</th>' : '') + '</tr></thead><tbody>'
+    + rows.map(function (r) {
+      return '<tr><td data-h="' + esc(head) + '">' + esc(r.label)
+        + (r.detail ? ' <span class="meta">' + esc(r.detail) + '</span>' : '')
+        + '</td><td data-h="Usage">' + esc(r.usage) + '</td><td data-h="Share">' + esc(r.share)
+        + '</td>' + (cost ? '<td data-h="API cost">' + esc(r.cost) + '</td>' : '') + '</tr>';
+    }).join('') + '</tbody></table></div></div>';
+}
+
+/**
+ * The extremes of the selected range.
+ *
+ * Nothing here is compared against a limit, because none of these figures has one: a peak day
+ * is the busiest day *on record*, a streak is a run of days with usage inside the range, and
+ * the shares are shares of the range. The two lower tables need attribution, and say so rather
+ * than standing empty.
+ */
+function sRecords() {
+  const r = vm.records;
+  if (!r) return '<p class="empty">No records yet.</p>';
+  let h = '';
+  const peak = r.peakDay
+    ? 'Peak day ' + esc(r.peakDay.day) + ' · ' + esc(r.peakDay.usage)
+      + (vm.showCost && r.peakDay.cost !== '–'
+         ? ' · ' + esc(r.peakDay.cost) + (r.peakDay.costPartial ? ' ⚠' : '') : '')
+    : 'Peak day –';
+  const streak = r.streak
+    ? 'Longest streak ' + r.streak.days + ' day' + (r.streak.days === 1 ? '' : 's')
+      + ' · ' + esc(r.streak.from) + ' → ' + esc(r.streak.to)
+    : 'Longest streak –';
+  h += '<div class="card"><div class="row"><span class="name">' + peak + '</span>'
+    + '<span class="meta">' + streak + '</span></div></div>';
+  h += recordTable('Model', r.topModels);
+  if (r.attributionOn) {
+    h += recordTable('Project', r.topProjects);
+    h += recordTable('Session', r.topSessions);
+  } else {
+    h += '<p class="empty">Top projects and sessions need tokenPace.attribution.</p>';
+  }
+  const notes = [r.note, r.sessionNote].filter(Boolean);
+  if (notes.length) {
+    h += '<ul class="meta">' + notes.map(n => '<li>' + esc(n) + '</li>').join('') + '</ul>';
+  }
+  return h;
+}
+
+/**
+ * The tools of the range, busiest first.
+ *
+ * No bar and no limit: a tool call has neither, and a bar beside a count invites a reading
+ * of "how full is it" that nothing here can answer. The share is the share of the calls
+ * counted in this range; the notes below say since when that counting has been happening and
+ * whether a day hit the per-day name cap.
+ */
+function sTools() {
+  const t = vm.tools;
+  if (!t) return '<p class="empty">No tool calls counted.</p>';
+  let h = '';
+  if (t.rows.length) {
+    h += '<div class="scroll"><table><thead><tr><th>Tool</th><th>Calls</th><th>Share</th>'
+      + '<th>Models</th></tr></thead><tbody>'
+      + t.rows.map(function (r) {
+        return '<tr><td data-h="Tool">' + esc(r.name)
+          + (r.sources ? ' <span class="meta">' + esc(r.sources) + '</span>' : '')
+          + '</td><td data-h="Calls">' + esc(r.callsText) + '</td>'
+          + '<td data-h="Share">' + esc(r.share) + '</td>'
+          + '<td data-h="Models">' + esc(r.models) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    h += '<div class="meta">' + esc(t.totalText) + ' call(s) · ' + t.distinct + ' distinct tool(s)'
+      + (t.hidden ? ' · ' + t.hidden + ' more not listed' : '') + '</div>';
+  } else {
+    h += '<p class="empty">No tool call counted in this range.</p>';
+  }
+  if (t.notes.length) {
+    h += '<ul class="meta">' + t.notes.map(n => '<li>' + esc(n) + '</li>').join('') + '</ul>';
+  }
+  return h;
+}
+
+/**
+ * The budgets the reader configured.
+ *
+ * A budget is the one limit in this panel that nobody had to guess: it was typed into the
+ * settings. So the bar is drawn against *that* number and against nothing else, the money
+ * rows keep the tilde and the warning sign the cost column has (an unpriced model makes a spend a lower
+ * bound, and a lower bound makes the share one too), and a period with no local data at all
+ * shows a dash — a budget at "0 %" would claim a quiet week when the history may simply not
+ * have been read yet. Nothing is summed across rows: dollars and tokens are two questions.
+ *
+ * "No budget configured" is therefore only ever said about an empty setting: a budget that
+ * cannot be measured — money while the cost column is off — still has its row, all dashes,
+ * with the responsible setting named under it.
+ */
+function sBudget() {
+  const rows = vm.budgets || [];
+  if (!rows.length) {
+    return '<p class="empty">No budget configured. tokenPace.budgets takes your own limit '
+      + 'per provider, period and unit.'
+      + '<br><button data-act="cmd" data-id="tokenPace.openSettings">Open settings</button></p>';
+  }
+  return rows.map(function (b) {
+    const share = b.share === null || b.share === undefined ? null : b.share;
+    const cls = b.over ? 'warn' : 'neutral';
+    let h = '<div class="card"><div class="row"><span class="name">' + esc(b.label)
+      + (b.partial ? ' ⚠' : '') + '</span><span class="meta">' + esc(b.shareText)
+      + (b.over ? ' · over' : '') + '</span></div>'
+      + '<div class="win"><div class="win-top"><span>' + esc(b.usedText) + ' of '
+      + esc(b.limitText) + '</span><b>' + esc(b.from) + ' → ' + esc(b.last) + '</b></div>';
+    // No denominator, no bar: a null share is a period we have not read, not an empty one.
+    if (share !== null) {
+      h += bar(share, cls, null, null,
+        { now: Math.round(share), max: 100, text: b.label + ': ' + b.usedText + ' of ' + b.limitText });
+    }
+    h += '</div>';
+    const meta = [
+      // Why a row is all dashes: a budget is never dropped for being unmeasurable, so the
+      // card has to name the switch that is in the way instead of showing a blank card.
+      b.unmeasurable || null,
+      b.projectedText ? 'projected ' + b.projectedText + ' by ' + b.last : null,
+      b.projectionBasis,
+    ].filter(Boolean).join(' · ');
+    if (meta) {
+      h += '<div class="meta' + (b.projectedOver ? ' warn' : '') + '">' + esc(meta) + '</div>';
+    }
+    return h + '</div>';
+  }).join('')
+    + '<div class="meta">A budget is your own number. USD is the hypothetical API '
+    + 'equivalent, not a bill, and no budget is ever added to another.</div>';
+}
+
 function sForecast() {
   let h = '';
   if (!vm.forecasts.length) h += '<p class="empty">No window to project.</p>';
@@ -1114,14 +1303,18 @@ function sDrill() {
 
 const RENDER = {
   controls: sControls, footer: sFooter, drill: sDrill,
-  summary: sSummary, quota: sQuota, kpis: sKpis, tokens: sTokens, chart: sChart, models: sModels,
-  heatmap: sHeatmap, hours: sHours, forecast: sForecast, history: sHistory, projects: sProjects,
-  sessions: sSessions, dataQuality: sDataQuality,
+  summary: sSummary, quota: sQuota, context: sContext, kpis: sKpis, tokens: sTokens,
+  chart: sChart, models: sModels, heatmap: sHeatmap, hours: sHours, records: sRecords,
+  tools: sTools, budget: sBudget, forecast: sForecast,
+  history: sHistory, projects: sProjects, sessions: sSessions, dataQuality: sDataQuality,
 };
 const TITLE = {
-  summary: 'Summary', quota: 'Quota', kpis: 'Key figures', tokens: 'Tokens', chart: 'Chart',
-  models: 'Models', heatmap: 'Activity', hours: 'Time of day', forecast: 'Forecast',
-  history: 'Reset history', projects: 'Projects', sessions: 'Sessions', dataQuality: 'Data quality',
+  summary: 'Summary', quota: 'Quota', context: 'Context window', kpis: 'Key figures',
+  tokens: 'Tokens', chart: 'Chart', models: 'Models', heatmap: 'Activity',
+  hours: 'Time of day', records: 'Records', tools: 'Tools', budget: 'Budgets',
+  forecast: 'Forecast',
+  history: 'Reset history',
+  projects: 'Projects', sessions: 'Sessions', dataQuality: 'Data quality',
 };
 
 function sControls() {

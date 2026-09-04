@@ -14,7 +14,7 @@
 import * as vscode from 'vscode'
 import { Aggregator } from './agg'
 import { Config, readTimeConfig } from './config'
-import { toCsv, toJson, toMarkdownSummary } from './exporter'
+import { toCsv, toJson, toMarkdownSummary, toolsCsv } from './exporter'
 import { markdownDocument, quickPickItems } from './textViews'
 import { DayRange } from './time'
 import type { ViewModel } from './viewModel'
@@ -71,7 +71,34 @@ function exportNotice(cfg: Config): string {
     : `${base} and project labels (${cfg.showProjectNames === 'hash' ? 'salted hashes' : 'directory basenames'}).`
 }
 
-async function save(text: string, name: string, filters: Record<string, string[]>, notice: string): Promise<void> {
+/**
+ * A second file written beside the chosen one, for data that cannot live in the first.
+ *
+ * The tool table is keyed by day and model while a bucket row is keyed by day, hour, model,
+ * tier and isSub, so a tool column on a bucket row would be an invented split. It becomes a
+ * companion file instead — named in the save dialog before anything is written, because a
+ * file the user did not pick must not appear on disk unannounced.
+ */
+interface Companion {
+  /** Replaces the extension of the chosen name, e.g. `.tools.csv`. */
+  suffix: string
+  text: string
+}
+
+/** `…/export.csv` + `.tools.csv` → `…/export.tools.csv`; a name without a dot just gains it. */
+function companionPath(path: string, suffix: string): string {
+  const cut = path.lastIndexOf('.')
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return (cut > slash ? path.slice(0, cut) : path) + suffix
+}
+
+async function save(
+  text: string,
+  name: string,
+  filters: Record<string, string[]>,
+  notice: string,
+  companion?: Companion,
+): Promise<void> {
   const uri = await vscode.window.showSaveDialog({
     defaultUri: vscode.Uri.file(name),
     filters,
@@ -80,7 +107,15 @@ async function save(text: string, name: string, filters: Record<string, string[]
   })
   if (!uri) return
   await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'))
-  const open = await vscode.window.showInformationMessage(`Token Pace: exported to ${uri.fsPath}`, 'Open')
+  let second: vscode.Uri | null = null
+  if (companion) {
+    second = uri.with({ path: companionPath(uri.path, companion.suffix) })
+    await vscode.workspace.fs.writeFile(second, Buffer.from(companion.text, 'utf8'))
+  }
+  const open = await vscode.window.showInformationMessage(
+    `Token Pace: exported to ${uri.fsPath}${second ? ` and ${second.fsPath}` : ''}`,
+    'Open',
+  )
   if (open === 'Open') await vscode.window.showTextDocument(uri)
 }
 
@@ -157,7 +192,8 @@ export function registerNativeViews(
         toCsv(agg, range, cfg, tcfg),
         `token-pace-${range.from}_${range.to}-${timestamp()}.csv`,
         { CSV: ['csv'] },
-        exportNotice(cfg),
+        `${exportNotice(cfg)} Tool names go into a second file beside it (.tools.csv).`,
+        { suffix: '.tools.csv', text: toolsCsv(agg, range) },
       )
     }),
 
@@ -168,7 +204,10 @@ export function registerNativeViews(
         toJson(agg, range, cfg, tcfg),
         `token-pace-${range.from}_${range.to}-${timestamp()}.json`,
         { JSON: ['json'] },
-        exportNotice(cfg),
+        // The CSV path names the tool file; this one has to name the array, for the same
+        // reason: `tools[]` carries the names as the transcript spells them, MCP names
+        // included, and the dialog is the last moment to say no to that leaving the machine.
+        `${exportNotice(cfg)} Tool names are included as tools[].`,
       )
     }),
 

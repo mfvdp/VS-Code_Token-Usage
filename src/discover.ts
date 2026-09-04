@@ -2,38 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as fs from 'fs'
-import * as os from 'os'
 import * as path from 'path'
+import { ADAPTERS, adapterFor, tableOf } from './adapters'
 import { Source } from './types'
-
-/**
- * Both tools keep their data under the home directory — on Windows `~/.claude`
- * is `%USERPROFILE%\.claude`. Both also allow relocating that directory via an
- * environment variable; without honouring it a user would see zero tokens
- * forever, with no error to explain why.
- *
- * Caveat: the extension host only inherits variables that were set when VS Code
- * started — one set only in a shell profile does not reach here. Hence the
- * additional `tokenPace.claudeDir` / `tokenPace.codexDir` settings, which may
- * name several directories: people move between machines and keep old homes.
- */
-function homesOf(envVar: string, fallback: string, overrides: string[]): string[] {
-  const explicit = overrides.map((o) => o.trim()).filter((o) => o.length > 0)
-  if (explicit.length) return explicit.map((o) => path.resolve(untilde(o)))
-  const env = process.env[envVar]?.trim()
-  return [env ? path.resolve(untilde(env)) : path.join(os.homedir(), fallback)]
-}
-
-/** Expand a leading "~" — people type it in settings. */
-function untilde(p: string): string {
-  return p === '~' || p.startsWith(`~${path.sep}`) || p.startsWith('~/')
-    ? path.join(os.homedir(), p.slice(1))
-    : p
-}
-
-function isDir(p: string): boolean {
-  try { return fs.statSync(p).isDirectory() } catch { return false }
-}
 
 /**
  * Two settings naming the same directory through a symlink or a trailing slash
@@ -54,30 +25,27 @@ function dedupe(roots: string[]): string[] {
   return out
 }
 
-/** Set on activation; changes require a window reload. */
+/**
+ * Set on activation; changes require a window reload. Where a provider's transcripts live is
+ * the adapter's answer (`src/adapters`); this module only resolves, dedupes and remembers it.
+ */
+const ROOTS: Record<Source, string[]> = tableOf(() => [] as string[])
 export let CLAUDE_ROOTS: string[] = []
 export let CODEX_ROOTS: string[] = []
 /** First root of each tool — for callers that still expect a single directory. */
 export let CLAUDE_ROOT = ''
 export let CODEX_ROOT = ''
 
+/** The configured roots of one provider, for callers that iterate the registry. */
+export function rootsFor(source: Source): string[] {
+  return ROOTS[source]
+}
+
 export function configureRoots(claudeDirs: string[] = [], codexDirs: string[] = []): { claude: string[]; codex: string[] } {
-  const claude: string[] = []
-  for (const home of homesOf('CLAUDE_CONFIG_DIR', '.claude', claudeDirs)) claude.push(path.join(home, 'projects'))
-  if (claudeDirs.every((d) => !d.trim())) {
-    // Some Claude Code builds keep their state under XDG config instead of ~/.claude.
-    const xdg = path.join(os.homedir(), '.config', 'claude', 'projects')
-    if (isDir(xdg)) claude.push(xdg)
-  }
-  const codex: string[] = []
-  for (const home of homesOf('CODEX_HOME', '.codex', codexDirs)) {
-    codex.push(path.join(home, 'sessions'))
-    // Archived threads keep their rollouts; leaving them out would make usage vanish on archive.
-    const archived = path.join(home, 'archived_sessions')
-    if (isDir(archived)) codex.push(archived)
-  }
-  CLAUDE_ROOTS = dedupe(claude)
-  CODEX_ROOTS = dedupe(codex)
+  const dirs: Record<Source, string[]> = { claude: claudeDirs, codex: codexDirs }
+  for (const a of ADAPTERS) ROOTS[a.id] = dedupe(a.roots(dirs[a.id]))
+  CLAUDE_ROOTS = ROOTS.claude
+  CODEX_ROOTS = ROOTS.codex
   CLAUDE_ROOT = CLAUDE_ROOTS[0] ?? ''
   CODEX_ROOT = CODEX_ROOTS[0] ?? ''
   return { claude: [...CLAUDE_ROOTS], codex: [...CODEX_ROOTS] }
@@ -92,8 +60,9 @@ function under(file: string, root: string): boolean {
 
 /** Which tool a transcript path belongs to, by the configured roots; null when it is outside all of them. */
 export function rootOf(file: string): { source: Source; root: string } | null {
-  for (const root of CLAUDE_ROOTS) if (under(file, root)) return { source: 'claude', root }
-  for (const root of CODEX_ROOTS) if (under(file, root)) return { source: 'codex', root }
+  for (const a of ADAPTERS) {
+    for (const root of ROOTS[a.id]) if (under(file, root)) return { source: a.id, root }
+  }
   return null
 }
 
@@ -127,8 +96,9 @@ export async function findTranscripts(root: string, match: (name: string) => boo
   return out.sort()
 }
 
-export const isClaudeTranscript = (n: string) => n.endsWith('.jsonl')
-export const isCodexRollout = (n: string) => n.startsWith('rollout-') && n.endsWith('.jsonl')
-
+// The three predicates the registry answers, named per provider for the callers that ask
+// about exactly one of them (diagnostics, tests). New code should ask the adapter.
+export const isClaudeTranscript = (n: string) => adapterFor('claude').matches(n)
+export const isCodexRollout = (n: string) => adapterFor('codex').matches(n)
 /** Subagent transcripts live under .../<sessionId>/subagents/... */
-export const isClaudeSubagent = (p: string) => p.includes(`${path.sep}subagents${path.sep}`)
+export const isClaudeSubagent = (p: string) => adapterFor('claude').isSub(p)

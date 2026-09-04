@@ -380,6 +380,35 @@ test('a status line without rate limits reports no windows instead of zeroes', (
   assert.deepEqual(r.cost, { totalUsd: 0.5 })
 })
 
+test('the context window is a percentage only when it has a denominator to be one of', () => {
+  const at = 1_700_000_000
+  // A reported percentage with no window size behind it has nothing to be a share of.
+  const noSize = claudeStateFromStatusline(
+    { context_window: { total_input_tokens: 40_000, used_percentage: 55 } }, at,
+  )
+  assert.deepEqual(noSize.context, { used: 40_000, size: null, usedPct: null })
+
+  // A size of zero is an absence, not a denominator: no "40,000 / 0" can be rendered.
+  const zero = claudeStateFromStatusline(
+    { context_window: { total_input_tokens: 40_000, context_window_size: 0, used_percentage: 12 } }, at,
+  )
+  assert.deepEqual(zero.context, { used: 40_000, size: null, usedPct: null })
+
+  // An implausible percentage is refused exactly as a rate-limit window's is, and the
+  // quotient the payload does support takes its place.
+  const wild = claudeStateFromStatusline(
+    { context_window: { total_input_tokens: 40_000, context_window_size: 200_000, used_percentage: 4_000_000 } }, at,
+  )
+  assert.deepEqual(wild.context, { used: 40_000, size: 200_000, usedPct: 20 })
+
+  // A plausible reported percentage still wins over the quotient — the provider counts
+  // things we do not see in the two token fields.
+  const reported = claudeStateFromStatusline(
+    { context_window: { total_input_tokens: 40_000, context_window_size: 200_000, used_percentage: 33 } }, at,
+  )
+  assert.deepEqual(reported.context, { used: 40_000, size: 200_000, usedPct: 33 })
+})
+
 test('a mirror file of an unknown schema is refused', () => {
   const dir = scratchDir('quota-mirror')
   const file = path.join(dir, 'mirror.json')

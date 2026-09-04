@@ -4,8 +4,9 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator, billable, localDay } from '../src/agg'
+import { freshInput } from '../src/stats'
 import { hourIndex, TimeConfig } from '../src/time'
-import { bucketKey, STATE_VERSION } from '../src/types'
+import { Bucket, Snapshot, Source, ToolStat, bucketKey, STATE_VERSION } from '../src/types'
 import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, ctxFor } from './fixtures/helpers'
 
 const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
@@ -309,4 +310,30 @@ test('cost: priced, unpriced, fast-without-rate and family attribution', () => {
   assert.equal(agg.sum('2026-03-10', '2026-03-10', utc, { tier: 'fast' }).input, 400)
   assert.equal(agg.sum('2026-03-10', '2026-03-10', utc, { source: 'codex' }).input, 0)
   assert.equal(agg.sum('2026-03-10', '2026-03-10', utc, { isSub: true }).requests, 0)
+})
+
+test('a restored bucket from a provider this build does not know is dropped', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(
+    claudeLine({ id: 'a', ts: T0, usage: { input: 100, cacheRead: 40, output: 5 }, tools: [{ name: 'Read' }] }),
+    CTX,
+  )
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  // A snapshot is a file: another build, or a hand edit, can put any string in `source`.
+  const alien: Bucket = { ...snap.buckets[0], source: 'gemini' as Source, model: 'gemini-9' }
+  snap.buckets.push(alien)
+  snap.buckets.push({ ...alien, source: '' as Source })
+  const alienTool: ToolStat = { source: 'gemini' as Source, day: '2026-03-10', model: 'gemini-9', name: 'Grep', calls: 3 }
+  snap.tools = [...(snap.tools ?? []), alienTool]
+
+  const back = Aggregator.fromSnapshot(snap)
+  // Every restored row has to name a provider the registry can answer for: everything
+  // downstream looks the source up to decide how to read the row.
+  assert.deepEqual(back.all().map((b) => b.source), ['claude'])
+  assert.equal(back.all().length, 1)
+  assert.deepEqual(back.tools().rows.map((t) => t.source), ['claude'])
+  // And the rule that reads a bucket stays total regardless: the views sit behind a `try`,
+  // so a throw here would blank the dashboard instead of stating an absence.
+  assert.equal(freshInput(alien), alien.input)
+  assert.equal(billable(alien), alien.input + alien.cacheWrite + alien.output)
 })

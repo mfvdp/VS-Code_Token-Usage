@@ -43,6 +43,8 @@ const CLAUDE_SESSION_ITEM = 'tokenPace.quota.claude.session.300'
 const CLAUDE_WEEK_ITEM = 'tokenPace.quota.claude.weekly_all.10080'
 const CODEX_ITEM = 'tokenPace.quota.codex.codex.300'
 const TOKENS_ITEM = 'tokenPace.tokens'
+const CONTEXT_ITEM = 'tokenPace.context'
+const BUDGET_ITEM = 'tokenPace.budget'
 
 /**
  * Σ of the synthetic transcripts, by the same rule `billable()` applies:
@@ -616,3 +618,70 @@ test('clear stored data lists the shared cache and says the bridge has to go fir
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+
+test('the status line mirror reaches the context entry and the text view', async () => {
+  const fx = makeFixture()
+  fs.mkdirSync(fx.storage, { recursive: true })
+  // A mirror the bridge could have written a minute ago: the same shape as the fixture in
+  // test/fixtures/quota, with a fresh timestamp so nothing is stale.
+  fs.writeFileSync(path.join(fx.storage, 'statusline-mirror.json'), JSON.stringify({
+    schema_version: 1,
+    written_at: Date.now() - 60_000,
+    payload: {
+      rate_limits: { five_hour: { used_percentage: 44 } },
+      context_window: {
+        total_input_tokens: 120_000,
+        total_output_tokens: 8_000,
+        context_window_size: 200_000,
+        used_percentage: 64,
+      },
+    },
+  }))
+
+  await activateHost(fx, REPO, {
+    settings: { 'tokenPace.statusBar.show': ['claudeQuota', 'context', 'tokens'] },
+  })
+  await waitFor('the context entry', () => state.textOf(CONTEXT_ITEM) !== undefined)
+  // The cold scan is awaited so this test leaves nothing running behind it.
+  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+
+  assert.equal(state.textOf(CONTEXT_ITEM), 'ctx 64%')
+  // One session's window, said once, and the same figure in the text view — not a second
+  // derivation from the same file.
+  await state.execute('tokenPace.showUsageMarkdown')
+  const md = lastMarkdown()
+  assert.equal(md.split('## Context window').length, 2, md)
+  assert.ok(md.includes('128,000 / 200,000 · 64 % — current session, via the status line'), md)
+
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a configured budget reaches the status bar and the markdown view from one derivation', async () => {
+  const fx = makeFixture()
+  await activateHost(fx, REPO, {
+    settings: {
+      'tokenPace.statusBar.show': ['budget', 'tokens'],
+      'tokenPace.dashboard.sections': ['budget'],
+      // Small enough that the synthetic transcripts move it, and stated by the test, so no
+      // part of it can have been derived from a plan or a provider reading.
+      'tokenPace.budgets': [{ scope: 'total', period: 'month', unit: 'tokens', limit: 1000 }],
+    },
+  })
+  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitFor('the budget entry', () => state.textOf(BUDGET_ITEM) !== undefined)
+
+  const text = String(state.textOf(BUDGET_ITEM))
+  assert.match(text, /^budget \d+ %/, text)
+  // A token budget's share is measured, not hypothetical, so it carries no estimate marker.
+  assert.equal(text.includes('~'), false, text)
+
+  // The same share in the text view — the bar takes the row from the view model rather than
+  // computing a second one.
+  await state.execute('tokenPace.showUsageMarkdown')
+  const md = lastMarkdown()
+  assert.equal(md.split('## Budgets').length, 2, md)
+  const share = text.replace('budget ', '').replace(' over', '')
+  assert.ok(md.includes(`| ${share} |`) || md.includes(`| ${share} ⚠ |`), md)
+
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})

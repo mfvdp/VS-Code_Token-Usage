@@ -11,10 +11,8 @@
  * would be a figure that never existed anywhere.
  */
 
-import {
-  readClaudeJsonUtilization, readClaudeQuota, readCodexQuota, readStatuslineMirror, codexStateFromTranscript,
-  CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE, StatuslineReading,
-} from './quota'
+import { adapterFor } from './adapters'
+import { StatuslineReading } from './quota'
 import { CodexRateLimitsSnapshot, QuotaState, Source } from './types'
 
 export type ClaudeSourceId = 'cacheFile' | 'statusline' | 'claudeJson' | 'poll'
@@ -56,6 +54,7 @@ export interface ContextReading {
   used: number
   /** The model's window size, when the payload named one; null means no denominator. */
   size: number | null
+  /** Null whenever `size` is null — with no denominator a view shows tokens only, no percent. */
   usedPct: number | null
   /** Epoch SECONDS of the status-line payload, as everywhere else in this module. */
   fetchedAt: number | null
@@ -85,7 +84,8 @@ export interface BestState {
   extras: SourceExtras | null
 }
 
-interface Reading {
+/** One source, read once. Produced by the provider adapter, ranked here. */
+export interface Reading {
   id: SourceId
   state: QuotaState
   identityHint: string | null
@@ -111,50 +111,6 @@ function enabled(id: SourceId, mode: QuotaMode, polled: QuotaState | undefined):
   return true
 }
 
-function readClaude(id: ClaudeSourceId, inputs: SourceInputs, now: number): Reading {
-  switch (id) {
-    case 'cacheFile':
-      return { id, state: readClaudeQuota(inputs.claudeCacheFile ?? CLAUDE_QUOTA_FILE, now), identityHint: null }
-    case 'statusline': {
-      const r = readStatuslineMirror(inputs.mirrorFile)
-      // The extras ride along even when the payload carried no rate limits at
-      // all: a context window without a quota window is still a fact the bridge
-      // observed, and dropping it would hide it behind an unrelated absence.
-      const extras: SourceExtras = {
-        context: r.context === null ? null : { ...r.context, fetchedAt: r.state.fetchedAt },
-        cost: r.cost,
-        promptCache: r.promptCache,
-        model: r.model,
-      }
-      return { id, state: r.state, identityHint: r.identityHint, extras }
-    }
-    case 'claudeJson': {
-      const r = readClaudeJsonUtilization(inputs.claudeJsonFile, now)
-      return { id, state: r.state, identityHint: r.identityHint }
-    }
-    case 'poll':
-      return { id, state: inputs.polled.claude ?? missing('claude'), identityHint: null }
-  }
-}
-
-function readCodex(id: CodexSourceId, inputs: SourceInputs, now: number): Reading {
-  switch (id) {
-    case 'cacheFile':
-      return { id, state: readCodexQuota(inputs.codexCacheFile ?? CODEX_QUOTA_FILE, now), identityHint: null }
-    case 'transcript':
-      return { id, state: codexStateFromTranscript(inputs.transcript()), identityHint: null }
-    case 'poll':
-      return { id, state: inputs.polled.codex ?? missing('codex'), identityHint: null }
-  }
-}
-
-function missing(source: Source): QuotaState {
-  return {
-    source, ok: false, fetchedAt: null, planType: null, windows: [],
-    problem: 'No fetch of our own yet', problemKind: 'unknown',
-  }
-}
-
 /**
  * The best available state plus every candidate with its age.
  *
@@ -163,14 +119,13 @@ function missing(source: Source): QuotaState {
  * failed — an absent source is a stated absence, not a gap in the list.
  */
 export function bestState(source: Source, inputs: SourceInputs, now: number): BestState {
+  const adapter = adapterFor(source)
   const order: SourceId[] = source === 'claude' ? inputs.claudeOrder : inputs.codexOrder
   const readings: Reading[] = []
   const candidates: Candidate[] = []
   for (const id of order) {
     if (!enabled(id, inputs.mode, inputs.polled[source])) continue
-    const r = source === 'claude'
-      ? readClaude(id as ClaudeSourceId, inputs, now)
-      : readCodex(id as CodexSourceId, inputs, now)
+    const r = adapter.readQuota(id, inputs, now)
     readings.push(r)
     const c: Candidate = { id, ok: r.state.ok, ageSec: ageSec(r.state, now) }
     if (r.state.problem) c.problem = r.state.problem

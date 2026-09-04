@@ -13,6 +13,7 @@
  */
 
 import * as fs from 'fs'
+import { SOURCES } from './adapters'
 import { PersistentAppServer, findCodexBinary as realFindCodexBinary } from './appServer'
 import { detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, poll as realPoll } from './poller'
 import { codexStateFromBody, quotaFileFor, writeQuotaCacheFile } from './quota'
@@ -78,7 +79,6 @@ export interface QuotaDeps {
 /** Why a fetch did not happen — so the caller can say something useful. */
 export type Blocked = 'mode' | 'consent' | 'follower' | null
 
-const SOURCES: Source[] = ['claude', 'codex']
 const MINUTE_MS = 60_000
 const HOUR_MS = 3_600_000
 /** Wait this long past the announced reset before asking — servers round, too. */

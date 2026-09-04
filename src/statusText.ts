@@ -12,13 +12,18 @@
  * No `vscode` import, ever: this module is loaded by the test bundle.
  */
 
+import { LABEL, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
 import { billable, BucketFilter, CostSummary } from './agg'
-import { Config, readPaceConfig, readTimeConfig } from './config'
+import { BudgetRow, worstBudget } from './budget'
+import { Config, CONTEXT_NOTE, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
 import { isCustomPricing, PricingOptions } from './prices'
+// Type only: this module renders, it never reads a file, and `quotaSources` does.
+import type { ContextReading } from './quotaSources'
 import {
-  ageMinutes, BarOptions, compact, estimate, extraUsageText, percentOf, percentText, renderBar, usd,
+  ageMinutes, BarOptions, compact, estimate, extraUsageText, full, percentOf, percentText,
+  renderBar, usd,
 } from './render'
 import { ageText, formatReset, formatTime, lastDays, relativeShort, TimeConfig } from './time'
 import {
@@ -30,15 +35,13 @@ import {
 // Vocabulary
 // ---------------------------------------------------------------------------
 
-/** Terse provider prefix; `tokenPace.labels` overrides both of these. */
-const LABEL: Record<Source, string> = { claude: 'CC', codex: 'CDX' }
-const TITLE: Record<Source, string> = { claude: 'Claude Code', codex: 'Codex' }
-
-/** The provider's own usage page — the only two URLs this module knows. */
-export const USAGE_PAGE: Record<Source, string> = {
-  claude: 'https://claude.ai/settings/usage',
-  codex: 'https://chatgpt.com/codex/settings/usage',
-}
+/**
+ * The provider vocabulary all comes from the registry: the terse prefix `LABEL`
+ * (`tokenPace.labels` overrides it), the full `TITLE`, and the provider's own usage page.
+ * `USAGE_PAGE` is re-exported because the command that opens the page must link to exactly
+ * the address the tooltip shows.
+ */
+export { USAGE_PAGE }
 
 /** Where a reading came from, in words. Shown so a figure is always traceable. */
 const ORIGIN_NAME: Record<QuotaOrigin, string> = {
@@ -96,6 +99,17 @@ export interface StatusTextInput {
   role: Role
   scanning: boolean
   consent: ConsentState
+  /**
+   * The Claude context window the status line last reported, or null. One session, not the
+   * account — absent when the bridge is not connected, and never derived from anything else.
+   */
+  context?: ContextReading | null
+  /**
+   * The budget rows of the last view-model build. Optional, because every caller that only
+   * renders quota (the preview, most tests) has none — and an absent list is no entry, not a
+   * zero: a budget nobody configured is not a budget at 0 %.
+   */
+  budgets?: BudgetRow[]
 }
 
 /** One status bar entry, fully decided. The vscode layer copies these fields verbatim. */
@@ -125,6 +139,8 @@ export type ItemSpec =
   | { kind: 'forecast'; q: QuotaState }
   | { kind: 'compact'; q: QuotaState }
   | { kind: 'summary'; sources: Source[] }
+  | { kind: 'context'; c: ContextReading }
+  | { kind: 'budget'; b: BudgetRow }
   | { kind: 'tokens' }
   | { kind: 'cost' }
 
@@ -580,7 +596,15 @@ function colorSpan(colorId: string, text: string): string {
 function titleLine(q: QuotaState, cfg: Config): string {
   const name = TITLE[q.source]
   const head = cfg.usagePageLinks ? `**[${name}](${USAGE_PAGE[q.source]})**` : `**${name}**`
-  return q.planType ? `${head} · plan \`${q.planType}\`` : head
+  // Same rule and same wording as the quota card: the provider's word, else the configured
+  // name marked as configured. The tooltip is the only place in the bar that says it at all.
+  // The name itself goes in a code span, like every other string this file takes from a
+  // provider or a settings file: the tooltip is a trusted MarkdownString with HTML enabled,
+  // so a name carrying `**`, `|` or a tag would rewrite the markup around it instead of
+  // printing. The suffix stays outside the span — it is our word, not theirs.
+  const plan = planNameOf(cfg, q.source, q.planType)
+  if (plan === null) return head
+  return `${head} · plan \`${plan.name}\`${plan.from === 'configured' ? ' (as configured)' : ''}`
 }
 
 /** In the tooltip a reset is spelled out; `none` would leave the column empty for no gain. */
@@ -931,6 +955,106 @@ export function tokenTooltip(ctx: RenderContext, what: 'tokens' | 'cost'): strin
   return out.join('\n')
 }
 
+// ---------------------------------------------------------------------------
+// Context window — one Claude Code session, straight from the status line
+// ---------------------------------------------------------------------------
+
+/**
+ * `42%`, or the token count when the payload named no window size.
+ *
+ * A percentage needs a denominator; without one there is nothing to be a share of, so the
+ * item shows what it has — tokens — and says nothing about how full anything is.
+ */
+export function contextValue(c: ContextReading): string {
+  if (c.size !== null && finite(c.usedPct)) return `${Math.round(c.usedPct as number)}%`
+  if (c.size !== null) return `${compact(c.used)}/${compact(c.size)}`
+  return compact(c.used)
+}
+
+/** Same rule as a quota item: the age is shown when the setting asks, or when it is stale. */
+function contextAgeSuffix(c: ContextReading, cfg: Config, now: number): string {
+  if (cfg.showAgeInItem === 'never') return ''
+  const age = ageMinutes(c.fetchedAt, now)
+  const stale = age !== null && age > cfg.staleAfterMinutes
+  if (cfg.showAgeInItem === 'whenStale' && !stale) return ''
+  const a = ageShort(c.fetchedAt, now)
+  return a === null ? '' : ` $(history) ${a}`
+}
+
+export function contextTooltip(c: ContextReading, ctx: RenderContext): string {
+  const { cfg } = ctx
+  if (cfg.tooltip === 'off') return ''
+  const out: string[] = ['**Context window**', '']
+  out.push(c.size === null
+    ? `${full(c.used)} tokens in the conversation`
+    : `${full(c.used)} of ${full(c.size)} tokens`
+      + (finite(c.usedPct) ? ` · ${Math.round(c.usedPct as number)} %` : ''))
+  out.push('')
+  // The whole reason this item is safe to show: it is one conversation, not the account, and
+  // it is a mirrored reading rather than something we counted.
+  out.push(`_This is the ${CONTEXT_NOTE} — not an account figure, and not comparable to a quota window._`)
+  const age = ageText(c.fetchedAt, ctx.now)
+  if (age !== null) {
+    out.push('')
+    out.push(`Status line updated ${age}.`)
+  }
+  if (cfg.tooltip !== 'compact') {
+    out.push('')
+    out.push('_measured: context window_')
+  }
+  out.push('')
+  out.push(footerLine(ctx))
+  return out.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Budgets — the reader's own limit, measured against the local buckets
+// ---------------------------------------------------------------------------
+
+/**
+ * The share of a budget, as the one figure the bar can carry.
+ *
+ * A money budget's used figure is the hypothetical API equivalent, so the share derived from
+ * it is an estimate and says so — in the bar it stands alone, with no `~$12.34` beside it to
+ * make that obvious. A period with no local data has no share at all and prints the dash the
+ * row already carries.
+ */
+export function budgetValue(b: BudgetRow): string {
+  if (b.share === null || b.shareText === '–') return '–'
+  return b.unit === 'usd' ? estimate(b.shareText) : b.shareText
+}
+
+/**
+ * Every configured budget, not only the one in the bar.
+ *
+ * The item shows the worst share because a status bar has room for one; the tooltip is where
+ * the rest of them are, so a second budget quietly running over cannot hide behind the first.
+ */
+export function budgetTooltip(rows: BudgetRow[], ctx: RenderContext): string {
+  const { cfg } = ctx
+  if (cfg.tooltip === 'off') return ''
+  const out: string[] = ['**Budgets**', '']
+  for (const b of rows) {
+    out.push(`- ${b.text}${b.partial ? ' ⚠' : ''}`)
+  }
+  out.push('')
+  // Two sentences that have to travel with the number: where the limit came from, and what
+  // a dollar figure here is not.
+  out.push('_Your own limits from `tokenPace.budgets`, measured against the locally counted'
+    + ' usage. USD is the hypothetical API equivalent, not a bill._')
+  if (rows.some((b) => b.partial)) {
+    out.push('')
+    out.push('_⚠ Unpriced models make the spend — and the share — a lower bound._')
+  }
+  if (cfg.tooltip !== 'compact') {
+    out.push('')
+    out.push('_measured: local buckets · limit: your own_')
+  }
+  out.push('')
+  out.push(footerLine(ctx))
+  return out.join('\n')
+}
+
 export function problemTooltip(q: QuotaState, ctx: RenderContext): string {
   const { cfg } = ctx
   if (cfg.tooltip === 'off') return ''
@@ -1094,6 +1218,37 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         priorityKey: '1000',
       }
     }
+    case 'context': {
+      const click = clickCommand(cfg, null)
+      return {
+        id: 'tokenPace.context',
+        text: `ctx ${contextValue(spec.c)}${contextAgeSuffix(spec.c, cfg, now)}`,
+        colorId: null,
+        alarm: false,
+        tooltipMarkdown: contextTooltip(spec.c, ctx),
+        command: click.command,
+        commandArgs: click.args,
+        name: 'Token Pace — context window',
+        priorityKey: '1000',
+      }
+    }
+    case 'budget': {
+      const click = clickCommand(cfg, null)
+      return {
+        id: 'tokenPace.budget',
+        // No colour and no alarm: a budget is the reader's own number, and painting the bar
+        // red for it would put a provider's vocabulary on a private decision. The share and
+        // the word "over" are the whole statement.
+        text: `budget ${budgetValue(spec.b)}${spec.b.over ? ' over' : ''}`,
+        colorId: null,
+        alarm: false,
+        tooltipMarkdown: budgetTooltip(ctx.budgets ?? [spec.b], ctx),
+        command: click.command,
+        commandArgs: click.args,
+        name: 'Token Pace — budget',
+        priorityKey: '1000',
+      }
+    }
     case 'tokens': {
       const { from, to } = periodRange(ctx)
       let total = 0
@@ -1242,6 +1397,18 @@ export function buildItems(input: StatusTextInput): ItemModel[] {
         }
         break
       }
+      case 'context':
+        // No reading, no entry: there is no second way to learn a context window, so an
+        // absent status line leaves the bar shorter rather than showing a dash.
+        if (ctx.context) out.push(itemModel({ kind: 'context', c: ctx.context }, ctx))
+        break
+      case 'budget': {
+        // The one closest to its own limit. A row without a share never wins, because it
+        // never lost: no local data for the period is not "0 % used".
+        const worst = worstBudget(ctx.budgets ?? [])
+        if (worst) out.push(itemModel({ kind: 'budget', b: worst }, ctx))
+        break
+      }
       case 'tokens':
         out.push(itemModel({ kind: 'tokens' }, ctx))
         break
@@ -1301,6 +1468,20 @@ const PREVIEW_KINDS: ProblemKind[] = [
  * happen for real. It is kept strictly apart from the live items: its own id space, its own
  * label, its own timer — it reads no file and writes none.
  */
+/** A synthetic budget row; the preview never reads a setting or a bucket. */
+function previewBudget(share: number, over: boolean): BudgetRow {
+  return {
+    key: 'total:month:usd', identity: 'preview', label: 'All providers · this month',
+    scope: 'total', period: 'month', unit: 'usd',
+    from: '2026-09-01', to: '2026-09-12', last: '2026-09-30',
+    limit: 200, limitText: '$200', used: share * 2, usedText: `~$${share * 2}`,
+    share, shareText: `${share} %`, over, partial: false, covered: true,
+    projected: null, projectedText: null, projectionBasis: null, projectedOver: false,
+    unmeasurable: null,
+    text: `All providers · this month: ~$${share * 2} of $200 · ${share} %`,
+  }
+}
+
 export function previewItems(cfg: Config, now: number): ItemModel[] {
   const hour = 3_600_000
   const base: StatusTextInput = {
@@ -1363,6 +1544,13 @@ export function previewItems(cfg: Config, now: number): ItemModel[] {
       },
     }),
   })
+  // Both context shapes: with a window size, and without one — the second is the state that
+  // must never grow a percentage.
+  push({ kind: 'context', c: { used: 128_000, size: 200_000, usedPct: 64, fetchedAt: fresh } })
+  push({ kind: 'context', c: { used: 128_000, size: null, usedPct: null, fetchedAt: fresh } })
+  // A budget under its limit and one over it — the second is the only state that adds a word.
+  push({ kind: 'budget', b: previewBudget(38, false) })
+  push({ kind: 'budget', b: previewBudget(118, true) })
   push({ kind: 'tokens' })
   push({ kind: 'cost' })
 

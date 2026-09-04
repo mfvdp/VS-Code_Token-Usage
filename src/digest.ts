@@ -12,6 +12,7 @@
  * Deterministic: same input, same sentences, same order.
  */
 
+import { SOURCE_TITLE } from './adapters'
 import { WindowDisplay } from './pace'
 import { compact, usd } from './render'
 import { Source } from './types'
@@ -37,7 +38,6 @@ const MAX_SENTENCES = 5
 /** Above this share of cache reads the prompt cache is doing essentially all the work. */
 const EXCELLENT = 80
 const GOOD = 50
-const SOURCE_TITLE: Record<Source, string> = { claude: 'Claude Code', codex: 'Codex' }
 
 function classify(rate: number): string {
   if (rate >= EXCELLENT) return 'excellent'

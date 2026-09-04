@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
-import { QuotaSample, QuotaWindow } from '../src/types'
+import { QuotaSample, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
 import {
   DASHBOARD_SECTION_KEYS, PROBLEM_ACTION, SOURCE_TITLE, SPARK_GAP, WEBVIEW_COMMANDS, WindowVm,
   applyMessage, buildViewModel, defaultUiState, forecastsFor, parseWebviewMessage, sparkOf,
@@ -15,6 +15,8 @@ import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
   timeConfig, win,
 } from './fixtures/viewFixtures'
+import { claudeLine, ctxFor } from './fixtures/helpers'
+import { toolAgg } from './helpers/toolAgg'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -597,4 +599,324 @@ test('a window that has just reset says "measuring" once on its card', () => {
   const row = vm.forecasts.find((f) => f.source === 'claude' && f.windowId === w.id)
   assert.ok(row)
   assert.equal(row.forecast.text, 'measuring · window just started')
+})
+
+// ---------------------------------------------------------------------------
+// Context window (F1) and plan name (F3)
+// ---------------------------------------------------------------------------
+
+const READING = { used: 128_000, size: 200_000, usedPct: 64, fetchedAt: Math.round((NOW - 120_000) / 1000) }
+
+test('the context card is built from the status-line reading and from nothing else', () => {
+  const vm = buildViewModel({ ...makeInput(), context: READING })
+  const c = vm.context
+  assert.ok(c)
+  assert.equal(c.used, 128_000)
+  assert.equal(c.size, 200_000)
+  assert.equal(c.percentText, '64 %')
+  assert.equal(c.text, '128,000 / 200,000 · 64 %')
+  assert.equal(c.note, 'current session, via the status line')
+  assert.equal(c.fresh, true)
+  assert.equal(c.ageText, '2 min ago')
+
+  // Three days of ingested tokens are on file in the fixture; none of them may produce a
+  // context window. There is no way to derive one, so the absent bridge is an absent card.
+  assert.equal(buildViewModel(makeInput()).context, null)
+  assert.equal(buildViewModel({ ...makeInput(), context: null }).context, null)
+})
+
+test('a context reading without a window size is never given a percentage', () => {
+  const vm = buildViewModel({
+    ...makeInput(),
+    context: { used: 128_000, size: null, usedPct: 40, fetchedAt: READING.fetchedAt },
+  })
+  const c = vm.context
+  assert.ok(c)
+  assert.equal(c.size, null)
+  // A percentage the payload sent without a denominator cannot be checked against anything.
+  assert.equal(c.percentText, '–')
+  assert.equal(c.text, '128,000 tokens')
+  assert.equal(c.text.includes('%'), false)
+})
+
+test('a context reading is stale by the same clock as a quota reading', () => {
+  const old = { ...READING, fetchedAt: Math.round((NOW - 90 * 60_000) / 1000) }
+  assert.equal(buildViewModel({ ...makeInput(), context: old }).context?.fresh, false)
+  // An unknown time is not an old time: nothing has shown the reading to be stale.
+  const undated = { ...READING, fetchedAt: null }
+  const c = buildViewModel({ ...makeInput(), context: undated }).context
+  assert.equal(c?.fresh, true)
+  assert.equal(c?.ageText, null)
+})
+
+test('the configured plan name fills in for a provider that names none, and says so', () => {
+  const cfgWithPlan = makeConfig({ 'tokenPace.planName': { claude: 'Max 20x', codex: '  Plus  ' } })
+  const vm = buildViewModel(makeInput({
+    cfg: cfgWithPlan,
+    quotas: [state('claude', { planType: null }), state('codex', { planType: null })],
+  }))
+  const claude = vm.quotas[0]
+  assert.equal(claude.planType, 'Max 20x')
+  assert.equal(claude.planSource, 'configured')
+  assert.equal(claude.planText, 'plan Max 20x (as configured)')
+  assert.equal(vm.quotas[1].planText, 'plan Plus (as configured)')
+
+  // The provider's own word wins and carries no qualifier.
+  const stated = buildViewModel(makeInput({ cfg: cfgWithPlan }))
+  assert.equal(stated.quotas[0].planType, 'max20')
+  assert.equal(stated.quotas[0].planSource, 'provider')
+  assert.equal(stated.quotas[0].planText, 'plan max20')
+
+  // Neither source: no name, and nothing invented in its place.
+  const none = buildViewModel(makeInput({ quotas: [state('claude', { planType: null })] }))
+  assert.equal(none.quotas[0].planType, null)
+  assert.equal(none.quotas[0].planSource, null)
+  assert.equal(none.quotas[0].planText, null)
+})
+
+// ---------------------------------------------------------------------------
+// Records (F2) and the local five-hour block (F5)
+// ---------------------------------------------------------------------------
+
+test('the records of the range are on the view model, capped by dashboard.topN', () => {
+  const vm = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.attribution': 'session', 'tokenPace.dashboard.topN': 2 }),
+    agg: buildAgg('session'),
+  }))
+  const r = vm.records
+  // The fixture's busiest day is the one with three sessions of work on it.
+  assert.equal(r.peakDay?.day, TODAY)
+  assert.ok(r.streak && r.streak.days >= 3, JSON.stringify(r.streak))
+  assert.equal(r.streak?.to, TODAY)
+  assert.ok(r.topModels.length > 0)
+  // The cap is a cap on rows, so no table may be longer than it — and the shares are shares
+  // of everything in the range, not of the two rows that were listed.
+  for (const table of [r.topModels, r.topProjects, r.topSessions]) {
+    assert.ok(table.length <= 2, `${table.length} rows survived a topN of 2`)
+  }
+  assert.equal(r.attributionOn, true)
+  assert.ok(r.topProjects.length > 0)
+  assert.ok(r.topSessions.length > 0)
+
+  // Rows are sorted by usage, and every figure is text the view prints verbatim.
+  const first = r.topModels[0]
+  assert.equal(typeof first.usage, 'string')
+  assert.match(first.share, /%$/)
+})
+
+test('without attribution the two lower record tables are empty by consent, not by chance', () => {
+  const vm = buildViewModel(makeInput())
+  assert.equal(vm.records.attributionOn, false)
+  assert.deepEqual(vm.records.topProjects, [])
+  assert.deepEqual(vm.records.topSessions, [])
+  // The models table needs no consent — it comes from the buckets.
+  assert.ok(vm.records.topModels.length > 0)
+})
+
+test('a provider with no window at all gets one local estimate, and no window ever does', () => {
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude', { ok: false, problem: 'no token', problemKind: 'noToken', windows: [] })],
+  }))
+  const card = vm.quotas[0]
+  const b = card.localBlock
+  assert.ok(b, 'a provider without a window has nothing but the local count')
+  assert.equal(b.source, 'claude')
+  assert.equal(b.hours, 5)
+  // The fixture's Claude work starts at 09:00 UTC, inside the five hours before NOW.
+  assert.equal(b.firstAt, '09:00')
+  assert.ok(b.text.startsWith('Local estimate — '), b.text)
+  assert.ok(b.text.includes('in the last 5 h'), b.text)
+  assert.ok(b.text.includes('first counted at 09:00'), b.text)
+  assert.ok(b.text.endsWith('Not the provider’s window; no limit is known.'), b.text)
+  // Nothing that would make it look like a window.
+  assert.equal(/%/.test(b.text), false, b.text)
+  assert.equal(Object.prototype.hasOwnProperty.call(b, 'percent'), false)
+
+  // A provider that does report a window keeps its window and gets no second figure beside it.
+  assert.equal(buildViewModel(makeInput()).quotas[0].localBlock, null)
+})
+
+test('a provider with no window and no local tokens gets no estimate either', () => {
+  const vm = buildViewModel(makeInput({
+    agg: new Aggregator(),
+    quotas: [state('codex', { ok: false, problem: 'no token', problemKind: 'noToken', windows: [] })],
+  }))
+  // An empty span would state a measured idle five hours; the buckets cannot tell an idle
+  // hour from one that was never read.
+  assert.equal(vm.quotas[0].localBlock, null)
+})
+
+// ---------------------------------------------------------------------------
+// Tool usage
+// ---------------------------------------------------------------------------
+
+function toolVm(over: Record<string, unknown> = {}, opts: { models?: string[]; providers?: ('claude' | 'codex')[] } = {}) {
+  const t = toolAgg(NOW)
+  return buildViewModel(makeInput({
+    agg: t.agg,
+    range: t.range,
+    cfg: makeConfig(over),
+    ui: opts.providers || opts.models
+      ? { providers: opts.providers ?? ['claude', 'codex'], models: opts.models ?? [] }
+      : undefined,
+  }))
+}
+
+test('tool calls are grouped by name, busiest first, with the models that made them', () => {
+  const t = toolVm().tools
+  assert.deepEqual(t.rows.map((r) => r.name), ['Read', 'Bash', 'Edit', 'exec'])
+  assert.deepEqual(t.rows.map((r) => r.calls), [3, 2, 1, 1])
+  assert.equal(t.rows[0].callsText, '3')
+  assert.equal(t.total, 7)
+  assert.equal(t.totalText, '7')
+  assert.equal(t.distinct, 4)
+  assert.equal(t.hidden, 0)
+  // The models are named, sorted and de-duplicated — one row can be two models.
+  assert.equal(t.rows[0].models, 'claude-opus-4-6')
+  assert.equal(t.rows[1].models, 'claude-opus-4-6, claude-sonnet-4-6')
+  assert.equal(t.rows[0].sources, SOURCE_TITLE.claude)
+  assert.equal(t.rows[3].sources, SOURCE_TITLE.codex)
+})
+
+test('a tool share is a share of the calls counted in the range, not of the listed rows', () => {
+  const t = toolVm({ 'tokenPace.dashboard.topN': 2 }).tools
+  assert.equal(t.rows.length, 2)
+  assert.equal(t.hidden, 2)
+  assert.equal(t.distinct, 4)
+  // 3 of 7, not 3 of the 5 calls the two listed rows hold.
+  assert.equal(t.rows[0].share, '43 %')
+  assert.equal(t.total, 7)
+})
+
+test('the tool table states the day tool counting started, and never invents one', () => {
+  const t = toolVm()
+  assert.equal(t.tools.since, t.range.from)
+  assert.ok(t.tools.notes.some((n) => n === `Tool calls counted since ${t.range.from}.`), t.tools.notes.join(' | '))
+
+  // Nothing counted at all: no day is claimed, and the empty table says why it is empty.
+  const empty = buildViewModel(makeInput({ agg: new Aggregator() })).tools
+  assert.equal(empty.since, null)
+  assert.equal(empty.total, 0)
+  assert.equal(empty.totalText, '–')
+  assert.deepEqual(empty.rows, [])
+  assert.ok(empty.notes.some((n) => n.includes('No tool call has been counted yet')), empty.notes.join(' | '))
+})
+
+test('the coverage day survives a range that starts after the first tool call', () => {
+  const t = toolAgg(NOW)
+  const vm = buildViewModel(makeInput({
+    agg: t.agg,
+    range: { from: t.days[1], to: t.days[1], label: 'Today', preset: 'today' },
+  }))
+  // Only the later day is counted, but the table still names the day counting began.
+  assert.equal(vm.tools.total, 4)
+  assert.equal(vm.tools.since, t.days[0])
+})
+
+test('the provider and model filters reach the tool table', () => {
+  assert.deepEqual(toolVm({}, { providers: ['codex'] }).tools.rows.map((r) => r.name), ['exec'])
+  const sonnet = toolVm({}, { models: ['claude-sonnet-4-6'] }).tools
+  assert.deepEqual(sonnet.rows.map((r) => r.name), ['Bash', 'Edit'])
+  assert.equal(sonnet.total, 2)
+  assert.equal(sonnet.rows[0].share, '50 %')
+})
+
+test('a day that hit the tool-name cap says so instead of pretending to be complete', () => {
+  const t = toolAgg(NOW)
+  for (let i = 0; i < TOOL_NAME_CAP + 5; i++) {
+    t.agg.addClaudeLine(claudeLine({
+      id: `cap-${i}`, ts: NOW, usage: { input: 1, output: 1 },
+      tools: [{ name: `tool_${String(i).padStart(3, '0')}`, id: `toolu_cap_${i}` }],
+    }), ctxFor())
+  }
+  const tools = buildViewModel(makeInput({ agg: t.agg, range: t.range })).tools
+  assert.equal(tools.truncated, true)
+  assert.ok(tools.notes.some((n) => n.includes(String(TOOL_NAME_CAP))), tools.notes.join(' | '))
+})
+
+test('a tool row carries a count and a share, never a limit, a cost or a bar', () => {
+  const t = toolVm().tools
+  for (const r of t.rows) {
+    assert.deepEqual(Object.keys(r).sort(), ['callsText', 'calls', 'models', 'name', 'share', 'sources'].sort())
+    assert.equal(/[█▁▏▎▍▌▋▊▉]/.test(JSON.stringify(r)), false, r.name)
+    assert.equal(/\$/.test(JSON.stringify(r)), false, r.name)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Budgets
+// ---------------------------------------------------------------------------
+
+const BUDGETS = [
+  { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+  { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+]
+
+test('a budget is measured against the number the user typed and nothing else', () => {
+  const vm = buildViewModel(makeInput({
+    agg: buildAgg(), cfg: makeConfig({ 'tokenPace.budgets': BUDGETS }),
+  }))
+  assert.equal(vm.budgets.length, 2)
+  const [money, tokens] = vm.budgets
+  assert.equal(money.limit, 20)
+  assert.equal(money.limitText, '$20.00')
+  assert.equal(money.unit, 'usd')
+  // The month of `now`, not the selected range: a month budget is a question about the month.
+  assert.equal(money.from, '2026-09-01')
+  assert.equal(money.last, '2026-09-30')
+  assert.equal(tokens.from, TODAY)
+  assert.equal(tokens.last, TODAY)
+  // The share is of the user's own limit; every text is the one the three views print.
+  assert.equal(money.shareText, '2 %')
+  assert.ok(money.text.startsWith('All providers · this month: ~$'), money.text)
+  assert.ok(tokens.text.startsWith('Claude Code · today: '), tokens.text)
+})
+
+test('the panel filters cannot move a budget', () => {
+  // A budget is a standing limit. A provider chip is a question about the table below it,
+  // and a limit that shrank because a chip was clicked would be a different question under
+  // the same label.
+  const cfgWith = makeConfig({ 'tokenPace.budgets': BUDGETS })
+  const all = buildViewModel(makeInput({ agg: buildAgg(), cfg: cfgWith }))
+  const filtered = buildViewModel(makeInput({
+    agg: buildAgg(), cfg: cfgWith, ui: { providers: ['codex'], models: ['gpt-5.3-codex'] },
+  }))
+  assert.deepEqual(filtered.budgets.map((b) => b.used), all.budgets.map((b) => b.used))
+  // The tables beside them did move, so the filter really was applied.
+  assert.notDeepEqual(filtered.models.rows.map((m) => m.model), all.models.rows.map((m) => m.model))
+})
+
+test('a budget that cannot be measured keeps its row and says why', () => {
+  // A money budget has nothing to measure while the cost column is off — but it is still a
+  // budget the reader configured, and a view model that quietly forgets it makes the panel
+  // say "No budget configured" about a settings file that plainly configures one.
+  const noCost = buildViewModel(makeInput({
+    agg: buildAgg(),
+    cfg: makeConfig({ 'tokenPace.budgets': BUDGETS, 'tokenPace.showCost': false }),
+  }))
+  assert.deepEqual(noCost.budgets.map((b) => b.unit), ['usd', 'tokens'])
+  assert.equal(noCost.budgets[0].unmeasurable, 'not measured while tokenPace.showCost is off')
+  assert.equal(noCost.budgets[0].usedText, '–')
+  assert.equal(noCost.budgets[0].share, null)
+  assert.equal(noCost.budgets[1].unmeasurable, null)
+  // Nothing configured, nothing shown — never a row with an invented limit.
+  assert.deepEqual(buildViewModel(makeInput({ agg: buildAgg() })).budgets, [])
+})
+
+test('an empty install gives a budget no share at all instead of 0 %', () => {
+  const vm = buildViewModel(makeInput({
+    agg: new Aggregator(), quotas: [], cfg: makeConfig({ 'tokenPace.budgets': BUDGETS }),
+  }))
+  for (const b of vm.budgets) {
+    assert.equal(b.covered, false)
+    assert.equal(b.share, null)
+    assert.equal(b.shareText, '–')
+    assert.equal(b.projectedText, null)
+  }
+})
+
+test('budget is a section key the panel can fold', () => {
+  assert.ok((DASHBOARD_SECTION_KEYS as readonly string[]).includes('budget'))
+  assert.deepEqual(parseWebviewMessage({ type: 'toggleSection', key: 'budget' }),
+    { type: 'toggleSection', key: 'budget' })
 })

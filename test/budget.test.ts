@@ -183,14 +183,30 @@ test('an unpriced model makes a money budget a lower bound', () => {
   assert.equal(tokens[0].partial, false)
 })
 
-test('a money budget is dropped while cost display is off', () => {
+test('a money budget keeps its row, all dashes, while cost display is off', () => {
+  // The row may not vanish: a budget nobody is counting is still a budget the reader
+  // configured, and dropping it lets the panel answer "no budget configured" to a settings
+  // file that configures one. Every figure is a dash and the reason names the setting.
   const agg = fromBuckets([bucket({ day: TODAY, input: 500_000 })])
   const rows = budgetRows(
     ctxOf(agg, { showCost: false }),
     [spec({ period: 'day', unit: 'usd', limit: 10 }), spec({ period: 'day', unit: 'tokens', limit: 10 })],
     NOW,
   )
-  assert.deepEqual(rows.map((r) => r.unit), ['tokens'])
+  assert.deepEqual(rows.map((r) => r.unit), ['usd', 'tokens'])
+  const money = rows[0]
+  assert.equal(money.unmeasurable, 'not measured while tokenPace.showCost is off')
+  assert.equal(money.usedText, '–')
+  assert.equal(money.shareText, '–')
+  assert.equal(money.share, null)
+  assert.equal(money.used, 0)
+  assert.equal(money.covered, false, 'nothing counted it, so no alert and no status-bar entry')
+  assert.equal(money.over, false)
+  assert.equal(money.projectedText, null)
+  assert.match(money.text, /tokenPace\.showCost/)
+  // The token budget beside it is untouched.
+  assert.equal(rows[1].unmeasurable, null)
+  assert.equal(rows[1].covered, true)
 })
 
 test('a scope only ever counts its own provider', () => {
@@ -210,20 +226,28 @@ test('a scope only ever counts its own provider', () => {
   assert.equal(rows[2].used, 800_000, 'total is the sum of the enabled providers, per their own rules')
 })
 
-test('a budget for a switched-off provider is dropped, not shown at zero', () => {
+test('a budget for a switched-off provider is a dash, never a zero', () => {
   const agg = fromBuckets([bucket({ day: TODAY, source: 'claude', input: 300_000 })])
   const ctx = ctxOf(agg, { sources: ['claude'] })
   const rows = budgetRows(ctx, [
     spec({ scope: 'codex', period: 'day', limit: 1_000_000 }),
     spec({ scope: 'total', period: 'day', limit: 1_000_000 }),
   ], NOW)
-  assert.deepEqual(rows.map((r) => r.scope), ['total'])
-  assert.equal(rows[0].used, 300_000, 'total means the providers that are switched on')
+  assert.deepEqual(rows.map((r) => r.scope), ['codex', 'total'])
+  assert.equal(rows[0].unmeasurable, 'not measured while Codex is not selected')
+  assert.equal(rows[0].usedText, '–')
+  assert.equal(rows[0].share, null)
+  assert.equal(rows[1].unmeasurable, null)
+  assert.equal(rows[1].used, 300_000, 'total means the providers that are switched on')
 })
 
-test('no budget is dropped and none is shown when no provider is selected', () => {
+test('with no provider selected every budget is a row nothing counts', () => {
   const agg = fromBuckets([bucket({ day: TODAY, input: 300_000 })])
-  assert.deepEqual(budgetRows(ctxOf(agg, { sources: [] }), [spec({ period: 'day' })], NOW), [])
+  const rows = budgetRows(ctxOf(agg, { sources: [] }), [spec({ period: 'day' })], NOW)
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].used, 0)
+  assert.equal(rows[0].usedText, '–')
+  assert.ok(rows[0].unmeasurable, 'the row states why it has no figure')
 })
 
 test('the model filter reaches a budget like every other figure', () => {

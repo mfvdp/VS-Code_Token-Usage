@@ -18,6 +18,7 @@ import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
   timeConfig, win,
 } from './fixtures/viewFixtures'
+import { toolAgg } from './helpers/toolAgg'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -249,4 +250,193 @@ test('the pace unit is percent of the window — no view ever says "points"', ()
     ...quickPickItems(vm).flatMap((i) => [i.label, i.description ?? '', i.detail ?? '']),
   ]
   for (const t of texts) assert.doesNotMatch(t, /\bpoints\b/i, t)
+})
+
+test('a context window is only ever a reading — never something we counted', () => {
+  // Three days of buckets are on file in this fixture. A context window cannot be derived
+  // from them (they count what was sent, not what is still in the conversation), so the
+  // absence of the status line has to stay an absence in all three views.
+  const vm = buildViewModel(makeInput())
+  assert.equal(vm.context, null)
+  assert.equal(markdownDocument(vm).includes('Context window'), false)
+  assert.equal(quickPickItems(vm).some((i) => i.label.includes('Context window')), false)
+
+  // And with a reading that carries no window size, no view may state a share of it.
+  const sizeless = buildViewModel({
+    ...makeInput(),
+    context: { used: 128_000, size: null, usedPct: 71, fetchedAt: Math.round(NOW / 1000) },
+  })
+  const card = sizeless.context
+  assert.ok(card)
+  assert.equal(card.percentText, '–')
+  const line = `${card.text} ${card.percentText}`
+  assert.equal(/\d\s*%/.test(card.text), false, card.text)
+  assert.equal(line.includes('71'), false, line)
+  const rendered = quickPickItems(sizeless).find((i) => i.label.startsWith('Context window: '))
+  assert.ok(rendered)
+  assert.equal(/\d\s*%/.test(rendered.label), false, rendered.label)
+})
+
+test('a plan name is a label, never a limit', () => {
+  // The setting exists so a card can be titled; nothing downstream may turn it into a
+  // window, a denominator or a threshold. A provider that reports no window still reports
+  // none once a plan name is configured.
+  const vm = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.planName': { claude: 'Max 20x' } }),
+    quotas: [state('claude', { ok: false, planType: null, windows: [], problem: 'no token' })],
+  }))
+  const card = vm.quotas[0]
+  assert.equal(card.planText, 'plan Max 20x (as configured)')
+  assert.equal(card.windows.length, 0)
+  assert.equal(vm.forecasts.length, 0)
+  assert.equal(vm.windowUsage.length, 0)
+})
+
+test('the local five-hour block is a count, never a window', () => {
+  // The whole point of the shape: a reader who sees a percentage beside a five-hour figure
+  // reads it as the provider's. There is no limit behind this number, so there is nothing to
+  // divide by — and no bar, pace, forecast or alert may appear anywhere it is rendered.
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude', { ok: false, problem: 'no token', problemKind: 'noToken', windows: [] })],
+  }))
+  const card = vm.quotas[0]
+  const b = card.localBlock
+  assert.ok(b)
+  for (const key of ['percent', 'percentText', 'limit', 'level', 'verdict', 'forecast', 'resetsAt', 'display']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(b, key), false, `localBlock carries ${key}`)
+  }
+  assert.equal(/\d\s*%/.test(b.text), false, b.text)
+  assert.ok(b.text.includes('no limit is known'), b.text)
+  // Nothing else on the view model grew a window out of it either.
+  assert.equal(card.windows.length, 0)
+  assert.equal(vm.forecasts.length, 0)
+  assert.equal(vm.windowUsage.length, 0)
+
+  // The same sentence in the flat views, and no percentage next to it in either.
+  const item = quickPickItems(vm).find((i) => i.label.startsWith('Local estimate'))
+  assert.ok(item)
+  assert.equal(item.label, b.text)
+  assert.equal(/\d\s*%/.test(`${item.label} ${item.description ?? ''}`), false, item.label)
+  const md = markdownDocument(vm)
+  const line = md.split('\n').find((l) => l.startsWith('Local estimate'))
+  assert.equal(line, b.text)
+})
+
+test('a record is a fact about the range, never a share of something unmeasured', () => {
+  const vm = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.attribution': 'session' }),
+    agg: buildAgg('session'),
+  }))
+  const r = vm.records
+  // Every share is a percentage of a total that was actually summed here; a row that could
+  // not be priced prints a dash rather than a lower bound dressed as a cost.
+  for (const e of [...r.topModels, ...r.topProjects, ...r.topSessions]) {
+    assert.match(e.share, /^(–|\d+(\.\d+)? %)$/, e.share)
+    if (e.cost !== '–') assert.match(e.cost, /^~/, `${e.label}: ${e.cost}`)
+  }
+  // With attribution off the tables are empty rather than filled from another source.
+  const off = buildViewModel(makeInput())
+  assert.equal(off.records.attributionOn, false)
+  assert.deepEqual(off.records.topProjects, [])
+  assert.deepEqual(off.records.topSessions, [])
+})
+
+test('a tool count is a count of what was read, never an estimate and never a limit', () => {
+  const t = toolAgg(NOW)
+  const vm = buildViewModel(makeInput({ agg: t.agg, range: t.range }))
+  const tools = vm.tools
+  for (const r of tools.rows) {
+    // A share of the calls counted here, and nothing else: no "~", no cost, no denominator
+    // from a provider — tool calls have no quota to be a share of.
+    assert.match(r.share, /^(–|\d+ %)$/, r.share)
+    assert.equal(/~/.test(`${r.callsText}${r.models}`), false, r.name)
+  }
+  // The table says since when it counts. Everything before the upgrade to the tool table has
+  // tokens but no tool rows, and a silent zero there would read as a quiet week.
+  assert.ok(tools.since)
+  assert.ok(tools.notes.some((n) => n.includes(String(tools.since))), tools.notes.join(' | '))
+
+  // Nothing counted: a dash, not a zero, in every rendering.
+  const empty = buildViewModel(makeInput({ agg: new Aggregator(), quotas: [] }))
+  assert.equal(empty.tools.totalText, '–')
+  assert.equal(empty.tools.since, null)
+  const md = markdownDocument(empty)
+  const section = md.slice(md.indexOf('## Tools'), md.indexOf('## ', md.indexOf('## Tools') + 5))
+  assert.equal(/\b0 call/.test(section), false, section)
+  assert.equal(quickPickItems(empty).some((i) => /^Tool .+: /.test(i.label)), false)
+})
+
+test('a token budget and a money budget are never combined into one figure', () => {
+  // The one rule that makes a budget list readable at all: dollars and tokens answer two
+  // different questions, so nothing may add them, average them or rank them by raw value.
+  // Only the share — a fraction of the reader's own limit — crosses between the two.
+  const vm = buildViewModel(makeInput({
+    agg: buildAgg(),
+    cfg: makeConfig({
+      'tokenPace.budgets': [
+        { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+        { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+      ],
+    }),
+  }))
+  const [money, tokens] = vm.budgets
+  assert.equal(money.unit, 'usd')
+  assert.equal(tokens.unit, 'tokens')
+  // Each row's used figure came from its own unit's sum, and neither one is the other's total.
+  assert.notEqual(money.used, tokens.used)
+  assert.ok(money.usedText.startsWith('~$'), money.usedText)
+  assert.equal(/\$/.test(tokens.usedText + tokens.limitText), false, tokens.text)
+  // No row, and no view, carries a sum across the two.
+  const total = money.used + tokens.used
+  const md = markdownDocument(vm)
+  for (const text of [md, quickPickItems(vm).map((i) => `${i.label} ${i.description ?? ''}`).join('\n')]) {
+    assert.equal(text.includes(String(total)), false, text)
+  }
+  // The status bar picks by share, so a huge token count cannot outrank a nearly spent budget.
+  const worst = [...vm.budgets].sort((a, b) => (b.share ?? -1) - (a.share ?? -1))[0]
+  assert.equal(worst.key, money.share! >= tokens.share! ? money.key : tokens.key)
+})
+
+test('a budget with no local data for its period is a dash, never 0 %', () => {
+  const vm = buildViewModel(makeInput({
+    agg: new Aggregator(), quotas: [],
+    cfg: makeConfig({ 'tokenPace.budgets': [{ scope: 'total', period: 'month', unit: 'usd', limit: 20 }] }),
+  }))
+  const b = vm.budgets[0]
+  assert.equal(b.share, null)
+  assert.equal(b.shareText, '–')
+  // And no projection either: an extrapolation from nothing is an invention.
+  assert.equal(b.projectedText, null)
+  const item = quickPickItems(vm).find((i) => i.label === b.text)
+  assert.ok(item)
+  assert.equal(/\b0 %/.test(item.label), false, item.label)
+})
+
+test('a budget nothing can measure is stated, never quietly forgotten', () => {
+  // A money budget has nothing to count while the cost column is off. Dropping the row made
+  // all three views describe the reader's own settings wrongly — the panel went as far as
+  // "No budget configured" — so the row stays, every figure on it is a dash, and the setting
+  // in the way is named. Absence is stated here exactly as it is everywhere else.
+  const vm = buildViewModel(makeInput({
+    agg: buildAgg(),
+    cfg: makeConfig({
+      'tokenPace.budgets': [{ scope: 'total', period: 'month', unit: 'usd', limit: 20 }],
+      'tokenPace.showCost': false,
+    }),
+  }))
+  assert.equal(vm.budgets.length, 1)
+  const b = vm.budgets[0]
+  assert.equal(b.unmeasurable, 'not measured while tokenPace.showCost is off')
+  assert.equal(b.usedText, '–')
+  assert.equal(b.shareText, '–')
+  assert.equal(b.share, null)
+  assert.equal(b.covered, false, 'no alert and no status-bar entry can stand on it')
+  // The markdown keeps the section and says why the row is empty.
+  const md = markdownDocument(vm)
+  assert.ok(md.includes('## Budgets'), md)
+  assert.ok(md.includes('tokenPace.showCost'), md)
+  assert.equal(/\$0\.00|\b0 %/.test(md.slice(md.indexOf('## Budgets'), md.indexOf('\n## ', md.indexOf('## Budgets') + 5))), false, md)
+  // And so do the Quick Pick and the copied summary.
+  assert.ok(quickPickItems(vm).some((i) => i.label === b.text), b.text)
+  assert.ok(toMarkdownSummary(vm).includes(b.text), b.text)
 })

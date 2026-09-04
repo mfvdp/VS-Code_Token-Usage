@@ -28,6 +28,7 @@
  * makes the whole rule set testable.
  */
 
+import { PROVIDER_NAME } from './adapters'
 import { BudgetPeriod, BudgetRow } from './budget'
 import { AlertConfig } from './config'
 import { MementoLike } from './storage'
@@ -100,8 +101,15 @@ export type Notify = (
   level: 'info' | 'warning',
 ) => PromiseLike<string | undefined>
 
-/** Entries older than this are dropped: their cycle cannot come back. */
-const ENTRY_TTL_MS = 14 * 24 * 60 * 60 * 1000
+/**
+ * Entries older than this are dropped: their cycle cannot come back.
+ *
+ * It has to outlast the longest budget period, not just the longest quota window: a
+ * month budget's "once per period" lives entirely in its entry, so a 31-day period
+ * whose entry is pruned on day 15 would announce itself a second time. Forty-five days
+ * clears every period the settings allow; the count stays bounded by MAX_ENTRIES.
+ */
+const ENTRY_TTL_MS = 45 * 24 * 60 * 60 * 1000
 const MAX_ENTRIES = 200
 const DEFAULT_STALE_MS = 20 * 60 * 1000
 
@@ -113,9 +121,7 @@ export function nextLocalMidnight(now: number): number {
 }
 
 function providerName(source: AlertSubject): string {
-  if (source === 'claude') return 'Claude'
-  if (source === 'codex') return 'Codex'
-  return 'All providers'
+  return source === 'total' ? 'All providers' : PROVIDER_NAME[source]
 }
 
 function pct(value: number): string {
@@ -532,7 +538,14 @@ export class Alerts {
       if (!r.covered || r.share === null || !Number.isFinite(r.share)) continue
       if (r.share < level) continue
       const entry = entryOf(state, r.identity)
-      if (entry.budgetLevel !== undefined && level <= entry.budgetLevel) continue
+      if (entry.budgetLevel !== undefined && level <= entry.budgetLevel) {
+        // Already announced for this period — but the entry is what keeps it quiet, so it
+        // is touched while the period is still running. Without this, a save triggered by
+        // any other alert could age it out mid-period and the period would speak twice.
+        entry.at = now
+        state.entries[r.identity] = entry
+        continue
+      }
       entry.budgetLevel = level
       entry.at = now
       state.entries[r.identity] = entry

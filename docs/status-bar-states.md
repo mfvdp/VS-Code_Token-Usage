@@ -54,6 +54,8 @@ entry (right-click on the status bar):
 | Quota problem | `tokenPace.quota.<source>.problem` |
 | Extra usage | `tokenPace.extra.<source>` |
 | Forecast | `tokenPace.forecast.<source>` |
+| Context window | `tokenPace.context` |
+| Budget | `tokenPace.budget` |
 | Tokens | `tokenPace.tokens` |
 | API cost | `tokenPace.cost` |
 | Collective item (`density: minimal`) | `tokenPace.summary` |
@@ -104,6 +106,10 @@ Two modifiers apply on top:
 | `CC extra $12.00 of $50.00 · 24 %` | extra usage / prepaid credits | `charts.blue` | A separate pot; it is never folded into the plan windows. |
 | `CC extra off (never enabled)` | extra usage exists but is switched off | `tokenPace.stale` | A disabled allowance is stated, never drawn as "0 % used". The reason in brackets is the provider's own (`never enabled`, `switched off`, or its `disabled_reason`); with none it reads plain `off`. |
 | `CC $(graph) 5h ~empty in 40m` | forecast item (`statusBar.show` contains `forecast`) | default | Estimate — it carries `~`. It disappears when there is nothing to measure. |
+| `ctx 64%` | context window of the current Claude Code session (`statusBar.show` contains `context`) | default | One conversation, not the account, and never comparable to a quota window. It needs the connected status line; with no reading the entry is absent rather than a dash. |
+| `ctx 128K` | the same, but the payload named no window size | default | No denominator, no percentage: the tokens stand alone and no bar is drawn. |
+| `budget ~42 %` | the configured budget closest to its own limit (`statusBar.show` contains `budget`) | default | Your own limit from `tokenPace.budgets`, measured against the locally counted usage — never a plan or a quota. A money budget is the hypothetical API equivalent, so its share carries `~`; a token budget's does not. The tooltip lists every budget. |
+| `budget 118 % over` | the same, past the limit you stated | default | No colour and no alarm: the limit is yours, and a provider's warning vocabulary would misrepresent it. Rows without local data for the period cannot win the comparison — an unread period is not a quiet one. |
 | `Σ 4.6M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope` | default | Fresh input + cache write + output; cache reads are listed separately in the tooltip. |
 | `$(sync~spin) reading history …` | the token item during a cold scan | default | The figures are still growing; they are not a total yet. |
 | `~$1.23 · today` / `~$12.30 · 7d` | hypothetical API cost | default | Estimate. `⚠` appended means some tokens have no price and are missing from the sum. |
@@ -144,7 +150,9 @@ is the whole point, and the provider label has to stay readable.
 
 `tokenPace.tooltip` decides how much of it is built:
 
-* **full** — title (a link to the provider's usage page unless `usagePageLinks` is off),
+* **full** — title (a link to the provider's usage page unless `usagePageLinks` is off, with
+  the plan name beside it: what the provider states, else `tokenPace.planName`, and the second
+  kind always prints as `plan Max 20x (as configured)`),
   the window table `Window | Used | Elapsed | Pace | Resets`, a forecast line per window
   that has one, the `windowSelect: auto` explanation, extra usage, the freshness line, the
   token tables for today / 7 days / 30 days, the composition and cache-hit line, the

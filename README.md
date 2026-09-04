@@ -171,9 +171,13 @@ the remaining share, not a prediction, which is why it carries `~`.
 ```
 
 * **Entries.** `tokenPace.statusBar.show` is an ordered array of `claudeQuota`, `codexQuota`,
-  `extra`, `tokens`, `cost`, `forecast`. The array order is the display order (drag the rows
-  in the settings UI); the order *inside* one entry is fixed. An empty list hides the status
-  bar entirely.
+  `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`. The array order is the display
+  order (drag the rows in the settings UI); the order *inside* one entry is fixed. An empty
+  list hides the status bar entirely. `context` is off by default and appears only while the
+  Claude Code status line is connected — it is one session's context window, never an account
+  figure. `budget` is off by default too and shows the configured budget closest to its own
+  limit (`budget 63 %`, `budget ~63 %` for a money budget, `budget 118 % over`); the tooltip
+  lists all of them.
 * **Density.** `full` (default) gives every window its own entry, `compact` folds a provider's
   windows into one item (`CC 25%·2h14m | 69%·6d`), `minimal` folds every provider into a
   single `TP 69% ▲`. Problem states are never folded — a named cause is the point.
@@ -297,21 +301,26 @@ writes no file, and never mixes with the live items.
 | Section | Contents |
 |---|---|
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
-| `quota` | One card per provider: bar with elapsed tick and a second tick for the projected value at the reset, verdict, reset, forecast line, sustainable rate, sparkline, extra usage, and a freshness row (last check · last data · last local event · next refresh · snapshot age) |
+| `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
+| `quota` | One card per provider: the plan name where one is known, bar with elapsed tick and a second tick for the projected value at the reset, verdict, reset, forecast line, sustainable rate, sparkline, extra usage, and a freshness row (last check · last data · last local event · next refresh · snapshot age). A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |
 | `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost), the composition bar, cache economy, calendar periods and the plan factor |
 | `chart` | Stacked daily (or weekly) bars for the selected range, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
 | `models` | Per-model breakdown with usage, output, requests, cache hit, cost, share and price provenance; sortable, with average and P90 turn length where enough samples exist |
 | `heatmap` | Calendar heatmap of the last 53 weeks with current and longest streak, active days, peak day and a variability measure. Days outside the coverage are dotted, not empty |
 | `hours` | Hour-of-day profile and a weekday × 4-hour grid |
+| `records` | Records of the selected range: peak day, longest run of days with usage, and the top models, projects and sessions (`dashboard.topN` rows each). Off by default; the two lower tables need `tokenPace.attribution` |
+| `tools` | Tool calls of the selected range by name, with the share of the calls counted in it and the models that made them (`dashboard.topN` rows). Off by default; names only, never a tool's input or its result, and the section states the day counting started |
+| `budget` | Your own limits from `tokenPace.budgets`: used, limit, share against **that** number, and the end-of-period projection. Off by default; a period with no local data shows a dash, and no budget is ever added to another |
 | `forecast` | Burn rate, exhaustion forecast, end-of-window projection, local usage inside the running window, and per-project attribution inside it |
 | `history` | Reset retrospective: how often the window was exhausted, how much was left over |
 | `projects` | Per-project breakdown — needs `tokenPace.attribution` |
 | `sessions` | Per-session breakdown — needs `tokenPace.attribution: session` |
 | `dataQuality` | Roots, file counts, coverage, bucket counts, retention, quota history size, every source with its age or its failure, drift, calibration, bridge state, consent, role — plus buttons for the export and diagnostics commands |
 
-Defaults omit `history`, `projects` and `sessions`; `projects` and `sessions` stay empty until
-attribution is switched on and say so instead of showing an empty table.
+Defaults omit `context`, `records`, `tools`, `budget`, `history`, `projects` and `sessions`; `projects` and `sessions` stay
+empty until attribution is switched on and say so instead of showing an empty table, and
+`context` says how a reading could be had instead of inventing one.
 
 **Ranges.** Chips for `today`, `yesterday`, `7d`, `30d`, `90d`, `thisWeek`, `thisMonth`,
 `lastMonth`, `year`, `all`, plus two date fields for a custom range (capped at five years, and
@@ -684,13 +693,26 @@ non-standard tier explicitly.
 They are a subset of output, so the composition bar deliberately does not draw them as their own
 slice — that would count them twice.
 
+**Tool calls.** The `tools` section counts how often each tool was called, by name, per day and
+model. It is a small side table beside the buckets, not a bucket dimension: a tool dimension
+would multiply every bucket by models × tiers × hours and turn every sum into a guess. Only the
+**name** is read — `Read`, `Bash`, an MCP server's `files.read` — never an argument, a path or a
+result. At most 100 distinct names are kept per provider and day; when a day exceeds that, the
+section and the export say so instead of quietly showing a short list. The rows are kept for at
+most 90 days — a table keyed by day × model × name cannot be carried as far as a rolled-up
+bucket — and for less when `tokenPace.retentionDays` is shorter; the section states the first
+day it has a row for, so a range that reaches further back does not read as a quiet week.
+
 **Lower bounds.** A response with no terminal line has an output figure that is a floor, not a
 total. Such rows carry `⚠`, the tooltip states what share of today's responses are affected, and
 the dashboard's data-quality section carries the lower-bound share for the whole range.
 
-**Upgrading.** The persisted snapshot is schema version 5. A snapshot from an older version is
-discarded and the transcripts are read again from scratch — nothing is lost that the transcripts
-still hold, it just takes a moment on the first start.
+**Upgrading.** The persisted snapshot is schema version 6. Version 5 — everything before the tool
+table — is read forward with an empty tool table rather than being thrown away, so no upgrade
+forces a cold re-read; tool counting then starts with the next ingest, and the section states the
+first day it has a row for. Any older version is discarded and the transcripts are read again
+from scratch — nothing is lost that the transcripts still hold, it just takes a moment on the
+first start.
 
 ## History and forecasts
 
@@ -715,6 +737,48 @@ sections with it.
 * **Cycles.** A cycle ends when the provider announces a different reset time, or when the
   percentage falls by five points or more without one. A rise too steep to come from usage is
   treated as the limit being re-based: the cycle continues, but the rate fit restarts.
+
+## Budgets
+
+`tokenPace.budgets` is a list of limits **you** state; nothing here is derived from a plan, a
+quota window or a price list. Each entry names a scope (`total`, `claude`, `codex`), a period
+(`day`, `week`, `month`), a unit (`usd`, `tokens`) and your own `limit`, plus an optional
+`label`:
+
+```json
+"tokenPace.budgets": [
+  { "scope": "total",  "period": "month", "unit": "usd",    "limit": 200 },
+  { "scope": "claude", "period": "day",   "unit": "tokens", "limit": 5000000, "label": "Daily cap" }
+]
+```
+
+* **`usd` is the hypothetical API equivalent, not a bill.** On a subscription you do not pay
+  these amounts. Unpriced models make the spend — and therefore the share — a **lower bound**,
+  marked `⚠`, exactly like the API cost column.
+* **A budget is only ever compared with itself.** A token budget and a money budget are two
+  different questions, so their raw values are never added, averaged or ranked against each
+  other. Only their shares — a fraction of *your* limit — can be compared, which is what the
+  status bar entry `budget` uses to pick the one closest to running out.
+* **A period with no local data shows a dash**, not 0 %. The figures come from the transcripts
+  Token Pace has ingested, and a budget at “0 %” would claim a quiet week where the history may
+  simply not have been read yet.
+* **A budget nothing can measure keeps its row and says so.** A `usd` budget while
+  `tokenPace.showCost` is off has nobody counting it: every figure on the row is a dash and
+  the line names what is in the way. It is never removed, because a missing row would let the
+  panel answer “No budget configured” to a settings file that plainly configures one.
+* **The projection is the same rule as the calendar card's**: the average per *elapsed* day,
+  silent below five active days and on the last day of the period, and always marked `~`.
+* Periods use your own `tokenPace.timezone`, `tokenPace.dayBoundaryHour` and
+  `tokenPace.startOfWeek`. The bounds are printed with every row.
+* An entry with an unknown scope, period or unit, or without a finite limit above zero, is
+  dropped **whole** rather than repaired — a defaulted limit would be a number Token Pace
+  invented. At most 20 budgets, one per scope × period × unit.
+* The `budget` dashboard section is off by default; the same rows appear in the Quick Pick
+  list, in the markdown document and in *Copy usage summary*.
+
+`tokenPace.alerts.budgetPercent` (default `0` = off) notifies **once per period** when a budget
+passes that percentage of its own limit — upwards only, and never while the first read of the
+transcript history is still running.
 
 ## Alerts
 
@@ -777,10 +841,25 @@ rather than writing `0.00`, and the `TOTAL` row's last column reads `lowerBound`
 one. Days without data produce no row at all — a spreadsheet that fills gaps with zeros turns
 “we were not running” into “nothing was used”, and those are different statements.
 
+The tool table cannot be a column on a bucket row — it is keyed by day and model, a bucket row
+by day, hour, model, tier and isSub, so any per-row tool number would be an invented split. It
+becomes a second file beside the one you choose instead, named `….tools.csv` and announced in
+the save dialog before anything is written:
+
+```
+day, source, model, tool, calls
+```
+
+Tool **names** only, never a call's input or its result. A `TRUNCATED` line is added when a day
+had more distinct tools than the per-day cap, so a short table cannot be mistaken for a
+complete one.
+
 **Export JSON…** writes the same buckets with the range, the timezone configuration, the pricing
 provenance (`as_of`, `custom`, `multiplier`, `unknown_model`), the totals, and the notes that
 qualify them. `costUsd` is `null`, not `0`, where there is no price. With attribution on it also
-carries a `sessions[]` array, and the note says the project labels are exactly as stored. The
+carries a `sessions[]` array, and the note says the project labels are exactly as stored. It also
+carries `tools[]` (day, source, model, tool, calls) and `toolsTruncated`; `schema_version` is `2`
+since those two were added, and everything version 1 wrote still means the same thing. The
 save dialog names what is about to leave the machine — model names always, project labels
 (basenames or salted hashes) when attribution is on — because that is the last moment to say no.
 
@@ -846,6 +925,19 @@ scheduled instead — and `CC 7d ∞` means the window has no limit, so there is
 divide by and no pace to compute. The full matrix is in
 [docs/status-bar-states.md](docs/status-bar-states.md).
 
+**When a provider reports no window at all**, the dashboard card, the Quick Pick and the
+markdown document each carry one extra line, the same line word for word:
+
+> Local estimate — 412k tokens in the last 5 h, first counted at 09:00. Not the provider’s
+> window; no limit is known.
+
+That is the number of tokens this machine ingested over the last five hours, and nothing more.
+No percentage, no bar, no pace, no forecast and no alert: there is no limit to divide by, and a
+share of an invented denominator would be our number wearing the provider’s clothes. It carries
+`≈` when part of those five hours is older than the hour buckets still kept. The moment a real
+window arrives the line is gone, and the status bar is unchanged either way — a problem state
+stays a problem state.
+
 ## Privacy
 
 Only these are read: `~/.claude/projects/` (plus `~/.config/claude/projects/`, where some Claude
@@ -861,8 +953,11 @@ and whether something shadows it) and — only in `quotaSource: poll`, only afte
 `~/.claude/sessions/*.key` and the `oauthAccount` block of `~/.claude.json` are **never** touched;
 symlinks are not followed while scanning; the walk is confined to `projects/` and `sessions/`.
 
-Transcript contents — prompts, responses, tool calls — are never stored, logged, exported or
-displayed. Nothing is written except the extension's own state in its `globalStorage`, with
+Transcript contents — prompts, responses, tool arguments and tool results — are never stored,
+logged, exported or displayed. The one thing read out of a message body is the **name** of a tool
+call, with the day, the model and how often it ran: that is what the `tools` section and the
+`tools[]` of the export are made of, and it is names and counts, never a path, an argument or an
+output. Nothing is written except the extension's own state in its `globalStorage`, with
 exactly two opt-in exceptions, each behind its own consent dialog and each with a backup or a
 never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
 status-line bridge. Both are off by default and both are disabled in Restricted Mode.
@@ -943,7 +1038,7 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `statusBar.show` | `["claudeQuota","codexQuota","tokens"]` | Which entries the status bar shows **and in which order**: `claudeQuota`, `codexQuota`, `extra`, `tokens`, `cost`, `forecast`. Empty hides the bar. `cost` needs `showCost`, `forecast` needs `quotaHistoryDays` above 0 |
+| `statusBar.show` | `["claudeQuota","codexQuota","tokens"]` | Which entries the status bar shows **and in which order**: `claudeQuota`, `codexQuota`, `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`. Empty hides the bar. `cost` needs `showCost`, `forecast` needs `quotaHistoryDays` above 0, `context` needs the connected status line, `budget` needs `budgets` |
 | `windowSelect` | `worstPace` | Which quota windows appear: `worstPace` (one entry per tool — the window that needs attention), `all`, `leading`, `session`, `weekly`, `auto` |
 | `density` | `full` | `full`, `compact` (one item per provider), `minimal` (one item in total) |
 | `clickAction` | `dashboard` | What a click does: `dashboard`, `menu`, `refresh`, `openWebsite`. A problem state always performs its repair instead |
@@ -952,6 +1047,7 @@ power-user settings sit at the end of their group.
 | `staleAfterMinutes` | `20` | Age (1–1440) from which a reading counts as stale: greyed out, marked, and barred from raising alerts |
 | `timezone` | `system` | `system`, `utc`, or an IANA name. Governs the status bar summary as well as the dashboard. Display only — nothing is re-counted; an unusable value falls back |
 | `dayBoundaryHour` | `0` | The hour a “day” starts (0–23), for the status bar summary as well as the dashboard. `4` books work after midnight onto the previous day |
+| `planName` | `{}` | Plan name shown beside the provider title, e.g. `{"claude": "Max 20x"}` (40 characters max). Display only — never a limit; a name a provider states itself wins, and yours prints as `plan Max 20x (as configured)` |
 | `keybindings` | `true` | Bind `ctrl+alt+shift+t` (`cmd+alt+shift+t`) to *Open Dashboard*. Off frees the chord without a `-` rule in `keybindings.json`; the Command Palette is unaffected |
 | `windows` | `all` | **Deprecated** — replaced by `windowSelect`. Still honoured while `windowSelect` is at its default `worstPace` |
 
@@ -990,9 +1086,10 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `dashboard.sections` | `summary, quota, kpis, tokens, chart, models, heatmap, hours, forecast, dataQuality` | Which sections the panel shows **and in which order**. Also available: `history`, `projects`, `sessions` |
+| `dashboard.sections` | `summary, quota, kpis, tokens, chart, models, heatmap, hours, forecast, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` |
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
+| `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |
 | `dashboard.mode` | `webview` | What *Open Dashboard* and a status bar click open: `webview`, `quickPick`, `markdown` |
 | `startOfWeek` | `monday` | First day of the week for the heatmap, the weekday grid and `thisWeek` |
 | `planPriceUsd` | `{}` | What you pay per month, per tool, e.g. `{"claude": 100}`. Used only for the plan-factor line |
@@ -1006,6 +1103,7 @@ power-user settings sit at the end of their group.
 | `customPrices` | `{}` | Per-model rates in USD per 1M tokens, merged field-wise over the built-in table |
 | `pricing.multiplier` | `1` | Factor on every list price (0.01–10) for contract discounts |
 | `unknownModelPricing` | `strict` | `strict` (report a lower bound) or `family` (borrow a related model's price and say so) |
+| `budgets` | `[]` | Your own limits: `{scope, period, unit, limit, label?}`. **`usd` is the hypothetical API equivalent, not a bill.** Unusable entries are dropped whole; at most 20 |
 | `pricing.showListPrice` | `false` | Show the undiscounted list price as a second column |
 
 ### Quota sources
@@ -1055,6 +1153,7 @@ power-user settings sit at the end of their group.
 | `alerts.forecastLeadMinutes` | `0` | Notify when the forecast expects exhaustion within *n* minutes (0–1440); `0` = off |
 | `alerts.onPaceFast` | `false` | Notify once per cycle when a window goes from on pace to ahead of pace |
 | `alerts.windowCondition` | `any` | Which windows may alert: `any`, `sessionOnly`, `weeklyOnly` |
+| `alerts.budgetPercent` | `0` | Notify once per period when a `budgets` entry passes this share of its own limit (0–200); `0` = off |
 
 ### Diagnostics
 
@@ -1077,8 +1176,8 @@ power-user settings sit at the end of their group.
 | `Token Pace: Cycle Status Bar Windows` | | Steps `windowSelect` through its values |
 | `Token Pace: Preview Status Bar States` | | Synthetic renderings of every state, for 60 seconds |
 | `Token Pace: Open Official Usage Page` | | Opens the provider's own usage page in your browser |
-| `Token Pace: Export CSV…` | | One row per bucket, plus a `TOTAL` row |
-| `Token Pace: Export JSON…` | | Buckets, totals, range, timezone and pricing provenance |
+| `Token Pace: Export CSV…` | | One row per bucket, plus a `TOTAL` row — and the tool table in a second file beside it |
+| `Token Pace: Export JSON…` | | Buckets, tool calls, totals, range, timezone and pricing provenance |
 | `Token Pace: Copy Usage Summary` | | The summary as markdown, on the clipboard |
 | `Token Pace: Copy Diagnostics` | | An allow-listed report, safe to paste into an issue |
 | `Token Pace: Connect Claude Status Line…` | | Installs the status-line bridge (opt-in, with consent and a backup) |
@@ -1098,6 +1197,19 @@ command stays available from the Command Palette either way.
 
 The dashboard's title bar carries *Fetch Quota Now*, *Re-read Token History*, *Show Log*,
 *Open Settings* and *Export CSV…*.
+
+**Interface language.** Everything the *manifest* contributes is localized: the store listing,
+the display name, the command titles, the settings pages and the walkthrough. `package.json`
+holds only `%key%` placeholders, the words live in `package.nls.json` (English) and
+`package.nls.de.json` (German), and VS Code picks the file matching its display language
+(*Configure Display Language*), falling back to English for any key a translation lacks. Setting
+ids, enum values, paths and the JSON examples in the descriptions are identical in both
+languages, because they are what you copy. What the extension *renders* is English everywhere —
+status bar, tooltip, dashboard, text views, exports. That split is deliberate: those sentences
+are assembled from fragments, de-duplicated against one another and asserted verbatim by the
+tests, so translating them takes a vocabulary seam, not a search-and-replace. A further language
+is one file, `package.nls.<locale>.json` with the keys of `package.nls.json`; `test/nls.test.ts`
+fails if a key is missing, unused, or if a translation drops a setting link or an example.
 
 **Walkthrough.** *Help → Get Started* lists **Get started with Token Pace**: what the bar and
 its colours mean, where the quota figures come from and what “poll” means, and the dashboard.

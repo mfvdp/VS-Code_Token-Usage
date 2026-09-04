@@ -776,6 +776,7 @@ export function readClaudeJsonUtilization(file: string, now = Date.now()): Claud
 export interface StatuslineReading {
   state: QuotaState
   identityHint: string | null
+  /** `size` null means no denominator was named — then `usedPct` is null too. */
   context: { used: number; size: number | null; usedPct: number | null } | null
   cost: { totalUsd: number } | null
   promptCache: { warm: boolean | null; ttl: '5m' | '1h' | null; expiresAt: number | null; hitRatio: number | null } | null
@@ -849,7 +850,10 @@ export function claudeStateFromStatusline(payload: any, fetchedAt: number | null
   const cw = pick(payload, 'context_window', 'contextWindow') as any
   const inTok = num(pick(cw, 'total_input_tokens', 'totalInputTokens'))
   const outTok = num(pick(cw, 'total_output_tokens', 'totalOutputTokens'))
-  const size = num(pick(cw, 'context_window_size', 'contextWindowSize'))
+  // A size of 0 (or below) is not a denominator, so it is treated as an absence rather
+  // than divided by or printed as "40,000 / 0".
+  const sizeRaw = num(pick(cw, 'context_window_size', 'contextWindowSize'))
+  const size = sizeRaw !== null && sizeRaw > 0 ? sizeRaw : null
   const used = inTok === null && outTok === null ? null : (inTok ?? 0) + (outTok ?? 0)
   const reported = num(pick(cw, 'used_percentage', 'usedPercentage'))
   const totalUsd = num(pick(pick(payload, 'cost') as any, 'total_cost_usd', 'totalCostUsd'))
@@ -860,7 +864,17 @@ export function claudeStateFromStatusline(payload: any, fetchedAt: number | null
     identityHint: null,
     context: used === null
       ? null
-      : { used, size, usedPct: reported ?? (size !== null && size > 0 ? (used / size) * 100 : null) },
+      // No denominator, no percentage: a share with nothing to be a share of cannot be
+      // checked and would print without a "of what". A reported percentage is preferred
+      // over the quotient, but only if it is plausible — the same gate every rate-limit
+      // window passes through.
+      : {
+        used,
+        size,
+        usedPct: size === null
+          ? null
+          : reported !== null && plausiblePercent(reported) ? reported : (used / size) * 100,
+      },
     cost: totalUsd === null ? null : { totalUsd },
     promptCache: promptCacheOf(pick(payload, 'prompt_cache', 'promptCache')),
     model: model && typeof model === 'object'

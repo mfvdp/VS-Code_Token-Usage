@@ -146,7 +146,9 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   group('Quota')
   for (const q of vm.quotas) {
     const meta = [
-      q.planType ? `plan ${q.planType}` : null,
+      // `planText` is the whole fragment, "(as configured)" included: a name from a settings
+      // file and a name from the provider must not read the same.
+      q.planText,
       q.origin ? `via ${q.origin}` : null,
       q.ageText ? `updated ${q.ageText}` : null,
       q.stale ? 'stale' : null,
@@ -178,6 +180,22 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
         description: q.extra.billed ? 'billed' : q.extra.enabled ? 'enabled' : 'off',
       })
     }
+    // The provider reported no window; this is what was counted locally instead. The sentence
+    // is the view model's own, word for word in all three views — a second phrasing of "this
+    // is not the provider's window" is a second promise.
+    if (q.localBlock) add({ label: q.localBlock.text, description: q.title })
+  }
+
+  group('Context window')
+  if (vm.context) {
+    add({
+      label: `Context window: ${vm.context.text}`,
+      description: vm.context.note,
+      detail: [
+        vm.context.ageText ? `updated ${vm.context.ageText}` : null,
+        vm.context.fresh ? null : 'stale',
+      ].filter(Boolean).join(' · ') || undefined,
+    })
   }
 
   group('Key figures')
@@ -263,6 +281,15 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     })
   }
 
+  group('Records')
+  for (const row of recordLines(vm)) add(row)
+
+  group('Tools')
+  for (const row of toolLines(vm)) add(row)
+
+  group('Budgets')
+  for (const row of budgetLines(vm)) add(row)
+
   group('Projects')
   for (const p of vm.projects.rows) {
     add({
@@ -296,6 +323,94 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   group('Notes')
   for (const f of vm.footnotes) add({ label: f })
   return items
+}
+
+/**
+ * The Records section as flat rows.
+ *
+ * The two day records are always stated, with a dash where there is none: "no peak day" is a
+ * fact about the range, and leaving the row out would look like a rendering that forgot it.
+ * The three tables are as long as `dashboard.topN` allows and no longer.
+ */
+function recordLines(vm: ViewModel): PickItem[] {
+  const r = vm.records
+  const out: PickItem[] = []
+  out.push({
+    label: `Record peak day: ${r.peakDay ? `${r.peakDay.day} — ${r.peakDay.usage}` : '–'}`,
+    description: r.peakDay && r.peakDay.cost !== '–'
+      ? `${r.peakDay.cost}${r.peakDay.costPartial ? ' ⚠' : ''}`
+      : undefined,
+  })
+  out.push({
+    label: `Record streak: ${r.streak ? `${r.streak.days} day${r.streak.days === 1 ? '' : 's'}` : '–'}`,
+    description: r.streak ? `${r.streak.from} → ${r.streak.to}` : undefined,
+  })
+  const table = (kind: string, rows: ViewModel['records']['topModels']): void => {
+    for (const e of rows) {
+      out.push({
+        label: `Top ${kind} ${e.label}: ${e.usage}`,
+        description: [`${e.share} of usage`, e.cost === '–' ? null : e.cost].filter(Boolean).join(' · '),
+        detail: e.detail ?? undefined,
+      })
+    }
+  }
+  table('model', r.topModels)
+  table('project', r.topProjects)
+  table('session', r.topSessions)
+  if (!r.attributionOn) {
+    out.push({ label: 'Top projects and sessions need tokenPace.attribution', command: 'tokenPace.openSettings' })
+  }
+  for (const n of [r.note, r.sessionNote]) if (n) out.push({ label: n })
+  return out
+}
+
+/**
+ * The tool table as flat rows.
+ *
+ * The notes travel with the rows rather than only with the table: in a flat list the sentence
+ * that says since when tool calls are counted is the only thing between an empty table and
+ * the impression that no tool was ever used.
+ */
+function toolLines(vm: ViewModel): PickItem[] {
+  const t = vm.tools
+  const out: PickItem[] = []
+  for (const r of t.rows) {
+    out.push({
+      label: `Tool ${r.name}: ${r.callsText}`,
+      description: `${r.share} of calls · ${r.models}`,
+      detail: r.sources || undefined,
+    })
+  }
+  if (t.hidden > 0) {
+    out.push({
+      label: `${t.hidden} more tool row(s)`,
+      description: 'raise tokenPace.dashboard.topN to see them',
+      command: 'tokenPace.openSettings',
+    })
+  }
+  for (const n of t.notes) out.push({ label: n })
+  return out
+}
+
+/**
+ * The budgets as flat rows.
+ *
+ * The label is `row.text` and nothing else — the same sentence the dashboard card and the
+ * markdown table are built from, so a budget cannot read one way here and another there. The
+ * period bounds sit in the description because a share without its period is a number
+ * without a question.
+ */
+function budgetLines(vm: ViewModel): PickItem[] {
+  return vm.budgets.map((b) => ({
+    label: b.text,
+    description: [
+      `${b.from} → ${b.last}`,
+      // A lower bound, said the way every other lower bound in this extension is said.
+      b.partial ? '⚠ lower bound' : null,
+      b.over ? 'over budget' : null,
+    ].filter(Boolean).join(' · '),
+    detail: b.projectionBasis ?? undefined,
+  }))
 }
 
 /**
@@ -365,7 +480,7 @@ export function markdownDocument(vm: ViewModel): string {
   if (vm.quotas.length === 0) L.push('_No quota reading._', '')
   for (const q of vm.quotas) {
     const meta = [
-      q.planType ? `plan ${q.planType}` : null,
+      q.planText,
       q.origin ? `via ${q.origin}` : null,
       q.ageText ? `updated ${q.ageText}` : null,
       q.stale ? '⚠ stale' : null,
@@ -395,10 +510,19 @@ export function markdownDocument(vm: ViewModel): string {
     if (q.extra) {
       L.push(`Extra usage: ${cell(q.extra.text)} (${q.extra.billed ? 'billed' : q.extra.enabled ? 'enabled' : 'off'})`, '')
     }
+    if (q.localBlock) L.push(q.localBlock.text, '')
     const f = q.freshness
     L.push(`Freshness — last check ${cell(f.lastCheck)} · last data ${cell(f.lastData)} · `
       + `last local event ${cell(f.lastEvent)} · next refresh ${cell(f.nextRefresh)} · `
       + `snapshot ${cell(f.snapshotAge)}`)
+    L.push('')
+  }
+
+  if (vm.context) {
+    L.push('## Context window', '')
+    L.push(`${vm.context.text} — ${vm.context.note}`
+      + (vm.context.ageText ? ` · updated ${vm.context.ageText}` : '')
+      + (vm.context.fresh ? '' : ' · ⚠ stale'))
     L.push('')
   }
 
@@ -530,6 +654,64 @@ export function markdownDocument(vm: ViewModel): string {
     L.push(`| ${String(h.hour).padStart(2, '0')}:00 | ${cell(h.text)} |`)
   }
   L.push('')
+
+  L.push('## Records', '')
+  const rec = vm.records
+  L.push(`Peak day: ${rec.peakDay ? `${rec.peakDay.day} — ${rec.peakDay.usage}` : '–'}`
+    + (rec.peakDay && rec.peakDay.cost !== '–'
+      ? ` · ${rec.peakDay.cost}${rec.peakDay.costPartial ? ' ⚠' : ''}` : ''))
+  L.push('')
+  L.push(`Longest streak: ${rec.streak ? `${rec.streak.days} day${rec.streak.days === 1 ? '' : 's'} · ${rec.streak.from} → ${rec.streak.to}` : '–'}`)
+  L.push('')
+  for (const [head, rows] of [
+    ['Model', rec.topModels], ['Project', rec.topProjects], ['Session', rec.topSessions],
+  ] as const) {
+    if (rows.length === 0) continue
+    L.push(`| Top ${head.toLowerCase()} | Detail | Usage | Share | API cost |`)
+    L.push('|---|---|---|---|---|')
+    for (const e of rows) {
+      L.push(`| ${cell(e.label)} | ${cell(e.detail)} | ${cell(e.usage)} | ${cell(e.share)} | ${cell(e.cost)} |`)
+    }
+    L.push('')
+  }
+  if (!rec.attributionOn) L.push('_Top projects and sessions need `tokenPace.attribution`._', '')
+  for (const n of [rec.note, rec.sessionNote]) if (n) L.push(`_${n}_`, '')
+
+  L.push('## Tools', '')
+  const tools = vm.tools
+  if (tools.rows.length > 0) {
+    L.push('| Tool | Provider | Calls | Share | Models |')
+    L.push('|---|---|---|---|---|')
+    for (const r of tools.rows) {
+      L.push(`| ${cell(r.name)} | ${cell(r.sources)} | ${cell(r.callsText)} | ${cell(r.share)} | `
+        + `${cell(r.models)} |`)
+    }
+    L.push('')
+    L.push(`${tools.totalText} call(s) · ${tools.distinct} distinct tool(s)`
+      + (tools.hidden > 0 ? ` · ${tools.hidden} more not listed` : ''))
+    L.push('')
+  }
+  for (const n of tools.notes) L.push(`_${n}_`, '')
+
+  if (vm.budgets.length > 0) {
+    L.push('## Budgets', '')
+    L.push('| Budget | Period | Used | Limit | Share | Projected |')
+    L.push('|---|---|---|---|---|---|')
+    for (const b of vm.budgets) {
+      L.push(`| ${cell(b.label)}${b.partial ? ' ⚠' : ''} | ${b.from} → ${b.last} | `
+        + `${cell(b.usedText)} | ${cell(b.limitText)} | ${cell(b.shareText)}${b.over ? ' ⚠' : ''} | `
+        + `${cell(b.projectedText ? `${b.projectedText} by ${b.last}` : null)} |`)
+    }
+    L.push('')
+    // A row of dashes is a configured budget nothing is counting, not an idle period, so the
+    // switch that is in the way is named under the table rather than left to be guessed.
+    const unmeasured = vm.budgets.filter((b) => b.unmeasurable !== null)
+    if (unmeasured.length > 0) {
+      L.push(`_${unmeasured.map((b) => `${b.label} — ${b.unmeasurable}`).join('; ')}._`, '')
+    }
+    // The one sentence that keeps a budget from being read as a plan limit.
+    L.push('_A budget is your own number; `usd` is the hypothetical API equivalent, not a bill._', '')
+  }
 
   if (vm.projects.enabled && vm.projects.rows.length > 0) {
     L.push('## Projects', '')

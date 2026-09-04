@@ -16,10 +16,21 @@ import { Aggregator, billable } from './agg'
 import { Config } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { TimeConfig, dayOfHour } from './time'
-import { Bucket } from './types'
+import { Bucket, TOOL_NAME_CAP } from './types'
 import type { ViewModel } from './viewModel'
 
-export const EXPORT_SCHEMA_VERSION = 1
+/**
+ * 2 added `tools[]` and `toolsTruncated`; everything version 1 carried is still there and
+ * still means the same thing, so a reader written for 1 keeps working.
+ */
+export const EXPORT_SCHEMA_VERSION = 2
+
+/**
+ * The tool side table's own columns. A separate file, never a column on a bucket row: the
+ * side table is keyed by day and model, a bucket row by day, hour, model, tier and isSub, so
+ * any per-row tool number would be an invented split of a figure nobody measured that way.
+ */
+export const TOOLS_CSV_COLUMNS = ['day', 'source', 'model', 'tool', 'calls'] as const
 
 export const CSV_COLUMNS = [
   'day', 'hour', 'source', 'model', 'isSub', 'tier', 'res',
@@ -139,6 +150,29 @@ export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: Ti
   return lines.join('\n') + '\n'
 }
 
+/**
+ * The tool calls of the range, one line per day, provider, model and tool name.
+ *
+ * Names only — never a tool's input, never its result. An empty table still gets its header
+ * row: a file with a header and no data says "nothing was counted", a zero-byte file says
+ * "something went wrong".
+ */
+export function toolsCsv(agg: Aggregator, range: ExportRange): string {
+  const lines: string[] = [TOOLS_CSV_COLUMNS.join(',')]
+  const q = agg.tools(range.from, range.to)
+  let total = 0
+  for (const t of q.rows) {
+    lines.push([t.day, t.source, t.model, t.name, t.calls].map(csvCell).join(','))
+    total += t.calls
+  }
+  lines.push(['TOTAL', '', '', '', total].map(csvCell).join(','))
+  // The cap is a fact about the data, not about the export, so it travels with it.
+  if (q.truncated) {
+    lines.push(['TRUNCATED', '', '', `more than ${TOOL_NAME_CAP} distinct tools on at least one day`, ''].map(csvCell).join(','))
+  }
+  return lines.join('\n') + '\n'
+}
+
 export interface JsonExport {
   schema_version: number
   generated_at: string
@@ -148,12 +182,17 @@ export interface JsonExport {
   pricing: { as_of: string; custom: boolean; multiplier: number; unknown_model: string }
   totals: Record<string, number | boolean>
   buckets: Array<Record<string, string | number | boolean | null>>
+  tools: Array<Record<string, string | number>>
+  toolsTruncated: boolean
   sessions?: Array<Record<string, string | number | boolean | string[] | null>>
   notes: string[]
 }
 
 export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: TimeConfig): string {
   const pricing = pricingOf(cfg)
+  // The tool table is addressed by the day the ingest stored, so it takes the range bounds
+  // as they are — there is no hour left in a tool row to re-address in another zone.
+  const toolQuery = agg.tools(range.from, range.to)
   const buckets: JsonExport['buckets'] = []
   const totals = {
     usage: 0, input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0,
@@ -218,10 +257,16 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
     },
     totals: { ...totals, lowerBound: totals.unpricedTokens > 0 },
     buckets,
+    tools: toolQuery.rows.map((t) => ({
+      day: t.day, source: t.source, model: t.model, tool: t.name, calls: t.calls,
+    })),
+    toolsTruncated: toolQuery.truncated,
     notes: [
       'usage = fresh input + cache write + output',
       'costUsd is hypothetical API cost, not a bill; null means the model has no price on file',
       'days without data have no row — gaps are gaps, not zeros',
+      'tools[] counts tool calls by name and day; names only, never inputs or results. '
+        + `toolsTruncated means a day had more than ${TOOL_NAME_CAP} distinct tools and the rarest were not counted`,
     ],
   }
 
@@ -273,7 +318,8 @@ export function toMarkdownSummary(vm: ViewModel): string {
 
   for (const q of vm.quotas) {
     const meta = [
-      q.planType ? `plan ${q.planType}` : null,
+      // The whole fragment, so a configured name stays marked as one in the clipboard too.
+      q.planText,
       q.origin ? `via ${q.origin}` : null,
       q.ageText ? `updated ${q.ageText}` : null,
       q.stale ? '⚠ stale' : null,
@@ -291,6 +337,9 @@ export function toMarkdownSummary(vm: ViewModel): string {
       L.push('')
     }
     if (q.extra) L.push(`Extra usage: ${cell(q.extra.text)}`, '')
+    // Word for word the sentence the three views print. The clipboard must not be the one
+    // place where a five-hour figure appears without saying what it is not.
+    if (q.localBlock) L.push(q.localBlock.text, '')
   }
 
   for (const t of vm.totals) {
@@ -303,6 +352,15 @@ export function toMarkdownSummary(vm: ViewModel): string {
         + `${cell(r.cost)}${r.costPartial ? ' ⚠' : ''} |`)
     }
     L.push('')
+  }
+
+  if (vm.budgets.length > 0) {
+    L.push('## Budgets', '')
+    // Word for word the line the three views print, so a pasted summary cannot describe a
+    // budget differently from the panel it was copied out of.
+    for (const b of vm.budgets) L.push(`- ${b.text}${b.partial ? ' ⚠' : ''}`)
+    L.push('')
+    L.push('_Your own limits; USD is the hypothetical API equivalent, not a bill._', '')
   }
 
   if (vm.cacheEconomy.length > 0) {

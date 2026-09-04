@@ -3,6 +3,19 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.2.1 — 2026-09-04
+
+### Changed
+
+* **The quota cards lead the dashboard.** The default section order is now `quota, summary,
+  kpis, …`: the bars for Claude Code and Codex come first, everything statistical follows.
+  The range, provider and model chips filter the statistics and not the quota cards, so the
+  filter bar moved down with them — it sits below the `quota` and `context` cards that lead
+  the list and above the first section it applies to. A first-run or preview notice still
+  stands above everything, because it qualifies every figure on the page. The Quick Pick and
+  the markdown view follow the same order. A configured `tokenPace.dashboard.sections` is
+  left exactly as it is.
+
 ## 1.2.0 — 2026-09-04
 
 ### Added

@@ -907,6 +907,31 @@ test('every section is a fold the keyboard can reach, open unless the reader clo
   assert.ok(folded.indexOf('<details open><summary data-act="section" data-key="forecast"') >= 0, folded)
 })
 
+test('the filter bar sits below the quota cards and above the first section it filters', () => {
+  const order = (html: string): string[] => {
+    const out: string[] = []
+    const re = /data-sec="([a-zA-Z]+)"/g
+    for (let m = re.exec(html); m; m = re.exec(html)) out.push(m[1])
+    return out
+  }
+  // The default order: quota first, then the statistics — the chips go between them.
+  assert.deepEqual(order(renderPage({ sections: ['quota', 'summary', 'kpis'] })),
+    ['notices', 'quota', 'controls', 'summary', 'kpis', 'drill', 'footer'])
+  // A context card leads the same way; the bar waits for the first section it applies to.
+  assert.deepEqual(order(renderPage({ sections: ['quota', 'context', 'kpis'] })),
+    ['notices', 'quota', 'context', 'controls', 'kpis', 'drill', 'footer'])
+  // A reader who puts the statistics first gets the chips at the top, as before.
+  assert.deepEqual(order(renderPage({ sections: ['summary', 'quota'] })),
+    ['notices', 'controls', 'summary', 'quota', 'drill', 'footer'])
+  // Nothing to filter: the bar is still in the page (the range label and the refresh button
+  // live there), after the cards.
+  assert.deepEqual(order(renderPage({ sections: ['quota'] })),
+    ['notices', 'quota', 'controls', 'drill', 'footer'])
+  // A preview banner qualifies every figure, so it stands above the quota cards.
+  const preview = renderPage({ sections: ['quota', 'kpis'], preview: true })
+  assert.ok(preview.indexOf('Preview data') < preview.indexOf('data-sec="quota"'), preview)
+})
+
 test('a payload without the fold list renders every section open', () => {
   // An older extension build sends no `collapsed`; the page may not fold everything away.
   const html = renderPage({ sections: ['quota'], ui: { providers: ['claude'], models: [] } })

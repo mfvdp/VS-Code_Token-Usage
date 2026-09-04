@@ -40,7 +40,7 @@
   },
   "homepage": "https://github.com/mfvdp/VS-Code_Token-Usage#readme",
   "qna": "https://github.com/mfvdp/VS-Code_Token-Usage/issues",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "frederik",
   "license": "AGPL-3.0-or-later",
   "engines": {
@@ -767,8 +767,8 @@
             "type": "array",
             "order": 1,
             "default": [
-              "summary",
               "quota",
+              "summary",
               "kpis",
               "tokens",
               "chart",
@@ -782,8 +782,8 @@
             "items": {
               "type": "string",
               "enum": [
-                "summary",
                 "quota",
+                "summary",
                 "context",
                 "kpis",
                 "tokens",

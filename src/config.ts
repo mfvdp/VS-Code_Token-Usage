@@ -201,7 +201,7 @@ const SUMMARY_PERIODS: readonly SummaryPeriod[] = ['today', '7d', '30d']
 const SUMMARY_SCOPES: readonly SummaryScope[] = ['both', 'claude', 'codex']
 const TOOLTIP_MODES: readonly TooltipMode[] = ['full', 'compact', 'off']
 const DASHBOARD_SECTIONS: readonly DashboardSection[] = [
-  'summary', 'quota', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap',
+  'quota', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap',
   'hours', 'records', 'tools', 'budget', 'forecast', 'history', 'projects', 'sessions',
   'dataQuality',
 ]
@@ -224,8 +224,9 @@ const ALERT_BASES: readonly AlertBasis[] = ['used', 'remaining']
 const ALERT_WINDOW_CONDITIONS: readonly AlertWindowCondition[] = ['any', 'sessionOnly', 'weeklyOnly']
 
 const DEFAULT_STATUS_BAR: readonly StatusBarEntry[] = ['claudeQuota', 'codexQuota', 'tokens']
+/** The quota cards first — the reading a glance is for — and the statistics beneath them. */
 const DEFAULT_SECTIONS: readonly DashboardSection[] = [
-  'summary', 'quota', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours', 'forecast', 'dataQuality',
+  'quota', 'summary', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours', 'forecast', 'dataQuality',
 ]
 const DEFAULT_CLAUDE_SOURCES: readonly ClaudeSourceId[] = ['cacheFile', 'statusline', 'claudeJson', 'poll']
 const DEFAULT_CODEX_SOURCES: readonly CodexSourceId[] = ['cacheFile', 'transcript', 'poll']

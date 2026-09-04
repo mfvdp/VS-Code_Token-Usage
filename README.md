@@ -296,13 +296,13 @@ writes no file, and never mixes with the live items.
 *Token Pace: Open Dashboard* (`ctrl+alt+shift+t`, `cmd+alt+shift+t` on macOS, unless
 `tokenPace.keybindings` is off) opens the panel in the secondary sidebar. It needs
 **VS Code 1.106 or newer**, for the reason given at the top of this file.
-`tokenPace.dashboard.sections` is an ordered array — the array order is the render order:
+`tokenPace.dashboard.sections` is an ordered array — the array order is the render order. The range, provider and model chips filter the statistics, not the quota cards, so the filter bar sits below every `quota` and `context` card that leads the list and above the first section the filter applies to:
 
 | Section | Contents |
 |---|---|
+| `quota` | One card per provider: the plan name where one is known, bar with elapsed tick and a second tick for the projected value at the reset, verdict, reset, forecast line, sustainable rate, sparkline, extra usage, and a freshness row (last check · last data · last local event · next refresh · snapshot age). A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
-| `quota` | One card per provider: the plan name where one is known, bar with elapsed tick and a second tick for the projected value at the reset, verdict, reset, forecast line, sustainable rate, sparkline, extra usage, and a freshness row (last check · last data · last local event · next refresh · snapshot age). A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |
 | `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost), the composition bar, cache economy, calendar periods and the plan factor |
 | `chart` | Stacked daily (or weekly) bars for the selected range, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
@@ -1086,7 +1086,7 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `dashboard.sections` | `summary, quota, kpis, tokens, chart, models, heatmap, hours, forecast, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` |
+| `dashboard.sections` | `quota, summary, kpis, tokens, chart, models, heatmap, hours, forecast, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` |
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |

@@ -140,9 +140,6 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     command: 'tokenPace.showDashboard',
   })
 
-  group('Summary')
-  for (const s of vm.digest) add({ label: s })
-
   group('Quota')
   for (const q of vm.quotas) {
     const meta = [
@@ -185,6 +182,9 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     // is not the provider's window" is a second promise.
     if (q.localBlock) add({ label: q.localBlock.text, description: q.title })
   }
+
+  group('Summary')
+  for (const s of vm.digest) add({ label: s })
 
   group('Context window')
   if (vm.context) {
@@ -470,12 +470,6 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('## First run', '', vm.firstRun.text, '')
   }
 
-  if (vm.digest.length > 0) {
-    L.push('## Summary', '')
-    for (const s of vm.digest) L.push(`- ${s}`)
-    L.push('')
-  }
-
   L.push('## Quota', '')
   if (vm.quotas.length === 0) L.push('_No quota reading._', '')
   for (const q of vm.quotas) {
@@ -515,6 +509,12 @@ export function markdownDocument(vm: ViewModel): string {
     L.push(`Freshness — last check ${cell(f.lastCheck)} · last data ${cell(f.lastData)} · `
       + `last local event ${cell(f.lastEvent)} · next refresh ${cell(f.nextRefresh)} · `
       + `snapshot ${cell(f.snapshotAge)}`)
+    L.push('')
+  }
+
+  if (vm.digest.length > 0) {
+    L.push('## Summary', '')
+    for (const s of vm.digest) L.push(`- ${s}`)
     L.push('')
   }
 

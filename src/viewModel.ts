@@ -124,7 +124,7 @@ export type WebviewMessage =
  * matching a section on screen.
  */
 export const DASHBOARD_SECTION_KEYS = [
-  'summary', 'quota', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours',
+  'quota', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours',
   'records', 'tools', 'budget', 'forecast', 'history', 'projects', 'sessions', 'dataQuality',
   // `satisfies`, so a key that is not a section of the config is a compile error here; the
   // other direction — a new section that nobody may fold — is asserted in the test.

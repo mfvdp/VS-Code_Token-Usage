@@ -42,7 +42,8 @@ const SECTION_FIELDS: Record<string, (keyof ViewModel)[]> = {
   drill: ['drill'],
   // Chrome that is always present. `footer` carries the generated-at line, which changes on
   // every tick — keeping it in its own node is what stops a full re-render every minute.
-  controls: ['range', 'ui', 'models', 'firstRun', 'preview'],
+  notices: ['firstRun', 'preview'],
+  controls: ['range', 'ui', 'models'],
   footer: ['footnotes', 'pricing', 'generatedAt'],
 }
 
@@ -1302,7 +1303,7 @@ function sDrill() {
 }
 
 const RENDER = {
-  controls: sControls, footer: sFooter, drill: sDrill,
+  notices: sNotices, controls: sControls, footer: sFooter, drill: sDrill,
   summary: sSummary, quota: sQuota, context: sContext, kpis: sKpis, tokens: sTokens,
   chart: sChart, models: sModels, heatmap: sHeatmap, hours: sHours, records: sRecords,
   tools: sTools, budget: sBudget, forecast: sForecast,
@@ -1317,8 +1318,10 @@ const TITLE = {
   projects: 'Projects', sessions: 'Sessions', dataQuality: 'Data quality',
 };
 
-function sControls() {
-  let h = controls();
+// Above everything, quota cards included: a preview banner or the first-run box qualifies
+// every figure on the page, not only the statistics the filter bar governs.
+function sNotices() {
+  let h = '';
   if (vm.firstRun) {
     h += '<div class="box info" role="status">' + esc(vm.firstRun.text)
       + (vm.firstRun.scanning ? '' : '<br><button data-act="cmd" data-id="tokenPace.rescan">'
@@ -1327,6 +1330,14 @@ function sControls() {
   if (vm.preview) h += '<div class="box" role="status">Preview data — not a reading.</div>';
   return h;
 }
+
+function sControls() {
+  return controls();
+}
+
+// Sections the range, provider and model chips do not filter: a provider's window is what
+// it is whichever week is selected, and the context reading belongs to one live session.
+const RANGE_FREE = ['quota', 'context'];
 
 function sFooter() {
   // The footnotes already carry the pricing sentence (and the one about configured rates);
@@ -1345,9 +1356,15 @@ function collapsed(key) {
 }
 
 function renderAll() {
-  let h = '<div data-sec="controls" data-body="controls">' + sControls() + '</div>';
+  let h = '<div data-sec="notices" data-body="notices">' + sNotices() + '</div>';
+  // The filter bar sits where its effect starts: below the leading sections it does not
+  // apply to, above the first one it does. With the default order that puts the quota cards
+  // on top and the chips between them and the statistics.
+  let controlsPlaced = false;
+  const controlsBlock = '<div data-sec="controls" data-body="controls">' + sControls() + '</div>';
   for (const key of vm.sections) {
     if (!RENDER[key]) continue;
+    if (!controlsPlaced && RANGE_FREE.indexOf(key) < 0) { h += controlsBlock; controlsPlaced = true; }
     // A native <details>: the fold is the browser's, so it is keyboard reachable and
     // announced as expandable, and the body stays in the document either way — a section
     // update writes into it whether the reader has it open or not.
@@ -1356,6 +1373,7 @@ function renderAll() {
       + '</h2></summary>'
       + '<div data-body="' + key + '">' + RENDER[key]() + '</div></details></section>';
   }
+  if (!controlsPlaced) h += controlsBlock;
   h += '<div data-sec="drill" data-body="drill">' + sDrill() + '</div>';
   h += '<div class="foot" data-sec="footer" data-body="footer">' + sFooter() + '</div>';
   document.getElementById('root').innerHTML = h;

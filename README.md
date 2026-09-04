@@ -300,7 +300,7 @@ writes no file, and never mixes with the live items.
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |
 | `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost), the composition bar, cache economy, calendar periods and the plan factor |
-| `chart` | Stacked daily (or weekly) bars for the selected range, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
+| `chart` | Stacked daily (or weekly) bars for the selected range, stacked by provider or by model, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
 | `models` | Per-model breakdown with the same columns as the totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) plus the share of the range; every column sortable, with average and P90 turn length where enough samples exist. Where the rates came from is the tooltip of the cost, not a column |
 | `heatmap` | Calendar heatmap of the last 53 weeks with current and longest streak, active days, peak day and a variability measure. Days outside the coverage are dotted, not empty |
 | `hours` | Hour-of-day profile and a weekday × 4-hour grid, captioned with the weeks of usage days it stands on. A block nothing was ever done in is hatched |
@@ -330,8 +330,11 @@ day actually ingested, never earlier.
 model table sortable by every column it shows (`model`, `usage`, `freshInput`, `cacheWrite5m`,
 `cacheWrite1h`, `cacheRead`, `output`, `reasoning`, `requests`, `cacheHit`, `perRequest`, `cost`,
 `share`, ascending or descending).
-Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The heatmap
-switches between `usage` and `cost`; the hour profile between local time and UTC.
+Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The chart also
+stacks either **by provider** or **by model** — by model it draws the five largest models of the
+range in their own colours and folds the rest into one `other` band, so the column total is the
+same either way. The heatmap switches between `usage` and `cost`; the hour profile between local
+time and UTC.
 
 **Collapsing.** Every section header is a toggle. What you collapse is remembered with the rest
 of the view state (range, sort, filters), so a panel you have trimmed to two sections opens that

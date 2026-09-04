@@ -34,10 +34,10 @@ import { QuotaHistory } from './quotaHistory'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
 import type { ContextReading } from './quotaSources'
 import {
-  AttributionRows, CacheEconomyRow, CalendarRows, ChartData, CompositionEntry, DrillData,
-  HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort, ModelSortKey,
-  MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SOURCE_TITLE,
-  SessionRow, StatsCtx, TotalRow, WindowUsageRow,
+  AttributionRows, CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack,
+  CompositionEntry, DrillData, HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort,
+  ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData,
+  SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, WindowUsageRow,
   attributionInWindow, cacheEconomy, cacheStates, calendar, chart, composition,
   drill as drillStats, filterFor, heatmap, hours, kpis, localBlock, modelTable, planFactors,
   projectRows, records as recordsOf, sessionRows, totalsFor, windowUsage,
@@ -52,9 +52,9 @@ import {
 } from './types'
 
 export type {
-  CacheEconomyRow, CalendarRows, ChartData, CompositionEntry, DrillData, HeatmapData, HoursData,
-  Kpi, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow, PlanFactorRow, ProjectRow,
-  RecordEntry, RecordsData, SessionRow, TotalRow, WindowUsageRow,
+  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack, CompositionEntry, DrillData,
+  HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow,
+  PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow, WindowUsageRow,
 }
 
 /** Re-exported so a view names a budget row from the model that produced it. */
@@ -76,6 +76,8 @@ export interface UiState {
   providers: Source[]
   models: string[]
   metric: Metric
+  /** Whether the daily chart splits a column by provider or by model. */
+  chartStack: ChartStack
   heatmapMetric: 'usage' | 'cost'
   hourZone: 'local' | 'utc'
   drillDay: string | null
@@ -113,6 +115,7 @@ export type WebviewMessage =
   | { type: 'setSort'; key: ModelSortKey; dir: 'asc' | 'desc' }
   | { type: 'setFilter'; providers: Source[]; models: string[] }
   | { type: 'setMetric'; metric: Metric }
+  | { type: 'setChartStack'; stack: ChartStack }
   | { type: 'setHeatmapMetric'; metric: 'usage' | 'cost' }
   | { type: 'setHourZone'; zone: 'local' | 'utc' }
   | { type: 'drill'; day: string | null }
@@ -200,6 +203,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return typeof m.metric === 'string' && (METRICS as string[]).includes(m.metric)
         ? { type: 'setMetric', metric: m.metric as Metric }
         : null
+    case 'setChartStack':
+      return m.stack === 'provider' || m.stack === 'model'
+        ? { type: 'setChartStack', stack: m.stack }
+        : null
     case 'setHeatmapMetric':
       return m.metric === 'usage' || m.metric === 'cost'
         ? { type: 'setHeatmapMetric', metric: m.metric }
@@ -231,6 +238,7 @@ export function defaultUiState(cfg: Config): UiState {
     providers: ['claude', 'codex'],
     models: [],
     metric: 'usage',
+    chartStack: 'provider',
     heatmapMetric: 'usage',
     hourZone: 'local',
     drillDay: null,
@@ -263,6 +271,8 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       }
     case 'setMetric':
       return { ...ui, metric: m.metric }
+    case 'setChartStack':
+      return { ...ui, chartStack: m.stack }
     case 'setHeatmapMetric':
       return { ...ui, heatmapMetric: m.metric }
     case 'setHourZone':
@@ -1088,7 +1098,7 @@ export function buildViewModel(input: VmInput): ViewModel {
     cacheEconomy: cache,
     calendar: calendar(ctx),
     planFactor: planFactors(ctx, cfg.planPriceUsd),
-    chart: chart(ctx, range, ui.metric),
+    chart: chart(ctx, range, ui.metric, ui.chartStack),
     models,
     heatmap: heatmap(ctx, ui.heatmapMetric, firstDay),
     hours: hours(ctx, range, ui.hourZone),

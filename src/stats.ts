@@ -264,10 +264,31 @@ export interface RecordsData {
   sessionNote: string | null
 }
 
+/** Which dimension a column is split along. Both stacks are splits of the same column total. */
+export type ChartStack = 'provider' | 'model'
+
+/**
+ * One band of the stack. `key` is the identity a view styles by — the provider id for a
+ * provider stack, the model name (or 'other') for a model stack — and `label` is the word the
+ * legend and the tooltips print, so no view has to look a name up a second time.
+ */
+export interface ChartSeries {
+  key: string
+  label: string
+  /**
+   * The provider the band belongs to, or null when it does not belong to exactly one: the
+   * folded 'other' band, and a model seen under two providers.
+   */
+  source: Source | null
+  values: number[]
+}
+
 export interface ChartData {
   days: string[]
   labels: string[]
-  series: { source: Source; values: number[] }[]
+  /** How the columns are split. A stack is a partition: the column totals do not depend on it. */
+  stack: ChartStack
+  series: ChartSeries[]
   metric: Metric
   max: number
   ticks: number[]
@@ -1213,20 +1234,85 @@ export function niceCeil(v: number): number {
   return step * mag
 }
 
-export function chart(ctx: StatsCtx, range: DayRange, metric: Metric): ChartData {
+/**
+ * Beyond this many bands a stack is a rainbow nobody can read against a legend, so the rest
+ * is folded into one named 'other' — folded, never dropped: the column total must not change
+ * with the way the column is split.
+ */
+export const CHART_MODEL_SERIES = 5
+
+/**
+ * The per-model bands of a column, largest first. Built from the very buckets the provider
+ * stack counts — the model names come from `bucketsIn` over the same range, and each band is
+ * summed over the providers that model actually appeared under — so the two stacks are two
+ * splits of one total rather than two measurements of it.
+ */
+function modelSeries(ctx: StatsCtx, days: string[], metric: Metric): ChartSeries[] {
+  if (days.length === 0) return []
+  const sourcesOf = new Map<string, Set<Source>>()
+  for (const b of bucketsIn(ctx, days[0], days[days.length - 1])) {
+    let seen = sourcesOf.get(b.model)
+    if (!seen) {
+      seen = new Set<Source>()
+      sourcesOf.set(b.model, seen)
+    }
+    seen.add(b.source)
+  }
+
+  const built: { s: ChartSeries; total: number }[] = []
+  for (const [model, sources] of sourcesOf) {
+    const values = new Array<number>(days.length).fill(0)
+    for (const source of sources) {
+      const v = ctx.agg.series(days, ctx.tcfg, { source, models: [model] }, metric, ctx.pricing)
+      for (let i = 0; i < values.length; i++) values[i] += v[i]
+    }
+    const total = values.reduce((a, b) => a + b, 0)
+    // A model with buckets in range but nothing in this metric — reasoning tokens a model
+    // never emits — would be a colour in the legend and no band in the chart.
+    if (total <= 0) continue
+    const list = [...sources]
+    built.push({
+      s: { key: model, label: model, source: list.length === 1 ? list[0] : null, values },
+      total,
+    })
+  }
+  // Largest band first, so the legend reads in the order the colours were handed out; the
+  // name breaks the tie, so two equal models do not swap places on every redraw.
+  built.sort((a, b) => b.total - a.total || a.s.key.localeCompare(b.s.key))
+
+  const out = built.slice(0, CHART_MODEL_SERIES).map((b) => b.s)
+  const rest = built.slice(CHART_MODEL_SERIES)
+  if (rest.length > 0) {
+    const other = new Array<number>(days.length).fill(0)
+    for (const r of rest) for (let i = 0; i < other.length; i++) other[i] += r.s.values[i]
+    out.push({ key: 'other', label: 'other', source: null, values: other })
+  }
+  return out
+}
+
+export function chart(
+  ctx: StatsCtx,
+  range: DayRange,
+  metric: Metric,
+  stack: ChartStack = 'provider',
+): ChartData {
   const days = daysBetween(range.from, range.to)
   const weekly = days.length > WEEKLY_CHART_DAYS
-  const perSource = ctx.sources.map((source) => ({
-    source,
-    values: ctx.agg.series(days, ctx.tcfg, filterFor(ctx, source), metric, ctx.pricing),
-  }))
+  const bands: ChartSeries[] = stack === 'model'
+    ? modelSeries(ctx, days, metric)
+    : ctx.sources.map((source) => ({
+      key: source,
+      label: SOURCE_TITLE[source] ?? source,
+      source,
+      values: ctx.agg.series(days, ctx.tcfg, filterFor(ctx, source), metric, ctx.pricing),
+    }))
   const costDaily = ctx.showCost && metric !== 'cost'
     ? seriesOf(ctx, days, 'cost')
     : null
 
   let labels = days.map((d) => d.slice(5))
   let outDays = days
-  let series = perSource
+  let series = bands
   let costLine = costDaily
   if (weekly) {
     // Server-side condensation: beyond four months a per-day bar is a hairline nobody reads.
@@ -1241,8 +1327,8 @@ export function chart(ctx: StatsCtx, range: DayRange, metric: Metric): ChartData
     }
     outDays = starts
     labels = starts.map((d) => d.slice(5))
-    series = perSource.map((s) => ({
-      source: s.source,
+    series = bands.map((s) => ({
+      ...s,
       values: groups.map((g) => g.reduce((sum, i) => sum + s.values[i], 0)),
     }))
     costLine = costDaily ? groups.map((g) => g.reduce((sum, i) => sum + costDaily[i], 0)) : null
@@ -1253,6 +1339,7 @@ export function chart(ctx: StatsCtx, range: DayRange, metric: Metric): ChartData
   return {
     days: outDays,
     labels,
+    stack,
     series,
     metric,
     max,

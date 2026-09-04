@@ -168,7 +168,8 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
     chart: {
       days: ['2026-09-01', '2026-09-02', '2026-09-03'],
       labels: ['09-01', '09-02', '09-03'],
-      series: [{ source: 'claude', values: [10, 20, 30] }],
+      stack: 'provider',
+      series: [{ key: 'claude', label: 'Claude Code', source: 'claude', values: [10, 20, 30] }],
       metric: 'usage', max: 30, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
     },
     models: { rows: [], total: 0, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
@@ -285,6 +286,48 @@ test('a label wider than its slot spills to both sides, not over its neighbour',
   assert.match(SCRIPT, /el\.hidden = \(Number\(el\.dataset\.i\) % vEvery\)/)
   // And the axis text is written into the centred element, never over it.
   assert.match(SCRIPT, /const inner = el\.firstElementChild \|\| el;/)
+})
+
+test('the cost line stays inside the plot instead of drawing across the page below it', () => {
+  // An inline SVG is a replaced element: with `inset: 0` and no size of its own the browser
+  // took the width from the box and the height from the viewBox's 1:1 ratio, which painted a
+  // plot-wide cost line straight over the model table and the heatmap underneath.
+  const rule = /\.costline \{([^}]*)\}/.exec(STYLE)
+  assert.ok(rule, 'the cost line has no rule')
+  const body = (rule as RegExpExecArray)[1]
+  assert.match(body, /position: absolute/)
+  assert.match(body, /width: 100%/)
+  assert.match(body, /height: 100%/)
+  // The box it is measured against, and the one it may not clip: the tick labels live in the
+  // gutter outside the plot, so an overflow rule here would cut every one of them off.
+  assert.match(STYLE, /\.plot \{[^}]*position: relative/)
+  assert.equal(/\.plot \{[^}]*overflow: hidden/.test(STYLE), false, STYLE)
+  // And the overlay is drawn with an explicit viewBox that the sizing above stretches to it.
+  assert.match(SCRIPT, /svg class="costline" viewBox="0 0 100 100"/)
+})
+
+test('the plot is tall enough for a stack of six bands', () => {
+  const plot = /\.plot \{([^}]*)\}/.exec(STYLE)
+  assert.ok(plot, 'the plot has no rule')
+  // 120 px made every model but the largest a hairline once a column was split six ways.
+  assert.match((plot as RegExpExecArray)[1], /height: 240px/)
+})
+
+test('a dropdown is painted by the theme, its popup included', () => {
+  // The popup is drawn by the browser, not by the page: light option text on the light system
+  // menu is what a select looked like before the theme colours and the colour scheme were set.
+  const sel = /\nselect \{([^}]*)\}/.exec(STYLE)
+  const opt = /select option \{([^}]*)\}/.exec(STYLE)
+  assert.ok(sel, 'select has no rule of its own')
+  assert.ok(opt, 'option has no rule')
+  for (const rule of [(sel as RegExpExecArray)[1], (opt as RegExpExecArray)[1]]) {
+    assert.match(rule, /background: var\(--vscode-dropdown-background\)/)
+    assert.match(rule, /color: var\(--vscode-dropdown-foreground\)/)
+  }
+  assert.match((sel as RegExpExecArray)[1], /border: 1px solid var\(--vscode-dropdown-border/)
+  // The classes VS Code stamps on the body, both kinds of each theme.
+  assert.match(STYLE, /body\.vscode-dark, body\.vscode-high-contrast \{ color-scheme: dark; \}/)
+  assert.match(STYLE, /body\.vscode-light, body\.vscode-high-contrast-light \{ color-scheme: light; \}/)
 })
 
 test('a heading breaks at its separator, never inside the window label', () => {
@@ -781,8 +824,9 @@ test('the provider is named, not keyed, wherever the reader sees it', () => {
     chart: {
       days: ['2026-09-01', '2026-09-02', '2026-09-03'],
       labels: ['09-01', '09-02', '09-03'],
-      series: [{ source: 'claude', values: [10, 20, 30] },
-        { source: 'codex', values: [1, 2, 3] }],
+      stack: 'provider',
+      series: [{ key: 'claude', label: 'Claude Code', source: 'claude', values: [10, 20, 30] },
+        { key: 'codex', label: 'Codex', source: 'codex', values: [1, 2, 3] }],
       metric: 'usage', max: 30, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
     },
   })
@@ -793,6 +837,48 @@ test('the provider is named, not keyed, wherever the reader sees it', () => {
   assert.ok(chart.indexOf('title="Claude Code \u00b7 2026-09-01: 10"') >= 0, chart)
   assert.ok(chart.indexOf('title="Codex \u00b7 2026-09-03: 3"') >= 0, chart)
   assert.equal(/title="(claude|codex) /.test(chart), false, chart)
+})
+
+test('the model stack colours by position, names every band and still drills into the day', () => {
+  const bands = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    days: ['2026-09-01', '2026-09-02', '2026-09-03'],
+    labels: ['09-01', '09-02', '09-03'],
+    stack: 'model',
+    series: [
+      { key: 'claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', values: [10, 20, 30] },
+      { key: 'gpt-5.3-codex', label: 'gpt-5.3-codex', source: 'codex', values: [5, 4, 3] },
+      { key: 'other', label: 'other', source: null, values: [1, 1, 1] },
+    ],
+    metric: 'usage', max: 40, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
+    ...over,
+  })
+  const chart = render('sChart()', { chart: bands() })
+  // One legend entry per band, the model names verbatim and the fold named as what it is.
+  assert.ok(chart.indexOf('<i class="dot s0"></i>claude-opus-4-6') >= 0, chart)
+  assert.ok(chart.indexOf('<i class="dot s1"></i>gpt-5.3-codex') >= 0, chart)
+  assert.ok(chart.indexOf('<i class="dot other"></i>other') >= 0, chart)
+  // A colour per position, because a model name has none of its own.
+  assert.ok(chart.indexOf('<div class="seg s0"') >= 0, chart)
+  assert.ok(chart.indexOf('<div class="seg s1"') >= 0, chart)
+  assert.ok(chart.indexOf('<div class="seg other"') >= 0, chart)
+  // The tooltip says what the legend says, and the column is still the day's drill.
+  assert.ok(chart.indexOf('title="claude-opus-4-6 · 2026-09-01: 10"') >= 0, chart)
+  assert.ok(chart.indexOf('data-act="drill" data-day="2026-09-01"') >= 0, chart)
+  // The selector says which stack is on screen.
+  assert.ok(chart.indexOf('<option value="model" selected>by model</option>') >= 0, chart)
+  assert.ok(chart.indexOf('<option value="provider">by provider</option>') >= 0, chart)
+
+  // The provider stack keeps its two colours and its own selected option.
+  const byProvider = render('sChart()', {
+    chart: bands({
+      stack: 'provider',
+      series: [{ key: 'claude', label: 'Claude Code', source: 'claude', values: [10, 20, 30] }],
+    }),
+  })
+  assert.ok(byProvider.indexOf('<div class="seg claude"') >= 0, byProvider)
+  assert.ok(byProvider.indexOf('<i class="dot claude"></i>Claude Code') >= 0, byProvider)
+  assert.ok(byProvider.indexOf('<option value="provider" selected>by provider</option>') >= 0, byProvider)
+  assert.equal(byProvider.indexOf('class="seg s0"'), -1, byProvider)
 })
 
 test('the forecast head prints the confidence only where the sentence has not', () => {
@@ -1356,7 +1442,7 @@ test('no renderer invents a number or leaks an undefined', () => {
 test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
     'model', 'clearModels', 'moreModels', 'section', 'heatmapMetric', 'hourZone', 'drill',
-    'costLine', 'metric']) {
+    'costLine', 'metric', 'chartStack']) {
     assert.ok(SCRIPT.indexOf('data-act="' + act + '"') >= 0, act)
   }
   for (const role of ['from', 'to']) {

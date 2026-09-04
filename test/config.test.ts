@@ -281,6 +281,12 @@ test('affects() accepts keys with and without the tokenPace prefix', () => {
   assert.equal(affects(event, ['tokenPace.barWidth']), true)
   assert.equal(affects(event, ['tokenPace.density', 'barWidth']), true)
   assert.equal(affects(event, ['density']), false)
+  // The bare namespace means "any of our settings": VS Code answers a section prefix, so it
+  // must be passed through as is — `tokenPace.tokenPace` is nothing and would never match.
+  const any = { affectsConfiguration: (section: string) => 'tokenPace.barWidth'.startsWith(section) }
+  assert.equal(affects(any, ['tokenPace']), true)
+  const other = { affectsConfiguration: (section: string) => 'editor.fontSize'.startsWith(section) }
+  assert.equal(affects(other, ['tokenPace']), false)
 })
 
 test('planName is trimmed, cut at 40 characters and otherwise dropped', () => {

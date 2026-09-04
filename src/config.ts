@@ -658,10 +658,17 @@ export interface ConfigurationChangeLike {
   affectsConfiguration(section: string): boolean
 }
 
-/** True when the change touches any of `keys` (with or without the `tokenPace.` prefix). */
+/**
+ * True when the change touches any of `keys` (with or without the `tokenPace.` prefix).
+ *
+ * The bare namespace is a key too: `affects(e, ['tokenPace'])` asks whether *any* setting of
+ * the extension changed. It must not be prefixed into `tokenPace.tokenPace`, a section that
+ * does not exist — that misspelling silently switched the whole live-settings path off, so
+ * every change waited for a reload.
+ */
 export function affects(e: ConfigurationChangeLike, keys: string[]): boolean {
   for (const key of keys) {
-    const full = key.startsWith('tokenPace.') ? key : `tokenPace.${key}`
+    const full = key === 'tokenPace' || key.startsWith('tokenPace.') ? key : `tokenPace.${key}`
     if (e.affectsConfiguration(full)) return true
   }
   return false

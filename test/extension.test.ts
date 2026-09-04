@@ -685,3 +685,26 @@ test('a configured budget reaches the status bar and the markdown view from one 
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
+
+test('a settings change is applied live: no reload between the edit and the status bar', async () => {
+  const fx = makeFixture()
+  await activateHost(fx, REPO, {
+    settings: { 'tokenPace.statusBar.show': ['tokens'], 'tokenPace.summary.period': 'today' },
+  })
+  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  assert.ok(String(state.textOf(TOKENS_ITEM)).endsWith('· today'), state.textOf(TOKENS_ITEM))
+
+  // The workbench answers `affectsConfiguration` per section prefix; the host asks for the
+  // whole namespace. That question was once spelt `tokenPace.tokenPace`, a section that does
+  // not exist, and every settings change quietly waited for a reload.
+  state.set('tokenPace.summary.period', '7d')
+  state.fireConfigChange(['tokenPace.summary.period'])
+  await waitFor('the period to change', () => String(state.textOf(TOKENS_ITEM) ?? '').endsWith('· 7d'))
+  assert.ok(String(state.textOf(TOKENS_ITEM)).startsWith('Σ'), state.textOf(TOKENS_ITEM))
+
+  state.set('tokenPace.statusBar.show', [])
+  state.fireConfigChange(['tokenPace.statusBar.show'])
+  await waitFor('the item to go', () => state.textOf(TOKENS_ITEM) === undefined)
+
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})

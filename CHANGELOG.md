@@ -101,6 +101,12 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+* **Settings changes apply without a reload again.** The check that asks whether a change
+  touched any `tokenPace` setting had spelt the section `tokenPace.tokenPace`, which nothing
+  ever matches, so since 1.0 every edit — status bar entries, dashboard sections, plan name,
+  budgets, alert thresholds, quota source — quietly waited for the next window reload. The
+  bare namespace is now passed through as the workbench expects, and an activation test edits
+  a setting and watches the status bar follow.
 * At a sidebar narrower than 320 px the tables stack into `label: value` cards, and a long
   value — the new tools section is the first with one — ran past the card edge instead of
   wrapping, readable only by scrolling sideways through the layout that exists to avoid

@@ -121,6 +121,21 @@ test('overflow keeps the real figure, limitReached and unlimited get their own g
   assert.equal(inf.text, 'CC 5h ∞ · resets 3h30m')
 })
 
+test('a limit-reached window whose reset has passed says "reset due" once, never "resets reset due"', () => {
+  // exhausted / limitReached outrank resetDue as the display, so the countdown — which reads
+  // "reset due" for a time in the past — is printed next to the state word; it must not be
+  // hung behind "resets" like a duration would be.
+  for (const w of [
+    win({ percent: 100, limitReached: true, resetsAt: NOW - 5 * 60_000 }),
+    win({ percent: 100, resetsAt: NOW - 5 * 60_000 }),
+  ]) {
+    const text = textsOf({ quotas: [state({ windows: [w] })] })[0]
+    assert.ok(text.includes('· reset due'), text)
+    assert.ok(!text.includes('resets reset'), text)
+    assert.equal(text.split('reset due').length, 2, text)
+  }
+})
+
 test('exhausted and limitReached are said in words, whatever the colour settings do', () => {
   // `indicator: color` drops the glyph, `colorMode: monochrome` drops the colour, and a
   // high-contrast theme may drop the alarm background — the state has to survive all three.

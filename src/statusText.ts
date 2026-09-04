@@ -414,6 +414,10 @@ function resetSuffix(view: WindowView, cfg: Config, now: number, tcfg: TimeConfi
   if (view.display === 'resetDue') return ''
   const t = formatReset(view.w.resetsAt, now, cfg.resetFormat, tcfg)
   if (t === '') return ''
+  // A window the provider still calls exhausted or limit-reached keeps that display even
+  // once its reset time has passed, and the countdown then reads "reset due" — a sentence of
+  // its own, not a duration to hang "resets" in front of.
+  if (t.includes('reset due')) return ` · ${t}`
   // Always named. A bare "· 42m" next to a percentage is unreadable beside the stale-age
   // suffix, which is also a bare duration — one of the two has to say what it counts, and
   // the age already carries `$(history)`, so the reset carries the word.

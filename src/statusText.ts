@@ -632,14 +632,19 @@ function windowRow(view: WindowView, cfg: Config, now: number, tcfg: TimeConfig)
   // The Pace column stands right beside the value here, so the state word is dropped from
   // the value whenever that column already carries exactly it.
   const value = windowValue(view, cfg, { state: stateWord(view.display) !== view.verdict.text })
-  return `| ${view.w.label} | ${painted} ${value} | ${elapsed} | ${view.verdict.text} | `
+  // A window still measuring has no pace to report yet; the column says so with the same
+  // dash every other absent figure gets, not with a sentence about the measuring.
+  const pace = view.verdict.measuring ? '–' : view.verdict.text
+  return `| ${view.w.label} | ${painted} ${value} | ${elapsed} | ${pace} | `
     + `${tooltipReset(view.w, cfg, now, tcfg)} |`
 }
 
 function forecastLine(q: QuotaState, w: QuotaWindow, ctx: RenderContext): string | null {
   const f = ctx.forecasts.get(`${q.source}:${w.id}`)
   if (!f) return null
-  if (f.state !== 'eta' && f.state !== 'resetsFirst' && f.state !== 'idle' && f.state !== 'measuring') return null
+  // A forecast still measuring has nothing to say about the window yet — "measuring · 1
+  // reading over 0 min" reports on the forecast, not on the quota — so it is not a line.
+  if (f.state !== 'eta' && f.state !== 'resetsFirst' && f.state !== 'idle') return null
   const bits: string[] = []
   // The forecast text already carries its own "~"; estimates are never shown bare.
   if (f.text !== '') bits.push(f.text)
@@ -649,7 +654,6 @@ function forecastLine(q: QuotaState, w: QuotaWindow, ctx: RenderContext): string
     const noun = f.basis.samples === 1 ? 'reading' : 'readings'
     bits.push(`based on ${f.basis.samples} ${noun} over ${spanText(f.basis.spanMs)}`)
   }
-  if (finite(f.sustainablePerHour)) bits.push(`allowed ${(f.sustainablePerHour as number).toFixed(1)} %/h`)
   if (bits.length === 0) return null
   return `$(graph) ${w.shortLabel}: ${bits.join(' · ')}`
 }

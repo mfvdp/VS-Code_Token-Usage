@@ -118,7 +118,7 @@ function win(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 'session:300', label: '5 h', percent: 61, percentText: '61 %', display: 'normal',
     level: 'ok', verdict: { text: 'on pace', level: 'ok' }, elapsed: 30, reset: '3h20m',
-    resetAbsolute: '14:00', forecast: null, sustainable: null, spark: [],
+    resetAbsolute: '14:00', forecast: null, spark: [],
     aria: { now: 61, max: 100, text: '61 %' }, ...over,
   }
 }
@@ -143,7 +143,7 @@ function forecastCard(over: Record<string, unknown> = {}): Record<string, unknow
       state: 'eta', ratePerHour: 4, etaMs: null, endPercent: 90, sustainablePerHour: 3,
       confidence: 'medium', basis: { samples: 9, spanMs: 3600_000 }, text: '~90 % at the reset',
     },
-    sustainable: null, lockout: null, resetForecast: null, spark: [], gaps: 0, ...over,
+    lockout: null, resetForecast: null, spark: [], gaps: 0, ...over,
   }
 }
 
@@ -450,7 +450,8 @@ test('the local fallback words a window exactly as the view model would', () => 
       })] })],
     })
     assert.ok(h.indexOf(r.header) >= 0, r.display + ': ' + h)
-    assert.ok(h.indexOf('on pace' + (r.state ? ' · ' + r.state : '') + '</div>') >= 0,
+    // The verdict and the state share one span in the header row.
+    assert.ok(h.indexOf('on pace' + (r.state ? ' · ' + r.state : '') + '</span>') >= 0,
       r.display + ': ' + h)
   }
 })
@@ -482,6 +483,115 @@ test('a forecast that only repeats what the card already printed is dropped', ()
     'full until the reset',
   )
   assert.ok(news.indexOf('full until the reset') >= 0, news)
+})
+
+test('the verdict stands in the header row between the label and the figure', () => {
+  const h = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      level: 'warn', percent: 70, percentText: '70 %', elapsed: 61,
+      verdict: { text: '9 % ahead of pace', level: 'warn' },
+    })] })],
+  })
+  const from = h.indexOf('<div class="win-top">')
+  const top = h.slice(from, h.indexOf('</div>', from))
+  assert.ok(top.indexOf('<span>5 h · resets 3h20m</span>') >= 0, top)
+  const verdict = top.indexOf('<span class="verdict warn">▲ 9 % ahead of pace</span>')
+  const figure = top.indexOf('<b>70 %</b>')
+  assert.ok(verdict > 0 && figure > verdict, top)
+  // Once, and above the bar — nothing below it repeats the verdict.
+  assert.equal(h.split('class="verdict').length - 1, 1, h)
+  assert.ok(h.indexOf('class="verdict') < h.indexOf('class="track"'), h)
+  // The state word joins the verdict in the same span.
+  const state = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      display: 'exhausted', level: 'error', stateText: 'limit reached',
+      verdict: { text: 'exhausted', level: 'error' },
+    })] })],
+  })
+  assert.ok(state.indexOf('<span class="verdict error">▲ exhausted · limit reached</span>') >= 0, state)
+  // The row wraps in a narrow sidebar; it never clips or ellipsises.
+  const row = STYLE.match(/\.win-top \{[^}]*\}/)
+  assert.ok(row, 'the header row rule is missing')
+  assert.ok(row[0].includes('flex-wrap: wrap'), row[0])
+  assert.equal(/nowrap|text-overflow|overflow: hidden/.test(row[0]), false, row[0])
+  assert.match(STYLE, /\.verdict \{[^}]*overflow-wrap: anywhere/)
+})
+
+test('a measuring window prints neither its verdict nor its forecast, and no sustainable rate', () => {
+  const measuring = {
+    state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: 20,
+    confidence: null, basis: { samples: 1, spanMs: 0 }, text: 'measuring · 1 reading over 0 min',
+  }
+  const h = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      percent: 3, percentText: '3 %', elapsed: 1,
+      verdict: { text: 'measuring · window just reset', level: 'ok', measuring: true },
+      forecast: measuring, aria: { now: 3, max: 100, text: '5 h: 3 % used' },
+    })] })],
+  })
+  assert.equal(/measuring/i.test(h), false, h)
+  assert.equal(/keeps it to the reset|%\/h/.test(h), false, h)
+  assert.equal(h.indexOf('class="verdict'), -1, h)
+  assert.ok(h.indexOf('<span>5 h · resets 3h20m</span><b>3 %</b>') >= 0, h)
+  // A measuring forecast is skipped even when the verdict has a pace to report.
+  const paced = render('sQuota()', { quotas: [card({ windows: [win({ forecast: measuring })] })] })
+  assert.equal(/measuring/.test(paced), false, paced)
+  assert.ok(paced.indexOf('>on pace<') >= 0, paced)
+  // The sustainable line is gone even from a payload that still carries the field.
+  const legacy = render('sQuota()', {
+    quotas: [card({ windows: [win({ sustainable: '~17.9 %/h keeps it to the reset' })] })],
+  })
+  assert.equal(legacy.indexOf('keeps it'), -1, legacy)
+})
+
+test('the bar paints the pace gap on whichever side of the marker it lies', () => {
+  const ahead = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      percent: 70, elapsed: 30, level: 'warn', verdict: { text: '40 % ahead of pace', level: 'warn' },
+    })] })],
+  })
+  // Beyond the marker, from the elapsed share to the percentage, in the darkened level colour.
+  assert.match(ahead, /<span class="fill over warn" data-x="30\.00" data-w="40\.00"/)
+  assert.equal(ahead.indexOf('class="slack"'), -1, ahead)
+  // The marker itself is untouched and is drawn after the band, so it stays on top.
+  assert.match(ahead, /<i class="mark" data-x="30\.00" title="time elapsed in this window">/)
+  assert.ok(ahead.indexOf('fill over') < ahead.indexOf('class="mark"'), ahead)
+  // Behind the marker, from the percentage to the elapsed share, as a lighter track.
+  const behind = render('sQuota()', { quotas: [card({ windows: [win({ percent: 20, elapsed: 55 })] })] })
+  assert.match(behind, /<span class="slack" data-x="20\.00" data-w="35\.00"/)
+  assert.equal(behind.indexOf('fill over'), -1, behind)
+  assert.match(behind, /<i class="mark" data-x="55\.00"/)
+  // Exactly on the clock: no band either way. Over 100 %: the band ends at the bar's edge.
+  const even = render('sQuota()', { quotas: [card({ windows: [win({ percent: 30, elapsed: 30 })] })] })
+  assert.equal(/fill over|class="slack"/.test(even), false, even)
+  const full = render('sQuota()', {
+    quotas: [card({ windows: [win({ percent: 130, elapsed: 60, level: 'error' })] })],
+  })
+  assert.match(full, /<span class="fill over error" data-x="60\.00" data-w="40\.00"/)
+  // No clock, a window that has just reset, and an unlimited window have no gap to show.
+  const noClock = render('sQuota()', { quotas: [card({ windows: [win({ elapsed: null })] })] })
+  assert.equal(/fill over|class="slack"|class="mark"/.test(noClock), false, noClock)
+  for (const display of ['resetDue', 'unlimited']) {
+    const h = render('sQuota()', { quotas: [card({ windows: [win({ display, percent: 70, elapsed: 30 })] })] })
+    assert.equal(/fill over|class="slack"/.test(h), false, display + ': ' + h)
+  }
+  // The accessibility attributes still describe the bar, not the bands.
+  assert.match(ahead, /role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="61" aria-valuetext="61 %"/)
+  assert.equal(ahead.split('role="progressbar"').length - 1, 1, ahead)
+  // Theme colours only: the level colour mixed toward black, the track's grey lifted.
+  for (const level of ['ok', 'warn', 'warn2', 'error']) {
+    assert.match(STYLE, new RegExp('\\.fill\\.over\\.' + level + ' \\{ background: color-mix\\(in srgb, var\\(--' + level + '\\) 65%, black\\); \\}'))
+  }
+  assert.match(STYLE, /\.slack \{[^}]*color-mix\(in srgb, var\(--vscode-foreground\) 30%, transparent\)/)
+  assert.match(STYLE, /\.fill\.over \{[^}]*position: absolute/)
+})
+
+test('the card keeps its short age but neither the freshness row nor the official page', () => {
+  const h = render('sQuota()', { quotas: [card({ usagePageUrl: 'https://claude.ai/settings/usage' })] })
+  assert.equal(h.indexOf('official page'), -1, h)
+  assert.equal(h.indexOf('https://'), -1, h)
+  assert.equal(/last check|last data|last local event|next refresh|snapshot/.test(h), false, h)
+  assert.ok(h.indexOf('2 min ago') >= 0, h)
 })
 
 test('the state is dropped when the verdict already says the same word', () => {
@@ -606,7 +716,7 @@ test('a window whose reset has passed is not told it is full', () => {
 test('the forecast meta line never starts with a separator', () => {
   const h = render('sForecast()', {
     forecasts: [forecastCard({
-      sustainable: null, lockout: null, resetForecast: null, gaps: 0,
+      lockout: null, resetForecast: null, gaps: 0,
       forecast: {
         state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null,
         sustainablePerHour: null, confidence: null, basis: { samples: 9, spanMs: 1 }, text: 'measuring',
@@ -618,7 +728,7 @@ test('the forecast meta line never starts with a separator', () => {
   // Nothing to say at all leaves the line out rather than printing an empty one.
   const bare = render('sForecast()', {
     forecasts: [forecastCard({
-      sustainable: null, lockout: null, resetForecast: null, gaps: 0,
+      lockout: null, resetForecast: null, gaps: 0,
       forecast: {
         state: 'idle', ratePerHour: 0, etaMs: null, endPercent: null, sustainablePerHour: null,
         confidence: null, basis: null, text: 'idle',
@@ -754,10 +864,92 @@ test('the hour strip has an axis of its own and marks its empty hours', () => {
 })
 
 test('a lone sparkline sample is a point, not a stretched dash', () => {
+  // The KPI sparks are still plain value lists and take the evenly spaced renderer.
   const h = String(nodeVm.runInContext('sparkSvg([10, -1, 50, -1, 90])', ctx))
   assert.equal(h.indexOf('<circle'), -1, h)
   assert.equal(h.split('class="pt"').length - 1, 3, h)
   assert.match(STYLE, /\.spark path\.pt \{[^}]*vector-effect: non-scaling-stroke/)
+})
+
+/** A seven-day spark in the view model's slotted shape. */
+function slotted(points: Record<string, unknown>[], bridges: Record<string, unknown>[] = []): Record<string, unknown> {
+  return { slots: 672, from: 0, to: 672 * 15 * 60_000, points, bridges }
+}
+
+function sparkOf(s: Record<string, unknown>): string {
+  return String(nodeVm.runInContext('sparkSvg(' + JSON.stringify(s) + ')', ctx))
+}
+
+test('the quota sparkline is time-proportional: one unit per slot, holes as wide as their time', () => {
+  // Two adjacent slots are one polyline, x is the slot index, y is the inverted percentage.
+  const two = sparkOf(slotted([{ i: 10, p: 20, level: 'ok' }, { i: 11, p: 30, level: 'ok' }]))
+  assert.match(two, /^<svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" aria-hidden="true">/)
+  assert.equal(two.split('<polyline').length - 1, 1, two)
+  assert.match(two, /<polyline class="ok" points="10,80.0 11,70.0"\/>/)
+  // Slot 0 sits on the left edge, the last slot at slots − 1.
+  const ends = sparkOf(slotted([{ i: 0, p: 0, level: null }, { i: 671, p: 100, level: 'error' }]))
+  assert.match(ends, /<path class="pt" d="M0 100.0h.01"\/>/)
+  assert.match(ends, /<path class="pt error" d="M671 0.0h.01"\/>/)
+  // Over 100 % stays on the top edge instead of leaving the box.
+  const over = sparkOf(slotted([{ i: 1, p: 140, level: 'error' }, { i: 2, p: 150, level: 'error' }]))
+  assert.match(over, /<polyline class="error" points="1,0.0 2,0.0"\/>/)
+  // Nothing to draw is nothing, not an empty box.
+  assert.equal(sparkOf(slotted([])), '')
+  assert.equal(String(nodeVm.runInContext('sparkSvg(null)', ctx)), '')
+  assert.equal(String(nodeVm.runInContext('sparkSvg({ slots: 0, points: [{ i: 0, p: 1 }] })', ctx)), '')
+  for (const h of [two, ends, over]) assert.equal(/NaN|undefined|Infinity/.test(h), false, h)
+  assert.match(STYLE, /\.spark\.q \{ height: 22px; \}/)
+})
+
+test('a spark run splits where the pace level changes, each segment wearing the later level', () => {
+  const h = sparkOf(slotted([
+    { i: 0, p: 10, level: 'ok' }, { i: 1, p: 20, level: 'ok' },
+    { i: 2, p: 60, level: 'warn' }, { i: 3, p: 70, level: 'warn' },
+  ]))
+  assert.match(h, /<polyline class="ok" points="0,90.0 1,80.0"\/><polyline class="warn" points="1,80.0 2,40.0 3,30.0"\/>/)
+  assert.equal(h.split('<polyline').length - 1, 2, h)
+  // A point without a clock has no level and keeps the provider colour; a level the CSS does
+  // not know is not turned into a class either.
+  const plain = sparkOf(slotted([{ i: 4, p: 5, level: null }, { i: 5, p: 6, level: 'constructor' }]))
+  assert.match(plain, /<polyline points="4,95.0 5,94.0"\/>/)
+  for (const level of ['ok', 'warn', 'warn2', 'error']) {
+    assert.match(STYLE, new RegExp('\\.spark polyline\\.' + level + ', \\.spark path\\.pt\\.' + level + ' \\{ stroke: var\\(--' + level + '\\); \\}'))
+  }
+})
+
+test('a hole in the spark is bridged with a dashed line only where the model says so', () => {
+  const pts = [{ i: 5, p: 50, level: null }, { i: 9, p: 55, level: null }]
+  const bridged = sparkOf(slotted(pts, [{ from: 5, to: 9 }]))
+  assert.match(bridged, /<line class="bridge" x1="5" y1="50.0" x2="9" y2="45.0"\/>/)
+  // Both ends stay the lone-point hairline: nothing solid is drawn across the hole.
+  assert.equal(bridged.split('class="pt"').length - 1, 2, bridged)
+  assert.equal(bridged.indexOf('<polyline'), -1, bridged)
+  const hole = sparkOf(slotted(pts))
+  assert.equal(hole.indexOf('<line'), -1, hole)
+  assert.equal(hole.indexOf('<polyline'), -1, hole)
+  // A bridge naming a slot with no point is ignored rather than drawn to nowhere.
+  const stray = sparkOf(slotted(pts, [{ from: 5, to: 7 }]))
+  assert.equal(stray.indexOf('<line'), -1, stray)
+  assert.match(STYLE, /\.spark line\.bridge \{[^}]*stroke: var\(--dim\)[^}]*stroke-dasharray[^}]*opacity: \.6[^}]*vector-effect: non-scaling-stroke/)
+})
+
+test('the quota card draws the slotted spark and captions its span once', () => {
+  const h = render('sQuota()', {
+    quotas: [card({ windows: [
+      win({ spark: slotted([{ i: 1, p: 1, level: null }, { i: 2, p: 2, level: null }]) }),
+      win({ id: 'weekly_all:10080', label: '7 d', spark: slotted([{ i: 1, p: 1, level: null }]) }),
+    ] })],
+  })
+  assert.equal(h.split('<svg class="spark q"').length - 1, 2, h)
+  assert.equal(h.split('last 7 days').length - 1, 1, h)
+  // A payload that still sends the 24-hour list is drawn the old way and gets no caption
+  // that would misstate its span; a window with nothing to draw gets no box.
+  const old = render('sQuota()', { quotas: [card({ windows: [win({ spark: [1, 2, 3] })] })] })
+  assert.ok(old.indexOf('<svg class="spark"') >= 0, old)
+  assert.equal(old.indexOf('last 7 days'), -1, old)
+  const none = render('sQuota()', { quotas: [card({ windows: [win({ spark: slotted([]) })] })] })
+  assert.equal(none.indexOf('<svg'), -1, none)
+  assert.equal(none.indexOf('last 7 days'), -1, none)
 })
 
 test('the script scrolls the drill panel into view', () => {

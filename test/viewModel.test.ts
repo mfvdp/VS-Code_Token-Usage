@@ -69,9 +69,8 @@ test('a window carries its verdict, its clock and its accessibility text', () =>
   assert.equal(w.reset, '2h')
   assert.ok(w.resetAbsolute.length > 0)
   assert.deepEqual(w.aria, { now: 40, max: 100, text: '5 h: 40% used, 20 % of the window still spare' })
-  // Percentage points of the window, printed with the unit the figure above it uses, and
-  // marked as the estimate it is.
-  assert.match(String(w.sustainable), /^~[\d.]+ %\/h keeps it to the reset$/)
+  // The "keeps it to the reset" rate is gone from every view, and with it from the model.
+  assert.equal('sustainable' in w, false)
 })
 
 test('an unreadable quota names its cause and offers exactly one repair step', () => {
@@ -437,7 +436,6 @@ test('an unlimited window is never given a percentage it does not have', () => {
   assert.equal(w.percentText, '∞')
   assert.equal(w.display, 'unlimited')
   assert.equal(w.forecast?.state, 'none')
-  assert.equal(w.sustainable, null)
 })
 
 test('an unlimited window with a stated reset is given no reserve and no budget', () => {
@@ -455,7 +453,6 @@ test('an unlimited window with a stated reset is given no reserve and no budget'
   assert.equal(w.verdict.points, null)
   assert.equal(w.verdict.ratio, null)
   assert.equal(w.verdict.level, 'ok')
-  assert.equal(w.sustainable, null)
   assert.equal(w.resetLine, 'resets 2h')
   // The verdict is the state, so the state is not said a second time beside it.
   assert.equal(w.stateText, '')
@@ -463,7 +460,7 @@ test('an unlimited window with a stated reset is given no reserve and no budget'
   // The forecast list reads the same window through its own path.
   const f = vm.forecasts.find((x) => x.windowId === 'codex:10080')
   assert.ok(f)
-  assert.equal(f.sustainable, null)
+  assert.equal('sustainable' in f, false)
   assert.equal(f.forecast.state, 'none')
 })
 
@@ -582,10 +579,11 @@ test('the forecast list drops the "full" row the quota card beside it refuses', 
   assert.equal(row.forecast.text, 'full until the reset')
 })
 
-test('a window that has just reset says "measuring" once on its card', () => {
-  // Verdict and forecast both measure a window that has only just started; the card prints the
-  // verdict and keeps the forecast's marks, but not a second sentence saying the same thing.
-  // The Forecast section still carries the full row.
+test('a window that has just reset hands the card no measuring sentence at all', () => {
+  // Verdict and forecast both measure a window that has only just started. The card keeps
+  // the forecast's marks but gets no sentence for it, and the accessibility text does not
+  // read out the measuring verdict either: no view prints it, and the screen reader is not
+  // told what the sighted reader is spared. The Forecast section still carries the full row.
   const history = makeHistory()
   fillHistory(history)
   const vm = buildViewModel(makeInput({
@@ -596,9 +594,26 @@ test('a window that has just reset says "measuring" once on its card', () => {
   assert.equal(w.verdict.measuring, true)
   assert.equal(w.forecast?.state, 'measuring')
   assert.equal(w.forecast?.text, '')
+  assert.equal(w.aria.text, '5 h: 3% used')
+  assert.equal(/measuring/.test(w.aria.text), false)
   const row = vm.forecasts.find((f) => f.source === 'claude' && f.windowId === w.id)
   assert.ok(row)
   assert.equal(row.forecast.text, 'measuring · window just started')
+})
+
+test('a measuring forecast is blanked on the card whatever the verdict says', () => {
+  // The forecast measures with too few readings while the verdict, three hours into the
+  // window, has a pace to report: the card keeps the verdict and still prints no forecast
+  // sentence — "measuring · 1 reading over 0 min" reports on the forecast, not on the quota.
+  const history = makeHistory()
+  history.add(state('claude'), FINGERPRINT, NOW - 60_000)
+  const vm = buildViewModel(makeInput({ history, quotas: [state('claude')] }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.verdict.measuring, false)
+  assert.equal(w.forecast?.state, 'measuring')
+  assert.equal(w.forecast?.text, '')
+  assert.equal(w.forecast?.basis?.samples, 1)
+  assert.equal(/measuring/.test(w.aria.text), false)
 })
 
 // ---------------------------------------------------------------------------

@@ -253,6 +253,18 @@ input[type=date] { cursor: text; }
 .fill.error { background: var(--error); }
 .fill.extra { background: var(--claude); }
 .fill.neutral { background: var(--dim); }
+/* The pace gap, drawn into the bar itself. The elapsed marker stays where it is; what changes
+   is the paint on either side of it. Fill beyond the marker is consumption ahead of the clock
+   and wears the level's colour darkened, so the excess reads as a band even where the marker
+   is hard to make out; track between the end of the fill and the marker is time the window
+   still has in hand and is a lighter grey than the rest of the track. */
+.fill.over { position: absolute; top: 0; left: 0; border-radius: 0 4px 4px 0; }
+.fill.over.ok { background: color-mix(in srgb, var(--ok) 65%, black); }
+.fill.over.warn { background: color-mix(in srgb, var(--warn) 65%, black); }
+.fill.over.warn2 { background: color-mix(in srgb, var(--warn2) 65%, black); }
+.fill.over.error { background: color-mix(in srgb, var(--error) 65%, black); }
+.slack { position: absolute; top: 0; left: 0; height: 100%; border-radius: 0 4px 4px 0;
+         background: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
 .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px;
         background: var(--vscode-foreground); opacity: .6; border-radius: 1px; }
 .mark.fc { background: var(--warn); opacity: .9; border-radius: 0; width: 2px;
@@ -262,13 +274,17 @@ input[type=date] { cursor: text; }
    like "Claude Code · 7 d" is the separator itself. */
 .nobr { white-space: nowrap; }
 .win { margin-top: 8px; }
-.win-top { display: flex; justify-content: space-between; gap: 8px; font-size: 11px;
-           color: var(--dim); margin-bottom: 3px; }
+/* Label and reset on the left, the verdict beside them, the figure on the right — one row
+   above the bar, so the card spends no line of its own on the verdict. A narrow sidebar wraps
+   the row onto a second line; nothing in it is ever cut. */
+.win-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline;
+           gap: 0 8px; font-size: 11px; color: var(--dim); margin-bottom: 3px; }
 /* The label wraps rather than clips: "GPT-5.3-Codex-Spark 5 h · resets 4h59m" cut to "…4h5" in a
    narrow sidebar loses the countdown, which is the one thing the header is for. */
 .win-top span { min-width: 0; }
-.win-top b { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; flex: none; }
-.verdict { font-size: 11px; margin-top: 3px; color: var(--dim); }
+.win-top b { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; flex: none;
+             margin-left: auto; }
+.verdict { color: var(--dim); overflow-wrap: anywhere; }
 .verdict.warn, .verdict.warn2 { color: var(--warn); }
 .verdict.error { color: var(--error); }
 .scroll { overflow-x: auto; }
@@ -295,7 +311,20 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .kpi .d.bad { color: var(--warn); }
 .kpi .d.neutral { color: var(--dim); }
 .spark { width: 100%; height: 18px; display: block; }
+/* The quota sparkline is seven days in 15-minute slots and a little taller than the KPI ones,
+   so the pace colours along it can be told apart. */
+.spark.q { height: 22px; }
 .spark polyline { fill: none; stroke: var(--claude); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+/* Each segment wears the pace level the bar showed at its later point; a point with no clock
+   keeps the provider colour. */
+.spark polyline.ok, .spark path.pt.ok { stroke: var(--ok); }
+.spark polyline.warn, .spark path.pt.warn { stroke: var(--warn); }
+.spark polyline.warn2, .spark path.pt.warn2 { stroke: var(--warn2); }
+.spark polyline.error, .spark path.pt.error { stroke: var(--error); }
+/* A bridge joins two readings with no reset between them across slots that have none — VS
+   Code was not running — and is dashed, so it never claims a measurement that was not taken. */
+.spark line.bridge { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; opacity: .6;
+                     vector-effect: non-scaling-stroke; }
 /* A lone reading between two gaps is drawn as a hair-length stroke with a round cap: the
    viewBox is stretched to the card width, and any shape with a geometric size would be
    stretched with it — a 5 px dash that reads as a line where there is a single point. */
@@ -439,12 +468,29 @@ const has = (k) => vm.sections.indexOf(k) >= 0;
 
 function pct(v) { return Math.max(0, Math.min(100, Number(v) || 0)); }
 
-function bar(percent, cls, elapsed, forecastEnd, aria) {
+/**
+ * A bar with its marks. the gap flag paints the pace gap into it — the fill beyond the elapsed
+ * marker darker, the track between the fill and the marker lighter — and is only asked for by
+ * a quota window that has a clock and a limit to compare against: a window that has just
+ * reset, or one with no limit, has no gap to show. The marker itself never moves.
+ */
+function bar(percent, cls, elapsed, forecastEnd, aria, gap) {
   let h = '<div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="'
     + (aria ? aria.max : 100) + '" aria-valuenow="' + (aria ? aria.now : Math.round(percent))
     + '" aria-valuetext="' + esc(aria ? aria.text : '') + '">'
     + '<div class="fill ' + cls + '" data-w="' + pct(percent).toFixed(2) + '"></div>';
-  if (elapsed !== null && elapsed !== undefined) {
+  const clock = elapsed !== null && elapsed !== undefined;
+  if (clock && gap) {
+    const p = pct(percent), e = pct(elapsed);
+    if (p > e) {
+      h += '<span class="fill over ' + cls + '" data-x="' + e.toFixed(2) + '" data-w="'
+        + (p - e).toFixed(2) + '" title="used beyond the elapsed share"></span>';
+    } else if (e > p) {
+      h += '<span class="slack" data-x="' + p.toFixed(2) + '" data-w="' + (e - p).toFixed(2)
+        + '" title="elapsed share not yet used"></span>';
+    }
+  }
+  if (clock) {
     h += '<i class="mark" data-x="' + pct(elapsed).toFixed(2) + '" title="time elapsed in this window"></i>';
   }
   if (forecastEnd !== null && forecastEnd !== undefined) {
@@ -453,7 +499,79 @@ function bar(percent, cls, elapsed, forecastEnd, aria) {
   return h + '</div>';
 }
 
-function sparkSvg(values) {
+/** The pace levels a sparkline segment can wear; anything else keeps the provider colour. */
+var SPARK_LEVELS = ['ok', 'warn', 'warn2', 'error'];
+
+function sparkLevel(pt) {
+  return SPARK_LEVELS.indexOf(pt.level) >= 0 ? pt.level : '';
+}
+
+/** True when there is a line to draw: two array values, or one point of a slotted spark. */
+function hasSpark(s) {
+  if (Array.isArray(s)) return s.length > 1;
+  return !!(s && Array.isArray(s.points) && s.points.length > 0);
+}
+
+/**
+ * Seven days of one window, time-proportional: the viewBox is one unit per 15-minute slot,
+ * so a stretch without readings is exactly as wide as the time it covers. Runs of adjacent
+ * slots become polylines, split wherever the pace level changes — the segment between two
+ * points wears the level of the later one — and a bridge across slots with no reading is a
+ * dashed line. A lone reading is the round-cap hairline. Percentages above 100 sit on the top
+ * edge rather than leaving the box. A plain array (the KPI sparks) takes the older renderer.
+ */
+function sparkSvg(spark) {
+  if (Array.isArray(spark)) return sparkArraySvg(spark);
+  if (!spark || !Array.isArray(spark.points)) return '';
+  const W = Number(spark.slots);
+  const pts = spark.points.filter(function (pt) {
+    return !!pt && Number.isFinite(Number(pt.i)) && Number.isFinite(Number(pt.p));
+  });
+  if (!(W > 0) || !pts.length) return '';
+  const H = 100;
+  const xOf = pt => String(Math.round(Number(pt.i)));
+  const yOf = pt => (H - pct(pt.p)).toFixed(1);
+  const poly = (seg, cls) => '<polyline' + (cls ? ' class="' + cls + '"' : '') + ' points="'
+    + seg.map(pt => xOf(pt) + ',' + yOf(pt)).join(' ') + '"/>';
+  let body = '';
+  let run = [];
+  const flush = () => {
+    if (run.length === 1) {
+      const cls = sparkLevel(run[0]);
+      body += '<path class="pt' + (cls ? ' ' + cls : '') + '" d="M' + xOf(run[0]) + ' '
+        + yOf(run[0]) + 'h.01"/>';
+    } else if (run.length > 1) {
+      let seg = [run[0]];
+      let cls = sparkLevel(run[1]);
+      for (let k = 1; k < run.length; k++) {
+        const c = sparkLevel(run[k]);
+        if (c !== cls) { body += poly(seg, cls); seg = [run[k - 1]]; cls = c; }
+        seg.push(run[k]);
+      }
+      body += poly(seg, cls);
+    }
+    run = [];
+  };
+  for (const pt of pts) {
+    if (run.length && Number(pt.i) - Number(run[run.length - 1].i) !== 1) flush();
+    run.push(pt);
+  }
+  flush();
+  const byI = Object.create(null);
+  for (const pt of pts) byI[Number(pt.i)] = pt;
+  for (const b of Array.isArray(spark.bridges) ? spark.bridges : []) {
+    const a = b ? byI[Number(b.from)] : null;
+    const z = b ? byI[Number(b.to)] : null;
+    if (!a || !z) continue;
+    body += '<line class="bridge" x1="' + xOf(a) + '" y1="' + yOf(a) + '" x2="' + xOf(z)
+      + '" y2="' + yOf(z) + '"/>';
+  }
+  return '<svg class="spark q" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" '
+    + 'aria-hidden="true">' + body + '</svg>';
+}
+
+/** A list of 0..100 values evenly spaced, with -1 for a break: the KPI sparks. */
+function sparkArraySvg(values) {
   const n = values.length;
   if (!n) return '';
   const W = 100, H = 20;
@@ -629,26 +747,42 @@ function quotaCard(q) {
     const end = f && f.endPercent !== null && f.endPercent !== undefined ? f.endPercent : null;
     const reset = orElse(w.resetLine, fbResetLine(w));
     const state = orElse(w.stateText, fbStateText(w));
+    // A window still measuring has no pace to report; the sentence that said so at length
+    // ("measuring · window just reset") is not printed anywhere.
+    const said = w.verdict && !w.verdict.measuring && typeof w.verdict.text === 'string'
+      ? w.verdict.text : '';
+    const verdict = [said ? (w.level === 'ok' ? '' : '▲ ') + esc(said) : '', esc(state)]
+      .filter(Boolean).join(' · ');
+    // The verdict goes into the header row, between the label and the figure, so the card
+    // spends no line of its own on it; the elapsed marker and the darker fill beyond it say
+    // the same thing in the bar underneath.
     h += '<div class="win"><div class="win-top"><span>' + esc(w.label)
-      + (reset ? ' · ' + esc(reset) : '') + '</span><b>' + esc(w.percentText) + '</b></div>'
-      + bar(w.percent, w.display === 'resetDue' ? 'neutral' : w.level, w.elapsed, end, w.aria)
-      + '<div class="verdict ' + esc(w.level) + '">'
-      + (w.level === 'ok' ? '' : '▲ ') + esc(w.verdict.text)
-      + (state ? ' · ' + esc(state) : '') + '</div>';
+      + (reset ? ' · ' + esc(reset) : '') + '</span>'
+      + (verdict ? '<span class="verdict ' + esc(w.level) + '">' + verdict + '</span>' : '')
+      + '<b>' + esc(w.percentText) + '</b></div>'
+      + bar(w.percent, w.display === 'resetDue' ? 'neutral' : w.level, w.elapsed, end, w.aria,
+            w.display !== 'resetDue' && w.display !== 'unlimited');
     // A forecast that only repeats a word the card has already printed — in the verdict, in
     // the state beside it or in the reset line — is not a second fact. A "full" forecast on a
     // window that has just reset is dropped for a second reason: the reading it is built on
-    // belongs to the window before the reset, which is why the bar is neutral, not red.
-    const trusted = !(w.display === 'resetDue' && f && f.state === 'full');
+    // belongs to the window before the reset, which is why the bar is neutral, not red. A
+    // forecast still measuring has nothing to say about the window yet and is not a line.
+    const trusted = !(w.display === 'resetDue' && f && f.state === 'full')
+      && !(f && f.state === 'measuring');
     // Word for word against each line already on the card, never as a substring: a forecast
     // that merely contains a word said above it is still a sentence of its own.
-    const printed = [String(w.verdict.text).toLowerCase(), state.toLowerCase(), reset.toLowerCase()];
+    const printed = [said.toLowerCase(), state.toLowerCase(), reset.toLowerCase()];
     if (f && f.text && trusted && printed.indexOf(f.text.toLowerCase()) < 0) {
       h += '<div class="meta">' + esc(f.text) + '</div>';
     }
-    if (w.sustainable) h += '<div class="meta">' + esc(w.sustainable) + '</div>';
-    if (w.spark && w.spark.length > 1) h += sparkSvg(w.spark);
+    if (hasSpark(w.spark)) h += sparkSvg(w.spark);
     h += '</div>';
+  }
+  // The sparklines' span, said once per card rather than under each of them. Only the slotted
+  // spark covers seven days; a payload from a build that still sends the 24-hour list gets no
+  // caption that would misstate it.
+  if (q.windows.some(w => w.spark && !Array.isArray(w.spark) && hasSpark(w.spark))) {
+    h += '<div class="meta">sparkline: last 7 days</div>';
   }
   if (q.extra) {
     h += '<div class="win"><div class="win-top"><span>Extra usage'
@@ -661,12 +795,8 @@ function quotaCard(q) {
   // Only ever present when the provider reported no window at all. It is a count, not a
   // window: no bar, no percentage, no pace — the sentence itself says what it is not.
   if (q.localBlock) h += '<div class="box info" role="status">' + esc(q.localBlock.text) + '</div>';
-  const f = q.freshness;
-  h += '<div class="meta">last check ' + esc(f.lastCheck || '–') + ' · last data '
-    + esc(f.lastData || '–') + ' · last local event ' + esc(f.lastEvent || '–')
-    + ' · next refresh ' + esc(f.nextRefresh || '–') + ' · snapshot ' + esc(f.snapshotAge || '–')
-    + '</div>';
-  if (q.usagePageUrl) h += '<div class="meta">official page: ' + esc(q.usagePageUrl) + '</div>';
+  // The card header already says how old the reading is; the full freshness row and the
+  // official page stay in the tooltip and the markdown view, where there is room for them.
   return h + '</div>';
 }
 
@@ -1177,7 +1307,7 @@ function sForecast() {
     const head = [state && said !== state.toLowerCase() ? state : '',
       conf && said.indexOf(conf.toLowerCase()) < 0 ? conf : ''].filter(Boolean);
     // One list, one join: a separator in front of the first item is a missing item.
-    const meta = [f.sustainable, f.lockout, f.resetForecast].filter(Boolean);
+    const meta = [f.lockout, f.resetForecast].filter(Boolean);
     if (fc.basis) meta.push(fc.basis.samples + ' readings');
     if (f.gaps) meta.push(f.gaps + ' gap(s)');
     h += '<div class="card"><div class="row"><span class="name">'
@@ -1185,7 +1315,7 @@ function sForecast() {
       + '<span class="meta">' + esc(head.join(' · ')) + '</span></div>'
       + (body ? '<div>' + esc(body) + '</div>' : '')
       + (meta.length ? '<div class="meta">' + meta.map(esc).join(' · ') + '</div>' : '')
-      + (f.spark.length > 1 ? sparkSvg(f.spark) : '') + '</div>';
+      + (hasSpark(f.spark) ? sparkSvg(f.spark) : '') + '</div>';
   }
   if (vm.windowUsage.length) {
     h += '<div class="scroll"><table><thead><tr><th>Local usage in window</th><th>Usage</th>'

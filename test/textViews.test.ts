@@ -279,11 +279,59 @@ test('neither text view ever prints the verb twice or an internal identifier', (
     assert.equal(/\b(resetDue|limitReached|resetsFirst)\b/.test(text), false, name)
     assert.equal(/\bnormal\b/.test(text), false, name)
   }
-  // The detail line joins the sustainable sentence and the reset time: "…to the reset · reset
-  // at 14:00" would say the word twice in a row.
+  // The detail line is the reset time alone, and says the word once.
   for (const item of quickPickItems(vm)) {
     assert.equal(/reset · reset\b/.test(item.detail ?? ''), false, item.detail)
   }
+})
+
+test('a measuring window leaves no sentence in either text view, and the rate line is gone', () => {
+  const history = makeHistory()
+  fillHistory(history)
+  const vm = buildViewModel(makeInput({
+    history,
+    quotas: [state('claude', { windows: [win({ percent: 3, resetsAt: NOW + 5 * 3_600_000 - 30_000, windowMinutes: 300 })] })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.verdict.measuring, true)
+  assert.equal(w.forecast?.state, 'measuring')
+  const item = quickPickItems(vm).find((i) => /[█▁▏▎▍▌▋▊▉┃]/.test(i.label))
+  assert.ok(item)
+  assert.equal(/measuring/.test(item.description ?? ''), false, item.description)
+  // The reset time still prints, once, as a clock time.
+  assert.match(item.detail ?? '', /^reset at \d/)
+  assert.equal((item.detail ?? '').split('reset').length - 1, 1, item.detail)
+  const md = markdownDocument(vm)
+  const row = md.split('\n').find((l) => l.startsWith('|') && l.includes('`')) ?? ''
+  assert.equal(/measuring/.test(row), false, row)
+  // The pace column is an absent figure, not a sentence about the measuring.
+  assert.match(row, /\| – \| 4h59m \|/, row)
+  // The markdown keeps the freshness row the dashboard card dropped.
+  assert.ok(md.includes('Freshness — last check'), md)
+  // The "keeps it to the reset" rate is gone from both views, and from the forecast table.
+  for (const text of [pickText(vm), md, pickText(fullVm()), markdownDocument(fullVm())]) {
+    assert.equal(text.includes('keeps it to the reset'), false)
+    assert.equal(text.includes('Sustainable'), false)
+  }
+  assert.ok(markdownDocument(fullVm()).includes('| Window | State | Rate | Lockout | At reset | Basis |'))
+})
+
+test('a measuring forecast on a paced window is dropped from the quota rows of both views', () => {
+  // One reading only: the forecast measures while the verdict, two hours before the reset,
+  // has a pace to report. The verdict stays; the forecast sentence does not appear.
+  const history = makeHistory()
+  history.add(state('claude'), FINGERPRINT, NOW - 60_000)
+  const vm = buildViewModel(makeInput({ history, quotas: [state('claude')] }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.verdict.measuring, false)
+  assert.equal(w.forecast?.state, 'measuring')
+  const item = quickPickItems(vm).find((i) => /[█▁▏▎▍▌▋▊▉┃]/.test(i.label))
+  assert.ok(item)
+  assert.ok((item.description ?? '').includes(w.verdict.text), item.description)
+  assert.equal(/measuring|reading/.test(item.description ?? ''), false, item.description)
+  const row = markdownDocument(vm).split('\n').find((l) => l.startsWith('|') && l.includes('`')) ?? ''
+  assert.ok(row.includes(w.verdict.text), row)
+  assert.equal(/measuring|reading/.test(row), false, row)
 })
 
 test('every window row in the flat views names the provider it belongs to', () => {

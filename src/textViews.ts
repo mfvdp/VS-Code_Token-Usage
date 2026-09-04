@@ -95,17 +95,31 @@ function repeats(text: string, said: (string | null | undefined)[]): boolean {
   return said.some((s) => typeof s === 'string' && s.trim().toLowerCase() === t)
 }
 
+/**
+ * The verdict as the views print it: '' while the window is still measuring. A pace that
+ * cannot be judged yet is not a fact about the window, and "measuring · window just reset"
+ * beside a bar that has barely started said so at length in every view.
+ */
+function verdictText(w: WindowVmOf): string {
+  return w.verdict.measuring ? '' : w.verdict.text
+}
+
+/** The forecast sentence the views print: '' while the forecast itself is still measuring. */
+function forecastSentence(f: Forecast | null): string {
+  return f && f.state !== 'measuring' ? f.text : ''
+}
+
 function windowLine(w: WindowVmOf): string {
-  const parts = [w.verdict.text]
+  const parts = [verdictText(w)].filter(Boolean)
   // `stateText` and `resetLine` arrive already de-duplicated against each other and against
   // the verdict, so appending them cannot repeat a word the line already carries.
   if (w.stateText) parts.push(w.stateText)
   if (w.resetLine) parts.push(w.resetLine)
-  const f = trustedForecast(w)
+  const ft = forecastSentence(trustedForecast(w))
   // A forecast that only repeats a segment already on the line ("reset due" beside "reset
   // due") is not a second fact — compared segment for segment, never as a substring, so a
   // real sentence that merely contains one of the words is kept.
-  if (f && f.text && !repeats(f.text, parts)) parts.push(f.text)
+  if (ft && !repeats(ft, parts)) parts.push(ft)
   return parts.join(' · ')
 }
 
@@ -163,15 +177,9 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
       add({
         label: `${w.label} ${bar(w.percent, w.elapsed)} ${w.percentText}`,
         description: windowLine(w),
-        // The sustainable sentence ends in "…keeps it to the reset", so after it the time alone
-        // is the whole statement; a window whose reset has passed says "reset due" in the
-        // description already and gets no time here.
-        detail: [
-          w.sustainable,
-          w.resetAbsolute && w.display !== 'resetDue'
-            ? (w.sustainable ? `at ${w.resetAbsolute}` : `reset at ${w.resetAbsolute}`)
-            : null,
-        ].filter(Boolean).join(' · ') || undefined,
+        // The reset as a clock time, once: a window whose reset has passed says "reset due" in
+        // the description already and gets no time here.
+        detail: w.resetAbsolute && w.display !== 'resetDue' ? `reset at ${w.resetAbsolute}` : undefined,
       })
     }
     if (q.extra) {
@@ -233,7 +241,7 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   for (const f of vm.forecasts) {
     add({
       label: `Forecast ${withSource(f.source, f.label)}: ${forecastText(f.forecast) || '–'}`,
-      description: [f.sustainable, f.lockout, f.resetForecast].filter(Boolean).join(' · '),
+      description: [f.lockout, f.resetForecast].filter(Boolean).join(' · '),
       detail: f.forecast.basis
         ? `${f.forecast.basis.samples} readings · ${f.gaps} gap(s) in the last 24 h`
         : undefined,
@@ -497,12 +505,14 @@ export function markdownDocument(vm: ViewModel): string {
       for (const w of q.windows) {
         const f = trustedForecast(w)
         // Same rule as the QuickPick line: the Forecast column stays empty when it would only
-        // repeat the Resets or Pace column of the same row.
-        const ft = f ? forecastText(f) : ''
-        const forecastCell = repeats(ft, [w.reset, w.stateText, w.verdict.text]) ? '' : ft
+        // repeat the Resets or Pace column of the same row, and a forecast still measuring
+        // has no sentence to print at all.
+        const ft = f && f.state !== 'measuring' ? forecastText(f) : ''
+        const verdict = verdictText(w)
+        const forecastCell = repeats(ft, [w.reset, w.stateText, verdict]) ? '' : ft
         L.push(`| ${cell(w.label)} | \`${bar(w.percent, w.elapsed)}\` ${cell(w.percentText)} | `
           + `${w.elapsed === null ? '–' : `${Math.round(w.elapsed)} %`} | `
-          + `${cell(w.verdict.text + (w.stateText ? ` · ${w.stateText}` : ''))} | `
+          + `${cell([verdict, w.stateText].filter(Boolean).join(' · '))} | `
           + `${cell(w.reset)} | ${cell(forecastCell)} |`)
       }
       L.push('')
@@ -601,12 +611,12 @@ export function markdownDocument(vm: ViewModel): string {
   L.push('## Forecast', '')
   if (vm.forecasts.length === 0) L.push('_No quota window to project._', '')
   else {
-    L.push('| Window | State | Rate | Sustainable | Lockout | At reset | Basis |')
-    L.push('|---|---|---|---|---|---|---|')
+    L.push('| Window | State | Rate | Lockout | At reset | Basis |')
+    L.push('|---|---|---|---|---|---|')
     for (const f of vm.forecasts) {
       L.push(`| ${cell(withSource(f.source, f.label))} | ${cell(forecastText(f.forecast))} | `
         + `${f.forecast.ratePerHour === null ? '–' : `${f.forecast.ratePerHour.toFixed(1)} %/h`} | `
-        + `${cell(f.sustainable)} | ${cell(f.lockout)} | ${cell(f.resetForecast)} | `
+        + `${cell(f.lockout)} | ${cell(f.resetForecast)} | `
         + `${f.forecast.basis ? `${f.forecast.basis.samples} readings, ${f.gaps} gap(s)` : '–'} |`)
     }
     L.push('')

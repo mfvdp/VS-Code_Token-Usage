@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { usd } from '../src/render'
 import {
-  MIN_GRID_SAMPLES, MIN_P90_SAMPLES, StatsCtx, attributionInWindow, cacheEconomy, cacheHitParts,
+  MIN_P90_SAMPLES, StatsCtx, attributionInWindow, cacheEconomy, cacheHitParts,
   cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil, planFactors,
   projectPeriod, projectRows, sessionRows, totalRow, totalsFor, windowUsage,
 } from '../src/stats'
@@ -217,13 +217,50 @@ test('the hour profile names how many days it stands on', () => {
   assert.equal(h.weekdayLabels[0], 'Mon')
 })
 
-test('a weekday × 4-hour cell stays empty below the sample threshold', () => {
-  const grid = hours(ctxOf(buildAgg()), range('30d'), 'local').grid
+/** One hour bucket per day, at the same hour, over `n` consecutive days ending on TODAY. */
+function daysOfHourBuckets(n: number, hourOfDay = 10): Bucket[] {
+  const out: Bucket[] = []
+  for (let i = 0; i < n; i++) {
+    const ts = Date.UTC(2026, 8, 3 - i, hourOfDay, 0)
+    const day = new Date(ts).toISOString().slice(0, 10)
+    out.push({
+      ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'h',
+        Math.floor(ts / 3_600_000), day),
+      input: 10_000, output: 1_000, requests: 1, outputFinal: 1,
+    })
+  }
+  return out
+}
+
+test('a weekday × 4-hour cell is drawn from the days it has, and hatched only without one', () => {
+  // A week of work at 10:00: one cell per weekday in the 08–12 block, the other 35 empty.
+  const grid = hours(ctxOf(fromBuckets(daysOfHourBuckets(7))), range('7d'), 'local').grid
   assert.equal(grid.length, 42)
   const filled = grid.filter((c) => c.value !== null)
-  // The fixture has at most one day per cell, well below the threshold.
-  assert.equal(filled.length, 0)
-  for (const c of grid) assert.ok(c.samples < MIN_GRID_SAMPLES)
+  assert.equal(filled.length, 7)
+  for (const c of filled) {
+    assert.equal(c.block, 2)
+    assert.equal(c.samples, 1)
+    assert.equal(c.value, 11_000)
+  }
+  // Every other cell has no day at all behind it — that, and only that, is hatched.
+  for (const c of grid.filter((x) => x.value === null)) assert.equal(c.samples, 0)
+  assert.equal(new Set(filled.map((c) => c.weekday)).size, 7)
+})
+
+test('the grid says how many weeks it stands on, and below three that it is a record', () => {
+  const week = hours(ctxOf(fromBuckets(daysOfHourBuckets(7))), range('7d'), 'local')
+  assert.deepEqual(week.basis, { weeks: 1, days: 7, text: 'based on 1 week — a record, not a habit' })
+
+  // Twenty-two days of usage round up to four weeks — past the point where the picture is
+  // allowed to be called a habit, so the qualifier is gone.
+  const month = hours(ctxOf(fromBuckets(daysOfHourBuckets(22))), range('30d'), 'local')
+  assert.deepEqual(month.basis, { weeks: 4, days: 22, text: 'based on 4 weeks' })
+
+  // Nothing measured is not "0 weeks" of anything.
+  const empty = hours(ctxOf(new Aggregator()), range('30d'), 'local')
+  assert.deepEqual(empty.basis, { weeks: 0, days: 0, text: 'no day with usage in this range' })
+  assert.equal(empty.grid.filter((c) => c.value !== null).length, 0)
 })
 
 test('rolled-up buckets are named as missing from the hour profile', () => {
@@ -277,6 +314,66 @@ test('the model table sorts, caps and reports what it hid', () => {
   const capped = modelTable(ctx, range('30d'), { key: 'usage', dir: 'desc' }, 2)
   assert.equal(capped.rows.length, 2)
   assert.equal(capped.hidden, all.rows.length - 2)
+})
+
+test('one model’s row is the totals row, column for column', () => {
+  const agg = single({
+    input: 4000, cacheWrite: 2000, cacheWrite1h: 500, cacheRead: 90_000, output: 3000,
+    reasoning: 900, requests: 4, outputFinal: 4,
+  })
+  const ctx = ctxOf(agg, { sources: ['claude'] })
+  const total = totalRow(ctx, 'Today', TODAY, TODAY, 'claude')
+  const rows = modelTable(ctx, range('today'), { key: 'usage', dir: 'desc' }, 0).rows
+  assert.equal(rows.length, 1)
+  const row = rows[0]
+  // Every counted column of the totals table, formatted by the same helpers: with one model
+  // in the range the two tables are the same numbers, or one of them is wrong.
+  for (const key of ['freshInput', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output',
+    'reasoning', 'requests', 'cacheHit', 'perRequest'] as const) {
+    assert.equal(row[key], total[key], key)
+  }
+  assert.equal(row.usageText, total.usage)
+  assert.equal(row.costText, total.cost)
+  // The raw counts behind the cells, so a sort never has to read "1.2M" back as a number.
+  assert.equal(row.freshInputN, 4000)
+  assert.equal(row.cacheWrite5mN, 1500)
+  assert.equal(row.cacheWrite1hN, 500)
+  assert.equal(row.cacheReadN, 90_000)
+  assert.equal(row.outputN, 3000)
+  assert.equal(row.reasoningN, 900)
+  assert.equal(row.requestsN, 4)
+  assert.equal(row.perRequestN, row.usage / 4)
+})
+
+test('an absent figure is a dash in the model table too, never a zero', () => {
+  const agg = single({ input: 1000, output: 100, requests: 1, outputFinal: 1 })
+  const row = modelTable(ctxOf(agg, { sources: ['claude'] }), range('today'),
+    { key: 'usage', dir: 'desc' }, 0).rows[0]
+  assert.equal(row.cacheWrite5m, '–')
+  assert.equal(row.cacheWrite1h, '–')
+  assert.equal(row.cacheRead, '–')
+  assert.equal(row.reasoning, '–')
+  assert.equal(row.perRequest, '1.1K')
+})
+
+test('the model table sorts on the raw counts of the new columns', () => {
+  const buckets: Bucket[] = [
+    { ...emptyBucket('claude', 'big-reader', false, 'standard', 'd', null, TODAY), input: 100, cacheRead: 900_000, output: 10, requests: 1, outputFinal: 1 },
+    { ...emptyBucket('claude', 'big-writer', false, 'standard', 'd', null, TODAY), input: 100, cacheWrite: 50_000, cacheWrite1h: 40_000, output: 10, requests: 1, outputFinal: 1 },
+    { ...emptyBucket('claude', 'big-thinker', false, 'standard', 'd', null, TODAY), input: 100, reasoning: 7000, output: 8000, requests: 2, outputFinal: 2 },
+  ]
+  const ctx = ctxOf(fromBuckets(buckets), { sources: ['claude'] })
+  const first = (key: 'cacheRead' | 'cacheWrite1h' | 'reasoning' | 'perRequest', dir: 'asc' | 'desc'): string =>
+    modelTable(ctx, range('today'), { key, dir }, 0).rows[0].model
+  assert.equal(first('cacheRead', 'desc'), 'big-reader')
+  assert.equal(first('cacheWrite1h', 'desc'), 'big-writer')
+  assert.equal(first('reasoning', 'desc'), 'big-thinker')
+  // Per request is usage over requests, not usage: the writer's 50K over one request wins.
+  assert.equal(first('perRequest', 'desc'), 'big-writer')
+  // Ascending puts the same column the other way round; ties keep their alphabetical order.
+  const asc = modelTable(ctx, range('today'), { key: 'cacheRead', dir: 'asc' }, 0).rows.map((r) => r.model)
+  assert.equal(asc[asc.length - 1], 'big-reader')
+  assert.deepEqual(asc.slice(0, 2), ['big-thinker', 'big-writer'])
 })
 
 test('a model without a price is marked, not costed', () => {

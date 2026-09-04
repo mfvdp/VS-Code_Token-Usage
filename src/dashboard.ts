@@ -1058,24 +1058,45 @@ function short(n) {
   return String(Math.round(n * 100) / 100);
 }
 
+/**
+ * The model table carries the same columns as the totals table, in the same order and with
+ * the same words: a reader who has just read "Write 1h" over the whole range wants to know
+ * which model wrote it, and a second table with a third of the columns cannot answer that.
+ *
+ * There is no Price column. What it held is not a figure but a provenance, and it now hangs
+ * on the cost it qualifies: the tooltip of the API cost cell names the rates and where they
+ * came from, an unpriced model's cost stays a dash, and a borrowed rate is marked ⚠ — the
+ * same mark the footnote at the bottom of the page spells out.
+ */
 function sModels() {
   const m = vm.models;
   if (!m.rows.length) return '<p class="empty">No model data in this range.</p>';
-  const cols = [['model', 'Model'], ['usage', 'Usage'], ['output', 'Output'], ['requests', 'Req.'],
-    ['cacheHit', 'Hit']].concat(vm.showCost ? [['cost', 'API cost']] : []);
+  const cols = [['model', 'Model'], ['usage', 'Usage'], ['freshInput', 'Fresh in'],
+    ['cacheWrite5m', 'Write 5m'], ['cacheWrite1h', 'Write 1h'], ['cacheRead', 'Cache read'],
+    ['output', 'Output'], ['reasoning', 'Reasoning'], ['requests', 'Req.'], ['cacheHit', 'Hit'],
+    ['perRequest', 'Per req.']]
+    .concat(vm.showCost ? [['cost', 'API cost']] : []).concat([['share', 'Share']]);
   const head = cols.map(c => '<th class="sortable" data-act="sort" data-key="' + c[0] + '" tabindex="0"'
     + (m.sort.key === c[0] ? ' aria-sort="' + (m.sort.dir === 'asc' ? 'ascending' : 'descending') + '"' : '')
-    + '>' + esc(c[1]) + '</th>').join('') + '<th>Share</th><th>Price</th>';
+    + '>' + esc(c[1]) + '</th>').join('');
   const rows = m.rows.map(r => '<tr>'
     + '<td data-h="Model">' + esc(r.model) + (r.isSub ? ' <span class="meta">sub</span>' : '')
     + (r.tier !== 'standard' ? ' <span class="meta">' + esc(r.tier) + '</span>' : '') + '</td>'
     + '<td data-h="Usage">' + esc(r.usageText) + '</td>'
+    + '<td data-h="Fresh in">' + esc(r.freshInput) + '</td>'
+    + '<td data-h="Write 5m">' + esc(r.cacheWrite5m) + '</td>'
+    + '<td data-h="Write 1h">' + esc(r.cacheWrite1h) + '</td>'
+    + '<td data-h="Cache read">' + esc(r.cacheRead) + '</td>'
     + '<td data-h="Output">' + esc(r.output) + '</td>'
+    + '<td data-h="Reasoning">' + esc(r.reasoning) + '</td>'
     + '<td data-h="Req.">' + esc(r.requests) + '</td>'
     + '<td data-h="Hit">' + esc(r.cacheHit) + '</td>'
-    + (vm.showCost ? '<td data-h="API cost">' + esc(r.costText) + '</td>' : '')
+    + '<td data-h="Per req.">' + esc(r.perRequest) + '</td>'
+    + (vm.showCost ? '<td data-h="API cost" title="' + esc(r.price) + '">' + esc(r.costText)
+        + (r.priced === 'family'
+          ? ' <span title="priced from a related model (family fallback)">⚠</span>' : '')
+      + '</td>' : '')
     + '<td data-h="Share">' + esc(r.share) + '</td>'
-    + '<td data-h="Price" title="' + esc(r.price) + '">' + esc(r.priced) + '</td>'
     + '</tr>' + (r.turnAvg
       ? '<tr><td colspan="99" class="meta">Avg turn ' + esc(r.turnAvg)
         + (r.turnP90 ? ' · P90 ' + esc(r.turnP90) : '') + '</td></tr>' : '')).join('');
@@ -1128,7 +1149,7 @@ function sHours() {
       const lvl = cell.value === null ? 'none'
         : 'l' + Math.max(1, Math.ceil((cell.value / gmax) * 4));
       grid += '<i class="' + lvl + '" title="' + esc(cell.value === null
-        ? 'fewer than 3 days of samples (' + cell.samples + ')'
+        ? 'no usage in this block'
         : Math.round(cell.value).toLocaleString('en-US') + ' tokens over ' + cell.samples + ' day(s)')
         + '"></i>';
     }
@@ -1141,8 +1162,11 @@ function sHours() {
       + (p.zone === z) + '">' + z + '</button>').join('') + '</span></div>'
     + '<div class="hours">' + bars + '</div>' + hourAxis
     + (p.note ? '<div class="meta">' + esc(p.note) + '</div>' : '')
-    + '<div class="meta">by weekday and four-hour block</div>'
-    + grid;
+    // The caption carries what the grid stands on. A picture whose thin weeks look exactly
+    // like its thick ones has to say which it is, in the same line that names it.
+    + '<div class="meta">by weekday and four-hour block · ' + esc(p.basis.text) + '</div>'
+    + grid
+    + '<div class="legend"><span>hatched: no usage in that block</span></div>';
 }
 
 /**

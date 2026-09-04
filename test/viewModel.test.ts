@@ -7,9 +7,12 @@ import { Aggregator } from '../src/agg'
 import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
 import { QuotaSample, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
+import { paceVerdict, windowElapsed } from '../src/pace'
+import { THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import {
-  DASHBOARD_SECTION_KEYS, PROBLEM_ACTION, SOURCE_TITLE, SPARK_GAP, WEBVIEW_COMMANDS, WindowVm,
-  applyMessage, buildViewModel, defaultUiState, forecastsFor, parseWebviewMessage, sparkOf,
+  DASHBOARD_SECTION_KEYS, PROBLEM_ACTION, SOURCE_TITLE, SPARK_DAYS, SPARK_SLOTS, SPARK_SLOT_MS,
+  WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel, defaultUiState, forecastsFor,
+  parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
@@ -246,16 +249,109 @@ test('a broken quota state contributes no forecast at all', () => {
   assert.equal(map.size, 0)
 })
 
-test('sparklines break where the readings stop instead of drawing through the gap', () => {
-  const s = (t: number, p: number): QuotaSample => ({ s: 'claude', w: 'w', t, p, r: null, o: 'poll', f: FINGERPRINT })
-  const values = sparkOf([
-    s(NOW - 6 * 3_600_000, 10),
-    s(NOW - 5.9 * 3_600_000, 12),
-    s(NOW - 60_000, 40),
-  ], NOW)
-  assert.deepEqual(values, [10, 12, SPARK_GAP, 40])
-  // Older than the 24-hour window: not drawn at all rather than stretched.
-  assert.deepEqual(sparkOf([s(NOW - 40 * 3_600_000, 90)], NOW), [])
+const MIN = 60_000
+const DAY = 24 * 3_600_000
+const sample = (t: number, p: number, r: number | null = null): QuotaSample =>
+  ({ s: 'claude', w: 'w', t, p, r, o: 'poll', f: FINGERPRINT })
+
+test('the sparkline grid is seven days of quarter hours ending in the slot that holds now', () => {
+  assert.equal(SPARK_SLOT_MS, 15 * MIN)
+  assert.equal(SPARK_DAYS, 7)
+  assert.equal(SPARK_SLOTS, 672)
+  // The history thins to the same grid, so one stored sample is one slot.
+  assert.equal(THIN_RECENT_SLOT_MS, SPARK_SLOT_MS)
+  assert.equal(THIN_RECENT_DAYS, SPARK_DAYS)
+  const vm = sparkOf([], NOW, 300, cfg.pace)
+  assert.equal(vm.slots, SPARK_SLOTS)
+  assert.equal(vm.to - vm.from, SPARK_DAYS * DAY)
+  assert.ok(vm.from <= NOW && NOW < vm.to, 'now lies inside the grid')
+  assert.equal(vm.to, Math.floor(NOW / SPARK_SLOT_MS) * SPARK_SLOT_MS + SPARK_SLOT_MS, 'slots are aligned to the quarter hour')
+  assert.ok(NOW - vm.from >= (SPARK_SLOTS - 1) * SPARK_SLOT_MS, 'at most one partial slot is missing from the seven days')
+  assert.deepEqual(vm.points, [])
+  assert.deepEqual(vm.bridges, [])
+  // An unaligned now still ends in the slot that contains it.
+  const odd = sparkOf([sample(NOW + 7 * MIN, 10)], NOW + 7 * MIN, 300, cfg.pace)
+  assert.equal(odd.points[0].i, SPARK_SLOTS - 1)
+  assert.ok(odd.from <= NOW + 7 * MIN - (SPARK_SLOTS - 1) * SPARK_SLOT_MS)
+})
+
+test('samples land in the slot their time falls into; older than the grid they are dropped', () => {
+  const { from } = sparkOf([], NOW, 300, cfg.pace)
+  const vm = sparkOf([
+    sample(from - 1, 5),               // one millisecond before the grid: gone, not stretched
+    sample(from, 10),                  // start of the grid (seven days less one slot before now)
+    sample(NOW - 15 * MIN, 40),        // one slot before the slot of now
+    sample(NOW, 42),                   // the slot of now is the last one
+    sample(NOW - 3 * DAY, 30),
+  ], NOW, 300, cfg.pace)
+  assert.deepEqual(vm.points.map((p) => [p.i, p.p]), [
+    [0, 10], [SPARK_SLOTS - 1 - 3 * 96, 30], [SPARK_SLOTS - 2, 40], [SPARK_SLOTS - 1, 42],
+  ])
+  // Older than the whole window: nothing at all rather than a line from nowhere.
+  assert.deepEqual(sparkOf([sample(NOW - 40 * DAY, 90)], NOW, 300, cfg.pace).points, [])
+  // Ascending, unique, inside the grid — the renderer relies on it.
+  const ids = vm.points.map((p) => p.i)
+  assert.deepEqual(ids, [...new Set(ids)].sort((a, b) => a - b))
+  assert.ok(ids.every((i) => i >= 0 && i < SPARK_SLOTS))
+})
+
+test('the last reading of a slot wins', () => {
+  const t0 = Math.floor(NOW / SPARK_SLOT_MS) * SPARK_SLOT_MS - SPARK_SLOT_MS
+  const vm = sparkOf([sample(t0 + 9 * MIN, 30), sample(t0 + MIN, 10), sample(t0 + 5 * MIN, 20)], NOW, 300, cfg.pace)
+  assert.deepEqual(vm.points.map((p) => [p.i, p.p]), [[SPARK_SLOTS - 2, 30]])
+})
+
+test('every point carries the pace level the bar would have shown at that time', () => {
+  const r = NOW + 2 * 3_600_000
+  const t = NOW - 30 * MIN
+  const vm = sparkOf([sample(t, 70, r), sample(NOW, 20, r)], NOW, 300, cfg.pace)
+  const expected = paceVerdict(70, windowElapsed(r, 300, t), cfg.pace)
+  assert.equal(expected.level, 'warn', 'the fixture is ahead of pace, or the test proves nothing')
+  assert.equal(vm.points[0].level, 'warn')
+  assert.equal(vm.points[1].level, paceVerdict(20, windowElapsed(r, 300, NOW), cfg.pace).level)
+  assert.equal(vm.points[1].level, 'ok')
+  // No clock: no verdict — from the sample's side or from the window's.
+  assert.equal(sparkOf([sample(t, 70, null)], NOW, 300, cfg.pace).points[0].level, null)
+  assert.equal(sparkOf([sample(t, 70, r)], NOW, null, cfg.pace).points[0].level, null)
+  // Exhausted is a fact, not a pace: 'error' with or without a clock, like the bar.
+  assert.equal(sparkOf([sample(t, 100, r)], NOW, 300, cfg.pace).points[0].level, 'error')
+  assert.equal(sparkOf([sample(t, 99.5, null)], NOW, null, cfg.pace).points[0].level, 'error')
+})
+
+test('a hole without a reset inside is bridged; a hole across a reset stays a hole', () => {
+  const r1 = NOW + 3_600_000
+  const r2 = NOW + 6 * 3_600_000
+  const at = (slotsAgo: number) => NOW - slotsAgo * SPARK_SLOT_MS
+  // Same resetsAt, usage rose: the readings simply stopped for a while.
+  const same = sparkOf([sample(at(10), 20, r1), sample(at(2), 25, r1)], NOW, 300, cfg.pace)
+  assert.deepEqual(same.bridges, [{ from: SPARK_SLOTS - 11, to: SPARK_SLOTS - 3 }])
+  // Both without a reset time: also a bridge.
+  const nulls = sparkOf([sample(at(10), 20), sample(at(2), 20)], NOW, 300, cfg.pace)
+  assert.equal(nulls.bridges.length, 1)
+  // The provider announced a new reset in between: the window turned over in the dark.
+  const reset = sparkOf([sample(at(10), 20, r1), sample(at(2), 25, r2)], NOW, 300, cfg.pace)
+  assert.deepEqual(reset.bridges, [])
+  // A fall of more than a point without a new reset is a reset too.
+  const fell = sparkOf([sample(at(10), 20, r1), sample(at(2), 18, r1)], NOW, 300, cfg.pace)
+  assert.deepEqual(fell.bridges, [])
+  // A fall of exactly one point is rounding, not a reset.
+  const rounding = sparkOf([sample(at(10), 20, r1), sample(at(2), 19, r1)], NOW, 300, cfg.pace)
+  assert.equal(rounding.bridges.length, 1)
+  // Adjacent slots are joined by the line itself, not by a bridge.
+  const adjacent = sparkOf([sample(at(3), 20, r1), sample(at(2), 21, r1)], NOW, 300, cfg.pace)
+  assert.deepEqual(adjacent.bridges, [])
+})
+
+test('the quota card and the forecast list carry the same sparkline', () => {
+  const history = makeHistory()
+  fillHistory(history)
+  const vm = buildViewModel(makeInput({ history }))
+  const card = vm.quotas[0].windows.find((w) => w.id === 'session:300') as WindowVm
+  assert.equal(card.spark.points.length, 9, 'nine readings a quarter hour apart: nine slots')
+  assert.equal(card.spark.points[8].i, SPARK_SLOTS - 1)
+  assert.deepEqual(card.spark.bridges, [])
+  const row = vm.forecasts.find((f) => f.source === 'claude' && f.windowId === 'session:300')
+  assert.deepEqual(row?.spark, card.spark)
 })
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,23 @@ export const HISTORY_VERSION = 1
 const DEFAULT_MAX_SAMPLES = 20_000
 
 /**
+ * Thinning grid. Inside the last `THIN_RECENT_DAYS` days one reading per (source, window,
+ * identity) per `THIN_RECENT_SLOT_MS` survives — the newest of the slot, so the value shown is
+ * always the last one measured; older than that, one per `THIN_OLD_SLOT_MS`. The grid is aligned
+ * to the epoch (`Math.floor(t / slot)`), the same quarter hours the sparkline draws, so every
+ * stored sample maps to exactly one sparkline slot and no slot ever holds two.
+ *
+ * The arithmetic that keeps the store under the cap: 7 days × 96 quarter hours = 672 slots per
+ * window; with 7 windows (two providers, session, weekly and per-model windows) that is
+ * 7 × 672 ≈ 4.7 k samples for the week, plus 24 × 7 = 168 per further day — ≈ 8.6 k at the
+ * default 30 days and ≈ 18.7 k at the 90-day maximum, under the 20 k cap. Reset anchors add two
+ * samples per reset on top, a few dozen a week at most.
+ */
+export const THIN_RECENT_DAYS = 7
+export const THIN_RECENT_SLOT_MS = 15 * 60_000
+export const THIN_OLD_SLOT_MS = 60 * 60_000
+
+/**
  * A reading that follows more than six hours of silence is kept even when it repeats
  * the previous value. Without it a closed laptop would look like a straight line
  * between two distant points instead of the gap it really was.
@@ -177,6 +194,85 @@ function cyclesOf(list: QuotaSample[]): Cycle[] {
 }
 
 /**
+ * True when `cyclesOf` would treat the step from `prev` to `s` as a discontinuity: a reset
+ * (announced or inferred from a fall) or a limit re-basing. The one rule set, so that thinning
+ * keeps exactly the samples the cycle split needs.
+ */
+function breaks(prev: QuotaSample, s: QuotaSample): boolean {
+  const resetChanged = prev.r !== null && s.r !== null && prev.r !== s.r
+  if (resetChanged || prev.p - s.p >= CYCLE_DROP_POINTS) return true
+  const hours = (s.t - prev.t) / HOUR_MS
+  const rise = s.p - prev.p
+  return rise >= REBASE_MIN_POINTS && hours > 0 && rise / hours > REBASE_POINTS_PER_HOUR
+}
+
+/**
+ * Which thinning slot a sample belongs to, or null when it is not thinned at all. The regime is
+ * part of the id, so the last hourly slot before the seven-day line and the first quarter hour
+ * inside it never read as one slot.
+ */
+function slotOf(t: number, now: number, thinOld: boolean): string | null {
+  if (t >= now - THIN_RECENT_DAYS * DAY_MS) return `q${Math.floor(t / THIN_RECENT_SLOT_MS)}`
+  return thinOld ? `h${Math.floor(t / THIN_OLD_SLOT_MS)}` : null
+}
+
+/**
+ * One stream (same source, window and identity, sorted by time) thinned to one sample per slot.
+ *
+ * The last reading of a slot wins, so the newest value is always the one kept. Kept regardless
+ * of the slot: the newest reading of the stream, the last sample before and the first sample
+ * after a discontinuity (so `cyclesOf` and the forecast fits keep their anchors), and any
+ * sample whose removal would make its neighbours look like a discontinuity the readings never
+ * showed — a gradual fall of five points across a slot is not a reset and must not become one.
+ * The cycle split therefore sees the same starts, ends and fit boundaries before and after.
+ */
+function thinned(list: QuotaSample[], now: number, thinOld: boolean): QuotaSample[] {
+  const n = list.length
+  if (n < 2) return list
+  const out: QuotaSample[] = []
+  let lastKept: QuotaSample | null = null
+  for (let i = 0; i < n; i++) {
+    const s = list[i]
+    const next = i + 1 < n ? list[i + 1] : null
+    const prev = i > 0 ? list[i - 1] : null
+    const slot = slotOf(s.t, now, thinOld)
+    const keep = next === null
+      || slot === null
+      || slotOf(next.t, now, thinOld) !== slot
+      || (prev !== null && breaks(prev, s))
+      || breaks(s, next)
+      || (lastKept !== null && breaks(lastKept, next))
+    if (keep) {
+      out.push(s)
+      lastKept = s
+    }
+  }
+  return out
+}
+
+function streamKey(s: QuotaSample): string {
+  return `${s.s}|${s.w}|${s.f}`
+}
+
+/** Every stream (or only the streams in `only`) thinned; the result is sorted by time again. */
+function thinAll(list: QuotaSample[], now: number, thinOld: boolean, only?: Set<string>): QuotaSample[] {
+  const streams = new Map<string, QuotaSample[]>()
+  const out: QuotaSample[] = []
+  for (const s of list) {
+    const key = streamKey(s)
+    if (only && !only.has(key)) {
+      out.push(s)
+      continue
+    }
+    const stream = streams.get(key)
+    if (stream) stream.push(s)
+    else streams.set(key, [s])
+  }
+  for (const stream of streams.values()) out.push(...thinned(stream, now, thinOld))
+  return out.sort((a, b) => a.t - b.t)
+}
+
+/**
  * The persisted quota time series.
  *
  * One file per extension installation in globalStorage, shared by every VS Code window
@@ -189,6 +285,12 @@ export class QuotaHistory {
   private loaded = false
   /** At most one `.corrupt-<ts>` copy per instance — a broken file must not breed copies. */
   private corruptKept = false
+  /**
+   * The `now` of the last `prune`. A save merges the file back in, and without the horizon the
+   * merge would resurrect every sample the prune had just dropped — retention and thinning
+   * only hold on disk when the save applies the same rules to the union.
+   */
+  private horizon: number | null = null
 
   constructor(
     private readonly file: string,
@@ -234,15 +336,16 @@ export class QuotaHistory {
 
   /**
    * Atomic write with merge-on-save: re-read the file, union by (s, w, t, f), sort by
-   * time, cap, then tmp + rename. Best effort — history is a convenience, so a read-only
-   * storage directory must never break the poll loop.
+   * time, apply the last prune's retention and thinning to the union (else the file would
+   * hand back what the prune dropped), cap, then tmp + rename. Best effort — history is a
+   * convenience, so a read-only storage directory must never break the poll loop.
    */
   save(): void {
     const merged = new Map<string, QuotaSample>()
     for (const s of this.readFile()) merged.set(keyOf(s), s)
     for (const s of this.items) merged.set(keyOf(s), s)
     let list = [...merged.values()].sort((a, b) => a.t - b.t)
-    if (list.length > this.maxSamples) list = list.slice(list.length - this.maxSamples)
+    list = this.horizon === null ? this.capped(list) : this.trimmed(list, this.horizon)
     this.setItems(list)
     this.writeFile(list)
   }
@@ -259,6 +362,12 @@ export class QuotaHistory {
    * Write guard: a sample is dropped when (w, t, f) already exists, or when percent and
    * resetsAt equal the previous sample of that window — unless more than six hours passed,
    * because then the sample is the evidence that the gap ended.
+   *
+   * Thinning: inside the last seven days a stream keeps one sample per quarter hour, and a new
+   * reading in a slot that already holds one replaces it — except the anchors around a reset,
+   * which stay (see `thinned`). The thinning is a write rule, not a file format: the schema
+   * version is unchanged, a dense version-1 file loads as it is and is thinned by the next
+   * `prune`, and samples another window merged into the file are thinned by the next `add`.
    */
   add(state: QuotaState, fingerprint: string, now: number): number {
     this.ensure()
@@ -275,6 +384,7 @@ export class QuotaHistory {
       return 0
     }
     let added = 0
+    const touched = new Set<string>()
     for (const w of state.windows ?? []) {
       if (!w || typeof w.id !== 'string' || w.id === '') continue
       const p = w.percent
@@ -287,9 +397,10 @@ export class QuotaHistory {
       if (prev && prev.p === p && prev.r === r && t - prev.t <= GAP_KEEP_MS) continue
       this.items.push(sample)
       this.keys.add(key)
+      touched.add(streamKey(sample))
       added++
     }
-    if (added > 0) this.items.sort((a, b) => a.t - b.t)
+    if (added > 0) this.setItems(thinAll(this.items, now, false, touched))
     return added
   }
 
@@ -314,13 +425,14 @@ export class QuotaHistory {
     return out
   }
 
-  /** Retention first, then the hard cap — the oldest samples go. Call `save()` to persist. */
+  /**
+   * Retention first, then thinning (a quarter hour inside the last seven days, an hour beyond),
+   * then the hard cap — the oldest samples go. Call `save()` to persist.
+   */
   prune(now: number): void {
     this.ensure()
-    const cutoff = now - this.retentionDays * DAY_MS
-    let list = this.items.filter((s) => s.t >= cutoff)
-    if (list.length > this.maxSamples) list = list.slice(list.length - this.maxSamples)
-    this.setItems(list)
+    this.horizon = now
+    this.setItems(this.trimmed(this.items, now))
   }
 
   size(): { samples: number; bytes: number; oldest: number | null } {
@@ -347,6 +459,16 @@ export class QuotaHistory {
 
   private ensure(): void {
     if (!this.loaded) this.load()
+  }
+
+  /** Retention, thinning, cap — the prune rules, in that order. */
+  private trimmed(list: QuotaSample[], now: number): QuotaSample[] {
+    const cutoff = now - this.retentionDays * DAY_MS
+    return this.capped(thinAll(list.filter((s) => s.t >= cutoff), now, true))
+  }
+
+  private capped(list: QuotaSample[]): QuotaSample[] {
+    return list.length > this.maxSamples ? list.slice(list.length - this.maxSamples) : list
   }
 
   private setItems(list: QuotaSample[]): void {

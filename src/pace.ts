@@ -127,29 +127,6 @@ export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceCo
   return { level, points: p, ratio, measuring: false, text: pointsText(p) }
 }
 
-/**
- * The rate that would just last until the reset, in percentage points of the window per
- * hour and per day (the renderers print it as "%/h").
- * Null without a reset time or once the reset has passed: a window whose clock
- * has run out has no remaining hours to spread anything over — and null past 100 %,
- * where the allowance is negative and no rate keeps the window to its reset.
- */
-export function sustainableRate(
-  percent: number,
-  resetsAt: number | null,
-  now: number,
-): { perHour: number; perDay: number } | null {
-  if (resetsAt === null || !Number.isFinite(resetsAt) || !Number.isFinite(percent)) return null
-  const hours = (resetsAt - now) / 3_600_000
-  if (hours <= 0) return null
-  const remaining = 100 - percent
-  // An overflowed window has no allowance to spread: a clamped 0 pp/h would read as
-  // "0 %/h keeps it to the reset", and nothing keeps an overdrawn window to it.
-  if (remaining < 0) return null
-  const perHour = remaining / hours
-  return { perHour, perDay: perHour * 24 }
-}
-
 export function severityOf(v: PaceVerdict): PaceLevel {
   return v.level
 }

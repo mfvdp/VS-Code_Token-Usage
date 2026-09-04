@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  effectivePace, PaceConfig, paceVerdict, SENSITIVITY_PRESETS, severityOf, sustainableRate,
+  effectivePace, PaceConfig, paceVerdict, SENSITIVITY_PRESETS, severityOf,
   windowDisplay, windowElapsed,
 } from '../src/pace'
 import { QuotaWindow } from '../src/types'
@@ -111,20 +111,6 @@ test('without a clock there is no pace at all — and no invented denominator', 
 test('ratio is used ÷ elapsed, the formula the setting description documents', () => {
   assert.equal(paceVerdict(50, 25, normal).ratio, 2)
   assert.equal(paceVerdict(25, 50, normal).ratio, 0.5)
-})
-
-test('sustainableRate: null once there is no time left to spread anything over', () => {
-  const now = 1_000_000_000_000
-  assert.deepEqual(sustainableRate(50, now + 5 * 3_600_000, now), { perHour: 10, perDay: 240 })
-  assert.equal(sustainableRate(50, null, now), null)
-  assert.equal(sustainableRate(50, now, now), null)
-  assert.equal(sustainableRate(50, now - 1000, now), null)
-  // Overflow has no sustainable rate at all: a clamped 0 pp/h would print as
-  // "~0.0 %/h keeps it to the reset", and nothing keeps an overdrawn window to it.
-  assert.equal(sustainableRate(120, now + 2 * 3_600_000, now), null)
-  assert.equal(sustainableRate(100.5, now + 2 * 3_600_000, now), null)
-  // Exactly empty is still a real answer: zero left, and zero is what may be spent.
-  assert.deepEqual(sustainableRate(100, now + 2 * 3_600_000, now), { perHour: 0, perDay: 0 })
 })
 
 test('windowDisplay: unlimited and limitReached come before any percentage', () => {

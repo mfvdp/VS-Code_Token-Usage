@@ -430,16 +430,39 @@ const FORECAST: Forecast = {
   text: '~empty in 40 min (12:40) · high confidence',
 }
 
-test('the tooltip carries the forecast, the lockout time, the basis and the sustainable rate', () => {
+test('the tooltip carries the forecast, the lockout time and the basis, but no sustainable rate', () => {
   const tip = quotaTooltip(state(), makeContext(input({
     forecasts: new Map([['claude:session:300', FORECAST]]),
   })))
   assert.ok(tip.includes('$(graph) 5h: ~empty in 40 min'), tip)
   assert.ok(tip.includes('locks 12:40'), tip)
   assert.ok(tip.includes('based on 7 readings over 2 h'), tip)
-  assert.ok(tip.includes('allowed 4.0 %/h'), tip)
+  // The "allowed x %/h" rate went with the dashboard's "keeps it to the reset" line.
+  assert.equal(/allowed|%\/h/.test(tip), false, tip)
   // Every projection is marked as an estimate.
   assert.ok(tip.includes('~empty'))
+})
+
+test('the tooltip prints no measuring sentence: a dash in the pace column, no forecast line', () => {
+  const measuring: Forecast = {
+    state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: 20,
+    confidence: null, basis: { samples: 1, spanMs: 0 }, text: 'measuring · 1 reading over 0 min',
+  }
+  // Thirty seconds into a five-hour window: the verdict measures as well as the forecast.
+  const fresh = state({ windows: [win({ percent: 2, resetsAt: NOW + 5 * HOUR - 30_000 })] })
+  const tip = quotaTooltip(fresh, makeContext(input({
+    forecasts: new Map([['claude:session:300', measuring]]),
+  })))
+  assert.equal(/measuring|reading over/.test(tip), false, tip)
+  assert.ok(tip.includes('| 0 % | – |'), tip)
+  // The freshness line and the official page stay where they were.
+  assert.ok(tip.includes('Updated '), tip)
+  assert.ok(tip.startsWith('**[Claude Code](https://claude.ai/settings/usage)**'), tip)
+  // A forecast that measures under a verdict that does not is still not a line.
+  const paced = quotaTooltip(state(), makeContext(input({
+    forecasts: new Map([['claude:session:300', measuring]]),
+  })))
+  assert.equal(/measuring|reading over|\$\(graph\)/.test(paced), false, paced)
 })
 
 test('the tooltip title links the official usage page unless the setting says otherwise', () => {

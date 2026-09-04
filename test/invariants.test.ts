@@ -110,7 +110,6 @@ test('a window without a clock gets no pace, no elapsed and no projected end', (
   assert.equal(w.verdict.text, 'no clock for this window')
   assert.equal(w.reset, '')
   assert.equal(w.resetAbsolute, '')
-  assert.equal(w.sustainable, null)
   // No reset time, so no projected end and no sustainable rate can exist.
   assert.equal(w.forecast?.endPercent, null)
   assert.equal(w.forecast?.sustainablePerHour, null)
@@ -245,7 +244,7 @@ test('the pace unit is percent of the window — no view ever says "points"', ()
     toMarkdownSummary(vm),
     ...vm.retro.map((r) => r.text),
     ...vm.dataQuality.calibration.map((c) => c.text),
-    ...vm.forecasts.flatMap((f) => [f.resetForecast ?? '', f.sustainable ?? '', f.lockout ?? '']),
+    ...vm.forecasts.flatMap((f) => [f.resetForecast ?? '', f.lockout ?? '']),
     ...vm.quotas.flatMap((q) => q.windows.map((w) => w.verdict.text)),
     ...quickPickItems(vm).flatMap((i) => [i.label, i.description ?? '', i.detail ?? '']),
   ]

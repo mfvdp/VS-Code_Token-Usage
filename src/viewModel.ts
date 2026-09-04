@@ -26,8 +26,7 @@ import {
   Retro,
 } from './forecast'
 import {
-  PaceConfig, effectivePace, paceVerdict, severityOf, sustainableRate, windowDisplay, WindowDisplay,
-  windowElapsed,
+  PaceConfig, effectivePace, paceVerdict, severityOf, windowDisplay, WindowDisplay, windowElapsed,
 } from './pace'
 import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
 import { ageMinutes, estimate, extraUsageText, full, percentOf, percentText } from './render'
@@ -316,8 +315,12 @@ export interface WindowVm {
    * `resetLine`, or '' when neither adds anything. Views print this instead of the enum.
    */
   stateText: string
+  /**
+   * The forecast for the bar's marks and, when it has one, its sentence. A forecast still
+   * `measuring` arrives with an empty `text`: the views print nothing for it, and neither do
+   * they print the verdict of a window that is still measuring — see `cardForecast`.
+   */
   forecast: Forecast | null
-  sustainable: string | null
   spark: SparkVm
   aria: { now: number; max: number; text: string }
 }
@@ -468,7 +471,6 @@ export interface ViewModel {
     windowId: string
     label: string
     forecast: Forecast
-    sustainable: string | null
     lockout: string | null
     resetForecast: string | null
     spark: SparkVm
@@ -712,31 +714,22 @@ function resetLineOf(display: WindowDisplay, reset: string): string {
 /**
  * A window with no limit has no denominator, so every figure derived from its percentage is
  * arithmetic on a number that means nothing: "99 points in reserve" beside "∞" is the same
- * sentence contradicting itself, and a rate that "keeps it to the reset" budgets a limit that
- * does not exist. Both are answered here, before the pace maths runs.
+ * sentence contradicting itself. It is answered here, before the pace maths runs.
  */
 function unlimitedVerdict(w: QuotaWindow): PaceVerdict | null {
   if (!w.unlimited) return null
   return { level: 'ok', points: null, ratio: null, measuring: false, text: 'unlimited' }
 }
 
-function sustainableText(w: QuotaWindow, now: number): string | null {
-  if (w.unlimited) return null
-  const r = sustainableRate(w.percent, w.resetsAt, now)
-  if (!r) return null
-  // Percentage points of the window, said the way the figure above it is said: "%".
-  return estimate(`${r.perHour.toFixed(1)} %/h keeps it to the reset`)
-}
-
 /**
- * The forecast as the quota card prints it. A window that has just reset is "measuring" in
- * the verdict already; a forecast that says "measuring · window just started" under it is the
- * same fact in other words, so the card keeps the forecast (its marks and state) but not the
- * sentence. The Forecast section keeps its own row untouched.
+ * The forecast as the quota card prints it. A forecast that is still measuring has nothing to
+ * say about the window yet — "measuring · 1 reading over 0 min" is a report about the
+ * forecast, not about the quota — so the card keeps the forecast (its marks and state) but
+ * not the sentence. The Forecast section keeps its own row untouched.
  */
-function cardForecast(f: Forecast | null, verdict: PaceVerdict): Forecast | null {
+function cardForecast(f: Forecast | null): Forecast | null {
   if (!f) return null
-  return verdict.measuring && f.state === 'measuring' ? { ...f, text: '' } : f
+  return f.state === 'measuring' ? { ...f, text: '' } : f
 }
 
 function quotaCard(
@@ -775,15 +768,18 @@ function quotaCard(
       resetAbsolute: formatReset(w.resetsAt, now, 'absolute', tcfg),
       resetLine: resetLineOf(display, reset),
       stateText: stateTextOf(display, verdict.text),
-      forecast: cardForecast(forecasts.get(`${q.source}:${w.id}`) ?? null, verdict),
-      sustainable: sustainableText(w, now),
+      forecast: cardForecast(forecasts.get(`${q.source}:${w.id}`) ?? null),
       spark: sparkOf(history.samples(q.source, w.id, fp, now - SPARK_SPAN_MS), now, w.windowMinutes, paceCfg),
       aria: {
         now: Number.isFinite(w.percent) ? Math.round(w.percent) : 0,
         max: 100,
         // "unlimited, unlimited" is the screen reader saying the same word twice: the
-        // unlimited verdict IS the state, so it is not repeated after it.
-        text: verdict.text === text ? `${w.label}: ${text}` : `${w.label}: ${text}, ${verdict.text}`,
+        // unlimited verdict IS the state, so it is not repeated after it. A verdict still
+        // measuring is not read out either — no view prints it, and the screen reader is
+        // not told what the sighted reader is spared.
+        text: verdict.text === text || verdict.measuring
+          ? `${w.label}: ${text}`
+          : `${w.label}: ${text}, ${verdict.text}`,
       },
     }
   })
@@ -1204,7 +1200,6 @@ function forecastList(
         windowId: w.id,
         label: labels.get(key) ?? w.label,
         forecast: f,
-        sustainable: sustainableText(w, now),
         lockout: lockoutText(f, now, (ms) => formatTime(ms, tcfg)),
         resetForecast: rf === null
           ? null

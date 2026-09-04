@@ -17,7 +17,7 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![Token Pace in the VS Code status bar: one entry per quota window, each with a pace-coloured bar, an elapsed marker, the percentage and the countdown to its reset](media/screenshot-status-bar.png)
 
-![The Token Pace dashboard in the secondary sidebar: quota cards with forecast and sustainable rate, the KPI row, the daily chart and the model table](media/screenshot-dashboard.png)
+![The Token Pace dashboard in the secondary sidebar: quota cards with pace verdict and forecast, the KPI row, the daily chart and the model table](media/screenshot-dashboard.png)
 
 Both pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States*
 and a synthetic snapshot), not from anybody's real usage. The tooltip behind the bar is
@@ -92,8 +92,7 @@ the status bar, the tooltip, the dashboard and the exports alike.
 | **Window** | One quota bucket of a provider, with a length and a reset time: Claude's 5-hour session, its 7-day plan window, a model-scoped 7-day window, Codex's 5-hour and 7-day limits. Every figure belongs to a window; nothing is ever summed across two |
 | **Pace** | Consumption compared with the share of the window that has **already elapsed**, not with a fixed threshold. `ratio = (used ÷ limit) ÷ (elapsed ÷ window)`; `1.0` is exactly on pace |
 | **Ahead of pace / spare** | The same relation as a difference of percentages (`used % − elapsed %`). Above the line it reads `5 % ahead of pace`, below it `36 % of the window still spare`. The unit is percentage points of the window, written `%` — the same sign as the figure above it |
-| **Elapsed marker** | The `┃` inside the bar, at the position the window's own clock has reached. Fill left of it is spare, fill right of it is ahead of pace. It is what makes the verdict readable without colour |
-| **Sustainable rate** | The rate that would just last until the reset — `~18.8 %/h keeps it to the reset`. Arithmetic on the remaining share and the remaining hours, not a prediction, so it carries `~` |
+| **Elapsed marker** | The `┃` inside the bar, at the position the window's own clock has reached. Fill left of it is spare, fill right of it is ahead of pace. It is what makes the verdict readable without colour. The dashboard bar also paints the gap: fill beyond the marker is drawn in a darker shade of the level colour, and track between the end of the fill and the marker in a lighter grey |
 | **Lower bound** | A figure that is certainly *at least* this large but may be larger: output of Claude subagents, and of any response with no terminal line, is counted but cannot be counted completely. Marked `⚠` in the tooltip, the tables and the exports, and never quietly rounded up |
 | **Provenance** | Where a number came from and how sure it is. Every view carries it: `measured: quota, tokens · estimated: ~API cost`, and per model `exact` / `family` / `custom` / `none` |
 | **Poll vs cache** | *Poll* is a request Token Pace makes itself, with your access token, after consent. *Cache* is a reading somebody else already fetched — a cache file, Claude Code's status line, `~/.claude.json`, the Codex transcripts. Cache costs nothing and touches no network; its age is always shown |
@@ -121,8 +120,9 @@ Two guards keep the verdict honest:
 * **Tolerance band.** A window has to run more than *n* points ahead of pace before it is
   coloured at all — otherwise the bar would flip colour on rounding noise.
 * **Minimum elapsed.** Right after a reset `elapsed ≈ 0`, so the ratio explodes and the very
-  first prompt would always look too fast. Below the minimum the verdict reads
-  `measuring · window just reset` and stays green.
+  first prompt would always look too fast. Below the minimum the verdict is `measuring`: the
+  bar stays green and the views print no pace text at all until the window has run long
+  enough to judge.
 
 `tokenPace.pace.sensitivity` picks the pair:
 
@@ -142,7 +142,7 @@ Two guards keep the verdict honest:
 
 Exhaustion outranks everything: a full window is a fact, not a tendency. The verdict text is
 one of `on pace`, `5 % ahead of pace`, `36 % of the window still spare`,
-`measuring · window just reset`, `no clock for this window`, `exhausted`.
+`no clock for this window`, `exhausted` — or nothing, while the window is still measuring.
 
 An absolute level says little on its own: 80 % used is comfortable six days into a weekly
 window and alarming six hours in. Real numbers from one session:
@@ -155,11 +155,6 @@ CDX 7 d   100 % used · 10 % elapsed   → red
 
 Windows that report no reset time have nothing to compare against; they stay green until
 they are spent.
-
-**Sustainable rate.** For a window with a reset in the future, Token Pace also states the
-rate that would just last until then — `allowed 3.4 %/h` in the tooltip and
-`~18.8 %/h keeps it to the reset` in the dashboard, per hour and per day. It is arithmetic on
-the remaining share, not a prediction, which is why it carries `~`.
 
 ## Status bar
 
@@ -300,7 +295,7 @@ writes no file, and never mixes with the live items.
 
 | Section | Contents |
 |---|---|
-| `quota` | One card per provider: the plan name where one is known, bar with elapsed tick and a second tick for the projected value at the reset, verdict, reset, forecast line, sustainable rate, sparkline, extra usage, and a freshness row (last check · last data · last local event · next refresh · snapshot age). A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
+| `quota` | One card per provider: the plan name and the reading's age in the header, then per window one header row (label, reset, pace verdict, percentage) over a bar with the elapsed tick, the pace gap painted on either side of it and a second tick for the projected value at the reset, the forecast line, a seven-day sparkline coloured by pace, and extra usage. The full freshness row (last check · last data · last local event · next refresh · snapshot age) and the official page stay in the tooltip and the markdown view. A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |

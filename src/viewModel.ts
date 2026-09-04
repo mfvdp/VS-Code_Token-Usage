@@ -25,7 +25,10 @@ import {
   Calibration, ForecastConfig, calibration, forecast, lockoutText, resetForecast, retrospective,
   Retro,
 } from './forecast'
-import { PaceConfig, effectivePace, paceVerdict, sustainableRate, windowDisplay, WindowDisplay } from './pace'
+import {
+  PaceConfig, effectivePace, paceVerdict, severityOf, sustainableRate, windowDisplay, WindowDisplay,
+  windowElapsed,
+} from './pace'
 import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
 import { ageMinutes, estimate, extraUsageText, full, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
@@ -315,7 +318,7 @@ export interface WindowVm {
   stateText: string
   forecast: Forecast | null
   sustainable: string | null
-  spark: number[]
+  spark: SparkVm
   aria: { now: number; max: number; text: string }
 }
 
@@ -468,7 +471,8 @@ export interface ViewModel {
     sustainable: string | null
     lockout: string | null
     resetForecast: string | null
-    spark: number[]
+    spark: SparkVm
+    /** Stretches without readings in the last 24 h — the count the text beside the forecast states. */
     gaps: number
   }[]
   retro: { source: Source; windowId: string; label: string; retro: Retro; text: string }[]
@@ -502,26 +506,94 @@ export interface ViewModel {
 // Sparklines
 // ---------------------------------------------------------------------------
 
-/** A break in the series. Percentages are never negative, so this cannot collide with data. */
-export const SPARK_GAP = -1
-/** Longer than this without a reading is a hole in the coverage, not a flat line. */
-const SPARK_GAP_MS = 90 * 60_000
-const SPARK_WINDOW_MS = 24 * 60 * 60_000
-const SPARK_MAX_POINTS = 60
+export const SPARK_SLOT_MS = 15 * 60_000
+export const SPARK_DAYS = 7
+/** 672 quarter hours: the sparkline's whole x axis, one slot per column. */
+export const SPARK_SLOTS = SPARK_DAYS * 24 * 4
+
+/** One reading on the sparkline: `i` is the slot index 0..SPARK_SLOTS-1, `p` the percent (0..100+). */
+export interface SparkPoint { i: number; p: number; level: PaceLevel | null }
+/** Slot indices of two consecutive points a dashed bridge joins. */
+export interface SparkBridge { from: number; to: number }
 
 /**
- * The last 24 hours of one window as a list of percentages, with `SPARK_GAP` wherever the
- * readings stop. Drawing straight through a gap would claim a measurement that was never
- * taken — VS Code is not running all day, and that shows.
+ * Seven days of one window on a time-proportional grid: x = slot index, so a missing slot is
+ * a hole exactly as wide as the time nobody measured. The grid is aligned to the quarter hours
+ * of the epoch — the same grid the history is thinned to — so a stored sample maps to exactly
+ * one slot and the drawing shifts by whole slots, never by a fraction.
  */
-export function sparkOf(samples: QuotaSample[], now: number): number[] {
-  const recent = samples.filter((s) => s.t >= now - SPARK_WINDOW_MS).sort((a, b) => a.t - b.t)
-  const out: number[] = []
-  for (let i = 0; i < recent.length; i++) {
-    if (i > 0 && recent[i].t - recent[i - 1].t > SPARK_GAP_MS) out.push(SPARK_GAP)
-    out.push(recent[i].p)
+export interface SparkVm {
+  /** = SPARK_SLOTS */
+  slots: number
+  /** Unix ms: start of slot 0. */
+  from: number
+  /** Unix ms: end of the last slot; the slot containing `now` is the last slot (index slots-1). */
+  to: number
+  /** Ascending unique `i`; one point per slot that has a reading — the LAST reading inside the slot. */
+  points: SparkPoint[]
+  /**
+   * For consecutive points a, b with b.i - a.i > 1: a bridge when no reset lies between them —
+   * both samples carry the same resetsAt (or both null) AND b.p >= a.p - 1. Otherwise the hole
+   * stays a hole: a line across a reset would claim the window never turned over.
+   */
+  bridges: SparkBridge[]
+}
+
+/** Longer than this without a reading is a hole in the coverage, not a flat line. */
+const GAP_MIN_MS = 90 * 60_000
+/** The forecast list counts gaps over the last day — the text beside it says so. */
+const GAP_COUNT_MS = 24 * 60 * 60_000
+const SPARK_SPAN_MS = SPARK_DAYS * 24 * 60 * 60_000
+
+/**
+ * The pace level the bar would have shown at the time of the sample: elapsed share from the
+ * sample's own `resetsAt` and the window length, judged by the same rule as the bar. Null
+ * without a clock — except an exhausted reading, which the bar colours 'error' with or without
+ * one.
+ */
+function sparkLevel(s: QuotaSample, windowMinutes: number | null, paceCfg: PaceConfig): PaceLevel | null {
+  const elapsed = windowElapsed(s.r, windowMinutes, s.t)
+  const verdict = paceVerdict(s.p, elapsed, paceCfg)
+  const level = severityOf(verdict)
+  if (level === 'error') return level
+  return elapsed === null ? null : level
+}
+
+/**
+ * The last seven days of one window on the sparkline grid.
+ *
+ * Only samples inside the grid are drawn; older ones are dropped rather than stretched. Two
+ * readings in one slot leave the later one — the newest value is the one the user saw last.
+ */
+export function sparkOf(
+  samples: QuotaSample[],
+  now: number,
+  windowMinutes: number | null,
+  paceCfg: PaceConfig,
+): SparkVm {
+  const to = (Math.floor(now / SPARK_SLOT_MS) + 1) * SPARK_SLOT_MS
+  const from = to - SPARK_SLOTS * SPARK_SLOT_MS
+  const last = new Map<number, QuotaSample>()
+  const sorted = [...samples].sort((a, b) => a.t - b.t)
+  for (const s of sorted) {
+    if (!Number.isFinite(s.t) || !Number.isFinite(s.p)) continue
+    const i = Math.floor((s.t - from) / SPARK_SLOT_MS)
+    if (i < 0 || i >= SPARK_SLOTS) continue
+    last.set(i, s)
   }
-  return out.length > SPARK_MAX_POINTS ? out.slice(out.length - SPARK_MAX_POINTS) : out
+  const slots = [...last.keys()].sort((a, b) => a - b)
+  const points: SparkPoint[] = []
+  const bridges: SparkBridge[] = []
+  let prev: { i: number; s: QuotaSample } | null = null
+  for (const i of slots) {
+    const s = last.get(i) as QuotaSample
+    points.push({ i, p: s.p, level: sparkLevel(s, windowMinutes, paceCfg) })
+    if (prev && i - prev.i > 1 && prev.s.r === s.r && s.p >= prev.s.p - 1) {
+      bridges.push({ from: prev.i, to: i })
+    }
+    prev = { i, s }
+  }
+  return { slots: SPARK_SLOTS, from, to, points, bridges }
 }
 
 // ---------------------------------------------------------------------------
@@ -705,7 +777,7 @@ function quotaCard(
       stateText: stateTextOf(display, verdict.text),
       forecast: cardForecast(forecasts.get(`${q.source}:${w.id}`) ?? null, verdict),
       sustainable: sustainableText(w, now),
-      spark: sparkOf(history.samples(q.source, w.id, fp, now - SPARK_WINDOW_MS), now),
+      spark: sparkOf(history.samples(q.source, w.id, fp, now - SPARK_SPAN_MS), now, w.windowMinutes, paceCfg),
       aria: {
         now: Number.isFinite(w.percent) ? Math.round(w.percent) : 0,
         max: 100,
@@ -978,7 +1050,7 @@ export function buildViewModel(input: VmInput): ViewModel {
   const kpiRow = kpis(ctx, range, previous)
   const cache = cacheEconomy(ctx, range)
 
-  const forecastRows = forecastList(cards, quotas, history, input.fingerprints, forecasts, now, tcfg)
+  const forecastRows = forecastList(cards, quotas, history, input.fingerprints, forecasts, now, tcfg, paceCfg)
   const retroRows = retroList(quotas, history, input.fingerprints)
   const usageRows: WindowUsageRow[] = []
   const attribution: ViewModel['attributionInWindow'] = []
@@ -1104,6 +1176,7 @@ function forecastList(
   forecasts: Map<string, Forecast>,
   now: number,
   tcfg: TimeConfig,
+  paceCfg: PaceConfig,
 ): ViewModel['forecasts'] {
   const out: ViewModel['forecasts'] = []
   const labels = new Map<string, string>()
@@ -1124,7 +1197,7 @@ function forecastList(
       // it rests on belongs to the window before the reset. The list beside it may not keep
       // stating what the card refuses to; the three views do not disagree about one window.
       if (f.state === 'full' && displays.get(key) === 'resetDue') continue
-      const samples = history.samples(q.source, w.id, fp, now - SPARK_WINDOW_MS)
+      const samples = history.samples(q.source, w.id, fp, now - SPARK_SPAN_MS)
       const rf = resetForecast(f)
       out.push({
         source: q.source,
@@ -1138,8 +1211,8 @@ function forecastList(
           : estimate(rf.sign === '+'
             ? `${rf.points.toFixed(0)} % spare at the reset`
             : `${rf.points.toFixed(0)} % over before the reset`),
-        spark: sparkOf(samples, now),
-        gaps: history.gaps(samples, SPARK_GAP_MS).length,
+        spark: sparkOf(samples, now, w.windowMinutes, paceCfg),
+        gaps: history.gaps(samples.filter((s) => s.t >= now - GAP_COUNT_MS), GAP_MIN_MS).length,
       })
     }
   }

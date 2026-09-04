@@ -5,7 +5,9 @@ import * as assert from 'node:assert/strict'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
-import { QuotaHistory, fingerprintFor } from '../src/quotaHistory'
+import {
+  HISTORY_VERSION, QuotaHistory, THIN_OLD_SLOT_MS, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS, fingerprintFor,
+} from '../src/quotaHistory'
 import { QuotaOrigin, QuotaState, QuotaWindow } from '../src/types'
 import { scratchFile } from './fixtures/helpers'
 
@@ -269,4 +271,172 @@ test('fingerprintFor is stable, short and identity-bound', () => {
   assert.notEqual(a, fingerprintFor('codex', 'max-20x'))
   assert.notEqual(a, fingerprintFor('claude', null))
   assert.equal(fingerprintFor('claude', null), fingerprintFor('claude', 'unknown'))
+})
+
+// ---------------------------------------------------------------------------
+// Thinning — a write rule, not a file format
+// ---------------------------------------------------------------------------
+
+const MIN = 60_000
+const DAY = 24 * H
+/** A quarter-hour boundary near BASE, so "the same slot" in a test means what it says. */
+const SLOT0 = Math.floor(BASE / THIN_RECENT_SLOT_MS) * THIN_RECENT_SLOT_MS
+
+test('the thinning grid is the sparkline grid', () => {
+  assert.equal(THIN_RECENT_SLOT_MS, 15 * MIN)
+  assert.equal(THIN_RECENT_DAYS, 7)
+  assert.equal(THIN_OLD_SLOT_MS, H)
+})
+
+test('ten readings in one quarter hour leave one — the newest', () => {
+  const h = new QuotaHistory(tmpFile('h.json'), 30)
+  h.load()
+  for (let k = 0; k < 10; k++) {
+    const t = SLOT0 + k * MIN
+    assert.equal(h.add(state(t, [win('w', 10 + k, null)]), FP, t), 1, 'every changed reading is accepted')
+  }
+  const list = h.samples('claude', 'w', FP)
+  assert.equal(list.length, 1)
+  assert.equal(list[0].p, 19)
+  assert.equal(list[0].t, SLOT0 + 9 * MIN)
+  // The next slot gets its own sample; the previous one is untouched.
+  h.add(state(SLOT0 + 16 * MIN, [win('w', 20, null)]), FP, SLOT0 + 16 * MIN)
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [19, 20])
+})
+
+test('thinning keeps the last sample before a reset and the first one after it', () => {
+  const h = new QuotaHistory(tmpFile('h.json'), 30)
+  h.load()
+  const r1 = SLOT0 + 5 * H
+  const r2 = SLOT0 + 10 * H
+  const add = (t: number, p: number, r: number | null) => h.add(state(t, [win('w', p, r)]), FP, t)
+  add(SLOT0 + 1 * MIN, 50, r1)
+  add(SLOT0 + 2 * MIN, 52, r1)
+  add(SLOT0 + 3 * MIN, 54, r1)   // last before the reset
+  add(SLOT0 + 4 * MIN, 2, r2)    // first after it
+  add(SLOT0 + 5 * MIN, 3, r2)
+  add(SLOT0 + 6 * MIN, 4, r2)    // newest of the slot
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => [s.p, s.r]), [[54, r1], [2, r2], [4, r2]])
+  const cycles = h.cycles('claude', 'w', FP)
+  assert.equal(cycles.length, 2)
+  assert.equal(cycles[0].end, SLOT0 + 3 * MIN)
+  assert.equal(cycles[1].start, SLOT0 + 4 * MIN)
+  assert.deepEqual(cycles[1].tags, ['RESET'])
+
+  // An inferred reset — a fall of five points without a new resetsAt — anchors just the same.
+  const g = new QuotaHistory(tmpFile('h.json'), 30)
+  g.load()
+  const addNull = (t: number, p: number) => g.add(state(t, [win('w', p, null)]), FP, t)
+  addNull(SLOT0 + 1 * MIN, 70)
+  addNull(SLOT0 + 2 * MIN, 72)
+  addNull(SLOT0 + 3 * MIN, 3)
+  addNull(SLOT0 + 4 * MIN, 6)
+  assert.deepEqual(g.samples('claude', 'w', FP).map((s) => s.p), [72, 3, 6])
+  assert.equal(g.cycles('claude', 'w', FP).length, 2)
+})
+
+test('thinning never invents a reset: a gradual fall across a slot stays one cycle', () => {
+  const h = new QuotaHistory(tmpFile('h.json'), 30)
+  h.load()
+  const add = (t: number, p: number) => h.add(state(t, [win('w', p, null)]), FP, t)
+  add(SLOT0 - 5 * MIN, 52)
+  for (const [k, p] of [[1, 50], [2, 47], [3, 44], [4, 41]]) add(SLOT0 + k * MIN, p)
+  // No consecutive pair fell five points, so no reset was ever seen — and the thinned series
+  // must not show one either, whatever it had to keep for that.
+  assert.equal(h.cycles('claude', 'w', FP).length, 1)
+  const kept = h.samples('claude', 'w', FP)
+  assert.equal(kept[kept.length - 1].p, 41, 'the newest reading is always kept')
+  for (let i = 1; i < kept.length; i++) assert.ok(kept[i - 1].p - kept[i].p < 5)
+})
+
+test('prune thins samples older than seven days to one per hour and keeps the newest of each', () => {
+  const h = new QuotaHistory(tmpFile('h.json'), 30)
+  h.load()
+  const now = SLOT0 + 20 * DAY
+  const old = now - 10 * DAY
+  const hourStart = Math.floor(old / H) * H
+  // Three hours of readings every five minutes, starting on an hour boundary.
+  for (let k = 0; k < 36; k++) {
+    const t = hourStart + k * 5 * MIN
+    h.add(state(t, [win('w', k, null)]), FP, now)
+  }
+  // Five readings every five minutes inside the last seven days: thinned to the quarter hour.
+  for (let k = 0; k < 5; k++) {
+    const t = now - 30 * MIN + k * 5 * MIN
+    h.add(state(t, [win('w', 50 + k, null)]), FP, now)
+  }
+  assert.equal(h.samples('claude', 'w', FP).length, 36 + 2, 'add thins only the recent part; the old part waits for prune')
+  h.prune(now)
+  const kept = h.samples('claude', 'w', FP)
+  const oldKept = kept.filter((s) => s.t < now - 7 * DAY)
+  assert.deepEqual(oldKept.map((s) => s.p), [11, 23, 35], 'the last reading of each hour')
+  const recentKept = kept.filter((s) => s.t >= now - 7 * DAY)
+  assert.equal(recentKept.length, 2, 'recent samples stay on the quarter-hour grid, not the hourly one')
+  assert.equal(recentKept[recentKept.length - 1].p, 54)
+})
+
+test('retention and the hard cap still apply after thinning', () => {
+  const h = new QuotaHistory(tmpFile('h.json'), 1)
+  h.load()
+  const now = SLOT0 + 10 * DAY
+  h.add(state(now - 3 * DAY, [win('w', 10, null)]), FP, now)
+  h.add(state(now - 2 * H, [win('w', 20, null)]), FP, now)
+  h.prune(now)
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [20])
+
+  const capped = new QuotaHistory(tmpFile('h.json'), 30, 2)
+  capped.load()
+  for (let k = 0; k < 4; k++) capped.add(state(SLOT0 + k * H, [win('w', 10 * k, null)]), FP, SLOT0 + k * H)
+  capped.prune(SLOT0 + 4 * H)
+  assert.deepEqual(capped.samples('claude', 'w', FP).map((s) => s.p), [20, 30])
+})
+
+test('a dense version-1 file loads as it is and is thinned by the next prune', () => {
+  const file = tmpFile('h.json')
+  const samples = []
+  for (let k = 0; k < 10; k++) samples.push({ s: 'claude', w: 'w', t: SLOT0 + k * MIN, p: k, r: null, o: 'poll', f: FP })
+  fs.writeFileSync(file, JSON.stringify({ version: 1, samples }))
+  const h = new QuotaHistory(file, 30)
+  h.load()
+  assert.equal(h.size().samples, 10, 'loading changes nothing — the schema is the same')
+  h.prune(SLOT0 + H)
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [9])
+  // The save merges the file back in — and must not let the file undo the prune.
+  h.save()
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { version: number; samples: unknown[] }
+  assert.equal(raw.version, HISTORY_VERSION)
+  assert.equal(raw.samples.length, 1)
+  assert.equal(h.size().samples, 1)
+})
+
+test('a save after a prune keeps the retention the prune applied', () => {
+  const file = tmpFile('h.json')
+  const now = SLOT0 + 40 * DAY
+  const a = new QuotaHistory(file, 30)
+  a.load()
+  a.add(state(now - 35 * DAY, [win('w', 10, null)]), FP, now)
+  a.add(state(now - H, [win('w', 20, null)]), FP, now)
+  a.save()
+  assert.equal((JSON.parse(fs.readFileSync(file, 'utf8')) as { samples: unknown[] }).samples.length, 2,
+    'before any prune a save keeps everything it merged')
+  a.prune(now)
+  a.save()
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { samples: Array<{ p: number }> }
+  assert.deepEqual(raw.samples.map((s) => s.p), [20])
+})
+
+test('seven windows for seven days at the quarter-hour cadence stay under 4 800 samples', () => {
+  const h = new QuotaHistory(tmpFile('h.json'), 30)
+  h.load()
+  const windows = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+  const from = SLOT0 - 7 * DAY
+  let count = 0
+  for (let t = from; t < SLOT0; t += THIN_RECENT_SLOT_MS) {
+    count++
+    // Every window moves every reading, so nothing is dropped by the value guard alone.
+    h.add(state(t, windows.map((w, i) => win(w, (count + i) % 100, null))), FP, t)
+  }
+  assert.equal(count, 7 * 96)
+  assert.ok(h.size().samples <= 4_800, `${h.size().samples} samples`)
+  assert.ok(h.size().samples >= windows.length * (7 * 96 - 1), 'nothing beyond the grid was thinned away')
 })

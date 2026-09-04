@@ -732,8 +732,15 @@ sections with it.
   for Codex from the plan type plus the set of limit ids. Never from the token.
 * **Merging, not overwriting.** Several windows share one file, so a save re-reads it, unions the
   samples and writes atomically; last-writer-wins would throw away what the other window saw.
-* **Gaps are gaps.** A stretch without readings is drawn as a break in the sparkline, never
-  interpolated, and the number of gaps in the last 24 h is stated next to the forecast.
+* **Thinning.** The series is kept on the sparkline's own grid: inside the last seven days one
+  reading per window per quarter hour (the newest of the slot), one per hour beyond that. The
+  last reading before a reset and the first one after it are always kept, so the reset history
+  and the forecast fits keep their anchors. Seven windows come to about 4.7 k samples a week,
+  8.6 k at 30 days and 18.7 k at 90 — under the hard cap of 20 k.
+* **Gaps are gaps.** The sparkline covers seven days on a time-proportional axis, so a stretch
+  without readings is a hole exactly as wide as the time nobody measured. A hole with no reset
+  inside it is bridged with a dashed line; a hole across a reset stays a hole, and the number of
+  gaps in the last 24 h is stated next to the forecast.
 * **Cycles.** A cycle ends when the provider announces a different reset time, or when the
   percentage falls by five points or more without one. A rise too steep to come from usage is
   treated as the limit being re-based: the cycle continues, but the rate fit restarts.

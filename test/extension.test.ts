@@ -708,3 +708,25 @@ test('a settings change is applied live: no reload between the edit and the stat
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
+
+test('a stored chart stack is restored, and a nonsense one is dropped', async () => {
+  // The persisted UI state is user data from an older build: every field goes through the
+  // restore validation, and what fails it falls back to the default instead of reaching the
+  // view model. `setRange` writes the whole restored state back, which is where it is readable.
+  const kept = new Map<string, unknown>([
+    ['tokenPace.ui', { range: '30d', chartStack: 'model', heatmapMetric: 'sideways' }],
+  ])
+  const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+  await state.execute('tokenPace.setRange', '7d')
+  const ui = host.ctx.globalState.get<{ chartStack: string; heatmapMetric: string }>('tokenPace.ui')
+  assert.equal(ui?.chartStack, 'model')
+  assert.equal(ui?.heatmapMetric, 'usage')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  const junk = new Map<string, unknown>([['tokenPace.ui', { chartStack: 'by-the-moon' }]])
+  const second = await activateHost(makeFixture(), REPO, { globalState: junk })
+  await state.execute('tokenPace.setRange', '7d')
+  assert.equal(second.ctx.globalState.get<{ chartStack: string }>('tokenPace.ui')?.chartStack,
+    'provider')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})

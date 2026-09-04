@@ -486,6 +486,83 @@ test('the chart condenses to weekly bars beyond four months', () => {
   )
 })
 
+test('the chart splits a column by model without changing the column', () => {
+  const ctx = ctxOf(buildAgg())
+  const r = range('30d')
+  const byProvider = chart(ctx, r, 'usage')
+  const byModel = chart(ctx, r, 'usage', 'model')
+  assert.equal(byProvider.stack, 'provider')
+  assert.equal(byModel.stack, 'model')
+  // The provider bands keep today's identity and are named from the same table the cards use.
+  assert.deepEqual(byProvider.series.map((x) => x.key), ['claude', 'codex'])
+  assert.deepEqual(byProvider.series.map((x) => x.label), ['Claude Code', 'Codex'])
+  assert.deepEqual(byProvider.series.map((x) => x.source), ['claude', 'codex'])
+
+  // A stack is a partition: splitting the same column a second way may not move a single token.
+  const column = (c: typeof byModel, i: number): number =>
+    c.series.reduce((sum, x) => sum + x.values[i], 0)
+  assert.equal(byModel.days.length, byProvider.days.length)
+  for (let i = 0; i < byProvider.days.length; i++) {
+    assert.equal(column(byModel, i), column(byProvider, i), byProvider.days[i])
+  }
+  assert.equal(byModel.max, byProvider.max)
+
+  // Model names verbatim, largest band first, and each one carries the provider it came from.
+  assert.deepEqual(byModel.series.map((x) => x.label), byModel.series.map((x) => x.key))
+  assert.ok(byModel.series.some((x) => x.key === 'claude-opus-4-6'), JSON.stringify(byModel.series.map((x) => x.key)))
+  assert.ok(byModel.series.some((x) => x.key === 'gpt-5.3-codex'))
+  const totals = byModel.series.map((x) => x.values.reduce((a, b) => a + b, 0))
+  assert.deepEqual(totals, [...totals].sort((a, b) => b - a))
+  assert.equal(byModel.series.every((x) => x.values.every((v) => Number.isFinite(v))), true)
+  // Four models here, so nothing is folded away yet.
+  assert.equal(byModel.series.some((x) => x.key === 'other'), false)
+})
+
+test('beyond five models the rest of the stack is folded into one band, never dropped', () => {
+  // Eight models on one day, each smaller than the one before.
+  const buckets = Array.from({ length: 8 }, (_, i) => ({
+    ...emptyBucket('claude', `m${i}`, false, 'standard' as const, 'd' as const, null, TODAY),
+    output: 100 - i * 10,
+    requests: 1,
+  }))
+  const ctx = ctxOf(fromBuckets(buckets), { sources: ['claude'] })
+  const r = range('today')
+  const byModel = chart(ctx, r, 'usage', 'model')
+  assert.equal(byModel.series.length, 6)
+  assert.deepEqual(byModel.series.map((x) => x.key), ['m0', 'm1', 'm2', 'm3', 'm4', 'other'])
+  const other = byModel.series[byModel.series.length - 1]
+  assert.equal(other.label, 'other')
+  // The fold spans no single provider, so it names none.
+  assert.equal(other.source, null)
+  // 50 + 40 + 30 = the three models the top five left over.
+  assert.equal(other.values.reduce((a, b) => a + b, 0), 120)
+  const sum = (c: typeof byModel): number =>
+    c.series.reduce((s, x) => s + x.values.reduce((a, b) => a + b, 0), 0)
+  assert.equal(sum(byModel), sum(chart(ctx, r, 'usage')))
+})
+
+test('a model with nothing in the selected metric is no band and no colour', () => {
+  const buckets = [
+    { ...emptyBucket('claude', 'thinker', false, 'standard' as const, 'd' as const, null, TODAY), output: 50, reasoning: 40, requests: 1 },
+    { ...emptyBucket('claude', 'quiet', false, 'standard' as const, 'd' as const, null, TODAY), output: 50, reasoning: 0, requests: 1 },
+  ]
+  const ctx = ctxOf(fromBuckets(buckets), { sources: ['claude'] })
+  const byModel = chart(ctx, range('today'), 'reasoning', 'model')
+  assert.deepEqual(byModel.series.map((x) => x.key), ['thinker'])
+})
+
+test('the weekly condensation keeps the model bands it was given', () => {
+  const ctx = ctxOf(buildAgg())
+  const long = { from: '2026-01-01', to: TODAY, label: 'long', preset: 'custom' as const }
+  const weekly = chart(ctx, long, 'usage', 'model')
+  assert.equal(weekly.weekly, true)
+  assert.equal(weekly.stack, 'model')
+  assert.equal(weekly.series.every((x) => x.values.length === weekly.days.length), true)
+  const total = (c: { series: { values: number[] }[] }): number =>
+    c.series.reduce((s, x) => s + x.values.reduce((a, b) => a + b, 0), 0)
+  assert.equal(total(weekly), total(chart(ctx, long, 'usage')))
+})
+
 test('niceCeil rounds the axis to something a person reads', () => {
   assert.equal(niceCeil(0), 1)
   assert.equal(niceCeil(7), 10)

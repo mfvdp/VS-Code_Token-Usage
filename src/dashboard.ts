@@ -239,6 +239,24 @@ button:hover, select:hover { background: var(--vscode-toolbar-hoverBackground, v
 button:focus-visible, select:focus-visible, input:focus-visible, [tabindex]:focus-visible {
   outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px;
 }
+/* The popup of a <select> is drawn by the browser, not by this page, and it took its colours
+   from the system rather than from the theme: light option text on a light system menu, which
+   is a dropdown nobody could read. The options are given the theme's own dropdown colours, and
+   the colour scheme is declared as well — that is the one thing the browser reads when it
+   paints the popup's chrome. VS Code stamps the theme kind on the body; the high-contrast
+   light class comes second on purpose, because the host sets it next to vscode-high-contrast
+   and the later rule is the one that wins. */
+body.vscode-dark, body.vscode-high-contrast { color-scheme: dark; }
+body.vscode-light, body.vscode-high-contrast-light { color-scheme: light; }
+select {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border, var(--line));
+}
+select option {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+}
 button[aria-pressed="true"] {
   background: var(--vscode-button-background, var(--track));
   color: var(--vscode-button-foreground, inherit);
@@ -303,8 +321,11 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
                  vector-effect: non-scaling-stroke; }
 /* The plot keeps a gutter on its right for the tick labels. Inside the plot they either hide
    behind the newest bars or, opaque, cut them into pieces that read as gaps in the data —
-   and the newest days are the ones worth reading. */
-.plot { position: relative; height: 120px; margin-top: 6px; margin-right: 38px;
+   and the newest days are the ones worth reading. Because those labels sit outside the box,
+   the plot must not hide its overflow: an overflow rule here would cut every one of them off.
+   240 px rather than the 120 px this started at — split six ways, a 120 px column turns every
+   model but the largest into a hairline. */
+.plot { position: relative; height: 240px; margin-top: 6px; margin-right: 38px;
         border-bottom: 1px solid var(--rule); }
 .grid { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--rule); z-index: 2;
         pointer-events: none; }
@@ -326,7 +347,19 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .seg.claude { background: var(--claude); }
 .seg.codex { background: var(--codex); }
 .seg:first-of-type { border-radius: 2px 2px 0 0; }
-.costline { position: absolute; inset: 0; pointer-events: none; }
+/* The model stack is coloured by position, not by name: five theme chart colours in a fixed
+   order and one dimmed band for the folded rest. A colour per model name would need a palette
+   as long as the model list and would repeat itself the moment it ran out. */
+.seg.s0, .dot.s0 { background: var(--vscode-charts-blue); }
+.seg.s1, .dot.s1 { background: var(--vscode-charts-purple); }
+.seg.s2, .dot.s2 { background: var(--vscode-charts-green); }
+.seg.s3, .dot.s3 { background: var(--vscode-charts-yellow); }
+.seg.s4, .dot.s4 { background: var(--vscode-charts-orange); }
+.seg.other, .dot.other { background: var(--dim); }
+/* Explicit width and height, because this is a replaced element: with inset alone the
+   browser took the width from the box and the height from the viewBox's 1:1 ratio, which drew
+   a 590 px tall cost line straight over the model table and the heatmap below it. */
+.costline { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .costline polyline { fill: none; stroke: var(--warn); stroke-width: 1.5;
                      vector-effect: non-scaling-stroke; }
 .axis { display: flex; gap: 2px; font-size: 9px; color: var(--dim); margin-top: 3px; }
@@ -866,6 +899,16 @@ function sTokens() {
   return h;
 }
 
+/**
+ * The class one band is painted with. A provider stack keeps the two provider colours the
+ * rest of the page uses; a model stack is coloured by position, because a model name has no
+ * colour of its own and the fold is the one band that is not a model.
+ */
+function segClass(c, s, i) {
+  if (c.stack !== 'model') return s.key;
+  return s.key === 'other' ? 'other' : 's' + i;
+}
+
 function sChart() {
   const c = vm.chart;
   if (!c.days.length) return '<p class="empty">No data in this range.</p>';
@@ -873,16 +916,22 @@ function sChart() {
   const sel = '<select data-act="metric" aria-label="chart metric">'
     + metrics.map(m => '<option value="' + m + '"' + (c.metric === m ? ' selected' : '') + '>'
       + esc(m) + '</option>').join('') + '</select>';
+  // Both stacks split the same column: the totals, the axis and the drill do not change with it.
+  const stacks = [['provider', 'by provider'], ['model', 'by model']];
+  const stackSel = '<select data-act="chartStack" aria-label="chart stacking">'
+    + stacks.map(o => '<option value="' + o[0] + '"' + (c.stack === o[0] ? ' selected' : '') + '>'
+      + esc(o[1]) + '</option>').join('') + '</select>';
   const totals = c.days.map((_, i) => c.series.reduce((s, x) => s + x.values[i], 0));
   const showValues = c.days.length <= 31;
   const cols = c.days.map((d, i) => {
-    const segs = c.series.map(s => {
+    const segs = c.series.map((s, si) => {
       const v = s.values[i];
       if (v <= 0) return '';
-      // The tooltip names the provider the way the legend beside it does: a bar whose legend
+      // The tooltip names the band the way the legend beside it does: a bar whose legend
       // says "Claude Code" and whose title says "claude" is two names for one series.
-      return '<div class="seg ' + s.source + '" data-bh="' + ((v / c.max) * 100).toFixed(2)
-        + '" title="' + esc(srcName(s.source) + ' · ' + d + ': '
+      return '<div class="seg ' + esc(segClass(c, s, si)) + '" data-bh="'
+        + ((v / c.max) * 100).toFixed(2)
+        + '" title="' + esc(s.label + ' · ' + d + ': '
           + Math.round(v).toLocaleString('en-US')) + '"></div>';
     }).join('');
     return '<div class="col" data-act="drill" data-day="' + esc(d) + '" tabindex="0" role="button" '
@@ -908,13 +957,13 @@ function sChart() {
   const labels = c.labels.map((l, i) => '<span data-i="' + i + '" data-l="' + esc(l) + '"><i>'
     + esc(l) + '</i></span>').join('');
   return '<div class="row"><span class="meta">' + (c.weekly ? 'weekly bars' : 'daily bars')
-    + ' · ' + c.days.length + ' columns</span><span class="wrap">' + sel
+    + ' · ' + c.days.length + ' columns</span><span class="wrap">' + sel + stackSel
     + (c.costLine ? '<button data-act="costLine" aria-pressed="' + costLine + '">cost line</button>' : '')
     + '</span></div>'
     + '<div class="plot">' + grids + '<div class="chart">' + cols + '</div>' + overlay + '</div>'
     + '<div class="axis">' + labels + '</div>'
-    + '<div class="legend">' + c.series.map(s => '<span><i class="dot ' + s.source + '"></i>'
-      + esc(srcName(s.source)) + '</span>').join('')
+    + '<div class="legend">' + c.series.map((s, si) => '<span><i class="dot '
+      + esc(segClass(c, s, si)) + '"></i>' + esc(s.label) + '</span>').join('')
     + (costLine && c.costLine ? '<span>— API cost (second axis)</span>' : '')
     + '<span>click a column for that day</span></div>';
 }
@@ -1534,8 +1583,10 @@ document.addEventListener('keydown', (ev) => {
   }
 });
 document.addEventListener('change', (ev) => {
-  const el = target(ev, '[data-act="metric"]');
-  if (el && vm) post({ type: 'setMetric', metric: el.value });
+  const el = target(ev, '[data-act="metric"], [data-act="chartStack"]');
+  if (!el || !vm) return;
+  if (el.dataset.act === 'metric') post({ type: 'setMetric', metric: el.value });
+  else post({ type: 'setChartStack', stack: el.value });
 });
 
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.

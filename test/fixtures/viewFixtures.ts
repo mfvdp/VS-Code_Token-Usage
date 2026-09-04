@@ -37,7 +37,11 @@ export function daysAgo(n: number): number {
 }
 
 export function makeConfig(over: Record<string, unknown> = {}): Config {
-  return sanitize({ 'tokenPace.timezone': 'utc', 'tokenPace.startOfWeek': 'monday', ...over })
+  // A fixed 24-hour clock: 'auto' follows the machine's locale, and the assertions that read
+  // "09:00" must not turn into "09:00 AM" on a runner whose locale is en-US.
+  return sanitize({
+    'tokenPace.timezone': 'utc', 'tokenPace.startOfWeek': 'monday', 'tokenPace.resetHourCycle': 'h23', ...over,
+  })
 }
 
 export function timeConfig(cfg: Config): TimeConfig {

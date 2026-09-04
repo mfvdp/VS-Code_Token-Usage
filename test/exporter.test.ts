@@ -6,7 +6,9 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { CSV_COLUMNS, EXPORT_SCHEMA_VERSION, TOOLS_CSV_COLUMNS, toCsv, toJson, toMarkdownSummary, toolsCsv } from '../src/exporter'
 import { buildViewModel } from '../src/viewModel'
-import { NOW, TODAY, buildAgg, makeConfig, makeInput, state, timeConfig } from './fixtures/viewFixtures'
+import {
+  FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, timeConfig, win,
+} from './fixtures/viewFixtures'
 import { toolAgg } from './helpers/toolAgg'
 
 const cfg = makeConfig()
@@ -149,6 +151,29 @@ test('the markdown summary keeps the windows, the totals and the markers', () =>
   assert.ok(md.includes('lower bound'))
   assert.ok(md.includes('~ = estimate'))
   assert.ok(md.includes('hypothetical'))
+})
+
+test('the clipboard summary prints no measuring sentence and describes the gaps as they are drawn', () => {
+  // A window that has just reset: the verdict measures. The pace cell is the absence marker,
+  // as in the tooltip and the text views — never "measuring · window just reset".
+  const history = makeHistory()
+  const then = NOW - 4 * 3_600_000
+  // One reading four hours ago, then two hours of silence, then the last two hours every 15 min.
+  history.add(state('claude', { fetchedAt: Math.round(then / 1000), windows: [win({ percent: 10 })] }), FINGERPRINT, then)
+  fillHistory(history)
+  const vm = buildViewModel(makeInput({
+    history,
+    quotas: [state('claude', { windows: [win({ percent: 3, resetsAt: NOW + 5 * 3_600_000 - 30_000, windowMinutes: 300 })] })],
+  }))
+  assert.equal(vm.quotas[0].windows[0].verdict.measuring, true)
+  const md = toMarkdownSummary(vm)
+  assert.equal(/measuring|reading over|just reset/.test(md), false, md)
+  assert.ok(md.includes('| 5 h | 3% | 0 % | – |'), md)
+  // The gap footnote says what the sparkline does with a hole: bridged without a reset inside,
+  // open across one — not the "drawn broken" of the old one-notch-per-reading line.
+  assert.ok(vm.forecasts.some((f) => f.gaps > 0), 'the fixture has a gap')
+  assert.match(md, /gap\(s\) in the last 24 h; a hole with no reset inside it is bridged by a dashed line, a hole across a reset stays open\./)
+  assert.equal(md.includes('drawn broken'), false)
 })
 
 test('the clipboard summary keeps a configured plan name marked as configured', () => {

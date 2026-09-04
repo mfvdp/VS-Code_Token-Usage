@@ -99,6 +99,30 @@ test('a window whose reset has passed is not reported as the fullest one', () =>
   assert.equal(s, 'The fullest quota window is Claude Code 7 d at 40 % — on pace.')
 })
 
+test('a measuring verdict ends the fullest-window sentence at the percentage', () => {
+  const s = digest(input({
+    quotas: [{
+      title: 'Claude Code',
+      windows: [{
+        label: '5 h', percent: 2, display: 'normal',
+        verdict: { text: 'measuring · window just reset', measuring: true },
+      }],
+    }],
+  })).find((x) => x.startsWith('The fullest quota window'))
+  assert.equal(s, 'The fullest quota window is Claude Code 5 h at 2 %.')
+  // And through a real view model: a window that has just reset measures, and the Summary
+  // says so nowhere — the same rule the quota card, the tooltip and the text views apply.
+  const history = makeHistory()
+  fillHistory(history)
+  const vm = buildViewModel(makeInput({
+    history,
+    quotas: [state('claude', { windows: [win({ percent: 3, resetsAt: NOW + 5 * 3_600_000 - 30_000, windowMinutes: 300 })] })],
+  }))
+  assert.equal(vm.quotas[0].windows[0].verdict.measuring, true)
+  for (const line of vm.digest) assert.doesNotMatch(line, /measuring/)
+  assert.ok(vm.digest.some((line) => line === 'The fullest quota window is Claude Code 5 h at 3 %.'), vm.digest.join('\n'))
+})
+
 test('a window without a limit has no fullness to report', () => {
   const s = digest(input({
     quotas: [{

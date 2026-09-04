@@ -5,8 +5,56 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## 1.2.1 — 2026-09-04
 
+### Added
+
+* **The daily chart stacks by model.** A second selector beside the metric — *by provider* /
+  *by model* — splits every column into the five largest models of the range, each in its own
+  colour across all columns, and folds the rest into one `other` band; the column total is the
+  same either way, because a stack is a partition of the same figure. The legend names the
+  models verbatim, a click on a column still opens that day, and the choice is remembered with
+  the rest of the panel state. The plot is twice as tall (240 px) for both stacks.
+* **The models table shows what the totals table shows.** Usage, fresh input, cache write 5 m
+  and 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost and share —
+  the same helpers, the same `–` for an absent figure, and a single-model table adds up to the
+  totals row column by column. Every column sorts on its raw count rather than on the rounded
+  label. The markdown view carries the same figures, plus the provider and cost-share columns it
+  has the room for.
+* **Seven-day sparklines, coloured by pace.** The line under each quota window now spans a
+  fixed seven days on a time-proportional axis of 15-minute slots: a night without VS Code is
+  as wide as a night, not one notch. Each stretch is drawn in the colour the bar showed at the
+  time (green, yellow, orange, red), a hole with no reset inside is bridged by a dashed grey
+  line — *unmeasured*, not a claim — and a hole that contains a reset stays a hole. The quota
+  history is thinned as it is written so this stays bounded: one sample per window and quarter
+  hour inside the last seven days, one per hour beyond, with the samples around every reset, the
+  first and the peak of every cycle and a third reading of a short one always kept, so the reset
+  history reads the same before and after thinning; seven windows come to about 4 700 samples a
+  week and stay under the 20 000 cap even at 90 days of retention.
+
 ### Changed
 
+* **The quota card lost a line per window and gained its verdict up top.** The pace verdict
+  (`▲ 9 % ahead of pace`) sits in the header row between the window label and the percentage,
+  wrapping on a narrow sidebar instead of clipping. The bar paints the pace gap: ahead of time,
+  the fill beyond the elapsed marker is darker; behind time, the track between the fill and the
+  marker is a stronger grey than the rest of the track — the marker itself is unchanged. Gone
+  from every view: the sustainable-rate line (`~17.9 %/h keeps it to the reset`) and the
+  `measuring · …` hints; a window too young to
+  judge simply shows no verdict — in the card, the Summary and the clipboard export alike — and
+  a forecast still measuring prints the bare state word `measuring` in the Forecast section and
+  nothing on the card. Gone from the dashboard card only: the `official page` link and the
+  freshness row — the markdown view keeps both (the official page as a line of its own now),
+  and the tooltip keeps the reading's age and the official page as the link on the provider
+  name, as before.
+* **The weekday × four-hour grid draws whatever days it has.** It used to hatch every cell
+  below three distinct days, which on a 7-day range is every cell, and said nothing about it.
+  A cell is now filled from the days that touched it and hatched only where no usage day did;
+  the caption states the basis — `based on 1 week — a record, not a habit` below three weeks,
+  the plain `based on N weeks` from there on (a 30-day range worked on every day says `5 weeks`,
+  rounded up from 30 days) — counting weeks from the days with usage, not from the length of the
+  range. A legend line explains the hatch.
+* **The `Price` column is gone** from the models table and the markdown table. Where a rate
+  came from now lives on the cost it qualifies: the tooltip of the API-cost cell, a `⚠` when a
+  related model's rates stood in, and the footnote as before.
 * **The quota cards lead the dashboard.** The default section order is now `quota, summary,
   kpis, …`: the bars for Claude Code and Codex come first, everything statistical follows.
   The range, provider and model chips filter the statistics and not the quota cards, so the
@@ -15,6 +63,19 @@ This project follows [Semantic Versioning](https://semver.org/).
   stands above everything, because it qualifies every figure on the page. The Quick Pick and
   the markdown view follow the same order. A configured `tokenPace.dashboard.sections` is
   left exactly as it is.
+
+### Fixed
+
+* **The cost line drew across the sections below the chart.** The overlay is an inline SVG
+  with only a viewBox; without an explicit size a replaced element takes the plot's width and
+  derives its height from the 1:1 ratio, so it was as tall as the plot was wide and the line was
+  stretched over the models table and the heatmap. It now has the plot's exact size.
+* **The chart's dropdowns were unreadable** — light option text on the light native popup.
+  Selects and their options take the theme's dropdown colours, and the page declares the colour
+  scheme of the theme so the popup is painted dark in a dark theme.
+* **Quota-history retention never held on disk.** Saving merged the file back into memory and
+  resurrected every sample the prune had just dropped. A save after a prune now applies the same
+  retention, thinning and cap to the merged result.
 
 ## 1.2.0 — 2026-09-04
 

@@ -330,9 +330,10 @@ export function toMarkdownSummary(vm: ViewModel): string {
       L.push('| Window | Used | Elapsed | Pace | Resets |')
       L.push('|---|---|---|---|---|')
       for (const w of q.windows) {
+        // The verdict as the three views print it: nothing while the window is still measuring.
         L.push(`| ${cell(w.label)} | ${cell(w.percentText)} | `
           + `${w.elapsed === null ? '–' : `${Math.round(w.elapsed)} %`} | `
-          + `${cell(w.verdict.text)} | ${cell(w.reset)} |`)
+          + `${cell(w.verdict.measuring ? '' : w.verdict.text)} | ${cell(w.reset)} |`)
       }
       L.push('')
     }
@@ -382,8 +383,8 @@ export function toMarkdownSummary(vm: ViewModel): string {
   for (const f of vm.footnotes) L.push(`- ${f}`)
   const gaps = vm.forecasts.reduce((n, f) => n + f.gaps, 0)
   if (gaps > 0) {
-    L.push(`- Quota readings have ${gaps} gap(s) in the last 24 h; the series is drawn broken, `
-      + 'not interpolated.')
+    L.push(`- Quota readings have ${gaps} gap(s) in the last 24 h; a hole with no reset inside it `
+      + 'is bridged by a dashed line, a hole across a reset stays open.')
   }
   L.push('')
   return L.join('\n')

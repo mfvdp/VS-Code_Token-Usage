@@ -687,7 +687,8 @@ test('a window that has just reset hands the card no measuring sentence at all',
   // Verdict and forecast both measure a window that has only just started. The card keeps
   // the forecast's marks but gets no sentence for it, and the accessibility text does not
   // read out the measuring verdict either: no view prints it, and the screen reader is not
-  // told what the sighted reader is spared. The Forecast section still carries the full row.
+  // told what the sighted reader is spared. The Forecast row is blanked by the same rule: the
+  // state and the basis stay, the sentence does not — no view has a "measuring · …" to print.
   const history = makeHistory()
   fillHistory(history)
   const vm = buildViewModel(makeInput({
@@ -702,7 +703,10 @@ test('a window that has just reset hands the card no measuring sentence at all',
   assert.equal(/measuring/.test(w.aria.text), false)
   const row = vm.forecasts.find((f) => f.source === 'claude' && f.windowId === w.id)
   assert.ok(row)
-  assert.equal(row.forecast.text, 'measuring · window just started')
+  assert.equal(row.forecast.state, 'measuring')
+  assert.equal(row.forecast.text, '')
+  assert.ok(row.forecast.basis && row.forecast.basis.samples >= 1)
+  assert.equal(/measuring/.test(JSON.stringify(vm.digest)), false, JSON.stringify(vm.digest))
 })
 
 test('a measuring forecast is blanked on the card whatever the verdict says', () => {

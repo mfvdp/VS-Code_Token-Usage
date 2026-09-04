@@ -217,30 +217,67 @@ function slotOf(t: number, now: number, thinOld: boolean): string | null {
 }
 
 /**
+ * The stretches of one stream between discontinuities (`breaks`), as `[first, last]` index
+ * pairs. A cycle is one or more of these — a limit re-basing splits a stretch but not a cycle.
+ */
+function stretches(list: QuotaSample[]): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  let from = 0
+  for (let i = 1; i <= list.length; i++) {
+    if (i === list.length || breaks(list[i - 1], list[i])) {
+      out.push([from, i - 1])
+      from = i
+    }
+  }
+  return out
+}
+
+/**
+ * The indexes thinning may never drop, whatever slot they fall in: for every stretch its first
+ * and last sample (the cycle's `start`, `end` and `fitStart`, and the anchors of a reset), the
+ * first sample of its peak (`peak`, `peakAt` and `capped`), and a third sample where a stretch
+ * of three or more readings would otherwise keep fewer — `complete` asks a closed cycle for
+ * three readings, and a cycle that had them before thinning must still have them after.
+ * Cycle statistics are thereby the same before and after a prune.
+ */
+function anchors(list: QuotaSample[]): Set<number> {
+  const keep = new Set<number>()
+  for (const [a, b] of stretches(list)) {
+    keep.add(a)
+    keep.add(b)
+    let peak = a
+    for (let i = a + 1; i <= b; i++) if (list[i].p > list[peak].p) peak = i
+    keep.add(peak)
+    if (b - a >= 2 && (peak === a || peak === b)) keep.add(a + 1)
+  }
+  return keep
+}
+
+/**
  * One stream (same source, window and identity, sorted by time) thinned to one sample per slot.
  *
  * The last reading of a slot wins, so the newest value is always the one kept. Kept regardless
- * of the slot: the newest reading of the stream, the last sample before and the first sample
- * after a discontinuity (so `cyclesOf` and the forecast fits keep their anchors), and any
- * sample whose removal would make its neighbours look like a discontinuity the readings never
- * showed — a gradual fall of five points across a slot is not a reset and must not become one.
- * The cycle split therefore sees the same starts, ends and fit boundaries before and after.
+ * of the slot: the `anchors` — the first and the newest reading of the stream, the last sample
+ * before and the first sample after a discontinuity, the peak of every stretch and a third
+ * sample of a short one — and any sample whose removal would make its neighbours look like a
+ * discontinuity the readings never showed: a gradual fall of five points across a slot is not
+ * a reset and must not become one. The cycle split therefore sees the same starts, ends, peaks,
+ * fit boundaries and `complete` flags before and after.
  */
 function thinned(list: QuotaSample[], now: number, thinOld: boolean): QuotaSample[] {
   const n = list.length
   if (n < 2) return list
+  const anchor = anchors(list)
   const out: QuotaSample[] = []
   let lastKept: QuotaSample | null = null
   for (let i = 0; i < n; i++) {
     const s = list[i]
     const next = i + 1 < n ? list[i + 1] : null
-    const prev = i > 0 ? list[i - 1] : null
     const slot = slotOf(s.t, now, thinOld)
-    const keep = next === null
+    const keep = anchor.has(i)
+      || next === null
       || slot === null
       || slotOf(next.t, now, thinOld) !== slot
-      || (prev !== null && breaks(prev, s))
-      || breaks(s, next)
       || (lastKept !== null && breaks(lastKept, next))
     if (keep) {
       out.push(s)

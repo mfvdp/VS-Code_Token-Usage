@@ -90,6 +90,11 @@ function trustedForecast(w: WindowVmOf): Forecast | null {
 }
 
 /** True when the text is one of the segments already printed, compared whole and case-blind. */
+/** "1 reading" / "12 readings" — the basis line is the one place a count of one shows up. */
+function readings(n: number): string {
+  return `${n} ${n === 1 ? 'reading' : 'readings'}`
+}
+
 function repeats(text: string, said: (string | null | undefined)[]): boolean {
   const t = text.trim().toLowerCase()
   return said.some((s) => typeof s === 'string' && s.trim().toLowerCase() === t)
@@ -243,7 +248,7 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
       label: `Forecast ${withSource(f.source, f.label)}: ${forecastText(f.forecast) || '–'}`,
       description: [f.lockout, f.resetForecast].filter(Boolean).join(' · '),
       detail: f.forecast.basis
-        ? `${f.forecast.basis.samples} readings · ${f.gaps} gap(s) in the last 24 h`
+        ? `${readings(f.forecast.basis.samples)} · ${f.gaps} gap(s) in the last 24 h`
         : undefined,
     })
   }
@@ -519,6 +524,9 @@ export function markdownDocument(vm: ViewModel): string {
     L.push(`Freshness — last check ${cell(f.lastCheck)} · last data ${cell(f.lastData)} · `
       + `last local event ${cell(f.lastEvent)} · next refresh ${cell(f.nextRefresh)} · `
       + `snapshot ${cell(f.snapshotAge)}`)
+    // The one reader of `usagePageUrl` since the card stopped printing it — the same URL the
+    // tooltip links from the provider name, null when `tokenPace.usagePageLinks` is off.
+    if (q.usagePageUrl) L.push(`Official page: ${q.usagePageUrl}`)
     L.push('')
   }
 
@@ -623,7 +631,7 @@ export function markdownDocument(vm: ViewModel): string {
       L.push(`| ${cell(withSource(f.source, f.label))} | ${cell(forecastText(f.forecast))} | `
         + `${f.forecast.ratePerHour === null ? '–' : `${f.forecast.ratePerHour.toFixed(1)} %/h`} | `
         + `${cell(f.lockout)} | ${cell(f.resetForecast)} | `
-        + `${f.forecast.basis ? `${f.forecast.basis.samples} readings, ${f.gaps} gap(s)` : '–'} |`)
+        + `${f.forecast.basis ? `${readings(f.forecast.basis.samples)}, ${f.gaps} gap(s)` : '–'} |`)
     }
     L.push('')
   }

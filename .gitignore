@@ -3,3 +3,6 @@ dist/
 *.vsix
 *.tsbuildinfo
 out-test/
+
+# Worktrees the orchestration tool creates for parallel agents
+.claude/worktrees/

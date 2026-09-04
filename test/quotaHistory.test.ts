@@ -288,7 +288,7 @@ test('the thinning grid is the sparkline grid', () => {
   assert.equal(THIN_OLD_SLOT_MS, H)
 })
 
-test('ten readings in one quarter hour leave one — the newest', () => {
+test('ten readings in one quarter hour leave the newest and the anchors of the stretch', () => {
   const h = new QuotaHistory(tmpFile('h.json'), 30)
   h.load()
   for (let k = 0; k < 10; k++) {
@@ -296,12 +296,14 @@ test('ten readings in one quarter hour leave one — the newest', () => {
     assert.equal(h.add(state(t, [win('w', 10 + k, null)]), FP, t), 1, 'every changed reading is accepted')
   }
   const list = h.samples('claude', 'w', FP)
-  assert.equal(list.length, 1)
-  assert.equal(list[0].p, 19)
-  assert.equal(list[0].t, SLOT0 + 9 * MIN)
+  // The first reading of the stream and the newest are anchors, and a stretch of three or more
+  // readings keeps a third one so a cycle that had three readings still has them: `complete`
+  // may not depend on how many quarter hours the cycle happened to span.
+  assert.deepEqual(list.map((s) => s.p), [10, 11, 19])
+  assert.equal(list[list.length - 1].t, SLOT0 + 9 * MIN)
   // The next slot gets its own sample; the previous one is untouched.
   h.add(state(SLOT0 + 16 * MIN, [win('w', 20, null)]), FP, SLOT0 + 16 * MIN)
-  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [19, 20])
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [10, 11, 19, 20])
 })
 
 test('thinning keeps the last sample before a reset and the first one after it', () => {
@@ -310,17 +312,15 @@ test('thinning keeps the last sample before a reset and the first one after it',
   const r1 = SLOT0 + 5 * H
   const r2 = SLOT0 + 10 * H
   const add = (t: number, p: number, r: number | null) => h.add(state(t, [win('w', p, r)]), FP, t)
-  add(SLOT0 + 1 * MIN, 50, r1)
-  add(SLOT0 + 2 * MIN, 52, r1)
-  add(SLOT0 + 3 * MIN, 54, r1)   // last before the reset
-  add(SLOT0 + 4 * MIN, 2, r2)    // first after it
-  add(SLOT0 + 5 * MIN, 3, r2)
-  add(SLOT0 + 6 * MIN, 4, r2)    // newest of the slot
-  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => [s.p, s.r]), [[54, r1], [2, r2], [4, r2]])
+  for (let k = 0; k < 6; k++) add(SLOT0 + (1 + k) * MIN, 50 + k, r1)   // 55 is the last before the reset
+  for (let k = 0; k < 6; k++) add(SLOT0 + (7 + k) * MIN, 2 + k, r2)    // 2 is the first after it, 7 the newest
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => [s.p, s.r]),
+    [[50, r1], [51, r1], [55, r1], [2, r2], [3, r2], [7, r2]])
   const cycles = h.cycles('claude', 'w', FP)
   assert.equal(cycles.length, 2)
-  assert.equal(cycles[0].end, SLOT0 + 3 * MIN)
-  assert.equal(cycles[1].start, SLOT0 + 4 * MIN)
+  assert.equal(cycles[0].end, SLOT0 + 6 * MIN)
+  assert.equal(cycles[0].complete, true, 'six readings before the reset: complete, thinned or not')
+  assert.equal(cycles[1].start, SLOT0 + 7 * MIN)
   assert.deepEqual(cycles[1].tags, ['RESET'])
 
   // An inferred reset — a fall of five points without a new resetsAt — anchors just the same.
@@ -331,8 +331,42 @@ test('thinning keeps the last sample before a reset and the first one after it',
   addNull(SLOT0 + 2 * MIN, 72)
   addNull(SLOT0 + 3 * MIN, 3)
   addNull(SLOT0 + 4 * MIN, 6)
-  assert.deepEqual(g.samples('claude', 'w', FP).map((s) => s.p), [72, 3, 6])
+  assert.deepEqual(g.samples('claude', 'w', FP).map((s) => s.p), [70, 72, 3, 6])
   assert.equal(g.cycles('claude', 'w', FP).length, 2)
+})
+
+test('cycle statistics are the same before and after a prune, however dense the readings were', () => {
+  // A dense version-1 file spanning the hourly and the quarter-hour regime: cycles of every
+  // length down to two readings, one with a peak before its end, one with a re-basing step.
+  const file = tmpFile('h.json')
+  const now = SLOT0 + 20 * DAY
+  const samples: Array<{ s: string; w: string; t: number; p: number; r: number | null; o: string; f: string }> = []
+  const lengths = [300, 11, 7, 480, 45, 3, 600, 2, 25, 90, 5, 700, 13, 8]   // minutes per cycle
+  let t = now - 12 * DAY
+  for (const [i, len] of lengths.entries()) {
+    const r = t + 5 * H
+    let p = 1
+    for (let m = 0; m < len; m++) {
+      if (i === 4 && m === 30) p -= 3          // a dip: the peak lies before the end of the cycle
+      else if (i === 6 && m === 200) p += 20   // a re-basing step inside the cycle
+      else if (i === 4 && m > 30) p += 0.05
+      else p += 0.4
+      samples.push({ s: 'claude', w: 'w', t: t + m * MIN, p: Math.min(100, p), r, o: 'poll', f: FP })
+    }
+    t += len * MIN
+  }
+  fs.writeFileSync(file, JSON.stringify({ version: 1, samples }))
+  const h = new QuotaHistory(file, 30)
+  h.load()
+  const before = h.cycles('claude', 'w', FP)
+  assert.equal(before.length, lengths.length)
+  assert.equal(before.filter((c) => c.complete).length, lengths.length - 2, 'every closed cycle with three readings')
+  assert.equal(before[7].complete, false, 'two readings are not a complete cycle')
+  assert.equal(before[4].peakAt, before[4].start + 29 * MIN, 'the peak lies before the dip')
+  assert.deepEqual(before[6].tags, ['RESET', 'REBASE'])
+  h.prune(now)
+  assert.ok(h.size().samples < samples.length / 3, `${h.size().samples} of ${samples.length} kept`)
+  assert.deepEqual(h.cycles('claude', 'w', FP), before)
 })
 
 test('thinning never invents a reset: a gradual fall across a slot stays one cycle', () => {
@@ -369,7 +403,8 @@ test('prune thins samples older than seven days to one per hour and keeps the ne
   h.prune(now)
   const kept = h.samples('claude', 'w', FP)
   const oldKept = kept.filter((s) => s.t < now - 7 * DAY)
-  assert.deepEqual(oldKept.map((s) => s.p), [11, 23, 35], 'the last reading of each hour')
+  assert.deepEqual(oldKept.map((s) => s.p), [0, 1, 11, 23, 35],
+    'the last reading of each hour, plus the anchors of the stream (its first two readings)')
   const recentKept = kept.filter((s) => s.t >= now - 7 * DAY)
   assert.equal(recentKept.length, 2, 'recent samples stay on the quarter-hour grid, not the hourly one')
   assert.equal(recentKept[recentKept.length - 1].p, 54)
@@ -400,13 +435,13 @@ test('a dense version-1 file loads as it is and is thinned by the next prune', (
   h.load()
   assert.equal(h.size().samples, 10, 'loading changes nothing — the schema is the same')
   h.prune(SLOT0 + H)
-  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [9])
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [0, 1, 9], 'the anchors and the newest')
   // The save merges the file back in — and must not let the file undo the prune.
   h.save()
   const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { version: number; samples: unknown[] }
   assert.equal(raw.version, HISTORY_VERSION)
-  assert.equal(raw.samples.length, 1)
-  assert.equal(h.size().samples, 1)
+  assert.equal(raw.samples.length, 3)
+  assert.equal(h.size().samples, 3)
 })
 
 test('a save after a prune keeps the retention the prune applied', () => {

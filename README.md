@@ -92,7 +92,7 @@ the status bar, the tooltip, the dashboard and the exports alike.
 | **Window** | One quota bucket of a provider, with a length and a reset time: Claude's 5-hour session, its 7-day plan window, a model-scoped 7-day window, Codex's 5-hour and 7-day limits. Every figure belongs to a window; nothing is ever summed across two |
 | **Pace** | Consumption compared with the share of the window that has **already elapsed**, not with a fixed threshold. `ratio = (used ÷ limit) ÷ (elapsed ÷ window)`; `1.0` is exactly on pace |
 | **Ahead of pace / spare** | The same relation as a difference of percentages (`used % − elapsed %`). Above the line it reads `5 % ahead of pace`, below it `36 % of the window still spare`. The unit is percentage points of the window, written `%` — the same sign as the figure above it |
-| **Elapsed marker** | The `┃` inside the bar, at the position the window's own clock has reached. Fill left of it is spare, fill right of it is ahead of pace. It is what makes the verdict readable without colour. The dashboard bar also paints the gap: fill beyond the marker is drawn in a darker shade of the level colour, and track between the end of the fill and the marker in a lighter grey |
+| **Elapsed marker** | The `┃` inside the bar, at the position the window's own clock has reached. Fill left of it is spare, fill right of it is ahead of pace. It is what makes the verdict readable without colour. The dashboard bar also paints the gap: fill beyond the marker is drawn in a darker shade of the level colour, and track between the end of the fill and the marker in a stronger grey than the rest of the track |
 | **Lower bound** | A figure that is certainly *at least* this large but may be larger: output of Claude subagents, and of any response with no terminal line, is counted but cannot be counted completely. Marked `⚠` in the tooltip, the tables and the exports, and never quietly rounded up |
 | **Provenance** | Where a number came from and how sure it is. Every view carries it: `measured: quota, tokens · estimated: ~API cost`, and per model `exact` / `family` / `custom` / `none` |
 | **Poll vs cache** | *Poll* is a request Token Pace makes itself, with your access token, after consent. *Cache* is a reading somebody else already fetched — a cache file, Claude Code's status line, `~/.claude.json`, the Codex transcripts. Cache costs nothing and touches no network; its age is always shown |
@@ -295,7 +295,7 @@ writes no file, and never mixes with the live items.
 
 | Section | Contents |
 |---|---|
-| `quota` | One card per provider: the plan name and the reading's age in the header, then per window one header row (label, reset, pace verdict, percentage) over a bar with the elapsed tick, the pace gap painted on either side of it and a second tick for the projected value at the reset, the forecast line, a seven-day sparkline coloured by pace, and extra usage. The full freshness row (last check · last data · last local event · next refresh · snapshot age) and the official page stay in the tooltip and the markdown view. A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
+| `quota` | One card per provider: the plan name and the reading's age in the header, then per window one header row (label, reset, pace verdict, percentage) over a bar with the elapsed tick, the pace gap painted on either side of it and a second tick for the projected value at the reset, the forecast line, a seven-day sparkline coloured by pace, and extra usage. The full freshness row (last check · last data · last local event · next refresh · snapshot age) and the official page stay in the markdown view; the tooltip keeps the reading's age and links the official page from the provider name. A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |
@@ -739,8 +739,10 @@ sections with it.
   samples and writes atomically; last-writer-wins would throw away what the other window saw.
 * **Thinning.** The series is kept on the sparkline's own grid: inside the last seven days one
   reading per window per quarter hour (the newest of the slot), one per hour beyond that. The
-  last reading before a reset and the first one after it are always kept, so the reset history
-  and the forecast fits keep their anchors. Seven windows come to about 4.7 k samples a week,
+  last reading before a reset and the first one after it are always kept, as are the first
+  reading of the series, the peak of every cycle and a third reading of a cycle that would
+  otherwise drop below three, so the reset history, its `complete` flags and the forecast fits
+  are the same before and after thinning. Seven windows come to about 4.7 k samples a week,
   8.6 k at 30 days and 18.7 k at 90 — under the hard cap of 20 k.
 * **Gaps are gaps.** The sparkline covers seven days on a time-proportional axis, so a stretch
   without readings is a hole exactly as wide as the time nobody measured. A hole with no reset

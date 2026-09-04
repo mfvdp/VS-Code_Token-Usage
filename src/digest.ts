@@ -27,7 +27,7 @@ export interface DigestInput {
   cacheEconomy: Array<{ source: Source; hitRate: string; hitValue: number | null; savedUsd: string }>
   quotas: Array<{
     title: string
-    windows: Array<{ label: string; percent: number; display: WindowDisplay; verdict: { text: string } }>
+    windows: Array<{ label: string; percent: number; display: WindowDisplay; verdict: { text: string; measuring?: boolean } }>
   }>
   unpricedModels: string[]
   totals: Array<{ source: Source; title: string; rows: Array<{ label: string; usage: string }> }>
@@ -110,13 +110,17 @@ function criticalWindow(d: DigestInput): string | null {
       if (!Number.isFinite(w.percent)) continue
       if (!LIVE_DISPLAYS.includes(w.display)) continue
       if (best === null || w.percent > best.percent) {
-        best = { title: q.title, label: w.label, percent: w.percent, text: w.verdict.text }
+        // The same rule as the quota views: a verdict still measuring is not a fact about the
+        // window, so the sentence ends at the percentage instead of carrying "measuring ·
+        // window just reset" as if it were a pace.
+        const text = w.verdict.measuring ? '' : w.verdict.text
+        best = { title: q.title, label: w.label, percent: w.percent, text }
       }
     }
   }
   if (!best) return null
-  return `The fullest quota window is ${best.title} ${best.label} at ${Math.round(best.percent)} % — `
-    + `${best.text}.`
+  const head = `The fullest quota window is ${best.title} ${best.label} at ${Math.round(best.percent)} %`
+  return best.text ? `${head} — ${best.text}.` : `${head}.`
 }
 
 /**

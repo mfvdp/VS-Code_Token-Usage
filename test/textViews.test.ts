@@ -353,14 +353,37 @@ test('a measuring window leaves no sentence in either text view, and the rate li
   assert.equal(/measuring/.test(row), false, row)
   // The pace column is an absent figure, not a sentence about the measuring.
   assert.match(row, /\| – \| 4h59m \|/, row)
-  // The markdown keeps the freshness row the dashboard card dropped.
+  // The markdown keeps the freshness row the dashboard card dropped, and the official page.
   assert.ok(md.includes('Freshness — last check'), md)
+  assert.ok(md.includes('\nOfficial page: https://claude.ai/settings/usage\n'), md)
+  // The Forecast section and the Summary say "measuring" as a bare state word at most — never
+  // the "measuring · window just reset" / "measuring · N readings over …" sentences.
+  const forecastItem = quickPickItems(vm).find((i) => i.label.startsWith('Forecast Claude Code · 5 h:'))
+  assert.ok(forecastItem)
+  assert.equal(forecastItem.label, 'Forecast Claude Code · 5 h: measuring', forecastItem.label)
+  const forecastRow = rowsOf(md, '## Forecast').find((l) => l.includes('| Claude Code · 5 h |')) ?? ''
+  assert.match(forecastRow, /^\| Claude Code · 5 h \| measuring \| /, forecastRow)
+  // (`pickText` joins label, description and detail with " · ", so "measuring · 9 readings" is
+  // the join of two fields, not a sentence — the sentences are matched by their own words.)
+  for (const text of [pickText(vm), md]) {
+    assert.equal(/measuring · (window|\d+ readings? over)|readings? over|just reset|just started/.test(text), false, text)
+  }
   // The "keeps it to the reset" rate is gone from both views, and from the forecast table.
   for (const text of [pickText(vm), md, pickText(fullVm()), markdownDocument(fullVm())]) {
     assert.equal(text.includes('keeps it to the reset'), false)
     assert.equal(text.includes('Sustainable'), false)
   }
   assert.ok(markdownDocument(fullVm()).includes('| Window | State | Rate | Lockout | At reset | Basis |'))
+})
+
+test('the official page is a line of the markdown only while the setting allows the link', () => {
+  const linked = markdownDocument(buildViewModel(makeInput()))
+  assert.ok(linked.includes('Official page: https://claude.ai/settings/usage'), linked)
+  const off = markdownDocument(buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.usagePageLinks': false }),
+  })))
+  assert.equal(off.includes('Official page'), false, off)
+  assert.equal(off.includes('settings/usage'), false, off)
 })
 
 test('a measuring forecast on a paced window is dropped from the quota rows of both views', () => {

@@ -259,14 +259,14 @@ export function forecast(
   if (elapsed !== null && Number.isFinite(elapsed) && elapsed < cfg.minElapsedPercent) {
     return { ...withRate(blank('measuring', 'measuring · window just started')), basis }
   }
+  const noun = fit.length === 1 ? 'reading' : 'readings'
   if (fit.length < cfg.minSamples || spanMs < cfg.minSpanMs) {
-    const noun = fit.length === 1 ? 'reading' : 'readings'
     return { ...withRate(blank('measuring', `measuring · ${fit.length} ${noun} over ${duration(spanMs)}`)), basis }
   }
 
   const slope = slopePerHour(fit)
   if (slope === null) {
-    return { ...withRate(blank('measuring', `measuring · ${fit.length} readings over ${duration(spanMs)}`)), basis }
+    return { ...withRate(blank('measuring', `measuring · ${fit.length} ${noun} over ${duration(spanMs)}`)), basis }
   }
   const confidence = confidenceOf(fit.length, spanMs)
   if (slope <= cfg.idleRate) {

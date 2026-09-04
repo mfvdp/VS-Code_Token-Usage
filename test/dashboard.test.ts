@@ -373,6 +373,28 @@ test('no composition slice borrows a colour that already means something else', 
   }
 })
 
+test('the cost line wears no colour a stacked band wears', () => {
+  // One yellow meaning "API cost" over a yellow band meaning "the fourth model" was the same
+  // mark twice; the line takes the foreground, which no band and no verdict uses.
+  const line = /\.costline polyline \{([^}]*)\}/.exec(STYLE)
+  assert.ok(line, 'the cost line has no stroke rule')
+  const stroke = /stroke: ([^;]+);/.exec((line as RegExpExecArray)[1])
+  assert.ok(stroke, 'no stroke')
+  const colour = (stroke as RegExpExecArray)[1].trim()
+  assert.equal(colour, 'var(--vscode-charts-foreground, var(--vscode-foreground))')
+  for (const v of ['--ok', '--warn', '--warn2', '--error', '--claude', '--codex', 'charts-yellow']) {
+    assert.equal(colour.indexOf(v), -1, 'the cost line uses ' + v)
+  }
+  const bands = ['s0', 's1', 's2', 's3', 's4', 'other']
+  for (const b of bands) {
+    const rule = new RegExp('\\.seg\\.' + b + ', \\.dot\\.' + b + ' \\{([^}]*)\\}').exec(STYLE)
+    assert.ok(rule, 'no rule for .seg.' + b)
+    const fill = /background: ([^;]+);/.exec((rule as RegExpExecArray)[1])
+    assert.ok(fill, 'no fill for .seg.' + b)
+    assert.notEqual((fill as RegExpExecArray)[1].trim(), colour, '.seg.' + b + ' wears the cost line colour')
+  }
+})
+
 test('an empty hour is the shortest mark in the strip, never taller than a used one', () => {
   assert.match(STYLE, /\.hours \{[^}]*border-bottom: 1px solid var\(--rule\)/)
   const bar = /\.hours \.hb \{([^}]*)\}/.exec(STYLE)
@@ -696,6 +718,24 @@ test('a full window says so instead of showing a lone dash', () => {
   assert.equal(silent.indexOf('Full until the reset'), -1, silent)
   assert.equal(silent.indexOf('>–<'), -1, silent)
   assert.ok(silent.indexOf('>full</span>') >= 0, silent)
+})
+
+test('the Forecast section prints a measuring forecast as its state word, never as a sentence', () => {
+  // The model hands the row a measuring forecast with its sentence blanked, exactly as it hands
+  // the quota card one; the section prints the state word in the head and no body under it.
+  const h = render('sForecast()', {
+    windowUsage: [], attributionInWindow: [],
+    forecasts: [forecastCard({
+      forecast: {
+        state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: 20,
+        confidence: null, basis: { samples: 2, spanMs: 60_000 }, text: '',
+      },
+    })],
+  })
+  assert.ok(h.indexOf('<span class="meta">measuring</span>') >= 0, h)
+  assert.equal((h.match(/measuring/g) || []).length, 1, h)
+  assert.equal(/readings? over|just reset|just started|%\/h/.test(h), false, h)
+  assert.ok(h.indexOf('2 readings') >= 0, h)
 })
 
 test('a forecast with nothing to say still says so', () => {

@@ -276,7 +276,8 @@ input[type=date] { cursor: text; }
    is the paint on either side of it. Fill beyond the marker is consumption ahead of the clock
    and wears the level's colour darkened, so the excess reads as a band even where the marker
    is hard to make out; track between the end of the fill and the marker is time the window
-   still has in hand and is a lighter grey than the rest of the track. */
+   still has in hand and is a stronger grey than the rest of the track — more foreground mixed
+   in, which reads lighter on a dark theme and darker on a light one. */
 .fill.over { position: absolute; top: 0; left: 0; border-radius: 0 4px 4px 0; }
 .fill.over.ok { background: color-mix(in srgb, var(--ok) 65%, black); }
 .fill.over.warn { background: color-mix(in srgb, var(--warn) 65%, black); }
@@ -390,8 +391,13 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
    browser took the width from the box and the height from the viewBox's 1:1 ratio, which drew
    a 590 px tall cost line straight over the model table and the heatmap below it. */
 .costline { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.costline polyline { fill: none; stroke: var(--warn); stroke-width: 1.5;
-                     vector-effect: non-scaling-stroke; }
+/* The overlay is one line over a stack of coloured bands, so it wears none of their hues: the
+   model stack takes five chart colours including the yellow this line used to have, and one
+   yellow meaning "API cost" beside a yellow band meaning "the fourth model" was the same mark
+   twice. The foreground is the one colour no band uses — it is also the colour of the legend's
+   own dash for the line. */
+.costline polyline { fill: none; stroke: var(--vscode-charts-foreground, var(--vscode-foreground));
+                     stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .axis { display: flex; gap: 2px; font-size: 9px; color: var(--dim); margin-top: 3px; }
 /* The chart's own axis shares the plot's gutter, so every day label stays under its column;
    the hour strip below has no gutter and keeps the plain rule. */
@@ -504,7 +510,7 @@ function pct(v) { return Math.max(0, Math.min(100, Number(v) || 0)); }
 
 /**
  * A bar with its marks. the gap flag paints the pace gap into it — the fill beyond the elapsed
- * marker darker, the track between the fill and the marker lighter — and is only asked for by
+ * marker darker, the track between the fill and the marker a stronger grey — and is only asked for by
  * a quota window that has a clock and a limit to compare against: a window that has just
  * reset, or one with no limit, has no gap to show. The marker itself never moves.
  */
@@ -830,7 +836,8 @@ function quotaCard(q) {
   // window: no bar, no percentage, no pace — the sentence itself says what it is not.
   if (q.localBlock) h += '<div class="box info" role="status">' + esc(q.localBlock.text) + '</div>';
   // The card header already says how old the reading is; the full freshness row and the
-  // official page stay in the tooltip and the markdown view, where there is room for them.
+  // official page stay in the markdown view, where there is room for them, and the tooltip
+  // links the official page from the provider name.
   return h + '</div>';
 }
 
@@ -1382,7 +1389,7 @@ function sForecast() {
       conf && said.indexOf(conf.toLowerCase()) < 0 ? conf : ''].filter(Boolean);
     // One list, one join: a separator in front of the first item is a missing item.
     const meta = [f.lockout, f.resetForecast].filter(Boolean);
-    if (fc.basis) meta.push(fc.basis.samples + ' readings');
+    if (fc.basis) meta.push(fc.basis.samples + (fc.basis.samples === 1 ? ' reading' : ' readings'));
     if (f.gaps) meta.push(f.gaps + ' gap(s)');
     h += '<div class="card"><div class="row"><span class="name">'
       + srcLabel(f.source, f.label) + '</span>'

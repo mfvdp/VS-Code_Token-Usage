@@ -328,7 +328,7 @@ export interface WindowVm {
   /**
    * The forecast for the bar's marks and, when it has one, its sentence. A forecast still
    * `measuring` arrives with an empty `text`: the views print nothing for it, and neither do
-   * they print the verdict of a window that is still measuring — see `cardForecast`.
+   * they print the verdict of a window that is still measuring — see `printableForecast`.
    */
   forecast: Forecast | null
   spark: SparkVm
@@ -359,6 +359,11 @@ export interface QuotaCard {
   }
   windows: WindowVm[]
   extra: { text: string; utilization: number | null; enabled: boolean; billed: boolean } | null
+  /**
+   * The provider's own usage page, or null when `tokenPace.usagePageLinks` is off. Printed by
+   * the markdown view as a line of its own; the tooltip links the same `USAGE_PAGE` entry from
+   * the provider name, and the dashboard card no longer prints it.
+   */
   usagePageUrl: string | null
   /**
    * Locally counted tokens of the last five hours, and only while this provider reports no
@@ -732,12 +737,14 @@ function unlimitedVerdict(w: QuotaWindow): PaceVerdict | null {
 }
 
 /**
- * The forecast as the quota card prints it. A forecast that is still measuring has nothing to
- * say about the window yet — "measuring · 1 reading over 0 min" is a report about the
- * forecast, not about the quota — so the card keeps the forecast (its marks and state) but
- * not the sentence. The Forecast section keeps its own row untouched.
+ * The forecast as every view prints it. A forecast that is still measuring has nothing to say
+ * about the window yet — "measuring · 1 reading over 0 min" is a report about the forecast,
+ * not about the quota — so the quota card and the Forecast row alike keep the forecast (its
+ * marks, state and basis) but not the sentence. Applied once, here, so the dashboard, the
+ * Quick Pick and the markdown cannot disagree about the same row: each of them prints the
+ * bare state word "measuring" where the sentence used to be, or nothing at all.
  */
-function cardForecast(f: Forecast | null): Forecast | null {
+function printableForecast(f: Forecast | null): Forecast | null {
   if (!f) return null
   return f.state === 'measuring' ? { ...f, text: '' } : f
 }
@@ -778,7 +785,7 @@ function quotaCard(
       resetAbsolute: formatReset(w.resetsAt, now, 'absolute', tcfg),
       resetLine: resetLineOf(display, reset),
       stateText: stateTextOf(display, verdict.text),
-      forecast: cardForecast(forecasts.get(`${q.source}:${w.id}`) ?? null),
+      forecast: printableForecast(forecasts.get(`${q.source}:${w.id}`) ?? null),
       spark: sparkOf(history.samples(q.source, w.id, fp, now - SPARK_SPAN_MS), now, w.windowMinutes, paceCfg),
       aria: {
         now: Number.isFinite(w.percent) ? Math.round(w.percent) : 0,
@@ -1209,7 +1216,8 @@ function forecastList(
         source: q.source,
         windowId: w.id,
         label: labels.get(key) ?? w.label,
-        forecast: f,
+        // Same rule as the card: a measuring forecast keeps its state and basis, not its sentence.
+        forecast: printableForecast(f) as Forecast,
         lockout: lockoutText(f, now, (ms) => formatTime(ms, tcfg)),
         resetForecast: rf === null
           ? null

@@ -505,3 +505,22 @@ test('the forecast list drops the "full" row the quota card beside it refuses', 
   assert.equal(row.forecast.state, 'full')
   assert.equal(row.forecast.text, 'full until the reset')
 })
+
+test('a window that has just reset says "measuring" once on its card', () => {
+  // Verdict and forecast both measure a window that has only just started; the card prints the
+  // verdict and keeps the forecast's marks, but not a second sentence saying the same thing.
+  // The Forecast section still carries the full row.
+  const history = makeHistory()
+  fillHistory(history)
+  const vm = buildViewModel(makeInput({
+    history,
+    quotas: [state('claude', { windows: [win({ percent: 3, resetsAt: NOW + 5 * 3_600_000 - 30_000, windowMinutes: 300 })] })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.verdict.measuring, true)
+  assert.equal(w.forecast?.state, 'measuring')
+  assert.equal(w.forecast?.text, '')
+  const row = vm.forecasts.find((f) => f.source === 'claude' && f.windowId === w.id)
+  assert.ok(row)
+  assert.equal(row.forecast.text, 'measuring · window just started')
+})

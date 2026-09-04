@@ -198,6 +198,10 @@ const CSS = `
 body {
   font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
   color: var(--vscode-foreground); padding: 10px 12px 24px; margin: 0;
+  /* A path or an id with no break opportunity ("~/.cache/codex-usage/state.json") must break
+     rather than widen the page: the real host showed a sidebar scrolling sideways by the width
+     of one such token in the data-quality list. Only tokens that would overflow are affected. */
+  overflow-wrap: anywhere;
 }
 h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
      margin: 20px 0 8px; font-weight: 600; }
@@ -245,7 +249,9 @@ input[type=date] { cursor: text; }
 .win { margin-top: 8px; }
 .win-top { display: flex; justify-content: space-between; gap: 8px; font-size: 11px;
            color: var(--dim); margin-bottom: 3px; }
-.win-top span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* The label wraps rather than clips: "GPT-5.3-Codex-Spark 5 h · resets 4h59m" cut to "…4h5" in a
+   narrow sidebar loses the countdown, which is the one thing the header is for. */
+.win-top span { min-width: 0; }
 .win-top b { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; flex: none; }
 .verdict { font-size: 11px; margin-top: 3px; color: var(--dim); }
 .verdict.warn, .verdict.warn2 { color: var(--warn); }

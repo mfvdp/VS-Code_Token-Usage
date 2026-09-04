@@ -549,6 +549,17 @@ function sustainableText(w: QuotaWindow, now: number): string | null {
   return estimate(`${r.perHour.toFixed(1)} points/h keeps it to the reset`)
 }
 
+/**
+ * The forecast as the quota card prints it. A window that has just reset is "measuring" in
+ * the verdict already; a forecast that says "measuring · window just started" under it is the
+ * same fact in other words, so the card keeps the forecast (its marks and state) but not the
+ * sentence. The Forecast section keeps its own row untouched.
+ */
+function cardForecast(f: Forecast | null, verdict: PaceVerdict): Forecast | null {
+  if (!f) return null
+  return verdict.measuring && f.state === 'measuring' ? { ...f, text: '' } : f
+}
+
 function quotaCard(
   q: QuotaState,
   input: VmInput,
@@ -584,7 +595,7 @@ function quotaCard(
       resetAbsolute: formatReset(w.resetsAt, now, 'absolute', tcfg),
       resetLine: resetLineOf(display, reset),
       stateText: stateTextOf(display, verdict.text),
-      forecast: forecasts.get(`${q.source}:${w.id}`) ?? null,
+      forecast: cardForecast(forecasts.get(`${q.source}:${w.id}`) ?? null, verdict),
       sustainable: sustainableText(w, now),
       spark: sparkOf(history.samples(q.source, w.id, fp, now - SPARK_WINDOW_MS), now),
       aria: {

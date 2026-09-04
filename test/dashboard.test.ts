@@ -873,3 +873,15 @@ test('the message hooks the extension parses are all still in the page', () => {
     assert.ok(SCRIPT.indexOf('data-role="' + role + '"') >= 0, role)
   }
 })
+
+test('long tokens break instead of widening the page, and a window header wraps instead of clipping', () => {
+  // The real host at 270 px scrolled sideways by the width of one unbreakable path in the
+  // data-quality list, and cut "…resets 4h59m" out of a long window header. Chrome breaks
+  // paths at slashes on its own; the webview host did not.
+  const css = STYLE
+  assert.match(css, /body \{[^}]*overflow-wrap: anywhere/s)
+  const winTop = css.match(/\.win-top span \{[^}]*\}/)
+  assert.ok(winTop, 'the header label rule is missing')
+  assert.equal(winTop[0].includes('text-overflow'), false, winTop[0])
+  assert.equal(winTop[0].includes('nowrap'), false, winTop[0])
+})

@@ -90,6 +90,29 @@ test('every KPI appears once in both renderings', () => {
   }
 })
 
+test('every key figure is explained once in both text views', () => {
+  const vm = fullVm()
+  const md = markdownDocument(vm)
+  const items = quickPickItems(vm)
+  // One heading, one bullet per figure, in the order the table has them.
+  assert.equal(md.split('\n').filter((l) => l === '### Key figures explained').length, 1)
+  const all = md.split('\n')
+  const start = all.indexOf('### Key figures explained')
+  const end = all.findIndex((l, i) => i > start && /^#{2,3} /.test(l))
+  const lines = all.slice(start + 1, end).filter((l) => l.startsWith('- **'))
+  assert.equal(lines.length, vm.kpis.length)
+  for (let i = 0; i < vm.kpis.length; i++) {
+    const k = vm.kpis[i]
+    assert.equal(lines[i], `- **${k.label}** — ${k.explain.what}. ${k.explain.how}. ${k.explain.period}.`)
+    // The QuickPick has no room for the whole card: what the figure is, and what it stands on.
+    const item = items.find((x) => x.label.startsWith(`${k.label}: `))
+    assert.ok(item, k.label)
+    assert.equal(item.detail, `${k.explain.what} · ${k.explain.provenance}`)
+  }
+  // The list sits after the table, not inside it: the parity count above must stay right.
+  assert.ok(start > md.split('\n').indexOf('## Key figures'))
+})
+
 test('the day the panel is opened for is the first figure in all three renderings', () => {
   const vm = fullVm()
   const today = vm.kpis[0]

@@ -216,7 +216,9 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     add({
       label: `${k.label}: ${k.value}`,
       description: k.delta ? [k.delta.glyph, k.delta.text].filter(Boolean).join(' ') : undefined,
-      detail: [k.note, k.provenance].filter(Boolean).join(' · '),
+      // What the figure is and what it stands on — the same sentence the dashboard shows on
+      // hover, because a list without a card has no other place to put it.
+      detail: [k.explain.what, k.explain.provenance].filter(Boolean).join(' · '),
     })
   }
 
@@ -550,6 +552,15 @@ export function markdownDocument(vm: ViewModel): string {
   for (const k of vm.kpis) {
     L.push(`| ${cell(k.label)} | ${cell(k.value)} | ${k.delta ? cell([k.delta.glyph, k.delta.text].filter(Boolean).join(' ')) : '–'} | `
       + `${cell([k.note, k.provenance].filter(Boolean).join(' · '))} |`)
+  }
+  L.push('')
+
+  // The dashboard shows this on hover; a document that is read without one needs it in the
+  // text, or the table is seven numbers whose denominators the reader has to guess.
+  L.push('### Key figures explained', '')
+  for (const k of vm.kpis) {
+    L.push(`- **${cell(k.label)}** — ${cell(k.explain.what)}. ${cell(k.explain.how)}. `
+      + `${cell(k.explain.period)}.`)
   }
   L.push('')
 

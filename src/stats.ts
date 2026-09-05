@@ -36,6 +36,31 @@ import { Attribution, Bucket, SessionRec, Source, Tier } from './types'
  */
 export type KpiPolarity = 'upGood' | 'upBad' | 'neutral'
 
+/**
+ * What a card counts, in the words all three views share.
+ *
+ * A figure with no denominator on it invites the reader to invent one: "cache hit 61 %" of
+ * what, over which days, against which comparison. Every sentence here is built where the
+ * number is built, so the explanation cannot say one thing while the figure counts another —
+ * and every one of them is text, never a formula the views would have to evaluate again.
+ */
+export interface KpiExplain {
+  /** What the figure is, in one sentence. */
+  what: string
+  /** How it is computed — the formula the code above actually applies. */
+  how: string
+  /** Which days it covers, with the dates. */
+  period: string
+  /** The comparison the delta badge states, or nothing when there is no period before it. */
+  compare: { against: string; previous: string } | null
+  /** The same figure per provider, or nothing when the filter holds only one of them. */
+  split: { claude: string; codex: string } | null
+  /** Measured, derived or estimated, spelled out rather than as a one-word badge. */
+  provenance: string
+  /** What the sparkline beside the figure plots. */
+  sparkNote: string
+}
+
 export interface Kpi {
   key: string
   label: string
@@ -48,6 +73,8 @@ export interface Kpi {
   polarity: KpiPolarity
   spark: number[]
   note: string | null
+  /** The card's own explanation; the views show it, they do not write it. */
+  explain: KpiExplain
 }
 
 export interface TotalRow {
@@ -596,9 +623,9 @@ export function totalsFor(
 // KPIs
 // ---------------------------------------------------------------------------
 
-function seriesOf(ctx: StatsCtx, days: string[], metric: Metric): number[] {
+function seriesOf(ctx: StatsCtx, days: string[], metric: Metric, source?: Source): number[] {
   const out = new Array<number>(days.length).fill(0)
-  for (const s of ctx.sources) {
+  for (const s of source ? [source] : ctx.sources) {
     const v = ctx.agg.series(days, ctx.tcfg, filterFor(ctx, s), metric, ctx.pricing)
     for (let i = 0; i < out.length; i++) out[i] += v[i]
   }
@@ -627,13 +654,13 @@ interface RangeFacts {
   daily: number[]
 }
 
-function factsFor(ctx: StatsCtx, from: string, to: string): RangeFacts {
+function factsFor(ctx: StatsCtx, from: string, to: string, source?: Source): RangeFacts {
   const days = daysBetween(from, to)
-  const daily = seriesOf(ctx, days, 'usage')
+  const daily = seriesOf(ctx, days, 'usage', source)
   let usage = 0
   let cost = 0
   let requests = 0
-  const list = bucketsIn(ctx, from, to)
+  const list = bucketsIn(ctx, from, to, source)
   for (const b of list) {
     usage += billable(b)
     requests += b.requests
@@ -641,6 +668,62 @@ function factsFor(ctx: StatsCtx, from: string, to: string): RangeFacts {
     if (c && !c.unpriced) cost += c.usd
   }
   return { usage, cost, requests, hit: sumParts(list), activeDays: activeDaysIn(daily), days, daily }
+}
+
+/** Provenance as a sentence rather than as a one-word badge, for the card's explanation. */
+const PROVENANCE_TEXT: Record<Provenance, string> = {
+  measured: 'measured',
+  derived: 'derived from measured figures',
+  estimated: 'estimated (~): what this usage would cost through the API',
+}
+
+/** What the fourteen points beside every figure are; one sentence, one place. */
+const SPARK_NOTE = `last ${SPARK_POINTS} days · one point per day`
+
+/** The three counted fields behind every token figure — the same words on every card. */
+const HOW_USAGE = 'fresh input + cache write + output'
+
+function spanOf(from: string, to: string): string {
+  return from === to ? from : `${from} → ${to}`
+}
+
+/**
+ * A range as "what it is called · which days it covers", lower case because it is read as a
+ * fragment behind a "Period" label. A hand-picked range is already named by its days, and
+ * printing the name and the dates would state the same thing twice.
+ */
+function periodOf(r: DayRange): string {
+  const days = spanOf(r.from, r.to)
+  if (r.label === days) return days
+  return `${r.label.charAt(0).toLowerCase()}${r.label.slice(1)} · ${days}`
+}
+
+/**
+ * The same facts per provider, or nothing.
+ *
+ * Only when both providers are actually in the filter: with one of them switched off a
+ * "split" would print a figure for a provider whose rows the rest of the card excludes.
+ */
+function splitFactsFor(
+  ctx: StatsCtx, from: string, to: string,
+): { claude: RangeFacts; codex: RangeFacts } | null {
+  if (!ctx.sources.includes('claude') || !ctx.sources.includes('codex')) return null
+  return { claude: factsFor(ctx, from, to, 'claude'), codex: factsFor(ctx, from, to, 'codex') }
+}
+
+/** Which accounts a figure covers, named the way the cards name them. */
+function sourcesText(ctx: StatsCtx): string {
+  const titles = ctx.sources.map((s) => SOURCE_TITLE[s] ?? s)
+  if (titles.length === 0) return 'no provider selected'
+  return titles.length > 1 ? 'both providers' : titles[0]
+}
+
+/** The split formatted by the very function that formatted the card's own value. */
+function splitWith(
+  per: { claude: RangeFacts; codex: RangeFacts } | null,
+  format: (f: RangeFacts) => string,
+): { claude: string; codex: string } | null {
+  return per ? { claude: format(per.claude), codex: format(per.codex) } : null
 }
 
 /**
@@ -651,6 +734,10 @@ function factsFor(ctx: StatsCtx, from: string, to: string): RangeFacts {
  * opens the panel for, and a reader who has switched the range to last month should not have
  * to switch back to see it. Its delta is against yesterday, the only comparison that makes
  * "today" mean anything, and it says so in its note.
+ *
+ * Every card also carries its own `explain`: the sentence pair, the period with its dates,
+ * the comparison, the per-provider split and the basis. It is built here, beside the figure,
+ * because an explanation written in a view is an explanation that can drift from the number.
  */
 export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null): Kpi[] {
   const cur = factsFor(ctx, range.from, range.to)
@@ -667,6 +754,30 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
   const avg = cur.activeDays > 0 ? cur.usage / cur.activeDays : null
   const prevAvg = prev && prev.activeDays > 0 ? prev.usage / prev.activeDays : null
 
+  const per = splitFactsFor(ctx, range.from, range.to)
+  const period = periodOf(range)
+  const against = previous ? periodOf(previous) : null
+  /**
+   * One card's explanation. `format` is the very function that formatted the card's value,
+   * so the previous period and the two providers are printed on the same scale as the
+   * figure itself — a raw number beside a compacted one would read as a different quantity.
+   */
+  const explainOf = (
+    what: string,
+    how: string,
+    provenance: Provenance,
+    format: (f: RangeFacts) => string,
+  ): KpiExplain => ({
+    what,
+    how,
+    period,
+    compare: against !== null && prev !== null ? { against, previous: format(prev) } : null,
+    split: splitWith(per, format),
+    provenance: PROVENANCE_TEXT[provenance],
+    sparkNote: SPARK_NOTE,
+  })
+  const usageText = (f: RangeFacts): string => tokens(f.usage)
+
   const out: Kpi[] = [
     todayKpi(ctx, delta),
     {
@@ -677,7 +788,8 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       delta: prev ? delta(cur.usage, prev.usage) : { glyph: '', text: 'new' },
       polarity: 'upBad',
       spark: usageSpark,
-      note: 'fresh input + cache write + output',
+      note: HOW_USAGE,
+      explain: explainOf('All tokens the selected range processed', HOW_USAGE, 'measured', usageText),
     },
     {
       key: 'requests',
@@ -688,6 +800,12 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       polarity: 'upBad',
       spark: reqSpark,
       note: 'a Codex token_count event is not necessarily one turn',
+      explain: explainOf(
+        'API requests the transcripts recorded',
+        'one per assistant turn; a Codex token_count event is not necessarily one turn',
+        'measured',
+        (f) => tokens(f.requests),
+      ),
     },
     {
       key: 'cacheHit',
@@ -698,6 +816,15 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       polarity: 'upGood',
       spark: seriesOf(ctx, sparkDays, 'cacheRead'),
       note: 'cache reads ÷ input',
+      explain: explainOf(
+        'Share of input served from the prompt cache',
+        // The denominator is each provider's own, exactly as `cacheHitParts` computes it:
+        // one formula for both would be wrong for one of them.
+        'cache reads ÷ all input — Claude counts cache reads beside fresh input, '
+          + 'Codex reports them inside its input',
+        'derived',
+        (f) => percentOf(f.hit.num, f.hit.den),
+      ),
     },
     {
       key: 'activeDays',
@@ -709,6 +836,12 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       polarity: 'neutral',
       spark: usageSpark.map((v) => (v > 0 ? 1 : 0)),
       note: null,
+      explain: explainOf(
+        'Days with any usage in the range',
+        'days whose usage is above zero',
+        'measured',
+        (f) => (len > 0 ? `${f.activeDays} of ${len}` : '–'),
+      ),
     },
     {
       key: 'avgPerActiveDay',
@@ -721,6 +854,12 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       polarity: 'neutral',
       spark: usageSpark,
       note: null,
+      explain: explainOf(
+        'Usage per day, counting only active days',
+        'usage ÷ active days',
+        'derived',
+        (f) => (f.activeDays > 0 ? compact(f.usage / f.activeDays) : '–'),
+      ),
     },
   ]
   if (ctx.showCost) {
@@ -733,6 +872,12 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       polarity: 'upBad',
       spark: costSpark,
       note: 'hypothetical: what this usage would have cost through the API',
+      explain: explainOf(
+        'What the same tokens would have cost through the API at list prices',
+        'tokens × the price table in effect, per model',
+        'estimated',
+        (f) => costText(f.cost),
+      ),
     })
   }
   return out
@@ -753,16 +898,34 @@ function todayKpi(
   const yesterday = addDays(today, -1)
   const cur = factsFor(ctx, today, today)
   const prev = factsFor(ctx, yesterday, yesterday)
-  const cost = ctx.showCost ? costText(cur.cost) : '–'
+  // Tokens and the amount in one string, so the previous day and the per-provider split are
+  // printed exactly as the tile itself is.
+  const both = (f: RangeFacts): string => {
+    const cost = ctx.showCost ? costText(f.cost) : '–'
+    return tokens(f.usage) + (ctx.showCost && cost !== '–' ? ` · ${cost}` : '')
+  }
   return {
     key: 'today',
     label: 'Today',
-    value: tokens(cur.usage) + (ctx.showCost && cost !== '–' ? ` · ${cost}` : ''),
+    value: both(cur),
     provenance: 'measured',
     delta: cur.usage === 0 && prev.usage === 0 ? null : delta(cur.usage, prev.usage),
     polarity: 'upBad',
     spark: seriesOf(ctx, lastDaysEndingAt(today, SPARK_POINTS), 'usage'),
     note: 'since the day boundary · against yesterday',
+    explain: {
+      // "both providers" only while both are in the filter: with one switched off the tile
+      // counts one account, and saying otherwise would be the invention this file forbids.
+      what: `Tokens processed since the day boundary, ${sourcesText(ctx)}`,
+      how: HOW_USAGE,
+      period: `since the day boundary · ${today}`,
+      // The one card whose comparison exists whatever range is selected — and the only
+      // comparison that makes "today" mean anything.
+      compare: { against: 'yesterday', previous: both(prev) },
+      split: splitWith(splitFactsFor(ctx, today, today), both),
+      provenance: PROVENANCE_TEXT.measured,
+      sparkNote: SPARK_NOTE,
+    },
   }
 }
 

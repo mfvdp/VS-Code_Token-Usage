@@ -1377,6 +1377,104 @@ test('a delta is coloured by what the figure means, never by the arrow alone', (
   assert.equal(/\.kpi \.d\.(up|down) \{/.test(STYLE), false)
 })
 
+/** A KPI with the explanation the view model now builds for every card. */
+function kpiCard(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    key: 'usage', label: 'Usage', value: '1.2M', provenance: 'measured', spark: [1, 2],
+    note: 'fresh input + cache write + output', delta: { glyph: '▲', text: '+5%' },
+    polarity: 'upBad',
+    explain: {
+      what: 'All tokens the selected range processed',
+      how: 'fresh input + cache write + output',
+      period: 'last 30 days · 2026-08-05 → 2026-09-03',
+      compare: { against: 'previous 30 days · 2026-07-06 → 2026-08-04', previous: '900K' },
+      split: { claude: '1M', codex: '200K' },
+      provenance: 'measured',
+      sparkNote: 'last 14 days · one point per day',
+    },
+    ...over,
+  }
+}
+
+test('a key figure explains itself in a popover instead of a native tooltip', () => {
+  const h = render('sKpis()', { kpis: [kpiCard()] })
+  // A title attribute would be a second tooltip over the same card, and one no keyboard
+  // and no screen reader can reach.
+  assert.equal(/<div class="kpi"[^>]*title=/.test(h), false, h)
+  assert.ok(h.indexOf('<div class="kpi" tabindex="0" aria-describedby="pop-usage">') >= 0, h)
+  assert.ok(h.indexOf('<div class="pop" role="tooltip" id="pop-usage" hidden>') >= 0, h)
+  // Labelled lines, in the order the card is read.
+  for (const line of [
+    '<b>What</b> All tokens the selected range processed',
+    '<b>How</b> fresh input + cache write + output',
+    '<b>Period</b> last 30 days · 2026-08-05 → 2026-09-03',
+    '<b>Compared with</b> previous 30 days · 2026-07-06 → 2026-08-04 · 900K',
+    '<b>Basis</b> measured',
+    '<b>Spark</b> last 14 days · one point per day',
+  ]) {
+    assert.ok(h.indexOf(line) >= 0, line + ' missing from ' + h)
+  }
+  // The providers are named by the registry, the same way every other heading names them.
+  assert.ok(h.indexOf('<b>Split</b> Claude Code 1M · Codex 200K') >= 0, h)
+  // The popover is inside the card it explains: the card is its containing block, and a
+  // pointer moving onto it never leaves the card.
+  assert.ok(h.indexOf('class="pop"') > h.indexOf('class="kpi"'), h)
+  assert.ok(h.indexOf('</div></div>', h.indexOf('class="pop"')) > 0, h)
+})
+
+test('a line of the explanation that has nothing to say is not written at all', () => {
+  // No period before the selected one, one provider in the filter: two labels with nothing
+  // behind them would announce a comparison and a split that were never made.
+  const h = render('sKpis()', {
+    kpis: [kpiCard({ explain: { ...(kpiCard().explain as Record<string, unknown>), compare: null, split: null } })],
+  })
+  assert.equal(h.indexOf('Compared with'), -1, h)
+  assert.equal(h.indexOf('Split'), -1, h)
+  assert.ok(h.indexOf('<b>What</b>') >= 0, h)
+})
+
+test('the explanation opens on hover and on focus, and closes on Escape', () => {
+  // mouseenter, focus and blur do not bubble; only a capture-phase listener sees them.
+  assert.match(SCRIPT, /addEventListener\('mouseenter', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SCRIPT, /addEventListener\('mouseleave', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SCRIPT, /addEventListener\('focus', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SCRIPT, /addEventListener\('blur', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SCRIPT, /ev\.key === 'Escape'/)
+  // The card itself, never one of its children: crossing onto the sparkline is not a leave.
+  assert.match(SCRIPT, /classList\.contains\('kpi'\)/)
+  assert.match(STYLE, /\.kpi \{[^}]*position: relative;/)
+  assert.match(STYLE, /\.pop \{ position: absolute; top: 100%; left: 0; z-index: 5;/)
+  assert.match(STYLE, /\.pop\.right \{ left: auto; right: 0; \}/)
+  // The hover-widget colours, with the page's own tokens behind them.
+  assert.match(STYLE, /--vscode-editorHoverWidget-background/)
+  assert.match(STYLE, /--vscode-editorHoverWidget-border/)
+})
+
+test('an explanation on the right of the grid hangs from the right edge of its card', () => {
+  const moves: string[] = []
+  const pop = {
+    hidden: true,
+    classList: { add: (c: string) => moves.push('add:' + c), remove: (c: string) => moves.push('remove:' + c) },
+  }
+  const cardAt = (left: number) => ({
+    querySelector: () => pop,
+    getBoundingClientRect: () => ({ left, width: 100 }),
+  })
+  const open = (left: number): string[] => {
+    moves.length = 0
+    ;(ctx as Record<string, unknown>).probe = cardAt(left)
+    nodeVm.runInContext('window.innerWidth = 400; showPop(probe);', ctx)
+    return moves
+  }
+  // A card whose middle is left of the panel's middle keeps the default anchor …
+  assert.deepEqual(open(10), ['remove:right'])
+  assert.equal(pop.hidden, false)
+  // … one on the right side would run off the page and is anchored the other way.
+  assert.deepEqual(open(280), ['add:right'])
+  nodeVm.runInContext('hidePop();', ctx)
+  assert.equal(pop.hidden, true)
+})
+
 test('with no quota card at all the section says how to get one, and invents nothing', () => {
   const h = render('sQuota()', { quotas: [] })
   assert.equal(/\d ?%/.test(h), false, h)

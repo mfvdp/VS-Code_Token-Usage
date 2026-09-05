@@ -35,9 +35,9 @@ import { QuotaHistory } from './quotaHistory'
 import type { ContextReading } from './quotaSources'
 import {
   AttributionRows, CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack,
-  CompositionEntry, DrillData, HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort,
-  ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData,
-  SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, WindowUsageRow,
+  CompositionEntry, DrillData, HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
+  ModelSort, ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry,
+  RecordsData, SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, WindowUsageRow,
   attributionInWindow, cacheEconomy, cacheStates, calendar, chart, composition,
   drill as drillStats, filterFor, heatmap, hours, kpis, localBlock, modelTable, planFactors,
   projectRows, records as recordsOf, sessionRows, totalsFor, windowUsage,
@@ -53,8 +53,9 @@ import {
 
 export type {
   CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack, CompositionEntry, DrillData,
-  HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow,
-  PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow, WindowUsageRow,
+  HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow, ModelSort, ModelSortKey,
+  PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow,
+  WindowUsageRow,
 }
 
 /** Re-exported so a view names a budget row from the model that produced it. */

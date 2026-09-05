@@ -212,22 +212,39 @@ body {
 h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
      margin: 20px 0 8px; font-weight: 600; }
 h2:first-child { margin-top: 0; }
+/* The page's rhythm lives on the sections, not on the headings inside them: a hairline and a
+   fixed gap above every section, which is also the gap a folded one keeps — the sections used
+   to run into each other, and a folded Summary glued itself to the filter bar. */
+section { margin-top: 22px; padding-top: 10px; border-top: 1px solid var(--line); }
 /* A section head is a <summary>: the fold is the browser's, which means it is keyboard
-   reachable and announced as expandable without a word of ARIA from us. The heading inside
-   keeps its own margins, so a folded section looks exactly like an unfolded one above it. */
-summary { list-style: none; cursor: pointer; }
+   reachable and announced as expandable without a word of ARIA from us. It is a flex row of
+   its own so the chevron, the heading and the gear at its right end sit on one centre line
+   and the row keeps a hand-sized height whatever the heading says. */
+summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
+          min-height: 24px; }
 summary::-webkit-details-marker { display: none; }
-summary h2 { display: flex; align-items: baseline; gap: 6px; }
+summary h2 { display: flex; align-items: center; gap: 6px; margin: 0; flex: 1 1 auto; }
+/* Only while the body is there: a folded section's own margin is the whole gap. */
+details[open] summary { margin-bottom: 8px; }
 /* The twisty is drawn, not typed: a glyph in the markup would end up in the copied text. */
 summary h2::before { content: "▾"; font-size: 9px; line-height: 1; opacity: .7; }
 details:not([open]) summary h2::before { content: "▸"; }
 summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+/* The gear at the end of a section header: quiet until it is wanted, and never a reason for
+   the header to grow. */
+.gear { background: none; border: none; padding: 0 2px; line-height: 0; color: inherit;
+        opacity: .6; flex: none; }
+.gear:hover, .gear:focus-visible { opacity: 1; background: none; }
+.gear svg { display: block; }
 p { margin: 6px 0; }
 .empty { color: var(--dim); font-style: italic; }
 .dim { color: var(--dim); }
 .meta { color: var(--dim); font-size: 11px; }
 .meta.warn { color: var(--warn); }
 .card { margin-bottom: 14px; }
+/* The two provider cards ran into one another; a hairline says where one ends. Scoped to the
+   quota body, because a "card" elsewhere on the page is a row of a list that needs no rule. */
+[data-body="quota"] .card + .card { border-top: 1px solid var(--line); padding-top: 10px; }
 .name { font-weight: 600; }
 .row { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
 .wrap { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
@@ -264,6 +281,23 @@ button[aria-pressed="true"] {
   border-color: var(--vscode-button-background, var(--line));
 }
 input[type=date] { cursor: text; }
+/* The filter bar is a labelled grid: one column for the row labels, one for the chips, so the
+   chips of all three rows start at the same x and the bar reads as three lines rather than as
+   a paragraph of buttons. A tinted block with a hairline around it, because it governs the
+   sections below it instead of belonging to any one of them. */
+.bar { display: grid; grid-template-columns: minmax(62px, max-content) 1fr auto;
+       gap: 6px 8px; align-items: center; margin: 10px 0; padding: 8px;
+       background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+       border: 1px solid var(--line); border-radius: 4px; }
+/* A row with nothing in the third column takes the width the refresh button leaves. */
+.bar .span2 { grid-column: 2 / 4; }
+/* The date fields are a line of their own, directly under the range they belong to. */
+.bar .full { grid-column: 1 / 4; }
+/* The caption ends the range row; a little air keeps it apart from the last chip. */
+.bar .cap { margin-left: 2px; }
+.icon { display: inline-flex; align-items: center; justify-content: center; line-height: 0;
+        padding: 3px 5px; justify-self: end; }
+.icon svg { display: block; }
 .track { position: relative; height: 8px; border-radius: 4px; background: var(--track); }
 .fill { height: 100%; border-radius: 4px; transition: width .3s ease; }
 .fill.ok { background: var(--ok); }
@@ -320,7 +354,8 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 th:first-child, td:first-child { text-align: left; padding-left: 0; }
 td { text-align: right; padding: 3px 0 3px 8px; white-space: nowrap; }
 tr.more td { color: var(--dim); font-style: italic; text-align: left; }
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px;
+        margin-bottom: 8px; }
 .kpi { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
 .kpi .v { font-size: 15px; font-variant-numeric: tabular-nums; }
 .kpi .l { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
@@ -497,6 +532,8 @@ let vm = null;
 let costLine = false;
 /** Model chips beyond the first four, shown on request. Local: a chip is not a setting. */
 let allModels = false;
+/** The range presets beyond today / 7d / 30d, shown on request. Local for the same reason. */
+let allRanges = false;
 /** The two date fields, opened by the "custom…" chip. Also local — the range itself is not. */
 let showDates = false;
 /** The day the drill panel was last scrolled to, so a refresh of the same day stays put. */
@@ -712,10 +749,45 @@ function orElse(value, fallback) {
 
 /** Chips beyond this many are folded away; four is what fits a sidebar on one line. */
 const MODEL_CHIPS = 4;
+/** The ranges that are always on the bar. The rest are one chip away. */
+const RANGE_CHIPS = ['today', '7d', '30d'];
 
+/**
+ * The two icons the bar draws. Inline SVG on purpose: the page loads nothing from anywhere,
+ * so an icon font is not an option — and a glyph typed into the markup would end up in the
+ * copied text of the page.
+ */
+const ICON_REFRESH = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">'
+  + '<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M11.2 4.2A5 5 0 0 1 6.8 12.9"/>'
+  + '<path fill="currentColor" d="M5.5 12.3L6.4 14.6L7.2 11.1Z"/>'
+  + '<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M4.8 11.8A5 5 0 0 1 9.2 3.1"/>'
+  + '<path fill="currentColor" d="M10.5 3.7L9.6 1.4L8.8 4.9Z"/></svg>';
+const ICON_GEAR = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">'
+  + '<path fill="currentColor" fill-rule="evenodd" d="M14.8 6.4L14.8 9.6L12.9 9.6L12.5 10.3'
+  + 'L13.9 11.7L11.7 13.9L10.3 12.5L9.6 12.9L9.6 14.8L6.4 14.8L6.4 12.9L5.7 12.5L4.3 13.9'
+  + 'L2.1 11.7L3.5 10.3L3.1 9.6L1.2 9.6L1.2 6.4L3.1 6.4L3.5 5.7L2.1 4.3L4.3 2.1L5.7 3.5'
+  + 'L6.4 3.1L6.4 1.2L9.6 1.2L9.6 3.1L10.3 3.5L11.7 2.1L13.9 4.3L12.5 5.7L12.9 6.4Z'
+  + 'M5.7 8A2.3 2.3 0 1 0 10.3 8A2.3 2.3 0 1 0 5.7 8Z"/></svg>';
+
+/** The gear that opens the settings this section is made of. */
+function gear(key) {
+  return '<button class="gear" data-act="sectionSettings" data-key="' + esc(key)
+    + '" aria-label="Settings for this section" title="Settings for this section">'
+    + ICON_GEAR + '</button>';
+}
+
+/**
+ * The filter bar: a labelled grid of three rows — range, providers, models — with the labels
+ * in a column of their own, so the chips line up under each other instead of running on as
+ * one paragraph of buttons. Everything it decides is view state; nothing here is a setting.
+ */
 function controls() {
   const r = vm.range;
-  const chips = r.presets.map(p => '<button data-act="range" data-preset="' + p + '" aria-pressed="'
+  // A selected preset is never folded away, the way a filtered-on model is not: a chip the
+  // reader cannot see is a range they cannot leave.
+  const presets = r.presets.filter(p => allRanges || RANGE_CHIPS.indexOf(p) >= 0 || r.preset === p);
+  const restRanges = r.presets.length - presets.length;
+  const chips = presets.map(p => '<button data-act="range" data-preset="' + p + '" aria-pressed="'
     + (r.preset === p) + '">' + esc(p) + '</button>').join('');
   const providers = ['claude', 'codex'].map(s => '<button data-act="provider" data-src="' + s
     + '" aria-pressed="' + (vm.ui.providers.indexOf(s) >= 0) + '">' + esc(srcName(s))
@@ -727,36 +799,42 @@ function controls() {
     if (names.indexOf(m.model) < 0) names.push(m.model);
     if (names.length >= 12) break;
   }
-  // A filtered-on model is never folded away: a chip the reader cannot see is a filter they
-  // cannot switch off, and the table above it would look empty for no stated reason.
-  const shown = names.filter((n, i) => allModels || i < MODEL_CHIPS || vm.ui.models.indexOf(n) >= 0);
-  const rest = names.length - shown.length;
-  const models = shown.map(name => '<button data-act="model" data-model="'
-    + esc(name) + '" aria-pressed="' + (vm.ui.models.indexOf(name) >= 0) + '">'
-    + esc(name) + '</button>').join('')
-    + (rest > 0 ? '<button data-act="moreModels">+' + rest + ' more</button>' : '')
-    + (allModels && names.length > MODEL_CHIPS ? '<button data-act="moreModels">fewer</button>' : '');
+  // Beyond four the row is one chip until it is asked for — a dozen model names is the widest
+  // thing on the bar. A filtered-on model stays visible whatever the fold says.
+  const many = names.length > MODEL_CHIPS;
+  const openRow = !many || allModels;
+  const shown = names.filter(n => openRow || vm.ui.models.indexOf(n) >= 0);
+  const models = (openRow ? '' : '<button data-act="moreModels">models (' + names.length + ') ▾</button>')
+    + shown.map(name => '<button data-act="model" data-model="'
+      + esc(name) + '" aria-pressed="' + (vm.ui.models.indexOf(name) >= 0) + '">'
+      + esc(name) + '</button>').join('')
+    + (openRow && vm.ui.models.length ? '<button data-act="clearModels">clear</button>' : '')
+    + (openRow && many ? '<button data-act="moreModels">fewer ▴</button>' : '');
   // The two date fields are the rarest control on the page and the widest; they stay folded
   // until the range is one they belong to, or until the reader asks for them.
   const custom = r.preset === 'custom' || r.preset === 'all' || showDates;
   const dates = custom
-    ? '<div class="wrap"><label class="meta" for="tp-from">from</label>'
+    ? '<div class="wrap full"><label class="meta" for="tp-from">from</label>'
       + '<input id="tp-from" type="date" data-role="from" value="' + esc(r.from) + '">'
       + '<label class="meta" for="tp-to">to</label>'
       + '<input id="tp-to" type="date" data-role="to" value="' + esc(r.to) + '">'
       + '<button data-act="customRange">apply</button></div>'
     : '';
-  return '<div class="wrap">' + chips
+  return '<div class="bar">'
+    + '<span class="meta">Range</span>'
+    + '<div class="wrap">' + chips
     + '<button data-act="customDates" aria-pressed="' + custom + '">custom…</button>'
-    + '<button data-act="refresh" title="Rebuild from the transcripts and fetch the quota">refresh</button>'
-    + '</div>'
+    + (restRanges > 0 ? '<button data-act="moreRanges">more ▾</button>' : '')
+    + (allRanges && r.presets.length > RANGE_CHIPS.length
+       ? '<button data-act="moreRanges">fewer ▴</button>' : '')
+    // The range in words ends the row it belongs to rather than taking a line of its own.
+    + '<span class="meta cap">' + esc(r.label) + ' · ' + esc(r.from) + ' → ' + esc(r.to)
+    + '</span></div>'
+    + '<button class="icon" data-act="refresh" aria-label="Refresh"'
+    + ' title="Rebuild from the transcripts and fetch the quota">' + ICON_REFRESH + '</button>'
     + dates
-    + '<div class="wrap"><span class="meta">' + esc(r.label) + ' · ' + esc(r.from) + ' → '
-    + esc(r.to) + '</span></div>'
-    + '<div class="wrap"><span class="meta">providers</span>' + providers
-    + (models ? '<span class="meta">models' + (names.length > MODEL_CHIPS ? ' (' + names.length + ')' : '')
-       + '</span>' + models : '')
-    + (vm.ui.models.length ? '<button data-act="clearModels">clear</button>' : '')
+    + '<span class="meta">Providers</span><div class="wrap span2">' + providers + '</div>'
+    + (names.length ? '<span class="meta">Models</span><div class="wrap span2">' + models + '</div>' : '')
     + '</div>';
 }
 
@@ -1580,7 +1658,7 @@ function renderAll() {
     // update writes into it whether the reader has it open or not.
     h += '<section data-sec="' + key + '"><details' + (collapsed(key) ? '' : ' open') + '>'
       + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(TITLE[key] || key)
-      + '</h2></summary>'
+      + '</h2>' + gear(key) + '</summary>'
       + '<div data-body="' + key + '">' + RENDER[key]() + '</div></details></section>';
   }
   if (!controlsPlaced) h += controlsBlock;
@@ -1735,8 +1813,10 @@ function act(el) {
   } else if (a === 'clearModels') {
     post({ type: 'setFilter', providers: vm.ui.providers, models: [] });
   } else if (a === 'moreModels') { allModels = !allModels; renderSection('controls'); }
+  else if (a === 'moreRanges') { allRanges = !allRanges; renderSection('controls'); }
   else if (a === 'customDates') { showDates = !showDates; renderSection('controls'); }
   else if (a === 'section') post({ type: 'toggleSection', key: el.dataset.key });
+  else if (a === 'sectionSettings') post({ type: 'openSectionSettings', key: el.dataset.key });
   else if (a === 'heatmapMetric') post({ type: 'setHeatmapMetric', metric: el.dataset.metric });
   else if (a === 'hourZone') post({ type: 'setHourZone', zone: el.dataset.zone });
   else if (a === 'drill') post({ type: 'drill', day: el.dataset.day || null });
@@ -1749,14 +1829,27 @@ function target(ev, sel) {
 }
 document.addEventListener('click', (ev) => {
   const el = target(ev, '[data-act]');
-  if (el && vm) act(el);
+  if (!el || !vm) return;
+  // The gear lives inside the <summary>, whose default action is the fold: without both of
+  // these, opening the settings would close the section on the way out.
+  if (el.dataset.act === 'sectionSettings') { ev.stopPropagation(); ev.preventDefault(); }
+  act(el);
 });
 document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter' && ev.key !== ' ') return;
   const el = target(ev, '[data-act]');
+  if (!el || !vm) return;
+  // The same for the keyboard: the key press acts on the gear and stops there, so the press
+  // that opens the settings does not fold the section under it.
+  if (el.dataset.act === 'sectionSettings') {
+    ev.stopPropagation();
+    ev.preventDefault();
+    act(el);
+    return;
+  }
   // A <summary> turns Enter and Space into a click of its own; acting here as well would
   // toggle the section twice and leave the fold where it started.
-  if (el && vm && el.tagName !== 'BUTTON' && el.tagName !== 'SELECT' && el.tagName !== 'SUMMARY') {
+  if (el.tagName !== 'BUTTON' && el.tagName !== 'SELECT' && el.tagName !== 'SUMMARY') {
     ev.preventDefault();
     act(el);
   }

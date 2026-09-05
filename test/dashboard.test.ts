@@ -1301,8 +1301,9 @@ function renderPage(over: Record<string, unknown> = {}): string {
 test('every section is a fold the keyboard can reach, open unless the reader closed it', () => {
   const open = renderPage({ sections: ['quota', 'forecast'] })
   // A native <details>: focusable, announced as expandable, and toggled with Enter or Space
-  // without a line of ARIA from us.
-  assert.ok(open.indexOf('<details open><summary data-act="section" data-key="quota"><h2>Quota</h2></summary>') >= 0, open)
+  // without a line of ARIA from us. The gear at the end of the header is part of the summary.
+  assert.ok(open.indexOf('<details open><summary data-act="section" data-key="quota"><h2>Quota</h2>'
+    + '<button class="gear" data-act="sectionSettings" data-key="quota"') >= 0, open)
   assert.equal(open.split('<details').length - 1, 2)
 
   const folded = renderPage({ sections: ['quota', 'forecast'], ui: { providers: ['claude'], models: [], collapsed: ['quota'] } })
@@ -1336,6 +1337,8 @@ test('the filter bar sits below the quota cards and above the first section it f
   // A preview banner qualifies every figure, so it stands above the quota cards.
   const preview = renderPage({ sections: ['quota', 'kpis'], preview: true })
   assert.ok(preview.indexOf('Preview data') < preview.indexOf('data-sec="quota"'), preview)
+  // Wherever it lands, the bar is one block of its own rather than loose rows of buttons.
+  assert.ok(preview.indexOf('<div data-sec="controls" data-body="controls"><div class="bar">') >= 0, preview)
 })
 
 test('a payload without the fold list renders every section open', () => {
@@ -1419,32 +1422,41 @@ test('a card per provider with nothing in it is the same state as no card at all
   assert.equal(offline.indexOf('No quota reading yet.') >= 0, false, offline)
 })
 
-test('model chips fold behind a count once there are more than four', () => {
+test('the model row is one chip until it is asked for, once there are more than four', () => {
   const row = (m: string) => ({
     model: m, source: 'claude', isSub: false, tier: 'standard', usage: 1, usageText: '1',
     output: '1', requests: '1', cost: 0, costText: '–', listCost: null, cacheHit: '–',
     share: '100 %', costShare: '–', priced: 'exact', price: '–', turnAvg: null, turnP90: null,
   })
   const names = ['a', 'b', 'c', 'd', 'e', 'f']
-  const h = render('controls()', {
-    models: { rows: names.map(row), total: 6, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
-  })
-  assert.equal(h.split('data-act="model"').length - 1, 4, h)
-  assert.ok(h.indexOf('models (6)') >= 0, h)
-  assert.ok(h.indexOf('+2 more') >= 0, h)
+  const all = { rows: names.map(row), total: 6, hidden: 0, sort: { key: 'usage', dir: 'desc' } }
+  const h = render('controls()', { models: all })
+  // Six model names are the widest thing on the bar, so the row folds to its own count chip.
+  assert.equal(h.split('data-act="model"').length - 1, 0, h)
+  assert.ok(h.indexOf('<button data-act="moreModels">models (6) ▾</button>') >= 0, h)
+  assert.ok(h.indexOf('<span class="meta">Models</span>') >= 0, h)
   // A model that is being filtered on is never folded away: a chip the reader cannot see is
   // a filter they cannot switch off.
   const filtered = render('controls()', {
-    models: { rows: names.map(row), total: 6, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
-    ui: { providers: ['claude'], models: ['f'], collapsed: [] },
+    models: all, ui: { providers: ['claude'], models: ['f'], collapsed: [] },
   })
   assert.ok(filtered.indexOf('data-model="f"') >= 0, filtered)
+  assert.equal(filtered.split('data-act="model"').length - 1, 1, filtered)
+  // Opened, the row shows every chip, the way out of the filter and the way back.
+  ;(ctx as Record<string, unknown>).fixture = model({
+    models: all, ui: { providers: ['claude'], models: ['f'], collapsed: [] },
+  })
+  const opened = String(nodeVm.runInContext('vm = fixture; (function () { allModels = true;'
+    + ' var h = controls(); allModels = false; return h; })()', ctx))
+  for (const n of names) assert.ok(opened.indexOf('data-model="' + n + '"') >= 0, n + ': ' + opened)
+  assert.ok(opened.indexOf('<button data-act="clearModels">clear</button>') >= 0, opened)
+  assert.ok(opened.indexOf('<button data-act="moreModels">fewer ▴</button>') >= 0, opened)
   // Four or fewer and there is nothing to fold.
   const few = render('controls()', {
     models: { rows: names.slice(0, 3).map(row), total: 3, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
   })
-  assert.equal(few.indexOf('more</button>') >= 0, false, few)
-  assert.ok(few.indexOf('<span class="meta">models</span>') >= 0, few)
+  assert.equal(few.indexOf('data-act="moreModels"') >= 0, false, few)
+  assert.equal(few.split('data-act="model"').length - 1, 3, few)
 })
 
 test('the date fields stay out of the way until the range is a custom one', () => {
@@ -1466,6 +1478,122 @@ test('a clipped table is announced once the browser has measured it', () => {
   assert.match(SCRIPT, /class="meta scrollhint"/)
 })
 
+test('the filter bar is a labelled grid: one row per thing it filters', () => {
+  const h = render('controls()', {
+    models: { rows: [modelRow()], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  // One block, not a run of button rows: the labels share a column, so the chips of all
+  // three rows start at the same x.
+  assert.ok(h.startsWith('<div class="bar">'), h)
+  for (const label of ['Range', 'Providers', 'Models']) {
+    assert.equal(h.split('<span class="meta">' + label + '</span>').length - 1, 1, label + ': ' + h)
+  }
+  // Every row's label is followed by the cell that carries its chips.
+  assert.ok(h.indexOf('<span class="meta">Providers</span><div class="wrap span2">'
+    + '<button data-act="provider"') >= 0, h)
+  assert.ok(h.indexOf('<span class="meta">Models</span><div class="wrap span2">'
+    + '<button data-act="model"') >= 0, h)
+  // The range in words ends the range row instead of taking a line of its own …
+  assert.ok(h.indexOf('<span class="meta cap">Last 30 days · 2026-08-05 → 2026-09-03</span></div>') >= 0, h)
+  // … and the refresh button is the last thing in that row, an icon with a name of its own.
+  assert.ok(h.indexOf('</span></div><button class="icon" data-act="refresh" aria-label="Refresh"'
+    + ' title="Rebuild from the transcripts and fetch the quota"><svg') >= 0, h)
+  // Inline SVG, never an icon font or a file: the page loads nothing from anywhere.
+  assert.equal(/<img|@font-face|url\(/.test(h), false, h)
+  assert.ok(h.indexOf('stroke="currentColor"') >= 0, h)
+  // The date fields are a line of their own, directly under the range they belong to.
+  const dates = render('controls()', {
+    range: { from: '2026-08-05', to: '2026-09-03', label: 'Custom', preset: 'custom', presets: ['7d', '30d'] },
+  })
+  assert.ok(dates.indexOf('</button><div class="wrap full"><label class="meta" for="tp-from">') >= 0, dates)
+  assert.ok(dates.indexOf('data-act="customRange">apply</button></div><span class="meta">Providers</span>') >= 0, dates)
+
+  // The grid itself: a first column wide enough for the longest label, a tinted block with a
+  // hairline around it, and the row gap the three rows breathe by.
+  const bar = /\.bar \{([^}]*)\}/.exec(STYLE)
+  assert.ok(bar, 'the filter bar has no rule')
+  const rule = (bar as RegExpExecArray)[1]
+  assert.match(rule, /display: grid/)
+  assert.match(rule, /grid-template-columns: minmax\(62px, max-content\) 1fr auto/)
+  assert.match(rule, /gap: 6px 8px/)
+  assert.match(rule, /background: color-mix\(in srgb, var\(--vscode-foreground\) 4%, transparent\)/)
+  assert.match(rule, /border: 1px solid var\(--line\)/)
+  assert.match(rule, /border-radius: 4px/)
+  assert.match(rule, /padding: 8px/)
+  // The rows that have no icon take the width the refresh button leaves.
+  assert.match(STYLE, /\.bar \.span2 \{ grid-column: 2 \/ 4; \}/)
+  assert.match(STYLE, /\.bar \.full \{ grid-column: 1 \/ 4; \}/)
+  assert.match(STYLE, /\.icon \{[^}]*justify-self: end/)
+})
+
+test('the range row keeps three presets and folds the rest away', () => {
+  const presets = ['today', 'yesterday', '7d', '30d', '90d', 'thisWeek', 'thisMonth',
+    'lastMonth', 'year', 'all']
+  const range = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    range: { from: '2026-08-05', to: '2026-09-03', label: 'Last 30 days', preset: '30d', presets, ...over },
+  })
+  const h = render('controls()', range())
+  for (const p of ['today', '7d', '30d']) {
+    assert.ok(h.indexOf('data-preset="' + p + '"') >= 0, p + ': ' + h)
+  }
+  for (const p of ['yesterday', '90d', 'thisWeek', 'year', 'all']) {
+    assert.equal(h.indexOf('data-preset="' + p + '"') >= 0, false, p + ': ' + h)
+  }
+  assert.ok(h.indexOf('<button data-act="moreRanges">more ▾</button>') >= 0, h)
+  // A selected preset that the fold would hide stays on the bar: a chip the reader cannot
+  // see is a range they cannot leave.
+  const year = render('controls()', range({ preset: 'year', label: 'This year' }))
+  assert.ok(year.indexOf('data-preset="year" aria-pressed="true"') >= 0, year)
+  // Unfolded: every preset, and the way back.
+  ;(ctx as Record<string, unknown>).fixture = model(range())
+  const opened = String(nodeVm.runInContext('vm = fixture; (function () { allRanges = true;'
+    + ' var h = controls(); allRanges = false; return h; })()', ctx))
+  for (const p of presets) assert.ok(opened.indexOf('data-preset="' + p + '"') >= 0, p + ': ' + opened)
+  assert.ok(opened.indexOf('<button data-act="moreRanges">fewer ▴</button>') >= 0, opened)
+  assert.equal(opened.indexOf('more ▾') >= 0, false, opened)
+})
+
+test('sections are set apart from each other and from the bar', () => {
+  // They used to run into one another, and a folded section glued itself to the filter bar.
+  // The rhythm is on the section, not on the heading, so a fold changes nothing about it.
+  assert.match(STYLE, /section \{ margin-top: 22px; padding-top: 10px; border-top: 1px solid var\(--line\); \}/)
+  const summary = /summary \{([^}]*)\}/.exec(STYLE)
+  assert.ok(summary, 'the section head has no rule')
+  const head = (summary as RegExpExecArray)[1]
+  assert.match(head, /min-height: 24px/)
+  assert.match(head, /display: flex/)
+  assert.match(head, /align-items: center/)
+  // The heading no longer carries the gap; the row it sits in does.
+  assert.match(STYLE, /summary h2 \{[^}]*margin: 0/)
+  assert.match(STYLE, /details\[open\] summary \{ margin-bottom: 8px; \}/)
+  assert.match(STYLE, /\.kpis \{[^}]*margin-bottom: 8px/s)
+  // Two provider cards in one section are told apart by a hairline, and only there.
+  assert.match(STYLE,
+    /\[data-body="quota"\] \.card \+ \.card \{ border-top: 1px solid var\(--line\); padding-top: 10px; \}/)
+  assert.match(STYLE, /\.legend \{[^}]*margin-top: 6px/)
+})
+
+test('every section header carries a gear that opens its own settings', () => {
+  const html = renderPage({ sections: ['quota', 'summary', 'kpis'] })
+  for (const key of ['quota', 'summary', 'kpis']) {
+    assert.ok(html.indexOf('<button class="gear" data-act="sectionSettings" data-key="' + key
+      + '" aria-label="Settings for this section" title="Settings for this section">') >= 0,
+    key + ': ' + html)
+  }
+  // Inside the summary, at its right end, and drawn rather than typed.
+  assert.ok(html.indexOf('<h2>Quota</h2><button class="gear"') >= 0, html)
+  assert.equal(html.split('</svg></button></summary>').length - 1, 3, html)
+  assert.match(STYLE, /summary h2 \{[^}]*flex: 1 1 auto/)
+  assert.match(STYLE, /\.gear \{[^}]*opacity: \.6/s)
+  assert.match(STYLE, /\.gear:hover, \.gear:focus-visible \{ opacity: 1/)
+  // The fold is the summary's default action: without both of these, opening the settings
+  // would close the section on the way out — with the mouse and with the keyboard.
+  assert.match(SCRIPT, /if \(el\.dataset\.act === 'sectionSettings'\) \{ ev\.stopPropagation\(\); ev\.preventDefault\(\); \}/)
+  assert.match(SCRIPT, /post\(\{ type: 'openSectionSettings', key: el\.dataset\.key \}\)/)
+  const keydown = SCRIPT.slice(SCRIPT.indexOf("document.addEventListener('keydown'"))
+  assert.match(keydown, /el\.dataset\.act === 'sectionSettings'[\s\S]{0,160}ev\.stopPropagation\(\);\s*ev\.preventDefault\(\);\s*act\(el\);/)
+})
+
 // ---------------------------------------------------------------------------
 // Nothing invented, nothing broken
 // ---------------------------------------------------------------------------
@@ -1481,8 +1609,8 @@ test('no renderer invents a number or leaks an undefined', () => {
 
 test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
-    'model', 'clearModels', 'moreModels', 'section', 'heatmapMetric', 'hourZone', 'drill',
-    'costLine', 'metric', 'chartStack']) {
+    'model', 'clearModels', 'moreModels', 'moreRanges', 'section', 'sectionSettings',
+    'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'chartStack']) {
     assert.ok(SCRIPT.indexOf('data-act="' + act + '"') >= 0, act)
   }
   for (const role of ['from', 'to']) {

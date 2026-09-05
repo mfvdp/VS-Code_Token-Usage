@@ -434,9 +434,34 @@ export function filterFor(ctx: StatsCtx, source?: Source): BucketFilter {
   return f
 }
 
+/**
+ * The hour a bucket belongs to costs an `Intl` format to place in a zone, and one view-model
+ * rebuild asks that of every hour bucket several times over — once to range-check it, once
+ * per table that groups it. The answer depends on nothing but the hour and the two fields of
+ * the time config that decide where a day begins, so it is remembered on those; the
+ * aggregator keeps a memo of its own for the same reason. The cap is a bound on the memory,
+ * not on the correctness: a cleared memo is refilled from the same inputs.
+ */
+let dayMemoKey = ''
+const dayMemo = new Map<number, string>()
+
 /** The day a bucket belongs to in the configured zone — the same mapping the aggregator uses. */
 export function dayOfBucket(b: Bucket, tcfg: TimeConfig): string {
-  if (b.res === 'h') return dayOfHour(b.hour ?? 0, tcfg)
+  if (b.res === 'h') {
+    const key = `${tcfg.zone}|${tcfg.dayBoundaryHour}`
+    if (key !== dayMemoKey) {
+      dayMemoKey = key
+      dayMemo.clear()
+    }
+    const hour = b.hour ?? 0
+    let day = dayMemo.get(hour)
+    if (day === undefined) {
+      if (dayMemo.size > 50_000) dayMemo.clear()
+      day = dayOfHour(hour, tcfg)
+      dayMemo.set(hour, day)
+    }
+    return day
+  }
   if (b.res === 'd') return b.day
   return `${b.day}-01`
 }
@@ -648,13 +673,17 @@ function hourSpanRow(
     output: mark(tokens(b.output)),
     reasoning: mark(tokens(b.reasoning)),
     requests: mark(tokens(b.requests)),
-    cost: ctx.showCost ? mark(costText(c.usd)) : '–',
-    listCost: ctx.showCost && showListPrice && c.listUsd > 0 ? mark(costText(c.listUsd)) : null,
+    // The cost cells keep the one mark they already carry: `costText` prefixes `~` because
+    // an API cost is an estimate whatever the span, and a second glyph in front of it —
+    // "≈~$0.50" — is two caveats on one figure. That the row is a lower bound is said by
+    // every other cell in it and by the note under the table.
+    cost: ctx.showCost ? costText(c.usd) : '–',
+    listCost: ctx.showCost && showListPrice && c.listUsd > 0 ? costText(c.listUsd) : null,
     costPartial: c.partial,
     incomplete: b.requests > 0 && b.outputFinal < b.requests,
     cacheHit: mark(percentOf(hit.num, hit.den)),
     perRequest: mark(b.requests > 0 ? compact(use / b.requests) : '–'),
-    costPerRequest: ctx.showCost && b.requests > 0 ? mark(costText(c.usd / b.requests)) : '–',
+    costPerRequest: ctx.showCost && b.requests > 0 ? costText(c.usd / b.requests) : '–',
     outputShare: mark(percentOf(b.output, use)),
     provenance: 'measured',
     approx: !complete,
@@ -683,8 +712,11 @@ function windowRows(
       w.windowMinutes !== null && Number.isFinite(w.windowMinutes)
       && Math.abs(w.windowMinutes - span.minutes) <= WINDOW_MINUTES_SLACK
       && w.resetsAt !== null && Number.isFinite(w.resetsAt))
-    if (reported && reported.resetsAt !== null) {
-      const fromMs = reported.resetsAt - spanMs
+    if (reported && reported.resetsAt !== null && reported.windowMinutes !== null) {
+      // The reported length, not the nominal one: the slack above lets a 299-minute window
+      // match the 5 h row, and a bound a minute off the card's is a different hour bucket
+      // once `sumHours` rounds outward. The nominal span only names the row.
+      const fromMs = reported.resetsAt - reported.windowMinutes * 60_000
       const toMs = Math.min(ctx.now, reported.resetsAt)
       // A reset further out than the window is long puts the window's start in the future;
       // there is no elapsed span to sum then, and the trailing span below is the honest answer.
@@ -1518,6 +1550,25 @@ export function niceCeil(v: number): number {
   return step * mag
 }
 
+/**
+ * One bucket's contribution to a chart metric — the same reading `Aggregator.series` takes,
+ * so a chart built from grouped buckets and a series asked of the aggregator cannot disagree.
+ * An unpriced bucket contributes no cost rather than a guess.
+ */
+function metricOfBucket(b: Bucket, metric: Metric, ctx: StatsCtx): number {
+  switch (metric) {
+    case 'output': return b.output
+    case 'cacheRead': return b.cacheRead
+    case 'requests': return b.requests
+    case 'reasoning': return b.reasoning
+    case 'cost': {
+      const c = costOfBucketOn(b, ctx)
+      return c && !c.unpriced ? c.usd : 0
+    }
+    default: return billable(b)
+  }
+}
+
 /** The ranks a provider's named bands can take, largest model first; the rest is the fold. */
 const MODEL_RANKS: readonly ChartRank[] = [0, 1, 2, 3, 4]
 
@@ -1539,13 +1590,25 @@ export const CHART_MODEL_SERIES_PER_PROVIDER = MODEL_RANKS.length
 function modelSeries(ctx: StatsCtx, days: string[], metric: Metric): ChartSeries[] {
   if (days.length === 0) return []
   const out: ChartSeries[] = []
+  const at = new Map(days.map((d, i) => [d, i]))
   for (const source of SOURCES) {
     if (!ctx.sources.includes(source)) continue
-    const names = new Set<string>()
-    for (const b of bucketsIn(ctx, days[0], days[days.length - 1], source)) names.add(b.model)
+    // One grouped pass, the way `modelTable` groups the same buckets: a series per model
+    // asked of the aggregator would walk the whole table once per model, and a busy month
+    // has a dozen models and ten thousand buckets.
+    const byModel = new Map<string, number[]>()
+    for (const b of bucketsIn(ctx, days[0], days[days.length - 1], source)) {
+      const i = at.get(dayOfBucket(b, ctx.tcfg))
+      if (i === undefined) continue
+      let values = byModel.get(b.model)
+      if (!values) {
+        values = new Array<number>(days.length).fill(0)
+        byModel.set(b.model, values)
+      }
+      values[i] += metricOfBucket(b, metric, ctx)
+    }
     const built: { model: string; values: number[]; total: number }[] = []
-    for (const model of names) {
-      const values = ctx.agg.series(days, ctx.tcfg, { source, models: [model] }, metric, ctx.pricing)
+    for (const [model, values] of byModel) {
       const total = values.reduce((a, b) => a + b, 0)
       // A model with buckets in range but nothing in this metric — reasoning tokens a model
       // never emits — would be a swatch in the legend and no band in the chart.

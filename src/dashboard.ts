@@ -7,9 +7,10 @@
  * Three things this file is careful about. Everything it renders comes from the view model —
  * no number is computed here, so the webview cannot drift away from the QuickPick and the
  * markdown view. Everything the webview sends back goes through `parseWebviewMessage`: it is
- * the only untrusted input the extension has, and it may ask for a range, a fold or one of
- * eleven named commands, never for a path or a setting. And updates are per section, so a
- * one-second refresh cannot reset a sort order or throw away the scroll position.
+ * the only untrusted input the extension has, and it may ask for a range, a fold, the
+ * settings of one named section or one of eleven named commands, never for a path or a
+ * setting id of its own. And updates are per section, so a one-second refresh cannot reset
+ * a sort order or throw away the scroll position.
  *
  * No external resource of any kind: the CSP allows exactly the nonced inline style and
  * script of this file. The chart, the heatmap and the sparklines are CSS and inline SVG.
@@ -20,15 +21,24 @@ import { SOURCE_TITLE } from './adapters'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { ViewModel } from './viewModel'
 
+/**
+ * What a section is rebuilt from. A field of the UI state may be named as `ui.<field>`: the
+ * fragment then still carries the whole `ui` object — the webview merges a payload field by
+ * field — but the section is only rebuilt when that one field changes. Listing the whole
+ * `ui` where a single switch is meant replaced the body on every sort, drill and fold, and
+ * with it the sideways scroll position of the tables inside it.
+ */
+type SectionField = keyof ViewModel | `ui.${keyof ViewModel['ui']}`
+
 /** Section keys the webview renders, in the order `dashboard.sections` gives them. */
-const SECTION_FIELDS: Record<string, (keyof ViewModel)[]> = {
+const SECTION_FIELDS: Record<string, SectionField[]> = {
   summary: ['digest'],
   quota: ['quotas'],
   context: ['context'],
   kpis: ['kpis'],
-  // `ui` because the cache chips above the composition bars decide which parts are drawn:
-  // without it the switch would move and the bars beneath it would not.
-  tokens: ['totals', 'composition', 'cacheEconomy', 'calendar', 'planFactor', 'ui'],
+  // The cache switch above the composition bars decides which parts are drawn, so the
+  // section follows it — and nothing else the reader may do to the view state.
+  tokens: ['totals', 'composition', 'cacheEconomy', 'calendar', 'planFactor', 'ui.compositionCache'],
   chart: ['chart'],
   models: ['models'],
   heatmap: ['heatmap'],
@@ -138,9 +148,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       const next = serialise(vm, fields)
       if (this.sent.get(key) === next) continue
       this.sent.set(key, next)
-      const payload: Record<string, unknown> = {}
-      for (const f of fields) payload[f] = vm[f]
-      void view.webview.postMessage({ type: 'section', key, payload })
+      void view.webview.postMessage({ type: 'section', key, payload: payloadOf(vm, fields) })
     }
   }
 
@@ -172,11 +180,39 @@ export function layoutKey(vm: ViewModel): string {
   return serialise(vm, LAYOUT_FIELDS)
 }
 
-const LAYOUT_FIELDS: (keyof ViewModel)[] = ['sections', 'showCost']
+const LAYOUT_FIELDS: SectionField[] = ['sections', 'showCost']
 
-function serialise(vm: ViewModel, fields: (keyof ViewModel)[]): string {
+const UI_FIELD = 'ui.'
+
+/** The one field of the UI state a `ui.<field>` dependency names. */
+function uiField(f: SectionField): string {
+  return f.slice(UI_FIELD.length)
+}
+
+/**
+ * What a section's fragment carries. A `ui.<field>` dependency ships the whole `ui` object:
+ * the webview assigns a payload's fields onto its view model, so half a `ui` there would
+ * throw the provider chips and the model filter away.
+ */
+function payloadOf(vm: ViewModel, fields: SectionField[]): Record<string, unknown> {
   const o: Record<string, unknown> = {}
-  for (const f of fields) o[f] = vm[f]
+  for (const f of fields) {
+    if (f.startsWith(UI_FIELD)) o.ui = vm.ui
+    else o[f] = vm[f as keyof ViewModel]
+  }
+  return o
+}
+
+/** What a section is compared by: a `ui.<field>` dependency compares that one field. */
+function serialise(vm: ViewModel, fields: SectionField[]): string {
+  const o: Record<string, unknown> = {}
+  for (const f of fields) {
+    o[f] = f.startsWith(UI_FIELD)
+      // A payload from a build that had no UI state is a view like any other here: the
+      // provider states an absence, it does not throw the panel away over one field.
+      ? (vm.ui as unknown as Record<string, unknown> | undefined)?.[uiField(f)]
+      : vm[f as keyof ViewModel]
+  }
   return JSON.stringify(o)
 }
 
@@ -232,9 +268,11 @@ summary h2::before { content: "▾"; font-size: 9px; line-height: 1; opacity: .7
 details:not([open]) summary h2::before { content: "▸"; }
 summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 /* The gear at the end of a section header: quiet until it is wanted, and never a reason for
-   the header to grow. */
-.gear { background: none; border: none; padding: 0 2px; line-height: 0; color: inherit;
-        opacity: .6; flex: none; }
+   the header to grow. 24 x 24 of target around the 16 px icon, because the whole summary row
+   is the fold and a click three pixels off the gear would close the section instead of
+   opening its settings; the negative margin keeps the header at its own height. */
+.gear { background: none; border: none; padding: 4px; margin: -4px -2px; line-height: 0;
+        color: inherit; opacity: .6; flex: none; }
 .gear:hover, .gear:focus-visible { opacity: 1; background: none; }
 .gear svg { display: block; }
 p { margin: 6px 0; }
@@ -466,10 +504,21 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .st-pattern.r4, .st-both.r4 { background: repeating-linear-gradient(0deg, var(--hue) 0 2px, var(--ground) 2px 4px); }
 .st-pattern.rother, .st-both.rother { background: radial-gradient(var(--hue) 1px, var(--ground) 1.2px);
                                       background-size: 4px 4px; }
+/* The faint end of the shade ramp is a few percent of hue against the plot, and two such
+   steps are barely a step apart: a hairline in the full hue gives those bands an edge, so a
+   4 px band still says where it starts and which provider it belongs to. Inset, so it costs
+   the stack no pixel of height, and only where the fill alone is too weak — the patterned
+   styles already draw the full hue across the band. */
+.st-shade.r3, .st-shade.r4, .st-shade.rother { box-shadow: inset 0 0 0 1px var(--hue); }
 /* Explicit width and height, because this is a replaced element: with inset alone the
    browser took the width from the box and the height from the viewBox's 1:1 ratio, which drew
-   a 590 px tall cost line straight over the model table and the heatmap below it. */
-.costline { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+   a 590 px tall cost line straight over the model table and the heatmap below it. The
+   overflow is visible because the series is mapped onto the whole box — the maximum sits at
+   y = 0 and a zero at y = 100 — where the browser's own rule for an inline SVG would cut the
+   marker dot at the peak in half and square the apex of the line off. The plot does not clip
+   either: its tick labels live in the gutter beside it. */
+.costline { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none;
+            overflow: visible; }
 /* The overlay is one line over a stack of coloured bands, so it wears none of their hues: the
    foreground is the one colour no band uses. It is drawn twice — a halo in the page's own
    background under a 2 px line — so it stays readable over a band of any hue or pattern, and
@@ -494,6 +543,10 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
              display: flex; justify-content: center; }
 .axis span i { font-style: normal; white-space: nowrap; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: var(--dim); margin-top: 6px; }
+/* A group heading — the provider a run of swatches belongs to — takes a line of its own.
+   Wrapped into the middle of a line it read as one more entry instead of as the label of
+   the entries after it. Only the chart's legend has such a child. */
+.legend > span.meta { flex-basis: 100%; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
 /* A chart swatch is bigger than the others: at 8 px a 4 px stripe pitch is two strokes, and
    two strokes are not a pattern anyone can match against a band. */
@@ -850,6 +903,11 @@ function controls() {
     if (names.indexOf(m.model) < 0) names.push(m.model);
     if (names.length >= 12) break;
   }
+  // The table is filtered by the very chips this row draws, so a model filtered down to
+  // nothing in this range has no row to take its name from. Its chip is added anyway: a
+  // filter with no chip is a filter the reader cannot see and cannot switch off, and the
+  // sections would go on saying "no data in this range" about a range that has plenty.
+  for (const n of vm.ui.models) if (names.indexOf(n) < 0) names.push(n);
   // Beyond four the row is one chip until it is asked for — a dozen model names is the widest
   // thing on the bar. A filtered-on model stays visible whatever the fold says.
   const many = names.length > MODEL_CHIPS;
@@ -859,7 +917,7 @@ function controls() {
     + shown.map(name => '<button data-act="model" data-model="'
       + esc(name) + '" aria-pressed="' + (vm.ui.models.indexOf(name) >= 0) + '">'
       + esc(name) + '</button>').join('')
-    + (openRow && vm.ui.models.length ? '<button data-act="clearModels">clear</button>' : '')
+    + (vm.ui.models.length ? '<button data-act="clearModels">clear</button>' : '')
     + (openRow && many ? '<button data-act="moreModels">fewer ▴</button>' : '');
   // The two date fields are the rarest control on the page and the widest; they stay folded
   // until the range is one they belong to, or until the reader asks for them.
@@ -1127,7 +1185,7 @@ function normSpark(values) {
  * Why a row is marked. Worded once, here and in the markdown view, because the two views
  * print the same table and a caveat phrased twice is read as two different caveats.
  */
-const APPROX_NOTE = '≈ marks a span whose oldest hours are already rolled up into day totals';
+const APPROX_NOTE = '≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals';
 
 function totalsTable(t) {
   const cost = vm.showCost;
@@ -1207,10 +1265,15 @@ function compositionBar(c) {
     + ((p.tokens / total) * 100).toFixed(2) + '" title="' + esc(p.text) + ': '
     + fullNum(p.tokens) + ' · ' + Math.round((p.tokens / total) * 100) + ' %"></i>').join('');
   const sum = (keys) => c.parts.reduce((s, p) => s + (keys.indexOf(p.key) >= 0 ? p.tokens : 0), 0);
-  const caption = noCache
-    ? '<div class="meta">without cache · ' + fullNum(sum(['cacheRead']))
-      + ' tokens cache read and ' + fullNum(sum(['cacheWrite5m', 'cacheWrite1h']))
-      + ' cache write not shown</div>'
+  // Only the halves that were really set aside are named: a provider that never writes cache
+  // would otherwise be told a "0 cache write" the table beside it prints as a dash.
+  const read = sum(['cacheRead']);
+  const written = sum(['cacheWrite5m', 'cacheWrite1h']);
+  const left = [];
+  if (read > 0) left.push(fullNum(read) + ' tokens cache read');
+  if (written > 0) left.push(fullNum(written) + (read > 0 ? '' : ' tokens') + ' cache write');
+  const caption = noCache && left.length
+    ? '<div class="meta">without cache · ' + left.join(' and ') + ' not shown</div>'
     : '';
   return '<div class="meta">' + esc(srcName(c.source)) + ' composition</div>'
     + '<div class="compbar">' + segs + '</div>'
@@ -1222,8 +1285,11 @@ function compositionBar(c) {
 function sTokens() {
   let h = vm.totals.map(totalsTable).join('');
   const bars = vm.composition.map(compositionBar).join('');
-  // The switch belongs to the bars: with nothing drawn there is nothing to switch.
-  if (bars) h += cacheChips() + bars;
+  // The switch belongs to the bars, but it must outlive the mode it sets: a range whose only
+  // counted tokens are cache tokens draws no bar at all in 'hidden', and a switch that came
+  // and went with the bars would take the way back with it.
+  const anyParts = vm.composition.some(c => c.parts.some(p => p.key !== 'reasoning' && p.tokens > 0));
+  if (bars || anyParts) h += cacheChips() + bars;
   if (vm.cacheEconomy.length) {
     h += '<div class="scroll"><table><thead><tr><th>Cache</th><th>Hit rate</th>'
       + '<th>Realised</th><th>Blended $/1M</th></tr></thead><tbody>'
@@ -1276,7 +1342,6 @@ function sChart() {
   const sel = '<select data-act="metric" aria-label="chart metric">'
     + metrics.map(m => '<option value="' + m + '"' + (c.metric === m ? ' selected' : '') + '>'
       + esc(m) + '</option>').join('') + '</select>';
-  const num = (v) => Math.round(v).toLocaleString('en-US');
   const totals = c.days.map((_, i) => c.series.reduce((s, x) => s + x.values[i], 0));
   // A provider's column total, summed from the same bands the column is drawn from.
   const subtotals = {};
@@ -1296,12 +1361,12 @@ function sChart() {
       const share = Math.round((v / totals[i]) * 1000) / 10;
       return '<div class="seg ' + bandStyle(s.source, s.rank, c.modelStyle) + '" data-bh="'
         + ((v / c.max) * 100).toFixed(2)
-        + '" title="' + esc(s.label + ' · ' + srcName(s.source) + ' · ' + num(v) + ' · ' + share
-          + ' % of the ' + unit + ' · ' + srcName(s.source) + ' total ' + num(subtotals[s.source][i]))
+        + '" title="' + esc(s.label + ' · ' + srcName(s.source) + ' · ' + fullNum(v) + ' · ' + share
+          + ' % of the ' + unit + ' · ' + srcName(s.source) + ' total ' + fullNum(subtotals[s.source][i]))
         + '"></div>';
     }).join('');
     return '<div class="col" data-act="drill" data-day="' + esc(d) + '" tabindex="0" role="button" '
-      + 'title="' + esc(d + ': ' + num(totals[i])) + '">'
+      + 'title="' + esc(d + ': ' + fullNum(totals[i])) + '">'
       + (showValues && totals[i] > 0
          ? '<span class="vlabel" data-i="' + i + '"><i>' + esc(short(totals[i]))
             + '</i></span>' : '')

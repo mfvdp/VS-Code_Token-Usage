@@ -109,7 +109,11 @@ test('the running windows lead the fixed rows, and the mark is explained once pe
   const rolled = markdownDocument(folded)
   assert.ok(folded.totals[0].rows.filter((r) => r.approx).length === 2)
   assert.equal(rolled.split('rolled up into day totals').length - 1, folded.totals.length)
-  assert.ok(rolled.includes('_≈ marks a span whose oldest hours are already rolled up into day totals_'))
+  assert.ok(rolled.includes('_≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals_'))
+  // And the glyph legend every view prints names the mark, so the QuickPick — which has no
+  // room for the sentence under a table — still says what a figure with it is.
+  assert.ok(folded.footnotes.some((f) => f.includes('≈ = lower bound')), JSON.stringify(folded.footnotes))
+  assert.equal(vm.footnotes.some((f) => f.includes('≈')), false, JSON.stringify(vm.footnotes))
 })
 
 test('every KPI appears once in both renderings', () => {

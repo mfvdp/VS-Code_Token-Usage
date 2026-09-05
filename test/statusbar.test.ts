@@ -769,6 +769,41 @@ test('a change to sections or showCost re-renders the whole dashboard, not one f
   assert.equal((posted[0] as any).payload.showCost, false)
 })
 
+test('a sort or a fold does not replace the tokens body under the reader', () => {
+  // The tokens section follows one field of the UI state — the cache switch above its
+  // composition bars. It used to follow the whole of it, so every sort, drill and fold
+  // replaced its tables and threw away how far they had been scrolled sideways.
+  const { DashboardProvider } = loadDashboard()
+  const ui = (over: Record<string, unknown>): Record<string, unknown> => ({
+    providers: ['claude', 'codex'], models: [], collapsed: [], compositionCache: 'all',
+    sort: { key: 'usage', dir: 'desc' }, ...over,
+  })
+  const vm = (over: Record<string, unknown>): ViewModel => ({
+    sections: ['tokens'], showCost: true, totals: [], composition: [], cacheEconomy: [],
+    calendar: null, planFactor: [], ui: ui({}), ...over,
+  } as unknown as ViewModel)
+
+  const posted: unknown[] = []
+  const p = new DashboardProvider(() => undefined)
+  p.update(vm({}))
+  p.resolveWebviewView(fakeView(posted))
+  const keys = (): string[] => posted.filter((m: any) => m.type === 'section').map((m: any) => m.key)
+
+  posted.length = 0
+  p.update(vm({ ui: ui({ sort: { key: 'cost', dir: 'asc' }, collapsed: ['chart'] }) }))
+  assert.equal(keys().includes('tokens'), false, JSON.stringify(keys()))
+  // The switch itself still reaches it — and the fragment carries the whole UI state, or the
+  // page would lose its provider chips and its model filter with the assignment.
+  posted.length = 0
+  p.update(vm({ ui: ui({ compositionCache: 'noCache' }) }))
+  // The filter bar follows the whole UI state and redraws with it; the tokens body follows
+  // this one switch, and it is what the switch is for.
+  assert.deepEqual(keys().sort(), ['controls', 'tokens'])
+  const fragment = posted.find((m: any) => m.type === 'section' && m.key === 'tokens') as any
+  assert.deepEqual(fragment.payload.ui.providers, ['claude', 'codex'])
+  assert.equal(fragment.payload.ui.compositionCache, 'noCache')
+})
+
 test('the token item names its period even when the period is today', () => {
   for (const [period, suffix] of [['today', '· today'], ['7d', '· 7d'], ['30d', '· 30d']]) {
     const m = buildItems(input({ cfg: cfg({ 'tokenPace.summary.period': period }) }))

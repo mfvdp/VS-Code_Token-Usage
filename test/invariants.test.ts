@@ -226,6 +226,8 @@ test('the pace unit is percent of the window — no view ever says "points"', ()
   // The sentences that used to carry the word must actually have been rendered, or the
   // assertion below would pass on a view that said nothing at all.
   assert.ok(vm.retro.some((r) => r.text.includes('unused at the reset')), JSON.stringify(vm.retro))
+  assert.ok(vm.quotas.some((q) => q.windows.some((w) => (w.forecast?.text ?? '').includes('reset'))),
+    JSON.stringify(vm.quotas.flatMap((q) => q.windows.map((w) => w.forecast?.text ?? ''))))
   const texts = [
     markdownDocument(vm),
     toMarkdownSummary(vm),

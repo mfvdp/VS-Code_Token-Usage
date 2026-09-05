@@ -1302,7 +1302,12 @@ function footnotesFor(vm: ViewModel, cfg: Config): string[] {
       out.push(`Priced from a related model (family fallback): ${vm.familyPriced.join(', ')}.`)
     }
   }
-  out.push('~ = estimate · measured = read from the provider · derived = computed from measured values.')
+  // The glyph legend every view prints. `≈` is only explained where it can appear: the
+  // QuickPick has no room for the sentence under the table, so the mark it prints beside a
+  // window row would otherwise reach that reader with nothing anywhere saying what it means.
+  const approx = vm.totals.some((t) => t.rows.some((r) => r.approx))
+  out.push(`~ = estimate · ${approx ? '≈ = lower bound · ' : ''}measured = read from the provider `
+    + '· derived = computed from measured values.')
   out.push('Quota percentages come from the provider and cover every client of the account; they '
     + 'cannot be derived from the local token counts.')
   if (cfg.attribution === 'none') {

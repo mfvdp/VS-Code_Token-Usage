@@ -38,20 +38,13 @@ test('every section the panel folds has settings behind its gear', () => {
   assert.deepEqual(Object.keys(SECTION_SETTINGS).sort(), [...DASHBOARD_SECTION_KEYS].sort())
 })
 
-/**
- * The chart's own model style is contributed by the chart rebuild of this same release. Until
- * that change is in the tree the id is not in the manifest yet: the gear then carries one
- * filter term the settings editor does not know, which it ignores. Every other id is checked
- * without mercy, and this one is checked again the moment it exists.
- */
-const PENDING = new Set(['tokenPace.chart.modelStyle'])
-
 test('every id behind a gear is a setting the manifest really contributes', () => {
   assert.ok(DECLARED.size > 50, `only ${DECLARED.size} settings were read from the manifest`)
   for (const [key, list] of Object.entries(SECTION_SETTINGS)) {
     for (const id of list) {
       assert.match(id, /^tokenPace\./, `${key}: ${id}`)
-      if (!DECLARED.has(id) && PENDING.has(id)) continue
+      // No exception for any id: one that is renamed or dropped turns its gear into a button
+      // that opens an empty settings page, which is exactly what this reads the manifest for.
       assert.ok(DECLARED.has(id), `${key}: ${id} is not in contributes.configuration`)
     }
   }

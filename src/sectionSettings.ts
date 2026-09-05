@@ -45,8 +45,6 @@ export const SECTION_SETTINGS: Record<DashboardSectionKey, string[]> = {
     'tokenPace.dashboard.sections',
   ],
   chart: [
-    // The chart's own model style. Shipped with the chart rebuild of the same release, so
-    // the id may be one merge behind this table in a working copy.
     'tokenPace.chart.modelStyle', 'tokenPace.dashboard.topN', 'tokenPace.showCost',
     'tokenPace.dashboard.sections',
   ],

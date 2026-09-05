@@ -91,9 +91,11 @@ function trustedForecast(w: WindowVmOf): Forecast | null {
 
 /**
  * Why a figure carries `≈`. The same sentence the dashboard prints under its totals table —
- * one caveat, worded once, so the two views cannot explain the mark differently.
+ * one caveat, worded once, so the two views cannot explain the mark differently. It says
+ * "lower bound" rather than "approximate": what is missing from such a row is whole hours
+ * of usage, which can only make the figure too small, never too large.
  */
-export const APPROX_NOTE = '≈ marks a span whose oldest hours are already rolled up into day totals'
+export const APPROX_NOTE = '≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals'
 
 /** True when the text is one of the segments already printed, compared whole and case-blind. */
 function repeats(text: string, said: (string | null | undefined)[]): boolean {

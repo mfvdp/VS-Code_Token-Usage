@@ -283,6 +283,10 @@ test('the cost line stays inside the plot instead of drawing across the page bel
   assert.equal(/\.plot \{[^}]*overflow: hidden/.test(STYLE), false, STYLE)
   // And the overlay is drawn with an explicit viewBox that the sizing above stretches to it.
   assert.match(SCRIPT, /svg class="costline" viewBox="0 0 100 100"/)
+  // The series is mapped onto the whole box, so the maximum sits at y = 0 and a zero at
+  // y = 100: with the browser's own rule for an inline SVG the marker dot at the peak would
+  // be cut in half and the apex of the line squared off.
+  assert.match(body, /overflow: visible/)
 })
 
 test('the plot is tall enough for a stack of six bands', () => {
@@ -380,7 +384,7 @@ test('the cache chips sit above the composition bars and say which mode is on', 
   const chips = h.indexOf('data-act="compositionCache"')
   const bar = h.indexOf('class="compbar"')
   assert.ok(chips >= 0, h)
-  assert.ok(chips < bar, 'the switch is below the bar it governs')
+  assert.ok(chips < bar, 'the switch is above the bar it governs')
   assert.ok(h.indexOf('<span class="meta">cache</span>') >= 0, h)
   assert.ok(h.indexOf('data-act="compositionCache" data-mode="all" aria-pressed="true">shown') >= 0, h)
   assert.ok(h.indexOf('data-act="compositionCache" data-mode="noCache" aria-pressed="false">hidden') >= 0, h)
@@ -410,6 +414,43 @@ test('hiding the cache drops its parts, rescales the rest and says what is missi
   assert.ok(off.indexOf('without cache · 96,000 tokens cache read and 2,500 cache write not shown') >= 0, off)
 })
 
+test('the cache switch outlives the mode it sets', () => {
+  // A range whose only counted tokens are cache tokens draws no bar at all once the cache is
+  // hidden. The chips are what switches it back on, so they cannot go with the bar.
+  const cacheOnly = { source: 'claude', parts: [{ key: 'cacheRead', tokens: 96_000, text: 'Cache read' }] }
+  const off = render('sTokens()', tokensVm({
+    composition: [cacheOnly],
+    ui: { providers: ['claude'], models: [], collapsed: [], compositionCache: 'noCache' },
+  }))
+  assert.equal(off.indexOf('class="compbar"'), -1, off)
+  assert.ok(off.indexOf('data-act="compositionCache" data-mode="all" aria-pressed="false">shown') >= 0, off)
+  // Nothing to compose at all is still no switch: there is no bar it could ever govern.
+  const nothing = render('sTokens()', tokensVm({ composition: [{ source: 'claude', parts: [] }] }))
+  assert.equal(nothing.indexOf('data-act="compositionCache"'), -1, nothing)
+})
+
+test('the caption names the cache halves that were really set aside, never a zero', () => {
+  const noWrites = render('sTokens()', tokensVm({
+    composition: [{ source: 'codex', parts: [
+      { key: 'freshInput', tokens: 1000, text: 'Fresh input' },
+      { key: 'cacheRead', tokens: 179_000, text: 'Cache read' },
+      { key: 'cacheWrite5m', tokens: 0, text: 'Cache write 5m' },
+    ] }],
+    ui: { providers: ['codex'], models: [], collapsed: [], compositionCache: 'noCache' },
+  }))
+  // The table beside it prints a dash for a figure a provider never reports; the caption
+  // must not print "and 0 cache write" for the same absence.
+  assert.ok(noWrites.indexOf('without cache · 179,000 tokens cache read not shown') >= 0, noWrites)
+  const noReads = render('sTokens()', tokensVm({
+    composition: [{ source: 'claude', parts: [
+      { key: 'freshInput', tokens: 1000, text: 'Fresh input' },
+      { key: 'cacheWrite5m', tokens: 2500, text: 'Cache write 5m' },
+    ] }],
+    ui: { providers: ['claude'], models: [], collapsed: [], compositionCache: 'noCache' },
+  }))
+  assert.ok(noReads.indexOf('without cache · 2,500 tokens cache write not shown') >= 0, noReads)
+})
+
 test('the two window rows carry their span as the tooltip of the label', () => {
   const row = (over: Record<string, unknown>): Record<string, unknown> => ({
     label: 'Current 5 h window', usage: '1.5K', freshInput: '1K', cacheWrite5m: '–',
@@ -434,7 +475,7 @@ test('the two window rows carry their span as the tooltip of the label', () => {
   }))
   // Once per table, however many rows carry the mark.
   assert.equal(approx.split('rolled up into day totals').length - 1, 1, approx)
-  assert.ok(approx.indexOf('≈ marks a span whose oldest hours are already rolled up into day totals') >= 0, approx)
+  assert.ok(approx.indexOf('≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals') >= 0, approx)
 })
 
 test('the cost line wears no colour a stacked band wears', () => {
@@ -919,6 +960,12 @@ test('the band styles are one provider hue varied by rank, at a fixed 4 px pitch
   assert.match(rule('r4'), /background: repeating-linear-gradient\(0deg, var\(--hue\) 0 2px, var\(--ground\) 2px 4px\);/)
   assert.match(rule('rother'), /background: radial-gradient\(var\(--hue\) 1px, var\(--ground\) 1\.2px\);/)
   assert.match(rule('rother'), /background-size: 4px 4px;/)
+  // The faint end of the shade ramp gets an edge of its own: two mixes a few percent apart
+  // are not two colours at 4 px, and the last of them is barely there against the plot.
+  assert.match(STYLE, /\.st-shade\.r3, \.st-shade\.r4, \.st-shade\.rother \{ box-shadow: inset 0 0 0 1px var\(--hue\); \}/)
+  // A provider label in the legend is a heading, so it takes a line of its own; wrapped into
+  // the middle of one it read as one more swatch entry.
+  assert.match(STYLE, /\.legend > span\.meta \{ flex-basis: 100%; \}/)
   // The chart's swatches are big enough for a pattern to be read; the other legends keep 8 px.
   assert.match(STYLE, /\.legend \.dot\.band \{ width: 14px; height: 14px; \}/)
   assert.match(STYLE, /\.dot \{ display: inline-block; width: 8px; height: 8px;/)
@@ -1595,6 +1642,8 @@ test('the model row is one chip until it is asked for, once there are more than 
   })
   assert.ok(filtered.indexOf('data-model="f"') >= 0, filtered)
   assert.equal(filtered.split('data-act="model"').length - 1, 1, filtered)
+  // And the way out of the filter is beside it, folded row or not.
+  assert.ok(filtered.indexOf('<button data-act="clearModels">clear</button>') >= 0, filtered)
   // Opened, the row shows every chip, the way out of the filter and the way back.
   ;(ctx as Record<string, unknown>).fixture = model({
     models: all, ui: { providers: ['claude'], models: ['f'], collapsed: [] },
@@ -1610,6 +1659,24 @@ test('the model row is one chip until it is asked for, once there are more than 
   })
   assert.equal(few.indexOf('data-act="moreModels"') >= 0, false, few)
   assert.equal(few.split('data-act="model"').length - 1, 3, few)
+})
+
+test('a model filtered down to nothing keeps its chip and the way back', () => {
+  // The model table is filtered by these very chips, so a filter on a model with no bucket
+  // in the range empties the table the chip names are read from. Dropping the row then would
+  // leave the reader with every section saying "no data" and nothing to switch off.
+  const h = render('controls()', {
+    models: { rows: [], total: 0, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+    ui: { providers: ['claude', 'codex'], models: ['claude-opus-4-6'], collapsed: [] },
+  })
+  assert.ok(h.indexOf('<span class="meta">Models</span>') >= 0, h)
+  assert.ok(h.indexOf('data-act="model" data-model="claude-opus-4-6" aria-pressed="true"') >= 0, h)
+  assert.ok(h.indexOf('<button data-act="clearModels">clear</button>') >= 0, h)
+  // With no filter and no rows there is nothing to say, and the row is not drawn.
+  const empty = render('controls()', {
+    models: { rows: [], total: 0, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  assert.equal(empty.indexOf('<span class="meta">Models</span>'), -1, empty)
 })
 
 test('the date fields stay out of the way until the range is a custom one', () => {
@@ -1738,6 +1805,9 @@ test('every section header carries a gear that opens its own settings', () => {
   assert.equal(html.split('</svg></button></summary>').length - 1, 3, html)
   assert.match(STYLE, /summary h2 \{[^}]*flex: 1 1 auto/)
   assert.match(STYLE, /\.gear \{[^}]*opacity: \.6/s)
+  // 24 x 24 around the 16 px icon: the whole summary row folds the section, so a click three
+  // pixels off the gear must not close what it was meant to open.
+  assert.match(STYLE, /\.gear \{[^}]*padding: 4px; margin: -4px -2px/s)
   assert.match(STYLE, /\.gear:hover, \.gear:focus-visible \{ opacity: 1/)
   // The fold is the summary's default action: without both of these, opening the settings
   // would close the section on the way out — with the mouse and with the keyboard.

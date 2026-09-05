@@ -7,8 +7,8 @@ import { Aggregator } from '../src/agg'
 import { usd } from '../src/render'
 import {
   CHART_MODEL_SERIES_PER_PROVIDER, MIN_P90_SAMPLES, StatsCtx, cacheEconomy, cacheHitParts,
-  cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil, planFactors,
-  projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
+  cacheStateOf, calendar, chart, dayOfBucket, drill, heatmap, hours, kpis, modelTable,
+  niceCeil, planFactors, projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
 } from '../src/stats'
 import { DayRange, dayOf, daysBetween, previousRange, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
@@ -605,6 +605,24 @@ test('a provider that reports no window of that length gets a trailing span, nam
   assert.equal(noReset[1].label, 'Last 5 h')
 })
 
+test('a window row is bounded by the length the provider reported, not by the nominal span', () => {
+  // The match tolerates a minute of drift either way, so a window reported as 301 minutes is
+  // still the 5 h row — but the row is summed over the window that was reported. Hour buckets
+  // are rounded outward, so that minute decides a whole bucket: 08:00 lies inside
+  // [08:59, 14:00) and outside the nominal [09:00, 14:00).
+  const ctx = ctxOf(fromBuckets([hourBucket(4), hourBucket(1)]), { sources: ['claude'] })
+  const reported = (windowMinutes: number) => totalsFor(
+    ctx, 'claude', range('30d'), null, '2026-07-01', false,
+    [{ id: 'session:300', label: '5 h', resetsAt: NOW + 2 * 3_600_000, windowMinutes }],
+  )[1]
+  assert.equal(reported(301).label, 'Current 5 h window')
+  assert.equal(reported(301).spanText, '08:59 → now')
+  assert.equal(reported(301).usage, '3K')
+  // The nominal span still names the row and still decides which row it is.
+  assert.equal(reported(300).spanText, '09:00 → now')
+  assert.equal(reported(300).usage, '1.5K')
+})
+
 test('a window row whose oldest hours are rolled up marks every figure it prints', () => {
   const ctx = ctxOf(fromBuckets([hourBucket(1)], true), { sources: ['claude'] })
   const rows = totalsFor(ctx, 'claude', range('30d'), null, '2026-07-01')
@@ -614,6 +632,11 @@ test('a window row whose oldest hours are rolled up marks every figure it prints
   assert.equal(five.requests, '≈1')
   assert.equal(five.output, '≈500')
   assert.equal(five.cacheHit, '≈0 %')
+  // The cost keeps the single mark it already carries: `~` says an API cost is an estimate
+  // whatever the span, and a second glyph in front of it would put two caveats with two
+  // meanings on one figure. That the row is a lower bound is said by every other cell.
+  assert.equal(five.cost.startsWith('~'), true, five.cost)
+  assert.equal(five.cost.indexOf('≈'), -1, five.cost)
   // A day-bounded row is summed from the day buckets, which the roll-up does not touch.
   const today = rows.find((r) => r.label === 'Today')
   assert.equal(today?.approx, false)
@@ -704,6 +727,40 @@ test('the chart stacks every column by model, one band per provider and model', 
   assert.equal(c.modelStyle, 'pattern')
   assert.equal(chart(ctx, r, 'usage', 'both').modelStyle, 'both')
   assert.equal('stack' in c, false)
+})
+
+test('an hour bucket lands on the day its own zone puts it on, however often it is asked', () => {
+  // Placing an hour in a zone costs an Intl format, and one rebuild asks it of every bucket
+  // several times over, so the answer is remembered — keyed by the zone and by the hour a
+  // day begins at. Both have to invalidate it, or a changed setting would be answered out of
+  // the old table for the rest of the session.
+  const b = hourBucket(10) // 2026-09-03 02:00 UTC
+  assert.equal(dayOfBucket(b, tcfg), '2026-09-03')
+  assert.equal(dayOfBucket(b, { ...tcfg, zone: 'America/New_York' }), '2026-09-02')
+  assert.equal(dayOfBucket(b, { ...tcfg, dayBoundaryHour: 4 }), '2026-09-02')
+  assert.equal(dayOfBucket(b, tcfg), '2026-09-03')
+  // A day bucket carries its day, and a month bucket is placed on its first day.
+  assert.equal(dayOfBucket({ ...b, res: 'd', hour: null, day: '2026-08-01' }, tcfg), '2026-08-01')
+  assert.equal(dayOfBucket({ ...b, res: 'm', hour: null, day: '2026-08' }, tcfg), '2026-08-01')
+})
+
+test('a band is the same figure however it was summed, in every metric', () => {
+  // The bands are grouped out of the buckets in one pass; the aggregator answers the same
+  // question per provider with a pass of its own. Splitting a column by model may not move a
+  // token or a cent, so the two have to agree in every metric the chart offers.
+  const ctx = ctxOf(buildAgg())
+  const r = range('30d')
+  for (const metric of ['usage', 'output', 'cacheRead', 'requests', 'reasoning', 'cost'] as const) {
+    const c = chart(ctx, r, metric)
+    for (const source of ['claude', 'codex'] as const) {
+      const own = ctx.agg.series(c.days, tcfg, { source }, metric, ctx.pricing)
+      const bands = c.series.filter((x) => x.source === source)
+      for (let i = 0; i < c.days.length; i++) {
+        const sum = bands.reduce((t, x) => t + x.values[i], 0)
+        assert.ok(Math.abs(sum - own[i]) < 1e-9, `${metric} ${source} ${c.days[i]}: ${sum} vs ${own[i]}`)
+      }
+    }
+  }
 })
 
 test('a model used under both providers is two bands, one per provider', () => {

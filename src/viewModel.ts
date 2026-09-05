@@ -528,8 +528,15 @@ export const SPARK_DAYS = 7
 /** 672 quarter hours: the sparkline's whole x axis, one slot per column. */
 export const SPARK_SLOTS = SPARK_DAYS * 24 * 4
 
-/** One reading on the sparkline: `i` is the slot index 0..SPARK_SLOTS-1, `p` the percent (0..100+). */
-export interface SparkPoint { i: number; p: number; level: PaceLevel | null }
+/**
+ * One reading on the sparkline: `i` is the slot index 0..SPARK_SLOTS-1, `p` the percent (0..100+).
+ *
+ * `reset` marks the first reading of a new window — its sample reports a different `resetsAt`
+ * than the previous drawn one (a missing reset time and a present one count as different, and
+ * the very first point never carries it). The renderer draws the stroke INTO such a point
+ * without a pace colour: that fall is the window turning over, not a pace anybody kept.
+ */
+export interface SparkPoint { i: number; p: number; level: PaceLevel | null; reset?: true }
 /** Slot indices of two consecutive points a dashed bridge joins. */
 export interface SparkBridge { from: number; to: number }
 
@@ -604,7 +611,10 @@ export function sparkOf(
   let prev: { i: number; s: QuotaSample } | null = null
   for (const i of slots) {
     const s = last.get(i) as QuotaSample
-    points.push({ i, p: s.p, level: sparkLevel(s, windowMinutes, paceCfg) })
+    const point: SparkPoint = { i, p: s.p, level: sparkLevel(s, windowMinutes, paceCfg) }
+    // A new reset time is a new window: the segment leading here belongs to neither of them.
+    if (prev && prev.s.r !== s.r) point.reset = true
+    points.push(point)
     if (prev && i - prev.i > 1 && prev.s.r === s.r && s.p >= prev.s.p - 1) {
       bridges.push({ from: prev.i, to: i })
     }

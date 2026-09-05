@@ -76,14 +76,37 @@ test('graded adds a second warning level beyond three times the tolerance', () =
 })
 
 test('minElapsedPercent suppresses the alarm right after a reset', () => {
-  const v = paceVerdict(20, 1, normal)
+  const v = paceVerdict(10, 1, normal)
   assert.equal(v.measuring, true)
   assert.equal(v.level, 'ok')
   assert.equal(v.text, 'measuring · window just reset')
-  assert.equal(v.points, 19)
+  assert.equal(v.points, 9)
   // Above the threshold the same figure is judged.
-  assert.equal(paceVerdict(20, 4, normal).level, 'warn')
-  assert.equal(paceVerdict(20, 1, { ...normal, sensitivity: 'custom', minElapsedPercent: 0 }).measuring, false)
+  assert.equal(paceVerdict(10, 4, normal).level, 'warn')
+  assert.equal(paceVerdict(10, 1, { ...normal, sensitivity: 'custom', minElapsedPercent: 0 }).measuring, false)
+})
+
+test('measuring needs a young window AND a small bill', () => {
+  // The doubt is about the clock, not about the reading: 60 % of a window spent in its first
+  // minutes is a fact no elapsed share can explain away, so it is judged like any other.
+  const heavy = paceVerdict(60, 1, normal)
+  assert.equal(heavy.measuring, false)
+  assert.equal(heavy.level, 'warn')
+  assert.equal(heavy.text, '59 % ahead of pace')
+  assert.equal(paceVerdict(60, 1, graded).level, 'warn2')
+  // The ceiling is twice the tolerance — 10 % at 'normal' — and inclusive.
+  assert.equal(paceVerdict(10, 1, normal).measuring, true)
+  assert.equal(paceVerdict(10.5, 1, normal).measuring, false)
+  assert.equal(paceVerdict(10.5, 1, normal).level, 'warn')
+  // It moves with the tolerance: 'strict' stops trusting a young clock earlier than 'relaxed'.
+  assert.equal(paceVerdict(4, 0.5, { ...normal, sensitivity: 'strict' }).measuring, true)
+  assert.equal(paceVerdict(5, 0.5, { ...normal, sensitivity: 'strict' }).measuring, false)
+  assert.equal(paceVerdict(20, 4, { ...normal, sensitivity: 'relaxed' }).measuring, true)
+  assert.equal(paceVerdict(21, 4, { ...normal, sensitivity: 'relaxed' }).measuring, false)
+  // A custom tolerance carries its own ceiling.
+  const custom: PaceConfig = { sensitivity: 'custom', tolerancePoints: 20, minElapsedPercent: 5, levels: 'binary' }
+  assert.equal(paceVerdict(40, 1, custom).measuring, true)
+  assert.equal(paceVerdict(41, 1, custom).measuring, false)
 })
 
 test('exhaustion outranks everything, including measuring', () => {

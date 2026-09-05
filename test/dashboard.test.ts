@@ -1131,6 +1131,31 @@ test('a spark run splits where the pace level changes, each segment wearing the 
   }
 })
 
+test('the stroke into the first reading after a reset wears no pace colour', () => {
+  // The window turned over between the two readings: that fall is not a pace anybody kept,
+  // so the stroke stands alone in the neutral provider colour and the coloured run starts
+  // again at the new window's first reading.
+  const h = sparkOf(slotted([
+    { i: 0, p: 80, level: 'warn' }, { i: 1, p: 90, level: 'warn' },
+    { i: 2, p: 5, level: 'ok', reset: true }, { i: 3, p: 12, level: 'ok' },
+    { i: 4, p: 20, level: 'ok' },
+  ]))
+  assert.equal(h.split('<polyline').length - 1, 3, h)
+  assert.match(h, /<polyline class="warn" points="0,20.0 1,10.0"\/><polyline points="1,10.0 2,95.0"\/><polyline class="ok" points="2,95.0 3,88.0 4,80.0"\/>/)
+  // Two resets in a row keep one stroke each rather than melting into one neutral run.
+  const twice = sparkOf(slotted([
+    { i: 0, p: 60, level: 'warn' }, { i: 1, p: 4, level: 'ok', reset: true },
+    { i: 2, p: 3, level: 'ok', reset: true }, { i: 3, p: 9, level: 'ok' },
+  ]))
+  assert.match(twice, /<polyline points="0,40.0 1,96.0"\/><polyline points="1,96.0 2,97.0"\/><polyline class="ok" points="2,97.0 3,91.0"\/>/)
+  assert.equal(twice.split('<polyline').length - 1, 3, twice)
+  // A lone reading is a point, not a stroke: it keeps its own level whatever it reports.
+  const lone = sparkOf(slotted([{ i: 2, p: 5, level: 'ok', reset: true }]))
+  assert.match(lone, /<path class="pt ok" d="M2 95.0h.01"\/>/)
+  // The class-less polyline is the provider stroke the CSS defines.
+  assert.match(STYLE, /\.spark polyline \{ fill: none; stroke: var\(--claude\);/)
+})
+
 test('a hole in the spark is bridged with a dashed line only where the model says so', () => {
   const pts = [{ i: 5, p: 50, level: null }, { i: 9, p: 55, level: null }]
   const bridged = sparkOf(slotted(pts, [{ from: 5, to: 9 }]))

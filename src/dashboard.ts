@@ -336,7 +336,8 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .spark.q { height: 22px; }
 .spark polyline { fill: none; stroke: var(--claude); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 /* Each segment wears the pace level the bar showed at its later point; a point with no clock
-   keeps the provider colour. */
+   keeps the provider colour, and so does the segment into the first reading after a reset —
+   that fall is the window turning over, and colouring it would judge a pace nobody kept. */
 .spark polyline.ok, .spark path.pt.ok { stroke: var(--ok); }
 .spark polyline.warn, .spark path.pt.warn { stroke: var(--warn); }
 .spark polyline.warn2, .spark path.pt.warn2 { stroke: var(--warn2); }
@@ -556,9 +557,11 @@ function hasSpark(s) {
  * Seven days of one window, time-proportional: the viewBox is one unit per 15-minute slot,
  * so a stretch without readings is exactly as wide as the time it covers. Runs of adjacent
  * slots become polylines, split wherever the pace level changes — the segment between two
- * points wears the level of the later one — and a bridge across slots with no reading is a
- * dashed line. A lone reading is the round-cap hairline. Percentages above 100 sit on the top
- * edge rather than leaving the box. A plain array (the KPI sparks) takes the older renderer.
+ * points wears the level of the later one, except into a point the view model marked as the
+ * first reading of a new window, which is a neutral two-point stroke — and a bridge across
+ * slots with no reading is a dashed line. A lone reading is the round-cap hairline.
+ * Percentages above 100 sit on the top edge rather than leaving the box. A plain array (the
+ * KPI sparks) takes the older renderer.
  */
 function sparkSvg(spark) {
   if (Array.isArray(spark)) return sparkArraySvg(spark);
@@ -581,14 +584,19 @@ function sparkSvg(spark) {
       body += '<path class="pt' + (cls ? ' ' + cls : '') + '" d="M' + xOf(run[0]) + ' '
         + yOf(run[0]) + 'h.01"/>';
     } else if (run.length > 1) {
-      let seg = [run[0]];
-      let cls = sparkLevel(run[1]);
+      // One stroke per pair of neighbours, wearing the level of the later point, so equal
+      // neighbours share a polyline. A stroke into the first reading of a new window stands
+      // alone and wears no level: the drop is the reset, and the coloured run starts again
+      // at that reading.
+      const segs = [];
       for (let k = 1; k < run.length; k++) {
-        const c = sparkLevel(run[k]);
-        if (c !== cls) { body += poly(seg, cls); seg = [run[k - 1]]; cls = c; }
-        seg.push(run[k]);
+        const isReset = !!run[k].reset;
+        const cls = isReset ? '' : sparkLevel(run[k]);
+        const last = segs.length ? segs[segs.length - 1] : null;
+        if (last && !last.reset && !isReset && last.cls === cls) last.pts.push(run[k]);
+        else segs.push({ cls: cls, reset: isReset, pts: [run[k - 1], run[k]] });
       }
-      body += poly(seg, cls);
+      for (const sg of segs) body += poly(sg.pts, sg.cls);
     }
     run = [];
   };

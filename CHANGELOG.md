@@ -3,6 +3,81 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.2.2 — 2026-09-05
+
+### Added
+
+* **Every key figure explains itself.** Hovering a card in the *Key figures* row — or reaching
+  it with the keyboard — opens a small panel that says what the figure counts, how it is
+  computed, the period with its dates, what the delta is compared with (the previous period, or
+  yesterday, with that value), the split between Claude Code and Codex, whether it is measured,
+  derived or estimated, and what the sparkline spans. The words come from the view model, so the
+  markdown report lists the same explanations under its table and the Quick Pick shows them as
+  the item detail. The panel never widens the page: on the right half of the grid it hangs from
+  the card's right edge.
+* **Two window rows in the totals table.** `Current 5 h window` and `Current 7 d window` lead
+  the fixed rows, per provider, and cover exactly the window the provider reports a reset for —
+  so they can be read against the quota card above. Where no such window is reported the row is
+  a trailing `Last 5 h` / `Last 7 d` span and says so. Both are summed from hour buckets: once
+  the oldest hours of the span are rolled up into day totals, every figure in the row carries
+  `≈`, and the span itself is the tooltip of the row label.
+* **A cache switch over the composition bars.** `cache: shown | hidden` sits directly above the
+  bars; hidden drops cache read and both cache writes from bar and legend, the remaining shares
+  are shares of what is drawn, and a caption under the bar names the tokens left out — the bar
+  never pretends the cache did not exist. Each slice's tooltip carries its tokens and its share.
+  The choice is remembered with the rest of the panel state.
+* **A gear in every section header.** It opens the settings editor filtered to the settings that
+  section is made of — the quota gear to the quota sources, the poll interval and the pace
+  settings, the models gear to the row cap and the price table, and so on; every list ends with
+  the section list itself, so a section can be hidden from where it stands. Enter and Space on
+  the gear do the same without folding the section.
+* **`tokenPace.chart.modelStyle`** — how the daily chart tells the models of one provider
+  apart: `pattern` (default: solid, stripes, cross-hatch, lines, dots), `shade` (lighter and
+  darker steps of the provider's hue) or `both`. A change redraws the chart at once.
+
+### Changed
+
+* **The daily chart is always stacked by model, and the provider stays readable.** The
+  *by provider / by model* selector is gone; every band wears its provider's hue — Claude blue,
+  Codex purple — and the five largest models of each provider get a rank drawn as a pattern or a
+  shade (see the new setting), with the rest folded into one `other` band per provider. The
+  legend is grouped by provider and its swatches carry the same fill as the bands; a band's
+  tooltip names the model, the provider, the value, its share of the column and the provider's
+  total for that column. A stored *by provider* choice from 1.2.1 is dropped silently.
+* **The cost line is legible and sits where the bars are.** Its points are at the column
+  centres rather than the column edges, the 2 px line runs over a 4 px halo in the page
+  background so it reads over any band, every data point is a dot, and the legend key is drawn
+  the same way.
+* **A young window that is already heavy is judged, not excused.** `measuring` — the state
+  right after a reset in which no verdict is coloured — now needs both a young window
+  (`pace.minElapsedPercent`) and a bill of at most twice the tolerance (10 points at `normal`).
+  Sixty percent used two percent into the window shows yellow in the bar, the status bar and the
+  sparkline alike, and can raise a pace alert; it used to show green.
+* **The stroke down into a new window is neutral.** The sparkline's fall at a reset wears the
+  provider colour instead of the pace colour of the first reading after it: that fall is the
+  window turning over, not a pace anybody kept.
+* **The filter bar is one labelled block.** A row each for *Range*, *Providers* and *Models*
+  with the chips aligned in a column; `today`, `7d`, `30d` and `custom…` are visible and the
+  rest fold behind `more ▾`; the range caption sits at the end of the Range row; the models fold
+  behind `models (N) ▾` once there are more than four; refresh is an icon button at the right.
+* **Sections are set apart.** Every section is separated from the one above by a rule and a
+  fixed gap, folded or not, so a collapsed Summary no longer glues to the filter bar; the two
+  quota cards are divided by a hairline as well.
+
+### Removed
+
+* **The Forecast section.** Its cards repeated the forecast line every quota card already
+  carries, and its *Local usage in window* and per-project attribution tables answered a
+  question nobody had asked. The forecast itself is unchanged: the sentence stays on the quota
+  card and in the tooltip, the status-bar forecast entry and the forecast alert stay. A
+  `dashboard.sections` list that still names `forecast` is accepted and the entry ignored.
+
+### Fixed
+
+* The `dashboard.sections` enum descriptions in the manifest were listed in a different order
+  than the values — the settings editor described `quota` as the summary and vice versa. A test
+  now checks every enum in the manifest against its descriptions.
+
 ## 1.2.1 — 2026-09-04
 
 ### Added

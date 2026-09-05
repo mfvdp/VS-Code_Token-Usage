@@ -17,9 +17,11 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![Token Pace in the VS Code status bar: one entry per quota window, each with a pace-coloured bar, an elapsed marker, the percentage and the countdown to its reset](media/screenshot-status-bar.png)
 
-![The Token Pace dashboard in the secondary sidebar: quota cards with pace verdict and forecast, the KPI row, the daily chart and the model table](media/screenshot-dashboard.png)
+![The Token Pace dashboard in the secondary sidebar: quota cards with pace verdict, forecast and a seven-day sparkline coloured by pace, the Tokens section folded, the filter block, the summary, the key figures and the daily chart by model with the cost line](media/screenshot-dashboard.png)
 
-Both pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States*
+![The Tokens section of the dashboard: the two running windows against the quota cards over the fixed periods, the cache switch over the composition bars, and the cache economy](media/screenshot-tokens.png)
+
+The pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States*
 and a synthetic snapshot), not from anybody's real usage. The tooltip behind the bar is
 described in full under [Tooltip](#tooltip).
 

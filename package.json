@@ -40,7 +40,7 @@
   },
   "homepage": "https://github.com/mfvdp/VS-Code_Token-Usage#readme",
   "qna": "https://github.com/mfvdp/VS-Code_Token-Usage/issues",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "publisher": "frederik",
   "license": "AGPL-3.0-or-later",
   "engines": {

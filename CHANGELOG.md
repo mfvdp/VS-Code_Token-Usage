@@ -3,6 +3,18 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.2.3 — 2026-09-05
+
+### Changed
+
+* **The store page shows 1.2.2.** The README pictures — and with them the Marketplace and Open
+  VSX overview — are retaken from the current build: the dashboard picture shows the quota
+  cards with their sparklines, the folded Tokens section, the filter block, the summary, the key
+  figures and the chart by model with its cost line; a second picture shows the Tokens section
+  with the running-window rows and the cache switch; the status-bar picture is retaken. The
+  walkthrough's section table and its dashboard step name the sections of 1.2.2 — no Forecast
+  section, no sustainable-rate line, the Tokens section and the gears where they are now.
+
 ## 1.2.2 — 2026-09-05
 
 ### Added

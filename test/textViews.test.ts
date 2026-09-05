@@ -31,6 +31,15 @@ function fullVm(): ViewModel {
   }))
 }
 
+/** The fixture's aggregator after a roll-up that keeps no hour buckets at all. */
+function rolledUp(): Aggregator {
+  const snap = buildAgg().toSnapshot()
+  return Aggregator.fromSnapshot(
+    { ...snap, rollup: { lastRun: NOW, hourRetentionDays: 0, retentionDays: 400 } },
+    'none',
+  )
+}
+
 /** Table rows of one markdown section, without the header row. */
 function rowsOf(md: string, heading: string): string[] {
   const lines = md.split('\n')
@@ -71,9 +80,36 @@ test('every totals row appears once in both renderings', () => {
     assert.equal(items.filter((i) => i.label.startsWith(`${t.title} · `)).length, t.rows.length)
     assert.equal(rowsOf(md, `## Tokens — ${t.title}`).length, t.rows.length)
   }
-  // Seven, not eight: the selected 30-day range is the fixed "Last 30 days" row, and one
-  // table must never print the same label twice.
-  assert.equal(total, vm.totals.length * 7)
+  // Seven calendar rows — the selected 30-day range is the fixed "Last 30 days" row, and one
+  // table must never print the same label twice — plus the two running window rows.
+  assert.equal(total, vm.totals.length * 9)
+})
+
+test('the running windows lead the fixed rows, and the mark is explained once per table', () => {
+  const vm = fullVm()
+  const md = markdownDocument(vm)
+  for (const t of vm.totals) {
+    // Selected range, previous, then the two windows a reader checks against the quota cards.
+    assert.deepEqual(t.rows.slice(2, 4).map((r) => r.label),
+      ['Current 5 h window', 'Current 7 d window'])
+    const rows = rowsOf(md, `## Tokens — ${t.title}`)
+    assert.ok(rows[2].startsWith('| Current 5 h window |'), rows[2])
+    // Every row of the table reaches the QuickPick too.
+    assert.equal(
+      quickPickItems(vm).filter((i) => i.label.startsWith(`${t.title} · Current `)).length, 2)
+  }
+  // The fixture reads whole hours that are still on file, so nothing is marked and the
+  // caveat is not printed at all.
+  assert.equal(vm.totals.some((t) => t.rows.some((r) => r.approx)), false)
+  assert.equal(md.includes('rolled up into day totals'), false)
+
+  // With the hour buckets already folded away, both window rows are lower bounds — and the
+  // sentence that explains the mark is printed once per table, not once per row.
+  const folded = buildViewModel(makeInput({ agg: rolledUp() }))
+  const rolled = markdownDocument(folded)
+  assert.ok(folded.totals[0].rows.filter((r) => r.approx).length === 2)
+  assert.equal(rolled.split('rolled up into day totals').length - 1, folded.totals.length)
+  assert.ok(rolled.includes('_≈ marks a span whose oldest hours are already rolled up into day totals_'))
 })
 
 test('every KPI appears once in both renderings', () => {
@@ -126,23 +162,25 @@ test('the day the panel is opened for is the first figure in all three rendering
   assert.ok(row.includes(today.value), row)
 })
 
-test('every forecast appears once in both renderings', () => {
+test('the Forecast section is gone from both renderings, and the card keeps its forecast', () => {
   const vm = fullVm()
   const items = quickPickItems(vm)
   const md = markdownDocument(vm)
-  assert.ok(vm.forecasts.length >= 4)
-  assert.equal(items.filter((i) => i.label.startsWith('Forecast ')).length, vm.forecasts.length)
-  assert.equal(rowsOf(md, '## Forecast').length, vm.forecasts.length)
+  assert.equal(items.some((i) => i.label.startsWith('Forecast ')), false)
+  assert.equal(md.includes('## Forecast'), false)
+  assert.equal(md.includes('## Local usage inside the current windows'), false)
+  assert.equal(md.includes('### Attribution'), false)
+  // The forecast itself still travels with the window and still reaches the window table.
+  assert.ok(vm.quotas.some((q) => q.windows.some((w) => w.forecast !== null)))
+  assert.ok(md.includes('| Window | Used | Elapsed | Pace | Resets | Forecast |'), md.slice(0, 400))
 })
 
-test('cache economy, window usage and the digest survive into both renderings', () => {
+test('cache economy and the digest survive into both renderings', () => {
   const vm = fullVm()
   const items = quickPickItems(vm)
   const md = markdownDocument(vm)
   assert.equal(items.filter((i) => i.label.startsWith('Cache economy ')).length, vm.cacheEconomy.length)
   assert.equal(rowsOf(md, '## Cache economy').length, vm.cacheEconomy.length)
-  assert.equal(items.filter((i) => i.label.startsWith('Local usage in ')).length, vm.windowUsage.length)
-  assert.equal(rowsOf(md, '## Local usage inside the current windows').length, vm.windowUsage.length)
   for (const s of vm.digest) {
     assert.ok(items.some((i) => i.label === s), s)
     assert.ok(md.includes(`- ${s}`), s)
@@ -229,7 +267,7 @@ test('the flat list is grouped by headings that carry no command', () => {
     assert.equal(s.detail, undefined)
   }
   const labels = seps.map((s) => s.label)
-  for (const want of ['Quota', 'Key figures', 'Tokens', 'Forecast', 'Data quality', 'Actions']) {
+  for (const want of ['Quota', 'Key figures', 'Tokens', 'Cache', 'Models', 'Data quality', 'Actions']) {
     assert.ok(labels.includes(want), want)
   }
   // A heading is only written when a row follows it: the last item is a row, never a divider.
@@ -283,7 +321,7 @@ test('the markdown document is a document, not a table dump', () => {
   const md = markdownDocument(fullVm())
   assert.ok(md.startsWith('# Token Pace — usage'))
   for (const heading of ['## Summary', '## Quota', '## Key figures', '## Cache economy',
-    '## Calendar', '## Models', '## Forecast', '## Activity', '## Data quality']) {
+    '## Calendar', '## Models', '## Activity', '## Data quality']) {
     assert.ok(md.includes(heading), heading)
   }
   // A pipe inside a value would split the column, so it has to be escaped.
@@ -379,24 +417,17 @@ test('a measuring window leaves no sentence in either text view, and the rate li
   // The markdown keeps the freshness row the dashboard card dropped, and the official page.
   assert.ok(md.includes('Freshness — last check'), md)
   assert.ok(md.includes('\nOfficial page: https://claude.ai/settings/usage\n'), md)
-  // The Forecast section and the Summary say "measuring" as a bare state word at most — never
-  // the "measuring · window just reset" / "measuring · N readings over …" sentences.
-  const forecastItem = quickPickItems(vm).find((i) => i.label.startsWith('Forecast Claude Code · 5 h:'))
-  assert.ok(forecastItem)
-  assert.equal(forecastItem.label, 'Forecast Claude Code · 5 h: measuring', forecastItem.label)
-  const forecastRow = rowsOf(md, '## Forecast').find((l) => l.includes('| Claude Code · 5 h |')) ?? ''
-  assert.match(forecastRow, /^\| Claude Code · 5 h \| measuring \| /, forecastRow)
+  // Nothing anywhere says "measuring · window just reset" / "measuring · N readings over …".
   // (`pickText` joins label, description and detail with " · ", so "measuring · 9 readings" is
   // the join of two fields, not a sentence — the sentences are matched by their own words.)
   for (const text of [pickText(vm), md]) {
     assert.equal(/measuring · (window|\d+ readings? over)|readings? over|just reset|just started/.test(text), false, text)
   }
-  // The "keeps it to the reset" rate is gone from both views, and from the forecast table.
+  // The "keeps it to the reset" rate is gone from both views.
   for (const text of [pickText(vm), md, pickText(fullVm()), markdownDocument(fullVm())]) {
     assert.equal(text.includes('keeps it to the reset'), false)
     assert.equal(text.includes('Sustainable'), false)
   }
-  assert.ok(markdownDocument(fullVm()).includes('| Window | State | Rate | Lockout | At reset | Basis |'))
 })
 
 test('the official page is a line of the markdown only while the setting allows the link', () => {
@@ -427,44 +458,25 @@ test('a measuring forecast on a paced window is dropped from the quota rows of b
   assert.equal(/measuring|reading/.test(row), false, row)
 })
 
-test('every window row in the flat views names the provider it belongs to', () => {
+test('every window list that stands on its own names the provider it belongs to', () => {
   const vm = twinVm()
   // The premise: the label alone is ambiguous.
-  const fives = vm.forecasts.filter((f) => f.label === '5 h')
+  const fives = vm.quotas.flatMap((q) => q.windows.filter((w) => w.label === '5 h'))
   assert.equal(fives.length, 2)
-  assert.notEqual(fives[0].source, fives[1].source)
+  assert.notEqual(vm.quotas[0].source, vm.quotas[1].source)
 
   const named = /(Claude Code|Codex)/
-  // Reset history is checked in the markdown block below: with no complete cycle on file the
-  // QuickPick leaves those rows out entirely (see the test that follows).
-  const prefixes = ['Forecast ', 'Local usage in ']
-  const items = quickPickItems(vm)
-  for (const p of prefixes) {
-    const rows = items.filter((i) => i.label.startsWith(p))
-    assert.ok(rows.length >= 2, p)
-    for (const r of rows) assert.ok(named.test(r.label), r.label)
-  }
-  // Attribution items are headed by the window, so they carry the provider as well.
-  const attribution = items.filter((i) => i.label.includes(' · unexplained'))
-  assert.ok(attribution.length >= 2)
-  for (const a of attribution) assert.ok(named.test(a.label), a.label)
-
   const md = markdownDocument(vm)
-  for (const a of vm.attributionInWindow) {
-    assert.ok(md.includes(`### Attribution — ${SOURCE_TITLE[a.source]} · ${a.label}`), a.label)
-  }
-  // The raw window id was what made the two blocks look alike; it is gone from the headings.
-  assert.equal(md.includes('### Attribution — session:300'), false)
-  for (const heading of ['## Forecast', '## Reset history', '## Local usage inside the current windows']) {
-    const start = md.indexOf(heading)
-    assert.notEqual(start, -1, heading)
-    // To the next heading of any level: the attribution blocks below are `###`.
-    const block = md.slice(start, md.indexOf('\n#', start + 1))
-    for (const line of block.split('\n')) {
-      if (!line.startsWith('| ') && !line.startsWith('- **')) continue
-      if (line.startsWith('| Window') || line.startsWith('|---')) continue
-      assert.ok(named.test(line), `${heading}: ${line}`)
-    }
+  // The quota window tables sit under a provider heading, so they need no second name; the
+  // reset history is the one list whose rows stand on their own.
+  const heading = '## Reset history'
+  const start = md.indexOf(heading)
+  assert.notEqual(start, -1, heading)
+  const block = md.slice(start, md.indexOf('\n#', start + 1))
+  for (const line of block.split('\n')) {
+    if (!line.startsWith('| ') && !line.startsWith('- **')) continue
+    if (line.startsWith('| Window') || line.startsWith('|---')) continue
+    assert.ok(named.test(line), `${heading}: ${line}`)
   }
 })
 
@@ -533,17 +545,6 @@ test('every provider column in the flat views carries the name, not the internal
   for (const line of md.split('\n').filter((l) => l.startsWith('Plan comparison'))) {
     assert.equal(ids.test(line.split(':')[0]), false, line)
   }
-})
-
-test('a forecast with nothing to say prints a dash, never its state name', () => {
-  const vm = buildViewModel(makeInput())
-  const bare = vm.forecasts.find((f) => f.forecast.text === '')
-  assert.ok(bare, 'the fixture has a window without a series')
-  assert.equal(bare.forecast.state, 'none')
-  const item = quickPickItems(vm)
-    .find((i) => i.label.startsWith(`Forecast ${SOURCE_TITLE[bare.source]} · ${bare.label}:`))
-  assert.ok(item)
-  assert.ok(item.label.endsWith(': –'), item.label)
 })
 
 test('a stale reading after the reset says "reset due" once per row, not per column', () => {

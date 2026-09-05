@@ -113,7 +113,6 @@ test('a window without a clock gets no pace, no elapsed and no projected end', (
   // No reset time, so no projected end and no sustainable rate can exist.
   assert.equal(w.forecast?.endPercent, null)
   assert.equal(w.forecast?.sustainablePerHour, null)
-  assert.equal(vm.windowUsage.length, 0)
 })
 
 test('a non-finite percentage is discarded, not clamped to a number', () => {
@@ -168,17 +167,6 @@ test('with nothing ingested the heatmap claims no coverage rather than a year of
   }
   assert.equal(h.activeDays, 0)
   assert.equal(h.streak, 0)
-})
-
-test('the shown share of a window is a share of local tokens, never of the server figure', () => {
-  const vm = buildViewModel(makeInput({
-    cfg: makeConfig({ 'tokenPace.attribution': 'project' }),
-    agg: buildAgg('project'),
-  }))
-  for (const a of vm.attributionInWindow) {
-    assert.equal(a.unexplained, 'server % cannot be split — shown share is of local tokens only')
-    assert.doesNotMatch(a.unexplained, /\d+ ?%/)
-  }
 })
 
 test('preview data is flagged everywhere it is rendered and never merged into a reading', () => {
@@ -238,13 +226,12 @@ test('the pace unit is percent of the window — no view ever says "points"', ()
   // The sentences that used to carry the word must actually have been rendered, or the
   // assertion below would pass on a view that said nothing at all.
   assert.ok(vm.retro.some((r) => r.text.includes('unused at the reset')), JSON.stringify(vm.retro))
-  assert.ok(vm.forecasts.some((f) => (f.resetForecast ?? '').includes('at the reset')))
   const texts = [
     markdownDocument(vm),
     toMarkdownSummary(vm),
     ...vm.retro.map((r) => r.text),
     ...vm.dataQuality.calibration.map((c) => c.text),
-    ...vm.forecasts.flatMap((f) => [f.resetForecast ?? '', f.lockout ?? '']),
+    ...vm.quotas.flatMap((q) => q.windows.map((w) => w.forecast?.text ?? '')),
     ...vm.quotas.flatMap((q) => q.windows.map((w) => w.verdict.text)),
     ...quickPickItems(vm).flatMap((i) => [i.label, i.description ?? '', i.detail ?? '']),
   ]
@@ -287,8 +274,6 @@ test('a plan name is a label, never a limit', () => {
   const card = vm.quotas[0]
   assert.equal(card.planText, 'plan Max 20x (as configured)')
   assert.equal(card.windows.length, 0)
-  assert.equal(vm.forecasts.length, 0)
-  assert.equal(vm.windowUsage.length, 0)
 })
 
 test('the local five-hour block is a count, never a window', () => {
@@ -308,8 +293,6 @@ test('the local five-hour block is a count, never a window', () => {
   assert.ok(b.text.includes('no limit is known'), b.text)
   // Nothing else on the view model grew a window out of it either.
   assert.equal(card.windows.length, 0)
-  assert.equal(vm.forecasts.length, 0)
-  assert.equal(vm.windowUsage.length, 0)
 
   // The same sentence in the flat views, and no percentage next to it in either.
   const item = quickPickItems(vm).find((i) => i.label.startsWith('Local estimate'))

@@ -775,7 +775,6 @@
               "models",
               "heatmap",
               "hours",
-              "forecast",
               "dataQuality"
             ],
             "uniqueItems": true,
@@ -794,15 +793,14 @@
                 "records",
                 "tools",
                 "budget",
-                "forecast",
                 "history",
                 "projects",
                 "sessions",
                 "dataQuality"
               ],
               "enumDescriptions": [
-                "%config.dashboard.sections.enum.summary%",
                 "%config.dashboard.sections.enum.quota%",
+                "%config.dashboard.sections.enum.summary%",
                 "%config.dashboard.sections.enum.context%",
                 "%config.dashboard.sections.enum.kpis%",
                 "%config.dashboard.sections.enum.tokens%",
@@ -813,7 +811,6 @@
                 "%config.dashboard.sections.enum.records%",
                 "%config.dashboard.sections.enum.tools%",
                 "%config.dashboard.sections.enum.budget%",
-                "%config.dashboard.sections.enum.forecast%",
                 "%config.dashboard.sections.enum.history%",
                 "%config.dashboard.sections.enum.projects%",
                 "%config.dashboard.sections.enum.sessions%",

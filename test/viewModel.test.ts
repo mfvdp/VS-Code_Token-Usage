@@ -46,9 +46,13 @@ test('the view model is built from the aggregator, the history and the quota sta
   assert.equal(vm.quotas[0].problem, null)
   assert.equal(vm.quotas[0].usagePageUrl, 'https://claude.ai/settings/usage')
 
-  // Range, previous, today, 7d, 30d, this week, this month, all time — minus the fixed row
-  // the selected 30-day range already is, which would otherwise appear twice.
-  for (const t of vm.totals) assert.equal(t.rows.length, 7)
+  // Range, previous, the two running windows, today, 7d, 30d, this week, this month, all
+  // time — minus the fixed row the selected 30-day range already is, which would otherwise
+  // appear twice.
+  for (const t of vm.totals) assert.equal(t.rows.length, 9)
+  // The windows the provider reported, held against the same bounds the quota card draws.
+  assert.deepEqual(vm.totals[0].rows.slice(2, 4).map((r) => r.label),
+    ['Current 5 h window', 'Current 7 d window'])
   // Six figures over the range plus the "today" tile that opens the row.
   assert.equal(vm.kpis.length, 7)
   assert.equal(vm.kpis[0].key, 'today')
@@ -148,12 +152,26 @@ test('an empty install gets a first-run card instead of a wall of dashes', () =>
   assert.equal(scanning.firstRun?.text, 'Reading history…')
 })
 
+test('the totals table gets the windows of its own provider, and nobody else\u2019s', () => {
+  // Claude reports both windows, Codex reports none: the first table holds its rows against
+  // the reported bounds, the second falls back to a trailing span and says so in its label.
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude'), state('codex', { ok: false, problem: 'no token', windows: [] })],
+  }))
+  const claude = vm.totals.find((t) => t.source === 'claude')
+  const codex = vm.totals.find((t) => t.source === 'codex')
+  assert.deepEqual(claude?.rows.slice(2, 4).map((r) => r.label),
+    ['Current 5 h window', 'Current 7 d window'])
+  assert.deepEqual(codex?.rows.slice(2, 4).map((r) => r.label), ['Last 5 h', 'Last 7 d'])
+  // The window row's span is the window's own, not the range's.
+  assert.equal(claude?.rows[2].spanText, '09:00 \u2192 now')
+})
+
 test('projects and sessions stay empty until attribution is switched on', () => {
   const off = buildViewModel(makeInput())
   assert.equal(off.projects.enabled, false)
   assert.deepEqual(off.projects.rows, [])
   assert.deepEqual(off.sessions.rows, [])
-  assert.deepEqual(off.attributionInWindow, [])
 
   const on = buildViewModel(makeInput({
     cfg: makeConfig({ 'tokenPace.attribution': 'project' }),
@@ -162,29 +180,6 @@ test('projects and sessions stay empty until attribution is switched on', () => 
   assert.equal(on.projects.enabled, true)
   assert.ok(on.projects.rows.length >= 1)
   assert.ok(on.sessions.rows.length >= 1)
-  assert.ok(on.attributionInWindow.length >= 1)
-  assert.equal(
-    on.attributionInWindow[0].unexplained,
-    'server % cannot be split — shown share is of local tokens only',
-  )
-})
-
-test('a window attribution block names its provider and its window', () => {
-  const on = buildViewModel(makeInput({
-    cfg: makeConfig({ 'tokenPace.attribution': 'project' }),
-    agg: buildAgg('project'),
-  }))
-  // Both providers report a "5 h" window: without the source a reader cannot tell the two
-  // blocks apart, and the raw id ("session:300") is not a label to show anyone.
-  for (const a of on.attributionInWindow) {
-    assert.ok(a.source === 'claude' || a.source === 'codex')
-    assert.ok(a.label.length > 0)
-    assert.notEqual(a.label, a.windowId)
-  }
-  const first = on.attributionInWindow[0]
-  assert.equal(first.source, 'claude')
-  assert.equal(first.windowId, 'session:300')
-  assert.equal(first.label, '5 h')
 })
 
 test('the price date is stated once, in the footnote that needs it', () => {
@@ -391,7 +386,7 @@ test('the first reading of a new window is flagged so its stroke can stay neutra
   assert.deepEqual(hole.points.map((p) => p.reset), [undefined, undefined])
 })
 
-test('the quota card and the forecast list carry the same sparkline', () => {
+test('the quota card carries the sparkline and its own gap count', () => {
   const history = makeHistory()
   fillHistory(history)
   const vm = buildViewModel(makeInput({ history }))
@@ -399,8 +394,24 @@ test('the quota card and the forecast list carry the same sparkline', () => {
   assert.equal(card.spark.points.length, 9, 'nine readings a quarter hour apart: nine slots')
   assert.equal(card.spark.points[8].i, SPARK_SLOTS - 1)
   assert.deepEqual(card.spark.bridges, [])
-  const row = vm.forecasts.find((f) => f.source === 'claude' && f.windowId === 'session:300')
-  assert.deepEqual(row?.spark, card.spark)
+  // Readings a quarter hour apart leave no hole between them.
+  assert.equal(card.gaps, 0)
+  // A window with no series at all has no reading to count a gap against.
+  const bare = vm.quotas[0].windows.find((w) => w.id === 'weekly_all:10080') as WindowVm
+  assert.equal(bare.gaps, 0)
+
+  // One reading ten hours before the series is a stretch nobody measured, and the exporter's
+  // footnote counts it off the card.
+  const holed = makeHistory()
+  holed.add(
+    { source: 'claude', ok: true, origin: 'poll', fetchedAt: Math.round((NOW - 10 * 3_600_000) / 1000), planType: null, windows: [win({ percent: 5 })] },
+    FINGERPRINT,
+    NOW - 10 * 3_600_000,
+  )
+  fillHistory(holed)
+  const gapped = buildViewModel(makeInput({ history: holed }))
+  const w5 = gapped.quotas[0].windows.find((w) => w.id === 'session:300') as WindowVm
+  assert.equal(w5.gaps, 1)
 })
 
 // ---------------------------------------------------------------------------
@@ -421,6 +432,10 @@ test('parseWebviewMessage accepts exactly the documented shapes', () => {
     { type: 'setChartStack', stack: 'model' })
   assert.deepEqual(parseWebviewMessage({ type: 'setChartStack', stack: 'provider' }),
     { type: 'setChartStack', stack: 'provider' })
+  assert.deepEqual(parseWebviewMessage({ type: 'setCompositionCache', mode: 'noCache' }),
+    { type: 'setCompositionCache', mode: 'noCache' })
+  assert.deepEqual(parseWebviewMessage({ type: 'setCompositionCache', mode: 'all' }),
+    { type: 'setCompositionCache', mode: 'all' })
   assert.deepEqual(parseWebviewMessage({ type: 'setHeatmapMetric', metric: 'cost' }),
     { type: 'setHeatmapMetric', metric: 'cost' })
   assert.deepEqual(parseWebviewMessage({ type: 'setHourZone', zone: 'utc' }), { type: 'setHourZone', zone: 'utc' })
@@ -449,6 +464,8 @@ test('parseWebviewMessage drops everything else', () => {
     { type: 'setHeatmapMetric', metric: 'requests' },
     { type: 'setChartStack', stack: 'session' },
     { type: 'setChartStack' },
+    { type: 'setCompositionCache', mode: 'none' },
+    { type: 'setCompositionCache' },
     { type: 'setHourZone', zone: 'mars' },
     { type: 'drill', day: 'yesterday' },
     { type: 'command', id: 'workbench.action.terminal.new' },
@@ -517,6 +534,7 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     models: [],
     metric: 'usage',
     chartStack: 'provider',
+    compositionCache: 'all',
     heatmapMetric: 'usage',
     hourZone: 'local',
     drillDay: null,
@@ -533,6 +551,8 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     { key: 'cost', dir: 'asc' })
   assert.equal(applyMessage(ui, { type: 'setMetric', metric: 'output' }).metric, 'output')
   assert.equal(applyMessage(ui, { type: 'setChartStack', stack: 'model' }).chartStack, 'model')
+  assert.equal(
+    applyMessage(ui, { type: 'setCompositionCache', mode: 'noCache' }).compositionCache, 'noCache')
   assert.equal(applyMessage(ui, { type: 'setHeatmapMetric', metric: 'cost' }).heatmapMetric, 'cost')
   assert.equal(applyMessage(ui, { type: 'setHourZone', zone: 'utc' }).hourZone, 'utc')
   assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'] }).providers, ['codex'])
@@ -611,11 +631,8 @@ test('an unlimited window with a stated reset is given no reserve and no budget'
   // The verdict is the state, so the state is not said a second time beside it.
   assert.equal(w.stateText, '')
   assert.equal(w.aria.text, 'Opus 7 d: unlimited')
-  // The forecast list reads the same window through its own path.
-  const f = vm.forecasts.find((x) => x.windowId === 'codex:10080')
-  assert.ok(f)
-  assert.equal('sustainable' in f, false)
-  assert.equal(f.forecast.state, 'none')
+  // No denominator, so no projection either: the card carries a forecast with nothing in it.
+  assert.equal(w.forecast?.state, 'none')
 })
 
 // ---------------------------------------------------------------------------
@@ -711,34 +728,30 @@ test('the provider titles are exported from the view model for the text views', 
   assert.equal(buildViewModel(makeInput()).quotas[0].title, SOURCE_TITLE.claude)
 })
 
-test('the forecast list drops the "full" row the quota card beside it refuses', () => {
-  // A 100 % reading from before a reset that has passed: the card shows "reset due" on a neutral
-  // bar and prints no forecast for it. The list under the Forecast heading is built from the
-  // same reading through its own path and used to keep the row — one view stating what the
-  // other refuses. Three views, one statement per window.
+test('a "full" reading from before a passed reset is still a full window ahead of one', () => {
+  // A 100 % reading from before a reset that has passed: the card shows "reset due" on a
+  // neutral bar, and the view that prints the forecast beside it drops the sentence itself.
   const due = buildViewModel(makeInput({
     quotas: [state('claude', { windows: [win({ percent: 100, resetsAt: DUE })] })],
   }))
   assert.equal(due.quotas[0].windows[0].display, 'resetDue')
-  assert.equal(due.forecasts.some((f) => f.source === 'claude' && f.forecast.state === 'full'), false)
 
-  // The mirror image keeps its row: the same reading with the reset still ahead is the plainest
-  // fact the list has.
+  // The mirror image keeps its sentence: the same reading with the reset still ahead is the
+  // plainest fact the card has.
   const ahead = buildViewModel(makeInput({
     quotas: [state('claude', { windows: [win({ percent: 100, resetsAt: AHEAD })] })],
   }))
-  const row = ahead.forecasts.find((f) => f.source === 'claude')
-  assert.ok(row)
-  assert.equal(row.forecast.state, 'full')
-  assert.equal(row.forecast.text, 'full until the reset')
+  const w = ahead.quotas[0].windows[0]
+  assert.equal(w.forecast?.state, 'full')
+  assert.equal(w.forecast?.text, 'full until the reset')
 })
 
 test('a window that has just reset hands the card no measuring sentence at all', () => {
   // Verdict and forecast both measure a window that has only just started. The card keeps
   // the forecast's marks but gets no sentence for it, and the accessibility text does not
   // read out the measuring verdict either: no view prints it, and the screen reader is not
-  // told what the sighted reader is spared. The Forecast row is blanked by the same rule: the
-  // state and the basis stay, the sentence does not — no view has a "measuring · …" to print.
+  // told what the sighted reader is spared. The state and the basis stay, the sentence does
+  // not — no view has a "measuring · …" to print.
   const history = makeHistory()
   fillHistory(history)
   const vm = buildViewModel(makeInput({
@@ -751,11 +764,7 @@ test('a window that has just reset hands the card no measuring sentence at all',
   assert.equal(w.forecast?.text, '')
   assert.equal(w.aria.text, '5 h: 3% used')
   assert.equal(/measuring/.test(w.aria.text), false)
-  const row = vm.forecasts.find((f) => f.source === 'claude' && f.windowId === w.id)
-  assert.ok(row)
-  assert.equal(row.forecast.state, 'measuring')
-  assert.equal(row.forecast.text, '')
-  assert.ok(row.forecast.basis && row.forecast.basis.samples >= 1)
+  assert.ok(w.forecast?.basis && w.forecast.basis.samples >= 1)
   assert.equal(/measuring/.test(JSON.stringify(vm.digest)), false, JSON.stringify(vm.digest))
 })
 

@@ -89,12 +89,13 @@ function trustedForecast(w: WindowVmOf): Forecast | null {
   return w.display === 'resetDue' && f.state === 'full' ? null : f
 }
 
-/** True when the text is one of the segments already printed, compared whole and case-blind. */
-/** "1 reading" / "12 readings" — the basis line is the one place a count of one shows up. */
-function readings(n: number): string {
-  return `${n} ${n === 1 ? 'reading' : 'readings'}`
-}
+/**
+ * Why a figure carries `≈`. The same sentence the dashboard prints under its totals table —
+ * one caveat, worded once, so the two views cannot explain the mark differently.
+ */
+export const APPROX_NOTE = '≈ marks a span whose oldest hours are already rolled up into day totals'
 
+/** True when the text is one of the segments already printed, compared whole and case-blind. */
 function repeats(text: string, said: (string | null | undefined)[]): boolean {
   const t = text.trim().toLowerCase()
   return said.some((s) => typeof s === 'string' && s.trim().toLowerCase() === t)
@@ -244,40 +245,9 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     })
   }
 
-  group('Forecast')
-  for (const f of vm.forecasts) {
-    add({
-      label: `Forecast ${withSource(f.source, f.label)}: ${forecastText(f.forecast) || '–'}`,
-      description: [f.lockout, f.resetForecast].filter(Boolean).join(' · '),
-      detail: f.forecast.basis
-        ? `${readings(f.forecast.basis.samples)} · ${f.gaps} gap(s) in the last 24 h`
-        : undefined,
-    })
-  }
-
   group('Reset history')
   for (const r of retroWorthShowing(vm)) {
     add({ label: `Reset history ${withSource(r.source, r.label)}`, description: r.text })
-  }
-
-  group('Usage inside the windows')
-  for (const u of vm.windowUsage) {
-    add({
-      label: `Local usage in ${withSource(u.source, u.label)}: ${u.usage}`,
-      description: `${u.requests} req · ${u.cost}`,
-      detail: u.complete ? undefined : 'hour buckets are incomplete for this window',
-    })
-  }
-
-  group('Attribution')
-  for (const a of vm.attributionInWindow) {
-    // Named like the markdown heading, so the block cannot be mistaken for a totals row of
-    // the provider it starts with.
-    const head = `Attribution ${withSource(a.source, a.label)}`
-    for (const row of a.rows) {
-      add({ label: `${head} · ${row.label}: ${row.share}`, description: row.usage })
-    }
-    add({ label: `${head} · unexplained`, description: a.unexplained })
   }
 
   group('Models')
@@ -575,6 +545,8 @@ export function markdownDocument(vm: ViewModel): string {
         + `${cell(r.cost)}${r.costPartial ? ' ⚠' : ''} |`)
     }
     L.push('')
+    // Once per table, never once per row: the mark is the same caveat wherever it appears.
+    if (t.rows.some((r) => r.approx)) L.push(`_${APPROX_NOTE}_`, '')
   }
 
   if (vm.composition.length > 0) {
@@ -633,44 +605,10 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('')
   }
 
-  L.push('## Forecast', '')
-  if (vm.forecasts.length === 0) L.push('_No quota window to project._', '')
-  else {
-    L.push('| Window | State | Rate | Lockout | At reset | Basis |')
-    L.push('|---|---|---|---|---|---|')
-    for (const f of vm.forecasts) {
-      L.push(`| ${cell(withSource(f.source, f.label))} | ${cell(forecastText(f.forecast))} | `
-        + `${f.forecast.ratePerHour === null ? '–' : `${f.forecast.ratePerHour.toFixed(1)} %/h`} | `
-        + `${cell(f.lockout)} | ${cell(f.resetForecast)} | `
-        + `${f.forecast.basis ? `${readings(f.forecast.basis.samples)}, ${f.gaps} gap(s)` : '–'} |`)
-    }
-    L.push('')
-  }
-
   if (vm.retro.length > 0) {
     L.push('## Reset history', '')
     for (const r of vm.retro) L.push(`- **${withSource(r.source, r.label)}**: ${r.text}`)
     L.push('')
-  }
-
-  if (vm.windowUsage.length > 0) {
-    L.push('## Local usage inside the current windows', '')
-    L.push('| Window | Usage | Requests | API cost | Complete |')
-    L.push('|---|---|---|---|---|')
-    for (const u of vm.windowUsage) {
-      L.push(`| ${cell(withSource(u.source, u.label))} | ${cell(u.usage)} | ${cell(u.requests)} | ${cell(u.cost)} | `
-        + `${u.complete ? 'yes' : 'no — hour buckets rolled up'} |`)
-    }
-    L.push('')
-  }
-
-  for (const a of vm.attributionInWindow) {
-    L.push(`### Attribution — ${withSource(a.source, a.label)}`, '')
-    L.push('| Project | Share of local tokens | Usage |')
-    L.push('|---|---|---|')
-    for (const row of a.rows) L.push(`| ${cell(row.label)} | ${cell(row.share)} | ${cell(row.usage)} |`)
-    L.push('')
-    L.push(`_${a.unexplained}_`, '')
   }
 
   L.push('## Activity', '')

@@ -98,6 +98,14 @@ export interface TotalRow {
   costPerRequest: string
   outputShare: string
   provenance: Provenance
+  /**
+   * The oldest hours of this row's span have already been rolled up into day totals, so every
+   * figure in it is a lower bound and carries `≈`. Only the two window rows can set it: a row
+   * bounded by whole days is summed from the day buckets, which are never rolled away.
+   */
+  approx: boolean
+  /** The span behind the row, for the tooltip: '2026-09-01 → 2026-09-03' or '13:00 → now'. */
+  spanText: string
 }
 
 /**
@@ -323,16 +331,6 @@ export interface ChartData {
   costLine: number[] | null
 }
 
-export interface WindowUsageRow {
-  source: Source
-  windowId: string
-  label: string
-  usage: string
-  cost: string
-  requests: string
-  complete: boolean
-}
-
 /**
  * Local tokens over the last few hours — everything we can say when a provider tells us
  * nothing. Deliberately without a percentage, a limit, a pace or a forecast: there is no
@@ -351,11 +349,6 @@ export interface LocalBlockRow {
   complete: boolean
   /** The one sentence all three views print, so they cannot phrase it three ways. */
   text: string
-}
-
-export interface AttributionRows {
-  rows: { label: string; share: string; usage: string }[]
-  unexplained: string
 }
 
 export interface DrillData {
@@ -576,7 +569,126 @@ export function totalRow(
     outputShare: percentOf(b.output, use),
     // The token side is read from the transcripts; the cost column carries its own '~'.
     provenance: 'measured',
+    // Whole days are summed from the day buckets, which outlive the hour buckets: a row
+    // bounded by dates is never a lower bound for want of an hour.
+    approx: false,
+    spanText: from === to ? from : `${from} → ${to}`,
   }
+}
+
+/** The two spans the window rows cover, in the words the provider windows use. */
+const TOTALS_WINDOW_SPANS: { minutes: number; label: string }[] = [
+  { minutes: 300, label: '5 h' },
+  { minutes: 10080, label: '7 d' },
+]
+
+/** A reported window counts as the span when its length matches to the minute. */
+const WINDOW_MINUTES_SLACK = 1
+
+/** The provider's reported quota window, as much of it as the totals rows need. */
+export interface TotalsWindow {
+  id: string
+  label: string
+  resetsAt: number | null
+  windowMinutes: number | null
+}
+
+/**
+ * The bounds behind a window row in words: '13:00 → now', or with the date in front when the
+ * span started on an earlier day — a bare clock time on a seven-day row would name an hour
+ * without saying which day it belongs to.
+ */
+function spanTextOf(ctx: StatsCtx, fromMs: number, toMs: number): string {
+  const today = dayOf(ctx.now, ctx.tcfg)
+  const at = (ms: number): string => {
+    const day = dayOf(ms, ctx.tcfg)
+    return day === today ? formatTime(ms, ctx.tcfg) : `${day} ${formatTime(ms, ctx.tcfg)}`
+  }
+  return `${at(fromMs)} → ${toMs >= ctx.now ? 'now' : at(toMs)}`
+}
+
+/**
+ * One row over a half-open span of hours, for the two window rows of the totals table.
+ *
+ * Hour buckets are the only resolution that can answer a span which does not start at a day
+ * boundary, and they are pruned before the day totals are: once the oldest hours of the span
+ * are gone, every figure in the row is a lower bound and says so with `≈`. Zero is printed
+ * like any other measurement here — the transcripts were read, and an unused window is a
+ * measured absence of usage, not an absence of data.
+ */
+function hourSpanRow(
+  ctx: StatsCtx,
+  source: Source,
+  label: string,
+  fromMs: number,
+  toMs: number,
+  showListPrice: boolean,
+): TotalRow {
+  const { bucket, complete } = ctx.agg.sumHours(fromMs, toMs, filterFor(ctx, source))
+  const b = { ...bucket, source }
+  const c = hourSpanCost(ctx, source, Math.floor(fromMs / MS_HOUR), Math.ceil(toMs / MS_HOUR))
+  const use = billable(b)
+  const hit = cacheHitParts(b)
+  const fresh = freshInput(b)
+  const mark = (t: string): string => (complete || t === '–' ? t : `≈${t}`)
+  return {
+    label,
+    from: dayOf(fromMs, ctx.tcfg),
+    to: dayOf(Math.max(fromMs, toMs - 1), ctx.tcfg),
+    usage: mark(tokens(use)),
+    freshInput: mark(tokens(fresh)),
+    cacheWrite5m: mark(tokens(Math.max(0, b.cacheWrite - b.cacheWrite1h))),
+    cacheWrite1h: mark(tokens(b.cacheWrite1h)),
+    cacheRead: mark(tokens(b.cacheRead)),
+    output: mark(tokens(b.output)),
+    reasoning: mark(tokens(b.reasoning)),
+    requests: mark(tokens(b.requests)),
+    cost: ctx.showCost ? mark(costText(c.usd)) : '–',
+    listCost: ctx.showCost && showListPrice && c.listUsd > 0 ? mark(costText(c.listUsd)) : null,
+    costPartial: c.partial,
+    incomplete: b.requests > 0 && b.outputFinal < b.requests,
+    cacheHit: mark(percentOf(hit.num, hit.den)),
+    perRequest: mark(b.requests > 0 ? compact(use / b.requests) : '–'),
+    costPerRequest: ctx.showCost && b.requests > 0 ? mark(costText(c.usd / b.requests)) : '–',
+    outputShare: mark(percentOf(b.output, use)),
+    provenance: 'measured',
+    approx: !complete,
+    spanText: spanTextOf(ctx, fromMs, toMs),
+  }
+}
+
+/**
+ * The 5 h and the 7 d row of one provider.
+ *
+ * Where the provider reports a window of that length with a reset time, the row covers
+ * exactly that window — the same bounds the quota card's bar is drawn over, so the two say
+ * the same thing about the same hours. Where it does not, the row is a trailing span of the
+ * same length ending now, and its label says "Last" rather than "Current": a span nobody
+ * reported a reset for is not a window, and it must not be read as one.
+ */
+function windowRows(
+  ctx: StatsCtx,
+  source: Source,
+  windows: TotalsWindow[],
+  showListPrice: boolean,
+): TotalRow[] {
+  return TOTALS_WINDOW_SPANS.map((span) => {
+    const spanMs = span.minutes * 60_000
+    const reported = windows.find((w) =>
+      w.windowMinutes !== null && Number.isFinite(w.windowMinutes)
+      && Math.abs(w.windowMinutes - span.minutes) <= WINDOW_MINUTES_SLACK
+      && w.resetsAt !== null && Number.isFinite(w.resetsAt))
+    if (reported && reported.resetsAt !== null) {
+      const fromMs = reported.resetsAt - spanMs
+      const toMs = Math.min(ctx.now, reported.resetsAt)
+      // A reset further out than the window is long puts the window's start in the future;
+      // there is no elapsed span to sum then, and the trailing span below is the honest answer.
+      if (toMs > fromMs) {
+        return hourSpanRow(ctx, source, `Current ${span.label} window`, fromMs, toMs, showListPrice)
+      }
+    }
+    return hourSpanRow(ctx, source, `Last ${span.label}`, ctx.now - spanMs, ctx.now, showListPrice)
+  })
 }
 
 /**
@@ -595,6 +707,7 @@ export function totalsFor(
   previous: DayRange | null,
   firstDay: string | null,
   showListPrice = false,
+  windows: TotalsWindow[] = [],
 ): TotalRow[] {
   const today = dayOf(ctx.now, ctx.tcfg)
   const fixed: { label: string; from: string; to: string }[] = [
@@ -612,6 +725,9 @@ export function totalsFor(
   if (previous) {
     rows.push(totalRow(ctx, previous.label, previous.from, previous.to, source, showListPrice))
   }
+  // The two running windows lead the fixed rows: they are the spans a reader checks against
+  // the quota cards above them, and 'Today' is a calendar day, not a window.
+  rows.push(...windowRows(ctx, source, windows, showListPrice))
   for (const f of fixed) {
     if (same && f.label === range.label) continue
     rows.push(totalRow(ctx, f.label, f.from, f.to, source, showListPrice))
@@ -1919,25 +2035,43 @@ export function hours(ctx: StatsCtx, range: DayRange, zone: 'local' | 'utc'): Ho
 }
 
 // ---------------------------------------------------------------------------
-// Window usage and attribution
+// Local usage over an hour span
 // ---------------------------------------------------------------------------
 
 /**
  * Cost of the hour buckets inside a half-open hour range.
  *
  * `sumHours` merges across models, so the merged bucket has no model of its own to price;
- * the cost is summed from the individual buckets over exactly the same hours instead.
+ * the cost is summed from the individual buckets over exactly the same hours instead. The
+ * unpriced flag travels with it: a span holding a model the price table does not know is a
+ * partial amount, and the totals table marks it exactly as a day-bounded row does.
  */
-function costOfHourSpan(ctx: StatsCtx, source: Source, fromHour: number, toHour: number): number {
-  let cost = 0
+function hourSpanCost(
+  ctx: StatsCtx,
+  source: Source,
+  fromHour: number,
+  toHour: number,
+): { usd: number; listUsd: number; partial: boolean } {
+  let usd = 0
+  let listUsd = 0
+  let partial = false
   for (const one of ctx.agg.all()) {
     if (one.res !== 'h' || one.hour === null || one.source !== source) continue
     if (one.hour < fromHour || one.hour >= toHour) continue
     if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue
     const c = costOfBucketOn(one, ctx)
-    if (c && !c.unpriced) cost += c.usd
+    if (!c || c.unpriced) {
+      if (allTokens(one) > 0) partial = true
+      continue
+    }
+    usd += c.usd
+    listUsd += c.listUsd
   }
-  return cost
+  return { usd, listUsd, partial }
+}
+
+function costOfHourSpan(ctx: StatsCtx, source: Source, fromHour: number, toHour: number): number {
+  return hourSpanCost(ctx, source, fromHour, toHour).usd
 }
 
 /** The earliest hour bucket with billable tokens in a half-open hour range, or null. */
@@ -1951,31 +2085,6 @@ function firstUsedHour(ctx: StatsCtx, source: Source, fromHour: number, toHour: 
     if (first === null || one.hour < first) first = one.hour
   }
   return first
-}
-
-/** Local usage since the window opened — hour buckets only, so the answer can be incomplete. */
-export function windowUsage(
-  ctx: StatsCtx,
-  source: Source,
-  w: { id: string; label: string; resetsAt: number | null; windowMinutes: number | null },
-): WindowUsageRow | null {
-  if (w.resetsAt === null || w.windowMinutes === null) return null
-  if (!Number.isFinite(w.resetsAt) || !Number.isFinite(w.windowMinutes)) return null
-  const fromMs = w.resetsAt - w.windowMinutes * 60_000
-  const toMs = Math.min(ctx.now, w.resetsAt)
-  const { bucket, complete } = ctx.agg.sumHours(fromMs, toMs, filterFor(ctx, source))
-  const b = { ...bucket, source }
-  const cost = costOfHourSpan(ctx, source, Math.floor(fromMs / MS_HOUR), Math.ceil(toMs / MS_HOUR))
-  const mark = (s: string): string => (complete || s === '–' ? s : `≈${s}`)
-  return {
-    source,
-    windowId: w.id,
-    label: w.label,
-    usage: mark(tokens(billable(b))),
-    cost: ctx.showCost ? mark(costText(cost)) : '–',
-    requests: mark(tokens(b.requests)),
-    complete,
-  }
 }
 
 /**
@@ -2015,64 +2124,6 @@ export function localBlock(ctx: StatsCtx, source: Source, now: number = ctx.now)
     text: `Local estimate — ${usage} tokens in the last ${LOCAL_BLOCK_HOURS} h`
       + (firstAt !== null ? `, first counted at ${firstAt}` : '')
       + '. Not the provider’s window; no limit is known.',
-  }
-}
-
-/**
- * How the tokens counted *inside* the window split across projects.
- *
- * Only the per-hour slices of a session count here, never its lifetime counters: a session
- * resumed over three days would otherwise bring its whole history into a five-hour box and
- * contradict the window usage row printed beside it. The hour range is the one `windowUsage`
- * sums over, so both tables describe the same tokens.
- *
- * The shares are shares of the *locally counted* tokens, never of the server percentage:
- * the server also counts the web app, the desktop client and system prompts, and a
- * percentage of a number we cannot see would be an invention. What the window measured but
- * no session slice explains — records written before this build kept slices, or slices
- * already pruned — is named rather than folded into the shares.
- */
-export function attributionInWindow(
-  ctx: StatsCtx,
-  source: Source,
-  w: { resetsAt: number | null; windowMinutes: number | null },
-): AttributionRows | null {
-  if (w.resetsAt === null || w.windowMinutes === null) return null
-  if (!Number.isFinite(w.resetsAt) || !Number.isFinite(w.windowMinutes)) return null
-  const fromMs = w.resetsAt - w.windowMinutes * 60_000
-  const toMs = Math.min(ctx.now, w.resetsAt)
-  const fromHour = Math.floor(fromMs / MS_HOUR)
-  const toHour = Math.ceil(toMs / MS_HOUR)
-  const byProject = new Map<string, number>()
-  let total = 0
-  for (const s of ctx.agg.sessions()) {
-    if (s.source !== source) continue
-    let use = 0
-    for (const [key, value] of Object.entries(s.hourUsage ?? {})) {
-      const hour = Number(key)
-      if (!Number.isFinite(hour) || hour < fromHour || hour >= toHour) continue
-      if (value > 0) use += value
-    }
-    if (use <= 0) continue
-    byProject.set(s.project, (byProject.get(s.project) ?? 0) + use)
-    total += use
-  }
-  if (byProject.size === 0) return null
-  // Sessions carry no model dimension, so the rows are never model-filtered and the figure
-  // they are held against must not be either — comparing them would invent a gap.
-  const { bucket, complete } = ctx.agg.sumHours(fromMs, toMs, { source })
-  const measured = billable({ ...bucket, source })
-  const mark = (t: string): string => (complete || t === '–' ? t : `≈${t}`)
-  const rows = [...byProject.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([label, value]) => ({ label, share: percentOf(value, total), usage: mark(tokens(value)) }))
-  // Named only when it rounds to a visible share: "0 % unattributed" is noise, not a caveat.
-  const gap = measured - total
-  const named = measured > 0 && gap > 0 && Math.round((gap / measured) * 100) >= 1
-  return {
-    rows,
-    unexplained: 'server % cannot be split — shown share is of local tokens only'
-      + (named ? `; ${percentOf(gap, measured)} of this window has no session slice` : ''),
   }
 }
 

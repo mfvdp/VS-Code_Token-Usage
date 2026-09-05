@@ -88,6 +88,35 @@ test('the JSON examples inside a translation keep their setting keys and values'
   }
 })
 
+test('every enum description is the key of the value standing at its own index', () => {
+  // `dashboard.sections` shipped with its first two descriptions swapped, so the settings UI
+  // explained "quota" as the summary and vice versa. The keys carry the value's own name, so
+  // the two lists can be checked against each other rather than only counted.
+  const manifest = rawManifest as {
+    contributes: { configuration: Array<{ properties: Record<string, Record<string, unknown>> }> }
+  }
+  let checked = 0
+  for (const section of manifest.contributes.configuration) {
+    for (const [key, property] of Object.entries(section.properties)) {
+      const items = (property.items ?? {}) as Record<string, unknown>
+      for (const holder of [property, items]) {
+        const described = holder.enumDescriptions as string[] | undefined
+        if (!described) continue
+        const values = (holder.enum ?? []) as string[]
+        assert.equal(described.length, values.length,
+          `${key} describes ${described.length} of ${values.length} values`)
+        const short = key.replace(/^tokenPace\./, '')
+        for (let i = 0; i < values.length; i++) {
+          assert.equal(described[i], `%config.${short}.enum.${values[i]}%`,
+            `${key}: the description at index ${i} is not the one for "${values[i]}"`)
+        }
+        checked++
+      }
+    }
+  }
+  assert.ok(checked >= 20, `only ${checked} enum lists checked`)
+})
+
 test('the strings a user sees first are localized, not left in the manifest', () => {
   const manifest = rawManifest as {
     displayName: string

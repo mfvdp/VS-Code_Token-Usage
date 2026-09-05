@@ -302,7 +302,7 @@ writes no file, and never mixes with the live items.
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline. Hovering a card, or reaching it with the keyboard, opens what it counts, how it is computed, the period with its dates, what it is compared with, the split per provider and its basis; the markdown view lists the same explanations under the table |
-| `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost), the composition bar, cache economy, calendar periods and the plan factor |
+| `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost). Two rows lead the fixed ones: `Current 5 h window` and `Current 7 d window` cover exactly the window the provider reports a reset for, so they can be read against the quota card above — where no such window is reported the row is a trailing `Last 5 h` / `Last 7 d` span and says so. Both are summed from hour buckets, so once the oldest hours of the span have been rolled up into day totals every figure in the row carries `≈`; the span itself is the tooltip of the row label. Then the composition bar with a `cache` switch that hides cache read and cache write (the remaining shares are then shares of what is drawn, and a caption names the tokens left out), cache economy, calendar periods and the plan factor |
 | `chart` | Stacked daily (or weekly) bars for the selected range, stacked by provider or by model, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
 | `models` | Per-model breakdown with the same columns as the totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) plus the share of the range; every column sortable, with average and P90 turn length where enough samples exist. Where the rates came from is the tooltip of the cost, not a column |
 | `heatmap` | Calendar heatmap of the last 53 weeks with current and longest streak, active days, peak day and a variability measure. Days outside the coverage are dotted, not empty |
@@ -310,7 +310,6 @@ writes no file, and never mixes with the live items.
 | `records` | Records of the selected range: peak day, longest run of days with usage, and the top models, projects and sessions (`dashboard.topN` rows each). Off by default; the two lower tables need `tokenPace.attribution` |
 | `tools` | Tool calls of the selected range by name, with the share of the calls counted in it and the models that made them (`dashboard.topN` rows). Off by default; names only, never a tool's input or its result, and the section states the day counting started |
 | `budget` | Your own limits from `tokenPace.budgets`: used, limit, share against **that** number, and the end-of-period projection. Off by default; a period with no local data shows a dash, and no budget is ever added to another |
-| `forecast` | Burn rate, exhaustion forecast, end-of-window projection, local usage inside the running window, and per-project attribution inside it |
 | `history` | Reset retrospective: how often the window was exhausted, how much was left over |
 | `projects` | Per-project breakdown — needs `tokenPace.attribution` |
 | `sessions` | Per-session breakdown — needs `tokenPace.attribution: session` |
@@ -727,8 +726,8 @@ first start.
 With `tokenPace.quotaHistoryDays` above 0 (default **30**), each real quota reading is appended
 to `quotaHistory.json` in the extension's `globalStorage`: source, window id, timestamp, percent,
 reset time, origin and an account fingerprint. That series is what makes burn rate, sparklines,
-forecasts and the reset retrospective possible. Setting it to `0` disables the history and those
-sections with it.
+forecasts and the reset retrospective possible. Setting it to `0` disables the history, and with
+it the sparklines, the forecast line and the `history` section.
 
 * **Write guard.** Only an actual reading is stored — a poll answer, a push, or a file whose
   `fetchedAt` moved. A state replayed from memory (a redraw, a mode switch, a follower reloading
@@ -750,9 +749,9 @@ sections with it.
 * **Gaps are gaps.** The sparkline covers seven days on a time-proportional axis, so a stretch
   without readings is a hole exactly as wide as the time nobody measured. A hole with no reset
   inside it is bridged with a dashed line; a hole across a reset stays a hole, and the number of
-  gaps in the last 24 h is stated next to the forecast. The stroke down into the first reading
-  of a new window wears no pace colour: that fall is the window turning over, not a pace
-  anybody kept.
+  gaps in the last 24 h is counted in the copied summary. The stroke down into the first
+  reading of a new window wears no pace colour: that fall is the window turning over, not a
+  pace anybody kept.
 * **Cycles.** A cycle ends when the provider announces a different reset time, or when the
   percentage falls by five points or more without one. A rise too steep to come from usage is
   treated as the limit being re-based: the cycle continues, but the rate fit restarts.
@@ -1105,7 +1104,7 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `dashboard.sections` | `quota, summary, kpis, tokens, chart, models, heatmap, hours, forecast, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` |
+| `dashboard.sections` | `quota, summary, kpis, tokens, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` |
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |
@@ -1156,7 +1155,7 @@ power-user settings sit at the end of their group.
 |---|---|---|
 | `hourRetentionDays` | `45` | How long hour buckets are kept (1–3650) before they are folded into days. Irreversible |
 | `retentionDays` | `400` | How long day buckets are kept (60–36500) before they are folded into months |
-| `quotaHistoryDays` | `30` | How long quota readings are kept as a time series (0–90). `0` empties the `forecast` entry of `statusBar.show` and the `forecast` and `history` sections of the dashboard |
+| `quotaHistoryDays` | `30` | How long quota readings are kept as a time series (0–90). `0` empties the `forecast` entry of `statusBar.show` and the `history` section of the dashboard, and leaves the quota cards without a sparkline or a forecast line |
 | `attribution` | `none` | `none`, `project` or `session`. Changing it triggers a full re-scan |
 | `showProjectNames` | `basename` | `basename` or `hash` (salted, screen-share safe) |
 

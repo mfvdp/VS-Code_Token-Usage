@@ -714,19 +714,29 @@ test('a stored chart stack is restored, and a nonsense one is dropped', async ()
   // restore validation, and what fails it falls back to the default instead of reaching the
   // view model. `setRange` writes the whole restored state back, which is where it is readable.
   const kept = new Map<string, unknown>([
-    ['tokenPace.ui', { range: '30d', chartStack: 'model', heatmapMetric: 'sideways' }],
+    ['tokenPace.ui', {
+      range: '30d', chartStack: 'model', heatmapMetric: 'sideways', compositionCache: 'noCache',
+    }],
   ])
   const host = await activateHost(makeFixture(), REPO, { globalState: kept })
   await state.execute('tokenPace.setRange', '7d')
-  const ui = host.ctx.globalState.get<{ chartStack: string; heatmapMetric: string }>('tokenPace.ui')
+  const ui = host.ctx.globalState.get<{
+    chartStack: string; heatmapMetric: string; compositionCache: string
+  }>('tokenPace.ui')
   assert.equal(ui?.chartStack, 'model')
   assert.equal(ui?.heatmapMetric, 'usage')
+  assert.equal(ui?.compositionCache, 'noCache')
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 
-  const junk = new Map<string, unknown>([['tokenPace.ui', { chartStack: 'by-the-moon' }]])
+  const junk = new Map<string, unknown>([
+    ['tokenPace.ui', { chartStack: 'by-the-moon', compositionCache: 'sometimes' }],
+  ])
   const second = await activateHost(makeFixture(), REPO, { globalState: junk })
   await state.execute('tokenPace.setRange', '7d')
-  assert.equal(second.ctx.globalState.get<{ chartStack: string }>('tokenPace.ui')?.chartStack,
-    'provider')
+  const restored = second.ctx.globalState.get<{
+    chartStack: string; compositionCache: string
+  }>('tokenPace.ui')
+  assert.equal(restored?.chartStack, 'provider')
+  assert.equal(restored?.compositionCache, 'all')
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })

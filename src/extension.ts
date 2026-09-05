@@ -1361,6 +1361,9 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
     out.metric = raw.metric as UiState['metric']
   }
   if (raw.chartStack === 'provider' || raw.chartStack === 'model') out.chartStack = raw.chartStack
+  if (raw.compositionCache === 'all' || raw.compositionCache === 'noCache') {
+    out.compositionCache = raw.compositionCache
+  }
   if (raw.heatmapMetric === 'usage' || raw.heatmapMetric === 'cost') out.heatmapMetric = raw.heatmapMetric
   if (raw.hourZone === 'local' || raw.hourZone === 'utc') out.hourZone = raw.hourZone
   if (typeof raw.drillDay === 'string') out.drillDay = raw.drillDay

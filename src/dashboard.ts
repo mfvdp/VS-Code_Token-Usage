@@ -26,7 +26,9 @@ const SECTION_FIELDS: Record<string, (keyof ViewModel)[]> = {
   quota: ['quotas'],
   context: ['context'],
   kpis: ['kpis'],
-  tokens: ['totals', 'composition', 'cacheEconomy', 'calendar', 'planFactor'],
+  // `ui` because the cache chips above the composition bars decide which parts are drawn:
+  // without it the switch would move and the bars beneath it would not.
+  tokens: ['totals', 'composition', 'cacheEconomy', 'calendar', 'planFactor', 'ui'],
   chart: ['chart'],
   models: ['models'],
   heatmap: ['heatmap'],
@@ -34,7 +36,6 @@ const SECTION_FIELDS: Record<string, (keyof ViewModel)[]> = {
   records: ['records'],
   tools: ['tools'],
   budget: ['budgets'],
-  forecast: ['forecasts', 'windowUsage', 'attributionInWindow'],
   history: ['retro'],
   projects: ['projects'],
   sessions: ['sessions'],
@@ -695,12 +696,6 @@ function srcLabel(source, label) {
   return parts.map(p => '<span class="nobr">' + esc(p) + '</span>').join(' · ');
 }
 
-/** The forecast states in words. */
-const STATE_WORD = {
-  none: '', measuring: 'measuring', idle: 'idle', resetsFirst: 'resets first',
-  eta: 'projected', stale: 'stale', full: 'full',
-};
-
 /**
  * The window states in words, for the fallback below and nowhere else. The map has no
  * fallback of its own on purpose — an unknown state prints nothing rather than leaking an
@@ -1025,12 +1020,20 @@ function normSpark(values) {
   return max > 0 ? values.map(v => (v / max) * 100) : values.map(() => 0);
 }
 
+/**
+ * Why a row is marked. Worded once, here and in the markdown view, because the two views
+ * print the same table and a caveat phrased twice is read as two different caveats.
+ */
+const APPROX_NOTE = '≈ marks a span whose oldest hours are already rolled up into day totals';
+
 function totalsTable(t) {
   const cost = vm.showCost;
   const head = ['Period', 'Usage', 'Fresh in', 'Write 5m', 'Write 1h', 'Cache read', 'Output',
     'Reasoning', 'Req.', 'Hit', 'Per req.'].concat(cost ? ['API cost'] : []);
   const rows = t.rows.map(r => '<tr>'
-    + '<td data-h="Period">' + esc(r.label) + '</td>'
+    // The span is the tooltip of the label, not a column: the two window rows are the only
+    // ones whose bounds are not already spelled out by their name.
+    + '<td data-h="Period" title="' + esc(r.spanText || '') + '">' + esc(r.label) + '</td>'
     + '<td data-h="Usage">' + esc(r.usage) + '</td>'
     + '<td data-h="Fresh in">' + esc(r.freshInput) + '</td>'
     + '<td data-h="Write 5m">' + esc(r.cacheWrite5m) + '</td>'
@@ -1046,9 +1049,11 @@ function totalsTable(t) {
     + (cost ? '<td data-h="API cost">' + esc(r.cost) + (r.costPartial
         ? ' <span title="some models have no price on file">⚠</span>' : '') + '</td>' : '')
     + '</tr>').join('');
+  const approx = t.rows.some(r => r.approx);
   return '<div class="card"><div class="name">' + esc(t.title) + '</div><div class="scroll"><table>'
     + '<thead><tr>' + head.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr></thead>'
-    + '<tbody>' + rows + '</tbody></table></div></div>';
+    + '<tbody>' + rows + '</tbody></table></div>'
+    + (approx ? '<div class="meta">' + esc(APPROX_NOTE) + '</div>' : '') + '</div>';
 }
 
 /** Where the tokens of a period went — the six counted fields as one bar. */
@@ -1058,24 +1063,64 @@ const PART_CLASS = {
   reasoning: 'c6',
 };
 
+/** The three parts the cache chip puts aside; everything else is always drawn. */
+const CACHE_PARTS = ['cacheRead', 'cacheWrite5m', 'cacheWrite1h'];
+
+/** A round token count, the way every composition tooltip and caption prints one. */
+function fullNum(n) {
+  return Math.round(n).toLocaleString('en-US');
+}
+
+/** 'noCache' only when the view model says so; anything else is the full mix. */
+function cacheMode() {
+  return vm.ui && vm.ui.compositionCache === 'noCache' ? 'noCache' : 'all';
+}
+
+/**
+ * One switch for both bars. Cache reads are an order of magnitude larger than the rest on a
+ * normal day, which leaves the other five parts as hairlines; hiding them is the only way to
+ * read the mix, and the caption under each bar names what was set aside so the shares cannot
+ * be mistaken for shares of everything.
+ */
+function cacheChips() {
+  const mode = cacheMode();
+  const chip = (value, label) => '<button data-act="compositionCache" data-mode="' + value
+    + '" aria-pressed="' + (mode === value) + '">' + label + '</button>';
+  return '<div class="row"><span class="meta">cache</span><span class="wrap">'
+    + chip('all', 'shown') + chip('noCache', 'hidden') + '</span></div>';
+}
+
 function compositionBar(c) {
+  const noCache = cacheMode() === 'noCache';
   // Reasoning is a subset of output; adding it as its own slice would count it twice.
-  const parts = c.parts.filter(p => p.key !== 'reasoning' && p.tokens > 0);
+  const counted = c.parts.filter(p => p.key !== 'reasoning' && p.tokens > 0);
+  const parts = noCache ? counted.filter(p => CACHE_PARTS.indexOf(p.key) < 0) : counted;
+  // The shares are shares of what is drawn. A bar that kept the old denominator would not
+  // add up to its own width, which is why the caption below states what is missing.
   const total = parts.reduce((s, p) => s + p.tokens, 0);
   if (!total) return '';
   const cls = (p) => PART_CLASS[p.key] || 'c6';
   const segs = parts.map(p => '<i class="cs ' + cls(p) + '" data-w="'
     + ((p.tokens / total) * 100).toFixed(2) + '" title="' + esc(p.text) + ': '
-    + Math.round(p.tokens).toLocaleString('en-US') + '"></i>').join('');
+    + fullNum(p.tokens) + ' · ' + Math.round((p.tokens / total) * 100) + ' %"></i>').join('');
+  const sum = (keys) => c.parts.reduce((s, p) => s + (keys.indexOf(p.key) >= 0 ? p.tokens : 0), 0);
+  const caption = noCache
+    ? '<div class="meta">without cache · ' + fullNum(sum(['cacheRead']))
+      + ' tokens cache read and ' + fullNum(sum(['cacheWrite5m', 'cacheWrite1h']))
+      + ' cache write not shown</div>'
+    : '';
   return '<div class="meta">' + esc(srcName(c.source)) + ' composition</div>'
     + '<div class="compbar">' + segs + '</div>'
     + '<div class="legend">' + parts.map(p => '<span><i class="dot ' + cls(p) + '"></i>'
-      + esc(p.text) + '</span>').join('') + '</div>';
+      + esc(p.text) + '</span>').join('') + '</div>'
+    + caption;
 }
 
 function sTokens() {
   let h = vm.totals.map(totalsTable).join('');
-  h += vm.composition.map(compositionBar).join('');
+  const bars = vm.composition.map(compositionBar).join('');
+  // The switch belongs to the bars: with nothing drawn there is nothing to switch.
+  if (bars) h += cacheChips() + bars;
   if (vm.cacheEconomy.length) {
     h += '<div class="scroll"><table><thead><tr><th>Cache</th><th>Hit rate</th>'
       + '<th>Realised</th><th>Blended $/1M</th></tr></thead><tbody>'
@@ -1433,61 +1478,6 @@ function sBudget() {
     + 'equivalent, not a bill, and no budget is ever added to another.</div>';
 }
 
-function sForecast() {
-  let h = '';
-  if (!vm.forecasts.length) h += '<p class="empty">No window to project.</p>';
-  for (const f of vm.forecasts) {
-    const fc = f.forecast || {};
-    const state = word(STATE_WORD, fc.state);
-    // The sentence is the forecast's own; the webview does not write one. "Full until the
-    // reset." used to stand in for a missing text, and it asserts a reset that a window
-    // without a known reset time does not have — the forecast says "full" for those and says
-    // "full until the reset" only when it knows one. An empty body is enough while the state
-    // in the head is the statement; an unlimited window and a fresh install both arrive here
-    // as the state "none", and a card with neither a state nor a body says nothing at all
-    // where the absence marker belongs.
-    const body = fc.text || (state ? '' : '–');
-    // The same rule the quota card applies to its forecast line: a head that repeats what the
-    // sentence below it already ends with ("~empty in 5 h (17:00) · medium confidence") is not a
-    // second fact. The confidence is printed once, wherever it is already said.
-    const conf = fc.confidence ? fc.confidence + ' confidence' : '';
-    // The state word goes the same way: "full" over a body that is exactly "full" (a window with
-    // no reset ahead) is the one word twice. Word for word, never as a substring.
-    const said = String(body).toLowerCase();
-    const head = [state && said !== state.toLowerCase() ? state : '',
-      conf && said.indexOf(conf.toLowerCase()) < 0 ? conf : ''].filter(Boolean);
-    // One list, one join: a separator in front of the first item is a missing item.
-    const meta = [f.lockout, f.resetForecast].filter(Boolean);
-    if (fc.basis) meta.push(fc.basis.samples + (fc.basis.samples === 1 ? ' reading' : ' readings'));
-    if (f.gaps) meta.push(f.gaps + ' gap(s)');
-    h += '<div class="card"><div class="row"><span class="name">'
-      + srcLabel(f.source, f.label) + '</span>'
-      + '<span class="meta">' + esc(head.join(' · ')) + '</span></div>'
-      + (body ? '<div>' + esc(body) + '</div>' : '')
-      + (meta.length ? '<div class="meta">' + meta.map(esc).join(' · ') + '</div>' : '')
-      + (hasSpark(f.spark) ? sparkSvg(f.spark) : '') + '</div>';
-  }
-  if (vm.windowUsage.length) {
-    h += '<div class="scroll"><table><thead><tr><th>Local usage in window</th><th>Usage</th>'
-      + '<th>Req.</th>' + (vm.showCost ? '<th>API cost</th>' : '') + '</tr></thead><tbody>'
-      + vm.windowUsage.map(u => '<tr><td data-h="Window">' + srcLabel(u.source, u.label)
-        + (u.complete ? '' : ' <span title="hour buckets are rolled up for part of this window">≈</span>')
-        + '</td><td data-h="Usage">' + esc(u.usage) + '</td><td data-h="Req.">' + esc(u.requests)
-        + '</td>' + (vm.showCost ? '<td data-h="API cost">' + esc(u.cost) + '</td>' : '')
-        + '</tr>').join('') + '</tbody></table></div>';
-  }
-  for (const a of vm.attributionInWindow) {
-    // The label is the window as the user knows it ("5 h"); the id is a key, not a heading.
-    h += '<div class="card"><div class="name">'
-      + srcLabel(a.source, a.label || a.windowId) + '</div>'
-      + '<div class="scroll"><table><tbody>'
-      + a.rows.map(r => '<tr><td>' + esc(r.label) + '</td><td>' + esc(r.share) + '</td><td>'
-        + esc(r.usage) + '</td></tr>').join('')
-      + '</tbody></table></div><div class="meta">' + esc(a.unexplained) + '</div></div>';
-  }
-  return h;
-}
-
 function sHistory() {
   if (!vm.retro.length) return '<p class="empty">No cycles on file yet.</p>';
   return '<ul>' + vm.retro.map(r => '<li><b>' + srcLabel(r.source, r.label) + '</b>: '
@@ -1585,14 +1575,13 @@ const RENDER = {
   notices: sNotices, controls: sControls, footer: sFooter, drill: sDrill,
   summary: sSummary, quota: sQuota, context: sContext, kpis: sKpis, tokens: sTokens,
   chart: sChart, models: sModels, heatmap: sHeatmap, hours: sHours, records: sRecords,
-  tools: sTools, budget: sBudget, forecast: sForecast,
+  tools: sTools, budget: sBudget,
   history: sHistory, projects: sProjects, sessions: sSessions, dataQuality: sDataQuality,
 };
 const TITLE = {
   summary: 'Summary', quota: 'Quota', context: 'Context window', kpis: 'Key figures',
   tokens: 'Tokens', chart: 'Chart', models: 'Models', heatmap: 'Activity',
   hours: 'Time of day', records: 'Records', tools: 'Tools', budget: 'Budgets',
-  forecast: 'Forecast',
   history: 'Reset history',
   projects: 'Projects', sessions: 'Sessions', dataQuality: 'Data quality',
 };
@@ -1806,6 +1795,7 @@ function act(el) {
   } else if (a === 'moreModels') { allModels = !allModels; renderSection('controls'); }
   else if (a === 'customDates') { showDates = !showDates; renderSection('controls'); }
   else if (a === 'section') post({ type: 'toggleSection', key: el.dataset.key });
+  else if (a === 'compositionCache') post({ type: 'setCompositionCache', mode: el.dataset.mode });
   else if (a === 'heatmapMetric') post({ type: 'setHeatmapMetric', metric: el.dataset.metric });
   else if (a === 'hourZone') post({ type: 'setHourZone', zone: el.dataset.zone });
   else if (a === 'drill') post({ type: 'drill', day: el.dataset.day || null });

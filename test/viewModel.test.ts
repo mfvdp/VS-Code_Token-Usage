@@ -211,6 +211,18 @@ test('the model filter and the provider filter reach every section', () => {
   assert.equal(only.cacheEconomy.length, 1)
 })
 
+test('the chart is stacked by provider and model and carries the configured style', () => {
+  const vm = buildViewModel(makeInput())
+  assert.equal(vm.chart.modelStyle, 'pattern')
+  assert.ok(vm.chart.series.length > 1)
+  assert.equal(vm.chart.series.every((s) => s.key === `${s.source}:${s.label}`), true)
+  // No stacking to switch any more: neither the chart nor the UI state carries one.
+  assert.equal('stack' in vm.chart, false)
+  assert.equal('chartStack' in vm.ui, false)
+  const shaded = buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.chart.modelStyle': 'shade' }) }))
+  assert.equal(shaded.chart.modelStyle, 'shade')
+})
+
 test('the drill-down opens one day and nothing else', () => {
   const vm = buildViewModel(makeInput({ ui: { drillDay: TODAY } }))
   assert.equal(vm.drill?.day, TODAY)
@@ -367,10 +379,6 @@ test('parseWebviewMessage accepts exactly the documented shapes', () => {
     { type: 'setFilter', providers: ['claude'], models: ['a'] })
   assert.deepEqual(parseWebviewMessage({ type: 'setMetric', metric: 'cacheRead' }),
     { type: 'setMetric', metric: 'cacheRead' })
-  assert.deepEqual(parseWebviewMessage({ type: 'setChartStack', stack: 'model' }),
-    { type: 'setChartStack', stack: 'model' })
-  assert.deepEqual(parseWebviewMessage({ type: 'setChartStack', stack: 'provider' }),
-    { type: 'setChartStack', stack: 'provider' })
   assert.deepEqual(parseWebviewMessage({ type: 'setHeatmapMetric', metric: 'cost' }),
     { type: 'setHeatmapMetric', metric: 'cost' })
   assert.deepEqual(parseWebviewMessage({ type: 'setHourZone', zone: 'utc' }), { type: 'setHourZone', zone: 'utc' })
@@ -397,7 +405,9 @@ test('parseWebviewMessage drops everything else', () => {
     { type: 'setFilter', providers: [], models: [123] },
     { type: 'setMetric', metric: 'passwords' },
     { type: 'setHeatmapMetric', metric: 'requests' },
-    { type: 'setChartStack', stack: 'session' },
+    // The chart is always stacked by model; the stacking message of older pages is nothing.
+    { type: 'setChartStack', stack: 'model' },
+    { type: 'setChartStack', stack: 'provider' },
     { type: 'setChartStack' },
     { type: 'setHourZone', zone: 'mars' },
     { type: 'drill', day: 'yesterday' },
@@ -466,7 +476,6 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     providers: ['claude', 'codex'],
     models: [],
     metric: 'usage',
-    chartStack: 'provider',
     heatmapMetric: 'usage',
     hourZone: 'local',
     drillDay: null,
@@ -482,7 +491,6 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
   assert.deepEqual(applyMessage(ui, { type: 'setSort', key: 'cost', dir: 'asc' }).sort,
     { key: 'cost', dir: 'asc' })
   assert.equal(applyMessage(ui, { type: 'setMetric', metric: 'output' }).metric, 'output')
-  assert.equal(applyMessage(ui, { type: 'setChartStack', stack: 'model' }).chartStack, 'model')
   assert.equal(applyMessage(ui, { type: 'setHeatmapMetric', metric: 'cost' }).heatmapMetric, 'cost')
   assert.equal(applyMessage(ui, { type: 'setHourZone', zone: 'utc' }).hourZone, 'utc')
   assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'] }).providers, ['codex'])

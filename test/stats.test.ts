@@ -6,11 +6,11 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { usd } from '../src/render'
 import {
-  MIN_P90_SAMPLES, StatsCtx, attributionInWindow, cacheEconomy, cacheHitParts,
-  cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil, planFactors,
-  projectPeriod, projectRows, sessionRows, totalRow, totalsFor, windowUsage,
+  CHART_MODEL_SERIES_PER_PROVIDER, MIN_P90_SAMPLES, StatsCtx, attributionInWindow, cacheEconomy,
+  cacheHitParts, cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil,
+  planFactors, projectPeriod, projectRows, sessionRows, totalRow, totalsFor, windowUsage,
 } from '../src/stats'
-import { DayRange, rangeFor } from '../src/time'
+import { DayRange, daysBetween, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
 import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
 import { claudeLine } from './fixtures/helpers'
@@ -583,59 +583,95 @@ test('the chart condenses to weekly bars beyond four months', () => {
   )
 })
 
-test('the chart splits a column by model without changing the column', () => {
+test('the chart stacks every column by model, one band per provider and model', () => {
   const ctx = ctxOf(buildAgg())
   const r = range('30d')
-  const byProvider = chart(ctx, r, 'usage')
-  const byModel = chart(ctx, r, 'usage', 'model')
-  assert.equal(byProvider.stack, 'provider')
-  assert.equal(byModel.stack, 'model')
-  // The provider bands keep today's identity and are named from the same table the cards use.
-  assert.deepEqual(byProvider.series.map((x) => x.key), ['claude', 'codex'])
-  assert.deepEqual(byProvider.series.map((x) => x.label), ['Claude Code', 'Codex'])
-  assert.deepEqual(byProvider.series.map((x) => x.source), ['claude', 'codex'])
-
-  // A stack is a partition: splitting the same column a second way may not move a single token.
-  const column = (c: typeof byModel, i: number): number =>
-    c.series.reduce((sum, x) => sum + x.values[i], 0)
-  assert.equal(byModel.days.length, byProvider.days.length)
-  for (let i = 0; i < byProvider.days.length; i++) {
-    assert.equal(column(byModel, i), column(byProvider, i), byProvider.days[i])
+  const c = chart(ctx, r, 'usage')
+  // A stack is a partition of each provider's own series: splitting the column by model may
+  // not move a single token, so a provider's bands sum to what its own filter counts.
+  for (const source of ['claude', 'codex'] as const) {
+    const own = ctx.agg.series(c.days, tcfg, { source }, 'usage', ctx.pricing)
+    const bands = c.series.filter((x) => x.source === source)
+    assert.ok(bands.length > 0, source)
+    for (let i = 0; i < c.days.length; i++) {
+      assert.equal(bands.reduce((sum, x) => sum + x.values[i], 0), own[i], `${source} ${c.days[i]}`)
+    }
   }
-  assert.equal(byModel.max, byProvider.max)
-
-  // Model names verbatim, largest band first, and each one carries the provider it came from.
-  assert.deepEqual(byModel.series.map((x) => x.label), byModel.series.map((x) => x.key))
-  assert.ok(byModel.series.some((x) => x.key === 'claude-opus-4-6'), JSON.stringify(byModel.series.map((x) => x.key)))
-  assert.ok(byModel.series.some((x) => x.key === 'gpt-5.3-codex'))
-  const totals = byModel.series.map((x) => x.values.reduce((a, b) => a + b, 0))
-  assert.deepEqual(totals, [...totals].sort((a, b) => b - a))
-  assert.equal(byModel.series.every((x) => x.values.every((v) => Number.isFinite(v))), true)
-  // Four models here, so nothing is folded away yet.
-  assert.equal(byModel.series.some((x) => x.key === 'other'), false)
+  // The key names the provider and the model, the label the model alone, and every band
+  // belongs to exactly one provider.
+  for (const s of c.series) {
+    assert.equal(s.key, `${s.source}:${s.label}`)
+    assert.equal(s.values.every((v) => Number.isFinite(v)), true)
+  }
+  assert.ok(c.series.some((x) => x.key === 'claude:claude-opus-4-6'), JSON.stringify(c.series.map((x) => x.key)))
+  assert.ok(c.series.some((x) => x.key === 'codex:gpt-5.3-codex'))
+  // Claude's bands first, then Codex's; within a provider largest first, ranked from 0.
+  const sources = c.series.map((x) => x.source)
+  assert.ok(sources.lastIndexOf('claude') < sources.indexOf('codex'), sources.join(','))
+  for (const source of ['claude', 'codex'] as const) {
+    const bands = c.series.filter((x) => x.source === source)
+    const totals = bands.map((x) => x.values.reduce((a, b) => a + b, 0))
+    assert.deepEqual(totals, [...totals].sort((a, b) => b - a))
+    assert.deepEqual(bands.map((x) => x.rank), bands.map((_, i) => i))
+  }
+  // Three Claude models and one Codex model, so nothing is folded away yet.
+  assert.equal(c.series.some((x) => x.rank === 'other'), false)
+  // The style is the setting's word, carried for the view; the default is the pattern.
+  assert.equal(c.modelStyle, 'pattern')
+  assert.equal(chart(ctx, r, 'usage', 'both').modelStyle, 'both')
+  assert.equal('stack' in c, false)
 })
 
-test('beyond five models the rest of the stack is folded into one band, never dropped', () => {
-  // Eight models on one day, each smaller than the one before.
-  const buckets = Array.from({ length: 8 }, (_, i) => ({
+test('a model used under both providers is two bands, one per provider', () => {
+  const buckets = [
+    { ...emptyBucket('claude', 'shared-model', false, 'standard' as const, 'd' as const, null, TODAY), output: 70, requests: 1 },
+    { ...emptyBucket('codex', 'shared-model', false, 'standard' as const, 'd' as const, null, TODAY), output: 30, requests: 1 },
+  ]
+  const c = chart(ctxOf(fromBuckets(buckets)), range('today'), 'usage')
+  assert.deepEqual(c.series.map((x) => [x.key, x.label, x.source, x.rank]), [
+    ['claude:shared-model', 'shared-model', 'claude', 0],
+    ['codex:shared-model', 'shared-model', 'codex', 0],
+  ])
+  assert.equal(c.series[0].values.reduce((a, b) => a + b, 0), 70)
+  assert.equal(c.series[1].values.reduce((a, b) => a + b, 0), 30)
+})
+
+test('beyond five models a provider folds the rest into its own other band, never dropped', () => {
+  // Eight Claude models and two Codex models on one day, each smaller than the one before.
+  const claude = Array.from({ length: 8 }, (_, i) => ({
     ...emptyBucket('claude', `m${i}`, false, 'standard' as const, 'd' as const, null, TODAY),
     output: 100 - i * 10,
     requests: 1,
   }))
-  const ctx = ctxOf(fromBuckets(buckets), { sources: ['claude'] })
+  const codex = Array.from({ length: 2 }, (_, i) => ({
+    ...emptyBucket('codex', `x${i}`, false, 'standard' as const, 'd' as const, null, TODAY),
+    output: 20 - i * 5,
+    requests: 1,
+  }))
   const r = range('today')
-  const byModel = chart(ctx, r, 'usage', 'model')
-  assert.equal(byModel.series.length, 6)
-  assert.deepEqual(byModel.series.map((x) => x.key), ['m0', 'm1', 'm2', 'm3', 'm4', 'other'])
-  const other = byModel.series[byModel.series.length - 1]
+  const c = chart(ctxOf(fromBuckets([...claude, ...codex])), r, 'usage')
+  assert.equal(CHART_MODEL_SERIES_PER_PROVIDER, 5)
+  assert.deepEqual(c.series.map((x) => x.key), [
+    'claude:m0', 'claude:m1', 'claude:m2', 'claude:m3', 'claude:m4', 'claude:other', 'codex:x0', 'codex:x1',
+  ])
+  assert.deepEqual(c.series.map((x) => x.rank), [0, 1, 2, 3, 4, 'other', 0, 1])
+  const other = c.series[5]
   assert.equal(other.label, 'other')
-  // The fold spans no single provider, so it names none.
-  assert.equal(other.source, null)
+  // The fold is the provider's own: it names Claude, and Codex, with two models, has none.
+  assert.equal(other.source, 'claude')
   // 50 + 40 + 30 = the three models the top five left over.
   assert.equal(other.values.reduce((a, b) => a + b, 0), 120)
-  const sum = (c: typeof byModel): number =>
-    c.series.reduce((s, x) => s + x.values.reduce((a, b) => a + b, 0), 0)
-  assert.equal(sum(byModel), sum(chart(ctx, r, 'usage')))
+  const sum = c.series.reduce((t, x) => t + x.values.reduce((a, b) => a + b, 0), 0)
+  assert.equal(sum, 100 + 90 + 80 + 70 + 60 + 120 + 20 + 15)
+  // Under a Codex-only filter the ranks start from 0 again: they are per provider.
+  const only = chart(ctxOf(fromBuckets([...claude, ...codex]), { sources: ['codex'] }), r, 'usage')
+  assert.deepEqual(only.series.map((x) => [x.key, x.rank]), [['codex:x0', 0], ['codex:x1', 1]])
+})
+
+test('the bands come in registry order, however the provider chips were toggled', () => {
+  const c = chart(ctxOf(buildAgg(), { sources: ['codex', 'claude'] }), range('30d'), 'usage')
+  assert.equal(c.series[0].source, 'claude')
+  assert.equal(c.series[c.series.length - 1].source, 'codex')
 })
 
 test('a model with nothing in the selected metric is no band and no colour', () => {
@@ -644,20 +680,25 @@ test('a model with nothing in the selected metric is no band and no colour', () 
     { ...emptyBucket('claude', 'quiet', false, 'standard' as const, 'd' as const, null, TODAY), output: 50, reasoning: 0, requests: 1 },
   ]
   const ctx = ctxOf(fromBuckets(buckets), { sources: ['claude'] })
-  const byModel = chart(ctx, range('today'), 'reasoning', 'model')
-  assert.deepEqual(byModel.series.map((x) => x.key), ['thinker'])
+  const c = chart(ctx, range('today'), 'reasoning')
+  assert.deepEqual(c.series.map((x) => x.key), ['claude:thinker'])
 })
 
 test('the weekly condensation keeps the model bands it was given', () => {
   const ctx = ctxOf(buildAgg())
   const long = { from: '2026-01-01', to: TODAY, label: 'long', preset: 'custom' as const }
-  const weekly = chart(ctx, long, 'usage', 'model')
+  const weekly = chart(ctx, long, 'usage')
   assert.equal(weekly.weekly, true)
-  assert.equal(weekly.stack, 'model')
   assert.equal(weekly.series.every((x) => x.values.length === weekly.days.length), true)
-  const total = (c: { series: { values: number[] }[] }): number =>
-    c.series.reduce((s, x) => s + x.values.reduce((a, b) => a + b, 0), 0)
-  assert.equal(total(weekly), total(chart(ctx, long, 'usage')))
+  assert.equal(weekly.series.every((x) => x.key === `${x.source}:${x.label}`), true)
+  // Condensing the days into weeks moves nothing: a provider's weekly bands still sum to the
+  // provider's own series over the same days.
+  const days = daysBetween(long.from, long.to)
+  for (const source of ['claude', 'codex'] as const) {
+    const own = ctx.agg.series(days, tcfg, { source }, 'usage', ctx.pricing).reduce((a, b) => a + b, 0)
+    const bands = weekly.series.filter((x) => x.source === source)
+    assert.equal(bands.reduce((t, x) => t + x.values.reduce((a, b) => a + b, 0), 0), own, source)
+  }
 })
 
 test('niceCeil rounds the axis to something a person reads', () => {

@@ -1360,7 +1360,9 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
   if (typeof raw.metric === 'string' && (METRICS as string[]).includes(raw.metric)) {
     out.metric = raw.metric as UiState['metric']
   }
-  if (raw.chartStack === 'provider' || raw.chartStack === 'model') out.chartStack = raw.chartStack
+  // A field an older build stored and this one no longer has — the chart's stacking, which is
+  // always by model now — is simply not copied: the state is rebuilt from the defaults field
+  // by field, so a key this build does not know is dropped without a special case.
   if (raw.heatmapMetric === 'usage' || raw.heatmapMetric === 'cost') out.heatmapMetric = raw.heatmapMetric
   if (raw.hourZone === 'local' || raw.hourZone === 'utc') out.hourZone = raw.hourZone
   if (typeof raw.drillDay === 'string') out.drillDay = raw.drillDay

@@ -300,7 +300,7 @@ writes no file, and never mixes with the live items.
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline |
 | `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost), the composition bar, cache economy, calendar periods and the plan factor |
-| `chart` | Stacked daily (or weekly) bars for the selected range, stacked by provider or by model, with a metric selector and an optional cost line on a second axis. Clicking a column drills into that day |
+| `chart` | Stacked daily (or weekly) bars for the selected range, one band per model in its provider's hue — the models of one provider told apart by pattern or shade (`chart.modelStyle`) — with a metric selector and an optional cost line on a second axis through the column centres. Clicking a column drills into that day |
 | `models` | Per-model breakdown with the same columns as the totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) plus the share of the range; every column sortable, with average and P90 turn length where enough samples exist. Where the rates came from is the tooltip of the cost, not a column |
 | `heatmap` | Calendar heatmap of the last 53 weeks with current and longest streak, active days, peak day and a variability measure. Days outside the coverage are dotted, not empty |
 | `hours` | Hour-of-day profile and a weekday × 4-hour grid, captioned with the weeks of usage days it stands on. A block nothing was ever done in is hatched |
@@ -330,11 +330,17 @@ day actually ingested, never earlier.
 model table sortable by every column it shows (`model`, `usage`, `freshInput`, `cacheWrite5m`,
 `cacheWrite1h`, `cacheRead`, `output`, `reasoning`, `requests`, `cacheHit`, `perRequest`, `cost`,
 `share`, ascending or descending).
-Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The chart also
-stacks either **by provider** or **by model** — by model it draws the five largest models of the
-range in their own colours and folds the rest into one `other` band, so the column total is the
-same either way. The heatmap switches between `usage` and `cost`; the hour profile between local
-time and UTC.
+Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The chart is
+always stacked **by model**, one band per model under each provider: every band wears its
+provider's hue — Claude blue, Codex purple — and the five largest models of a provider are told
+apart by rank, drawn as a pattern (solid, 45° stripes, 135° stripes, cross-hatch, horizontal
+lines), as a shade of the hue, or as both (`tokenPace.chart.modelStyle`); the rest of that
+provider's models is folded into one dotted `other` band, so the column total is the same
+however many models there are. The legend is grouped by provider and its swatches carry the
+band's own fill; a band's tooltip names the model, the provider, the value, its share of the
+column and the provider's column total. The cost line, when switched on, runs through the
+column centres over a halo in the page background, with a dot per column, on its own axis.
+The heatmap switches between `usage` and `cost`; the hour profile between local time and UTC.
 
 **Collapsing.** Every section header is a toggle. What you collapse is remembered with the rest
 of the view state (range, sort, filters), so a panel you have trimmed to two sections opens that
@@ -1105,6 +1111,7 @@ power-user settings sit at the end of their group.
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |
 | `dashboard.mode` | `webview` | What *Open Dashboard* and a status bar click open: `webview`, `quickPick`, `markdown` |
+| `chart.modelStyle` | `pattern` | How the bands of one provider are told apart in the daily chart: `pattern` (solid, stripes, cross-hatch, lines, dots in the provider hue), `shade` (lightness steps of the hue) or `both` |
 | `startOfWeek` | `monday` | First day of the week for the heatmap, the weekday grid and `thisWeek` |
 | `planPriceUsd` | `{}` | What you pay per month, per tool, e.g. `{"claude": 100}`. Used only for the plan-factor line |
 | `calibration.show` | `false` | Show local tokens per quota percentage point, derived from your own history |

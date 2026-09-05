@@ -75,6 +75,8 @@ export interface FakeVscodeState {
   registered: Map<string, number>
   /** Command ids passed to `executeCommand`, in order. */
   executed: string[]
+  /** The same calls with their arguments — for a command whose payload is the point. */
+  executedArgs: Array<{ id: string; args: unknown[] }>
   /** Every status bar item ever created, disposed ones included. */
   items: FakeStatusBarItem[]
   clipboard: string[]
@@ -205,6 +207,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const registered = new Map<string, number>()
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const executed: string[] = []
+  const executedArgs: Array<{ id: string; args: unknown[] }> = []
   const items: FakeStatusBarItem[] = []
   const clipboard: string[] = []
   const messages: RecordedMessage[] = []
@@ -321,6 +324,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       },
       executeCommand(id: string, ...args: unknown[]): Promise<unknown> {
         executed.push(id)
+        executedArgs.push({ id, args })
         const fn = handlers.get(id)
         // An unknown id is a workbench command (openSettings, view focus): a no-op here.
         if (!fn) return Promise.resolve(undefined)
@@ -438,6 +442,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     log,
     registered,
     executed,
+    executedArgs,
     items,
     clipboard,
     messages,
@@ -471,6 +476,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       registered.clear()
       handlers.clear()
       executed.length = 0
+      executedArgs.length = 0
       items.length = 0
       clipboard.length = 0
       messages.length = 0

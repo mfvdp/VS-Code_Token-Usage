@@ -129,6 +129,7 @@ export type WebviewMessage =
   | { type: 'setHourZone'; zone: 'local' | 'utc' }
   | { type: 'drill'; day: string | null }
   | { type: 'toggleSection'; key: DashboardSectionKey }
+  | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
   | { type: 'command'; id: WebviewCommandId }
 
@@ -232,6 +233,12 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'toggleSection':
       return typeof m.key === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(m.key)
         ? { type: 'toggleSection', key: m.key as DashboardSectionKey }
+        : null
+    // The gear in a section header. It names a section, never a setting: which settings that
+    // section is worth filtering the editor to is decided here, not in the webview.
+    case 'openSectionSettings':
+      return typeof m.key === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(m.key)
+        ? { type: 'openSectionSettings', key: m.key as DashboardSectionKey }
         : null
     case 'refresh':
       return { type: 'refresh' }

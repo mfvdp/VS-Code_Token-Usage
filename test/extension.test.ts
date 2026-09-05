@@ -278,6 +278,35 @@ function lastMarkdown(): string {
   return doc.text
 }
 
+/**
+ * The dashboard's own message channel: the provider the extension registered, resolved
+ * against a fake webview view, so a test can send exactly what the page would send.
+ */
+function dashboardPost(): (m: unknown) => void {
+  const provider = state.webviewProviders.get('tokenPace.dashboard') as
+    { resolveWebviewView(view: unknown): void } | undefined
+  assert.ok(provider, 'the dashboard view provider was not registered')
+  const sink: Array<(m: unknown) => void> = []
+  provider.resolveWebviewView({
+    visible: true,
+    webview: {
+      options: {},
+      html: '',
+      onDidReceiveMessage(fn: (m: unknown) => void): { dispose(): void } {
+        sink.push(fn)
+        return { dispose: () => undefined }
+      },
+      postMessage: () => Promise.resolve(true),
+      cspSource: '',
+    },
+    onDidChangeVisibility: () => ({ dispose: () => undefined }),
+    onDidDispose: () => ({ dispose: () => undefined }),
+    show: () => undefined,
+  })
+  assert.equal(sink.length, 1, 'the dashboard did not subscribe to its webview')
+  return sink[0]
+}
+
 /** Snapshot fields that must not depend on which thread did the scanning. */
 function bucketFingerprint(file: string): string[] {
   const snap = JSON.parse(fs.readFileSync(file, 'utf8')) as {
@@ -426,6 +455,28 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
   // An unknown preset is ignored rather than accepted as a custom range.
   await state.execute('tokenPace.setRange', 'not-a-range')
   assert.equal((ctx.globalState.get<{ range: string }>('tokenPace.ui') ?? { range: '' }).range, '7d')
+
+  // --- the gear in a section header opens that section's settings --------------
+  const post = dashboardPost()
+  const openings = (): Array<{ id: string; args: unknown[] }> =>
+    state.executedArgs.filter((c) => c.id === 'workbench.action.openSettings')
+  const before = openings().length
+  post({ type: 'openSectionSettings', key: 'tools' })
+  const opened = openings()
+  assert.equal(opened.length, before + 1, 'the gear did not open the settings')
+  // One `@id:` filter naming real settings — not a search term, and not the whole extension.
+  assert.deepEqual(opened[opened.length - 1].args,
+    ['@id:tokenPace.retentionDays,tokenPace.dashboard.sections'])
+  post({ type: 'openSectionSettings', key: 'quota' })
+  const quota = String(openings()[openings().length - 1].args[0])
+  assert.match(quota, /^@id:tokenPace\./)
+  assert.ok(quota.includes('tokenPace.quotaSource'), quota)
+  assert.ok(quota.endsWith('tokenPace.dashboard.sections'), quota)
+  // A key that is not a section, or a setting id smuggled in as one, never reaches a command.
+  for (const key of ['tokenPace.debug', 'controls', 42]) {
+    post({ type: 'openSectionSettings', key })
+  }
+  assert.equal(openings().length, before + 2, 'a message outside the allow-list opened settings')
 
   // --- the QuickPick view -----------------------------------------------------
   await state.execute('tokenPace.showUsageQuickPick')

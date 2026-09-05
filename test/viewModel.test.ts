@@ -444,6 +444,28 @@ test('parseWebviewMessage accepts exactly the documented shapes', () => {
   assert.deepEqual(parseWebviewMessage({ type: 'refresh' }), { type: 'refresh' })
   assert.deepEqual(parseWebviewMessage({ type: 'command', id: 'tokenPace.rescan' }),
     { type: 'command', id: 'tokenPace.rescan' })
+  assert.deepEqual(parseWebviewMessage({ type: 'openSectionSettings', key: 'quota' }),
+    { type: 'openSectionSettings', key: 'quota' })
+})
+
+test('the section gear names a section, never a setting', () => {
+  // The webview may ask for one of the sections it renders; which settings that section is
+  // made of is decided in the extension, so a message can never point the settings editor at
+  // something the page made up.
+  for (const key of DASHBOARD_SECTION_KEYS) {
+    assert.deepEqual(parseWebviewMessage({ type: 'openSectionSettings', key }),
+      { type: 'openSectionSettings', key })
+  }
+  for (const raw of [{ type: 'openSectionSettings' },
+    { type: 'openSectionSettings', key: 'tokenPace.debug' },
+    { type: 'openSectionSettings', key: 'controls' },
+    { type: 'openSectionSettings', key: 7 }]) {
+    assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
+  }
+  // Opening the settings changes no view state, so the UI state comes back unchanged — by
+  // identity, which is what tells the caller there is nothing to persist.
+  const ui = defaultUiState(cfg)
+  assert.equal(applyMessage(ui, { type: 'openSectionSettings', key: 'kpis' }), ui)
 })
 
 test('parseWebviewMessage drops everything else', () => {

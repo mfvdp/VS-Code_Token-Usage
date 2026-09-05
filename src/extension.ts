@@ -46,6 +46,7 @@ import { CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE, configureQuotaFiles } from './quot
 import { QuotaHistory } from './quotaHistory'
 import { QuotaManager, QuotaOptions } from './quotaManager'
 import { scan, ScanContext } from './scan'
+import { sectionSettingsQuery } from './sectionSettings'
 import { Role, showMenu, StatusBar } from './statusbar'
 import { USAGE_PAGE } from './statusText'
 import {
@@ -344,6 +345,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     if (m.type === 'command') {
       void vscode.commands.executeCommand(m.id)
+      return
+    }
+    // The gear of a section header: the settings editor, filtered to the settings that
+    // decide what that section shows. Nothing about the view changes, so nothing is stored.
+    if (m.type === 'openSectionSettings') {
+      void vscode.commands.executeCommand('workbench.action.openSettings', sectionSettingsQuery(m.key))
       return
     }
     const next = applyMessage(ui, m)

@@ -294,7 +294,7 @@ writes no file, and never mixes with the live items.
 *Token Pace: Open Dashboard* (`ctrl+alt+shift+t`, `cmd+alt+shift+t` on macOS, unless
 `tokenPace.keybindings` is off) opens the panel in the secondary sidebar. It needs
 **VS Code 1.106 or newer**, for the reason given at the top of this file.
-`tokenPace.dashboard.sections` is an ordered array — the array order is the render order. The range, provider and model chips filter the statistics, not the quota cards, so the filter bar sits below every `quota` and `context` card that leads the list and above the first section the filter applies to:
+`tokenPace.dashboard.sections` is an ordered array — the array order is the render order. Every section is set off from the one above it by a rule and a fixed gap, whether it is folded or not, and its header carries a gear that opens the settings behind that section. The range, provider and model chips filter the statistics, not the quota cards, so the filter bar sits below every `quota` and `context` card that leads the list and above the first section the filter applies to:
 
 | Section | Contents |
 |---|---|
@@ -319,16 +319,24 @@ Defaults omit `context`, `records`, `tools`, `budget`, `history`, `projects` and
 empty until attribution is switched on and say so instead of showing an empty table, and
 `context` says how a reading could be had instead of inventing one.
 
-**Ranges.** Chips for `today`, `yesterday`, `7d`, `30d`, `90d`, `thisWeek`, `thisMonth`,
-`lastMonth`, `year`, `all`, plus two date fields for a custom range (capped at five years, and
-a reversed range is swapped rather than returned empty). The date fields stay hidden until you
-open them with the `custom…` chip, or until the range actually is a custom one, so the common
-case is chips only. `dashboard.defaultRange` is the
-starting point; the range you pick is remembered for the session. `all` starts at the first
-day actually ingested, never earlier.
+**The filter bar.** One labelled block with a row each for **Range**, **Providers** and
+**Models**: the labels share a column, so the chips of all three rows start at the same place
+instead of running on as one paragraph of buttons. The range in words (`Last 30 days ·
+2026-08-06 → 2026-09-05`) ends the range row, and the refresh button sits at its right end as
+an icon.
 
-**Filters and sorting.** Provider toggles, up to twelve model chips — folded behind a
-`models (N)` toggle above four, because a long chip row pushes the figures off the panel — and a
+**Ranges.** Chips for `today`, `7d` and `30d` are on the bar; `yesterday`, `90d`, `thisWeek`,
+`thisMonth`, `lastMonth`, `year` and `all` are one `more ▾` chip away (`fewer ▴` puts them
+back, and a range you have selected stays visible whatever the fold says). Two date fields
+give a custom range (capped at five years, and a reversed range is swapped rather than
+returned empty); they stay hidden until you open them with the `custom…` chip, or until the
+range actually is a custom one, so the common case is chips only. `dashboard.defaultRange` is
+the starting point; the range you pick is remembered for the session. `all` starts at the
+first day actually ingested, never earlier.
+
+**Filters and sorting.** Provider toggles, up to twelve model chips — above four the row is
+one `models (N) ▾` chip until you open it, because a long chip row pushes the figures off the
+panel, and a model you are filtering on stays on the bar either way — and a
 model table sortable by every column it shows (`model`, `usage`, `freshInput`, `cacheWrite5m`,
 `cacheWrite1h`, `cacheRead`, `output`, `reasoning`, `requests`, `cacheHit`, `perRequest`, `cost`,
 `share`, ascending or descending).
@@ -342,6 +350,13 @@ time and UTC.
 of the view state (range, sort, filters), so a panel you have trimmed to two sections opens that
 way again. `tokenPace.dashboard.sections` decides what exists at all; collapsing decides what
 you look at today.
+
+**The gear in a section header.** Opens the settings editor filtered to the settings that
+section is made of — the quota gear to the quota sources, the poll interval and the pace
+settings, the models gear to the row cap and the price table, and so on; every list ends with
+`tokenPace.dashboard.sections`. It never toggles the fold, with the mouse or with the
+keyboard, and it changes nothing on its own: it opens the settings you would otherwise have
+to find among all of them.
 
 **Peak hours.** No fixed peak windows are built in. The profile is drawn from your own hour
 buckets and nothing else, and rolled-up days that no longer have an hour are named as excluded

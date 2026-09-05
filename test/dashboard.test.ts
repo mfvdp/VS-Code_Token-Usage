@@ -136,22 +136,11 @@ function card(over: Record<string, unknown> = {}): Record<string, unknown> {
   }
 }
 
-function forecastCard(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    source: 'claude', windowId: 'session:300', label: '5 h',
-    forecast: {
-      state: 'eta', ratePerHour: 4, etaMs: null, endPercent: 90, sustainablePerHour: 3,
-      confidence: 'medium', basis: { samples: 9, spanMs: 3600_000 }, text: '~90 % at the reset',
-    },
-    lockout: null, resetForecast: null, spark: [], gaps: 0, ...over,
-  }
-}
-
 function model(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     generatedAt: '2026-09-03 12:00',
     now: 0,
-    sections: ['quota', 'forecast'],
+    sections: ['quota', 'history'],
     showCost: true,
     pricing: { asOf: '2026-09-02', custom: false, showList: false },
     range: { from: '2026-08-05', to: '2026-09-03', label: 'Last 30 days', preset: '30d', presets: ['7d', '30d'] },
@@ -189,18 +178,9 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
       weekdayLabels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       zone: 'local', days: 7, note: null,
     },
-    forecasts: [forecastCard()],
     retro: [{ source: 'claude', windowId: 'session:300', label: '5 h', retro: null, text: 'peaked at 61 %' }],
-    windowUsage: [{
-      source: 'codex', windowId: 'session:300', label: '5 h', usage: '1.2M', cost: '$1.50',
-      requests: '30', complete: true,
-    }],
     projects: { rows: [], enabled: false },
     sessions: { rows: [], enabled: false, cacheStates: [] },
-    attributionInWindow: [{
-      source: 'claude', windowId: 'session:300', label: '5 h',
-      rows: [{ label: 'token-pace', share: '80 %', usage: '1.0M' }], unexplained: 'nothing unexplained',
-    }],
     dataQuality: null,
     unpricedModels: [],
     familyPriced: [],
@@ -333,26 +313,16 @@ test('a dropdown is painted by the theme, its popup included', () => {
 test('a heading breaks at its separator, never inside the window label', () => {
   assert.match(STYLE, /\.nobr \{ white-space: nowrap/)
   // "Claude Code · 7 d" at 300 px used to wrap between the "7" and the "d".
-  const f = render('sForecast()', {
-    forecasts: [forecastCard({ label: '7 d' })],
-    windowUsage: [{
-      source: 'codex', windowId: 'weekly:10080', label: '7 d', usage: '1.2M', cost: '$1.50',
-      requests: '30', complete: true,
-    }],
-    attributionInWindow: [{
-      source: 'claude', windowId: 'weekly:10080', label: '7 d',
-      rows: [], unexplained: 'nothing unexplained',
-    }],
-  })
-  assert.ok(f.indexOf(heading('Claude Code', '7 d')) >= 0, f)
-  assert.ok(f.indexOf(heading('Codex', '7 d')) >= 0, f)
-  // Every heading that carries a window label: the forecast card, the usage row and the
-  // attribution card from that render, and the reset history from its own.
-  assert.equal(f.split('class="nobr"').length - 1, 6, f)
   const h = render('sHistory()', {
-    retro: [{ source: 'claude', windowId: 'weekly:10080', label: '7 d', retro: null, text: 'x' }],
+    retro: [
+      { source: 'claude', windowId: 'weekly:10080', label: '7 d', retro: null, text: 'x' },
+      { source: 'codex', windowId: 'weekly:10080', label: '7 d', retro: null, text: 'y' },
+    ],
   })
   assert.ok(h.indexOf('<b>' + heading('Claude Code', '7 d') + '</b>') >= 0, h)
+  assert.ok(h.indexOf('<b>' + heading('Codex', '7 d') + '</b>') >= 0, h)
+  // Both parts of both headings are unbreakable; nothing else in the block is.
+  assert.equal(h.split('class="nobr"').length - 1, 4, h)
 })
 
 test('no composition slice borrows a colour that already means something else', () => {
@@ -371,6 +341,101 @@ test('no composition slice borrows a colour that already means something else', 
     assert.equal(seen.indexOf(body), -1, '.cs.c' + i + ' repeats an earlier fill: ' + body)
     seen.push(body)
   }
+})
+
+/** The six composition parts of one provider, with the numbers a test wants to see again. */
+function comp(source = 'claude'): Record<string, unknown> {
+  return {
+    source,
+    parts: [
+      { key: 'freshInput', tokens: 1000, text: 'Fresh input' },
+      { key: 'cacheWrite5m', tokens: 2000, text: 'Cache write 5m' },
+      { key: 'cacheWrite1h', tokens: 500, text: 'Cache write 1h' },
+      { key: 'cacheRead', tokens: 96_000, text: 'Cache read' },
+      { key: 'output', tokens: 500, text: 'Output' },
+      { key: 'reasoning', tokens: 200, text: 'Reasoning (of output)' },
+    ],
+  }
+}
+
+/** A view model with a composition bar and the calendar block `sTokens` reads after it. */
+function tokensVm(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const period = { label: 'p', usage: '1K', cost: '~$1', requests: '1', activeDays: 1, avgPerDay: '1K' }
+  return {
+    totals: [],
+    composition: [comp()],
+    cacheEconomy: [],
+    calendar: {
+      thisWeek: period,
+      thisMonth: { ...period, projection: null, projectionBasis: null },
+      lastMonth: period,
+      year: period,
+    },
+    planFactor: [],
+    ...over,
+  }
+}
+
+test('the cache chips sit above the composition bars and say which mode is on', () => {
+  const h = render('sTokens()', tokensVm())
+  const chips = h.indexOf('data-act="compositionCache"')
+  const bar = h.indexOf('class="compbar"')
+  assert.ok(chips >= 0, h)
+  assert.ok(chips < bar, 'the switch is below the bar it governs')
+  assert.ok(h.indexOf('<span class="meta">cache</span>') >= 0, h)
+  assert.ok(h.indexOf('data-act="compositionCache" data-mode="all" aria-pressed="true">shown') >= 0, h)
+  assert.ok(h.indexOf('data-act="compositionCache" data-mode="noCache" aria-pressed="false">hidden') >= 0, h)
+
+  const off = render('sTokens()', tokensVm({
+    ui: { providers: ['claude'], models: [], collapsed: [], compositionCache: 'noCache' },
+  }))
+  assert.ok(off.indexOf('data-act="compositionCache" data-mode="noCache" aria-pressed="true">hidden') >= 0, off)
+})
+
+test('hiding the cache drops its parts, rescales the rest and says what is missing', () => {
+  const all = render('sTokens()', tokensVm())
+  // Every counted part is drawn, reasoning excepted — it is a subset of output.
+  assert.equal(all.split('class="cs ').length - 1, 5, all)
+  assert.ok(all.indexOf('Cache read: 96,000 · 96 %') >= 0, all)
+  assert.ok(all.indexOf('without cache') === -1, all)
+
+  const off = render('sTokens()', tokensVm({
+    ui: { providers: ['claude'], models: [], collapsed: [], compositionCache: 'noCache' },
+  }))
+  assert.equal(off.split('class="cs ').length - 1, 2, off)
+  assert.equal(off.indexOf('Cache read'), -1, off)
+  assert.equal(off.indexOf('Cache write 5m'), -1, off)
+  assert.equal(off.indexOf('Cache write 1h'), -1, off)
+  // 1000 of the 1500 tokens still on screen: the share is a share of what is drawn.
+  assert.ok(off.indexOf('Fresh input: 1,000 · 67 %') >= 0, off)
+  assert.ok(off.indexOf('without cache · 96,000 tokens cache read and 2,500 cache write not shown') >= 0, off)
+})
+
+test('the two window rows carry their span as the tooltip of the label', () => {
+  const row = (over: Record<string, unknown>): Record<string, unknown> => ({
+    label: 'Current 5 h window', usage: '1.5K', freshInput: '1K', cacheWrite5m: '–',
+    cacheWrite1h: '–', cacheRead: '–', output: '500', reasoning: '–', requests: '1',
+    cacheHit: '–', perRequest: '1.5K', cost: '~$0.01', costPartial: false, incomplete: false,
+    approx: false, spanText: '09:00 → now', ...over,
+  })
+  const h = render('sTokens()', tokensVm({
+    totals: [{ source: 'claude', title: 'Claude Code', rows: [row({}), row({ label: 'Today', spanText: '2026-09-03', approx: false })] }],
+  }))
+  assert.ok(h.indexOf('<td data-h="Period" title="09:00 → now">Current 5 h window</td>') >= 0, h)
+  assert.ok(h.indexOf('<td data-h="Period" title="2026-09-03">Today</td>') >= 0, h)
+  // Nothing is approximate, so the caveat is not printed.
+  assert.equal(h.indexOf('rolled up into day totals'), -1, h)
+
+  const approx = render('sTokens()', tokensVm({
+    totals: [{
+      source: 'claude',
+      title: 'Claude Code',
+      rows: [row({ approx: true, usage: '≈1.5K' }), row({ label: 'Today' })],
+    }],
+  }))
+  // Once per table, however many rows carry the mark.
+  assert.equal(approx.split('rolled up into day totals').length - 1, 1, approx)
+  assert.ok(approx.indexOf('≈ marks a span whose oldest hours are already rolled up into day totals') >= 0, approx)
 })
 
 test('the cost line wears no colour a stacked band wears', () => {
@@ -690,84 +755,6 @@ test('an unknown display state prints nothing rather than its identifier', () =>
   assert.equal(/function|\[object/.test(src), false, src)
 })
 
-test('a full window says so instead of showing a lone dash', () => {
-  const full = (text: string): string => render('sForecast()', {
-    windowUsage: [], attributionInWindow: [],
-    forecasts: [forecastCard({
-      forecast: {
-        state: 'full', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: null,
-        confidence: null, basis: null, text,
-      },
-    })],
-  })
-  const h = full('full until the reset')
-  assert.ok(h.indexOf('full until the reset') >= 0, h)
-  assert.equal(h.indexOf('>–<'), -1, h)
-  assert.equal(h.indexOf('—'), -1, h)
-  assert.equal(h.indexOf('resetsFirst'), -1, h)
-  // A window whose reset time is not known says the shorter sentence, and the card prints
-  // that one: the webview has no sentence of its own to fall back on, because the one it
-  // had ("Full until the reset.") asserted a reset that may not exist.
-  const bare = full('full')
-  assert.ok(bare.indexOf('>full<') >= 0, bare)
-  assert.equal(bare.indexOf('until the reset'), -1, bare)
-  // …and the head does not say the same word over it: one "full" per card.
-  assert.equal(bare.split('>full<').length - 1, 1, bare)
-  // And with no text at all the state word in the head is the whole statement.
-  const silent = full('')
-  assert.equal(silent.indexOf('Full until the reset'), -1, silent)
-  assert.equal(silent.indexOf('>–<'), -1, silent)
-  assert.ok(silent.indexOf('>full</span>') >= 0, silent)
-})
-
-test('the Forecast section prints a measuring forecast as its state word, never as a sentence', () => {
-  // The model hands the row a measuring forecast with its sentence blanked, exactly as it hands
-  // the quota card one; the section prints the state word in the head and no body under it.
-  const h = render('sForecast()', {
-    windowUsage: [], attributionInWindow: [],
-    forecasts: [forecastCard({
-      forecast: {
-        state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: 20,
-        confidence: null, basis: { samples: 2, spanMs: 60_000 }, text: '',
-      },
-    })],
-  })
-  assert.ok(h.indexOf('<span class="meta">measuring</span>') >= 0, h)
-  assert.equal((h.match(/measuring/g) || []).length, 1, h)
-  assert.equal(/readings? over|just reset|just started|%\/h/.test(h), false, h)
-  assert.ok(h.indexOf('2 readings') >= 0, h)
-})
-
-test('a forecast with nothing to say still says so', () => {
-  // `none` is what an unlimited window and a fresh install both produce, and the state word
-  // for it is deliberately empty — so the card would otherwise be a name and a blank line.
-  const h = render('sForecast()', {
-    windowUsage: [], attributionInWindow: [],
-    forecasts: [forecastCard({
-      forecast: {
-        state: 'none', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: null,
-        confidence: null, basis: null, text: '',
-      },
-    })],
-  })
-  assert.ok(h.indexOf(heading('Claude Code', '5 h')) >= 0, h)
-  assert.ok(h.indexOf('>–<') >= 0, h)
-  assert.equal(h.indexOf('none'), -1, h)
-  // A state that does have a word carries the statement itself; no dash beside it.
-  for (const state of ['measuring', 'idle', 'stale']) {
-    const worded = render('sForecast()', {
-      windowUsage: [], attributionInWindow: [],
-      forecasts: [forecastCard({
-        forecast: {
-          state, ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: null,
-          confidence: null, basis: null, text: '',
-        },
-      })],
-    })
-    assert.equal(worded.indexOf('>–<'), -1, state + ': ' + worded)
-  }
-})
-
 test('a window whose reset has passed is not told it is full', () => {
   // The bar is painted neutral because the percentage predates the reset; a forecast built
   // on the same percentage must not assert it as a fact one line below.
@@ -801,31 +788,6 @@ test('a window whose reset has passed is not told it is full', () => {
   assert.ok(full.indexOf('full until the reset in 3 h') >= 0, full)
 })
 
-test('the forecast meta line never starts with a separator', () => {
-  const h = render('sForecast()', {
-    forecasts: [forecastCard({
-      lockout: null, resetForecast: null, gaps: 0,
-      forecast: {
-        state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null,
-        sustainablePerHour: null, confidence: null, basis: { samples: 9, spanMs: 1 }, text: 'measuring',
-      },
-    })],
-  })
-  assert.equal(/"meta">\s*·/.test(h), false, h)
-  assert.ok(h.indexOf('9 readings') >= 0, h)
-  // Nothing to say at all leaves the line out rather than printing an empty one.
-  const bare = render('sForecast()', {
-    forecasts: [forecastCard({
-      lockout: null, resetForecast: null, gaps: 0,
-      forecast: {
-        state: 'idle', ratePerHour: 0, etaMs: null, endPercent: null, sustainablePerHour: null,
-        confidence: null, basis: null, text: 'idle',
-      },
-    })],
-  })
-  assert.equal(/<div class="meta"><\/div>/.test(bare), false, bare)
-})
-
 test('the footer prints "Prices as of" exactly once, whichever side carries it', () => {
   const withNote = render('sFooter()')
   assert.equal(withNote.split('Prices as of').length - 1, 1, withNote)
@@ -840,19 +802,17 @@ test('the footer prints "Prices as of" exactly once, whichever side carries it',
 // ---------------------------------------------------------------------------
 
 test('every window that stands on its own says whose window it is', () => {
-  const f = render('sForecast()', {
-    forecasts: [forecastCard(), forecastCard({ source: 'codex' })],
-  })
   const claude = heading('Claude Code', '5 h')
-  assert.ok(f.indexOf(claude) >= 0, f)
-  assert.ok(f.indexOf(heading('Codex', '5 h')) >= 0, f)
-  // The window usage table and the attribution heading, from the same render.
-  assert.ok(f.indexOf('data-h="Window">' + heading('Codex', '5 h')) >= 0, f)
-  assert.ok(f.indexOf('"name">' + claude) >= 0, f)
-  // The heading is the label, never the internal id.
-  assert.equal(f.indexOf('session:300'), -1, f)
-  const h = render('sHistory()')
+  const h = render('sHistory()', {
+    retro: [
+      { source: 'claude', windowId: 'session:300', label: '5 h', retro: null, text: 'peaked at 61 %' },
+      { source: 'codex', windowId: 'session:300', label: '5 h', retro: null, text: 'peaked at 12 %' },
+    ],
+  })
   assert.ok(h.indexOf('<b>' + claude + '</b>') >= 0, h)
+  assert.ok(h.indexOf('<b>' + heading('Codex', '5 h') + '</b>') >= 0, h)
+  // The heading is the label, never the internal id.
+  assert.equal(h.indexOf('session:300'), -1, h)
 })
 
 test('the provider is named, not keyed, wherever the reader sees it', () => {
@@ -919,39 +879,6 @@ test('the model stack colours by position, names every band and still drills int
   assert.ok(byProvider.indexOf('<i class="dot claude"></i>Claude Code') >= 0, byProvider)
   assert.ok(byProvider.indexOf('<option value="provider" selected>by provider</option>') >= 0, byProvider)
   assert.equal(byProvider.indexOf('class="seg s0"'), -1, byProvider)
-})
-
-test('the forecast head prints the confidence only where the sentence has not', () => {
-  const head = (over: Record<string, unknown>): string => {
-    const h = render('sForecast()', {
-      windowUsage: [], attributionInWindow: [],
-      forecasts: [forecastCard({ forecast: {
-        state: 'eta', ratePerHour: 4, etaMs: null, endPercent: 90, sustainablePerHour: 3,
-        confidence: 'medium', basis: null, ...over,
-      } })],
-    })
-    assert.equal(h.split('medium confidence').length - 1, 1, h)
-    return h
-  }
-  // The eta sentence already ends with the confidence; the head beside it says the state only.
-  const eta = head({ text: '~empty in 5 h (17:00) \u00b7 medium confidence' })
-  assert.ok(eta.indexOf('<span class="meta">projected</span>') >= 0, eta)
-  assert.ok(eta.indexOf('~empty in 5 h (17:00) \u00b7 medium confidence') >= 0, eta)
-  // A sentence that does not say it — "resets first", "idle" — still gets it from the head.
-  const first = head({ state: 'resetsFirst', text: '~ends at 90 % when it resets' })
-  assert.ok(first.indexOf('resets first \u00b7 medium confidence') >= 0, first)
-})
-
-test('a missing source or label degrades to what is there', () => {
-  const h = render('sForecast()', {
-    forecasts: [],
-    windowUsage: [],
-    attributionInWindow: [{
-      windowId: 'weekly_opus:10080', rows: [], unexplained: '–',
-    }],
-  })
-  assert.ok(h.indexOf('weekly_opus:10080') >= 0, h)
-  assert.equal(h.indexOf('undefined'), -1, h)
 })
 
 // ---------------------------------------------------------------------------
@@ -1299,18 +1226,18 @@ function renderPage(over: Record<string, unknown> = {}): string {
 }
 
 test('every section is a fold the keyboard can reach, open unless the reader closed it', () => {
-  const open = renderPage({ sections: ['quota', 'forecast'] })
+  const open = renderPage({ sections: ['quota', 'history'] })
   // A native <details>: focusable, announced as expandable, and toggled with Enter or Space
   // without a line of ARIA from us.
   assert.ok(open.indexOf('<details open><summary data-act="section" data-key="quota"><h2>Quota</h2></summary>') >= 0, open)
   assert.equal(open.split('<details').length - 1, 2)
 
-  const folded = renderPage({ sections: ['quota', 'forecast'], ui: { providers: ['claude'], models: [], collapsed: ['quota'] } })
+  const folded = renderPage({ sections: ['quota', 'history'], ui: { providers: ['claude'], models: [], collapsed: ['quota'] } })
   assert.ok(folded.indexOf('<details><summary data-act="section" data-key="quota"') >= 0, folded)
   // Folded, not dropped: the body is still in the document, so a section update writes into
   // it whether the reader has it open or not.
   assert.ok(folded.indexOf('<div data-body="quota">') >= 0, folded)
-  assert.ok(folded.indexOf('<details open><summary data-act="section" data-key="forecast"') >= 0, folded)
+  assert.ok(folded.indexOf('<details open><summary data-act="section" data-key="history"') >= 0, folded)
 })
 
 test('the filter bar sits below the quota cards and above the first section it filters', () => {
@@ -1471,7 +1398,7 @@ test('a clipped table is announced once the browser has measured it', () => {
 // ---------------------------------------------------------------------------
 
 test('no renderer invents a number or leaks an undefined', () => {
-  const calls = ['sQuota()', 'sForecast()', 'sHistory()', 'sChart()', 'sHours()', 'sHeatmap()',
+  const calls = ['sQuota()', 'sHistory()', 'sChart()', 'sHours()', 'sHeatmap()',
     'sFooter()', 'controls()']
   for (const call of calls) {
     const h = render(call)
@@ -1482,7 +1409,7 @@ test('no renderer invents a number or leaks an undefined', () => {
 test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
     'model', 'clearModels', 'moreModels', 'section', 'heatmapMetric', 'hourZone', 'drill',
-    'costLine', 'metric', 'chartStack']) {
+    'costLine', 'metric', 'chartStack', 'compositionCache']) {
     assert.ok(SCRIPT.indexOf('data-act="' + act + '"') >= 0, act)
   }
   for (const role of ['from', 'to']) {

@@ -313,6 +313,21 @@ test('the provider outranks the setting, and a configured name says that it is o
   assert.equal(planText({ name: 'Max 20x', from: 'configured' }), 'plan Max 20x (as configured)')
 })
 
+test('a stored dashboard section that no longer exists is dropped, not shown', () => {
+  // 1.2.1 shipped a `forecast` section; a settings file written then still names it. The
+  // sanitizer drops it in silence — the rest of the list is the user's order and stays.
+  const sections = properties['tokenPace.dashboard.sections'].items?.enum ?? []
+  assert.equal(sections.includes('forecast'), false, 'forecast is still a contributed section')
+  assert.equal((properties['tokenPace.dashboard.sections'].default as string[]).includes('forecast'), false)
+  assert.deepEqual(
+    sanitize({ 'tokenPace.dashboard.sections': ['quota', 'forecast', 'tokens'] }).dashboard.sections,
+    ['quota', 'tokens'],
+  )
+  // The status-bar entry of the same name is a different thing and is still contributed.
+  const bar = properties['tokenPace.statusBar.show'].items?.enum ?? []
+  assert.ok(bar.includes('forecast'), 'the status bar lost its forecast entry')
+})
+
 test('the context entry and the context section are contributed but not switched on', () => {
   const bar = properties['tokenPace.statusBar.show'].items?.enum ?? []
   assert.ok(bar.includes('context'), 'statusBar.show cannot show the context window')

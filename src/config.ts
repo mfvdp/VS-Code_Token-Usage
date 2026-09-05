@@ -155,7 +155,7 @@ export type TooltipMode = 'full' | 'compact' | 'off'
 
 export type DashboardSection =
   | 'summary' | 'quota' | 'context' | 'kpis' | 'tokens' | 'chart' | 'models' | 'heatmap'
-  | 'hours' | 'records' | 'tools' | 'budget' | 'forecast' | 'history' | 'projects'
+  | 'hours' | 'records' | 'tools' | 'budget' | 'history' | 'projects'
   | 'sessions' | 'dataQuality'
 export type DefaultRange =
   | 'today' | '7d' | '30d' | '90d' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'year' | 'all'
@@ -202,7 +202,7 @@ const SUMMARY_SCOPES: readonly SummaryScope[] = ['both', 'claude', 'codex']
 const TOOLTIP_MODES: readonly TooltipMode[] = ['full', 'compact', 'off']
 const DASHBOARD_SECTIONS: readonly DashboardSection[] = [
   'quota', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap',
-  'hours', 'records', 'tools', 'budget', 'forecast', 'history', 'projects', 'sessions',
+  'hours', 'records', 'tools', 'budget', 'history', 'projects', 'sessions',
   'dataQuality',
 ]
 const DEFAULT_RANGES: readonly DefaultRange[] = [
@@ -226,7 +226,7 @@ const ALERT_WINDOW_CONDITIONS: readonly AlertWindowCondition[] = ['any', 'sessio
 const DEFAULT_STATUS_BAR: readonly StatusBarEntry[] = ['claudeQuota', 'codexQuota', 'tokens']
 /** The quota cards first — the reading a glance is for — and the statistics beneath them. */
 const DEFAULT_SECTIONS: readonly DashboardSection[] = [
-  'quota', 'summary', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours', 'forecast', 'dataQuality',
+  'quota', 'summary', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours', 'dataQuality',
 ]
 const DEFAULT_CLAUDE_SOURCES: readonly ClaudeSourceId[] = ['cacheFile', 'statusline', 'claudeJson', 'poll']
 const DEFAULT_CODEX_SOURCES: readonly CodexSourceId[] = ['cacheFile', 'transcript', 'poll']

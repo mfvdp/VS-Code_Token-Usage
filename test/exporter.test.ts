@@ -171,7 +171,7 @@ test('the clipboard summary prints no measuring sentence and describes the gaps 
   assert.ok(md.includes('| 5 h | 3% | 0 % | – |'), md)
   // The gap footnote says what the sparkline does with a hole: bridged without a reset inside,
   // open across one — not the "drawn broken" of the old one-notch-per-reading line.
-  assert.ok(vm.forecasts.some((f) => f.gaps > 0), 'the fixture has a gap')
+  assert.ok(vm.quotas.some((q) => q.windows.some((w) => w.gaps > 0)), 'the fixture has a gap')
   assert.match(md, /gap\(s\) in the last 24 h; a hole with no reset inside it is bridged by a dashed line, a hole across a reset stays open\./)
   assert.equal(md.includes('drawn broken'), false)
 })

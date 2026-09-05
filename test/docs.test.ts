@@ -32,7 +32,7 @@ interface Property {
   enum?: string[]
   enumDescriptions?: string[]
   markdownDescription?: string
-  items?: { minimum?: number; maximum?: number }
+  items?: { minimum?: number; maximum?: number; enum?: string[] }
 }
 
 /**
@@ -435,6 +435,21 @@ test('every contributed setting has a row in the README settings tables', () => 
     const short = key.replace(/^tokenPace\./, '')
     assert.ok(SETTINGS.includes(`| \`${short}\` |`), `the README settings tables have no row for ${key}`)
   }
+})
+
+test('the README section table lists exactly the sections the panel contributes', () => {
+  // A section removed from the manifest but left in the table is a promise the build does not
+  // keep — and one added without a row is a section nobody can find out about.
+  const table = README.slice(README.indexOf('| Section | Contents |'), README.indexOf('\nDefaults omit'))
+  assert.ok(table.length > 0, 'the README has no section table any more')
+  const listed = [...table.matchAll(/^\| `([a-zA-Z]+)` \| /gm)].map((m) => m[1])
+  const contributed = properties['tokenPace.dashboard.sections'].items?.enum ?? []
+  assert.deepEqual([...listed].sort(), [...contributed].sort())
+  // And the sentence under it names every section the default leaves out, and only those.
+  const omitted = [...README.slice(README.indexOf('\nDefaults omit'), README.indexOf('\nDefaults omit') + 240)
+    .matchAll(/`([a-zA-Z]+)`/g)].map((m) => m[1])
+  const shipped = properties['tokenPace.dashboard.sections'].default as string[]
+  assert.deepEqual([...new Set(omitted)].sort(), contributed.filter((k) => !shipped.includes(k)).sort())
 })
 
 test('the README states the defaults the manifest actually ships', () => {

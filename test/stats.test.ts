@@ -6,14 +6,13 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { usd } from '../src/render'
 import {
-  MIN_P90_SAMPLES, StatsCtx, attributionInWindow, cacheEconomy, cacheHitParts,
+  MIN_P90_SAMPLES, StatsCtx, cacheEconomy, cacheHitParts,
   cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil, planFactors,
-  projectPeriod, projectRows, sessionRows, totalRow, totalsFor, windowUsage,
+  projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
 } from '../src/stats'
-import { DayRange, rangeFor } from '../src/time'
+import { DayRange, dayOf, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
 import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
-import { claudeLine } from './fixtures/helpers'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -53,12 +52,27 @@ function single(over: Partial<Bucket>): Aggregator {
 }
 
 /** The same road as `single`, for a world that needs more than one bucket. */
-function fromBuckets(buckets: Bucket[]): Aggregator {
+function fromBuckets(buckets: Bucket[], rolledUp = false): Aggregator {
   const snap: Snapshot = {
     version: 5, buckets, cursors: {}, pending: {}, sessions: {}, attribution: 'none',
-    rollup: { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }, firstIngest: NOW - 86_400_000,
+    // A roll-up that has already run and keeps no hours at all: every span reaching into the
+    // past is then a lower bound, which is what puts the `≈` on a window row.
+    rollup: rolledUp
+      ? { lastRun: NOW, hourRetentionDays: 0, retentionDays: 400 }
+      : { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 },
+    firstIngest: NOW - 86_400_000,
   }
   return Aggregator.fromSnapshot(snap, 'none')
+}
+
+/** One hour bucket of Claude usage, `n` hours before NOW. */
+function hourBucket(hoursAgo: number, over: Partial<Bucket> = {}): Bucket {
+  const ms = NOW - hoursAgo * 3_600_000
+  return {
+    ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'h',
+      Math.floor(ms / 3_600_000), dayOf(ms, tcfg)),
+    input: 1000, output: 500, requests: 1, outputFinal: 1, ...over,
+  }
 }
 
 /** One session record with only the fields a test cares about filled in. */
@@ -540,9 +554,10 @@ test('the totals table never shows two rows with the same label', () => {
     assert.equal(new Set(labels).size, labels.length, `duplicate label for ${preset}`)
   }
   // The selected range *is* the fixed row, so the fixed one is dropped rather than printed
-  // twice: seven rows instead of eight, and the numbers stay where the reader expects them.
+  // twice, and the numbers stay where the reader expects them. Six calendar rows plus the
+  // two window rows every table carries.
   const thirty = totalsFor(ctx, 'claude', rangeFor('30d', NOW, tcfg), null, '2026-07-01')
-  assert.equal(thirty.length, 6)
+  assert.equal(thirty.length, 6 + 2)
   assert.equal(thirty[0].label, 'Last 30 days')
   assert.equal(thirty.filter((row) => row.label === 'Last 30 days').length, 1)
 
@@ -550,8 +565,77 @@ test('the totals table never shows two rows with the same label', () => {
   const custom = totalsFor(
     ctx, 'claude', rangeFor({ from: '2026-08-01', to: '2026-08-15' }, NOW, tcfg), null, '2026-07-01',
   )
-  assert.equal(custom.length, 6 + 1)
+  assert.equal(custom.length, 6 + 1 + 2)
   assert.equal(custom[0].label, '2026-08-01 → 2026-08-15')
+})
+
+test('the totals table leads its fixed rows with the two running windows', () => {
+  // Two hours of usage, one of them inside the reported five-hour window, both inside the week.
+  const ctx = ctxOf(fromBuckets([hourBucket(1), hourBucket(20)]), { sources: ['claude'] })
+  const windows = [
+    { id: 'session:300', label: '5 h', resetsAt: NOW + 2 * 3_600_000, windowMinutes: 300 },
+    { id: 'weekly_all:10080', label: '7 d', resetsAt: NOW + 3 * 86_400_000, windowMinutes: 10080 },
+  ]
+  const rows = totalsFor(ctx, 'claude', range('30d'), null, '2026-07-01', false, windows)
+  // Directly above 'Today': the spans a reader checks against the quota cards, then the calendar.
+  const labels = rows.map((r) => r.label)
+  assert.deepEqual(labels.slice(1, 4), ['Current 5 h window', 'Current 7 d window', 'Today'])
+
+  const five = rows[1]
+  // The window opened three hours ago, so only the newer of the two hours is in it.
+  assert.equal(five.usage, '1.5K')
+  assert.equal(five.requests, '1')
+  assert.equal(five.approx, false)
+  assert.equal(five.spanText, '09:00 → now')
+  const week = rows[2]
+  assert.equal(week.usage, '3K')
+  assert.equal(week.requests, '2')
+  // A span that started on an earlier day names the day, so the clock time is not ambiguous.
+  assert.equal(week.spanText, '2026-08-30 12:00 → now')
+})
+
+test('a provider that reports no window of that length gets a trailing span, named as one', () => {
+  const ctx = ctxOf(fromBuckets([hourBucket(1)]), { sources: ['claude'] })
+  const rows = totalsFor(ctx, 'claude', range('30d'), null, '2026-07-01')
+  assert.deepEqual(rows.slice(1, 3).map((r) => r.label), ['Last 5 h', 'Last 7 d'])
+  assert.equal(rows[1].spanText, '07:00 → now')
+  // A reported window without a reset time is not a window we can bound, so it falls back too.
+  const noReset = totalsFor(ctx, 'claude', range('30d'), null, '2026-07-01', false,
+    [{ id: 'session:300', label: '5 h', resetsAt: null, windowMinutes: 300 }])
+  assert.equal(noReset[1].label, 'Last 5 h')
+})
+
+test('a window row whose oldest hours are rolled up marks every figure it prints', () => {
+  const ctx = ctxOf(fromBuckets([hourBucket(1)], true), { sources: ['claude'] })
+  const rows = totalsFor(ctx, 'claude', range('30d'), null, '2026-07-01')
+  const five = rows[1]
+  assert.equal(five.approx, true)
+  assert.equal(five.usage, '≈1.5K')
+  assert.equal(five.requests, '≈1')
+  assert.equal(five.output, '≈500')
+  assert.equal(five.cacheHit, '≈0 %')
+  // A day-bounded row is summed from the day buckets, which the roll-up does not touch.
+  const today = rows.find((r) => r.label === 'Today')
+  assert.equal(today?.approx, false)
+  assert.equal(today?.usage.startsWith('≈'), false)
+})
+
+test('an unused window is a measured zero, printed like every other row', () => {
+  const ctx = ctxOf(fromBuckets([]), { sources: ['claude'] })
+  const rows = totalsFor(ctx, 'claude', range('30d'), null, '2026-07-01')
+  assert.equal(rows[1].label, 'Last 5 h')
+  // Absence is a dash here as everywhere; what matters is that the row exists at all.
+  assert.equal(rows[1].usage, '–')
+  assert.equal(rows[1].approx, false)
+})
+
+test('a calendar row carries its own span as the tooltip text', () => {
+  const ctx = ctxOf(buildAgg())
+  const rows = totalsFor(ctx, 'claude', range('30d'), null, '2026-07-01')
+  const today = rows.find((r) => r.label === 'Today')
+  assert.equal(today?.spanText, TODAY)
+  const week = rows.find((r) => r.label === 'Last 7 days')
+  assert.equal(week?.spanText, '2026-08-28 → 2026-09-03')
 })
 
 test('a selected range that only shares a label with a fixed row says which one it is', () => {
@@ -667,15 +751,6 @@ test('niceCeil rounds the axis to something a person reads', () => {
   assert.equal(niceCeil(4_800), 5_000)
 })
 
-test('a window without a clock gets no local usage row', () => {
-  const ctx = ctxOf(buildAgg())
-  assert.equal(windowUsage(ctx, 'claude', { id: 'x', label: 'x', resetsAt: null, windowMinutes: 300 }), null)
-  assert.equal(windowUsage(ctx, 'claude', { id: 'x', label: 'x', resetsAt: NOW, windowMinutes: null }), null)
-  const row = windowUsage(ctx, 'claude', { id: 'session:300', label: '5 h', resetsAt: NOW + 3_600_000, windowMinutes: 300 })
-  assert.ok(row)
-  assert.equal(row?.complete, true)
-})
-
 test('the KPI row reports "new" when there is no previous period to compare with', () => {
   const list = kpis(ctxOf(buildAgg()), range('30d'), null)
   // "Today" is not about the selected range and has its own comparison — yesterday — which
@@ -779,61 +854,4 @@ test('a project share without a denominator is a dash, not a zero', () => {
   assert.equal(rows[0].usage, '–')
   assert.equal(rows[0].share, '–')
   assert.equal(rows[0].sessions, 1)
-})
-
-test('window attribution counts the window’s own hours, not whole session lifetimes', () => {
-  const agg = new Aggregator()
-  agg.attribution = 'project'
-  let n = 0
-  const add = (project: string, ts: number, input: number): void => {
-    n++
-    const file = `/virtual/claude/projects/-home-t-${project}/s.jsonl`
-    agg.addClaudeLine(
-      claudeLine({ id: `m-${n}`, ts, model: 'claude-opus-4-6', final: true, cwd: `/home/t/${project}`, usage: { input } }),
-      { isSub: false, file, attribution: 'project', projectSalt: 'salt', hashProjects: false },
-    )
-  }
-  // "old" has been running for days: ten million tokens outside the window, 100K inside it.
-  add('old', NOW - 72 * 3_600_000, 10_000_000)
-  add('old', NOW - 3_600_000, 100_000)
-  add('new', NOW - 1_800_000, 1_900_000)
-
-  const ctx = ctxOf(agg, { sources: ['claude'] })
-  const w = { id: 'session:300', label: '5 h', resetsAt: NOW + 2 * 3_600_000, windowMinutes: 300 }
-  const a = attributionInWindow(ctx, 'claude', w)
-  assert.ok(a)
-  assert.deepEqual(a?.rows, [
-    { label: 'new', share: '95 %', usage: '1.9M' },
-    { label: 'old', share: '5 %', usage: '100K' },
-  ])
-  // The same tokens the window usage row reports, from the same hour range.
-  assert.equal(windowUsage(ctx, 'claude', w)?.usage, '2M')
-  // Everything the window measured is attributed, so nothing is declared unexplained.
-  assert.equal(a?.unexplained, 'server % cannot be split — shown share is of local tokens only')
-})
-
-test('window attribution names what it cannot attribute instead of rescaling', () => {
-  // A record from before per-hour slices existed: lifetime counters, no slice. Its five
-  // million tokens must neither enter a row nor be quietly dropped from the caveat.
-  const oldRec = session({ sessionId: 'legacy', project: 'legacy', input: 5_000_000, hourUsage: undefined })
-  const sliced = session({
-    sessionId: 'fresh', project: 'alpha',
-    hourUsage: { [String(Math.floor((NOW - 3_600_000) / 3_600_000))]: 1000 },
-  })
-  const ctx = ctxOf(withSessions(buildAgg('project'), [oldRec, sliced]), { sources: ['claude'] })
-  const w = { resetsAt: NOW + 2 * 3_600_000, windowMinutes: 300 }
-  const a = attributionInWindow(ctx, 'claude', w)
-  assert.deepEqual(a?.rows, [{ label: 'alpha', share: '100 %', usage: '1K' }])
-  // The fixture's window holds 13,600 local tokens; only 1,000 of them carry a slice.
-  assert.equal(
-    a?.unexplained,
-    'server % cannot be split — shown share is of local tokens only; '
-      + '93 % of this window has no session slice',
-  )
-
-  // With no slice at all there is no table to draw, rather than a table of lifetimes.
-  const none = attributionInWindow(
-    ctxOf(withSessions(buildAgg('project'), [oldRec]), { sources: ['claude'] }), 'claude', w,
-  )
-  assert.equal(none, null)
 })

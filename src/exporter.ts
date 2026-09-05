@@ -381,7 +381,9 @@ export function toMarkdownSummary(vm: ViewModel): string {
 
   L.push('---', '')
   for (const f of vm.footnotes) L.push(`- ${f}`)
-  const gaps = vm.forecasts.reduce((n, f) => n + f.gaps, 0)
+  // Counted off the quota cards themselves: every window carries the gaps of its own series,
+  // so the sentence survives a page that no longer prints a forecast list.
+  const gaps = vm.quotas.reduce((n, q) => n + q.windows.reduce((m, w) => m + w.gaps, 0), 0)
   if (gaps > 0) {
     L.push(`- Quota readings have ${gaps} gap(s) in the last 24 h; a hole with no reset inside it `
       + 'is bridged by a dashed line, a hole across a reset stays open.')

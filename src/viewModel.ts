@@ -22,8 +22,7 @@ import {
 } from './config'
 import { digest } from './digest'
 import {
-  Calibration, ForecastConfig, calibration, forecast, lockoutText, resetForecast, retrospective,
-  Retro,
+  Calibration, ForecastConfig, calibration, forecast, retrospective, Retro,
 } from './forecast'
 import {
   PaceConfig, effectivePace, paceVerdict, severityOf, windowDisplay, WindowDisplay, windowElapsed,
@@ -34,13 +33,13 @@ import { QuotaHistory } from './quotaHistory'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
 import type { ContextReading } from './quotaSources'
 import {
-  AttributionRows, CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack,
+  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack,
   CompositionEntry, DrillData, HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort,
   ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData,
-  SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, WindowUsageRow,
-  attributionInWindow, cacheEconomy, cacheStates, calendar, chart, composition,
+  SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, TotalsWindow,
+  cacheEconomy, cacheStates, calendar, chart, composition,
   drill as drillStats, filterFor, heatmap, hours, kpis, localBlock, modelTable, planFactors,
-  projectRows, records as recordsOf, sessionRows, totalsFor, windowUsage,
+  projectRows, records as recordsOf, sessionRows, totalsFor,
 } from './stats'
 import {
   DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatReset, formatTime,
@@ -54,7 +53,7 @@ import {
 export type {
   CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack, CompositionEntry, DrillData,
   HeatmapData, HoursData, Kpi, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow,
-  PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow, WindowUsageRow,
+  PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow,
 }
 
 /** Re-exported so a view names a budget row from the model that produced it. */
@@ -70,6 +69,9 @@ export { SOURCE_TITLE }
 // UI state and the webview message protocol
 // ---------------------------------------------------------------------------
 
+/** Whether the composition bar shows the cache parts or the rest of the mix without them. */
+export type CompositionCache = 'all' | 'noCache'
+
 export interface UiState {
   range: RangePreset | { from: string; to: string }
   sort: { key: string; dir: 'asc' | 'desc' }
@@ -78,6 +80,12 @@ export interface UiState {
   metric: Metric
   /** Whether the daily chart splits a column by provider or by model. */
   chartStack: ChartStack
+  /**
+   * Whether the composition bar draws the three cache parts. Cache reads dwarf everything
+   * else on most days, so 'noCache' is how the remaining parts become readable at all; the
+   * bar states what it left out rather than quietly rescaling.
+   */
+  compositionCache: CompositionCache
   heatmapMetric: 'usage' | 'cost'
   hourZone: 'local' | 'utc'
   drillDay: string | null
@@ -116,6 +124,7 @@ export type WebviewMessage =
   | { type: 'setFilter'; providers: Source[]; models: string[] }
   | { type: 'setMetric'; metric: Metric }
   | { type: 'setChartStack'; stack: ChartStack }
+  | { type: 'setCompositionCache'; mode: CompositionCache }
   | { type: 'setHeatmapMetric'; metric: 'usage' | 'cost' }
   | { type: 'setHourZone'; zone: 'local' | 'utc' }
   | { type: 'drill'; day: string | null }
@@ -130,7 +139,7 @@ export type WebviewMessage =
  */
 export const DASHBOARD_SECTION_KEYS = [
   'quota', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours',
-  'records', 'tools', 'budget', 'forecast', 'history', 'projects', 'sessions', 'dataQuality',
+  'records', 'tools', 'budget', 'history', 'projects', 'sessions', 'dataQuality',
   // `satisfies`, so a key that is not a section of the config is a compile error here; the
   // other direction — a new section that nobody may fold — is asserted in the test.
 ] as const satisfies readonly DashboardSection[]
@@ -207,6 +216,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return m.stack === 'provider' || m.stack === 'model'
         ? { type: 'setChartStack', stack: m.stack }
         : null
+    case 'setCompositionCache':
+      return m.mode === 'all' || m.mode === 'noCache'
+        ? { type: 'setCompositionCache', mode: m.mode }
+        : null
     case 'setHeatmapMetric':
       return m.metric === 'usage' || m.metric === 'cost'
         ? { type: 'setHeatmapMetric', metric: m.metric }
@@ -239,6 +252,7 @@ export function defaultUiState(cfg: Config): UiState {
     models: [],
     metric: 'usage',
     chartStack: 'provider',
+    compositionCache: 'all',
     heatmapMetric: 'usage',
     hourZone: 'local',
     drillDay: null,
@@ -273,6 +287,8 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       return { ...ui, metric: m.metric }
     case 'setChartStack':
       return { ...ui, chartStack: m.stack }
+    case 'setCompositionCache':
+      return { ...ui, compositionCache: m.mode }
     case 'setHeatmapMetric':
       return { ...ui, heatmapMetric: m.metric }
     case 'setHourZone':
@@ -332,6 +348,12 @@ export interface WindowVm {
    */
   forecast: Forecast | null
   spark: SparkVm
+  /**
+   * Stretches without a quota reading in the last 24 h. The exporter's footnote counts them
+   * so a pasted summary says how much of the sparkline beside it is a hole rather than a
+   * measurement; nothing on the page prints the number on its own.
+   */
+  gaps: number
   aria: { now: number; max: number; text: string }
 }
 
@@ -481,33 +503,9 @@ export interface ViewModel {
    * different question wearing the same label.
    */
   budgets: BudgetRow[]
-  forecasts: {
-    source: Source
-    windowId: string
-    label: string
-    forecast: Forecast
-    lockout: string | null
-    resetForecast: string | null
-    spark: SparkVm
-    /** Stretches without readings in the last 24 h — the count the text beside the forecast states. */
-    gaps: number
-  }[]
   retro: { source: Source; windowId: string; label: string; retro: Retro; text: string }[]
-  windowUsage: WindowUsageRow[]
   projects: { rows: ProjectRow[]; enabled: boolean }
   sessions: { rows: SessionRow[]; enabled: boolean; cacheStates: { session: string; text: string }[] }
-  /**
-   * Per-window project split. `source` and `label` travel with the rows because two
-   * providers can both report a "5 h" window: a block headed by the raw id, or by a label
-   * with no provider, cannot be told apart from its twin.
-   */
-  attributionInWindow: {
-    source: Source
-    windowId: string
-    label: string
-    rows: AttributionRows['rows']
-    unexplained: string
-  }[]
   dataQuality: DataQuality
   unpricedModels: string[]
   familyPriced: string[]
@@ -764,6 +762,7 @@ function quotaCard(
   const age = ageMinutes(q.fetchedAt, now)
   const fp = input.fingerprints[q.source] ?? ''
   const windows: WindowVm[] = q.windows.map((w) => {
+    const samples = history.samples(q.source, w.id, fp, now - SPARK_SPAN_MS)
     const elapsed = elapsedOf(w, now)
     const verdict = unlimitedVerdict(w) ?? paceVerdict(w.percent, elapsed, paceCfg)
     const display = windowDisplay(w, fetchedMs, now)
@@ -786,7 +785,8 @@ function quotaCard(
       resetLine: resetLineOf(display, reset),
       stateText: stateTextOf(display, verdict.text),
       forecast: printableForecast(forecasts.get(`${q.source}:${w.id}`) ?? null),
-      spark: sparkOf(history.samples(q.source, w.id, fp, now - SPARK_SPAN_MS), now, w.windowMinutes, paceCfg),
+      spark: sparkOf(samples, now, w.windowMinutes, paceCfg),
+      gaps: history.gaps(samples.filter((s) => s.t >= now - GAP_COUNT_MS), GAP_MIN_MS).length,
       aria: {
         now: Number.isFinite(w.percent) ? Math.round(w.percent) : 0,
         max: 100,
@@ -1050,10 +1050,14 @@ export function buildViewModel(input: VmInput): ViewModel {
   const forecasts = forecastsFor(quotas, history, input.fingerprints, input.forecastCfg, now, paceCfg, tcfg)
   const cards = quotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay))
 
+  // The provider's own windows, so the totals table can hold the running 5 h and 7 d spans
+  // against exactly the bounds the quota card above it draws.
+  const windowsOf = (source: Source): TotalsWindow[] =>
+    quotas.find((q) => q.source === source)?.windows ?? []
   const totals = sources.map((source) => ({
     source,
     title: SOURCE_TITLE[source],
-    rows: totalsFor(ctx, source, range, previous, firstDay, cfg.pricing.showListPrice),
+    rows: totalsFor(ctx, source, range, previous, firstDay, cfg.pricing.showListPrice, windowsOf(source)),
   }))
 
   const costSummary = combinedCost(ctx, range)
@@ -1063,25 +1067,7 @@ export function buildViewModel(input: VmInput): ViewModel {
   const kpiRow = kpis(ctx, range, previous)
   const cache = cacheEconomy(ctx, range)
 
-  const forecastRows = forecastList(cards, quotas, history, input.fingerprints, forecasts, now, tcfg, paceCfg)
   const retroRows = retroList(quotas, history, input.fingerprints)
-  const usageRows: WindowUsageRow[] = []
-  const attribution: ViewModel['attributionInWindow'] = []
-  for (const q of quotas) {
-    if (!sources.includes(q.source)) continue
-    for (const w of q.windows) {
-      const row = windowUsage(ctx, q.source, w)
-      if (row) usageRows.push(row)
-      if (cfg.attribution !== 'none') {
-        const a = attributionInWindow(ctx, q.source, w)
-        if (a) {
-          attribution.push({
-            source: q.source, windowId: w.id, label: w.label, rows: a.rows, unexplained: a.unexplained,
-          })
-        }
-      }
-    }
-  }
 
   const attributionOn = cfg.attribution !== 'none'
   const dq = dataQuality(input, ctx, tcfg, costSummary, stats)
@@ -1118,16 +1104,13 @@ export function buildViewModel(input: VmInput): ViewModel {
     // Every provider, no model filter: see `ViewModel.budgets`. The period bounds come from
     // `now`, never from the selected range — a month budget is about the month.
     budgets: budgetRows({ ...ctx, sources: [...SOURCES], models: [] }, cfg.budgets, now),
-    forecasts: forecastRows,
     retro: retroRows,
-    windowUsage: usageRows,
     projects: { rows: attributionOn ? projectRows(ctx) : [], enabled: attributionOn },
     sessions: {
       rows: attributionOn ? sessionRows(ctx) : [],
       enabled: attributionOn,
       cacheStates: attributionOn ? cacheStates(ctx) : [],
     },
-    attributionInWindow: attribution,
     dataQuality: dq,
     unpricedModels: costSummary.unpricedModels,
     familyPriced: costSummary.familyPriced,
@@ -1178,57 +1161,6 @@ function combinedCost(ctx: StatsCtx, range: DayRange) {
   }
   out.unpricedModels = [...unpriced].sort()
   out.familyPriced = [...family].sort()
-  return out
-}
-
-function forecastList(
-  cards: QuotaCard[],
-  quotas: QuotaState[],
-  history: QuotaHistory,
-  fingerprints: Record<Source, string>,
-  forecasts: Map<string, Forecast>,
-  now: number,
-  tcfg: TimeConfig,
-  paceCfg: PaceConfig,
-): ViewModel['forecasts'] {
-  const out: ViewModel['forecasts'] = []
-  const labels = new Map<string, string>()
-  const displays = new Map<string, WindowDisplay>()
-  for (const c of cards) {
-    for (const w of c.windows) {
-      labels.set(`${c.source}:${w.id}`, w.label)
-      displays.set(`${c.source}:${w.id}`, w.display)
-    }
-  }
-  for (const q of quotas) {
-    const fp = fingerprints[q.source] ?? ''
-    for (const w of q.windows) {
-      const key = `${q.source}:${w.id}`
-      const f = forecasts.get(key)
-      if (!f) continue
-      // The quota card drops a "full" forecast once the stated reset has passed — the reading
-      // it rests on belongs to the window before the reset. The list beside it may not keep
-      // stating what the card refuses to; the three views do not disagree about one window.
-      if (f.state === 'full' && displays.get(key) === 'resetDue') continue
-      const samples = history.samples(q.source, w.id, fp, now - SPARK_SPAN_MS)
-      const rf = resetForecast(f)
-      out.push({
-        source: q.source,
-        windowId: w.id,
-        label: labels.get(key) ?? w.label,
-        // Same rule as the card: a measuring forecast keeps its state and basis, not its sentence.
-        forecast: printableForecast(f) as Forecast,
-        lockout: lockoutText(f, now, (ms) => formatTime(ms, tcfg)),
-        resetForecast: rf === null
-          ? null
-          : estimate(rf.sign === '+'
-            ? `${rf.points.toFixed(0)} % spare at the reset`
-            : `${rf.points.toFixed(0)} % over before the reset`),
-        spark: sparkOf(samples, now, w.windowMinutes, paceCfg),
-        gaps: history.gaps(samples.filter((s) => s.t >= now - GAP_COUNT_MS), GAP_MIN_MS).length,
-      })
-    }
-  }
   return out
 }
 

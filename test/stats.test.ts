@@ -10,7 +10,7 @@ import {
   cacheStateOf, calendar, chart, drill, heatmap, hours, kpis, modelTable, niceCeil, planFactors,
   projectPeriod, projectRows, sessionRows, totalRow, totalsFor, windowUsage,
 } from '../src/stats'
-import { DayRange, rangeFor } from '../src/time'
+import { DayRange, previousRange, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
 import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
 import { claudeLine } from './fixtures/helpers'
@@ -724,6 +724,76 @@ test('every KPI states which direction is the good one, and none states a colour
     activeDays: 'neutral',
     avgPerActiveDay: 'neutral',
   })
+})
+
+test('every key figure explains itself, in the words its own number was built with', () => {
+  const r = range('30d')
+  const prev = previousRange(r)
+  const list = kpis(ctxOf(buildAgg()), r, prev)
+  for (const k of list) {
+    const e = k.explain
+    assert.ok(e, k.key)
+    for (const [field, text] of Object.entries({
+      what: e.what, how: e.how, period: e.period, provenance: e.provenance, sparkNote: e.sparkNote,
+    })) {
+      assert.notEqual(text, '', `${k.key}.${field} is empty`)
+    }
+    // The shape beside every figure is the same fourteen days, and it says so.
+    assert.equal(e.sparkNote, 'last 14 days · one point per day')
+  }
+  const by = Object.fromEntries(list.map((k) => [k.key, k.explain]))
+  // The range with its dates, read as a fragment behind a "Period" label.
+  assert.equal(by.usage.period, `last 30 days · ${r.from} → ${r.to}`)
+  // "Today" is not about the selected range and says which day it is about.
+  assert.equal(by.today.period, `since the day boundary · ${TODAY}`)
+  assert.equal(by.today.compare?.against, 'yesterday')
+  // The comparison is the previous period, named and dated the same way.
+  assert.equal(by.usage.compare?.against, `previous 30 days · ${prev?.from} → ${prev?.to}`)
+  // The previous value is formatted exactly like the value it is compared with.
+  assert.match(String(by.usage.compare?.previous), /^[\d.]+[KMG]?$/)
+  assert.match(String(by.cost.compare?.previous), /^~\$/)
+  assert.match(String(by.cacheHit.compare?.previous), / %$/)
+  assert.match(String(by.activeDays.compare?.previous), /^\d+ of 30$/)
+  // The formula is the one the code applies, both denominators named.
+  assert.match(by.cacheHit.how, /cache reads ÷ all input/)
+  assert.match(by.cacheHit.how, /Codex reports them inside its input/)
+  // Each basis is spelled out rather than left as the one-word badge.
+  assert.equal(by.usage.provenance, 'measured')
+  assert.equal(by.avgPerActiveDay.provenance, 'derived from measured figures')
+  assert.match(by.cost.provenance, /^estimated \(~\)/)
+})
+
+test('the explanation splits per provider only while both providers are in the filter', () => {
+  const r = range('30d')
+  const both = kpis(ctxOf(buildAgg()), r, previousRange(r))
+  for (const k of both) {
+    assert.ok(k.explain.split, `${k.key} has no split`)
+    assert.notEqual(k.explain.split?.claude, '')
+    assert.notEqual(k.explain.split?.codex, '')
+  }
+  const by = Object.fromEntries(both.map((k) => [k.key, k.explain]))
+  // Formatted like the card's value, per provider — a raw count beside a compacted one
+  // would read as a different quantity.
+  assert.match(String(by.usage.split?.claude), /^[\d.]+[KMG]?$/)
+  assert.match(String(by.cost.split?.codex), /^~\$/)
+  assert.match(String(by.activeDays.split?.claude), /^\d+ of 30$/)
+  // One provider selected: a split would print a figure the rest of the card excludes.
+  const alone = kpis(ctxOf(buildAgg(), { sources: ['claude'] }), r, previousRange(r))
+  for (const k of alone) assert.equal(k.explain.split, null, k.key)
+  // And the tile that counts both accounts stops saying that it does.
+  assert.equal(alone[0].explain.what, 'Tokens processed since the day boundary, Claude Code')
+})
+
+test('a range with no period before it has nothing to compare against', () => {
+  const list = kpis(ctxOf(buildAgg()), range('all'), null)
+  for (const k of list.filter((x) => x.key !== 'today')) {
+    assert.equal(k.explain.compare, null, k.key)
+  }
+  // Today keeps its own comparison whatever the range is: yesterday always exists.
+  assert.equal(list[0].explain.compare?.against, 'yesterday')
+  // A hand-picked range is named by its days; the period line prints them once, not twice.
+  const custom = rangeFor({ from: '2026-08-01', to: '2026-08-03' }, NOW, tcfg)
+  assert.equal(kpis(ctxOf(buildAgg()), custom, null)[1].explain.period, '2026-08-01 → 2026-08-03')
 })
 
 test('the cache TTL countdown is an estimate and expires', () => {

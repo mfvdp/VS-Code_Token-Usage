@@ -321,7 +321,10 @@ th:first-child, td:first-child { text-align: left; padding-left: 0; }
 td { text-align: right; padding: 3px 0 3px 8px; white-space: nowrap; }
 tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
-.kpi { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+/* The card is the popover's containing block, so the explanation hangs under the very figure
+   it explains. No z-index here on purpose: a stacking context on the card would trap the
+   popover behind the cards that follow it in the grid. */
+.kpi { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; position: relative; }
 .kpi .v { font-size: 15px; font-variant-numeric: tabular-nums; }
 .kpi .l { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
 /* Deltas are coloured from the figure's polarity, never from the arrow: more usage and more
@@ -330,6 +333,26 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .kpi .d.good { color: var(--ok); }
 .kpi .d.bad { color: var(--warn); }
 .kpi .d.neutral { color: var(--dim); }
+/* What the figure counts, on hover and on focus. A native title would give one line after a
+   delay, could not be reached by keyboard and would be unreadable in a screen reader; this is
+   a real element, so the card can point at it with aria-describedby.
+   The width is capped against the viewport as well as at 320 px: absolutely positioned
+   overflow still widens the page, and a 320 px card in a 260 px sidebar is a sideways
+   scrollbar over the whole dashboard. */
+.pop { position: absolute; top: 100%; left: 0; z-index: 5; margin-top: 4px;
+       min-width: 220px; max-width: min(320px, 90vw); padding: 6px 8px; font-size: 11px;
+       line-height: 1.5; text-transform: none; letter-spacing: normal; white-space: normal;
+       border-radius: 4px;
+       background: var(--vscode-editorHoverWidget-background,
+                   var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+       color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+       border: 1px solid var(--vscode-editorHoverWidget-border,
+               var(--vscode-editorWidget-border, var(--line)));
+       box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
+/* Measured at open time: a card in the right half would push its explanation off the page. */
+.pop.right { left: auto; right: 0; }
+.pop b { color: var(--dim); font-weight: 600; }
+.pop div + div { margin-top: 2px; }
 .spark { width: 100%; height: 18px; display: block; }
 /* The quota sparkline is seven days in 15-minute slots and a little taller than the KPI ones,
    so the pace colours along it can be told apart. */
@@ -946,15 +969,53 @@ function deltaClass(k) {
   return 'neutral';
 }
 
+/**
+ * One labelled line of an explanation. An empty text writes nothing at all: a "Compared with"
+ * with nothing behind it would announce a comparison that was never made.
+ */
+function popLine(label, text) {
+  const t = text === null || text === undefined ? '' : String(text);
+  return t ? '<div><b>' + esc(label) + '</b> ' + esc(t) + '</div>' : '';
+}
+
+/**
+ * The card's own explanation, every word of it from the view model. The provider names are
+ * the registry's, the same ones every other heading uses.
+ *
+ * Hidden until it is hovered or focused, and it stays in the markup either way: the card
+ * points at it with aria-describedby, and an element that is written only on hover has no id
+ * to point at.
+ */
+function kpiPop(k, id) {
+  const e = k.explain;
+  if (!e) return '';
+  return '<div class="pop" role="tooltip" id="' + esc(id) + '" hidden>'
+    + popLine('What', e.what)
+    + popLine('How', e.how)
+    + popLine('Period', e.period)
+    + (e.compare ? popLine('Compared with', e.compare.against + ' · ' + e.compare.previous) : '')
+    + (e.split
+       ? popLine('Split', srcName('claude') + ' ' + e.split.claude + ' · '
+         + srcName('codex') + ' ' + e.split.codex)
+       : '')
+    + popLine('Basis', e.provenance)
+    + popLine('Spark', e.sparkNote)
+    + '</div>';
+}
+
 function sKpis() {
   return '<div class="kpis">' + vm.kpis.map(k => {
     const d = k.delta
       ? '<span class="d ' + deltaClass(k)
         + '">' + [k.delta.glyph, k.delta.text].filter(Boolean).map(esc).join(' ') + '</span>'
       : '';
-    return '<div class="kpi" title="' + esc([k.note, k.provenance].filter(Boolean).join(' · ')) + '">'
+    // Focusable, because an explanation only a mouse can reach is not an explanation. No
+    // title attribute beside it: two tooltips over one card is one of them too many.
+    const id = 'pop-' + String(k.key);
+    return '<div class="kpi" tabindex="0" aria-describedby="' + esc(id) + '">'
       + '<div class="l">' + esc(k.label) + '</div><div class="v">' + esc(k.value) + '</div>'
-      + '<div class="meta">' + d + '</div>' + sparkSvg(normSpark(k.spark)) + '</div>';
+      + '<div class="meta">' + d + '</div>' + sparkSvg(normSpark(k.spark))
+      + kpiPop(k, id) + '</div>';
   }).join('') + '</div>';
 }
 
@@ -1775,6 +1836,60 @@ document.addEventListener('change', (ev) => {
   if (el.dataset.act === 'metric') post({ type: 'setMetric', metric: el.value });
   else post({ type: 'setChartStack', stack: el.value });
 });
+
+// -- the KPI explanation ----------------------------------------------------
+
+/** The explanation currently open; opening a second one closes it. */
+let openPop = null;
+
+function hidePop() {
+  // A re-render can have taken the node out of the document underneath us. Hiding a detached
+  // element is harmless, and dropping the reference is what matters.
+  if (openPop) openPop.hidden = true;
+  openPop = null;
+}
+
+/**
+ * Opens one card's explanation. Which side it hangs from is measured, not assumed: a card in
+ * the right half of the grid would push a left-anchored popover off the page, and the panel
+ * is anything from a 260 px sidebar to a full editor column.
+ */
+function showPop(card) {
+  const pop = card.querySelector ? card.querySelector('.pop') : null;
+  if (!pop) return;
+  hidePop();
+  const box = card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+  const width = window.innerWidth || 0;
+  if (box && width && box.left + box.width / 2 > width / 2) pop.classList.add('right');
+  else pop.classList.remove('right');
+  pop.hidden = false;
+  openPop = pop;
+}
+
+/**
+ * The card itself, never one of its children: mouseenter and mouseleave fire for the inner
+ * elements as well, and a pointer crossing onto the sparkline is not a pointer leaving the
+ * card. The popover is a child of the card, so hovering it keeps the card hovered.
+ */
+function kpiCard(ev) {
+  const t = ev.target;
+  return t && t.classList && t.classList.contains('kpi') ? t : null;
+}
+
+// mouseenter, mouseleave, focus and blur do not bubble; a capture-phase listener sees them
+// all the same, so one pair of listeners survives every re-render of the section.
+document.addEventListener('mouseenter', (ev) => {
+  const card = kpiCard(ev);
+  if (card) showPop(card);
+}, true);
+document.addEventListener('mouseleave', (ev) => { if (kpiCard(ev)) hidePop(); }, true);
+document.addEventListener('focus', (ev) => {
+  const card = kpiCard(ev);
+  if (card) showPop(card);
+}, true);
+document.addEventListener('blur', (ev) => { if (kpiCard(ev)) hidePop(); }, true);
+// Escape closes it wherever the focus is — the way a reader expects to dismiss a hover card.
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') hidePop(); });
 
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.
 window.addEventListener('resize', () => { if (vm) applyFits(); });

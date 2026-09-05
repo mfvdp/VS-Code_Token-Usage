@@ -1163,8 +1163,8 @@ test('a lone sparkline sample is a point, not a stretched dash', () => {
 })
 
 /** A seven-day spark in the view model's slotted shape. */
-function slotted(points: Record<string, unknown>[], bridges: Record<string, unknown>[] = []): Record<string, unknown> {
-  return { slots: 672, from: 0, to: 672 * 15 * 60_000, points, bridges }
+function slotted(points: Record<string, unknown>[]): Record<string, unknown> {
+  return { slots: 672, from: 0, to: 672 * 15 * 60_000, points }
 }
 
 function sparkOf(s: Record<string, unknown>): string {
@@ -1177,10 +1177,12 @@ test('the quota sparkline is time-proportional: one unit per slot, holes as wide
   assert.match(two, /^<svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" aria-hidden="true">/)
   assert.equal(two.split('<polyline').length - 1, 1, two)
   assert.match(two, /<polyline class="ok" points="10,80.0 11,70.0"\/>/)
-  // Slot 0 sits on the left edge, the last slot at slots − 1.
+  // Slot 0 sits on the left edge, the last slot at slots − 1 — and the week between them is
+  // one stroke, drawn across whatever nobody measured.
   const ends = sparkOf(slotted([{ i: 0, p: 0, level: null }, { i: 671, p: 100, level: 'error' }]))
-  assert.match(ends, /<path class="pt" d="M0 100.0h.01"\/>/)
-  assert.match(ends, /<path class="pt error" d="M671 0.0h.01"\/>/)
+  assert.match(ends, /<polyline class="error" points="0,100.0 671,0.0"\/>/)
+  const one = sparkOf(slotted([{ i: 671, p: 100, level: 'error' }]))
+  assert.match(one, /<path class="pt error" d="M671 0.0h.01"\/>/)
   // Over 100 % stays on the top edge instead of leaving the box.
   const over = sparkOf(slotted([{ i: 1, p: 140, level: 'error' }, { i: 2, p: 150, level: 'error' }]))
   assert.match(over, /<polyline class="error" points="1,0.0 2,0.0"\/>/)
@@ -1233,20 +1235,22 @@ test('the stroke into the first reading after a reset wears no pace colour', () 
   assert.match(STYLE, /\.spark polyline \{ fill: none; stroke: var\(--claude\);/)
 })
 
-test('a hole in the spark is bridged with a dashed line only where the model says so', () => {
-  const pts = [{ i: 5, p: 50, level: null }, { i: 9, p: 55, level: null }]
-  const bridged = sparkOf(slotted(pts, [{ from: 5, to: 9 }]))
-  assert.match(bridged, /<line class="bridge" x1="5" y1="50.0" x2="9" y2="45.0"\/>/)
-  // Both ends stay the lone-point hairline: nothing solid is drawn across the hole.
-  assert.equal(bridged.split('class="pt"').length - 1, 2, bridged)
-  assert.equal(bridged.indexOf('<polyline'), -1, bridged)
-  const hole = sparkOf(slotted(pts))
+test('a hole in the spark is drawn straight across, in the colour of the reading after it', () => {
+  // Four slots without a reading between two readings: one stroke from the one to the other,
+  // as wide as the hour it covers, and no hairline dots at its ends.
+  const hole = sparkOf(slotted([{ i: 5, p: 50, level: 'ok' }, { i: 9, p: 55, level: 'ok' }]))
+  assert.match(hole, /<polyline class="ok" points="5,50.0 9,45.0"\/>/)
+  assert.equal(hole.split('<polyline').length - 1, 1, hole)
+  assert.equal(hole.indexOf('class="pt'), -1, hole)
   assert.equal(hole.indexOf('<line'), -1, hole)
-  assert.equal(hole.indexOf('<polyline'), -1, hole)
-  // A bridge naming a slot with no point is ignored rather than drawn to nowhere.
-  const stray = sparkOf(slotted(pts, [{ from: 5, to: 7 }]))
-  assert.equal(stray.indexOf('<line'), -1, stray)
-  assert.match(STYLE, /\.spark line\.bridge \{[^}]*stroke: var\(--dim\)[^}]*stroke-dasharray[^}]*opacity: \.6[^}]*vector-effect: non-scaling-stroke/)
+  // A hole the window turned over in is the neutral stroke, like any other reset.
+  const dark = sparkOf(slotted([{ i: 5, p: 50, level: 'warn' }, { i: 9, p: 5, level: 'ok', reset: true }, { i: 10, p: 8, level: 'ok' }]))
+  assert.match(dark, /<polyline points="5,50.0 9,95.0"\/><polyline class="ok" points="9,95.0 10,92.0"\/>/)
+  // The dashed bridge of 1.2.1 is gone from the stylesheet with the element it styled.
+  assert.equal(STYLE.indexOf('bridge'), -1)
+  // A stray bridges field from an older view model is ignored, not drawn.
+  const stale = sparkOf({ ...slotted([{ i: 1, p: 1, level: 'ok' }, { i: 3, p: 2, level: 'ok' }]), bridges: [{ from: 1, to: 3 }] })
+  assert.equal(stale.indexOf('<line'), -1, stale)
 })
 
 test('the quota card draws the slotted spark and captions its span once', () => {
@@ -1429,6 +1433,13 @@ test('the filter bar sits below the quota cards and above the first section it f
   // A context card leads the same way; the bar waits for the first section it applies to.
   assert.deepEqual(order(renderPage({ sections: ['quota', 'context', 'kpis'] })),
     ['notices', 'quota', 'context', 'controls', 'kpis', 'drill', 'footer'])
+  // The Tokens section is fixed periods of everything and follows no chip, so it leads the
+  // same way — and where it is listed after a filtered section it stays below the bar: the
+  // order is the reader's, the bar only marks where the chips start to apply.
+  assert.deepEqual(order(renderPage({ ...tokensVm(), sections: ['quota', 'tokens', 'summary', 'kpis'] })),
+    ['notices', 'quota', 'tokens', 'controls', 'summary', 'kpis', 'drill', 'footer'])
+  assert.deepEqual(order(renderPage({ ...tokensVm(), sections: ['quota', 'summary', 'tokens'] })),
+    ['notices', 'quota', 'controls', 'summary', 'tokens', 'drill', 'footer'])
   // A reader who puts the statistics first gets the chips at the top, as before.
   assert.deepEqual(order(renderPage({ sections: ['summary', 'quota'] })),
     ['notices', 'controls', 'summary', 'quota', 'drill', 'footer'])

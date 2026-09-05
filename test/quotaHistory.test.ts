@@ -475,3 +475,34 @@ test('seven windows for seven days at the quarter-hour cadence stay under 4 800 
   assert.ok(h.size().samples <= 4_800, `${h.size().samples} samples`)
   assert.ok(h.size().samples >= windows.length * (7 * 96 - 1), 'nothing beyond the grid was thinned away')
 })
+
+test('a jittering or riding reset time neither splits a cycle nor escapes thinning', () => {
+  // Claude Code's usage cache writes the reset time with sub-second jitter: every reading
+  // once began a cycle of its own, and none of them could be thinned as a repeat.
+  const h = new QuotaHistory(tmpFile('h.json'), 30)
+  h.load()
+  const r = BASE + 5 * H
+  const jitter = [0, -114, 18, -34, 16, 0, -11, 5, -9, 84]
+  for (const [k, j] of jitter.entries()) {
+    h.add(state(BASE + k * 15 * 60_000, [win('w', 10 + Math.floor(k / 2), r + j)], 'cache'), FP, BASE + k * 15 * 60_000)
+  }
+  const cycles = h.cycles('claude', 'w', FP)
+  assert.equal(cycles.length, 1)
+  assert.equal(cycles[0].peak, 14)
+  // Five values, each read twice: the repeats are thinned as repeats despite the jitter.
+  assert.deepEqual(h.samples('claude', 'w', FP).map((s) => s.p), [10, 11, 12, 13, 14])
+  // A real reset a whole window later still splits, whichever way the value went.
+  h.add(state(BASE + 10 * 15 * 60_000, [win('w', 22, r + 5 * H)], 'cache'), FP, BASE + 10 * 15 * 60_000)
+  assert.equal(h.cycles('claude', 'w', FP).length, 2)
+
+  // An idle rolling window: the reset time rides along with the clock, and 0 % stays one
+  // reading rather than one sample per poll.
+  const g = new QuotaHistory(tmpFile('h.json'), 30)
+  g.load()
+  for (let k = 0; k < 20; k++) {
+    const t = BASE + k * 122_000
+    g.add(state(t, [win('w', 0, t + 5 * H)], 'cache'), FP, t)
+  }
+  assert.equal(g.samples('claude', 'w', FP).length, 1)
+  assert.equal(g.cycles('claude', 'w', FP).length, 1)
+})

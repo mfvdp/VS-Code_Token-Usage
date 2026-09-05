@@ -53,9 +53,20 @@ This project follows [Semantic Versioning](https://semver.org/).
   (`pace.minElapsedPercent`) and a bill of at most twice the tolerance (10 points at `normal`).
   Sixty percent used two percent into the window shows yellow in the bar, the status bar and the
   sparkline alike, and can raise a pace alert; it used to show green.
-* **The stroke down into a new window is neutral.** The sparkline's fall at a reset wears the
-  provider colour instead of the pace colour of the first reading after it: that fall is the
-  window turning over, not a pace anybody kept.
+* **The sparkline is one line, and only the turn of a window is neutral.** A stretch without
+  readings is drawn straight across, from the last reading before it to the first one after,
+  instead of a dashed bridge or a hole. The stroke into a reading the window turned over before
+  — the reset time moved, or the value fell by five points without one, the rule the reset
+  history already splits cycles by — wears the provider colour instead of a pace colour; every
+  other stroke keeps the pace colour of its later reading, and a reading of 0 % is on pace with
+  or without a clock. (1.2.1 coloured the fall at a reset in the pace colour of the new window.)
+* **The Tokens section sits above the filter bar and follows no chip.** Its rows are fixed
+  periods — the two running windows, today, the last 7 and 30 days, this week, this month, all
+  time — of every provider and model; the *Selected range* and *previous period* rows are gone
+  (the key figures, the chart and the models table carry the range), and the composition bars
+  and the cache economy cover the last 30 days and say so. The default section order is now
+  `quota, tokens, summary, kpis, …`; a stored order is kept as it is, and a `tokens` entry listed
+  after a filtered section stays below the bar.
 * **The filter bar is one labelled block.** A row each for *Range*, *Providers* and *Models*
   with the chips aligned in a column; `today`, `7d`, `30d` and `custom…` are visible and the
   rest fold behind `more ▾`; the range caption sits at the end of the Range row; the models fold
@@ -74,6 +85,14 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+* **Every reading looked like a reset.** Claude Code's usage cache reports a window's reset time
+  with sub-second jitter from one read to the next, and an idle Codex window's reset time rides
+  along with the clock. The exact comparison took each of them for a new window: the reset
+  history split into one-sample cycles, no reading was ever thinned as a repeat, and the
+  sparkline — once its reset strokes were neutral — was neutral from end to end. Reset times
+  are now compared with a half-minute tolerance, a clock that only moved by the time between two
+  readings is not a reset, and the one rule (`resetRule.ts`) serves the reset history, the
+  thinning anchors, the forecast and the sparkline alike.
 * The `dashboard.sections` enum descriptions in the manifest were listed in a different order
   than the values — the settings editor described `quota` as the summary and vice versa. A test
   now checks every enum in the manifest against its descriptions.

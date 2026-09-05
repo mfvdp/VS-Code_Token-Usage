@@ -294,7 +294,7 @@ writes no file, and never mixes with the live items.
 *Token Pace: Open Dashboard* (`ctrl+alt+shift+t`, `cmd+alt+shift+t` on macOS, unless
 `tokenPace.keybindings` is off) opens the panel in the secondary sidebar. It needs
 **VS Code 1.106 or newer**, for the reason given at the top of this file.
-`tokenPace.dashboard.sections` is an ordered array — the array order is the render order. Every section is set off from the one above it by a rule and a fixed gap, whether it is folded or not, and its header carries a gear that opens the settings behind that section. The range, provider and model chips filter the statistics, not the quota cards, so the filter bar sits below every `quota` and `context` card that leads the list and above the first section the filter applies to:
+`tokenPace.dashboard.sections` is an ordered array — the array order is the render order. Every section is set off from the one above it by a rule and a fixed gap, whether it is folded or not, and its header carries a gear that opens the settings behind that section. The range, provider and model chips filter the statistics — not the quota cards, and not the `tokens` section, whose periods are fixed — so the filter bar sits below every `quota`, `context` and `tokens` section that leads the list and above the first section the filter applies to; a filter-free section listed after a filtered one simply stays below the bar:
 
 | Section | Contents |
 |---|---|
@@ -302,7 +302,7 @@ writes no file, and never mixes with the live items.
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline. Hovering a card, or reaching it with the keyboard, opens what it counts, how it is computed, the period with its dates, what it is compared with, the split per provider and its basis; the markdown view lists the same explanations under the table |
-| `tokens` | Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost). Two rows lead the fixed ones: `Current 5 h window` and `Current 7 d window` cover exactly the window the provider reports a reset for, so they can be read against the quota card above — where no such window is reported the row is a trailing `Last 5 h` / `Last 7 d` span and says so. Both are summed from hour buckets, so once the oldest hours of the span have been rolled up into day totals every figure in the row carries `≈` and is a lower bound; the span itself is the tooltip of the row label. Then the composition bar with a `cache` switch that hides cache read and cache write (the remaining shares are then shares of what is drawn, and a caption names the tokens left out), cache economy, calendar periods and the plan factor |
+| `tokens` | Fixed periods of everything — every provider and model, whatever the chips say. Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) with the rows `Today`, `Last 7 days`, `Last 30 days`, `This week`, `This month`, `All time`. Two rows lead them: `Current 5 h window` and `Current 7 d window` cover exactly the window the provider reports a reset for, so they can be read against the quota card above — where no such window is reported the row is a trailing `Last 5 h` / `Last 7 d` span and says so. Both are summed from hour buckets, so once the oldest hours of the span have been rolled up into day totals every figure in the row carries `≈` and is a lower bound; the span itself is the tooltip of the row label. Then the composition bar over the last 30 days with a `cache` switch that hides cache read and cache write (the remaining shares are then shares of what is drawn, and a caption names the tokens left out), the cache economy of the same 30 days, calendar periods and the plan factor |
 | `chart` | Stacked daily (or weekly) bars for the selected range, one band per model in its provider's hue — the models of one provider told apart by pattern or shade (`chart.modelStyle`) — with a metric selector and an optional cost line on a second axis through the column centres. Clicking a column drills into that day |
 | `models` | Per-model breakdown with the same columns as the totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) plus the share of the range; every column sortable, with average and P90 turn length where enough samples exist. Where the rates came from is the tooltip of the cost, not a column |
 | `heatmap` | Calendar heatmap of the last 53 weeks with current and longest streak, active days, peak day and a variability measure. Days outside the coverage are dotted, not empty |
@@ -767,15 +767,18 @@ it the sparklines, the forecast line and the `history` section.
   otherwise drop below three, so the reset history, its `complete` flags and the forecast fits
   are the same before and after thinning. Seven windows come to about 4.7 k samples a week,
   8.6 k at 30 days and 18.7 k at 90 — under the hard cap of 20 k.
-* **Gaps are gaps.** The sparkline covers seven days on a time-proportional axis, so a stretch
-  without readings is a hole exactly as wide as the time nobody measured. A hole with no reset
-  inside it is bridged with a dashed line; a hole across a reset stays a hole, and the number of
-  gaps in the last 24 h is counted in the copied summary. The stroke down into the first
-  reading of a new window wears no pace colour: that fall is the window turning over, not a
-  pace anybody kept.
-* **Cycles.** A cycle ends when the provider announces a different reset time, or when the
-  percentage falls by five points or more without one. A rise too steep to come from usage is
-  treated as the limit being re-based: the cycle continues, but the rate fit restarts.
+* **Gaps are drawn across.** The sparkline covers seven days on a time-proportional axis, so a
+  stretch without readings is exactly as wide as the time nobody measured, and the line runs
+  straight from the last reading before it to the first one after; the number of such gaps in
+  the last 24 h is counted in the copied summary. The stroke into a reading the window turned
+  over before wears no pace colour: that stroke is the window turning over, not a pace anybody
+  kept. Every other stroke wears the pace colour of its later reading.
+* **Cycles.** A cycle ends when the window turned over: the provider announces a different
+  reset time, or the percentage falls by five points or more without one. Reset times within
+  half a minute of each other are the same reset — Claude Code's usage cache writes the time
+  with sub-second jitter — and the reset time of an idle rolling window, which merely rides
+  along with the clock, has not moved either. A rise too steep to come from usage is treated as
+  the limit being re-based: the cycle continues, but the rate fit restarts.
 
 ## Budgets
 
@@ -1125,7 +1128,7 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `dashboard.sections` | `quota, summary, kpis, tokens, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` |
+| `dashboard.sections` | `quota, tokens, summary, kpis, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` |
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |

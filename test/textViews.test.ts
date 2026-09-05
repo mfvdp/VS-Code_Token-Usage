@@ -80,20 +80,20 @@ test('every totals row appears once in both renderings', () => {
     assert.equal(items.filter((i) => i.label.startsWith(`${t.title} · `)).length, t.rows.length)
     assert.equal(rowsOf(md, `## Tokens — ${t.title}`).length, t.rows.length)
   }
-  // Seven calendar rows — the selected 30-day range is the fixed "Last 30 days" row, and one
-  // table must never print the same label twice — plus the two running window rows.
-  assert.equal(total, vm.totals.length * 9)
+  // Six fixed calendar rows — the table follows no chip, so there is no selected-range row
+  // and no previous period — plus the two running window rows.
+  assert.equal(total, vm.totals.length * 8)
 })
 
 test('the running windows lead the fixed rows, and the mark is explained once per table', () => {
   const vm = fullVm()
   const md = markdownDocument(vm)
   for (const t of vm.totals) {
-    // Selected range, previous, then the two windows a reader checks against the quota cards.
-    assert.deepEqual(t.rows.slice(2, 4).map((r) => r.label),
-      ['Current 5 h window', 'Current 7 d window'])
+    // The two windows a reader checks against the quota cards lead, then the fixed periods.
+    assert.deepEqual(t.rows.slice(0, 3).map((r) => r.label),
+      ['Current 5 h window', 'Current 7 d window', 'Today'])
     const rows = rowsOf(md, `## Tokens — ${t.title}`)
-    assert.ok(rows[2].startsWith('| Current 5 h window |'), rows[2])
+    assert.ok(rows[0].startsWith('| Current 5 h window |'), rows[0])
     // Every row of the table reaches the QuickPick too.
     assert.equal(
       quickPickItems(vm).filter((i) => i.label.startsWith(`${t.title} · Current `)).length, 2)
@@ -184,7 +184,7 @@ test('cache economy and the digest survive into both renderings', () => {
   const items = quickPickItems(vm)
   const md = markdownDocument(vm)
   assert.equal(items.filter((i) => i.label.startsWith('Cache economy ')).length, vm.cacheEconomy.length)
-  assert.equal(rowsOf(md, '## Cache economy').length, vm.cacheEconomy.length)
+  assert.equal(rowsOf(md, '## Cache economy — last 30 days').length, vm.cacheEconomy.length)
   for (const s of vm.digest) {
     assert.ok(items.some((i) => i.label === s), s)
     assert.ok(md.includes(`- ${s}`), s)
@@ -324,7 +324,7 @@ test('the QuickPick only ever offers our own commands', () => {
 test('the markdown document is a document, not a table dump', () => {
   const md = markdownDocument(fullVm())
   assert.ok(md.startsWith('# Token Pace — usage'))
-  for (const heading of ['## Summary', '## Quota', '## Key figures', '## Cache economy',
+  for (const heading of ['## Summary', '## Quota', '## Key figures', '## Cache economy — last 30 days',
     '## Calendar', '## Models', '## Activity', '## Data quality']) {
     assert.ok(md.includes(heading), heading)
   }
@@ -533,7 +533,7 @@ test('every provider column in the flat views carries the name, not the internal
     const title = SOURCE_TITLE[c.source]
     assert.ok(items.some((i) => i.label.startsWith(`Cache economy ${title}: `)), title)
   }
-  for (const heading of ['## Cache economy', '## Composition']) {
+  for (const heading of ['## Cache economy — last 30 days', '## Composition — last 30 days']) {
     const rows = rowsOf(md, heading)
     assert.ok(rows.length > 0, heading)
     for (const r of rows) {

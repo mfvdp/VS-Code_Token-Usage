@@ -30,6 +30,7 @@ import {
 import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
 import { ageMinutes, estimate, extraUsageText, full, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
+import { turnedOver } from './resetRule'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
 import type { ContextReading } from './quotaSources'
 import {
@@ -42,7 +43,7 @@ import {
   projectRows, records as recordsOf, sessionRows, totalsFor,
 } from './stats'
 import {
-  DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatReset, formatTime,
+  DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatReset, formatTime, rangeFor,
   isDay, previousRange, relativeShort,
 } from './time'
 import {
@@ -526,14 +527,13 @@ export const SPARK_SLOTS = SPARK_DAYS * 24 * 4
 /**
  * One reading on the sparkline: `i` is the slot index 0..SPARK_SLOTS-1, `p` the percent (0..100+).
  *
- * `reset` marks the first reading of a new window — its sample reports a different `resetsAt`
- * than the previous drawn one (a missing reset time and a present one count as different, and
- * the very first point never carries it). The renderer draws the stroke INTO such a point
- * without a pace colour: that fall is the window turning over, not a pace anybody kept.
+ * `reset` marks a reading the window turned over before: since the previous drawn reading the
+ * provider's reset time moved, or the value fell by five points without one — `turnedOver`,
+ * the rule the reset history splits cycles by (the very first point never carries it). The
+ * renderer draws the stroke INTO such a point without a pace colour: that stroke is the
+ * window turning over, not a pace anybody kept.
  */
 export interface SparkPoint { i: number; p: number; level: PaceLevel | null; reset?: true }
-/** Slot indices of two consecutive points a dashed bridge joins. */
-export interface SparkBridge { from: number; to: number }
 
 /**
  * Seven days of one window on a time-proportional grid: x = slot index, so a missing slot is
@@ -548,14 +548,13 @@ export interface SparkVm {
   from: number
   /** Unix ms: end of the last slot; the slot containing `now` is the last slot (index slots-1). */
   to: number
-  /** Ascending unique `i`; one point per slot that has a reading — the LAST reading inside the slot. */
-  points: SparkPoint[]
   /**
-   * For consecutive points a, b with b.i - a.i > 1: a bridge when no reset lies between them —
-   * both samples carry the same resetsAt (or both null) AND b.p >= a.p - 1. Otherwise the hole
-   * stays a hole: a line across a reset would claim the window never turned over.
+   * Ascending unique `i`; one point per slot that has a reading — the LAST reading inside the
+   * slot. Consecutive points are joined by one straight stroke whatever lies between them: a
+   * stretch without readings is exactly as wide as the time it covers, and the line runs
+   * across it. `WindowVm.gaps` counts those stretches for the last day.
    */
-  bridges: SparkBridge[]
+  points: SparkPoint[]
 }
 
 /** Longer than this without a reading is a hole in the coverage, not a flat line. */
@@ -568,13 +567,15 @@ const SPARK_SPAN_MS = SPARK_DAYS * 24 * 60 * 60_000
  * The pace level the bar would have shown at the time of the sample: elapsed share from the
  * sample's own `resetsAt` and the window length, judged by the same rule as the bar. Null
  * without a clock — except an exhausted reading, which the bar colours 'error' with or without
- * one.
+ * one, and an untouched one: nothing used is on pace by any clock, and a stroke along the
+ * floor in the neutral colour would read as a reset that never happened.
  */
 function sparkLevel(s: QuotaSample, windowMinutes: number | null, paceCfg: PaceConfig): PaceLevel | null {
   const elapsed = windowElapsed(s.r, windowMinutes, s.t)
   const verdict = paceVerdict(s.p, elapsed, paceCfg)
   const level = severityOf(verdict)
   if (level === 'error') return level
+  if (s.p <= 0) return 'ok'
   return elapsed === null ? null : level
 }
 
@@ -602,20 +603,16 @@ export function sparkOf(
   }
   const slots = [...last.keys()].sort((a, b) => a - b)
   const points: SparkPoint[] = []
-  const bridges: SparkBridge[] = []
-  let prev: { i: number; s: QuotaSample } | null = null
+  let prev: QuotaSample | null = null
   for (const i of slots) {
     const s = last.get(i) as QuotaSample
     const point: SparkPoint = { i, p: s.p, level: sparkLevel(s, windowMinutes, paceCfg) }
-    // A new reset time is a new window: the segment leading here belongs to neither of them.
-    if (prev && prev.s.r !== s.r) point.reset = true
+    // The window turned over: the stroke leading here belongs to neither window.
+    if (prev && turnedOver(prev, s)) point.reset = true
     points.push(point)
-    if (prev && i - prev.i > 1 && prev.s.r === s.r && s.p >= prev.s.p - 1) {
-      bridges.push({ from: prev.i, to: i })
-    }
-    prev = { i, s }
+    prev = s
   }
-  return { slots: SPARK_SLOTS, from, to, points, bridges }
+  return { slots: SPARK_SLOTS, from, to, points }
 }
 
 // ---------------------------------------------------------------------------
@@ -1061,10 +1058,17 @@ export function buildViewModel(input: VmInput): ViewModel {
   // against exactly the bounds the quota card above it draws.
   const windowsOf = (source: Source): TotalsWindow[] =>
     quotas.find((q) => q.source === source)?.windows ?? []
-  const totals = sources.map((source) => ({
+  // The Tokens section follows no chip. It sits above the filter bar with the quota cards, and
+  // a table up there that quietly narrowed to the range, provider or model picked below would
+  // be read as the whole — so its rows are fixed periods (the running windows, today, the last
+  // 7 and 30 days, this week, this month, all time) of every provider and model, and the
+  // composition bars and the cache economy take the last 30 days and say so.
+  const whole: StatsCtx = { ...ctx, sources: [...SOURCES], models: [] }
+  const month = rangeFor('30d', now, tcfg)
+  const totals = whole.sources.map((source) => ({
     source,
     title: SOURCE_TITLE[source],
-    rows: totalsFor(ctx, source, range, previous, firstDay, cfg.pricing.showListPrice, windowsOf(source)),
+    rows: totalsFor(whole, source, null, null, firstDay, cfg.pricing.showListPrice, windowsOf(source)),
   }))
 
   const costSummary = combinedCost(ctx, range)
@@ -1072,7 +1076,7 @@ export function buildViewModel(input: VmInput): ViewModel {
     ctx, range, sortOf(ui.sort), cfg.dashboard.modelRows, cfg.pricing.showListPrice,
   )
   const kpiRow = kpis(ctx, range, previous)
-  const cache = cacheEconomy(ctx, range)
+  const cache = cacheEconomy(whole, month)
 
   const retroRows = retroList(quotas, history, input.fingerprints)
 
@@ -1093,11 +1097,11 @@ export function buildViewModel(input: VmInput): ViewModel {
     context: contextCard(input.context, cfg, now),
     digest: [],
     kpis: kpiRow,
-    composition: composition(ctx, range),
+    composition: composition(whole, month),
     totals,
     cacheEconomy: cache,
-    calendar: calendar(ctx),
-    planFactor: planFactors(ctx, cfg.planPriceUsd),
+    calendar: calendar(whole),
+    planFactor: planFactors(whole, cfg.planPriceUsd),
     chart: chart(ctx, range, ui.metric, cfg.chart.modelStyle),
     models,
     heatmap: heatmap(ctx, ui.heatmapMetric, firstDay),

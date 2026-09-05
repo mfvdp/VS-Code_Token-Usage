@@ -433,17 +433,15 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .spark.q { height: 22px; }
 .spark polyline { fill: none; stroke: var(--claude); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 /* Each segment wears the pace level the bar showed at its later point; a point with no clock
-   keeps the provider colour, and so does the segment into the first reading after a reset —
-   that fall is the window turning over, and colouring it would judge a pace nobody kept. */
+   keeps the provider colour, and so does the stroke into a reading the window turned over
+   before — that stroke is the window turning over, and colouring it would judge a pace nobody
+   kept. A stretch without readings is drawn straight across, from the last reading before it
+   to the first one after. */
 .spark polyline.ok, .spark path.pt.ok { stroke: var(--ok); }
 .spark polyline.warn, .spark path.pt.warn { stroke: var(--warn); }
 .spark polyline.warn2, .spark path.pt.warn2 { stroke: var(--warn2); }
 .spark polyline.error, .spark path.pt.error { stroke: var(--error); }
-/* A bridge joins two readings with no reset between them across slots that have none — VS
-   Code was not running — and is dashed, so it never claims a measurement that was not taken. */
-.spark line.bridge { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; opacity: .6;
-                     vector-effect: non-scaling-stroke; }
-/* A lone reading between two gaps is drawn as a hair-length stroke with a round cap: the
+/* A single reading is drawn as a hair-length stroke with a round cap: the
    viewBox is stretched to the card width, and any shape with a geometric size would be
    stretched with it — a 5 px dash that reads as a line where there is a single point. */
 .spark path.pt { fill: none; stroke: var(--claude); stroke-width: 3; stroke-linecap: round;
@@ -694,13 +692,13 @@ function hasSpark(s) {
 
 /**
  * Seven days of one window, time-proportional: the viewBox is one unit per 15-minute slot,
- * so a stretch without readings is exactly as wide as the time it covers. Runs of adjacent
- * slots become polylines, split wherever the pace level changes — the segment between two
- * points wears the level of the later one, except into a point the view model marked as the
- * first reading of a new window, which is a neutral two-point stroke — and a bridge across
- * slots with no reading is a dashed line. A lone reading is the round-cap hairline.
- * Percentages above 100 sit on the top edge rather than leaving the box. A plain array (the
- * KPI sparks) takes the older renderer.
+ * so a stretch without readings is exactly as wide as the time it covers — and the line is
+ * drawn straight across it, from the last reading before to the first one after. Consecutive
+ * points become polylines, split wherever the pace level changes: the stroke between two
+ * points wears the level of the later one, except into a point the view model marked as one
+ * the window turned over before, which is a neutral two-point stroke. A single reading is the
+ * round-cap hairline. Percentages above 100 sit on the top edge rather than leaving the box.
+ * A plain array (the KPI sparks) takes the older renderer.
  */
 function sparkSvg(spark) {
   if (Array.isArray(spark)) return sparkArraySvg(spark);
@@ -716,42 +714,24 @@ function sparkSvg(spark) {
   const poly = (seg, cls) => '<polyline' + (cls ? ' class="' + cls + '"' : '') + ' points="'
     + seg.map(pt => xOf(pt) + ',' + yOf(pt)).join(' ') + '"/>';
   let body = '';
-  let run = [];
-  const flush = () => {
-    if (run.length === 1) {
-      const cls = sparkLevel(run[0]);
-      body += '<path class="pt' + (cls ? ' ' + cls : '') + '" d="M' + xOf(run[0]) + ' '
-        + yOf(run[0]) + 'h.01"/>';
-    } else if (run.length > 1) {
-      // One stroke per pair of neighbours, wearing the level of the later point, so equal
-      // neighbours share a polyline. A stroke into the first reading of a new window stands
-      // alone and wears no level: the drop is the reset, and the coloured run starts again
-      // at that reading.
-      const segs = [];
-      for (let k = 1; k < run.length; k++) {
-        const isReset = !!run[k].reset;
-        const cls = isReset ? '' : sparkLevel(run[k]);
-        const last = segs.length ? segs[segs.length - 1] : null;
-        if (last && !last.reset && !isReset && last.cls === cls) last.pts.push(run[k]);
-        else segs.push({ cls: cls, reset: isReset, pts: [run[k - 1], run[k]] });
-      }
-      for (const sg of segs) body += poly(sg.pts, sg.cls);
+  if (pts.length === 1) {
+    const cls = sparkLevel(pts[0]);
+    body = '<path class="pt' + (cls ? ' ' + cls : '') + '" d="M' + xOf(pts[0]) + ' '
+      + yOf(pts[0]) + 'h.01"/>';
+  } else {
+    // One stroke per pair of neighbours, wearing the level of the later point, so equal
+    // neighbours share a polyline. A stroke into a reading the window turned over before
+    // stands alone and wears no level: it is the reset, and the coloured run starts again
+    // at that reading.
+    const segs = [];
+    for (let k = 1; k < pts.length; k++) {
+      const isReset = !!pts[k].reset;
+      const cls = isReset ? '' : sparkLevel(pts[k]);
+      const last = segs.length ? segs[segs.length - 1] : null;
+      if (last && !last.reset && !isReset && last.cls === cls) last.pts.push(pts[k]);
+      else segs.push({ cls: cls, reset: isReset, pts: [pts[k - 1], pts[k]] });
     }
-    run = [];
-  };
-  for (const pt of pts) {
-    if (run.length && Number(pt.i) - Number(run[run.length - 1].i) !== 1) flush();
-    run.push(pt);
-  }
-  flush();
-  const byI = Object.create(null);
-  for (const pt of pts) byI[Number(pt.i)] = pt;
-  for (const b of Array.isArray(spark.bridges) ? spark.bridges : []) {
-    const a = b ? byI[Number(b.from)] : null;
-    const z = b ? byI[Number(b.to)] : null;
-    if (!a || !z) continue;
-    body += '<line class="bridge" x1="' + xOf(a) + '" y1="' + yOf(a) + '" x2="' + xOf(z)
-      + '" y2="' + yOf(z) + '"/>';
+    for (const sg of segs) body += poly(sg.pts, sg.cls);
   }
   return '<svg class="spark q" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" '
     + 'aria-hidden="true">' + body + '</svg>';
@@ -1275,7 +1255,7 @@ function compositionBar(c) {
   const caption = noCache && left.length
     ? '<div class="meta">without cache · ' + left.join(' and ') + ' not shown</div>'
     : '';
-  return '<div class="meta">' + esc(srcName(c.source)) + ' composition</div>'
+  return '<div class="meta">' + esc(srcName(c.source)) + ' composition · last 30 days</div>'
     + '<div class="compbar">' + segs + '</div>'
     + '<div class="legend">' + parts.map(p => '<span><i class="dot ' + cls(p) + '"></i>'
       + esc(p.text) + '</span>').join('') + '</div>'
@@ -1291,7 +1271,7 @@ function sTokens() {
   const anyParts = vm.composition.some(c => c.parts.some(p => p.key !== 'reasoning' && p.tokens > 0));
   if (bars || anyParts) h += cacheChips() + bars;
   if (vm.cacheEconomy.length) {
-    h += '<div class="scroll"><table><thead><tr><th>Cache</th><th>Hit rate</th>'
+    h += '<div class="scroll"><table><thead><tr><th>Cache · last 30 days</th><th>Hit rate</th>'
       + '<th>Realised</th><th>Blended $/1M</th></tr></thead><tbody>'
       + vm.cacheEconomy.map(c => '<tr><td data-h="Cache">' + esc(srcName(c.source)) + '</td>'
         + '<td data-h="Hit rate">' + esc(c.hitRate) + '</td><td data-h="Realised">'
@@ -1806,8 +1786,10 @@ function sControls() {
 }
 
 // Sections the range, provider and model chips do not filter: a provider's window is what
-// it is whichever week is selected, and the context reading belongs to one live session.
-const RANGE_FREE = ['quota', 'context'];
+// it is whichever week is selected, the context reading belongs to one live session, and the
+// Tokens section is fixed periods of everything — the running windows, today, the last 7 and
+// 30 days, this week and month — for every provider and model.
+const RANGE_FREE = ['quota', 'context', 'tokens'];
 
 function sFooter() {
   // The footnotes already carry the pricing sentence (and the one about configured rates);

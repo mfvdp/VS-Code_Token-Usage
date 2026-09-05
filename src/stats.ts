@@ -740,7 +740,7 @@ function windowRows(
 export function totalsFor(
   ctx: StatsCtx,
   source: Source,
-  range: DayRange,
+  range: DayRange | null,
   previous: DayRange | null,
   firstDay: string | null,
   showListPrice = false,
@@ -755,18 +755,22 @@ export function totalsFor(
     { label: 'This month', from: `${today.slice(0, 8)}01`, to: today },
     { label: 'All time', from: firstDay ?? today, to: today },
   ]
-  const twin = fixed.find((f) => f.label === range.label)
-  const same = twin !== undefined && twin.from === range.from && twin.to === range.to
-  const label = twin !== undefined && !same ? `Selected range (${range.label})` : range.label
-  const rows: TotalRow[] = [totalRow(ctx, label, range.from, range.to, source, showListPrice)]
-  if (previous) {
+  // No range: fixed periods only — the dashboard's table, which sits above the filter bar.
+  const twin = range ? fixed.find((f) => f.label === range.label) : undefined
+  const same = range !== null && twin !== undefined && twin.from === range.from && twin.to === range.to
+  const rows: TotalRow[] = []
+  if (range) {
+    const label = twin !== undefined && !same ? `Selected range (${range.label})` : range.label
+    rows.push(totalRow(ctx, label, range.from, range.to, source, showListPrice))
+  }
+  if (range && previous) {
     rows.push(totalRow(ctx, previous.label, previous.from, previous.to, source, showListPrice))
   }
   // The two running windows lead the fixed rows: they are the spans a reader checks against
   // the quota cards above them, and 'Today' is a calendar day, not a window.
   rows.push(...windowRows(ctx, source, windows, showListPrice))
   for (const f of fixed) {
-    if (same && f.label === range.label) continue
+    if (same && f.label === (range as DayRange).label) continue
     rows.push(totalRow(ctx, f.label, f.from, f.to, source, showListPrice))
   }
   return rows

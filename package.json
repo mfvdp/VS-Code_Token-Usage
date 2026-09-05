@@ -768,9 +768,9 @@
             "order": 1,
             "default": [
               "quota",
+              "tokens",
               "summary",
               "kpis",
-              "tokens",
               "chart",
               "models",
               "heatmap",

@@ -9,10 +9,11 @@ import { rangeFor } from '../src/time'
 import { QuotaSample, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
+import { RESET_JITTER_MS } from '../src/resetRule'
 import {
   DASHBOARD_SECTION_KEYS, PROBLEM_ACTION, SOURCE_TITLE, SPARK_DAYS, SPARK_SLOTS, SPARK_SLOT_MS,
   WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel, defaultUiState, forecastsFor,
-  parseWebviewMessage, sparkOf,
+  SparkVm, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
@@ -46,13 +47,14 @@ test('the view model is built from the aggregator, the history and the quota sta
   assert.equal(vm.quotas[0].problem, null)
   assert.equal(vm.quotas[0].usagePageUrl, 'https://claude.ai/settings/usage')
 
-  // Range, previous, the two running windows, today, 7d, 30d, this week, this month, all
-  // time — minus the fixed row the selected 30-day range already is, which would otherwise
-  // appear twice.
-  for (const t of vm.totals) assert.equal(t.rows.length, 9)
+  // The two running windows, today, 7d, 30d, this week, this month, all time — fixed periods
+  // only: the table sits above the filter bar and follows no chip, so there is no selected
+  // range and no previous period in it.
+  for (const t of vm.totals) assert.equal(t.rows.length, 8)
   // The windows the provider reported, held against the same bounds the quota card draws.
-  assert.deepEqual(vm.totals[0].rows.slice(2, 4).map((r) => r.label),
+  assert.deepEqual(vm.totals[0].rows.slice(0, 2).map((r) => r.label),
     ['Current 5 h window', 'Current 7 d window'])
+  assert.equal(vm.totals[0].rows[2].label, 'Today')
   // Six figures over the range plus the "today" tile that opens the row.
   assert.equal(vm.kpis.length, 7)
   assert.equal(vm.kpis[0].key, 'today')
@@ -160,11 +162,11 @@ test('the totals table gets the windows of its own provider, and nobody else\u20
   }))
   const claude = vm.totals.find((t) => t.source === 'claude')
   const codex = vm.totals.find((t) => t.source === 'codex')
-  assert.deepEqual(claude?.rows.slice(2, 4).map((r) => r.label),
+  assert.deepEqual(claude?.rows.slice(0, 2).map((r) => r.label),
     ['Current 5 h window', 'Current 7 d window'])
-  assert.deepEqual(codex?.rows.slice(2, 4).map((r) => r.label), ['Last 5 h', 'Last 7 d'])
+  assert.deepEqual(codex?.rows.slice(0, 2).map((r) => r.label), ['Last 5 h', 'Last 7 d'])
   // The window row's span is the window's own, not the range's.
-  assert.equal(claude?.rows[2].spanText, '09:00 \u2192 now')
+  assert.equal(claude?.rows[0].spanText, '09:00 \u2192 now')
 })
 
 test('projects and sessions stay empty until attribution is switched on', () => {
@@ -197,13 +199,22 @@ test('the price date is stated once, in the footnote that needs it', () => {
   assert.equal(custom.footnotes.filter((f) => f.includes('configured rates')).length, 1)
 })
 
-test('the model filter and the provider filter reach every section', () => {
+test('the model filter and the provider filter reach every filtered section, and not the Tokens section', () => {
   const only = buildViewModel(makeInput({ ui: { providers: ['codex'], models: ['gpt-5.3-codex'] } }))
-  assert.equal(only.totals.length, 1)
-  assert.equal(only.totals[0].source, 'codex')
   assert.deepEqual(only.models.rows.map((r) => r.model), ['gpt-5.3-codex'])
   assert.equal(only.chart.series.length, 1)
-  assert.equal(only.cacheEconomy.length, 1)
+  // The Tokens section sits above the filter bar with the quota cards and is fixed periods of
+  // everything: both providers, every model, whatever the chips say — a table up there that
+  // quietly narrowed would be read as the whole.
+  const whole = buildViewModel(makeInput())
+  assert.equal(only.totals.length, 2)
+  assert.deepEqual(only.totals.map((t) => t.source), ['claude', 'codex'])
+  assert.deepEqual(only.totals, whole.totals)
+  assert.deepEqual(only.composition, whole.composition)
+  assert.deepEqual(only.cacheEconomy, whole.cacheEconomy)
+  assert.deepEqual(only.calendar, whole.calendar)
+  assert.deepEqual(only.planFactor, whole.planFactor)
+  assert.equal(only.cacheEconomy.length, 2)
 })
 
 test('the chart is stacked by provider and model and carries the configured style', () => {
@@ -274,7 +285,6 @@ test('the sparkline grid is seven days of quarter hours ending in the slot that 
   assert.equal(vm.to, Math.floor(NOW / SPARK_SLOT_MS) * SPARK_SLOT_MS + SPARK_SLOT_MS, 'slots are aligned to the quarter hour')
   assert.ok(NOW - vm.from >= (SPARK_SLOTS - 1) * SPARK_SLOT_MS, 'at most one partial slot is missing from the seven days')
   assert.deepEqual(vm.points, [])
-  assert.deepEqual(vm.bridges, [])
   // An unaligned now still ends in the slot that contains it.
   const odd = sparkOf([sample(NOW + 7 * MIN, 10)], NOW + 7 * MIN, 300, cfg.pace)
   assert.equal(odd.points[0].i, SPARK_SLOTS - 1)
@@ -319,6 +329,10 @@ test('every point carries the pace level the bar would have shown at that time',
   // No clock: no verdict — from the sample's side or from the window's.
   assert.equal(sparkOf([sample(t, 70, null)], NOW, 300, cfg.pace).points[0].level, null)
   assert.equal(sparkOf([sample(t, 70, r)], NOW, null, cfg.pace).points[0].level, null)
+  // Except nothing used, which is on pace by any clock — an idle window reports no reset
+  // time, and a neutral stroke along the floor would read as a reset that never happened.
+  assert.equal(sparkOf([sample(t, 0, null)], NOW, 300, cfg.pace).points[0].level, 'ok')
+  assert.equal(sparkOf([sample(t, 0, r)], NOW, null, cfg.pace).points[0].level, 'ok')
   // Exhausted is a fact, not a pace: 'error' with or without a clock, like the bar.
   assert.equal(sparkOf([sample(t, 100, r)], NOW, 300, cfg.pace).points[0].level, 'error')
   assert.equal(sparkOf([sample(t, 99.5, null)], NOW, null, cfg.pace).points[0].level, 'error')
@@ -349,53 +363,50 @@ test('a young window heavy with usage is judged by every view, not left measurin
   assert.equal(sparkOf([sample(NOW, 6, resetsAt)], NOW, 300, cfg.pace).points[0].level, 'ok')
 })
 
-test('a hole without a reset inside is bridged; a hole across a reset stays a hole', () => {
+test('a reading the window turned over before is flagged so its stroke can stay neutral', () => {
   const r1 = NOW + 3_600_000
   const r2 = NOW + 6 * 3_600_000
   const at = (slotsAgo: number) => NOW - slotsAgo * SPARK_SLOT_MS
-  // Same resetsAt, usage rose: the readings simply stopped for a while.
-  const same = sparkOf([sample(at(10), 20, r1), sample(at(2), 25, r1)], NOW, 300, cfg.pace)
-  assert.deepEqual(same.bridges, [{ from: SPARK_SLOTS - 11, to: SPARK_SLOTS - 3 }])
-  // Both without a reset time: also a bridge.
-  const nulls = sparkOf([sample(at(10), 20), sample(at(2), 20)], NOW, 300, cfg.pace)
-  assert.equal(nulls.bridges.length, 1)
-  // The provider announced a new reset in between: the window turned over in the dark.
-  const reset = sparkOf([sample(at(10), 20, r1), sample(at(2), 25, r2)], NOW, 300, cfg.pace)
-  assert.deepEqual(reset.bridges, [])
-  // A fall of more than a point without a new reset is a reset too.
-  const fell = sparkOf([sample(at(10), 20, r1), sample(at(2), 18, r1)], NOW, 300, cfg.pace)
-  assert.deepEqual(fell.bridges, [])
-  // A fall of exactly one point is rounding, not a reset.
-  const rounding = sparkOf([sample(at(10), 20, r1), sample(at(2), 19, r1)], NOW, 300, cfg.pace)
-  assert.equal(rounding.bridges.length, 1)
-  // Adjacent slots are joined by the line itself, not by a bridge.
-  const adjacent = sparkOf([sample(at(3), 20, r1), sample(at(2), 21, r1)], NOW, 300, cfg.pace)
-  assert.deepEqual(adjacent.bridges, [])
-})
-
-test('the first reading of a new window is flagged so its stroke can stay neutral', () => {
-  const r1 = NOW + 3_600_000
-  const r2 = NOW + 6 * 3_600_000
-  const at = (slotsAgo: number) => NOW - slotsAgo * SPARK_SLOT_MS
+  const flags = (vm: SparkVm) => vm.points.map((p) => p.reset)
   const vm = sparkOf([
     sample(at(3), 80, r1), sample(at(2), 90, r1), sample(at(1), 5, r2), sample(at(0), 12, r2),
   ], NOW, 300, cfg.pace)
-  assert.deepEqual(vm.points.map((p) => p.reset), [undefined, undefined, true, undefined])
+  assert.deepEqual(flags(vm), [undefined, undefined, true, undefined])
   // The first point of the whole line never carries it: there is no stroke leading into it.
   assert.equal(sparkOf([sample(at(1), 5, r2)], NOW, 300, cfg.pace).points[0].reset, undefined)
-  // A reset time appearing or disappearing is a change as much as a different one is.
-  const appears = sparkOf([sample(at(1), 5, null), sample(at(0), 6, r2)], NOW, 300, cfg.pace)
-  assert.deepEqual(appears.points.map((p) => p.reset), [undefined, true])
-  const vanishes = sparkOf([sample(at(1), 5, r2), sample(at(0), 6, null)], NOW, 300, cfg.pace)
-  assert.deepEqual(vanishes.points.map((p) => p.reset), [undefined, true])
-  // The flag follows the reported reset, not the fall: a reading that dropped inside the same
-  // window is a correction, and its stroke keeps the pace colour.
+  // The same rule as the reset history: a moved reset time flags the reading whether the
+  // value fell or rose — a new window already in use when it was first read still turned
+  // over — and a fall of five points without one is a reset the provider did not announce.
+  const rose = sparkOf([sample(at(1), 2, r1), sample(at(0), 22, r2)], NOW, 300, cfg.pace)
+  assert.deepEqual(flags(rose), [undefined, true])
   const fell = sparkOf([sample(at(1), 20, r1), sample(at(0), 4, r1)], NOW, 300, cfg.pace)
-  assert.deepEqual(fell.points.map((p) => p.reset), [undefined, undefined])
-  // A bridge never crosses a reset by definition, so a bridged point is never flagged.
+  assert.deepEqual(flags(fell), [undefined, true])
+  const dipped = sparkOf([sample(at(1), 20, r1), sample(at(0), 16, r1)], NOW, 300, cfg.pace)
+  assert.deepEqual(flags(dipped), [undefined, undefined], 'a four-point dip is a correction')
+  // A missing reset time says nothing: appearing or vanishing is not a turn of the window.
+  const appears = sparkOf([sample(at(1), 5, null), sample(at(0), 6, r2)], NOW, 300, cfg.pace)
+  assert.deepEqual(flags(appears), [undefined, undefined])
+  const vanishes = sparkOf([sample(at(1), 5, r2), sample(at(0), 6, null)], NOW, 300, cfg.pace)
+  assert.deepEqual(flags(vanishes), [undefined, undefined])
+  // Claude Code's usage cache writes the reset time with sub-second jitter: not a reset. The
+  // whole line was neutral once because every reading looked like one.
+  const jitter = sparkOf([
+    sample(at(3), 20, r1), sample(at(2), 25, r1 - 114), sample(at(1), 30, r1 + 18), sample(at(0), 35, r1 + RESET_JITTER_MS),
+  ], NOW, 300, cfg.pace)
+  assert.deepEqual(flags(jitter), [undefined, undefined, undefined, undefined])
+  // An idle rolling window reports "now + window length": the reset time rides along with
+  // the clock, and that is not a reset either.
+  const riding = sparkOf([
+    sample(at(2), 0, at(2) + 5 * 3_600_000), sample(at(1), 0, at(1) + 5 * 3_600_000 + 1000),
+    sample(at(0), 0, at(0) + 5 * 3_600_000),
+  ], NOW, 300, cfg.pace)
+  assert.deepEqual(flags(riding), [undefined, undefined, undefined])
+  // A stretch without readings changes nothing: the flag is about the two readings either
+  // side of it, and the renderer draws the stroke across whatever lies between them.
   const hole = sparkOf([sample(at(9), 20, r1), sample(at(2), 25, r1)], NOW, 300, cfg.pace)
-  assert.equal(hole.bridges.length, 1)
-  assert.deepEqual(hole.points.map((p) => p.reset), [undefined, undefined])
+  assert.deepEqual(flags(hole), [undefined, undefined])
+  const dark = sparkOf([sample(at(9), 20, r1), sample(at(2), 25, r2)], NOW, 300, cfg.pace)
+  assert.deepEqual(flags(dark), [undefined, true])
 })
 
 test('the quota card carries the sparkline and its own gap count', () => {
@@ -405,7 +416,6 @@ test('the quota card carries the sparkline and its own gap count', () => {
   const card = vm.quotas[0].windows.find((w) => w.id === 'session:300') as WindowVm
   assert.equal(card.spark.points.length, 9, 'nine readings a quarter hour apart: nine slots')
   assert.equal(card.spark.points[8].i, SPARK_SLOTS - 1)
-  assert.deepEqual(card.spark.bridges, [])
   // Readings a quarter hour apart leave no hole between them.
   assert.equal(card.gaps, 0)
   // A window with no series at all has no reading to count a gap against.

@@ -229,7 +229,7 @@ const ALERT_WINDOW_CONDITIONS: readonly AlertWindowCondition[] = ['any', 'sessio
 const DEFAULT_STATUS_BAR: readonly StatusBarEntry[] = ['claudeQuota', 'codexQuota', 'tokens']
 /** The quota cards first — the reading a glance is for — and the statistics beneath them. */
 const DEFAULT_SECTIONS: readonly DashboardSection[] = [
-  'quota', 'summary', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours', 'dataQuality',
+  'quota', 'tokens', 'summary', 'kpis', 'chart', 'models', 'heatmap', 'hours', 'dataQuality',
 ]
 const DEFAULT_CLAUDE_SOURCES: readonly ClaudeSourceId[] = ['cacheFile', 'statusline', 'claudeJson', 'poll']
 const DEFAULT_CODEX_SOURCES: readonly CodexSourceId[] = ['cacheFile', 'transcript', 'poll']

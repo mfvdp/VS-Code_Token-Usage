@@ -4,6 +4,7 @@
 import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
+import { resetMoved, turnedOver } from './resetRule'
 import { QuotaOrigin, QuotaSample, QuotaState, Source } from './types'
 
 /** Schema of `quotaHistory.json`. A file with any other version is not ours to edit. */
@@ -35,9 +36,6 @@ export const THIN_OLD_SLOT_MS = 60 * 60_000
  * between two distant points instead of the gap it really was.
  */
 export const GAP_KEEP_MS = 6 * 60 * 60 * 1000
-
-/** A fall of five points without a new `resetsAt` is a reset the provider did not announce. */
-const CYCLE_DROP_POINTS = 5
 
 /**
  * Limit re-basing: percent cannot climb this fast from usage alone, so such a jump means
@@ -157,9 +155,9 @@ function absorb(b: Building, s: QuotaSample): void {
 /**
  * Splits one window's samples into cycles.
  *
- * A cycle ends when the provider announces a different `resetsAt` or when the percentage
- * falls by five points or more without one — providers do not always publish the reset,
- * and a fall is the only other honest evidence that the window turned over. A rise that
+ * A cycle ends when the window turned over — see `turnedOver`: the provider announces a
+ * different `resetsAt` (beyond the jitter of the cache origin), or the percentage falls by
+ * five points or more without one, the only other honest evidence. A rise that
  * is too steep to come from usage is a re-basing: it stays inside the cycle but moves
  * `fitStart`, so the forecast does not fit a slope across the step.
  */
@@ -170,10 +168,7 @@ function cyclesOf(list: QuotaSample[]): Cycle[] {
   for (let i = 1; i < list.length; i++) {
     const prev = list[i - 1]
     const s = list[i]
-    // A null resetsAt means "the source does not say", not "the reset time changed".
-    const resetChanged = prev.r !== null && s.r !== null && prev.r !== s.r
-    const fell = prev.p - s.p >= CYCLE_DROP_POINTS
-    if (resetChanged || fell) {
+    if (turnedOver(prev, s)) {
       cur.cycle.end = prev.t
       cur.cycle.complete = cur.count >= 3
       out.push(cur.cycle)
@@ -199,8 +194,7 @@ function cyclesOf(list: QuotaSample[]): Cycle[] {
  * keeps exactly the samples the cycle split needs.
  */
 function breaks(prev: QuotaSample, s: QuotaSample): boolean {
-  const resetChanged = prev.r !== null && s.r !== null && prev.r !== s.r
-  if (resetChanged || prev.p - s.p >= CYCLE_DROP_POINTS) return true
+  if (turnedOver(prev, s)) return true
   const hours = (s.t - prev.t) / HOUR_MS
   const rise = s.p - prev.p
   return rise >= REBASE_MIN_POINTS && hours > 0 && rise / hours > REBASE_POINTS_PER_HOUR
@@ -431,7 +425,9 @@ export class QuotaHistory {
       const key = keyOf(sample)
       if (this.keys.has(key)) continue
       const prev = this.previous(sample)
-      if (prev && prev.p === p && prev.r === r && t - prev.t <= GAP_KEEP_MS) continue
+      // The same reading again — a reset time that only jittered, or rode along with the
+      // clock of an idle rolling window, is the same reading.
+      if (prev && prev.p === p && !resetMoved(prev, sample) && t - prev.t <= GAP_KEEP_MS) continue
       this.items.push(sample)
       this.keys.add(key)
       touched.add(streamKey(sample))

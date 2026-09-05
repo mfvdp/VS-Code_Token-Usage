@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { turnedOver } from './resetRule'
 import { Forecast, ForecastState, QuotaSample, QuotaWindow } from './types'
 
 export interface ForecastConfig {
@@ -65,8 +66,7 @@ export interface Calibration {
 const HOUR_MS = 3_600_000
 /** The display layer's "exhausted" threshold — a full window needs no projection. */
 const FULL_PERCENT = 99.5
-/** Same discontinuity rules as `quotaHistory.cycles()`; kept in sync by name, not by import. */
-const CYCLE_DROP_POINTS = 5
+/** The re-basing rules of `quotaHistory.cycles()`; kept in sync by name, not by import. */
 const REBASE_POINTS_PER_HOUR = 60
 const REBASE_MIN_POINTS = 5
 /** A calibration band is built from at most the three newest qualifying spans. */
@@ -119,8 +119,9 @@ interface Segment {
 /**
  * Splits a window's samples at reset discontinuities, mirroring `quotaHistory.cycles()`.
  *
- * The duplication is deliberate: this module stays free of the file-backed history, and a
- * caller that already filtered to one cycle simply gets that cycle back unchanged.
+ * The duplication is deliberate: this module stays free of the file-backed history — the
+ * reset rule itself is shared through `resetRule` — and a caller that already filtered to one
+ * cycle simply gets that cycle back unchanged.
  */
 function splitCycles(list: QuotaSample[]): Segment[] {
   if (list.length === 0) return []
@@ -129,9 +130,7 @@ function splitCycles(list: QuotaSample[]): Segment[] {
   for (let i = 1; i < list.length; i++) {
     const prev = list[i - 1]
     const s = list[i]
-    const resetChanged = prev.r !== null && s.r !== null && prev.r !== s.r
-    const fell = prev.p - s.p >= CYCLE_DROP_POINTS
-    if (resetChanged || fell) {
+    if (turnedOver(prev, s)) {
       out.push(cur)
       cur = { samples: [s], fitStart: s.t }
       continue

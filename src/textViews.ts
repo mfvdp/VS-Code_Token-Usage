@@ -552,7 +552,7 @@ export function markdownDocument(vm: ViewModel): string {
   }
 
   if (vm.composition.length > 0) {
-    L.push('## Composition', '')
+    L.push('## Composition — last 30 days', '')
     L.push('| Provider | Part | Tokens |')
     L.push('|---|---|---|')
     for (const c of vm.composition) {
@@ -561,7 +561,7 @@ export function markdownDocument(vm: ViewModel): string {
     L.push('')
   }
 
-  L.push('## Cache economy', '')
+  L.push('## Cache economy — last 30 days', '')
   L.push('| Provider | Hit rate | Realised saving | Blended $/1M | Basis |')
   L.push('|---|---|---|---|---|')
   for (const c of vm.cacheEconomy) {

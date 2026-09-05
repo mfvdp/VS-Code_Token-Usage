@@ -435,29 +435,53 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 /* An explicit display beats the browser's [hidden] rule, which is how fitChart thins. */
 .col .vlabel[hidden] { display: none; }
 .col .vlabel i { font-style: normal; }
-.seg.claude { background: var(--claude); }
-.seg.codex { background: var(--codex); }
 .seg:first-of-type { border-radius: 2px 2px 0 0; }
-/* The model stack is coloured by position, not by name: five theme chart colours in a fixed
-   order and one dimmed band for the folded rest. A colour per model name would need a palette
-   as long as the model list and would repeat itself the moment it ran out. */
-.seg.s0, .dot.s0 { background: var(--vscode-charts-blue); }
-.seg.s1, .dot.s1 { background: var(--vscode-charts-purple); }
-.seg.s2, .dot.s2 { background: var(--vscode-charts-green); }
-.seg.s3, .dot.s3 { background: var(--vscode-charts-yellow); }
-.seg.s4, .dot.s4 { background: var(--vscode-charts-orange); }
-.seg.other, .dot.other { background: var(--dim); }
+/* A band is its provider's hue — Claude blue, Codex purple, the two colours the rest of the
+   page uses — varied by the model's rank within that provider, so a column says "how much of
+   each provider" at a glance and "which model" on a second look. A colour per model name would
+   need a palette as long as the model list and would repeat itself the moment it ran out.
+   The pattern style keeps the hue at 35 % as the ground and draws the rank as strokes in the
+   full hue; the shade style steps the lightness instead; both draws the strokes over the
+   shaded ground. The stroke pitch is 4 px in CSS pixels (2 on, 2 off) whatever the band's
+   size, so a hairline band and a wide one hatch alike. The script's bandStyle() hands these
+   classes out; nothing else picks a chart colour, and a legend swatch wears exactly the
+   classes of its band. */
+.hue-claude { --hue: var(--claude); }
+.hue-codex { --hue: var(--codex); }
+.r0 { --mix: 100%; }
+.r1 { --mix: 78%; }
+.r2 { --mix: 58%; }
+.r3 { --mix: 42%; }
+.r4 { --mix: 30%; }
+.rother { --mix: 22%; }
+.st-pattern { --ground: color-mix(in srgb, var(--hue) 35%, transparent); }
+.st-shade, .st-both { --ground: color-mix(in srgb, var(--hue) var(--mix), var(--track)); }
+.band { background: var(--ground); }
+/* The largest model is the plain hue in every style: it is what the provider colour means. */
+.band.r0 { background: var(--hue); }
+.st-pattern.r1, .st-both.r1 { background: repeating-linear-gradient(45deg, var(--hue) 0 2px, var(--ground) 2px 4px); }
+.st-pattern.r2, .st-both.r2 { background: repeating-linear-gradient(135deg, var(--hue) 0 2px, var(--ground) 2px 4px); }
+.st-pattern.r3, .st-both.r3 { background: repeating-linear-gradient(45deg, var(--hue) 0 2px, transparent 2px 4px),
+                                          repeating-linear-gradient(135deg, var(--hue) 0 2px, var(--ground) 2px 4px); }
+.st-pattern.r4, .st-both.r4 { background: repeating-linear-gradient(0deg, var(--hue) 0 2px, var(--ground) 2px 4px); }
+.st-pattern.rother, .st-both.rother { background: radial-gradient(var(--hue) 1px, var(--ground) 1.2px);
+                                      background-size: 4px 4px; }
 /* Explicit width and height, because this is a replaced element: with inset alone the
    browser took the width from the box and the height from the viewBox's 1:1 ratio, which drew
    a 590 px tall cost line straight over the model table and the heatmap below it. */
 .costline { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 /* The overlay is one line over a stack of coloured bands, so it wears none of their hues: the
-   model stack takes five chart colours including the yellow this line used to have, and one
-   yellow meaning "API cost" beside a yellow band meaning "the fourth model" was the same mark
-   twice. The foreground is the one colour no band uses — it is also the colour of the legend's
-   own dash for the line. */
-.costline polyline { fill: none; stroke: var(--vscode-charts-foreground, var(--vscode-foreground));
-                     stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+   foreground is the one colour no band uses. It is drawn twice — a halo in the page's own
+   background under a 2 px line — so it stays readable over a band of any hue or pattern, and
+   both strokes are non-scaling, so their widths hold under the stretched viewBox. The dots sit
+   in a second, unstretched SVG and take the line's colour. The legend's key for the line is
+   the same three marks at swatch size, so it shares the rules. */
+.key polyline, .costline polyline { fill: none; stroke: var(--vscode-charts-foreground, var(--vscode-foreground));
+                     stroke-width: 2; vector-effect: non-scaling-stroke; }
+.key polyline.halo, .costline polyline.halo { stroke: var(--vscode-sideBar-background, var(--vscode-editor-background));
+                                             stroke-width: 4; }
+.key circle, .costline circle { fill: var(--vscode-charts-foreground, var(--vscode-foreground)); }
+.legend svg.key { width: 22px; height: 10px; overflow: visible; vertical-align: -1px; margin-right: 4px; }
 .axis { display: flex; gap: 2px; font-size: 9px; color: var(--dim); margin-top: 3px; }
 /* The chart's own axis shares the plot's gutter, so every day label stays under its column;
    the hour strip below has no gutter and keeps the plain rule. */
@@ -471,8 +495,9 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .axis span i { font-style: normal; white-space: nowrap; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: var(--dim); margin-top: 6px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
-.dot.claude { background: var(--claude); }
-.dot.codex { background: var(--codex); }
+/* A chart swatch is bigger than the others: at 8 px a 4 px stripe pitch is two strokes, and
+   two strokes are not a pattern anyone can match against a band. */
+.legend .dot.band { width: 14px; height: 14px; }
 .dot.time { background: var(--vscode-foreground); opacity: .6; width: 2px; border-radius: 1px; }
 .dot.fc { background: var(--warn); width: 2px; border-radius: 0; }
 .heat { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 9px);
@@ -1230,14 +1255,19 @@ function sTokens() {
 }
 
 /**
- * The class one band is painted with. A provider stack keeps the two provider colours the
- * rest of the page uses; a model stack is coloured by position, because a model name has no
- * colour of its own and the fold is the one band that is not a model.
+ * The classes one band is painted with: the provider's hue, the model's rank within that
+ * provider and the style the setting chose. The one place a chart colour is decided — the
+ * bands and the legend swatches call it alike, so a swatch shows exactly the fill of its band.
  */
-function segClass(c, s, i) {
-  if (c.stack !== 'model') return s.key;
-  return s.key === 'other' ? 'other' : 's' + i;
+function bandStyle(source, rank, style) {
+  const st = style === 'shade' || style === 'both' ? style : 'pattern';
+  return 'band s-' + source + '-' + rank + ' hue-' + source + ' r' + rank + ' st-' + st;
 }
+
+/** The legend's key for the cost line: the halo, the line and one dot, at swatch size. */
+const COST_KEY = '<svg class="key" viewBox="0 0 22 10" aria-hidden="true">'
+  + '<polyline class="halo" points="1,8 8,3 14,6 21,2"/>'
+  + '<polyline class="line" points="1,8 8,3 14,6 21,2"/><circle cx="8" cy="3" r="2.5"/></svg>';
 
 function sChart() {
   const c = vm.chart;
@@ -1246,26 +1276,32 @@ function sChart() {
   const sel = '<select data-act="metric" aria-label="chart metric">'
     + metrics.map(m => '<option value="' + m + '"' + (c.metric === m ? ' selected' : '') + '>'
       + esc(m) + '</option>').join('') + '</select>';
-  // Both stacks split the same column: the totals, the axis and the drill do not change with it.
-  const stacks = [['provider', 'by provider'], ['model', 'by model']];
-  const stackSel = '<select data-act="chartStack" aria-label="chart stacking">'
-    + stacks.map(o => '<option value="' + o[0] + '"' + (c.stack === o[0] ? ' selected' : '') + '>'
-      + esc(o[1]) + '</option>').join('') + '</select>';
+  const num = (v) => Math.round(v).toLocaleString('en-US');
   const totals = c.days.map((_, i) => c.series.reduce((s, x) => s + x.values[i], 0));
+  // A provider's column total, summed from the same bands the column is drawn from.
+  const subtotals = {};
+  c.series.forEach(s => {
+    const sub = subtotals[s.source] || (subtotals[s.source] = c.days.map(() => 0));
+    s.values.forEach((v, i) => { sub[i] += v; });
+  });
+  const unit = c.weekly ? 'week' : 'day';
   const showValues = c.days.length <= 31;
   const cols = c.days.map((d, i) => {
-    const segs = c.series.map((s, si) => {
+    const segs = c.series.map(s => {
       const v = s.values[i];
       if (v <= 0) return '';
-      // The tooltip names the band the way the legend beside it does: a bar whose legend
-      // says "Claude Code" and whose title says "claude" is two names for one series.
-      return '<div class="seg ' + esc(segClass(c, s, si)) + '" data-bh="'
+      // The tooltip names the band the way the legend does — model and provider — and reads
+      // its share and its provider's total off the very values the bands are drawn from:
+      // nothing is measured a second time here, only divided.
+      const share = Math.round((v / totals[i]) * 1000) / 10;
+      return '<div class="seg ' + bandStyle(s.source, s.rank, c.modelStyle) + '" data-bh="'
         + ((v / c.max) * 100).toFixed(2)
-        + '" title="' + esc(s.label + ' · ' + d + ': '
-          + Math.round(v).toLocaleString('en-US')) + '"></div>';
+        + '" title="' + esc(s.label + ' · ' + srcName(s.source) + ' · ' + num(v) + ' · ' + share
+          + ' % of the ' + unit + ' · ' + srcName(s.source) + ' total ' + num(subtotals[s.source][i]))
+        + '"></div>';
     }).join('');
     return '<div class="col" data-act="drill" data-day="' + esc(d) + '" tabindex="0" role="button" '
-      + 'title="' + esc(d + ': ' + Math.round(totals[i]).toLocaleString('en-US')) + '">'
+      + 'title="' + esc(d + ': ' + num(totals[i])) + '">'
       + (showValues && totals[i] > 0
          ? '<span class="vlabel" data-i="' + i + '"><i>' + esc(short(totals[i]))
             + '</i></span>' : '')
@@ -1277,24 +1313,47 @@ function sChart() {
   if (costLine && c.costLine) {
     const cmax = Math.max.apply(null, c.costLine.concat([0])) || 1;
     const n = c.costLine.length;
-    const pts = c.costLine.map((v, i) => ((n <= 1 ? 50 : (i / (n - 1)) * 100)).toFixed(1) + ','
-      + (100 - (v / cmax) * 100).toFixed(1)).join(' ');
+    // One point per column, at the column's centre. The columns are n equal flex items with a
+    // 2 px gap between them, so the centre of column i sits at (i + 0.5) / n of the plot width
+    // give or take a fraction of one gap — nothing an eye can see against a 2 px line.
+    const xs = c.costLine.map((_, i) => (((i + 0.5) / n) * 100).toFixed(1));
+    const ys = c.costLine.map(v => (100 - (v / cmax) * 100).toFixed(1));
+    const pts = xs.map((x, i) => x + ',' + ys[i]).join(' ');
+    // The line is drawn twice in one stretched viewBox — the halo first, then the line — and
+    // the dots go into a second SVG with no viewBox: placed by percentages of the same box, a
+    // circle there is measured in pixels and stays round, where the stretched box would
+    // squash it into an ellipse.
     overlay = '<svg class="costline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'
-      + '<polyline points="' + pts + '"/></svg>';
+      + '<polyline class="halo" points="' + pts + '"/>'
+      + '<polyline class="line" points="' + pts + '"/></svg>'
+      + '<svg class="costline dots" aria-hidden="true">'
+      + xs.map((x, i) => '<circle cx="' + x + '%" cy="' + ys[i] + '%" r="2.5"/>').join('')
+      + '</svg>';
   }
   // Every label is rendered and carries its own text; which of them survive is decided by
   // fitChart once the browser knows how wide a column actually is.
   const labels = c.labels.map((l, i) => '<span data-i="' + i + '" data-l="' + esc(l) + '"><i>'
     + esc(l) + '</i></span>').join('');
+  // The legend is grouped by provider — its name, then its bands in rank order — and every
+  // swatch wears the classes of its band, so the pattern in the key is the pattern in the bar.
+  let legend = '';
+  let group = null;
+  c.series.forEach(s => {
+    if (s.source !== group) {
+      group = s.source;
+      legend += '<span class="meta">' + esc(srcName(s.source)) + '</span>';
+    }
+    legend += '<span><i class="dot ' + bandStyle(s.source, s.rank, c.modelStyle) + '"></i>'
+      + esc(s.label) + '</span>';
+  });
   return '<div class="row"><span class="meta">' + (c.weekly ? 'weekly bars' : 'daily bars')
-    + ' · ' + c.days.length + ' columns</span><span class="wrap">' + sel + stackSel
+    + ' · ' + c.days.length + ' columns</span><span class="wrap">' + sel
     + (c.costLine ? '<button data-act="costLine" aria-pressed="' + costLine + '">cost line</button>' : '')
     + '</span></div>'
     + '<div class="plot">' + grids + '<div class="chart">' + cols + '</div>' + overlay + '</div>'
     + '<div class="axis">' + labels + '</div>'
-    + '<div class="legend">' + c.series.map((s, si) => '<span><i class="dot '
-      + esc(segClass(c, s, si)) + '"></i>' + esc(s.label) + '</span>').join('')
-    + (costLine && c.costLine ? '<span>— API cost (second axis)</span>' : '')
+    + '<div class="legend">' + legend
+    + (costLine && c.costLine ? '<span>' + COST_KEY + 'API cost (second axis)</span>' : '')
     + '<span>click a column for that day</span></div>';
 }
 
@@ -1914,10 +1973,8 @@ document.addEventListener('keydown', (ev) => {
   }
 });
 document.addEventListener('change', (ev) => {
-  const el = target(ev, '[data-act="metric"], [data-act="chartStack"]');
-  if (!el || !vm) return;
-  if (el.dataset.act === 'metric') post({ type: 'setMetric', metric: el.value });
-  else post({ type: 'setChartStack', stack: el.value });
+  const el = target(ev, '[data-act="metric"]');
+  if (el && vm) post({ type: 'setMetric', metric: el.value });
 });
 
 // -- the KPI explanation ----------------------------------------------------

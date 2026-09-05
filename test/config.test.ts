@@ -70,6 +70,16 @@ test('CONFIG_KEYS has no duplicates', () => {
   assert.equal(new Set(CONFIG_KEYS).size, CONFIG_KEYS.length)
 })
 
+test('the chart model style is read as an enum with pattern as its default', () => {
+  assert.ok(CONFIG_KEYS.includes('tokenPace.chart.modelStyle'))
+  assert.equal(sanitize({}).chart.modelStyle, 'pattern')
+  assert.equal(sanitize({ 'tokenPace.chart.modelStyle': 'shade' }).chart.modelStyle, 'shade')
+  assert.equal(sanitize({ 'tokenPace.chart.modelStyle': 'both' }).chart.modelStyle, 'both')
+  // A word the page has no rules for would be an unstyled chart, so it falls back.
+  assert.equal(sanitize({ 'tokenPace.chart.modelStyle': 'rainbow' }).chart.modelStyle, 'pattern')
+  assert.equal(sanitize({ 'tokenPace.chart.modelStyle': 3 }).chart.modelStyle, 'pattern')
+})
+
 test('every property carries an order and a description', () => {
   for (const [key, property] of Object.entries(properties)) {
     assert.equal(typeof property.order, 'number', `${key} has no order`)

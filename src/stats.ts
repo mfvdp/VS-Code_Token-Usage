@@ -15,8 +15,10 @@
  * number that looks measured.
  */
 
-import { SOURCE_TITLE, maybeAdapterFor } from './adapters'
+import { SOURCES, SOURCE_TITLE, maybeAdapterFor } from './adapters'
 import { Aggregator, BucketFilter, Metric, billable } from './agg'
+// Type only: the chart carries the setting's value, not the module that reads settings.
+import type { ChartModelStyle } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, priceOf } from './prices'
 import { Provenance, compact, deltaBadge, estimate, percentOf, usd } from './render'
 import {
@@ -299,32 +301,35 @@ export interface RecordsData {
   sessionNote: string | null
 }
 
-/** Which dimension a column is split along. Both stacks are splits of the same column total. */
-export type ChartStack = 'provider' | 'model'
+/** A band's place among its provider's bands: 0 is the largest model, 'other' the fold. */
+export type ChartRank = 0 | 1 | 2 | 3 | 4 | 'other'
 
 /**
- * One band of the stack. `key` is the identity a view styles by — the provider id for a
- * provider stack, the model name (or 'other') for a model stack — and `label` is the word the
- * legend and the tooltips print, so no view has to look a name up a second time.
+ * One band of the stack: one model under one provider, a model used under both providers
+ * giving two. `key` (`<source>:<model>`, or `<source>:other` for the fold) is the identity a
+ * view styles by, `label` the word the legend and the tooltips print, and `rank` the band's
+ * place within its provider — so a view can vary the provider's one hue by rank instead of
+ * needing a palette as long as the model list.
  */
 export interface ChartSeries {
   key: string
   label: string
-  /**
-   * The provider the band belongs to, or null when it does not belong to exactly one: the
-   * folded 'other' band, and a model seen under two providers.
-   */
-  source: Source | null
+  source: Source
+  rank: ChartRank
   values: number[]
 }
 
 export interface ChartData {
   days: string[]
   labels: string[]
-  /** How the columns are split. A stack is a partition: the column totals do not depend on it. */
-  stack: ChartStack
+  /** Claude's bands first, then Codex's; within a provider largest first, the fold last. */
   series: ChartSeries[]
   metric: Metric
+  /**
+   * How the webview tells one provider's bands apart — a setting, carried here so the page
+   * reads it from the one view model rather than from a second channel.
+   */
+  modelStyle: ChartModelStyle
   max: number
   ticks: number[]
   weekly: boolean
@@ -1513,58 +1518,51 @@ export function niceCeil(v: number): number {
   return step * mag
 }
 
-/**
- * Beyond this many bands a stack is a rainbow nobody can read against a legend, so the rest
- * is folded into one named 'other' — folded, never dropped: the column total must not change
- * with the way the column is split.
- */
-export const CHART_MODEL_SERIES = 5
+/** The ranks a provider's named bands can take, largest model first; the rest is the fold. */
+const MODEL_RANKS: readonly ChartRank[] = [0, 1, 2, 3, 4]
 
 /**
- * The per-model bands of a column, largest first. Built from the very buckets the provider
- * stack counts — the model names come from `bucketsIn` over the same range, and each band is
- * summed over the providers that model actually appeared under — so the two stacks are two
- * splits of one total rather than two measurements of it.
+ * Beyond this many bands per provider a stack is a rainbow nobody can read against a legend,
+ * so the rest of that provider's models is folded into one band named 'other' — folded,
+ * never dropped: the column total must not change with the way the column is split.
+ */
+export const CHART_MODEL_SERIES_PER_PROVIDER = MODEL_RANKS.length
+
+/**
+ * The bands of a column: one per (provider, model), a model used under both providers giving
+ * two. Built from the very buckets the totals count — the names come from `bucketsIn` over
+ * the same range and the same filter — so a provider's bands are a split of that provider's
+ * own series rather than a second measurement of it. Providers come in registry order, Claude
+ * before Codex, each with its largest model first and its fold last: the legend reads in the
+ * order the ranks were handed out, and toggling a provider chip off and on cannot reorder it.
  */
 function modelSeries(ctx: StatsCtx, days: string[], metric: Metric): ChartSeries[] {
   if (days.length === 0) return []
-  const sourcesOf = new Map<string, Set<Source>>()
-  for (const b of bucketsIn(ctx, days[0], days[days.length - 1])) {
-    let seen = sourcesOf.get(b.model)
-    if (!seen) {
-      seen = new Set<Source>()
-      sourcesOf.set(b.model, seen)
+  const out: ChartSeries[] = []
+  for (const source of SOURCES) {
+    if (!ctx.sources.includes(source)) continue
+    const names = new Set<string>()
+    for (const b of bucketsIn(ctx, days[0], days[days.length - 1], source)) names.add(b.model)
+    const built: { model: string; values: number[]; total: number }[] = []
+    for (const model of names) {
+      const values = ctx.agg.series(days, ctx.tcfg, { source, models: [model] }, metric, ctx.pricing)
+      const total = values.reduce((a, b) => a + b, 0)
+      // A model with buckets in range but nothing in this metric — reasoning tokens a model
+      // never emits — would be a swatch in the legend and no band in the chart.
+      if (total <= 0) continue
+      built.push({ model, values, total })
     }
-    seen.add(b.source)
-  }
-
-  const built: { s: ChartSeries; total: number }[] = []
-  for (const [model, sources] of sourcesOf) {
-    const values = new Array<number>(days.length).fill(0)
-    for (const source of sources) {
-      const v = ctx.agg.series(days, ctx.tcfg, { source, models: [model] }, metric, ctx.pricing)
-      for (let i = 0; i < values.length; i++) values[i] += v[i]
-    }
-    const total = values.reduce((a, b) => a + b, 0)
-    // A model with buckets in range but nothing in this metric — reasoning tokens a model
-    // never emits — would be a colour in the legend and no band in the chart.
-    if (total <= 0) continue
-    const list = [...sources]
-    built.push({
-      s: { key: model, label: model, source: list.length === 1 ? list[0] : null, values },
-      total,
+    // The name breaks a tie, so two equal models do not swap places on every redraw.
+    built.sort((a, b) => b.total - a.total || a.model.localeCompare(b.model))
+    built.slice(0, CHART_MODEL_SERIES_PER_PROVIDER).forEach((b, i) => {
+      out.push({ key: `${source}:${b.model}`, label: b.model, source, rank: MODEL_RANKS[i], values: b.values })
     })
-  }
-  // Largest band first, so the legend reads in the order the colours were handed out; the
-  // name breaks the tie, so two equal models do not swap places on every redraw.
-  built.sort((a, b) => b.total - a.total || a.s.key.localeCompare(b.s.key))
-
-  const out = built.slice(0, CHART_MODEL_SERIES).map((b) => b.s)
-  const rest = built.slice(CHART_MODEL_SERIES)
-  if (rest.length > 0) {
-    const other = new Array<number>(days.length).fill(0)
-    for (const r of rest) for (let i = 0; i < other.length; i++) other[i] += r.s.values[i]
-    out.push({ key: 'other', label: 'other', source: null, values: other })
+    const rest = built.slice(CHART_MODEL_SERIES_PER_PROVIDER)
+    if (rest.length > 0) {
+      const other = new Array<number>(days.length).fill(0)
+      for (const r of rest) for (let i = 0; i < other.length; i++) other[i] += r.values[i]
+      out.push({ key: `${source}:other`, label: 'other', source, rank: 'other', values: other })
+    }
   }
   return out
 }
@@ -1573,18 +1571,11 @@ export function chart(
   ctx: StatsCtx,
   range: DayRange,
   metric: Metric,
-  stack: ChartStack = 'provider',
+  modelStyle: ChartModelStyle = 'pattern',
 ): ChartData {
   const days = daysBetween(range.from, range.to)
   const weekly = days.length > WEEKLY_CHART_DAYS
-  const bands: ChartSeries[] = stack === 'model'
-    ? modelSeries(ctx, days, metric)
-    : ctx.sources.map((source) => ({
-      key: source,
-      label: SOURCE_TITLE[source] ?? source,
-      source,
-      values: ctx.agg.series(days, ctx.tcfg, filterFor(ctx, source), metric, ctx.pricing),
-    }))
+  const bands = modelSeries(ctx, days, metric)
   const costDaily = ctx.showCost && metric !== 'cost'
     ? seriesOf(ctx, days, 'cost')
     : null
@@ -1618,9 +1609,9 @@ export function chart(
   return {
     days: outDays,
     labels,
-    stack,
     series,
     metric,
+    modelStyle,
     max,
     ticks: [0.25, 0.5, 0.75, 1].map((f) => max * f),
     weekly,

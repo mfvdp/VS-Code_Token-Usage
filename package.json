@@ -879,9 +879,25 @@
             ],
             "markdownDescription": "%config.dashboard.mode.description%"
           },
-          "tokenPace.startOfWeek": {
+          "tokenPace.chart.modelStyle": {
             "type": "string",
             "order": 6,
+            "enum": [
+              "pattern",
+              "shade",
+              "both"
+            ],
+            "default": "pattern",
+            "enumDescriptions": [
+              "%config.chart.modelStyle.enum.pattern%",
+              "%config.chart.modelStyle.enum.shade%",
+              "%config.chart.modelStyle.enum.both%"
+            ],
+            "markdownDescription": "%config.chart.modelStyle.description%"
+          },
+          "tokenPace.startOfWeek": {
+            "type": "string",
+            "order": 7,
             "enum": [
               "monday",
               "tuesday",
@@ -896,7 +912,7 @@
           },
           "tokenPace.planPriceUsd": {
             "type": "object",
-            "order": 7,
+            "order": 8,
             "default": {},
             "properties": {
               "claude": {

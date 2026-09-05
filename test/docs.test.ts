@@ -459,6 +459,7 @@ test('the README states the defaults the manifest actually ships', () => {
     ['tokenPace.tooltipExplanations', 'false'],
     ['tokenPace.density', 'full'],
     ['tokenPace.alerts.thresholds', '[90]'],
+    ['tokenPace.chart.modelStyle', 'pattern'],
   ]
   for (const [key, text] of shown) {
     const short = key.replace(/^tokenPace\./, '')

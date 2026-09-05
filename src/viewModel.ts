@@ -33,7 +33,7 @@ import { QuotaHistory } from './quotaHistory'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
 import type { ContextReading } from './quotaSources'
 import {
-  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack,
+  CacheEconomyRow, CalendarRows, ChartData, ChartSeries,
   CompositionEntry, DrillData, HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
   ModelSort, ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData,
   SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, TotalsWindow,
@@ -51,7 +51,7 @@ import {
 } from './types'
 
 export type {
-  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartStack, CompositionEntry, DrillData,
+  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, CompositionEntry, DrillData,
   HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow,
   PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow,
 }
@@ -78,8 +78,6 @@ export interface UiState {
   providers: Source[]
   models: string[]
   metric: Metric
-  /** Whether the daily chart splits a column by provider or by model. */
-  chartStack: ChartStack
   /**
    * Whether the composition bar draws the three cache parts. Cache reads dwarf everything
    * else on most days, so 'noCache' is how the remaining parts become readable at all; the
@@ -123,7 +121,6 @@ export type WebviewMessage =
   | { type: 'setSort'; key: ModelSortKey; dir: 'asc' | 'desc' }
   | { type: 'setFilter'; providers: Source[]; models: string[] }
   | { type: 'setMetric'; metric: Metric }
-  | { type: 'setChartStack'; stack: ChartStack }
   | { type: 'setCompositionCache'; mode: CompositionCache }
   | { type: 'setHeatmapMetric'; metric: 'usage' | 'cost' }
   | { type: 'setHourZone'; zone: 'local' | 'utc' }
@@ -213,10 +210,6 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return typeof m.metric === 'string' && (METRICS as string[]).includes(m.metric)
         ? { type: 'setMetric', metric: m.metric as Metric }
         : null
-    case 'setChartStack':
-      return m.stack === 'provider' || m.stack === 'model'
-        ? { type: 'setChartStack', stack: m.stack }
-        : null
     case 'setCompositionCache':
       return m.mode === 'all' || m.mode === 'noCache'
         ? { type: 'setCompositionCache', mode: m.mode }
@@ -258,7 +251,6 @@ export function defaultUiState(cfg: Config): UiState {
     providers: ['claude', 'codex'],
     models: [],
     metric: 'usage',
-    chartStack: 'provider',
     compositionCache: 'all',
     heatmapMetric: 'usage',
     hourZone: 'local',
@@ -292,8 +284,6 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       }
     case 'setMetric':
       return { ...ui, metric: m.metric }
-    case 'setChartStack':
-      return { ...ui, chartStack: m.stack }
     case 'setCompositionCache':
       return { ...ui, compositionCache: m.mode }
     case 'setHeatmapMetric':
@@ -1108,7 +1098,7 @@ export function buildViewModel(input: VmInput): ViewModel {
     cacheEconomy: cache,
     calendar: calendar(ctx),
     planFactor: planFactors(ctx, cfg.planPriceUsd),
-    chart: chart(ctx, range, ui.metric, ui.chartStack),
+    chart: chart(ctx, range, ui.metric, cfg.chart.modelStyle),
     models,
     heatmap: heatmap(ctx, ui.heatmapMetric, firstDay),
     hours: hours(ctx, range, ui.hourZone),

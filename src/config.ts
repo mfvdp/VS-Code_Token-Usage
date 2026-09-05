@@ -73,6 +73,7 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.dashboard.modelRows',
   'tokenPace.dashboard.topN',
   'tokenPace.dashboard.mode',
+  'tokenPace.chart.modelStyle',
   'tokenPace.startOfWeek',
   'tokenPace.planPriceUsd',
   'tokenPace.calibration.show',
@@ -160,6 +161,7 @@ export type DashboardSection =
 export type DefaultRange =
   | 'today' | '7d' | '30d' | '90d' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'year' | 'all'
 export type DashboardMode = 'webview' | 'quickPick' | 'markdown'
+export type ChartModelStyle = 'pattern' | 'shade' | 'both'
 export type StartOfWeek =
   | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
 
@@ -209,6 +211,7 @@ const DEFAULT_RANGES: readonly DefaultRange[] = [
   'today', '7d', '30d', '90d', 'thisWeek', 'thisMonth', 'lastMonth', 'year', 'all',
 ]
 const DASHBOARD_MODES: readonly DashboardMode[] = ['webview', 'quickPick', 'markdown']
+const CHART_MODEL_STYLES: readonly ChartModelStyle[] = ['pattern', 'shade', 'both']
 const START_OF_WEEK: readonly StartOfWeek[] = [
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
 ]
@@ -303,6 +306,8 @@ export interface Config {
     topN: number
     mode: DashboardMode
   }
+  /** How the daily chart tells one provider's bands apart: strokes, lightness, or both. */
+  chart: { modelStyle: ChartModelStyle }
   timezone: string
   dayBoundaryHour: number
   startOfWeek: StartOfWeek
@@ -587,6 +592,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
       topN: Math.trunc(num(get('tokenPace.dashboard.topN'), 5, 1, 20)),
       mode: pick(get('tokenPace.dashboard.mode'), DASHBOARD_MODES, 'webview'),
     },
+    chart: { modelStyle: pick(get('tokenPace.chart.modelStyle'), CHART_MODEL_STYLES, 'pattern') },
     timezone: text(get('tokenPace.timezone'), 'system'),
     dayBoundaryHour: Math.trunc(num(get('tokenPace.dayBoundaryHour'), 0, 0, 23)),
     startOfWeek: pick(get('tokenPace.startOfWeek'), START_OF_WEEK, 'monday'),

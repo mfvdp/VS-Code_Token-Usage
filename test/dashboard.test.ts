@@ -157,9 +157,8 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
     chart: {
       days: ['2026-09-01', '2026-09-02', '2026-09-03'],
       labels: ['09-01', '09-02', '09-03'],
-      stack: 'provider',
-      series: [{ key: 'claude', label: 'Claude Code', source: 'claude', values: [10, 20, 30] }],
-      metric: 'usage', max: 30, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
+      series: [{ key: 'claude:claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', rank: 0, values: [10, 20, 30] }],
+      metric: 'usage', modelStyle: 'pattern', max: 30, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
     },
     models: { rows: [], total: 0, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
     records: null,
@@ -450,14 +449,13 @@ test('the cost line wears no colour a stacked band wears', () => {
   for (const v of ['--ok', '--warn', '--warn2', '--error', '--claude', '--codex', 'charts-yellow']) {
     assert.equal(colour.indexOf(v), -1, 'the cost line uses ' + v)
   }
-  const bands = ['s0', 's1', 's2', 's3', 's4', 'other']
-  for (const b of bands) {
-    const rule = new RegExp('\\.seg\\.' + b + ', \\.dot\\.' + b + ' \\{([^}]*)\\}').exec(STYLE)
-    assert.ok(rule, 'no rule for .seg.' + b)
-    const fill = /background: ([^;]+);/.exec((rule as RegExpExecArray)[1])
-    assert.ok(fill, 'no fill for .seg.' + b)
-    assert.notEqual((fill as RegExpExecArray)[1].trim(), colour, '.seg.' + b + ' wears the cost line colour')
-  }
+  // And no band rule wears the line's colour: the hues are the two provider colours, and every
+  // ground and stroke is mixed from the hue and the track.
+  const bandRules = STYLE.slice(STYLE.indexOf('.hue-claude {'), STYLE.indexOf('.costline {'))
+  assert.ok(bandRules.length > 0, 'the band rules are missing')
+  assert.equal(bandRules.indexOf('charts-foreground'), -1, bandRules)
+  assert.equal(bandRules.indexOf('var(--vscode-foreground)'), -1, bandRules)
+  for (const hue of ['--claude', '--codex']) assert.ok(bandRules.indexOf('var(' + hue + ')') >= 0, hue)
 })
 
 test('an empty hour is the shortest mark in the strip, never taller than a used one', () => {
@@ -824,61 +822,166 @@ test('the provider is named, not keyed, wherever the reader sees it', () => {
     chart: {
       days: ['2026-09-01', '2026-09-02', '2026-09-03'],
       labels: ['09-01', '09-02', '09-03'],
-      stack: 'provider',
-      series: [{ key: 'claude', label: 'Claude Code', source: 'claude', values: [10, 20, 30] },
-        { key: 'codex', label: 'Codex', source: 'codex', values: [1, 2, 3] }],
-      metric: 'usage', max: 30, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
+      series: [{ key: 'claude:claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', rank: 0, values: [10, 20, 30] },
+        { key: 'codex:gpt-5.3-codex', label: 'gpt-5.3-codex', source: 'codex', rank: 0, values: [1, 2, 3] }],
+      metric: 'usage', modelStyle: 'pattern', max: 30, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
     },
   })
-  assert.ok(chart.indexOf('<i class="dot claude"></i>Claude Code') >= 0, chart)
-  assert.ok(chart.indexOf('<i class="dot codex"></i>Codex') >= 0, chart)
-  // The tooltip of the bar the legend describes: the legend used to say "Claude Code" while
-  // every segment's title still said "claude", which is two names for one series.
-  assert.ok(chart.indexOf('title="Claude Code \u00b7 2026-09-01: 10"') >= 0, chart)
-  assert.ok(chart.indexOf('title="Codex \u00b7 2026-09-03: 3"') >= 0, chart)
-  assert.equal(/title="(claude|codex) /.test(chart), false, chart)
+  // The legend groups the bands under the provider's name, and the tooltip of a band names
+  // the provider the same way: a legend that says "Claude Code" over a title that says
+  // "claude" is two names for one series.
+  assert.ok(chart.indexOf('<span class="meta">Claude Code</span>') >= 0, chart)
+  assert.ok(chart.indexOf('<span class="meta">Codex</span>') >= 0, chart)
+  assert.ok(chart.indexOf('title="claude-opus-4-6 \u00b7 Claude Code \u00b7 10 \u00b7') >= 0, chart)
+  assert.ok(chart.indexOf('title="gpt-5.3-codex \u00b7 Codex \u00b7 3 \u00b7') >= 0, chart)
+  assert.ok(chart.indexOf('\u00b7 Claude Code total 10"') >= 0, chart)
+  assert.equal(/\u00b7 (claude|codex)( |")/.test(chart), false, chart)
 })
 
-test('the model stack colours by position, names every band and still drills into the day', () => {
+test('every band wears its provider hue and its rank, and the legend groups them by provider', () => {
   const bands = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
     days: ['2026-09-01', '2026-09-02', '2026-09-03'],
     labels: ['09-01', '09-02', '09-03'],
-    stack: 'model',
     series: [
-      { key: 'claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', values: [10, 20, 30] },
-      { key: 'gpt-5.3-codex', label: 'gpt-5.3-codex', source: 'codex', values: [5, 4, 3] },
-      { key: 'other', label: 'other', source: null, values: [1, 1, 1] },
+      { key: 'claude:claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', rank: 0, values: [10, 20, 30] },
+      { key: 'claude:claude-sonnet-4-6', label: 'claude-sonnet-4-6', source: 'claude', rank: 1, values: [4, 4, 4] },
+      { key: 'claude:other', label: 'other', source: 'claude', rank: 'other', values: [1, 1, 1] },
+      { key: 'codex:gpt-5.3-codex', label: 'gpt-5.3-codex', source: 'codex', rank: 0, values: [5, 4, 3] },
     ],
-    metric: 'usage', max: 40, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
+    metric: 'usage', modelStyle: 'pattern', max: 40, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
     ...over,
   })
   const chart = render('sChart()', { chart: bands() })
-  // One legend entry per band, the model names verbatim and the fold named as what it is.
-  assert.ok(chart.indexOf('<i class="dot s0"></i>claude-opus-4-6') >= 0, chart)
-  assert.ok(chart.indexOf('<i class="dot s1"></i>gpt-5.3-codex') >= 0, chart)
-  assert.ok(chart.indexOf('<i class="dot other"></i>other') >= 0, chart)
-  // A colour per position, because a model name has none of its own.
-  assert.ok(chart.indexOf('<div class="seg s0"') >= 0, chart)
-  assert.ok(chart.indexOf('<div class="seg s1"') >= 0, chart)
-  assert.ok(chart.indexOf('<div class="seg other"') >= 0, chart)
-  // The tooltip says what the legend says, and the column is still the day's drill.
-  assert.ok(chart.indexOf('title="claude-opus-4-6 · 2026-09-01: 10"') >= 0, chart)
+  // The classes name the provider, the rank and the style: the hue is the provider's, the
+  // rank varies it, and the fold is a rank of its own.
+  assert.ok(chart.indexOf('<div class="seg band s-claude-0 hue-claude r0 st-pattern"') >= 0, chart)
+  assert.ok(chart.indexOf('<div class="seg band s-claude-1 hue-claude r1 st-pattern"') >= 0, chart)
+  assert.ok(chart.indexOf('<div class="seg band s-claude-other hue-claude rother st-pattern"') >= 0, chart)
+  assert.ok(chart.indexOf('<div class="seg band s-codex-0 hue-codex r0 st-pattern"') >= 0, chart)
+  // One legend entry per band with exactly the band's classes, grouped under the provider,
+  // the model names verbatim and the fold named as what it is.
+  const legend = chart.slice(chart.indexOf('<div class="legend">'))
+  assert.ok(legend.indexOf('<span class="meta">Claude Code</span><span><i class="dot band s-claude-0 hue-claude r0 st-pattern"></i>claude-opus-4-6</span>') >= 0, legend)
+  assert.ok(legend.indexOf('<i class="dot band s-claude-1 hue-claude r1 st-pattern"></i>claude-sonnet-4-6</span>') >= 0, legend)
+  assert.ok(legend.indexOf('<i class="dot band s-claude-other hue-claude rother st-pattern"></i>other</span>'
+    + '<span class="meta">Codex</span><span><i class="dot band s-codex-0 hue-codex r0 st-pattern"></i>gpt-5.3-codex</span>') >= 0, legend)
+  assert.equal(legend.split('class="meta"').length - 1, 2, legend)
+  // The tooltip: model, provider, value, share of the column, and the provider's column total.
+  assert.ok(chart.indexOf('title="claude-opus-4-6 · Claude Code · 10 · 50 % of the day · Claude Code total 15"') >= 0, chart)
+  assert.ok(chart.indexOf('title="gpt-5.3-codex · Codex · 3 · 7.9 % of the day · Codex total 3"') >= 0, chart)
+  // The column is still the day's drill, and there is no stacking to switch any more.
   assert.ok(chart.indexOf('data-act="drill" data-day="2026-09-01"') >= 0, chart)
-  // The selector says which stack is on screen.
-  assert.ok(chart.indexOf('<option value="model" selected>by model</option>') >= 0, chart)
-  assert.ok(chart.indexOf('<option value="provider">by provider</option>') >= 0, chart)
+  assert.equal(chart.indexOf('data-act="chartStack"'), -1, chart)
+  assert.equal(chart.indexOf('by provider'), -1, chart)
 
-  // The provider stack keeps its two colours and its own selected option.
-  const byProvider = render('sChart()', {
-    chart: bands({
-      stack: 'provider',
-      series: [{ key: 'claude', label: 'Claude Code', source: 'claude', values: [10, 20, 30] }],
-    }),
+  // The style is the setting's word, on bands and swatches alike — twelve bands and four
+  // swatches here — and a word the page has no rules for falls back to the pattern rather
+  // than to an unstyled band.
+  for (const [style, cls] of [['shade', 'st-shade'], ['both', 'st-both'], ['neon', 'st-pattern']]) {
+    const h = render('sChart()', { chart: bands({ modelStyle: style }) })
+    assert.equal(h.split(' ' + cls + '"').length - 1, 16, style + ': ' + h)
+    for (const other of ['st-pattern', 'st-shade', 'st-both']) {
+      if (other !== cls) assert.equal(h.indexOf(other), -1, style + ' also wears ' + other)
+    }
+  }
+  // Weekly bars share a week, not a day.
+  const weekly = render('sChart()', { chart: bands({ weekly: true }) })
+  assert.ok(weekly.indexOf('% of the week ·') >= 0, weekly)
+  // One function hands the classes out, to bands and swatches alike; nothing else decides.
+  assert.equal(SCRIPT.split('function bandStyle(').length - 1, 1)
+  assert.equal(SCRIPT.indexOf('segClass'), -1)
+  assert.ok(SCRIPT.indexOf('class="seg \' + bandStyle(') >= 0)
+  assert.ok(SCRIPT.indexOf('class="dot \' + bandStyle(') >= 0)
+})
+
+test('the band styles are one provider hue varied by rank, at a fixed 4 px pitch', () => {
+  assert.match(STYLE, /\.hue-claude \{ --hue: var\(--claude\); \}/)
+  assert.match(STYLE, /\.hue-codex \{ --hue: var\(--codex\); \}/)
+  // Shade: lightness steps of the hue against the track, the largest model the full hue.
+  for (const [rank, mix] of [['r0', '100%'], ['r1', '78%'], ['r2', '58%'], ['r3', '42%'], ['r4', '30%'], ['rother', '22%']]) {
+    assert.match(STYLE, new RegExp('\\.' + rank + ' \\{ --mix: ' + mix + '; \\}'))
+  }
+  assert.match(STYLE, /\.st-shade, \.st-both \{ --ground: color-mix\(in srgb, var\(--hue\) var\(--mix\), var\(--track\)\); \}/)
+  assert.match(STYLE, /\.band \{ background: var\(--ground\); \}/)
+  assert.match(STYLE, /\.band\.r0 \{ background: var\(--hue\); \}/)
+  // Pattern: a 35 % ground with strokes in the full hue, 2 px on and 2 px off in CSS pixels,
+  // so the hatching is the same on a hairline band and a wide one.
+  assert.match(STYLE, /\.st-pattern \{ --ground: color-mix\(in srgb, var\(--hue\) 35%, transparent\); \}/)
+  const rule = (rank: string): string => {
+    const m = new RegExp('\\.st-pattern\\.' + rank + ', \\.st-both\\.' + rank + ' \\{([^}]*)\\}').exec(STYLE)
+    assert.ok(m, 'no stroke rule for ' + rank)
+    return (m as RegExpExecArray)[1]
+  }
+  assert.match(rule('r1'), /background: repeating-linear-gradient\(45deg, var\(--hue\) 0 2px, var\(--ground\) 2px 4px\);/)
+  assert.match(rule('r2'), /background: repeating-linear-gradient\(135deg, var\(--hue\) 0 2px, var\(--ground\) 2px 4px\);/)
+  assert.match(rule('r3'), /repeating-linear-gradient\(45deg, var\(--hue\) 0 2px, transparent 2px 4px\),/)
+  assert.match(rule('r3'), /repeating-linear-gradient\(135deg, var\(--hue\) 0 2px, var\(--ground\) 2px 4px\);/)
+  assert.match(rule('r4'), /background: repeating-linear-gradient\(0deg, var\(--hue\) 0 2px, var\(--ground\) 2px 4px\);/)
+  assert.match(rule('rother'), /background: radial-gradient\(var\(--hue\) 1px, var\(--ground\) 1\.2px\);/)
+  assert.match(rule('rother'), /background-size: 4px 4px;/)
+  // The chart's swatches are big enough for a pattern to be read; the other legends keep 8 px.
+  assert.match(STYLE, /\.legend \.dot\.band \{ width: 14px; height: 14px; \}/)
+  assert.match(STYLE, /\.dot \{ display: inline-block; width: 8px; height: 8px;/)
+})
+
+test('the cost line runs through the column centres, haloed, with a round dot per column', () => {
+  const chartOf = (costs: number[]): Record<string, unknown> => ({
+    days: costs.map((_, i) => '2026-09-0' + (i + 1)),
+    labels: costs.map((_, i) => '09-0' + (i + 1)),
+    series: [{ key: 'claude:claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', rank: 0, values: costs.map(() => 10) }],
+    metric: 'usage', modelStyle: 'pattern', max: 10, ticks: [2.5, 5, 7.5, 10], weekly: false, costLine: costs,
   })
-  assert.ok(byProvider.indexOf('<div class="seg claude"') >= 0, byProvider)
-  assert.ok(byProvider.indexOf('<i class="dot claude"></i>Claude Code') >= 0, byProvider)
-  assert.ok(byProvider.indexOf('<option value="provider" selected>by provider</option>') >= 0, byProvider)
-  assert.equal(byProvider.indexOf('class="seg s0"'), -1, byProvider)
+  nodeVm.runInContext('costLine = true', ctx)
+  try {
+    // x = (i + 0.5) / n of the width: one column is centred, two sit at a quarter and at three
+    // quarters, five at every fifth — never on the edges, where the old line started and ended.
+    const one = render('sChart()', { chart: chartOf([1]) })
+    assert.ok(one.indexOf('<polyline class="halo" points="50.0,0.0"/>') >= 0, one)
+    assert.ok(one.indexOf('<polyline class="line" points="50.0,0.0"/>') >= 0, one)
+    const two = render('sChart()', { chart: chartOf([1, 2]) })
+    assert.ok(two.indexOf('<polyline class="halo" points="25.0,50.0 75.0,0.0"/>') >= 0, two)
+    assert.ok(two.indexOf('<polyline class="line" points="25.0,50.0 75.0,0.0"/>') >= 0, two)
+    const five = render('sChart()', { chart: chartOf([1, 2, 3, 4, 5]) })
+    const line = /<polyline class="line" points="([^"]*)"/.exec(five)
+    assert.ok(line, five)
+    assert.deepEqual((line as RegExpExecArray)[1].split(' ').map((p) => p.split(',')[0]),
+      ['10.0', '30.0', '50.0', '70.0', '90.0'])
+    // The halo is drawn first, so the line paints over it, and both sit in the stretched box.
+    assert.ok(five.indexOf('class="halo"') < five.indexOf('class="line"'), five)
+    assert.match(five, /<svg class="costline" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline class="halo"/)
+    // The dots: one per point, in a second SVG that is not stretched, placed by percentage of
+    // the same box, so they stay round and sit on the line.
+    const dots = /<svg class="costline dots"([^>]*)>(.*?)<\/svg>/.exec(five)
+    assert.ok(dots, five)
+    assert.equal((dots as RegExpExecArray)[1].indexOf('preserveAspectRatio'), -1, five)
+    assert.equal((dots as RegExpExecArray)[1].indexOf('viewBox'), -1, five)
+    assert.ok((dots as RegExpExecArray)[2].indexOf('<circle cx="10.0%" cy="80.0%" r="2.5"/>') >= 0, five)
+    assert.ok((dots as RegExpExecArray)[2].indexOf('<circle cx="90.0%" cy="0.0%" r="2.5"/>') >= 0, five)
+    assert.equal((dots as RegExpExecArray)[2].split('<circle ').length - 1, 5, five)
+    // The legend's key is the same three marks, not a dash.
+    assert.ok(five.indexOf('<svg class="key" viewBox="0 0 22 10" aria-hidden="true"><polyline class="halo"') >= 0, five)
+    assert.ok(five.indexOf('<circle cx="8" cy="3" r="2.5"/></svg>API cost (second axis)') >= 0, five)
+    assert.equal(five.indexOf('— API cost'), -1, five)
+  } finally {
+    nodeVm.runInContext('costLine = false', ctx)
+  }
+  // The strokes: a halo in the page's own background under a 2 px line, both non-scaling, and
+  // the dots in the line's colour.
+  const halo = /\.costline polyline\.halo \{([^}]*)\}/.exec(STYLE)
+  assert.ok(halo, 'the halo has no rule')
+  assert.match((halo as RegExpExecArray)[1], /stroke: var\(--vscode-sideBar-background, var\(--vscode-editor-background\)\)/)
+  assert.match((halo as RegExpExecArray)[1], /stroke-width: 4/)
+  const line = /\.costline polyline \{([^}]*)\}/.exec(STYLE)
+  assert.ok(line, 'the line has no rule')
+  assert.match((line as RegExpExecArray)[1], /stroke-width: 2;/)
+  assert.match((line as RegExpExecArray)[1], /vector-effect: non-scaling-stroke/)
+  const dot = /\.costline circle \{([^}]*)\}/.exec(STYLE)
+  assert.ok(dot, 'the dots have no rule')
+  assert.match((dot as RegExpExecArray)[1], /fill: var\(--vscode-charts-foreground, var\(--vscode-foreground\)\)/)
+  // The key shares those rules, so it cannot drift from the line it stands for.
+  assert.match(STYLE, /\.key polyline, \.costline polyline \{/)
+  assert.match(STYLE, /\.key polyline\.halo, \.costline polyline\.halo \{/)
+  assert.match(STYLE, /\.key circle, \.costline circle \{/)
 })
 
 // ---------------------------------------------------------------------------
@@ -1660,7 +1763,7 @@ test('no renderer invents a number or leaks an undefined', () => {
 test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
     'model', 'clearModels', 'moreModels', 'moreRanges', 'section', 'sectionSettings',
-    'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'chartStack', 'compositionCache']) {
+    'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'compositionCache']) {
     assert.ok(SCRIPT.indexOf('data-act="' + act + '"') >= 0, act)
   }
   for (const role of ['from', 'to']) {

@@ -120,9 +120,12 @@ Two guards keep the verdict honest:
 * **Tolerance band.** A window has to run more than *n* points ahead of pace before it is
   coloured at all — otherwise the bar would flip colour on rounding noise.
 * **Minimum elapsed.** Right after a reset `elapsed ≈ 0`, so the ratio explodes and the very
-  first prompt would always look too fast. Below the minimum the verdict is `measuring`: the
-  bar stays green and the views print no pace text at all until the window has run long
-  enough to judge.
+  first prompt would always look too fast. While that little of the window has run **and** at
+  most twice the tolerance of it is used (10 % at `normal`), the verdict is `measuring`: the
+  bar stays green and the views print no pace text at all. Above that share the reading is far
+  too large to be an artefact of the short clock — 60 % of a window spent in its first two
+  minutes is a fact, not a rounding error — so it is judged from the first minute, and bar,
+  verdict, status bar and sparkline colour together.
 
 `tokenPace.pace.sensitivity` picks the pair:
 
@@ -747,7 +750,9 @@ sections with it.
 * **Gaps are gaps.** The sparkline covers seven days on a time-proportional axis, so a stretch
   without readings is a hole exactly as wide as the time nobody measured. A hole with no reset
   inside it is bridged with a dashed line; a hole across a reset stays a hole, and the number of
-  gaps in the last 24 h is stated next to the forecast.
+  gaps in the last 24 h is stated next to the forecast. The stroke down into the first reading
+  of a new window wears no pace colour: that fall is the window turning over, not a pace
+  anybody kept.
 * **Cycles.** A cycle ends when the provider announces a different reset time, or when the
   percentage falls by five points or more without one. A rise too steep to come from usage is
   treated as the limit being re-based: the cycle continues, but the rate fit restarts.
@@ -1071,7 +1076,7 @@ power-user settings sit at the end of their group.
 |---|---|---|
 | `pace.sensitivity` | `normal` | `relaxed`, `normal`, `strict` or `custom` — see the preset table above |
 | `pace.tolerancePoints` | `5` | Only with `sensitivity: custom`. Dead band in percentage points (0–20) |
-| `pace.minElapsedPercent` | `3` | Only with `sensitivity: custom`. How much of a window must have elapsed before any colour (0–20) |
+| `pace.minElapsedPercent` | `3` | Only with `sensitivity: custom`. How much of a window must have elapsed before a small reading is judged (0–20) |
 | `pace.levels` | `binary` | `binary` or `graded` (a second warning level beyond three times the tolerance) |
 
 ### Status bar

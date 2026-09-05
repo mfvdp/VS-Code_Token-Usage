@@ -18,7 +18,10 @@ export interface PaceConfig {
   sensitivity: Sensitivity
   /** Dead band in percentage points around the clock, only used with sensitivity 'custom'. */
   tolerancePoints: number
-  /** Share of the window that must have passed before any verdict is coloured. */
+  /**
+   * Share of the window that must have passed before a small usage is judged. Heavy
+   * usage is judged from the first minute — see `paceVerdict`.
+   */
   minElapsedPercent: number
   levels: 'binary' | 'graded'
 }
@@ -101,6 +104,13 @@ function pointsText(points: number): string {
  * tendency), a window without a clock gets no pace at all, and a window that
  * has barely started is explicitly "measuring" — right after a reset elapsed is
  * near zero, so the very first prompt would otherwise always look too fast.
+ *
+ * "Measuring" is doubt about the clock, not a blanket pardon: it holds only while
+ * the window is young AND consumption is still small — at most twice the tolerance
+ * of the whole window (10 % at 'normal'). Beyond that the gap is far too large to
+ * be an artefact of a nearly-zero elapsed share — 60 % of a window spent in its
+ * first minutes is a fact, not a rounding error — so the normal judgement applies
+ * and the bar, the header, the status bar and the sparkline all colour together.
  */
 export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceConfig): PaceVerdict {
   const { tolerancePoints, minElapsedPercent, levels } = effectivePace(cfg)
@@ -118,7 +128,7 @@ export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceCo
   if (!hasClock) {
     return { level: 'ok', points: null, ratio: null, measuring: false, text: 'no clock for this window' }
   }
-  if ((elapsed as number) < minElapsedPercent) {
+  if ((elapsed as number) < minElapsedPercent && percent <= tolerancePoints * 2) {
     return { level: 'ok', points, ratio, measuring: true, text: 'measuring · window just reset' }
   }
   const p = points as number

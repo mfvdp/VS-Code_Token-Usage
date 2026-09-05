@@ -317,6 +317,31 @@ test('every point carries the pace level the bar would have shown at that time',
   assert.equal(sparkOf([sample(t, 99.5, null)], NOW, null, cfg.pace).points[0].level, 'error')
 })
 
+test('a young window heavy with usage is judged by every view, not left measuring', () => {
+  // Half a minute into a five-hour window with 60 % of it already spent: the clock has barely
+  // run, but the reading is far too big to be an artefact of that. Bar colour, verdict
+  // sentence, accessibility text and the sparkline all read the one verdict, so they turn
+  // together — there is no second rule anywhere.
+  const resetsAt = NOW + 5 * 3_600_000 - 30_000
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude', { windows: [win({ percent: 60, resetsAt, windowMinutes: 300 })] })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.verdict.measuring, false)
+  assert.equal(w.level, 'warn')
+  assert.equal(w.verdict.text, '60 % ahead of pace')
+  assert.equal(w.aria.text, '5 h: 60% used, 60 % ahead of pace')
+  assert.equal(sparkOf([sample(NOW, 60, resetsAt)], NOW, 300, cfg.pace).points[0].level, 'warn')
+  // A small bill in the same young window still gets the benefit of the doubt.
+  const small = buildViewModel(makeInput({
+    quotas: [state('claude', { windows: [win({ percent: 6, resetsAt, windowMinutes: 300 })] })],
+  })).quotas[0].windows[0]
+  assert.equal(small.verdict.measuring, true)
+  assert.equal(small.level, 'ok')
+  assert.equal(small.aria.text, '5 h: 6% used')
+  assert.equal(sparkOf([sample(NOW, 6, resetsAt)], NOW, 300, cfg.pace).points[0].level, 'ok')
+})
+
 test('a hole without a reset inside is bridged; a hole across a reset stays a hole', () => {
   const r1 = NOW + 3_600_000
   const r2 = NOW + 6 * 3_600_000
@@ -339,6 +364,31 @@ test('a hole without a reset inside is bridged; a hole across a reset stays a ho
   // Adjacent slots are joined by the line itself, not by a bridge.
   const adjacent = sparkOf([sample(at(3), 20, r1), sample(at(2), 21, r1)], NOW, 300, cfg.pace)
   assert.deepEqual(adjacent.bridges, [])
+})
+
+test('the first reading of a new window is flagged so its stroke can stay neutral', () => {
+  const r1 = NOW + 3_600_000
+  const r2 = NOW + 6 * 3_600_000
+  const at = (slotsAgo: number) => NOW - slotsAgo * SPARK_SLOT_MS
+  const vm = sparkOf([
+    sample(at(3), 80, r1), sample(at(2), 90, r1), sample(at(1), 5, r2), sample(at(0), 12, r2),
+  ], NOW, 300, cfg.pace)
+  assert.deepEqual(vm.points.map((p) => p.reset), [undefined, undefined, true, undefined])
+  // The first point of the whole line never carries it: there is no stroke leading into it.
+  assert.equal(sparkOf([sample(at(1), 5, r2)], NOW, 300, cfg.pace).points[0].reset, undefined)
+  // A reset time appearing or disappearing is a change as much as a different one is.
+  const appears = sparkOf([sample(at(1), 5, null), sample(at(0), 6, r2)], NOW, 300, cfg.pace)
+  assert.deepEqual(appears.points.map((p) => p.reset), [undefined, true])
+  const vanishes = sparkOf([sample(at(1), 5, r2), sample(at(0), 6, null)], NOW, 300, cfg.pace)
+  assert.deepEqual(vanishes.points.map((p) => p.reset), [undefined, true])
+  // The flag follows the reported reset, not the fall: a reading that dropped inside the same
+  // window is a correction, and its stroke keeps the pace colour.
+  const fell = sparkOf([sample(at(1), 20, r1), sample(at(0), 4, r1)], NOW, 300, cfg.pace)
+  assert.deepEqual(fell.points.map((p) => p.reset), [undefined, undefined])
+  // A bridge never crosses a reset by definition, so a bridged point is never flagged.
+  const hole = sparkOf([sample(at(9), 20, r1), sample(at(2), 25, r1)], NOW, 300, cfg.pace)
+  assert.equal(hole.bridges.length, 1)
+  assert.deepEqual(hole.points.map((p) => p.reset), [undefined, undefined])
 })
 
 test('the quota card and the forecast list carry the same sparkline', () => {

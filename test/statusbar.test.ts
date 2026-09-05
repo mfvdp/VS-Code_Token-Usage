@@ -465,6 +465,23 @@ test('the tooltip prints no measuring sentence: a dash in the pace column, no fo
   assert.equal(/measuring|reading over|\$\(graph\)/.test(paced), false, paced)
 })
 
+test('a young window heavy with usage is coloured, not excused as measuring', () => {
+  // Half a minute into a five-hour window, 60 % of it already spent. Item colour, glyph and
+  // the tooltip's pace column all come from the one verdict, so they say the same thing.
+  const young = state({ windows: [win({ percent: 60, resetsAt: NOW + 5 * HOUR - 30_000 })] })
+  const m = buildItems(input({ quotas: [young] }))[0]
+  assert.equal(m.colorId, 'tokenPace.paceWarn')
+  assert.ok(m.text.includes('60% ▲'), m.text)
+  assert.ok(quotaTooltip(young, makeContext(input())).includes('| 0 % | 60 % ahead of pace |'))
+  // The same young window with a small bill keeps the benefit of the doubt: green, no glyph,
+  // and the absence marker where the sentence would be.
+  const quiet = state({ windows: [win({ percent: 6, resetsAt: NOW + 5 * HOUR - 30_000 })] })
+  const q = buildItems(input({ quotas: [quiet] }))[0]
+  assert.equal(q.colorId, 'tokenPace.paceOk')
+  assert.equal(q.text.includes('▲'), false, q.text)
+  assert.ok(quotaTooltip(quiet, makeContext(input())).includes('| 0 % | – |'))
+})
+
 test('the tooltip title links the official usage page unless the setting says otherwise', () => {
   const linked = quotaTooltip(state(), makeContext(input()))
   assert.ok(linked.startsWith('**[Claude Code](https://claude.ai/settings/usage)** · plan `max20`'), linked)

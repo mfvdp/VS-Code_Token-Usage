@@ -24,6 +24,9 @@
 # Extensions view's readme pane resolves a relative link inside the package, so a page left
 # out here is a dead link for everybody who reads the overview inside VS Code.
 !docs/*.md
+# The German runtime strings (package.json "l10n" points at this directory). The parts under
+# l10n/parts/ are the inputs of scripts/merge-l10n.mjs and stay out.
+!l10n/bundle.l10n.*.json
 
 # The extension-host smoke test and the VS Code it downloads. Excluded again *after* the
 # negations, so no later `!` line can pull a few hundred megabytes of editor into the .vsix.

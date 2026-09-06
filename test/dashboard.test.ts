@@ -17,6 +17,8 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
 
@@ -81,6 +83,17 @@ function between(s: string, open: RegExp, close: string): string {
 
 const STYLE = between(PAGE, /<style nonce="[A-Za-z0-9]+">/, '</style>')
 const SCRIPT = between(PAGE, /<script nonce="[A-Za-z0-9]+">/, '</script>')
+
+/**
+ * The script's source, for the assertions that describe how a piece of the webview is
+ * written rather than what it does.
+ *
+ * `SCRIPT` is what the page ships: the built module, reprinted by esbuild, so its quotes,
+ * its whitespace and its comments are the printer's and not the author's. Behaviour is
+ * checked against that text — it is the one that runs — and the rules that must hold of the
+ * shipped page (no URL, no external resource, no timer) are checked against both.
+ */
+const SOURCE = readFileSync(join(__dirname, '..', 'src', 'webview', 'main.ts'), 'utf8')
 
 /**
  * The webview script in a context of its own. On load it takes the VS Code API and registers
@@ -262,9 +275,9 @@ test('a label wider than its slot spills to both sides, not over its neighbour',
   // The thinning still works: an explicit display would otherwise beat the browser's rule
   // for the hidden attribute, and every value label would stay on the page.
   assert.match(STYLE, /\.col \.vlabel\[hidden\] \{ display: none/)
-  assert.match(SCRIPT, /el\.hidden = \(Number\(el\.dataset\.i\) % vEvery\)/)
+  assert.match(SOURCE, /el\.hidden = \(Number\(el\.dataset\.i\) % vEvery\)/)
   // And the axis text is written into the centred element, never over it.
-  assert.match(SCRIPT, /const inner = el\.firstElementChild \|\| el;/)
+  assert.match(SOURCE, /const inner = el\.firstElementChild \|\| el;/)
 })
 
 test('the cost line stays inside the plot instead of drawing across the page below it', () => {
@@ -282,7 +295,7 @@ test('the cost line stays inside the plot instead of drawing across the page bel
   assert.match(STYLE, /\.plot \{[^}]*position: relative/)
   assert.equal(/\.plot \{[^}]*overflow: hidden/.test(STYLE), false, STYLE)
   // And the overlay is drawn with an explicit viewBox that the sizing above stretches to it.
-  assert.match(SCRIPT, /svg class="costline" viewBox="0 0 100 100"/)
+  assert.match(SOURCE, /svg class="costline" viewBox="0 0 100 100"/)
   // The series is mapped onto the whole box, so the maximum sits at y = 0 and a zero at
   // y = 100: with the browser's own rule for an inline SVG the marker dot at the peak would
   // be cut in half and the apex of the line squared off.
@@ -522,8 +535,26 @@ test('an empty hour is the shortest mark in the strip, never taller than a used 
 
 test('the page stays self-contained: one nonce, no external resource', () => {
   assert.match(PAGE, /default-src 'none'; style-src 'nonce-[A-Za-z0-9]{32}'; script-src 'nonce-[A-Za-z0-9]{32}'/)
-  assert.equal(/https?:\/\//.test(STYLE + SCRIPT), false)
-  assert.equal(/<link|<img|@import|url\(/.test(STYLE + SCRIPT), false)
+  // Both texts: what the page ships, and the module it was built from — a URL that a build
+  // step happened to drop would be just as much of a promise broken as one that shipped.
+  assert.equal(/https?:\/\//.test(STYLE + SCRIPT + SOURCE), false)
+  assert.equal(/<link|<img|@import|url\(/.test(STYLE + SCRIPT + SOURCE), false)
+})
+
+test('the page ships the built webview module, not a template string', () => {
+  // The script is src/webview/main.ts as esbuild printed it, with the two provider consts in
+  // front of it: the registry is Node code, so its facts are written into the page rather
+  // than bundled into a browser script.
+  assert.match(SCRIPT, /^\n\/\*\* The provider titles[^\n]*\nconst SRC_TITLE = \{"claude":"Claude Code"/)
+  assert.match(SCRIPT, /\nconst SRC_IDS = \["claude","codex"\];\n/)
+  assert.ok(SCRIPT.indexOf('const vscode = acquireVsCodeApi();') >= 0, 'the module is missing')
+  assert.ok(SOURCE.indexOf('const vscode = acquireVsCodeApi();') >= 0, 'the source is missing')
+  // A webview has no module loader: nothing may be left for one to resolve.
+  assert.equal(/^\s*(?:import|export)\b/m.test(SCRIPT), false, 'the script is not self-contained')
+  // And dashboard.ts no longer carries a copy of the script of its own.
+  const dashboard = readFileSync(join(__dirname, '..', 'src', 'dashboard.ts'), 'utf8')
+  assert.ok(dashboard.indexOf("import script from 'webview:script'") >= 0)
+  assert.equal(dashboard.indexOf('acquireVsCodeApi'), -1)
 })
 
 // ---------------------------------------------------------------------------
@@ -929,10 +960,10 @@ test('every band wears its provider hue and its rank, and the legend groups them
   const weekly = render('sChart()', { chart: bands({ weekly: true }) })
   assert.ok(weekly.indexOf('% of the week ·') >= 0, weekly)
   // One function hands the classes out, to bands and swatches alike; nothing else decides.
-  assert.equal(SCRIPT.split('function bandStyle(').length - 1, 1)
-  assert.equal(SCRIPT.indexOf('segClass'), -1)
-  assert.ok(SCRIPT.indexOf('class="seg \' + bandStyle(') >= 0)
-  assert.ok(SCRIPT.indexOf('class="dot \' + bandStyle(') >= 0)
+  assert.equal(SOURCE.split('function bandStyle(').length - 1, 1)
+  assert.equal(SOURCE.indexOf('segClass'), -1)
+  assert.ok(SOURCE.indexOf('class="seg \' + bandStyle(') >= 0)
+  assert.ok(SOURCE.indexOf('class="dot \' + bandStyle(') >= 0)
 })
 
 test('the band styles are one provider hue varied by rank, at a fixed 4 px pitch', () => {
@@ -1399,11 +1430,11 @@ test('showing a reading sets the marker and the label; hiding clears both', () =
   assert.equal(nodeVm.runInContext('sparkMark', ctx), null)
   // The pointer follows mousemove, the arrow keys step, Escape and blur hide — and no element
   // is created at hover time, so the script names no namespace URL.
-  assert.match(SCRIPT, /addEventListener\('mousemove', \(ev\) => \{/)
-  assert.match(SCRIPT, /ev\.key === 'ArrowLeft' \? -1 : ev\.key === 'ArrowRight' \? 1 : 0/)
-  assert.match(SCRIPT, /if \(ev\.key === 'Escape'\) \{ sparkHide\(\); return; \}/)
-  assert.match(SCRIPT, /if \(sparkMark && ev\.target === sparkMark\.svg\) sparkHide\(\);\n\}, true\)/)
-  assert.equal(SCRIPT.indexOf('createElementNS'), -1)
+  assert.match(SOURCE, /addEventListener\('mousemove', \(ev\) => \{/)
+  assert.match(SOURCE, /ev\.key === 'ArrowLeft' \? -1 : ev\.key === 'ArrowRight' \? 1 : 0/)
+  assert.match(SOURCE, /if \(ev\.key === 'Escape'\) \{ sparkHide\(\); return; \}/)
+  assert.match(SOURCE, /if \(sparkMark && ev\.target === sparkMark\.svg\) sparkHide\(\);\n\}, true\)/)
+  assert.equal(SOURCE.indexOf('createElementNS'), -1)
 })
 
 test('the quota card draws the slotted spark and captions its span once', () => {
@@ -1426,7 +1457,7 @@ test('the quota card draws the slotted spark and captions its span once', () => 
 })
 
 test('the script scrolls the drill panel into view', () => {
-  assert.match(SCRIPT, /scrollIntoView\(\{ block: 'nearest' \}\)/)
+  assert.match(SOURCE, /scrollIntoView\(\{ block: 'nearest' \}\)/)
 })
 
 /** A context whose only element is one heat strip, with the two widths that decide it. */
@@ -1614,10 +1645,10 @@ test('a payload without the fold list renders every section open', () => {
 })
 
 test('the fold is posted, and a summary is not toggled twice by one key press', () => {
-  assert.match(SCRIPT, /post\(\{ type: 'toggleSection', key: el\.dataset\.key \}\)/)
+  assert.match(SOURCE, /post\(\{ type: 'toggleSection', key: el\.dataset\.key \}\)/)
   // The keydown fallback exists for the elements that are not natively activatable; a
   // <summary> is, and acting on both events would fold and unfold in one press.
-  assert.match(SCRIPT, /el\.tagName !== 'SUMMARY'/)
+  assert.match(SOURCE, /el\.tagName !== 'SUMMARY'/)
 })
 
 test('a delta is coloured by what the figure means, never by the arrow alone', () => {
@@ -1704,16 +1735,16 @@ test('a line of the explanation that has nothing to say is not written at all', 
 
 test('the explanation opens on hover and on focus, and closes on Escape', () => {
   // mouseenter, focus and blur do not bubble; only a capture-phase listener sees them.
-  assert.match(SCRIPT, /addEventListener\('mouseenter', \(ev\) => \{[\s\S]*?\}, true\)/)
-  assert.match(SCRIPT, /addEventListener\('mouseleave', \(ev\) => \{[\s\S]*?\}, true\)/)
-  assert.match(SCRIPT, /addEventListener\('focus', \(ev\) => \{[\s\S]*?\}, true\)/)
-  assert.match(SCRIPT, /addEventListener\('blur', \(ev\) => \{[\s\S]*?\}, true\)/)
-  assert.match(SCRIPT, /ev\.key === 'Escape'/)
+  assert.match(SOURCE, /addEventListener\('mouseenter', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SOURCE, /addEventListener\('mouseleave', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SOURCE, /addEventListener\('focus', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SOURCE, /addEventListener\('blur', \(ev\) => \{[\s\S]*?\}, true\)/)
+  assert.match(SOURCE, /ev\.key === 'Escape'/)
   // The block itself, never one of its children: crossing onto the sparkline is not a leave.
   // Found by the attribute every explained block carries, so a quota window and a key figure
   // are one mechanism rather than two copies of it.
-  assert.match(SCRIPT, /hasAttribute\('data-explain'\)/)
-  assert.equal(/classList\.contains\('kpi'\)/.test(SCRIPT), false)
+  assert.match(SOURCE, /hasAttribute\('data-explain'\)/)
+  assert.equal(/classList\.contains\('kpi'\)/.test(SOURCE), false)
   assert.match(STYLE, /\.kpi \{[^}]*position: relative;/)
   assert.match(STYLE, /\.pop \{ position: absolute; top: 100%; left: 0; z-index: 5;/)
   assert.match(STYLE, /\.pop\.right \{ left: auto; right: 0; \}/)
@@ -1806,7 +1837,7 @@ test('a window without an explanation gets neither the attributes nor an empty p
 })
 
 test('one explanation mechanism: any block with data-explain, key figure or window', () => {
-  assert.match(SCRIPT, /hasAttribute\('data-explain'\)/)
+  assert.match(SOURCE, /hasAttribute\('data-explain'\)/)
   assert.ok(render('sKpis()', { kpis: [kpiCard()] }).indexOf('<div class="kpi" tabindex="0" data-explain ') >= 0)
   assert.ok(render('sQuota()', { quotas: [card({ windows: [explained()] })] })
     .indexOf('<div class="win" tabindex="0" data-explain ') >= 0)
@@ -1880,6 +1911,17 @@ test('an open explanation and the focus on its block survive a refresh of the se
   nodeVm.runInContext('hidePop(); renderSection("quota");', c)
   assert.deepEqual(looked, ['pop-q-claude-session-300', 'pop-q-claude-session-300'])
   assert.equal(nodeVm.runInContext('openPop', c), null)
+
+  // The spark hover marks an svg by reference, and that svg is one of the nodes the refresh
+  // replaces. A mark inside the refreshed body is dropped; one outside it is left alone.
+  const inside = { querySelector: () => null, parentNode: null }
+  const outside = { querySelector: () => null, parentNode: null }
+  Object.assign(c, { inside, outside })
+  body.contains = (el: unknown) => el === inside
+  nodeVm.runInContext('sparkMark = { svg: inside, g: null, k: 0 }; renderSection("quota");', c)
+  assert.equal(nodeVm.runInContext('sparkMark', c), null)
+  nodeVm.runInContext('sparkMark = { svg: outside, g: null, k: 0 }; renderSection("quota");', c)
+  assert.equal(nodeVm.runInContext('sparkMark && sparkMark.svg === outside', c), true)
 })
 
 test('the prompt-cache line is the last line of the Claude card, and only with a reading', () => {
@@ -1909,7 +1951,7 @@ test('the prompt-cache line is the last line of the Claude card, and only with a
     quotas: [card({ promptCache: { text: 'prompt cache – · expires in – (– TTL) · hit ratio –', note: 'n' } })],
   })
   assert.ok(bare.indexOf('prompt cache – · expires in – (– TTL) · hit ratio –') >= 0, bare)
-  assert.equal(/setInterval|setTimeout/.test(SCRIPT), false)
+  assert.equal(/setInterval|setTimeout/.test(SCRIPT + SOURCE), false)
 })
 
 test('with no quota card at all the section says how to get one, and invents nothing', () => {
@@ -2026,8 +2068,8 @@ test('the date fields stay out of the way until the range is a custom one', () =
 })
 
 test('a clipped table is announced once the browser has measured it', () => {
-  assert.match(SCRIPT, /scrollWidth > el\.clientWidth/)
-  assert.match(SCRIPT, /class="meta scrollhint"/)
+  assert.match(SOURCE, /scrollWidth > el\.clientWidth/)
+  assert.match(SOURCE, /class="meta scrollhint"/)
 })
 
 test('the filter bar is a labelled grid: one row per thing it filters', () => {
@@ -2143,9 +2185,9 @@ test('every section header carries a gear that opens its own settings', () => {
   assert.match(STYLE, /\.gear:hover, \.gear:focus-visible \{ opacity: 1/)
   // The fold is the summary's default action: without both of these, opening the settings
   // would close the section on the way out — with the mouse and with the keyboard.
-  assert.match(SCRIPT, /if \(el\.dataset\.act === 'sectionSettings'\) \{ ev\.stopPropagation\(\); ev\.preventDefault\(\); \}/)
-  assert.match(SCRIPT, /post\(\{ type: 'openSectionSettings', key: el\.dataset\.key \}\)/)
-  const keydown = SCRIPT.slice(SCRIPT.indexOf("document.addEventListener('keydown'"))
+  assert.match(SOURCE, /if \(el\.dataset\.act === 'sectionSettings'\) \{ ev\.stopPropagation\(\); ev\.preventDefault\(\); \}/)
+  assert.match(SOURCE, /post\(\{ type: 'openSectionSettings', key: el\.dataset\.key \}\)/)
+  const keydown = SOURCE.slice(SOURCE.indexOf("document.addEventListener('keydown'"))
   assert.match(keydown, /el\.dataset\.act === 'sectionSettings'[\s\S]{0,160}ev\.stopPropagation\(\);\s*ev\.preventDefault\(\);\s*act\(el\);/)
 })
 
@@ -2166,10 +2208,10 @@ test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
     'model', 'clearModels', 'moreModels', 'moreRanges', 'section', 'sectionSettings',
     'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'compositionCache']) {
-    assert.ok(SCRIPT.indexOf('data-act="' + act + '"') >= 0, act)
+    assert.ok(SOURCE.indexOf('data-act="' + act + '"') >= 0, act)
   }
   for (const role of ['from', 'to']) {
-    assert.ok(SCRIPT.indexOf('data-role="' + role + '"') >= 0, role)
+    assert.ok(SOURCE.indexOf('data-role="' + role + '"') >= 0, role)
   }
 })
 

@@ -5,6 +5,9 @@
 //   node build.mjs           dist/extension.js, dist/scanWorker.js, dist/statusline-bridge.js
 //   node build.mjs --watch   the same, rebuilt on change
 //   node build.mjs --tests   every test/**/*.test.ts to out-test/, for `node --test out-test/`
+//
+// The dashboard's webview script is a build of its own and reaches every one of them as
+// text, through the virtual module `webview:script` — see `webviewScriptPlugin` below.
 
 import * as esbuild from 'esbuild'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
@@ -15,6 +18,67 @@ const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
 const watch = process.argv.includes('--watch')
 const tests = process.argv.includes('--tests')
 
+const WEBVIEW_ENTRY = 'src/webview/main.ts'
+
+/**
+ * The dashboard's script is the one module in this repository that runs in a browser: its own
+ * tsconfig (lib DOM, strict, no Node types), no imports, no externals, nothing minified. It is
+ * built to text here rather than to a file, because the page carries it inline under the CSP
+ * nonce and the dashboard's HTML must stay a pure string.
+ *
+ * `bundle` is off on purpose. The bundler wraps an iife around the whole file, which would put
+ * the script's state and its renderers out of the page's own scope — a change to what the page
+ * *is*, not only to how it is built. Without imports there is nothing to bundle anyway, and the
+ * guard below keeps it that way.
+ */
+async function buildWebviewText() {
+  if (!existsSync(WEBVIEW_ENTRY)) throw new Error(`build: ${WEBVIEW_ENTRY} does not exist`)
+  const built = await esbuild.build({
+    entryPoints: [WEBVIEW_ENTRY],
+    outfile: 'webview.js',
+    write: false,
+    bundle: false,
+    minify: false,
+    platform: 'browser',
+    target: 'es2022',
+    tsconfig: 'tsconfig.webview.json',
+    // Nothing is appended to the text: what the page gets is the module and nothing else.
+    legalComments: 'none',
+    logLevel: 'silent',
+  })
+  const text = built.outputFiles[0].text
+  // An import would survive `bundle: false` verbatim, and a webview has no loader for one.
+  if (/^\s*(import|export)\b/m.test(text)) {
+    throw new Error(`build: ${WEBVIEW_ENTRY} must stay self-contained — no import, no export`)
+  }
+  return text
+}
+
+let webviewText = null
+
+/**
+ * Resolves `import script from 'webview:script'` to the text built above — for the shipped
+ * bundles and for `--tests` alike, so a test renders the very script the page ships. The text
+ * is built once and remembered; in watch mode the entry is named as a watched file, so a change
+ * to the webview rebuilds the extension bundle around it.
+ */
+const webviewScriptPlugin = {
+  name: 'webview-script',
+  setup(build) {
+    build.onResolve({ filter: /^webview:script$/ }, (args) => ({
+      path: args.path, namespace: 'webview-script',
+    }))
+    build.onLoad({ filter: /.*/, namespace: 'webview-script' }, async () => {
+      if (webviewText === null || watch) webviewText = await buildWebviewText()
+      return {
+        contents: `export default ${JSON.stringify(webviewText)}`,
+        loader: 'js',
+        watchFiles: [WEBVIEW_ENTRY],
+      }
+    })
+  },
+}
+
 const common = {
   bundle: true,
   format: 'cjs',
@@ -22,6 +86,7 @@ const common = {
   target: 'node20',
   external: ['vscode'],
   logLevel: 'info',
+  plugins: [webviewScriptPlugin],
   // Keeps the version we report to the Codex app-server in step with the manifest.
   define: { __EXT_VERSION__: JSON.stringify(pkg.version) },
 }

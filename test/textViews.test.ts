@@ -292,7 +292,10 @@ test('an empty group leaves no heading behind', () => {
 test('the reset history is dropped from the list only when no window has a cycle yet', () => {
   const vm = fullVm()
   // The fixture has no complete cycle on file, so every row would say the same non-answer.
+  // The rule reads `retro.enough`, not the sentence: the sentence is translated, and a rule
+  // that matched English words would keep every row in every other language.
   assert.ok(vm.retro.length > 0)
+  assert.ok(vm.retro.every((r) => !r.retro.enough))
   assert.ok(vm.retro.every((r) => r.text.startsWith('not enough data')))
   assert.equal(quickPickItems(vm).some((i) => i.label.startsWith('Reset history ')), false)
   assert.equal(quickPickItems(vm).some((i) => i.separator && i.label === 'Reset history'), false)
@@ -303,7 +306,11 @@ test('the reset history is dropped from the list only when no window has a cycle
   const answered = {
     ...vm,
     retro: vm.retro.map((r, i) => (i === 0
-      ? { ...r, text: '50 % of the complete cycles hit the limit · Avg 12 % unused at the reset' }
+      ? {
+        ...r,
+        retro: { ...r.retro, enough: true },
+        text: '50 % of the complete cycles hit the limit · Avg 12 % unused at the reset',
+      }
       : r)),
   }
   const rows = quickPickItems(answered).filter((i) => i.label.startsWith('Reset history '))

@@ -4,14 +4,14 @@
   "API cost (second axis)": "API-Kosten (zweite Achse)",
   "Active": "Aktiv",
   "Activity": "Aktivität",
-  "Avg turn {0}": "Ø Runde {0}",
+  "Avg turn {0}": "Ø Turn {0}",
   "Avg turn {0} · P90 {1}": "Ø Runde {0} · P90 {1}",
   "Avg/day": "Ø/Tag",
   "Basis": "Grundlage",
   "Blended": "Mischpreis",
   "Blended $/1M": "Mischpreis $/1M",
   "Budgets": "Budgets",
-  "CV {0} · {1} spiky day(s)": "CV {0} · {1} Ausreißertag(e)",
+  "CV {0} · {1} spiky day(s)": "VK {0} · {1} Ausreißertag(e)",
   "Cache": "Cache",
   "Cache read": "Cache-Lesen",
   "Cache · last 30 days": "Cache · letzte 30 Tage",
@@ -192,5 +192,5 @@
   "{0} · {1} · {2} · {3} % of the day · {1} total {4}": "{0} · {1} · {2} · {3} % des Tages · {1} gesamt {4}",
   "{0} · {1} · {2} · {3} % of the week · {1} total {4}": "{0} · {1} · {2} · {3} % der Woche · {1} gesamt {4}",
   "{0}: {1} of {2}": "{0}: {1} von {2}",
-  "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ steht für eine Untergrenze: die ältesten Stunden des Zeitraums sind bereits zu Tagessummen zusammengefasst"
+  "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ kennzeichnet eine Untergrenze: Die ältesten Stunden des Zeitraums sind bereits zu Tagessummen zusammengefasst"
 }

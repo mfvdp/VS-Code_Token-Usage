@@ -14,6 +14,7 @@
  * action it unlocks is a formality, not a decision.
  */
 
+import { t } from './i18n'
 import { MementoLike } from './storage'
 
 const CONSENT_KEY = 'networkConsent'
@@ -51,30 +52,39 @@ export function disclosure(intervalMinutes: number): string {
   const minutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0
     ? Math.round(intervalMinutes)
     : DEFAULT_INTERVAL_MINUTES
-  const cadence = minutes >= 60 && minutes % 60 === 0
-    ? `${minutes / 60} ${minutes === 60 ? 'hour' : 'hours'}`
-    : `${minutes} minutes`
+  // One key per paragraph, with the hard wraps inside it: the dialog's layout is part of the
+  // text, and a translated half-sentence glued to an English one would not be either.
   return [
-    'Token counts are read from local transcript files and need no network access. Quota percentages do.',
+    t('Token counts are read from local transcript files and need no network access. Quota percentages do.'),
     '',
-    `If you allow it, then at most every ${cadence} (tokenPace.pollIntervalMinutes):`,
+    cadenceLine(minutes),
     '',
-    '• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from',
-    '  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,',
-    '  because the endpoint rate-limits other callers into a permanent 429.',
-    '• Codex — the local "codex app-server" is started and asked for its rate limits. No traffic',
-    '  of ours leaves the machine for this.',
+    t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using the accessToken from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.'),
+    t('\u2022 Codex \u2014 the local "codex app-server" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.'),
     '',
-    'That endpoint is undocumented: it is what Claude Code itself calls, it carries no stability',
-    'promise, and it may change or disappear at any time. Token Pace then shows no quota figures',
-    'rather than guessing any.',
+    t('That endpoint is undocumented: it is what Claude Code itself calls, it carries no stability\npromise, and it may change or disappear at any time. Token Pace then shows no quota figures\nrather than guessing any.'),
     '',
-    'The token is only read, never refreshed, and appears in no log line or error message. The',
-    'target address is hard-coded and cannot be configured. Nothing is sent anywhere else, and',
-    'no usage data is collected by this extension.',
+    t('The token is only read, never refreshed, and appears in no log line or error message. The\ntarget address is hard-coded and cannot be configured. Nothing is sent anywhere else, and\nno usage data is collected by this extension.'),
     '',
-    'You can change this later with "Token Pace: Reset Network Access Decision".',
+    t('You can change this later with "Token Pace: Reset Network Access Decision".'),
   ].join('\n')
+}
+
+/**
+ * "every 45 minutes", "every 1 hour", "every 2 hours" \u2014 as three whole sentences.
+ *
+ * The cadence is not assembled from a translated fragment: "every" and "hours" belong to one
+ * sentence in every language, and a language that puts the number last could not be served by
+ * a phrase glued together here.
+ */
+function cadenceLine(minutes: number): string {
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60
+    return hours === 1
+      ? t('If you allow it, then at most every {0} hour (tokenPace.pollIntervalMinutes):', hours)
+      : t('If you allow it, then at most every {0} hours (tokenPace.pollIntervalMinutes):', hours)
+  }
+  return t('If you allow it, then at most every {0} minutes (tokenPace.pollIntervalMinutes):', minutes)
 }
 
 /**
@@ -124,19 +134,24 @@ export class NetworkConsent {
 
   private async ask(): Promise<boolean> {
     const ui = this.opts.ui ?? windowUi()
+    // The two buttons are computed once and compared with those same values: a label that is
+    // translated on the way in and re-translated on the way out is a comparison against a
+    // string nobody ever showed.
+    const allow = t('Allow')
+    const never = t('Never')
     const choice = await ui.showInformationMessage(
-      'Allow Token Pace to fetch quota figures?',
+      t('Allow Token Pace to fetch quota figures?'),
       { modal: true, detail: this.disclosure() },
-      'Allow',
-      'Never',
+      allow,
+      never,
     )
-    if (choice === 'Allow') {
+    if (choice === allow) {
       await this.memento.update(CONSENT_KEY, 'granted')
       this.log('Network access allowed by the user.')
       return true
     }
     // Cancel means "not now" and stays askable; only "Never" is recorded.
-    if (choice === 'Never') {
+    if (choice === never) {
       await this.memento.update(CONSENT_KEY, 'denied')
       this.log('Network access declined by the user.')
     }
@@ -205,9 +220,11 @@ export const DEFAULT_QUOTA_CACHE_FILES: readonly string[] = [
   '~/.cache/codex-usage/state.json',
 ]
 
-const WRITE_TITLES: Record<WriteConsentKind, string> = {
-  writeQuotaCache: 'Allow Token Pace to write the shared quota cache file?',
-  statusLine: 'Allow Token Pace to edit Claude Code\'s settings.json?',
+/** The question, asked when the dialog opens rather than when this module is loaded. */
+function writeTitle(kind: WriteConsentKind): string {
+  return kind === 'writeQuotaCache'
+    ? t('Allow Token Pace to write the shared quota cache file?')
+    : t('Allow Token Pace to edit Claude Code\'s settings.json?')
 }
 
 /**
@@ -222,44 +239,33 @@ export function writeConsentDisclosure(kind: WriteConsentKind, paths: WriteConse
     const files = (paths.quotaCacheFiles ?? []).filter((f) => typeof f === 'string' && f.trim() !== '')
     const listed = files.length > 0 ? files : [...DEFAULT_QUOTA_CACHE_FILES]
     return [
-      'Token Pace writes only into its own storage — with this one exception, if you allow it.',
+      t('Token Pace writes only into its own storage \u2014 with this one exception, if you allow it.'),
       '',
-      'After each of its own quota polls it would write the result to these files, one per',
-      'provider:',
+      t('After each of its own quota polls it would write the result to these files, one per\nprovider:'),
       ...listed.map((f) => `  ${f}`),
       '',
-      'Each of them is the documented exchange format (schema_version 1) other tools read, so a',
-      'panel, a shell prompt and this extension can share one fetch instead of three.',
+      t('Each of them is the documented exchange format (schema_version 1) other tools read, so a\npanel, a shell prompt and this extension can share one fetch instead of three.'),
       '',
-      'They contain the provider\'s quota response — percentages, reset times, plan type. They',
-      'never contain your access token. An existing file whose fetch time is newer than ours is',
-      'never overwritten, and the write is atomic (temp file plus rename), so a reader never',
-      'sees half a file.',
+      t('They contain the provider\'s quota response \u2014 percentages, reset times, plan type. They\nnever contain your access token. An existing file whose fetch time is newer than ours is\nnever overwritten, and the write is atomic (temp file plus rename), so a reader never\nsees half a file.'),
       '',
-      'Switch it off again with the setting "tokenPace.writeQuotaCache".',
+      t('Switch it off again with the setting "tokenPace.writeQuotaCache".'),
     ].join('\n')
   }
   const settings = paths.settingsFile ?? '~/.claude/settings.json'
   const mirror = paths.mirrorFile ?? '<globalStorage>/statusline-mirror.json'
   return [
-    'Token Pace writes only into its own storage — with this one exception, if you allow it.',
+    t('Token Pace writes only into its own storage \u2014 with this one exception, if you allow it.'),
     '',
-    'To read quota figures without any network access, it can register a small script as Claude',
-    'Code\'s status line. Claude Code then runs that script on every status-line refresh and pipes',
-    'its status JSON into it; the script mirrors that JSON to a file and prints a status line.',
+    t('To read quota figures without any network access, it can register a small script as Claude\nCode\'s status line. Claude Code then runs that script on every status-line refresh and pipes\nits status JSON into it; the script mirrors that JSON to a file and prints a status line.'),
     '',
-    'What changes:',
-    `  • ${settings} — the "statusLine" entry is set to the script.`,
-    `  • A backup is written first, next to it, as settings.json.token-pace-backup-<timestamp>.`,
-    `  • The mirrored JSON is stored at ${mirror}.`,
+    t('What changes:'),
+    `  \u2022 ${t('{0} \u2014 the "statusLine" entry is set to the script.', settings)}`,
+    `  \u2022 ${t('A backup is written first, next to it, as settings.json.token-pace-backup-<timestamp>.')}`,
+    `  \u2022 ${t('The mirrored JSON is stored at {0}.', mirror)}`,
     '',
-    'An existing status-line command is kept: it is called by the script with the same input and',
-    'its output is passed through unchanged. A settings.json that cannot be parsed is never',
-    'touched. The script never sends anything anywhere and never logs the piped JSON.',
+    t('An existing status-line command is kept: it is called by the script with the same input and\nits output is passed through unchanged. A settings.json that cannot be parsed is never\ntouched. The script never sends anything anywhere and never logs the piped JSON.'),
     '',
-    '"Token Pace: Disconnect Claude Status Line" restores the previous entry exactly — as long as',
-    'the entry is still the one we installed. It is not removed automatically when the extension',
-    'is uninstalled, so disconnect first if you plan to remove Token Pace.',
+    t('"Token Pace: Disconnect Claude Status Line" restores the previous entry exactly \u2014 as long as\nthe entry is still the one we installed. It is not removed automatically when the extension\nis uninstalled, so disconnect first if you plan to remove Token Pace.'),
   ].join('\n')
 }
 
@@ -316,18 +322,21 @@ export class WriteConsent {
 
   private async ask(): Promise<boolean> {
     const ui = this.opts.ui ?? windowUi()
+    // Same rule as the network dialog: one value, shown and compared.
+    const allow = t('Allow')
+    const never = t('Never')
     const choice = await ui.showInformationMessage(
-      WRITE_TITLES[this.kind],
+      writeTitle(this.kind),
       { modal: true, detail: this.disclosure() },
-      'Allow',
-      'Never',
+      allow,
+      never,
     )
-    if (choice === 'Allow') {
+    if (choice === allow) {
       await this.memento.update(this.key, 'granted')
       this.log(`Write access allowed by the user: ${this.kind}.`)
       return true
     }
-    if (choice === 'Never') {
+    if (choice === never) {
       await this.memento.update(this.key, 'denied')
       this.log(`Write access declined by the user: ${this.kind}.`)
     }

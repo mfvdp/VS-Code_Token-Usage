@@ -32,7 +32,7 @@ import {
 } from './helpers/fakeVscode'
 // Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`.
 import type { TokenPaceApi } from '../src/extension'
-import { BRIDGE_BLOCKS_DELETE } from '../src/storage'
+import { bridgeBlocksDelete } from '../src/storage'
 import { STATE_VERSION } from '../src/types'
 
 /** Never a real key: the string is asserted *absent* from every output this test reads. */
@@ -649,7 +649,7 @@ test('clear stored data lists the shared cache and says the bridge has to go fir
   assert.ok(String(cache.detail).includes(fx.missingCodexCache), 'the Codex cache path is not named')
 
   // The bridge line is a statement, not a deletable item: no key, and a separator above it.
-  const bridgeLine = offered.items.find((i) => i.detail === BRIDGE_BLOCKS_DELETE)
+  const bridgeLine = offered.items.find((i) => i.detail === bridgeBlocksDelete())
   assert.ok(bridgeLine, 'the installed bridge is not mentioned')
   assert.equal(bridgeLine.key, undefined)
   assert.ok(String(bridgeLine.detail).includes('Disconnect Claude Status Line'))

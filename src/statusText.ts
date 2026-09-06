@@ -17,6 +17,7 @@ import { billable, BucketFilter, CostSummary } from './agg'
 import { BudgetRow, worstBudget } from './budget'
 import { Config, CONTEXT_NOTE, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
+import { t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
 import { isCustomPricing, PricingOptions } from './prices'
 import { promptCacheText } from './promptCache'
@@ -44,14 +45,21 @@ import {
  */
 export { USAGE_PAGE }
 
-/** Where a reading came from, in words. Shown so a figure is always traceable. */
-const ORIGIN_NAME: Record<QuotaOrigin, string> = {
-  cache: 'cache file',
-  poll: 'polled',
-  push: 'pushed',
-  transcript: 'transcript',
-  statusline: 'status line',
-  claudeJson: 'claude.json',
+/**
+ * Where a reading came from, in words. Shown so a figure is always traceable.
+ *
+ * A function rather than a table: the translation bundle arrives at activation, and a table
+ * built at module load would keep the English words for the rest of the session.
+ */
+function originName(origin: QuotaOrigin): string {
+  switch (origin) {
+    case 'cache': return t('cache file')
+    case 'poll': return t('polled')
+    case 'push': return t('pushed')
+    case 'transcript': return t('transcript')
+    case 'statusline': return t('status line')
+    default: return t('claude.json')
+  }
 }
 
 /**
@@ -322,10 +330,10 @@ function autoQuiet(sessions: QuotaWindow[]): boolean {
 export function autoExplain(q: QuotaState, cfg: Config): string | null {
   if (cfg.windowSelect !== 'auto') return null
   const sessions = q.windows.filter((w) => w.kind === 'session')
-  if (sessions.length === 0) return 'auto: showing every window — this provider reports no session window'
+  if (sessions.length === 0) return t('auto: showing every window — this provider reports no session window')
   return autoQuiet(sessions)
-    ? `auto: showing every window — every session window is below ${AUTO_SESSION_QUIET_PERCENT} %`
-    : `auto: showing session windows only — a session window is at or above ${AUTO_SESSION_QUIET_PERCENT} %`
+    ? t('auto: showing every window — every session window is below {0} %', AUTO_SESSION_QUIET_PERCENT)
+    : t('auto: showing session windows only — a session window is at or above {0} %', AUTO_SESSION_QUIET_PERCENT)
 }
 
 /** The window that decides the colour of a collective item: worst level, then highest use. */
@@ -357,13 +365,10 @@ function statePrefix(display: WindowDisplay): string {
  * `colorMode: monochrome` and high-contrast themes each remove one of them, so the state is
  * said in plain words as well. The wording is the one `viewModel.ts` uses.
  */
-const STATE_WORD: Partial<Record<WindowDisplay, string>> = {
-  exhausted: 'exhausted',
-  limitReached: 'limit reached',
-}
-
 export function stateWord(display: WindowDisplay): string | null {
-  return STATE_WORD[display] ?? null
+  if (display === 'exhausted') return t('exhausted')
+  if (display === 'limitReached') return t('limit reached')
+  return null
 }
 
 /**
@@ -374,10 +379,10 @@ export function stateWord(display: WindowDisplay): string | null {
  */
 export function windowValue(view: WindowView, cfg: Config, opts: { state?: boolean } = {}): string {
   if (view.display === 'unlimited') return '∞'
-  if (view.display === 'resetDue') return 'reset due'
+  if (view.display === 'resetDue') return t('reset due')
   const figure = percentText(view.w.percent, cfg.percentMode, cfg.overflowDisplay)
-  const word = STATE_WORD[view.display]
-  return word === undefined || opts.state === false ? figure : `${figure} ${word}`
+  const word = stateWord(view.display)
+  return word === null || opts.state === false ? figure : `${figure} ${word}`
 }
 
 function barFor(view: WindowView, cfg: Config): string {
@@ -418,16 +423,19 @@ function indicatorGlyph(view: WindowView, cfg: Config): string {
 
 function resetSuffix(view: WindowView, cfg: Config, now: number, tcfg: TimeConfig): string {
   if (view.display === 'resetDue') return ''
-  const t = formatReset(view.w.resetsAt, now, cfg.resetFormat, tcfg)
-  if (t === '') return ''
+  const text = formatReset(view.w.resetsAt, now, cfg.resetFormat, tcfg)
+  if (text === '') return ''
   // A window the provider still calls exhausted or limit-reached keeps that display even
   // once its reset time has passed, and the countdown then reads "reset due" — a sentence of
-  // its own, not a duration to hang "resets" in front of.
-  if (t.includes('reset due')) return ` · ${t}`
+  // its own, not a duration to hang "resets" in front of. Asked of the clock rather than of
+  // the rendered words: "reset due" is itself translated, and a search for the English
+  // phrase would stop matching in every other language.
+  const due = finite(view.w.resetsAt) && (view.w.resetsAt as number) <= now && cfg.resetFormat !== 'absolute'
+  if (due) return ` · ${text}`
   // Always named. A bare "· 42m" next to a percentage is unreadable beside the stale-age
   // suffix, which is also a bare duration — one of the two has to say what it counts, and
   // the age already carries `$(history)`, so the reset carries the word.
-  return ` · resets ${t}`
+  return ` · ${t('resets {0}', text)}`
 }
 
 function ageSuffix(q: QuotaState, stale: boolean, cfg: Config, now: number): string {
@@ -487,103 +495,103 @@ export function problemView(q: QuotaState, cfg: Config, now: number): ProblemVie
   switch (kind) {
     case 'noToken':
       return {
-        kind, icon: '$(key)', message: 'no token', command: 'tokenPace.showOutput',
-        explain: 'No credentials were found, so the quota cannot be polled.',
+        kind, icon: '$(key)', message: t('no token'), command: 'tokenPace.showOutput',
+        explain: t('No credentials were found, so the quota cannot be polled.'),
         check: codex
-          ? 'Check: run `codex login`, then fetch again. The log names the lookup that failed.'
-          : 'Check: sign in to Claude Code (`claude`), or set `CLAUDE_CODE_OAUTH_TOKEN`. The log names the lookup that failed — it never contains the token itself.',
+          ? t('Check: run `codex login`, then fetch again. The log names the lookup that failed.')
+          : t('Check: sign in to Claude Code (`claude`), or set `CLAUDE_CODE_OAUTH_TOKEN`. The log names the lookup that failed — it never contains the token itself.'),
       }
     case 'tokenExpired':
       return {
-        kind, icon: '$(warning)', message: 'token expired', command: 'tokenPace.showOutput',
-        explain: 'The stored credentials are past their expiry. This extension never refreshes a token.',
-        check: 'Check: sign in again in the CLI; the next poll picks the new token up automatically.',
+        kind, icon: '$(warning)', message: t('token expired'), command: 'tokenPace.showOutput',
+        explain: t('The stored credentials are past their expiry. This extension never refreshes a token.'),
+        check: t('Check: sign in again in the CLI; the next poll picks the new token up automatically.'),
       }
     case 'consentPending':
       return {
-        kind, icon: '$(shield)', message: 'consent', command: 'tokenPace.refreshQuota',
-        explain: 'Network access has not been granted yet, so no request was made.',
-        check: 'Check: click here — the fetch asks for consent once and remembers the answer.',
+        kind, icon: '$(shield)', message: t('consent'), command: 'tokenPace.refreshQuota',
+        explain: t('Network access has not been granted yet, so no request was made.'),
+        check: t('Check: click here — the fetch asks for consent once and remembers the answer.'),
       }
     case 'retry': {
       const at = finite(q.nextAttemptAt) ? relativeShort(q.nextAttemptAt as number, now) : null
       return {
-        kind, icon: '$(clock)', message: at ? `retry ${at}` : 'retry',
+        kind, icon: '$(clock)', message: at ? t('retry {0}', at) : t('retry'),
         command: 'tokenPace.refreshQuota',
-        explain: 'The last attempt failed; the next one is scheduled after a backoff.',
-        check: 'Check: the log holds the reason. Clicking here retries immediately.',
+        explain: t('The last attempt failed; the next one is scheduled after a backoff.'),
+        check: t('Check: the log holds the reason. Clicking here retries immediately.'),
       }
     }
     case 'offline':
       return {
-        kind, icon: '$(cloud-offline)', message: 'offline', command: 'tokenPace.refreshQuota',
-        explain: 'The request did not reach the provider (timeout, DNS or proxy).',
-        check: 'Check: connectivity, and `http.proxy` — Copy Diagnostics lists the proxy settings in effect.',
+        kind, icon: '$(cloud-offline)', message: t('offline'), command: 'tokenPace.refreshQuota',
+        explain: t('The request did not reach the provider (timeout, DNS or proxy).'),
+        check: t('Check: connectivity, and `http.proxy` — Copy Diagnostics lists the proxy settings in effect.'),
       }
     case 'quotaOff':
       return {
-        kind, icon: '$(circle-slash)', message: 'quota off', command: 'tokenPace.openSettings',
-        explain: 'No quota source is enabled for this provider.',
-        check: 'Check: `tokenPace.claudeQuotaSources` / `tokenPace.codexQuotaSources`.',
+        kind, icon: '$(circle-slash)', message: t('quota off'), command: 'tokenPace.openSettings',
+        explain: t('No quota source is enabled for this provider.'),
+        check: t('Check: `tokenPace.claudeQuotaSources` / `tokenPace.codexQuotaSources`.'),
       }
     case 'modeCache':
       return {
-        kind, icon: '$(circle-slash)', message: 'quota off', command: 'tokenPace.openSettings',
-        explain: '`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.',
-        check: 'Check: point `tokenPace.claudeQuotaFile` / `tokenPace.codexQuotaFile` at a cache file, or switch the mode to `auto`.',
+        kind, icon: '$(circle-slash)', message: t('quota off'), command: 'tokenPace.openSettings',
+        explain: t('`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.'),
+        check: t('Check: point `tokenPace.claudeQuotaFile` / `tokenPace.codexQuotaFile` at a cache file, or switch the mode to `auto`.'),
       }
     case 'forbidden':
       return {
         kind, icon: '$(lock)', message: '403', command: 'tokenPace.showOutput',
-        explain: 'The provider refused the usage endpoint (HTTP 403). This may mean a Team or Enterprise account without a usage endpoint — token counts keep working.',
-        check: 'Check: the official usage page in the browser; if it works there and not here, the endpoint is not available for this account.',
+        explain: t('The provider refused the usage endpoint (HTTP 403). This may mean a Team or Enterprise account without a usage endpoint — token counts keep working.'),
+        check: t('Check: the official usage page in the browser; if it works there and not here, the endpoint is not available for this account.'),
       }
     case 'unauthorized':
       return {
-        kind, icon: '$(key)', message: 'sign in', command: 'tokenPace.showOutput',
-        explain: 'The provider rejected the credentials (HTTP 401).',
-        check: 'Check: sign in again in the CLI. The token is only read, never refreshed.',
+        kind, icon: '$(key)', message: t('sign in'), command: 'tokenPace.showOutput',
+        explain: t('The provider rejected the credentials (HTTP 401).'),
+        check: t('Check: sign in again in the CLI. The token is only read, never refreshed.'),
       }
     case 'noBinary':
       return {
-        kind, icon: '$(circle-slash)', message: codex ? 'no codex' : 'no binary',
+        kind, icon: '$(circle-slash)', message: codex ? t('no codex') : t('no binary'),
         command: 'tokenPace.openSettings',
-        explain: 'The provider CLI was not found on PATH, so its app-server could not be asked.',
-        check: 'Check: `tokenPace.codexBinary`, or install the CLI.',
+        explain: t('The provider CLI was not found on PATH, so its app-server could not be asked.'),
+        check: t('Check: `tokenPace.codexBinary`, or install the CLI.'),
       }
     case 'noFile':
       return {
         kind, icon: '', message: '–', command: 'tokenPace.rescan',
-        explain: 'The configured quota cache file does not exist.',
-        check: 'Check: `tokenPace.claudeQuotaFile` / `tokenPace.codexQuotaFile`, or enable another source.',
+        explain: t('The configured quota cache file does not exist.'),
+        check: t('Check: `tokenPace.claudeQuotaFile` / `tokenPace.codexQuotaFile`, or enable another source.'),
       }
     case 'paused':
       // Raised only by a cache file whose `blocked_until` is still in the future: the external
       // poller that owns the file is backing off. Nothing in this extension is paused, and a
       // fetch of our own is refused outside `quotaSource: poll` — so only that mode is offered one.
       return {
-        kind, icon: '$(clock)', message: 'paused',
+        kind, icon: '$(clock)', message: t('paused'),
         command: cfg.quotaSource === 'poll' ? 'tokenPace.refreshQuota' : 'tokenPace.showOutput',
-        explain: 'The external poller that writes the quota cache file is in backoff; its reading stands still until the pause ends (the reported reason names the time).',
-        check: 'Check: nothing here is broken. The file is written by that poller, not by this extension — switch `tokenPace.quotaSource` to `poll` to fetch independently of it.',
+        explain: t('The external poller that writes the quota cache file is in backoff; its reading stands still until the pause ends (the reported reason names the time).'),
+        check: t('Check: nothing here is broken. The file is written by that poller, not by this extension — switch `tokenPace.quotaSource` to `poll` to fetch independently of it.'),
       }
     case 'follower':
       return {
         kind, icon: '', message: '–', command: 'tokenPace.showDashboard',
-        explain: 'Another VS Code window holds the lease and polls; this one only displays what that window wrote.',
-        check: 'Check: nothing. Set `tokenPace.leaderElection` to false if every window should poll on its own.',
+        explain: t('Another VS Code window holds the lease and polls; this one only displays what that window wrote.'),
+        check: t('Check: nothing. Set `tokenPace.leaderElection` to false if every window should poll on its own.'),
       }
     case 'empty':
       return {
         kind, icon: '', message: '–', command: 'tokenPace.rescan',
-        explain: 'The source answered, but carried no window this build can read.',
-        check: 'Check: the log lists the fields that were seen; unknown window kinds are reported, not dropped.',
+        explain: t('The source answered, but carried no window this build can read.'),
+        check: t('Check: the log lists the fields that were seen; unknown window kinds are reported, not dropped.'),
       }
     default:
       return {
         kind: 'unknown', icon: '', message: '–', command: 'tokenPace.showOutput',
-        explain: q.problem ? 'The quota could not be read.' : 'No quota reading is available.',
-        check: 'Check: the log holds the raw reason. Clicking here tries again.',
+        explain: q.problem ? t('The quota could not be read.') : t('No quota reading is available.'),
+        check: t('Check: the log holds the raw reason. Clicking here tries again.'),
       }
   }
 }
@@ -614,14 +622,17 @@ function titleLine(q: QuotaState, cfg: Config): string {
   // printing. The suffix stays outside the span — it is our word, not theirs.
   const plan = planNameOf(cfg, q.source, q.planType)
   if (plan === null) return head
-  return `${head} · plan \`${plan.name}\`${plan.from === 'configured' ? ' (as configured)' : ''}`
+  const named = plan.from === 'configured'
+    ? t('plan {0} (as configured)', `\`${plan.name}\``)
+    : t('plan {0}', `\`${plan.name}\``)
+  return `${head} · ${named}`
 }
 
 /** In the tooltip a reset is spelled out; `none` would leave the column empty for no gain. */
 function tooltipReset(w: QuotaWindow, cfg: Config, now: number, tcfg: TimeConfig): string {
   const fmt = cfg.resetFormat === 'none' ? 'both' : cfg.resetFormat
-  const t = formatReset(w.resetsAt, now, fmt, tcfg)
-  return t === '' ? '–' : t
+  const text = formatReset(w.resetsAt, now, fmt, tcfg)
+  return text === '' ? '–' : text
 }
 
 function windowRow(view: WindowView, cfg: Config, now: number, tcfg: TimeConfig): string {
@@ -657,23 +668,32 @@ function forecastLine(q: QuotaState, w: QuotaWindow, ctx: RenderContext): string
   const lock = lockoutText(f, ctx.now, (ms) => formatTime(ms, ctx.tcfg))
   if (lock !== null) bits.push(lock)
   if (f.basis && f.basis.samples > 0) {
-    const noun = f.basis.samples === 1 ? 'reading' : 'readings'
-    bits.push(`based on ${f.basis.samples} ${noun} over ${spanText(f.basis.spanMs)}`)
+    // Two whole sentences rather than a noun glued into one: the plural of "reading" is not
+    // the only thing that changes with the count in every language.
+    bits.push(f.basis.samples === 1
+      ? t('based on {0} reading over {1}', f.basis.samples, spanText(f.basis.spanMs))
+      : t('based on {0} readings over {1}', f.basis.samples, spanText(f.basis.spanMs)))
   }
   if (bits.length === 0) return null
   return `$(graph) ${w.shortLabel}: ${bits.join(' · ')}`
 }
 
 function freshnessLine(q: QuotaState, cfg: Config, now: number): string {
-  const origin = q.origin ? ORIGIN_NAME[q.origin] : null
+  const origin = q.origin ? originName(q.origin) : null
   const age = ageText(q.fetchedAt, now)
-  if (age === null) return origin ? `No reading yet · ${origin}` : 'No reading yet'
-  const suffix = isStale(q, cfg, now) ? ' · $(warning) **stale**' : ''
-  return `Updated ${age}${origin ? ` · ${origin}` : ''}${suffix}`
+  if (age === null) return origin ? t('No reading yet · {0}', origin) : t('No reading yet')
+  const suffix = isStale(q, cfg, now) ? ` · $(warning) **${t('stale')}**` : ''
+  return `${origin ? t('Updated {0} · {1}', age, origin) : t('Updated {0}', age)}${suffix}`
 }
 
-const FOLLOWER_NOTE = '$(info) another window polls and writes the data; this one only displays it'
-const SCANNING_NOTE = '$(sync~spin) reading history … the token figures below are still growing'
+/** Icons outside, sentence inside — the glyph is the same in every language. */
+function followerNote(): string {
+  return `$(info) ${t('another window polls and writes the data; this one only displays it')}`
+}
+
+function scanningNote(): string {
+  return `$(sync~spin) ${t('reading history … the token figures below are still growing')}`
+}
 
 /**
  * The action row. Only this extension's own argument-less commands are linked; a link that
@@ -681,13 +701,14 @@ const SCANNING_NOTE = '$(sync~spin) reading history … the token figures below 
  */
 export function footerLine(ctx: RenderContext): string {
   const blocked = ctx.consent === 'denied' || ctx.cfg.quotaSource === 'cache' || ctx.role === 'follower'
-  const fetch = blocked ? '$(sync) Fetch now' : '$(sync) [Fetch now](command:tokenPace.refreshQuota)'
+  const fetchNow = t('Fetch now')
+  const fetch = blocked ? `$(sync) ${fetchNow}` : `$(sync) [${fetchNow}](command:tokenPace.refreshQuota)`
   return [
     fetch,
-    '$(history) [Re-read](command:tokenPace.rescan)',
-    '$(output) [Log](command:tokenPace.showOutput)',
-    '$(settings-gear) [Settings](command:tokenPace.openSettings)',
-    '$(dashboard) [Dashboard](command:tokenPace.showDashboard)',
+    `$(history) [${t('Re-read')}](command:tokenPace.rescan)`,
+    `$(output) [${t('Log')}](command:tokenPace.showOutput)`,
+    `$(settings-gear) [${t('Settings')}](command:tokenPace.openSettings)`,
+    `$(dashboard) [${t('Dashboard')}](command:tokenPace.showDashboard)`,
   ].join(' · ')
 }
 
@@ -696,8 +717,11 @@ export function footerLine(ctx: RenderContext): string {
 // ---------------------------------------------------------------------------
 
 const PERIOD_DAYS: Record<Config['summary']['period'], number> = { today: 1, '7d': 7, '30d': 30 }
-const PERIOD_LABEL: Record<Config['summary']['period'], string> = {
-  today: 'today', '7d': '7 days', '30d': '30 days',
+
+/** The period in words, asked for when it is printed rather than when this module loads. */
+function periodLabel(period: Config['summary']['period']): string {
+  if (period === 'today') return t('today')
+  return period === '7d' ? t('7 days') : t('30 days')
 }
 
 function scopeSources(cfg: Config): Source[] {
@@ -721,10 +745,12 @@ function usageTable(source: Source, ctx: RenderContext): string[] {
   const today = days[days.length - 1]
   const week = days[Math.max(0, days.length - 7)]
   const withCost = ctx.cfg.showCost
-  const out: string[] = [`**${TITLE[source]}** — tokens`, '']
+  const out: string[] = [t('{0} — tokens', `**${TITLE[source]}**`), '']
+  // A whole header row per key: the pipes are the table, and a column name that travels
+  // alone reads differently in a language that has one word for two of them.
   out.push(withCost
-    ? '| Period | Usage | Output | Cache read | Req. | API cost |'
-    : '| Period | Usage | Output | Cache read | Req. |')
+    ? t('| Period | Usage | Output | Cache read | Req. | API cost |')
+    : t('| Period | Usage | Output | Cache read | Req. |'))
   out.push(withCost ? '|---|---|---|---|---|---|' : '|---|---|---|---|---|')
 
   const row = (label: string, from: string, to: string): void => {
@@ -740,9 +766,9 @@ function usageTable(source: Source, ctx: RenderContext): string[] {
     }
     out.push(line)
   }
-  row('today', today, today)
-  row('7 days', week, today)
-  row('30 days', days[0], today)
+  row(t('today'), today, today)
+  row(t('7 days'), week, today)
+  row(t('30 days'), days[0], today)
 
   const d = ctx.agg.sum(today, today, ctx.tcfg, { source })
   out.push('')
@@ -751,21 +777,21 @@ function usageTable(source: Source, ctx: RenderContext): string[] {
   if (d.requests > 0 && d.outputFinal < d.requests) {
     const pct = Math.round((1 - d.outputFinal / d.requests) * 100)
     out.push('')
-    out.push(`⚠ ${pct} % of today's responses have no terminal line — the output figure is a **lower bound**.`)
+    out.push(`⚠ ${t("{0} % of today's responses have no terminal line — the output figure is a **lower bound**.", pct)}`)
   }
   if (withCost) {
     const c = ctx.agg.cost(days[0], today, ctx.tcfg, ctx.pricing, { source })
     if (c.unpricedTokens > 0) {
       out.push('')
-      out.push(`⚠ ${compact(c.unpricedTokens)} tokens have no price (${c.unpricedModels.join(', ') || 'unknown model'}) — they are missing from the cost, not billed at a guess.`)
+      out.push(`⚠ ${t('{0} tokens have no price ({1}) — they are missing from the cost, not billed at a guess.', compact(c.unpricedTokens), c.unpricedModels.join(', ') || t('unknown model'))}`)
     }
     if (c.fastUnpricedTokens > 0) {
       out.push('')
-      out.push(`⚠ ${compact(c.fastUnpricedTokens)} fast-mode tokens have no published fast rate and are left out.`)
+      out.push(`⚠ ${t('{0} fast-mode tokens have no published fast rate and are left out.', compact(c.fastUnpricedTokens))}`)
     }
     if (c.familyPriced.length > 0) {
       out.push('')
-      out.push(`⚠ priced from a family fallback: ${c.familyPriced.join(', ')}.`)
+      out.push(`⚠ ${t('priced from a family fallback: {0}.', c.familyPriced.join(', '))}`)
     }
   }
   return out
@@ -779,16 +805,18 @@ function compositionLine(b: Bucket, source: Source): string {
     ? percentOf(b.cacheRead, b.input)
     : percentOf(b.cacheRead, b.input + b.cacheRead)
   const w1h = b.cacheWrite1h > 0 ? ` (1 h ${compact(b.cacheWrite1h)})` : ''
-  return `today: fresh ${tokenText(fresh)} · cache write ${tokenText(b.cacheWrite)}${w1h} · `
-    + `cache read ${tokenText(b.cacheRead)} · output ${tokenText(b.output)} · reasoning ${tokenText(b.reasoning)} · `
-    + `cache hit ${hit}`
+  // One key for the whole line: six labelled figures whose order a translator may need to
+  // change, and the "1 h" parenthesis rides along inside its own placeholder.
+  return t('today: fresh {0} · cache write {1}{2} · cache read {3} · output {4} · reasoning {5} · cache hit {6}',
+    tokenText(fresh), tokenText(b.cacheWrite), w1h, tokenText(b.cacheRead), tokenText(b.output),
+    tokenText(b.reasoning), hit)
 }
 
 function provenanceLine(ctx: RenderContext, hasQuota: boolean): string {
-  const measured = [hasQuota ? 'quota' : null, 'tokens'].filter((s): s is string => s !== null)
-  const estimated = ctx.cfg.showCost ? ['~API cost'] : []
-  const parts = [`measured: ${measured.join(', ')}`]
-  if (estimated.length > 0) parts.push(`estimated: ${estimated.join(', ')}`)
+  // Whole phrases, not a list assembled from translated words: "measured" governs what
+  // follows it, and the two shapes this line can take are worth two keys.
+  const parts = [hasQuota ? t('measured: quota, tokens') : t('measured: tokens')]
+  if (ctx.cfg.showCost) parts.push(t('estimated: ~API cost'))
   return `_${parts.join(' · ')}_`
 }
 
@@ -797,21 +825,21 @@ function explanations(ctx: RenderContext, opts: { quota: boolean; codex: boolean
   const out: string[] = []
   if (opts.quota) {
     out.push('')
-    out.push('_“Elapsed” is how much of the window’s own time has passed. Usage above it means you are ahead of the clock; the verdict names the difference in percent of the window._')
+    out.push(`_${t('“Elapsed” is how much of the window’s own time has passed. Usage above it means you are ahead of the clock; the verdict names the difference in percent of the window.')}_`)
     out.push('')
-    out.push('_The percentage comes from the provider and covers **all** clients (desktop app and browser included). It cannot be derived from the token counts below._')
+    out.push(`_${t('The percentage comes from the provider and covers **all** clients (desktop app and browser included). It cannot be derived from the token counts below.')}_`)
   }
   out.push('')
-  out.push('_“Usage” is fresh input + cache write + output; cache reads are listed separately because they outweigh everything else by orders of magnitude._')
+  out.push(`_${t('“Usage” is fresh input + cache write + output; cache reads are listed separately because they outweigh everything else by orders of magnitude.')}_`)
   if (opts.codex) {
     out.push('')
-    out.push('_For Codex, “Req.” counts `token_count` events — a single turn can produce several, so it is not a message count._')
+    out.push(`_${t('For Codex, “Req.” counts `token_count` events — a single turn can produce several, so it is not a message count.')}_`)
   }
   if (ctx.cfg.showCost) {
     out.push('')
-    out.push(isCustomPricing(ctx.pricing)
-      ? '_API cost is hypothetical and computed **at your configured rates**: what this usage would have cost through the API. On a subscription you do not pay it._'
-      : '_API cost is hypothetical: what this usage would have cost through the provider’s API at list prices. On a subscription you do not pay it._')
+    out.push(`_${isCustomPricing(ctx.pricing)
+      ? t('API cost is hypothetical and computed **at your configured rates**: what this usage would have cost through the API. On a subscription you do not pay it.')
+      : t('API cost is hypothetical: what this usage would have cost through the provider’s API at list prices. On a subscription you do not pay it.')}_`)
   }
   return out
 }
@@ -826,8 +854,9 @@ const COMPACT_MAX_ROWS = 4
 function quotaBlock(q: QuotaState, ctx: RenderContext, compactMode: boolean): string[] {
   const { cfg, now, tcfg } = ctx
   const out: string[] = [titleLine(q, cfg), '']
-  const header = cfg.percentMode === 'remaining' ? 'Remaining' : 'Used'
-  out.push(`| Window | ${header} | Elapsed | Pace | Resets |`)
+  out.push(cfg.percentMode === 'remaining'
+    ? t('| Window | Remaining | Elapsed | Pace | Resets |')
+    : t('| Window | Used | Elapsed | Pace | Resets |'))
   out.push('|---|---|---|---|---|')
   const windows = compactMode ? q.windows.slice(0, COMPACT_MAX_ROWS) : q.windows
   for (const w of windows) out.push(windowRow(viewOf(q, w, cfg, now), cfg, now, tcfg))
@@ -857,11 +886,11 @@ function quotaBlock(q: QuotaState, ctx: RenderContext, compactMode: boolean): st
   if (extra !== null) {
     out.push('')
     // Purchased usage is a separate pot and is never folded into the plan windows.
-    out.push(`Extra usage: ${q.extra?.enabled ? `**${extra}**` : extra}`)
+    out.push(t('Extra usage: {0}', q.extra?.enabled ? `**${extra}**` : extra))
   }
   if (q.partial === true) {
     out.push('')
-    out.push('$(warning) partial data: only some sources answered.')
+    out.push(`$(warning) ${t('partial data: only some sources answered.')}`)
   }
   return out
 }
@@ -880,11 +909,11 @@ export function quotaTooltip(q: QuotaState, ctx: RenderContext): string {
   }
   if (ctx.role === 'follower') {
     out.push('')
-    out.push(`_${FOLLOWER_NOTE}_`)
+    out.push(`_${followerNote()}_`)
   }
   if (ctx.scanning) {
     out.push('')
-    out.push(`_${SCANNING_NOTE}_`)
+    out.push(`_${scanningNote()}_`)
   }
   out.push('')
   out.push(...usageTable(q.source, ctx))
@@ -911,7 +940,7 @@ export function summaryTooltip(sources: Source[], ctx: RenderContext): string {
       out.push(freshnessLine(q, cfg, ctx.now))
     } else {
       const p = problemView(q, cfg, ctx.now)
-      out.push(`**${TITLE[q.source]} — quota unavailable**`)
+      out.push(`**${t('{0} — quota unavailable', TITLE[q.source])}**`)
       out.push('')
       out.push(p.explain)
     }
@@ -943,19 +972,22 @@ function tokenBody(ctx: RenderContext): string[] {
 export function tokenTooltip(ctx: RenderContext, what: 'tokens' | 'cost'): string {
   const { cfg } = ctx
   if (cfg.tooltip === 'off') return ''
-  const period = PERIOD_LABEL[cfg.summary.period]
-  const head = what === 'tokens' ? `**Tokens — ${period}**` : `**API cost — ${period}** (hypothetical)`
+  const period = periodLabel(cfg.summary.period)
+  const head = what === 'tokens'
+    ? `**${t('Tokens — {0}', period)}**`
+    : `**${t('API cost — {0}', period)}** ${t('(hypothetical)')}`
   const out: string[] = [head]
   if (ctx.scanning) {
     out.push('')
-    out.push(`_${SCANNING_NOTE}_`)
+    out.push(`_${scanningNote()}_`)
   }
   if (cfg.tooltip === 'compact') {
     const { from, to } = periodRange(ctx)
     for (const s of scopeSources(cfg)) {
       const b = ctx.agg.sum(from, to, ctx.tcfg, { source: s })
       out.push('')
-      out.push(`${TITLE[s]}: ${tokenText(billable(b))} usage · ${tokenText(b.output)} output · ${compact(b.requests)} req.`)
+      out.push(t('{0}: {1} usage · {2} output · {3} req.',
+        TITLE[s], tokenText(billable(b)), tokenText(b.output), compact(b.requests)))
     }
     out.push('')
     out.push(footerLine(ctx))
@@ -965,7 +997,7 @@ export function tokenTooltip(ctx: RenderContext, what: 'tokens' | 'cost'): strin
   out.push(...tokenBody(ctx))
   if (ctx.role === 'follower') {
     out.push('')
-    out.push(`_${FOLLOWER_NOTE}_`)
+    out.push(`_${followerNote()}_`)
   }
   out.push('')
   out.push(provenanceLine(ctx, false))
@@ -1004,23 +1036,23 @@ function contextAgeSuffix(c: ContextReading, cfg: Config, now: number): string {
 export function contextTooltip(c: ContextReading, ctx: RenderContext): string {
   const { cfg } = ctx
   if (cfg.tooltip === 'off') return ''
-  const out: string[] = ['**Context window**', '']
+  const out: string[] = [`**${t('Context window')}**`, '']
   out.push(c.size === null
-    ? `${full(c.used)} tokens in the conversation`
-    : `${full(c.used)} of ${full(c.size)} tokens`
+    ? t('{0} tokens in the conversation', full(c.used))
+    : t('{0} of {1} tokens', full(c.used), full(c.size))
       + (finite(c.usedPct) ? ` · ${Math.round(c.usedPct as number)} %` : ''))
   out.push('')
   // The whole reason this item is safe to show: it is one conversation, not the account, and
   // it is a mirrored reading rather than something we counted.
-  out.push(`_This is the ${CONTEXT_NOTE} — not an account figure, and not comparable to a quota window._`)
+  out.push(`_${t('This is the {0} — not an account figure, and not comparable to a quota window.', CONTEXT_NOTE)}_`)
   const age = ageText(c.fetchedAt, ctx.now)
   if (age !== null) {
     out.push('')
-    out.push(`Status line updated ${age}.`)
+    out.push(t('Status line updated {0}.', age))
   }
   if (cfg.tooltip !== 'compact') {
     out.push('')
-    out.push('_measured: context window_')
+    out.push(`_${t('measured: context window')}_`)
   }
   out.push('')
   out.push(footerLine(ctx))
@@ -1053,22 +1085,21 @@ export function budgetValue(b: BudgetRow): string {
 export function budgetTooltip(rows: BudgetRow[], ctx: RenderContext): string {
   const { cfg } = ctx
   if (cfg.tooltip === 'off') return ''
-  const out: string[] = ['**Budgets**', '']
+  const out: string[] = [`**${t('Budgets')}**`, '']
   for (const b of rows) {
     out.push(`- ${b.text}${b.partial ? ' ⚠' : ''}`)
   }
   out.push('')
   // Two sentences that have to travel with the number: where the limit came from, and what
   // a dollar figure here is not.
-  out.push('_Your own limits from `tokenPace.budgets`, measured against the locally counted'
-    + ' usage. USD is the hypothetical API equivalent, not a bill._')
+  out.push(`_${t('Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.')}_`)
   if (rows.some((b) => b.partial)) {
     out.push('')
-    out.push('_⚠ Unpriced models make the spend — and the share — a lower bound._')
+    out.push(`_⚠ ${t('Unpriced models make the spend — and the share — a lower bound.')}_`)
   }
   if (cfg.tooltip !== 'compact') {
     out.push('')
-    out.push('_measured: local buckets · limit: your own_')
+    out.push(`_${t('measured: local buckets · limit: your own')}_`)
   }
   out.push('')
   out.push(footerLine(ctx))
@@ -1079,18 +1110,20 @@ export function problemTooltip(q: QuotaState, ctx: RenderContext): string {
   const { cfg } = ctx
   if (cfg.tooltip === 'off') return ''
   const p = problemView(q, cfg, ctx.now)
-  const out: string[] = [`**${TITLE[q.source]} — quota unavailable**`, '', p.explain, '', `_${p.check}_`]
+  const out: string[] = [
+    `**${t('{0} — quota unavailable', TITLE[q.source])}**`, '', p.explain, '', `_${p.check}_`,
+  ]
   if (q.problem) {
     out.push('')
-    out.push(`Reported: \`${q.problem}\``)
+    out.push(t('Reported: {0}', `\`${q.problem}\``))
   }
   if (q.fetchedAt !== null) {
     out.push('')
-    out.push(`Last reading: ${freshnessLine(q, cfg, ctx.now)}`)
+    out.push(t('Last reading: {0}', freshnessLine(q, cfg, ctx.now)))
   }
   if (ctx.role === 'follower') {
     out.push('')
-    out.push(`_${FOLLOWER_NOTE}_`)
+    out.push(`_${followerNote()}_`)
   }
   if (cfg.tooltip !== 'compact') {
     out.push('')
@@ -1153,7 +1186,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         tooltipMarkdown: problemTooltip(spec.q, ctx),
         command: p.command,
         commandArgs: p.args,
-        name: `${TITLE[spec.q.source]} — quota unavailable`,
+        name: t('{0} — quota unavailable', TITLE[spec.q.source]),
         priorityKey: '1000',
       }
     }
@@ -1163,13 +1196,13 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       const click = clickCommand(cfg, spec.q.source)
       return {
         id: `tokenPace.extra.${spec.q.source}`,
-        text: `${providerLabel(spec.q.source, cfg)} extra ${text}`,
+        text: t('{0} extra {1}', providerLabel(spec.q.source, cfg), text),
         colorId: cfg.colorMode === 'theme' ? (on ? EXTRA_COLOR : STALE_COLOR) : null,
         alarm: false,
         tooltipMarkdown: quotaTooltip(spec.q, ctx),
         command: click.command,
         commandArgs: click.args,
-        name: `${TITLE[spec.q.source]} — extra usage`,
+        name: t('{0} — extra usage', TITLE[spec.q.source]),
         priorityKey: '1000',
       }
     }
@@ -1183,7 +1216,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         tooltipMarkdown: quotaTooltip(spec.q, ctx),
         command: click.command,
         commandArgs: click.args,
-        name: `${TITLE[spec.q.source]} — forecast`,
+        name: t('{0} — forecast', TITLE[spec.q.source]),
         priorityKey: '1000',
       }
     }
@@ -1209,7 +1242,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         tooltipMarkdown: quotaTooltip(spec.q, ctx),
         command: click.command,
         commandArgs: click.args,
-        name: `${TITLE[spec.q.source]} — quota`,
+        name: t('{0} — quota', TITLE[spec.q.source]),
         priorityKey: '1000',
       }
     }
@@ -1234,7 +1267,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         tooltipMarkdown: summaryTooltip(spec.sources, ctx),
         command: click.command,
         commandArgs: click.args,
-        name: 'Token Pace — usage',
+        name: t('Token Pace — usage'),
         priorityKey: '1000',
       }
     }
@@ -1242,13 +1275,13 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       const click = clickCommand(cfg, null)
       return {
         id: 'tokenPace.context',
-        text: `ctx ${contextValue(spec.c)}${contextAgeSuffix(spec.c, cfg, now)}`,
+        text: `${t('ctx {0}', contextValue(spec.c))}${contextAgeSuffix(spec.c, cfg, now)}`,
         colorId: null,
         alarm: false,
         tooltipMarkdown: contextTooltip(spec.c, ctx),
         command: click.command,
         commandArgs: click.args,
-        name: 'Token Pace — context window',
+        name: t('Token Pace — context window'),
         priorityKey: '1000',
       }
     }
@@ -1259,13 +1292,15 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         // No colour and no alarm: a budget is the reader's own number, and painting the bar
         // red for it would put a provider's vocabulary on a private decision. The share and
         // the word "over" are the whole statement.
-        text: `budget ${budgetValue(spec.b)}${spec.b.over ? ' over' : ''}`,
+        text: spec.b.over
+          ? t('budget {0} over', budgetValue(spec.b))
+          : t('budget {0}', budgetValue(spec.b)),
         colorId: null,
         alarm: false,
         tooltipMarkdown: budgetTooltip(ctx.budgets ?? [spec.b], ctx),
         command: click.command,
         commandArgs: click.args,
-        name: 'Token Pace — budget',
+        name: t('Token Pace — budget'),
         priorityKey: '1000',
       }
     }
@@ -1279,13 +1314,13 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       const click = clickCommand(cfg, null)
       return {
         id: 'tokenPace.tokens',
-        text: ctx.scanning ? '$(sync~spin) reading history …' : `Σ ${tokenText(total)}${suffix}`,
+        text: ctx.scanning ? `$(sync~spin) ${t('reading history …')}` : `Σ ${tokenText(total)}${suffix}`,
         colorId: null,
         alarm: false,
         tooltipMarkdown: tokenTooltip(ctx, 'tokens'),
         command: click.command,
         commandArgs: click.args,
-        name: `Token Pace — tokens (${PERIOD_LABEL[cfg.summary.period]})`,
+        name: t('Token Pace — tokens ({0})', periodLabel(cfg.summary.period)),
         priorityKey: '1000',
       }
     }
@@ -1312,7 +1347,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         tooltipMarkdown: tokenTooltip(ctx, 'cost'),
         command: click.command,
         commandArgs: click.args,
-        name: `Token Pace — API cost (${PERIOD_LABEL[cfg.summary.period]})`,
+        name: t('Token Pace — API cost ({0})', periodLabel(cfg.summary.period)),
         priorityKey: '1000',
       }
     }
@@ -1338,14 +1373,15 @@ function forecastItemText(q: QuotaState, ctx: RenderContext): string | null {
   }
   if (best === null) return null
   const { f, w } = best
+  const label = windowLabel(w, ctx.cfg)
   if (f.state === 'eta' && finite(f.etaMs)) {
-    return `$(graph) ${windowLabel(w, ctx.cfg)} ~empty in ${relativeShort(f.etaMs as number, ctx.now)}`
+    return `$(graph) ${t('{0} ~empty in {1}', label, relativeShort(f.etaMs as number, ctx.now))}`
   }
   if (f.state === 'resetsFirst' && finite(f.endPercent)) {
-    return `$(graph) ${windowLabel(w, ctx.cfg)} ~ends at ${Math.round(f.endPercent as number)}%`
+    return `$(graph) ${t('{0} ~ends at {1}%', label, Math.round(f.endPercent as number))}`
   }
-  if (f.state === 'idle') return `$(graph) ${windowLabel(w, ctx.cfg)} idle`
-  if (f.state === 'measuring') return `$(graph) ${windowLabel(w, ctx.cfg)} measuring`
+  if (f.state === 'idle') return `$(graph) ${t('{0} idle', label)}`
+  if (f.state === 'measuring') return `$(graph) ${t('{0} measuring', label)}`
   return null
 }
 
@@ -1445,7 +1481,10 @@ export function buildItems(input: StatusTextInput): ItemModel[] {
 // Preview
 // ---------------------------------------------------------------------------
 
-const PREVIEW_MARK = '[preview]'
+/** The mark every preview item carries; a function, so it is translated at render time. */
+function previewMark(): string {
+  return t('[preview]')
+}
 
 function previewWindow(p: Partial<QuotaWindow>): QuotaWindow {
   return {
@@ -1490,15 +1529,16 @@ const PREVIEW_KINDS: ProblemKind[] = [
  */
 /** A synthetic budget row; the preview never reads a setting or a bucket. */
 function previewBudget(share: number, over: boolean): BudgetRow {
+  const label = t('All providers · this month')
   return {
-    key: 'total:month:usd', identity: 'preview', label: 'All providers · this month',
+    key: 'total:month:usd', identity: 'preview', label,
     scope: 'total', period: 'month', unit: 'usd',
     from: '2026-09-01', to: '2026-09-12', last: '2026-09-30',
     limit: 200, limitText: '$200', used: share * 2, usedText: `~$${share * 2}`,
     share, shareText: `${share} %`, over, partial: false, covered: true,
     projected: null, projectedText: null, projectionBasis: null, projectedOver: false,
     unmeasurable: null,
-    text: `All providers · this month: ~$${share * 2} of $200 · ${share} %`,
+    text: t('{0}: {1} of {2} · {3} %', label, `~$${share * 2}`, '$200', share),
   }
 }
 
@@ -1575,11 +1615,12 @@ export function previewItems(cfg: Config, now: number): ItemModel[] {
   push({ kind: 'cost' })
 
   // Own id space, own label, one command: clicking any of them ends the preview.
+  const mark = previewMark()
   return out.map((m, i) => ({
     ...m,
     id: `tokenPace.preview.${i}`,
-    text: `${PREVIEW_MARK} ${m.text}`,
-    name: `${PREVIEW_MARK} ${m.name}`,
+    text: `${mark} ${m.text}`,
+    name: `${mark} ${m.name}`,
     command: 'tokenPace.previewStatusBar',
     commandArgs: undefined,
     priorityKey: String(1000 - i),

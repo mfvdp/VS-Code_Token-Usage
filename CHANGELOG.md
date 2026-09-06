@@ -33,6 +33,13 @@ This project follows [Semantic Versioning](https://semver.org/).
   `not ok` line with its diagnostic block, so a red run can be read without opening the log.
   Dependabot watches npm and the workflow actions weekly.
 
+* **Token Pace speaks German.** When VS Code's display language is German, the dashboard, the
+  status bar and its tooltip, the Quick Pick, the markdown report, the dialogs and the
+  notifications are German too — 789 strings, with numbers and dates formatted for the
+  language. English stays the source; the German lives in `l10n/` and ships in the package.
+  Debug log lines, the diagnostics copy and CSV/JSON headers stay English on purpose, because
+  they are pasted into issues.
+
 ### Changed
 
 * **The store page is short again.** The README — which is the overview on the Marketplace and

@@ -13,9 +13,10 @@ import { Cursor } from './types'
  * which would otherwise silently undercount.
  *
  * A file whose size and mtime are exactly what the last pass recorded is not
- * opened at all: on a sweep over thousands of finished transcripts this is the
- * difference between one stat and one open+read each. The rotation check runs
- * first, because a replaced file can have the same size and an older mtime.
+ * read: on a sweep over thousands of finished transcripts that is the difference
+ * between a stat on the open handle and a read of the whole tail. The rotation
+ * check runs first, because a replaced file can have the same size and an older
+ * mtime.
  *
  * @param onRestart called before the first line whenever the file is re-read from the
  *   start, so derived per-file state (Codex baselines) is reset before it can taint a line
@@ -28,17 +29,12 @@ export async function readNewLines(
   maxBytes = 256 * 1024 * 1024,
   onRestart?: () => void,
 ): Promise<boolean> {
-  // A prefilter and nothing more: a file whose size, mtime and identity are exactly what the
-  // last pass recorded is skipped without being opened. Every figure the read itself relies
-  // on is taken from the open handle below, so the file may change between the two calls
-  // without the read ever running past its end or against the wrong file.
-  let pre: fs.Stats
-  try { pre = await fs.promises.stat(file) } catch { return false }
-  const same = pre.ino === cur.ino && pre.dev === cur.dev && pre.size >= cur.offset
-  if (same && pre.size === cur.size && pre.mtimeMs === cur.mtime) return false
-
+  // Open first, ask afterwards: every figure below — identity, size, mtime — comes from the
+  // handle that is read, so nothing can change between a check and the read it guards. An
+  // unchanged file costs an open and a stat instead of a stat alone; on a sweep over a
+  // thousand finished transcripts that is a few milliseconds of kernel time per pass.
   let fh: fs.promises.FileHandle
-  try { fh = await fs.promises.open(file, 'r') } catch { return false } // lgtm[js/file-system-race]
+  try { fh = await fs.promises.open(file, 'r') } catch { return false }
   let restarted = false
   try {
     const st = await fh.stat()

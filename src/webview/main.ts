@@ -1434,12 +1434,34 @@ const RENDER = new Map<string, () => string>([
   ['history', sHistory], ['projects', sProjects], ['sessions', sSessions], ['dataQuality', sDataQuality],
 ]);
 /**
- * The renderer for a section key, or null. A Map lookup, not a property access: a key from
- * the payload must never pick anything but one of the sections above, and a plain object
- * would answer 'constructor' with a function.
+ * The renderer for a section key, or null. Chosen by comparing the key with each literal, not
+ * by looking it up: a key from the payload never selects a function by name, so there is no
+ * name it could pick that is not one of the sections above.
  */
 function renderer(key: string): (() => string) | null {
-  return RENDER.get(key) ?? null;
+  switch (key) {
+    case 'notices': return sNotices;
+    case 'controls': return sControls;
+    case 'footer': return sFooter;
+    case 'drill': return sDrill;
+    case 'summary': return sSummary;
+    case 'quota': return sQuota;
+    case 'context': return sContext;
+    case 'kpis': return sKpis;
+    case 'tokens': return sTokens;
+    case 'chart': return sChart;
+    case 'models': return sModels;
+    case 'heatmap': return sHeatmap;
+    case 'hours': return sHours;
+    case 'records': return sRecords;
+    case 'tools': return sTools;
+    case 'budget': return sBudget;
+    case 'history': return sHistory;
+    case 'projects': return sProjects;
+    case 'sessions': return sSessions;
+    case 'dataQuality': return sDataQuality;
+    default: return null;
+  }
 }
 /** A section's heading. A key this build does not know heads its section with itself. */
 function titleOf(key: string): string {

@@ -22,6 +22,10 @@ updates:
     ignore:
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
+      # The VS Code types are pinned to `engines.vscode`: a newer types package would let the
+      # code call APIs the oldest supported VS Code does not have, and vsce refuses to package
+      # types that are newer than the engine. Both move together, by hand, in a release.
+      - dependency-name: '@types/vscode'
       - dependency-name: 'typescript'
         update-types: ['version-update:semver-major']
 

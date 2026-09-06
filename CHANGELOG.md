@@ -35,6 +35,20 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+* **The store page is short again.** The README — which is the overview on the Marketplace and
+  on Open VSX — now says what the extension is, shows the three pictures, lists what you see,
+  how to install it and what it does with your data, and links to the documentation. Every
+  chapter moved, word for word, to a page under `docs/`: where the numbers come from, the status
+  bar, the dashboard, quota sources, cost, counting, history, budgets and alerts, sessions,
+  export, troubleshooting, privacy, Windows and remote development, settings, commands and
+  building. The pages ship in the package, so the links also work in the Extensions view; a new
+  `docs/release.md` records the release recipe, the two store secrets and the publisher
+  verification.
+* **Under the hood: the dashboard script is a TypeScript module.** The webview's script used
+  to be a template string inside the renderer, invisible to the type checker; it is now
+  `src/webview/main.ts`, checked against the DOM types, built by esbuild and inlined at build
+  time. The rendered page is unchanged.
+
 * **Ahead of pace is yellow at once.** The tolerance band that kept a card green while it was up
   to five points ahead of pace is gone: `tokenPace.pace.tolerancePoints` now defaults to 0 and
   applies with every sensitivity, so a window that says "1 % ahead of pace" is yellow and one

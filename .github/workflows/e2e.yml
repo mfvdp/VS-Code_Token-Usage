@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 Frederik Marx
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The extension-host smoke test: a real VS Code, this extension in development mode, five
+# checks a fake host cannot answer (test-e2e/suite/index.ts). It is a job of its own so the
+# unit matrix stays fast — this one downloads an editor and starts a window.
+
+name: E2E
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: extension host smoke test
+    runs-on: ubuntu-latest
+    # A window that never comes up has to fail the job, not hold a runner for six hours.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Downloading the editor is the only step that needs the network; a cached copy also
+      # keeps an outage on Microsoft's side from failing a run that has nothing to do with it.
+      # A stale entry is harmless: the downloader checks the version and fetches a newer one.
+      - name: Cache the downloaded VS Code
+        uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: vscode-test-${{ runner.os }}-
+
+      # The GitHub runner image ships xvfb; the guard is for images that do not.
+      - name: Ensure xvfb
+        run: command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+
+      # `npm run test:e2e` builds the bundles and the suite itself, so there is no separate
+      # build step here: what the window loads is what this commit produces.
+      - name: Smoke test
+        run: xvfb-run -a npm run test:e2e

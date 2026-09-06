@@ -6,3 +6,8 @@ out-test/
 
 # Worktrees the orchestration tool creates for parallel agents
 .claude/worktrees/
+
+# The extension-host smoke test: the VS Code it downloads, and the suite build.mjs builds
+# beside its source (--extensionTestsPath needs plain JavaScript).
+.vscode-test/
+test-e2e/suite/index.js

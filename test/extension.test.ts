@@ -30,6 +30,8 @@ import {
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
 } from './helpers/fakeVscode'
+// Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`.
+import type { TokenPaceApi } from '../src/extension'
 import { BRIDGE_BLOCKS_DELETE } from '../src/storage'
 import { STATE_VERSION } from '../src/types'
 
@@ -186,7 +188,7 @@ function settingsOf(fx: Fixture): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 interface Extension {
-  activate(context: unknown): Promise<void>
+  activate(context: unknown): Promise<TokenPaceApi>
   deactivate(): void
 }
 
@@ -194,6 +196,8 @@ interface Host {
   ctx: FakeExtensionContext
   state: FakeVscodeState
   ext: Extension
+  /** What `activate()` resolved with — the extension-host smoke test reads the bar through it. */
+  api: TokenPaceApi
   elapsedMs: number
 }
 
@@ -245,8 +249,8 @@ async function activateHost(
   const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState })
   LIVE.push(ctx)
   const started = Date.now()
-  await ext.activate(ctx)
-  return { ctx, state, ext, elapsedMs: Date.now() - started }
+  const api = await ext.activate(ctx)
+  return { ctx, state, ext, api, elapsedMs: Date.now() - started }
 }
 
 /** Disposal is asserted per test; this only stops a *failing* test from hanging the run. */
@@ -791,5 +795,44 @@ test('a stored chart stack from an older build is ignored, and the rest of the s
   const restored = second.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
   assert.equal('chartStack' in (restored as Record<string, unknown>), false)
   assert.equal(restored?.compositionCache, 'all')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('activate() returns the API the extension-host smoke test reads the bar through', async () => {
+  // `test-e2e/` asserts a *real* settings round-trip through this return value, so what it
+  // reports has to be exactly what the bar shows — otherwise the smoke test could pass over
+  // a window that renders nothing. Here that is checkable: the fake host records every item.
+  const host = await activateHost(makeFixture(), REPO, {
+    settings: { 'tokenPace.summary.period': 'today' },
+  })
+  const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as { version: string }
+  assert.equal(host.api.version, manifest.version)
+
+  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  // Every id on the bar, with the bar's own text. The comparison goes by id rather than by
+  // position: `state.live()` records items in creation order, and an activation of an earlier
+  // test in this process can still be ticking into the same recording.
+  const items = host.api.statusBar()
+  assert.deepEqual(
+    items.map((i) => i.id).sort(),
+    [...new Set(state.live().map((i) => i.id))].sort(),
+  )
+  for (const item of items) assert.equal(item.text, state.textOf(item.id))
+
+  // The same live seam the smoke test watches, one layer lower: the API has to follow a
+  // settings change without a reload, because that is the only way the e2e check can see one.
+  const before = state.textOf(TOKENS_ITEM)
+  state.set('tokenPace.summary.period', '7d')
+  state.fireConfigChange(['tokenPace.summary.period'])
+  await waitFor('the period to change', () => String(state.textOf(TOKENS_ITEM) ?? '').endsWith('· 7d'))
+  const after = host.api.statusBar().find((i) => i.id === TOKENS_ITEM)?.text
+  assert.notEqual(after, before)
+  assert.equal(after, state.textOf(TOKENS_ITEM))
+
+  // Nothing but ids and texts: no tooltip, no command, nothing a transcript could reach.
+  for (const item of host.api.statusBar()) {
+    assert.deepEqual(Object.keys(item).sort(), ['id', 'text'])
+  }
+
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })

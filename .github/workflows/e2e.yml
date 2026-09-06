@@ -39,7 +39,7 @@ jobs:
       # keeps an outage on Microsoft's side from failing a run that has nothing to do with it.
       # A stale entry is harmless: the downloader checks the version and fetches a newer one.
       - name: Cache the downloaded VS Code
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .vscode-test
           key: vscode-test-${{ runner.os }}-${{ hashFiles('package-lock.json') }}

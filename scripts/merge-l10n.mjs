@@ -107,7 +107,8 @@ function main(argv) {
   for (const [lang, bundle] of Object.entries(bundles)) {
     const file = bundlePath(lang)
     const text = serialize(bundle)
-    const current = existsSync(file) ? readFileSync(file, 'utf8') : null
+    let current = null
+    try { current = readFileSync(file, 'utf8') } catch { /* not written yet */ }
     if (current === text) {
       console.log(`merge-l10n: ${file} is up to date (${Object.keys(bundle).length} key(s))`)
       continue

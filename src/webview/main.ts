@@ -45,7 +45,7 @@ let showDates = false;
 /** The day the drill panel was last scrolled to, so a refresh of the same day stays put. */
 let shownDrill: string | null = null;
 const esc = (s: unknown): string => String(s === null || s === undefined ? '' : s)
-  .replace(/[&<>"]/g, c => (({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as Record<string, string>)[c]));
+  .replace(/[&<>"']/g, c => (({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'} as Record<string, string>)[c]));
 const post = (m: unknown): void => vscode.postMessage(m);
 
 /**
@@ -81,15 +81,20 @@ function pct(v: unknown): number { return Math.max(0, Math.min(100, Number(v) ||
  */
 function bar(percent: number, cls: string, elapsed: number | null | undefined,
              forecastEnd: number | null | undefined, aria: Payload, gap?: boolean): string {
+  // Every value from the payload is escaped or coerced before it becomes markup — the class
+  // and the aria numbers included, however enum-like they look in the view model.
+  const c = esc(cls);
+  const max = aria && Number.isFinite(Number(aria.max)) ? Number(aria.max) : 100;
+  const now = aria && Number.isFinite(Number(aria.now)) ? Math.round(Number(aria.now)) : Math.round(percent);
   let h = '<div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="'
-    + (aria ? aria.max : 100) + '" aria-valuenow="' + (aria ? aria.now : Math.round(percent))
+    + max + '" aria-valuenow="' + now
     + '" aria-valuetext="' + esc(aria ? aria.text : '') + '">'
-    + '<div class="fill ' + cls + '" data-w="' + pct(percent).toFixed(2) + '"></div>';
+    + '<div class="fill ' + c + '" data-w="' + pct(percent).toFixed(2) + '"></div>';
   const clock = elapsed !== null && elapsed !== undefined;
   if (clock && gap) {
     const p = pct(percent), e = pct(elapsed);
     if (p > e) {
-      h += '<span class="fill over ' + cls + '" data-x="' + e.toFixed(2) + '" data-w="'
+      h += '<span class="fill over ' + c + '" data-x="' + e.toFixed(2) + '" data-w="'
         + (p - e).toFixed(2) + '" title="' + tr('used beyond the elapsed share') + '"></span>';
     } else if (e > p) {
       h += '<span class="slack" data-x="' + p.toFixed(2) + '" data-w="' + (e - p).toFixed(2)
@@ -384,7 +389,7 @@ function controls(): string {
   // reader cannot see is a range they cannot leave.
   const presets = r.presets.filter((p: Payload) => allRanges || RANGE_CHIPS.indexOf(p) >= 0 || r.preset === p);
   const restRanges = r.presets.length - presets.length;
-  const chips = presets.map((p: Payload) => '<button data-act="range" data-preset="' + p + '" aria-pressed="'
+  const chips = presets.map((p: Payload) => '<button data-act="range" data-preset="' + esc(p) + '" aria-pressed="'
     + (r.preset === p) + '">' + presetLabel(p) + '</button>').join('');
   const providers = SRC_IDS.map(s => '<button data-act="provider" data-src="' + s
     + '" aria-pressed="' + (vm.ui.providers.indexOf(s) >= 0) + '">' + esc(srcName(s))
@@ -822,7 +827,7 @@ function compositionBar(c: Payload): string {
   // add up to its own width, which is why the caption below states what is missing.
   const total = parts.reduce((s: Payload, p: Payload) => s + p.tokens, 0);
   if (!total) return '';
-  const cls = (p: Payload) => PART_CLASS[p.key] || 'c6';
+  const cls = (p: Payload) => word(PART_CLASS, p.key) || 'c6';
   const segs = parts.map((p: Payload) => '<i class="cs ' + cls(p) + '" data-w="'
     + ((p.tokens / total) * 100).toFixed(2) + '" title="' + esc(p.text) + ': '
     + fullNum(p.tokens) + ' · ' + Math.round((p.tokens / total) * 100) + ' %"></i>').join('');
@@ -882,7 +887,7 @@ function sTokens(): string {
       + esc(p.usage) + '</td>'
       + (vm.showCost ? '<td data-h="' + w.cost + '">' + esc(p.cost) + '</td>' : '')
       + '<td data-h="' + w.requests + '">' + esc(p.requests) + '</td><td data-h="' + active + '">'
-      + p.activeDays
+      + esc(p.activeDays)
       + '</td><td data-h="' + perDay + '">' + esc(p.avgPerDay) + '</td></tr>').join('')
     + '</tbody></table></div>';
   if (cal.thisMonth.projection) {
@@ -902,7 +907,8 @@ function sTokens(): string {
  */
 function bandStyle(source: string, rank: number, style: string): string {
   const st = style === 'shade' || style === 'both' ? style : 'pattern';
-  return 'band s-' + source + '-' + rank + ' hue-' + source + ' r' + rank + ' st-' + st;
+  const s = esc(source), r = esc(rank);
+  return 'band s-' + s + '-' + r + ' hue-' + s + ' r' + r + ' st-' + st;
 }
 
 /** The legend's key for the cost line: the halo, the line and one dot, at swatch size. */
@@ -932,8 +938,11 @@ function sChart(): string {
       + metricLabel(m) + '</option>').join('') + '</select>';
   const totals = c.days.map((_: Payload, i: Payload) => c.series.reduce((s: Payload, x: Payload) => s + x.values[i], 0));
   // A provider's column total, summed from the same bands the column is drawn from.
-  const subtotals: Record<string, number[]> = {};
+  // Keyed by provider id only: a payload names the provider, and a name that is not one of
+  // ours is not a key (nor, on an object without a prototype, could it ever reach one).
+  const subtotals: Record<string, number[]> = Object.create(null);
   c.series.forEach((s: Payload) => {
+    if (SRC_IDS.indexOf(s.source) < 0) return;
     const sub = subtotals[s.source] || (subtotals[s.source] = c.days.map(() => 0));
     s.values.forEach((v: Payload, i: Payload) => { sub[i] += v; });
   });
@@ -951,9 +960,9 @@ function sChart(): string {
       const name = esc(srcName(s.source));
       const title = c.weekly
         ? tr('{0} · {1} · {2} · {3} % of the week · {1} total {4}',
-             esc(s.label), name, fullNum(v), share, fullNum(subtotals[s.source][i]))
+             esc(s.label), name, fullNum(v), share, fullNum((subtotals[s.source] || [])[i] || 0))
         : tr('{0} · {1} · {2} · {3} % of the day · {1} total {4}',
-             esc(s.label), name, fullNum(v), share, fullNum(subtotals[s.source][i]));
+             esc(s.label), name, fullNum(v), share, fullNum((subtotals[s.source] || [])[i] || 0));
       return '<div class="seg ' + bandStyle(s.source, s.rank, c.modelStyle) + '" data-bh="'
         + ((v / c.max) * 100).toFixed(2)
         + '" title="' + title
@@ -1083,7 +1092,7 @@ function sModels(): string {
         + '</td></tr>' : '')).join('');
   const more = m.hidden > 0
     ? '<tr class="more"><td colspan="99">'
-      + tr('{0} more — set tokenPace.dashboard.modelRows', m.hidden) + '</td></tr>' : '';
+      + tr('{0} more — set tokenPace.dashboard.modelRows', esc(m.hidden)) + '</td></tr>' : '';
   return '<div class="scroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + rows + more
     + '</tbody></table></div>';
 }
@@ -1091,12 +1100,12 @@ function sModels(): string {
 function sHeatmap(): string {
   const h = vm.heatmap;
   const cells = h.weeks.map((w: Payload) => w.days.map((d: Payload) => '<i class="'
-    + (d.level === null ? 'out' : 'l' + d.level) + '" title="' + esc(d.text) + '"></i>').join('')).join('');
+    + (d.level === null ? 'out' : 'l' + esc(d.level)) + '" title="' + esc(d.text) + '"></i>').join('')).join('');
   return '<div class="row"><span class="meta">'
-    + tr('streak {0} · longest {1} · active {2}', h.streak, h.longestStreak, h.activeDays)
+    + tr('streak {0} · longest {1} · active {2}', esc(h.streak), esc(h.longestStreak), esc(h.activeDays))
     + (h.peakDay ? ' · ' + tr('peak {0} ({1})', esc(h.peakDay.day), esc(h.peakDay.text)) : '')
     + (h.variability
-       ? ' · ' + tr('CV {0} · {1} spiky day(s)', esc(h.variability.cv), h.variability.spikyDays)
+       ? ' · ' + tr('CV {0} · {1} spiky day(s)', esc(h.variability.cv), esc(h.variability.spikyDays))
        : '')
     + '</span><span class="wrap">'
     + ['usage', 'cost'].map(m => '<button data-act="heatmapMetric" data-metric="' + m
@@ -1138,15 +1147,15 @@ function sHours(): string {
         : 'l' + Math.max(1, Math.ceil((cell.value / gmax) * 4));
       grid += '<i class="' + lvl + '" title="' + (cell.value === null
         ? tr('no usage in this block')
-        : tr('{0} tokens over {1} day(s)', fullNum(cell.value), cell.samples))
+        : tr('{0} tokens over {1} day(s)', fullNum(cell.value), esc(cell.samples)))
         + '"></i>';
     }
   }
   grid += '</div>';
   return '<div class="row"><span class="meta">'
     + (p.peakHour === null
-       ? tr('no hour data · {0} day(s)', p.days)
-       : tr('peak {0}:00 · {1} day(s)', String(p.peakHour).padStart(2, '0'), p.days))
+       ? tr('no hour data · {0} day(s)', esc(p.days))
+       : tr('peak {0}:00 · {1} day(s)', esc(String(p.peakHour).padStart(2, '0')), esc(p.days)))
     + '</span><span class="wrap">'
     + ['local', 'utc'].map(z => '<button data-act="hourZone" data-zone="' + z + '" aria-pressed="'
       + (p.zone === z) + '">' + zoneLabel(z) + '</button>').join('') + '</span></div>'
@@ -1329,7 +1338,7 @@ function sProjects(): string {
       + '<td data-h="' + w.usage + '">' + esc(p.usage) + '</td><td data-h="' + w.requests + '">'
       + esc(p.requests) + '</td>'
       + '<td data-h="' + w.cacheHit + '">' + esc(p.cacheHit) + '</td><td data-h="' + w.share + '">'
-      + esc(p.share) + '</td><td data-h="' + sessions + '">' + p.sessions + '</td></tr>').join('')
+      + esc(p.share) + '</td><td data-h="' + sessions + '">' + esc(p.sessions) + '</td></tr>').join('')
     + '</tbody></table></div>';
 }
 
@@ -1424,6 +1433,15 @@ const RENDER: Record<string, () => string> = {
   tools: sTools, budget: sBudget,
   history: sHistory, projects: sProjects, sessions: sSessions, dataQuality: sDataQuality,
 };
+/**
+ * The renderer for a section key, or null. An own-property check, not a bare index: a bare
+ * `RENDER[key]` answers 'constructor' with a function, and a key from the payload must never
+ * pick anything but one of the sections above.
+ */
+function renderer(key: string): (() => string) | null {
+  return Object.prototype.hasOwnProperty.call(RENDER, key) && typeof RENDER[key] === 'function'
+    ? RENDER[key] : null;
+}
 /** A section's heading. A key this build does not know heads its section with itself. */
 function titleOf(key: string): string {
   const titles: Record<string, string> = {
@@ -1489,15 +1507,16 @@ function renderAll(): void {
   let controlsPlaced = false;
   const controlsBlock = '<div data-sec="controls" data-body="controls">' + sControls() + '</div>';
   for (const key of vm.sections) {
-    if (!RENDER[key]) continue;
+    const render = renderer(key);
+    if (!render) continue;
     if (!controlsPlaced && RANGE_FREE.indexOf(key) < 0) { h += controlsBlock; controlsPlaced = true; }
     // A native <details>: the fold is the browser's, so it is keyboard reachable and
     // announced as expandable, and the body stays in the document either way — a section
     // update writes into it whether the reader has it open or not.
-    h += '<section data-sec="' + key + '"><details' + (collapsed(key) ? '' : ' open') + '>'
+    h += '<section data-sec="' + esc(key) + '"><details' + (collapsed(key) ? '' : ' open') + '>'
       + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(titleOf(key))
       + '</h2>' + gear(key) + '</summary>'
-      + '<div data-body="' + key + '">' + RENDER[key]() + '</div></details></section>';
+      + '<div data-body="' + esc(key) + '">' + render() + '</div></details></section>';
   }
   if (!controlsPlaced) h += controlsBlock;
   h += '<div data-sec="drill" data-body="drill">' + sDrill() + '</div>';
@@ -1518,7 +1537,8 @@ function renderAll(): void {
  */
 function renderSection(key: string): void {
   const body = document.querySelector('[data-body="' + key + '"]');
-  if (!body || !RENDER[key]) { renderAll(); return; }
+  const render = renderer(key);
+  if (!body || !render) { renderAll(); return; }
   // An explanation open inside this body, and the focus on its block, live in the nodes
   // about to be replaced; both are put back on the nodes that replace them.
   const keep = keepPop(body);
@@ -1526,7 +1546,7 @@ function renderSection(key: string): void {
   // few seconds while the prompt-cache countdown ticks. Dropped here, so nothing holds on to
   // a node that has just left the document.
   if (sparkMark && body.contains && body.contains(sparkMark.svg)) sparkMark = null;
-  body.innerHTML = RENDER[key]();
+  body.innerHTML = render();
   applyStyles();
   restorePop(keep);
   // A day opened from the chart lands a whole page below it. Only on a new day, so a table

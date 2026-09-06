@@ -49,7 +49,9 @@ function dayCount(days: number): string {
 /** A table cell: pipes would split the column, newlines would end the row. */
 function cell(s: string | null | undefined): string {
   if (s === null || s === undefined || s === '') return '–'
-  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+  // The backslash first: it is the escape character, so a value that already carries
+  // one (`a\|b`) would otherwise come out as `a\\|b` — a literal backslash and a live pipe.
+  return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
 }
 
 /**

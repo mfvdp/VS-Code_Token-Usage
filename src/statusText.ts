@@ -15,7 +15,7 @@
 import { LABEL, SOURCES, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
 import { billable, BucketFilter, CostSummary } from './agg'
 import { BudgetRow, worstBudget } from './budget'
-import { Config, contextNote, planNameOf, readPaceConfig, readTimeConfig } from './config'
+import { Config, contextNote, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
 import { t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
@@ -600,6 +600,16 @@ function colorSpan(colorId: string, text: string): string {
   return `<span style="color:var(--vscode-${colorId.replace(/\./g, '-')});">${text}</span>`
 }
 
+/**
+ * A borrowed string — a provider's label, a model name, an error text — inside a code span.
+ * The tooltip is a trusted MarkdownString with HTML enabled, so a value carrying `**`, `|`,
+ * a tag or a backtick would rewrite the markup around it instead of printing; the span
+ * neutralises the first three and `oneLine` removes the backtick that would end the span.
+ */
+function span(s: string): string {
+  return `\`${oneLine(String(s))}\``
+}
+
 function titleLine(q: QuotaState, cfg: Config): string {
   const name = TITLE[q.source]
   const head = cfg.usagePageLinks ? `**[${name}](${USAGE_PAGE[q.source]})**` : `**${name}**`
@@ -612,8 +622,8 @@ function titleLine(q: QuotaState, cfg: Config): string {
   const plan = planNameOf(cfg, q.source, q.planType)
   if (plan === null) return head
   const named = plan.from === 'configured'
-    ? t('plan {0} (as configured)', `\`${plan.name}\``)
-    : t('plan {0}', `\`${plan.name}\``)
+    ? t('plan {0} (as configured)', span(plan.name))
+    : t('plan {0}', span(plan.name))
   return `${head} · ${named}`
 }
 
@@ -641,7 +651,7 @@ function windowRow(view: WindowView, cfg: Config, now: number, tcfg: TimeConfig)
   // A window still measuring has no pace to report yet; the column says so with the same
   // dash every other absent figure gets, not with a sentence about the measuring.
   const pace = view.verdict.measuring ? '–' : view.verdict.text
-  return `| ${view.w.label} | ${painted} ${value} | ${elapsed} | ${pace} | `
+  return `| ${span(view.w.label)} | ${painted} ${value} | ${elapsed} | ${pace} | `
     + `${tooltipReset(view.w, cfg, now, tcfg)} |`
 }
 
@@ -664,7 +674,7 @@ function forecastLine(q: QuotaState, w: QuotaWindow, ctx: RenderContext): string
       : t('based on {0} readings over {1}', f.basis.samples, spanText(f.basis.spanMs)))
   }
   if (bits.length === 0) return null
-  return `$(graph) ${w.shortLabel}: ${bits.join(' · ')}`
+  return `$(graph) ${span(w.shortLabel)}: ${bits.join(' · ')}`
 }
 
 function freshnessLine(q: QuotaState, cfg: Config, now: number): string {
@@ -785,7 +795,7 @@ function usageTable(source: Source, ctx: RenderContext): string[] {
     const c = ctx.agg.cost(days[0], today, ctx.tcfg, ctx.pricing, { source })
     if (c.unpricedTokens > 0) {
       out.push('')
-      out.push(`⚠ ${t('{0} tokens have no price ({1}) — they are missing from the cost, not billed at a guess.', compact(c.unpricedTokens), c.unpricedModels.join(', ') || t('unknown model'))}`)
+      out.push(`⚠ ${t('{0} tokens have no price ({1}) — they are missing from the cost, not billed at a guess.', compact(c.unpricedTokens), c.unpricedModels.map(span).join(', ') || t('unknown model'))}`)
     }
     if (c.fastUnpricedTokens > 0) {
       out.push('')
@@ -793,7 +803,7 @@ function usageTable(source: Source, ctx: RenderContext): string[] {
     }
     if (c.familyPriced.length > 0) {
       out.push('')
-      out.push(`⚠ ${t('priced from a family fallback: {0}.', c.familyPriced.join(', '))}`)
+      out.push(`⚠ ${t('priced from a family fallback: {0}.', c.familyPriced.map(span).join(', '))}`)
     }
   }
   return out
@@ -1122,7 +1132,7 @@ export function problemTooltip(q: QuotaState, ctx: RenderContext): string {
   ]
   if (q.problem) {
     out.push('')
-    out.push(t('Reported: {0}', `\`${q.problem}\``))
+    out.push(t('Reported: {0}', span(q.problem.slice(0, 200))))
   }
   if (q.fetchedAt !== null) {
     out.push('')

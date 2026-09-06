@@ -167,13 +167,13 @@ test('exhausted and limitReached are said in words, whatever the colour settings
 test('the tooltip table states the window state once, not once per column', () => {
   const full = state({ windows: [win({ percent: 100, resetsAt: NOW + 47 * 60_000 })] })
   const tip = quotaTooltip(full, makeContext(input({ quotas: [full] })))
-  const row = tip.split('\n').find((l) => l.startsWith('| 5 h |')) ?? ''
+  const row = tip.split('\n').find((l) => l.startsWith('| `5 h` |')) ?? ''
   // The Pace column carries it, so the value column does not repeat it.
   assert.equal(row.split('exhausted').length - 1, 1, row)
   // Where the verdict says something else, the value keeps the word.
   const stop = state({ windows: [win({ percent: Number.NaN, limitReached: true })] })
   const stopRow = quotaTooltip(stop, makeContext(input({ quotas: [stop] })))
-    .split('\n').find((l) => l.startsWith('| 5 h |')) ?? ''
+    .split('\n').find((l) => l.startsWith('| `5 h` |')) ?? ''
   assert.ok(stopRow.includes('limit reached'), stopRow)
   assert.ok(stopRow.includes('no reading'), stopRow)
 })
@@ -436,7 +436,7 @@ test('the tooltip carries the forecast, the lockout time and the basis, but no s
   const tip = quotaTooltip(state(), makeContext(input({
     forecasts: new Map([['claude:session:300', FORECAST]]),
   })))
-  assert.ok(tip.includes('$(graph) 5h: ~empty in 40 min'), tip)
+  assert.ok(tip.includes('$(graph) `5h`: ~empty in 40 min'), tip)
   assert.ok(tip.includes('locks 12:40'), tip)
   assert.ok(tip.includes('based on 7 readings over 2 h'), tip)
   // The "allowed x %/h" rate went with the dashboard's "keeps it to the reset" line.
@@ -490,7 +490,7 @@ test('the tooltip title links the official usage page unless the setting says ot
   const plain = quotaTooltip(state(), makeContext(input({ cfg: cfg({ 'tokenPace.usagePageLinks': false }) })))
   assert.ok(plain.startsWith('**Claude Code** · plan `max20`'), plain)
   const codex = quotaTooltip(state({ source: 'codex' }), makeContext(input()))
-  assert.ok(codex.includes('https://chatgpt.com/codex/settings/usage'), codex)
+  assert.match(codex, /https:\/\/chatgpt\.com\/codex\/settings\/usage(?![\w./-])/, codex)
 })
 
 test('the freshness line names age and origin, and marks a stale reading', () => {
@@ -824,7 +824,7 @@ test('with the explanations off the tooltip keeps everything that is a measureme
   assert.equal(tip.includes('API cost is hypothetical'), false, tip)
   // The table, the forecast, the token tables, the provenance line and the actions stay.
   assert.ok(tip.includes('| Window | Used | Elapsed | Pace | Resets |'), tip)
-  assert.ok(tip.includes('$(graph) 5h: ~empty in 40 min'), tip)
+  assert.ok(tip.includes('$(graph) `5h`: ~empty in 40 min'), tip)
   assert.ok(tip.includes('| Period | Usage | Output | Cache read | Req. | API cost |'), tip)
   assert.ok(tip.includes('_measured: quota, tokens · estimated: ~API cost_'), tip)
   assert.ok(tip.includes('[Dashboard](command:tokenPace.showDashboard)'), tip)

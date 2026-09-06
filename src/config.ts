@@ -509,7 +509,7 @@ function priceMap(raw: unknown): Record<string, CustomPrice> {
  * remaining control characters are removed. Nothing is added: what is left is the user's own
  * text, only printable and on one line.
  */
-function oneLine(v: string): string {
+export function oneLine(v: string): string {
   return v
     .replace(/`/g, '')
     .replace(/[\t\n\v\f\r\u0085\u2028\u2029]/g, ' ')

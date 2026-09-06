@@ -22,6 +22,7 @@
  */
 
 import * as vscode from 'vscode'
+import { randomBytes } from 'node:crypto'
 import script from 'webview:script'
 import { SOURCES, SOURCE_TITLE } from './adapters'
 import { locale, t } from './i18n'
@@ -79,10 +80,28 @@ function htmlLang(): string {
 }
 
 function nonceOf(): string {
+  // The nonce is the page's whole script and style allow-list, so it comes from the platform's
+  // cryptographic generator, not from Math.random, whose state a page could reconstruct. The
+  // alphabet stays alphanumeric: valid nonce syntax, and what every consumer of it expects.
   const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  const bytes = randomBytes(32)
   let s = ''
-  for (let i = 0; i < 32; i++) s += abc[Math.floor(Math.random() * abc.length)]
+  for (let i = 0; i < 32; i++) s += abc[bytes[i] % abc.length]
   return s
+}
+
+/** HTML text: the four characters that could open markup or end an attribute. */
+function escHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c])
+}
+
+/**
+ * A value written into the page's own <script>: JSON, with `<` escaped so no string inside it
+ * can end the element early (`\u003c` is an ordinary JSON escape; the value read back is the
+ * same). Every constant the shell writes in front of the module goes through this one door.
+ */
+function inline(v: unknown): string {
+  return JSON.stringify(v).replace(/</g, '\\u003c')
 }
 
 export class DashboardProvider implements vscode.WebviewViewProvider {
@@ -189,16 +208,16 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private html(): string {
     const nonce = nonceOf()
     return `<!DOCTYPE html>
-<html lang="${htmlLang()}">
+<html lang="${htmlLang().replace(/[^A-Za-z0-9-]/g, '')}">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+      content="default-src 'none'; base-uri 'none'; form-action 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style nonce="${nonce}">${CSS}</style>
 </head>
 <body>
-<div id="root"><p class="empty">${t('Loading …')}</p></div>
+<div id="root"><p class="empty">${escHtml(t('Loading …'))}</p></div>
 <script nonce="${nonce}">${scriptText()}</script>
 </body>
 </html>`
@@ -694,26 +713,33 @@ ul { margin: 6px 0; padding-left: 18px; }
 function scriptText(): string {
   return `
 /** The provider titles, interpolated from the registry so the webview cannot drift from it. */
-const SRC_TITLE = ${JSON.stringify(SOURCE_TITLE)};
+const SRC_TITLE = ${inline(SOURCE_TITLE)};
 /** The provider ids in registry order — the order of the filter bar's provider chips. */
-const SRC_IDS = ${JSON.stringify(SOURCES)};
+const SRC_IDS = ${inline(SOURCES)};
 /** Every string the module below shows, keyed by its English text — see webviewWords(). */
 const L10N = ${webviewDictionary()};
 /** The tag the host's Intl formatters use, so the page's own numbers read like the model's. */
-const LOCALE = ${JSON.stringify(locale())};
+const LOCALE = ${inline(locale())};
 ${script}`
 }
 
 /**
  * The dictionary as it is written into the page.
  *
- * `<` is escaped even though no translation may contain one: it is the single character that
- * could end the <script> element early, and a bundle is a file — one a distribution, a patch
- * or a hand edit could get wrong. `\u003c` is an ordinary escape inside a JSON string, so the
- * value the script reads back is unchanged.
+ * The values are HTML-escaped here, once, because the module concatenates a translation into
+ * markup and into attribute values without escaping it again (see `tr()` in
+ * src/webview/main.ts). A bundle is a file — one a distribution, a patch or a hand edit could
+ * get wrong — and the test that forbids markup in a translation runs only over the files that
+ * ship; this makes the page safe against a bundle that never met that test. English is
+ * unchanged by it: no key carries one of the five characters. The keys stay as they are, they
+ * are what `tr()` looks up. Then `<` is escaped in the JSON as well, the one character that
+ * could end the <script> element early.
  */
 function webviewDictionary(): string {
-  return JSON.stringify(webviewWords()).replace(/</g, '\\u003c')
+  const words = webviewWords()
+  const safe: Record<string, string> = {}
+  for (const key of Object.keys(words)) safe[key] = escHtml(words[key])
+  return inline(safe)
 }
 
 /**

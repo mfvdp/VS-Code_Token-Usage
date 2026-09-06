@@ -46,9 +46,11 @@ export async function readNewLines(
     return restarted
   }
 
-  const end = Math.min(st.size, cur.offset + maxBytes)
   const fh = await fs.promises.open(file, 'r')
   try {
+    // The size that bounds this read is the open handle's, not the stat's from a moment ago:
+    // a file that grew or was truncated in between is read as it is, never past its end.
+    const end = Math.min((await fh.stat()).size, cur.offset + maxBytes)
     const CHUNK = 1 << 20
     let pos = cur.offset
     let rest = Buffer.alloc(0)

@@ -540,7 +540,7 @@ test('an empty hour is the shortest mark in the strip, never taller than a used 
 })
 
 test('the page stays self-contained: one nonce, no external resource', () => {
-  assert.match(PAGE, /default-src 'none'; style-src 'nonce-[A-Za-z0-9]{32}'; script-src 'nonce-[A-Za-z0-9]{32}'/)
+  assert.match(PAGE, /default-src 'none'; base-uri 'none'; form-action 'none'; style-src 'nonce-[A-Za-z0-9]{32}'; script-src 'nonce-[A-Za-z0-9]{32}'/)
   // Both texts: what the page ships, and the module it was built from — a URL that a build
   // step happened to drop would be just as much of a promise broken as one that shipped.
   assert.equal(/https?:\/\//.test(STYLE + SCRIPT + SOURCE), false)

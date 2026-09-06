@@ -136,7 +136,7 @@ test('the network disclosure states the interval the user actually configured', 
   assert.match(disclosure(120), /every 2 hours/)
   // A nonsensical value falls back to the manifest default rather than printing it.
   assert.match(disclosure(0), /every 30 minutes/)
-  assert.ok(disclosure(30).includes('https://api.anthropic.com/api/oauth/usage'))
+  assert.match(disclosure(30), /https:\/\/api\.anthropic\.com\/api\/oauth\/usage(?![\w./-])/)
 })
 
 test('the network consent remembers exactly one answer per machine', async () => {

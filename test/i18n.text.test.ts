@@ -222,7 +222,7 @@ test('the consent dialog asks, and compares its answer, in the bundle language',
   assert.match(shown[0].detail, /^Die Token-Zahlen werden aus lokalen Transkriptdateien/)
   assert.match(shown[0].detail, /höchstens alle 45 Minuten/)
   // The address is not a sentence and does not move.
-  assert.ok(shown[0].detail.includes('https://api.anthropic.com/api/oauth/usage'))
+  assert.match(shown[0].detail, /https:\/\/api\.anthropic\.com\/api\/oauth\/usage(?![\w./-])/)
 })
 
 test('the write disclosure and the stored-data labels follow the bundle', () => {

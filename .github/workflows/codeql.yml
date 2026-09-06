@@ -28,6 +28,12 @@ jobs:
         with:
           languages: javascript-typescript
           queries: security-and-quality
+          # The tests and the smoke test are not shipped: their fixtures stat-then-write on
+          # purpose and assert on literal URLs, which reads as a finding only out of context.
+          config: |
+            paths-ignore:
+              - test
+              - test-e2e
 
       - uses: github/codeql-action/analyze@v4
         with:

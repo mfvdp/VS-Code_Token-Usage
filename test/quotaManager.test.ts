@@ -344,6 +344,54 @@ test('the fingerprints identify the account without ever touching the token', ()
   assert.notEqual(fp.claude, fp.codex)
 })
 
+/**
+ * The fingerprint is what keeps two accounts apart, so it must not wobble with
+ * the source that happens to win a round: only `~/.claude.json` carries an
+ * account marker, and it is rewritten in place often enough that a reading
+ * without one is normal. Splitting one account into two streams would empty the
+ * sparklines; merging two accounts would be worse, so both directions are pinned.
+ */
+test('one account keeps one history stream when a reading carries no identity hint', () => {
+  const h = harness()
+  const claudeJson = (uuid: string): void => {
+    fs.writeFileSync(h.files.claudeJsonFile, JSON.stringify({
+      cachedUsageUtilization: {
+        fetchedAtMs: BASE - 10 * MIN, accountUuid: uuid, utilization: { limits: [] },
+      },
+    }))
+  }
+
+  // The cache file wins the race and carries no marker of its own; the account
+  // comes from claude.json beside it.
+  claudeJson('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+  h.writeClaudeCache((BASE - 5 * MIN) / 1000, 42, null)
+  h.mgr.current(BASE)
+  const first = h.mgr.fingerprints().claude
+  assert.equal(h.added.length, 1)
+  assert.equal(h.added[0].state.origin, 'cache')
+  assert.equal(h.added[0].fingerprint, first)
+
+  // Same account, same origin, but claude.json is unreadable for a moment — the
+  // last known marker is carried forward instead of falling back to "unknown".
+  fs.rmSync(h.files.claudeJsonFile)
+  h.writeClaudeCache((BASE - 1 * MIN) / 1000, 44, null)
+  h.mgr.invalidate()
+  h.mgr.current(BASE + 1_000)
+  assert.equal(h.added.length, 2)
+  assert.equal(h.added[1].state.origin, 'cache')
+  assert.equal(h.added[1].fingerprint, first)
+
+  // A different account really is a different account: a new marker is adopted at
+  // once, so two identities never end up in one stream.
+  claudeJson('11111111-2222-3333-4444-555555555555')
+  h.writeClaudeCache(BASE / 1000, 7, null)
+  h.mgr.invalidate()
+  h.mgr.current(BASE + 2_000)
+  assert.equal(h.added.length, 3)
+  assert.notEqual(h.added[2].fingerprint, first)
+  assert.equal(h.mgr.fingerprints().claude, h.added[2].fingerprint)
+})
+
 test('a failed poll keeps its own problem kind and a visible next attempt', async () => {
   const h = harness({}, {}, () => true, () => ({
     state: null, retryAfterSeconds: 900, problem: 'HTTP 429 — backing off before the next attempt',

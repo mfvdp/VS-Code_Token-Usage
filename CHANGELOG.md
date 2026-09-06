@@ -3,6 +3,23 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.3.2 — 2026-09-07
+
+### Security
+
+* **The last four CodeQL findings are closed in code.** The dashboard's section renderer is
+  chosen by comparing the section key with each literal instead of looking a function up by
+  name; the page nonce is sixteen random bytes as hex, with no modulo that could bias it; and
+  the transcript tail opens a file before it asks anything about it — identity, size and
+  modification time all come from the handle it reads, so nothing can change between a check
+  and the read it guards. An unchanged file now costs an open and a stat instead of a stat
+  alone, a few milliseconds per sweep over a thousand finished transcripts.
+
+### Changed
+
+* The release workflow builds its GitHub release with `softprops/action-gh-release` v3
+  (Node 24 runtime, same inputs); the dependency review uses v5 of its action.
+
 ## 1.3.1 — 2026-09-06
 
 ### Security

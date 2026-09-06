@@ -47,8 +47,8 @@ import { QuotaHistory } from './quotaHistory'
 import { QuotaManager, QuotaOptions } from './quotaManager'
 import { scan, ScanContext } from './scan'
 import { sectionSettingsQuery } from './sectionSettings'
-import { Role, showMenu, StatusBar } from './statusbar'
-import { USAGE_PAGE } from './statusText'
+import { Role, showMenu, StatusBar, StatusInput } from './statusbar'
+import { buildItems, USAGE_PAGE } from './statusText'
 import {
   BRIDGE_BLOCKS_DELETE, DELETE_WARNING, DELETE_WARNING_EXTERNAL, deleteItems, formatBytes, inventory,
   StoredKey, StoredPaths,
@@ -92,7 +92,26 @@ const METRICS: ReadonlyArray<UiState['metric']> = ['usage', 'output', 'cacheRead
 
 let log: Logger
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+/**
+ * What `activate` resolves with, and therefore what
+ * `vscode.extensions.getExtension('frederik.token-pace')?.exports` is.
+ *
+ * It exists for one reader: the extension-host smoke test in `test-e2e/`, which has to watch
+ * a settings change arrive in a *real* window — the bug that lived from 1.0 to 1.2 was
+ * invisible to every unit test because the fake host answered `affectsConfiguration` the way
+ * the code asked, not the way the workbench does. So it stays deliberately small and stable:
+ * a version string and what the status bar last rendered. Nothing here exposes a transcript,
+ * a token, a path or an account — the item text is the same string the user can read off the
+ * bar. Preview items (`tokenPace.preview.*`) live in their own id space and are not reported.
+ */
+export interface TokenPaceApi {
+  /** The version of the manifest this bundle was built from. */
+  version: string
+  /** Id and text of the live status-bar items as of the last render, in bar order. */
+  statusBar(): Array<{ id: string; text: string }>
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<TokenPaceApi> {
   log = new Logger(vscode.window.createOutputChannel('Token Pace', { log: true }))
   context.subscriptions.push(log)
   const say = (m: string): void => log.info(m)
@@ -178,6 +197,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let forecasts = new Map<string, Forecast>()
   let latestVm: ViewModel | undefined
   let lastVmAt = 0
+  /** The input of the last status-bar render; the extension API reads the bar through it. */
+  let lastStatusInput: StatusInput | null = null
   let role: Role = 'single'
   let roleWired = false
   let scanning = false
@@ -295,12 +316,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (force || now - lastVmAt >= VM_MIN_INTERVAL_MS) rebuildVm(now)
     if (!readingsOk) return
     try {
-      statusBar.update({
+      const input: StatusInput = {
         quotas, agg, cfg, now, forecasts, role, scanning, consent: consent.state(),
         context: quotaMgr.contextReading(),
         promptCache: quotaMgr.promptCacheReading(),
         budgets: latestVm?.budgets ?? [],
-      })
+      }
+      statusBar.update(input)
+      // Kept for the extension API (see `TokenPaceApi`): `buildItems` is pure, so re-running
+      // it over this exact input reproduces what is on the bar without rendering twice per
+      // second. Holding the input, not the result, is what makes a missing render visible —
+      // the object still carries the `cfg` of the frame that was actually drawn.
+      lastStatusInput = input
     } catch (err) {
       log.error(`Rendering the status bar failed: ${err}`)
     }
@@ -1176,6 +1203,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // The cold scan is deliberately not awaited: activation must not wait for a gigabyte of
   // transcripts, and every view above already renders the "reading history" state.
   void bootstrap()
+
+  // --------------------------------------------------------------- the extension API
+  // Everything it can report has already been rendered onto the bar; see `TokenPaceApi`.
+  return {
+    version: __EXT_VERSION__,
+    statusBar: () => (lastStatusInput === null
+      ? []
+      : buildItems(lastStatusInput).map((m) => ({ id: m.id, text: m.text }))),
+  }
 
   async function bootstrap(): Promise<void> {
     if (role !== 'follower') {

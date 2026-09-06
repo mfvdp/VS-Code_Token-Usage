@@ -11,6 +11,6 @@
     "skipLibCheck": true,
     "moduleResolution": "node"
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "test-e2e/**/*.ts"],
   "exclude": ["node_modules", "dist", "out", "out-test"]
 }

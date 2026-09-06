@@ -91,6 +91,14 @@ for (const e of entries) {
   else console.log(`build: skipping ${e.out} — ${e.in} does not exist yet`)
 }
 
+// The extension-host smoke test's suite (`npm run test:e2e`). Not shipped and not in dist/:
+// `--extensionTestsPath` names a plain CommonJS module, so it is built beside its source,
+// with the map inlined to keep it a single artifact.
+const e2e = { in: 'test-e2e/suite/index.ts', out: 'test-e2e/suite/index.js' }
+if (existsSync(e2e.in)) {
+  await esbuild.build({ ...common, entryPoints: [e2e.in], outfile: e2e.out, sourcemap: 'inline' })
+}
+
 const ctxs = await Promise.all(
   present.map((e) => esbuild.context({ ...common, entryPoints: [e.in], outfile: e.out, sourcemap: true })),
 )

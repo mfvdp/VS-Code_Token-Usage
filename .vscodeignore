@@ -22,8 +22,14 @@
 !scripts/uninstall.js
 !docs/*.md
 
+# The extension-host smoke test and the VS Code it downloads. Excluded again *after* the
+# negations, so no later `!` line can pull a few hundred megabytes of editor into the .vsix.
+test-e2e/**
+.vscode-test/**
+
 # Deliberately not shipped, and not negated above:
-#   src/, test/, out/, out-test/, .github/, .vscode/, .git/, node_modules/
+#   src/, test/, test-e2e/, out/, out-test/, .vscode-test/, .github/, .vscode/, .git/,
+#   node_modules/
 #   build.mjs, tsconfig.json, package-lock.json, scripts/check-privacy.mjs
 #   dist/*.js.map, *.vsix
 #   media/logo.svg and media/logo-* (draft sources of the store logo)

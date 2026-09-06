@@ -3,6 +3,7 @@
 
 /** Pure presentation helpers, with no dependency on vscode. */
 
+import { locale, t } from './i18n'
 import {
   lastDays as lastDaysIn, SYSTEM_TIME_CONFIG,
 } from './time'
@@ -182,7 +183,13 @@ export function estimate(s: string): string {
 export type Provenance = 'measured' | 'estimated' | 'derived'
 
 export function provenanceBadge(p: Provenance): string {
-  return p
+  // A switch rather than a table: `t()` needs a literal message, and a lookup built at module
+  // load would be filled before the bundle is set and stay English for good.
+  switch (p) {
+    case 'estimated': return t('estimated')
+    case 'derived': return t('derived')
+    default: return t('measured')
+  }
 }
 
 /** A quotient, or '–' when there is no denominator to divide by (never 0.0). */
@@ -214,7 +221,7 @@ export function deltaBadge(
     return { glyph: '•', text: '–' }
   }
   // No glyph: "new" is the whole message, and a glyph that repeats it reads "new new".
-  if (prev === null || (prev === 0 && cur > 0)) return { glyph: '', text: 'new' }
+  if (prev === null || (prev === 0 && cur > 0)) return { glyph: '', text: t('new') }
   if (prev === 0) return { glyph: '•', text: '±0%' }
   const pct = ((cur - prev) / Math.abs(prev)) * 100
   const abs = Math.abs(pct)
@@ -224,20 +231,40 @@ export function deltaBadge(
   return { glyph: pct > 0 ? '▲' : '▼', text }
 }
 
-const NF = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 })
-const NF0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
+/**
+ * The two number formatters, per locale.
+ *
+ * Built on demand rather than at module load: the language is only known once the host has
+ * called `setLocale`, and a formatter made before that would print en-US digits for the rest
+ * of the session. They are kept per tag because building one costs more than formatting a
+ * hundred numbers, and every token figure on the dashboard goes through them.
+ */
+const numberFormats = new Map<string, { one: Intl.NumberFormat; whole: Intl.NumberFormat }>()
+function formats(): { one: Intl.NumberFormat; whole: Intl.NumberFormat } {
+  const lang = locale()
+  let f = numberFormats.get(lang)
+  if (!f) {
+    f = {
+      one: new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }),
+      whole: new Intl.NumberFormat(lang, { maximumFractionDigits: 0 }),
+    }
+    numberFormats.set(lang, f)
+  }
+  return f
+}
 
 /** Compact token count: 987 · 12.3K · 1.2M · 3.4G */
 export function compact(n: number): string {
+  const { one, whole } = formats()
   const a = Math.abs(n)
-  if (a < 1000) return NF0.format(n)
-  if (a < 1e6) return NF.format(n / 1e3) + 'K'
-  if (a < 1e9) return NF.format(n / 1e6) + 'M'
-  return NF.format(n / 1e9) + 'G'
+  if (a < 1000) return whole.format(n)
+  if (a < 1e6) return one.format(n / 1e3) + 'K'
+  if (a < 1e9) return one.format(n / 1e6) + 'M'
+  return one.format(n / 1e9) + 'G'
 }
 
 export function full(n: number): string {
-  return NF0.format(n)
+  return formats().whole.format(n)
 }
 
 export function ageMinutes(fetchedAtSeconds: number | null, now = Date.now()): number | null {
@@ -269,7 +296,7 @@ export function usd(n: number): string {
   if (n === 0) return '–'
   if (n < 0.01) return '<$0.01'
   const d = digitsFor(n)
-  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
+  return '$' + n.toLocaleString(locale(), { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
 /**
@@ -279,12 +306,13 @@ export function usd(n: number): string {
 export function money(n: number, currency: string | null): string {
   const f = digitsFor(n)
   const d = { minimumFractionDigits: f, maximumFractionDigits: f }
-  if (!currency) return n.toLocaleString('en-US', d)
+  const lang = locale()
+  if (!currency) return n.toLocaleString(lang, d)
   try {
-    return n.toLocaleString('en-US', { style: 'currency', currency, ...d })
+    return n.toLocaleString(lang, { style: 'currency', currency, ...d })
   } catch {
     // Unknown ISO code — better a readable fallback than a thrown RangeError.
-    return `${n.toLocaleString('en-US', d)} ${currency}`
+    return `${n.toLocaleString(lang, d)} ${currency}`
   }
 }
 
@@ -305,19 +333,19 @@ export function extraUsageText(e: {
   reason: string | null
 } | undefined): string | null {
   if (!e) return null
-  if (e.unlimited) return 'unlimited'
-  if (!e.enabled) return `off${e.reason ? ` (${e.reason})` : ''}`
+  if (e.unlimited) return t('unlimited')
+  if (!e.enabled) return e.reason ? t('off ({0})', e.reason) : t('off')
   const parts: string[] = []
   if (e.used !== null) {
     parts.push(e.limit !== null
-      ? `${money(e.used, e.currency)} of ${money(e.limit, e.currency)}`
+      ? t('{0} of {1}', money(e.used, e.currency), money(e.limit, e.currency))
       : money(e.used, e.currency))
   } else if (e.balance !== null) {
-    parts.push(`${e.balance} credits left`)
+    parts.push(t('{0} credits left', e.balance))
   }
   if (e.utilization !== null) parts.push(`${e.utilization.toFixed(0)} %`)
-  if (e.spendLimitReached) parts.push('spend limit reached')
-  return parts.length ? parts.join(' · ') : 'on'
+  if (e.spendLimitReached) parts.push(t('spend limit reached'))
+  return parts.length ? parts.join(' · ') : t('on')
 }
 
 // ---------------------------------------------------------------------------

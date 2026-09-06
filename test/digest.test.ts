@@ -77,6 +77,12 @@ test('unpriced models are named as the reason the cost is a lower bound', () => 
   const s = digest(input({ unpricedModels: ['claude-experimental-x'] }))
     .find((x) => x.includes('without a price'))
   assert.match(String(s), /1 model without a price on file \(claude-experimental-x\), so every cost figure here is a lower bound\./)
+
+  // One model and several are two sentences, not one with an 's' appended.
+  const two = digest(input({ unpricedModels: ['claude-experimental-x', 'gpt-unknown'] }))
+    .find((x) => x.includes('without a price'))
+  assert.equal(two, '2 models without a price on file (claude-experimental-x, gpt-unknown), '
+    + 'so every cost figure here is a lower bound.')
 })
 
 test('the fullest window is the one reported, with its verdict', () => {

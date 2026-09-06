@@ -13,6 +13,7 @@
  */
 
 import { SOURCE_TITLE } from './adapters'
+import { t } from './i18n'
 import { WindowDisplay } from './pace'
 import { compact, usd } from './render'
 import { Source } from './types'
@@ -39,10 +40,11 @@ const MAX_SENTENCES = 5
 const EXCELLENT = 80
 const GOOD = 50
 
+/** The quality label in the bracket behind a hit rate — a label of its own, not a fragment. */
 function classify(rate: number): string {
-  if (rate >= EXCELLENT) return 'excellent'
-  if (rate >= GOOD) return 'good'
-  return 'low'
+  if (rate >= EXCELLENT) return t('excellent')
+  if (rate >= GOOD) return t('good')
+  return t('low')
 }
 
 /** Today against the mean of the seven days before it — the days themselves, not a fit. */
@@ -54,13 +56,18 @@ function todayVsWeek(spark: number[]): string | null {
   const mean = before.reduce((a, b) => a + b, 0) / before.length
   if (mean <= 0) {
     return today > 0
-      ? `Today is the first day with usage in ${before.length} days (${compact(today)} tokens).`
+      ? t('Today is the first day with usage in {0} days ({1} tokens).', before.length, compact(today))
       : null
   }
   const delta = ((today - mean) / mean) * 100
-  const dir = delta >= 0 ? 'above' : 'below'
-  return `Today's usage is ${Math.abs(delta).toFixed(0)} % ${dir} the ${before.length}-day average `
-    + `(${compact(today)} vs ${compact(mean)} tokens per day).`
+  const figure = Math.abs(delta).toFixed(0)
+  // Above and below are two whole sentences: a direction word dropped into a slot cannot be
+  // put into another language's word order.
+  return delta >= 0
+    ? t("Today's usage is {0} % above the {1}-day average ({2} vs {3} tokens per day).",
+      figure, before.length, compact(today), compact(mean))
+    : t("Today's usage is {0} % below the {1}-day average ({2} vs {3} tokens per day).",
+      figure, before.length, compact(today), compact(mean))
 }
 
 function topModel(d: DigestInput): string | null {
@@ -69,14 +76,14 @@ function topModel(d: DigestInput): string | null {
   if (d.showCost) {
     const byCost = [...rows].sort((a, b) => b.cost - a.cost)[0]
     if (byCost.cost > 0) {
-      return `Most expensive model in this range: ${byCost.model} at ~${usd(byCost.cost)}, `
-        + `${byCost.costShare} of the API equivalent.`
+      return t('Most expensive model in this range: {0} at ~{1}, {2} of the API equivalent.',
+        byCost.model, usd(byCost.cost), byCost.costShare)
     }
   }
   const byUsage = [...rows].sort((a, b) => b.usage - a.usage)[0]
   if (byUsage.usage <= 0) return null
-  return `Busiest model in this range: ${byUsage.model} with ${compact(byUsage.usage)} tokens, `
-    + `${byUsage.share} of the total.`
+  return t('Busiest model in this range: {0} with {1} tokens, {2} of the total.',
+    byUsage.model, compact(byUsage.usage), byUsage.share)
 }
 
 function cacheSentence(d: DigestInput): string | null {
@@ -85,14 +92,16 @@ function cacheSentence(d: DigestInput): string | null {
   const parts = rows.map(
     (r) => `${SOURCE_TITLE[r.source]} ${r.hitRate} (${classify(r.hitValue as number)})`,
   )
-  return `Cache hit rate — ${parts.join(', ')}.`
+  return t('Cache hit rate — {0}.', parts.join(', '))
 }
 
 function unpricedSentence(d: DigestInput): string | null {
   if (!d.showCost || d.unpricedModels.length === 0) return null
   const n = d.unpricedModels.length
-  return `${n} model${n === 1 ? '' : 's'} without a price on file (${d.unpricedModels.join(', ')}), `
-    + 'so every cost figure here is a lower bound.'
+  const names = d.unpricedModels.join(', ')
+  return n === 1
+    ? t('{0} model without a price on file ({1}), so every cost figure here is a lower bound.', n, names)
+    : t('{0} models without a price on file ({1}), so every cost figure here is a lower bound.', n, names)
 }
 
 /**
@@ -119,8 +128,10 @@ function criticalWindow(d: DigestInput): string | null {
     }
   }
   if (!best) return null
-  const head = `The fullest quota window is ${best.title} ${best.label} at ${Math.round(best.percent)} %`
-  return best.text ? `${head} — ${best.text}.` : `${head}.`
+  const pct = Math.round(best.percent)
+  return best.text
+    ? t('The fullest quota window is {0} {1} at {2} % — {3}.', best.title, best.label, pct, best.text)
+    : t('The fullest quota window is {0} {1} at {2} %.', best.title, best.label, pct)
 }
 
 /**

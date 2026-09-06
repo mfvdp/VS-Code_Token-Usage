@@ -17,6 +17,7 @@
 
 import { SOURCES, SOURCE_TITLE, maybeAdapterFor } from './adapters'
 import { Aggregator, BucketFilter, Metric, billable } from './agg'
+import { locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, priceOf } from './prices'
@@ -412,15 +413,25 @@ export const LOCAL_BLOCK_HOURS = 5
  * from the same table the model used. */
 export { SOURCE_TITLE }
 
-const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const WEEK_START_INDEX: Record<string, number> = {
   sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
+}
+
+/**
+ * The seven weekday abbreviations, Sunday first.
+ *
+ * Built on call rather than kept in a module-level table: the translation bundle is only
+ * installed at activation, and a table filled before that would stay English for good.
+ */
+function weekdayNames(): string[] {
+  return [t('Sun'), t('Mon'), t('Tue'), t('Wed'), t('Thu'), t('Fri'), t('Sat')]
 }
 
 /** Weekday names in the user's own week order — `weekdayOf` returns 0 for their first day. */
 export function weekdayLabels(tcfg: TimeConfig): string[] {
   const start = WEEK_START_INDEX[tcfg.startOfWeek] ?? 1
-  return Array.from({ length: 7 }, (_, i) => WEEKDAY_NAMES[(start + i) % 7])
+  const names = weekdayNames()
+  return Array.from({ length: 7 }, (_, i) => names[(start + i) % 7])
 }
 
 // ---------------------------------------------------------------------------
@@ -634,7 +645,7 @@ function spanTextOf(ctx: StatsCtx, fromMs: number, toMs: number): string {
     const day = dayOf(ms, ctx.tcfg)
     return day === today ? formatTime(ms, ctx.tcfg) : `${day} ${formatTime(ms, ctx.tcfg)}`
   }
-  return `${at(fromMs)} → ${toMs >= ctx.now ? 'now' : at(toMs)}`
+  return `${at(fromMs)} → ${toMs >= ctx.now ? t('now') : at(toMs)}`
 }
 
 /**
@@ -721,10 +732,10 @@ function windowRows(
       // A reset further out than the window is long puts the window's start in the future;
       // there is no elapsed span to sum then, and the trailing span below is the honest answer.
       if (toMs > fromMs) {
-        return hourSpanRow(ctx, source, `Current ${span.label} window`, fromMs, toMs, showListPrice)
+        return hourSpanRow(ctx, source, t('Current {0} window', span.label), fromMs, toMs, showListPrice)
       }
     }
-    return hourSpanRow(ctx, source, `Last ${span.label}`, ctx.now - spanMs, ctx.now, showListPrice)
+    return hourSpanRow(ctx, source, t('Last {0}', span.label), ctx.now - spanMs, ctx.now, showListPrice)
   })
 }
 
@@ -747,20 +758,22 @@ export function totalsFor(
   windows: TotalsWindow[] = [],
 ): TotalRow[] {
   const today = dayOf(ctx.now, ctx.tcfg)
+  // The same messages `time.rangeFor` labels the presets with, so the twin below still
+  // recognises "the selected range is this fixed row" once both are translated.
   const fixed: { label: string; from: string; to: string }[] = [
-    { label: 'Today', from: today, to: today },
-    { label: 'Last 7 days', from: addDays(today, -6), to: today },
-    { label: 'Last 30 days', from: addDays(today, -29), to: today },
-    { label: 'This week', from: addDays(today, -weekdayOf(today, ctx.tcfg)), to: today },
-    { label: 'This month', from: `${today.slice(0, 8)}01`, to: today },
-    { label: 'All time', from: firstDay ?? today, to: today },
+    { label: t('Today'), from: today, to: today },
+    { label: t('Last {0} days', 7), from: addDays(today, -6), to: today },
+    { label: t('Last {0} days', 30), from: addDays(today, -29), to: today },
+    { label: t('This week'), from: addDays(today, -weekdayOf(today, ctx.tcfg)), to: today },
+    { label: t('This month'), from: `${today.slice(0, 8)}01`, to: today },
+    { label: t('All time'), from: firstDay ?? today, to: today },
   ]
   // No range: fixed periods only — the dashboard's table, which sits above the filter bar.
   const twin = range ? fixed.find((f) => f.label === range.label) : undefined
   const same = range !== null && twin !== undefined && twin.from === range.from && twin.to === range.to
   const rows: TotalRow[] = []
   if (range) {
-    const label = twin !== undefined && !same ? `Selected range (${range.label})` : range.label
+    const label = twin !== undefined && !same ? t('Selected range ({0})', range.label) : range.label
     rows.push(totalRow(ctx, label, range.from, range.to, source, showListPrice))
   }
   if (range && previous) {
@@ -827,18 +840,30 @@ function factsFor(ctx: StatsCtx, from: string, to: string, source?: Source): Ran
   return { usage, cost, requests, hit: sumParts(list), activeDays: activeDaysIn(daily), days, daily }
 }
 
-/** Provenance as a sentence rather than as a one-word badge, for the card's explanation. */
-const PROVENANCE_TEXT: Record<Provenance, string> = {
-  measured: 'measured',
-  derived: 'derived from measured figures',
-  estimated: 'estimated (~): what this usage would cost through the API',
+/**
+ * Provenance as a sentence rather than as a one-word badge, for the card's explanation.
+ *
+ * A function, like every other little word table in this file: `t()` reads its message from
+ * the source, and a table built at module load would be filled before the bundle is
+ * installed and would stay English for the rest of the session.
+ */
+function provenanceText(p: Provenance): string {
+  switch (p) {
+    case 'derived': return t('derived from measured figures')
+    case 'estimated': return t('estimated (~): what this usage would cost through the API')
+    default: return t('measured')
+  }
 }
 
 /** What the fourteen points beside every figure are; one sentence, one place. */
-const SPARK_NOTE = `last ${SPARK_POINTS} days · one point per day`
+function sparkNote(): string {
+  return t('last {0} days · one point per day', SPARK_POINTS)
+}
 
 /** The three counted fields behind every token figure — the same words on every card. */
-const HOW_USAGE = 'fresh input + cache write + output'
+function howUsage(): string {
+  return t('fresh input + cache write + output')
+}
 
 function spanOf(from: string, to: string): string {
   return from === to ? from : `${from} → ${to}`
@@ -871,8 +896,8 @@ function splitFactsFor(
 /** Which accounts a figure covers, named the way the cards name them. */
 function sourcesText(ctx: StatsCtx): string {
   const titles = ctx.sources.map((s) => SOURCE_TITLE[s] ?? s)
-  if (titles.length === 0) return 'no provider selected'
-  return titles.length > 1 ? 'both providers' : titles[0]
+  if (titles.length === 0) return t('no provider selected')
+  return titles.length > 1 ? t('both providers') : titles[0]
 }
 
 /** The split formatted by the very function that formatted the card's own value. */
@@ -930,8 +955,8 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
     period,
     compare: against !== null && prev !== null ? { against, previous: format(prev) } : null,
     split: splitWith(per, format),
-    provenance: PROVENANCE_TEXT[provenance],
-    sparkNote: SPARK_NOTE,
+    provenance: provenanceText(provenance),
+    sparkNote: sparkNote(),
   })
   const usageText = (f: RangeFacts): string => tokens(f.usage)
 
@@ -939,81 +964,80 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
     todayKpi(ctx, delta),
     {
       key: 'usage',
-      label: 'Usage',
+      label: t('Usage'),
       value: tokens(cur.usage),
       provenance: 'measured',
-      delta: prev ? delta(cur.usage, prev.usage) : { glyph: '', text: 'new' },
+      delta: prev ? delta(cur.usage, prev.usage) : { glyph: '', text: t('new') },
       polarity: 'upBad',
       spark: usageSpark,
-      note: HOW_USAGE,
-      explain: explainOf('All tokens the selected range processed', HOW_USAGE, 'measured', usageText),
+      note: howUsage(),
+      explain: explainOf(t('All tokens the selected range processed'), howUsage(), 'measured', usageText),
     },
     {
       key: 'requests',
-      label: 'Requests',
+      label: t('Requests'),
       value: tokens(cur.requests),
       provenance: 'measured',
-      delta: prev ? delta(cur.requests, prev.requests) : { glyph: '', text: 'new' },
+      delta: prev ? delta(cur.requests, prev.requests) : { glyph: '', text: t('new') },
       polarity: 'upBad',
       spark: reqSpark,
-      note: 'a Codex token_count event is not necessarily one turn',
+      note: t('a Codex token_count event is not necessarily one turn'),
       explain: explainOf(
-        'API requests the transcripts recorded',
-        'one per assistant turn; a Codex token_count event is not necessarily one turn',
+        t('API requests the transcripts recorded'),
+        t('one per assistant turn; a Codex token_count event is not necessarily one turn'),
         'measured',
         (f) => tokens(f.requests),
       ),
     },
     {
       key: 'cacheHit',
-      label: 'Cache hit',
+      label: t('Cache hit'),
       value: percentOf(cur.hit.num, cur.hit.den),
       provenance: 'derived',
-      delta: hitRate === null ? null : prevHit === null ? { glyph: '', text: 'new' } : delta(hitRate, prevHit),
+      delta: hitRate === null ? null : prevHit === null ? { glyph: '', text: t('new') } : delta(hitRate, prevHit),
       polarity: 'upGood',
       spark: seriesOf(ctx, sparkDays, 'cacheRead'),
-      note: 'cache reads ÷ input',
+      note: t('cache reads ÷ input'),
       explain: explainOf(
-        'Share of input served from the prompt cache',
+        t('Share of input served from the prompt cache'),
         // The denominator is each provider's own, exactly as `cacheHitParts` computes it:
         // one formula for both would be wrong for one of them.
-        'cache reads ÷ all input — Claude counts cache reads beside fresh input, '
-          + 'Codex reports them inside its input',
+        t('cache reads ÷ all input — Claude counts cache reads beside fresh input, Codex reports them inside its input'),
         'derived',
         (f) => percentOf(f.hit.num, f.hit.den),
       ),
     },
     {
       key: 'activeDays',
-      label: 'Active days',
-      value: len > 0 ? `${cur.activeDays} of ${len}` : '–',
+      label: t('Active days'),
+      value: len > 0 ? t('{0} of {1}', cur.activeDays, len) : '–',
       provenance: 'measured',
-      delta: prev ? delta(cur.activeDays, prev.activeDays) : { glyph: '', text: 'new' },
+      delta: prev ? delta(cur.activeDays, prev.activeDays) : { glyph: '', text: t('new') },
       // Working on more days is neither good nor bad; it is a habit, not a budget.
       polarity: 'neutral',
       spark: usageSpark.map((v) => (v > 0 ? 1 : 0)),
       note: null,
       explain: explainOf(
-        'Days with any usage in the range',
-        'days whose usage is above zero',
+        t('Days with any usage in the range'),
+        t('days whose usage is above zero'),
         'measured',
-        (f) => (len > 0 ? `${f.activeDays} of ${len}` : '–'),
+        (f) => (len > 0 ? t('{0} of {1}', f.activeDays, len) : '–'),
       ),
     },
     {
       key: 'avgPerActiveDay',
-      label: 'Avg per active day',
+      label: t('Avg per active day'),
       value: avg === null ? '–' : compact(avg),
       provenance: 'derived',
-      delta: avg === null ? null : prevAvg === null ? { glyph: '', text: 'new' } : delta(avg, prevAvg),
+      delta: avg === null ? null : prevAvg === null ? { glyph: '', text: t('new') } : delta(avg, prevAvg),
       // A quotient of two figures that each have their own direction: a rise can be less
       // usage on fewer days. Colouring it would name a winner that the number does not.
       polarity: 'neutral',
       spark: usageSpark,
       note: null,
       explain: explainOf(
-        'Usage per day, counting only active days',
-        'usage ÷ active days',
+        t('Usage per day, counting only active days'),
+        t('usage ÷ active days'),
         'derived',
         (f) => (f.activeDays > 0 ? compact(f.usage / f.activeDays) : '–'),
       ),
@@ -1022,16 +1046,16 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
   if (ctx.showCost) {
     out.splice(2, 0, {
       key: 'cost',
-      label: 'API equivalent',
+      label: t('API equivalent'),
       value: costText(cur.cost),
       provenance: 'estimated',
-      delta: prev ? delta(cur.cost, prev.cost) : { glyph: '', text: 'new' },
+      delta: prev ? delta(cur.cost, prev.cost) : { glyph: '', text: t('new') },
       polarity: 'upBad',
       spark: costSpark,
-      note: 'hypothetical: what this usage would have cost through the API',
+      note: t('hypothetical: what this usage would have cost through the API'),
       explain: explainOf(
-        'What the same tokens would have cost through the API at list prices',
-        'tokens × the price table in effect, per model',
+        t('What the same tokens would have cost through the API at list prices'),
+        t('tokens × the price table in effect, per model'),
         'estimated',
         (f) => costText(f.cost),
       ),
@@ -1063,25 +1087,25 @@ function todayKpi(
   }
   return {
     key: 'today',
-    label: 'Today',
+    label: t('Today'),
     value: both(cur),
     provenance: 'measured',
     delta: cur.usage === 0 && prev.usage === 0 ? null : delta(cur.usage, prev.usage),
     polarity: 'upBad',
     spark: seriesOf(ctx, lastDaysEndingAt(today, SPARK_POINTS), 'usage'),
-    note: 'since the day boundary · against yesterday',
+    note: t('since the day boundary · against yesterday'),
     explain: {
       // "both providers" only while both are in the filter: with one switched off the tile
       // counts one account, and saying otherwise would be the invention this file forbids.
-      what: `Tokens processed since the day boundary, ${sourcesText(ctx)}`,
-      how: HOW_USAGE,
-      period: `since the day boundary · ${today}`,
+      what: t('Tokens processed since the day boundary, {0}', sourcesText(ctx)),
+      how: howUsage(),
+      period: t('since the day boundary · {0}', today),
       // The one card whose comparison exists whatever range is selected — and the only
       // comparison that makes "today" mean anything.
-      compare: { against: 'yesterday', previous: both(prev) },
+      compare: { against: t('yesterday'), previous: both(prev) },
       split: splitWith(splitFactsFor(ctx, today, today), both),
-      provenance: PROVENANCE_TEXT.measured,
-      sparkNote: SPARK_NOTE,
+      provenance: provenanceText('measured'),
+      sparkNote: sparkNote(),
     },
   }
 }
@@ -1095,12 +1119,12 @@ export function composition(ctx: StatsCtx, range: DayRange): CompositionEntry[] 
   for (const source of ctx.sources) {
     const b = ctx.agg.sum(range.from, range.to, ctx.tcfg, filterFor(ctx, source))
     const parts: CompositionPart[] = [
-      { key: 'freshInput', tokens: freshInput({ ...b, source }), text: 'Fresh input' },
-      { key: 'cacheWrite5m', tokens: Math.max(0, b.cacheWrite - b.cacheWrite1h), text: 'Cache write 5m' },
-      { key: 'cacheWrite1h', tokens: b.cacheWrite1h, text: 'Cache write 1h' },
-      { key: 'cacheRead', tokens: b.cacheRead, text: 'Cache read' },
-      { key: 'output', tokens: b.output, text: 'Output' },
-      { key: 'reasoning', tokens: b.reasoning, text: 'Reasoning (of output)' },
+      { key: 'freshInput', tokens: freshInput({ ...b, source }), text: t('Fresh input') },
+      { key: 'cacheWrite5m', tokens: Math.max(0, b.cacheWrite - b.cacheWrite1h), text: t('Cache write 5m') },
+      { key: 'cacheWrite1h', tokens: b.cacheWrite1h, text: t('Cache write 1h') },
+      { key: 'cacheRead', tokens: b.cacheRead, text: t('Cache read') },
+      { key: 'output', tokens: b.output, text: t('Output') },
+      { key: 'reasoning', tokens: b.reasoning, text: t('Reasoning (of output)') },
     ]
     out.push({ source, parts })
   }
@@ -1164,8 +1188,8 @@ export function cacheEconomy(ctx: StatsCtx, range: DayRange): CacheEconomyRow[] 
       savedUsd: ctx.showCost ? savedText : '–',
       blendedPerM: ctx.showCost ? ratePerM(cost, priced) : '–',
       note: source === 'claude'
-        ? 'counterfactual: cache reads at the input rate, minus what the writes cost'
-        : 'counterfactual: cache reads at the input rate (Codex bills no cache write)',
+        ? t('counterfactual: cache reads at the input rate, minus what the writes cost')
+        : t('counterfactual: cache reads at the input rate (Codex bills no cache write)'),
       partial: unpricedTokens > 0,
     })
   }
@@ -1195,13 +1219,13 @@ export function calendar(ctx: StatsCtx): CalendarRows {
   const weekFrom = addDays(today, -weekdayOf(today, ctx.tcfg))
   const monthFrom = `${today.slice(0, 8)}01`
   const lastMonthEnd = addDays(monthFrom, -1)
-  const thisMonth = periodRow(ctx, 'This month', monthFrom, today)
+  const thisMonth = periodRow(ctx, t('This month'), monthFrom, today)
   const projected = projectMonth(ctx, monthFrom, today)
   return {
-    thisWeek: periodRow(ctx, 'This week', weekFrom, today),
+    thisWeek: periodRow(ctx, t('This week'), weekFrom, today),
     thisMonth: { ...thisMonth, ...projected },
-    lastMonth: periodRow(ctx, 'Last month', `${lastMonthEnd.slice(0, 8)}01`, lastMonthEnd),
-    year: periodRow(ctx, 'This year', `${today.slice(0, 4)}-01-01`, today),
+    lastMonth: periodRow(ctx, t('Last month'), `${lastMonthEnd.slice(0, 8)}01`, lastMonthEnd),
+    year: periodRow(ctx, t('This year'), `${today.slice(0, 4)}-01-01`, today),
   }
 }
 
@@ -1257,7 +1281,7 @@ export function projectPeriod(
   const text = (n: number): string => (metric === 'cost' ? usd(n) : compact(n))
   return {
     projection: metric === 'cost' ? costText(total) : estimate(compact(total)),
-    projectionBasis: `so far ${text(soFar)} · Avg ${text(perDay)}/day · ${remaining} days left`,
+    projectionBasis: t('so far {0} · Avg {1}/day · {2} days left', text(soFar), text(perDay), remaining),
     total,
     perDay,
     remaining,
@@ -1285,7 +1309,7 @@ function projectMonth(
  */
 function planUsd(n: number): string {
   if (n > 0 && n < 0.01) return '<$0.01'
-  return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `$${n.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 /**
@@ -1322,9 +1346,9 @@ export function planFactors(
     out.push({
       source,
       text: c.usd > 0
-        ? `${estimate(usd(c.usd))} API equivalent this month ÷ ${planUsd(plan)} plan `
-          + `= ${factorText(factor)}`
-        : `no priced usage this month against the ${planUsd(plan)} plan`,
+        ? t('{0} API equivalent this month ÷ {1} plan = {2}',
+          estimate(usd(c.usd)), planUsd(plan), factorText(factor))
+        : t('no priced usage this month against the {0} plan', planUsd(plan)),
       partial,
     })
   }
@@ -1368,19 +1392,19 @@ function durationText(ms: number): string {
 /** Why a group carries no cost — the Price column says which of the two it is. */
 function unpricedText(reason: 'no price' | 'fast rate unknown' | null): string {
   return reason === 'fast rate unknown'
-    ? 'fast rate unknown — no rate on file for this tier'
-    : 'no price on file'
+    ? t('fast rate unknown — no rate on file for this tier')
+    : t('no price on file')
 }
 
 function priceTextFor(model: string, day: string, ctx: StatsCtx): { priced: ModelRow['priced']; text: string } {
   const p = priceOf(model, day, ctx.pricing)
-  if (!p) return { priced: 'none', text: 'no price on file' }
-  const rates = `${usd(p.price.input)} / ${usd(p.price.output)} per 1M`
-  if (p.confidence === 'custom') return { priced: 'custom', text: `${rates}, your configured rates` }
+  if (!p) return { priced: 'none', text: t('no price on file') }
+  const rates = t('{0} / {1} per 1M', usd(p.price.input), usd(p.price.output))
+  if (p.confidence === 'custom') return { priced: 'custom', text: t('{0}, your configured rates', rates) }
   if (p.confidence === 'family') {
-    return { priced: 'family', text: `${rates}, borrowed from ${p.family ?? 'a related model'}` }
+    return { priced: 'family', text: t('{0}, borrowed from {1}', rates, p.family ?? t('a related model')) }
   }
-  return { priced: 'exact', text: `${rates}, list as of ${PRICES_AS_OF}` }
+  return { priced: 'exact', text: t('{0}, list as of {1}', rates, PRICES_AS_OF) }
 }
 
 /**
@@ -1628,7 +1652,7 @@ function modelSeries(ctx: StatsCtx, days: string[], metric: Metric): ChartSeries
     if (rest.length > 0) {
       const other = new Array<number>(days.length).fill(0)
       for (const r of rest) for (let i = 0; i < other.length; i++) other[i] += r.values[i]
-      out.push({ key: `${source}:other`, label: 'other', source, rank: 'other', values: other })
+      out.push({ key: `${source}:other`, label: t('other'), source, rank: 'other', values: other })
     }
   }
   return out
@@ -1744,10 +1768,11 @@ export function heatmap(
       level,
       value,
       text: outside
-        ? 'outside coverage'
+        ? t('outside coverage')
         : value > 0
+          // A date and a figure with a colon between them: no word to translate.
           ? `${day}: ${metric === 'cost' ? costText(value) : compact(value)}`
-          : `${day}: no usage`,
+          : t('{0}: no usage', day),
     })
     if (outside) continue
     if (value > 0) {
@@ -1960,9 +1985,8 @@ export function records(
   const note = excluded === 0
     ? null
     : excluded === 1
-      ? '1 rolled-up month bucket in this range has no day left and is not in these records'
-      : `${excluded} rolled-up month buckets in this range have no day left `
-        + 'and are not in these records'
+      ? t('1 rolled-up month bucket in this range has no day left and is not in these records')
+      : t('{0} rolled-up month buckets in this range have no day left and are not in these records', excluded)
   return {
     peakDay,
     streak,
@@ -1973,7 +1997,7 @@ export function records(
     topProjects: topOf(
       [...projects.entries()].map(([label, g]) => ({
         label,
-        detail: `${g.sessions} session${g.sessions === 1 ? '' : 's'}`,
+        detail: g.sessions === 1 ? t('{0} session', g.sessions) : t('{0} sessions', g.sessions),
         usage: g.usage,
         cost: '–',
       })),
@@ -1984,7 +2008,7 @@ export function records(
     attributionOn: on,
     note,
     sessionNote: sessions.length > 0
-      ? 'projects and sessions count each session’s whole lifetime, which can reach outside this range'
+      ? t('projects and sessions count each session’s whole lifetime, which can reach outside this range')
       : null,
   }
 }
@@ -2004,9 +2028,15 @@ export function records(
  */
 function gridBasis(days: number): HoursData['basis'] {
   const weeks = Math.ceil(days / 7)
-  if (days === 0) return { weeks: 0, days: 0, text: 'no day with usage in this range' }
-  const weekText = `based on ${weeks} week${weeks === 1 ? '' : 's'}`
-  return { weeks, days, text: weeks < GRID_HABIT_WEEKS ? `${weekText} — a record, not a habit` : weekText }
+  if (days === 0) return { weeks: 0, days: 0, text: t('no day with usage in this range') }
+  // Four whole sentences rather than one built from pieces: the qualifier is part of the
+  // sentence, and singular and plural are not the same sentence in every language.
+  const thin = weeks < GRID_HABIT_WEEKS
+  const one = weeks === 1
+  const text = thin
+    ? (one ? t('based on {0} week — a record, not a habit', weeks) : t('based on {0} weeks — a record, not a habit', weeks))
+    : (one ? t('based on {0} week', weeks) : t('based on {0} weeks', weeks))
+  return { weeks, days, text }
 }
 
 /**
@@ -2087,7 +2117,9 @@ export function hours(ctx: StatsCtx, range: DayRange, zone: 'local' | 'utc'): Ho
     zone,
     days: seenDays.size,
     note: excluded > 0
-      ? `${excluded} rolled-up bucket${excluded === 1 ? '' : 's'} in this range have no hour left and are not in the profile`
+      ? (excluded === 1
+        ? t('{0} rolled-up bucket in this range have no hour left and are not in the profile', excluded)
+        : t('{0} rolled-up buckets in this range have no hour left and are not in the profile', excluded))
       : null,
   }
 }
@@ -2179,9 +2211,11 @@ export function localBlock(ctx: StatsCtx, source: Source, now: number = ctx.now)
     requests: mark(tokens(b.requests)),
     firstAt,
     complete,
-    text: `Local estimate — ${usage} tokens in the last ${LOCAL_BLOCK_HOURS} h`
-      + (firstAt !== null ? `, first counted at ${firstAt}` : '')
-      + '. Not the provider’s window; no limit is known.',
+    text: firstAt !== null
+      ? t('Local estimate — {0} tokens in the last {1} h, first counted at {2}. Not the provider’s window; no limit is known.',
+        usage, LOCAL_BLOCK_HOURS, firstAt)
+      : t('Local estimate — {0} tokens in the last {1} h. Not the provider’s window; no limit is known.',
+        usage, LOCAL_BLOCK_HOURS),
   }
 }
 
@@ -2274,9 +2308,9 @@ export function cacheStateOf(s: SessionRec, now: number): string | null {
   if (s.lastCacheWriteTs === null || s.lastCacheTtl === null) return null
   const ttl = s.lastCacheTtl === '1h' ? 60 * 60_000 : 5 * 60_000
   const left = s.lastCacheWriteTs + ttl - now
-  if (left <= 0) return estimate('cache likely cold')
+  if (left <= 0) return estimate(t('cache likely cold'))
   const minutes = Math.max(1, Math.round(left / 60_000))
-  return estimate(`cache likely cold in ${minutes} min`)
+  return estimate(t('cache likely cold in {0} min', minutes))
 }
 
 export function cacheStates(ctx: StatsCtx): { session: string; text: string }[] {

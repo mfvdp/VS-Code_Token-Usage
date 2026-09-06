@@ -8,10 +8,10 @@ import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
 import { QuotaSample, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
 import { paceVerdict, windowElapsed } from '../src/pace'
-import { THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
+import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
 import {
-  DASHBOARD_SECTION_KEYS, PROBLEM_ACTION, SOURCE_TITLE, SPARK_DAYS, SPARK_SLOTS, SPARK_SLOT_MS,
+  DASHBOARD_SECTION_KEYS, problemActions, SOURCE_TITLE, SPARK_DAYS, SPARK_SLOTS, SPARK_SLOT_MS,
   WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel, defaultUiState, forecastsFor,
   SparkVm, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
@@ -586,7 +586,7 @@ test('parseWebviewMessage keeps the command allow-list to eleven harmless comman
 })
 
 test('every repair step a card offers is a command its own view can run', () => {
-  for (const [kind, action] of Object.entries(PROBLEM_ACTION)) {
+  for (const [kind, action] of Object.entries(problemActions())) {
     assert.ok(
       WEBVIEW_COMMANDS.includes(action.command as never),
       `${kind}: ${action.command} is offered as a button the webview cannot send`,
@@ -596,7 +596,7 @@ test('every repair step a card offers is a command its own view can run', () => 
 
 test('every problem kind names one repair step, and the follower is sent to the dashboard', () => {
   assert.deepEqual(
-    Object.fromEntries(Object.entries(PROBLEM_ACTION).map(([k, a]) => [k, a.command])),
+    Object.fromEntries(Object.entries(problemActions()).map(([k, a]) => [k, a.command])),
     {
       noToken: 'tokenPace.showOutput',
       tokenExpired: 'tokenPace.showOutput',
@@ -615,7 +615,7 @@ test('every problem kind names one repair step, and the follower is sent to the 
       unknown: 'tokenPace.showOutput',
     },
   )
-  const labels = new Set(Object.values(PROBLEM_ACTION).map((a) => a.label))
+  const labels = new Set(Object.values(problemActions()).map((a) => a.label))
   assert.deepEqual([...labels].sort(),
     ['Fetch quota now', 'Open dashboard', 'Open settings', 'Re-read history', 'Show log'])
 })
@@ -1312,4 +1312,39 @@ test('the countdown is as of the model\'s own clock, and past the expiry the lin
   }).quotas[0].promptCache
   assert.equal(bare?.text, 'prompt cache – · expires in – (– TTL) · hit ratio –')
   assert.equal(bare?.expired, false)
+})
+
+/**
+ * A window turning over `cycles` times: four rising readings, then a fall no `resetsAt`
+ * announced — the evidence `quotaHistory.cycles()` splits a complete cycle on.
+ */
+function fillCompleteCycles(history: QuotaHistory, cycles: number): void {
+  let t = NOW - 24 * 3_600_000
+  for (let c = 0; c <= cycles; c++) {
+    for (const percent of [20, 40, 60, 80]) {
+      history.add(
+        {
+          source: 'claude', ok: true, origin: 'poll', fetchedAt: Math.round(t / 1000),
+          planType: null, windows: [win({ percent })],
+        },
+        FINGERPRINT,
+        t,
+      )
+      t += 30 * 60_000
+    }
+  }
+}
+
+test('the retrospective counts complete cycles, and one cycle is not "1 cycles"', () => {
+  const one = makeHistory()
+  fillCompleteCycles(one, 1)
+  const first = buildViewModel(makeInput({ history: one })).retro
+    .find((r) => r.windowId === 'session:300')
+  assert.equal(first?.text, 'not enough data yet · 1 complete cycle on file')
+
+  const two = makeHistory()
+  fillCompleteCycles(two, 2)
+  const second = buildViewModel(makeInput({ history: two })).retro
+    .find((r) => r.windowId === 'session:300')
+  assert.equal(second?.text, 'not enough data yet · 2 complete cycles on file')
 })

@@ -10,6 +10,7 @@
  * nobody can see.
  */
 
+import { t } from './i18n'
 import { PaceLevel, PaceVerdict, QuotaWindow } from './types'
 
 export type Sensitivity = 'relaxed' | 'normal' | 'strict' | 'custom'
@@ -116,8 +117,8 @@ export function windowElapsed(
  */
 function pointsText(points: number): string {
   const n = Math.round(Math.abs(points))
-  if (n === 0) return 'on pace'
-  return points > 0 ? `${n} % ahead of pace` : `${n} % of the window still spare`
+  if (n === 0) return t('on pace')
+  return points > 0 ? t('{0} % ahead of pace', n) : t('{0} % of the window still spare', n)
 }
 
 /**
@@ -144,7 +145,7 @@ function pointsText(points: number): string {
 export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceConfig): PaceVerdict {
   const { tolerancePoints, minElapsedPercent, levels } = effectivePace(cfg)
   if (!Number.isFinite(percent)) {
-    return { level: 'ok', points: null, ratio: null, measuring: false, text: 'no reading' }
+    return { level: 'ok', points: null, ratio: null, measuring: false, text: t('no reading') }
   }
   const hasClock = elapsed !== null && Number.isFinite(elapsed)
   const points = hasClock ? percent - (elapsed as number) : null
@@ -152,13 +153,13 @@ export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceCo
   // 99.5 rather than 100 so the level matches the figure the user sees, which is
   // rounded to whole percent.
   if (percent >= 99.5) {
-    return { level: 'error', points, ratio, measuring: false, text: 'exhausted' }
+    return { level: 'error', points, ratio, measuring: false, text: t('exhausted') }
   }
   if (!hasClock) {
-    return { level: 'ok', points: null, ratio: null, measuring: false, text: 'no clock for this window' }
+    return { level: 'ok', points: null, ratio: null, measuring: false, text: t('no clock for this window') }
   }
   if ((elapsed as number) < minElapsedPercent && percent <= MEASURING_CAP_POINTS) {
-    return { level: 'ok', points, ratio, measuring: true, text: 'measuring · window just reset' }
+    return { level: 'ok', points, ratio, measuring: true, text: t('measuring · window just reset') }
   }
   const p = points as number
   const ahead = Math.round(p - tolerancePoints)

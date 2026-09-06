@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Frederik Marx
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# LF in the repository and LF in every working tree, Windows included.
+#
+# Git for Windows installs with core.autocrlf=true and the CI runner keeps that default, so
+# without this line the Windows job checks out sources whose lines end in CRLF. The tests that
+# read the repository's own text then look for a blank line ("\n\n") that no longer exists —
+# the ProblemKind table is parsed out of src/types.ts that way — and the bundle built there
+# would ship CRLF to every user. `text=auto` still leaves the pictures alone: Git detects a
+# binary file by its content, not by this rule.
+* text=auto eol=lf

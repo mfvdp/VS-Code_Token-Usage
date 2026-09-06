@@ -192,6 +192,26 @@ test("hourCycle 'auto' follows the machine, and stays one of the two forms", () 
   assert.ok(auto === '06:00' || auto === '06:00 AM', `unexpected auto form ${auto}`)
 })
 
+test('the clock is spelled with ordinary spaces, whatever ICU does this year', () => {
+  // CLDR 42 (ICU 72) put U+202F before AM/PM in en-US and CLDR 48 (ICU 78) took it back
+  // out; both ship inside Node 22, so an unnormalised string differs from runner to runner
+  // — and `package.nls.json` documents exactly one of the two ("06:00 AM"). The character
+  // is invisible, which is precisely why it has to be asserted.
+  const t = Date.UTC(2026, 8, 3, 6, 0)
+  for (const cfg of [
+    { ...utc, hourCycle: 'h12' as const },
+    { ...utc, hourCycle: 'h23' as const },
+    { ...utc, hourCycle: 'auto' as const },
+    { ...berlin, hourCycle: 'h12' as const },
+  ]) {
+    for (const withWeekday of [false, true]) {
+      const out = formatTime(t, cfg, withWeekday)
+      assert.doesNotMatch(out, /[\u00a0\u202f\u2007\u2009]/, `${JSON.stringify(out)} carries an exotic space`)
+    }
+  }
+  assert.equal(formatTime(t, { ...utc, hourCycle: 'h12' }), '06:00 AM')
+})
+
 test('ageText names absence instead of showing a zero age', () => {
   const now = Date.UTC(2026, 8, 3, 12, 0)
   assert.equal(ageText(null, now), null)

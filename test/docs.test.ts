@@ -24,7 +24,15 @@ import { QuotaState, QuotaWindow } from '../src/types'
 import { readManifest } from './helpers/nls'
 
 const ROOT = join(__dirname, '..')
-const readDoc = (name: string): string => readFileSync(join(ROOT, name), 'utf8')
+/**
+ * Line endings are normalised on the way in. A Windows checkout with `core.autocrlf` — the
+ * Git for Windows default, and the CI runner's — hands out CRLF, and a rule like "the
+ * declaration ends at the first blank line" (`indexOf('\n\n')`) then matches nothing at all:
+ * the assertion below silently reads the whole rest of the file instead of the declaration.
+ * The words these tests pin are the same on every platform; the separators are not part of
+ * them, so they are levelled here rather than at each of the twenty reading sites.
+ */
+const readDoc = (name: string): string => readFileSync(join(ROOT, name), 'utf8').replace(/\r\n/g, '\n')
 
 interface Property {
   type?: string

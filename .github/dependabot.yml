@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Frederik Marx
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# The dependencies are few and all of them are build-time (esbuild, typescript, vsce), so the
+# risk is not a breaking upgrade — it is an update nobody notices for a year. Weekly, with
+# minor and patch updates collected into one pull request per ecosystem: a single PR is read,
+# five separate ones are waved through. A major version arrives on its own, because that is
+# the one that has to be judged.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

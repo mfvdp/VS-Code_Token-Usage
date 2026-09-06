@@ -249,8 +249,9 @@ export function maybeAdapterFor(source: string): ProviderAdapter | undefined {
   return isKnownSource(source) ? BY_ID[source] : undefined
 }
 
-/** The provider ids, in registry order. */
-export const SOURCES: Source[] = ADAPTERS.map((a) => a.id)
+/** The provider ids, in registry order — read-only, because that order *is* the
+ * display order and a caller that sorts in place would reorder every view at once. */
+export const SOURCES: readonly Source[] = ADAPTERS.map((a) => a.id)
 
 /** Whether a string names a provider this build knows. The guard for data read off disk. */
 export function isKnownSource(v: unknown): v is Source {

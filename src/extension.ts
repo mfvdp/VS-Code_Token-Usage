@@ -863,7 +863,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const candidates = quotaMgr.candidates()
     const drift = quotaMgr.driftReport()
     const net = cfg.diagnostics.includeNetworkSetup
-    const quota: QuotaDiag[] = (['claude', 'codex'] as Source[]).map((source) => ({
+    const quota: QuotaDiag[] = SOURCES.map((source) => ({
       source,
       candidates: (candidates[source] ?? []).map((c) => ({
         id: c.id, ok: c.ok, ageSec: c.ageSec, problem: c.problem ?? null,

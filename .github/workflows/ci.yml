@@ -42,8 +42,43 @@ jobs:
       - name: Build bundles
         run: npm run build
 
+      # One shell on all three platforms: the Windows default is PowerShell, where
+      # `2>&1 | tee` neither redirects nor pipes what bash does, and the log below would be
+      # a transcript of objects instead of TAP. `pipefail` keeps tee from swallowing the
+      # suite's exit code.
       - name: Test
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log
+
+      # Reading a job log takes a token; reading a run's summary page does not. So when the
+      # suite fails, the failures are written where they can be read, linked or pasted: each
+      # `not ok` line with the indented TAP block under it, which is where node puts the
+      # expected and actual values, the operator and the stack.
+      - name: Failing tests
+        if: failure()
+        shell: bash
+        run: |
+          if [ ! -f test.log ]; then
+            echo "No test.log — the run failed before the suite started."
+            exit 0
+          fi
+          {
+            echo "### Failing tests (${{ matrix.os }})"
+            echo
+            echo '```'
+            awk '
+              /^ *not ok / { blk = 1; n = 0 }
+              blk && total < 2000 { print; n++; total++; if (n >= 40) blk = 0 }
+              / *\.\.\.$/ { blk = 0 }
+              END {
+                if (total == 0) print "The suite reported no \"not ok\" line; see the Test step above."
+                else if (total >= 2000) print "… truncated here; the rest is in the job log."
+              }
+            ' test.log
+            echo '```'
+          } | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       - name: Privacy check (http literals against the allow-list)
         run: npm run check:privacy

@@ -311,6 +311,31 @@ test('planName is trimmed, cut at 40 characters and otherwise dropped', () => {
   assert.deepEqual(sanitize({ 'tokenPace.planName': { gemini: 'Ultra' } }).planName, {})
 })
 
+test('planName is one line of plain text — no backtick, no control character', () => {
+  // The status-bar tooltip prints the name inside a code span, so a backtick in the value
+  // used to close that span and hand the rest of the tooltip to the user's markup.
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: 'Max `20x`' } }).planName,
+    { claude: 'Max 20x' })
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: '`' } }).planName, {})
+  // A line break splits a one-line label in two; the words survive, joined by one space.
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: 'Max\n20x' } }).planName,
+    { claude: 'Max 20x' })
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { codex: 'Plus\r\n  Team\tA' } }).planName,
+    { codex: 'Plus Team A' })
+  // The invisible ones are removed outright, not turned into a gap.
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: 'Ma\u0000x\u007f 20x\u009b' } }).planName,
+    { claude: 'Max 20x' })
+  // The cap counts what is left, so stripped characters do not eat into the 40 a user has;
+  // a cut that lands on a space is trimmed again rather than printing a trailing gap.
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: '`'.repeat(20) + 'y'.repeat(40) } }).planName,
+    { claude: 'y'.repeat(40) })
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: 'z'.repeat(39) + '  tail' } }).planName,
+    { claude: 'z'.repeat(39) })
+  // Everything a name legitimately contains is left alone.
+  assert.deepEqual(sanitize({ 'tokenPace.planName': { claude: 'Max 20x (Team) · €', codex: 'Pro+' } }).planName,
+    { claude: 'Max 20x (Team) · €', codex: 'Pro+' })
+})
+
 test('the provider outranks the setting, and a configured name says that it is one', () => {
   const cfg = sanitize({ 'tokenPace.planName': { claude: 'Max 20x' } })
   assert.deepEqual(planNameOf(cfg, 'claude', 'max20'), { name: 'max20', from: 'provider' })

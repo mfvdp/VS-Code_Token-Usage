@@ -12,7 +12,7 @@
  * No `vscode` import, ever: this module is loaded by the test bundle.
  */
 
-import { LABEL, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
+import { LABEL, SOURCES, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
 import { billable, BucketFilter, CostSummary } from './agg'
 import { BudgetRow, worstBudget } from './budget'
 import { Config, CONTEXT_NOTE, planNameOf, readPaceConfig, readTimeConfig } from './config'
@@ -697,7 +697,7 @@ const PERIOD_LABEL: Record<Config['summary']['period'], string> = {
 function scopeSources(cfg: Config): Source[] {
   if (cfg.summary.scope === 'claude') return ['claude']
   if (cfg.summary.scope === 'codex') return ['codex']
-  return ['claude', 'codex']
+  return [...SOURCES]
 }
 
 function periodRange(ctx: RenderContext): { from: string; to: string } {

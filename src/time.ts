@@ -11,6 +11,8 @@
  * move usage between days.
  */
 
+import { locale, t } from './i18n'
+
 /** IANA zone name, or the two aliases. An unusable name falls back to the system zone. */
 export type Zone = 'system' | 'utc' | string
 
@@ -223,36 +225,36 @@ export function rangeFor(
   }
   switch (preset) {
     case 'today':
-      return { from: today, to: today, label: 'Today', preset }
+      return { from: today, to: today, label: t('Today'), preset }
     case 'yesterday': {
       const y = addDays(today, -1)
-      return { from: y, to: y, label: 'Yesterday', preset }
+      return { from: y, to: y, label: t('Yesterday'), preset }
     }
     case '7d':
     case '30d':
     case '90d': {
       const n = Number(preset.slice(0, -1))
-      return { from: addDays(today, -(n - 1)), to: today, label: `Last ${n} days`, preset }
+      return { from: addDays(today, -(n - 1)), to: today, label: t('Last {0} days', n), preset }
     }
     case 'thisWeek':
-      return { from: startOfWeekDay(today, cfg), to: today, label: 'This week', preset }
+      return { from: startOfWeekDay(today, cfg), to: today, label: t('This week'), preset }
     case 'thisMonth':
-      return { from: `${today.slice(0, 8)}01`, to: today, label: 'This month', preset }
+      return { from: `${today.slice(0, 8)}01`, to: today, label: t('This month'), preset }
     case 'lastMonth': {
       const lastOfPrev = addDays(`${today.slice(0, 8)}01`, -1)
       return {
-        from: `${lastOfPrev.slice(0, 8)}01`, to: lastOfPrev, label: 'Last month', preset,
+        from: `${lastOfPrev.slice(0, 8)}01`, to: lastOfPrev, label: t('Last month'), preset,
       }
     }
     case 'year':
-      return { from: `${today.slice(0, 4)}-01-01`, to: today, label: 'This year', preset }
+      return { from: `${today.slice(0, 4)}-01-01`, to: today, label: t('This year'), preset }
     case 'all':
       // Without a first ingest day there is no coverage to claim — today is the honest floor.
       return {
-        from: firstDay && isDay(firstDay) ? firstDay : today, to: today, label: 'All time', preset,
+        from: firstDay && isDay(firstDay) ? firstDay : today, to: today, label: t('All time'), preset,
       }
     default:
-      return { from: today, to: today, label: 'Today', preset: 'today' }
+      return { from: today, to: today, label: t('Today'), preset: 'today' }
   }
 }
 
@@ -268,7 +270,7 @@ export function previousRange(r: DayRange): DayRange | null {
   const to = addDays(r.from, -1)
   const from = addDays(to, -(len - 1))
   return {
-    from, to, label: len === 1 ? 'Previous day' : `Previous ${len} days`, preset: 'custom',
+    from, to, label: len === 1 ? t('Previous day') : t('Previous {0} days', len), preset: 'custom',
   }
 }
 
@@ -277,8 +279,9 @@ export type ResetFormat = 'none' | 'relative' | 'absolute' | 'both'
 /**
  * Which hour cycle 'auto' means. The setting exists because a 12-hour reader
  * misreads "18:00"; that preference lives in the OS locale, so it is read from
- * there. The digits themselves are always formatted with the en-US pattern so
- * the status bar looks the same on every machine.
+ * there. The digits themselves follow the seam's locale (`locale()` in i18n.ts:
+ * en-US unless the editor runs in another language), so the status bar looks
+ * the same on every machine of one language.
  */
 let autoCycle: 'h12' | 'h23' | null = null
 function systemHourCycle(): 'h12' | 'h23' {
@@ -315,16 +318,33 @@ function plainSpaces(s: string): string {
 export function formatTime(ms: number, cfg: TimeConfig, withWeekday = false): string {
   const zone = resolveZone(cfg.zone)
   const cycle = effectiveCycle(cfg.hourCycle)
-  const f = formatter(`t|${zone ?? ''}|${cycle}`, () => new Intl.DateTimeFormat('en-US', {
+  const lang = locale()
+  const f = formatter(`t|${lang}|${zone ?? ''}|${cycle}`, () => new Intl.DateTimeFormat(lang, {
     timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: cycle,
   }))
   const time = plainSpaces(f.format(ms))
   if (!withWeekday) return time
-  const w = formatter(`w|${zone ?? ''}`, () => new Intl.DateTimeFormat('en-US', {
+  const w = formatter(`w|${lang}|${zone ?? ''}`, () => new Intl.DateTimeFormat(lang, {
     timeZone: zone, weekday: 'short',
   }))
   // Two letters: the bar is narrow and "Mo" is unambiguous next to a clock time.
   return `${w.format(ms).slice(0, 2)} ${time}`
+}
+
+/**
+ * "Sat 6 Sep": the calendar day of an instant in the configured zone, for a sparkline label
+ * or a table cell. Weekday, day, month in that order whatever the locale — the label has to
+ * stay narrow and read the same next to a clock time — with the locale's own names.
+ */
+export function formatDay(ms: number, cfg: TimeConfig): string {
+  const zone = resolveZone(cfg.zone)
+  const lang = locale()
+  const f = formatter(`d|${lang}|${zone ?? ''}`, () => new Intl.DateTimeFormat(lang, {
+    timeZone: zone, weekday: 'short', day: 'numeric', month: 'short',
+  }))
+  const parts = f.formatToParts(ms)
+  const part = (type: Intl.DateTimeFormatPart['type']): string => parts.find((p) => p.type === type)?.value ?? ''
+  return `${part('weekday')} ${part('day')} ${part('month')}`
 }
 
 /**
@@ -336,7 +356,7 @@ export function formatTime(ms: number, cfg: TimeConfig, withWeekday = false): st
 export function relativeShort(ms: number, now: number): string {
   if (!Number.isFinite(ms)) return ''
   const diff = ms - now
-  if (diff <= 0) return 'reset due'
+  if (diff <= 0) return t('reset due')
   const total = Math.floor(diff / 1000)
   if (total < 60) return '<1m'
   const h = Math.floor(total / 3600)
@@ -362,7 +382,7 @@ export function relativeTime(target: number, now = Date.now()): string {
   if (h >= 48) txt = `${Math.floor(h / 24)} d ${h % 24} h`
   else if (h > 0) txt = `${h} h ${String(m).padStart(2, '0')} min`
   else txt = `${m} min`
-  return past ? `${txt} ago` : `in ${txt}`
+  return past ? t('{0} ago', txt) : t('in {0}', txt)
 }
 
 /**
@@ -388,16 +408,16 @@ export function formatReset(
   const far = resetsAt - now >= MS_DAY
   const abs = formatTime(resetsAt, cfg, far)
   if (fmt === 'absolute') return abs
-  return resetsAt <= now ? `${abs} (reset due)` : `${abs} (in ${rel})`
+  return resetsAt <= now ? `${abs} (${t('reset due')})` : `${abs} (${t('in {0}', rel)})`
 }
 
 /** Age of a reading; null when nothing was ever read (absence is not "0 min old"). */
 export function ageText(fetchedAtSec: number | null, now: number): string | null {
   if (fetchedAtSec === null || !Number.isFinite(fetchedAtSec) || fetchedAtSec <= 0) return null
   const min = (now - fetchedAtSec * 1000) / 60000
-  if (min < 1) return 'just now'
-  if (min < 60) return `${Math.round(min)} min ago`
+  if (min < 1) return t('just now')
+  if (min < 60) return t('{0} min ago', Math.round(min))
   const h = min / 60
-  if (h < 48) return `${Math.round(h)} h ago`
-  return `${Math.round(h / 24)} d ago`
+  if (h < 48) return t('{0} h ago', Math.round(h))
+  return t('{0} d ago', Math.round(h / 24))
 }

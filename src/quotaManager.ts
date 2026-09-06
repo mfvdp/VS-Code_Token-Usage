@@ -15,6 +15,7 @@
 import * as fs from 'fs'
 import { SOURCES } from './adapters'
 import { PersistentAppServer, findCodexBinary as realFindCodexBinary } from './appServer'
+import { t } from './i18n'
 import { detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, poll as realPoll } from './poller'
 import { codexStateFromBody, quotaFileFor, writeQuotaCacheFile } from './quota'
 import { fingerprintFor } from './quotaHistory'
@@ -428,10 +429,10 @@ export class QuotaManager {
       const why = this.blocked()
       if (why === 'consent') {
         kind = 'consentPending'
-        text = 'Network access has not been allowed yet'
+        text = t('Network access has not been allowed yet')
       } else if (why === 'follower') {
         kind = 'follower'
-        text = 'Another window holds the lease and fetches for this editor'
+        text = t('Another window holds the lease and fetches for this editor')
       } else if (why === 'mode') {
         // Whatever the winning source said beats the mode: the mode only explains
         // why we did not fetch ourselves, not why the local reading is missing.
@@ -441,10 +442,10 @@ export class QuotaManager {
         // bar would explain a mode that is not set and advise switching to the
         // one that already is.
         kind = named ?? (this.opts.mode === 'cache' ? 'modeCache' : 'unknown')
-        text = state.problem ?? `No fetch of our own: quotaSource is "${this.opts.mode}"`
+        text = state.problem ?? t('No fetch of our own: quotaSource is "{0}"', this.opts.mode)
       } else {
         kind = state.problemKind ?? 'unknown'
-        text = state.problem ?? 'No quota reading'
+        text = state.problem ?? t('No quota reading')
       }
     }
     return { ...state, problem: text, problemKind: kind, nextAttemptAt }
@@ -513,17 +514,19 @@ export class QuotaManager {
         this.persist()
         this.log(`${src}: quota fetched`)
       } else {
-        this.problem[src] = { text: r.problem ?? 'Fetch failed', kind: r.problemKind ?? 'unknown' }
+        // The poller's own words are what the display shows; only our fallback is translated,
+        // and the log keeps the English so an issue report reads the same on every machine.
+        this.problem[src] = { text: r.problem ?? t('Fetch failed'), kind: r.problemKind ?? 'unknown' }
         this.failCount[src] += 1
         // No retry hint means a permanent cause (missing credentials, no binary) —
         // do not keep asking every minute in that case.
         const wait = r.retryAfterSeconds ?? this.intervalMs() / 1000
         this.nextPollAt[src] = now + wait * 1000
         this.persist()
-        this.log(`${src}: ${this.problem[src]!.text} — next attempt in ${Math.round(wait / 60)} min`)
+        this.log(`${src}: ${r.problem ?? 'Fetch failed'} — next attempt in ${Math.round(wait / 60)} min`)
       }
     } catch (e) {
-      this.problem[src] = { text: 'Unexpected error while fetching', kind: 'unknown' }
+      this.problem[src] = { text: t('Unexpected error while fetching'), kind: 'unknown' }
       this.failCount[src] += 1
       this.nextPollAt[src] = this.deps.now() + this.intervalMs()
       this.log(`${src}: ${(e as Error)?.name ?? 'error'} while fetching`)

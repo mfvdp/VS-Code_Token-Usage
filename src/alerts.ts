@@ -31,6 +31,7 @@
 import { PROVIDER_NAME } from './adapters'
 import { BudgetPeriod, BudgetRow } from './budget'
 import { AlertConfig } from './config'
+import { t } from './i18n'
 import { MementoLike } from './storage'
 import { relativeShort } from './time'
 import { Forecast, PaceLevel, PaceVerdict, QuotaState, QuotaWindow, Source } from './types'
@@ -38,6 +39,11 @@ import { Forecast, PaceLevel, PaceVerdict, QuotaState, QuotaWindow, Source } fro
 /** Memento key of the persisted alert state. */
 export const ALERTS_KEY = 'tokenPace.alerts'
 
+/**
+ * The two buttons of every alert, as their English keys. What the user sees is `t()` of
+ * these — computed inside `evaluate`, because a `t()` at module load would run before the
+ * bundle exists (see i18n.ts). The literals there must stay the same words as here.
+ */
 export const ACTION_DASHBOARD = 'Open Dashboard'
 export const ACTION_SNOOZE = 'Not today'
 
@@ -121,7 +127,7 @@ export function nextLocalMidnight(now: number): number {
 }
 
 function providerName(source: AlertSubject): string {
-  return source === 'total' ? 'All providers' : PROVIDER_NAME[source]
+  return source === 'total' ? t('All providers') : PROVIDER_NAME[source]
 }
 
 function pct(value: number): string {
@@ -196,10 +202,13 @@ interface BudgetGroup {
   scopes: Set<BudgetRow['scope']>
 }
 
-const PERIOD_TITLE: Record<BudgetPeriod, string> = {
-  day: 'today',
-  week: 'this week',
-  month: 'this month',
+/** A function rather than a table: the words are translated when the message is built. */
+function periodTitle(period: BudgetPeriod): string {
+  switch (period) {
+    case 'day': return t('today')
+    case 'week': return t('this week')
+    case 'month': return t('this month')
+  }
 }
 
 /** Adds one window's sentence fragment to its provider's group. */
@@ -316,11 +325,14 @@ export class Alerts {
     // open must not make the same announcement again on the next start.
     await this.save(state, now)
 
+    // The same words as ACTION_DASHBOARD / ACTION_SNOOZE, translated now that the bundle is there.
+    const openDashboard = t('Open Dashboard')
+    const notToday = t('Not today')
     for (const decision of pending) {
       this.log(`Alert (${decision.kind}): ${decision.message}`)
-      const choice = await this.notify(decision.message, [ACTION_DASHBOARD, ACTION_SNOOZE], decision.level)
-      if (choice === ACTION_DASHBOARD) decision.command = DASHBOARD_COMMAND
-      if (choice === ACTION_SNOOZE) {
+      const choice = await this.notify(decision.message, [openDashboard, notToday], decision.level)
+      if (choice === openDashboard) decision.command = DASHBOARD_COMMAND
+      if (choice === notToday) {
         const until = nextLocalMidnight(now)
         decision.snoozedUntil = until
         const fresh = this.load()
@@ -417,7 +429,7 @@ export class Alerts {
         identities: g.identities,
         windowIds: g.windowIds,
         level: 'warning',
-        message: `${providerName(source)} quota: ${g.parts.join(' · ')}`,
+        message: t('{0} quota: {1}', providerName(source), g.parts.join(' · ')),
       })
     }
   }
@@ -426,9 +438,9 @@ export class Alerts {
   private thresholdPart(w: QuotaWindow, usedLevel: number): string {
     if (this.cfg.basis === 'remaining') {
       const left = Math.max(0, 100 - w.percent)
-      return `${w.label} has ${pct(left)} left (threshold ${pct(100 - usedLevel)})`
+      return t('{0} has {1} left (threshold {2})', w.label, pct(left), pct(100 - usedLevel))
     }
-    return `${w.label} at ${pct(w.percent)} (threshold ${pct(usedLevel)})`
+    return t('{0} at {1} (threshold {2})', w.label, pct(w.percent), pct(usedLevel))
   }
 
   private paceDecisions(
@@ -453,7 +465,7 @@ export class Alerts {
       if (!fast || !wasOk || entry.paceWarned) continue
       entry.paceWarned = true
       announced.add(c.identity)
-      collect(bySource, c, `${c.window.label} — ${v.text} (${pct(c.window.percent)} used)`)
+      collect(bySource, c, t('{0} — {1} ({2} used)', c.window.label, v.text, pct(c.window.percent)))
     }
     for (const [source, g] of bySource) {
       out.push({
@@ -462,7 +474,7 @@ export class Alerts {
         identities: g.identities,
         windowIds: g.windowIds,
         level: 'warning',
-        message: `${providerName(source)} pace: ${g.parts.join(' · ')}`,
+        message: t('{0} pace: {1}', providerName(source), g.parts.join(' · ')),
       })
     }
   }
@@ -491,11 +503,10 @@ export class Alerts {
       entry.at = now
       state.entries[c.identity] = entry
       announced.add(c.identity)
-      const reset = c.window.resetsAt !== null
-        ? `, before it resets (${relativeShort(c.window.resetsAt, now)})`
-        : ''
-      const when = f.etaMs > now ? `in ~${relativeShort(f.etaMs, now)}` : 'imminently'
-      collect(bySource, c, `${c.window.label} runs out ${when}${reset}`)
+      const when = f.etaMs > now ? t('in ~{0}', relativeShort(f.etaMs, now)) : t('imminently')
+      collect(bySource, c, c.window.resetsAt !== null
+        ? t('{0} runs out {1}, before it resets ({2})', c.window.label, when, relativeShort(c.window.resetsAt, now))
+        : t('{0} runs out {1}', c.window.label, when))
     }
     for (const [source, g] of bySource) {
       out.push({
@@ -504,7 +515,7 @@ export class Alerts {
         identities: g.identities,
         windowIds: g.windowIds,
         level: 'warning',
-        message: `${providerName(source)} — on this pace: ${g.parts.join(' · ')}`,
+        message: t('{0} — on this pace: {1}', providerName(source), g.parts.join(' · ')),
       })
     }
   }
@@ -555,9 +566,9 @@ export class Alerts {
         ?? { parts: [], identities: [], keys: [], scopes: new Set<BudgetRow['scope']>() }
       // The lower bound is stated, not rounded away: unpriced models make a money
       // budget's used figure — and therefore its share — a floor, never the whole story.
-      group.parts.push(
-        `${r.label} — ${r.usedText} of ${r.limitText} (${r.shareText}${r.partial ? ', lower bound' : ''})`,
-      )
+      group.parts.push(r.partial
+        ? t('{0} — {1} of {2} ({3}, lower bound)', r.label, r.usedText, r.limitText, r.shareText)
+        : t('{0} — {1} of {2} ({3})', r.label, r.usedText, r.limitText, r.shareText))
       group.identities.push(r.identity)
       group.keys.push(r.key)
       group.scopes.add(r.scope)
@@ -574,7 +585,7 @@ export class Alerts {
         windowIds: [],
         budgetKeys: g.keys,
         level: 'warning',
-        message: `Budget ${PERIOD_TITLE[period]} — past ${pct(level)}: ${g.parts.join(' · ')}`,
+        message: t('Budget {0} — past {1}: {2}', periodTitle(period), pct(level), g.parts.join(' · ')),
       })
     }
   }
@@ -602,7 +613,7 @@ export class Alerts {
       entry.at = now
       state.entries[c.identity] = entry
       announced.add(c.identity)
-      collect(bySource, c, `${w.label} is at ${pct(w.percent)} and resets in ${relativeShort(w.resetsAt, now)}`)
+      collect(bySource, c, t('{0} is at {1} and resets in {2}', w.label, pct(w.percent), relativeShort(w.resetsAt, now)))
     }
     for (const [source, g] of bySource) {
       out.push({
@@ -611,7 +622,7 @@ export class Alerts {
         identities: g.identities,
         windowIds: g.windowIds,
         level: 'info',
-        message: `${providerName(source)} — unused allowance does not carry over: ${g.parts.join(' · ')}`,
+        message: t('{0} — unused allowance does not carry over: {1}', providerName(source), g.parts.join(' · ')),
       })
     }
   }

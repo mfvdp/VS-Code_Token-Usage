@@ -570,6 +570,27 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .r3 { --mix: 42%; }
 .r4 { --mix: 30%; }
 .rother { --mix: 22%; }
+/* Shade has no strokes to fall back on — the fill is the whole message — so it takes a ramp
+   of its own instead of the ground the patterned styles hatch over, which is why these six
+   rules override the ones above for that style alone.
+   Measured in a browser on the band-size demo — bands of exactly 4, 8 and 16 px, both themes,
+   both hues, 120 neighbouring pairs. The shared ramp leaves its closest pair ΔE 5.0 apart in
+   the fill, and the 1 px hue outline that used to prop that end up costs a 4 px band half of
+   its height: over the whole band the closest pair falls to ΔE 0.8, and the ladder turns
+   round eight times — rank 3 paints LIGHTER than rank 2 at 4 px — so the outline, not the
+   shade, is the only thing left to read.
+   These six mixes leave no pair closer than ΔE 9.8 in either theme or for either hue, no pair
+   out of order, and the faintest band ΔE 20 clear of the page. That is what lets the outline
+   go, and a fill that carries itself paints a 4 px band as it paints a 16 px one. The
+   steps narrow towards the faint end because a point of mix buys less lightness beside the
+   full hue than beside the track. r0 only names the anchor: the plain-hue rule below paints
+   it. Changing a number here changes the shade style and nothing else. */
+.st-shade.r0 { --mix: 100%; }
+.st-shade.r1 { --mix: 82%; }
+.st-shade.r2 { --mix: 65%; }
+.st-shade.r3 { --mix: 49%; }
+.st-shade.r4 { --mix: 33%; }
+.st-shade.rother { --mix: 18%; }
 .st-pattern { --ground: color-mix(in srgb, var(--hue) 35%, transparent); }
 .st-shade, .st-both { --ground: color-mix(in srgb, var(--hue) var(--mix), var(--track)); }
 .band { background: var(--ground); }
@@ -582,12 +603,6 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .st-pattern.r4, .st-both.r4 { background: repeating-linear-gradient(0deg, var(--hue) 0 2px, var(--ground) 2px 4px); }
 .st-pattern.rother, .st-both.rother { background: radial-gradient(var(--hue) 1px, var(--ground) 1.2px);
                                       background-size: 4px 4px; }
-/* The faint end of the shade ramp is a few percent of hue against the plot, and two such
-   steps are barely a step apart: a hairline in the full hue gives those bands an edge, so a
-   4 px band still says where it starts and which provider it belongs to. Inset, so it costs
-   the stack no pixel of height, and only where the fill alone is too weak — the patterned
-   styles already draw the full hue across the band. */
-.st-shade.r3, .st-shade.r4, .st-shade.rother { box-shadow: inset 0 0 0 1px var(--hue); }
 /* Explicit width and height, because this is a replaced element: with inset alone the
    browser took the width from the box and the height from the viewBox's 1:1 ratio, which drew
    a 590 px tall cost line straight over the model table and the heatmap below it. The

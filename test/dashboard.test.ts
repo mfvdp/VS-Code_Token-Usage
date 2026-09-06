@@ -1255,9 +1255,15 @@ test('every band wears its provider hue and its rank, and the legend groups them
 test('the band styles are one provider hue varied by rank, at a fixed 4 px pitch', () => {
   assert.match(STYLE, /\.hue-claude \{ --hue: var\(--claude\); \}/)
   assert.match(STYLE, /\.hue-codex \{ --hue: var\(--codex\); \}/)
-  // Shade: lightness steps of the hue against the track, the largest model the full hue.
+  // The ground the patterned styles hatch over. `both` paints it between its strokes, so
+  // these six are the pattern styles' business and the shade ramp below does not touch them.
   for (const [rank, mix] of [['r0', '100%'], ['r1', '78%'], ['r2', '58%'], ['r3', '42%'], ['r4', '30%'], ['rother', '22%']]) {
     assert.match(STYLE, new RegExp('\\.' + rank + ' \\{ --mix: ' + mix + '; \\}'))
+  }
+  // Shade: lightness steps of the hue against the track, the largest model the full hue —
+  // its own ramp, spaced by measurement (see the next test) rather than by the ground above.
+  for (const [rank, mix] of [['r0', '100%'], ['r1', '82%'], ['r2', '65%'], ['r3', '49%'], ['r4', '33%'], ['rother', '18%']]) {
+    assert.match(STYLE, new RegExp('\\.st-shade\\.' + rank + ' \\{ --mix: ' + mix + '; \\}'))
   }
   assert.match(STYLE, /\.st-shade, \.st-both \{ --ground: color-mix\(in srgb, var\(--hue\) var\(--mix\), var\(--track\)\); \}/)
   assert.match(STYLE, /\.band \{ background: var\(--ground\); \}/)
@@ -1277,15 +1283,100 @@ test('the band styles are one provider hue varied by rank, at a fixed 4 px pitch
   assert.match(rule('r4'), /background: repeating-linear-gradient\(0deg, var\(--hue\) 0 2px, var\(--ground\) 2px 4px\);/)
   assert.match(rule('rother'), /background: radial-gradient\(var\(--hue\) 1px, var\(--ground\) 1\.2px\);/)
   assert.match(rule('rother'), /background-size: 4px 4px;/)
-  // The faint end of the shade ramp gets an edge of its own: two mixes a few percent apart
-  // are not two colours at 4 px, and the last of them is barely there against the plot.
-  assert.match(STYLE, /\.st-shade\.r3, \.st-shade\.r4, \.st-shade\.rother \{ box-shadow: inset 0 0 0 1px var\(--hue\); \}/)
+  // No shade band wears an outline. A 1 px inset costs a 4 px band half of its height, which
+  // made the paint of a rank depend on how tall its band happened to be — and turned the
+  // ladder round, because two rows of the full hue outweigh two rows of a faint fill.
+  assert.equal(/\.st-shade[^{]*\{[^}]*box-shadow/.test(STYLE), false, STYLE)
   // A provider label in the legend is a heading, so it takes a line of its own; wrapped into
   // the middle of one it read as one more swatch entry.
   assert.match(STYLE, /\.legend > span\.meta \{ flex-basis: 100%; \}/)
   // The chart's swatches are big enough for a pattern to be read; the other legends keep 8 px.
   assert.match(STYLE, /\.legend \.dot\.band \{ width: 14px; height: 14px; \}/)
   assert.match(STYLE, /\.dot \{ display: inline-block; width: 8px; height: 8px;/)
+})
+
+/**
+ * The shade ramp, measured rather than eyeballed.
+ *
+ * A shade band is `color-mix(in srgb, var(--hue) m%, var(--track))` painted over the page, and
+ * `--track` is a share of the foreground with nothing behind it, so what the reader sees is
+ *
+ *     m·hue + (1 − m)·(share·foreground + (1 − share)·background)
+ *
+ * — a straight line from the provider hue to the track over the page. Chrome agrees to the
+ * byte: rank 2 of the dark page measures 52,106,168 and this gives 52.6, 106.5, 168.6.
+ *
+ * That is why the ramp can be judged here at all. The band's height does not enter the sum:
+ * the fill is flat, so a 4 px band paints exactly what a 16 px one paints — which is the point
+ * of the ramp having no outline, and the reason this test is enough for all three sizes.
+ */
+test('the shade ramp keeps every neighbouring rank a visible step apart, at any band height', () => {
+  // Read the ramp out of the page rather than restating it: this measures what ships.
+  const mixes = ['r0', 'r1', 'r2', 'r3', 'r4', 'rother'].map((rank) => {
+    const m = new RegExp('\\.st-shade\\.' + rank + ' \\{ --mix: (\\d+)%; \\}').exec(STYLE)
+    assert.ok(m, 'no shade ramp rule for ' + rank)
+    return Number((m as RegExpExecArray)[1]) / 100
+  })
+  const tr = /--track: color-mix\(in srgb, var\(--vscode-foreground\) (\d+)%, transparent\);/.exec(STYLE)
+  assert.ok(tr, 'no --track rule')
+  const share = Number((tr as RegExpExecArray)[1]) / 100
+
+  // The two default themes, as VS Code ships them: foreground, sidebar background and the two
+  // chart colours --claude and --codex resolve to.
+  const THEMES = [
+    { name: 'Dark Modern', fg: [204, 204, 204], bg: [24, 24, 24],
+      hues: { claude: [55, 148, 255], codex: [177, 128, 215] } },
+    { name: 'Light Modern', fg: [59, 59, 59], bg: [248, 248, 248],
+      hues: { claude: [26, 133, 255], codex: [101, 45, 144] } },
+  ]
+  /** sRGB → CIE L*a*b* (D65), the space in which a ΔE means anything. */
+  const lab = (c: number[]): number[] => {
+    const lin = (v: number): number => {
+      const x = v / 255
+      return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)
+    }
+    const [R, G, B] = [lin(c[0]), lin(c[1]), lin(c[2])]
+    const xyz = [(0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047,
+      0.2126729 * R + 0.7151522 * G + 0.0721750 * B,
+      (0.0193339 * R + 0.1191920 * G + 0.9503041 * B) / 1.08883]
+    const f = (t: number): number => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116)
+    const [fx, fy, fz] = xyz.map(f)
+    return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)]
+  }
+  const dE = (a: number[], b: number[]): number => {
+    const [p, q] = [lab(a), lab(b)]
+    return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
+  }
+
+  for (const th of THEMES) {
+    const track = th.fg.map((f, i) => share * f + (1 - share) * th.bg[i])
+    for (const [hueName, hue] of Object.entries(th.hues)) {
+      const where = th.name + ' · ' + hueName
+      const ramp = mixes.map((m) => track.map((t, i) => m * hue[i] + (1 - m) * t))
+      for (let i = 1; i < ramp.length; i++) {
+        const step = dE(ramp[i - 1], ramp[i])
+        // Eight is where two fills stop being one colour with a rounding error. The narrowest
+        // step of this ramp measures 9.8; the one it replaced fell to 5.0 in the fill alone,
+        // and to 0.8 once the outline it leaned on had eaten half of a 4 px band.
+        assert.ok(step >= 8, `${where}: ranks ${i - 1} and ${i} are only ΔE ${step.toFixed(1)} apart`)
+        // Monotone, so the ladder reads in one direction: rank by rank away from the hue.
+        // Which direction that is depends on the theme — towards a dark page or a light one.
+        const towards = lab(th.bg)[0] > lab(hue)[0] ? 1 : -1
+        assert.ok(towards * (lab(ramp[i])[0] - lab(ramp[i - 1])[0]) > 0,
+          `${where}: rank ${i} does not continue the ladder (L* ${lab(ramp[i])[0].toFixed(1)} `
+          + `after ${lab(ramp[i - 1])[0].toFixed(1)})`)
+      }
+      // The faintest rank is still a band, not a stain on the plot.
+      const floor = dE(ramp[ramp.length - 1], th.bg)
+      assert.ok(floor >= 12, `${where}: the faintest band is only ΔE ${floor.toFixed(1)} off the page`)
+    }
+    // The two providers must not meet at the faint end either: the 'other' of one sits right
+    // above the largest model of the next in a stacked column.
+    const faintest = Object.values(th.hues).map((hue) =>
+      track.map((t, i) => mixes[5] * hue[i] + (1 - mixes[5]) * t))
+    const apart = dE(faintest[0], faintest[1])
+    assert.ok(apart >= 8, `${th.name}: the two faintest bands are only ΔE ${apart.toFixed(1)} apart`)
+  }
 })
 
 test('the cost line runs through the column centres, haloed, with a round dot per column', () => {

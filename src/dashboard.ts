@@ -15,11 +15,16 @@
  * No external resource of any kind: the CSP allows exactly the nonced inline style and
  * script this file writes — the style below, and src/webview/main.ts, built to text at build
  * time. The chart, the heatmap and the sparklines are CSS and inline SVG.
+ *
+ * The page's words are this file's business too: the script cannot import the localisation
+ * seam, so every string it shows is translated here and written in front of it as one
+ * dictionary — see `webviewWords()` at the bottom.
  */
 
 import * as vscode from 'vscode'
 import script from 'webview:script'
 import { SOURCES, SOURCE_TITLE } from './adapters'
+import { locale, t } from './i18n'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { ViewModel } from './viewModel'
 
@@ -58,6 +63,19 @@ const SECTION_FIELDS: Record<string, SectionField[]> = {
   notices: ['firstRun', 'preview'],
   controls: ['range', 'ui', 'models'],
   footer: ['footnotes', 'pricing', 'generatedAt'],
+}
+
+/**
+ * The page's language, for the browser and for a screen reader: the primary subtag of the
+ * editor's language, so an English build stays `lang="en"` whether the host says 'en' or
+ * 'en-US', and a German one says `lang="de"`. A page whose words are German but whose markup
+ * claims English is read out in the wrong accent, hyphenated by the wrong rules and quoted
+ * with the wrong marks.
+ */
+function htmlLang(): string {
+  const tag = locale()
+  const dash = tag.indexOf('-')
+  return dash > 0 ? tag.slice(0, dash) : tag
 }
 
 function nonceOf(): string {
@@ -157,7 +175,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private html(): string {
     const nonce = nonceOf()
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${htmlLang()}">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
@@ -166,8 +184,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 <style nonce="${nonce}">${CSS}</style>
 </head>
 <body>
-<div id="root"><p class="empty">Loading …</p></div>
-<script nonce="${nonce}">${SCRIPT}</script>
+<div id="root"><p class="empty">${t('Loading …')}</p></div>
+<script nonce="${nonce}">${scriptText()}</script>
 </body>
 </html>`
   }
@@ -652,15 +670,260 @@ ul { margin: 6px 0; padding-left: 18px; }
  * through the virtual module `webview:script` — so the compiler sees every line of it, which
  * it never did while this was a template string.
  *
- * The two consts in front of it are the provider registry's. The registry is Node code (fs,
- * os, path) and cannot be part of a browser bundle, so they are written at the top of the very
- * same <script>, where the module below reads them out of its own scope; src/webview/globals.d.ts
- * declares them for the compiler. Module scope, so rendering a page is still a string
- * concatenation and touches no file.
+ * The three consts in front of it are what a browser bundle cannot reach: the provider
+ * registry is Node code (fs, os, path), and so is the localisation seam. They are written at
+ * the top of the very same <script>, where the module below reads them out of its own scope;
+ * src/webview/globals.d.ts declares them for the compiler. A function rather than a const,
+ * because `t()` may only run once the host has set the bundle — at render time, not at load.
+ * Still a string concatenation, though: rendering a page touches no file.
  */
-const SCRIPT = `
+function scriptText(): string {
+  return `
 /** The provider titles, interpolated from the registry so the webview cannot drift from it. */
 const SRC_TITLE = ${JSON.stringify(SOURCE_TITLE)};
 /** The provider ids in registry order — the order of the filter bar's provider chips. */
 const SRC_IDS = ${JSON.stringify(SOURCES)};
+/** Every string the module below shows, keyed by its English text — see webviewWords(). */
+const L10N = ${webviewDictionary()};
 ${script}`
+}
+
+/**
+ * The dictionary as it is written into the page.
+ *
+ * `<` is escaped even though no translation may contain one: it is the single character that
+ * could end the <script> element early, and a bundle is a file — one a distribution, a patch
+ * or a hand edit could get wrong. `\u003c` is an ordinary escape inside a JSON string, so the
+ * value the script reads back is unchanged.
+ */
+function webviewDictionary(): string {
+  return JSON.stringify(webviewWords()).replace(/</g, '\\u003c')
+}
+
+/**
+ * Every string src/webview/main.ts shows, keyed by the English text `tr()` looks it up with.
+ *
+ * The list is written out rather than derived: `scripts/l10n-extract.mjs` reads the source of
+ * `t()`, not its arguments at run time, and src/webview is not scanned at all (it imports no
+ * seam of its own). So this is where a webview string becomes a translatable key — a call to
+ * `tr()` with no entry here reaches the reader in English for good, which is what the
+ * dictionary test in test/dashboard.test.ts exists to catch.
+ *
+ * Two rules for the values. They are markup, not text: a translation with `<`, `>`, `&` or a
+ * double quote in it would land in an attribute or a tag half-escaped, and the same test
+ * refuses one. And a string the view model already delivers — every label, explanation and
+ * caption the model builds — is translated there, never a second time here.
+ */
+function webviewWords(): Record<string, string> {
+  return {
+    'A budget is your own number. USD is the hypothetical API equivalent, not a bill, and no budget is ever added to another.':
+      t('A budget is your own number. USD is the hypothetical API equivalent, not a bill, and no budget is ever added to another.'),
+    'API cost': t('API cost'),
+    'API cost (second axis)': t('API cost (second axis)'),
+    'Active': t('Active'),
+    'Activity': t('Activity'),
+    'Avg turn {0}': t('Avg turn {0}'),
+    'Avg turn {0} · P90 {1}': t('Avg turn {0} · P90 {1}'),
+    'Avg/day': t('Avg/day'),
+    'Basis': t('Basis'),
+    'Blended': t('Blended'),
+    'Blended $/1M': t('Blended $/1M'),
+    'Budgets': t('Budgets'),
+    'CV {0} · {1} spiky day(s)': t('CV {0} · {1} spiky day(s)'),
+    'Cache': t('Cache'),
+    'Cache read': t('Cache read'),
+    'Cache · last 30 days': t('Cache · last 30 days'),
+    'Calibration {0} {1}: {2}': t('Calibration {0} {1}: {2}'),
+    'Calls': t('Calls'),
+    'Chart': t('Chart'),
+    'Compared with': t('Compared with'),
+    'Connect the status line': t('Connect the status line'),
+    'Consent: {0} · {1} · attribution {2} · v{3}': t('Consent: {0} · {1} · attribution {2} · v{3}'),
+    'Context window': t('Context window'),
+    'Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB':
+      t('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB'),
+    'Data quality': t('Data quality'),
+    'Day {0}': t('Day {0}'),
+    'Duration': t('Duration'),
+    'Extra usage': t('Extra usage'),
+    'Extra usage (billed)': t('Extra usage (billed)'),
+    'Fetch quota now': t('Fetch quota now'),
+    'Fields reported but not rendered ({0}): {1}': t('Fields reported but not rendered ({0}): {1}'),
+    'Fresh in': t('Fresh in'),
+    'Generated {0}.': t('Generated {0}.'),
+    'Hit': t('Hit'),
+    'Hit rate': t('Hit rate'),
+    'How': t('How'),
+    'Key figures': t('Key figures'),
+    'Longest streak {0}': t('Longest streak {0}'),
+    'Longest streak {0} day · {1} → {2}': t('Longest streak {0} day · {1} → {2}'),
+    'Longest streak {0} days · {1} → {2}': t('Longest streak {0} days · {1} → {2}'),
+    'Lower bound share {0}': t('Lower bound share {0}'),
+    'Model': t('Model'),
+    'Models': t('Models'),
+    'No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.':
+      t('No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.'),
+    'No context reading. The Claude Code status line is what reports it.':
+      t('No context reading. The Claude Code status line is what reports it.'),
+    'No cycles on file yet.': t('No cycles on file yet.'),
+    'No data in this range.': t('No data in this range.'),
+    'No model data in this range.': t('No model data in this range.'),
+    'No project data yet.': t('No project data yet.'),
+    'No quota reading yet. There are two ways to get one: fetch it from the provider, which asks for network access first, or connect the Claude Code status line, which mirrors the figures Claude Code already has on this machine.':
+      t('No quota reading yet. There are two ways to get one: fetch it from the provider, which asks for network access first, or connect the Claude Code status line, which mirrors the figures Claude Code already has on this machine.'),
+    'No records yet.': t('No records yet.'),
+    'No session data yet.': t('No session data yet.'),
+    'No tool call counted in this range.': t('No tool call counted in this range.'),
+    'No tool calls counted.': t('No tool calls counted.'),
+    'Not enough data for a summary yet.': t('Not enough data for a summary yet.'),
+    'Open settings': t('Open settings'),
+    'Output': t('Output'),
+    'Peak day {0}': t('Peak day {0}'),
+    'Peak day {0} · {1}': t('Peak day {0} · {1}'),
+    'Per req.': t('Per req.'),
+    'Period': t('Period'),
+    'Preview data — not a reading.': t('Preview data — not a reading.'),
+    'Prices as of {0} · your configured rates.': t('Prices as of {0} · your configured rates.'),
+    'Prices as of {0}.': t('Prices as of {0}.'),
+    'Project': t('Project'),
+    'Project attribution is off (tokenPace.attribution).':
+      t('Project attribution is off (tokenPace.attribution).'),
+    'Projects': t('Projects'),
+    'Providers': t('Providers'),
+    'Quota': t('Quota'),
+    'Quota history {0} samples · {1} KB · oldest {2}': t('Quota history {0} samples · {1} KB · oldest {2}'),
+    'Range': t('Range'),
+    'Re-read token history': t('Re-read token history'),
+    'Realised': t('Realised'),
+    'Reasoning': t('Reasoning'),
+    'Rebuild from the transcripts and fetch the quota':
+      t('Rebuild from the transcripts and fetch the quota'),
+    'Records': t('Records'),
+    'Refresh': t('Refresh'),
+    'Req.': t('Req.'),
+    'Reset history': t('Reset history'),
+    'Retention {0} d hourly · {1} d daily · {2} d quota history':
+      t('Retention {0} d hourly · {1} d daily · {2} d quota history'),
+    'Roots: {0} · {1} file(s)': t('Roots: {0} · {1} file(s)'),
+    'Session': t('Session'),
+    'Session attribution is off (tokenPace.attribution).':
+      t('Session attribution is off (tokenPace.attribution).'),
+    'Sessions': t('Sessions'),
+    'Settings for this section': t('Settings for this section'),
+    'Share': t('Share'),
+    'Sources {0}: {1}': t('Sources {0}: {1}'),
+    'Spark': t('Spark'),
+    'Split': t('Split'),
+    'Started': t('Started'),
+    'Status line: {0}': t('Status line: {0}'),
+    'Summary': t('Summary'),
+    'Time of day': t('Time of day'),
+    'Tokens': t('Tokens'),
+    'Tool': t('Tool'),
+    'Tools': t('Tools'),
+    'Top projects and sessions need tokenPace.attribution.':
+      t('Top projects and sessions need tokenPace.attribution.'),
+    'Usage': t('Usage'),
+    'What': t('What'),
+    'Write 1h': t('Write 1h'),
+    'Write 5m': t('Write 5m'),
+    'all': t('all'),
+    'apply': t('apply'),
+    'by weekday and four-hour block · {0}': t('by weekday and four-hour block · {0}'),
+    'cache': t('cache'),
+    'cacheRead': t('cacheRead'),
+    'chart metric': t('chart metric'),
+    'clear': t('clear'),
+    'clear stored data': t('clear stored data'),
+    'click a column for that day': t('click a column for that day'),
+    'close': t('close'),
+    'context window: {0}': t('context window: {0}'),
+    'copy diagnostics': t('copy diagnostics'),
+    'copy summary': t('copy summary'),
+    'cost': t('cost'),
+    'cost line': t('cost line'),
+    'custom…': t('custom…'),
+    'daily bars · {0} columns': t('daily bars · {0} columns'),
+    'dotted = outside coverage': t('dotted = outside coverage'),
+    'dotted = outside coverage (before {0})': t('dotted = outside coverage (before {0})'),
+    'elapsed share not yet used': t('elapsed share not yet used'),
+    'exhausted': t('exhausted'),
+    'export CSV': t('export CSV'),
+    'export JSON': t('export JSON'),
+    'family-priced: {0}': t('family-priced: {0}'),
+    'fewer ▴': t('fewer ▴'),
+    'from': t('from'),
+    'hatched: no usage in that block': t('hatched: no usage in that block'),
+    'hidden': t('hidden'),
+    'lastMonth': t('lastMonth'),
+    'less': t('less'),
+    'limit reached': t('limit reached'),
+    'local': t('local'),
+    'lower bound': t('lower bound'),
+    'models ({0}) ▾': t('models ({0}) ▾'),
+    'month projection {0} · {1}': t('month projection {0} · {1}'),
+    'more': t('more'),
+    'more ▾': t('more ▾'),
+    'no hour data · {0} day(s)': t('no hour data · {0} day(s)'),
+    'no source answered': t('no source answered'),
+    'no usage in this block': t('no usage in this block'),
+    'none': t('none'),
+    'ok': t('ok'),
+    'output': t('output'),
+    'output is a lower bound: some requests had no terminal line':
+      t('output is a lower bound: some requests had no terminal line'),
+    'over': t('over'),
+    'over the limit': t('over the limit'),
+    'peak {0} ({1})': t('peak {0} ({1})'),
+    'peak {0}:00 · {1} day(s)': t('peak {0}:00 · {1} day(s)'),
+    'priced from a related model (family fallback)': t('priced from a related model (family fallback)'),
+    'projected at the reset': t('projected at the reset'),
+    'projected {0} by {1}': t('projected {0} by {1}'),
+    'quota sparkline, 7 days': t('quota sparkline, 7 days'),
+    'reasoning': t('reasoning'),
+    'requests': t('requests'),
+    'reset due': t('reset due'),
+    'resets {0}': t('resets {0}'),
+    'scroll sideways for the remaining columns →': t('scroll sideways for the remaining columns →'),
+    'shown': t('shown'),
+    'some models have no price on file': t('some models have no price on file'),
+    'sparkline: last 7 days': t('sparkline: last 7 days'),
+    'stale': t('stale'),
+    'streak {0} · longest {1} · active {2}': t('streak {0} · longest {1} · active {2}'),
+    'sub': t('sub'),
+    'thisMonth': t('thisMonth'),
+    'thisWeek': t('thisWeek'),
+    'time elapsed': t('time elapsed'),
+    'time elapsed in this window': t('time elapsed in this window'),
+    'to': t('to'),
+    'today': t('today'),
+    'unavailable': t('unavailable'),
+    'unlimited': t('unlimited'),
+    'unpriced: {0}': t('unpriced: {0}'),
+    'updated {0}': t('updated {0}'),
+    'usage': t('usage'),
+    'used beyond the elapsed share': t('used beyond the elapsed share'),
+    'utc': t('utc'),
+    'weekly bars · {0} columns': t('weekly bars · {0} columns'),
+    'without cache · {0} tokens cache read and {1} cache write not shown':
+      t('without cache · {0} tokens cache read and {1} cache write not shown'),
+    'without cache · {0} tokens cache read not shown': t('without cache · {0} tokens cache read not shown'),
+    'without cache · {0} tokens cache write not shown':
+      t('without cache · {0} tokens cache write not shown'),
+    'year': t('year'),
+    'yesterday': t('yesterday'),
+    '{0} call(s) · {1} distinct tool(s)': t('{0} call(s) · {1} distinct tool(s)'),
+    '{0} composition · last 30 days': t('{0} composition · last 30 days'),
+    '{0} more not listed': t('{0} more not listed'),
+    '{0} more — set tokenPace.dashboard.modelRows': t('{0} more — set tokenPace.dashboard.modelRows'),
+    '{0} of {1}': t('{0} of {1}'),
+    '{0} tokens over {1} day(s)': t('{0} tokens over {1} day(s)'),
+    '{0} · {1} · {2} · {3} % of the day · {1} total {4}':
+      t('{0} · {1} · {2} · {3} % of the day · {1} total {4}'),
+    '{0} · {1} · {2} · {3} % of the week · {1} total {4}':
+      t('{0} · {1} · {2} · {3} % of the week · {1} total {4}'),
+    '{0}: {1} of {2}': t('{0}: {1} of {2}'),
+    '≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals':
+      t('≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals'),
+  }
+}

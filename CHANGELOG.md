@@ -29,6 +29,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   reaches the status bar without a reload, and the dashboard command opens the dashboard. A
   separate workflow runs it on every push. `activate()` now returns a small API
   (`version`, `statusBar()`) for this test.
+* **A reached limit is red and says so.** A window the provider reports as limit-reached is
+  painted red on the dashboard as it already was in the status bar, and its explanation states
+  the limit first instead of quoting a pace rule that did not decide the colour. A window whose
+  stated reset has passed is no longer judged in colour at all: its chip loses the pace class
+  and the "▲", matching its neutral bar and its "Why grey" explanation.
+* **The privacy check reads the translations too.** `npm run check:privacy` now scans the
+  German bundle, its parts and the manifest strings for http(s) literals, not only the three
+  shipped bundles.
 * **The CI names the failing tests.** When the test step fails, the job summary lists every
   `not ok` line with its diagnostic block, so a red run can be read without opening the log.
   Dependabot watches npm and the workflow actions weekly.
@@ -62,6 +70,12 @@ This project follows [Semantic Versioning](https://semver.org/).
   that says "0 % ahead" never is. The sensitivity presets keep only the minimum elapsed share
   before a verdict (relaxed 5 %, normal 3 %, strict 1 %); the measuring phase ends early once
   usage passes 10 %. With graded levels the amber step starts at 15 points ahead.
+* **Absolute reset times read "resets at 15:30".** With `tokenPace.resetFormat` set to
+  `absolute` or `both`, the countdown word gives way to "resets at" (German "Reset um"); the
+  relative form stays "resets 3h44m" in English and becomes "Reset in 3h44m" in German.
+* **The store tokens reach only the publish steps.** The release workflow no longer puts
+  `VSCE_PAT` and `OVSX_PAT` into the environment of every step; `npm ci`, the tests and the
+  packaging run without them.
 * **The reset stroke is vertical.** Where a cycle ends, the neutral stroke drops straight down —
   at the announced reset time when it lies between two readings, otherwise at the first reading
   of the new cycle; the line holds the old value until then and continues from the new reading's
@@ -73,6 +87,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   reset time then rides along with the clock again was invisible to the reset rule when the fall
   was small; the rule now recognises a reset that passed between two readings, so the reset
   history, the thinning of repeats, the forecast split and the sparkline agree.
+* **A fractional tolerance band** (`tokenPace.pace.tolerancePoints` 2.5, say) flipped the colour
+  between two printed figures; the verdict now rounds the way the views print, so the colour
+  changes exactly where the figure does.
+* **The prompt-cache line names the age of its reading** and marks one older than
+  `tokenPace.staleAfterMinutes`, in the card, the Quick Pick, the markdown report and the
+  tooltip.
+* **The model table's hit-rate sort** read a number back out of its own formatted cell; it
+  sorts by the share the cell was formatted from, which also keeps it right in German.
 * **A backtick in the plan name** no longer ends the code span in the status-bar tooltip:
   `tokenPace.planName` is read without backticks, control characters and line breaks.
 * **Windows test runs.** The suite failed on Windows since 1.2.1 on two counts that the Linux and

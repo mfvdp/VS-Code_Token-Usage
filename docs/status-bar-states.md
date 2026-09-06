@@ -95,8 +95,8 @@ Two modifiers apply on top:
 | Text | State | Colour / background | Check |
 |---|---|---|---|
 | `CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m` | normal, on pace | `tokenPace.paceOk` | – |
-| `CC 5h ████┃▁▁▁ 45% ▲ · resets 2h14m` | ahead of pace beyond the tolerance | `tokenPace.paceWarn` | Tolerance: `pace.sensitivity`, or `pace.tolerancePoints` with `custom`. |
-| `CC 5h ██████┃▁ 80% ▲▲ · resets 2h14m` | more than three times the tolerance ahead | `tokenPace.paceAhead` | Only with `pace.levels: graded`. |
+| `CC 5h ████┃▁▁▁ 45% ▲ · resets 2h14m` | ahead of pace, from the first whole percent | `tokenPace.paceWarn` | `pace.tolerancePoints` (default 0) adds a band of grace before the colour flips; it applies with every `pace.sensitivity`. |
+| `CC 5h ██████┃▁ 80% ▲▲ · resets 2h14m` | 15 % or more ahead — three times the band, at least 15 | `tokenPace.paceAhead` | Only with `pace.levels: graded`. |
 | `CC 5h ██████┃█ 100% exhausted · resets 47m` prefixed with `$(warning)` | exhausted (≥ 99.5 %) | `statusBarItem.errorBackground` | The countdown is now the only number that moves. Every countdown is named `resets`, so it can be mistaken neither for a percentage nor for the reading age. The state is also said in words, because the icon, the emoji and the alarm background can each be switched off. |
 | `CC 5h ████████ 111%` | overflow (> 100.5 %), billed beyond the plan | `charts.red` | `overflowDisplay: clamp` shows `100%` instead — the figure is real, not a rounding error. |
 | `⛔ CC 5h ████████ 100% limit reached` | the provider reports the limit as reached | `statusBarItem.errorBackground` | An explicit provider flag, not derived from the percentage. The words survive `colorMode: monochrome` and a high-contrast theme. |

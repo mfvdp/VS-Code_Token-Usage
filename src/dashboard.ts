@@ -433,10 +433,10 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .spark.q { height: 22px; }
 .spark polyline { fill: none; stroke: var(--claude); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 /* Each segment wears the pace level the bar showed at its later point; a point with no clock
-   keeps the provider colour, and so does the stroke into a reading the window turned over
-   before — that stroke is the window turning over, and colouring it would judge a pace nobody
-   kept. A stretch without readings is drawn straight across, from the last reading before it
-   to the first one after. */
+   keeps the provider colour, and so does the vertical drop into a reading the window turned
+   over before — that drop is the window turning over, and colouring it would judge a pace
+   nobody kept. A stretch without readings is drawn straight across, from the last reading
+   before it to the first one after. */
 .spark polyline.ok, .spark path.pt.ok { stroke: var(--ok); }
 .spark polyline.warn, .spark path.pt.warn { stroke: var(--warn); }
 .spark polyline.warn2, .spark path.pt.warn2 { stroke: var(--warn2); }
@@ -446,6 +446,22 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
    stretched with it — a 5 px dash that reads as a line where there is a single point. */
 .spark path.pt { fill: none; stroke: var(--claude); stroke-width: 3; stroke-linecap: round;
                  vector-effect: non-scaling-stroke; }
+/* The reading under the pointer, or the one stepped to with the arrow keys: the same
+   round-capped hairline as a lone reading, only heavier and in the hover widget's text colour
+   — a circle element would be stretched with the viewBox into an ellipse. */
+.spark path.hov { fill: none; stroke: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+                  stroke-width: 5; stroke-linecap: round; vector-effect: non-scaling-stroke;
+                  pointer-events: none; }
+/* The hit area. A polyline with no fill is a hairline to the pointer; the transparent
+   rectangle over the whole box takes the pointer for it, so any x along the line finds the
+   nearest reading. */
+.spark rect.ov { fill: transparent; pointer-events: all; }
+/* The quota sparkline's hover label hangs under the reading it names, in the box the KPI
+   explanation uses. Sized to its one line, and its anchor slides from the left edge to the
+   right one with the reading — a box hung from the reading's x alone would leave the card
+   on the right half of the axis. */
+.sparkbox { position: relative; }
+.sparkbox .pop { min-width: 0; white-space: nowrap; }
 /* The plot keeps a gutter on its right for the tick labels. Inside the plot they either hide
    behind the newest bars or, opaque, cut them into pieces that read as gaps in the data —
    and the newest days are the ones worth reading. Because those labels sit outside the box,
@@ -691,50 +707,99 @@ function hasSpark(s) {
 }
 
 /**
+ * The geometry of a slotted spark, shared by the renderer and the hover so the two never
+ * place a reading differently: x is time, one unit per 15-minute slot from the grid's start,
+ * y the inverted percentage on a box 100 high. A payload without the grid's bounds, or a
+ * point without its time, falls back to the slot index — the same axis in whole slots. Null
+ * when there is nothing to draw.
+ */
+function sparkGeometry(spark) {
+  if (!spark || !Array.isArray(spark.points)) return null;
+  const W = Number(spark.slots);
+  if (!(W > 0)) return null;
+  const from = Number(spark.from), to = Number(spark.to);
+  const scale = Number.isFinite(from) && Number.isFinite(to) && to > from ? W / (to - from) : null;
+  const xAt = t => scale !== null && Number.isFinite(Number(t)) ? (Number(t) - from) * scale : null;
+  const pts = [];
+  for (const pt of spark.points) {
+    if (!pt || !Number.isFinite(Number(pt.i)) || !Number.isFinite(Number(pt.p))) continue;
+    const x = xAt(pt.t);
+    const r = pt.r !== null && pt.r !== undefined && Number.isFinite(Number(pt.r)) ? Number(pt.r) : null;
+    pts.push({
+      x: x === null ? Math.round(Number(pt.i)) : x, y: 100 - pct(pt.p), t: Number(pt.t), r: r,
+      level: sparkLevel(pt), reset: !!pt.reset, label: typeof pt.label === 'string' ? pt.label : '',
+    });
+  }
+  return pts.length ? { W: W, H: 100, xAt: xAt, pts: pts } : null;
+}
+
+/**
  * Seven days of one window, time-proportional: the viewBox is one unit per 15-minute slot,
  * so a stretch without readings is exactly as wide as the time it covers — and the line is
  * drawn straight across it, from the last reading before to the first one after. Consecutive
  * points become polylines, split wherever the pace level changes: the stroke between two
- * points wears the level of the later one, except into a point the view model marked as one
- * the window turned over before, which is a neutral two-point stroke. A single reading is the
- * round-cap hairline. Percentages above 100 sit on the top edge rather than leaving the box.
- * A plain array (the KPI sparks) takes the older renderer.
+ * points wears the level of the later one. Into a point the view model marked as one the
+ * window turned over before, the line holds the old value in the old level up to the moment
+ * the old window ended, drops there vertically in a neutral two-point stroke to the new
+ * value, and continues from it. A single reading is the round-cap hairline. Percentages
+ * above 100 sit on the top edge rather than leaving the box. The ref names the provider and
+ * the window the spark belongs to, so the hover can find its readings in the view model
+ * again. A plain array (the KPI sparks) takes the older renderer.
  */
-function sparkSvg(spark) {
+function sparkSvg(spark, ref) {
   if (Array.isArray(spark)) return sparkArraySvg(spark);
-  if (!spark || !Array.isArray(spark.points)) return '';
-  const W = Number(spark.slots);
-  const pts = spark.points.filter(function (pt) {
-    return !!pt && Number.isFinite(Number(pt.i)) && Number.isFinite(Number(pt.p));
-  });
-  if (!(W > 0) || !pts.length) return '';
-  const H = 100;
-  const xOf = pt => String(Math.round(Number(pt.i)));
-  const yOf = pt => (H - pct(pt.p)).toFixed(1);
-  const poly = (seg, cls) => '<polyline' + (cls ? ' class="' + cls + '"' : '') + ' points="'
-    + seg.map(pt => xOf(pt) + ',' + yOf(pt)).join(' ') + '"/>';
+  const g = sparkGeometry(spark);
+  if (!g) return '';
+  const W = g.W, H = g.H, pts = g.pts;
+  const num2 = v => String(Math.round(v * 100) / 100);
+  const at = (x, y) => num2(x) + ',' + y.toFixed(1);
   let body = '';
   if (pts.length === 1) {
-    const cls = sparkLevel(pts[0]);
-    body = '<path class="pt' + (cls ? ' ' + cls : '') + '" d="M' + xOf(pts[0]) + ' '
-      + yOf(pts[0]) + 'h.01"/>';
+    const cls = pts[0].level;
+    body = '<path class="pt' + (cls ? ' ' + cls : '') + '" d="M' + num2(pts[0].x) + ' '
+      + pts[0].y.toFixed(1) + 'h.01"/>';
   } else {
     // One stroke per pair of neighbours, wearing the level of the later point, so equal
-    // neighbours share a polyline. A stroke into a reading the window turned over before
-    // stands alone and wears no level: it is the reset, and the coloured run starts again
-    // at that reading.
+    // neighbours share a polyline. The neutral drop stands alone: nothing joins it, and the
+    // coloured run starts again after it.
     const segs = [];
-    for (let k = 1; k < pts.length; k++) {
-      const isReset = !!pts[k].reset;
-      const cls = isReset ? '' : sparkLevel(pts[k]);
+    const add = (cls, neutral, a, b) => {
       const last = segs.length ? segs[segs.length - 1] : null;
-      if (last && !last.reset && !isReset && last.cls === cls) last.pts.push(pts[k]);
-      else segs.push({ cls: cls, reset: isReset, pts: [pts[k - 1], pts[k]] });
+      if (last && !last.neutral && !neutral && last.cls === cls) last.coords.push(b);
+      else segs.push({ cls: cls, neutral: neutral, coords: [a, b] });
+    };
+    for (let k = 1; k < pts.length; k++) {
+      const prev = pts[k - 1], s = pts[k];
+      if (!s.reset) { add(s.level, false, at(prev.x, prev.y), at(s.x, s.y)); continue; }
+      // The window turned over between the two readings. Where the old one ended is its
+      // announced reset when that lies between them — the clock of the last reading before
+      // the turn, so the drop stands where the window ended, not where VS Code happened to
+      // be open again — and otherwise the new reading's own x. The drop ends at the new
+      // reading's value, never at a 0 nobody measured (a rolling window ends above it); the
+      // tail is left out when the drop already stands at the reading.
+      const known = prev.r !== null && prev.t < prev.r && prev.r <= s.t ? g.xAt(prev.r) : null;
+      const xDrop = known === null ? s.x : known;
+      add(prev.level, false, at(prev.x, prev.y), at(xDrop, prev.y));
+      add('', true, at(xDrop, prev.y), at(xDrop, s.y));
+      if (num2(xDrop) !== num2(s.x)) add(s.level, false, at(xDrop, s.y), at(s.x, s.y));
     }
-    for (const sg of segs) body += poly(sg.pts, sg.cls);
+    for (const sg of segs) {
+      body += '<polyline' + (sg.cls ? ' class="' + sg.cls + '"' : '') + ' points="'
+        + sg.coords.join(' ') + '"/>';
+    }
   }
-  return '<svg class="spark q" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" '
-    + 'aria-hidden="true">' + body + '</svg>';
+  // The rectangle is the pointer's target — see the stylesheet — and lies over the strokes;
+  // the empty path after it is the marker of the hovered reading, given its one coordinate
+  // by the script (no element is created at hover time). The svg itself can take the focus:
+  // the readings are stepped through with the arrow keys, and the label names what a screen
+  // reader cannot see.
+  const overlay = '<rect class="ov" x="0" y="0" width="' + W + '" height="' + H + '"/>'
+    + '<path class="hov"/>';
+  const names = ref ? ' data-src="' + esc(ref.src) + '" data-win="' + esc(ref.win) + '"' : '';
+  const aria = typeof spark.aria === 'string' && spark.aria ? spark.aria : 'quota sparkline, 7 days';
+  return '<div class="sparkbox"><svg class="spark q" viewBox="0 0 ' + W + ' ' + H + '" '
+    + 'preserveAspectRatio="none" role="img" tabindex="0" aria-label="' + esc(aria) + '"' + names + '>'
+    + body + overlay + '</svg><div class="pop" role="tooltip" aria-live="polite" hidden></div></div>';
 }
 
 /** A list of 0..100 values evenly spaced, with -1 for a break: the KPI sparks. */
@@ -982,7 +1047,7 @@ function quotaCard(q) {
     if (f && f.text && trusted && printed.indexOf(f.text.toLowerCase()) < 0) {
       h += '<div class="meta">' + esc(f.text) + '</div>';
     }
-    if (hasSpark(w.spark)) h += sparkSvg(w.spark);
+    if (hasSpark(w.spark)) h += sparkSvg(w.spark, { src: q.source, win: w.id });
     h += '</div>';
   }
   // The sparklines' span, said once per card rather than under each of them. Only the slotted
@@ -2077,6 +2142,111 @@ document.addEventListener('focus', (ev) => {
 document.addEventListener('blur', (ev) => { if (kpiCard(ev)) hidePop(); }, true);
 // Escape closes it wherever the focus is — the way a reader expects to dismiss a hover card.
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') hidePop(); });
+
+// -- the sparkline hover ----------------------------------------------------
+
+/** The reading marked on a quota sparkline: its svg, the spark's geometry and the index. */
+let sparkMark = null;
+
+/**
+ * The spark an svg was drawn from, looked up in the view model by provider and window: the
+ * markup carries no second copy of the readings, and a re-rendered section is found again
+ * by the same two names.
+ */
+function sparkData(svg) {
+  if (!vm || !svg || !svg.getAttribute) return null;
+  const src = svg.getAttribute('data-src'), win = svg.getAttribute('data-win');
+  const q = (vm.quotas || []).find(c => !!c && c.source === src);
+  const w = q ? (q.windows || []).find(x => !!x && x.id === win) : null;
+  return w ? sparkGeometry(w.spark) : null;
+}
+
+/** The index of the reading nearest to an x in viewBox units. */
+function sparkNearest(pts, u) {
+  let best = 0;
+  for (let k = 1; k < pts.length; k++) {
+    if (Math.abs(pts[k].x - u) < Math.abs(pts[best].x - u)) best = k;
+  }
+  return best;
+}
+
+function sparkHide() {
+  if (!sparkMark) return;
+  const dot = sparkMark.svg.querySelector('path.hov');
+  if (dot) dot.removeAttribute('d');
+  const box = sparkMark.svg.parentNode;
+  const pop = box && box.querySelector ? box.querySelector('.pop') : null;
+  if (pop) pop.hidden = true;
+  sparkMark = null;
+}
+
+/**
+ * Marks one reading and shows its label under it. The label's anchor slides with the
+ * reading — at the left edge the box starts there, at the right edge it ends there — so it
+ * never leaves the card, whatever the panel's width. Any other explanation open on the page
+ * closes: one hover card at a time, as everywhere else.
+ */
+function sparkShow(svg, g, k) {
+  if (!g || !g.pts.length) return;
+  k = Math.max(0, Math.min(g.pts.length - 1, k));
+  // The pointer moving within one reading's reach: nothing changes.
+  if (sparkMark && sparkMark.svg === svg && sparkMark.k === k) return;
+  if (sparkMark && sparkMark.svg !== svg) sparkHide();
+  if (typeof hidePop === 'function') hidePop();
+  const pt = g.pts[k];
+  const dot = svg.querySelector('path.hov');
+  if (dot) dot.setAttribute('d', 'M' + pt.x + ' ' + pt.y + 'h.01');
+  const box = svg.parentNode;
+  const pop = box && box.querySelector ? box.querySelector('.pop') : null;
+  if (pop) {
+    pop.textContent = pt.label;
+    const share = ((pt.x / g.W) * 100).toFixed(2);
+    pop.style.left = share + '%';
+    pop.style.transform = 'translateX(-' + share + '%)';
+    pop.hidden = !pt.label;
+  }
+  sparkMark = { svg: svg, g: g, k: k };
+}
+
+function isSpark(el) {
+  return !!(el && el.classList && el.classList.contains('spark') && el.classList.contains('q'));
+}
+
+// The nearest reading by x follows the pointer; the geometry is computed once per spark and
+// kept while the pointer stays on it.
+document.addEventListener('mousemove', (ev) => {
+  const svg = target(ev, 'svg.spark.q');
+  if (!svg) return;
+  const g = sparkMark && sparkMark.svg === svg ? sparkMark.g : sparkData(svg);
+  if (!g) return;
+  const box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : null;
+  if (!box || !(box.width > 0)) return;
+  sparkShow(svg, g, sparkNearest(g.pts, ((ev.clientX - box.left) / box.width) * g.W));
+});
+document.addEventListener('mouseleave', (ev) => {
+  if (sparkMark && ev.target === sparkMark.svg) sparkHide();
+}, true);
+// Reaching a spark by keyboard marks its newest reading; the arrow keys walk from there.
+document.addEventListener('focus', (ev) => {
+  if (!isSpark(ev.target)) return;
+  const g = sparkData(ev.target);
+  if (g) sparkShow(ev.target, g, g.pts.length - 1);
+}, true);
+document.addEventListener('blur', (ev) => {
+  if (sparkMark && ev.target === sparkMark.svg) sparkHide();
+}, true);
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') { sparkHide(); return; }
+  if (!isSpark(ev.target)) return;
+  const step = ev.key === 'ArrowLeft' ? -1 : ev.key === 'ArrowRight' ? 1 : 0;
+  if (!step) return;
+  ev.preventDefault();
+  // After Escape the focus is still on the spark: the next arrow starts again from the
+  // newest reading rather than doing nothing.
+  const own = sparkMark && sparkMark.svg === ev.target;
+  const g = own ? sparkMark.g : sparkData(ev.target);
+  if (g) sparkShow(ev.target, g, own ? sparkMark.k + step : g.pts.length - 1);
+});
 
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.
 window.addEventListener('resize', () => { if (vm) applyFits(); });

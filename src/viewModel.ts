@@ -44,7 +44,7 @@ import {
 } from './stats'
 import {
   DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatReset, formatTime, rangeFor,
-  isDay, previousRange, relativeShort,
+  isDay, previousRange, relativeShort, resolveZone,
 } from './time'
 import {
   Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaOrigin, QuotaSample,
@@ -527,13 +527,33 @@ export const SPARK_SLOTS = SPARK_DAYS * 24 * 4
 /**
  * One reading on the sparkline: `i` is the slot index 0..SPARK_SLOTS-1, `p` the percent (0..100+).
  *
- * `reset` marks a reading the window turned over before: since the previous drawn reading the
- * provider's reset time moved, or the value fell by five points without one — `turnedOver`,
- * the rule the reset history splits cycles by (the very first point never carries it). The
- * renderer draws the stroke INTO such a point without a pace colour: that stroke is the
- * window turning over, not a pace anybody kept.
+ * `t` is the reading's own time and `r` the reset it announced (null when the provider
+ * stated none): the renderer places the reading by `t` on the time axis and, when the window
+ * turned over before it, drops the line at `r` of the reading before — the moment the old
+ * window ended — when that lies between the two readings. `label` is what a hover over the
+ * reading says, worded here so the webview computes no time of its own.
+ *
+ * `reset` marks a reading the window turned over before AND whose value fell: since the
+ * previous drawn reading the provider's reset time moved, the value fell by five points
+ * without one, or the announced reset passed and the value fell after it — `turnedOver`, the
+ * rule the reset history splits cycles by (the very first point never carries it). The
+ * renderer draws the stroke INTO such a point as a vertical drop without a pace colour: that
+ * stroke is the window turning over, not a pace anybody kept. A turn-over the value ROSE
+ * across — a new window already in use when it was first read — is an ordinary stroke: there
+ * is no fall to draw, and a neutral stroke upward would read as a reset that added usage.
  */
-export interface SparkPoint { i: number; p: number; level: PaceLevel | null; reset?: true }
+export interface SparkPoint {
+  i: number
+  p: number
+  level: PaceLevel | null
+  /** Unix ms of the reading. */
+  t: number
+  /** The reset the reading announced, unix ms; null when the provider stated none. */
+  r: number | null
+  /** "Sat 6 Sep · 14:20 · 37 %", plus " · reset" when `reset` is set. */
+  label: string
+  reset?: true
+}
 
 /**
  * Seven days of one window on a time-proportional grid: x = slot index, so a missing slot is
@@ -555,6 +575,11 @@ export interface SparkVm {
    * across it. `WindowVm.gaps` counts those stretches for the last day.
    */
   points: SparkPoint[]
+  /**
+   * The line in words, for the screen reader that cannot see it: "quota sparkline, 7 days,
+   * 41 readings, peak 62 %". Counted and worded here, not in the webview.
+   */
+  aria: string
 }
 
 /** Longer than this without a reading is a hole in the coverage, not a flat line. */
@@ -580,6 +605,43 @@ function sparkLevel(s: QuotaSample, windowMinutes: number | null, paceCfg: PaceC
 }
 
 /**
+ * "Sat 6 Sep": the day of a reading, in the configured zone. One formatter per zone, kept —
+ * the label is built for every point of every sparkline on every render. The digits follow
+ * the en-US pattern like every other time in the extension, so the label reads the same on
+ * every machine; the zone is the user's.
+ */
+const sparkDayFormatters = new Map<string, Intl.DateTimeFormat>()
+function sparkDay(ms: number, tcfg: TimeConfig): string {
+  const zone = resolveZone(tcfg.zone)
+  const key = zone ?? ''
+  let f = sparkDayFormatters.get(key)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: zone, weekday: 'short', day: 'numeric', month: 'short' })
+    sparkDayFormatters.set(key, f)
+  }
+  const parts = f.formatToParts(ms)
+  const part = (type: string): string => parts.find((p) => p.type === type)?.value ?? ''
+  return `${part('weekday')} ${part('day')} ${part('month')}`
+}
+
+/**
+ * What a hover over a reading says: "Sat 6 Sep · 14:20 · 37 %". The clock honours the
+ * configured hour cycle and zone exactly as the reset times on the card do; the percentage
+ * is rounded to the whole percent every other view prints.
+ */
+function sparkLabel(s: QuotaSample, tcfg: TimeConfig): string {
+  return `${sparkDay(s.t, tcfg)} · ${formatTime(s.t, tcfg)} · ${Math.round(s.p)} %`
+}
+
+/** The line in words: how many readings it has and how high it got. */
+function sparkAria(points: SparkPoint[]): string {
+  const n = points.length
+  if (n === 0) return `quota sparkline, ${SPARK_DAYS} days, no readings`
+  const peak = Math.round(Math.max(...points.map((p) => p.p)))
+  return `quota sparkline, ${SPARK_DAYS} days, ${n} reading${n === 1 ? '' : 's'}, peak ${peak} %`
+}
+
+/**
  * The last seven days of one window on the sparkline grid.
  *
  * Only samples inside the grid are drawn; older ones are dropped rather than stretched. Two
@@ -590,6 +652,7 @@ export function sparkOf(
   now: number,
   windowMinutes: number | null,
   paceCfg: PaceConfig,
+  tcfg: TimeConfig,
 ): SparkVm {
   const to = (Math.floor(now / SPARK_SLOT_MS) + 1) * SPARK_SLOT_MS
   const from = to - SPARK_SLOTS * SPARK_SLOT_MS
@@ -606,13 +669,16 @@ export function sparkOf(
   let prev: QuotaSample | null = null
   for (const i of slots) {
     const s = last.get(i) as QuotaSample
-    const point: SparkPoint = { i, p: s.p, level: sparkLevel(s, windowMinutes, paceCfg) }
-    // The window turned over: the stroke leading here belongs to neither window.
-    if (prev && turnedOver(prev, s)) point.reset = true
+    const r = s.r !== null && Number.isFinite(s.r) ? s.r : null
+    const point: SparkPoint = { i, p: s.p, level: sparkLevel(s, windowMinutes, paceCfg), t: s.t, r, label: '' }
+    // The window turned over and the value fell: the stroke leading here is the reset, not a
+    // pace. A turn-over the value rose across has no fall to draw and stays an ordinary stroke.
+    if (prev && turnedOver(prev, s) && s.p < prev.p) point.reset = true
+    point.label = sparkLabel(s, tcfg) + (point.reset ? ' · reset' : '')
     points.push(point)
     prev = s
   }
-  return { slots: SPARK_SLOTS, from, to, points }
+  return { slots: SPARK_SLOTS, from, to, points, aria: sparkAria(points) }
 }
 
 // ---------------------------------------------------------------------------
@@ -789,7 +855,7 @@ function quotaCard(
       resetLine: resetLineOf(display, reset),
       stateText: stateTextOf(display, verdict.text),
       forecast: printableForecast(forecasts.get(`${q.source}:${w.id}`) ?? null),
-      spark: sparkOf(samples, now, w.windowMinutes, paceCfg),
+      spark: sparkOf(samples, now, w.windowMinutes, paceCfg, tcfg),
       gaps: history.gaps(samples.filter((s) => s.t >= now - GAP_COUNT_MS), GAP_MIN_MS).length,
       aria: {
         now: Number.isFinite(w.percent) ? Math.round(w.percent) : 0,

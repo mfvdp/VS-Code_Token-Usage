@@ -28,6 +28,7 @@ import { execFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { WriteConsent } from './consent'
+import { t } from './i18n'
 import { MementoLike } from './storage'
 
 /** Memento key of the install record. Never deleted by "Clear Stored Data": it is the undo. */
@@ -100,7 +101,7 @@ export function readSettings(file: string): SettingsRead {
     return { kind: 'unparsable', error: (e as Error).message }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { kind: 'unparsable', error: 'settings.json does not contain a JSON object' }
+    return { kind: 'unparsable', error: t('settings.json does not contain a JSON object') }
   }
   return { kind: 'ok', settings: parsed as Record<string, unknown>, raw }
 }
@@ -214,8 +215,10 @@ export function resolveWriteTarget(file: string): { ok: true; file: string } | {
   } catch (e) {
     return {
       ok: false,
-      message: `${file} could not be resolved (${(e as Error).message}). It looks like a link whose `
-        + 'target is missing, so it was left untouched — repair the link and try again.',
+      message: t(
+        '{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.',
+        file, (e as Error).message,
+      ),
     }
   }
 }
@@ -330,7 +333,7 @@ export async function install(
     return {
       ok: false,
       reason: 'restricted',
-      message: 'The status line bridge is disabled in Restricted Mode. Trust the workspace to use it.',
+      message: t('The status line bridge is disabled in Restricted Mode. Trust the workspace to use it.'),
     }
   }
 
@@ -339,7 +342,7 @@ export async function install(
     return {
       ok: false,
       reason: 'unparsable',
-      message: `${paths.settingsFile} is not valid JSON (${read.error}). It was left untouched — fix it and try again.`,
+      message: t('{0} is not valid JSON ({1}). It was left untouched — fix it and try again.', paths.settingsFile, read.error),
     }
   }
   const settings = read.kind === 'ok' ? read.settings : {}
@@ -348,7 +351,7 @@ export async function install(
   if (!target.ok) return { ok: false, reason: 'writeFailed', message: target.message }
 
   if (!(await consent())) {
-    return { ok: false, reason: 'consent', message: 'The status line bridge needs your explicit consent.' }
+    return { ok: false, reason: 'consent', message: t('The status line bridge needs your explicit consent.') }
   }
 
   const node = await (opts.resolveNode ?? (() => resolveNode()))()
@@ -356,8 +359,7 @@ export async function install(
     return {
       ok: false,
       reason: 'noNode',
-      message: 'No "node" executable was found on PATH. Claude Code would have to run the bridge '
-        + 'script itself, so install Node.js (or add it to PATH) and try again.',
+      message: t('No "node" executable was found on PATH. Claude Code would have to run the bridge script itself, so install Node.js (or add it to PATH) and try again.'),
     }
   }
 
@@ -376,7 +378,7 @@ export async function install(
     }
     writeJsonAtomic(target.file, plan.newSettings)
   } catch (e) {
-    return { ok: false, reason: 'writeFailed', message: `Could not write ${paths.settingsFile}: ${(e as Error).message}` }
+    return { ok: false, reason: 'writeFailed', message: t('Could not write {0}: {1}', paths.settingsFile, (e as Error).message) }
   }
 
   try {
@@ -391,8 +393,9 @@ export async function install(
     return {
       ok: false,
       reason: 'writeFailed',
-      message: `The install could not be recorded (${(e as Error).message}); settings.json was restored`
-        + `${backup !== null ? ` from ${backup}` : ''}.`,
+      message: backup !== null
+        ? t('The install could not be recorded ({0}); settings.json was restored from {1}.', (e as Error).message, backup)
+        : t('The install could not be recorded ({0}); settings.json was restored.', (e as Error).message),
     }
   }
 
@@ -412,7 +415,7 @@ export type RestoreResult =
 export async function restore(paths: BridgePaths, memento: MementoLike): Promise<RestoreResult> {
   const record = memento.get<BridgeRecord | undefined>(BRIDGE_KEY, undefined)
   if (!record || typeof record.installedCommand !== 'string') {
-    return { ok: false, reason: 'notInstalled', message: 'Token Pace has not installed a status line.' }
+    return { ok: false, reason: 'notInstalled', message: t('Token Pace has not installed a status line.') }
   }
 
   const read = readSettings(paths.settingsFile)
@@ -420,7 +423,7 @@ export async function restore(paths: BridgePaths, memento: MementoLike): Promise
     return {
       ok: false,
       reason: 'unparsable',
-      message: `${paths.settingsFile} is not valid JSON. It was left untouched.`,
+      message: t('{0} is not valid JSON. It was left untouched.', paths.settingsFile),
     }
   }
   if (read.kind === 'missing') {
@@ -433,8 +436,7 @@ export async function restore(paths: BridgePaths, memento: MementoLike): Promise
     return {
       ok: false,
       reason: 'changed',
-      message: 'The status line is no longer the one Token Pace installed, so nothing was changed. '
-        + 'Edit settings.json yourself, or restore the backup written at install time.',
+      message: t('The status line is no longer the one Token Pace installed, so nothing was changed. Edit settings.json yourself, or restore the backup written at install time.'),
     }
   }
 
@@ -448,7 +450,7 @@ export async function restore(paths: BridgePaths, memento: MementoLike): Promise
   try {
     writeJsonAtomic(target.file, next)
   } catch (e) {
-    return { ok: false, reason: 'writeFailed', message: `Could not write ${paths.settingsFile}: ${(e as Error).message}` }
+    return { ok: false, reason: 'writeFailed', message: t('Could not write {0}: {1}', paths.settingsFile, (e as Error).message) }
   }
   await memento.update(BRIDGE_KEY, undefined)
   return { ok: true, restored: record.previous === undefined ? 'removed' : 'previous' }
@@ -516,14 +518,14 @@ export function registerBridgeCommands(context: ExtensionContextLike, deps: Brid
   const connect = vscode.commands.registerCommand('tokenPace.connectStatusLine', async () => {
     if (deps.restricted()) {
       void vscode.window.showWarningMessage(
-        'Token Pace: the status line bridge is disabled in Restricted Mode.',
+        t('Token Pace: the status line bridge is disabled in Restricted Mode.'),
       )
       return
     }
     const read = readSettings(deps.paths.settingsFile)
     if (read.kind === 'unparsable') {
       void vscode.window.showWarningMessage(
-        `Token Pace: ${deps.paths.settingsFile} is not valid JSON, so it was left untouched.`,
+        t('Token Pace: {0} is not valid JSON, so it was left untouched.', deps.paths.settingsFile),
       )
       return
     }
@@ -531,10 +533,10 @@ export function registerBridgeCommands(context: ExtensionContextLike, deps: Brid
     let mode: BridgeMode = 'standalone'
     const previous = read.kind === 'ok' ? statusLineCommandOf(read.settings.statusLine) : null
     if (previous !== null) {
-      const keep = 'Keep it and chain Token Pace'
-      const replace = 'Replace it (a backup is written)'
+      const keep = t('Keep it and chain Token Pace')
+      const replace = t('Replace it (a backup is written)')
       const choice = await vscode.window.showQuickPick([keep, replace], {
-        title: 'A status line command is already configured',
+        title: t('A status line command is already configured'),
         placeHolder: previous.length > 80 ? `${previous.slice(0, 80)}…` : previous,
       })
       if (choice === undefined) return
@@ -549,31 +551,31 @@ export function registerBridgeCommands(context: ExtensionContextLike, deps: Brid
     }, () => consent.request())
 
     if (!result.ok) {
-      if (result.reason !== 'consent') void vscode.window.showWarningMessage(`Token Pace: ${result.message}`)
+      if (result.reason !== 'consent') void vscode.window.showWarningMessage(t('Token Pace: {0}', result.message))
       return
     }
     deps.onChange?.()
     const shadow = result.shadowed === 'configuration-shadowed'
-      ? ' Another settings file also defines a status line and takes precedence (configuration-shadowed).'
+      ? ` ${t('Another settings file also defines a status line and takes precedence (configuration-shadowed).')}`
       : ''
     void vscode.window.showInformationMessage(
       result.status === 'already'
-        ? `Token Pace: the status line is already connected.${shadow}`
-        : `Token Pace: status line connected. Backup: ${result.backup ?? 'none needed'}.${shadow}`,
+        ? `${t('Token Pace: the status line is already connected.')}${shadow}`
+        : `${t('Token Pace: status line connected. Backup: {0}.', result.backup ?? t('none needed'))}${shadow}`,
     )
   })
 
   const disconnect = vscode.commands.registerCommand('tokenPace.disconnectStatusLine', async () => {
     const result = await restore(deps.paths, deps.memento)
     if (!result.ok) {
-      void vscode.window.showWarningMessage(`Token Pace: ${result.message}`)
+      void vscode.window.showWarningMessage(t('Token Pace: {0}', result.message))
       return
     }
     deps.onChange?.()
     void vscode.window.showInformationMessage(
       result.restored === 'previous'
-        ? 'Token Pace: the previous status line was restored.'
-        : 'Token Pace: the status line entry was removed.',
+        ? t('Token Pace: the previous status line was restored.')
+        : t('Token Pace: the status line entry was removed.'),
     )
   })
 

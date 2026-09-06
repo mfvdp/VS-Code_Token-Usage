@@ -14,6 +14,7 @@ import * as vscode from 'vscode'
 import { SOURCES, SOURCE_TITLE } from './adapters'
 import { Aggregator } from './agg'
 import { Config } from './config'
+import { t } from './i18n'
 import {
   ALARM_BACKGROUND, buildItems, ConsentState, ItemModel, previewItems, Role, StatusTextInput,
 } from './statusText'
@@ -171,53 +172,54 @@ export async function showMenu(
   run: (command: string, ...args: unknown[]) => Thenable<unknown>,
 ): Promise<void> {
   const blocked = input.cfg.quotaSource === 'cache'
-    ? 'disabled: tokenPace.quotaSource is “cache” — nothing is fetched over the network'
+    ? t('disabled: tokenPace.quotaSource is “cache” — nothing is fetched over the network')
     : input.consent === 'denied'
-      ? 'disabled: network consent was declined (Token Pace: Reset Network Access Decision asks again)'
+      ? t('disabled: network consent was declined (Token Pace: Reset Network Access Decision asks again)')
       : input.role === 'follower'
-        ? 'disabled: another VS Code window holds the lease and polls'
+        ? t('disabled: another VS Code window holds the lease and polls')
         : undefined
 
   const sources = input.quotas.length > 0
     ? [...new Set(input.quotas.map((q) => q.source))]
     : [...SOURCES]
 
+  // The icon stays outside the translated words: a `$(…)` id is not prose.
   const items: MenuItem[] = [
-    { label: '$(dashboard) Open Dashboard', command: 'tokenPace.showDashboard' },
-    { label: '$(markdown) Show Usage as Text (Markdown)', command: 'tokenPace.showUsageMarkdown' },
-    { label: '$(list-selection) Show Usage (Quick Pick)', command: 'tokenPace.showUsageQuickPick' },
+    { label: `$(dashboard) ${t('Open Dashboard')}`, command: 'tokenPace.showDashboard' },
+    { label: `$(markdown) ${t('Show Usage as Text (Markdown)')}`, command: 'tokenPace.showUsageMarkdown' },
+    { label: `$(list-selection) ${t('Show Usage (Quick Pick)')}`, command: 'tokenPace.showUsageQuickPick' },
     { label: '', kind: vscode.QuickPickItemKind.Separator },
     {
-      label: `${blocked ? '$(circle-slash)' : '$(sync)'} Fetch Quota Now`,
+      label: `${blocked ? '$(circle-slash)' : '$(sync)'} ${t('Fetch Quota Now')}`,
       detail: blocked,
       command: 'tokenPace.refreshQuota',
     },
-    { label: '$(history) Re-read History', command: 'tokenPace.rescan' },
+    { label: `$(history) ${t('Re-read History')}`, command: 'tokenPace.rescan' },
     {
-      label: '$(list-ordered) Cycle Status Bar Windows',
+      label: `$(list-ordered) ${t('Cycle Status Bar Windows')}`,
       description: input.cfg.windowSelect,
       command: 'tokenPace.cycleWindowSelect',
     },
     { label: '', kind: vscode.QuickPickItemKind.Separator },
     ...sources.map((s): MenuItem => ({
-      label: `$(link-external) Open Official Usage Page — ${SOURCE_TITLE[s]}`,
+      label: `$(link-external) ${t('Open Official Usage Page — {0}', SOURCE_TITLE[s])}`,
       command: 'tokenPace.openUsagePage',
       args: [s],
     })),
     { label: '', kind: vscode.QuickPickItemKind.Separator },
-    { label: '$(desktop-download) Export CSV…', command: 'tokenPace.exportCsv' },
-    { label: '$(clippy) Copy Usage Summary', command: 'tokenPace.copySummary' },
-    { label: '$(bug) Copy Diagnostics', command: 'tokenPace.copyDiagnostics' },
+    { label: `$(desktop-download) ${t('Export CSV…')}`, command: 'tokenPace.exportCsv' },
+    { label: `$(clippy) ${t('Copy Usage Summary')}`, command: 'tokenPace.copySummary' },
+    { label: `$(bug) ${t('Copy Diagnostics')}`, command: 'tokenPace.copyDiagnostics' },
     { label: '', kind: vscode.QuickPickItemKind.Separator },
-    { label: '$(eye) Preview Status Bar States', command: 'tokenPace.previewStatusBar' },
-    { label: '$(output) Show Log', command: 'tokenPace.showOutput' },
-    { label: '$(settings-gear) Settings', command: 'tokenPace.openSettings' },
-    { label: '$(trash) Clear Stored Data…', command: 'tokenPace.clearStoredData' },
+    { label: `$(eye) ${t('Preview Status Bar States')}`, command: 'tokenPace.previewStatusBar' },
+    { label: `$(output) ${t('Show Log')}`, command: 'tokenPace.showOutput' },
+    { label: `$(settings-gear) ${t('Settings')}`, command: 'tokenPace.openSettings' },
+    { label: `$(trash) ${t('Clear Stored Data…')}`, command: 'tokenPace.clearStoredData' },
   ]
 
   const picked = await vscode.window.showQuickPick(items, {
     title: 'Token Pace',
-    placeHolder: 'Pick an action',
+    placeHolder: t('Pick an action'),
     matchOnDetail: true,
   })
   if (!picked || !picked.command) return

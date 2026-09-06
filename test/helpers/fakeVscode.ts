@@ -102,6 +102,11 @@ export interface FakeVscodeState {
   /** `vscode.env.remoteName` — undefined is a local window, a string is WSL/SSH/container. */
   setRemoteName(name: string | undefined): void
   /**
+   * `vscode.env.language` and `vscode.l10n.bundle` — what `activate()` hands to the i18n
+   * seam. 'en' and no bundle unless a test says otherwise; `reset()` puts that back.
+   */
+  setLanguage(language: string, bundle?: Record<string, string>): void
+  /**
    * Clears every recording and replaces the settings.
    *
    * A bundle evaluates `require('vscode')` once and keeps the object, so one process can
@@ -220,6 +225,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const contentProviders = new Map<string, { provideTextDocumentContent(uri: unknown): string }>()
   const configListeners: Array<(e: { affectsConfiguration(section: string): boolean }) => void> = []
   const windowStateListeners: Array<(e: { focused: boolean; active: boolean }) => void> = []
+  let language = 'en'
+  let l10nBundle: Record<string, string> | undefined
 
   const disposable = (dispose: () => void = () => { /* nothing to release */ }): { dispose(): void } =>
     ({ dispose })
@@ -338,6 +345,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
 
     env: {
       remoteName: undefined as string | undefined,
+      get language(): string { return language },
       appName: 'Token Pace Test Host',
       clipboard: {
         writeText(text: string): Promise<void> {
@@ -436,6 +444,16 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     languages: {
       setTextDocumentLanguage: (doc: unknown): Promise<unknown> => Promise.resolve(doc),
     },
+
+    /** The bundle VS Code would have loaded for `env.language`; `t` mirrors the real one. */
+    l10n: {
+      get bundle(): Record<string, string> | undefined { return l10nBundle },
+      uri: undefined,
+      t(message: string, ...args: Array<string | number | boolean>): string {
+        const template = l10nBundle?.[message] ?? message
+        return template.replace(/\{(\d+)\}/g, (m, i: string) => (args[Number(i)] === undefined ? m : String(args[Number(i)])))
+      },
+    },
   }
 
   const state: FakeVscodeState = {
@@ -471,7 +489,13 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     setRemoteName(name: string | undefined): void {
       api.env.remoteName = name
     },
+    setLanguage(tag: string, bundle?: Record<string, string>): void {
+      language = tag
+      l10nBundle = bundle
+    },
     reset(settings?: Record<string, unknown>): void {
+      language = 'en'
+      l10nBundle = undefined
       log.length = 0
       registered.clear()
       handlers.clear()

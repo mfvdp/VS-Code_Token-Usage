@@ -233,6 +233,8 @@ interface ActivateOptions {
    * here rather than before the call: `state.reset()` clears the queue.
    */
   answers?: unknown[]
+  /** `vscode.env.language` and the bundle VS Code would have loaded for it — the i18n seam's input. */
+  language?: { tag: string; bundle?: Record<string, string> }
 }
 
 async function activateHost(
@@ -244,6 +246,7 @@ async function activateHost(
   // After the reset: it clears the remote name and the answer queue along with every
   // other recording.
   state.setRemoteName(opts.remoteName)
+  if (opts.language) state.setLanguage(opts.language.tag, opts.language.bundle)
   state.answers.push(...(opts.answers ?? []))
   const ext = require('../src/extension') as Extension
   const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState })
@@ -666,6 +669,35 @@ test('clear stored data lists the shared cache and says the bridge has to go fir
   assert.equal(fs.existsSync(fx.stateFile), true, 'an item that was not picked was deleted')
   const confirm = state.messages[state.messages.length - 1]
   assert.match(confirm.text, /Delete 1 stored item/)
+
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('the bundle VS Code loaded for the language reaches the dialogs: activate() feeds the i18n seam', async () => {
+  const fx = makeEmptyFixture()
+  const de = JSON.parse(fs.readFileSync(path.join(REPO, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const key = Object.keys(de).find((k) => k.startsWith('Token Pace found no Claude Code or Codex transcripts'))
+  assert.ok(key, 'the remote hint has no German entry')
+  const buttons = ['Run Token Pace locally', 'Open Settings', 'Not now'].map((k) => de[k])
+  assert.ok(buttons.every((b) => typeof b === 'string' && b.length > 0), 'a button of the remote hint has no German entry')
+  const expected = de[key].replace('{0}', 'wsl')
+
+  await activateHost(fx, REPO, {
+    remoteName: 'wsl',
+    globalState: new Map<string, unknown>(),
+    language: { tag: 'de', bundle: de },
+    // Answered with the German labels: the code has to compare against what it showed.
+    answers: [buttons[0], de['Reload Window']],
+    settings: { 'tokenPace.quotaSource': 'cache' },
+  })
+
+  await waitFor('the German remote hint', () => state.messages.some((m) => m.text === expected))
+  const hint = state.messages.find((m) => m.text === expected)!
+  assert.deepEqual(hint.actions, buttons)
+  await waitFor('the reload prompt', () => state.executed.includes('workbench.action.reloadWindow'))
+  const reload = state.messages.find((m) => m.actions.includes(de['Reload Window']))
+  assert.ok(reload, 'the reload prompt was not shown with the German button')
+  assert.equal(reload.text, de['Token Pace will run on the local machine after a window reload.'])
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })

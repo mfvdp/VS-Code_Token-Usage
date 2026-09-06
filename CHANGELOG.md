@@ -5,6 +5,28 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## 1.3.1 — unreleased
 
+### Security
+
+* **Every value from a payload is escaped before it becomes markup.** CodeQL flagged the
+  dashboard's page build (`innerHTML` from a posted view model). An audit of every path found
+  no exploitable field, but about twenty interpolations bypassed the escaper — numbers, level
+  and class names, translated words, `data-*` attributes; all of them now go through it, the
+  translated strings are escaped once where the page is built, and a section key or part key
+  that is not one of ours is dropped instead of looked up on a prototype. The page's script
+  constants are hardened against an early `</script>`, the CSP forbids `base-uri` and
+  `form-action`, and the nonce comes from the platform's cryptographic generator.
+* **The webview takes messages of its own origin only** — measured in a real VS Code window —
+  and acknowledges every rendered page; the smoke test waits for that acknowledgement, so a
+  rule that shut the host out could not ship.
+* **The status-bar tooltip keeps borrowed strings in code spans.** Window labels, model names
+  and a provider's error text are printed inside a code span with backticks removed, the way
+  the plan name already was, so a hostile label cannot rewrite the tooltip's markdown.
+* **Markdown cells escape the backslash before the pipe**, so a value like `a\|b` no longer
+  splits a table column in the report or the export. The transcript tail reads up to the size
+  of the file it opened, not the size it measured a moment earlier. The test files are no
+  longer scanned by CodeQL: their fixtures stat-then-write and assert on literal URLs on
+  purpose.
+
 ### Changed
 
 * **The price table is checked as of 2026-09-06.** Both pricing pages were read again in full.

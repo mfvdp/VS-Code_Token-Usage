@@ -1013,3 +1013,44 @@ test('the preview shows a budget under and over its limit, and colours neither',
     assert.equal(m.alarm, false)
   }
 })
+
+// ---------------------------------------------------------------------------
+// Prompt-cache row
+// ---------------------------------------------------------------------------
+
+const CACHE = {
+  warm: true, ttl: '5m' as const, expiresAt: NOW + 220_000, hitRatio: 0.82,
+  readAt: Math.floor(NOW / 1000) - 60,
+}
+const CACHE_ROW = '$(database) prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'
+
+test('the prompt-cache row is in the Claude tooltip only while the bridge delivers a reading', () => {
+  const tip = buildItems(input({ promptCache: CACHE }))[0].tooltipMarkdown
+  assert.ok(tip.includes(`\n${CACHE_ROW}\n`), tip)
+  // Once, below the window table and above the freshness line.
+  assert.equal(tip.split('prompt cache').length - 1, 1, tip)
+  assert.ok(tip.indexOf(CACHE_ROW) > tip.indexOf('| 5 h |'), tip)
+  assert.ok(tip.indexOf(CACHE_ROW) < tip.indexOf('Updated '), tip)
+  // No reading, no row — never a dash line that suggests one could be had.
+  assert.equal(buildItems(input())[0].tooltipMarkdown.includes('prompt cache'), false)
+  assert.equal(buildItems(input({ promptCache: null }))[0].tooltipMarkdown.includes('prompt cache'), false)
+  // Codex has no status line: its tooltip never carries the row, reading or not.
+  const codex = buildItems(input({
+    quotas: [state({ source: 'codex' })], promptCache: CACHE,
+    cfg: cfg({ 'tokenPace.statusBar.show': ['codexQuota'] }),
+  }))[0].tooltipMarkdown
+  assert.equal(codex.includes('prompt cache'), false, codex)
+})
+
+test('the prompt-cache row keeps out of the compact tooltip and reaches the summary one', () => {
+  const compact = buildItems(input({ promptCache: CACHE, cfg: cfg({ 'tokenPace.tooltip': 'compact' }) }))[0].tooltipMarkdown
+  assert.equal(compact.includes('prompt cache'), false, compact)
+  assert.ok(compact.split('\n').length <= 12)
+  const summary = buildItems(input({ promptCache: CACHE, cfg: cfg({ 'tokenPace.density': 'minimal' }) }))[0].tooltipMarkdown
+  assert.ok(summary.includes(CACHE_ROW), summary)
+  // Past the expiry the row reports the last reading; a part the payload left out is a dash.
+  const gone = buildItems(input({ promptCache: CACHE, now: NOW + 300_000 }))[0].tooltipMarkdown
+  assert.ok(gone.includes('$(database) prompt cache · expired at 12:03 (last reading) · hit ratio 82 %'), gone)
+  const bare = buildItems(input({ promptCache: { ...CACHE, ttl: null, hitRatio: null } }))[0].tooltipMarkdown
+  assert.ok(bare.includes('prompt cache warm · expires in 3 m 40 s (– TTL) · hit ratio –'), bare)
+})

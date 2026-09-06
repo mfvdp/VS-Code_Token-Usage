@@ -19,7 +19,8 @@ import { detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, po
 import { codexStateFromBody, quotaFileFor, writeQuotaCacheFile } from './quota'
 import { fingerprintFor } from './quotaHistory'
 import {
-  bestState, Candidate, ClaudeSourceId, CodexSourceId, ContextReading, QuotaMode, SourceExtras, SourceInputs,
+  bestState, Candidate, ClaudeSourceId, CodexSourceId, ContextReading, PromptCacheReading, QuotaMode, SourceExtras,
+  SourceInputs,
 } from './quotaSources'
 import { CodexRateLimitsSnapshot, ProblemKind, QuotaState, Source } from './types'
 
@@ -295,6 +296,16 @@ export class QuotaManager {
    */
   contextReading(): ContextReading | null {
     return this.lastExtras.claude?.context ?? null
+  }
+
+  /**
+   * The prompt cache of the running Claude Code session, when the status-line
+   * bridge reported one — otherwise null. The same rules as `contextReading()`:
+   * the last `current()` reading, kept beside the state, with the mirror's own
+   * time, and never a figure derived from the transcripts.
+   */
+  promptCacheReading(): PromptCacheReading | null {
+    return this.lastExtras.claude?.promptCache ?? null
   }
 
   driftReport(): Record<Source, string[]> {

@@ -366,7 +366,9 @@ input[type=date] { cursor: text; }
    the unit, and neither must the provider in front of it. The only break left in a heading
    like "Claude Code · 7 d" is the separator itself. */
 .nobr { white-space: nowrap; }
-.win { margin-top: 8px; }
+/* Positioned for the same reason the KPI card is: the window block is the containing block of
+   its own explanation, so the popover hangs under the bar it explains. */
+.win { margin-top: 8px; position: relative; }
 /* Label and reset on the left, the verdict beside them, the figure on the right — one row
    above the bar, so the card spends no line of its own on the verdict. A narrow sidebar wraps
    the row onto a second line; nothing in it is ever cut. */
@@ -960,10 +962,16 @@ function quotaCard(q) {
       ? w.verdict.text : '';
     const verdict = [said ? (w.level === 'ok' ? '' : '▲ ') + esc(said) : '', esc(state)]
       .filter(Boolean).join(' · ');
+    // Why the bar wears its colour, on hover and on focus: the block is focusable and points
+    // at its own explanation, the same way a key figure does. A payload without the field —
+    // an older build — gets neither the attributes nor an empty panel.
+    const ex = w.explain && Array.isArray(w.explain.lines) ? w.explain : null;
+    const popId = ex ? 'pop-q-' + String(q.source) + '-' + String(w.id).replace(/[^A-Za-z0-9_-]/g, '-') : '';
     // The verdict goes into the header row, between the label and the figure, so the card
     // spends no line of its own on it; the elapsed marker and the darker fill beyond it say
     // the same thing in the bar underneath.
-    h += '<div class="win"><div class="win-top"><span>' + esc(w.label)
+    h += '<div class="win"' + (ex ? ' tabindex="0" data-explain aria-describedby="' + esc(popId) + '"' : '')
+      + '><div class="win-top"><span>' + esc(w.label)
       + (reset ? ' · ' + esc(reset) : '') + '</span>'
       + (verdict ? '<span class="verdict ' + esc(w.level) + '">' + verdict + '</span>' : '')
       + '<b>' + esc(w.percentText) + '</b></div>'
@@ -983,6 +991,7 @@ function quotaCard(q) {
       h += '<div class="meta">' + esc(f.text) + '</div>';
     }
     if (hasSpark(w.spark)) h += sparkSvg(w.spark);
+    if (ex) h += explainPop(ex, popId);
     h += '</div>';
   }
   // The sparklines' span, said once per card rather than under each of them. Only the slotted
@@ -1002,10 +1011,29 @@ function quotaCard(q) {
   // Only ever present when the provider reported no window at all. It is a count, not a
   // window: no bar, no percentage, no pace — the sentence itself says what it is not.
   if (q.localBlock) h += '<div class="box info" role="status">' + esc(q.localBlock.text) + '</div>';
+  // The bridge's prompt-cache line, last, and only when the status line delivered one: the
+  // words are the view model's, dashes included, and the countdown in them is as of the
+  // model's own clock — nothing here ticks on its own.
+  if (q.promptCache && q.promptCache.text) {
+    h += '<div class="meta" title="' + esc(q.promptCache.note) + '">' + esc(q.promptCache.text) + '</div>';
+  }
   // The card header already says how old the reading is; the full freshness row and the
   // official page stay in the markdown view, where there is room for them, and the tooltip
   // links the official page from the provider name.
   return h + '</div>';
+}
+
+/**
+ * Why a window wears its colour: the title names the colour, the lines say what the bar was
+ * judged from. Every word is the view model's — the same lines the markdown prints under its
+ * table and the Quick Pick carries as the item detail. Written hidden and left in the markup,
+ * like the KPI panel, so the block has something to point at with aria-describedby.
+ */
+function explainPop(e, id) {
+  return '<div class="pop" role="tooltip" id="' + esc(id) + '" hidden>'
+    + '<div><b>' + esc(e.title) + '</b></div>'
+    + e.lines.map(l => '<div>' + esc(l) + '</div>').join('')
+    + '</div>';
 }
 
 /**
@@ -1148,7 +1176,7 @@ function sKpis() {
     // Focusable, because an explanation only a mouse can reach is not an explanation. No
     // title attribute beside it: two tooltips over one card is one of them too many.
     const id = 'pop-' + String(k.key);
-    return '<div class="kpi" tabindex="0" aria-describedby="' + esc(id) + '">'
+    return '<div class="kpi" tabindex="0" data-explain aria-describedby="' + esc(id) + '">'
       + '<div class="l">' + esc(k.label) + '</div><div class="v">' + esc(k.value) + '</div>'
       + '<div class="meta">' + d + '</div>' + sparkSvg(normSpark(k.spark))
       + kpiPop(k, id) + '</div>';
@@ -1843,8 +1871,12 @@ function renderAll() {
 function renderSection(key) {
   const body = document.querySelector('[data-body="' + key + '"]');
   if (!body || !RENDER[key]) { renderAll(); return; }
+  // An explanation open inside this body, and the focus on its block, live in the nodes
+  // about to be replaced; both are put back on the nodes that replace them.
+  const keep = keepPop(body);
   body.innerHTML = RENDER[key]();
   applyStyles();
+  restorePop(keep);
   // A day opened from the chart lands a whole page below it. Only on a new day, so a table
   // that merely refreshes cannot pull the page around under the reader.
   if (key === 'drill') {
@@ -2024,7 +2056,11 @@ document.addEventListener('change', (ev) => {
   if (el && vm) post({ type: 'setMetric', metric: el.value });
 });
 
-// -- the KPI explanation ----------------------------------------------------
+// -- explanations: any block that carries data-explain and a .pop of its own ------------
+//
+// The key figures and the quota windows share one mechanism: the block is focusable, points
+// at its panel with aria-describedby, and the panel opens on hover and on focus, closes on
+// leave, blur and Escape, and hangs from whichever edge keeps it on the page.
 
 /** The explanation currently open; opening a second one closes it. */
 let openPop = null;
@@ -2054,27 +2090,53 @@ function showPop(card) {
 }
 
 /**
- * The card itself, never one of its children: mouseenter and mouseleave fire for the inner
+ * The block itself, never one of its children: mouseenter and mouseleave fire for the inner
  * elements as well, and a pointer crossing onto the sparkline is not a pointer leaving the
- * card. The popover is a child of the card, so hovering it keeps the card hovered.
+ * block. The popover is a child of the block, so hovering it keeps the block hovered.
  */
-function kpiCard(ev) {
+function explainCard(ev) {
   const t = ev.target;
-  return t && t.classList && t.classList.contains('kpi') ? t : null;
+  return t && t.hasAttribute && t.hasAttribute('data-explain') ? t : null;
+}
+
+/**
+ * What a section refresh has to put back: the open explanation, by id, and whether the
+ * keyboard focus was on its block. The quota section refreshes every few seconds while the
+ * prompt-cache countdown ticks, and a refresh that closed the panel under the reader — or
+ * dropped the focus a keyboard user had just placed — would make the explanation unreadable.
+ */
+function keepPop(body) {
+  if (!openPop || !body.contains || !body.contains(openPop)) return null;
+  // The focus counts only when it sits on the explained block itself: with nothing focused
+  // the active element is the page body, which contains every panel there is, and a hover
+  // must not turn into a focus on the next refresh.
+  const active = document.activeElement;
+  const focused = !!(active && active.hasAttribute && active.hasAttribute('data-explain')
+    && active.contains && active.contains(openPop));
+  return { id: openPop.id, focused: focused };
+}
+
+function restorePop(keep) {
+  if (!keep || !keep.id) return;
+  const pop = document.getElementById(keep.id);
+  const card = pop && pop.closest ? pop.closest('[data-explain]') : null;
+  if (!card) { openPop = null; return; }
+  if (keep.focused && card.focus) card.focus();
+  showPop(card);
 }
 
 // mouseenter, mouseleave, focus and blur do not bubble; a capture-phase listener sees them
 // all the same, so one pair of listeners survives every re-render of the section.
 document.addEventListener('mouseenter', (ev) => {
-  const card = kpiCard(ev);
+  const card = explainCard(ev);
   if (card) showPop(card);
 }, true);
-document.addEventListener('mouseleave', (ev) => { if (kpiCard(ev)) hidePop(); }, true);
+document.addEventListener('mouseleave', (ev) => { if (explainCard(ev)) hidePop(); }, true);
 document.addEventListener('focus', (ev) => {
-  const card = kpiCard(ev);
+  const card = explainCard(ev);
   if (card) showPop(card);
 }, true);
-document.addEventListener('blur', (ev) => { if (kpiCard(ev)) hidePop(); }, true);
+document.addEventListener('blur', (ev) => { if (explainCard(ev)) hidePop(); }, true);
 // Escape closes it wherever the focus is — the way a reader expects to dismiss a hover card.
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') hidePop(); });
 

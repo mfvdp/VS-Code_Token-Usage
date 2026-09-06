@@ -3,7 +3,7 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## 1.3.1 — unreleased
+## 1.3.1 — 2026-09-06
 
 ### Security
 

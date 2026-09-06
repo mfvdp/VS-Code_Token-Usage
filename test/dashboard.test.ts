@@ -2709,3 +2709,53 @@ test('the budget section says what a dollar budget is not', () => {
   const h = render('sBudget()', { budgets: [budgetRow()] })
   assert.ok(h.includes('not a bill'), h)
 })
+
+// ---------------------------------------------------------------------------
+// Hostile payloads
+// ---------------------------------------------------------------------------
+
+/** Every string of a payload poisoned with markup, quotes and a backtick; numbers untouched. */
+function poisoned(v: unknown, mark: string): unknown {
+  if (typeof v === 'string') return mark + v
+  if (Array.isArray(v)) return v.map((x) => poisoned(x, mark))
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const k of Object.keys(v as Record<string, unknown>)) out[k] = poisoned((v as Record<string, unknown>)[k], mark)
+    return out
+  }
+  return v
+}
+
+test('a payload full of markup renders as text: no section lets a string become an element', () => {
+  const MARK = '<img src=x onerror=alert(1)>"\'&`'
+  const base = { ...model({}), ...tokensVm() } as Record<string, unknown>
+  const ALL = 'Object.keys(RENDER).map(k => { try { return RENDER[k]() } catch (e) { return "THROW:" + k + ":" + e } }).join("\\n")'
+  // Sections the plain fixture cannot render (it carries no data for them) are not the
+  // subject here; every other section must render the poison, not choke on it.
+  ;(ctx as Record<string, unknown>).fixture = base
+  const clean = String(nodeVm.runInContext('vm = fixture; ' + ALL, ctx))
+  const unrenderable = new Set((clean.match(/THROW:(\w+):/g) ?? []).map((m) => m.split(':')[1]))
+  const hostile = poisoned(base, MARK) as Record<string, unknown>
+  // The section list has to stay usable, or nothing would render at all.
+  hostile.sections = base.sections
+  ;(ctx as Record<string, unknown>).fixture = hostile
+  const out = String(nodeVm.runInContext('vm = fixture; ' + ALL, ctx))
+  const threw = (out.match(/THROW:(\w+):[^\n]*/g) ?? []).filter((m) => !unrenderable.has(m.split(':')[1]))
+  assert.deepEqual(threw, [], threw.join('; '))
+  assert.equal(out.indexOf('<img'), -1, 'a poisoned string became an element')
+  // The escaped text still reads "onerror=" — what must not exist is the attribute form.
+  assert.equal(/\s+onerror=/.test(out.replace(/&lt;img src=x onerror=alert\(1\)&gt;/g, '')), false, 'a poisoned string became an attribute')
+  assert.ok(out.indexOf('&lt;img src=x onerror=alert(1)&gt;&quot;&#39;&amp;`') >= 0, 'the poison is not on the page as text')
+  // And nothing but the nonced module runs: the page carries no second script.
+  assert.equal(/<script/i.test(out), false)
+})
+
+test('a poisoned section key or part key is dropped, never looked up on the prototype', () => {
+  const h = render('sTokens()', { ...tokensVm(), sections: ['constructor', '__proto__', 'tokens'] })
+  assert.ok(h.length > 0)
+  const all = String(nodeVm.runInContext(
+    'vm = Object.assign({}, fixture, { sections: ["constructor", "__proto__", "quota"] }); renderer("constructor") === null && renderer("__proto__") === null && typeof renderer("quota") === "function"',
+    ctx,
+  ))
+  assert.equal(all, 'true')
+})

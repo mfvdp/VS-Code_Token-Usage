@@ -1932,9 +1932,23 @@ document.addEventListener('keydown', (ev) => {
 window.addEventListener('resize', () => { if (vm) applyFits(); });
 
 window.addEventListener('message', (ev) => {
+  // Only the host drives the page. Measured in a real window: VS Code delivers the host's
+  // messages with the page's own `vscode-webview://…` origin — from a frame that is neither
+  // the parent nor the top, so the origin is the one thing to check. An event the page
+  // dispatches to itself (a test harness) has an empty origin. Anything else is ignored,
+  // whatever it says; the smoke test waits for the acknowledgement below, so a rule that
+  // shut the host out would fail there before it shipped.
+  if (ev.origin !== '' && ev.origin !== window.origin) return;
   const msg = ev.data;
   if (!msg) return;
-  if (msg.type === 'data') { vm = msg.payload; renderAll(); return; }
+  if (msg.type === 'data') {
+    vm = msg.payload;
+    renderAll();
+    // The acknowledgement the smoke test waits for: the page was built from a payload that
+    // arrived, so the whole channel — host, frame, origin rule, renderer — is proven live.
+    post({ type: 'rendered', sections: vm && Array.isArray(vm.sections) ? vm.sections.length : 0 });
+    return;
+  }
   if (msg.type === 'section' && vm) {
     Object.assign(vm, msg.payload);
     renderSection(msg.key);

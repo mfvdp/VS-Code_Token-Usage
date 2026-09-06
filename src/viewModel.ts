@@ -132,6 +132,7 @@ export type WebviewMessage =
   | { type: 'toggleSection'; key: DashboardSectionKey }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
+  | { type: 'rendered'; sections: number }
   | { type: 'command'; id: WebviewCommandId }
 
 /**
@@ -196,6 +197,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       const len = dayCount(from, to)
       if (len <= 0 || len > MAX_CUSTOM_DAYS) return null
       return { type: 'setRange', from, to }
+    }
+    case 'rendered': {
+      if (typeof m.sections !== 'number' || !Number.isFinite(m.sections) || m.sections < 0) return null
+      return { type: 'rendered', sections: Math.floor(m.sections) }
     }
     case 'setSort': {
       if (typeof m.key !== 'string' || !(MODEL_SORT_KEYS as readonly string[]).includes(m.key)) return null

@@ -120,6 +120,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
    * so the smoke test needs something the page itself sets.
    */
   private htmlLength = 0
+  /** Pages the webview reported having rendered from a payload (see `renderedCount`). */
+  private renders = 0
 
   constructor(
     private readonly onMessage: (m: WebviewMessage) => void,
@@ -137,6 +139,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     this.htmlLength = html.length
     view.webview.onDidReceiveMessage((raw: unknown) => {
       const m = parseWebviewMessage(raw)
+      if (m && m.type === 'rendered') { this.renders++; return }
       if (!m) {
         if (!this.warned) {
           this.warned = true
@@ -165,6 +168,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   /** How long the page of the last resolved view is; 0 while no view has resolved. */
   renderedHtmlLength(): number {
     return this.htmlLength
+  }
+
+  /**
+   * How many times the webview reported a page rendered from a payload. Unlike the html
+   * length, this proves the message channel end to end: the payload reached the frame, passed
+   * the page's origin rule and was drawn — the smoke test waits for it to move off 0.
+   */
+  renderedCount(): number {
+    return this.renders
   }
 
   update(vm: ViewModel): void {

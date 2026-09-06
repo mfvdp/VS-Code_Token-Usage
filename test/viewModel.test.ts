@@ -493,6 +493,14 @@ test('the quota card carries the sparkline and its own gap count', () => {
 // message protocol
 // ---------------------------------------------------------------------------
 
+test('parseWebviewMessage accepts the rendered acknowledgement only with a sane count', () => {
+  assert.deepEqual(parseWebviewMessage({ type: 'rendered', sections: 3 }), { type: 'rendered', sections: 3 })
+  assert.deepEqual(parseWebviewMessage({ type: 'rendered', sections: 2.9 }), { type: 'rendered', sections: 2 })
+  for (const bad of ['3', -1, Number.NaN, Number.POSITIVE_INFINITY, undefined, null]) {
+    assert.equal(parseWebviewMessage({ type: 'rendered', sections: bad }), null, String(bad))
+  }
+})
+
 test('parseWebviewMessage accepts exactly the documented shapes', () => {
   assert.deepEqual(parseWebviewMessage({ type: 'setRange', preset: '7d' }), { type: 'setRange', preset: '7d' })
   assert.deepEqual(parseWebviewMessage({ type: 'setRange', from: '2026-01-01', to: '2026-01-31' }),

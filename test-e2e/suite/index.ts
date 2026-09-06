@@ -240,6 +240,10 @@ check('the dashboard command opens the dashboard', async () => {
   // `resolveWebviewView` throws is caught and logged there, never seen here. So the check
   // waits for the length the provider records once the page is built.
   await waitFor('the dashboard webview to resolve and render', () => tp.dashboardHtmlLength() > 0)
+  // And the page itself must say so: the payload crossed the frame boundary, passed the
+  // page's origin rule and was drawn. A wrong rule leaves this at 0 — a dead dashboard that
+  // no host-side figure would reveal.
+  await waitFor('the webview to acknowledge a rendered page', () => tp.dashboardRendered() > 0)
 
   // The tab assertion goes through the mode that does open an editor: the same command, the
   // live `dashboard.mode` setting, the markdown usage document. It proves the routing, the

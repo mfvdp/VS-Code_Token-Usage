@@ -114,6 +114,12 @@ export interface TokenPaceApi {
    * command that resolves proves nothing about the page.
    */
   dashboardHtmlLength(): number
+  /**
+   * How many payloads the dashboard webview acknowledged as rendered. The smoke test waits
+   * for it after the html length: it proves the postMessage channel and the page's origin
+   * rule, which the length alone cannot.
+   */
+  dashboardRendered(): number
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<TokenPaceApi> {
@@ -1231,6 +1237,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       ? []
       : buildItems(lastStatusInput).map((m) => ({ id: m.id, text: m.text }))),
     dashboardHtmlLength: () => dashboard.renderedHtmlLength(),
+    dashboardRendered: () => dashboard.renderedCount(),
   }
 
   async function bootstrap(): Promise<void> {

@@ -838,3 +838,15 @@ test('the prompt-cache line is in both text views only while the bridge delivers
   assert.equal(quickPickItems(none).some((i) => i.label.startsWith('prompt cache')), false)
   assert.equal(quotaPart(markdownDocument(none)).includes('prompt cache'), false)
 })
+
+test('a backslash before a pipe cannot split a markdown table cell', () => {
+  const vm = fullVm()
+  const row = vm.models.rows[0] as unknown as Record<string, unknown>
+  const key = ['model', 'name', 'label'].find((k) => typeof row[k] === 'string')
+  assert.ok(key, 'the model row has no name field')
+  row[key!] = 'a\\|b'
+  const md = markdownDocument(vm)
+  // The backslash is escaped first, so the pipe after it is still escaped: a\\\\\\|b in the text.
+  const line = md.split('\n').find((l: string) => l.includes('a\\\\\\|b'))
+  assert.ok(line, md.split('\n').filter((l: string) => l.includes('a\\')).join(' / ') || '(no row carries the name)')
+})

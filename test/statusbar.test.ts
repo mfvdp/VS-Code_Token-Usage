@@ -1078,3 +1078,13 @@ test('the prompt-cache row keeps out of the compact tooltip and reaches the summ
   const bare = buildItems(input({ promptCache: { ...CACHE, ttl: null, hitRatio: null } }))[0].tooltipMarkdown
   assert.ok(bare.includes('prompt cache warm · expires in 3 m 40 s (– TTL) · hit ratio –'), bare)
 })
+
+test('a hostile window label, model name or problem text stays inside a code span of the tooltip', () => {
+  const evil = '**bold**|<b>x</b>`'
+  const s = state({ windows: [win({ label: evil, shortLabel: evil })], problem: evil })
+  const tip = quotaTooltip(s, makeContext(input({ quotas: [s] })))
+  // The span holds the markup as text and the backtick that would end it is gone.
+  assert.ok(tip.includes('`**bold**|<b>x</b>`'), tip)
+  assert.equal(tip.includes('| **bold**'), false, 'the label reached the table raw')
+  assert.equal(tip.includes('``'), false, 'an empty span: a backtick from the value survived')
+})

@@ -530,3 +530,36 @@ test('without a status-line mirror there is no context reading at all', () => {
   h.mgr.current(BASE)
   assert.equal(h.mgr.contextReading(), null)
 })
+
+test('the prompt cache is the status line\'s, stamped with the mirror\'s time, cleared with the rest', () => {
+  const h = harness()
+  // A fresher cache file wins the quota; the prompt cache still comes from the mirror, with
+  // the mirror's own time rather than the winner's.
+  h.writeClaudeCache((BASE - MIN) / 1000, 42, null)
+  fs.writeFileSync(h.files.mirrorFile, JSON.stringify({
+    schema_version: 1, written_at: BASE - 8 * MIN,
+    payload: {
+      rate_limits: { five_hour: { used_percentage: 55, resets_at: null } },
+      prompt_cache: { warm: true, ttl: '5m', expires_at: (BASE + 3 * MIN) / 1000, hit_ratio: 0.82 },
+    },
+  }))
+  // Nothing has been read yet, so there is nothing to report — not a cold cache.
+  assert.equal(h.mgr.promptCacheReading(), null)
+  const claude = h.mgr.current(BASE).find((s) => s.source === 'claude')!
+  assert.equal(claude.origin, 'cache')
+  assert.deepEqual(h.mgr.promptCacheReading(), {
+    warm: true, ttl: '5m', expiresAt: BASE + 3 * MIN, hitRatio: 0.82, readAt: (BASE - 8 * MIN) / 1000,
+  })
+  h.mgr.clearPolled()
+  assert.equal(h.mgr.promptCacheReading(), null)
+})
+
+test('a mirror without a prompt-cache block yields no reading — never one from the buckets', () => {
+  const h = harness()
+  fs.writeFileSync(h.files.mirrorFile, JSON.stringify({
+    schema_version: 1, written_at: BASE - MIN,
+    payload: { rate_limits: { five_hour: { used_percentage: 55, resets_at: null } } },
+  }))
+  h.mgr.current(BASE)
+  assert.equal(h.mgr.promptCacheReading(), null)
+})

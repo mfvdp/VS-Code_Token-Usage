@@ -27,12 +27,14 @@ import {
 import {
   PaceConfig, effectivePace, paceVerdict, severityOf, windowDisplay, WindowDisplay, windowElapsed,
 } from './pace'
+import { explainWindow, WindowExplain } from './paceExplain'
 import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
+import { promptCacheText } from './promptCache'
 import { ageMinutes, estimate, extraUsageText, full, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
 import { turnedOver } from './resetRule'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
-import type { ContextReading } from './quotaSources'
+import type { ContextReading, PromptCacheReading } from './quotaSources'
 import {
   CacheEconomyRow, CalendarRows, ChartData, ChartSeries,
   CompositionEntry, DrillData, HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
@@ -353,6 +355,14 @@ export interface WindowVm {
    */
   gaps: number
   aria: { now: number; max: number; text: string }
+  /**
+   * Why the bar wears its colour, from the very verdict that coloured it: the used and the
+   * elapsed share with the gap between them, the rule that turns the bar yellow, the
+   * measuring phase while it applies, an exhaustion, a missing clock, a stale reading. The
+   * dashboard shows it on hover and focus, the markdown prints it under the table, the Quick
+   * Pick carries its first two lines — every view the same words, none of them its own.
+   */
+  explain: WindowExplain
 }
 
 export interface QuotaCard {
@@ -393,6 +403,35 @@ export interface QuotaCard {
    * treat ours as the provider's.
    */
   localBlock: LocalBlockRow | null
+  /**
+   * The prompt cache of the Claude Code session the status line last wrote about, or null:
+   * for the Codex card always, for the Claude card whenever the bridge delivered no reading.
+   * Like the context card it has no second source — nothing here is ever estimated from the
+   * transcripts, which count cache reads but cannot know whether a cache is still warm.
+   */
+  promptCache: PromptCacheCard | null
+}
+
+export interface PromptCacheCard {
+  warm: boolean | null
+  ttl: '5m' | '1h' | null
+  /** Unix ms, as the payload stated it. */
+  expiresAt: number | null
+  /** A share of one, as reported. */
+  hitRatio: number | null
+  /** Epoch seconds of the status-line payload the line was read from. */
+  readAt: number | null
+  /** The stated expiry has passed: the line reports the last reading, not a live state. */
+  expired: boolean
+  /**
+   * The one line every view prints: "prompt cache warm · expires in 3 m 40 s (1 h TTL) · hit
+   * ratio 87 %", "prompt cache cold", or "prompt cache · expired at 14:20 (last reading)" —
+   * with a dash for every part the payload did not carry. The countdown is as of `now`, so
+   * it moves with every rebuild of the model and with nothing else.
+   */
+  text: string
+  /** The one sentence that keeps this from being read as an account figure. */
+  note: string
 }
 
 /**
@@ -465,6 +504,12 @@ export interface VmInput {
    * or null renders no card at all — this figure has no second source.
    */
   context?: ContextReading | null
+  /**
+   * The status line's prompt-cache reading, straight from `quotaManager.promptCacheReading()`.
+   * Absent or null renders no line at all — like the context window, this figure has no
+   * second source.
+   */
+  promptCache?: PromptCacheReading | null
 }
 
 export interface ViewModel {
@@ -841,6 +886,22 @@ function quotaCard(
     const pct = percentText(w.percent, cfg.percentMode, cfg.overflowDisplay)
     const text = w.unlimited ? 'unlimited' : display === 'resetDue' ? 'reset due' : `${pct} used`
     const reset = formatReset(w.resetsAt, now, 'relative', tcfg)
+    // Why the bar wears its colour, from the very verdict that coloured it and the pace
+    // configuration as it applies after the presets. The views print these lines; none of
+    // them writes its own.
+    const explain = explainWindow({
+      percent: w.percent,
+      elapsed,
+      verdict,
+      display,
+      pace: effectivePace(paceCfg),
+      resetsAt: w.resetsAt,
+      windowMinutes: w.windowMinutes,
+      now,
+      ageMinutes: age,
+      staleAfterMinutes: cfg.staleAfterMinutes,
+      formatTime: (ms) => formatTime(ms, tcfg),
+    })
     return {
       id: w.id,
       label: w.label,
@@ -868,6 +929,7 @@ function quotaCard(
           ? `${w.label}: ${text}`
           : `${w.label}: ${text}, ${verdict.text}`,
       },
+      explain,
     }
   })
 
@@ -912,6 +974,35 @@ function quotaCard(
     // window would be read as a second opinion about that window — and it is not one: it
     // counts what this machine ingested, the window counts what the account spent.
     localBlock: !q.ok || q.windows.length === 0 ? localBlock(ctx, q.source, now) : null,
+    // Only the Claude card, and only from the bridge: Codex has no status line, and no
+    // reading of it is invented for either provider.
+    promptCache: q.source === 'claude' ? promptCacheCard(input.promptCache, now, tcfg) : null,
+  }
+}
+
+/**
+ * The bridge's prompt-cache reading as the card's last line, or null.
+ *
+ * The countdown is computed here, against the model's `now`, and nowhere else: the model is
+ * rebuilt on the extension's own refresh tick, so the line moves with every rebuild and no
+ * view needs a timer of its own to keep it honest.
+ */
+function promptCacheCard(
+  reading: PromptCacheReading | null | undefined,
+  now: number,
+  tcfg: TimeConfig,
+): PromptCacheCard | null {
+  if (!reading) return null
+  const line = promptCacheText(reading, now, (ms) => formatTime(ms, tcfg))
+  return {
+    warm: reading.warm,
+    ttl: reading.ttl,
+    expiresAt: reading.expiresAt,
+    hitRatio: reading.hitRatio,
+    readAt: reading.readAt,
+    expired: line.expired,
+    text: line.text,
+    note: CONTEXT_NOTE,
   }
 }
 

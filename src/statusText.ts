@@ -19,8 +19,9 @@ import { Config, CONTEXT_NOTE, planNameOf, readPaceConfig, readTimeConfig } from
 import { lockoutText } from './forecast'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
 import { isCustomPricing, PricingOptions } from './prices'
+import { promptCacheText } from './promptCache'
 // Type only: this module renders, it never reads a file, and `quotaSources` does.
-import type { ContextReading } from './quotaSources'
+import type { ContextReading, PromptCacheReading } from './quotaSources'
 import {
   ageMinutes, BarOptions, compact, estimate, extraUsageText, full, percentOf, percentText,
   renderBar, usd,
@@ -104,6 +105,11 @@ export interface StatusTextInput {
    * account — absent when the bridge is not connected, and never derived from anything else.
    */
   context?: ContextReading | null
+  /**
+   * The prompt cache the status line last reported, or null. One row of the Claude tooltip
+   * while the bridge delivers it; absent otherwise, never estimated.
+   */
+  promptCache?: PromptCacheReading | null
   /**
    * The budget rows of the last view-model build. Optional, because every caller that only
    * renders quota (the preview, most tests) has none — and an absent list is no entry, not a
@@ -835,6 +841,12 @@ function quotaBlock(q: QuotaState, ctx: RenderContext, compactMode: boolean): st
   if (forecasts.length > 0) {
     out.push('')
     out.push(forecasts.join('\n\n'))
+  }
+  // The bridge's prompt-cache line, the same words as the dashboard card: one session's
+  // cache, only while the status line reports it, with a dash for every part it left out.
+  if (q.source === 'claude' && ctx.promptCache) {
+    out.push('')
+    out.push(`$(database) ${promptCacheText(ctx.promptCache, now, (ms) => formatTime(ms, tcfg)).text}`)
   }
   const auto = autoExplain(q, cfg)
   if (auto !== null) {

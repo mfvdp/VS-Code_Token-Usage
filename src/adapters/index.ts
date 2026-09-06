@@ -136,7 +136,7 @@ function readClaude(id: ClaudeSourceId, inputs: SourceInputs, now: number): Read
       const extras: SourceExtras = {
         context: r.context === null ? null : { ...r.context, fetchedAt: r.state.fetchedAt },
         cost: r.cost,
-        promptCache: r.promptCache,
+        promptCache: r.promptCache === null ? null : { ...r.promptCache, readAt: r.state.fetchedAt },
         model: r.model,
       }
       return { id, state: r.state, identityHint: r.identityHint, extras }

@@ -686,6 +686,9 @@ test('the status line mirror reaches the context entry and the text view', async
         context_window_size: 200_000,
         used_percentage: 64,
       },
+      // A warm cache with an hour to go: the line the Claude card, the text view and the
+      // tooltip print from this one reading.
+      prompt_cache: { warm: true, ttl: '1h', expires_at: Math.floor(Date.now() / 1000) + 3_600, hit_ratio: 0.82 },
     },
   }))
 
@@ -703,6 +706,8 @@ test('the status line mirror reaches the context entry and the text view', async
   const md = lastMarkdown()
   assert.equal(md.split('## Context window').length, 2, md)
   assert.ok(md.includes('128,000 / 200,000 · 64 % — current session, via the status line'), md)
+  // The prompt cache from the same mirror, under the Claude windows, with its parts.
+  assert.match(md, /\nprompt cache warm · expires in \d+ (h|m) \d+ (m|s) \(1 h TTL\) · hit ratio 82 % — current session, via the status line\n/)
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })

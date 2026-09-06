@@ -61,6 +61,25 @@ export interface ContextReading {
 }
 
 /**
+ * The prompt cache of ONE Claude Code session, as the status line reported it.
+ *
+ * The same rules as `ContextReading`: it is the bridge's reading and nothing else —
+ * the transcripts know what was read from a cache, not whether one is still warm —
+ * and it carries the payload's own time, because "expires in 3 m" is only a fact
+ * relative to when the status line said so.
+ */
+export interface PromptCacheReading {
+  warm: boolean | null
+  ttl: '5m' | '1h' | null
+  /** Unix ms, as the payload stated it; null when it named none. */
+  expiresAt: number | null
+  /** A share of one (0.82), as reported; null when absent. */
+  hitRatio: number | null
+  /** Epoch SECONDS of the status-line payload, like `ContextReading.fetchedAt`. */
+  readAt: number | null
+}
+
+/**
  * What the status line knows beyond the quota windows.
  *
  * Only the `statusline` reading ever fills this in. It is deliberately kept
@@ -71,7 +90,7 @@ export interface ContextReading {
 export interface SourceExtras {
   context: ContextReading | null
   cost: StatuslineReading['cost']
-  promptCache: StatuslineReading['promptCache']
+  promptCache: PromptCacheReading | null
   model: StatuslineReading['model']
 }
 

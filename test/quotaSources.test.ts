@@ -248,3 +248,23 @@ test('a context window without a size carries no percentage of its own', () => {
   writeMirror(dir, BASE - MIN, 55, { context_window: { total_input_tokens: 40_000, used_percentage: 55 } })
   assert.equal(bestState('claude', inputs(dir), BASE).extras?.context?.usedPct, null)
 })
+
+test('the prompt cache rides along with the extras, stamped with the mirror\'s own time', () => {
+  const dir = scratchDir('qsrc')
+  writeCache(dir, 'claude-cache.json', (BASE - MIN) / 1000, 20)
+  writeMirror(dir, BASE - 12 * MIN, 55, {
+    prompt_cache: { warm: true, ttl: '1h', expires_at: (BASE + 30 * MIN) / 1000, hit_ratio: 0.9 },
+  })
+  const r = bestState('claude', inputs(dir), BASE)
+  // The cache file is fresher and decides the quota; the prompt cache is the mirror's, with
+  // the mirror's time — eleven minutes older than the winner's.
+  assert.equal(r.state.origin, 'cache')
+  assert.deepEqual(r.extras?.promptCache, {
+    warm: true, ttl: '1h', expiresAt: BASE + 30 * MIN, hitRatio: 0.9, readAt: (BASE - 12 * MIN) / 1000,
+  })
+  assert.notEqual(r.extras?.promptCache?.readAt, r.state.fetchedAt)
+  // Nothing of it is spliced into the state, and a mirror without the block is an absence.
+  assert.equal(JSON.stringify(r.state).includes('prompt'), false)
+  writeMirror(dir, BASE - MIN, 55)
+  assert.equal(bestState('claude', inputs(dir), BASE).extras?.promptCache, null)
+})

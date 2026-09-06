@@ -117,6 +117,16 @@ function forecastSentence(f: Forecast | null): string {
   return f && f.state !== 'measuring' ? f.text : ''
 }
 
+/**
+ * The first `n` lines of a window's explanation, or all of them. A payload from a build
+ * that predates the field yields nothing rather than a sentence of this view's own.
+ */
+function explainLines(w: WindowVmOf, n = Infinity): string[] {
+  const e = w.explain
+  if (!e || !Array.isArray(e.lines)) return []
+  return e.lines.filter((l) => typeof l === 'string' && l !== '').slice(0, n)
+}
+
 function windowLine(w: WindowVmOf): string {
   const parts = [verdictText(w)].filter(Boolean)
   // `stateText` and `resetLine` arrive already de-duplicated against each other and against
@@ -182,11 +192,19 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
       add({
         label: `${w.label} ${bar(w.percent, w.elapsed)} ${w.percentText}`,
         description: windowLine(w),
-        // The reset as a clock time, once: a window whose reset has passed says "reset due" in
-        // the description already and gets no time here.
-        detail: w.resetAbsolute && w.display !== 'resetDue' ? `reset at ${w.resetAbsolute}` : undefined,
+        // The reset as a clock time, once — a window whose reset has passed says "reset due"
+        // in the description already and gets no time here — then why the bar has its colour:
+        // the first two lines of the explanation the dashboard shows on hover, because a list
+        // without a card has no other place to put them.
+        detail: [
+          w.resetAbsolute && w.display !== 'resetDue' ? `reset at ${w.resetAbsolute}` : null,
+          ...explainLines(w, 2),
+        ].filter(Boolean).join(' · ') || undefined,
       })
     }
+    // The bridge's prompt-cache line, word for word as the card prints it. Only ever present
+    // on the Claude card, and only while the status line delivered one.
+    if (q.promptCache) add({ label: q.promptCache.text, description: q.promptCache.note })
     if (q.extra) {
       add({
         label: `Extra usage: ${q.extra.text}`,
@@ -489,7 +507,18 @@ export function markdownDocument(vm: ViewModel): string {
           + `${cell(w.reset)} | ${cell(forecastCell)} |`)
       }
       L.push('')
+      // Why each bar has its colour, one line per window in the table's order: the dashboard
+      // shows this on hover, and a document read without one needs it in the text.
+      for (const w of q.windows) {
+        const lines = explainLines(w)
+        if (lines.length === 0) continue
+        L.push(`- **${cell(w.label)}** — ${cell(w.explain.title)}: ${lines.map(cell).join(' ')}`)
+      }
+      if (q.windows.some((w) => explainLines(w).length > 0)) L.push('')
     }
+    // The bridge's prompt-cache line, under the windows it was read beside — the same words
+    // as the card, qualified once as the session's rather than the account's.
+    if (q.promptCache) L.push(`${cell(q.promptCache.text)} — ${q.promptCache.note}`, '')
     if (q.extra) {
       L.push(`Extra usage: ${cell(q.extra.text)} (${q.extra.billed ? 'billed' : q.extra.enabled ? 'enabled' : 'off'})`, '')
     }

@@ -1195,3 +1195,121 @@ test('budget is a section key the panel can fold', () => {
   assert.deepEqual(parseWebviewMessage({ type: 'toggleSection', key: 'budget' }),
     { type: 'toggleSection', key: 'budget' })
 })
+
+// ---------------------------------------------------------------------------
+// Why this colour, and the prompt-cache line
+// ---------------------------------------------------------------------------
+
+/** No band and a three-percent measuring phase, stated outright so no preset decides the words. */
+const PACE_NO_BAND = {
+  'tokenPace.pace.sensitivity': 'custom',
+  'tokenPace.pace.tolerancePoints': 0,
+  'tokenPace.pace.minElapsedPercent': 3,
+}
+
+test('every window explains its colour from the very verdict that coloured it', () => {
+  const vm = buildViewModel(makeInput({ cfg: makeConfig(PACE_NO_BAND) }))
+  const [five, seven] = vm.quotas[0].windows
+  // 40 % used with 60 % of the window gone: green, and the words say by how much.
+  assert.equal(five.level, 'ok')
+  assert.equal(five.explain.title, 'Why green')
+  assert.equal(five.explain.lines[0], 'Used 40 % of the window; 60 % of its time has passed → 20 % behind pace.')
+  assert.equal(five.explain.lines[1], 'Yellow as soon as the reading is ahead of pace; green at or behind.')
+  // A fresh reading adds no stale line.
+  assert.equal(five.explain.lines.length, 2)
+  // 62 % used with four of seven days gone: five points ahead, yellow at once without a band —
+  // and the gap in the explanation is the gap of the verdict, rounded the same way.
+  assert.equal(seven.level, 'warn')
+  assert.equal(seven.verdict.text, '5 % ahead of pace')
+  assert.equal(seven.explain.title, 'Why yellow')
+  assert.equal(seven.explain.lines[0], 'Used 62 % of the window; 57 % of its time has passed → 5 % ahead of pace.')
+  // The Codex card explains its windows the same way.
+  for (const w of vm.quotas[1].windows) assert.ok(w.explain.lines.length >= 2, w.label)
+})
+
+test('the explanation follows the window into every state the card can be in', () => {
+  const explainOf = (over: Partial<QuotaWindow>, quota: Parameters<typeof state>[1] = {}) =>
+    buildViewModel(makeInput({
+      cfg: makeConfig(PACE_NO_BAND),
+      quotas: [state('claude', { windows: [win(over)], ...quota })],
+    })).quotas[0].windows[0].explain
+  // Exhausted: red for that reason, with the reset it waits for, and no yellow rule.
+  const full = explainOf({ percent: 100 })
+  assert.equal(full.title, 'Why red')
+  assert.equal(full.lines[0], '100 % used — exhausted until the reset at 14:00.')
+  assert.equal(full.lines.some((l) => l.startsWith('Yellow')), false, JSON.stringify(full.lines))
+  // No clock: no pace, and the sentence that says so.
+  const noClock = explainOf({ resetsAt: null, windowMinutes: null })
+  assert.equal(noClock.title, 'Why green')
+  assert.equal(noClock.lines[0], 'Used 40 % of the window.')
+  assert.equal(noClock.lines[1], 'This window reports no reset time, so there is no pace; the colour follows the level only.')
+  // A passed reset: neutral, and the figure is named as the old window's.
+  const due = explainOf({ percent: 62, resetsAt: NOW - 60_000 })
+  assert.equal(due.title, 'Why grey')
+  assert.ok(due.lines[0].startsWith('The stated reset (11:59) has passed'), due.lines[0])
+  assert.equal(due.lines.some((l) => /ahead|behind|on pace/.test(l)), false, JSON.stringify(due.lines))
+  // No limit: no share, no pace, no colour.
+  assert.equal(explainOf({ unlimited: true, percent: 0 }).title, 'Why no colour')
+  // Stale by the same clock as the card's own flag, in the last line.
+  const old = buildViewModel(makeInput({
+    cfg: makeConfig(PACE_NO_BAND),
+    quotas: [state('claude', { fetchedAt: Math.round((NOW - 42 * 60_000) / 1000) })],
+  })).quotas[0]
+  assert.equal(old.stale, true)
+  const lines = old.windows[0].explain.lines
+  assert.equal(lines[lines.length - 1], 'The reading is 42 min old (stale after 20 min); the colour may lag.')
+})
+
+test('a measuring window is explained by the phase it is in, with the clock time it ends', () => {
+  // A five-point band, so the phase holds up to ten percent under either reading of the rule.
+  const vm = buildViewModel(makeInput({
+    cfg: makeConfig({ ...PACE_NO_BAND, 'tokenPace.pace.tolerancePoints': 5 }),
+    quotas: [state('claude', { windows: [win({ percent: 3, resetsAt: NOW + 5 * 3_600_000 - 30_000, windowMinutes: 300 })] })],
+  }))
+  const w = vm.quotas[0].windows[0]
+  assert.equal(w.verdict.measuring, true)
+  assert.equal(w.explain.title, 'Why green')
+  assert.equal(w.explain.lines[0], 'Used 3 % of the window; 0 % of its time has passed → 3 % ahead of pace.')
+  // The window started 30 s ago; three percent of five hours is nine minutes in.
+  assert.equal(w.explain.lines[1],
+    'Measuring until 3 % of the window has passed (12:08); no verdict before that unless usage exceeds 10 %.')
+  assert.equal(w.explain.lines[2], 'Yellow when more than 5 % ahead of pace (your tolerance band); green at or below that.')
+  // The accessibility text and the header still say nothing about the measuring — the
+  // explanation is where the phase is named, and only there.
+  assert.equal(/measuring/i.test(w.aria.text), false)
+})
+
+const CACHE = {
+  warm: true, ttl: '5m' as const, expiresAt: NOW + 220_000, hitRatio: 0.82,
+  readAt: Math.round((NOW - 60_000) / 1000),
+}
+
+test('the prompt-cache line is the Claude card\'s, from the bridge and from nothing else', () => {
+  const vm = buildViewModel({ ...makeInput(), promptCache: CACHE })
+  const c = vm.quotas[0].promptCache
+  assert.ok(c)
+  assert.equal(c.text, 'prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %')
+  assert.equal(c.expired, false)
+  assert.equal(c.readAt, CACHE.readAt)
+  assert.equal(c.warm, true)
+  assert.equal(c.note, 'current session, via the status line')
+  // Codex has no status line, so it never gets one — and without a reading neither does
+  // Claude, three days of ingested cache reads notwithstanding: there is no second source.
+  assert.equal(vm.quotas[1].promptCache, null)
+  assert.equal(buildViewModel(makeInput()).quotas[0].promptCache, null)
+  assert.equal(buildViewModel({ ...makeInput(), promptCache: null }).quotas[0].promptCache, null)
+})
+
+test('the countdown is as of the model\'s own clock, and past the expiry the line says so', () => {
+  const later = buildViewModel({ ...makeInput(), now: NOW + 60_000, promptCache: CACHE }).quotas[0].promptCache
+  assert.ok(later?.text.includes('expires in 2 m 40 s'), later?.text)
+  const gone = buildViewModel({ ...makeInput(), now: NOW + 300_000, promptCache: CACHE }).quotas[0].promptCache
+  assert.equal(gone?.text, 'prompt cache · expired at 12:03 (last reading) · hit ratio 82 %')
+  assert.equal(gone?.expired, true)
+  // Every part the payload left out is a dash; none is inferred from the others.
+  const bare = buildViewModel({
+    ...makeInput(), promptCache: { warm: null, ttl: null, expiresAt: null, hitRatio: null, readAt: null },
+  }).quotas[0].promptCache
+  assert.equal(bare?.text, 'prompt cache – · expires in – (– TTL) · hit ratio –')
+  assert.equal(bare?.expired, false)
+})

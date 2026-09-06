@@ -259,6 +259,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // The accessor, not a second read: `current()` above (and in `render`) is what filled
       // it, so the card and the status-bar item describe the same mirror.
       context: quotaMgr.contextReading(),
+      promptCache: quotaMgr.promptCacheReading(),
       preview: statusBar.previewActive(),
     })
   }
@@ -297,6 +298,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       statusBar.update({
         quotas, agg, cfg, now, forecasts, role, scanning, consent: consent.state(),
         context: quotaMgr.contextReading(),
+        promptCache: quotaMgr.promptCacheReading(),
         budgets: latestVm?.budgets ?? [],
       })
     } catch (err) {

@@ -757,3 +757,75 @@ test('no budget configured leaves no heading and no row behind', () => {
   assert.equal(quickPickItems(vm).some((i) => i.label === 'Budgets'), false)
   assert.equal(markdownDocument(vm).includes('## Budgets'), false)
 })
+
+// ---------------------------------------------------------------------------
+// Why this colour, and the prompt-cache line
+// ---------------------------------------------------------------------------
+
+/** The Quota part of the document: up to the first heading every document carries after it. */
+function quotaPart(md: string): string {
+  return md.slice(md.indexOf('## Quota'), md.indexOf('## Key figures'))
+}
+
+test('every window\'s explanation reaches both text views, word for word', () => {
+  const vm = fullVm()
+  const md = markdownDocument(vm)
+  const items = quickPickItems(vm)
+  const windows = vm.quotas.flatMap((q) => q.windows)
+  // One line per window under the table, in the dashboard's words and in the table's order.
+  const bullets = quotaPart(md).split('\n').filter((l) => /^- \*\*.+\*\* — Why /.test(l))
+  assert.equal(bullets.length, windows.length)
+  windows.forEach((w, i) => {
+    assert.ok(w.explain.lines.length >= 2, w.label)
+    assert.equal(bullets[i], `- **${w.label}** — ${w.explain.title}: ${w.explain.lines.join(' ')}`)
+  })
+  // The Quick Pick carries the first two lines as the item detail, behind the reset time.
+  const bar = /[█▁▏▎▍▌▋▊▉┃]/
+  const rows = items.filter((i) => bar.test(i.label))
+  assert.equal(rows.length, windows.length)
+  windows.forEach((w, i) => {
+    const detail = rows[i].detail ?? ''
+    // A reset a day or more ahead carries its weekday ("Su 12:00"), a nearer one only a time.
+    assert.match(detail, /^reset at ([A-Z][a-z] )?\d/, detail)
+    assert.ok(detail.includes(` · ${w.explain.lines[0]} · ${w.explain.lines[1]}`), detail)
+    // Two lines, not the whole panel: the stale line and the state stay with the document.
+    assert.equal(detail.split(' · ').length, 3, detail)
+  })
+  // The unit is the header's, here too.
+  for (const text of [md, ...items.map((i) => i.detail ?? '')]) assert.doesNotMatch(text, /\bpoints\b/i)
+})
+
+test('a window without a clock is explained without a pace in both views', () => {
+  const vm = buildViewModel(makeInput({
+    quotas: [state('claude', { windows: [win({ resetsAt: null, windowMinutes: null })] })],
+  }))
+  const item = quickPickItems(vm).find((i) => /[█▁▏▎▍▌▋▊▉┃]/.test(i.label))
+  assert.ok(item)
+  // No reset time, so the detail is the explanation alone.
+  assert.equal(item.detail, 'Used 40 % of the window. · This window reports no reset time, so there is no pace; the colour follows the level only.')
+  assert.ok(quotaPart(markdownDocument(vm)).includes('- **5 h** — Why green: Used 40 % of the window. This window reports no reset time'))
+})
+
+test('the prompt-cache line is in both text views only while the bridge delivers it', () => {
+  const cache = {
+    warm: true, ttl: '5m' as const, expiresAt: NOW + 220_000, hitRatio: 0.82,
+    readAt: Math.round((NOW - 60_000) / 1000),
+  }
+  const vm = buildViewModel({ ...makeInput(), promptCache: cache })
+  const text = 'prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'
+  const item = quickPickItems(vm).find((i) => i.label === text)
+  assert.ok(item)
+  assert.equal(item.description, 'current session, via the status line')
+  assert.equal(item.command, undefined)
+  const quota = quotaPart(markdownDocument(vm))
+  const claude = quota.slice(quota.indexOf('### Claude Code'), quota.indexOf('### Codex'))
+  assert.ok(claude.includes(`\n${text} — current session, via the status line\n`), claude)
+  // Under the windows and their explanations, before the freshness row — and once.
+  assert.ok(claude.indexOf(text) > claude.lastIndexOf('- **7 d**'), claude)
+  assert.ok(claude.indexOf(text) < claude.indexOf('Freshness —'), claude)
+  assert.equal(quota.split('prompt cache').length - 1, 1, quota)
+  // Without a reading nothing — not a dash line, and not a guess from the cache reads on file.
+  const none = buildViewModel(makeInput())
+  assert.equal(quickPickItems(none).some((i) => i.label.startsWith('prompt cache')), false)
+  assert.equal(quotaPart(markdownDocument(none)).includes('prompt cache'), false)
+})

@@ -1670,7 +1670,7 @@ test('a key figure explains itself in a popover instead of a native tooltip', ()
   // A title attribute would be a second tooltip over the same card, and one no keyboard
   // and no screen reader can reach.
   assert.equal(/<div class="kpi"[^>]*title=/.test(h), false, h)
-  assert.ok(h.indexOf('<div class="kpi" tabindex="0" aria-describedby="pop-usage">') >= 0, h)
+  assert.ok(h.indexOf('<div class="kpi" tabindex="0" data-explain aria-describedby="pop-usage">') >= 0, h)
   assert.ok(h.indexOf('<div class="pop" role="tooltip" id="pop-usage" hidden>') >= 0, h)
   // Labelled lines, in the order the card is read.
   for (const line of [
@@ -1709,8 +1709,11 @@ test('the explanation opens on hover and on focus, and closes on Escape', () => 
   assert.match(SCRIPT, /addEventListener\('focus', \(ev\) => \{[\s\S]*?\}, true\)/)
   assert.match(SCRIPT, /addEventListener\('blur', \(ev\) => \{[\s\S]*?\}, true\)/)
   assert.match(SCRIPT, /ev\.key === 'Escape'/)
-  // The card itself, never one of its children: crossing onto the sparkline is not a leave.
-  assert.match(SCRIPT, /classList\.contains\('kpi'\)/)
+  // The block itself, never one of its children: crossing onto the sparkline is not a leave.
+  // Found by the attribute every explained block carries, so a quota window and a key figure
+  // are one mechanism rather than two copies of it.
+  assert.match(SCRIPT, /hasAttribute\('data-explain'\)/)
+  assert.equal(/classList\.contains\('kpi'\)/.test(SCRIPT), false)
   assert.match(STYLE, /\.kpi \{[^}]*position: relative;/)
   assert.match(STYLE, /\.pop \{ position: absolute; top: 100%; left: 0; z-index: 5;/)
   assert.match(STYLE, /\.pop\.right \{ left: auto; right: 0; \}/)
@@ -1742,6 +1745,171 @@ test('an explanation on the right of the grid hangs from the right edge of its c
   assert.deepEqual(open(280), ['add:right'])
   nodeVm.runInContext('hidePop();', ctx)
   assert.equal(pop.hidden, true)
+})
+
+/** A window with the explanation the view model builds for every bar. */
+function explained(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return win({
+    level: 'warn', percent: 70, percentText: '70 %', elapsed: 30,
+    verdict: { text: '40 % ahead of pace', level: 'warn' },
+    explain: {
+      title: 'Why yellow',
+      lines: [
+        'Used 70 % of the window; 30 % of its time has passed → 40 % ahead of pace.',
+        'Yellow as soon as the reading is ahead of pace; green at or behind.',
+      ],
+    },
+    ...over,
+  })
+}
+
+test('a quota window explains its colour in the same popover the key figures use', () => {
+  const h = render('sQuota()', { quotas: [card({ windows: [explained()] })] })
+  // Focusable and pointing at its own panel, like a key figure; no title attribute beside it.
+  assert.ok(h.indexOf('<div class="win" tabindex="0" data-explain aria-describedby="pop-q-claude-session-300">') >= 0, h)
+  assert.equal(/<div class="win"[^>]*title=/.test(h), false, h)
+  // The title names the colour; every line is the view model's, in its order.
+  assert.ok(h.indexOf('<div class="pop" role="tooltip" id="pop-q-claude-session-300" hidden>'
+    + '<div><b>Why yellow</b></div>'
+    + '<div>Used 70 % of the window; 30 % of its time has passed → 40 % ahead of pace.</div>'
+    + '<div>Yellow as soon as the reading is ahead of pace; green at or behind.</div></div>') >= 0, h)
+  // Inside the block it explains, after the bar, so hovering the panel keeps the block
+  // hovered — and the block is the panel's containing block.
+  const pop = h.indexOf('class="pop"')
+  assert.ok(pop > h.indexOf('<div class="win"') && pop > h.indexOf('class="track"'), h)
+  assert.ok(h.indexOf('</div></div>', pop) > 0, h)
+  assert.match(STYLE, /\.win \{[^}]*position: relative;/)
+  // The id is safe for aria-describedby whatever the window id contains.
+  const odd = render('sQuota()', { quotas: [card({ windows: [explained({ id: 'codex_bengalfox:300' })] })] })
+  assert.ok(odd.indexOf('aria-describedby="pop-q-claude-codex_bengalfox-300"') >= 0, odd)
+  // Two windows, two panels, each with an id of its own.
+  const two = render('sQuota()', {
+    quotas: [card({ windows: [explained(), explained({ id: 'weekly_all:10080', label: '7 d' })] })],
+  })
+  assert.equal(two.split('class="pop"').length - 1, 2, two)
+  assert.ok(two.indexOf('id="pop-q-claude-weekly_all-10080"') >= 0, two)
+  // Markup in a line is text, never markup.
+  const sharp = render('sQuota()', {
+    quotas: [card({ windows: [explained({ explain: { title: '<b>x</b>', lines: ['a < b & "c"'] } })] })],
+  })
+  assert.ok(sharp.indexOf('<b>&lt;b&gt;x&lt;/b&gt;</b>') >= 0, sharp)
+  assert.ok(sharp.indexOf('<div>a &lt; b &amp; &quot;c&quot;</div>') >= 0, sharp)
+})
+
+test('a window without an explanation gets neither the attributes nor an empty panel', () => {
+  // A payload from a build that predates the field: nothing to show, so nothing to focus.
+  const h = render('sQuota()', { quotas: [card({ windows: [win()] })] })
+  assert.ok(h.indexOf('<div class="win"><div class="win-top">') >= 0, h)
+  assert.equal(h.indexOf('data-explain'), -1, h)
+  assert.equal(h.indexOf('class="pop"'), -1, h)
+  assert.equal(h.indexOf('tabindex'), -1, h)
+})
+
+test('one explanation mechanism: any block with data-explain, key figure or window', () => {
+  assert.match(SCRIPT, /hasAttribute\('data-explain'\)/)
+  assert.ok(render('sKpis()', { kpis: [kpiCard()] }).indexOf('<div class="kpi" tabindex="0" data-explain ') >= 0)
+  assert.ok(render('sQuota()', { quotas: [card({ windows: [explained()] })] })
+    .indexOf('<div class="win" tabindex="0" data-explain ') >= 0)
+})
+
+test('an open explanation and the focus on its block survive a refresh of the section', () => {
+  // The quota section is rewritten every few seconds while the prompt-cache countdown ticks.
+  // The panel a reader is looking at, and the focus a keyboard user placed on its block, are
+  // put back on the nodes that replace them — by id, because the old nodes are gone.
+  const focused: string[] = []
+  const looked: string[] = []
+  const popOf = (card: Record<string, unknown>, id: string): Record<string, unknown> =>
+    ({ id, hidden: true, classList: { add: () => undefined, remove: () => undefined }, closest: () => card })
+  const cardOf = (name: string, id: string): Record<string, unknown> => {
+    const card: Record<string, unknown> = {
+      getBoundingClientRect: () => ({ left: 10, width: 100 }),
+      focus: () => { focused.push(name) },
+    }
+    card.pop = popOf(card, id)
+    card.querySelector = () => card.pop
+    return card
+  }
+  const before = cardOf('before', 'pop-q-claude-session-300')
+  const after = cardOf('after', 'pop-q-claude-session-300')
+  const elsewhere = cardOf('elsewhere', 'pop-usage')
+  const body = { innerHTML: '', dataset: {}, style: {}, contains: (el: unknown) => el === before.pop }
+  // The page body is what is active when nothing is focused, and it contains every panel.
+  const pageBody = { contains: () => true }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined,
+    getElementById: (id: string) => { looked.push(id); return id === 'pop-q-claude-session-300' ? after.pop : null },
+    querySelector: (s: string) => (s === '[data-body="quota"]' ? body : null),
+    querySelectorAll: () => [],
+    activeElement: pageBody,
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: doc,
+    window: { addEventListener: () => undefined, innerWidth: 400 },
+    console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  Object.assign(c, { fixture: model({ quotas: [card({ windows: [explained()] })] }), before, after, elsewhere })
+  nodeVm.runInContext('vm = fixture; showPop(before);', c)
+  assert.equal((before.pop as { hidden: boolean }).hidden, false)
+
+  // Hovered, not focused: the panel comes back, and no focus is invented for it.
+  nodeVm.runInContext('renderSection("quota");', c)
+  assert.equal((after.pop as { hidden: boolean }).hidden, false)
+  assert.equal(nodeVm.runInContext('openPop === after.pop', c), true)
+  assert.deepEqual(focused, [])
+  assert.deepEqual(looked, ['pop-q-claude-session-300'])
+
+  // Focused on the block: the panel comes back and so does the focus.
+  nodeVm.runInContext('showPop(before);', c)
+  doc.activeElement = { hasAttribute: (a: string) => a === 'data-explain', contains: (el: unknown) => el === before.pop }
+  nodeVm.runInContext('renderSection("quota");', c)
+  assert.equal(nodeVm.runInContext('openPop === after.pop', c), true)
+  assert.deepEqual(focused, ['after'])
+  assert.deepEqual(looked, ['pop-q-claude-session-300', 'pop-q-claude-session-300'])
+  doc.activeElement = pageBody
+
+  // A panel open outside the refreshed section is left exactly as it is, and nothing is
+  // looked up for it.
+  nodeVm.runInContext('showPop(elsewhere); renderSection("quota");', c)
+  assert.equal((elsewhere.pop as { hidden: boolean }).hidden, false)
+  assert.equal(nodeVm.runInContext('openPop === elsewhere.pop', c), true)
+  assert.deepEqual(looked, ['pop-q-claude-session-300', 'pop-q-claude-session-300'])
+  assert.deepEqual(focused, ['after'])
+  // With nothing open a refresh restores nothing.
+  nodeVm.runInContext('hidePop(); renderSection("quota");', c)
+  assert.deepEqual(looked, ['pop-q-claude-session-300', 'pop-q-claude-session-300'])
+  assert.equal(nodeVm.runInContext('openPop', c), null)
+})
+
+test('the prompt-cache line is the last line of the Claude card, and only with a reading', () => {
+  const line = 'prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'
+  const h = render('sQuota()', {
+    quotas: [card({ promptCache: { text: line, note: 'current session, via the status line', expired: false } })],
+  })
+  assert.ok(h.indexOf('<div class="meta" title="current session, via the status line">' + line + '</div></div>') >= 0, h)
+  // Last: after the sparkline caption, the extra usage and any local block.
+  const withExtra = render('sQuota()', {
+    quotas: [card({
+      promptCache: { text: line, note: 'n', expired: false },
+      extra: { text: '$12 of $50', utilization: 24, enabled: true, billed: true },
+    })],
+  })
+  assert.ok(withExtra.indexOf(line) > withExtra.indexOf('Extra usage'), withExtra)
+  assert.ok(withExtra.indexOf(line) > withExtra.indexOf('class="track"'), withExtra)
+  // Without a reading nothing is drawn — not a dash line, not an estimate.
+  const none = render('sQuota()', { quotas: [card({ promptCache: null })] })
+  assert.equal(none.indexOf('prompt cache'), -1, none)
+  // An odd payload with an empty text draws nothing either.
+  const empty = render('sQuota()', { quotas: [card({ promptCache: { text: '', note: 'n' } })] })
+  assert.equal(empty.indexOf('prompt cache'), -1, empty)
+  // Every word is the model's: a dash in the text stays a dash, and the line ticks on nothing
+  // of its own — the script has no timer at all.
+  const bare = render('sQuota()', {
+    quotas: [card({ promptCache: { text: 'prompt cache – · expires in – (– TTL) · hit ratio –', note: 'n' } })],
+  })
+  assert.ok(bare.indexOf('prompt cache – · expires in – (– TTL) · hit ratio –') >= 0, bare)
+  assert.equal(/setInterval|setTimeout/.test(SCRIPT), false)
 })
 
 test('with no quota card at all the section says how to get one, and invents nothing', () => {

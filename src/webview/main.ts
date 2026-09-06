@@ -47,7 +47,29 @@ let shownDrill: string | null = null;
 const esc = (s: unknown): string => String(s === null || s === undefined ? '' : s)
   .replace(/[&<>"]/g, c => (({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as Record<string, string>)[c]));
 const post = (m: unknown): void => vscode.postMessage(m);
-const has = (k: string): boolean => vm.sections.indexOf(k) >= 0;
+
+/**
+ * The page's own words, in the reader's language.
+ *
+ * Everywhere else in this repository a string goes through `t()` from src/i18n.ts. That
+ * module is Node code and a webview has no module loader, so src/dashboard.ts builds one
+ * dictionary with `t()` at render time and writes it in front of this module as `L10N` — the
+ * same trick the provider registry's two consts use. A string is looked up by its English
+ * text and falls back to it, which is why an English build needs no dictionary at all and why
+ * a key nobody translated reaches the reader in English rather than blank.
+ *
+ * `{0}`, `{1}`, … are filled from the arguments and a translation may reorder them; every
+ * argument is escaped by its caller, because what comes back is concatenated into markup.
+ * The values themselves carry no markup — test/dashboard.test.ts holds the dictionary to it.
+ */
+function tr(key: string, ...args: Array<string | number>): string {
+  const template = word(L10N, key) || key;
+  if (!args.length) return template;
+  return template.replace(/\{(\d+)\}/g, (m: string, i: string) => {
+    const a = args[Number(i)];
+    return a === undefined ? m : String(a);
+  });
+}
 
 function pct(v: unknown): number { return Math.max(0, Math.min(100, Number(v) || 0)); }
 
@@ -68,17 +90,19 @@ function bar(percent: number, cls: string, elapsed: number | null | undefined,
     const p = pct(percent), e = pct(elapsed);
     if (p > e) {
       h += '<span class="fill over ' + cls + '" data-x="' + e.toFixed(2) + '" data-w="'
-        + (p - e).toFixed(2) + '" title="used beyond the elapsed share"></span>';
+        + (p - e).toFixed(2) + '" title="' + tr('used beyond the elapsed share') + '"></span>';
     } else if (e > p) {
       h += '<span class="slack" data-x="' + p.toFixed(2) + '" data-w="' + (e - p).toFixed(2)
-        + '" title="elapsed share not yet used"></span>';
+        + '" title="' + tr('elapsed share not yet used') + '"></span>';
     }
   }
   if (clock) {
-    h += '<i class="mark" data-x="' + pct(elapsed).toFixed(2) + '" title="time elapsed in this window"></i>';
+    h += '<i class="mark" data-x="' + pct(elapsed).toFixed(2) + '" title="'
+      + tr('time elapsed in this window') + '"></i>';
   }
   if (forecastEnd !== null && forecastEnd !== undefined) {
-    h += '<i class="mark fc" data-x="' + pct(forecastEnd).toFixed(2) + '" title="projected at the reset"></i>';
+    h += '<i class="mark fc" data-x="' + pct(forecastEnd).toFixed(2) + '" title="'
+      + tr('projected at the reset') + '"></i>';
   }
   return h + '</div>';
 }
@@ -200,7 +224,7 @@ function sparkSvg(spark: Payload, ref?: { src: Payload; win: Payload }): string 
   const overlay = '<rect class="ov" x="0" y="0" width="' + W + '" height="' + H + '"/>'
     + '<path class="hov"/>';
   const names = ref ? ' data-src="' + esc(ref.src) + '" data-win="' + esc(ref.win) + '"' : '';
-  const aria = typeof spark.aria === 'string' && spark.aria ? spark.aria : 'quota sparkline, 7 days';
+  const aria = typeof spark.aria === 'string' && spark.aria ? spark.aria : tr('quota sparkline, 7 days');
   return '<div class="sparkbox"><svg class="spark q" viewBox="0 0 ' + W + ' ' + H + '" '
     + 'preserveAspectRatio="none" role="img" tabindex="0" aria-label="' + esc(aria) + '"' + names + '>'
     + body + overlay + '</svg><div class="pop" role="tooltip" aria-live="polite" hidden></div></div>';
@@ -261,16 +285,20 @@ function srcLabel(source: Payload, label: Payload): string {
 }
 
 /**
- * The window states in words, for the fallback below and nowhere else. The map has no
- * fallback of its own on purpose — an unknown state prints nothing rather than leaking an
- * identifier into the sentence — and "resetDue" is deliberately absent from it: the reset
- * line is the one place that says a window has reset, and a card that said it twice, once in
- * its header and once beside the verdict, is what this pair of helpers exists to prevent.
+ * The window states in words, for the fallback below and nowhere else. Built on the call
+ * rather than kept as a table, because the words are the reader's language and a table would
+ * be translated once, at load. It has no fallback of its own on purpose — an unknown state
+ * prints nothing rather than leaking an identifier into the sentence — and "resetDue" is
+ * deliberately absent from it: the reset line is the one place that says a window has reset,
+ * and a card that said it twice, once in its header and once beside the verdict, is what this
+ * pair of helpers exists to prevent.
  */
-const DISPLAY_WORD: Record<string, string> = {
-  normal: '', exhausted: 'exhausted', overflow: 'over the limit', unlimited: 'unlimited',
-  limitReached: 'limit reached',
-};
+function displayWords(): Record<string, string> {
+  return {
+    normal: '', exhausted: tr('exhausted'), overflow: tr('over the limit'),
+    unlimited: tr('unlimited'), limitReached: tr('limit reached'),
+  };
+}
 
 /**
  * resetLine and stateText are worded once, in the view model, so this card, the QuickPick
@@ -279,15 +307,16 @@ const DISPLAY_WORD: Record<string, string> = {
  * same rules and say nothing the view model would not.
  */
 function fbResetLine(w: Payload): string {
-  if (w.display === 'resetDue') return 'reset due';
+  const due = tr('reset due');
+  if (w.display === 'resetDue') return due;
   const r = w.reset === null || w.reset === undefined ? '' : String(w.reset);
   if (!r) return '';
   // A reset text that already says the window has reset is a sentence, not a duration.
-  return r.indexOf('reset due') >= 0 ? r : 'resets ' + r;
+  return r.indexOf(due) >= 0 ? r : tr('resets {0}', r);
 }
 
 function fbStateText(w: Payload): string {
-  const s = word(DISPLAY_WORD, w.display);
+  const s = word(displayWords(), w.display);
   if (!s) return '';
   const said = w.verdict && typeof w.verdict.text === 'string' ? w.verdict.text : '';
   return said.toLowerCase().indexOf(s) >= 0 ? '' : s;
@@ -324,9 +353,24 @@ const ICON_GEAR = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="
 
 /** The gear that opens the settings this section is made of. */
 function gear(key: string): string {
+  const label = tr('Settings for this section');
   return '<button class="gear" data-act="sectionSettings" data-key="' + esc(key)
-    + '" aria-label="Settings for this section" title="Settings for this section">'
+    + '" aria-label="' + label + '" title="' + label + '">'
     + ICON_GEAR + '</button>';
+}
+
+/**
+ * A range preset as the chip says it. The ids that are already a figure — "7d", "30d" — read
+ * the same in every language; the rest are words. An id this build does not know keeps its
+ * own name: a chip nobody can read is still a range the reader can leave.
+ */
+function presetLabel(preset: Payload): string {
+  const p = String(preset === null || preset === undefined ? '' : preset);
+  const words: Record<string, string> = {
+    today: tr('today'), yesterday: tr('yesterday'), thisWeek: tr('thisWeek'),
+    thisMonth: tr('thisMonth'), lastMonth: tr('lastMonth'), year: tr('year'), all: tr('all'),
+  };
+  return esc(word(words, p) || p);
 }
 
 /**
@@ -341,7 +385,7 @@ function controls(): string {
   const presets = r.presets.filter((p: Payload) => allRanges || RANGE_CHIPS.indexOf(p) >= 0 || r.preset === p);
   const restRanges = r.presets.length - presets.length;
   const chips = presets.map((p: Payload) => '<button data-act="range" data-preset="' + p + '" aria-pressed="'
-    + (r.preset === p) + '">' + esc(p) + '</button>').join('');
+    + (r.preset === p) + '">' + presetLabel(p) + '</button>').join('');
   const providers = SRC_IDS.map(s => '<button data-act="provider" data-src="' + s
     + '" aria-pressed="' + (vm.ui.providers.indexOf(s) >= 0) + '">' + esc(srcName(s))
     + '</button>').join('');
@@ -362,44 +406,46 @@ function controls(): string {
   const many = names.length > MODEL_CHIPS;
   const openRow = !many || allModels;
   const shown = names.filter(n => openRow || vm.ui.models.indexOf(n) >= 0);
-  const models = (openRow ? '' : '<button data-act="moreModels">models (' + names.length + ') ▾</button>')
+  const models = (openRow ? '' : '<button data-act="moreModels">'
+      + tr('models ({0}) ▾', names.length) + '</button>')
     + shown.map(name => '<button data-act="model" data-model="'
       + esc(name) + '" aria-pressed="' + (vm.ui.models.indexOf(name) >= 0) + '">'
       + esc(name) + '</button>').join('')
-    + (vm.ui.models.length ? '<button data-act="clearModels">clear</button>' : '')
-    + (openRow && many ? '<button data-act="moreModels">fewer ▴</button>' : '');
+    + (vm.ui.models.length ? '<button data-act="clearModels">' + tr('clear') + '</button>' : '')
+    + (openRow && many ? '<button data-act="moreModels">' + tr('fewer ▴') + '</button>' : '');
   // The two date fields are the rarest control on the page and the widest; they stay folded
   // until the range is one they belong to, or until the reader asks for them.
   const custom = r.preset === 'custom' || r.preset === 'all' || showDates;
   const dates = custom
-    ? '<div class="wrap full"><label class="meta" for="tp-from">from</label>'
+    ? '<div class="wrap full"><label class="meta" for="tp-from">' + tr('from') + '</label>'
       + '<input id="tp-from" type="date" data-role="from" value="' + esc(r.from) + '">'
-      + '<label class="meta" for="tp-to">to</label>'
+      + '<label class="meta" for="tp-to">' + tr('to') + '</label>'
       + '<input id="tp-to" type="date" data-role="to" value="' + esc(r.to) + '">'
-      + '<button data-act="customRange">apply</button></div>'
+      + '<button data-act="customRange">' + tr('apply') + '</button></div>'
     : '';
   return '<div class="bar">'
-    + '<span class="meta">Range</span>'
+    + '<span class="meta">' + tr('Range') + '</span>'
     + '<div class="wrap">' + chips
-    + '<button data-act="customDates" aria-pressed="' + custom + '">custom…</button>'
-    + (restRanges > 0 ? '<button data-act="moreRanges">more ▾</button>' : '')
+    + '<button data-act="customDates" aria-pressed="' + custom + '">' + tr('custom…') + '</button>'
+    + (restRanges > 0 ? '<button data-act="moreRanges">' + tr('more ▾') + '</button>' : '')
     + (allRanges && r.presets.length > RANGE_CHIPS.length
-       ? '<button data-act="moreRanges">fewer ▴</button>' : '')
+       ? '<button data-act="moreRanges">' + tr('fewer ▴') + '</button>' : '')
     // The range in words ends the row it belongs to rather than taking a line of its own.
     + '<span class="meta cap">' + esc(r.label) + ' · ' + esc(r.from) + ' → ' + esc(r.to)
     + '</span></div>'
-    + '<button class="icon" data-act="refresh" aria-label="Refresh"'
-    + ' title="Rebuild from the transcripts and fetch the quota">' + ICON_REFRESH + '</button>'
+    + '<button class="icon" data-act="refresh" aria-label="' + tr('Refresh') + '"'
+    + ' title="' + tr('Rebuild from the transcripts and fetch the quota') + '">' + ICON_REFRESH + '</button>'
     + dates
-    + '<span class="meta">Providers</span><div class="wrap span2">' + providers + '</div>'
-    + (names.length ? '<span class="meta">Models</span><div class="wrap span2">' + models + '</div>' : '')
+    + '<span class="meta">' + tr('Providers') + '</span><div class="wrap span2">' + providers + '</div>'
+    + (names.length ? '<span class="meta">' + tr('Models') + '</span><div class="wrap span2">' + models
+       + '</div>' : '')
     + '</div>';
 }
 
 // -- sections ---------------------------------------------------------------
 
 function sSummary(): string {
-  if (!vm.digest.length) return '<p class="empty">Not enough data for a summary yet.</p>';
+  if (!vm.digest.length) return '<p class="empty">' + tr('Not enough data for a summary yet.') + '</p>';
   return '<ul>' + vm.digest.map((s: Payload) => '<li>' + esc(s) + '</li>').join('') + '</ul>';
 }
 
@@ -410,7 +456,7 @@ function quotaCard(q: Payload): string {
     // "(as configured)" that keeps it apart from something a provider said.
     + [q.planText ? esc(q.planText) : '', q.origin ? esc(q.origin) : '',
        q.ageText ? esc(q.ageText) : ''].filter(Boolean).join(' · ')
-    + (q.stale ? ' ⚠ stale' : '') + '</span></div>';
+    + (q.stale ? ' ⚠ ' + tr('stale') : '') + '</span></div>';
   if (q.problem) {
     h += '<div class="box" role="status">' + esc(q.problem)
       + (q.problemKind ? ' <span class="meta">(' + esc(q.problemKind) + ')</span>' : '')
@@ -465,11 +511,12 @@ function quotaCard(q: Payload): string {
   // spark covers seven days; a payload from a build that still sends the 24-hour list gets no
   // caption that would misstate it.
   if (q.windows.some((w: Payload) => w.spark && !Array.isArray(w.spark) && hasSpark(w.spark))) {
-    h += '<div class="meta">sparkline: last 7 days</div>';
+    h += '<div class="meta">' + tr('sparkline: last 7 days') + '</div>';
   }
   if (q.extra) {
-    h += '<div class="win"><div class="win-top"><span>Extra usage'
-      + (q.extra.billed ? ' (billed)' : '') + '</span><b>' + esc(q.extra.text) + '</b></div>'
+    h += '<div class="win"><div class="win-top"><span>'
+      + (q.extra.billed ? tr('Extra usage (billed)') : tr('Extra usage'))
+      + '</span><b>' + esc(q.extra.text) + '</b></div>'
       + (q.extra.utilization === null ? ''
          : bar(q.extra.utilization, 'extra', null, null,
                { now: Math.round(q.extra.utilization), max: 100, text: q.extra.text }))
@@ -534,12 +581,12 @@ function quotaInvitation(): string {
   const why = vm.quotas.map(function (q: Payload) {
     return q.problem ? esc(q.title) + ': ' + esc(q.problem) : '';
   }).filter(Boolean).join(' · ');
+  // One key, not three lines added together: a translator needs the whole sentence.
   return '<div class="box info" role="status">'
-    + 'No quota reading yet. There are two ways to get one: fetch it from the provider, '
-    + 'which asks for network access first, or connect the Claude Code status line, which '
-    + 'mirrors the figures Claude Code already has on this machine.'
-    + '<br><button data-act="cmd" data-id="tokenPace.refreshQuota">Fetch quota now</button> '
-    + '<button data-act="cmd" data-id="tokenPace.connectStatusLine">Connect the status line</button>'
+    + tr('No quota reading yet. There are two ways to get one: fetch it from the provider, which asks for network access first, or connect the Claude Code status line, which mirrors the figures Claude Code already has on this machine.')
+    + '<br><button data-act="cmd" data-id="tokenPace.refreshQuota">' + tr('Fetch quota now') + '</button> '
+    + '<button data-act="cmd" data-id="tokenPace.connectStatusLine">' + tr('Connect the status line')
+    + '</button>'
     + (why ? '<div class="meta">' + why + '</div>' : '')
     + '</div>';
 }
@@ -547,8 +594,8 @@ function quotaInvitation(): string {
 function sQuota(): string {
   if (noReadingYet()) return quotaInvitation();
   return vm.quotas.map(quotaCard).join('')
-    + '<div class="legend"><span><i class="dot time"></i>time elapsed</span>'
-    + '<span><i class="dot fc"></i>projected at the reset</span></div>';
+    + '<div class="legend"><span><i class="dot time"></i>' + tr('time elapsed') + '</span>'
+    + '<span><i class="dot fc"></i>' + tr('projected at the reset') + '</span></div>';
 }
 
 /**
@@ -561,13 +608,13 @@ function sQuota(): string {
 function sContext(): string {
   const c = vm.context;
   if (!c) {
-    return '<p class="empty">No context reading. The Claude Code status line is what reports it.'
+    return '<p class="empty">' + tr('No context reading. The Claude Code status line is what reports it.')
       + '<br><button data-act="cmd" data-id="tokenPace.connectStatusLine">'
-      + 'Connect the status line</button></p>';
+      + tr('Connect the status line') + '</button></p>';
   }
-  const age = [c.ageText ? 'updated ' + esc(c.ageText) : '', c.fresh ? '' : '⚠ stale']
+  const age = [c.ageText ? tr('updated {0}', esc(c.ageText)) : '', c.fresh ? '' : '⚠ ' + tr('stale')]
     .filter(Boolean).join(' · ');
-  let h = '<div class="card"><div class="row"><span class="name">Context window</span>'
+  let h = '<div class="card"><div class="row"><span class="name">' + tr('Context window') + '</span>'
     + '<span class="meta' + (c.fresh ? '' : ' warn') + '">' + age + '</span></div>'
     + '<div class="win"><div class="win-top"><span>' + esc(c.note) + '</span><b>'
     + esc(c.text) + '</b></div>';
@@ -575,7 +622,7 @@ function sContext(): string {
   // claim the conversation is full, an empty one that it is empty.
   if (c.size !== null && c.percentText !== '–') {
     h += bar(pctOf(c), 'neutral', null, null,
-      { now: Math.round(pctOf(c)), max: 100, text: 'context window: ' + c.text });
+      { now: Math.round(pctOf(c)), max: 100, text: tr('context window: {0}', c.text) });
   }
   return h + '</div></div>';
 }
@@ -621,16 +668,16 @@ function kpiPop(k: Payload, id: string): string {
   const e = k.explain;
   if (!e) return '';
   return '<div class="pop" role="tooltip" id="' + esc(id) + '" hidden>'
-    + popLine('What', e.what)
-    + popLine('How', e.how)
-    + popLine('Period', e.period)
-    + (e.compare ? popLine('Compared with', e.compare.against + ' · ' + e.compare.previous) : '')
+    + popLine(tr('What'), e.what)
+    + popLine(tr('How'), e.how)
+    + popLine(tr('Period'), e.period)
+    + (e.compare ? popLine(tr('Compared with'), e.compare.against + ' · ' + e.compare.previous) : '')
     + (e.split
-       ? popLine('Split', srcName('claude') + ' ' + e.split.claude + ' · '
+       ? popLine(tr('Split'), srcName('claude') + ' ' + e.split.claude + ' · '
          + srcName('codex') + ' ' + e.split.codex)
        : '')
-    + popLine('Basis', e.provenance)
-    + popLine('Spark', e.sparkNote)
+    + popLine(tr('Basis'), e.provenance)
+    + popLine(tr('Spark'), e.sparkNote)
     + '</div>';
 }
 
@@ -660,36 +707,55 @@ function normSpark(values: number[]): number[] {
  * Why a row is marked. Worded once, here and in the markdown view, because the two views
  * print the same table and a caveat phrased twice is read as two different caveats.
  */
-const APPROX_NOTE = '≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals';
+function approxNote(): string {
+  return tr('≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals');
+}
+
+/**
+ * The words the totals table and the model table share. One heading per column, translated
+ * once: the same word heads the column and prefixes the cell in the stacked layout, where
+ * `td[data-h]::before` prints exactly this text.
+ */
+function columnWords(): Record<string, string> {
+  return {
+    period: tr('Period'), usage: tr('Usage'), freshInput: tr('Fresh in'),
+    cacheWrite5m: tr('Write 5m'), cacheWrite1h: tr('Write 1h'), cacheRead: tr('Cache read'),
+    output: tr('Output'), reasoning: tr('Reasoning'), requests: tr('Req.'), cacheHit: tr('Hit'),
+    perRequest: tr('Per req.'), cost: tr('API cost'), model: tr('Model'), share: tr('Share'),
+  };
+}
 
 function totalsTable(t: Payload): string {
   const cost = vm.showCost;
-  const head = ['Period', 'Usage', 'Fresh in', 'Write 5m', 'Write 1h', 'Cache read', 'Output',
-    'Reasoning', 'Req.', 'Hit', 'Per req.'].concat(cost ? ['API cost'] : []);
+  const w = columnWords();
+  const head = [w.period, w.usage, w.freshInput, w.cacheWrite5m, w.cacheWrite1h, w.cacheRead,
+    w.output, w.reasoning, w.requests, w.cacheHit, w.perRequest].concat(cost ? [w.cost] : []);
   const rows = t.rows.map((r: Payload) => '<tr>'
     // The span is the tooltip of the label, not a column: the two window rows are the only
     // ones whose bounds are not already spelled out by their name.
-    + '<td data-h="Period" title="' + esc(r.spanText || '') + '">' + esc(r.label) + '</td>'
-    + '<td data-h="Usage">' + esc(r.usage) + '</td>'
-    + '<td data-h="Fresh in">' + esc(r.freshInput) + '</td>'
-    + '<td data-h="Write 5m">' + esc(r.cacheWrite5m) + '</td>'
-    + '<td data-h="Write 1h">' + esc(r.cacheWrite1h) + '</td>'
-    + '<td data-h="Cache read">' + esc(r.cacheRead) + '</td>'
-    + '<td data-h="Output">' + esc(r.output) + (r.incomplete
-        ? ' <span title="output is a lower bound: some requests had no terminal line">⚠</span>' : '')
+    + '<td data-h="' + w.period + '" title="' + esc(r.spanText || '') + '">' + esc(r.label) + '</td>'
+    + '<td data-h="' + w.usage + '">' + esc(r.usage) + '</td>'
+    + '<td data-h="' + w.freshInput + '">' + esc(r.freshInput) + '</td>'
+    + '<td data-h="' + w.cacheWrite5m + '">' + esc(r.cacheWrite5m) + '</td>'
+    + '<td data-h="' + w.cacheWrite1h + '">' + esc(r.cacheWrite1h) + '</td>'
+    + '<td data-h="' + w.cacheRead + '">' + esc(r.cacheRead) + '</td>'
+    + '<td data-h="' + w.output + '">' + esc(r.output) + (r.incomplete
+        ? ' <span title="' + tr('output is a lower bound: some requests had no terminal line')
+          + '">⚠</span>' : '')
     + '</td>'
-    + '<td data-h="Reasoning">' + esc(r.reasoning) + '</td>'
-    + '<td data-h="Req.">' + esc(r.requests) + '</td>'
-    + '<td data-h="Hit">' + esc(r.cacheHit) + '</td>'
-    + '<td data-h="Per req.">' + esc(r.perRequest) + '</td>'
-    + (cost ? '<td data-h="API cost">' + esc(r.cost) + (r.costPartial
-        ? ' <span title="some models have no price on file">⚠</span>' : '') + '</td>' : '')
+    + '<td data-h="' + w.reasoning + '">' + esc(r.reasoning) + '</td>'
+    + '<td data-h="' + w.requests + '">' + esc(r.requests) + '</td>'
+    + '<td data-h="' + w.cacheHit + '">' + esc(r.cacheHit) + '</td>'
+    + '<td data-h="' + w.perRequest + '">' + esc(r.perRequest) + '</td>'
+    + (cost ? '<td data-h="' + w.cost + '">' + esc(r.cost) + (r.costPartial
+        ? ' <span title="' + tr('some models have no price on file') + '">⚠</span>' : '')
+      + '</td>' : '')
     + '</tr>').join('');
   const approx = t.rows.some((r: Payload) => r.approx);
   return '<div class="card"><div class="name">' + esc(t.title) + '</div><div class="scroll"><table>'
     + '<thead><tr>' + head.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr></thead>'
     + '<tbody>' + rows + '</tbody></table></div>'
-    + (approx ? '<div class="meta">' + esc(APPROX_NOTE) + '</div>' : '') + '</div>';
+    + (approx ? '<div class="meta">' + esc(approxNote()) + '</div>' : '') + '</div>';
 }
 
 /** Where the tokens of a period went — the six counted fields as one bar. */
@@ -722,8 +788,8 @@ function cacheChips(): string {
   const mode = cacheMode();
   const chip = (value: Payload, label: Payload) => '<button data-act="compositionCache" data-mode="' + value
     + '" aria-pressed="' + (mode === value) + '">' + label + '</button>';
-  return '<div class="row"><span class="meta">cache</span><span class="wrap">'
-    + chip('all', 'shown') + chip('noCache', 'hidden') + '</span></div>';
+  return '<div class="row"><span class="meta">' + tr('cache') + '</span><span class="wrap">'
+    + chip('all', tr('shown')) + chip('noCache', tr('hidden')) + '</span></div>';
 }
 
 function compositionBar(c: Payload): string {
@@ -744,20 +810,26 @@ function compositionBar(c: Payload): string {
   // would otherwise be told a "0 cache write" the table beside it prints as a dash.
   const read = sum(['cacheRead']);
   const written = sum(['cacheWrite5m', 'cacheWrite1h']);
-  const left = [];
-  if (read > 0) left.push(fullNum(read) + ' tokens cache read');
-  if (written > 0) left.push(fullNum(written) + (read > 0 ? '' : ' tokens') + ' cache write');
-  const caption = noCache && left.length
-    ? '<div class="meta">without cache · ' + left.join(' and ') + ' not shown</div>'
-    : '';
-  return '<div class="meta">' + esc(srcName(c.source)) + ' composition · last 30 days</div>'
+  // One sentence per case rather than halves added together: which half comes first, and
+  // what stands between them, is a translator's decision and not a concatenation's.
+  let caption = '';
+  if (noCache && read > 0 && written > 0) {
+    caption = tr('without cache · {0} tokens cache read and {1} cache write not shown',
+                 fullNum(read), fullNum(written));
+  } else if (noCache && read > 0) {
+    caption = tr('without cache · {0} tokens cache read not shown', fullNum(read));
+  } else if (noCache && written > 0) {
+    caption = tr('without cache · {0} tokens cache write not shown', fullNum(written));
+  }
+  return '<div class="meta">' + tr('{0} composition · last 30 days', esc(srcName(c.source))) + '</div>'
     + '<div class="compbar">' + segs + '</div>'
     + '<div class="legend">' + parts.map((p: Payload) => '<span><i class="dot ' + cls(p) + '"></i>'
       + esc(p.text) + '</span>').join('') + '</div>'
-    + caption;
+    + (caption ? '<div class="meta">' + caption + '</div>' : '');
 }
 
 function sTokens(): string {
+  const w = columnWords();
   let h = vm.totals.map(totalsTable).join('');
   const bars = vm.composition.map(compositionBar).join('');
   // The switch belongs to the bars, but it must outlive the mode it sets: a range whose only
@@ -766,31 +838,38 @@ function sTokens(): string {
   const anyParts = vm.composition.some((c: Payload) => c.parts.some((p: Payload) => p.key !== 'reasoning' && p.tokens > 0));
   if (bars || anyParts) h += cacheChips() + bars;
   if (vm.cacheEconomy.length) {
-    h += '<div class="scroll"><table><thead><tr><th>Cache · last 30 days</th><th>Hit rate</th>'
-      + '<th>Realised</th><th>Blended $/1M</th></tr></thead><tbody>'
-      + vm.cacheEconomy.map((c: Payload) => '<tr><td data-h="Cache">' + esc(srcName(c.source)) + '</td>'
-        + '<td data-h="Hit rate">' + esc(c.hitRate) + '</td><td data-h="Realised">'
-        + esc(c.savedUsd) + (c.partial ? ' ⚠' : '') + '</td><td data-h="Blended">'
+    h += '<div class="scroll"><table><thead><tr><th>' + tr('Cache · last 30 days') + '</th><th>'
+      + tr('Hit rate') + '</th>'
+      + '<th>' + tr('Realised') + '</th><th>' + tr('Blended $/1M') + '</th></tr></thead><tbody>'
+      + vm.cacheEconomy.map((c: Payload) => '<tr><td data-h="' + tr('Cache') + '">'
+        + esc(srcName(c.source)) + '</td>'
+        + '<td data-h="' + tr('Hit rate') + '">' + esc(c.hitRate) + '</td><td data-h="'
+        + tr('Realised') + '">'
+        + esc(c.savedUsd) + (c.partial ? ' ⚠' : '') + '</td><td data-h="' + tr('Blended') + '">'
         + esc(c.blendedPerM) + '</td></tr>').join('')
       + '</tbody></table></div>'
       + '<div class="meta">' + esc(vm.cacheEconomy[0].note) + '</div>';
   }
   const cal = vm.calendar;
-  h += '<div class="scroll"><table><thead><tr><th>Period</th><th>Usage</th>'
-    + (vm.showCost ? '<th>API cost</th>' : '') + '<th>Req.</th><th>Active</th><th>Avg/day</th>'
+  const active = tr('Active'), perDay = tr('Avg/day');
+  h += '<div class="scroll"><table><thead><tr><th>' + w.period + '</th><th>' + w.usage + '</th>'
+    + (vm.showCost ? '<th>' + w.cost + '</th>' : '') + '<th>' + w.requests + '</th><th>' + active
+    + '</th><th>' + perDay + '</th>'
     + '</tr></thead><tbody>'
     + [cal.thisWeek, cal.thisMonth, cal.lastMonth, cal.year].map(p => '<tr>'
-      + '<td data-h="Period">' + esc(p.label) + '</td><td data-h="Usage">' + esc(p.usage) + '</td>'
-      + (vm.showCost ? '<td data-h="API cost">' + esc(p.cost) + '</td>' : '')
-      + '<td data-h="Req.">' + esc(p.requests) + '</td><td data-h="Active">' + p.activeDays
-      + '</td><td data-h="Avg/day">' + esc(p.avgPerDay) + '</td></tr>').join('')
+      + '<td data-h="' + w.period + '">' + esc(p.label) + '</td><td data-h="' + w.usage + '">'
+      + esc(p.usage) + '</td>'
+      + (vm.showCost ? '<td data-h="' + w.cost + '">' + esc(p.cost) + '</td>' : '')
+      + '<td data-h="' + w.requests + '">' + esc(p.requests) + '</td><td data-h="' + active + '">'
+      + p.activeDays
+      + '</td><td data-h="' + perDay + '">' + esc(p.avgPerDay) + '</td></tr>').join('')
     + '</tbody></table></div>';
   if (cal.thisMonth.projection) {
-    h += '<div class="meta">month projection ' + esc(cal.thisMonth.projection) + ' · '
-      + esc(cal.thisMonth.projectionBasis) + '</div>';
+    h += '<div class="meta">' + tr('month projection {0} · {1}',
+      esc(cal.thisMonth.projection), esc(cal.thisMonth.projectionBasis)) + '</div>';
   }
   for (const p of vm.planFactor) {
-    h += '<div class="meta">' + esc(p.text) + (p.partial ? ' ⚠ lower bound' : '') + '</div>';
+    h += '<div class="meta">' + esc(p.text) + (p.partial ? ' ⚠ ' + tr('lower bound') : '') + '</div>';
   }
   return h;
 }
@@ -810,13 +889,26 @@ const COST_KEY = '<svg class="key" viewBox="0 0 22 10" aria-hidden="true">'
   + '<polyline class="halo" points="1,8 8,3 14,6 21,2"/>'
   + '<polyline class="line" points="1,8 8,3 14,6 21,2"/><circle cx="8" cy="3" r="2.5"/></svg>';
 
+/**
+ * A metric as the dropdown and the heat map's chips say it. The value the page posts back
+ * stays the id the extension parses; only the word beside it is the reader's.
+ */
+function metricLabel(metric: Payload): string {
+  const m = String(metric === null || metric === undefined ? '' : metric);
+  const words: Record<string, string> = {
+    usage: tr('usage'), output: tr('output'), cacheRead: tr('cacheRead'),
+    requests: tr('requests'), reasoning: tr('reasoning'), cost: tr('cost'),
+  };
+  return esc(word(words, m) || m);
+}
+
 function sChart(): string {
   const c = vm.chart;
-  if (!c.days.length) return '<p class="empty">No data in this range.</p>';
+  if (!c.days.length) return '<p class="empty">' + tr('No data in this range.') + '</p>';
   const metrics = ['usage', 'output', 'cacheRead', 'requests', 'reasoning', 'cost'];
-  const sel = '<select data-act="metric" aria-label="chart metric">'
+  const sel = '<select data-act="metric" aria-label="' + tr('chart metric') + '">'
     + metrics.map(m => '<option value="' + m + '"' + (c.metric === m ? ' selected' : '') + '>'
-      + esc(m) + '</option>').join('') + '</select>';
+      + metricLabel(m) + '</option>').join('') + '</select>';
   const totals = c.days.map((_: Payload, i: Payload) => c.series.reduce((s: Payload, x: Payload) => s + x.values[i], 0));
   // A provider's column total, summed from the same bands the column is drawn from.
   const subtotals: Record<string, number[]> = {};
@@ -824,7 +916,6 @@ function sChart(): string {
     const sub = subtotals[s.source] || (subtotals[s.source] = c.days.map(() => 0));
     s.values.forEach((v: Payload, i: Payload) => { sub[i] += v; });
   });
-  const unit = c.weekly ? 'week' : 'day';
   const showValues = c.days.length <= 31;
   const cols = c.days.map((d: Payload, i: Payload) => {
     const segs = c.series.map((s: Payload) => {
@@ -834,10 +925,17 @@ function sChart(): string {
       // its share and its provider's total off the very values the bands are drawn from:
       // nothing is measured a second time here, only divided.
       const share = Math.round((v / totals[i]) * 1000) / 10;
+      // A sentence per unit rather than the word "day" slotted into one: the provider is
+      // named twice in the same line, which only a whole key can order.
+      const name = esc(srcName(s.source));
+      const title = c.weekly
+        ? tr('{0} · {1} · {2} · {3} % of the week · {1} total {4}',
+             esc(s.label), name, fullNum(v), share, fullNum(subtotals[s.source][i]))
+        : tr('{0} · {1} · {2} · {3} % of the day · {1} total {4}',
+             esc(s.label), name, fullNum(v), share, fullNum(subtotals[s.source][i]));
       return '<div class="seg ' + bandStyle(s.source, s.rank, c.modelStyle) + '" data-bh="'
         + ((v / c.max) * 100).toFixed(2)
-        + '" title="' + esc(s.label + ' · ' + srcName(s.source) + ' · ' + fullNum(v) + ' · ' + share
-          + ' % of the ' + unit + ' · ' + srcName(s.source) + ' total ' + fullNum(subtotals[s.source][i]))
+        + '" title="' + title
         + '"></div>';
     }).join('');
     return '<div class="col" data-act="drill" data-day="' + esc(d) + '" tabindex="0" role="button" '
@@ -886,15 +984,18 @@ function sChart(): string {
     legend += '<span><i class="dot ' + bandStyle(s.source, s.rank, c.modelStyle) + '"></i>'
       + esc(s.label) + '</span>';
   });
-  return '<div class="row"><span class="meta">' + (c.weekly ? 'weekly bars' : 'daily bars')
-    + ' · ' + c.days.length + ' columns</span><span class="wrap">' + sel
-    + (c.costLine ? '<button data-act="costLine" aria-pressed="' + costLine + '">cost line</button>' : '')
+  return '<div class="row"><span class="meta">'
+    + (c.weekly ? tr('weekly bars · {0} columns', c.days.length)
+                : tr('daily bars · {0} columns', c.days.length))
+    + '</span><span class="wrap">' + sel
+    + (c.costLine ? '<button data-act="costLine" aria-pressed="' + costLine + '">' + tr('cost line')
+       + '</button>' : '')
     + '</span></div>'
     + '<div class="plot">' + grids + '<div class="chart">' + cols + '</div>' + overlay + '</div>'
     + '<div class="axis">' + labels + '</div>'
     + '<div class="legend">' + legend
-    + (costLine && c.costLine ? '<span>' + COST_KEY + 'API cost (second axis)</span>' : '')
-    + '<span>click a column for that day</span></div>';
+    + (costLine && c.costLine ? '<span>' + COST_KEY + tr('API cost (second axis)') + '</span>' : '')
+    + '<span>' + tr('click a column for that day') + '</span></div>';
 }
 
 function short(n: number): string {
@@ -917,39 +1018,43 @@ function short(n: number): string {
  */
 function sModels(): string {
   const m = vm.models;
-  if (!m.rows.length) return '<p class="empty">No model data in this range.</p>';
-  const cols = [['model', 'Model'], ['usage', 'Usage'], ['freshInput', 'Fresh in'],
-    ['cacheWrite5m', 'Write 5m'], ['cacheWrite1h', 'Write 1h'], ['cacheRead', 'Cache read'],
-    ['output', 'Output'], ['reasoning', 'Reasoning'], ['requests', 'Req.'], ['cacheHit', 'Hit'],
-    ['perRequest', 'Per req.']]
-    .concat(vm.showCost ? [['cost', 'API cost']] : []).concat([['share', 'Share']]);
+  if (!m.rows.length) return '<p class="empty">' + tr('No model data in this range.') + '</p>';
+  const w = columnWords();
+  const cols = [['model', w.model], ['usage', w.usage], ['freshInput', w.freshInput],
+    ['cacheWrite5m', w.cacheWrite5m], ['cacheWrite1h', w.cacheWrite1h], ['cacheRead', w.cacheRead],
+    ['output', w.output], ['reasoning', w.reasoning], ['requests', w.requests],
+    ['cacheHit', w.cacheHit], ['perRequest', w.perRequest]]
+    .concat(vm.showCost ? [['cost', w.cost]] : []).concat([['share', w.share]]);
   const head = cols.map(c => '<th class="sortable" data-act="sort" data-key="' + c[0] + '" tabindex="0"'
     + (m.sort.key === c[0] ? ' aria-sort="' + (m.sort.dir === 'asc' ? 'ascending' : 'descending') + '"' : '')
     + '>' + esc(c[1]) + '</th>').join('');
   const rows = m.rows.map((r: Payload) => '<tr>'
-    + '<td data-h="Model">' + esc(r.model) + (r.isSub ? ' <span class="meta">sub</span>' : '')
+    + '<td data-h="' + w.model + '">' + esc(r.model)
+    + (r.isSub ? ' <span class="meta">' + tr('sub') + '</span>' : '')
     + (r.tier !== 'standard' ? ' <span class="meta">' + esc(r.tier) + '</span>' : '') + '</td>'
-    + '<td data-h="Usage">' + esc(r.usageText) + '</td>'
-    + '<td data-h="Fresh in">' + esc(r.freshInput) + '</td>'
-    + '<td data-h="Write 5m">' + esc(r.cacheWrite5m) + '</td>'
-    + '<td data-h="Write 1h">' + esc(r.cacheWrite1h) + '</td>'
-    + '<td data-h="Cache read">' + esc(r.cacheRead) + '</td>'
-    + '<td data-h="Output">' + esc(r.output) + '</td>'
-    + '<td data-h="Reasoning">' + esc(r.reasoning) + '</td>'
-    + '<td data-h="Req.">' + esc(r.requests) + '</td>'
-    + '<td data-h="Hit">' + esc(r.cacheHit) + '</td>'
-    + '<td data-h="Per req.">' + esc(r.perRequest) + '</td>'
-    + (vm.showCost ? '<td data-h="API cost" title="' + esc(r.price) + '">' + esc(r.costText)
+    + '<td data-h="' + w.usage + '">' + esc(r.usageText) + '</td>'
+    + '<td data-h="' + w.freshInput + '">' + esc(r.freshInput) + '</td>'
+    + '<td data-h="' + w.cacheWrite5m + '">' + esc(r.cacheWrite5m) + '</td>'
+    + '<td data-h="' + w.cacheWrite1h + '">' + esc(r.cacheWrite1h) + '</td>'
+    + '<td data-h="' + w.cacheRead + '">' + esc(r.cacheRead) + '</td>'
+    + '<td data-h="' + w.output + '">' + esc(r.output) + '</td>'
+    + '<td data-h="' + w.reasoning + '">' + esc(r.reasoning) + '</td>'
+    + '<td data-h="' + w.requests + '">' + esc(r.requests) + '</td>'
+    + '<td data-h="' + w.cacheHit + '">' + esc(r.cacheHit) + '</td>'
+    + '<td data-h="' + w.perRequest + '">' + esc(r.perRequest) + '</td>'
+    + (vm.showCost ? '<td data-h="' + w.cost + '" title="' + esc(r.price) + '">' + esc(r.costText)
         + (r.priced === 'family'
-          ? ' <span title="priced from a related model (family fallback)">⚠</span>' : '')
+          ? ' <span title="' + tr('priced from a related model (family fallback)') + '">⚠</span>' : '')
       + '</td>' : '')
-    + '<td data-h="Share">' + esc(r.share) + '</td>'
+    + '<td data-h="' + w.share + '">' + esc(r.share) + '</td>'
     + '</tr>' + (r.turnAvg
-      ? '<tr><td colspan="99" class="meta">Avg turn ' + esc(r.turnAvg)
-        + (r.turnP90 ? ' · P90 ' + esc(r.turnP90) : '') + '</td></tr>' : '')).join('');
+      ? '<tr><td colspan="99" class="meta">'
+        + (r.turnP90 ? tr('Avg turn {0} · P90 {1}', esc(r.turnAvg), esc(r.turnP90))
+                     : tr('Avg turn {0}', esc(r.turnAvg)))
+        + '</td></tr>' : '')).join('');
   const more = m.hidden > 0
-    ? '<tr class="more"><td colspan="99">' + m.hidden
-      + ' more — set tokenPace.dashboard.modelRows</td></tr>' : '';
+    ? '<tr class="more"><td colspan="99">'
+      + tr('{0} more — set tokenPace.dashboard.modelRows', m.hidden) + '</td></tr>' : '';
   return '<div class="scroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + rows + more
     + '</tbody></table></div>';
 }
@@ -958,21 +1063,28 @@ function sHeatmap(): string {
   const h = vm.heatmap;
   const cells = h.weeks.map((w: Payload) => w.days.map((d: Payload) => '<i class="'
     + (d.level === null ? 'out' : 'l' + d.level) + '" title="' + esc(d.text) + '"></i>').join('')).join('');
-  return '<div class="row"><span class="meta">streak ' + h.streak + ' · longest ' + h.longestStreak
-    + ' · active ' + h.activeDays
-    + (h.peakDay ? ' · peak ' + esc(h.peakDay.day) + ' (' + esc(h.peakDay.text) + ')' : '')
-    + (h.variability ? ' · CV ' + esc(h.variability.cv) + ' · ' + h.variability.spikyDays
-       + ' spiky day(s)' : '')
+  return '<div class="row"><span class="meta">'
+    + tr('streak {0} · longest {1} · active {2}', h.streak, h.longestStreak, h.activeDays)
+    + (h.peakDay ? ' · ' + tr('peak {0} ({1})', esc(h.peakDay.day), esc(h.peakDay.text)) : '')
+    + (h.variability
+       ? ' · ' + tr('CV {0} · {1} spiky day(s)', esc(h.variability.cv), h.variability.spikyDays)
+       : '')
     + '</span><span class="wrap">'
     + ['usage', 'cost'].map(m => '<button data-act="heatmapMetric" data-metric="' + m
-      + '" aria-pressed="' + (h.metric === m) + '">' + m + '</button>').join('')
+      + '" aria-pressed="' + (h.metric === m) + '">' + metricLabel(m) + '</button>').join('')
     + '</span></div>'
     + '<div class="heat">' + cells + '</div>'
-    + '<div class="legend"><span>less</span><span><i class="dot l1"></i>'
+    + '<div class="legend"><span>' + tr('less') + '</span><span><i class="dot l1"></i>'
     + '<i class="dot l2"></i><i class="dot l3"></i>'
-    + '<i class="dot l4"></i></span><span>more</span>'
-    + '<span>dotted = outside coverage'
-    + (h.firstDay ? ' (before ' + esc(h.firstDay) + ')' : '') + '</span></div>';
+    + '<i class="dot l4"></i></span><span>' + tr('more') + '</span>'
+    + '<span>' + (h.firstDay ? tr('dotted = outside coverage (before {0})', esc(h.firstDay))
+                             : tr('dotted = outside coverage'))
+    + '</span></div>';
+}
+
+/** The two clocks the hour strip can be read in. */
+function zoneLabel(zone: string): string {
+  return zone === 'utc' ? tr('utc') : zone === 'local' ? tr('local') : esc(zone);
 }
 
 function sHours(): string {
@@ -995,25 +1107,27 @@ function sHours(): string {
       const cell = p.grid.find((c: Payload) => c.weekday === d && c.block === b) || { value: null, samples: 0 };
       const lvl = cell.value === null ? 'none'
         : 'l' + Math.max(1, Math.ceil((cell.value / gmax) * 4));
-      grid += '<i class="' + lvl + '" title="' + esc(cell.value === null
-        ? 'no usage in this block'
-        : Math.round(cell.value).toLocaleString('en-US') + ' tokens over ' + cell.samples + ' day(s)')
+      grid += '<i class="' + lvl + '" title="' + (cell.value === null
+        ? tr('no usage in this block')
+        : tr('{0} tokens over {1} day(s)', fullNum(cell.value), cell.samples))
         + '"></i>';
     }
   }
   grid += '</div>';
   return '<div class="row"><span class="meta">'
-    + (p.peakHour === null ? 'no hour data' : 'peak ' + String(p.peakHour).padStart(2, '0') + ':00')
-    + ' · ' + p.days + ' day(s)</span><span class="wrap">'
+    + (p.peakHour === null
+       ? tr('no hour data · {0} day(s)', p.days)
+       : tr('peak {0}:00 · {1} day(s)', String(p.peakHour).padStart(2, '0'), p.days))
+    + '</span><span class="wrap">'
     + ['local', 'utc'].map(z => '<button data-act="hourZone" data-zone="' + z + '" aria-pressed="'
-      + (p.zone === z) + '">' + z + '</button>').join('') + '</span></div>'
+      + (p.zone === z) + '">' + zoneLabel(z) + '</button>').join('') + '</span></div>'
     + '<div class="hours">' + bars + '</div>' + hourAxis
     + (p.note ? '<div class="meta">' + esc(p.note) + '</div>' : '')
     // The caption carries what the grid stands on. A picture whose thin weeks look exactly
     // like its thick ones has to say which it is, in the same line that names it.
-    + '<div class="meta">by weekday and four-hour block · ' + esc(p.basis.text) + '</div>'
+    + '<div class="meta">' + tr('by weekday and four-hour block · {0}', esc(p.basis.text)) + '</div>'
     + grid
-    + '<div class="legend"><span>hatched: no usage in that block</span></div>';
+    + '<div class="legend"><span>' + tr('hatched: no usage in that block') + '</span></div>';
 }
 
 /**
@@ -1023,14 +1137,16 @@ function sHours(): string {
 function recordTable(head: string, rows: Payload[]): string {
   if (!rows.length) return '';
   const cost = vm.showCost;
+  const w = columnWords();
   return '<div class="card"><div class="name">' + esc(head) + '</div>'
-    + '<div class="scroll"><table><thead><tr><th>' + esc(head) + '</th><th>Usage</th>'
-    + '<th>Share</th>' + (cost ? '<th>API cost</th>' : '') + '</tr></thead><tbody>'
+    + '<div class="scroll"><table><thead><tr><th>' + esc(head) + '</th><th>' + w.usage + '</th>'
+    + '<th>' + w.share + '</th>' + (cost ? '<th>' + w.cost + '</th>' : '') + '</tr></thead><tbody>'
     + rows.map(function (r) {
       return '<tr><td data-h="' + esc(head) + '">' + esc(r.label)
         + (r.detail ? ' <span class="meta">' + esc(r.detail) + '</span>' : '')
-        + '</td><td data-h="Usage">' + esc(r.usage) + '</td><td data-h="Share">' + esc(r.share)
-        + '</td>' + (cost ? '<td data-h="API cost">' + esc(r.cost) + '</td>' : '') + '</tr>';
+        + '</td><td data-h="' + w.usage + '">' + esc(r.usage) + '</td><td data-h="' + w.share + '">'
+        + esc(r.share)
+        + '</td>' + (cost ? '<td data-h="' + w.cost + '">' + esc(r.cost) + '</td>' : '') + '</tr>';
     }).join('') + '</tbody></table></div></div>';
 }
 
@@ -1044,25 +1160,27 @@ function recordTable(head: string, rows: Payload[]): string {
  */
 function sRecords(): string {
   const r = vm.records;
-  if (!r) return '<p class="empty">No records yet.</p>';
+  if (!r) return '<p class="empty">' + tr('No records yet.') + '</p>';
   let h = '';
   const peak = r.peakDay
-    ? 'Peak day ' + esc(r.peakDay.day) + ' · ' + esc(r.peakDay.usage)
+    ? tr('Peak day {0} · {1}', esc(r.peakDay.day), esc(r.peakDay.usage))
       + (vm.showCost && r.peakDay.cost !== '–'
          ? ' · ' + esc(r.peakDay.cost) + (r.peakDay.costPartial ? ' ⚠' : '') : '')
-    : 'Peak day –';
+    : tr('Peak day {0}', '–');
+  // Singular and plural are two sentences, not a letter added to one.
   const streak = r.streak
-    ? 'Longest streak ' + r.streak.days + ' day' + (r.streak.days === 1 ? '' : 's')
-      + ' · ' + esc(r.streak.from) + ' → ' + esc(r.streak.to)
-    : 'Longest streak –';
+    ? (r.streak.days === 1
+       ? tr('Longest streak {0} day · {1} → {2}', r.streak.days, esc(r.streak.from), esc(r.streak.to))
+       : tr('Longest streak {0} days · {1} → {2}', r.streak.days, esc(r.streak.from), esc(r.streak.to)))
+    : tr('Longest streak {0}', '–');
   h += '<div class="card"><div class="row"><span class="name">' + peak + '</span>'
     + '<span class="meta">' + streak + '</span></div></div>';
-  h += recordTable('Model', r.topModels);
+  h += recordTable(tr('Model'), r.topModels);
   if (r.attributionOn) {
-    h += recordTable('Project', r.topProjects);
-    h += recordTable('Session', r.topSessions);
+    h += recordTable(tr('Project'), r.topProjects);
+    h += recordTable(tr('Session'), r.topSessions);
   } else {
-    h += '<p class="empty">Top projects and sessions need tokenPace.attribution.</p>';
+    h += '<p class="empty">' + tr('Top projects and sessions need tokenPace.attribution.') + '</p>';
   }
   const notes = [r.note, r.sessionNote].filter(Boolean);
   if (notes.length) {
@@ -1081,22 +1199,25 @@ function sRecords(): string {
  */
 function sTools(): string {
   const t = vm.tools;
-  if (!t) return '<p class="empty">No tool calls counted.</p>';
+  if (!t) return '<p class="empty">' + tr('No tool calls counted.') + '</p>';
+  const w = columnWords();
+  const tool = tr('Tool'), calls = tr('Calls'), models = tr('Models');
   let h = '';
   if (t.rows.length) {
-    h += '<div class="scroll"><table><thead><tr><th>Tool</th><th>Calls</th><th>Share</th>'
-      + '<th>Models</th></tr></thead><tbody>'
+    h += '<div class="scroll"><table><thead><tr><th>' + tool + '</th><th>' + calls + '</th><th>'
+      + w.share + '</th>'
+      + '<th>' + models + '</th></tr></thead><tbody>'
       + t.rows.map(function (r: Payload) {
-        return '<tr><td data-h="Tool">' + esc(r.name)
+        return '<tr><td data-h="' + tool + '">' + esc(r.name)
           + (r.sources ? ' <span class="meta">' + esc(r.sources) + '</span>' : '')
-          + '</td><td data-h="Calls">' + esc(r.callsText) + '</td>'
-          + '<td data-h="Share">' + esc(r.share) + '</td>'
-          + '<td data-h="Models">' + esc(r.models) + '</td></tr>';
+          + '</td><td data-h="' + calls + '">' + esc(r.callsText) + '</td>'
+          + '<td data-h="' + w.share + '">' + esc(r.share) + '</td>'
+          + '<td data-h="' + models + '">' + esc(r.models) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
-    h += '<div class="meta">' + esc(t.totalText) + ' call(s) · ' + t.distinct + ' distinct tool(s)'
-      + (t.hidden ? ' · ' + t.hidden + ' more not listed' : '') + '</div>';
+    h += '<div class="meta">' + tr('{0} call(s) · {1} distinct tool(s)', esc(t.totalText), t.distinct)
+      + (t.hidden ? ' · ' + tr('{0} more not listed', t.hidden) : '') + '</div>';
   } else {
-    h += '<p class="empty">No tool call counted in this range.</p>';
+    h += '<p class="empty">' + tr('No tool call counted in this range.') + '</p>';
   }
   if (t.notes.length) {
     h += '<ul class="meta">' + t.notes.map((n: Payload) => '<li>' + esc(n) + '</li>').join('') + '</ul>';
@@ -1121,29 +1242,32 @@ function sTools(): string {
 function sBudget(): string {
   const rows = vm.budgets || [];
   if (!rows.length) {
-    return '<p class="empty">No budget configured. tokenPace.budgets takes your own limit '
-      + 'per provider, period and unit.'
-      + '<br><button data-act="cmd" data-id="tokenPace.openSettings">Open settings</button></p>';
+    return '<p class="empty">'
+      + tr('No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.')
+      + '<br><button data-act="cmd" data-id="tokenPace.openSettings">' + tr('Open settings')
+      + '</button></p>';
   }
   return rows.map(function (b: Payload) {
     const share = b.share === null || b.share === undefined ? null : b.share;
     const cls = b.over ? 'warn' : 'neutral';
     let h = '<div class="card"><div class="row"><span class="name">' + esc(b.label)
       + (b.partial ? ' ⚠' : '') + '</span><span class="meta">' + esc(b.shareText)
-      + (b.over ? ' · over' : '') + '</span></div>'
-      + '<div class="win"><div class="win-top"><span>' + esc(b.usedText) + ' of '
-      + esc(b.limitText) + '</span><b>' + esc(b.from) + ' → ' + esc(b.last) + '</b></div>';
+      + (b.over ? ' · ' + tr('over') : '') + '</span></div>'
+      + '<div class="win"><div class="win-top"><span>'
+      + tr('{0} of {1}', esc(b.usedText), esc(b.limitText))
+      + '</span><b>' + esc(b.from) + ' → ' + esc(b.last) + '</b></div>';
     // No denominator, no bar: a null share is a period we have not read, not an empty one.
     if (share !== null) {
       h += bar(share, cls, null, null,
-        { now: Math.round(share), max: 100, text: b.label + ': ' + b.usedText + ' of ' + b.limitText });
+        { now: Math.round(share), max: 100,
+          text: tr('{0}: {1} of {2}', b.label, b.usedText, b.limitText) });
     }
     h += '</div>';
     const meta = [
       // Why a row is all dashes: a budget is never dropped for being unmeasurable, so the
       // card has to name the switch that is in the way instead of showing a blank card.
       b.unmeasurable || null,
-      b.projectedText ? 'projected ' + b.projectedText + ' by ' + b.last : null,
+      b.projectedText ? tr('projected {0} by {1}', b.projectedText, b.last) : null,
       b.projectionBasis,
     ].filter(Boolean).join(' · ');
     if (meta) {
@@ -1151,42 +1275,54 @@ function sBudget(): string {
     }
     return h + '</div>';
   }).join('')
-    + '<div class="meta">A budget is your own number. USD is the hypothetical API '
-    + 'equivalent, not a bill, and no budget is ever added to another.</div>';
+    + '<div class="meta">'
+    + tr('A budget is your own number. USD is the hypothetical API equivalent, not a bill, and no budget is ever added to another.')
+    + '</div>';
 }
 
 function sHistory(): string {
-  if (!vm.retro.length) return '<p class="empty">No cycles on file yet.</p>';
+  if (!vm.retro.length) return '<p class="empty">' + tr('No cycles on file yet.') + '</p>';
   return '<ul>' + vm.retro.map((r: Payload) => '<li><b>' + srcLabel(r.source, r.label) + '</b>: '
     + esc(r.text) + '</li>').join('') + '</ul>';
 }
 
 function sProjects(): string {
   if (!vm.projects.enabled) {
-    return '<p class="empty">Project attribution is off (tokenPace.attribution).</p>';
+    return '<p class="empty">' + tr('Project attribution is off (tokenPace.attribution).') + '</p>';
   }
-  if (!vm.projects.rows.length) return '<p class="empty">No project data yet.</p>';
-  return '<div class="scroll"><table><thead><tr><th>Project</th><th>Usage</th><th>Req.</th>'
-    + '<th>Hit</th><th>Share</th><th>Sessions</th></tr></thead><tbody>'
-    + vm.projects.rows.map((p: Payload) => '<tr><td data-h="Project">' + esc(p.project) + '</td>'
-      + '<td data-h="Usage">' + esc(p.usage) + '</td><td data-h="Req.">' + esc(p.requests) + '</td>'
-      + '<td data-h="Hit">' + esc(p.cacheHit) + '</td><td data-h="Share">'
-      + esc(p.share) + '</td><td data-h="Sessions">' + p.sessions + '</td></tr>').join('')
+  if (!vm.projects.rows.length) return '<p class="empty">' + tr('No project data yet.') + '</p>';
+  const w = columnWords();
+  const project = tr('Project'), sessions = tr('Sessions');
+  return '<div class="scroll"><table><thead><tr><th>' + project + '</th><th>' + w.usage + '</th><th>'
+    + w.requests + '</th>'
+    + '<th>' + w.cacheHit + '</th><th>' + w.share + '</th><th>' + sessions + '</th></tr></thead><tbody>'
+    + vm.projects.rows.map((p: Payload) => '<tr><td data-h="' + project + '">' + esc(p.project) + '</td>'
+      + '<td data-h="' + w.usage + '">' + esc(p.usage) + '</td><td data-h="' + w.requests + '">'
+      + esc(p.requests) + '</td>'
+      + '<td data-h="' + w.cacheHit + '">' + esc(p.cacheHit) + '</td><td data-h="' + w.share + '">'
+      + esc(p.share) + '</td><td data-h="' + sessions + '">' + p.sessions + '</td></tr>').join('')
     + '</tbody></table></div>';
 }
 
 function sSessions(): string {
   if (!vm.sessions.enabled) {
-    return '<p class="empty">Session attribution is off (tokenPace.attribution).</p>';
+    return '<p class="empty">' + tr('Session attribution is off (tokenPace.attribution).') + '</p>';
   }
-  if (!vm.sessions.rows.length) return '<p class="empty">No session data yet.</p>';
-  return '<div class="scroll"><table><thead><tr><th>Session</th><th>Project</th><th>Started</th>'
-    + '<th>Duration</th><th>Usage</th><th>Req.</th><th>Cache</th></tr></thead><tbody>'
-    + vm.sessions.rows.map((s: Payload) => '<tr><td data-h="Session">' + esc(s.session)
-      + (s.isSub ? ' <span class="meta">sub</span>' : '') + '</td>'
-      + '<td data-h="Project">' + esc(s.project) + '</td><td data-h="Started">' + esc(s.started)
-      + '</td><td data-h="Duration">' + esc(s.duration) + '</td><td data-h="Usage">' + esc(s.usage)
-      + '</td><td data-h="Req.">' + esc(s.requests) + '</td><td data-h="Cache">'
+  if (!vm.sessions.rows.length) return '<p class="empty">' + tr('No session data yet.') + '</p>';
+  const w = columnWords();
+  const session = tr('Session'), project = tr('Project'), started = tr('Started');
+  const duration = tr('Duration'), cache = tr('Cache');
+  return '<div class="scroll"><table><thead><tr><th>' + session + '</th><th>' + project + '</th><th>'
+    + started + '</th>'
+    + '<th>' + duration + '</th><th>' + w.usage + '</th><th>' + w.requests + '</th><th>' + cache
+    + '</th></tr></thead><tbody>'
+    + vm.sessions.rows.map((s: Payload) => '<tr><td data-h="' + session + '">' + esc(s.session)
+      + (s.isSub ? ' <span class="meta">' + tr('sub') + '</span>' : '') + '</td>'
+      + '<td data-h="' + project + '">' + esc(s.project) + '</td><td data-h="' + started + '">'
+      + esc(s.started)
+      + '</td><td data-h="' + duration + '">' + esc(s.duration) + '</td><td data-h="' + w.usage + '">'
+      + esc(s.usage)
+      + '</td><td data-h="' + w.requests + '">' + esc(s.requests) + '</td><td data-h="' + cache + '">'
       + esc(s.cacheState || '–') + '</td></tr>').join('')
     + '</tbody></table></div>';
 }
@@ -1194,58 +1330,62 @@ function sSessions(): string {
 function sDataQuality(): string {
   const d = vm.dataQuality;
   const li = [];
-  li.push('Roots: ' + (d.roots.length ? d.roots.map(esc).join(', ') : 'none') + ' · ' + d.files + ' file(s)');
-  li.push('Coverage ' + esc(d.oldestDay || '–') + ' → ' + esc(d.newestDay || '–') + ' · '
-    + d.buckets.hour + ' hour / ' + d.buckets.day + ' day / ' + d.buckets.month
-    + ' month buckets · snapshot ' + Math.round(d.snapshotBytes / 1024) + ' KB');
-  li.push('Lower bound share ' + esc(d.lowerBoundShare)
-    + (d.unpricedModels.length ? ' · unpriced: ' + d.unpricedModels.map(esc).join(', ') : '')
-    + (d.familyPriced.length ? ' · family-priced: ' + d.familyPriced.map(esc).join(', ') : ''));
-  li.push('Retention ' + d.retention.hourDays + ' d hourly · ' + d.retention.days + ' d daily · '
-    + d.retention.historyDays + ' d quota history');
-  li.push('Quota history ' + d.history.samples + ' samples · ' + Math.round(d.history.bytes / 1024)
-    + ' KB · oldest ' + esc(d.history.oldest || '–'));
+  li.push(tr('Roots: {0} · {1} file(s)',
+    d.roots.length ? d.roots.map(esc).join(', ') : tr('none'), d.files));
+  li.push(tr('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB',
+    esc(d.oldestDay || '–'), esc(d.newestDay || '–'),
+    d.buckets.hour, d.buckets.day, d.buckets.month, Math.round(d.snapshotBytes / 1024)));
+  li.push(tr('Lower bound share {0}', esc(d.lowerBoundShare))
+    + (d.unpricedModels.length ? ' · ' + tr('unpriced: {0}', d.unpricedModels.map(esc).join(', ')) : '')
+    + (d.familyPriced.length ? ' · ' + tr('family-priced: {0}', d.familyPriced.map(esc).join(', ')) : ''));
+  li.push(tr('Retention {0} d hourly · {1} d daily · {2} d quota history',
+    d.retention.hourDays, d.retention.days, d.retention.historyDays));
+  li.push(tr('Quota history {0} samples · {1} KB · oldest {2}',
+    d.history.samples, Math.round(d.history.bytes / 1024), esc(d.history.oldest || '–')));
   for (const q of d.quota) {
-    li.push('Sources ' + esc(q.source) + ': ' + (q.candidates.length
+    li.push(tr('Sources {0}: {1}', esc(q.source), q.candidates.length
       ? q.candidates.map((c: Payload) => esc(c.id) + ' ' + (c.ok
-          ? (c.ageSec === null ? 'ok' : Math.round(c.ageSec / 60) + ' min')
-          : esc(c.problem || 'unavailable'))).join(' · ')
-      : 'no source answered'));
+          ? (c.ageSec === null ? tr('ok') : Math.round(c.ageSec / 60) + ' min')
+          : esc(c.problem || tr('unavailable')))).join(' · ')
+      : tr('no source answered')));
     if (q.drift.length) {
-      li.push('Fields reported but not rendered (' + esc(q.source) + '): '
-        + q.drift.map(esc).join(', '));
+      li.push(tr('Fields reported but not rendered ({0}): {1}',
+        esc(q.source), q.drift.map(esc).join(', ')));
     }
   }
   for (const c of d.calibration) {
-    li.push('Calibration ' + esc(c.source) + ' ' + esc(c.windowId) + ': ' + esc(c.text));
+    li.push(tr('Calibration {0} {1}: {2}', esc(c.source), esc(c.windowId), esc(c.text)));
   }
-  if (d.bridge) li.push('Status line: ' + esc(d.bridge));
-  li.push('Consent: ' + esc(d.consent) + ' · ' + esc(d.leader) + ' · attribution '
-    + esc(d.attribution) + ' · v' + esc(d.version));
+  if (d.bridge) li.push(tr('Status line: {0}', esc(d.bridge)));
+  li.push(tr('Consent: {0} · {1} · attribution {2} · v{3}',
+    esc(d.consent), esc(d.leader), esc(d.attribution), esc(d.version)));
   return '<ul>' + li.map(x => '<li>' + x + '</li>').join('') + '</ul>'
     + '<div class="wrap">'
-    + '<button data-act="cmd" data-id="tokenPace.copyDiagnostics">copy diagnostics</button>'
-    + '<button data-act="cmd" data-id="tokenPace.exportCsv">export CSV</button>'
-    + '<button data-act="cmd" data-id="tokenPace.exportJson">export JSON</button>'
-    + '<button data-act="cmd" data-id="tokenPace.copySummary">copy summary</button>'
-    + '<button data-act="cmd" data-id="tokenPace.clearStoredData">clear stored data</button>'
+    + '<button data-act="cmd" data-id="tokenPace.copyDiagnostics">' + tr('copy diagnostics') + '</button>'
+    + '<button data-act="cmd" data-id="tokenPace.exportCsv">' + tr('export CSV') + '</button>'
+    + '<button data-act="cmd" data-id="tokenPace.exportJson">' + tr('export JSON') + '</button>'
+    + '<button data-act="cmd" data-id="tokenPace.copySummary">' + tr('copy summary') + '</button>'
+    + '<button data-act="cmd" data-id="tokenPace.clearStoredData">' + tr('clear stored data') + '</button>'
     + '</div>';
 }
 
 function sDrill(): string {
   if (!vm.drill) return '';
-  return '<h2>Day ' + esc(vm.drill.day) + '</h2>'
-    + '<div class="scroll"><table><thead><tr><th>Model</th><th>Usage</th><th>Req.</th>'
-    + (vm.showCost ? '<th>API cost</th>' : '') + '</tr></thead><tbody>'
-    + vm.drill.models.map((m: Payload) => '<tr><td data-h="Model">' + esc(m.model) + '</td>'
-      + '<td data-h="Usage">' + esc(m.usageText) + '</td><td data-h="Req.">' + esc(m.requests)
-      + '</td>' + (vm.showCost ? '<td data-h="API cost">' + esc(m.costText) + '</td>' : '')
+  const w = columnWords();
+  return '<h2>' + tr('Day {0}', esc(vm.drill.day)) + '</h2>'
+    + '<div class="scroll"><table><thead><tr><th>' + w.model + '</th><th>' + w.usage + '</th><th>'
+    + w.requests + '</th>'
+    + (vm.showCost ? '<th>' + w.cost + '</th>' : '') + '</tr></thead><tbody>'
+    + vm.drill.models.map((m: Payload) => '<tr><td data-h="' + w.model + '">' + esc(m.model) + '</td>'
+      + '<td data-h="' + w.usage + '">' + esc(m.usageText) + '</td><td data-h="' + w.requests + '">'
+      + esc(m.requests)
+      + '</td>' + (vm.showCost ? '<td data-h="' + w.cost + '">' + esc(m.costText) + '</td>' : '')
       + '</tr>').join('')
     + (vm.drill.sessions.length
        ? vm.drill.sessions.map((s: Payload) => '<tr><td colspan="99" class="meta">' + esc(s.session) + ' · '
          + esc(s.project) + ' · ' + esc(s.usage) + '</td></tr>').join('') : '')
     + '</tbody></table></div>'
-    + '<button data-act="drill" data-day="">close</button>';
+    + '<button data-act="drill" data-day="">' + tr('close') + '</button>';
 }
 
 const RENDER: Record<string, () => string> = {
@@ -1255,13 +1395,18 @@ const RENDER: Record<string, () => string> = {
   tools: sTools, budget: sBudget,
   history: sHistory, projects: sProjects, sessions: sSessions, dataQuality: sDataQuality,
 };
-const TITLE: Record<string, string> = {
-  summary: 'Summary', quota: 'Quota', context: 'Context window', kpis: 'Key figures',
-  tokens: 'Tokens', chart: 'Chart', models: 'Models', heatmap: 'Activity',
-  hours: 'Time of day', records: 'Records', tools: 'Tools', budget: 'Budgets',
-  history: 'Reset history',
-  projects: 'Projects', sessions: 'Sessions', dataQuality: 'Data quality',
-};
+/** A section's heading. A key this build does not know heads its section with itself. */
+function titleOf(key: string): string {
+  const titles: Record<string, string> = {
+    summary: tr('Summary'), quota: tr('Quota'), context: tr('Context window'),
+    kpis: tr('Key figures'),
+    tokens: tr('Tokens'), chart: tr('Chart'), models: tr('Models'), heatmap: tr('Activity'),
+    hours: tr('Time of day'), records: tr('Records'), tools: tr('Tools'), budget: tr('Budgets'),
+    history: tr('Reset history'),
+    projects: tr('Projects'), sessions: tr('Sessions'), dataQuality: tr('Data quality'),
+  };
+  return word(titles, key) || key;
+}
 
 // Above everything, quota cards included: a preview banner or the first-run box qualifies
 // every figure on the page, not only the statistics the filter bar governs.
@@ -1270,9 +1415,11 @@ function sNotices(): string {
   if (vm.firstRun) {
     h += '<div class="box info" role="status">' + esc(vm.firstRun.text)
       + (vm.firstRun.scanning ? '' : '<br><button data-act="cmd" data-id="tokenPace.rescan">'
-        + 'Re-read token history</button>') + '</div>';
+        + tr('Re-read token history') + '</button>') + '</div>';
   }
-  if (vm.preview) h += '<div class="box" role="status">Preview data — not a reading.</div>';
+  if (vm.preview) {
+    h += '<div class="box" role="status">' + tr('Preview data — not a reading.') + '</div>';
+  }
   return h;
 }
 
@@ -1288,12 +1435,15 @@ const RANGE_FREE = ['quota', 'context', 'tokens'];
 
 function sFooter(): string {
   // The footnotes already carry the pricing sentence (and the one about configured rates);
-  // the line below is only the fallback for a model that does not, never a second copy.
-  const priced = vm.footnotes.some((f: Payload) => String(f).indexOf('Prices as of') >= 0);
+  // the line below is only the fallback for a model that does not, never a second copy. What
+  // marks that sentence is the as-of date it carries — the only footnote that does — because
+  // the sentence itself is written in whatever language the view model was built in.
+  const asOf = vm.pricing && vm.pricing.asOf ? esc(vm.pricing.asOf) : '';
+  const priced = !asOf || vm.footnotes.some((f: Payload) => String(f).indexOf(asOf) >= 0);
   return '<ul>' + vm.footnotes.map((f: Payload) => '<li>' + esc(f) + '</li>').join('')
-    + (priced ? '' : '<li>Prices as of ' + esc(vm.pricing.asOf)
-       + (vm.pricing.custom ? ' · your configured rates' : '') + '.</li>')
-    + '<li>Generated ' + esc(vm.generatedAt) + '.</li></ul>';
+    + (priced ? '' : '<li>' + (vm.pricing.custom ? tr('Prices as of {0} · your configured rates.', asOf)
+                                                 : tr('Prices as of {0}.', asOf)) + '</li>')
+    + '<li>' + tr('Generated {0}.', esc(vm.generatedAt)) + '</li></ul>';
 }
 
 /** Folded away by the reader, as the view model remembers it. */
@@ -1316,7 +1466,7 @@ function renderAll(): void {
     // announced as expandable, and the body stays in the document either way — a section
     // update writes into it whether the reader has it open or not.
     h += '<section data-sec="' + key + '"><details' + (collapsed(key) ? '' : ' open') + '>'
-      + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(TITLE[key] || key)
+      + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(titleOf(key))
       + '</h2>' + gear(key) + '</summary>'
       + '<div data-body="' + key + '">' + RENDER[key]() + '</div></details></section>';
   }
@@ -1425,7 +1575,7 @@ function fitScroll(): void {
     if (hint) { hint.hidden = !over; return; }
     if (!over) return;
     el.insertAdjacentHTML('afterend',
-      '<div class="meta scrollhint">scroll sideways for the remaining columns →</div>');
+      '<div class="meta scrollhint">' + tr('scroll sideways for the remaining columns →') + '</div>');
   });
 }
 

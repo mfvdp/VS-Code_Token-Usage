@@ -21,6 +21,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
+import { setBundle, setLocale } from '../src/i18n'
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -96,20 +97,25 @@ const SCRIPT = between(PAGE, /<script nonce="[A-Za-z0-9]+">/, '</script>')
 const SOURCE = readFileSync(join(__dirname, '..', 'src', 'webview', 'main.ts'), 'utf8')
 
 /**
- * The webview script in a context of its own. On load it takes the VS Code API and registers
- * four listeners; nothing else runs until a section renderer is called by name.
+ * A context for the webview script. On load it takes the VS Code API and registers four
+ * listeners; nothing else runs until a section renderer is called by name. A function,
+ * because the German page below is a second script that needs a second context.
  */
-const ctx = nodeVm.createContext({
-  acquireVsCodeApi: () => ({ postMessage: () => undefined }),
-  document: {
-    addEventListener: () => undefined,
-    getElementById: () => null,
-    querySelector: () => null,
-    querySelectorAll: () => [],
-  },
-  window: { addEventListener: () => undefined },
-  console,
-})
+function makeContext(): nodeVm.Context {
+  return nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: {
+      addEventListener: () => undefined,
+      getElementById: () => null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+    },
+    window: { addEventListener: () => undefined },
+    console,
+  })
+}
+
+const ctx = makeContext()
 nodeVm.runInContext(SCRIPT, ctx)
 
 /** The heading markup `srcLabel` writes: one unbreakable span per part, one separator. */
@@ -555,6 +561,115 @@ test('the page ships the built webview module, not a template string', () => {
   const dashboard = readFileSync(join(__dirname, '..', 'src', 'dashboard.ts'), 'utf8')
   assert.ok(dashboard.indexOf("import script from 'webview:script'") >= 0)
   assert.equal(dashboard.indexOf('acquireVsCodeApi'), -1)
+})
+
+// ---------------------------------------------------------------------------
+// The page's own words
+// ---------------------------------------------------------------------------
+
+/** The dictionary the page ships, read back out of the very context the script ran in. */
+const DICT = nodeVm.runInContext('L10N', ctx) as Record<string, string>
+
+/** Every `tr('…')` literal in src/webview/main.ts, with the line it stands on. */
+function trCalls(): Array<{ key: string; line: number }> {
+  const out: Array<{ key: string; line: number }> = []
+  SOURCE.split('\n').forEach((text, i) => {
+    for (const m of text.matchAll(/\btr\(\s*'((?:[^'\\]|\\.)*)'/g)) {
+      out.push({ key: m[1].replace(/\\(['\\])/g, '$1'), line: i + 1 })
+    }
+  })
+  return out
+}
+
+test('every string the webview translates is a key of the dictionary the page ships', () => {
+  // The extract script does not read src/webview — the module imports no seam of its own —
+  // so a `tr()` with no entry in `webviewWords()` is a string that can never be translated,
+  // and nothing else in the build would say so.
+  const calls = trCalls()
+  assert.ok(calls.length > 150, `only ${calls.length} tr() call(s) found in main.ts`)
+  for (const { key, line } of calls) {
+    assert.ok(Object.prototype.hasOwnProperty.call(DICT, key),
+      `src/webview/main.ts:${line}: tr(${JSON.stringify(key)}) has no entry in webviewWords()`)
+  }
+  // The other direction: an entry nobody calls would sit in the German bundle for good, and
+  // the bundle's own orphan check cannot see it — from src/ it looks like a used t() key.
+  const used = new Set(calls.map((c) => c.key))
+  const orphans = Object.keys(DICT).filter((k) => !used.has(k))
+  assert.deepEqual(orphans, [], `in webviewWords() but never asked for: ${orphans.join(', ')}`)
+})
+
+test('the dictionary stands in front of the module, is English without a bundle, and carries no markup', () => {
+  // The third const of the page, after the provider registry's two.
+  assert.match(SCRIPT, /\nconst SRC_IDS = \["claude","codex"\];\n\/\*\*[^\n]*\nconst L10N = \{/)
+  for (const [key, value] of Object.entries(DICT)) {
+    // With no bundle every entry is its own key: the English page is exactly what it was.
+    assert.equal(value, key, `the empty bundle changed ${JSON.stringify(key)}`)
+    // The values are concatenated into markup, in text and inside attributes alike.
+    assert.equal(/[<>"&]/.test(value), false, `markup character in ${JSON.stringify(value)}`)
+  }
+})
+
+/**
+ * The page as it is built with a bundle in place. The seam is module state that every other
+ * test here reads, so it is put back whatever happens.
+ */
+function germanPage(): string {
+  try {
+    setLocale('de')
+    setBundle({
+      'Loading …': 'Wird geladen …',
+      'Range': 'Zeitraum',
+      'Providers': 'Anbieter',
+      'Models': 'Modelle',
+      'Refresh': 'Aktualisieren',
+      'today': 'heute',
+      'custom…': 'benutzerdefiniert…',
+      'Not enough data for a summary yet.': 'Noch nicht genug Daten für eine Zusammenfassung.',
+      'Usage': 'Verbrauch',
+      'Period': 'Zeitraum',
+    })
+    return page()
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+}
+
+test('a German bundle reaches the page, the script inside it and the language of the markup', () => {
+  const html = germanPage()
+  // The markup says which language it is in: a German page announced as English is read out
+  // in the wrong accent and hyphenated by the wrong rules.
+  assert.match(html, /<html lang="de">/)
+  assert.match(PAGE, /<html lang="en">/)
+  assert.ok(html.indexOf('Wird geladen …') >= 0, 'the loading line is still English')
+
+  const de = makeContext()
+  nodeVm.runInContext(between(html, /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
+  ;(de as Record<string, unknown>).fixture = model(tokensVm({
+    range: { from: '2026-08-05', to: '2026-09-03', label: 'Letzte 30 Tage', preset: '30d',
+             presets: ['today', '7d', '30d'] },
+    // One model, so the bar draws the row that is labelled with it.
+    models: { rows: [{ model: 'claude-opus-4-6' }], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  }))
+  const bar = String(nodeVm.runInContext('vm = fixture; controls()', de))
+  for (const word of ['Zeitraum', 'Anbieter', 'Modelle', 'Aktualisieren', 'heute', 'benutzerdefiniert…']) {
+    assert.ok(bar.indexOf(word) >= 0, `${word} is missing from ${bar}`)
+  }
+  // A section renderer, and with it the tables: the heading and the stacked-layout prefix are
+  // the same word, so both have to be the German one.
+  const tokens = String(nodeVm.runInContext('vm = fixture; sTokens()', de))
+  assert.ok(tokens.indexOf('<th>Verbrauch</th>') >= 0, tokens)
+  assert.ok(tokens.indexOf('data-h="Verbrauch"') >= 0, tokens)
+  assert.equal(tokens.indexOf('data-h="Usage"'), -1, tokens)
+  const summary = String(nodeVm.runInContext('vm = fixture; sSummary()', de))
+  assert.ok(summary.indexOf('Noch nicht genug Daten') >= 0, summary)
+  // A key this bundle does not carry stays English rather than going blank, and a preset
+  // that is a figure rather than a word is a figure in every language.
+  assert.ok(bar.indexOf('title="Rebuild from the transcripts and fetch the quota"') >= 0, bar)
+  assert.ok(bar.indexOf('>7d</button>') >= 0, bar)
+
+  // And the English page every other test reads is untouched by all of this.
+  assert.ok(render('sSummary()').indexOf('Not enough data for a summary yet.') >= 0)
 })
 
 // ---------------------------------------------------------------------------

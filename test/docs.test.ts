@@ -14,8 +14,9 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
 import { usedThresholds } from '../src/alerts'
-import { sanitize } from '../src/config'
+import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
+import { PaceConfig, paceVerdict } from '../src/pace'
 import { priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
 import { selectWindows, viewOf, windowValue } from '../src/statusText'
@@ -37,6 +38,9 @@ const readDoc = (name: string): string => readFileSync(join(ROOT, name), 'utf8')
 interface Property {
   type?: string
   default?: unknown
+  minimum?: number
+  maximum?: number
+  multipleOf?: number
   enum?: string[]
   enumDescriptions?: string[]
   markdownDescription?: string
@@ -512,6 +516,35 @@ test('the settings tables state the defaults the manifest actually ships', () =>
     assert.ok(SETTINGS.includes(`| \`${short}\` | \`${text}\` |`),
       `docs/settings.md does not show ${short} defaulting to ${text}`)
   }
+})
+
+test('the tolerance band is offered in whole points, which is all the verdict reads', () => {
+  const p = properties['tokenPace.pace.tolerancePoints']
+  assert.equal(p.type, 'number')
+  assert.equal(p.default, 0)
+  assert.equal(p.minimum, 0)
+  assert.equal(p.maximum, 20)
+  // The step the spinner offers, and why the manifest states one: `paceVerdict` rounds the
+  // band to whole points before it compares, so that a card printing "3 % ahead of pace"
+  // cannot wear two colours. A band typed as 2.5 is therefore not half a point of extra
+  // grace — it is exactly 3 — and a spinner that steps in halves would be offering a
+  // precision the verdict does not have.
+  assert.equal(p.multipleOf, 1)
+  const band = (points: number): PaceConfig =>
+    readPaceConfig(sanitize({ 'tokenPace.pace.tolerancePoints': points }))
+  for (const percent of [33.4, 35.6, 36.4, 36.6, 40, 48, 60]) {
+    assert.equal(paceVerdict(percent, 33, band(2.5)).level, paceVerdict(percent, 33, band(3)).level,
+      `${percent} %: a band of 2.5 is judged differently from a band of 3`)
+  }
+  // Not "somewhere between 2 and 3": at 2.6 points ahead — "3 % ahead of pace" on the card —
+  // the rounded band of 3 keeps the window green where a band of 2 has already coloured it.
+  assert.equal(paceVerdict(35.6, 33, band(2.5)).level, 'ok')
+  assert.equal(paceVerdict(35.6, 33, band(2)).level, 'warn')
+  // And the row a reader looks the setting up in says so, rather than leaving the decimal open.
+  const rows = SETTINGS.split('\n').filter((l) => l.startsWith('| `pace.tolerancePoints` |'))
+  assert.equal(rows.length, 1, 'docs/settings.md has no single row for pace.tolerancePoints')
+  assert.match(rows[0], /whole/)
+  assert.ok(rows[0].includes('0–20'), rows[0])
 })
 
 // ---------------------------------------------------------------------------

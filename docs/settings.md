@@ -32,7 +32,7 @@ power-user settings sit at the end of their group.
 | Setting | Default | Meaning |
 |---|---|---|
 | `pace.sensitivity` | `normal` | `relaxed`, `normal`, `strict` or `custom` — how long a window counts as just reset, see the preset table in [Pace, not level](numbers.md#pace-not-level) |
-| `pace.tolerancePoints` | `0` | Band in percentage points a window may run ahead of its clock before it is coloured (0–20); applies with every sensitivity |
+| `pace.tolerancePoints` | `0` | Band in percentage points a window may run ahead of its clock before it is coloured (whole numbers, 0–20); applies with every sensitivity. The verdict rounds the band the way the card rounds its figure, so `2.5` is a band of 3, not half a point more grace than 2 |
 | `pace.minElapsedPercent` | `3` | Only with `sensitivity: custom`. How much of a window must have elapsed before a small reading is judged (0–20) |
 | `pace.levels` | `binary` | `binary` or `graded` (a second warning level from 15 % ahead — three times the band, at least 15) |
 

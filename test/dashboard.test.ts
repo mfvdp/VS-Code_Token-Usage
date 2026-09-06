@@ -629,9 +629,10 @@ test('no shipped bundle puts markup into one of the page\'s words', () => {
 
 /**
  * The page as it is built with a bundle in place. The seam is module state that every other
- * test here reads, so it is put back whatever happens.
+ * test here reads, so it is put back whatever happens. `extra` is for a test that needs a
+ * word this bundle does not carry; it is merged over the entries below.
  */
-function germanPage(): string {
+function germanPage(extra: Record<string, string> = {}): string {
   try {
     setLocale('de')
     setBundle({
@@ -645,6 +646,7 @@ function germanPage(): string {
       'Not enough data for a summary yet.': 'Noch nicht genug Daten für eine Zusammenfassung.',
       'Usage': 'Verbrauch',
       'Period': 'Zeitraum',
+      ...extra,
     })
     return page()
   } finally {
@@ -705,6 +707,38 @@ test('a German bundle reaches the page, the script inside it and the language of
 
   // And the English page every other test reads is untouched by all of this.
   assert.ok(render('sSummary()').indexOf('Not enough data for a summary yet.') >= 0)
+})
+
+test('the German page keeps the two reset prepositions apart', () => {
+  // "in" for a countdown, "um" for a time of day: the card's fallback picks between two
+  // messages precisely because one slot cannot carry both, and a page that shipped only the
+  // relative one would word every window "Reset in 14:20". The strings come out of the
+  // shipped bundle rather than being typed here, so what this asserts is the German a reader
+  // really gets; changing either of them is a deliberate act.
+  const bundle = JSON.parse(
+    readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8'),
+  ) as Record<string, string>
+  assert.equal(bundle['resets at {0}'], 'Reset um {0}')
+  assert.equal(bundle['resets {0}'], 'Reset in {0}')
+
+  const de = makeContext()
+  const html = germanPage({
+    'resets at {0}': bundle['resets at {0}'], 'resets {0}': bundle['resets {0}'],
+  })
+  nodeVm.runInContext(between(html, /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
+  const line = (reset: unknown): string => {
+    ;(de as Record<string, unknown>).fixture = win({ reset })
+    return String(nodeVm.runInContext('fbResetLine(fixture)', de))
+  }
+  assert.equal(line('14:20'), 'Reset um 14:20')
+  assert.equal(line('3h20m'), 'Reset in 3h20m')
+  // The word the card writes into the header row, in the language of the page.
+  ;(de as Record<string, unknown>).fixture = model({
+    quotas: [card({ windows: [win({ reset: '14:20', verdict: { text: 'on pace', level: 'ok' } })] })],
+  })
+  const card14 = String(nodeVm.runInContext('vm = fixture; sQuota()', de))
+  assert.ok(card14.indexOf('5 h · Reset um 14:20') >= 0, card14)
+  assert.equal(card14.indexOf('Reset in 14:20'), -1, card14)
 })
 
 // ---------------------------------------------------------------------------
@@ -811,6 +845,45 @@ test('the local fallback words a window exactly as the view model would', () => 
   }
 })
 
+test('a payload with no reset line reads a clock time as a time and a countdown as a countdown', () => {
+  // The same fallback, asked the one question the view model's own wording never has to
+  // answer: what kind of text it was handed. A countdown and a time of day take different
+  // prepositions in most languages — "resets 3h20m" against "resets at 14:20", "Reset in
+  // 3h20m" against "Reset um 14:20" — so there are two messages, and a payload from a build
+  // that sent a clock time in this field must reach the right one of them.
+  const line = (over: Record<string, unknown>): string => {
+    ;(ctx as Record<string, unknown>).fixture = win(over)
+    return String(nodeVm.runInContext('fbResetLine(fixture)', ctx))
+  }
+  // Every shape `formatReset` can hand over that leads with a clock: both hour cycles, the
+  // weekday a reset more than a day away carries, and the `both` format's bracketed
+  // countdown behind it.
+  assert.equal(line({ reset: '14:20' }), 'resets at 14:20')
+  assert.equal(line({ reset: '2:05 PM' }), 'resets at 2:05 PM')
+  assert.equal(line({ reset: 'Mo 14:20' }), 'resets at Mo 14:20')
+  assert.equal(line({ reset: '14:20 (in 3h20m)' }), 'resets at 14:20 (in 3h20m)')
+  // A countdown keeps the relative wording — it has no clock in it at any length.
+  assert.equal(line({ reset: '3h20m' }), 'resets 3h20m')
+  assert.equal(line({ reset: '45m' }), 'resets 45m')
+  assert.equal(line({ reset: '2d 5h' }), 'resets 2d 5h')
+  // "reset due" is a whole sentence: no verb is hung in front of it, not even when the text
+  // it stands in also carries a clock time.
+  assert.equal(line({ display: 'resetDue' }), 'reset due')
+  assert.equal(line({ display: 'resetDue', reset: '14:20' }), 'reset due')
+  assert.equal(line({ reset: 'reset due' }), 'reset due')
+  assert.equal(line({ reset: '14:20 (reset due)' }), '14:20 (reset due)')
+  // No reset text is silence, never a reset at zero.
+  assert.equal(line({ reset: '' }), '')
+  assert.equal(line({ reset: null }), '')
+  assert.equal(line({ reset: undefined }), '')
+  // And the card prints the line once, in the header row beside the label.
+  const h = render('sQuota()', {
+    quotas: [card({ windows: [win({ reset: '14:20', verdict: { text: 'on pace', level: 'ok' } })] })],
+  })
+  assert.ok(h.indexOf('<span>5 h · resets at 14:20</span>') >= 0, h)
+  assert.equal(h.split('resets at').length - 1, 1, h)
+})
+
 test('a forecast that only repeats what the card already printed is dropped', () => {
   const same = (over: Record<string, unknown>, text: string): string => render('sQuota()', {
     quotas: [card({ windows: [win({
@@ -897,6 +970,42 @@ test('a limit the provider reports as reached wears the alarm colour, whatever t
   })
   assert.ok(h.indexOf('<div class="fill error"') >= 0, h)
   assert.equal(h.indexOf('<div class="fill ok"'), -1, h)
+})
+
+test('the chip over that bar is red as well, and only a judged window wears the arrow', () => {
+  // The bar is red for this state whatever the pace said; the chip in the header row above it
+  // is the same window, so a green "20 % of the window still spare" over a red bar would be
+  // the card arguing with itself. The arrow follows the chip's colour, so it is there too,
+  // although the pace level underneath is 'ok'.
+  const reached = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      display: 'limitReached', level: 'ok', percent: 40, percentText: '40 %',
+      stateText: 'limit reached', verdict: { text: '20 % of the window still spare', level: 'ok' },
+    })] })],
+  })
+  assert.ok(reached.indexOf(
+    '<span class="verdict error">▲ 20 % of the window still spare · limit reached</span>') >= 0, reached)
+  // The same reading at the same pace level, which no provider has called reached, keeps the
+  // pace colour and stays arrow-less: the red is the provider's word about the limit, not a
+  // rule the card has invented for 40 %.
+  const spare = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      display: 'normal', level: 'ok', percent: 40, percentText: '40 %',
+      verdict: { text: '20 % of the window still spare', level: 'ok' },
+    })] })],
+  })
+  assert.ok(spare.indexOf('<span class="verdict ok">20 % of the window still spare</span>') >= 0, spare)
+  assert.equal(spare.indexOf('▲'), -1, spare)
+  // And a window whose stated reset has passed is judged by nothing at all — the reading
+  // belongs to the window before it — so its chip wears no level and no arrow even at 'error'.
+  const due = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      display: 'resetDue', level: 'error', percent: 99.8, percentText: '100 %',
+      verdict: { text: 'exhausted', level: 'error' },
+    })] })],
+  })
+  assert.ok(due.indexOf('<span class="verdict">exhausted</span>') >= 0, due)
+  assert.equal(due.indexOf('▲'), -1, due)
 })
 
 test('a measuring window prints neither its verdict nor its forecast, and no sustainable rate', () => {

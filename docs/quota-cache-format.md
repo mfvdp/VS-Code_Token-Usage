@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # The quota cache file
 
+Part of the [Token Pace documentation](../README.md#documentation).
+
 Token Pace does not need the network to show your quota. In its default mode it reads a
 small JSON file that *somebody else* wrote — a panel plugin, a cron job, a shell script, a
 sibling extension. This document is the contract for that file, so you can write one.

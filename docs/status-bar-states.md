@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Status bar states
 
+Part of the [Token Pace documentation](../README.md#documentation).
+
 Every text Token Pace can put in the status bar, what it means, which state wins when
 several apply, and the one thing to check when it is not what you expected.
 

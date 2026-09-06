@@ -111,7 +111,8 @@ test('the colour follows the printed figure: "0 % ahead" is never yellow, "1 % a
 })
 
 test('a band typed with a decimal flips where the printed figure changes, not half a point off', () => {
-  // 2.5 is settable (the setting is a plain number), and the card only ever prints whole
+  // The manifest asks for whole points, but nothing rounds the value on its way in, so a
+  // hand-written 2.5 still reaches the verdict — and the card only ever prints whole
   // percents: every gap that prints "3 % ahead of pace" must wear the same colour.
   const half: PaceConfig = { ...normal, tolerancePoints: 2.5 }
   const low = paceVerdict(35.6, 33, half)

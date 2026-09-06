@@ -150,27 +150,50 @@ test('legacy Anthropic rows are priced with their own check date', () => {
 
 // ---------------------------------------------------------------- fast mode
 
-test('Opus 4.6 is the only model with published fast rates', () => {
-  const p = priceOf('claude-opus-4-6', PRICES_AS_OF)
-  assert.deepEqual(p?.price.fast, { input: 30, output: 150 })
+test('the models with published fast rates are Opus 5, Opus 4.8, Opus 4.6 and GPT-6 Astra', () => {
+  // Opus 5 and 4.8: twice the standard rate. Opus 4.6: fast requests run at standard speed
+  // and are billed at standard rates, so its fast rates are its standard rates.
+  assert.deepEqual(priceOf('claude-opus-5', PRICES_AS_OF)?.price.fast, { input: 10, output: 50 })
+  assert.deepEqual(priceOf('claude-opus-4-8', PRICES_AS_OF)?.price.fast, { input: 10, output: 50 })
+  assert.deepEqual(priceOf('claude-opus-4-6', PRICES_AS_OF)?.price.fast, { input: 5, output: 25 })
+  assert.equal(priceOf('claude-opus-4-7', PRICES_AS_OF)?.price.fast, undefined, 'Opus 4.7 refuses fast requests')
   const withFast = Object.entries(PRICES)
     .filter(([, rules]) => rules.some((r) => r.fast))
     .map(([model]) => model)
-  assert.deepEqual(withFast, ['claude-opus-4-6'])
+    .sort()
+  assert.deepEqual(withFast, ['claude-opus-4-6', 'claude-opus-4-8', 'claude-opus-5', 'gpt-6-astra'])
 })
 
-test('fast turns of Opus 4.6 are billed at 30/150', () => {
-  const c = costOf(bucket({ model: 'claude-opus-4-6', tier: 'fast', input: M, output: M }))
-  close(c.usd, 180, 'fast usd')
-  close(c.listUsd, 180, 'fast list usd')
-  // The standard bucket of the same size costs a sixth.
-  close(costOf(bucket({ model: 'claude-opus-4-6', input: M, output: M })).usd, 30)
-  // Cache rates follow the input rate, so they carry the same factor.
-  close(costOf(bucket({ model: 'claude-opus-4-6', tier: 'fast', cacheRead: M })).usd, 3, 'fast cacheRead')
+test('GPT-6 Astra is priced from the OpenAI page: 10 / 1 cached / 50, fast exactly double', () => {
+  const p = priceOf('gpt-6-astra', '2026-09-06')
+  assert.ok(p && p.rule, 'the rule exists')
+  assert.equal(p!.confidence, 'exact')
+  close(p!.price.input, 10); close(p!.price.cacheRead, 1); close(p!.price.output, 50)
+  assert.deepEqual(p!.price.fast, { input: 20, output: 100 })
+  assert.equal(p!.rule!.from, '2026-09-06')
+  // Usage from the days before the page was read takes the nearest rule and says so.
+  const earlier = priceOf('gpt-6-astra', '2026-09-01')
+  close(earlier!.price.input, 10)
+  assert.equal(earlier!.approximate, true)
+  // A standard bucket of a million in and out: $60; the same turns in fast mode: $120.
+  close(costOf(bucket({ model: 'gpt-6-astra', input: M, output: M })).usd, 60)
+  close(costOf(bucket({ model: 'gpt-6-astra', tier: 'fast', input: M, output: M })).usd, 120)
+})
+
+test('fast turns of Opus 5 are billed at 10/50, Opus 4.6 fast turns at the standard rate', () => {
+  const c = costOf(bucket({ model: 'claude-opus-5', tier: 'fast', input: M, output: M }))
+  close(c.usd, 60, 'fast usd')
+  close(c.listUsd, 60, 'fast list usd')
+  // The standard bucket of the same size costs half.
+  close(costOf(bucket({ model: 'claude-opus-5', input: M, output: M })).usd, 30)
+  // Cache rates follow the input rate, so they carry the same factor (0.5 -> 1).
+  close(costOf(bucket({ model: 'claude-opus-5', tier: 'fast', cacheRead: M })).usd, 1, 'fast cacheRead')
+  // Opus 4.6: the fast bucket costs exactly what the standard one costs.
+  close(costOf(bucket({ model: 'claude-opus-4-6', tier: 'fast', input: M, output: M })).usd, 30)
 })
 
 test('fast turns of a model without fast rates are unpriced, not silently standard', () => {
-  const c = costOfBucket(bucket({ model: 'claude-opus-5', tier: 'fast', input: M, output: M }))
+  const c = costOfBucket(bucket({ model: 'claude-sonnet-5', tier: 'fast', input: M, output: M }))
   assert.ok(c, 'the tokens are known, so the bucket is reported, not dropped')
   assert.equal(c.unpriced, true)
   assert.equal(c.reason, 'fast rate unknown')
@@ -178,41 +201,41 @@ test('fast turns of a model without fast rates are unpriced, not silently standa
   assert.equal(c.listUsd, 0)
   assert.equal(c.confidence, 'exact')
   // fast-us behaves the same way.
-  assert.equal(costOfBucket(bucket({ model: 'claude-sonnet-5', tier: 'fast-us', input: M }))?.reason, 'fast rate unknown')
+  assert.equal(costOfBucket(bucket({ model: 'claude-haiku-4-5', tier: 'fast-us', input: M }))?.reason, 'fast rate unknown')
 })
 
 test('an override can supply the missing fast rates', () => {
-  const opts: PricingOptions = { overrides: { 'claude-opus-5': { fast: { input: 10, output: 50 } } } }
-  const c = costOf(bucket({ model: 'claude-opus-5', tier: 'fast', input: M, output: M }), opts)
-  close(c.usd, 60, 'custom fast usd')
+  const opts: PricingOptions = { overrides: { 'claude-sonnet-5': { fast: { input: 4, output: 20 } } } }
+  const c = costOf(bucket({ model: 'claude-sonnet-5', tier: 'fast', input: M, output: M }), opts)
+  close(c.usd, 24, 'custom fast usd')
   // No published fast rate to compare against — the list column falls back to the custom figure
   // instead of pretending a discount.
-  close(c.listUsd, 60, 'custom fast list usd')
+  close(c.listUsd, 24, 'custom fast list usd')
 })
 
 test('an input override never rescales the derived fast cache rates', () => {
-  // Opus 4.6: list 5/25 in, fast 30/150 — the fast cache rates are the list cache rates
-  // times 30/5. A user override of the *standard* input rate must not touch that factor.
+  // Opus 5: list 5/25 in, fast 10/50 — the fast cache rates are the list cache rates
+  // times 10/5. A user override of the *standard* input rate must not touch that factor.
   const b = bucket({
-    model: 'claude-opus-4-6', tier: 'fast',
+    model: 'claude-opus-5', tier: 'fast',
     input: M, cacheWrite: M, cacheWrite1h: 0.4 * M, cacheRead: M, output: M,
   })
   const list = costOf(b)
-  close(list.usd, 30 + 0.6 * 37.5 + 0.4 * 60 + 3 + 150, 'fast list usd')
+  close(list.usd, 10 + 0.6 * 12.5 + 0.4 * 20 + 1 + 50, 'fast list usd')
 
-  // A cheaper stated input rate cannot make the bill go up (it used to: factor 30/1).
-  const cheaper = costOf(b, { overrides: { 'claude-opus-4-6': { input: 1 } } })
+  // A cheaper stated input rate cannot make the bill go up (it used to: factor 10/1).
+  const cheaper = costOf(b, { overrides: { 'claude-opus-5': { input: 1 } } })
   close(cheaper.usd, list.usd, 'fast usd under a cheaper input override')
   close(cheaper.listUsd, list.usd, 'list usd stays the published figure')
   // ...and a dearer one cannot make it go down.
-  const dearer = costOf(b, { overrides: { 'claude-opus-4-6': { input: 10 } } })
+  const dearer = costOf(b, { overrides: { 'claude-opus-5': { input: 20 } } })
   close(dearer.usd, list.usd, 'fast usd under a dearer input override')
 
   // An overridden cache rate is still scaled by the published fast factor, once.
-  const cache = costOf(bucket({ model: 'claude-opus-4-6', tier: 'fast', cacheRead: M }), {
-    overrides: { 'claude-opus-4-6': { cacheRead: 1 } },
+  const cache = costOf(bucket({ model: 'claude-opus-5', tier: 'fast', cacheRead: M }), {
+    overrides: { 'claude-opus-5': { cacheRead: 1 } },
   })
-  close(cache.usd, 6, 'overridden cache read at the fast factor')
+  close(cache.usd, 2, 'overridden cache read at the fast factor')
 })
 
 test('a model priced only by an override derives its fast cache rates from that override', () => {
@@ -349,7 +372,7 @@ test('web search costs one cent per request, web fetch is free', () => {
 test('US-only inference multiplies token cost by 1.1, not the tool calls', () => {
   close(costOf(bucket({ model: 'claude-opus-5', tier: 'us', input: M })).usd, 5 * US_INFERENCE_MULTIPLIER)
   close(costOf(bucket({ model: 'claude-opus-5', tier: 'us', input: M, webSearch: 1 })).usd, 5 * 1.1 + 0.01)
-  close(costOf(bucket({ model: 'claude-opus-4-6', tier: 'fast-us', input: M })).usd, 30 * 1.1)
+  close(costOf(bucket({ model: 'claude-opus-5', tier: 'fast-us', input: M })).usd, 10 * 1.1)
 })
 
 test('Claude cache writes split by TTL', () => {
@@ -381,7 +404,7 @@ test('priceTableSummary reports the table and its sources', () => {
   const s = priceTableSummary()
   assert.equal(s.models, Object.keys(PRICES).length)
   assert.equal(s.asOf, PRICES_AS_OF)
-  assert.equal(s.asOf, '2026-09-02')
+  assert.equal(s.asOf, '2026-09-06')
   assert.deepEqual(s.sources, PRICE_SOURCES)
   assert.ok(s.models >= 25, 'current and legacy rows')
   s.sources.push('mutation')

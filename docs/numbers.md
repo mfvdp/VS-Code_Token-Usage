@@ -21,7 +21,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | Tokens per hour / day / model | `~/.claude/projects/**/*.jsonl` | exact | on file change |
 | Tokens per hour / day / model | `~/.codex/sessions/**/rollout-*.jsonl` (and `archived_sessions/`) | exact | on file change |
 | Output of Claude subagents, and of any response with no terminal line | the same transcripts | **lower bound** (⚠ in tooltip, table and export) | – |
-| API cost | token counts × a dated price table | **estimate** (`~`) | table checked 2026-09-02 |
+| API cost | token counts × a dated price table | **estimate** (`~`) | table checked 2026-09-06 |
 | Burn rate, ETA, end-of-window, reset retrospective | the stored quota history | **estimate**, with a stated confidence and “based on *N* readings” | needs several readings |
 | Tokens per percentage point (calibration) | quota history ÷ local tokens | **observation about your data**, off by default | – |
 

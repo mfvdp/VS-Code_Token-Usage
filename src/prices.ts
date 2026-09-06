@@ -18,7 +18,7 @@ import { Bucket } from './types'
  */
 
 /** Day the table below was last checked against the published price lists. */
-export const PRICES_AS_OF = '2026-09-02'
+export const PRICES_AS_OF = '2026-09-06'
 
 /**
  * Legacy Anthropic rows (Claude 4.x and 3.x) come from an older check of the same
@@ -104,19 +104,22 @@ function openaiRule(from: string, price: ModelPrice): PriceRule {
 export const PRICES: Record<string, PriceRule[]> = {
   // ---- Anthropic, current table ----
   'claude-fable-5-1': [anthropicRule(PRICES_AS_OF, anthropic(10, 50, 0.25))],
-  // Same tier and per-token price as Fable 5.1, but its cache-read rate was not
-  // confirmed at launch — the standard 0.1x applies until it is.
-  'claude-mythos-5-1': [anthropicRule(PRICES_AS_OF, anthropic(10, 50))],
+  // Same tier and per-token price as Fable 5.1, including the 0.025x cache read the pricing
+  // page states for both (confirmed 2026-09-06).
+  'claude-mythos-5-1': [anthropicRule(PRICES_AS_OF, anthropic(10, 50, 0.25))],
   'claude-fable-5': [anthropicRule(PRICES_AS_OF, anthropic(10, 50))],
   'claude-mythos-5': [anthropicRule(PRICES_AS_OF, anthropic(10, 50))],
-  'claude-opus-5': [anthropicRule(PRICES_AS_OF, anthropic(5, 25))],
-  'claude-opus-4-8': [anthropicRule(PRICES_AS_OF, anthropic(5, 25))],
+  'claude-opus-5': [anthropicRule(PRICES_AS_OF, { ...anthropic(5, 25), fast: { input: 10, output: 50 } })],
+  'claude-opus-4-8': [anthropicRule(PRICES_AS_OF, { ...anthropic(5, 25), fast: { input: 10, output: 50 } })],
   'claude-opus-4-7': [anthropicRule(PRICES_AS_OF, anthropic(5, 25))],
-  // The only model whose fast-mode rates the table states (6x the standard rate).
-  // For every other model fast mode counts as unpriced, reason 'fast rate unknown'.
+  // Fast mode as the pricing page states it on 2026-09-06: Opus 5 and Opus 4.8 at twice the
+  // standard rate (10 / 50); Opus 4.6 accepts `speed: "fast"` but runs at standard speed and is
+  // billed at standard rates, so its fast rates ARE its standard rates; Opus 4.7 refuses fast
+  // requests. Every other model's fast turns count as unpriced, reason 'fast rate unknown'.
   'claude-opus-4-6': [
-    anthropicRule(PRICES_AS_OF, { ...anthropic(5, 25), fast: { input: 30, output: 150 } }),
+    anthropicRule(PRICES_AS_OF, { ...anthropic(5, 25), fast: { input: 5, output: 25 } }),
   ],
+  'claude-opus-4-5': [anthropicRule(PRICES_AS_OF, anthropic(5, 25))],
   'claude-sonnet-5': [anthropicRule(PRICES_AS_OF, anthropic(2, 10))],
   'claude-sonnet-4-6': [anthropicRule(PRICES_AS_OF, anthropic(3, 15))],
   'claude-haiku-4-5': [anthropicRule(PRICES_AS_OF, anthropic(1, 5))],
@@ -132,12 +135,20 @@ export const PRICES: Record<string, PriceRule[]> = {
   'claude-3-haiku': [anthropicRule(LEGACY_CHECKED, anthropic(0.25, 1.25))],
   'claude-3-opus': [anthropicRule(LEGACY_CHECKED, anthropic(15, 75))],
   // ---- OpenAI ----
+  // GPT-6 Astra, on the OpenAI pricing page since the 2026-09-06 check: standard $10 / $1 cached /
+  // $50 per 1M; fast mode is stated as exactly double, so the fast rates are on file. The
+  // page also doubles the whole request above 272K input tokens; a bucket does not know a
+  // request's context size, so that surcharge is not applied and such turns are priced at
+  // the short-context rate (a lower bound, never an invented number).
+  'gpt-6-astra': [openaiRule(PRICES_AS_OF, { ...openai(10, 1, 50), fast: { input: 20, output: 100 } })],
   'gpt-5.6-sol': [openaiRule(PRICES_AS_OF, openai(4, 0.4, 20))],
   'gpt-5.6-terra': [openaiRule(PRICES_AS_OF, openai(2, 0.2, 12))],
   'gpt-5.6-luna': [openaiRule(PRICES_AS_OF, openai(0.2, 0.02, 1.2))],
   'gpt-5.6-cyber': [openaiRule(PRICES_AS_OF, openai(12.5, 1.25, 75))],
   'gpt-5.5': [openaiRule(PRICES_AS_OF, openai(5, 0.5, 30))],
   'gpt-5.5-pro': [openaiRule(PRICES_AS_OF, openai(30, 0, 180))],
+  'gpt-5.4-pro': [openaiRule(PRICES_AS_OF, openai(30, 0, 180))],
+  'gpt-5.2-pro': [openaiRule(PRICES_AS_OF, openai(21, 0, 168))],
   'gpt-5.4': [openaiRule(PRICES_AS_OF, openai(2.5, 0.25, 15))],
   'gpt-5.4-mini': [openaiRule(PRICES_AS_OF, openai(0.75, 0.075, 4.5))],
   'gpt-5.4-nano': [openaiRule(PRICES_AS_OF, openai(0.2, 0.02, 1.25))],

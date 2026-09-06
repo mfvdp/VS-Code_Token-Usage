@@ -3,6 +3,20 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.3.1 — unreleased
+
+### Changed
+
+* **The price table is checked as of 2026-09-06.** Both pricing pages were read again in full.
+  New rows: GPT-6 Astra ($10 in, $1 cached, $50 out per million; fast mode at exactly twice
+  that, so fast turns are priced rather than left unpriced), GPT-5.4 Pro, GPT-5.2 Pro and
+  Claude Opus 4.5. Corrections: fast mode now belongs to Claude Opus 5 and Opus 4.8 at $10 / $50,
+  Opus 4.6 runs fast requests at its standard rates and Opus 4.7 refuses them (the table used to
+  give Opus 4.6 alone a six-times fast rate); Claude Mythos 5.1 shares the $0.25 cache-read rate
+  of Fable 5.1. GPT-6 Astra's long-context surcharge above 272K input tokens is not applied —
+  a bucket does not know a request's context size — so such turns are priced at the short-context
+  rate, a lower bound as everywhere else in the cost column.
+
 ## 1.3.0 — 2026-09-06
 
 ### Added

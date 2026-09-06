@@ -3,6 +3,34 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.4.0 — 2026-09-07
+
+### Changed
+
+* **The shade model style is legible at every band height.** Measured in a real browser at 4, 8
+  and 16 px: the old lightness ramp, with its 1 px outline on the faint ranks, collapsed to a
+  colour distance under 1 between neighbouring models at 8 px and ran backwards at 4 px, where
+  the outline was half the band. The ramp is now six even steps chosen from those measurements
+  (no neighbour closer than a distance of about 10, the faintest band still clearly off the
+  page, both providers still apart), with no outline. The pattern and combined styles are
+  unchanged.
+* **A reached limit is red in the verdict chip too.** A window the provider reports as
+  limit-reached wore the alarm colour on its bar but a dim chip whenever the pace happened to be
+  fine; chip and bar now agree.
+* **The tolerance band is a whole number** in the settings editor (`tokenPace.pace.tolerancePoints`
+  offers 0–20 in steps of 1); the verdict rounds a hand-written decimal the way the card rounds
+  its figure, so `2.5` is a band of 3.
+
+### Fixed
+
+* A payload without a worded reset line — one from an older build — reads a clock time as
+  "resets at 14:20" and a countdown as "resets 3h20m" instead of forcing the countdown wording
+  on both.
+* **Why a sparkline can start over.** A sign-in with a different Claude account on 6 September
+  showed that the quota history keeps one stream per account identity and never mixes two: the
+  sparklines then show only the new account's readings. That rule is now pinned by a test at
+  the manager level; the behaviour is unchanged and correct.
+
 ## 1.3.2 — 2026-09-07
 
 ### Security

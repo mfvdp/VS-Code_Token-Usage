@@ -347,6 +347,9 @@ p { margin: 6px 0; }
    quota body, because a "card" elsewhere on the page is a row of a list that needs no rule. */
 [data-body="quota"] .card + .card { border-top: 1px solid var(--line); padding-top: 10px; }
 .name { font-weight: 600; }
+/* A provider's name never breaks inside the word: at 300 px with a long German meta text the
+   row used to split a five-letter name across two lines; the meta beside it is what wraps. */
+.row > .name { white-space: nowrap; }
 .row { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
 .wrap { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 button, select, input {

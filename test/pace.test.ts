@@ -96,8 +96,9 @@ test('the colour follows the printed figure: "0 % ahead" is never yellow, "1 % a
   const over = paceVerdict(40.5, 40, normal)
   assert.equal(over.text, '1 % ahead of pace')
   assert.equal(over.level, 'warn')
-  // A band is taken off before the rounding: 5.4 ahead with a band of 5 prints "5 % ahead"
-  // and stays green, 5.5 prints "6 % ahead" — one point over the band — and is yellow.
+  // A band is taken off in the same whole percents: 5.4 ahead with a band of 5 prints
+  // "5 % ahead" and stays green, 5.5 prints "6 % ahead" — one point over the band — and is
+  // yellow.
   const inBand = paceVerdict(45.4, 40, banded)
   assert.equal(inBand.level, 'ok')
   assert.equal(inBand.text, '5 % ahead of pace')
@@ -107,6 +108,21 @@ test('the colour follows the printed figure: "0 % ahead" is never yellow, "1 % a
   // The band applies beside a preset as well, not only with 'custom'.
   assert.equal(paceVerdict(45.4, 40, { ...banded, sensitivity: 'strict' }).level, 'ok')
   assert.equal(paceVerdict(45.5, 40, { ...banded, sensitivity: 'relaxed' }).level, 'warn')
+})
+
+test('a band typed with a decimal flips where the printed figure changes, not half a point off', () => {
+  // 2.5 is settable (the setting is a plain number), and the card only ever prints whole
+  // percents: every gap that prints "3 % ahead of pace" must wear the same colour.
+  const half: PaceConfig = { ...normal, tolerancePoints: 2.5 }
+  const low = paceVerdict(35.6, 33, half)
+  assert.equal(low.text, '3 % ahead of pace')
+  assert.equal(low.level, 'ok')
+  const high = paceVerdict(36.4, 33, half)
+  assert.equal(high.text, '3 % ahead of pace')
+  assert.equal(high.level, 'ok')
+  const over = paceVerdict(36.6, 33, half)
+  assert.equal(over.text, '4 % ahead of pace')
+  assert.equal(over.level, 'warn')
 })
 
 test('graded adds a second warning level from 15 points ahead, or three times a larger band', () => {

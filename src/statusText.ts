@@ -15,7 +15,7 @@
 import { LABEL, SOURCES, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
 import { billable, BucketFilter, CostSummary } from './agg'
 import { BudgetRow, worstBudget } from './budget'
-import { Config, CONTEXT_NOTE, planNameOf, readPaceConfig, readTimeConfig } from './config'
+import { Config, contextNote, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
 import { t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
@@ -24,12 +24,12 @@ import { promptCacheText } from './promptCache'
 // Type only: this module renders, it never reads a file, and `quotaSources` does.
 import type { ContextReading, PromptCacheReading } from './quotaSources'
 import {
-  ageMinutes, BarOptions, compact, estimate, extraUsageText, full, percentOf, percentText,
-  renderBar, usd,
+  ageMinutes, BarOptions, compact, estimate, extraUsageText, full, originName, percentOf,
+  percentText, renderBar, usd,
 } from './render'
 import { ageText, formatReset, formatTime, lastDays, relativeShort, TimeConfig } from './time'
 import {
-  Bucket, emptyBucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaOrigin, QuotaState,
+  Bucket, emptyBucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaState,
   QuotaWindow, Source,
 } from './types'
 
@@ -44,23 +44,6 @@ import {
  * the address the tooltip shows.
  */
 export { USAGE_PAGE }
-
-/**
- * Where a reading came from, in words. Shown so a figure is always traceable.
- *
- * A function rather than a table: the translation bundle arrives at activation, and a table
- * built at module load would keep the English words for the rest of the session.
- */
-function originName(origin: QuotaOrigin): string {
-  switch (origin) {
-    case 'cache': return t('cache file')
-    case 'poll': return t('polled')
-    case 'push': return t('pushed')
-    case 'transcript': return t('transcript')
-    case 'statusline': return t('status line')
-    default: return t('claude.json')
-  }
-}
 
 /**
  * Foreground per pace level. The first three ids are contributed by this extension with a
@@ -435,7 +418,13 @@ function resetSuffix(view: WindowView, cfg: Config, now: number, tcfg: TimeConfi
   // Always named. A bare "· 42m" next to a percentage is unreadable beside the stale-age
   // suffix, which is also a bare duration — one of the two has to say what it counts, and
   // the age already carries `$(history)`, so the reset carries the word.
-  return ` · ${t('resets {0}', text)}`
+  //
+  // Two messages, not one with a slot: a countdown and a time of day take different
+  // prepositions in most languages ("in 3h44m" against "um 15:30"), and the seam keys a
+  // translation by its English message, so one message can only carry one of them.
+  return cfg.resetFormat === 'relative'
+    ? ` · ${t('resets {0}', text)}`
+    : ` · ${t('resets at {0}', text)}`
 }
 
 function ageSuffix(q: QuotaState, stale: boolean, cfg: Config, now: number): string {
@@ -724,6 +713,19 @@ function periodLabel(period: Config['summary']['period']): string {
   return period === '7d' ? t('7 days') : t('30 days')
 }
 
+/**
+ * The period as the two summary items spell it, beside the figure and inside a bar that has
+ * no room for a sentence.
+ *
+ * "today" is a word and is translated; "7d" and "30d" are the same compact spans the
+ * dashboard's range chips print in every language, so a German word for them here alone
+ * would give the reader two names for one range. Never the raw setting value for "today",
+ * though — that was the one period a reader was left to read in English.
+ */
+function periodSuffix(period: Config['summary']['period']): string {
+  return period === 'today' ? t('today') : period
+}
+
 function scopeSources(cfg: Config): Source[] {
   if (cfg.summary.scope === 'claude') return ['claude']
   if (cfg.summary.scope === 'codex') return ['codex']
@@ -875,7 +877,12 @@ function quotaBlock(q: QuotaState, ctx: RenderContext, compactMode: boolean): st
   // cache, only while the status line reports it, with a dash for every part it left out.
   if (q.source === 'claude' && ctx.promptCache) {
     out.push('')
-    out.push(`$(database) ${promptCacheText(ctx.promptCache, now, (ms) => formatTime(ms, tcfg)).text}`)
+    const pc = promptCacheText(ctx.promptCache, now, (ms) => formatTime(ms, tcfg), cfg.staleAfterMinutes)
+    // The age of the reading, beside the line it built: the freshness row below belongs to
+    // the quota state, which may come from a different and much newer source.
+    const seen = [pc.ageText ? t('updated {0}', pc.ageText) : null,
+      pc.fresh ? null : `$(warning) **${t('stale')}**`].filter(Boolean).join(' · ')
+    out.push(`$(database) ${pc.text}${seen ? ` · ${seen}` : ''}`)
   }
   const auto = autoExplain(q, cfg)
   if (auto !== null) {
@@ -1044,7 +1051,7 @@ export function contextTooltip(c: ContextReading, ctx: RenderContext): string {
   out.push('')
   // The whole reason this item is safe to show: it is one conversation, not the account, and
   // it is a mirrored reading rather than something we counted.
-  out.push(`_${t('This is the {0} — not an account figure, and not comparable to a quota window.', CONTEXT_NOTE)}_`)
+  out.push(`_${t('This is the {0} — not an account figure, and not comparable to a quota window.', contextNote())}_`)
   const age = ageText(c.fetchedAt, ctx.now)
   if (age !== null) {
     out.push('')
@@ -1310,7 +1317,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       for (const s of scopeSources(cfg)) total += billableOf(ctx, from, to, s)
       // Always printed: "Σ 2.6M" alone is a number without a period, and today is the one
       // period a reader is most likely to assume wrongly.
-      const suffix = ` · ${cfg.summary.period}`
+      const suffix = ` · ${periodSuffix(cfg.summary.period)}`
       const click = clickCommand(cfg, null)
       return {
         id: 'tokenPace.tokens',
@@ -1337,7 +1344,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       const money = usdSum === 0 ? '–' : estimate(usd(usdSum))
       // Same rule as the tokens item: the period is always named, so "today" cannot be mistaken for
       // the range of the dashboard.
-      const suffix = ` · ${cfg.summary.period}`
+      const suffix = ` · ${periodSuffix(cfg.summary.period)}`
       const click = clickCommand(cfg, null)
       return {
         id: 'tokenPace.cost',

@@ -18,11 +18,17 @@
 
 import { t } from './i18n'
 import type { PromptCacheReading } from './quotaSources'
+import { ageMinutes } from './render'
+import { ageText } from './time'
 
 export interface PromptCacheLine {
   text: string
   /** The stated expiry lies in the past: the line reports the last reading, not a live state. */
   expired: boolean
+  /** How old the reading is, as the views print it; null when the payload named no time. */
+  ageText: string | null
+  /** False only when the reading is older than `staleAfterMinutes`; an unknown age claims nothing. */
+  fresh: boolean
 }
 
 /** The TTL classes the payload names, as the line spells them. */
@@ -56,8 +62,15 @@ export function promptCacheText(
   r: PromptCacheReading,
   now: number,
   formatTime: (ms: number) => string,
+  staleAfterMinutes: number,
 ): PromptCacheLine {
   const ratio = hitRatioText(r.hitRatio)
+  // The line describes the session as the status line saw it at `readAt`, so every spelling
+  // of it carries that time: a cache that was warm an hour ago is not a warm cache now, and
+  // the card's own age belongs to whichever source won the quota race, not to this reading.
+  // An unknown time is not a stale time — then the line claims nothing about its age.
+  const age = ageMinutes(r.readAt, now)
+  const seen = { ageText: ageText(r.readAt, now), fresh: !(age !== null && age > staleAfterMinutes) }
   const expires = r.expiresAt !== null && Number.isFinite(r.expiresAt) ? r.expiresAt : null
   // Past the stated expiry the "warm" of the payload is history: the line says when it
   // ended and that this is the last thing the status line reported, not a live state.
@@ -70,12 +83,14 @@ export function promptCacheText(
         ? t('prompt cache · expired at {0} (last reading) · hit ratio {1}', at, ratio)
         : t('prompt cache · expired at {0} (last reading)', at),
       expired: true,
+      ...seen,
     }
   }
   if (r.warm === false) {
     return {
       text: ratio ? t('prompt cache cold · hit ratio {0}', ratio) : t('prompt cache cold'),
       expired: false,
+      ...seen,
     }
   }
   // Warm, or a payload that did not say: every part of the line is printed, and every part
@@ -88,5 +103,6 @@ export function promptCacheText(
       ? t('prompt cache warm · expires in {0} ({1} TTL) · hit ratio {2}', countdown, ttl, hit)
       : t('prompt cache – · expires in {0} ({1} TTL) · hit ratio {2}', countdown, ttl, hit),
     expired: false,
+    ...seen,
   }
 }

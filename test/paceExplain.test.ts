@@ -210,9 +210,19 @@ test('no limit and no reading are explained as absences, never as a green pace',
   assert.deepEqual(nan.lines, ['The reading carries no usable percentage, so nothing is judged.'])
 })
 
-test('a limit the provider reports as reached is stated after the pace', () => {
+test('a limit the provider reports as reached is red, and no pace rule is quoted for it', () => {
+  // The status bar paints the alarm for this state whatever the percentage says, so the
+  // popover names that colour rather than a green the pace decided on its own.
   const e = explain(40, THIRD, NO_BAND, { display: 'limitReached' })
-  assert.equal(e.lines[e.lines.length - 1], 'The provider reports this limit as reached.')
+  assert.equal(e.title, 'Why red')
+  assert.equal(e.lines[0], 'The provider reports this limit as reached.')
+  assert.equal(e.lines[1], 'Used 40 % of the window; 33 % of its time has passed → 7 % ahead of pace.')
+  // The pace decided nothing here, so the rule that names the colours is not printed.
+  assert.equal(e.lines.some((l) => /Yellow|Amber/.test(l)), false, JSON.stringify(e.lines))
+  // A full window that is also reported as reached keeps its reset time.
+  const full = explain(100, 2, NO_BAND, { display: 'limitReached' })
+  assert.equal(full.lines[0], 'The provider reports this limit as reached.')
+  assert.ok(full.lines[1].includes('exhausted until the reset at'), full.lines[1])
 })
 
 test('the first two lines are the facts and whatever decided the colour', () => {

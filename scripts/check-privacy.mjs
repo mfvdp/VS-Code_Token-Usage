@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Static privacy check: every http(s) literal that survives into the shipped bundles is
- * listed with its host and matched against an allow-list. The promise "no network access
+ * Static privacy check: every http(s) literal that survives into the shipped bundles *and the
+ * shipped string files* is listed with its host and matched against an allow-list. The
+ * promise "no network access
  * beyond the one consent-gated endpoint" is otherwise unverifiable — a price feed, a status
  * page or a CDN font would be a two-line change nobody notices in review.
  *
@@ -81,21 +82,40 @@ export function scanBundle(text, allow = DEFAULT_ALLOW) {
   return { urls, offenders: urls.filter((u) => !u.allowed) }
 }
 
+function pick(dir, re) {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir).filter((f) => re.test(f)).sort().map((f) => join(dir, f))
+}
+
+/**
+ * Every file the .vsix carries that can hold a URL literal. Code is only half of it: VS Code
+ * reads the l10n bundles and the manifest strings at runtime, so a host hidden in a
+ * translation ships just as surely as one in `dist/`. `l10n/parts/*.json` do not ship, but
+ * they are the input of merge-l10n.mjs, so a host is named in the file a translator edits.
+ * Keep in step with the `!` lines of .vscodeignore. Exported so the test can assert the list.
+ */
+export function filesToScan() {
+  return [
+    ...pick('dist', /\.js$/),
+    ...pick('l10n', /^bundle\.l10n\..+\.json$/),
+    ...pick(join('l10n', 'parts'), /\.json$/),
+    ...pick('.', /^package\.nls(\..+)?\.json$/),
+  ]
+}
+
 function main() {
-  const dir = 'dist'
-  if (!existsSync(dir)) {
+  if (!existsSync('dist')) {
     console.error('check-privacy: no dist/ — run `npm run build` first')
     process.exit(1)
   }
-  const files = readdirSync(dir).filter((f) => f.endsWith('.js')).sort()
-  if (files.length === 0) {
+  const files = filesToScan()
+  if (!files.some((f) => f.startsWith('dist'))) {
     console.error('check-privacy: no dist/*.js — run `npm run build` first')
     process.exit(1)
   }
 
   let offenders = 0
-  for (const file of files) {
-    const full = join(dir, file)
+  for (const full of files) {
     const { urls } = scanBundle(readFileSync(full, 'utf8'))
     console.log(`${full}: ${urls.length} http(s) literal(s)`)
     for (const u of urls) {

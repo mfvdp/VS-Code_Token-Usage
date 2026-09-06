@@ -166,7 +166,9 @@ test('compatibility shims still serve the wave-2 callers', () => {
   assert.equal(renderBar(50, 8), '████▁▁▁▁')
   assert.equal(severity(99.6, 10), 'error')
   assert.equal(severity(50, 40), 'warn')
-  assert.equal(severity(42, 40), 'ok')
+  // The shim asks the one rule set, so it follows the shipped default band of 0: two points
+  // ahead of pace is yellow, exactly as every card that prints "2 % ahead of pace" is.
+  assert.equal(severity(42, 40), 'warn')
   assert.equal(severity(10, null), 'ok')
   const now = 1_000_000_000_000
   assert.equal(windowElapsed(now + 150 * 60_000, 300, now), 50)

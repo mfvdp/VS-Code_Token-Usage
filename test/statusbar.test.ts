@@ -302,8 +302,10 @@ test('the reset suffix follows resetFormat', () => {
   const cases: Array<[string, string]> = [
     ['none', 'CC 5h ██┃▁▁▁▁▁ 25%'],
     ['relative', 'CC 5h ██┃▁▁▁▁▁ 25% · resets 3h30m'],
-    ['absolute', 'CC 5h ██┃▁▁▁▁▁ 25% · resets 15:30'],
-    ['both', 'CC 5h ██┃▁▁▁▁▁ 25% · resets 15:30 (in 3h30m)'],
+    // A clock time takes a different preposition from a countdown, so it is a second
+    // message — one English message can only ever carry one translation.
+    ['absolute', 'CC 5h ██┃▁▁▁▁▁ 25% · resets at 15:30'],
+    ['both', 'CC 5h ██┃▁▁▁▁▁ 25% · resets at 15:30 (in 3h30m)'],
   ]
   for (const [fmt, text] of cases) {
     assert.equal(textsOf({ cfg: cfg({ 'tokenPace.resetFormat': fmt }) })[0], text, fmt)
@@ -1039,6 +1041,7 @@ const CACHE = {
   readAt: Math.floor(NOW / 1000) - 60,
 }
 const CACHE_ROW = '$(database) prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'
+  + ' · updated 1 min ago'
 
 test('the prompt-cache row is in the Claude tooltip only while the bridge delivers a reading', () => {
   const tip = buildItems(input({ promptCache: CACHE }))[0].tooltipMarkdown
@@ -1067,6 +1070,11 @@ test('the prompt-cache row keeps out of the compact tooltip and reaches the summ
   // Past the expiry the row reports the last reading; a part the payload left out is a dash.
   const gone = buildItems(input({ promptCache: CACHE, now: NOW + 300_000 }))[0].tooltipMarkdown
   assert.ok(gone.includes('$(database) prompt cache · expired at 12:03 (last reading) · hit ratio 82 %'), gone)
+  // The age of the reading travels with every spelling of the line, and a reading older than
+  // tokenPace.staleAfterMinutes is marked: the freshness row below belongs to the quota
+  // state, which may come from a much newer source.
+  const old = buildItems(input({ promptCache: { ...CACHE, readAt: Math.floor(NOW / 1000) - 3600 } }))[0].tooltipMarkdown
+  assert.ok(old.includes('· updated 1 h ago · $(warning) **stale**'), old)
   const bare = buildItems(input({ promptCache: { ...CACHE, ttl: null, hitRatio: null } }))[0].tooltipMarkdown
   assert.ok(bare.includes('prompt cache warm · expires in 3 m 40 s (– TTL) · hit ratio –'), bare)
 })

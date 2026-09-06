@@ -19,6 +19,7 @@ import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
+import { t } from './i18n'
 
 export interface ClaudeCredentials {
   accessToken: string
@@ -180,10 +181,10 @@ export async function loadCredentials(
   if (expired) {
     return {
       kind: 'tokenExpired',
-      error: 'Access token expired — use Claude Code once and the credentials renew themselves',
+      error: t('Access token expired — use Claude Code once and the credentials renew themselves'),
     }
   }
-  return { kind: 'noToken', error: `No Claude Code credentials at ${file}` }
+  return { kind: 'noToken', error: t('No Claude Code credentials at {0}', file) }
 }
 
 export function isCredentialsError(v: ClaudeCredentials | CredentialsError): v is CredentialsError {

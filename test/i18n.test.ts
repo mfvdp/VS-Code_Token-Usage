@@ -298,5 +298,11 @@ test('every German entry keeps the placeholders of its key, is German, and ends 
     if (key.split(/\s+/).length >= 6) assert.notEqual(value, key, `still English: ${JSON.stringify(key)}`)
     // The formal register: no informal address anywhere in the bundle.
     assert.doesNotMatch(value, /\b(du|dich|dir|dein|deine|deinen|deinem|deiner)\b/i, `informal address in ${JSON.stringify(value)}`)
+    // A markdown header row is pasted above a hard-coded separator row: one pipe more or less
+    // and the table stops being a table in that language only.
+    if (key.startsWith('| ')) {
+      assert.equal((value.match(/\|/g) || []).length, (key.match(/\|/g) || []).length,
+        `pipe count differs for ${JSON.stringify(key)}`)
+    }
   }
 })

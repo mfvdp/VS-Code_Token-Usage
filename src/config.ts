@@ -18,7 +18,7 @@
  */
 
 /**
- * The two imports this file makes.
+ * The three imports this file makes.
  *
  * `budget.ts` owns the shape of a budget *and* the rules that make one usable, and those
  * rules are the sanitising rules — a second copy here is exactly the drift the CONFIG_KEYS
@@ -30,9 +30,15 @@
  * in the file whose whole job is to have one rule per setting. It reaches this module's
  * dependencies (fs, os, path via the quota readers) but not `vscode`, and it does not import
  * this file either, so `sanitize` stays runnable without an extension host.
+ *
+ * `i18n` is the localisation seam — no vscode, no fs, no clock, and it imports nothing at
+ * all. The two words this file spells out for a reader (the plan fragment and the context
+ * note) are shown by four views each; a copy of either one beside a view is a copy that
+ * drifts.
  */
 import { SOURCES } from './adapters'
 import { BudgetSpec, sanitizeBudgets } from './budget'
+import { t } from './i18n'
 
 export type { BudgetSpec }
 
@@ -726,8 +732,13 @@ export function affects(e: ConfigurationChangeLike, keys: string[]): boolean {
  *
  * It describes one Claude Code conversation as the status line reported it: not the account,
  * not comparable to a quota window, and not something Token Pace could count for itself.
+ *
+ * A function, not a constant: the translation bundle arrives at activation, so a sentence
+ * built at module load would stay English for the rest of the session.
  */
-export const CONTEXT_NOTE = 'current session, via the status line'
+export function contextNote(): string {
+  return t('current session, via the status line')
+}
 
 /** Where a plan name came from. A configured one is always labelled as such where it prints. */
 export type PlanSource = 'provider' | 'configured'
@@ -755,10 +766,19 @@ export function planNameOf(
   return configured ? { name: configured, from: 'configured' } : null
 }
 
-/** `plan Max 20x` or `plan Max 20x (as configured)`; null when no name is known. */
+/**
+ * `plan Max 20x` or `plan Max 20x (as configured)`; null when no name is known.
+ *
+ * Through the seam, and with the same two keys the status-bar tooltip uses: the card, the
+ * Quick Pick, the markdown report and the clipboard export all print this fragment, and a
+ * German page that says "plan max20" between two German words is the card speaking with two
+ * voices. Called at render time, so the bundle is already in place.
+ */
 export function planText(plan: { name: string; from: PlanSource } | null): string | null {
   if (plan === null) return null
-  return plan.from === 'configured' ? `plan ${plan.name} (as configured)` : `plan ${plan.name}`
+  return plan.from === 'configured'
+    ? t('plan {0} (as configured)', plan.name)
+    : t('plan {0}', plan.name)
 }
 
 export function readTimeConfig(cfg: Config): TimeConfig {

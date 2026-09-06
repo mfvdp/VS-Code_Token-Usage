@@ -139,6 +139,15 @@ between `webview`, `quickPick` and `markdown`. **Show Usage (Quick Pick)** is a 
 list; **Show Usage as Text** opens a read-only markdown document. All three read the same view
 model, so the numbers cannot drift apart, and a test counts the rows of one against the other.
 
+**Language.** With VS Code's display language set to German — the *German Language Pack*, or
+`--locale=de` — the extension is German: the status bar and its tooltip, the dashboard, the
+Quick Pick, the markdown report, the settings descriptions and every dialog, with dates and
+numbers formatted for that language (`2,8M`, `1.234.567`). English is the source text, so an
+untranslated string falls back to English rather than going blank, and every other display
+language gets English. Three things stay English on purpose, because they are pasted into
+issues and have to be readable by a maintainer: the debug log, the diagnostics report, and the
+CSV and JSON exports.
+
 **Accessibility.** Bars are `role="progressbar"` with `aria-valuenow` and a spoken
 `aria-valuetext`; sortable headers carry `aria-sort`; toggles carry `aria-pressed`; chart
 columns are focusable buttons. The webview loads no external resource of any kind — its CSP

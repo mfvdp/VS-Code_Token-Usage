@@ -94,6 +94,13 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private layout?: string
   /** An unparsable message is logged once — a loop of them would be its own denial of service. */
   private warned = false
+  /**
+   * Size of the page the last resolved view was given; 0 until one resolves. Only the
+   * extension API reads it (see `TokenPaceApi.dashboardHtmlLength`): revealing the view is
+   * not the same as resolving it, and a provider that throws is swallowed by the workbench,
+   * so the smoke test needs something the page itself sets.
+   */
+  private htmlLength = 0
 
   constructor(
     private readonly onMessage: (m: WebviewMessage) => void,
@@ -106,7 +113,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     this.sent.clear()
     this.layout = undefined
     view.webview.options = { enableScripts: true, localResourceRoots: [] }
-    view.webview.html = this.html()
+    const html = this.html()
+    view.webview.html = html
+    this.htmlLength = html.length
     view.webview.onDidReceiveMessage((raw: unknown) => {
       const m = parseWebviewMessage(raw)
       if (!m) {
@@ -132,6 +141,11 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       this.layout = undefined
     })
     this.flush()
+  }
+
+  /** How long the page of the last resolved view is; 0 while no view has resolved. */
+  renderedHtmlLength(): number {
+    return this.htmlLength
   }
 
   update(vm: ViewModel): void {
@@ -670,7 +684,7 @@ ul { margin: 6px 0; padding-left: 18px; }
  * through the virtual module `webview:script` — so the compiler sees every line of it, which
  * it never did while this was a template string.
  *
- * The three consts in front of it are what a browser bundle cannot reach: the provider
+ * The four consts in front of it are what a browser bundle cannot reach: the provider
  * registry is Node code (fs, os, path), and so is the localisation seam. They are written at
  * the top of the very same <script>, where the module below reads them out of its own scope;
  * src/webview/globals.d.ts declares them for the compiler. A function rather than a const,
@@ -685,6 +699,8 @@ const SRC_TITLE = ${JSON.stringify(SOURCE_TITLE)};
 const SRC_IDS = ${JSON.stringify(SOURCES)};
 /** Every string the module below shows, keyed by its English text — see webviewWords(). */
 const L10N = ${webviewDictionary()};
+/** The tag the host's Intl formatters use, so the page's own numbers read like the model's. */
+const LOCALE = ${JSON.stringify(locale())};
 ${script}`
 }
 
@@ -710,9 +726,10 @@ function webviewDictionary(): string {
  * dictionary test in test/dashboard.test.ts exists to catch.
  *
  * Two rules for the values. They are markup, not text: a translation with `<`, `>`, `&` or a
- * double quote in it would land in an attribute or a tag half-escaped, and the same test
- * refuses one. And a string the view model already delivers — every label, explanation and
- * caption the model builds — is translated there, never a second time here.
+ * double quote in it would land in an attribute or a tag half-escaped, and
+ * test/dashboard.test.ts refuses one, in the English dictionary and in every shipped bundle.
+ * And a string the view model already delivers — every label, explanation and caption the
+ * model builds — is translated there, never a second time here.
  */
 function webviewWords(): Record<string, string> {
   return {

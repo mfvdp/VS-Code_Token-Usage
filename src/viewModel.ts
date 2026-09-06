@@ -17,7 +17,7 @@ import { SOURCES, USAGE_PAGE } from './adapters'
 import { Aggregator, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
 import {
-  Config, CONTEXT_NOTE, DashboardSection, PlanSource, planNameOf, planText, readPaceConfig,
+  Config, contextNote, DashboardSection, PlanSource, planNameOf, planText, readPaceConfig,
   readTimeConfig,
 } from './config'
 import { digest } from './digest'
@@ -31,7 +31,7 @@ import {
 import { explainWindow, WindowExplain } from './paceExplain'
 import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
 import { promptCacheText } from './promptCache'
-import { ageMinutes, estimate, extraUsageText, full, percentOf, percentText } from './render'
+import { ageMinutes, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
 import { turnedOver } from './resetRule'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
@@ -50,7 +50,7 @@ import {
   formatTime, rangeFor, isDay, previousRange, relativeShort,
 } from './time'
 import {
-  Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaOrigin, QuotaSample,
+  Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
   QuotaState, QuotaWindow, Source, TOOL_NAME_CAP,
 } from './types'
 
@@ -380,7 +380,8 @@ export interface QuotaCard {
   problemAction: { label: string; command: string } | null
   ageText: string | null
   stale: boolean
-  origin: QuotaOrigin | null
+  /** Where the reading came from, in words ("cache file", "polled") — never the raw id. */
+  origin: string | null
   freshness: {
     lastCheck: string | null
     lastData: string | null
@@ -422,6 +423,10 @@ export interface PromptCacheCard {
   hitRatio: number | null
   /** Epoch seconds of the status-line payload the line was read from. */
   readAt: number | null
+  /** That time as the views print it, or null when the payload named none. */
+  ageText: string | null
+  /** False only when the reading is older than `staleAfterMinutes`; an unknown age claims nothing. */
+  fresh: boolean
   /** The stated expiry has passed: the line reports the last reading, not a live state. */
   expired: boolean
   /**
@@ -836,6 +841,13 @@ function stateTextOf(display: WindowDisplay, verdictText: string): string {
  * the stated time has passed. That second answer is already a whole sentence, so it keeps the
  * verb away from it — both for a `resetDue` window and for the minutes after a fresh reading
  * has caught up with a reset that just happened.
+ *
+ * The `reset` handed in here is always the relative countdown — the card, the Quick Pick and
+ * the markdown report carry the clock time in a column of their own — so this line is always
+ * "resets <duration>". The status bar, which does follow `tokenPace.resetFormat`, has a
+ * second message for the clock-time formats: a countdown and a time of day take different
+ * prepositions in most languages, and the seam keys a translation by its English message, so
+ * one message can only ever carry one of the two.
  */
 function resetLineOf(display: WindowDisplay, reset: string): string {
   const due = t('reset due')
@@ -957,7 +969,9 @@ function quotaCard(
     problemAction: q.ok ? null : (problemActions()[q.problemKind ?? 'unknown'] ?? null),
     ageText: ageText(q.fetchedAt, now),
     stale: age !== null && age > cfg.staleAfterMinutes,
-    origin: q.origin ?? null,
+    // The word for it, not the id: 'statusline' between two German fragments is the card
+    // speaking English mid-sentence, and nothing machine-reads this field.
+    origin: q.origin ? originName(q.origin) : null,
     freshness: {
       lastCheck: ageText(q.fetchedAt, now),
       lastData: newestSampleText(history, q.source, q.windows.map((w) => w.id), fp, now),
@@ -984,7 +998,7 @@ function quotaCard(
     localBlock: !q.ok || q.windows.length === 0 ? localBlock(ctx, q.source, now) : null,
     // Only the Claude card, and only from the bridge: Codex has no status line, and no
     // reading of it is invented for either provider.
-    promptCache: q.source === 'claude' ? promptCacheCard(input.promptCache, now, tcfg) : null,
+    promptCache: q.source === 'claude' ? promptCacheCard(input.promptCache, now, tcfg, cfg) : null,
   }
 }
 
@@ -999,18 +1013,21 @@ function promptCacheCard(
   reading: PromptCacheReading | null | undefined,
   now: number,
   tcfg: TimeConfig,
+  cfg: Config,
 ): PromptCacheCard | null {
   if (!reading) return null
-  const line = promptCacheText(reading, now, (ms) => formatTime(ms, tcfg))
+  const line = promptCacheText(reading, now, (ms) => formatTime(ms, tcfg), cfg.staleAfterMinutes)
   return {
     warm: reading.warm,
     ttl: reading.ttl,
     expiresAt: reading.expiresAt,
     hitRatio: reading.hitRatio,
     readAt: reading.readAt,
+    ageText: line.ageText,
+    fresh: line.fresh,
     expired: line.expired,
     text: line.text,
-    note: CONTEXT_NOTE,
+    note: contextNote(),
   }
 }
 
@@ -1073,7 +1090,7 @@ export function contextCard(
     // An unknown age is not a stale age: the mirror simply named no time, and marking that
     // as stale would put a warning on a reading nobody has shown to be old.
     fresh: !(age !== null && age > cfg.staleAfterMinutes),
-    note: CONTEXT_NOTE,
+    note: contextNote(),
   }
 }
 

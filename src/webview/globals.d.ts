@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The four names main.ts uses but does not declare.
+ * The five names main.ts uses but does not declare.
  *
  * `acquireVsCodeApi` is the webview host's own function, injected by VS Code before the page
- * runs. `SRC_TITLE` and `SRC_IDS` are the provider registry's two facts, and `L10N` is the
- * page's translated words; all three are written in front of this module by src/dashboard.ts,
- * because the registry and the localisation seam are Node code and cannot be part of a
- * browser bundle. All four are declared, never defined: nothing here reaches the built
- * script, so a wrong shape is a compile error and never a second copy of the truth.
+ * runs. `SRC_TITLE` and `SRC_IDS` are the provider registry's two facts, `L10N` is the page's
+ * translated words and `LOCALE` the language they are counted in; all four are written in
+ * front of this module by src/dashboard.ts, because the registry and the localisation seam
+ * are Node code and cannot be part of a browser bundle. All five are declared, never defined:
+ * nothing here reaches the built script, so a wrong shape is a compile error and never a
+ * second copy of the truth.
  */
 
 /** The VS Code webview API. Only `postMessage` is used, and only ever with our own messages. */
@@ -27,3 +28,6 @@ declare const SRC_IDS: readonly string[]
  * key that is missing falls back to itself, which is why an English build ships an empty one.
  */
 declare const L10N: Record<string, string>
+
+/** The BCP 47 tag src/i18n.ts hands the host's Intl formatters — the page formats with it too. */
+declare const LOCALE: string

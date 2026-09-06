@@ -473,7 +473,13 @@ function quotaCard(q: Payload): string {
     // ("measuring · window just reset") is not printed anywhere.
     const said = w.verdict && !w.verdict.measuring && typeof w.verdict.text === 'string'
       ? w.verdict.text : '';
-    const verdict = [said ? (w.level === 'ok' ? '' : '▲ ') + esc(said) : '', esc(state)]
+    // A window whose stated reset has passed is not being judged: the reading belongs to the
+    // window before it, which is why the bar below is neutral and its explanation is titled
+    // "Why grey". The verdict beside them is that same reading, so it wears neither the pace
+    // colour nor the warning arrow — a red "▲ exhausted" over a grey bar is the card
+    // contradicting its own explanation.
+    const judged = w.display !== 'resetDue';
+    const verdict = [said ? (judged && w.level !== 'ok' ? '▲ ' : '') + esc(said) : '', esc(state)]
       .filter(Boolean).join(' · ');
     // Why the bar wears its colour, on hover and on focus: the block is focusable and points
     // at its own explanation, the same way a key figure does. A payload without the field —
@@ -486,10 +492,14 @@ function quotaCard(q: Payload): string {
     h += '<div class="win"' + (ex ? ' tabindex="0" data-explain aria-describedby="' + esc(popId) + '"' : '')
       + '><div class="win-top"><span>' + esc(w.label)
       + (reset ? ' · ' + esc(reset) : '') + '</span>'
-      + (verdict ? '<span class="verdict ' + esc(w.level) + '">' + verdict + '</span>' : '')
+      + (verdict ? '<span class="verdict' + (judged ? ' ' + esc(w.level) : '') + '">'
+         + verdict + '</span>' : '')
       + '<b>' + esc(w.percentText) + '</b></div>'
-      + bar(w.percent, w.display === 'resetDue' ? 'neutral' : w.level, w.elapsed, end, w.aria,
-            w.display !== 'resetDue' && w.display !== 'unlimited');
+      // A limit the provider itself reports as reached is red wherever it is drawn — the
+      // status bar paints the alarm for it whatever the percentage says — so the bar here
+      // says the same rather than letting the pace decide a colour it did not decide.
+      + bar(w.percent, !judged ? 'neutral' : w.display === 'limitReached' ? 'error' : w.level,
+            w.elapsed, end, w.aria, judged && w.display !== 'unlimited');
     // A forecast that only repeats a word the card has already printed — in the verdict, in
     // the state beside it or in the reset line — is not a second fact. A "full" forecast on a
     // window that has just reset is dropped for a second reason: the reading it is built on
@@ -529,11 +539,18 @@ function quotaCard(q: Payload): string {
   // words are the view model's, dashes included, and the countdown in them is as of the
   // model's own clock — nothing here ticks on its own.
   if (q.promptCache && q.promptCache.text) {
-    h += '<div class="meta" title="' + esc(q.promptCache.note) + '">' + esc(q.promptCache.text) + '</div>';
+    // Its own age, like the context card's: the header above belongs to the source that won
+    // the quota race, which is not the mirror this line was read from. A payload without the
+    // fields — an older build — is marked neither fresh nor stale.
+    const aged = q.promptCache.fresh === false;
+    const seen = [q.promptCache.ageText ? tr('updated {0}', esc(q.promptCache.ageText)) : '',
+      aged ? '⚠ ' + tr('stale') : ''].filter(Boolean).join(' · ');
+    h += '<div class="meta' + (aged ? ' warn' : '') + '" title="'
+      + esc(q.promptCache.note) + '">' + esc(q.promptCache.text)
+      + (seen ? ' · ' + seen : '') + '</div>';
   }
-  // The card header already says how old the reading is; the full freshness row and the
-  // official page stay in the markdown view, where there is room for them, and the tooltip
-  // links the official page from the provider name.
+  // The full freshness row and the official page stay in the markdown view, where there is
+  // room for them, and the tooltip links the official page from the provider name.
   return h + '</div>';
 }
 
@@ -768,9 +785,13 @@ const PART_CLASS: Record<string, string> = {
 /** The three parts the cache chip puts aside; everything else is always drawn. */
 const CACHE_PARTS = ['cacheRead', 'cacheWrite5m', 'cacheWrite1h'];
 
-/** A round token count, the way every composition tooltip and caption prints one. */
+/**
+ * A round token count, the way every composition tooltip and caption prints one — in the
+ * page's own language, so a tooltip never states in "248,922" what the table beside it prints
+ * as "248,9K". This is render.ts's `full()`, unit for unit.
+ */
 function fullNum(n: number): string {
-  return Math.round(n).toLocaleString('en-US');
+  return Math.round(n).toLocaleString(LOCALE);
 }
 
 /** 'noCache' only when the view model says so; anything else is the full mix. */
@@ -1000,10 +1021,18 @@ function sChart(): string {
 
 function short(n: number): string {
   const a = Math.abs(n);
-  if (a >= 1e9) return (n / 1e9).toFixed(1) + 'G';
-  if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-  return String(Math.round(n * 100) / 100);
+  // One decimal, in the page's own decimal mark: an axis reading "12.5K" above a table
+  // reading "306,5K" is not two styles, it is two numbers. The digits are exactly what
+  // toFixed(1) gave, so the English page is unchanged.
+  const one = (x: number) => x.toLocaleString(LOCALE, {
+    minimumFractionDigits: 1, maximumFractionDigits: 1,
+  });
+  if (a >= 1e9) return one(n / 1e9) + 'G';
+  if (a >= 1e6) return one(n / 1e6) + 'M';
+  if (a >= 1e3) return one(n / 1e3) + 'K';
+  // Below a thousand the fraction is the reading — a requests or cost tick of 2.5 must not
+  // be rounded to 3 — so the same two decimals as before, only in the page's own mark.
+  return (Math.round(n * 100) / 100).toLocaleString(LOCALE, { maximumFractionDigits: 2 });
 }
 
 /**
@@ -1703,9 +1732,15 @@ function hidePop(): void {
  * Opens one card's explanation. Which side it hangs from is measured, not assumed: a card in
  * the right half of the grid would push a left-anchored popover off the page, and the panel
  * is anything from a 260 px sidebar to a full editor column.
+ *
+ * It is the block's own panel that opens; a sparkline inside the block has a popover of its
+ * own, and that one belongs to the hover.
  */
 function showPop(card: Element): void {
-  const pop = card.querySelector ? card.querySelector<HTMLElement>('.pop') : null;
+  // The block's own popover, never a descendant: a quota window with history carries the
+  // sparkline's hover label inside .sparkbox as well, it is written before the explanation,
+  // and a plain '.pop' lookup answers in tree order — so it would find the empty one.
+  const pop = card.querySelector ? card.querySelector<HTMLElement>(':scope > .pop') : null;
   if (!pop) return;
   hidePop();
   const box = card.getBoundingClientRect ? card.getBoundingClientRect() : null;

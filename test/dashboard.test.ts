@@ -17,7 +17,7 @@
  */
 
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
@@ -609,6 +609,24 @@ test('the dictionary stands in front of the module, is English without a bundle,
   }
 })
 
+test('no shipped bundle puts markup into one of the page\'s words', () => {
+  // The rule above is about the value a reader gets, and that comes from a bundle: the loop
+  // has just insisted every value is its own key, so on its own it can only ever re-read the
+  // English. The files a translator, a patch or a distribution edits are held to it here.
+  const dir = join(__dirname, '..', 'l10n')
+  const bundles = readdirSync(dir).filter((f) => /^bundle\.l10n\..+\.json$/.test(f))
+  assert.ok(bundles.length > 0, 'no l10n/bundle.l10n.<lang>.json to check')
+  for (const file of bundles) {
+    const bundle = JSON.parse(readFileSync(join(dir, file), 'utf8')) as Record<string, string>
+    for (const key of Object.keys(DICT)) {
+      const value = bundle[key]
+      if (typeof value !== 'string') continue
+      assert.equal(/[<>"&]/.test(value), false,
+        `${file}: markup character in the translation of ${JSON.stringify(key)}: ${JSON.stringify(value)}`)
+    }
+  }
+})
+
 /**
  * The page as it is built with a bundle in place. The seam is module state that every other
  * test here reads, so it is put back whatever happens.
@@ -667,6 +685,23 @@ test('a German bundle reaches the page, the script inside it and the language of
   // that is a figure rather than a word is a figure in every language.
   assert.ok(bar.indexOf('title="Rebuild from the transcripts and fetch the quota"') >= 0, bar)
   assert.ok(bar.indexOf('>7d</button>') >= 0, bar)
+
+  // The page's own numbers are counted in the page's own language. A chart axis in "2.8M"
+  // beside a table in "2,8M" is not two styles, it is two values.
+  assert.match(html, /\nconst LOCALE = "de";\n/)
+  ;(de as Record<string, unknown>).fixture = model({
+    chart: {
+      days: ['2026-09-05'], labels: ['09-05'],
+      series: [{ key: 'claude:claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', rank: 0, values: [2_800_000] }],
+      metric: 'usage', modelStyle: 'pattern', max: 2_800_000,
+      ticks: [700_000, 1_400_000, 2_100_000, 2_800_000], weekly: false, costLine: null,
+    },
+  })
+  const chart = String(nodeVm.runInContext('vm = fixture; sChart()', de))
+  assert.ok(chart.indexOf('2,8M') >= 0, chart)
+  assert.equal(chart.indexOf('2.8M'), -1, chart)
+  assert.equal(chart.indexOf('2,800,000'), -1, chart)
+  assert.ok(chart.indexOf('2.800.000') >= 0, chart)
 
   // And the English page every other test reads is untouched by all of this.
   assert.ok(render('sSummary()').indexOf('Not enough data for a summary yet.') >= 0)
@@ -835,6 +870,33 @@ test('the verdict stands in the header row between the label and the figure', ()
   assert.ok(row[0].includes('flex-wrap: wrap'), row[0])
   assert.equal(/nowrap|text-overflow|overflow: hidden/.test(row[0]), false, row[0])
   assert.match(STYLE, /\.verdict \{[^}]*overflow-wrap: anywhere/)
+})
+
+test('a window whose reset has passed is not judged in colour either', () => {
+  // The reading predates the reset — the bar is neutral and the explanation is titled "Why
+  // grey" — so the verdict beside them must not contradict both in red.
+  const h = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      display: 'resetDue', level: 'error', percent: 99.8, percentText: '100 %',
+      resetLine: 'reset due', stateText: '', verdict: { text: 'exhausted', level: 'error' },
+    })] })],
+  })
+  assert.ok(h.indexOf('<span class="verdict">exhausted</span>') >= 0, h)
+  assert.equal(h.indexOf('▲'), -1, h)
+  assert.ok(h.indexOf('<div class="fill neutral"') >= 0, h)
+})
+
+test('a limit the provider reports as reached wears the alarm colour, whatever the pace said', () => {
+  // The status bar paints the alarm for this state at any percentage; a green bar beside a
+  // red status-bar item is one window with two colours.
+  const h = render('sQuota()', {
+    quotas: [card({ windows: [win({
+      display: 'limitReached', level: 'ok', percent: 40, percentText: '40 %',
+      stateText: 'limit reached', verdict: { text: '20 % of the window still spare', level: 'ok' },
+    })] })],
+  })
+  assert.ok(h.indexOf('<div class="fill error"') >= 0, h)
+  assert.equal(h.indexOf('<div class="fill ok"'), -1, h)
 })
 
 test('a measuring window prints neither its verdict nor its forecast, and no sustainable rate', () => {
@@ -1942,6 +2004,43 @@ test('a quota window explains its colour in the same popover the key figures use
   assert.ok(sharp.indexOf('<div>a &lt; b &amp; &quot;c&quot;</div>') >= 0, sharp)
 })
 
+test('a window opens its own explanation, not the sparkline\'s hover label', () => {
+  // A window with history carries two popovers inside the same explained block: the
+  // sparkline's hover label, written first and empty until the pointer is on the spark, and
+  // the explanation, written last. A lookup for `.pop` alone finds the sparkline's — which is
+  // why the explanation is looked up as the block's own child.
+  const spark = slotted([
+    { i: 1, p: 10, level: 'ok', t: SLOT, r: null, label: 'Thu 3 Sep · 00:15 · 10 %' },
+    { i: 2, p: 40, level: 'warn', t: 2 * SLOT, r: null, label: 'Thu 3 Sep · 00:30 · 40 %' },
+  ])
+  const h = render('sQuota()', { quotas: [card({ windows: [explained({ spark })] })] })
+  const block = between(h, /<div class="win" tabindex="0" data-explain[^>]*>/, '<div class="legend">')
+  // The sparkline's label really is the first `.pop` in the block, and the explanation the
+  // second: the order this guards against.
+  const ids = block.split('<div class="pop"').slice(1)
+    .map((part) => (/^ role="tooltip" id="([^"]+)"/.exec(part) ?? [])[1] ?? '')
+  assert.deepEqual(ids, ['', 'pop-q-claude-session-300'], block)
+  // Only the explanation is a child of the block; the sparkline's label sits in .sparkbox.
+  assert.ok(block.indexOf('<div class="sparkbox">') < block.indexOf('<div class="pop" role="tooltip" id='), block)
+  // The node showPop picks, with the block's two popovers behind the two selectors it may
+  // use. The one it opens must be the explanation the block points at with aria-describedby.
+  const make = (id: string): { id: string; hidden: boolean; classList: { add: () => void; remove: () => void } } => ({
+    id, hidden: true, classList: { add: () => undefined, remove: () => undefined },
+  })
+  const sparkLabel = make('')
+  const explanation = make('pop-q-claude-session-300')
+  ;(ctx as Record<string, unknown>).probe = {
+    // A descendant lookup answers in document order; a child lookup skips the .sparkbox.
+    querySelector: (sel: string) => (sel.indexOf(':scope >') === 0 ? explanation : sparkLabel),
+    getBoundingClientRect: () => ({ left: 10, width: 100 }),
+  }
+  nodeVm.runInContext('window.innerWidth = 400; showPop(probe);', ctx)
+  assert.equal(nodeVm.runInContext('openPop.id', ctx), 'pop-q-claude-session-300')
+  assert.equal(explanation.hidden, false)
+  assert.equal(sparkLabel.hidden, true)
+  nodeVm.runInContext('hidePop();', ctx)
+})
+
 test('a window without an explanation gets neither the attributes nor an empty panel', () => {
   // A payload from a build that predates the field: nothing to show, so nothing to focus.
   const h = render('sQuota()', { quotas: [card({ windows: [win()] })] })
@@ -2067,6 +2166,26 @@ test('the prompt-cache line is the last line of the Claude card, and only with a
   })
   assert.ok(bare.indexOf('prompt cache – · expires in – (– TTL) · hit ratio –') >= 0, bare)
   assert.equal(/setInterval|setTimeout/.test(SCRIPT + SOURCE), false)
+})
+
+test('the prompt-cache line carries its own age, and an old reading is marked as one', () => {
+  // The header's age belongs to whichever source won the quota race; this line was read from
+  // the status-line mirror, so it says when *that* was.
+  const line = 'prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'
+  const old = render('sQuota()', {
+    quotas: [card({ promptCache: { text: line, note: 'n', expired: false, ageText: '3 d ago', fresh: false } })],
+  })
+  assert.ok(old.indexOf('<div class="meta warn" title="n">' + line + ' · updated 3 d ago · ⚠ stale</div>') >= 0, old)
+  const fresh = render('sQuota()', {
+    quotas: [card({ promptCache: { text: line, note: 'n', expired: false, ageText: '1 min ago', fresh: true } })],
+  })
+  assert.ok(fresh.indexOf('<div class="meta" title="n">' + line + ' · updated 1 min ago</div>') >= 0, fresh)
+  // A payload from a build without the fields is marked neither fresh nor stale.
+  const older = render('sQuota()', {
+    quotas: [card({ promptCache: { text: line, note: 'n', expired: false } })],
+  })
+  assert.ok(older.indexOf('<div class="meta" title="n">' + line + '</div>') >= 0, older)
+  assert.equal(older.indexOf('stale'), -1, older)
 })
 
 test('with no quota card at all the section says how to get one, and invents nothing', () => {

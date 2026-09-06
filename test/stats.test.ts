@@ -390,6 +390,31 @@ test('the model table sorts on the raw counts of the new columns', () => {
   assert.deepEqual(asc.slice(0, 2), ['big-thinker', 'big-writer'])
 })
 
+test('the hit-rate sort follows the share it was formatted from, not the digits in the cell', () => {
+  // Reading a percentage back out of its own cell means parsing the reader's digit grouping,
+  // and that grouping is not the same in every language. The row carries the share itself.
+  const buckets: Bucket[] = [
+    // 900_000 of 900_100 input read from the cache — the highest hit rate here.
+    { ...emptyBucket('claude', 'hot', false, 'standard', 'd', null, TODAY), input: 100, cacheRead: 900_000, output: 10, requests: 1, outputFinal: 1 },
+    // Half its input from the cache.
+    { ...emptyBucket('claude', 'warm', false, 'standard', 'd', null, TODAY), input: 1000, cacheRead: 1000, output: 10, requests: 1, outputFinal: 1 },
+    // No cache read at all, but input to divide by: a real 0 %.
+    { ...emptyBucket('claude', 'cold', false, 'standard', 'd', null, TODAY), input: 1000, output: 10, requests: 1, outputFinal: 1 },
+    // No input at all: no denominator, so the cell is a dash and the row sorts below zero.
+    { ...emptyBucket('claude', 'blank', false, 'standard', 'd', null, TODAY), output: 10, requests: 1, outputFinal: 1 },
+  ]
+  const ctx = ctxOf(fromBuckets(buckets), { sources: ['claude'] })
+  const order = (dir: 'asc' | 'desc'): string[] =>
+    modelTable(ctx, range('today'), { key: 'cacheHit', dir }, 0).rows.map((r) => r.model)
+  assert.deepEqual(order('desc'), ['hot', 'warm', 'cold', 'blank'])
+  assert.deepEqual(order('asc'), ['blank', 'cold', 'warm', 'hot'])
+  const rows = modelTable(ctx, range('today'), { key: 'cacheHit', dir: 'desc' }, 0).rows
+  assert.equal(rows[3].cacheHit, '–')
+  assert.equal(rows[3].cacheHitN, -1)
+  assert.equal(rows[1].cacheHit, '50 %')
+  assert.equal(rows[1].cacheHitN, 0.5)
+})
+
 test('a model without a price is marked, not costed', () => {
   const row = modelTable(ctxOf(buildAgg()), range('30d'), { key: 'usage', dir: 'desc' }, 0).rows
     .find((r) => r.model === 'claude-experimental-x')

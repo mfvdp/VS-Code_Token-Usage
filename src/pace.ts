@@ -138,9 +138,10 @@ function pointsText(points: number): string {
  *
  * The colour follows the figure the views print: "ahead" is rounded to whole points
  * exactly as the "N % ahead of pace" sentence rounds it, so a card that says "0 % ahead"
- * is never yellow and one that says "1 % ahead" always is. The band, when someone set
- * one, is taken off before the rounding, so "6 % ahead" with a band of 5 is one point
- * over it and yellow, "5 % ahead" is not.
+ * is never yellow and one that says "1 % ahead" always is. The band, when someone set one,
+ * is taken off in those same whole percents: with a band of 5, "5 % ahead" is inside it and
+ * green, "6 % ahead" is one point over and yellow. A band typed with a decimal is rounded
+ * the same way, so two cards printing the same figure can never wear different colours.
  */
 export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceConfig): PaceVerdict {
   const { tolerancePoints, minElapsedPercent, levels } = effectivePace(cfg)
@@ -162,7 +163,7 @@ export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceCo
     return { level: 'ok', points, ratio, measuring: true, text: t('measuring · window just reset') }
   }
   const p = points as number
-  const ahead = Math.round(p - tolerancePoints)
+  const ahead = Math.round(p) - Math.round(tolerancePoints)
   let level: PaceLevel = 'ok'
   if (ahead >= 1) level = levels === 'graded' && ahead >= gradedThreshold(tolerancePoints) ? 'warn2' : 'warn'
   return { level, points: p, ratio, measuring: false, text: pointsText(p) }

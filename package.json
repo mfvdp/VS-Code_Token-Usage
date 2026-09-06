@@ -482,7 +482,7 @@
           "tokenPace.pace.tolerancePoints": {
             "type": "number",
             "order": 2,
-            "default": 5,
+            "default": 0,
             "minimum": 0,
             "maximum": 20,
             "markdownDescription": "%config.pace.tolerancePoints.description%"

@@ -117,32 +117,39 @@ number stays readable near the start and the end of a window where the ratio exp
 infinity. The unit is percentage points of the window, and it is written `%` — the same sign as
 the figure above it. The tooltip always names the difference, tolerance or not.
 
+The colour follows that difference at once: a window ahead of its clock is yellow, at or
+behind it green. Both are rounded to the whole percent the card prints, so a card that says
+`on pace` is never yellow and one that says `1 % ahead of pace` always is — the sentence and
+the colour never contradict each other.
+
 Two guards keep the verdict honest:
 
-* **Tolerance band.** A window has to run more than *n* points ahead of pace before it is
-  coloured at all — otherwise the bar would flip colour on rounding noise.
+* **Tolerance band** (`pace.tolerancePoints`, default **0**). Whoever wants a few points of
+  grace before the colour flips can ask for them. The band is taken off before the rounding:
+  with a band of 5, a card reading `5 % ahead of pace` stays green and `6 % ahead of pace` is
+  yellow. It applies with every sensitivity.
 * **Minimum elapsed.** Right after a reset `elapsed ≈ 0`, so the ratio explodes and the very
   first prompt would always look too fast. While that little of the window has run **and** at
-  most twice the tolerance of it is used (10 % at `normal`), the verdict is `measuring`: the
-  bar stays green and the views print no pace text at all. Above that share the reading is far
-  too large to be an artefact of the short clock — 60 % of a window spent in its first two
-  minutes is a fact, not a rounding error — so it is judged from the first minute, and bar,
-  verdict, status bar and sparkline colour together.
+  most 10 % of it is used, the verdict is `measuring`: the bar stays green and the views print
+  no pace text at all. Above that share the reading is far too large to be an artefact of the
+  short clock — 60 % of a window spent in its first two minutes is a fact, not a rounding
+  error — so it is judged from the first minute, and bar, verdict, status bar and sparkline
+  colour together.
 
-`tokenPace.pace.sensitivity` picks the pair:
+`tokenPace.pace.sensitivity` picks how long a window counts as just reset:
 
-| Preset | Tolerance | Minimum elapsed | ≈ ratio at mid-window |
-|---|---|---|---|
-| `relaxed` | 10 points | 5 % | 1.2 |
-| `normal` (default) | 5 points | 3 % | 1.12 |
-| `strict` | 2 points | 1 % | 1.05 |
-| `custom` | `pace.tolerancePoints` | `pace.minElapsedPercent` | – |
+| Preset | Minimum elapsed |
+|---|---|
+| `relaxed` | 5 % |
+| `normal` (default) | 3 % |
+| `strict` | 1 % |
+| `custom` | `pace.minElapsedPercent` |
 
 | Colour | Meaning |
 |---|---|
-| 🟢 green | usage at or below the elapsed share plus the tolerance — on pace |
-| 🟡 yellow (▲) | usage ahead of pace beyond the tolerance |
-| 🟡 amber (▲▲) | more than three times the tolerance ahead — only with `pace.levels: graded` |
+| 🟢 green | usage at or below the elapsed share (plus the band, if one is set) — on pace |
+| 🟡 yellow (▲) | usage ahead of pace, from the first whole percent |
+| 🟡 amber (▲▲) | 15 % or more ahead — three times the band, at least 15 — only with `pace.levels: graded` |
 | 🔴 red | the window is spent (≥ 99.5 %); the status bar entry also gets an alarm background |
 
 Exhaustion outranks everything: a full window is a fact, not a tendency. The verdict text is
@@ -271,7 +278,7 @@ Four contributed theme colours, overridable in `workbench.colorCustomizations`:
 ```jsonc
 "workbench.colorCustomizations": {
   "tokenPace.paceOk":    "#89D185",  // on pace, or spare left over       (dark default)
-  "tokenPace.paceWarn":  "#CCA700",  // ahead of pace beyond the tolerance
+  "tokenPace.paceWarn":  "#CCA700",  // ahead of pace (beyond the band, if one is set)
   "tokenPace.paceAhead": "#D18616",  // second level, only with pace.levels: graded
   "tokenPace.stale":     "#8B8B8B"   // reading older than staleAfterMinutes
 }                                    // stale defaults to descriptionForeground
@@ -772,15 +779,23 @@ it the sparklines, the forecast line and the `history` section.
 * **Gaps are drawn across.** The sparkline covers seven days on a time-proportional axis, so a
   stretch without readings is exactly as wide as the time nobody measured, and the line runs
   straight from the last reading before it to the first one after; the number of such gaps in
-  the last 24 h is counted in the copied summary. The stroke into a reading the window turned
-  over before wears no pace colour: that stroke is the window turning over, not a pace anybody
-  kept. Every other stroke wears the pace colour of its later reading.
+  the last 24 h is counted in the copied summary. Where the window turned over and the value
+  fell, the line holds the old value in its old colour up to the moment the old window ended
+  — the reset the last reading before the turn announced, when it lies between the two
+  readings, otherwise the first reading after the turn — and drops there vertically, in the
+  neutral provider colour, to the new reading's value: never to a 0 nobody measured, and never
+  as a slope across the hours VS Code was closed. A rise across a turn-over is an ordinary
+  stroke. Every other stroke wears the pace colour of its later reading. Hovering a reading,
+  or stepping through them with ← and → once the sparkline has the focus, names its day, time
+  and percentage — and `reset` when the window turned over before it.
 * **Cycles.** A cycle ends when the window turned over: the provider announces a different
-  reset time, or the percentage falls by five points or more without one. Reset times within
-  half a minute of each other are the same reset — Claude Code's usage cache writes the time
-  with sub-second jitter — and the reset time of an idle rolling window, which merely rides
-  along with the clock, has not moved either. A rise too steep to come from usage is treated as
-  the limit being re-based: the cycle continues, but the rate fit restarts.
+  reset time, the percentage falls by five points or more without one, or the reset time it
+  announced has passed and the percentage fell after it — how a pinned Codex window that never
+  reached five points ends. Reset times within half a minute of each other are the same reset
+  — Claude Code's usage cache writes the time with sub-second jitter — and the reset time of
+  an idle rolling window, which merely rides along with the clock, has not moved either. A
+  rise too steep to come from usage is treated as the limit being re-based: the cycle
+  continues, but the rate fit restarts.
 
 ## Budgets
 
@@ -1099,10 +1114,10 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `pace.sensitivity` | `normal` | `relaxed`, `normal`, `strict` or `custom` — see the preset table above |
-| `pace.tolerancePoints` | `5` | Only with `sensitivity: custom`. Dead band in percentage points (0–20) |
+| `pace.sensitivity` | `normal` | `relaxed`, `normal`, `strict` or `custom` — how long a window counts as just reset, see the preset table above |
+| `pace.tolerancePoints` | `0` | Band in percentage points a window may run ahead of its clock before it is coloured (0–20); applies with every sensitivity |
 | `pace.minElapsedPercent` | `3` | Only with `sensitivity: custom`. How much of a window must have elapsed before a small reading is judged (0–20) |
-| `pace.levels` | `binary` | `binary` or `graded` (a second warning level beyond three times the tolerance) |
+| `pace.levels` | `binary` | `binary` or `graded` (a second warning level from 15 % ahead — three times the band, at least 15) |
 
 ### Status bar
 

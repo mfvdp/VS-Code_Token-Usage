@@ -278,7 +278,7 @@ test('the sparkline grid is seven days of quarter hours ending in the slot that 
   // The history thins to the same grid, so one stored sample is one slot.
   assert.equal(THIN_RECENT_SLOT_MS, SPARK_SLOT_MS)
   assert.equal(THIN_RECENT_DAYS, SPARK_DAYS)
-  const vm = sparkOf([], NOW, 300, cfg.pace)
+  const vm = sparkOf([], NOW, 300, cfg.pace, tcfg)
   assert.equal(vm.slots, SPARK_SLOTS)
   assert.equal(vm.to - vm.from, SPARK_DAYS * DAY)
   assert.ok(vm.from <= NOW && NOW < vm.to, 'now lies inside the grid')
@@ -286,25 +286,25 @@ test('the sparkline grid is seven days of quarter hours ending in the slot that 
   assert.ok(NOW - vm.from >= (SPARK_SLOTS - 1) * SPARK_SLOT_MS, 'at most one partial slot is missing from the seven days')
   assert.deepEqual(vm.points, [])
   // An unaligned now still ends in the slot that contains it.
-  const odd = sparkOf([sample(NOW + 7 * MIN, 10)], NOW + 7 * MIN, 300, cfg.pace)
+  const odd = sparkOf([sample(NOW + 7 * MIN, 10)], NOW + 7 * MIN, 300, cfg.pace, tcfg)
   assert.equal(odd.points[0].i, SPARK_SLOTS - 1)
   assert.ok(odd.from <= NOW + 7 * MIN - (SPARK_SLOTS - 1) * SPARK_SLOT_MS)
 })
 
 test('samples land in the slot their time falls into; older than the grid they are dropped', () => {
-  const { from } = sparkOf([], NOW, 300, cfg.pace)
+  const { from } = sparkOf([], NOW, 300, cfg.pace, tcfg)
   const vm = sparkOf([
     sample(from - 1, 5),               // one millisecond before the grid: gone, not stretched
     sample(from, 10),                  // start of the grid (seven days less one slot before now)
     sample(NOW - 15 * MIN, 40),        // one slot before the slot of now
     sample(NOW, 42),                   // the slot of now is the last one
     sample(NOW - 3 * DAY, 30),
-  ], NOW, 300, cfg.pace)
+  ], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(vm.points.map((p) => [p.i, p.p]), [
     [0, 10], [SPARK_SLOTS - 1 - 3 * 96, 30], [SPARK_SLOTS - 2, 40], [SPARK_SLOTS - 1, 42],
   ])
   // Older than the whole window: nothing at all rather than a line from nowhere.
-  assert.deepEqual(sparkOf([sample(NOW - 40 * DAY, 90)], NOW, 300, cfg.pace).points, [])
+  assert.deepEqual(sparkOf([sample(NOW - 40 * DAY, 90)], NOW, 300, cfg.pace, tcfg).points, [])
   // Ascending, unique, inside the grid — the renderer relies on it.
   const ids = vm.points.map((p) => p.i)
   assert.deepEqual(ids, [...new Set(ids)].sort((a, b) => a - b))
@@ -313,29 +313,29 @@ test('samples land in the slot their time falls into; older than the grid they a
 
 test('the last reading of a slot wins', () => {
   const t0 = Math.floor(NOW / SPARK_SLOT_MS) * SPARK_SLOT_MS - SPARK_SLOT_MS
-  const vm = sparkOf([sample(t0 + 9 * MIN, 30), sample(t0 + MIN, 10), sample(t0 + 5 * MIN, 20)], NOW, 300, cfg.pace)
+  const vm = sparkOf([sample(t0 + 9 * MIN, 30), sample(t0 + MIN, 10), sample(t0 + 5 * MIN, 20)], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(vm.points.map((p) => [p.i, p.p]), [[SPARK_SLOTS - 2, 30]])
 })
 
 test('every point carries the pace level the bar would have shown at that time', () => {
   const r = NOW + 2 * 3_600_000
   const t = NOW - 30 * MIN
-  const vm = sparkOf([sample(t, 70, r), sample(NOW, 20, r)], NOW, 300, cfg.pace)
+  const vm = sparkOf([sample(t, 70, r), sample(NOW, 20, r)], NOW, 300, cfg.pace, tcfg)
   const expected = paceVerdict(70, windowElapsed(r, 300, t), cfg.pace)
   assert.equal(expected.level, 'warn', 'the fixture is ahead of pace, or the test proves nothing')
   assert.equal(vm.points[0].level, 'warn')
   assert.equal(vm.points[1].level, paceVerdict(20, windowElapsed(r, 300, NOW), cfg.pace).level)
   assert.equal(vm.points[1].level, 'ok')
   // No clock: no verdict — from the sample's side or from the window's.
-  assert.equal(sparkOf([sample(t, 70, null)], NOW, 300, cfg.pace).points[0].level, null)
-  assert.equal(sparkOf([sample(t, 70, r)], NOW, null, cfg.pace).points[0].level, null)
+  assert.equal(sparkOf([sample(t, 70, null)], NOW, 300, cfg.pace, tcfg).points[0].level, null)
+  assert.equal(sparkOf([sample(t, 70, r)], NOW, null, cfg.pace, tcfg).points[0].level, null)
   // Except nothing used, which is on pace by any clock — an idle window reports no reset
   // time, and a neutral stroke along the floor would read as a reset that never happened.
-  assert.equal(sparkOf([sample(t, 0, null)], NOW, 300, cfg.pace).points[0].level, 'ok')
-  assert.equal(sparkOf([sample(t, 0, r)], NOW, null, cfg.pace).points[0].level, 'ok')
+  assert.equal(sparkOf([sample(t, 0, null)], NOW, 300, cfg.pace, tcfg).points[0].level, 'ok')
+  assert.equal(sparkOf([sample(t, 0, r)], NOW, null, cfg.pace, tcfg).points[0].level, 'ok')
   // Exhausted is a fact, not a pace: 'error' with or without a clock, like the bar.
-  assert.equal(sparkOf([sample(t, 100, r)], NOW, 300, cfg.pace).points[0].level, 'error')
-  assert.equal(sparkOf([sample(t, 99.5, null)], NOW, null, cfg.pace).points[0].level, 'error')
+  assert.equal(sparkOf([sample(t, 100, r)], NOW, 300, cfg.pace, tcfg).points[0].level, 'error')
+  assert.equal(sparkOf([sample(t, 99.5, null)], NOW, null, cfg.pace, tcfg).points[0].level, 'error')
 })
 
 test('a young window heavy with usage is judged by every view, not left measuring', () => {
@@ -352,7 +352,7 @@ test('a young window heavy with usage is judged by every view, not left measurin
   assert.equal(w.level, 'warn')
   assert.equal(w.verdict.text, '60 % ahead of pace')
   assert.equal(w.aria.text, '5 h: 60% used, 60 % ahead of pace')
-  assert.equal(sparkOf([sample(NOW, 60, resetsAt)], NOW, 300, cfg.pace).points[0].level, 'warn')
+  assert.equal(sparkOf([sample(NOW, 60, resetsAt)], NOW, 300, cfg.pace, tcfg).points[0].level, 'warn')
   // A small bill in the same young window still gets the benefit of the doubt.
   const small = buildViewModel(makeInput({
     quotas: [state('claude', { windows: [win({ percent: 6, resetsAt, windowMinutes: 300 })] })],
@@ -360,7 +360,7 @@ test('a young window heavy with usage is judged by every view, not left measurin
   assert.equal(small.verdict.measuring, true)
   assert.equal(small.level, 'ok')
   assert.equal(small.aria.text, '5 h: 6% used')
-  assert.equal(sparkOf([sample(NOW, 6, resetsAt)], NOW, 300, cfg.pace).points[0].level, 'ok')
+  assert.equal(sparkOf([sample(NOW, 6, resetsAt)], NOW, 300, cfg.pace, tcfg).points[0].level, 'ok')
 })
 
 test('a reading the window turned over before is flagged so its stroke can stay neutral', () => {
@@ -370,43 +370,96 @@ test('a reading the window turned over before is flagged so its stroke can stay 
   const flags = (vm: SparkVm) => vm.points.map((p) => p.reset)
   const vm = sparkOf([
     sample(at(3), 80, r1), sample(at(2), 90, r1), sample(at(1), 5, r2), sample(at(0), 12, r2),
-  ], NOW, 300, cfg.pace)
+  ], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(vm), [undefined, undefined, true, undefined])
   // The first point of the whole line never carries it: there is no stroke leading into it.
-  assert.equal(sparkOf([sample(at(1), 5, r2)], NOW, 300, cfg.pace).points[0].reset, undefined)
-  // The same rule as the reset history: a moved reset time flags the reading whether the
-  // value fell or rose — a new window already in use when it was first read still turned
-  // over — and a fall of five points without one is a reset the provider did not announce.
-  const rose = sparkOf([sample(at(1), 2, r1), sample(at(0), 22, r2)], NOW, 300, cfg.pace)
-  assert.deepEqual(flags(rose), [undefined, true])
-  const fell = sparkOf([sample(at(1), 20, r1), sample(at(0), 4, r1)], NOW, 300, cfg.pace)
+  assert.equal(sparkOf([sample(at(1), 5, r2)], NOW, 300, cfg.pace, tcfg).points[0].reset, undefined)
+  // The reset history's rule, plus a fall: a moved reset time the value ROSE across — a new
+  // window already in use when it was first read — turned over, but there is no drop to
+  // draw, so its stroke stays an ordinary one in the pace colour. A fall of five points
+  // without a moved reset is a reset the provider did not announce.
+  const rose = sparkOf([sample(at(1), 2, r1), sample(at(0), 22, r2)], NOW, 300, cfg.pace, tcfg)
+  assert.deepEqual(flags(rose), [undefined, undefined])
+  const fell = sparkOf([sample(at(1), 20, r1), sample(at(0), 4, r1)], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(fell), [undefined, true])
-  const dipped = sparkOf([sample(at(1), 20, r1), sample(at(0), 16, r1)], NOW, 300, cfg.pace)
+  const dipped = sparkOf([sample(at(1), 20, r1), sample(at(0), 16, r1)], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(dipped), [undefined, undefined], 'a four-point dip is a correction')
   // A missing reset time says nothing: appearing or vanishing is not a turn of the window.
-  const appears = sparkOf([sample(at(1), 5, null), sample(at(0), 6, r2)], NOW, 300, cfg.pace)
+  const appears = sparkOf([sample(at(1), 5, null), sample(at(0), 6, r2)], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(appears), [undefined, undefined])
-  const vanishes = sparkOf([sample(at(1), 5, r2), sample(at(0), 6, null)], NOW, 300, cfg.pace)
+  const vanishes = sparkOf([sample(at(1), 5, r2), sample(at(0), 6, null)], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(vanishes), [undefined, undefined])
   // Claude Code's usage cache writes the reset time with sub-second jitter: not a reset. The
   // whole line was neutral once because every reading looked like one.
   const jitter = sparkOf([
     sample(at(3), 20, r1), sample(at(2), 25, r1 - 114), sample(at(1), 30, r1 + 18), sample(at(0), 35, r1 + RESET_JITTER_MS),
-  ], NOW, 300, cfg.pace)
+  ], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(jitter), [undefined, undefined, undefined, undefined])
   // An idle rolling window reports "now + window length": the reset time rides along with
   // the clock, and that is not a reset either.
   const riding = sparkOf([
     sample(at(2), 0, at(2) + 5 * 3_600_000), sample(at(1), 0, at(1) + 5 * 3_600_000 + 1000),
     sample(at(0), 0, at(0) + 5 * 3_600_000),
-  ], NOW, 300, cfg.pace)
+  ], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(riding), [undefined, undefined, undefined])
   // A stretch without readings changes nothing: the flag is about the two readings either
   // side of it, and the renderer draws the stroke across whatever lies between them.
-  const hole = sparkOf([sample(at(9), 20, r1), sample(at(2), 25, r1)], NOW, 300, cfg.pace)
+  const hole = sparkOf([sample(at(9), 20, r1), sample(at(2), 25, r1)], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(hole), [undefined, undefined])
-  const dark = sparkOf([sample(at(9), 20, r1), sample(at(2), 25, r2)], NOW, 300, cfg.pace)
+  const dark = sparkOf([sample(at(9), 20, r1), sample(at(2), 3, r2)], NOW, 300, cfg.pace, tcfg)
   assert.deepEqual(flags(dark), [undefined, true])
+})
+
+test('every point carries its time, its reset clock and a label with the day, the clock and the percentage', () => {
+  const r = NOW + 2 * 3_600_000
+  const t = NOW - 30 * MIN
+  const [pt] = sparkOf([sample(t, 37.4, r)], NOW, 300, cfg.pace, tcfg).points
+  assert.equal(pt.t, t)
+  assert.equal(pt.r, r)
+  // The fixture's clock: UTC, 24 hours; NOW is a Thursday noon. The percentage is rounded
+  // to the whole percent every other view prints.
+  assert.equal(pt.label, 'Thu 3 Sep · 11:30 · 37 %')
+  // The label follows the configured hour cycle and zone exactly as the reset times do.
+  assert.equal(sparkOf([sample(t, 37.4, r)], NOW, 300, cfg.pace, { ...tcfg, hourCycle: 'h12' }).points[0].label,
+    'Thu 3 Sep · 11:30 AM · 37 %')
+  assert.equal(sparkOf([sample(t, 37.4, r)], NOW, 300, cfg.pace, { ...tcfg, zone: 'Europe/Berlin' }).points[0].label,
+    'Thu 3 Sep · 13:30 · 37 %')
+  // A day boundary in the zone: 23:30 UTC is already Friday in Berlin.
+  const late = NOW + 11.5 * 3_600_000
+  assert.equal(sparkOf([sample(late, 5)], late, 300, cfg.pace, { ...tcfg, zone: 'Europe/Berlin' }).points[0].label,
+    'Fri 4 Sep · 01:30 · 5 %')
+  // No reset time stays null — never a 0, never a clock invented for the drop to stand at.
+  assert.equal(sparkOf([sample(t, 1)], NOW, 300, cfg.pace, tcfg).points[0].r, null)
+  assert.equal(sparkOf([sample(t, 1, NaN)], NOW, 300, cfg.pace, tcfg).points[0].r, null)
+  // A flagged reading says so.
+  const r2 = NOW + 6 * 3_600_000
+  const flagged = sparkOf([sample(NOW - 15 * MIN, 80, r), sample(NOW, 5, r2)], NOW, 300, cfg.pace, tcfg).points
+  assert.equal(flagged[1].reset, true)
+  assert.equal(flagged[1].label, 'Thu 3 Sep · 12:00 · 5 % · reset')
+  assert.equal(flagged[0].label, 'Thu 3 Sep · 11:45 · 80 %')
+})
+
+test('the line is described in words for the screen reader', () => {
+  const r = NOW + 2 * 3_600_000
+  assert.equal(sparkOf([], NOW, 300, cfg.pace, tcfg).aria, 'quota sparkline, 7 days, no readings')
+  assert.equal(sparkOf([sample(NOW, 5, r)], NOW, 300, cfg.pace, tcfg).aria,
+    'quota sparkline, 7 days, 1 reading, peak 5 %')
+  assert.equal(sparkOf([sample(NOW - 30 * MIN, 70.4, r), sample(NOW, 20, r)], NOW, 300, cfg.pace, tcfg).aria,
+    'quota sparkline, 7 days, 2 readings, peak 70 %')
+})
+
+test('a pinned Codex window that ends under five points is flagged where it dropped', () => {
+  // Fixed at 4 % for its five hours; when it ended the value fell to 0 and the reset clock
+  // rode along with the time again. resetMoved cannot see that, and the fall is under five
+  // points — the passed reset with the fall after it is the mark (resetRule.resetPassed).
+  const at = (slotsAgo: number) => NOW - slotsAgo * SPARK_SLOT_MS
+  const pinned = sample(at(24), 4, at(24) + 5 * 3_600_000)
+  const ended = sample(at(2), 0, at(2) + 5 * 3_600_000)
+  const vm = sparkOf([pinned, ended], NOW, 300, cfg.pace, tcfg)
+  assert.deepEqual(vm.points.map((p) => p.reset), [undefined, true])
+  assert.equal(vm.points[1].label.endsWith(' · reset'), true)
+  // The reset the drop stands at is carried on the point before it.
+  assert.equal(vm.points[0].r, at(24) + 5 * 3_600_000)
 })
 
 test('the quota card carries the sparkline and its own gap count', () => {

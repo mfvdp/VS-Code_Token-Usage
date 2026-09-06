@@ -16,7 +16,11 @@ export type Sensitivity = 'relaxed' | 'normal' | 'strict' | 'custom'
 
 export interface PaceConfig {
   sensitivity: Sensitivity
-  /** Dead band in percentage points around the clock, only used with sensitivity 'custom'. */
+  /**
+   * Band in percentage points a window may run ahead of its clock before it is coloured.
+   * 0 by default and applied with every sensitivity: a reading ahead of pace is yellow at
+   * once, and only someone who asks for a band gets one.
+   */
   tolerancePoints: number
   /**
    * Share of the window that must have passed before a small usage is judged. Heavy
@@ -27,22 +31,30 @@ export interface PaceConfig {
 }
 
 /**
- * Presets in percentage points, converted from the ratio thresholds the field
- * uses (ratio = (used ÷ limit) ÷ (elapsed ÷ window)): at the middle of a window
- * a ratio of 1.2 / 1.12 / 1.05 is 10 / 6 / 2.5 points ahead; the presets round that to 10 / 5 / 2 so the
- * point bands below are the same judgement expressed in a unit that stays
- * readable near the window edges, where a ratio explodes towards infinity.
+ * The presets decide only how long a window counts as "just reset": the share of it that
+ * must have run before a small reading is judged. They carried a tolerance band as well
+ * until 1.3, which kept a card reading "4 % ahead of pace" green — the number said one
+ * thing and the colour another. Now the band is one setting, 0 by default, whatever the
+ * sensitivity.
  */
-export const SENSITIVITY_PRESETS: Record<
-  Exclude<Sensitivity, 'custom'>, { tolerancePoints: number; minElapsedPercent: number }
-> = {
-  relaxed: { tolerancePoints: 10, minElapsedPercent: 5 },
-  normal: { tolerancePoints: 5, minElapsedPercent: 3 },
-  strict: { tolerancePoints: 2, minElapsedPercent: 1 },
+export const SENSITIVITY_PRESETS: Record<Exclude<Sensitivity, 'custom'>, { minElapsedPercent: number }> = {
+  relaxed: { minElapsedPercent: 5 },
+  normal: { minElapsedPercent: 3 },
+  strict: { minElapsedPercent: 1 },
 }
 
+/**
+ * "Measuring" ends here whatever the tolerance: a young window that has already spent this
+ * much is judged like any other. Ten points of a whole window inside its first minutes is
+ * a fact, not an artefact of a nearly-zero elapsed share.
+ */
+export const MEASURING_CAP_POINTS = 10
+
+/** The tolerance a graded second level is scaled from when the configured band is smaller. */
+const GRADED_BASE_POINTS = 5
+
 export const DEFAULT_PACE: PaceConfig = {
-  sensitivity: 'normal', tolerancePoints: 5, minElapsedPercent: 3, levels: 'binary',
+  sensitivity: 'normal', tolerancePoints: 0, minElapsedPercent: 3, levels: 'binary',
 }
 
 function positive(n: number, fallback: number): number {
@@ -53,15 +65,26 @@ export function effectivePace(
   cfg: PaceConfig,
 ): { tolerancePoints: number; minElapsedPercent: number; levels: 'binary' | 'graded' } {
   const levels: 'binary' | 'graded' = cfg.levels === 'graded' ? 'graded' : 'binary'
+  // The band applies with every sensitivity; a preset only picks the elapsed share.
+  const tolerancePoints = positive(cfg.tolerancePoints, DEFAULT_PACE.tolerancePoints)
   if (cfg.sensitivity === 'custom') {
     return {
-      tolerancePoints: positive(cfg.tolerancePoints, SENSITIVITY_PRESETS.normal.tolerancePoints),
+      tolerancePoints,
       minElapsedPercent: positive(cfg.minElapsedPercent, SENSITIVITY_PRESETS.normal.minElapsedPercent),
       levels,
     }
   }
   const p = SENSITIVITY_PRESETS[cfg.sensitivity] ?? SENSITIVITY_PRESETS.normal
-  return { tolerancePoints: p.tolerancePoints, minElapsedPercent: p.minElapsedPercent, levels }
+  return { tolerancePoints, minElapsedPercent: p.minElapsedPercent, levels }
+}
+
+/**
+ * Where the second level of `graded` starts, in points ahead beyond the band: three times
+ * the tolerance, and never under three times five — with the default band of 0, "▲▲" at 15
+ * points ahead rather than at the very first one.
+ */
+export function gradedThreshold(tolerancePoints: number): number {
+  return 3 * Math.max(positive(tolerancePoints, 0), GRADED_BASE_POINTS)
 }
 
 /**
@@ -106,11 +129,17 @@ function pointsText(points: number): string {
  * near zero, so the very first prompt would otherwise always look too fast.
  *
  * "Measuring" is doubt about the clock, not a blanket pardon: it holds only while
- * the window is young AND consumption is still small — at most twice the tolerance
- * of the whole window (10 % at 'normal'). Beyond that the gap is far too large to
- * be an artefact of a nearly-zero elapsed share — 60 % of a window spent in its
- * first minutes is a fact, not a rounding error — so the normal judgement applies
- * and the bar, the header, the status bar and the sparkline all colour together.
+ * the window is young AND consumption is still small — at most `MEASURING_CAP_POINTS`
+ * of the whole window. Beyond that the gap is far too large to be an artefact of a
+ * nearly-zero elapsed share — 60 % of a window spent in its first minutes is a fact,
+ * not a rounding error — so the normal judgement applies and the bar, the header, the
+ * status bar and the sparkline all colour together.
+ *
+ * The colour follows the figure the views print: "ahead" is rounded to whole points
+ * exactly as the "N % ahead of pace" sentence rounds it, so a card that says "0 % ahead"
+ * is never yellow and one that says "1 % ahead" always is. The band, when someone set
+ * one, is taken off before the rounding, so "6 % ahead" with a band of 5 is one point
+ * over it and yellow, "5 % ahead" is not.
  */
 export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceConfig): PaceVerdict {
   const { tolerancePoints, minElapsedPercent, levels } = effectivePace(cfg)
@@ -128,12 +157,13 @@ export function paceVerdict(percent: number, elapsed: number | null, cfg: PaceCo
   if (!hasClock) {
     return { level: 'ok', points: null, ratio: null, measuring: false, text: 'no clock for this window' }
   }
-  if ((elapsed as number) < minElapsedPercent && percent <= tolerancePoints * 2) {
+  if ((elapsed as number) < minElapsedPercent && percent <= MEASURING_CAP_POINTS) {
     return { level: 'ok', points, ratio, measuring: true, text: 'measuring · window just reset' }
   }
   const p = points as number
+  const ahead = Math.round(p - tolerancePoints)
   let level: PaceLevel = 'ok'
-  if (p > tolerancePoints) level = levels === 'graded' && p > tolerancePoints * 3 ? 'warn2' : 'warn'
+  if (ahead >= 1) level = levels === 'graded' && ahead >= gradedThreshold(tolerancePoints) ? 'warn2' : 'warn'
   return { level, points: p, ratio, measuring: false, text: pointsText(p) }
 }
 

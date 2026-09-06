@@ -591,7 +591,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
 
     pace: {
       sensitivity: pick(get('tokenPace.pace.sensitivity'), SENSITIVITIES, 'normal'),
-      tolerancePoints: num(get('tokenPace.pace.tolerancePoints'), 5, 0, 20),
+      tolerancePoints: num(get('tokenPace.pace.tolerancePoints'), 0, 0, 20),
       minElapsedPercent: num(get('tokenPace.pace.minElapsedPercent'), 3, 0, 20),
       levels: pick(get('tokenPace.pace.levels'), PACE_LEVELS, 'binary'),
     },

@@ -4,15 +4,17 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  effectivePace, PaceConfig, paceVerdict, SENSITIVITY_PRESETS, severityOf,
-  windowDisplay, windowElapsed,
+  DEFAULT_PACE, MEASURING_CAP_POINTS, PaceConfig, effectivePace, gradedThreshold, paceVerdict,
+  SENSITIVITY_PRESETS, severityOf, windowDisplay, windowElapsed,
 } from '../src/pace'
 import { QuotaWindow } from '../src/types'
 
 const normal: PaceConfig = {
-  sensitivity: 'normal', tolerancePoints: 5, minElapsedPercent: 3, levels: 'binary',
+  sensitivity: 'normal', tolerancePoints: 0, minElapsedPercent: 3, levels: 'binary',
 }
 const graded: PaceConfig = { ...normal, levels: 'graded' }
+/** Someone who asked for a band: five points of grace before the colour flips. */
+const banded: PaceConfig = { ...normal, tolerancePoints: 5 }
 
 function win(p: Partial<QuotaWindow>): QuotaWindow {
   return {
@@ -21,20 +23,32 @@ function win(p: Partial<QuotaWindow>): QuotaWindow {
   }
 }
 
-test('the three sensitivity presets are the documented point bands', () => {
-  assert.deepEqual(SENSITIVITY_PRESETS.relaxed, { tolerancePoints: 10, minElapsedPercent: 5 })
-  assert.deepEqual(SENSITIVITY_PRESETS.normal, { tolerancePoints: 5, minElapsedPercent: 3 })
-  assert.deepEqual(SENSITIVITY_PRESETS.strict, { tolerancePoints: 2, minElapsedPercent: 1 })
+test('the three sensitivity presets pick the elapsed share only; the band is one setting', () => {
+  assert.deepEqual(SENSITIVITY_PRESETS.relaxed, { minElapsedPercent: 5 })
+  assert.deepEqual(SENSITIVITY_PRESETS.normal, { minElapsedPercent: 3 })
+  assert.deepEqual(SENSITIVITY_PRESETS.strict, { minElapsedPercent: 1 })
+  // No band by default: a card that says "4 % ahead of pace" is yellow, not green.
+  assert.deepEqual(DEFAULT_PACE,
+    { sensitivity: 'normal', tolerancePoints: 0, minElapsedPercent: 3, levels: 'binary' })
+  assert.equal(MEASURING_CAP_POINTS, 10)
 })
 
-test('effectivePace: presets win over the raw numbers, custom frees them', () => {
-  assert.deepEqual(effectivePace({ ...normal, sensitivity: 'relaxed', tolerancePoints: 99 }),
-    { tolerancePoints: 10, minElapsedPercent: 5, levels: 'binary' })
+test('effectivePace: presets pick the elapsed share, the band applies with every one of them', () => {
+  assert.deepEqual(effectivePace({ ...normal, sensitivity: 'relaxed' }),
+    { tolerancePoints: 0, minElapsedPercent: 5, levels: 'binary' })
+  assert.deepEqual(effectivePace({ ...normal, sensitivity: 'strict' }),
+    { tolerancePoints: 0, minElapsedPercent: 1, levels: 'binary' })
+  // A band set beside a preset is honoured — it was custom-only once, and a band set with
+  // 'normal' silently did nothing.
+  assert.deepEqual(effectivePace({ ...normal, sensitivity: 'relaxed', tolerancePoints: 7 }),
+    { tolerancePoints: 7, minElapsedPercent: 5, levels: 'binary' })
   assert.deepEqual(effectivePace({ sensitivity: 'custom', tolerancePoints: 7, minElapsedPercent: 12, levels: 'graded' }),
     { tolerancePoints: 7, minElapsedPercent: 12, levels: 'graded' })
-  // Nonsense in the settings falls back to the normal preset instead of colouring randomly.
+  // Nonsense in the settings falls back to the defaults instead of colouring randomly.
   assert.deepEqual(effectivePace({ sensitivity: 'custom', tolerancePoints: NaN, minElapsedPercent: -3, levels: 'binary' }),
-    { tolerancePoints: 5, minElapsedPercent: 3, levels: 'binary' })
+    { tolerancePoints: 0, minElapsedPercent: 3, levels: 'binary' })
+  assert.deepEqual(effectivePace({ ...normal, tolerancePoints: -1 }),
+    { tolerancePoints: 0, minElapsedPercent: 3, levels: 'binary' })
 })
 
 test('windowElapsed needs both ends of the clock', () => {
@@ -48,19 +62,22 @@ test('windowElapsed needs both ends of the clock', () => {
   assert.equal(windowElapsed(now - 60 * 60_000, 300, now), 100)
 })
 
-test('paceVerdict: the tolerance band decides the colour, the number stays exact', () => {
+test('paceVerdict: ahead of pace is yellow at once, the number stays exact', () => {
   const v = paceVerdict(50, 40, normal)
   assert.equal(v.level, 'warn')
   assert.equal(v.points, 10)
   assert.equal(v.text, '10 % ahead of pace')
   assert.equal(v.measuring, false)
-  // Inside the band: no colour, but the figure is still reported honestly.
-  const inBand = paceVerdict(42, 40, normal)
-  assert.equal(inBand.level, 'ok')
-  assert.equal(inBand.text, '2 % ahead of pace')
+  // No band by default: the first whole point ahead colours the window, and the figure the
+  // card prints is the one the colour follows.
+  const two = paceVerdict(42, 40, normal)
+  assert.equal(two.level, 'warn')
+  assert.equal(two.text, '2 % ahead of pace')
   const one = paceVerdict(41, 40, normal)
+  assert.equal(one.level, 'warn')
   assert.equal(one.text, '1 % ahead of pace')
   const onPace = paceVerdict(40.2, 40, normal)
+  assert.equal(onPace.level, 'ok')
   assert.equal(onPace.text, 'on pace')
   const reserve = paceVerdict(30, 40, normal)
   assert.equal(reserve.level, 'ok')
@@ -69,10 +86,45 @@ test('paceVerdict: the tolerance band decides the colour, the number stays exact
   assert.equal(severityOf(reserve), 'ok')
 })
 
-test('graded adds a second warning level beyond three times the tolerance', () => {
+test('the colour follows the printed figure: "0 % ahead" is never yellow, "1 % ahead" always is', () => {
+  // 0.4 points ahead rounds to "on pace" and stays green …
+  const under = paceVerdict(40.4, 40, normal)
+  assert.equal(under.text, 'on pace')
+  assert.equal(under.level, 'ok')
+  // … 0.5 rounds to "1 % ahead of pace" and is yellow: the sentence and the colour never
+  // contradict each other.
+  const over = paceVerdict(40.5, 40, normal)
+  assert.equal(over.text, '1 % ahead of pace')
+  assert.equal(over.level, 'warn')
+  // A band is taken off before the rounding: 5.4 ahead with a band of 5 prints "5 % ahead"
+  // and stays green, 5.5 prints "6 % ahead" — one point over the band — and is yellow.
+  const inBand = paceVerdict(45.4, 40, banded)
+  assert.equal(inBand.level, 'ok')
+  assert.equal(inBand.text, '5 % ahead of pace')
+  const outBand = paceVerdict(45.5, 40, banded)
+  assert.equal(outBand.level, 'warn')
+  assert.equal(outBand.text, '6 % ahead of pace')
+  // The band applies beside a preset as well, not only with 'custom'.
+  assert.equal(paceVerdict(45.4, 40, { ...banded, sensitivity: 'strict' }).level, 'ok')
+  assert.equal(paceVerdict(45.5, 40, { ...banded, sensitivity: 'relaxed' }).level, 'warn')
+})
+
+test('graded adds a second warning level from 15 points ahead, or three times a larger band', () => {
+  assert.equal(gradedThreshold(0), 15)
+  assert.equal(gradedThreshold(5), 15)
+  assert.equal(gradedThreshold(7), 21)
+  assert.equal(gradedThreshold(NaN), 15)
+  assert.equal(paceVerdict(55, 40, graded).level, 'warn2')
   assert.equal(paceVerdict(60, 40, graded).level, 'warn2')
   assert.equal(paceVerdict(60, 40, normal).level, 'warn')
-  assert.equal(paceVerdict(55, 40, graded).level, 'warn')
+  // The same rounding as the first level: 14.4 ahead prints "14 %" and stays one level, 14.5
+  // prints "15 %" and is the second.
+  assert.equal(paceVerdict(54.4, 40, graded).level, 'warn')
+  assert.equal(paceVerdict(54.5, 40, graded).level, 'warn2')
+  // With a band of 7 the second level starts 21 points beyond the band.
+  const wide: PaceConfig = { ...graded, tolerancePoints: 7 }
+  assert.equal(paceVerdict(67, 40, wide).level, 'warn')
+  assert.equal(paceVerdict(68, 40, wide).level, 'warn2')
 })
 
 test('minElapsedPercent suppresses the alarm right after a reset', () => {
@@ -86,7 +138,7 @@ test('minElapsedPercent suppresses the alarm right after a reset', () => {
   assert.equal(paceVerdict(10, 1, { ...normal, sensitivity: 'custom', minElapsedPercent: 0 }).measuring, false)
 })
 
-test('measuring needs a young window AND a small bill', () => {
+test('measuring needs a young window AND a small bill — the cap is ten points, whatever the band', () => {
   // The doubt is about the clock, not about the reading: 60 % of a window spent in its first
   // minutes is a fact no elapsed share can explain away, so it is judged like any other.
   const heavy = paceVerdict(60, 1, normal)
@@ -94,19 +146,21 @@ test('measuring needs a young window AND a small bill', () => {
   assert.equal(heavy.level, 'warn')
   assert.equal(heavy.text, '59 % ahead of pace')
   assert.equal(paceVerdict(60, 1, graded).level, 'warn2')
-  // The ceiling is twice the tolerance — 10 % at 'normal' — and inclusive.
+  // The ceiling is MEASURING_CAP_POINTS, inclusive.
   assert.equal(paceVerdict(10, 1, normal).measuring, true)
   assert.equal(paceVerdict(10.5, 1, normal).measuring, false)
   assert.equal(paceVerdict(10.5, 1, normal).level, 'warn')
-  // It moves with the tolerance: 'strict' stops trusting a young clock earlier than 'relaxed'.
-  assert.equal(paceVerdict(4, 0.5, { ...normal, sensitivity: 'strict' }).measuring, true)
-  assert.equal(paceVerdict(5, 0.5, { ...normal, sensitivity: 'strict' }).measuring, false)
-  assert.equal(paceVerdict(20, 4, { ...normal, sensitivity: 'relaxed' }).measuring, true)
-  assert.equal(paceVerdict(21, 4, { ...normal, sensitivity: 'relaxed' }).measuring, false)
-  // A custom tolerance carries its own ceiling.
+  // Neither the preset nor a band moves the cap: the presets differ in the elapsed share only.
+  assert.equal(paceVerdict(10, 0.5, { ...normal, sensitivity: 'strict' }).measuring, true)
+  assert.equal(paceVerdict(10.5, 0.5, { ...normal, sensitivity: 'strict' }).measuring, false)
+  assert.equal(paceVerdict(10, 4, { ...normal, sensitivity: 'relaxed' }).measuring, true)
+  assert.equal(paceVerdict(11, 4, { ...normal, sensitivity: 'relaxed' }).measuring, false)
   const custom: PaceConfig = { sensitivity: 'custom', tolerancePoints: 20, minElapsedPercent: 5, levels: 'binary' }
-  assert.equal(paceVerdict(40, 1, custom).measuring, true)
-  assert.equal(paceVerdict(41, 1, custom).measuring, false)
+  assert.equal(paceVerdict(10, 1, custom).measuring, true)
+  assert.equal(paceVerdict(11, 1, custom).measuring, false)
+  // Past the cap the band still has its say in the judgement itself.
+  assert.equal(paceVerdict(11, 1, custom).level, 'ok')
+  assert.equal(paceVerdict(40, 1, custom).level, 'warn')
 })
 
 test('exhaustion outranks everything, including measuring', () => {

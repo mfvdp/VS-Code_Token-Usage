@@ -36,10 +36,29 @@ export function resetMoved(prev: QuotaSample, s: QuotaSample): boolean {
 }
 
 /**
- * True when the window turned over between the two readings: a moved reset, or a fall of
+ * True when the reset the earlier reading announced came and went between the two readings,
+ * the later one announces another, and the value fell: the window ended on its own clock.
+ *
+ * This is how a pinned rolling window (Codex: a request pins the window, five hours later it
+ * ends) that never reached `CYCLE_DROP_POINTS` turns over. Its reset time then rides along
+ * with the clock again — moved by exactly the time between the readings, which `resetMoved`
+ * rightly does not count — and the fall is too small for the drop rule; without this the
+ * window ended and nothing recorded it. An idle window riding along at 0 % is not caught:
+ * its value never falls. Nor is a reading that still announces the passed reset: that is a
+ * stale view of the old window, and a fall inside it is rounding, not a reset.
+ */
+export function resetPassed(prev: QuotaSample, s: QuotaSample): boolean {
+  if (prev.r === null || s.r === null) return false
+  if (!(prev.t < prev.r && prev.r <= s.t)) return false
+  if (Math.abs(s.r - prev.r) <= RESET_JITTER_MS) return false
+  return s.p < prev.p
+}
+
+/**
+ * True when the window turned over between the two readings: a moved reset, a fall of
  * `CYCLE_DROP_POINTS` without one — providers do not always publish the reset, and a fall is
- * the only other honest evidence.
+ * the only other honest evidence — or a reset that passed with the value falling after it.
  */
 export function turnedOver(prev: QuotaSample, s: QuotaSample): boolean {
-  return resetMoved(prev, s) || prev.p - s.p >= CYCLE_DROP_POINTS
+  return resetMoved(prev, s) || prev.p - s.p >= CYCLE_DROP_POINTS || resetPassed(prev, s)
 }

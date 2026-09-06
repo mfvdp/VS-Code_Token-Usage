@@ -1162,9 +1162,12 @@ test('a lone sparkline sample is a point, not a stretched dash', () => {
   assert.match(STYLE, /\.spark path\.pt \{[^}]*vector-effect: non-scaling-stroke/)
 })
 
+/** One 15-minute slot of the grid, in ms. */
+const SLOT = 15 * 60_000
+
 /** A seven-day spark in the view model's slotted shape. */
 function slotted(points: Record<string, unknown>[]): Record<string, unknown> {
-  return { slots: 672, from: 0, to: 672 * 15 * 60_000, points }
+  return { slots: 672, from: 0, to: 672 * SLOT, points }
 }
 
 function sparkOf(s: Record<string, unknown>): string {
@@ -1174,9 +1177,12 @@ function sparkOf(s: Record<string, unknown>): string {
 test('the quota sparkline is time-proportional: one unit per slot, holes as wide as their time', () => {
   // Two adjacent slots are one polyline, x is the slot index, y is the inverted percentage.
   const two = sparkOf(slotted([{ i: 10, p: 20, level: 'ok' }, { i: 11, p: 30, level: 'ok' }]))
-  assert.match(two, /^<svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" aria-hidden="true">/)
+  assert.match(two, /^<div class="sparkbox"><svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" role="img" tabindex="0" aria-label="quota sparkline, 7 days">/)
   assert.equal(two.split('<polyline').length - 1, 1, two)
   assert.match(two, /<polyline class="ok" points="10,80.0 11,70.0"\/>/)
+  // With its time a reading sits where it was taken, not at the start of its slot.
+  const exact = sparkOf(slotted([{ i: 10, p: 20, level: 'ok', t: 10.5 * SLOT }, { i: 11, p: 30, level: 'ok', t: 11.25 * SLOT }]))
+  assert.match(exact, /<polyline class="ok" points="10.5,80.0 11.25,70.0"\/>/)
   // Slot 0 sits on the left edge, the last slot at slots − 1 — and the week between them is
   // one stroke, drawn across whatever nobody measured.
   const ends = sparkOf(slotted([{ i: 0, p: 0, level: null }, { i: 671, p: 100, level: 'error' }]))
@@ -1210,24 +1216,27 @@ test('a spark run splits where the pace level changes, each segment wearing the 
   }
 })
 
-test('the stroke into the first reading after a reset wears no pace colour', () => {
-  // The window turned over between the two readings: that fall is not a pace anybody kept,
-  // so the stroke stands alone in the neutral provider colour and the coloured run starts
-  // again at the new window's first reading.
+test('the stroke into the first reading after a reset is a vertical drop without a pace colour', () => {
+  // The window turned over between the two readings: that fall is not a pace anybody kept.
+  // The line holds the old value in the old colour up to the drop, the drop itself stands
+  // alone in the neutral provider colour, and the coloured run starts again at the new
+  // window's first reading. Without a reset time between the readings the drop stands at
+  // the new reading, so there is no tail.
   const h = sparkOf(slotted([
     { i: 0, p: 80, level: 'warn' }, { i: 1, p: 90, level: 'warn' },
     { i: 2, p: 5, level: 'ok', reset: true }, { i: 3, p: 12, level: 'ok' },
     { i: 4, p: 20, level: 'ok' },
   ]))
   assert.equal(h.split('<polyline').length - 1, 3, h)
-  assert.match(h, /<polyline class="warn" points="0,20.0 1,10.0"\/><polyline points="1,10.0 2,95.0"\/><polyline class="ok" points="2,95.0 3,88.0 4,80.0"\/>/)
-  // Two resets in a row keep one stroke each rather than melting into one neutral run.
+  assert.match(h, /<polyline class="warn" points="0,20.0 1,10.0 2,10.0"\/><polyline points="2,10.0 2,95.0"\/><polyline class="ok" points="2,95.0 3,88.0 4,80.0"\/>/)
+  // Two resets in a row keep one drop each rather than melting into one neutral run; the
+  // hold between them wears the level of the reading it holds.
   const twice = sparkOf(slotted([
     { i: 0, p: 60, level: 'warn' }, { i: 1, p: 4, level: 'ok', reset: true },
     { i: 2, p: 3, level: 'ok', reset: true }, { i: 3, p: 9, level: 'ok' },
   ]))
-  assert.match(twice, /<polyline points="0,40.0 1,96.0"\/><polyline points="1,96.0 2,97.0"\/><polyline class="ok" points="2,97.0 3,91.0"\/>/)
-  assert.equal(twice.split('<polyline').length - 1, 3, twice)
+  assert.match(twice, /<polyline class="warn" points="0,40.0 1,40.0"\/><polyline points="1,40.0 1,96.0"\/><polyline class="ok" points="1,96.0 2,96.0"\/><polyline points="2,96.0 2,97.0"\/><polyline class="ok" points="2,97.0 3,91.0"\/>/)
+  assert.equal(twice.split('<polyline').length - 1, 5, twice)
   // A lone reading is a point, not a stroke: it keeps its own level whatever it reports.
   const lone = sparkOf(slotted([{ i: 2, p: 5, level: 'ok', reset: true }]))
   assert.match(lone, /<path class="pt ok" d="M2 95.0h.01"\/>/)
@@ -1243,14 +1252,158 @@ test('a hole in the spark is drawn straight across, in the colour of the reading
   assert.equal(hole.split('<polyline').length - 1, 1, hole)
   assert.equal(hole.indexOf('class="pt'), -1, hole)
   assert.equal(hole.indexOf('<line'), -1, hole)
-  // A hole the window turned over in is the neutral stroke, like any other reset.
+  // A hole the window turned over in: the old value is held across it and dropped at the
+  // first reading after, like any other reset — not sloped down across the hole.
   const dark = sparkOf(slotted([{ i: 5, p: 50, level: 'warn' }, { i: 9, p: 5, level: 'ok', reset: true }, { i: 10, p: 8, level: 'ok' }]))
-  assert.match(dark, /<polyline points="5,50.0 9,95.0"\/><polyline class="ok" points="9,95.0 10,92.0"\/>/)
+  assert.match(dark, /<polyline class="warn" points="5,50.0 9,50.0"\/><polyline points="9,50.0 9,95.0"\/><polyline class="ok" points="9,95.0 10,92.0"\/>/)
   // The dashed bridge of 1.2.1 is gone from the stylesheet with the element it styled.
   assert.equal(STYLE.indexOf('bridge'), -1)
   // A stray bridges field from an older view model is ignored, not drawn.
   const stale = sparkOf({ ...slotted([{ i: 1, p: 1, level: 'ok' }, { i: 3, p: 2, level: 'ok' }]), bridges: [{ from: 1, to: 3 }] })
   assert.equal(stale.indexOf('<line'), -1, stale)
+})
+
+test('the reset stroke is vertical: a hold in the old colour, a drop, a tail in the new one', () => {
+  // The old window's last reading, at slot 100, announced its reset two hours (eight slots)
+  // later; the first reading of the new window came twelve hours after that one (VS Code
+  // closed over the reset). The line holds the old value to the announced reset, drops
+  // there, and runs on at the new value — not a slope from the one reading to the other.
+  const t0 = 100 * SLOT
+  const h = sparkOf(slotted([
+    { i: 100, p: 80, level: 'warn', t: t0, r: t0 + 8 * SLOT, label: 'a' },
+    { i: 148, p: 5, level: 'ok', t: t0 + 48 * SLOT, r: t0 + 68 * SLOT, label: 'b', reset: true },
+    { i: 150, p: 8, level: 'ok', t: t0 + 50 * SLOT, r: t0 + 68 * SLOT, label: 'c' },
+  ]))
+  assert.match(h, /<polyline class="warn" points="100,20.0 108,20.0"\/><polyline points="108,20.0 108,95.0"\/><polyline class="ok" points="108,95.0 148,95.0 150,92.0"\/>/)
+  assert.equal(h.split('<polyline').length - 1, 3, h)
+  // The drop ends at the new reading's value — 5 %, where a rolling window may well sit —
+  // never at a 0 nobody measured.
+  assert.equal(h.indexOf('108,100.0'), -1, h)
+  // Every neutral stroke stands upright: x1 === x2.
+  const neutral = [...h.matchAll(/<polyline points="([\d.]+),[\d.]+ ([\d.]+),[\d.]+"\/>/g)]
+  assert.equal(neutral.length, 1, h)
+  for (const [, x1, x2] of neutral) assert.equal(x1, x2, h)
+})
+
+test('without a reset time between the two readings the drop stands at the new reading', () => {
+  const t0 = 100 * SLOT
+  const at = (r1: number | null, r2: number | null): string => sparkOf(slotted([
+    { i: 100, p: 80, level: 'warn', t: t0, r: r1, label: 'a' },
+    { i: 148, p: 5, level: 'ok', t: t0 + 48 * SLOT, r: r2, label: 'b', reset: true },
+  ]))
+  const expected = /<polyline class="warn" points="100,20.0 148,20.0"\/><polyline points="148,20.0 148,95.0"\/><rect/
+  // No clock on the old reading …
+  assert.match(at(null, t0 + 60 * SLOT), expected)
+  // … a reset the old reading was itself already past (a stale reading) …
+  assert.match(at(t0 - SLOT, t0 + 60 * SLOT), expected)
+  // … or a reset announced beyond the new reading: an unmoved clock with a five-point fall.
+  assert.match(at(t0 + 60 * SLOT, t0 + 60 * SLOT), expected)
+  // A reset exactly at the new reading's time drops there as well. No tail in any of these:
+  // the drop already stands at the reading, and a zero-length stroke would draw nothing.
+  assert.match(at(t0 + 48 * SLOT, t0 + 60 * SLOT), expected)
+  for (const h of [at(null, null), at(t0 - SLOT, null), at(t0 + 60 * SLOT, null), at(t0 + 48 * SLOT, null)]) {
+    assert.equal(h.split('<polyline').length - 1, 2, h)
+  }
+  // A payload from a build without times falls back to the slot index for the drop too.
+  const old = sparkOf(slotted([{ i: 5, p: 50, level: 'warn' }, { i: 9, p: 5, level: 'ok', reset: true }]))
+  assert.match(old, /<polyline class="warn" points="5,50.0 9,50.0"\/><polyline points="9,50.0 9,95.0"\/><rect/)
+})
+
+test('the quota sparkline can be hovered and reached by keyboard; the KPI sparks cannot', () => {
+  const spark = {
+    ...slotted([
+      { i: 1, p: 10, level: 'ok', t: SLOT, r: null, label: 'Thu 3 Sep · 00:15 · 10 %' },
+      { i: 2, p: 30, level: 'ok', t: 2 * SLOT, r: null, label: 'Thu 3 Sep · 00:30 · 30 %' },
+    ]),
+    aria: 'quota sparkline, 7 days, 2 readings, peak 30 %',
+  }
+  const h = render('sQuota()', { quotas: [card({ windows: [win({ spark })] })] })
+  // The svg is the focusable, labelled element; the provider and the window it belongs to
+  // are written on it so the hover finds the readings in the view model, not in a copy.
+  assert.match(h, /<div class="sparkbox"><svg class="spark q" viewBox="0 0 672 100" preserveAspectRatio="none" role="img" tabindex="0" aria-label="quota sparkline, 7 days, 2 readings, peak 30 %" data-src="claude" data-win="session:300">/)
+  // The overlay takes the pointer, the empty marker waits for a reading, and the label box
+  // is the KPI explanation's, hidden until there is something to say.
+  assert.match(h, /<rect class="ov" x="0" y="0" width="672" height="100"\/><path class="hov"\/><\/svg><div class="pop" role="tooltip" aria-live="polite" hidden><\/div><\/div>/)
+  // No label is written into the markup: the readings stay in the view model.
+  assert.equal(h.indexOf('Thu 3 Sep'), -1, h)
+  // The KPI sparks stay decoration: hidden from the reader, nothing to hover.
+  const k = render('sKpis()', { kpis: [kpiCard({ spark: [1, 2, 3] })] })
+  assert.match(k, /<svg class="spark" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">/)
+  assert.equal(k.indexOf('class="ov"'), -1, k)
+  assert.equal(k.indexOf('sparkbox'), -1, k)
+  // The hovered reading reuses the explanation's box and its hover-widget colours: one rule
+  // for the box, a modifier for the spark's one-line label.
+  assert.equal(STYLE.split('--vscode-editorHoverWidget-background').length - 1, 1)
+  assert.match(STYLE, /\.sparkbox \{ position: relative; \}/)
+  assert.match(STYLE, /\.sparkbox \.pop \{ min-width: 0; white-space: nowrap; \}/)
+  assert.match(STYLE, /\.spark rect\.ov \{ fill: transparent; pointer-events: all; \}/)
+  assert.match(STYLE, /\.spark path\.hov \{[^}]*vector-effect: non-scaling-stroke;[^}]*pointer-events: none; \}/)
+})
+
+test('the hover marks the reading nearest to the pointer and names it from the view model', () => {
+  // The geometry the renderer and the hover share: x from the reading's time, the slot index
+  // when there is none; the reset clock null unless the reading carries one — never 0.
+  const g = nodeVm.runInContext('sparkGeometry(' + JSON.stringify(slotted([
+    { i: 1, p: 50, t: 1.5 * SLOT, r: null, label: 'a' }, { i: 7, p: 20, level: 'ok', label: 'b' },
+    { i: 9, p: 0, t: 9 * SLOT, r: 9 * SLOT + 3_600_000, label: 'c', reset: true },
+  ])) + ')', ctx) as { W: number; pts: Array<Record<string, unknown>> }
+  assert.equal(g.W, 672)
+  // Through JSON: the arrays were built in the script's own realm, whose Array is not ours.
+  assert.deepEqual(JSON.parse(JSON.stringify(g.pts.map((p) => [p.x, p.y, p.r, p.level, p.reset, p.label]))), [
+    [1.5, 50, null, '', false, 'a'], [7, 80, null, 'ok', false, 'b'], [9, 100, 9 * SLOT + 3_600_000, '', true, 'c'],
+  ])
+  assert.equal(nodeVm.runInContext('sparkGeometry({ slots: 672, points: [] })', ctx), null)
+  // Nearest by x; a tie goes to the earlier reading.
+  assert.equal(nodeVm.runInContext('sparkNearest([{ x: 0 }, { x: 10 }, { x: 20 }], 12)', ctx), 1)
+  assert.equal(nodeVm.runInContext('sparkNearest([{ x: 0 }, { x: 10 }, { x: 20 }], 5)', ctx), 0)
+  assert.equal(nodeVm.runInContext('sparkNearest([{ x: 0 }, { x: 10 }, { x: 20 }], 99)', ctx), 2)
+  // The readings are looked up in the view model by the two names on the svg.
+  ;(ctx as Record<string, unknown>).fixture = model({
+    quotas: [card({ windows: [win({ spark: slotted([{ i: 3, p: 40, level: 'ok', t: 3 * SLOT, r: null, label: 'three' }]) })] })],
+  })
+  const found = nodeVm.runInContext(
+    'vm = fixture; sparkData({ getAttribute: (k) => k === "data-src" ? "claude" : "session:300" })', ctx,
+  ) as { pts: Array<{ label: string }> } | null
+  assert.equal(found?.pts[0].label, 'three')
+  assert.equal(nodeVm.runInContext('sparkData({ getAttribute: (k) => k === "data-src" ? "codex" : "session:300" })', ctx), null)
+})
+
+test('showing a reading sets the marker and the label; hiding clears both', () => {
+  const dot: Record<string, unknown> = {}
+  const pop = { hidden: true, textContent: '', style: {} as Record<string, string> }
+  const svg = {
+    querySelector: (sel: string) => (sel === 'path.hov'
+      ? { setAttribute: (k: string, v: string) => { dot[k] = v }, removeAttribute: (k: string) => { delete dot[k] } }
+      : null),
+    parentNode: { querySelector: (sel: string) => (sel === '.pop' ? pop : null) },
+  }
+  ;(ctx as Record<string, unknown>).probeSvg = svg
+  ;(ctx as Record<string, unknown>).probeSpark = slotted([
+    { i: 10, p: 20, level: 'ok', t: 10 * SLOT, r: null, label: 'first' },
+    { i: 336, p: 30, level: 'ok', t: 336 * SLOT, r: null, label: 'middle' },
+  ])
+  nodeVm.runInContext('sparkShow(probeSvg, sparkGeometry(probeSpark), 1)', ctx)
+  assert.equal(dot.d, 'M336 70h.01')
+  assert.equal(pop.textContent, 'middle')
+  assert.equal(pop.hidden, false)
+  // Half-way along the axis the box is centred on the reading: its anchor slides with it.
+  assert.equal(pop.style.left, '50.00%')
+  assert.equal(pop.style.transform, 'translateX(-50.00%)')
+  // Stepping past the ends stays at the ends.
+  nodeVm.runInContext('sparkShow(probeSvg, sparkGeometry(probeSpark), -5)', ctx)
+  assert.equal(pop.textContent, 'first')
+  assert.equal(dot.d, 'M10 80h.01')
+  nodeVm.runInContext('sparkHide()', ctx)
+  assert.equal(dot.d, undefined)
+  assert.equal(pop.hidden, true)
+  assert.equal(nodeVm.runInContext('sparkMark', ctx), null)
+  // The pointer follows mousemove, the arrow keys step, Escape and blur hide — and no element
+  // is created at hover time, so the script names no namespace URL.
+  assert.match(SCRIPT, /addEventListener\('mousemove', \(ev\) => \{/)
+  assert.match(SCRIPT, /ev\.key === 'ArrowLeft' \? -1 : ev\.key === 'ArrowRight' \? 1 : 0/)
+  assert.match(SCRIPT, /if \(ev\.key === 'Escape'\) \{ sparkHide\(\); return; \}/)
+  assert.match(SCRIPT, /if \(sparkMark && ev\.target === sparkMark\.svg\) sparkHide\(\);\n\}, true\)/)
+  assert.equal(SCRIPT.indexOf('createElementNS'), -1)
 })
 
 test('the quota card draws the slotted spark and captions its span once', () => {

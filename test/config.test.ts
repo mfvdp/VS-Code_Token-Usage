@@ -273,8 +273,9 @@ test('the structural sub-configs mirror the settings', () => {
   })
   assert.deepEqual(readTimeConfig(cfg),
     { zone: 'Europe/Berlin', dayBoundaryHour: 4, startOfWeek: 'sunday', hourCycle: 'h23' })
+  // No band unless one is set: a window ahead of pace is coloured at once.
   assert.deepEqual(readPaceConfig(cfg),
-    { sensitivity: 'strict', tolerancePoints: 5, minElapsedPercent: 3, levels: 'graded' })
+    { sensitivity: 'strict', tolerancePoints: 0, minElapsedPercent: 3, levels: 'graded' })
   assert.deepEqual(readAlertConfig(cfg), {
     thresholds: [90], basis: 'used', requireAhead: true, minRemainingMinutes: 60,
     useItLoseIt: false, forecastLeadMinutes: 0, onPaceFast: false, windowCondition: 'weeklyOnly',

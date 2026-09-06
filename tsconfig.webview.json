@@ -1,0 +1,21 @@
+{
+  // The dashboard's script: a browser module, checked on its own so that no Node global and
+  // no Node type can reach it. `npm run typecheck` runs this config after the main one.
+  "compilerOptions": {
+    "module": "esnext",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "noEmit": true,
+    "strict": true,
+    // The one part of `strict` that is not a check but an emit: it would put a "use strict"
+    // at the top of the built text, where the two provider consts written in front of it
+    // make it a dead string rather than a directive — and turning the page's script from
+    // sloppy to strict is a change to the page, not to how it is built. Off, deliberately.
+    "alwaysStrict": false,
+    "noUnusedLocals": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node"
+  },
+  "include": ["src/webview/**/*.ts"]
+}

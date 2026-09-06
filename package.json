@@ -1510,7 +1510,7 @@
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.webview.json",
     "test": "node build.mjs --tests && node --test \"out-test/*.test.js\"",
     "test:e2e": "node test-e2e/run.mjs",
     "check:privacy": "node scripts/check-privacy.mjs",

@@ -936,6 +936,7 @@ function webviewWords(): Record<string, string> {
     'requests': t('requests'),
     'reset due': t('reset due'),
     'resets {0}': t('resets {0}'),
+    'resets at {0}': t('resets at {0}'),
     'scroll sideways for the remaining columns →': t('scroll sideways for the remaining columns →'),
     'shown': t('shown'),
     'some models have no price on file': t('some models have no price on file'),

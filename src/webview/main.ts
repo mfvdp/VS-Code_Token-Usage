@@ -316,8 +316,10 @@ function fbResetLine(w: Payload): string {
   if (w.display === 'resetDue') return due;
   const r = w.reset === null || w.reset === undefined ? '' : String(w.reset);
   if (!r) return '';
-  // A reset text that already says the window has reset is a sentence, not a duration.
-  return r.indexOf(due) >= 0 ? r : tr('resets {0}', r);
+  // A reset text that already says the window has reset is a sentence, not a duration; a
+  // clock time ("14:20", "2:05 PM") takes the absolute wording, a countdown the relative one.
+  if (r.indexOf(due) >= 0) return r;
+  return /\d:\d\d/.test(r) ? tr('resets at {0}', r) : tr('resets {0}', r);
 }
 
 function fbStateText(w: Payload): string {
@@ -484,7 +486,11 @@ function quotaCard(q: Payload): string {
     // colour nor the warning arrow — a red "▲ exhausted" over a grey bar is the card
     // contradicting its own explanation.
     const judged = w.display !== 'resetDue';
-    const verdict = [said ? (judged && w.level !== 'ok' ? '▲ ' : '') + esc(said) : '', esc(state)]
+    // A limit the provider reports as reached is red wherever it is shown: the bar below wears
+    // 'error' for it, and so does the chip — the pace level alone would leave it dim whenever
+    // the pace happened to be fine.
+    const chipLevel = w.display === 'limitReached' ? 'error' : w.level;
+    const verdict = [said ? (judged && chipLevel !== 'ok' ? '▲ ' : '') + esc(said) : '', esc(state)]
       .filter(Boolean).join(' · ');
     // Why the bar wears its colour, on hover and on focus: the block is focusable and points
     // at its own explanation, the same way a key figure does. A payload without the field —
@@ -497,7 +503,7 @@ function quotaCard(q: Payload): string {
     h += '<div class="win"' + (ex ? ' tabindex="0" data-explain aria-describedby="' + esc(popId) + '"' : '')
       + '><div class="win-top"><span>' + esc(w.label)
       + (reset ? ' · ' + esc(reset) : '') + '</span>'
-      + (verdict ? '<span class="verdict' + (judged ? ' ' + esc(w.level) : '') + '">'
+      + (verdict ? '<span class="verdict' + (judged ? ' ' + esc(chipLevel) : '') + '">'
          + verdict + '</span>' : '')
       + '<b>' + esc(w.percentText) + '</b></div>'
       // A limit the provider itself reports as reached is red wherever it is drawn — the

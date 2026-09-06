@@ -11,3 +11,6 @@ out-test/
 # beside its source (--extensionTestsPath needs plain JavaScript).
 .vscode-test/
 test-e2e/suite/index.js
+
+# written by the CI Test step (tee), never committed
+test.log

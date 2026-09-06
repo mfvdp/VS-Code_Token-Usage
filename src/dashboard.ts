@@ -81,13 +81,10 @@ function htmlLang(): string {
 
 function nonceOf(): string {
   // The nonce is the page's whole script and style allow-list, so it comes from the platform's
-  // cryptographic generator, not from Math.random, whose state a page could reconstruct. The
-  // alphabet stays alphanumeric: valid nonce syntax, and what every consumer of it expects.
-  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  const bytes = randomBytes(32)
-  let s = ''
-  for (let i = 0; i < 32; i++) s += abc[bytes[i] % abc.length]
-  return s
+  // cryptographic generator, not from Math.random, whose state a page could reconstruct. Hex
+  // keeps every bit of the 128 (no modulo, no bias) and is valid nonce syntax: 32 characters
+  // of [0-9a-f].
+  return randomBytes(16).toString('hex')
 }
 
 /** HTML text: the four characters that could open markup or end an attribute. */

@@ -28,29 +28,34 @@ export async function readNewLines(
   maxBytes = 256 * 1024 * 1024,
   onRestart?: () => void,
 ): Promise<boolean> {
-  let st: fs.Stats
-  try { st = await fs.promises.stat(file) } catch { return false }
+  // A prefilter and nothing more: a file whose size, mtime and identity are exactly what the
+  // last pass recorded is skipped without being opened. Every figure the read itself relies
+  // on is taken from the open handle below, so the file may change between the two calls
+  // without the read ever running past its end or against the wrong file.
+  let pre: fs.Stats
+  try { pre = await fs.promises.stat(file) } catch { return false }
+  const same = pre.ino === cur.ino && pre.dev === cur.dev && pre.size >= cur.offset
+  if (same && pre.size === cur.size && pre.mtimeMs === cur.mtime) return false
 
+  let fh: fs.promises.FileHandle
+  try { fh = await fs.promises.open(file, 'r') } catch { return false } // lgtm[js/file-system-race]
   let restarted = false
-  if (st.ino !== cur.ino || st.dev !== cur.dev || st.size < cur.offset) {
-    cur.offset = 0
-    cur.ino = st.ino
-    cur.dev = st.dev
-    restarted = true
-    onRestart?.()
-  }
-  if (!restarted && st.size === cur.size && st.mtimeMs === cur.mtime) return false
-  if (st.size <= cur.offset) {
-    cur.size = st.size
-    cur.mtime = st.mtimeMs
-    return restarted
-  }
-
-  const fh = await fs.promises.open(file, 'r')
   try {
-    // The size that bounds this read is the open handle's, not the stat's from a moment ago:
-    // a file that grew or was truncated in between is read as it is, never past its end.
-    const end = Math.min((await fh.stat()).size, cur.offset + maxBytes)
+    const st = await fh.stat()
+    if (st.ino !== cur.ino || st.dev !== cur.dev || st.size < cur.offset) {
+      cur.offset = 0
+      cur.ino = st.ino
+      cur.dev = st.dev
+      restarted = true
+      onRestart?.()
+    }
+    if (!restarted && st.size === cur.size && st.mtimeMs === cur.mtime) return false
+    if (st.size <= cur.offset) {
+      cur.size = st.size
+      cur.mtime = st.mtimeMs
+      return restarted
+    }
+    const end = Math.min(st.size, cur.offset + maxBytes)
     const CHUNK = 1 << 20
     let pos = cur.offset
     let rest = Buffer.alloc(0)

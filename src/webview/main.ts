@@ -1426,21 +1426,20 @@ function sDrill(): string {
     + '<button data-act="drill" data-day="">' + tr('close') + '</button>';
 }
 
-const RENDER: Record<string, () => string> = {
-  notices: sNotices, controls: sControls, footer: sFooter, drill: sDrill,
-  summary: sSummary, quota: sQuota, context: sContext, kpis: sKpis, tokens: sTokens,
-  chart: sChart, models: sModels, heatmap: sHeatmap, hours: sHours, records: sRecords,
-  tools: sTools, budget: sBudget,
-  history: sHistory, projects: sProjects, sessions: sSessions, dataQuality: sDataQuality,
-};
+const RENDER = new Map<string, () => string>([
+  ['notices', sNotices], ['controls', sControls], ['footer', sFooter], ['drill', sDrill],
+  ['summary', sSummary], ['quota', sQuota], ['context', sContext], ['kpis', sKpis], ['tokens', sTokens],
+  ['chart', sChart], ['models', sModels], ['heatmap', sHeatmap], ['hours', sHours], ['records', sRecords],
+  ['tools', sTools], ['budget', sBudget],
+  ['history', sHistory], ['projects', sProjects], ['sessions', sSessions], ['dataQuality', sDataQuality],
+]);
 /**
- * The renderer for a section key, or null. An own-property check, not a bare index: a bare
- * `RENDER[key]` answers 'constructor' with a function, and a key from the payload must never
- * pick anything but one of the sections above.
+ * The renderer for a section key, or null. A Map lookup, not a property access: a key from
+ * the payload must never pick anything but one of the sections above, and a plain object
+ * would answer 'constructor' with a function.
  */
 function renderer(key: string): (() => string) | null {
-  return Object.prototype.hasOwnProperty.call(RENDER, key) && typeof RENDER[key] === 'function'
-    ? RENDER[key] : null;
+  return RENDER.get(key) ?? null;
 }
 /** A section's heading. A key this build does not know heads its section with itself. */
 function titleOf(key: string): string {

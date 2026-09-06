@@ -2729,7 +2729,7 @@ function poisoned(v: unknown, mark: string): unknown {
 test('a payload full of markup renders as text: no section lets a string become an element', () => {
   const MARK = '<img src=x onerror=alert(1)>"\'&`'
   const base = { ...model({}), ...tokensVm() } as Record<string, unknown>
-  const ALL = 'Object.keys(RENDER).map(k => { try { return RENDER[k]() } catch (e) { return "THROW:" + k + ":" + e } }).join("\\n")'
+  const ALL = '[...RENDER.keys()].map(k => { try { return RENDER.get(k)() } catch (e) { return "THROW:" + k + ":" + e } }).join("\\n")'
   // Sections the plain fixture cannot render (it carries no data for them) are not the
   // subject here; every other section must render the poison, not choke on it.
   ;(ctx as Record<string, unknown>).fixture = base

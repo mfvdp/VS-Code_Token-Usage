@@ -13,7 +13,7 @@
 
 import { strict as assert } from 'node:assert'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { test } from 'node:test'
 import {
   ADAPTERS, LABEL, PROVIDER_NAME, SOURCES, SOURCE_TITLE, USAGE_PAGE, adapterFor, isKnownSource,
@@ -86,8 +86,11 @@ test('the file predicates belong to the adapter that reads them', () => {
 
 test('roots come from the adapter and honour an explicit directory', () => {
   const dirs = [join('/virtual', 'home')]
-  assert.deepEqual(adapterFor('claude').roots(dirs), [join('/virtual', 'home', 'projects')])
-  assert.deepEqual(adapterFor('codex').roots(dirs), [join('/virtual', 'home', 'sessions')])
+  // The adapter resolves the directory, and `resolve` is what puts the drive letter in front
+  // of a root-relative path on Windows (`D:\\virtual\\home`); `join` alone does not, which is
+  // why this expectation is resolved the same way rather than joined.
+  assert.deepEqual(adapterFor('claude').roots(dirs), [resolve(join('/virtual', 'home', 'projects'))])
+  assert.deepEqual(adapterFor('codex').roots(dirs), [resolve(join('/virtual', 'home', 'sessions'))])
 })
 
 test('freshInput is the adapter rule, so stats and pricing cannot disagree', () => {

@@ -61,14 +61,14 @@ Both live in the repository's *Settings → Secrets and variables → Actions*.
 | `VSCE_PAT` | Visual Studio Marketplace (`vsce publish`) | An Azure DevOps **personal access token** for the organisation that owns the publisher, scope *Marketplace → Manage*, "All accessible organizations" |
 | `OVSX_PAT` | Open VSX (`ovsx publish`) | An access token created in the Open VSX user settings of the account that owns the namespace |
 
-**VSCE_PAT expires: (fill in)**
-
 Azure DevOps personal access tokens always expire — a year at most, and the page offers much
 shorter defaults. When it has expired the Marketplace step does not stop the release: the
 token is still present, so the step runs, `vsce` fails on an authentication error, and what
 you get is one red step at the end of an otherwise finished release, with the GitHub release
-and Open VSX already done. Write the expiry date on the line above whenever the token is
-renewed, and renew it *before* a release rather than during one.
+and Open VSX already done. The expiry date is deliberately **not** written here — this is a
+public repository and nothing about the tokens belongs in it. Look it up before a release in
+Azure DevOps under *User settings → Personal access tokens*, and renew the token *before* a
+release rather than during one.
 
 `ovsx publish` needs the **namespace to exist**; `release.yml` has no create-namespace step.
 The namespace `frederik` was created by hand once (Open VSX → *Namespaces* → create, with the

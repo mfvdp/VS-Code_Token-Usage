@@ -795,8 +795,8 @@ test('every page under docs/ says where it belongs and carries the licence heade
   }
 })
 
-test('the release page names the two secrets and the expiry line that has to be filled in', () => {
-  for (const needed of ['VSCE_PAT', 'OVSX_PAT', 'VSCE_PAT expires:', 'pdvfm.de', 'TXT record']) {
+test('the release page names the two secrets, keeps the token expiry out of the repository, and says how to verify the publisher', () => {
+  for (const needed of ['VSCE_PAT', 'OVSX_PAT', 'deliberately **not** written here', 'pdvfm.de', 'TXT record']) {
     assert.ok(doc.release.includes(needed), `docs/release.md does not mention ${needed}`)
   }
   // The workflow is what the page describes, so the secret names have to be the ones it reads.

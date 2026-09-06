@@ -7,7 +7,8 @@ import { locale, t } from './i18n'
 import {
   lastDays as lastDaysIn, SYSTEM_TIME_CONFIG,
 } from './time'
-import { paceVerdict } from './pace'
+import { DEFAULT_PACE, paceVerdict } from './pace'
+import type { QuotaOrigin } from './types'
 
 /** Left-aligned eighth blocks U+258F..U+2589 for the partial fill of the last cell. */
 const EIGHTHS = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉']
@@ -273,6 +274,26 @@ export function ageMinutes(fetchedAtSeconds: number | null, now = Date.now()): n
 }
 
 /**
+ * Where a reading came from, in words. Shown so a figure is always traceable.
+ *
+ * Here rather than beside one of the views: the quota card, the Quick Pick, the markdown
+ * report, the clipboard export and the status-bar tooltip all name the same origin, and a
+ * second table would be a second vocabulary. A function rather than a table, because the
+ * translation bundle arrives at activation and words computed at module load would stay
+ * English for the rest of the session.
+ */
+export function originName(origin: QuotaOrigin): string {
+  switch (origin) {
+    case 'cache': return t('cache file')
+    case 'poll': return t('polled')
+    case 'push': return t('pushed')
+    case 'transcript': return t('transcript')
+    case 'statusline': return t('status line')
+    default: return t('claude.json')
+  }
+}
+
+/**
  * Number of decimals for a money amount: cents below $100, whole units at or
  * above it. At three or more digits the cents carry no information anyone acts
  * on, and dropping them keeps the figure short in a status bar or a table cell.
@@ -334,7 +355,7 @@ export function extraUsageText(e: {
 } | undefined): string | null {
   if (!e) return null
   if (e.unlimited) return t('unlimited')
-  if (!e.enabled) return e.reason ? t('off ({0})', e.reason) : t('off')
+  if (!e.enabled) return e.reason ? t('off ({0})', reasonWord(e.reason)) : t('off')
   const parts: string[] = []
   if (e.used !== null) {
     parts.push(e.limit !== null
@@ -368,8 +389,24 @@ export type Severity = 'ok' | 'warn' | 'error'
 
 /** @deprecated compatibility shim, removed in wave 3 — use paceVerdict from './pace'. */
 export function severity(percent: number, elapsed: number | null): Severity {
-  const v = paceVerdict(percent, elapsed, {
-    sensitivity: 'normal', tolerancePoints: 5, minElapsedPercent: 3, levels: 'binary',
-  })
+  // The shipped default, never a band of its own: a second pace rule in a second place is a
+  // rule nobody can see, and this shim exists only so an old caller keeps compiling.
+  const v = paceVerdict(percent, elapsed, DEFAULT_PACE)
   return v.level === 'warn2' ? 'warn' : v.level
+}
+
+/**
+ * The reason an extra-usage allowance is off, in the reader's language.
+ *
+ * Only the three words we choose ourselves are translated. A `disabled_reason` the provider
+ * sent is their sentence, not ours: passing it through a table it is not in would either
+ * drop it or invent a translation for a string we have never seen.
+ */
+function reasonWord(reason: string): string {
+  switch (reason) {
+    case 'switched off': return t('switched off')
+    case 'never enabled': return t('never enabled')
+    case 'not enabled': return t('not enabled')
+    default: return reason
+  }
 }

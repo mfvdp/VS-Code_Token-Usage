@@ -59,7 +59,9 @@ test('the quota card, its verdict and its explanation come out in German', () =>
   assert.equal(w.percentText, '40%')
   // 40 % used against a window whose clock has run 60 % — behind pace, in German.
   assert.match(w.verdict.text, /des Fensters noch übrig$/, w.verdict.text)
-  assert.equal(w.resetLine, 'Reset 2h')
+  // The countdown takes its preposition; a clock time takes a different one, which is why the
+  // status bar has a second message for the absolute formats.
+  assert.equal(w.resetLine, 'Reset in 2h')
   assert.equal(w.explain.title, 'Warum grün')
   assert.ok(w.explain.lines[0].startsWith('40 % des Fensters verbraucht;'), w.explain.lines[0])
   assert.ok(w.explain.lines.some((l) => l.startsWith('Gelb, sobald')), JSON.stringify(w.explain.lines))
@@ -89,7 +91,7 @@ test('the key figures, the digest and the footnotes are German, and the numbers 
   assert.ok(vm.footnotes.some((f) => f.includes('gemessen = vom Anbieter gelesen')), JSON.stringify(vm.footnotes))
   // The composition bars and the totals table name their columns in German as well.
   assert.deepEqual(vm.composition[0].parts.map((p) => p.text),
-    ['Frische Eingabe', 'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte (von der Ausgabe)'])
+    ['Frische Eingabe', 'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte (Teil der Ausgabe)'])
   assert.ok(vm.totals[0].rows.some((r) => r.label === 'Letzte 7 Tage'), vm.totals[0].rows.map((r) => r.label).join(' · '))
 })
 

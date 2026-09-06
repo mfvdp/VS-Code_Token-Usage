@@ -27,7 +27,8 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m
 | 🔴 red | the window is spent (≥ 99.5 %); the entry also gets an alarm background |
 
 The `┃` marker sits where the window's own clock stands, so the verdict is readable
-without colour. The tooltip says it in words: `12 % ahead of pace`,
-`36 % of the window still spare`, `measuring · window just reset`.
+without colour. The tooltip says it in words: `12 % ahead of pace` or
+`36 % of the window still spare`; a window that has only just reset is still measuring, and
+its Pace cell is a dash until the phase ends.
 
 Absence is a dash. A missing figure is never drawn as `0 %` or `$0.00`.

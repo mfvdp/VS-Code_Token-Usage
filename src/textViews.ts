@@ -12,7 +12,7 @@
  */
 
 import { t } from './i18n'
-import { DEFAULT_BAR, renderBar } from './render'
+import { DEFAULT_BAR, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
 import { SOURCE_TITLE } from './viewModel'
 import type { ViewModel } from './viewModel'
@@ -217,7 +217,14 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     }
     // The bridge's prompt-cache line, word for word as the card prints it. Only ever present
     // on the Claude card, and only while the status line delivered one.
-    if (q.promptCache) add({ label: q.promptCache.text, description: q.promptCache.note })
+    if (q.promptCache) {
+      add({
+        label: q.promptCache.text,
+        description: [q.promptCache.note,
+          q.promptCache.ageText ? t('updated {0}', q.promptCache.ageText) : null,
+          q.promptCache.fresh ? null : t('stale')].filter(Boolean).join(' · '),
+      })
+    }
     if (q.extra) {
       add({
         label: t('Extra usage: {0}', q.extra.text),
@@ -537,7 +544,11 @@ export function markdownDocument(vm: ViewModel): string {
     }
     // The bridge's prompt-cache line, under the windows it was read beside — the same words
     // as the card, qualified once as the session's rather than the account's.
-    if (q.promptCache) L.push(`${cell(q.promptCache.text)} — ${q.promptCache.note}`, '')
+    if (q.promptCache) {
+      const seen = [q.promptCache.ageText ? t('updated {0}', q.promptCache.ageText) : null,
+        q.promptCache.fresh ? null : `⚠ ${t('stale')}`].filter(Boolean).join(' · ')
+      L.push(`${cell(q.promptCache.text)} — ${q.promptCache.note}${seen ? ` · ${cell(seen)}` : ''}`, '')
+    }
     if (q.extra) {
       L.push(t('Extra usage: {0} ({1})', cell(q.extra.text),
         q.extra.billed ? t('billed') : q.extra.enabled ? t('enabled') : t('off')), '')
@@ -604,7 +615,9 @@ export function markdownDocument(vm: ViewModel): string {
     L.push(t('| Provider | Part | Tokens |'))
     L.push('|---|---|---|')
     for (const c of vm.composition) {
-      for (const p of c.parts) L.push(`| ${cell(withSource(c.source, ''))} | ${cell(p.text)} | ${p.tokens > 0 ? p.tokens.toLocaleString('en-US') : '–'} |`)
+      // The report's own formatter, like every other table in it: one document must not
+      // state the same quantity as "248,922" here and "248,9K" three sections above.
+      for (const p of c.parts) L.push(`| ${cell(withSource(c.source, ''))} | ${cell(p.text)} | ${p.tokens > 0 ? full(p.tokens) : '–'} |`)
     }
     L.push('')
   }

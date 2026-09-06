@@ -12,9 +12,6 @@ import * as os from 'os'
 import * as path from 'path'
 import { IngestContext } from '../../src/agg'
 
-/** The local scratchpad the suite prefers over /tmp when it is present. */
-export const SCRATCH = '/tmp/claude-1000/-home-frederik-Claude-VS-Code-Tokens/9d0eb37a-71d8-4832-9deb-36dcbfb5985b/scratchpad'
-
 const madeTempDirs: string[] = []
 let sweeperArmed = false
 
@@ -52,10 +49,13 @@ export function tmpDir(prefix: string, base?: string): string {
   return track(fs.mkdtempSync(path.join(root, `${prefix}-`)))
 }
 
-/** Like tmpDir, but under the scratchpad when that exists — keeps churn out of /tmp. */
+/**
+ * Like tmpDir, but under whatever TOKEN_PACE_TEST_TMP names — a scratchpad, a CI sandbox —
+ * and under the OS temp directory otherwise. Never a path baked into this file: one written
+ * here is one machine's session directory, and it is gone by the next run.
+ */
 export function scratchDir(prefix: string): string {
-  const base = process.env.TOKEN_PACE_TEST_TMP || (fs.existsSync(SCRATCH) ? SCRATCH : os.tmpdir())
-  return tmpDir(prefix, base)
+  return tmpDir(prefix, process.env.TOKEN_PACE_TEST_TMP || os.tmpdir())
 }
 
 /** A path inside a fresh scratch directory, for tests that need one named file. */

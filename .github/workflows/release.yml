@@ -15,9 +15,14 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Only a yes/no flag reaches the job environment — the `secrets` context is not available
+    # in a step's `if:`, so the question "is the token configured?" has to be answered once,
+    # here, as a plain `true`/`false`. The tokens themselves are set on the one step that
+    # publishes with them, so `npm ci`, the tests and every dependency install script run
+    # without them in their environment.
     env:
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
+      HAS_OVSX_PAT: ${{ secrets.OVSX_PAT != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,9 +57,13 @@ jobs:
       # Each publish step is skipped rather than failed when its token is not configured,
       # so a fork or a first release can produce the .vsix without any secrets.
       - name: Publish to the Visual Studio Marketplace
-        if: env.VSCE_PAT != ''
+        if: env.HAS_VSCE_PAT == 'true'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx --yes @vscode/vsce publish --packagePath token-pace-${{ github.ref_name }}.vsix
 
       - name: Publish to Open VSX
-        if: env.OVSX_PAT != ''
+        if: env.HAS_OVSX_PAT == 'true'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: npx --yes ovsx publish token-pace-${{ github.ref_name }}.vsix --pat "$OVSX_PAT"

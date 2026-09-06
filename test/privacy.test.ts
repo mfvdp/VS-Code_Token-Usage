@@ -11,9 +11,10 @@ interface ScanResult {
 
 // The scanner is a plain .mjs so `npm run check:privacy` needs no build step; required here
 // rather than imported so the TypeScript build does not need an .mjs declaration file.
-const { scanBundle, DEFAULT_ALLOW } = require('../scripts/check-privacy.mjs') as {
+const { scanBundle, DEFAULT_ALLOW, filesToScan } = require('../scripts/check-privacy.mjs') as {
   scanBundle: (text: string, allow?: string[]) => ScanResult
   DEFAULT_ALLOW: string[]
+  filesToScan: () => string[]
 }
 
 test('an allowed host passes, an unknown one is reported', () => {
@@ -71,4 +72,21 @@ test('trailing punctuation is not part of the URL, and the line number is report
   assert.equal(urls[0].url, 'https://docs.claude.com/en/docs/claude-code')
   assert.equal(urls[0].allowed, true)
   assert.equal(urls[0].line, 2)
+})
+
+test('the scan covers the shipped string files, not just the code bundles', () => {
+  // VS Code reads the l10n bundle and the manifest strings at runtime, so a host introduced
+  // in a translated sentence ships as surely as one in dist/. dist/ itself is not asserted
+  // on: `npm test` does not build it.
+  const files = filesToScan()
+  assert.ok(files.some((f) => /l10n[\\/]bundle\.l10n\..+\.json$/.test(f)), files.join(' '))
+  assert.ok(files.some((f) => /l10n[\\/]parts[\\/].+\.de\.json$/.test(f)), files.join(' '))
+  assert.ok(files.some((f) => /^package\.nls.*\.json$/.test(f)), files.join(' '))
+})
+
+test('a host planted in a translated string is reported', () => {
+  const bundle = '{\n  "a": "Preise: https://price-feed.example/v1/rates"\n}\n'
+  const { offenders } = scanBundle(bundle, DEFAULT_ALLOW)
+  assert.equal(offenders.length, 1)
+  assert.equal(offenders[0].host, 'price-feed.example')
 })

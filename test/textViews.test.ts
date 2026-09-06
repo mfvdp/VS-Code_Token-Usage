@@ -822,11 +822,13 @@ test('the prompt-cache line is in both text views only while the bridge delivers
   const text = 'prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'
   const item = quickPickItems(vm).find((i) => i.label === text)
   assert.ok(item)
-  assert.equal(item.description, 'current session, via the status line')
+  // Its own age, beside the note: the card header's age belongs to whichever source won the
+  // quota race, not to the mirror this line was read from.
+  assert.equal(item.description, 'current session, via the status line · updated 1 min ago')
   assert.equal(item.command, undefined)
   const quota = quotaPart(markdownDocument(vm))
   const claude = quota.slice(quota.indexOf('### Claude Code'), quota.indexOf('### Codex'))
-  assert.ok(claude.includes(`\n${text} — current session, via the status line\n`), claude)
+  assert.ok(claude.includes(`\n${text} — current session, via the status line · updated 1 min ago\n`), claude)
   // Under the windows and their explanations, before the freshness row — and once.
   assert.ok(claude.indexOf(text) > claude.lastIndexOf('- **7 d**'), claude)
   assert.ok(claude.indexOf(text) < claude.indexOf('Freshness —'), claude)

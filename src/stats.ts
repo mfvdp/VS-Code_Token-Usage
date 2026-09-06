@@ -147,6 +147,8 @@ export interface ModelRow {
   costText: string
   listCost: string | null
   cacheHit: string
+  /** The share behind `cacheHit`, 0..1; -1 when there was no denominator to divide by. */
+  cacheHitN: number
   share: string
   costShare: string
   priced: 'exact' | 'family' | 'custom' | 'none'
@@ -1435,24 +1437,11 @@ function sortRows(rows: ModelRow[], sort: ModelSort): ModelRow[] {
   return [...rows].sort((a, b) => {
     let d = 0
     if (key === 'model') d = a.model.localeCompare(b.model)
-    // The hit rate has no raw pair of its own on the row; it is read back off the cell.
-    else if (key === 'cacheHit') d = numOf(a.cacheHit) - numOf(b.cacheHit)
+    else if (key === 'cacheHit') d = a.cacheHitN - b.cacheHitN
     else d = MODEL_SORT_VALUE[key](a) - MODEL_SORT_VALUE[key](b)
     // A stable tie-break keeps rows from swapping places on every one-second redraw.
     return d !== 0 ? d * dir : a.model.localeCompare(b.model)
   })
-}
-
-/** Reads the number back out of a formatted cell; a dash sorts as "no value", below zero. */
-function numOf(text: string): number {
-  const m = /-?\d+(\.\d+)?/.exec(text.replace(/,/g, ''))
-  if (!m) return -1
-  const v = Number(m[0])
-  if (!Number.isFinite(v)) return -1
-  if (text.endsWith('K')) return v * 1e3
-  if (text.endsWith('M')) return v * 1e6
-  if (text.endsWith('G')) return v * 1e9
-  return v
 }
 
 export function modelTable(
@@ -1543,6 +1532,11 @@ export function modelTable(
       costText: ctx.showCost ? costText(g.cost) : '–',
       listCost: ctx.showCost && showListPrice && g.listUsd > 0 ? costText(g.listUsd) : null,
       cacheHit: percentOf(g.hit.num, g.hit.den),
+      // The value the cell was formatted from, not the cell: reading a number back out of a
+      // rounded label means parsing digit grouping, and that grouping is the reader's — a
+      // German page writes "1.234,5" where an English one writes "1,234.5". A row with no
+      // denominator sorts as "no value", below zero, exactly as its dash reads.
+      cacheHitN: g.hit.den > 0 ? g.hit.num / g.hit.den : -1,
       share: percentOf(g.usage, totalUsage),
       costShare: ctx.showCost ? percentOf(g.cost, totalCost) : '–',
       // The list rates belong to a bucket that was billed at them. A fast-mode group whose

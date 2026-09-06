@@ -25,6 +25,7 @@
  */
 
 import { billable } from './agg'
+import { t } from './i18n'
 import { compact, estimate, percentOf, usd } from './render'
 import {
   MIN_PROJECTION_DAYS, SOURCE_TITLE, StatsCtx, bucketsIn, costText, dayOfBucket, filterFor,
@@ -182,18 +183,22 @@ export function periodBounds(period: BudgetPeriod, today: string, ctx: StatsCtx)
   return { from, last: monthLastDay(today) }
 }
 
-const PERIOD_TITLE: Record<BudgetPeriod, string> = {
-  day: 'today',
-  week: 'this week',
-  month: 'this month',
+/**
+ * The period a budget covers, in words. Functions rather than a table: the translation
+ * bundle arrives at activation, and words built at module load would stay English for the
+ * rest of the session.
+ */
+function periodTitle(period: BudgetPeriod): string {
+  if (period === 'day') return t('today')
+  return period === 'week' ? t('this week') : t('this month')
 }
 
 function scopeTitle(scope: BudgetScope): string {
-  return scope === 'total' ? 'All providers' : SOURCE_TITLE[scope]
+  return scope === 'total' ? t('All providers') : SOURCE_TITLE[scope]
 }
 
 export function defaultBudgetLabel(spec: BudgetSpec): string {
-  return `${scopeTitle(spec.scope)} · ${PERIOD_TITLE[spec.period]}`
+  return `${scopeTitle(spec.scope)} · ${periodTitle(spec.period)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -303,11 +308,11 @@ function usedText(spec: BudgetSpec, used: number): string {
  * the setting that causes them rather than described in the abstract.
  */
 function unmeasurableReason(ctx: StatsCtx, spec: BudgetSpec, sources: Source[]): string | null {
-  if (spec.unit === 'usd' && !ctx.showCost) return 'not measured while tokenPace.showCost is off'
+  if (spec.unit === 'usd' && !ctx.showCost) return t('not measured while tokenPace.showCost is off')
   // The provider selection is the panel's own filter, not a setting with a name to quote —
   // and the budget list is built past it, so this half is reachable only for a caller that
   // narrows the sources itself.
-  if (sources.length === 0) return `not measured while ${scopeTitle(spec.scope)} is not selected`
+  if (sources.length === 0) return t('not measured while {0} is not selected', scopeTitle(spec.scope))
   return null
 }
 
@@ -364,7 +369,7 @@ export function budgetRows(ctx: StatsCtx, budgets: BudgetSpec[], now: number = c
         projectionBasis: null,
         projectedOver: false,
         unmeasurable,
-        text: `${label}: – of ${lim} · ${unmeasurable}`,
+        text: `${t('{0}: {1} of {2}', label, '–', lim)} · ${unmeasurable}`,
       })
       continue
     }
@@ -375,8 +380,8 @@ export function budgetRows(ctx: StatsCtx, budgets: BudgetSpec[], now: number = c
     const lim = limitText(spec)
     const use = usedText(spec, facts.used)
     const shareText = facts.covered ? percentOf(facts.used, spec.limit) : '–'
-    const parts = [`${label}: ${use} of ${lim}`, shareText]
-    if (projection.text !== null) parts.push(`projected ${projection.text} by ${last}`)
+    const parts = [t('{0}: {1} of {2}', label, use, lim), shareText]
+    if (projection.text !== null) parts.push(t('projected {0} by {1}', projection.text, last))
 
     out.push({
       key: `${spec.scope}:${spec.period}:${spec.unit}`,

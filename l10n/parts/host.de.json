@@ -1,5 +1,6 @@
 {
   "A status line command is already configured": "Ein Statuszeilen-Befehl ist bereits konfiguriert",
+  "Access token expired — use Claude Code once and the credentials renew themselves": "Zugriffstoken abgelaufen — verwenden Sie Claude Code einmal, dann erneuern sich die Zugangsdaten von selbst",
   "All providers": "Alle Anbieter",
   "All time": "Gesamt",
   "Another settings file also defines a status line and takes precedence (configuration-shadowed).": "Eine andere Einstellungsdatei definiert ebenfalls eine Statuszeile und hat Vorrang (configuration-shadowed).",
@@ -21,6 +22,7 @@
   "Later": "Später",
   "Network access has not been allowed yet": "Der Netzwerkzugriff wurde noch nicht erlaubt",
   "No \"node\" executable was found on PATH. Claude Code would have to run the bridge script itself, so install Node.js (or add it to PATH) and try again.": "Auf dem PATH wurde kein ausführbares „node“ gefunden. Claude Code müsste das Bridge-Skript selbst ausführen; installieren Sie daher Node.js (oder nehmen Sie es in den PATH auf) und versuchen Sie es erneut.",
+  "No Claude Code credentials at {0}": "Keine Claude-Code-Zugangsdaten unter {0}",
   "No fetch of our own: quotaSource is \"{0}\"": "Kein eigener Abruf: quotaSource ist „{0}“",
   "No quota data found. Token Pace can fetch it from the provider — that needs your Claude Code access token.": "Keine Kontingentdaten gefunden. Token Pace kann sie beim Anbieter abrufen — dafür wird Ihr Claude-Code-Zugriffstoken benötigt.",
   "No quota reading": "Kein Kontingent-Messwert",

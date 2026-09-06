@@ -228,11 +228,18 @@ check('a settings change reaches the status bar without a reload', async () => {
 })
 
 check('the dashboard command opens the dashboard', async () => {
+  const tp = extensionApi()
+
   // Default mode: the webview *view* in the secondary side bar. It is not an editor tab, so
-  // `window.tabGroups` cannot see it; what is observable is that the command resolves, and
-  // that is exactly what breaks when the contributed view id and the `<viewType>.focus`
-  // command drift apart — the dispatch then rejects with "command not found".
+  // `window.tabGroups` cannot see it; the dispatch itself is one half of the check — that is
+  // what breaks when the contributed view id and the `<viewType>.focus` command drift apart,
+  // the command then rejects with "command not found".
   await vscode.commands.executeCommand('tokenPace.showDashboard')
+  // The other half: the page. Revealing a view is not resolving it — the command resolves a
+  // few milliseconds before the workbench asks the provider for the html, and whatever
+  // `resolveWebviewView` throws is caught and logged there, never seen here. So the check
+  // waits for the length the provider records once the page is built.
+  await waitFor('the dashboard webview to resolve and render', () => tp.dashboardHtmlLength() > 0)
 
   // The tab assertion goes through the mode that does open an editor: the same command, the
   // live `dashboard.mode` setting, the markdown usage document. It proves the routing, the

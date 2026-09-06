@@ -23,7 +23,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
-import { ADAPTERS, SOURCES } from './adapters'
+import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
 import { Aggregator } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
@@ -42,7 +42,7 @@ import { DEFAULT_FORECAST_CONFIG, ForecastConfig } from './forecast'
 import { setBundle, setLocale, t } from './i18n'
 import { Lease } from './lease'
 import { NativeViews, registerNativeViews } from './nativeViews'
-import { paceVerdict, windowElapsed } from './pace'
+import { effectivePace, paceVerdict, windowElapsed } from './pace'
 import { CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE, configureQuotaFiles } from './quota'
 import { QuotaHistory } from './quotaHistory'
 import { QuotaManager, QuotaOptions } from './quotaManager'
@@ -108,6 +108,12 @@ export interface TokenPaceApi {
   version: string
   /** Id and text of the live status-bar items as of the last render, in bar order. */
   statusBar(): Array<{ id: string; text: string }>
+  /**
+   * Size of the page the dashboard webview last rendered; 0 until the view resolves. The
+   * smoke test polls it: the workbench swallows whatever `resolveWebviewView` throws, so a
+   * command that resolves proves nothing about the page.
+   */
+  dashboardHtmlLength(): number
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<TokenPaceApi> {
@@ -245,7 +251,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       ...DEFAULT_FORECAST_CONFIG,
       // A reading older than two poll intervals cannot carry a projection.
       staleAfterMs: 2 * cfg.pollIntervalMinutes * 60_000,
-      minElapsedPercent: readPaceConfig(cfg).minElapsedPercent,
+      // The value after the sensitivity preset has been applied, which is the one the pace
+      // rule itself uses: the raw setting is 'custom' only, and a forecast measuring against
+      // a different threshold than the verdict beside it is two rules for one window.
+      minElapsedPercent: effectivePace(readPaceConfig(cfg)).minElapsedPercent,
     }
   }
 
@@ -1221,6 +1230,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     statusBar: () => (lastStatusInput === null
       ? []
       : buildItems(lastStatusInput).map((m) => ({ id: m.id, text: m.text }))),
+    dashboardHtmlLength: () => dashboard.renderedHtmlLength(),
   }
 
   async function bootstrap(): Promise<void> {
@@ -1406,7 +1416,7 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
     out.sort = { key: sort.key, dir: sort.dir }
   }
   if (Array.isArray(raw.providers)) {
-    const providers = raw.providers.filter((p): p is Source => p === 'claude' || p === 'codex')
+    const providers = raw.providers.filter(isKnownSource)
     if (providers.length > 0) out.providers = providers
   }
   if (Array.isArray(raw.models)) {

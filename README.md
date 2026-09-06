@@ -56,6 +56,9 @@ output is read.
 * **Nothing invented.** A missing figure is `–`, never `0 %`; a window without a stated length
   gets no pace rather than an invented denominator; estimates carry `~` and lower bounds `⚠`.
   → [Numbers, words and pace](docs/numbers.md)
+* **English and German.** With VS Code's display language set to German the whole interface is
+  German, numbers and dates included; the debug log, the diagnostics report and the exports
+  stay English so they can be pasted into an issue. → [Language](docs/dashboard.md)
 
 ## Install
 

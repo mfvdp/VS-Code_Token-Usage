@@ -182,3 +182,22 @@ test('the localized manifest is shipped — .vscodeignore excludes everything by
   const ignore = readFileSync(join(ROOT, '.vscodeignore'), 'utf8')
   assert.match(ignore, /^!package\.nls\*\.json$/m, '.vscodeignore does not keep package.nls*.json')
 })
+
+test('a German setting description never quotes a string the runtime shows in German', () => {
+  // A description that illustrates a rule with a card text has to quote the card text the
+  // reader will actually see. The German file quoted the English runtime strings through 1.3,
+  // which reads as a bug in the product rather than as an example.
+  const bundle = JSON.parse(
+    readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8'),
+  ) as Record<string, string>
+  let quoted = 0
+  for (const [key, value] of Object.entries(germanNls)) {
+    for (const m of value.matchAll(/\u201e([^\u201c]+)\u201c/g)) {
+      quoted++
+      assert.equal(typeof bundle[m[1]], 'undefined',
+        `package.nls.de.json:${key} quotes ${JSON.stringify(m[1])}, which the German build `
+        + `shows as ${JSON.stringify(bundle[m[1]])}`)
+    }
+  }
+  assert.ok(quoted >= 10, `only ${quoted} quoted phrase(s) in package.nls.de.json`)
+})

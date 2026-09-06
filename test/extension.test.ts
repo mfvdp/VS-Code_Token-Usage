@@ -743,7 +743,7 @@ test('the status line mirror reaches the context entry and the text view', async
   assert.equal(md.split('## Context window').length, 2, md)
   assert.ok(md.includes('128,000 / 200,000 · 64 % — current session, via the status line'), md)
   // The prompt cache from the same mirror, under the Claude windows, with its parts.
-  assert.match(md, /\nprompt cache warm · expires in \d+ (h|m) \d+ (m|s) \(1 h TTL\) · hit ratio 82 % — current session, via the status line\n/)
+  assert.match(md, /\nprompt cache warm · expires in \d+ (h|m) \d+ (m|s) \(1 h TTL\) · hit ratio 82 % — current session, via the status line · updated [^\n]+\n/)
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })

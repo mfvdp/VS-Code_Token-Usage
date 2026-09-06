@@ -247,21 +247,29 @@ export function explainWindow(i: ExplainInput): WindowExplain {
     return { title: t('Why grey'), lines }
   }
 
-  const title = colourTitle(i.verdict.level)
+  // A limit the provider itself reports as reached is red wherever it is drawn — the status
+  // bar paints the alarm background for it whatever the percentage says — so that state names
+  // the colour and opens the explanation, and no pace rule is quoted for a colour it did not
+  // decide.
+  const reached = i.display === 'limitReached'
+  const title = reached ? t('Why red') : colourTitle(i.verdict.level)
   const clock = i.elapsed !== null && Number.isFinite(i.elapsed)
   const facts = clock ? factsLine(used, i.elapsed as number, i.verdict, i.percent) : null
-  if (i.verdict.level === 'error') {
+  if (reached || i.verdict.level === 'error') {
     const at = time(i.resetsAt)
+    if (reached) lines.push(t('The provider reports this limit as reached.'))
     // The state is part of the sentence, not a word dropped into a slot: "over the limit"
     // and "exhausted" take different grammar in another language.
-    if (i.display === 'overflow') {
-      lines.push(at
-        ? t('{0} % used — over the limit until the reset at {1}.', used, at)
-        : t('{0} % used — over the limit; this window reports no reset time.', used))
-    } else {
-      lines.push(at
-        ? t('{0} % used — exhausted until the reset at {1}.', used, at)
-        : t('{0} % used — exhausted; this window reports no reset time.', used))
+    if (i.verdict.level === 'error') {
+      if (i.display === 'overflow') {
+        lines.push(at
+          ? t('{0} % used — over the limit until the reset at {1}.', used, at)
+          : t('{0} % used — over the limit; this window reports no reset time.', used))
+      } else {
+        lines.push(at
+          ? t('{0} % used — exhausted until the reset at {1}.', used, at)
+          : t('{0} % used — exhausted; this window reports no reset time.', used))
+      }
     }
     if (facts) lines.push(facts)
   } else if (!clock || facts === null) {
@@ -273,7 +281,6 @@ export function explainWindow(i: ExplainInput): WindowExplain {
     if (i.verdict.measuring) lines.push(measuringLine(i, th))
     lines.push(ruleLine(th))
   }
-  if (i.display === 'limitReached') lines.push(t('The provider reports this limit as reached.'))
   if (staleLine) lines.push(staleLine)
   return { title, lines }
 }

@@ -13,7 +13,7 @@
 
 import { strict as assert } from 'node:assert'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { test } from 'node:test'
 import {
   ADAPTERS, LABEL, PROVIDER_NAME, SOURCES, SOURCE_TITLE, USAGE_PAGE, adapterFor, isKnownSource,
@@ -192,6 +192,33 @@ test('no module outside the registry spells a provider name out again', () => {
     }
   }
   assert.deepEqual(offenders, [], `provider names outside src/adapters:\n${offenders.join('\n')}`)
+})
+
+test('the provider pair is the registry list, never an array literal', () => {
+  // Eight sites used to write the pair out by hand: the default provider filter, the two
+  // per-provider settings maps, two diagnostics tables, the summary scope and the webview's
+  // provider chips. Each was a chance for the order to drift from the registry's — and each
+  // would have to be found again by hand the day a third provider is added. `SOURCES` is the
+  // list; the ids may only be spelled out where the registry itself defines them.
+  const ids = ADAPTERS.map((a) => a.id)
+  const quoted = '[\'"`](?:' + ids.join('|') + ')[\'"`]'
+  // An array literal of two or more provider ids, in any order, whatever the quotes.
+  const re = new RegExp('\\[\\s*(?:' + quoted + '\\s*,\\s*)+' + quoted + '\\s*\\]')
+  const offenders: string[] = []
+  for (const file of srcFiles(join(ROOT, 'src'))) {
+    // `types.ts` declares the union the ids come from; the registry is skipped by `srcFiles`.
+    if (file.endsWith(`${sep}types.ts`)) continue
+    const lines = withoutCommentLines(readFileSync(file, 'utf8')).split('\n')
+    lines.forEach((line, i) => {
+      if (re.test(line)) offenders.push(`${file.slice(ROOT.length + 1)}:${i + 1}: ${line.trim()}`)
+    })
+  }
+  assert.deepEqual(offenders, [], `write SOURCES instead:\n${offenders.join('\n')}`)
+  // The rule is only worth anything if the regex would still catch a relapse.
+  assert.equal(re.test("  providers: ['claude', 'codex'],"), true)
+  assert.equal(re.test('const s = ["codex","claude"] as Source[]'), true)
+  // A single id — a scope that really is one provider — is not a second table.
+  assert.equal(re.test("if (scope === 'claude') return ['claude']"), false)
 })
 
 test('the usage page URLs live only in the registry', () => {

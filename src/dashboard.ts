@@ -17,7 +17,7 @@
  */
 
 import * as vscode from 'vscode'
-import { SOURCE_TITLE } from './adapters'
+import { SOURCES, SOURCE_TITLE } from './adapters'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { ViewModel } from './viewModel'
 
@@ -873,7 +873,7 @@ function controls() {
   const restRanges = r.presets.length - presets.length;
   const chips = presets.map(p => '<button data-act="range" data-preset="' + p + '" aria-pressed="'
     + (r.preset === p) + '">' + esc(p) + '</button>').join('');
-  const providers = ['claude', 'codex'].map(s => '<button data-act="provider" data-src="' + s
+  const providers = ${JSON.stringify(SOURCES)}.map(s => '<button data-act="provider" data-src="' + s
     + '" aria-pressed="' + (vm.ui.providers.indexOf(s) >= 0) + '">' + esc(srcName(s))
     + '</button>').join('');
   // The table splits main and sub-agent rows per model; the filter does not, so the same

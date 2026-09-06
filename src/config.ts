@@ -18,13 +18,20 @@
  */
 
 /**
- * The one import this file makes.
+ * The two imports this file makes.
  *
  * `budget.ts` owns the shape of a budget *and* the rules that make one usable, and those
  * rules are the sanitising rules — a second copy here is exactly the drift the CONFIG_KEYS
  * parity test exists to catch. It is a pure module (no vscode, no fs, no clock) and it does
  * not import this file, so nothing circular follows from it.
+ *
+ * `adapters` is the provider registry, and the per-provider settings (`planName`,
+ * `planPrice`) are keyed by provider: spelling the pair out here would be a second registry
+ * in the file whose whole job is to have one rule per setting. It reaches this module's
+ * dependencies (fs, os, path via the quota readers) but not `vscode`, and it does not import
+ * this file either, so `sanitize` stays runnable without an extension host.
  */
+import { SOURCES } from './adapters'
 import { BudgetSpec, sanitizeBudgets } from './budget'
 
 export type { BudgetSpec }
@@ -484,16 +491,40 @@ function priceMap(raw: unknown): Record<string, CustomPrice> {
 }
 
 /**
- * The plan names, trimmed and cut at 40 characters like `labels` — the same rule, because it
- * is the same kind of value: a word the user chose that we print beside a provider title.
+ * One line of plain text out of whatever a settings file holds.
+ *
+ * The status-bar tooltip is markdown and prints the plan name inside a code span, so a
+ * backtick in the value closes that span early and the rest of the tooltip is rendered as
+ * the user's markup instead of ours. Control characters are the same defect one layer down:
+ * a line break splits a one-line label in two, and the invisible C0/C1 characters make a
+ * name look truncated for no reason a reader can see. So backticks are dropped, the
+ * whitespace controls (tab, the line breaks, NEL and the two Unicode separators) become a
+ * single space — `Max<newline>20x` stays two words rather than fusing into one — and the
+ * remaining control characters are removed. Nothing is added: what is left is the user's own
+ * text, only printable and on one line.
+ */
+function oneLine(v: string): string {
+  return v
+    .replace(/`/g, '')
+    .replace(/[\t\n\v\f\r\u0085\u2028\u2029]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+    .replace(/ {2,}/g, ' ')
+    .trim()
+}
+
+/**
+ * The plan names, cleaned, trimmed and cut at 40 characters like `labels` — the same rule,
+ * because it is the same kind of value: a word the user chose that we print beside a
+ * provider title. The cap is applied to the cleaned text, so stripped characters do not eat
+ * into the 40 a user has to spend; a cut that lands on a space is trimmed again.
  */
 function planNames(raw: unknown): { claude?: string; codex?: string } {
   const out: { claude?: string; codex?: string } = {}
   if (!isRecord(raw)) return out
-  for (const key of ['claude', 'codex'] as const) {
+  for (const key of SOURCES) {
     const v = raw[key]
     if (typeof v !== 'string') continue
-    const t = v.trim().slice(0, 40)
+    const t = oneLine(v).slice(0, 40).trim()
     if (t !== '') out[key] = t
   }
   return out
@@ -502,7 +533,7 @@ function planNames(raw: unknown): { claude?: string; codex?: string } {
 function planPrices(raw: unknown): { claude?: number; codex?: number } {
   const out: { claude?: number; codex?: number } = {}
   if (!isRecord(raw)) return out
-  for (const key of ['claude', 'codex'] as const) {
+  for (const key of SOURCES) {
     const n = raw[key]
     if (typeof n === 'number' && Number.isFinite(n) && n > 0) out[key] = n
   }

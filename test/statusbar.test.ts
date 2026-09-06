@@ -930,6 +930,22 @@ test('a plan name never reaches the tooltip as markup', () => {
   assert.ok(tip.includes('plan `**[x](http://e.example)**` (as configured)'), tip)
 })
 
+test('a backtick in the plan name cannot close the code span it is printed in', () => {
+  // The reported defect: `tokenPace.planName` is printed inside a code span, so a name that
+  // contains a backtick ended the span and the rest of the tooltip — the windows, the ages,
+  // the footnotes — was rendered as the user's own markup. `sanitize` now takes backticks
+  // and control characters out of the name, so the span the tooltip opens is the span it
+  // closes.
+  const ticked = cfg({ 'tokenPace.planName': { claude: 'Max `20x` **bold**' } })
+  const tip = quotaTooltip(state({ planType: null }), makeContext(input({ cfg: ticked })))
+  assert.ok(tip.includes('plan `Max 20x **bold**` (as configured)'), tip)
+  assert.equal((tip.match(/`/g) ?? []).length % 2, 0, tip)
+  // A name spanning two lines would break the tooltip's row layout just as thoroughly.
+  const wrapped = cfg({ 'tokenPace.planName': { claude: 'Max\n20x' } })
+  const two = quotaTooltip(state({ planType: null }), makeContext(input({ cfg: wrapped })))
+  assert.ok(two.includes('plan `Max 20x` (as configured)'), two)
+})
+
 test('the preview shows both context shapes and neither invents a share', () => {
   const texts = previewItems(cfg({}), NOW).map((m) => m.text).filter((t) => t.includes('ctx '))
   assert.deepEqual(texts, ['[preview] ctx 64%', '[preview] ctx 128K'])

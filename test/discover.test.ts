@@ -14,6 +14,22 @@ import { claudeLine, codexMeta, codexTokenCount, codexTurnContext, tmpDir } from
 /** Roots are module state; whatever a test sets, the next process step must not inherit. */
 after(() => { configureRoots() })
 
+/**
+ * A symlink where the platform hands one out. Windows needs a privilege for a real symlink
+ * and answers EPERM without it, so a directory link falls back to a junction — the same
+ * thing as far as `realpath` and the walker are concerned. `false` means this machine cannot
+ * make the link at all, and the test has to say so rather than fail on a missing privilege.
+ */
+function trySymlink(target: string, link: string, kind: 'dir' | 'file'): boolean {
+  for (const type of kind === 'dir' ? (['dir', 'junction'] as const) : (['file'] as const)) {
+    try {
+      fs.symlinkSync(target, link, type)
+      return true
+    } catch { /* the next kind, or none */ }
+  }
+  return false
+}
+
 test('explicit directories: multiple roots, deduped by spelling and trailing separators', () => {
   const dir = tmpDir('disc')
   const a = path.join(dir, 'a')
@@ -27,12 +43,15 @@ test('explicit directories: multiple roots, deduped by spelling and trailing sep
   assert.equal(discover.CODEX_ROOT, r.codex[0])
 })
 
-test('a symlinked duplicate of a root counts once (realpath identity)', () => {
+test('a symlinked duplicate of a root counts once (realpath identity)', (t) => {
   const dir = tmpDir('disc')
   const real = path.join(dir, 'real')
   fs.mkdirSync(path.join(real, 'projects'), { recursive: true })
   const link = path.join(dir, 'link')
-  fs.symlinkSync(real, link, 'dir')
+  if (!trySymlink(real, link, 'dir')) {
+    t.skip('this file system does not do symlinks')
+    return
+  }
   const r = configureRoots([real, link], [])
   assert.equal(r.claude.length, 1)
 })
@@ -67,7 +86,7 @@ test('environment overrides and tilde expansion drive the default roots', () => 
   }
 })
 
-test('findTranscripts walks recursively, matches by name, and never follows symlinks', async () => {
+test('findTranscripts walks recursively, matches by name, and never follows symlinks', async (t) => {
   const dir = tmpDir('disc')
   const root = path.join(dir, 'projects')
   fs.mkdirSync(path.join(root, 'p', 'sub'), { recursive: true })
@@ -77,10 +96,13 @@ test('findTranscripts walks recursively, matches by name, and never follows syml
   const outside = path.join(dir, 'outside')
   fs.mkdirSync(outside)
   fs.writeFileSync(path.join(outside, 'z.jsonl'), '')
-  fs.symlinkSync(outside, path.join(root, 'p', 'link'), 'dir')
-  fs.symlinkSync(path.join(outside, 'z.jsonl'), path.join(root, 'p', 'l.jsonl'), 'file')
+  const dirLink = trySymlink(outside, path.join(root, 'p', 'link'), 'dir')
+  const fileLink = trySymlink(path.join(outside, 'z.jsonl'), path.join(root, 'p', 'l.jsonl'), 'file')
   const found = await findTranscripts(root, isClaudeTranscript)
   assert.deepEqual(found, [path.join(root, 'p', 'a.jsonl'), path.join(root, 'p', 'sub', 'b.jsonl')])
+  // The walk is asserted everywhere; only the two links need a privilege this machine may
+  // not have, and a run that could not lay them proves less rather than nothing.
+  if (!dirLink || !fileLink) t.diagnostic('no symlinks here: the walk was checked without them')
   assert.deepEqual(await findTranscripts(path.join(dir, 'missing'), isClaudeTranscript), [])
 })
 

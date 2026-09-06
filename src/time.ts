@@ -297,6 +297,20 @@ function effectiveCycle(c: TimeConfig['hourCycle']): 'h12' | 'h23' {
   return c === 'h12' || c === 'h23' ? c : systemHourCycle()
 }
 
+/**
+ * One plain space, whatever ICU thinks this year.
+ *
+ * CLDR 42 (ICU 72) put a narrow no-break space before AM/PM in en-US; CLDR 48 (ICU 78) put
+ * the ordinary space back. Both ship inside the *same* Node major, so two machines running
+ * the same build print two different strings — and `package.nls.json` documents exactly one
+ * of them ("06:00 AM"). The character is invisible; a status-bar text that silently changes
+ * with a Node upgrade, and a settings example that then no longer matches what the user
+ * sees, are not.
+ */
+function plainSpaces(s: string): string {
+  return s.replace(/[\u202f\u00a0]/g, ' ')
+}
+
 /** "06:00" / "06:00 AM", with a weekday prefix when the day itself is in doubt. */
 export function formatTime(ms: number, cfg: TimeConfig, withWeekday = false): string {
   const zone = resolveZone(cfg.zone)
@@ -304,7 +318,7 @@ export function formatTime(ms: number, cfg: TimeConfig, withWeekday = false): st
   const f = formatter(`t|${zone ?? ''}|${cycle}`, () => new Intl.DateTimeFormat('en-US', {
     timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: cycle,
   }))
-  const time = f.format(ms)
+  const time = plainSpaces(f.format(ms))
   if (!withWeekday) return time
   const w = formatter(`w|${zone ?? ''}`, () => new Intl.DateTimeFormat('en-US', {
     timeZone: zone, weekday: 'short',

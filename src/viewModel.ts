@@ -249,7 +249,7 @@ export function defaultUiState(cfg: Config): UiState {
   return {
     range: cfg.dashboard.defaultRange as RangePreset,
     sort: { key: 'usage', dir: 'desc' },
-    providers: ['claude', 'codex'],
+    providers: [...SOURCES],
     models: [],
     metric: 'usage',
     compositionCache: 'all',
@@ -1032,7 +1032,7 @@ export function buildViewModel(input: VmInput): ViewModel {
     multiplier: cfg.pricing.multiplier,
     unknownModel: cfg.unknownModelPricing,
   }
-  const sources: Source[] = ui.providers.length > 0 ? [...ui.providers] : ['claude', 'codex']
+  const sources: Source[] = ui.providers.length > 0 ? [...ui.providers] : [...SOURCES]
   const ctx: StatsCtx = {
     agg, tcfg, pricing, now, sources, models: ui.models, showCost: cfg.showCost,
     // Stated rather than inferred: with attribution off the session table is empty, and the
@@ -1247,7 +1247,7 @@ function dataQuality(
     lowerBoundShare: percentOf(cost.unpricedTokens + cost.fastUnpricedTokens, totalTokens),
     unpricedModels: cost.unpricedModels,
     familyPriced: cost.familyPriced,
-    quota: (['claude', 'codex'] as Source[]).map((source) => ({
+    quota: SOURCES.map((source) => ({
       source,
       candidates: input.candidates[source] ?? [],
       drift: input.drift[source] ?? [],

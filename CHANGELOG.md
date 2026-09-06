@@ -3,6 +3,62 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.3.0 — 2026-09-06
+
+### Added
+
+* **Every quota card explains its colour.** Hovering a window on a quota card — or reaching it
+  with the keyboard — opens the same kind of panel the key figures have: how much of the window
+  is used and how much of its time has passed, the resulting distance from pace, the rule that
+  painted the card ("Yellow as soon as the reading is ahead of pace; green at or behind"), and,
+  where they apply, the measuring phase with its end time, exhaustion, a window without a reset
+  clock, or a stale reading with its age. The markdown report prints the same line under each
+  window and the Quick Pick shows it as the item detail.
+* **The sparkline answers the mouse.** Moving over a quota sparkline marks the nearest reading
+  and names it — day, time and percent, plus "reset" where a cycle ended; the sparkline can be
+  focused and stepped through with the arrow keys, Escape hides the label. The label is built in
+  the view model with the configured time zone and hour cycle.
+* **Prompt-cache state on the Claude card.** When the status-line bridge is connected, the
+  Claude card ends with the prompt cache's state: warm with its expiry countdown and TTL class,
+  cold, or expired at the time of the last reading, with the hit ratio where the payload carries
+  one. The same line appears in the markdown report, the Quick Pick and the status-bar tooltip.
+  Without the bridge there is no line — nothing is estimated.
+* **A smoke test in a real VS Code.** `npm run test:e2e` downloads VS Code into `.vscode-test/`,
+  starts it with an isolated profile and an empty home, and checks that the extension activates,
+  every contributed command is registered, the status-bar preview renders, a settings change
+  reaches the status bar without a reload, and the dashboard command opens the dashboard. A
+  separate workflow runs it on every push. `activate()` now returns a small API
+  (`version`, `statusBar()`) for this test.
+* **The CI names the failing tests.** When the test step fails, the job summary lists every
+  `not ok` line with its diagnostic block, so a red run can be read without opening the log.
+  Dependabot watches npm and the workflow actions weekly.
+
+### Changed
+
+* **Ahead of pace is yellow at once.** The tolerance band that kept a card green while it was up
+  to five points ahead of pace is gone: `tokenPace.pace.tolerancePoints` now defaults to 0 and
+  applies with every sensitivity, so a window that says "1 % ahead of pace" is yellow and one
+  that says "0 % ahead" never is. The sensitivity presets keep only the minimum elapsed share
+  before a verdict (relaxed 5 %, normal 3 %, strict 1 %); the measuring phase ends early once
+  usage passes 10 %. With graded levels the amber step starts at 15 points ahead.
+* **The reset stroke is vertical.** Where a cycle ends, the neutral stroke drops straight down —
+  at the announced reset time when it lies between two readings, otherwise at the first reading
+  of the new cycle; the line holds the old value until then and continues from the new reading's
+  value, never from an invented zero. A reading at which the value rose is an ordinary segment.
+
+### Fixed
+
+* **A Codex window that ends under five points now closes its cycle.** A pinned window whose
+  reset time then rides along with the clock again was invisible to the reset rule when the fall
+  was small; the rule now recognises a reset that passed between two readings, so the reset
+  history, the thinning of repeats, the forecast split and the sparkline agree.
+* **A backtick in the plan name** no longer ends the code span in the status-bar tooltip:
+  `tokenPace.planName` is read without backticks, control characters and line breaks.
+* **Windows test runs.** The suite failed on Windows since 1.2.1 on two counts that the Linux and
+  macOS runners could not show: fixtures checked out with CRLF line endings (a `.gitattributes`
+  now pins LF) and a time formatter that printed a narrow no-break space before "AM" on some ICU
+  builds (it prints an ordinary space everywhere now).
+
 ## 1.2.3 — 2026-09-05
 
 ### Changed

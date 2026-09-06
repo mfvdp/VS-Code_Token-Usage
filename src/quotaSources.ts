@@ -12,6 +12,7 @@
  */
 
 import { adapterFor } from './adapters'
+import { t } from './i18n'
 import { StatuslineReading } from './quota'
 import { CodexRateLimitsSnapshot, QuotaState, Source } from './types'
 
@@ -181,7 +182,7 @@ export function bestState(source: Source, inputs: SourceInputs, now: number): Be
   return {
     state: {
       source, ok: false, fetchedAt: null, planType: null, windows: [],
-      problem: 'No quota source is enabled', problemKind: 'quotaOff',
+      problem: t('No quota source is enabled'), problemKind: 'quotaOff',
     },
     candidates,
     identityHint: null,

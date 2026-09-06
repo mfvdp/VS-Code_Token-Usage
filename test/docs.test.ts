@@ -384,17 +384,17 @@ function problemKinds(): string[] {
 }
 
 /**
- * `PROBLEM_ACTION` is module-private (it is an implementation detail of `buildViewModel`),
- * so it is read from the source text rather than imported. That still fails loudly when the
- * table drifts, which is the point.
+ * The repair table is read from the source text rather than called, so the documented
+ * mapping is checked against what a reader of `viewModel.ts` sees. The labels go through
+ * `t()` since the German build, so the English message is read out of the call.
  */
-function problemActions(): Record<string, { label: string; command: string }> {
+function problemActionTable(): Record<string, { label: string; command: string }> {
   const src = readDoc('src/viewModel.ts')
-  const at = src.indexOf('const PROBLEM_ACTION')
-  assert.ok(at >= 0, 'src/viewModel.ts no longer defines PROBLEM_ACTION')
+  const at = src.indexOf('export function problemActions')
+  assert.ok(at >= 0, 'src/viewModel.ts no longer defines problemActions')
   const body = src.slice(at, src.indexOf('\n}', at))
   const out: Record<string, { label: string; command: string }> = {}
-  for (const m of body.matchAll(/(\w+):\s*\{\s*label:\s*'([^']*)'\s*,\s*command:\s*'([^']*)'\s*\}/g)) {
+  for (const m of body.matchAll(/(\w+):\s*\{\s*label:\s*t\('([^']*)'\)\s*,\s*command:\s*'([^']*)'\s*\}/g)) {
     out[m[1]] = { label: m[2], command: m[3] }
   }
   return out
@@ -442,10 +442,10 @@ test('every ProblemKind has exactly one repair action, and the code holds that t
   assert.deepEqual(PROBLEM_TABLE.map((r) => r[0]).sort(), [...kinds].sort(),
     'PROBLEM_TABLE and the ProblemKind union have drifted apart')
 
-  const actual = problemActions()
+  const actual = problemActionTable()
   const expected: Record<string, { label: string; command: string }> = {}
   for (const [kind, label, command] of PROBLEM_TABLE) expected[kind] = { label, command }
-  assert.deepEqual(actual, expected, 'PROBLEM_ACTION in src/viewModel.ts no longer matches the documented table')
+  assert.deepEqual(actual, expected, 'problemActions() in src/viewModel.ts no longer matches the documented table')
 })
 
 test('docs/status-bar-states.md lists the same problem table', () => {

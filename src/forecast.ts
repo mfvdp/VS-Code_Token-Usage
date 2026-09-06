@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { locale, t } from './i18n'
 import { turnedOver } from './resetRule'
 import { Forecast, ForecastState, QuotaSample, QuotaWindow } from './types'
 
@@ -82,7 +83,7 @@ const CALIBRATION_MIN_POINTS = 5
  * usable (and testable) on its own.
  */
 function defaultTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return new Date(ms).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 function duration(ms: number): string {
@@ -195,8 +196,8 @@ function sustainableOf(percent: number, resetsAt: number | null, now: number): n
  * the same instant, which read as two different resets.
  */
 function fullText(resetsAt: number | null, now: number): string {
-  if (resetsAt === null || !Number.isFinite(resetsAt) || resetsAt <= now) return 'full'
-  return 'full until the reset'
+  if (resetsAt === null || !Number.isFinite(resetsAt) || resetsAt <= now) return t('full')
+  return t('full until the reset')
 }
 
 /**
@@ -246,31 +247,35 @@ export function forecast(
 
   // Stale beats measuring: a series that stopped an hour ago is not being measured.
   if (cfg.staleAfterMs > 0 && now - newest.t > cfg.staleAfterMs) {
-    return { ...withRate(blank('stale', 'stale reading')), basis }
+    return { ...withRate(blank('stale', t('stale reading'))), basis }
   }
   // The reset has passed but the newest reading still predates it: the percentage belongs
   // to a window that no longer exists, so extrapolating it would land an ETA after a reset
   // that already happened. Same rule as `pace.windowDisplay`'s `resetDue`, so the forecast
   // row and the quota card agree; a reading taken after the reset still forecasts.
   if (w.resetsAt !== null && Number.isFinite(w.resetsAt) && w.resetsAt <= now && newest.t < w.resetsAt) {
-    return { ...withRate(blank('stale', 'reset due')), basis }
+    return { ...withRate(blank('stale', t('reset due'))), basis }
   }
   if (elapsed !== null && Number.isFinite(elapsed) && elapsed < cfg.minElapsedPercent) {
-    return { ...withRate(blank('measuring', 'measuring · window just started')), basis }
+    return { ...withRate(blank('measuring', t('measuring · window just started'))), basis }
   }
-  const noun = fit.length === 1 ? 'reading' : 'readings'
+  // Singular and plural are two whole messages: a noun glued into a sentence takes a
+  // different form in another language, and the count decides which.
+  const measuringText = fit.length === 1
+    ? t('measuring · {0} reading over {1}', fit.length, duration(spanMs))
+    : t('measuring · {0} readings over {1}', fit.length, duration(spanMs))
   if (fit.length < cfg.minSamples || spanMs < cfg.minSpanMs) {
-    return { ...withRate(blank('measuring', `measuring · ${fit.length} ${noun} over ${duration(spanMs)}`)), basis }
+    return { ...withRate(blank('measuring', measuringText)), basis }
   }
 
   const slope = slopePerHour(fit)
   if (slope === null) {
-    return { ...withRate(blank('measuring', `measuring · ${fit.length} ${noun} over ${duration(spanMs)}`)), basis }
+    return { ...withRate(blank('measuring', measuringText)), basis }
   }
   const confidence = confidenceOf(fit.length, spanMs)
   if (slope <= cfg.idleRate) {
     return {
-      ...withRate(blank('idle', `idle · no change over ${duration(spanMs)}`)),
+      ...withRate(blank('idle', t('idle · no change over {0}', duration(spanMs)))),
       ratePerHour: slope, confidence, basis,
     }
   }
@@ -285,14 +290,21 @@ export function forecast(
     return {
       state: 'resetsFirst', ratePerHour: slope, etaMs: null, endPercent,
       sustainablePerHour: sustainable, confidence, basis,
-      text: `~ends at ${percentText(endPercent as number)} when it resets`,
+      text: t('~ends at {0} when it resets', percentText(endPercent as number)),
     }
   }
   return {
     state: 'eta', ratePerHour: slope, etaMs, endPercent,
     sustainablePerHour: sustainable, confidence, basis,
-    text: `~empty in ${duration(etaMs - now)} (${fmtTime(etaMs)}) · ${confidence} confidence`,
+    text: etaText(confidence, duration(etaMs - now), fmtTime(etaMs)),
   }
+}
+
+/** The ETA sentence, one whole message per confidence — never a word dropped into a slot. */
+function etaText(confidence: 'low' | 'medium' | 'high', span: string, at: string): string {
+  if (confidence === 'high') return t('~empty in {0} ({1}) · high confidence', span, at)
+  if (confidence === 'medium') return t('~empty in {0} ({1}) · medium confidence', span, at)
+  return t('~empty in {0} ({1}) · low confidence', span, at)
 }
 
 /**
@@ -303,7 +315,7 @@ export function forecast(
  */
 export function lockoutText(f: Forecast, now: number, fmtTime: (ms: number) => string = defaultTime): string | null {
   if (f.state !== 'eta' || f.etaMs === null || !Number.isFinite(f.etaMs) || f.etaMs <= now) return null
-  return `locks ${fmtTime(f.etaMs)}`
+  return t('locks {0}', fmtTime(f.etaMs))
 }
 
 /**

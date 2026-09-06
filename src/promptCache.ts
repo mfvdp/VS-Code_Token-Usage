@@ -16,6 +16,7 @@
  * the caller's render clock says and a test can pin it.
  */
 
+import { t } from './i18n'
 import type { PromptCacheReading } from './quotaSources'
 
 export interface PromptCacheLine {
@@ -60,22 +61,32 @@ export function promptCacheText(
   const expires = r.expiresAt !== null && Number.isFinite(r.expiresAt) ? r.expiresAt : null
   // Past the stated expiry the "warm" of the payload is history: the line says when it
   // ended and that this is the last thing the status line reported, not a live state.
+  // Each spelling of the line is one whole message: a sentence a translator only ever sees
+  // in halves cannot be put into another language's word order.
   if (expires !== null && now >= expires) {
+    const at = formatTime(expires)
     return {
-      text: `prompt cache · expired at ${formatTime(expires)} (last reading)${ratio ? ` · hit ratio ${ratio}` : ''}`,
+      text: ratio
+        ? t('prompt cache · expired at {0} (last reading) · hit ratio {1}', at, ratio)
+        : t('prompt cache · expired at {0} (last reading)', at),
       expired: true,
     }
   }
   if (r.warm === false) {
-    return { text: `prompt cache cold${ratio ? ` · hit ratio ${ratio}` : ''}`, expired: false }
+    return {
+      text: ratio ? t('prompt cache cold · hit ratio {0}', ratio) : t('prompt cache cold'),
+      expired: false,
+    }
   }
   // Warm, or a payload that did not say: every part of the line is printed, and every part
   // the payload left out is a dash — never a value inferred from the others.
-  const state = r.warm === true ? 'warm' : '–'
   const countdown = expires === null ? '–' : countdownText(expires - now)
   const ttl = r.ttl !== null && r.ttl in TTL_WORD ? TTL_WORD[r.ttl] : '–'
+  const hit = ratio ?? '–'
   return {
-    text: `prompt cache ${state} · expires in ${countdown} (${ttl} TTL) · hit ratio ${ratio ?? '–'}`,
+    text: r.warm === true
+      ? t('prompt cache warm · expires in {0} ({1} TTL) · hit ratio {2}', countdown, ttl, hit)
+      : t('prompt cache – · expires in {0} ({1} TTL) · hit ratio {2}', countdown, ttl, hit),
     expired: false,
   }
 }

@@ -17,6 +17,7 @@
 import { execFile } from 'child_process'
 import { findCodexBinary, readRateLimitsOnce } from './appServer'
 import { isCredentialsError, loadCredentials } from './credentials'
+import { t } from './i18n'
 import { claudeStateFromBody, codexStateFromBody } from './quota'
 import { ProblemKind, QuotaState, Source } from './types'
 
@@ -119,19 +120,19 @@ interface NetworkFailure {
 function classify(err: unknown): NetworkFailure {
   const e = err as { name?: string; code?: string; message?: string; cause?: { code?: string; message?: string } }
   if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
-    return { problem: 'timeout while fetching', kind: 'offline' }
+    return { problem: t('timeout while fetching'), kind: 'offline' }
   }
   const code = String(e?.code ?? e?.cause?.code ?? '')
   const message = `${e?.message ?? ''} ${e?.cause?.message ?? ''}`
   if (/CERT|TLS|SSL|self.signed|UNABLE_TO_VERIFY/i.test(`${code} ${message}`)) {
-    return { problem: 'TLS error — possibly a proxy intercepting TLS', kind: 'offline' }
+    return { problem: t('TLS error — possibly a proxy intercepting TLS'), kind: 'offline' }
   }
   if (['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ECONNRESET', 'ENETUNREACH', 'EHOSTUNREACH'].includes(code)) {
-    return { problem: 'network error while fetching', kind: 'offline' }
+    return { problem: t('network error while fetching'), kind: 'offline' }
   }
   // Unclassified failures are reported as unreachable rather than guessed at: the
   // exception text may not be shown, so a wrong cause would be worse than none.
-  return { problem: 'fetch failed — provider not reachable', kind: 'offline' }
+  return { problem: t('fetch failed — provider not reachable'), kind: 'offline' }
 }
 
 export async function pollClaude(failCount: number, opts: PollOptions): Promise<PollResult> {
@@ -168,7 +169,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     return {
       state: null,
       retryAfterSeconds: null,
-      problem: 'credentials rejected — sign in to Claude Code again',
+      problem: t('credentials rejected — sign in to Claude Code again'),
       problemKind: 'unauthorized',
     }
   }
@@ -178,7 +179,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     return {
       state: null,
       retryAfterSeconds: null,
-      problem: 'HTTP 403 — may mean a Team/Enterprise account without a usage endpoint; token counts keep working',
+      problem: t('HTTP 403 — may mean a Team/Enterprise account without a usage endpoint; token counts keep working'),
       problemKind: 'forbidden',
     }
   }
@@ -186,7 +187,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     return {
       state: null,
       retryAfterSeconds: backoff(failCount + 1, BACKOFF_NET_BASE_S, BACKOFF_NET_MAX_S),
-      problem: 'proxy requires authentication (HTTP 407)',
+      problem: t('proxy requires authentication (HTTP 407)'),
       problemKind: 'offline',
     }
   }
@@ -198,7 +199,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     return {
       state: null,
       retryAfterSeconds: wait,
-      problem: `HTTP ${res.status} — backing off before the next attempt`,
+      problem: t('HTTP {0} — backing off before the next attempt', res.status),
       problemKind: 'retry',
     }
   }
@@ -216,7 +217,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     body = await res.json()
   } catch {
     return {
-      state: null, retryAfterSeconds: null, problem: 'Response is not valid JSON', problemKind: 'empty',
+      state: null, retryAfterSeconds: null, problem: t('Response is not valid JSON'), problemKind: 'empty',
     }
   }
   const state = claudeStateFromBody(body, Math.floor(Date.now() / 1000), 'poll')
@@ -225,7 +226,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     : {
       state: null,
       retryAfterSeconds: null,
-      problem: 'Response contained no quota windows',
+      problem: t('Response contained no quota windows'),
       problemKind: 'empty',
       raw: body,
     }
@@ -235,7 +236,7 @@ export async function pollCodex(failCount: number, opts: { binary?: string }): P
   const bin = findCodexBinary(opts.binary)
   if (!bin) {
     return {
-      state: null, retryAfterSeconds: null, problem: 'codex executable not found', problemKind: 'noBinary',
+      state: null, retryAfterSeconds: null, problem: t('codex executable not found'), problemKind: 'noBinary',
     }
   }
   const body = await readRateLimitsOnce(bin)
@@ -253,7 +254,7 @@ export async function pollCodex(failCount: number, opts: { binary?: string }): P
     : {
       state: null,
       retryAfterSeconds: null,
-      problem: 'app-server returned no quota windows',
+      problem: t('app-server returned no quota windows'),
       problemKind: 'empty',
       raw: body,
     }

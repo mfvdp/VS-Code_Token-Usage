@@ -138,6 +138,15 @@ test('a window still measuring says until when, and what usage would end the dou
   assert.equal(paceVerdict(cap + 1, 0, cfgOf(BAND)).measuring, false)
   // Without a measuring phase there is nothing to announce, and no cap to name.
   const none: EffectivePace = { tolerancePoints: 5, minElapsedPercent: 0, levels: 'binary' }
+  // No window length and no reset: the phase is still named, without a clock time in it.
+  const noClock = explain(3, 4.95, BAND, { resetsAt: null, windowMinutes: null })
+  assert.equal(noClock.lines[1],
+    'Measuring until 3 % of the window has passed; no verdict before that unless usage exceeds 10 %.')
+  const noCap = explain(3, 4.95, { ...BAND, minElapsedPercent: 5 },
+    { resetsAt: null, windowMinutes: null, verdict: paceVerdict(3, 4.95, cfgOf({ ...BAND, minElapsedPercent: 5 })) })
+  assert.equal(noCap.lines.some((l) => l === 'Measuring until 5 % of the window has passed; no verdict before that.'),
+    false, JSON.stringify(noCap.lines))
+
   assert.equal(paceThresholds(none).measuringCap, null)
   assert.equal(explain(3, 4.95, none).lines.some((l) => l.startsWith('Measuring')), false)
 })

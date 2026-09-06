@@ -21,6 +21,7 @@
  * that names a band the verdict no longer applies is worse than none.
  */
 
+import { t } from './i18n'
 import { PaceConfig, paceVerdict, WindowDisplay } from './pace'
 import { PaceLevel, PaceVerdict } from './types'
 
@@ -116,8 +117,21 @@ export function paceThresholds(pace: EffectivePace): PaceThresholds {
   return { yellowFrom, amberFrom: pace.levels === 'graded' ? amberFrom : null, measuringCap }
 }
 
-/** The colours the bar paints per level — the words the README uses for them. */
-const COLOUR: Record<PaceLevel, string> = { ok: 'green', warn: 'yellow', warn2: 'amber', error: 'red' }
+/**
+ * The heading names the colour the bar is wearing — the words the README uses for them.
+ *
+ * A function, not a table: `t()` needs its message as a literal, and the colour is only ever
+ * read as part of the heading, so the whole heading is the key a translator sees.
+ */
+function colourTitle(level: PaceLevel): string {
+  switch (level) {
+    case 'ok': return t('Why green')
+    case 'warn': return t('Why yellow')
+    case 'warn2': return t('Why amber')
+    case 'error': return t('Why red')
+    default: return t('Why this colour')
+  }
+}
 
 /** A threshold as the settings show it: whole numbers plain, anything else to one decimal. */
 function figure(n: number): string {
@@ -142,25 +156,34 @@ function ageWords(min: number): string {
  */
 function gapWords(points: number): string {
   const n = Math.round(Math.abs(points))
-  if (n === 0) return 'on pace'
-  return points > 0 ? `${n} % ahead of pace` : `${n} % behind pace`
+  if (n === 0) return t('on pace')
+  return points > 0 ? t('{0} % ahead of pace', n) : t('{0} % behind pace', n)
 }
 
 function factsLine(used: number, elapsed: number, verdict: PaceVerdict, percent: number): string {
   const points = verdict.points !== null && Number.isFinite(verdict.points) ? verdict.points : percent - elapsed
-  return `Used ${used} % of the window; ${Math.round(elapsed)} % of its time has passed → ${gapWords(points)}.`
+  return t('Used {0} % of the window; {1} % of its time has passed → {2}.',
+    used, Math.round(elapsed), gapWords(points))
 }
 
-function ruleLine(t: PaceThresholds): string {
+function ruleLine(th: PaceThresholds): string {
   let s: string
-  if (t.yellowFrom === null) s = 'No reading ahead of pace turns this bar yellow with the configured band.'
-  else if (t.yellowFrom <= 1) s = 'Yellow as soon as the reading is ahead of pace; green at or behind.'
-  else s = `Yellow when more than ${t.yellowFrom - 1} % ahead of pace (your tolerance band); green at or below that.`
-  if (t.amberFrom !== null) s += ` Amber from ${t.amberFrom} % ahead.`
+  if (th.yellowFrom === null) s = t('No reading ahead of pace turns this bar yellow with the configured band.')
+  else if (th.yellowFrom <= 1) s = t('Yellow as soon as the reading is ahead of pace; green at or behind.')
+  else s = t('Yellow when more than {0} % ahead of pace (your tolerance band); green at or below that.', th.yellowFrom - 1)
+  // Two whole sentences joined by a space, never a translated fragment glued into one.
+  if (th.amberFrom !== null) s += ` ${t('Amber from {0} % ahead.', th.amberFrom)}`
   return s
 }
 
-function measuringLine(i: ExplainInput, t: PaceThresholds): string {
+/**
+ * The measuring phase in one sentence.
+ *
+ * Four spellings rather than one built from pieces: the clock time and the usage cap are
+ * each optional, and a sentence a translator only ever sees in halves cannot be put into
+ * German word order.
+ */
+function measuringLine(i: ExplainInput, th: PaceThresholds): string {
   const span = i.windowMinutes !== null && Number.isFinite(i.windowMinutes) && i.windowMinutes > 0
     ? i.windowMinutes * 60_000
     : null
@@ -169,9 +192,17 @@ function measuringLine(i: ExplainInput, t: PaceThresholds): string {
   const at = span !== null && i.resetsAt !== null && Number.isFinite(i.resetsAt)
     ? i.formatTime(i.resetsAt - span + (span * i.pace.minElapsedPercent) / 100)
     : null
-  return `Measuring until ${figure(i.pace.minElapsedPercent)} % of the window has passed`
-    + `${at ? ` (${at})` : ''}; no verdict before that`
-    + `${t.measuringCap !== null ? ` unless usage exceeds ${t.measuringCap} %` : ''}.`
+  const share = figure(i.pace.minElapsedPercent)
+  if (at !== null) {
+    return th.measuringCap !== null
+      ? t('Measuring until {0} % of the window has passed ({1}); no verdict before that unless usage exceeds {2} %.',
+        share, at, th.measuringCap)
+      : t('Measuring until {0} % of the window has passed ({1}); no verdict before that.', share, at)
+  }
+  return th.measuringCap !== null
+    ? t('Measuring until {0} % of the window has passed; no verdict before that unless usage exceeds {1} %.',
+      share, th.measuringCap)
+    : t('Measuring until {0} % of the window has passed; no verdict before that.', share)
 }
 
 /**
@@ -184,52 +215,65 @@ function measuringLine(i: ExplainInput, t: PaceThresholds): string {
  */
 export function explainWindow(i: ExplainInput): WindowExplain {
   const staleLine = i.ageMinutes !== null && Number.isFinite(i.ageMinutes) && i.ageMinutes > i.staleAfterMinutes
-    ? `The reading is ${ageWords(i.ageMinutes)} old (stale after ${i.staleAfterMinutes} min); the colour may lag.`
+    ? t('The reading is {0} old (stale after {1} min); the colour may lag.',
+      ageWords(i.ageMinutes), i.staleAfterMinutes)
     : null
   const time = (ms: number | null): string | null =>
     (ms !== null && Number.isFinite(ms) ? i.formatTime(ms) : null)
 
   if (!Number.isFinite(i.percent)) {
     return {
-      title: 'Why no colour',
-      lines: ['The reading carries no usable percentage, so nothing is judged.', ...(staleLine ? [staleLine] : [])],
+      title: t('Why no colour'),
+      lines: [t('The reading carries no usable percentage, so nothing is judged.'), ...(staleLine ? [staleLine] : [])],
     }
   }
   const used = Math.round(i.percent)
   const lines: string[] = []
-  if (i.display === 'unlimited' || i.verdict.text === 'unlimited') {
-    lines.push('This window has no limit, so there is no share to judge and no pace.')
+  // The unlimited verdict is compared against the very message it was built from, so the
+  // check holds in every language: both sides come out of the same bundle entry.
+  if (i.display === 'unlimited' || i.verdict.text === t('unlimited')) {
+    lines.push(t('This window has no limit, so there is no share to judge and no pace.'))
     if (staleLine) lines.push(staleLine)
-    return { title: 'Why no colour', lines }
+    return { title: t('Why no colour'), lines }
   }
   if (i.display === 'resetDue') {
     const at = time(i.resetsAt)
-    lines.push(`The stated reset${at ? ` (${at})` : ''} has passed and no reading since has caught up: `
-      + `the ${used} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.`)
+    lines.push(at
+      ? t('The stated reset ({0}) has passed and no reading since has caught up: the {1} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.',
+        at, used)
+      : t('The stated reset has passed and no reading since has caught up: the {0} % belongs to the window before it, so the bar stays neutral until a newer reading arrives.',
+        used))
     if (staleLine) lines.push(staleLine)
-    return { title: 'Why grey', lines }
+    return { title: t('Why grey'), lines }
   }
 
-  const title = `Why ${COLOUR[i.verdict.level] ?? 'this colour'}`
+  const title = colourTitle(i.verdict.level)
   const clock = i.elapsed !== null && Number.isFinite(i.elapsed)
   const facts = clock ? factsLine(used, i.elapsed as number, i.verdict, i.percent) : null
   if (i.verdict.level === 'error') {
-    const word = i.display === 'overflow' ? 'over the limit' : 'exhausted'
     const at = time(i.resetsAt)
-    lines.push(at
-      ? `${used} % used — ${word} until the reset at ${at}.`
-      : `${used} % used — ${word}; this window reports no reset time.`)
+    // The state is part of the sentence, not a word dropped into a slot: "over the limit"
+    // and "exhausted" take different grammar in another language.
+    if (i.display === 'overflow') {
+      lines.push(at
+        ? t('{0} % used — over the limit until the reset at {1}.', used, at)
+        : t('{0} % used — over the limit; this window reports no reset time.', used))
+    } else {
+      lines.push(at
+        ? t('{0} % used — exhausted until the reset at {1}.', used, at)
+        : t('{0} % used — exhausted; this window reports no reset time.', used))
+    }
     if (facts) lines.push(facts)
   } else if (!clock || facts === null) {
-    lines.push(`Used ${used} % of the window.`)
-    lines.push('This window reports no reset time, so there is no pace; the colour follows the level only.')
+    lines.push(t('Used {0} % of the window.', used))
+    lines.push(t('This window reports no reset time, so there is no pace; the colour follows the level only.'))
   } else {
-    const t = paceThresholds(i.pace)
+    const th = paceThresholds(i.pace)
     lines.push(facts)
-    if (i.verdict.measuring) lines.push(measuringLine(i, t))
-    lines.push(ruleLine(t))
+    if (i.verdict.measuring) lines.push(measuringLine(i, th))
+    lines.push(ruleLine(th))
   }
-  if (i.display === 'limitReached') lines.push('The provider reports this limit as reached.')
+  if (i.display === 'limitReached') lines.push(t('The provider reports this limit as reached.'))
   if (staleLine) lines.push(staleLine)
   return { title, lines }
 }

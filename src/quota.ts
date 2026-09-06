@@ -16,6 +16,7 @@ import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
+import { locale, t } from './i18n'
 import {
   CodexRateLimitsSnapshot, ExtraUsage, ProblemKind, QuotaOrigin, QuotaState, QuotaWindow, Source,
   WindowKind,
@@ -396,7 +397,7 @@ export function claudeStateFromBody(
   if (origin) state.origin = origin
   if (drift.length) state.drift = drift
   if (!state.ok) {
-    state.problem = 'Response contained no quota windows'
+    state.problem = t('Response contained no quota windows')
     state.problemKind = 'empty'
   }
   return state
@@ -534,7 +535,7 @@ export function codexStateFromBody(
   if (origin) state.origin = origin
   if (drift.length) state.drift = drift
   if (!state.ok) {
-    state.problem = 'Response contained no quota windows'
+    state.problem = t('Response contained no quota windows')
     state.problemKind = 'empty'
   }
   return state
@@ -590,7 +591,7 @@ export function codexStateFromTranscript(snaps: CodexRateLimitsSnapshot[]): Quot
     return am - bm || (a.windowMinutes ?? 1e9) - (b.windowMinutes ?? 1e9)
   })
   if (windows.length === 0) {
-    return problemState('codex', 'empty', 'No rate limits in the transcripts yet')
+    return problemState('codex', 'empty', t('No rate limits in the transcripts yet'))
   }
   return {
     source: 'codex',
@@ -641,21 +642,21 @@ function readCacheFile(file: string): CacheFile | null {
  */
 function cacheEnvelope(source: Source, file: string, now: number): QuotaState | CacheFile {
   const r = readCacheFile(file)
-  if (!r) return problemState(source, 'noFile', `No quota file at ${file}`)
+  if (!r) return problemState(source, 'noFile', t('No quota file at {0}', file))
   const fetchedAt = num(r.outer?.fetched_at)
   const version = num(r.outer?.schema_version) ?? 0
   if (version > CACHE_SCHEMA_VERSION) {
     return problemState(source, 'unknown',
-      `Cache file schema_version ${version} is newer than this build reads`, fetchedAt)
+      t('Cache file schema_version {0} is newer than this build reads', version), fetchedAt)
   }
   const blockedUntil = num(r.outer?.blocked_until) ?? 0
   if (blockedUntil > now / 1000) {
     return problemState(source, 'paused',
-      `Poller paused until ${new Date(blockedUntil * 1000).toLocaleTimeString('en-US')}`, fetchedAt)
+      t('Poller paused until {0}', new Date(blockedUntil * 1000).toLocaleTimeString(locale())), fetchedAt)
   }
   if (!r.body) {
     return problemState(source, 'empty',
-      `Empty response (fail_count ${r.outer?.fail_count ?? '?'})`, fetchedAt)
+      t('Empty response (fail_count {0})', String(r.outer?.fail_count ?? '?')), fetchedAt)
   }
   return r
 }
@@ -742,27 +743,27 @@ export interface ClaudeJsonReading {
 export function readClaudeJsonUtilization(file: string, now = Date.now()): ClaudeJsonReading {
   let txt: string
   try { txt = fs.readFileSync(file, 'utf8') } catch {
-    return { state: problemState('claude', 'noFile', `No ${file}`), identityHint: null }
+    return { state: problemState('claude', 'noFile', t('No {0}', file)), identityHint: null }
   }
   let parsed: any
   try { parsed = JSON.parse(txt) } catch {
-    return { state: problemState('claude', 'empty', 'claude.json is not valid JSON'), identityHint: null }
+    return { state: problemState('claude', 'empty', t('claude.json is not valid JSON')), identityHint: null }
   }
   const cached = parsed?.cachedUsageUtilization
   if (!cached || typeof cached !== 'object') {
-    return { state: problemState('claude', 'empty', 'No cachedUsageUtilization in claude.json'), identityHint: null }
+    return { state: problemState('claude', 'empty', t('No cachedUsageUtilization in claude.json')), identityHint: null }
   }
   const uuid = str(cached.accountUuid)
   const identityHint = uuid ? sha8(uuid) : null
   const fetchedAtMs = num(cached.fetchedAtMs)
   if (fetchedAtMs === null) {
-    return { state: problemState('claude', 'empty', 'cachedUsageUtilization without a timestamp'), identityHint }
+    return { state: problemState('claude', 'empty', t('cachedUsageUtilization without a timestamp')), identityHint }
   }
   if (now - fetchedAtMs > CLAUDE_JSON_MAX_AGE_MS) {
     // Older than a day says nothing about the running window — discarded, and the
     // reason is kept for the data-quality list rather than shown as a figure.
     return {
-      state: problemState('claude', 'unknown', 'stale: cachedUsageUtilization is older than 24 h',
+      state: problemState('claude', 'unknown', t('stale: cachedUsageUtilization is older than 24 h'),
         Math.round(fetchedAtMs / 1000)),
       identityHint,
     }
@@ -844,7 +845,7 @@ export function claudeStateFromStatusline(payload: any, fetchedAt: number | null
       : undefined,
   }
   if (!state.ok) {
-    state.problem = 'Status line carried no rate limits'
+    state.problem = t('Status line carried no rate limits')
     state.problemKind = 'empty'
   }
   const cw = pick(payload, 'context_window', 'contextWindow') as any
@@ -892,19 +893,19 @@ export function readStatuslineMirror(file: string): StatuslineReading {
     ({ state: s, identityHint: null, context: null, cost: null, promptCache: null, model: null })
   let txt: string
   try { txt = fs.readFileSync(file, 'utf8') } catch {
-    return empty(problemState('claude', 'noFile', `No status line mirror at ${file}`))
+    return empty(problemState('claude', 'noFile', t('No status line mirror at {0}', file)))
   }
   let parsed: any
   try { parsed = JSON.parse(txt) } catch {
-    return empty(problemState('claude', 'empty', 'Status line mirror is not valid JSON'))
+    return empty(problemState('claude', 'empty', t('Status line mirror is not valid JSON')))
   }
   const version = num(parsed?.schema_version) ?? 0
   if (version !== MIRROR_SCHEMA_VERSION) {
-    return empty(problemState('claude', 'unknown', `Status line mirror schema_version ${version} is not readable`))
+    return empty(problemState('claude', 'unknown', t('Status line mirror schema_version {0} is not readable', version)))
   }
   const writtenAt = num(parsed?.written_at)
   if (!parsed?.payload || typeof parsed.payload !== 'object') {
-    return empty(problemState('claude', 'empty', 'Status line mirror without a payload',
+    return empty(problemState('claude', 'empty', t('Status line mirror without a payload'),
       writtenAt === null ? null : Math.round(writtenAt / 1000)))
   }
   return claudeStateFromStatusline(parsed.payload, writtenAt === null ? null : Math.round(writtenAt / 1000))

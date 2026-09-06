@@ -21,6 +21,7 @@ import {
   readTimeConfig,
 } from './config'
 import { digest } from './digest'
+import { t } from './i18n'
 import {
   Calibration, ForecastConfig, calibration, forecast, retrospective, Retro,
 } from './forecast'
@@ -45,8 +46,8 @@ import {
   projectRows, records as recordsOf, sessionRows, totalsFor,
 } from './stats'
 import {
-  DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatReset, formatTime, rangeFor,
-  isDay, previousRange, relativeShort, resolveZone,
+  DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatDay, formatReset,
+  formatTime, rangeFor, isDay, previousRange, relativeShort,
 } from './time'
 import {
   Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaOrigin, QuotaSample,
@@ -650,40 +651,32 @@ function sparkLevel(s: QuotaSample, windowMinutes: number | null, paceCfg: PaceC
 }
 
 /**
- * "Sat 6 Sep": the day of a reading, in the configured zone. One formatter per zone, kept —
- * the label is built for every point of every sparkline on every render. The digits follow
- * the en-US pattern like every other time in the extension, so the label reads the same on
- * every machine; the zone is the user's.
+ * What a hover over a reading says: "Sat 6 Sep · 14:20 · 37 %". The day and the clock come
+ * from `time.ts` — the one place that knows the configured zone, the hour cycle and the
+ * reader's language — and the percentage is rounded to the whole percent every other view
+ * prints. The "· reset" is part of the message rather than glued behind it, so a translator
+ * sees the whole label.
  */
-const sparkDayFormatters = new Map<string, Intl.DateTimeFormat>()
-function sparkDay(ms: number, tcfg: TimeConfig): string {
-  const zone = resolveZone(tcfg.zone)
-  const key = zone ?? ''
-  let f = sparkDayFormatters.get(key)
-  if (!f) {
-    f = new Intl.DateTimeFormat('en-US', { timeZone: zone, weekday: 'short', day: 'numeric', month: 'short' })
-    sparkDayFormatters.set(key, f)
-  }
-  const parts = f.formatToParts(ms)
-  const part = (type: string): string => parts.find((p) => p.type === type)?.value ?? ''
-  return `${part('weekday')} ${part('day')} ${part('month')}`
-}
-
-/**
- * What a hover over a reading says: "Sat 6 Sep · 14:20 · 37 %". The clock honours the
- * configured hour cycle and zone exactly as the reset times on the card do; the percentage
- * is rounded to the whole percent every other view prints.
- */
-function sparkLabel(s: QuotaSample, tcfg: TimeConfig): string {
-  return `${sparkDay(s.t, tcfg)} · ${formatTime(s.t, tcfg)} · ${Math.round(s.p)} %`
+function sparkLabel(s: QuotaSample, tcfg: TimeConfig, reset: boolean): string {
+  const day = formatDay(s.t, tcfg)
+  const time = formatTime(s.t, tcfg)
+  const pct = Math.round(s.p)
+  // Day, clock and percentage carry no word of their own — the three formatters already
+  // speak the reader's language. Only the reset marker is a word, and it is translated as
+  // part of the whole label rather than glued on behind it.
+  return reset
+    ? t('{0} · {1} · {2} % · reset', day, time, pct)
+    : `${day} · ${time} · ${pct} %`
 }
 
 /** The line in words: how many readings it has and how high it got. */
 function sparkAria(points: SparkPoint[]): string {
   const n = points.length
-  if (n === 0) return `quota sparkline, ${SPARK_DAYS} days, no readings`
+  if (n === 0) return t('quota sparkline, {0} days, no readings', SPARK_DAYS)
   const peak = Math.round(Math.max(...points.map((p) => p.p)))
-  return `quota sparkline, ${SPARK_DAYS} days, ${n} reading${n === 1 ? '' : 's'}, peak ${peak} %`
+  return n === 1
+    ? t('quota sparkline, {0} days, {1} reading, peak {2} %', SPARK_DAYS, n, peak)
+    : t('quota sparkline, {0} days, {1} readings, peak {2} %', SPARK_DAYS, n, peak)
 }
 
 /**
@@ -719,7 +712,7 @@ export function sparkOf(
     // The window turned over and the value fell: the stroke leading here is the reset, not a
     // pace. A turn-over the value rose across has no fall to draw and stays an ordinary stroke.
     if (prev && turnedOver(prev, s) && s.p < prev.p) point.reset = true
-    point.label = sparkLabel(s, tcfg) + (point.reset ? ' · reset' : '')
+    point.label = sparkLabel(s, tcfg, point.reset === true)
     points.push(point)
     prev = s
   }
@@ -781,48 +774,59 @@ export function forecastsFor(
  *
  * A full record, not a partial one: every kind the extension can report has an entry, so a
  * new kind is a compile error here rather than a card with a dead end on it.
+ *
+ * A function rather than a constant since the labels are translated: a table built at module
+ * load would be filled before the language bundle is installed and would stay English for the
+ * rest of the session.
  */
-export const PROBLEM_ACTION: Record<ProblemKind, { label: string; command: string }> = {
-  noToken: { label: 'Show log', command: 'tokenPace.showOutput' },
-  tokenExpired: { label: 'Show log', command: 'tokenPace.showOutput' },
-  consentPending: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' },
-  modeCache: { label: 'Open settings', command: 'tokenPace.openSettings' },
-  retry: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' },
-  offline: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' },
-  forbidden: { label: 'Show log', command: 'tokenPace.showOutput' },
-  unauthorized: { label: 'Show log', command: 'tokenPace.showOutput' },
-  noBinary: { label: 'Open settings', command: 'tokenPace.openSettings' },
-  quotaOff: { label: 'Open settings', command: 'tokenPace.openSettings' },
-  noFile: { label: 'Re-read history', command: 'tokenPace.rescan' },
-  empty: { label: 'Re-read history', command: 'tokenPace.rescan' },
-  paused: { label: 'Fetch quota now', command: 'tokenPace.refreshQuota' },
-  // A follower window renders what the leader wrote; the numbers are there, the fetch is
-  // not this window's to make. The dashboard is where the reading it does have is shown.
-  follower: { label: 'Open dashboard', command: 'tokenPace.showDashboard' },
-  unknown: { label: 'Show log', command: 'tokenPace.showOutput' },
+export function problemActions(): Record<ProblemKind, { label: string; command: string }> {
+  return {
+    noToken: { label: t('Show log'), command: 'tokenPace.showOutput' },
+    tokenExpired: { label: t('Show log'), command: 'tokenPace.showOutput' },
+    consentPending: { label: t('Fetch quota now'), command: 'tokenPace.refreshQuota' },
+    modeCache: { label: t('Open settings'), command: 'tokenPace.openSettings' },
+    retry: { label: t('Fetch quota now'), command: 'tokenPace.refreshQuota' },
+    offline: { label: t('Fetch quota now'), command: 'tokenPace.refreshQuota' },
+    forbidden: { label: t('Show log'), command: 'tokenPace.showOutput' },
+    unauthorized: { label: t('Show log'), command: 'tokenPace.showOutput' },
+    noBinary: { label: t('Open settings'), command: 'tokenPace.openSettings' },
+    quotaOff: { label: t('Open settings'), command: 'tokenPace.openSettings' },
+    noFile: { label: t('Re-read history'), command: 'tokenPace.rescan' },
+    empty: { label: t('Re-read history'), command: 'tokenPace.rescan' },
+    paused: { label: t('Fetch quota now'), command: 'tokenPace.refreshQuota' },
+    // A follower window renders what the leader wrote; the numbers are there, the fetch is
+    // not this window's to make. The dashboard is where the reading it does have is shown.
+    follower: { label: t('Open dashboard'), command: 'tokenPace.showDashboard' },
+    unknown: { label: t('Show log'), command: 'tokenPace.showOutput' },
+  }
 }
 
 /**
  * Every window state in words. `normal` has nothing to add, and `resetDue` is left empty
  * because `resetLine` already says "reset due" — printing both would say it twice in one row.
+ *
+ * A function, like the table above: the words are translated, and a lookup built at module
+ * load would be filled before the bundle is installed.
  */
-const DISPLAY_WORD: Record<WindowDisplay, string> = {
-  normal: '',
-  exhausted: 'exhausted',
-  overflow: 'over the limit',
-  unlimited: 'unlimited',
-  limitReached: 'limit reached',
-  resetDue: '',
+function displayWord(display: WindowDisplay): string {
+  switch (display) {
+    case 'exhausted': return t('exhausted')
+    case 'overflow': return t('over the limit')
+    case 'unlimited': return t('unlimited')
+    case 'limitReached': return t('limit reached')
+    default: return ''
+  }
 }
 
 /**
  * The state, unless the verdict standing next to it already contains the word — "exhausted ·
- * exhausted" is not two facts.
+ * exhausted" is not two facts. Both sides come out of the same bundle, so the comparison
+ * holds in every language.
  */
 function stateTextOf(display: WindowDisplay, verdictText: string): string {
-  const w = DISPLAY_WORD[display] ?? ''
+  const w = displayWord(display)
   if (!w) return ''
-  return verdictText.toLowerCase().includes(w) ? '' : w
+  return verdictText.toLowerCase().includes(w.toLowerCase()) ? '' : w
 }
 
 /**
@@ -834,9 +838,12 @@ function stateTextOf(display: WindowDisplay, verdictText: string): string {
  * has caught up with a reset that just happened.
  */
 function resetLineOf(display: WindowDisplay, reset: string): string {
-  if (display === 'resetDue') return 'reset due'
+  const due = t('reset due')
+  if (display === 'resetDue') return due
   if (!reset) return ''
-  return reset.includes('reset due') ? reset : `resets ${reset}`
+  // `formatReset` writes that same message when the stated time has passed; comparing
+  // against it rather than against the English words keeps the rule in every language.
+  return reset.includes(due) ? reset : t('resets {0}', reset)
 }
 
 /**
@@ -846,7 +853,7 @@ function resetLineOf(display: WindowDisplay, reset: string): string {
  */
 function unlimitedVerdict(w: QuotaWindow): PaceVerdict | null {
   if (!w.unlimited) return null
-  return { level: 'ok', points: null, ratio: null, measuring: false, text: 'unlimited' }
+  return { level: 'ok', points: null, ratio: null, measuring: false, text: t('unlimited') }
 }
 
 /**
@@ -884,7 +891,7 @@ function quotaCard(
     // The same rounding rule as the status bar, from the same function — two views that
     // disagree about whether 99.6 % is "100%" or "99%" would look like two readings.
     const pct = percentText(w.percent, cfg.percentMode, cfg.overflowDisplay)
-    const text = w.unlimited ? 'unlimited' : display === 'resetDue' ? 'reset due' : `${pct} used`
+    const text = w.unlimited ? t('unlimited') : display === 'resetDue' ? t('reset due') : t('{0} used', pct)
     const reset = formatReset(w.resetsAt, now, 'relative', tcfg)
     // Why the bar wears its colour, from the very verdict that coloured it and the pace
     // configuration as it applies after the presets. The views print these lines; none of
@@ -925,6 +932,7 @@ function quotaCard(
         // unlimited verdict IS the state, so it is not repeated after it. A verdict still
         // measuring is not read out either — no view prints it, and the screen reader is
         // not told what the sighted reader is spared.
+        // Punctuation around two already-translated parts: nothing to put into a bundle.
         text: verdict.text === text || verdict.measuring
           ? `${w.label}: ${text}`
           : `${w.label}: ${text}, ${verdict.text}`,
@@ -944,9 +952,9 @@ function quotaCard(
     planType: plan?.name ?? null,
     planSource: plan?.from ?? null,
     planText: planText(plan),
-    problem: q.ok ? null : (q.problem ?? 'unavailable'),
+    problem: q.ok ? null : (q.problem ?? t('unavailable')),
     problemKind: q.ok ? null : (q.problemKind ?? 'unknown'),
-    problemAction: q.ok ? null : (PROBLEM_ACTION[q.problemKind ?? 'unknown'] ?? null),
+    problemAction: q.ok ? null : (problemActions()[q.problemKind ?? 'unknown'] ?? null),
     ageText: ageText(q.fetchedAt, now),
     stale: age !== null && age > cfg.staleAfterMinutes,
     origin: q.origin ?? null,
@@ -1059,7 +1067,7 @@ export function contextCard(
     size,
     percentText,
     text: size === null
-      ? `${full(reading.used)} tokens`
+      ? t('{0} tokens', full(reading.used))
       : `${full(reading.used)} / ${full(size)}${pct === null ? '' : ` · ${percentText}`}`,
     ageText: ageText(reading.fetchedAt, now),
     // An unknown age is not a stale age: the mirror simply named no time, and marking that
@@ -1152,17 +1160,17 @@ export function toolRows(ctx: StatsCtx, range: DayRange, limit: number): ToolsDa
       calls: g.calls,
       callsText: full(g.calls),
       share: percentOf(g.calls, total),
-      models: models.length === 0 ? '–' : shown.join(', ') + (rest > 0 ? ` +${rest} more` : ''),
+      models: models.length === 0 ? '–' : shown.join(', ') + (rest > 0 ? ` ${t('+{0} more', rest)}` : ''),
       sources: [...g.sources].sort().map((s) => SOURCE_TITLE[s]).join(', '),
     }
   })
 
   const notes: string[] = []
-  if (since !== null) notes.push(`Tool calls counted since ${since}.`)
-  else notes.push('No tool call has been counted yet — counting starts with the next transcript read.')
+  if (since !== null) notes.push(t('Tool calls counted since {0}.', since))
+  else notes.push(t('No tool call has been counted yet — counting starts with the next transcript read.'))
   if (truncated) {
-    notes.push(`More than ${TOOL_NAME_CAP} distinct tools were used on at least one day; `
-      + 'the rarest names of that day are not counted.')
+    notes.push(t('More than {0} distinct tools were used on at least one day; the rarest names of that day are not counted.',
+      TOOL_NAME_CAP))
   }
   return {
     rows,
@@ -1289,9 +1297,8 @@ export function buildViewModel(input: VmInput): ViewModel {
       ? {
         scanning: input.scanning === true,
         text: input.scanning === true
-          ? 'Reading history…'
-          : 'No transcripts found yet. Check that Claude Code or Codex has run on this machine, '
-            + 'and that tokenPace.claudeDir / tokenPace.codexDir point at their directories.',
+          ? t('Reading history…')
+          : t('No transcripts found yet. Check that Claude Code or Codex has run on this machine, and that tokenPace.claudeDir / tokenPace.codexDir point at their directories.'),
       }
       : null,
     footnotes: [],
@@ -1357,11 +1364,13 @@ function retroList(
 function retroText(r: Retro): string {
   if (!r.enough) {
     const n = r.cycles.filter((c) => c.complete).length
-    return `not enough data yet · ${n} complete cycle${n === 1 ? '' : 's'} on file`
+    return n === 1
+      ? t('not enough data yet · {0} complete cycle on file', n)
+      : t('not enough data yet · {0} complete cycles on file', n)
   }
   const capped = r.cappedShare === null ? '–' : `${Math.round(r.cappedShare * 100)} %`
   const unused = r.avgUnused === null ? '–' : `${Math.round(r.avgUnused)} %`
-  return `${capped} of the complete cycles hit the limit · Avg ${unused} unused at the reset`
+  return t('{0} of the complete cycles hit the limit · Avg {1} unused at the reset', capped, unused)
 }
 
 function dataQuality(
@@ -1410,10 +1419,10 @@ function dataQuality(
       drift: input.drift[source] ?? [],
     })),
     consent: input.consent === 'granted'
-      ? 'network access granted'
+      ? t('network access granted')
       : input.consent === 'denied'
-        ? 'network access denied — local sources only'
-        : 'not asked yet — local sources only',
+        ? t('network access denied — local sources only')
+        : t('not asked yet — local sources only'),
     leader: cfg.leaderElection === false ? 'single' : input.leader ? 'leader' : 'follower',
     retention: {
       hourDays: cfg.hourRetentionDays,
@@ -1429,50 +1438,50 @@ function dataQuality(
     bridge: input.bridge === null
       ? null
       : input.bridge.shadowed
-        ? 'status line connected but shadowed by another settings file'
+        ? t('status line connected but shadowed by another settings file')
         : input.bridge.installed
-          ? `status line connected${input.bridge.mirrorAge === null ? '' : ` · mirror ${ageText(Math.round((now - input.bridge.mirrorAge) / 1000), now) ?? 'unknown age'}`}`
-          : 'status line not connected',
+          ? (input.bridge.mirrorAge === null
+            ? t('status line connected')
+            : t('status line connected · mirror {0}',
+              ageText(Math.round((now - input.bridge.mirrorAge) / 1000), now) ?? t('unknown age')))
+          : t('status line not connected'),
     attribution: cfg.attribution,
     version: typeof __EXT_VERSION__ === 'string' ? __EXT_VERSION__ : '0.0.0',
   }
 }
 
 function calibrationText(c: Calibration | null): string {
-  if (!c) return 'not enough data'
-  return estimate(
-    `server counts ${c.factor.toFixed(1)} % of the window per 1M local tokens `
-    + `(band ${c.low.toFixed(1)}–${c.high.toFixed(1)}, ${c.basisHours.toFixed(1)} h of basis)`,
-  )
+  if (!c) return t('not enough data')
+  return estimate(t('server counts {0} % of the window per 1M local tokens (band {1}–{2}, {3} h of basis)',
+    c.factor.toFixed(1), c.low.toFixed(1), c.high.toFixed(1), c.basisHours.toFixed(1)))
 }
 
 function footnotesFor(vm: ViewModel, cfg: Config): string[] {
   const out: string[] = []
-  out.push('“Usage” = fresh input + cache write + output; cache reads are listed apart because '
-    + 'they outnumber the rest by orders of magnitude.')
+  out.push(t('“Usage” = fresh input + cache write + output; cache reads are listed apart because they outnumber the rest by orders of magnitude.'))
   if (vm.showCost) {
     // The only place the price date is stated. Every view prints these footnotes verbatim, so
     // a second "Prices as of" line anywhere else comes out as the same sentence twice.
-    out.push('API cost is hypothetical: what this usage would have cost through the provider API. '
-      + `On a subscription you do not pay it. Prices as of ${vm.pricing.asOf}.`)
-    if (vm.pricing.custom) out.push('Costs use your configured rates, not the published list prices.')
+    out.push(t('API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}.',
+      vm.pricing.asOf))
+    if (vm.pricing.custom) out.push(t('Costs use your configured rates, not the published list prices.'))
     if (vm.unpricedModels.length > 0) {
-      out.push(`No price on file for: ${vm.unpricedModels.join(', ')} — every cost total is a lower bound.`)
+      out.push(t('No price on file for: {0} — every cost total is a lower bound.', vm.unpricedModels.join(', ')))
     }
     if (vm.familyPriced.length > 0) {
-      out.push(`Priced from a related model (family fallback): ${vm.familyPriced.join(', ')}.`)
+      out.push(t('Priced from a related model (family fallback): {0}.', vm.familyPriced.join(', ')))
     }
   }
   // The glyph legend every view prints. `≈` is only explained where it can appear: the
   // QuickPick has no room for the sentence under the table, so the mark it prints beside a
   // window row would otherwise reach that reader with nothing anywhere saying what it means.
-  const approx = vm.totals.some((t) => t.rows.some((r) => r.approx))
-  out.push(`~ = estimate · ${approx ? '≈ = lower bound · ' : ''}measured = read from the provider `
-    + '· derived = computed from measured values.')
-  out.push('Quota percentages come from the provider and cover every client of the account; they '
-    + 'cannot be derived from the local token counts.')
+  const approx = vm.totals.some((row) => row.rows.some((r) => r.approx))
+  out.push(approx
+    ? t('~ = estimate · ≈ = lower bound · measured = read from the provider · derived = computed from measured values.')
+    : t('~ = estimate · measured = read from the provider · derived = computed from measured values.'))
+  out.push(t('Quota percentages come from the provider and cover every client of the account; they cannot be derived from the local token counts.'))
   if (cfg.attribution === 'none') {
-    out.push('Project and session figures are off (tokenPace.attribution).')
+    out.push(t('Project and session figures are off (tokenPace.attribution).'))
   }
   return out
 }

@@ -83,6 +83,11 @@ test('too few readings or too short a span is measuring, and says so', () => {
   const short = forecast(series(5, 3 * MIN, 10, 12), win(12, NOW + 4 * H), NOW, CFG, 50)
   assert.equal(short.state, 'measuring')
   assert.equal(short.text, 'measuring · 5 readings over 12 min')
+
+  // One reading is one reading: the singular is its own sentence, not an 's' left off.
+  const one = forecast([sample(NOW, 12)], win(12, NOW + 4 * H), NOW, CFG, 50)
+  assert.equal(one.state, 'measuring')
+  assert.equal(one.text, 'measuring · 1 reading over 0 min')
 })
 
 test('a reading older than staleAfterMs is stale, not a forecast', () => {

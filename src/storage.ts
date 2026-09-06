@@ -17,6 +17,7 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
+import { t } from './i18n'
 
 /**
  * The slice of `vscode.Memento` this code needs.
@@ -67,7 +68,14 @@ export const STORED_MEMENTO_KEYS: Readonly<Record<'consent' | 'alerts' | 'ui', r
   ui: ['tokenPace.ui'],
 }
 
-const LABELS: Record<StoredKey, string> = {
+/**
+ * The English name of an item, for the log.
+ *
+ * Deliberately not the translated one: a log line is pasted into an issue, and a maintainer
+ * has to be able to read it whatever language the editor runs in. `labelOf` carries the same
+ * eight names for the pick list, translated at call time.
+ */
+const LOG_LABELS: Record<StoredKey, string> = {
   state: 'Token snapshot (state.json)',
   quota: 'Quota cache (quota.json)',
   history: 'Quota history (quotaHistory.json)',
@@ -76,6 +84,23 @@ const LABELS: Record<StoredKey, string> = {
   consent: 'Consent decisions',
   alerts: 'Alert state',
   ui: 'Dashboard view state',
+}
+
+/**
+ * The name the pick list shows. A function, not a table: the translation bundle is installed
+ * at activation, so a table built at module load would stay English for the whole session.
+ */
+export function labelOf(key: StoredKey): string {
+  switch (key) {
+    case 'state': return t('Token snapshot (state.json)')
+    case 'quota': return t('Quota cache (quota.json)')
+    case 'history': return t('Quota history (quotaHistory.json)')
+    case 'mirror': return t('Status line mirror (statusline-mirror.json)')
+    case 'externalQuota': return t('Shared quota cache (outside the extension storage)')
+    case 'consent': return t('Consent decisions')
+    case 'alerts': return t('Alert state')
+    default: return t('Dashboard view state')
+  }
 }
 
 /**
@@ -159,7 +184,7 @@ export function inventory(
     const size = files !== null
       ? sizeOf(files)
       : mementoSize(STORED_MEMENTO_KEYS[key as 'consent' | 'alerts' | 'ui'], memento)
-    out.push({ key, label: LABELS[key], bytes: size.bytes, detail: details[key] ?? null, present: size.present })
+    out.push({ key, label: labelOf(key), bytes: size.bytes, detail: details[key] ?? null, present: size.present })
   }
   return out
 }
@@ -235,10 +260,10 @@ export async function deleteItems(
         }
       }
       deleted.push(key)
-      log?.(`Stored data removed: ${LABELS[key]}`)
+      log?.(`Stored data removed: ${LOG_LABELS[key]}`)
     } catch (e) {
       failed.push(key)
-      log?.(`Stored data could not be removed: ${LABELS[key]} — ${(e as Error).message}`)
+      log?.(`Stored data could not be removed: ${LOG_LABELS[key]} — ${(e as Error).message}`)
     }
   }
   return { deleted, failed }
@@ -251,17 +276,19 @@ export async function deleteItems(
  * the part that matters: Claude Code deletes its own transcripts after 30 days,
  * so everything older than that is gone for good.
  */
-export const DELETE_WARNING = 'The token snapshot is rebuilt from the transcript files that are '
-  + 'still on disk. Claude Code deletes those after 30 days, so any usage history older than that '
-  + 'is lost for good.'
+export function deleteWarning(): string {
+  // One literal, however long: `scripts/l10n-extract.mjs` reads the source, and a concatenation
+  // is not a key it can find.
+  return t('The token snapshot is rebuilt from the transcript files that are still on disk. Claude Code deletes those after 30 days, so any usage history older than that is lost for good.')
+}
 
 /**
  * The extra sentence for the shared cache: it is the one file outside our own
  * storage, and other tools read it — deleting it takes their figures away too.
  */
-export const DELETE_WARNING_EXTERNAL = 'The shared quota cache lies outside the extension storage '
-  + 'and other tools may read it. Deleting it removes their last known figures as well; it is '
-  + 'written again on the next quota poll while the opt-in is on.'
+export function deleteWarningExternal(): string {
+  return t('The shared quota cache lies outside the extension storage and other tools may read it. Deleting it removes their last known figures as well; it is written again on the next quota poll while the opt-in is on.')
+}
 
 /**
  * The line the delete list shows while Claude Code\'s status line is ours.
@@ -270,8 +297,9 @@ export const DELETE_WARNING_EXTERNAL = 'The shared quota cache lies outside the 
  * believed otherwise would be left with a status line pointing at a script whose
  * data we just removed.
  */
-export const BRIDGE_BLOCKS_DELETE = 'Run "Token Pace: Disconnect Claude Status Line" first — '
-  + 'clearing files here does not restore Claude Code\'s settings.json.'
+export function bridgeBlocksDelete(): string {
+  return t('Run "Token Pace: Disconnect Claude Status Line" first — clearing files here does not restore Claude Code\'s settings.json.')
+}
 
 /** "12.3 kB" / "482 B" — for the pick list, where an exact byte count helps nobody. */
 export function formatBytes(bytes: number): string {

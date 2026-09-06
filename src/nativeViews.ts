@@ -15,6 +15,7 @@ import * as vscode from 'vscode'
 import { Aggregator } from './agg'
 import { Config, readTimeConfig } from './config'
 import { toCsv, toJson, toMarkdownSummary, toolsCsv } from './exporter'
+import { t } from './i18n'
 import { markdownDocument, quickPickItems } from './textViews'
 import { DayRange } from './time'
 import type { ViewModel } from './viewModel'
@@ -45,7 +46,7 @@ class UsageDocumentProvider implements vscode.TextDocumentContentProvider {
       return markdownDocument(this.getVm())
     } catch (err) {
       // A view that throws would leave an empty editor with no explanation.
-      return `# Token Pace\n\nThe usage view could not be built: ${String(err)}\n`
+      return `# Token Pace\n\n${t('The usage view could not be built: {0}', String(err))}\n`
     }
   }
 
@@ -65,10 +66,12 @@ function timestamp(now = new Date()): string {
 
 /** What the save dialog has to say out loud before anything is written. */
 function exportNotice(cfg: Config): string {
-  const base = 'Includes model names'
-  return cfg.attribution === 'none'
-    ? `${base}.`
-    : `${base} and project labels (${cfg.showProjectNames === 'hash' ? 'salted hashes' : 'directory basenames'}).`
+  // Three whole sentences rather than one built from a stem: what follows "model names"
+  // changes the sentence, not just a word at its end.
+  if (cfg.attribution === 'none') return t('Includes model names.')
+  return cfg.showProjectNames === 'hash'
+    ? t('Includes model names and project labels (salted hashes).')
+    : t('Includes model names and project labels (directory basenames).')
 }
 
 /**
@@ -102,8 +105,8 @@ async function save(
   const uri = await vscode.window.showSaveDialog({
     defaultUri: vscode.Uri.file(name),
     filters,
-    saveLabel: 'Export',
-    title: `Token Pace export — ${notice}`,
+    saveLabel: t('Export'),
+    title: t('Token Pace export — {0}', notice),
   })
   if (!uri) return
   await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'))
@@ -112,18 +115,23 @@ async function save(
     second = uri.with({ path: companionPath(uri.path, companion.suffix) })
     await vscode.workspace.fs.writeFile(second, Buffer.from(companion.text, 'utf8'))
   }
+  // The button is computed once and compared with that same value: a label translated on
+  // the way in and re-translated on the way out compares against a string nobody was shown.
+  const openLabel = t('Open')
   const open = await vscode.window.showInformationMessage(
-    `Token Pace: exported to ${uri.fsPath}${second ? ` and ${second.fsPath}` : ''}`,
-    'Open',
+    second
+      ? t('Token Pace: exported to {0} and {1}', uri.fsPath, second.fsPath)
+      : t('Token Pace: exported to {0}', uri.fsPath),
+    openLabel,
   )
-  if (open === 'Open') await vscode.window.showTextDocument(uri)
+  if (open === openLabel) await vscode.window.showTextDocument(uri)
 }
 
 async function showQuickPick(deps: NativeViewDeps): Promise<void> {
   const vm = deps.getVm()
   const pick = vscode.window.createQuickPick<vscode.QuickPickItem & { command?: string }>()
-  pick.title = `Token Pace — ${vm.range.label}`
-  pick.placeholder = 'Usage, quota windows and key figures (chart and heatmap need the dashboard)'
+  pick.title = t('Token Pace — {0}', vm.range.label)
+  pick.placeholder = t('Usage, quota windows and key figures (chart and heatmap need the dashboard)')
   pick.matchOnDescription = true
   pick.matchOnDetail = true
   // A `separator: true` item is a heading, not a row: it carries no command and the
@@ -141,18 +149,17 @@ async function showQuickPick(deps: NativeViewDeps): Promise<void> {
       command: i.command,
     }
   })
-  pick.buttons = [
-    { iconPath: new vscode.ThemeIcon('sync'), tooltip: 'Fetch quota now' },
-    { iconPath: new vscode.ThemeIcon('history'), tooltip: 'Re-read token history' },
-    { iconPath: new vscode.ThemeIcon('output'), tooltip: 'Show log' },
-    { iconPath: new vscode.ThemeIcon('settings-gear'), tooltip: 'Open settings' },
+  // The tooltip is both the label and the key the click is looked up under, so it is
+  // translated exactly once and the table is built from those same four values.
+  const buttons: Array<{ icon: string; tooltip: string; command: string }> = [
+    { icon: 'sync', tooltip: t('Fetch quota now'), command: 'tokenPace.refreshQuota' },
+    { icon: 'history', tooltip: t('Re-read token history'), command: 'tokenPace.rescan' },
+    { icon: 'output', tooltip: t('Show log'), command: 'tokenPace.showOutput' },
+    { icon: 'settings-gear', tooltip: t('Open settings'), command: 'tokenPace.openSettings' },
   ]
-  const byTooltip: Record<string, string> = {
-    'Fetch quota now': 'tokenPace.refreshQuota',
-    'Re-read token history': 'tokenPace.rescan',
-    'Show log': 'tokenPace.showOutput',
-    'Open settings': 'tokenPace.openSettings',
-  }
+  pick.buttons = buttons.map((b) => ({ iconPath: new vscode.ThemeIcon(b.icon), tooltip: b.tooltip }))
+  const byTooltip: Record<string, string> = {}
+  for (const b of buttons) byTooltip[b.tooltip] = b.command
   pick.onDidTriggerButton((b) => {
     const command = byTooltip[String(b.tooltip ?? '')]
     if (command) void deps.run(command)
@@ -192,7 +199,7 @@ export function registerNativeViews(
         toCsv(agg, range, cfg, tcfg),
         `token-pace-${range.from}_${range.to}-${timestamp()}.csv`,
         { CSV: ['csv'] },
-        `${exportNotice(cfg)} Tool names go into a second file beside it (.tools.csv).`,
+        `${exportNotice(cfg)} ${t('Tool names go into a second file beside it (.tools.csv).')}`,
         { suffix: '.tools.csv', text: toolsCsv(agg, range) },
       )
     }),
@@ -207,14 +214,14 @@ export function registerNativeViews(
         // The CSV path names the tool file; this one has to name the array, for the same
         // reason: `tools[]` carries the names as the transcript spells them, MCP names
         // included, and the dialog is the last moment to say no to that leaving the machine.
-        `${exportNotice(cfg)} Tool names are included as tools[].`,
+        `${exportNotice(cfg)} ${t('Tool names are included as tools[].')}`,
       )
     }),
 
     vscode.commands.registerCommand('tokenPace.copySummary', async () => {
       await vscode.env.clipboard.writeText(toMarkdownSummary(deps.getVm()))
       void vscode.window.showInformationMessage(
-        'Token Pace: usage summary copied as markdown (model names included).',
+        t('Token Pace: usage summary copied as markdown (model names included).'),
       )
     }),
   )

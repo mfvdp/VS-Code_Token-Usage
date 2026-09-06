@@ -14,6 +14,7 @@
 
 import { Aggregator, billable } from './agg'
 import { Config } from './config'
+import { t } from './i18n'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { TimeConfig, dayOfHour } from './time'
 import { Bucket, TOOL_NAME_CAP } from './types'
@@ -161,9 +162,9 @@ export function toolsCsv(agg: Aggregator, range: ExportRange): string {
   const lines: string[] = [TOOLS_CSV_COLUMNS.join(',')]
   const q = agg.tools(range.from, range.to)
   let total = 0
-  for (const t of q.rows) {
-    lines.push([t.day, t.source, t.model, t.name, t.calls].map(csvCell).join(','))
-    total += t.calls
+  for (const row of q.rows) {
+    lines.push([row.day, row.source, row.model, row.name, row.calls].map(csvCell).join(','))
+    total += row.calls
   }
   lines.push(['TOTAL', '', '', '', total].map(csvCell).join(','))
   // The cap is a fact about the data, not about the export, so it travels with it.
@@ -257,8 +258,8 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
     },
     totals: { ...totals, lowerBound: totals.unpricedTokens > 0 },
     buckets,
-    tools: toolQuery.rows.map((t) => ({
-      day: t.day, source: t.source, model: t.model, tool: t.name, calls: t.calls,
+    tools: toolQuery.rows.map((row) => ({
+      day: row.day, source: row.source, model: row.model, tool: row.name, calls: row.calls,
     })),
     toolsTruncated: toolQuery.truncated,
     notes: [
@@ -312,22 +313,24 @@ function cell(s: string | null | undefined): string {
  */
 export function toMarkdownSummary(vm: ViewModel): string {
   const L: string[] = []
-  L.push(`# Token Pace — ${vm.range.label} (${vm.range.from} → ${vm.range.to})`)
+  // The range bounds are dates, not words: they stay outside the key, which is then the same
+  // one the QuickPick titles itself with.
+  L.push(`# ${t('Token Pace — {0}', vm.range.label)} (${vm.range.from} → ${vm.range.to})`)
   L.push('')
-  if (vm.preview) L.push('> **Preview data — not a reading.**', '')
+  if (vm.preview) L.push(`> **${t('Preview data — not a reading.')}**`, '')
 
   for (const q of vm.quotas) {
     const meta = [
       // The whole fragment, so a configured name stays marked as one in the clipboard too.
       q.planText,
-      q.origin ? `via ${q.origin}` : null,
-      q.ageText ? `updated ${q.ageText}` : null,
-      q.stale ? '⚠ stale' : null,
+      q.origin ? t('via {0}', q.origin) : null,
+      q.ageText ? t('updated {0}', q.ageText) : null,
+      q.stale ? `⚠ ${t('stale')}` : null,
     ].filter(Boolean).join(' · ')
     L.push(`## ${q.title}${meta ? ` — ${meta}` : ''}`, '')
     if (q.problem) L.push(`> ⚠ ${q.problem}`, '')
     if (q.windows.length > 0) {
-      L.push('| Window | Used | Elapsed | Pace | Resets |')
+      L.push(t('| Window | Used | Elapsed | Pace | Resets |'))
       L.push('|---|---|---|---|---|')
       for (const w of q.windows) {
         // The verdict as the three views print it: nothing while the window is still measuring.
@@ -337,17 +340,17 @@ export function toMarkdownSummary(vm: ViewModel): string {
       }
       L.push('')
     }
-    if (q.extra) L.push(`Extra usage: ${cell(q.extra.text)}`, '')
+    if (q.extra) L.push(t('Extra usage: {0}', cell(q.extra.text)), '')
     // Word for word the sentence the three views print. The clipboard must not be the one
     // place where a five-hour figure appears without saying what it is not.
     if (q.localBlock) L.push(q.localBlock.text, '')
   }
 
-  for (const t of vm.totals) {
-    L.push(`## Tokens — ${t.title}`, '')
-    L.push('| Period | Usage | Cache read | Output | Req. | Cache hit | API cost |')
+  for (const table of vm.totals) {
+    L.push(`## ${t('Tokens — {0}', table.title)}`, '')
+    L.push(t('| Period | Usage | Cache read | Output | Req. | Cache hit | API cost |'))
     L.push('|---|---|---|---|---|---|---|')
-    for (const r of t.rows) {
+    for (const r of table.rows) {
       L.push(`| ${cell(r.label)} | ${cell(r.usage)} | ${cell(r.cacheRead)} | `
         + `${cell(r.output)}${r.incomplete ? ' ⚠' : ''} | ${cell(r.requests)} | ${cell(r.cacheHit)} | `
         + `${cell(r.cost)}${r.costPartial ? ' ⚠' : ''} |`)
@@ -356,25 +359,25 @@ export function toMarkdownSummary(vm: ViewModel): string {
   }
 
   if (vm.budgets.length > 0) {
-    L.push('## Budgets', '')
+    L.push(`## ${t('Budgets')}`, '')
     // Word for word the line the three views print, so a pasted summary cannot describe a
     // budget differently from the panel it was copied out of.
     for (const b of vm.budgets) L.push(`- ${b.text}${b.partial ? ' ⚠' : ''}`)
     L.push('')
-    L.push('_Your own limits; USD is the hypothetical API equivalent, not a bill._', '')
+    L.push(`_${t('Your own limits; USD is the hypothetical API equivalent, not a bill.')}_`, '')
   }
 
   if (vm.cacheEconomy.length > 0) {
-    L.push('## Cache economy', '')
+    L.push(`## ${t('Cache economy')}`, '')
     for (const c of vm.cacheEconomy) {
-      L.push(`- **${c.source}**: hit ${c.hitRate} · realised ${c.savedUsd} · blended ${c.blendedPerM} `
-        + `(${c.note})`)
+      L.push(`- ${t('**{0}**: hit {1} · realised {2} · blended {3} ({4})',
+        c.source, c.hitRate, c.savedUsd, c.blendedPerM, c.note)}`)
     }
     L.push('')
   }
 
   if (vm.digest.length > 0) {
-    L.push('## Summary', '')
+    L.push(`## ${t('Summary')}`, '')
     for (const s of vm.digest) L.push(`- ${s}`)
     L.push('')
   }
@@ -385,8 +388,7 @@ export function toMarkdownSummary(vm: ViewModel): string {
   // so the sentence survives a page that no longer prints a forecast list.
   const gaps = vm.quotas.reduce((n, q) => n + q.windows.reduce((m, w) => m + w.gaps, 0), 0)
   if (gaps > 0) {
-    L.push(`- Quota readings have ${gaps} gap(s) in the last 24 h; a hole with no reset inside it `
-      + 'is bridged by a dashed line, a hole across a reset stays open.')
+    L.push(`- ${t('Quota readings have {0} gap(s) in the last 24 h; a hole with no reset inside it is bridged by a dashed line, a hole across a reset stays open.', gaps)}`)
   }
   L.push('')
   return L.join('\n')

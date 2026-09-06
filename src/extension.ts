@@ -51,7 +51,7 @@ import { sectionSettingsQuery } from './sectionSettings'
 import { Role, showMenu, StatusBar, StatusInput } from './statusbar'
 import { buildItems, USAGE_PAGE } from './statusText'
 import {
-  BRIDGE_BLOCKS_DELETE, DELETE_WARNING, DELETE_WARNING_EXTERNAL, deleteItems, formatBytes, inventory,
+  bridgeBlocksDelete, deleteItems, deleteWarning, deleteWarningExternal, formatBytes, inventory,
   StoredKey, StoredPaths,
 } from './storage'
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
@@ -977,7 +977,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     if (bridge?.installed === true) {
       picks.push(
         { label: t('Status line bridge'), kind: vscode.QuickPickItemKind.Separator },
-        { label: `$(warning) ${t('The Claude status line is still connected')}`, detail: BRIDGE_BLOCKS_DELETE },
+        { label: `$(warning) ${t('The Claude status line is still connected')}`, detail: bridgeBlocksDelete() },
       )
     }
     const chosen = await vscode.window.showQuickPick(picks, {
@@ -990,8 +990,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     // The bridge line is pickable in some hosts; picking only it deletes nothing.
     if (keys.length === 0) return
     const detail = keys.includes('externalQuota')
-      ? `${DELETE_WARNING}\n\n${DELETE_WARNING_EXTERNAL}`
-      : DELETE_WARNING
+      ? `${deleteWarning()}\n\n${deleteWarningExternal()}`
+      : deleteWarning()
     const deleteLabel = t('Delete')
     const confirm = await vscode.window.showWarningMessage(
       t('Delete {0} stored item(s)? This cannot be undone.', keys.length),

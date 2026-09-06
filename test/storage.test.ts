@@ -12,7 +12,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  BRIDGE_BLOCKS_DELETE, DELETE_WARNING_EXTERNAL, deleteItems, formatBytes, inventory, MementoLike,
+  bridgeBlocksDelete, deleteItems, deleteWarningExternal, formatBytes, inventory, MementoLike,
   StoredPaths, storedFile, storedFiles,
 } from '../src/storage'
 import { scratchDir } from './fixtures/helpers'
@@ -229,8 +229,8 @@ test('storedFiles lists both cache files where storedFile can only name one', ()
 })
 
 test('the two extra warnings say what deleting cannot undo', () => {
-  assert.match(DELETE_WARNING_EXTERNAL, /outside the extension storage/)
-  assert.match(DELETE_WARNING_EXTERNAL, /other tools/)
-  assert.match(BRIDGE_BLOCKS_DELETE, /Disconnect Claude Status Line/)
-  assert.match(BRIDGE_BLOCKS_DELETE, /settings\.json/)
+  assert.match(deleteWarningExternal(), /outside the extension storage/)
+  assert.match(deleteWarningExternal(), /other tools/)
+  assert.match(bridgeBlocksDelete(), /Disconnect Claude Status Line/)
+  assert.match(bridgeBlocksDelete(), /settings\.json/)
 })

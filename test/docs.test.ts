@@ -10,8 +10,8 @@
  */
 
 import { strict as assert } from 'node:assert'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
 import { usedThresholds } from '../src/alerts'
 import { sanitize } from '../src/config'
@@ -83,6 +83,35 @@ const README = readDoc('README.md')
 const STATES = readDoc('docs/status-bar-states.md')
 
 /**
+ * Since 1.3 the README is the store overview only — three pictures, six bullets, install,
+ * privacy in five lines and the index — and every chapter it used to carry lives in its own
+ * page under `docs/`. The prose assertions below therefore name the page they belong to: a
+ * sentence that has to exist is checked where a reader would look it up, not in whichever
+ * file happens to contain the words. `DOCS` is every page at once, for the few checks that
+ * only ask that a claim exists somewhere in the documentation.
+ */
+const doc = {
+  numbers: readDoc('docs/numbers.md'),
+  statusBar: readDoc('docs/status-bar.md'),
+  dashboard: readDoc('docs/dashboard.md'),
+  quotaSources: readDoc('docs/quota-sources.md'),
+  cost: readDoc('docs/cost.md'),
+  counting: readDoc('docs/counting.md'),
+  history: readDoc('docs/history.md'),
+  budgetsAlerts: readDoc('docs/budgets-alerts.md'),
+  sessions: readDoc('docs/sessions.md'),
+  export: readDoc('docs/export.md'),
+  troubleshooting: readDoc('docs/troubleshooting.md'),
+  privacy: readDoc('docs/privacy.md'),
+  windows: readDoc('docs/windows-wsl-remote.md'),
+  settings: readDoc('docs/settings.md'),
+  commands: readDoc('docs/commands.md'),
+  development: readDoc('docs/development.md'),
+  release: readDoc('docs/release.md'),
+} as const
+const DOCS = [README, STATES, ...Object.values(doc)].join('\n')
+
+/**
  * The examples in the settings UI are quoted with curly quotes; this pulls them out, one entry
  * per enum value (null where a description carries no example, such as "Follow the locale").
  */
@@ -145,7 +174,7 @@ test('barStyle says where line and shade actually differ, because for shapes and
   const md = properties['tokenPace.barStyle'].markdownDescription ?? ''
   assert.match(md, /line.+shade.+differ only/i)
   assert.match(md, /blocks/)
-  assert.match(README, /`line` and `shade` differ only for `blocks`/)
+  assert.match(doc.statusBar, /`line` and `shade` differ only for `blocks`/)
   assert.match(STATES, /differ only for `barGlyphs: blocks`/)
 })
 
@@ -206,27 +235,27 @@ test('worstPace is documented as level first, utilisation second — which is wh
   const cfg = sanitize({ 'tokenPace.timezone': 'utc', 'tokenPace.windowSelect': 'worstPace' })
   assert.deepEqual(selectWindows(q, cfg, NOW).map((w) => w.id), ['session:300'])
 
-  // So neither the settings UI nor the README may promise "furthest ahead of the clock".
+  // So neither the settings UI nor the status-bar page may promise "furthest ahead of the clock".
   const shown = properties['tokenPace.windowSelect'].enumDescriptions ?? []
   const worst = shown[(properties['tokenPace.windowSelect'].enum ?? []).indexOf('worstPace')]
   assert.equal(/furthest ahead/.test(worst), false, worst)
   assert.match(worst, /most-utilised/)
-  assert.equal(/`worstPace` \(the one furthest ahead of the clock\)/.test(README), false)
-  assert.match(README, /`worstPace` \(the worst pace verdict/)
+  assert.equal(/`worstPace` \(the one furthest ahead of the clock\)/.test(DOCS), false)
+  assert.match(doc.statusBar, /`worstPace` \(the worst pace verdict/)
 })
 
 // ---------------------------------------------------------------------------
 // Family fallback
 // ---------------------------------------------------------------------------
 
-test('the README names the donor the family fallback really picks', () => {
+test('docs/cost.md names the donor the family fallback really picks', () => {
   // The rule is "newest priced model of the family", so the donor is whatever prices.ts holds
-  // today — the README example has to be derived from it, never guessed.
+  // today — the documented example has to be derived from it, never guessed.
   for (const unknown of ['claude-opus-4-9', 'gpt-5.7-mini']) {
     const priced = priceOf(unknown, '2026-09-03', { unknownModel: 'family' })
     assert.equal(priced?.confidence, 'family', `${unknown} has no family fallback`)
     const claim = `\`${unknown}\` → \`${priced?.family}\``
-    assert.ok(README.includes(claim), `the README does not say ${claim}`)
+    assert.ok(doc.cost.includes(claim), `docs/cost.md does not say ${claim}`)
   }
 })
 
@@ -251,7 +280,7 @@ test('the alert-threshold range in the manifest is exactly what an alert can fir
 // ---------------------------------------------------------------------------
 
 test('the Privacy list names every file the extension opens', () => {
-  const privacy = README.slice(README.indexOf('\n## Privacy'), README.indexOf('\n## ', README.indexOf('\n## Privacy') + 5))
+  const privacy = doc.privacy
   assert.ok(privacy.length > 0)
   for (const needed of [
     '~/.claude/projects/',            // transcript scan
@@ -274,7 +303,7 @@ test('the Privacy list names every file the extension opens', () => {
 })
 
 test('the promise about transcript contents matches what the tool table stores', () => {
-  const privacy = README.slice(README.indexOf('\n## Privacy'), README.indexOf('\n## ', README.indexOf('\n## Privacy') + 5))
+  const privacy = doc.privacy
   // The tool side table stores a name, a day, a model and a count — so the sentence may not
   // claim tool calls are never stored, and it has to say what is stored instead.
   assert.equal(/tool calls — are never stored/.test(privacy), false,
@@ -288,7 +317,7 @@ test('the promise about transcript contents matches what the tool table stores',
 })
 
 test('both export dialogs say that tool names are about to leave the machine', () => {
-  // The README's rule for the save dialog: it names what is about to be written, because that
+  // The documented rule for the save dialog: it names what is about to be written, because that
   // is the last moment to say no. The tool table is the newest thing in both files — names as
   // the transcript spells them, MCP names included — so neither dialog may stay quiet about it.
   const src = readDoc('src/nativeViews.ts')
@@ -300,28 +329,28 @@ test('both export dialogs say that tool names are about to leave the machine', (
   }
 })
 
-test('the tool-table retention the README promises is the horizon the aggregator applies', () => {
+test('the tool-table retention the docs promise is the horizon the aggregator applies', () => {
   const days = /TOOL_KEEP_DAYS = (\d+)/.exec(readDoc('src/agg.ts'))
   assert.ok(days, 'src/agg.ts no longer states a TOOL_KEEP_DAYS')
   const cap = (days as RegExpExecArray)[1]
   const flat = (t: string): string => t.replace(/\s+/g, ' ')
-  assert.ok(flat(README).includes(`kept for at most ${cap} days`),
-    `the README does not state the ${cap}-day tool horizon`)
+  assert.ok(flat(doc.counting).includes(`kept for at most ${cap} days`),
+    `docs/counting.md does not state the ${cap}-day tool horizon`)
   // The day buckets outlive the tool rows on the shipped default, so it is user-visible.
   assert.ok(flat(readDoc('CHANGELOG.md')).includes(`at most **${cap} days**`),
     `the CHANGELOG does not state the ${cap}-day tool horizon`)
 })
 
-test('the README states the snapshot version the code writes and the one it reads forward', () => {
+test('docs/counting.md states the snapshot version the code writes and the one it reads forward', () => {
   const src = readDoc('src/types.ts')
   const version = /STATE_VERSION = (\d+)/.exec(src)
   assert.ok(version, 'src/types.ts no longer states a STATE_VERSION')
-  assert.ok(README.includes(`snapshot is schema version ${(version as RegExpExecArray)[1]}`),
-    `the README does not name schema version ${(version as RegExpExecArray)[1]}`)
+  assert.ok(doc.counting.includes(`snapshot is schema version ${(version as RegExpExecArray)[1]}`),
+    `docs/counting.md does not name schema version ${(version as RegExpExecArray)[1]}`)
   const readable = /READABLE_STATE_VERSIONS[^=]*= \[([^\]]*)\]/.exec(src)
   assert.ok(readable, 'src/types.ts no longer lists the readable versions')
   for (const v of (readable as RegExpExecArray)[1].split(',').map((x) => x.trim()).filter(Boolean)) {
-    assert.match(README, new RegExp(`[Vv]ersion ${v}\\b`), `the README does not say version ${v} is still read`)
+    assert.match(doc.counting, new RegExp(`[Vv]ersion ${v}\\b`), `docs/counting.md does not say version ${v} is still read`)
   }
 })
 
@@ -335,8 +364,8 @@ test('the documented cause of "CC paused" is the one that can actually produce i
   // Only src/quota.ts produces this state, from a cache file whose blocked_until is in the future.
   assert.match(row as string, /blocked_until/)
   assert.equal(/pollOnlyWhenFocused/.test(row as string), false, 'the focus gate never produces this state')
-  // And the README says the same about the cache file.
-  assert.match(README, /`blocked_until` in the future is reported as a paused state/)
+  // And docs/quota-sources.md says the same about the cache file.
+  assert.match(doc.quotaSources, /`blocked_until` in the future is reported as a paused state/)
 })
 
 // ---------------------------------------------------------------------------
@@ -390,9 +419,15 @@ const PROBLEM_TABLE: Array<[string, string, string]> = [
   ['unknown', 'Show log', 'tokenPace.showOutput'],
 ]
 
-/** The rows of one markdown table, keyed by the `kind` cell they carry. */
-function rowsByKind(doc: string, from: string, to: string): Map<string, string> {
-  const section = doc.slice(doc.indexOf(from), doc.indexOf(to, doc.indexOf(from) + from.length))
+/**
+ * The rows of one markdown table, keyed by the `kind` cell they carry. `to` may be absent —
+ * a page whose chapter runs to the end of the file has no following heading to stop at.
+ */
+function rowsByKind(text: string, from: string, to?: string): Map<string, string> {
+  const start = text.indexOf(from)
+  assert.ok(start >= 0, `${from} is missing`)
+  const end = to === undefined ? -1 : text.indexOf(to, start + from.length)
+  const section = end < 0 ? text.slice(start) : text.slice(start, end)
   assert.ok(section.length > 0, `${from} is missing`)
   const out = new Map<string, string>()
   for (const line of section.split('\n')) {
@@ -422,12 +457,12 @@ test('docs/status-bar-states.md lists the same problem table', () => {
   }
 })
 
-test('the README explains every problem state with its bar text and its click', () => {
-  const rows = rowsByKind(README, '## If the bar says', '\n## ')
+test('docs/troubleshooting.md explains every problem state with its bar text and its click', () => {
+  const rows = rowsByKind(doc.troubleshooting, '# If the bar says')
   for (const [kind, label] of PROBLEM_TABLE) {
     const row = rows.get(kind)
-    assert.ok(row, `the README does not cover the problem kind ${kind}`)
-    assert.ok((row as string).includes(label), `${kind}: the README row does not name “${label}”`)
+    assert.ok(row, `docs/troubleshooting.md does not cover the problem kind ${kind}`)
+    assert.ok((row as string).includes(label), `${kind}: the row does not name “${label}”`)
   }
 })
 
@@ -435,32 +470,33 @@ test('the README explains every problem state with its bar text and its click', 
 // The settings tables against the manifest
 // ---------------------------------------------------------------------------
 
-const SETTINGS = README.slice(README.indexOf('\n## Settings'), README.indexOf('\n## Commands and keybindings'))
+const SETTINGS = doc.settings
 
-test('every contributed setting has a row in the README settings tables', () => {
-  assert.ok(SETTINGS.length > 0, 'the README has no Settings section any more')
+test('every contributed setting has a row in the settings tables', () => {
+  assert.ok(SETTINGS.length > 0, 'docs/settings.md is empty')
   for (const key of Object.keys(properties)) {
     const short = key.replace(/^tokenPace\./, '')
-    assert.ok(SETTINGS.includes(`| \`${short}\` |`), `the README settings tables have no row for ${key}`)
+    assert.ok(SETTINGS.includes(`| \`${short}\` |`), `docs/settings.md has no row for ${key}`)
   }
 })
 
-test('the README section table lists exactly the sections the panel contributes', () => {
+test('the documented section table lists exactly the sections the panel contributes', () => {
   // A section removed from the manifest but left in the table is a promise the build does not
   // keep — and one added without a row is a section nobody can find out about.
-  const table = README.slice(README.indexOf('| Section | Contents |'), README.indexOf('\nDefaults omit'))
-  assert.ok(table.length > 0, 'the README has no section table any more')
+  const page = doc.dashboard
+  const table = page.slice(page.indexOf('| Section | Contents |'), page.indexOf('\nDefaults omit'))
+  assert.ok(table.length > 0, 'docs/dashboard.md has no section table any more')
   const listed = [...table.matchAll(/^\| `([a-zA-Z]+)` \| /gm)].map((m) => m[1])
   const contributed = properties['tokenPace.dashboard.sections'].items?.enum ?? []
   assert.deepEqual([...listed].sort(), [...contributed].sort())
   // And the sentence under it names every section the default leaves out, and only those.
-  const omitted = [...README.slice(README.indexOf('\nDefaults omit'), README.indexOf('\nDefaults omit') + 240)
+  const omitted = [...page.slice(page.indexOf('\nDefaults omit'), page.indexOf('\nDefaults omit') + 240)
     .matchAll(/`([a-zA-Z]+)`/g)].map((m) => m[1])
   const shipped = properties['tokenPace.dashboard.sections'].default as string[]
   assert.deepEqual([...new Set(omitted)].sort(), contributed.filter((k) => !shipped.includes(k)).sort())
 })
 
-test('the README states the defaults the manifest actually ships', () => {
+test('the settings tables state the defaults the manifest actually ships', () => {
   const shown: Array<[string, string]> = [
     ['tokenPace.windowSelect', 'worstPace'],
     ['tokenPace.clickAction', 'dashboard'],
@@ -474,7 +510,7 @@ test('the README states the defaults the manifest actually ships', () => {
     assert.equal(JSON.stringify(properties[key].default).replace(/"/g, ''), text,
       `${key} does not default to ${text} in package.json`)
     assert.ok(SETTINGS.includes(`| \`${short}\` | \`${text}\` |`),
-      `the README settings table does not show ${short} defaulting to ${text}`)
+      `docs/settings.md does not show ${short} defaulting to ${text}`)
   }
 })
 
@@ -541,9 +577,9 @@ test('the two states that survive every switched-off channel are quoted with the
   assert.equal(exhausted, '100% exhausted')
   assert.equal(stopped, '100% limit reached')
   // Both tables show the bar text; a row that still carries the bare figure is stale.
-  for (const [name, doc] of [['README.md', README], ['docs/status-bar-states.md', STATES]] as const) {
+  for (const [name, page] of [['docs/status-bar.md', doc.statusBar], ['docs/status-bar-states.md', STATES]] as const) {
     for (const [needle, marker] of [[exhausted, 'exhausted (≥ 99.5 %)'], [stopped, 'reports the limit as reached']] as const) {
-      const row = doc.split('\n').find((l) => l.startsWith('|') && l.includes(marker))
+      const row = page.split('\n').find((l) => l.startsWith('|') && l.includes(marker))
       assert.ok(row, `${name} has no row for “${marker}”`)
       assert.ok((row as string).includes(needle), `${name}: “${marker}” no longer prints “${needle}”`)
     }
@@ -571,6 +607,15 @@ test('.vscodeignore still keeps the things that must not ship', () => {
   }
 })
 
+test('every page under docs/ is packaged, because the README links all of them', () => {
+  // The store overview is the README, and since 1.3 it is almost only links into docs/. A
+  // page missing from the .vsix is a dead link in the Extensions view's readme pane, where
+  // nothing rewrites a relative path to the repository.
+  for (const file of readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.md'))) {
+    assert.equal(shipped(`docs/${file}`), true, `docs/${file} would not be packaged`)
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Keybindings and the walkthrough
 // ---------------------------------------------------------------------------
@@ -582,11 +627,11 @@ test('exactly one keybinding, and the setting that switches it off exists', () =
   assert.equal(binding.when, 'config.tokenPace.keybindings')
   assert.equal(properties['tokenPace.keybindings'].type, 'boolean')
   assert.equal(properties['tokenPace.keybindings'].default, true)
-  assert.match(README, /`ctrl\+alt\+shift\+t`/)
+  assert.match(doc.commands, /`ctrl\+alt\+shift\+t`/)
   // The removed chord may still be named in prose (it explains why it went); what it may not
   // do any more is stand in a table cell as if it still bound something.
-  assert.equal(/\|\s*`ctrl\+alt\+shift\+q`[^|]*\|/.test(README), false,
-    'the README still lists the removed chord as a binding')
+  assert.equal(/\|\s*`ctrl\+alt\+shift\+q`[^|]*\|/.test(DOCS), false,
+    'the documentation still lists the removed chord as a binding')
 })
 
 test('the walkthrough only names commands that exist and media files that are there', () => {
@@ -627,7 +672,7 @@ test('the quota step quotes the consent dialog, not a paraphrase of it', () => {
 test('the menu command is named after what it opens', () => {
   const menu = manifest.contributes.commands.find((c) => c.command === 'tokenPace.menu')
   assert.equal(menu?.title, 'Show Actions Menu')
-  assert.equal(/`Token Pace: Menu`/.test(README), false, 'the README still uses the old command title')
+  assert.equal(/`Token Pace: Menu`/.test(DOCS), false, 'the documentation still uses the old command title')
 })
 
 // ---------------------------------------------------------------------------
@@ -638,8 +683,9 @@ test('every place a money budget is described says it is not a bill', () => {
   const setting = String(properties['tokenPace.budgets'].markdownDescription)
   assert.match(setting, /hypothetical API equivalent, not a bill/)
   // And the same promise where a reader looks it up rather than hovers it.
-  const section = README.slice(README.indexOf('\n## Budgets'), README.indexOf('\n## ', README.indexOf('\n## Budgets') + 5))
-  assert.ok(section.length > 0, 'the README has no Budgets section')
+  const page = doc.budgetsAlerts
+  const section = page.slice(page.indexOf('\n## Budgets'), page.indexOf('\n## ', page.indexOf('\n## Budgets') + 5))
+  assert.ok(section.length > 0, 'docs/budgets-alerts.md has no Budgets section')
   assert.match(section, /hypothetical API equivalent, not a bill/)
   // A budget must never be presented as something a provider stated.
   assert.match(section, /limits \*\*you\*\* state/)
@@ -654,4 +700,130 @@ test('the budget alert is off by default and says what it is judged on', () => {
   assert.match(d, /once per period/)
   // The freshness gate is a different one from the quota alerts', and the description says so.
   assert.match(d, /locally counted usage/)
+})
+
+// ---------------------------------------------------------------------------
+// The store overview and the pages behind it
+// ---------------------------------------------------------------------------
+
+/** Every markdown file whose links have to resolve: the overview, the pages, the walkthrough. */
+function linkedFiles(): string[] {
+  const out = ['README.md']
+  for (const f of readdirSync(join(ROOT, 'docs')).filter((n) => n.endsWith('.md')).sort()) out.push(`docs/${f}`)
+  for (const f of readdirSync(join(ROOT, 'media/walkthrough')).filter((n) => n.endsWith('.md')).sort()) {
+    out.push(`media/walkthrough/${f}`)
+  }
+  return out
+}
+
+/**
+ * GitHub's heading slug, which is what an anchor in a relative link is matched against:
+ * lower-cased, code spans and emphasis dropped, everything but letters, digits, spaces,
+ * hyphens and underscores removed, spaces turned into hyphens. `## If the bar says …`
+ * therefore ends in a hyphen, because dropping the ellipsis leaves its space behind.
+ */
+function slugs(markdown: string): Set<string> {
+  const out = new Set<string>()
+  let inFence = false
+  for (const line of markdown.split('\n')) {
+    if (/^```/.test(line)) { inFence = !inFence; continue }
+    if (inFence) continue
+    const m = /^#{1,6} (.+)$/.exec(line)
+    if (!m) continue
+    out.add(m[1]
+      .replace(/`/g, '')
+      .replace(/\*\*?/g, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N} _-]/gu, '')
+      .replace(/ /g, '-'))
+  }
+  return out
+}
+
+test('every relative link in the README, docs/ and the walkthrough resolves', () => {
+  // vsce rewrites a relative link against the repository URL, so a path that is wrong here is
+  // a 404 on both store pages — and nothing in the packaging says a word about it.
+  const broken: string[] = []
+  for (const file of linkedFiles()) {
+    const text = readDoc(file)
+    for (const m of text.matchAll(/\[[^\]\n]*\]\(([^)\s]+)\)/g)) {
+      const target = m[1]
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('//')) continue
+      const [path, anchor] = target.split('#') as [string, string | undefined]
+      const resolved = path === '' ? file : normalize(join(dirname(file), path))
+      if (relative(ROOT, join(ROOT, resolved)).startsWith('..')) {
+        broken.push(`${file}: ${target} leaves the repository`)
+        continue
+      }
+      if (!existsSync(join(ROOT, resolved))) {
+        broken.push(`${file}: ${target} → ${resolved} does not exist`)
+        continue
+      }
+      if (anchor !== undefined && anchor !== '' && resolved.endsWith('.md')
+        && !slugs(readDoc(resolved)).has(anchor)) {
+        broken.push(`${file}: ${target} — ${resolved} has no heading with that anchor`)
+      }
+    }
+  }
+  assert.deepEqual(broken, [], `\n${broken.join('\n')}`)
+})
+
+test('the README index links every page under docs/, and links nothing that is not one', () => {
+  const listed = new Set([...README.matchAll(/\]\((docs\/[^)#\s]+)\)/g)].map((m) => m[1].slice('docs/'.length)))
+  const present = new Set(readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.md')))
+  assert.deepEqual([...listed].sort(), [...present].sort(),
+    'the README documentation index and the contents of docs/ have drifted apart')
+})
+
+test('the README stays the store overview and does not grow a manual back', () => {
+  // 1.3 split a 1337-line README into docs/. The cap is what keeps it from creeping back: a
+  // chapter belongs on its own page, where the index can point at it and a reader can find it.
+  const lines = README.split('\n').length
+  assert.ok(lines <= 200, `README.md is ${lines} lines; the store overview is meant to stay short`)
+  for (const needed of ['## What you see', '## Install', '## Privacy', '## Documentation', '## Licence']) {
+    assert.ok(README.includes(needed), `README.md no longer has a ${needed} section`)
+  }
+  // And what it must not carry again: the settings tables live on their own page.
+  assert.equal(/\| `windowSelect` \|/.test(README), false, 'the settings table is back in the README')
+})
+
+test('every page under docs/ says where it belongs and carries the licence header', () => {
+  for (const file of readdirSync(join(ROOT, 'docs')).filter((f) => f.endsWith('.md'))) {
+    const text = readDoc(`docs/${file}`)
+    assert.match(text, /SPDX-License-Identifier: AGPL-3\.0-or-later/, `docs/${file} has no SPDX header`)
+    assert.match(text, /^<!--[\s\S]*?-->\n\n# .+\n/, `docs/${file} does not open with one H1`)
+  }
+})
+
+test('the release page names the two secrets and the expiry line that has to be filled in', () => {
+  for (const needed of ['VSCE_PAT', 'OVSX_PAT', 'VSCE_PAT expires:', 'pdvfm.de', 'TXT record']) {
+    assert.ok(doc.release.includes(needed), `docs/release.md does not mention ${needed}`)
+  }
+  // The workflow is what the page describes, so the secret names have to be the ones it reads.
+  const workflow = readDoc('.github/workflows/release.yml')
+  for (const secret of ['VSCE_PAT', 'OVSX_PAT']) {
+    assert.ok(workflow.includes(`secrets.${secret}`), `release.yml does not read secrets.${secret}`)
+  }
+})
+
+test('the tooltip chapter states the prompt-cache row, and only for a connected bridge', () => {
+  // The row exists because the status line delivered a reading; without the bridge there is
+  // nothing to show, and nothing about the cache may be derived from the token buckets.
+  assert.match(doc.statusBar, /status-line bridge is connected, one further row states the prompt cache/)
+  assert.match(doc.statusBar, /Without the bridge the row is absent\nrather than estimated/)
+})
+
+test('the settings page says that a plan name is cleaned before it is printed', () => {
+  const row = doc.settings.split('\n').find((l) => l.startsWith('| `planName` |'))
+  assert.ok(row, 'docs/settings.md has no planName row')
+  assert.match(row as string, /Backticks, control characters and line breaks are stripped/)
+  assert.match(row as string, /40-character cut/)
+  // What the row promises is what config.sanitize does.
+  assert.equal(sanitize({ 'tokenPace.planName': { claude: 'Max`20x\nteam' } }).planName.claude, 'Max20x team')
+  assert.equal((sanitize({ 'tokenPace.planName': { claude: 'x'.repeat(80) } }).planName.claude ?? '').length, 40)
+})
+
+test('the developer page keeps the command that runs the smoke test in a real window', () => {
+  assert.match(doc.development, /npm run test:e2e/)
+  assert.match(readDoc('package.json'), /"test:e2e":/)
 })

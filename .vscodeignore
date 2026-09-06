@@ -20,6 +20,9 @@
 # Extensions view's readme pane, and on a Marketplace page that is not rewritten.
 !media/screenshot-*.png
 !scripts/uninstall.js
+# Since 1.3 the README is the store overview and every chapter lives under docs/. The
+# Extensions view's readme pane resolves a relative link inside the package, so a page left
+# out here is a dead link for everybody who reads the overview inside VS Code.
 !docs/*.md
 
 # The extension-host smoke test and the VS Code it downloads. Excluded again *after* the

@@ -16,6 +16,14 @@ updates:
       minor-and-patch:
         patterns: ['*']
         update-types: ['minor', 'patch']
+    # Two majors are judged already and declined: the Node types follow the Node that VS Code
+    # ships (22), and a TypeScript major is a compiler change, not an update. Ignoring them
+    # here keeps Dependabot from reopening the same two pull requests every week.
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions
     directory: /

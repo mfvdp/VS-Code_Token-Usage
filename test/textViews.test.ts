@@ -870,7 +870,6 @@ function agentVm(select = false): { vm: ViewModel; agentKey: string } {
   const agg = buildAgg('project')
   const dir = path.dirname(CLAUDE_FILE)
   const sessionFile = path.join(dir, 'sess-alpha.jsonl')
-  const agentFile = path.join(dir, 'sess-alpha', 'subagents', 'agent-a94f0001.jsonl')
   const counts = {
     input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 0,
     requests: 5, outputFinal: 5, toolCalls: 3,
@@ -892,7 +891,7 @@ function agentVm(select = false): { vm: ViewModel; agentKey: string } {
   agg.mains = () => [main]
   agg.agents = () => [agent]
   agg.launches = () => [pending]
-  const agentKey = `a:${agentFile}`
+  const agentKey = 'a:a94f0001'
   const vm = buildViewModel(makeInput({
     agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: select ? { agentSelected: agentKey } : {},
   }))

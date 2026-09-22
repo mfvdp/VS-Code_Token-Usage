@@ -14,14 +14,16 @@
  *  - anything else is unknown, never done: Claude Code writes no end marker into an agent's
  *    transcript, so a silent file is not a finished one.
  *
- * The aggregator hands its records over as lists, without the paths it keys them by. The
- * paths a node key is made of are recovered from what the records carry — an agent's
- * `sessionFile`, a launch's `file` — and from the aggregator's cursor keys, which are the
- * transcript paths themselves. A session whose own path cannot be found at all is keyed by
- * its id instead of a path; a key is only ever used to find the node again.
+ * A node is keyed by the identifiers its records carry — `s:<sessionId>`,
+ * `w:<sessionId>|<workflowId>` (a run belongs to its session), `a:<agentId>`,
+ * `l:<toolUseId>` — and never by a path. A key goes to the page, comes back in a message and
+ * is kept with the stored view state, and a transcript path spells out the project's
+ * directory, which the tree does not even name when attribution is off. The identifiers are
+ * unique on one machine — a session id is its transcript's UUID, agent and tool_use ids are
+ * random — and the aggregator holds each to 64 characters, so a key is short by construction.
+ * A key is only ever used to find its node again.
  */
 
-import * as path from 'path'
 import {
   AGENT_RETENTION_DAYS, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_TREE_DEPTH, NodeDetails,
   NodeState, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS, TreeNode,
@@ -46,8 +48,9 @@ export interface AgentTreeInput {
   selected: string | null
   tcfg: TimeConfig
   /**
-   * The transcript paths the aggregator holds a cursor for. Only used to find the real path of
-   * a session or an agent file; without it the paths are derived from the records alone.
+   * The transcript paths the aggregator holds a cursor for. No longer read: they were the
+   * bodies of the node keys, and a key carries no path any more. Accepted so that a caller
+   * written against the earlier shape still compiles.
    */
   files?: Iterable<string>
 }
@@ -57,9 +60,10 @@ const HOUR_MS = 3_600_000
 
 /**
  * The longest key the webview may send back — `MAX_AGENT_KEY_CHARS` in viewModel.ts, which
- * cannot be imported here without a cycle. A node whose key the parser drops could never be
- * selected or folded, so a longer path keeps its tail: that is where the session and the agent
- * id are, which is what keeps two keys apart.
+ * cannot be imported here without a cycle. No key made of the aggregator's records comes near
+ * it (two identifiers of at most 64 characters and a prefix); the cut is the safety net for
+ * records that did not come through its sanitisers, because a node whose key the parser drops
+ * could never be selected or folded. It keeps the tail, the end of the identifier.
  */
 const MAX_KEY_CHARS = 200
 
@@ -427,10 +431,6 @@ interface RootAcc {
   main: MainRec | null
   agents: AgentRec[]
   pendings: AgentLaunch[]
-  /** The session's path as an agent record states it. */
-  agentSessionFile: string | null
-  /** The session's path as a launch from its own transcript states it. */
-  launchFile: string | null
 }
 
 interface Forest {
@@ -550,35 +550,6 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
     if (id !== null && recById.has(id)) linked.add(l.toolUseId)
   }
 
-  // The paths the cursors know, for exactly the file names asked for below.
-  const wanted = new Set<string>()
-  for (const r of recById.values()) wanted.add(`agent-${r.agentId}.jsonl`)
-  for (const m of mains) wanted.add(`${m.sessionId}.jsonl`)
-  const found = new Map<string, string[]>()
-  for (const f of input.files ?? []) {
-    if (typeof f !== 'string') continue
-    const b = base(f)
-    if (!wanted.has(b)) continue
-    const list = found.get(b)
-    if (list) list.push(f)
-    else found.set(b, [f])
-  }
-  const mainFileOf = (sessionId: string): string | null => {
-    const list = (found.get(`${sessionId}.jsonl`) ?? [])
-      .filter((f) => !segments(f).slice(0, -1).includes('subagents'))
-      .sort(cmp)
-    return list[0] ?? null
-  }
-  const agentFileOf = (r: AgentRec): string => {
-    const name = `agent-${r.agentId}.jsonl`
-    const list = (found.get(name) ?? []).filter((f) => segments(f).includes(r.sessionId)).sort(cmp)
-    if (list[0]) return list[0]
-    // Where Claude Code writes it: `<slug>/<session>/subagents/[workflows/<wf>/]agent-<id>.jsonl`.
-    const wf = text(r.workflowId)
-    return path.join(path.dirname(r.sessionFile), r.sessionId, 'subagents',
-      ...(wf !== null ? ['workflows', wf] : []), name)
-  }
-
   const projects = new Map<string, string>()
   if (input.attribution !== 'none') {
     for (const s of input.sessions ?? []) {
@@ -593,29 +564,22 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
   const accFor = (sessionId: string): RootAcc => {
     let a = accs.get(sessionId)
     if (!a) {
-      a = { sessionId, main: null, agents: [], pendings: [], agentSessionFile: null, launchFile: null }
+      a = { sessionId, main: null, agents: [], pendings: [] }
       accs.set(sessionId, a)
     }
     return a
   }
-  for (const r of recById.values()) {
-    const a = accFor(r.sessionId)
-    a.agents.push(r)
-    a.agentSessionFile ??= r.sessionFile
-  }
-  const placeOf = (file: string): { sessionId: string; main: boolean } | null => {
+  for (const r of recById.values()) accFor(r.sessionId).agents.push(r)
+  // The session a launch belongs to: its agent's, when an agent launched it, else its file's.
+  const sessionOfLaunch = (file: string): string | null => {
     const id = agentIdOf(file)
     const r = id !== null ? recById.get(id) : undefined
-    return r ? { sessionId: r.sessionId, main: false } : sessionOfPath(file)
+    return r ? r.sessionId : sessionOfPath(file)?.sessionId ?? null
   }
   for (const l of launches) {
-    const place = placeOf(l.file)
-    if (place === null) continue
-    const pending = !linked.has(l.toolUseId)
-    const a = pending ? accFor(place.sessionId) : accs.get(place.sessionId)
-    if (!a) continue
-    if (place.main) a.launchFile ??= l.file
-    if (pending) a.pendings.push(l)
+    if (linked.has(l.toolUseId)) continue
+    const sessionId = sessionOfLaunch(l.file)
+    if (sessionId !== null) accFor(sessionId).pendings.push(l)
   }
   for (const m of mains) {
     const a = accFor(m.sessionId)
@@ -628,8 +592,7 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
     const recent = a.main !== null && a.main.lastTs >= now - ROOT_WINDOW_MS
     if (!recent && a.agents.length === 0 && a.pendings.length === 0) continue
     const root = buildRoot(a, {
-      now, tcfg, attribution: input.attribution, project: projects.get(a.sessionId) ?? null,
-      file: a.agentSessionFile ?? a.launchFile ?? mainFileOf(a.sessionId), launchOf, agentFileOf,
+      now, tcfg, attribution: input.attribution, project: projects.get(a.sessionId) ?? null, launchOf,
     })
     for (const e of preorder(root)) if (!byKey.has(e.key)) byKey.set(e.key, e)
     roots.push(root)
@@ -644,20 +607,16 @@ interface RootEnv {
   tcfg: TimeConfig
   attribution: Attribution
   project: string | null
-  /** The session's own transcript path, when anything names it. */
-  file: string | null
   launchOf: (r: AgentRec) => AgentLaunch | null
-  agentFileOf: (r: AgentRec) => string
 }
 
 function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const { now, tcfg } = env
-  const keyBody = env.file ?? a.sessionId
   const main = a.main
   const mainCounters = main ? countersOf(main) : null
   const start = main ? firstOf(main) : null
   const root: Entry = {
-    key: fitKey('s:', keyBody),
+    key: fitKey('s:', a.sessionId),
     kind: 'session',
     label: sessionLabel(a.sessionId),
     // Attribution off: no project names anywhere, and the tree does not make an exception.
@@ -687,7 +646,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     let w = workflows.get(wf)
     if (!w) {
       w = {
-        key: fitKey('w:', `${keyBody}|${wf}`),
+        key: fitKey('w:', `${a.sessionId}|${wf}`),
         kind: 'workflow',
         label: workflowLabel(wf),
         sub: null,
@@ -731,7 +690,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const alias = text(r.meta?.model) ?? text(launch?.modelHint)
     const lastModel = models.length > 0 ? normalizeModel(models[models.length - 1]) : ''
     const e: Entry = {
-      key: fitKey('a:', env.agentFileOf(r)),
+      key: fitKey('a:', r.agentId),
       kind: 'agent',
       label: `${type ?? t('Agent')} · ${lastModel || alias || '–'} · ${r.agentId.slice(0, 4)}`,
       sub: null,

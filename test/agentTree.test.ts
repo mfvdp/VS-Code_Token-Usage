@@ -138,8 +138,10 @@ function stateText(over: Partial<AgentTreeInput>, key: string): string | undefin
   return agentDetails(input(over), NOW, key)?.stateText
 }
 
-const rootKey = `s:${sessionFile()}`
-const agentKey = (id: string, session = S1, wf: string | null = null): string => `a:${agentFile(id, session, wf)}`
+/** Node keys are the records' identifiers, whatever directory the transcripts sit in. */
+const rootKey = `s:${S1}`
+const agentKey = (id: string): string => `a:${id}`
+const wfKey = `w:${S1}|${WF}`
 
 // ---------------------------------------------------------------------------
 // §4.4 · states
@@ -177,9 +179,9 @@ test('a workflow agent completed by the journal says so, and a missing time is l
       rec('bbbb0004', { outcome: 'failed', outcomeTs: null }),
     ],
   }
-  assert.equal(stateText(over, agentKey('bbbb0001', S1, WF)),
+  assert.equal(stateText(over, agentKey('bbbb0001')),
     'Completed — the workflow journal recorded the result at 11:56.')
-  assert.equal(stateText(over, agentKey('bbbb0002', S1, WF)), 'Completed — the workflow journal recorded the result.')
+  assert.equal(stateText(over, agentKey('bbbb0002')), 'Completed — the workflow journal recorded the result.')
   assert.equal(stateText(over, agentKey('bbbb0003')), 'Completed — the parent recorded the result.')
   assert.equal(stateText(over, agentKey('bbbb0004')), 'Failed — the parent recorded the failure.')
 })
@@ -311,7 +313,6 @@ test('agents whose session transcript was never read still get their session, wh
 })
 
 test('a workflow run is running, failed, done or unknown from its agents', () => {
-  const wfKey = `w:${sessionFile()}|${WF}`
   const run = (agents: AgentRec[]): { vm: AgentTreeVm; w: TreeNode; text: string | undefined } => {
     const vm = build({ agents })
     return { vm, w: node(vm, wfKey), text: stateText({ agents }, wfKey) }
@@ -327,7 +328,7 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
   assert.equal(running.text, 'Running — inferred: at least one agent of this run is running.')
   assert.equal(parentOf(running.vm, running.w.key)?.key, rootKey)
   assert.deepEqual(running.w.children.map((c) => c.key).sort(),
-    [agentKey('eeee0001', S1, WF), agentKey('eeee0002', S1, WF)].sort())
+    [agentKey('eeee0001'), agentKey('eeee0002')].sort())
 
   const f = run([done('eeee0001'), failed('eeee0002')])
   assert.deepEqual([f.w.state, f.w.derived], ['failed', false])
@@ -368,7 +369,7 @@ test('roots are the sessions of the last day and the sessions with agents in ret
   })
   assert.deepEqual(vm.roots.map((r) => r.label), ['Session aaaa1111', 'Session cccc3333'])
   assert.equal(vm.omittedRoots, 0)
-  assert.deepEqual(vm.roots[1].children.map((c) => c.key), [agentKey('aaaa0001', 'cccc3333-agents')])
+  assert.deepEqual(vm.roots[1].children.map((c) => c.key), [agentKey('aaaa0001')])
 })
 
 test('at most MAX_ROOTS sessions are listed, the newest, and the rest is counted', () => {
@@ -445,11 +446,10 @@ test('a run keeps its own agents, even one another agent launched', () => {
       wfRec('eeee0003', { spawnerFile: agentFile('eeee0002', S1, WF), firstTs: NOW - 20 * MIN }),
     ],
   })
-  const wfKey = `w:${sessionFile()}|${WF}`
-  assert.equal(parentOf(vm, agentKey('eeee0002', S1, WF))?.key, wfKey)
+  assert.equal(parentOf(vm, agentKey('eeee0002'))?.key, wfKey)
   // Inside the run, a nested agent still sits under its spawner.
-  assert.equal(parentOf(vm, agentKey('eeee0003', S1, WF))?.key, agentKey('eeee0002', S1, WF))
-  assert.equal(depths(vm).get(agentKey('eeee0003', S1, WF)), 3)
+  assert.equal(parentOf(vm, agentKey('eeee0003'))?.key, agentKey('eeee0002'))
+  assert.equal(depths(vm).get(agentKey('eeee0003')), 3)
 })
 
 // ---------------------------------------------------------------------------
@@ -640,7 +640,7 @@ test('a session and a run have details of their own', () => {
   assert.deepEqual(['Models', 'Started', 'Turns', 'Usage', 'Cache write 5m', 'Tool calls', 'Agents'].map(sv),
     ['claude-opus-5', '10:00', '12', '3.5K', '400', '9', '4'])
 
-  const w = agentDetails(input(over), NOW, `w:${sessionFile()}|${WF}`)
+  const w = agentDetails(input(over), NOW, wfKey)
   assert.ok(w)
   assert.deepEqual(w.rows.map((r) => r.label), [
     'Agents', 'Started', 'Duration', 'Last activity', 'Turns', 'Usage', 'Fresh input', 'Cache write 5m',
@@ -695,45 +695,68 @@ test('an empty tree says which absence it is', () => {
 // Keys
 // ---------------------------------------------------------------------------
 
-test('node keys have the documented shapes and come from the transcript paths where one is known', () => {
-  const vm = build({
+test('node keys are the identifiers the records carry, in the documented shapes, and never a path', () => {
+  const over: Partial<AgentTreeInput> = {
     agents: [rec('aaaa0001'), wfRec('bbbb0001')],
     launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })],
-  })
-  assert.deepEqual(all(vm.roots).map((n) => n.key).sort(), [
-    agentKey('aaaa0001'), agentKey('bbbb0001', S1, WF), 'l:toolu_pppp0001', rootKey, `w:${sessionFile()}|${WF}`,
-  ].sort())
+  }
+  const keysOf = (vm: AgentTreeVm): string[] => all(vm.roots).map((n) => n.key).sort()
+  const vm = build(over)
+  assert.deepEqual(keysOf(vm), ['a:aaaa0001', 'a:bbbb0001', 'l:toolu_pppp0001', `s:${S1}`, `w:${S1}|${WF}`].sort())
 
-  // A session without agents: its path from the cursors, or its id when nothing names one.
-  assert.equal(build({ files: [sessionFile(), agentFile('zzzz0000')] }).roots[0].key, rootKey)
-  assert.equal(build().roots[0].key, `s:${S1}`)
-  // A cursor path under `subagents` with the session's name is not the session's transcript.
-  assert.equal(build({ files: [path.join(PROJ, 'x', 'subagents', `${S1}.jsonl`)] }).roots[0].key, `s:${S1}`)
+  // Where the files lie changes nothing: the cursors' paths — the session's own, an agent's in an
+  // odd directory, a namesake under another session — are not what a key is made of.
+  const files = [
+    sessionFile(), agentFile('aaaa0001'), agentFile('bbbb0001', S1, WF),
+    path.join(PROJ, S1, 'subagents', 'nested', 'agent-aaaa0001.jsonl'), agentFile('aaaa0001', S2),
+  ]
+  assert.deepEqual(keysOf(build({ ...over, files })), keysOf(vm))
+  // A session without agents is its id as well, whether a cursor names its transcript or not.
+  assert.equal(build().roots[0].key, rootKey)
+  assert.equal(build({ files: [sessionFile()] }).roots[0].key, rootKey)
 
-  // An agent file where the cursors found it wins over the path the record implies — but only
-  // one inside its own session's directory.
-  const odd = path.join(PROJ, S1, 'subagents', 'nested', 'agent-aaaa0001.jsonl')
-  const elsewhere = path.join(PROJ, S2, 'subagents', 'agent-aaaa0002.jsonl')
-  const found = build({ agents: [rec('aaaa0001'), rec('aaaa0002')], files: [odd, elsewhere] })
-  assert.ok(all(found.roots).some((n) => n.key === `a:${odd}`))
-  assert.ok(all(found.roots).some((n) => n.key === agentKey('aaaa0002')))
+  // No key names a directory, so neither the page nor the stored view state ever holds the
+  // project's path — which the tree does not even show as a label while attribution is off.
+  for (const k of keysOf(vm)) {
+    assert.equal(/[\\/]/.test(k), false, k)
+    assert.equal(k.includes('alpha'), false, k)
+  }
 })
 
-test('a key never exceeds what the webview may send back, and two long keys stay apart', () => {
+test('keys stay short however deep the files lie, stay apart where names share a tail, and do not move', () => {
   const deep = path.join(path.sep, 'home', 'x'.repeat(120), '.claude', 'projects', `-home-${'y'.repeat(60)}`)
   const file = path.join(deep, `${S1}.jsonl`)
-  const long = (id: string): AgentRec => rec(id, { sessionFile: file, spawnerFile: file })
-  const vm = build({ agents: [long('aaaa0001'), long('aaaa0002'), wfRec('bbbb0001', { sessionFile: file })] })
+  assert.ok(file.length > MAX_AGENT_KEY_CHARS, 'the path alone is longer than any key may be')
+  const long = (id: string, over: Partial<AgentRec> = {}): AgentRec =>
+    rec(id, { sessionFile: file, spawnerFile: file, ...over })
+  // Two agents whose rows read alike — one type, one model, the same four characters — an id that
+  // ends like one of theirs, a run and a launch, all in that deep session.
+  const over: Partial<AgentTreeInput> = {
+    agents: [long('aaaa0001'), long('aaaa0002', { input: 999 }), long('bbbb0001'), wfRec('cccc0001', { sessionFile: file })],
+    launches: [launch('pppp0001', { agentId: null, file, ts: NOW - MIN })],
+  }
+  const vm = build(over)
   const keys = all(vm.roots).map((n) => n.key)
-  assert.ok(keys.some((k) => k.startsWith('a:…')), keys.join('\n'))
+  assert.equal(keys.length, 1 + 4 + 1 + 1)
   for (const k of keys) assert.ok(k.length <= MAX_AGENT_KEY_CHARS, `${k.length}: ${k}`)
-  assert.equal(new Set(keys).size, keys.length)
-  // The tail survives: the agent's own file name is still the end of its key.
-  assert.ok(keys.some((k) => k.endsWith('agent-aaaa0001.jsonl')))
-  // And a long key still selects its node.
-  const key = keys.find((k) => k.endsWith('agent-aaaa0002.jsonl'))
-  assert.ok(key)
-  assert.equal(build({ agents: [long('aaaa0001'), long('aaaa0002')], selected: key }).selected?.key, key)
+  assert.equal(new Set(keys).size, keys.length, 'two nodes share a key')
+  assert.equal(node(vm, agentKey('aaaa0001')).label, node(vm, agentKey('aaaa0002')).label, 'the two rows read alike')
+
+  // Stable: a later build, the records in another order and the cursors' paths give the same keys.
+  const again = build({ ...over, agents: [...(over.agents ?? [])].reverse(), files: [file] }, NOW + 3 * MIN)
+  assert.deepEqual(all(again.roots).map((n) => n.key).sort(), [...keys].sort())
+  // A key selects its own node and no other: the one of the pair with 999 fresh input tokens.
+  const picked = build({ ...over, selected: agentKey('aaaa0002') }).selected
+  assert.equal(picked?.key, agentKey('aaaa0002'))
+  assert.equal(picked?.rows.find((r) => r.label === 'Fresh input')?.value, '999')
+
+  // An identifier that never passed the aggregator's 64-character cap still gets a key the
+  // webview takes back, cut to its tail — and two such stay apart by where they differ.
+  const huge = (tail: string): AgentRec => rec(`${'f'.repeat(300)}${tail}`)
+  const cut = all(build({ agents: [huge('01'), huge('02')] }).roots).map((n) => n.key)
+  for (const k of cut) assert.ok(k.length <= MAX_AGENT_KEY_CHARS, `${k.length}: ${k}`)
+  assert.equal(new Set(cut).size, cut.length)
+  assert.ok(cut.some((k) => k.startsWith('a:…') && k.endsWith('01')), cut.join('\n'))
 })
 
 // ---------------------------------------------------------------------------
@@ -816,7 +839,7 @@ test('the tree speaks German with the bundle the extension ships', () => {
   const vm = german(() => build(over))
   assert.equal(vm.roots[0].label, 'Sitzung 9d0eb37a')
   assert.equal(node(vm, 'l:toolu_pppp0001').label, 'Agent · – · gestartet')
-  assert.equal(node(vm, `w:${sessionFile()}|${WF}`).label, 'Workflow cfe7718d')
+  assert.equal(node(vm, wfKey).label, 'Workflow cfe7718d')
   assert.equal(vm.selected?.stateText,
     'Läuft — abgeleitet: Das Transkript hat sich vor 1 min geändert, und es wurde noch kein Ergebnis aufgezeichnet.')
   assert.deepEqual(vm.selected?.rows.map((r) => r.label), [
@@ -827,7 +850,7 @@ test('the tree speaks German with the bundle the extension ships', () => {
   assert.equal(vm.selected?.rows.find((r) => r.label === 'Ausgabe')?.note, '⚠ Untergrenze')
   // The figures in the reader's number format, too.
   assert.equal(vm.selected?.rows.find((r) => r.label === 'Verbrauch')?.value, '1,2K')
-  assert.equal(german(() => agentDetails(input(over), NOW, agentKey('bbbb0001', S1, WF))?.stateText),
+  assert.equal(german(() => agentDetails(input(over), NOW, agentKey('bbbb0001'))?.stateText),
     'Fertig — das Workflow-Journal hat das Ergebnis um 11:55 aufgezeichnet.')
   assert.equal(german(() => build({ ...over, selected: 'l:gone' })).note, 'Der ausgewählte Knoten ist nicht mehr im Baum.')
   assert.equal(german(() => build({ mains: [] })).note, 'Keine Claude-Code-Sitzung in den letzten 7 Tagen.')

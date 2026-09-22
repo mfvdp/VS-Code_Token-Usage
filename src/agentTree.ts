@@ -24,7 +24,7 @@ export const MAX_TREE_DEPTH = 6
 export type NodeState = 'running' | 'done' | 'failed' | 'unknown' | 'active' | 'idle'
 
 export interface TreeNode {
-  /** Stable: `s:<sessionFile>` | `w:<sessionFile>|<wfId>` | `a:<agentFile>` | `l:<toolUseId>`. */
+  /** Stable, never a path: `s:<sessionId>` | `w:<sessionId>|<wfId>` | `a:<agentId>` | `l:<toolUseId>`. */
   key: string
   /** `pending` = launched, file not seen yet. */
   kind: 'session' | 'workflow' | 'agent' | 'pending'

@@ -24,6 +24,7 @@ import * as path from 'path'
 import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
 import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
+import { AgentTreeVm, TreeNode } from './agentTree'
 import { Aggregator } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
@@ -46,7 +47,7 @@ import { effectivePace, paceVerdict, windowElapsed } from './pace'
 import { CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE, configureQuotaFiles } from './quota'
 import { QuotaHistory } from './quotaHistory'
 import { QuotaManager, QuotaOptions } from './quotaManager'
-import { scan, ScanContext } from './scan'
+import { agentPollFiles, agentReplayFiles, replayAgents, scan, ScanContext } from './scan'
 import { sectionSettingsQuery } from './sectionSettings'
 import { Role, showMenu, StatusBar, StatusInput } from './statusbar'
 import { buildItems, USAGE_PAGE } from './statusText'
@@ -77,6 +78,12 @@ const ROLLUP_MS = 6 * 60 * 60_000
 /** A file event storm (a save, a rename, a truncation) is one reload. */
 const FOLLOWER_DEBOUNCE_MS = 1000
 const QUOTA_FILE_DEBOUNCE_MS = 300
+/**
+ * While an agent runs, the agent directories of its session are listed this often: the file
+ * watcher reports a change within about a second, but not the files of a directory it has
+ * never seen (see `agentPollFiles`), and the sweep comes only once a minute.
+ */
+export const AGENT_POLL_MS = 5000
 
 /** The debug log file is rotated at this size; exactly one older generation is kept. */
 const LOG_ROTATE_BYTES = 5 * 1024 * 1024
@@ -220,8 +227,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   let roleWired = false
   let scanning = false
   let ingesting = false
+  /** The one-time agent replay while it runs; no ingest, roll-up or timed save meanwhile. */
+  let replayRun: Promise<void> | null = null
+  /** A replay that failed is tried again on the next activation, not after every ingest. */
+  let replayFailed = false
   let dirty = false
   let saving = false
+  /** Set on the way out: work still in flight then must not start anything new. */
+  let disposed = false
   let writeConsentAsked = false
   const pendingFiles = new Set<string>()
 
@@ -309,6 +322,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     try {
       latestVm = buildVm(now)
       lastVmAt = now
+      // The poll follows the newest tree there is, before a view could fail on it.
+      updateAgentPoll()
       dashboard.update(latestVm)
       views.refreshMarkdown()
     } catch (err) {
@@ -492,7 +507,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     ingestTimer = setTimeout(() => {
       ingestTimer = undefined
       // The cold scan reads every file anyway; the sweep picks up whatever arrives meanwhile.
-      if (scanning || ingesting || role === 'follower') return
+      // The agent replay hands the files that waited for it back when it ends.
+      if (scanning || ingesting || replayRun !== null || role === 'follower') return
       const files = pendingFiles.size > 0 ? [...pendingFiles] : undefined
       pendingFiles.clear()
       ingesting = true
@@ -505,13 +521,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
           if (n > 0) { dirty = true; quotaMgr.invalidate(); render(true) }
         })
         .catch((err) => log.error(`Ingest failed: ${err}`))
-        .finally(() => { ingesting = false })
+        .finally(() => {
+          ingesting = false
+          // A replay that found this ingest in its way runs now.
+          void replayAgentTables('deferred')
+        })
     }, INGEST_DEBOUNCE_MS)
   }
 
   function rollup(now: number): void {
-    // Never while data is moving: a roll-up folds hour buckets a running ingest still writes to.
-    if (scanning || ingesting || role === 'follower') return
+    // Never while data is moving: a roll-up folds hour buckets a running ingest still writes to,
+    // and prunes the agent tables a replay is rebuilding.
+    if (scanning || ingesting || replayRun !== null || role === 'follower') return
     try {
       const r = agg.rollup(now, cfg.hourRetentionDays, cfg.retentionDays, readTimeConfig(cfg))
       if (r.hoursMerged > 0 || r.daysMerged > 0) {
@@ -523,6 +544,89 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     } catch (err) {
       log.error(`Roll-up failed: ${err}`)
     }
+  }
+
+  // --------------------------------------------------------------- agents
+  /**
+   * The hot-directory poll: while the tree shows an agent at work, the agent directories of
+   * every active session are listed every AGENT_POLL_MS and each new or changed file goes to
+   * the ingest like a watcher event. It follows the view model (`updateAgentPoll` after every
+   * rebuild), so it stops by itself once nothing runs; a follower never polls.
+   */
+  const agentPoll = new AgentPoll(pollAgentFiles)
+
+  /** Asked again after every wait: the lease can change hands while a pass or a replay runs. */
+  function readsTranscripts(): boolean {
+    return role !== 'follower' && !disposed
+  }
+
+  function updateAgentPoll(): void {
+    const wanted = readsTranscripts() && agentPollWanted(latestVm?.agents)
+    if (!agentPoll.set(wanted)) return
+    // Counts only, like every line about transcripts.
+    log.debug(wanted
+      ? `Agent poll: on, every ${AGENT_POLL_MS / 1000} s — ${latestVm?.agents.running ?? 0} running agent(s)`
+      : 'Agent poll: off')
+  }
+
+  async function pollAgentFiles(): Promise<void> {
+    // Not while a scan or the replay moves the records the pass reads its sessions from.
+    if (scanning || replayRun !== null || !readsTranscripts()) return
+    try {
+      const found = await agentPollFiles(agg, Date.now())
+      if (!readsTranscripts() || found.changed.length === 0) return
+      for (const file of found.changed) scheduleIngest(file)
+      log.debug(`Agent poll: ${found.changed.length} of ${found.listed} agent file(s) changed`
+        + ` in ${found.sessions} active session(s)`)
+    } catch (err) {
+      // Best effort by design — the sweep finds within the minute whatever a pass missed.
+      log.debug(`Agent poll: a pass failed (${errorKind(err)})`)
+    }
+  }
+
+  /**
+   * The one-time replay of the agent tables. A snapshot written by a build without them
+   * (version 6) holds cursors past every line its transcripts had, so the ingest alone would
+   * give the tree only what is written from now on; `replayAgents` reads the Claude transcripts
+   * of the agent retention once more, up to what was counted, for the agent tables and nothing
+   * else. Due whenever this aggregator was never replayed — after the cold start, after a
+   * re-read — and never while a scan or an ingest moves the data, nor in a follower, which
+   * renders the leader's tables. A replay that had to wait is retried when the next ingest ends
+   * (the sweep brings one every minute). Counts and a duration are logged; never a path or a line.
+   */
+  function replayAgentTables(why: 'cold start' | 're-read' | 'deferred'): Promise<void> {
+    if (replayRun) return replayRun
+    if (!readsTranscripts() || replayFailed || scanning || ingesting || agg.agentsReplayed) return Promise.resolve()
+    const target = agg
+    const started = Date.now()
+    replayRun = (async () => {
+      try {
+        const files = agentReplayFiles(target, started)
+        const changed = await replayAgents(target, files, scanContext())
+        target.agentsReplayed = true
+        log.info(`Agent replay (${why}): ${files.length} file(s) read again, ${changed} change(s),`
+          + ` ${Date.now() - started} ms`)
+        // A re-read or a lost lease can have put another aggregator in place meanwhile; this
+        // one is gone then, and there is nothing of it to save or show.
+        if (target !== agg || !readsTranscripts()) return
+        dirty = true
+        // A save already under way wrote the state before the replay ended: the timed save
+        // takes this one, as `dirty` stays set.
+        if (!saving) {
+          dirty = false
+          await saveState()
+        }
+        render(true)
+      } catch (err) {
+        replayFailed = true
+        log.error(`Agent replay failed (${errorKind(err)}); it is tried again on the next start.`)
+      }
+    })().finally(() => {
+      replayRun = null
+      // What the watcher and the poll reported meanwhile waited for the replay.
+      if (!disposed && pendingFiles.size > 0) scheduleIngest()
+    })
+    return replayRun
   }
 
   // --------------------------------------------------------------- persistence
@@ -684,6 +788,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   function becomeFollower(): void {
     stopTranscriptWatchers()
+    // The role is already set: this stops the poll, and the view model built below keeps it off.
+    updateAgentPoll()
     ensureCredentialsWatcher()
     watchSharedFiles()
     followerReload()
@@ -898,10 +1004,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: t('Token Pace: re-reading token history …') },
       async () => {
+        // A replay still at work belongs to the aggregator about to be dropped: it ends first,
+        // so that the replay below is this re-read's own.
+        if (replayRun) await replayRun
         agg = Aggregator.fromSnapshot(undefined, cfg.attribution)
         agg.timeConfig = readTimeConfig(cfg)
         await coldScan()
         rollup(Date.now())
+        // The re-read fed the agent tables from its own lines; the replay goes over them the
+        // way it does after an upgrade and marks them replayed, so the next start does not.
+        await replayAgentTables('re-read')
         await saveState()
         render(true)
       },
@@ -1154,7 +1266,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
           : `Project names switched to "${cfg.showProjectNames}" — re-reading the transcripts.`)
         agg = Aggregator.fromSnapshot(undefined, cfg.attribution)
         agg.timeConfig = readTimeConfig(cfg)
-        void coldScan().then(() => { rollup(Date.now()); render(true) })
+        void coldScan().then(() => { rollup(Date.now()); render(true); void replayAgentTables('re-read') })
       } else if (before.attribution !== 'none' && cfg.attribution === 'none') {
         agg.clearSessions()
         dirty = true
@@ -1186,7 +1298,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   every(LEASE_MS, updateRole)
   every(ALERT_MS, () => runAlerts(Date.now()))
   every(SAVE_MS, () => {
-    if (!dirty || scanning || ingesting) return
+    // A replay saves when it is done; half of one is not worth a write.
+    if (!dirty || scanning || ingesting || replayRun !== null) return
     dirty = false
     void saveState()
   })
@@ -1200,7 +1313,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   // --------------------------------------------------------------- teardown
   context.subscriptions.push({
     dispose: () => {
+      disposed = true
       for (const t of timers) clearInterval(t)
+      agentPoll.dispose()
       if (ingestTimer) clearTimeout(ingestTimer)
       if (quotaFileTimer) clearTimeout(quotaFileTimer)
       stopTranscriptWatchers()
@@ -1261,6 +1376,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       scanning = false
     }
     render(true)
+    // After the first frame, so the figures are on screen while the agent tables are rebuilt;
+    // a follower renders the leader's and replays nothing.
+    void replayAgentTables('cold start')
     // Fetch once right away so that without an external cache the first interval is not a wait.
     quotaMgr.tick(onQuotaUpdate)
     logQuotaSources()
@@ -1272,6 +1390,80 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
 export function deactivate(): void {
   // Everything is released through context.subscriptions.
+}
+
+// ---------------------------------------------------------------------------
+// The hot-directory poll's two decisions — whether to run, and one timer at most — kept out
+// of `activate` so a test can hold them without a window
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the hot-directory poll has anything to look for: an agent or a launch the tree shows
+ * as running, or a launch whose transcript was not seen yet in a session that is active — the
+ * first file of a new directory is exactly the one a recursive watcher on Linux can miss. A
+ * launch in an idle session keeps nothing going: the poll lists active sessions only.
+ */
+export function agentPollWanted(tree: AgentTreeVm | undefined): boolean {
+  if (!tree) return false
+  if (tree.running > 0) return true
+  const pending = (n: TreeNode): boolean => n.kind === 'pending' || n.children.some(pending)
+  return tree.roots.some((r) => r.state === 'active' && pending(r))
+}
+
+/** The two timer calls the poll makes: the real ones, unless a test hands in its own. */
+export interface PollTimers {
+  set(fn: () => void, ms: number): unknown
+  clear(handle: unknown): void
+}
+
+const REAL_TIMERS: PollTimers = {
+  set: (fn, ms) => setInterval(fn, ms),
+  clear: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+}
+
+/**
+ * One interval while the poll is wanted and none otherwise, however often it is asked. A pass
+ * that outlasts the interval is not started a second time beside itself: the tick that meets it
+ * is skipped. A pass reports its own failures; none of them reaches the timer.
+ */
+export class AgentPoll {
+  private timer: unknown = null
+  private busy = false
+
+  constructor(
+    private readonly pass: () => Promise<void>,
+    private readonly everyMs = AGENT_POLL_MS,
+    private readonly timers: PollTimers = REAL_TIMERS,
+  ) {}
+
+  get on(): boolean {
+    return this.timer !== null
+  }
+
+  /** Starts or stops the interval to match `wanted`; true when that changed anything. */
+  set(wanted: boolean): boolean {
+    if (wanted === this.on) return false
+    if (wanted) {
+      this.timer = this.timers.set(() => this.tick(), this.everyMs)
+    } else {
+      this.timers.clear(this.timer)
+      this.timer = null
+    }
+    return true
+  }
+
+  dispose(): void {
+    this.set(false)
+  }
+
+  private tick(): void {
+    if (this.busy) return
+    this.busy = true
+    void Promise.resolve()
+      .then(() => this.pass())
+      .catch(() => undefined)
+      .finally(() => { this.busy = false })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1382,6 +1574,17 @@ const NO_HTTP: { proxy: HttpSetting; proxySupport: HttpSetting; proxyStrictSSL: 
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * What kind of failure an error is — its system code or its class — for the log lines about
+ * transcripts, which name counts and nothing else: a file system error's message carries the
+ * path it failed on.
+ */
+function errorKind(err: unknown): string {
+  const code = isRecord(err) ? err.code : undefined
+  if (typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code)) return code
+  return err instanceof Error ? err.name : 'unknown error'
 }
 
 function sameList(a: string[], b: string[]): boolean {

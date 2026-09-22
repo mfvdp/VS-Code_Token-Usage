@@ -5,6 +5,7 @@ import { createHash } from 'crypto'
 import * as path from 'path'
 // Value import, and safe: `adapters` imports this module for types only, so the cycle is erased.
 import { isKnownSource } from './adapters'
+import { AGENT_RETENTION_DAYS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
@@ -20,7 +21,7 @@ export interface IngestContext {
   attribution: Attribution
   projectSalt: string
   hashProjects: boolean
-  /** Replay: touch only agents/launches/mains/journal, never buckets, pending, sessions or tools. */
+  /** Replay: touch only agents/launches/mains/journal, never buckets, pending, sessions, tools or cursors. */
   agentsOnly?: boolean
 }
 
@@ -196,6 +197,332 @@ export function parseCodexRateLimits(rl: unknown, t: number): CodexRateLimitsSna
   }
 }
 
+// ---------------------------------------------------------------------------
+// Agents: what the tables take from a transcript, and how
+// ---------------------------------------------------------------------------
+
+/**
+ * Caps for the free strings the agent tables take from a transcript or a sidecar. Every one
+ * of them is an identifier — a type, a model, a tool_use id — and is held to a small
+ * alphabet on the way in. A value that does not fit is dropped whole rather than trimmed into
+ * a string nobody wrote; the tree shows the absence as "–".
+ */
+export const AGENT_NAME_MAX_CHARS = 40
+export const AGENT_ID_MAX_CHARS = 64
+/** Real model ids (`message.model`) run longer than the aliases a launch or a sidecar names. */
+export const AGENT_MODEL_MAX_CHARS = 64
+/** Distinct model ids kept per agent or main session record. */
+export const AGENT_MODELS_MAX = 8
+/** No build spawns agents this deep; a larger "depth" is not one and is dropped. */
+const MAX_SPAWN_DEPTH = 99
+const MS_DAY = 86_400_000
+
+const NAME_ALPHABET = /^[A-Za-z0-9_.:@/-]+$/
+const ID_ALPHABET = /^[A-Za-z0-9_-]+$/
+
+/** An agent type or a model: `[A-Za-z0-9_.:@/-]`, 1 to `max` characters; anything else is null. */
+export function cleanAgentName(v: unknown, max = AGENT_NAME_MAX_CHARS): string | null {
+  return typeof v === 'string' && v.length > 0 && v.length <= max && NAME_ALPHABET.test(v) ? v : null
+}
+
+/** A tool_use id, an agent id, a workflow id: `[A-Za-z0-9_-]`, 1 to 64 characters; else null. */
+export function cleanAgentId(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 && v.length <= AGENT_ID_MAX_CHARS && ID_ALPHABET.test(v) ? v : null
+}
+
+function cleanDepth(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_SPAWN_DEPTH ? v : null
+}
+
+/**
+ * A name a record cannot do without: the session id above `subagents`, or a main transcript's
+ * file name. A Claude Code session id is a UUID and passes unchanged; anything else is cut down
+ * to the id alphabet and cap instead of dropped. The path it comes from is the record's key
+ * anyway, so the clipped name reveals nothing the key does not.
+ */
+function clipId(v: string): string {
+  return v.replace(/[^A-Za-z0-9_-]/g, '').slice(0, AGENT_ID_MAX_CHARS)
+}
+
+/** The four identity fields, each through its sanitiser; null when none of them is usable. */
+function cleanMeta(v: unknown): AgentMeta | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const o = v as Record<string, unknown>
+  const meta: AgentMeta = {
+    agentType: cleanAgentName(o.agentType),
+    model: cleanAgentName(o.model),
+    spawnDepth: cleanDepth(o.spawnDepth),
+    toolUseId: cleanAgentId(o.toolUseId),
+  }
+  return meta.agentType === null && meta.model === null && meta.spawnDepth === null && meta.toolUseId === null
+    ? null
+    : meta
+}
+
+/**
+ * The identity an `agent-<id>.meta.json` gives its transcript: `agentType`, `model`,
+ * `spawnDepth` and `toolUseId`, each through its sanitiser, and nothing else. The sidecar also
+ * holds the agent's description and its whole prompt; those are content, and the parsed
+ * object that holds them does not outlive this call. Null when the text is no JSON object or
+ * none of the four fields is usable.
+ */
+export function parseAgentMeta(text: string): AgentMeta | null {
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { return null }
+  return cleanMeta(parsed)
+}
+
+/** Where a Claude transcript sits, and what that says about it. */
+export interface ClaudePlacement {
+  /** The project directory's name — the fallback project label when a line carries no cwd. */
+  slug: string
+  /** For a subagent: the id of the session it belongs to; null for a main transcript. */
+  parent: string | null
+  /** For a transcript below a `subagents` directory: its session's main transcript. */
+  sessionFile: string | null
+  /** The workflow run, when the file lies under `subagents/workflows/<wf>/`. */
+  workflowId: string | null
+}
+
+/**
+ * Where a Claude transcript sits tells what it is: `<projects>/<slug>/<sessionId>.jsonl` for a
+ * main session, `<projects>/<slug>/<sessionId>/subagents/agent-<id>.jsonl` for a subagent, and
+ * `…/subagents/workflows/<wf>/agent-<id>.jsonl` for an agent of a workflow run. The nearest
+ * directory named `subagents` above the file anchors it: counting a fixed number of levels up
+ * took `workflows` for the session and `subagents` for the project at the second depth. A
+ * subagent path without such a directory keeps the reading it always had; a main transcript's
+ * never changed.
+ */
+export function claudePlacement(file: string, isSub: boolean): ClaudePlacement {
+  const dir = path.dirname(file)
+  if (!isSub) return { slug: path.basename(dir), parent: null, sessionFile: null, workflowId: null }
+  // The directory names between `subagents` and the file, outermost first.
+  const below: string[] = []
+  let at = dir
+  for (;;) {
+    const name = path.basename(at)
+    if (name === 'subagents') {
+      const sessionDir = path.dirname(at)
+      const sessionId = path.basename(sessionDir)
+      const slugDir = path.dirname(sessionDir)
+      return {
+        slug: path.basename(slugDir),
+        parent: sessionId,
+        sessionFile: path.join(slugDir, `${sessionId}.jsonl`),
+        workflowId: below.length >= 2 && below[0] === 'workflows' ? below[1] : null,
+      }
+    }
+    const up = path.dirname(at)
+    if (up === at) break
+    below.unshift(name)
+    at = up
+  }
+  const sessionDir = path.dirname(dir)
+  return {
+    slug: path.basename(path.dirname(sessionDir)), parent: path.basename(sessionDir),
+    sessionFile: null, workflowId: null,
+  }
+}
+
+/** An agent transcript's file name, and the agent id it carries. */
+const AGENT_FILE_RE = /^agent-([0-9a-f]{1,64})\.jsonl$/
+
+/** The two tags a task notification is read for. Its summary and output path never are. */
+const NOTE_TOOL_USE_ID_RE = /<tool-use-id>([A-Za-z0-9_-]{1,64})<\/tool-use-id>/
+const NOTE_STATUS_RE = /<status>([a-z_]{1,20})<\/status>/
+
+/**
+ * Whether a raw Claude line is worth parsing. Parsing is most of what a scan costs, so a line
+ * is looked at first: a response carries "usage"; an agent's result is a `toolUseResult` with
+ * an `agentId` *key* after it — a key, because inside a JSON string the quotes around the word
+ * would be escaped, so a tool's output that merely mentions it does not pass; a background
+ * agent's end is a task notification, and a tool result never is one. Everything else — a
+ * tool's output, a prompt, an attachment — is passed over unparsed.
+ */
+function worthParsing(raw: string): boolean {
+  if (raw.indexOf('"usage"') >= 0) return true
+  const at = raw.indexOf('"toolUseResult"')
+  if (at >= 0) return raw.indexOf('"agentId"', at) >= 0
+  return raw.indexOf('task-notification') >= 0
+}
+
+/**
+ * What a reported status means for a launch. A status this build does not know is no result
+ * and leaves the launch as it was (undefined).
+ */
+function launchOutcome(status: unknown): 'launched' | 'completed' | 'failed' | undefined {
+  switch (status) {
+    case 'async_launched': return 'launched'
+    case 'completed': return 'completed'
+    case 'failed':
+    case 'error':
+    case 'killed':
+    case 'cancelled':
+    case 'timeout':
+      return 'failed'
+    default:
+      return undefined
+  }
+}
+
+/** The parent's own report of a finished sync agent — only when all three numbers are there. */
+function reportedTotals(r: Record<string, unknown>): AgentLaunch['totals'] {
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+  const tokens = r.totalTokens
+  const durationMs = r.totalDurationMs
+  const toolUses = r.totalToolUseCount
+  return ok(tokens) && ok(durationMs) && ok(toolUses) ? { tokens, durationMs, toolUses } : null
+}
+
+/** The tool call a tool result answers: the `tool_use_id` of its first `tool_result` block. */
+function toolResultId(message: unknown): string | null {
+  const content = message && typeof message === 'object' ? (message as { content?: unknown }).content : undefined
+  if (!Array.isArray(content)) return null
+  for (const c of content) {
+    if (c && typeof c === 'object' && (c as { type?: unknown }).type === 'tool_result') {
+      return cleanAgentId((c as { tool_use_id?: unknown }).tool_use_id)
+    }
+  }
+  return null
+}
+
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+/** A line's own time: an ISO `timestamp` as transcripts write it, or a numeric `ts` in ms. */
+function lineTime(d: { timestamp?: unknown; ts?: unknown }): number | null {
+  if (typeof d.timestamp === 'string') {
+    const t = Date.parse(d.timestamp)
+    if (Number.isFinite(t)) return t
+  }
+  return typeof d.ts === 'number' && Number.isFinite(d.ts) && d.ts > 0 ? d.ts : null
+}
+
+/** How an open message names the record that holds it (see `PendingMessage.agent`). */
+function ownerKey(file: string): string {
+  return path.basename(file, '.jsonl')
+}
+
+/** The token figures of a message, or of the growth of one. */
+interface TokenFigures {
+  input: number
+  cacheWrite: number
+  cacheWrite1h: number
+  cacheRead: number
+  output: number
+  reasoning: number
+}
+
+function creditTokens(rec: AgentRec | MainRec, v: TokenFigures): void {
+  rec.input += v.input
+  rec.cacheWrite += v.cacheWrite
+  rec.cacheWrite1h += v.cacheWrite1h
+  rec.cacheRead += v.cacheRead
+  rec.output += v.output
+  rec.reasoning += v.reasoning
+}
+
+/** A counted line's time and model onto its record. Only a real model id is listed. */
+function touchRecord(rec: AgentRec | MainRec, at: number, model: unknown): void {
+  if (at < rec.firstTs) rec.firstTs = at
+  if (at > rec.lastTs) rec.lastTs = at
+  const id = cleanAgentName(model, AGENT_MODEL_MAX_CHARS)
+  if (id && rec.models.length < AGENT_MODELS_MAX && !rec.models.includes(id)) rec.models.push(id)
+}
+
+/** A launch's recorded result onto an agent record that has none yet. */
+function adoptOutcome(rec: AgentRec, launch: AgentLaunch): boolean {
+  if (rec.outcome !== null || (launch.outcome !== 'completed' && launch.outcome !== 'failed')) return false
+  rec.outcome = launch.outcome
+  rec.outcomeTs = launch.outcomeTs
+  return true
+}
+
+// Restoring: a snapshot is a file a user can edit and another build can have written, so every
+// record is rebuilt from the fields this build knows, each checked as it was at ingest. A field
+// nobody wrote here — a description, say — does not survive the round trip.
+
+function restoreModels(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  const out: string[] = []
+  for (const m of v) {
+    const id = cleanAgentName(m, AGENT_MODEL_MAX_CHARS)
+    if (id && out.length < AGENT_MODELS_MAX && !out.includes(id)) out.push(id)
+  }
+  return out
+}
+
+function restoreAgent(v: unknown): AgentRec | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const agentId = cleanAgentId(r.agentId)
+  const firstTs = finiteOrNull(r.firstTs)
+  const lastTs = finiteOrNull(r.lastTs)
+  if (r.source !== 'claude' || agentId === null || firstTs === null || lastTs === null) return null
+  if (typeof r.sessionFile !== 'string' || !r.sessionFile) return null
+  return {
+    source: 'claude',
+    agentId,
+    sessionId: typeof r.sessionId === 'string' ? clipId(r.sessionId) : '',
+    sessionFile: r.sessionFile,
+    workflowId: cleanAgentId(r.workflowId),
+    meta: cleanMeta(r.meta),
+    metaTries: num(r.metaTries),
+    spawnerFile: typeof r.spawnerFile === 'string' && r.spawnerFile ? r.spawnerFile : null,
+    firstTs,
+    lastTs,
+    models: restoreModels(r.models),
+    input: num(r.input), cacheWrite: num(r.cacheWrite), cacheWrite1h: num(r.cacheWrite1h),
+    cacheRead: num(r.cacheRead), output: num(r.output), reasoning: num(r.reasoning),
+    requests: num(r.requests), outputFinal: num(r.outputFinal), toolCalls: num(r.toolCalls),
+    outcome: r.outcome === 'completed' || r.outcome === 'failed' ? r.outcome : null,
+    outcomeTs: finiteOrNull(r.outcomeTs),
+  }
+}
+
+function restoreLaunch(v: unknown): AgentLaunch | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const toolUseId = cleanAgentId(r.toolUseId)
+  const ts = finiteOrNull(r.ts)
+  if (toolUseId === null || ts === null || typeof r.file !== 'string' || !r.file) return null
+  const outcome = r.outcome === 'launched' || r.outcome === 'completed' || r.outcome === 'failed' ? r.outcome : null
+  const totals = r.totals && typeof r.totals === 'object' ? r.totals as Record<string, unknown> : null
+  return {
+    toolUseId,
+    file: r.file,
+    ts,
+    agentId: cleanAgentId(r.agentId),
+    typeHint: cleanAgentName(r.typeHint),
+    modelHint: cleanAgentName(r.modelHint),
+    background: r.background === true,
+    outcome,
+    outcomeTs: finiteOrNull(r.outcomeTs),
+    totals: totals
+      ? reportedTotals({ totalTokens: totals.tokens, totalDurationMs: totals.durationMs, totalToolUseCount: totals.toolUses })
+      : null,
+  }
+}
+
+function restoreMain(v: unknown): MainRec | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const firstTs = finiteOrNull(r.firstTs)
+  const lastTs = finiteOrNull(r.lastTs)
+  if (r.source !== 'claude' || typeof r.sessionId !== 'string' || firstTs === null || lastTs === null) return null
+  return {
+    source: 'claude',
+    sessionId: clipId(r.sessionId),
+    firstTs,
+    lastTs,
+    models: restoreModels(r.models),
+    input: num(r.input), cacheWrite: num(r.cacheWrite), cacheWrite1h: num(r.cacheWrite1h),
+    cacheRead: num(r.cacheRead), output: num(r.output), reasoning: num(r.reasoning),
+    requests: num(r.requests), outputFinal: num(r.outputFinal), toolCalls: num(r.toolCalls),
+  }
+}
+
 /**
  * Collects token counts from both tools.
  *
@@ -211,11 +538,36 @@ export function parseCodexRateLimits(rl: unknown, t: number): CodexRateLimitsSna
  * months by `rollup()`. Ingest and roll-up never overlap: the aggregator is
  * single-threaded, and the extension runs the roll-up between scans, so a line
  * can only ever see a consistent set of buckets.
+ *
+ * Beside the counting, Claude lines feed four agent tables for the Agents section: one
+ * record per agent transcript and per main session (the same dedupe as the buckets), the
+ * launches a parent recorded, and workflow journal results that came in before their agent.
+ * They hold identifiers, times and counts — never a description, a prompt or a result.
  */
 export class Aggregator {
   private buckets = new Map<string, Bucket>()
   private pending = new Map<string, PendingMessage>()
   private sessionMap = new Map<string, SessionRec>()
+  /** Agent transcripts, keyed by path. */
+  private agentMap = new Map<string, AgentRec>()
+  /** Agent launches, keyed by tool_use id. */
+  private launchMap = new Map<string, AgentLaunch>()
+  /** Main Claude sessions, keyed by path: the tree's roots, kept whatever `attribution` says. */
+  private mainMap = new Map<string, MainRec>()
+  /** Workflow journal results that arrived before their agent's transcript: agentId → ts (0 unknown). */
+  private journalResultMap = new Map<string, number>()
+  /**
+   * Lookups between the agent tables, derived from them and rebuilt on restore: an agent's
+   * file by its id and by the tool_use id its sidecar names; a launch by the agent the
+   * parent's result named.
+   */
+  private agentFileById = new Map<string, string>()
+  private agentFileByToolUse = new Map<string, string>()
+  private launchByAgent = new Map<string, string>()
+  /** A replay's own open messages. `pending` belongs to the counting and a replay never touches it. */
+  private replayPending = new Map<string, PendingMessage>()
+  /** What a replay keeps of the records it rebuilds (identity, spawner, outcome), keyed by path. */
+  private replayKept = new Map<string, AgentRec>()
   /** Tool side table, keyed `source|day|model|name`. */
   private toolStats = new Map<string, ToolStat>()
   /** Distinct names per `source|day`, for the cap; rebuilt from the rows on restore. */
@@ -362,20 +714,6 @@ export class Aggregator {
     s.lastCacheWriteTs = ts
   }
 
-  /**
-   * Where a Claude transcript sits tells what it is: `<projects>/<slug>/<sessionId>.jsonl`
-   * for a main session, `<projects>/<slug>/<sessionId>/subagents/<agent>.jsonl` for a
-   * subagent. The slug is the fallback project label when a line carries no cwd.
-   */
-  private static claudePlacement(file: string, isSub: boolean): { slug: string; parent: string | null } {
-    const dir = path.dirname(file)
-    if (isSub) {
-      const sessionDir = path.dirname(dir)
-      return { slug: path.basename(path.dirname(sessionDir)), parent: path.basename(sessionDir) }
-    }
-    return { slug: path.basename(dir), parent: null }
-  }
-
   // ------------------------------------------------------------------ Tools
 
   /**
@@ -425,16 +763,20 @@ export class Aggregator {
   }
 
   /**
-   * Counts the `tool_use` blocks of one Claude line onto its message.
+   * Counts the `tool_use` blocks of one Claude line onto its message, and returns how many
+   * calls that added — the figure an agent's or a session's record takes as its tool calls.
    *
    * Claude writes one content block per line under a repeated `message.id`, so a message
    * with two parallel `Read` calls arrives as two lines. Counting by block id makes those
    * two calls, while a line read twice stays one; a block without an id falls back to the
    * max-per-name rule, which never double counts but folds parallel calls of one tool into
    * a single call. `p.day`/`p.model` place the count on the message, not on the late line.
+   * With `toTable` false (a replay) the side table is left alone; only the message's own
+   * memory of what it counted moves, and that memory belongs to the replay.
    */
-  private countClaudeTools(p: PendingMessage, content: unknown): void {
-    if (!Array.isArray(content)) return
+  private countClaudeTools(p: PendingMessage, content: unknown, toTable = true): number {
+    if (!Array.isArray(content)) return 0
+    let added = 0
     const counts = new Map<string, number>()
     for (const c of content) {
       if (!c || typeof c !== 'object') continue
@@ -450,45 +792,67 @@ export class Aggregator {
         if (ids.length < TOOL_IDS_PER_MESSAGE) ids.push(id)
         const tools = p.tools ?? (p.tools = {})
         tools[name] = (tools[name] ?? 0) + 1
-        this.addTool('claude', p.day, p.model, name, 1)
+        if (toTable) this.addTool('claude', p.day, p.model, name, 1)
+        added += 1
         continue
       }
       counts.set(name, (counts.get(name) ?? 0) + 1)
     }
-    if (counts.size === 0) return
+    if (counts.size === 0) return added
     const tools = p.tools ?? (p.tools = {})
     for (const [name, cand] of counts) {
       const prev = tools[name] ?? 0
       if (cand <= prev) continue
       tools[name] = cand
-      this.addTool('claude', p.day, p.model, name, cand - prev)
+      if (toTable) this.addTool('claude', p.day, p.model, name, cand - prev)
+      added += cand - prev
     }
+    return added
   }
 
   // ---------------------------------------------------------------- Claude
 
-  /** Processes one line of a Claude transcript. Returns true if it was counted. */
+  /**
+   * Processes one line of a Claude transcript. Returns true when anything changed: a counted
+   * response, or an agent's record — a launch, a result, a notification.
+   */
   addClaudeLine(raw: string, ctx: IngestContext): boolean {
-    if (raw.indexOf('"usage"') < 0) return false
+    if (!worthParsing(raw)) return false
     let d: any
     try { d = JSON.parse(raw) } catch { return false }
-    if (d?.type !== 'assistant') return false
+    if (!d || typeof d !== 'object') return false
+    if (d.type === 'assistant') return this.claudeResponse(d, ctx)
+    if (d.type === 'user') return this.agentResult(d, ctx)
+    if (d.type === 'queue-operation') return this.agentNotification(d)
+    return false
+  }
+
+  /** One assistant line: its tokens onto buckets, session and agent tables, and its launches. */
+  private claudeResponse(d: any, ctx: IngestContext): boolean {
     const m = d.message
     if (!m || typeof m !== 'object') return false
-    const u = m.usage
-    if (!u || typeof u !== 'object') return false
     // Placeholder and error lines carry all-zero usage and would only inflate the request count.
     if (m.model === '<synthetic>' || d.isApiErrorMessage) return false
-    const id = m.id
-    if (typeof id !== 'string' || !id) return false
-
     const parsed = Date.parse(d.timestamp ?? '')
-    const ts = Number.isFinite(parsed) ? parsed : Date.now()
+    // The agent tables take a line's own time or nothing: a record dated "now" would show an
+    // agent that finished last week as running. The buckets keep the fallback they always had.
+    const at = Number.isFinite(parsed) ? parsed : null
+    const launched = at !== null && this.noteLaunches(m.content, at, ctx)
+    const u = m.usage
+    if (!u || typeof u !== 'object') return launched
+    const id = m.id
+    if (typeof id !== 'string' || !id) return launched
+
+    const ts = at ?? Date.now()
     const hour = hourIndex(ts)
     const day = localDay(ts)
     const model = typeof m.model === 'string' ? m.model : 'unknown'
     const final = m.stop_reason != null
     const isSub = ctx.isSub
+    // A replay rebuilds the agent tables and nothing else. It keeps open messages of its own,
+    // so the counting side's are neither read nor written, and nothing that counts is touched.
+    const replay = ctx.agentsOnly === true
+    const pending = replay ? this.replayPending : this.pending
 
     const cand = {
       input: num(u.input_tokens),
@@ -504,29 +868,31 @@ export class Aggregator {
       webFetch: num(u.server_tool_use?.web_fetch_requests),
     }
 
-    const cur = this.cursors.get(ctx.file)
+    const cur = replay ? undefined : this.cursors.get(ctx.file)
     if (cur) cur.lastTs = ts
-    this.noteIngest(ts)
+    if (!replay) this.noteIngest(ts)
 
-    const prev = this.pending.get(id)
+    const prev = pending.get(id)
     if (!prev) {
       const tier = tierOf(u.speed, u.inference_geo)
-      const b = this.bucketFor('claude', hour, day, model, isSub, tier)
-      b.input += cand.input
-      b.cacheWrite += cand.cacheWrite
-      b.cacheWrite1h += cand.cacheWrite1h
-      b.cacheRead += cand.cacheRead
-      b.output += cand.output
-      b.reasoning += cand.reasoning
-      b.webSearch += cand.webSearch
-      b.webFetch += cand.webFetch
-      b.requests += 1
-      if (final) b.outputFinal += 1
       const p: PendingMessage = { hour, day, model, isSub, tier, ...cand, final }
-      this.countClaudeTools(p, m.content)
+      const tools = this.countClaudeTools(p, m.content, !replay)
+      if (!replay) {
+        const b = this.bucketFor('claude', hour, day, model, isSub, tier)
+        b.input += cand.input
+        b.cacheWrite += cand.cacheWrite
+        b.cacheWrite1h += cand.cacheWrite1h
+        b.cacheRead += cand.cacheRead
+        b.output += cand.output
+        b.reasoning += cand.reasoning
+        b.webSearch += cand.webSearch
+        b.webFetch += cand.webFetch
+        b.requests += 1
+        if (final) b.outputFinal += 1
+      }
 
-      if (ctx.attribution !== 'none') {
-        const place = Aggregator.claudePlacement(ctx.file, isSub)
+      if (!replay && ctx.attribution !== 'none') {
+        const place = claudePlacement(ctx.file, isSub)
         const cwd = str(d.cwd)
         const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
           'claude',
@@ -550,17 +916,16 @@ export class Aggregator {
         p.session = ctx.file
       }
 
-      this.pending.set(id, p)
-      this.trimPending()
+      if (at !== null) this.creditMessage(p, cand, final, tools, at, m.model, ctx)
+      pending.set(id, p)
+      this.trimPending(pending)
       return true
     }
 
-    // Known id: only add the difference to the running maximum. The bucket is looked up
-    // by the message's own hour, so a late line follows its message into a rolled-up bucket.
-    const b = this.bucketFor('claude', prev.hour, prev.day, prev.model, prev.isSub, prev.tier)
-    // Claude puts each content block on its own line, so the tool calls of a message arrive
-    // on the *later* lines of its id: counting them only in the branch above would miss them.
-    this.countClaudeTools(prev, m.content)
+    // Known id: only add the difference to the running maximum. Claude puts each content
+    // block on its own line, so the tool calls of a message arrive on the *later* lines of
+    // its id: counting them only in the branch above would miss them.
+    const tools = this.countClaudeTools(prev, m.content, !replay)
     const prevReasoning = prev.reasoning ?? 0
     const next = {
       input: Math.max(prev.input, cand.input),
@@ -583,17 +948,22 @@ export class Aggregator {
       webFetch: next.webFetch - prev.webFetch,
     }
     const newlyFinal = final && !prev.final
-    b.input += delta.input
-    b.cacheWrite += delta.cacheWrite
-    b.cacheWrite1h += delta.cacheWrite1h
-    b.cacheRead += delta.cacheRead
-    b.output += delta.output
-    b.reasoning += delta.reasoning
-    b.webSearch += delta.webSearch
-    b.webFetch += delta.webFetch
-    if (newlyFinal) b.outputFinal += 1
+    if (!replay) {
+      // Looked up by the message's own hour, so a late line follows its message into a
+      // rolled-up bucket.
+      const b = this.bucketFor('claude', prev.hour, prev.day, prev.model, prev.isSub, prev.tier)
+      b.input += delta.input
+      b.cacheWrite += delta.cacheWrite
+      b.cacheWrite1h += delta.cacheWrite1h
+      b.cacheRead += delta.cacheRead
+      b.output += delta.output
+      b.reasoning += delta.reasoning
+      b.webSearch += delta.webSearch
+      b.webFetch += delta.webFetch
+      if (newlyFinal) b.outputFinal += 1
+    }
 
-    const s = prev.session ? this.sessionMap.get(prev.session) : undefined
+    const s = !replay && prev.session ? this.sessionMap.get(prev.session) : undefined
     if (s) {
       s.input += delta.input
       s.cacheWrite += delta.cacheWrite
@@ -608,6 +978,8 @@ export class Aggregator {
       this.noteSessionHour(s, prev.hour, delta.input + delta.cacheWrite + delta.output)
     }
 
+    this.creditGrowth(prev, delta, newlyFinal, tools, at, m.model, ctx)
+
     prev.input = next.input
     prev.cacheWrite = next.cacheWrite
     prev.cacheWrite1h = next.cacheWrite1h
@@ -620,15 +992,453 @@ export class Aggregator {
     return true
   }
 
-  /** Keeps the pending map small; Map preserves insertion order, so the oldest goes first. */
-  private trimPending(limit = 4000): void {
-    if (this.pending.size <= limit) return
-    const drop = this.pending.size - limit
+  /** Keeps a map of open messages small; Map preserves insertion order, so the oldest goes first. */
+  private trimPending(map: Map<string, PendingMessage> = this.pending, limit = 4000): void {
+    if (map.size <= limit) return
+    const drop = map.size - limit
     let i = 0
-    for (const k of this.pending.keys()) {
-      this.pending.delete(k)
+    for (const k of map.keys()) {
+      map.delete(k)
       if (++i >= drop) break
     }
+  }
+
+  // ---------------------------------------------------------------- Agents
+
+  /**
+   * A message's first line in an agent or a main transcript: its figures onto that file's
+   * record, which the first counted line makes. `p` remembers which record holds the
+   * message — as `session` does for the session table — so its later lines add their growth
+   * there and nowhere else.
+   */
+  private creditMessage(
+    p: PendingMessage, v: TokenFigures, final: boolean, tools: number, at: number, model: unknown,
+    ctx: IngestContext,
+  ): void {
+    const rec = ctx.isSub ? this.agentFor(ctx.file, at) : this.mainFor(ctx.file, at)
+    if (!rec) return
+    creditTokens(rec, v)
+    rec.requests += 1
+    if (final) rec.outputFinal += 1
+    rec.toolCalls += tools
+    touchRecord(rec, at, model)
+    if (ctx.isSub) p.agent = ownerKey(ctx.file)
+    else p.main = ownerKey(ctx.file)
+  }
+
+  /**
+   * A later line of a known message: its growth onto the record that holds the message. An
+   * open message from before the agent tables (a version 6 snapshot) names no record; its next
+   * line links it to this file and credits the growth from there on — the part before is the
+   * replay's to rebuild, and crediting it here as well would count it twice.
+   */
+  private creditGrowth(
+    p: PendingMessage, v: TokenFigures, newlyFinal: boolean, tools: number, at: number | null,
+    model: unknown, ctx: IngestContext,
+  ): void {
+    const key = ownerKey(ctx.file)
+    const owner = ctx.isSub ? p.agent : p.main
+    const other = ctx.isSub ? p.main : p.agent
+    // Held by another transcript, or by the other kind of record: counted there, not here.
+    if (owner !== undefined && owner !== key) return
+    if (owner === undefined && other !== undefined) return
+    let rec: AgentRec | MainRec | null | undefined = ctx.isSub ? this.agentMap.get(ctx.file) : this.mainMap.get(ctx.file)
+    if (!rec) {
+      if (at === null) return
+      rec = ctx.isSub ? this.agentFor(ctx.file, at) : this.mainFor(ctx.file, at)
+      if (!rec) return
+    }
+    if (owner === undefined) {
+      if (ctx.isSub) p.agent = key
+      else p.main = key
+    }
+    creditTokens(rec, v)
+    if (newlyFinal) rec.outputFinal += 1
+    rec.toolCalls += tools
+    if (at !== null) touchRecord(rec, at, model)
+  }
+
+  /**
+   * The record of an agent transcript, made by its first counted line: its identity from the
+   * file name, its session and workflow run from where it sits (`claudePlacement`). Null for a
+   * file below `subagents` that is no agent transcript. What was recorded before the
+   * transcript came in — the parent's result, the workflow journal — joins it here.
+   */
+  private agentFor(file: string, at: number): AgentRec | null {
+    const have = this.agentMap.get(file)
+    if (have) return have
+    const name = AGENT_FILE_RE.exec(path.basename(file))
+    if (!name) return null
+    const place = claudePlacement(file, true)
+    if (place.sessionFile === null || place.parent === null) return null
+    // A replay carries over what the lines cannot rebuild: the sidecar, the spawner, a result.
+    const kept = this.replayKept.get(file)
+    if (kept) this.replayKept.delete(file)
+    const rec: AgentRec = {
+      source: 'claude',
+      agentId: name[1],
+      sessionId: clipId(place.parent),
+      sessionFile: place.sessionFile,
+      workflowId: cleanAgentId(place.workflowId),
+      meta: kept?.meta ?? null,
+      metaTries: kept?.metaTries ?? 0,
+      spawnerFile: kept?.spawnerFile ?? null,
+      firstTs: at,
+      lastTs: at,
+      models: [],
+      input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
+      output: 0, reasoning: 0, requests: 0, outputFinal: 0, toolCalls: 0,
+      outcome: kept?.outcome ?? null,
+      outcomeTs: kept?.outcomeTs ?? null,
+    }
+    this.agentMap.set(file, rec)
+    this.agentFileById.set(rec.agentId, file)
+    this.linkAgent(file, rec)
+    return rec
+  }
+
+  /** Joins a new agent record to what was recorded about it before its transcript was read. */
+  private linkAgent(file: string, rec: AgentRec): void {
+    // The parent's result named this agent: its launch is the spawner.
+    const toolUseId = this.launchByAgent.get(rec.agentId)
+    const launch = toolUseId !== undefined ? this.launchMap.get(toolUseId) : undefined
+    if (launch) {
+      if (rec.spawnerFile === null) rec.spawnerFile = launch.file
+      adoptOutcome(rec, launch)
+    }
+    // A record a replay rebuilds keeps its sidecar, and with it the link that names.
+    this.linkMeta(file, rec)
+    // The workflow journal recorded the result before the transcript was read.
+    const journal = this.journalResultMap.get(rec.agentId)
+    if (journal !== undefined) {
+      this.journalResultMap.delete(rec.agentId)
+      rec.outcome = 'completed'
+      rec.outcomeTs = journal > 0 ? journal : null
+    }
+  }
+
+  /** The link a sidecar's tool_use id makes: the launch it names is the agent's spawner. */
+  private linkMeta(file: string, rec: AgentRec): void {
+    const toolUseId = rec.meta?.toolUseId
+    if (!toolUseId) return
+    this.agentFileByToolUse.set(toolUseId, file)
+    const launch = this.launchMap.get(toolUseId)
+    if (!launch) return
+    rec.spawnerFile = launch.file
+    if (launch.agentId === null) {
+      launch.agentId = rec.agentId
+      this.launchByAgent.set(rec.agentId, toolUseId)
+    }
+    adoptOutcome(rec, launch)
+  }
+
+  /** The record of a main transcript, made by its first counted line. */
+  private mainFor(file: string, at: number): MainRec {
+    let rec = this.mainMap.get(file)
+    if (!rec) {
+      rec = {
+        source: 'claude',
+        sessionId: clipId(path.basename(file, '.jsonl')),
+        firstTs: at,
+        lastTs: at,
+        models: [],
+        input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
+        output: 0, reasoning: 0, requests: 0, outputFinal: 0, toolCalls: 0,
+      }
+      this.mainMap.set(file, rec)
+    }
+    return rec
+  }
+
+  /**
+   * The agent launches on one assistant line: `tool_use` blocks named `Agent` (or `Task`, as
+   * older builds call it). A streamed message repeats its block on later lines, so a launch is
+   * made once, by the first. Three fields of the input are read and no more — its description
+   * and prompt are content.
+   */
+  private noteLaunches(content: unknown, at: number, ctx: IngestContext): boolean {
+    if (!Array.isArray(content)) return false
+    let changed = false
+    for (const c of content) {
+      if (!c || typeof c !== 'object') continue
+      const block = c as { type?: unknown; name?: unknown; id?: unknown; input?: unknown }
+      if (block.type !== 'tool_use' || (block.name !== 'Agent' && block.name !== 'Task')) continue
+      const toolUseId = cleanAgentId(block.id)
+      if (toolUseId === null || this.launchMap.has(toolUseId)) continue
+      const input = block.input && typeof block.input === 'object'
+        ? block.input as { subagent_type?: unknown; model?: unknown; run_in_background?: unknown }
+        : undefined
+      const launch: AgentLaunch = {
+        toolUseId,
+        file: ctx.file,
+        ts: at,
+        agentId: null,
+        typeHint: cleanAgentName(input?.subagent_type),
+        modelHint: cleanAgentName(input?.model),
+        background: input?.run_in_background === true,
+        outcome: null,
+        outcomeTs: null,
+        totals: null,
+      }
+      this.launchMap.set(toolUseId, launch)
+      // An agent whose sidecar was read first already names this launch.
+      const file = this.agentFileByToolUse.get(toolUseId)
+      const rec = file !== undefined ? this.agentMap.get(file) : undefined
+      if (file !== undefined && rec) this.linkMeta(file, rec)
+      changed = true
+    }
+    return changed
+  }
+
+  /**
+   * A tool result that names an agent: the parent's record of what became of its launch. Five
+   * fields of the result are read — `agentId`, `status` and the three totals — because it also
+   * carries the agent's prompt and its answer. The tool_use id comes from the message's own
+   * `tool_result` block.
+   */
+  private agentResult(d: any, ctx: IngestContext): boolean {
+    const r = d.toolUseResult
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return false
+    const agentId = cleanAgentId(r.agentId)
+    if (agentId === null) return false
+    const toolUseId = toolResultId(d.message)
+    if (toolUseId === null) return false
+    const at = lineTime(d)
+    const status: unknown = r.status
+    let changed = false
+    let launch = this.launchMap.get(toolUseId)
+    if (!launch) {
+      // The launch's own line was not read (it lies before what this build has seen): the
+      // result stands in for it, with its own time as the latest the launch can have been.
+      if (at === null) return false
+      launch = {
+        toolUseId, file: ctx.file, ts: at, agentId: null, typeHint: null, modelHint: null,
+        background: status === 'async_launched', outcome: null, outcomeTs: null, totals: null,
+      }
+      this.launchMap.set(toolUseId, launch)
+      changed = true
+    }
+    if (launch.agentId !== agentId) {
+      if (launch.agentId !== null && this.launchByAgent.get(launch.agentId) === toolUseId) {
+        this.launchByAgent.delete(launch.agentId)
+      }
+      launch.agentId = agentId
+      changed = true
+    }
+    this.launchByAgent.set(agentId, toolUseId)
+    const outcome = launchOutcome(status)
+    if (outcome) changed = this.applyOutcome(launch, outcome, at, outcome === 'completed' ? reportedTotals(r) : null) || changed
+    return this.propagateOutcome(launch) || changed
+  }
+
+  /**
+   * A queued task notification: how a background agent's end reaches the parent. Two tags are
+   * read — `<tool-use-id>` and `<status>` — and never the summary or the output path. A
+   * notification for a tool call that is no known launch (a background shell task reports
+   * the same way) changes nothing.
+   */
+  private agentNotification(d: any): boolean {
+    if (d.operation !== 'enqueue' || typeof d.content !== 'string') return false
+    const text: string = d.content
+    if (text.indexOf('task-notification') < 0) return false
+    const id = NOTE_TOOL_USE_ID_RE.exec(text)
+    const launch = id ? this.launchMap.get(id[1]) : undefined
+    if (!launch) return false
+    const status = NOTE_STATUS_RE.exec(text)
+    const outcome = status ? launchOutcome(status[1]) : undefined
+    if (!outcome) return false
+    const changed = this.applyOutcome(launch, outcome, lineTime(d), null)
+    return this.propagateOutcome(launch) || changed
+  }
+
+  /**
+   * An outcome onto a launch. "Launched" never takes back a result — a re-read line or a late
+   * copy must not revive a finished agent — and a result already recorded keeps the time it
+   * was first recorded at.
+   */
+  private applyOutcome(
+    launch: AgentLaunch, outcome: 'launched' | 'completed' | 'failed', at: number | null,
+    totals: AgentLaunch['totals'],
+  ): boolean {
+    if (outcome === 'launched') {
+      if (launch.outcome !== null) return false
+      launch.outcome = 'launched'
+      return true
+    }
+    let changed = false
+    if (launch.outcome !== outcome) {
+      launch.outcome = outcome
+      launch.outcomeTs = at
+      changed = true
+    } else if (launch.outcomeTs === null && at !== null) {
+      launch.outcomeTs = at
+      changed = true
+    }
+    const t = launch.totals
+    if (totals && (!t || t.tokens !== totals.tokens || t.durationMs !== totals.durationMs || t.toolUses !== totals.toolUses)) {
+      launch.totals = totals
+      changed = true
+    }
+    return changed
+  }
+
+  /** A launch's result onto the agent it named, and the spawner an agent without one lacks. */
+  private propagateOutcome(launch: AgentLaunch): boolean {
+    if (launch.agentId === null) return false
+    const file = this.agentFileById.get(launch.agentId)
+    const rec = file !== undefined ? this.agentMap.get(file) : undefined
+    if (!rec) return false
+    let changed = false
+    if ((launch.outcome === 'completed' || launch.outcome === 'failed')
+      && (rec.outcome !== launch.outcome || rec.outcomeTs !== launch.outcomeTs)) {
+      rec.outcome = launch.outcome
+      rec.outcomeTs = launch.outcomeTs
+      changed = true
+    }
+    if (rec.spawnerFile === null) {
+      rec.spawnerFile = launch.file
+      changed = true
+    }
+    return changed
+  }
+
+  /**
+   * One line of a workflow's `journal.jsonl`. Two fields are read — `type` and `agentId` — and
+   * never the workflow's key or the agent's result. Only a `result` changes anything (a
+   * `started` line is followed by the agent's own transcript): the agent is recorded as
+   * completed, or — when its transcript was not read yet — the result waits for it. Journal
+   * lines carry no time of their own today; the result's time is then unknown, never "now".
+   */
+  addWorkflowJournalLine(raw: string, ctx: IngestContext): boolean {
+    if (raw.indexOf('"result"') < 0) return false
+    let d: any
+    try { d = JSON.parse(raw) } catch { return false }
+    if (!d || typeof d !== 'object' || d.type !== 'result') return false
+    const agentId = cleanAgentId(d.agentId)
+    if (agentId === null) return false
+    const at = lineTime(d) ?? finiteOrNull(this.cursors.get(ctx.file)?.lastTs)
+    const file = this.agentFileById.get(agentId)
+    const rec = file !== undefined ? this.agentMap.get(file) : undefined
+    if (!rec) {
+      const v = at ?? 0
+      if (this.journalResultMap.get(agentId) === v) return false
+      this.journalResultMap.set(agentId, v)
+      return true
+    }
+    if (rec.outcome === 'completed') {
+      if (rec.outcomeTs !== null || at === null) return false
+      rec.outcomeTs = at
+      return true
+    }
+    rec.outcome = 'completed'
+    rec.outcomeTs = at
+    return true
+  }
+
+  /** Whether the agent file has a record whose sidecar is still unread (fewer than 3 tries). */
+  needsAgentMeta(file: string): boolean {
+    const rec = this.agentMap.get(file)
+    return rec !== undefined && rec.meta === null && rec.metaTries < 3
+  }
+
+  /**
+   * The sidecar's four fields, or null for "tried, nothing usable". Every call is a try; a
+   * sidecar that names a tool_use id links the agent to its launch. The fields are sanitised
+   * again here, so a caller cannot put anything into the table the reader would not have.
+   */
+  setAgentMeta(file: string, meta: AgentMeta | null): void {
+    const rec = this.agentMap.get(file)
+    if (!rec) return
+    rec.metaTries += 1
+    const clean = cleanMeta(meta)
+    if (!clean) return
+    rec.meta = clean
+    this.linkMeta(file, rec)
+  }
+
+  /** Subagent transcripts, in the order they were first counted. */
+  agents(): AgentRec[] { return [...this.agentMap.values()] }
+  /** Agent launches the parent transcripts recorded. */
+  launches(): AgentLaunch[] { return [...this.launchMap.values()] }
+  /** Main Claude sessions, the tree's roots. */
+  mains(): MainRec[] { return [...this.mainMap.values()] }
+
+  /**
+   * The agent records with the path each is keyed by. The tree needs it: a node's key is the
+   * agent's file, and `spawnerFile` names a file, not a record.
+   */
+  agentEntries(): Array<[file: string, rec: AgentRec]> { return [...this.agentMap] }
+  /** The main session records with their path — the key every agent's `sessionFile` names. */
+  mainEntries(): Array<[file: string, rec: MainRec]> { return [...this.mainMap] }
+
+  get agentsReplayed(): boolean { return this.agentsReplayedFlag }
+  set agentsReplayed(v: boolean) { this.agentsReplayedFlag = v }
+
+  /**
+   * Starts a replay over `files` (`replayAgents` in scan.ts): what these transcripts gave the
+   * agent tables is taken out, so reading them again from the start rebuilds it instead of
+   * adding to it. What the lines cannot give back — an agent's sidecar, its spawner, a
+   * recorded result — is kept aside and carried into the rebuilt record.
+   */
+  beginAgentReplay(files: Iterable<string>): void {
+    this.replayPending.clear()
+    this.replayKept.clear()
+    const set = new Set(files)
+    for (const file of set) {
+      const rec = this.agentMap.get(file)
+      if (rec) {
+        this.replayKept.set(file, rec)
+        this.dropAgent(file, rec)
+      }
+      this.mainMap.delete(file)
+    }
+    for (const [id, launch] of this.launchMap) if (set.has(launch.file)) this.dropLaunch(id, launch)
+  }
+
+  /** Ends a replay: its open messages are forgotten, and a kept record nothing rebuilt is gone. */
+  endAgentReplay(): void {
+    this.replayPending.clear()
+    this.replayKept.clear()
+  }
+
+  private dropAgent(file: string, rec: AgentRec): void {
+    this.agentMap.delete(file)
+    if (this.agentFileById.get(rec.agentId) === file) this.agentFileById.delete(rec.agentId)
+    const toolUseId = rec.meta?.toolUseId
+    if (toolUseId && this.agentFileByToolUse.get(toolUseId) === file) this.agentFileByToolUse.delete(toolUseId)
+  }
+
+  private dropLaunch(id: string, launch: AgentLaunch): void {
+    this.launchMap.delete(id)
+    if (launch.agentId !== null && this.launchByAgent.get(launch.agentId) === id) this.launchByAgent.delete(launch.agentId)
+  }
+
+  /**
+   * Drops what the agent tables hold beyond their retention: an agent or a main session whose
+   * last line, a launch whose last news, and a waiting journal result older than `horizon`. A
+   * journal result of unknown time counts as old — it can only have waited since before.
+   */
+  private pruneAgents(horizon: number): void {
+    for (const [file, rec] of this.agentMap) {
+      if (Math.max(rec.lastTs, rec.outcomeTs ?? 0) < horizon) this.dropAgent(file, rec)
+    }
+    for (const [id, launch] of this.launchMap) {
+      if (Math.max(launch.ts, launch.outcomeTs ?? 0) < horizon) this.dropLaunch(id, launch)
+    }
+    for (const [file, rec] of this.mainMap) if (rec.lastTs < horizon) this.mainMap.delete(file)
+    for (const [id, ts] of this.journalResultMap) if (ts < horizon) this.journalResultMap.delete(id)
+  }
+
+  /** The lookups between the agent tables, from the tables themselves (after a restore). */
+  private reindexAgents(): void {
+    this.agentFileById.clear()
+    this.agentFileByToolUse.clear()
+    this.launchByAgent.clear()
+    for (const [file, rec] of this.agentMap) {
+      this.agentFileById.set(rec.agentId, file)
+      if (rec.meta?.toolUseId) this.agentFileByToolUse.set(rec.meta.toolUseId, file)
+    }
+    for (const [id, launch] of this.launchMap) if (launch.agentId !== null) this.launchByAgent.set(launch.agentId, id)
   }
 
   // ----------------------------------------------------------------- Codex
@@ -831,6 +1641,10 @@ export class Aggregator {
       firstIngest: this.firstIngest,
       tools: [...this.toolStats.values()],
       toolsTruncated: [...this.toolsTruncated],
+      agents: Object.fromEntries(this.agentMap),
+      launches: Object.fromEntries(this.launchMap),
+      mains: Object.fromEntries(this.mainMap),
+      journalResults: Object.fromEntries(this.journalResultMap),
       agentsReplayed: this.agentsReplayedFlag,
     }
   }
@@ -842,9 +1656,10 @@ export class Aggregator {
    * project/session): those can only come from a re-read. The other direction just
    * drops the table; project and session share one record shape and switch freely.
    *
-   * Version 5 is read as well: it differs from 6 only by the tool side table, which
-   * simply starts empty — a cold re-read of every transcript would be a steep price
-   * for a table that has no history yet either way.
+   * Versions 5 and 6 are read as well: each lacks one table that simply starts empty —
+   * the tool side table (5), the agent tables (6) — and a cold re-read of every transcript
+   * would be a steep price for tables that have no history yet either way. A 6 also says
+   * the agent replay has not run, so the host rebuilds the agent tables once.
    */
   static fromSnapshot(s: Snapshot | undefined, attribution: Attribution = 'none'): Aggregator {
     const a = new Aggregator()
@@ -895,7 +1710,28 @@ export class Aggregator {
       }
     }
     a.firstIngest = typeof s.firstIngest === 'number' && Number.isFinite(s.firstIngest) ? s.firstIngest : null
-    a.agentsReplayedFlag = s.agentsReplayed === true
+    // The agent tables came with version 7. They do not depend on `attribution`: the tree's
+    // roots are kept whatever the session table is set to.
+    if (s.version >= 7) {
+      for (const [file, v] of Object.entries(s.agents ?? {})) {
+        const rec = restoreAgent(v)
+        if (file && rec) a.agentMap.set(file, rec)
+      }
+      for (const v of Object.values(s.launches ?? {})) {
+        const launch = restoreLaunch(v)
+        if (launch) a.launchMap.set(launch.toolUseId, launch)
+      }
+      for (const [file, v] of Object.entries(s.mains ?? {})) {
+        const rec = restoreMain(v)
+        if (file && rec) a.mainMap.set(file, rec)
+      }
+      for (const [id, v] of Object.entries(s.journalResults ?? {})) {
+        const agentId = cleanAgentId(id)
+        if (agentId !== null && typeof v === 'number' && Number.isFinite(v) && v >= 0) a.journalResultMap.set(agentId, v)
+      }
+      a.reindexAgents()
+      a.agentsReplayedFlag = s.agentsReplayed === true
+    }
     return a
   }
 
@@ -915,23 +1751,6 @@ export class Aggregator {
   all(): Bucket[] { return [...this.buckets.values()] }
 
   sessions(): SessionRec[] { return [...this.sessionMap.values()] }
-
-  // ----------------------------------------------------------- Agents (contract stubs, 1.5 C0)
-
-  /** Subagent transcripts in retention. */
-  agents(): AgentRec[] { return [] }
-  /** Agent launches the parent transcripts recorded. */
-  launches(): AgentLaunch[] { return [] }
-  /** Main Claude sessions, the tree's roots. */
-  mains(): MainRec[] { return [] }
-  /** Whether the agent file has a record whose sidecar is still unread (fewer than 3 tries). */
-  needsAgentMeta(_file: string): boolean { return false }
-  /** The sidecar's four fields, or null for "tried, nothing usable". */
-  setAgentMeta(_file: string, _meta: AgentMeta | null): void { /* PA1 */ }
-  /** One line of a workflow `journal.jsonl`; true when anything changed. */
-  addWorkflowJournalLine(_raw: string, _ctx: IngestContext): boolean { return false }
-  get agentsReplayed(): boolean { return this.agentsReplayedFlag }
-  set agentsReplayed(v: boolean) { this.agentsReplayedFlag = v }
 
   /**
    * The tool side table over an inclusive local-day range; both bounds are optional and
@@ -1052,6 +1871,11 @@ export class Aggregator {
         if (Number(k) < sessionHorizon) delete s.hourUsage[k]
       }
     }
+
+    // The agent tables serve a tree of what ran lately, not the history: they keep
+    // AGENT_RETENTION_DAYS, whatever the bucket retention says. No setting — the tree has
+    // nothing to show for older agents, and the snapshot would carry them on every save.
+    this.pruneAgents(now - AGENT_RETENTION_DAYS * MS_DAY)
 
     this.rollupState = {
       lastRun: now,

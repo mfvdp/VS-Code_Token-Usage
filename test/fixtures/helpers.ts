@@ -110,6 +110,12 @@ export interface ClaudeLineOpts {
   type?: string
   /** Content blocks of this line. Claude Code writes exactly one block per line. */
   tools?: ClaudeToolBlock[]
+  /** Raw content blocks instead of `tools`, for a block whose input matters (an agent launch). */
+  content?: unknown[]
+  /** A line of an agent's own transcript: it names the agent and sits on the side chain. */
+  agentId?: string
+  /** What a final line gives as its stop reason; `end_turn` unless said otherwise. */
+  stopReason?: string
 }
 
 /** One assistant line as Claude Code writes it, one content block per line. */
@@ -130,23 +136,26 @@ export function claudeLine(o: ClaudeLineOpts): string {
     iterations: [{ type: 'message', input_tokens: u.input ?? 0, output_tokens: u.output ?? 0 }],
     speed: u.speed === undefined ? 'standard' : u.speed,
   }
-  const content = o.tools
+  const content = o.content ?? (o.tools
     ? o.tools.map((t, i) => {
       const block: Record<string, unknown> = { type: 'tool_use', name: t.name, input: {} }
       if (t.id !== null) block.id = t.id ?? `toolu_${o.id}_${i}`
       return block
     })
-    : [{ type: 'text', text: 'synthetic fixture text' }]
+    : [{ type: 'text', text: 'synthetic fixture text' }])
   const line: Record<string, unknown> = {
     parentUuid: 'uuid-parent-0000',
-    isSidechain: false,
+    isSidechain: o.agentId !== undefined,
+  }
+  if (o.agentId !== undefined) line.agentId = o.agentId
+  Object.assign(line, {
     message: {
       model: o.synthetic ? '<synthetic>' : (o.model ?? 'claude-opus-4-6'),
       id: o.id,
       type: 'message',
       role: 'assistant',
       content,
-      stop_reason: o.final ? 'end_turn' : null,
+      stop_reason: o.final ? (o.stopReason ?? 'end_turn') : null,
       stop_sequence: null,
       stop_details: null,
       usage,
@@ -160,11 +169,186 @@ export function claudeLine(o: ClaudeLineOpts): string {
     entrypoint: 'cli',
     version: '9.9.9',
     gitBranch: 'main',
-  }
+  })
   if (o.cwd !== null) line.cwd = o.cwd ?? '/home/tester/proj-alpha'
   if (o.sessionId !== null) line.sessionId = o.sessionId ?? 'sess-0001'
   if (o.error) line.isApiErrorMessage = true
   return JSON.stringify(line)
+}
+
+// ---------------------------------------------------------------------------
+// Agents. The shapes are what Claude Code writes for a subagent (checked 2026-09-22):
+// the launch and the answer in the parent's transcript, the task notification of a
+// background agent, the workflow journal, the identity sidecar. Every description, prompt,
+// summary and answer below is fixture text a record must never hold.
+// ---------------------------------------------------------------------------
+
+export interface AgentToolUseOpts {
+  /** The assistant message id. */
+  id: string
+  ts: number
+  toolUseId: string
+  /** `Agent` in current builds, `Task` in older ones. */
+  name?: 'Agent' | 'Task'
+  /** `input.subagent_type`; absent by default, as for a general-purpose launch. */
+  subagentType?: string
+  /** `input.model`; `opus` unless null (then absent). */
+  model?: string | null
+  /** `input.run_in_background`; absent unless given. */
+  background?: boolean
+  description?: string
+  prompt?: string
+  usage?: ClaudeUsage
+  /** The launch sits in this agent's own transcript (a nested agent). */
+  agentId?: string
+  final?: boolean
+}
+
+/** An assistant line whose one content block launches an agent. */
+export function agentToolUseLine(o: AgentToolUseOpts): string {
+  const input: Record<string, unknown> = { description: o.description ?? 'synthetic launch description' }
+  if (o.subagentType !== undefined) input.subagent_type = o.subagentType
+  if (o.model !== null) input.model = o.model ?? 'opus'
+  if (o.background !== undefined) input.run_in_background = o.background
+  input.prompt = o.prompt ?? 'synthetic launch prompt'
+  return claudeLine({
+    id: o.id,
+    ts: o.ts,
+    usage: o.usage ?? { input: 10, output: 20 },
+    final: o.final ?? true,
+    stopReason: 'tool_use',
+    agentId: o.agentId,
+    content: [{ type: 'tool_use', id: o.toolUseId, name: o.name ?? 'Agent', input, caller: { type: 'direct' } }],
+  })
+}
+
+export interface AgentResultOpts {
+  ts: number
+  toolUseId: string
+  agentId: string
+  /** `async_launched` for a background launch; `completed`, `failed`, … for a sync one. */
+  status?: string
+  /** The parent's own report of a finished sync agent. */
+  totals?: { tokens: number; durationMs: number; toolUses: number }
+  description?: string
+  prompt?: string
+  /** The agent's answer, as the tool result's text. */
+  answer?: string
+  /** The line sits in this agent's own transcript (the answer to a nested launch). */
+  inAgent?: string
+}
+
+/**
+ * The user line that answers an agent launch: a `tool_result` block for the tool_use id and,
+ * beside it, the `toolUseResult` object. A finished sync agent's result also carries the
+ * agent's own usage summary — a report, which must never be counted as tokens.
+ */
+export function agentResultLine(o: AgentResultOpts): string {
+  const status = o.status ?? 'completed'
+  const answer = o.answer ?? 'synthetic agent answer'
+  const result: Record<string, unknown> = status === 'async_launched'
+    ? {
+      isAsync: true, status, agentId: o.agentId, description: o.description ?? 'synthetic result description',
+      resolvedModel: 'claude-opus-4-6', prompt: o.prompt ?? 'synthetic result prompt',
+      outputFile: `/tmp/synthetic/tasks/${o.agentId}.output`, canReadOutputFile: true,
+    }
+    : {
+      status, prompt: o.prompt ?? 'synthetic result prompt', agentId: o.agentId, agentType: 'general-purpose',
+      content: [{ type: 'text', text: answer }], resolvedModel: 'claude-opus-4-6',
+      usage: { input_tokens: 777, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 555 },
+    }
+  if (o.totals) {
+    result.totalDurationMs = o.totals.durationMs
+    result.totalTokens = o.totals.tokens
+    result.totalToolUseCount = o.totals.toolUses
+  }
+  const line: Record<string, unknown> = { parentUuid: 'uuid-parent-0000', isSidechain: o.inAgent !== undefined, promptId: 'prompt-0000' }
+  if (o.inAgent !== undefined) line.agentId = o.inAgent
+  Object.assign(line, {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ tool_use_id: o.toolUseId, type: 'tool_result', content: [{ type: 'text', text: answer }] }],
+    },
+    uuid: `uuid-result-${o.toolUseId}`,
+    timestamp: iso(o.ts),
+    toolUseResult: result,
+    sourceToolAssistantUUID: 'uuid-assistant-0000',
+    userType: 'external',
+    entrypoint: 'cli',
+    cwd: '/home/tester/proj-alpha',
+    sessionId: 'sess-0001',
+    version: '9.9.9',
+    gitBranch: 'main',
+  })
+  return JSON.stringify(line)
+}
+
+export interface QueueOperationOpts {
+  ts: number
+  /** Null leaves the tag out, as for a notification without a tool call behind it. */
+  toolUseId?: string | null
+  status?: string
+  operation?: 'enqueue' | 'dequeue' | 'remove'
+  summary?: string
+  outputFile?: string
+  /** The raw content, instead of a built notification. */
+  content?: string
+}
+
+/** A queue operation carrying a background task's notification, one tag per line. */
+export function queueOperationLine(o: QueueOperationOpts): string {
+  const tags = ['<task-notification>', '<task-id>b0c1d2e3f</task-id>']
+  if (o.toolUseId !== null) tags.push(`<tool-use-id>${o.toolUseId ?? 'toolu_synthetic'}</tool-use-id>`)
+  tags.push(`<output-file>${o.outputFile ?? '/tmp/synthetic/tasks/b0c1d2e3f.output'}</output-file>`)
+  tags.push(`<status>${o.status ?? 'completed'}</status>`)
+  tags.push(`<summary>${o.summary ?? 'Agent "synthetic summary" completed'}</summary>`)
+  tags.push('</task-notification>')
+  return JSON.stringify({
+    type: 'queue-operation',
+    operation: o.operation ?? 'enqueue',
+    timestamp: iso(o.ts),
+    sessionId: 'sess-0001',
+    content: o.content ?? tags.join('\n'),
+  })
+}
+
+/**
+ * One line of a workflow run's `journal.jsonl`. Journal lines carry no time today; `ts`
+ * adds one, for the rule that a line's own time wins when there is one.
+ */
+export function journalLine(o: { type: 'started' | 'result'; agentId: string; result?: unknown; ts?: number }): string {
+  const line: Record<string, unknown> = { type: o.type, key: `synthetic-journal-key-${o.agentId}`, agentId: o.agentId }
+  if (o.type === 'result') line.result = o.result ?? { summary: 'synthetic journal summary', changedFiles: ['src/x.ts'] }
+  if (o.ts !== undefined) line.timestamp = iso(o.ts)
+  return JSON.stringify(line)
+}
+
+export interface MetaOpts {
+  /** Null leaves a field out, as older or other sidecars do. */
+  agentType?: string | null
+  model?: string | null
+  spawnDepth?: number | null
+  toolUseId?: string | null
+  description?: string
+  prompt?: string
+  parentAgentId?: string
+  /** Any further key a sidecar carries (requestShape, worktreePath, …). */
+  extra?: Record<string, unknown>
+}
+
+/** An `agent-<id>.meta.json` sidecar. Its description and prompt are content; only four fields may be read. */
+export function metaJson(o: MetaOpts = {}): string {
+  const meta: Record<string, unknown> = {}
+  if (o.agentType !== null) meta.agentType = o.agentType ?? 'general-purpose'
+  meta.description = o.description ?? 'synthetic meta description'
+  if (o.toolUseId !== null) meta.toolUseId = o.toolUseId ?? 'toolu_synthetic'
+  if (o.parentAgentId !== undefined) meta.parentAgentId = o.parentAgentId
+  if (o.spawnDepth !== null) meta.spawnDepth = o.spawnDepth ?? 1
+  if (o.model !== null) meta.model = o.model ?? 'opus'
+  if (o.prompt !== undefined) meta.prompt = o.prompt
+  Object.assign(meta, o.extra)
+  return JSON.stringify(meta)
 }
 
 export function codexMeta(o: { ts: number; id?: string; cwd?: string | null; forkedFrom?: string; threadSource?: string }): string {

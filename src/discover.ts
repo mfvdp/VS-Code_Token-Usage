@@ -96,6 +96,39 @@ export async function findTranscripts(root: string, match: (name: string) => boo
   return out.sort()
 }
 
+/**
+ * The agent transcripts of one Claude session, workflow journals included: every transcript
+ * directly in `<session>/subagents/` and in each `<session>/subagents/workflows/<wf>/`. For
+ * polling a running session — a recursive watcher on Linux misses the files of a directory
+ * made after it started — so two known levels are listed instead of a walk, and no link is
+ * followed, as in the walk above.
+ */
+export async function agentTranscriptsOf(sessionFile: string): Promise<string[]> {
+  if (!sessionFile.endsWith('.jsonl')) return []
+  const isTranscript = adapterFor('claude').matches
+  const out: string[] = []
+  const list = async (dir: string, each: (e: fs.Dirent, p: string) => void): Promise<void> => {
+    let entries: fs.Dirent[]
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) if (!e.isSymbolicLink()) each(e, path.join(dir, e.name))
+  }
+  const workflows: string[] = []
+  await list(path.join(sessionFile.slice(0, -'.jsonl'.length), 'subagents'), (e, p) => {
+    if (e.isFile() && isTranscript(e.name)) out.push(p)
+    else if (e.isDirectory() && e.name === 'workflows') workflows.push(p)
+  })
+  for (const dir of workflows) {
+    const runs: string[] = []
+    await list(dir, (e, p) => { if (e.isDirectory()) runs.push(p) })
+    for (const run of runs) await list(run, (e, p) => { if (e.isFile() && isTranscript(e.name)) out.push(p) })
+  }
+  return out.sort()
+}
+
 // The three predicates the registry answers, named per provider for the callers that ask
 // about exactly one of them (diagnostics, tests). New code should ask the adapter.
 export const isClaudeTranscript = (n: string) => adapterFor('claude').matches(n)

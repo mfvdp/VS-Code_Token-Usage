@@ -140,7 +140,7 @@
   "config.resetHourCycle.enum.h23": "24-hour clock — “06:00”",
   "config.labelMaxChars.description": "Truncate generated window labels to this many characters. `0` means no truncation.",
   "configuration.dashboard.title": "Dashboard",
-  "config.dashboard.sections.description": "Which sections the **Token Pace** panel shows — **and in which order**: the array order is the render order.\n\n`projects` and `sessions` stay empty until `#tokenPace.attribution#` is switched on.",
+  "config.dashboard.sections.description": "Which sections the **Token Pace** panel shows — **and in which order**: the array order is the render order.\n\n`projects` and `sessions` stay empty until `#tokenPace.attribution#` is switched on.\n\n`agents` — the Claude Code agent tree — comes directly after `quota` in the default. A list you have set yourself is kept exactly as it is, so there the tree appears only once you add `agents` to it.",
   "config.dashboard.sections.enum.summary": "Rule-based summary sentences, each with its number and basis",
   "config.dashboard.sections.enum.quota": "Quota cards with bar, elapsed tick, verdict and reset",
   "config.dashboard.sections.enum.agents": "Session → workflow → agent tree with derived states and a details panel; Claude Code only",

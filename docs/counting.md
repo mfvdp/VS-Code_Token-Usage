@@ -52,15 +52,32 @@ most 90 days — a table keyed by day × model × name cannot be carried as far 
 bucket — and for less when `tokenPace.retentionDays` is shorter; the section states the first
 day it has a row for, so a range that reaches further back does not read as a quiet week.
 
+**Agents.** Where a Claude transcript sits says what it is: `<project>/<session>.jsonl` is a
+session, `<session>/subagents/agent-<id>.jsonl` one of its agents — an agent spawned by another
+agent lies flat beside it — and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` an agent
+of a workflow run. The placement is read from the nearest `subagents` directory above the file,
+at every depth. A run's `journal.jsonl` sits beside its agents with the same suffix, but it is
+the run's own record, not a transcript: it is never counted, only `type` and `agentId` of its
+lines are read, and a result line marks that agent completed. An agent's tokens have always been
+part of the totals; the
+[Agents](agents.md) section adds a view of them, not a count. Beside the buckets every agent
+transcript and every session transcript of the last seven days gets a small record of its own,
+filled by the same message-id dedupe, so a streamed reply counts once there as well; a launch,
+its result or a journal line only ever sets a state. The parent's own report of a sync agent's
+totals is shown as the parent's figure and never added to anything. The records are dropped
+seven days after their last line, whatever `tokenPace.retentionDays` says.
+
 **Lower bounds.** A response with no terminal line has an output figure that is a floor, not a
 total. Such rows carry `⚠`, the tooltip states what share of today's responses are affected, and
-the dashboard's data-quality section carries the lower-bound share for the whole range.
+the dashboard's data-quality section carries the lower-bound share for the whole range. Almost
+every finished subagent is one: Claude Code writes no end marker into an agent's transcript, and
+the file ends on an assistant line whose `stop_reason` is still `null`.
 
 **Upgrading.** The persisted snapshot is schema version 7. Version 6 — everything before the agent
 tables — and version 5 — everything before the tool table — are read forward rather than thrown
 away, so no upgrade forces a cold re-read: a table the older version did not have starts empty.
 Tool counting then starts with the next ingest, and the section states the first day it has a row
-for; the agent tables are rebuilt once from the transcripts of the last seven days, without
-counting a token twice. Any older version is discarded and the transcripts are read again from
-scratch — nothing is lost that the transcripts still hold, it just takes a moment on the first
-start.
+for; the agent tables are rebuilt once from the transcripts of the last seven days, each read only
+as far as its tokens were already counted, so no token is counted twice and no total moves. Any
+older version is discarded and the transcripts are read again from scratch — nothing is lost
+that the transcripts still hold, it just takes a moment on the first start.

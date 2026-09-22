@@ -47,6 +47,10 @@ output is read.
 * **A dashboard in the secondary sidebar**: quota cards that explain their own colour, a
   seven-day sparkline, the key figures, the daily chart by model with the cost line, and the
   fixed-period token totals. → [Dashboard](docs/dashboard.md)
+* **Your Claude Code agents as a tree**: the sessions of the last seven days with their workflow
+  runs and agents, each with its state, usage and duration, live while it runs; a click opens
+  the details. A state that is only inferred says so, and nothing of a prompt or a result is
+  read. → [Agents](docs/agents.md)
 * **The same figures without a webview**: a markdown report, a searchable Quick Pick, a CSV
   and a JSON export, and a diagnostics report that is safe to paste into an issue.
   → [Export and diagnostics](docs/export.md)
@@ -91,7 +95,8 @@ exactly what is sent where; the access token is read only then, only from
 
 Transcript contents — prompts, responses, tool arguments and tool results — are never stored,
 logged, exported or displayed, and nothing is written outside the extension's own storage
-except the two opt-ins, each behind its own consent dialog.
+except the two opt-ins, each behind its own consent dialog. The agent tree reads an agent's
+type, model, ids and outcome — never its prompt, its description or its result.
 
 No telemetry of any kind is collected, the webview loads no external resource, and
 `npm run check:privacy` fails the build on any `http(s)` literal outside a small allow-list.
@@ -105,6 +110,7 @@ The full account is in [Privacy](docs/privacy.md).
 | [Status bar](docs/status-bar.md) | What an entry is made of, the special states, the click, the tooltip, the colours, the preview |
 | [Status bar states](docs/status-bar-states.md) | Every text the bar can show, which state wins when several apply, and the one thing to check |
 | [Dashboard](docs/dashboard.md) | The sections of the panel, the filter bar, the chart, the tables and the heatmap |
+| [Agents](docs/agents.md) | The session → workflow → agent tree: what is read, how every state is derived, what is kept and for how long |
 | [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch, the status-line bridge, extra usage |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
 | [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |

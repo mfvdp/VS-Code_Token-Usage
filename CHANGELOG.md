@@ -3,6 +3,71 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.5.0 — 2026-09-23
+
+### Added
+
+* **Agents — the Claude Code sessions of the last seven days as a tree.** A new dashboard
+  section (`agents`, on by default, directly below the quota cards) shows every session, the
+  workflow runs inside it, the agents it spawned and the agents those spawned in turn, the most
+  recent session first. Every node carries its state, its usage — the same definition as the
+  tables, and a part of their totals rather than an addition to them — and its duration; the
+  markdown view prints the same tree as an indented list. At most 20 sessions and 300 nodes are
+  shown, and what is left out is stated under the tree. Claude Code only: Codex writes no agent
+  identity, and the section says nothing about it.
+* **States that say what they rest on.** Done and failed are what somebody recorded — the
+  parent's tool result, a task notification, or a workflow run's journal. Running and unknown,
+  and a session's active and idle, are inferred from when a transcript last recorded a response,
+  and are marked as inferred: `~` in the glyph's title, `[~Running]` in the markdown. Claude Code
+  writes no end marker into an agent's transcript, so an agent that has been silent for ten
+  minutes without a result is unknown, never done.
+* **Details on a click.** Clicking a node, or pressing Enter on it, opens a panel under the tree:
+  type, models, depth, start, duration, last activity, the state with the sentence it was derived
+  with, turns, the token kinds of the totals table, tool calls, who spawned it and its workflow
+  run. Output that is a lower bound says so — almost every finished agent's is, because its file
+  ends on a line Claude Code never marked as finished. For a synchronous agent the parent's own
+  report of its totals is shown beside ours and never added to any sum. What you fold and which
+  node is open are kept with the dashboard's view state, as node keys and nothing else.
+* **Live while agents run.** A changed transcript is read as soon as the token counts read it;
+  the section is pushed at most every two seconds, so the tree does not redraw under the pointer
+  twice a second, while a fold or a click is answered at once; the running clocks tick every
+  second in the page itself. On Linux, where the recursive file watcher misses the files of a
+  directory created after it started, the agent directories of the active sessions are also
+  listed every five seconds while an agent runs.
+* **Everything the tree reads, field by field.** From `agent-<id>.meta.json` only `agentType`,
+  `model`, `spawnDepth` and `toolUseId`; from a workflow run's `journal.jsonl` only `type` and
+  `agentId`; from an `Agent` or `Task` tool call only its id, `subagent_type`, `model` and
+  `run_in_background`; from its tool result only `agentId`, `status` and the three totals; from
+  a task notification only the `<tool-use-id>` and `<status>` tags. Never a description, a
+  prompt, a summary, an output path or a result. Every string among them is an identifier, held
+  to a small alphabet and length on the way in, and the tables are kept for seven days. The
+  documentation has a page of its own for the section, and the privacy page names every field.
+
+### Changed
+
+* **The default section order gains `agents` after `quota`.** A `tokenPace.dashboard.sections`
+  you have set yourself is left exactly as it is, so the tree appears there only once you add
+  `agents` to the list.
+* **The filter bar sits below the agent tree too.** The range, provider and model chips do not
+  apply to it — it is always the last seven days — so, like the quota cards and the Tokens
+  section, it stays above the bar when it leads the list.
+* **The snapshot is schema version 7.** Versions 6 and 5 are read forward rather than thrown
+  away, so the update forces no cold re-read. On the first start the agent tables are rebuilt
+  once from the Claude transcripts of the last seven days, each read only as far as its tokens
+  were already counted, so no token is counted twice and no total moves. On the machine this was
+  built on, a week with 879 agents took the snapshot from 2.4 to 3.2 MB and a cold scan of 1.7 GB
+  of transcripts from 3.2 to 3.7 seconds.
+
+### Fixed
+
+* **The agents of a workflow run were filed one level off.** A transcript under
+  `subagents/workflows/<run>/` was read as if the run's directory were the session: with
+  attribution on, its record named `workflows` as its parent session — the `parent` of
+  `sessions[]` in the JSON export — and, for a line without a working directory, `subagents` as
+  its project. The placement now walks up to the nearest `subagents` directory, so an agent
+  belongs to its real session and project at every depth. Records made before the update keep
+  their old placement until *Re-read Token History*.
+
 ## 1.4.0 — 2026-09-07
 
 ### Changed

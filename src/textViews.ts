@@ -11,8 +11,10 @@
  * Pure: no vscode. `nativeViews.ts` turns these lists and strings into commands.
  */
 
+import { MAX_NODES } from './agentTree'
+import type { NodeState, TreeNode } from './agentTree'
 import { t } from './i18n'
-import { DEFAULT_BAR, full, renderBar } from './render'
+import { DEFAULT_BAR, estimate, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
 import { SOURCE_TITLE } from './viewModel'
 import type { ViewModel } from './viewModel'
@@ -490,6 +492,81 @@ function dataQualityLines(vm: ViewModel): string[] {
   return out
 }
 
+// ---------------------------------------------------------------------------
+// Agents
+// ---------------------------------------------------------------------------
+
+/**
+ * A tree node's state in words, capitalised as the list prints it. A function, like the
+ * other word tables here: the bundle is installed at activation.
+ */
+function agentStateWord(state: NodeState): string {
+  switch (state) {
+    case 'running': return t('Running')
+    case 'done': return t('Done')
+    case 'failed': return t('Failed')
+    case 'unknown': return t('Unknown')
+    case 'active': return t('Active')
+    case 'idle': return t('Idle')
+    default: return ''
+  }
+}
+
+/**
+ * "[~Running] Explore · claude-opus-5 · a94f · 12.3K · 4 min 05 s". An inferred state carries
+ * the estimate mark, a recorded one does not — the same distinction the dashboard draws — and
+ * a usage whose output is a lower bound carries ⚠.
+ */
+function agentNodeLine(n: TreeNode): string {
+  const word = agentStateWord(n.state)
+  const state = n.derived ? estimate(word) : word
+  const name = n.sub ? `${cell(n.label)} — ${cell(n.sub)}` : cell(n.label)
+  return `[${state}] ${name} · ${cell(n.usage)}${n.lowerBound ? ' ⚠' : ''} · ${cell(n.duration)}`
+}
+
+/**
+ * The Agents section: the same tree as the dashboard, as an indented list, and the open
+ * node's details as a table. A view model without a built tree prints nothing — no tree is
+ * not the same statement as an empty one, and only the builder's note may say "none".
+ */
+function agentLines(vm: ViewModel): string[] {
+  const a = vm.agents
+  if (!a || !Array.isArray(a.roots)) return []
+  if (a.roots.length === 0 && !a.note) return []
+  const L: string[] = [`## ${t('Agents')}`, '']
+  if (a.roots.length === 0) {
+    L.push(`_${a.note}_`, '')
+    return L
+  }
+  let lower = false
+  const walk = (n: TreeNode, depth: number): void => {
+    lower = lower || n.lowerBound
+    L.push(`${'  '.repeat(depth)}- ${agentNodeLine(n)}`)
+    for (const c of n.children) walk(c, depth + 1)
+  }
+  for (const r of a.roots) walk(r, 0)
+  L.push('')
+  const notes: string[] = []
+  if (a.omittedRoots > 0) notes.push(t('{0} older session(s) not listed.', a.omittedRoots))
+  if (a.truncated) notes.push(t('Tree cut at {0} nodes.', MAX_NODES))
+  if (lower) notes.push(t('⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.'))
+  if (a.note) notes.push(a.note)
+  for (const n of notes) L.push(`_${n}_`, '')
+  const d = a.selected
+  if (d) {
+    L.push(`### ${cell(d.title)}`, '')
+    L.push(t('| Detail | Value |'))
+    L.push('|---|---|')
+    // The state first, with the sentence that says what it rests on.
+    L.push(`| ${cell(t('State'))} | ${cell(d.stateText)} |`)
+    for (const r of d.rows) {
+      L.push(`| ${cell(r.label)} | ${cell(r.value)}${r.note ? ` · ${cell(r.note)}` : ''} |`)
+    }
+    L.push('')
+  }
+  return L
+}
+
 /** The read-only `tokenpace:/usage.md` document — the same figures as tables. */
 export function markdownDocument(vm: ViewModel): string {
   const L: string[] = []
@@ -564,6 +641,9 @@ export function markdownDocument(vm: ViewModel): string {
     if (q.usagePageUrl) L.push(t('Official page: {0}', q.usagePageUrl))
     L.push('')
   }
+
+  // Where the dashboard has it: directly after the quota cards.
+  L.push(...agentLines(vm))
 
   if (vm.digest.length > 0) {
     L.push(`## ${t('Summary')}`, '')

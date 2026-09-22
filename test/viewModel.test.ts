@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { strict as assert } from 'node:assert'
+import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
-import { QuotaSample, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
+import { AgentLaunch, AgentRec, MainRec, QuotaSample, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
@@ -16,7 +17,7 @@ import {
   SparkVm, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
-  FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
+  CLAUDE_FILE, FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
   timeConfig, win,
 } from './fixtures/viewFixtures'
 import { claudeLine, ctxFor } from './fixtures/helpers'
@@ -718,6 +719,97 @@ test('agent tree folds toggle and the selection sets and clears, by identity whe
     { type: 'agentSelect', key: long }, { type: 'agentSelect', key: ['a'] }]) {
     assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
   }
+})
+
+// ---------------------------------------------------------------------------
+// The agent tree
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixture's aggregator with agent records laid over it, in the shapes the aggregator
+ * hands out: the fixture's session `sess-alpha` with one running subagent and one launch whose
+ * file was not seen yet. The session table underneath is the fixture's own, project `alpha`.
+ */
+function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggregator; agentKey: string } {
+  const agg = buildAgg(attribution)
+  const dir = path.dirname(CLAUDE_FILE)
+  const sessionFile = path.join(dir, 'sess-alpha.jsonl')
+  const agentFile = path.join(dir, 'sess-alpha', 'subagents', 'agent-a94f0001.jsonl')
+  const counts = {
+    input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 0,
+    requests: 5, outputFinal: 5, toolCalls: 3,
+  }
+  const main: MainRec = {
+    source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
+    models: ['claude-opus-4-6'], ...counts,
+  }
+  const agent: AgentRec = {
+    source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
+    spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
+    ...counts, outcome: null, outcomeTs: null,
+  }
+  const pending: AgentLaunch = {
+    toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
+    modelHint: null, background: true, outcome: 'launched', outcomeTs: null, totals: null,
+  }
+  agg.mains = () => [main]
+  agg.agents = () => [agent]
+  agg.launches = () => [pending]
+  return { agg, agentKey: `a:${agentFile}` }
+}
+
+test('the view model carries the agent tree of the aggregator, with the selection, the attribution and its clock', () => {
+  const { agg, agentKey } = withAgents()
+  const vm = buildViewModel(makeInput({
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentSelected: agentKey },
+  }))
+  const tree = vm.agents
+  assert.equal(tree.updatedAt, NOW)
+  assert.equal(tree.roots.length, 1)
+  const root = tree.roots[0]
+  assert.equal(root.label, 'Session sess-alp')
+  // The project label comes from the attribution table — the same one the Sessions table reads.
+  assert.equal(root.sub, 'alpha')
+  assert.equal(root.state, 'idle')
+  assert.deepEqual(root.children.map((c) => [c.kind, c.state]), [['agent', 'running'], ['pending', 'running']])
+  assert.equal(tree.running, 2)
+  assert.equal(tree.selected?.key, agentKey)
+  assert.equal(tree.selected?.title, 'Explore · claude-opus-4-6 · a94f')
+  assert.equal(tree.note, null)
+
+  // Attribution off: the same tree without a project name.
+  const off = buildViewModel(makeInput({ agg: withAgents('none').agg, ui: { agentSelected: agentKey } }))
+  assert.equal(off.agents.roots[0].sub, null)
+  assert.equal(off.agents.selected?.key, agentKey)
+
+  // Range-free and chip-free: the tree is the Claude sessions of the last days, whatever the
+  // table below is filtered to.
+  const filtered = buildViewModel(makeInput({
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }),
+    ui: { agentSelected: agentKey, providers: ['codex'], models: ['gpt-5.3-codex'], range: '7d' },
+  }))
+  assert.deepEqual(filtered.agents, tree)
+})
+
+test('a session without agents is keyed by the transcript path the aggregator holds a cursor for', () => {
+  const agg = buildAgg()
+  agg.mains = () => [{
+    source: 'claude', sessionId: 's1', firstTs: NOW - 3_600_000, lastTs: NOW - 30 * 60_000, models: [],
+    input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0,
+    outputFinal: 0, toolCalls: 0,
+  }]
+  const vm = buildViewModel(makeInput({ agg }))
+  assert.equal(vm.agents.roots[0].key, `s:${CLAUDE_FILE}`)
+  assert.equal(vm.agents.roots[0].usage, '–')
+})
+
+test('with nothing ingested the agent tree is empty and says which absence it is', () => {
+  const vm = buildViewModel(makeInput({ agg: new Aggregator(), quotas: [], ui: { agentSelected: 's:/gone.jsonl' } }))
+  assert.deepEqual(vm.agents.roots, [])
+  assert.equal(vm.agents.selected, null)
+  assert.equal(vm.agents.running, 0)
+  assert.equal(vm.agents.note, 'No Claude Code session in the last 7 days.')
 })
 
 test('every section the dashboard can show can also be folded', () => {

@@ -734,7 +734,6 @@ function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggrega
   const agg = buildAgg(attribution)
   const dir = path.dirname(CLAUDE_FILE)
   const sessionFile = path.join(dir, 'sess-alpha.jsonl')
-  const agentFile = path.join(dir, 'sess-alpha', 'subagents', 'agent-a94f0001.jsonl')
   const counts = {
     input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 0,
     requests: 5, outputFinal: 5, toolCalls: 3,
@@ -756,7 +755,7 @@ function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggrega
   agg.mains = () => [main]
   agg.agents = () => [agent]
   agg.launches = () => [pending]
-  return { agg, agentKey: `a:${agentFile}` }
+  return { agg, agentKey: 'a:a94f0001' }
 }
 
 test('the view model carries the agent tree of the aggregator, with the selection, the attribution and its clock', () => {
@@ -792,7 +791,7 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   assert.deepEqual(filtered.agents, tree)
 })
 
-test('a session without agents is keyed by the transcript path the aggregator holds a cursor for', () => {
+test('a session without agents is keyed by its id, never by the transcript path the aggregator holds a cursor for', () => {
   const agg = buildAgg()
   agg.mains = () => [{
     source: 'claude', sessionId: 's1', firstTs: NOW - 3_600_000, lastTs: NOW - 30 * 60_000, models: [],
@@ -800,7 +799,7 @@ test('a session without agents is keyed by the transcript path the aggregator ho
     outputFinal: 0, toolCalls: 0,
   }]
   const vm = buildViewModel(makeInput({ agg }))
-  assert.equal(vm.agents.roots[0].key, `s:${CLAUDE_FILE}`)
+  assert.equal(vm.agents.roots[0].key, 's:s1')
   assert.equal(vm.agents.roots[0].usage, '–')
 })
 

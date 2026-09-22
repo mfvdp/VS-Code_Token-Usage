@@ -25,15 +25,19 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import {
-  claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso, snakeRateLimits, tmpDir,
+  agentResultLine, agentToolUseLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
+  journalLine, metaJson, snakeRateLimits, tmpDir,
 } from './fixtures/helpers'
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
 } from './helpers/fakeVscode'
-// Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`.
+// Shapes and constants only: agentTree.ts imports nothing, so loading it early reads no setting.
+import { AgentTreeVm, emptyAgentTree, TreeNode } from '../src/agentTree'
+// Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`, and
+// `lazy` for the modules below it.
 import type { TokenPaceApi } from '../src/extension'
 import { bridgeBlocksDelete } from '../src/storage'
-import { STATE_VERSION } from '../src/types'
+import { Snapshot, STATE_VERSION } from '../src/types'
 
 /** Never a real key: the string is asserted *absent* from every output this test reads. */
 const FAKE_TOKEN = 'sk-ant-oat01-SYNTHETIC-TEST-TOKEN-0000000000000000'
@@ -290,10 +294,16 @@ function lastMarkdown(): string {
  * against a fake webview view, so a test can send exactly what the page would send.
  */
 function dashboardPost(): (m: unknown) => void {
+  return openDashboard().post
+}
+
+/** The same fake view, and everything the provider posted to it, oldest first. */
+function openDashboard(): { post: (m: unknown) => void; sent: unknown[] } {
   const provider = state.webviewProviders.get('tokenPace.dashboard') as
     { resolveWebviewView(view: unknown): void } | undefined
   assert.ok(provider, 'the dashboard view provider was not registered')
   const sink: Array<(m: unknown) => void> = []
+  const sent: unknown[] = []
   provider.resolveWebviewView({
     visible: true,
     webview: {
@@ -303,7 +313,10 @@ function dashboardPost(): (m: unknown) => void {
         sink.push(fn)
         return { dispose: () => undefined }
       },
-      postMessage: () => Promise.resolve(true),
+      postMessage: (m: unknown) => {
+        sent.push(m)
+        return Promise.resolve(true)
+      },
       cspSource: '',
     },
     onDidChangeVisibility: () => ({ dispose: () => undefined }),
@@ -311,15 +324,16 @@ function dashboardPost(): (m: unknown) => void {
     show: () => undefined,
   })
   assert.equal(sink.length, 1, 'the dashboard did not subscribe to its webview')
-  return sink[0]
+  return { post: sink[0], sent }
 }
 
 /** Snapshot fields that must not depend on which thread did the scanning. */
 function bucketFingerprint(file: string): string[] {
-  const snap = JSON.parse(fs.readFileSync(file, 'utf8')) as {
-    buckets: Array<Record<string, unknown>>
-  }
-  return snap.buckets
+  return fingerprintOf(JSON.parse(fs.readFileSync(file, 'utf8')) as Snapshot)
+}
+
+function fingerprintOf(snap: Snapshot): string[] {
+  return (snap.buckets as unknown as Array<Record<string, unknown>>)
     .map((b) => ['source', 'model', 'isSub', 'input', 'cacheWrite', 'cacheRead', 'output', 'requests']
       .map((k) => `${k}=${String(b[k])}`).join(' '))
     .sort()
@@ -904,4 +918,470 @@ test('activate() returns the API the extension-host smoke test reads the bar thr
   }
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+// ---------------------------------------------------------------------------
+// The Agents section: the hot-directory poll, the one-time replay, a follower
+// ---------------------------------------------------------------------------
+
+/**
+ * The modules below the extension, loaded the way the extension itself is: lazily, once
+ * `before` has moved the home directory. Loading discover.ts configures the default roots from
+ * `os.homedir()`, and this file never lets that be the developer's own.
+ */
+function lazy(): {
+  ext: typeof import('../src/extension')
+  scan: typeof import('../src/scan')
+  agg: typeof import('../src/agg')
+  discover: typeof import('../src/discover')
+} {
+  return {
+    ext: require('../src/extension'),
+    scan: require('../src/scan'),
+    agg: require('../src/agg'),
+    discover: require('../src/discover'),
+  }
+}
+
+const MINUTE = 60_000
+const HOUR = 60 * MINUTE
+
+/** Session ids in the shape Claude Code writes them, and two workflow runs. */
+const ACTIVE = 'a0a0a0a0-1111-4111-8111-000000000001'
+const IDLE = 'b0b0b0b0-2222-4222-8222-000000000002'
+const RUN = 'wf_c0ffee00-3333-4333'
+const RUN2 = 'wf_d0d0d0d0-4444-4444'
+
+function writeLines(file: string, lines: string[]): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, lines.map((l) => `${l}\n`).join(''))
+}
+
+function appendLine(file: string, line: string): void {
+  fs.appendFileSync(file, `${line}\n`)
+}
+
+function sidecarOf(file: string): string {
+  return file.replace(/\.jsonl$/, '.meta.json')
+}
+
+interface AgentWorld {
+  project: string
+  activeMain: string
+  idleMain: string
+  /** A workflow agent that is still writing, and the journal of its run. */
+  running: string
+  journal: string
+  /** A sync agent whose result the parent recorded. */
+  sync: string
+  /** The idle session's agent: silent for two hours, no result. */
+  idleAgent: string
+  /** What the world adds to the fixture's billable tokens. */
+  billable: number
+}
+
+/**
+ * Two Claude sessions beside the fixture's own: an active one with a running workflow agent
+ * and a finished sync agent it launched, and one idle for two hours with a silent agent. Every
+ * line is invented; the shapes are the ones test/fixtures/helpers.ts documents.
+ */
+function writeAgentWorld(fx: Fixture): AgentWorld {
+  const project = path.join(fx.claudeRoot, '-tmp-token-pace-synthetic')
+  const sub = (session: string, ...rest: string[]): string => path.join(project, session, 'subagents', ...rest)
+  const w: AgentWorld = {
+    project,
+    activeMain: path.join(project, `${ACTIVE}.jsonl`),
+    idleMain: path.join(project, `${IDLE}.jsonl`),
+    running: sub(ACTIVE, 'workflows', RUN, 'agent-a1a1a1.jsonl'),
+    journal: sub(ACTIVE, 'workflows', RUN, 'journal.jsonl'),
+    sync: sub(ACTIVE, 'agent-c3c3c3.jsonl'),
+    idleAgent: sub(IDLE, 'agent-b1b1b1.jsonl'),
+    // The main 11 + 1 and its launch line 10 + 20, the running agent 20 + 2, the sync agent
+    // 40 + 4, the idle main 13 + 1 and its agent 17 + 1. The parent's report is no usage.
+    billable: 12 + 30 + 22 + 44 + 14 + 18,
+  }
+  writeLines(w.activeMain, [
+    claudeLine({ id: 'msg_act_1', ts: T, usage: { input: 11, output: 1 }, final: true }),
+    agentToolUseLine({ id: 'msg_act_2', ts: T, toolUseId: 'toolu_sync01', subagentType: 'Explore' }),
+    agentResultLine({ ts: T, toolUseId: 'toolu_sync01', agentId: 'c3c3c3', totals: { tokens: 44, durationMs: 1000, toolUses: 0 } }),
+  ])
+  writeLines(w.running, [claudeLine({ id: 'msg_a1_1', ts: T, agentId: 'a1a1a1', usage: { input: 20, output: 2 } })])
+  fs.writeFileSync(sidecarOf(w.running), metaJson({ agentType: 'workflow-subagent', model: 'opus', toolUseId: null }))
+  writeLines(w.journal, [journalLine({ type: 'started', agentId: 'a1a1a1' })])
+  writeLines(w.sync, [claudeLine({ id: 'msg_c3_1', ts: T, agentId: 'c3c3c3', usage: { input: 40, output: 4 }, final: true })])
+  fs.writeFileSync(sidecarOf(w.sync), metaJson({ agentType: 'Explore', model: 'haiku', toolUseId: 'toolu_sync01' }))
+  writeLines(w.idleMain, [claudeLine({ id: 'msg_idle_1', ts: T - 2 * HOUR, usage: { input: 13, output: 1 }, final: true })])
+  writeLines(w.idleAgent, [claudeLine({ id: 'msg_b1_1', ts: T - 2 * HOUR, agentId: 'b1b1b1', usage: { input: 17, output: 1 } })])
+  return w
+}
+
+/**
+ * Scans the fixture in this process and leaves the result where the extension keeps its state:
+ * as this build writes it (7), or as a build before the agent tables did (6) — every line
+ * counted, every cursor at its file's end, and no agent table at all.
+ */
+async function seedSnapshot(fx: Fixture, version: 6 | 7): Promise<Snapshot> {
+  const { agg, scan, discover } = lazy()
+  discover.configureRoots([fx.claudeDir], [fx.codexDir])
+  const a = new agg.Aggregator()
+  await scan.scan(a)
+  const snap = JSON.parse(JSON.stringify(a.toSnapshot())) as Snapshot
+  if (version === 6) {
+    snap.version = 6
+    delete snap.agents
+    delete snap.launches
+    delete snap.mains
+    delete snap.journalResults
+    delete snap.agentsReplayed
+    for (const p of Object.values(snap.pending)) {
+      delete p.agent
+      delete p.main
+    }
+  }
+  fs.mkdirSync(fx.storage, { recursive: true })
+  fs.writeFileSync(fx.stateFile, JSON.stringify(snap))
+  return snap
+}
+
+/** The stored state, or null while it cannot be read (not written yet, or being replaced). */
+function readState(fx: Fixture): Snapshot | null {
+  try {
+    return JSON.parse(fs.readFileSync(fx.stateFile, 'utf8')) as Snapshot
+  } catch {
+    return null
+  }
+}
+
+function offsetsOf(snap: Snapshot): Record<string, number> {
+  return Object.fromEntries(Object.entries(snap.cursors).map(([file, cur]) => [file, cur.offset]))
+}
+
+function treeKeys(nodes: TreeNode[]): string[] {
+  return nodes.flatMap((n) => [n.key, ...treeKeys(n.children)])
+}
+
+/**
+ * Makes every recursive `fs.watch` throw, as on a platform without one: the extension falls
+ * back to its periodic sweep — held by the test below — and has its agent poll, which is what
+ * the test watches. Undone by the function it returns.
+ */
+function blindRecursiveWatchers(): () => void {
+  // The module object itself: the namespace import above has getters only, and the bundle
+  // reads `watch` from this object at every call.
+  const nodeFs = require('fs') as { watch: unknown }
+  const real = nodeFs.watch as (...args: unknown[]) => fs.FSWatcher
+  nodeFs.watch = (...args: unknown[]): fs.FSWatcher => {
+    const options = args[1]
+    if (typeof options === 'object' && options !== null && (options as { recursive?: unknown }).recursive === true) {
+      throw new Error('synthetic: no recursive watcher in this test')
+    }
+    return real.apply(nodeFs, args)
+  }
+  return () => { nodeFs.watch = real }
+}
+
+interface HeldInterval { fn: () => void; ms: number }
+
+/**
+ * Holds every `setInterval` made from here on instead of arming it, until `restore`: the test
+ * fires the ones of one period itself and can count what is still armed. Timeouts stay real —
+ * the ingest's debounce is one of them.
+ */
+function holdIntervals(): { fire(ms: number): number; armed(): number; restore(): void } {
+  const g = globalThis as unknown as { setInterval: unknown; clearInterval: unknown }
+  const realSet = g.setInterval
+  const realClear = g.clearInterval as (handle: unknown) => void
+  const held = new Set<HeldInterval>()
+  g.setInterval = (fn: () => void, ms?: number): HeldInterval => {
+    const h = { fn, ms: ms ?? 0 }
+    held.add(h)
+    return h
+  }
+  g.clearInterval = (handle: unknown): void => {
+    if (!held.delete(handle as HeldInterval)) realClear(handle)
+  }
+  return {
+    fire: (ms) => {
+      const due = [...held].filter((h) => h.ms === ms)
+      for (const h of due) h.fn()
+      return due.length
+    },
+    armed: () => held.size,
+    restore: () => {
+      g.setInterval = realSet
+      g.clearInterval = realClear
+    },
+  }
+}
+
+test('a poll pass lists the agent files of active sessions only and hands on the new and the changed ones', async () => {
+  const { scan, agg, discover } = lazy()
+  const home = tmpDir('tp-poll')
+  const at = (...p: string[]): string => path.join(home, 'projects', '-tmp-poll', ...p)
+  const now = Date.now()
+  const line = (id: string, ts: number, agentId?: string): string => claudeLine({ id, ts, agentId, usage: { input: 1 } })
+  const active = at('s-active.jsonl')
+  const idle = at('s-idle.jsonl')
+  // Its own transcript went quiet an hour ago, but one of its agents is still writing.
+  const lively = at('s-lively.jsonl')
+  const x1 = at('s-active', 'subagents', 'agent-e1.jsonl')
+  const y1 = at('s-idle', 'subagents', 'agent-f1.jsonl')
+  const z1 = at('s-lively', 'subagents', 'agent-d1.jsonl')
+  writeLines(active, [line('m1', now - MINUTE)])
+  writeLines(idle, [line('m2', now - HOUR)])
+  writeLines(lively, [line('m3', now - HOUR)])
+  writeLines(x1, [line('x1', now - MINUTE, 'e1')])
+  writeLines(y1, [line('y1', now - HOUR, 'f1')])
+  writeLines(z1, [line('z1', now - MINUTE, 'd1')])
+  discover.configureRoots([home], [path.join(home, 'codex')])
+  const a = new agg.Aggregator()
+  await scan.scan(a)
+
+  // By the records alone: the session's own last line, or one of its agents'.
+  assert.deepEqual(scan.activeAgentSessions(a, now), [active, lively].sort())
+  assert.deepEqual(await scan.agentPollFiles(a, now), { sessions: 2, listed: 2, changed: [] })
+
+  // A line more, a workflow run in a directory made after the scan, a file touched without
+  // growing — and a line in the idle session, which no pass lists.
+  appendLine(x1, line('x2', now, 'e1'))
+  const x2 = at('s-active', 'subagents', 'workflows', 'wf_1', 'agent-e2.jsonl')
+  const journal = at('s-active', 'subagents', 'workflows', 'wf_1', 'journal.jsonl')
+  writeLines(x2, [line('x3', now, 'e2')])
+  writeLines(journal, [journalLine({ type: 'started', agentId: 'e2' })])
+  const later = new Date(now + 5000)
+  fs.utimesSync(z1, later, later)
+  appendLine(y1, line('y2', now - HOUR, 'f1'))
+  assert.deepEqual(await scan.agentPollFiles(a, now), { sessions: 2, listed: 4, changed: [x1, x2, journal, z1] })
+
+  // The comparison itself: size or mtime against the cursor, no cursor is new, a file gone is
+  // nothing to read.
+  const gone = at('s-active', 'subagents', 'agent-e9.jsonl')
+  a.cursors.set(gone, { offset: 1, size: 1, ino: 1, dev: 1, mtime: 1 })
+  assert.deepEqual(await scan.changedSinceCursor([active, x1, gone, x2, z1], a.cursors), [x1, x2, z1])
+
+  // A record that names a session outside every configured root is never listed.
+  const snap = a.toSnapshot()
+  const outside = path.join(tmpDir('tp-elsewhere'), 's-out.jsonl')
+  snap.mains = { ...snap.mains, [outside]: { ...snap.mains![active], sessionId: 's-out' } }
+  assert.deepEqual(scan.activeAgentSessions(agg.Aggregator.fromSnapshot(snap), now), [active, lively].sort())
+})
+
+test('the poll is wanted while an agent runs, or while a launch waits for its file in an active session', () => {
+  const { ext } = lazy()
+  const node = (over: Partial<TreeNode>): TreeNode => ({
+    key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–',
+    lowerBound: false, duration: '–', startTs: null, lastTs: null, children: [], ...over,
+  })
+  const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(T), roots, running })
+  const waiting = node({ key: 'l:toolu_x', kind: 'pending', state: 'unknown', derived: true })
+
+  assert.equal(ext.agentPollWanted(undefined), false)
+  assert.equal(ext.agentPollWanted(tree([])), false)
+  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'active', children: [node({})] })])), false,
+    'a finished agent in an active session')
+  // The count covers every root, the ones beyond the list too.
+  assert.equal(ext.agentPollWanted(tree([], 1)), true)
+  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'active', children: [node({ children: [waiting] })] })])),
+    true, 'a launch deep in an active session')
+  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'idle', children: [waiting] })])), false,
+    'a launch in an idle session: no pass would list its directory')
+})
+
+test('the poll keeps one timer at most, never runs two passes at once, and outlives no failure', async () => {
+  const { ext } = lazy()
+  const made: Array<{ fn: () => void; ms: number; cleared: boolean }> = []
+  const timers = {
+    set: (fn: () => void, ms: number) => {
+      const t = { fn, ms, cleared: false }
+      made.push(t)
+      return t
+    },
+    clear: (handle: unknown) => { (handle as { cleared: boolean }).cleared = true },
+  }
+  const settle = (): Promise<void> => new Promise((r) => setImmediate(r))
+  let passes = 0
+  let finish: () => void = () => undefined
+  const poll = new ext.AgentPoll(() => {
+    passes++
+    return new Promise<void>((r) => { finish = r })
+  }, ext.AGENT_POLL_MS, timers)
+
+  assert.equal(poll.on, false)
+  assert.equal(poll.set(true), true)
+  assert.equal(poll.set(true), false, 'asked twice, it still keeps one timer')
+  assert.deepEqual(made.map((t) => t.ms), [ext.AGENT_POLL_MS])
+  made[0].fn()
+  await settle()
+  assert.equal(passes, 1)
+  // The pass is still at work: the next tick waits for the one after.
+  made[0].fn()
+  await settle()
+  assert.equal(passes, 1)
+  finish()
+  await settle()
+  made[0].fn()
+  await settle()
+  assert.equal(passes, 2)
+  finish()
+  assert.equal(poll.set(false), true)
+  assert.equal(made[0].cleared, true)
+  assert.equal(poll.set(false), false)
+  assert.equal(poll.on, false)
+
+  // A pass that fails reports it itself; the timer ticks on and is not left waiting for it.
+  let failures = 0
+  const failing = new ext.AgentPoll(() => {
+    failures++
+    return Promise.reject(new Error('synthetic failure'))
+  }, ext.AGENT_POLL_MS, timers)
+  failing.set(true)
+  const t = made[made.length - 1]
+  t.fn()
+  await settle()
+  t.fn()
+  await settle()
+  assert.equal(failures, 2)
+  failing.dispose()
+  assert.equal(t.cleared, true)
+})
+
+test('while an agent runs, the poll hands the new and changed files of active sessions to the ingest, never an idle one, and stops when nothing runs', async () => {
+  const { ext, agg } = lazy()
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  // A state that has been replayed already: the cold start reads every line itself, and
+  // nothing waits for a replay.
+  const replayed = new agg.Aggregator()
+  replayed.agentsReplayed = true
+  fs.mkdirSync(fx.storage, { recursive: true })
+  fs.writeFileSync(fx.stateFile, JSON.stringify(replayed.toSnapshot()))
+  const base = EXPECTED_BILLABLE + w.billable
+  const intervals = holdIntervals()
+  const seeAgain = blindRecursiveWatchers()
+  try {
+    await activateHost(fx, REPO)
+    await waitFor('the cold scan', () => state.textOf(TOKENS_ITEM) === `Σ ${base} · 7d`)
+    await waitFor('the poll to start', () => state.logText().includes('Agent poll: on'))
+    assert.match(state.logText(), /No watcher on .*falling back to the periodic sweep/)
+
+    // The running agent writes on and its run records the result; a second run starts in a
+    // directory made after the cold start and finishes too. The idle session gets a line and
+    // an agent of its own.
+    const now = Date.now()
+    const run2 = path.join(w.project, ACTIVE, 'subagents', 'workflows', RUN2)
+    const second = path.join(run2, 'agent-a2a2a2.jsonl')
+    appendLine(w.running, claudeLine({ id: 'msg_a1_2', ts: now, agentId: 'a1a1a1', usage: { input: 100, output: 5 }, final: true }))
+    appendLine(w.journal, journalLine({ type: 'result', agentId: 'a1a1a1' }))
+    writeLines(second, [claudeLine({ id: 'msg_a2_1', ts: now, agentId: 'a2a2a2', usage: { input: 200, output: 7 }, final: true })])
+    writeLines(path.join(run2, 'journal.jsonl'), [
+      journalLine({ type: 'started', agentId: 'a2a2a2' }), journalLine({ type: 'result', agentId: 'a2a2a2' }),
+    ])
+    appendLine(w.idleAgent, claudeLine({ id: 'msg_b1_2', ts: T - 2 * HOUR, agentId: 'b1b1b1', usage: { input: 1000 } }))
+    const idleNew = path.join(w.project, IDLE, 'subagents', 'agent-b2b2b2.jsonl')
+    writeLines(idleNew, [claudeLine({ id: 'msg_b2_1', ts: T - 2 * HOUR, agentId: 'b2b2b2', usage: { input: 3000 } })])
+
+    // No watcher sees any of it, and the sweep is held: only a pass of the poll can.
+    assert.ok(intervals.fire(ext.AGENT_POLL_MS) > 0, 'no interval of the poll\'s period is armed')
+    await waitFor('the polled files to be counted', () => state.textOf(TOKENS_ITEM) === `Σ ${base + 105 + 207} · 7d`)
+    // Two active sessions — this one and the fixture's own, which has no agent — with five files.
+    assert.match(state.logText(), /Agent poll: 4 of 5 agent file\(s\) changed in 2 active session\(s\)/)
+    // Both runs have their results, the sync agent had one before: nothing runs any more, and
+    // the poll stopped with the first model that said so.
+    await waitFor('the poll to stop', () => state.logText().includes('Agent poll: off'))
+
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    assert.equal(intervals.armed(), 0, 'an interval outlived the extension')
+    // The state written on the way out: what the poll found was counted, the idle session was
+    // never read again.
+    const agents = readState(fx)?.agents ?? {}
+    assert.equal(agents[second]?.outcome, 'completed')
+    assert.equal(agents[w.running]?.outcome, 'completed')
+    assert.equal(agents[w.idleAgent]?.input, 17)
+    assert.equal(agents[idleNew], undefined)
+  } finally {
+    seeAgain()
+    intervals.restore()
+  }
+})
+
+test('the agent tables of an upgraded snapshot are replayed once after the cold start, not on the next start, and by a re-read', async () => {
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const fixtureMain = path.join(w.project, '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl')
+  // What a 1.4 build leaves behind: every line counted, every cursor at its file's end, no agent table.
+  const v6 = await seedSnapshot(fx, 6)
+  const claudeFiles = Object.keys(v6.cursors).filter((f) => f.startsWith(fx.claudeRoot + path.sep)).length
+  assert.equal(claudeFiles, 7)
+
+  await activateHost(fx, REPO)
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsReplayed === true)
+  assert.match(state.logText(),
+    new RegExp(`Agent replay \\(cold start\\): ${claudeFiles} file\\(s\\) read again, \\d+ change\\(s\\), \\d+ ms`))
+  const snap = readState(fx)
+  assert.ok(snap)
+  assert.equal(snap.version, STATE_VERSION)
+  assert.deepEqual(Object.keys(snap.agents ?? {}).sort(), [w.running, w.sync, w.idleAgent].sort())
+  assert.equal(snap.agents?.[w.sync]?.outcome, 'completed')
+  assert.equal(snap.agents?.[w.sync]?.meta?.agentType, 'Explore')
+  assert.equal(snap.agents?.[w.running]?.workflowId, RUN)
+  assert.equal(snap.launches?.toolu_sync01?.agentId, 'c3c3c3')
+  assert.deepEqual(Object.keys(snap.mains ?? {}).sort(), [fixtureMain, w.activeMain, w.idleMain].sort())
+  // The counting is what it was: the replay moves no bucket and no cursor.
+  assert.deepEqual(fingerprintOf(snap), fingerprintOf(v6))
+  assert.deepEqual(offsetsOf(snap), offsetsOf(v6))
+
+  // The page gets the tree keyed by identifiers alone: no path and no project name reach it.
+  const page = openDashboard()
+  const data = page.sent.find((m) => (m as { type?: unknown }).type === 'data') as
+    { payload: { agents: AgentTreeVm } } | undefined
+  assert.ok(data, 'the dashboard got no full payload')
+  const keys = treeKeys(data.payload.agents.roots)
+  for (const key of [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, 'a:a1a1a1', 'a:c3c3c3', `s:${IDLE}`, 'a:b1b1b1']) {
+    assert.ok(keys.includes(key), `${key} is not among ${keys.join(', ')}`)
+  }
+  for (const key of keys) {
+    assert.match(key, /^[swal]:[^\\/]+$/)
+    assert.equal(key.includes('token-pace-synthetic'), false, key)
+  }
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // --- the next start finds the tables replayed ---------------------------------
+  await activateHost(fx, REPO)
+  await waitFor('the second cold start', () => state.logText().includes('Cold start done'))
+  await sleep(300)
+  assert.doesNotMatch(state.logText(), /Agent replay/)
+
+  // --- "Re-read token history" replays over what it has just read ---------------
+  await state.execute('tokenPace.rescan')
+  assert.match(state.logText(), /Agent replay \(re-read\): \d+ file\(s\) read again/)
+  const reread = readState(fx)
+  assert.ok(reread)
+  assert.equal(reread.agentsReplayed, true)
+  assert.deepEqual(Object.keys(reread.agents ?? {}).sort(), [w.running, w.sync, w.idleAgent].sort())
+  assert.deepEqual(fingerprintOf(reread), fingerprintOf(v6))
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a follower shows the agents of the leader\'s state and neither polls nor replays', async () => {
+  const fx = makeFixture()
+  writeAgentWorld(fx)
+  // The leader's state as this build writes it, with a running agent — never replayed, which a
+  // leader would do now and a follower must leave to the leader.
+  const leader = await seedSnapshot(fx, 7)
+  assert.equal(leader.agentsReplayed, false)
+  const written = fs.readFileSync(fx.stateFile, 'utf8')
+  fs.writeFileSync(fx.leaderFile, JSON.stringify({
+    pid: process.pid, id: 'another-window-0123456789abcdef', expiresAt: Date.now() + 120_000,
+  }))
+
+  await activateHost(fx, REPO)
+  await waitFor('the follower role', () => state.logText().includes('Role: single → follower'))
+  await sleep(300)
+  await state.execute('tokenPace.showUsageMarkdown')
+  assert.match(lastMarkdown(), /\[~Running\] workflow-subagent · claude-opus-4-6 · a1a1/)
+  assert.doesNotMatch(state.logText(), /Agent poll: on/)
+  assert.doesNotMatch(state.logText(), /Agent replay/)
+
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  assert.equal(fs.readFileSync(fx.stateFile, 'utf8'), written, 'a follower wrote the shared state')
 })

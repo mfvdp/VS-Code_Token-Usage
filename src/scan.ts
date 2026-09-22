@@ -3,11 +3,11 @@
 
 import * as fs from 'fs'
 import { ADAPTERS, adapterFor } from './adapters'
-import { AGENT_RETENTION_DAYS } from './agentTree'
+import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
 import { Aggregator, IngestContext, parseAgentMeta } from './agg'
-import { findTranscripts, rootOf, rootsFor } from './discover'
+import { agentTranscriptsOf, findTranscripts, rootOf, rootsFor } from './discover'
 import { newCursor, readNewLines } from './tail'
-import { AgentMeta, Attribution, Source } from './types'
+import { AgentMeta, Attribution, Cursor, Source } from './types'
 
 export interface ScanProgress { done: number; total: number; file: string }
 
@@ -185,4 +185,72 @@ export function agentReplayFiles(agg: Aggregator, now: number): string[] {
     if (Math.max(cur.lastTs ?? 0, cur.mtime ?? 0) >= horizon) out.push(file)
   }
   return out.sort()
+}
+
+// ---------------------------------------------------------------------------
+// The hot-directory poll (the host runs a pass every few seconds while agents work)
+// ---------------------------------------------------------------------------
+
+/**
+ * The main transcripts of the Claude sessions that are active now: a session whose own record,
+ * or one of whose agents' records, has a line within SESSION_ACTIVE_MS. The paths are the ones
+ * the aggregator keys its main records by and the `sessionFile` its agent records name — never a
+ * node key of the tree, which carries no path — and only those below a configured Claude root,
+ * like every other file this module reads.
+ */
+export function activeAgentSessions(agg: Aggregator, now: number): string[] {
+  const out = new Set<string>()
+  for (const [file, main] of agg.mainEntries()) if (now - main.lastTs <= SESSION_ACTIVE_MS) out.add(file)
+  for (const rec of agg.agents()) if (now - rec.lastTs <= SESSION_ACTIVE_MS) out.add(rec.sessionFile)
+  return [...out].filter((file) => rootOf(file)?.source === 'claude').sort()
+}
+
+/**
+ * The files whose size or modification time differ from what their cursor recorded, and the
+ * ones no cursor knows yet — new files. One stat each: size and mtime are the two figures
+ * `readNewLines` recognises an unchanged file by. A file gone by the time it is asked about is
+ * left out; one replaced by a file of the same size and time is the sweep's to find.
+ */
+export async function changedSinceCursor(
+  files: readonly string[], cursors: ReadonlyMap<string, Cursor>,
+): Promise<string[]> {
+  const out: string[] = []
+  for (const file of files) {
+    const cur = cursors.get(file)
+    if (!cur) {
+      out.push(file)
+      continue
+    }
+    try {
+      const st = await fs.promises.stat(file)
+      if (st.size !== cur.size || st.mtimeMs !== cur.mtime) out.push(file)
+    } catch {
+      // Gone since it was listed: there is nothing to read.
+    }
+  }
+  return out
+}
+
+/** What one pass of the hot-directory poll found: counts for the log, the files for the ingest. */
+export interface AgentPollResult {
+  /** Active sessions whose directories were listed. */
+  sessions: number
+  /** Agent transcripts and workflow journals found in them. */
+  listed: number
+  /** The ones the cursors have not seen in their present state. */
+  changed: string[]
+}
+
+/**
+ * One pass of the hot-directory poll: every agent transcript and workflow journal of every
+ * active session (`agentTranscriptsOf` — two known levels, no walk, no link) that is new or
+ * changed since its cursor last saw it. A recursive watcher on Linux misses the files of a
+ * directory made after it started — a session's first agent, every agent of a new workflow run
+ * — and the sweep would only find them within the minute. Lists and compares, reads nothing.
+ */
+export async function agentPollFiles(agg: Aggregator, now: number): Promise<AgentPollResult> {
+  const sessions = activeAgentSessions(agg, now)
+  const listed: string[] = []
+  for (const session of sessions) listed.push(...await agentTranscriptsOf(session))
+  return { sessions: sessions.length, listed: listed.length, changed: await changedSinceCursor(listed, agg.cursors) }
 }

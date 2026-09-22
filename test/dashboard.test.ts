@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
 import { setBundle, setLocale } from '../src/i18n'
+import { parseWebviewMessage } from '../src/viewModel'
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -2360,12 +2361,15 @@ test('the prompt-cache line is the last line of the Claude card, and only with a
   const empty = render('sQuota()', { quotas: [card({ promptCache: { text: '', note: 'n' } })] })
   assert.equal(empty.indexOf('prompt cache'), -1, empty)
   // Every word is the model's: a dash in the text stays a dash, and the line ticks on nothing
-  // of its own — the script has no timer at all.
+  // of its own. The page has exactly one timer, and it moves the agent tree's live spans —
+  // this line carries none.
   const bare = render('sQuota()', {
     quotas: [card({ promptCache: { text: 'prompt cache – · expires in – (– TTL) · hit ratio –', note: 'n' } })],
   })
   assert.ok(bare.indexOf('prompt cache – · expires in – (– TTL) · hit ratio –') >= 0, bare)
-  assert.equal(/setInterval|setTimeout/.test(SCRIPT + SOURCE), false)
+  assert.equal(bare.indexOf('data-live'), -1, bare)
+  assert.equal(/setTimeout/.test(SCRIPT + SOURCE), false)
+  assert.equal((SOURCE.match(/setInterval\(/g) ?? []).length, 1)
 })
 
 test('the prompt-cache line carries its own age, and an old reading is marked as one', () => {
@@ -2630,7 +2634,8 @@ test('every section header carries a gear that opens its own settings', () => {
 // ---------------------------------------------------------------------------
 
 test('no renderer invents a number or leaks an undefined', () => {
-  const calls = ['sQuota()', 'sHistory()', 'sChart()', 'sHours()', 'sHeatmap()',
+  // The plain fixture carries no agent tree at all, which is a payload an older build sends.
+  const calls = ['sQuota()', 'sAgents()', 'sHistory()', 'sChart()', 'sHours()', 'sHeatmap()',
     'sFooter()', 'controls()']
   for (const call of calls) {
     const h = render(call)
@@ -2641,7 +2646,8 @@ test('no renderer invents a number or leaks an undefined', () => {
 test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
     'model', 'clearModels', 'moreModels', 'moreRanges', 'section', 'sectionSettings',
-    'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'compositionCache']) {
+    'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'compositionCache',
+    'agentFold', 'agentSelect']) {
     assert.ok(SOURCE.indexOf('data-act="' + act + '"') >= 0, act)
   }
   for (const role of ['from', 'to']) {
@@ -2958,4 +2964,753 @@ test('a poisoned section key or part key is dropped, never looked up on the prot
     ctx,
   ))
   assert.equal(all, 'true')
+})
+
+// ---------------------------------------------------------------------------
+// The agent tree
+// ---------------------------------------------------------------------------
+
+/** 2026-09-22 12:00 UTC — the clock every agent-tree test reads. */
+const AG_NOW = Date.UTC(2026, 8, 22, 12, 0, 0)
+
+/** Node keys shaped the way the tree builder makes them. */
+const AK = {
+  s1: 's:/p/-home-u-repo/9d0eb37a.jsonl',
+  wf: 'w:/p/-home-u-repo/9d0eb37a.jsonl|wf_cfe7718d',
+  a1: 'a:/p/-home-u-repo/9d0eb37a/subagents/workflows/wf_cfe7718d/agent-a94f.jsonl',
+  a2: 'a:/p/-home-u-repo/9d0eb37a/subagents/workflows/wf_cfe7718d/agent-b1c2.jsonl',
+  a3: 'a:/p/-home-u-repo/9d0eb37a/subagents/agent-c3d4.jsonl',
+  l1: 'l:toolu_01ABCDEF',
+  s2: 's:/p/-home-u-repo/1234abcd.jsonl',
+}
+
+/** One TreeNode of src/agentTree.ts, its figures already formatted as the view model does. */
+function treeNode(key: string, state: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    key, kind: 'agent', label: 'Explore · Opus 5 · a94f', sub: null, state,
+    derived: state !== 'done' && state !== 'failed', usage: '12.3K', lowerBound: false,
+    duration: '40.0 s', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, children: [], ...over,
+  }
+}
+
+/**
+ * An AgentTreeVm with every state a node can be in, seven nodes: an active session holding a
+ * running workflow run (one agent running, one done) and a failed agent whose own launch has
+ * no transcript yet, and an idle session.
+ */
+function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    roots: [
+      treeNode(AK.s1, 'active', {
+        kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', duration: '1 h 05 min',
+        children: [
+          treeNode(AK.wf, 'running', {
+            kind: 'workflow', label: 'Workflow cfe7718d', usage: '410K',
+            children: [
+              treeNode(AK.a1, 'running'),
+              treeNode(AK.a2, 'done', { label: 'Plan · Opus 5 · b1c2', lowerBound: true }),
+            ],
+          }),
+          treeNode(AK.a3, 'failed', {
+            label: 'general-purpose · Sonnet 5 · c3d4',
+            children: [
+              treeNode(AK.l1, 'unknown', {
+                kind: 'pending', label: 'Explore · – · launched', usage: '–', duration: '–',
+                startTs: AG_NOW - 900_000, lastTs: null,
+              }),
+            ],
+          }),
+        ],
+      }),
+      treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', usage: '–', duration: '–' }),
+    ],
+    selected: null, running: 2, omittedRoots: 0, truncated: false, note: null, updatedAt: AG_NOW,
+    ...over,
+  }
+}
+
+function agentUi(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    providers: ['claude', 'codex'], models: [], metric: 'usage', collapsed: [],
+    agentsFolded: [], agentSelected: null, ...over,
+  }
+}
+
+/** The NodeDetails the view model builds for AK.a1, with a row of every kind of absence. */
+function detailsOf(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    key: AK.a1, title: 'Explore · Opus 5 · a94f', state: 'running',
+    stateText: 'Running — inferred: the transcript changed 5 s ago and no result was recorded yet.',
+    rows: [
+      { label: 'Type', value: 'Explore' },
+      { label: 'Model', value: 'Opus 5' },
+      { label: 'Depth', value: '' },
+      { label: 'Last activity', value: '11:59:55' },
+      { label: 'Output', value: '1.2K', note: '⚠ lower bound' },
+      { label: 'Spawned by', value: '–' },
+      { label: 'Workflow run', value: null },
+    ],
+    ...over,
+  }
+}
+
+interface AgentCtx {
+  c: nodeVm.Context
+  posted: unknown[]
+  root: { innerHTML: string }
+  intervals: Array<{ fn: () => void; ms: number }>
+  clock: { t: number }
+  fire: (type: string, ev: Record<string, unknown>) => void
+}
+
+/**
+ * A context with everything the Agents section touches: a root that keeps what renderAll
+ * writes, the listeners the script registers (keyed `document:click`, `window:message`, …),
+ * the messages it posts, the intervals it starts and a clock the test moves. A query for the
+ * live spans answers with `spans`.
+ */
+function agentCtx(spans: Array<Record<string, unknown>> = []): AgentCtx {
+  const posted: unknown[] = []
+  const listeners: Record<string, Array<(ev: unknown) => void>> = {}
+  const intervals: Array<{ fn: () => void; ms: number }> = []
+  const root = { innerHTML: '', dataset: {}, style: {} }
+  const clock = { t: AG_NOW }
+  const on = (scope: string) => (type: string, fn: (ev: unknown) => void): void => {
+    (listeners[scope + type] ??= []).push(fn)
+  }
+  const c = nodeVm.createContext({
+    // Copied out of the script's realm, so a posted message compares like any other value.
+    acquireVsCodeApi: () => ({ postMessage: (m: unknown) => { posted.push(JSON.parse(JSON.stringify(m))) } }),
+    document: {
+      addEventListener: on('document:'),
+      getElementById: () => root,
+      querySelector: () => null,
+      querySelectorAll: (sel: string) => (sel === '[data-live="since"]' ? spans : []),
+    },
+    window: {
+      addEventListener: on('window:'),
+      setInterval: (fn: () => void, ms: number) => { intervals.push({ fn, ms }); return intervals.length },
+    },
+    console,
+    clock,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  nodeVm.runInContext('Date.now = function () { return clock.t; };', c)
+  const fire = (type: string, ev: Record<string, unknown>): void => {
+    for (const fn of listeners[type] ?? []) fn(ev)
+  }
+  return { c, posted, root, intervals, clock, fire }
+}
+
+/** The section as sAgents writes it, from the tree above plus `over`. */
+function agentsHtml(a: AgentCtx, over: Record<string, unknown> = {}): string {
+  ;(a.c as Record<string, unknown>).fixture = model({
+    sections: ['quota', 'agents'], agents: agentTree(), ui: agentUi(), ...over,
+  })
+  return String(nodeVm.runInContext('vm = fixture; sAgents()', a.c))
+}
+
+/** A start tag exactly as the renderers write one: lower-case names, double-quoted values. */
+const TAG_RE = /<([a-z][a-z0-9]*)((?:\s[a-z][a-z0-9-]*(?:="[^"]*")?)*)>/g
+
+function tagsOf(html: string): Array<{ name: string; attrs: string[] }> {
+  return [...html.matchAll(TAG_RE)].map((m) => ({
+    name: m[1],
+    attrs: [...m[2].matchAll(/\s([a-z][a-z0-9-]*)(?:="[^"]*")?/g)].map((x) => x[1]),
+  }))
+}
+
+/** What a browser hands back for an attribute value this page escaped. */
+function unescapeHtml(s: string): string {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+}
+
+test('the agent tree draws every state with a glyph of its own and marks each inferred one', () => {
+  const a = agentCtx()
+  const h = agentsHtml(a)
+  assert.ok(h.startsWith('<div class="agtree" role="tree" aria-label="Agents"><ul role="none">'
+    + '<li role="treeitem" class="ag-k-session"'), h)
+  const glyphs = [...h.matchAll(/<span class="ag-st ag-([a-z]+)" role="img" aria-label="([^"]*)" title="([^"]*)"><\/span>/g)]
+  // One glyph per node, all six states among them, and what a screen reader hears is the title.
+  assert.deepEqual(glyphs.map((m) => m[1]), ['active', 'running', 'running', 'done', 'failed', 'unknown', 'idle'])
+  for (const m of glyphs) {
+    assert.equal(m[2], m[3], m[0])
+    // The tilde on everything the tree builder inferred, none on what the parent recorded.
+    assert.equal(m[3].startsWith('~'), m[1] !== 'done' && m[1] !== 'failed', m[0])
+  }
+  assert.deepEqual([...new Set(glyphs.map((m) => m[3]))], [
+    '~active session · derived', '~running · derived', 'done · recorded', 'failed · recorded',
+    '~unknown · derived', '~idle session · derived',
+  ])
+  // The node's flag decides, not its state: a done the builder only inferred says so, and a
+  // node that does not say which it is is never called recorded.
+  assert.ok(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a2, 'done', { derived: true })] }) })
+    .indexOf('title="~done · derived"') >= 0)
+  assert.ok(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a3, 'failed', { derived: undefined })] }) })
+    .indexOf('title="~failed · derived"') >= 0)
+  // A state or kind this build does not know is drawn as unknown and never becomes a class.
+  const odd = agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'exploded', { kind: 'rocket' })] }) })
+  assert.ok(odd.indexOf('<li role="treeitem" class="ag-k-agent"') >= 0, odd)
+  assert.ok(odd.indexOf('<span class="ag-st ag-unknown"') >= 0, odd)
+  assert.equal(/exploded|rocket/.test(odd), false, odd)
+  // Each glyph is the stylesheet's, drawn from the class in a colour of the page.
+  for (const s of ['running', 'done', 'failed', 'unknown', 'active', 'idle']) {
+    assert.match(STYLE, new RegExp('\\.ag-' + s + '::before \\{ content: "[^"]+"; color: var\\(--[a-zA-Z-]+\\); \\}'), s)
+  }
+})
+
+test('a row carries the usage and duration it was given and, only while it runs, a live clock', () => {
+  const a = agentCtx()
+  const h = agentsHtml(a)
+  // The figures of a row, each one unbreakable, so a narrow sidebar wraps at a separator.
+  const figs = (...parts: string[]): string =>
+    '<span class="ag-fig">' + parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
+  const since = '<span data-live="since" data-ts="' + (AG_NOW - 42_000) + '">42 s</span>'
+  // The glyph in a column of its own, the words beside it in theirs.
+  assert.ok(h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '" aria-pressed="false">'
+    + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
+    + '<span class="ag-text"><span class="ag-label">Explore · Opus 5 · a94f</span>'
+    + figs('12.3K', '40.0 s', 'running for ' + since) + '</span></button>') >= 0, h)
+  assert.match(STYLE, /\.ag-row \{[^}]*display: flex; align-items: baseline;/)
+  assert.equal(/\.ag-row \{[^}]*flex-wrap/.test(STYLE), false, 'the glyph would wrap away from its name')
+  assert.match(STYLE, /\.ag-text \{[^}]*flex-wrap: wrap;/)
+  // The workflow run and its running agent tick; done, failed, unknown and the sessions do not.
+  assert.equal(h.split('data-live="since"').length - 1, 2, h)
+  // Output that is a lower bound is marked the way the totals table marks it.
+  assert.ok(h.indexOf('<span class="ag-label">Plan · Opus 5 · b1c2</span>'
+    + figs('12.3K <span title="output is a lower bound: some requests had no terminal line">⚠</span>', '40.0 s')) >= 0, h)
+  // Absence is a dash, never a zero: the launch nobody has counted yet, the quiet session.
+  assert.ok(h.indexOf('<span class="ag-label">Explore · – · launched</span>' + figs('–', '–')) >= 0, h)
+  assert.ok(h.indexOf('<span class="ag-label">Session 1234abcd</span>' + figs('–', '–')) >= 0, h)
+  // The project a session belongs to, when attribution names one, beside its name.
+  assert.ok(h.indexOf('<span class="ag-label">Session 9d0eb37a</span><span class="meta">repo</span>'
+    + figs('1.2M', '1 h 05 min')) >= 0, h)
+  // A launch whose transcript has not been seen yet reads as the hint it is.
+  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-pending" aria-selected="false">') >= 0, h)
+  assert.match(STYLE, /\.ag-k-pending > \.ag-line \.ag-label \{ font-style: italic; \}/)
+  // A running node without a start gets no clock rather than one counting from 1970.
+  const nostart = agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'running', { startTs: null })] }) })
+  assert.equal(nostart.indexOf('data-live'), -1, nostart)
+  // A node with nothing in it is dashes.
+  const bare = agentsHtml(a, { agents: agentTree({ roots: [{ key: AK.a1 }] }) })
+  assert.ok(bare.indexOf('<span class="ag-label">–</span>' + figs('–', '–')) >= 0, bare)
+  assert.equal(/undefined|NaN|null|\[object Object\]/.test(h + nostart + bare), false)
+})
+
+test('a folded node keeps its row, drops its children and says it is collapsed', () => {
+  const a = agentCtx()
+  const open = agentsHtml(a)
+  // Every node with children has a fold and says whether it is open; a leaf has neither, and
+  // keeps its place in the column with an empty slot.
+  assert.ok(open.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="true" aria-selected="false">'
+    + '<div class="ag-line"><button class="ag-fold" data-act="agentFold" data-key="' + AK.wf
+    + '" aria-label="Collapse Workflow cfe7718d"></button>') >= 0, open)
+  assert.ok(open.indexOf('<li role="treeitem" class="ag-k-agent" aria-selected="false"><div class="ag-line">'
+    + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '"') >= 0, open)
+  assert.equal(open.split('aria-expanded="true"').length - 1, 3, open)
+  assert.equal(open.indexOf('aria-expanded="false"'), -1, open)
+  // The children of an open node are its group.
+  assert.equal(open.split('<ul role="group">').length - 1, 3, open)
+
+  const folded = agentsHtml(a, { ui: agentUi({ agentsFolded: [AK.wf] }) })
+  assert.ok(folded.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="false" aria-selected="false">'
+    + '<div class="ag-line"><button class="ag-fold" data-act="agentFold" data-key="' + AK.wf
+    + '" aria-label="Expand Workflow cfe7718d"></button>') >= 0, folded)
+  // Its two agents are not written at all; its parent and its siblings are untouched.
+  assert.equal(folded.indexOf(AK.a1), -1, folded)
+  assert.equal(folded.indexOf(AK.a2), -1, folded)
+  for (const k of [AK.s1, AK.a3, AK.l1, AK.s2]) assert.ok(folded.indexOf('data-key="' + k + '"') >= 0, k)
+  // Folding a session takes everything under it away, and the other session stays.
+  const root = agentsHtml(a, { ui: agentUi({ agentsFolded: [AK.s1] }) })
+  for (const k of [AK.wf, AK.a1, AK.a2, AK.a3, AK.l1]) assert.equal(root.indexOf('data-key="' + k + '"'), -1, k)
+  assert.ok(root.indexOf('data-key="' + AK.s2 + '"') >= 0, root)
+  // The twisty is drawn, not typed, and turns with the attribute.
+  assert.match(STYLE, /\.ag-fold::before \{ content: "▾";/)
+  assert.match(STYLE, /\[aria-expanded="false"\] > \.ag-line > \.ag-fold::before \{ content: "▸"; \}/)
+  assert.equal(/[▾▸]/.test(open + folded), false)
+})
+
+test('the selected node is the one pressed row, and only a selection opens the details', () => {
+  const a = agentCtx()
+  const none = agentsHtml(a)
+  assert.equal(none.indexOf('aria-pressed="true"'), -1, none)
+  assert.equal(none.indexOf('ag-details'), -1, none)
+  const h = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: agentUi({ agentSelected: AK.a1 }) })
+  const pressed = [...h.matchAll(/data-act="agentSelect" data-key="([^"]*)" aria-pressed="true"/g)].map((m) => m[1])
+  assert.deepEqual(pressed, [AK.a1])
+  assert.equal(h.split('aria-pressed="false"').length - 1, 6, h)
+  // The tree says the same to a screen reader.
+  assert.equal(h.split('aria-selected="true"').length - 1, 1, h)
+  // Quieter than a pressed chip: the track's tint and the focus colour's edge.
+  assert.match(STYLE, /\.ag-row\[aria-pressed="true"\] \{ background: var\(--track\);/)
+})
+
+test('the details print the view model\'s rows, a dash for each absence, and a live last activity', () => {
+  const a = agentCtx()
+  const h = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: agentUi({ agentSelected: AK.a1 }) })
+  // Under the tree.
+  assert.ok(h.indexOf('<div class="agtree"') < h.indexOf('<div class="ag-details"'), h)
+  const panel = h.slice(h.indexOf('<div class="ag-details"'))
+  assert.ok(panel.startsWith('<div class="ag-details" role="region" aria-label="Details">'
+    + '<div class="name">Explore · Opus 5 · a94f</div><dl>'
+    + '<dt>State</dt><dd><span class="ag-st ag-running" role="img" aria-label="~running · derived" '
+    + 'title="~running · derived"></span> '
+    + 'Running — inferred: the transcript changed 5 s ago and no result was recorded yet.</dd>'
+    + '<dt>Type</dt><dd>Explore</dd><dt>Model</dt><dd>Opus 5</dd>'), panel)
+  // Absent is a dash, whether the model sent an empty text, a dash or nothing at all.
+  assert.ok(panel.indexOf('<dt>Depth</dt><dd>–</dd>') >= 0, panel)
+  assert.ok(panel.indexOf('<dt>Spawned by</dt><dd>–</dd>') >= 0, panel)
+  assert.ok(panel.indexOf('<dt>Workflow run</dt><dd>–</dd>') >= 0, panel)
+  assert.ok(panel.indexOf('<dt>Output</dt><dd>1.2K <span class="meta">⚠ lower bound</span></dd>') >= 0, panel)
+  // The model's own last-activity row keeps its words and gains the clock — once.
+  assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:59:55 · <span data-live="since" data-ts="'
+    + (AG_NOW - 5_000) + '">5 s</span> ago</dd>') >= 0, panel)
+  assert.equal(panel.split('Last activity').length - 1, 1, panel)
+  // A model without such a row gets one of the page's own, right under the state.
+  const own = agentsHtml(a, {
+    agents: agentTree({ selected: detailsOf({ rows: [{ label: 'Type', value: 'Explore' }] }) }),
+    ui: agentUi({ agentSelected: AK.a1 }),
+  })
+  assert.ok(own.indexOf('yet.</dd><dt>Last activity</dt><dd><span data-live="since" data-ts="'
+    + (AG_NOW - 5_000) + '">5 s</span> ago</dd><dt>Type</dt><dd>Explore</dd></dl></div>') >= 0, own)
+  // A node without a last activity gets no clock: the launch nobody has seen a line of.
+  const pending = agentsHtml(a, {
+    agents: agentTree({ selected: detailsOf({ key: AK.l1, title: 'Explore · – · launched', state: 'unknown', rows: [] }) }),
+    ui: agentUi({ agentSelected: AK.l1 }),
+  })
+  const pendingPanel = pending.slice(pending.indexOf('<div class="ag-details"'))
+  assert.equal(pendingPanel.indexOf('data-live'), -1, pendingPanel)
+  assert.ok(pendingPanel.indexOf('aria-label="~unknown · derived"') >= 0, pendingPanel)
+  // A recorded state is no estimate in the panel either.
+  const done = agentsHtml(a, {
+    agents: agentTree({ selected: detailsOf({ key: AK.a2, state: 'done', stateText: 'Completed — the parent recorded the result at 11:59.' }) }),
+    ui: agentUi({ agentSelected: AK.a2 }),
+  })
+  assert.ok(done.indexOf('<dt>State</dt><dd><span class="ag-st ag-done" role="img" aria-label="done · recorded" '
+    + 'title="done · recorded"></span> Completed — the parent recorded the result at 11:59.</dd>') >= 0, done)
+  // A details payload with nothing in it, for a node the tree does not hold, is dashes.
+  const empty = agentsHtml(a, { agents: agentTree({ selected: { key: 'x' } }) })
+  assert.equal(empty.slice(empty.indexOf('<div class="ag-details"')),
+    '<div class="ag-details" role="region" aria-label="Details"><div class="name">–</div><dl>'
+    + '<dt>State</dt><dd><span class="ag-st ag-unknown" role="img" aria-label="~unknown · derived" '
+    + 'title="~unknown · derived"></span> –</dd></dl></div>')
+  // Two columns, stacked in a narrow sidebar.
+  assert.match(STYLE, /\.ag-details dl \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\);/)
+  assert.match(STYLE, /@media \(max-width: 320px\) \{\n {2}\.ag-details dl \{ grid-template-columns: 1fr;/)
+})
+
+test('an empty tree says so, and a cut tree says what it left out', () => {
+  // A payload without the tree — an older build — and an empty one.
+  assert.equal(render('sAgents()'), '<p class="empty">No Claude Code session in the last 7 days.</p>')
+  const a = agentCtx()
+  assert.equal(agentsHtml(a, { agents: agentTree({ roots: [] }) }),
+    '<p class="empty">No Claude Code session in the last 7 days.</p>')
+  // The view model's own note, in its words, wins over the page's.
+  assert.equal(agentsHtml(a, { agents: agentTree({ roots: [], note: 'Nothing <here>.' }) }),
+    '<p class="empty">Nothing &lt;here&gt;.</p>')
+  const plain = agentsHtml(a)
+  assert.equal(plain.indexOf('<p class="empty">'), -1, plain)
+  const cut = agentsHtml(a, {
+    agents: agentTree({ omittedRoots: 3, truncated: true, note: 'The selected node is no longer in the tree.' }),
+  })
+  assert.ok(cut.indexOf('</ul></div><p class="empty">3 older session(s) not shown.</p>'
+    + '<p class="empty">Tree cut at 7 nodes.</p>'
+    + '<p class="empty">The selected node is no longer in the tree.</p>') >= 0, cut)
+})
+
+test('a hostile tree renders inert: no element and no handler the renderer did not write', () => {
+  const EVIL = '<script>alert(1)</script><img src=x onerror=alert(2)>" onmouseover="alert(3)\' `x` '
+  const a = agentCtx()
+  // Every string of the tree poisoned — labels, sub texts, keys, the sentences, even the state
+  // and the kind — and the selection and a fold pointing at poisoned keys.
+  const agents = poisoned(agentTree({ selected: detailsOf(), note: 'n', omittedRoots: 2, truncated: true }), EVIL)
+  const h = agentsHtml(a, { agents, ui: agentUi({ agentSelected: EVIL + AK.a1, agentsFolded: [EVIL + AK.a3] }) })
+  // Everything was drawn: the poison did not stop the renderer, it is only text.
+  assert.ok(h.indexOf('<div class="ag-details"') >= 0, h)
+  assert.equal(/<script/i.test(h), false, h)
+  for (const tag of tagsOf(h)) {
+    assert.ok(['div', 'ul', 'li', 'button', 'span', 'p', 'dl', 'dt', 'dd'].includes(tag.name), tag.name)
+    for (const name of tag.attrs) assert.equal(/^on/.test(name), false, name + ' on <' + tag.name + '>')
+  }
+  // Every "<" and ">" on the page belongs to a tag the renderer wrote.
+  const text = h.replace(TAG_RE, '').replace(/<\/[a-z]+>/g, '')
+  assert.equal(/[<>]/.test(text), false, text)
+  // The poison is on the page as text — in the labels, the notes and the details alike.
+  const shown = '&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(2)&gt;&quot; '
+    + 'onmouseover=&quot;alert(3)&#39; `x` '
+  for (const where of ['<span class="ag-label">' + shown, '<p class="empty">' + shown + 'n</p>',
+    '<div class="name">' + shown, '<dt>' + shown + 'Type</dt>']) {
+    assert.ok(h.indexOf(where) >= 0, where + ' missing from ' + h)
+  }
+  // A key survives the attribute exactly: the browser hands the host back what it was given.
+  const keys = [...h.matchAll(/data-key="([^"]*)"/g)].map((m) => unescapeHtml(m[1]))
+  assert.ok(keys.includes(EVIL + AK.a1), keys.join('\n'))
+  // The poisoned selection is still the one pressed row, the poisoned fold still folds.
+  assert.equal(h.split('aria-pressed="true"').length - 1, 1, h)
+  assert.equal(keys.includes(EVIL + AK.l1), false)
+  // An unknown state and kind reach no class.
+  assert.equal(/class="[^"]*(?:script|alert)/.test(h), false, h)
+})
+
+test('one timer, started with the first payload, keeps the live spans current without a render', () => {
+  const spans: Array<{ dataset: Record<string, string>; textContent: string }> = [
+    { dataset: { ts: String(AG_NOW - 42_000) }, textContent: '42 s' },
+    { dataset: { ts: 'not a time' }, textContent: 'kept' },
+  ]
+  const a = agentCtx(spans)
+  // Nothing ticks on a page that has not been given anything to show.
+  assert.equal(a.intervals.length, 0)
+  const payload = model({ sections: ['quota', 'agents'], agents: agentTree(), ui: agentUi() })
+  a.fire('window:message', { origin: '', data: { type: 'data', payload } })
+  assert.deepEqual(a.intervals.map((x) => x.ms), [1000])
+  // The page is drawn from the clock's own time …
+  const html = a.root.innerHTML
+  assert.ok(html.indexOf('<span data-live="since" data-ts="' + (AG_NOW - 42_000) + '">42 s</span>') >= 0, html)
+  // … and a tick rewrites the text of the spans, and nothing else.
+  const tick = (t: number): string => { a.clock.t = t; a.intervals[0].fn(); return spans[0].textContent }
+  assert.equal(tick(AG_NOW + 1_000), '43 s')
+  assert.equal(spans[1].textContent, 'kept')
+  assert.equal(tick(AG_NOW + 17 * 60_000 + 18_000), '18 min 00 s')
+  assert.equal(tick(AG_NOW - 42_000 + 3_723_000), '1 h 02 min')
+  assert.equal(tick(AG_NOW - 42_000 + 2 * 86_400_000 + 3_723_000), '2 d 1 h')
+  // In units, never as a clock reading: "12:05" beside a start time reads as a time of day.
+  const at = (s: number): string => tick(AG_NOW - 42_000 + s * 1000)
+  assert.deepEqual([59, 60, 3599, 3600, 86_399, 86_400].map(at),
+    ['59 s', '1 min 00 s', '59 min 59 s', '1 h 00 min', '23 h 59 min', '1 d 0 h'])
+  // Two clocks a second apart never make a negative time.
+  assert.equal(tick(AG_NOW - 43_000), '0 s')
+  assert.equal(a.root.innerHTML, html, 'a tick re-rendered the page')
+  assert.deepEqual(a.posted, [{ type: 'rendered', sections: 2 }], 'a tick posted a message')
+  // A second payload, and a push of the section itself, start no second timer.
+  a.fire('window:message', { origin: '', data: { type: 'data', payload } })
+  a.fire('window:message', {
+    origin: '', data: { type: 'section', key: 'agents', payload: { agents: agentTree(), ui: agentUi() } },
+  })
+  assert.equal(a.intervals.length, 1)
+  // A page with no live span on it ticks through nothing.
+  spans.length = 0
+  assert.doesNotThrow(() => a.intervals[0].fn())
+})
+
+test('a click on a fold or a row posts what the host parses, and a second click closes the row', () => {
+  const a = agentCtx()
+  a.fire('window:message', {
+    origin: '',
+    data: { type: 'data', payload: model({ sections: ['agents'], agents: agentTree(), ui: agentUi({ agentSelected: AK.a1 }) }) },
+  })
+  a.posted.length = 0
+  const button = (act: string, key?: string): Record<string, unknown> =>
+    ({ tagName: 'BUTTON', dataset: key === undefined ? { act } : { act, key } })
+  const event = (el: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> =>
+    ({ target: { closest: () => el }, stopPropagation: () => undefined, preventDefault: () => undefined, ...extra })
+  a.fire('document:click', event(button('agentFold', AK.wf)))
+  a.fire('document:click', event(button('agentSelect', AK.a2)))
+  // The row whose details are open closes them again.
+  a.fire('document:click', event(button('agentSelect', AK.a1)))
+  // A button without a key is not a message worth sending.
+  a.fire('document:click', event(button('agentFold', '')))
+  a.fire('document:click', event(button('agentSelect')))
+  const expected = [
+    { type: 'agentFold', key: AK.wf },
+    { type: 'agentSelect', key: AK.a2 },
+    { type: 'agentSelect', key: null },
+  ]
+  assert.deepEqual(a.posted, expected)
+  // Every one of them passes the host's allow-list unchanged.
+  for (const m of expected) assert.deepEqual(parseWebviewMessage(m), m)
+  // Enter and Space on a button are the browser's own click: the keydown fallback leaves both
+  // alone, or one key press would fold a node and unfold it again.
+  a.fire('document:keydown', event(button('agentFold', AK.wf), { key: 'Enter' }))
+  a.fire('document:keydown', event(button('agentSelect', AK.a2), { key: ' ' }))
+  assert.equal(a.posted.length, 3)
+})
+
+test('a keyboard user on the tree keeps the focus through a push of the section', () => {
+  const focused: string[] = []
+  const control = (act: string, key: string, name: string): Record<string, unknown> =>
+    ({ dataset: { act, key }, focus: () => { focused.push(name) } })
+  const before = control('agentSelect', AK.a1, 'before')
+  const drawn = [control('agentFold', AK.a1, 'fold'), control('agentSelect', AK.a2, 'other'),
+    control('agentSelect', AK.a1, 'after')]
+  const inside = new Set<unknown>([before])
+  const body = {
+    innerHTML: '', dataset: {}, style: {},
+    contains: (el: unknown) => inside.has(el),
+    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined,
+    getElementById: () => null,
+    querySelector: (s: string) => (s === '[data-body="agents"]' || s === '[data-body="quota"]' ? body : null),
+    querySelectorAll: () => [],
+    activeElement: before,
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc,
+    window: { addEventListener: () => undefined }, console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  ;(c as Record<string, unknown>).fixture = model({ sections: ['quota', 'agents'], agents: agentTree(), ui: agentUi() })
+  nodeVm.runInContext('vm = fixture; renderSection("agents");', c)
+  // The row the reader was on, found again by what it does and whom it names — not the fold
+  // beside it, and not another row.
+  assert.deepEqual(focused, ['after'])
+  // A control that is gone takes the focus nowhere, and nothing else is focused instead.
+  focused.length = 0
+  const gone = control('agentSelect', 'a:/p/gone.jsonl', 'gone')
+  inside.add(gone)
+  doc.activeElement = gone
+  nodeVm.runInContext('renderSection("agents");', c)
+  assert.deepEqual(focused, [])
+  // A focus outside the section, or a refresh of another section, is left to the browser.
+  doc.activeElement = before
+  inside.clear()
+  nodeVm.runInContext('renderSection("agents");', c)
+  inside.add(before)
+  nodeVm.runInContext('renderSection("quota");', c)
+  assert.deepEqual(focused, [])
+})
+
+test('the running glyph pulses only for a reader who allows motion, and the tree has no colour of its own', () => {
+  const motion = between(STYLE, /@media \(prefers-reduced-motion: no-preference\) \{/, '\n}')
+  assert.match(motion, /\.ag-running::before \{ animation: ag-pulse 2s ease-in-out infinite; \}/)
+  assert.equal((STYLE.match(/animation:/g) ?? []).length, 1, 'an animation outside the motion query')
+  assert.match(STYLE, /@keyframes ag-pulse \{/)
+  // Every rule of the tree and the panel paints with a token of the page or the theme.
+  const rules = STYLE.split('}').map((r) => r.replace(/\/\*[\s\S]*?\*\//g, '')).filter((r) => /\.ag-|\.agtree/.test(r))
+  assert.ok(rules.length > 15, String(rules.length))
+  for (const r of rules) assert.equal(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/.test(r), false, r)
+})
+
+test('the agent tree speaks German on a German page', () => {
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const words = ['Agents', 'running', 'done', 'failed', 'unknown', 'active session', 'idle session',
+    '{0} · derived', '{0} · recorded', 'running for {0}', '{0} ago', 'State', 'Last activity', 'Details',
+    'Collapse {0}', 'Expand {0}', 'Tree cut at {0} nodes.', '{0} older session(s) not shown.',
+    'No Claude Code session in the last 7 days.']
+  const de: Record<string, string> = {}
+  for (const w of words) {
+    assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
+    assert.equal(typeof bundle[w], 'string', 'no German for ' + w)
+    de[w] = bundle[w]
+  }
+  const c = makeContext()
+  nodeVm.runInContext(between(germanPage(de), /<script nonce="[A-Za-z0-9]+">/, '</script>'), c)
+  ;(c as Record<string, unknown>).clock = { t: AG_NOW }
+  nodeVm.runInContext('Date.now = function () { return clock.t; };', c)
+  const section = (over: Record<string, unknown>): string => {
+    ;(c as Record<string, unknown>).fixture = model({ agents: agentTree(), ui: agentUi(), ...over })
+    return String(nodeVm.runInContext('vm = fixture; sAgents()', c))
+  }
+  const h = section({
+    agents: agentTree({ selected: detailsOf({ rows: [] }), truncated: true, omittedRoots: 2 }),
+    ui: agentUi({ agentSelected: AK.a1 }),
+  })
+  for (const phrase of [
+    'role="tree" aria-label="Agenten"', 'title="~läuft · abgeleitet"', 'title="fertig · aufgezeichnet"',
+    'title="fehlgeschlagen · aufgezeichnet"', 'title="~unbekannt · abgeleitet"',
+    'title="~Sitzung aktiv · abgeleitet"', 'title="~Sitzung ruht · abgeleitet"',
+    '<span class="nobr">läuft seit <span data-live="since"', '<dt>Zustand</dt>', '<dt>Letzte Aktivität</dt><dd>vor <span data-live="since"',
+    'aria-label="Workflow cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
+    '<p class="empty">Baum bei 7 Knoten abgeschnitten.</p>',
+  ]) assert.ok(h.indexOf(phrase) >= 0, phrase + ' missing from ' + h)
+  assert.ok(section({ ui: agentUi({ agentsFolded: [AK.wf] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
+  assert.equal(section({ agents: agentTree({ roots: [] }) }),
+    '<p class="empty">Keine Claude-Code-Sitzung in den letzten 7 Tagen.</p>')
+})
+
+// ---------------------------------------------------------------------------
+// The push throttle
+// ---------------------------------------------------------------------------
+
+interface Rig {
+  p: any
+  view: any
+  posted: any[]
+  sections: () => string[]
+  live: () => Array<{ at: number; cleared: boolean }>
+  advance: (to: number) => void
+  setClock: (t: number) => void
+  dispose: () => void
+}
+
+/**
+ * A provider on a clock the test moves, with a view that records what it is sent and hands its
+ * dispose handler back. `advance` moves the clock and fires every timer due by then, in the
+ * order they fall due — what the event loop would have done in the meantime.
+ */
+function throttleRig(): Rig {
+  const { DashboardProvider } = loadDashboard()
+  let now = AG_NOW
+  const timers: Array<{ fn: () => void; at: number; cleared: boolean; fired: boolean }> = []
+  const clock = {
+    now: () => now,
+    setTimeout: (fn: () => void, ms: number): unknown => {
+      const timer = { fn, at: now + ms, cleared: false, fired: false }
+      timers.push(timer)
+      return timer
+    },
+    clearTimeout: (handle: unknown): void => { (handle as { cleared: boolean }).cleared = true },
+  }
+  const posted: any[] = []
+  const disposers: Array<() => void> = []
+  const view = {
+    visible: true,
+    webview: {
+      options: {},
+      html: '',
+      onDidReceiveMessage: () => ({ dispose: () => undefined }),
+      postMessage: (m: unknown) => { posted.push(m); return Promise.resolve(true) },
+    },
+    onDidChangeVisibility: () => ({ dispose: () => undefined }),
+    onDidDispose: (fn: () => void) => { disposers.push(fn); return { dispose: () => undefined } },
+    show: () => undefined,
+  }
+  const p = new DashboardProvider(() => undefined, () => undefined, clock)
+  const live = (): typeof timers => timers.filter((x) => !x.cleared && !x.fired)
+  const advance = (to: number): void => {
+    for (;;) {
+      const due = live().filter((x) => x.at <= to).sort((x, y) => x.at - y.at)[0]
+      if (!due) break
+      now = due.at
+      due.fired = true
+      due.fn()
+    }
+    now = to
+  }
+  return {
+    p, view, posted, live, advance,
+    sections: () => posted.filter((m) => m.type === 'section').map((m) => m.key),
+    setClock: (t: number) => { now = t },
+    dispose: () => { for (const fn of disposers) fn() },
+  }
+}
+
+/** A view model with only what the three sections of the rig are built from. */
+function flushVm(over: Record<string, unknown> = {}): any {
+  return {
+    sections: ['quota', 'agents', 'summary'], showCost: true, quotas: [], digest: [],
+    agents: flushTree(0), ui: agentUi(), ...over,
+  }
+}
+
+function flushTree(n: number): Record<string, unknown> {
+  return {
+    roots: [{ key: 'a:/p/' + n + '.jsonl' }], selected: null, running: 1, omittedRoots: 0,
+    truncated: false, note: null, updatedAt: n,
+  }
+}
+
+test('the agent tree is pushed at most every two seconds, and no other section waits for it', () => {
+  const { SECTION_MIN_INTERVAL_MS } = loadDashboard()
+  assert.deepEqual({ ...SECTION_MIN_INTERVAL_MS }, { agents: 2000 })
+  const r = throttleRig()
+  r.p.update(flushVm({ agents: flushTree(1) }))
+  r.p.resolveWebviewView(r.view)
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+
+  // Half a second later the tree changed: held back, on one timer, for the rest of the interval.
+  r.posted.length = 0
+  r.advance(AG_NOW + 500)
+  r.p.update(flushVm({ agents: flushTree(2) }))
+  assert.deepEqual(r.sections(), [])
+  assert.deepEqual(r.live().map((x) => x.at), [AG_NOW + 2000])
+  const timer = r.live()[0]
+
+  // The tree again and the summary with it: the summary goes at once, the tree waits — on the
+  // same timer, neither a second one nor the first one cleared and set again.
+  r.advance(AG_NOW + 600)
+  r.p.update(flushVm({ agents: flushTree(3), digest: ['new'] }))
+  assert.deepEqual(r.sections(), ['summary'])
+  assert.deepEqual(r.live(), [timer])
+  assert.equal(timer.cleared, false)
+
+  // The timer flushes again and the tree goes: the newest one, not the one held first.
+  r.posted.length = 0
+  r.advance(AG_NOW + 2000)
+  assert.deepEqual(r.sections(), ['agents'])
+  assert.deepEqual(r.posted[0].payload.agents, flushTree(3))
+  assert.deepEqual(r.live(), [])
+
+  // A section without an interval of its own is never held, however fast it changes.
+  r.posted.length = 0
+  r.advance(AG_NOW + 2100)
+  r.p.update(flushVm({ agents: flushTree(3), digest: ['newer'] }))
+  r.advance(AG_NOW + 2150)
+  r.p.update(flushVm({ agents: flushTree(3), digest: ['newest'] }))
+  assert.deepEqual(r.sections(), ['summary', 'summary'])
+  assert.deepEqual(r.live(), [])
+})
+
+test('a fold or a selection is answered at once, and the interval counts from that push', () => {
+  const r = throttleRig()
+  const folded = ['s:/p/1.jsonl']
+  r.p.update(flushVm({ agents: flushTree(1) }))
+  r.p.resolveWebviewView(r.view)
+  // 300 ms after the full push the reader folds a node: nothing about the click waits.
+  r.posted.length = 0
+  r.advance(AG_NOW + 300)
+  r.p.update(flushVm({ agents: flushTree(1), ui: agentUi({ agentsFolded: folded }) }))
+  assert.ok(r.sections().includes('agents'), r.sections().join())
+  // A selection, which changes the details the tree carries as well, goes at once too.
+  r.posted.length = 0
+  r.advance(AG_NOW + 400)
+  const ui = agentUi({ agentsFolded: folded, agentSelected: 'a:/p/1.jsonl' })
+  r.p.update(flushVm({ agents: { ...flushTree(1), selected: { key: 'a:/p/1.jsonl' } }, ui }))
+  assert.ok(r.sections().includes('agents'), r.sections().join())
+  assert.deepEqual(r.live(), [])
+  // Live data a moment later waits out the interval from the click's push.
+  r.posted.length = 0
+  r.advance(AG_NOW + 500)
+  r.p.update(flushVm({ agents: { ...flushTree(2), selected: { key: 'a:/p/1.jsonl' } }, ui }))
+  assert.deepEqual(r.sections(), [])
+  assert.deepEqual(r.live().map((x) => x.at), [AG_NOW + 2400])
+  r.advance(AG_NOW + 2399)
+  assert.deepEqual(r.sections(), [])
+  r.advance(AG_NOW + 2400)
+  assert.deepEqual(r.sections(), ['agents'])
+})
+
+test('a held tree waits for nothing once the whole page is pushed, and its timer dies with the view', () => {
+  const r = throttleRig()
+  const layout = ['agents', 'quota', 'summary']
+  r.p.update(flushVm({ agents: flushTree(1) }))
+  r.p.resolveWebviewView(r.view)
+  r.advance(AG_NOW + 500)
+  r.p.update(flushVm({ agents: flushTree(2) }))
+  const first = r.live()
+  assert.equal(first.length, 1)
+  // A layout change forces a full push, which carries the held tree along.
+  r.posted.length = 0
+  r.p.update(flushVm({ agents: flushTree(2), sections: layout }))
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  assert.equal(first[0].cleared, true)
+  assert.deepEqual(r.live(), [])
+  // Held again, and the view goes away: the timer goes with it.
+  r.advance(AG_NOW + 600)
+  r.p.update(flushVm({ agents: flushTree(3), sections: layout }))
+  const second = r.live()
+  assert.equal(second.length, 1)
+  r.dispose()
+  assert.equal(second[0].cleared, true)
+  assert.deepEqual(r.live(), [])
+})
+
+test('a clock that went backwards holds nothing back', () => {
+  const r = throttleRig()
+  r.p.update(flushVm({ agents: flushTree(1) }))
+  r.p.resolveWebviewView(r.view)
+  // The system clock was set back a minute: an interval counted from the last push would not
+  // end for a minute, so the tree goes at once and the interval counts from there.
+  r.posted.length = 0
+  r.setClock(AG_NOW - 60_000)
+  r.p.update(flushVm({ agents: flushTree(2) }))
+  assert.deepEqual(r.sections(), ['agents'])
+  assert.deepEqual(r.live(), [])
+  r.posted.length = 0
+  r.setClock(AG_NOW - 59_000)
+  r.p.update(flushVm({ agents: flushTree(3) }))
+  assert.deepEqual(r.sections(), [])
+  assert.deepEqual(r.live().map((x) => x.at), [AG_NOW - 58_000])
 })

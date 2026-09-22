@@ -1432,14 +1432,252 @@ function sDrill(): string {
     + '<button data-act="drill" data-day="">' + tr('close') + '</button>';
 }
 
-// The Agents section: the session → workflow → agent tree. A placeholder until the tree
-// renderer lands; it states the one thing it can say for sure, and nothing it cannot.
+// -- agents -----------------------------------------------------------------
+//
+// The Agents section: the Claude Code sessions of the last seven days, the workflow runs
+// inside them and the agents they spawned, as one tree. Every word and figure a node shows is
+// the view model's — the label, the usage, the duration, the state and the sentence that
+// derives it — and so is every row of the details panel. What is decided here is the
+// structure, the fold and the selection, and one thing a view model cannot deliver: a clock
+// that moves between two pushes.
+
+/** The states a node can be drawn in. A state this build does not know is drawn as unknown. */
+const AGENT_STATES = ['running', 'done', 'failed', 'unknown', 'active', 'idle'];
+/** The kinds of node. Only these ever reach a class name. */
+const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending'];
+/**
+ * Far deeper than the tree builder ever nests (MAX_TREE_DEPTH in src/agentTree.ts, with the
+ * session and the workflow run above it), so the guard only ever stops a payload that is not a
+ * tree the builder made.
+ */
+const AGENT_MAX_DEPTH = 24;
+
+function agentState(v: Payload): string {
+  return AGENT_STATES.indexOf(v) >= 0 ? String(v) : 'unknown';
+}
+
+/**
+ * A node's state in words, for the title of its glyph. Built on the call, like displayWords(),
+ * because the words are the reader's language. Only a session is active or idle, and its words
+ * name it; the other four are the states of an agent, a workflow run or a pending launch.
+ */
+function agentStateWord(state: string): string {
+  const words: Record<string, string> = {
+    running: tr('running'), done: tr('done'), failed: tr('failed'), unknown: tr('unknown'),
+    active: tr('active session'), idle: tr('idle session'),
+  };
+  return word(words, state);
+}
+
+/**
+ * The title of a state glyph. A state the tree builder inferred carries the tilde every
+ * estimate on this page carries, and says it was derived; one the parent or the workflow
+ * journal recorded says so instead. A node that does not say which it is gets the tilde: a
+ * state is only ever called recorded when the view model says it was.
+ */
+function agentStateTitle(state: string, derived: Payload): string {
+  const w = agentStateWord(state);
+  return derived === false ? tr('{0} · recorded', w) : '~' + tr('{0} · derived', w);
+}
+
+/**
+ * The glyph itself is drawn by the stylesheet from the state class, so it never ends up in the
+ * copied text of the page; the image role and its label are what a screen reader gets instead.
+ */
+function agentGlyph(state: string, derived: Payload): string {
+  const title = agentStateTitle(state, derived);
+  return '<span class="ag-st ag-' + esc(state) + '" role="img" aria-label="' + title + '" title="'
+    + title + '"></span>';
+}
+
+/** A time stamp from the payload, or null: only a positive, finite number of milliseconds is one. */
+function agentTs(v: Payload): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/** A text of the payload, escaped, or the dash that stands for its absence. */
+function orDash(v: Payload): string {
+  return typeof v === 'string' && v !== '' ? esc(v) : '–';
+}
+
+/**
+ * The time since a moment, as the live spans print it, in the units the page's durations are
+ * written in: 42 s, 12 min 05 s, then 1 h 02 min, then 2 d 3 h. Not a clock reading: "12:05"
+ * beside a start time reads as a time of day, which a count in units cannot. The abbreviations
+ * are the ones the German page writes as well, so the text needs no translation and cannot
+ * drift from one. A moment slightly in the future — two clocks a second apart — reads 0 s
+ * rather than a negative time.
+ */
+function sinceText(ms: number): string {
+  if (!Number.isFinite(ms)) return '–';
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const two = (x: number): string => (x < 10 ? '0' : '') + x;
+  if (s < 60) return s + ' s';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + ' min ' + two(s % 60) + ' s';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + ' h ' + two(m % 60) + ' min';
+  return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
+}
+
+/**
+ * A span the page's one timer keeps current (see tickLive): the time since the stamp, written
+ * now and rewritten every second without a render. The only figure on the page this script
+ * computes rather than reads — a clock between two pushes is the one thing a push cannot carry.
+ */
+function liveSince(ts: number): string {
+  return '<span data-live="since" data-ts="' + esc(ts) + '">' + esc(sinceText(Date.now() - ts)) + '</span>';
+}
+
+/**
+ * One node and, unless the reader folded it, everything under it. The fold and the row are
+ * two buttons of their own, so both are reached with the keyboard and announced as what they
+ * do; a leaf has no fold and keeps its place in the column with an empty slot. A folded node's
+ * children are not written at all: the fold is the reader's, kept with the view state, and
+ * the next push brings them back the moment it is undone.
+ */
+function agentNode(n: Payload, folded: string[], selected: string | null, depth: number): string {
+  if (!n || typeof n !== 'object') return '';
+  const key = typeof n.key === 'string' ? n.key : '';
+  const kids = depth < AGENT_MAX_DEPTH && Array.isArray(n.children) ? n.children : [];
+  const open = folded.indexOf(key) < 0;
+  const on = key !== '' && key === selected;
+  const state = agentState(n.state);
+  const kind = AGENT_KINDS.indexOf(n.kind) >= 0 ? String(n.kind) : 'agent';
+  const label = orDash(n.label);
+  // Usage and duration as the view model worded them — output that is a lower bound is marked
+  // the way the totals table marks it — and, only while the node runs, the time since it
+  // started, ticking. Each figure is unbreakable, so a narrow sidebar wraps the line at a
+  // separator and never between a number and its unit.
+  const start = agentTs(n.startTs);
+  const figures = [orDash(n.usage) + (n.lowerBound === true
+      ? ' <span title="' + tr('output is a lower bound: some requests had no terminal line') + '">⚠</span>'
+      : ''),
+    orDash(n.duration)];
+  if (state === 'running' && start !== null) figures.push(tr('running for {0}', liveSince(start)));
+  const fold = kids.length
+    ? '<button class="ag-fold" data-act="agentFold" data-key="' + esc(key) + '" aria-label="'
+      + (open ? tr('Collapse {0}', label) : tr('Expand {0}', label)) + '"></button>'
+    : '<span class="ag-pad"></span>';
+  // The glyph keeps its column, and the words beside it wrap within theirs: a long agent type
+  // in a narrow sidebar breaks its own line rather than leaving the glyph alone on one.
+  const row = '<button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
+    + '" aria-pressed="' + on + '">' + agentGlyph(state, n.derived)
+    + '<span class="ag-text"><span class="ag-label">' + label + '</span>'
+    + (typeof n.sub === 'string' && n.sub ? '<span class="meta">' + esc(n.sub) + '</span>' : '')
+    + '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ')
+    + '</span></span></button>';
+  return '<li role="treeitem" class="ag-k-' + esc(kind) + '"'
+    + (kids.length ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '">'
+    + '<div class="ag-line">' + fold + row + '</div>'
+    + (kids.length && open
+       ? '<ul role="group">' + kids.map((c: Payload) => agentNode(c, folded, selected, depth + 1)).join('')
+         + '</ul>'
+       : '')
+    + '</li>';
+}
+
+/** Every node of the tree as it arrived, depth first, bounded like the renderer above. */
+function agentNodes(roots: Payload[]): Payload[] {
+  const out: Payload[] = [];
+  const walk = (list: Payload, depth: number): void => {
+    if (!Array.isArray(list) || depth > AGENT_MAX_DEPTH) return;
+    for (const n of list) {
+      if (!n || typeof n !== 'object') continue;
+      out.push(n);
+      walk(n.children, depth + 1);
+    }
+  };
+  walk(roots, 0);
+  return out;
+}
+
+/**
+ * The details of the selected node, in the words the view model wrote. The state row carries
+ * the sentence the state was derived with. The one figure added here is how long ago the node
+ * last changed — from the tree node the details belong to — and it ticks: a row of the view
+ * model's that already names the last activity keeps its words and gains the clock, and a
+ * model without one gets a row of its own.
+ */
+function agentDetails(d: Payload, node: Payload): string {
+  const lastTs = node ? agentTs(node.lastTs) : null;
+  const ago = lastTs === null ? '' : tr('{0} ago', liveSince(lastTs));
+  const lastLabel = tr('Last activity');
+  let placed = !ago;
+  let rows = '';
+  for (const r of Array.isArray(d.rows) ? d.rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const live = !placed && r.label === lastLabel;
+    if (live) placed = true;
+    rows += '<dt>' + orDash(r.label) + '</dt><dd>' + orDash(r.value) + (live ? ' · ' + ago : '')
+      + (typeof r.note === 'string' && r.note ? ' <span class="meta">' + esc(r.note) + '</span>' : '')
+      + '</dd>';
+  }
+  const own = placed ? '' : '<dt>' + lastLabel + '</dt><dd>' + ago + '</dd>';
+  return '<div class="ag-details" role="region" aria-label="' + tr('Details') + '">'
+    + '<div class="name">' + orDash(d.title) + '</div><dl>'
+    + '<dt>' + tr('State') + '</dt><dd>' + agentGlyph(agentState(d.state), node ? node.derived : undefined)
+    + ' ' + orDash(d.stateText) + '</dd>' + own + rows + '</dl></div>';
+}
+
+/**
+ * The tree, what it had to leave out, and the details of the selected node under it. The fold
+ * and the selection are the view state's (vm.ui), the details are what the view model built
+ * for that selection (vm.agents.selected); both travel in the same push, so the pressed row
+ * and the panel under it cannot disagree. No chip of the filter bar applies: the tree is the
+ * last seven days whatever the range says.
+ */
 function sAgents(): string {
   const a = vm.agents;
-  if (!a || !Array.isArray(a.roots) || !a.roots.length) {
-    return '<p class="empty">' + tr('No Claude Code session in the last 7 days.') + '</p>';
+  const roots: Payload[] = a && Array.isArray(a.roots) ? a.roots : [];
+  const note = a && typeof a.note === 'string' && a.note ? esc(a.note) : '';
+  if (!roots.length) {
+    return '<p class="empty">' + (note || tr('No Claude Code session in the last 7 days.')) + '</p>';
   }
-  return '<p class="empty">' + tr('No Claude Code session in the last 7 days.') + '</p>';
+  const ui = vm.ui || {};
+  const folded = Array.isArray(ui.agentsFolded)
+    ? ui.agentsFolded.filter((k: Payload) => typeof k === 'string') : [];
+  const selected = typeof ui.agentSelected === 'string' ? ui.agentSelected : null;
+  // The outer list is only the frame: its items belong to the tree itself, and the list under
+  // a node is that node's group.
+  let h = '<div class="agtree" role="tree" aria-label="' + tr('Agents') + '"><ul role="none">'
+    + roots.map((n: Payload) => agentNode(n, folded, selected, 0)).join('') + '</ul></div>';
+  const omitted = Number(a.omittedRoots);
+  if (omitted > 0) {
+    h += '<p class="empty">' + tr('{0} older session(s) not shown.', esc(Math.round(omitted))) + '</p>';
+  }
+  // The figure is the nodes that arrived, which is where the builder stopped.
+  if (a.truncated === true) {
+    h += '<p class="empty">' + tr('Tree cut at {0} nodes.', agentNodes(roots).length) + '</p>';
+  }
+  if (note) h += '<p class="empty">' + note + '</p>';
+  const sel = a.selected;
+  if (sel && typeof sel === 'object') {
+    const node = typeof sel.key === 'string'
+      ? agentNodes(roots).find((n: Payload) => n.key === sel.key) : null;
+    h += agentDetails(sel, node || null);
+  }
+  return h;
+}
+
+/**
+ * The page's one timer. Every second it rewrites the text of the live spans — how long a
+ * running node has been running, and the last activity in the details — from the clock, and
+ * does nothing else: no render, no message, no request. A page without such a span costs one
+ * empty query a second.
+ */
+function tickLive(): void {
+  document.querySelectorAll<HTMLElement>('[data-live="since"]').forEach(el => {
+    const ts = Number(el.dataset.ts);
+    if (Number.isFinite(ts)) el.textContent = sinceText(Date.now() - ts);
+  });
+}
+
+let liveTimer: number | null = null;
+
+/** Starts the timer above, once — with the first payload, which is what gives it anything to tick. */
+function startLive(): void {
+  if (liveTimer === null) liveTimer = window.setInterval(tickLive, 1000);
 }
 
 const RENDER = new Map<string, () => string>([
@@ -1514,8 +1752,9 @@ function sControls(): string {
 
 // Sections the range, provider and model chips do not filter: a provider's window is what
 // it is whichever week is selected, the agent tree is the sessions of the last seven days,
-// the context reading belongs to one live session, and the Tokens section is fixed periods of everything — the running windows, today, the last 7 and
-// 30 days, this week and month — for every provider and model.
+// the context reading belongs to one live session, and the Tokens section is fixed periods
+// of everything — the running windows, today, the last 7 and 30 days, this week and month —
+// for every provider and model.
 const RANGE_FREE = ['quota', 'agents', 'context', 'tokens'];
 
 function sFooter(): string {
@@ -1584,9 +1823,14 @@ function renderSection(key: string): void {
   // few seconds while the prompt-cache countdown ticks. Dropped here, so nothing holds on to
   // a node that has just left the document.
   if (sparkMark && body.contains && body.contains(sparkMark.svg)) sparkMark = null;
+  // The agent tree is rewritten every few seconds while agents run. A keyboard user on one of
+  // its folds or rows stays there; dropping the focus would send them back to the top of the
+  // page with every push.
+  const focus = key === 'agents' ? keepFocus(body) : null;
   body.innerHTML = render();
   applyStyles();
   restorePop(keep);
+  if (focus) restoreFocus(body, focus);
   // A day opened from the chart lands a whole page below it. Only on a new day, so a table
   // that merely refreshes cannot pull the page around under the reader.
   if (key === 'drill') {
@@ -1596,6 +1840,24 @@ function renderSection(key: string): void {
       if (sec && sec.scrollIntoView) sec.scrollIntoView({ block: 'nearest' });
     }
     shownDrill = day;
+  }
+}
+
+/** The control the focus is on inside `body`, by what it does and what it names; null otherwise. */
+function keepFocus(body: Element): { act: string; key: string } | null {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el || !el.dataset || !body.contains || !body.contains(el)) return null;
+  const act = el.dataset.act, key = el.dataset.key;
+  return act && key ? { act: act, key: key } : null;
+}
+
+/** Puts the focus back on the control that does the same thing to the same node. */
+function restoreFocus(body: Element, f: { act: string; key: string }): void {
+  if (!body.querySelectorAll) return;
+  const all = body.querySelectorAll<HTMLElement>('[data-act]');
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i];
+    if (el.dataset.act === f.act && el.dataset.key === f.key) { el.focus(); return; }
   }
 }
 
@@ -1732,6 +1994,14 @@ function act(el: HTMLElement): void {
   else if (a === 'hourZone') post({ type: 'setHourZone', zone: el.dataset.zone });
   else if (a === 'drill') post({ type: 'drill', day: el.dataset.day || null });
   else if (a === 'costLine') { costLine = !costLine; renderSection('chart'); }
+  else if (a === 'agentFold') {
+    const key = el.dataset.key;
+    if (key) post({ type: 'agentFold', key: key });
+  } else if (a === 'agentSelect') {
+    // The row whose details are open closes them again: a second click clears the selection.
+    const key = el.dataset.key;
+    if (key) post({ type: 'agentSelect', key: vm.ui && vm.ui.agentSelected === key ? null : key });
+  }
 }
 
 function target<T extends Element = HTMLElement>(ev: Event, sel: string): T | null {
@@ -1985,6 +2255,7 @@ window.addEventListener('message', (ev) => {
     // The acknowledgement the smoke test waits for: the page was built from a payload that
     // arrived, so the whole channel — host, frame, origin rule, renderer — is proven live.
     post({ type: 'rendered', sections: vm && Array.isArray(vm.sections) ? vm.sections.length : 0 });
+    startLive();
     return;
   }
   if (msg.type === 'section' && vm) {

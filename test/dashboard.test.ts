@@ -22,7 +22,9 @@ import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
 import { setBundle, setLocale } from '../src/i18n'
-import { parseWebviewMessage } from '../src/viewModel'
+import { buildViewModel, parseWebviewMessage } from '../src/viewModel'
+import { agentWorld, treeNodes } from './fixtures/agentWorld'
+import { makeConfig, makeInput } from './fixtures/viewFixtures'
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -3518,6 +3520,40 @@ test('the agent tree speaks German on a German page', () => {
   assert.ok(section({ ui: agentUi({ agentsFolded: [AK.wf] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
   assert.equal(section({ agents: agentTree({ roots: [] }) }),
     '<p class="empty">Keine Claude-Code-Sitzung in den letzten 7 Tagen.</p>')
+})
+
+test('the tree the view model builds reaches the page with its dashes, its marks and its derivations', () => {
+  // End to end, where the tests above hand the renderer a tree of their own: the records the
+  // aggregator filled from the builders' lines (test/fixtures/agentWorld.ts), the tree the view
+  // model builds from them, and the markup the page writes for that tree.
+  const vm = buildViewModel(makeInput({ agg: agentWorld().agg, cfg: makeConfig() }))
+  const nodes = treeNodes(vm.agents.roots)
+  const h = agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi() })
+  const rowOf = (key: string): string => {
+    const at = h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + key + '"')
+    assert.ok(at >= 0, 'no row for ' + key)
+    return h.slice(at, h.indexOf('</button>', at))
+  }
+  const words: Record<string, string> = {
+    running: 'running', done: 'done', failed: 'failed', unknown: 'unknown', active: 'active session', idle: 'idle session',
+  }
+  for (const n of nodes) {
+    const row = rowOf(n.key)
+    // The state the builder decided, and whether it inferred it or found it recorded.
+    const title = n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded'
+    assert.ok(row.indexOf('<span class="ag-st ag-' + n.state + '" role="img" aria-label="' + title + '" title="' + title + '">') >= 0, row)
+    // Its usage first among the figures, and ⚠ beside it exactly when the output is a lower bound.
+    assert.ok(row.indexOf('<span class="ag-fig"><span class="nobr">' + n.usage) >= 0, row)
+    assert.equal(row.indexOf('>⚠</span>') >= 0, n.lowerBound, row)
+  }
+  // Nearly every agent of Claude Code ends on an unfinished reply, and the page says so for each.
+  assert.ok(nodes.filter((n) => n.kind === 'agent' && n.lowerBound).length >= 5)
+  // A launch nothing was counted of: two dashes, no mark, and no zero.
+  const pending = nodes.filter((n) => n.kind === 'pending')
+  assert.equal(pending.length, 1)
+  const p = rowOf(pending[0].key)
+  assert.ok(p.indexOf('<span class="ag-fig"><span class="nobr">–</span> · <span class="nobr">–</span>') >= 0, p)
+  assert.equal(/>0[ <]|> 0</.test(p), false, p)
 })
 
 // ---------------------------------------------------------------------------

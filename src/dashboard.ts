@@ -103,6 +103,38 @@ function inline(v: unknown): string {
   return JSON.stringify(v).replace(/</g, '\\u003c')
 }
 
+/**
+ * The least time between two pushes of one section, for the sections that need one. A running
+ * agent writes a line into its transcript every 0.6 s at the median, and every push rewrites
+ * the whole tree; two seconds keeps it live without redrawing it under the reader's pointer
+ * twice a second. A section not listed here is pushed the moment it changes, and a section held
+ * back holds back nothing else.
+ */
+export const SECTION_MIN_INTERVAL_MS: Readonly<Partial<Record<string, number>>> = { agents: 2000 }
+
+/** A section's own interval, or 0 for one that is pushed as soon as it changes. */
+function minIntervalOf(key: string): number {
+  const ms = Object.prototype.hasOwnProperty.call(SECTION_MIN_INTERVAL_MS, key)
+    ? SECTION_MIN_INTERVAL_MS[key] : undefined
+  return typeof ms === 'number' && ms > 0 ? ms : 0
+}
+
+/**
+ * What the throttle reads the time from and waits with. The provider takes the system's; a test
+ * hands in a clock it can move and a timer it can fire.
+ */
+export interface FlushClock {
+  now(): number
+  setTimeout(fn: () => void, ms: number): unknown
+  clearTimeout(handle: unknown): void
+}
+
+const SYSTEM_CLOCK: FlushClock = {
+  now: () => Date.now(),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
+
 export class DashboardProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'tokenPace.dashboard'
   private view?: vscode.WebviewView
@@ -121,10 +153,21 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
   private htmlLength = 0
   /** Pages the webview reported having rendered from a payload (see `renderedCount`). */
   private renders = 0
+  /** When each section with an interval of its own was last pushed, by `clock`. */
+  private pushedAt = new Map<string, number>()
+  /**
+   * The view-state part of each such section as it was last pushed. A change there is the
+   * reader's own fold or selection, and a click is answered at once whatever the interval
+   * says: the interval bounds how often live data redraws a section, not how fast it answers.
+   */
+  private sentUi = new Map<string, string>()
+  /** The one timer a held-back section waits on, and when it fires; null while nothing waits. */
+  private deferred: { handle: unknown; at: number } | null = null
 
   constructor(
     private readonly onMessage: (m: WebviewMessage) => void,
     private readonly log: (m: string) => void = () => {},
+    private readonly clock: FlushClock = SYSTEM_CLOCK,
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -160,6 +203,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       this.view = undefined
       this.sent.clear()
       this.layout = undefined
+      // A section held back for a view that is gone has nowhere to go.
+      this.cancelDeferred()
     })
     this.flush()
   }
@@ -195,6 +240,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     const vm = this.latest
     const view = this.view
     if (!vm || !view || !view.visible) return
+    const now = this.clock.now()
     // `sections` and `showCost` govern the layout of every section at once: which ones exist
     // and whether the cost columns are drawn. A per-section fragment cannot express that, so a
     // change to either forces the next push to be a full one.
@@ -204,16 +250,74 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
     if (this.sent.size === 0) {
       for (const [key, fields] of Object.entries(SECTION_FIELDS)) {
         this.sent.set(key, serialise(vm, fields))
+        this.notePushed(key, vm, fields, now)
       }
+      // The whole page is on its way: nothing is left for a held-back section to wait for.
+      this.cancelDeferred()
       void view.webview.postMessage({ type: 'data', payload: vm })
       return
     }
+    let wait = Infinity
     for (const [key, fields] of Object.entries(SECTION_FIELDS)) {
       const next = serialise(vm, fields)
       if (this.sent.get(key) === next) continue
+      // Held back, not dropped: `sent` still holds what the page has, so the flush the timer
+      // makes compares against it again and pushes whatever the latest view model says.
+      const hold = this.holdFor(key, vm, fields, now)
+      if (hold > 0) {
+        wait = Math.min(wait, hold)
+        continue
+      }
       this.sent.set(key, next)
+      this.notePushed(key, vm, fields, now)
       void view.webview.postMessage({ type: 'section', key, payload: payloadOf(vm, fields) })
     }
+    if (wait !== Infinity) this.deferFor(wait, now)
+  }
+
+  /**
+   * How much longer a changed section has to wait before it may be pushed; 0 when it may go
+   * now. Only a section with an interval of its own ever waits, never for a change to the view
+   * state it follows, and never because the clock went backwards.
+   */
+  private holdFor(key: string, vm: ViewModel, fields: SectionField[], now: number): number {
+    const min = minIntervalOf(key)
+    const last = this.pushedAt.get(key)
+    if (min === 0 || last === undefined || now < last) return 0
+    const left = last + min - now
+    if (left <= 0) return 0
+    return serialise(vm, uiFieldsOf(fields)) === this.sentUi.get(key) ? left : 0
+  }
+
+  /** Notes a push of a section with an interval: when it went, and the view state it carried. */
+  private notePushed(key: string, vm: ViewModel, fields: SectionField[], now: number): void {
+    if (minIntervalOf(key) === 0) return
+    this.pushedAt.set(key, now)
+    this.sentUi.set(key, serialise(vm, uiFieldsOf(fields)))
+  }
+
+  /**
+   * One timer for everything held back. It flushes again when the first held section is due,
+   * and a flush that still finds one early arms it anew; a need that falls due earlier moves
+   * it forward, a later one waits for it.
+   */
+  private deferFor(ms: number, now: number): void {
+    const at = now + ms
+    if (this.deferred !== null) {
+      if (this.deferred.at <= at) return
+      this.clock.clearTimeout(this.deferred.handle)
+    }
+    const handle = this.clock.setTimeout(() => {
+      this.deferred = null
+      this.flush()
+    }, ms)
+    this.deferred = { handle, at }
+  }
+
+  private cancelDeferred(): void {
+    if (this.deferred === null) return
+    this.clock.clearTimeout(this.deferred.handle)
+    this.deferred = null
   }
 
   private html(): string {
@@ -251,6 +355,11 @@ const UI_FIELD = 'ui.'
 /** The one field of the UI state a `ui.<field>` dependency names. */
 function uiField(f: SectionField): string {
   return f.slice(UI_FIELD.length)
+}
+
+/** The `ui.<field>` dependencies of a section — what only the reader's own clicks change. */
+function uiFieldsOf(fields: SectionField[]): SectionField[] {
+  return fields.filter((f) => f.startsWith(UI_FIELD))
 }
 
 /**
@@ -705,6 +814,54 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .foot { margin-top: 18px; font-size: 10px; color: var(--dim); line-height: 1.6; }
 .foot li { margin-bottom: 2px; }
 ul { margin: 6px 0; padding-left: 18px; }
+/* The agent tree: one list per level, each indented by the width of a fold, so a node's
+   children start under its glyph and the glyphs of one level stand in a column. A row is two
+   buttons — the fold, and the row itself, which opens the node's details — without a chip's
+   border: a tree of bordered buttons reads as a wall of controls rather than as a tree. The
+   hover and the focus ring are every button's. */
+.agtree ul { list-style: none; margin: 0; padding: 0; }
+.agtree ul ul { padding-left: 16px; }
+.ag-line { display: flex; align-items: flex-start; }
+.ag-fold, .ag-pad { flex: none; width: 16px; min-height: 20px; }
+.ag-fold { border: none; background: none; padding: 0; line-height: 20px; color: var(--dim); }
+/* The twisty is drawn, like the section heads', so it never ends up in the copied text. */
+.ag-fold::before { content: "▾"; font-size: 9px; }
+[aria-expanded="false"] > .ag-line > .ag-fold::before { content: "▸"; }
+.ag-row { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 4px;
+          min-height: 20px; padding: 1px 4px; border: none; background: none; text-align: left;
+          font-size: var(--vscode-font-size); }
+/* The glyph keeps its column; name, project and figures wrap beside it, never under it. */
+.ag-text { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline;
+           gap: 0 6px; }
+/* The open node: the track's tint and the focus colour's edge — the page's own two marks for
+   "this one", quieter than a pressed chip, which would paint a whole row in the button colour. */
+.ag-row[aria-pressed="true"] { background: var(--track); color: var(--vscode-foreground);
+                               box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
+.ag-label { min-width: 0; }
+/* Launched, but its transcript not seen yet: the name is the launch's hint, not the agent's. */
+.ag-k-pending > .ag-line .ag-label { font-style: italic; }
+/* Usage, duration and the live clock: quieter than the name, and in figures that do not
+   jitter while the seconds tick. */
+.ag-fig { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; margin-left: auto;
+          text-align: right; }
+/* One glyph per state, drawn from the class and coloured with the page's own tokens only:
+   green and red for what the parent recorded, the provider's blue for what still runs, the
+   foreground for a session in use, and the dim tone for what the tree can only call quiet. */
+.ag-st { flex: none; display: inline-block; width: 12px; text-align: center; font-size: 10px; }
+.ag-running::before { content: "●"; color: var(--claude); }
+.ag-done::before { content: "✓"; color: var(--ok); }
+.ag-failed::before { content: "✕"; color: var(--error); }
+.ag-unknown::before { content: "?"; color: var(--dim); }
+.ag-active::before { content: "●"; color: var(--vscode-foreground); }
+.ag-idle::before { content: "○"; color: var(--dim); }
+@keyframes ag-pulse { 50% { opacity: .35; } }
+/* The details of the selected node, under the tree: the key figure's box around a two-column
+   list, the words on the left and what the view model says about them on the right. */
+.ag-details { margin-top: 8px; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+.ag-details dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px;
+                 margin: 6px 0 0; font-size: 11px; }
+.ag-details dt { color: var(--dim); }
+.ag-details dd { margin: 0; min-width: 0; font-variant-numeric: tabular-nums; }
 @media (max-width: 320px) {
   .kpis { grid-template-columns: 1fr; }
   table, thead, tbody, th, td, tr { display: block; }
@@ -720,7 +877,18 @@ ul { margin: 6px 0; padding-left: 18px; }
      and would otherwise be prefixed with a bare ": ". */
   td[data-h]::before { content: attr(data-h) ": "; color: var(--dim); }
 }
+/* The details list stacks in a sidebar this narrow: beside a column of labels, the sentence
+   of the state row would be left a word per line. */
+@media (max-width: 320px) {
+  .ag-details dl { grid-template-columns: 1fr; gap: 0; }
+  .ag-details dd { margin-bottom: 4px; }
+}
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+/* The running glyph breathes only for a reader who has not asked for less motion; for anyone
+   else it is a steady dot, and the state is in its title either way. */
+@media (prefers-reduced-motion: no-preference) {
+  .ag-running::before { animation: ag-pulse 2s ease-in-out infinite; }
+}
 `
 
 // ---------------------------------------------------------------------------
@@ -809,6 +977,7 @@ function webviewWords(): Record<string, string> {
     'Calibration {0} {1}: {2}': t('Calibration {0} {1}: {2}'),
     'Calls': t('Calls'),
     'Chart': t('Chart'),
+    'Collapse {0}': t('Collapse {0}'),
     'Compared with': t('Compared with'),
     'Connect the status line': t('Connect the status line'),
     'Consent: {0} · {1} · attribution {2} · v{3}': t('Consent: {0} · {1} · attribution {2} · v{3}'),
@@ -817,7 +986,9 @@ function webviewWords(): Record<string, string> {
       t('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB'),
     'Data quality': t('Data quality'),
     'Day {0}': t('Day {0}'),
+    'Details': t('Details'),
     'Duration': t('Duration'),
+    'Expand {0}': t('Expand {0}'),
     'Extra usage': t('Extra usage'),
     'Extra usage (billed)': t('Extra usage (billed)'),
     'Fetch quota now': t('Fetch quota now'),
@@ -828,6 +999,7 @@ function webviewWords(): Record<string, string> {
     'Hit rate': t('Hit rate'),
     'How': t('How'),
     'Key figures': t('Key figures'),
+    'Last activity': t('Last activity'),
     'Longest streak {0}': t('Longest streak {0}'),
     'Longest streak {0} day · {1} → {2}': t('Longest streak {0} day · {1} → {2}'),
     'Longest streak {0} days · {1} → {2}': t('Longest streak {0} days · {1} → {2}'),
@@ -889,6 +1061,7 @@ function webviewWords(): Record<string, string> {
     'Spark': t('Spark'),
     'Split': t('Split'),
     'Started': t('Started'),
+    'State': t('State'),
     'Status line: {0}': t('Status line: {0}'),
     'Summary': t('Summary'),
     'Time of day': t('Time of day'),
@@ -897,10 +1070,12 @@ function webviewWords(): Record<string, string> {
     'Tools': t('Tools'),
     'Top projects and sessions need tokenPace.attribution.':
       t('Top projects and sessions need tokenPace.attribution.'),
+    'Tree cut at {0} nodes.': t('Tree cut at {0} nodes.'),
     'Usage': t('Usage'),
     'What': t('What'),
     'Write 1h': t('Write 1h'),
     'Write 5m': t('Write 5m'),
+    'active session': t('active session'),
     'all': t('all'),
     'apply': t('apply'),
     'by weekday and four-hour block · {0}': t('by weekday and four-hour block · {0}'),
@@ -918,17 +1093,20 @@ function webviewWords(): Record<string, string> {
     'cost line': t('cost line'),
     'custom…': t('custom…'),
     'daily bars · {0} columns': t('daily bars · {0} columns'),
+    'done': t('done'),
     'dotted = outside coverage': t('dotted = outside coverage'),
     'dotted = outside coverage (before {0})': t('dotted = outside coverage (before {0})'),
     'elapsed share not yet used': t('elapsed share not yet used'),
     'exhausted': t('exhausted'),
     'export CSV': t('export CSV'),
     'export JSON': t('export JSON'),
+    'failed': t('failed'),
     'family-priced: {0}': t('family-priced: {0}'),
     'fewer ▴': t('fewer ▴'),
     'from': t('from'),
     'hatched: no usage in that block': t('hatched: no usage in that block'),
     'hidden': t('hidden'),
+    'idle session': t('idle session'),
     'lastMonth': t('lastMonth'),
     'less': t('less'),
     'limit reached': t('limit reached'),
@@ -959,6 +1137,8 @@ function webviewWords(): Record<string, string> {
     'reset due': t('reset due'),
     'resets {0}': t('resets {0}'),
     'resets at {0}': t('resets at {0}'),
+    'running': t('running'),
+    'running for {0}': t('running for {0}'),
     'scroll sideways for the remaining columns →': t('scroll sideways for the remaining columns →'),
     'shown': t('shown'),
     'some models have no price on file': t('some models have no price on file'),
@@ -973,6 +1153,7 @@ function webviewWords(): Record<string, string> {
     'to': t('to'),
     'today': t('today'),
     'unavailable': t('unavailable'),
+    'unknown': t('unknown'),
     'unlimited': t('unlimited'),
     'unpriced: {0}': t('unpriced: {0}'),
     'updated {0}': t('updated {0}'),
@@ -987,12 +1168,16 @@ function webviewWords(): Record<string, string> {
       t('without cache · {0} tokens cache write not shown'),
     'year': t('year'),
     'yesterday': t('yesterday'),
+    '{0} ago': t('{0} ago'),
     '{0} call(s) · {1} distinct tool(s)': t('{0} call(s) · {1} distinct tool(s)'),
     '{0} composition · last 30 days': t('{0} composition · last 30 days'),
     '{0} more not listed': t('{0} more not listed'),
     '{0} more — set tokenPace.dashboard.modelRows': t('{0} more — set tokenPace.dashboard.modelRows'),
     '{0} of {1}': t('{0} of {1}'),
+    '{0} older session(s) not shown.': t('{0} older session(s) not shown.'),
     '{0} tokens over {1} day(s)': t('{0} tokens over {1} day(s)'),
+    '{0} · derived': t('{0} · derived'),
+    '{0} · recorded': t('{0} · recorded'),
     '{0} · {1} · {2} · {3} % of the day · {1} total {4}':
       t('{0} · {1} · {2} · {3} % of the day · {1} total {4}'),
     '{0} · {1} · {2} · {3} % of the week · {1} total {4}':

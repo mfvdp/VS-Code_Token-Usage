@@ -65,7 +65,7 @@ export interface ProviderAdapter {
   matches(name: string): boolean
   /** Whether a transcript path belongs to a subagent rather than the main session. */
   isSub(file: string): boolean
-  /** Feeds one transcript line to the aggregator; true when it counted tokens. */
+  /** Feeds one transcript line to the aggregator; true when it changed anything — tokens or an agent's record. */
   ingest(line: string, cur: Cursor, ctx: IngestContext, agg: Aggregator): boolean
   /**
    * Neutralises the derived cursor fields before a re-read from the start. Only providers
@@ -184,7 +184,11 @@ const CLAUDE: ProviderAdapter = {
   matches: (n) => n.endsWith('.jsonl'),
   /** Subagent transcripts live under .../<sessionId>/subagents/... */
   isSub: (p) => p.includes(`${path.sep}subagents${path.sep}`),
-  ingest: (line, _cur, ctx, agg) => agg.addClaudeLine(line, ctx),
+  // A workflow run's journal sits beside its agents' transcripts and shares their suffix, but
+  // its lines are the run's own record (an agent started, an agent's result) — not a transcript.
+  ingest: (line, _cur, ctx, agg) => path.basename(ctx.file) === 'journal.jsonl'
+    ? agg.addWorkflowJournalLine(line, ctx)
+    : agg.addClaudeLine(line, ctx),
   // A re-read from the start needs no reset: message ids still in `pending` dedupe
   // themselves, and there is no cumulative state to unwind.
   resetCursor: () => { /* nothing derived */ },

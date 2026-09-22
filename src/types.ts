@@ -80,6 +80,17 @@ export interface PendingMessage {
   /** Session file key, when attribution is on. */
   session?: string
   /**
+   * The agent transcript this message was credited to, by its file name without `.jsonl`
+   * (`agent-<id>`); `main` names the main session's transcript the same way (its session
+   * id). They play the part `session` plays for the session table: a later line of the
+   * message adds its growth to that record, and a line of the same id in another file adds
+   * nothing to it. A name rather than the path, because every open message carries one:
+   * 4000 paths would add most of a megabyte to a snapshot that is written every few seconds.
+   * Optional — an entry from a version 6 snapshot has neither and is linked by its next line.
+   */
+  agent?: string
+  main?: string
+  /**
    * Tool calls already counted for this message, per tool name. Claude writes one content
    * block per line under a repeated `message.id`, so the counter has to survive across
    * lines; only the increase over this record is ever added, the same max-per-key rule the
@@ -301,7 +312,10 @@ export interface Snapshot {
   tools?: ToolStat[]
   /** `source|day` pairs that hit `TOOL_NAME_CAP` — shown as truncated, never silently dropped. */
   toolsTruncated?: string[]
-  /** Subagent transcripts, keyed by path. Absent in older snapshots, which load with none. */
+  /**
+   * Subagent transcripts, keyed by path (version 7). Absent in older snapshots, which load
+   * with none — as do the three tables below.
+   */
   agents?: Record<string, AgentRec>
   /** Agent launches the parent transcripts recorded, keyed by tool_use id. */
   launches?: Record<string, AgentLaunch>
@@ -309,18 +323,23 @@ export interface Snapshot {
   mains?: Record<string, MainRec>
   /** Workflow journal results for agents not seen yet: agentId → ts (0 when unknown). */
   journalResults?: Record<string, number>
-  /** Whether the one-time agent replay over the retained transcripts has run. */
+  /**
+   * Whether the one-time agent replay over the retained transcripts has run. Only a version
+   * 7 snapshot can say yes: an older one was written before the agent tables existed.
+   */
   agentsReplayed?: boolean
 }
 
-export const STATE_VERSION = 6
+export const STATE_VERSION = 7
 
 /**
- * Snapshot versions this build can load. 5 differs from 6 only by the tool side table,
- * so it maps forward to an empty one instead of forcing every user into a cold re-read
- * for a table nobody has collected yet; tool counts then start at the next ingest.
+ * Snapshot versions this build can load. Each older version lacks one table that simply
+ * starts empty, so it maps forward instead of forcing every user into a cold re-read:
+ * 5 has no tool side table, 6 no agent tables (agents, launches, main sessions, journal
+ * results). Tool counts then start at the next ingest; the agent tables are rebuilt once
+ * from the transcripts still on disk, because a 6 never says `agentsReplayed`.
  */
-export const READABLE_STATE_VERSIONS: readonly number[] = [6, 5]
+export const READABLE_STATE_VERSIONS: readonly number[] = [5, 6, 7]
 
 export type WindowKind = 'session' | 'weekly' | 'other'
 

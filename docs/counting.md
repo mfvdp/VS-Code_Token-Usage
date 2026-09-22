@@ -56,9 +56,11 @@ day it has a row for, so a range that reaches further back does not read as a qu
 total. Such rows carry `⚠`, the tooltip states what share of today's responses are affected, and
 the dashboard's data-quality section carries the lower-bound share for the whole range.
 
-**Upgrading.** The persisted snapshot is schema version 6. Version 5 — everything before the tool
-table — is read forward with an empty tool table rather than being thrown away, so no upgrade
-forces a cold re-read; tool counting then starts with the next ingest, and the section states the
-first day it has a row for. Any older version is discarded and the transcripts are read again
-from scratch — nothing is lost that the transcripts still hold, it just takes a moment on the
-first start.
+**Upgrading.** The persisted snapshot is schema version 7. Version 6 — everything before the agent
+tables — and version 5 — everything before the tool table — are read forward rather than thrown
+away, so no upgrade forces a cold re-read: a table the older version did not have starts empty.
+Tool counting then starts with the next ingest, and the section states the first day it has a row
+for; the agent tables are rebuilt once from the transcripts of the last seven days, without
+counting a token twice. Any older version is discarded and the transcripts are read again from
+scratch — nothing is lost that the transcripts still hold, it just takes a moment on the first
+start.

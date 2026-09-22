@@ -7,17 +7,26 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
+import type { NodeState, TreeNode } from '../src/agentTree'
 import { toMarkdownSummary } from '../src/exporter'
+import { setBundle, setLocale } from '../src/i18n'
 import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
-import { buildViewModel } from '../src/viewModel'
+import { Attribution, Snapshot } from '../src/types'
+import { ViewModel, buildViewModel } from '../src/viewModel'
 import { QuotaHistory } from '../src/quotaHistory'
+import {
+  AGENT_CONTENT, AGENT_WORLD, agentNode, agentWorld, agentWorldFile, treeNodes,
+} from './fixtures/agentWorld'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
   timeConfig, win,
 } from './fixtures/viewFixtures'
+import { ROOT } from './helpers/nls'
 import { toolAgg } from './helpers/toolAgg'
 
 const cfg = makeConfig()
@@ -423,4 +432,188 @@ test('a budget nothing can measure is stated, never quietly forgotten', () => {
   // And so do the Quick Pick and the copied summary.
   assert.ok(quickPickItems(vm).some((i) => i.label === b.text), b.text)
   assert.ok(toMarkdownSummary(vm).includes(b.text), b.text)
+})
+
+// ---------------------------------------------------------------------------
+// 1.5 · the Agents section
+//
+// The same rules on the agent tree: asserted on the tree the view model builds from records
+// the aggregator filled — through the builders, test/fixtures/agentWorld.ts — and on the
+// markdown that prints it, never on the tree builder's helpers.
+// ---------------------------------------------------------------------------
+
+/** The Agents world's view model; `select` picks the node whose details are open. */
+function agentsVm(o: { attribution?: Attribution; agg?: Aggregator; select?: (roots: TreeNode[]) => string } = {}): ViewModel {
+  const attribution = o.attribution ?? 'none'
+  const agg = o.agg ?? agentWorld(attribution).agg
+  const config = makeConfig({ 'tokenPace.attribution': attribution })
+  const first = buildViewModel(makeInput({ agg, cfg: config }))
+  if (!o.select) return first
+  return buildViewModel(makeInput({ agg, cfg: config, ui: { agentSelected: o.select(first.agents.roots) } }))
+}
+
+/** Every node of the tree, each with its own details open — the panel the view model builds for it. */
+function everyNodeOpen(attribution: Attribution = 'none', agg = agentWorld(attribution).agg): Array<{ node: TreeNode; vm: ViewModel }> {
+  return treeNodes(agentsVm({ attribution, agg }).agents.roots)
+    .map((node) => ({ node, vm: agentsVm({ attribution, agg, select: () => node.key }) }))
+}
+
+/** The markdown's lines for the tree: one per node, in the order the tree has them. */
+function agentLines(vm: ViewModel): string[] {
+  const md = markdownDocument(vm)
+  const at = md.indexOf('## Agents\n')
+  assert.ok(at >= 0, 'the markdown has no Agents section')
+  const end = md.indexOf('\n## ', at)
+  return md.slice(at, end < 0 ? undefined : end).split('\n').filter((l) => /^\s*- \[/.test(l))
+}
+
+const GERMAN = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+
+function inGerman<T>(run: () => T): T {
+  try {
+    setBundle(GERMAN)
+    setLocale('de')
+    return run()
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+}
+
+test('a launch whose agent was never read shows no figure of its own — dashes, never 0', () => {
+  const vm = agentsVm({ select: (roots) => treeNodes(roots).find((n) => n.kind === 'pending')?.key ?? '' })
+  const pending = treeNodes(vm.agents.roots).filter((n) => n.kind === 'pending')
+  assert.equal(pending.length, 1)
+  const [p] = pending
+  // Launched two minutes ago: running by the tree's clock, and nothing of it counted yet.
+  assert.equal(p.state, 'running')
+  assert.deepEqual([p.usage, p.duration, p.lowerBound], ['–', '–', false])
+  // Its details have no count to show at all — what was launched, when, and by whom.
+  const d = vm.agents.selected
+  assert.ok(d)
+  assert.equal(d.key, p.key)
+  assert.deepEqual(d.rows.map((r) => r.label), ['Type', 'Models', 'Started', 'Spawned by'])
+  // The markdown prints the same two dashes, and no zero anywhere on the line.
+  const line = agentLines(vm).find((l) => l.includes(p.label))
+  assert.ok(line, agentLines(vm).join('\n'))
+  assert.match(line, / · – · –$/)
+  assert.equal(/(^|\s)0(\s|$)/.test(line), false, line)
+})
+
+test('an agent whose output is a lower bound says so wherever its figures are, and a finished one does not', () => {
+  const { agg } = agentWorld()
+  const vm = agentsVm({ agg })
+  const lines = agentLines(vm)
+  let marked = 0
+  for (const rec of agg.agents()) {
+    const n = agentNode(vm.agents.roots, rec.agentId)
+    // The record's own count decides: some reply of it never reached its final line.
+    const bound = rec.outputFinal < rec.requests
+    assert.equal(n.lowerBound, bound, n.label)
+    const d = agentsVm({ agg, select: () => n.key }).agents.selected
+    assert.ok(d)
+    const output = d.rows.find((r) => r.label === 'Output')
+    assert.ok(output, n.label)
+    assert.equal(output.note, bound ? '⚠ lower bound' : undefined, n.label)
+    const line = lines.find((l) => l.includes(n.label))
+    assert.ok(line, n.label)
+    assert.equal(/ ⚠ · /.test(line), bound, line)
+    if (bound) marked++
+  }
+  // Claude Code's agents end on an unfinished reply: all but the quick one here, which did not.
+  assert.equal(marked, agg.agents().length - 1)
+  assert.equal(agentNode(vm.agents.roots, AGENT_WORLD.guide).lowerBound, false)
+  // The markdown explains the mark, once.
+  assert.equal(markdownDocument(vm).split('⚠ marks a lower bound').length - 1, 1)
+})
+
+test('an agent with no counted request is dashes throughout — no figure of it reads 0', () => {
+  // The aggregator makes an agent's record on its first counted line, so the record without a
+  // request comes from a snapshot: one whose counters another build left at nothing.
+  const snap = JSON.parse(JSON.stringify(agentWorld().agg.toSnapshot())) as Snapshot
+  const file = agentWorldFile(AGENT_WORLD.silent)
+  const stored = snap.agents?.[file]
+  assert.ok(stored, Object.keys(snap.agents ?? {}).join('\n'))
+  Object.assign(stored, {
+    input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0,
+    requests: 0, outputFinal: 0, toolCalls: 0,
+  })
+  const vm = agentsVm({ agg: Aggregator.fromSnapshot(snap), select: (roots) => agentNode(roots, AGENT_WORLD.silent).key })
+  const n = agentNode(vm.agents.roots, AGENT_WORLD.silent)
+  assert.equal(n.usage, '–')
+  assert.equal(n.lowerBound, false, 'no request, so no reply that could have been cut short')
+  const d = vm.agents.selected
+  assert.ok(d)
+  assert.equal(d.key, n.key)
+  for (const label of ['Turns', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output',
+    'Reasoning', 'Tool calls']) {
+    assert.equal(d.rows.find((r) => r.label === label)?.value, '–', label)
+  }
+  assert.equal(d.rows.some((r) => /^0(\s|$)/.test(r.value)), false, JSON.stringify(d.rows))
+  const line = agentLines(vm).find((l) => l.includes(n.label))
+  assert.ok(line)
+  assert.equal(/(^|\s)0(\s|$)/.test(line), false, line)
+})
+
+/**
+ * Unknown is inferred like running, active and idle, but its sentences — §4.4 of the build spec
+ * wrote them so — say what was not recorded instead of saying "inferred". Reported with PB3;
+ * until they say it, the rule holds unknown to what its sentence does do: it names the state as
+ * unknown, which claims no result. Drop the state from this set once the sentences carry the word.
+ */
+const INFERRED_UNWORDED: ReadonlySet<NodeState> = new Set<NodeState>(['unknown'])
+
+test('every inferred state says it was inferred, and no recorded one says so — in English and in German', () => {
+  // The glossary's word for it (§4.8, derived → abgeleitet), where the English says "inferred".
+  assert.match(GERMAN['Running — inferred: at least one agent of this run is running.'], /abgeleitet/)
+  const langs = [
+    { lang: 'en', word: 'inferred', unknown: 'Unknown', build: () => everyNodeOpen() },
+    { lang: 'de', word: 'abgeleitet', unknown: GERMAN.Unknown, build: () => inGerman(() => everyNodeOpen()) },
+  ]
+  for (const { lang, word, unknown, build } of langs) {
+    const open = build()
+    // Every state the tree can show is in the world, so the rule is tried on each of them.
+    assert.deepEqual([...new Set(open.map((x) => x.node.state))].sort(),
+      ['active', 'done', 'failed', 'idle', 'running', 'unknown'], lang)
+    for (const { node, vm } of open) {
+      const d = vm.agents.selected
+      assert.ok(d, `${lang}: no details for ${node.key}`)
+      assert.equal(d.state, node.state)
+      const where = `${lang} ${node.kind} ${node.state}: ${d.stateText}`
+      const says = d.stateText.includes(word)
+      if (!node.derived) assert.equal(says, false, where)
+      else if (!INFERRED_UNWORDED.has(node.state)) assert.equal(says, true, where)
+      else assert.ok(d.stateText.startsWith(`${unknown} — `), where)
+    }
+    // Only a recorded outcome is a fact, and the tree only calls those two states recorded.
+    for (const { node } of open) assert.equal(node.derived, node.state !== 'done' && node.state !== 'failed', node.key)
+  }
+})
+
+/** The fields §3.2 gives the tree, a node, a details panel and one of its rows — nothing else. */
+const TREE_FIELDS = new Set([
+  'roots', 'selected', 'running', 'omittedRoots', 'truncated', 'note', 'updatedAt',
+  'key', 'kind', 'label', 'sub', 'state', 'derived', 'usage', 'lowerBound', 'duration', 'startTs', 'lastTs', 'children',
+  'title', 'stateText', 'rows', 'value',
+])
+
+test('the tree the page receives carries no key a transcript\'s content lives under, and none of the content', () => {
+  const { agg, raw } = agentWorld('session')
+  // Only a test of anything if the lines and sidecars it was read from do carry the content.
+  for (const s of AGENT_CONTENT) assert.ok(raw.includes(s), `the fixture lost ${s}`)
+  for (const k of ['description', 'prompt', 'summary', 'outputFile', 'content', 'result']) assert.ok(raw.includes(`"${k}"`), k)
+  // The tree as each section push carries it: once with every node's details open in turn.
+  const open = everyNodeOpen('session', agg)
+  const keys = new Set<string>()
+  const walk = (v: unknown): void => {
+    if (Array.isArray(v)) v.forEach(walk)
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) { keys.add(k); walk(x) }
+  }
+  for (const { vm } of open) walk(JSON.parse(JSON.stringify(vm.agents)))
+  for (const k of ['description', 'prompt', 'summary', 'outputFile']) assert.equal(keys.has(k), false, k)
+  assert.deepEqual([...keys].filter((k) => !TREE_FIELDS.has(k)), [])
+  // Nor the content under any other name — in the whole model, or in the markdown.
+  const everything = open.map(({ vm }) => JSON.stringify(vm) + markdownDocument(vm)).join('\n')
+  for (const s of AGENT_CONTENT) assert.equal(everything.includes(s), false, s)
+  assert.equal(/synthetic/.test(everything), false)
 })

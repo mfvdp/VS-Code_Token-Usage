@@ -45,5 +45,9 @@ older VS Code base than the `^1.106.0` engine floor the secondary-sidebar contri
 needs, so they cannot install it until they rebase. Each publish step is skipped rather than failed when its
 token is not configured, so a fork can produce the `.vsix` without any secrets.
 
+**Commit trailers.** Since 1.5 a commit written with an AI coding assistant names, in its
+`Co-Authored-By:` trailer, the model that actually wrote it — so the commits of one release can
+name different models, and the history tells which part came from which.
+
 The recipe itself — what to run in which order, the two secrets it needs and the publisher
 verification — is in [Releasing](release.md).

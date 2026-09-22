@@ -13,15 +13,22 @@ import { strict as assert } from 'node:assert'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
+import {
+  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_TREE_DEPTH, ROOT_WINDOW_MS, RUNNING_WINDOW_MS,
+  SESSION_ACTIVE_MS,
+} from '../src/agentTree'
+import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
 import { PaceConfig, paceVerdict } from '../src/pace'
 import { priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
+import { AGENT_META_MAX_BYTES } from '../src/scan'
 import { selectWindows, viewOf, windowValue } from '../src/statusText'
 import { formatReset, TimeConfig } from '../src/time'
 import { QuotaState, QuotaWindow } from '../src/types'
+import { MAX_AGENT_FOLDS } from '../src/viewModel'
 import { readManifest } from './helpers/nls'
 
 const ROOT = join(__dirname, '..')
@@ -98,6 +105,7 @@ const doc = {
   numbers: readDoc('docs/numbers.md'),
   statusBar: readDoc('docs/status-bar.md'),
   dashboard: readDoc('docs/dashboard.md'),
+  agents: readDoc('docs/agents.md'),
   quotaSources: readDoc('docs/quota-sources.md'),
   cost: readDoc('docs/cost.md'),
   counting: readDoc('docs/counting.md'),
@@ -297,6 +305,9 @@ test('the Privacy list names every file the extension opens', () => {
     'settings.local.json',            // shadow detection
     'managed-settings',               // shadow detection
     '.credentials.json',              // poll mode, after consent
+    'meta.json',                      // an agent transcript's identity sidecar
+    'journal.jsonl',                  // a workflow run's journal of started agents and results
+    'subagents/',                     // the agent directories the running tree is polled from
   ]) {
     assert.ok(privacy.includes(needed), `the Privacy section does not mention ${needed}`)
   }
@@ -318,6 +329,129 @@ test('the promise about transcript contents matches what the tool table stores',
   const attribution = String(properties['tokenPace.attribution'].markdownDescription)
   assert.equal(/no tool call\./.test(attribution), false, attribution)
   assert.match(attribution, /no tool argument and no tool result/)
+})
+
+/**
+ * The body of one function or method of a source file: from its signature to the closing brace
+ * at the indentation the signature stands at. Enough to see which fields it reads.
+ */
+function bodyOf(src: string, signature: string): string {
+  const at = src.indexOf(signature)
+  assert.ok(at >= 0, `the source no longer contains ${signature}`)
+  const lineStart = src.lastIndexOf('\n', at) + 1
+  const indent = (/^[ \t]*/.exec(src.slice(lineStart, at)) as RegExpExecArray)[0]
+  const end = src.indexOf(`\n${indent}}`, at)
+  assert.ok(end > at, `${signature} has no closing brace at its own indentation`)
+  return src.slice(at, end)
+}
+
+/** The distinct `<variable>.<field>` names a body reads, in order of first appearance. */
+function fieldsRead(body: string, variable: string): string[] {
+  return [...new Set([...body.matchAll(new RegExp(`\\b${variable}\\??\\.([A-Za-z_]+)`, 'g'))].map((m) => m[1]))]
+}
+
+/**
+ * What the agent tables take out of the files they read, as the aggregator's own parsers read
+ * it. The lists are the documented contract: a parser that starts to read one more field fails
+ * here until the privacy page and the agents page name it too.
+ */
+test('the privacy and agents pages name every field the agent tables read, and the ones they never do', () => {
+  const src = readDoc('src/agg.ts')
+  const read: Array<[string, string[], string[]]> = [
+    ['the identity sidecar', fieldsRead(bodyOf(src, 'function cleanMeta('), 'o'),
+      ['agentType', 'model', 'spawnDepth', 'toolUseId']],
+    ['the workflow journal', fieldsRead(bodyOf(src, 'addWorkflowJournalLine(raw'), 'd'), ['type', 'agentId']],
+    ['an agent launch', fieldsRead(bodyOf(src, 'private noteLaunches('), 'input'),
+      ['subagent_type', 'model', 'run_in_background']],
+    ['the tool result', [...fieldsRead(bodyOf(src, 'private agentResult('), 'r'),
+      ...fieldsRead(bodyOf(src, 'function reportedTotals('), 'r')],
+    ['agentId', 'status', 'totalTokens', 'totalDurationMs', 'totalToolUseCount']],
+    ['the task notification', [...src.matchAll(/const NOTE_\w+_RE = \/<([a-z-]+)>/g)].map((m) => m[1]),
+      ['tool-use-id', 'status']],
+  ]
+  for (const [what, actual, documented] of read) {
+    assert.deepEqual(actual, documented,
+      `src/agg.ts reads other fields of ${what} than the documentation names — update docs/privacy.md, docs/agents.md and this list`)
+    for (const field of documented) {
+      const span = what === 'the task notification' ? `\`<${field}>\`` : `\`${field}\``
+      assert.ok(doc.privacy.includes(span), `docs/privacy.md does not name ${span} of ${what}`)
+      assert.ok(doc.agents.includes(span), `docs/agents.md does not name ${span} of ${what}`)
+    }
+  }
+  // And what stays out, in the words both pages promise it in.
+  for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result']) {
+    assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
+    assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
+  }
+})
+
+/**
+ * The details panel prints the sentence a state was derived with, and the agents page quotes
+ * them — with an example where the sentence has a time or an age. Every state sentence the tree
+ * builder can write is either quoted or the same sentence with or without its time.
+ */
+test('docs/agents.md quotes the state sentences the tree builder writes, word for word', () => {
+  const src = readDoc('src/agentTreeBuild.ts')
+  const quoted = [
+    'Completed — the parent recorded the result at {0}.',
+    'Failed — the parent recorded the failure at {0}.',
+    'Running — inferred: the transcript changed {0} and no result was recorded yet.',
+    'Unknown — no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.',
+    'Completed — the workflow journal recorded the result.',
+    'Active — inferred: the session transcript changed {0}.',
+    'Idle — inferred: the session transcript has been silent since {0}.',
+    "Unknown — the session's own transcript has not been read; only its agents were.",
+    'Running — inferred: at least one agent of this run is running.',
+    'Failed — at least one agent of this run has a recorded failure.',
+    'Done — every agent of this run has a recorded result.',
+    'Unknown — not every agent of this run has a recorded result, and none is running.',
+    "Running — inferred: the parent recorded the launch {0} and no result yet; the agent's transcript has not been seen yet.",
+    "Unknown — the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
+  ]
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const sentence of quoted) {
+    assert.ok(src.includes(`'${sentence}'`) || src.includes(`"${sentence}"`),
+      `src/agentTreeBuild.ts no longer writes: ${sentence}`)
+    const pattern = sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{0\\\}/g, '[^|]+?')
+    assert.match(flat, new RegExp(pattern), `docs/agents.md does not quote: ${sentence}`)
+  }
+  const written = [...src.matchAll(/\bt\((['"])((?:Completed|Failed|Running|Unknown|Active|Idle|Done) — .*?)\1/g)]
+    .map((m) => m[2])
+  assert.ok(written.length >= quoted.length, `only ${written.length} state sentences found in src/agentTreeBuild.ts`)
+  const covered = (s: string): boolean => quoted.includes(s)
+    || quoted.includes(s.replace(/\.$/, ' at {0}.')) || quoted.includes(s.replace(/ at \{0\}\.$/, '.'))
+  assert.deepEqual(written.filter((s) => !covered(s)), [], 'a state sentence the agents page does not quote')
+})
+
+test('docs/agents.md states the limits the tree, the push and the sanitisers work to', () => {
+  const agg = readDoc('src/agg.ts')
+  const throttle = /SECTION_MIN_INTERVAL_MS[^=]*=\s*\{\s*agents:\s*(\d+)\s*\}/.exec(readDoc('src/dashboard.ts'))
+  assert.ok(throttle, 'src/dashboard.ts no longer states the push interval of the agents section')
+  const name = /const NAME_ALPHABET = \/\^(\[[^\]]+\])\+\$\//.exec(agg)
+  const id = /const ID_ALPHABET = \/\^(\[[^\]]+\])\+\$\//.exec(agg)
+  const depth = /const MAX_SPAWN_DEPTH = (\d+)/.exec(agg)
+  assert.ok(name && id && depth, 'src/agg.ts no longer states its agent alphabets and depth cap')
+  const claims: Array<[string, string]> = [
+    [`the last **${AGENT_RETENTION_DAYS} days**`, 'what the tree covers'],
+    [`**${AGENT_RETENTION_DAYS} days** after its last line`, 'when a record is dropped'],
+    [`At most **${MAX_ROOTS}** sessions`, 'the session cap'],
+    [`at most **${MAX_NODES}** nodes`, 'the node cap'],
+    [`more than **${MAX_TREE_DEPTH}** levels`, 'the depth cap'],
+    [`within the last **${RUNNING_WINDOW_MS / 60_000} minutes**`, 'the running window'],
+    [`a response within the last ${SESSION_ACTIVE_MS / 60_000} minutes`, 'the active window'],
+    [`a response within the last ${ROOT_WINDOW_MS / 3_600_000} hours`, 'which sessions are roots'],
+    [`once every **${Number(throttle[1]) / 1000} seconds**`, 'the push interval'],
+    [`at most ${MAX_AGENT_FOLDS} folded nodes`, 'the fold cap'],
+    [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
+    [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
+    [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],
+    [`id at most ${AGENT_ID_MAX_CHARS} characters of \`${id[1]}\``, 'the id cap'],
+    [`a whole number from 1 to ${depth[1]}`, 'the spawn depth range'],
+  ]
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const [claim, what] of claims) {
+    assert.ok(flat.includes(claim), `docs/agents.md does not state ${what}: ${claim}`)
+  }
 })
 
 test('both export dialogs say that tool names are about to leave the machine', () => {
@@ -498,6 +632,28 @@ test('the documented section table lists exactly the sections the panel contribu
     .matchAll(/`([a-zA-Z]+)`/g)].map((m) => m[1])
   const shipped = properties['tokenPace.dashboard.sections'].default as string[]
   assert.deepEqual([...new Set(omitted)].sort(), contributed.filter((k) => !shipped.includes(k)).sort())
+})
+
+test('the settings table shows the section order the manifest ships', () => {
+  // A section added to the default is the one change a reader of this row cannot see coming:
+  // 1.5 put `agents` after `quota`, and the row went on listing the 1.4 order.
+  const shipped = (properties['tokenPace.dashboard.sections'].default as string[]).join(', ')
+  assert.ok(SETTINGS.includes(`| \`dashboard.sections\` | \`${shipped}\` |`),
+    `docs/settings.md does not show dashboard.sections defaulting to ${shipped}`)
+})
+
+test('the dashboard page names every section the filter bar stays below', () => {
+  // The chips do not filter these, so the bar sits below them while they lead the list. The
+  // sentence lost track once already: `agents` joined the list and the page still named three.
+  const m = /const RANGE_FREE = \[([^\]]*)\]/.exec(readDoc('src/webview/main.ts'))
+  assert.ok(m, 'src/webview/main.ts no longer lists the sections the filter bar skips')
+  const free = [...m[1].matchAll(/'([a-zA-Z]+)'/g)].map((x) => x[1])
+  assert.ok(free.length >= 4, `only ${free.length} filter-free sections parsed`)
+  const page = doc.dashboard.replace(/\s+/g, ' ')
+  const at = page.indexOf('the filter bar sits below every ')
+  assert.ok(at >= 0, 'docs/dashboard.md no longer says where the filter bar sits')
+  const clause = page.slice(at, page.indexOf(' section that leads the list', at))
+  assert.deepEqual([...clause.matchAll(/`([a-zA-Z]+)`/g)].map((x) => x[1]).sort(), [...free].sort())
 })
 
 test('the settings tables state the defaults the manifest actually ships', () => {

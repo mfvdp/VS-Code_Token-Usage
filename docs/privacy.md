@@ -16,16 +16,39 @@ and whether something shadows it) and — only in `quotaSource: poll`, only afte
 `~/.claude/.credentials.json`, for the access token that the poll sends to
 `https://api.anthropic.com/api/oauth/usage` and nowhere else.
 
+Inside `~/.claude/projects/` two small files beside the agent transcripts are read for the
+[Agents](agents.md) section: the `agent-<id>.meta.json` next to each agent transcript, for four
+fields — `agentType`, `model`, `spawnDepth` and `toolUseId`, never its `description` or its
+`prompt`, and only from a regular file of at most 64 KB — and a workflow run's `journal.jsonl`,
+for the `type` and `agentId` of each line (and its time, should a line ever carry one), never
+its `key` or its `result`. To catch agent files the recursive file watcher misses on Linux, the
+`subagents/` directories of the active sessions and the workflow directories inside them are
+also listed every five seconds while an agent runs; the listing follows no link.
+
 `~/.claude/ide/*.lock` (which holds an `authToken` in clear text),
 `~/.claude/sessions/*.key` and the `oauthAccount` block of `~/.claude.json` are **never** touched;
 symlinks are not followed while scanning; the walk is confined to `projects/` and `sessions/`.
 
 Transcript contents — prompts, responses, tool arguments and tool results — are never stored,
-logged, exported or displayed. The one thing read out of a message body is the **name** of a tool
-call, with the day, the model and how often it ran: that is what the `tools` section and the
-`tools[]` of the export are made of, and it is names and counts, never a path, an argument or an
-output. Nothing is written except the extension's own state in its `globalStorage`, with
-exactly two opt-in exceptions, each behind its own consent dialog and each with a backup or a
+logged, exported or displayed. What is read out of a message body is named here — names,
+identifiers and counts, never content:
+
+* the **name** of a tool call, with the day, the model and how often it ran: that is what the
+  `tools` section and the `tools[]` of the export are made of, and it is names and counts, never
+  a path, an argument or an output;
+* for the agent tree, from an `Agent` (or `Task`) tool call its `id` and three fields of its
+  input — `subagent_type`, `model` and `run_in_background`: the agent's type, its model alias and
+  whether it runs in the background; from the tool result that answers it `agentId`, `status`,
+  `totalTokens`, `totalDurationMs` and `totalToolUseCount`; from a queued task notification the
+  `<tool-use-id>` and `<status>` tags. Never the `description`, the `prompt`, the `summary`, the
+  `output-file`, the `content` or the `result`, and never a working directory. Each of these
+  values is an identifier or a number, and an identifier is held to a small alphabet and length
+  on the way in — one that does not fit is dropped, not trimmed. The agent tables keep them for
+  seven days in the token snapshot, never in an export or the diagnostics report, and of them
+  the log only ever gets counts.
+
+Nothing is written except the extension's own state in its `globalStorage`, with exactly two
+opt-in exceptions, each behind its own consent dialog and each with a backup or a
 never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
 status-line bridge. Both are off by default and both are disabled in Restricted Mode.
 

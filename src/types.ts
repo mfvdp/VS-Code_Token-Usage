@@ -214,6 +214,77 @@ export interface SessionRec {
 
 export type Attribution = 'none' | 'project' | 'session'
 
+/** Identity of a subagent transcript, from `agent-<id>.meta.json`. Four fields; nothing else is read. */
+export interface AgentMeta {
+  /** ≤ 40 chars, alphabet [A-Za-z0-9_.:@/-]. */
+  agentType: string | null
+  /** ≤ 40 chars, same alphabet. */
+  model: string | null
+  /** Integer ≥ 1. */
+  spawnDepth: number | null
+  /** ≤ 64 chars, alphabet [A-Za-z0-9_-]. */
+  toolUseId: string | null
+}
+
+/** One subagent transcript, keyed by its path. Kept for AGENT_RETENTION_DAYS after its last line. */
+export interface AgentRec {
+  source: 'claude'
+  /** From the file name `agent-<id>.jsonl`; fallback the line's `agentId`. */
+  agentId: string
+  /** Directory name above `subagents`. */
+  sessionId: string
+  /** `<slugDir>/<sessionId>.jsonl` — the tree root key. */
+  sessionFile: string
+  /** `wf_…` when under `subagents/workflows/<wf>/`. */
+  workflowId: string | null
+  /** Null until the sidecar was read. */
+  meta: AgentMeta | null
+  /** Attempts so far; stop after 3. */
+  metaTries: number
+  /** Transcript that issued the tool_use (meta.toolUseId ↔ launches). */
+  spawnerFile: string | null
+  firstTs: number
+  lastTs: number
+  /** Real model ids seen, in order of first appearance, ≤ 8. */
+  models: string[]
+  input: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
+  output: number; reasoning: number; requests: number; outputFinal: number; toolCalls: number
+  /** From the launch record or the workflow journal. */
+  outcome: 'completed' | 'failed' | null
+  outcomeTs: number | null
+}
+
+/** A launch the parent transcript recorded; the bridge from tool_use id to agent. */
+export interface AgentLaunch {
+  /** ≤ 64 chars. */
+  toolUseId: string
+  /** The transcript holding the tool_use (main or agent). */
+  file: string
+  ts: number
+  /** Known once the tool result (or a journal line) named it. */
+  agentId: string | null
+  /** `input.subagent_type`, sanitised like AgentMeta.agentType. */
+  typeHint: string | null
+  /** `input.model`, sanitised. */
+  modelHint: string | null
+  background: boolean
+  outcome: 'launched' | 'completed' | 'failed' | null
+  outcomeTs: number | null
+  /** The parent's own report for a sync agent — shown as "parent's report", never summed. */
+  totals: { tokens: number; durationMs: number; toolUses: number } | null
+}
+
+/** A main Claude session kept for the tree root regardless of `tokenPace.attribution`. Keyed by path. */
+export interface MainRec {
+  source: 'claude'
+  sessionId: string
+  firstTs: number
+  lastTs: number
+  models: string[]
+  input: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
+  output: number; reasoning: number; requests: number; outputFinal: number; toolCalls: number
+}
+
 export interface Snapshot {
   /** Schema version of the persisted state. */
   version: number
@@ -230,6 +301,16 @@ export interface Snapshot {
   tools?: ToolStat[]
   /** `source|day` pairs that hit `TOOL_NAME_CAP` — shown as truncated, never silently dropped. */
   toolsTruncated?: string[]
+  /** Subagent transcripts, keyed by path. Absent in older snapshots, which load with none. */
+  agents?: Record<string, AgentRec>
+  /** Agent launches the parent transcripts recorded, keyed by tool_use id. */
+  launches?: Record<string, AgentLaunch>
+  /** Main Claude sessions for the agent tree's roots, keyed by path. */
+  mains?: Record<string, MainRec>
+  /** Workflow journal results for agents not seen yet: agentId → ts (0 when unknown). */
+  journalResults?: Record<string, number>
+  /** Whether the one-time agent replay over the retained transcripts has run. */
+  agentsReplayed?: boolean
 }
 
 export const STATE_VERSION = 6

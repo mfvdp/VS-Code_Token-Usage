@@ -25,6 +25,9 @@ export const SECTION_SETTINGS: Record<DashboardSectionKey, string[]> = {
     'tokenPace.quotaHistoryDays', 'tokenPace.alerts.thresholds', 'tokenPace.alerts.basis',
     'tokenPace.dashboard.sections',
   ],
+  // Claude Code only and on by default; attribution decides whether a session root may name
+  // its project.
+  agents: ['tokenPace.attribution', 'tokenPace.dashboard.sections'],
   // Connecting the status line is a command, not a setting. What a setting decides here is
   // how old a reading may be before the card calls it stale, and whether the same reading
   // also gets a status bar item of its own.

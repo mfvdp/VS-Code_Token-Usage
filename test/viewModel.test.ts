@@ -21,6 +21,7 @@ import {
 } from './fixtures/viewFixtures'
 import { claudeLine, ctxFor } from './fixtures/helpers'
 import { toolAgg } from './helpers/toolAgg'
+import { rawManifest } from './helpers/nls'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -641,6 +642,8 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     hourZone: 'local',
     drillDay: null,
     collapsed: [],
+    agentsFolded: [],
+    agentSelected: null,
   })
 
   const drilled = applyMessage(ui, { type: 'drill', day: '2026-09-01' })
@@ -663,6 +666,58 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
   // A refresh and a command change nothing, and say so by identity.
   assert.equal(applyMessage(ui, { type: 'refresh' }), ui)
   assert.equal(applyMessage(ui, { type: 'command', id: 'tokenPace.rescan' }), ui)
+})
+
+test('the agents section sits directly after quota, in the fold list and in the manifest default', () => {
+  assert.equal(DASHBOARD_SECTION_KEYS[0], 'quota')
+  assert.equal(DASHBOARD_SECTION_KEYS[1], 'agents')
+  const manifest = rawManifest as {
+    contributes: { configuration: Array<{ properties?: Record<string, { default?: unknown }> }> }
+  }
+  let sections: unknown
+  for (const group of manifest.contributes.configuration) {
+    const p = group.properties?.['tokenPace.dashboard.sections']
+    if (p) sections = p.default
+  }
+  assert.ok(Array.isArray(sections), 'tokenPace.dashboard.sections has no default array')
+  const order = sections as string[]
+  assert.equal(order.indexOf('agents'), order.indexOf('quota') + 1, order.join(','))
+  // The config's own default says the same as the manifest's.
+  assert.deepEqual(defaultUiState(cfg).agentsFolded, [])
+  assert.equal(cfg.dashboard.sections.indexOf('agents'), cfg.dashboard.sections.indexOf('quota') + 1)
+})
+
+test('agent tree folds toggle and the selection sets and clears, by identity when nothing changes', () => {
+  const ui = defaultUiState(cfg)
+  const folded = applyMessage(ui, { type: 'agentFold', key: 's:/p/a.jsonl' })
+  assert.deepEqual(folded.agentsFolded, ['s:/p/a.jsonl'])
+  assert.deepEqual(ui.agentsFolded, [], 'the input state was mutated')
+  const both = applyMessage(folded, { type: 'agentFold', key: 'a:/p/a/subagents/agent-1.jsonl' })
+  assert.deepEqual(both.agentsFolded, ['s:/p/a.jsonl', 'a:/p/a/subagents/agent-1.jsonl'])
+  assert.deepEqual(applyMessage(both, { type: 'agentFold', key: 's:/p/a.jsonl' }).agentsFolded,
+    ['a:/p/a/subagents/agent-1.jsonl'])
+
+  const selected = applyMessage(ui, { type: 'agentSelect', key: 'l:toolu_01' })
+  assert.equal(selected.agentSelected, 'l:toolu_01')
+  assert.equal(applyMessage(selected, { type: 'agentSelect', key: 'l:toolu_01' }), selected)
+  assert.equal(applyMessage(selected, { type: 'agentSelect', key: null }).agentSelected, null)
+  assert.equal(applyMessage(ui, { type: 'agentSelect', key: null }), ui)
+  // Over-long keys change nothing even when they reach applyMessage directly.
+  const long = 'x'.repeat(201)
+  assert.equal(applyMessage(ui, { type: 'agentFold', key: long }), ui)
+  assert.equal(applyMessage(ui, { type: 'agentSelect', key: long }), ui)
+
+  // The parser: strings of 1..200 chars, or null for the selection; nothing else.
+  assert.deepEqual(parseWebviewMessage({ type: 'agentFold', key: 'w:/p/a.jsonl|wf_1' }),
+    { type: 'agentFold', key: 'w:/p/a.jsonl|wf_1' })
+  assert.deepEqual(parseWebviewMessage({ type: 'agentSelect', key: null }), { type: 'agentSelect', key: null })
+  assert.deepEqual(parseWebviewMessage({ type: 'agentSelect', key: 'x'.repeat(200) }),
+    { type: 'agentSelect', key: 'x'.repeat(200) })
+  for (const raw of [{ type: 'agentFold' }, { type: 'agentFold', key: null }, { type: 'agentFold', key: '' },
+    { type: 'agentFold', key: long }, { type: 'agentFold', key: 7 }, { type: 'agentSelect' },
+    { type: 'agentSelect', key: long }, { type: 'agentSelect', key: ['a'] }]) {
+    assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
+  }
 })
 
 test('every section the dashboard can show can also be folded', () => {

@@ -770,6 +770,7 @@
             "order": 1,
             "default": [
               "quota",
+              "agents",
               "tokens",
               "summary",
               "kpis",
@@ -784,6 +785,7 @@
               "type": "string",
               "enum": [
                 "quota",
+                "agents",
                 "summary",
                 "context",
                 "kpis",
@@ -802,6 +804,7 @@
               ],
               "enumDescriptions": [
                 "%config.dashboard.sections.enum.quota%",
+                "%config.dashboard.sections.enum.agents%",
                 "%config.dashboard.sections.enum.summary%",
                 "%config.dashboard.sections.enum.context%",
                 "%config.dashboard.sections.enum.kpis%",

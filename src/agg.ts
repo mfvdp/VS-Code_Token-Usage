@@ -8,7 +8,7 @@ import { isKnownSource } from './adapters'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  Attribution, Bucket, CodexRateLimitsSnapshot, Cursor, PendingMessage, Resolution, SessionRec,
+  AgentLaunch, AgentMeta, AgentRec, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, PendingMessage, Resolution, SessionRec,
   Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
   TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
@@ -20,6 +20,8 @@ export interface IngestContext {
   attribution: Attribution
   projectSalt: string
   hashProjects: boolean
+  /** Replay: touch only agents/launches/mains/journal, never buckets, pending, sessions or tools. */
+  agentsOnly?: boolean
 }
 
 export interface BucketFilter {
@@ -231,6 +233,8 @@ export class Aggregator {
   /** Zone used to address late lines into rolled-up buckets and to map hours to days. */
   timeConfig: TimeConfig = SYSTEM_TIME_CONFIG
   private rollupState = { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }
+  /** Whether the one-time agent replay has run; persisted with the snapshot. */
+  private agentsReplayedFlag = false
   /** dayOfHour goes through Intl and is hit for every bucket on every query — memoised. */
   private dayMemoKey = ''
   private dayMemo = new Map<number, string>()
@@ -827,6 +831,7 @@ export class Aggregator {
       firstIngest: this.firstIngest,
       tools: [...this.toolStats.values()],
       toolsTruncated: [...this.toolsTruncated],
+      agentsReplayed: this.agentsReplayedFlag,
     }
   }
 
@@ -890,6 +895,7 @@ export class Aggregator {
       }
     }
     a.firstIngest = typeof s.firstIngest === 'number' && Number.isFinite(s.firstIngest) ? s.firstIngest : null
+    a.agentsReplayedFlag = s.agentsReplayed === true
     return a
   }
 
@@ -909,6 +915,23 @@ export class Aggregator {
   all(): Bucket[] { return [...this.buckets.values()] }
 
   sessions(): SessionRec[] { return [...this.sessionMap.values()] }
+
+  // ----------------------------------------------------------- Agents (contract stubs, 1.5 C0)
+
+  /** Subagent transcripts in retention. */
+  agents(): AgentRec[] { return [] }
+  /** Agent launches the parent transcripts recorded. */
+  launches(): AgentLaunch[] { return [] }
+  /** Main Claude sessions, the tree's roots. */
+  mains(): MainRec[] { return [] }
+  /** Whether the agent file has a record whose sidecar is still unread (fewer than 3 tries). */
+  needsAgentMeta(_file: string): boolean { return false }
+  /** The sidecar's four fields, or null for "tried, nothing usable". */
+  setAgentMeta(_file: string, _meta: AgentMeta | null): void { /* PA1 */ }
+  /** One line of a workflow `journal.jsonl`; true when anything changed. */
+  addWorkflowJournalLine(_raw: string, _ctx: IngestContext): boolean { return false }
+  get agentsReplayed(): boolean { return this.agentsReplayedFlag }
+  set agentsReplayed(v: boolean) { this.agentsReplayedFlag = v }
 
   /**
    * The tool side table over an inclusive local-day range; both bounds are optional and

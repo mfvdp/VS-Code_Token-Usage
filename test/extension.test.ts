@@ -835,6 +835,38 @@ test('a stored chart stack from an older build is ignored, and the rest of the s
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+test('stored agent folds and selection restore by shape; over-long keys are dropped', async () => {
+  // The two agent tree fields are opaque node keys: only their shape is checked on restore —
+  // strings of at most 200 chars, at most 200 folds, a selection that is such a string or null.
+  const long = 'k'.repeat(201)
+  const folds = ['s:/p/a.jsonl', long, 7, '', 's:/p/a.jsonl', ...Array.from({ length: 250 }, (_, i) => `a:${i}`)]
+  const kept = new Map<string, unknown>([
+    ['tokenPace.ui', { range: '30d', agentsFolded: folds, agentSelected: 'l:toolu_01' }],
+  ])
+  const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+  await state.execute('tokenPace.setRange', '7d')
+  const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  const restored = ui?.agentsFolded as string[]
+  assert.ok(Array.isArray(restored), 'agentsFolded was not written back')
+  assert.equal(restored.length, 200)
+  assert.equal(restored[0], 's:/p/a.jsonl')
+  assert.equal(restored.includes(long), false)
+  assert.ok(restored.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 200))
+  assert.equal(new Set(restored).size, restored.length)
+  assert.equal(ui?.agentSelected, 'l:toolu_01')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  const junk = new Map<string, unknown>([
+    ['tokenPace.ui', { agentsFolded: 'not-a-list', agentSelected: long }],
+  ])
+  const second = await activateHost(makeFixture(), REPO, { globalState: junk })
+  await state.execute('tokenPace.setRange', '7d')
+  const back = second.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  assert.deepEqual(back?.agentsFolded, [])
+  assert.equal(back?.agentSelected, null)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
 test('activate() returns the API the extension-host smoke test reads the bar through', async () => {
   // `test-e2e/` asserts a *real* settings round-trip through this return value, so what it
   // reports has to be exactly what the bar shows — otherwise the smoke test could pass over

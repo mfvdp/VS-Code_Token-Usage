@@ -1432,9 +1432,19 @@ function sDrill(): string {
     + '<button data-act="drill" data-day="">' + tr('close') + '</button>';
 }
 
+// The Agents section: the session → workflow → agent tree. A placeholder until the tree
+// renderer lands; it states the one thing it can say for sure, and nothing it cannot.
+function sAgents(): string {
+  const a = vm.agents;
+  if (!a || !Array.isArray(a.roots) || !a.roots.length) {
+    return '<p class="empty">' + tr('No Claude Code session in the last 7 days.') + '</p>';
+  }
+  return '<p class="empty">' + tr('No Claude Code session in the last 7 days.') + '</p>';
+}
+
 const RENDER = new Map<string, () => string>([
   ['notices', sNotices], ['controls', sControls], ['footer', sFooter], ['drill', sDrill],
-  ['summary', sSummary], ['quota', sQuota], ['context', sContext], ['kpis', sKpis], ['tokens', sTokens],
+  ['summary', sSummary], ['quota', sQuota], ['agents', sAgents], ['context', sContext], ['kpis', sKpis], ['tokens', sTokens],
   ['chart', sChart], ['models', sModels], ['heatmap', sHeatmap], ['hours', sHours], ['records', sRecords],
   ['tools', sTools], ['budget', sBudget],
   ['history', sHistory], ['projects', sProjects], ['sessions', sSessions], ['dataQuality', sDataQuality],
@@ -1452,6 +1462,7 @@ function renderer(key: string): (() => string) | null {
     case 'drill': return sDrill;
     case 'summary': return sSummary;
     case 'quota': return sQuota;
+    case 'agents': return sAgents;
     case 'context': return sContext;
     case 'kpis': return sKpis;
     case 'tokens': return sTokens;
@@ -1472,7 +1483,7 @@ function renderer(key: string): (() => string) | null {
 /** A section's heading. A key this build does not know heads its section with itself. */
 function titleOf(key: string): string {
   const titles: Record<string, string> = {
-    summary: tr('Summary'), quota: tr('Quota'), context: tr('Context window'),
+    summary: tr('Summary'), quota: tr('Quota'), agents: tr('Agents'), context: tr('Context window'),
     kpis: tr('Key figures'),
     tokens: tr('Tokens'), chart: tr('Chart'), models: tr('Models'), heatmap: tr('Activity'),
     hours: tr('Time of day'), records: tr('Records'), tools: tr('Tools'), budget: tr('Budgets'),
@@ -1502,10 +1513,10 @@ function sControls(): string {
 }
 
 // Sections the range, provider and model chips do not filter: a provider's window is what
-// it is whichever week is selected, the context reading belongs to one live session, and the
-// Tokens section is fixed periods of everything — the running windows, today, the last 7 and
+// it is whichever week is selected, the agent tree is the sessions of the last seven days,
+// the context reading belongs to one live session, and the Tokens section is fixed periods of everything — the running windows, today, the last 7 and
 // 30 days, this week and month — for every provider and model.
-const RANGE_FREE = ['quota', 'context', 'tokens'];
+const RANGE_FREE = ['quota', 'agents', 'context', 'tokens'];
 
 function sFooter(): string {
   // The footnotes already carry the pricing sentence (and the one about configured rates);

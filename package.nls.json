@@ -143,6 +143,7 @@
   "config.dashboard.sections.description": "Which sections the **Token Pace** panel shows — **and in which order**: the array order is the render order.\n\n`projects` and `sessions` stay empty until `#tokenPace.attribution#` is switched on.",
   "config.dashboard.sections.enum.summary": "Rule-based summary sentences, each with its number and basis",
   "config.dashboard.sections.enum.quota": "Quota cards with bar, elapsed tick, verdict and reset",
+  "config.dashboard.sections.enum.agents": "Session → workflow → agent tree with derived states and a details panel; Claude Code only",
   "config.dashboard.sections.enum.context": "Context window of the current Claude Code session, as the status line reported it — needs the connected status line",
   "config.dashboard.sections.enum.kpis": "KPI row: today, usage, cost, requests, cache hit, active days, avg per active day",
   "config.dashboard.sections.enum.tokens": "Token totals with fresh input, cache write 5m/1h, cache read, output, reasoning",

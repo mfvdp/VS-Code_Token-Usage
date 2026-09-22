@@ -143,6 +143,7 @@
   "config.dashboard.sections.description": "Welche Abschnitte das **Token-Pace**-Panel zeigt — **und in welcher Reihenfolge**: die Reihenfolge des Arrays ist die Renderreihenfolge.\n\n`projects` und `sessions` bleiben leer, bis `#tokenPace.attribution#` eingeschaltet ist.",
   "config.dashboard.sections.enum.summary": "Regelbasierte Übersichtssätze, jeder mit seiner Zahl und seiner Grundlage",
   "config.dashboard.sections.enum.quota": "Kontingentkarten mit Balken, Zeitmarke, Urteil und Reset",
+  "config.dashboard.sections.enum.agents": "Baum Sitzung → Workflow-Lauf → Agent mit abgeleiteten Zuständen und Detailkarte; nur Claude Code",
   "config.dashboard.sections.enum.context": "Kontextfenster der laufenden Claude-Code-Sitzung, so wie die Statuszeile es gemeldet hat — braucht die verbundene Statuszeile",
   "config.dashboard.sections.enum.kpis": "KPI-Zeile: heute, Verbrauch, Kosten, Anfragen, Cache-Treffer, aktive Tage, Schnitt je aktivem Tag",
   "config.dashboard.sections.enum.tokens": "Token-Summen mit frischem Input, Cache-Schreiben 5m/1h, Cache-Lesen, Output, Reasoning",

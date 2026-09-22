@@ -14,6 +14,7 @@
  */
 
 import { SOURCES, USAGE_PAGE } from './adapters'
+import { AgentTreeVm, emptyAgentTree } from './agentTree'
 import { Aggregator, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
 import {
@@ -97,6 +98,10 @@ export interface UiState {
    * same click that made it.
    */
   collapsed: string[]
+  /** Agent tree node keys the reader has folded (children hidden). */
+  agentsFolded: string[]
+  /** The agent tree node whose details are open, or null. */
+  agentSelected: string | null
 }
 
 /** The commands the webview may ask for. Nothing outside this list is ever executed. */
@@ -130,6 +135,8 @@ export type WebviewMessage =
   | { type: 'setHourZone'; zone: 'local' | 'utc' }
   | { type: 'drill'; day: string | null }
   | { type: 'toggleSection'; key: DashboardSectionKey }
+  | { type: 'agentFold'; key: string }
+  | { type: 'agentSelect'; key: string | null }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
   | { type: 'rendered'; sections: number }
@@ -141,7 +148,7 @@ export type WebviewMessage =
  * matching a section on screen.
  */
 export const DASHBOARD_SECTION_KEYS = [
-  'quota', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours',
+  'quota', 'agents', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours',
   'records', 'tools', 'budget', 'history', 'projects', 'sessions', 'dataQuality',
   // `satisfies`, so a key that is not a section of the config is a compile error here; the
   // other direction — a new section that nobody may fold — is asserted in the test.
@@ -156,6 +163,13 @@ const METRICS: Metric[] = ['usage', 'output', 'cacheRead', 'requests', 'reasonin
 const MAX_CUSTOM_DAYS = 1826
 const MAX_MODEL_FILTER = 50
 const MAX_MODEL_CHARS = 80
+/** Longest agent tree node key a message or the stored state may carry, and most folds kept. */
+export const MAX_AGENT_KEY_CHARS = 200
+export const MAX_AGENT_FOLDS = 200
+
+function isAgentKey(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0 && v.length <= MAX_AGENT_KEY_CHARS
+}
 
 /**
  * A real calendar day, not just something shaped like one: `2026-13-01` parses fine and
@@ -242,6 +256,13 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return typeof m.key === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(m.key)
         ? { type: 'openSectionSettings', key: m.key as DashboardSectionKey }
         : null
+    // A node key of the agent tree. Opaque to the host: it only ever selects or folds a node
+    // the tree builder made, and a key that matches none selects nothing.
+    case 'agentFold':
+      return isAgentKey(m.key) ? { type: 'agentFold', key: m.key } : null
+    case 'agentSelect':
+      if (m.key === null) return { type: 'agentSelect', key: null }
+      return isAgentKey(m.key) ? { type: 'agentSelect', key: m.key } : null
     case 'refresh':
       return { type: 'refresh' }
     case 'command':
@@ -265,6 +286,8 @@ export function defaultUiState(cfg: Config): UiState {
     hourZone: 'local',
     drillDay: null,
     collapsed: [],
+    agentsFolded: [],
+    agentSelected: null,
   }
 }
 
@@ -308,6 +331,18 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
         collapsed: on ? ui.collapsed.filter((k) => k !== m.key) : [...ui.collapsed, m.key],
       }
     }
+    case 'agentFold': {
+      if (!isAgentKey(m.key)) return ui
+      const on = ui.agentsFolded.includes(m.key)
+      if (!on && ui.agentsFolded.length >= MAX_AGENT_FOLDS) return ui
+      return {
+        ...ui,
+        agentsFolded: on ? ui.agentsFolded.filter((k) => k !== m.key) : [...ui.agentsFolded, m.key],
+      }
+    }
+    case 'agentSelect':
+      if (m.key !== null && !isAgentKey(m.key)) return ui
+      return ui.agentSelected === m.key ? ui : { ...ui, agentSelected: m.key }
     default:
       return ui
   }
@@ -532,6 +567,8 @@ export interface ViewModel {
   range: DayRange & { previous: DayRange | null; presets: RangePreset[] }
   ui: UiState
   quotas: QuotaCard[]
+  /** The Agents section: session → workflow → agent tree with derived states. */
+  agents: AgentTreeVm
   /** One Claude Code session's context window, or null when the status line said nothing. */
   context: ContextCard | null
   digest: string[]
@@ -1281,6 +1318,7 @@ export function buildViewModel(input: VmInput): ViewModel {
     range: { ...range, previous, presets: RANGE_PRESETS },
     ui,
     quotas: cards,
+    agents: emptyAgentTree(now),
     context: contextCard(input.context, cfg, now),
     digest: [],
     kpis: kpiRow,

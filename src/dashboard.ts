@@ -42,6 +42,8 @@ type SectionField = keyof ViewModel | `ui.${keyof ViewModel['ui']}`
 const SECTION_FIELDS: Record<string, SectionField[]> = {
   summary: ['digest'],
   quota: ['quotas'],
+  // The tree, and the two pieces of view state that decide what of it is open.
+  agents: ['agents', 'ui.agentsFolded', 'ui.agentSelected'],
   context: ['context'],
   kpis: ['kpis'],
   // The cache switch above the composition bars decides which parts are drawn, so the
@@ -792,6 +794,7 @@ function webviewWords(): Record<string, string> {
     'API cost (second axis)': t('API cost (second axis)'),
     'Active': t('Active'),
     'Activity': t('Activity'),
+    'Agents': t('Agents'),
     'Avg turn {0}': t('Avg turn {0}'),
     'Avg turn {0} · P90 {1}': t('Avg turn {0} · P90 {1}'),
     'Avg/day': t('Avg/day'),
@@ -831,6 +834,7 @@ function webviewWords(): Record<string, string> {
     'Lower bound share {0}': t('Lower bound share {0}'),
     'Model': t('Model'),
     'Models': t('Models'),
+    'No Claude Code session in the last 7 days.': t('No Claude Code session in the last 7 days.'),
     'No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.':
       t('No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.'),
     'No context reading. The Claude Code status line is what reports it.':

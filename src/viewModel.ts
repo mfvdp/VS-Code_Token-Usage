@@ -14,7 +14,8 @@
  */
 
 import { SOURCES, USAGE_PAGE } from './adapters'
-import { AgentTreeVm, emptyAgentTree } from './agentTree'
+import { AgentTreeVm } from './agentTree'
+import { buildAgentTree } from './agentTreeBuild'
 import { Aggregator, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
 import {
@@ -1318,7 +1319,19 @@ export function buildViewModel(input: VmInput): ViewModel {
     range: { ...range, previous, presets: RANGE_PRESETS },
     ui,
     quotas: cards,
-    agents: emptyAgentTree(now),
+    // Range-free like the quota cards, and deliberately blind to the provider and model chips:
+    // the tree is the Claude Code sessions of the last days, whatever the table below filters.
+    // The cursor keys are the transcript paths, from which a session's node key is taken.
+    agents: buildAgentTree({
+      agents: agg.agents(),
+      launches: agg.launches(),
+      mains: agg.mains(),
+      sessions: agg.sessions(),
+      attribution: cfg.attribution,
+      selected: ui.agentSelected ?? null,
+      tcfg,
+      files: agg.cursors.keys(),
+    }, now),
     context: contextCard(input.context, cfg, now),
     digest: [],
     kpis: kpiRow,

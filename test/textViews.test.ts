@@ -10,14 +10,20 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
+import { AgentTreeVm, MAX_NODES, emptyAgentTree } from '../src/agentTree'
+import { setBundle, setLocale } from '../src/i18n'
 import { markdownDocument, quickPickItems } from '../src/textViews'
+import { AgentLaunch, AgentRec, MainRec } from '../src/types'
 import { SOURCE_TITLE, ViewModel, buildViewModel } from '../src/viewModel'
 import {
-  FINGERPRINT, NOW, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
+  CLAUDE_FILE, FINGERPRINT, NOW, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
 } from './fixtures/viewFixtures'
 import { deltaBadge } from '../src/render'
+import { ROOT } from './helpers/nls'
 import { toolAgg } from './helpers/toolAgg'
 
 function fullVm(): ViewModel {
@@ -849,4 +855,151 @@ test('a backslash before a pipe cannot split a markdown table cell', () => {
   // The backslash is escaped first, so the pipe after it is still escaped: a\\\\\\|b in the text.
   const line = md.split('\n').find((l: string) => l.includes('a\\\\\\|b'))
   assert.ok(line, md.split('\n').filter((l: string) => l.includes('a\\')).join(' / ') || '(no row carries the name)')
+})
+
+// ---------------------------------------------------------------------------
+// The agent tree
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixture's session `sess-alpha` with one running subagent and one launch whose file was
+ * not seen yet, in the shapes the aggregator hands out — laid over the fixture's aggregator,
+ * whose session table names the project `alpha`.
+ */
+function agentVm(select = false): { vm: ViewModel; agentKey: string } {
+  const agg = buildAgg('project')
+  const dir = path.dirname(CLAUDE_FILE)
+  const sessionFile = path.join(dir, 'sess-alpha.jsonl')
+  const agentFile = path.join(dir, 'sess-alpha', 'subagents', 'agent-a94f0001.jsonl')
+  const counts = {
+    input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 0,
+    requests: 5, outputFinal: 5, toolCalls: 3,
+  }
+  const main: MainRec = {
+    source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
+    models: ['claude-opus-4-6'], ...counts,
+  }
+  const agent: AgentRec = {
+    source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
+    spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
+    ...counts, outcome: null, outcomeTs: null,
+  }
+  const pending: AgentLaunch = {
+    toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
+    modelHint: null, background: true, outcome: 'launched', outcomeTs: null, totals: null,
+  }
+  agg.mains = () => [main]
+  agg.agents = () => [agent]
+  agg.launches = () => [pending]
+  const agentKey = `a:${agentFile}`
+  const vm = buildViewModel(makeInput({
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: select ? { agentSelected: agentKey } : {},
+  }))
+  return { vm, agentKey }
+}
+
+/** The lines of one `## ` section, heading excluded, up to the next `## ` heading. */
+function sectionOf(md: string, heading: string): string[] {
+  const lines = md.split('\n')
+  const start = lines.indexOf(heading)
+  assert.notEqual(start, -1, `section missing: ${heading}`)
+  const end = lines.findIndex((l, i) => i > start && l.startsWith('## '))
+  return lines.slice(start + 1, end === -1 ? undefined : end)
+}
+
+test('the agent tree reaches the markdown as an indented list, right after the quota, with the open node as a table', () => {
+  const { vm, agentKey } = agentVm(true)
+  assert.equal(vm.agents.selected?.key, agentKey)
+  const md = markdownDocument(vm)
+  const at = md.indexOf('## Agents')
+  assert.ok(at > md.indexOf('## Quota'), 'the agents section comes after the quota')
+  assert.ok(at < md.indexOf('## Key figures'))
+  if (md.includes('## Summary')) assert.ok(at < md.indexOf('## Summary'), 'the dashboard puts agents before the summary')
+  assert.equal(md.split('## Agents').length, 2)
+
+  const lines = sectionOf(md, '## Agents')
+  // Inferred states carry the estimate mark; the session is idle, its agent and the launch run.
+  assert.deepEqual(lines.filter((l) => /^\s*- /.test(l)), [
+    '- [~Idle] Session sess-alp — alpha · 1.2K · 2 h 15 min',
+    '  - [~Running] Explore · claude-opus-4-6 · a94f · 1.2K · 19 min 00 s',
+    '  - [~Running] Plan · – · launched · – · –',
+  ])
+  // Nothing here is a lower bound, so the mark is not explained.
+  assert.equal(lines.some((l) => l.includes('lower bound')), false)
+
+  const d = vm.agents.selected
+  assert.ok(d)
+  const head = lines.indexOf(`### ${d.title}`)
+  assert.notEqual(head, -1, lines.join('\n'))
+  assert.equal(lines[head + 2], '| Detail | Value |')
+  assert.equal(lines[head + 3], '|---|---|')
+  const rows = lines.slice(head + 4).filter((l) => l.startsWith('| '))
+  assert.equal(rows.length, 1 + d.rows.length, 'the state and every row, once')
+  assert.equal(rows[0], `| State | ${d.stateText} |`)
+  assert.ok(rows.includes('| Type | Explore |'), rows.join('\n'))
+  assert.ok(rows.includes('| Last activity | 11:59 · 1 min ago |'), rows.join('\n'))
+  assert.ok(rows.includes('| Spawned by | Session sess-alp |'), rows.join('\n'))
+
+  // Nothing selected: the list and no table.
+  const plain = markdownDocument(agentVm().vm)
+  assert.equal(sectionOf(plain, '## Agents').some((l) => l.startsWith('### ') || l.startsWith('| ')), false)
+})
+
+test('the notes under the tree state the cut, the sessions left out, the lower bound and a stale selection', () => {
+  const { vm } = agentVm()
+  const tree: AgentTreeVm = {
+    roots: [{
+      key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', sub: null, state: 'done', derived: false,
+      usage: '12K', lowerBound: true, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+      children: [],
+    }],
+    selected: null,
+    running: 0,
+    omittedRoots: 3,
+    truncated: true,
+    note: 'The selected node is no longer in the tree.',
+    updatedAt: NOW,
+  }
+  const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
+  // A recorded state carries no estimate mark; a lower bound carries ⚠ behind the figure.
+  assert.ok(lines.includes('- [Done] Session 12345678 · 12K ⚠ · 4 min 05 s'), lines.join('\n'))
+  for (const note of [
+    '_3 older session(s) not listed._',
+    `_Tree cut at ${MAX_NODES} nodes._`,
+    '_⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted._',
+    '_The selected node is no longer in the tree._',
+  ]) assert.ok(lines.includes(note), `${note}\n${lines.join('\n')}`)
+  assert.equal(lines.some((l) => l.startsWith('### ')), false)
+})
+
+test('an empty tree is one sentence; a tree that was never built is no section at all', () => {
+  const empty = markdownDocument(buildViewModel(makeInput({ agg: new Aggregator(), quotas: [] })))
+  assert.deepEqual(sectionOf(empty, '## Agents').filter(Boolean), ['_No Claude Code session in the last 7 days._'])
+
+  const { vm } = agentVm()
+  // No note means nothing was claimed: an unbuilt tree is not an empty one.
+  assert.equal(markdownDocument({ ...vm, agents: emptyAgentTree(NOW) }).includes('## Agents'), false)
+  const without = { ...vm } as Partial<ViewModel>
+  delete without.agents
+  assert.equal(markdownDocument(without as ViewModel).includes('## Agents'), false)
+})
+
+test('the markdown tree speaks German with the shipped bundle', () => {
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  let md = ''
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    md = markdownDocument(agentVm(true).vm)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  const lines = sectionOf(md, '## Agenten')
+  assert.ok(lines.includes('- [~Ruht] Sitzung sess-alp — alpha · 1,2K · 2 h 15 min'), lines.join('\n'))
+  assert.ok(lines.includes('  - [~Läuft] Plan · – · gestartet · – · –'), lines.join('\n'))
+  assert.ok(lines.includes('| Detail | Wert |'), lines.join('\n'))
+  assert.ok(lines.some((l) => l.startsWith('| Zustand | Läuft — abgeleitet: ')), lines.join('\n'))
+  assert.ok(lines.includes('| Gestartet von | Sitzung sess-alp |'), lines.join('\n'))
 })

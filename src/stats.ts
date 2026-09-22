@@ -557,8 +557,12 @@ function sumParts(list: Bucket[]): { num: number; den: number } {
   return { num, den }
 }
 
-/** A token count, or a dash when there is nothing — "0" would claim a measurement. */
-function tokens(n: number): string {
+/**
+ * A token count, or a dash when there is nothing — "0" would claim a measurement. Exported
+ * for the agent tree's details, which print the same kinds as the totals table and must not
+ * format them a second way.
+ */
+export function tokens(n: number): string {
   return n > 0 ? compact(n) : '–'
 }
 
@@ -1380,8 +1384,11 @@ function turnStats(sessions: SessionRec[], source: Source, model: string): TurnS
   return { avg, p90: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))] }
 }
 
-/** "1.4 s" / "2 min 05 s" — turn gaps span three orders of magnitude. */
-function durationText(ms: number): string {
+/**
+ * "1.4 s" / "2 min 05 s" — turn gaps span three orders of magnitude. Exported for the agent
+ * tree, whose durations sit beside the Sessions table's and must read the same way.
+ */
+export function durationText(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '–'
   if (ms < 1000) return `${Math.round(ms)} ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`

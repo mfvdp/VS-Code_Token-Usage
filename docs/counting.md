@@ -74,7 +74,10 @@ Code*. Its `totalTokens` is the context of the agent's last request including it
 input, cache write, cache read and output of that one request (a median ratio of 1.000 against
 that request, measured on this machine) — not what the agent consumed over its run (a median
 0.83 of the usage counted here). It is a different kind of figure, and it is never summed: not
-into the agent's usage, not into any total.
+into the agent's usage, not into any total. The agent's own *Context at the end*, beside it, is
+counted here: the input, cache write and cache read of its newest request — the running maximum
+over that reply's lines, as every figure of a reply is —, without the reply's output, so it
+stays below Claude Code's figure by about that output.
 
 **Lower bounds.** A response with no terminal line has an output figure that is a floor, not a
 total. Such rows carry `⚠`, the tooltip states what share of today's responses are affected, and

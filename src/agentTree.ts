@@ -65,6 +65,11 @@ export const MIN_SHORT_ID = 4
  * `RunRec.agentsDropped`, not listed. The largest run on the measuring machine had 427.
  */
 export const MAX_RUN_AGENTS = 5000
+/**
+ * L2 (1.6): from how long an agent ran on, its details say what it used per minute. Below a
+ * minute a rate is a division by a fraction of a minute — a burst of one reply, not a pace.
+ */
+export const PER_MINUTE_FROM_MS = 60_000
 
 /**
  * `stopped` (1.6 D7): the parent recorded a stop — `killed`, `cancelled` or `stopped` — which is
@@ -279,17 +284,33 @@ export interface RunningItem {
 }
 
 /**
+ * One part of an agent's token mix (1.6 L2): which kind of token, its share of the four together,
+ * and its words — "cache read 76 %", the part's title on the page.
+ */
+export interface MixPart {
+  part: 'fresh' | 'cacheWrite' | 'cacheRead' | 'output'
+  /** Of fresh input, cache write, cache read and output together; the parts' shares sum to 1. */
+  share: number
+  label: string
+}
+
+/**
  * One row of the details panel, pre-formatted. How the page lays it out is the row's own say,
- * never a guess from its words: a figure beside its label (the default), or a sentence that
- * takes the whole width under it. `live` marks the row the page's clock ticks in, `copy` the
- * row whose value *Copy ID* copies.
+ * never a guess from its words: a figure beside its label (the default), a sentence that takes
+ * the whole width under it, or a bar across that width with its words under it. `live` marks the
+ * row the page's clock ticks in, `copy` the row whose value *Copy ID* copies.
  */
 export interface DetailRow {
   label: string
   value: string
   note?: string
-  /** Absent means a figure. A sentence's note follows it after " · ", a figure's after a space. */
-  kind?: 'figure' | 'sentence'
+  /**
+   * Absent means a figure. A sentence's note follows it after " · ", a figure's after a space. A
+   * bar (1.6 L2) draws `parts` in their order and prints `value` — the same in words — under it.
+   */
+  kind?: 'figure' | 'sentence' | 'bar'
+  /** L2: a bar's parts — the token mix, the shares summing to 1, drawn in this order. Only on a bar. */
+  parts?: MixPart[]
   /** The row the live "… ago" clock attaches to, in place of its note. */
   live?: 'ago'
   /** The row whose value the Copy ID button copies (D11). */
@@ -309,6 +330,14 @@ export interface NodeDetails {
   stateText: string
   /** As the node: its last activity, null when there is none. */
   lastTs: number | null
+  /**
+   * L2 (1.6): the one line under the state — for an agent with a counted request "1.2K in 29 min
+   * 00 s · 5 requests · 3 tool calls": what it used, how long it ran, how many requests and tool
+   * calls it made. Null for an agent nothing of which was counted, and for every other node. (The
+   * spec's `summary`: a name the tree's payload never carries, since a task notification's and a
+   * workflow result's content lives under it.)
+   */
+  overview: string | null
   /**
    * What *Copy ID* copies: the agent id, a launch's tool_use id, a run's id, a session's id —
    * the whole identifier the ID row shows. Null when the node has none.

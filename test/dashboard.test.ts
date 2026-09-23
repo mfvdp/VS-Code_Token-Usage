@@ -3786,7 +3786,8 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
           { label: 'Output', value: '1.2K', note: '⚠ lower bound', kind: 'sentence' },
           { label: 'ID', value: 'a1', copy: true },
           { label: 'ID', value: 'a2', copy: true },
-          { label: 'Bar', value: 'x', kind: 'bar' },
+          // 1.6 P9 (pinned and changed): `bar` is a kind this build draws (L2); an unknown one is another.
+          { label: 'Chart', value: 'x', kind: 'chart' },
         ],
       }),
     }),
@@ -3800,7 +3801,7 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.equal(saidPanel.split('data-id="tokenPace.copyAgentId"').length - 1, 1, saidPanel)
   assert.ok(saidPanel.indexOf('<dt>ID</dt><dd>a2</dd>') >= 0, saidPanel)
   // A kind this build does not know is laid out as a figure.
-  assert.ok(saidPanel.indexOf('<dt>Bar</dt><dd>x</dd>') >= 0, saidPanel)
+  assert.ok(saidPanel.indexOf('<dt>Chart</dt><dd>x</dd>') >= 0, saidPanel)
   // A node without a last activity gets no clock: the launch nobody has seen a line of.
   const pending = agentsHtml(a, {
     agents: agentTree({ selected: detailsOf({ key: AK.l1, title: 'Explore · – · launched', state: 'unknown', lastTs: null, rows: [] }) }),
@@ -3829,6 +3830,63 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.match(STYLE, /\.ag-details dl \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\);/)
   assert.equal(/\.ag-details dl \{ grid-template-columns: 1fr;/.test(STYLE), false, 'the details still stack somewhere')
   assert.match(STYLE, /\.ag-details \.ag-wide \{ grid-column: 1 \/ -1; \}/)
+})
+
+test('an agent\'s details: the line under its state, and its token mix as one bar whose parts the CSSOM sizes, with its words under it', () => {
+  // 1.6 L2 (P9).
+  const a = agentCtx()
+  const mix = {
+    label: 'Token mix', value: 'fresh 2 % · cache write 18 % · cache read 76 % · output 4 %', kind: 'bar',
+    parts: [
+      { part: 'fresh', share: 0.02, label: 'fresh 2 %' }, { part: 'cacheWrite', share: 0.18, label: 'cache write 18 %' },
+      { part: 'cacheRead', share: 0.76, label: 'cache read 76 %' }, { part: 'output', share: 0.04, label: 'output 4 %' },
+    ],
+  }
+  const h = agentsHtml(a, {
+    agents: agentTree({ selected: detailsOf({ overview: '1.2K in 29 min 00 s · 5 requests · <3> tool calls', rows: [mix, { label: 'Type', value: 'Explore' }] }) }),
+    ui: agentUi({ agentSelected: AK.a1 }),
+  })
+  const panel = panelOf(h)
+  // Right under the state, across the whole width; its label a screen reader's alone; escaped; each
+  // clause kept whole, so a narrow panel breaks between two of them, never inside "29 min".
+  assert.ok(panel.indexOf('no result was recorded yet.</dd><dt class="sr">Summary</dt>'
+    + '<dd class="ag-wide ag-overview"><span class="nobr">1.2K in 29 min 00 s</span> · <span class="nobr">5 requests</span> · '
+    + '<span class="nobr">&lt;3&gt; tool calls</span></dd>') >= 0, panel)
+  // The bar across the whole width, a part per kind in the Tokens section's colours, each as wide
+  // as its share — through data-w, which applyStyles writes with the CSSOM, never an inline style
+  // the page's CSP would refuse —, its words under it; the bar itself hidden from a screen reader.
+  assert.ok(panel.indexOf('<dt class="ag-wide">Token mix</dt><dd class="ag-wide"><span class="ag-mix" aria-hidden="true">'
+    + '<i class="cs c1" data-w="2.00" title="fresh 2 %"></i><i class="cs c2" data-w="18.00" title="cache write 18 %"></i>'
+    + '<i class="cs c4" data-w="76.00" title="cache read 76 %"></i><i class="cs c5" data-w="4.00" title="output 4 %"></i></span>'
+    + '<span class="ag-mixtext"><span class="nobr">fresh 2 %</span> · <span class="nobr">cache write 18 %</span> · '
+    + '<span class="nobr">cache read 76 %</span> · <span class="nobr">output 4 %</span></span></dd><dt>Type</dt>') >= 0, panel)
+  assert.equal(/\sstyle=/.test(panel), false, panel)
+  assert.match(SCRIPT, /querySelectorAll\("\[data-w\]"\)\.forEach\(\(el\) => \{\s*el\.style\.width = el\.dataset\.w \+ "%";/)
+  // A part this page cannot draw is left out: a share that is no number, outside 0…1, a kind it
+  // does not know; a bar with no part left is its words alone, still across the width.
+  const odd = agentsHtml(a, {
+    agents: agentTree({
+      selected: detailsOf({
+        overview: null,
+        rows: [{
+          label: 'Token mix', value: 'x', kind: 'bar',
+          parts: [{ part: 'fresh', share: Number.NaN, label: 'a' }, { part: 'cacheRead', share: 1.5, label: 'b' },
+            { part: '__proto__', share: 0.5, label: 'c' }, { part: 'output', share: 0.5, label: '"d"' }],
+        }, { label: 'Token mix', value: 'y', kind: 'bar', parts: 'none' }],
+      }),
+    }),
+    ui: agentUi({ agentSelected: AK.a1 }),
+  })
+  const oddPanel = panelOf(odd)
+  assert.ok(oddPanel.indexOf('<dd class="ag-wide"><span class="ag-mix" aria-hidden="true"><i class="cs c5" data-w="50.00" title="&quot;d&quot;"></i></span>'
+    + '<span class="ag-mixtext"><span class="nobr">x</span></span></dd>') >= 0, oddPanel)
+  assert.ok(oddPanel.indexOf('<dt class="ag-wide">Token mix</dt><dd class="ag-wide"><span class="nobr">y</span></dd>') >= 0, oddPanel)
+  // No overview, no line and no hidden label.
+  assert.equal(oddPanel.indexOf('ag-overview'), -1, oddPanel)
+  assert.equal(oddPanel.indexOf('<dt class="sr">'), -1, oddPanel)
+  // The bar's own rules: a flex row of the track's colour, its parts full height.
+  assert.match(STYLE, /\.ag-mix \{ display: flex; height: 8px;[^}]*overflow: hidden; background: var\(--track\); \}/)
+  assert.match(STYLE, /\.ag-mix > i \{ display: block; height: 100%; \}/)
 })
 
 test('details under a row of the running list say themselves whether the state was recorded, and keep their clock', () => {
@@ -4813,7 +4871,9 @@ test('the agent tree speaks German on a German page', () => {
     // 1.6 N9: the state and the clocks in words for a screen reader.
     '{0}, derived', '{0}, recorded', 'since {0}', 'silent since {0}',
     // 1.6 P7b: a session's span, the last part of its figures' line.
-    'span from the first to the last line']
+    'span from the first to the last line',
+    // 1.6 P9 (L2): the hidden label of the line under a details panel's state.
+    'Summary']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -4830,7 +4890,7 @@ test('the agent tree speaks German on a German page', () => {
   }
   const h = section({
     agents: agentTree({
-      selected: detailsOf({ rows: [] }), omittedRoots: 2, runningMore: 3,
+      selected: detailsOf({ rows: [], overview: '1.2K in 29 min 00 s · 5 requests · 3 tool calls' }), omittedRoots: 2, runningMore: 3,
       runningNow: [runningItem({ silence: true, lastTs: AG_NOW - 4 * 60_000 }), runningItem({ key: AK.l1, waiting: true })],
     }),
     ui: openUi({ agentSelected: AK.a1 }),
@@ -4850,6 +4910,8 @@ test('the agent tree speaks German on a German page', () => {
     // 1.6 N9: the state and the clocks for a screen reader, in German.
     'aria-label="läuft, abgeleitet" title="~läuft · abgeleitet"', 'aria-label="fertig, aufgezeichnet" title="fertig · aufgezeichnet"',
     '<span class="sr">seit 11:59</span>', '<span class="sr">still seit 11:59</span>',
+    // 1.6 L2: the line under the state, its label a screen reader's.
+    '<dt class="sr">Zusammenfassung</dt><dd class="ag-wide ag-overview">',
     // The running list: its heading with everything that runs, the waiting clause, the rest counted.
     '<div class="name" role="heading" aria-level="3">Laufen gerade (5)</div>',
     '<span>wartet auf einen untergeordneten Agenten</span>', '<p class="meta">und 3 weitere</p>',
@@ -5786,6 +5848,9 @@ test('the fold and the row are targets of 24 × 24 px at least, and a forced-col
   const block = forced.slice(0, forced.indexOf('\n}') + 2)
   assert.match(block, /\.ag-st::before, \.ag-lb \{ color: CanvasText; \}/)
   assert.match(block, /\.ag-fold::before \{ color: ButtonText; \}/)
+  // 1.6 L2 (P9, the rule P7 left to it): each part of the details' token mix a border of the text's
+  // colour, the theme having taken its fill.
+  assert.match(block, /\.ag-mix > i \{ border: 1px solid CanvasText; box-sizing: border-box; \}/)
   assert.match(block, /\.ag-row\[aria-pressed="true"\], \.agtree \.ag-row\[data-pressed="true"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/)
   // 1.6 L1: the item the keyboard is on, a ring of the text colour round its line.
   assert.match(block, /\.agtree li\[role="treeitem"\]:focus-visible > \.ag-line \{ outline: 2px solid CanvasText; \}/)

@@ -995,6 +995,11 @@ ul { margin: 6px 0; padding-left: 18px; }
    the button that copies it, as small as the text beside it. */
 .ag-details .ag-id { overflow-wrap: anywhere; }
 .ag-copy { margin-left: 4px; padding: 0 6px; }
+/* 1.6 L2: an agent's token mix — one bar across the panel, a part per kind of token in the Tokens
+   section's own colours, each as wide as its share (set through the CSSOM), and its words under it. */
+.ag-mix { display: flex; height: 8px; margin: 3px 0 2px; border-radius: 4px; overflow: hidden; background: var(--track); }
+.ag-mix > i { display: block; height: 100%; }
+.ag-mixtext { display: block; }
 @media (max-width: 320px) {
   .kpis { grid-template-columns: 1fr; }
   table, thead, tbody, th, td, tr { display: block; }
@@ -1017,13 +1022,15 @@ ul { margin: 6px 0; padding-left: 18px; }
   .ag-running::before { animation: ag-pulse 2s ease-in-out infinite; }
 }
 /* 1.6 N9: in a forced-colours theme (Windows High Contrast) the agent tree's marks take the
-   system's colours — the glyphs and the ⚠ the text's, the twisty a button's — and the open row,
+   system's colours — the glyphs and the ⚠ the text's, the twisty a button's, and each part of the
+   details' token mix (1.6 L2) a border of the text's, the theme having taken its fill — and the open row,
    whose tint and edge the theme removes, a 2 px outline in the highlight colour. 1.6 L1: the item
    the keyboard is on, a 2 px ring round its line in the text colour — never the highlight's, so an
    open row that has the focus shows both. The theme's own adjustment is left on everywhere else. */
 @media (forced-colors: active) {
   .ag-st::before, .ag-lb { color: CanvasText; }
   .ag-fold::before { color: ButtonText; }
+  .ag-mix > i { border: 1px solid CanvasText; box-sizing: border-box; }
   .ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
   .agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 2px solid CanvasText; }
 }

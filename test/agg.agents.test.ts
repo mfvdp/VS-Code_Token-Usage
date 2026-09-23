@@ -162,6 +162,11 @@ test('an agent transcript gets its record on the first counted line, with the de
     // 1.6 N5: it called no tool.
     lastTool: null,
     lastToolTs: null,
+    // 1.6 N8: every line of the fixture is written at `high`; L2: its newest request, msg_2, had
+    // 7 tokens of input and nothing cached (1.6 P9, pinned and changed: the record's shape).
+    effort: 'high',
+    efforts: ['high'],
+    lastContext: 7,
   })
   // The buckets hold the same figures: the record follows them, it does not count on its own.
   const sub = agg.all().filter((b) => b.isSub)
@@ -692,8 +697,10 @@ test('no agent or launch record holds a string longer than its cap', () => {
     toolUseId: AGENT_ID_MAX_CHARS, typeHint: AGENT_NAME_MAX_CHARS, modelHint: AGENT_NAME_MAX_CHARS,
     agentType: AGENT_NAME_MAX_CHARS, model: AGENT_NAME_MAX_CHARS,
   }
-  // Fixed vocabularies, not free strings.
-  const enums: Record<string, string[]> = { source: ['claude'], outcome: ['launched', 'completed', 'failed'] }
+  // Fixed vocabularies, not free strings. 1.6 N8: an effort is one of five levels.
+  const enums: Record<string, string[]> = {
+    source: ['claude'], outcome: ['launched', 'completed', 'failed'], effort: ['low', 'medium', 'high', 'xhigh', 'max'],
+  }
   // Paths are keys, not free strings: the transcript's own path is what every cursor holds too.
   const paths = new Set(['sessionFile', 'spawnerFile', 'file'])
   const check = (obj: Record<string, unknown>, where: string): void => {
@@ -704,6 +711,8 @@ test('no agent or launch record holds a string longer than its cap', () => {
       } else if (typeof v === 'string') {
         assert.ok(k in capOf, `${where}.${k} is a string field nobody capped`)
         assert.ok(v.length <= capOf[k], `${where}.${k} holds ${v.length} characters`)
+      } else if (Array.isArray(v) && k === 'efforts') {
+        for (const m of v) assert.ok(enums.effort.includes(m as string), `${where}.${k} lists ${String(m)}`)
       } else if (Array.isArray(v)) {
         for (const m of v) assert.ok(typeof m === 'string' && m.length <= AGENT_MODEL_MAX_CHARS, `${where}.${k}`)
       } else if (v && typeof v === 'object') {
@@ -1559,8 +1568,9 @@ test('an agent keeps the name of its last tool call and the time of its line, th
 })
 
 test('the last tool call survives a snapshot round trip, checked again; a snapshot of revision 4 asks for the replay that fills it', async () => {
-  // 5: the last tool call (1.6 N5) is what only a replay can fill for the transcripts already read.
-  assert.equal(AGENT_TABLES_REVISION, 5)
+  // 5: the last tool call (1.6 N5) is what only a replay can fill for the transcripts already read
+  // (1.6 P9, pinned and changed: a later package raises it again — 6, the efforts and the context).
+  assert.ok(AGENT_TABLES_REVISION >= 5)
   const agg = new Aggregator()
   agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, agentId: 'abc123', usage: { input: 5 }, tools: [{ name: 'Bash' }] }), AGENT_CTX)
   const back = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot)
@@ -1647,5 +1657,181 @@ test('a tool call\'s input never leaves the reader: only its name reaches the re
   // No key of the call's input either (a record's own `input` is its token count, not this one).
   for (const snapshot of [outputs[0][1], outputs[1][1]]) {
     assert.equal(/"(command|description|timeout)"/.test(snapshot), false, 'the snapshot holds a field of the call\'s input')
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P9 · N8, L2: the effort of an agent's replies (§0a.4), the context of its newest request
+// ---------------------------------------------------------------------------
+
+test('an agent keeps the effort of its newest reply and every distinct one in the order first seen — top-level only (1.6 N8)', () => {
+  const agg = new Aggregator()
+  const line = (id: string, ts: number, effort: unknown, usage: Parameters<typeof claudeLine>[0]['usage'] = { input: 5 },
+    content?: unknown[]): void => {
+    agg.addClaudeLine(claudeLine({ id, ts, agentId: 'abc123', usage, effort, content }), AGENT_CTX)
+  }
+  const effort = (): [string | null, string[]] => [agentOf(agg, AGENT).effort, agentOf(agg, AGENT).efforts]
+  line('m1', T0, 'high')
+  assert.deepEqual(effort(), ['high', ['high']])
+  // A later line of the same message says it again: nothing new.
+  line('m1', T0 + 300, 'high')
+  assert.deepEqual(effort(), ['high', ['high']])
+  line('m2', T0 + 60_000, 'xhigh')
+  assert.deepEqual(effort(), ['xhigh', ['high', 'xhigh']])
+  // A reply back at an earlier level is the newest one's level; the list keeps its first sighting.
+  line('m3', T0 + 120_000, 'high')
+  assert.deepEqual(effort(), ['high', ['high', 'xhigh']])
+  // A value outside the five levels, or none at all, is no effort: what was kept stays.
+  line('m4', T0 + 180_000, 'turbo')
+  line('m5', T0 + 240_000, 42)
+  line('m6', T0 + 300_000, null)
+  assert.deepEqual(effort(), ['high', ['high', 'xhigh']])
+  // Only the top level: an `effort` inside a tool call's input — a proposal's size, say — is not
+  // the reply's.
+  line('m7', T0 + 360_000, null, { input: 5 },
+    [{ type: 'tool_use', id: 'toolu_p1', name: 'Propose', input: { proposals: [{ effort: 'max', text: 'synthetic proposal' }] } }])
+  assert.deepEqual(effort(), ['high', ['high', 'xhigh']])
+  // A line read out of order — older than the newest — joins the list and does not move the newest.
+  line('m8', T0 + 100_000, 'max')
+  assert.deepEqual(effort(), ['high', ['high', 'xhigh', 'max']])
+  // A request the API rejected carries a `perTurnEffort` of its own, which is never read.
+  agg.addClaudeLine(apiErrorLine({ id: 'e1', ts: T0 + 400_000, agentId: 'abc123', perTurnEffort: 'low' }), AGENT_CTX)
+  assert.deepEqual(effort(), ['high', ['high', 'xhigh', 'max']])
+  line('m9', T0 + 420_000, 'medium')
+  line('m10', T0 + 480_000, 'low')
+  assert.deepEqual(effort(), ['low', ['high', 'xhigh', 'max', 'medium', 'low']])
+  // A main session's record keeps none.
+  agg.addClaudeLine(claudeLine({ id: 'x1', ts: T0, usage: { input: 3 }, effort: 'xhigh' }), MAIN_CTX)
+  assert.equal('effort' in (agg.mains()[0] as object), false)
+  assert.equal('efforts' in (agg.mains()[0] as object), false)
+})
+
+test('an agent keeps the context of its newest request — input, cache write and cache read, the running maximum of that reply (1.6 L2)', () => {
+  const agg = new Aggregator()
+  const line = (id: string, ts: number, usage: Parameters<typeof claudeLine>[0]['usage']): void => {
+    agg.addClaudeLine(claudeLine({ id, ts, agentId: 'abc123', usage }), AGENT_CTX)
+  }
+  const context = (): number | null => agentOf(agg, AGENT).lastContext
+  line('m1', T0, { input: 100, cacheWrite: 2000, cacheRead: 5000, output: 40 })
+  assert.equal(context(), 7100)
+  // A later line of the same reply grows it — the reply's running maximum, never a sum of lines.
+  line('m1', T0 + 400, { input: 100, cacheWrite: 2400, cacheRead: 5000, output: 90 })
+  assert.equal(context(), 7500)
+  line('m1', T0 + 500, { input: 100, cacheWrite: 1000, cacheRead: 5000, output: 90 })
+  assert.equal(context(), 7500)
+  // The next reply is the newest: its own context, whatever the one before carried.
+  line('m2', T0 + 60_000, { input: 3, cacheWrite: 800, cacheRead: 7500, output: 20 })
+  assert.equal(context(), 8303)
+  // A late line of an older reply changes nothing: it is not the newest request.
+  line('m1', T0 + 700, { input: 100, cacheWrite: 9000, cacheRead: 5000, output: 90 })
+  assert.equal(context(), 8303)
+  // The output is the reply, not the context it was written from.
+  line('m3', T0 + 120_000, { input: 1, output: 5000 })
+  assert.equal(context(), 1)
+  // A main session's record keeps none.
+  agg.addClaudeLine(claudeLine({ id: 'x1', ts: T0, usage: { input: 3 } }), MAIN_CTX)
+  assert.equal('lastContext' in (agg.mains()[0] as object), false)
+})
+
+test('the efforts and the context survive a snapshot round trip, checked again; a snapshot of revision 5 asks for the replay that fills them', async () => {
+  // 6: the efforts (1.6 N8) and the newest request's context (L2) are what only a replay can fill
+  // for the transcripts already read.
+  assert.equal(AGENT_TABLES_REVISION, 6)
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, agentId: 'abc123', usage: { input: 5, cacheRead: 100 }, effort: 'high' }), AGENT_CTX)
+  agg.addClaudeLine(claudeLine({ id: 'm2', ts: T0 + 1000, agentId: 'abc123', usage: { input: 7, cacheWrite: 20 }, effort: 'max' }), AGENT_CTX)
+  const back = agentOf(Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot), AGENT)
+  assert.deepEqual([back.effort, back.efforts, back.lastContext], ['max', ['high', 'max'], 27])
+  // A snapshot is a file anyone can edit: every value is checked as at ingest.
+  const edited = (rec: Record<string, unknown>): [unknown, unknown, unknown] => {
+    const s = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+    Object.assign((s.agents as Record<string, AgentRec>)[AGENT], rec)
+    const r = agentOf(Aggregator.fromSnapshot(s), AGENT)
+    return [r.effort, r.efforts, r.lastContext]
+  }
+  assert.deepEqual(edited({ effort: 'turbo' }), [null, ['high', 'max'], 27])
+  assert.deepEqual(edited({ effort: 'M', efforts: 'high' }), [null, [], 27])
+  assert.deepEqual(edited({ efforts: ['high', 'high', 'M', 3, 'low', 'medium', 'xhigh', 'max', null] }),
+    ['max', ['high', 'low', 'medium', 'xhigh', 'max'], 27])
+  assert.deepEqual(edited({ lastContext: -5 }), ['max', ['high', 'max'], null])
+  assert.deepEqual(edited({ lastContext: Number.NaN }), ['max', ['high', 'max'], null])
+  assert.deepEqual(edited({ lastContext: '27' }), ['max', ['high', 'max'], null])
+  assert.deepEqual(edited({ effort: undefined, efforts: undefined, lastContext: undefined }), [null, [], null])
+
+  // The replay: a snapshot of the revision before has neither, and the replay reads them back from
+  // the lines — counting nothing twice.
+  const home = tmpDir('effort')
+  configureRoots([home], [path.join(home, 'codex')])
+  const dir = path.join(home, 'projects', CLAUDE_SLUG)
+  const file = path.join(dir, SESSION, 'subagents', 'agent-abc123.jsonl')
+  writeLines(path.join(dir, `${SESSION}.jsonl`), [claudeLine({ id: 'x1', ts: T0, usage: { input: 3 }, final: true })])
+  writeLines(file, [
+    claudeLine({ id: 'r1', ts: T0 + 1000, agentId: 'abc123', usage: { input: 5, cacheRead: 40 }, effort: 'xhigh' }),
+    claudeLine({ id: 'r2', ts: T0 + 5000, agentId: 'abc123', usage: { input: 9, cacheWrite: 30, cacheRead: 45 }, effort: 'high' }),
+  ])
+  const scanned = new Aggregator()
+  await scan(scanned)
+  const got = (a: Aggregator): [unknown, unknown, unknown] => [agentOf(a, file).effort, agentOf(a, file).efforts, agentOf(a, file).lastContext]
+  assert.deepEqual(got(scanned), ['high', ['xhigh', 'high'], 84])
+  const before = JSON.parse(JSON.stringify(scanned.toSnapshot())) as Snapshot
+  const old = (before.agents as unknown as Record<string, Record<string, unknown>>)[file]
+  delete old.effort
+  delete old.efforts
+  delete old.lastContext
+  before.agentsRevision = 5
+  const restored = Aggregator.fromSnapshot(before)
+  assert.deepEqual(got(restored), [null, [], null])
+  assert.notEqual(restored.agentsRevision, AGENT_TABLES_REVISION, 'the host replays')
+  const counted = counting(restored)
+  await replayAgents(restored, agentReplayFiles(restored, T0 + 60_000))
+  assert.deepEqual(got(restored), ['high', ['xhigh', 'high'], 84])
+  assert.equal(counting(restored), counted)
+})
+
+test('a nested effort, a proposal\'s text and an error line\'s effort never leave the reader: only the reply\'s own effort reaches the record, the tree and the counts (1.6 §0a.4)', async () => {
+  // The line Claude Code writes, with a top-level `effort` and a tool call whose input carries an
+  // `effort` of its own beside synthetic content — and a rejected request with its `perTurnEffort`.
+  const secret = 'EFFORT-PROPOSAL-CONTENT-3c9e'
+  const home = tmpDir('effort-leak')
+  configureRoots([home], [path.join(home, 'codex')])
+  const dir = path.join(home, 'projects', CLAUDE_SLUG)
+  const main = path.join(dir, `${SESSION}.jsonl`)
+  const file = path.join(dir, SESSION, 'subagents', 'agent-abc123.jsonl')
+  const at = (min: number): number => VNOW - min * 60_000
+  writeLines(main, [claudeLine({ id: 'm1', ts: at(40), sessionId: SESSION, usage: { input: 10 }, final: true, effort: 'low' })])
+  writeLines(file, [
+    claudeLine({ id: 'r1', ts: at(35), agentId: 'abc123', usage: { input: 5, output: 2 }, final: true, effort: 'xhigh' }),
+    claudeLine({
+      id: 'r2', ts: at(30), agentId: 'abc123', usage: { input: 5, output: 2 }, final: true, stopReason: 'tool_use', effort: 'xhigh',
+      content: [{ type: 'tool_use', id: 'toolu_leak_2', name: 'Plan',
+        input: { proposals: [{ effort: 'M', text: `${secret} proposal` }, { effort: 'max', text: `${secret} second` }] } }],
+    }),
+    apiErrorLine({ id: 'e1', ts: at(29), agentId: 'abc123', perTurnEffort: 'medium', text: `${secret} error text` }),
+  ])
+  const agg0 = new Aggregator()
+  await scan(agg0)
+  const live = JSON.stringify(agg0.toSnapshot())
+  const agg = Aggregator.fromSnapshot(JSON.parse(live) as Snapshot)
+  await replayAgents(agg, agentReplayFiles(agg, VNOW))
+  // The reply's own, and nothing else: not the proposals' `M` or `max`, not the error line's
+  // `medium`, not the main session's `low`.
+  assert.deepEqual([agentOf(agg, file).effort, agentOf(agg, file).efforts], ['xhigh', ['xhigh']])
+  assert.ok(fs.readFileSync(file, 'utf8').includes(`${secret} proposal`), 'the fixture lost its proposal')
+  const cfg = makeConfig()
+  const input = makeInput({ agg, cfg, ui: { agentsExpanded: ['s:' + SESSION], agentSelected: 'a:abc123' } })
+  const vm = buildViewModel(input)
+  assert.equal(vm.agents.selected?.rows.find((r) => r.label === 'Effort')?.value, 'xhigh')
+  const session = buildViewModel({ ...input, ui: { ...input.ui, agentSelected: 's:' + SESSION } })
+  assert.equal(session.agents.selected?.rows.find((r) => r.label === 'Agents by effort')?.value, 'xhigh 1')
+  const range = { from: '2026-09-01', to: '2026-09-03' }
+  const outputs: Array<[string, string]> = [
+    ['live snapshot', live], ['snapshot', JSON.stringify(agg.toSnapshot())], ['view model', JSON.stringify(vm)],
+    ['session view model', JSON.stringify(session)], ['markdown', markdownDocument(vm, agentTreeFor(input, 'text'))],
+    ['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)], ['tools export', toolsCsv(agg, range)],
+  ]
+  for (const [what, out] of outputs) {
+    assert.equal(out.includes(secret), false, `${what} holds a proposal's or an error's text`)
+    assert.equal(/"effort":"(M|medium|low)"/.test(out), false, `${what} holds an effort that is no reply's own`)
+    assert.equal(/perTurnEffort|proposals/.test(out), false, `${what} names a field the reader never reads`)
   }
 })

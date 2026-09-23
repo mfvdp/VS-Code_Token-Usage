@@ -117,6 +117,11 @@ export interface ClaudeLineOpts {
   agentId?: string
   /** What a final line gives as its stop reason; `end_turn` unless said otherwise. */
   stopReason?: string
+  /**
+   * 1.6 N8: the line's top-level `effort` — `high` unless said otherwise (Claude Code writes one on
+   * every reply line); null leaves the key out.
+   */
+  effort?: unknown
 }
 
 /** One assistant line as Claude Code writes it, one content block per line. */
@@ -165,7 +170,7 @@ export function claudeLine(o: ClaudeLineOpts): string {
     type: o.type ?? 'assistant',
     uuid: `uuid-${o.id}-${Math.floor(o.ts / 1000)}`,
     timestamp: iso(o.ts),
-    effort: 'high',
+    ...(o.effort === null ? {} : { effort: o.effort === undefined ? 'high' : o.effort }),
     userType: 'external',
     entrypoint: 'cli',
     version: '9.9.9',
@@ -425,6 +430,8 @@ export interface ApiErrorOpts {
   apiError?: string
   /** `quotaLimits.upgradePaths` (280 lines): strings, left out unless given. */
   upgradePaths?: string[]
+  /** 1.6 §0a.4: the line's `perTurnEffort` — null unless given; never read (an effort is a reply's). */
+  perTurnEffort?: unknown
 }
 
 /**
@@ -480,7 +487,7 @@ export function apiErrorLine(o: ApiErrorOpts): string {
   if (o.errorDetails !== undefined) line.errorDetails = o.errorDetails
   if (o.apiError !== undefined) line.apiError = o.apiError
   Object.assign(line, {
-    perTurnEffort: null,
+    perTurnEffort: o.perTurnEffort === undefined ? null : o.perTurnEffort,
     userType: 'external',
     entrypoint: 'cli',
     cwd: '/home/tester/proj-alpha',

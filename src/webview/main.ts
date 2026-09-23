@@ -2166,6 +2166,14 @@ function agentNodes(roots: Payload[]): Payload[] {
  * 1.6 L1: in the tree the panel belongs to its item, and its Copy ID button is reached with Tab
  * from that item — only while it is the tree's current item (`reach`); otherwise the button is
  * out of the Tab order, and the tree stays one stop of it.
+ *
+ * 1.6 L2: under the state, the view model's one-line overview of the node (`overview`) — what an
+ * agent used, how long it ran, how many requests and tool calls — across the whole width, its
+ * label a screen reader's alone; and a row of kind `bar` (the token mix) is drawn across that width
+ * too: its parts as one bar, each part's width its share — set through the CSSOM like every bar of
+ * the page (`data-w`, see applyStyles), never an inline style —, its title the part's words, and
+ * under the bar the same words, which is what a screen reader reads: the bar itself is hidden from
+ * it. A bar without a part this page can draw is its words alone.
  */
 function agentDetails(d: Payload, node: Payload, depth: number | null, reach = true): string {
   const derived = node && typeof node.derived === 'boolean' ? node.derived : d.derived;
@@ -2184,7 +2192,8 @@ function agentDetails(d: Payload, node: Payload, depth: number | null, reach = t
     if (!r || typeof r !== 'object') continue;
     const live = !placed && r.live === 'ago';
     if (live) placed = true;
-    const wide = r.kind === 'sentence' ? ' class="ag-wide"' : '';
+    const bar = r.kind === 'bar';
+    const wide = r.kind === 'sentence' || bar ? ' class="ag-wide"' : '';
     const hasNote = typeof r.note === 'string' && r.note !== '';
     const note = hasNote ? '<span class="meta">' + esc(r.note) + '</span>' : '';
     // One button per panel, on the first row that asks for it.
@@ -2194,18 +2203,48 @@ function agentDetails(d: Payload, node: Payload, depth: number | null, reach = t
     if (copy) copied = true;
     // An id has no space to break at, and a launch's tool_use id is wider than the value column
     // of a narrow sidebar: it may break anywhere rather than run out of the panel.
-    const value = copy ? '<span class="ag-id">' + orDash(r.value) + '</span>' : orDash(r.value);
+    const value = copy ? '<span class="ag-id">' + orDash(r.value) + '</span>' : bar ? agentMix(r) : orDash(r.value);
     rows += '<dt' + wide + '>' + orDash(r.label) + '</dt><dd' + wide + '>' + value
       + (live ? ' · ' + agoBeside : note ? (wide ? ' · ' : ' ') + note : '')
       + copy + '</dd>';
   }
   const own = placed ? '' : '<dt>' + lastLabel + '</dt><dd>' + ago + '</dd>';
   const ind = typeof depth === 'number' && depth > 0 ? ' data-ind="' + Math.min(depth, AGENT_MAX_DEPTH) + '"' : '';
+  const overview = typeof d.overview === 'string' && d.overview !== ''
+    ? '<dt class="sr">' + tr('Summary') + '</dt><dd class="ag-wide ag-overview">' + agentClauses(d.overview) + '</dd>' : '';
   return '<div class="ag-details"' + ind + ' role="region" aria-label="' + tr('Details') + '">'
     + '<div class="name">' + orDash(d.title) + '</div><dl>'
     + '<dt class="ag-wide">' + tr('State') + '</dt><dd class="ag-wide">'
     + agentGlyph(agentState(d.state), derived)
-    + ' ' + orDash(d.stateText) + '</dd>' + own + rows + '</dl></div>';
+    + ' ' + orDash(d.stateText) + '</dd>' + overview + own + rows + '</dl></div>';
+}
+
+/**
+ * 1.6 L2: a line of the view model's clauses joined by " · " — the overview, the token mix's words —
+ * with each clause kept whole, so a narrow panel breaks the line between two clauses and never
+ * between a figure and its unit ("60 %", "29 min"). The words stay the view model's, character for
+ * character.
+ */
+function agentClauses(text: Payload): string {
+  return String(text).split(' · ').map((c: string) => '<span class="nobr">' + esc(c) + '</span>').join(' · ');
+}
+
+/** 1.6 L2: the colour of each part of an agent's token mix — the Tokens section's own for the same kind. */
+const MIX_CLASS: Record<string, string> = { fresh: 'c1', cacheWrite: 'c2', cacheRead: 'c4', output: 'c5' };
+
+/**
+ * 1.6 L2: a bar row of the details — the token mix. Its parts in their order, each as wide as its
+ * share (a finite number from 0 to 1; anything else is not drawn), then the row's words. The bar is
+ * the eye's; the words say the same to everyone.
+ */
+function agentMix(r: Payload): string {
+  const parts = (Array.isArray(r.parts) ? r.parts : []).filter((p: Payload) => p && typeof p === 'object'
+    && typeof p.share === 'number' && isFinite(p.share) && p.share > 0 && p.share <= 1 && word(MIX_CLASS, p.part));
+  const words = typeof r.value === 'string' && r.value !== '' ? agentClauses(r.value) : '–';
+  if (!parts.length) return words;
+  return '<span class="ag-mix" aria-hidden="true">' + parts.map((p: Payload) => '<i class="cs ' + word(MIX_CLASS, p.part)
+    + '" data-w="' + (p.share * 100).toFixed(2) + '" title="' + esc(p.label) + '"></i>').join('') + '</span>'
+    + '<span class="ag-mixtext">' + words + '</span>';
 }
 
 /**

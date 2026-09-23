@@ -33,8 +33,8 @@
 
 import {
   AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS,
-  MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeDetails, NodeState, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS,
-  RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS, TreeNode, WEEKDAY_NAMES_WITHIN_MS,
+  MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, MixPart, NodeDetails, NodeState, PER_MINUTE_FROM_MS, RESUMED_AFTER_MS,
+  ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS, TreeNode, WEEKDAY_NAMES_WITHIN_MS,
 } from './agentTree'
 import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
@@ -43,8 +43,8 @@ import { compact, full } from './render'
 import { durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, dayOf, formatTime, weekdayWords } from './time'
 import {
-  AgentLaunch, AgentRec, Attribution, Bucket, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RejectedRequest, RunLaunch,
-  RunRec, SessionRec, emptyBucket,
+  AgentLaunch, AgentRec, Attribution, Bucket, Effort, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RejectedRequest,
+  RunLaunch, RunRec, SessionRec, emptyBucket,
 } from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
@@ -763,6 +763,8 @@ interface Member {
   /** D4: a collected member with a record: its first line and its last activity; null for one without. */
   startTs: number | null
   lastTs: number | null
+  /** N8: the effort of its newest reply; null for a member without a record, and for one whose replies carried none. */
+  effort: Effort | null
 }
 
 function noTally(): AgentTally {
@@ -1063,23 +1065,25 @@ function recordedRows(o: Outcome | undefined, now: number, tcfg: TimeConfig): De
 }
 
 /**
- * Turns, the token kinds of the totals table and the tool calls. Nothing counted is a dash
- * throughout — a record without a request has no zero to report. Output is a lower bound when a
- * reply never reached a line with a stop reason, and its note says how many of the replies did
- * not (D10, see lowerBoundTextOf) — the same words the row's mark carries.
+ * Requests — 1.5 called them turns; a request is what the API was asked, and what the overview
+ * line counts (L2) —, the token kinds of the totals table and the tool calls. Nothing counted is a
+ * dash throughout — a record without a request has no zero to report. Output is a lower bound when
+ * a reply never reached a line with a stop reason, and its note says how many of the replies did
+ * not (D10, see lowerBoundTextOf) — the same words the row's mark carries. A session leaves out the
+ * usage: its `Own transcript` row, first in its details, is that figure already (L2).
  */
-function countRows(c: Counters | null): DetailRow[] {
+function countRows(c: Counters | null, usage = true): DetailRow[] {
   if (c === null || c.requests === 0) {
-    return [t('Turns'), t('Usage'), t('Fresh input'), t('Cache write 5m'), t('Cache write 1h'), t('Cache read'),
-      t('Output'), t('Reasoning'), t('Tool calls')].map((label) => ({ label, value: '–' }))
+    return [t('Requests'), ...(usage ? [t('Usage')] : []), t('Fresh input'), t('Cache write 5m'), t('Cache write 1h'),
+      t('Cache read'), t('Output'), t('Reasoning'), t('Tool calls')].map((label) => ({ label, value: '–' }))
   }
   const b = bucketOf(c, true)
   const output: DetailRow = { label: t('Output'), value: tokens(c.output) }
   const bound = lowerBoundTextOf(c)
   if (bound !== null) output.note = bound
   return [
-    { label: t('Turns'), value: full(c.requests) },
-    { label: t('Usage'), value: compact(billable(b)) },
+    { label: t('Requests'), value: full(c.requests) },
+    ...(usage ? [{ label: t('Usage'), value: compact(billable(b)) }] : []),
     { label: t('Fresh input'), value: tokens(freshInput(b)) },
     { label: t('Cache write 5m'), value: tokens(Math.max(0, c.cacheWrite - c.cacheWrite1h)) },
     { label: t('Cache write 1h'), value: tokens(c.cacheWrite1h) },
@@ -1113,6 +1117,174 @@ function reportRows(l: AgentLaunch | null): DetailRow[] {
 
 function depthText(v: unknown): string {
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 ? String(v) : '–'
+}
+
+/**
+ * L2 (1.6): an agent's line under its state — "1.2K in 29 min 00 s · 5 requests · 3 tool calls": its
+ * usage, its duration, its requests and its tool calls. One sentence for each count that is one, so
+ * a translator has the whole line each time.
+ */
+function overviewOf(c: Counters, duration: string): string {
+  const usage = usageText(c)
+  const requests = full(c.requests)
+  const calls = full(c.toolCalls)
+  if (c.requests === 1 && c.toolCalls === 1) return t('{0} in {1} · 1 request · 1 tool call', usage, duration)
+  if (c.requests === 1) return t('{0} in {1} · 1 request · {2} tool calls', usage, duration, calls)
+  if (c.toolCalls === 1) return t('{0} in {1} · {2} requests · 1 tool call', usage, duration, requests)
+  return t('{0} in {1} · {2} requests · {3} tool calls', usage, duration, requests, calls)
+}
+
+/** "76 %", a whole percent — "<1 %" for a share that is there but rounds to none. */
+function shareText(share: number): string {
+  return share < 0.005 ? '<1 %' : `${full(Math.round(share * 100))} %`
+}
+
+/**
+ * L2 (1.6): an agent's token mix — how its tokens split between fresh input, cache write, cache
+ * read and output, as a bar and in words: "fresh 2 % · cache write 18 % · cache read 76 % · output
+ * 4 %". Of the four together (a share of the usage alone would leave the cache reads out, which is
+ * most of what an agent's requests carry); a kind with no token is left out, and the parts' shares
+ * sum to 1. Only for an agent with a counted request: nothing counted has no mix.
+ */
+function mixRows(c: Counters): DetailRow[] {
+  if (c.requests <= 0) return []
+  const kinds: Array<[MixPart['part'], number]> = [
+    ['fresh', freshInput(bucketOf(c, true))], ['cacheWrite', c.cacheWrite], ['cacheRead', c.cacheRead], ['output', c.output],
+  ]
+  const total = kinds.reduce((sum, [, n]) => sum + n, 0)
+  if (!(total > 0)) return []
+  // A switch rather than a table: `t()` needs a literal message.
+  const words = (part: MixPart['part'], share: string): string => {
+    switch (part) {
+      case 'fresh': return t('fresh {0}', share)
+      case 'cacheWrite': return t('cache write {0}', share)
+      case 'cacheRead': return t('cache read {0}', share)
+      default: return t('output {0}', share)
+    }
+  }
+  const parts: MixPart[] = kinds.filter(([, n]) => n > 0)
+    .map(([part, n]) => ({ part, share: n / total, label: words(part, shareText(n / total)) }))
+  return [{ label: t('Token mix'), value: parts.map((p) => p.label).join(' · '), kind: 'bar', parts }]
+}
+
+/**
+ * L2: the context an agent's newest request carried — its input, cache write and cache read, the
+ * running maximum over the lines of that reply (the aggregator's `lastContext`) —, what the next
+ * request would have started from. A dash for an agent nothing of which was counted, and for a
+ * record that does not say (one from before 1.6, until the replay fills it in).
+ */
+function contextRows(r: AgentRec, c: Counters): DetailRow[] {
+  const v: unknown = r.lastContext
+  if (c.requests <= 0 || typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return [{ label: t('Context at the end'), value: '–' }]
+  return [{ label: t('Context at the end'), value: compact(v), note: t("the last request's input, cache reads and writes") }]
+}
+
+/**
+ * L2: what an agent used per minute of its duration — from PER_MINUTE_FROM_MS on; below it a rate
+ * is a division by a fraction of a minute, a burst of one reply rather than a pace.
+ */
+function perMinuteRows(c: Counters, ms: number): DetailRow[] {
+  if (c.requests <= 0 || !Number.isFinite(ms) || ms < PER_MINUTE_FROM_MS) return []
+  return [{ label: t('Per minute'), value: compact((billable(bucketOf(c, true)) * 60_000) / ms) }]
+}
+
+const EFFORT_LEVELS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+
+/** A level of effort, checked again — a snapshot of another build's making may carry anything — or null. */
+function effortLevel(v: unknown): Effort | null {
+  return typeof v === 'string' && EFFORT_LEVELS.has(v) ? v as Effort : null
+}
+
+/**
+ * N8 (1.6): the efforts an agent's replies were written at, in the order first seen, each checked
+ * again; the newest reply's alone when the record lists none.
+ */
+function effortsOf(r: AgentRec): Effort[] {
+  const list: Effort[] = []
+  for (const e of Array.isArray(r.efforts) ? r.efforts : []) {
+    const level = effortLevel(e)
+    if (level !== null && !list.includes(level)) list.push(level)
+  }
+  const last = effortLevel(r.effort)
+  return list.length === 0 && last !== null ? [last] : list
+}
+
+/** "xhigh", or "high, then xhigh" where the replies' effort changed; '–' where none was recorded. */
+function effortText(list: readonly Effort[]): string {
+  if (list.length === 0) return '–'
+  return list.slice(1).reduce<string>((acc, e) => t('{0}, then {1}', acc, e), list[0])
+}
+
+/**
+ * N8: the agents below a run or a session by the effort of their newest reply — "xhigh 412 · max 12
+ * · – 3", the most frequent first; `–` counts the ones with none recorded: a launch nobody has read
+ * a line of, an agent its journal started without a transcript, one whose replies carried none. The
+ * members the tally counts, each once (its `started`). None, no row.
+ */
+function effortCountRows(e: Entry): DetailRow[] {
+  const counts = new Map<string, number>()
+  const note = (effort: Effort | null): void => {
+    const k = effort ?? '–'
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  for (const x of preorder(e)) {
+    if (x !== e && isAgentLike(x)) note(x.effort)
+    for (const m of x.collected) note(m.effort)
+  }
+  if (counts.size === 0) return []
+  const value = [...counts].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0])).map(([k, n]) => `${k} ${full(n)}`).join(' · ')
+  return [{ label: t('Agents by effort'), value }]
+}
+
+/**
+ * The most intervals that share a moment, both ends included — two agents whose lines meet at one
+ * millisecond ran at once. A sweep over the starts and the ends, a start before an end at the same
+ * time.
+ */
+export function mostAtOnce(spans: ReadonlyArray<readonly [number, number]>): number {
+  const events: Array<[number, number]> = []
+  for (const [a, b] of spans) {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue
+    events.push([Math.min(a, b), 1], [Math.max(a, b), -1])
+  }
+  events.sort((x, y) => x[0] - y[0] || y[1] - x[1])
+  let now = 0
+  let most = 0
+  for (const [, step] of events) {
+    now += step
+    if (now > most) most = now
+  }
+  return most
+}
+
+/**
+ * L2: how many of a run's agents worked at the same time, at most — over each member's first line
+ * to its last activity (a collected member with a record included; one its journal started without a
+ * transcript has no time to place). A dash for a run none of whose members has one.
+ */
+function parallelismRows(w: Entry): DetailRow[] {
+  const spans: Array<[number, number]> = []
+  for (const x of preorder(w)) {
+    if (x !== w && x.kind === 'agent' && x.startTs !== null && x.lastTs !== null) spans.push([x.startTs, x.lastTs])
+    for (const m of x.collected) if (m.startTs !== null && m.lastTs !== null) spans.push([m.startTs, m.lastTs])
+  }
+  const most = mostAtOnce(spans)
+  return [{ label: t('Parallelism'), value: most > 0 ? t('up to {0} at once', full(most)) : '–' }]
+}
+
+/**
+ * L2: where a workflow agent stands in its run by usage — "3 of 41 by usage" —, among the run's
+ * agents with a counted request (an agent with a bigger usage ranks before it; equal ones share a
+ * place). Only in a run of at least two such agents, and only for one of them.
+ */
+function rankRows(e: Entry, run: Entry | null): DetailRow[] {
+  if (run === null || e.counters === null || e.counters.requests <= 0) return []
+  const counted = [...preorder(run)].filter((x) => x.kind === 'agent' && x.counters !== null && x.counters.requests > 0)
+  if (counted.length < 2) return []
+  const used = (x: Entry): number => (x.counters === null ? 0 : billable(bucketOf(x.counters, true)))
+  const own = used(e)
+  const place = 1 + counted.filter((x) => used(x) > own).length
+  return [{ label: t('Rank in run'), value: t('{0} of {1} by usage', full(place), full(counted.length)) }]
 }
 
 // ---------------------------------------------------------------------------
@@ -1172,6 +1344,10 @@ interface Entry {
   collected: Member[]
   /** N1: the tally of the members below the node, where it carries one; null elsewhere. */
   tally: AgentTally | null
+  /** N8: an agent's effort, of its newest reply; null for every other node, and for an agent whose replies carried none. */
+  effort: Effort | null
+  /** L2: the details' line under the state — an agent's with a counted request; null elsewhere. */
+  overview: string | null
   /** Built on demand: only the selected node's rows are ever needed. */
   rows: () => DetailRow[]
 }
@@ -1452,6 +1628,8 @@ function collectorEntry(sessionId: string, wf: string, members: Member[]): Entry
     rejected: null,
     collected: members,
     tally: null,
+    effort: null,
+    overview: null,
     rows: () => [],
   }
   e.rows = () => {
@@ -1514,8 +1692,13 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     rejected: null,
     collected: [],
     tally: null,
+    effort: null,
+    overview: null,
     rows: () => [],
   }
+  // L2: the session's two figures first (D5) — its own transcript's usage is the first of them,
+  // so the counts that follow leave the usage out, which 1.5 printed a second time —, then its
+  // agents: how many, how many ended on a rejected request, and by effort (N8).
   root.rows = () => [
     { label: t('Own transcript'), value: root.usage },
     ...(usageAgents !== null
@@ -1527,9 +1710,10 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     ...(env.attribution !== 'none' ? [{ label: t('Project'), value: root.sub ?? '–' }] : []),
     { label: t('Models'), value: modelsOf(main?.models).join(', ') || '–' },
     ...timeRows(root.startTs, root.lastTs, now, tcfg, true),
-    ...countRows(mainCounters),
+    ...countRows(mainCounters, false),
     { label: t('Agents'), value: full(membersBelow(root)) },
     ...endedRejectedRows(root),
+    ...effortCountRows(root),
     idRow(a.sessionId),
   ]
 
@@ -1565,6 +1749,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         rejected: null,
         collected: [],
         tally: null,
+        effort: null,
+        overview: null,
         rows: () => [],
       }
       attach(w, root)
@@ -1625,7 +1811,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       }
       list.push({
         state: st.state, superseded: next !== null, rejected, journalFailed: journal !== null && journalOutcome(journal) === 'failed',
-        startTs: first, lastTs: activity,
+        startTs: first, lastTs: activity, effort: effortLevel(r.effort),
       })
       continue
     }
@@ -1662,26 +1848,44 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       rejected,
       collected: [],
       tally: null,
+      effort: effortLevel(r.effort),
+      // L2: what it used, how long it ran, how many requests and tool calls it made — the line under
+      // its state. An agent nothing of which was counted has none of the four.
+      overview: counted ? overviewOf(c, durationText(activity - first)) : null,
       rows: () => [],
     }
-    e.rows = () => [
-      { label: t('Type'), value: type ?? '–' },
-      { label: t('Models'), value: models.join(', ') || alias || '–' },
-      idRow(r.agentId),
-      { label: t('Depth'), value: depthText(r.meta?.spawnDepth) },
-      ...timeRows(e.startTs, e.lastTs, now, tcfg, false, counted),
-      ...recordedRows(st.resumed, now, tcfg),
-      ...countRows(c),
-      ...rejectedRows(rejected, now, tcfg),
-      { label: t('Spawned by'), value: spawnedBy(spawnerFileOf.get(e) ?? null) },
-      // The run by the name its row carries (N6): the rows are built once the tree is.
-      { label: t('Workflow run'), value: wf !== null ? workflows.get(wf)?.label ?? runIdName(wf) : '–' },
-      // D7: which attempt at its step this agent is, where the journal started the step more than once.
-      ...(attempts >= 2 && journal !== null && Number.isInteger(journal.attempt) && journal.attempt >= 1
-        ? [{ label: t('Attempt'), value: t('{0} of {1} of this step', full(journal.attempt), full(attempts)) }]
-        : []),
-      ...reportRows(launch),
-    ]
+    // L2 (1.6): the details in the order a reader asks — what the tokens were (the mix), how the
+    // agent stands in its run, the context it ended with and its pace, then who it is, when it ran,
+    // what it counted, why it ended, where it came from and Claude Code's own report.
+    e.rows = () => {
+      const by = spawnedBy(spawnerFileOf.get(e) ?? null)
+      return [
+        ...mixRows(c),
+        ...rankRows(e, wf !== null ? workflows.get(wf) ?? null : null),
+        ...contextRows(r, c),
+        ...perMinuteRows(c, activity - first),
+        { label: t('Type'), value: type ?? '–' },
+        { label: t('Models'), value: models.join(', ') || alias || '–' },
+        // N8: the effort its replies were written at.
+        { label: t('Effort'), value: effortText(effortsOf(r)) },
+        idRow(r.agentId),
+        { label: t('Depth'), value: depthText(r.meta?.spawnDepth) },
+        ...timeRows(e.startTs, e.lastTs, now, tcfg, false, counted),
+        ...recordedRows(st.resumed, now, tcfg),
+        ...countRows(c),
+        ...rejectedRows(rejected, now, tcfg),
+        // A workflow agent no launch names was started by its run, which the next row names: 1.5's
+        // "Spawned by –" on every one of them said nothing.
+        ...(wf !== null && by === '–' ? [] : [{ label: t('Spawned by'), value: by }]),
+        // The run by the name its row carries (N6): the rows are built once the tree is.
+        { label: t('Workflow run'), value: wf !== null ? workflows.get(wf)?.label ?? runIdName(wf) : '–' },
+        // D7: which attempt at its step this agent is, where the journal started the step more than once.
+        ...(attempts >= 2 && journal !== null && Number.isInteger(journal.attempt) && journal.attempt >= 1
+          ? [{ label: t('Attempt'), value: t('{0} of {1} of this step', full(journal.attempt), full(attempts)) }]
+          : []),
+        ...reportRows(launch),
+      ]
+    }
     byAgent.set(r.agentId, e)
     spawnerFileOf.set(e, text(r.spawnerFile) ?? text(launch?.file))
   }
@@ -1734,6 +1938,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       rejected: null,
       collected: [],
       tally: null,
+      effort: null,
+      overview: null,
       rows: () => [
         { label: t('Type'), value: text(l.typeHint) ?? '–' },
         { label: t('Models'), value: text(l.modelHint) ?? '–' },
@@ -1809,7 +2015,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const siblingRuns = members.some((m) => m.state === 'running') || recordsOnly.some((m) => m.state === 'running')
     const only: Member[] = run === null ? [] : (journalOnlyOf.get(wf) ?? []).map((j) => ({
       state: journalOnlyState(j, run, siblingRuns, now), superseded: text(j.supersededBy) !== null, rejected: null,
-      journalFailed: journalOutcome(j) === 'failed', startTs: null, lastTs: null,
+      journalFailed: journalOutcome(j) === 'failed', startTs: null, lastTs: null, effort: null,
     }))
     // D4: every member without a counted reply in one collector, the run's last child.
     const collected = [...recordsOnly, ...only]
@@ -1842,26 +2048,30 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     w.fullLabel = w.label
     const dropped = run !== null && typeof run.agentsDropped === 'number' && Number.isInteger(run.agentsDropped)
       && run.agentsDropped > 0 ? run.agentsDropped : 0
-    // A run whose agents nobody has seen yet has no count to state: '–', never an invented 0.
-    const agentsValue = tally.started > 0 ? full(tally.started) : '–'
-    const agentsRow: DetailRow = dropped > 0
-      ? {
-        label: t('Agents'), value: agentsValue,
-        note: t('{0} further agents not listed', full(dropped)), kind: 'sentence',
-      }
-      : { label: t('Agents'), value: agentsValue }
+    // L2: the run's details open with its tally, in words — "427 started, 112 done, 12 failed, 295
+    // retried, about 8 unknown", as a collector's do. A run whose agents nobody has seen yet has no
+    // count to state: '–', never an invented 0.
+    const agentsRow: DetailRow = tally.started === 0
+      ? { label: t('Agents'), value: '–' }
+      : dropped > 0
+        ? { label: t('Agents'), value: tallySpoken(tally), note: t('{0} further agents not listed', full(dropped)), kind: 'sentence' }
+        : { label: t('Agents'), value: tallySpoken(tally), kind: 'sentence' }
     // N4: a resumed run was launched more than once — the ends of the earlier launches are its
     // history, and only the latest launch's decides the run.
     const launchesRow: DetailRow[] = launches.length >= 2
       ? [{ label: t('Launches'), value: t('{0} — resumed {1} time(s)', full(launches.length), full(launches.length - 1)) }]
       : []
+    // L2: the tally, how many of its agents worked at once, its times, its counts, how its agents
+    // ended and at what effort, how often it was launched, and its ID.
     w.rows = () => [
       agentsRow,
-      ...launchesRow,
+      ...parallelismRows(w),
       ...timeRows(w.startTs, w.lastTs, now, tcfg),
       ...recordedRows(st.resumed, now, tcfg),
       ...countRows(sum),
       ...endedRejectedRows(w),
+      ...effortCountRows(w),
+      ...launchesRow,
       idRow(wf),
     ]
   }
@@ -1982,7 +2192,7 @@ function payloadOf(
 function detailsOf(e: Entry): NodeDetails {
   return {
     key: e.key, title: e.fullLabel, state: e.state, derived: derivedOf(e.state), stateText: e.stateText,
-    lastTs: e.lastTs, id: e.id, rows: e.rows(),
+    lastTs: e.lastTs, overview: e.overview, id: e.id, rows: e.rows(),
   }
 }
 

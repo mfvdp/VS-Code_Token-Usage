@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import {
   AGENT_RETENTION_DAYS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
-  SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, WEEKDAY_NAMES_WITHIN_MS,
+  PER_MINUTE_FROM_MS, SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
 import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
@@ -366,7 +366,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
     // 1.6 §0a.3 (P4): the launch blocks of a reply, and the result that answers a `Workflow` call.
     'the launch blocks', 'the workflow result',
     // 1.6 §0a.2 (P5a): an agent's rejected request, and the limit that refused it.
-    'a rejected request', 'a rejected request\'s limit']) {
+    'a rejected request', 'a rejected request\'s limit',
+    // 1.6 §0a.5 (P6): the tool calls of a reply; §0a.4 (P9): the effort of a response.
+    'the tool calls of a reply', 'the effort of a response']) {
     assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
   }
   for (const row of READ_CONTRACT) {
@@ -381,7 +383,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
   // `label` and `phase`; §0a.3 (P4): a `Workflow` call's `script` and its result's `scriptPath`
   // and `transcriptDir`; §0a.2 (P5a): an API error line's `errorDetails`.
   for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result', 'label', 'phase',
-    'script', 'scriptPath', 'transcriptDir', 'errorDetails']) {
+    'script', 'scriptPath', 'transcriptDir', 'errorDetails',
+    // 1.6 §0a.4 (P9): an error line's effort of its own, which the effort's reader never names.
+    'perTurnEffort']) {
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
@@ -534,6 +538,8 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`has not changed for **${SILENT_AFTER_MS / 60_000} minutes**`, 'when a running agent\'s silence is stated'],
     // 1.6 N6 (P7): how far back a session's or a run's start is named by its weekday.
     [`within the last **${WEEKDAY_NAMES_WITHIN_MS / 86_400_000} days**`, 'when a start is named by its weekday'],
+    // 1.6 L2 (P9): from how long an agent ran on its details say what it used per minute.
+    [`From **${PER_MINUTE_FROM_MS / 60_000} minute** on, what it used **per minute**`, 'when an agent\'s pace is stated'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
     [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],

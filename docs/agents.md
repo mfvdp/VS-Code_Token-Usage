@@ -500,26 +500,51 @@ the row (see [Opening and selection](#opening-and-selection)). The panel is draw
 twice.
 `Escape` anywhere in the section closes the details and puts the keyboard focus back on the row
 they stood under — in the tree on its item —; while a hover card or a sparkline's tip is open, the first `Escape` closes that
-and the next one the details. For an agent: type,
-models, its ID, depth, started, duration, last activity (with a live `… ago` beside it) and —
-for an agent that wrote on after its outcome — what was recorded, then turns,
-usage, fresh input, cache write 5 m and 1 h, cache read, output — with its lower bound, where it is
-one, in numbers — reasoning and tool calls, then —
-when the API rejected its last request — the `Last request` row, then
-who spawned it, its workflow run and — where the run's journal started its step more than once —
-which attempt it was. A session opens with its two figures — `Own transcript`, and
+and the next one the details.
+
+**An agent's details**, in this order. Under the state and its sentence, one line of what the
+agent came to — `1.2K in 29 min 00 s · 5 requests · 3 tool calls`: its usage, its duration, its
+requests and its tool calls. Then its **token mix**: one bar of its fresh input, cache write,
+cache read and output, each part as wide as its share of the four together, in the Tokens
+section's colours, and the same in words under it — `fresh 2 % · cache write 18 % · cache read
+76 % · output 4 %`, which is what a screen reader and the markdown report get (in a forced-colours
+theme each part has a border of the text's colour). For an agent of a workflow run with at least
+two agents that counted a request, its **rank in the run** by usage — `3 of 41 by usage`, an
+agent with a bigger usage before it, equal ones sharing a place. The **context at the end**: the
+input, cache reads and cache writes of its newest request — what its next request would have
+started from (Claude Code's report below counts the reply's output on top of it). From
+**1 minute** on, what it used **per minute** of its duration. Then its type, its models, the
+**effort** its replies were written at — the word Claude Code writes, `xhigh`, or `high, then
+xhigh` where it changed —, its ID, depth, started, duration, last activity (with a live `… ago`
+beside it) and — for an agent that wrote on after its outcome — what was recorded, then its
+requests (the requests to the API; 1.5 called them turns), usage, fresh input, cache write 5 m
+and 1 h, cache read, output — with its lower bound, where it is one, in numbers — reasoning and
+tool calls, then — when the API rejected its last request — the `Last request` row, then who
+spawned it — left out for an agent of a workflow run that no launch names: its run started it,
+and the next row names the run —, its workflow run and — where the run's journal started its
+step more than once — which attempt it was, and last Claude Code's report, where there is one. An
+agent nothing of which was counted has no summary line, no mix, no rank and no pace, and dashes
+for its figures.
+
+A session opens with its two figures — `Own transcript`, and
 `Agents, last 7 days` with what it is not: *not added to the own figure — the two cover different
 spans* — then its project (only while attribution allows one), its models, `Since first line`
 and `Span` in place of a start and a duration, the last activity, the counts of its own
-transcript, how many agents it has, how many of them ended on a rejected request, by reason, and
-its ID; a collector its tally in words (`266 started, 255 done, 3 failed, about 8 unknown`), a
+transcript — its usage is the `Own transcript` row already —, how many agents it has, how many of
+them ended on a rejected request, by reason, its **agents by effort** — `xhigh 412 · max 12 · – 3`,
+the most frequent first, `–` counting the ones with none recorded: a launch nobody has read a line
+of, an agent its journal started without a transcript, one whose replies carried none — and its
+ID; a collector its tally in words (`266 started, 255 done, 3 failed, about 8 unknown`), a
 `Usage` of `–` with why — *These agents were started, but none of them wrote a reply that could be
 counted — their transcripts hold no response, or only rejected requests.* — and how many of them
 ended on a rejected request, by reason, and no ID, since it stands for no one identifier; a
-workflow run how many agents it has — the ones its journal started without a counted transcript
-included, and how many it did not list —, how often it was launched when it was resumed, its times, the end its parent
-recorded when an agent wrote on after it, the counts summed over its agents, how many of them
-ended on a rejected request, by reason, and its ID; a launch
+workflow run its tally in words — `427 started, 112 done, 12 failed, 295 retried, about 8
+unknown`, the agents its journal started without a counted transcript included — and how many
+agents it did not list, its **parallelism** — `up to 7 at once`, the most of its agents whose time
+from their first line to their last activity overlapped, both ends included —, its times, the end
+its parent recorded when an agent wrote on after it, the counts summed over its agents, how many
+of them ended on a rejected request, by reason, its agents by effort, how often it was launched
+when it was resumed, and its ID; a launch
 the type and model it asked for,
 its ID, when it was made and who made it. Anything absent is `–`, and a record without a single
 request shows dashes, never zeros. Every row says itself how it is laid out — a figure beside its
@@ -562,7 +587,7 @@ Everything comes from the directory Token Pace already reads for the token count
 
 | File | Taken from it | Never read |
 |---|---|---|
-| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); a nested agent lies flat beside the one that spawned it | any text, and a tool call's `input` |
+| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); of a reply's line its top-level `effort` — one of `low`, `medium`, `high`, `xhigh` and `max`, any other value none; a nested agent lies flat beside the one that spawned it | any text, a tool call's `input` — and an `effort` inside it —, and an error line's `perTurnEffort` |
 | `agent-<id>.meta.json` beside each agent transcript | `agentType`, `model`, `spawnDepth`, `toolUseId` — from a file of at most 64 KB, never through a link | `description`, `prompt`, and every other field |
 | `<session>/subagents/workflows/<run>/journal.jsonl` | `type`, `key` and `agentId` at the head of each line, matched on the raw line — a line of at most 16 KB without that head is parsed for the same three, a longer one skipped and counted; the `key` is compared within the journal, never kept: with the keys of the same journal's other lines, to tell a step that was started again from a new one, and it is never stored, shown, exported or logged | the `result`, `label` and `phase` a line carries |
 | the transcript that launched an agent — the session's, or another agent's | an `Agent` (or `Task`) tool call: its `id` and three fields of its input, `subagent_type`, `model` and `run_in_background` | the input's `description` and `prompt` |
@@ -592,8 +617,9 @@ last time, the token counts, the number of tool calls and the recorded result wi
 word for it (one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`,
 `stopped`), and for an agent its last rejected request — its time, its HTTP status, its error
 kind and its limit, each one of the values listed above — an agent whose transcript holds nothing
-but rejected requests has a record from the first of them, its counts all zero —, and the name of
-its last tool call with that line's time; per launch its tool-call id, the type and model it asked for, whether it runs in the
+but rejected requests has a record from the first of them, its counts all zero —, the name of
+its last tool call with that line's time, the effort of its newest reply and every other one its
+replies carried (at most the five levels), and the context of its newest request — a count; per launch its tool-call id, the type and model it asked for, whether it runs in the
 background, its result with that word and the parent's three totals; per `Workflow` call its
 tool-call id, the run id its result named, when it was made, and the run's end with the parent's
 word for it; per workflow run the agents

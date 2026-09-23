@@ -24,6 +24,8 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | Agent states done, failed and stopped | the parent's tool result or task notification, or the workflow run's journal | **recorded** | on file change; the agent tree is pushed at most every 2 s |
 | Agent states running and unknown, sessions active and idle | the time of a transcript's last response, or of the launch | **derived** (`~` in the glyph's title), with the sentence it rests on | the same |
 | Report from Claude Code of a sync agent | the tool result that returns the agent | Claude Code's own figure — the context of the agent's last request with its reply, not what it used; shown, never added to a total | – |
+| An agent's context at the end, token mix, rank in its run, usage per minute | the agent's transcript — the counted replies | **exact** for what was counted; the context is its newest request's input, cache write and cache read, without the reply | on file change |
+| An agent's effort | the top-level `effort` of its replies' lines | **recorded** — Claude Code's own word, one of five | on file change |
 | API cost | token counts × a dated price table | **estimate** (`~`) | table checked 2026-09-06 |
 | Burn rate, ETA, end-of-window, reset retrospective | the stored quota history | **estimate**, with a stated confidence and “based on *N* readings” | needs several readings |
 | Tokens per percentage point (calibration) | quota history ÷ local tokens | **observation about your data**, off by default | – |

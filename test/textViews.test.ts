@@ -888,7 +888,7 @@ function agentVm(select = false): { vm: ViewModel; agentKey: string; text: Agent
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null, lastTool: null, lastToolTs: null,
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null, lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
   }
   const pending: AgentLaunch = {
     toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
@@ -960,8 +960,17 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   assert.equal(lines[head + 2], '| Detail | Value |')
   assert.equal(lines[head + 3], '|---|---|')
   const rows = lines.slice(head + 4).filter((l) => l.startsWith('| '))
-  assert.equal(rows.length, 1 + d.rows.length, 'the state and every row, once')
+  // 1.6 P9 (L2, pinned and changed): the state, the line under it, every row — once each.
+  assert.equal(rows.length, 2 + d.rows.length, 'the state, the overview and every row, once')
   assert.equal(rows[0], `| State | ${d.stateText} |`)
+  assert.ok(d.overview)
+  assert.equal(rows[1], `| Summary | ${d.overview} |`)
+  assert.equal(d.overview, '1.2K in 19 min 00 s · 5 requests · 3 tool calls')
+  // The token mix is its words in the table; the bar is the page's.
+  const mix = d.rows.find((r) => r.kind === 'bar')
+  assert.ok(mix)
+  assert.ok(rows.includes(`| Token mix | ${mix.value} |`), rows.join('\n'))
+  assert.match(mix.value, /^fresh \d+ % · (cache write \d+ % · )?(cache read \d+ % · )?output \d+ %$/)
   assert.ok(rows.includes('| Type | Explore |'), rows.join('\n'))
   assert.ok(rows.includes('| Last activity | 11:59 · 1 min ago |'), rows.join('\n'))
   assert.ok(rows.includes('| Spawned by | Session Thu 09:00 · sess-alp |'), rows.join('\n'))
@@ -996,7 +1005,7 @@ test('an agent that ended on a rejected request: its sentence and its Last reque
     spawnerFile: sessionFile, firstTs: NOW - 40 * 60_000, lastTs: NOW - 30 * 60_000, models: ['claude-opus-4-6'],
     ...counts, outcome: null, outcomeTs: null, outcomeStatus: null,
     rejected: { at: NOW - 29 * 60_000, status: 429, error: 'rate_limit', limit: 'five_hour' },
-    lastTool: null, lastToolTs: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
   }
   agg.mains = () => [main]
   agg.agents = () => [agent]
@@ -1094,7 +1103,7 @@ test('an agent of a session the tree does not list is on its running line alone,
     workflowId: null, meta: null, metaTries: 3, spawnerFile: null, firstTs: NOW - 10 * 60_000, lastTs: NOW - 30_000,
     models: ['claude-opus-4-6'], input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700,
     reasoning: 0, requests: 5, outputFinal: 4, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
-    lastTool: null, lastToolTs: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
   }
   agg.mains = () => mains
   agg.agents = () => [agent]
@@ -1181,7 +1190,7 @@ test('the markdown prints every node of its tree, fifty children a node, and say
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: null }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 2 * 3_600_000 + i * 1000, lastTs: NOW - 3_600_000, models: ['claude-opus-4-6'],
     ...counts, outcome: 'completed', outcomeTs: NOW - 3_600_000, outcomeStatus: 'completed', rejected: null,
-    lastTool: null, lastToolTs: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
   }))
   agg.mains = () => [main]
   agg.agents = () => agents

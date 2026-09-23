@@ -9,7 +9,7 @@ import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, JournalAgent,
+  AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, Effort, JournalAgent,
   LaunchStatus, PendingMessage, RateLimitKind, RecordedOutcome, RejectedRequest, Resolution, RunLaunch, RunRec, SessionRec,
   Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
   TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
@@ -366,9 +366,10 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * that adds a field only a replay can fill for the transcripts already read raises it by one.
  * 1 = 1.6's runs from the workflow journals; 2 = the `Workflow` launches and their ends (N4); 3 = the
  * rejected requests of the agents (N3); 4 = the records of the agents whose transcript holds
- * nothing but rejected requests (D4); 5 = the last tool call of an agent and its time (N5).
+ * nothing but rejected requests (D4); 5 = the last tool call of an agent and its time (N5); 6 = the
+ * effort of an agent's replies (N8) and the context of its newest request (L2).
  */
-export const AGENT_TABLES_REVISION = 5
+export const AGENT_TABLES_REVISION = 6
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -570,6 +571,40 @@ function restoreRejected(v: unknown): RejectedRequest | null {
   return { at, status: httpStatus(r.status), error: apiErrorKind(r.error), limit: rateLimitKind(r.limit) }
 }
 
+/**
+ * The levels an assistant line's top-level `effort` may give (1.6 N8, §0a.4) — every one Claude
+ * Code writes there. Observed on this machine's agent transcripts: xhigh, max, high and medium;
+ * `low` is Claude Code's fifth.
+ */
+const EFFORT_LEVELS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+/** The distinct efforts an agent's record lists: at most as many as there are. */
+export const AGENT_EFFORTS_MAX = EFFORT_LEVELS.length
+
+function effortLevel(v: unknown): Effort | null {
+  return typeof v === 'string' && (EFFORT_LEVELS as readonly string[]).includes(v) ? v as Effort : null
+}
+
+/**
+ * The effort an assistant line of an agent's transcript was written at (1.6 N8, §0a.4): its
+ * top-level `effort`, through its allow-list — one of the five levels, else null. Nothing nested is
+ * looked at: a tool's input may carry an `effort` of its own (a proposal's size, say), and an API
+ * error line's `perTurnEffort` is another field of another line.
+ */
+export function effortOf(d: any): Effort | null {
+  return effortLevel(d.effort)
+}
+
+/** The distinct efforts a snapshot lists, each checked as at ingest, in their order, at most AGENT_EFFORTS_MAX. */
+function restoreEfforts(v: unknown): Effort[] {
+  if (!Array.isArray(v)) return []
+  const out: Effort[] = []
+  for (const e of v) {
+    const level = effortLevel(e)
+    if (level !== null && !out.includes(level) && out.length < AGENT_EFFORTS_MAX) out.push(level)
+  }
+  return out
+}
+
 /** The tool call a tool result answers: the `tool_use_id` of its first `tool_result` block. */
 function toolResultId(message: unknown): string | null {
   const content = message && typeof message === 'object' ? (message as { content?: unknown }).content : undefined
@@ -630,6 +665,23 @@ function noteLastTool(rec: AgentRec | MainRec, last: string | null | undefined, 
   if (rec.lastToolTs !== null && rec.lastToolTs > at) return
   rec.lastTool = last
   rec.lastToolTs = at
+}
+
+/**
+ * What the newest line of an agent's transcript says of its reply, onto the agent's record — before
+ * the line's time moves the record's (`touchRecord`): the reply's context — its input, cache write
+ * and cache read so far, the running maximum over its lines (1.6 L2) — and the effort it was
+ * written at (N8), while the line is no older than the record's last one; a late line of an older
+ * reply changes neither. Every effort a reply carried joins the record's list in the order first
+ * seen. A main session's record keeps neither.
+ */
+function noteNewest(rec: AgentRec | MainRec, at: number, context: number, effort: Effort | null): void {
+  if (!('lastContext' in rec)) return
+  const newest = at >= rec.lastTs
+  if (newest) rec.lastContext = context
+  if (effort === null) return
+  if (newest) rec.effort = effort
+  if (!rec.efforts.includes(effort) && rec.efforts.length < AGENT_EFFORTS_MAX) rec.efforts.push(effort)
 }
 
 function creditTokens(rec: AgentRec | MainRec, v: TokenFigures): void {
@@ -723,6 +775,11 @@ function restoreAgent(v: unknown): AgentRec | null {
     // a name without its time names no moment the tree could compare, and is dropped with it.
     lastTool: finiteOrNull(r.lastToolTs) === null ? null : cleanAgentName(r.lastTool, TOOL_NAME_MAX_CHARS),
     lastToolTs: finiteOrNull(r.lastToolTs),
+    // 1.6 N8, L2: the effort through its five levels, the list through the same, and the context
+    // of the newest request a count — anything else is none.
+    effort: effortLevel(r.effort),
+    efforts: restoreEfforts(r.efforts),
+    lastContext: typeof r.lastContext === 'number' && Number.isFinite(r.lastContext) && r.lastContext >= 0 ? r.lastContext : null,
   }
 }
 
@@ -1203,6 +1260,8 @@ export class Aggregator {
     const model = typeof m.model === 'string' ? m.model : 'unknown'
     const final = m.stop_reason != null
     const isSub = ctx.isSub
+    // 1.6 N8 (§0a.4): an agent's transcript only — no main session's record carries an effort.
+    const effort = isSub ? effortOf(d) : null
     // A replay rebuilds the agent tables and nothing else. It keeps open messages of its own,
     // so the counting side's are neither read nor written, and nothing that counts is touched.
     const replay = ctx.agentsOnly === true
@@ -1270,7 +1329,7 @@ export class Aggregator {
         p.session = ctx.file
       }
 
-      if (at !== null) this.creditMessage(p, cand, final, tools, at, m.model, ctx)
+      if (at !== null) this.creditMessage(p, cand, final, tools, at, m.model, effort, ctx)
       pending.set(id, p)
       this.trimPending(pending)
       return true
@@ -1332,7 +1391,7 @@ export class Aggregator {
       this.noteSessionHour(s, prev.hour, delta.input + delta.cacheWrite + delta.output)
     }
 
-    this.creditGrowth(prev, delta, newlyFinal, tools, at, m.model, ctx)
+    this.creditGrowth(prev, delta, newlyFinal, tools, at, m.model, next.input + next.cacheWrite + next.cacheRead, effort, ctx)
 
     prev.input = next.input
     prev.cacheWrite = next.cacheWrite
@@ -1367,10 +1426,11 @@ export class Aggregator {
    */
   private creditMessage(
     p: PendingMessage, v: TokenFigures, final: boolean, tools: ToolCalls, at: number, model: unknown,
-    ctx: IngestContext,
+    effort: Effort | null, ctx: IngestContext,
   ): void {
     const rec = ctx.isSub ? this.agentFor(ctx.file, at) : this.mainFor(ctx.file, at)
     if (!rec) return
+    noteNewest(rec, at, v.input + v.cacheWrite + v.cacheRead, effort)
     creditTokens(rec, v)
     rec.requests += 1
     if (final) rec.outputFinal += 1
@@ -1386,11 +1446,13 @@ export class Aggregator {
    * A later line of a known message: its growth onto the record that holds the message. An
    * open message from before the agent tables (a version 6 snapshot) names no record; its next
    * line links it to this file and credits the growth from there on — the part before is the
-   * replay's to rebuild, and crediting it here as well would count it twice.
+   * replay's to rebuild, and crediting it here as well would count it twice. `context` is the
+   * message's context with this line (1.6 L2): input, cache write and cache read, each the running
+   * maximum over its lines.
    */
   private creditGrowth(
     p: PendingMessage, v: TokenFigures, newlyFinal: boolean, tools: ToolCalls, at: number | null,
-    model: unknown, ctx: IngestContext,
+    model: unknown, context: number, effort: Effort | null, ctx: IngestContext,
   ): void {
     const key = ownerKey(ctx.file)
     const owner = ctx.isSub ? p.agent : p.main
@@ -1408,6 +1470,7 @@ export class Aggregator {
       if (ctx.isSub) p.agent = key
       else p.main = key
     }
+    if (at !== null) noteNewest(rec, at, context, effort)
     creditTokens(rec, v)
     if (newlyFinal) rec.outputFinal += 1
     rec.toolCalls += tools.added
@@ -1473,10 +1536,14 @@ export class Aggregator {
       outcome: kept?.outcome ?? null,
       outcomeTs: kept?.outcomeTs ?? null,
       outcomeStatus: kept?.outcomeStatus ?? null,
-      // The transcript's own lines say it again: a replay reads its rejections anew, and its tool calls.
+      // The transcript's own lines say it again: a replay reads its rejections anew, its tool calls,
+      // its efforts and its newest request's context.
       rejected: null,
       lastTool: null,
       lastToolTs: null,
+      effort: null,
+      efforts: [],
+      lastContext: null,
     }
     this.agentMap.set(file, rec)
     this.agentFileById.set(rec.agentId, file)

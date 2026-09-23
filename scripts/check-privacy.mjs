@@ -166,6 +166,10 @@ export const READ_CONTRACT = [
   // only its `type`, `name` and `id`; its `input` is never looked at.
   { what: 'the tool calls of a reply', file: 'src/agg.ts', kind: 'fields', body: 'private countClaudeTools(', variable: 'b',
     fields: ['type', 'name', 'id'] },
+  // 1.6 §0a.4 (P9): the effort a reply of an agent's transcript was written at — the line's
+  // top-level `effort`, one of five levels. Never a nested one, never an error line's `perTurnEffort`.
+  { what: 'the effort of a response', file: 'src/agg.ts', kind: 'fields', body: 'function effortOf(', variable: 'd',
+    fields: ['effort'] },
 ]
 
 /**

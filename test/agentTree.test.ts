@@ -19,9 +19,10 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import {
   AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeState,
+  PER_MINUTE_FROM_MS,
   RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TreeNode, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
-import { AgentTreeInput, agentDetails, buildAgentTree, byNewestFirst, shortIdsOf, spanText } from '../src/agentTreeBuild'
+import { AgentTreeInput, agentDetails, buildAgentTree, byNewestFirst, mostAtOnce, shortIdsOf, spanText } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
 import { TimeConfig } from '../src/time'
 import { AgentLaunch, AgentRec, JournalAgent, MainRec, RunLaunch, RunRec, SessionRec } from '../src/types'
@@ -68,7 +69,7 @@ function rec(id: string, over: Partial<AgentRec> = {}): AgentRec {
     firstTs: NOW - 30 * MIN, lastTs: NOW - 1 * MIN, models: ['claude-opus-5'],
     input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 50,
     requests: 5, outputFinal: 5, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
-    lastTool: null, lastToolTs: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
     ...over,
   }
 }
@@ -673,7 +674,10 @@ test('an agent the journal started without a counted transcript is a member of i
   assert.equal(node(vm, collectorKey).agentCount, 3)
   assert.equal(w.agentCount, 4)
   assert.equal(node(vm, rootKey).agentCount, 4)
-  assert.equal(agentDetails(input(quiet), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value, '4')
+  // 1.6 P9 (L2, pinned and changed): a run's Agents row is its tally in words, the started first —
+  // it was the bare count; a session's stays the count.
+  assert.equal(agentDetails(input(quiet), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value,
+    '4 started, 2 done, 1 failed, about 1 unknown')
   assert.equal(agentDetails(input(quiet), NOW, rootKey)?.rows.find((r) => r.label === 'Agents')?.value, '4')
   // J2 has no end and the journal has been quiet for half an hour: unknown — so is the run.
   assert.equal(w.state, 'unknown')
@@ -714,8 +718,9 @@ test('a run beyond MAX_RUN_AGENTS says how many agents it did not list', () => {
     runs: [run([jagent(J1, { step: 1, outcome: 'completed' })], { agentsDropped: 12 })],
     selected: wfKey,
   }
+  // 1.6 P9 (L2, pinned and changed): the tally in words, where it was the bare count.
   assert.deepEqual(build(over).selected?.rows.find((r) => r.label === 'Agents'),
-    { label: 'Agents', value: '1', note: '12 further agents not listed', kind: 'sentence' })
+    { label: 'Agents', value: '1 started, 1 done', note: '12 further agents not listed', kind: 'sentence' })
   assert.deepEqual(german(() => build(over).selected?.rows.find((r) => r.label === 'Agenten')?.note), '12 weitere Agenten nicht aufgeführt')
 })
 
@@ -844,8 +849,10 @@ test('a tally counts every attempt below a node once, under the state its row sh
   }
   assert.deepEqual([build().roots[0].tally, build().roots[0].tallyText, build().roots[0].tallySpoken], [null, null, null],
     'a session without agents')
-  // The run's Agents row says the tally's started, journal-only members included.
-  assert.equal(agentDetails(input(tallyWorld()), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value, '8')
+  // The run's Agents row says the tally — 1.6 P9 (L2, pinned and changed): in words, where it was
+  // the started alone — journal-only members included.
+  assert.deepEqual(agentDetails(input(tallyWorld()), NOW, wfKey)?.rows.find((r) => r.label === 'Agents'),
+    { label: 'Agents', value: '8 started, 3 done, 1 failed, 2 retried, about 2 running', kind: 'sentence' })
 })
 
 test('a tally names only the states it has, and only the inferred ones carry the estimate mark', () => {
@@ -1380,7 +1387,8 @@ test('running counts every running agent and launch, also on sessions beyond the
 test("an agent's details: every row pre-formatted, dashes for absence, Claude Code's report only when there is one", () => {
   const over: Partial<AgentTreeInput> = {
     agents: [
-      rec('aaaa0001', { outputFinal: 4 }),
+      // 1.6 P9: the context of its newest request, and the two efforts its replies were written at.
+      rec('aaaa0001', { outputFinal: 4, lastContext: 5_480, effort: 'xhigh', efforts: ['high', 'xhigh'] }),
       rec('aaaa0002', { meta: null, spawnerFile: null, requests: 0, outputFinal: 0 }),
     ],
     launches: [launch('aaaa0001', { totals: { tokens: 123_456, durationMs: 65_000, toolUses: 7 } })],
@@ -1391,17 +1399,36 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
   assert.equal(d.title, 'Explore · claude-opus-5 · aaaa0001')
   assert.equal(d.state, 'running')
   assert.equal(d.id, 'aaaa0001')
+  // 1.6 P9 (L2): the line under its state — what it used, how long, how many requests and calls.
+  assert.equal(d.overview, '1.2K in 29 min 00 s · 5 requests · 3 tool calls')
   // Every row says how it is laid out — a figure unless it says otherwise — which row the page's
   // clock ticks in, and which one Copy ID copies: nothing is left to a guess from its words.
+  // 1.6 P9 (L2, pinned and changed): the mix, the context it ended with and its pace first, its
+  // effort after its models, "Turns" is "Requests".
+  const all = 300 + 200 + 5000 + 700
   assert.deepEqual(d.rows, [
+    {
+      label: 'Token mix', value: 'fresh 5 % · cache write 3 % · cache read 81 % · output 11 %', kind: 'bar',
+      parts: [
+        { part: 'fresh', share: 300 / all, label: 'fresh 5 %' },
+        { part: 'cacheWrite', share: 200 / all, label: 'cache write 3 %' },
+        { part: 'cacheRead', share: 5000 / all, label: 'cache read 81 %' },
+        { part: 'output', share: 700 / all, label: 'output 11 %' },
+      ],
+    },
+    { label: 'Context at the end', value: '5.5K', note: "the last request's input, cache reads and writes" },
+    // 1 200 in 29 minutes.
+    { label: 'Per minute', value: '41' },
     { label: 'Type', value: 'Explore' },
     { label: 'Models', value: 'claude-opus-5' },
+    // N8: in the order its replies carried them.
+    { label: 'Effort', value: 'high, then xhigh' },
     { label: 'ID', value: 'aaaa0001', copy: true },
     { label: 'Depth', value: '1' },
     { label: 'Started', value: '11:30' },
     { label: 'Duration', value: '29 min 00 s' },
     { label: 'Last activity', value: '11:59', note: '1 min ago', live: 'ago' },
-    { label: 'Turns', value: '5' },
+    { label: 'Requests', value: '5' },
     { label: 'Usage', value: '1.2K' },
     { label: 'Fresh input', value: '300' },
     { label: 'Cache write 5m', value: '200' },
@@ -1425,8 +1452,11 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
   const bare = agentDetails(input(over), NOW, agentKey('aaaa0002'))
   assert.ok(bare)
   const value = (label: string): string | undefined => bare.rows.find((r) => r.label === label)?.value
-  assert.deepEqual(['Type', 'Depth', 'Turns', 'Usage', 'Output', 'Tool calls', 'Spawned by'].map(value),
-    ['–', '–', '–', '–', '–', '–', '–'])
+  assert.deepEqual(['Type', 'Depth', 'Requests', 'Usage', 'Output', 'Tool calls', 'Spawned by', 'Effort', 'Context at the end'].map(value),
+    ['–', '–', '–', '–', '–', '–', '–', '–', '–'])
+  // 1.6 P9: nothing counted, no mix, no pace, no line under the state.
+  assert.deepEqual(bare.rows.filter((r) => ['Token mix', 'Per minute', 'Rank in run'].includes(r.label)), [])
+  assert.equal(bare.overview, null)
   assert.equal(bare.rows.some((r) => r.label === 'Report from Claude Code'), false)
   assert.equal(bare.rows.some((r) => r.value === '0'), false, 'a zero where nothing was counted')
 
@@ -1437,24 +1467,32 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
 
 test('a session and a run have details of their own', () => {
   const over: Partial<AgentTreeInput> = {
-    agents: [rec('aaaa0001'), wfRec('bbbb0001'), wfRec('bbbb0002', { firstTs: NOW - 40 * MIN })],
+    agents: [
+      rec('aaaa0001', { effort: 'xhigh', efforts: ['xhigh'] }),
+      wfRec('bbbb0001', { effort: 'xhigh', efforts: ['xhigh'] }),
+      wfRec('bbbb0002', { firstTs: NOW - 40 * MIN, effort: 'max', efforts: ['max'] }),
+    ],
     launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })],
   }
   const s = agentDetails(input(over), NOW, rootKey)
   assert.ok(s)
   assert.equal(s.title, 'Session Tue 10:00 · 9d0eb37a')
+  // 1.6 P9 (L2): no line under a session's state — it is an agent's.
+  assert.equal(s.overview, null)
   // D5: its own figure and its agents' first, a first line and a span in place of a start and a
-  // duration; the ID row last.
+  // duration; the ID row last. 1.6 P9 (L2, pinned and changed): "Turns" is "Requests", the Usage
+  // row that said the own figure a second time is gone, and its agents by effort follow their count.
   assert.deepEqual(s.rows.map((r) => r.label), [
-    'Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Last activity', 'Turns', 'Usage',
-    'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents', 'ID',
+    'Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Last activity', 'Requests',
+    'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents', 'Agents by effort', 'ID',
   ])
   const sv = (label: string): string | undefined => s.rows.find((r) => r.label === label)?.value
   // The session's own transcript only: 1 000 + 500 + 2 000; its agents are nodes of their own,
-  // and their three records' 3 × 1 200 a figure of their own beside it, never added to it.
-  assert.deepEqual(['Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Turns', 'Usage',
-    'Cache write 5m', 'Tool calls', 'Agents', 'ID'].map(sv),
-  ['3.5K', '3.6K', 'claude-opus-5', '10:00', '1 h 58 min', '12', '3.5K', '400', '9', '4', S1])
+  // and their three records' 3 × 1 200 a figure of their own beside it, never added to it. N8: the
+  // launch nobody has read a line of has no effort recorded.
+  assert.deepEqual(['Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Requests',
+    'Cache write 5m', 'Tool calls', 'Agents', 'Agents by effort', 'ID'].map(sv),
+  ['3.5K', '3.6K', 'claude-opus-5', '10:00', '1 h 58 min', '12', '400', '9', '4', 'xhigh 2 · max 1 · – 1', S1])
   assert.deepEqual(s.rows.find((r) => r.label === 'Agents, last 7 days'), {
     label: 'Agents, last 7 days', value: '3.6K', kind: 'sentence',
     note: 'not added to the own figure — the two cover different spans',
@@ -1464,15 +1502,19 @@ test('a session and a run have details of their own', () => {
 
   const w = agentDetails(input(over), NOW, wfKey)
   assert.ok(w)
+  // 1.6 P9 (L2, pinned and changed): the tally, how many ran at once, its times and counts, its
+  // agents by effort, its ID.
+  assert.equal(w.overview, null)
   assert.deepEqual(w.rows.map((r) => r.label), [
-    'Agents', 'Started', 'Duration', 'Last activity', 'Turns', 'Usage', 'Fresh input', 'Cache write 5m',
-    'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'ID',
+    'Agents', 'Parallelism', 'Started', 'Duration', 'Last activity', 'Requests', 'Usage', 'Fresh input', 'Cache write 5m',
+    'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents by effort', 'ID',
   ])
   // A run's id is its directory's name, which the launch's result names too.
   assert.equal(w.id, WF)
   assert.deepEqual(w.rows[w.rows.length - 1], { label: 'ID', value: WF, copy: true })
   const wv = (label: string): string | undefined => w.rows.find((r) => r.label === label)?.value
-  assert.deepEqual(['Agents', 'Started', 'Turns', 'Usage', 'Tool calls'].map(wv), ['2', '11:20', '10', '2.4K', '6'])
+  assert.deepEqual(['Agents', 'Parallelism', 'Started', 'Requests', 'Usage', 'Tool calls', 'Agents by effort'].map(wv),
+    ['2 started, about 2 running', 'up to 2 at once', '11:20', '10', '2.4K', '6', 'max 1 · xhigh 1'])
 })
 
 // 1.6 P3a (§3.0 b, D3): pinned "a listed session's finished agent keeps its details, open branch or
@@ -1739,7 +1781,10 @@ function german<T>(run: () => T): T {
 
 test('the tree speaks German with the bundle the extension ships', () => {
   const over: Partial<AgentTreeInput> = {
-    agents: [rec('aaaa0001', { outputFinal: 4 }), wfRec('bbbb0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })],
+    agents: [
+      rec('aaaa0001', { outputFinal: 4, lastContext: 5_480, effort: 'xhigh', efforts: ['high', 'xhigh'] }),
+      wfRec('bbbb0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN, effort: 'max', efforts: ['max'] }),
+    ],
     launches: [launch('pppp0001', { agentId: null, typeHint: null, modelHint: null, ts: NOW - MIN })],
     // 1.6 P2b: the journal's result comes from the run, with no time.
     runs: [run([jagent('bbbb0001', { outcome: 'completed' })])],
@@ -1752,11 +1797,27 @@ test('the tree speaks German with the bundle the extension ships', () => {
   assert.equal(node(vm, wfKey).label, 'Workflow-Lauf Di 11:20 · cfe7718d')
   assert.equal(vm.selected?.stateText,
     'Läuft — abgeleitet: Das Transkript hat sich vor 1 min geändert, und es wurde noch kein Ergebnis aufgezeichnet.')
+  // 1.6 P9 (L2, pinned and changed): the mix, the context, the pace and the effort, „Anfragen" for "Turns".
   assert.deepEqual(vm.selected?.rows.map((r) => r.label), [
-    'Typ', 'Modelle', 'ID', 'Tiefe', 'Beginn', 'Dauer', 'Letzte Aktivität', 'Turns', 'Verbrauch', 'Frische Eingabe',
+    'Token-Mischung', 'Kontext am Ende', 'Pro Minute', 'Typ', 'Modelle', 'Effort', 'ID', 'Tiefe', 'Beginn', 'Dauer',
+    'Letzte Aktivität', 'Anfragen', 'Verbrauch', 'Frische Eingabe',
     'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte', 'Tool-Aufrufe',
     'Gestartet von', 'Workflow-Lauf',
   ])
+  const de = (label: string): DetailRow | undefined => vm.selected?.rows.find((r) => r.label === label)
+  assert.equal(vm.selected?.overview, '1,2K in 29 min 00 s · 5 Anfragen · 3 Tool-Aufrufe')
+  assert.equal(de('Token-Mischung')?.value, 'frisch 5 % · Cache-Schreiben 3 % · Cache-Lesen 81 % · Ausgabe 11 %')
+  assert.deepEqual(de('Token-Mischung')?.parts?.map((p) => p.label), ['frisch 5 %', 'Cache-Schreiben 3 %', 'Cache-Lesen 81 %', 'Ausgabe 11 %'])
+  assert.deepEqual([de('Kontext am Ende')?.value, de('Kontext am Ende')?.note], ['5,5K', 'Eingabe, Cache-Lesen und -Schreiben der letzten Anfrage'])
+  assert.equal(de('Effort')?.value, 'high, dann xhigh')
+  const runDe = german(() => agentDetails(input(over), NOW, wfKey))
+  const rv = (label: string): string | undefined => runDe?.rows.find((r) => r.label === label)?.value
+  assert.deepEqual([rv('Agenten'), rv('Parallelität'), rv('Agenten nach Effort'), rv('Anfragen')],
+    ['1 gestartet, 1 fertig', 'bis zu 1 gleichzeitig', 'max 1', '5'])
+  // The rank, in a run of two counted agents: the bigger one first.
+  const two = { ...over, agents: [...(over.agents ?? []), wfRec('bbbb0002', { input: 3000 })] }
+  assert.equal(german(() => agentDetails(input(two), NOW, agentKey('bbbb0001'))?.rows.find((r) => r.label === 'Platz im Lauf')?.value),
+    '2 von 2 nach Verbrauch')
   // 1.6 D10: with how many replies are unfinished — one of the five.
   assert.equal(vm.selected?.rows.find((r) => r.label === 'Ausgabe')?.note, '⚠ Untergrenze — 1 von 5 Antworten unvollständig')
   // The figures in the reader's number format, too.
@@ -1783,7 +1844,8 @@ test('every message of the tree and of its markdown has a German entry, and the 
     'Running now', 'Sessions and agents', '(waiting)', 'No agent is running.', 'and {0} more']
   assert.ok(ours.length >= 30, `only ${ours.length} keys found in src/agentTreeBuild.ts`)
   // Words German takes over as they are.
-  const same = new Set(['Agent', 'Turns', 'Workflow {0}', 'ID'])
+  // 1.6 P9 (N8): "Effort" is German's word for it too (§6); "Turns" is gone ("Requests", „Anfragen").
+  const same = new Set(['Agent', 'Effort', 'Workflow {0}', 'ID'])
   for (const k of [...ours, ...text]) {
     assert.ok(k in keys, `${JSON.stringify(k)} is not a t() key in src/`)
     const de = GERMAN[k]
@@ -2539,7 +2601,9 @@ test('a run\'s agents without a counted reply are one collector, its last child:
   assert.equal(w.agentCount, 427)
   assert.equal(w.tallyText, '427 started · 416 ✓ · 3 ✕ · ~8 ?')
   assert.equal(node(vm, rootKey).agentCount, 427)
-  assert.equal(agentDetails(input(over), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value, '427')
+  // 1.6 P9 (L2, pinned and changed): the run's row is its tally in words; the session's the count.
+  assert.equal(agentDetails(input(over), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value,
+    '427 started, 416 done, 3 failed, about 8 unknown')
   assert.equal(agentDetails(input(over), NOW, rootKey)?.rows.find((r) => r.label === 'Agents')?.value, '427')
   // The run and its session count the collector's rejections among theirs.
   for (const key of [wfKey, rootKey]) {
@@ -2669,9 +2733,14 @@ test('an agent outside a run whose transcript holds only rejected requests is a 
   assert.equal(vm.selected?.stateText,
     'Unknown — inferred: no result was recorded; the last request, at 11:40, was rejected — 5-hour limit (HTTP 429).')
   const rows = Object.fromEntries((vm.selected?.rows ?? []).map((r) => [r.label, r.value]))
-  for (const label of ['Duration', 'Turns', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls']) {
+  // 1.6 P9 (L2): "Turns" is "Requests", and the context it ended with a dash too; nothing counted
+  // has no mix, no pace and no line under its state.
+  for (const label of ['Duration', 'Requests', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output',
+    'Reasoning', 'Tool calls', 'Context at the end']) {
     assert.equal(rows[label], '–', label)
   }
+  assert.deepEqual(['Token mix', 'Per minute', 'Rank in run'].filter((label) => label in rows), [])
+  assert.equal(vm.selected?.overview, null)
   assert.deepEqual([rows.Started, rows['Last activity'], rows['Last request']], ['11:35', '11:40', 'rejected at 11:40 — 5-hour limit (HTTP 429)'])
   assert.equal((vm.selected?.rows ?? []).some((r) => /^0(\s|$)/.test(r.value)), false)
   // Within its ten minutes it runs, and is listed like any running agent.
@@ -2987,4 +3056,174 @@ test('every node and running item carries its start and last activity as clock t
   // In the configured zone.
   const ny = build({ tcfg: { ...tcfg, zone: 'America/New_York' }, agents: [rec('aaaa0001', { firstTs: NOW - 30 * MIN, lastTs: NOW - MIN })] })
   assert.equal(node(ny, agentKey('aaaa0001')).startClock, '07:30')
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P9 · L2: the details panel, reordered; N8: effort per agent
+// ---------------------------------------------------------------------------
+
+/** The rows of a node's details, by label. */
+function rowsOf(over: Partial<AgentTreeInput>, key: string): Map<string, DetailRow> {
+  return new Map((agentDetails(input(over), NOW, key)?.rows ?? []).map((r) => [r.label, r]))
+}
+
+test('an agent\'s details open with its mix, its rank, its context and its pace, then who it is — in the order L2 gives', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      wfRec(J1, { lastContext: 12_000, effort: 'xhigh', efforts: ['xhigh'] }),
+      wfRec(J2, { input: 3000, lastContext: 900 }),
+    ],
+  }
+  const labels = agentDetails(input(over), NOW, agentKey(J1))?.rows.map((r) => r.label)
+  // A workflow agent that no launch names has no "Spawned by": its run started it, the next row says which.
+  assert.deepEqual(labels, [
+    'Token mix', 'Rank in run', 'Context at the end', 'Per minute', 'Type', 'Models', 'Effort', 'ID', 'Depth', 'Started', 'Duration',
+    'Last activity', 'Requests', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning',
+    'Tool calls', 'Workflow run',
+  ])
+  assert.equal(agentDetails(input(over), NOW, agentKey(J1))?.overview, '1.2K in 29 min 00 s · 5 requests · 3 tool calls')
+})
+
+test('the token mix: the four kinds in their order, shares summing to 1, a kind without a token left out, a sliver "<1 %"', () => {
+  const mix = (over: Partial<AgentRec>): DetailRow | undefined => rowsOf({ agents: [rec('aaaa0001', over)] }, agentKey('aaaa0001')).get('Token mix')
+  const full = mix({})
+  assert.ok(full?.parts)
+  assert.equal(full.kind, 'bar')
+  assert.deepEqual(full.parts.map((p) => p.part), ['fresh', 'cacheWrite', 'cacheRead', 'output'])
+  assert.ok(Math.abs(full.parts.reduce((sum, p) => sum + p.share, 0) - 1) < 1e-12)
+  // Its words are its parts' words, in the same order: what a screen reader and the markdown get.
+  assert.equal(full.value, full.parts.map((p) => p.label).join(' · '))
+  // No cache write: three parts; a share below half a percent still says it is there.
+  const three = mix({ input: 20, cacheWrite: 0, cacheRead: 9000, output: 980 })
+  assert.deepEqual(three?.parts?.map((p) => [p.part, p.label]), [['fresh', 'fresh <1 %'], ['cacheRead', 'cache read 90 %'], ['output', 'output 10 %']])
+  assert.ok(Math.abs((three?.parts ?? []).reduce((sum, p) => sum + p.share, 0) - 1) < 1e-12)
+  // Requests but not a token: no mix to draw. Nothing counted: none either.
+  assert.equal(mix({ input: 0, cacheWrite: 0, cacheRead: 0, output: 0 }), undefined)
+  assert.equal(mix({ requests: 0, outputFinal: 0 }), undefined)
+})
+
+test('the rank in its run, only in a run of two counted agents or more; equal ones share a place', () => {
+  const place = (over: Partial<AgentTreeInput>, id: string): string | undefined => rowsOf(over, agentKey(id)).get('Rank in run')?.value
+  // Alone with a collector and a journal-only member: no rank — nothing to rank against.
+  const alone: Partial<AgentTreeInput> = {
+    agents: [wfRec(J1), rejectedOnly(J2, NOW - 5 * MIN)],
+    runs: [run([jagent(J1, { step: 1 }), jagent(J2, { step: 2 }), jagent(J3, { step: 3 })])],
+  }
+  assert.equal(place(alone, J1), undefined)
+  const three: Partial<AgentTreeInput> = {
+    agents: [wfRec(J1, { input: 5000 }), wfRec(J2), wfRec(J3), rec('aaaa0001', { input: 90_000 })],
+  }
+  assert.deepEqual([place(three, J1), place(three, J2), place(three, J3)], ['1 of 3 by usage', '2 of 3 by usage', '2 of 3 by usage'])
+  // An agent outside a run has no rank, however big.
+  assert.equal(place(three, 'aaaa0001'), undefined)
+})
+
+test('usage per minute from a minute on, and the context at the end only where there is one', () => {
+  const rows = (over: Partial<AgentRec>): Map<string, DetailRow> => rowsOf({ agents: [rec('aaaa0001', over)] }, agentKey('aaaa0001'))
+  // 59 s: a burst, not a pace. 60 s: 1 200 in a minute.
+  assert.equal(rows({ firstTs: NOW - MIN - 59_000, lastTs: NOW - MIN }).get('Per minute'), undefined)
+  assert.equal(PER_MINUTE_FROM_MS, 60_000)
+  assert.deepEqual(rows({ firstTs: NOW - MIN - PER_MINUTE_FROM_MS, lastTs: NOW - MIN }).get('Per minute'), { label: 'Per minute', value: '1.2K' })
+  assert.equal(rows({ firstTs: NOW - 11 * MIN, lastTs: NOW - MIN }).get('Per minute')?.value, '120')
+  // The context: the newest request's, with what it is; a record that does not say is a dash.
+  assert.deepEqual(rows({ lastContext: 48_210 }).get('Context at the end'),
+    { label: 'Context at the end', value: '48.2K', note: "the last request's input, cache reads and writes" })
+  for (const lastContext of [null, 0, -3, Number.NaN, '5000' as unknown as number]) {
+    assert.deepEqual(rows({ lastContext }).get('Context at the end'), { label: 'Context at the end', value: '–' }, String(lastContext))
+  }
+})
+
+test('the line under an agent\'s state says what it came to, one sentence per count that is one', () => {
+  const overview = (over: Partial<AgentRec>): string | null | undefined =>
+    agentDetails(input({ agents: [rec('aaaa0001', over)] }), NOW, agentKey('aaaa0001'))?.overview
+  assert.equal(overview({}), '1.2K in 29 min 00 s · 5 requests · 3 tool calls')
+  assert.equal(overview({ requests: 1, outputFinal: 1 }), '1.2K in 29 min 00 s · 1 request · 3 tool calls')
+  assert.equal(overview({ toolCalls: 1 }), '1.2K in 29 min 00 s · 5 requests · 1 tool call')
+  assert.equal(overview({ requests: 1, outputFinal: 1, toolCalls: 1 }), '1.2K in 29 min 00 s · 1 request · 1 tool call')
+  assert.equal(overview({ toolCalls: 0 }), '1.2K in 29 min 00 s · 5 requests · 0 tool calls')
+  assert.equal(german(() => overview({ requests: 1, outputFinal: 1, toolCalls: 1 })), '1,2K in 29 min 00 s · 1 Anfrage · 1 Tool-Aufruf')
+  assert.equal(german(() => overview({ requests: 1, outputFinal: 1 })), '1,2K in 29 min 00 s · 1 Anfrage · 3 Tool-Aufrufe')
+  assert.equal(german(() => overview({ toolCalls: 1 })), '1,2K in 29 min 00 s · 5 Anfragen · 1 Tool-Aufruf')
+})
+
+test('parallelism: the most agents of a run at once, over each one\'s first line to its last activity, both ends included', () => {
+  assert.equal(mostAtOnce([]), 0)
+  assert.equal(mostAtOnce([[0, 10]]), 1)
+  // The crafted overlap: at 15 the second ends as the third runs and the fourth starts — three at once.
+  assert.equal(mostAtOnce([[0, 10], [5, 15], [12, 20], [15, 16]]), 3)
+  // Touching ends count as one moment; apart by a millisecond they do not.
+  assert.equal(mostAtOnce([[0, 10], [10, 20]]), 2)
+  assert.equal(mostAtOnce([[0, 10], [11, 20]]), 1)
+  assert.equal(mostAtOnce([[0, Number.NaN], [3, 4]]), 1)
+  // In a run: J1 11:20–11:59, J2 11:25–11:40, J3 11:45–11:50 — two at a time at most; the rejection-
+  // only member at 11:47 is one more then, a journal-only member none (it has no time).
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      wfRec(J1, { firstTs: NOW - 40 * MIN, lastTs: NOW - MIN }),
+      wfRec(J2, { firstTs: NOW - 35 * MIN, lastTs: NOW - 20 * MIN }),
+      wfRec(J3, { firstTs: NOW - 15 * MIN, lastTs: NOW - 10 * MIN }),
+    ],
+    runs: [run([jagent(J1), jagent(J2), jagent(J3), jagent(J4)])],
+  }
+  assert.equal(rowsOf(over, wfKey).get('Parallelism')?.value, 'up to 2 at once')
+  const withRejected = { ...over, agents: [...(over.agents ?? []), rejectedOnly('a5b6a79800112233', NOW - 13 * MIN)] }
+  assert.equal(rowsOf(withRejected, wfKey).get('Parallelism')?.value, 'up to 3 at once')
+  // A run nobody has written to yet — its launch alone —: nothing to sweep, a dash.
+  const launched: Partial<AgentTreeInput> = {
+    runLaunches: [{ toolUseId: 'toolu_wf1', file: sessionFile(), ts: NOW - MIN, runId: WF, outcome: 'launched', outcomeStatus: null, outcomeTs: null }],
+  }
+  assert.deepEqual(rowsOf(launched, wfKey).get('Parallelism'), { label: 'Parallelism', value: '–' })
+})
+
+test('effort: the row names its replies\' effort, in the order they changed; runs and sessions count their agents by it, a dash for none', () => {
+  const effort = (over: Partial<AgentRec>): string | undefined => rowsOf({ agents: [rec('aaaa0001', over)] }, agentKey('aaaa0001')).get('Effort')?.value
+  assert.equal(effort({ effort: 'xhigh', efforts: ['xhigh'] }), 'xhigh')
+  assert.equal(effort({ effort: 'max', efforts: ['high', 'xhigh', 'max'] }), 'high, then xhigh, then max')
+  assert.equal(effort({}), '–')
+  // A snapshot of another build's making: checked again, as the aggregator does.
+  assert.equal(effort({ effort: 'turbo' as never, efforts: ['M' as never, 'high', 'high'] }), 'high')
+  assert.equal(effort({ effort: 'high', efforts: [] }), 'high')
+  assert.equal(effort({ effort: 'M' as never, efforts: 'xhigh' as never }), '–')
+  assert.equal(german(() => effort({ effort: 'xhigh', efforts: ['high', 'xhigh'] })), 'high, dann xhigh')
+  // A run of five: three at xhigh, one at max, one journal-only member and a rejection-only one
+  // with none recorded — the most frequent first, the counts summing to its tally's started.
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      wfRec(J1, { effort: 'xhigh', efforts: ['xhigh'] }), wfRec(J2, { effort: 'xhigh', efforts: ['high', 'xhigh'] }),
+      wfRec(J3, { effort: 'max', efforts: ['max'] }), wfRec(J4, { effort: 'xhigh', efforts: ['xhigh'] }),
+      rejectedOnly('a5b6a79800112233', NOW - 5 * MIN),
+    ],
+    runs: [run([jagent(J1), jagent(J2), jagent(J3), jagent(J4), jagent('a6a7980011223344')])],
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })],
+    mains: [main()],
+  }
+  const vm = build(over)
+  assert.equal(rowsOf(over, wfKey).get('Agents by effort')?.value, 'xhigh 3 · – 2 · max 1')
+  assert.equal(node(vm, wfKey).tally?.started, 6)
+  // The session: the run's six and the launch nobody has read a line of.
+  assert.equal(rowsOf(over, rootKey).get('Agents by effort')?.value, 'xhigh 3 · – 3 · max 1')
+  assert.equal(node(vm, rootKey).tally?.started, 7)
+  const sum = (v: string): number => v.split(' · ').reduce((n, part) => n + Number(part.split(' ').pop()), 0)
+  assert.equal(sum(rowsOf(over, rootKey).get('Agents by effort')?.value ?? ''), node(vm, rootKey).tally?.started)
+  // Ties: by the word, the dash last.
+  const tie: Partial<AgentTreeInput> = { agents: [wfRec(J1, { effort: 'xhigh' }), wfRec(J2, { effort: 'high' }), wfRec(J3)] }
+  assert.equal(rowsOf(tie, wfKey).get('Agents by effort')?.value, 'high 1 · xhigh 1 · – 1')
+  assert.equal(german(() => rowsOf(tie, wfKey).get('Agenten nach Effort')?.value), 'high 1 · xhigh 1 · – 1')
+  // A session without an agent has no such row, and a collector none of its own.
+  assert.equal(rowsOf({}, rootKey).has('Agents by effort'), false)
+  assert.equal(rowsOf(over, collectorKey).has('Agents by effort'), false)
+})
+
+test('who spawned an agent: left out for a workflow agent no launch names, kept where a launch or an agent does and for a direct agent', () => {
+  const spawned = (over: Partial<AgentTreeInput>, id: string): string | undefined => rowsOf(over, agentKey(id)).get('Spawned by')?.value
+  // Its run started it: the Workflow run row says which. 1.5 wrote "Spawned by –" on every one.
+  assert.equal(spawned({ agents: [wfRec(J1)] }, J1), undefined)
+  assert.equal(rowsOf({ agents: [wfRec(J1)] }, agentKey(J1)).get('Workflow run')?.value, 'Workflow run Tue 11:30 · cfe7718d')
+  // A launch in the session's transcript names it: the session.
+  assert.equal(spawned({ agents: [wfRec(J1, { spawnerFile: sessionFile() })] }, J1), 'Session Tue 10:00 · 9d0eb37a')
+  // Another agent of the run launched it.
+  assert.equal(spawned({ agents: [wfRec(J1), wfRec(J2, { spawnerFile: agentFile(J1, S1, WF) })] }, J2),
+    'workflow-subagent · claude-opus-5 · 1f2e')
+  // A direct agent keeps the row, a dash where nothing names who launched it.
+  assert.equal(spawned({ agents: [rec('aaaa0001', { spawnerFile: null, meta: null })] }, 'aaaa0001'), '–')
 })

@@ -245,6 +245,11 @@ export type ApiErrorKind =
   | 'rate_limit' | 'server_error' | 'invalid_request' | 'authentication_failed' | 'max_output_tokens' | 'overloaded'
 /** The `quotaLimits.rateLimitType` of a rejected request (1.6 §0a.2): which limit refused it. */
 export type RateLimitKind = 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seven_day_sonnet'
+/**
+ * The top-level `effort` of an assistant line in an agent's transcript (1.6 N8, §0a.4), through its
+ * allow-list — the five levels Claude Code writes there. Any other value is no effort (null).
+ */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /**
  * The last rejected request of an agent's transcript (1.6 N3, §0a.2): the time of its error line
@@ -320,6 +325,20 @@ export interface AgentRec {
    */
   lastTool: string | null
   lastToolTs: number | null
+  /**
+   * 1.6 N8 (§0a.4): the top-level `effort` of the transcript's newest counted reply, through its
+   * allow-list, and every distinct one its replies carried, in the order first seen — at most five,
+   * as there are five. Never a nested `effort` (a tool's input carries some), never the
+   * `perTurnEffort` of an error line. Null and empty for a transcript whose replies carry none.
+   */
+  effort: Effort | null
+  efforts: Effort[]
+  /**
+   * 1.6 L2: the context of the transcript's newest request — its input, cache write and cache read,
+   * the running maximum over the lines of that reply, as every counter of a reply is. What the
+   * details call "Context at the end"; null until a counted reply came.
+   */
+  lastContext: number | null
 }
 
 /** A launch the parent transcript recorded; the bridge from tool_use id to agent. */

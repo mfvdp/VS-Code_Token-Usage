@@ -591,14 +591,50 @@ test('an agent with no counted request is dashes throughout — no figure of it 
   const d = vm.agents.selected
   assert.ok(d)
   assert.equal(d.key, n.key)
-  for (const label of ['Turns', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output',
-    'Reasoning', 'Tool calls']) {
+  // 1.6 P9 (L2, pinned and changed): "Turns" is "Requests", and the context at the end is a dash too;
+  // no mix, no pace, no rank and no line under the state for an agent nothing of which was counted.
+  for (const label of ['Requests', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output',
+    'Reasoning', 'Tool calls', 'Context at the end']) {
     assert.equal(d.rows.find((r) => r.label === label)?.value, '–', label)
   }
+  assert.deepEqual(d.rows.filter((r) => r.kind === 'bar' || r.label === 'Per minute' || r.label === 'Rank in run'), [])
+  assert.equal(d.overview, null)
   assert.equal(d.rows.some((r) => /^0(\s|$)/.test(r.value)), false, JSON.stringify(d.rows))
   const line = agentLines(vm).find((l) => l.includes(n.fullLabel))
   assert.ok(line)
   assert.equal(/(^|\s)0(\s|$)/.test(line), false, line)
+})
+
+test('every agent\'s details say what it came to only where something was counted: the line, the mix summing to 1, its words, its effort', () => {
+  // 1.6 P9 (L2, N8): on every node of the world, with its own details open.
+  for (const { node, vm } of everyNodeOpen('session')) {
+    const d = vm.agents.selected
+    assert.ok(d, node.key)
+    const bars = d.rows.filter((r) => r.kind === 'bar')
+    const counted = node.kind === 'agent' && node.usage !== '–'
+    // The line under the state and the mix: an agent's with a counted request, no other node's.
+    assert.equal(d.overview !== null, counted, `${node.key}: ${d.overview}`)
+    assert.equal(bars.length, counted ? 1 : 0, node.key)
+    for (const bar of bars) {
+      assert.ok(Array.isArray(bar.parts) && bar.parts.length > 0, node.key)
+      assert.ok(Math.abs(bar.parts.reduce((sum, p) => sum + p.share, 0) - 1) < 1e-9, node.key)
+      assert.ok(bar.parts.every((p) => p.share > 0 && p.share <= 1), node.key)
+      assert.equal(bar.value, bar.parts.map((p) => p.label).join(' · '), node.key)
+      // The shares are of the four kinds together: what the Requests and token rows below it count.
+      assert.deepEqual(bar.parts.map((p) => p.part), ['fresh', 'cacheWrite', 'cacheRead', 'output'].filter((k) => bar.parts?.some((p) => p.part === k)))
+    }
+    if (counted) assert.ok(d.overview?.startsWith(`${node.usage} in ${node.duration} · `), `${node.key}: ${d.overview}`)
+    // N8: an agent names its effort — every agent of the world was written at one — and a run and a
+    // session count theirs, summing to what their tally started.
+    if (node.kind === 'agent') assert.match(d.rows.find((r) => r.label === 'Effort')?.value ?? '', /^(low|medium|high|xhigh|max)(, then (low|medium|high|xhigh|max))*$|^–$/, node.key)
+    const byEffort = d.rows.find((r) => r.label === 'Agents by effort')
+    if ((node.kind === 'workflow' || node.kind === 'session') && node.tally !== null) {
+      assert.ok(byEffort, node.key)
+      assert.equal(byEffort.value.split(' · ').reduce((n, part) => n + Number(part.split(' ').pop()), 0), node.tally.started, node.key)
+    } else {
+      assert.equal(byEffort, undefined, node.key)
+    }
+  }
 })
 
 test('every inferred state says it was inferred, and no recorded one says so — in English and in German', () => {
@@ -659,6 +695,11 @@ const TREE_FIELDS = new Set([
   // 1.6 P6: why an output is a lower bound, in numbers (D10), and whether the page may say how
   // long a running agent has been silent (N5) — on a node and on a running item alike.
   'lowerBoundText', 'silence',
+  // 1.6 P9 (L2): the details' line under the state (§2.2's `summary`, named `overview`: `summary` is
+  // a content key this test keeps out), and a bar row's parts — each a kind of token, its share and
+  // its words (§2.2's `text`, named `label`, the row's own field name, since `text` is where a
+  // reply's content lives).
+  'overview', 'parts', 'part', 'share',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {

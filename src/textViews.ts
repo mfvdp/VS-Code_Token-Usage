@@ -628,8 +628,10 @@ function agentLines(vm: ViewModel, textTree?: AgentTreeVm | null): string[] {
     L.push(`### ${cell(d.title)}`, '')
     L.push(t('| Detail | Value |'))
     L.push('|---|---|')
-    // The state first, with the sentence that says what it rests on.
+    // The state first, with the sentence that says what it rests on; then the node's one-line
+    // overview (1.6 L2) where it has one. A bar row — the token mix — is its words here.
     L.push(`| ${cell(t('State'))} | ${cell(d.stateText)} |`)
+    if (typeof d.overview === 'string' && d.overview !== '') L.push(`| ${cell(t('Summary'))} | ${cell(d.overview)} |`)
     for (const r of d.rows) {
       L.push(`| ${cell(r.label)} | ${cell(r.value)}${r.note ? ` · ${cell(r.note)}` : ''} |`)
     }

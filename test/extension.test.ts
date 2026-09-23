@@ -849,34 +849,51 @@ test('a stored chart stack from an older build is ignored, and the rest of the s
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
-test('stored agent folds and selection restore by shape; over-long keys are dropped', async () => {
+test('stored opened agent nodes and the selection restore by shape; over-long keys are dropped', async () => {
   // The two agent tree fields are opaque node keys: only their shape is checked on restore —
-  // strings of at most 200 chars, at most 200 folds, a selection that is such a string or null.
+  // strings of at most 200 chars, at most 200 opened nodes, a selection that is such a string
+  // or null. The caps are read where `activateHost` reads everything else: after the stub.
+  const { MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS } = require('../src/viewModel') as typeof import('../src/viewModel')
+  assert.deepEqual([MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS], [200, 200])
   const long = 'k'.repeat(201)
-  const folds = ['s:/p/a.jsonl', long, 7, '', 's:/p/a.jsonl', ...Array.from({ length: 250 }, (_, i) => `a:${i}`)]
+  const opened = ['s:s1', long, 7, '', 's:s1', null, ...Array.from({ length: 250 }, (_, i) => `a:${i}`)]
   const kept = new Map<string, unknown>([
-    ['tokenPace.ui', { range: '30d', agentsFolded: folds, agentSelected: 'l:toolu_01' }],
+    // 1.5.0 kept folds instead; it was never published, and a fold is not an opened node.
+    ['tokenPace.ui', { range: '30d', agentsExpanded: opened, agentsFolded: ['w:s1|wf_1'], agentSelected: 'l:toolu_01' }],
   ])
   const host = await activateHost(makeFixture(), REPO, { globalState: kept })
   await state.execute('tokenPace.setRange', '7d')
   const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
-  const restored = ui?.agentsFolded as string[]
-  assert.ok(Array.isArray(restored), 'agentsFolded was not written back')
-  assert.equal(restored.length, 200)
-  assert.equal(restored[0], 's:/p/a.jsonl')
+  const restored = ui?.agentsExpanded as string[]
+  assert.ok(Array.isArray(restored), 'agentsExpanded was not written back')
+  assert.equal(restored.length, MAX_AGENT_EXPANDED)
+  assert.equal(restored[0], 's:s1')
   assert.equal(restored.includes(long), false)
-  assert.ok(restored.every((k) => typeof k === 'string' && k.length > 0 && k.length <= 200))
+  assert.ok(restored.every((k) => typeof k === 'string' && k.length > 0 && k.length <= MAX_AGENT_KEY_CHARS))
   assert.equal(new Set(restored).size, restored.length)
+  // The cut keeps the first ones, in their order.
+  assert.deepEqual(restored.slice(0, 3), ['s:s1', 'a:0', 'a:1'])
+  assert.equal(restored.includes('w:s1|wf_1'), false, 'a 1.5.0 fold became an opened node')
+  assert.equal('agentsFolded' in (ui as Record<string, unknown>), false, 'the 1.5.0 folds were carried along')
   assert.equal(ui?.agentSelected, 'l:toolu_01')
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 
+  // Folds alone — what a 1.5.0 window stored — open nothing: the tree starts collapsed.
+  const folds = new Map<string, unknown>([['tokenPace.ui', { agentsFolded: ['s:s1', 'w:s1|wf_1'] }]])
+  const third = await activateHost(makeFixture(), REPO, { globalState: folds })
+  await state.execute('tokenPace.setRange', '7d')
+  const fromFolds = third.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  assert.deepEqual(fromFolds?.agentsExpanded, [])
+  assert.equal('agentsFolded' in (fromFolds as Record<string, unknown>), false)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
   const junk = new Map<string, unknown>([
-    ['tokenPace.ui', { agentsFolded: 'not-a-list', agentSelected: long }],
+    ['tokenPace.ui', { agentsExpanded: 'not-a-list', agentSelected: long }],
   ])
   const second = await activateHost(makeFixture(), REPO, { globalState: junk })
   await state.execute('tokenPace.setRange', '7d')
   const back = second.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
-  assert.deepEqual(back?.agentsFolded, [])
+  assert.deepEqual(back?.agentsExpanded, [])
   assert.equal(back?.agentSelected, null)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
@@ -1170,7 +1187,7 @@ test('the poll is wanted while an agent runs, or while a launch waits for its fi
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–',
-    lowerBound: false, duration: '–', startTs: null, lastTs: null, children: [], ...over,
+    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(T), roots, running })
   const waiting = node({ key: 'l:toolu_x', kind: 'pending', state: 'unknown', derived: true })

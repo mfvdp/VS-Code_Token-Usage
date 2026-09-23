@@ -14,7 +14,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
 import {
-  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_TREE_DEPTH, ROOT_WINDOW_MS, RUNNING_WINDOW_MS,
+  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, ROOT_WINDOW_MS, RUNNING_WINDOW_MS,
   SESSION_ACTIVE_MS,
 } from '../src/agentTree'
 import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS } from '../src/agg'
@@ -28,7 +28,7 @@ import { AGENT_META_MAX_BYTES } from '../src/scan'
 import { selectWindows, viewOf, windowValue } from '../src/statusText'
 import { formatReset, TimeConfig } from '../src/time'
 import { QuotaState, QuotaWindow } from '../src/types'
-import { MAX_AGENT_FOLDS } from '../src/viewModel'
+import { MAX_AGENT_EXPANDED } from '../src/viewModel'
 import { readManifest } from './helpers/nls'
 
 const ROOT = join(__dirname, '..')
@@ -443,7 +443,8 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`a response within the last ${SESSION_ACTIVE_MS / 60_000} minutes`, 'the active window'],
     [`a response within the last ${ROOT_WINDOW_MS / 3_600_000} hours`, 'which sessions are roots'],
     [`once every **${Number(throttle[1]) / 1000} seconds**`, 'the push interval'],
-    [`at most ${MAX_AGENT_FOLDS} folded nodes`, 'the fold cap'],
+    [`at most ${MAX_AGENT_EXPANDED} opened nodes`, 'the cap on opened nodes'],
+    [`at most **${MAX_RUNNING_LIST}** running agents`, 'the running list cap'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
     [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],

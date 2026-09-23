@@ -15,7 +15,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | Section | Contents |
 |---|---|
 | `quota` | One card per provider: the plan name and the reading's age in the header, then per window one header row (label, reset, pace verdict, percentage) over a bar with the elapsed tick, the pace gap painted on either side of it and a second tick for the projected value at the reset, the forecast line, a seven-day sparkline coloured by pace, and extra usage. Every window explains its colour: hovering it, or reaching it with the keyboard, opens why the bar is green, yellow, amber or red — the used and the elapsed share with the gap between them, the rule that turns it yellow (as soon as the reading is ahead of pace, or past your tolerance band), the measuring phase with the time it ends, an exhausted window with its reset, a missing clock, a stale reading; the words are the view model's, so the markdown view prints one such line per window under its table and the Quick Pick carries the first two as the item detail. With the status line connected the Claude card ends with the prompt-cache line — warm or cold, the expiry countdown and TTL, the hit ratio — with a `–` for every part the payload did not carry, and never an estimate of any of it. The full freshness row (last check · last data · last local event · next refresh · snapshot age) and the official page stay in the markdown view; the tooltip keeps the reading's age and links the official page from the provider name. A provider that reports no window at all gets one local five-hour estimate instead, labelled as one |
-| `agents` | Session → workflow → agent tree of the Claude Code sessions of the last seven days, most recent first: every node with its state (running, done, failed or unknown; a session active or idle), its usage and its duration. A done or failed state is what the parent's own records or the workflow journal say; running, unknown, active and idle are derived from when the transcripts last changed, and are marked as derived. Clicking a node opens its details panel under the tree. The section is pushed at most every two seconds while agents run, and its clocks tick in between. Claude Code only — Codex records no agent identity. Nothing of an agent's prompt, description or result is ever read; the whole account is in [Agents](agents.md) |
+| `agents` | First a list of the agents running now — longest-running first, each with its live clock, its usage and where it sits (session, workflow run, project), a waiting parent marked as waiting — so none has to be looked for in the tree; then the session → workflow → agent tree of the Claude Code sessions of the last seven days, most recent first, closed by default: only the sessions show, a closed node says how many agents are below it, and the nodes you open stay open. Every node with its state (running, done, failed or unknown; a session active or idle), its usage and its duration. A done or failed state is what the parent's own records or the workflow journal say; running, unknown, active and idle are derived from when the transcripts last changed, and are marked as derived. Clicking a node — in the tree or in the running list — opens its details panel under the tree. The section is pushed at most every two seconds while agents run, and its clocks tick in between. Claude Code only — Codex records no agent identity. Nothing of an agent's prompt, description or result is ever read; the whole account is in [Agents](agents.md) |
 | `summary` | Three to five rule-based sentences, each with its figure and the basis it came from. No advice — only measurements |
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline. Hovering a card, or reaching it with the keyboard, opens what it counts, how it is computed, the period with its dates, what it is compared with, the split per provider and its basis; the markdown view lists the same explanations under the table |
@@ -71,8 +71,8 @@ The heatmap switches between `usage` and `cost`; the hour profile between local 
 
 **Collapsing.** Every section header is a toggle. What you collapse is remembered with the rest
 of the view state (range, sort, filters), so a panel you have trimmed to two sections opens that
-way again. The nodes you fold in the agent tree and the one whose details are open are kept the
-same way. `tokenPace.dashboard.sections` decides what exists at all; collapsing decides what
+way again. The nodes you open in the agent tree — it starts closed — and the one whose details are
+open are kept the same way. `tokenPace.dashboard.sections` decides what exists at all; collapsing decides what
 you look at today.
 
 **The gear in a section header.** Opens the settings editor filtered to the settings that
@@ -140,8 +140,8 @@ applied as a multiplier to anything. Off by default because it invites over-inte
 between `webview`, `quickPick` and `markdown`. **Show Usage (Quick Pick)** is a flat, searchable
 list; **Show Usage as Text** opens a read-only markdown document. All three read the same view
 model, so the numbers cannot drift apart, and a test counts the rows of one against the other.
-The agent tree is the one part the Quick Pick leaves out: the markdown document prints it as an
-indented list, with the open node's details as a table.
+The agents section is the one part the Quick Pick leaves out: the markdown document prints its
+running list and the whole tree as indented lists, with the open node's details as a table.
 
 **Language.** With VS Code's display language set to German — the *German Language Pack*, or
 `--locale=de` — the extension is German: the status bar and its tooltip, the dashboard, the
@@ -154,13 +154,14 @@ CSV and JSON exports.
 
 **Accessibility.** Bars are `role="progressbar"` with `aria-valuenow` and a spoken
 `aria-valuetext`; sortable headers carry `aria-sort`; toggles carry `aria-pressed`; chart
-columns are focusable buttons. The agent tree is a `tree` of `treeitem`s with `aria-expanded`
-and `aria-selected`, its fold and its row are buttons of their own, and every state glyph has a
+columns are focusable buttons. The running list's rows are buttons ahead of the tree, under a
+level-three heading. The agent tree is a `tree` of `treeitem`s with `aria-expanded` and
+`aria-selected`, its toggle and its row are buttons of their own, and every state glyph has a
 spoken label that says whether the state was recorded or derived; the focus stays on its button
-when the tree is pushed again. The webview loads no external resource of any kind — its CSP
+— in the running list or in the tree — when the section is pushed again. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
 range, a sort, a filter, a metric, a drill day, a section toggle, the key of an agent-tree node to
-fold or open — at most 200 characters, and only ever matched against the nodes the tree was
-built with — or one of a fixed list of named commands; never a path and never a setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
+open, close or select — at most 200 characters, and only ever matched against the nodes the tree
+was built with — or one of a fixed list of named commands; never a path and never a setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
 carry the same figures.

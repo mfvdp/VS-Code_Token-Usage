@@ -2649,9 +2649,12 @@ test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
     'model', 'clearModels', 'moreModels', 'moreRanges', 'section', 'sectionSettings',
     'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'compositionCache',
-    'agentFold', 'agentSelect']) {
+    'agentToggle', 'agentSelect']) {
     assert.ok(SOURCE.indexOf('data-act="' + act + '"') >= 0, act)
   }
+  // 1.5.0's fold is gone from the page as it is from the host's allow-list.
+  assert.equal(SOURCE.indexOf('agentFold'), -1)
+  assert.equal(SCRIPT.indexOf('agentFold'), -1)
   for (const role of ['from', 'to']) {
     assert.ok(SOURCE.indexOf('data-role="' + role + '"') >= 0, role)
   }
@@ -2991,30 +2994,40 @@ function treeNode(key: string, state: string, over: Record<string, unknown> = {}
   return {
     key, kind: 'agent', label: 'Explore · Opus 5 · a94f', sub: null, state,
     derived: state !== 'done' && state !== 'failed', usage: '12.3K', lowerBound: false,
-    duration: '40.0 s', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, children: [], ...over,
+    duration: '40.0 s', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, agentCount: 0, children: [], ...over,
+  }
+}
+
+/** One RunningItem of src/agentTree.ts: the running agent of the tree below, where it sits. */
+function runningItem(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    key: AK.a1, kind: 'agent', label: 'Explore · Opus 5 · a94f', context: 'Session 9d0eb37a · Workflow cfe7718d · repo',
+    usage: '12.3K', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, waiting: false, ...over,
   }
 }
 
 /**
  * An AgentTreeVm with every state a node can be in, seven nodes: an active session holding a
  * running workflow run (one agent running, one done) and a failed agent whose own launch has
- * no transcript yet, and an idle session.
+ * no transcript yet, and an idle session. Every parent counts the agents below it, and the
+ * running agent is the one item of the running list, as the builder would make them.
  */
 function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     roots: [
       treeNode(AK.s1, 'active', {
         kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', duration: '1 h 05 min',
+        agentCount: 4,
         children: [
           treeNode(AK.wf, 'running', {
-            kind: 'workflow', label: 'Workflow cfe7718d', usage: '410K',
+            kind: 'workflow', label: 'Workflow cfe7718d', usage: '410K', agentCount: 2,
             children: [
               treeNode(AK.a1, 'running'),
               treeNode(AK.a2, 'done', { label: 'Plan · Opus 5 · b1c2', lowerBound: true }),
             ],
           }),
           treeNode(AK.a3, 'failed', {
-            label: 'general-purpose · Sonnet 5 · c3d4',
+            label: 'general-purpose · Sonnet 5 · c3d4', agentCount: 1,
             children: [
               treeNode(AK.l1, 'unknown', {
                 kind: 'pending', label: 'Explore · – · launched', usage: '–', duration: '–',
@@ -3026,16 +3039,32 @@ function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> 
       }),
       treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', usage: '–', duration: '–' }),
     ],
-    selected: null, running: 2, omittedRoots: 0, truncated: false, note: null, updatedAt: AG_NOW,
+    selected: null, running: 1, runningNow: [runningItem()], runningMore: 0,
+    omittedRoots: 0, truncated: false, note: null, updatedAt: AG_NOW,
     ...over,
   }
 }
 
+/** Every node of agentTree() that has children: the view state of a reader who opened them all. */
+const OPEN = [AK.s1, AK.wf, AK.a3]
+
 function agentUi(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     providers: ['claude', 'codex'], models: [], metric: 'usage', collapsed: [],
-    agentsFolded: [], agentSelected: null, ...over,
+    agentsExpanded: [], agentSelected: null, ...over,
   }
+}
+
+/** The view state with every node of the tree opened — what the 1.5.0 tests saw by default. */
+function openUi(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return agentUi({ agentsExpanded: OPEN, ...over })
+}
+
+/** The tree part of a rendered section: from the tree's own frame on, the running list left out. */
+function treePart(h: string): string {
+  const at = h.indexOf('<div class="agtree"')
+  assert.ok(at >= 0, 'no tree in ' + h)
+  return h.slice(at)
 }
 
 /** The NodeDetails the view model builds for AK.a1, with a row of every kind of absence. */
@@ -3131,7 +3160,8 @@ function unescapeHtml(s: string): string {
 
 test('the agent tree draws every state with a glyph of its own and marks each inferred one', () => {
   const a = agentCtx()
-  const h = agentsHtml(a)
+  // Every node opened, so every state is on screen; the running list above it is its own test.
+  const h = treePart(agentsHtml(a, { ui: openUi() }))
   assert.ok(h.startsWith('<div class="agtree" role="tree" aria-label="Agents"><ul role="none">'
     + '<li role="treeitem" class="ag-k-session"'), h)
   const glyphs = [...h.matchAll(/<span class="ag-st ag-([a-z]+)" role="img" aria-label="([^"]*)" title="([^"]*)"><\/span>/g)]
@@ -3165,7 +3195,8 @@ test('the agent tree draws every state with a glyph of its own and marks each in
 
 test('a row carries the usage and duration it was given and, only while it runs, a live clock', () => {
   const a = agentCtx()
-  const h = agentsHtml(a)
+  // Every node opened; the running list's own row of the running agent is left out of the counts.
+  const h = treePart(agentsHtml(a, { ui: openUi() }))
   // The figures of a row, each one unbreakable, so a narrow sidebar wraps at a separator.
   const figs = (...parts: string[]): string =>
     '<span class="ag-fig">' + parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
@@ -3189,9 +3220,14 @@ test('a row carries the usage and duration it was given and, only while it runs,
   assert.equal(h.indexOf('⚠</span>'), -1, h)
   assert.equal(/ag-lb|lower-bound/.test(h), false, h)
   assert.ok(h.endsWith('</ul></div><p class="meta">Output figures in the details marked ⚠ are lower bounds.</p>'), h)
-  // A fold that hides the only such row takes the line with it.
-  const hidden = agentsHtml(a, { ui: agentUi({ agentsFolded: [AK.wf] }) })
+  // A closed run hides the only such row, and takes the line with it; so does the tree's
+  // default, where only the sessions show.
+  const hidden = agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1, AK.a3] }) })
   assert.equal(hidden.indexOf('marked ⚠'), -1, hidden)
+  assert.equal(agentsHtml(a).indexOf('marked ⚠'), -1)
+  // A session row that carries one is on screen closed as well: the line follows it.
+  const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', lowerBound: true })] })
+  assert.ok(agentsHtml(a, { agents: rootMark }).indexOf('marked ⚠') >= 0)
   // Absence is a dash, never a zero: the quiet session. A launch nobody has counted yet shows
   // no figures at all — here it is not running, so not even a clock.
   assert.ok(h.indexOf(lbl('Explore', '–', 'launched') + '</span></button>') >= 0, h)
@@ -3202,8 +3238,11 @@ test('a row carries the usage and duration it was given and, only while it runs,
   // A launch whose transcript has not been seen yet reads as the hint it is.
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-pending" aria-selected="false">') >= 0, h)
   assert.match(STYLE, /\.ag-k-pending > \.ag-line \.ag-label \{ font-style: italic; \}/)
-  // A running node without a start gets no clock rather than one counting from 1970.
-  const nostart = agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'running', { startTs: null })] }) })
+  // A running node without a start gets no clock rather than one counting from 1970 — in the
+  // tree, and in the running list.
+  const nostart = agentsHtml(a, {
+    agents: agentTree({ roots: [treeNode(AK.a1, 'running', { startTs: null })], runningNow: [runningItem({ startTs: null })] }),
+  })
   assert.equal(nostart.indexOf('data-live'), -1, nostart)
   // A node with nothing in it is dashes.
   const bare = agentsHtml(a, { agents: agentTree({ roots: [{ key: AK.a1 }] }) })
@@ -3213,45 +3252,77 @@ test('a row carries the usage and duration it was given and, only while it runs,
   assert.equal(/undefined|NaN|null|\[object Object\]/.test(h + nostart + bare), false)
 })
 
-test('a folded node keeps its row, drops its children and says it is collapsed', () => {
+test('by default the tree is closed: only the sessions, each parent collapsed and saying how many agents it holds', () => {
   const a = agentCtx()
-  const open = agentsHtml(a)
-  // Every node with children has a fold and says whether it is open; a leaf has neither, and
-  // keeps its place in the column with an empty slot.
+  const h = treePart(agentsHtml(a))
+  // The two sessions and nothing under them: no run, no agent, no launch is written.
+  assert.deepEqual([...h.matchAll(/data-act="agentSelect" data-key="([^"]*)"/g)].map((m) => m[1]), [AK.s1, AK.s2])
+  for (const k of [AK.wf, AK.a1, AK.a2, AK.a3, AK.l1]) assert.equal(h.indexOf('data-key="' + k + '"'), -1, k)
+  assert.equal(h.indexOf('<ul role="group">'), -1, h)
+  // The session with children is collapsed, its toggle says it opens it, and its meta line says
+  // what it holds beside the project; the session with none is a leaf, and counts nothing.
+  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
+    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
+    + '" aria-label="Expand Session 9d0eb37a"></button>') >= 0, h)
+  assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
+    + '<span class="meta">repo · <span class="nobr">4 agent(s)</span></span>') >= 0, h)
+  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-selected="false"><div class="ag-line">'
+    + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.s2 + '"') >= 0, h)
+  assert.equal(h.split('agent(s)').length - 1, 1, h)
+  assert.equal(h.indexOf('aria-expanded="true"'), -1, h)
+})
+
+test('an opened node shows its children closed in turn, each counting its own; an opened one counts nothing', () => {
+  const a = agentCtx()
+  // The reader opened the busy session: its run and its failed agent show, closed.
+  const one = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1] }) }))
+  assert.ok(one.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="true" aria-selected="false">'
+    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
+    + '" aria-label="Collapse Session 9d0eb37a"></button>') >= 0, one)
+  // Opened, the session names its project and no count: its agents are on screen now.
+  assert.ok(one.indexOf('<span class="nobr">Session 9d0eb37a</span></span><span class="meta">repo</span>') >= 0, one)
+  assert.ok(one.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="false" aria-selected="false">'
+    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
+    + '" aria-label="Expand Workflow cfe7718d"></button>') >= 0, one)
+  assert.ok(one.indexOf('<span class="nobr">Workflow cfe7718d</span></span><span class="meta"><span class="nobr">2 agent(s)</span></span>') >= 0, one)
+  assert.ok(one.indexOf('<span class="nobr">c3d4</span></span><span class="meta"><span class="nobr">1 agent(s)</span></span>') >= 0, one)
+  // The children of the closed ones are not written at all.
+  for (const k of [AK.a1, AK.a2, AK.l1]) assert.equal(one.indexOf('data-key="' + k + '"'), -1, k)
+  assert.equal(one.split('<ul role="group">').length - 1, 1, one)
+
+  // Everything opened: three groups, every parent says it is open, and no row counts.
+  const open = treePart(agentsHtml(a, { ui: openUi() }))
   assert.ok(open.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="true" aria-selected="false">'
-    + '<div class="ag-line"><button class="ag-fold" data-act="agentFold" data-key="' + AK.wf
+    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
     + '" aria-label="Collapse Workflow cfe7718d"></button>') >= 0, open)
+  // A leaf has no toggle and keeps its place in the column with an empty slot.
   assert.ok(open.indexOf('<li role="treeitem" class="ag-k-agent" aria-selected="false"><div class="ag-line">'
     + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '"') >= 0, open)
   assert.equal(open.split('aria-expanded="true"').length - 1, 3, open)
   assert.equal(open.indexOf('aria-expanded="false"'), -1, open)
-  // The children of an open node are its group.
   assert.equal(open.split('<ul role="group">').length - 1, 3, open)
+  assert.equal(open.indexOf('agent(s)'), -1, open)
 
-  const folded = agentsHtml(a, { ui: agentUi({ agentsFolded: [AK.wf] }) })
-  assert.ok(folded.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="false" aria-selected="false">'
-    + '<div class="ag-line"><button class="ag-fold" data-act="agentFold" data-key="' + AK.wf
-    + '" aria-label="Expand Workflow cfe7718d"></button>') >= 0, folded)
-  // Its two agents are not written at all; its parent and its siblings are untouched.
-  assert.equal(folded.indexOf(AK.a1), -1, folded)
-  assert.equal(folded.indexOf(AK.a2), -1, folded)
-  for (const k of [AK.s1, AK.a3, AK.l1, AK.s2]) assert.ok(folded.indexOf('data-key="' + k + '"') >= 0, k)
-  // Folding a session takes everything under it away, and the other session stays.
-  const root = agentsHtml(a, { ui: agentUi({ agentsFolded: [AK.s1] }) })
-  for (const k of [AK.wf, AK.a1, AK.a2, AK.a3, AK.l1]) assert.equal(root.indexOf('data-key="' + k + '"'), -1, k)
-  assert.ok(root.indexOf('data-key="' + AK.s2 + '"') >= 0, root)
+  // Opening a node below a closed one shows nothing of it: the session decides first.
+  const deep = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.wf] }) }))
+  for (const k of [AK.wf, AK.a1, AK.a2]) assert.equal(deep.indexOf('data-key="' + k + '"'), -1, k)
+  // A count the view model did not give — none, zero, nonsense — prints nothing, never a 0.
+  for (const agentCount of [undefined, 0, -3, 2.5, '7', null]) {
+    const odd = agentTree({ roots: [treeNode(AK.s1, 'active', { kind: 'session', label: 'Session 9d0eb37a', agentCount, children: [treeNode(AK.a1, 'running')] })] })
+    assert.equal(treePart(agentsHtml(a, { agents: odd })).indexOf('agent(s)'), -1, String(agentCount))
+  }
   // The twisty is drawn, not typed, and turns with the attribute.
   assert.match(STYLE, /\.ag-fold::before \{ content: "▾";/)
   assert.match(STYLE, /\[aria-expanded="false"\] > \.ag-line > \.ag-fold::before \{ content: "▸"; \}/)
-  assert.equal(/[▾▸]/.test(open + folded), false)
+  assert.equal(/[▾▸]/.test(open + one), false)
 })
 
 test('the selected node is the one pressed row, and only a selection opens the details', () => {
   const a = agentCtx()
-  const none = agentsHtml(a)
+  const none = agentsHtml(a, { ui: openUi() })
   assert.equal(none.indexOf('aria-pressed="true"'), -1, none)
   assert.equal(none.indexOf('ag-details'), -1, none)
-  const h = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: agentUi({ agentSelected: AK.a1 }) })
+  const h = treePart(agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: openUi({ agentSelected: AK.a1 }) }))
   const pressed = [...h.matchAll(/data-act="agentSelect" data-key="([^"]*)" aria-pressed="true"/g)].map((m) => m[1])
   assert.deepEqual(pressed, [AK.a1])
   assert.equal(h.split('aria-pressed="false"').length - 1, 6, h)
@@ -3259,6 +3330,36 @@ test('the selected node is the one pressed row, and only a selection opens the d
   assert.equal(h.split('aria-selected="true"').length - 1, 1, h)
   // Quieter than a pressed chip: the track's tint and the focus colour's edge.
   assert.match(STYLE, /\.ag-row\[aria-pressed="true"\] \{ background: var\(--track\);/)
+})
+
+test('selecting a node opens nothing: the details open under the closed tree, the running row pressed', () => {
+  const a = agentCtx()
+  // The running agent, selected from the running list: its tree row is inside a closed branch.
+  const h = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: agentUi({ agentSelected: AK.a1 }) })
+  const tree = treePart(h)
+  assert.equal(tree.indexOf('data-key="' + AK.a1 + '"'), -1, 'the selection opened the branch')
+  assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
+  // The details are under the tree all the same, with the live age of the node's last line —
+  // the node is in the payload, only not on screen.
+  const panel = h.slice(h.indexOf('<div class="ag-details"'))
+  assert.ok(h.indexOf('<div class="ag-details"') > h.indexOf('<div class="agtree"'), h)
+  assert.ok(panel.indexOf('<span data-live="since" data-ts="' + (AG_NOW - 5_000) + '">5 s</span> ago') >= 0, panel)
+  // Its running row is the one pressed row; the tree has none on screen.
+  assert.deepEqual([...h.matchAll(/data-key="([^"]*)" data-list="now" aria-pressed="true"/g)].map((m) => m[1]), [AK.a1])
+  assert.equal(h.split('aria-pressed="true"').length - 1, 1, h)
+  // A node of a session the tree does not list is found in the running list for its clock.
+  const far = 'a:ffff0001'
+  const beyond = agentsHtml(a, {
+    agents: agentTree({
+      runningNow: [runningItem({ key: far, lastTs: AG_NOW - 7_000 })],
+      selected: detailsOf({ key: far, rows: [] }),
+    }),
+    ui: agentUi({ agentSelected: far }),
+  })
+  const farPanel = beyond.slice(beyond.indexOf('<div class="ag-details"'))
+  assert.ok(farPanel.indexOf('<dt>Last activity</dt><dd><span class="nobr"><span data-live="since" data-ts="'
+    + (AG_NOW - 7_000) + '">7 s</span> ago</span></dd>') >= 0, farPanel)
+  assert.ok(farPanel.indexOf('aria-label="~running · derived"') >= 0, farPanel)
 })
 
 test('the details print the view model\'s rows, a dash for each absence, and a live last activity', () => {
@@ -3345,11 +3446,18 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   const EVIL = '<script>alert(1)</script><img src=x onerror=alert(2)>" onmouseover="alert(3)\' `x` '
   const a = agentCtx()
   // Every string of the tree poisoned — labels, sub texts, keys, the sentences, even the state
-  // and the kind — and the selection and a fold pointing at poisoned keys.
-  const agents = poisoned(agentTree({ selected: detailsOf(), note: 'n', omittedRoots: 2, truncated: true }), EVIL)
-  const h = agentsHtml(a, { agents, ui: agentUi({ agentSelected: EVIL + AK.a1, agentsFolded: [EVIL + AK.a3] }) })
+  // and the kind, and every string of the running list with them: label, context, usage, key,
+  // kind — and the selection and the opened nodes pointing at poisoned keys.
+  const agents = poisoned(agentTree({
+    selected: detailsOf(), note: 'n', omittedRoots: 2, truncated: true, runningMore: 3,
+    runningNow: [runningItem(), runningItem({ key: AK.l1, kind: 'pending', usage: '–', waiting: true })],
+  }), EVIL)
+  const h = agentsHtml(a, {
+    agents, ui: agentUi({ agentSelected: EVIL + AK.a1, agentsExpanded: [EVIL + AK.s1, EVIL + AK.wf] }),
+  })
   // Everything was drawn: the poison did not stop the renderer, it is only text.
   assert.ok(h.indexOf('<div class="ag-details"') >= 0, h)
+  assert.ok(h.indexOf('<div class="ag-now">') === 0, h)
   assert.equal(/<script/i.test(h), false, h)
   for (const tag of tagsOf(h)) {
     assert.ok(['div', 'ul', 'li', 'button', 'span', 'p', 'dl', 'dt', 'dd'].includes(tag.name), tag.name)
@@ -3362,17 +3470,25 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   const shown = '&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(2)&gt;&quot; '
     + 'onmouseover=&quot;alert(3)&#39; `x` '
   for (const where of ['<span class="ag-label"><span class="nobr">' + shown, '<p class="empty">' + shown + 'n</p>',
-    '<div class="name">' + shown, '<dt>' + shown + 'Type</dt>']) {
+    '<div class="name">' + shown, '<dt>' + shown + 'Type</dt>',
+    // The running list's context and usage, as text too.
+    '<span class="meta ag-ctx"><span>' + shown + 'Session 9d0eb37a</span>', '<span class="nobr">' + shown + '12.3K</span>']) {
     assert.ok(h.indexOf(where) >= 0, where + ' missing from ' + h)
   }
   // A key survives the attribute exactly: the browser hands the host back what it was given.
   const keys = [...h.matchAll(/data-key="([^"]*)"/g)].map((m) => unescapeHtml(m[1]))
   assert.ok(keys.includes(EVIL + AK.a1), keys.join('\n'))
-  // The poisoned selection is still the one pressed row, the poisoned fold still folds.
-  assert.equal(h.split('aria-pressed="true"').length - 1, 1, h)
-  assert.equal(keys.includes(EVIL + AK.l1), false)
-  // An unknown state and kind reach no class.
+  // The poisoned selection is still the pressed row — in the tree and in the running list —
+  // and the poisoned opened nodes still open: the agent under them is on screen, the launch
+  // under the failed agent, which nobody opened, is only in the running list.
+  const pressedKeys = [...h.matchAll(/data-key="([^"]*)"(?: data-list="now")? aria-pressed="true"/g)].map((m) => unescapeHtml(m[1]))
+  assert.deepEqual(pressedKeys, [EVIL + AK.a1, EVIL + AK.a1])
+  const treeKeys = [...treePart(h).matchAll(/data-key="([^"]*)"/g)].map((m) => unescapeHtml(m[1]))
+  assert.ok(treeKeys.includes(EVIL + AK.a1), treeKeys.join('\n'))
+  assert.equal(treeKeys.includes(EVIL + AK.l1), false)
+  // An unknown state and kind reach no class, in the tree or in the running list.
   assert.equal(/class="[^"]*(?:script|alert)/.test(h), false, h)
+  assert.ok(h.indexOf('<li class="ag-k-agent"><button class="ag-row" data-act="agentSelect"') >= 0, h)
 })
 
 test('one timer, started with the first payload, keeps the live spans current without a render', () => {
@@ -3415,37 +3531,45 @@ test('one timer, started with the first payload, keeps the live spans current wi
   assert.doesNotThrow(() => a.intervals[0].fn())
 })
 
-test('a click on a fold or a row posts what the host parses, and a second click closes the row', () => {
+test('a click on a toggle or a row posts what the host parses, and a second click closes the row', () => {
   const a = agentCtx()
   a.fire('window:message', {
     origin: '',
     data: { type: 'data', payload: model({ sections: ['agents'], agents: agentTree(), ui: agentUi({ agentSelected: AK.a1 }) }) },
   })
   a.posted.length = 0
-  const button = (act: string, key?: string): Record<string, unknown> =>
-    ({ tagName: 'BUTTON', dataset: key === undefined ? { act } : { act, key } })
+  const button = (act: string, key?: string, list?: string): Record<string, unknown> =>
+    ({ tagName: 'BUTTON', dataset: { act, ...(key === undefined ? {} : { key }), ...(list === undefined ? {} : { list }) } })
   const event = (el: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> =>
     ({ target: { closest: () => el }, stopPropagation: () => undefined, preventDefault: () => undefined, ...extra })
-  a.fire('document:click', event(button('agentFold', AK.wf)))
+  a.fire('document:click', event(button('agentToggle', AK.s1)))
   a.fire('document:click', event(button('agentSelect', AK.a2)))
   // The row whose details are open closes them again.
   a.fire('document:click', event(button('agentSelect', AK.a1)))
+  // A row of the running list is the same message: another running agent selects it, the
+  // selected one's running row closes it again.
+  a.fire('document:click', event(button('agentSelect', AK.l1, 'now')))
+  a.fire('document:click', event(button('agentSelect', AK.a1, 'now')))
   // A button without a key is not a message worth sending.
-  a.fire('document:click', event(button('agentFold', '')))
+  a.fire('document:click', event(button('agentToggle', '')))
   a.fire('document:click', event(button('agentSelect')))
+  a.fire('document:click', event(button('agentSelect', '', 'now')))
   const expected = [
-    { type: 'agentFold', key: AK.wf },
+    { type: 'agentToggle', key: AK.s1 },
     { type: 'agentSelect', key: AK.a2 },
+    { type: 'agentSelect', key: null },
+    { type: 'agentSelect', key: AK.l1 },
     { type: 'agentSelect', key: null },
   ]
   assert.deepEqual(a.posted, expected)
   // Every one of them passes the host's allow-list unchanged.
   for (const m of expected) assert.deepEqual(parseWebviewMessage(m), m)
   // Enter and Space on a button are the browser's own click: the keydown fallback leaves both
-  // alone, or one key press would fold a node and unfold it again.
-  a.fire('document:keydown', event(button('agentFold', AK.wf), { key: 'Enter' }))
+  // alone, or one key press would open a node and close it again.
+  a.fire('document:keydown', event(button('agentToggle', AK.wf), { key: 'Enter' }))
   a.fire('document:keydown', event(button('agentSelect', AK.a2), { key: ' ' }))
-  assert.equal(a.posted.length, 3)
+  a.fire('document:keydown', event(button('agentSelect', AK.a1, 'now'), { key: 'Enter' }))
+  assert.equal(a.posted.length, expected.length)
 })
 
 test('a keyboard user on the tree keeps the focus through a push of the section', () => {
@@ -3453,7 +3577,7 @@ test('a keyboard user on the tree keeps the focus through a push of the section'
   const control = (act: string, key: string, name: string): Record<string, unknown> =>
     ({ dataset: { act, key }, focus: () => { focused.push(name) } })
   const before = control('agentSelect', AK.a1, 'before')
-  const drawn = [control('agentFold', AK.a1, 'fold'), control('agentSelect', AK.a2, 'other'),
+  const drawn = [control('agentToggle', AK.a1, 'fold'), control('agentSelect', AK.a2, 'other'),
     control('agentSelect', AK.a1, 'after')]
   const inside = new Set<unknown>([before])
   const body = {
@@ -3494,6 +3618,59 @@ test('a keyboard user on the tree keeps the focus through a push of the section'
   assert.deepEqual(focused, [])
 })
 
+test('a keyboard user on a row of the running list comes back to that row, not to the same node\'s tree row', () => {
+  const focused: string[] = []
+  const control = (act: string, key: string, name: string, list?: string): Record<string, unknown> =>
+    ({ dataset: list === undefined ? { act, key } : { act, key, list }, focus: () => { focused.push(name) } })
+  // What a push draws, in document order: the running list first, then the tree.
+  const drawn = [
+    control('agentSelect', AK.l1, 'now-other', 'now'),
+    control('agentSelect', AK.a1, 'now-row', 'now'),
+    control('agentToggle', AK.s1, 'toggle'),
+    control('agentSelect', AK.a1, 'tree-row'),
+  ]
+  const inside = new Set<unknown>()
+  const body = {
+    innerHTML: '', dataset: {}, style: {},
+    contains: (el: unknown) => inside.has(el),
+    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined,
+    getElementById: () => null,
+    querySelector: (s: string) => (s === '[data-body="agents"]' ? body : null),
+    querySelectorAll: () => [],
+    activeElement: null,
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc,
+    window: { addEventListener: () => undefined }, console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  ;(c as Record<string, unknown>).fixture = model({ sections: ['agents'], agents: agentTree(), ui: agentUi() })
+  nodeVm.runInContext('vm = fixture;', c)
+  const push = (active: Record<string, unknown>): string[] => {
+    focused.length = 0
+    inside.clear()
+    inside.add(active)
+    doc.activeElement = active
+    nodeVm.runInContext('renderSection("agents");', c)
+    return [...focused]
+  }
+  // On the running row: back to the running row, although the tree row comes later.
+  assert.deepEqual(push(control('agentSelect', AK.a1, 'was-now', 'now')), ['now-row'])
+  // On the tree row: back to the tree row, although the running row with its key comes first.
+  assert.deepEqual(push(control('agentSelect', AK.a1, 'was-tree')), ['tree-row'])
+  // A running row whose agent has finished is gone from the list: the focus goes nowhere,
+  // and least of all to that agent's tree row.
+  drawn.splice(1, 1)
+  assert.deepEqual(push(control('agentSelect', AK.a1, 'was-now', 'now')), [])
+  // The script names the list it came from: the running rows carry data-list, the tree rows not.
+  const h = agentsHtml(agentCtx(), { ui: openUi() })
+  assert.equal(h.split('data-list="now"').length - 1, 1, h)
+  assert.equal(treePart(h).indexOf('data-list'), -1)
+})
+
 test('the running glyph pulses only for a reader who allows motion, and the tree has no colour of its own', () => {
   const motion = between(STYLE, /@media \(prefers-reduced-motion: no-preference\) \{/, '\n}')
   assert.match(motion, /\.ag-running::before \{ animation: ag-pulse 2s ease-in-out infinite; \}/)
@@ -3510,7 +3687,9 @@ test('the agent tree speaks German on a German page', () => {
   const words = ['Agents', 'running', 'done', 'failed', 'unknown', 'active session', 'idle session',
     '{0} · derived', '{0} · recorded', 'running for {0}', '{0} ago', 'State', 'Last activity', 'Details',
     'Collapse {0}', 'Expand {0}', 'Tree cut at {0} nodes.', '{0} older session(s) not shown.',
-    'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.']
+    'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.',
+    // 1.5.1: the running list and what a closed node holds.
+    'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent', '{0} agent(s)']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -3526,8 +3705,11 @@ test('the agent tree speaks German on a German page', () => {
     return String(nodeVm.runInContext('vm = fixture; sAgents()', c))
   }
   const h = section({
-    agents: agentTree({ selected: detailsOf({ rows: [] }), truncated: true, omittedRoots: 2 }),
-    ui: agentUi({ agentSelected: AK.a1 }),
+    agents: agentTree({
+      selected: detailsOf({ rows: [] }), truncated: true, omittedRoots: 2, runningMore: 3,
+      runningNow: [runningItem(), runningItem({ key: AK.l1, waiting: true })],
+    }),
+    ui: openUi({ agentSelected: AK.a1 }),
   })
   for (const phrase of [
     'role="tree" aria-label="Agenten"', 'title="~läuft · abgeleitet"', 'title="fertig · aufgezeichnet"',
@@ -3537,8 +3719,17 @@ test('the agent tree speaks German on a German page', () => {
     'aria-label="Workflow cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
     '<p class="empty">Baum bei 7 Knoten abgeschnitten.</p>',
     '<p class="meta">Mit ⚠ markierte Ausgabewerte in den Details sind Untergrenzen.</p>',
+    // The running list: its heading with everything that runs, the waiting clause, the rest counted.
+    '<div class="name" role="heading" aria-level="3">Laufen gerade (5)</div>',
+    '<span>wartet auf einen untergeordneten Agenten</span>', '<p class="meta">und 3 weitere</p>',
   ]) assert.ok(h.indexOf(phrase) >= 0, phrase + ' missing from ' + h)
-  assert.ok(section({ ui: agentUi({ agentsFolded: [AK.wf] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
+  assert.ok(section({ ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
+  // The tree's default: the closed session counts its agents in German.
+  const closed = section({})
+  assert.ok(closed.indexOf('<span class="meta">repo · <span class="nobr">4 Agent(en)</span></span>') >= 0, closed)
+  // The toggle's words are the page's; the node's name is the view model's (English here).
+  assert.ok(closed.indexOf('aria-label="Session 9d0eb37a ausklappen"') >= 0, closed)
+  assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
   assert.equal(section({ agents: agentTree({ roots: [] }) }),
     '<p class="empty">Keine Claude-Code-Sitzung in den letzten 7 Tagen.</p>')
 })
@@ -3549,7 +3740,9 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   // model builds from them, and the markup the page writes for that tree.
   const vm = buildViewModel(makeInput({ agg: agentWorld().agg, cfg: makeConfig() }))
   const nodes = treeNodes(vm.agents.roots)
-  const h = agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi() })
+  // Every parent opened, as a reader who opened them all would have it: every node on screen.
+  const opened = nodes.filter((n) => n.children.length > 0).map((n) => n.key)
+  const h = treePart(agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi({ agentsExpanded: opened }) }))
   const rowOf = (key: string): string => {
     const at = h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + key + '"')
     assert.ok(at >= 0, 'no row for ' + key)
@@ -3579,9 +3772,133 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   assert.equal(/>0[ <]|> 0</.test(p), false, p)
 })
 
+test('the running list the view model builds reaches the page first, the tree closed under it', () => {
+  const vm = buildViewModel(makeInput({ agg: agentWorld('session').agg, cfg: makeConfig({ 'tokenPace.attribution': 'session' }) }))
+  const items = vm.agents.runningNow
+  // The world's running agent and its launch waiting for a transcript.
+  assert.deepEqual(items.map((r) => r.kind), ['agent', 'pending'])
+  const h = agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi() })
+  // First in the section, before the tree: the heading with the count, one row per item, in order.
+  assert.ok(h.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (2)</div><ul>'), h)
+  assert.ok(h.indexOf('<div class="ag-now">') < h.indexOf('<div class="agtree"'))
+  const rows = [...h.slice(0, h.indexOf('<div class="agtree"')).matchAll(/data-key="([^"]*)" data-list="now"/g)].map((m) => m[1])
+  assert.deepEqual(rows, items.map((r) => r.key))
+  for (const r of items) {
+    const at = h.indexOf('data-key="' + r.key + '" data-list="now"')
+    const row = h.slice(at, h.indexOf('</button>', at))
+    // The live clock from its start, its usage — a dash for the launch — and where it sits.
+    assert.ok(row.indexOf('<span class="nobr">running for <span data-live="since" data-ts="' + r.startTs + '">') >= 0, row)
+    assert.ok(row.indexOf('<span class="nobr">' + r.usage + '</span></span>') >= 0, row)
+    assert.ok(row.indexOf('<span class="meta ag-ctx"><span>' + r.context.split(' · ').join('</span> · <span>') + '</span></span>') >= 0, row)
+    assert.equal(/>0[ <]|> 0</.test(row), false, row)
+  }
+  assert.equal(items.find((r) => r.kind === 'pending')?.usage, '–')
+  // The tree under it holds the two sessions and nothing else, each saying what it holds.
+  const tree = treePart(h)
+  assert.deepEqual([...tree.matchAll(/data-act="agentSelect" data-key="([^"]*)"/g)].map((m) => m[1]),
+    vm.agents.roots.map((r) => r.key))
+  for (const r of vm.agents.roots) {
+    assert.ok(tree.indexOf('<span class="nobr">' + r.agentCount + ' agent(s)</span>') >= 0, r.label)
+  }
+  assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
+})
+
 // ---------------------------------------------------------------------------
-// The push throttle
+// 1.5.1: the running list
 // ---------------------------------------------------------------------------
+
+/** One row of the running list exactly as the page writes it. */
+function nowRow(o: { key: string; kind?: string; parts: string[]; clock?: { ts: number; text: string } | null;
+  usage: string; where: string[]; pressed?: boolean }): string {
+  const figs = [...(o.clock ? ['running for <span data-live="since" data-ts="' + o.clock.ts + '">' + o.clock.text + '</span>'] : []), o.usage]
+  return '<li class="ag-k-' + (o.kind ?? 'agent') + '"><button class="ag-row" data-act="agentSelect" data-key="' + o.key
+    + '" data-list="now" aria-pressed="' + (o.pressed === true) + '">'
+    + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
+    + '<span class="ag-text"><span class="ag-label">' + o.parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
+    + '<span class="ag-fig">' + figs.map((f) => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
+    + (o.where.length ? '<span class="meta ag-ctx">' + o.where.map((w) => '<span>' + w + '</span>').join(' · ') + '</span>' : '')
+    + '</span></button></li>'
+}
+
+test('the running list comes first: how many run, then a row each with its clock, its usage and where it sits', () => {
+  const a = agentCtx()
+  const items = [
+    runningItem({ key: 'a:w1', label: 'general-purpose · Opus 5 · w1w1', context: 'Session 9d0eb37a',
+      usage: '4.1K', startTs: AG_NOW - 600_000, waiting: true }),
+    runningItem(),
+    runningItem({ key: AK.l1, kind: 'pending', label: 'Plan · sonnet · launched', context: 'Session 9d0eb37a · repo',
+      usage: '–', startTs: AG_NOW - 90_000, lastTs: AG_NOW - 90_000 }),
+  ]
+  const h = agentsHtml(a, { agents: agentTree({ runningNow: items }), ui: agentUi({ agentSelected: AK.a1 }) })
+  const now = h.slice(0, h.indexOf('<div class="agtree"'))
+  assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (3)</div><ul>'
+    // Waiting on the agent below it: the clause says so, after where it sits.
+    + nowRow({ key: 'a:w1', parts: ['general-purpose', 'Opus 5', 'w1w1'], clock: { ts: AG_NOW - 600_000, text: '10 min 00 s' },
+      usage: '4.1K', where: ['Session 9d0eb37a', 'waits for a child agent'] })
+    // The selected one is pressed, like its tree row.
+    + nowRow({ key: AK.a1, parts: ['Explore', 'Opus 5', 'a94f'], clock: { ts: AG_NOW - 42_000, text: '42 s' },
+      usage: '12.3K', where: ['Session 9d0eb37a', 'Workflow cfe7718d', 'repo'], pressed: true })
+    // A launch nobody has read a line of: its clock, and a dash for what it used.
+    + nowRow({ key: AK.l1, kind: 'pending', parts: ['Plan', 'sonnet', 'launched'], clock: { ts: AG_NOW - 90_000, text: '1 min 30 s' },
+      usage: '–', where: ['Session 9d0eb37a', 'repo'] })
+    + '</ul></div>', now)
+  // The rows are the first buttons of the section, the tree's after them.
+  const acts = [...h.matchAll(/data-act="([a-zA-Z]+)" data-key="([^"]*)"/g)].map((m) => m[2])
+  assert.deepEqual(acts.slice(0, 3), ['a:w1', AK.a1, AK.l1])
+  // Each part of where it sits keeps together while it fits and breaks inside only when not;
+  // the line is one of its own under the name and the figures; a launch's name is italic.
+  assert.match(STYLE, /\.ag-ctx \{ flex: 1 1 100%; \}/)
+  assert.match(STYLE, /\.ag-ctx > span \{ display: inline-block; max-width: 100%; \}/)
+  assert.match(STYLE, /\.ag-now li \{ display: flex; \}/)
+  assert.match(STYLE, /\.ag-now \.ag-k-pending \.ag-label \{ font-style: italic; \}/)
+  assert.match(STYLE, /\.ag-now ul \{ list-style: none; margin: 4px 0 0; padding: 0; \}/)
+})
+
+test('the running list counts what it left out, and an item with nothing in it is dashes, never a zero', () => {
+  const a = agentCtx()
+  const more = agentsHtml(a, { agents: agentTree({ runningMore: 4 }) })
+  assert.ok(more.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (5)</div><ul>'), more)
+  assert.ok(more.indexOf('</li></ul><p class="meta">and 4 more</p></div><div class="agtree"') >= 0, more)
+  // Only left-out ones: the heading and the count, no empty list.
+  const only = agentsHtml(a, { agents: agentTree({ runningNow: [], runningMore: 2 }) })
+  assert.ok(only.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (2)</div>'
+    + '<p class="meta">and 2 more</p></div>'), only)
+  assert.equal(only.indexOf('<ul></ul>'), -1)
+  // A count that is none is no line.
+  for (const runningMore of [0, -1, 0.4, NaN, Infinity, null, undefined, 'three', '4', true]) {
+    const h = agentsHtml(a, { agents: agentTree({ runningMore }) })
+    assert.equal(h.indexOf(' more</p>'), -1, String(runningMore))
+    assert.ok(h.indexOf('Running now (1)') >= 0, String(runningMore))
+  }
+  // An item without a label, a usage, a start or a context: dashes, no clock, no empty line —
+  // and what is not an item at all is skipped.
+  const bare = agentsHtml(a, { agents: agentTree({ runningNow: [{ key: AK.a1 }, null, 7, 'x'] }) })
+  assert.ok(bare.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div><ul>'
+    + nowRow({ key: AK.a1, parts: ['–'], clock: null, usage: '–', where: [] }) + '</ul></div>'), bare)
+  assert.equal(/undefined|NaN|null|\[object Object\]|>0</.test(bare.slice(0, bare.indexOf('<div class="agtree"'))), false, bare)
+  // A kind this build does not know reaches no class: it is drawn as an agent.
+  const rocket = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ kind: 'rocket' })] }) })
+  assert.ok(rocket.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div><ul>'
+    + '<li class="ag-k-agent">'), rocket)
+  assert.equal(rocket.indexOf('rocket'), -1, rocket)
+})
+
+test('with nothing running the list is one quiet line and no heading; a payload without the list says nothing', () => {
+  const a = agentCtx()
+  const quiet = agentsHtml(a, { agents: agentTree({ runningNow: [], runningMore: 0 }) })
+  assert.ok(quiet.startsWith('<p class="ag-now meta">No agent is running.</p><div class="agtree"'), quiet)
+  assert.equal(quiet.indexOf('Running now'), -1, quiet)
+  assert.equal(quiet.indexOf('data-list'), -1, quiet)
+  // An older build's payload carries no list: no line claims that nothing runs.
+  for (const runningNow of [undefined, null, 'x', { key: AK.a1 }]) {
+    const old = agentsHtml(a, { agents: agentTree({ runningNow }) })
+    assert.ok(old.startsWith('<div class="agtree"'), String(runningNow) + ': ' + old)
+    assert.equal(old.indexOf('No agent is running.'), -1)
+  }
+  // With no session at all, the section's one note says it; the list adds nothing to it.
+  assert.equal(agentsHtml(a, { agents: agentTree({ roots: [], runningNow: [] }) }),
+    '<p class="empty">No Claude Code session in the last 7 days.</p>')
+})
 
 interface Rig {
   p: any
@@ -3702,20 +4019,32 @@ test('the agent tree is pushed at most every two seconds, and no other section w
   assert.deepEqual(r.live(), [])
 })
 
-test('a fold or a selection is answered at once, and the interval counts from that push', () => {
+test('an opened node or a selection is answered at once, and the interval counts from that push', () => {
   const r = throttleRig()
-  const folded = ['s:/p/1.jsonl']
+  const opened = ['s:/p/1.jsonl']
   r.p.update(flushVm({ agents: flushTree(1) }))
   r.p.resolveWebviewView(r.view)
-  // 300 ms after the full push the reader folds a node: nothing about the click waits.
+  // 300 ms after the full push the reader opens a node: nothing about the click waits.
   r.posted.length = 0
   r.advance(AG_NOW + 300)
-  r.p.update(flushVm({ agents: flushTree(1), ui: agentUi({ agentsFolded: folded }) }))
+  r.p.update(flushVm({ agents: flushTree(1), ui: agentUi({ agentsExpanded: opened }) }))
+  assert.ok(r.sections().includes('agents'), r.sections().join())
+  // The push carries the view state the page draws the tree from.
+  const push = r.posted.find((m) => m.type === 'section' && m.key === 'agents')
+  assert.deepEqual(push.payload.ui.agentsExpanded, opened)
+  // Closing it again is answered at once as well.
+  r.posted.length = 0
+  r.advance(AG_NOW + 350)
+  r.p.update(flushVm({ agents: flushTree(1), ui: agentUi({ agentsExpanded: [] }) }))
+  assert.ok(r.sections().includes('agents'), r.sections().join())
+  r.posted.length = 0
+  r.advance(AG_NOW + 360)
+  r.p.update(flushVm({ agents: flushTree(1), ui: agentUi({ agentsExpanded: opened }) }))
   assert.ok(r.sections().includes('agents'), r.sections().join())
   // A selection, which changes the details the tree carries as well, goes at once too.
   r.posted.length = 0
   r.advance(AG_NOW + 400)
-  const ui = agentUi({ agentsFolded: folded, agentSelected: 'a:/p/1.jsonl' })
+  const ui = agentUi({ agentsExpanded: opened, agentSelected: 'a:/p/1.jsonl' })
   r.p.update(flushVm({ agents: { ...flushTree(1), selected: { key: 'a:/p/1.jsonl' } }, ui }))
   assert.ok(r.sections().includes('agents'), r.sections().join())
   assert.deepEqual(r.live(), [])
@@ -3811,7 +4140,7 @@ test('a fragment for a section with no body on the page updates the model and re
 
 test('a label breaks only between its parts, never inside a hyphenated model id', () => {
   const a = agentCtx()
-  const h = agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'done', { label: 'general-purpose · claude-opus-5 · a94f' })] }) })
+  const h = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'done', { label: 'general-purpose · claude-opus-5 · a94f' })] }) }))
   const label = h.slice(h.indexOf('<span class="ag-label">'), h.indexOf('</span><span class="ag-fig">') + 7)
   assert.equal(label, '<span class="ag-label"><span class="nobr">general-purpose</span> · '
     + '<span class="nobr">claude-opus-5</span> · <span class="nobr">a94f</span></span>')

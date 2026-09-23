@@ -3,7 +3,33 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.5.1 — 2026-09-23
+
+### Added
+
+* **Running now — the agents at work, first thing in the Agents section.** A list above the tree
+  names every agent and every launch that is running at this moment, so you no longer have to
+  look for them in the tree: the longest-running first, each with the running glyph, its name, a
+  live `running for …` clock, its usage and where it sits — the session, the workflow run, and
+  the project while `tokenPace.attribution` names one. An agent that runs only because an agent
+  it launched is still running says so: `waits for a child agent`. The list is taken from every
+  session of the last seven days, the ones the tree does not list and the nodes it had to cut
+  included; it holds at most 20 agents and counts the rest (`and 3 more`). A click on a row
+  opens the same details as the tree row; with nothing running the list is one line,
+  `No agent is running.` The markdown view prints it as well, before the tree.
+
+### Changed
+
+* **The agent tree starts closed.** Only the sessions show until you open one, and a closed node
+  says how many agents are below it (`4 agent(s)`). The nodes you open are remembered with the
+  dashboard's view state, as node keys and nothing else, and stay open across pushes, reloads
+  and restarts; selecting a node — in the tree or in the running list — opens nothing by itself,
+  and its details show under the tree whether its row is on screen or not. What 1.5.0 kept as
+  folded nodes is not carried over.
+
 ## 1.5.0 — 2026-09-23
+
+Tagged but not published: the release run stopped at a failing test. 1.5.1 is the first release that ships these changes.
 
 ### Added
 

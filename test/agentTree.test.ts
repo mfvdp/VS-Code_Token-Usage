@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  AgentTreeVm, MAX_NODES, MAX_ROOTS, MAX_TREE_DEPTH, TreeNode,
+  AgentTreeVm, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, TreeNode,
 } from '../src/agentTree'
 import { AgentTreeInput, agentDetails, buildAgentTree } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
@@ -663,14 +663,19 @@ test('the open node gets its details; a node that is gone leaves none and says s
   assert.equal(gone.selected, null)
   assert.equal(gone.note, 'The selected node is no longer in the tree.')
 
-  // A session beyond the list is not on screen either.
+  // A session beyond the list is not in the tree, but its nodes are still nodes: the running
+  // list names the running agents of such a session too, and a click on one opens its details
+  // like a click on a tree row. So the selection opens, and nothing claims it is gone.
   const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
     main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
-  const beyond = build({ mains, selected: `s:${mains[MAX_ROOTS].sessionId}` })
-  assert.equal(beyond.selected, null)
-  assert.equal(beyond.note, 'The selected node is no longer in the tree.')
-  // …while its details can still be asked for directly.
-  assert.equal(agentDetails(input({ mains }), NOW, `s:${mains[MAX_ROOTS].sessionId}`)?.title, 'Session 00000020')
+  const beyondKey = `s:${mains[MAX_ROOTS].sessionId}`
+  const beyond = build({ mains, selected: beyondKey })
+  assert.equal(beyond.roots.some((r) => r.key === beyondKey), false, 'the session beyond the list is listed')
+  assert.equal(beyond.selected?.key, beyondKey)
+  assert.equal(beyond.selected?.title, 'Session 00000020')
+  assert.equal(beyond.note, null)
+  // The same details asked for directly.
+  assert.deepEqual(agentDetails(input({ mains }), NOW, beyondKey), beyond.selected)
 
   assert.equal(build({ agents }).note, null)
   assert.equal(build({ agents }).selected, null)
@@ -859,7 +864,9 @@ test('every message of the tree and of its markdown has a German entry, and the 
   // The markdown's own words for the tree.
   const text = ['Agents', 'Running', 'Done', 'Failed', 'Unknown', 'Active', 'Idle', 'State', '| Detail | Value |',
     'Tree cut at {0} nodes.', '{0} older session(s) not listed.',
-    '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.']
+    '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.',
+    // The running list above the tree, and the tree's own heading under it.
+    'Running now', 'Sessions and agents', '(waiting)', 'No agent is running.', 'and {0} more']
   assert.ok(ours.length >= 30, `only ${ours.length} keys found in src/agentTreeBuild.ts`)
   // Words German takes over as they are.
   const same = new Set(['Agent', 'Turns', 'Workflow {0}'])
@@ -946,4 +953,214 @@ test('seconds under a minute are written in the page\'s own digits', () => {
     assert.equal(durationText(1_450), '1,5 s')
     assert.equal(durationText(125_000), '2 min 05 s')
   })
+})
+
+// ---------------------------------------------------------------------------
+// 1.5.1 · what a closed node holds, and the running list
+// ---------------------------------------------------------------------------
+
+/** The keys of a tree's running items, in their order. */
+function runningKeys(vm: AgentTreeVm): string[] {
+  return vm.runningNow.map((r) => r.key)
+}
+
+test('every node counts the agents and launches below it — never itself, never a run — on the tree before the cut', () => {
+  const vm = build({
+    agents: [
+      rec('aaaa0001', { firstTs: NOW - 40 * MIN }),
+      rec('aaaa0002', { spawnerFile: agentFile('aaaa0001'), firstTs: NOW - 35 * MIN }),
+      wfRec('bbbb0001'),
+      wfRec('bbbb0002', { firstTs: NOW - 20 * MIN }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, file: agentFile('aaaa0001'), ts: NOW - MIN })],
+  })
+  const root = vm.roots[0]
+  // Five agent-like nodes below the session: two agents, the launch under the first, the run's two.
+  assert.equal(root.agentCount, 5)
+  assert.equal(node(vm, agentKey('aaaa0001')).agentCount, 2, 'its nested agent and its launch')
+  assert.equal(node(vm, wfKey).agentCount, 2)
+  for (const k of [agentKey('aaaa0002'), agentKey('bbbb0001'), agentKey('bbbb0002'), 'l:toolu_pppp0001']) {
+    assert.equal(node(vm, k).agentCount, 0, k)
+  }
+  // A session without agents holds none.
+  assert.equal(build().roots[0].agentCount, 0)
+
+  // Cut at MAX_NODES: the payload carries fewer children than the session holds, and the count
+  // still says how many there are.
+  const many = Array.from({ length: 400 }, (_, i) => rec(`c${String(i).padStart(7, '0')}`, {
+    firstTs: NOW - 5 * HOUR + i * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
+  }))
+  const cut = build({ agents: many })
+  assert.equal(cut.truncated, true)
+  assert.ok(cut.roots[0].children.length < 400, String(cut.roots[0].children.length))
+  assert.equal(cut.roots[0].agentCount, 400)
+})
+
+test('the running list holds every running agent and launch, longest-running first, and nothing that is not running', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      rec('aaaa0001', { firstTs: NOW - 20 * MIN }),
+      rec('aaaa0002', { firstTs: NOW - 45 * MIN }),
+      // The same start: the key decides, so the order never flickers between two pushes.
+      rec('aaaa0004', { firstTs: NOW - 30 * MIN }),
+      rec('aaaa0003', { firstTs: NOW - 30 * MIN }),
+      rec('dddd0001', { outcome: 'completed', outcomeTs: NOW - MIN }),
+      rec('eeee0001', { firstTs: NOW - 50 * MIN, lastTs: NOW - 40 * MIN }),
+      wfRec('bbbb0001', { firstTs: NOW - 10 * MIN }),
+      wfRec('bbbb0002', { outcome: 'failed', outcomeTs: NOW - 2 * MIN }),
+    ],
+    launches: [
+      launch('pppp0001', { agentId: null, ts: NOW - 3 * MIN, typeHint: 'Plan', modelHint: 'sonnet' }),
+      launch('pppp0002', { agentId: null, ts: NOW - 30 * MIN }),
+    ],
+  }
+  const vm = build(over)
+  assert.deepEqual(runningKeys(vm), [
+    agentKey('aaaa0002'), agentKey('aaaa0003'), agentKey('aaaa0004'), agentKey('aaaa0001'), agentKey('bbbb0001'),
+    'l:toolu_pppp0001',
+  ])
+  // Done, failed, unknown, the run, the session and a launch gone quiet are not in it.
+  for (const k of [agentKey('dddd0001'), agentKey('bbbb0002'), agentKey('eeee0001'), 'l:toolu_pppp0002', wfKey, rootKey]) {
+    assert.equal(runningKeys(vm).includes(k), false, k)
+  }
+  // Every item is a running node of the tree, named as the node is, its figures the node's.
+  for (const r of vm.runningNow) {
+    const n = node(vm, r.key)
+    assert.equal(n.state, 'running', r.key)
+    assert.deepEqual([r.kind, r.label, r.startTs, r.lastTs], [n.kind, n.label, n.startTs, n.lastTs], r.key)
+    assert.equal(r.usage, n.kind === 'pending' ? '–' : n.usage, r.key)
+  }
+  // A launch nothing was counted of has a dash, never a zero.
+  const pending = vm.runningNow.find((r) => r.kind === 'pending')
+  assert.ok(pending)
+  assert.deepEqual([pending.label, pending.usage], ['Plan · sonnet · launched', '–'])
+  // The number the host polls by is the same count: listed plus left out.
+  assert.equal(vm.running, vm.runningNow.length + vm.runningMore)
+  assert.equal(vm.runningMore, 0)
+  // Nothing runs, nothing is listed.
+  const quiet = build({ agents: [rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - MIN })] })
+  assert.deepEqual([quiet.runningNow, quiet.runningMore, quiet.running], [[], 0, 0])
+  assert.deepEqual([build({ mains: [] }).runningNow, build({ mains: [] }).runningMore], [[], 0])
+})
+
+test('the running list stops at MAX_RUNNING_LIST and counts the rest, the longest-running kept', () => {
+  const n = MAX_RUNNING_LIST + 5
+  const agents = Array.from({ length: n }, (_, i) => rec(`f${String(i).padStart(7, '0')}`, {
+    // The last one made started first: the order is the start, not the order of the records.
+    firstTs: NOW - (i + 1) * MIN, lastTs: NOW - 30_000,
+  }))
+  const vm = build({ agents })
+  assert.equal(vm.running, n)
+  assert.equal(vm.runningNow.length, MAX_RUNNING_LIST)
+  assert.equal(vm.runningMore, 5)
+  assert.deepEqual(runningKeys(vm), agents.slice().reverse().slice(0, MAX_RUNNING_LIST).map((r) => agentKey(r.agentId)))
+})
+
+test('the running list is taken from every session, those beyond the list and the nodes beyond the cut included', () => {
+  // Beyond MAX_ROOTS: the oldest session is not listed, and its running agent still is.
+  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
+    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  const oldest = mains[MAX_ROOTS].sessionId
+  const far = build({ mains, agents: [rec('aaaa0001', { sessionId: oldest })] })
+  assert.equal(far.omittedRoots, 1)
+  assert.equal(all(far.roots).some((x) => x.key === agentKey('aaaa0001')), false, 'the agent is on the tree')
+  assert.deepEqual(far.runningNow.map((r) => [r.key, r.context]), [[agentKey('aaaa0001'), 'Session 00000020']])
+  // Its row opens its details like any other.
+  const opened = build({ mains, agents: [rec('aaaa0001', { sessionId: oldest })], selected: agentKey('aaaa0001') })
+  assert.equal(opened.selected?.key, agentKey('aaaa0001'))
+  assert.equal(opened.selected?.stateText, 'Running — inferred: the transcript changed 1 min ago and no result was recorded yet.')
+  assert.equal(opened.note, null)
+
+  // Beyond the cut: the newer session's three hundred running agents fill the tree before the
+  // older session's one, which started first and so leads the list — though the tree left it out.
+  const crowd = Array.from({ length: MAX_NODES }, (_, i) => rec(`c${String(i).padStart(7, '0')}`, {
+    sessionId: S2, firstTs: NOW - 5 * MIN + i * 100, lastTs: NOW - 30_000,
+  }))
+  const early = rec('eeee0001', { firstTs: NOW - 30 * MIN })
+  const vm = build({ agents: [...crowd, early], mains: [main({ lastTs: NOW - 3 * MIN }), main({ sessionId: S2, lastTs: NOW - MIN })] })
+  assert.equal(vm.truncated, true)
+  assert.equal(vm.roots[0].key, `s:${S2}`)
+  assert.equal(all(vm.roots).some((x) => x.key === agentKey('eeee0001')), false, 'the cut kept the early agent')
+  assert.equal(vm.runningNow[0].key, agentKey('eeee0001'))
+  assert.equal(vm.running, MAX_NODES + 1)
+  assert.equal(vm.runningNow.length + vm.runningMore, vm.running)
+})
+
+test('a running item says where it sits: its session, its run, its project while attribution names one', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      rec('aaaa0001', { firstTs: NOW - 20 * MIN }),
+      wfRec('bbbb0001', { firstTs: NOW - 10 * MIN }),
+      // Nested inside the run: the run is still where it sits.
+      wfRec('bbbb0002', { spawnerFile: agentFile('bbbb0001', S1, WF), firstTs: NOW - 5 * MIN }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, file: agentFile('bbbb0001', S1, WF), ts: NOW - 2 * MIN })],
+    sessions: [sessionRec()],
+  }
+  const contexts = (vm: AgentTreeVm): string[][] => vm.runningNow.map((r) => [r.key, r.context])
+  assert.deepEqual(contexts(build({ ...over, attribution: 'project' })), [
+    [agentKey('aaaa0001'), 'Session 9d0eb37a · alpha'],
+    [agentKey('bbbb0001'), 'Session 9d0eb37a · Workflow cfe7718d · alpha'],
+    [agentKey('bbbb0002'), 'Session 9d0eb37a · Workflow cfe7718d · alpha'],
+    // A launch from inside the run sits in the run.
+    ['l:toolu_pppp0001', 'Session 9d0eb37a · Workflow cfe7718d · alpha'],
+  ])
+  // Attribution off: no project anywhere, the list included.
+  assert.deepEqual(contexts(build({ ...over, attribution: 'none' })), [
+    [agentKey('aaaa0001'), 'Session 9d0eb37a'],
+    [agentKey('bbbb0001'), 'Session 9d0eb37a · Workflow cfe7718d'],
+    [agentKey('bbbb0002'), 'Session 9d0eb37a · Workflow cfe7718d'],
+    ['l:toolu_pppp0001', 'Session 9d0eb37a · Workflow cfe7718d'],
+  ])
+  // In German, the words the tree's own labels use.
+  assert.deepEqual(german(() => build({ ...over, attribution: 'none' })).runningNow.map((r) => r.context).slice(0, 2),
+    ['Sitzung 9d0eb37a', 'Sitzung 9d0eb37a · Workflow cfe7718d'])
+})
+
+test('an item waits when the roll-up made it running, and says so; one running by its own transcript does not', () => {
+  const silent = { firstTs: NOW - 50 * MIN, lastTs: NOW - 40 * MIN }
+  const vm = build({
+    mains: [main({ lastTs: NOW - 30 * MIN })],
+    agents: [
+      // parent → child → grandchild; only the grandchild wrote lately.
+      rec('aaaa0001', silent),
+      rec('aaaa0002', { firstTs: NOW - 45 * MIN, lastTs: NOW - 40 * MIN, spawnerFile: agentFile('aaaa0001'), meta: null }),
+      rec('aaaa0003', { firstTs: NOW - 35 * MIN, spawnerFile: agentFile('aaaa0002'), meta: null, lastTs: NOW - 1 * MIN }),
+      // Running by its own clock, with a running child: not waiting.
+      rec('cccc0001', { firstTs: NOW - 25 * MIN, lastTs: NOW - 2 * MIN }),
+      rec('cccc0002', { firstTs: NOW - 20 * MIN, spawnerFile: agentFile('cccc0001'), meta: null }),
+      // A recorded result stays a fact; its running child is listed, the parent is not.
+      rec('bbbb0001', { firstTs: NOW - 15 * MIN, lastTs: NOW - 12 * MIN, outcome: 'completed', outcomeTs: NOW - 11 * MIN }),
+      rec('bbbb0002', { firstTs: NOW - 14 * MIN, spawnerFile: agentFile('bbbb0001'), meta: null }),
+    ],
+  })
+  assert.deepEqual(vm.runningNow.map((r) => [r.key, r.waiting]), [
+    [agentKey('aaaa0001'), true],
+    [agentKey('aaaa0002'), true],
+    [agentKey('aaaa0003'), false],
+    [agentKey('cccc0001'), false],
+    [agentKey('cccc0002'), false],
+    [agentKey('bbbb0002'), false],
+  ])
+  // The flag follows the sentence the details print.
+  const d = agentDetails(input({
+    mains: [main({ lastTs: NOW - 30 * MIN })],
+    agents: [rec('aaaa0001', silent), rec('aaaa0002', { spawnerFile: agentFile('aaaa0001'), meta: null, lastTs: NOW - MIN })],
+  }), NOW, agentKey('aaaa0001'))
+  assert.equal(d?.stateText, 'Running — inferred: a child agent of this agent is still running.')
+})
+
+test('the running list carries no field the page does not need, and keys it can send back', () => {
+  const vm = build({
+    agents: [rec('aaaa0001'), wfRec('bbbb0001')],
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })],
+  })
+  assert.ok(vm.runningNow.length === 3)
+  for (const r of vm.runningNow) {
+    assert.deepEqual(Object.keys(r).sort(), ['context', 'key', 'kind', 'label', 'lastTs', 'startTs', 'usage', 'waiting'])
+    assert.ok(r.key.length > 0 && r.key.length <= MAX_AGENT_KEY_CHARS, r.key)
+    assert.equal(/[\\/]/.test(r.key + r.context), false, `${r.key} ${r.context}`)
+    assert.ok(r.kind === 'agent' || r.kind === 'pending')
+    assert.equal(typeof r.waiting, 'boolean')
+  }
 })

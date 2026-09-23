@@ -10,14 +10,48 @@ Part of the [Token Pace documentation](../README.md#documentation).
 The `agents` section of the [dashboard](dashboard.md) shows the Claude Code sessions of the
 last **7 days** as a tree: each session, the workflow runs inside it, the agents it spawned and
 the agents those spawned in turn — with the state of every node, what it used and how long it
-took. It is on by default, directly after `quota` in `tokenPace.dashboard.sections`; a list you
-have set yourself is kept as it is, so there the tree appears once you add `agents` to it. The
-range, provider and model chips do not apply: the tree is always the last seven days, so the
-filter bar stays below it. *Show Usage as Text* prints the same tree as an indented list, with
-the open node's details as a table; the Quick Pick does not carry it.
+took. Above the tree, the first thing in the section, a list names the agents that are running
+right now, so you do not have to look for them in the tree; the tree itself starts closed, with
+only the sessions showing. It is on by default, directly after `quota` in
+`tokenPace.dashboard.sections`; a list you have set yourself is kept as it is, so there the
+section appears once you add `agents` to it. The range, provider and model chips do not apply:
+the section is always the last seven days, so the filter bar stays below it. *Show Usage as
+Text* prints the running list and then the whole tree as indented lists, with the open node's
+details as a table; the Quick Pick does not carry them.
 
 Claude Code only. Codex writes no agent identity into its transcripts, and the section states
 nothing about Codex.
+
+## Running now
+
+The list above the tree — `Running now (3)` — holds every agent and every launch whose state is
+**running** (see [States](#states)): an agent that replied, or was launched, within the last ten
+minutes and has no recorded result — a launch whose transcript has not appeared yet included —
+and an agent that runs only because an agent it launched runs. It is taken from every session
+of the last seven days — those the tree does not list any more, and nodes the tree had to cut,
+included — so nothing that runs is missing from it because the tree is full. Running is an
+inferred state, and every row's glyph says so, as the tree's do.
+
+**Order and cap.** The longest-running first: by the time of the agent's first line, or of the
+launch, the earliest on top; two that started at the same moment keep a fixed order. The list
+holds at most **20** running agents; the rest are counted under it (`and 3 more`).
+
+**Each row** is the running glyph, the agent's name as the tree writes it, a live
+`running for 12 min 05 s` counted from its first line (from the launch, for a launch), its
+usage — `–` for a launch, since nothing of it was counted — and under them where it sits:
+`Session 9d0eb37a · Workflow cfe7718d`, with the session's project after it while
+`tokenPace.attribution` names one. An agent that runs only because an agent below it runs — the
+parent waiting for its child — says so on that line: `waits for a child agent`.
+
+**A click on a row** opens the same details a click on its tree row opens, under the tree, and
+the same click again closes them. It opens nothing in the tree: the panel shows whether the
+node's tree row is on screen or inside a closed branch — or in a session the tree does not
+list. The rows are buttons ahead of the tree, so the keyboard reaches them first.
+
+With nothing running, the list is one line — `No agent is running.` — with no heading. The
+markdown report prints the list under `### Running now`, one line per agent — its name, where it
+sits and its usage, `(waiting)` behind a waiting one — and heads the tree after it with
+`### Sessions and agents`.
 
 ## The tree
 
@@ -28,6 +62,12 @@ seven days. At most **20** sessions are listed; the rest are counted under the t
 id (`Session 9d0eb37a`), and with its project beside it while `tokenPace.attribution` is
 `project` or `session` — the label the Sessions table shows, hashed too under
 `showProjectNames: hash`. With `attribution: none` no project is named anywhere in the tree.
+
+**Closed by default.** Only the sessions show until you open one; an opened node shows its
+children closed in turn. A closed node says how many agents are below it — `4 agent(s)` beside
+its name, counting every agent and launch at any depth under it, on the whole tree, also those
+the tree had to cut — and says nothing once it is open. What you open stays open (see
+[Opening and selection](#opening-and-selection)).
 
 **Below a session** come its workflow runs (`Workflow cfe7718d`) and its agents, each agent
 under the agent that launched it when that one is in the same tree, otherwise directly under the
@@ -42,10 +82,11 @@ before any of them keeps its deepest.
 
 **Each row** is the state glyph, the name, the usage — fresh input + cache write + output, the
 definition the tables use — and the duration from the first line to the last. A row carries no
-lower-bound mark: the details do (`Output … ⚠ lower bound`), and while a row on screen has one,
-a line under the tree says so — *Output figures in the details marked ⚠ are lower bounds.* A
-running node also says for how long: `running for 12 min 05 s`, counted from its first line and
-ticking every second. An agent's name is its type, its model and
+lower-bound mark: the details do (`Output … ⚠ lower bound`), and while a row on screen — one of
+a session, or of an opened node — has one, a line under the tree says so — *Output figures in
+the details marked ⚠ are lower bounds.* A running node also says for how long:
+`running for 12 min 05 s`, counted from its first line and ticking every second. An agent's name
+is its type, its model and
 the first four characters of its id — `Explore · claude-opus-5 · a94f`. The type is the one the
 agent's sidecar names, else the one its launch asked for, else `Agent`; the model is the last one
 its transcript recorded, else the alias the sidecar or the launch names, else `–`. An agent's
@@ -103,8 +144,9 @@ A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
 
 ## Details
 
-Clicking a row — or `Enter` on it, since the fold and the row are buttons of their own — opens
-the node's details under the tree; the same click again closes them. For an agent: type,
+Clicking a row — of the tree or of the running list, or `Enter` on it, since the toggle and the
+row are buttons of their own — opens the node's details under the tree; the same click again
+closes them. For an agent: type,
 models, depth, started, duration, last activity (with a live `… ago` beside it), then turns,
 usage, fresh input, cache write 5 m and 1 h, cache read, output, reasoning and tool calls, then
 who spawned it and its workflow run. A session lists its project (only while attribution allows
@@ -176,23 +218,28 @@ much was read, in counts only.
 * The file watcher reports a changed transcript within about a second, as it does for the token
   counts.
 * The section is pushed at most once every **2 seconds**. A running agent writes a line every
-  0.6 seconds at the median, and every push redraws the tree; the other sections are not held
-  back by it, and a fold or a click of yours is answered at once.
-* The `running for …` clocks and the last activity in the details tick every second in the page
-  itself — no message, no redraw.
+  0.6 seconds at the median, and every push redraws the running list and the tree; the other
+  sections are not held back by it, and opening a node or a click of yours is answered at once.
+  The keyboard focus stays on its row through a push — on the running list's row or on the
+  tree's, whichever it was on.
+* The `running for …` clocks of the running list and the tree and the last activity in the
+  details tick every second in the page itself — no message, no redraw.
 * The recursive file watcher can miss the files of a directory created after it started — on
   Linux it does — so while an agent runs the agent directories of the active sessions are also
   listed every **5 seconds**, on every platform; the one-minute sweep stays as the last net.
 
-## Folding and selection
+## Opening and selection
 
-A node with children has a fold (▾ / ▸) in front of its row. What you fold and which node is
-open are kept with the rest of the dashboard's view state — range, sort, filters, folded
-sections — in the extension's own storage, so they survive a push, a reload and a restart. Only
-node keys are kept, made of the session, run, agent or launch id: never a label, a figure or
-anything from a transcript, and at most 200 folded nodes. A key whose node has gone matches
-nothing, and an open node that has left the tree says so (`The selected node is no longer in the
-tree.`). *Clear Stored Data…* removes them with the rest of the dashboard view state.
+A node with children has a toggle (▸ closed, ▾ open) in front of its row; the tree starts with
+every node closed. Which nodes you opened and which node's details are open are kept with the
+rest of the dashboard's view state — range, sort, filters, folded sections — in the extension's
+own storage, so they survive a push, a reload and a restart; selecting a node never opens
+anything by itself. Only node keys are kept, made of the session, run, agent or launch id: the
+opened nodes' keys and the selected one's — never a label, a figure or anything from a
+transcript, and at most 200 opened nodes. A key whose node has gone matches nothing, and a
+selected node that is no longer among the records of the last seven days says so (`The selected
+node is no longer in the tree.`); one of a session the tree does not list any more still opens.
+*Clear Stored Data…* removes them with the rest of the dashboard view state.
 
 ## Limits
 

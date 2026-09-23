@@ -12,9 +12,9 @@ import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
 import {
-  DASHBOARD_SECTION_KEYS, problemActions, SOURCE_TITLE, SPARK_DAYS, SPARK_SLOTS, SPARK_SLOT_MS,
-  WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel, defaultUiState, forecastsFor,
-  SparkVm, parseWebviewMessage, sparkOf,
+  DASHBOARD_SECTION_KEYS, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
+  SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel, defaultUiState,
+  forecastsFor, SparkVm, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
   CLAUDE_FILE, FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
@@ -643,7 +643,7 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     hourZone: 'local',
     drillDay: null,
     collapsed: [],
-    agentsFolded: [],
+    agentsExpanded: [],
     agentSelected: null,
   })
 
@@ -683,42 +683,73 @@ test('the agents section sits directly after quota, in the fold list and in the 
   assert.ok(Array.isArray(sections), 'tokenPace.dashboard.sections has no default array')
   const order = sections as string[]
   assert.equal(order.indexOf('agents'), order.indexOf('quota') + 1, order.join(','))
-  // The config's own default says the same as the manifest's.
-  assert.deepEqual(defaultUiState(cfg).agentsFolded, [])
+  // The config's own default says the same as the manifest's; the tree starts with nothing open.
+  assert.deepEqual(defaultUiState(cfg).agentsExpanded, [])
   assert.equal(cfg.dashboard.sections.indexOf('agents'), cfg.dashboard.sections.indexOf('quota') + 1)
 })
 
-test('agent tree folds toggle and the selection sets and clears, by identity when nothing changes', () => {
+test('an agent node toggle opens and closes it, and the selection sets and clears, by identity when nothing changes', () => {
   const ui = defaultUiState(cfg)
-  const folded = applyMessage(ui, { type: 'agentFold', key: 's:/p/a.jsonl' })
-  assert.deepEqual(folded.agentsFolded, ['s:/p/a.jsonl'])
-  assert.deepEqual(ui.agentsFolded, [], 'the input state was mutated')
-  const both = applyMessage(folded, { type: 'agentFold', key: 'a:/p/a/subagents/agent-1.jsonl' })
-  assert.deepEqual(both.agentsFolded, ['s:/p/a.jsonl', 'a:/p/a/subagents/agent-1.jsonl'])
-  assert.deepEqual(applyMessage(both, { type: 'agentFold', key: 's:/p/a.jsonl' }).agentsFolded,
-    ['a:/p/a/subagents/agent-1.jsonl'])
+  // The tree starts collapsed: nothing is open until the reader opens it.
+  assert.deepEqual(ui.agentsExpanded, [])
+  const opened = applyMessage(ui, { type: 'agentToggle', key: 's:9d0eb37a' })
+  assert.deepEqual(opened.agentsExpanded, ['s:9d0eb37a'])
+  assert.deepEqual(ui.agentsExpanded, [], 'the input state was mutated')
+  const both = applyMessage(opened, { type: 'agentToggle', key: 'w:9d0eb37a|wf_1' })
+  assert.deepEqual(both.agentsExpanded, ['s:9d0eb37a', 'w:9d0eb37a|wf_1'])
+  // The same toggle again closes it, and nothing else.
+  assert.deepEqual(applyMessage(both, { type: 'agentToggle', key: 's:9d0eb37a' }).agentsExpanded,
+    ['w:9d0eb37a|wf_1'])
+  assert.deepEqual(applyMessage(applyMessage(opened, { type: 'agentToggle', key: 's:9d0eb37a' }),
+    { type: 'agentToggle', key: 's:9d0eb37a' }).agentsExpanded, ['s:9d0eb37a'], 'toggling twice is back where it was')
 
+  // A selection opens the details and nothing else: which nodes are open stays the reader's.
   const selected = applyMessage(ui, { type: 'agentSelect', key: 'l:toolu_01' })
   assert.equal(selected.agentSelected, 'l:toolu_01')
+  assert.deepEqual(selected.agentsExpanded, [], 'a selection opened a node')
+  assert.deepEqual(applyMessage(both, { type: 'agentSelect', key: 'a:a94f0001' }).agentsExpanded, both.agentsExpanded)
   assert.equal(applyMessage(selected, { type: 'agentSelect', key: 'l:toolu_01' }), selected)
   assert.equal(applyMessage(selected, { type: 'agentSelect', key: null }).agentSelected, null)
   assert.equal(applyMessage(ui, { type: 'agentSelect', key: null }), ui)
   // Over-long keys change nothing even when they reach applyMessage directly.
-  const long = 'x'.repeat(201)
-  assert.equal(applyMessage(ui, { type: 'agentFold', key: long }), ui)
+  const long = 'x'.repeat(MAX_AGENT_KEY_CHARS + 1)
+  assert.equal(applyMessage(ui, { type: 'agentToggle', key: long }), ui)
+  assert.equal(applyMessage(ui, { type: 'agentToggle', key: '' }), ui)
   assert.equal(applyMessage(ui, { type: 'agentSelect', key: long }), ui)
 
-  // The parser: strings of 1..200 chars, or null for the selection; nothing else.
-  assert.deepEqual(parseWebviewMessage({ type: 'agentFold', key: 'w:/p/a.jsonl|wf_1' }),
-    { type: 'agentFold', key: 'w:/p/a.jsonl|wf_1' })
+  // The parser: strings of 1..200 chars, or null for the selection; nothing else — and the
+  // 1.5.0 message `agentFold` is no longer a message at all.
+  assert.deepEqual(parseWebviewMessage({ type: 'agentToggle', key: 'w:9d0eb37a|wf_1' }),
+    { type: 'agentToggle', key: 'w:9d0eb37a|wf_1' })
+  assert.deepEqual(parseWebviewMessage({ type: 'agentToggle', key: 'x'.repeat(MAX_AGENT_KEY_CHARS) }),
+    { type: 'agentToggle', key: 'x'.repeat(MAX_AGENT_KEY_CHARS) })
   assert.deepEqual(parseWebviewMessage({ type: 'agentSelect', key: null }), { type: 'agentSelect', key: null })
-  assert.deepEqual(parseWebviewMessage({ type: 'agentSelect', key: 'x'.repeat(200) }),
-    { type: 'agentSelect', key: 'x'.repeat(200) })
-  for (const raw of [{ type: 'agentFold' }, { type: 'agentFold', key: null }, { type: 'agentFold', key: '' },
-    { type: 'agentFold', key: long }, { type: 'agentFold', key: 7 }, { type: 'agentSelect' },
+  assert.deepEqual(parseWebviewMessage({ type: 'agentSelect', key: 'x'.repeat(MAX_AGENT_KEY_CHARS) }),
+    { type: 'agentSelect', key: 'x'.repeat(MAX_AGENT_KEY_CHARS) })
+  for (const raw of [{ type: 'agentToggle' }, { type: 'agentToggle', key: null }, { type: 'agentToggle', key: '' },
+    { type: 'agentToggle', key: long }, { type: 'agentToggle', key: 7 }, { type: 'agentToggle', key: ['s:1'] },
+    { type: 'agentFold', key: 's:9d0eb37a' }, { type: 'agentFold' }, { type: 'agentSelect' },
     { type: 'agentSelect', key: long }, { type: 'agentSelect', key: ['a'] }]) {
     assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
   }
+})
+
+test('at most MAX_AGENT_EXPANDED nodes are kept open; beyond the cap nothing more opens, and closing always works', () => {
+  assert.equal(MAX_AGENT_EXPANDED, 200)
+  let ui = defaultUiState(cfg)
+  for (let i = 0; i < MAX_AGENT_EXPANDED; i++) ui = applyMessage(ui, { type: 'agentToggle', key: `a:${i}` })
+  assert.equal(ui.agentsExpanded.length, MAX_AGENT_EXPANDED)
+  // The 201st is not opened, and says so by identity: nothing to persist.
+  const full = ui
+  assert.equal(applyMessage(full, { type: 'agentToggle', key: 'a:extra' }), full)
+  // Closing one works at the cap, and makes room for exactly one more.
+  const closed = applyMessage(full, { type: 'agentToggle', key: 'a:7' })
+  assert.equal(closed.agentsExpanded.length, MAX_AGENT_EXPANDED - 1)
+  assert.equal(closed.agentsExpanded.includes('a:7'), false)
+  const again = applyMessage(closed, { type: 'agentToggle', key: 'a:extra' })
+  assert.equal(again.agentsExpanded.length, MAX_AGENT_EXPANDED)
+  assert.equal(again.agentsExpanded[MAX_AGENT_EXPANDED - 1], 'a:extra')
+  assert.equal(applyMessage(again, { type: 'agentToggle', key: 'a:7' }), again)
 })
 
 // ---------------------------------------------------------------------------
@@ -774,14 +805,26 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   assert.equal(root.state, 'active')
   assert.deepEqual(root.children.map((c) => [c.kind, c.state]), [['agent', 'running'], ['pending', 'running']])
   assert.equal(tree.running, 2)
+  // A closed session says what it holds: the agent and the launch below it.
+  assert.equal(root.agentCount, 2)
+  assert.deepEqual(root.children.map((c) => c.agentCount), [0, 0])
   assert.equal(tree.selected?.key, agentKey)
   assert.equal(tree.selected?.title, 'Explore · claude-opus-4-6 · a94f')
   assert.equal(tree.note, null)
+  // The running list: both, the one that started first on top, each with where it sits — the
+  // project too, while attribution names one — and a launch with nothing counted as a dash.
+  assert.deepEqual(tree.runningNow.map((r) => [r.kind, r.key, r.label, r.context, r.usage, r.waiting]), [
+    ['agent', agentKey, 'Explore · claude-opus-4-6 · a94f', 'Session sess-alp · alpha', '1.2K', false],
+    ['pending', 'l:toolu_02', 'Plan · – · launched', 'Session sess-alp · alpha', '–', false],
+  ])
+  assert.deepEqual(tree.runningNow.map((r) => r.startTs), [NOW - 20 * 60_000, NOW - 2 * 60_000])
+  assert.equal(tree.runningMore, 0)
 
-  // Attribution off: the same tree without a project name.
+  // Attribution off: the same tree without a project name, in the running list as well.
   const off = buildViewModel(makeInput({ agg: withAgents('none').agg, ui: { agentSelected: agentKey } }))
   assert.equal(off.agents.roots[0].sub, null)
   assert.equal(off.agents.selected?.key, agentKey)
+  assert.deepEqual(off.agents.runningNow.map((r) => r.context), ['Session sess-alp', 'Session sess-alp'])
 
   // Range-free and chip-free: the tree is the Claude sessions of the last days, whatever the
   // table below is filtered to.
@@ -809,6 +852,8 @@ test('with nothing ingested the agent tree is empty and says which absence it is
   assert.deepEqual(vm.agents.roots, [])
   assert.equal(vm.agents.selected, null)
   assert.equal(vm.agents.running, 0)
+  assert.deepEqual(vm.agents.runningNow, [])
+  assert.equal(vm.agents.runningMore, 0)
   assert.equal(vm.agents.note, 'No Claude Code session in the last 7 days.')
 })
 

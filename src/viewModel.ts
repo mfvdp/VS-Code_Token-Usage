@@ -99,8 +99,12 @@ export interface UiState {
    * same click that made it.
    */
   collapsed: string[]
-  /** Agent tree node keys the reader has folded (children hidden). */
-  agentsFolded: string[]
+  /**
+   * Agent tree node keys the reader has opened (children shown). The tree starts collapsed —
+   * only the sessions show — and a node stays open across pushes and reloads until the reader
+   * closes it again.
+   */
+  agentsExpanded: string[]
   /** The agent tree node whose details are open, or null. */
   agentSelected: string | null
 }
@@ -136,7 +140,7 @@ export type WebviewMessage =
   | { type: 'setHourZone'; zone: 'local' | 'utc' }
   | { type: 'drill'; day: string | null }
   | { type: 'toggleSection'; key: DashboardSectionKey }
-  | { type: 'agentFold'; key: string }
+  | { type: 'agentToggle'; key: string }
   | { type: 'agentSelect'; key: string | null }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
@@ -164,9 +168,9 @@ const METRICS: Metric[] = ['usage', 'output', 'cacheRead', 'requests', 'reasonin
 const MAX_CUSTOM_DAYS = 1826
 const MAX_MODEL_FILTER = 50
 const MAX_MODEL_CHARS = 80
-/** Longest agent tree node key a message or the stored state may carry, and most folds kept. */
+/** Longest agent tree node key a message or the stored state may carry, and most opened nodes kept. */
 export const MAX_AGENT_KEY_CHARS = 200
-export const MAX_AGENT_FOLDS = 200
+export const MAX_AGENT_EXPANDED = 200
 
 function isAgentKey(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0 && v.length <= MAX_AGENT_KEY_CHARS
@@ -257,10 +261,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return typeof m.key === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(m.key)
         ? { type: 'openSectionSettings', key: m.key as DashboardSectionKey }
         : null
-    // A node key of the agent tree. Opaque to the host: it only ever selects or folds a node
-    // the tree builder made, and a key that matches none selects nothing.
-    case 'agentFold':
-      return isAgentKey(m.key) ? { type: 'agentFold', key: m.key } : null
+    // A node key of the agent tree. Opaque to the host: it only ever opens, closes or selects a
+    // node the tree builder made, and a key that matches none selects nothing.
+    case 'agentToggle':
+      return isAgentKey(m.key) ? { type: 'agentToggle', key: m.key } : null
     case 'agentSelect':
       if (m.key === null) return { type: 'agentSelect', key: null }
       return isAgentKey(m.key) ? { type: 'agentSelect', key: m.key } : null
@@ -287,7 +291,7 @@ export function defaultUiState(cfg: Config): UiState {
     hourZone: 'local',
     drillDay: null,
     collapsed: [],
-    agentsFolded: [],
+    agentsExpanded: [],
     agentSelected: null,
   }
 }
@@ -332,16 +336,20 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
         collapsed: on ? ui.collapsed.filter((k) => k !== m.key) : [...ui.collapsed, m.key],
       }
     }
-    case 'agentFold': {
+    case 'agentToggle': {
+      // Opens a closed node, closes an open one. Beyond the cap nothing more is opened — the
+      // stored state stays bounded — while closing always works.
       if (!isAgentKey(m.key)) return ui
-      const on = ui.agentsFolded.includes(m.key)
-      if (!on && ui.agentsFolded.length >= MAX_AGENT_FOLDS) return ui
+      const on = ui.agentsExpanded.includes(m.key)
+      if (!on && ui.agentsExpanded.length >= MAX_AGENT_EXPANDED) return ui
       return {
         ...ui,
-        agentsFolded: on ? ui.agentsFolded.filter((k) => k !== m.key) : [...ui.agentsFolded, m.key],
+        agentsExpanded: on ? ui.agentsExpanded.filter((k) => k !== m.key) : [...ui.agentsExpanded, m.key],
       }
     }
     case 'agentSelect':
+      // A selection opens the details and nothing else: which nodes are open stays what the
+      // reader made it, whether the selected one is on screen or not.
       if (m.key !== null && !isAgentKey(m.key)) return ui
       return ui.agentSelected === m.key ? ui : { ...ui, agentSelected: m.key }
     default:
@@ -568,7 +576,7 @@ export interface ViewModel {
   range: DayRange & { previous: DayRange | null; presets: RangePreset[] }
   ui: UiState
   quotas: QuotaCard[]
-  /** The Agents section: session → workflow → agent tree with derived states. */
+  /** The Agents section: the agents running now, and the session → workflow → agent tree with derived states. */
   agents: AgentTreeVm
   /** One Claude Code session's context window, or null when the status line said nothing. */
   context: ContextCard | null

@@ -581,12 +581,59 @@ test('every inferred state says it was inferred, and no recorded one says so —
   }
 })
 
-/** The fields §3.2 gives the tree, a node, a details panel and one of its rows — nothing else. */
+/**
+ * The fields §3.2 gives the tree, a node, a details panel and one of its rows, and the fields
+ * §9 of the 1.5.1 spec adds — a node's agent count, the running list and its items — nothing else.
+ */
 const TREE_FIELDS = new Set([
-  'roots', 'selected', 'running', 'omittedRoots', 'truncated', 'note', 'updatedAt',
-  'key', 'kind', 'label', 'sub', 'state', 'derived', 'usage', 'lowerBound', 'duration', 'startTs', 'lastTs', 'children',
+  'roots', 'selected', 'running', 'runningNow', 'runningMore', 'omittedRoots', 'truncated', 'note', 'updatedAt',
+  'key', 'kind', 'label', 'sub', 'state', 'derived', 'usage', 'lowerBound', 'duration', 'startTs', 'lastTs',
+  'agentCount', 'children',
   'title', 'stateText', 'rows', 'value',
+  'context', 'waiting',
 ])
+
+test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {
+  for (const attribution of ['none', 'session'] as const) {
+    const vm = agentsVm({ attribution })
+    const nodes = treeNodes(vm.agents.roots)
+    const running = nodes.filter((n) => (n.kind === 'agent' || n.kind === 'pending') && n.state === 'running')
+    // The world has a running agent and a running launch: both listed, nothing else.
+    assert.ok(running.length >= 2, String(running.length))
+    assert.deepEqual(vm.agents.runningNow.map((r) => r.key).sort(), running.map((n) => n.key).sort())
+    assert.equal(vm.agents.runningMore, 0)
+    for (const r of vm.agents.runningNow) {
+      const n = running.find((x) => x.key === r.key)
+      assert.ok(n, r.key)
+      // The figure is the node's, and a launch nobody read a line of has none.
+      assert.equal(r.usage, n.kind === 'pending' ? '–' : n.usage, r.key)
+      assert.equal(/^0(\s|$)/.test(r.usage), false, r.usage)
+      // Where it sits, and no project unless attribution names one.
+      assert.ok(r.context.startsWith('Session '), r.context)
+      assert.equal(/\b(alpha|beta)\b/.test(r.context), attribution !== 'none', `${attribution}: ${r.context}`)
+    }
+    // The markdown's running lines, in the same order, with no zero either.
+    const md = markdownDocument(vm)
+    const at = md.indexOf('### Running now\n')
+    assert.ok(at >= 0, md)
+    const lines = md.slice(at, md.indexOf('### Sessions and agents', at)).split('\n').filter((l) => l.startsWith('- '))
+    assert.deepEqual(lines.map((l) => vm.agents.runningNow.findIndex((r) => l.startsWith(`- ${r.label} · `))),
+      vm.agents.runningNow.map((_, i) => i))
+    for (const l of lines) assert.equal(/(^|\s)0(\s|$)/.test(l), false, l)
+  }
+})
+
+test('a closed node counts the agents below it on the whole tree, and a leaf counts none', () => {
+  const vm = agentsVm()
+  const agentLike = (n: TreeNode): number =>
+    n.children.reduce((s, c) => s + agentLike(c) + (c.kind === 'agent' || c.kind === 'pending' ? 1 : 0), 0)
+  for (const n of treeNodes(vm.agents.roots)) {
+    // Nothing is cut in this world, so the count is what the payload holds below the node.
+    assert.equal(vm.agents.truncated, false)
+    assert.equal(n.agentCount, agentLike(n), n.label)
+    if (n.children.length === 0) assert.equal(n.agentCount, 0, n.label)
+  }
+})
 
 test('the tree the page receives carries no key a transcript\'s content lives under, and none of the content', () => {
   const { agg, raw } = agentWorld('session')

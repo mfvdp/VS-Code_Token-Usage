@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
-import { AgentTreeVm, MAX_NODES, emptyAgentTree } from '../src/agentTree'
+import { AgentTreeVm, MAX_NODES, RunningItem, emptyAgentTree } from '../src/agentTree'
 import { setBundle, setLocale } from '../src/i18n'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
@@ -918,15 +918,28 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   assert.equal(md.split('## Agents').length, 2)
 
   const lines = sectionOf(md, '## Agents')
+  // The running list first, as on the dashboard: label · where it sits · usage, the agent that
+  // started first on top, a launch nothing was counted of as a dash.
+  const now = lines.indexOf('### Running now')
+  const tree = lines.indexOf('### Sessions and agents')
+  assert.ok(now >= 0 && tree > now, lines.join('\n'))
+  assert.deepEqual(lines.slice(now, tree).filter((l) => /^\s*- /.test(l)), [
+    '- Explore · claude-opus-4-6 · a94f · Session sess-alp · alpha · 1.2K',
+    '- Plan · – · launched · Session sess-alp · alpha · –',
+  ])
+  // The tree under a heading of its own: without it, a renderer reads the two lists as one.
   // Inferred states carry the estimate mark; its agent and the launch run, so the session,
-  // quiet itself, is active through them.
-  assert.deepEqual(lines.filter((l) => /^\s*- /.test(l)), [
+  // quiet itself, is active through them. The markdown prints every node, open or not.
+  assert.deepEqual(lines.slice(tree).filter((l) => /^\s*- /.test(l)), [
     '- [~Active] Session sess-alp — alpha · 1.2K · 2 h 15 min',
     '  - [~Running] Explore · claude-opus-4-6 · a94f · 1.2K · 19 min 00 s',
     '  - [~Running] Plan · – · launched · – · –',
   ])
-  // Nothing here is a lower bound, so the mark is not explained.
+  assert.equal(lines[tree - 1], '', 'the list and the heading run together')
+  // Nothing here is a lower bound, so the mark is not explained; nothing waits.
   assert.equal(lines.some((l) => l.includes('lower bound')), false)
+  assert.equal(lines.some((l) => l.includes('(waiting)')), false)
+  assert.equal(lines.some((l) => l.includes('No agent is running.')), false)
 
   const d = vm.agents.selected
   assert.ok(d)
@@ -941,9 +954,72 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   assert.ok(rows.includes('| Last activity | 11:59 · 1 min ago |'), rows.join('\n'))
   assert.ok(rows.includes('| Spawned by | Session sess-alp |'), rows.join('\n'))
 
-  // Nothing selected: the list and no table.
+  // Nothing selected: the lists and no table.
   const plain = markdownDocument(agentVm().vm)
-  assert.equal(sectionOf(plain, '## Agents').some((l) => l.startsWith('### ') || l.startsWith('| ')), false)
+  assert.equal(sectionOf(plain, '## Agents').some((l) => detailsHead(l) || l.startsWith('| ')), false)
+})
+
+/** A `### ` heading of the Agents section other than its two fixed ones: a details table's. */
+function detailsHead(line: string): boolean {
+  return line.startsWith('### ') && line !== '### Running now' && line !== '### Sessions and agents'
+}
+
+/** One RunningItem, in the shape src/agentTree.ts gives it. */
+function runningItem(over: Partial<RunningItem> = {}): RunningItem {
+  return {
+    key: 'a:a94f0001', kind: 'agent', label: 'Explore · claude-opus-5 · a94f', context: 'Session 12345678 · Workflow cfe7718d',
+    usage: '12.3K', startTs: NOW - 300_000, lastTs: NOW - 5_000, waiting: false, ...over,
+  }
+}
+
+test('the running list prints every item, marks the waiting ones, counts the rest, and escapes what could break the line', () => {
+  const { vm } = agentVm()
+  const agents: AgentTreeVm = {
+    ...vm.agents,
+    runningNow: [
+      runningItem({ waiting: true, label: 'general-purpose · claude-opus-5 · b1c2', key: 'a:b1c2' }),
+      runningItem(),
+      runningItem({ kind: 'pending', key: 'l:toolu_03', label: 'Plan · sonnet · launched', usage: '–', context: 'Session 12345678' }),
+      runningItem({ key: 'a:c3d4', label: 'Explore | a\nb', context: 'Session 12345678 · pro|ject' }),
+    ],
+    runningMore: 3,
+  }
+  const lines = sectionOf(markdownDocument({ ...vm, agents }), '## Agents')
+  const now = lines.indexOf('### Running now')
+  const tree = lines.indexOf('### Sessions and agents')
+  assert.ok(now >= 0 && tree > now, lines.join('\n'))
+  assert.deepEqual(lines.slice(now + 1, tree).filter(Boolean), [
+    '- general-purpose · claude-opus-5 · b1c2 · Session 12345678 · Workflow cfe7718d · 12.3K (waiting)',
+    '- Explore · claude-opus-5 · a94f · Session 12345678 · Workflow cfe7718d · 12.3K',
+    '- Plan · sonnet · launched · Session 12345678 · –',
+    // A pipe and a newline stay text: one item, one line.
+    '- Explore \\| a b · Session 12345678 · pro\\|ject · 12.3K',
+    '_and 3 more_',
+  ])
+  // Only what was left out is counted; nothing claims a zero.
+  const counted = sectionOf(markdownDocument({ ...vm, agents: { ...agents, runningMore: 0 } }), '## Agents')
+  assert.equal(counted.some((l) => l.includes('more_')), false)
+  // Everything left out and nothing listed still heads the list and says how many.
+  const onlyMore = sectionOf(markdownDocument({ ...vm, agents: { ...agents, runningNow: [], runningMore: 2 } }), '## Agents')
+  assert.ok(onlyMore.includes('### Running now') && onlyMore.includes('_and 2 more_'), onlyMore.join('\n'))
+  assert.equal(onlyMore.includes('_No agent is running._'), false)
+})
+
+test('with nothing running the markdown says so in one line, and an older model without the list claims nothing', () => {
+  const { vm } = agentVm()
+  const quiet = sectionOf(markdownDocument({ ...vm, agents: { ...vm.agents, runningNow: [], runningMore: 0 } }), '## Agents')
+  assert.ok(quiet.includes('_No agent is running._'), quiet.join('\n'))
+  assert.equal(quiet.includes('### Running now'), false, 'a heading over nothing')
+  // The tree keeps its heading, under the line.
+  assert.ok(quiet.indexOf('### Sessions and agents') > quiet.indexOf('_No agent is running._'), quiet.join('\n'))
+  assert.ok(quiet.some((l) => l.startsWith('- [~')), quiet.join('\n'))
+  // A tree from a build before the list: no list, no line about one, and the tree as it was.
+  const older = { ...vm.agents } as Partial<AgentTreeVm>
+  delete older.runningNow
+  delete older.runningMore
+  const old = sectionOf(markdownDocument({ ...vm, agents: older as AgentTreeVm }), '## Agents')
+  assert.equal(old.some((l) => l.startsWith('### ') || l.includes('No agent is running')), false, old.join('\n'))
+  assert.ok(old.some((l) => l.startsWith('- [~Active] Session sess-alp')), old.join('\n'))
 })
 
 test('the notes under the tree state the cut, the sessions left out, the lower bound and a stale selection', () => {
@@ -952,10 +1028,12 @@ test('the notes under the tree state the cut, the sessions left out, the lower b
     roots: [{
       key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', sub: null, state: 'done', derived: false,
       usage: '12K', lowerBound: true, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
-      children: [],
+      agentCount: 0, children: [],
     }],
     selected: null,
     running: 0,
+    runningNow: [],
+    runningMore: 0,
     omittedRoots: 3,
     truncated: true,
     note: 'The selected node is no longer in the tree.',
@@ -970,7 +1048,7 @@ test('the notes under the tree state the cut, the sessions left out, the lower b
     '_⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted._',
     '_The selected node is no longer in the tree._',
   ]) assert.ok(lines.includes(note), `${note}\n${lines.join('\n')}`)
-  assert.equal(lines.some((l) => l.startsWith('### ')), false)
+  assert.equal(lines.some(detailsHead), false)
 })
 
 test('an empty tree is one sentence; a tree that was never built is no section at all', () => {
@@ -999,6 +1077,13 @@ test('the markdown tree speaks German with the shipped bundle', () => {
   const lines = sectionOf(md, '## Agenten')
   assert.ok(lines.includes('- [~Aktiv] Sitzung sess-alp — alpha · 1,2K · 2 h 15 min'), lines.join('\n'))
   assert.ok(lines.includes('  - [~Läuft] Plan · – · gestartet · – · –'), lines.join('\n'))
+  // The running list and the tree's heading, German too.
+  assert.ok(lines.indexOf('### Laufen gerade') >= 0
+    && lines.indexOf('### Sitzungen und Agenten') > lines.indexOf('### Laufen gerade'), lines.join('\n'))
+  assert.ok(lines.includes('- Plan · – · gestartet · Sitzung sess-alp · alpha · –'), lines.join('\n'))
+  assert.equal(bundle['(waiting)'], '(wartet)')
+  assert.equal(bundle['No agent is running.'], 'Kein Agent läuft gerade.')
+  assert.equal(bundle['and {0} more'], 'und {0} weitere')
   assert.ok(lines.includes('| Detail | Wert |'), lines.join('\n'))
   assert.ok(lines.some((l) => l.startsWith('| Zustand | Läuft — abgeleitet: ')), lines.join('\n'))
   assert.ok(lines.includes('| Gestartet von | Sitzung sess-alp |'), lines.join('\n'))

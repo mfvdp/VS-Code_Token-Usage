@@ -25,8 +25,8 @@
  */
 
 import {
-  AGENT_RETENTION_DAYS, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_TREE_DEPTH, NodeDetails,
-  NodeState, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS, TreeNode,
+  AGENT_RETENTION_DAYS, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH,
+  NodeDetails, NodeState, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS, TreeNode,
 } from './agentTree'
 import { billable } from './agg'
 import { t } from './i18n'
@@ -411,6 +411,11 @@ interface Entry {
   lastTs: number | null
   parent: Entry | null
   children: Entry[]
+  /**
+   * Running only because an agent below it runs: the roll-up made it so, its own transcript
+   * did not. False for everything else.
+   */
+  waiting: boolean
   /** The run an agent belongs to; null for everything that is not a workflow agent. */
   workflowId: string | null
   /** The measured counters behind `usage`, where there are any. */
@@ -623,6 +628,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     lastTs: main ? main.lastTs : null,
     parent: null,
     children: [],
+    waiting: false,
     workflowId: null,
     counters: mainCounters,
     rows: () => [],
@@ -653,6 +659,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         lastTs: null,
         parent: null,
         children: [],
+        waiting: false,
         workflowId: wf,
         counters: null,
         rows: () => [],
@@ -696,6 +703,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       lastTs: r.lastTs,
       parent: null,
       children: [],
+      waiting: false,
       workflowId: wf,
       counters: c,
       rows: () => [],
@@ -749,6 +757,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       lastTs: Math.max(l.ts, outcomeAt ?? 0),
       parent: null,
       children: [],
+      waiting: false,
       workflowId: null,
       counters: null,
       rows: () => [
@@ -774,6 +783,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     if (e.kind === 'agent' && below && e.state === 'unknown') {
       e.state = 'running'
       e.stateText = t('Running — inferred: a child agent of this agent is still running.')
+      // The running list says so: this one runs by what is below it, not by its own clock.
+      e.waiting = true
     }
     return below || (isAgentLike(e) && e.state === 'running')
   }
@@ -870,8 +881,84 @@ function detailsOf(e: Entry): NodeDetails {
 }
 
 /**
+ * The agents and pending launches below a node — what a collapsed row says it holds — for
+ * every node at once, on the tree as it was built: the MAX_NODES cut may drop some of them
+ * from the payload, but they are still there.
+ */
+function agentCounts(roots: Entry[]): Map<Entry, number> {
+  const out = new Map<Entry, number>()
+  const count = (e: Entry): number => {
+    let n = 0
+    for (const c of e.children) n += count(c) + (isAgentLike(c) ? 1 : 0)
+    out.set(e, n)
+    return n
+  }
+  for (const r of roots) count(r)
+  return out
+}
+
+/**
+ * Where a running node sits, in the words of the nodes above it: its session, the run it
+ * belongs to if any, and the session's project while attribution names one (`sub` is null
+ * otherwise, see buildRoot).
+ */
+function contextOf(e: Entry): string {
+  let root = e
+  let run: Entry | null = null
+  for (let p = e.parent; p !== null; p = p.parent) {
+    if (run === null && p.kind === 'workflow') run = p
+    root = p
+  }
+  return [root.label, run?.label ?? null, root.sub].filter((s): s is string => !!s).join(' · ')
+}
+
+/** Longest-running first: the earliest start; a node without one last; then by key, so the order is stable. */
+function byStartThenKey(a: Entry, b: Entry): number {
+  if (a.startTs !== b.startTs) {
+    if (a.startTs === null) return 1
+    if (b.startTs === null) return -1
+    return a.startTs - b.startTs
+  }
+  return cmp(a.key, b.key)
+}
+
+/**
+ * Every agent and pending launch in state running, from all roots — listed or not, above the
+ * cut or below it: whoever watches the list came to see exactly these, wherever the tree put
+ * them. One entry per key.
+ */
+function runningOf(roots: Entry[]): Entry[] {
+  const seen = new Set<string>()
+  const out: Entry[] = []
+  for (const r of roots) {
+    for (const e of preorder(r)) {
+      if (!isAgentLike(e) || e.state !== 'running' || seen.has(e.key)) continue
+      seen.add(e.key)
+      out.push(e)
+    }
+  }
+  return out.sort(byStartThenKey)
+}
+
+function runningItem(e: Entry): RunningItem {
+  return {
+    key: e.key,
+    kind: e.kind === 'pending' ? 'pending' : 'agent',
+    label: e.label,
+    context: contextOf(e),
+    // A launch nobody has read a line of has nothing counted; the builder already says '–'.
+    usage: e.kind === 'pending' ? '–' : e.usage,
+    startTs: e.startTs,
+    lastTs: e.lastTs,
+    waiting: e.waiting,
+  }
+}
+
+/**
  * The tree for the view model: at most MAX_ROOTS sessions, most recent first, cut at
- * MAX_NODES nodes, with the details of `input.selected` when that node is on it.
+ * MAX_NODES nodes; the running agents of every session above it; and the details of
+ * `input.selected` wherever that node is — a row of the running list may name a node of a
+ * session the tree does not list.
  */
 export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm {
   const forest = buildForest(input, now)
@@ -883,6 +970,8 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
   // Every root, listed or not: the host polls while anything runs, wherever it sits.
   let running = 0
   for (const r of forest.roots) for (const e of preorder(r)) if (isAgentLike(e) && e.state === 'running') running++
+  const live = runningOf(forest.roots)
+  const counts = agentCounts(forest.roots)
 
   const toNode = (e: Entry): TreeNode => ({
     key: e.key,
@@ -896,10 +985,13 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     duration: e.duration,
     startTs: e.startTs,
     lastTs: e.lastTs,
+    agentCount: counts.get(e) ?? 0,
     children: e.children.filter((c) => kept.has(c)).map(toNode),
   })
 
-  const details = selected !== null && kept.has(selected) ? detailsOf(selected) : null
+  // Any node of the forest: the running list names nodes of sessions beyond MAX_ROOTS too, and
+  // a click on one of them opens its details like a click on a tree row.
+  const details = selected !== null ? detailsOf(selected) : null
   let note: string | null = null
   if (forest.roots.length === 0) {
     // A session that is older than a day and never ran an agent is not in the tree; saying
@@ -915,6 +1007,8 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     roots: shown.map(toNode),
     selected: details,
     running,
+    runningNow: live.slice(0, MAX_RUNNING_LIST).map(runningItem),
+    runningMore: Math.max(0, live.length - MAX_RUNNING_LIST),
     omittedRoots: Math.max(0, forest.roots.length - MAX_ROOTS),
     truncated: kept.size < total,
     note,

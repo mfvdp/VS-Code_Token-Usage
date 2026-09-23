@@ -42,8 +42,9 @@ type SectionField = keyof ViewModel | `ui.${keyof ViewModel['ui']}`
 const SECTION_FIELDS: Record<string, SectionField[]> = {
   summary: ['digest'],
   quota: ['quotas'],
-  // The tree, and the two pieces of view state that decide what of it is open.
-  agents: ['agents', 'ui.agentsFolded', 'ui.agentSelected'],
+  // The running list and the tree, and the two pieces of view state that decide what of it is
+  // open: the nodes the reader opened, and the node whose details are shown.
+  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected'],
   context: ['context'],
   kpis: ['kpis'],
   // The cache switch above the composition bars decides which parts are drawn, so the
@@ -874,6 +875,16 @@ ul { margin: 6px 0; padding-left: 18px; }
 /* A breath, not a blink: at its faintest the dot keeps most of its colour, so it never reads
    as switched off. */
 @keyframes ag-pulse { 50% { opacity: .7; } }
+/* The running list above the tree: every row is a tree row's button, glyph, name and figures,
+   stretched to the width of the list, and where the agent sits is a line of its own under the
+   name. A part of that line — "Session 9d0eb37a", "Workflow cfe7718d" — keeps together while
+   it fits and breaks inside only when a narrow sidebar leaves it no line wide enough. */
+.ag-now { margin-bottom: 10px; }
+.ag-now ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.ag-now li { display: flex; }
+.ag-now .ag-k-pending .ag-label { font-style: italic; }
+.ag-ctx { flex: 1 1 100%; }
+.ag-ctx > span { display: inline-block; max-width: 100%; }
 /* The details of the selected node, under the tree: the key figure's box around a two-column
    list, the words on the left and what the view model says about them on the right. */
 .ag-details { margin-top: 8px; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
@@ -1025,6 +1036,7 @@ function webviewWords(): Record<string, string> {
     'Model': t('Model'),
     'Models': t('Models'),
     'No Claude Code session in the last 7 days.': t('No Claude Code session in the last 7 days.'),
+    'No agent is running.': t('No agent is running.'),
     'No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.':
       t('No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.'),
     'No context reading. The Claude Code status line is what reports it.':
@@ -1070,6 +1082,7 @@ function webviewWords(): Record<string, string> {
     'Retention {0} d hourly · {1} d daily · {2} d quota history':
       t('Retention {0} d hourly · {1} d daily · {2} d quota history'),
     'Roots: {0} · {1} file(s)': t('Roots: {0} · {1} file(s)'),
+    'Running now ({0})': t('Running now ({0})'),
     'Session': t('Session'),
     'Session attribution is off (tokenPace.attribution).':
       t('Session attribution is off (tokenPace.attribution).'),
@@ -1096,6 +1109,7 @@ function webviewWords(): Record<string, string> {
     'Write 5m': t('Write 5m'),
     'active session': t('active session'),
     'all': t('all'),
+    'and {0} more': t('and {0} more'),
     'apply': t('apply'),
     'by weekday and four-hour block · {0}': t('by weekday and four-hour block · {0}'),
     'cache': t('cache'),
@@ -1179,6 +1193,7 @@ function webviewWords(): Record<string, string> {
     'usage': t('usage'),
     'used beyond the elapsed share': t('used beyond the elapsed share'),
     'utc': t('utc'),
+    'waits for a child agent': t('waits for a child agent'),
     'weekly bars · {0} columns': t('weekly bars · {0} columns'),
     'without cache · {0} tokens cache read and {1} cache write not shown':
       t('without cache · {0} tokens cache read and {1} cache write not shown'),
@@ -1187,6 +1202,7 @@ function webviewWords(): Record<string, string> {
       t('without cache · {0} tokens cache write not shown'),
     'year': t('year'),
     'yesterday': t('yesterday'),
+    '{0} agent(s)': t('{0} agent(s)'),
     '{0} ago': t('{0} ago'),
     '{0} call(s) · {1} distinct tool(s)': t('{0} call(s) · {1} distinct tool(s)'),
     '{0} composition · last 30 days': t('{0} composition · last 30 days'),

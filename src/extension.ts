@@ -58,7 +58,7 @@ import {
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
 import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
 import {
-  applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, MAX_AGENT_FOLDS,
+  applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, MAX_AGENT_EXPANDED,
   MAX_AGENT_KEY_CHARS, RANGE_PRESETS, UiState, ViewModel,
   WebviewMessage,
 } from './viewModel'
@@ -1650,11 +1650,13 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
     out.collapsed = raw.collapsed.filter((k): k is string =>
       typeof k === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(k))
   }
-  // Agent tree folds and the open node: opaque keys, so only their shape is checked — a key
-  // whose node is gone simply matches nothing.
-  if (Array.isArray(raw.agentsFolded)) {
-    out.agentsFolded = [...new Set(raw.agentsFolded.filter((k): k is string =>
-      typeof k === 'string' && k.length > 0 && k.length <= MAX_AGENT_KEY_CHARS))].slice(0, MAX_AGENT_FOLDS)
+  // The agent tree nodes the reader opened and the node whose details are open: opaque keys, so
+  // only their shape is checked — a key whose node is gone simply matches nothing. The folds
+  // 1.5.0 kept (`agentsFolded`) are not read: that build was never published, and a fold is the
+  // opposite of what is kept now.
+  if (Array.isArray(raw.agentsExpanded)) {
+    out.agentsExpanded = [...new Set(raw.agentsExpanded.filter((k): k is string =>
+      typeof k === 'string' && k.length > 0 && k.length <= MAX_AGENT_KEY_CHARS))].slice(0, MAX_AGENT_EXPANDED)
   }
   if (raw.agentSelected === null
     || (typeof raw.agentSelected === 'string' && raw.agentSelected.length > 0

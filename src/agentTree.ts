@@ -20,6 +20,8 @@ export const ROOT_WINDOW_MS = 24 * 3_600_000
 export const MAX_ROOTS = 20
 export const MAX_NODES = 300
 export const MAX_TREE_DEPTH = 6
+/** Running agents listed above the tree; the rest are counted in `runningMore`. */
+export const MAX_RUNNING_LIST = 20
 
 export type NodeState = 'running' | 'done' | 'failed' | 'unknown' | 'active' | 'idle'
 
@@ -43,7 +45,33 @@ export interface TreeNode {
   duration: string
   startTs: number | null
   lastTs: number | null
+  /**
+   * Agents and pending launches anywhere below this node, counted on the whole tree before the
+   * MAX_NODES cut — what a collapsed row says it holds. 0 for a node with none below it.
+   */
+  agentCount: number
   children: TreeNode[]
+}
+
+/**
+ * One entry of the "Running now" list above the tree: an agent or a pending launch in state
+ * running, wherever it sits — a collapsed branch, a session beyond MAX_ROOTS, a node beyond
+ * the MAX_NODES cut.
+ */
+export interface RunningItem {
+  /** The node key — selecting it opens the same details as the tree row. */
+  key: string
+  kind: 'agent' | 'pending'
+  /** The node label. */
+  label: string
+  /** "Session 9d0eb37a · Workflow 8a71f8cc", plus " · <project>" when attribution allows a label. */
+  context: string
+  /** As the node: '–' when nothing was counted; a pending launch is always '–'. */
+  usage: string
+  startTs: number | null
+  lastTs: number | null
+  /** Running only because an agent below it runs (the roll-up), not by its own transcript. */
+  waiting: boolean
 }
 
 export interface DetailRow { label: string; value: string; note?: string }
@@ -55,6 +83,13 @@ export interface AgentTreeVm {
   selected: NodeDetails | null
   /** Agents in state running (all roots). */
   running: number
+  /**
+   * The running agents and launches of all roots, longest-running first, at most
+   * MAX_RUNNING_LIST of them.
+   */
+  runningNow: RunningItem[]
+  /** Running agents and launches beyond MAX_RUNNING_LIST, not listed. */
+  runningMore: number
   /** Roots beyond MAX_ROOTS. */
   omittedRoots: number
   /** MAX_NODES hit. */
@@ -70,6 +105,8 @@ export function emptyAgentTree(now: number): AgentTreeVm {
     roots: [],
     selected: null,
     running: 0,
+    runningNow: [],
+    runningMore: 0,
     omittedRoots: 0,
     truncated: false,
     note: null,

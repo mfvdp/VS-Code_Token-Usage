@@ -47,10 +47,11 @@ output is read.
 * **A dashboard in the secondary sidebar**: quota cards that explain their own colour, a
   seven-day sparkline, the key figures, the daily chart by model with the cost line, and the
   fixed-period token totals. → [Dashboard](docs/dashboard.md)
-* **Your Claude Code agents as a tree**: the sessions of the last seven days with their workflow
-  runs and agents, each with its state, usage and duration, live while it runs; a click opens
-  the details. A state that is only inferred says so, and nothing of a prompt or a result is
-  read. → [Agents](docs/agents.md)
+* **Your Claude Code agents as a tree**: the agents running now listed on top, then the
+  sessions of the last seven days with their workflow runs and agents — closed until you open
+  them — each with its state, usage and duration, live while it runs; a click opens the details.
+  A state that is only inferred says so, and nothing of a prompt or a result is read.
+  → [Agents](docs/agents.md)
 * **The same figures without a webview**: a markdown report, a searchable Quick Pick, a CSV
   and a JSON export, and a diagnostics report that is safe to paste into an issue.
   → [Export and diagnostics](docs/export.md)

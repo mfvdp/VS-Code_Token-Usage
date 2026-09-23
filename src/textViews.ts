@@ -12,7 +12,7 @@
  */
 
 import { MAX_NODES } from './agentTree'
-import type { NodeState, TreeNode } from './agentTree'
+import type { NodeState, RunningItem, TreeNode } from './agentTree'
 import { t } from './i18n'
 import { DEFAULT_BAR, estimate, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
@@ -525,9 +525,36 @@ function agentNodeLine(n: TreeNode): string {
 }
 
 /**
- * The Agents section: the same tree as the dashboard, as an indented list, and the open
- * node's details as a table. A view model without a built tree prints nothing — no tree is
- * not the same statement as an empty one, and only the builder's note may say "none".
+ * "Explore · claude-opus-5 · a94f · Session 9d0eb37a · Workflow cfe7718d · 12.3K" — a running
+ * agent, where it sits and what it used; "(waiting)" when it runs only because an agent below
+ * it does.
+ */
+function runningLine(r: RunningItem): string {
+  return `- ${cell(r.label)} · ${cell(r.context)} · ${cell(r.usage)}${r.waiting ? ` ${t('(waiting)')}` : ''}`
+}
+
+/**
+ * The running list, before the tree as on the dashboard: every running agent and launch the
+ * view model listed, and how many it left out — or the one line that says nothing runs. A view
+ * model without the list (an older build's) prints no list and makes no claim either way.
+ */
+function runningLines(a: ViewModel['agents']): string[] {
+  if (!Array.isArray(a.runningNow)) return []
+  const more = typeof a.runningMore === 'number' && a.runningMore > 0 ? a.runningMore : 0
+  if (a.runningNow.length === 0 && more === 0) return [`_${t('No agent is running.')}_`, '']
+  const L: string[] = [`### ${t('Running now')}`, '']
+  for (const r of a.runningNow) L.push(runningLine(r))
+  if (a.runningNow.length > 0) L.push('')
+  if (more > 0) L.push(`_${t('and {0} more', more)}_`, '')
+  return L
+}
+
+/**
+ * The Agents section: the running list, then the same tree as the dashboard, as an indented
+ * list — every node, whatever the dashboard has open — and the open node's details as a table.
+ * The tree has a heading of its own after the running list: two lists one after the other are
+ * one list to a markdown renderer. A view model without a built tree prints nothing — no tree
+ * is not the same statement as an empty one, and only the builder's note may say "none".
  */
 function agentLines(vm: ViewModel): string[] {
   const a = vm.agents
@@ -538,6 +565,8 @@ function agentLines(vm: ViewModel): string[] {
     L.push(`_${a.note}_`, '')
     return L
   }
+  const running = runningLines(a)
+  if (running.length > 0) L.push(...running, `### ${t('Sessions and agents')}`, '')
   let lower = false
   const walk = (n: TreeNode, depth: number): void => {
     lower = lower || n.lowerBound

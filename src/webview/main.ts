@@ -1545,15 +1545,18 @@ function agentNode(n: Payload, folded: string[], selected: string | null, depth:
   const state = agentState(n.state);
   const kind = AGENT_KINDS.indexOf(n.kind) >= 0 ? String(n.kind) : 'agent';
   const label = orDash(n.label);
-  // Usage and duration as the view model worded them — output that is a lower bound is marked
-  // the way the totals table marks it — and, only while the node runs, the time since it
-  // started, ticking. Each figure is unbreakable, so a narrow sidebar wraps the line at a
-  // separator and never between a number and its unit.
+  // The name breaks only between its parts: "Explore · claude-opus-5 · a94f" in a narrow
+  // sidebar wraps at a separator, never at the hyphen inside a model id.
+  const parts = typeof n.label === 'string' && n.label !== '' ? n.label.split(' · ') : ['–'];
+  const labelHtml = parts.map((p: string) => '<span class="nobr">' + orDash(p) + '</span>').join(' · ');
+  // Usage and duration as the view model worded them and, only while the node runs, the time
+  // since it started, ticking. A lower bound is not marked here: almost every finished agent's
+  // output is one, and a ⚠ on nearly every row says nothing — the details mark it, and one line
+  // under the tree says where. A launch whose transcript was never seen has nothing counted,
+  // so it shows no figures at all rather than a row of dashes. Each figure is unbreakable, so
+  // a narrow sidebar wraps the line at a separator and never between a number and its unit.
   const start = agentTs(n.startTs);
-  const figures = [orDash(n.usage) + (n.lowerBound === true
-      ? ' <span title="' + tr('output is a lower bound: some requests had no terminal line') + '">⚠</span>'
-      : ''),
-    orDash(n.duration)];
+  const figures = kind === 'pending' ? [] : [orDash(n.usage), orDash(n.duration)];
   if (state === 'running' && start !== null) figures.push(tr('running for {0}', liveSince(start)));
   const fold = kids.length
     ? '<button class="ag-fold" data-act="agentFold" data-key="' + esc(key) + '" aria-label="'
@@ -1563,10 +1566,12 @@ function agentNode(n: Payload, folded: string[], selected: string | null, depth:
   // in a narrow sidebar breaks its own line rather than leaving the glyph alone on one.
   const row = '<button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
     + '" aria-pressed="' + on + '">' + agentGlyph(state, n.derived)
-    + '<span class="ag-text"><span class="ag-label">' + label + '</span>'
+    + '<span class="ag-text"><span class="ag-label">' + labelHtml + '</span>'
     + (typeof n.sub === 'string' && n.sub ? '<span class="meta">' + esc(n.sub) + '</span>' : '')
-    + '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ')
-    + '</span></span></button>';
+    + (figures.length
+       ? '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
+       : '')
+    + '</span></button>';
   return '<li role="treeitem" class="ag-k-' + esc(kind) + '"'
     + (kids.length ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '">'
     + '<div class="ag-line">' + fold + row + '</div>'
@@ -1596,12 +1601,17 @@ function agentNodes(roots: Payload[]): Payload[] {
  * The details of the selected node, in the words the view model wrote. The state row carries
  * the sentence the state was derived with. The one figure added here is how long ago the node
  * last changed — from the tree node the details belong to — and it ticks: a row of the view
- * model's that already names the last activity keeps its words and gains the clock, and a
- * model without one gets a row of its own.
+ * model's that already names the last activity keeps its time and gets the clock in place of
+ * its note, which is the same age written once at build time (the markdown view keeps that
+ * note); a model without such a row gets one of its own. Every row is a label beside its
+ * value; the state sentence and the parent's report are sentences, not figures, and take the
+ * whole width under their label.
  */
 function agentDetails(d: Payload, node: Payload): string {
   const lastTs = node ? agentTs(node.lastTs) : null;
-  const ago = lastTs === null ? '' : tr('{0} ago', liveSince(lastTs));
+  // Unbreakable, like the figures of a row: the clock's text is rewritten every second, and a
+  // narrow value column would otherwise tear "40 s" across two lines.
+  const ago = lastTs === null ? '' : '<span class="nobr">' + tr('{0} ago', liveSince(lastTs)) + '</span>';
   const lastLabel = tr('Last activity');
   let placed = !ago;
   let rows = '';
@@ -1609,15 +1619,33 @@ function agentDetails(d: Payload, node: Payload): string {
     if (!r || typeof r !== 'object') continue;
     const live = !placed && r.label === lastLabel;
     if (live) placed = true;
-    rows += '<dt>' + orDash(r.label) + '</dt><dd>' + orDash(r.value) + (live ? ' · ' + ago : '')
-      + (typeof r.note === 'string' && r.note ? ' <span class="meta">' + esc(r.note) + '</span>' : '')
+    // Three kinds of row carry a note: the last activity (whose note the clock replaces), an
+    // output that is a lower bound (a ⚠ mark beside a figure) and the parent's report, whose
+    // note is a clause of its own. That one is a sentence rather than a figure and takes the
+    // whole width — told apart by its note, not by its label, which is the reader's language.
+    const hasNote = typeof r.note === 'string' && r.note !== '';
+    const wide = !live && hasNote && r.note.charAt(0) !== '⚠' ? ' class="ag-wide"' : '';
+    const note = hasNote ? '<span class="meta">' + esc(r.note) + '</span>' : '';
+    rows += '<dt' + wide + '>' + orDash(r.label) + '</dt><dd' + wide + '>' + orDash(r.value)
+      + (live ? ' · ' + ago : note ? (wide ? ' · ' : ' ') + note : '')
       + '</dd>';
   }
   const own = placed ? '' : '<dt>' + lastLabel + '</dt><dd>' + ago + '</dd>';
   return '<div class="ag-details" role="region" aria-label="' + tr('Details') + '">'
     + '<div class="name">' + orDash(d.title) + '</div><dl>'
-    + '<dt>' + tr('State') + '</dt><dd>' + agentGlyph(agentState(d.state), node ? node.derived : undefined)
+    + '<dt class="ag-wide">' + tr('State') + '</dt><dd class="ag-wide">'
+    + agentGlyph(agentState(d.state), node ? node.derived : undefined)
     + ' ' + orDash(d.stateText) + '</dd>' + own + rows + '</dl></div>';
+}
+
+/**
+ * Whether a row on screen carries an output that is a lower bound: the nodes as they arrived,
+ * bounded like the renderer, and not those under a fold, which are not written at all.
+ */
+function shownLowerBound(list: Payload, folded: string[], depth: number): boolean {
+  if (!Array.isArray(list) || depth > AGENT_MAX_DEPTH) return false;
+  return list.some((n: Payload) => !!n && typeof n === 'object' && (n.lowerBound === true
+    || (folded.indexOf(typeof n.key === 'string' ? n.key : '') < 0 && shownLowerBound(n.children, folded, depth + 1))));
 }
 
 /**
@@ -1651,6 +1679,11 @@ function sAgents(): string {
     h += '<p class="empty">' + tr('Tree cut at {0} nodes.', agentNodes(roots).length) + '</p>';
   }
   if (note) h += '<p class="empty">' + note + '</p>';
+  // The rows do not carry the lower-bound mark (see agentNode); this line says where it is,
+  // and only while a row on screen has one.
+  if (shownLowerBound(roots, folded, 0)) {
+    h += '<p class="meta">' + tr('Output figures in the details marked ⚠ are lower bounds.') + '</p>';
+  }
   const sel = a.selected;
   if (sel && typeof sel === 'object') {
     const node = typeof sel.key === 'string'
@@ -1815,7 +1848,11 @@ function renderAll(): void {
 function renderSection(key: string): void {
   const body = document.querySelector('[data-body="' + key + '"]');
   const render = renderer(key);
-  if (!body || !render) { renderAll(); return; }
+  // A section that is not on the page has no body to write into. Its fields are already in
+  // `vm` (the message handler assigned them), so the next render draws it current; a change
+  // of which sections are shown arrives as a whole-page push, never as a fragment. Rewriting
+  // the whole page here instead reset every scroll position with each such push.
+  if (!body || !render) return;
   // An explanation open inside this body, and the focus on its block, live in the nodes
   // about to be replaced; both are put back on the nodes that replace them.
   const keep = keepPop(body);

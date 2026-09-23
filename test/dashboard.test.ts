@@ -3047,10 +3047,11 @@ function detailsOf(over: Record<string, unknown> = {}): Record<string, unknown> 
       { label: 'Type', value: 'Explore' },
       { label: 'Model', value: 'Opus 5' },
       { label: 'Depth', value: '' },
-      { label: 'Last activity', value: '11:59:55' },
+      { label: 'Last activity', value: '11:59:55', note: '5 s ago' },
       { label: 'Output', value: '1.2K', note: '⚠ lower bound' },
       { label: 'Spawned by', value: '–' },
       { label: 'Workflow run', value: null },
+      { label: "Parent's report", value: '12K tokens · 40.0 s · 3 tool calls', note: "the parent's own count, not added to any total" },
     ],
     ...over,
   }
@@ -3168,25 +3169,35 @@ test('a row carries the usage and duration it was given and, only while it runs,
   // The figures of a row, each one unbreakable, so a narrow sidebar wraps at a separator.
   const figs = (...parts: string[]): string =>
     '<span class="ag-fig">' + parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
+  // The name breaks only between its parts, never at the hyphen of a model id.
+  const lbl = (...parts: string[]): string =>
+    '<span class="ag-label">' + parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
   const since = '<span data-live="since" data-ts="' + (AG_NOW - 42_000) + '">42 s</span>'
   // The glyph in a column of its own, the words beside it in theirs.
   assert.ok(h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '" aria-pressed="false">'
     + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
-    + '<span class="ag-text"><span class="ag-label">Explore · Opus 5 · a94f</span>'
+    + '<span class="ag-text">' + lbl('Explore', 'Opus 5', 'a94f')
     + figs('12.3K', '40.0 s', 'running for ' + since) + '</span></button>') >= 0, h)
   assert.match(STYLE, /\.ag-row \{[^}]*display: flex; align-items: baseline;/)
   assert.equal(/\.ag-row \{[^}]*flex-wrap/.test(STYLE), false, 'the glyph would wrap away from its name')
   assert.match(STYLE, /\.ag-text \{[^}]*flex-wrap: wrap;/)
   // The workflow run and its running agent tick; done, failed, unknown and the sessions do not.
   assert.equal(h.split('data-live="since"').length - 1, 2, h)
-  // Output that is a lower bound is marked the way the totals table marks it.
-  assert.ok(h.indexOf('<span class="ag-label">Plan · Opus 5 · b1c2</span>'
-    + figs('12.3K <span title="output is a lower bound: some requests had no terminal line">⚠</span>', '40.0 s')) >= 0, h)
-  // Absence is a dash, never a zero: the launch nobody has counted yet, the quiet session.
-  assert.ok(h.indexOf('<span class="ag-label">Explore · – · launched</span>' + figs('–', '–')) >= 0, h)
-  assert.ok(h.indexOf('<span class="ag-label">Session 1234abcd</span>' + figs('–', '–')) >= 0, h)
+  // Output that is a lower bound is not marked on the row — the details mark it — and one
+  // line under the tree says so.
+  assert.ok(h.indexOf(lbl('Plan', 'Opus 5', 'b1c2') + figs('12.3K', '40.0 s')) >= 0, h)
+  assert.equal(h.indexOf('⚠</span>'), -1, h)
+  assert.equal(/ag-lb|lower-bound/.test(h), false, h)
+  assert.ok(h.endsWith('</ul></div><p class="meta">Output figures in the details marked ⚠ are lower bounds.</p>'), h)
+  // A fold that hides the only such row takes the line with it.
+  const hidden = agentsHtml(a, { ui: agentUi({ agentsFolded: [AK.wf] }) })
+  assert.equal(hidden.indexOf('marked ⚠'), -1, hidden)
+  // Absence is a dash, never a zero: the quiet session. A launch nobody has counted yet shows
+  // no figures at all — here it is not running, so not even a clock.
+  assert.ok(h.indexOf(lbl('Explore', '–', 'launched') + '</span></button>') >= 0, h)
+  assert.ok(h.indexOf(lbl('Session 1234abcd') + figs('–', '–')) >= 0, h)
   // The project a session belongs to, when attribution names one, beside its name.
-  assert.ok(h.indexOf('<span class="ag-label">Session 9d0eb37a</span><span class="meta">repo</span>'
+  assert.ok(h.indexOf(lbl('Session 9d0eb37a') + '<span class="meta">repo</span>'
     + figs('1.2M', '1 h 05 min')) >= 0, h)
   // A launch whose transcript has not been seen yet reads as the hint it is.
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-pending" aria-selected="false">') >= 0, h)
@@ -3196,7 +3207,9 @@ test('a row carries the usage and duration it was given and, only while it runs,
   assert.equal(nostart.indexOf('data-live'), -1, nostart)
   // A node with nothing in it is dashes.
   const bare = agentsHtml(a, { agents: agentTree({ roots: [{ key: AK.a1 }] }) })
-  assert.ok(bare.indexOf('<span class="ag-label">–</span>' + figs('–', '–')) >= 0, bare)
+  assert.ok(bare.indexOf(lbl('–') + figs('–', '–')) >= 0, bare)
+  // No lower bound on a row on screen, no line about one.
+  assert.equal(bare.indexOf('marked ⚠'), -1, bare)
   assert.equal(/undefined|NaN|null|\[object Object\]/.test(h + nostart + bare), false)
 })
 
@@ -3256,8 +3269,8 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   const panel = h.slice(h.indexOf('<div class="ag-details"'))
   assert.ok(panel.startsWith('<div class="ag-details" role="region" aria-label="Details">'
     + '<div class="name">Explore · Opus 5 · a94f</div><dl>'
-    + '<dt>State</dt><dd><span class="ag-st ag-running" role="img" aria-label="~running · derived" '
-    + 'title="~running · derived"></span> '
+    + '<dt class="ag-wide">State</dt><dd class="ag-wide"><span class="ag-st ag-running" role="img" '
+    + 'aria-label="~running · derived" title="~running · derived"></span> '
     + 'Running — inferred: the transcript changed 5 s ago and no result was recorded yet.</dd>'
     + '<dt>Type</dt><dd>Explore</dd><dt>Model</dt><dd>Opus 5</dd>'), panel)
   // Absent is a dash, whether the model sent an empty text, a dash or nothing at all.
@@ -3265,17 +3278,23 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.ok(panel.indexOf('<dt>Spawned by</dt><dd>–</dd>') >= 0, panel)
   assert.ok(panel.indexOf('<dt>Workflow run</dt><dd>–</dd>') >= 0, panel)
   assert.ok(panel.indexOf('<dt>Output</dt><dd>1.2K <span class="meta">⚠ lower bound</span></dd>') >= 0, panel)
-  // The model's own last-activity row keeps its words and gains the clock — once.
-  assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:59:55 · <span data-live="since" data-ts="'
-    + (AG_NOW - 5_000) + '">5 s</span> ago</dd>') >= 0, panel)
+  // The model's own last-activity row keeps its time and gains the clock — once, in place of
+  // the age the view model wrote beside it: one age per row, never two.
+  assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:59:55 · <span class="nobr"><span data-live="since" data-ts="'
+    + (AG_NOW - 5_000) + '">5 s</span> ago</span></dd>') >= 0, panel)
   assert.equal(panel.split('Last activity').length - 1, 1, panel)
+  assert.equal(panel.indexOf('<span class="meta">5 s ago</span>'), -1, panel)
+  // The parent's report is a sentence, not a figure: it takes the whole width under its label,
+  // its note set off by the separator the page uses between clauses.
+  assert.ok(panel.indexOf('<dt class="ag-wide">Parent&#39;s report</dt><dd class="ag-wide">12K tokens · 40.0 s · '
+    + '3 tool calls · <span class="meta">the parent&#39;s own count, not added to any total</span></dd>') >= 0, panel)
   // A model without such a row gets one of the page's own, right under the state.
   const own = agentsHtml(a, {
     agents: agentTree({ selected: detailsOf({ rows: [{ label: 'Type', value: 'Explore' }] }) }),
     ui: agentUi({ agentSelected: AK.a1 }),
   })
-  assert.ok(own.indexOf('yet.</dd><dt>Last activity</dt><dd><span data-live="since" data-ts="'
-    + (AG_NOW - 5_000) + '">5 s</span> ago</dd><dt>Type</dt><dd>Explore</dd></dl></div>') >= 0, own)
+  assert.ok(own.indexOf('yet.</dd><dt>Last activity</dt><dd><span class="nobr"><span data-live="since" data-ts="'
+    + (AG_NOW - 5_000) + '">5 s</span> ago</span></dd><dt>Type</dt><dd>Explore</dd></dl></div>') >= 0, own)
   // A node without a last activity gets no clock: the launch nobody has seen a line of.
   const pending = agentsHtml(a, {
     agents: agentTree({ selected: detailsOf({ key: AK.l1, title: 'Explore · – · launched', state: 'unknown', rows: [] }) }),
@@ -3289,17 +3308,18 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
     agents: agentTree({ selected: detailsOf({ key: AK.a2, state: 'done', stateText: 'Completed — the parent recorded the result at 11:59.' }) }),
     ui: agentUi({ agentSelected: AK.a2 }),
   })
-  assert.ok(done.indexOf('<dt>State</dt><dd><span class="ag-st ag-done" role="img" aria-label="done · recorded" '
-    + 'title="done · recorded"></span> Completed — the parent recorded the result at 11:59.</dd>') >= 0, done)
+  assert.ok(done.indexOf('<dt class="ag-wide">State</dt><dd class="ag-wide"><span class="ag-st ag-done" role="img" '
+    + 'aria-label="done · recorded" title="done · recorded"></span> Completed — the parent recorded the result at 11:59.</dd>') >= 0, done)
   // A details payload with nothing in it, for a node the tree does not hold, is dashes.
   const empty = agentsHtml(a, { agents: agentTree({ selected: { key: 'x' } }) })
   assert.equal(empty.slice(empty.indexOf('<div class="ag-details"')),
     '<div class="ag-details" role="region" aria-label="Details"><div class="name">–</div><dl>'
-    + '<dt>State</dt><dd><span class="ag-st ag-unknown" role="img" aria-label="~unknown · derived" '
-    + 'title="~unknown · derived"></span> –</dd></dl></div>')
-  // Two columns, stacked in a narrow sidebar.
+    + '<dt class="ag-wide">State</dt><dd class="ag-wide"><span class="ag-st ag-unknown" role="img" '
+    + 'aria-label="~unknown · derived" title="~unknown · derived"></span> –</dd></dl></div>')
+  // Two columns at every width; the sentences span both.
   assert.match(STYLE, /\.ag-details dl \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\);/)
-  assert.match(STYLE, /@media \(max-width: 320px\) \{\n {2}\.ag-details dl \{ grid-template-columns: 1fr;/)
+  assert.equal(/\.ag-details dl \{ grid-template-columns: 1fr;/.test(STYLE), false, 'the details still stack somewhere')
+  assert.match(STYLE, /\.ag-details \.ag-wide \{ grid-column: 1 \/ -1; \}/)
 })
 
 test('an empty tree says so, and a cut tree says what it left out', () => {
@@ -3341,7 +3361,7 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   // The poison is on the page as text — in the labels, the notes and the details alike.
   const shown = '&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(2)&gt;&quot; '
     + 'onmouseover=&quot;alert(3)&#39; `x` '
-  for (const where of ['<span class="ag-label">' + shown, '<p class="empty">' + shown + 'n</p>',
+  for (const where of ['<span class="ag-label"><span class="nobr">' + shown, '<p class="empty">' + shown + 'n</p>',
     '<div class="name">' + shown, '<dt>' + shown + 'Type</dt>']) {
     assert.ok(h.indexOf(where) >= 0, where + ' missing from ' + h)
   }
@@ -3490,7 +3510,7 @@ test('the agent tree speaks German on a German page', () => {
   const words = ['Agents', 'running', 'done', 'failed', 'unknown', 'active session', 'idle session',
     '{0} · derived', '{0} · recorded', 'running for {0}', '{0} ago', 'State', 'Last activity', 'Details',
     'Collapse {0}', 'Expand {0}', 'Tree cut at {0} nodes.', '{0} older session(s) not shown.',
-    'No Claude Code session in the last 7 days.']
+    'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -3513,9 +3533,10 @@ test('the agent tree speaks German on a German page', () => {
     'role="tree" aria-label="Agenten"', 'title="~läuft · abgeleitet"', 'title="fertig · aufgezeichnet"',
     'title="fehlgeschlagen · aufgezeichnet"', 'title="~unbekannt · abgeleitet"',
     'title="~Sitzung aktiv · abgeleitet"', 'title="~Sitzung ruht · abgeleitet"',
-    '<span class="nobr">läuft seit <span data-live="since"', '<dt>Zustand</dt>', '<dt>Letzte Aktivität</dt><dd>vor <span data-live="since"',
+    '<span class="nobr">läuft seit <span data-live="since"', '<dt class="ag-wide">Zustand</dt>', '<dt>Letzte Aktivität</dt><dd><span class="nobr">vor <span data-live="since"',
     'aria-label="Workflow cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
     '<p class="empty">Baum bei 7 Knoten abgeschnitten.</p>',
+    '<p class="meta">Mit ⚠ markierte Ausgabewerte in den Details sind Untergrenzen.</p>',
   ]) assert.ok(h.indexOf(phrase) >= 0, phrase + ' missing from ' + h)
   assert.ok(section({ ui: agentUi({ agentsFolded: [AK.wf] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
   assert.equal(section({ agents: agentTree({ roots: [] }) }),
@@ -3542,17 +3563,19 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     // The state the builder decided, and whether it inferred it or found it recorded.
     const title = n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded'
     assert.ok(row.indexOf('<span class="ag-st ag-' + n.state + '" role="img" aria-label="' + title + '" title="' + title + '">') >= 0, row)
-    // Its usage first among the figures, and ⚠ beside it exactly when the output is a lower bound.
-    assert.ok(row.indexOf('<span class="ag-fig"><span class="nobr">' + n.usage) >= 0, row)
-    assert.equal(row.indexOf('>⚠</span>') >= 0, n.lowerBound, row)
+    // Its usage first among the figures, and no mark on the row: the details carry it.
+    if (n.kind !== 'pending') assert.ok(row.indexOf('<span class="ag-fig"><span class="nobr">' + n.usage) >= 0, row)
+    assert.equal(row.indexOf('⚠'), -1, row)
   }
-  // Nearly every agent of Claude Code ends on an unfinished reply, and the page says so for each.
+  // Nearly every agent of Claude Code ends on an unfinished reply, and the page says once where
+  // that is marked; the payload still carries the flag.
   assert.ok(nodes.filter((n) => n.kind === 'agent' && n.lowerBound).length >= 5)
-  // A launch nothing was counted of: two dashes, no mark, and no zero.
+  assert.equal(h.split('Output figures in the details marked ⚠ are lower bounds.').length - 1, 1, h)
+  // A launch nothing was counted of: no figures, no mark, and no zero.
   const pending = nodes.filter((n) => n.kind === 'pending')
   assert.equal(pending.length, 1)
   const p = rowOf(pending[0].key)
-  assert.ok(p.indexOf('<span class="ag-fig"><span class="nobr">–</span> · <span class="nobr">–</span>') >= 0, p)
+  assert.equal(p.indexOf('–</span> · <span class="nobr">–'), -1, p)
   assert.equal(/>0[ <]|> 0</.test(p), false, p)
 })
 
@@ -3749,4 +3772,55 @@ test('a clock that went backwards holds nothing back', () => {
   r.p.update(flushVm({ agents: flushTree(3) }))
   assert.deepEqual(r.sections(), [])
   assert.deepEqual(r.live().map((x) => x.at), [AG_NOW - 58_000])
+})
+
+// ---------------------------------------------------------------------------
+// 1.5 fix pass: pushes only for what is on the page, and the marks where they belong
+// ---------------------------------------------------------------------------
+
+test('the host pushes a fragment only for a section on the page, or for the chrome around it', () => {
+  const r = throttleRig()
+  r.p.update(flushVm())
+  r.p.resolveWebviewView(r.view)
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  r.posted.length = 0
+  // Records and tools are not in the list: their changes stay on the host. The summary is, and
+  // goes; so does the footer, which every page has.
+  r.p.update(flushVm({ records: { changed: 1 }, tools: { changed: 1 }, digest: ['new'], generatedAt: 'later' }))
+  assert.deepEqual(r.sections().sort(), ['footer', 'summary'])
+  // Once a section is added to the list the layout changed, and that push is a whole page.
+  r.posted.length = 0
+  r.p.update(flushVm({ sections: ['quota', 'agents', 'summary', 'records'], records: { changed: 2 }, digest: ['new'], generatedAt: 'later' }))
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  r.posted.length = 0
+  r.p.update(flushVm({ sections: ['quota', 'agents', 'summary', 'records'], records: { changed: 3 }, digest: ['new'], generatedAt: 'later' }))
+  assert.deepEqual(r.sections(), ['records'])
+})
+
+test('a fragment for a section with no body on the page updates the model and rewrites nothing', () => {
+  const a = agentCtx()
+  a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['agents'], agents: agentTree(), ui: agentUi() }) } })
+  assert.ok(a.root.innerHTML.length > 0)
+  a.root.innerHTML = 'untouched'
+  a.posted.length = 0
+  a.fire('window:message', { origin: '', data: { type: 'section', key: 'records', payload: { records: { marker: 7 } } } })
+  assert.equal(a.root.innerHTML, 'untouched', 'the whole page was rewritten for a section that is not on it')
+  assert.deepEqual(a.posted, [])
+  assert.equal(nodeVm.runInContext('vm.records.marker', a.c), 7, 'the payload was dropped')
+})
+
+test('a label breaks only between its parts, never inside a hyphenated model id', () => {
+  const a = agentCtx()
+  const h = agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'done', { label: 'general-purpose · claude-opus-5 · a94f' })] }) })
+  const label = h.slice(h.indexOf('<span class="ag-label">'), h.indexOf('</span><span class="ag-fig">') + 7)
+  assert.equal(label, '<span class="ag-label"><span class="nobr">general-purpose</span> · '
+    + '<span class="nobr">claude-opus-5</span> · <span class="nobr">a94f</span></span>')
+  assert.equal(label.split('<span class="nobr">').length - 1, 3)
+})
+
+test('the quota name keeps its nowrap alone, and the running dot never fades below 0.7', () => {
+  assert.match(STYLE, /\[data-body="quota"\] \.row > \.name \{ white-space: nowrap; \}/)
+  assert.equal(/(^|\n)\.row > \.name \{ white-space: nowrap; \}/.test(STYLE), false, 'the rule reaches every card again')
+  assert.match(STYLE, /@keyframes ag-pulse \{ 50% \{ opacity: \.7; \} \}/)
+  assert.match(STYLE, /@media \(prefers-reduced-motion: no-preference\) \{\n {2}\.ag-running::before \{ animation: ag-pulse/)
 })

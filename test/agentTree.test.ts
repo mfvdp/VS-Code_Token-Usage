@@ -24,6 +24,7 @@ import { AgentTreeInput, agentDetails, buildAgentTree } from '../src/agentTreeBu
 import { setBundle, setLocale } from '../src/i18n'
 import { TimeConfig } from '../src/time'
 import { AgentLaunch, AgentRec, MainRec, SessionRec } from '../src/types'
+import { durationText } from '../src/stats'
 import { MAX_AGENT_KEY_CHARS } from '../src/viewModel'
 import { ROOT } from './helpers/nls'
 
@@ -221,7 +222,7 @@ test('without a recorded result an agent runs while its transcript is fresh and 
   assert.equal(stateText(over, states[0].key),
     'Running — inferred: the transcript changed 2 min ago and no result was recorded yet.')
   assert.equal(stateText(over, states[2].key),
-    'Unknown — no result was recorded and the transcript has been silent since 11:49; the agent may have been stopped.')
+    'Unknown — inferred: no result was recorded and the transcript has been silent since 11:49; the agent may have been stopped.')
   assert.equal(stateText(over, states[3].key),
     'Running — inferred: the transcript changed 3 min ago and no result was recorded yet.')
 })
@@ -264,7 +265,7 @@ test('a launch whose transcript was never seen is a pending node under whoever l
   assert.equal(stale.label, 'Agent · – · launched')
   assert.equal(stale.state, 'unknown')
   assert.equal(stateText(over, stale.key),
-    "Unknown — the parent recorded the launch at 11:40 but no result, and the agent's transcript was never seen; the agent may have been stopped.")
+    "Unknown — inferred: the parent recorded the launch at 11:40 but no result, and the agent's transcript was never seen; the agent may have been stopped.")
 
   // A named agent whose transcript never arrived, completed by the parent's record.
   const reported = node(vm, 'l:toolu_pppp0003')
@@ -299,7 +300,8 @@ test('a session is active while its transcript changed within ten minutes and id
 })
 
 test('agents whose session transcript was never read still get their session, which claims nothing', () => {
-  const over = { mains: [], agents: [rec('aaaa0001')] }
+  // Silent agents: a running one would make the session active through it (see the roll-up).
+  const over = { mains: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] }
   const vm = build(over)
   assert.equal(vm.roots.length, 1)
   const root = vm.roots[0]
@@ -308,7 +310,7 @@ test('agents whose session transcript was never read still get their session, wh
   assert.deepEqual([root.state, root.derived, root.usage, root.duration, root.startTs, root.lastTs],
     ['unknown', true, '–', '–', null, null])
   assert.equal(stateText(over, root.key),
-    "Unknown — the session's own transcript has not been read; only its agents were.")
+    "Unknown — inferred: the session's own transcript has not been read; only its agents were.")
   assert.deepEqual(root.children.map((c) => c.key), [agentKey('aaaa0001')])
 })
 
@@ -340,7 +342,7 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
 
   const u = run([done('eeee0001'), silent('eeee0002')])
   assert.deepEqual([u.w.state, u.w.derived], ['unknown', true])
-  assert.equal(u.text, 'Unknown — not every agent of this run has a recorded result, and none is running.')
+  assert.equal(u.text, 'Unknown — inferred: not every agent of this run has a recorded result, and none is running.')
 
   // The run's figures are its agents' figures: 2 × (300 + 200 + 700), from its first start to
   // its last line.
@@ -704,16 +706,8 @@ test('node keys are the identifiers the records carry, in the documented shapes,
   const vm = build(over)
   assert.deepEqual(keysOf(vm), ['a:aaaa0001', 'a:bbbb0001', 'l:toolu_pppp0001', `s:${S1}`, `w:${S1}|${WF}`].sort())
 
-  // Where the files lie changes nothing: the cursors' paths — the session's own, an agent's in an
-  // odd directory, a namesake under another session — are not what a key is made of.
-  const files = [
-    sessionFile(), agentFile('aaaa0001'), agentFile('bbbb0001', S1, WF),
-    path.join(PROJ, S1, 'subagents', 'nested', 'agent-aaaa0001.jsonl'), agentFile('aaaa0001', S2),
-  ]
-  assert.deepEqual(keysOf(build({ ...over, files })), keysOf(vm))
-  // A session without agents is its id as well, whether a cursor names its transcript or not.
+  // A session without agents is its id as well.
   assert.equal(build().roots[0].key, rootKey)
-  assert.equal(build({ files: [sessionFile()] }).roots[0].key, rootKey)
 
   // No key names a directory, so neither the page nor the stored view state ever holds the
   // project's path — which the tree does not even show as a label while attribution is off.
@@ -742,8 +736,8 @@ test('keys stay short however deep the files lie, stay apart where names share a
   assert.equal(new Set(keys).size, keys.length, 'two nodes share a key')
   assert.equal(node(vm, agentKey('aaaa0001')).label, node(vm, agentKey('aaaa0002')).label, 'the two rows read alike')
 
-  // Stable: a later build, the records in another order and the cursors' paths give the same keys.
-  const again = build({ ...over, agents: [...(over.agents ?? [])].reverse(), files: [file] }, NOW + 3 * MIN)
+  // Stable: a later build and the records in another order give the same keys.
+  const again = build({ ...over, agents: [...(over.agents ?? [])].reverse() }, NOW + 3 * MIN)
   assert.deepEqual(all(again.roots).map((n) => n.key).sort(), [...keys].sort())
   // A key selects its own node and no other: the one of the pair with 999 fresh input tokens.
   const picked = build({ ...over, selected: agentKey('aaaa0002') }).selected
@@ -844,7 +838,7 @@ test('the tree speaks German with the bundle the extension ships', () => {
     'Läuft — abgeleitet: Das Transkript hat sich vor 1 min geändert, und es wurde noch kein Ergebnis aufgezeichnet.')
   assert.deepEqual(vm.selected?.rows.map((r) => r.label), [
     'Typ', 'Modelle', 'Tiefe', 'Beginn', 'Dauer', 'Letzte Aktivität', 'Turns', 'Verbrauch', 'Frische Eingabe',
-    'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte', 'Werkzeugaufrufe',
+    'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte', 'Tool-Aufrufe',
     'Gestartet von', 'Workflow-Lauf',
   ])
   assert.equal(vm.selected?.rows.find((r) => r.label === 'Ausgabe')?.note, '⚠ Untergrenze')
@@ -875,4 +869,81 @@ test('every message of the tree and of its markdown has a German entry, and the 
     assert.ok(typeof de === 'string' && de.length > 0, `no German for ${JSON.stringify(k)}`)
     if (!same.has(k)) assert.notEqual(de, k, `still English: ${JSON.stringify(k)}`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// The roll-up: waiting on a running agent is not silence
+// ---------------------------------------------------------------------------
+
+test('an agent waiting on a running child runs, and a session with a running agent is active — both inferred', () => {
+  const silent = { firstTs: NOW - 50 * MIN, lastTs: NOW - 40 * MIN }
+  const over: Partial<AgentTreeInput> = {
+    // The session itself quiet for half an hour.
+    mains: [main({ lastTs: NOW - 30 * MIN })],
+    agents: [
+      // parent → child → grandchild; only the grandchild wrote lately.
+      rec('aaaa0001', silent),
+      rec('aaaa0002', { ...silent, spawnerFile: agentFile('aaaa0001'), meta: null }),
+      rec('aaaa0003', { spawnerFile: agentFile('aaaa0002'), meta: null, lastTs: NOW - 1 * MIN }),
+      // A recorded result stays a fact, whatever runs under it.
+      rec('bbbb0001', { ...silent, outcome: 'completed', outcomeTs: NOW - 35 * MIN }),
+      rec('bbbb0002', { spawnerFile: agentFile('bbbb0001'), meta: null, lastTs: NOW - 1 * MIN }),
+      // Silent, with a silent child: unknown, as before.
+      rec('cccc0001', silent),
+      rec('cccc0002', { ...silent, spawnerFile: agentFile('cccc0001'), meta: null }),
+    ],
+  }
+  const vm = build(over)
+  assert.equal(parentOf(vm, agentKey('aaaa0003'))?.key, agentKey('aaaa0002'))
+  assert.equal(parentOf(vm, agentKey('aaaa0002'))?.key, agentKey('aaaa0001'))
+  const st = (id: string): string => node(vm, agentKey(id)).state
+  assert.deepEqual(['aaaa0001', 'aaaa0002', 'aaaa0003', 'bbbb0001', 'bbbb0002', 'cccc0001', 'cccc0002'].map(st),
+    ['running', 'running', 'running', 'done', 'running', 'unknown', 'unknown'])
+  assert.equal(node(vm, agentKey('aaaa0001')).derived, true)
+  const child = 'Running — inferred: a child agent of this agent is still running.'
+  assert.equal(stateText(over, agentKey('aaaa0001')), child)
+  assert.equal(stateText(over, agentKey('aaaa0002')), child)
+  // The one that wrote keeps its own sentence.
+  assert.match(stateText(over, agentKey('aaaa0003')) ?? '', /^Running — inferred: the transcript changed 1 min ago/)
+  assert.match(stateText(over, agentKey('bbbb0001')) ?? '', /^Completed — /)
+  // Four agents run: the host keeps polling for each.
+  assert.equal(vm.running, 4)
+
+  const root = vm.roots[0]
+  assert.deepEqual([root.state, root.derived], ['active', true])
+  assert.equal(stateText(over, rootKey), 'Active — inferred: an agent of this session is running.')
+  // A session active on its own keeps its own sentence; one with nothing running stays idle.
+  const own = { ...over, mains: [main({ lastTs: NOW - 2 * MIN })] }
+  assert.equal(stateText(own, rootKey), 'Active — inferred: the session transcript changed 2 min ago.')
+  const quiet = { mains: [main({ lastTs: NOW - 30 * MIN })], agents: [rec('cccc0001', silent)] }
+  assert.equal(build(quiet).roots[0].state, 'idle')
+  // A launch that runs counts as a running agent below, and a session never read is active
+  // through its running agent.
+  const launched = { mains: [main({ lastTs: NOW - 30 * MIN })], launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })] }
+  assert.equal(build(launched).roots[0].state, 'active')
+  assert.equal(build({ mains: [], agents: [rec('aaaa0003', { lastTs: NOW - MIN })] }).roots[0].state, 'active')
+})
+
+test('the roll-up speaks German', () => {
+  const over: Partial<AgentTreeInput> = {
+    mains: [main({ lastTs: NOW - 30 * MIN })],
+    agents: [
+      rec('aaaa0001', { firstTs: NOW - 50 * MIN, lastTs: NOW - 40 * MIN }),
+      rec('aaaa0002', { spawnerFile: agentFile('aaaa0001'), meta: null, lastTs: NOW - MIN }),
+    ],
+  }
+  german(() => {
+    assert.equal(stateText(over, agentKey('aaaa0001')), 'Läuft — abgeleitet: Ein untergeordneter Agent dieses Agenten läuft noch.')
+    assert.equal(stateText(over, rootKey), 'Aktiv — abgeleitet: Ein Agent dieser Sitzung läuft.')
+  })
+})
+
+test('seconds under a minute are written in the page\'s own digits', () => {
+  assert.equal(durationText(48_000), '48.0 s')
+  assert.equal(durationText(1_450), '1.5 s')
+  german(() => {
+    assert.equal(durationText(48_000), '48,0 s')
+    assert.equal(durationText(1_450), '1,5 s')
+    assert.equal(durationText(125_000), '2 min 05 s')
+  })
 })

@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
-import type { NodeState, TreeNode } from '../src/agentTree'
+import type { TreeNode } from '../src/agentTree'
 import { toMarkdownSummary } from '../src/exporter'
 import { setBundle, setLocale } from '../src/i18n'
 import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
@@ -555,22 +555,14 @@ test('an agent with no counted request is dashes throughout — no figure of it 
   assert.equal(/(^|\s)0(\s|$)/.test(line), false, line)
 })
 
-/**
- * Unknown is inferred like running, active and idle, but its sentences — §4.4 of the build spec
- * wrote them so — say what was not recorded instead of saying "inferred". Reported with PB3;
- * until they say it, the rule holds unknown to what its sentence does do: it names the state as
- * unknown, which claims no result. Drop the state from this set once the sentences carry the word.
- */
-const INFERRED_UNWORDED: ReadonlySet<NodeState> = new Set<NodeState>(['unknown'])
-
 test('every inferred state says it was inferred, and no recorded one says so — in English and in German', () => {
   // The glossary's word for it (§4.8, derived → abgeleitet), where the English says "inferred".
   assert.match(GERMAN['Running — inferred: at least one agent of this run is running.'], /abgeleitet/)
   const langs = [
-    { lang: 'en', word: 'inferred', unknown: 'Unknown', build: () => everyNodeOpen() },
-    { lang: 'de', word: 'abgeleitet', unknown: GERMAN.Unknown, build: () => inGerman(() => everyNodeOpen()) },
+    { lang: 'en', word: 'inferred', build: () => everyNodeOpen() },
+    { lang: 'de', word: 'abgeleitet', build: () => inGerman(() => everyNodeOpen()) },
   ]
-  for (const { lang, word, unknown, build } of langs) {
+  for (const { lang, word, build } of langs) {
     const open = build()
     // Every state the tree can show is in the world, so the rule is tried on each of them.
     assert.deepEqual([...new Set(open.map((x) => x.node.state))].sort(),
@@ -581,9 +573,8 @@ test('every inferred state says it was inferred, and no recorded one says so —
       assert.equal(d.state, node.state)
       const where = `${lang} ${node.kind} ${node.state}: ${d.stateText}`
       const says = d.stateText.includes(word)
-      if (!node.derived) assert.equal(says, false, where)
-      else if (!INFERRED_UNWORDED.has(node.state)) assert.equal(says, true, where)
-      else assert.ok(d.stateText.startsWith(`${unknown} — `), where)
+      // Every inferred state says so — unknown included — and no recorded one does.
+      assert.equal(says, node.derived, where)
     }
     // Only a recorded outcome is a fact, and the tree only calls those two states recorded.
     for (const { node } of open) assert.equal(node.derived, node.state !== 'done' && node.state !== 'failed', node.key)

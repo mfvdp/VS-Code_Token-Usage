@@ -63,6 +63,7 @@
   "Not enough data for a summary yet.": "Noch nicht genug Daten für eine Zusammenfassung.",
   "Open settings": "Einstellungen öffnen",
   "Output": "Ausgabe",
+  "Output figures in the details marked ⚠ are lower bounds.": "Mit ⚠ markierte Ausgabewerte in den Details sind Untergrenzen.",
   "Peak day {0}": "Spitzentag {0}",
   "Peak day {0} · {1}": "Spitzentag {0} · {1}",
   "Per req.": "Pro Anfr.",

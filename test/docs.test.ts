@@ -396,17 +396,19 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Completed — the parent recorded the result at {0}.',
     'Failed — the parent recorded the failure at {0}.',
     'Running — inferred: the transcript changed {0} and no result was recorded yet.',
-    'Unknown — no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.',
+    'Running — inferred: a child agent of this agent is still running.',
+    'Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.',
     'Completed — the workflow journal recorded the result.',
     'Active — inferred: the session transcript changed {0}.',
+    'Active — inferred: an agent of this session is running.',
     'Idle — inferred: the session transcript has been silent since {0}.',
-    "Unknown — the session's own transcript has not been read; only its agents were.",
+    "Unknown — inferred: the session's own transcript has not been read; only its agents were.",
     'Running — inferred: at least one agent of this run is running.',
     'Failed — at least one agent of this run has a recorded failure.',
     'Done — every agent of this run has a recorded result.',
-    'Unknown — not every agent of this run has a recorded result, and none is running.',
+    'Unknown — inferred: not every agent of this run has a recorded result, and none is running.',
     "Running — inferred: the parent recorded the launch {0} and no result yet; the agent's transcript has not been seen yet.",
-    "Unknown — the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
+    "Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
   ]
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const sentence of quoted) {

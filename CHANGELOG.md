@@ -17,23 +17,25 @@ This project follows [Semantic Versioning](https://semver.org/).
   identity, and the section says nothing about it.
 * **States that say what they rest on.** Done and failed are what somebody recorded — the
   parent's tool result, a task notification, or a workflow run's journal. Running and unknown,
-  and a session's active and idle, are inferred from when a transcript last recorded a response,
-  and are marked as inferred: `~` in the glyph's title, `[~Running]` in the markdown. Claude Code
+  and a session's active and idle, are inferred from when a transcript last recorded a response
+  — an agent waiting on a running agent it launched runs too, and a session with a running agent
+  is active — and are marked as inferred: `~` in the glyph's title, `[~Running]` in the markdown. Claude Code
   writes no end marker into an agent's transcript, so an agent that has been silent for ten
   minutes without a result is unknown, never done.
 * **Details on a click.** Clicking a node, or pressing Enter on it, opens a panel under the tree:
   type, models, depth, start, duration, last activity, the state with the sentence it was derived
   with, turns, the token kinds of the totals table, tool calls, who spawned it and its workflow
-  run. Output that is a lower bound says so — almost every finished agent's is, because its file
-  ends on a line Claude Code never marked as finished. For a synchronous agent the parent's own
+  run. Output that is a lower bound says so there, with `⚠` — almost every finished agent's is,
+  because its file ends on a line Claude Code never marked as finished — so the tree rows carry
+  no mark, and one line under the tree says where to find it. For a synchronous agent the parent's own
   report of its totals is shown beside ours and never added to any sum. What you fold and which
   node is open are kept with the dashboard's view state, as node keys and nothing else.
 * **Live while agents run.** A changed transcript is read as soon as the token counts read it;
   the section is pushed at most every two seconds, so the tree does not redraw under the pointer
   twice a second, while a fold or a click is answered at once; the running clocks tick every
-  second in the page itself. On Linux, where the recursive file watcher misses the files of a
-  directory created after it started, the agent directories of the active sessions are also
-  listed every five seconds while an agent runs.
+  second in the page itself. Because the recursive file watcher can miss the files of a
+  directory created after it started — on Linux it does — the agent directories of the active
+  sessions are also listed every five seconds while an agent runs, on every platform.
 * **Everything the tree reads, field by field.** From `agent-<id>.meta.json` only `agentType`,
   `model`, `spawnDepth` and `toolUseId`; from a workflow run's `journal.jsonl` only `type` and
   `agentId`; from an `Agent` or `Task` tool call only its id, `subagent_type`, `model` and
@@ -67,6 +69,14 @@ This project follows [Semantic Versioning](https://semver.org/).
   its project. The placement now walks up to the nearest `subagents` directory, so an agent
   belongs to its real session and project at every depth. Records made before the update keep
   their old placement until *Re-read Token History*.
+* **The Records card overflowed a 260 px sidebar** (since 1.4.0). The rule that keeps a
+  provider's name in a quota card from breaking applied to every card row, so the Records
+  card's peak-day name could not wrap and pushed the card past the sidebar. It now applies to
+  the quota cards only.
+* **A live update no longer re-renders the whole page when a section that is not on it
+  changes.** A fragment for a section missing from `tokenPace.dashboard.sections` made the page
+  rewrite itself, and every scroll position went with it; the host now pushes only the sections
+  on the page, and the page ignores a fragment it has no place for.
 
 ## 1.4.0 — 2026-09-07
 

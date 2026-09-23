@@ -770,7 +770,8 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   assert.equal(root.label, 'Session sess-alp')
   // The project label comes from the attribution table — the same one the Sessions table reads.
   assert.equal(root.sub, 'alpha')
-  assert.equal(root.state, 'idle')
+  // Quiet itself for 45 minutes, but its agent and its launch run: active, through them.
+  assert.equal(root.state, 'active')
   assert.deepEqual(root.children.map((c) => [c.kind, c.state]), [['agent', 'running'], ['pending', 'running']])
   assert.equal(tree.running, 2)
   assert.equal(tree.selected?.key, agentKey)

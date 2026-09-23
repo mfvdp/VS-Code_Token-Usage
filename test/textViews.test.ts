@@ -918,9 +918,10 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   assert.equal(md.split('## Agents').length, 2)
 
   const lines = sectionOf(md, '## Agents')
-  // Inferred states carry the estimate mark; the session is idle, its agent and the launch run.
+  // Inferred states carry the estimate mark; its agent and the launch run, so the session,
+  // quiet itself, is active through them.
   assert.deepEqual(lines.filter((l) => /^\s*- /.test(l)), [
-    '- [~Idle] Session sess-alp — alpha · 1.2K · 2 h 15 min',
+    '- [~Active] Session sess-alp — alpha · 1.2K · 2 h 15 min',
     '  - [~Running] Explore · claude-opus-4-6 · a94f · 1.2K · 19 min 00 s',
     '  - [~Running] Plan · – · launched · – · –',
   ])
@@ -996,7 +997,7 @@ test('the markdown tree speaks German with the shipped bundle', () => {
     setLocale(undefined)
   }
   const lines = sectionOf(md, '## Agenten')
-  assert.ok(lines.includes('- [~Ruht] Sitzung sess-alp — alpha · 1,2K · 2 h 15 min'), lines.join('\n'))
+  assert.ok(lines.includes('- [~Aktiv] Sitzung sess-alp — alpha · 1,2K · 2 h 15 min'), lines.join('\n'))
   assert.ok(lines.includes('  - [~Läuft] Plan · – · gestartet · – · –'), lines.join('\n'))
   assert.ok(lines.includes('| Detail | Wert |'), lines.join('\n'))
   assert.ok(lines.some((l) => l.startsWith('| Zustand | Läuft — abgeleitet: ')), lines.join('\n'))

@@ -33,7 +33,7 @@ id (`Session 9d0eb37a`), and with its project beside it while `tokenPace.attribu
 under the agent that launched it when that one is in the same tree, otherwise directly under the
 session; the agents of a run stay inside their run. Siblings are ordered by when they started. A
 launch whose transcript has not appeared yet is a node of its own, in italics and named from the
-launch — `Plan · sonnet · launched` — with a dash for every figure, since nothing was counted.
+launch — `Plan · sonnet · launched` — with no figures beside it, since nothing was counted.
 No agent sits more than **6** levels below its session: one that would sit deeper moves up, it
 is never dropped. The tree holds at most **300** nodes; past that it is cut
 (`Tree cut at 300 nodes.`), keeping every listed session, the open node and every running agent
@@ -41,9 +41,11 @@ with the nodes above them, then the rest level by level, so every session keeps 
 before any of them keeps its deepest.
 
 **Each row** is the state glyph, the name, the usage — fresh input + cache write + output, the
-definition the tables use, with `⚠` when its output is a lower bound — and the duration from the
-first line to the last. A running node also says for how long: `running for 12 min 05 s`,
-counted from its first line and ticking every second. An agent's name is its type, its model and
+definition the tables use — and the duration from the first line to the last. A row carries no
+lower-bound mark: the details do (`Output … ⚠ lower bound`), and while a row on screen has one,
+a line under the tree says so — *Output figures in the details marked ⚠ are lower bounds.* A
+running node also says for how long: `running for 12 min 05 s`, counted from its first line and
+ticking every second. An agent's name is its type, its model and
 the first four characters of its id — `Explore · claude-opus-5 · a94f`. The type is the one the
 agent's sidecar names, else the one its launch asked for, else `Agent`; the model is the last one
 its transcript recorded, else the alias the sidecar or the launch names, else `–`. An agent's
@@ -55,10 +57,10 @@ usage is part of the figures the totals already contain: the tree adds nothing t
 |---|---|---|---|
 | ✓ | done | recorded | the parent's tool result or task notification says `completed`, or the workflow run's journal holds a result for the agent |
 | ✕ | failed | recorded | the parent recorded `failed`, `error`, `killed`, `cancelled` or `timeout` |
-| ● | running | derived | nothing was recorded yet, and the agent replied — or was launched — within the last **10 minutes** |
+| ● | running | derived | nothing was recorded yet, and the agent replied — or was launched — within the last **10 minutes**, or an agent it launched is running |
 | ? | unknown | derived | nothing was recorded, and the agent has been silent for longer than that |
-| ● | active | derived | a session whose own transcript recorded a response within the last 10 minutes |
-| ○ | idle | derived | a session silent for longer than that |
+| ● | active | derived | a session whose own transcript recorded a response within the last 10 minutes, or one of whose agents is running |
+| ○ | idle | derived | a session silent for longer than that, with no agent running |
 
 A **workflow run** is running while one of its agents runs, failed when one of them failed, done
 when every one of them has a recorded result, and unknown otherwise. A **launch** whose
@@ -77,7 +79,8 @@ word for word. For an agent:
 * Completed — the parent recorded the result at 14:20.
 * Failed — the parent recorded the failure at 14:20.
 * Running — inferred: the transcript changed 2 min ago and no result was recorded yet.
-* Unknown — no result was recorded and the transcript has been silent since 14:20; the agent may have been stopped.
+* Running — inferred: a child agent of this agent is still running.
+* Unknown — inferred: no result was recorded and the transcript has been silent since 14:20; the agent may have been stopped.
 
 A result recorded without a time is stated without one. Today that is the case for every agent
 of a workflow run that no launch accounts for: the run's journal completes it, and its lines
@@ -86,14 +89,15 @@ carry no time — *Completed — the workflow journal recorded the result.* The 
 | Node | Sentence |
 |---|---|
 | Session | Active — inferred: the session transcript changed 3 min ago. |
+| Session | Active — inferred: an agent of this session is running. |
 | Session | Idle — inferred: the session transcript has been silent since 09:12. |
-| Session | Unknown — the session's own transcript has not been read; only its agents were. |
+| Session | Unknown — inferred: the session's own transcript has not been read; only its agents were. |
 | Workflow run | Running — inferred: at least one agent of this run is running. |
 | Workflow run | Failed — at least one agent of this run has a recorded failure. |
 | Workflow run | Done — every agent of this run has a recorded result. |
-| Workflow run | Unknown — not every agent of this run has a recorded result, and none is running. |
+| Workflow run | Unknown — inferred: not every agent of this run has a recorded result, and none is running. |
 | Launch | Running — inferred: the parent recorded the launch 1 min ago and no result yet; the agent's transcript has not been seen yet. |
-| Launch | Unknown — the parent recorded the launch at 14:20 but no result, and the agent's transcript was never seen; the agent may have been stopped. |
+| Launch | Unknown — inferred: the parent recorded the launch at 14:20 but no result, and the agent's transcript was never seen; the agent may have been stopped. |
 
 A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
 
@@ -117,7 +121,8 @@ what it is, *the parent's own count, not added to any total*: it need not follow
 **Why the output is a lower bound.** Claude Code writes no end marker into an agent's
 transcript — a finished agent's file ends on an assistant line whose `stop_reason` is still
 `null` — so its last reply is counted as far as it was written, and almost every finished
-agent's output carries `⚠ lower bound`.
+agent's output carries `⚠ lower bound` in its details. A mark on nearly every row would say
+nothing, so the tree rows carry none; the line under the tree points to the details instead.
 
 ## What is read
 
@@ -175,9 +180,9 @@ much was read, in counts only.
   back by it, and a fold or a click of yours is answered at once.
 * The `running for …` clocks and the last activity in the details tick every second in the page
   itself — no message, no redraw.
-* The recursive file watcher on Linux misses the files of a directory created after it started,
-  so while an agent runs the agent directories of the active sessions are also listed every
-  **5 seconds**; the one-minute sweep stays as the last net.
+* The recursive file watcher can miss the files of a directory created after it started — on
+  Linux it does — so while an agent runs the agent directories of the active sessions are also
+  listed every **5 seconds**, on every platform; the one-minute sweep stays as the last net.
 
 ## Folding and selection
 
@@ -200,10 +205,11 @@ tree.`). *Clear Stored Data…* removes them with the rest of the dashboard view
 * **No end marker.** An agent that was stopped — interrupted, its session closed, its process
   gone — has no recorded result, so ten minutes after its last reply it reads `unknown`, never
   `done`.
-* **Waiting looks like silence.** The states are read from replies, so an agent that waits longer
-  than ten minutes — on one tool call, or on an agent it launched — reads `unknown` until its next
-  reply, and a session whose agents do the work while it waits reads `idle` even while an agent
-  below it runs.
+* **Waiting can look like silence.** The states are read from replies. An agent waiting on an
+  agent it launched reads `running` while that agent runs, and a session reads `active` while
+  one of its agents runs — both say they were inferred from below. An agent that waits longer
+  than ten minutes on anything else — one long tool call — reads `unknown` until its next
+  reply.
 
 ## Settings
 

@@ -1391,7 +1391,10 @@ function turnStats(sessions: SessionRec[], source: Source, model: string): TurnS
 export function durationText(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '–'
   if (ms < 1000) return `${Math.round(ms)} ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
+  // In the page's own digits, like every other figure: "48,0 s" on a German page, not "48.0 s".
+  if (ms < 60_000) {
+    return `${(ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`
+  }
   const m = Math.floor(ms / 60_000)
   const s = Math.round((ms % 60_000) / 1000)
   if (m < 60) return `${m} min ${String(s).padStart(2, '0')} s`

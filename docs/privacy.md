@@ -21,9 +21,10 @@ Inside `~/.claude/projects/` two small files beside the agent transcripts are re
 fields — `agentType`, `model`, `spawnDepth` and `toolUseId`, never its `description` or its
 `prompt`, and only from a regular file of at most 64 KB — and a workflow run's `journal.jsonl`,
 for the `type` and `agentId` of each line (and its time, should a line ever carry one), never
-its `key` or its `result`. To catch agent files the recursive file watcher misses on Linux, the
-`subagents/` directories of the active sessions and the workflow directories inside them are
-also listed every five seconds while an agent runs; the listing follows no link.
+its `key` or its `result`. To catch agent files the recursive file watcher can miss (on Linux
+it does), the `subagents/` directories of the active sessions and the workflow directories
+inside them are also listed every five seconds while an agent runs, on every platform; the
+listing follows no link.
 
 `~/.claude/ide/*.lock` (which holds an `authToken` in clear text),
 `~/.claude/sessions/*.key` and the `oauthAccount` block of `~/.claude.json` are **never** touched;

@@ -47,12 +47,6 @@ export interface AgentTreeInput {
   /** `ui.agentSelected`: the node whose details are open, or null. */
   selected: string | null
   tcfg: TimeConfig
-  /**
-   * The transcript paths the aggregator holds a cursor for. No longer read: they were the
-   * bodies of the node keys, and a key carries no path any more. Accepted so that a caller
-   * written against the earlier shape still compiles.
-   */
-  files?: Iterable<string>
 }
 
 const DAY_MS = 86_400_000
@@ -288,7 +282,7 @@ function agentState(r: AgentRec, launch: AgentLaunch | null, now: number, tcfg: 
   }
   return {
     state: 'unknown',
-    stateText: t('Unknown — no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.',
+    stateText: t('Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.',
       stamp(r.lastTs, now, tcfg)),
   }
 }
@@ -306,14 +300,14 @@ function pendingState(l: AgentLaunch, now: number, tcfg: TimeConfig): StateOf {
   }
   return {
     state: 'unknown',
-    stateText: t("Unknown — the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
+    stateText: t("Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
       stamp(l.ts, now, tcfg)),
   }
 }
 
 function sessionState(main: MainRec | null, now: number, tcfg: TimeConfig): StateOf {
   if (!main) {
-    return { state: 'unknown', stateText: t("Unknown — the session's own transcript has not been read; only its agents were.") }
+    return { state: 'unknown', stateText: t("Unknown — inferred: the session's own transcript has not been read; only its agents were.") }
   }
   if (now - main.lastTs <= SESSION_ACTIVE_MS) {
     return { state: 'active', stateText: t('Active — inferred: the session transcript changed {0}.', ago(main.lastTs, now)) }
@@ -335,7 +329,7 @@ function workflowState(states: NodeState[]): StateOf {
   if (states.length > 0 && states.every((s) => s === 'done')) {
     return { state: 'done', stateText: t('Done — every agent of this run has a recorded result.') }
   }
-  return { state: 'unknown', stateText: t('Unknown — not every agent of this run has a recorded result, and none is running.') }
+  return { state: 'unknown', stateText: t('Unknown — inferred: not every agent of this run has a recorded result, and none is running.') }
 }
 
 // ---------------------------------------------------------------------------
@@ -768,6 +762,27 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const id = agentIdOf(l.file)
     const host = id !== null ? byAgent.get(id) ?? null : null
     attach(e, host !== null && depthOf(host) < MAX_TREE_DEPTH ? host : root)
+  }
+
+  // Waiting is not silence: an agent that launched a child agent and waits on it writes
+  // nothing until the child returns, so an agent with no result of its own and a running
+  // agent anywhere below it is running too — derived, and its sentence says from what.
+  // Children before parents, so a running grandchild carries up through every level.
+  const rollUp = (e: Entry): boolean => {
+    let below = false
+    for (const c of e.children) if (rollUp(c)) below = true
+    if (e.kind === 'agent' && below && e.state === 'unknown') {
+      e.state = 'running'
+      e.stateText = t('Running — inferred: a child agent of this agent is still running.')
+    }
+    return below || (isAgentLike(e) && e.state === 'running')
+  }
+  let anyRunning = false
+  for (const c of root.children) if (rollUp(c)) anyRunning = true
+  // A session whose agents do the work while its own transcript waits is in use all the same.
+  if (anyRunning && root.state !== 'active') {
+    root.state = 'active'
+    root.stateText = t('Active — inferred: an agent of this session is running.')
   }
 
   // A run is summed from the agents inside it, on the whole tree: the cap below may hide some

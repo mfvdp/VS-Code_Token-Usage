@@ -257,8 +257,14 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       void view.webview.postMessage({ type: 'data', payload: vm })
       return
     }
+    // Only what the page shows. A section that is not on it has no body to write into, and a
+    // fragment for it used to make the page rewrite itself whole — every scroll position lost
+    // to a change nobody could see. Adding it to the list changes the layout, and that push is
+    // a full one.
+    const shown = shownSections(vm)
     let wait = Infinity
     for (const [key, fields] of Object.entries(SECTION_FIELDS)) {
+      if (!shown.has(key)) continue
       const next = serialise(vm, fields)
       if (this.sent.get(key) === next) continue
       // Held back, not dropped: `sent` still holds what the page has, so the flush the timer
@@ -349,6 +355,15 @@ export function layoutKey(vm: ViewModel): string {
 }
 
 const LAYOUT_FIELDS: SectionField[] = ['sections', 'showCost']
+
+/** The pieces of the page that are always there, whatever `dashboard.sections` lists. */
+const CHROME_SECTIONS = ['notices', 'controls', 'footer', 'drill']
+
+/** The keys a section push may carry: the listed sections and the chrome around them. */
+export function shownSections(vm: ViewModel): Set<string> {
+  const listed = Array.isArray(vm.sections) ? vm.sections.map(String) : []
+  return new Set([...listed, ...CHROME_SECTIONS])
+}
 
 const UI_FIELD = 'ui.'
 
@@ -459,8 +474,10 @@ p { margin: 6px 0; }
 [data-body="quota"] .card + .card { border-top: 1px solid var(--line); padding-top: 10px; }
 .name { font-weight: 600; }
 /* A provider's name never breaks inside the word: at 300 px with a long German meta text the
-   row used to split a five-letter name across two lines; the meta beside it is what wraps. */
-.row > .name { white-space: nowrap; }
+   row used to split a five-letter name across two lines; the meta beside it is what wraps.
+   Only in the quota cards: the same row elsewhere (the Records card's peak day) carries a
+   name long enough to push the card past a 260 px sidebar when it may not wrap. */
+[data-body="quota"] .row > .name { white-space: nowrap; }
 .row { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
 .wrap { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 button, select, input {
@@ -854,7 +871,9 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-unknown::before { content: "?"; color: var(--dim); }
 .ag-active::before { content: "●"; color: var(--vscode-foreground); }
 .ag-idle::before { content: "○"; color: var(--dim); }
-@keyframes ag-pulse { 50% { opacity: .35; } }
+/* A breath, not a blink: at its faintest the dot keeps most of its colour, so it never reads
+   as switched off. */
+@keyframes ag-pulse { 50% { opacity: .7; } }
 /* The details of the selected node, under the tree: the key figure's box around a two-column
    list, the words on the left and what the view model says about them on the right. */
 .ag-details { margin-top: 8px; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
@@ -862,6 +881,11 @@ ul { margin: 6px 0; padding-left: 18px; }
                  margin: 6px 0 0; font-size: 11px; }
 .ag-details dt { color: var(--dim); }
 .ag-details dd { margin: 0; min-width: 0; font-variant-numeric: tabular-nums; }
+/* The state sentence and the parent's report are sentences: beside the column of labels a
+   narrow sidebar would leave them a word per line, so they take the whole width under their
+   label, at every width. The short rows stay label beside value. */
+.ag-details .ag-wide { grid-column: 1 / -1; }
+.ag-details dd.ag-wide { margin-bottom: 2px; }
 @media (max-width: 320px) {
   .kpis { grid-template-columns: 1fr; }
   table, thead, tbody, th, td, tr { display: block; }
@@ -876,12 +900,6 @@ ul { margin: 6px 0; padding-left: 18px; }
   /* Only cells that carry a header: the sub-rows and the drill lines span the whole table
      and would otherwise be prefixed with a bare ": ". */
   td[data-h]::before { content: attr(data-h) ": "; color: var(--dim); }
-}
-/* The details list stacks in a sidebar this narrow: beside a column of labels, the sentence
-   of the state row would be left a word per line. */
-@media (max-width: 320px) {
-  .ag-details dl { grid-template-columns: 1fr; gap: 0; }
-  .ag-details dd { margin-bottom: 4px; }
 }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 /* The running glyph breathes only for a reader who has not asked for less motion; for anyone
@@ -1024,6 +1042,7 @@ function webviewWords(): Record<string, string> {
     'Not enough data for a summary yet.': t('Not enough data for a summary yet.'),
     'Open settings': t('Open settings'),
     'Output': t('Output'),
+    'Output figures in the details marked ⚠ are lower bounds.': t('Output figures in the details marked ⚠ are lower bounds.'),
     'Peak day {0}': t('Peak day {0}'),
     'Peak day {0} · {1}': t('Peak day {0} · {1}'),
     'Per req.': t('Per req.'),

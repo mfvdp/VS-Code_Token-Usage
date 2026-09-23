@@ -1321,7 +1321,6 @@ export function buildViewModel(input: VmInput): ViewModel {
     quotas: cards,
     // Range-free like the quota cards, and deliberately blind to the provider and model chips:
     // the tree is the Claude Code sessions of the last days, whatever the table below filters.
-    // The cursor keys are the transcript paths, from which a session's node key is taken.
     agents: buildAgentTree({
       agents: agg.agents(),
       launches: agg.launches(),
@@ -1330,7 +1329,6 @@ export function buildViewModel(input: VmInput): ViewModel {
       attribution: cfg.attribution,
       selected: ui.agentSelected ?? null,
       tcfg,
-      files: agg.cursors.keys(),
     }, now),
     context: contextCard(input.context, cfg, now),
     digest: [],

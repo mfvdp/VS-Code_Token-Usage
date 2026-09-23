@@ -517,20 +517,26 @@ function agentStateWord(state: NodeState): string {
  * "[~Running] Explore · claude-opus-5 · 94f3 · 12.3K · 4 min 05 s". An inferred state carries
  * the estimate mark, a recorded one does not — the same distinction the dashboard draws — and
  * a usage whose output is a lower bound carries ⚠. A session names its two figures, as its
- * dashboard row does — "12.0M own · 137.4M agents · 22 d 11 h": what its own transcript used
+ * dashboard row does — "own 12.0M · agents 137.4M · 22 d 11 h": what its own transcript used
  * and what its agents of the last seven days used, never added, then its span; a session
  * without agents has no agents figure. An attempt the workflow journal superseded (1.6 D7) —
- * a row the dashboard dims — says so at the end: "(superseded by a later attempt)".
+ * a row the dashboard dims — says so at the end: "(superseded by a later attempt)". A node
+ * with agents below it — a session, a run, an agent that launched others — carries their tally
+ * after its name, in brackets so its counts do not run into the figures (1.6 N1):
+ * "[~Running] Workflow cfe7718d (6 started · 2 ✓ · 1 ✕ · 2 ↻ · ~1 ●) · 1.2M · 4 min 10 s".
+ * The document prints every node, so an agent's tally stands beside its children's lines, as
+ * a session's and a run's do.
  */
 function agentNodeLine(n: TreeNode): string {
   const word = agentStateWord(n.state)
   const state = n.derived ? estimate(word) : word
-  const name = n.sub ? `${cell(n.label)} — ${cell(n.sub)}` : cell(n.label)
+  const tally = typeof n.tallyText === 'string' && n.tallyText !== '' ? ` (${cell(n.tallyText)})` : ''
+  const name = (n.sub ? `${cell(n.label)} — ${cell(n.sub)}` : cell(n.label)) + tally
   const mark = n.lowerBound ? ' ⚠' : ''
   if (n.kind === 'session') {
     const agents = typeof n.usageAgents === 'string' && n.usageAgents !== ''
-      ? ` · ${t('{0} agents', cell(n.usageAgents))}` : ''
-    return `[${state}] ${name} · ${t('{0} own', cell(n.usage))}${mark}${agents} · ${cell(n.duration)}`
+      ? ` · ${t('agents {0}', cell(n.usageAgents))}` : ''
+    return `[${state}] ${name} · ${t('own {0}', cell(n.usage))}${mark}${agents} · ${cell(n.duration)}`
   }
   const superseded = n.superseded === true ? ` (${t('superseded by a later attempt')})` : ''
   return `[${state}] ${name} · ${cell(n.usage)}${mark} · ${cell(n.duration)}${superseded}`

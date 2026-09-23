@@ -1438,7 +1438,7 @@ function sDrill(): string {
 // of the last seven days, the workflow runs inside them and the agents they spawned, as one
 // tree under it — collapsed, the sessions only, until the reader opens a node. Every word and
 // figure a row shows is the view model's — the label, the usage, the duration, the state and
-// the sentence that derives it, the agents a closed node holds — and so is every row of the
+// the sentence that derives it, the tally of the agents below a node — and so is every row of the
 // details panel. What is decided here is the structure, which nodes are open and which one is
 // selected, and one thing a view model cannot deliver: a clock that moves between two pushes.
 
@@ -1535,29 +1535,42 @@ function liveSince(ts: number): string {
   return '<span data-live="since" data-ts="' + esc(ts) + '">' + esc(sinceText(Date.now() - ts)) + '</span>';
 }
 
-/** How many agents a closed node holds, as the view model counted them; 0 for anything that is no count. */
-function agentCountOf(v: Payload): number {
-  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : 0;
+/**
+ * What the agents below a node came to (1.6 N1), as the view model wrote it — "427 started ·
+ * 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — for the eye, and the same in words for a screen reader, which
+ * would read the glyphs as shapes. Each part keeps together and the line wraps between them,
+ * only ever after a separator: the space in front of each dot does not break, so no line of a
+ * narrow sidebar starts with one. Nothing for a node without a tally: no count is not a count
+ * of none.
+ */
+function agentTally(n: Payload): string {
+  const shown = typeof n.tallyText === 'string' && n.tallyText !== '' ? n.tallyText : '';
+  if (!shown) return '';
+  const spoken = typeof n.tallySpoken === 'string' && n.tallySpoken !== '' ? n.tallySpoken : shown;
+  return '<span class="ag-tally"><span aria-hidden="true">'
+    + shown.split(' · ').map((p: string) => '<span class="nobr">' + esc(p) + '</span>').join('\u00a0· ')
+    + '</span><span class="sr">' + esc(spoken) + '</span></span>';
 }
 
 /**
  * A session's figures: what its own transcript used, since its first line, and — as a figure
  * of its own, never added to it — what its agents of the last seven days used; then its span
  * from the first line to the last, which says so in its title. Two figures of two different
- * spans side by side, each named, so neither reads as the other's part or as their sum. A
- * session without agents shows no agents figure at all, rather than a dash that reads as one
- * that was not counted.
+ * spans side by side, each named, so neither reads as the other's part or as their sum. The
+ * name comes first — "own 1.2M · agents 434.6K" — since a figure in front of "agents" reads as a
+ * number of agents, and the tally beside it counts agents. A session without agents shows no
+ * agents figure at all, rather than a dash that reads as one that was not counted.
  */
 function sessionFigures(n: Payload): string[] {
-  const out = [tr('{0} own', orDash(n.usage))];
-  if (typeof n.usageAgents === 'string' && n.usageAgents !== '') out.push(tr('{0} agents', orDash(n.usageAgents)));
+  const out = [tr('own {0}', orDash(n.usage))];
+  if (typeof n.usageAgents === 'string' && n.usageAgents !== '') out.push(tr('agents {0}', orDash(n.usageAgents)));
   out.push('<span title="' + tr('span from the first to the last line') + '">' + orDash(n.duration) + '</span>');
   return out;
 }
 
 /**
  * One node and, once the reader opened it, everything under it. The tree starts closed: only
- * the sessions are drawn, and a closed node says how many agents are below it. The toggle and
+ * the sessions are drawn, and each says what the agents below it came to. The toggle and
  * the row are two buttons of their own, so both are reached with the keyboard and announced as
  * what they do; a leaf has no toggle and keeps its place in the column with an empty slot. A
  * closed node's children are not written at all: which nodes are open is the reader's, kept
@@ -1591,15 +1604,17 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, dept
     ? '<button class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-label="'
       + (open ? tr('Collapse {0}', label) : tr('Expand {0}', label)) + '"></button>'
     : '<span class="ag-pad"></span>';
-  // The meta line: the project a session belongs to, when attribution names one, and — unless
-  // the node is open and shows its children — how many agents are below it, so a closed branch
-  // still says what it holds. The count is the view model's, taken on the whole tree before the
-  // MAX_NODES cut, so a node whose children the cut took all away still says what it holds: it
-  // is drawn as a leaf, since there is nothing to open, open or not in the stored state.
-  const count = kids.length && open ? 0 : agentCountOf(n.agentCount);
+  // The meta line: the project a session belongs to, when attribution names one, and the tally
+  // of the agents below the node (1.6 N1). A session's and a run's stand whether the node is
+  // open or not: what failed, was retried or is still unknown among 400 agents is not something
+  // to count off the rows. An agent's stands only while it is closed: open, its few children are
+  // on screen with their own glyphs. The tally is the view model's, taken on the whole tree
+  // before the MAX_NODES cut, so a node whose children the cut took all away still says what it
+  // holds: it is drawn as a leaf, since there is nothing to open, open or not in the stored state.
+  const tally = kind === 'agent' && kids.length && open ? '' : agentTally(n);
   const meta: string[] = [];
   if (typeof n.sub === 'string' && n.sub) meta.push(esc(n.sub));
-  if (count > 0) meta.push('<span class="nobr">' + tr('{0} agent(s)', count) + '</span>');
+  if (tally) meta.push(tally);
   // The glyph keeps its column, and the words beside it wrap within theirs: a long agent type
   // in a narrow sidebar breaks its own line rather than leaving the glyph alone on one.
   const row = '<button class="ag-row" data-act="agentSelect" data-key="' + esc(key)

@@ -628,6 +628,9 @@ const TREE_FIELDS = new Set([
   'usageAgents', 'id', 'live', 'copy',
   // 1.6 P2b: an attempt the workflow journal superseded (D7).
   'superseded',
+  // 1.6 P2c: a node's tally (N1) — the object, its seven counts ('running' is the tree's own
+  // field name too), and its two texts.
+  'tally', 'tallyText', 'tallySpoken', 'started', 'done', 'failed', 'retried', 'stopped', 'unknown',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {
@@ -657,6 +660,50 @@ test('the running list claims nothing the tree does not: running nodes only, a l
     assert.deepEqual(lines.map((l) => vm.agents.runningNow.findIndex((r) => l.startsWith(`- [~Running] ${r.label} · `))),
       vm.agents.runningNow.map((_, i) => i))
     for (const l of lines) assert.equal(/(^|\s)0(\s|$)/.test(l), false, l)
+  }
+})
+
+test('a node\'s tally counts every agent below it once, sums to its started, and marks only the inferred counts', () => {
+  // 1.6 N1, in English and in German: the tally is on a session, a run and an agent with agents
+  // below it, and nowhere else; its fields sum to `started`, which is the node's agent count;
+  // retried is exactly the superseded attempts below it; and only running and unknown — the
+  // two derived states — carry the estimate mark, on the row and in the words.
+  for (const lang of ['en', 'de']) {
+    const vm = lang === 'de' ? inGerman(() => agentsVm()) : agentsVm()
+    const nodes = treeNodes(vm.agents.roots)
+    const below = (n: TreeNode): TreeNode[] => n.children.flatMap((c) => [...(c.kind === 'agent' || c.kind === 'pending' ? [c] : []), ...below(c)])
+    for (const n of nodes) {
+      const members = below(n)
+      const want = members.length > 0 && (n.kind === 'session' || n.kind === 'workflow' || n.kind === 'agent')
+      assert.equal(n.tally !== null, want, `${lang} ${n.label}`)
+      assert.equal(n.tallyText !== null, want, `${lang} ${n.label}`)
+      assert.equal(n.tallySpoken !== null, want, `${lang} ${n.label}`)
+      if (!n.tally || n.tallyText === null || n.tallySpoken === null) continue
+      const t = n.tally
+      assert.equal(t.done + t.failed + t.retried + t.stopped + t.running + t.unknown, t.started, `${lang} ${n.label}`)
+      // Nothing is cut and no run of this world has a journal-only member: the payload holds them all.
+      assert.equal(t.started, n.agentCount, `${lang} ${n.label}`)
+      assert.equal(t.started, members.length, `${lang} ${n.label}`)
+      assert.equal(t.retried, members.filter((m) => m.superseded).length, `${lang} ${n.label}`)
+      for (const st of ['done', 'failed', 'stopped', 'running', 'unknown'] as const) {
+        assert.equal(t[st], members.filter((m) => !m.superseded && m.state === st).length, `${lang} ${n.label} ${st}`)
+      }
+      const parts = n.tallyText.split(' · ')
+      assert.equal(parts[0], lang === 'de' ? `${t.started} gestartet` : `${t.started} started`)
+      for (const p of parts.slice(1)) assert.equal(p.startsWith('~'), /[●?]$/.test(p), `${lang}: ${p}`)
+      assert.equal(parts.some((p) => /(^|\D)0 /.test(p)), false, n.tallyText)
+      const spoken = n.tallySpoken.split(', ')
+      assert.equal(spoken.length, parts.length, n.tallySpoken)
+      const about = lang === 'de' ? 'etwa ' : 'about '
+      assert.equal(spoken.filter((p) => p.startsWith(about)).length, parts.filter((p) => p.startsWith('~')).length, n.tallySpoken)
+      assert.equal(/[✓✕↻■●?~]/.test(n.tallySpoken), false, n.tallySpoken)
+    }
+    // The world holds every kind of member the tally counts, so each field was tried.
+    const session = vm.agents.roots.find((r) => r.tally !== null && r.tally.retried > 0)
+    assert.ok(session?.tally, `${lang}: no session with a retried attempt`)
+    for (const f of ['done', 'failed', 'retried', 'stopped', 'running', 'unknown'] as const) {
+      assert.ok(vm.agents.roots.some((r) => (r.tally?.[f] ?? 0) > 0), `${lang}: no session with ${f}`)
+    }
   }
 })
 

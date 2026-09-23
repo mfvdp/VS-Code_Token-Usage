@@ -742,6 +742,175 @@ test('a session with nothing but a journal-only member at work is active through
 })
 
 // ---------------------------------------------------------------------------
+// 1.6 N1 · the tally
+// ---------------------------------------------------------------------------
+
+/** One agent id per member of the tally world: `a` + 16 hex, apart in their first four. */
+const T = {
+  done: 'a1000000000000001', failed: 'a2000000000000002', retryFail: 'a3000000000000003', retry: 'a4000000000000004',
+  replaced: 'a5000000000000005', replacement: 'a6000000000000006', onlyOpen: 'a7000000000000007', onlyDone: 'a8000000000000008',
+  killed: 'a9000000000000009', silent: 'ab00000000000000b', waiting: 'ac00000000000000c',
+}
+
+/**
+ * Every state an agent below a session can be in, once: in a workflow run a completion, a
+ * final failure, a failure the journal retried and its completed retry, an attempt the journal
+ * replaced and the replacement that runs, and two agents the journal started without a counted
+ * transcript — one open (running beside the replacement), one completed; beside the run an agent
+ * the parent recorded as killed, one gone silent, and one that waits on the launch it made a
+ * minute ago, whose transcript has not appeared yet.
+ */
+function tallyWorld(): Partial<AgentTreeInput> {
+  return {
+    agents: [
+      silentWf(T.done), silentWf(T.failed), silentWf(T.retryFail), silentWf(T.retry), silentWf(T.replaced),
+      wfRec(T.replacement, { lastTs: NOW - MIN }),
+      rec(T.killed, { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 20 * MIN, lastTs: NOW - 20 * MIN }),
+      rec(T.silent, { firstTs: NOW - 40 * MIN, lastTs: NOW - 30 * MIN }),
+      rec(T.waiting, { firstTs: NOW - 40 * MIN, lastTs: NOW - 30 * MIN }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, file: agentFile(T.waiting), ts: NOW - MIN })],
+    runs: [run([
+      jagent(T.done, { step: 1, outcome: 'completed' }),
+      jagent(T.failed, { step: 2, outcome: 'failed' }),
+      jagent(T.retryFail, { step: 3, outcome: 'failed', supersededBy: T.retry }),
+      jagent(T.retry, { step: 3, attempt: 2, outcome: 'completed' }),
+      jagent(T.replaced, { step: 4, outcome: 'stopped', supersededBy: T.replacement }),
+      jagent(T.replacement, { step: 4, attempt: 2 }),
+      jagent(T.onlyOpen, { step: 5 }),
+      jagent(T.onlyDone, { step: 6, outcome: 'completed' }),
+    ])],
+  }
+}
+
+test('a tally counts every attempt below a node once, under the state its row shows — a superseded one as retried', () => {
+  const vm = build(tallyWorld())
+  const root = node(vm, rootKey)
+  // Twelve members: nine records, the launch, and the run's two journal-only agents.
+  assert.deepEqual(root.tally, { started: 12, done: 3, failed: 1, retried: 2, stopped: 1, running: 4, unknown: 1 })
+  assert.equal(root.tallyText, '12 started · 3 ✓ · 1 ✕ · 2 ↻ · 1 ■ · ~4 ● · ~1 ?')
+  assert.equal(root.tallySpoken, '12 started, 3 done, 1 failed, 2 retried, 1 stopped, about 4 running, about 1 unknown')
+  // The run: its six records and its two journal-only members; the retried failure and the
+  // replaced attempt are retried, not failed and not stopped; the open journal-only member runs
+  // beside the replacement.
+  const w = node(vm, wfKey)
+  assert.deepEqual(w.tally, { started: 8, done: 3, failed: 1, retried: 2, stopped: 0, running: 2, unknown: 0 })
+  assert.equal(w.tallyText, '8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●')
+  assert.equal(w.tallySpoken, '8 started, 3 done, 1 failed, 2 retried, about 2 running')
+  // An agent with an agent below it counts that one — its launch — and never itself.
+  const waiting = node(vm, agentKey(T.waiting))
+  assert.deepEqual([waiting.state, waiting.tally], ['running', { started: 1, done: 0, failed: 0, retried: 0, stopped: 0, running: 1, unknown: 0 }])
+  assert.equal(waiting.tallyText, '1 started · ~1 ●')
+  assert.equal(waiting.tallySpoken, '1 started, about 1 running')
+  // Every node without an agent below it has no tally at all: no "0 started" claimed anywhere.
+  for (const n of all(vm.roots)) {
+    const has = n.key === rootKey || n.key === wfKey || n.key === waiting.key
+    assert.equal(n.tally !== null, has, n.key)
+    assert.equal(n.tallyText !== null, has, n.key)
+    assert.equal(n.tallySpoken !== null, has, n.key)
+    if (n.tally) {
+      const t = n.tally
+      assert.equal(t.done + t.failed + t.retried + t.stopped + t.running + t.unknown, t.started, n.key)
+      assert.equal(t.started, n.agentCount, n.key)
+    }
+  }
+  assert.deepEqual([build().roots[0].tally, build().roots[0].tallyText, build().roots[0].tallySpoken], [null, null, null],
+    'a session without agents')
+  // The run's Agents row says the tally's started, journal-only members included.
+  assert.equal(agentDetails(input(tallyWorld()), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value, '8')
+})
+
+test('a tally names only the states it has, and only the inferred ones carry the estimate mark', () => {
+  // All done: the started agents and the one state, nothing else.
+  const done: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1), silentWf(J2)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2, outcome: 'completed' })])],
+  }
+  assert.equal(node(build(done), wfKey).tallyText, '2 started · 2 ✓')
+  assert.equal(node(build(done), wfKey).tallySpoken, '2 started, 2 done')
+  // Unknown alone: the estimate mark, and "about" in words.
+  const quiet: Partial<AgentTreeInput> = { agents: [rec(J1, { firstTs: NOW - 40 * MIN, lastTs: NOW - 30 * MIN })] }
+  assert.equal(build(quiet).roots[0].tallyText, '1 started · ~1 ?')
+  assert.equal(build(quiet).roots[0].tallySpoken, '1 started, about 1 unknown')
+  // A stop nothing replaced is stopped, recorded: no mark.
+  const stopped: Partial<AgentTreeInput> = { agents: [rec(J1, { outcome: 'stopped', outcomeStatus: 'cancelled', outcomeTs: NOW - 20 * MIN, lastTs: NOW - 20 * MIN })] }
+  assert.equal(build(stopped).roots[0].tallyText, '1 started · 1 ■')
+  // The mark is on running and unknown only, on every node of the tally world.
+  for (const n of all(build(tallyWorld()).roots)) {
+    if (n.tallyText === null) continue
+    for (const part of n.tallyText.split(' · ').slice(1)) assert.equal(part.startsWith('~'), /[●?]$/.test(part), part)
+    assert.equal(/\b0 /.test(n.tallyText), false, n.tallyText)
+  }
+})
+
+test('a run\'s state is the one function of its tally, so its row and its tally never disagree', () => {
+  // Runs of every make-up, drawn by a fixed-seed generator: records and journal-only members,
+  // open or ended by the journal or stopped by the parent, superseded or not, fresh or silent.
+  // Whatever the members, the
+  // run's state is §3.0 (a) read off its tally — running, then unknown, then done, failed,
+  // stopped — and the tally holds every member once.
+  let seed = 7
+  const rand = (): number => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648
+    return seed / 2_147_483_648
+  }
+  const pick = <V>(xs: readonly V[]): V => xs[Math.floor(rand() * xs.length)]
+  const ruled = new Set<string>()
+  for (let i = 0; i < 300; i++) {
+    const size = 1 + Math.floor(rand() * 6)
+    const ids = Array.from({ length: size }, (_, k) => `a${String(i).padStart(4, '0')}${String(k).padStart(12, '0')}`)
+    const journal: JournalAgent[] = []
+    const agents: AgentRec[] = []
+    ids.forEach((id, k) => {
+      const next = k + 1 < size && rand() < 0.35 ? ids[k + 1] : null
+      const outcome = next !== null ? pick(['failed', 'stopped', 'completed'] as const) : pick([null, null, 'completed', 'failed'] as const)
+      journal.push(jagent(id, { step: next !== null || (k > 0 && journal[k - 1].supersededBy === id) ? 1 : k + 2, outcome, supersededBy: next }))
+      if (rand() < 0.6) {
+        const r = rand()
+        agents.push(wfRec(id, r < 0.2
+          // A stop the parent recorded, which beats whatever the journal says of the agent.
+          ? { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 20 * MIN, firstTs: NOW - 40 * MIN, lastTs: NOW - 20 * MIN }
+          : r < 0.45 ? { lastTs: NOW - MIN } : { firstTs: NOW - 40 * MIN, lastTs: NOW - 30 * MIN }))
+      }
+    })
+    const vm = build({ agents, runs: [run(journal, { lastTs: rand() < 0.2 ? NOW - 2 * MIN : NOW - 30 * MIN })] })
+    const w = node(vm, wfKey)
+    const t = w.tally
+    assert.ok(t, `run ${i}`)
+    assert.equal(t.started, size, `run ${i}`)
+    assert.equal(t.retried, journal.filter((j) => j.supersededBy !== null).length, `run ${i}`)
+    const want = t.running > 0 ? 'running' : t.unknown > 0 ? 'unknown' : t.done > 0 ? 'done' : t.failed > 0 ? 'failed' : 'stopped'
+    assert.equal(w.state, want, `run ${i}: ${w.tallyText}`)
+    ruled.add(want)
+  }
+  assert.deepEqual([...ruled].sort(), ['done', 'failed', 'running', 'stopped', 'unknown'], 'every rule was reached')
+})
+
+test('a tally is taken on the whole tree — the cut takes rows, not agents — in the reader\'s digits', () => {
+  const many = Array.from({ length: 400 }, (_, i) => rec(`c${String(i).padStart(7, '0')}`, {
+    firstTs: NOW - 5 * HOUR + i * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
+  }))
+  const cut = build({ agents: many })
+  assert.equal(cut.truncated, true)
+  assert.deepEqual(cut.roots[0].tally, { started: 400, done: 400, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0 })
+  // Twelve hundred agents of a run's journal, none of them a row: grouped as the page groups figures.
+  const big: Partial<AgentTreeInput> = {
+    runs: [run(Array.from({ length: 1200 }, (_, i) => jagent(`a${String(i).padStart(16, '0')}`, { step: i + 1, outcome: 'completed' })))],
+  }
+  assert.equal(node(build(big), wfKey).tallyText, '1,200 started · 1,200 ✓')
+  assert.equal(german(() => node(build(big), wfKey).tallyText), '1.200 gestartet · 1.200 ✓')
+})
+
+test('the tally speaks German, and its glyphs are the same in every language', () => {
+  const vm = german(() => build(tallyWorld()))
+  const root = node(vm, rootKey)
+  assert.equal(root.tallyText, '12 gestartet · 3 ✓ · 1 ✕ · 2 ↻ · 1 ■ · ~4 ● · ~1 ?')
+  assert.equal(root.tallySpoken,
+    '12 gestartet, 3 fertig, 1 fehlgeschlagen, 2 wiederholt, 1 gestoppt, etwa 4 laufend, etwa 1 unbekannt')
+  assert.equal(node(vm, agentKey(T.waiting)).tallySpoken, '1 gestartet, etwa 1 laufend')
+})
+
+// ---------------------------------------------------------------------------
 // §4.5 · roots
 // ---------------------------------------------------------------------------
 

@@ -310,8 +310,11 @@ test('every German entry keeps the placeholders of its key, is German, and ends 
 test('the words 1.6 retired are in no bundle and no source any more', () => {
   // D9: the agent report is Claude Code's, not the parent's, and it is the context of the last
   // request — "Parent's report" and its "tokens" figure said otherwise. R4: the German manifest
-  // says „Tool-Aufrufe", as the runtime bundle always did.
-  const retired = ["Parent's report", "the parent's own count, not added to any total", '{0} tokens · {1} · {2} tool calls']
+  // says „Tool-Aufrufe", as the runtime bundle always did. N1: a node's tally replaces the bare
+  // count of its agents. D5 (lead note, §7c): a session's figures are named first — "own 1.2M",
+  // "agents 434.6K" — since a figure in front of "agents" reads as a number of agents.
+  const retired = ["Parent's report", "the parent's own count, not added to any total", '{0} tokens · {1} · {2} tool calls',
+    '{0} agent(s)', '{0} own', '{0} agents']
   const bundle = readJson(BUNDLE) as Record<string, string>
   const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts']
     .map((f) => readFileSync(join(ROOT, f), 'utf8'))

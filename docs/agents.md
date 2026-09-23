@@ -67,12 +67,11 @@ id (`Session 9d0eb37a`), and with its project beside it while `tokenPace.attribu
 `showProjectNames: hash`. With `attribution: none` no project is named anywhere in the tree.
 
 **Closed by default.** Only the sessions show until you open one; an opened node shows its
-children closed in turn. A closed node says how many agents are below it — `4 agent(s)` beside
-its name, counting every agent and launch at any depth under it, on the whole tree, also those
-the tree had to cut and the agents a workflow run's journal started whose transcript was never
-counted (see [States](#states)) — and says nothing once it is open. A node whose agents the tree
-had to cut all away, or a run whose agents no transcript shows, has nothing to open: it has no
-toggle, and its count still says what is below it. What you open stays open (see
+children closed in turn. Each session says beside its name what its agents came to — its
+[tally](#the-tally), `12 started · 3 ✓ · 1 ✕ · 2 ↻ · 1 ■ · ~4 ● · ~1 ?` — so a closed session
+already tells a run that went well from one that did not. A node whose agents the tree had to cut
+all away, or a run whose agents no transcript shows, has nothing to open: it has no toggle, and
+its tally still says what is below it. What you open stays open (see
 [Opening and selection](#opening-and-selection)).
 
 **Below a session** come its workflow runs (`Workflow cfe7718d`) and its agents, each agent
@@ -88,7 +87,7 @@ before any of them keeps its deepest.
 
 **Each row** is the state glyph, the name, the usage — fresh input + cache write + output, the
 definition the tables use — and the duration from the first line to the last. A **session's** row
-names its two figures — `12.0M own · 137.4M agents · 22 d 11 h`: what its own transcript used,
+names its two figures — `own 12.0M · agents 137.4M · 22 d 11 h`: what its own transcript used,
 counted from its first line, and what its agents of the last seven days used. The two are never
 added: they cover different spans, a session's own transcript often weeks, its agents the seven
 days the tree keeps. A session without agents shows no agents figure. The last figure is the
@@ -110,6 +109,38 @@ every one of them carries, is left off. Four characters keep nearly every agent 
 agents of a session share them, both names carry as many as it takes — measured over a week on one
 machine, 917 of 925 agents needed four and 8 needed five. The whole id is in the details. An
 agent's usage is part of the figures the totals already contain: the tree adds nothing to any sum.
+
+### The tally
+
+A session, a workflow run and an agent that launched agents of its own carry the **tally** of
+every agent below them — at any depth, on the whole tree, also the ones the tree had to cut and
+the agents a workflow run's journal started whose transcript was never counted (see
+[States](#states)) — and every launch whose transcript has not appeared yet:
+
+| Part | Counts |
+|---|---|
+| `12 started` | every agent and launch below the node, each attempt once — the only total |
+| `3 ✓` | done |
+| `1 ✕` | failed, and not retried: a final failure |
+| `2 ↻` | retried: every attempt the workflow journal started its step again after, whatever its own state — a failure that was retried, an attempt that was replaced, a completed step that was run again |
+| `1 ■` | stopped, and not replaced: a stop nothing followed |
+| `~4 ●` | running |
+| `~1 ?` | unknown |
+
+Every agent counts once and in exactly one part, so the parts after `started` add up to it, and a
+part with no agent in it is left out. Running and unknown are inferred, so their counts carry the
+`~` every estimate on the page carries; done, failed, retried and stopped are what was recorded.
+There is no "x of y": `started` is the one total. A screen reader gets the same in words —
+*12 started, 3 done, 1 failed, 2 retried, 1 stopped, about 4 running, about 1 unknown* — in place
+of the glyphs.
+
+A session's and a run's tally stand beside the name whether the node is open or closed: what
+failed, was retried or is still unknown among a few hundred agents is not something to count off
+the rows. An agent's stands only while it is closed; open, its children are on screen with their
+own glyphs. A node with no agent below it — a session that started none, an agent that launched
+none, a launch — has no tally, rather than a `0 started`. The markdown report prints a node's
+tally after its name in brackets, on every node that has one:
+`[~Running] Workflow cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s`.
 
 ## States
 
@@ -146,7 +177,8 @@ again, the attempt before it is superseded: a failed one was retried
 agent recorded a result.*) — and a completed one was run again. The sentence names the next
 attempt by its short id. A superseded attempt keeps its own glyph and state; its row is dimmed,
 its glyph's title adds `superseded by a later attempt`, and its markdown line ends on
-`(superseded by a later attempt)`. The details of an agent whose step was started more than once
+`(superseded by a later attempt)`; the [tally](#the-tally) counts it under `↻`, not under its
+own state. The details of an agent whose step was started more than once
 say which attempt it was — `Attempt`: `1 of 2 of this step`. What the parent recorded comes first:
 a result the parent recorded for an agent beats the journal's; the journal's ends carry no time
 and are never outlived.
@@ -156,9 +188,12 @@ its journal started whose transcript was never counted — and a superseded atte
 whatever its own state: it was retried. The run is running while a member runs; unknown while a
 member has neither a recorded end nor runs; and once every member is closed, done when one of
 them completed — one failure among completed agents does not fail a run —, failed when none
-completed and one failed, and stopped when the last attempt of every step was stopped. An agent
+completed and one failed, and stopped when the last attempt of every step was stopped. That is
+the run's [tally](#the-tally) read in one order — a `~●` makes it running, else a `~?` unknown,
+else a `✓` done, else a `✕` failed, else stopped — so a run's glyph and its tally never disagree,
+and a done run may still show `1 ✕` beside it. An agent
 the journal started without a counted transcript has no row of its own: it counts in its run's
-state, in the count of every node above it and in the run's `Agents` row, and it is running while
+state, in the tally of every node above it and in the run's `Agents` row, and it is running while
 the journal changed within the last ten minutes or another member of the run runs, unknown after
 that, unless the journal recorded its end. A run keeps at most **5000** agents of its journal;
 further starts are counted, not listed, and its details say so (`12 further agents not listed`).

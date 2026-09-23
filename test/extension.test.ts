@@ -1223,7 +1223,8 @@ test('the poll is wanted while an agent runs or a session is active, and never f
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
-    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, superseded: false, children: [], ...over,
+    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, tally: null, tallyText: null, tallySpoken: null,
+    superseded: false, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
   const waiting = node({ key: 'l:toolu_x', kind: 'pending', state: 'unknown', derived: true })

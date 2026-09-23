@@ -2994,9 +2994,48 @@ function treeNode(key: string, state: string, over: Record<string, unknown> = {}
   return {
     key, kind: 'agent', label: 'Explore · Opus 5 · a94f', sub: null, state,
     derived: state !== 'done' && state !== 'failed', usage: '12.3K', lowerBound: false,
-    duration: '40.0 s', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, agentCount: 0, children: [], ...over,
+    duration: '40.0 s', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, agentCount: 0,
+    tally: null, tallyText: null, tallySpoken: null, children: [], ...over,
   }
 }
+
+/**
+ * A node's tally (1.6 N1) as the tree builder writes it: the counts, the row's text with the
+ * glyphs, and the same in words — started first, then each state with at least one agent.
+ */
+function tallyOf(n: { done?: number; failed?: number; retried?: number; stopped?: number; running?: number; unknown?: number }): Record<string, unknown> {
+  const c = { done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0, ...n }
+  const started = c.done + c.failed + c.retried + c.stopped + c.running + c.unknown
+  const glyphs: Array<[number, string, string]> = [
+    [c.done, `${c.done} ✓`, `${c.done} done`], [c.failed, `${c.failed} ✕`, `${c.failed} failed`],
+    [c.retried, `${c.retried} ↻`, `${c.retried} retried`], [c.stopped, `${c.stopped} ■`, `${c.stopped} stopped`],
+    [c.running, `~${c.running} ●`, `about ${c.running} running`], [c.unknown, `~${c.unknown} ?`, `about ${c.unknown} unknown`],
+  ]
+  const on = glyphs.filter(([k]) => k > 0)
+  return {
+    agentCount: started,
+    tally: { started, ...c },
+    tallyText: [`${started} started`, ...on.map((g) => g[1])].join(' · '),
+    tallySpoken: [`${started} started`, ...on.map((g) => g[2])].join(', '),
+  }
+}
+
+/**
+ * The markup the page writes for a tally: its parts for the eye, unbreakable each, the space in
+ * front of each separator a no-break space — a line breaks after a dot, never before one — and
+ * its words for the ear.
+ */
+function tallyHtml(text: string, spoken: string): string {
+  return '<span class="ag-tally"><span aria-hidden="true">'
+    + text.split(' · ').map((p) => '<span class="nobr">' + p + '</span>').join('\u00a0· ')
+    + '</span><span class="sr">' + spoken + '</span></span>'
+}
+
+/** The session's, the run's and the failed agent's tallies of agentTree() below. */
+const T_S1 = tallyOf({ done: 1, failed: 1, running: 1, unknown: 1 })
+const T_WF = tallyOf({ done: 1, running: 1 })
+const T_A3 = tallyOf({ unknown: 1 })
+const tallyMarkup = (t: Record<string, unknown>): string => tallyHtml(String(t.tallyText), String(t.tallySpoken))
 
 /** One RunningItem of src/agentTree.ts: the running agent of the tree below, where it sits. */
 function runningItem(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -3009,25 +3048,26 @@ function runningItem(over: Record<string, unknown> = {}): Record<string, unknown
 /**
  * An AgentTreeVm with every state a node can be in, seven nodes: an active session holding a
  * running workflow run (one agent running, one done) and a failed agent whose own launch has
- * no transcript yet, and an idle session. Every parent counts the agents below it, and the
- * running agent is the one item of the running list, as the builder would make them.
+ * no transcript yet, and an idle session. Every parent counts the agents below it and carries
+ * their tally, the idle session with none has neither, and the running agent is the one item
+ * of the running list, as the builder would make them.
  */
 function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     roots: [
       treeNode(AK.s1, 'active', {
         kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min',
-        agentCount: 4,
+        ...T_S1,
         children: [
           treeNode(AK.wf, 'running', {
-            kind: 'workflow', label: 'Workflow cfe7718d', usage: '410K', agentCount: 2,
+            kind: 'workflow', label: 'Workflow cfe7718d', usage: '410K', ...T_WF,
             children: [
               treeNode(AK.a1, 'running'),
               treeNode(AK.a2, 'done', { label: 'Plan · Opus 5 · b1c2', lowerBound: true }),
             ],
           }),
           treeNode(AK.a3, 'failed', {
-            label: 'general-purpose · Sonnet 5 · c3d4', agentCount: 1,
+            label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3,
             children: [
               treeNode(AK.l1, 'unknown', {
                 kind: 'pending', label: 'Explore · – · launched', usage: '–', duration: '–',
@@ -3276,14 +3316,16 @@ test('a row carries the usage and duration it was given and, only while it runs,
   // Absence is a dash, never a zero: the quiet session. A launch nobody has counted yet shows
   // no figures at all — here it is not running, so not even a clock.
   assert.ok(h.indexOf(lbl('Explore', '–', 'launched') + '</span></button>') >= 0, h)
-  // A session's figures name what they are (D5): its own transcript's usage, its agents' —
-  // never added to it, and not shown for a session without agents — and its span, whose title
-  // says so.
+  // A session's figures name what they are (D5), the name first — a figure in front of
+  // "agents" would read as a number of agents, beside a tally that counts them: its own
+  // transcript's usage, its agents' — never added to it, and not shown for a session without
+  // agents — and its span, whose title says so.
   const span = (v: string): string => '<span title="span from the first to the last line">' + v + '</span>'
-  assert.ok(h.indexOf(lbl('Session 1234abcd') + figs('– own', span('–'))) >= 0, h)
-  // The project a session belongs to, when attribution names one, beside its name.
-  assert.ok(h.indexOf(lbl('Session 9d0eb37a') + '<span class="meta">repo</span>'
-    + figs('1.2M own', '434.6K agents', span('1 h 05 min'))) >= 0, h)
+  assert.ok(h.indexOf(lbl('Session 1234abcd') + figs('own –', span('–'))) >= 0, h)
+  // The project a session belongs to, when attribution names one, beside its name, then the
+  // tally of its agents (1.6 N1), which an opened session keeps.
+  assert.ok(h.indexOf(lbl('Session 9d0eb37a') + '<span class="meta">repo · ' + tallyMarkup(T_S1) + '</span>'
+    + figs('own 1.2M', 'agents 434.6K', span('1 h 05 min'))) >= 0, h)
   // The sum of the two is no figure of the page.
   assert.equal(h.indexOf('1.6M'), -1, h)
   // A launch whose transcript has not been seen yet reads as the hint it is.
@@ -3303,7 +3345,7 @@ test('a row carries the usage and duration it was given and, only while it runs,
   assert.equal(/undefined|NaN|null|\[object Object\]/.test(h + nostart + bare), false)
 })
 
-test('by default the tree is closed: only the sessions, each parent collapsed and saying how many agents it holds', () => {
+test('by default the tree is closed: only the sessions, each parent collapsed and saying what its agents came to', () => {
   const a = agentCtx()
   const h = treePart(agentsHtml(a))
   // The two sessions and nothing under them: no run, no agent, no launch is written.
@@ -3311,37 +3353,46 @@ test('by default the tree is closed: only the sessions, each parent collapsed an
   for (const k of [AK.wf, AK.a1, AK.a2, AK.a3, AK.l1]) assert.equal(h.indexOf('data-key="' + k + '"'), -1, k)
   assert.equal(h.indexOf('<ul role="group">'), -1, h)
   // The session with children is collapsed, its toggle says it opens it, and its meta line says
-  // what it holds beside the project; the session with none is a leaf, and counts nothing.
+  // beside the project what its agents came to (1.6 N1) — the glyphs for the eye, each part
+  // unbreakable, and the same in words for a screen reader, which would read the glyphs as
+  // shapes; the session with none is a leaf, and has no tally at all rather than "0 started".
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
     + '" aria-label="Expand Session 9d0eb37a"></button>') >= 0, h)
   assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
-    + '<span class="meta">repo · <span class="nobr">4 agent(s)</span></span>') >= 0, h)
+    + '<span class="meta">repo · <span class="ag-tally"><span aria-hidden="true"><span class="nobr">4 started</span>\u00a0· '
+    + '<span class="nobr">1 ✓</span>\u00a0· <span class="nobr">1 ✕</span>\u00a0· <span class="nobr">~1 ●</span>\u00a0· <span class="nobr">~1 ?</span>'
+    + '</span><span class="sr">4 started, 1 done, 1 failed, about 1 running, about 1 unknown</span></span></span>') >= 0, h)
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-selected="false"><div class="ag-line">'
     + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.s2 + '"') >= 0, h)
-  assert.equal(h.split('agent(s)').length - 1, 1, h)
+  assert.equal(h.split('class="ag-tally"').length - 1, 1, h)
+  assert.equal(/started|agent\(s\)/.test(h.slice(h.indexOf('data-key="' + AK.s2 + '"'))), false, h)
   assert.equal(h.indexOf('aria-expanded="true"'), -1, h)
+  // The screen reader's words are out of sight and still read: the page's visually hidden rule.
+  assert.match(STYLE, /\.sr \{ position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;\s+overflow: hidden; clip-path: inset\(50%\); white-space: nowrap; \}/)
 })
 
-test('an opened node shows its children closed in turn, each counting its own; an opened one counts nothing', () => {
+test('an opened node shows its children closed in turn, each with its tally; a session and a run keep theirs open, an agent drops its own', () => {
   const a = agentCtx()
   // The reader opened the busy session: its run and its failed agent show, closed.
   const one = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1] }) }))
   assert.ok(one.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="true" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
     + '" aria-label="Collapse Session 9d0eb37a"></button>') >= 0, one)
-  // Opened, the session names its project and no count: its agents are on screen now.
-  assert.ok(one.indexOf('<span class="nobr">Session 9d0eb37a</span></span><span class="meta">repo</span>') >= 0, one)
+  // Opened, the session still names its project and its tally (1.6 N1): what failed or is still
+  // unknown among its agents is not something to count off the rows once they show.
+  assert.ok(one.indexOf('<span class="nobr">Session 9d0eb37a</span></span><span class="meta">repo · ' + tallyMarkup(T_S1) + '</span>') >= 0, one)
   assert.ok(one.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
     + '" aria-label="Expand Workflow cfe7718d"></button>') >= 0, one)
-  assert.ok(one.indexOf('<span class="nobr">Workflow cfe7718d</span></span><span class="meta"><span class="nobr">2 agent(s)</span></span>') >= 0, one)
-  assert.ok(one.indexOf('<span class="nobr">c3d4</span></span><span class="meta"><span class="nobr">1 agent(s)</span></span>') >= 0, one)
+  assert.ok(one.indexOf('<span class="nobr">Workflow cfe7718d</span></span><span class="meta">' + tallyMarkup(T_WF) + '</span>') >= 0, one)
+  assert.ok(one.indexOf('<span class="nobr">c3d4</span></span><span class="meta">' + tallyMarkup(T_A3) + '</span>') >= 0, one)
   // The children of the closed ones are not written at all.
   for (const k of [AK.a1, AK.a2, AK.l1]) assert.equal(one.indexOf('data-key="' + k + '"'), -1, k)
   assert.equal(one.split('<ul role="group">').length - 1, 1, one)
 
-  // Everything opened: three groups, every parent says it is open, and no row counts.
+  // Everything opened: three groups, every parent says it is open; the session and the run keep
+  // their tallies, the opened agent shows its child's glyph instead of its own tally.
   const open = treePart(agentsHtml(a, { ui: openUi() }))
   assert.ok(open.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="true" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
@@ -3352,16 +3403,36 @@ test('an opened node shows its children closed in turn, each counting its own; a
   assert.equal(open.split('aria-expanded="true"').length - 1, 3, open)
   assert.equal(open.indexOf('aria-expanded="false"'), -1, open)
   assert.equal(open.split('<ul role="group">').length - 1, 3, open)
+  assert.ok(open.indexOf('<span class="meta">repo · ' + tallyMarkup(T_S1) + '</span>') >= 0, open)
+  assert.ok(open.indexOf('<span class="nobr">Workflow cfe7718d</span></span><span class="meta">' + tallyMarkup(T_WF) + '</span>') >= 0, open)
+  assert.ok(open.indexOf('<span class="nobr">c3d4</span></span><span class="ag-fig">') >= 0, open)
+  assert.equal(open.split('class="ag-tally"').length - 1, 2, open)
   assert.equal(open.indexOf('agent(s)'), -1, open)
 
   // Opening a node below a closed one shows nothing of it: the session decides first.
   const deep = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.wf] }) }))
   for (const k of [AK.wf, AK.a1, AK.a2]) assert.equal(deep.indexOf('data-key="' + k + '"'), -1, k)
-  // A count the view model did not give — none, zero, nonsense — prints nothing, never a 0.
-  for (const agentCount of [undefined, 0, -3, 2.5, '7', null]) {
-    const odd = agentTree({ roots: [treeNode(AK.s1, 'active', { kind: 'session', label: 'Session 9d0eb37a', agentCount, children: [treeNode(AK.a1, 'running')] })] })
-    assert.equal(treePart(agentsHtml(a, { agents: odd })).indexOf('agent(s)'), -1, String(agentCount))
+  // A tally the view model did not give — none, empty, nonsense — prints nothing, never a 0; the
+  // count alone is no tally. Words missing, the glyphs are read out rather than nothing.
+  for (const tallyText of [undefined, '', 7, null, {}, ['4 started']]) {
+    const odd = agentTree({ roots: [treeNode(AK.s1, 'active', {
+      kind: 'session', label: 'Session 9d0eb37a', agentCount: 4, tallyText, tallySpoken: '4 started', children: [treeNode(AK.a1, 'running')],
+    })] })
+    const oh = treePart(agentsHtml(a, { agents: odd }))
+    assert.equal(oh.indexOf('ag-tally'), -1, String(tallyText))
+    assert.equal(/started|agent\(s\)|>0</.test(oh), false, oh)
   }
+  const mute = agentTree({ roots: [treeNode(AK.s1, 'active', {
+    kind: 'session', label: 'Session 9d0eb37a', tallyText: '2 started · 2 ✓', tallySpoken: null, children: [treeNode(AK.a1, 'running')],
+  })] })
+  assert.ok(treePart(agentsHtml(a, { agents: mute })).indexOf(tallyHtml('2 started · 2 ✓', '2 started · 2 ✓')) >= 0)
+  // The tally is the view model's text, and like every text of it, it is escaped.
+  const hostile = agentTree({ roots: [treeNode(AK.s1, 'active', {
+    kind: 'session', label: 'Session 9d0eb37a', tallyText: '<b>1</b> started', tallySpoken: '"1" <started>', children: [treeNode(AK.a1, 'running')],
+  })] })
+  const hh = treePart(agentsHtml(a, { agents: hostile }))
+  assert.ok(hh.indexOf('<span class="nobr">&lt;b&gt;1&lt;/b&gt; started</span>') >= 0, hh)
+  assert.ok(hh.indexOf('<span class="sr">&quot;1&quot; &lt;started&gt;</span>') >= 0, hh)
   // The twisty is drawn, not typed, and turns with the attribute.
   assert.match(STYLE, /\.ag-fold::before \{ content: "▾";/)
   assert.match(STYLE, /\[aria-expanded="false"\] > \.ag-line > \.ag-fold::before \{ content: "▸"; \}/)
@@ -3581,14 +3652,15 @@ test('the ⚠ line counts the running list: with every node closed a running row
   assert.equal(agentsHtml(a, { agents: older }).indexOf(legend), -1)
 })
 
-test('a node whose agents the tree had to cut all away has nothing to open and still says how many', () => {
-  // The MAX_NODES cut can take every child of a node while its count, taken before the cut,
-  // still has them. The node is drawn as a leaf — there is nothing to open — and its count says
+test('a node whose agents the tree had to cut all away has nothing to open and still says what they came to', () => {
+  // The MAX_NODES cut can take every child of a node while its tally, taken before the cut,
+  // still has them. The node is drawn as a leaf — there is nothing to open — and its tally says
   // what is below it, opened by the reader earlier or not.
   const a = agentCtx()
+  const three = tallyOf({ done: 2, stopped: 1 })
   const cut = agentTree({
     truncated: true,
-    roots: [treeNode(AK.s1, 'active', { kind: 'session', label: 'Session 9d0eb37a', agentCount: 3, children: [] })],
+    roots: [treeNode(AK.s1, 'active', { kind: 'session', label: 'Session 9d0eb37a', ...three, children: [] })],
   })
   for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.s1] })]) {
     const h = treePart(agentsHtml(a, { agents: cut, ui }))
@@ -3597,11 +3669,19 @@ test('a node whose agents the tree had to cut all away has nothing to open and s
     assert.ok(h.indexOf('<div class="ag-line"><span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="'
       + AK.s1 + '"') >= 0, h)
     assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
-      + '<span class="meta"><span class="nobr">3 agent(s)</span></span>') >= 0, h)
+      + '<span class="meta">' + tallyHtml('3 started · 2 ✓ · 1 ■', '3 started, 2 done, 1 stopped') + '</span>') >= 0, h)
   }
-  // A node with its children on the payload still counts only while it is closed.
-  const open = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1] }) }))
-  assert.equal(open.indexOf('4 agent(s)'), -1, open)
+  // An agent whose children were all cut is a leaf too, and its tally stands whatever is stored;
+  // with its children on the payload it stands only while the agent is closed.
+  const leaf = agentTree({ truncated: true, roots: [treeNode(AK.a3, 'failed', { label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3 })] })
+  for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.a3] })]) {
+    assert.ok(treePart(agentsHtml(a, { agents: leaf, ui })).indexOf(tallyMarkup(T_A3)) >= 0)
+  }
+  const withChild = agentTree({ roots: [treeNode(AK.a3, 'failed', {
+    label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3, children: [treeNode(AK.l1, 'unknown', { kind: 'pending' })],
+  })] })
+  assert.ok(treePart(agentsHtml(a, { agents: withChild })).indexOf(tallyMarkup(T_A3)) >= 0)
+  assert.equal(treePart(agentsHtml(a, { agents: withChild, ui: agentUi({ agentsExpanded: [AK.a3] }) })).indexOf('ag-tally'), -1)
 })
 
 test('an empty tree says so, and a cut tree says what it left out', () => {
@@ -3869,8 +3949,8 @@ test('the agent tree speaks German on a German page', () => {
     '{0} · derived', '{0} · recorded', 'running for {0}', '{0} ago', 'State', 'Last activity', 'Details',
     'Collapse {0}', 'Expand {0}', 'Tree cut at {0} nodes.', '{0} older session(s) not shown.',
     'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.',
-    // 1.5.1: the running list and what a closed node holds.
-    'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent', '{0} agent(s)']
+    // 1.5.1: the running list.
+    'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -3908,9 +3988,16 @@ test('the agent tree speaks German on a German page', () => {
   // 1.6 D7: a stop, recorded — „gestoppt · aufgezeichnet".
   assert.ok(section({ agents: agentTree({ roots: [treeNode(AK.a3, 'stopped', { derived: false })] }) })
     .indexOf('title="gestoppt · aufgezeichnet"') >= 0)
-  // The tree's default: the closed session counts its agents in German.
-  const closed = section({})
-  assert.ok(closed.indexOf('<span class="meta">repo · <span class="nobr">4 Agent(en)</span></span>') >= 0, closed)
+  // The tree's default: the closed session's tally, in the words the view model wrote — German
+  // when it was built in German (1.6 N1); the page translates nothing of it.
+  const closed = section({ agents: agentTree({ roots: [treeNode(AK.s1, 'active', {
+    kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', duration: '1 h 05 min', agentCount: 4,
+    tally: { started: 4, done: 3, failed: 0, retried: 0, stopped: 0, running: 1, unknown: 0 },
+    tallyText: '4 gestartet · 3 ✓ · ~1 ●', tallySpoken: '4 gestartet, 3 fertig, etwa 1 laufend',
+    children: [treeNode(AK.a1, 'running')],
+  })] }) })
+  assert.ok(closed.indexOf('<span class="meta">repo · ' + tallyHtml('4 gestartet · 3 ✓ · ~1 ●', '4 gestartet, 3 fertig, etwa 1 laufend')
+    + '</span>') >= 0, closed)
   // The toggle's words are the page's; the node's name is the view model's (English here).
   assert.ok(closed.indexOf('aria-label="Session 9d0eb37a ausklappen"') >= 0, closed)
   assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
@@ -3943,10 +4030,19 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     const title = (n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded')
       + (n.superseded ? ' · superseded by a later attempt' : '')
     assert.ok(row.indexOf('<span class="ag-st ag-' + n.state + '" role="img" aria-label="' + title + '" title="' + title + '">') >= 0, row)
-    // Its usage first among the figures, and no mark on the row: the details carry it.
-    if (n.kind !== 'pending') assert.ok(row.indexOf('<span class="ag-fig"><span class="nobr">' + n.usage) >= 0, row)
+    // Its usage first among the figures — a session's named, "own 23.3K" — and no mark on the
+    // row: the details carry it.
+    if (n.kind !== 'pending') {
+      assert.ok(row.indexOf('<span class="ag-fig"><span class="nobr">' + (n.kind === 'session' ? 'own ' : '') + n.usage) >= 0, row)
+    }
     assert.equal(row.indexOf('⚠'), -1, row)
+    // 1.6 N1: every node opened, so a session's and a run's tally stand, an agent's does not —
+    // its children show their own glyphs — and a node without agents below has none.
+    const shows = n.tallyText !== null && n.kind !== 'agent'
+    assert.equal(row.indexOf('class="ag-tally"') >= 0, shows, row)
+    if (shows) assert.ok(row.indexOf(tallyHtml(String(n.tallyText), String(n.tallySpoken))) >= 0, row)
   }
+  assert.ok(nodes.some((n) => n.kind === 'agent' && n.tallyText !== null), 'the world has an agent with agents below it')
   // Nearly every agent of Claude Code ends on an unfinished reply, and the page says once where
   // that is marked; the payload still carries the flag.
   assert.ok(nodes.filter((n) => n.kind === 'agent' && n.lowerBound).length >= 5)
@@ -3980,12 +4076,13 @@ test('the running list the view model builds reaches the page first, the tree cl
     assert.equal(/>0[ <]|> 0</.test(row), false, row)
   }
   assert.equal(items.find((r) => r.kind === 'pending')?.usage, '–')
-  // The tree under it holds the two sessions and nothing else, each saying what it holds.
+  // The tree under it holds the two sessions and nothing else, each saying what its agents came to.
   const tree = treePart(h)
   assert.deepEqual([...tree.matchAll(/data-act="agentSelect" data-key="([^"]*)"/g)].map((m) => m[1]),
     vm.agents.roots.map((r) => r.key))
   for (const r of vm.agents.roots) {
-    assert.ok(tree.indexOf('<span class="nobr">' + r.agentCount + ' agent(s)</span>') >= 0, r.label)
+    assert.equal(r.tally?.started, r.agentCount, r.label)
+    assert.ok(tree.indexOf(tallyHtml(String(r.tallyText), String(r.tallySpoken))) >= 0, r.label)
   }
   assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
   // The running agent is mid-reply, so its output is a lower bound — and with every node closed

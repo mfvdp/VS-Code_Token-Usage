@@ -44,6 +44,29 @@ export const MAX_RUN_AGENTS = 5000
  */
 export type NodeState = 'running' | 'done' | 'failed' | 'stopped' | 'unknown' | 'active' | 'idle'
 
+/**
+ * N1 (1.6): the agents below a node by the state their rows show. `started` is the only
+ * denominator; every attempt counts once and in exactly one field, so the six after `started`
+ * sum to it. A superseded attempt goes to `retried` whatever its own state; every other field
+ * counts only attempts that are not superseded.
+ */
+export interface AgentTally {
+  /** Agent-like members below the node: agent records, the agents a run's journal started without one, pending launches. */
+  started: number
+  /** Completed, not superseded. */
+  done: number
+  /** Final failures: failed and not superseded by a later attempt. */
+  failed: number
+  /** Every superseded attempt — failed and retried, replaced, or run again. */
+  retried: number
+  /** Stopped and not superseded (a stop nothing replaced). */
+  stopped: number
+  /** Running (derived), not superseded — an agent that runs because an agent below it runs included. */
+  running: number
+  /** Unknown (derived), not superseded. */
+  unknown: number
+}
+
 export interface TreeNode {
   /** Stable, never a path: `s:<sessionId>` | `w:<sessionId>|<wfId>` | `a:<agentId>` | `l:<toolUseId>`. */
   key: string
@@ -82,11 +105,28 @@ export interface TreeNode {
   lastTs: number | null
   /**
    * Agents and pending launches anywhere below this node, counted on the whole tree before the
-   * MAX_NODES cut — what a collapsed row says it holds. 0 for a node with none below it. A
+   * MAX_NODES cut — the `started` of its tally, where it has one. 0 for a node with none below it. A
    * workflow run's count includes the agents its journal started whose transcript was never
    * counted (1.6 D2): they are members of the run, though no row of their own is drawn for them.
    */
   agentCount: number
+  /**
+   * N1: what the agents below the node came to — on sessions, workflow runs and agents with
+   * agents below them, counted on the whole tree before the MAX_NODES cut, as `agentCount` is
+   * (its `started` equals it). Null for every other node, and for a session with no agent.
+   */
+  tally: AgentTally | null
+  /**
+   * N1: the tally as the row writes it — "427 started · 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?": the
+   * started agents, then each state with at least one agent, in the order done, failed,
+   * retried, stopped, running, unknown; the two inferred ones carry `~`. Null with `tally`.
+   */
+  tallyText: string | null
+  /**
+   * N1: the same in words, for a screen reader — "427 started, 112 done, 12 failed, 295
+   * retried, about 8 unknown". Null with `tally`.
+   */
+  tallySpoken: string | null
   /**
    * D7: an attempt the workflow journal started its step again after — a failure retried, a
    * run replaced before it recorded anything, or a completed step re-run. It keeps its own state

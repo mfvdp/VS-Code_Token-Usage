@@ -29,7 +29,7 @@
  */
 
 import {
-  AGENT_RETENTION_DAYS, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
+  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
   NodeDetails, NodeState, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS,
   SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from './agentTree'
@@ -509,33 +509,95 @@ function sessionState(main: MainRec | null, now: number, tcfg: TimeConfig): Stat
   }
 }
 
-/** A member of a workflow run as its state rule counts it: its state, and whether a later attempt superseded it. */
+/**
+ * A member below a node as the tally counts it (N1) and a run's state rule reads it: its state,
+ * and whether a later attempt of its step superseded it (D7). An agent, a pending launch, or an
+ * agent a run's journal started without a counted transcript.
+ */
 interface Member {
   state: NodeState
   superseded: boolean
 }
 
+function noTally(): AgentTally {
+  return { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0 }
+}
+
 /**
- * A workflow run from its members (§3.0 a of the 1.6 spec) — its agents with a record, the ones
- * its journal started without one, and the launches inside it. An attempt the journal superseded
- * is closed, whatever its own state: it was retried. Of the others, one running makes the run
- * running; one open — neither recorded nor running — makes it unknown; with every member closed,
- * one completion makes it done, whatever failed beside it (the failures are the run's to show,
- * not its end); else a failure makes it failed; else the last attempt of every step was stopped.
- * One failure among completed agents never fails a run.
+ * One member into a tally, in exactly one field besides `started`: a superseded attempt is
+ * retried whatever its own state — it was followed by another — and every other one counts by
+ * its state. A member in a state no agent can be in (a snapshot of another build's making) is
+ * counted as unknown rather than left out, so the fields still sum to `started`.
  */
-function workflowState(members: readonly Member[]): StateOf {
-  const open = members.filter((m) => !m.superseded)
-  if (open.some((m) => m.state === 'running')) {
+function tallyInto(tally: AgentTally, m: Member): void {
+  tally.started++
+  if (m.superseded) tally.retried++
+  else if (m.state === 'done' || m.state === 'failed' || m.state === 'stopped' || m.state === 'running') tally[m.state]++
+  else tally.unknown++
+}
+
+/**
+ * The tally of everything below a node (N1), on the whole tree: every agent and launch at any
+ * depth, and the members the journal of each run among them started without a counted
+ * transcript. The node itself is not counted, whatever it is.
+ */
+function tallyBelow(e: Entry): AgentTally {
+  const out = noTally()
+  for (const x of preorder(e)) {
+    if (x !== e && isAgentLike(x)) tallyInto(out, x)
+    for (const m of x.journalMembers) tallyInto(out, m)
+  }
+  return out
+}
+
+/**
+ * "427 started · 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — the started agents, then each state at least one
+ * of them is in, with the glyph its rows carry: done, failed, retried, stopped, running,
+ * unknown. The two inferred states carry the tilde every estimate on the page carries.
+ */
+function tallyText(n: AgentTally): string {
+  const parts = [t('{0} started', full(n.started))]
+  const glyphs: Array<[number, string]> = [
+    [n.done, `${full(n.done)} ✓`], [n.failed, `${full(n.failed)} ✕`], [n.retried, `${full(n.retried)} ↻`],
+    [n.stopped, `${full(n.stopped)} ■`], [n.running, `~${full(n.running)} ●`], [n.unknown, `~${full(n.unknown)} ?`],
+  ]
+  for (const [count, part] of glyphs) if (count > 0) parts.push(part)
+  return parts.join(' · ')
+}
+
+/** The tally in words, in the same order — what a screen reader says in place of the glyphs. */
+function tallySpoken(n: AgentTally): string {
+  const parts = [t('{0} started', full(n.started))]
+  if (n.done > 0) parts.push(t('{0} done', full(n.done)))
+  if (n.failed > 0) parts.push(t('{0} failed', full(n.failed)))
+  if (n.retried > 0) parts.push(t('{0} retried', full(n.retried)))
+  if (n.stopped > 0) parts.push(t('{0} stopped', full(n.stopped)))
+  if (n.running > 0) parts.push(t('about {0} running', full(n.running)))
+  if (n.unknown > 0) parts.push(t('about {0} unknown', full(n.unknown)))
+  return parts.join(', ')
+}
+
+/**
+ * A workflow run's state from its members' tally (§3.0 a of the 1.6 spec) — its agents with a
+ * record, the ones its journal started without one, and the launches inside it — so the run's
+ * row and its tally can never disagree. A superseded attempt is closed whatever its own state:
+ * the tally has it under retried. Of the others, one running makes the run running; one open —
+ * neither recorded nor running — makes it unknown; with every member closed, one completion
+ * makes it done, whatever failed beside it (the tally shows the failures; they are not the
+ * run's end); else a failure makes it failed; else the last attempt of every step was stopped.
+ * One failure among completed agents never fails a run, and a run with no member is unknown.
+ */
+function workflowState(n: AgentTally): StateOf {
+  if (n.running > 0) {
     return { state: 'running', stateText: t('Running — inferred: at least one agent of this run is running.') }
   }
-  if (members.length === 0 || open.some((m) => m.state !== 'done' && m.state !== 'failed' && m.state !== 'stopped')) {
+  if (n.started === 0 || n.unknown > 0) {
     return { state: 'unknown', stateText: t('Unknown — inferred: not every agent of this run has a recorded result, and none is running.') }
   }
-  if (open.some((m) => m.state === 'done')) {
+  if (n.done > 0) {
     return { state: 'done', stateText: t('Done — every agent of this run has a recorded outcome, and at least one completed.') }
   }
-  if (open.some((m) => m.state === 'failed')) {
+  if (n.failed > 0) {
     return { state: 'failed', stateText: t('Failed — every agent of this run has a recorded outcome, and none completed.') }
   }
   return {
@@ -685,6 +747,13 @@ interface Entry {
    * (their collector comes with D4). Empty for every other node.
    */
   journalOnly: JournalAgent[]
+  /**
+   * The states of those journal-only members, as the run's state rule and every tally above
+   * the run count them (N1). Empty for every other node.
+   */
+  journalMembers: Member[]
+  /** N1: the tally of the members below the node, where it carries one; null elsewhere. */
+  tally: AgentTally | null
   /** Built on demand: only the selected node's rows are ever needed. */
   rows: () => DetailRow[]
 }
@@ -934,6 +1003,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     counters: mainCounters,
     superseded: false,
     journalOnly: [],
+    journalMembers: [],
+    tally: null,
     rows: () => [],
   }
   root.rows = () => [
@@ -977,6 +1048,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         counters: null,
         superseded: false,
         journalOnly: [],
+        journalMembers: [],
+        tally: null,
         rows: () => [],
       }
       attach(w, root)
@@ -1046,6 +1119,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       counters: c,
       superseded: next !== null,
       journalOnly: [],
+      journalMembers: [],
+      tally: null,
       rows: () => [],
     }
     e.rows = () => [
@@ -1110,6 +1185,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       counters: null,
       superseded: false,
       journalOnly: [],
+      journalMembers: [],
+      tally: null,
       rows: () => [
         { label: t('Type'), value: text(l.typeHint) ?? '–' },
         { label: t('Models'), value: text(l.modelHint) ?? '–' },
@@ -1152,7 +1229,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   }
 
   // A run is summed from the agents inside it, on the whole tree: the cap below may hide some
-  // of them, but it does not change what the run used. Its state is its members' (§3.0 a).
+  // of them, but it does not change what the run used. Its state is the one function of its
+  // members' tally (§3.0 a), so the row's glyph and the tally beside it always agree.
   for (const [wf, w] of workflows) {
     const members = [...preorder(w)].filter(isAgentLike)
     const sum = noCounters()
@@ -1169,7 +1247,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       state: journalOnlyState(j, run, siblingRuns, now), superseded: text(j.supersededBy) !== null,
     }))
     if (only.some((m) => m.state === 'running')) anyRunning = true
-    const st = workflowState([...members.map((m) => ({ state: m.state, superseded: m.superseded })), ...only])
+    w.journalMembers = only
+    const tally = tallyBelow(w)
+    const st = workflowState(tally)
     w.state = st.state
     w.stateText = st.stateText
     w.counters = sum
@@ -1182,10 +1262,10 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       && run.agentsDropped > 0 ? run.agentsDropped : 0
     const agentsRow: DetailRow = dropped > 0
       ? {
-        label: t('Agents'), value: full(members.length + only.length),
+        label: t('Agents'), value: full(tally.started),
         note: t('{0} further agents not listed', full(dropped)), kind: 'sentence',
       }
-      : { label: t('Agents'), value: full(members.length + only.length) }
+      : { label: t('Agents'), value: full(tally.started) }
     w.rows = () => [
       agentsRow,
       ...timeRows(w.startTs, w.lastTs, now, tcfg),
@@ -1197,6 +1277,15 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   if (anyRunning && root.state !== 'active') {
     root.state = 'active'
     root.stateText = t('Active — inferred: an agent of this session is running.')
+  }
+
+  // N1: what the agents below each session, run and agent came to, every state final by now —
+  // the roll-up's waiting agents included. A node with no agent below it has no tally, so a
+  // session without agents claims no "0 started", and a leaf agent none at all.
+  for (const e of preorder(root)) {
+    if (e.kind !== 'session' && e.kind !== 'workflow' && e.kind !== 'agent') continue
+    const tally = tallyBelow(e)
+    e.tally = tally.started > 0 ? tally : null
   }
 
   for (const e of preorder(root)) e.children.sort(byStart)
@@ -1374,6 +1463,9 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     startTs: e.startTs,
     lastTs: e.lastTs,
     agentCount: counts.get(e) ?? 0,
+    tally: e.tally === null ? null : { ...e.tally },
+    tallyText: e.tally === null ? null : tallyText(e.tally),
+    tallySpoken: e.tally === null ? null : tallySpoken(e.tally),
     superseded: e.superseded,
     children: e.children.filter((c) => kept.has(c)).map(toNode),
   })

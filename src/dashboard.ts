@@ -884,6 +884,12 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-unknown::before { content: "?"; color: var(--dim); }
 .ag-active::before { content: "●"; color: var(--vscode-foreground); }
 .ag-idle::before { content: "○"; color: var(--dim); }
+/* Words for a screen reader alone: out of sight and out of the copied text's way, still in the
+   accessibility tree. A node's tally (1.6 N1) is glyphs for the eye — "112 ✓ · 12 ✕" — which a
+   screen reader would read as shapes; the words stand beside them, and the glyphs are hidden
+   from it. */
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* 1.6 D7: an attempt the workflow journal superseded keeps its glyph, dimmed — at .8 a failed or
    stopped glyph still stands out 3:1 in both themes — and its words take the dim tone. */
 .ag-sup > .ag-line > .ag-row .ag-st { opacity: .8; }
@@ -1130,6 +1136,7 @@ function webviewWords(): Record<string, string> {
     'Write 1h': t('Write 1h'),
     'Write 5m': t('Write 5m'),
     'active session': t('active session'),
+    'agents {0}': t('agents {0}'),
     'all': t('all'),
     'and {0} more': t('and {0} more'),
     'apply': t('apply'),
@@ -1181,6 +1188,7 @@ function webviewWords(): Record<string, string> {
       t('output is a lower bound: some requests had no terminal line'),
     'over': t('over'),
     'over the limit': t('over the limit'),
+    'own {0}': t('own {0}'),
     'peak {0} ({1})': t('peak {0} ({1})'),
     'peak {0}:00 · {1} day(s)': t('peak {0}:00 · {1} day(s)'),
     'priced from a related model (family fallback)': t('priced from a related model (family fallback)'),
@@ -1227,8 +1235,6 @@ function webviewWords(): Record<string, string> {
       t('without cache · {0} tokens cache write not shown'),
     'year': t('year'),
     'yesterday': t('yesterday'),
-    '{0} agent(s)': t('{0} agent(s)'),
-    '{0} agents': t('{0} agents'),
     '{0} ago': t('{0} ago'),
     '{0} call(s) · {1} distinct tool(s)': t('{0} call(s) · {1} distinct tool(s)'),
     '{0} composition · last 30 days': t('{0} composition · last 30 days'),
@@ -1236,7 +1242,6 @@ function webviewWords(): Record<string, string> {
     '{0} more — set tokenPace.dashboard.modelRows': t('{0} more — set tokenPace.dashboard.modelRows'),
     '{0} of {1}': t('{0} of {1}'),
     '{0} older session(s) not shown.': t('{0} older session(s) not shown.'),
-    '{0} own': t('{0} own'),
     '{0} tokens over {1} day(s)': t('{0} tokens over {1} day(s)'),
     '{0} · derived': t('{0} · derived'),
     '{0} · recorded': t('{0} · recorded'),

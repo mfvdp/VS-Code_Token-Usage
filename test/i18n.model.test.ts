@@ -199,3 +199,15 @@ test('the subagent share of a window and the data-quality line speak German, wit
       'Subagenten ≈5,5K von ≈9K hier gezählt (61 %)')
   })
 })
+
+test('split by main session and subagent, the chart names its two bands in German (1.6 O2)', () => {
+  german(() => {
+    const vm = buildViewModel(makeInput({ agg: agentShareAgg(), ui: { chartSplit: 'agents' } }))
+    assert.equal(vm.chart.split, 'agents')
+    assert.deepEqual(vm.chart.series.map((s) => [s.key, s.label]), [
+      ['claude:main', 'Claude Code · Hauptsitzungen'],
+      ['claude:sub', 'Claude Code · Subagenten'],
+      ['codex:main', 'Codex · Hauptsitzungen'],
+    ])
+  })
+})

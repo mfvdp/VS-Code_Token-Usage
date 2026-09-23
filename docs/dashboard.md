@@ -20,7 +20,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `context` | The context window of the current Claude Code session as the status line reported it — tokens, and a share only when the payload named a window size. Off by default; nothing here is derived from the token counts |
 | `kpis` | Today (usage, and its cost while `showCost` is on), then usage, API equivalent, requests, cache hit, active days, Avg per active day — each with a delta against the previous period and a sparkline. Hovering a card, or reaching it with the keyboard, opens what it counts, how it is computed, the period with its dates, what it is compared with, the split per provider and its basis; the markdown view lists the same explanations under the table |
 | `tokens` | Fixed periods of everything — every provider and model, whatever the chips say. Totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) with the rows `Today`, `Last 7 days`, `Last 30 days`, `This week`, `This month`, `All time`. Two rows lead them: `Current 5 h window` and `Current 7 d window` cover exactly the window the provider reports a reset for, so they can be read against the quota card above — where no such window is reported the row is a trailing `Last 5 h` / `Last 7 d` span and says so. Both are summed from hour buckets, so once the oldest hours of the span have been rolled up into day totals every figure in the row carries `≈` and is a lower bound; the span itself is the tooltip of the row label. Then the composition bar over the last 30 days with a `cache` switch that hides cache read and cache write (the remaining shares are then shares of what is drawn, and a caption names the tokens left out), the cache economy of the same 30 days, calendar periods and the plan factor |
-| `chart` | Stacked daily (or weekly) bars for the selected range, one band per model in its provider's hue — the models of one provider told apart by pattern or shade (`chart.modelStyle`) — with a metric selector and an optional cost line on a second axis through the column centres. Clicking a column drills into that day |
+| `chart` | Stacked daily (or weekly) bars for the selected range, one band per model in its provider's hue — the models of one provider told apart by pattern or shade (`chart.modelStyle`) — or, with the `subagents` chip beside the metric selector pressed, two bands per provider: its main sessions and its subagents. A metric selector and an optional cost line on a second axis through the column centres. Clicking a column drills into that day |
 | `models` | Per-model breakdown with the same columns as the totals table (usage, fresh input, cache write 5 m / 1 h, cache read, output, reasoning, requests, hit rate, per request, API cost) plus the share of the range; every column sortable, with average and P90 turn length where enough samples exist. Where the rates came from is the tooltip of the cost, not a column |
 | `heatmap` | Calendar heatmap of the last 53 weeks with current and longest streak, active days, peak day and a variability measure. Days outside the coverage are dotted, not empty |
 | `hours` | Hour-of-day profile and a weekday × 4-hour grid, captioned with the weeks of usage days it stands on. A block nothing was ever done in is hatched |
@@ -58,7 +58,7 @@ model table sortable by every column it shows (`model`, `usage`, `freshInput`, `
 `cacheWrite1h`, `cacheRead`, `output`, `reasoning`, `requests`, `cacheHit`, `perRequest`, `cost`,
 `share`, ascending or descending).
 Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The chart is
-always stacked **by model**, one band per model under each provider: every band wears its
+stacked **by model** unless its `subagents` chip is pressed (below), one band per model under each provider: every band wears its
 provider's hue — Claude blue, Codex purple — and the five largest models of a provider are told
 apart by rank, drawn as a pattern (solid, 45° stripes, 135° stripes, cross-hatch, horizontal
 lines), as a shade of the hue, or as both (`tokenPace.chart.modelStyle`); the rest of that
@@ -69,8 +69,24 @@ column and the provider's column total. The cost line, when switched on, runs th
 column centres over a halo in the page background, with a dot per column, on its own axis.
 The heatmap switches between `usage` and `cost`; the hour profile between local time and UTC.
 
+**Main sessions and subagents.** The `subagents` chip beside the metric selector splits every
+column by who wrote the tokens instead of by model: two bands per provider, `Claude Code · main
+sessions` in the plain hue and `Claude Code · subagents` in the first pattern (or shade) of the
+style — the same for Codex, whose subagents are its forked threads. The split comes from the
+buckets' own subagent dimension — a reply written in a transcript under `subagents/` for Claude
+Code, a forked thread for Codex — so the two bands of a provider sum exactly to its column split
+by model, day by day and in every metric; nothing is estimated. A part that counted nothing in the
+range has no band, and the model and provider filters narrow the split as they narrow the models.
+The legend has no provider headings then — each label names its provider — and a band's tooltip
+reads `Claude Code · subagents · 12,345 · 58.8 % of the day · Claude Code total 21,000`. Pressed
+(`aria-pressed`), the chip draws the split; pressed again, the models. The choice is kept with the
+rest of the view state. In a forced-colours theme (Windows High Contrast), which removes every
+pattern and every hue, the main sessions are drawn as a solid band in the text colour and the
+subagents as a band of the page colour ringed by the text colour, so the two parts of a column stay
+apart.
+
 **Collapsing.** Every section header is a toggle. What you collapse is remembered with the rest
-of the view state (range, sort, filters), so a panel you have trimmed to two sections opens that
+of the view state (range, sort, filters, the chart's split), so a panel you have trimmed to two sections opens that
 way again. The nodes you open in the agent tree — it starts closed — the one whose details are
 open, and how many more children you asked an opened node to show, are kept the same way. `tokenPace.dashboard.sections` decides what exists at all; collapsing decides what
 you look at today.
@@ -175,7 +191,7 @@ stays on its row — the running list's button, or the tree's item — when the 
 again. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
-range, a sort, a filter, a metric, a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
+range, a sort, a filter, a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
 open, close, select or show more children of — at most 200 characters, and only ever matched against the nodes the tree
 was built with — or one of a fixed list of named commands; never a path and never a setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
 carry the same figures.

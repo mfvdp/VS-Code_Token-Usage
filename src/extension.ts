@@ -58,7 +58,7 @@ import {
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
 import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
 import {
-  agentTreeFor, applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, isAgentSelectedIn,
+  agentTreeFor, applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, isAgentSelectedIn, isChartSplit,
   MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, RANGE_PRESETS, UiState, ViewModel,
   WebviewMessage,
 } from './viewModel'
@@ -1872,9 +1872,10 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
   if (typeof raw.metric === 'string' && (METRICS as string[]).includes(raw.metric)) {
     out.metric = raw.metric as UiState['metric']
   }
-  // A field an older build stored and this one no longer has — the chart's stacking, which is
-  // always by model now — is simply not copied: the state is rebuilt from the defaults field
-  // by field, so a key this build does not know is dropped without a special case.
+  // A field an older build stored and this one no longer has — the chart's stacking by provider
+  // or model (`chartStack`), which 1.2.2 took out; 1.6's split is a field of its own, below — is
+  // simply not copied: the state is rebuilt from the defaults field by field, so a key this build
+  // does not know is dropped without a special case.
   if (raw.compositionCache === 'all' || raw.compositionCache === 'noCache') {
     out.compositionCache = raw.compositionCache
   }
@@ -1919,6 +1920,8 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
   }
   // 1.6 L3: whether the 7-day block is open — a boolean, and nothing else.
   if (typeof raw.agentsWeekOpen === 'boolean') out.agentsWeekOpen = raw.agentsWeekOpen
+  // 1.6 O2: the chart's split — one of its two words; anything else is the split by model.
+  if (isChartSplit(raw.chartSplit)) out.chartSplit = raw.chartSplit
   return out
 }
 

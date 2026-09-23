@@ -339,6 +339,8 @@
   "{0} stopped": "{0} gestoppt",
   "{0} tokens": "{0} Token",
   "{0} used": "{0} verbraucht",
+  "{0} · main sessions": "{0} · Hauptsitzungen",
+  "{0} · subagents": "{0} · Subagenten",
   "{0} · {1} · launched": "{0} · {1} · gestartet",
   "{0} · {1} · {2} % · reset": "{0} · {1} · {2} % · Reset",
   "{0} — resumed {1} time(s)": "{0} — {1}-mal fortgesetzt",

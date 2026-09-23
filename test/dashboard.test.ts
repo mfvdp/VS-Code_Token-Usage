@@ -1329,6 +1329,123 @@ test('every band wears its provider hue and its rank, and the legend groups them
   assert.ok(SOURCE.indexOf('class="dot \' + bandStyle(') >= 0)
 })
 
+test('split by main session and subagent, the chart draws two bands per provider under a pressed chip, and its legend names each (1.6 O2)', () => {
+  const split = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    days: ['2026-09-01', '2026-09-02', '2026-09-03'],
+    labels: ['09-01', '09-02', '09-03'],
+    series: [
+      { key: 'claude:main', label: 'Claude Code · main sessions', source: 'claude', rank: 0, values: [10, 20, 30] },
+      { key: 'claude:sub', label: 'Claude Code · subagents', source: 'claude', rank: 1, values: [30, 20, 10] },
+      { key: 'codex:main', label: 'Codex · main sessions', source: 'codex', rank: 0, values: [5, 4, 3] },
+    ],
+    metric: 'usage', modelStyle: 'pattern', split: 'agents', max: 60, ticks: [15, 30, 45, 60], weekly: false, costLine: null,
+    ...over,
+  })
+  const h = render('sChart()', { chart: split() })
+  // The chip beside the metric, pressed while the chart is split; the cost line's button after it.
+  const row = h.slice(0, h.indexOf('<div class="plot">'))
+  assert.ok(row.indexOf('</select><button data-act="chartSplit" aria-pressed="true">subagents</button>') >= 0, row)
+  const byModel = render('sChart()', { chart: split({ split: 'model', costLine: [1, 2, 3] }) })
+  assert.ok(byModel.indexOf('</select><button data-act="chartSplit" aria-pressed="false">subagents</button>'
+    + '<button data-act="costLine"') >= 0, byModel)
+  // A chart without the field — an older payload — is the split by model, the chip not pressed.
+  const { split: _s, ...older } = split()
+  assert.ok(render('sChart()', { chart: older }).indexOf('aria-pressed="false">subagents</button>') >= 0)
+  // Each band wears its rank and its part: the main sessions the plain hue, the subagents the
+  // first pattern — and the part is what a forced-colours theme paints them by.
+  assert.ok(h.indexOf('<div class="seg band s-claude-0 hue-claude r0 st-pattern sp-main"') >= 0, h)
+  assert.ok(h.indexOf('<div class="seg band s-claude-1 hue-claude r1 st-pattern sp-sub"') >= 0, h)
+  assert.ok(h.indexOf('<div class="seg band s-codex-0 hue-codex r0 st-pattern sp-main"') >= 0, h)
+  // The legend: no provider headings — each label names its provider — every swatch its band's classes.
+  const legend = h.slice(h.indexOf('<div class="legend">'))
+  assert.equal(legend.indexOf('class="meta"'), -1, legend)
+  assert.ok(legend.startsWith('<div class="legend"><span><i class="dot band s-claude-0 hue-claude r0 st-pattern sp-main"></i>Claude Code · main sessions</span>'
+    + '<span><i class="dot band s-claude-1 hue-claude r1 st-pattern sp-sub"></i>Claude Code · subagents</span>'
+    + '<span><i class="dot band s-codex-0 hue-codex r0 st-pattern sp-main"></i>Codex · main sessions</span>'), legend)
+  // The tooltip names the provider once — in the label — then the value, the share and the provider's total.
+  assert.ok(h.indexOf('title="Claude Code · subagents · 30 · 66.7 % of the day · Claude Code total 40"') >= 0, h)
+  assert.ok(h.indexOf('title="Codex · main sessions · 5 · 11.1 % of the day · Codex total 5"') >= 0, h)
+  assert.ok(render('sChart()', { chart: split({ weekly: true }) }).indexOf('title="Claude Code · subagents · 30 · 66.7 % of the week · Claude Code total 40"') >= 0)
+  // Split by model nothing of the split is drawn: no part class, the headings back.
+  assert.equal(/sp-(main|sub)/.test(byModel), false, byModel)
+  assert.ok(byModel.indexOf('<span class="meta">Claude Code</span>') >= 0, byModel)
+  // A style is a style in the split too: the shade and both styles name their part alike.
+  const shade = render('sChart()', { chart: split({ modelStyle: 'shade' }) })
+  assert.ok(shade.indexOf('<div class="seg band s-claude-1 hue-claude r1 st-shade sp-sub"') >= 0, shade)
+  // Everything the payload names is escaped on the way in.
+  const evil = render('sChart()', { chart: split({ series: [{ key: 'claude:main', label: '<b>x</b>', source: 'claude', rank: 0, values: [1, 1, 1] }] }) })
+  assert.equal(evil.indexOf('<b>'), -1, evil)
+})
+
+test('the "subagents" chip asks for the other split, and the page redraws only what the host pushes (1.6 O2)', () => {
+  const a = agentCtx()
+  const pageWith = (split: string): void => a.fire('window:message', {
+    origin: '', data: { type: 'data', payload: model({ sections: ['chart'], chart: { ...(model().chart as Record<string, unknown>), split } }) },
+  })
+  const chip = { tagName: 'BUTTON', dataset: { act: 'chartSplit' } }
+  const click = (): void => a.fire('document:click', { target: { closest: () => chip }, stopPropagation: () => undefined, preventDefault: () => undefined })
+  pageWith('model')
+  a.posted.length = 0
+  click()
+  assert.deepEqual(a.posted, [{ type: 'setChartSplit', split: 'agents' }])
+  pageWith('agents')
+  a.posted.length = 0
+  click()
+  assert.deepEqual(a.posted, [{ type: 'setChartSplit', split: 'model' }])
+  // Every message the chip posts is one the host's parser takes.
+  const { parseWebviewMessage } = require('../src/viewModel') as typeof import('../src/viewModel')
+  for (const m of [{ type: 'setChartSplit', split: 'agents' }, { type: 'setChartSplit', split: 'model' }]) {
+    assert.deepEqual(parseWebviewMessage(m), m)
+  }
+})
+
+test('a forced-colours theme keeps the two parts of a split column apart, in its own colours and with its adjustment on (1.6 O2)', () => {
+  // The one forced-colours block of the page (1.6 N9's): the main sessions solid in the text
+  // colour, the subagents the page colour ringed inside by the text colour — the theme removes
+  // every gradient and gives every other background the page's own, which would paint both away.
+  const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active) {'))
+  const block = forced.slice(0, forced.indexOf('\n}') + 2)
+  assert.equal(STYLE.split('@media (forced-colors: active) {').length - 1, 1, 'a second forced-colours block')
+  assert.match(block, /\n {2}\.band\.sp-main \{ background: CanvasText; \}\n/)
+  assert.match(block, /\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n/)
+  // No gradient there — the theme would take it — and the theme's own adjustment left on.
+  assert.equal(/gradient/.test(block), false, block)
+  assert.equal(/forced-color-adjust/.test(STYLE), false)
+  // The block stands after every band rule, so at the same specificity it is the one that wins.
+  assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
+  assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.band.r0 { background: var(--hue); }'))
+})
+
+test('the chart\'s chip and the split\'s tooltips speak German on a German page (1.6 O2)', () => {
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const words = ['subagents', '{0} · {1} · {2} % of the day · {3} total {4}', '{0} · {1} · {2} % of the week · {3} total {4}', 'chart metric']
+  const de: Record<string, string> = {}
+  for (const w of words) {
+    assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
+    assert.equal(typeof bundle[w], 'string', 'no German for ' + w)
+    de[w] = bundle[w]
+  }
+  assert.equal(bundle.subagents, 'Subagenten')
+  // The band labels are the view model's words, German there: the page only carries them.
+  assert.equal(bundle['{0} · main sessions'], '{0} · Hauptsitzungen')
+  assert.equal(bundle['{0} · subagents'], '{0} · Subagenten')
+  const c = makeContext()
+  nodeVm.runInContext(between(germanPage(de), /<script nonce="[A-Za-z0-9]+">/, '</script>'), c)
+  ;(c as Record<string, unknown>).fixture = model({
+    chart: {
+      days: ['2026-09-01'], labels: ['09-01'],
+      series: [
+        { key: 'claude:main', label: 'Claude Code · Hauptsitzungen', source: 'claude', rank: 0, values: [1000] },
+        { key: 'claude:sub', label: 'Claude Code · Subagenten', source: 'claude', rank: 1, values: [3000] },
+      ],
+      metric: 'usage', modelStyle: 'pattern', split: 'agents', max: 4000, ticks: [1000, 2000, 3000, 4000], weekly: false, costLine: null,
+    },
+  })
+  const h = String(nodeVm.runInContext('vm = fixture; sChart()', c))
+  assert.ok(h.indexOf('aria-pressed="true">Subagenten</button>') >= 0, h)
+  assert.ok(h.indexOf('title="Claude Code · Subagenten · 3.000 · 75 % des Tages · Claude Code gesamt 4.000"') >= 0, h)
+})
+
 test('the band styles are one provider hue varied by rank, at a fixed 4 px pitch', () => {
   assert.match(STYLE, /\.hue-claude \{ --hue: var\(--claude\); \}/)
   assert.match(STYLE, /\.hue-codex \{ --hue: var\(--codex\); \}/)

@@ -1058,6 +1058,57 @@ test('the 7-day block\'s disclosure is stored and pushed at once; a stored state
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+test('the chart\'s split is stored and the chart pushed with it; a stored split restores as one of its two words (1.6 O2)', async () => {
+  // Each host's own cold scan is waited for by its own status bar item — the Σ of the tokens item —
+  // not by the log line, which the scan of an activation disposed a moment before can write into
+  // this recording too.
+  const scanned = (): Promise<void> => waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  // Restored as one of the two words, and only as one: anything else is the split by model.
+  const cases: Array<[unknown, string]> = [['agents', 'agents'], ['model', 'model'], ['Agents', 'model'], ['provider', 'model'],
+    [true, 'model'], [null, 'model'], [undefined, 'model']]
+  for (const [stored, want] of cases) {
+    const kept = new Map<string, unknown>([['tokenPace.ui', { chartSplit: stored, range: '30d' }]])
+    const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+    await scanned()
+    await state.execute('tokenPace.setRange', '7d')
+    assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.chartSplit, want, JSON.stringify(stored))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  }
+  // The page's chip: stored, and the chart pushed at once, split — each provider's main sessions,
+  // and no subagents' band, the fixture having no subagent —; pressed again, by model.
+  const host = await activateHost(makeFixture(), REPO)
+  await scanned()
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  type ChartPush = { payload: { chart: { split: unknown; series: Array<{ key: string }> } } }
+  const chartPushes = (from: number): ChartPush[] =>
+    page.sent.slice(from).filter((m) => {
+      const x = m as { type?: unknown; key?: unknown }
+      return x.type === 'section' && x.key === 'chart'
+    }) as ChartPush[]
+  let before = page.sent.length
+  page.post({ type: 'setChartSplit', split: 'agents' })
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.chartSplit, 'agents')
+  let pushes = chartPushes(before)
+  assert.equal(pushes.length, 1, 'the split did not push the chart')
+  assert.equal(pushes[0].payload.chart.split, 'agents')
+  assert.deepEqual(pushes[0].payload.chart.series.map((s) => s.key), ['claude:main', 'codex:main'])
+  // A word the parser does not know is dropped whole: nothing stored, nothing pushed.
+  before = page.sent.length
+  page.post({ type: 'setChartSplit', split: 'provider' })
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.chartSplit, 'agents')
+  assert.equal(chartPushes(before).length, 0)
+  before = page.sent.length
+  page.post({ type: 'setChartSplit', split: 'model' })
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.chartSplit, 'model')
+  pushes = chartPushes(before)
+  assert.equal(pushes.length, 1, 'the split by model did not push the chart')
+  assert.equal(pushes[0].payload.chart.split, 'model')
+  assert.deepEqual(pushes[0].payload.chart.series.map((s) => s.key).sort(),
+    ['claude:claude-opus-4-6', 'claude:claude-sonnet-4-6', 'codex:gpt-5.4-synthetic'])
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
 test('a reader with 200 stored opened nodes, all long gone, can still open one: the oldest gives way', async () => {
   // Nothing prunes the key of a node that has left the tree — a session past the list, an agent
   // past the seven days — so a regular reader reaches the cap with keys that match nothing. The

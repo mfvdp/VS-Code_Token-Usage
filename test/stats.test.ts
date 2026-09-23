@@ -3,7 +3,7 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { Aggregator } from '../src/agg'
+import { Aggregator, billable } from '../src/agg'
 import { setLocale } from '../src/i18n'
 import { usd } from '../src/render'
 import {
@@ -12,7 +12,7 @@ import {
   niceCeil, planFactors, projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
   durationText,
 } from '../src/stats'
-import { DayRange, dayOf, daysBetween, previousRange, rangeFor } from '../src/time'
+import { DayRange, addDays, dayOf, daysBetween, previousRange, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
 import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
 
@@ -866,6 +866,122 @@ test('the weekly condensation keeps the model bands it was given', () => {
     const own = ctx.agg.series(days, tcfg, { source }, 'usage', ctx.pricing).reduce((a, b) => a + b, 0)
     const bands = weekly.series.filter((x) => x.source === source)
     assert.equal(bands.reduce((t, x) => t + x.values.reduce((a, b) => a + b, 0), 0), own, source)
+  }
+})
+
+/**
+ * 1.6 O2: a world with both parts under both providers — main sessions and subagents of Claude,
+ * main threads and forks of Codex — over three days and two models each, so the split and the
+ * model split group the very same buckets two different ways.
+ */
+function splitWorld(): Bucket[] {
+  const days = [addDays(TODAY, -2), addDays(TODAY, -1), TODAY]
+  const out: Bucket[] = []
+  days.forEach((day, d) => {
+    for (const [source, models] of [['claude', ['claude-opus-4-6', 'claude-haiku-4-5']], ['codex', ['gpt-5.3-codex', 'gpt-5.3-codex-mini']]] as const) {
+      models.forEach((model, m) => {
+        for (const isSub of [false, true]) {
+          // Day 0 has no Codex fork at all, and the Claude subagents write Haiku only.
+          if (isSub && source === 'codex' && d === 0) continue
+          if (isSub && source === 'claude' && m === 0) continue
+          const k = (d + 1) * (m + 1) * (isSub ? 3 : 7)
+          out.push({
+            ...emptyBucket(source, model, isSub, 'standard', 'd', null, day),
+            input: 100 * k, cacheWrite: 20 * k, cacheRead: 900 * k, output: 40 * k, reasoning: 5 * k,
+            requests: k, outputFinal: k,
+          })
+        }
+      })
+    }
+  })
+  return out
+}
+
+test('split by main session and subagent, a column is two bands per provider that sum to the unsplit column, day by day and in every metric (1.6 O2)', () => {
+  const ctx = ctxOf(fromBuckets(splitWorld()))
+  const r = range('7d')
+  const byModel = chart(ctx, r, 'usage')
+  const split = chart(ctx, r, 'usage', 'pattern', 'agents')
+  // What the chart was split into travels with it; the default is the models.
+  assert.equal(byModel.split, 'model')
+  assert.equal(split.split, 'agents')
+  assert.equal(chart(ctx, r, 'usage', 'pattern', 'something' as never).split, 'model')
+  // Two bands per provider, main sessions first — the plain hue, rank 0 — then the subagents,
+  // rank 1; each label names its provider, the legend of the split having no provider headings.
+  assert.deepEqual(split.series.map((s) => [s.key, s.label, s.source, s.rank]), [
+    ['claude:main', 'Claude Code · main sessions', 'claude', 0],
+    ['claude:sub', 'Claude Code · subagents', 'claude', 1],
+    ['codex:main', 'Codex · main sessions', 'codex', 0],
+    ['codex:sub', 'Codex · subagents', 'codex', 1],
+  ])
+  // Same days, same labels, same axis: only the bands inside a column differ.
+  assert.deepEqual([split.days, split.labels, split.max, split.ticks, split.weekly],
+    [byModel.days, byModel.labels, byModel.max, byModel.ticks, byModel.weekly])
+  const sum = (series: typeof split.series, i: number, source?: string): number =>
+    series.filter((s) => source === undefined || s.source === source).reduce((t, s) => t + s.values[i], 0)
+  for (const metric of ['usage', 'output', 'cacheRead', 'requests', 'reasoning', 'cost'] as const) {
+    const m = chart(ctx, r, metric)
+    const a = chart(ctx, r, metric, 'pattern', 'agents')
+    for (let i = 0; i < m.days.length; i++) {
+      for (const source of [undefined, 'claude', 'codex']) {
+        assert.ok(Math.abs(sum(a.series, i, source) - sum(m.series, i, source)) < 1e-9,
+          `${metric} ${source ?? 'all'} ${m.days[i]}: ${sum(a.series, i, source)} vs ${sum(m.series, i, source)}`)
+      }
+    }
+  }
+  // The subagents' band is exactly the isSub buckets of its provider, the main sessions' the rest.
+  const day = split.days.indexOf(TODAY)
+  const want = (source: Source, isSub: boolean): number => splitWorld()
+    .filter((b) => b.source === source && b.isSub === isSub && b.day === TODAY).reduce((t, b) => t + billable(b), 0)
+  assert.deepEqual(split.series.map((s) => s.values[day]), [want('claude', false), want('claude', true), want('codex', false), want('codex', true)])
+  // A day without forks is a zero in Codex's subagent band, never a missing column.
+  assert.equal(split.series[3].values[split.days.indexOf(addDays(TODAY, -2))], 0)
+})
+
+test('the split draws no band for a part that counted nothing, and follows the provider and model filters (1.6 O2)', () => {
+  const r = range('7d')
+  // No subagent anywhere: one band per provider, its main sessions, still in their rank.
+  const mainOnly = chart(ctxOf(fromBuckets(splitWorld().filter((b) => !b.isSub))), r, 'usage', 'pattern', 'agents')
+  assert.deepEqual(mainOnly.series.map((s) => [s.key, s.rank]), [['claude:main', 0], ['codex:main', 0]])
+  // Only subagents: the band keeps rank 1 — its paint says "subagents" whichever part is the larger.
+  const subOnly = chart(ctxOf(fromBuckets(splitWorld().filter((b) => b.isSub))), r, 'usage', 'pattern', 'agents')
+  assert.deepEqual(subOnly.series.map((s) => [s.key, s.rank]), [['claude:sub', 1], ['codex:sub', 1]])
+  // A metric one part never emits is no band of that part.
+  const noReasoning = splitWorld().map((b) => (b.isSub ? { ...b, reasoning: 0 } : b))
+  assert.deepEqual(chart(ctxOf(fromBuckets(noReasoning)), r, 'reasoning', 'pattern', 'agents').series.map((s) => s.key),
+    ['claude:main', 'codex:main'])
+  // The provider chips and the model filter narrow the split as they narrow the models.
+  const codex = chart(ctxOf(fromBuckets(splitWorld()), { sources: ['codex'] }), r, 'usage', 'pattern', 'agents')
+  assert.deepEqual(codex.series.map((s) => s.key), ['codex:main', 'codex:sub'])
+  const opus = chart(ctxOf(fromBuckets(splitWorld()), { models: ['claude-opus-4-6'] }), r, 'usage', 'pattern', 'agents')
+  // Claude's subagents wrote no Opus: the Opus filter leaves the main sessions alone.
+  assert.deepEqual(opus.series.map((s) => s.key), ['claude:main'])
+  const byModel = chart(ctxOf(fromBuckets(splitWorld()), { models: ['claude-opus-4-6'] }), r, 'usage')
+  assert.deepEqual(opus.series[0].values, byModel.series[0].values)
+  // An empty range is no band at all.
+  const nothing = chart(ctxOf(fromBuckets([])), r, 'usage', 'pattern', 'agents')
+  assert.deepEqual(nothing.series, [])
+})
+
+test('the weekly condensation keeps the split\'s bands and their sums (1.6 O2)', () => {
+  const ctx = ctxOf(buildAgg())
+  const long = { from: '2026-01-01', to: TODAY, label: 'long', preset: 'custom' as const }
+  const weekly = chart(ctx, long, 'usage', 'pattern', 'agents')
+  assert.equal(weekly.weekly, true)
+  assert.equal(weekly.split, 'agents')
+  assert.equal(weekly.series.every((x) => x.values.length === weekly.days.length), true)
+  const days = daysBetween(long.from, long.to)
+  for (const source of ['claude', 'codex'] as const) {
+    const own = ctx.agg.series(days, tcfg, { source }, 'usage', ctx.pricing).reduce((a, b) => a + b, 0)
+    const bands = weekly.series.filter((x) => x.source === source)
+    assert.ok(bands.length > 0, source)
+    assert.equal(bands.reduce((t, x) => t + x.values.reduce((a, b) => a + b, 0), 0), own, source)
+    // Each part is its provider's own filter of the same dimension.
+    for (const [part, isSub] of [['main', false], ['sub', true]] as const) {
+      const band = bands.find((x) => x.key === `${source}:${part}`)
+      const mine = ctx.agg.series(days, tcfg, { source, isSub }, 'usage', ctx.pricing).reduce((a, b) => a + b, 0)
+      assert.equal(band ? band.values.reduce((a, b) => a + b, 0) : 0, mine, `${source}:${part}`)
+    }
   }
 })
 

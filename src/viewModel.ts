@@ -39,7 +39,7 @@ import { turnedOver } from './resetRule'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
 import type { ContextReading, PromptCacheReading } from './quotaSources'
 import {
-  CacheEconomyRow, CalendarRows, ChartData, ChartSeries,
+  CHART_SPLITS, CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartSplit,
   CompositionEntry, DrillData, HeatmapData, HourSums, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
   ModelSort, ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData,
   SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, TotalsWindow,
@@ -57,7 +57,7 @@ import {
 } from './types'
 
 export type {
-  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, CompositionEntry, DrillData,
+  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartSplit, CompositionEntry, DrillData,
   HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow,
   PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow,
 }
@@ -125,6 +125,12 @@ export interface UiState {
    * list, before the tree. Closed by default; the view model builds the block only while it is open.
    */
   agentsWeekOpen: boolean
+  /**
+   * 1.6 O2: what the chart's columns are split into — the models of each provider (the default,
+   * every build before 1.6), or each provider's main sessions and subagents (the chart's
+   * "subagents" chip).
+   */
+  chartSplit: ChartSplit
 }
 
 /**
@@ -173,6 +179,7 @@ export type WebviewMessage =
   | { type: 'agentSelect'; key: string | null; from?: AgentSelectedIn }
   | { type: 'agentMore'; key: string }
   | { type: 'agentsWeek' }
+  | { type: 'setChartSplit'; split: ChartSplit }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
   | { type: 'rendered'; sections: number }
@@ -212,6 +219,11 @@ function isAgentKey(v: unknown): v is string {
 
 export function isAgentSelectedIn(v: unknown): v is AgentSelectedIn {
   return typeof v === 'string' && (AGENT_SELECTED_IN as readonly string[]).includes(v)
+}
+
+/** 1.6 O2: one of the chart's two splits — the one list the parser, the reducer and the restore filter check. */
+export function isChartSplit(v: unknown): v is ChartSplit {
+  return typeof v === 'string' && (CHART_SPLITS as readonly string[]).includes(v)
 }
 
 /**
@@ -319,6 +331,9 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     // closes an open one.
     case 'agentsWeek':
       return { type: 'agentsWeek' }
+    // 1.6 O2: the chart's "subagents" chip — the split it asks for, one of two words.
+    case 'setChartSplit':
+      return isChartSplit(m.split) ? { type: 'setChartSplit', split: m.split } : null
     case 'refresh':
       return { type: 'refresh' }
     case 'command':
@@ -347,6 +362,7 @@ export function defaultUiState(cfg: Config): UiState {
     agentSelectedIn: 'tree',
     agentsMore: [],
     agentsWeekOpen: false,
+    chartSplit: 'model',
   }
 }
 
@@ -437,6 +453,9 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       // what it is: closed, the details open under the node's other row where the page has one,
       // and under the block's row again once it is opened.
       return { ...ui, agentsWeekOpen: ui.agentsWeekOpen !== true }
+    case 'setChartSplit':
+      // 1.6 O2: the split the chip asked for; the one already drawn changes nothing.
+      return ui.chartSplit === m.split ? ui : { ...ui, chartSplit: m.split }
     default:
       return ui
   }
@@ -1684,7 +1703,7 @@ export function buildViewModel(input: VmInput): ViewModel {
     cacheEconomy: cache,
     calendar: calendar(whole),
     planFactor: planFactors(whole, cfg.planPriceUsd),
-    chart: chart(ctx, range, ui.metric, cfg.chart.modelStyle),
+    chart: chart(ctx, range, ui.metric, cfg.chart.modelStyle, ui.chartSplit),
     models,
     heatmap: heatmap(ctx, ui.heatmapMetric, firstDay),
     hours: hours(ctx, range, ui.hourZone),

@@ -818,6 +818,32 @@ test('docs/export.md lists every column of the agents file, the schema version a
     'docs/dashboard.md still says the Quick Pick leaves the agents out')
 })
 
+test('docs/dashboard.md names the chart\'s split by main session and subagent as the page and the model write it (1.6 O2)', () => {
+  // The words, taken from the sources that write them: the chip the page draws, the band labels
+  // the chart builds, the tooltip of a split band, the rule a forced-colours theme paints by.
+  const page = readDoc('src/webview/main.ts')
+  const stats = readDoc('src/stats.ts')
+  const style = readDoc('src/dashboard.ts')
+  for (const [src, written] of [
+    [page, 'subagents'], [page, '{0} · {1} · {2} % of the day · {3} total {4}'],
+    [stats, '{0} · main sessions'], [stats, '{0} · subagents'],
+  ] as Array<[string, string]>) assert.ok(src.includes(`'${written}'`), `a source no longer writes: ${written}`)
+  assert.ok(page.includes('data-act="chartSplit"') && page.includes("type: 'setChartSplit'"), 'the chip moved: say it in the docs')
+  assert.ok(style.includes('.band.sp-main { background: CanvasText; }') && style.includes('.band.sp-sub { background: Canvas; outline: 1px solid CanvasText;'),
+    'the forced-colours rule of the split moved: say it in the docs')
+  const dash = readDoc('docs/dashboard.md').replace(/\s+/g, ' ')
+  for (const claim of ['**Main sessions and subagents.**', 'The `subagents` chip beside the metric selector',
+    '`Claude Code · main sessions`', '`Claude Code · subagents`', 'whose subagents are its forked threads',
+    'sum exactly to its column split by model, day by day and in every metric', 'A part that counted nothing in the range has no band',
+    'The legend has no provider headings then', '`Claude Code · subagents · 12,345 · 58.8 % of the day · Claude Code total 21,000`',
+    'The choice is kept with the rest of the view state', 'the main sessions are drawn as a solid band in the text colour',
+    'the subagents as a band of the page colour ringed by the text colour', 'the chart\'s split (`model` or `agents`)',
+    'stacked **by model** unless its `subagents` chip is pressed']) {
+    assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
+  }
+  assert.equal(dash.includes('always stacked **by model**'), false, 'docs/dashboard.md still says the chart is always by model')
+})
+
 test('the tool-table retention the docs promise is the horizon the aggregator applies', () => {
   const days = /TOOL_KEEP_DAYS = (\d+)/.exec(readDoc('src/agg.ts'))
   assert.ok(days, 'src/agg.ts no longer states a TOOL_KEEP_DAYS')

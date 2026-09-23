@@ -313,6 +313,11 @@ export type ChartRank = 0 | 1 | 2 | 3 | 4 | 'other'
  * view styles by, `label` the word the legend and the tooltips print, and `rank` the band's
  * place within its provider — so a view can vary the provider's one hue by rank instead of
  * needing a palette as long as the model list.
+ *
+ * 1.6 O2: split by main session and subagent (`ChartData.split === 'agents'`), a provider has at
+ * most two bands — `<source>:main`, rank 0, "Claude Code · main sessions", and `<source>:sub`,
+ * rank 1, "Claude Code · subagents" — so the main sessions keep the plain hue and the subagents
+ * wear the first pattern (or shade) of every style, whichever of the two is the larger.
  */
 export interface ChartSeries {
   key: string
@@ -322,10 +327,20 @@ export interface ChartSeries {
   values: number[]
 }
 
+/**
+ * 1.6 O2: what a column is split into — its provider's models (every build before 1.6), or its
+ * provider's main sessions and subagents, from the buckets' own `isSub` dimension.
+ */
+export type ChartSplit = 'model' | 'agents'
+export const CHART_SPLITS: readonly ChartSplit[] = ['model', 'agents']
+
 export interface ChartData {
   days: string[]
   labels: string[]
-  /** Claude's bands first, then Codex's; within a provider largest first, the fold last. */
+  /**
+   * Claude's bands first, then Codex's; within a provider largest first, the fold last — or,
+   * split by main session and subagent, the main sessions first and the subagents second.
+   */
   series: ChartSeries[]
   metric: Metric
   /**
@@ -333,6 +348,8 @@ export interface ChartData {
    * reads it from the one view model rather than from a second channel.
    */
   modelStyle: ChartModelStyle
+  /** 1.6 O2: what the columns are split into, as the reader chose it (`ui.chartSplit`). */
+  split: ChartSplit
   max: number
   ticks: number[]
   weekly: boolean
@@ -1755,15 +1772,50 @@ function modelSeries(ctx: StatsCtx, days: string[], metric: Metric): ChartSeries
   return out
 }
 
+/**
+ * 1.6 O2: the bands of a column split by main session and subagent — two per provider at most,
+ * from the `isSub` dimension of the very buckets the model split groups: a bucket written by a
+ * subagent transcript (Claude Code's `subagents/`, a Codex fork) is the subagents' band, every
+ * other bucket the main sessions'. Nothing is estimated and nothing re-measured, so the two bands
+ * of a provider sum to exactly what its model bands sum to, day by day and in every metric. A
+ * part that counted nothing in the range is no band, as a model that counted nothing is none.
+ * The ranks are fixed — the main sessions 0, the subagents 1 — so a band keeps its paint
+ * whichever of the two is the larger, and the labels name the provider, since the legend of the
+ * split has no provider headings to stand under.
+ */
+function agentSeries(ctx: StatsCtx, days: string[], metric: Metric): ChartSeries[] {
+  if (days.length === 0) return []
+  const out: ChartSeries[] = []
+  const at = new Map(days.map((d, i) => [d, i]))
+  const total = (values: number[]): number => values.reduce((a, b) => a + b, 0)
+  for (const source of SOURCES) {
+    if (!ctx.sources.includes(source)) continue
+    const main = new Array<number>(days.length).fill(0)
+    const sub = new Array<number>(days.length).fill(0)
+    for (const b of bucketsIn(ctx, days[0], days[days.length - 1], source)) {
+      const i = at.get(dayOfBucket(b, ctx.tcfg))
+      if (i === undefined) continue
+      ;(b.isSub ? sub : main)[i] += metricOfBucket(b, metric, ctx)
+    }
+    const name = SOURCE_TITLE[source]
+    if (total(main) > 0) out.push({ key: `${source}:main`, label: t('{0} · main sessions', name), source, rank: 0, values: main })
+    if (total(sub) > 0) out.push({ key: `${source}:sub`, label: t('{0} · subagents', name), source, rank: 1, values: sub })
+  }
+  return out
+}
+
 export function chart(
   ctx: StatsCtx,
   range: DayRange,
   metric: Metric,
   modelStyle: ChartModelStyle = 'pattern',
+  split: ChartSplit = 'model',
 ): ChartData {
   const days = daysBetween(range.from, range.to)
   const weekly = days.length > WEEKLY_CHART_DAYS
-  const bands = modelSeries(ctx, days, metric)
+  // Anything but the one other word is the split by model: a view state from anywhere draws a chart.
+  const by: ChartSplit = split === 'agents' ? 'agents' : 'model'
+  const bands = by === 'agents' ? agentSeries(ctx, days, metric) : modelSeries(ctx, days, metric)
   const costDaily = ctx.showCost && metric !== 'cost'
     ? seriesOf(ctx, days, 'cost')
     : null
@@ -1800,6 +1852,7 @@ export function chart(
     series,
     metric,
     modelStyle,
+    split: by,
     max,
     ticks: [0.25, 0.5, 0.75, 1].map((f) => max * f),
     weekly,

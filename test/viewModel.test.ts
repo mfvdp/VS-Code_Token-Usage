@@ -226,9 +226,11 @@ test('the chart is stacked by provider and model and carries the configured styl
   assert.equal(vm.chart.modelStyle, 'pattern')
   assert.ok(vm.chart.series.length > 1)
   assert.equal(vm.chart.series.every((s) => s.key === `${s.source}:${s.label}`), true)
-  // No stacking to switch any more: neither the chart nor the UI state carries one.
+  // No stacking by provider to switch any more: neither the chart nor the UI state carries one.
+  // (1.6 O2's split by main session and subagent is `split` / `chartSplit`, by model by default.)
   assert.equal('stack' in vm.chart, false)
   assert.equal('chartStack' in vm.ui, false)
+  assert.deepEqual([vm.chart.split, vm.ui.chartSplit], ['model', 'model'])
   const shaded = buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.chart.modelStyle': 'shade' }) }))
   assert.equal(shaded.chart.modelStyle, 'shade')
 })
@@ -567,7 +569,8 @@ test('parseWebviewMessage drops everything else', () => {
     { type: 'setFilter', providers: [], models: [123] },
     { type: 'setMetric', metric: 'passwords' },
     { type: 'setHeatmapMetric', metric: 'requests' },
-    // The chart is always stacked by model; the stacking message of older pages is nothing.
+    // The stacking message of older pages (by provider / by model, gone since 1.2.2) is nothing —
+    // 1.6's split by main session and subagent is a message of its own, `setChartSplit`.
     { type: 'setChartStack', stack: 'model' },
     { type: 'setChartStack', stack: 'provider' },
     { type: 'setChartStack' },
@@ -653,6 +656,8 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     agentsMore: [],
     // 1.6 L3: the 7-day block starts closed.
     agentsWeekOpen: false,
+    // 1.6 O2: the chart is split by model until the reader presses its "subagents" chip.
+    chartSplit: 'model',
   })
 
   const drilled = applyMessage(ui, { type: 'drill', day: '2026-09-01' })
@@ -675,6 +680,40 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
   // A refresh and a command change nothing, and say so by identity.
   assert.equal(applyMessage(ui, { type: 'refresh' }), ui)
   assert.equal(applyMessage(ui, { type: 'command', id: 'tokenPace.rescan' }), ui)
+})
+
+test('the chart\'s split is one of two words, stored in the UI state and drawn by the view model (1.6 O2)', () => {
+  // The chip's message carries the split it asks for, and nothing but the two words passes.
+  for (const split of ['model', 'agents'] as const) {
+    assert.deepEqual(parseWebviewMessage({ type: 'setChartSplit', split }), { type: 'setChartSplit', split })
+  }
+  for (const raw of [{ type: 'setChartSplit' }, { type: 'setChartSplit', split: 'provider' }, { type: 'setChartSplit', split: 'Agents' },
+    { type: 'setChartSplit', split: 1 }, { type: 'setChartSplit', split: null }, { type: 'setChartSplit', split: ['agents'] }]) {
+    assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
+  }
+  const ui = defaultUiState(cfg)
+  const split = applyMessage(ui, { type: 'setChartSplit', split: 'agents' })
+  assert.equal(split.chartSplit, 'agents')
+  assert.equal(ui.chartSplit, 'model', 'the input state was mutated')
+  // Asking for the split already drawn changes nothing: the same object, nothing to store.
+  assert.equal(applyMessage(split, { type: 'setChartSplit', split: 'agents' }), split)
+  assert.equal(applyMessage(split, { type: 'setChartSplit', split: 'model' }).chartSplit, 'model')
+  // Only the chart follows it: every other part of the view model is the one the models split builds.
+  const byModel = buildViewModel(makeInput())
+  const byAgents = buildViewModel(makeInput({ ui: { chartSplit: 'agents' } }))
+  assert.equal(byModel.chart.split, 'model')
+  assert.equal(byAgents.chart.split, 'agents')
+  assert.ok(byAgents.chart.series.length > 0)
+  assert.equal(byAgents.chart.series.every((s) => s.key === `${s.source}:main` || s.key === `${s.source}:sub`), true,
+    JSON.stringify(byAgents.chart.series.map((s) => s.key)))
+  assert.deepEqual(byAgents.chart.days, byModel.chart.days)
+  for (let i = 0; i < byModel.chart.days.length; i++) {
+    const col = (vm: typeof byModel): number => vm.chart.series.reduce((t, s) => t + s.values[i], 0)
+    assert.equal(col(byAgents), col(byModel), byModel.chart.days[i])
+  }
+  const { chart: _a, ui: _b, ...restModel } = byModel
+  const { chart: _c, ui: _d, ...restAgents } = byAgents
+  assert.deepEqual(restAgents, restModel)
 })
 
 test('the agents section sits directly after quota, in the fold list and in the manifest default', () => {

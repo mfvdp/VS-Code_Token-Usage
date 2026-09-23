@@ -930,11 +930,15 @@ function sTokens(): string {
  * The classes one band is painted with: the provider's hue, the model's rank within that
  * provider and the style the setting chose. The one place a chart colour is decided — the
  * bands and the legend swatches call it alike, so a swatch shows exactly the fill of its band.
+ * 1.6 O2: split by main session and subagent, a band also names its part — `sp-main` for rank 0,
+ * `sp-sub` for rank 1, the two ranks the split hands out — which is what a forced-colours theme
+ * paints it by (see the style), the hue and the pattern being the theme's to remove there.
  */
-function bandStyle(source: string, rank: number, style: string): string {
+function bandStyle(source: string, rank: number | string, style: string, split?: boolean): string {
   const st = style === 'shade' || style === 'both' ? style : 'pattern';
   const s = esc(source), r = esc(rank);
-  return 'band s-' + s + '-' + r + ' hue-' + s + ' r' + r + ' st-' + st;
+  return 'band s-' + s + '-' + r + ' hue-' + s + ' r' + r + ' st-' + st
+    + (split ? (String(rank) === '0' ? ' sp-main' : ' sp-sub') : '');
 }
 
 /** The legend's key for the cost line: the halo, the line and one dot, at swatch size. */
@@ -962,6 +966,11 @@ function sChart(): string {
   const sel = '<select data-act="metric" aria-label="' + tr('chart metric') + '">'
     + metrics.map(m => '<option value="' + m + '"' + (c.metric === m ? ' selected' : '') + '>'
       + metricLabel(m) + '</option>').join('') + '</select>';
+  // 1.6 O2: the columns split into each provider's main sessions and subagents instead of its
+  // models — the view model's word for what it drew, never a guess of the page's. The chip beside
+  // the metric asks the host for the other split; the host keeps it with the rest of the view state.
+  const split = c.split === 'agents';
+  const splitChip = '<button data-act="chartSplit" aria-pressed="' + split + '">' + tr('subagents') + '</button>';
   const totals = c.days.map((_: Payload, i: Payload) => c.series.reduce((s: Payload, x: Payload) => s + x.values[i], 0));
   // A provider's column total, summed from the same bands the column is drawn from.
   // Keyed by provider id only: a payload names the provider, and a name that is not one of
@@ -984,12 +993,17 @@ function sChart(): string {
       // A sentence per unit rather than the word "day" slotted into one: the provider is
       // named twice in the same line, which only a whole key can order.
       const name = esc(srcName(s.source));
-      const title = c.weekly
-        ? tr('{0} · {1} · {2} · {3} % of the week · {1} total {4}',
-             esc(s.label), name, fullNum(v), share, fullNum((subtotals[s.source] || [])[i] || 0))
-        : tr('{0} · {1} · {2} · {3} % of the day · {1} total {4}',
-             esc(s.label), name, fullNum(v), share, fullNum((subtotals[s.source] || [])[i] || 0));
-      return '<div class="seg ' + bandStyle(s.source, s.rank, c.modelStyle) + '" data-bh="'
+      const sub = fullNum((subtotals[s.source] || [])[i] || 0);
+      // 1.6 O2: a band of the split names its provider in its own label ("Claude Code · subagents"),
+      // so its tooltip does not name it a second time before the value.
+      const title = split
+        ? (c.weekly
+          ? tr('{0} · {1} · {2} % of the week · {3} total {4}', esc(s.label), fullNum(v), share, name, sub)
+          : tr('{0} · {1} · {2} % of the day · {3} total {4}', esc(s.label), fullNum(v), share, name, sub))
+        : c.weekly
+          ? tr('{0} · {1} · {2} · {3} % of the week · {1} total {4}', esc(s.label), name, fullNum(v), share, sub)
+          : tr('{0} · {1} · {2} · {3} % of the day · {1} total {4}', esc(s.label), name, fullNum(v), share, sub);
+      return '<div class="seg ' + bandStyle(s.source, s.rank, c.modelStyle, split) + '" data-bh="'
         + ((v / c.max) * 100).toFixed(2)
         + '" title="' + title
         + '"></div>';
@@ -1030,20 +1044,22 @@ function sChart(): string {
     + esc(l) + '</i></span>').join('');
   // The legend is grouped by provider — its name, then its bands in rank order — and every
   // swatch wears the classes of its band, so the pattern in the key is the pattern in the bar.
+  // 1.6 O2: split by main session and subagent, every label names its provider itself
+  // ("Claude Code · main sessions"), and a heading above it would only say the name again.
   let legend = '';
   let group: string | null = null;
   c.series.forEach((s: Payload) => {
-    if (s.source !== group) {
+    if (!split && s.source !== group) {
       group = s.source;
       legend += '<span class="meta">' + esc(srcName(s.source)) + '</span>';
     }
-    legend += '<span><i class="dot ' + bandStyle(s.source, s.rank, c.modelStyle) + '"></i>'
+    legend += '<span><i class="dot ' + bandStyle(s.source, s.rank, c.modelStyle, split) + '"></i>'
       + esc(s.label) + '</span>';
   });
   return '<div class="row"><span class="meta">'
     + (c.weekly ? tr('weekly bars · {0} columns', c.days.length)
                 : tr('daily bars · {0} columns', c.days.length))
-    + '</span><span class="wrap">' + sel
+    + '</span><span class="wrap">' + sel + splitChip
     + (c.costLine ? '<button data-act="costLine" aria-pressed="' + costLine + '">' + tr('cost line')
        + '</button>' : '')
     + '</span></div>'
@@ -3070,6 +3086,11 @@ function act(el: HTMLElement): void {
   else if (a === 'hourZone') post({ type: 'setHourZone', zone: el.dataset.zone });
   else if (a === 'drill') post({ type: 'drill', day: el.dataset.day || null });
   else if (a === 'costLine') { costLine = !costLine; renderSection('chart'); }
+  else if (a === 'chartSplit') {
+    // 1.6 O2: the other split than the one the chart was drawn with; the host keeps it and pushes
+    // the chart again.
+    post({ type: 'setChartSplit', split: vm.chart && vm.chart.split === 'agents' ? 'model' : 'agents' });
+  }
   else if (a === 'agentToggle') {
     // Opens a closed node or closes an open one; the host keeps which, so it survives a reload.
     const key = el.dataset.key;

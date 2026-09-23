@@ -1060,13 +1060,20 @@ ul { margin: 6px 0; padding-left: 18px; }
    details' token mix (1.6 L2) a border of the text's, the theme having taken its fill — and the open row,
    whose tint and edge the theme removes, a 2 px outline in the highlight colour. 1.6 L1: the item
    the keyboard is on, a 2 px ring round its line in the text colour — never the highlight's, so an
-   open row that has the focus shows both. The theme's own adjustment is left on everywhere else. */
+   open row that has the focus shows both. 1.6 O2: the chart split by main session and subagent
+   keeps its two parts apart — the theme removes every gradient and gives every other background
+   the page's own colour, so the plain hue of the main sessions and the stripes of the subagents
+   would both be painted away: the main sessions a solid band in the text colour, the subagents a
+   band of the page colour ringed 1 px inside by the text colour (a legend swatch wears its band's
+   classes, so it shows the same). The theme's own adjustment is left on everywhere else. */
 @media (forced-colors: active) {
   .ag-st::before, .ag-lb { color: CanvasText; }
   .ag-fold::before { color: ButtonText; }
   .ag-mix > i { border: 1px solid CanvasText; box-sizing: border-box; }
   .ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
   .agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 2px solid CanvasText; }
+  .band.sp-main { background: CanvasText; }
+  .band.sp-sub { background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; }
 }
 `
 
@@ -1350,6 +1357,7 @@ function webviewWords(): Record<string, string> {
     'stopped': t('stopped'),
     'streak {0} · longest {1} · active {2}': t('streak {0} · longest {1} · active {2}'),
     'sub': t('sub'),
+    'subagents': t('subagents'),
     'superseded by a later attempt': t('superseded by a later attempt'),
     'thisMonth': t('thisMonth'),
     'thisWeek': t('thisWeek'),
@@ -1393,6 +1401,9 @@ function webviewWords(): Record<string, string> {
       t('{0} · {1} · {2} · {3} % of the day · {1} total {4}'),
     '{0} · {1} · {2} · {3} % of the week · {1} total {4}':
       t('{0} · {1} · {2} · {3} % of the week · {1} total {4}'),
+    // 1.6 O2: a band of the split names its provider in its label, so its tooltip names it once.
+    '{0} · {1} · {2} % of the day · {3} total {4}': t('{0} · {1} · {2} % of the day · {3} total {4}'),
+    '{0} · {1} · {2} % of the week · {3} total {4}': t('{0} · {1} · {2} % of the week · {3} total {4}'),
     '{0}: {1} of {2}': t('{0}: {1} of {2}'),
     '~1 of them running': t('~1 of them running'),
     '~Cost': t('~Cost'),

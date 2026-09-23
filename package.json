@@ -1523,7 +1523,7 @@
     "vscode:uninstall": "node ./scripts/uninstall.js"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.20.4",
     "@types/vscode": "^1.106.0",
     "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "^3.9.2",

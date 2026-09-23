@@ -137,6 +137,12 @@ test('the read contract holds for the shipped sources: every reader names exactl
   assert.deepEqual(byWhat.get('the tool result')?.fields, ['agentId', 'status'])
   assert.deepEqual(byWhat.get('the reported totals')?.fields, ['totalTokens', 'totalDurationMs', 'totalToolUseCount'])
   assert.deepEqual(byWhat.get('the task notification')?.fields, ['tool-use-id', 'status'])
+  // 1.6 P4 (§0a.3): the blocks of a reply the launches come from — `input` only for an agent's —
+  // and the result that answers a `Workflow` call, in a method of its own, so the agent's result
+  // keeps exactly its two fields.
+  assert.deepEqual(byWhat.get('the launch blocks')?.fields, ['type', 'name', 'id', 'input'])
+  assert.deepEqual(byWhat.get('the workflow result')?.fields, ['runId', 'status'])
+  assert.equal(byWhat.get('the workflow result')?.body, 'private runResult(')
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, 'src/agg.ts', row.what)
 })
 

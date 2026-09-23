@@ -314,6 +314,96 @@ export function queueOperationLine(o: QueueOperationOpts): string {
   })
 }
 
+export interface WorkflowToolUseOpts {
+  /** The assistant message id. */
+  id: string
+  ts: number
+  toolUseId: string
+  /** The workflow's script — content, as every other key of the input. */
+  script?: string
+  /** A resume names the run it continues; the result then names the same run id. */
+  resumeFromRunId?: string
+  /** The call sits in this agent's own transcript (not observed; the shape allows it). */
+  agentId?: string
+  usage?: ClaudeUsage
+}
+
+/**
+ * An assistant line whose one content block calls the `Workflow` tool, with every input key
+ * Claude Code writes (checked 2026-09-23: `script`, `scriptPath`, `args`, `resumeFromRunId`,
+ * `description`, `run_in_background`) carrying fixture text. Of the block only its `id` may be read.
+ */
+export function workflowToolUseLine(o: WorkflowToolUseOpts): string {
+  const input: Record<string, unknown> = {
+    script: o.script ?? 'synthetic workflow script',
+    scriptPath: '/tmp/synthetic/workflows/synthetic-flow.js',
+    args: { goal: 'synthetic workflow args' },
+    description: 'synthetic workflow description',
+    run_in_background: true,
+  }
+  if (o.resumeFromRunId !== undefined) input.resumeFromRunId = o.resumeFromRunId
+  return claudeLine({
+    id: o.id,
+    ts: o.ts,
+    usage: o.usage ?? { input: 10, output: 20 },
+    final: true,
+    stopReason: 'tool_use',
+    agentId: o.agentId,
+    content: [{ type: 'tool_use', id: o.toolUseId, name: 'Workflow', input, caller: { type: 'direct' } }],
+  })
+}
+
+export interface WorkflowResultOpts {
+  ts: number
+  toolUseId: string
+  /** `wf_` + 8 hex + `-` + 3 hex in Claude Code's own results; anything here, to test the allow-list. */
+  runId?: unknown
+  /** `async_launched` in every result observed. */
+  status?: string
+  summary?: string
+  /** The line sits in this agent's own transcript. */
+  inAgent?: string
+}
+
+/**
+ * The user line that answers a `Workflow` call: a `tool_result` block for its tool_use id and the
+ * `toolUseResult` beside it, with every key Claude Code writes there (checked 2026-09-23: `runId`,
+ * `scriptPath`, `status`, `summary`, `taskId`, `taskType`, `transcriptDir`, `workflowName`) — the
+ * summary, the paths and the names fixture text. Only `runId` and `status` may be read.
+ */
+export function workflowResultLine(o: WorkflowResultOpts): string {
+  const result: Record<string, unknown> = {
+    status: o.status ?? 'async_launched',
+    taskId: 'b9c8d7e6f',
+    taskType: 'local_workflow',
+    workflowName: 'synthetic-workflow-name',
+    summary: o.summary ?? 'synthetic workflow summary',
+    scriptPath: '/tmp/synthetic/workflows/synthetic-flow.js',
+    transcriptDir: '/tmp/synthetic/transcripts/synthetic-run',
+  }
+  if (o.runId !== undefined) result.runId = o.runId
+  const line: Record<string, unknown> = { parentUuid: 'uuid-parent-0000', isSidechain: o.inAgent !== undefined, promptId: 'prompt-0000' }
+  if (o.inAgent !== undefined) line.agentId = o.inAgent
+  Object.assign(line, {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ tool_use_id: o.toolUseId, type: 'tool_result', content: [{ type: 'text', text: 'synthetic workflow answer' }] }],
+    },
+    uuid: `uuid-result-${o.toolUseId}`,
+    timestamp: iso(o.ts),
+    toolUseResult: result,
+    sourceToolAssistantUUID: 'uuid-assistant-0000',
+    userType: 'external',
+    entrypoint: 'cli',
+    cwd: '/home/tester/proj-alpha',
+    sessionId: 'sess-0001',
+    version: '9.9.9',
+    gitBranch: 'main',
+  })
+  return JSON.stringify(line)
+}
+
 /**
  * A journal key in the shape Claude Code writes — `v2:` and 64 hex digits (5643 of 5643 keys on
  * the measuring machine) — made from a step name: the sha256 of `synthetic-journal-step-<step>`.

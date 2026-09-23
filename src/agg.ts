@@ -10,7 +10,7 @@ import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
   AgentLaunch, AgentMeta, AgentRec, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, JournalAgent, LaunchStatus,
-  PendingMessage, RecordedOutcome, Resolution, RunRec, SessionRec,
+  PendingMessage, RecordedOutcome, Resolution, RunLaunch, RunRec, SessionRec,
   Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
   TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
@@ -231,6 +231,18 @@ export function cleanAgentId(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 && v.length <= AGENT_ID_MAX_CHARS && ID_ALPHABET.test(v) ? v : null
 }
 
+/**
+ * A workflow run's id as a `Workflow` tool result names it (1.6 §0a.3): `wf_` and 1 to 61
+ * characters of `[A-Za-z0-9_-]`, 64 at most — the name of the run's directory. Observed: 212 of
+ * 212 results, all `wf_` + 8 hex + `-` + 3 hex.
+ */
+const RUN_ID_RE = /^wf_[A-Za-z0-9_-]{1,61}$/
+
+/** A run id through its allow-list, or null. */
+export function cleanRunId(v: unknown): string | null {
+  return typeof v === 'string' && RUN_ID_RE.test(v) ? v : null
+}
+
 function cleanDepth(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_SPAWN_DEPTH ? v : null
 }
@@ -352,9 +364,9 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * The revision of the agent tables. The host replays the retained transcripts and journals once
  * whenever the snapshot's `agentsRevision` differs (see `Aggregator.agentsRevision`): a build
  * that adds a field only a replay can fill for the transcripts already read raises it by one.
- * 1 = 1.6's runs from the workflow journals.
+ * 1 = 1.6's runs from the workflow journals; 2 = the `Workflow` launches and their ends (N4).
  */
-export const AGENT_TABLES_REVISION = 1
+export const AGENT_TABLES_REVISION = 2
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -400,15 +412,16 @@ function journalHead(raw: string): JournalHead | null | 'skip' {
 /**
  * Whether a raw Claude line is worth parsing. Parsing is most of what a scan costs, so a line
  * is looked at first: a response carries "usage"; an agent's result is a `toolUseResult` with
- * an `agentId` *key* after it — a key, because inside a JSON string the quotes around the word
- * would be escaped, so a tool's output that merely mentions it does not pass; a background
- * agent's end is a task notification, and a tool result never is one. Everything else — a
- * tool's output, a prompt, an attachment — is passed over unparsed.
+ * an `agentId` *key* after it, a workflow run's (1.6 N4) one with a `runId` key — a key, because
+ * inside a JSON string the quotes around the word would be escaped, so a tool's output that
+ * merely mentions it does not pass; a background agent's or run's end is a task notification,
+ * and a tool result never is one. Everything else — a tool's output, a prompt, an attachment —
+ * is passed over unparsed.
  */
 function worthParsing(raw: string): boolean {
   if (raw.indexOf('"usage"') >= 0) return true
   const at = raw.indexOf('"toolUseResult"')
-  if (at >= 0) return raw.indexOf('"agentId"', at) >= 0
+  if (at >= 0) return raw.indexOf('"agentId"', at) >= 0 || raw.indexOf('"runId"', at) >= 0
   return raw.indexOf('task-notification') >= 0
 }
 
@@ -449,6 +462,45 @@ function launchOutcome(status: unknown): LaunchNews | undefined {
   if (status === 'async_launched') return { outcome: 'launched', status: null }
   const outcome = outcomeOfStatus(status)
   return outcome === null ? undefined : { outcome, status: status as LaunchStatus }
+}
+
+/** Where a launch keeps its end — an agent's launch and a run's alike. */
+interface LaunchEnd {
+  outcome: 'launched' | RecordedOutcome | null
+  outcomeTs: number | null
+  outcomeStatus: LaunchStatus | null
+}
+
+/**
+ * An outcome onto a launch, an agent's or a workflow run's. "Launched" never takes back a result
+ * — a re-read line or a late copy must not revive a finished agent — and a result already
+ * recorded keeps the time and the word it was first recorded with: a notification that repeats a
+ * stop in another word ("killed" after "stopped") is the same stop. A word arriving for an
+ * outcome that had none (a snapshot written before 1.6) is taken. True when anything changed.
+ */
+function applyEnd(launch: LaunchEnd, news: LaunchNews, at: number | null): boolean {
+  const outcome = news.outcome
+  if (outcome === 'launched') {
+    if (launch.outcome !== null) return false
+    launch.outcome = 'launched'
+    return true
+  }
+  if (launch.outcome !== outcome) {
+    launch.outcome = outcome
+    launch.outcomeTs = at
+    launch.outcomeStatus = news.status
+    return true
+  }
+  let changed = false
+  if (launch.outcomeTs === null && at !== null) {
+    launch.outcomeTs = at
+    changed = true
+  }
+  if (launch.outcomeStatus === null && news.status !== null) {
+    launch.outcomeStatus = news.status
+    changed = true
+  }
+  return changed
 }
 
 /**
@@ -619,6 +671,29 @@ function restoreLaunch(v: unknown): AgentLaunch | null {
   }
 }
 
+/** A run launch as a snapshot carries it (1.6 N4): the same checks as at ingest. */
+function restoreRunLaunch(v: unknown): RunLaunch | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const toolUseId = cleanAgentId(r.toolUseId)
+  const ts = finiteOrNull(r.ts)
+  if (toolUseId === null || ts === null || typeof r.file !== 'string' || !r.file) return null
+  const known = r.outcome === 'launched' || r.outcome === 'completed' || r.outcome === 'failed' || r.outcome === 'stopped'
+    ? r.outcome : null
+  // As for an agent's launch: a stop keeps its outcome only with the parent's word beside it.
+  const outcomeStatus = restoreStatus(r.outcomeStatus, known)
+  const outcome = known === 'stopped' && outcomeStatus === null ? null : known
+  return {
+    toolUseId,
+    file: r.file,
+    ts,
+    runId: cleanRunId(r.runId),
+    outcome,
+    outcomeStatus,
+    outcomeTs: known !== outcome ? null : finiteOrNull(r.outcomeTs),
+  }
+}
+
 function restoreMain(v: unknown): MainRec | null {
   if (!v || typeof v !== 'object') return null
   const r = v as Record<string, unknown>
@@ -703,10 +778,11 @@ function restoreRun(v: unknown): RunRec | null {
  * single-threaded, and the extension runs the roll-up between scans, so a line
  * can only ever see a consistent set of buckets.
  *
- * Beside the counting, Claude lines feed four agent tables for the Agents section: one
+ * Beside the counting, Claude lines feed five agent tables for the Agents section: one
  * record per agent transcript and per main session (the same dedupe as the buckets), the
- * launches a parent recorded, and the workflow runs as their journals record them. They hold
- * identifiers, times and counts — never a description, a prompt, a result or a journal's key.
+ * launches of agents and of workflow runs a parent recorded, and the workflow runs as their
+ * journals record them. They hold identifiers, times and counts — never a description, a
+ * prompt, a script, a result or a journal's key.
  */
 export class Aggregator {
   private buckets = new Map<string, Bucket>()
@@ -716,6 +792,8 @@ export class Aggregator {
   private agentMap = new Map<string, AgentRec>()
   /** Agent launches, keyed by tool_use id. */
   private launchMap = new Map<string, AgentLaunch>()
+  /** `Workflow` tool calls — the launches of workflow runs (1.6 N4) — keyed by tool_use id. */
+  private runLaunchMap = new Map<string, RunLaunch>()
   /** Main Claude sessions, keyed by path: the tree's roots, kept whatever `attribution` says. */
   private mainMap = new Map<string, MainRec>()
   /** Workflow runs as their journals record them, keyed `${sessionId}|${workflowId}`. */
@@ -1326,7 +1404,8 @@ export class Aggregator {
    * The agent launches on one assistant line: `tool_use` blocks named `Agent` (or `Task`, as
    * older builds call it). A streamed message repeats its block on later lines, so a launch is
    * made once, by the first. Three fields of the input are read and no more — its description
-   * and prompt are content.
+   * and prompt are content. A block named `Workflow` launches a workflow run (1.6 N4, §0a.3): of
+   * it only the `id` is read — its input, which holds the workflow's script, is never touched.
    */
   private noteLaunches(content: unknown, at: number, ctx: IngestContext): boolean {
     if (!Array.isArray(content)) return false
@@ -1334,7 +1413,12 @@ export class Aggregator {
     for (const c of content) {
       if (!c || typeof c !== 'object') continue
       const block = c as { type?: unknown; name?: unknown; id?: unknown; input?: unknown }
-      if (block.type !== 'tool_use' || (block.name !== 'Agent' && block.name !== 'Task')) continue
+      if (block.type !== 'tool_use') continue
+      if (block.name === 'Workflow') {
+        if (this.noteRunLaunch(cleanAgentId(block.id), at, ctx)) changed = true
+        continue
+      }
+      if (block.name !== 'Agent' && block.name !== 'Task') continue
       const toolUseId = cleanAgentId(block.id)
       if (toolUseId === null || this.launchMap.has(toolUseId)) continue
       const input = block.input && typeof block.input === 'object'
@@ -1364,6 +1448,19 @@ export class Aggregator {
   }
 
   /**
+   * A `Workflow` tool call: a run launch, made once by the first line that carries the block —
+   * its id, the transcript and the line's time, nothing else. Which run it launched the tool
+   * result says (`runResult`).
+   */
+  private noteRunLaunch(toolUseId: string | null, at: number, ctx: IngestContext): boolean {
+    if (toolUseId === null || this.runLaunchMap.has(toolUseId)) return false
+    this.runLaunchMap.set(toolUseId, {
+      toolUseId, file: ctx.file, ts: at, runId: null, outcome: null, outcomeStatus: null, outcomeTs: null,
+    })
+    return true
+  }
+
+  /**
    * A tool result that names an agent: the parent's record of what became of its launch. Five
    * fields of the result are read — `agentId`, `status` and the three totals — because it also
    * carries the agent's prompt and its answer. The tool_use id comes from the message's own
@@ -1373,7 +1470,8 @@ export class Aggregator {
     const r = d.toolUseResult
     if (!r || typeof r !== 'object' || Array.isArray(r)) return false
     const agentId = cleanAgentId(r.agentId)
-    if (agentId === null) return false
+    // A result that names no agent may answer a `Workflow` call (1.6 N4).
+    if (agentId === null) return this.runResult(d, r, ctx)
     const toolUseId = toolResultId(d.message)
     if (toolUseId === null) return false
     const at = lineTime(d)
@@ -1405,6 +1503,35 @@ export class Aggregator {
   }
 
   /**
+   * The tool result that answers a `Workflow` call (1.6 N4, §0a.3): the run it launched and how it
+   * went. Two fields of the result are read — `runId`, through its allow-list, and `status`, by
+   * the same map as an agent's — and never its `summary`, `scriptPath`, `transcriptDir` (a path),
+   * `workflowName`, `taskId` or `taskType`. The tool_use id comes from the message's own
+   * `tool_result` block; a result whose call was not read stands in for it, as for an agent.
+   */
+  private runResult(d: any, r: any, ctx: IngestContext): boolean {
+    const runId = cleanRunId(r.runId)
+    if (runId === null) return false
+    const toolUseId = toolResultId(d.message)
+    if (toolUseId === null) return false
+    const at = lineTime(d)
+    let changed = false
+    let launch = this.runLaunchMap.get(toolUseId)
+    if (!launch) {
+      if (at === null) return false
+      launch = { toolUseId, file: ctx.file, ts: at, runId: null, outcome: null, outcomeStatus: null, outcomeTs: null }
+      this.runLaunchMap.set(toolUseId, launch)
+      changed = true
+    }
+    if (launch.runId !== runId) {
+      launch.runId = runId
+      changed = true
+    }
+    const news = launchOutcome(r.status)
+    return (news !== undefined && applyEnd(launch, news, at)) || changed
+  }
+
+  /**
    * A queued task notification: how a background agent's end reaches the parent. Two tags are
    * read — `<tool-use-id>` and `<status>` — and never the summary or the output path. A
    * notification for a tool call that is no known launch (a background shell task reports
@@ -1416,44 +1543,25 @@ export class Aggregator {
     if (text.indexOf('task-notification') < 0) return false
     const id = NOTE_TOOL_USE_ID_RE.exec(text)
     const launch = id ? this.launchMap.get(id[1]) : undefined
-    if (!launch) return false
+    // A workflow run's end arrives the same way, for its `Workflow` call (1.6 N4).
+    const runLaunch = id && !launch ? this.runLaunchMap.get(id[1]) : undefined
+    if (!launch && !runLaunch) return false
     const status = NOTE_STATUS_RE.exec(text)
     const news = status ? launchOutcome(status[1]) : undefined
     if (!news) return false
+    if (runLaunch) return applyEnd(runLaunch, news, lineTime(d))
+    if (!launch) return false
     const changed = this.applyOutcome(launch, news, lineTime(d), null)
     return this.propagateOutcome(launch) || changed
   }
 
   /**
-   * An outcome onto a launch. "Launched" never takes back a result — a re-read line or a late
-   * copy must not revive a finished agent — and a result already recorded keeps the time and
-   * the word it was first recorded with: a notification that repeats a stop in another word
-   * ("killed" after "stopped") is the same stop. A word arriving for an outcome that had none
-   * (a snapshot written before 1.6) is taken.
+   * An outcome onto an agent's launch, by the rules of `applyEnd`, and the parent's report of a
+   * finished sync agent with it.
    */
   private applyOutcome(launch: AgentLaunch, news: LaunchNews, at: number | null, totals: AgentLaunch['totals']): boolean {
-    const outcome = news.outcome
-    if (outcome === 'launched') {
-      if (launch.outcome !== null) return false
-      launch.outcome = 'launched'
-      return true
-    }
-    let changed = false
-    if (launch.outcome !== outcome) {
-      launch.outcome = outcome
-      launch.outcomeTs = at
-      launch.outcomeStatus = news.status
-      changed = true
-    } else {
-      if (launch.outcomeTs === null && at !== null) {
-        launch.outcomeTs = at
-        changed = true
-      }
-      if (launch.outcomeStatus === null && news.status !== null) {
-        launch.outcomeStatus = news.status
-        changed = true
-      }
-    }
+    let changed = applyEnd(launch, news, at)
+    if (news.outcome === 'launched') return changed
     const t = launch.totals
     if (totals && (!t || t.tokens !== totals.tokens || t.durationMs !== totals.durationMs || t.toolUses !== totals.toolUses)) {
       launch.totals = totals
@@ -1657,6 +1765,8 @@ export class Aggregator {
   launches(): AgentLaunch[] { return [...this.launchMap.values()] }
   /** Main Claude sessions, the tree's roots. */
   mains(): MainRec[] { return [...this.mainMap.values()] }
+  /** The `Workflow` tool calls the transcripts recorded (1.6 N4): the parent's view of each run. */
+  runLaunches(): RunLaunch[] { return [...this.runLaunchMap.values()] }
   /** Workflow runs as their journals record them. */
   runs(): RunRec[] { return [...this.runMap.values()] }
 
@@ -1699,6 +1809,9 @@ export class Aggregator {
       this.mainMap.delete(file)
     }
     for (const [id, launch] of this.launchMap) if (set.has(launch.file)) this.dropLaunch(id, launch)
+    // A run launch is its transcript's lines alone — the call, its result, its notification — so
+    // reading them again rebuilds it whole.
+    for (const [id, launch] of this.runLaunchMap) if (set.has(launch.file)) this.runLaunchMap.delete(id)
   }
 
   /** Ends a replay: its open messages are forgotten, and a kept record nothing rebuilt is gone. */
@@ -1730,6 +1843,9 @@ export class Aggregator {
     }
     for (const [id, launch] of this.launchMap) {
       if (Math.max(launch.ts, launch.outcomeTs ?? 0) < horizon) this.dropLaunch(id, launch)
+    }
+    for (const [id, launch] of this.runLaunchMap) {
+      if (Math.max(launch.ts, launch.outcomeTs ?? 0) < horizon) this.runLaunchMap.delete(id)
     }
     for (const [file, rec] of this.mainMap) if (rec.lastTs < horizon) this.mainMap.delete(file)
     for (const [key, run] of this.runMap) {
@@ -1957,6 +2073,7 @@ export class Aggregator {
       launches: Object.fromEntries(this.launchMap),
       mains: Object.fromEntries(this.mainMap),
       runs: Object.fromEntries(this.runMap),
+      runLaunches: Object.fromEntries(this.runLaunchMap),
       agentsRevision: this.agentsRevisionValue,
     }
   }
@@ -2044,6 +2161,10 @@ export class Aggregator {
         for (const v of Object.values(s.runs ?? {})) {
           const run = restoreRun(v)
           if (run) a.runMap.set(`${run.sessionId}|${run.workflowId}`, run)
+        }
+        for (const v of Object.values(s.runLaunches ?? {})) {
+          const launch = restoreRunLaunch(v)
+          if (launch) a.runLaunchMap.set(launch.toolUseId, launch)
         }
         a.agentsRevisionValue = count(s.agentsRevision)
       }

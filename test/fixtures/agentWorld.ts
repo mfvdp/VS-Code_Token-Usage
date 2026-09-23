@@ -12,7 +12,7 @@
  *       Plan · sonnet           depth 2, launched from the Explore agent's own transcript: done
  *     Agent · sonnet            launched in the background, no sidecar, silent since 11:38: unknown
  *     Explore · sonnet          launched in the background, stopped: a task notification says `killed`
- *     Workflow cfe7718d         running
+ *     Workflow cfe7718d         running — launched by a `Workflow` call whose result names the run, no end recorded yet
  *       workflow-subagent       done — the workflow journal recorded it, at no time of its own
  *       workflow-subagent       failed — a task notification recorded it
  *       workflow-subagent       failed, retried — the journal recorded the failure and started its step again
@@ -25,7 +25,8 @@
  *
  * Every launch, result, notification, journal line and sidecar carries the description,
  * prompt, summary, answer and output path the builders write (`AGENT_CONTENT`) — a journal line
- * its key, label, phase and result too — which is content no view may hold. Nearly every agent
+ * its key, label, phase and result too, the `Workflow` call its script and the result that
+ * answers it its summary, paths and names — which is content no view may hold. Nearly every agent
  * transcript ends on a line whose reply was never marked finished, as Claude Code's do, so nearly
  * every agent's output is a lower bound.
  */
@@ -38,7 +39,7 @@ import { Attribution } from '../../src/types'
 import { agentTreeFor, defaultUiState } from '../../src/viewModel'
 import {
   CLAUDE_ROOT, ClaudeUsage, agentResultLine, agentToolUseLine, claudeLine, ctxFor, journalKey, journalLine, metaJson,
-  queueOperationLine,
+  queueOperationLine, workflowResultLine, workflowToolUseLine,
 } from './helpers'
 
 /**
@@ -79,6 +80,9 @@ export const AGENT_CONTENT = [
   'synthetic result prompt', 'synthetic agent answer', 'synthetic summary', '/tmp/synthetic/tasks',
   'synthetic journal summary', 'synthetic journal label', 'synthetic journal phase', 'synthetic meta description',
   'synthetic meta prompt', ...STEPS.map((step) => journalKey(step)),
+  // 1.6 N4: the `Workflow` call's input and the result that answers it.
+  'synthetic workflow script', 'synthetic workflow args', 'synthetic workflow description', 'synthetic workflow summary',
+  'synthetic workflow answer', 'synthetic-workflow-name', '/tmp/synthetic/workflows', '/tmp/synthetic/transcripts',
 ]
 
 const SLUG = path.join(CLAUDE_ROOT, '-home-t-alpha')
@@ -112,6 +116,8 @@ const TU = {
   wfFailed: 'toolu_01Ga6kN9qT2wZ5cF8jM1pS4v',
   pending: 'toolu_01Rb3fJ6mV9yC2gL5oR8uX1a',
   guide: 'toolu_01Ld7hP0sW3zD6iM9qT2xB5e',
+  // 1.6 N4: the `Workflow` call that launched the run.
+  workflow: 'toolu_01Wf4kR7nT0wC3fJ6mP9sV2y',
 } as const
 
 /**
@@ -206,8 +212,13 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
   sidecar(W.stopped, { agentType: 'Explore', model: 'sonnet', spawnDepth: 1, toolUseId: TU.stopped })
   turn(f(W.stopped), 'k-2', at(11, 33, 40), SONNET, { input: 3, cacheWrite: 900, cacheRead: 7900, output: 540 }, { agentId: W.stopped, final: false })
   read(MAIN, queueOperationLine({ ts: at(11, 34), toolUseId: TU.stopped, status: 'killed' }))
-  // The workflow run: a tool call that launches no agent, and three agents in the run's directory.
-  turn(MAIN, 'm-4', at(11, 40), OPUS, { input: 20, cacheWrite: 1900, cacheRead: 19700, output: 310 }, { tools: ['Workflow'] })
+  // The workflow run: a tool call that launches no agent but the run (1.6 N4) — its result names
+  // the run's directory, in the background, and no end has been recorded for it yet — and the
+  // agents in the run's directory.
+  read(MAIN, workflowToolUseLine({
+    id: 'm-4', ts: at(11, 40), toolUseId: TU.workflow, usage: { input: 20, cacheWrite: 1900, cacheRead: 19700, output: 310 },
+  }))
+  read(MAIN, workflowResultLine({ ts: at(11, 40, 1), toolUseId: TU.workflow, runId: W.workflow }))
   turn(f(W.wfDone), 'wd-1', at(11, 40, 10), OPUS, { input: 9, cacheWrite: 11200, output: 700 }, { agentId: W.wfDone, tools: ['Read'] })
   sidecar(W.wfDone, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
   journal('started', W.wfDone, 'done', at(11, 40, 11))

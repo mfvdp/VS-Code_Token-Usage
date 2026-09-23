@@ -139,10 +139,17 @@ export const READ_CONTRACT = [
     fields: ['type', 'key', 'agentId'] },
   { what: 'the workflow journal (fallback)', file: 'src/agg.ts', kind: 'fields', body: 'function journalFallback(', variable: 'd',
     fields: ['type', 'key', 'agentId'] },
+  // 1.6 §0a.3 (P4): the blocks of a reply the launches are read from — an `Agent`/`Task` block's
+  // `input` for the three fields above; of a `Workflow` block only its `id`, its input never.
+  { what: 'the launch blocks', file: 'src/agg.ts', kind: 'fields', body: 'private noteLaunches(', variable: 'block',
+    fields: ['type', 'name', 'id', 'input'] },
   { what: 'an agent launch', file: 'src/agg.ts', kind: 'fields', body: 'private noteLaunches(', variable: 'input',
     fields: ['subagent_type', 'model', 'run_in_background'] },
   { what: 'the tool result', file: 'src/agg.ts', kind: 'fields', body: 'private agentResult(', variable: 'r',
     fields: ['agentId', 'status'] },
+  // 1.6 §0a.3 (P4): the result that answers a `Workflow` call — the run it launched and its status.
+  { what: 'the workflow result', file: 'src/agg.ts', kind: 'fields', body: 'private runResult(', variable: 'r',
+    fields: ['runId', 'status'] },
   { what: 'the reported totals', file: 'src/agg.ts', kind: 'fields', body: 'function reportedTotals(', variable: 'r',
     fields: ['totalTokens', 'totalDurationMs', 'totalToolUseCount'] },
   { what: 'the task notification', file: 'src/agg.ts', kind: 'tags', pattern: /const NOTE_\w+_RE = \/<([a-z-]+)>/g,

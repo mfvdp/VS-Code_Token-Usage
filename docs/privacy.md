@@ -39,12 +39,16 @@ identifiers and counts, never content:
 * the **name** of a tool call, with the day, the model and how often it ran: that is what the
   `tools` section and the `tools[]` of the export are made of, and it is names and counts, never
   a path, an argument or an output;
-* for the agent tree, from an `Agent` (or `Task`) tool call its `id` and three fields of its
-  input — `subagent_type`, `model` and `run_in_background`: the agent's type, its model alias and
+* for the agent tree, of the `tool_use` blocks of a reply the `type`, the `name` and the `id`:
+  from an `Agent` (or `Task`) tool call its `id` and three fields of its `input` —
+  `subagent_type`, `model` and `run_in_background`: the agent's type, its model alias and
   whether it runs in the background; from the tool result that answers it `agentId`, `status`,
-  `totalTokens`, `totalDurationMs` and `totalToolUseCount`; from a queued task notification the
+  `totalTokens`, `totalDurationMs` and `totalToolUseCount`; from a `Workflow` tool call its `id`,
+  and from the result that answers it the `runId` and the `status` — the call's input, which
+  holds the workflow's `script`, is never read; from a queued task notification the
   `<tool-use-id>` and `<status>` tags. Never the `description`, the `prompt`, the `summary`, the
-  `output-file`, the `content` or the `result`, and never a working directory. Each of these
+  `output-file`, the `content` or the `result`, never a workflow's `script`, `scriptPath` or
+  `transcriptDir`, and never a working directory. Each of these
   values is an identifier or a number, and an identifier is held to a small alphabet and length
   on the way in — one that does not fit is dropped, not trimmed. The agent tables keep them for
   seven days in the token snapshot, never in an export or the diagnostics report, and of them

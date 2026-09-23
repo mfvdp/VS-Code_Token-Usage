@@ -396,7 +396,8 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
 
   const u = run([done('eeee0001'), silent('eeee0002')])
   assert.deepEqual([u.w.state, u.w.derived], ['unknown', true])
-  assert.equal(u.text, 'Unknown — inferred: not every agent of this run has a recorded result, and none is running.')
+  // 1.6 §7c (P4): the run's unknown sentence says "outcome", as the run's other sentences do.
+  assert.equal(u.text, 'Unknown — inferred: not every agent of this run has a recorded outcome, and none is running.')
 
   // The run's figures are its agents' figures: 2 × (300 + 200 + 700), from its first start to
   // its last line.

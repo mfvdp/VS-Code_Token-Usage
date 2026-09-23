@@ -362,7 +362,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
   // The readers 1.5 documented stay in the contract: a row cannot leave it unnoticed.
   const readers = READ_CONTRACT.map((row) => row.what)
   for (const what of ['the identity sidecar', 'the workflow journal', 'the workflow journal (fallback)', 'an agent launch',
-    'the tool result', 'the reported totals', 'the task notification']) {
+    'the tool result', 'the reported totals', 'the task notification',
+    // 1.6 §0a.3 (P4): the launch blocks of a reply, and the result that answers a `Workflow` call.
+    'the launch blocks', 'the workflow result']) {
     assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
   }
   for (const row of READ_CONTRACT) {
@@ -374,8 +376,10 @@ test('the privacy and agents pages name every field the agent tables read, and t
     }
   }
   // And what stays out, in the words both pages promise it in. 1.6 §0a.1 (P2b): a journal line's
-  // `label` and `phase`.
-  for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result', 'label', 'phase']) {
+  // `label` and `phase`; §0a.3 (P4): a `Workflow` call's `script` and its result's `scriptPath`
+  // and `transcriptDir`.
+  for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result', 'label', 'phase',
+    'script', 'scriptPath', 'transcriptDir']) {
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
@@ -405,7 +409,8 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     // result." are gone from the builder and the page.
     'Done — every agent of this run has a recorded outcome, and at least one completed.',
     'Failed — every agent of this run has a recorded outcome, and none completed.',
-    'Unknown — inferred: not every agent of this run has a recorded result, and none is running.',
+    // 1.6 §7c (P4): "outcome", as the run's other sentences say — its "… a recorded result, …" is gone.
+    'Unknown — inferred: not every agent of this run has a recorded outcome, and none is running.',
     "Running — inferred: the parent recorded the launch {0} and no result yet; the agent's transcript has not been seen yet.",
     "Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
     // 1.6 D6: an agent that wrote on after its outcome.
@@ -418,10 +423,19 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Failed — the workflow journal recorded the failure.',
     'Failed, retried — the workflow journal recorded the failure and started the same step again (agent {0}).',
     'Stopped, replaced — the workflow journal started the same step again (agent {0}) before this agent recorded a result.',
+    // 1.6 N4 (P4): a run's own end, as its parent recorded it for its latest launch; a run an agent
+    // of which wrote on after it; a run nothing but its launch shows yet.
+    'Completed — the parent recorded the end of this run at {0}.',
+    'Failed — the parent recorded the failure of this run at {0}.',
+    'Stopped — the parent recorded ‘{0}’ for this run at {1}.',
+    'Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.',
+    'Running — inferred: the parent launched this run {0} and no agent has written yet.',
+    'Unknown — inferred: the parent launched this run at {0}, but no agent of it was ever seen.',
   ]
-  // The two run sentences 1.6 replaced are written nowhere any more.
+  // The run sentences 1.6 replaced are written nowhere any more.
   for (const gone of ['Failed — at least one agent of this run has a recorded failure.',
-    'Done — every agent of this run has a recorded result.']) {
+    'Done — every agent of this run has a recorded result.',
+    'Unknown — inferred: not every agent of this run has a recorded result, and none is running.']) {
     assert.equal(src.includes(gone), false, `src/agentTreeBuild.ts still writes: ${gone}`)
     assert.equal(doc.agents.replace(/\s+/g, ' ').includes(gone), false, `docs/agents.md still quotes: ${gone}`)
   }

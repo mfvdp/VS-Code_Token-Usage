@@ -25,7 +25,7 @@ import { TimeConfig } from '../src/time'
 import { AgentLaunch, AgentRec, Snapshot, STATE_VERSION } from '../src/types'
 import {
   CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, claudeLine, ctxFor, iso, journalLine,
-  metaJson, queueOperationLine, tmpDir,
+  metaJson, queueOperationLine, tmpDir, workflowResultLine,
 } from './fixtures/helpers'
 
 /** Roots are module state; the next test file must not inherit a scratch directory. */
@@ -711,9 +711,22 @@ test('no agent or launch record holds a string longer than its cap', () => {
 // The gate
 // ---------------------------------------------------------------------------
 
-test('a line that is no response, agent result or notification changes nothing', () => {
+// 1.6 P4 (N4): pinned that nothing but a response, an agent's result or a notification changes the
+// agent tables. The result that answers a `Workflow` call — a `runId` and no `agentId` — is one
+// more line that does (asserted at the end); one that only mentions a run changes nothing.
+test('a line that is no response, agent or run result, or notification changes nothing', () => {
   const agg = new Aggregator()
   const lines = [
+    // A shell's output mentions a run id — inside a string, where the quotes are escaped.
+    JSON.stringify({
+      type: 'user', timestamp: iso(T0),
+      message: { role: 'user', content: [{ tool_use_id: 'toolu_b', type: 'tool_result', content: 'x' }] },
+      toolUseResult: { stdout: 'grep "runId" wf_0a1b2c3d-123', stderr: '' },
+    }),
+    // A result that names no run this build takes: outside the allow-list, or none at all.
+    workflowResultLine({ ts: T0, toolUseId: 'toolu_wf', runId: '../wf_x' }),
+    workflowResultLine({ ts: T0, toolUseId: 'toolu_wf', runId: 42 }),
+    workflowResultLine({ ts: T0, toolUseId: 'toolu_wf' }),
     // A shell's output mentions the words — inside a string, where the quotes are escaped.
     JSON.stringify({
       type: 'user', timestamp: iso(T0),
@@ -738,6 +751,10 @@ test('a line that is no response, agent result or notification changes nothing',
   const before = JSON.stringify(agg.toSnapshot())
   for (const line of lines) assert.equal(agg.addClaudeLine(line, MAIN_CTX), false, line.slice(0, 60))
   assert.equal(JSON.stringify(agg.toSnapshot()), before)
+  // The result that answers a `Workflow` call names its run: that changes the run launches.
+  assert.equal(agg.addClaudeLine(workflowResultLine({ ts: T0, toolUseId: 'toolu_wf', runId: WF }), MAIN_CTX), true)
+  assert.notEqual(JSON.stringify(agg.toSnapshot()), before)
+  assert.deepEqual(agg.runLaunches().map((l) => [l.toolUseId, l.runId, l.outcome]), [['toolu_wf', WF, 'launched']])
 })
 
 // ---------------------------------------------------------------------------

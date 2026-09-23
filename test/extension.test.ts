@@ -26,7 +26,7 @@ import * as os from 'os'
 import * as path from 'path'
 import {
   agentResultLine, agentToolUseLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
-  journalKey, journalLine, metaJson, snakeRateLimits, tmpDir,
+  journalKey, journalLine, metaJson, queueOperationLine, snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine,
 } from './fixtures/helpers'
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
@@ -1543,6 +1543,40 @@ test('a journal\'s keys, labels, phases and results reach neither the log, the d
   } finally {
     seeAgain()
     intervals.restore()
+  }
+})
+
+test('a Workflow call\'s script and its result\'s summary, paths and names reach neither the log, the diagnostics, the markdown nor the state (1.6 §0a.3)', async () => {
+  // The host's half of the §0a.3 leak test (test/agg.runs.test.ts has the aggregator's): the cold
+  // start reads the run's launch, the result that names the run and the notification that ends
+  // it, the replay the revision asks for reads them again, and the rest goes where the host sends it.
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const secret = 'WORKFLOW-HOST-CONTENT-8c2d'
+  appendLine(w.activeMain, workflowToolUseLine({ id: 'msg_act_wf', ts: T, toolUseId: 'toolu_wfhost01', script: `${secret}-script` }))
+  appendLine(w.activeMain, workflowResultLine({ ts: T, toolUseId: 'toolu_wfhost01', runId: RUN, summary: `${secret}-summary` }))
+  appendLine(w.activeMain, queueOperationLine({ ts: T, toolUseId: 'toolu_wfhost01', status: 'completed', summary: `${secret}-note` }))
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const { agg } = lazy()
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  await state.execute('tokenPace.copyDiagnostics')
+  const report = state.clipboard[state.clipboard.length - 1]
+  assert.ok(report && report.length > 0, 'no diagnostics were copied')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const saved = fs.readFileSync(fx.stateFile, 'utf8')
+  // It went through: the launch is kept with the run it named and the end the parent recorded,
+  // and the run reads done by it.
+  const launches = Object.values((JSON.parse(saved) as Snapshot).runLaunches ?? {})
+  assert.deepEqual(launches.map((l) => [l.toolUseId, l.runId, l.outcome, l.outcomeStatus]), [['toolu_wfhost01', RUN, 'completed', 'completed']])
+  assert.match(markdown, /\[Done\] Workflow c0ffee00/)
+  for (const [what, text] of [['log', state.logText()], ['diagnostics', report], ['markdown', markdown], ['state', saved]]) {
+    assert.equal(text.includes(secret), false, `the ${what} holds the call's script, the result's summary or the notification's`)
+    for (const fixture of ['synthetic workflow', 'synthetic-workflow-name', '/tmp/synthetic/', 'local_workflow']) {
+      assert.equal(text.includes(fixture), false, `the ${what} holds the fixture's ${fixture}`)
+    }
   }
 })
 

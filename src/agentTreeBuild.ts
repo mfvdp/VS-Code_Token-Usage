@@ -17,6 +17,9 @@
  *    recorded yet;
  *  - anything else is unknown, never done: Claude Code writes no end marker into an agent's
  *    transcript, so a silent file is not a finished one.
+ * A workflow run's end is what its parent recorded for its latest `Workflow` launch, then — once
+ * every member is closed — what its members came to, and failing both what their clocks say; a
+ * run nothing but its launch shows yet runs by the launch's clock (1.6 N4, §3.0 c).
  *
  * A node is keyed by the identifiers its records carry — `s:<sessionId>`,
  * `w:<sessionId>|<workflowId>` (a run belongs to its session), `a:<agentId>`,
@@ -40,8 +43,8 @@ import { compact, full } from './render'
 import { durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, dayOf, formatTime } from './time'
 import {
-  AgentLaunch, AgentRec, Attribution, Bucket, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RunRec, SessionRec,
-  emptyBucket,
+  AgentLaunch, AgentRec, Attribution, Bucket, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RunLaunch, RunRec,
+  SessionRec, emptyBucket,
 } from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
@@ -57,6 +60,11 @@ export interface AgentTreeInput {
    * what the journal says of their ends. Absent means none.
    */
   runs?: readonly RunRec[]
+  /**
+   * The `Workflow` tool calls the transcripts recorded (1.6 N4): the run each launched, and the
+   * end the parent recorded for it. Absent means none.
+   */
+  runLaunches?: readonly RunLaunch[]
   /** `ui.agentSelected`: the node whose details are open, or null. */
   selected: string | null
   /**
@@ -175,6 +183,11 @@ function validMain(m: MainRec): boolean {
 
 function validRun(r: RunRec): boolean {
   return !!r && text(r.sessionId) !== null && text(r.workflowId) !== null && Array.isArray(r.agents)
+}
+
+/** A run launch the tree can place: its call, its transcript, its time, and the run the result named. */
+function validRunLaunch(l: RunLaunch): boolean {
+  return !!l && text(l.toolUseId) !== null && text(l.file) !== null && stampOf(l.ts) !== null && text(l.runId) !== null
 }
 
 function validJournalAgent(j: JournalAgent): boolean {
@@ -609,7 +622,7 @@ function workflowState(n: AgentTally): StateOf {
     return { state: 'running', stateText: t('Running — inferred: at least one agent of this run is running.') }
   }
   if (n.started === 0 || n.unknown > 0) {
-    return { state: 'unknown', stateText: t('Unknown — inferred: not every agent of this run has a recorded result, and none is running.') }
+    return { state: 'unknown', stateText: t('Unknown — inferred: not every agent of this run has a recorded outcome, and none is running.') }
   }
   if (n.done > 0) {
     return { state: 'done', stateText: t('Done — every agent of this run has a recorded outcome, and at least one completed.') }
@@ -621,6 +634,110 @@ function workflowState(n: AgentTally): StateOf {
     state: 'stopped',
     stateText: t('Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.'),
   }
+}
+
+/** The latest of a run's launches — a resume is another launch of the same run —, by time, then by id. */
+function latestLaunch(launches: readonly RunLaunch[]): RunLaunch | null {
+  let out: RunLaunch | null = null
+  for (const l of launches) {
+    if (out === null || l.ts > out.ts || (l.ts === out.ts && cmp(l.toolUseId, out.toolUseId) > 0)) out = l
+  }
+  return out
+}
+
+/**
+ * N4 (§3.0 c, the first source): the end the parent recorded for a workflow run — the task
+ * notification, or the tool result, that answered its **latest** launch — with its time and its
+ * word. A latest launch still under way (`launched`: a resume in progress) gives none: what an
+ * earlier launch recorded is history, which the `Launches` row counts. A stop only with its word.
+ */
+function parentRunEnd(latest: RunLaunch | null): Outcome | null {
+  if (latest === null) return null
+  const o = latest.outcome
+  if (o !== 'completed' && o !== 'failed' && o !== 'stopped') return null
+  const e = ended(o, wordOf(latest.outcomeStatus, o))
+  return e === null ? null : { ...e, at: stampOf(latest.outcomeTs) }
+}
+
+/** The run's end as the parent recorded it, in the run's own sentence — the time left out when it has none. */
+function runOutcomeState(o: Outcome, now: number, tcfg: TimeConfig): StateOf {
+  const at = o.at === null ? null : stamp(o.at, now, tcfg)
+  if (o.outcome === 'stopped') {
+    // D7 for runs: the parent's own word, verbatim — ‘stopped’, ‘killed’ or ‘cancelled’.
+    return {
+      state: 'stopped',
+      stateText: at === null
+        ? t('Stopped — the parent recorded ‘{0}’ for this run.', o.word)
+        : t('Stopped — the parent recorded ‘{0}’ for this run at {1}.', o.word, at),
+    }
+  }
+  if (o.outcome === 'failed') {
+    return {
+      state: 'failed',
+      stateText: at === null
+        ? t('Failed — the parent recorded the failure of this run.')
+        : t('Failed — the parent recorded the failure of this run at {0}.', at),
+    }
+  }
+  return {
+    state: 'done',
+    stateText: at === null
+      ? t('Completed — the parent recorded the end of this run.')
+      : t('Completed — the parent recorded the end of this run at {0}.', at),
+  }
+}
+
+/**
+ * The third source of a run's end (§3.0 c): Claude Code's own run record (1.6 L4), which this
+ * build does not read yet — so it says nothing, and the run's state is its members'.
+ */
+function recordRunEnd(run: RunRec | null): StateOf | null {
+  void run
+  return null
+}
+
+/**
+ * A workflow run's state (§3.0 c): the end its parent recorded for its latest launch, then — once
+ * every member is closed — what they came to (the journal's view, `workflowState`), then Claude
+ * Code's run record, then what its members' clocks say. A recorded end does not close a member:
+ * one without an outcome of its own keeps its own state and counts so in the tally, so a done run
+ * may show an agent still running beside it for up to ten minutes. The parent's end is outlived
+ * like an agent's (D6): a member whose last line came more than RESUMED_AFTER_MS after it makes
+ * the run's state an inference again, the recorded end kept for the details (`resumed`). A run no
+ * agent has written to yet — nothing but its launch — is running for ten minutes after the
+ * launch, then unknown.
+ */
+function runState(
+  tally: AgentTally, latest: RunLaunch | null, run: RunRec | null, lastActivity: number | null, now: number, tcfg: TimeConfig,
+): StateOf {
+  const parent = parentRunEnd(latest)
+  const outlived = parent !== null && parent.at !== null && lastActivity !== null && lastActivity > parent.at + RESUMED_AFTER_MS
+  if (parent !== null && !outlived) return runOutcomeState(parent, now, tcfg)
+  if (tally.started > 0 && tally.running === 0 && tally.unknown === 0) return workflowState(tally)
+  const record = recordRunEnd(run)
+  if (record !== null) return record
+  if (tally.started === 0 && latest !== null) {
+    if (now - latest.ts <= RUNNING_WINDOW_MS) {
+      return {
+        state: 'running',
+        stateText: t('Running — inferred: the parent launched this run {0} and no agent has written yet.', ago(latest.ts, now)),
+      }
+    }
+    return {
+      state: 'unknown',
+      stateText: t('Unknown — inferred: the parent launched this run at {0}, but no agent of it was ever seen.', stamp(latest.ts, now, tcfg)),
+    }
+  }
+  const st = workflowState(tally)
+  if (!outlived || parent === null || parent.at === null) return st
+  if (st.state === 'running') {
+    return {
+      state: 'running',
+      stateText: t('Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.', stamp(parent.at, now, tcfg)),
+      resumed: parent,
+    }
+  }
+  return { ...st, resumed: parent }
 }
 
 /**
@@ -783,6 +900,8 @@ interface RootAcc {
   pendings: AgentLaunch[]
   /** Its workflow runs as their journals record them, by run id. */
   runs: Map<string, RunView>
+  /** The `Workflow` calls that launched its runs (N4), by run id: one per launch, resumes included. */
+  runLaunches: Map<string, RunLaunch[]>
 }
 
 interface Forest {
@@ -922,15 +1041,39 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
   const accFor = (sessionId: string): RootAcc => {
     let a = accs.get(sessionId)
     if (!a) {
-      a = { sessionId, main: null, agents: [], pendings: [], runs: new Map() }
+      a = { sessionId, main: null, agents: [], pendings: [], runs: new Map(), runLaunches: new Map() }
       accs.set(sessionId, a)
     }
     return a
   }
   for (const r of recById.values()) accFor(r.sessionId).agents.push(r)
+  // The session a launch belongs to: its agent's, when an agent launched it, else its file's.
+  const sessionOfLaunch = (file: string): string | null => {
+    const id = agentIdOf(file)
+    const r = id !== null ? recById.get(id) : undefined
+    return r ? r.sessionId : sessionOfPath(file)?.sessionId ?? null
+  }
+  // N4: the `Workflow` calls whose result named their run, by the launching transcript's session
+  // and the run's id — the parent's view of the run, joined to its journal and its agents by
+  // that pair. Kept while the launch or the end the parent recorded for it is within the retention.
+  const launchedRuns = new Map<string, RunLaunch[]>()
+  for (const l of input.runLaunches ?? []) {
+    if (!validRunLaunch(l) || Math.max(l.ts, stampOf(l.outcomeTs) ?? 0) < since) continue
+    const sessionId = sessionOfLaunch(l.file)
+    if (sessionId === null) continue
+    const runId = l.runId as string
+    const key = `${sessionId}|${runId}`
+    let list = launchedRuns.get(key)
+    if (!list) {
+      list = []
+      launchedRuns.set(key, list)
+      accFor(sessionId).runLaunches.set(runId, list)
+    }
+    if (!list.some((x) => x.toolUseId === l.toolUseId)) list.push(l)
+  }
   // A run is in the tree while its journal changed within the retention, or while one of its
-  // agents' records is: the journal's view of those agents joins them by id.
-  const recordedRuns = new Set<string>()
+  // agents' records or one of its launches is: the journal's view of those agents joins them by id.
+  const recordedRuns = new Set<string>(launchedRuns.keys())
   for (const r of recById.values()) {
     const wf = text(r.workflowId)
     if (wf !== null) recordedRuns.add(`${r.sessionId}|${wf}`)
@@ -942,12 +1085,6 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
     if (!recordedRuns.has(key) && (last === null || last < since)) continue
     const acc = accFor(run.sessionId)
     if (!acc.runs.has(run.workflowId)) acc.runs.set(run.workflowId, runView(run))
-  }
-  // The session a launch belongs to: its agent's, when an agent launched it, else its file's.
-  const sessionOfLaunch = (file: string): string | null => {
-    const id = agentIdOf(file)
-    const r = id !== null ? recById.get(id) : undefined
-    return r ? r.sessionId : sessionOfPath(file)?.sessionId ?? null
   }
   for (const l of launches) {
     if (linked.has(l.toolUseId)) continue
@@ -964,7 +1101,7 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
   for (const a of accs.values()) {
     const recent = a.main !== null && a.main.lastTs >= now - ROOT_WINDOW_MS
     const journalled = [...a.runs.values()].some((v) => v.byAgent.size > 0)
-    if (!recent && a.agents.length === 0 && a.pendings.length === 0 && !journalled) continue
+    if (!recent && a.agents.length === 0 && a.pendings.length === 0 && !journalled && a.runLaunches.size === 0) continue
     const root = buildRoot(a, {
       now, tcfg, attribution: input.attribution, project: projects.get(a.sessionId) ?? null, launchOf,
     })
@@ -1240,6 +1377,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     if (only.length === 0) continue
     workflowOf(wf).journalOnly = only
   }
+  // N4: a run its parent launched is a run of the session from the launch on — before any agent
+  // of it has written a line, or its journal one.
+  for (const wf of a.runLaunches.keys()) workflowOf(wf)
 
   // A run is summed from the agents inside it, on the whole tree: a closed run, or one showing
   // fifty of its agents at a time, hides some of them from the page, but that does not change
@@ -1255,6 +1395,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       if (m.startTs !== null && (first === null || m.startTs < first)) first = m.startTs
       if (m.lastTs !== null && (last === null || m.lastTs > last)) last = m.lastTs
     }
+    // N4: the launches of the run, a resume being one more. The latest decides the parent's end.
+    const launches = a.runLaunches.get(wf) ?? []
+    const latest = latestLaunch(launches)
     const run = a.runs.get(wf)?.run ?? null
     const siblingRuns = members.some((m) => m.state === 'running')
     const only: Member[] = run === null ? [] : w.journalOnly.map((j) => ({
@@ -1263,26 +1406,46 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     if (only.some((m) => m.state === 'running')) anyRunning = true
     w.journalMembers = only
     const tally = tallyBelow(w)
-    const st = workflowState(tally)
+    // The members' last line, before the launches fill in for a run nobody has written to yet.
+    const st = runState(tally, latest, run, last, now, tcfg)
     w.state = st.state
     w.stateText = st.stateText
     w.counters = sum
     w.usage = usageText(sum)
     w.lowerBound = sum.outputFinal < sum.requests
+    // A run no agent has written to yet: its launch is its start, and the parent's last word on
+    // it its last activity. It ran for no time anyone measured, so it has no duration.
+    const measured = members.length > 0
+    if (!measured) {
+      for (const l of launches) {
+        const lastOf = Math.max(l.ts, stampOf(l.outcomeTs) ?? 0)
+        if (first === null || l.ts < first) first = l.ts
+        if (last === null || lastOf > last) last = lastOf
+      }
+    }
     w.startTs = first
     w.lastTs = last
-    w.duration = first !== null && last !== null ? durationText(last - first) : '–'
+    w.duration = measured && first !== null && last !== null ? durationText(last - first) : '–'
     const dropped = run !== null && typeof run.agentsDropped === 'number' && Number.isInteger(run.agentsDropped)
       && run.agentsDropped > 0 ? run.agentsDropped : 0
+    // A run whose agents nobody has seen yet has no count to state: '–', never an invented 0.
+    const agentsValue = tally.started > 0 ? full(tally.started) : '–'
     const agentsRow: DetailRow = dropped > 0
       ? {
-        label: t('Agents'), value: full(tally.started),
+        label: t('Agents'), value: agentsValue,
         note: t('{0} further agents not listed', full(dropped)), kind: 'sentence',
       }
-      : { label: t('Agents'), value: full(tally.started) }
+      : { label: t('Agents'), value: agentsValue }
+    // N4: a resumed run was launched more than once — the ends of the earlier launches are its
+    // history, and only the latest launch's decides the run.
+    const launchesRow: DetailRow[] = launches.length >= 2
+      ? [{ label: t('Launches'), value: t('{0} — resumed {1} time(s)', full(launches.length), full(launches.length - 1)) }]
+      : []
     w.rows = () => [
       agentsRow,
+      ...launchesRow,
       ...timeRows(w.startTs, w.lastTs, now, tcfg),
+      ...recordedRows(st.resumed, now, tcfg),
       ...countRows(sum),
       idRow(wf),
     ]

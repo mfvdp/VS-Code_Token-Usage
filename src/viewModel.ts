@@ -1340,6 +1340,7 @@ export function agentTreeFor(
     launches: agg.launches(),
     mains: agg.mains(),
     runs: agg.runs(),
+    runLaunches: agg.runLaunches(),
     sessions: agg.sessions(),
     attribution: cfg.attribution,
     selected: ui.agentSelected ?? null,

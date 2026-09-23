@@ -319,6 +319,31 @@ export interface MainRec {
 }
 
 /**
+ * A `Workflow` tool call a transcript recorded (1.6 N4, §0a.3), keyed by its tool_use id: the
+ * parent's view of a workflow run, as an `AgentLaunch` is of an agent. Of the call only its `id`
+ * is read — never its input, which holds the workflow's script — and of the tool result that
+ * answers it the `runId` and the `status`; the task notification of the call gives its end.
+ */
+export interface RunLaunch {
+  /** The `Workflow` block's id, ≤ 64 chars of `[A-Za-z0-9_-]`. */
+  toolUseId: string
+  /** The transcript holding the tool_use (the session's, or an agent's). */
+  file: string
+  ts: number
+  /**
+   * From the tool result: `wf_` and at most 61 characters of `[A-Za-z0-9_-]` — the name of the
+   * run's directory under `subagents/workflows/`. Null until the result arrives. A resumed run
+   * keeps its id, so one run can have several launches.
+   */
+  runId: string | null
+  /** `launched` for the background start (`async_launched`), an end once the parent recorded one. */
+  outcome: 'launched' | RecordedOutcome | null
+  /** The parent's word for the end (§0a.0); null while launched. */
+  outcomeStatus: LaunchStatus | null
+  outcomeTs: number | null
+}
+
+/**
  * One agent as its run's journal records it (1.6 D2, D7): its id, which step of the run it
  * works on and which attempt at that step it is, and the outcome the journal gave it. No key, no
  * label, no result — the journal's `key` only ever tells two steps apart, in memory (see
@@ -391,6 +416,11 @@ export interface Snapshot {
    * A version 7 snapshot has none: the replay rebuilds them from the journals.
    */
   runs?: Record<string, RunRec>
+  /**
+   * The `Workflow` tool calls the transcripts recorded, keyed by tool_use id (1.6 N4). A snapshot
+   * written before them has none: the replay the revision asks for finds them again.
+   */
+  runLaunches?: Record<string, RunLaunch>
   /**
    * Which revision of the agent tables the one-time replay last built (`AGENT_TABLES_REVISION`
    * in agg.ts); absent means 0 — never replayed by this build. Replaces 1.5's `agentsReplayed`:

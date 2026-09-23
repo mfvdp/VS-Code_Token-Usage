@@ -577,7 +577,9 @@ test('docs/dashboard.md and docs/numbers.md name the subagent share of a window 
   const numbers = doc.numbers.replace(/\s+/g, ' ')
   for (const claim of ['| Subagent share of a Claude window (`Subagents 4.7M of 5.5M counted here (86 %)`) |',
     'A share of tokens, **never of the quota**', '`≈` on both figures', 'Claude only',
-    '| Agent records against subagent hour buckets (data quality) |', 'a record keeps a whole agent, a bucket the hour of each reply']) {
+    '| Agent records against subagent hour buckets (data quality) |', 'a record keeps a whole agent, a bucket the hour of each reply',
+    // Review 3: the buckets' figure is marked as the view model marks it (dataQuality.agents.buckets).
+    'the buckets\' figure `≈` once those seven days reach below the hour buckets\' roll-up']) {
     assert.ok(numbers.includes(claim), `docs/numbers.md does not say: ${claim}`)
   }
 })

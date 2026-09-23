@@ -1459,6 +1459,12 @@ const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending', 'noreply'];
  */
 const AGENT_MAX_DEPTH = 24;
 /**
+ * 1.6 P7b: the least room, in the name's font size, an agent's model that gives way keeps on its
+ * row: its dot with a space either side and the ellipsis, " · …" (11.6 + 13 px at 13 px). With
+ * less it is taken off the name whole (fitAgentNames).
+ */
+const AGENT_MODEL_ROOM_EM = 1.9;
+/**
  * 1.6 D10: whether a row of the tree — and of the running list — marks an output that is a lower
  * bound with ⚠, inside its usage figure, titled with the view model's reason ("⚠ lower bound — 2
  * of 41 replies unfinished"). Off, the rows carry no mark and the details' Output note alone says
@@ -1640,8 +1646,9 @@ function agentTally(n: Payload): string[] {
 
 /**
  * A session's figures: what its own transcript used, since its first line, and — as a figure
- * of its own, never added to it — what its agents of the last seven days used; then its span
- * from the first line to the last, which says so in its title. Two figures of two different
+ * of its own, never added to it — what its agents of the last seven days used; its span from
+ * the first line to the last, which says so in its title, ends its line after the tally
+ * (sessionSpan, 1.6 P7b). Two figures of two different
  * spans side by side, each named, so neither reads as the other's part or as their sum. The
  * name comes first — "own 1.2M · agents 434.6K" — since a figure in front of "agents" reads as a
  * number of agents, and the tally beside it counts agents. A session without agents shows no
@@ -1651,36 +1658,45 @@ function sessionFigures(n: Payload): string[] {
   // 1.6 D10: a session's lower bound is its own transcript's, so the mark goes with its own figure.
   const out = [tr('own {0}', orDash(n.usage) + lowerMark(n))];
   if (typeof n.usageAgents === 'string' && n.usageAgents !== '') out.push(tr('agents {0}', orDash(n.usageAgents)));
-  out.push('<span title="' + tr('span from the first to the last line') + '">' + orDash(n.duration) + '</span>');
   return out;
+}
+
+/** A session's span, the last figure of its row (1.6 P7b), titled with what it is. */
+function sessionSpan(n: Payload): string {
+  return '<span title="' + tr('span from the first to the last line') + '">' + orDash(n.duration) + '</span>';
 }
 
 /**
  * 1.6 N6: the second line of a row — its figures, in the dim tone, under its name: what it used
  * (a session: its own transcript's and, apart, its agents'), then its duration or — while it runs —
  * the live clock since its start in the duration's place, then how long a running agent has been
- * silent (N5), then the tally of the agents below it (N1), where the row shows one. Every part is
- * an `ag-fp` of the line, whole or not at all: the line never wraps, and where a narrow sidebar
- * has no room for the last parts, fitAgentFigures takes them off the line whole and ends it on
- * "…" — never a figure torn in two, never a third line (a screen reader still gets every one).
- * A lower bound's ⚠ is inside the usage part (D10). Nothing of a launch nobody has read a line of,
- * or of a collector's agents, was counted: dashes, and a collector no clock at all (1.6, lead note).
+ * silent (N5), then the tally of the agents below it (N1), where the row shows one. A session's and
+ * a run's line puts its tally before its duration (1.6 P7b, the lead's call): what the agents
+ * below it came to is what the row is there to say, the span or the duration the least of it, and
+ * so the first to give way. Every part is an `ag-fp` of the line, whole or not at all: the line
+ * never wraps, and where a narrow sidebar has no room for the last parts, fitAgentFigures takes
+ * them off the line whole and ends it on "…" — never a figure torn in two, never a third line (a
+ * screen reader still gets every one). A lower bound's ⚠ is inside the usage part (D10). Nothing
+ * of a launch nobody has read a line of, or of a collector's agents, was counted: dashes, and a
+ * collector no clock at all (1.6, lead note).
  */
 function agentFigLine(n: Payload, kind: string, state: string, tally: string[]): string {
   const start = kind === 'noreply' ? null : agentTs(n.startTs);
   const clock = state === 'running' && start !== null;
-  const figs = kind === 'session' ? sessionFigures(n)
-    : [orDash(n.usage) + lowerMark(n)].concat(clock ? [] : [orDash(n.duration)]);
-  const head = figs.map((f: string) => '<span class="nobr">' + f + '</span>');
-  if (clock) {
-    // In the duration's place, the time since the start, ticking: the running glyph beside the
-    // name says what it counts, and the line has no room to spare for "running for" at 260 px.
-    const eye = '<span class="nobr">' + liveSince(start as number) + '</span>';
-    const since = agentClock(n.startClock);
-    head.push(spokenTwin(eye, since === null ? null : tr('since {0}', esc(since))));
+  const nobr = (f: string): string => '<span class="nobr">' + f + '</span>';
+  const head = (kind === 'session' ? sessionFigures(n) : [orDash(n.usage) + lowerMark(n)]).map(nobr);
+  // In the duration's place, while it runs, the time since the start, ticking: the running glyph
+  // beside the name says what it counts, and the line has no room to spare for "running for" at 260 px.
+  const since = agentClock(n.startClock);
+  const time = clock
+    ? spokenTwin(nobr(liveSince(start as number)), since === null ? null : tr('since {0}', esc(since)))
+    : nobr(kind === 'session' ? sessionSpan(n) : orDash(n.duration));
+  if (kind === 'session' || kind === 'workflow') {
+    return '<span class="ag-fig">' + figParts(head, 0) + figParts(tally, head.length)
+      + figParts([time], head.length + tally.length) + '</span>';
   }
   const silent = n.silence === true && kind === 'agent' ? liveSilent(agentTs(n.lastTs), agentClock(n.lastClock)) : '';
-  return '<span class="ag-fig">' + figParts(head, 0) + silent + figParts(tally, head.length) + '</span>';
+  return '<span class="ag-fig">' + figParts(head.concat([time]), 0) + silent + figParts(tally, head.length + 1) + '</span>';
 }
 
 /**
@@ -1741,8 +1757,9 @@ function agentMoreRow(n: Payload, key: string, shown: number): string {
  *
  * 1.6 N6: every row is two lines — its glyph and its name ("Explore · opus-5 · 94f3", the short id
  * dimmed; a session's project after it), then its figures under the name (see agentFigLine). Both
- * lines keep to one line whatever the width: a name too long for it gives way from its type on,
- * never its id, and says itself whole in its title.
+ * lines keep to one line whatever the width: a name too long for it gives way where it is worth
+ * least — an agent's model, a session's project, a session's or a run's short id (1.6 P7b, see
+ * agentLabel) — and says itself whole in its title.
  */
 function agentNode(n: Payload, expanded: string[], selected: string | null, panel: AgentPanel | null, depth: number): string {
   if (!n || typeof n !== 'object') return '';
@@ -1789,32 +1806,74 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
 /**
  * A row's first line after its glyph: the node's name as the view model wrote it (1.6 N6) —
  * "Explore · opus-5 · 94f3", "Session Tue 14:20 · 9d0eb37a", "Workflow run Tue 00:19 · cfe7718d" —
- * on one line. The last part of an agent's, a session's and a run's name is its short id, in the
- * dim tone (§7a Q11); a session's project follows it, dim as well, while attribution names one.
- * When the line has no room for all of it, the project gives way first, then the name from its
- * first part on — the type, then the model — each cut with an ellipsis, and the id never; the
- * whole name, the model id in full, is the line's title. A launch's name is the hint it was
- * launched with, "… · launched", its last word no id; a run's collector (1.6 D4) is named in
- * words — "263 agent(s) without a counted reply" — cut like any name.
+ * on one line, the whole name, the model id in full, its title. The last part of an agent's, a
+ * session's and a run's name is its short id, in the dim tone (§7a Q11); a session's project
+ * follows it, dim as well, while attribution names one. When the line has no room for all of it,
+ * each part gives way in the order of what it is worth to the row (1.6 P7b, the lead's call), cut
+ * with an ellipsis:
+ *
+ * - an agent: the model first, the dot in front of it with it — the type is what tells Explore
+ *   from Plan from general-purpose, and the short id the agent from its siblings, so both stay
+ *   whole; only a line too short for those two alone would cut the type. A launch likewise, its
+ *   last word ("launched") whole as an agent's id is;
+ * - a session and a run: a session's project first, then the short id, down to its ellipsis — so
+ *   a run never loses the time it is named by. The prefix word and the time stay whole; only a
+ *   line too short for both — a run of six days ago named by its date, in a 260 px sidebar — cuts
+ *   the word, never the time.
+ *
+ * A run's collector (1.6 D4) is named in words — "263 agent(s) without a counted reply" — cut
+ * like any name.
  */
 function agentLabel(n: Payload, kind: string): string {
   const v = n.label;
   const parts = typeof v === 'string' && v !== '' ? v.split(' · ') : ['–'];
-  const idLast = (kind === 'agent' || kind === 'session' || kind === 'workflow') && parts.length >= 2;
-  const id = idLast ? parts.pop() as string : null;
-  const names = kind === 'noreply' ? [parts.join(' · ')] : parts;
   const sub = typeof n.sub === 'string' && n.sub !== '' ? n.sub : '';
   const full = typeof n.fullLabel === 'string' && n.fullLabel !== '' ? n.fullLabel : typeof v === 'string' ? v : '';
   const title = full ? full + (sub ? ' · ' + sub : '') : '';
+  const part = (cls: string, html: string): string => '<span class="' + cls + '">' + html + '</span>';
   // The separators are parts of their own, which never give way, so a part cut short keeps its
-  // dot and its space in front of the next one.
+  // dot and its space in front of the next one — but the model's, which goes with it.
   const dot = '<span class="ag-dot"> · </span>';
-  return '<span class="ag-label"' + (title ? ' title="' + esc(title) + '"' : '') + '>'
-    + names.map((p: string, i: number) => (i ? dot : '') + '<span class="ag-np">' + orDash(p) + '</span>').join('')
-    + (id !== null ? dot + '<span class="ag-sid">' + orDash(id) + '</span>' : '')
+  let body: string;
+  if ((kind === 'agent' || kind === 'pending') && parts.length >= 2) {
+    const model = parts.slice(1, -1).join(' · ');
+    body = part('ag-np ag-type', orDash(parts[0]))
+      + (model ? part('ag-np ag-model', ' · ' + orDash(model)) : '') + dot
+      + (kind === 'agent' ? part('ag-sid', orDash(parts[parts.length - 1])) : part('ag-np ag-end', orDash(parts[parts.length - 1])));
+  } else if ((kind === 'session' || kind === 'workflow') && parts.length >= 2) {
+    const id = parts.pop() as string;
+    const name = parts.join(' · ');
+    const at = nameStart(name, agentClock(n.startClock));
+    // Without a start the page can tell from its name, the name before the id is one part, and
+    // gives way last, as the prefix word does.
+    body = (at === null ? part('ag-np ag-pre', orDash(name)) : part('ag-np ag-pre', esc(at[0])) + part('ag-np ag-when', esc(at[1])))
+      + dot + part('ag-sid ag-give', orDash(id));
+  } else {
+    body = part('ag-np', orDash(parts.join(' · ')));
+  }
+  return '<span class="ag-label"' + (title ? ' title="' + esc(title) + '"' : '') + '>' + body
     // The project's dot goes with it: it gives way first, and whole.
     + (sub ? '<span class="ag-proj"> · ' + esc(sub) + '</span>' : '')
     + '</span>';
+}
+
+/**
+ * 1.6 P7b: a session's or a run's name before its short id — "Session Tue 14:20" — as its prefix
+ * word and the time it is named by, the space in front of the time with it: ["Session",
+ * " Tue 14:20"]. The page formats no time of its own (N9): it finds the time the view model named
+ * the node by from the node's own clock time, `startClock` — "14:20", or "2026-09-01 14:20" on
+ * another day, the same clock reading of the same start — whose clock the name ends on, after the
+ * weekday or the date that is the word in front of it. Null when the name does not end so (no
+ * start, or a view model of another build): the name is then one part.
+ */
+function nameStart(name: string, clock: string | null): [string, string] | null {
+  if (clock === null) return null;
+  const time = clock.replace(/^\d{4}-\d{2}-\d{2} /, '');
+  if (time === '' || name.length <= time.length + 1 || name.slice(-(time.length + 1)) !== ' ' + time) return null;
+  const head = name.slice(0, name.length - time.length - 1);
+  const cut = head.lastIndexOf(' ');
+  if (cut <= 0) return null;
+  return [head.slice(0, cut), head.slice(cut) + ' ' + time];
 }
 
 /**
@@ -2331,14 +2390,38 @@ function applyFits(): void {
   fitChart();
   fitScroll();
   scrollHeat();
+  fitAgentNames();
   fitAgentFigures();
 }
 
 /**
+ * 1.6 P7b: an agent's model, where its row's name has no room for it, gives way on an ellipsis
+ * (see agentLabel) — while the room it has left holds its dot and the ellipsis, " · …"; below that
+ * it would be a sliver of a dot, which says nothing, and it is taken off the name whole
+ * (`ag-gone`, out of sight and still in the page for a screen reader) so the name reads
+ * "workflow-subagent · f6a7", the whole name in its title. Measured first for every name and
+ * written after; run with the page's other fits, and when a closed section opens.
+ */
+function fitAgentNames(): void {
+  const models = document.querySelectorAll<HTMLElement>('.ag-label > .ag-model');
+  if (!models.length) return;
+  models.forEach(m => { if (m.classList) m.classList.remove('ag-gone'); });
+  const off: HTMLElement[] = [];
+  models.forEach(m => {
+    if (typeof m.getBoundingClientRect !== 'function' || !(m.scrollWidth > m.clientWidth + 0.5)) return;
+    const size = (typeof getComputedStyle === 'function' ? parseFloat(getComputedStyle(m).fontSize) : NaN) || 13;
+    // " · …": the dot and its two spaces, and the ellipsis — 1.9 of the font's size.
+    if (m.getBoundingClientRect().width < size * AGENT_MODEL_ROOM_EM) off.push(m);
+  });
+  off.forEach(m => m.classList.add('ag-gone'));
+}
+
+/**
  * 1.6 N6: an agent row's figures are one line (see agentFigLine). Where a narrow sidebar leaves
- * that line too little room, its last parts come off it whole — the tally's last counts first, then
- * the tally, the silence, the clock — and the line ends on "…" (`ag-cut`): what stays is never a
- * figure torn in two, and the row never takes a third line. A part taken off stays in the page for
+ * that line too little room, its last parts come off it whole — on an agent's row the tally's last
+ * counts first, then the tally, the silence, the clock; on a session's and a run's the span or the
+ * duration first, then the tally's last counts (1.6 P7b) — and the line ends on "…" (`ag-cut`):
+ * what stays is never a figure torn in two, and the row never takes a third line. A part taken off stays in the page for
  * a screen reader (`ag-gone` hides it from the eye alone), so the row still says everything to the
  * ear, and the details panel says everything to the eye. The first part — the usage, with its ⚠ —
  * always stays. Measured first for every line and written after, so a page of rows is laid out twice
@@ -2761,7 +2844,7 @@ document.addEventListener('keydown', (ev) => {
 window.addEventListener('resize', () => { if (vm) applyFits(); });
 // 1.6 N6: a section opened after its render was laid out with no width at all; its agent rows'
 // figures are fitted to the width it has now. The toggle event does not bubble.
-document.addEventListener('toggle', () => { if (vm) fitAgentFigures(); }, true);
+document.addEventListener('toggle', () => { if (vm) { fitAgentNames(); fitAgentFigures(); } }, true);
 
 window.addEventListener('message', (ev) => {
   // Only the host drives the page. Measured in a real window: VS Code delivers the host's

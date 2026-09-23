@@ -135,13 +135,31 @@ children no longer fit shows none of them and says how many it has (`377 not sho
 the figures' dim tone, and a session's project after it. The second, under the name, in the dim
 tone, is the figures: the usage — fresh input + cache write + output, the definition the tables
 use —, the duration from the first line to the last, and for a session, a run and a closed agent
-with agents below it, the [tally](#the-tally). Neither line wraps, whatever the width: where the
-name has no room, a session's project gives way first, then the name's first part — an agent's
-type, a session's or a run's start — ending on `…`, never the model or the short id, and the whole
-name is the line's title. Where the figures have no room — a narrow sidebar, a deep row — their
-last parts come off the line whole, the tally's last counts first, then the tally, the silence and
-the clock, and the line ends on `…`: no figure is ever cut in two, a screen reader still hears
-every one, and the details panel shows them all. The usage always stays.
+with agents below it, the [tally](#the-tally). A session's and a run's second line is the usage,
+then the tally, then the span or the duration — `88.2K · 6 started · 2 ✓ · 1 ✕ · 19 min 50 s`: what
+the agents below came to is what such a row is there to say. An agent's is the usage, then the
+duration or the clock, then its silence and its tally.
+
+Neither line wraps, whatever the width. Where the name has no room, each part gives way in the
+order of what the row can best do without, ending on `…`, and the whole name — the model's whole id
+included — is the line's title:
+
+* An agent's **model** gives way first — `workflow-subagent · opus-… · f6a7` —, and where the line
+  has no room left even for its dot and the `…`, it is taken off the name whole:
+  `workflow-subagent · f6a7`. The **type** — what tells Explore from Plan from general-purpose — and
+  the short id stay whole; only a line too short for those two alone would cut the type. A launch
+  keeps its last word (`launched`) whole the same way.
+* A session's **project** gives way first, then a session's or a run's **short id**, down to its
+  `…`. The prefix word and the **time** the row is named by stay whole —
+  `Workflow run Thu 11:57 · 0d…` —, so a run never loses the time it is named by. Only a name by its
+  date in a narrow sidebar, `Workflow run 2026-09-03 11:57`, is too wide for its line even without
+  its id; there the prefix word gives way — `Wo… 2026-09-03 11:57 · 0…` — and still never the time.
+
+Where the figures have no room — a narrow sidebar, a deep row — their last parts come off the line
+whole, the last first: a session's or a run's span or duration, then the tally's last counts; an
+agent's tally, then its silence and its clock. The line ends on `…`: no figure is ever cut in two,
+a screen reader still hears every one, and the details panel shows them all. The usage always
+stays.
 
 A **session's** figures name themselves — `own 12.0M · agents 137.4M · 22 d 11 h`: what its own
 transcript used, counted from its first line, and what its agents of the last seven days used. The
@@ -213,10 +231,10 @@ There is no "x of y": `started` is the one total. A screen reader gets the same 
 *12 started, 3 done, 1 failed, 2 retried, 1 stopped, about 4 running, about 1 unknown* — in place
 of the glyphs.
 
-A session's and a run's tally end the second line of the row whether the node is open or closed: what
-failed, was retried or is still unknown among a few hundred agents is not something to count off
-the rows. An agent's stands only while it is closed; open, its children are on screen with their
-own glyphs. A node with no agent below it — a session that started none, an agent that launched
+A session's and a run's tally stand on the second line of the row, after the usage and before the
+span or the duration, whether the node is open or closed: what failed, was retried or is still
+unknown among a few hundred agents is not something to count off the rows. An agent's stands only
+while it is closed, at the end of its line; open, its children are on screen with their own glyphs. A node with no agent below it — a session that started none, an agent that launched
 none, a launch — has no tally, rather than a `0 started`. The markdown report prints a node's
 tally after its name in brackets, on every node that has one:
 `[~Running] Workflow run Tue 11:50 · cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s` — the
@@ -314,8 +332,9 @@ again, the attempt before it is superseded: a failed one was retried
 (*Stopped, replaced — the workflow journal started the same step again (agent 2e3d) before this
 agent recorded a result.*) — and a completed one was run again. The sentence names the next
 attempt by its short id. A superseded attempt keeps its own glyph and state; its row is dimmed —
-its glyph and its name faded to 65 %, its short id and figures in their dim tone as on any row, so
-every word of it still reads at 3:1 or better in the light and the dark theme —,
+its name faded to 65 %, its short id and figures in their dim tone as on any row, so every word of
+it still reads at 3:1 or better in the light and the dark theme; the glyph keeps its full strength,
+since it is the mark of the state and keeps its 3:1 too —,
 its glyph's title adds `superseded by a later attempt`, and its markdown line ends on
 `(superseded by a later attempt)`; the [tally](#the-tally) counts it under `↻`, not under its
 own state. The details of an agent whose step was started more than once

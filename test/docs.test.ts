@@ -567,6 +567,24 @@ test('docs/agents.md names sessions and runs by their start, rows as two lines i
   }
 })
 
+// 1.6 P7b (the lead's call on the P7 pictures): what gives way on a row's name and in which order,
+// the order of a session's and a run's figures, and a superseded row's glyph at full strength.
+test('docs/agents.md says what gives way on a name — the model, the project, the id, never the type or the time — and the order of a run\'s figures', () => {
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of ['`workflow-subagent · opus-… · f6a7`', '`workflow-subagent · f6a7`', 'so a run never loses the time it is named by',
+    '`Wo… 2026-09-03 11:57 · 0…`', 'and still never the time', '`88.2K · 6 started · 2 ✓ · 1 ✕ · 19 min 50 s`',
+    'after the usage and before the span or the duration', 'the glyph keeps its full strength', 'its name faded to 65 %']) {
+    assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+  for (const gone of ['its glyph and its name faded to 65 %', 'then the name\'s first part', 'never the model or the short id',
+    'A session\'s and a run\'s tally end the second line']) {
+    assert.equal(flat.includes(gone), false, `docs/agents.md still says: ${gone}`)
+  }
+  // The page's rules the page says them by: the model's least room, the order of the parts.
+  const page = readDoc('src/webview/main.ts')
+  assert.ok(/const AGENT_MODEL_ROOM_EM = 1\.9;/.test(page), 'the model\'s least room changed: say it in docs/agents.md')
+})
+
 test('docs/agents.md says why an output is a lower bound as measured, in the words the details use, and no row line points to it', () => {
   // 1.6 D10 (P6): the lower bound's cause, counted on the measuring machine — replacing 1.5's
   // "almost every finished agent", which the count contradicts — and the details' note as the

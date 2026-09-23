@@ -871,19 +871,29 @@ ul { margin: 6px 0; padding-left: 18px; }
    "this one", quieter than a pressed chip, which would paint a whole row in the button colour. */
 .ag-row[aria-pressed="true"] { background: var(--track); color: var(--vscode-foreground);
                                box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
-/* The name on one line. When the line has no room for all of it, a session's project gives way
-   first, then the name's first part — an agent's type, a session's or a run's start — ending on
-   an ellipsis; the rest of the name and the short id never. (Only the first part may shrink: a
-   part that shrank by a fraction of a pixel would already end on an ellipsis.) The id and the
-   project are in the figures' dim tone (§7a Q11). */
-.ag-label { display: flex; min-width: 0; overflow: hidden; }
+/* The name on one line (1.6 P7b, the lead's call). When the line has no room for all of it, its
+   parts give way one after the other, each on an ellipsis — first what the row can best do
+   without: an agent's model, the dot in front of it with it; a session's project, then a
+   session's or a run's short id, down to its ellipsis. An agent's type and short id, and a
+   session's or a run's prefix word and time, stay whole: only a line too short for them alone —
+   the last resort — cuts the type or the prefix word, never the time. The order is each part's
+   flex-shrink, a million times the next one's, so a part shrinks only once the one before it has
+   gone as far as it goes: a part that shrank by a fraction of a pixel would already end on an
+   ellipsis. A model left less room than its dot and the ellipsis is taken off the name whole
+   (fitAgentNames): out of sight, as a figure taken off its line, and still in the page for a
+   screen reader. The id and the project are in the figures' dim tone (§7a Q11). */
+.ag-label { position: relative; display: flex; min-width: 0; overflow: hidden; }
 .ag-label > span { flex: none; overflow: hidden; white-space: pre; text-overflow: ellipsis; }
-.ag-label > .ag-np:first-child { flex-shrink: 1; min-width: 1.5em; }
+.ag-label > .ag-proj { flex-shrink: 1000000000000; min-width: 0; color: var(--dim); }
+.ag-label > .ag-model { flex-shrink: 1000000; min-width: 0; }
+.ag-label > .ag-give { flex-shrink: 1000000; min-width: 1.5em; }
+.ag-label > .ag-type, .ag-label > .ag-pre, .ag-label > .ag-np:only-child { flex-shrink: 1; min-width: 1.5em; }
 .ag-label > .ag-sid { color: var(--dim); }
-.ag-label > .ag-proj { flex-shrink: 1000000; min-width: 0; color: var(--dim); }
+.ag-label > .ag-gone { position: absolute; left: 0; top: 0; width: 1px; height: 1px; clip-path: inset(50%); }
 /* Launched, but its transcript not seen yet: the name is the launch's hint, not the agent's. */
 .ag-k-pending > .ag-line .ag-label { font-style: italic; }
-/* Usage, duration and the live clock, the silence and the tally: quieter than the name, and in
+/* Usage, duration and the live clock, the silence and the tally — a session's and a run's tally
+   before their span or duration (1.6 P7b): quieter than the name, and in
    figures that do not jitter while the seconds tick — one line, whose parts the script takes
    off whole where it has no room for them (fitAgentFigures), ending it on an ellipsis; the
    browser's own ellipsis is the net under it. The silence of a running agent (1.6 N5, "silent for
@@ -916,11 +926,13 @@ ul { margin: 6px 0; padding-left: 18px; }
    from it. */
 .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
       overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* 1.6 D7: an attempt the workflow journal superseded keeps its glyph and its name, faded — to .65
-   (1.6 P7, the lead's call on the pictures: at .8 the dimming was hardly seen on the dark theme).
-   Its short id and its figures are in the dim tone already and stay so: faded as well, they would
-   fall below 3:1 on the light theme, and every word of the row keeps 3:1 in both. */
-.ag-sup > .ag-line > .ag-row > .ag-st, .ag-sup > .ag-line > .ag-row .ag-np { opacity: .65; }
+/* 1.6 D7: an attempt the workflow journal superseded keeps its glyph and its name; the name fades
+   to .65 (1.6 P7, the lead's call on the pictures: at .8 the dimming was hardly seen on the dark
+   theme). The glyph stays at full strength (1.6 P7b, the lead's call): it is the mark of the state
+   and keeps its 3:1 (WCAG 1.4.11), which at .65 it would not. The short id and the figures are in
+   the dim tone already and stay so: faded as well, they would fall below 3:1 on the light theme,
+   and every word of the row keeps 3:1 in both. */
+.ag-sup > .ag-line > .ag-row .ag-np { opacity: .65; }
 /* A breath, not a blink: at its faintest the dot keeps most of its colour, so it never reads
    as switched off. */
 @keyframes ag-pulse { 50% { opacity: .7; } }

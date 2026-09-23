@@ -3041,15 +3041,29 @@ const T_A3 = tallyOf({ unknown: 1 })
 /** The separator between two parts of a name: a part of its own, which never gives way. */
 const DOT = '<span class="ag-dot"> · </span>'
 /**
- * A row's first line as the page writes it: the parts of the name — only the first one may give
- * way — then, for an agent, a session and a run, the short id in the dim tone, and a session's
- * project; titled with the whole name.
+ * An agent's first line as the page writes it (1.6 P7b), titled with the whole name: its type,
+ * which never gives way, its model, which gives way first — its dot with it —, and its short id
+ * in the dim tone, which never gives way either. A launch has its last word in the id's place,
+ * whole, and not dimmed.
  */
-function lbl(title: string, names: string[], id: string | null = null, proj = ''): string {
-  return '<span class="ag-label" title="' + title + '">'
-    + names.map((p, i) => (i ? DOT : '') + '<span class="ag-np">' + p + '</span>').join('')
-    + (id !== null ? DOT + '<span class="ag-sid">' + id + '</span>' : '')
+function albl(title: string, type: string, model: string, id: string, launch = false): string {
+  return '<span class="ag-label" title="' + title + '"><span class="ag-np ag-type">' + type + '</span>'
+    + '<span class="ag-np ag-model"> · ' + model + '</span>' + DOT
+    + (launch ? '<span class="ag-np ag-end">' + id + '</span>' : '<span class="ag-sid">' + id + '</span>') + '</span>'
+}
+/**
+ * A session's or a run's first line (1.6 P7b): its prefix word and the time it is named by — the
+ * space in front of the time with it —, which stay whole, then its short id in the dim tone,
+ * which gives way (`ag-give`) after a session's project and before the prefix word.
+ */
+function slbl(title: string, pre: string, when: string, id: string, proj = ''): string {
+  return '<span class="ag-label" title="' + title + '"><span class="ag-np ag-pre">' + pre + '</span>'
+    + '<span class="ag-np ag-when"> ' + when + '</span>' + DOT + '<span class="ag-sid ag-give">' + id + '</span>'
     + (proj ? '<span class="ag-proj"> · ' + proj + '</span>' : '') + '</span>'
+}
+/** A name of one part — a collector's words — on an ellipsis where it has no room. */
+function olbl(title: string, name: string): string {
+  return '<span class="ag-label" title="' + title + '"><span class="ag-np">' + name + '</span></span>'
 }
 /** The separator in front of every part of a figures' line but the first, hidden from a screen reader. */
 const SEP = '<span aria-hidden="true"> · </span>'
@@ -3080,6 +3094,15 @@ function tallyFigs(t: Record<string, unknown>): string[] {
 }
 /** The end of a figures' line that ends on a tally, after other parts: the tally's parts and the line's end. */
 const tallyEnd = (t: Record<string, unknown>): string => tallyFigs(t).map((p) => '<span class="ag-fp">' + SEP + p + '</span>').join('') + '</span>'
+/**
+ * 1.6 P7b: the end of a session's or a run's figures' line: the tally's parts, then its span or
+ * duration — the part the fit takes off first — and the line's end.
+ */
+const tallyThen = (t: Record<string, unknown>, last: string): string => tallyFigs(t).concat([last])
+  .map((p) => '<span class="ag-fp">' + SEP + p + '</span>').join('') + '</span>'
+/** The busy session's span and the running run's clock of agentTree() below: the last parts of their lines. */
+const S1_SPAN = fig('<span title="span from the first to the last line">1 h 05 min</span>')
+const WF_CLOCK = clockFig(AG_NOW - 42_000, '42 s', '11:40')
 
 /** One RunningItem of src/agentTree.ts: the running agent of the tree below, where it sits. */
 function runningItem(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -3101,12 +3124,14 @@ function runningItem(over: Record<string, unknown> = {}): Record<string, unknown
 function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     roots: [
+      // 1.6 P7b: a session's and a run's clock time is the one its name ends on — the page finds the
+      // time it is named by from it.
       treeNode(AK.s1, 'active', {
         kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', sub: 'repo', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min',
-        ...T_S1,
+        startClock: '10:55', ...T_S1,
         children: [
           treeNode(AK.wf, 'running', {
-            kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', usage: '410K', ...T_WF,
+            kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', usage: '410K', startClock: '11:40', ...T_WF,
             children: [
               treeNode(AK.a1, 'running'),
               treeNode(AK.a2, 'done', { label: 'Plan · opus-5 · b1c2', lowerBound: true }),
@@ -3123,7 +3148,7 @@ function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> 
           }),
         ],
       }),
-      treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', usage: '–', duration: '–' }),
+      treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', usage: '–', duration: '–', startClock: '2026-09-21 09:00' }),
     ],
     selected: null, running: 1, runningNow: [runningItem()], runningMore: 0,
     omittedRoots: 0, note: null,
@@ -3330,10 +3355,14 @@ test('an attempt the workflow journal superseded keeps its glyph and state, dimm
   assert.equal(h.split('ag-sup').length - 1, 1, h)
   assert.ok(h.indexOf('aria-label="running, derived" title="~running · derived"') >= 0, h)
   // The dimming is the stylesheet's, no new colour: 1.6 P7 (pinned and changed, the lead's call on
-  // the pictures) fades the glyph and the name to .65 — at .8, and the name in the dim tone, the row
-  // was hardly dimmed on the dark theme; the short id and the figures are dim already and stay so.
-  assert.match(STYLE, /\.ag-sup > \.ag-line > \.ag-row > \.ag-st, \.ag-sup > \.ag-line > \.ag-row \.ag-np \{ opacity: \.65; \}/)
+  // the pictures) fades the name to .65 — at .8, and the name in the dim tone, the row was hardly
+  // dimmed on the dark theme; the short id and the figures are dim already and stay so. 1.6 P7b
+  // (pinned and changed, the lead's call: P7 faded the glyph too): only the name — every part of
+  // it, the type and the model —; the glyph is the mark of the state and keeps its full strength.
+  assert.match(STYLE, /\n\.ag-sup > \.ag-line > \.ag-row \.ag-np \{ opacity: \.65; \}/)
+  assert.equal(/\.ag-sup[^{]*\.ag-st/.test(STYLE), false, 'the glyph of a superseded row is faded')
   assert.equal(/\.ag-sup[^{]*\{[^}]*color:/.test(STYLE), false, 'a superseded row has a colour of its own')
+  assert.ok(h.indexOf(albl('workflow-subagent · opus-5 · b1c2', 'workflow-subagent', 'opus-5', 'b1c2')) >= 0, h)
   // A payload that does not say `true` is not dimmed.
   const plain = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a2, 'failed', { superseded: 'yes' })] }) }))
   assert.equal(plain.indexOf('ag-sup'), -1, plain)
@@ -3356,21 +3385,23 @@ test('a row is two lines: its name, then the usage and duration it was given —
   // dimmed, the whole name its title — and under it the figures, each part whole.
   assert.ok(h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '" aria-pressed="false">'
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
-    + '<span class="ag-text">' + lbl('Explore · claude-opus-5 · a94f', ['Explore', 'opus-5'], 'a94f')
+    + '<span class="ag-text">' + albl('Explore · claude-opus-5 · a94f', 'Explore', 'opus-5', 'a94f')
     + figs(fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', '11:59')) + '</span></button>') >= 0, h)
   assert.match(STYLE, /\.ag-row \{[^}]*display: flex; align-items: baseline;/)
   assert.equal(/\.ag-row \{[^}]*flex-wrap/.test(STYLE), false, 'the glyph would wrap away from its name')
   assert.match(STYLE, /\.ag-text \{[^}]*display: flex; flex-direction: column; \}/)
   // Neither line wraps: a row is two lines at any width.
-  assert.match(STYLE, /\.ag-label \{ display: flex; min-width: 0; overflow: hidden; \}/)
+  assert.match(STYLE, /\.ag-label \{ position: relative; display: flex; min-width: 0; overflow: hidden; \}/)
   assert.match(STYLE, /\.ag-fig \{[^}]*overflow: hidden; white-space: nowrap; text-overflow: ellipsis;[^}]*color: var\(--dim\);/)
   // The workflow run and its running agent tick; done, failed, unknown and the sessions do not.
   assert.equal(h.split('data-live="since"').length - 1, 2, h)
-  assert.ok(h.indexOf(lbl('Workflow run Tue 11:40 · cfe7718d', ['Workflow run Tue 11:40'], 'cfe7718d')
-    + figs(fig('410K'), clockFig(AG_NOW - 42_000, '42 s', '11:59'), ...tallyFigs(T_WF))) >= 0, h)
+  // 1.6 P7b (pinned and changed: P7 put the tally last): a run's tally before its clock or
+  // duration, which the fit takes off first.
+  assert.ok(h.indexOf(slbl('Workflow run Tue 11:40 · cfe7718d', 'Workflow run', 'Tue 11:40', 'cfe7718d')
+    + figs(fig('410K'), ...tallyFigs(T_WF), clockFig(AG_NOW - 42_000, '42 s', '11:40'))) >= 0, h)
   // A lower bound without its reason is not marked — a mark nobody can ask about says less than
   // none; with its reason it is (see the ⚠ test below), and no line under the tree speaks of it.
-  assert.ok(h.indexOf(lbl('Plan · opus-5 · b1c2', ['Plan', 'opus-5'], 'b1c2') + figs(fig('12.3K'), fig('40.0 s'))) >= 0, h)
+  assert.ok(h.indexOf(albl('Plan · opus-5 · b1c2', 'Plan', 'opus-5', 'b1c2') + figs(fig('12.3K'), fig('40.0 s'))) >= 0, h)
   assert.equal(h.indexOf('⚠'), -1, h)
   assert.ok(h.endsWith('</ul></div>'), h.slice(-120))
   const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', lowerBound: true,
@@ -3379,18 +3410,18 @@ test('a row is two lines: its name, then the usage and duration it was given —
     + 'title="⚠ lower bound — 1 of 9 replies unfinished">⚠</span>')) >= 0)
   // Absence is a dash, never a zero: the quiet session, and a launch nobody has counted yet —
   // here it is not running, so not even a clock, and its second line is dashes.
-  assert.ok(h.indexOf(lbl('Explore · – · launched', ['Explore', '–', 'launched']) + figs(fig('–'), fig('–')) + '</span></button>') >= 0, h)
+  assert.ok(h.indexOf(albl('Explore · – · launched', 'Explore', '–', 'launched', true) + figs(fig('–'), fig('–')) + '</span></button>') >= 0, h)
   // A session's figures name what they are (D5), the name first — a figure in front of
   // "agents" would read as a number of agents, beside a tally that counts them: its own
   // transcript's usage, its agents' — never added to it, and not shown for a session without
   // agents — and its span, whose title says so.
   const span = (v: string): string => '<span title="span from the first to the last line">' + v + '</span>'
-  assert.ok(h.indexOf(lbl('Session Mon 09:00 · 1234abcd', ['Session Mon 09:00'], '1234abcd') + figs(fig('own –'), fig(span('–')))) >= 0, h)
+  assert.ok(h.indexOf(slbl('Session Mon 09:00 · 1234abcd', 'Session', 'Mon 09:00', '1234abcd') + figs(fig('own –'), fig(span('–')))) >= 0, h)
   // The project a session belongs to, when attribution names one, after its id on the name's
   // line, then — on the second — its figures and the tally of its agents (1.6 N1), which an opened
-  // session keeps.
-  assert.ok(h.indexOf(lbl('Session Tue 10:55 · 9d0eb37a · repo', ['Session Tue 10:55'], '9d0eb37a', 'repo')
-    + figs(fig('own 1.2M'), fig('agents 434.6K'), fig(span('1 h 05 min')), ...tallyFigs(T_S1))) >= 0, h)
+  // session keeps, before its span (1.6 P7b).
+  assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a · repo', 'Session', 'Tue 10:55', '9d0eb37a', 'repo')
+    + figs(fig('own 1.2M'), fig('agents 434.6K'), ...tallyFigs(T_S1), fig(span('1 h 05 min')))) >= 0, h)
   // The sum of the two is no figure of the page.
   assert.equal(h.indexOf('1.6M'), -1, h)
   // A launch whose transcript has not been seen yet reads as the hint it is.
@@ -3420,22 +3451,23 @@ test('by default the tree is closed: only the sessions, each parent collapsed an
   for (const k of [AK.wf, AK.a1, AK.a2, AK.a3, AK.l1]) assert.equal(h.indexOf('data-key="' + k + '"'), -1, k)
   assert.equal(h.indexOf('<ul role="group">'), -1, h)
   // The session with children is collapsed, its toggle says it opens it, and the second line of
-  // its row (1.6 N6) ends on what its agents came to (1.6 N1) — the glyphs for the eye, each a
-  // part of the line, and the same in words once for a screen reader, which would read the glyphs
-  // as shapes; the session with none is a leaf, and has no tally at all rather than "0 started".
+  // its row (1.6 N6) says what its agents came to (1.6 N1) — the glyphs for the eye, each a part of
+  // the line, and the same in words once for a screen reader, which would read the glyphs as
+  // shapes —, after its usage and before its span (1.6 P7b, pinned and changed: P7 ended the line on
+  // the tally); the session with none is a leaf, and has no tally at all rather than "0 started".
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
     + '" aria-label="Expand Session Tue 10:55 · 9d0eb37a"></button>') >= 0, h)
-  assert.ok(h.indexOf(lbl('Session Tue 10:55 · 9d0eb37a · repo', ['Session Tue 10:55'], '9d0eb37a', 'repo')
+  assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a · repo', 'Session', 'Tue 10:55', '9d0eb37a', 'repo')
     + '<span class="ag-fig"><span class="ag-fp"><span class="nobr">own 1.2M</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="nobr">agents 434.6K</span></span>'
-    + '<span class="ag-fp">' + SEP + '<span class="nobr"><span title="span from the first to the last line">1 h 05 min</span></span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">4 started</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✓</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✕</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ●</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ?</span>'
-    + '<span class="sr">4 started, 1 done, 1 failed, about 1 running, about 1 unknown</span></span></span>') >= 0, h)
+    + '<span class="sr">4 started, 1 done, 1 failed, about 1 running, about 1 unknown</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="nobr"><span title="span from the first to the last line">1 h 05 min</span></span></span></span>') >= 0, h)
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-selected="false"><div class="ag-line">'
     + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.s2 + '"') >= 0, h)
   assert.equal(h.split('class="ag-t"').length - 1, 5, h)
@@ -3452,14 +3484,15 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   assert.ok(one.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="true" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
     + '" aria-label="Collapse Session Tue 10:55 · 9d0eb37a"></button>') >= 0, one)
-  // Opened, the session still names its project and ends its figures on its tally (1.6 N1): what
-  // failed or is still unknown among its agents is not something to count off the rows once they show.
+  // Opened, the session still names its project and shows its tally (1.6 N1) — before its span
+  // (1.6 P7b) —: what failed or is still unknown among its agents is not something to count off the
+  // rows once they show.
   assert.ok(one.indexOf('<span class="ag-proj"> · repo</span></span>') >= 0, one)
-  assert.ok(one.indexOf(tallyEnd(T_S1)) >= 0, one)
+  assert.ok(one.indexOf(tallyThen(T_S1, S1_SPAN)) >= 0, one)
   assert.ok(one.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
     + '" aria-label="Expand Workflow run Tue 11:40 · cfe7718d"></button>') >= 0, one)
-  assert.ok(one.indexOf(tallyEnd(T_WF)) >= 0, one)
+  assert.ok(one.indexOf(tallyThen(T_WF, WF_CLOCK)) >= 0, one)
   // A closed agent with an agent below it ends its figures on its tally too.
   assert.ok(one.indexOf('<span class="ag-sid">c3d4</span></span>' + figs(fig('12.3K'), fig('40.0 s'), ...tallyFigs(T_A3))) >= 0, one)
   // The children of the closed ones are not written at all.
@@ -3478,8 +3511,8 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   assert.equal(open.split('aria-expanded="true"').length - 1, 3, open)
   assert.equal(open.indexOf('aria-expanded="false"'), -1, open)
   assert.equal(open.split('<ul role="group">').length - 1, 3, open)
-  assert.ok(open.indexOf(tallyEnd(T_S1)) >= 0, open)
-  assert.ok(open.indexOf(tallyEnd(T_WF)) >= 0, open)
+  assert.ok(open.indexOf(tallyThen(T_S1, S1_SPAN)) >= 0, open)
+  assert.ok(open.indexOf(tallyThen(T_WF, WF_CLOCK)) >= 0, open)
   assert.ok(open.indexOf('<span class="ag-sid">c3d4</span></span>' + figs(fig('12.3K'), fig('40.0 s')) + '</span></button>') >= 0, open)
   assert.equal(open.split('class="ag-t"').length - 1, 5 + 3, open)
   assert.equal(open.indexOf('agent(s)'), -1, open)
@@ -3959,19 +3992,20 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
   const three = tallyOf({ done: 2, stopped: 1 })
   const closed = agentTree({
     roots: [treeNode(AK.s1, 'active', {
-      kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', ...three, hasChildren: true, childrenTotal: 2, children: [],
+      kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', startClock: '10:55', ...three, hasChildren: true, childrenTotal: 2, children: [],
     })],
   })
   const h = treePart(agentsHtml(a, { agents: closed }))
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
     + '" aria-label="Expand Session Tue 10:55 · 9d0eb37a"></button>') >= 0, h)
-  assert.ok(h.indexOf(lbl('Session Tue 10:55 · 9d0eb37a', ['Session Tue 10:55'], '9d0eb37a') + '<span class="ag-fig">') >= 0, h)
-  assert.ok(h.indexOf(tallyEnd(three)) >= 0, h)
+  assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a', 'Session', 'Tue 10:55', '9d0eb37a') + '<span class="ag-fig">') >= 0, h)
+  // 1.6 P7b: its tally before its span, the part the fit takes off first.
+  assert.ok(h.indexOf(tallyThen(three, fig('<span title="span from the first to the last line">40.0 s</span>'))) >= 0, h)
   assert.equal(h.indexOf('<ul role="group">'), -1, 'a closed node wrote a group')
   // A run of journal-only agents: agents below it, no child to open. A leaf, whatever is stored.
   const run = agentTree({
-    roots: [treeNode(AK.wf, 'unknown', { kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', ...three, children: [] })],
+    roots: [treeNode(AK.wf, 'unknown', { kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', startClock: '11:40', ...three, children: [] })],
   })
   for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.wf] })]) {
     const leaf = treePart(agentsHtml(a, { agents: run, ui }))
@@ -3979,7 +4013,7 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
     assert.equal(leaf.indexOf('aria-expanded'), -1, leaf)
     assert.ok(leaf.indexOf('<div class="ag-line"><span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="'
       + AK.wf + '"') >= 0, leaf)
-    assert.ok(leaf.indexOf(tallyEnd(three)) >= 0, leaf)
+    assert.ok(leaf.indexOf(tallyThen(three, fig('40.0 s'))) >= 0, leaf)
   }
   // An agent's tally stands while its children are not on screen: closed, or opened with none
   // of them sent (the payload's cap); with its children drawn it has none.
@@ -4087,7 +4121,10 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   // The poison is on the page as text — in the labels, the notes and the details alike.
   const shown = '&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(2)&gt;&quot; '
     + 'onmouseover=&quot;alert(3)&#39; `x` '
-  for (const where of ['<span class="ag-np">' + shown, '<span class="ag-label" title="' + shown, '<p class="empty">' + shown + 'n</p>',
+  // 1.6 P7b: a name from its type on — every node here is an agent's to the page: a poisoned kind
+  // is none it knows.
+  for (const where of ['<span class="ag-np ag-type">' + shown,
+    '<span class="ag-label" title="' + shown, '<p class="empty">' + shown + 'n</p>',
     '<div class="name">' + shown, '<dt>' + shown + 'Type</dt>',
     // The running list's context and usage, as text too.
     '<span class="meta ag-ctx"><span>' + shown + 'Session 9d0eb37a</span>', '<span class="nobr">' + shown + '12.3K</span>']) {
@@ -4455,7 +4492,9 @@ test('the agent tree speaks German on a German page', () => {
     // 1.6 D4: how many of a collector's agents run.
     '~1 of them running', '~{0} of them running',
     // 1.6 N9: the state and the clocks in words for a screen reader.
-    '{0}, derived', '{0}, recorded', 'since {0}', 'silent since {0}']
+    '{0}, derived', '{0}, recorded', 'since {0}', 'silent since {0}',
+    // 1.6 P7b: a session's span, the last part of its figures' line.
+    'span from the first to the last line']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -4516,8 +4555,9 @@ test('the agent tree speaks German on a German page', () => {
     tallyText: '4 gestartet · 3 ✓ · ~1 ●', tallySpoken: '4 gestartet, 3 fertig, etwa 1 laufend',
     children: [treeNode(AK.a1, 'running')],
   })] }) })
-  assert.ok(closed.indexOf(tallyEnd({ tallyText: '4 gestartet · 3 ✓ · ~1 ●', tallySpoken: '4 gestartet, 3 fertig, etwa 1 laufend' })) >= 0,
-    closed)
+  // 1.6 P7b: before the span, whose title is the page's words, German on a German page.
+  assert.ok(closed.indexOf(tallyThen({ tallyText: '4 gestartet · 3 ✓ · ~1 ●', tallySpoken: '4 gestartet, 3 fertig, etwa 1 laufend' },
+    fig('<span title="Spanne von der ersten bis zur letzten Zeile">1 h 05 min</span>'))) >= 0, closed)
   // The toggle's words are the page's; the node's name is the view model's (English here).
   assert.ok(closed.indexOf('aria-label="Session Tue 10:55 · 9d0eb37a ausklappen"') >= 0, closed)
   assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
@@ -4580,8 +4620,31 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     // its children show their own glyphs — and a node without agents below has none.
     const shows = n.tallyText !== null && n.kind !== 'agent'
     assert.equal(row.indexOf('class="ag-t"') >= 0, shows, row)
-    if (shows) assert.ok(row.indexOf(tallyEnd(n as unknown as Record<string, unknown>)) >= 0, row)
+    const group = n.kind === 'session' || n.kind === 'workflow'
+    if (shows && !group) assert.ok(row.indexOf(tallyEnd(n as unknown as Record<string, unknown>)) >= 0, row)
+    // 1.6 P7b: a session's and a run's tally before the line's last part — its span, its duration or
+    // its clock, the part the fit takes off first.
+    if (shows && group) {
+      const mid = tallyFigs(n as unknown as Record<string, unknown>).map((x) => '<span class="ag-fp">' + SEP + x + '</span>').join('')
+      const rest = row.slice(row.indexOf(mid) + mid.length)
+      assert.ok(row.indexOf(mid) >= 0 && rest.startsWith('<span class="ag-fp">' + SEP) && rest.split('class="ag-fp"').length === 2
+        && (rest.indexOf('data-live="since"') >= 0 || rest.indexOf('>' + n.duration + '</span>') >= 0), row)
+    }
+    // 1.6 P7b: the builder's names split on the page into what gives way and what does not — a
+    // session's and a run's prefix word and the time it is named by, whole, the time ending on the
+    // node's own clock time; an agent's type, whole, and its model, which gives way.
+    if (group && n.startClock !== null) {
+      const clock = n.startClock.replace(/^\d{4}-\d{2}-\d{2} /, '')
+      const pre = n.kind === 'session' ? 'Session' : 'Workflow run'
+      assert.ok(new RegExp('<span class="ag-np ag-pre">' + pre + '</span><span class="ag-np ag-when"> [A-Z][a-z]{2} ' + clock
+        + '</span><span class="ag-dot"> · </span><span class="ag-sid ag-give">').test(row), row)
+    }
+    if (n.kind === 'agent') {
+      const [type, model] = n.label.split(' · ')
+      assert.ok(row.indexOf('<span class="ag-np ag-type">' + type + '</span><span class="ag-np ag-model"> · ' + model + '</span>') >= 0, row)
+    }
   }
+  assert.ok(nodes.some((n) => (n.kind === 'session' || n.kind === 'workflow') && n.startClock !== null && n.tallyText !== null))
   assert.ok(nodes.some((n) => n.kind === 'agent' && n.tallyText !== null), 'the world has an agent with agents below it')
   // The payload carries the flag and its reason (1.6 D10); the shipped page marks the rows (P7) and
   // has no line about it under the tree.
@@ -4691,7 +4754,10 @@ test('the running list the view model builds reaches the page first, the tree cl
     vm.agents.roots.map((r) => r.key))
   for (const r of vm.agents.roots) {
     assert.equal(r.tally?.started, r.agentCount, r.label)
-    assert.ok(tree.indexOf(tallyEnd(r as unknown as Record<string, unknown>)) >= 0, r.label)
+    // 1.6 P7b: the tally, then the span — the line's last part — and the line's end.
+    const mid = tallyFigs(r as unknown as Record<string, unknown>).map((x) => '<span class="ag-fp">' + SEP + x + '</span>').join('')
+    assert.ok(tree.indexOf(mid + '<span class="ag-fp">' + SEP + fig('<span title="span from the first to the last line">' + r.duration
+      + '</span>') + '</span></span>') >= 0, r.label)
   }
   assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
   // The running agent is mid-reply, so its output is a lower bound — its item carries the flag and
@@ -4719,11 +4785,14 @@ function nowRow(o: { key: string; kind?: string; title?: string; names: string[]
   if (o.clock) parts.push(runFig(o.clock.ts, o.clock.text, o.clock.since === undefined ? '11:59' : o.clock.since))
   if (o.members) parts.push(fig(o.members))
   const title = o.title ?? [...o.names, ...(o.id ? [o.id] : [])].join(' · ')
+  // 1.6 P7b: an agent's name as a tree row writes it — the type, the model that gives way, the
+  // short id (a launch's last word) — and a name of one part as one.
+  const name = o.id ? albl(title, o.names[0], o.names[1], o.id)
+    : o.names.length === 3 ? albl(title, o.names[0], o.names[1], o.names[2], true) : olbl(title, o.names.join(' · '))
   return '<li class="ag-k-' + (o.kind ?? 'agent') + '"><button class="ag-row" data-act="agentSelect" data-key="' + o.key
     + '" data-list="now" aria-pressed="' + (o.pressed === true) + '">'
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
-    + '<span class="ag-text">' + (title === '' ? '<span class="ag-label">' + o.names.map((p) => '<span class="ag-np">' + p + '</span>').join('')
-      + '</span>' : lbl(title, o.names, o.id ?? null))
+    + '<span class="ag-text">' + (title === '' ? name.replace(' title=""', '') : name)
     + figs(...parts)
     + (o.where.length ? '<span class="meta ag-ctx">' + o.where.map((w) => '<span>' + w + '</span>').join(' · ') + '</span>' : '')
     + '</span></button>' + (o.panel ?? '') + '</li>'
@@ -4814,7 +4883,7 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
   assert.equal(li, '<li role="treeitem" class="ag-k-noreply" aria-selected="false"><div class="ag-line"><span class="ag-pad"></span>'
     + '<button class="ag-row" data-act="agentSelect" data-key="' + AK.n1 + '" aria-pressed="false">'
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
-    + '<span class="ag-text">' + lbl('263 agent(s) without a counted reply', ['263 agent(s) without a counted reply'])
+    + '<span class="ag-text">' + olbl('263 agent(s) without a counted reply', '263 agent(s) without a counted reply')
     + figs(fig('–'), fig('–'), ...tallyFigs(T_N1)) + '</span></button></div></li>', li)
   // Running, with a start the payload gives it anyway: still no clock in the tree — dashes.
   const started = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.wf, 'running', { kind: 'workflow',
@@ -5160,24 +5229,97 @@ test('a fragment for a section with no body on the page updates the model and re
 })
 
 // 1.6 N6 (pinned and changed): 1.5 let a name wrap between its parts; a row is two lines now, so the
-// name is one — no part of it wraps, and where it has no room its first part gives way, never the
-// model id or the short id.
-test('a name is one line: its parts never wrap, only its first part gives way, and the model id and the short id never', () => {
+// name is one — no part of it wraps. 1.6 P7b (pinned and changed, the lead's call: P7 let the first
+// part — an agent's type, a session's or a run's start — give way first): what gives way is what
+// the row can best do without — an agent's model, a session's project, then a session's or a run's
+// short id —, and an agent's type and short id, a session's and a run's prefix word and time stay
+// whole; only a line too short for those alone cuts the type or the prefix word — never the time.
+test('a name is one line: an agent\'s model gives way before its type and its short id; a session\'s project, then its short id, before its time', () => {
   const a = agentCtx()
   const h = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'done', { label: 'general-purpose · opus-5 · a94f',
     fullLabel: 'general-purpose · claude-opus-5 · a94f' })] }) }))
   const label = h.slice(h.indexOf('<span class="ag-label"'), h.indexOf('<span class="ag-fig">'))
-  assert.equal(label, lbl('general-purpose · claude-opus-5 · a94f', ['general-purpose', 'opus-5'], 'a94f'))
+  assert.equal(label, albl('general-purpose · claude-opus-5 · a94f', 'general-purpose', 'opus-5', 'a94f'))
+  assert.match(STYLE, /\.ag-label \{ position: relative; display: flex; min-width: 0; overflow: hidden; \}/)
   assert.match(STYLE, /\.ag-label > span \{ flex: none; overflow: hidden; white-space: pre; text-overflow: ellipsis; \}/)
-  assert.match(STYLE, /\.ag-label > \.ag-np:first-child \{ flex-shrink: 1; min-width: 1\.5em; \}/)
-  // The short id and a session's project in the dim tone; the project gives way first.
+  // The order is each part's flex-shrink, a million times the next one's: the project, then the
+  // model and a session's or a run's short id, then — the last resort — the type or the prefix
+  // word, or a name of one part. The time and an agent's short id have none: they never shrink.
+  assert.match(STYLE, /\.ag-label > \.ag-proj \{ flex-shrink: 1000000000000; min-width: 0; color: var\(--dim\); \}/)
+  assert.match(STYLE, /\.ag-label > \.ag-model \{ flex-shrink: 1000000; min-width: 0; \}/)
+  assert.match(STYLE, /\.ag-label > \.ag-give \{ flex-shrink: 1000000; min-width: 1\.5em; \}/)
+  assert.match(STYLE, /\.ag-label > \.ag-type, \.ag-label > \.ag-pre, \.ag-label > \.ag-np:only-child \{ flex-shrink: 1; min-width: 1\.5em; \}/)
+  assert.equal(/\.ag-(when|sid|dot|end)\b[^{]*\{[^}]*flex-shrink/.test(STYLE), false, 'a part that never gives way shrinks')
+  assert.equal(/\.ag-np:first-child/.test(STYLE), false, 'the first part gives way again')
+  // The short id and a session's project in the dim tone.
   assert.match(STYLE, /\.ag-label > \.ag-sid \{ color: var\(--dim\); \}/)
-  assert.match(STYLE, /\.ag-label > \.ag-proj \{ flex-shrink: 1000000; min-width: 0; color: var\(--dim\); \}/)
-  // A launch's last word is no id, and a collector's name is words: nothing of either is dimmed.
+  // A model taken off the name whole (fitAgentNames) is out of sight and still in the page.
+  assert.match(STYLE, /\.ag-label > \.ag-gone \{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; clip-path: inset\(50%\); \}/)
+  // A session and a run: the prefix word and the time the name ends on — the node's clock time —
+  // then the short id that gives way; a session's project after it. German the same.
+  const run = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.wf, 'done', { kind: 'workflow',
+    label: 'Workflow-Lauf 2026-09-17 11:57 · cfe7718d', startClock: '2026-09-17 11:57' })] }) }))
+  assert.ok(run.indexOf(slbl('Workflow-Lauf 2026-09-17 11:57 · cfe7718d', 'Workflow-Lauf', '2026-09-17 11:57', 'cfe7718d')) >= 0, run)
+  const de = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.s1, 'idle', { kind: 'session',
+    label: 'Sitzung Do 11:10 · 3f9a2c1d', startClock: '11:10' })] }) }))
+  assert.ok(de.indexOf(slbl('Sitzung Do 11:10 · 3f9a2c1d', 'Sitzung', 'Do 11:10', '3f9a2c1d')) >= 0, de)
+  // A clock of twelve hours, "02:20 PM": the time is its last two words and the weekday before them.
+  const pm = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.s1, 'idle', { kind: 'session',
+    label: 'Session Tue 02:20 PM · 9d0eb37a', startClock: '02:20 PM', sub: 'repo' })] }) }))
+  assert.ok(pm.indexOf(slbl('Session Tue 02:20 PM · 9d0eb37a · repo', 'Session', 'Tue 02:20 PM', '9d0eb37a', 'repo')) >= 0, pm)
+  // A name that does not end on the node's clock time — no start, or another build's view model —
+  // is one part before its id, which gives way last, as the prefix word does; a name with no id is
+  // one part.
+  for (const startClock of [null, '11:59', '', 7]) {
+    const odd = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.s1, 'idle', { kind: 'session',
+      label: 'Session Tue 10:55 · 9d0eb37a', startClock })] }) }))
+    assert.ok(odd.indexOf('<span class="ag-label" title="Session Tue 10:55 · 9d0eb37a"><span class="ag-np ag-pre">Session Tue 10:55</span>'
+      + DOT + '<span class="ag-sid ag-give">9d0eb37a</span></span>') >= 0, String(startClock) + odd)
+  }
+  const bare = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.s1, 'idle', { kind: 'session', label: 'Session 9d0eb37a', startClock: null })] }) }))
+  assert.ok(bare.indexOf(olbl('Session 9d0eb37a', 'Session 9d0eb37a')) >= 0, bare)
+  // A launch: its type, the model it was launched with, which gives way, and its last word, whole and
+  // not dimmed — it is no id. A collector's name is words, one part.
   const launch = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.l1, 'running', { kind: 'pending', label: 'Plan · sonnet · launched' })] }) }))
   assert.equal(launch.indexOf('ag-sid'), -1, launch)
+  assert.ok(launch.indexOf(albl('Plan · sonnet · launched', 'Plan', 'sonnet', 'launched', true)) >= 0, launch)
   const words = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.n1, 'running', { kind: 'noreply', label: '2 agent(s) without a counted reply' })] }) }))
-  assert.ok(words.indexOf(lbl('2 agent(s) without a counted reply', ['2 agent(s) without a counted reply'])) >= 0, words)
+  assert.ok(words.indexOf(olbl('2 agent(s) without a counted reply', '2 agent(s) without a counted reply')) >= 0, words)
+  // Escaped, however the name is split.
+  const hostile = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.s1, 'idle', { kind: 'session',
+    label: 'Session <b>x Tue 10:55 · 9d0e"b37a', startClock: '10:55' })] }) }))
+  assert.equal(/<b>|"b37a/.test(hostile), false, hostile)
+})
+
+// 1.6 P7b: an agent's model with less room than its dot and the ellipsis is taken off the name whole
+// — a sliver of a dot says nothing —, one with room for them gives way on its ellipsis, and a model
+// that fits is left alone; fitted again with more room, it comes back.
+test('a model with no room for its dot and an ellipsis is taken off the name whole, and comes back when there is room', () => {
+  const a = agentCtx()
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  const model = (width: number, scrollWidth: number) => {
+    const cls = new Set<string>()
+    const m = {
+      width, clientWidth: Math.floor(width), scrollWidth, cls,
+      getBoundingClientRect: () => ({ width: m.width }),
+      classList: { contains: (c: string) => cls.has(c), add: (c: string) => { cls.add(c) }, remove: (c: string) => { cls.delete(c) } },
+    }
+    return m
+  }
+  // The name's font is 13 px (the stub's getComputedStyle has none: the page takes 13), so the room
+  // is 1.9 × 13 = 24.7 px: " · …".
+  const sliver = model(7.1, 63), tight = model(24.8, 63), fits = model(62.9, 62), shut = model(0, 0)
+  doc.querySelectorAll = (q: string) => (q === '.ag-label > .ag-model' ? [sliver, tight, fits, shut] : [])
+  nodeVm.runInContext('fitAgentNames()', a.c)
+  assert.deepEqual([sliver, tight, fits, shut].map((m) => m.cls.has('ag-gone')), [true, false, false, false])
+  sliver.width = 40
+  sliver.clientWidth = 40
+  nodeVm.runInContext('fitAgentNames()', a.c)
+  assert.equal(sliver.cls.has('ag-gone'), false)
+  // The page's constant and its rules: with the page's other fits, and when a closed section opens.
+  assert.match(SOURCE, /const AGENT_MODEL_ROOM_EM = 1\.9;/)
+  assert.match(SOURCE, /function applyFits\(\): void \{[^}]*fitAgentNames\(\);\s*fitAgentFigures\(\);/)
+  assert.match(SOURCE, /document\.addEventListener\('toggle', \(\) => \{ if \(vm\) \{ fitAgentNames\(\); fitAgentFigures\(\); \} \}, true\);/)
 })
 
 // ---------------------------------------------------------------------------
@@ -5262,7 +5404,9 @@ test('every ticking clock of a row is hidden from a screen reader, and its words
   const live = h.split('data-live="since"').length - 1
   assert.equal(live, 3, h)
   assert.equal(h.split('<span aria-hidden="true"><span class="nobr">').length - 1, live, h)
-  assert.equal(h.split('<span class="sr">since 11:59</span>').length - 1, live, h)
+  // The run's clock time is the one its name ends on (1.6 P7b: the fixture's run is "Tue 11:40").
+  assert.equal(h.split('<span class="sr">since 11:59</span>').length - 1 + h.split('<span class="sr">since 11:40</span>').length - 1, live, h)
+  assert.equal(h.split('<span class="sr">since 11:40</span>').length - 1, 1, h)
   // The glyph's name is the state in words; its title, for the eye, keeps the page's "~running · derived".
   assert.ok(h.indexOf('aria-label="running, derived" title="~running · derived"') >= 0, h)
   assert.ok(h.indexOf('aria-label="done, recorded" title="done · recorded"') >= 0, h)

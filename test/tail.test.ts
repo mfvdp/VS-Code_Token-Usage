@@ -5,7 +5,7 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import * as fs from 'fs'
 import * as path from 'path'
-import { newCursor, readNewLines } from '../src/tail'
+import { newCursor, readNewLines, sameFile } from '../src/tail'
 import { tmpDir } from './fixtures/helpers'
 
 async function read(file: string, cur = newCursor(), maxBytes?: number): Promise<{ lines: string[]; restarted: boolean }> {
@@ -147,4 +147,45 @@ test('empty lines and CRLF endings are tolerated', async () => {
   fs.writeFileSync(file, 'a\r\n\n\nb\r\n')
   const r = await read(file)
   assert.deepEqual(r.lines, ['a\r', 'b\r'])
+})
+
+test('a new device number with the same inode is the same file: nothing is read twice', async () => {
+  // A disk that enumerates as sda3 on one boot and sdb3 on the next hands every file a new
+  // st_dev and keeps its inode. Re-reading from 0 there doubled the history on every boot.
+  const dir = tmpDir('tail')
+  const file = path.join(dir, 'flip.jsonl')
+  fs.writeFileSync(file, 'a\nb\n')
+  const cur = newCursor()
+  await read(file, cur)
+  const realDev = cur.dev
+  const offset = cur.offset
+  cur.dev = realDev + 16 // the cursor was saved while the disk had another number
+
+  // Unchanged file: nothing delivered, no restart, and the cursor learns the new number.
+  let restarts = 0
+  let lines: string[] = []
+  let restarted = await readNewLines(file, cur, (l) => lines.push(l), undefined, () => restarts++)
+  assert.equal(restarted, false)
+  assert.deepEqual(lines, [])
+  assert.equal(restarts, 0)
+  assert.equal(cur.offset, offset)
+  assert.equal(cur.dev, realDev)
+
+  // Grown file under yet another number: only the new line.
+  cur.dev = realDev + 32
+  fs.appendFileSync(file, 'c\n')
+  lines = []
+  restarted = await readNewLines(file, cur, (l) => lines.push(l), undefined, () => restarts++)
+  assert.equal(restarted, false)
+  assert.deepEqual(lines, ['c'])
+  assert.equal(restarts, 0)
+  assert.equal(cur.dev, realDev)
+})
+
+test('file identity is the inode and the consumed length, never the device number', () => {
+  const cur = { ino: 42, offset: 100 }
+  assert.equal(sameFile({ ino: 42, size: 100 }, cur), true)
+  assert.equal(sameFile({ ino: 42, size: 5000 }, cur), true)
+  assert.equal(sameFile({ ino: 43, size: 5000 }, cur), false, 'a new inode is a replaced file')
+  assert.equal(sameFile({ ino: 42, size: 99 }, cur), false, 'a shorter file was truncated')
 })

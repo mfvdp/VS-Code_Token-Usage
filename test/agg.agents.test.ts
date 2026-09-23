@@ -793,6 +793,28 @@ test('a scan builds the whole tree\'s records from a session on disk', async () 
   assert.equal(agg.all().filter((b) => b.isSub).reduce((s, b) => s + b.requests, 0), 6)
 })
 
+test('a device-number change between boots re-counts nothing, and the replay still reads the files', async () => {
+  writeWorld('FLIP')
+  const first = new Aggregator()
+  await scan(first)
+  const sum = (a: Aggregator) => a.all().reduce((n, b) => n + b.input + b.cacheWrite + b.cacheRead + b.output + b.requests, 0)
+  const before = sum(first)
+  assert.ok(before > 0)
+  // The next boot: the disk has another number, and the dedupe window no longer holds these
+  // message ids (it keeps the last 4000) — the case that doubled a real history.
+  const snap = first.toSnapshot()
+  for (const c of Object.values(snap.cursors)) c.dev = c.dev + 16
+  snap.pending = {}
+  const next = Aggregator.fromSnapshot(snap)
+  assert.equal(await scan(next), 0, 'no line is counted a second time')
+  assert.equal(sum(next), before)
+  // And the replay treats the renumbered files as the ones it has read.
+  assert.ok(agentReplayFiles(next, T0 + 120_000).length > 0)
+  const changed = await replayAgents(next, agentReplayFiles(next, T0 + 120_000))
+  assert.ok(changed > 0, 'the replay read the files it would have skipped as replaced')
+  assert.equal(sum(next), before, 'and touched no bucket')
+})
+
 test('descriptions, prompts, summaries and answers never reach the snapshot', async () => {
   const secret = 'NEVER-STORED-7f3a'
   writeWorld(secret)

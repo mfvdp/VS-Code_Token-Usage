@@ -8,9 +8,16 @@ import { Cursor } from './types'
  * Reads every COMPLETE line appended to a file since the last call.
  *
  * The cursor only advances past the last finished line — a half-written trailing
- * line is read again on the next pass. If (dev, ino) changes or the file shrinks,
- * it is re-read from the start; that covers rotation and atomic replacement,
- * which would otherwise silently undercount.
+ * line is read again on the next pass. If the inode changes or the file shrinks, it
+ * is re-read from the start; that covers rotation and atomic replacement, which would
+ * otherwise silently undercount.
+ *
+ * The device number alone is not identity. It names the block device the file system
+ * sits on, not the file system: a disk that enumerates as sda3 on one boot and sdb3 on
+ * the next gives every file a new `dev` and the same `ino`. Treating that as a new file
+ * re-read every transcript from the start into buckets that already held it — the
+ * history doubled on every such boot. A changed `dev` with the same `ino` and no
+ * shrink is therefore the same file; the cursor takes the new number and carries on.
  *
  * A file whose size and mtime are exactly what the last pass recorded is not
  * read: on a sweep over thousands of finished transcripts that is the difference
@@ -38,12 +45,15 @@ export async function readNewLines(
   let restarted = false
   try {
     const st = await fh.stat()
-    if (st.ino !== cur.ino || st.dev !== cur.dev || st.size < cur.offset) {
+    if (!sameFile(st, cur)) {
       cur.offset = 0
       cur.ino = st.ino
       cur.dev = st.dev
       restarted = true
       onRestart?.()
+    } else if (st.dev !== cur.dev) {
+      // The same file under a new device number (see above): keep the offset.
+      cur.dev = st.dev
     }
     if (!restarted && st.size === cur.size && st.mtimeMs === cur.mtime) return false
     if (st.size <= cur.offset) {
@@ -90,6 +100,15 @@ export async function readNewLines(
     await fh.close()
   }
   return restarted
+}
+
+/**
+ * Whether the file behind `st` is the one the cursor has read: the same inode, and not
+ * shorter than what was consumed. The device number is deliberately not compared — see
+ * `readNewLines`. Exported for the agent replay, which has to agree with this rule.
+ */
+export function sameFile(st: { ino: number; size: number }, cur: Pick<Cursor, 'ino' | 'offset'>): boolean {
+  return st.ino === cur.ino && st.size >= cur.offset
 }
 
 /** A fresh cursor for a file that has never been read. */

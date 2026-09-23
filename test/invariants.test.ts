@@ -12,7 +12,7 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import type { TreeNode } from '../src/agentTree'
-import { toMarkdownSummary } from '../src/exporter'
+import { agentRows, agentsCsv, toCsv, toJson, toMarkdownSummary, toolsCsv } from '../src/exporter'
 import { setBundle, setLocale } from '../src/i18n'
 import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
@@ -26,6 +26,7 @@ import {
   FINGERPRINT, NOW, TODAY, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
   timeConfig, win,
 } from './fixtures/viewFixtures'
+import { CLAUDE_ROOT } from './fixtures/helpers'
 import { ROOT } from './helpers/nls'
 import { toolAgg } from './helpers/toolAgg'
 
@@ -916,4 +917,42 @@ test('the tree the page receives carries no key a transcript\'s content lives un
   const everything = open.map(({ vm }) => JSON.stringify(vm) + markdownDocument(vm)).join('\n')
   for (const s of AGENT_CONTENT) assert.equal(everything.includes(s), false, s)
   assert.equal(/synthetic/.test(everything), false)
+})
+
+test('an export names an agent by its ids and words, never by a path, and carries none of what it was asked or answered (1.6 O2)', () => {
+  // The Agents world with attribution on, so the sessions' project labels are there to leak too;
+  // every transcript of it lies under the fixture root, every launch names its transcript's path.
+  const { agg, raw } = agentWorld('session')
+  for (const s of AGENT_CONTENT) assert.ok(raw.includes(s), `the fixture lost ${s}`)
+  const config = makeConfig({ 'tokenPace.attribution': 'session' })
+  const tc = timeConfig(config)
+  const days = { from: '2026-09-01', to: TODAY }
+  const rows = agentRows(agg, days, config, tc, NOW)
+  assert.equal(rows.length, 12, 'the world lost an agent')
+  const files: Array<[string, string]> = [
+    ['json', toJson(agg, days, config, tc, NOW)], ['csv', toCsv(agg, days, config, tc)], ['tools', toolsCsv(agg, days)],
+    ['agents', agentsCsv(agg, days, config, tc, NOW)],
+  ]
+  for (const [what, text] of files) {
+    assert.equal(text.includes(CLAUDE_ROOT), false, `the ${what} file names the fixture root`)
+    assert.equal(text.includes('.jsonl'), false, `the ${what} file names a transcript`)
+    assert.equal(text.includes('/home/t/'), false, `the ${what} file names a working directory`)
+    for (const s of AGENT_CONTENT) assert.equal(text.includes(s), false, `the ${what} file holds ${s}`)
+    assert.equal(/synthetic/.test(text), false, `the ${what} file holds fixture content`)
+  }
+  // No value of an agent row holds a path separator: ids, words of a fixed set, numbers and times.
+  const values = (v: unknown): unknown[] => (v && typeof v === 'object' ? Object.values(v).flatMap(values) : [v])
+  for (const r of rows) {
+    for (const v of values(r)) {
+      if (typeof v === 'string') assert.equal(/[\\/]/.test(v), false, `${r.agentId}: ${v}`)
+      else assert.ok(v === null || typeof v === 'number' || typeof v === 'boolean', `${r.agentId}: ${String(v)}`)
+    }
+  }
+  // Nor a field a transcript's content or a path lives under, in either file.
+  const json = JSON.parse(files[0][1]) as { agents: Array<Record<string, unknown>> }
+  const keys = new Set(json.agents.flatMap((a) => Object.keys(a)))
+  for (const k of ['description', 'prompt', 'summary', 'result', 'content', 'file', 'sessionFile', 'spawnerFile', 'meta', 'lastTool', 'rejected']) {
+    assert.equal(keys.has(k), false, k)
+  }
+  assert.equal(/sessionFile|spawnerFile|description|prompt/.test(files[3][1].split('\n')[0]), false)
 })

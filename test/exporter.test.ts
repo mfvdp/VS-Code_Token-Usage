@@ -4,8 +4,13 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
-import { CSV_COLUMNS, EXPORT_SCHEMA_VERSION, TOOLS_CSV_COLUMNS, toCsv, toJson, toMarkdownSummary, toolsCsv } from '../src/exporter'
-import { buildViewModel } from '../src/viewModel'
+import { AGENT_RETENTION_DAYS } from '../src/agentTree'
+import {
+  AGENTS_CSV_COLUMNS, AGENTS_FILE_SUFFIX, CSV_COLUMNS, EXPORT_SCHEMA_VERSION, TOOLS_CSV_COLUMNS, TOOLS_FILE_SUFFIX, agentRows,
+  agentsCsv, companionPath, toCsv, toJson, toMarkdownSummary, toolsCsv,
+} from '../src/exporter'
+import { agentTreeFor, buildViewModel } from '../src/viewModel'
+import { AGENT_WORLD, agentNode, agentWorld, treeNodes } from './fixtures/agentWorld'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
@@ -276,4 +281,177 @@ test('the clipboard summary carries every budget with the sentence that qualifie
 
   // Nothing configured, no heading — never an empty section suggesting a budget exists.
   assert.equal(toMarkdownSummary(buildViewModel(makeInput({ agg: buildAgg() }))).includes('## Budgets'), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 O2: the agents — schema 3, agents[] and the agents file
+// ---------------------------------------------------------------------------
+
+/** The Agents world's day, and the view model's clock the world was written against. */
+const WORLD_DAY = { from: '2026-09-01', to: TODAY }
+
+/** An agent row's JSON keys, in the order the export writes them — the spec's list (1.6 §3 O2). */
+const AGENT_KEYS = [
+  'agentId', 'sessionId', 'workflowId', 'type', 'model', 'models', 'effort', 'state', 'derived', 'outcome',
+  'outcomeStatus', 'attempt', 'firstTs', 'lastTs', 'requests', 'outputFinal', 'input', 'cacheWrite5m',
+  'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'usage', 'toolCalls', 'toolErrors', 'spawnedBy', 'report',
+]
+
+test('the JSON export is schema 3: agents[] of the documented fields, and the note that says what they are', () => {
+  assert.equal(EXPORT_SCHEMA_VERSION, 3)
+  const { agg } = agentWorld()
+  const j = JSON.parse(toJson(agg, WORLD_DAY, cfg, tcfg, NOW))
+  assert.equal(j.schema_version, 3)
+  // Everything version 2 carried is still there.
+  for (const k of ['range', 'timezone', 'pricing', 'totals', 'buckets', 'tools', 'toolsTruncated', 'notes']) assert.ok(k in j, k)
+  assert.ok(Array.isArray(j.agents) && j.agents.length > 0)
+  for (const a of j.agents) assert.deepEqual(Object.keys(a), AGENT_KEYS)
+  // The agents file's columns are the same fields, the report as three.
+  assert.deepEqual([...AGENTS_CSV_COLUMNS], [
+    ...AGENT_KEYS.filter((k) => k !== 'report'), 'reportTokens', 'reportDurationMs', 'reportToolUses',
+  ])
+  // §7a Q14, word for word, with the retention the tables keep.
+  assert.ok(j.notes.includes('agents[] holds the agent records whose activity overlaps the exported range\'s days, within the '
+    + `agent tables' ${AGENT_RETENTION_DAYS}-day retention; ids, names and counts only — never a path, a description or a prompt`),
+  j.notes.join(' | '))
+  // And that an agent's tokens are the isSub buckets' own, never to be added to them.
+  assert.ok(j.notes.some((n: string) => n.includes('never added') && n.includes('isSub')), j.notes.join(' | '))
+  // An install without agents exports the field as an empty list, not as absent.
+  assert.deepEqual(JSON.parse(toJson(buildAgg(), range, cfg, tcfg, NOW)).agents, [])
+})
+
+test('every agent record of the tree is a row, with the state, type and model its row shows — a collector\'s member too', () => {
+  const { agg } = agentWorld()
+  const W = AGENT_WORLD
+  const rows = agentRows(agg, WORLD_DAY, cfg, tcfg, NOW)
+  // Every record, each once, the first to start first: the launch nobody has written to and the
+  // agent the journal started without a transcript have no record, so no row.
+  assert.deepEqual(rows.map((r) => r.agentId), [
+    W.guide, W.explore, W.plan, W.silent, W.stopped, W.wfDone, W.wfFailed, W.wfRetryFail, W.wfRetry, W.wfReplaced,
+    W.wfRunning, W.wfRejected,
+  ])
+  assert.deepEqual(rows.map((r) => r.firstTs), [...rows.map((r) => r.firstTs)].sort())
+  const tree = agentTreeFor(makeInput({ agg, cfg }), 'text')
+  for (const r of rows) {
+    if (r.agentId === W.wfRejected) continue
+    const node = agentNode(tree.roots, r.agentId)
+    assert.equal(r.state, node.state, r.agentId)
+    assert.equal(r.derived, node.derived, r.agentId)
+    // The row's name is its type · its model · its short id.
+    assert.equal(node.fullLabel.startsWith(`${r.type ?? 'Agent'} · ${r.model ?? '–'} · `), true, `${node.fullLabel} / ${r.type} / ${r.model}`)
+  }
+  const by = new Map(rows.map((r) => [r.agentId, r]))
+  const row = (id: string): NonNullable<ReturnType<typeof by.get>> => {
+    const r = by.get(id)
+    assert.ok(r, id)
+    return r
+  }
+  // The member of the run's collector (D4): failed, as the journal recorded it — its record counted nothing.
+  assert.deepEqual([row(W.wfRejected).state, row(W.wfRejected).derived, row(W.wfRejected).requests, row(W.wfRejected).usage],
+    ['failed', false, 0, 0])
+  assert.ok(treeNodes(tree.roots).some((n) => n.kind === 'noreply'), 'the world lost its collector')
+  // The inferred states say so; the recorded ones do not.
+  assert.deepEqual([row(W.wfRunning).state, row(W.wfRunning).derived], ['running', true])
+  assert.deepEqual([row(W.silent).state, row(W.silent).derived, row(W.silent).type], ['unknown', true, null])
+  // What the parent recorded, with its own word; the journal's ends are the state's, not the outcome's.
+  assert.deepEqual([row(W.stopped).state, row(W.stopped).outcome, row(W.stopped).outcomeStatus], ['stopped', 'stopped', 'killed'])
+  assert.deepEqual([row(W.wfFailed).outcome, row(W.wfFailed).outcomeStatus], ['failed', 'failed'])
+  assert.deepEqual([row(W.wfDone).state, row(W.wfDone).outcome], ['done', null])
+  // The attempts at their step, as the journal numbers them (D7) — none outside a run or without a step.
+  assert.deepEqual([W.wfRetryFail, W.wfRetry, W.wfReplaced, W.wfRunning, W.wfDone, W.wfFailed, W.explore].map((id) => row(id).attempt),
+    [1, 2, 1, 2, 1, null, null])
+  // Who launched it: the session, an agent of the session by id, or nobody known — a run's agent.
+  assert.deepEqual([W.explore, W.plan, W.guide, W.wfFailed, W.wfDone].map((id) => row(id).spawnedBy),
+    ['session', W.explore, 'session', 'session', null])
+  // Claude Code's own report, only where there is one.
+  assert.deepEqual(row(W.explore).report, { tokens: 98_400, durationMs: 755_000, toolUses: 4 })
+  assert.deepEqual(row(W.plan).report, { tokens: 38_200, durationMs: 575_000, toolUses: 2 })
+  assert.equal(row(W.silent).report, null)
+  // The counts as the record holds them, the usage as the row counts it, the times in ISO.
+  assert.deepEqual(row(W.guide), {
+    agentId: W.guide, sessionId: W.quiet, workflowId: null, type: 'claude-code-guide', model: 'claude-haiku-4-5',
+    models: ['claude-haiku-4-5'], effort: 'high', state: 'done', derived: false, outcome: 'completed', outcomeStatus: 'completed',
+    attempt: null, firstTs: '2026-09-03T08:52:05.000Z', lastTs: '2026-09-03T08:52:53.000Z', requests: 2, outputFinal: 2,
+    input: 9, cacheWrite5m: 9400, cacheWrite1h: 0, cacheRead: 8100, output: 1070, reasoning: 0, usage: 9 + 9400 + 1070,
+    toolCalls: 1, toolErrors: null, spawnedBy: 'session', report: { tokens: 18_900, durationMs: 51_000, toolUses: 1 },
+  })
+  assert.equal(row(W.wfRunning).workflowId, W.workflow)
+  // Every session's agents, not only the sessions the page lists: both sessions are here.
+  assert.deepEqual([...new Set(rows.map((r) => r.sessionId))].sort(), [W.session, W.quiet].sort())
+})
+
+test('the agents of the export are those whose activity touches a day of the range, within the seven days the tables keep', () => {
+  const { agg } = agentWorld()
+  const ids = (from: string, to: string, now = NOW): string[] => agentRows(agg, { from, to }, cfg, tcfg, now).map((r) => r.agentId)
+  assert.equal(ids(TODAY, TODAY).length, 12)
+  // Days before or after the world's own export no agent at all.
+  assert.deepEqual(ids('2026-08-01', '2026-09-02'), [])
+  assert.deepEqual(ids('2026-09-04', '2026-09-30', NOW + 86_400_000), [])
+  // A range that holds the day, exported a week and a day later: past the retention, no row.
+  assert.deepEqual(ids('2026-08-01', '2026-09-30', NOW + (AGENT_RETENTION_DAYS + 1) * 86_400_000), [])
+  // The day an agent is on is the configured zone's: 08:52 UTC is still 2 September at UTC−10.
+  const hawaii = makeConfig({ 'tokenPace.timezone': 'Pacific/Honolulu' })
+  const early = agentRows(agg, { from: '2026-09-02', to: '2026-09-02' }, hawaii, timeConfig(hawaii), NOW).map((r) => r.agentId)
+  assert.ok(early.includes(AGENT_WORLD.guide), early.join(', '))
+  assert.equal(early.includes(AGENT_WORLD.wfRunning), false, early.join(', '))
+})
+
+test('the agents file has the documented columns, the same rows as agents[], and an empty cell where JSON says null', () => {
+  const { agg } = agentWorld()
+  const text = agentsCsv(agg, WORLD_DAY, cfg, tcfg, NOW)
+  const rows = csvRows(text)
+  assert.deepEqual(rows[0], [...AGENTS_CSV_COLUMNS])
+  const json = JSON.parse(toJson(agg, WORLD_DAY, cfg, tcfg, NOW)).agents as Array<Record<string, unknown>>
+  const body = rows.slice(1)
+  assert.equal(body.length, json.length)
+  // No TOTAL line: an agent's tokens are the isSub buckets' own.
+  assert.equal(body.some((r) => r[0] === 'TOTAL'), false)
+  const col = (name: string): number => (AGENTS_CSV_COLUMNS as readonly string[]).indexOf(name)
+  for (const [i, r] of body.entries()) {
+    const j = json[i]
+    assert.equal(r.length, AGENTS_CSV_COLUMNS.length, r.join(','))
+    for (const k of AGENT_KEYS.filter((x) => x !== 'report' && x !== 'models')) {
+      const v = j[k]
+      // Absent is empty — never 0, never "null".
+      assert.equal(r[col(k)], v === null ? '' : String(v), `${String(j.agentId)} ${k}`)
+    }
+    assert.equal(r[col('models')], (j.models as string[]).join(' '))
+    const report = j.report as { tokens: number; durationMs: number; toolUses: number } | null
+    assert.deepEqual([r[col('reportTokens')], r[col('reportDurationMs')], r[col('reportToolUses')]],
+      report === null ? ['', '', ''] : [String(report.tokens), String(report.durationMs), String(report.toolUses)])
+  }
+  // A range without an agent still has its header.
+  assert.equal(agentsCsv(agg, { from: '2026-08-01', to: '2026-08-02' }, cfg, tcfg, NOW), `${AGENTS_CSV_COLUMNS.join(',')}\n`)
+  assert.equal(agentsCsv(new Aggregator(), range, cfg, tcfg, NOW), `${AGENTS_CSV_COLUMNS.join(',')}\n`)
+})
+
+test('an agent row is identifiers, words of a fixed set and numbers: a record from elsewhere cannot put anything else in', () => {
+  // A snapshot of another build's making may hold anything: the export checks once more on the way out.
+  const { agg } = agentWorld()
+  const records = agg.agents()
+  const forged = records.map((r) => (r.agentId === AGENT_WORLD.explore
+    ? { ...r, meta: r.meta && { ...r.meta, agentType: 'Explore <script>' }, models: ['claude-haiku-4-5', 'a model, with "quotes"'] }
+    : r))
+  agg.agents = () => forged
+  const row = agentRows(agg, WORLD_DAY, cfg, tcfg, NOW).find((r) => r.agentId === AGENT_WORLD.explore)
+  assert.ok(row)
+  assert.equal(row.type, null)
+  assert.deepEqual(row.models, ['claude-haiku-4-5'])
+  const csv = agentsCsv(agg, WORLD_DAY, cfg, tcfg, NOW)
+  assert.equal(/script|quotes/.test(csv), false, csv)
+  // A record whose id is none of an id's shape is no row at all.
+  agg.agents = () => records.map((r) => (r.agentId === AGENT_WORLD.plan ? { ...r, agentId: 'plan/../../etc' } : r))
+  assert.equal(agentRows(agg, WORLD_DAY, cfg, tcfg, NOW).some((r) => r.agentId.includes('/')), false)
+})
+
+test('a companion file is the chosen name with its extension replaced — the tools file and the agents file side by side', () => {
+  assert.equal(TOOLS_FILE_SUFFIX, '.tools.csv')
+  assert.equal(AGENTS_FILE_SUFFIX, '.agents.csv')
+  const chosen = '/home/t/exports/token-pace-2026-09-01_2026-09-03-20260903-1200.csv'
+  assert.equal(companionPath(chosen, TOOLS_FILE_SUFFIX), '/home/t/exports/token-pace-2026-09-01_2026-09-03-20260903-1200.tools.csv')
+  assert.equal(companionPath(chosen, AGENTS_FILE_SUFFIX), '/home/t/exports/token-pace-2026-09-01_2026-09-03-20260903-1200.agents.csv')
+  // A name without an extension gains the suffix; a dot in a directory's name is no extension.
+  assert.equal(companionPath('/home/t/v1.2/export', AGENTS_FILE_SUFFIX), '/home/t/v1.2/export.agents.csv')
+  assert.equal(companionPath('C:\\Users\\t\\v1.2\\export.csv', AGENTS_FILE_SUFFIX), 'C:\\Users\\t\\v1.2\\export.agents.csv')
+  assert.notEqual(companionPath(chosen, TOOLS_FILE_SUFFIX), companionPath(chosen, AGENTS_FILE_SUFFIX))
 })

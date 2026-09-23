@@ -2031,6 +2031,54 @@ test('Copy Agent ID copies the id of the node whose details are open, and nothin
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+test('the exports say the agents are about to leave before anything is written, then write them beside the chosen file (1.6 O2)', async () => {
+  const fx = makeFixture()
+  writeAgentWorld(fx)
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const { agg } = lazy()
+  await waitFor('the whole tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  const { AGENTS_CSV_COLUMNS } = require('../src/exporter') as typeof import('../src/exporter')
+  const uri = (HOST.api as { Uri: { file(p: string): unknown } }).Uri.file
+  // The CSV: the dialog names the tool file and the agents file first; three files follow it.
+  const chosen = path.join(fx.data, 'out', 'usage.csv')
+  state.answers.push(uri(chosen), undefined)
+  await state.execute('tokenPace.exportCsv')
+  const title = String(state.saveDialogs[state.saveDialogs.length - 1]?.title ?? '')
+  assert.ok(title.includes('Tool names go into a second file beside it (.tools.csv).'), title)
+  assert.ok(title.includes('Agent ids and types go into a third file beside it (.agents.csv).'), title)
+  const agentsFile = path.join(fx.data, 'out', 'usage.agents.csv')
+  assert.deepEqual(state.writes.map((w) => w.path), [chosen, path.join(fx.data, 'out', 'usage.tools.csv'), agentsFile])
+  assert.equal(state.messages[state.messages.length - 1]?.text,
+    `Token Pace: exported to ${chosen}, ${path.join(fx.data, 'out', 'usage.tools.csv')} and ${agentsFile}`)
+  const lines = state.writes[2].text.trim().split('\n')
+  assert.equal(lines[0], AGENTS_CSV_COLUMNS.join(','))
+  // Every agent of the world, by its id — the running one, the sync one and the idle session's —
+  // and none of the paths they were read from.
+  assert.deepEqual(lines.slice(1).map((l) => l.split(',')[0]).sort(), ['a1a1a1', 'b1b1b1', 'c3c3c3'])
+  for (const w of state.writes) {
+    assert.equal(w.text.includes(fx.claudeRoot), false, `${w.path} names the transcripts' root`)
+    assert.equal(w.text.includes('.jsonl'), false, `${w.path} names a transcript`)
+  }
+  // The JSON: one file, its dialog naming agents[].
+  const json = path.join(fx.data, 'out', 'usage.json')
+  state.answers.push(uri(json), undefined)
+  await state.execute('tokenPace.exportJson')
+  const jsonTitle = String(state.saveDialogs[state.saveDialogs.length - 1]?.title ?? '')
+  assert.ok(jsonTitle.includes('Tool names are included as tools[].') && jsonTitle.includes('Agents are included as agents[].'), jsonTitle)
+  assert.equal(state.writes.length, 4)
+  const written = JSON.parse(state.writes[3].text) as { schema_version: number; agents: Array<{ agentId: string; type: string | null }> }
+  assert.equal(written.schema_version, 3)
+  assert.deepEqual(written.agents.map((a) => [a.agentId, a.type]).sort(),
+    [['a1a1a1', 'workflow-subagent'], ['b1b1b1', null], ['c3c3c3', 'Explore']])
+  assert.equal(state.messages[state.messages.length - 1]?.text, `Token Pace: exported to ${json}`)
+  // Said no to: nothing written.
+  state.answers.push(undefined)
+  await state.execute('tokenPace.exportCsv')
+  assert.equal(state.writes.length, 4)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
 test('the usage document prints every node of the agent tree, though the dashboard has them all closed', async () => {
   // 1.6 D3: the page carries only what the reader opened; the markdown document is handed the
   // tree with every node open, built for it (`getAgentTextTree`), and the page's stays closed.

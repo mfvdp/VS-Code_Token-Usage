@@ -140,7 +140,11 @@ applied as a multiplier to anything. Off by default because it invites over-inte
 between `webview`, `quickPick` and `markdown`. **Show Usage (Quick Pick)** is a flat, searchable
 list; **Show Usage as Text** opens a read-only markdown document. All three read the same view
 model, so the numbers cannot drift apart, and a test counts the rows of one against the other.
-The agents section is the one part the Quick Pick leaves out: the markdown document prints its
+Of the agents section the Quick Pick has a group of its own after the quota — the first five
+entries of the running list (the name marked `~`, running being inferred; where it sits under
+it), one row for the rest, and what the sessions' agents came to: their tallies added, *14
+started · 5 ✓ · 2 ✕ · … · last 7 days*, in words under it — every row opening the dashboard. The
+markdown document prints its
 running list, the 7-day block while the dashboard has it open, and the whole tree as indented lists — every node open, fifty children a node and a
 line for the rest — with the open node's details as a table.
 

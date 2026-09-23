@@ -85,6 +85,13 @@ export interface FakeVscodeState {
   /** Every `createQuickPick()` control, in creation order. */
   quickPickControls: FakeQuickPick[]
   documents: Array<{ uri: string; text: string }>
+  /** The options of every `showSaveDialog` call — what the dialog said before anything was written. */
+  saveDialogs: Array<Record<string, unknown>>
+  /**
+   * Every `workspace.fs.writeFile`, in order: the path and the text. Recorded in memory only —
+   * nothing is written to disk from a test.
+   */
+  writes: Array<{ path: string; text: string }>
   /** Answers `showQuickPick` / `showInformationMessage` hand out, oldest first. */
   answers: unknown[]
   settings: Map<string, unknown>
@@ -160,6 +167,12 @@ class FakeUri {
     return new FakeUri(base.scheme, joined, joined)
   }
 
+  /** A copy with another path, as `vscode.Uri.with({ path })` makes one; the file path follows it. */
+  with(change: { path?: string }): FakeUri {
+    const next = change.path ?? this.path
+    return new FakeUri(this.scheme, next, next)
+  }
+
   toString(): string {
     return `${this.scheme}:${this.path}`
   }
@@ -219,6 +232,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const quickPicks: RecordedQuickPick[] = []
   const quickPickControls: FakeQuickPick[] = []
   const documents: Array<{ uri: string; text: string }> = []
+  const saveDialogs: Array<Record<string, unknown>> = []
+  const writes: Array<{ path: string; text: string }> = []
   const answers: unknown[] = []
   const values = new Map<string, unknown>(Object.entries(settings))
   const webviewProviders = new Map<string, unknown>()
@@ -401,7 +416,10 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
         })
         return Promise.resolve(nextAnswer())
       },
-      showSaveDialog: (): Promise<unknown> => Promise.resolve(nextAnswer()),
+      showSaveDialog: (options: unknown): Promise<unknown> => {
+        saveDialogs.push((options ?? {}) as Record<string, unknown>)
+        return Promise.resolve(nextAnswer())
+      },
       showTextDocument: (doc: unknown): Promise<unknown> => Promise.resolve(doc),
       withProgress<T>(_options: unknown, task: (p: unknown, t: unknown) => PromiseLike<T>): PromiseLike<T> {
         return task(
@@ -434,8 +452,10 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
         return Promise.resolve({ uri, languageId: 'plaintext', getText: () => text })
       },
       fs: {
-        writeFile(): Promise<void> {
-          // Exports are never written from a test; the save dialog already returns nothing.
+        writeFile(uri: FakeUri, bytes: Uint8Array): Promise<void> {
+          // Exports are never written to disk from a test: what would have been written is
+          // recorded, so a test can read it back.
+          writes.push({ path: uri.fsPath, text: Buffer.from(bytes).toString('utf8') })
           return Promise.resolve()
         },
       },
@@ -467,6 +487,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     quickPicks,
     quickPickControls,
     documents,
+    saveDialogs,
+    writes,
     answers,
     settings: values,
     webviewProviders,
@@ -507,6 +529,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       quickPicks.length = 0
       quickPickControls.length = 0
       documents.length = 0
+      saveDialogs.length = 0
+      writes.length = 0
       api.env.remoteName = undefined
       answers.length = 0
       webviewProviders.clear()

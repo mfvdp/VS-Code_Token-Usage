@@ -19,7 +19,7 @@ import {
   IngestContext, claudePlacement, cleanAgentId, cleanAgentName, parseAgentMeta, rejectedOf,
 } from '../src/agg'
 import { agentTranscriptsOf, configureRoots } from '../src/discover'
-import { toCsv, toJson, toolsCsv } from '../src/exporter'
+import { agentRows, agentsCsv, toCsv, toJson, toolsCsv } from '../src/exporter'
 import { AGENT_META_MAX_BYTES, agentReplayFiles, readAgentMeta, replayAgents, scan } from '../src/scan'
 import { newCursor } from '../src/tail'
 import { TimeConfig } from '../src/time'
@@ -1509,8 +1509,10 @@ test('an API error line\'s text, its details and its quota block never leave the
   // The rejections are on the page — two agents, their run and their session.
   assert.ok(rows >= 5, `only ${rows} rejection rows`)
   const range = { from: '2026-09-01', to: '2026-09-03' }
-  outputs.push(['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)],
-    ['tools export', toolsCsv(agg, range)])
+  // 1.6 O2: both agents are rows of the exports, at the view model's clock — never their rejections' words.
+  assert.deepEqual(agentRows(agg, range, cfg, utc, VNOW).map((r) => r.agentId).sort(), ['abc123', 'def456'])
+  outputs.push(['json export', toJson(agg, range, cfg, utc, VNOW)], ['csv export', toCsv(agg, range, cfg, utc)],
+    ['tools export', toolsCsv(agg, range)], ['agents export', agentsCsv(agg, range, cfg, utc, VNOW)])
   for (const [what, out] of outputs) {
     assert.equal(out.includes(secret), false, `${what} holds an error line's text, details, API error or upgrade offer`)
     for (const s of ['synthetic overage reason', 'synthetic-overage-status', 'synthetic-slug']) {
@@ -1648,12 +1650,18 @@ test('a tool call\'s input never leaves the reader: only its name reaches the re
   // The name is what the sentence says, and all it says of the call.
   assert.match(vm.agents.selected?.stateText ?? '', /silent since \d\d:\d\d, after a Bash call; the agent may have been stopped\.$/)
   const range = { from: '2026-09-01', to: '2026-09-03' }
+  // 1.6 O2: the agent is a row of the exports, at the view model's clock — its last tool call is not.
+  assert.deepEqual(agentRows(agg, range, cfg, utc, VNOW).map((r) => r.agentId), ['abc123'])
   const outputs: Array<[string, string]> = [
     ['live snapshot', live], ['snapshot', JSON.stringify(agg.toSnapshot())], ['view model', JSON.stringify(vm)],
     ['markdown', markdownDocument(vm, agentTreeFor(input, 'text'))],
-    ['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)], ['tools export', toolsCsv(agg, range)],
+    ['json export', toJson(agg, range, cfg, utc, VNOW)], ['csv export', toCsv(agg, range, cfg, utc)], ['tools export', toolsCsv(agg, range)],
+    ['agents export', agentsCsv(agg, range, cfg, utc, VNOW)],
   ]
   for (const [what, out] of outputs) assert.equal(out.includes(secret), false, `${what} holds a tool call's input`)
+  // The tool table names the call, as it always did; the agent's row does not.
+  assert.equal(agentsCsv(agg, range, cfg, utc, VNOW).includes('Bash'), false, 'the agents export names the last tool call')
+  assert.equal(JSON.stringify(agentRows(agg, range, cfg, utc, VNOW)).includes('Bash'), false, 'agents[] names the last tool call')
   // No key of the call's input either (a record's own `input` is its token count, not this one).
   for (const snapshot of [outputs[0][1], outputs[1][1]]) {
     assert.equal(/"(command|description|timeout)"/.test(snapshot), false, 'the snapshot holds a field of the call\'s input')
@@ -1827,8 +1835,11 @@ test('a nested effort, a proposal\'s text and an error line\'s effort never leav
   const outputs: Array<[string, string]> = [
     ['live snapshot', live], ['snapshot', JSON.stringify(agg.toSnapshot())], ['view model', JSON.stringify(vm)],
     ['session view model', JSON.stringify(session)], ['markdown', markdownDocument(vm, agentTreeFor(input, 'text'))],
-    ['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)], ['tools export', toolsCsv(agg, range)],
+    ['json export', toJson(agg, range, cfg, utc, VNOW)], ['csv export', toCsv(agg, range, cfg, utc)], ['tools export', toolsCsv(agg, range)],
+    ['agents export', agentsCsv(agg, range, cfg, utc, VNOW)],
   ]
+  // 1.6 O2: the export carries the reply's own effort, and only that one.
+  assert.deepEqual(agentRows(agg, range, cfg, utc, VNOW).map((r) => [r.agentId, r.effort]), [['abc123', 'xhigh']])
   for (const [what, out] of outputs) {
     assert.equal(out.includes(secret), false, `${what} holds a proposal's or an error's text`)
     assert.equal(/"effort":"(M|medium|low)"/.test(out), false, `${what} holds an effort that is no reply's own`)

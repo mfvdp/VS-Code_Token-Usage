@@ -33,14 +33,64 @@ Tool **names** only, never a call's input or its result. A `TRUNCATED` line is a
 had more distinct tools than the per-day cap, so a short table cannot be mistaken for a
 complete one.
 
+The agents of the [Agents section](agents.md) cannot be a column either: an agent is one record
+across hours and days. They go into a third file beside the one you choose, named `….agents.csv`
+and announced in the save dialog as well — *Agent ids and types go into a third file beside it
+(.agents.csv).* One line per agent, no `TOTAL` line:
+
+```
+agentId, sessionId, workflowId, type, model, models, effort, state, derived,
+outcome, outcomeStatus, attempt, firstTs, lastTs, requests, outputFinal,
+input, cacheWrite5m, cacheWrite1h, cacheRead, output, reasoning, usage,
+toolCalls, toolErrors, spawnedBy, reportTokens, reportDurationMs, reportToolUses
+```
+
+Which agents: the agent records whose activity — from their first line to their last — touches a
+day of the exported range, within the **7 days** the agent tables keep; every session's, not only
+the sessions the dashboard lists. What of them: what the Agents section shows and nothing else —
+
+* `agentId`, `sessionId` and `workflowId` (the run, empty outside one) are the ids the details'
+  ID rows show; `type` and `model` are what the agent's name is made of — the model as its
+  whole id, the type empty where neither the sidecar nor the launch named one (the row says
+  "Agent") —, `models` the real model ids its replies were written with, separated by spaces,
+  and `effort` the effort of its newest reply;
+* `state` is the tree's state at the moment of the export — `running`, `done`, `failed`,
+  `stopped` or `unknown` — and `derived` says whether it was inferred (`true` for running and
+  unknown), as the tree marks it with `~`. `outcome` and `outcomeStatus` are what the parent
+  recorded, its tool result or a task notification, with its own word (`completed`, `killed` …);
+  empty when it recorded nothing — a workflow journal's end is in `state`, not here. `attempt`
+  is which start of its workflow step the agent was, as the run's journal numbers them (empty
+  outside a run);
+* `firstTs` and `lastTs` are its first line and its last activity (a rejected request after its
+  last reply included), in ISO time; the counters are its record's, `usage` its billable tokens
+  as its row counts them; `toolErrors` the tool results marked as errors, where they are
+  counted — empty otherwise;
+* `spawnedBy` is the agent id of the agent of the same session that launched it, `session` for
+  the session's own transcript, empty when neither is known; `reportTokens`, `reportDurationMs`
+  and `reportToolUses` are Claude Code's own report for it, empty without one.
+
+An agent's tokens are **the same tokens** the bucket rows with `isSub` true count, hour by hour —
+never add the two; that is also why the file has no `TOTAL`. The report is Claude Code's own
+figure, never part of any total either. Never a path — neither the transcript's nor the launching
+one's —, never a description, a prompt, a result or any other text of a transcript: the records
+hold none of it. An empty cell is an absent value, never a zero.
+
 **Export JSON…** writes the same buckets with the range, the timezone configuration, the pricing
 provenance (`as_of`, `custom`, `multiplier`, `unknown_model`), the totals, and the notes that
 qualify them. `costUsd` is `null`, not `0`, where there is no price. With attribution on it also
 carries a `sessions[]` array, and the note says the project labels are exactly as stored. It also
-carries `tools[]` (day, source, model, tool, calls) and `toolsTruncated`; `schema_version` is `2`
-since those two were added, and everything version 1 wrote still means the same thing. The
-save dialog names what is about to leave the machine — model names always, project labels
-(basenames or salted hashes) when attribution is on — because that is the last moment to say no.
+carries `tools[]` (day, source, model, tool, calls) and `toolsTruncated`, and `agents[]` — the
+agents file's rows, with the same fields and Claude Code's report as one `report` object
+(`tokens`, `durationMs`, `toolUses`, or `null`); an absent value is `null`, never `0`, and an
+install without agents exports an empty list. Its note says which agents and what of them:
+*agents[] holds the agent records whose activity overlaps the exported range's days, within the
+agent tables' 7-day retention; ids, names and counts only — never a path, a description or a
+prompt.* `schema_version` is `3` since `agents[]` was added (`2` added the tool table), and
+everything versions 1 and 2 wrote still means the same thing. The save dialog names what is
+about to leave the machine — model names always, tool names and the agents' ids and types
+(*Agents are included as agents[].*), project labels (basenames or salted hashes) when
+attribution is on — because that is the last moment to say no. After the export one message
+names every file written, the companions included.
 
 **Copy Usage Summary** puts a markdown version on the clipboard: quota windows, token tables,
 cache economy, the digest and the footnotes. The `~` and the lower-bound marks travel with the

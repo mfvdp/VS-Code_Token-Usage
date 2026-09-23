@@ -18,7 +18,7 @@ import * as path from 'path'
 import { MAX_RUN_AGENTS } from '../src/agentTree'
 import { AGENT_TABLES_REVISION, Aggregator, JOURNAL_HEAD_RE, JOURNAL_PARSE_MAX } from '../src/agg'
 import { configureRoots } from '../src/discover'
-import { toCsv, toJson, toolsCsv } from '../src/exporter'
+import { agentRows, agentsCsv, toCsv, toJson, toolsCsv } from '../src/exporter'
 import { agentReplayFiles, rebuildJournal, replayAgents, scan } from '../src/scan'
 import { markdownDocument } from '../src/textViews'
 import { TimeConfig } from '../src/time'
@@ -431,10 +431,15 @@ test('the journal key never leaves the comparison', async () => {
       [`markdown ${key}`, markdownDocument(open, agentTreeFor(input, 'text'))])
   }
   const range = { from: '2026-09-01', to: '2026-09-03' }
-  outputs.push(['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)],
-    ['tools export', toolsCsv(agg, range)])
-  // (The agents CSV comes with 1.6 O2; the log and the diagnostics report are the host's, and
-  // test/extension.test.ts holds them to the same rule.)
+  // 1.6 O2: the exports carry the run's agents with a record — at the view model's clock, inside
+  // the retention — and with them their attempts, never the key the attempts were told apart by.
+  // (d4d4 has no transcript: no record, no row.)
+  assert.deepEqual(agentRows(agg, range, cfg, utc, NOW).map((r) => [r.agentId, r.attempt]),
+    [[a1, 1], [a2, 2], [a3, 1]], 'the export does not carry the run\'s agents')
+  outputs.push(['json export', toJson(agg, range, cfg, utc, NOW)], ['csv export', toCsv(agg, range, cfg, utc)],
+    ['tools export', toolsCsv(agg, range)], ['agents export', agentsCsv(agg, range, cfg, utc, NOW)])
+  // (The log and the diagnostics report are the host's, and test/extension.test.ts holds them to
+  // the same rule.)
   // None of the keys, nor any 16-hex run of one of them; nor a label, a phase or a result.
   const runs = keys.flatMap((k) => {
     const hex = k.slice(3)

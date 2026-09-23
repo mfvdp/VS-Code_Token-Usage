@@ -22,7 +22,7 @@ import * as path from 'path'
 import { AGENT_RETENTION_DAYS, NodeDetails, RESUMED_AFTER_MS, RUNNING_WINDOW_MS, TreeNode } from '../src/agentTree'
 import { AGENT_TABLES_REVISION, Aggregator, cleanRunId } from '../src/agg'
 import { configureRoots } from '../src/discover'
-import { toCsv, toJson, toolsCsv } from '../src/exporter'
+import { agentRows, agentsCsv, toCsv, toJson, toolsCsv } from '../src/exporter'
 import { setBundle, setLocale } from '../src/i18n'
 import { agentReplayFiles, replayAgents, scan } from '../src/scan'
 import { markdownDocument } from '../src/textViews'
@@ -615,8 +615,10 @@ test('a Workflow call\'s input and its result\'s summary, paths and names never 
     outputs.push([`view model ${key}`, JSON.stringify(open)], [`markdown ${key}`, markdownDocument(open, agentTreeFor(input, 'text'))])
   }
   const range = { from: '2026-09-01', to: '2026-09-03' }
-  outputs.push(['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)],
-    ['tools export', toolsCsv(agg, range)])
+  // 1.6 O2: the exports carry the run's agents, at the view model's clock — its id with them.
+  assert.ok(agentRows(agg, range, cfg, utc, NOW).length > 0, 'the export carries no agent of the run')
+  outputs.push(['json export', toJson(agg, range, cfg, utc, NOW)], ['csv export', toCsv(agg, range, cfg, utc)],
+    ['tools export', toolsCsv(agg, range)], ['agents export', agentsCsv(agg, range, cfg, utc, NOW)])
   const never = [secret, 'synthetic workflow args', 'synthetic workflow description', '/tmp/synthetic',
     'synthetic-workflow-name', 'local_workflow', 'b9c8d7e6f', 'synthetic workflow answer']
   for (const [what, text] of outputs) {

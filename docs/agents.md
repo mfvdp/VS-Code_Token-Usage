@@ -19,7 +19,11 @@ section appears once you add `agents` to it. The range, provider and model chips
 the section is always the last seven days, so the filter bar stays below it. *Show Usage as
 Text* prints the running list, the 7-day block while you have it open, and then the whole tree as indented lists — every node open, at
 most 50 children each (see [Opening and selection](#opening-and-selection)) — with the open
-node's details as a table; the Quick Pick does not carry them.
+node's details as a table. *Show Usage (Quick Pick)* has a group `Agents` after the quota: the
+first five entries of the running list, one row for the rest, and the sessions' tallies added
+together — `14 started · 5 ✓ · 2 ✕ · … · last 7 days`, in words beside it —, every row opening the
+dashboard; past the 20 sessions the tree lists, that row names the sessions it counts and how
+many older ones it leaves out. The CSV and JSON exports carry the agents too (see [Export and diagnostics](export.md)).
 
 Claude Code only. Codex writes no agent identity into its transcripts, and the section states
 nothing about Codex.
@@ -702,8 +706,11 @@ word for it; per workflow run the agents
 its journal started, each with the ordinal of its step, its attempt, the journal's outcome and the
 attempt that superseded it, how many further ones it did not list, and when the journal last
 changed — never a key. The records are keyed by the transcript's path, as every transcript's read
-position always was. None of it is part of the CSV or JSON export, the clipboard summary or
-the diagnostics report. The tables do not depend on `tokenPace.attribution` — see
+position always was. The CSV and JSON exports carry of each agent record what the tree shows of
+it — its ids, its type, model and effort, its state, counts and times, who launched it and Claude
+Code's report — in the agents file beside the CSV and the `agents[]` of the JSON (see
+[Export and diagnostics](export.md)); never a path, a journal key, a rejected request or its last tool call. The
+clipboard summary and the diagnostics report carry none of it. The tables do not depend on `tokenPace.attribution` — see
 [Sessions and projects](sessions.md).
 
 ## Kept for seven days

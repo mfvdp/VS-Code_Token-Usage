@@ -12,19 +12,51 @@
  * a spreadsheet and then argue with.
  */
 
-import { Aggregator, billable } from './agg'
+import { Aggregator, billable, cleanAgentId, cleanAgentName } from './agg'
+import { AGENT_RETENTION_DAYS } from './agentTree'
+import { AgentRecordView, agentRecordViews } from './agentTreeBuild'
 import { Config } from './config'
 import { t } from './i18n'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing } from './prices'
-import { TimeConfig, dayOfHour } from './time'
+import { TimeConfig, dayOfHour, dayOf as dayOfInstant } from './time'
 import { Bucket, TOOL_NAME_CAP } from './types'
 import type { ViewModel } from './viewModel'
 
 /**
- * 2 added `tools[]` and `toolsTruncated`; everything version 1 carried is still there and
- * still means the same thing, so a reader written for 1 keeps working.
+ * 2 added `tools[]` and `toolsTruncated`; 3 (1.6 O2) added `agents[]`. Everything an earlier
+ * version carried is still there and still means the same thing, so a reader written for 1 or 2
+ * keeps working.
  */
-export const EXPORT_SCHEMA_VERSION = 2
+export const EXPORT_SCHEMA_VERSION = 3
+
+/**
+ * The agents file's columns (1.6 O2) — the fields of a JSON `agents[]` row, in their order, with
+ * Claude Code's report as three columns. What the Agents section shows of an agent and nothing
+ * else: ids, its type and model, its state, its counts and its times — never a path, never a word
+ * of what it was asked or answered.
+ */
+export const AGENTS_CSV_COLUMNS = [
+  'agentId', 'sessionId', 'workflowId', 'type', 'model', 'models', 'effort', 'state', 'derived',
+  'outcome', 'outcomeStatus', 'attempt', 'firstTs', 'lastTs', 'requests', 'outputFinal',
+  'input', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'usage',
+  'toolCalls', 'toolErrors', 'spawnedBy', 'reportTokens', 'reportDurationMs', 'reportToolUses',
+] as const
+
+/** The tool table's file beside the chosen one: `export.csv` → `export.tools.csv`. */
+export const TOOLS_FILE_SUFFIX = '.tools.csv'
+/** The agents file beside the chosen one (1.6 O2): `export.csv` → `export.agents.csv`. */
+export const AGENTS_FILE_SUFFIX = '.agents.csv'
+
+/**
+ * Where a companion file goes: the chosen path with its extension replaced by the suffix —
+ * `…/export.csv` + `.tools.csv` → `…/export.tools.csv`; a name without a dot just gains it, and a
+ * dot in a directory's name is no extension.
+ */
+export function companionPath(path: string, suffix: string): string {
+  const cut = path.lastIndexOf('.')
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return (cut > slash ? path.slice(0, cut) : path) + suffix
+}
 
 /**
  * The tool side table's own columns. A separate file, never a column on a bucket row: the
@@ -174,6 +206,131 @@ export function toolsCsv(agg: Aggregator, range: ExportRange): string {
   return lines.join('\n') + '\n'
 }
 
+/** One agent row of the export, as `agents[]` writes it; the agents file flattens `report`. */
+export interface AgentExportRow {
+  agentId: string
+  sessionId: string
+  workflowId: string | null
+  type: string | null
+  model: string | null
+  models: string[]
+  effort: string | null
+  state: string
+  derived: boolean
+  outcome: string | null
+  outcomeStatus: string | null
+  attempt: number | null
+  firstTs: string
+  lastTs: string
+  requests: number
+  outputFinal: number
+  input: number
+  cacheWrite5m: number
+  cacheWrite1h: number
+  cacheRead: number
+  output: number
+  reasoning: number
+  usage: number
+  toolCalls: number
+  toolErrors: number | null
+  spawnedBy: string | null
+  report: { tokens: number; durationMs: number; toolUses: number } | null
+}
+
+/** The longest model id or type an agent row carries — the length the agent tables keep a model id to. */
+const AGENT_EXPORT_NAME_MAX = 64
+
+/**
+ * One record as the tree reads it, checked once more on the way out: an id outside the ids'
+ * alphabet drops the row — no record the aggregator makes carries one —, a name outside the names'
+ * alphabet is null. So the file holds identifiers, words of a fixed set and numbers, whatever a
+ * snapshot from elsewhere held.
+ */
+function agentRowOf(v: AgentRecordView): AgentExportRow | null {
+  const agentId = cleanAgentId(v.agentId)
+  const sessionId = cleanAgentId(v.sessionId)
+  if (agentId === null || sessionId === null) return null
+  const name = (x: unknown): string | null => cleanAgentName(x, AGENT_EXPORT_NAME_MAX)
+  const spawnedBy = v.spawnedBy === 'session' ? 'session' : cleanAgentId(v.spawnedBy)
+  return {
+    agentId,
+    sessionId,
+    workflowId: cleanAgentId(v.workflowId),
+    type: name(v.type),
+    model: name(v.model),
+    models: v.models.map(name).filter((m): m is string => m !== null),
+    effort: v.effort,
+    state: v.state,
+    derived: v.derived,
+    outcome: v.outcome,
+    outcomeStatus: v.outcomeStatus,
+    attempt: v.attempt,
+    firstTs: new Date(v.firstTs).toISOString(),
+    lastTs: new Date(v.lastTs).toISOString(),
+    requests: v.requests,
+    outputFinal: v.outputFinal,
+    input: v.input,
+    cacheWrite5m: Math.max(0, v.cacheWrite - v.cacheWrite1h),
+    cacheWrite1h: v.cacheWrite1h,
+    cacheRead: v.cacheRead,
+    output: v.output,
+    reasoning: v.reasoning,
+    usage: v.usage,
+    toolCalls: v.toolCalls,
+    toolErrors: v.toolErrors,
+    spawnedBy,
+    report: v.report,
+  }
+}
+
+/**
+ * The agents of the export (1.6 O2): the agent records whose activity — from the first line to the
+ * last — touches a day of the range, within the agent tables' retention, each as the Agents section
+ * shows it at `now`: its state is the tree's, inferred where `derived` says so. Every session's
+ * agents, not only the sessions the dashboard lists; the first to start first.
+ */
+export function agentRows(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: TimeConfig, now = Date.now()): AgentExportRow[] {
+  const views = agentRecordViews({
+    agents: agg.agents(),
+    launches: agg.launches(),
+    mains: agg.mains(),
+    runs: agg.runs(),
+    runLaunches: agg.runLaunches(),
+    sessions: agg.sessions(),
+    attribution: cfg.attribution,
+    selected: null,
+    tcfg,
+  }, now)
+  const out: AgentExportRow[] = []
+  for (const v of views) {
+    if (dayOfInstant(v.firstTs, tcfg) > range.to || dayOfInstant(v.lastTs, tcfg) < range.from) continue
+    const row = agentRowOf(v)
+    if (row) out.push(row)
+  }
+  return out
+}
+
+/**
+ * The agents file (1.6 O2): one line per agent row, the columns of AGENTS_CSV_COLUMNS — the models
+ * joined by a space, an absent value empty, never 0. No TOTAL line: an agent's tokens are the same
+ * tokens the bucket rows with `isSub` true count, hour by hour, and a sum under them would invite
+ * adding the two. An empty table still gets its header row.
+ */
+export function agentsCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: TimeConfig, now = Date.now()): string {
+  const lines: string[] = [AGENTS_CSV_COLUMNS.join(',')]
+  const cellOf = (v: string | number | boolean | null): string => (v === null ? '' : csvCell(v))
+  for (const r of agentRows(agg, range, cfg, tcfg, now)) {
+    lines.push([
+      r.agentId, r.sessionId, r.workflowId, r.type, r.model, r.models.join(' '), r.effort, r.state, r.derived,
+      r.outcome, r.outcomeStatus, r.attempt, r.firstTs, r.lastTs, r.requests, r.outputFinal,
+      r.input, r.cacheWrite5m, r.cacheWrite1h, r.cacheRead, r.output, r.reasoning, r.usage,
+      r.toolCalls, r.toolErrors, r.spawnedBy,
+      r.report?.tokens ?? null, r.report?.durationMs ?? null, r.report?.toolUses ?? null,
+    ].map(cellOf).join(','))
+  }
+  return lines.join('\n') + '\n'
+}
+
 export interface JsonExport {
   schema_version: number
   generated_at: string
@@ -185,11 +342,13 @@ export interface JsonExport {
   buckets: Array<Record<string, string | number | boolean | null>>
   tools: Array<Record<string, string | number>>
   toolsTruncated: boolean
+  /** 1.6 O2 (schema 3). */
+  agents: AgentExportRow[]
   sessions?: Array<Record<string, string | number | boolean | string[] | null>>
   notes: string[]
 }
 
-export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: TimeConfig): string {
+export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: TimeConfig, now = Date.now()): string {
   const pricing = pricingOf(cfg)
   // The tool table is addressed by the day the ingest stored, so it takes the range bounds
   // as they are — there is no hour left in a tool row to re-address in another zone.
@@ -262,12 +421,19 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
       day: row.day, source: row.source, model: row.model, tool: row.name, calls: row.calls,
     })),
     toolsTruncated: toolQuery.truncated,
+    agents: agentRows(agg, range, cfg, tcfg, now),
     notes: [
       'usage = fresh input + cache write + output',
       'costUsd is hypothetical API cost, not a bill; null means the model has no price on file',
       'days without data have no row — gaps are gaps, not zeros',
       'tools[] counts tool calls by name and day; names only, never inputs or results. '
         + `toolsTruncated means a day had more than ${TOOL_NAME_CAP} distinct tools and the rarest were not counted`,
+      // §7a Q14 of the 1.6 spec, word for word.
+      'agents[] holds the agent records whose activity overlaps the exported range\'s days, within the agent tables\' '
+        + `${AGENT_RETENTION_DAYS}-day retention; ids, names and counts only — never a path, a description or a prompt`,
+      'an agent row counts the agent whole: the same tokens the buckets with isSub true count hour by hour, so the two are '
+        + 'never added; state is the Agents section\'s, inferred where derived is true; report is Claude Code\'s own '
+        + 'figure for the agent, never part of a total',
     ],
   }
 

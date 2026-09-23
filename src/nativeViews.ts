@@ -7,15 +7,18 @@
  *
  * All the rendering lives in `textViews.ts` and `exporter.ts`, which are pure and tested;
  * this file only wires them to commands, a content provider and the save dialog. The dialog
- * names what leaves the machine before the file exists — model names always, project labels
- * when attribution is on — because that is the last moment the user can say no.
+ * names what leaves the machine before the file exists — model names always, tool names and the
+ * agents' ids and types (1.6 O2), project labels when attribution is on — because that is the
+ * last moment the user can say no.
  */
 
 import * as vscode from 'vscode'
 import type { AgentTreeVm } from './agentTree'
 import { Aggregator } from './agg'
 import { Config, readTimeConfig } from './config'
-import { toCsv, toJson, toMarkdownSummary, toolsCsv } from './exporter'
+import {
+  AGENTS_FILE_SUFFIX, TOOLS_FILE_SUFFIX, agentsCsv, companionPath, toCsv, toJson, toMarkdownSummary, toolsCsv,
+} from './exporter'
 import { t } from './i18n'
 import { markdownDocument, quickPickItems } from './textViews'
 import { DayRange } from './time'
@@ -84,10 +87,11 @@ function exportNotice(cfg: Config): string {
 }
 
 /**
- * A second file written beside the chosen one, for data that cannot live in the first.
+ * A further file written beside the chosen one, for data that cannot live in the first.
  *
  * The tool table is keyed by day and model while a bucket row is keyed by day, hour, model,
- * tier and isSub, so a tool column on a bucket row would be an invented split. It becomes a
+ * tier and isSub, so a tool column on a bucket row would be an invented split; an agent (1.6 O2)
+ * is a whole record across hours and days, so an agent column would be one too. Each becomes a
  * companion file instead — named in the save dialog before anything is written, because a
  * file the user did not pick must not appear on disk unannounced.
  */
@@ -97,19 +101,12 @@ interface Companion {
   text: string
 }
 
-/** `…/export.csv` + `.tools.csv` → `…/export.tools.csv`; a name without a dot just gains it. */
-function companionPath(path: string, suffix: string): string {
-  const cut = path.lastIndexOf('.')
-  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  return (cut > slash ? path.slice(0, cut) : path) + suffix
-}
-
 async function save(
   text: string,
   name: string,
   filters: Record<string, string[]>,
   notice: string,
-  companion?: Companion,
+  companions: readonly Companion[] = [],
 ): Promise<void> {
   const uri = await vscode.window.showSaveDialog({
     defaultUri: vscode.Uri.file(name),
@@ -119,18 +116,24 @@ async function save(
   })
   if (!uri) return
   await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'))
-  let second: vscode.Uri | null = null
-  if (companion) {
-    second = uri.with({ path: companionPath(uri.path, companion.suffix) })
-    await vscode.workspace.fs.writeFile(second, Buffer.from(companion.text, 'utf8'))
+  const written: vscode.Uri[] = []
+  for (const c of companions) {
+    const next = uri.with({ path: companionPath(uri.path, c.suffix) })
+    await vscode.workspace.fs.writeFile(next, Buffer.from(c.text, 'utf8'))
+    written.push(next)
   }
   // The button is computed once and compared with that same value: a label translated on
   // the way in and re-translated on the way out compares against a string nobody was shown.
   const openLabel = t('Open')
+  // Every file that was written, by name — one sentence per count, so a translator has the
+  // whole sentence each time.
+  const [second, third] = written.map((u) => u.fsPath)
   const open = await vscode.window.showInformationMessage(
-    second
-      ? t('Token Pace: exported to {0} and {1}', uri.fsPath, second.fsPath)
-      : t('Token Pace: exported to {0}', uri.fsPath),
+    third !== undefined
+      ? t('Token Pace: exported to {0}, {1} and {2}', uri.fsPath, second, third)
+      : second !== undefined
+        ? t('Token Pace: exported to {0} and {1}', uri.fsPath, second)
+        : t('Token Pace: exported to {0}', uri.fsPath),
     openLabel,
   )
   if (open === openLabel) await vscode.window.showTextDocument(uri)
@@ -204,12 +207,19 @@ export function registerNativeViews(
     vscode.commands.registerCommand('tokenPace.exportCsv', async () => {
       const { agg, range, cfg } = deps.getExportInput()
       const tcfg = readTimeConfig(cfg)
+      // One instant for the file and the agents in it: an agent's state is the tree's at that moment.
+      const now = Date.now()
       await save(
         toCsv(agg, range, cfg, tcfg),
         `token-pace-${range.from}_${range.to}-${timestamp()}.csv`,
         { CSV: ['csv'] },
-        `${exportNotice(cfg)} ${t('Tool names go into a second file beside it (.tools.csv).')}`,
-        { suffix: '.tools.csv', text: toolsCsv(agg, range) },
+        // 1.6 O2: the agents' ids, types and models leave the machine too, in a file of their own.
+        `${exportNotice(cfg)} ${t('Tool names go into a second file beside it (.tools.csv).')} `
+          + t('Agent ids and types go into a third file beside it (.agents.csv).'),
+        [
+          { suffix: TOOLS_FILE_SUFFIX, text: toolsCsv(agg, range) },
+          { suffix: AGENTS_FILE_SUFFIX, text: agentsCsv(agg, range, cfg, tcfg, now) },
+        ],
       )
     }),
 
@@ -217,13 +227,14 @@ export function registerNativeViews(
       const { agg, range, cfg } = deps.getExportInput()
       const tcfg = readTimeConfig(cfg)
       await save(
-        toJson(agg, range, cfg, tcfg),
+        toJson(agg, range, cfg, tcfg, Date.now()),
         `token-pace-${range.from}_${range.to}-${timestamp()}.json`,
         { JSON: ['json'] },
         // The CSV path names the tool file; this one has to name the array, for the same
         // reason: `tools[]` carries the names as the transcript spells them, MCP names
         // included, and the dialog is the last moment to say no to that leaving the machine.
-        `${exportNotice(cfg)} ${t('Tool names are included as tools[].')}`,
+        // 1.6 O2: `agents[]` carries the agents' ids, types and models — said the same way.
+        `${exportNotice(cfg)} ${t('Tool names are included as tools[].')} ${t('Agents are included as agents[].')}`,
       )
     }),
 

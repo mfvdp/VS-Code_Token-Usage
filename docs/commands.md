@@ -18,8 +18,8 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `Token Pace: Cycle Status Bar Windows` | | Steps `windowSelect` through its values |
 | `Token Pace: Preview Status Bar States` | | Synthetic renderings of every state, for 60 seconds |
 | `Token Pace: Open Official Usage Page` | | Opens the provider's own usage page in your browser |
-| `Token Pace: Export CSV…` | | One row per bucket, plus a `TOTAL` row — and the tool table in a second file beside it |
-| `Token Pace: Export JSON…` | | Buckets, tool calls, totals, range, timezone and pricing provenance |
+| `Token Pace: Export CSV…` | | One row per bucket, plus a `TOTAL` row — the tool table in a second file beside it, the agents in a third |
+| `Token Pace: Export JSON…` | | Buckets, tool calls, agents, totals, range, timezone and pricing provenance |
 | `Token Pace: Copy Usage Summary` | | The summary as markdown, on the clipboard |
 | `Token Pace: Copy Diagnostics` | | An allow-listed report, safe to paste into an issue |
 | `Token Pace: Copy Agent ID` | | The whole id of the node whose details are open in the Agents section — agent, launch, run or session — on the clipboard; the details' *Copy ID* button does the same |

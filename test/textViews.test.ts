@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { AgentTreeVm, MAX_GROUP_CHILDREN, MAX_ROOTS, RunningItem, TreeNode, emptyAgentTree } from '../src/agentTree'
 import { setBundle, setLocale } from '../src/i18n'
-import { markdownDocument, quickPickItems } from '../src/textViews'
+import { PICK_RUNNING_ITEMS, PickItem, markdownDocument, quickPickItems } from '../src/textViews'
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
 import { SOURCE_TITLE, ViewModel, agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
@@ -1525,4 +1525,139 @@ test('a run\'s collector is one line of the markdown tree, the last under its ru
   assert.ok(de.includes('    - [~Läuft] 2 Agent(en) ohne gezählte Antwort (2 gestartet · 1 ✕ · ~1 ●) · – · –'), de.join('\n'))
   assert.ok(de.includes('- [~Läuft] 2 Agent(en) ohne gezählte Antwort · Sitzung 3f9a2c1d · Workflow-Lauf cfe7718d · – (~1 davon läuft)'),
     de.join('\n'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 O2: the agents in the Quick Pick
+// ---------------------------------------------------------------------------
+
+/** The Quick Pick's Agents group: the rows after its heading, up to the next heading. */
+function agentGroup(items: PickItem[], heading = 'Agents'): PickItem[] {
+  const at = items.findIndex((i) => i.separator === true && i.label === heading)
+  if (at < 0) return []
+  const end = items.findIndex((i, n) => n > at && i.separator === true)
+  return items.slice(at + 1, end < 0 ? undefined : end)
+}
+
+test('the Quick Pick names the running agents right after the quota, then what the sessions\' agents came to (1.6 O2)', () => {
+  const { agg } = agentWorld()
+  const vm = buildViewModel(makeInput({ agg, cfg: makeConfig() }))
+  const items = quickPickItems(vm)
+  const heads = items.filter((i) => i.separator === true).map((i) => i.label)
+  // After the quota, before the summary — where the dashboard has the section.
+  assert.equal(heads.indexOf('Agents'), heads.indexOf('Quota') + 1, heads.join(', '))
+  const rows = agentGroup(items)
+  // The running list's entries, in its order — the longest-running first — every one a way to
+  // the dashboard: the running agent, the launch nobody has written to yet, the run's collector.
+  const now = vm.agents.runningNow
+  assert.ok(now.length >= 3 && now.length <= PICK_RUNNING_ITEMS, String(now.length))
+  assert.deepEqual(rows.slice(0, now.length).map((i) => i.label), [
+    '~workflow-subagent · claude-opus-4-6 · f6a7',
+    '~Plan · sonnet · launched',
+    // A collector's count of agents is exact, so the ~ goes on the ones that run.
+    '2 agent(s) without a counted reply (~1 of them running)',
+  ])
+  for (const [n, r] of now.entries()) {
+    const i = rows[n]
+    assert.equal(i.description, `${r.usage}${r.lowerBound ? ' ⚠' : ''}`)
+    assert.ok(i.detail?.startsWith(r.context), i.detail)
+    assert.equal(i.command, 'tokenPace.showDashboard')
+  }
+  // Where it sits, and — for an output that is a lower bound — the tree's own words why.
+  assert.equal(rows[0].detail, 'Session 3f9a2c1d · Workflow run cfe7718d · ⚠ lower bound — 1 of 2 replies unfinished')
+  assert.equal(rows[1].detail, 'Session 3f9a2c1d')
+  // Then the two sessions' tallies together, in glyphs and in words: 13 agents of the busy one, 1 of the quiet one.
+  const tallies = vm.agents.roots.map((r) => r.tally)
+  assert.deepEqual(tallies.map((x) => x?.started), [13, 1])
+  const last = rows[rows.length - 1]
+  assert.equal(rows.length, now.length + 1)
+  assert.equal(last.label, '14 started · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ? · last 7 days')
+  assert.equal(last.detail, '14 started, 5 done, 2 failed, 2 retried, 1 stopped, about 3 running, about 1 unknown')
+  assert.equal(last.description, undefined)
+  assert.equal(last.command, 'tokenPace.showDashboard')
+  // Each field of the sum is the sessions' own, added — the running ones as the tree counts them.
+  const sum = (k: 'started' | 'running'): number => tallies.reduce((n, x) => n + (x?.[k] ?? 0), 0)
+  assert.equal(sum('started'), 14)
+  assert.equal(sum('running'), vm.agents.running)
+  // No share of a quota window: the agents are a list of their own (lead note on P10b).
+  assert.equal(rows.some((i) => /counted here|%/.test(`${i.label} ${i.description ?? ''} ${i.detail ?? ''}`)), false)
+})
+
+test('past five running entries the Quick Pick names five and counts the rest in one row; nothing running, only the tally', () => {
+  const { agg } = agentWorld()
+  const vm = buildViewModel(makeInput({ agg, cfg: makeConfig() }))
+  const one = vm.agents.runningNow[0]
+  const many: RunningItem[] = Array.from({ length: 7 }, (_, n) => ({
+    ...one, key: `a:x${n}`, label: `Explore · opus-5 · x${n}`, fullLabel: `Explore · claude-opus-5 · x${n}`,
+    lowerBound: false, lowerBoundText: null, waiting: n === 1,
+  }))
+  const rows = agentGroup(quickPickItems({ ...vm, agents: { ...vm.agents, runningNow: many, runningMore: 3 } }))
+  assert.equal(PICK_RUNNING_ITEMS, 5)
+  assert.deepEqual(rows.slice(0, 5).map((i) => i.label), [0, 1, 2, 3, 4].map((n) => `~Explore · claude-opus-5 · x${n}`))
+  // One that runs only because an agent below it does says so, as the running list does.
+  assert.deepEqual(rows.slice(0, 3).map((i) => i.detail), [one.context, `${one.context} · waits for a child agent`, one.context])
+  // The two listed entries not named here and the three the running list itself left out.
+  assert.deepEqual(rows[5], { label: 'and 5 more', command: 'tokenPace.showDashboard' })
+  assert.match(rows[6].label, / · last 7 days$/)
+  assert.equal(rows.length, 7)
+  // Nothing running: no row of the list, no "and 0 more" — the tally alone.
+  const quiet = agentGroup(quickPickItems({ ...vm, agents: { ...vm.agents, runningNow: [], runningMore: 0 } }))
+  assert.equal(quiet.length, 1)
+  assert.match(quiet[0].label, /^14 started · .* · last 7 days$/)
+})
+
+test('without a session the Quick Pick says what the tree says; sessions without agents, or no tree, leave no group behind', () => {
+  // No session at all: the tree's note, as the section's.
+  const empty = buildViewModel(makeInput({ agg: new Aggregator(), quotas: [] }))
+  assert.deepEqual(agentGroup(quickPickItems(empty)), [{ label: 'No Claude Code session in the last 7 days.' }])
+  // A session with no agent and nothing running has no tally — never "0 started" — and so no group.
+  const { vm } = agentVm()
+  const bare = vm.agents.roots.map((r) => ({ ...r, tally: null, tallyText: null, tallySpoken: null }))
+  const none = quickPickItems({ ...vm, agents: { ...vm.agents, roots: bare, runningNow: [], runningMore: 0 } })
+  assert.equal(none.some((i) => i.separator === true && i.label === 'Agents'), false)
+  assert.equal(none.some((i) => / started/.test(i.label)), false)
+  // A tree that was never built claims nothing either way.
+  assert.equal(quickPickItems({ ...vm, agents: emptyAgentTree() }).some((i) => i.separator === true && i.label === 'Agents'), false)
+  const without = { ...vm } as Partial<ViewModel>
+  delete without.agents
+  assert.equal(quickPickItems(without as ViewModel).some((i) => i.label === 'Agents'), false)
+})
+
+test('past the sessions the tree lists, the Quick Pick\'s tally says whose agents it counts (1.6 O2)', () => {
+  const { agg } = agentWorld()
+  const vm = buildViewModel(makeInput({ agg, cfg: makeConfig() }))
+  const rows = agentGroup(quickPickItems({ ...vm, agents: { ...vm.agents, omittedRoots: 3 } }))
+  const last = rows[rows.length - 1]
+  // The older sessions' agents are in no tally the view model carries, so the row says so
+  // rather than calling the listed sessions' sum the last seven days'.
+  assert.equal(last.label, '14 started · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ? · the 2 most recent sessions of the last 7 days')
+  assert.equal(last.description, '3 older session(s) not counted.')
+  assert.ok(MAX_ROOTS > 2)
+})
+
+test('the Quick Pick\'s agents speak German with the shipped bundle (1.6 O2)', () => {
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const { agg } = agentWorld()
+  let rows: PickItem[] = []
+  let omitted: PickItem[] = []
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    const vm = buildViewModel(makeInput({ agg, cfg: makeConfig() }))
+    rows = agentGroup(quickPickItems(vm), 'Agenten')
+    omitted = agentGroup(quickPickItems({ ...vm, agents: { ...vm.agents, omittedRoots: 3 } }), 'Agenten')
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.ok(rows.length >= 4, rows.map((i) => i.label).join(' / '))
+  assert.equal(rows[0].detail, 'Sitzung 3f9a2c1d · Workflow-Lauf cfe7718d · ⚠ Untergrenze — 1 von 2 Antworten unvollständig')
+  assert.equal(rows[2].label, '2 Agent(en) ohne gezählte Antwort (~1 davon läuft)')
+  const last = rows[rows.length - 1]
+  assert.equal(last.label, '14 gestartet · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ? · letzte 7 Tage')
+  assert.equal(last.detail, '14 gestartet, 5 fertig, 2 fehlgeschlagen, 2 wiederholt, 1 gestoppt, etwa 3 laufend, etwa 1 unbekannt')
+  const tail = omitted[omitted.length - 1]
+  assert.equal(tail.label, '14 gestartet · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ? · die 2 jüngsten Sitzungen der letzten 7 Tage')
+  assert.equal(tail.description, '3 ältere Sitzung(en) nicht mitgezählt.')
+  assert.equal(bundle['waits for a child agent'], 'wartet auf einen untergeordneten Agenten')
 })

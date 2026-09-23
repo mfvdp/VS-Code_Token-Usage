@@ -22,6 +22,7 @@ import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNA
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
+import { AGENTS_CSV_COLUMNS, EXPORT_SCHEMA_VERSION } from '../src/exporter'
 import { PaceConfig, paceVerdict } from '../src/pace'
 import { priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
@@ -775,6 +776,46 @@ test('both export dialogs say that tool names are about to leave the machine', (
     const block = src.slice(at, src.indexOf('}),', at))
     assert.match(block, /[Tt]ool names/, `the ${command} save dialog does not mention tool names`)
   }
+})
+
+test('both export dialogs say that the agents\' ids and types are about to leave the machine (1.6 O2)', () => {
+  // The same rule as for the tool names: the agents file and `agents[]` are named before
+  // anything is written, the file with its suffix, the array with its name.
+  const src = readDoc('src/nativeViews.ts')
+  const block = (command: string): string => {
+    const at = src.indexOf(`registerCommand('${command}'`)
+    assert.ok(at >= 0, `src/nativeViews.ts no longer registers ${command}`)
+    return src.slice(at, src.indexOf('}),', at))
+  }
+  assert.ok(block('tokenPace.exportCsv').includes("t('Agent ids and types go into a third file beside it (.agents.csv).')"),
+    'the CSV save dialog does not name the agents file')
+  assert.ok(block('tokenPace.exportCsv').includes('AGENTS_FILE_SUFFIX'), 'the CSV export writes no agents file')
+  assert.ok(block('tokenPace.exportJson').includes("t('Agents are included as agents[].')"),
+    'the JSON save dialog does not name agents[]')
+  // docs/export.md quotes both sentences as the dialogs say them.
+  const flat = (x: string): string => x.replace(/\s+/g, ' ')
+  for (const sentence of ['Agent ids and types go into a third file beside it (.agents.csv).', 'Agents are included as agents[].']) {
+    assert.ok(flat(doc.export).includes(sentence), `docs/export.md does not quote "${sentence}"`)
+  }
+})
+
+test('docs/export.md lists every column of the agents file, the schema version and the note on agents[] (1.6 O2)', () => {
+  const flat = (x: string): string => x.replace(/\s+/g, ' ')
+  const block = /```\n(agentId,[\s\S]*?)```/.exec(doc.export)
+  assert.ok(block, 'docs/export.md has no column block for the agents file')
+  assert.deepEqual((block as RegExpExecArray)[1].split(/[\s,]+/).filter(Boolean), [...AGENTS_CSV_COLUMNS])
+  assert.ok(doc.export.includes(`\`schema_version\` is \`${EXPORT_SCHEMA_VERSION}\``),
+    `docs/export.md does not state schema version ${EXPORT_SCHEMA_VERSION}`)
+  assert.ok(flat(doc.export).includes('agents[] holds the agent records whose activity overlaps the exported range\'s days, within '
+    + `the agent tables' ${AGENT_RETENTION_DAYS}-day retention; ids, names and counts only — never a path, a description or a prompt`),
+  'docs/export.md does not quote the note on agents[]')
+  // The pages that used to say the agent tables never reach an export say what does.
+  for (const [page, text] of [['agents.md', doc.agents], ['privacy.md', doc.privacy]] as const) {
+    assert.equal(/None of it is part of the CSV or JSON export|never in an export/.test(flat(text)), false,
+      `docs/${page} still says no agent reaches an export`)
+  }
+  assert.equal(flat(doc.dashboard).includes('the one part the Quick Pick leaves out'), false,
+    'docs/dashboard.md still says the Quick Pick leaves the agents out')
 })
 
 test('the tool-table retention the docs promise is the horizon the aggregator applies', () => {

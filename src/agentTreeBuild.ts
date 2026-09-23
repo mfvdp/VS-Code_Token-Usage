@@ -244,6 +244,21 @@ function modelsOf(v: unknown): string[] {
     .slice(0, 8)
 }
 
+/**
+ * What an agent's name is made of: its type — the sidecar's, else the one its launch asked for — and
+ * its model: the last real model id its replies were written with, through the model-name helper,
+ * else the alias the sidecar or the launch named. Null where none is known. The row, the details and
+ * the export (1.6 O2) read the same two.
+ */
+function nameOf(r: AgentRec, launch: AgentLaunch | null, models: readonly string[]): {
+  type: string | null; alias: string | null; model: string | null
+} {
+  const type = text(r.meta?.agentType) ?? text(launch?.typeHint)
+  const alias = text(r.meta?.model) ?? text(launch?.modelHint)
+  const lastModel = models.length > 0 ? normalizeModel(models[models.length - 1]) : ''
+  return { type, alias, model: lastModel || alias || null }
+}
+
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
@@ -765,6 +780,11 @@ function sessionState(main: MainRec | null, now: number, tcfg: TimeConfig): Stat
  * rejected requests.
  */
 interface Member {
+  /**
+   * The agent's id: a collected record's, or the id the journal started a member without a record
+   * under — what the export's state of that record is found by (1.6 O2).
+   */
+  agentId: string
   state: NodeState
   superseded: boolean
   /** N3: the request it ended on, when the API rejected it; null for every other member. */
@@ -813,9 +833,10 @@ function tallyBelow(e: Entry): AgentTally {
 /**
  * "427 started · 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — the started agents, then each state at least one
  * of them is in, with the glyph its rows carry: done, failed, retried, stopped, running,
- * unknown. The two inferred states carry the tilde every estimate on the page carries.
+ * unknown. The two inferred states carry the tilde every estimate on the page carries. The Quick
+ * Pick writes its sessions' tallies together in the same words (1.6 O2).
  */
-function tallyText(n: AgentTally): string {
+export function tallyText(n: AgentTally): string {
   const parts = [t('{0} started', full(n.started))]
   const glyphs: Array<[number, string]> = [
     [n.done, `${full(n.done)} ✓`], [n.failed, `${full(n.failed)} ✕`], [n.retried, `${full(n.retried)} ↻`],
@@ -826,7 +847,7 @@ function tallyText(n: AgentTally): string {
 }
 
 /** The tally in words, in the same order — what a screen reader says in place of the glyphs. */
-function tallySpoken(n: AgentTally): string {
+export function tallySpoken(n: AgentTally): string {
   const parts = [t('{0} started', full(n.started))]
   if (n.done > 0) parts.push(t('{0} done', full(n.done)))
   if (n.failed > 0) parts.push(t('{0} failed', full(n.failed)))
@@ -1113,10 +1134,8 @@ function countRows(c: Counters | null, usage = true): DetailRow[] {
  * ours, and never added to anything. A sentence, not a figure: it takes the whole width.
  */
 function reportRows(l: AgentLaunch | null): DetailRow[] {
-  const r = l?.totals
-  if (!r || typeof r !== 'object') return []
-  const nums = [r.tokens, r.durationMs, r.toolUses]
-  if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0)) return []
+  const r = reportOf(l)
+  if (r === null) return []
   return [{
     label: t('Report from Claude Code'),
     value: t('context at the end {0} (incl. cache reads and the reply) · {1} from the start · {2} tool calls',
@@ -1395,6 +1414,10 @@ interface Forest {
   byKey: Map<string, Entry>
   /** Whether any main session is within the retention at all — the empty note depends on it. */
   anyMain: boolean
+  /** The agent records the tree is made of, one per agent id — the export's rows (1.6 O2). */
+  records: Map<string, AgentRec>
+  /** The launch of a record, as the tree finds it: its sidecar's tool_use id first, then its agent id. */
+  launchOf: (r: AgentRec) => AgentLaunch | null
 }
 
 function cmp(a: string, b: string): number {
@@ -1605,7 +1628,7 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
   }
   const order = new Map(roots.map((r) => [r, r.lastTs ?? latest(r)]))
   roots.sort((x, y) => (order.get(y) ?? 0) - (order.get(x) ?? 0) || cmp(x.key, y.key))
-  return { roots, byKey, anyMain: mains.length > 0 }
+  return { roots, byKey, anyMain: mains.length > 0, records: recById, launchOf }
 }
 
 /**
@@ -1820,9 +1843,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const first = firstOf(r)
     const models = modelsOf(r.models)
     const wf = text(r.workflowId)
-    const type = text(r.meta?.agentType) ?? text(launch?.typeHint)
-    const alias = text(r.meta?.model) ?? text(launch?.modelHint)
-    const lastModel = models.length > 0 ? normalizeModel(models[models.length - 1]) : ''
+    const { type, alias, model: named } = nameOf(r, launch, models)
     // The journal's view of a run's agent, joined by id within its run (D2, D7).
     const view = wf !== null ? a.runs.get(wf) ?? null : null
     const journal = view?.byAgent.get(r.agentId) ?? null
@@ -1838,6 +1859,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         collectedOf.set(wf, list)
       }
       list.push({
+        agentId: r.agentId,
         state: st.state, superseded: next !== null, rejected, journalFailed: journal !== null && journalOutcome(journal) === 'failed',
         startTs: first, lastTs: activity, effort: effortLevel(r.effort),
       })
@@ -1849,7 +1871,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     // few — with dashes for every figure: nothing of it was counted, its time on the clock included.
     const counted = c.requests > 0
     // N6: the row names the model in its short form, the details and the markdown in full.
-    const model = lastModel || alias || '–'
+    const model = named ?? '–'
     const e: Entry = {
       key: fitKey('a:', r.agentId),
       kind: 'agent',
@@ -2045,6 +2067,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const run = a.runs.get(wf)?.run ?? null
     const siblingRuns = members.some((m) => m.state === 'running') || recordsOnly.some((m) => m.state === 'running')
     const only: Member[] = run === null ? [] : (journalOnlyOf.get(wf) ?? []).map((j) => ({
+      agentId: j.agentId,
       state: journalOnlyState(j, run, siblingRuns, now), superseded: text(j.supersededBy) !== null, rejected: null,
       journalFailed: journalOutcome(j) === 'failed', startTs: null, lastTs: null, effort: null,
     }))
@@ -2594,4 +2617,132 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
 export function agentDetails(input: AgentTreeInput, now: number, key: string): NodeDetails | null {
   const e = buildForest(input, now).byKey.get(key)
   return e ? detailsOf(e) : null
+}
+
+// ---------------------------------------------------------------------------
+// The export's view of the records (1.6 O2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One agent record as the tree reads it, for the export: what its row and its details show of it
+ * and nothing else — ids, its type and model, its state, its counts, its times, who launched it and
+ * Claude Code's own report. Never a path (the record's own and its launch's `file` stay here), never
+ * a word of what it was asked or answered: the records hold none.
+ */
+export interface AgentRecordView {
+  agentId: string
+  sessionId: string
+  /** The run it belongs to, or null for an agent outside a workflow run. */
+  workflowId: string | null
+  /** As its name says it; null where neither the sidecar nor the launch named one. */
+  type: string | null
+  model: string | null
+  /** The real model ids its replies were written with, in the order first seen. */
+  models: string[]
+  /** The effort of its newest reply (N8), or null. */
+  effort: Effort | null
+  /** The state its row shows — a run's collector member's own (D4) —, and whether it was inferred. */
+  state: NodeState
+  derived: boolean
+  /** What the parent recorded — its tool result or a task notification —, with its own word; null when it recorded nothing. */
+  outcome: RecordedOutcome | null
+  outcomeStatus: LaunchStatus | null
+  /** Which start of its workflow step it is (D7), as the run's journal numbers them; null outside a run or without a step. */
+  attempt: number | null
+  /** Its first line and its last activity — a request the API rejected after its last counted reply included (N3). */
+  firstTs: number
+  lastTs: number
+  input: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
+  output: number; reasoning: number; requests: number; outputFinal: number; toolCalls: number
+  /** Billable tokens, as its row's usage counts them. */
+  usage: number
+  /** The tool results marked as errors (O3), where the record counts them; null until it does. */
+  toolErrors: number | null
+  /** Who launched it: an agent of its session by id, 'session' for the session's own transcript, null when neither is known. */
+  spawnedBy: string | null
+  /** Claude Code's own report for it (D9), never added to anything; null without one. */
+  report: { tokens: number; durationMs: number; toolUses: number } | null
+}
+
+/**
+ * Every agent record the tree holds, as its rows and details read it (1.6 O2) — every session's, not
+ * only the MAX_ROOTS the page lists, a run's collector members (D4) included, each at the state the
+ * tree gives it; the records the tree leaves out (older than the retention, or not whole) are not
+ * among them. The first line first.
+ */
+export function agentRecordViews(input: AgentTreeInput, now: number): AgentRecordView[] {
+  const forest = buildForest(input, now)
+  const states = new Map<string, NodeState>()
+  for (const root of forest.roots) {
+    for (const e of preorder(root)) {
+      if (e.kind === 'agent' && e.id !== null) states.set(e.id, e.state)
+      for (const m of e.collected) if (!states.has(m.agentId)) states.set(m.agentId, m.state)
+    }
+  }
+  // The journal of each run, as the tree joins a run's agents to it: the first one of each run.
+  const journals = new Map<string, RunView>()
+  for (const run of input.runs ?? []) {
+    if (!validRun(run)) continue
+    const key = `${run.sessionId}|${run.workflowId}`
+    if (!journals.has(key)) journals.set(key, runView(run))
+  }
+  const out: AgentRecordView[] = []
+  for (const [id, r] of forest.records) {
+    const state = states.get(id)
+    if (state === undefined) continue
+    const launch = forest.launchOf(r)
+    const models = modelsOf(r.models)
+    const name = nameOf(r, launch, models)
+    const wf = text(r.workflowId)
+    const journal = wf !== null ? journals.get(`${r.sessionId}|${wf}`)?.byAgent.get(id) ?? null : null
+    const step = journal !== null && typeof journal.step === 'number' && Number.isInteger(journal.step) ? journal.step : 0
+    const attempt = step > 0 && journal !== null && Number.isInteger(journal.attempt) && journal.attempt >= 1 ? journal.attempt : null
+    const recorded = recordedOutcome(r, launch)
+    const c = countersOf(r)
+    const errors: unknown = (r as { toolErrors?: unknown }).toolErrors
+    out.push({
+      agentId: id,
+      sessionId: r.sessionId,
+      workflowId: wf,
+      type: name.type,
+      model: name.model,
+      models,
+      effort: effortLevel(r.effort),
+      state,
+      derived: derivedOf(state),
+      outcome: recorded?.outcome ?? null,
+      outcomeStatus: recorded?.word ?? null,
+      attempt,
+      firstTs: firstOf(r),
+      lastTs: activityOf(r, rejectionOf(r)),
+      ...c,
+      usage: billable(bucketOf(c, true)),
+      toolErrors: typeof errors === 'number' && Number.isInteger(errors) && errors >= 0 ? errors : null,
+      spawnedBy: spawnerOf(r, launch, forest.records),
+      report: reportOf(launch),
+    })
+  }
+  return out.sort((x, y) => x.firstTs - y.firstTs || cmp(x.agentId, y.agentId))
+}
+
+/**
+ * Who launched an agent, as its details' "Spawned by" row names it: an agent of the same session by
+ * its id, or the session's own transcript; null when the launching transcript is neither — or unknown.
+ */
+function spawnerOf(r: AgentRec, launch: AgentLaunch | null, records: ReadonlyMap<string, AgentRec>): string | null {
+  const file = text(r.spawnerFile) ?? text(launch?.file)
+  if (file === null) return null
+  const id = agentIdOf(file)
+  if (id !== null) return id !== r.agentId && records.get(id)?.sessionId === r.sessionId ? id : null
+  const place = sessionOfPath(file)
+  return place !== null && place.main && place.sessionId === r.sessionId ? 'session' : null
+}
+
+/** Claude Code's report for an agent, as the details' row takes it: three figures, all of them, or none. */
+function reportOf(l: AgentLaunch | null): AgentRecordView['report'] {
+  const r = l?.totals
+  if (!r || typeof r !== 'object') return null
+  const nums = [r.tokens, r.durationMs, r.toolUses]
+  if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0)) return null
+  return { tokens: r.tokens, durationMs: r.durationMs, toolUses: r.toolUses }
 }

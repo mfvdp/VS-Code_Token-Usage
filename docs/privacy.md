@@ -56,8 +56,12 @@ identifiers and counts, never content:
   `perTurnEffort`, and not from a main session's lines. Each of these
   values is an identifier or a number, and an identifier is held to a small alphabet and length
   on the way in — one that does not fit is dropped, not trimmed. The agent tables keep them for
-  seven days in the token snapshot, never in an export or the diagnostics report, and of them
-  the log only ever gets counts;
+  seven days in the token snapshot. The CSV and JSON exports carry of each agent only what the
+  Agents section shows of it — its ids, its type, model and effort, its state, its counts and
+  times, who launched it and the parent's three totals ([Export and diagnostics](export.md)),
+  never a path, its last tool call or a rejected request, each identifier checked against its alphabet
+  once more on the way out; the diagnostics report carries none of them, and of them the log only
+  ever gets counts;
 * for the agent tree too, of an API error line in an agent's transcript — the line Claude Code
   writes in place of a reply when the API rejected a request — the HTTP status `apiErrorStatus`,
   the `error` kind and, of its `quotaLimits` block, the `rateLimitType`: which limit refused the

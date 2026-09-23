@@ -11,7 +11,8 @@
  * Pure: no vscode. `nativeViews.ts` turns these lists and strings into commands.
  */
 
-import type { AgentTreeVm, AgentWeek, NodeState, RunningItem, TreeNode } from './agentTree'
+import type { AgentTally, AgentTreeVm, AgentWeek, NodeState, RunningItem, TreeNode } from './agentTree'
+import { tallySpoken, tallyText } from './agentTreeBuild'
 import { t } from './i18n'
 import { DEFAULT_BAR, estimate, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
@@ -240,6 +241,11 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     if (q.localBlock) add({ label: q.localBlock.text, description: q.title })
   }
 
+  // 1.6 O2: the agents, after the quota as the dashboard has them — the running ones and what
+  // the sessions' agents came to.
+  group(t('Agents'))
+  for (const row of agentPickLines(vm)) add(row)
+
   group(t('Summary'))
   for (const s of vm.digest) add({ label: s })
 
@@ -353,6 +359,79 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   group(t('Notes'))
   for (const f of vm.footnotes) add({ label: f })
   return items
+}
+
+/** The running list's entries the Quick Pick names (1.6 O2); the rest are counted in one row under them. */
+export const PICK_RUNNING_ITEMS = 5
+
+const TALLY_FIELDS = ['started', 'done', 'failed', 'retried', 'stopped', 'running', 'unknown'] as const
+
+/**
+ * What the listed sessions' agents came to together — each session's tally, counted on its whole
+ * tree, summed field by field; null when no session has an agent, as a session without one has no
+ * tally (never "0 started"). A field that is not a count counts nothing.
+ */
+function combinedTally(roots: readonly TreeNode[]): AgentTally | null {
+  const sum: AgentTally = { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0 }
+  for (const r of roots) {
+    const x = r.kind === 'session' ? r.tally : null
+    if (!x || typeof x !== 'object') continue
+    for (const k of TALLY_FIELDS) {
+      const n = x[k]
+      if (typeof n === 'number' && Number.isInteger(n) && n > 0) sum[k] += n
+    }
+  }
+  return sum.started > 0 ? sum : null
+}
+
+/**
+ * The Agents group of the Quick Pick (1.6 O2), from the same tree and running list the dashboard
+ * draws: the first PICK_RUNNING_ITEMS entries of the running list, longest-running first — the
+ * name marked `~`, running being inferred; where it sits and why it waits or is a lower bound
+ * under it — and one row for the rest; then what the sessions' agents came to, the tally the
+ * session rows carry, summed, in glyphs and in words. A run's collector (D4) is one entry for its
+ * members and says how many of them run: a `~` in front of its label would mark its count of
+ * agents as an estimate, and that count is exact. Without a session the tree's note is the group.
+ * No share of a quota window here (lead note on P10b): the agents are their own list. Every row
+ * opens the dashboard; none runs anything else.
+ */
+function agentPickLines(vm: ViewModel): PickItem[] {
+  const a = vm.agents
+  if (!a || !Array.isArray(a.roots)) return []
+  if (a.roots.length === 0) return a.note ? [{ label: a.note }] : []
+  const out: PickItem[] = []
+  const now = Array.isArray(a.runningNow) ? a.runningNow : []
+  const shown = now.slice(0, PICK_RUNNING_ITEMS)
+  for (const r of shown) {
+    const members = typeof r.running === 'number' && Number.isInteger(r.running) && r.running >= 1 ? r.running : 0
+    const label = r.kind === 'noreply'
+      ? `${fullName(r)}${members > 0 ? ` (${members === 1 ? t('~1 of them running') : t('~{0} of them running', full(members))})` : ''}`
+      : estimate(fullName(r))
+    out.push({
+      label,
+      description: `${r.usage}${r.lowerBound === true ? ' ⚠' : ''}`,
+      detail: [r.context, r.waiting ? t('waits for a child agent') : null, r.lowerBoundText].filter(Boolean).join(' · ') || undefined,
+      command: 'tokenPace.showDashboard',
+    })
+  }
+  const more = typeof a.runningMore === 'number' && a.runningMore > 0 ? a.runningMore : 0
+  const rest = now.length - shown.length + more
+  if (rest > 0) out.push({ label: t('and {0} more', full(rest)), command: 'tokenPace.showDashboard' })
+  const tally = combinedTally(a.roots)
+  if (tally) {
+    // Every session the tree has, or — past MAX_ROOTS — the ones it lists, and the row says so:
+    // the older sessions' agents are in no tally the view model carries.
+    const omitted = typeof a.omittedRoots === 'number' && a.omittedRoots > 0 ? a.omittedRoots : 0
+    out.push({
+      label: omitted === 0
+        ? t('{0} · last 7 days', tallyText(tally))
+        : t('{0} · the {1} most recent sessions of the last 7 days', tallyText(tally), full(a.roots.length)),
+      description: omitted > 0 ? t('{0} older session(s) not counted.', full(omitted)) : undefined,
+      detail: tallySpoken(tally),
+      command: 'tokenPace.showDashboard',
+    })
+  }
+  return out
 }
 
 /**

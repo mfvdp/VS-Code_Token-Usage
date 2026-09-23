@@ -458,13 +458,31 @@ function everyNodeOpen(attribution: Attribution = 'none', agg = agentWorld(attri
     .map((node) => ({ node, vm: agentsVm({ attribution, agg, select: () => node.key }) }))
 }
 
-/** The markdown's lines for the tree: one per node, in the order the tree has them. */
-function agentLines(vm: ViewModel): string[] {
+/** The lines of the markdown's Agents section, heading included. */
+function agentSection(vm: ViewModel): string[] {
   const md = markdownDocument(vm)
   const at = md.indexOf('## Agents\n')
   assert.ok(at >= 0, 'the markdown has no Agents section')
   const end = md.indexOf('\n## ', at)
-  return md.slice(at, end < 0 ? undefined : end).split('\n').filter((l) => /^\s*- \[/.test(l))
+  return md.slice(at, end < 0 ? undefined : end).split('\n')
+}
+
+/**
+ * The markdown's lines for the tree: one per node, in the order the tree has them — under the
+ * tree's own heading, where there is a running list above it, whose lines carry a state too.
+ */
+function agentLines(vm: ViewModel): string[] {
+  const all = agentSection(vm)
+  const head = all.indexOf('### Sessions and agents')
+  return all.slice(head < 0 ? 0 : head).filter((l) => /^\s*- \[/.test(l))
+}
+
+/** The markdown's running lines: one per item of the running list, in its order. */
+function runningLines(vm: ViewModel): string[] {
+  const all = agentSection(vm)
+  const at = all.indexOf('### Running now')
+  const head = all.indexOf('### Sessions and agents')
+  return at < 0 ? [] : all.slice(at, head < 0 ? undefined : head).filter((l) => l.startsWith('- '))
 }
 
 const GERMAN = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
@@ -523,6 +541,17 @@ test('an agent whose output is a lower bound says so wherever its figures are, a
   // Claude Code's agents end on an unfinished reply: all but the quick one here, which did not.
   assert.equal(marked, agg.agents().length - 1)
   assert.equal(agentNode(vm.agents.roots, AGENT_WORLD.guide).lowerBound, false)
+  // The running list says it too: a running agent is nearly always mid-reply, and the list is
+  // the first thing on the page and in the document. A launch nothing was counted of never.
+  const running = runningLines(vm)
+  assert.equal(running.length, vm.agents.runningNow.length)
+  assert.ok(vm.agents.runningNow.some((r) => r.lowerBound), 'no running agent of the world is a lower bound')
+  vm.agents.runningNow.forEach((r, i) => {
+    const n = treeNodes(vm.agents.roots).find((x) => x.key === r.key)
+    assert.ok(n, r.key)
+    assert.equal(r.lowerBound, n.lowerBound, r.key)
+    assert.equal(/ ⚠( |$)/.test(running[i]), r.lowerBound, running[i])
+  })
   // The markdown explains the mark, once.
   assert.equal(markdownDocument(vm).split('⚠ marks a lower bound').length - 1, 1)
 })
@@ -605,19 +634,19 @@ test('the running list claims nothing the tree does not: running nodes only, a l
     for (const r of vm.agents.runningNow) {
       const n = running.find((x) => x.key === r.key)
       assert.ok(n, r.key)
-      // The figure is the node's, and a launch nobody read a line of has none.
+      // The figure is the node's, and a launch nobody read a line of has none — nor a bound.
       assert.equal(r.usage, n.kind === 'pending' ? '–' : n.usage, r.key)
+      assert.equal(r.lowerBound, n.kind === 'pending' ? false : n.lowerBound, r.key)
       assert.equal(/^0(\s|$)/.test(r.usage), false, r.usage)
       // Where it sits, and no project unless attribution names one.
       assert.ok(r.context.startsWith('Session '), r.context)
       assert.equal(/\b(alpha|beta)\b/.test(r.context), attribution !== 'none', `${attribution}: ${r.context}`)
     }
-    // The markdown's running lines, in the same order, with no zero either.
-    const md = markdownDocument(vm)
-    const at = md.indexOf('### Running now\n')
-    assert.ok(at >= 0, md)
-    const lines = md.slice(at, md.indexOf('### Sessions and agents', at)).split('\n').filter((l) => l.startsWith('- '))
-    assert.deepEqual(lines.map((l) => vm.agents.runningNow.findIndex((r) => l.startsWith(`- ${r.label} · `))),
+    // The markdown's running lines, in the same order, each marked as the inferred state it is,
+    // with no zero either.
+    const lines = runningLines(vm)
+    assert.ok(lines.length > 0, agentSection(vm).join('\n'))
+    assert.deepEqual(lines.map((l) => vm.agents.runningNow.findIndex((r) => l.startsWith(`- [~Running] ${r.label} · `))),
       vm.agents.runningNow.map((_, i) => i))
     for (const l of lines) assert.equal(/(^|\s)0(\s|$)/.test(l), false, l)
   }

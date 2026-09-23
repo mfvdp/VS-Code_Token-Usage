@@ -3002,7 +3002,7 @@ function treeNode(key: string, state: string, over: Record<string, unknown> = {}
 function runningItem(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     key: AK.a1, kind: 'agent', label: 'Explore · Opus 5 · a94f', context: 'Session 9d0eb37a · Workflow cfe7718d · repo',
-    usage: '12.3K', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, waiting: false, ...over,
+    usage: '12.3K', lowerBound: false, startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, waiting: false, ...over,
   }
 }
 
@@ -3067,10 +3067,13 @@ function treePart(h: string): string {
   return h.slice(at)
 }
 
-/** The NodeDetails the view model builds for AK.a1, with a row of every kind of absence. */
+/**
+ * The NodeDetails the view model builds for AK.a1, with a row of every kind of absence; its
+ * `derived` and `lastTs` are the node's own, as the builder gives them.
+ */
 function detailsOf(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    key: AK.a1, title: 'Explore · Opus 5 · a94f', state: 'running',
+    key: AK.a1, title: 'Explore · Opus 5 · a94f', state: 'running', derived: true, lastTs: AG_NOW - 5_000,
     stateText: 'Running — inferred: the transcript changed 5 s ago and no result was recorded yet.',
     rows: [
       { label: 'Type', value: 'Explore' },
@@ -3398,7 +3401,7 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
     + (AG_NOW - 5_000) + '">5 s</span> ago</span></dd><dt>Type</dt><dd>Explore</dd></dl></div>') >= 0, own)
   // A node without a last activity gets no clock: the launch nobody has seen a line of.
   const pending = agentsHtml(a, {
-    agents: agentTree({ selected: detailsOf({ key: AK.l1, title: 'Explore · – · launched', state: 'unknown', rows: [] }) }),
+    agents: agentTree({ selected: detailsOf({ key: AK.l1, title: 'Explore · – · launched', state: 'unknown', lastTs: null, rows: [] }) }),
     ui: agentUi({ agentSelected: AK.l1 }),
   })
   const pendingPanel = pending.slice(pending.indexOf('<div class="ag-details"'))
@@ -3406,7 +3409,7 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.ok(pendingPanel.indexOf('aria-label="~unknown · derived"') >= 0, pendingPanel)
   // A recorded state is no estimate in the panel either.
   const done = agentsHtml(a, {
-    agents: agentTree({ selected: detailsOf({ key: AK.a2, state: 'done', stateText: 'Completed — the parent recorded the result at 11:59.' }) }),
+    agents: agentTree({ selected: detailsOf({ key: AK.a2, state: 'done', derived: false, stateText: 'Completed — the parent recorded the result at 11:59.' }) }),
     ui: agentUi({ agentSelected: AK.a2 }),
   })
   assert.ok(done.indexOf('<dt class="ag-wide">State</dt><dd class="ag-wide"><span class="ag-st ag-done" role="img" '
@@ -3421,6 +3424,102 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.match(STYLE, /\.ag-details dl \{ display: grid; grid-template-columns: max-content minmax\(0, 1fr\);/)
   assert.equal(/\.ag-details dl \{ grid-template-columns: 1fr;/.test(STYLE), false, 'the details still stack somewhere')
   assert.match(STYLE, /\.ag-details \.ag-wide \{ grid-column: 1 \/ -1; \}/)
+})
+
+test('details the page has no row for say themselves whether the state was recorded, and keep their clock', () => {
+  const a = agentCtx()
+  // The view model opens details only for a node the page has a row for, but the page does not
+  // take that on trust: a finished agent the payload holds nowhere — not in the tree, not in the
+  // running list — is described by its details, never guessed to be an estimate.
+  const far = 'a:ffff0002'
+  const cases: Array<[string, string, string]> = [
+    ['done', 'Completed — the parent recorded the result at 11:58.', 'done · recorded'],
+    ['failed', 'Failed — the parent recorded the failure at 11:58.', 'failed · recorded'],
+  ]
+  for (const [state, stateText, title] of cases) {
+    const h = agentsHtml(a, {
+      agents: agentTree({
+        runningNow: [], omittedRoots: 1,
+        selected: detailsOf({
+          key: far, state, derived: false, stateText, lastTs: AG_NOW - 65_000,
+          rows: [{ label: 'Last activity', value: '11:58:55', note: '1 min ago' }],
+        }),
+      }),
+      ui: agentUi({ agentSelected: far }),
+    })
+    assert.equal(h.indexOf('data-key="' + far + '"'), -1, 'the node has a row on the page after all')
+    const panel = h.slice(h.indexOf('<div class="ag-details"'))
+    assert.ok(panel.indexOf('<dd class="ag-wide"><span class="ag-st ag-' + state + '" role="img" aria-label="' + title
+      + '" title="' + title + '"></span> ' + stateText + '</dd>') >= 0, panel)
+    assert.equal(panel.indexOf('~' + state), -1, panel)
+    // The clock ticks from the details' own last activity, in place of the note, once.
+    assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:58:55 · <span class="nobr"><span data-live="since" data-ts="'
+      + (AG_NOW - 65_000) + '">1 min 05 s</span> ago</span></dd>') >= 0, panel)
+    assert.equal(panel.indexOf('1 min ago'), -1, panel)
+  }
+  // An inferred state says so the same way, and details that say nothing — a payload from a
+  // build before the flag — are never called recorded, whatever state they name.
+  const running = agentsHtml(a, { agents: agentTree({ runningNow: [], selected: detailsOf({ key: far }) }), ui: agentUi({ agentSelected: far }) })
+  assert.ok(running.indexOf('aria-label="~running · derived"') >= 0, running)
+  const unsaid = agentsHtml(a, {
+    agents: agentTree({ runningNow: [], selected: detailsOf({ key: far, state: 'done', derived: 'no', lastTs: 'soon' }) }),
+    ui: agentUi({ agentSelected: far }),
+  })
+  assert.ok(unsaid.indexOf('aria-label="~done · derived"') >= 0, unsaid)
+  assert.equal(unsaid.slice(unsaid.indexOf('<div class="ag-details"')).indexOf('data-live'), -1, unsaid)
+  // A row on the page says what the panel says: the node's flag and clock come first.
+  const onPage = agentsHtml(a, {
+    agents: agentTree({ selected: detailsOf({ key: AK.a2, state: 'done', derived: true, lastTs: AG_NOW - 99_000 }) }),
+    ui: agentUi({ agentSelected: AK.a2 }),
+  })
+  const onPagePanel = onPage.slice(onPage.indexOf('<div class="ag-details"'))
+  assert.ok(onPagePanel.indexOf('aria-label="done · recorded"') >= 0, onPagePanel)
+  assert.ok(onPagePanel.indexOf('data-ts="' + (AG_NOW - 5_000) + '"') >= 0, onPagePanel)
+  assert.equal(onPagePanel.indexOf('data-ts="' + (AG_NOW - 99_000) + '"'), -1, onPagePanel)
+})
+
+test('the ⚠ line counts the running list: with every node closed a running row with a lower bound still gets it', () => {
+  const a = agentCtx()
+  const legend = 'Output figures in the details marked ⚠ are lower bounds.'
+  // The default page: two sessions, neither a lower bound, every agent inside a closed branch —
+  // the running agent's row in the list is the only row on screen that is one.
+  const bound = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true })] }) })
+  assert.equal(treePart(bound).indexOf('data-key="' + AK.a1 + '"'), -1, 'the running agent\'s tree row is on screen')
+  assert.equal(bound.split(legend).length - 1, 1, bound)
+  // Under the tree, as for a tree row; the running row itself carries no mark, as a tree row does not.
+  assert.ok(bound.indexOf(legend) > bound.indexOf('<div class="agtree"'), bound)
+  assert.equal(bound.slice(0, bound.indexOf('<div class="agtree"')).indexOf('⚠'), -1, bound)
+  // No row on screen with a lower bound, no line — whatever a closed branch holds.
+  for (const lowerBound of [false, undefined, 'true', 1, null]) {
+    const h = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound })] }) })
+    assert.equal(h.indexOf(legend), -1, String(lowerBound))
+  }
+  // An older payload without the list claims nothing either way.
+  const older = agentTree({ runningNow: undefined })
+  assert.equal(agentsHtml(a, { agents: older }).indexOf(legend), -1)
+})
+
+test('a node whose agents the tree had to cut all away has nothing to open and still says how many', () => {
+  // The MAX_NODES cut can take every child of a node while its count, taken before the cut,
+  // still has them. The node is drawn as a leaf — there is nothing to open — and its count says
+  // what is below it, opened by the reader earlier or not.
+  const a = agentCtx()
+  const cut = agentTree({
+    truncated: true,
+    roots: [treeNode(AK.s1, 'active', { kind: 'session', label: 'Session 9d0eb37a', agentCount: 3, children: [] })],
+  })
+  for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.s1] })]) {
+    const h = treePart(agentsHtml(a, { agents: cut, ui }))
+    assert.equal(h.indexOf('ag-fold'), -1, h)
+    assert.equal(h.indexOf('aria-expanded'), -1, h)
+    assert.ok(h.indexOf('<div class="ag-line"><span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="'
+      + AK.s1 + '"') >= 0, h)
+    assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
+      + '<span class="meta"><span class="nobr">3 agent(s)</span></span>') >= 0, h)
+  }
+  // A node with its children on the payload still counts only while it is closed.
+  const open = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1] }) }))
+  assert.equal(open.indexOf('4 agent(s)'), -1, open)
 })
 
 test('an empty tree says so, and a cut tree says what it left out', () => {
@@ -3801,6 +3900,11 @@ test('the running list the view model builds reaches the page first, the tree cl
     assert.ok(tree.indexOf('<span class="nobr">' + r.agentCount + ' agent(s)</span>') >= 0, r.label)
   }
   assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
+  // The running agent is mid-reply, so its output is a lower bound — and with every node closed
+  // the line under the tree still says where that is marked, for the row in the list.
+  assert.deepEqual(items.map((r) => r.lowerBound), [true, false])
+  assert.equal(vm.agents.roots.some((r) => r.lowerBound), false, 'a session row carries the lower bound itself')
+  assert.equal(h.split('Output figures in the details marked ⚠ are lower bounds.').length - 1, 1, h)
 })
 
 // ---------------------------------------------------------------------------

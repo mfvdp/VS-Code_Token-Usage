@@ -734,22 +734,38 @@ test('an agent node toggle opens and closes it, and the selection sets and clear
   }
 })
 
-test('at most MAX_AGENT_EXPANDED nodes are kept open; beyond the cap nothing more opens, and closing always works', () => {
+test('at most MAX_AGENT_EXPANDED nodes are kept open; at the cap an open forgets the oldest, and closing always works', () => {
   assert.equal(MAX_AGENT_EXPANDED, 200)
   let ui = defaultUiState(cfg)
   for (let i = 0; i < MAX_AGENT_EXPANDED; i++) ui = applyMessage(ui, { type: 'agentToggle', key: `a:${i}` })
   assert.equal(ui.agentsExpanded.length, MAX_AGENT_EXPANDED)
-  // The 201st is not opened, and says so by identity: nothing to persist.
+  // Nothing prunes the key of a node that has left the tree, so a full list is mostly such
+  // keys after a while. The 201st open still opens: the key opened longest ago gives way, and
+  // the list stays at the cap.
   const full = ui
-  assert.equal(applyMessage(full, { type: 'agentToggle', key: 'a:extra' }), full)
-  // Closing one works at the cap, and makes room for exactly one more.
+  const more = applyMessage(full, { type: 'agentToggle', key: 'a:extra' })
+  assert.notEqual(more, full, 'an open at the cap did nothing')
+  assert.equal(more.agentsExpanded.length, MAX_AGENT_EXPANDED)
+  assert.equal(more.agentsExpanded[MAX_AGENT_EXPANDED - 1], 'a:extra')
+  assert.equal(more.agentsExpanded.includes('a:0'), false, 'the oldest key was kept')
+  assert.deepEqual(more.agentsExpanded.slice(0, 2), ['a:1', 'a:2'])
+  assert.deepEqual(full.agentsExpanded.slice(0, 1), ['a:0'], 'the input state was mutated')
+  // Every further open takes the next oldest, however many there are.
+  let many = more
+  for (let i = 0; i < 3 * MAX_AGENT_EXPANDED; i++) many = applyMessage(many, { type: 'agentToggle', key: `s:new-${i}` })
+  assert.equal(many.agentsExpanded.length, MAX_AGENT_EXPANDED)
+  assert.equal(many.agentsExpanded[MAX_AGENT_EXPANDED - 1], `s:new-${3 * MAX_AGENT_EXPANDED - 1}`)
+  assert.equal(new Set(many.agentsExpanded).size, MAX_AGENT_EXPANDED)
+  // Closing one works at the cap, and makes room for one more without forgetting any.
   const closed = applyMessage(full, { type: 'agentToggle', key: 'a:7' })
   assert.equal(closed.agentsExpanded.length, MAX_AGENT_EXPANDED - 1)
   assert.equal(closed.agentsExpanded.includes('a:7'), false)
   const again = applyMessage(closed, { type: 'agentToggle', key: 'a:extra' })
   assert.equal(again.agentsExpanded.length, MAX_AGENT_EXPANDED)
+  assert.equal(again.agentsExpanded[0], 'a:0', 'a key was forgotten below the cap')
   assert.equal(again.agentsExpanded[MAX_AGENT_EXPANDED - 1], 'a:extra')
-  assert.equal(applyMessage(again, { type: 'agentToggle', key: 'a:7' }), again)
+  // An open node closes again, at the cap as anywhere.
+  assert.equal(applyMessage(again, { type: 'agentToggle', key: 'a:extra' }).agentsExpanded.includes('a:extra'), false)
 })
 
 // ---------------------------------------------------------------------------

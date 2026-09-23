@@ -68,6 +68,8 @@ export interface RunningItem {
   context: string
   /** As the node: '–' when nothing was counted; a pending launch is always '–'. */
   usage: string
+  /** As the node: the output is a lower bound (outputFinal < requests). Never for a pending launch. */
+  lowerBound: boolean
   startTs: number | null
   lastTs: number | null
   /** Running only because an agent below it runs (the roll-up), not by its own transcript. */
@@ -76,7 +78,21 @@ export interface RunningItem {
 
 export interface DetailRow { label: string; value: string; note?: string }
 
-export interface NodeDetails { key: string; title: string; state: NodeState; stateText: string; rows: DetailRow[] }
+/**
+ * The details of one node. `derived` and `lastTs` are the node's own, so the panel says whether
+ * its state was recorded and keeps its clock without looking the node up on the page.
+ */
+export interface NodeDetails {
+  key: string
+  title: string
+  state: NodeState
+  /** As the node: true for an inferred state, false for a recorded one. */
+  derived: boolean
+  stateText: string
+  /** As the node: its last activity, null when there is none. */
+  lastTs: number | null
+  rows: DetailRow[]
+}
 
 export interface AgentTreeVm {
   roots: TreeNode[]

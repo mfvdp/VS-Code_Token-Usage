@@ -867,12 +867,14 @@ test('stored opened agent nodes and the selection restore by shape; over-long ke
   const restored = ui?.agentsExpanded as string[]
   assert.ok(Array.isArray(restored), 'agentsExpanded was not written back')
   assert.equal(restored.length, MAX_AGENT_EXPANDED)
-  assert.equal(restored[0], 's:s1')
   assert.equal(restored.includes(long), false)
   assert.ok(restored.every((k) => typeof k === 'string' && k.length > 0 && k.length <= MAX_AGENT_KEY_CHARS))
   assert.equal(new Set(restored).size, restored.length)
-  // The cut keeps the first ones, in their order.
-  assert.deepEqual(restored.slice(0, 3), ['s:s1', 'a:0', 'a:1'])
+  // The cut keeps the newest ones — the list is in the order they were opened, as an open at
+  // the cap keeps it — in their order; the oldest give way, the first key among them.
+  assert.deepEqual(restored.slice(0, 2), ['a:50', 'a:51'])
+  assert.equal(restored[restored.length - 1], 'a:249')
+  assert.equal(restored.includes('s:s1'), false)
   assert.equal(restored.includes('w:s1|wf_1'), false, 'a 1.5.0 fold became an opened node')
   assert.equal('agentsFolded' in (ui as Record<string, unknown>), false, 'the 1.5.0 folds were carried along')
   assert.equal(ui?.agentSelected, 'l:toolu_01')
@@ -895,6 +897,36 @@ test('stored opened agent nodes and the selection restore by shape; over-long ke
   const back = second.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
   assert.deepEqual(back?.agentsExpanded, [])
   assert.equal(back?.agentSelected, null)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a reader with 200 stored opened nodes, all long gone, can still open one: the oldest gives way', async () => {
+  // Nothing prunes the key of a node that has left the tree — a session past the list, an agent
+  // past the seven days — so a regular reader reaches the cap with keys that match nothing. The
+  // click on a node of today must still open it, be stored and reach the page.
+  const { MAX_AGENT_EXPANDED } = require('../src/viewModel') as typeof import('../src/viewModel')
+  const stale = Array.from({ length: MAX_AGENT_EXPANDED }, (_, i) => `s:gone-${i}`)
+  const kept = new Map<string, unknown>([['tokenPace.ui', { agentsExpanded: stale }]])
+  const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  const before = page.sent.length
+  page.post({ type: 'agentToggle', key: 's:todays-session' })
+  const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  const stored = ui?.agentsExpanded as string[]
+  assert.ok(Array.isArray(stored), 'agentsExpanded was not written back')
+  assert.equal(stored.length, MAX_AGENT_EXPANDED)
+  assert.equal(stored[stored.length - 1], 's:todays-session', 'the click opened nothing')
+  assert.equal(stored.includes('s:gone-0'), false, 'the oldest key was kept')
+  assert.deepEqual(stored.slice(0, 2), ['s:gone-1', 's:gone-2'])
+  // The section is pushed at once, carrying the opened node.
+  const pushes = page.sent.slice(before).filter((m) => {
+    const x = m as { type?: unknown; key?: unknown }
+    return x.type === 'section' && x.key === 'agents'
+  }) as Array<{ payload: { ui: { agentsExpanded: string[] } } }>
+  assert.equal(pushes.length, 1, 'the agents section was not pushed')
+  assert.equal(pushes[0].payload.ui.agentsExpanded.includes('s:todays-session'), true)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 

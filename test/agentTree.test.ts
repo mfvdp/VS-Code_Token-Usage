@@ -663,22 +663,94 @@ test('the open node gets its details; a node that is gone leaves none and says s
   assert.equal(gone.selected, null)
   assert.equal(gone.note, 'The selected node is no longer in the tree.')
 
-  // A session beyond the list is not in the tree, but its nodes are still nodes: the running
-  // list names the running agents of such a session too, and a click on one opens its details
-  // like a click on a tree row. So the selection opens, and nothing claims it is gone.
+  // A session beyond the list has no row on the page — not in the tree, and a session is never
+  // in the running list — so its details are not open either: a panel nothing on the page can
+  // close, coming back with every reload, is worse than saying why nothing shows.
   const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
     main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
-  const beyondKey = `s:${mains[MAX_ROOTS].sessionId}`
+  const oldest = mains[MAX_ROOTS].sessionId
+  const beyondKey = `s:${oldest}`
   const beyond = build({ mains, selected: beyondKey })
   assert.equal(beyond.roots.some((r) => r.key === beyondKey), false, 'the session beyond the list is listed')
-  assert.equal(beyond.selected?.key, beyondKey)
-  assert.equal(beyond.selected?.title, 'Session 00000020')
-  assert.equal(beyond.note, null)
-  // The same details asked for directly.
-  assert.deepEqual(agentDetails(input({ mains }), NOW, beyondKey), beyond.selected)
+  assert.equal(beyond.selected, null)
+  assert.equal(beyond.note, 'The selected node is no longer in the tree.')
+  // …while its details can still be asked for directly.
+  assert.equal(agentDetails(input({ mains }), NOW, beyondKey)?.title, 'Session 00000020')
+
+  // An agent of that session opens while it runs, because the running list has a row for it;
+  // once it has finished it has none, and the panel gives way to the note — it does not stay
+  // open with nothing on the page to close it.
+  const far = agentKey('aaaa0001')
+  const running = build({ mains, agents: [rec('aaaa0001', { sessionId: oldest })], selected: far })
+  assert.equal(running.omittedRoots, 1)
+  assert.deepEqual(running.runningNow.map((r) => r.key), [far])
+  assert.equal(running.selected?.key, far)
+  assert.equal(running.note, null)
+  for (const outcome of ['completed', 'failed'] as const) {
+    const finished = build({
+      mains, agents: [rec('aaaa0001', { sessionId: oldest, outcome, outcomeTs: NOW - MIN })], selected: far,
+    })
+    assert.equal(finished.omittedRoots, 1)
+    assert.deepEqual(finished.runningNow, [], outcome)
+    assert.equal(finished.selected, null, `a ${outcome} agent of a session beyond the list kept its details`)
+    assert.equal(finished.note, 'The selected node is no longer in the tree.', outcome)
+  }
+  // A listed session's finished agent keeps its details, open branch or not: its row is in the
+  // payload, inside the closed session.
+  const listed = build({ agents: [rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - MIN })], selected: far })
+  assert.equal(listed.selected?.key, far)
+  assert.equal(listed.selected?.state, 'done')
+  assert.equal(listed.note, null)
 
   assert.equal(build({ agents }).note, null)
   assert.equal(build({ agents }).selected, null)
+})
+
+test('a running agent of a session beyond the list opens only while the running list names it', () => {
+  // Every agent of the oldest session runs; the list holds the MAX_RUNNING_LIST that started
+  // first, so the last one to start has a row nowhere on the page.
+  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
+    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  const oldest = mains[MAX_ROOTS].sessionId
+  const agents = Array.from({ length: MAX_RUNNING_LIST + 1 }, (_, i) =>
+    rec(`b${String(i).padStart(7, '0')}`, { sessionId: oldest, firstTs: NOW - 40 * MIN + i * MIN }))
+  const first = agentKey(agents[0].agentId)
+  const last = agentKey(agents[MAX_RUNNING_LIST].agentId)
+  const listedVm = build({ mains, agents, selected: first })
+  assert.equal(listedVm.runningMore, 1)
+  assert.equal(listedVm.runningNow.some((r) => r.key === last), false)
+  assert.equal(listedVm.selected?.key, first)
+  const unlisted = build({ mains, agents, selected: last })
+  assert.equal(unlisted.selected, null)
+  assert.equal(unlisted.note, 'The selected node is no longer in the tree.')
+})
+
+test('the details say for themselves whether the state was recorded and when the node last changed', () => {
+  // Every kind and state of node: the details carry the node's own flag and last activity, so
+  // the panel does not need the node's row to say "recorded" or to keep its clock.
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      rec('aaaa0001'),
+      rec('aaaa0002', { outcome: 'completed', outcomeTs: NOW - MIN }),
+      rec('aaaa0003', { outcome: 'failed', outcomeTs: NOW - 2 * MIN }),
+      rec('aaaa0004', { lastTs: NOW - 40 * MIN, firstTs: NOW - 50 * MIN }),
+      wfRec('bbbb0001', { outcome: 'completed', outcomeTs: NOW - MIN }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })],
+    mains: [main(), main({ sessionId: S2, lastTs: NOW - 3 * HOUR, firstTs: NOW - 4 * HOUR })],
+  }
+  const vm = build(over)
+  const nodes = all(vm.roots)
+  assert.deepEqual([...new Set(nodes.map((n) => n.state))].sort(), ['active', 'done', 'failed', 'idle', 'running', 'unknown'])
+  for (const n of nodes) {
+    const d = agentDetails(input(over), NOW, n.key)
+    assert.ok(d, n.key)
+    assert.equal(d.derived, n.derived, `${n.key} ${n.state}`)
+    assert.equal(d.derived, n.state !== 'done' && n.state !== 'failed', n.key)
+    assert.equal(d.lastTs, n.lastTs, n.key)
+    // The same details as the view model's panel for that selection.
+    assert.deepEqual(build({ ...over, selected: n.key }).selected, d, n.key)
+  }
 })
 
 test('an empty tree says which absence it is', () => {
@@ -1157,10 +1229,40 @@ test('the running list carries no field the page does not need, and keys it can 
   })
   assert.ok(vm.runningNow.length === 3)
   for (const r of vm.runningNow) {
-    assert.deepEqual(Object.keys(r).sort(), ['context', 'key', 'kind', 'label', 'lastTs', 'startTs', 'usage', 'waiting'])
+    assert.deepEqual(Object.keys(r).sort(),
+      ['context', 'key', 'kind', 'label', 'lastTs', 'lowerBound', 'startTs', 'usage', 'waiting'])
     assert.ok(r.key.length > 0 && r.key.length <= MAX_AGENT_KEY_CHARS, r.key)
     assert.equal(/[\\/]/.test(r.key + r.context), false, `${r.key} ${r.context}`)
     assert.ok(r.kind === 'agent' || r.kind === 'pending')
     assert.equal(typeof r.waiting, 'boolean')
+    assert.equal(typeof r.lowerBound, 'boolean')
+  }
+})
+
+test("a running item carries its node's lower bound, and a launch nothing was counted of never does", () => {
+  // A running agent is nearly always mid-reply, so its output nearly always is a lower bound —
+  // and the running list is where it is looked at first.
+  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
+    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  const oldest = mains[MAX_ROOTS].sessionId
+  const vm = build({
+    mains,
+    agents: [
+      rec('aaaa0001', { sessionId: mains[0].sessionId, outputFinal: 4 }),
+      rec('aaaa0002', { sessionId: mains[0].sessionId, firstTs: NOW - 20 * MIN }),
+      // Beyond the list: the running line is the only line this agent has.
+      rec('aaaa0003', { sessionId: oldest, outputFinal: 2, firstTs: NOW - 10 * MIN }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, file: sessionFile(mains[0].sessionId), ts: NOW - MIN })],
+  })
+  assert.equal(vm.omittedRoots, 1)
+  const bounds = Object.fromEntries(vm.runningNow.map((r) => [r.key, r.lowerBound]))
+  assert.deepEqual(bounds, {
+    [agentKey('aaaa0001')]: true, [agentKey('aaaa0002')]: false, [agentKey('aaaa0003')]: true, 'l:toolu_pppp0001': false,
+  })
+  // The same flag as the node's, wherever the node is on the tree.
+  for (const r of vm.runningNow) {
+    const n = all(vm.roots).find((x) => x.key === r.key)
+    if (n) assert.equal(r.lowerBound, n.lowerBound, r.key)
   }
 })

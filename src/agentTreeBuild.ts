@@ -876,8 +876,15 @@ function keep(roots: Entry[], selected: Entry | null): Set<Entry> {
   return kept
 }
 
+/**
+ * A node's details. The flag and the last activity are the node's own, so the panel can say
+ * whether the state was recorded, and keep its clock, from the details alone.
+ */
 function detailsOf(e: Entry): NodeDetails {
-  return { key: e.key, title: e.label, state: e.state, stateText: e.stateText, rows: e.rows() }
+  return {
+    key: e.key, title: e.label, state: e.state, derived: derivedOf(e.state), stateText: e.stateText,
+    lastTs: e.lastTs, rows: e.rows(),
+  }
 }
 
 /**
@@ -948,6 +955,9 @@ function runningItem(e: Entry): RunningItem {
     context: contextOf(e),
     // A launch nobody has read a line of has nothing counted; the builder already says '–'.
     usage: e.kind === 'pending' ? '–' : e.usage,
+    // Nearly always true for a running agent: it is mid-reply. The row does not mark it (the
+    // details do); the line under the tree and the markdown's running line need to know.
+    lowerBound: e.kind === 'pending' ? false : e.lowerBound,
     startTs: e.startTs,
     lastTs: e.lastTs,
     waiting: e.waiting,
@@ -957,8 +967,8 @@ function runningItem(e: Entry): RunningItem {
 /**
  * The tree for the view model: at most MAX_ROOTS sessions, most recent first, cut at
  * MAX_NODES nodes; the running agents of every session above it; and the details of
- * `input.selected` wherever that node is — a row of the running list may name a node of a
- * session the tree does not list.
+ * `input.selected` while the page has a row for that node — in the tree, or in the running
+ * list, which may name a node of a session the tree does not list.
  */
 export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm {
   const forest = buildForest(input, now)
@@ -971,6 +981,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
   let running = 0
   for (const r of forest.roots) for (const e of preorder(r)) if (isAgentLike(e) && e.state === 'running') running++
   const live = runningOf(forest.roots)
+  const listed = live.slice(0, MAX_RUNNING_LIST)
   const counts = agentCounts(forest.roots)
 
   const toNode = (e: Entry): TreeNode => ({
@@ -989,9 +1000,14 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     children: e.children.filter((c) => kept.has(c)).map(toNode),
   })
 
-  // Any node of the forest: the running list names nodes of sessions beyond MAX_ROOTS too, and
-  // a click on one of them opens its details like a click on a tree row.
-  const details = selected !== null ? detailsOf(selected) : null
+  // The details of a node the page has a row for: in the tree — inside a closed branch too, the
+  // payload carries it — or in the running list, which names running agents of sessions beyond
+  // MAX_ROOTS too, so a click on one of them opens its details like a click on a tree row. A
+  // node with no row anywhere — its session not listed and itself not running, or gone from the
+  // records — gets no panel: nothing on the page could close one, and the stored selection
+  // would bring it back with every reload. The note below says why nothing opened instead.
+  const onPage = (e: Entry): boolean => kept.has(e) || listed.some((x) => x.key === e.key)
+  const details = selected !== null && onPage(selected) ? detailsOf(selected) : null
   let note: string | null = null
   if (forest.roots.length === 0) {
     // A session that is older than a day and never ran an agent is not in the tree; saying
@@ -1007,7 +1023,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     roots: shown.map(toNode),
     selected: details,
     running,
-    runningNow: live.slice(0, MAX_RUNNING_LIST).map(runningItem),
+    runningNow: listed.map(runningItem),
     runningMore: Math.max(0, live.length - MAX_RUNNING_LIST),
     omittedRoots: Math.max(0, forest.roots.length - MAX_ROOTS),
     truncated: kept.size < total,

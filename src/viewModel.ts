@@ -100,9 +100,9 @@ export interface UiState {
    */
   collapsed: string[]
   /**
-   * Agent tree node keys the reader has opened (children shown). The tree starts collapsed —
-   * only the sessions show — and a node stays open across pushes and reloads until the reader
-   * closes it again.
+   * Agent tree node keys the reader has opened (children shown), oldest first. The tree starts
+   * collapsed — only the sessions show — and a node stays open across pushes and reloads until
+   * the reader closes it again, or until MAX_AGENT_EXPANDED later opens have pushed it out.
    */
   agentsExpanded: string[]
   /** The agent tree node whose details are open, or null. */
@@ -168,7 +168,10 @@ const METRICS: Metric[] = ['usage', 'output', 'cacheRead', 'requests', 'reasonin
 const MAX_CUSTOM_DAYS = 1826
 const MAX_MODEL_FILTER = 50
 const MAX_MODEL_CHARS = 80
-/** Longest agent tree node key a message or the stored state may carry, and most opened nodes kept. */
+/**
+ * Longest agent tree node key a message or the stored state may carry, and most opened nodes
+ * kept — the newest ones: an open at the cap forgets the one opened longest ago.
+ */
 export const MAX_AGENT_KEY_CHARS = 200
 export const MAX_AGENT_EXPANDED = 200
 
@@ -337,15 +340,18 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       }
     }
     case 'agentToggle': {
-      // Opens a closed node, closes an open one. Beyond the cap nothing more is opened — the
-      // stored state stays bounded — while closing always works.
+      // Opens a closed node, closes an open one. The list is kept in the order the nodes were
+      // opened and bounded: at the cap an open forgets the node opened longest ago rather than
+      // being refused. Nothing prunes the key of a node that has left the tree — a session past
+      // the list, an agent past the retention — and the reader cannot close a node whose row is
+      // on no page, so after a while a full list is mostly such keys, and a refusal would leave
+      // every toggle dead. Closing always works.
       if (!isAgentKey(m.key)) return ui
-      const on = ui.agentsExpanded.includes(m.key)
-      if (!on && ui.agentsExpanded.length >= MAX_AGENT_EXPANDED) return ui
-      return {
-        ...ui,
-        agentsExpanded: on ? ui.agentsExpanded.filter((k) => k !== m.key) : [...ui.agentsExpanded, m.key],
+      if (ui.agentsExpanded.includes(m.key)) {
+        return { ...ui, agentsExpanded: ui.agentsExpanded.filter((k) => k !== m.key) }
       }
+      const keep = ui.agentsExpanded.slice(Math.max(0, ui.agentsExpanded.length - MAX_AGENT_EXPANDED + 1))
+      return { ...ui, agentsExpanded: [...keep, m.key] }
     }
     case 'agentSelect':
       // A selection opens the details and nothing else: which nodes are open stays what the

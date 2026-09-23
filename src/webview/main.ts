@@ -1569,10 +1569,12 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, dept
     ? '<button class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-label="'
       + (open ? tr('Collapse {0}', label) : tr('Expand {0}', label)) + '"></button>'
     : '<span class="ag-pad"></span>';
-  // The meta line: the project a session belongs to, when attribution names one, and — only
-  // while the node is closed — how many agents are below it, so a closed branch still says
-  // what it holds. The count is the view model's, taken on the whole tree.
-  const count = kids.length && !open ? agentCountOf(n.agentCount) : 0;
+  // The meta line: the project a session belongs to, when attribution names one, and — unless
+  // the node is open and shows its children — how many agents are below it, so a closed branch
+  // still says what it holds. The count is the view model's, taken on the whole tree before the
+  // MAX_NODES cut, so a node whose children the cut took all away still says what it holds: it
+  // is drawn as a leaf, since there is nothing to open, open or not in the stored state.
+  const count = kids.length && open ? 0 : agentCountOf(n.agentCount);
   const meta: string[] = [];
   if (typeof n.sub === 'string' && n.sub) meta.push(esc(n.sub));
   if (count > 0) meta.push('<span class="nobr">' + tr('{0} agent(s)', count) + '</span>');
@@ -1664,15 +1666,21 @@ function agentNodes(roots: Payload[]): Payload[] {
 /**
  * The details of the selected node, in the words the view model wrote. The state row carries
  * the sentence the state was derived with. The one figure added here is how long ago the node
- * last changed — from the tree node the details belong to — and it ticks: a row of the view
+ * last changed — from the node the details belong to — and it ticks: a row of the view
  * model's that already names the last activity keeps its time and gets the clock in place of
  * its note, which is the same age written once at build time (the markdown view keeps that
  * note); a model without such a row gets one of its own. Every row is a label beside its
  * value; the state sentence and the parent's report are sentences, not figures, and take the
  * whole width under their label.
+ *
+ * Whether the state was recorded, and when the node last changed, come from the node's row
+ * where the payload has one — so the panel and the row cannot disagree — and otherwise from the
+ * details themselves: the view model opens details only for a node with a row, but a payload is
+ * not taken on trust, and a recorded outcome is never guessed to be an estimate for want of one.
  */
 function agentDetails(d: Payload, node: Payload): string {
-  const lastTs = node ? agentTs(node.lastTs) : null;
+  const derived = node && typeof node.derived === 'boolean' ? node.derived : d.derived;
+  const lastTs = (node ? agentTs(node.lastTs) : null) || agentTs(d.lastTs);
   // Unbreakable, like the figures of a row: the clock's text is rewritten every second, and a
   // narrow value column would otherwise tear "40 s" across two lines.
   const ago = lastTs === null ? '' : '<span class="nobr">' + tr('{0} ago', liveSince(lastTs)) + '</span>';
@@ -1698,14 +1706,15 @@ function agentDetails(d: Payload, node: Payload): string {
   return '<div class="ag-details" role="region" aria-label="' + tr('Details') + '">'
     + '<div class="name">' + orDash(d.title) + '</div><dl>'
     + '<dt class="ag-wide">' + tr('State') + '</dt><dd class="ag-wide">'
-    + agentGlyph(agentState(d.state), node ? node.derived : undefined)
+    + agentGlyph(agentState(d.state), derived)
     + ' ' + orDash(d.stateText) + '</dd>' + own + rows + '</dl></div>';
 }
 
 /**
- * Whether a row on screen carries an output that is a lower bound: the nodes as they arrived,
- * bounded like the renderer, and only those of an opened node below the sessions — the
- * children of a closed one are not written at all.
+ * Whether a tree row on screen carries an output that is a lower bound: the nodes as they
+ * arrived, bounded like the renderer, and only those of an opened node below the sessions —
+ * the children of a closed one are not written at all. The running list's rows are asked
+ * separately (see sAgents).
  */
 function shownLowerBound(list: Payload, expanded: string[], depth: number): boolean {
   if (!Array.isArray(list) || depth > AGENT_MAX_DEPTH) return false;
@@ -1749,8 +1758,11 @@ function sAgents(): string {
   }
   if (note) h += '<p class="empty">' + note + '</p>';
   // The rows do not carry the lower-bound mark (see agentNode); this line says where it is,
-  // and only while a row on screen has one.
-  if (shownLowerBound(roots, expanded, 0)) {
+  // and only while a row on screen has one — a tree row, or a row of the running list, which
+  // is on screen whatever the tree has open, and whose agents are nearly always mid-reply.
+  const nowLower = Array.isArray(a.runningNow)
+    && a.runningNow.some((r: Payload) => !!r && typeof r === 'object' && r.lowerBound === true);
+  if (nowLower || shownLowerBound(roots, expanded, 0)) {
     h += '<p class="meta">' + tr('Output figures in the details marked ⚠ are lower bounds.') + '</p>';
   }
   const sel = a.selected;

@@ -15,17 +15,24 @@ This project follows [Semantic Versioning](https://semver.org/).
   it launched is still running says so: `waits for a child agent`. The list is taken from every
   session of the last seven days, the ones the tree does not list and the nodes it had to cut
   included; it holds at most 20 agents and counts the rest (`and 3 more`). A click on a row
-  opens the same details as the tree row; with nothing running the list is one line,
-  `No agent is running.` The markdown view prints it as well, before the tree.
+  opens the same details as the tree row — for an agent of a session the tree does not list, as
+  long as the list names it; with nothing running the list is one line, `No agent is running.`
+  A running agent is nearly always mid-reply, so its output is nearly always a lower bound: the
+  line under the tree that points to the `⚠` in the details counts the list's rows too. The
+  markdown view prints the list as well, before the tree, each line marked `[~Running]` as the
+  tree marks an inferred state, with `⚠` behind a usage that is a lower bound.
 
 ### Changed
 
 * **The agent tree starts closed.** Only the sessions show until you open one, and a closed node
-  says how many agents are below it (`4 agent(s)`). The nodes you open are remembered with the
+  says how many agents are below it (`4 agent(s)`) — also a node whose agents the tree had to
+  cut all away, which has nothing to open. The nodes you open are remembered with the
   dashboard's view state, as node keys and nothing else, and stay open across pushes, reloads
-  and restarts; selecting a node — in the tree or in the running list — opens nothing by itself,
-  and its details show under the tree whether its row is on screen or not. What 1.5.0 kept as
-  folded nodes is not carried over.
+  and restarts — at most 200 of them: opening one more forgets the one opened longest ago, so a
+  node can always be opened. Selecting a node — in the tree or in the running list — opens
+  nothing by itself, and its details show under the tree whether its row is on screen or inside
+  a closed branch; a selection the page has no row for says so under the tree instead. What
+  1.5.0 kept as folded nodes is not carried over.
 
 ## 1.5.0 — 2026-09-23
 

@@ -525,12 +525,15 @@ function agentNodeLine(n: TreeNode): string {
 }
 
 /**
- * "Explore · claude-opus-5 · a94f · Session 9d0eb37a · Workflow cfe7718d · 12.3K" — a running
- * agent, where it sits and what it used; "(waiting)" when it runs only because an agent below
- * it does.
+ * "[~Running] Explore · claude-opus-5 · a94f · Session 9d0eb37a · Workflow cfe7718d · 12.3K ⚠"
+ * — a running agent, where it sits and what it used. Running is inferred, and the line says so
+ * as the tree's lines do; a usage that is a lower bound carries ⚠ as there; "(waiting)" when
+ * it runs only because an agent below it does. For an agent of a session the tree does not
+ * list, this line is all the document says of it.
  */
 function runningLine(r: RunningItem): string {
-  return `- ${cell(r.label)} · ${cell(r.context)} · ${cell(r.usage)}${r.waiting ? ` ${t('(waiting)')}` : ''}`
+  return `- [${estimate(t('Running'))}] ${cell(r.label)} · ${cell(r.context)} · ${cell(r.usage)}`
+    + `${r.lowerBound === true ? ' ⚠' : ''}${r.waiting ? ` ${t('(waiting)')}` : ''}`
 }
 
 /**
@@ -567,7 +570,9 @@ function agentLines(vm: ViewModel): string[] {
   }
   const running = runningLines(a)
   if (running.length > 0) L.push(...running, `### ${t('Sessions and agents')}`, '')
-  let lower = false
+  // The ⚠ is explained wherever a line carries it: a running line too, which may be the only
+  // line an agent has — its session not listed, or the node beyond the cut.
+  let lower = Array.isArray(a.runningNow) && a.runningNow.some((r) => r.lowerBound === true)
   const walk = (n: TreeNode, depth: number): void => {
     lower = lower || n.lowerBound
     L.push(`${'  '.repeat(depth)}- ${agentNodeLine(n)}`)

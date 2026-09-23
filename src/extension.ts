@@ -1651,12 +1651,13 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
       typeof k === 'string' && (DASHBOARD_SECTION_KEYS as readonly string[]).includes(k))
   }
   // The agent tree nodes the reader opened and the node whose details are open: opaque keys, so
-  // only their shape is checked — a key whose node is gone simply matches nothing. The folds
-  // 1.5.0 kept (`agentsFolded`) are not read: that build was never published, and a fold is the
-  // opposite of what is kept now.
+  // only their shape is checked — a key whose node is gone simply matches nothing. The opened
+  // keys are stored oldest first, and a list over the cap keeps its newest, as an open at the
+  // cap does (see applyMessage). The folds 1.5.0 kept (`agentsFolded`) are not read: that build
+  // was never published, and a fold is the opposite of what is kept now.
   if (Array.isArray(raw.agentsExpanded)) {
     out.agentsExpanded = [...new Set(raw.agentsExpanded.filter((k): k is string =>
-      typeof k === 'string' && k.length > 0 && k.length <= MAX_AGENT_KEY_CHARS))].slice(0, MAX_AGENT_EXPANDED)
+      typeof k === 'string' && k.length > 0 && k.length <= MAX_AGENT_KEY_CHARS))].slice(-MAX_AGENT_EXPANDED)
   }
   if (raw.agentSelected === null
     || (typeof raw.agentSelected === 'string' && raw.agentSelected.length > 0

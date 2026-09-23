@@ -1536,6 +1536,21 @@ function agentCountOf(v: Payload): number {
 }
 
 /**
+ * A session's figures: what its own transcript used, since its first line, and — as a figure
+ * of its own, never added to it — what its agents of the last seven days used; then its span
+ * from the first line to the last, which says so in its title. Two figures of two different
+ * spans side by side, each named, so neither reads as the other's part or as their sum. A
+ * session without agents shows no agents figure at all, rather than a dash that reads as one
+ * that was not counted.
+ */
+function sessionFigures(n: Payload): string[] {
+  const out = [tr('{0} own', orDash(n.usage))];
+  if (typeof n.usageAgents === 'string' && n.usageAgents !== '') out.push(tr('{0} agents', orDash(n.usageAgents)));
+  out.push('<span title="' + tr('span from the first to the last line') + '">' + orDash(n.duration) + '</span>');
+  return out;
+}
+
+/**
  * One node and, once the reader opened it, everything under it. The tree starts closed: only
  * the sessions are drawn, and a closed node says how many agents are below it. The toggle and
  * the row are two buttons of their own, so both are reached with the keyboard and announced as
@@ -1563,7 +1578,7 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, dept
   // so it shows no figures at all rather than a row of dashes. Each figure is unbreakable, so
   // a narrow sidebar wraps the line at a separator and never between a number and its unit.
   const start = agentTs(n.startTs);
-  const figures = kind === 'pending' ? [] : [orDash(n.usage), orDash(n.duration)];
+  const figures = kind === 'pending' ? [] : kind === 'session' ? sessionFigures(n) : [orDash(n.usage), orDash(n.duration)];
   if (state === 'running' && start !== null) figures.push(tr('running for {0}', liveSince(start)));
   const fold = kids.length
     ? '<button class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-label="'
@@ -1666,12 +1681,15 @@ function agentNodes(roots: Payload[]): Payload[] {
 /**
  * The details of the selected node, in the words the view model wrote. The state row carries
  * the sentence the state was derived with. The one figure added here is how long ago the node
- * last changed — from the node the details belong to — and it ticks: a row of the view
- * model's that already names the last activity keeps its time and gets the clock in place of
- * its note, which is the same age written once at build time (the markdown view keeps that
- * note); a model without such a row gets one of its own. Every row is a label beside its
- * value; the state sentence and the parent's report are sentences, not figures, and take the
- * whole width under their label.
+ * last changed — from the node the details belong to — and it ticks: the row the view model
+ * marks `live` keeps its time and gets the clock in place of its note, which is the same age
+ * written once at build time (the markdown view keeps that note); a model without such a row
+ * gets one of its own. How a row is laid out is the row's own `kind`, never a guess from its
+ * label, its words or the first character of its note: a figure (the default) sits beside its
+ * label, its note after a space; a sentence takes the whole width under it, its note set off
+ * by " · ", as the state sentence does. The row marked `copy` carries the Copy ID button,
+ * which asks the host to copy the id of the node whose details are open — the value that row
+ * shows, and nothing the page could choose.
  *
  * Whether the state was recorded, and when the node last changed, come from the node's row
  * where the payload has one — so the panel and the row cannot disagree — and otherwise from the
@@ -1686,21 +1704,25 @@ function agentDetails(d: Payload, node: Payload): string {
   const ago = lastTs === null ? '' : '<span class="nobr">' + tr('{0} ago', liveSince(lastTs)) + '</span>';
   const lastLabel = tr('Last activity');
   let placed = !ago;
+  let copied = false;
   let rows = '';
   for (const r of Array.isArray(d.rows) ? d.rows : []) {
     if (!r || typeof r !== 'object') continue;
-    const live = !placed && r.label === lastLabel;
+    const live = !placed && r.live === 'ago';
     if (live) placed = true;
-    // Three kinds of row carry a note: the last activity (whose note the clock replaces), an
-    // output that is a lower bound (a ⚠ mark beside a figure) and the parent's report, whose
-    // note is a clause of its own. That one is a sentence rather than a figure and takes the
-    // whole width — told apart by its note, not by its label, which is the reader's language.
+    const wide = r.kind === 'sentence' ? ' class="ag-wide"' : '';
     const hasNote = typeof r.note === 'string' && r.note !== '';
-    const wide = !live && hasNote && r.note.charAt(0) !== '⚠' ? ' class="ag-wide"' : '';
     const note = hasNote ? '<span class="meta">' + esc(r.note) + '</span>' : '';
-    rows += '<dt' + wide + '>' + orDash(r.label) + '</dt><dd' + wide + '>' + orDash(r.value)
+    // One button per panel, on the first row that asks for it.
+    const copy = r.copy === true && !copied
+      ? ' <button class="ag-copy" data-act="cmd" data-id="tokenPace.copyAgentId">' + tr('Copy ID') + '</button>' : '';
+    if (copy) copied = true;
+    // An id has no space to break at, and a launch's tool_use id is wider than the value column
+    // of a narrow sidebar: it may break anywhere rather than run out of the panel.
+    const value = copy ? '<span class="ag-id">' + orDash(r.value) + '</span>' : orDash(r.value);
+    rows += '<dt' + wide + '>' + orDash(r.label) + '</dt><dd' + wide + '>' + value
       + (live ? ' · ' + ago : note ? (wide ? ' · ' : ' ') + note : '')
-      + '</dd>';
+      + copy + '</dd>';
   }
   const own = placed ? '' : '<dt>' + lastLabel + '</dt><dd>' + ago + '</dd>';
   return '<div class="ag-details" role="region" aria-label="' + tr('Details') + '">'

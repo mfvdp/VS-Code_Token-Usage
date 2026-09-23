@@ -25,6 +25,7 @@
   "command.exportJson.title": "Export JSON…",
   "command.copySummary.title": "Copy Usage Summary",
   "command.copyDiagnostics.title": "Copy Diagnostics",
+  "command.copyAgentId.title": "Copy Agent ID",
   "command.clearStoredData.title": "Clear Stored Data…",
   "command.previewStatusBar.title": "Preview Status Bar States",
   "command.connectStatusLine.title": "Connect Claude Status Line…",

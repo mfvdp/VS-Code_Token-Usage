@@ -513,15 +513,24 @@ function agentStateWord(state: NodeState): string {
 }
 
 /**
- * "[~Running] Explore · claude-opus-5 · a94f · 12.3K · 4 min 05 s". An inferred state carries
+ * "[~Running] Explore · claude-opus-5 · 94f3 · 12.3K · 4 min 05 s". An inferred state carries
  * the estimate mark, a recorded one does not — the same distinction the dashboard draws — and
- * a usage whose output is a lower bound carries ⚠.
+ * a usage whose output is a lower bound carries ⚠. A session names its two figures, as its
+ * dashboard row does — "12.0M own · 137.4M agents · 22 d 11 h": what its own transcript used
+ * and what its agents of the last seven days used, never added, then its span; a session
+ * without agents has no agents figure.
  */
 function agentNodeLine(n: TreeNode): string {
   const word = agentStateWord(n.state)
   const state = n.derived ? estimate(word) : word
   const name = n.sub ? `${cell(n.label)} — ${cell(n.sub)}` : cell(n.label)
-  return `[${state}] ${name} · ${cell(n.usage)}${n.lowerBound ? ' ⚠' : ''} · ${cell(n.duration)}`
+  const mark = n.lowerBound ? ' ⚠' : ''
+  if (n.kind === 'session') {
+    const agents = typeof n.usageAgents === 'string' && n.usageAgents !== ''
+      ? ` · ${t('{0} agents', cell(n.usageAgents))}` : ''
+    return `[${state}] ${name} · ${t('{0} own', cell(n.usage))}${mark}${agents} · ${cell(n.duration)}`
+  }
+  return `[${state}] ${name} · ${cell(n.usage)}${mark} · ${cell(n.duration)}`
 }
 
 /**

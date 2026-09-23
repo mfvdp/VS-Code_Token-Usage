@@ -23,7 +23,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | Output of Claude subagents, and of any response with no terminal line | the same transcripts | **lower bound** (⚠ in tooltip, tables, export and the agent details) | – |
 | Agent states done and failed | the parent's tool result or task notification, or the workflow run's journal | **recorded** | on file change; the agent tree is pushed at most every 2 s |
 | Agent states running and unknown, sessions active and idle | the time of a transcript's last response, or of the launch | **derived** (`~` in the glyph's title), with the sentence it rests on | the same |
-| Parent's report of a sync agent | the parent's tool result | the parent's own count — shown, never added to a total | – |
+| Report from Claude Code of a sync agent | the tool result that returns the agent | Claude Code's own figure — the context of the agent's last request with its reply, not what it used; shown, never added to a total | – |
 | API cost | token counts × a dated price table | **estimate** (`~`) | table checked 2026-09-06 |
 | Burn rate, ETA, end-of-window, reset retrospective | the stored quota history | **estimate**, with a stated confidence and “based on *N* readings” | needs several readings |
 | Tokens per percentage point (calibration) | quota history ÷ local tokens | **observation about your data**, off by default | – |

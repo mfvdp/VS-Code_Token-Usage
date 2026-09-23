@@ -582,11 +582,13 @@ test('parseWebviewMessage drops everything else', () => {
   for (const raw of bad) assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw) ?? 'undefined')
 })
 
-test('parseWebviewMessage keeps the command allow-list to eleven harmless commands', () => {
+test('parseWebviewMessage keeps the command allow-list to twelve harmless commands', () => {
   // Eleven, not nine: the empty quota state offers the two ways to get a reading, and both
   // of those commands ask before they act — connecting the status line goes through its own
-  // write consent and writes its own backup.
-  assert.equal(WEBVIEW_COMMANDS.length, 11)
+  // write consent and writes its own backup. Twelve since 1.6 (D11): the details' Copy ID
+  // copies the id the panel already shows and takes no argument the page could choose.
+  assert.equal(WEBVIEW_COMMANDS.length, 12)
+  assert.equal(WEBVIEW_COMMANDS.includes('tokenPace.copyAgentId'), true)
   for (const id of WEBVIEW_COMMANDS) {
     assert.deepEqual(parseWebviewMessage({ type: 'command', id }), { type: 'command', id })
     assert.match(id, /^tokenPace\./)
@@ -811,7 +813,8 @@ test('the view model carries the agent tree of the aggregator, with the selectio
     agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentSelected: agentKey },
   }))
   const tree = vm.agents
-  assert.equal(tree.updatedAt, NOW)
+  // The clock is the builder's input, never part of the tree (D12).
+  assert.equal('updatedAt' in tree, false)
   assert.equal(tree.roots.length, 1)
   const root = tree.roots[0]
   assert.equal(root.label, 'Session sess-alp')

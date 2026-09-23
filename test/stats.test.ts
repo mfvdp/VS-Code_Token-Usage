@@ -4,11 +4,13 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
+import { setLocale } from '../src/i18n'
 import { usd } from '../src/render'
 import {
   CHART_MODEL_SERIES_PER_PROVIDER, MIN_P90_SAMPLES, StatsCtx, cacheEconomy, cacheHitParts,
   cacheStateOf, calendar, chart, dayOfBucket, drill, heatmap, hours, kpis, modelTable,
   niceCeil, planFactors, projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
+  durationText,
 } from '../src/stats'
 import { DayRange, dayOf, daysBetween, previousRange, rangeFor } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
@@ -1047,4 +1049,35 @@ test('a project share without a denominator is a dash, not a zero', () => {
   assert.equal(rows[0].usage, '–')
   assert.equal(rows[0].share, '–')
   assert.equal(rows[0].sessions, 1)
+})
+
+test('a duration rounds to the unit it prints before it splits — "20 min 00 s", never "19 min 60 s"', () => {
+  // 1.6 D13. The seconds were rounded after the minutes were floored, so 19 min 59.6 s read
+  // "19 min 60 s"; the same at every step up. Each form now rounds first.
+  const cases: Array<[number, string]> = [
+    [999.4, '999 ms'], [999.6, '1.0 s'], [1_450, '1.5 s'], [59_949, '59.9 s'], [59_950, '1 min 00 s'],
+    [119_499, '1 min 59 s'], [119_500, '2 min 00 s'], [1_199_600, '20 min 00 s'], [3_599_499, '59 min 59 s'],
+    [3_599_500, '1 h 00 min'], [7_170_000, '2 h 00 min'], [125_000, '2 min 05 s'],
+  ]
+  for (const [ms, text] of cases) assert.equal(durationText(ms), text, String(ms))
+  // Nothing measured is a dash, as before.
+  for (const ms of [0, -5, NaN, Infinity]) assert.equal(durationText(ms), '–', String(ms))
+  // No form ever prints the next unit's worth of its own.
+  for (let ms = 1; ms < 4 * 3_600_000; ms += 997) {
+    const t = durationText(ms)
+    const m = /^(\d+) (?:min (\d+) s|h (\d+) min)$/.exec(t)
+    if (m) assert.ok(Number(m[2] ?? m[3]) < 60, `${ms}: ${t}`)
+    if (/ ms$/.test(t)) assert.ok(parseInt(t, 10) < 1000, `${ms}: ${t}`)
+    if (/^\d+\.\d s$/.test(t)) assert.ok(parseFloat(t) < 60, `${ms}: ${t}`)
+  }
+})
+
+test('a duration under a minute is written in the German digits on a German page', () => {
+  setLocale('de')
+  try {
+    assert.equal(durationText(59_949), '59,9 s')
+    assert.equal(durationText(999.6), '1,0 s')
+  } finally {
+    setLocale(undefined)
+  }
 })

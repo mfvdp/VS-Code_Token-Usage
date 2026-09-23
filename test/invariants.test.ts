@@ -510,7 +510,7 @@ test('a launch whose agent was never read shows no figure of its own — dashes,
   const d = vm.agents.selected
   assert.ok(d)
   assert.equal(d.key, p.key)
-  assert.deepEqual(d.rows.map((r) => r.label), ['Type', 'Models', 'Started', 'Spawned by'])
+  assert.deepEqual(d.rows.map((r) => r.label), ['Type', 'Models', 'ID', 'Started', 'Spawned by'])
   // The markdown prints the same two dashes, and no zero anywhere on the line.
   const line = agentLines(vm).find((l) => l.includes(p.label))
   assert.ok(line, agentLines(vm).join('\n'))
@@ -615,11 +615,14 @@ test('every inferred state says it was inferred, and no recorded one says so —
  * §9 of the 1.5.1 spec adds — a node's agent count, the running list and its items — nothing else.
  */
 const TREE_FIELDS = new Set([
-  'roots', 'selected', 'running', 'runningNow', 'runningMore', 'omittedRoots', 'truncated', 'note', 'updatedAt',
+  'roots', 'selected', 'running', 'runningNow', 'runningMore', 'omittedRoots', 'truncated', 'note',
   'key', 'kind', 'label', 'sub', 'state', 'derived', 'usage', 'lowerBound', 'duration', 'startTs', 'lastTs',
   'agentCount', 'children',
   'title', 'stateText', 'rows', 'value',
   'context', 'waiting',
+  // 1.6 P1: a session's agents' usage (D5), what Copy ID copies (D11), and a row's own layout,
+  // clock and copy marks (R5, D11). `updatedAt` left the tree (D12).
+  'usageAgents', 'id', 'live', 'copy',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {

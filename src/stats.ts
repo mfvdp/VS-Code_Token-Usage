@@ -1387,18 +1387,27 @@ function turnStats(sessions: SessionRec[], source: Source, model: string): TurnS
 /**
  * "1.4 s" / "2 min 05 s" — turn gaps span three orders of magnitude. Exported for the agent
  * tree, whose durations sit beside the Sessions table's and must read the same way.
+ *
+ * Each form rounds to the unit it prints first and splits the rounded figure after, so a
+ * rounding carries into the unit above: 1 199 600 ms is "20 min 00 s", never "19 min 60 s",
+ * and 999.6 ms is "1.0 s", never "1000 ms". A figure that rounds up to the next form's
+ * threshold is written in that form.
  */
 export function durationText(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '–'
-  if (ms < 1000) return `${Math.round(ms)} ms`
+  const r = Math.round(ms)
+  if (r < 1000) return `${r} ms`
+  // Tenths of a second, rounded once: 59 950 ms is 60.0 s, and so a minute.
+  const tenths = Math.round(ms / 100) / 10
   // In the page's own digits, like every other figure: "48,0 s" on a German page, not "48.0 s".
-  if (ms < 60_000) {
-    return `${(ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`
+  if (tenths < 60) {
+    return `${tenths.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`
   }
-  const m = Math.floor(ms / 60_000)
-  const s = Math.round((ms % 60_000) / 1000)
-  if (m < 60) return `${m} min ${String(s).padStart(2, '0')} s`
-  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`
+  const S = Math.round(ms / 1000)
+  const m = Math.floor(S / 60)
+  if (m < 60) return `${m} min ${String(S % 60).padStart(2, '0')} s`
+  const M = Math.round(ms / 60_000)
+  return `${Math.floor(M / 60)} h ${String(M % 60).padStart(2, '0')} min`
 }
 
 /** Why a group carries no cost — the Price column says which of the two it is. */

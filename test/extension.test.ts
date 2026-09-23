@@ -1213,25 +1213,37 @@ test('a poll pass lists the agent files of active sessions only and hands on the
   assert.deepEqual(scan.activeAgentSessions(agg.Aggregator.fromSnapshot(snap), now), [active, lively].sort())
 })
 
-test('the poll is wanted while an agent runs, or while a launch waits for its file in an active session', () => {
+test('the poll is wanted while an agent runs or a session is active, and never for an idle one', () => {
+  // 1.6 D8: an active session may start a workflow run at any moment, and a `Workflow` call
+  // leaves no launch the tree could wait on — so an active session is enough, whatever is below
+  // it. Until 1.5.1 a finished agent in an active session stopped the poll, and the first file of
+  // a run started next was left to a watcher that can miss it.
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
-    key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–',
+    key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
     lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, children: [], ...over,
   })
-  const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(T), roots, running })
+  const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
   const waiting = node({ key: 'l:toolu_x', kind: 'pending', state: 'unknown', derived: true })
 
   assert.equal(ext.agentPollWanted(undefined), false)
   assert.equal(ext.agentPollWanted(tree([])), false)
-  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'active', children: [node({})] })])), false,
-    'a finished agent in an active session')
+  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'active', children: [node({})] })])), true,
+    'a finished agent in an active session: the session may start the next one')
+  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'active' })])), true,
+    'an active session without agents')
   // The count covers every root, the ones beyond the list too.
   assert.equal(ext.agentPollWanted(tree([], 1)), true)
   assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'active', children: [node({ children: [waiting] })] })])),
     true, 'a launch deep in an active session')
   assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'idle', children: [waiting] })])), false,
     'a launch in an idle session: no pass would list its directory')
+  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'idle', children: [node({})] }),
+    node({ key: 's:2', kind: 'session', state: 'unknown' })])), false, 'every session idle and nothing running')
+  // Only a session's own state counts: the decision reads the roots, never a node's children,
+  // which the page need not carry.
+  assert.equal(ext.agentPollWanted(tree([node({ kind: 'session', state: 'idle', children: [node({ kind: 'session', state: 'active' })] })])),
+    false, 'an active state below the roots')
 })
 
 test('the poll keeps one timer at most, never runs two passes at once, and outlives no failure', async () => {
@@ -1292,10 +1304,20 @@ test('the poll keeps one timer at most, never runs two passes at once, and outli
   assert.equal(t.cleared, true)
 })
 
-test('while an agent runs, the poll hands the new and changed files of active sessions to the ingest, never an idle one, and stops when nothing runs', async () => {
+test('while an agent runs, the poll hands the new and changed files of active sessions to the ingest, never an idle one, and stops when nothing runs and no session is active', async () => {
   const { ext, agg } = lazy()
   const fx = makeFixture()
   const w = writeAgentWorld(fx)
+  // 1.6 D8: an active session keeps the poll going — it may start the next agent or run at any
+  // moment — so the poll stops only once nothing runs and every session is idle. Here every
+  // session is idle by its own transcript: the fixture's session, this one's lines and its sync
+  // agent's are dated eleven minutes back, and only the workflow's agent writes now. Its session
+  // is active through it while it runs (the roll-up), and idle again once it is done.
+  const quiet = T - 11 * MINUTE
+  const retime = (file: string): void => {
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').split(new Date(T).toISOString()).join(new Date(quiet).toISOString()))
+  }
+  for (const file of [path.join(w.project, '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl'), w.activeMain, w.sync]) retime(file)
   // A state that has been replayed already: the cold start reads every line itself, and
   // nothing waits for a replay.
   const replayed = new agg.Aggregator()
@@ -1330,10 +1352,11 @@ test('while an agent runs, the poll hands the new and changed files of active se
     // No watcher sees any of it, and the sweep is held: only a pass of the poll can.
     assert.ok(intervals.fire(ext.AGENT_POLL_MS) > 0, 'no interval of the poll\'s period is armed')
     await waitFor('the polled files to be counted', () => state.textOf(TOKENS_ITEM) === `Σ ${base + 105 + 207} · 7d`)
-    // Two active sessions — this one and the fixture's own, which has no agent — with five files.
-    assert.match(state.logText(), /Agent poll: 4 of 5 agent file\(s\) changed in 2 active session\(s\)/)
-    // Both runs have their results, the sync agent had one before: nothing runs any more, and
-    // the poll stopped with the first model that said so.
+    // One active session — this one, through its running agent; the fixture's own is quiet — with
+    // five files.
+    assert.match(state.logText(), /Agent poll: 4 of 5 agent file\(s\) changed in 1 active session\(s\)/)
+    // Both runs have their results, the sync agent had one before: nothing runs any more, no
+    // session is active, and the poll stopped with the first model that said so.
     await waitFor('the poll to stop', () => state.logText().includes('Agent poll: off'))
 
     assert.deepEqual(disposeAll(LIVE.pop()!), [])
@@ -1349,6 +1372,51 @@ test('while an agent runs, the poll hands the new and changed files of active se
     seeAgain()
     intervals.restore()
   }
+})
+
+test('a session that has just called the Workflow tool, with no agent file yet, starts the poll', async () => {
+  // 1.6 D8. A workflow run's first agent writes into a directory made after the watcher started
+  // — the one a recursive watcher on Linux can miss — and a `Workflow` call is no agent launch,
+  // so no pending node waits for it. Until 1.5.1 nothing started the poll then, and the run's
+  // first minute went unseen. The fixture's own session is quiet here; the one active session
+  // is the one with the fresh call.
+  const fx = makeFixture()
+  const project = path.join(fx.claudeRoot, '-tmp-token-pace-synthetic')
+  const own = path.join(project, '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl')
+  fs.writeFileSync(own, fs.readFileSync(own, 'utf8').split(new Date(T).toISOString()).join(new Date(T - 11 * MINUTE).toISOString()))
+  writeLines(path.join(project, `${ACTIVE}.jsonl`), [
+    claudeLine({ id: 'msg_wf_1', ts: T, usage: { input: 7, output: 1 }, tools: [{ name: 'Workflow', id: 'toolu_wf_0001' }] }),
+  ])
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitFor('the poll to start', () => state.logText().includes('Agent poll: on'))
+  // On for the session, not for an agent: nothing runs yet.
+  assert.match(state.logText(), /Agent poll: on, every 5 s — 0 running agent\(s\)/)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('Copy Agent ID copies the id of the node whose details are open, and nothing without one', async () => {
+  // 1.6 D11: the details' Copy ID button and the palette command are one command, and what it
+  // copies is the whole id the ID row shows — here the sync agent's — never a label or a figure.
+  const fx = makeFixture()
+  writeAgentWorld(fx)
+  const host = await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  const before = state.clipboard.length
+  await state.execute('tokenPace.copyAgentId')
+  assert.equal(state.clipboard.length, before, 'something was copied with nothing selected')
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Select a node in the Agents section first.')
+
+  page.post({ type: 'agentSelect', key: 'a:c3c3c3' })
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentSelected, 'a:c3c3c3')
+  // The button's message, through the page's own allow-list, runs the command.
+  page.post({ type: 'command', id: 'tokenPace.copyAgentId' })
+  await waitFor('the id on the clipboard', () => state.clipboard.length > before)
+  assert.deepEqual(state.clipboard.slice(before), ['c3c3c3'])
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: ID copied to the clipboard.')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
 test('the agent tables of an upgraded snapshot are replayed once after the cold start, not on the next start, and by a re-read', async () => {

@@ -930,9 +930,10 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   ])
   // The tree under a heading of its own: without it, a renderer reads the two lists as one.
   // Inferred states carry the estimate mark; its agent and the launch run, so the session,
-  // quiet itself, is active through them. The markdown prints every node, open or not.
+  // quiet itself, is active through them. The markdown prints every node, open or not. A
+  // session names its own figure and its agents' (1.6 D5), never their sum.
   assert.deepEqual(lines.slice(tree).filter((l) => /^\s*- /.test(l)), [
-    '- [~Active] Session sess-alp — alpha · 1.2K · 2 h 15 min',
+    '- [~Active] Session sess-alp — alpha · 1.2K own · 1.2K agents · 2 h 15 min',
     '  - [~Running] Explore · claude-opus-4-6 · a94f · 1.2K · 19 min 00 s',
     '  - [~Running] Plan · – · launched · – · –',
   ])
@@ -1067,7 +1068,7 @@ test('the notes under the tree state the cut, the sessions left out, the lower b
   const tree: AgentTreeVm = {
     roots: [{
       key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', sub: null, state: 'done', derived: false,
-      usage: '12K', lowerBound: true, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+      usage: '12K', usageAgents: null, lowerBound: true, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
       agentCount: 0, children: [],
     }],
     selected: null,
@@ -1077,11 +1078,11 @@ test('the notes under the tree state the cut, the sessions left out, the lower b
     omittedRoots: 3,
     truncated: true,
     note: 'The selected node is no longer in the tree.',
-    updatedAt: NOW,
   }
   const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
   // A recorded state carries no estimate mark; a lower bound carries ⚠ behind the figure.
-  assert.ok(lines.includes('- [Done] Session 12345678 · 12K ⚠ · 4 min 05 s'), lines.join('\n'))
+  // A session without agents prints its own figure alone, the ⚠ behind it.
+  assert.ok(lines.includes('- [Done] Session 12345678 · 12K own ⚠ · 4 min 05 s'), lines.join('\n'))
   for (const note of [
     '_3 older session(s) not listed._',
     `_Tree cut at ${MAX_NODES} nodes._`,
@@ -1097,7 +1098,7 @@ test('an empty tree is one sentence; a tree that was never built is no section a
 
   const { vm } = agentVm()
   // No note means nothing was claimed: an unbuilt tree is not an empty one.
-  assert.equal(markdownDocument({ ...vm, agents: emptyAgentTree(NOW) }).includes('## Agents'), false)
+  assert.equal(markdownDocument({ ...vm, agents: emptyAgentTree() }).includes('## Agents'), false)
   const without = { ...vm } as Partial<ViewModel>
   delete without.agents
   assert.equal(markdownDocument(without as ViewModel).includes('## Agents'), false)
@@ -1115,7 +1116,7 @@ test('the markdown tree speaks German with the shipped bundle', () => {
     setLocale(undefined)
   }
   const lines = sectionOf(md, '## Agenten')
-  assert.ok(lines.includes('- [~Aktiv] Sitzung sess-alp — alpha · 1,2K · 2 h 15 min'), lines.join('\n'))
+  assert.ok(lines.includes('- [~Aktiv] Sitzung sess-alp — alpha · 1,2K eigen · 1,2K Agenten · 2 h 15 min'), lines.join('\n'))
   assert.ok(lines.includes('  - [~Läuft] Plan · – · gestartet · – · –'), lines.join('\n'))
   // The running list and the tree's heading, German too.
   assert.ok(lines.indexOf('### Laufen gerade') >= 0

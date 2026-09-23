@@ -3016,7 +3016,7 @@ function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> 
   return {
     roots: [
       treeNode(AK.s1, 'active', {
-        kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', duration: '1 h 05 min',
+        kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min',
         agentCount: 4,
         children: [
           treeNode(AK.wf, 'running', {
@@ -3040,7 +3040,7 @@ function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> 
       treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', usage: '–', duration: '–' }),
     ],
     selected: null, running: 1, runningNow: [runningItem()], runningMore: 0,
-    omittedRoots: 0, truncated: false, note: null, updatedAt: AG_NOW,
+    omittedRoots: 0, truncated: false, note: null,
     ...over,
   }
 }
@@ -3078,12 +3078,14 @@ function detailsOf(over: Record<string, unknown> = {}): Record<string, unknown> 
     rows: [
       { label: 'Type', value: 'Explore' },
       { label: 'Model', value: 'Opus 5' },
+      { label: 'ID', value: 'a94f3c2e10b7d5e19', copy: true },
       { label: 'Depth', value: '' },
-      { label: 'Last activity', value: '11:59:55', note: '5 s ago' },
+      { label: 'Last activity', value: '11:59:55', note: '5 s ago', live: 'ago' },
       { label: 'Output', value: '1.2K', note: '⚠ lower bound' },
       { label: 'Spawned by', value: '–' },
       { label: 'Workflow run', value: null },
-      { label: "Parent's report", value: '12K tokens · 40.0 s · 3 tool calls', note: "the parent's own count, not added to any total" },
+      { label: 'Report from Claude Code', value: 'context at the end 12K (incl. cache reads and the reply) · 40.0 s from the start · 3 tool calls',
+        note: "Claude Code's own figure for this agent, never added to a total", kind: 'sentence' },
     ],
     ...over,
   }
@@ -3234,10 +3236,16 @@ test('a row carries the usage and duration it was given and, only while it runs,
   // Absence is a dash, never a zero: the quiet session. A launch nobody has counted yet shows
   // no figures at all — here it is not running, so not even a clock.
   assert.ok(h.indexOf(lbl('Explore', '–', 'launched') + '</span></button>') >= 0, h)
-  assert.ok(h.indexOf(lbl('Session 1234abcd') + figs('–', '–')) >= 0, h)
+  // A session's figures name what they are (D5): its own transcript's usage, its agents' —
+  // never added to it, and not shown for a session without agents — and its span, whose title
+  // says so.
+  const span = (v: string): string => '<span title="span from the first to the last line">' + v + '</span>'
+  assert.ok(h.indexOf(lbl('Session 1234abcd') + figs('– own', span('–'))) >= 0, h)
   // The project a session belongs to, when attribution names one, beside its name.
   assert.ok(h.indexOf(lbl('Session 9d0eb37a') + '<span class="meta">repo</span>'
-    + figs('1.2M', '1 h 05 min')) >= 0, h)
+    + figs('1.2M own', '434.6K agents', span('1 h 05 min'))) >= 0, h)
+  // The sum of the two is no figure of the page.
+  assert.equal(h.indexOf('1.6M'), -1, h)
   // A launch whose transcript has not been seen yet reads as the hint it is.
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-pending" aria-selected="false">') >= 0, h)
   assert.match(STYLE, /\.ag-k-pending > \.ag-line \.ag-label \{ font-style: italic; \}/)
@@ -3382,23 +3390,57 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.ok(panel.indexOf('<dt>Spawned by</dt><dd>–</dd>') >= 0, panel)
   assert.ok(panel.indexOf('<dt>Workflow run</dt><dd>–</dd>') >= 0, panel)
   assert.ok(panel.indexOf('<dt>Output</dt><dd>1.2K <span class="meta">⚠ lower bound</span></dd>') >= 0, panel)
-  // The model's own last-activity row keeps its time and gains the clock — once, in place of
-  // the age the view model wrote beside it: one age per row, never two.
+  // The row the model marks live keeps its time and gains the clock — once, in place of the age
+  // the view model wrote beside it: one age per row, never two.
   assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:59:55 · <span class="nobr"><span data-live="since" data-ts="'
     + (AG_NOW - 5_000) + '">5 s</span> ago</span></dd>') >= 0, panel)
   assert.equal(panel.split('Last activity').length - 1, 1, panel)
   assert.equal(panel.indexOf('<span class="meta">5 s ago</span>'), -1, panel)
-  // The parent's report is a sentence, not a figure: it takes the whole width under its label,
-  // its note set off by the separator the page uses between clauses.
-  assert.ok(panel.indexOf('<dt class="ag-wide">Parent&#39;s report</dt><dd class="ag-wide">12K tokens · 40.0 s · '
-    + '3 tool calls · <span class="meta">the parent&#39;s own count, not added to any total</span></dd>') >= 0, panel)
-  // A model without such a row gets one of the page's own, right under the state.
+  // Claude Code's report is a sentence, not a figure, because the row says so (kind): it takes
+  // the whole width under its label, its note set off by the separator the page uses between
+  // clauses.
+  assert.ok(panel.indexOf('<dt class="ag-wide">Report from Claude Code</dt><dd class="ag-wide">context at the end 12K '
+    + '(incl. cache reads and the reply) · 40.0 s from the start · 3 tool calls · '
+    + '<span class="meta">Claude Code&#39;s own figure for this agent, never added to a total</span></dd>') >= 0, panel)
+  // D11: the ID row, the whole id, and beside it the one button that asks the host to copy it.
+  assert.ok(panel.indexOf('<dt>ID</dt><dd><span class="ag-id">a94f3c2e10b7d5e19</span> '
+    + '<button class="ag-copy" data-act="cmd" data-id="tokenPace.copyAgentId">Copy ID</button></dd>') >= 0, panel)
+  assert.equal(panel.split('data-id="tokenPace.copyAgentId"').length - 1, 1, panel)
+  // A model without a live row gets a row of the page's own, right under the state.
   const own = agentsHtml(a, {
     agents: agentTree({ selected: detailsOf({ rows: [{ label: 'Type', value: 'Explore' }] }) }),
     ui: agentUi({ agentSelected: AK.a1 }),
   })
   assert.ok(own.indexOf('yet.</dd><dt>Last activity</dt><dd><span class="nobr"><span data-live="since" data-ts="'
     + (AG_NOW - 5_000) + '">5 s</span> ago</span></dd><dt>Type</dt><dd>Explore</dd></dl></div>') >= 0, own)
+  // R5: the layout and the clock are the rows' own say, never a guess from their words. A row
+  // labelled "Last activity" that is not marked live keeps its note and gets no clock (the
+  // page adds its own row); a note that is a clause does not make a figure a sentence; a
+  // sentence whose note is a ⚠ stays a sentence; a second copy row gets no second button.
+  const said = agentsHtml(a, {
+    agents: agentTree({
+      selected: detailsOf({
+        rows: [
+          { label: 'Last activity', value: '11:59:55', note: '5 s ago' },
+          { label: 'Report', value: '12K', note: 'a clause of its own' },
+          { label: 'Output', value: '1.2K', note: '⚠ lower bound', kind: 'sentence' },
+          { label: 'ID', value: 'a1', copy: true },
+          { label: 'ID', value: 'a2', copy: true },
+          { label: 'Bar', value: 'x', kind: 'bar' },
+        ],
+      }),
+    }),
+    ui: agentUi({ agentSelected: AK.a1 }),
+  })
+  const saidPanel = said.slice(said.indexOf('<div class="ag-details"'))
+  assert.ok(saidPanel.indexOf('yet.</dd><dt>Last activity</dt><dd><span class="nobr"><span data-live="since"') >= 0, saidPanel)
+  assert.ok(saidPanel.indexOf('<dt>Last activity</dt><dd>11:59:55 <span class="meta">5 s ago</span></dd>') >= 0, saidPanel)
+  assert.ok(saidPanel.indexOf('<dt>Report</dt><dd>12K <span class="meta">a clause of its own</span></dd>') >= 0, saidPanel)
+  assert.ok(saidPanel.indexOf('<dt class="ag-wide">Output</dt><dd class="ag-wide">1.2K · <span class="meta">⚠ lower bound</span></dd>') >= 0, saidPanel)
+  assert.equal(saidPanel.split('data-id="tokenPace.copyAgentId"').length - 1, 1, saidPanel)
+  assert.ok(saidPanel.indexOf('<dt>ID</dt><dd>a2</dd>') >= 0, saidPanel)
+  // A kind this build does not know is laid out as a figure.
+  assert.ok(saidPanel.indexOf('<dt>Bar</dt><dd>x</dd>') >= 0, saidPanel)
   // A node without a last activity gets no clock: the launch nobody has seen a line of.
   const pending = agentsHtml(a, {
     agents: agentTree({ selected: detailsOf({ key: AK.l1, title: 'Explore · – · launched', state: 'unknown', lastTs: null, rows: [] }) }),
@@ -3442,7 +3484,7 @@ test('details the page has no row for say themselves whether the state was recor
         runningNow: [], omittedRoots: 1,
         selected: detailsOf({
           key: far, state, derived: false, stateText, lastTs: AG_NOW - 65_000,
-          rows: [{ label: 'Last activity', value: '11:58:55', note: '1 min ago' }],
+          rows: [{ label: 'Last activity', value: '11:58:55', note: '1 min ago', live: 'ago' }],
         }),
       }),
       ui: agentUi({ agentSelected: far }),
@@ -4078,7 +4120,7 @@ function flushVm(over: Record<string, unknown> = {}): any {
 function flushTree(n: number): Record<string, unknown> {
   return {
     roots: [{ key: 'a:/p/' + n + '.jsonl' }], selected: null, running: 1, omittedRoots: 0,
-    truncated: false, note: null, updatedAt: n,
+    truncated: false, note: null,
   }
 }
 
@@ -4121,6 +4163,37 @@ test('the agent tree is pushed at most every two seconds, and no other section w
   r.p.update(flushVm({ agents: flushTree(3), digest: ['newest'] }))
   assert.deepEqual(r.sections(), ['summary', 'summary'])
   assert.deepEqual(r.live(), [])
+})
+
+test('an unchanged tree is not sent again: two builds five seconds apart from the same records are one payload', () => {
+  // 1.6 D12. The tree carried the time it was built at, so every build was a changed section
+  // and every push redrew the tree — the throttle's two seconds were the only thing between the
+  // page and a redraw per ingest. The records of the world, three hours on (nothing runs any
+  // more, nothing is selected), built twice five seconds apart.
+  const { agg } = agentWorld()
+  const input = makeInput({ agg, cfg: makeConfig() })
+  const at = (now: number): any => buildViewModel({ ...input, now }).agents
+  const base = input.now + 3 * 3_600_000
+  const first = at(base)
+  const second = at(base + 5_000)
+  assert.equal(first.running, 0)
+  assert.equal(first.selected, null)
+  assert.ok(first.roots.length > 0)
+  // Nothing in the tree is the time it was built at: the two serialise alike.
+  assert.equal(JSON.stringify(second), JSON.stringify(first))
+  assert.equal('updatedAt' in first, false)
+  const r = throttleRig()
+  r.p.update(flushVm({ agents: first }))
+  r.p.resolveWebviewView(r.view)
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  r.posted.length = 0
+  r.advance(AG_NOW + 5_000)
+  r.p.update(flushVm({ agents: second }))
+  assert.deepEqual(r.sections(), [], 'the unchanged tree was sent again')
+  assert.deepEqual(r.live(), [], 'a push of it was held for later')
+  // A tree that did change still goes, at once after the interval.
+  r.p.update(flushVm({ agents: { ...second, running: 1 } }))
+  assert.deepEqual(r.sections(), ['agents'])
 })
 
 test('an opened node or a selection is answered at once, and the interval counts from that push', () => {

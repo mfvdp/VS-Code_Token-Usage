@@ -24,7 +24,7 @@ import * as path from 'path'
 import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
 import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
-import { AgentTreeVm, TreeNode } from './agentTree'
+import { AgentTreeVm } from './agentTree'
 import { Aggregator } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
@@ -1094,6 +1094,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     )
   }
 
+  /**
+   * D11: the whole id of the node whose details are open — an agent id, a launch's tool_use id,
+   * a run's id or a session's id, as the ID row shows it — onto the clipboard, and nothing else.
+   * The details the page shows are the ones of the last view model, so the id copied is the one
+   * on screen. Nothing selected: one line that says where to select, and the clipboard is left
+   * as it was.
+   */
+  async function copyAgentId(): Promise<void> {
+    const id = latestVm?.agents?.selected?.id ?? null
+    if (typeof id !== 'string' || id === '') {
+      void vscode.window.showInformationMessage(t('Select a node in the Agents section first.'))
+      return
+    }
+    await vscode.env.clipboard.writeText(id)
+    void vscode.window.showInformationMessage(t('Token Pace: ID copied to the clipboard.'))
+  }
+
   function bridgeDiag(): DiagnosticsInput['bridge'] {
     const b = bridgeInfo()
     return b === null ? null : { installed: b.installed, shadowed: b.shadowed, mirrorAgeMs: b.mirrorAge }
@@ -1220,6 +1237,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     vscode.commands.registerCommand('tokenPace.openUsagePage', openUsagePage),
     vscode.commands.registerCommand('tokenPace.cycleWindowSelect', cycleWindowSelect),
     vscode.commands.registerCommand('tokenPace.copyDiagnostics', copyDiagnostics),
+    vscode.commands.registerCommand('tokenPace.copyAgentId', copyAgentId),
     vscode.commands.registerCommand('tokenPace.clearStoredData', clearStoredData),
     vscode.commands.registerCommand('tokenPace.previewStatusBar', () => {
       statusBar.preview(readConfig())
@@ -1424,15 +1442,16 @@ export function deactivate(): void {
 
 /**
  * Whether the hot-directory poll has anything to look for: an agent or a launch the tree shows
- * as running, or a launch whose transcript was not seen yet in a session that is active — the
- * first file of a new directory is exactly the one a recursive watcher on Linux can miss. A
- * launch in an idle session keeps nothing going: the poll lists active sessions only.
+ * as running, or a session that is active. An active session may start an agent or a workflow
+ * run at any moment, and the first file of a new directory is exactly the one a recursive
+ * watcher on Linux can miss — a `Workflow` call leaves no launch the tree could wait on, so
+ * waiting for one would miss the run's start. A pass costs a few milliseconds. The decision reads
+ * the running count and the roots' states only, never a node's children, which the page need not
+ * carry. An idle session keeps nothing going: the poll lists active sessions only.
  */
 export function agentPollWanted(tree: AgentTreeVm | undefined): boolean {
   if (!tree) return false
-  if (tree.running > 0) return true
-  const pending = (n: TreeNode): boolean => n.kind === 'pending' || n.children.some(pending)
-  return tree.roots.some((r) => r.state === 'active' && pending(r))
+  return tree.running > 0 || tree.roots.some((r) => r.kind === 'session' && r.state === 'active')
 }
 
 /** The two timer calls the poll makes: the real ones, unless a test hands in its own. */

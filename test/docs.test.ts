@@ -14,8 +14,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
 import {
-  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, ROOT_WINDOW_MS, RUNNING_WINDOW_MS,
-  SESSION_ACTIVE_MS,
+  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS,
+  ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS,
 } from '../src/agentTree'
 import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
@@ -409,12 +409,16 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Unknown — inferred: not every agent of this run has a recorded result, and none is running.',
     "Running — inferred: the parent recorded the launch {0} and no result yet; the agent's transcript has not been seen yet.",
     "Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
+    // 1.6 D6: an agent that wrote on after its outcome.
+    'Running — inferred: the transcript changed {0}, after an outcome was recorded at {1}.',
+    'Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.',
   ]
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const sentence of quoted) {
     assert.ok(src.includes(`'${sentence}'`) || src.includes(`"${sentence}"`),
       `src/agentTreeBuild.ts no longer writes: ${sentence}`)
-    const pattern = sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{0\\\}/g, '[^|]+?')
+    // Every placeholder, {0} and {1} alike, stands for the example the page gives there.
+    const pattern = sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{\d\\\}/g, '[^|]+?')
     assert.match(flat, new RegExp(pattern), `docs/agents.md does not quote: ${sentence}`)
   }
   const written = [...src.matchAll(/\bt\((['"])((?:Completed|Failed|Running|Unknown|Active|Idle|Done) — .*?)\1/g)]
@@ -445,6 +449,9 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`once every **${Number(throttle[1]) / 1000} seconds**`, 'the push interval'],
     [`at most ${MAX_AGENT_EXPANDED} opened nodes`, 'the cap on opened nodes'],
     [`at most **${MAX_RUNNING_LIST}** running agents`, 'the running list cap'],
+    [`more than **${RESUMED_AFTER_MS / 1000} seconds** after`, 'how late a line may follow a recorded outcome'],
+    [`at least **${MIN_SHORT_ID}** characters`, 'the shortest short id'],
+    [`from **${SPAN_IN_DAYS_FROM_MS / 3_600_000} hours** on`, 'when a span is written in days'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
     [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],

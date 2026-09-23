@@ -18,9 +18,10 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  AgentTreeVm, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, TreeNode,
+  AgentTreeVm, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS,
+  SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from '../src/agentTree'
-import { AgentTreeInput, agentDetails, buildAgentTree } from '../src/agentTreeBuild'
+import { AgentTreeInput, agentDetails, buildAgentTree, shortIdsOf, spanText } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
 import { TimeConfig } from '../src/time'
 import { AgentLaunch, AgentRec, MainRec, SessionRec } from '../src/types'
@@ -151,7 +152,8 @@ const wfKey = `w:${S1}|${WF}`
 test('an agent the parent recorded is done or failed, and the sentence names who recorded it and when', () => {
   const over: Partial<AgentTreeInput> = {
     agents: [
-      rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - 5 * MIN }),
+      // The last line comes with the result: a transcript that went on after it is D6's case.
+      rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN }),
       rec('aaaa0002', { outcome: 'failed', outcomeTs: NOW - 26 * HOUR, firstTs: NOW - 27 * HOUR, lastTs: NOW - 26 * HOUR }),
     ],
     launches: [
@@ -280,10 +282,14 @@ test('a launch whose transcript was never seen is a pending node under whoever l
 
   const d = agentDetails(input(over), NOW, fresh.key)
   assert.deepEqual(d?.rows.map((r) => [r.label, r.value]), [
-    ['Type', 'Plan'], ['Models', 'sonnet'], ['Started', '11:58'], ['Spawned by', 'Session 9d0eb37a'],
+    ['Type', 'Plan'], ['Models', 'sonnet'], ['ID', 'toolu_pppp0001'], ['Started', '11:58'], ['Spawned by', 'Session 9d0eb37a'],
   ])
+  // What Copy ID copies for a launch: its tool_use id, the one the ID row shows.
+  assert.equal(d?.id, 'toolu_pppp0001')
+  assert.deepEqual(d?.rows.find((r) => r.label === 'ID'), { label: 'ID', value: 'toolu_pppp0001', copy: true })
+  // The two agents of the session share their first seven characters, so each name carries eight.
   assert.deepEqual(agentDetails(input(over), NOW, nested.key)?.rows.find((r) => r.label === 'Spawned by')?.value,
-    'Explore · claude-opus-5 · aaaa')
+    'Explore · claude-opus-5 · aaaa0001')
   assert.deepEqual(agentDetails(input(over), NOW, stale.key)?.rows.slice(0, 2).map((r) => r.value), ['–', '–'])
 })
 
@@ -320,7 +326,9 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
     return { vm, w: node(vm, wfKey), text: stateText({ agents }, wfKey) }
   }
   const done = (id: string): AgentRec => wfRec(id, { outcome: 'completed', outcomeTs: NOW - 5 * MIN })
-  const failed = (id: string): AgentRec => wfRec(id, { outcome: 'failed', outcomeTs: NOW - 5 * MIN })
+  // A failure is the parent's record, and its last line comes with it (D6: one that goes on after
+  // the record is inferred again).
+  const failed = (id: string): AgentRec => wfRec(id, { outcome: 'failed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
   const silent = (id: string): AgentRec => wfRec(id, { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })
 
   const running = run([wfRec('eeee0001'), failed('eeee0002')])
@@ -458,9 +466,11 @@ test('a run keeps its own agents, even one another agent launched', () => {
 // §4.5 · labels, usage, duration
 // ---------------------------------------------------------------------------
 
-test('an agent is named by its type, its last model through the model-name helper and four characters of its id', () => {
+test('an agent is named by its type, its last model through the model-name helper and its short id', () => {
   const vm = build({
     agents: [
+      // Claude Code's own shape, `a` + 16 hex: the `a` every id carries is left off the name.
+      rec('a94f3c2e10b7d5e19', { models: ['claude-opus-5'] }),
       rec('abcd0001', { models: ['claude-sonnet-5', 'claude-opus-5[1m]'] }),
       rec('bcde0002', { models: ['claude-haiku-4-5-20251001'] }),
       rec('cdef0003', { models: [] }),
@@ -471,6 +481,8 @@ test('an agent is named by its type, its last model through the model-name helpe
     launches: [launch('def00004', { typeHint: 'Plan', modelHint: 'sonnet' })],
   })
   const label = (id: string): string => node(vm, agentKey(id)).label
+  assert.equal(label('a94f3c2e10b7d5e19'), 'Explore · claude-opus-5 · 94f3')
+  // Any other id is taken as it is: four characters, since no other id of the session shares them.
   assert.equal(label('abcd0001'), 'Explore · claude-opus-5 · abcd')
   // A placeholder no model wrote is not the agent's model.
   assert.equal(label('f0000006'), 'Explore · claude-sonnet-5 · f000')
@@ -512,7 +524,9 @@ test('a session carries its project label only while attribution is on and the t
   }
   const on = rowsOf({ attribution: 'project', sessions: [sessionRec()] })
   assert.equal(on.sub, 'alpha')
-  assert.deepEqual(on.rows[0], { label: 'Project', value: 'alpha' })
+  // After the two usage figures of D5, which lead a session's details.
+  assert.deepEqual(on.rows.map((r) => r.label).slice(0, 3), ['Own transcript', 'Project', 'Models'])
+  assert.deepEqual(on.rows.find((r) => r.label === 'Project'), { label: 'Project', value: 'alpha' })
 
   const off = rowsOf({ attribution: 'none', sessions: [sessionRec()] })
   assert.equal(off.sub, null)
@@ -524,7 +538,7 @@ test('a session carries its project label only while attribution is on and the t
     sessions: [sessionRec({ isSub: true, project: 'sub' }), sessionRec({ source: 'codex', project: 'codex' })],
   })
   assert.equal(others.sub, null)
-  assert.deepEqual(others.rows[0], { label: 'Project', value: '–' })
+  assert.deepEqual(others.rows.find((r) => r.label === 'Project'), { label: 'Project', value: '–' })
 })
 
 // ---------------------------------------------------------------------------
@@ -577,7 +591,7 @@ test('running counts every running agent and launch, also on sessions beyond the
 // §4.5 · details, selection, notes
 // ---------------------------------------------------------------------------
 
-test("an agent's details: every row pre-formatted, dashes for absence, the parent's report only when there is one", () => {
+test("an agent's details: every row pre-formatted, dashes for absence, Claude Code's report only when there is one", () => {
   const over: Partial<AgentTreeInput> = {
     agents: [
       rec('aaaa0001', { outputFinal: 4 }),
@@ -587,15 +601,20 @@ test("an agent's details: every row pre-formatted, dashes for absence, the paren
   }
   const d = agentDetails(input(over), NOW, agentKey('aaaa0001'))
   assert.ok(d)
-  assert.equal(d.title, 'Explore · claude-opus-5 · aaaa')
+  // The two agents' ids share seven characters: the name carries the eight that keep them apart.
+  assert.equal(d.title, 'Explore · claude-opus-5 · aaaa0001')
   assert.equal(d.state, 'running')
+  assert.equal(d.id, 'aaaa0001')
+  // Every row says how it is laid out — a figure unless it says otherwise — which row the page's
+  // clock ticks in, and which one Copy ID copies: nothing is left to a guess from its words.
   assert.deepEqual(d.rows, [
     { label: 'Type', value: 'Explore' },
     { label: 'Models', value: 'claude-opus-5' },
+    { label: 'ID', value: 'aaaa0001', copy: true },
     { label: 'Depth', value: '1' },
     { label: 'Started', value: '11:30' },
     { label: 'Duration', value: '29 min 00 s' },
-    { label: 'Last activity', value: '11:59', note: '1 min ago' },
+    { label: 'Last activity', value: '11:59', note: '1 min ago', live: 'ago' },
     { label: 'Turns', value: '5' },
     { label: 'Usage', value: '1.2K' },
     { label: 'Fresh input', value: '300' },
@@ -607,8 +626,11 @@ test("an agent's details: every row pre-formatted, dashes for absence, the paren
     { label: 'Tool calls', value: '3' },
     { label: 'Spawned by', value: 'Session 9d0eb37a' },
     { label: 'Workflow run', value: '–' },
-    { label: "Parent's report", value: '123.5K tokens · 1 min 05 s · 7 tool calls',
-      note: "the parent's own count, not added to any total" },
+    // D9: Claude Code's own figures, named for what they are — the context of the last request
+    // with its reply — and a sentence, which takes the whole width.
+    { label: 'Report from Claude Code',
+      value: 'context at the end 123.5K (incl. cache reads and the reply) · 1 min 05 s from the start · 7 tool calls',
+      note: "Claude Code's own figure for this agent, never added to a total", kind: 'sentence' },
   ])
 
   // No sidecar, no launch, nothing counted: every figure is a dash, and no report is made up.
@@ -617,12 +639,12 @@ test("an agent's details: every row pre-formatted, dashes for absence, the paren
   const value = (label: string): string | undefined => bare.rows.find((r) => r.label === label)?.value
   assert.deepEqual(['Type', 'Depth', 'Turns', 'Usage', 'Output', 'Tool calls', 'Spawned by'].map(value),
     ['–', '–', '–', '–', '–', '–', '–'])
-  assert.equal(bare.rows.some((r) => r.label === "Parent's report"), false)
+  assert.equal(bare.rows.some((r) => r.label === 'Report from Claude Code'), false)
   assert.equal(bare.rows.some((r) => r.value === '0'), false, 'a zero where nothing was counted')
 
   // A report whose numbers are not numbers is no report.
   const broken = { ...over, launches: [launch('aaaa0001', { totals: { tokens: NaN, durationMs: 1, toolUses: 1 } })] }
-  assert.equal(agentDetails(input(broken), NOW, agentKey('aaaa0001'))?.rows.some((r) => r.label === "Parent's report"), false)
+  assert.equal(agentDetails(input(broken), NOW, agentKey('aaaa0001'))?.rows.some((r) => r.label === 'Report from Claude Code'), false)
 })
 
 test('a session and a run have details of their own', () => {
@@ -633,21 +655,34 @@ test('a session and a run have details of their own', () => {
   const s = agentDetails(input(over), NOW, rootKey)
   assert.ok(s)
   assert.equal(s.title, 'Session 9d0eb37a')
+  // D5: its own figure and its agents' first, a first line and a span in place of a start and a
+  // duration; the ID row last.
   assert.deepEqual(s.rows.map((r) => r.label), [
-    'Models', 'Started', 'Duration', 'Last activity', 'Turns', 'Usage', 'Fresh input', 'Cache write 5m',
-    'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents',
+    'Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Last activity', 'Turns', 'Usage',
+    'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents', 'ID',
   ])
   const sv = (label: string): string | undefined => s.rows.find((r) => r.label === label)?.value
-  // The session's own transcript only: 1 000 + 500 + 2 000; its agents are nodes of their own.
-  assert.deepEqual(['Models', 'Started', 'Turns', 'Usage', 'Cache write 5m', 'Tool calls', 'Agents'].map(sv),
-    ['claude-opus-5', '10:00', '12', '3.5K', '400', '9', '4'])
+  // The session's own transcript only: 1 000 + 500 + 2 000; its agents are nodes of their own,
+  // and their three records' 3 × 1 200 a figure of their own beside it, never added to it.
+  assert.deepEqual(['Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Turns', 'Usage',
+    'Cache write 5m', 'Tool calls', 'Agents', 'ID'].map(sv),
+  ['3.5K', '3.6K', 'claude-opus-5', '10:00', '1 h 58 min', '12', '3.5K', '400', '9', '4', S1])
+  assert.deepEqual(s.rows.find((r) => r.label === 'Agents, last 7 days'), {
+    label: 'Agents, last 7 days', value: '3.6K', kind: 'sentence',
+    note: 'not added to the own figure — the two cover different spans',
+  })
+  assert.equal(s.id, S1)
+  assert.equal(s.rows.filter((r) => r.copy === true).length, 1)
 
   const w = agentDetails(input(over), NOW, wfKey)
   assert.ok(w)
   assert.deepEqual(w.rows.map((r) => r.label), [
     'Agents', 'Started', 'Duration', 'Last activity', 'Turns', 'Usage', 'Fresh input', 'Cache write 5m',
-    'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls',
+    'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'ID',
   ])
+  // A run's id is its directory's name, which the launch's result names too.
+  assert.equal(w.id, WF)
+  assert.deepEqual(w.rows[w.rows.length - 1], { label: 'ID', value: WF, copy: true })
   const wv = (label: string): string | undefined => w.rows.find((r) => r.label === label)?.value
   assert.deepEqual(['Agents', 'Started', 'Turns', 'Usage', 'Tool calls'].map(wv), ['2', '11:20', '10', '2.4K', '6'])
 })
@@ -759,7 +794,8 @@ test('an empty tree says which absence it is', () => {
   assert.equal(none.note, 'No Claude Code session in the last 7 days.')
   assert.equal(none.running, 0)
   assert.equal(none.truncated, false)
-  assert.equal(none.updatedAt, NOW)
+  // No time of its own (D12): an unchanged tree is the same tree a push later.
+  assert.equal('updatedAt' in none, false)
 
   // A session two days ago that never ran an agent is not in the tree — but it was a session.
   const quiet = build({ mains: [main({ lastTs: NOW - 2 * DAY, firstTs: NOW - 2 * DAY - HOUR })] })
@@ -800,8 +836,9 @@ test('keys stay short however deep the files lie, stay apart where names share a
   assert.ok(file.length > MAX_AGENT_KEY_CHARS, 'the path alone is longer than any key may be')
   const long = (id: string, over: Partial<AgentRec> = {}): AgentRec =>
     rec(id, { sessionFile: file, spawnerFile: file, ...over })
-  // Two agents whose rows read alike — one type, one model, the same four characters — an id that
-  // ends like one of theirs, a run and a launch, all in that deep session.
+  // Two agents of one type and one model whose ids start alike — which since 1.6 (D11) makes each
+  // name carry as many characters as keep them apart — an id that ends like one of theirs, a run
+  // and a launch, all in that deep session.
   const over: Partial<AgentTreeInput> = {
     agents: [long('aaaa0001'), long('aaaa0002', { input: 999 }), long('bbbb0001'), wfRec('cccc0001', { sessionFile: file })],
     launches: [launch('pppp0001', { agentId: null, file, ts: NOW - MIN })],
@@ -811,7 +848,8 @@ test('keys stay short however deep the files lie, stay apart where names share a
   assert.equal(keys.length, 1 + 4 + 1 + 1)
   for (const k of keys) assert.ok(k.length <= MAX_AGENT_KEY_CHARS, `${k.length}: ${k}`)
   assert.equal(new Set(keys).size, keys.length, 'two nodes share a key')
-  assert.equal(node(vm, agentKey('aaaa0001')).label, node(vm, agentKey('aaaa0002')).label, 'the two rows read alike')
+  assert.deepEqual([node(vm, agentKey('aaaa0001')).label, node(vm, agentKey('aaaa0002')).label],
+    ['Explore · claude-opus-5 · aaaa0001', 'Explore · claude-opus-5 · aaaa0002'], 'the two rows read alike')
 
   // Stable: a later build and the records in another order give the same keys.
   const again = build({ ...over, agents: [...(over.agents ?? [])].reverse() }, NOW + 3 * MIN)
@@ -914,7 +952,7 @@ test('the tree speaks German with the bundle the extension ships', () => {
   assert.equal(vm.selected?.stateText,
     'Läuft — abgeleitet: Das Transkript hat sich vor 1 min geändert, und es wurde noch kein Ergebnis aufgezeichnet.')
   assert.deepEqual(vm.selected?.rows.map((r) => r.label), [
-    'Typ', 'Modelle', 'Tiefe', 'Beginn', 'Dauer', 'Letzte Aktivität', 'Turns', 'Verbrauch', 'Frische Eingabe',
+    'Typ', 'Modelle', 'ID', 'Tiefe', 'Beginn', 'Dauer', 'Letzte Aktivität', 'Turns', 'Verbrauch', 'Frische Eingabe',
     'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte', 'Tool-Aufrufe',
     'Gestartet von', 'Workflow-Lauf',
   ])
@@ -941,7 +979,7 @@ test('every message of the tree and of its markdown has a German entry, and the 
     'Running now', 'Sessions and agents', '(waiting)', 'No agent is running.', 'and {0} more']
   assert.ok(ours.length >= 30, `only ${ours.length} keys found in src/agentTreeBuild.ts`)
   // Words German takes over as they are.
-  const same = new Set(['Agent', 'Turns', 'Workflow {0}'])
+  const same = new Set(['Agent', 'Turns', 'Workflow {0}', 'ID'])
   for (const k of [...ours, ...text]) {
     assert.ok(k in keys, `${JSON.stringify(k)} is not a t() key in src/`)
     const de = GERMAN[k]
@@ -1265,4 +1303,167 @@ test("a running item carries its node's lower bound, and a launch nothing was co
     const n = all(vm.roots).find((x) => x.key === r.key)
     if (n) assert.equal(r.lowerBound, n.lowerBound, r.key)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P1 · D5 the session's own usage beside its agents', D6 writing on after an outcome,
+// D11 short ids and the ID row
+// ---------------------------------------------------------------------------
+
+test('a session shows its own usage beside its agents\' — two figures, never their sum', () => {
+  // 11.3M + 0.5M + 0.5M of its own; two agents of 68.0M + 0.4M + 0.3M each.
+  const big = { input: 68_000_000, cacheWrite: 400_000, output: 300_000, cacheRead: 0, reasoning: 0 }
+  const over: Partial<AgentTreeInput> = {
+    mains: [main({ input: 11_300_000, cacheWrite: 500_000, output: 500_000 })],
+    agents: [rec('aaaa0001', big), wfRec('bbbb0001', big)],
+    selected: rootKey,
+  }
+  const vm = build(over)
+  const root = vm.roots[0]
+  assert.equal(root.usage, '12.3M')
+  assert.equal(root.usageAgents, '137.4M')
+  // Only a session carries the second figure.
+  for (const n of all(vm.roots).slice(1)) assert.equal(n.usageAgents, null, n.key)
+  // Nothing anywhere is the sum of the two: they cover different spans.
+  const payload = JSON.stringify(vm)
+  assert.equal(payload.includes('149.7M'), false, payload)
+  assert.ok(payload.includes('"12.3M"') && payload.includes('"137.4M"'))
+  const rows = vm.selected?.rows ?? []
+  assert.deepEqual(rows.slice(0, 2), [
+    { label: 'Own transcript', value: '12.3M' },
+    { label: 'Agents, last 7 days', value: '137.4M', note: 'not added to the own figure — the two cover different spans', kind: 'sentence' },
+  ])
+  assert.equal(rows.some((r) => r.value === '149.7M'), false)
+
+  // A session without agents has no agents figure — not a dash, none at all.
+  const alone = build({ mains: [main()], selected: rootKey })
+  assert.equal(alone.roots[0].usageAgents, null)
+  assert.equal(alone.selected?.rows.some((r) => r.label === 'Agents, last 7 days'), false)
+  // Agents whose records hold nothing counted: a dash, never a zero.
+  const zero = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0, outputFinal: 0 }
+  assert.equal(build({ agents: [rec('aaaa0001', { ...zero, lastTs: NOW - 30 * MIN })] }).roots[0].usageAgents, '–')
+  // Only the records of the last seven days are the agents' figure: an older one is gone.
+  const old = rec('cccc0001', { ...big, lastTs: NOW - 8 * DAY, firstTs: NOW - 8 * DAY - HOUR })
+  assert.equal(build({ ...over, agents: [rec('aaaa0001', big), old] }).roots[0].usageAgents, '68.7M')
+})
+
+test('a session\'s span is days and hours from 48 hours on, the hours floored; its details say since and span', () => {
+  assert.equal(SPAN_IN_DAYS_FROM_MS, 48 * HOUR)
+  assert.equal(spanText(22 * DAY + 11 * HOUR + 59 * MIN), '22 d 11 h')
+  assert.equal(spanText(22.5 * DAY), '22 d 12 h')
+  assert.equal(spanText(48 * HOUR), '2 d 0 h')
+  assert.equal(spanText(48 * HOUR - MIN), '47 h 59 min')
+  assert.equal(spanText(90_000), '1 min 30 s')
+  assert.equal(spanText(0), '–')
+  assert.equal(spanText(NaN), '–')
+  const over: Partial<AgentTreeInput> = {
+    mains: [main({ firstTs: NOW - (22 * DAY + 11 * HOUR + 59 * MIN) - 2 * MIN })],
+    selected: rootKey,
+  }
+  const vm = build(over)
+  assert.equal(vm.roots[0].duration, '22 d 11 h')
+  const row = (label: string): string | undefined => vm.selected?.rows.find((r) => r.label === label)?.value
+  assert.equal(row('Since first line'), '2026-08-30 23:59')
+  assert.equal(row('Span'), '22 d 11 h')
+  assert.equal(row('Started'), undefined, 'a session has a first line, not a start')
+  assert.equal(row('Duration'), undefined)
+  // An agent keeps its start and its duration.
+  const a = agentDetails(input({ agents: [rec('aaaa0001')] }), NOW, agentKey('aaaa0001'))
+  assert.deepEqual(a?.rows.filter((r) => ['Started', 'Duration'].includes(r.label)).map((r) => r.value), ['11:30', '29 min 00 s'])
+})
+
+test('an agent that writes on more than a minute after its recorded outcome is inferred again, and keeps the record', () => {
+  assert.equal(RESUMED_AFTER_MS, 60_000)
+  const at = NOW - 10 * MIN
+  const after = (ms: number, over: Partial<AgentRec> = {}, lo: Partial<AgentLaunch> = {}): Partial<AgentTreeInput> => ({
+    agents: [rec('aaaa0001', { outcome: 'completed', outcomeTs: at, lastTs: at + ms, ...over })],
+    launches: [launch('aaaa0001', { outcome: 'completed', outcomeTs: at, ...lo })],
+    selected: agentKey('aaaa0001'),
+  })
+  const state = (over: Partial<AgentTreeInput>): TreeNode => node(build(over), agentKey('aaaa0001'))
+  const recorded = (over: Partial<AgentTreeInput>): string | undefined =>
+    build(over).selected?.rows.find((r) => r.label === 'Recorded')?.value
+
+  // 61 s after the outcome, within the running window: running, inferred, and it says why.
+  const on = after(61_000)
+  assert.deepEqual([state(on).state, state(on).derived], ['running', true])
+  assert.equal(stateText(on, agentKey('aaaa0001')),
+    'Running — inferred: the transcript changed 9 min ago, after an outcome was recorded at 11:50.')
+  assert.equal(recorded(on), 'done at 11:50')
+  // 59 s, and exactly 60 s: the tail of the same reply — the outcome stands. (A `>=` in place
+  // of the `>` would revive the second one.)
+  for (const ms of [59_000, 60_000]) {
+    const same = after(ms)
+    assert.deepEqual([state(same).state, state(same).derived], ['done', false], String(ms))
+    assert.equal(stateText(same, agentKey('aaaa0001')), 'Completed — the parent recorded the result at 11:50.')
+    assert.equal(recorded(same), undefined, 'a Recorded row without a revival')
+  }
+  // Written on, then silent past the window: unknown, and it says what was recorded and when.
+  const quiet: Partial<AgentTreeInput> = {
+    agents: [rec('aaaa0001', { outcome: 'failed', outcomeTs: NOW - 60 * MIN, lastTs: NOW - 50 * MIN, firstTs: NOW - 70 * MIN })],
+    launches: [launch('aaaa0001', { outcome: 'failed', outcomeTs: NOW - 60 * MIN })],
+    selected: agentKey('aaaa0001'),
+  }
+  assert.deepEqual([state(quiet).state, state(quiet).derived], ['unknown', true])
+  assert.equal(stateText(quiet, agentKey('aaaa0001')),
+    'Unknown — inferred: the transcript went on after an outcome was recorded at 11:00, and has been silent since 11:10.')
+  assert.equal(recorded(quiet), 'failed at 11:00')
+  // The row sits with the times, after the last activity.
+  const labels = build(quiet).selected?.rows.map((r) => r.label) ?? []
+  assert.equal(labels.indexOf('Recorded'), labels.indexOf('Last activity') + 1, labels.join(', '))
+
+  // The workflow journal's result carries no time and is never outlived — nor one it was given.
+  const journal: Partial<AgentTreeInput> = {
+    agents: [wfRec('bbbb0001', { outcome: 'completed', outcomeTs: null, lastTs: NOW - MIN }),
+      wfRec('bbbb0002', { outcome: 'completed', outcomeTs: NOW - 20 * MIN, lastTs: NOW - MIN })],
+  }
+  for (const id of ['bbbb0001', 'bbbb0002']) {
+    assert.equal(node(build(journal), agentKey(id)).state, 'done', id)
+    assert.equal(agentDetails(input(journal), NOW, agentKey(id))?.rows.some((r) => r.label === 'Recorded'), false, id)
+  }
+  // An outcome recorded without a time cannot be outlived either.
+  const timeless = after(10 * MIN, { outcomeTs: null }, { outcomeTs: null })
+  assert.equal(state(timeless).state, 'done')
+  // In German: the state word and „um".
+  assert.deepEqual(german(() => build(on).selected?.rows.find((r) => r.value.endsWith(' um 11:50'))),
+    { label: 'Aufgezeichnet', value: 'fertig um 11:50' })
+  assert.equal(german(() => stateText(on, agentKey('aaaa0001'))),
+    'Läuft — abgeleitet: Das Transkript hat sich vor 9 min geändert, nachdem um 11:50 ein Ausgang aufgezeichnet wurde.')
+})
+
+test('short ids: the fewest characters from four on that no other agent of the session shares, without the leading a', () => {
+  assert.equal(MIN_SHORT_ID, 4)
+  const A = 'a3f2a1b2c3d4e5f60'
+  const B = 'a3f2a7777777777aa'
+  const C = 'a9c0d1e2f3a4b5c6d'
+  assert.deepEqual([...shortIdsOf([A, B, C, 'bcde0002'])].sort(),
+    [[A, '3f2a1'], [B, '3f2a7'], [C, '9c0d'], ['bcde0002', 'bcde']].sort())
+  // As many as it takes, and an id that is another's start has none of its own: shown whole.
+  assert.deepEqual([...shortIdsOf(['abcd', 'abcd1234', 'abce9'])].sort(),
+    [['abcd', 'abcd'], ['abcd1234', 'abcd1'], ['abce9', 'abce']].sort())
+  assert.deepEqual([...shortIdsOf(['aaaa0001', 'aaaa0002'])], [['aaaa0001', 'aaaa0001'], ['aaaa0002', 'aaaa0002']])
+  assert.deepEqual([...shortIdsOf([])], [])
+
+  // Per session: the same four characters in another session are no collision.
+  const over: Partial<AgentTreeInput> = {
+    agents: [rec(A), rec(B), rec(C), rec('a3f2a0000000000000'.slice(0, 17), { sessionId: S2 })],
+    mains: [main(), main({ sessionId: S2 })],
+    selected: agentKey(A),
+  }
+  const vm = build(over)
+  const label = (id: string): string => node(vm, agentKey(id)).label
+  assert.equal(label(A), 'Explore · claude-opus-5 · 3f2a1')
+  assert.equal(label(B), 'Explore · claude-opus-5 · 3f2a7')
+  assert.equal(label(C), 'Explore · claude-opus-5 · 9c0d')
+  assert.equal(label('a3f2a000000000000'), 'Explore · claude-opus-5 · 3f2a')
+  // Keys stay the full id.
+  assert.equal(node(vm, agentKey(A)).key, `a:${A}`)
+  // The whole id is in the details, in the row Copy ID copies, and it is what Copy ID copies.
+  assert.equal(vm.selected?.id, A)
+  assert.deepEqual(vm.selected?.rows.filter((r) => r.copy === true), [{ label: 'ID', value: A, copy: true }])
+  // A launch's is its tool_use id.
+  const launched = build({ launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })], selected: 'l:toolu_pppp0001' })
+  assert.equal(launched.selected?.id, 'toolu_pppp0001')
+  // The running list names an agent as the tree does.
+  assert.ok(vm.runningNow.some((r) => r.label === 'Explore · claude-opus-5 · 3f2a1'), JSON.stringify(vm.runningNow))
 })

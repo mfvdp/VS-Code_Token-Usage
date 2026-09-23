@@ -126,6 +126,9 @@ export const WEBVIEW_COMMANDS = [
   // the webview can name them without being able to do anything by naming them.
   'tokenPace.connectStatusLine',
   'tokenPace.showDashboard',
+  // The details panel's Copy ID button: it copies the id of the node whose details are open —
+  // an identifier the panel already shows — and takes no argument the page could choose.
+  'tokenPace.copyAgentId',
 ] as const
 export type WebviewCommandId = (typeof WEBVIEW_COMMANDS)[number]
 

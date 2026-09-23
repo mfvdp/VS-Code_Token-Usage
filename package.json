@@ -209,6 +209,11 @@
         "category": "%command.category%"
       },
       {
+        "command": "tokenPace.copyAgentId",
+        "title": "%command.copyAgentId.title%",
+        "category": "%command.category%"
+      },
+      {
         "command": "tokenPace.clearStoredData",
         "title": "%command.clearStoredData.title%",
         "category": "%command.category%"

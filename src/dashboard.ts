@@ -8,7 +8,7 @@
  * no number is computed here, so the webview cannot drift away from the QuickPick and the
  * markdown view. Everything the webview sends back goes through `parseWebviewMessage`: it is
  * the only untrusted input the extension has, and it may ask for a range, a fold, the
- * settings of one named section or one of eleven named commands, never for a path or a
+ * settings of one named section or one of twelve named commands, never for a path or a
  * setting id of its own. And updates are per section, so a one-second refresh cannot reset
  * a sort order or throw away the scroll position.
  *
@@ -902,11 +902,16 @@ ul { margin: 6px 0; padding-left: 18px; }
                  margin: 6px 0 0; font-size: 11px; }
 .ag-details dt { color: var(--dim); }
 .ag-details dd { margin: 0; min-width: 0; font-variant-numeric: tabular-nums; }
-/* The state sentence and the parent's report are sentences: beside the column of labels a
+/* The state sentence and every row the view model calls a sentence — Claude Code's report,
+   the agents' figure with what it is not — are sentences: beside the column of labels a
    narrow sidebar would leave them a word per line, so they take the whole width under their
    label, at every width. The short rows stay label beside value. */
 .ag-details .ag-wide { grid-column: 1 / -1; }
 .ag-details dd.ag-wide { margin-bottom: 2px; }
+/* The ID row: the whole identifier, which may break anywhere rather than leave the panel, and
+   the button that copies it, as small as the text beside it. */
+.ag-details .ag-id { overflow-wrap: anywhere; }
+.ag-copy { margin-left: 4px; padding: 0 6px; }
 @media (max-width: 320px) {
   .kpis { grid-template-columns: 1fr; }
   table, thead, tbody, th, td, tr { display: block; }
@@ -1021,6 +1026,7 @@ function webviewWords(): Record<string, string> {
     'Connect the status line': t('Connect the status line'),
     'Consent: {0} · {1} · attribution {2} · v{3}': t('Consent: {0} · {1} · attribution {2} · v{3}'),
     'Context window': t('Context window'),
+    'Copy ID': t('Copy ID'),
     'Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB':
       t('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB'),
     'Data quality': t('Data quality'),
@@ -1185,6 +1191,7 @@ function webviewWords(): Record<string, string> {
     'scroll sideways for the remaining columns →': t('scroll sideways for the remaining columns →'),
     'shown': t('shown'),
     'some models have no price on file': t('some models have no price on file'),
+    'span from the first to the last line': t('span from the first to the last line'),
     'sparkline: last 7 days': t('sparkline: last 7 days'),
     'stale': t('stale'),
     'streak {0} · longest {1} · active {2}': t('streak {0} · longest {1} · active {2}'),
@@ -1213,6 +1220,7 @@ function webviewWords(): Record<string, string> {
     'year': t('year'),
     'yesterday': t('yesterday'),
     '{0} agent(s)': t('{0} agent(s)'),
+    '{0} agents': t('{0} agents'),
     '{0} ago': t('{0} ago'),
     '{0} call(s) · {1} distinct tool(s)': t('{0} call(s) · {1} distinct tool(s)'),
     '{0} composition · last 30 days': t('{0} composition · last 30 days'),
@@ -1220,6 +1228,7 @@ function webviewWords(): Record<string, string> {
     '{0} more — set tokenPace.dashboard.modelRows': t('{0} more — set tokenPace.dashboard.modelRows'),
     '{0} of {1}': t('{0} of {1}'),
     '{0} older session(s) not shown.': t('{0} older session(s) not shown.'),
+    '{0} own': t('{0} own'),
     '{0} tokens over {1} day(s)': t('{0} tokens over {1} day(s)'),
     '{0} · derived': t('{0} · derived'),
     '{0} · recorded': t('{0} · recorded'),

@@ -63,9 +63,16 @@ part of the totals; the
 [Agents](agents.md) section adds a view of them, not a count. Beside the buckets every agent
 transcript and every session transcript of the last seven days gets a small record of its own,
 filled by the same message-id dedupe, so a streamed reply counts once there as well; a launch,
-its result or a journal line only ever sets a state. The parent's own report of a sync agent's
-totals is shown as the parent's figure and never added to anything. The records are dropped
-seven days after their last line, whatever `tokenPace.retentionDays` says.
+its result or a journal line only ever sets a state. The records are dropped seven days after
+their last line, whatever `tokenPace.retentionDays` says.
+
+**Claude Code's report of a sync agent.** The tool result that returns a sync agent to its parent
+carries Claude Code's own figures for it, shown in the agent's details as *Report from Claude
+Code*. Its `totalTokens` is the context of the agent's last request including its reply — the
+input, cache write, cache read and output of that one request (a median ratio of 1.000 against
+that request, measured on this machine) — not what the agent consumed over its run (a median
+0.83 of the usage counted here). It is a different kind of figure, and it is never summed: not
+into the agent's usage, not into any total.
 
 **Lower bounds.** A response with no terminal line has an output figure that is a floor, not a
 total. Such rows carry `⚠`, the tooltip states what share of today's responses are affected, and

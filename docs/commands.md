@@ -22,6 +22,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `Token Pace: Export JSON…` | | Buckets, tool calls, totals, range, timezone and pricing provenance |
 | `Token Pace: Copy Usage Summary` | | The summary as markdown, on the clipboard |
 | `Token Pace: Copy Diagnostics` | | An allow-listed report, safe to paste into an issue |
+| `Token Pace: Copy Agent ID` | | The whole id of the node whose details are open in the Agents section — agent, launch, run or session — on the clipboard; the details' *Copy ID* button does the same |
 | `Token Pace: Connect Claude Status Line…` | | Installs the status-line bridge (opt-in, with consent and a backup) |
 | `Token Pace: Disconnect Claude Status Line` | | Restores the previous status line, if it is still ours to restore |
 | `Token Pace: Clear Stored Data…` | | Lists and deletes what the extension has stored |

@@ -306,3 +306,21 @@ test('every German entry keeps the placeholders of its key, is German, and ends 
     }
   }
 })
+
+test('the words 1.6 retired are in no bundle and no source any more', () => {
+  // D9: the agent report is Claude Code's, not the parent's, and it is the context of the last
+  // request — "Parent's report" and its "tokens" figure said otherwise. R4: the German manifest
+  // says „Tool-Aufrufe", as the runtime bundle always did.
+  const retired = ["Parent's report", "the parent's own count, not added to any total", '{0} tokens · {1} · {2} tool calls']
+  const bundle = readJson(BUNDLE) as Record<string, string>
+  const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts']
+    .map((f) => readFileSync(join(ROOT, f), 'utf8'))
+  for (const word of retired) {
+    assert.equal(word in bundle, false, `the bundle still translates ${JSON.stringify(word)}`)
+    assert.equal(sources.some((s) => s.includes(`'${word}'`) || s.includes(`"${word}"`)), false,
+      `a source still writes ${JSON.stringify(word)}`)
+  }
+  assert.equal(readFileSync(join(ROOT, 'package.nls.de.json'), 'utf8').includes('Werkzeugaufruf'), false,
+    'the German manifest still says „Werkzeugaufrufe"')
+  assert.equal(Object.values(bundle).some((v) => v.includes('Werkzeugaufruf')), false)
+})

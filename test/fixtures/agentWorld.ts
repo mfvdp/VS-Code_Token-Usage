@@ -34,7 +34,11 @@ import {
   queueOperationLine,
 } from './helpers'
 
-/** Invented ids in Claude Code's shapes: a session's label shows eight characters, an agent's four. */
+/**
+ * Invented ids in Claude Code's shapes: a session's label shows eight characters, an agent's its
+ * short id — four characters, since no two agents of a session here share their first four, and
+ * without the leading `a` of an id in Claude Code's own `a` + 16 hex shape (the explore agent's).
+ */
 export const AGENT_WORLD = {
   session: '3f9a2c1d-7b4e-4c8a-9e21-5d6f7a8b9c0d',
   quiet: '8e1d4b7a-2c3f-4a5b-8c6d-7e8f9a0b1c2d',
@@ -64,6 +68,11 @@ const SLUG = path.join(CLAUDE_ROOT, '-home-t-alpha')
 const MAIN = path.join(SLUG, `${AGENT_WORLD.session}.jsonl`)
 const QUIET = path.join(SLUG, `${AGENT_WORLD.quiet}.jsonl`)
 const WF_DIR = path.join(SLUG, AGENT_WORLD.session, 'subagents', 'workflows', AGENT_WORLD.workflow)
+
+/** The short id an agent's name ends with (1.6 D11), for the ids of this world. */
+export function shortIdOf(id: string): string {
+  return (/^a[0-9a-f]{16}$/.test(id) ? id.slice(1) : id).slice(0, 4)
+}
 
 /** Where an agent's transcript lies: under its session's `subagents`, a run's one level deeper. */
 export function agentWorldFile(id: string): string {
@@ -196,7 +205,7 @@ export function treeNodes(roots: readonly TreeNode[]): TreeNode[] {
 
 /** The node of an agent by its id, found by the four characters its label ends on. */
 export function agentNode(roots: readonly TreeNode[], id: string): TreeNode {
-  const hit = treeNodes(roots).filter((n) => n.kind === 'agent' && n.label.endsWith(` · ${id.slice(0, 4)}`))
+  const hit = treeNodes(roots).filter((n) => n.kind === 'agent' && n.label.endsWith(` · ${shortIdOf(id)}`))
   if (hit.length !== 1) throw new Error(`agentWorld: ${hit.length} nodes for agent ${id}`)
   return hit[0]
 }

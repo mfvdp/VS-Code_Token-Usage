@@ -8,7 +8,9 @@
  * out, and nothing here reads a file or a clock. Every state is decided here and nowhere
  * else — the webview and the markdown only print it — and every state carries the sentence
  * that says what it rests on, because a "running" nobody can check is a claim, not a reading:
- *  - an agent is done or failed only when its parent (or the workflow journal) recorded it;
+ *  - an agent is done or failed only when its parent (or the workflow journal) recorded it —
+ *    and while its transcript did not go on more than RESUMED_AFTER_MS after the parent's
+ *    record, which makes its state an inference again;
  *  - it is running while its transcript changed within RUNNING_WINDOW_MS and nothing was
  *    recorded yet;
  *  - anything else is unknown, never done: Claude Code writes no end marker into an agent's
@@ -25,8 +27,9 @@
  */
 
 import {
-  AGENT_RETENTION_DAYS, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH,
-  NodeDetails, NodeState, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS, TreeNode,
+  AGENT_RETENTION_DAYS, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
+  NodeDetails, NodeState, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS,
+  SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from './agentTree'
 import { billable } from './agg'
 import { t } from './i18n'
@@ -207,6 +210,47 @@ function ago(ms: number, now: number): string {
   return ageText(Math.floor(ms / 1000), now) ?? '–'
 }
 
+/**
+ * A session's span, from its first line to its last: a duration below SPAN_IN_DAYS_FROM_MS,
+ * days and whole hours from it on — "22 d 11 h" in either language, the hours floored, since a
+ * session that ran for 22 days and 11 h 59 min has not run for 22 days and 12 hours.
+ */
+export function spanText(ms: number): string {
+  if (!Number.isFinite(ms) || ms < SPAN_IN_DAYS_FROM_MS) return durationText(ms)
+  const days = Math.floor(ms / DAY_MS)
+  const hours = Math.floor((ms - days * DAY_MS) / HOUR_MS)
+  return `${days} d ${hours} h`
+}
+
+/**
+ * The short id of each agent id of one session: the shortest start of the id, at least
+ * MIN_SHORT_ID characters, that no other id of the session starts with — so two agents of a
+ * session never carry the same name for want of a character. Claude Code's ids are `a` + 16 hex
+ * (every one on this machine), and the leading `a` says nothing; it is left off. Any other id is
+ * taken as it is. The longest start an id shares with another is the one it shares with a
+ * neighbour in sorted order, so one sort finds every length. An id that is the start of another
+ * one, or the same after the `a` is left off, has no start of its own and is shown whole.
+ */
+export function shortIdsOf(ids: readonly string[]): Map<string, string> {
+  const entries = [...new Set(ids)].map((id) => ({ id, hex: /^a([0-9a-f]{16})$/.exec(id)?.[1] ?? id }))
+  entries.sort((x, y) => cmp(x.hex, y.hex) || cmp(x.id, y.id))
+  const shared = (x: string, y: string): number => {
+    let i = 0
+    while (i < x.length && i < y.length && x[i] === y[i]) i++
+    return i
+  }
+  const out = new Map<string, string>()
+  entries.forEach((e, i) => {
+    const near = Math.max(
+      i > 0 ? shared(e.hex, entries[i - 1].hex) : 0,
+      i + 1 < entries.length ? shared(e.hex, entries[i + 1].hex) : 0,
+    )
+    const len = Math.max(MIN_SHORT_ID, near + 1)
+    out.set(e.id, len >= e.hex.length ? e.hex : e.hex.slice(0, len))
+  })
+  return out
+}
+
 function usageText(c: Counters): string {
   return c.requests > 0 ? compact(billable(bucketOf(c, true))) : '–'
 }
@@ -219,7 +263,15 @@ function workflowLabel(workflowId: string): string {
   return t('Workflow {0}', workflowId.replace(/^wf_/, '').slice(0, 8))
 }
 
-interface StateOf { state: NodeState; stateText: string }
+interface StateOf {
+  state: NodeState
+  stateText: string
+  /**
+   * D6: an outcome the parent recorded, when the transcript went on after it and the state is
+   * inferred again — the details keep it in a row of its own. Absent otherwise.
+   */
+  resumed?: Outcome
+}
 
 interface Outcome { outcome: 'completed' | 'failed'; at: number | null; by: 'parent' | 'journal' }
 
@@ -270,10 +322,36 @@ function recordedOutcome(r: AgentRec, launch: AgentLaunch | null): Outcome | nul
   return null
 }
 
+/**
+ * Whether the parent's recorded end no longer decides the state: the agent's transcript went on
+ * more than RESUMED_AFTER_MS after it. Only an outcome with a time can be outlived — the
+ * journal's carries none, so it never is — and a line written in the minute after the result
+ * is the tail of the same reply, not a new start.
+ */
+function resumedAfter(o: Outcome, r: AgentRec): boolean {
+  return o.by === 'parent' && o.at !== null && r.lastTs > o.at + RESUMED_AFTER_MS
+}
+
 function agentState(r: AgentRec, launch: AgentLaunch | null, now: number, tcfg: TimeConfig): StateOf {
   const o = recordedOutcome(r, launch)
-  if (o) return outcomeState(o, now, tcfg)
   const last = Math.max(r.lastTs, launch ? launch.ts : 0)
+  if (o && o.at !== null && resumedAfter(o, r)) {
+    const at = stamp(o.at, now, tcfg)
+    if (now - last <= RUNNING_WINDOW_MS) {
+      return {
+        state: 'running',
+        stateText: t('Running — inferred: the transcript changed {0}, after an outcome was recorded at {1}.', ago(last, now), at),
+        resumed: o,
+      }
+    }
+    return {
+      state: 'unknown',
+      stateText: t('Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.',
+        at, stamp(r.lastTs, now, tcfg)),
+      resumed: o,
+    }
+  }
+  if (o) return outcomeState(o, now, tcfg)
   if (now - last <= RUNNING_WINDOW_MS) {
     return {
       state: 'running',
@@ -336,14 +414,38 @@ function workflowState(states: NodeState[]): StateOf {
 // Detail rows
 // ---------------------------------------------------------------------------
 
-function timeRows(start: number | null, last: number | null, now: number, tcfg: TimeConfig): DetailRow[] {
+/**
+ * When a node started, how long it ran and when it last changed. A session's start is its
+ * transcript's first line and its length a span (D5): it may run for weeks, and "Started"
+ * beside "22 d 11 h" would read as one sitting. The last activity is the row the page's clock
+ * ticks in (`live`), in place of the age written here, which the markdown keeps.
+ */
+function timeRows(start: number | null, last: number | null, now: number, tcfg: TimeConfig, session = false): DetailRow[] {
+  const length = start === null || last === null ? '–' : session ? spanText(last - start) : durationText(last - start)
   return [
-    { label: t('Started'), value: start === null ? '–' : stamp(start, now, tcfg) },
-    { label: t('Duration'), value: start === null || last === null ? '–' : durationText(last - start) },
+    { label: session ? t('Since first line') : t('Started'), value: start === null ? '–' : stamp(start, now, tcfg) },
+    { label: session ? t('Span') : t('Duration'), value: length },
     last === null
       ? { label: t('Last activity'), value: '–' }
-      : { label: t('Last activity'), value: stamp(last, now, tcfg), note: ago(last, now) },
+      : { label: t('Last activity'), value: stamp(last, now, tcfg), note: ago(last, now), live: 'ago' },
   ]
+}
+
+/** The row the Copy ID button copies: the whole identifier, which a name only starts. */
+function idRow(id: string): DetailRow {
+  return { label: t('ID'), value: id, copy: true }
+}
+
+/**
+ * D6: the outcome the parent recorded for an agent that wrote on after it — the state word and
+ * when, "done at 14:20". Only while the state is inferred again; a recorded state says it itself.
+ */
+function recordedRows(o: Outcome | undefined, now: number, tcfg: TimeConfig): DetailRow[] {
+  if (!o || o.at === null) return []
+  return [{
+    label: t('Recorded'),
+    value: t('{0} at {1}', o.outcome === 'failed' ? t('failed') : t('done'), stamp(o.at, now, tcfg)),
+  }]
 }
 
 /**
@@ -374,8 +476,11 @@ function countRows(c: Counters | null): DetailRow[] {
 }
 
 /**
- * The parent's own figures for a sync agent — its count, not ours, and never added to one:
- * the parent's total need not follow the definition "Usage" follows.
+ * Claude Code's own figures for a sync agent, from the tool result that returns it: its
+ * `totalTokens` is the context of the agent's last request with its reply — input, cache write,
+ * cache read and output of that one request (measured: a median ratio of 1.000) — not what the
+ * agent used (a median 0.83 of our usage), so the row says which figure it is. Its words, never
+ * ours, and never added to anything. A sentence, not a figure: it takes the whole width.
  */
 function reportRows(l: AgentLaunch | null): DetailRow[] {
   const r = l?.totals
@@ -383,9 +488,11 @@ function reportRows(l: AgentLaunch | null): DetailRow[] {
   const nums = [r.tokens, r.durationMs, r.toolUses]
   if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0)) return []
   return [{
-    label: t("Parent's report"),
-    value: t('{0} tokens · {1} · {2} tool calls', compact(r.tokens), durationText(r.durationMs), full(r.toolUses)),
-    note: t("the parent's own count, not added to any total"),
+    label: t('Report from Claude Code'),
+    value: t('context at the end {0} (incl. cache reads and the reply) · {1} from the start · {2} tool calls',
+      compact(r.tokens), durationText(r.durationMs), full(r.toolUses)),
+    note: t("Claude Code's own figure for this agent, never added to a total"),
+    kind: 'sentence',
   }]
 }
 
@@ -405,10 +512,14 @@ interface Entry {
   state: NodeState
   stateText: string
   usage: string
+  /** D5: a session's agents' usage, beside its own; null for every other node and a session without agents. */
+  usageAgents: string | null
   lowerBound: boolean
   duration: string
   startTs: number | null
   lastTs: number | null
+  /** D11: the whole identifier the node stands for — what *Copy ID* copies. */
+  id: string | null
   parent: Entry | null
   children: Entry[]
   /**
@@ -614,6 +725,12 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const main = a.main
   const mainCounters = main ? countersOf(main) : null
   const start = main ? firstOf(main) : null
+  // D5: what the session's agents used, beside what its own transcript used — never added to
+  // it. The own figure runs from the transcript's first line, which may be weeks back; the
+  // agents' from the records of the last seven days. A sum would add two different spans.
+  const agentSum = noCounters()
+  for (const r of a.agents) addInto(agentSum, countersOf(r))
+  const usageAgents = a.agents.length > 0 ? usageText(agentSum) : null
   const root: Entry = {
     key: fitKey('s:', a.sessionId),
     kind: 'session',
@@ -622,10 +739,12 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     sub: env.attribution !== 'none' ? env.project : null,
     ...sessionState(main, now, tcfg),
     usage: mainCounters ? usageText(mainCounters) : '–',
+    usageAgents,
     lowerBound: mainCounters ? mainCounters.outputFinal < mainCounters.requests : false,
-    duration: main && start !== null ? durationText(main.lastTs - start) : '–',
+    duration: main && start !== null ? spanText(main.lastTs - start) : '–',
     startTs: start,
     lastTs: main ? main.lastTs : null,
+    id: a.sessionId,
     parent: null,
     children: [],
     waiting: false,
@@ -634,11 +753,19 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     rows: () => [],
   }
   root.rows = () => [
+    { label: t('Own transcript'), value: root.usage },
+    ...(usageAgents !== null
+      ? [{
+        label: t('Agents, last 7 days'), value: usageAgents,
+        note: t('not added to the own figure — the two cover different spans'), kind: 'sentence' as const,
+      }]
+      : []),
     ...(env.attribution !== 'none' ? [{ label: t('Project'), value: root.sub ?? '–' }] : []),
     { label: t('Models'), value: modelsOf(main?.models).join(', ') || '–' },
-    ...timeRows(root.startTs, root.lastTs, now, tcfg),
+    ...timeRows(root.startTs, root.lastTs, now, tcfg, true),
     ...countRows(mainCounters),
     { label: t('Agents'), value: full([...preorder(root)].filter(isAgentLike).length) },
+    idRow(a.sessionId),
   ]
 
   const workflows = new Map<string, Entry>()
@@ -653,10 +780,12 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         state: 'unknown',
         stateText: '',
         usage: '–',
+        usageAgents: null,
         lowerBound: false,
         duration: '–',
         startTs: null,
         lastTs: null,
+        id: wf,
         parent: null,
         children: [],
         waiting: false,
@@ -671,6 +800,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   }
 
   const ordered = [...a.agents].sort((x, y) => firstOf(x) - firstOf(y) || cmp(x.agentId, y.agentId))
+  // D11: per session, as few characters of each id as keep it apart from the others.
+  const shortIds = shortIdsOf(a.agents.map((r) => r.agentId))
   const byAgent = new Map<string, Entry>()
   const spawnerFileOf = new Map<Entry, string | null>()
   /** Who launched a node, by name: an agent of this session, the session itself, or '–'. */
@@ -690,17 +821,21 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const type = text(r.meta?.agentType) ?? text(launch?.typeHint)
     const alias = text(r.meta?.model) ?? text(launch?.modelHint)
     const lastModel = models.length > 0 ? normalizeModel(models[models.length - 1]) : ''
+    const st = agentState(r, launch, now, tcfg)
     const e: Entry = {
       key: fitKey('a:', r.agentId),
       kind: 'agent',
-      label: `${type ?? t('Agent')} · ${lastModel || alias || '–'} · ${r.agentId.slice(0, 4)}`,
+      label: `${type ?? t('Agent')} · ${lastModel || alias || '–'} · ${shortIds.get(r.agentId) ?? r.agentId}`,
       sub: null,
-      ...agentState(r, launch, now, tcfg),
+      state: st.state,
+      stateText: st.stateText,
       usage: usageText(c),
+      usageAgents: null,
       lowerBound: c.outputFinal < c.requests,
       duration: durationText(r.lastTs - first),
       startTs: first,
       lastTs: r.lastTs,
+      id: r.agentId,
       parent: null,
       children: [],
       waiting: false,
@@ -711,8 +846,10 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     e.rows = () => [
       { label: t('Type'), value: type ?? '–' },
       { label: t('Models'), value: models.join(', ') || alias || '–' },
+      idRow(r.agentId),
       { label: t('Depth'), value: depthText(r.meta?.spawnDepth) },
       ...timeRows(e.startTs, e.lastTs, now, tcfg),
+      ...recordedRows(st.resumed, now, tcfg),
       ...countRows(c),
       { label: t('Spawned by'), value: spawnedBy(spawnerFileOf.get(e) ?? null) },
       { label: t('Workflow run'), value: wf !== null ? workflowLabel(wf) : '–' },
@@ -751,10 +888,12 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       ...pendingState(l, now, tcfg),
       // No transcript, so nothing was counted: dashes, never zeros.
       usage: '–',
+      usageAgents: null,
       lowerBound: false,
       duration: '–',
       startTs: l.ts,
       lastTs: Math.max(l.ts, outcomeAt ?? 0),
+      id: l.toolUseId,
       parent: null,
       children: [],
       waiting: false,
@@ -763,6 +902,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       rows: () => [
         { label: t('Type'), value: text(l.typeHint) ?? '–' },
         { label: t('Models'), value: text(l.modelHint) ?? '–' },
+        idRow(l.toolUseId),
         { label: t('Started'), value: stamp(l.ts, now, tcfg) },
         { label: t('Spawned by'), value: spawnedBy(l.file) },
         ...reportRows(l),
@@ -798,7 +938,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
 
   // A run is summed from the agents inside it, on the whole tree: the cap below may hide some
   // of them, but it does not change what the run used.
-  for (const w of workflows.values()) {
+  for (const [wf, w] of workflows) {
     const members = [...preorder(w)].filter(isAgentLike)
     const sum = noCounters()
     let first: number | null = null
@@ -821,6 +961,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       { label: t('Agents'), value: full(members.length) },
       ...timeRows(w.startTs, w.lastTs, now, tcfg),
       ...countRows(sum),
+      idRow(wf),
     ]
   }
 
@@ -883,7 +1024,7 @@ function keep(roots: Entry[], selected: Entry | null): Set<Entry> {
 function detailsOf(e: Entry): NodeDetails {
   return {
     key: e.key, title: e.label, state: e.state, derived: derivedOf(e.state), stateText: e.stateText,
-    lastTs: e.lastTs, rows: e.rows(),
+    lastTs: e.lastTs, id: e.id, rows: e.rows(),
   }
 }
 
@@ -992,6 +1133,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     state: e.state,
     derived: derivedOf(e.state),
     usage: e.usage,
+    usageAgents: e.usageAgents,
     lowerBound: e.lowerBound,
     duration: e.duration,
     startTs: e.startTs,
@@ -1028,7 +1170,6 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     omittedRoots: Math.max(0, forest.roots.length - MAX_ROOTS),
     truncated: kept.size < total,
     note,
-    updatedAt: now,
   }
 }
 

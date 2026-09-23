@@ -85,17 +85,28 @@ with the nodes above them, then the rest level by level, so every session keeps 
 before any of them keeps its deepest.
 
 **Each row** is the state glyph, the name, the usage — fresh input + cache write + output, the
-definition the tables use — and the duration from the first line to the last. A row carries no
+definition the tables use — and the duration from the first line to the last. A **session's** row
+names its two figures — `12.0M own · 137.4M agents · 22 d 11 h`: what its own transcript used,
+counted from its first line, and what its agents of the last seven days used. The two are never
+added: they cover different spans, a session's own transcript often weeks, its agents the seven
+days the tree keeps. A session without agents shows no agents figure. The last figure is the
+session's span from its first line to its last (its title says so), written in days and hours
+from **48 hours** on — the hours floored, so `22 d 11 h` for a session of 22 days, 11 hours and
+59 minutes — and as a duration below that. A row carries no
 lower-bound mark: the details do (`Output … ⚠ lower bound`), and while a row on screen — one of
 a session, of an opened node, or of the running list, whose agents are nearly always mid-reply
 — has one, a line under the tree says so — *Output figures in the details marked ⚠ are lower
 bounds.* A running node also says for how long:
 `running for 12 min 05 s`, counted from its first line and ticking every second. An agent's name
-is its type, its model and
-the first four characters of its id — `Explore · claude-opus-5 · a94f`. The type is the one the
-agent's sidecar names, else the one its launch asked for, else `Agent`; the model is the last one
-its transcript recorded, else the alias the sidecar or the launch names, else `–`. An agent's
-usage is part of the figures the totals already contain: the tree adds nothing to any sum.
+is its type, its model and its short id — `Explore · claude-opus-5 · 94f3`. The type is the one
+the agent's sidecar names, else the one its launch asked for, else `Agent`; the model is the last
+one its transcript recorded, else the alias the sidecar or the launch names, else `–`. The **short
+id** is the start of the agent's id that no other agent of the same session starts with, at
+least **4** characters long: Claude Code's ids are `a` and 16 hex digits, and the `a`, which
+every one of them carries, is left off. Four characters keep nearly every agent apart; where two
+agents of a session share them, both names carry as many as it takes — measured over a week on one
+machine, 917 of 925 agents needed four and 8 needed five. The whole id is in the details. An
+agent's usage is part of the figures the totals already contain: the tree adds nothing to any sum.
 
 ## States
 
@@ -107,6 +118,14 @@ usage is part of the figures the totals already contain: the tree adds nothing t
 | ? | unknown | derived | nothing was recorded, and the agent has been silent for longer than that |
 | ● | active | derived | a session whose own transcript recorded a response within the last 10 minutes, or one of whose agents is running |
 | ○ | idle | derived | a session silent for longer than that, with no agent running |
+
+**An agent that wrote on after its outcome.** When the parent recorded an agent's end at a time,
+and the agent's transcript changed more than **60 seconds** after it, the outcome no longer
+decides the state: the agent went on — resumed, or the end was recorded for an earlier turn — and
+its state is inferred from its lines again, running within ten minutes of its last line, unknown
+after that. Its details keep what was recorded in a row of their own, `Recorded` —
+`done at 14:20`. A line within that minute is the tail of the same reply and changes nothing. The
+workflow journal's result carries no time, so it is never outlived.
 
 A **workflow run** is running while one of its agents runs, failed when one of them failed, done
 when every one of them has a recorded result, and unknown otherwise. A **launch** whose
@@ -127,6 +146,8 @@ word for word. For an agent:
 * Running — inferred: the transcript changed 2 min ago and no result was recorded yet.
 * Running — inferred: a child agent of this agent is still running.
 * Unknown — inferred: no result was recorded and the transcript has been silent since 14:20; the agent may have been stopped.
+* Running — inferred: the transcript changed 1 min ago, after an outcome was recorded at 14:20.
+* Unknown — inferred: the transcript went on after an outcome was recorded at 14:20, and has been silent since 14:38.
 
 A result recorded without a time is stated without one. Today that is the case for every agent
 of a workflow run that no launch accounts for: the run's journal completes it, and its lines
@@ -152,18 +173,33 @@ A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
 Clicking a row — of the tree or of the running list, or `Enter` on it, since the toggle and the
 row are buttons of their own — opens the node's details under the tree; the same click again
 closes them. For an agent: type,
-models, depth, started, duration, last activity (with a live `… ago` beside it), then turns,
+models, its ID, depth, started, duration, last activity (with a live `… ago` beside it) and —
+for an agent that wrote on after its outcome — what was recorded, then turns,
 usage, fresh input, cache write 5 m and 1 h, cache read, output, reasoning and tool calls, then
-who spawned it and its workflow run. A session lists its project (only while attribution allows
-one), its models, the same times and counts, and how many agents it has; a workflow run how many
-agents it has and the counts summed over them; a launch the type and model it asked for, when
-it was made and who made it. Anything absent is `–`, and a record without a single request
-shows dashes, never zeros.
+who spawned it and its workflow run. A session opens with its two figures — `Own transcript`, and
+`Agents, last 7 days` with what it is not: *not added to the own figure — the two cover different
+spans* — then its project (only while attribution allows one), its models, `Since first line`
+and `Span` in place of a start and a duration, the last activity, the counts of its own
+transcript, how many agents it has and its ID; a workflow run how many
+agents it has, the counts summed over them and its ID; a launch the type and model it asked for,
+its ID, when it was made and who made it. Anything absent is `–`, and a record without a single
+request shows dashes, never zeros. Every row says itself how it is laid out — a figure beside its
+label, or a sentence under it across the whole width — and which row the live clock ticks in;
+the page does not guess either from a row's words.
 
-**Parent's report.** When an agent runs synchronously, the tool result that returns it to its
-parent carries the parent's own count — tokens, duration and tool calls. That row is shown as
-what it is, *the parent's own count, not added to any total*: it need not follow the definition
-*usage* follows, and adding it to ours would count the agent twice.
+**ID and Copy ID.** The `ID` row holds the whole identifier the node stands for — the agent's id,
+a launch's tool-call id, a run's id, a session's id — and the `Copy ID` button beside it puts that
+id on the clipboard, and nothing else. *Token Pace: Copy Agent ID* in the Command Palette does
+the same for the node whose details are open, and says so when none is.
+
+**Report from Claude Code.** When an agent runs synchronously, the tool result that returns it
+to its parent carries Claude Code's own figures for it — `context at the end 18.9K (incl. cache
+reads and the reply) · 51.0 s from the start · 4 tool calls`. Its `totalTokens` is the context of
+the agent's **last request including its reply**: input, cache write, cache read and output of
+that one request (measured on this machine: a median ratio of 1.000 against that request) — not
+what the agent used over its run (a median 0.83 of the tree's usage). So the row says which figure
+it is, *Claude Code's own figure for this agent, never added to a total*: adding it to ours would
+count the agent twice, and it is not the same kind of figure.
 
 **Why the output is a lower bound.** Claude Code writes no end marker into an agent's
 transcript — a finished agent's file ends on an assistant line whose `stop_reason` is still
@@ -230,8 +266,14 @@ much was read, in counts only.
 * The `running for …` clocks of the running list and the tree and the last activity in the
   details tick every second in the page itself — no message, no redraw.
 * The recursive file watcher can miss the files of a directory created after it started — on
-  Linux it does — so while an agent runs the agent directories of the active sessions are also
-  listed every **5 seconds**, on every platform; the one-minute sweep stays as the last net.
+  Linux it does — so while an agent runs, or while a session is active, the agent directories of
+  the active sessions are also listed every **5 seconds**, on every platform; the one-minute
+  sweep stays as the last net. An active session is enough: it may start an agent or a workflow
+  run at any moment, and a workflow run leaves no launch the tree could wait on, so the first file
+  of a new run is found within five seconds rather than a minute. A pass costs a few milliseconds.
+  With every session idle and nothing running, the listing stops.
+* The tree carries no time of its own, so a tree that did not change is not sent to the page
+  again.
 
 ## Opening and selection
 

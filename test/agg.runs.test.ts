@@ -174,6 +174,24 @@ test('a run id is taken only through its allow-list, and a result without a call
   })
 })
 
+test('a Workflow call is a run launch only while its id fits the ids\' alphabet, and so is a result that answers one (1.6 §0a.3)', () => {
+  // The block's `id` goes through `cleanAgentId` like every tool_use id (review 2: nothing held
+  // the Workflow block's id to it). A call whose id does not fit is no launch, and a result or a
+  // notification for that id finds none.
+  const agg = new Aggregator()
+  const bad = ['toolu wf1', 'toolu_wf/../x', 'toolu_wf1"', 'x'.repeat(65), '']
+  for (const [i, toolUseId] of bad.entries()) {
+    agg.addClaudeLine(workflowToolUseLine({ id: `m${i}`, ts: NOW - 10 * MIN, toolUseId }), MAIN_CTX)
+    assert.equal(agg.addClaudeLine(workflowResultLine({ ts: NOW - 9 * MIN, toolUseId, runId: RUN }), MAIN_CTX), false, toolUseId)
+    notify(agg, toolUseId, NOW - 8 * MIN, 'completed')
+  }
+  assert.deepEqual(agg.runLaunches(), [])
+  assert.equal(nodes(treeOf(agg).roots).some((n) => n.kind === 'workflow'), false)
+  // The alphabet's edge: 64 characters are an id.
+  agg.addClaudeLine(workflowToolUseLine({ id: 'm-edge', ts: NOW - 10 * MIN, toolUseId: 'x'.repeat(64) }), MAIN_CTX)
+  assert.deepEqual(agg.runLaunches().map((l) => l.toolUseId), ['x'.repeat(64)])
+})
+
 test('a run\'s end is the parent\'s word for its launch: completed, failed, or a stop — never a failure', () => {
   const cases: Array<[string, string, string]> = [
     ['completed', 'done', `Completed — the parent recorded the end of this run at ${clock(NOW - 5 * MIN)}.`],

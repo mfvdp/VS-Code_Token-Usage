@@ -323,6 +323,8 @@
   "| Window | Remaining | Elapsed | Pace | Resets |": "| Fenster | Verbleibend | Verstrichen | Tempo | Reset |",
   "| Window | Used | Elapsed | Pace | Resets |": "| Fenster | Verbraucht | Verstrichen | Tempo | Reset |",
   "| Window | Used | Elapsed | Pace | Resets | Forecast |": "| Fenster | Verbraucht | Verstrichen | Tempo | Reset | Prognose |",
+  "~1 of them running": "~1 davon läuft",
+  "~{0} of them running": "~{0} davon laufen",
   "“Elapsed” is how much of the window’s own time has passed. Usage above it means you are ahead of the clock; the verdict names the difference in percent of the window.": "„Verstrichen“ ist der Anteil der eigenen Zeit des Fensters, der vergangen ist. Ein Verbrauch darüber heißt, Sie sind der Uhr voraus; das Urteil nennt den Unterschied in Prozent des Fensters.",
   "“Usage” is fresh input + cache write + output; cache reads are listed separately because they outweigh everything else by orders of magnitude.": "„Verbrauch“ ist frische Eingabe + Cache-Schreiben + Ausgabe; Cache-Lesen wird getrennt aufgeführt, weil es alles andere um Größenordnungen übersteigt.",
   "• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.": "• Claude — GET https://api.anthropic.com/api/oauth/usage, mit dem accessToken aus\n  ~/.claude/.credentials.json. Die Anfrage weist sich als Claude-Code-Client aus,\n  weil der Endpunkt andere Aufrufer dauerhaft mit 429 abweist.",

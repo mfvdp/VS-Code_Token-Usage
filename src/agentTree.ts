@@ -65,7 +65,11 @@ export type NodeState = 'running' | 'done' | 'failed' | 'stopped' | 'unknown' | 
  * counts only attempts that are not superseded.
  */
 export interface AgentTally {
-  /** Agent-like members below the node: agent records, the agents a run's journal started without one, pending launches. */
+  /**
+   * Agent-like members below the node: agent records, pending launches, and the members of a
+   * run's collector (D4) — the agents its journal started without a record, and the ones whose
+   * record counted no reply. On a collector, its own members.
+   */
   started: number
   /** Completed, not superseded. */
   done: number
@@ -82,10 +86,19 @@ export interface AgentTally {
 }
 
 export interface TreeNode {
-  /** Stable, never a path: `s:<sessionId>` | `w:<sessionId>|<wfId>` | `a:<agentId>` | `l:<toolUseId>`. */
+  /**
+   * Stable, never a path: `s:<sessionId>` | `w:<sessionId>|<wfId>` | `a:<agentId>` | `l:<toolUseId>`
+   * | `n:<sessionId>|<wfId>` (a run's collector, D4).
+   */
   key: string
-  /** `pending` = launched, file not seen yet. */
-  kind: 'session' | 'workflow' | 'agent' | 'pending'
+  /**
+   * `pending` = launched, file not seen yet. `noreply` (1.6 D4) = a run's collector: one node for
+   * every agent of the run without a counted reply — started by the run's journal with no
+   * transcript read, or with a transcript of nothing but rejected requests — always the run's
+   * last child, counted, not listed: no children, dashes for its figures, its members in its
+   * label, its tally and its state.
+   */
+  kind: 'session' | 'workflow' | 'agent' | 'pending' | 'noreply'
   /**
    * "Explore · claude-opus-5 · 94f3" / "Session 9d0eb37a" / "Workflow cfe7718d". An agent's id
    * part is its short id: the fewest characters of its id, from MIN_SHORT_ID on, that no other
@@ -120,8 +133,9 @@ export interface TreeNode {
   /**
    * Agents and pending launches anywhere below this node, counted on the whole tree — open or
    * closed, shown or not — the `started` of its tally, where it has one. 0 for a node with none
-   * below it. A workflow run's count includes the agents its journal started whose transcript was
-   * never counted (1.6 D2): they are members of the run, though no row of their own is drawn for them.
+   * below it. A run's collector (1.6 D4) counts its members, and so does every node above it: the
+   * agents the run's journal started whose transcript was never counted (D2), and the ones whose
+   * record counted no reply, are members of the run, though no row of their own is drawn for them.
    */
   agentCount: number
   /**
@@ -138,9 +152,9 @@ export interface TreeNode {
    */
   childrenMore: number
   /**
-   * N1: what the agents below the node came to — on sessions, workflow runs and agents with
-   * agents below them, counted on the whole tree, as `agentCount` is (its `started` equals it).
-   * Null for every other node, and for a session with no agent.
+   * N1: what the agents below the node came to — on sessions, workflow runs, collectors (D4, their
+   * own members) and agents with agents below them, counted on the whole tree, as `agentCount` is
+   * (its `started` equals it). Null for every other node, and for a session with no agent.
    */
   tally: AgentTally | null
   /**
@@ -170,24 +184,31 @@ export interface TreeNode {
 /**
  * One entry of the "Running now" list above the tree: an agent or a pending launch in state
  * running, wherever it sits — a closed branch, a session beyond MAX_ROOTS, a node past its
- * group's window.
+ * group's window — or a run's collector (1.6 D4) while one of its members runs: one entry for
+ * all of them, never a row per member.
  */
 export interface RunningItem {
   /** The node key — selecting it opens the same details as the tree row. */
   key: string
-  kind: 'agent' | 'pending'
+  kind: 'agent' | 'pending' | 'noreply'
   /** The node label. */
   label: string
   /** "Session 9d0eb37a · Workflow 8a71f8cc", plus " · <project>" when attribution allows a label. */
   context: string
   /** As the node: '–' when nothing was counted; a pending launch is always '–'. */
   usage: string
-  /** As the node: the output is a lower bound (outputFinal < requests). Never for a pending launch. */
+  /** As the node: the output is a lower bound (outputFinal < requests). Never for a pending launch or a collector. */
   lowerBound: boolean
+  /** As the node. A collector's: the earliest first line of a member that has a record, else null. */
   startTs: number | null
   lastTs: number | null
   /** Running only because an agent below it runs (the roll-up), not by its own transcript. */
   waiting: boolean
+  /**
+   * The running agents the entry stands for: 1 for an agent or a launch, a collector's members that
+   * run (D4). What `AgentTreeVm.running` sums over every entry, listed or not.
+   */
+  running: number
 }
 
 /**
@@ -232,7 +253,12 @@ export interface NodeDetails {
 export interface AgentTreeVm {
   roots: TreeNode[]
   selected: NodeDetails | null
-  /** Agents in state running (all roots). */
+  /**
+   * The running members of all roots (1.6 §2.3): agents and pending launches in state running and
+   * the running members of every run's collector (D4) — an attempt a later one superseded not
+   * among them — as the sessions' tallies count them; the sum of the running list's `running`,
+   * listed or not. What the host's poll and the list's heading read.
+   */
   running: number
   /**
    * The running agents and launches of all roots, longest-running first, at most

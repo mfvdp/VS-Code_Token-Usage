@@ -417,16 +417,20 @@ function rejectedRows(x: RejectedRequest | null, now: number, tcfg: TimeConfig):
 }
 
 /**
- * A run's or a session's agents that ended on a rejected request, one row per reason — "5-hour
- * limit (HTTP 429): 12" —, the most frequent first. A rejection whose line named no reason is
- * counted under `–`. None, no row.
+ * A run's, a session's or a collector's agents that ended on a rejected request, one row per
+ * reason — "5-hour limit (HTTP 429): 12" —, the most frequent first: the agents below it and the
+ * members of every collector among them (D4), a collector's own members included. A rejection
+ * whose line named no reason is counted under `–`. None, no row.
  */
 function endedRejectedRows(e: Entry): DetailRow[] {
   const counts = new Map<string, number>()
-  for (const x of preorder(e)) {
-    if (x === e || x.rejected === null) continue
-    const why = rejectionText(x.rejected) ?? '–'
+  const note = (x: RejectedRequest): void => {
+    const why = rejectionText(x) ?? '–'
     counts.set(why, (counts.get(why) ?? 0) + 1)
+  }
+  for (const x of preorder(e)) {
+    if (x !== e && x.rejected !== null) note(x.rejected)
+    for (const m of x.collected) if (m.rejected !== null) note(m.rejected)
   }
   return [...counts].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0])).map(([why, n]) => ({
     label: t('Ended on a rejected request'), value: `${why}: ${full(n)}`, kind: 'sentence' as const,
@@ -666,12 +670,21 @@ function sessionState(main: MainRec | null, now: number, tcfg: TimeConfig): Stat
 
 /**
  * A member below a node as the tally counts it (N1) and a run's state rule reads it: its state,
- * and whether a later attempt of its step superseded it (D7). An agent, a pending launch, or an
- * agent a run's journal started without a counted transcript.
+ * and whether a later attempt of its step superseded it (D7). An agent, a pending launch, or — in
+ * a run's collector (D4) — an agent without a counted reply: one the run's journal started whose
+ * transcript no record holds, or one whose record counted no request, its transcript nothing but
+ * rejected requests.
  */
 interface Member {
   state: NodeState
   superseded: boolean
+  /** N3: the request it ended on, when the API rejected it; null for every other member. */
+  rejected: RejectedRequest | null
+  /** D4: whether the run's journal recorded its failure — what the collector's all-failed sentence says. */
+  journalFailed: boolean
+  /** D4: a collected member with a record: its first line and its last activity; null for one without. */
+  startTs: number | null
+  lastTs: number | null
 }
 
 function noTally(): AgentTally {
@@ -684,7 +697,7 @@ function noTally(): AgentTally {
  * its state. A member in a state no agent can be in (a snapshot of another build's making) is
  * counted as unknown rather than left out, so the fields still sum to `started`.
  */
-function tallyInto(tally: AgentTally, m: Member): void {
+function tallyInto(tally: AgentTally, m: Pick<Member, 'state' | 'superseded'>): void {
   tally.started++
   if (m.superseded) tally.retried++
   else if (m.state === 'done' || m.state === 'failed' || m.state === 'stopped' || m.state === 'running') tally[m.state]++
@@ -693,14 +706,15 @@ function tallyInto(tally: AgentTally, m: Member): void {
 
 /**
  * The tally of everything below a node (N1), on the whole tree: every agent and launch at any
- * depth, and the members the journal of each run among them started without a counted
- * transcript. The node itself is not counted, whatever it is.
+ * depth, and the members every run's collector among them holds — its agents without a counted
+ * reply (D4). The node itself is not counted, whatever it is; a collector's own members are what
+ * its tally counts.
  */
 function tallyBelow(e: Entry): AgentTally {
   const out = noTally()
   for (const x of preorder(e)) {
     if (x !== e && isAgentLike(x)) tallyInto(out, x)
-    for (const m of x.journalMembers) tallyInto(out, m)
+    for (const m of x.collected) tallyInto(out, m)
   }
   return out
 }
@@ -759,6 +773,57 @@ function workflowState(n: AgentTally): StateOf {
     state: 'stopped',
     stateText: t('Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.'),
   }
+}
+
+/**
+ * The state of a run's collector (D4), by the rule a run's state follows (§3.0 a), over the members
+ * it holds: one running makes it running; one open — neither recorded nor running — unknown; with
+ * every one closed, done when one completed that nothing superseded, else failed when one failed,
+ * else stopped. When every member failed — the label says so too — its sentence says that the
+ * workflow journal recorded each failure, where it did; and when every member was superseded —
+ * their later attempts are rows of the run — their own ends decide, since the tally then counts
+ * them all as retried.
+ */
+function collectorState(members: readonly Member[]): StateOf {
+  const n = noTally()
+  for (const m of members) tallyInto(n, m)
+  if (n.running > 0) {
+    return { state: 'running', stateText: t('Running — inferred: at least one of these agents is running.') }
+  }
+  if (n.started === 0 || n.unknown > 0) {
+    return {
+      state: 'unknown',
+      stateText: t('Unknown — inferred: not every one of these agents has a recorded outcome, and none is running.'),
+    }
+  }
+  if (members.every((m) => m.state === 'failed' && m.journalFailed)) {
+    return { state: 'failed', stateText: t('Failed — the workflow journal recorded a failure for each of them.') }
+  }
+  const own = n.retried === n.started
+  if (own ? members.some((m) => m.state === 'done') : n.done > 0) {
+    return {
+      state: 'done',
+      stateText: t('Done — every one of these agents has a recorded outcome, and at least one completed.'),
+    }
+  }
+  if (own ? members.some((m) => m.state === 'failed') : n.failed > 0) {
+    return { state: 'failed', stateText: t('Failed — every one of these agents has a recorded outcome, and none completed.') }
+  }
+  return {
+    state: 'stopped',
+    stateText: t('Stopped — every one of these agents has a recorded outcome, and none completed: the last attempt of each step was stopped.'),
+  }
+}
+
+/**
+ * The label of a run's collector (D4): how many agents it holds, and — when every one of them
+ * failed — that they failed before their first reply.
+ */
+function collectorLabel(members: readonly Member[]): string {
+  const n = full(members.length)
+  return members.length > 0 && members.every((m) => m.state === 'failed')
+    ? t('{0} agent(s) failed before their first reply', n)
+    : t('{0} agent(s) without a counted reply', n)
 }
 
 /** The latest of a run's launches — a resume is another launch of the same run —, by time, then by id. */
@@ -887,10 +952,14 @@ function journalOnlyState(j: JournalAgent, run: RunRec, siblingRuns: boolean, no
  * When a node started, how long it ran and when it last changed. A session's start is its
  * transcript's first line and its length a span (D5): it may run for weeks, and "Started"
  * beside "22 d 11 h" would read as one sitting. The last activity is the row the page's clock
- * ticks in (`live`), in place of the age written here, which the markdown keeps.
+ * ticks in (`live`), in place of the age written here, which the markdown keeps. An agent nothing
+ * of which was counted (`measured` false, D4) has no duration: its start and its last line are
+ * times, but the length between them is a figure, and it has none.
  */
-function timeRows(start: number | null, last: number | null, now: number, tcfg: TimeConfig, session = false): DetailRow[] {
-  const length = start === null || last === null ? '–' : session ? spanText(last - start) : durationText(last - start)
+function timeRows(
+  start: number | null, last: number | null, now: number, tcfg: TimeConfig, session = false, measured = true,
+): DetailRow[] {
+  const length = !measured || start === null || last === null ? '–' : session ? spanText(last - start) : durationText(last - start)
   return [
     { label: session ? t('Since first line') : t('Started'), value: start === null ? '–' : stamp(start, now, tcfg) },
     { label: session ? t('Span') : t('Duration'), value: length },
@@ -1006,16 +1075,12 @@ interface Entry {
    */
   rejected: RejectedRequest | null
   /**
-   * A workflow run's members its journal started and no transcript of which was counted (D2):
-   * counted in the run's state and in every agent count above it, with no row of their own
-   * (their collector comes with D4). Empty for every other node.
+   * D4: a run's collector's members — the agents of the run without a counted reply, the ones its
+   * journal started whose transcript no record holds (D2) and the ones whose record counted no
+   * request — each as the tally counts it: in the collector's state and tally, and in every
+   * agent count above it, with no row of their own. Empty for every other node.
    */
-  journalOnly: JournalAgent[]
-  /**
-   * The states of those journal-only members, as the run's state rule and every tally above
-   * the run count them (N1). Empty for every other node.
-   */
-  journalMembers: Member[]
+  collected: Member[]
   /** N1: the tally of the members below the node, where it carries one; null elsewhere. */
   tally: AgentTally | null
   /** Built on demand: only the selected node's rows are ever needed. */
@@ -1046,7 +1111,9 @@ function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+/** Siblings by when they started, the oldest first; a run's collector (D4) always last. */
 function byStart(a: Entry, b: Entry): number {
+  if ((a.kind === 'noreply') !== (b.kind === 'noreply')) return a.kind === 'noreply' ? 1 : -1
   const x = a.startTs ?? Infinity
   const y = b.startTs ?? Infinity
   return x < y ? -1 : x > y ? 1 : cmp(a.key, b.key)
@@ -1072,12 +1139,12 @@ function isAgentLike(e: Entry): boolean {
   return e.kind === 'agent' || e.kind === 'pending'
 }
 
-/** The agents and launches below a node, its runs' journal-only members included — what its count says. */
+/** The agents and launches below a node, the members of its runs' collectors included — what its count says. */
 function membersBelow(e: Entry): number {
   let n = 0
   for (const x of preorder(e)) {
     if (x !== e && isAgentLike(x)) n++
-    n += x.journalOnly.length
+    n += x.collected.length
   }
   return n
 }
@@ -1245,6 +1312,62 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
   return { roots, byKey, anyMain: mains.length > 0 }
 }
 
+/**
+ * D4: a run's collector — one node for every member of the run without a counted reply: the
+ * agents its journal started whose transcript no record holds, and the ones whose record counted
+ * no request, their transcript nothing but requests the API rejected. Hundreds of them are no
+ * reading anyone can do row by row, and none has a figure to show: they are counted, not listed —
+ * in the collector's label and tally, in its state (the rule a run's state follows, over them),
+ * and in every count above it. Its figures are dashes; its start the earliest first line of a
+ * member that has a record, its last activity the latest line of one, and neither when none has.
+ */
+function collectorEntry(sessionId: string, wf: string, members: Member[]): Entry {
+  const st = collectorState(members)
+  let first: number | null = null
+  let last: number | null = null
+  for (const m of members) {
+    if (m.startTs !== null && (first === null || m.startTs < first)) first = m.startTs
+    if (m.lastTs !== null && (last === null || m.lastTs > last)) last = m.lastTs
+  }
+  const e: Entry = {
+    key: fitKey('n:', `${sessionId}|${wf}`),
+    kind: 'noreply',
+    label: collectorLabel(members),
+    sub: null,
+    state: st.state,
+    stateText: st.stateText,
+    usage: '–',
+    usageAgents: null,
+    lowerBound: false,
+    duration: '–',
+    startTs: first,
+    lastTs: last,
+    id: null,
+    parent: null,
+    children: [],
+    waiting: false,
+    workflowId: wf,
+    counters: null,
+    superseded: false,
+    rejected: null,
+    collected: members,
+    tally: null,
+    rows: () => [],
+  }
+  e.rows = () => {
+    const tally = e.tally ?? tallyBelow(e)
+    return [
+      { label: t('Agents'), value: tallySpoken(tally), kind: 'sentence' },
+      {
+        label: t('Usage'), value: '–', kind: 'sentence',
+        note: t('These agents were started, but none of them wrote a reply that could be counted — their transcripts hold no response, or only rejected requests.'),
+      },
+      ...endedRejectedRows(e),
+    ]
+  }
+  return e
+}
+
 interface RootEnv {
   now: number
   tcfg: TimeConfig
@@ -1285,8 +1408,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     counters: mainCounters,
     superseded: false,
     rejected: null,
-    journalOnly: [],
-    journalMembers: [],
+    collected: [],
     tally: null,
     rows: () => [],
   }
@@ -1332,8 +1454,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         counters: null,
         superseded: false,
         rejected: null,
-        journalOnly: [],
-        journalMembers: [],
+        collected: [],
         tally: null,
         rows: () => [],
       }
@@ -1367,6 +1488,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const place = sessionOfPath(file)
     return place !== null && place.main && place.sessionId === a.sessionId ? root.label : '–'
   }
+  // D4: the agents of each run whose record counted no reply — its transcript nothing but requests
+  // the API rejected — by run: members of their run's collector, not nodes of their own.
+  const collectedOf = new Map<string, Member[]>()
   for (const r of ordered) {
     const launch = env.launchOf(r)
     const c = countersOf(r)
@@ -1384,8 +1508,23 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const rejected = rejectionOf(r)
     const activity = activityOf(r, rejected)
     const st = agentState(r, launch, journal ? journalState(journal, next !== null ? shortOf(next) : null) : null, rejected, now, tcfg)
+    if (wf !== null && c.requests === 0) {
+      let list = collectedOf.get(wf)
+      if (!list) {
+        list = []
+        collectedOf.set(wf, list)
+      }
+      list.push({
+        state: st.state, superseded: next !== null, rejected, journalFailed: journal !== null && journalOutcome(journal) === 'failed',
+        startTs: first, lastTs: activity,
+      })
+      continue
+    }
     const step = journal !== null && typeof journal.step === 'number' && Number.isInteger(journal.step) ? journal.step : 0
     const attempts = step > 0 ? view?.attempts.get(step) ?? 0 : 0
+    // D4: an agent outside a run whose record counted no reply keeps a node of its own — there are
+    // few — with dashes for every figure: nothing of it was counted, its time on the clock included.
+    const counted = c.requests > 0
     const e: Entry = {
       key: fitKey('a:', r.agentId),
       kind: 'agent',
@@ -1396,7 +1535,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       usage: usageText(c),
       usageAgents: null,
       lowerBound: c.outputFinal < c.requests,
-      duration: durationText(activity - first),
+      duration: counted ? durationText(activity - first) : '–',
       startTs: first,
       lastTs: activity,
       id: r.agentId,
@@ -1407,8 +1546,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       counters: c,
       superseded: next !== null,
       rejected,
-      journalOnly: [],
-      journalMembers: [],
+      collected: [],
       tally: null,
       rows: () => [],
     }
@@ -1417,7 +1555,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       { label: t('Models'), value: models.join(', ') || alias || '–' },
       idRow(r.agentId),
       { label: t('Depth'), value: depthText(r.meta?.spawnDepth) },
-      ...timeRows(e.startTs, e.lastTs, now, tcfg),
+      ...timeRows(e.startTs, e.lastTs, now, tcfg, false, counted),
       ...recordedRows(st.resumed, now, tcfg),
       ...countRows(c),
       ...rejectedRows(rejected, now, tcfg),
@@ -1475,8 +1613,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       counters: null,
       superseded: false,
       rejected: null,
-      journalOnly: [],
-      journalMembers: [],
+      collected: [],
       tally: null,
       rows: () => [
         { label: t('Type'), value: text(l.typeHint) ?? '–' },
@@ -1511,13 +1648,17 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   for (const c of root.children) if (rollUp(c)) anyRunning = true
 
   // The agents a run's journal started whose transcript no record holds (D2): members of the run
-  // all the same. A run with nothing but such members is a run of the session too.
+  // all the same, in its collector (D4). A run with nothing but such members — or nothing but
+  // agents whose record counted no reply — is a run of the session too.
+  const journalOnlyOf = new Map<string, JournalAgent[]>()
   for (const [wf, view] of a.runs) {
     const recorded = new Set(a.agents.filter((r) => text(r.workflowId) === wf).map((r) => r.agentId))
     const only = [...view.byAgent.values()].filter((j) => !recorded.has(j.agentId))
     if (only.length === 0) continue
-    workflowOf(wf).journalOnly = only
+    journalOnlyOf.set(wf, only)
+    workflowOf(wf)
   }
+  for (const wf of collectedOf.keys()) workflowOf(wf)
   // N4: a run its parent launched is a run of the session from the launch on — before any agent
   // of it has written a line, or its journal one.
   for (const wf of a.runLaunches.keys()) workflowOf(wf)
@@ -1528,24 +1669,33 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   // row's glyph and the tally beside it always agree.
   for (const [wf, w] of workflows) {
     const members = [...preorder(w)].filter(isAgentLike)
+    // D4: the run's agents whose record counted no reply; their lines are the run's activity too.
+    const recordsOnly = collectedOf.get(wf) ?? []
     const sum = noCounters()
     let first: number | null = null
     let last: number | null = null
-    for (const m of members) {
-      if (m.counters) addInto(sum, m.counters)
+    const span = (m: { startTs: number | null; lastTs: number | null }): void => {
       if (m.startTs !== null && (first === null || m.startTs < first)) first = m.startTs
       if (m.lastTs !== null && (last === null || m.lastTs > last)) last = m.lastTs
     }
+    for (const m of members) {
+      if (m.counters) addInto(sum, m.counters)
+      span(m)
+    }
+    for (const m of recordsOnly) span(m)
     // N4: the launches of the run, a resume being one more. The latest decides the parent's end.
     const launches = a.runLaunches.get(wf) ?? []
     const latest = latestLaunch(launches)
     const run = a.runs.get(wf)?.run ?? null
-    const siblingRuns = members.some((m) => m.state === 'running')
-    const only: Member[] = run === null ? [] : w.journalOnly.map((j) => ({
-      state: journalOnlyState(j, run, siblingRuns, now), superseded: text(j.supersededBy) !== null,
+    const siblingRuns = members.some((m) => m.state === 'running') || recordsOnly.some((m) => m.state === 'running')
+    const only: Member[] = run === null ? [] : (journalOnlyOf.get(wf) ?? []).map((j) => ({
+      state: journalOnlyState(j, run, siblingRuns, now), superseded: text(j.supersededBy) !== null, rejected: null,
+      journalFailed: journalOutcome(j) === 'failed', startTs: null, lastTs: null,
     }))
-    if (only.some((m) => m.state === 'running')) anyRunning = true
-    w.journalMembers = only
+    // D4: every member without a counted reply in one collector, the run's last child.
+    const collected = [...recordsOnly, ...only]
+    if (collected.some((m) => m.state === 'running')) anyRunning = true
+    if (collected.length > 0) attach(collectorEntry(a.sessionId, wf, collected), w)
     const tally = tallyBelow(w)
     // The members' last line, before the launches fill in for a run nobody has written to yet.
     const st = runState(tally, latest, run, last, now, tcfg)
@@ -1598,11 +1748,11 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     root.stateText = t('Active — inferred: an agent of this session is running.')
   }
 
-  // N1: what the agents below each session, run and agent came to, every state final by now —
-  // the roll-up's waiting agents included. A node with no agent below it has no tally, so a
-  // session without agents claims no "0 started", and a leaf agent none at all.
+  // N1: what the agents below each session, run, collector and agent came to, every state final
+  // by now — the roll-up's waiting agents included. A node with no agent below it has no tally, so
+  // a session without agents claims no "0 started", and a leaf agent none at all.
   for (const e of preorder(root)) {
-    if (e.kind !== 'session' && e.kind !== 'workflow' && e.kind !== 'agent') continue
+    if (e.kind !== 'session' && e.kind !== 'workflow' && e.kind !== 'agent' && e.kind !== 'noreply') continue
     const tally = tallyBelow(e)
     e.tally = tally.started > 0 ? tally : null
   }
@@ -1624,18 +1774,21 @@ function pathOf(e: Entry): Entry[] {
 
 /**
  * The children an open node shows (1.6 D3): the first `limit` of them in the order the page
- * draws them, with the child on the path to the selected node and every running child pinned
- * into those places — each taking the place of the last child that is not pinned, so the ones
- * shown keep their order. Only when the pinned children alone are more than `limit` does one
- * of them go: the path to the selection first, then the running children in order. A node with
- * no more children than `limit` shows them all.
+ * draws them, with the child on the path to the selected node, a run's collector (D4) and every
+ * running child pinned into those places — each taking the place of the last child that is not
+ * pinned, so the ones shown keep their order. Only when the pinned children alone are more than
+ * `limit` does one of them go: the path to the selection first, then the collector, which stands
+ * for every agent of the run without a counted reply, then the running children in order. A node
+ * with no more children than `limit` shows them all.
  */
 function windowOf(e: Entry, limit: number, onPath: ReadonlySet<Entry>): Entry[] {
   if (e.children.length <= limit) return e.children
   const pinned: Entry[] = []
   const toSelected = e.children.find((c) => onPath.has(c))
   if (toSelected) pinned.push(toSelected)
-  for (const c of e.children) if (c !== toSelected && c.state === 'running') pinned.push(c)
+  const collector = e.children.find((c) => c.kind === 'noreply')
+  if (collector && collector !== toSelected) pinned.push(collector)
+  for (const c of e.children) if (c !== toSelected && c !== collector && c.state === 'running') pinned.push(c)
   const chosen = new Set(pinned.slice(0, limit))
   let free = limit - chosen.size
   for (const c of e.children) {
@@ -1716,9 +1869,10 @@ function detailsOf(e: Entry): NodeDetails {
  */
 function agentCounts(roots: Entry[]): Map<Entry, number> {
   const out = new Map<Entry, number>()
-  // A run's journal-only members (D2) count where its drawn agents do.
+  // A collector's members (D4) count where the drawn agents do: on the collector — the `started`
+  // of its tally — and on every node above it.
   const count = (e: Entry): number => {
-    let n = e.journalOnly.length
+    let n = e.collected.length
     for (const c of e.children) n += count(c) + (isAgentLike(c) ? 1 : 0)
     out.set(e, n)
     return n
@@ -1753,16 +1907,30 @@ function byStartThenKey(a: Entry, b: Entry): number {
 }
 
 /**
- * Every agent and pending launch in state running, from all roots — listed or not, open or
- * closed, inside a window or past it: whoever watches the list came to see exactly these,
- * wherever the tree put them. One entry per key.
+ * The running members a node stands for, as the tally counts them (N1, §2.3 of the 1.6 spec): an
+ * agent or a launch in state running is one, unless a later attempt of its step superseded it —
+ * the tally has that one under retried —, and a run's collector (D4) is as many as its members
+ * that run. Every other node is none. What `AgentTreeVm.running` sums, so the host's poll, the
+ * running list and the sessions' tallies say the same number.
+ */
+function runningMembers(e: Entry): number {
+  if (e.kind === 'noreply') return e.collected.filter((m) => m.state === 'running' && !m.superseded).length
+  return isAgentLike(e) && e.state === 'running' && !e.superseded ? 1 : 0
+}
+
+/**
+ * Every agent and pending launch in state running, and every run's collector while one of its
+ * members runs (D4) — once, for all of them, never a row per member —, from all roots, listed or
+ * not, open or closed, inside a window or past it: whoever watches the list came to see exactly
+ * these, wherever the tree put them. An attempt a later one superseded is not among them: the
+ * tally counts it as retried. One entry per key.
  */
 function runningOf(roots: Entry[]): Entry[] {
   const seen = new Set<string>()
   const out: Entry[] = []
   for (const r of roots) {
     for (const e of preorder(r)) {
-      if (!isAgentLike(e) || e.state !== 'running' || seen.has(e.key)) continue
+      if (runningMembers(e) === 0 || seen.has(e.key)) continue
       seen.add(e.key)
       out.push(e)
     }
@@ -1771,19 +1939,22 @@ function runningOf(roots: Entry[]): Entry[] {
 }
 
 function runningItem(e: Entry): RunningItem {
+  // Nothing of a launch nobody has read a line of, or of a collector's agents, was counted: the
+  // builder already says '–'.
+  const counted = e.kind === 'agent'
   return {
     key: e.key,
-    kind: e.kind === 'pending' ? 'pending' : 'agent',
+    kind: e.kind === 'pending' ? 'pending' : e.kind === 'noreply' ? 'noreply' : 'agent',
     label: e.label,
     context: contextOf(e),
-    // A launch nobody has read a line of has nothing counted; the builder already says '–'.
-    usage: e.kind === 'pending' ? '–' : e.usage,
+    usage: counted ? e.usage : '–',
     // Nearly always true for a running agent: it is mid-reply. The row does not mark it (the
     // details do); the line under the tree and the markdown's running line need to know.
-    lowerBound: e.kind === 'pending' ? false : e.lowerBound,
+    lowerBound: counted ? e.lowerBound : false,
     startTs: e.startTs,
     lastTs: e.lastTs,
     waiting: e.waiting,
+    running: runningMembers(e),
   }
 }
 
@@ -1819,9 +1990,10 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
   const shown = forest.roots.slice(0, MAX_ROOTS)
   const selectedKey = text(input.selected)
   const selected = selectedKey !== null ? forest.byKey.get(selectedKey) ?? null : null
-  // Every root, listed or not: the host polls while anything runs, wherever it sits.
+  // Every root, listed or not: the host polls while anything runs, wherever it sits — every
+  // running member, a collector's included (D4), as the sessions' tallies count them.
   let running = 0
-  for (const r of forest.roots) for (const e of preorder(r)) if (isAgentLike(e) && e.state === 'running') running++
+  for (const r of forest.roots) for (const e of preorder(r)) running += runningMembers(e)
   const live = runningOf(forest.roots)
   const listed = live.slice(0, MAX_RUNNING_LIST)
   const listedKeys = new Set(listed.map((e) => e.key))

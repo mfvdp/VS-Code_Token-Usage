@@ -1273,11 +1273,13 @@ test('an agent\'s rejected request is its record\'s last rejection — three val
 
 test('a later counted reply clears the rejection; a main session\'s error lines and a rejection before the last reply are not kept', () => {
   const agg = new Aggregator()
-  // Before the transcript's first counted reply there is no record to keep it on (1.6 D4 makes one).
-  assert.equal(agg.addClaudeLine(rejection(0), AGENT_CTX), false)
-  assert.equal(agg.agents().length, 0)
+  // Before the transcript's first counted reply: 1.6 P5b (D4) makes the record from the rejection
+  // — no request counted, the rejection kept (pinned "no record to keep it on" before, P5a).
+  assert.equal(agg.addClaudeLine(rejection(0), AGENT_CTX), true)
+  assert.deepEqual([agentOf(agg, AGENT).requests, agentOf(agg, AGENT).rejected?.at], [0, T0])
   agg.addClaudeLine(claudeLine({ id: 'r1', ts: T0 + 10_000, agentId: 'abc123', usage: { input: 5 }, final: true }), AGENT_CTX)
   assert.equal(agentOf(agg, AGENT).rejected, null, 'the earlier rejection was answered by this reply')
+  assert.equal(agentOf(agg, AGENT).requests, 1)
   agg.addClaudeLine(rejection(20_000), AGENT_CTX)
   assert.notEqual(agentOf(agg, AGENT).rejected, null)
   // A retry that went through: the next counted reply clears it — its first line, or a later
@@ -1326,8 +1328,9 @@ test('a rejection survives a snapshot round trip and the roll-up, and a hand-edi
 })
 
 test('the replay the revision asks for reads the rejections again', async () => {
-  // 3: an agent's rejected request (1.6 N3) is a field only a replay can fill for what was already read.
-  assert.equal(AGENT_TABLES_REVISION, 3)
+  // 3: an agent's rejected request (1.6 N3) is a field only a replay can fill for what was already
+  // read. (1.6 P5b pinned 3 here; 4 — the records of rejection-only transcripts — is pinned below.)
+  assert.ok(AGENT_TABLES_REVISION >= 3)
   const home = tmpDir('rejected-replay')
   configureRoots([home], [path.join(home, 'codex')])
   const file = path.join(home, 'projects', CLAUDE_SLUG, SESSION, 'subagents', 'agent-abc123.jsonl')
@@ -1352,6 +1355,85 @@ test('the replay the revision asks for reads the rejections again', async () => 
   await replayAgents(restored, agentReplayFiles(restored, T0 + 60_000))
   assert.deepEqual(agentOf(restored, file).rejected, want)
   assert.equal(counting(restored), counted)
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 D4: a transcript of nothing but rejected requests
+// ---------------------------------------------------------------------------
+
+test('a transcript of nothing but rejected requests gets its record from the first one — no request, no token, nothing counted', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, usage: { input: 10 }, final: true }), MAIN_CTX)
+  const counted = counting(agg)
+  const WF_REJECTED = path.join(SLUG_DIR, SESSION, 'subagents', 'workflows', WF, 'agent-a0c1e2d3f4a5b6c7d.jsonl')
+  const wfCtx = ctxFor({ file: WF_REJECTED, isSub: true })
+  const first = apiErrorLine({ id: 'e1', ts: T0 + 60_000, agentId: 'a0c1e2d3f4a5b6c7d' })
+  assert.equal(agg.addClaudeLine(first, wfCtx), true)
+  const rec = agentOf(agg, WF_REJECTED)
+  // Its identity and its place from the path, as any agent's; every counter zero; the rejection kept.
+  assert.deepEqual([rec.agentId, rec.sessionId, rec.workflowId, rec.firstTs, rec.lastTs], ['a0c1e2d3f4a5b6c7d', SESSION, WF, T0 + 60_000, T0 + 60_000])
+  assert.deepEqual([rec.input, rec.cacheWrite, rec.cacheWrite1h, rec.cacheRead, rec.output, rec.reasoning, rec.requests, rec.outputFinal, rec.toolCalls],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0])
+  assert.deepEqual(rec.rejected, { at: T0 + 60_000, status: 429, error: 'rate_limit', limit: 'five_hour' })
+  // The sidecar is due, as for any new record: it names the agent's type.
+  assert.equal(agg.needsAgentMeta(WF_REJECTED), true)
+  // A later rejection takes the place of the first; the record's times stay the first line's.
+  assert.equal(agg.addClaudeLine(apiErrorLine({ id: 'e2', ts: T0 + 120_000, agentId: 'a0c1e2d3f4a5b6c7d', status: 529,
+    error: 'server_error', quotaLimits: null }), wfCtx), true)
+  assert.deepEqual([agentOf(agg, WF_REJECTED).rejected?.at, agentOf(agg, WF_REJECTED).requests, agentOf(agg, WF_REJECTED).lastTs],
+    [T0 + 120_000, 0, T0 + 60_000])
+  // Nothing of it reached the counting side: no bucket, no session, no request.
+  assert.equal(counting(agg), counted)
+  // A main transcript's error lines still make nothing.
+  assert.equal(agg.addClaudeLine(apiErrorLine({ id: 'e-main', ts: T0 + 70_000 }), MAIN_CTX), false)
+  assert.equal(agg.agents().length, 1)
+  // Its first counted reply makes it an agent like any other and clears the rejection.
+  agg.addClaudeLine(claudeLine({ id: 'r1', ts: T0 + 180_000, agentId: 'a0c1e2d3f4a5b6c7d', usage: { input: 5, output: 2 }, final: true }), wfCtx)
+  assert.deepEqual([agentOf(agg, WF_REJECTED).requests, agentOf(agg, WF_REJECTED).rejected, agentOf(agg, WF_REJECTED).firstTs,
+    agentOf(agg, WF_REJECTED).lastTs], [1, null, T0 + 60_000, T0 + 180_000])
+})
+
+test('a rejection-only record survives a snapshot round trip, and the replay the revision asks for makes it again', async () => {
+  // 4: the records of rejection-only transcripts (1.6 D4) are what only a replay can fill for the
+  // transcripts already read.
+  assert.equal(AGENT_TABLES_REVISION, 4)
+  const home = tmpDir('rejected-only')
+  configureRoots([home], [path.join(home, 'codex')])
+  const dir = path.join(home, 'projects', CLAUDE_SLUG)
+  const file = path.join(dir, SESSION, 'subagents', 'workflows', WF, 'agent-abc123.jsonl')
+  writeLines(path.join(dir, `${SESSION}.jsonl`), [claudeLine({ id: 'm1', ts: T0, usage: { input: 3 }, final: true })])
+  writeLines(file, [rejection(1000), rejection(5000, { rateLimitType: 'seven_day' })])
+  fs.writeFileSync(file.replace(/\.jsonl$/, '.meta.json'), metaJson({ agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1 }))
+  const agg = new Aggregator()
+  await scan(agg)
+  const want = { at: T0 + 5000, status: 429, error: 'rate_limit', limit: 'seven_day' }
+  assert.deepEqual([agentOf(agg, file).requests, agentOf(agg, file).rejected, agentOf(agg, file).meta?.agentType], [0, want, 'workflow-subagent'])
+  // The round trip keeps it as it is.
+  const back = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot)
+  assert.deepEqual(agentOf(back, file), agentOf(agg, file))
+  // A snapshot of the revision before has no record of it and asks for the replay, which makes it
+  // again — sidecar and all — and counts nothing twice.
+  const before = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  delete (before.agents as Record<string, AgentRec>)[file]
+  before.agentsRevision = 3
+  const restored = Aggregator.fromSnapshot(before)
+  assert.notEqual(restored.agentsRevision, AGENT_TABLES_REVISION, 'the host replays')
+  const counted = counting(restored)
+  await replayAgents(restored, agentReplayFiles(restored, T0 + 60_000))
+  assert.deepEqual([agentOf(restored, file).requests, agentOf(restored, file).rejected], [0, want])
+  assert.equal(counting(restored), counted)
+})
+
+test('the roll-up keeps a rejection-only record seven days after its last rejection, not after its first line', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(rejection(0), AGENT_CTX)
+  agg.addClaudeLine(rejection(3 * DAY), AGENT_CTX)
+  assert.deepEqual([agentOf(agg, AGENT).lastTs, agentOf(agg, AGENT).rejected?.at], [T0, T0 + 3 * DAY])
+  // Eight days after its first line and five after its last rejection: kept.
+  agg.rollup(T0 + (AGENT_RETENTION_DAYS + 1) * DAY, 45, 400, utc)
+  assert.equal(agg.agents().length, 1)
+  agg.rollup(T0 + (3 + AGENT_RETENTION_DAYS + 1) * DAY, 45, 400, utc)
+  assert.equal(agg.agents().length, 0)
 })
 
 test('an API error line\'s text, its details and its quota block never leave the reader (1.6 §0a.2)', async () => {

@@ -528,7 +528,11 @@ test('an agent whose output is a lower bound says so wherever its figures are, a
   const vm = agentsVm({ agg })
   const lines = agentLines(vm)
   let marked = 0
-  for (const rec of agg.agents()) {
+  // 1.6 D4: an agent of a run without a counted reply has no node — its run's collector counts
+  // it, and shows no figure it could mark.
+  const counted = agg.agents().filter((rec) => rec.requests > 0 || rec.workflowId === null)
+  assert.ok(counted.length < agg.agents().length, 'the world lost its agent without a counted reply')
+  for (const rec of counted) {
     const n = agentNode(vm.agents.roots, rec.agentId)
     // The record's own count decides: some reply of it never reached its final line.
     const bound = rec.outputFinal < rec.requests
@@ -544,7 +548,7 @@ test('an agent whose output is a lower bound says so wherever its figures are, a
     if (bound) marked++
   }
   // Claude Code's agents end on an unfinished reply: all but the quick one here, which did not.
-  assert.equal(marked, agg.agents().length - 1)
+  assert.equal(marked, counted.length - 1)
   assert.equal(agentNode(vm.agents.roots, AGENT_WORLD.guide).lowerBound, false)
   // The running list says it too: a running agent is nearly always mid-reply, and the list is
   // the first thing on the page and in the document. A launch nothing was counted of never.
@@ -639,23 +643,35 @@ const TREE_FIELDS = new Set([
   // 1.6 P3a: whether a node has children, how many, and how many an open one does not show (D3).
   // `truncated` left the tree with the MAX_NODES cut.
   'hasChildren', 'childrenTotal', 'childrenMore',
+  // 1.6 P5b: a running item's `running` — the running agents it stands for, a collector's many
+  // (D4) — is the tree's own field name, listed above; the collector node brings no field.
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {
   for (const attribution of ['none', 'session'] as const) {
     const vm = agentsVm({ attribution })
     const nodes = treeNodes(vm.agents.roots)
-    const running = nodes.filter((n) => (n.kind === 'agent' || n.kind === 'pending') && n.state === 'running')
-    // The world has a running agent and a running launch: both listed, nothing else.
-    assert.ok(running.length >= 2, String(running.length))
+    // 1.6 D4: a run's collector while one of its members runs — one entry for all of them.
+    const running = nodes.filter((n) => (n.kind === 'agent' || n.kind === 'pending' || n.kind === 'noreply') && n.state === 'running')
+    // The world has a running agent, a running launch and a collector with a running member: all
+    // three listed, nothing else.
+    assert.ok(running.length >= 3, String(running.length))
+    assert.ok(running.some((n) => n.kind === 'noreply'), 'the world lost its running collector')
     assert.deepEqual(vm.agents.runningNow.map((r) => r.key).sort(), running.map((n) => n.key).sort())
     assert.equal(vm.agents.runningMore, 0)
+    // 1.6 §2.3: the number the host polls by counts every running member — a collector's as many
+    // as run of it — and so does every session's tally; the list's entries add up to it.
+    assert.equal(vm.agents.running, vm.agents.runningNow.reduce((sum, r) => sum + r.running, 0))
+    assert.equal(vm.agents.running, vm.agents.roots.reduce((sum, r) => sum + (r.tally?.running ?? 0), 0))
     for (const r of vm.agents.runningNow) {
       const n = running.find((x) => x.key === r.key)
       assert.ok(n, r.key)
-      // The figure is the node's, and a launch nobody read a line of has none — nor a bound.
-      assert.equal(r.usage, n.kind === 'pending' ? '–' : n.usage, r.key)
-      assert.equal(r.lowerBound, n.kind === 'pending' ? false : n.lowerBound, r.key)
+      assert.equal(r.kind, n.kind, r.key)
+      assert.equal(r.running, n.kind === 'noreply' ? n.tally?.running : 1, r.key)
+      // The figure is the node's, and a launch nobody read a line of has none — nor a bound — and
+      // neither has a collector.
+      assert.equal(r.usage, n.kind === 'agent' ? n.usage : '–', r.key)
+      assert.equal(r.lowerBound, n.kind === 'agent' ? n.lowerBound : false, r.key)
       assert.equal(/^0(\s|$)/.test(r.usage), false, r.usage)
       // Where it sits, and no project unless attribution names one.
       assert.ok(r.context.startsWith('Session '), r.context)
@@ -671,6 +687,36 @@ test('the running list claims nothing the tree does not: running nodes only, a l
   }
 })
 
+test('a run\'s collector never shows a figure — dashes for what none of its agents had counted, never a 0', () => {
+  // 1.6 D4: the agents of a run without a counted reply are counted in one collector node. Nothing
+  // of them was counted, so no figure of the collector may read as one: on its row, in its running
+  // entry, in its details, on its markdown lines — in English and in German.
+  for (const lang of ['en', 'de']) {
+    const build = (): Array<{ node: TreeNode; vm: ViewModel }> => everyNodeOpen('session').filter((x) => x.node.kind === 'noreply')
+    const open = lang === 'de' ? inGerman(build) : build()
+    assert.equal(open.length, 1, `${lang}: the world lost its collector`)
+    for (const { node, vm } of open) {
+      assert.deepEqual([node.usage, node.duration, node.usageAgents, node.lowerBound], ['–', '–', null, false], lang)
+      assert.deepEqual([node.hasChildren, node.children, node.childrenTotal], [false, [], 0], lang)
+      const d = vm.agents.selected
+      assert.ok(d, lang)
+      assert.equal(d.key, node.key)
+      // Its details: its tally in words, its usage a dash with why, the rejections by reason — no
+      // token count, no duration, nothing that reads 0.
+      const usage = lang === 'de' ? 'Verbrauch' : 'Usage'
+      assert.equal(d.rows.find((r) => r.label === usage)?.value, '–', lang)
+      for (const r of d.rows) assert.equal(/(^|\s)0(\s|$)|^0/.test(r.value), false, `${lang}: ${r.label} ${r.value}`)
+      const item = vm.agents.runningNow.find((r) => r.key === node.key)
+      assert.ok(item, `${lang}: its running members, and no entry`)
+      assert.deepEqual([item.usage, item.lowerBound], ['–', false], lang)
+      const md = agentSection(vm).filter((l) => l.includes(node.label))
+      assert.ok(md.length >= 2, md.join('\n'))
+      for (const l of md) assert.equal(/(^|\s)0(\s|$)| ⚠/.test(l), false, l)
+      assert.ok(md.some((l) => l.endsWith(' · – · –')), md.join('\n'))
+    }
+  }
+})
+
 test('a node\'s tally counts every agent below it once, sums to its started, and marks only the inferred counts', () => {
   // 1.6 N1, in English and in German: the tally is on a session, a run and an agent with agents
   // below it, and nowhere else; its fields sum to `started`, which is the node's agent count;
@@ -680,21 +726,26 @@ test('a node\'s tally counts every agent below it once, sums to its started, and
     const vm = lang === 'de' ? inGerman(() => agentsVm()) : agentsVm()
     const nodes = treeNodes(vm.agents.roots)
     const below = (n: TreeNode): TreeNode[] => n.children.flatMap((c) => [...(c.kind === 'agent' || c.kind === 'pending' ? [c] : []), ...below(c)])
+    // 1.6 D4: a collector's members are no nodes: its own tally is what it holds.
+    const collected = (n: TreeNode): TreeNode[] => [n, ...treeNodes(n.children)].filter((c) => c.kind === 'noreply')
+    const inCollectors = (n: TreeNode): number => collected(n).reduce((sum, c) => sum + (c.tally?.started ?? 0), 0)
     for (const n of nodes) {
       const members = below(n)
-      const want = members.length > 0 && (n.kind === 'session' || n.kind === 'workflow' || n.kind === 'agent')
+      const want = members.length + inCollectors(n) > 0
+        && (n.kind === 'session' || n.kind === 'workflow' || n.kind === 'agent' || n.kind === 'noreply')
       assert.equal(n.tally !== null, want, `${lang} ${n.label}`)
       assert.equal(n.tallyText !== null, want, `${lang} ${n.label}`)
       assert.equal(n.tallySpoken !== null, want, `${lang} ${n.label}`)
       if (!n.tally || n.tallyText === null || n.tallySpoken === null) continue
       const t = n.tally
       assert.equal(t.done + t.failed + t.retried + t.stopped + t.running + t.unknown, t.started, `${lang} ${n.label}`)
-      // Nothing is cut and no run of this world has a journal-only member: the payload holds them all.
+      // Nothing is cut: the payload holds every node — and every collector, which holds its members.
       assert.equal(t.started, n.agentCount, `${lang} ${n.label}`)
-      assert.equal(t.started, members.length, `${lang} ${n.label}`)
-      assert.equal(t.retried, members.filter((m) => m.superseded).length, `${lang} ${n.label}`)
+      assert.equal(t.started, members.length + inCollectors(n), `${lang} ${n.label}`)
+      const of = (f: keyof typeof t): number => collected(n).reduce((sum, c) => sum + (c.tally?.[f] ?? 0), 0)
+      assert.equal(t.retried, members.filter((m) => m.superseded).length + of('retried'), `${lang} ${n.label}`)
       for (const st of ['done', 'failed', 'stopped', 'running', 'unknown'] as const) {
-        assert.equal(t[st], members.filter((m) => !m.superseded && m.state === st).length, `${lang} ${n.label} ${st}`)
+        assert.equal(t[st], members.filter((m) => !m.superseded && m.state === st).length + of(st), `${lang} ${n.label} ${st}`)
       }
       const parts = n.tallyText.split(' · ')
       assert.equal(parts[0], lang === 'de' ? `${t.started} gestartet` : `${t.started} started`)
@@ -722,15 +773,23 @@ test('a closed node counts the agents below it on the whole tree, and a leaf cou
   const agg = agentWorld().agg
   const config = makeConfig({ 'tokenPace.attribution': 'none' })
   const text = agentTreeFor({ agg, cfg: config, ui: defaultUiState(config), now: NOW }, 'text')
-  const agentLike = (n: TreeNode): number =>
-    n.children.reduce((s, c) => s + agentLike(c) + (c.kind === 'agent' || c.kind === 'pending' ? 1 : 0), 0)
+  // 1.6 D4: a collector counts its members — its tally's started — and every node above it with them.
+  const agentLike = (n: TreeNode): number => n.children.reduce((s, c) => s + agentLike(c)
+    + (c.kind === 'agent' || c.kind === 'pending' ? 1 : c.kind === 'noreply' ? c.tally?.started ?? 0 : 0), 0)
   const nodes = treeNodes(text.roots)
-  assert.ok(nodes.some((n) => n.kind === 'workflow') && nodes.some((n) => n.kind === 'pending'), 'the world lost a kind of node')
+  assert.ok(nodes.some((n) => n.kind === 'workflow') && nodes.some((n) => n.kind === 'pending') && nodes.some((n) => n.kind === 'noreply'),
+    'the world lost a kind of node')
   for (const n of nodes) {
     // Nothing of this world is past a window: the count is what the tree holds below the node.
     assert.equal(n.childrenMore, 0, n.label)
-    assert.equal(n.agentCount, agentLike(n), n.label)
     assert.deepEqual([n.hasChildren, n.childrenTotal], [n.children.length > 0, n.children.length], n.label)
+    if (n.kind === 'noreply') {
+      // A leaf that holds members: it counts them, and lists none.
+      assert.deepEqual([n.children.length, n.agentCount], [0, n.tally?.started], n.label)
+      assert.ok(n.agentCount > 0, n.label)
+      continue
+    }
+    assert.equal(n.agentCount, agentLike(n), n.label)
     if (n.children.length === 0) assert.equal(n.agentCount, 0, n.label)
   }
   // The page as it starts: the sessions alone, each counting what the whole tree holds below it.

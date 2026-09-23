@@ -365,9 +365,10 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * whenever the snapshot's `agentsRevision` differs (see `Aggregator.agentsRevision`): a build
  * that adds a field only a replay can fill for the transcripts already read raises it by one.
  * 1 = 1.6's runs from the workflow journals; 2 = the `Workflow` launches and their ends (N4); 3 = the
- * rejected requests of the agents (N3).
+ * rejected requests of the agents (N3); 4 = the records of the agents whose transcript holds
+ * nothing but rejected requests (D4).
  */
-export const AGENT_TABLES_REVISION = 3
+export const AGENT_TABLES_REVISION = 4
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -1383,12 +1384,13 @@ export class Aggregator {
   /**
    * A request the API rejected, in an agent's transcript (1.6 N3, §0a.2): the agent's last
    * rejection, with the error line's time — the latest one, and only while no counted reply of
-   * the transcript is later (a counted reply clears it, `clearRejected`). Onto the record the
-   * transcript's counted lines made; a transcript of nothing but rejections has none yet, and
-   * its rejections are not kept. True when the record changed.
+   * the transcript is later (a counted reply clears it, `clearRejected`). A transcript of nothing
+   * but rejections gets its record from its first one (1.6 D4): with no request, no token and no
+   * reply counted, its first and last time that line's — the agent was started, and the tree
+   * counts it among its run's agents without a counted reply. True when the record changed.
    */
   private noteRejected(file: string, at: number, r: Omit<RejectedRequest, 'at'>): boolean {
-    const rec = this.agentMap.get(file)
+    const rec = this.agentFor(file, at)
     if (!rec || at < rec.lastTs) return false
     const prev = rec.rejected
     if (prev !== null) {
@@ -1400,7 +1402,8 @@ export class Aggregator {
   }
 
   /**
-   * The record of an agent transcript, made by its first counted line: its identity from the
+   * The record of an agent transcript, made by its first counted line — or by its first rejected
+   * request, when that comes first (1.6 D4): its identity from the
    * file name, its session and workflow run from where it sits (`claudePlacement`). Null for a
    * file below `subagents` that is no agent transcript. What the parent recorded before the
    * transcript came in joins it here; the workflow journal's view stays with the run (`runMap`)

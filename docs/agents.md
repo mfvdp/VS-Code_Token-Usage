@@ -28,7 +28,13 @@ nothing about Codex.
 The list above the tree — `Running now (3)` — holds every agent and every launch whose state is
 **running** (see [States](#states)): an agent that replied, or was launched, within the last ten
 minutes and has no recorded result — a launch whose transcript has not appeared yet included —
-and an agent that runs only because an agent it launched runs. It is taken from every session
+and an agent that runs only because an agent it launched runs. The agents of a workflow run
+without a counted reply are one row for all of them, their run's
+[collector](#agents-without-a-counted-reply), while one of them runs — never a row each — and
+that row says how many of them run: `~10 of them running`. The heading counts the running agents,
+so a collector's count is in it: two rows, one agent and a collector with ten running, read
+`Running now (11)` — the same number the sessions' [tallies](#the-tally) give. An attempt a later
+one superseded is not listed: the tally counts it as retried. It is taken from every session
 of the last seven days — those the tree does not list any more, the nodes inside a closed branch
 and those past the fifty children an opened node shows, included — so nothing that runs is
 missing from it because the tree is closed or full. Running is an inferred state, and every
@@ -36,11 +42,15 @@ row's glyph says so, as the tree's do.
 
 **Order and cap.** The longest-running first: by the time of the agent's first line, or of the
 launch, the earliest on top; two that started at the same moment keep a fixed order. The list
-holds at most **20** running agents; the rest are counted under it (`and 3 more`).
+holds at most **20** running agents; the rest are counted under it (`and 3 more`). A collector is
+one row of them however many of its agents run, and sorts by the first line of the earliest of
+its agents that has a transcript — last when none has.
 
 **Each row** is the running glyph, the agent's name as the tree writes it, a live
-`running for 12 min 05 s` counted from its first line (from the launch, for a launch), its
-usage — `–` for a launch, since nothing of it was counted — and under them where it sits:
+`running for 12 min 05 s` counted from its first line (from the launch, for a launch; for a
+collector from the first line of the earliest of its agents that has a transcript, and no clock
+when none has), its usage — `–` for a launch and a collector, since nothing of them was counted —
+and under them where it sits:
 `Session 9d0eb37a · Workflow cfe7718d`, with the session's project after it while
 `tokenPace.attribution` names one. An agent that runs only because an agent below it runs — the
 parent waiting for its child — says so on that line: `waits for a child agent`.
@@ -55,8 +65,9 @@ keyboard reaches them first.
 With nothing running, the list is one line — `No agent is running.` — with no heading. The
 markdown report prints the list under `### Running now`, one line per agent — `[~Running]`
 first, as the tree's lines mark an inferred state, then its name, where it sits and its usage,
-`⚠` behind a usage that is a lower bound and `(waiting)` behind a waiting one — and heads the
-tree after it with `### Sessions and agents`.
+`⚠` behind a usage that is a lower bound, `(waiting)` behind a waiting one and
+`(~10 of them running)` behind a collector — and heads the tree after it with
+`### Sessions and agents`.
 
 ## The tree
 
@@ -81,7 +92,9 @@ session; the agents of a run stay inside their run. Siblings are ordered by when
 launch whose transcript has not appeared yet is a node of its own, in italics and named from the
 launch — `Plan · sonnet · launched` — with no figures beside it, since nothing was counted. A
 workflow run is a node from the moment its session launched it, before any agent of it has
-written: with `–` for its figures and nothing to open until one does.
+written: with `–` for its figures and nothing to open until one does. A run's agents without a
+counted reply are one node, the run's last child: its
+[collector](#agents-without-a-counted-reply).
 No agent sits more than **6** levels below its session: one that would sit deeper moves up, it
 is never dropped.
 
@@ -90,8 +103,11 @@ order above. When it has more, a line after the last one says so — `50 more ·
 or `12 more` when the next fifty are the rest — and a click on it, or `Enter`, shows the next
 fifty. A node takes that step at most **10** times, so it shows up to 550 of its children; past
 that the line only counts the rest, `377 not shown`. Always among those shown, each taking the
-place of the last one that is not: every child that is running, and the one on the way to the
-node whose details are open — so the open node's row is never left out, nor a running agent's.
+place of the last one that is not: every child that is running, the one on the way to the node
+whose details are open, and a run's collector, which stays its last child — so the open node's
+row is never left out, nor a running agent's, nor the row that counts the run's agents without a
+counted reply. When those alone are more than fifty, the way to the open node comes first, then
+the collector, then the running children.
 
 **Only what is open goes to the page.** A closed node's children are not sent to it at all: only
 whether it has any, how many, and what the agents below it came to. A large run closed is one
@@ -129,7 +145,8 @@ agent's usage is part of the figures the totals already contain: the tree adds n
 
 ### The tally
 
-A session, a workflow run and an agent that launched agents of its own carry the **tally** of
+A session, a workflow run, a run's [collector](#agents-without-a-counted-reply) — of its own
+members — and an agent that launched agents of its own carry the **tally** of
 every agent below them — at any depth, on the whole tree, also the ones inside a closed branch
 or past a node's first fifty, and the agents a workflow run's journal started whose transcript
 was never counted (see [States](#states)) — and every launch whose transcript has not appeared
@@ -162,6 +179,27 @@ tally after its name in brackets, on every node that has one:
 every node, open on the dashboard or not, at most 50 children each, and one line at their depth
 for the rest: `… 377 more`.
 
+### Agents without a counted reply
+
+A workflow run can start hundreds of agents that never write a reply that could be counted: the
+run's journal started them, but no transcript of theirs was read, or their transcript holds
+nothing but requests the API rejected (see [States](#states)) — a run that hit a usage limit
+leaves many of them. Each is a member of its run, but none has a figure to show, and a row each
+would bury the agents that did the work. So they are **counted, not listed**: one node, the
+**collector**, the last child of its run, stands for all of them —
+`263 agent(s) without a counted reply`, or `3 agent(s) failed before their first reply` when every
+one of them failed. It has no toggle and no children; its figures are `–`, never a `0`; beside its
+label stands its [tally](#the-tally), and its state is its members', by the rule a run's state
+follows (see [States](#states)). An agent of a run whose transcript holds only rejected requests
+is kept from its first one on, with nothing counted; its first counted reply moves it out of the
+collector into a row of its own. An agent outside a run whose transcript holds only rejected
+requests keeps a row of its own — there are few — with `–` for its figures and the sentence that
+names the rejection. The collector's members count in the run's `Agents` row, in the tally of the
+run and of the session, and in the number of running agents the running list's heading and the
+agent poll go by; while one of them runs, the running list has one row for all of them. The
+markdown report prints the collector as one line under its run:
+`[~Running] 263 agent(s) without a counted reply (263 started · 250 ✓ · 3 ✕ · ~10 ●) · – · –`.
+
 ## States
 
 | Glyph | State | Kind | When |
@@ -190,7 +228,10 @@ sentence quotes the parent's word as it was written, `‘killed’`. Only `faile
 **Why an agent ended: a rejected request.** When the API refuses a request of an agent — a usage
 limit, a server error — Claude Code writes an error line into the agent's transcript in place of a
 reply. The last one is kept for the agent while no counted reply follows it (a reply that does
-clears it), and its time counts as the transcript's last activity. An agent that ended on one and
+clears it), and its time counts as the transcript's last activity. A transcript that holds nothing
+but such lines is kept from its first one, with nothing counted: in a workflow run it is a member of
+the run's [collector](#agents-without-a-counted-reply), outside one a row of its own with `–` for
+its figures. An agent that ended on one and
 has no recorded end reads unknown, as any silent agent does, but its sentence says why rather
 than that it may have been stopped — *Unknown — inferred: no result was recorded; the last
 request, at 14:20, was rejected — 5-hour limit (HTTP 429).* — and one within its ten minutes
@@ -243,8 +284,9 @@ completed and one failed, and stopped when the last attempt of every step was st
 the run's [tally](#the-tally) read in one order — a `~●` makes it running, else a `~?` unknown,
 else a `✓` done, else a `✕` failed, else stopped — so a run's glyph and its tally never disagree,
 and a done run may still show `1 ✕` beside it. An agent
-the journal started without a counted transcript has no row of its own: it counts in its run's
-state, in the tally of every node above it and in the run's `Agents` row, and it is running while
+the journal started without a counted transcript has no row of its own — its run's
+[collector](#agents-without-a-counted-reply) counts it —: it counts in its run's state, in the
+tally of every node above it and in the run's `Agents` row, and it is running while
 the journal changed within the last ten minutes or another member of the run runs, unknown after
 that, unless the journal recorded its end. A run keeps at most **5000** agents of its journal;
 further starts are counted, not listed, and its details say so (`12 further agents not listed`).
@@ -318,8 +360,20 @@ time. The other nodes:
 | Workflow run | Running — inferred: an agent of this run wrote on after the parent recorded its end at 14:20. |
 | Workflow run | Running — inferred: the parent launched this run 2 min ago and no agent has written yet. |
 | Workflow run | Unknown — inferred: the parent launched this run at 14:20, but no agent of it was ever seen. |
+| Collector | Running — inferred: at least one of these agents is running. |
+| Collector | Unknown — inferred: not every one of these agents has a recorded outcome, and none is running. |
+| Collector | Done — every one of these agents has a recorded outcome, and at least one completed. |
+| Collector | Failed — every one of these agents has a recorded outcome, and none completed. |
+| Collector | Failed — the workflow journal recorded a failure for each of them. |
+| Collector | Stopped — every one of these agents has a recorded outcome, and none completed: the last attempt of each step was stopped. |
 | Launch | Running — inferred: the parent recorded the launch 1 min ago and no result yet; the agent's transcript has not been seen yet. |
 | Launch | Unknown — inferred: the parent recorded the launch at 14:20 but no result, and the agent's transcript was never seen; the agent may have been stopped. |
+
+A collector's state is its members', read as a run's is: one running makes it running, one open
+unknown, and with every one closed, one completion that nothing superseded makes it done, else a
+failure failed, else stopped. When every one of them failed, the label says so and — where the
+run's journal recorded each failure — so does the sentence; when every one of them was superseded,
+their own ends decide, since the tally counts them all as retried.
 
 A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
 
@@ -349,9 +403,12 @@ which attempt it was. A session opens with its two figures — `Own transcript`,
 spans* — then its project (only while attribution allows one), its models, `Since first line`
 and `Span` in place of a start and a duration, the last activity, the counts of its own
 transcript, how many agents it has, how many of them ended on a rejected request, by reason, and
-its ID; a workflow run how many
-agents it has — the ones its journal started without a counted transcript included, and how many
-it did not list —, how often it was launched when it was resumed, its times, the end its parent
+its ID; a collector its tally in words (`266 started, 255 done, 3 failed, about 8 unknown`), a
+`Usage` of `–` with why — *These agents were started, but none of them wrote a reply that could be
+counted — their transcripts hold no response, or only rejected requests.* — and how many of them
+ended on a rejected request, by reason, and no ID, since it stands for no one identifier; a
+workflow run how many agents it has — the ones its journal started without a counted transcript
+included, and how many it did not list —, how often it was launched when it was resumed, its times, the end its parent
 recorded when an agent wrote on after it, the counts summed over its agents, how many of them
 ended on a rejected request, by reason, and its ID; a launch
 the type and model it asked for,
@@ -416,7 +473,8 @@ transcript and per session transcript the ids, the agent's type and model names,
 last time, the token counts, the number of tool calls and the recorded result with the parent's
 word for it (one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`,
 `stopped`), and for an agent its last rejected request — its time, its HTTP status, its error
-kind and its limit, each one of the values listed above; per launch its tool-call id, the type and model it asked for, whether it runs in the
+kind and its limit, each one of the values listed above — an agent whose transcript holds nothing
+but rejected requests has a record from the first of them, its counts all zero; per launch its tool-call id, the type and model it asked for, whether it runs in the
 background, its result with that word and the parent's three totals; per `Workflow` call its
 tool-call id, the run id its result named, when it was made, and the run's end with the parent's
 word for it; per workflow run the agents

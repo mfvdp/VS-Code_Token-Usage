@@ -20,6 +20,10 @@
  *       workflow-subagent       done — that retry, completed by the journal
  *       workflow-subagent       stopped, replaced — the journal started its step again before it recorded anything
  *       workflow-subagent       running — its transcript changed 25 s ago; the attempt that replaced the one above
+ *       2 agent(s) without a counted reply   running — the run's collector (1.6 D4): an agent whose
+ *                               transcript holds nothing but a request rejected on the 5-hour limit, its
+ *                               failure recorded by the journal, and one the journal started four minutes
+ *                               ago whose transcript has not appeared, running beside the agent above
  *     Plan · sonnet · launched  a background launch two minutes ago, no transcript yet
  *   Session 8e1d4b7a — idle since 09:20
  *     claude-code-guide         done in 48 s, its last reply finished
@@ -65,12 +69,17 @@ export const AGENT_WORLD = {
   wfRetryFail: '7a8b9c0d1e2f3a4b5',
   wfRetry: '8b9c0d1e2f3a4b5c6',
   wfReplaced: '9c0d1e2f3a4b5c6d7',
+  // 1.6 D4: the run's agents without a counted reply — one whose transcript holds only a rejected
+  // request, and one the journal started whose transcript was never seen. Members of the run's
+  // collector, never nodes of their own.
+  wfRejected: '3e4f5a6b7c8d9e0f1',
+  wfQueued: 'a4d5e6f7a8b9c0d1e',
   pending: '0a1b2c3d4e5f6a7b8',
   guide: '1b2c3d4e5f6a7b8c9',
 } as const
 
 /** The steps of the world's run: each journal line carries the key of one of them. */
-const STEPS = ['done', 'retry', 'run'] as const
+const STEPS = ['done', 'retry', 'run', 'rejected', 'queued'] as const
 
 /**
  * The content the builders put into the world's lines and sidecars. The world is only worth
@@ -103,7 +112,7 @@ export function shortIdOf(id: string): string {
 /** Where an agent's transcript lies: under its session's `subagents`, a run's one level deeper. */
 export function agentWorldFile(id: string): string {
   const W = AGENT_WORLD
-  if ([W.wfDone, W.wfFailed, W.wfRunning, W.wfRetryFail, W.wfRetry, W.wfReplaced].includes(id as typeof W.wfDone)) {
+  if ([W.wfDone, W.wfFailed, W.wfRunning, W.wfRetryFail, W.wfRetry, W.wfReplaced, W.wfRejected, W.wfQueued].includes(id as typeof W.wfDone)) {
     return path.join(WF_DIR, `agent-${id}.jsonl`)
   }
   const session = id === AGENT_WORLD.guide ? AGENT_WORLD.quiet : AGENT_WORLD.session
@@ -264,6 +273,17 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
   turn(f(W.wfRunning), 'wr-1', at(11, 52), OPUS, { input: 8, cacheWrite: 12100, output: 760 }, { agentId: W.wfRunning, tools: ['Read'] })
   sidecar(W.wfRunning, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
   journal('started', W.wfRunning, 'run', at(11, 52, 1))
+  // 1.6 D4: an agent whose first request is rejected on the 5-hour limit, and nothing else — the
+  // line makes its record, which counts nothing — and whose failure the journal records.
+  journal('started', W.wfRejected, 'rejected', at(11, 52, 30))
+  read(f(W.wfRejected), apiErrorLine({
+    id: 'rj-err', ts: at(11, 53), agentId: W.wfRejected, errorDetails: 'synthetic API error details',
+    upgradePaths: ['synthetic upgrade path'],
+  }))
+  sidecar(W.wfRejected, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
+  journal('failed', W.wfRejected, 'rejected', at(11, 54))
+  // 1.6 D4: an agent the journal started four minutes ago whose transcript has not appeared.
+  journal('started', W.wfQueued, 'queued', at(11, 56))
   // A launch whose agent has not written a line yet.
   read(MAIN, agentToolUseLine({ id: 'm-6', ts: at(11, 58), toolUseId: TU.pending, subagentType: 'Plan', model: 'sonnet', background: true }))
   read(MAIN, agentResultLine({ ts: at(11, 58, 1), toolUseId: TU.pending, agentId: W.pending, status: 'async_launched' }))

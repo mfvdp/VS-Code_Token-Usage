@@ -1268,6 +1268,8 @@ function webviewWords(): Record<string, string> {
     '{0} · {1} · {2} · {3} % of the week · {1} total {4}':
       t('{0} · {1} · {2} · {3} % of the week · {1} total {4}'),
     '{0}: {1} of {2}': t('{0}: {1} of {2}'),
+    '~1 of them running': t('~1 of them running'),
+    '~{0} of them running': t('~{0} of them running'),
     '≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals':
       t('≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals'),
   }

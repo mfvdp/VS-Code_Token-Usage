@@ -546,11 +546,15 @@ function agentNodeLine(n: TreeNode): string {
  * — a running agent, where it sits and what it used. Running is inferred, and the line says so
  * as the tree's lines do; a usage that is a lower bound carries ⚠ as there; "(waiting)" when
  * it runs only because an agent below it does. For an agent of a session the tree does not
- * list, this line is all the document says of it.
+ * list, this line is all the document says of it. A run's collector (1.6 D4) is one line for
+ * all of its agents without a counted reply, and says how many of them run:
+ * "[~Running] 263 agent(s) without a counted reply · Session 0133faf9 · Workflow 7e21c0de · – (~10 of them running)".
  */
 function runningLine(r: RunningItem): string {
+  const members = r.kind === 'noreply' && typeof r.running === 'number' && Number.isInteger(r.running) && r.running >= 1
+    ? ` (${r.running === 1 ? t('~1 of them running') : t('~{0} of them running', full(r.running))})` : ''
   return `- [${estimate(t('Running'))}] ${cell(r.label)} · ${cell(r.context)} · ${cell(r.usage)}`
-    + `${r.lowerBound === true ? ' ⚠' : ''}${r.waiting ? ` ${t('(waiting)')}` : ''}`
+    + `${r.lowerBound === true ? ' ⚠' : ''}${r.waiting ? ` ${t('(waiting)')}` : ''}${members}`
 }
 
 /**

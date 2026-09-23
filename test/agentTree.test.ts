@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
+  AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeState,
   RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from '../src/agentTree'
 import { AgentTreeInput, agentDetails, buildAgentTree, shortIdsOf, spanText } from '../src/agentTreeBuild'
@@ -171,6 +171,8 @@ function stateText(over: Partial<AgentTreeInput>, key: string): string | undefin
 const rootKey = `s:${S1}`
 const agentKey = (id: string): string => `a:${id}`
 const wfKey = `w:${S1}|${WF}`
+/** 1.6 D4: the collector of run WF — its agents without a counted reply. */
+const collectorKey = `n:${S1}|${WF}`
 
 // ---------------------------------------------------------------------------
 // §4.4 · states
@@ -652,7 +654,9 @@ test('the parent\'s record beats the journal\'s, and the journal\'s end is never
   assert.equal(agentDetails(input(keyless), NOW, agentKey(J1))?.rows.some((r) => r.label === 'Attempt'), false)
 })
 
-test('an agent the journal started without a counted transcript is a member of its run: counted, in its state, not drawn', () => {
+// 1.6 P5b (§3 D4): pinned "counted, in its state, not drawn" (P2b); the journal-only members are
+// drawn now — in one collector, the run's last child — and counted as before.
+test('an agent the journal started without a counted transcript is a member of its run: counted, in its state, in the collector', () => {
   const journalOnly = [jagent(J2, { step: 2 }), jagent(J3, { step: 3, outcome: 'failed' }), jagent(J4, { step: 4, outcome: 'completed' })]
   const quiet: Partial<AgentTreeInput> = {
     agents: [silentWf(J1)],
@@ -660,8 +664,10 @@ test('an agent the journal started without a counted transcript is a member of i
   }
   const vm = build(quiet)
   const w = node(vm, wfKey)
-  // Four members, one drawn: the count says so on the run and on its session.
-  assert.deepEqual(w.children.map((c) => c.key), [agentKey(J1)])
+  // Four members, one drawn as an agent, three in the collector: the count says so on the run
+  // and on its session.
+  assert.deepEqual(w.children.map((c) => c.key), [agentKey(J1), collectorKey])
+  assert.equal(node(vm, collectorKey).agentCount, 3)
   assert.equal(w.agentCount, 4)
   assert.equal(node(vm, rootKey).agentCount, 4)
   assert.equal(agentDetails(input(quiet), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value, '4')
@@ -679,8 +685,9 @@ test('an agent the journal started without a counted transcript is a member of i
     ...quiet, runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2, outcome: 'failed' })])],
   }
   assert.equal(node(build(closed), wfKey).state, 'done')
-  // None of them is a row of the running list: that is D4's collector's, later.
-  assert.deepEqual(build(fresh).runningNow.map((r) => r.key), [])
+  // The running one is in the running list through its collector — one entry, never a row of its own.
+  assert.deepEqual(build(fresh).runningNow.map((r) => [r.key, r.kind, r.running]), [[collectorKey, 'noreply', 1]])
+  assert.equal(build(fresh).running, 1)
 })
 
 test('a run its journal knows and no record of which was counted is still a node of its session', () => {
@@ -691,7 +698,8 @@ test('a run its journal knows and no record of which was counted is still a node
   const vm = build(over)
   // The session is older than a day and has no agent record: its run brings it into the tree.
   const w = node(vm, wfKey)
-  assert.deepEqual([w.children.length, w.agentCount, w.state], [0, 2, 'unknown'])
+  // 1.6 P5b (D4): pinned no child (P2b); its two members are its collector's now.
+  assert.deepEqual([w.children.map((c) => c.key), w.agentCount, w.state], [[collectorKey], 2, 'unknown'])
   assert.deepEqual([w.usage, w.duration], ['–', '–'], 'nothing of it was counted: dashes, never zeros')
   // A run whose journal is older than the retention is not.
   assert.equal(build({ ...over, runs: [run(over.runs![0].agents, { lastTs: NOW - 8 * DAY })] }).roots.length, 0)
@@ -814,9 +822,14 @@ test('a tally counts every attempt below a node once, under the state its row sh
   assert.deepEqual([waiting.state, waiting.tally], ['running', { started: 1, done: 0, failed: 0, retried: 0, stopped: 0, running: 1, unknown: 0 }])
   assert.equal(waiting.tallyText, '1 started · ~1 ●')
   assert.equal(waiting.tallySpoken, '1 started, about 1 running')
+  // 1.6 P5b (D4): the run's two journal-only members are its collector's — which carries their
+  // tally, one completed, one running beside the replacement.
+  const collector = node(vm, collectorKey)
+  assert.deepEqual(collector.tally, { started: 2, done: 1, failed: 0, retried: 0, stopped: 0, running: 1, unknown: 0 })
+  assert.equal(collector.tallyText, '2 started · 1 ✓ · ~1 ●')
   // Every node without an agent below it has no tally at all: no "0 started" claimed anywhere.
   for (const n of all(vm.roots)) {
-    const has = n.key === rootKey || n.key === wfKey || n.key === waiting.key
+    const has = n.key === rootKey || n.key === wfKey || n.key === waiting.key || n.key === collectorKey
     assert.equal(n.tally !== null, has, n.key)
     assert.equal(n.tallyText !== null, has, n.key)
     assert.equal(n.tallySpoken !== null, has, n.key)
@@ -1125,7 +1138,8 @@ function hexId(n: number): string {
 
 /**
  * The ideas round's large run, in one session: 427 agents, 164 of them with a transcript and 263
- * its journal started without one (until P5b counted, not drawn). The records started a minute
+ * its journal started without one — drawn in one collector, the run's last child (1.6 P5b, D4),
+ * so the run has 165 children. The records started a minute
  * apart five hours ago, so they are drawn in the order of their number; 150 completed, 12 failed,
  * 2 open; of the journal-only ones all but 8 completed. `extra` more journal-only agents join
  * the run, completed; `running` lets the last record write a minute ago.
@@ -1164,11 +1178,12 @@ test('only what is open goes to the page: a closed run of 427 agents is one sess
   const grown = page(bigWorld(100).over)
   assert.equal(grown.roots[0].tallyText, '527 started · 505 ✓ · 12 ✕ · ~10 ?')
   assert.equal(JSON.stringify(grown).length, size)
-  // Opened, the session shows its run — closed in turn, with its own counts.
+  // Opened, the session shows its run — closed in turn, with its own counts: its 164 agents and
+  // the collector of its 263 without a counted reply (1.6 P5b, D4: pinned 164 children before).
   const opened = page({ ...over, expanded: [rootKey] })
   const w = node(opened, wfKey)
   assert.deepEqual([w.children.length, w.hasChildren, w.childrenTotal, w.childrenMore, w.agentCount],
-    [0, true, 164, 0, 427])
+    [0, true, 165, 0, 427])
   assert.equal(w.tallyText, root.tallyText)
 })
 
@@ -1179,27 +1194,31 @@ test('an opened run shows fifty agents, the running and the selected one pinned 
   const vm = page({ ...over, expanded: [rootKey, wfKey], selected: picked })
   const w = node(vm, wfKey)
   assert.equal(w.children.length, MAX_GROUP_CHILDREN)
-  assert.equal(w.childrenTotal, 164)
+  assert.equal(w.childrenTotal, 165)
   assert.equal(w.childrenMore, w.childrenTotal - MAX_GROUP_CHILDREN)
-  // The first 48 in the order the page draws them, the two pinned ones in their own places.
-  assert.deepEqual(w.children.map((c) => c.key), [...ids.slice(0, 48).map(agentKey), picked, live])
+  // The first 47 in the order the page draws them, the three pinned ones in their own places —
+  // 1.6 P5b (D4): the collector is pinned too, always last (pinned 48 and the two before).
+  assert.deepEqual(w.children.map((c) => c.key), [...ids.slice(0, 47).map(agentKey), picked, live, collectorKey])
   assert.equal(node(vm, live).state, 'running')
   assert.equal(vm.selected?.key, picked)
   assert.equal(vm.note, null)
-  // The agents shown are leaves here: nothing below them, nothing more to say.
+  // The agents shown are leaves here: nothing below them, nothing more to say — nor has the
+  // collector, which counts its members and lists none.
   for (const c of w.children) assert.deepEqual([c.hasChildren, c.childrenTotal, c.childrenMore], [false, 0, 0], c.key)
-  // Without a selection and nothing running, the window is the first fifty.
+  // Without a selection and nothing running, the window is the first forty-nine and the collector.
   const plain = page({ ...bigWorld().over, expanded: [rootKey, wfKey] })
-  assert.deepEqual(node(plain, wfKey).children.map((c) => c.key), ids.slice(0, MAX_GROUP_CHILDREN).map(agentKey))
+  assert.deepEqual(node(plain, wfKey).children.map((c) => c.key),
+    [...ids.slice(0, MAX_GROUP_CHILDREN - 1).map(agentKey), collectorKey])
 })
 
 test('each "more" step shows fifty children more, at most MAX_MORE_PAGES steps; the counts follow', () => {
   const { over, ids } = bigWorld()
   const shown = (pages: number): TreeNode => node(page({ ...over, expanded: [rootKey, wfKey], more: [{ key: wfKey, pages }] }), wfKey)
-  assert.deepEqual([shown(1).children.length, shown(1).childrenMore], [100, 64])
-  assert.deepEqual([shown(2).children.length, shown(2).childrenMore], [150, 14])
-  assert.deepEqual([shown(3).children.length, shown(3).childrenMore], [164, 0])
-  assert.deepEqual(shown(3).children.map((c) => c.key), ids.map(agentKey))
+  // 1.6 P5b (D4): 164 agents and the collector (pinned 64, 14 and 164 before).
+  assert.deepEqual([shown(1).children.length, shown(1).childrenMore], [100, 65])
+  assert.deepEqual([shown(2).children.length, shown(2).childrenMore], [150, 15])
+  assert.deepEqual([shown(3).children.length, shown(3).childrenMore], [165, 0])
+  assert.deepEqual(shown(3).children.map((c) => c.key), [...ids.map(agentKey), collectorKey])
   // A group of 600: the last step shows 550, and the rest stays counted.
   const crowd = Array.from({ length: 600 }, (_, i) => rec(hexId(i), {
     firstTs: NOW - 5 * HOUR + i * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
@@ -2033,11 +2052,13 @@ test('the running list carries no field the page does not need, and keys it can 
   })
   assert.ok(vm.runningNow.length === 3)
   for (const r of vm.runningNow) {
+    // 1.6 P5b (D4): `running`, the running agents an entry stands for — 1 here, a collector's many.
     assert.deepEqual(Object.keys(r).sort(),
-      ['context', 'key', 'kind', 'label', 'lastTs', 'lowerBound', 'startTs', 'usage', 'waiting'])
+      ['context', 'key', 'kind', 'label', 'lastTs', 'lowerBound', 'running', 'startTs', 'usage', 'waiting'])
     assert.ok(r.key.length > 0 && r.key.length <= MAX_AGENT_KEY_CHARS, r.key)
     assert.equal(/[\\/]/.test(r.key + r.context), false, `${r.key} ${r.context}`)
     assert.ok(r.kind === 'agent' || r.kind === 'pending')
+    assert.equal(r.running, 1)
     assert.equal(typeof r.waiting, 'boolean')
     assert.equal(typeof r.lowerBound, 'boolean')
   }
@@ -2400,4 +2421,275 @@ test('a run and a session count their agents that ended on a rejected request, o
   const none = { agents: [wfRec('ffff0005', { lastTs: NOW - 30 * MIN })] }
   assert.equal(agentDetails(input(none), NOW, wfKey)?.rows.some((r) => r.label === label), false)
   assert.equal(agentDetails(input(none), NOW, rootKey)?.rows.some((r) => r.label === label), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 D4 · agents without a first reply: counted, not listed
+// ---------------------------------------------------------------------------
+
+/**
+ * An agent of run WF whose transcript holds nothing but requests the API rejected (1.6 D4): the
+ * record its first rejection made — no request, no token, its first and last line that
+ * rejection's time — and its last rejection, the same one unless said otherwise.
+ */
+function rejectedOnly(id: string, at: number, over: Partial<AgentRec> = {}): AgentRec {
+  return wfRec(id, {
+    firstTs: at, lastTs: at, models: [], input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0,
+    requests: 0, outputFinal: 0, toolCalls: 0, rejected: rejected(at), ...over,
+  })
+}
+
+/**
+ * The spec's D4 world: one run of 427 agents — 161 with counted replies, all completed; 3 whose
+ * transcripts hold nothing but requests rejected on the 5-hour limit, their failure recorded by
+ * the journal; and 263 the journal started without a transcript, all completed but 8 still open.
+ * The journal last changed half an hour ago and nothing runs.
+ */
+function collectorWorld(): { over: Partial<AgentTreeInput>; ids: string[]; rejectedIds: string[]; onlyIds: string[] } {
+  const ids = Array.from({ length: 161 }, (_, i) => hexId(0x20000 + i))
+  const rejectedIds = [0, 1, 2].map((i) => hexId(0x30000 + i))
+  const onlyIds = Array.from({ length: 263 }, (_, j) => hexId(0x10000 + j))
+  const agents = [
+    ...ids.map((id, i) => wfRec(id, { firstTs: NOW - 5 * HOUR + i * MIN, lastTs: NOW - 5 * HOUR + i * MIN + 30_000 })),
+    ...rejectedIds.map((id, i) => rejectedOnly(id, NOW - 4 * HOUR + i * MIN)),
+  ]
+  const journal = [
+    ...ids.map((id, i) => jagent(id, { step: i + 1, outcome: 'completed' })),
+    ...rejectedIds.map((id, i) => jagent(id, { step: 500 + i, outcome: 'failed' })),
+    ...onlyIds.map((id, j) => jagent(id, { step: 1000 + j, outcome: j < 8 ? null : 'completed' })),
+  ]
+  return { over: { agents, runs: [run(journal)] }, ids, rejectedIds, onlyIds }
+}
+
+test('a run\'s agents without a counted reply are one collector, its last child: counted, not listed, dashes for figures', () => {
+  const { over, ids, rejectedIds, onlyIds } = collectorWorld()
+  // The run opened and every "more" step taken: every child of the run on the page.
+  const vm = page({ ...over, expanded: [rootKey, wfKey], more: [{ key: wfKey, pages: 3 }] })
+  const w = node(vm, wfKey)
+  // 161 agents and one collector — no node for any of the 266 without a counted reply.
+  assert.deepEqual([w.children.length, w.childrenTotal, w.childrenMore], [162, 162, 0])
+  assert.deepEqual(w.children.map((c) => c.key), [...ids.map(agentKey), collectorKey])
+  assert.deepEqual(all(vm.roots).filter((n) => n.kind === 'noreply').map((n) => n.key), [collectorKey])
+  assert.equal(all(vm.roots).length, 1 + 1 + 162)
+  for (const id of [...rejectedIds, ...onlyIds]) assert.equal(all(vm.roots).some((n) => n.key === agentKey(id)), false, id)
+  // The collector: its members in its label, its count and its tally; no figure of its own.
+  const c = node(vm, collectorKey)
+  assert.equal(c.kind, 'noreply')
+  assert.equal(c.label, '266 agent(s) without a counted reply')
+  assert.deepEqual([c.usage, c.duration, c.usageAgents, c.lowerBound, c.superseded], ['–', '–', null, false, false])
+  assert.deepEqual([c.hasChildren, c.childrenTotal, c.childrenMore, c.children], [false, 0, 0, []])
+  assert.equal(c.agentCount, 266)
+  assert.deepEqual(c.tally, { started: 266, done: 255, failed: 3, retried: 0, stopped: 0, running: 0, unknown: 8 })
+  assert.equal(c.tallyText, '266 started · 255 ✓ · 3 ✕ · ~8 ?')
+  assert.deepEqual([c.state, c.derived], ['unknown', true])
+  // The run counts all 427 — the 1.5 "Agents 164" is 427 — and so does its session.
+  assert.equal(w.agentCount, 427)
+  assert.equal(w.tallyText, '427 started · 416 ✓ · 3 ✕ · ~8 ?')
+  assert.equal(node(vm, rootKey).agentCount, 427)
+  assert.equal(agentDetails(input(over), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value, '427')
+  assert.equal(agentDetails(input(over), NOW, rootKey)?.rows.find((r) => r.label === 'Agents')?.value, '427')
+  // The run and its session count the collector's rejections among theirs.
+  for (const key of [wfKey, rootKey]) {
+    assert.deepEqual(agentDetails(input(over), NOW, key)?.rows.filter((r) => r.label === 'Ended on a rejected request').map((r) => r.value),
+      ['5-hour limit (HTTP 429): 3'], key)
+  }
+  // No zero anywhere on the collector.
+  for (const v of [c.usage, c.duration, c.label, c.tallyText ?? '']) assert.equal(/(^|\s)0(\s|$)/.test(v), false, v)
+  // The markdown's tree: fifty children of the run, the collector among them — pinned, and last.
+  const text = node(build(over), wfKey)
+  assert.equal(text.children.length, MAX_GROUP_CHILDREN)
+  assert.equal(text.children[text.children.length - 1].key, collectorKey)
+  assert.equal(text.childrenMore, 162 - MAX_GROUP_CHILDREN)
+})
+
+test('the collector says in its label when every one of its agents failed before a first reply', () => {
+  const failed: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1), rejectedOnly(J2, NOW - 40 * MIN), rejectedOnly(J3, NOW - 39 * MIN)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2, outcome: 'failed' }),
+      jagent(J3, { step: 3, outcome: 'failed' }), jagent(J4, { step: 4, outcome: 'failed' })])],
+    selected: collectorKey,
+  }
+  const vm = build(failed)
+  const c = node(vm, collectorKey)
+  assert.deepEqual([c.label, c.state, c.derived], ['3 agent(s) failed before their first reply', 'failed', false])
+  assert.equal(vm.selected?.stateText, 'Failed — the workflow journal recorded a failure for each of them.')
+  assert.equal(german(() => node(build(failed), collectorKey).label), '3 Agent(en) vor der ersten Antwort fehlgeschlagen')
+  assert.equal(german(() => build(failed).selected?.stateText),
+    'Fehlgeschlagen — das Workflow-Journal hat für jeden von ihnen einen Fehlschlag aufgezeichnet.')
+  // One of them the parent failed, not the journal: the label stays, the sentence is the run's kind.
+  const parent: Partial<AgentTreeInput> = {
+    ...failed,
+    agents: [silentWf(J1), rejectedOnly(J2, NOW - 40 * MIN, { outcome: 'failed', outcomeStatus: 'failed', outcomeTs: NOW - 39 * MIN }),
+      rejectedOnly(J3, NOW - 39 * MIN)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J3, { step: 3, outcome: 'failed' }), jagent(J4, { step: 4, outcome: 'failed' })])],
+  }
+  assert.equal(node(build(parent), collectorKey).label, '3 agent(s) failed before their first reply')
+  assert.equal(build(parent).selected?.stateText, 'Failed — every one of these agents has a recorded outcome, and none completed.')
+  // One of them still open: the label counts them all without saying how they ended.
+  const open: Partial<AgentTreeInput> = {
+    ...failed,
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2, outcome: 'failed' }),
+      jagent(J3, { step: 3, outcome: 'failed' }), jagent(J4, { step: 4 })])],
+  }
+  assert.deepEqual([node(build(open), collectorKey).label, node(build(open), collectorKey).state],
+    ['3 agent(s) without a counted reply', 'unknown'])
+  assert.equal(german(() => node(build(open), collectorKey).label), '3 Agent(en) ohne gezählte Antwort')
+})
+
+test('the collector\'s state is its members\' by the run\'s rule, in its own sentences, in English and in German', () => {
+  const at = (runs: JournalAgent[], agents: AgentRec[] = [], lastTs = NOW - 30 * MIN): Partial<AgentTreeInput> => ({
+    agents: [silentWf(J1), ...agents], runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), ...runs], { lastTs })], selected: collectorKey,
+  })
+  const cases: Array<[string, Partial<AgentTreeInput>, NodeState, string, string]> = [
+    ['one runs', at([jagent(J2, { step: 2 }), jagent(J3, { step: 3, outcome: 'failed' })], [], NOW - 2 * MIN), 'running',
+      'Running — inferred: at least one of these agents is running.',
+      'Läuft — abgeleitet: Mindestens einer dieser Agenten läuft.'],
+    ['one is open', at([jagent(J2, { step: 2 }), jagent(J3, { step: 3, outcome: 'completed' })]), 'unknown',
+      'Unknown — inferred: not every one of these agents has a recorded outcome, and none is running.',
+      'Unbekannt — abgeleitet: Nicht für jeden dieser Agenten ist ein Ausgang aufgezeichnet, und keiner läuft.'],
+    // The journal can close a member that never wrote a transcript: a result…
+    ['one completed', at([jagent(J2, { step: 2, outcome: 'completed' }), jagent(J3, { step: 3, outcome: 'failed' })]), 'done',
+      'Done — every one of these agents has a recorded outcome, and at least one completed.',
+      'Fertig — für jeden dieser Agenten ist ein Ausgang aufgezeichnet, und mindestens einer wurde abgeschlossen.'],
+    // …or a replacement: its failure stands, the replaced one is retried.
+    ['one failed, one replaced', at([jagent(J2, { step: 2, outcome: 'failed' }), jagent(J3, { step: 3, outcome: 'stopped', supersededBy: J1 })]),
+      'failed', 'Failed — every one of these agents has a recorded outcome, and none completed.',
+      'Fehlgeschlagen — für jeden dieser Agenten ist ein Ausgang aufgezeichnet, und keiner wurde abgeschlossen.'],
+    // A stop the parent recorded for a rejection-only agent that nothing replaced.
+    ['stopped', at([jagent(J2, { step: 2 })], [rejectedOnly(J2, NOW - 40 * MIN, { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 39 * MIN })]),
+      'stopped', 'Stopped — every one of these agents has a recorded outcome, and none completed: the last attempt of each step was stopped.',
+      'Gestoppt — für jeden dieser Agenten ist ein Ausgang aufgezeichnet, und keiner wurde abgeschlossen: Der letzte Versuch jedes Schritts wurde gestoppt.'],
+  ]
+  for (const [what, over, state, en, de] of cases) {
+    const vm = build(over)
+    const c = node(vm, collectorKey)
+    assert.deepEqual([c.state, c.derived], [state, state === 'running' || state === 'unknown'], what)
+    assert.equal(vm.selected?.stateText, en, what)
+    assert.equal(german(() => build(over).selected?.stateText), de, what)
+    // The run's tally and the collector's agree on every member they share.
+    const t = c.tally
+    assert.ok(t, what)
+    assert.equal(t.done + t.failed + t.retried + t.stopped + t.running + t.unknown, t.started, what)
+  }
+  // Every member superseded — each attempt followed by a later one, a row of the run: their own
+  // ends decide, since the tally counts them all as retried. A completed step run again and a
+  // replaced one: done.
+  const redone = at([jagent(J2, { step: 1, outcome: 'completed', supersededBy: J1 }), jagent(J3, { step: 3, outcome: 'stopped', supersededBy: J1 })])
+  assert.deepEqual([node(build(redone), collectorKey).state, node(build(redone), collectorKey).tallyText], ['done', '2 started · 2 ↻'])
+  // A failure retried and a replaced one: failed — none completed — not stopped.
+  const retried = at([jagent(J2, { step: 1, outcome: 'failed', supersededBy: J1 }), jagent(J3, { step: 3, outcome: 'stopped', supersededBy: J1 })])
+  assert.equal(node(build(retried), collectorKey).state, 'failed')
+})
+
+test('a later counted reply moves an agent out of the collector into a node of its own', () => {
+  const before: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1), rejectedOnly(J2, NOW - 40 * MIN), rejectedOnly(J3, NOW - 39 * MIN)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2, outcome: 'failed' }), jagent(J3, { step: 3 })])],
+  }
+  assert.deepEqual(node(build(before), wfKey).children.map((c) => c.key), [agentKey(J1), collectorKey])
+  assert.equal(node(build(before), collectorKey).agentCount, 2)
+  // J3's retry went through: its first counted reply, which clears its rejection.
+  const replied = rejectedOnly(J3, NOW - 39 * MIN, { requests: 1, outputFinal: 1, input: 40, output: 12, lastTs: NOW - 38 * MIN, rejected: null })
+  const after: Partial<AgentTreeInput> = { ...before, agents: [silentWf(J1), rejectedOnly(J2, NOW - 40 * MIN), replied] }
+  const vm = build(after)
+  assert.deepEqual(node(vm, wfKey).children.map((c) => c.key), [agentKey(J1), agentKey(J3), collectorKey])
+  assert.deepEqual([node(vm, collectorKey).agentCount, node(vm, collectorKey).label], [1, '1 agent(s) failed before their first reply'])
+  assert.notEqual(node(vm, agentKey(J3)).usage, '–')
+  assert.equal(node(vm, wfKey).agentCount, 3)
+  // Its last member replied too: no collector.
+  const all3: Partial<AgentTreeInput> = { ...before, agents: [silentWf(J1), rejectedOnly(J2, NOW - 40 * MIN, { requests: 2, input: 9, output: 3, rejected: null }), replied] }
+  assert.equal(all(build(all3).roots).some((n) => n.kind === 'noreply'), false)
+})
+
+test('an agent outside a run whose transcript holds only rejected requests is a node of its own, with dashes for its figures', () => {
+  // Rejected first at 11:35, last at 11:40: its record has no request and no token.
+  const direct = rec('bbbb0009', {
+    firstTs: NOW - 25 * MIN, lastTs: NOW - 25 * MIN, models: [], input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0,
+    reasoning: 0, requests: 0, outputFinal: 0, toolCalls: 0, rejected: rejected(NOW - 20 * MIN),
+  })
+  const over: Partial<AgentTreeInput> = { agents: [direct], selected: agentKey('bbbb0009') }
+  const vm = build(over)
+  const n = node(vm, agentKey('bbbb0009'))
+  assert.deepEqual([n.kind, n.state, n.usage, n.duration, n.lowerBound], ['agent', 'unknown', '–', '–', false])
+  assert.equal(all(vm.roots).some((x) => x.kind === 'noreply'), false)
+  assert.equal(vm.selected?.stateText,
+    'Unknown — inferred: no result was recorded; the last request, at 11:40, was rejected — 5-hour limit (HTTP 429).')
+  const rows = Object.fromEntries((vm.selected?.rows ?? []).map((r) => [r.label, r.value]))
+  for (const label of ['Duration', 'Turns', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls']) {
+    assert.equal(rows[label], '–', label)
+  }
+  assert.deepEqual([rows.Started, rows['Last activity'], rows['Last request']], ['11:35', '11:40', 'rejected at 11:40 — 5-hour limit (HTTP 429)'])
+  assert.equal((vm.selected?.rows ?? []).some((r) => /^0(\s|$)/.test(r.value)), false)
+  // Within its ten minutes it runs, and is listed like any running agent.
+  const fresh = build({ agents: [{ ...direct, rejected: rejected(NOW - 2 * MIN) }] })
+  assert.deepEqual(fresh.runningNow.map((r) => [r.key, r.kind, r.usage, r.running]), [[agentKey('bbbb0009'), 'agent', '–', 1]])
+})
+
+test('running counts a collector\'s running members, and the running list carries the collector once for all of them', () => {
+  // A run at work: one agent writing, one rejection-only agent rejected three minutes ago, and two
+  // agents the journal started that no transcript shows yet.
+  const over: Partial<AgentTreeInput> = {
+    agents: [wfRec(J1, { firstTs: NOW - 30 * MIN, lastTs: NOW - MIN }), rejectedOnly(J2, NOW - 3 * MIN)],
+    runs: [run([jagent(J1, { step: 1 }), jagent(J2, { step: 2 }), jagent(J3, { step: 3 }), jagent(J4, { step: 4 })], { lastTs: NOW - MIN })],
+  }
+  const vm = page(over)
+  const whole = build(over)
+  const c = node(whole, collectorKey)
+  assert.deepEqual([c.state, c.tally?.running, c.startTs], ['running', 3, NOW - 3 * MIN])
+  // The host's number, the session's tally and the running list say the same: four.
+  assert.equal(vm.running, 4)
+  assert.equal(vm.roots[0].tally?.running, 4)
+  assert.deepEqual(vm.runningNow.map((r) => [r.key, r.kind, r.running]), [[agentKey(J1), 'agent', 1], [collectorKey, 'noreply', 3]])
+  assert.equal(vm.runningNow.reduce((s, r) => s + r.running, 0) , vm.running)
+  // The collector's entry: its label, its run's context, a dash for its usage, no bound, no wait —
+  // and its start the earliest first line of a member with a record.
+  const item = vm.runningNow[1]
+  assert.deepEqual(item, {
+    key: collectorKey, kind: 'noreply', label: '3 agent(s) without a counted reply', context: 'Session 9d0eb37a · Workflow cfe7718d',
+    usage: '–', lowerBound: false, startTs: NOW - 3 * MIN, lastTs: NOW - 3 * MIN, waiting: false, running: 3,
+  })
+  // Its row opens its details from the list, the tree closed.
+  const picked = page({ ...over, selected: collectorKey })
+  assert.equal(picked.selected?.key, collectorKey)
+  // Without a member that has a record, it has no start: last in the list.
+  const noRecord: Partial<AgentTreeInput> = { ...over, agents: [wfRec(J1, { firstTs: NOW - 30 * MIN, lastTs: NOW - MIN })] }
+  const listed = page(noRecord).runningNow
+  assert.deepEqual(listed.map((r) => [r.key, r.startTs, r.running]), [[agentKey(J1), NOW - 30 * MIN, 1], [collectorKey, null, 3]])
+  assert.equal(page(noRecord).running, 4)
+  // A collector none of whose members runs is not listed.
+  const quiet = page({ ...over, agents: [wfRec(J1, { lastTs: NOW - 40 * MIN }), rejectedOnly(J2, NOW - 45 * MIN)],
+    runs: [run([jagent(J1, { step: 1 }), jagent(J2, { step: 2 }), jagent(J3, { step: 3 })], { lastTs: NOW - 40 * MIN })] })
+  assert.deepEqual([quiet.running, quiet.runningNow], [0, []])
+  // A superseded attempt counts where the tally counts it — retried — and is not listed as running.
+  const revived: Partial<AgentTreeInput> = {
+    agents: [wfRec(J1, { lastTs: NOW - MIN, outcome: 'completed', outcomeStatus: 'completed', outcomeTs: NOW - 20 * MIN }), silentWf(J2)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed', supersededBy: J2 }), jagent(J2, { step: 1, attempt: 2, outcome: 'completed' })])],
+  }
+  const r = build(revived)
+  assert.deepEqual([node(r, agentKey(J1)).state, node(r, agentKey(J1)).superseded, r.roots[0].tally?.retried], ['running', true, 1])
+  assert.deepEqual([r.running, r.runningNow], [0, []])
+})
+
+test('the collector\'s details: its tally in words, why it has no figures, and how many of its agents ended on a rejected request', () => {
+  const { over } = collectorWorld()
+  const d = agentDetails(input(over), NOW, collectorKey)
+  assert.ok(d)
+  assert.deepEqual([d.key, d.title, d.state, d.derived, d.id], [collectorKey, '266 agent(s) without a counted reply', 'unknown', true, null])
+  assert.deepEqual(d.rows, [
+    { label: 'Agents', value: '266 started, 255 done, 3 failed, about 8 unknown', kind: 'sentence' },
+    {
+      label: 'Usage', value: '–', kind: 'sentence',
+      note: 'These agents were started, but none of them wrote a reply that could be counted — their transcripts hold no response, or only rejected requests.',
+    },
+    { label: 'Ended on a rejected request', value: '5-hour limit (HTTP 429): 3', kind: 'sentence' },
+  ])
+  const de = german(() => agentDetails(input(over), NOW, collectorKey))
+  assert.deepEqual(de?.rows.map((r) => [r.label, r.value, r.note]), [
+    ['Agenten', '266 gestartet, 255 fertig, 3 fehlgeschlagen, etwa 8 unbekannt', undefined],
+    ['Verbrauch', '–', 'Diese Agenten wurden gestartet, aber keiner hat eine zählbare Antwort geschrieben — ihre Transkripte enthalten keine Antwort oder nur abgelehnte Anfragen.'],
+    ['Endete mit abgelehnter Anfrage', '5-Stunden-Limit (HTTP 429): 3', undefined],
+  ])
+  assert.equal(de?.title, '266 Agent(en) ohne gezählte Antwort')
+  // Its last activity is the latest line of a member with a record — a rejection here.
+  assert.equal(d.lastTs, NOW - 4 * HOUR + 2 * MIN)
 })

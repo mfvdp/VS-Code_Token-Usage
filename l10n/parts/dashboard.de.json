@@ -224,5 +224,7 @@
   "{0} · {1} · {2} · {3} % of the day · {1} total {4}": "{0} · {1} · {2} · {3} % des Tages · {1} gesamt {4}",
   "{0} · {1} · {2} · {3} % of the week · {1} total {4}": "{0} · {1} · {2} · {3} % der Woche · {1} gesamt {4}",
   "{0}: {1} of {2}": "{0}: {1} von {2}",
+  "~1 of them running": "~1 davon läuft",
+  "~{0} of them running": "~{0} davon laufen",
   "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ kennzeichnet eine Untergrenze: Die ältesten Stunden des Zeitraums sind bereits zu Tagessummen zusammengefasst"
 }

@@ -439,6 +439,13 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.',
     'Running — inferred: the transcript changed {0}; its last request was rejected — {1}.',
     'Running — inferred: the transcript changed {0}; its last request was rejected.',
+    // 1.6 D4 (P5b): a run's collector — its agents without a counted reply — by its members' states.
+    'Running — inferred: at least one of these agents is running.',
+    'Unknown — inferred: not every one of these agents has a recorded outcome, and none is running.',
+    'Done — every one of these agents has a recorded outcome, and at least one completed.',
+    'Failed — every one of these agents has a recorded outcome, and none completed.',
+    'Failed — the workflow journal recorded a failure for each of them.',
+    'Stopped — every one of these agents has a recorded outcome, and none completed: the last attempt of each step was stopped.',
   ]
   // The run sentences 1.6 replaced are written nowhere any more.
   for (const gone of ['Failed — at least one agent of this run has a recorded failure.',
@@ -470,6 +477,26 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
   const covered = (s: string): boolean => quoted.includes(s)
     || quoted.some((q) => timeless(q) === s) || (timeless(s) !== null && quoted.includes(timeless(s) as string))
   assert.deepEqual(written.filter((s) => !covered(s)), [], 'a state sentence the agents page does not quote')
+})
+
+test('docs/agents.md names a run\'s collector as the tree builder writes it: both labels, the sentence of its details, its running count', () => {
+  // 1.6 D4 (P5b): the agents of a run without a counted reply are one node — the page says how it
+  // is labelled, why it has no figures, and how the running list and its heading count it.
+  const src = readDoc('src/agentTreeBuild.ts')
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const [written, example] of [
+    ['{0} agent(s) without a counted reply', '263 agent(s) without a counted reply'],
+    ['{0} agent(s) failed before their first reply', '3 agent(s) failed before their first reply'],
+    ['These agents were started, but none of them wrote a reply that could be counted — their transcripts hold no response, or only rejected requests.',
+      'These agents were started, but none of them wrote a reply that could be counted — their transcripts hold no response, or only rejected requests.'],
+  ]) {
+    assert.ok(src.includes(`'${written}'`), `src/agentTreeBuild.ts no longer writes: ${written}`)
+    assert.ok(flat.includes(example), `docs/agents.md does not quote: ${example}`)
+  }
+  assert.ok(readDoc('src/webview/main.ts').includes("tr('~{0} of them running'"), 'the page no longer says how many of a collector run')
+  for (const claim of ['`~10 of them running`', '`Running now (11)`', '`(~10 of them running)`', '### Agents without a counted reply']) {
+    assert.ok(doc.agents.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
 })
 
 test('docs/agents.md states the limits the tree, the push and the sanitisers work to', () => {

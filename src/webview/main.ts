@@ -1447,8 +1447,11 @@ function sDrill(): string {
  * `stopped` (1.6): the parent recorded a stop — an end, but no failure.
  */
 const AGENT_STATES = ['running', 'done', 'failed', 'stopped', 'unknown', 'active', 'idle'];
-/** The kinds of node. Only these ever reach a class name. */
-const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending'];
+/**
+ * The kinds of node. Only these ever reach a class name. `noreply` (1.6 D4): a run's collector —
+ * the run's agents without a counted reply, counted in one row, never listed.
+ */
+const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending', 'noreply'];
 /**
  * Far deeper than the tree builder ever nests (MAX_TREE_DEPTH in src/agentTree.ts, with the
  * session and the workflow run above it), so the guard only ever stops a payload that is not a
@@ -1628,10 +1631,7 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   // 1.6 D7: an attempt the workflow journal started its step again after — dimmed, its own state kept.
   const superseded = n.superseded === true;
   const label = orDash(n.label);
-  // The name breaks only between its parts: "Explore · claude-opus-5 · a94f" in a narrow
-  // sidebar wraps at a separator, never at the hyphen inside a model id.
-  const parts = typeof n.label === 'string' && n.label !== '' ? n.label.split(' · ') : ['–'];
-  const labelHtml = parts.map((p: string) => '<span class="nobr">' + orDash(p) + '</span>').join(' · ');
+  const labelHtml = agentLabel(n.label, kind);
   // Usage and duration as the view model worded them and, only while the node runs, the time
   // since it started, ticking. A lower bound is not marked here: almost every finished agent's
   // output is one, and a ⚠ on nearly every row says nothing — the details mark it, and one line
@@ -1680,6 +1680,19 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
 }
 
 /**
+ * A node's name as the row writes it. It breaks only between its parts: "Explore ·
+ * claude-opus-5 · a94f" in a narrow sidebar wraps at a separator, never at the hyphen inside a
+ * model id. A run's collector (1.6 D4) is named in words — "263 agent(s) without a counted
+ * reply" — which wrap between them like any sentence: kept on one line, the name is wider than a
+ * narrow sidebar.
+ */
+function agentLabel(v: Payload, kind: string): string {
+  if (kind === 'noreply') return orDash(v);
+  const parts = typeof v === 'string' && v !== '' ? v.split(' · ') : ['–'];
+  return parts.map((p: string) => '<span class="nobr">' + orDash(p) + '</span>').join(' · ');
+}
+
+/**
  * 1.6 N2: where the selected node's details are drawn, and whether they already are. The panel
  * stands under one row of the node — its tree row or its row in the running list — and only
  * under one: `drawn` is set by the first entry that takes it.
@@ -1717,15 +1730,15 @@ function agentShown(list: Payload, expanded: string[], key: string, depth: numbe
  * running — the live clock — and its usage, and under them where it sits. The row is the same
  * button a tree row is, with the same message, so it opens the same details; `data-list` tells
  * it apart from that tree row, which may be on the page as well, when the focus is put back
- * after a push. A pending launch reads as the hint it is, as in the tree.
+ * after a push. A pending launch reads as the hint it is, as in the tree. A run's collector (1.6
+ * D4) is one row for all of its agents without a counted reply, and says how many of them run.
  */
 function agentNowRow(it: Payload, panel: AgentPanel | null): string {
   const key = typeof it.key === 'string' ? it.key : '';
   // 1.6 N2: the row is pressed while the details stand under it, and they stand in its item.
   const on = panelHere(panel, 'now', key);
-  const kind = it.kind === 'pending' ? 'pending' : 'agent';
-  const parts = typeof it.label === 'string' && it.label !== '' ? it.label.split(' · ') : ['–'];
-  const labelHtml = parts.map((p: string) => '<span class="nobr">' + orDash(p) + '</span>').join(' · ');
+  const kind = it.kind === 'pending' || it.kind === 'noreply' ? String(it.kind) : 'agent';
+  const labelHtml = agentLabel(it.label, kind);
   const start = agentTs(it.startTs);
   const figures: string[] = [];
   if (start !== null) figures.push(tr('running for {0}', liveSince(start)));
@@ -1734,6 +1747,10 @@ function agentNowRow(it: Payload, panel: AgentPanel | null): string {
   const where: string[] = typeof it.context === 'string' && it.context !== ''
     ? it.context.split(' · ').map((p: string) => orDash(p)) : [];
   if (it.waiting === true) where.push(tr('waits for a child agent'));
+  const members = typeof it.running === 'number' && Number.isInteger(it.running) && it.running >= 1 ? it.running : 0;
+  if (kind === 'noreply' && members > 0) {
+    where.push(members === 1 ? tr('~1 of them running') : tr('~{0} of them running', esc(fullNum(members))));
+  }
   return '<li class="ag-k-' + kind + '"><button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
     + '" data-list="now" aria-pressed="' + on + '">' + agentGlyph('running', true)
     + '<span class="ag-text"><span class="ag-label">' + labelHtml + '</span>'
@@ -1748,7 +1765,9 @@ function agentNowRow(it: Payload, panel: AgentPanel | null): string {
  * to open the tree to find one. Longest-running first, as the view model ordered them, and
  * what it left out counted under them. With nothing running it is one quiet line and no
  * heading. A payload without the list — an older build's — says nothing about what runs, not
- * that nothing does.
+ * that nothing does. The heading counts the running agents (1.6 §2.3): the view model's
+ * `running`, which a run's collector adds its running members to (D4) — the number the sessions'
+ * tallies give —, where it is one; the rows otherwise.
  */
 function agentsNow(a: Payload, panel: AgentPanel | null): string {
   if (!Array.isArray(a.runningNow)) return '';
@@ -1756,8 +1775,10 @@ function agentsNow(a: Payload, panel: AgentPanel | null): string {
   const n = a.runningMore;
   const more = typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.round(n) : 0;
   if (!items.length && !more) return '<p class="ag-now meta">' + tr('No agent is running.') + '</p>';
+  const r = a.running;
+  const count = typeof r === 'number' && Number.isInteger(r) && r >= items.length + more ? r : items.length + more;
   return '<div class="ag-now"><div class="name" role="heading" aria-level="3">'
-    + tr('Running now ({0})', items.length + more) + '</div>'
+    + tr('Running now ({0})', count) + '</div>'
     + (items.length ? '<ul>' + items.map((it: Payload) => agentNowRow(it, panel)).join('') + '</ul>' : '')
     + (more ? '<p class="meta">' + tr('and {0} more', more) + '</p>' : '')
     + '</div>';

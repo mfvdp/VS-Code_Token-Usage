@@ -24,6 +24,7 @@ import {
 } from './fixtures/viewFixtures'
 import { deltaBadge } from '../src/render'
 import { ROOT } from './helpers/nls'
+import { agentWorld } from './fixtures/agentWorld'
 import { toolAgg } from './helpers/toolAgg'
 
 function fullVm(): ViewModel {
@@ -1022,7 +1023,7 @@ function detailsHead(line: string): boolean {
 function runningItem(over: Partial<RunningItem> = {}): RunningItem {
   return {
     key: 'a:a94f0001', kind: 'agent', label: 'Explore · claude-opus-5 · a94f', context: 'Session 12345678 · Workflow cfe7718d',
-    usage: '12.3K', lowerBound: false, startTs: NOW - 300_000, lastTs: NOW - 5_000, waiting: false, ...over,
+    usage: '12.3K', lowerBound: false, startTs: NOW - 300_000, lastTs: NOW - 5_000, waiting: false, running: 1, ...over,
   }
 }
 
@@ -1035,6 +1036,9 @@ test('the running list prints every item, marks the waiting ones and the lower b
       runningItem(),
       runningItem({ kind: 'pending', key: 'l:toolu_03', label: 'Plan · sonnet · launched', usage: '–', context: 'Session 12345678' }),
       runningItem({ key: 'a:c3d4', label: 'Explore | a\nb', context: 'Session 12345678 · pro|ject' }),
+      // 1.6 D4: a run's collector — one line for its agents without a counted reply, and how many run.
+      runningItem({ kind: 'noreply', key: 'n:12345678|wf_cfe7718d', label: '263 agent(s) without a counted reply', usage: '–', running: 10 }),
+      runningItem({ kind: 'noreply', key: 'n:12345678|wf_0133faf9', label: '2 agent(s) without a counted reply', usage: '–', running: 1 }),
     ],
     runningMore: 3,
   }
@@ -1050,6 +1054,8 @@ test('the running list prints every item, marks the waiting ones and the lower b
     '- [~Running] Plan · sonnet · launched · Session 12345678 · –',
     // A pipe and a newline stay text: one item, one line.
     '- [~Running] Explore \\| a b · Session 12345678 · pro\\|ject · 12.3K',
+    '- [~Running] 263 agent(s) without a counted reply · Session 12345678 · Workflow cfe7718d · – (~10 of them running)',
+    '- [~Running] 2 agent(s) without a counted reply · Session 12345678 · Workflow cfe7718d · – (~1 of them running)',
     '_and 3 more_',
   ])
   // The mark is explained under the tree, once, although no line of the tree carries it.
@@ -1352,4 +1358,36 @@ test('the markdown tree speaks German with the shipped bundle', () => {
   assert.ok(lines.includes('| Detail | Wert |'), lines.join('\n'))
   assert.ok(lines.some((l) => l.startsWith('| Zustand | Läuft — abgeleitet: ')), lines.join('\n'))
   assert.ok(lines.includes('| Gestartet von | Sitzung sess-alp |'), lines.join('\n'))
+})
+
+test('a run\'s collector is one line of the markdown tree, the last under its run: its tally after its label, dashes for its figures', () => {
+  // 1.6 D4, on the Agents world's records: its run's two agents without a counted reply — one
+  // whose transcript holds only a rejected request, one the journal started with no transcript.
+  const { agg } = agentWorld()
+  const input = makeInput({ agg, cfg: makeConfig() })
+  const print = (): string[] => sectionOf(markdownDocument(buildViewModel(input), agentTreeFor(input, 'text')), '## Agents')
+  const lines = print()
+  const tree = lines.slice(lines.indexOf('### Sessions and agents'))
+  const run = tree.findIndex((l) => l.startsWith('  - [~Running] Workflow cfe7718d'))
+  assert.ok(run >= 0, tree.join('\n'))
+  const under = tree.slice(run + 1).filter((l, i, all) => all.slice(0, i + 1).every((x) => x.startsWith('    - ')))
+  assert.equal(under[under.length - 1], '    - [~Running] 2 agent(s) without a counted reply (2 started · 1 ✕ · ~1 ●) · – · –', under.join('\n'))
+  assert.equal(under.filter((l) => l.includes('without a counted reply')).length, 1)
+  // The running list: one line for both, saying how many of them run.
+  assert.ok(lines.includes('- [~Running] 2 agent(s) without a counted reply · Session 3f9a2c1d · Workflow cfe7718d · – (~1 of them running)'),
+    lines.join('\n'))
+  // In German.
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  let de: string[] = []
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    de = sectionOf(markdownDocument(buildViewModel(input), agentTreeFor(input, 'text')), '## Agenten')
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.ok(de.includes('    - [~Läuft] 2 Agent(en) ohne gezählte Antwort (2 gestartet · 1 ✕ · ~1 ●) · – · –'), de.join('\n'))
+  assert.ok(de.includes('- [~Läuft] 2 Agent(en) ohne gezählte Antwort · Sitzung 3f9a2c1d · Workflow cfe7718d · – (~1 davon läuft)'),
+    de.join('\n'))
 })

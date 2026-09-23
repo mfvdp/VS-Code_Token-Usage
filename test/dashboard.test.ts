@@ -2988,6 +2988,8 @@ const AK = {
   a3: 'a:/p/-home-u-repo/9d0eb37a/subagents/agent-c3d4.jsonl',
   l1: 'l:toolu_01ABCDEF',
   s2: 's:/p/-home-u-repo/1234abcd.jsonl',
+  // 1.6 D4: the run's collector.
+  n1: 'n:9d0eb37a|wf_cfe7718d',
 }
 
 /**
@@ -3048,7 +3050,7 @@ const tallyMarkup = (t: Record<string, unknown>): string => tallyHtml(String(t.t
 function runningItem(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     key: AK.a1, kind: 'agent', label: 'Explore · Opus 5 · a94f', context: 'Session 9d0eb37a · Workflow cfe7718d · repo',
-    usage: '12.3K', lowerBound: false, startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, waiting: false, ...over,
+    usage: '12.3K', lowerBound: false, startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, waiting: false, running: 1, ...over,
   }
 }
 
@@ -4270,7 +4272,9 @@ test('the agent tree speaks German on a German page', () => {
     '{0} more · {1} not shown', '{0} more', '{0} not shown',
     'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.',
     // 1.5.1: the running list.
-    'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent']
+    'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent',
+    // 1.6 D4: how many of a collector's agents run.
+    '~1 of them running', '~{0} of them running']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -4334,6 +4338,14 @@ test('the agent tree speaks German on a German page', () => {
   assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
   assert.equal(section({ agents: agentTree({ roots: [] }) }),
     '<p class="empty">Keine Claude-Code-Sitzung in den letzten 7 Tagen.</p>')
+  // 1.6 D4: a collector's entry says in German how many of its agents run, in German digits.
+  const collected = (running: number): string => section({ agents: agentTree({ running: running + 1, runningNow: [
+    runningItem(), runningItem({ key: AK.n1, kind: 'noreply', label: '1.263 Agent(en) ohne gezählte Antwort', usage: '–',
+      startTs: null, lastTs: null, running }),
+  ] }) })
+  assert.ok(collected(1234).indexOf('<div class="name" role="heading" aria-level="3">Laufen gerade (1235)</div>') >= 0, collected(1234))
+  assert.ok(collected(1234).indexOf('<span>~1.234 davon laufen</span>') >= 0, collected(1234))
+  assert.ok(collected(1).indexOf('<span>~1 davon läuft</span>') >= 0, collected(1))
 })
 
 test('the tree the view model builds reaches the page with its dashes, its marks and its derivations', () => {
@@ -4438,11 +4450,14 @@ test('the details the view model builds open under the row that was clicked, and
 test('the running list the view model builds reaches the page first, the tree closed under it', () => {
   const vm = buildViewModel(makeInput({ agg: agentWorld('session').agg, cfg: makeConfig({ 'tokenPace.attribution': 'session' }) }))
   const items = vm.agents.runningNow
-  // The world's running agent and its launch waiting for a transcript.
-  assert.deepEqual(items.map((r) => r.kind), ['agent', 'pending'])
+  // The world's running agent, its run's collector (1.6 D4) — one entry for its agents without a
+  // counted reply, one of which runs — and its launch waiting for a transcript.
+  assert.deepEqual(items.map((r) => [r.kind, r.running]), [['agent', 1], ['noreply', 1], ['pending', 1]])
   const h = agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi() })
-  // First in the section, before the tree: the heading with the count, one row per item, in order.
-  assert.ok(h.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (2)</div><ul>'), h)
+  // First in the section, before the tree: the heading with the count — the running agents, as
+  // the view model counts them (1.6 §2.3) —, one row per item, in order.
+  assert.equal(vm.agents.running, 3)
+  assert.ok(h.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (3)</div><ul>'), h)
   assert.ok(h.indexOf('<div class="ag-now">') < h.indexOf('<div class="agtree"'))
   const rows = [...h.slice(0, h.indexOf('<div class="agtree"')).matchAll(/data-key="([^"]*)" data-list="now"/g)].map((m) => m[1])
   assert.deepEqual(rows, items.map((r) => r.key))
@@ -4452,10 +4467,13 @@ test('the running list the view model builds reaches the page first, the tree cl
     // The live clock from its start, its usage — a dash for the launch — and where it sits.
     assert.ok(row.indexOf('<span class="nobr">running for <span data-live="since" data-ts="' + r.startTs + '">') >= 0, row)
     assert.ok(row.indexOf('<span class="nobr">' + r.usage + '</span></span>') >= 0, row)
-    assert.ok(row.indexOf('<span class="meta ag-ctx"><span>' + r.context.split(' · ').join('</span> · <span>') + '</span></span>') >= 0, row)
+    // A collector says how many of its agents run, after where it sits.
+    const where = [...r.context.split(' · '), ...(r.kind === 'noreply' ? ['~1 of them running'] : [])]
+    assert.ok(row.indexOf('<span class="meta ag-ctx"><span>' + where.join('</span> · <span>') + '</span></span>') >= 0, row)
     assert.equal(/>0[ <]|> 0</.test(row), false, row)
   }
   assert.equal(items.find((r) => r.kind === 'pending')?.usage, '–')
+  assert.equal(items.find((r) => r.kind === 'noreply')?.usage, '–')
   // The tree under it holds the two sessions and nothing else, each saying what its agents came to
   // — the payload carries nothing below them (1.6 D3), and each keeps its toggle.
   assert.ok(vm.agents.roots.every((r) => r.children.length === 0 && r.hasChildren && r.childrenMore === 0))
@@ -4469,7 +4487,7 @@ test('the running list the view model builds reaches the page first, the tree cl
   assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
   // The running agent is mid-reply, so its output is a lower bound — and with every node closed
   // the line under the tree still says where that is marked, for the row in the list.
-  assert.deepEqual(items.map((r) => r.lowerBound), [true, false])
+  assert.deepEqual(items.map((r) => r.lowerBound), [true, false, false])
   assert.equal(vm.agents.roots.some((r) => r.lowerBound), false, 'a session row carries the lower bound itself')
   assert.equal(h.split('Output figures in the details marked ⚠ are lower bounds.').length - 1, 1, h)
 })
@@ -4482,10 +4500,12 @@ test('the running list the view model builds reaches the page first, the tree cl
 function nowRow(o: { key: string; kind?: string; parts: string[]; clock?: { ts: number; text: string } | null;
   usage: string; where: string[]; pressed?: boolean; panel?: string }): string {
   const figs = [...(o.clock ? ['running for <span data-live="since" data-ts="' + o.clock.ts + '">' + o.clock.text + '</span>'] : []), o.usage]
+  // 1.6 D4: a collector's name is words, which wrap like any sentence — no parts to keep together.
+  const label = o.kind === 'noreply' ? o.parts.join(' · ') : o.parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ')
   return '<li class="ag-k-' + (o.kind ?? 'agent') + '"><button class="ag-row" data-act="agentSelect" data-key="' + o.key
     + '" data-list="now" aria-pressed="' + (o.pressed === true) + '">'
     + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
-    + '<span class="ag-text"><span class="ag-label">' + o.parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
+    + '<span class="ag-text"><span class="ag-label">' + label + '</span>'
     + '<span class="ag-fig">' + figs.map((f) => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
     + (o.where.length ? '<span class="meta ag-ctx">' + o.where.map((w) => '<span>' + w + '</span>').join(' · ') + '</span>' : '')
     + '</span></button>' + (o.panel ?? '') + '</li>'
@@ -4524,6 +4544,56 @@ test('the running list comes first: how many run, then a row each with its clock
   assert.match(STYLE, /\.ag-now li \{ display: flex; flex-wrap: wrap; \}/)
   assert.match(STYLE, /\.ag-now \.ag-k-pending \.ag-label \{ font-style: italic; \}/)
   assert.match(STYLE, /\.ag-now ul \{ list-style: none; margin: 4px 0 0; padding: 0; \}/)
+})
+
+test('a run\'s collector is one row in the tree and one in the running list, which says how many of its agents run', () => {
+  // 1.6 D4: the agents of a run without a counted reply, in one node — no toggle, dashes for its
+  // figures, its tally beside its label — and, while one of them runs, one entry of the running
+  // list for all of them; the heading counts the running agents, as the view model does.
+  const a = agentCtx()
+  const T_N1 = tallyOf({ done: 250, failed: 3, running: 10 })
+  const collector = treeNode(AK.n1, 'running', {
+    kind: 'noreply', label: '263 agent(s) without a counted reply', usage: '–', duration: '–', startTs: null, lastTs: null, ...T_N1,
+  })
+  const tree = agentTree({
+    roots: [treeNode(AK.wf, 'running', { kind: 'workflow', label: 'Workflow cfe7718d', ...tallyOf({ done: 250, failed: 3, running: 11 }),
+      children: [treeNode(AK.a1, 'running'), collector] })],
+    running: 11,
+    runningNow: [runningItem(), runningItem({ key: AK.n1, kind: 'noreply', label: '263 agent(s) without a counted reply',
+      context: 'Session 9d0eb37a · Workflow cfe7718d · repo', usage: '–', startTs: null, lastTs: null, running: 10 })],
+  })
+  const h = agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.wf] }) })
+  const now = h.slice(0, h.indexOf('<div class="agtree"'))
+  assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (11)</div><ul>'
+    + nowRow({ key: AK.a1, parts: ['Explore', 'Opus 5', 'a94f'], clock: { ts: AG_NOW - 42_000, text: '42 s' },
+      usage: '12.3K', where: ['Session 9d0eb37a', 'Workflow cfe7718d', 'repo'] })
+    // No start of its own when none of its agents has a record: no clock, a dash for its usage.
+    + nowRow({ key: AK.n1, kind: 'noreply', parts: ['263 agent(s) without a counted reply'], clock: null, usage: '–',
+      where: ['Session 9d0eb37a', 'Workflow cfe7718d', 'repo', '~10 of them running'] })
+    + '</ul></div>', now)
+  // With one running member, the words for one.
+  const one = agentsHtml(a, { agents: agentTree({ running: 1, runningNow: [runningItem({ key: AK.n1, kind: 'noreply', usage: '–', running: 1 })] }) })
+  assert.ok(one.indexOf('<span>~1 of them running</span>') >= 0 && one.indexOf('Running now (1)') >= 0, one)
+  // A count the page cannot trust is no clause, and a heading that would count fewer than the
+  // rows counts the rows.
+  for (const running of [0, -2, 1.5, NaN, '10', null, undefined]) {
+    const odd = agentsHtml(a, { agents: agentTree({ running, runningNow: [runningItem({ key: AK.n1, kind: 'noreply', usage: '–', running })] }) })
+    assert.equal(odd.indexOf('of them running'), -1, String(running))
+    assert.ok(odd.indexOf('Running now (1)') >= 0, String(running))
+  }
+  // In the tree: a leaf — no toggle, no aria-expanded — its glyph, its label, its tally, dashes.
+  const t = treePart(h)
+  const at = t.indexOf('<li role="treeitem" class="ag-k-noreply"')
+  assert.ok(at >= 0, t)
+  const li = t.slice(at, t.indexOf('</li>', at) + 5)
+  assert.equal(li, '<li role="treeitem" class="ag-k-noreply" aria-selected="false"><div class="ag-line"><span class="ag-pad"></span>'
+    + '<button class="ag-row" data-act="agentSelect" data-key="' + AK.n1 + '" aria-pressed="false">'
+    + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
+    + '<span class="ag-text"><span class="ag-label">263 agent(s) without a counted reply</span>'
+    + '<span class="meta">' + tallyMarkup(T_N1) + '</span>'
+    + '<span class="ag-fig"><span class="nobr">–</span> · <span class="nobr">–</span></span></span></button></div></li>', li)
+  // Last in its run, after the agents.
+  assert.ok(t.indexOf('data-key="' + AK.a1 + '"') < at, t)
 })
 
 test('the running list counts what it left out, and an item with nothing in it is dashes, never a zero', () => {

@@ -18,8 +18,22 @@ export const SESSION_ACTIVE_MS = 10 * 60_000
 /** Sessions without agents appear only if active within this. */
 export const ROOT_WINDOW_MS = 24 * 3_600_000
 export const MAX_ROOTS = 20
-export const MAX_NODES = 300
 export const MAX_TREE_DEPTH = 6
+/**
+ * D3 (1.6): the children an opened node shows at first, and how many more each "more" step shows —
+ * the page carries only what is open, and of an open node at most this many children at a time.
+ */
+export const MAX_GROUP_CHILDREN = 50
+/** D3: the nodes whose "more" steps are remembered (`ui.agentsMore`); one more forgets the oldest. */
+export const MAX_AGENT_MORE = 200
+/** D3: the "more" steps one node takes at most — 50 + 10 × 50 of its children. */
+export const MAX_MORE_PAGES = 10
+/**
+ * D3: the most nodes one push of the page carries. A safety cap, not a view: filled with the path
+ * to the selected node and the running children first, then in the order the page draws them; an
+ * opened node whose children no longer fit ships none and says how many it holds.
+ */
+export const MAX_PAGE_NODES = 2000
 /** Running agents listed above the tree; the rest are counted in `runningMore`. */
 export const MAX_RUNNING_LIST = 20
 /**
@@ -104,16 +118,29 @@ export interface TreeNode {
   startTs: number | null
   lastTs: number | null
   /**
-   * Agents and pending launches anywhere below this node, counted on the whole tree before the
-   * MAX_NODES cut — the `started` of its tally, where it has one. 0 for a node with none below it. A
-   * workflow run's count includes the agents its journal started whose transcript was never
-   * counted (1.6 D2): they are members of the run, though no row of their own is drawn for them.
+   * Agents and pending launches anywhere below this node, counted on the whole tree — open or
+   * closed, shown or not — the `started` of its tally, where it has one. 0 for a node with none
+   * below it. A workflow run's count includes the agents its journal started whose transcript was
+   * never counted (1.6 D2): they are members of the run, though no row of their own is drawn for them.
    */
   agentCount: number
   /**
+   * D3: the node has children in the tree, whether this payload carries them or not — the page
+   * carries a node's children only while it is open. What decides the toggle.
+   */
+  hasChildren: boolean
+  /** D3: the children the node has in the tree, shown or not. */
+  childrenTotal: number
+  /**
+   * D3: the children this payload does not carry although the node is open — the ones past its
+   * window of MAX_GROUP_CHILDREN (and its "more" steps), or all of them when MAX_PAGE_NODES left
+   * no room. 0 for a closed node, and for an open one that shows them all.
+   */
+  childrenMore: number
+  /**
    * N1: what the agents below the node came to — on sessions, workflow runs and agents with
-   * agents below them, counted on the whole tree before the MAX_NODES cut, as `agentCount` is
-   * (its `started` equals it). Null for every other node, and for a session with no agent.
+   * agents below them, counted on the whole tree, as `agentCount` is (its `started` equals it).
+   * Null for every other node, and for a session with no agent.
    */
   tally: AgentTally | null
   /**
@@ -133,13 +160,17 @@ export interface TreeNode {
    * and glyph; the page dims the row. False for every other node.
    */
   superseded: boolean
+  /**
+   * The children this payload carries: none while the node is closed (D3), at most its window
+   * while it is open — in the order the page draws them.
+   */
   children: TreeNode[]
 }
 
 /**
  * One entry of the "Running now" list above the tree: an agent or a pending launch in state
- * running, wherever it sits — a collapsed branch, a session beyond MAX_ROOTS, a node beyond
- * the MAX_NODES cut.
+ * running, wherever it sits — a closed branch, a session beyond MAX_ROOTS, a node past its
+ * group's window.
  */
 export interface RunningItem {
   /** The node key — selecting it opens the same details as the tree row. */
@@ -212,8 +243,6 @@ export interface AgentTreeVm {
   runningMore: number
   /** Roots beyond MAX_ROOTS. */
   omittedRoots: number
-  /** MAX_NODES hit. */
-  truncated: boolean
   /**
    * E.g. "No Claude Code session in the last 7 days." The tree carries no time of its own: an
    * unchanged tree serialises the same, so the host does not send it again (D12).
@@ -230,7 +259,6 @@ export function emptyAgentTree(): AgentTreeVm {
     runningNow: [],
     runningMore: 0,
     omittedRoots: 0,
-    truncated: false,
     note: null,
   }
 }

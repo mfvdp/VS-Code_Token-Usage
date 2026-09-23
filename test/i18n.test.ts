@@ -18,7 +18,7 @@
 
 import { strict as assert } from 'node:assert'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -312,9 +312,10 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
   // request — "Parent's report" and its "tokens" figure said otherwise. R4: the German manifest
   // says „Tool-Aufrufe", as the runtime bundle always did. N1: a node's tally replaces the bare
   // count of its agents. D5 (lead note, §7c): a session's figures are named first — "own 1.2M",
-  // "agents 434.6K" — since a figure in front of "agents" reads as a number of agents.
+  // "agents 434.6K" — since a figure in front of "agents" reads as a number of agents. D3: there
+  // is no cut of the tree any more; what a node leaves out is said on the node.
   const retired = ["Parent's report", "the parent's own count, not added to any total", '{0} tokens · {1} · {2} tool calls',
-    '{0} agent(s)', '{0} own', '{0} agents']
+    '{0} agent(s)', '{0} own', '{0} agents', 'Tree cut at {0} nodes.']
   const bundle = readJson(BUNDLE) as Record<string, string>
   const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts']
     .map((f) => readFileSync(join(ROOT, f), 'utf8'))
@@ -326,4 +327,10 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
   assert.equal(readFileSync(join(ROOT, 'package.nls.de.json'), 'utf8').includes('Werkzeugaufruf'), false,
     'the German manifest still says „Werkzeugaufrufe"')
   assert.equal(Object.values(bundle).some((v) => v.includes('Werkzeugaufruf')), false)
+  // D3: nor in any part the bundle is merged from, key or value.
+  const parts = join(ROOT, 'l10n', 'parts')
+  for (const f of readdirSync(parts).filter((x) => x.endsWith('.json'))) {
+    const b = JSON.parse(readFileSync(join(parts, f), 'utf8')) as Record<string, string>
+    assert.equal(Object.entries(b).some(([k, v]) => k.includes('Tree cut') || v.includes('Baum bei')), false, f)
+  }
 })

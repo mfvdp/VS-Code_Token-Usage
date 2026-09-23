@@ -14,8 +14,9 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
 import {
-  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_RUN_AGENTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
-  RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS,
+  AGENT_RETENTION_DAYS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
+  MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
+  SPAN_IN_DAYS_FROM_MS,
 } from '../src/agentTree'
 import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
@@ -461,7 +462,11 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`the last **${AGENT_RETENTION_DAYS} days**`, 'what the tree covers'],
     [`**${AGENT_RETENTION_DAYS} days** after its last line`, 'when a record is dropped'],
     [`At most **${MAX_ROOTS}** sessions`, 'the session cap'],
-    [`at most **${MAX_NODES}** nodes`, 'the node cap'],
+    // 1.6 D3 (§7a Q15): the node cap became a window per node and a stated cap on the payload.
+    [`at most **${MAX_GROUP_CHILDREN}** of its children at a time`, 'the window of an opened node'],
+    [`at most **${MAX_MORE_PAGES}** times`, 'the most "more" steps of one node'],
+    [`the "more" steps of at most ${MAX_AGENT_MORE} nodes`, 'the cap on remembered "more" steps'],
+    [`at most **${MAX_PAGE_NODES}** nodes`, 'the page payload cap'],
     [`more than **${MAX_TREE_DEPTH}** levels`, 'the depth cap'],
     [`within the last **${RUNNING_WINDOW_MS / 60_000} minutes**`, 'the running window'],
     [`a response within the last ${SESSION_ACTIVE_MS / 60_000} minutes`, 'the active window'],

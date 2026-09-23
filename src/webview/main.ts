@@ -1569,17 +1569,56 @@ function sessionFigures(n: Payload): string[] {
 }
 
 /**
- * One node and, once the reader opened it, everything under it. The tree starts closed: only
- * the sessions are drawn, and each says what the agents below it came to. The toggle and
- * the row are two buttons of their own, so both are reached with the keyboard and announced as
- * what they do; a leaf has no toggle and keeps its place in the column with an empty slot. A
- * closed node's children are not written at all: which nodes are open is the reader's, kept
- * with the view state, and the next push brings the children the moment a node is opened.
+ * The "more" steps the reader took under an open node (1.6 D3), as the view state keeps them;
+ * 0 for a node with none.
+ */
+function agentPagesOf(key: string): number {
+  const list = vm && vm.ui && Array.isArray(vm.ui.agentsMore) ? vm.ui.agentsMore : [];
+  for (const e of list) {
+    if (e && typeof e === 'object' && e.key === key && typeof e.pages === 'number' && Number.isFinite(e.pages)) return e.pages;
+  }
+  return 0;
+}
+
+/**
+ * The line after the last child of an open node that holds more children than the payload
+ * carries (1.6 D3): "50 more · 377 not shown" — how many the next step shows, and how many are
+ * not shown now — or "12 more" when the next step shows the rest. While a step can be taken it
+ * is a button asking the host for the next fifty; once the node took its last step, or when the
+ * page had no room for any of its children at all (the payload's cap, where another step would
+ * only ask for more), it is the count alone: "377 not shown". The numbers are the view model's
+ * and the paging steps src/agentTree.ts's; nothing here decides which children those are.
+ */
+function agentMoreRow(n: Payload, key: string, shown: number): string {
+  const v = n.childrenMore;
+  const rest = typeof v === 'number' && Number.isFinite(v) && v >= 1 ? Math.round(v) : 0;
+  if (!rest || !key) return '';
+  const step = Math.min(AGENT_PAGING.groupChildren, rest);
+  const control = shown > 0 && agentPagesOf(key) < AGENT_PAGING.morePages;
+  const words = !control ? tr('{0} not shown', esc(fullNum(rest)))
+    : rest <= step ? tr('{0} more', esc(fullNum(step)))
+      : tr('{0} more · {1} not shown', esc(fullNum(step)), esc(fullNum(rest)));
+  const body = control
+    ? '<button class="ag-more" data-act="agentMore" data-key="' + esc(key) + '">' + words + '</button>'
+    : '<span class="ag-more">' + words + '</span>';
+  return '<li role="treeitem" class="ag-k-more"><div class="ag-line"><span class="ag-pad"></span>' + body + '</div></li>';
+}
+
+/**
+ * One node and, once the reader opened it, what the view model sent of everything under it. The
+ * tree starts closed: only the sessions are drawn, and each says what the agents below it came
+ * to. The toggle and the row are two buttons of their own, so both are reached with the
+ * keyboard and announced as what they do; a leaf has no toggle and keeps its place in the
+ * column with an empty slot. A closed node's children are not in the payload at all (1.6 D3):
+ * whether it has any is the node's own say (`hasChildren`), which open nodes are open is the
+ * reader's, kept with the view state, and the next push brings the children the moment a node
+ * is opened — at most fifty at a time, and a line after them says how many more there are.
  */
 function agentNode(n: Payload, expanded: string[], selected: string | null, depth: number): string {
   if (!n || typeof n !== 'object') return '';
   const key = typeof n.key === 'string' ? n.key : '';
   const kids = depth < AGENT_MAX_DEPTH && Array.isArray(n.children) ? n.children : [];
+  const parent = n.hasChildren === true || kids.length > 0;
   const open = key !== '' && expanded.indexOf(key) >= 0;
   const on = key !== '' && key === selected;
   const state = agentState(n.state);
@@ -1600,18 +1639,17 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, dept
   const start = agentTs(n.startTs);
   const figures = kind === 'pending' ? [] : kind === 'session' ? sessionFigures(n) : [orDash(n.usage), orDash(n.duration)];
   if (state === 'running' && start !== null) figures.push(tr('running for {0}', liveSince(start)));
-  const fold = kids.length
+  const fold = parent
     ? '<button class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-label="'
       + (open ? tr('Collapse {0}', label) : tr('Expand {0}', label)) + '"></button>'
     : '<span class="ag-pad"></span>';
   // The meta line: the project a session belongs to, when attribution names one, and the tally
   // of the agents below the node (1.6 N1). A session's and a run's stand whether the node is
   // open or not: what failed, was retried or is still unknown among 400 agents is not something
-  // to count off the rows. An agent's stands only while it is closed: open, its few children are
-  // on screen with their own glyphs. The tally is the view model's, taken on the whole tree
-  // before the MAX_NODES cut, so a node whose children the cut took all away still says what it
-  // holds: it is drawn as a leaf, since there is nothing to open, open or not in the stored state.
-  const tally = kind === 'agent' && kids.length && open ? '' : agentTally(n);
+  // to count off the rows. An agent's stands only while its children are on screen with their
+  // own glyphs: closed, or open with none of them sent. The tally is the view model's, taken on
+  // the whole tree, so it counts the children the page does not carry as well.
+  const tally = kind === 'agent' && parent && open && kids.length ? '' : agentTally(n);
   const meta: string[] = [];
   if (typeof n.sub === 'string' && n.sub) meta.push(esc(n.sub));
   if (tally) meta.push(tally);
@@ -1625,13 +1663,13 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, dept
        ? '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
        : '')
     + '</span></button>';
+  const group = parent && open
+    ? kids.map((c: Payload) => agentNode(c, expanded, selected, depth + 1)).join('') + agentMoreRow(n, key, kids.length)
+    : '';
   return '<li role="treeitem" class="ag-k-' + esc(kind) + (superseded ? ' ag-sup' : '') + '"'
-    + (kids.length ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '">'
+    + (parent ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '">'
     + '<div class="ag-line">' + fold + row + '</div>'
-    + (kids.length && open
-       ? '<ul role="group">' + kids.map((c: Payload) => agentNode(c, expanded, selected, depth + 1)).join('')
-         + '</ul>'
-       : '')
+    + (group ? '<ul role="group">' + group + '</ul>' : '')
     + '</li>';
 }
 
@@ -1772,9 +1810,10 @@ function shownLowerBound(list: Payload, expanded: string[], depth: number): bool
  * under it. Which nodes are open and which one is selected is the view state's (vm.ui), the
  * details are what the view model built for that selection (vm.agents.selected); both travel
  * in the same push, so a pressed row and the panel under the tree cannot disagree. Selecting
- * opens nothing: the panel shows whether the node's row is on screen or inside a closed
- * branch. No chip of the filter bar applies: the section is the last seven days whatever the
- * range says.
+ * opens nothing, and the view model sends details only while the node's row is on the page —
+ * in the tree or in the running list; a node inside a closed branch has none until the branch
+ * is opened again (1.6 D3). No chip of the filter bar applies: the section is the last seven
+ * days whatever the range says.
  */
 function sAgents(): string {
   const a = vm.agents;
@@ -1796,10 +1835,6 @@ function sAgents(): string {
   if (omitted > 0) {
     h += '<p class="empty">' + tr('{0} older session(s) not shown.', esc(Math.round(omitted))) + '</p>';
   }
-  // The figure is the nodes that arrived, which is where the builder stopped.
-  if (a.truncated === true) {
-    h += '<p class="empty">' + tr('Tree cut at {0} nodes.', agentNodes(roots).length) + '</p>';
-  }
   if (note) h += '<p class="empty">' + note + '</p>';
   // The rows do not carry the lower-bound mark (see agentNode); this line says where it is,
   // and only while a row on screen has one — a tree row, or a row of the running list, which
@@ -1811,8 +1846,8 @@ function sAgents(): string {
   }
   const sel = a.selected;
   if (sel && typeof sel === 'object') {
-    // The node the panel belongs to, for its clock: in the tree — closed branches included, the
-    // payload carries them — or, for a session the tree does not list, in the running list.
+    // The node the panel belongs to, for its clock: in the tree, or — for a session the tree
+    // does not list, or a branch it has closed — in the running list.
     const now = Array.isArray(a.runningNow) ? a.runningNow : [];
     const node = typeof sel.key === 'string'
       ? agentNodes(roots).find((n: Payload) => n.key === sel.key)
@@ -2023,16 +2058,22 @@ function keepFocus(body: Element): { act: string; key: string; list: string } | 
   return act && key ? { act: act, key: key, list: el.dataset.list || '' } : null;
 }
 
-/** Puts the focus back on the control that does the same thing to the same node, in the same list. */
+/**
+ * Puts the focus back on the control that does the same thing to the same node, in the same
+ * list. A "more" line that is gone — its node shows every child now — hands the focus to that
+ * node's toggle, so it does not fall out of the tree.
+ */
 function restoreFocus(body: Element, f: { act: string; key: string; list: string }): void {
   if (!body.querySelectorAll) return;
   const all = body.querySelectorAll<HTMLElement>('[data-act]');
+  const same = (el: HTMLElement, act: string): boolean =>
+    el.dataset.act === act && el.dataset.key === f.key && (el.dataset.list || '') === f.list;
   for (let i = 0; i < all.length; i++) {
-    const el = all[i];
-    if (el.dataset.act === f.act && el.dataset.key === f.key && (el.dataset.list || '') === f.list) {
-      el.focus();
-      return;
-    }
+    if (same(all[i], f.act)) { all[i].focus(); return; }
+  }
+  if (f.act !== 'agentMore') return;
+  for (let i = 0; i < all.length; i++) {
+    if (same(all[i], 'agentToggle')) { all[i].focus(); return; }
   }
 }
 
@@ -2173,6 +2214,10 @@ function act(el: HTMLElement): void {
     // Opens a closed node or closes an open one; the host keeps which, so it survives a reload.
     const key = el.dataset.key;
     if (key) post({ type: 'agentToggle', key: key });
+  } else if (a === 'agentMore') {
+    // The next fifty children of an open node; the host keeps how many, as it keeps the open ones.
+    const key = el.dataset.key;
+    if (key) post({ type: 'agentMore', key: key });
   } else if (a === 'agentSelect') {
     // The row whose details are open closes them again: a second click clears the selection.
     const key = el.dataset.key;

@@ -182,7 +182,6 @@
   "Top projects and sessions need `tokenPace.attribution`.": "Top-Projekte und -Sitzungen benötigen `tokenPace.attribution`.",
   "Top projects and sessions need tokenPace.attribution": "Top-Projekte und -Sitzungen benötigen tokenPace.attribution",
   "Top session {0}: {1}": "Top-Sitzung {0}: {1}",
-  "Tree cut at {0} nodes.": "Baum bei {0} Knoten abgeschnitten.",
   "Unknown": "Unbekannt",
   "Unpriced models make the spend — and the share — a lower bound.": "Modelle ohne Preis machen die Ausgaben — und den Anteil — zu einer Untergrenze.",
   "Unrendered fields {0}: {1}": "Nicht dargestellte Felder {0}: {1}",
@@ -328,6 +327,7 @@
   "“Usage” is fresh input + cache write + output; cache reads are listed separately because they outweigh everything else by orders of magnitude.": "„Verbrauch“ ist frische Eingabe + Cache-Schreiben + Ausgabe; Cache-Lesen wird getrennt aufgeführt, weil es alles andere um Größenordnungen übersteigt.",
   "• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.": "• Claude — GET https://api.anthropic.com/api/oauth/usage, mit dem accessToken aus\n  ~/.claude/.credentials.json. Die Anfrage weist sich als Claude-Code-Client aus,\n  weil der Endpunkt andere Aufrufer dauerhaft mit 429 abweist.",
   "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": "• Codex — der lokale „codex app-server“ wird gestartet und nach seinen Rate-Limits gefragt.\n  Dafür verlässt kein Datenverkehr von uns den Rechner.",
+  "… {0} more": "… {0} weitere",
   "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ kennzeichnet eine Untergrenze: Die ältesten Stunden des Zeitraums sind bereits zu Tagessummen zusammengefasst",
   "⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.": "⚠ kennzeichnet eine Untergrenze: Bei einer Antwort, die das Transkript nie als abgeschlossen markiert hat, zählt nur die bis dahin gemeldete Ausgabe."
 }

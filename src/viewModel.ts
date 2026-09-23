@@ -14,7 +14,7 @@
  */
 
 import { SOURCES, USAGE_PAGE } from './adapters'
-import { AgentTreeVm } from './agentTree'
+import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { buildAgentTree } from './agentTreeBuild'
 import { Aggregator, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
@@ -107,6 +107,13 @@ export interface UiState {
   agentsExpanded: string[]
   /** The agent tree node whose details are open, or null. */
   agentSelected: string | null
+  /**
+   * 1.6 D3: the opened nodes whose "more" row the reader pressed, and how often — each step
+   * shows MAX_GROUP_CHILDREN children more, at most MAX_MORE_PAGES steps. The most recently
+   * raised last, at most MAX_AGENT_MORE entries: one more forgets the one raised longest ago.
+   * Closing a node removes its entry, so it opens with its first fifty again.
+   */
+  agentsMore: Array<{ key: string; pages: number }>
 }
 
 /** The commands the webview may ask for. Nothing outside this list is ever executed. */
@@ -145,6 +152,7 @@ export type WebviewMessage =
   | { type: 'toggleSection'; key: DashboardSectionKey }
   | { type: 'agentToggle'; key: string }
   | { type: 'agentSelect'; key: string | null }
+  | { type: 'agentMore'; key: string }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
   | { type: 'rendered'; sections: number }
@@ -274,6 +282,9 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     case 'agentSelect':
       if (m.key === null) return { type: 'agentSelect', key: null }
       return isAgentKey(m.key) ? { type: 'agentSelect', key: m.key } : null
+    // The "more" row under an open node: shows the next fifty of its children.
+    case 'agentMore':
+      return isAgentKey(m.key) ? { type: 'agentMore', key: m.key } : null
     case 'refresh':
       return { type: 'refresh' }
     case 'command':
@@ -299,6 +310,7 @@ export function defaultUiState(cfg: Config): UiState {
     collapsed: [],
     agentsExpanded: [],
     agentSelected: null,
+    agentsMore: [],
   }
 }
 
@@ -351,7 +363,12 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       // every toggle dead. Closing always works.
       if (!isAgentKey(m.key)) return ui
       if (ui.agentsExpanded.includes(m.key)) {
-        return { ...ui, agentsExpanded: ui.agentsExpanded.filter((k) => k !== m.key) }
+        // A node closed is shown with its first fifty children when it is opened again.
+        return {
+          ...ui,
+          agentsExpanded: ui.agentsExpanded.filter((k) => k !== m.key),
+          agentsMore: ui.agentsMore.filter((e) => e.key !== m.key),
+        }
       }
       const keep = ui.agentsExpanded.slice(Math.max(0, ui.agentsExpanded.length - MAX_AGENT_EXPANDED + 1))
       return { ...ui, agentsExpanded: [...keep, m.key] }
@@ -361,6 +378,20 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       // reader made it, whether the selected one is on screen or not.
       if (m.key !== null && !isAgentKey(m.key)) return ui
       return ui.agentSelected === m.key ? ui : { ...ui, agentSelected: m.key }
+    case 'agentMore': {
+      // One step more of an open node's children. A "more" row only stands under an open node,
+      // so a key that is not open changes nothing — it would only grow the list with an entry
+      // nothing shows. At MAX_MORE_PAGES the node shows as many as it ever will, and a new
+      // entry at the cap forgets the one raised longest ago, as an open at its cap does; the
+      // entry raised is moved to the end, the newest.
+      if (!isAgentKey(m.key) || !ui.agentsExpanded.includes(m.key)) return ui
+      const had = ui.agentsMore.find((e) => e.key === m.key)
+      const pages = had ? had.pages : 0
+      if (pages >= MAX_MORE_PAGES) return ui
+      const rest = ui.agentsMore.filter((e) => e.key !== m.key)
+      const keep = rest.slice(Math.max(0, rest.length - MAX_AGENT_MORE + 1))
+      return { ...ui, agentsMore: [...keep, { key: m.key, pages: pages + 1 }] }
+    }
     default:
       return ui
   }
@@ -1265,6 +1296,31 @@ export function toolRows(ctx: StatsCtx, range: DayRange, limit: number): ToolsDa
 // buildViewModel
 // ---------------------------------------------------------------------------
 
+/**
+ * The Agents section's tree, from the aggregator's tables and the view state: `page` for the
+ * dashboard — only what the reader opened (1.6 D3) — and `text` for the markdown document, which
+ * prints every node. Range-free like the quota cards, and deliberately blind to the provider and
+ * model chips: the tree is the Claude Code sessions of the last days, whatever the tables filter.
+ */
+export function agentTreeFor(
+  input: Pick<VmInput, 'agg' | 'cfg' | 'ui' | 'now'>, mode: 'page' | 'text',
+): AgentTreeVm {
+  const { agg, cfg, ui } = input
+  return buildAgentTree({
+    agents: agg.agents(),
+    launches: agg.launches(),
+    mains: agg.mains(),
+    runs: agg.runs(),
+    sessions: agg.sessions(),
+    attribution: cfg.attribution,
+    selected: ui.agentSelected ?? null,
+    expanded: ui.agentsExpanded ?? [],
+    more: ui.agentsMore ?? [],
+    mode,
+    tcfg: readTimeConfig(cfg),
+  }, input.now)
+}
+
 export function buildViewModel(input: VmInput): ViewModel {
   const { agg, cfg, history, now, quotas, ui } = input
   const tcfg = readTimeConfig(cfg)
@@ -1336,18 +1392,8 @@ export function buildViewModel(input: VmInput): ViewModel {
     range: { ...range, previous, presets: RANGE_PRESETS },
     ui,
     quotas: cards,
-    // Range-free like the quota cards, and deliberately blind to the provider and model chips:
-    // the tree is the Claude Code sessions of the last days, whatever the table below filters.
-    agents: buildAgentTree({
-      agents: agg.agents(),
-      launches: agg.launches(),
-      mains: agg.mains(),
-      runs: agg.runs(),
-      sessions: agg.sessions(),
-      attribution: cfg.attribution,
-      selected: ui.agentSelected ?? null,
-      tcfg,
-    }, now),
+    // Only what the reader opened goes to the page (1.6 D3); see agentTreeFor.
+    agents: agentTreeFor(input, 'page'),
     context: contextCard(input.context, cfg, now),
     digest: [],
     kpis: kpiRow,

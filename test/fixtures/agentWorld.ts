@@ -33,7 +33,9 @@
 import * as path from 'path'
 import { Aggregator, parseAgentMeta } from '../../src/agg'
 import type { TreeNode } from '../../src/agentTree'
+import type { Config } from '../../src/config'
 import { Attribution } from '../../src/types'
+import { agentTreeFor, defaultUiState } from '../../src/viewModel'
 import {
   CLAUDE_ROOT, ClaudeUsage, agentResultLine, agentToolUseLine, claudeLine, ctxFor, journalKey, journalLine, metaJson,
   queueOperationLine,
@@ -250,6 +252,17 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
 /** Every node of a tree, depth first. */
 export function treeNodes(roots: readonly TreeNode[]): TreeNode[] {
   return roots.flatMap((n) => [n, ...treeNodes(n.children)])
+}
+
+/**
+ * The key of every node that has children — what a reader who opened them all keeps in
+ * `ui.agentsExpanded`. Since 1.6 (D3) the page carries a node's children only while it is open,
+ * so a test that looks at every node of the page opens them all first. Read off the markdown's
+ * tree, which opens every node; `now` is the clock the view model is built on.
+ */
+export function everyParent(agg: Aggregator, cfg: Config, now: number): string[] {
+  const text = agentTreeFor({ agg, cfg, ui: defaultUiState(cfg), now }, 'text')
+  return treeNodes(text.roots).filter((n) => n.hasChildren).map((n) => n.key)
 }
 
 /** The node of an agent by its id, found by the four characters its label ends on. */

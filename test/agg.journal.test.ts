@@ -23,11 +23,11 @@ import { agentReplayFiles, rebuildJournal, replayAgents, scan } from '../src/sca
 import { markdownDocument } from '../src/textViews'
 import { TimeConfig } from '../src/time'
 import { JournalAgent, Snapshot } from '../src/types'
-import { buildViewModel } from '../src/viewModel'
+import { agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
   CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, claudeLine, ctxFor, journalKey, journalLine, tmpDir,
 } from './fixtures/helpers'
-import { AGENT_WORLD, agentNode, agentWorld } from './fixtures/agentWorld'
+import { AGENT_WORLD, agentNode, agentWorld, everyParent } from './fixtures/agentWorld'
 import { NOW, makeConfig, makeInput } from './fixtures/viewFixtures'
 
 /** Roots are module state; the next test file must not inherit a scratch directory. */
@@ -347,7 +347,9 @@ test('the tree joins a run\'s journal to its agents by id, and the join survives
   // replaced (test/fixtures/agentWorld.ts).
   const { agg } = agentWorld()
   const cfg = makeConfig()
-  const vm = buildViewModel(makeInput({ agg, cfg })).agents
+  // Every node opened: the page carries only what is open (1.6 D3).
+  const ui = { agentsExpanded: everyParent(agg, cfg, NOW) }
+  const vm = buildViewModel(makeInput({ agg, cfg, ui })).agents
   const W = AGENT_WORLD
   const n = (id: string) => agentNode(vm.roots, id)
   assert.deepEqual([n(W.wfRetryFail).state, n(W.wfRetryFail).superseded], ['failed', true])
@@ -356,7 +358,7 @@ test('the tree joins a run\'s journal to its agents by id, and the join survives
   assert.deepEqual([n(W.wfRunning).state, n(W.wfRunning).superseded], ['running', false])
   assert.deepEqual([n(W.wfDone).state, n(W.wfDone).superseded], ['done', false])
   const back = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot)
-  assert.equal(JSON.stringify(buildViewModel(makeInput({ agg: back, cfg })).agents), JSON.stringify(vm))
+  assert.equal(JSON.stringify(buildViewModel(makeInput({ agg: back, cfg, ui })).agents), JSON.stringify(vm))
 })
 
 // ---------------------------------------------------------------------------
@@ -402,13 +404,18 @@ test('the journal key never leaves the comparison', async () => {
   // open, the markdown, the exports.
   const cfg = makeConfig()
   const outputs: Array<[string, string]> = [['snapshot', JSON.stringify(agg.toSnapshot())]]
-  const vm = buildViewModel(makeInput({ agg, cfg }))
+  // Every node opened (the page carries only what is open, 1.6 D3), and the markdown with the
+  // tree it is handed, every node of it open too.
+  const agentsExpanded = everyParent(agg, cfg, NOW)
+  const vm = buildViewModel(makeInput({ agg, cfg, ui: { agentsExpanded } }))
   const keysOf = (nodes: typeof vm.agents.roots): string[] => nodes.flatMap((n) => [n.key, ...keysOf(n.children)])
   const nodeKeys = keysOf(vm.agents.roots)
   assert.ok(nodeKeys.includes(`a:${a1}`), nodeKeys.join(', '))
   for (const key of nodeKeys) {
-    const open = buildViewModel(makeInput({ agg, cfg, ui: { agentSelected: key } }))
-    outputs.push([`view model ${key}`, JSON.stringify(open)], [`markdown ${key}`, markdownDocument(open)])
+    const input = makeInput({ agg, cfg, ui: { agentsExpanded, agentSelected: key } })
+    const open = buildViewModel(input)
+    outputs.push([`view model ${key}`, JSON.stringify(open)],
+      [`markdown ${key}`, markdownDocument(open, agentTreeFor(input, 'text'))])
   }
   const range = { from: '2026-09-01', to: '2026-09-03' }
   outputs.push(['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)],

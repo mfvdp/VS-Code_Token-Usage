@@ -11,8 +11,7 @@
  * Pure: no vscode. `nativeViews.ts` turns these lists and strings into commands.
  */
 
-import { MAX_NODES } from './agentTree'
-import type { NodeState, RunningItem, TreeNode } from './agentTree'
+import type { AgentTreeVm, NodeState, RunningItem, TreeNode } from './agentTree'
 import { t } from './i18n'
 import { DEFAULT_BAR, estimate, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
@@ -572,13 +571,16 @@ function runningLines(a: ViewModel['agents']): string[] {
 
 /**
  * The Agents section: the running list, then the same tree as the dashboard, as an indented
- * list — every node, whatever the dashboard has open — and the open node's details as a table.
- * The tree has a heading of its own after the running list: two lists one after the other are
- * one list to a markdown renderer. A view model without a built tree prints nothing — no tree
- * is not the same statement as an empty one, and only the builder's note may say "none".
+ * list — every node, whatever the dashboard has open: the tree built for the document (1.6 D3,
+ * `text` mode), which opens every node and gives each at most fifty children, the rest said in
+ * one line under them — `… 377 more` — and the open node's details as a table. Without that tree
+ * the page's is printed, which carries only what the dashboard has open. The tree has a heading
+ * of its own after the running list: two lists one after the other are one list to a markdown
+ * renderer. A view model without a built tree prints nothing — no tree is not the same
+ * statement as an empty one, and only the builder's note may say "none".
  */
-function agentLines(vm: ViewModel): string[] {
-  const a = vm.agents
+function agentLines(vm: ViewModel, textTree?: AgentTreeVm | null): string[] {
+  const a = textTree ?? vm.agents
   if (!a || !Array.isArray(a.roots)) return []
   if (a.roots.length === 0 && !a.note) return []
   const L: string[] = [`## ${t('Agents')}`, '']
@@ -589,18 +591,21 @@ function agentLines(vm: ViewModel): string[] {
   const running = runningLines(a)
   if (running.length > 0) L.push(...running, `### ${t('Sessions and agents')}`, '')
   // The ⚠ is explained wherever a line carries it: a running line too, which may be the only
-  // line an agent has — its session not listed, or the node beyond the cut.
+  // line an agent has — its session not listed, or its node past its group's fifty.
   let lower = Array.isArray(a.runningNow) && a.runningNow.some((r) => r.lowerBound === true)
   const walk = (n: TreeNode, depth: number): void => {
     lower = lower || n.lowerBound
     L.push(`${'  '.repeat(depth)}- ${agentNodeLine(n)}`)
-    for (const c of n.children) walk(c, depth + 1)
+    for (const c of Array.isArray(n.children) ? n.children : []) walk(c, depth + 1)
+    // The children the tree left out, where it left some: one line at their depth, as many as
+    // it did not print.
+    const more = typeof n.childrenMore === 'number' && n.childrenMore > 0 ? n.childrenMore : 0
+    if (more > 0) L.push(`${'  '.repeat(depth + 1)}- ${t('… {0} more', full(more))}`)
   }
   for (const r of a.roots) walk(r, 0)
   L.push('')
   const notes: string[] = []
   if (a.omittedRoots > 0) notes.push(t('{0} older session(s) not listed.', a.omittedRoots))
-  if (a.truncated) notes.push(t('Tree cut at {0} nodes.', MAX_NODES))
   if (lower) notes.push(t('⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.'))
   if (a.note) notes.push(a.note)
   for (const n of notes) L.push(`_${n}_`, '')
@@ -619,8 +624,12 @@ function agentLines(vm: ViewModel): string[] {
   return L
 }
 
-/** The read-only `tokenpace:/usage.md` document — the same figures as tables. */
-export function markdownDocument(vm: ViewModel): string {
+/**
+ * The read-only `tokenpace:/usage.md` document — the same figures as tables. `textTree` is the
+ * agent tree with every node open (1.6 D3), built for the document; without it the Agents
+ * section prints the view model's, which holds what the dashboard has open.
+ */
+export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): string {
   const L: string[] = []
   L.push(`# ${t('Token Pace — usage')}`)
   L.push('')
@@ -695,7 +704,7 @@ export function markdownDocument(vm: ViewModel): string {
   }
 
   // Where the dashboard has it: directly after the quota cards.
-  L.push(...agentLines(vm))
+  L.push(...agentLines(vm, textTree))
 
   if (vm.digest.length > 0) {
     L.push(`## ${t('Summary')}`, '')

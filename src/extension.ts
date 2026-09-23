@@ -24,7 +24,7 @@ import * as path from 'path'
 import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
 import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
-import { AgentTreeVm } from './agentTree'
+import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { AGENT_TABLES_REVISION, Aggregator } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
@@ -58,7 +58,7 @@ import {
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
 import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
 import {
-  applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, MAX_AGENT_EXPANDED,
+  agentTreeFor, applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, MAX_AGENT_EXPANDED,
   MAX_AGENT_KEY_CHARS, RANGE_PRESETS, UiState, ViewModel,
   WebviewMessage,
 } from './viewModel'
@@ -442,6 +442,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   const views: NativeViews = registerNativeViews(context, {
     getVm: () => latestVm ?? buildVm(Date.now()),
+    // The markdown document prints every node of the tree (1.6 D3), which the dashboard's
+    // payload no longer carries: it is built on demand, for the moment the view model is of.
+    getAgentTextTree: () => agentTreeFor({ agg, cfg, ui, now: latestVm?.now ?? Date.now() }, 'text'),
     run: (command, ...args) => vscode.commands.executeCommand(command, ...args),
     getExportInput: () => ({ agg, range: currentRange(Date.now()), cfg }),
   })
@@ -1718,6 +1721,19 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
     || (typeof raw.agentSelected === 'string' && raw.agentSelected.length > 0
       && raw.agentSelected.length <= MAX_AGENT_KEY_CHARS)) {
     out.agentSelected = raw.agentSelected
+  }
+  // 1.6 D3: the "more" steps of opened nodes — a key of the same shape and a whole number of
+  // steps from 1 to MAX_MORE_PAGES, anything else dropped entry by entry. A key stored twice
+  // keeps its last entry, and a list over the cap its newest, as a step at the cap does.
+  if (Array.isArray(raw.agentsMore)) {
+    const byKey = new Map<string, number>()
+    for (const e of raw.agentsMore) {
+      if (!isRecord(e) || typeof e.key !== 'string' || e.key.length === 0 || e.key.length > MAX_AGENT_KEY_CHARS) continue
+      if (typeof e.pages !== 'number' || !Number.isInteger(e.pages) || e.pages < 1 || e.pages > MAX_MORE_PAGES) continue
+      byKey.delete(e.key)
+      byKey.set(e.key, e.pages)
+    }
+    out.agentsMore = [...byKey].map(([key, pages]) => ({ key, pages })).slice(-MAX_AGENT_MORE)
   }
   return out
 }

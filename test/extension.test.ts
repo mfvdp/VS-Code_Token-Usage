@@ -900,6 +900,61 @@ test('stored opened agent nodes and the selection restore by shape; over-long ke
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+test('stored "more" steps restore by shape — a key, a whole number of steps from 1 to 10 — and a step is stored and pushed', async () => {
+  // 1.6 D3: `ui.agentsMore` is the view state's too. Entry by entry: a key of the opened nodes'
+  // shape and a whole number of steps within MAX_MORE_PAGES; anything else dropped, a key stored
+  // twice keeps its last entry, and a list over the cap its newest.
+  const { MAX_AGENT_MORE, MAX_MORE_PAGES } = require('../src/agentTree') as typeof import('../src/agentTree')
+  assert.deepEqual([MAX_AGENT_MORE, MAX_MORE_PAGES], [200, 10])
+  const long = 'k'.repeat(201)
+  const more = [
+    { key: 'w:s1|wf_1', pages: 2 }, { key: long, pages: 1 }, { key: '', pages: 1 }, { key: 7, pages: 1 },
+    { key: 'w:s1|wf_2', pages: 0 }, { key: 'w:s1|wf_3', pages: 11 }, { key: 'w:s1|wf_4', pages: 1.5 },
+    { key: 'w:s1|wf_5', pages: '2' }, null, 'w:s1|wf_6', { key: 'w:s1|wf_1', pages: 3 },
+    ...Array.from({ length: 250 }, (_, i) => ({ key: `a:${i}`, pages: 1 })),
+  ]
+  const kept = new Map<string, unknown>([['tokenPace.ui', { agentsExpanded: ['w:s1|wf_1'], agentsMore: more }]])
+  const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await state.execute('tokenPace.setRange', '7d')
+  const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  const restored = ui?.agentsMore as Array<{ key: string; pages: number }>
+  assert.ok(Array.isArray(restored), 'agentsMore was not written back')
+  assert.equal(restored.length, MAX_AGENT_MORE)
+  assert.ok(restored.every((e) => typeof e.key === 'string' && e.key.length > 0 && e.key.length <= 200
+    && Number.isInteger(e.pages) && e.pages >= 1 && e.pages <= MAX_MORE_PAGES), JSON.stringify(restored.slice(0, 3)))
+  assert.equal(new Set(restored.map((e) => e.key)).size, restored.length)
+  assert.equal(restored[restored.length - 1].key, 'a:249')
+  // The node's last entry wins, and the cut keeps the newest: it was the oldest left.
+  assert.equal(restored.some((e) => e.key === 'w:s1|wf_1'), false)
+  for (const bad of [long, 'w:s1|wf_2', 'w:s1|wf_3', 'w:s1|wf_4', 'w:s1|wf_5', 'w:s1|wf_6']) {
+    assert.equal(restored.some((e) => e.key === bad), false, bad)
+  }
+  // A step from the page is stored and the section pushed at once, carrying it.
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  const before = page.sent.length
+  page.post({ type: 'agentMore', key: 'w:s1|wf_1' })
+  const after = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentsMore as Array<{ key: string; pages: number }>
+  assert.deepEqual(after[after.length - 1], { key: 'w:s1|wf_1', pages: 1 })
+  const pushes = page.sent.slice(before).filter((m) => {
+    const x = m as { type?: unknown; key?: unknown }
+    return x.type === 'section' && x.key === 'agents'
+  }) as Array<{ payload: { ui: { agentsMore: Array<{ key: string; pages: number }> } } }>
+  assert.equal(pushes.length, 1, 'the agents section was not pushed')
+  assert.deepEqual(pushes[0].payload.ui.agentsMore[pushes[0].payload.ui.agentsMore.length - 1], { key: 'w:s1|wf_1', pages: 1 })
+  // Junk in place of the list is no list.
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const junk = new Map<string, unknown>([['tokenPace.ui', { agentsMore: 'not-a-list' }]])
+  const second = await activateHost(makeFixture(), REPO, { globalState: junk })
+  // Its cold start done before it goes: one still running past the dispose writes its log line
+  // into the next test's recording.
+  await waitFor('the second cold start', () => state.logText().includes('Cold start done'))
+  await state.execute('tokenPace.setRange', '7d')
+  assert.deepEqual(second.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentsMore, [])
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
 test('a reader with 200 stored opened nodes, all long gone, can still open one: the oldest gives way', async () => {
   // Nothing prunes the key of a node that has left the tree — a session past the list, an agent
   // past the seven days — so a regular reader reaches the cap with keys that match nothing. The
@@ -1223,8 +1278,8 @@ test('the poll is wanted while an agent runs or a session is active, and never f
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
-    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, tally: null, tallyText: null, tallySpoken: null,
-    superseded: false, children: [], ...over,
+    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, hasChildren: false, childrenTotal: 0,
+    childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
   const waiting = node({ key: 'l:toolu_x', kind: 'pending', state: 'unknown', derived: true })
@@ -1471,6 +1526,9 @@ test('Copy Agent ID copies the id of the node whose details are open, and nothin
   assert.equal(state.clipboard.length, before, 'something was copied with nothing selected')
   assert.equal(state.messages[state.messages.length - 1]?.text, 'Select a node in the Agents section first.')
 
+  // 1.6 D3: the sync agent has finished, so only its tree row can open its details — inside its
+  // session, which the reader opens first.
+  page.post({ type: 'agentToggle', key: `s:${ACTIVE}` })
   page.post({ type: 'agentSelect', key: 'a:c3c3c3' })
   assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentSelected, 'a:c3c3c3')
   // The button's message, through the page's own allow-list, runs the command.
@@ -1478,6 +1536,32 @@ test('Copy Agent ID copies the id of the node whose details are open, and nothin
   await waitFor('the id on the clipboard', () => state.clipboard.length > before)
   assert.deepEqual(state.clipboard.slice(before), ['c3c3c3'])
   assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: ID copied to the clipboard.')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('the usage document prints every node of the agent tree, though the dashboard has them all closed', async () => {
+  // 1.6 D3: the page carries only what the reader opened; the markdown document is handed the
+  // tree with every node open, built for it (`getAgentTextTree`), and the page's stays closed.
+  const fx = makeFixture()
+  writeAgentWorld(fx)
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  const data = page.sent.find((m) => (m as { type?: unknown }).type === 'data') as { payload: { agents: AgentTreeVm } }
+  assert.ok(data.payload.agents.roots.length > 0)
+  assert.ok(data.payload.agents.roots.every((r) => r.children.length === 0), 'the closed tree carried children to the page')
+  await state.execute('tokenPace.showUsageMarkdown')
+  const md = lastMarkdown()
+  const at = md.indexOf('### Sessions and agents')
+  assert.ok(at >= 0, md)
+  const tree = md.slice(at, md.indexOf('\n## ', at) < 0 ? undefined : md.indexOf('\n## ', at))
+  // The sessions, the run inside the active one and its agent, the sync agent and the idle one's.
+  assert.match(tree, /\n- \[[^\]]+\] Session a0a0a0a0/)
+  assert.match(tree, /\n {2}- \[[^\]]+\] Workflow c0ffee00/)
+  assert.match(tree, /\n {4}- \[[^\]]+\] workflow-subagent · claude-[^ ]+ · a1a1 · /)
+  assert.match(tree, /\n {2}- \[[^\]]+\] Explore · claude-[^ ]+ · c3c3 · /)
+  assert.match(tree, /\n {2}- \[[^\]]+\] Agent · claude-[^ ]+ · b1b1 · /)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
@@ -1521,9 +1605,16 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
     }) as Array<{ payload: { agents: AgentTreeVm } }>
     return carrying[carrying.length - 1]?.payload.agents
   }
-  await waitFor('the replayed tree on the page', () => (pageTree()?.roots.length ?? 0) > 0)
+  // 1.6 D3: the page carries a node's children only while it is open, so the reader opens the two
+  // sessions and the run.
+  for (const key of [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, `s:${IDLE}`]) page.post({ type: 'agentToggle', key })
+  const wanted = [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, 'a:a1a1a1', 'a:c3c3c3', `s:${IDLE}`, 'a:b1b1b1']
+  await waitFor('the replayed tree on the page', () => {
+    const tree = pageTree()
+    return !!tree && wanted.every((k) => treeKeys(tree.roots).includes(k))
+  })
   const keys = treeKeys(pageTree()!.roots)
-  for (const key of [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, 'a:a1a1a1', 'a:c3c3c3', `s:${IDLE}`, 'a:b1b1b1']) {
+  for (const key of wanted) {
     assert.ok(keys.includes(key), `${key} is not among ${keys.join(', ')}`)
   }
   for (const key of keys) {

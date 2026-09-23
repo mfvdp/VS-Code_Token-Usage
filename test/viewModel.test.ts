@@ -11,9 +11,10 @@ import { AgentLaunch, AgentRec, MainRec, QuotaSample, QuotaWindow, TOOL_NAME_CAP
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
+import { MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
 import {
   DASHBOARD_SECTION_KEYS, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
-  SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, applyMessage, buildViewModel, defaultUiState,
+  SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
   forecastsFor, SparkVm, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
@@ -647,6 +648,7 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     collapsed: [],
     agentsExpanded: [],
     agentSelected: null,
+    agentsMore: [],
   })
 
   const drilled = applyMessage(ui, { type: 'drill', day: '2026-09-01' })
@@ -809,8 +811,9 @@ function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggrega
 
 test('the view model carries the agent tree of the aggregator, with the selection, the attribution and its clock', () => {
   const { agg, agentKey } = withAgents()
+  // The session opened: the page carries a node's children only while it is open (1.6 D3).
   const vm = buildViewModel(makeInput({
-    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentSelected: agentKey },
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentSelected: agentKey, agentsExpanded: ['s:sess-alpha'] },
   }))
   const tree = vm.agents
   // The clock is the builder's input, never part of the tree (D12).
@@ -849,9 +852,63 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   // table below is filtered to.
   const filtered = buildViewModel(makeInput({
     agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }),
-    ui: { agentSelected: agentKey, providers: ['codex'], models: ['gpt-5.3-codex'], range: '7d' },
+    ui: { agentSelected: agentKey, agentsExpanded: ['s:sess-alpha'], providers: ['codex'], models: ['gpt-5.3-codex'], range: '7d' },
   }))
   assert.deepEqual(filtered.agents, tree)
+
+  // As the tree starts: the session closed, nothing below it in the payload, the same counts —
+  // and the running agent's details, since the running list has a row for it.
+  const closed = buildViewModel(makeInput({
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentSelected: agentKey },
+  })).agents
+  assert.deepEqual([closed.roots[0].children, closed.roots[0].hasChildren, closed.roots[0].childrenTotal, closed.roots[0].agentCount],
+    [[], true, 2, 2])
+  assert.equal(closed.selected?.key, agentKey)
+  assert.deepEqual(closed.runningNow, tree.runningNow)
+  // The markdown's tree opens every node, whatever the page has open.
+  const text = agentTreeFor(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: {} }), 'text')
+  assert.deepEqual(text.roots[0].children.map((c) => c.key), tree.roots[0].children.map((c) => c.key))
+})
+
+test('a "more" step raises an open node by one, up to MAX_MORE_PAGES; closing the node forgets it; the list keeps the newest', () => {
+  const open = applyMessage(defaultUiState(cfg), { type: 'agentToggle', key: 'w:s|wf_1' })
+  const once = applyMessage(open, { type: 'agentMore', key: 'w:s|wf_1' })
+  assert.deepEqual(once.agentsMore, [{ key: 'w:s|wf_1', pages: 1 }])
+  assert.deepEqual(open.agentsMore, [], 'the input state was mutated')
+  let ui = once
+  for (let i = 0; i < 20; i++) ui = applyMessage(ui, { type: 'agentMore', key: 'w:s|wf_1' })
+  assert.deepEqual(ui.agentsMore, [{ key: 'w:s|wf_1', pages: MAX_MORE_PAGES }])
+  // At the last step nothing changes, and says so by identity.
+  assert.equal(applyMessage(ui, { type: 'agentMore', key: 'w:s|wf_1' }), ui)
+  // A node that is not open has no "more" line: its step is no step.
+  assert.equal(applyMessage(open, { type: 'agentMore', key: 's:other' }), open)
+  assert.equal(applyMessage(open, { type: 'agentMore', key: '' }), open)
+  assert.equal(applyMessage(open, { type: 'agentMore', key: 'x'.repeat(MAX_AGENT_KEY_CHARS + 1) }), open)
+  // Closing the node forgets its steps: opened again, it shows its first fifty.
+  const shut = applyMessage(ui, { type: 'agentToggle', key: 'w:s|wf_1' })
+  assert.deepEqual([shut.agentsExpanded, shut.agentsMore], [[], []])
+  const reopened = applyMessage(shut, { type: 'agentToggle', key: 'w:s|wf_1' })
+  assert.deepEqual(reopened.agentsMore, [])
+  // At most MAX_AGENT_MORE nodes keep their steps; one more forgets the one raised longest ago,
+  // and a node raised again is the newest.
+  assert.equal(MAX_AGENT_MORE, 200)
+  let many = defaultUiState(cfg)
+  for (let i = 0; i <= MAX_AGENT_MORE; i++) {
+    many = applyMessage(many, { type: 'agentToggle', key: `w:s|wf_${i}` })
+    many = applyMessage(many, { type: 'agentMore', key: `w:s|wf_${i}` })
+  }
+  assert.equal(many.agentsMore.length, MAX_AGENT_MORE)
+  assert.equal(many.agentsMore.some((e) => e.key === 'w:s|wf_0'), false, 'the 201st kept the oldest')
+  assert.equal(many.agentsMore[MAX_AGENT_MORE - 1].key, `w:s|wf_${MAX_AGENT_MORE}`)
+  const raised = applyMessage(many, { type: 'agentMore', key: 'w:s|wf_1' })
+  assert.deepEqual(raised.agentsMore[MAX_AGENT_MORE - 1], { key: 'w:s|wf_1', pages: 2 })
+  assert.equal(raised.agentsMore.length, MAX_AGENT_MORE)
+  // The parser: a key of 1..200 characters, nothing else.
+  assert.deepEqual(parseWebviewMessage({ type: 'agentMore', key: 'w:s|wf_1' }), { type: 'agentMore', key: 'w:s|wf_1' })
+  for (const raw of [{ type: 'agentMore' }, { type: 'agentMore', key: null }, { type: 'agentMore', key: '' },
+    { type: 'agentMore', key: 'x'.repeat(MAX_AGENT_KEY_CHARS + 1) }, { type: 'agentMore', key: 3 }, { type: 'agentMore', key: ['k'] }]) {
+    assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
+  }
 })
 
 test('a session without agents is keyed by its id, never by the transcript path the aggregator holds a cursor for', () => {

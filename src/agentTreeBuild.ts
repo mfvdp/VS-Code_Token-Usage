@@ -29,9 +29,9 @@
  */
 
 import {
-  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, DetailRow, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
-  NodeDetails, NodeState, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS,
-  SPAN_IN_DAYS_FROM_MS, TreeNode,
+  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS,
+  MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeDetails, NodeState, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS,
+  RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from './agentTree'
 import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
@@ -59,6 +59,23 @@ export interface AgentTreeInput {
   runs?: readonly RunRec[]
   /** `ui.agentSelected`: the node whose details are open, or null. */
   selected: string | null
+  /**
+   * `ui.agentsExpanded` (1.6 D3): the nodes the reader opened. In `page` mode only these carry
+   * their children; absent means none is open. A key whose node has no children is ignored.
+   */
+  expanded?: readonly string[]
+  /**
+   * `ui.agentsMore` (D3): the opened nodes the reader asked to show more children of, and how
+   * many "more" steps each took (1…MAX_MORE_PAGES). Absent means none.
+   */
+  more?: ReadonlyArray<{ key: string; pages: number }>
+  /**
+   * `page` (the default): the dashboard's payload — only what is open, at most MAX_GROUP_CHILDREN
+   * children per open node and its "more" steps, at most MAX_PAGE_NODES nodes. `text`: the
+   * markdown document's tree — every node open, MAX_GROUP_CHILDREN children per node, the "more"
+   * steps left aside; the details of the selected node wherever it sits.
+   */
+  mode?: 'page' | 'text'
   tcfg: TimeConfig
 }
 
@@ -791,10 +808,6 @@ function* preorder(e: Entry): Generator<Entry> {
   for (const c of e.children) yield* preorder(c)
 }
 
-function sizeOf(e: Entry): number {
-  return e.children.reduce((n, c) => n + sizeOf(c), 1)
-}
-
 function depthOf(e: Entry): number {
   let d = 0
   for (let p = e.parent; p !== null; p = p.parent) d++
@@ -1228,9 +1241,10 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     workflowOf(wf).journalOnly = only
   }
 
-  // A run is summed from the agents inside it, on the whole tree: the cap below may hide some
-  // of them, but it does not change what the run used. Its state is the one function of its
-  // members' tally (§3.0 a), so the row's glyph and the tally beside it always agree.
+  // A run is summed from the agents inside it, on the whole tree: a closed run, or one showing
+  // fifty of its agents at a time, hides some of them from the page, but that does not change
+  // what the run used. Its state is the one function of its members' tally (§3.0 a), so the
+  // row's glyph and the tally beside it always agree.
   for (const [wf, w] of workflows) {
     const members = [...preorder(w)].filter(isAgentLike)
     const sum = noCounters()
@@ -1293,51 +1307,91 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
 }
 
 // ---------------------------------------------------------------------------
-// The cap, and the view-model shape
+// What goes to the page, and the view-model shape
 // ---------------------------------------------------------------------------
 
+/** The node and every node above it, from the node up. */
+function pathOf(e: Entry): Entry[] {
+  const out: Entry[] = []
+  for (let c: Entry | null = e; c !== null; c = c.parent) out.push(c)
+  return out
+}
+
 /**
- * The nodes that stay when the tree is larger than MAX_NODES. Every root stays; then the open
- * node and the running agents with the nodes above them — what someone watching the tree
- * came to see; then the rest level by level, so every session keeps its top levels before any
- * of them keeps its deepest one.
+ * The children an open node shows (1.6 D3): the first `limit` of them in the order the page
+ * draws them, with the child on the path to the selected node and every running child pinned
+ * into those places — each taking the place of the last child that is not pinned, so the ones
+ * shown keep their order. Only when the pinned children alone are more than `limit` does one
+ * of them go: the path to the selection first, then the running children in order. A node with
+ * no more children than `limit` shows them all.
  */
-function keep(roots: Entry[], selected: Entry | null): Set<Entry> {
-  const kept = new Set<Entry>(roots)
-  let budget = MAX_NODES - kept.size
-  const withAncestors = (e: Entry): void => {
-    const chain: Entry[] = []
-    let c: Entry | null = e
-    while (c !== null && !kept.has(c)) {
-      chain.push(c)
-      c = c.parent
-    }
-    // A node whose session is not listed has no chain that ends in a kept node.
-    if (c === null || chain.length > budget) return
-    for (const x of chain) kept.add(x)
-    budget -= chain.length
+function windowOf(e: Entry, limit: number, onPath: ReadonlySet<Entry>): Entry[] {
+  if (e.children.length <= limit) return e.children
+  const pinned: Entry[] = []
+  const toSelected = e.children.find((c) => onPath.has(c))
+  if (toSelected) pinned.push(toSelected)
+  for (const c of e.children) if (c !== toSelected && c.state === 'running') pinned.push(c)
+  const chosen = new Set(pinned.slice(0, limit))
+  let free = limit - chosen.size
+  for (const c of e.children) {
+    if (free <= 0) break
+    if (chosen.has(c)) continue
+    chosen.add(c)
+    free--
   }
-  if (selected) withAncestors(selected)
-  for (const r of roots) {
-    for (const e of preorder(r)) {
-      if (budget <= 0) break
-      if (isAgentLike(e) && e.state === 'running') withAncestors(e)
+  return e.children.filter((c) => chosen.has(c))
+}
+
+/** What one payload carries: the children each node ships, and every node it has a row for. */
+interface Payload {
+  /** The children a node ships, by node — only the nodes that ship any. */
+  shipped: Map<Entry, Entry[]>
+  /** Every node with a row in the payload: the roots and the children shipped below them. */
+  emitted: Set<Entry>
+}
+
+/**
+ * Which children go into the payload. An open node ships its window (see windowOf) or nothing:
+ * the whole payload holds at most `cap` nodes, so it is filled with the path to the selected node
+ * first, then the paths to the running nodes, then everything else in the order the page draws
+ * it — a node whose window no longer fits ships no children and says how many it holds, rather
+ * than a part of them in no order anyone chose. A node ships only when its own row is in the
+ * payload: a child of a closed node is not on the page, however open it is itself.
+ */
+function payloadOf(
+  roots: readonly Entry[], isOpen: (e: Entry) => boolean, limitOf: (e: Entry) => number,
+  selected: Entry | null, running: readonly Entry[], cap: number,
+): Payload {
+  const onPath = new Set<Entry>(selected ? pathOf(selected) : [])
+  const shipped = new Map<Entry, Entry[]>()
+  const refused = new Set<Entry>()
+  const emitted = new Set<Entry>(roots)
+  let budget = cap - roots.length
+  const ship = (e: Entry): boolean => {
+    if (shipped.has(e)) return true
+    if (refused.has(e) || !emitted.has(e) || e.children.length === 0 || !isOpen(e)) return false
+    const window = windowOf(e, limitOf(e), onPath)
+    if (window.length > budget) {
+      refused.add(e)
+      return false
     }
+    budget -= window.length
+    shipped.set(e, window)
+    for (const c of window) emitted.add(c)
+    return true
   }
-  let level = roots.flatMap((r) => r.children)
-  while (budget > 0 && level.length > 0) {
-    const next: Entry[] = []
-    for (const e of level) {
-      if (!kept.has(e)) {
-        if (budget <= 0) break
-        kept.add(e)
-        budget--
-      }
-      next.push(...e.children)
-    }
-    level = next
+  // A path from the top: each node ships once the one above it did.
+  const down = (e: Entry): void => {
+    for (const x of pathOf(e).reverse()) if (x !== e && !ship(x)) return
   }
-  return kept
+  if (selected) down(selected)
+  for (const r of running) down(r)
+  const visit = (e: Entry): void => {
+    if (!ship(e)) return
+    for (const c of shipped.get(e) ?? []) visit(c)
+  }
+  for (const r of roots) visit(r)
+  return { shipped, emitted }
 }
 
 /**
@@ -1352,9 +1406,8 @@ function detailsOf(e: Entry): NodeDetails {
 }
 
 /**
- * The agents and pending launches below a node — what a collapsed row says it holds — for
- * every node at once, on the tree as it was built: the MAX_NODES cut may drop some of them
- * from the payload, but they are still there.
+ * The agents and pending launches below a node — what its tally counts — for every node at
+ * once, on the whole tree: open or closed, inside a node's window or past it.
  */
 function agentCounts(roots: Entry[]): Map<Entry, number> {
   const out = new Map<Entry, number>()
@@ -1395,9 +1448,9 @@ function byStartThenKey(a: Entry, b: Entry): number {
 }
 
 /**
- * Every agent and pending launch in state running, from all roots — listed or not, above the
- * cut or below it: whoever watches the list came to see exactly these, wherever the tree put
- * them. One entry per key.
+ * Every agent and pending launch in state running, from all roots — listed or not, open or
+ * closed, inside a window or past it: whoever watches the list came to see exactly these,
+ * wherever the tree put them. One entry per key.
  */
 function runningOf(roots: Entry[]): Entry[] {
   const seen = new Set<string>()
@@ -1430,54 +1483,90 @@ function runningItem(e: Entry): RunningItem {
 }
 
 /**
- * The tree for the view model: at most MAX_ROOTS sessions, most recent first, cut at
- * MAX_NODES nodes; the running agents of every session above it; and the details of
- * `input.selected` while the page has a row for that node — in the tree, or in the running
- * list, which may name a node of a session the tree does not list.
+ * The "more" steps of an open node the reader took: a whole number from 0 to MAX_MORE_PAGES.
+ * The stored list is the view state's, and was checked on the way in; it is checked again
+ * here, since a count out of range would ask for a window nobody can page back from.
+ */
+function pagesFrom(more: AgentTreeInput['more']): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const m of Array.isArray(more) ? more : []) {
+    if (!m || typeof m.key !== 'string' || typeof m.pages !== 'number' || !Number.isInteger(m.pages)) continue
+    out.set(m.key, Math.max(0, Math.min(MAX_MORE_PAGES, m.pages)))
+  }
+  return out
+}
+
+/**
+ * The tree for the view model (1.6 D3): at most MAX_ROOTS sessions, most recent first; of them
+ * only what is open — in `page` mode a node carries its children only while the reader opened
+ * it, at most MAX_GROUP_CHILDREN of them and as many again per "more" step, with the path to
+ * the selected node and the running children pinned in, the whole payload at most
+ * MAX_PAGE_NODES nodes; in `text` mode every node is open, MAX_GROUP_CHILDREN children each.
+ * Every node says, open or not, whether it has children, how many, and what the agents below it
+ * came to, counted on the whole tree. Then the running agents of every session, and the details
+ * of `input.selected` while its row is on the page — in the tree, or in the running list, which
+ * may name a node of a session the tree does not list; `text` mode prints every node, so it
+ * has the details of the selected node wherever it sits.
  */
 export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm {
   const forest = buildForest(input, now)
+  const whole = input.mode === 'text'
   const shown = forest.roots.slice(0, MAX_ROOTS)
   const selectedKey = text(input.selected)
   const selected = selectedKey !== null ? forest.byKey.get(selectedKey) ?? null : null
-  const kept = keep(shown, selected)
-  const total = shown.reduce((n, r) => n + sizeOf(r), 0)
   // Every root, listed or not: the host polls while anything runs, wherever it sits.
   let running = 0
   for (const r of forest.roots) for (const e of preorder(r)) if (isAgentLike(e) && e.state === 'running') running++
   const live = runningOf(forest.roots)
   const listed = live.slice(0, MAX_RUNNING_LIST)
+  const listedKeys = new Set(listed.map((e) => e.key))
   const counts = agentCounts(forest.roots)
+  const opened = new Set(Array.isArray(input.expanded) ? input.expanded.filter((k) => typeof k === 'string') : [])
+  const pages = whole ? new Map<string, number>() : pagesFrom(input.more)
+  const isOpen = (e: Entry): boolean => whole || opened.has(e.key)
+  const limitOf = (e: Entry): number => MAX_GROUP_CHILDREN * (1 + (pages.get(e.key) ?? 0))
+  const payload = payloadOf(shown, isOpen, limitOf, selected, live, MAX_PAGE_NODES)
 
-  const toNode = (e: Entry): TreeNode => ({
-    key: e.key,
-    kind: e.kind,
-    label: e.label,
-    sub: e.sub,
-    state: e.state,
-    derived: derivedOf(e.state),
-    usage: e.usage,
-    usageAgents: e.usageAgents,
-    lowerBound: e.lowerBound,
-    duration: e.duration,
-    startTs: e.startTs,
-    lastTs: e.lastTs,
-    agentCount: counts.get(e) ?? 0,
-    tally: e.tally === null ? null : { ...e.tally },
-    tallyText: e.tally === null ? null : tallyText(e.tally),
-    tallySpoken: e.tally === null ? null : tallySpoken(e.tally),
-    superseded: e.superseded,
-    children: e.children.filter((c) => kept.has(c)).map(toNode),
-  })
+  const toNode = (e: Entry): TreeNode => {
+    const kids = payload.shipped.get(e) ?? []
+    return {
+      key: e.key,
+      kind: e.kind,
+      label: e.label,
+      sub: e.sub,
+      state: e.state,
+      derived: derivedOf(e.state),
+      usage: e.usage,
+      usageAgents: e.usageAgents,
+      lowerBound: e.lowerBound,
+      duration: e.duration,
+      startTs: e.startTs,
+      lastTs: e.lastTs,
+      agentCount: counts.get(e) ?? 0,
+      hasChildren: e.children.length > 0,
+      childrenTotal: e.children.length,
+      childrenMore: e.children.length > 0 && isOpen(e) ? e.children.length - kids.length : 0,
+      tally: e.tally === null ? null : { ...e.tally },
+      tallyText: e.tally === null ? null : tallyText(e.tally),
+      tallySpoken: e.tally === null ? null : tallySpoken(e.tally),
+      superseded: e.superseded,
+      children: kids.map(toNode),
+    }
+  }
 
-  // The details of a node the page has a row for: in the tree — inside a closed branch too, the
-  // payload carries it — or in the running list, which names running agents of sessions beyond
-  // MAX_ROOTS too, so a click on one of them opens its details like a click on a tree row. A
-  // node with no row anywhere — its session not listed and itself not running, or gone from the
-  // records — gets no panel: nothing on the page could close one, and the stored selection
-  // would bring it back with every reload. The note below says why nothing opened instead.
-  const onPage = (e: Entry): boolean => kept.has(e) || listed.some((x) => x.key === e.key)
-  const details = selected !== null && onPage(selected) ? detailsOf(selected) : null
+  // A selected node is reachable while its session is listed, or while the running list names
+  // it — that list holds running agents of sessions beyond MAX_ROOTS too; anything else — its
+  // session not listed and itself not running, or gone from the records — gets the note, since
+  // a stored selection that opens nothing would otherwise look like a panel that failed. A
+  // reachable node gets its details while its row is on the page: in the payload, or in the
+  // running list. One inside a closed branch has no row there and gets no panel and no note —
+  // opening the branch brings the panel back, and nothing on the page could close a panel that
+  // stood for a row nobody sees. The markdown prints every node, so it always has the row.
+  let top: Entry | null = selected
+  while (top !== null && top.parent !== null) top = top.parent
+  const reachable = selected !== null && ((top !== null && shown.includes(top)) || listedKeys.has(selected.key))
+  const onPage = selected !== null && (whole || payload.emitted.has(selected) || listedKeys.has(selected.key))
+  const details = selected !== null && reachable && onPage ? detailsOf(selected) : null
   let note: string | null = null
   if (forest.roots.length === 0) {
     // A session that is older than a day and never ran an agent is not in the tree; saying
@@ -1486,7 +1575,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
       ? t('No agent in the last {0} days, and no Claude Code session in the last {1} hours.',
         AGENT_RETENTION_DAYS, ROOT_WINDOW_MS / HOUR_MS)
       : t('No Claude Code session in the last 7 days.')
-  } else if (selectedKey !== null && details === null) {
+  } else if (selectedKey !== null && !reachable) {
     note = t('The selected node is no longer in the tree.')
   }
   return {
@@ -1496,7 +1585,6 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     runningNow: listed.map(runningItem),
     runningMore: Math.max(0, live.length - MAX_RUNNING_LIST),
     omittedRoots: Math.max(0, forest.roots.length - MAX_ROOTS),
-    truncated: kept.size < total,
     note,
   }
 }

@@ -12,6 +12,7 @@
  */
 
 import * as vscode from 'vscode'
+import type { AgentTreeVm } from './agentTree'
 import { Aggregator } from './agg'
 import { Config, readTimeConfig } from './config'
 import { toCsv, toJson, toMarkdownSummary, toolsCsv } from './exporter'
@@ -25,6 +26,11 @@ export const MARKDOWN_URI = `${MARKDOWN_SCHEME}:/usage.md`
 
 export interface NativeViewDeps {
   getVm: () => ViewModel
+  /**
+   * The agent tree with every node open (1.6 D3, `text` mode), for the markdown document: the
+   * view model's tree carries only what the dashboard has open. Null prints the page's tree.
+   */
+  getAgentTextTree: () => AgentTreeVm | null
   /** Runs one of our own commands; the QuickPick never executes anything else. */
   run: (command: string, ...args: unknown[]) => Thenable<unknown>
   getExportInput: () => { agg: Aggregator; range: DayRange; cfg: Config }
@@ -39,11 +45,14 @@ class UsageDocumentProvider implements vscode.TextDocumentContentProvider {
   private readonly emitter = new vscode.EventEmitter<vscode.Uri>()
   readonly onDidChange = this.emitter.event
 
-  constructor(private readonly getVm: () => ViewModel) {}
+  constructor(
+    private readonly getVm: () => ViewModel,
+    private readonly getAgentTextTree: () => AgentTreeVm | null,
+  ) {}
 
   provideTextDocumentContent(): string {
     try {
-      return markdownDocument(this.getVm())
+      return markdownDocument(this.getVm(), this.getAgentTextTree())
     } catch (err) {
       // A view that throws would leave an empty editor with no explanation.
       return `# Token Pace\n\n${t('The usage view could not be built: {0}', String(err))}\n`
@@ -177,7 +186,7 @@ export function registerNativeViews(
   context: vscode.ExtensionContext,
   deps: NativeViewDeps,
 ): NativeViews {
-  const provider = new UsageDocumentProvider(deps.getVm)
+  const provider = new UsageDocumentProvider(deps.getVm, deps.getAgentTextTree)
   const uri = vscode.Uri.parse(MARKDOWN_URI)
   context.subscriptions.push(
     provider,

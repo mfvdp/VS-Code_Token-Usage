@@ -21,10 +21,11 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
+import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES } from '../src/agentTree'
 import { setBundle, setLocale } from '../src/i18n'
 import { buildViewModel, parseWebviewMessage } from '../src/viewModel'
-import { agentWorld, treeNodes } from './fixtures/agentWorld'
-import { makeConfig, makeInput } from './fixtures/viewFixtures'
+import { agentWorld, everyParent, treeNodes } from './fixtures/agentWorld'
+import { NOW, makeConfig, makeInput } from './fixtures/viewFixtures'
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -2649,7 +2650,7 @@ test('the message hooks the extension parses are all still in the page', () => {
   for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
     'model', 'clearModels', 'moreModels', 'moreRanges', 'section', 'sectionSettings',
     'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'compositionCache',
-    'agentToggle', 'agentSelect']) {
+    'agentToggle', 'agentSelect', 'agentMore']) {
     assert.ok(SOURCE.indexOf('data-act="' + act + '"') >= 0, act)
   }
   // 1.5.0's fold is gone from the page as it is from the host's allow-list.
@@ -2989,12 +2990,18 @@ const AK = {
   s2: 's:/p/-home-u-repo/1234abcd.jsonl',
 }
 
-/** One TreeNode of src/agentTree.ts, its figures already formatted as the view model does. */
+/**
+ * One TreeNode of src/agentTree.ts, its figures already formatted as the view model does. Whether
+ * it has children and how many follow the children given (1.6 D3), unless `over` says otherwise —
+ * a closed node's payload carries none of them.
+ */
 function treeNode(key: string, state: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  const kids = Array.isArray(over.children) ? over.children.length : 0
   return {
     key, kind: 'agent', label: 'Explore · Opus 5 · a94f', sub: null, state,
     derived: state !== 'done' && state !== 'failed', usage: '12.3K', lowerBound: false,
     duration: '40.0 s', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, agentCount: 0,
+    hasChildren: kids > 0, childrenTotal: kids, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, children: [], ...over,
   }
 }
@@ -3080,7 +3087,7 @@ function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> 
       treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', usage: '–', duration: '–' }),
     ],
     selected: null, running: 1, runningNow: [runningItem()], runningMore: 0,
-    omittedRoots: 0, truncated: false, note: null,
+    omittedRoots: 0, note: null,
     ...over,
   }
 }
@@ -3652,39 +3659,96 @@ test('the ⚠ line counts the running list: with every node closed a running row
   assert.equal(agentsHtml(a, { agents: older }).indexOf(legend), -1)
 })
 
-test('a node whose agents the tree had to cut all away has nothing to open and still says what they came to', () => {
-  // The MAX_NODES cut can take every child of a node while its tally, taken before the cut,
-  // still has them. The node is drawn as a leaf — there is nothing to open — and its tally says
-  // what is below it, opened by the reader earlier or not.
+// 1.6 P3a (§3 D3): pinned "a node whose agents the tree had to cut all away has nothing to open".
+// The cut is gone, and a closed node's payload carries no child at all: whether it has any is its
+// own `hasChildren`, so it keeps its toggle; a node with nothing to open — a run whose agents no
+// transcript shows — is the leaf, and its tally says what is below it all the same.
+test('a closed node the payload carries no child of keeps its toggle and its tally; a node with no child is a leaf', () => {
   const a = agentCtx()
   const three = tallyOf({ done: 2, stopped: 1 })
-  const cut = agentTree({
-    truncated: true,
-    roots: [treeNode(AK.s1, 'active', { kind: 'session', label: 'Session 9d0eb37a', ...three, children: [] })],
+  const closed = agentTree({
+    roots: [treeNode(AK.s1, 'active', {
+      kind: 'session', label: 'Session 9d0eb37a', ...three, hasChildren: true, childrenTotal: 2, children: [],
+    })],
   })
-  for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.s1] })]) {
-    const h = treePart(agentsHtml(a, { agents: cut, ui }))
-    assert.equal(h.indexOf('ag-fold'), -1, h)
-    assert.equal(h.indexOf('aria-expanded'), -1, h)
-    assert.ok(h.indexOf('<div class="ag-line"><span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="'
-      + AK.s1 + '"') >= 0, h)
-    assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
-      + '<span class="meta">' + tallyHtml('3 started · 2 ✓ · 1 ■', '3 started, 2 done, 1 stopped') + '</span>') >= 0, h)
+  const h = treePart(agentsHtml(a, { agents: closed }))
+  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
+    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
+    + '" aria-label="Expand Session 9d0eb37a"></button>') >= 0, h)
+  assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
+    + '<span class="meta">' + tallyHtml('3 started · 2 ✓ · 1 ■', '3 started, 2 done, 1 stopped') + '</span>') >= 0, h)
+  assert.equal(h.indexOf('<ul role="group">'), -1, 'a closed node wrote a group')
+  // A run of journal-only agents: agents below it, no child to open. A leaf, whatever is stored.
+  const run = agentTree({
+    roots: [treeNode(AK.wf, 'unknown', { kind: 'workflow', label: 'Workflow cfe7718d', ...three, children: [] })],
+  })
+  for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.wf] })]) {
+    const leaf = treePart(agentsHtml(a, { agents: run, ui }))
+    assert.equal(leaf.indexOf('ag-fold'), -1, leaf)
+    assert.equal(leaf.indexOf('aria-expanded'), -1, leaf)
+    assert.ok(leaf.indexOf('<div class="ag-line"><span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="'
+      + AK.wf + '"') >= 0, leaf)
+    assert.ok(leaf.indexOf(tallyHtml('3 started · 2 ✓ · 1 ■', '3 started, 2 done, 1 stopped')) >= 0, leaf)
   }
-  // An agent whose children were all cut is a leaf too, and its tally stands whatever is stored;
-  // with its children on the payload it stands only while the agent is closed.
-  const leaf = agentTree({ truncated: true, roots: [treeNode(AK.a3, 'failed', { label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3 })] })
-  for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.a3] })]) {
-    assert.ok(treePart(agentsHtml(a, { agents: leaf, ui })).indexOf(tallyMarkup(T_A3)) >= 0)
-  }
-  const withChild = agentTree({ roots: [treeNode(AK.a3, 'failed', {
-    label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3, children: [treeNode(AK.l1, 'unknown', { kind: 'pending' })],
+  // An agent's tally stands while its children are not on screen: closed, or opened with none
+  // of them sent (the payload's cap); with its children drawn it has none.
+  const agent = (children: unknown[], more = 0): Record<string, unknown> => agentTree({ roots: [treeNode(AK.a3, 'failed', {
+    label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3, hasChildren: true, childrenTotal: 1, childrenMore: more, children,
   })] })
-  assert.ok(treePart(agentsHtml(a, { agents: withChild })).indexOf(tallyMarkup(T_A3)) >= 0)
-  assert.equal(treePart(agentsHtml(a, { agents: withChild, ui: agentUi({ agentsExpanded: [AK.a3] }) })).indexOf('ag-tally'), -1)
+  assert.ok(treePart(agentsHtml(a, { agents: agent([]) })).indexOf(tallyMarkup(T_A3)) >= 0)
+  assert.ok(treePart(agentsHtml(a, { agents: agent([], 1), ui: agentUi({ agentsExpanded: [AK.a3] }) })).indexOf(tallyMarkup(T_A3)) >= 0)
+  const drawn = treePart(agentsHtml(a, { agents: agent([treeNode(AK.l1, 'unknown', { kind: 'pending' })]), ui: agentUi({ agentsExpanded: [AK.a3] }) }))
+  assert.equal(drawn.indexOf('ag-tally'), -1, drawn)
 })
 
-test('an empty tree says so, and a cut tree says what it left out', () => {
+test('an open node with more children than it shows says how many, and offers the next fifty while it can', () => {
+  // 1.6 D3: after the last child drawn, one line: "50 more · 377 not shown" — the next step and
+  // everything not shown — or "12 more" when the next step shows the rest; a button posting
+  // `agentMore` for the node, while another step can be taken; the count alone once it took its
+  // last one, or when the payload had no room for any of its children.
+  const a = agentCtx()
+  const kids = Array.from({ length: 3 }, (_, i) => treeNode(`a:kid${i}`, 'done', { label: `Explore · Opus 5 · k${i}` }))
+  const run = (more: number, children = kids): Record<string, unknown> => agentTree({
+    roots: [treeNode(AK.wf, 'done', {
+      kind: 'workflow', label: 'Workflow cfe7718d', hasChildren: true, childrenTotal: children.length + more, childrenMore: more, children,
+    })],
+  })
+  const open = (over: Record<string, unknown> = {}): Record<string, unknown> => agentUi({ agentsExpanded: [AK.wf], ...over })
+  const line = (words: string, control: boolean): string => '<li role="treeitem" class="ag-k-more"><div class="ag-line">'
+    + '<span class="ag-pad"></span>'
+    + (control ? '<button class="ag-more" data-act="agentMore" data-key="' + AK.wf + '">' + words + '</button>'
+      : '<span class="ag-more">' + words + '</span>')
+    + '</div></li>'
+  const html = (agents: Record<string, unknown>, ui = open()): string => treePart(agentsHtml(a, { agents, ui }))
+  // The line comes after the last child, inside the node's group.
+  const many = html(run(377))
+  assert.ok(many.indexOf('data-key="a:kid2"') < many.indexOf('class="ag-k-more"'), many)
+  assert.ok(many.indexOf(line('50 more · 377 not shown', true) + '</ul>') >= 0, many)
+  assert.ok(html(run(1234)).indexOf(line('50 more · 1,234 not shown', true)) >= 0)
+  assert.ok(html(run(50)).indexOf(line('50 more', true)) >= 0)
+  assert.ok(html(run(12)).indexOf(line('12 more', true)) >= 0)
+  // Nothing more, no line; a closed node, none either — its children are not on the page at all.
+  assert.equal(html(run(0)).indexOf('ag-k-more'), -1)
+  assert.equal(html(run(377), agentUi()).indexOf('ag-k-more'), -1)
+  // The last step taken: the count alone, no control. One step before it, the control.
+  assert.ok(html(run(377), open({ agentsMore: [{ key: AK.wf, pages: 10 }] })).indexOf(line('377 not shown', false)) >= 0)
+  assert.ok(html(run(377), open({ agentsMore: [{ key: AK.wf, pages: 9 }] })).indexOf(line('50 more · 377 not shown', true)) >= 0)
+  // Open, and none of its children sent — the page had no room: the count alone.
+  assert.ok(html(run(380, [])).indexOf('<ul role="group">' + line('380 not shown', false) + '</ul>') >= 0)
+  // A payload count that is not one is no line.
+  for (const bad of [-1, 0.2, Number.NaN, '377', null]) {
+    const tree = run(0)
+    ;((tree.roots as Array<Record<string, unknown>>)[0]).childrenMore = bad
+    assert.equal(html(tree).indexOf('ag-k-more'), -1, String(bad))
+  }
+  // The steps are src/agentTree.ts's, written into the page.
+  assert.deepEqual(JSON.parse(String(nodeVm.runInContext('JSON.stringify(AGENT_PAGING)', ctx))),
+    { groupChildren: MAX_GROUP_CHILDREN, morePages: MAX_MORE_PAGES })
+})
+
+// 1.6 P3a (§3 D3): pinned "Tree cut at {0} nodes." under the tree; the cut is gone, and what a node
+// leaves out is said on the node (see the test above).
+test('an empty tree says so, and a tree says what it left out', () => {
   // A payload without the tree — an older build — and an empty one.
   assert.equal(render('sAgents()'), '<p class="empty">No Claude Code session in the last 7 days.</p>')
   const a = agentCtx()
@@ -3695,12 +3759,14 @@ test('an empty tree says so, and a cut tree says what it left out', () => {
     '<p class="empty">Nothing &lt;here&gt;.</p>')
   const plain = agentsHtml(a)
   assert.equal(plain.indexOf('<p class="empty">'), -1, plain)
-  const cut = agentsHtml(a, {
-    agents: agentTree({ omittedRoots: 3, truncated: true, note: 'The selected node is no longer in the tree.' }),
+  const left = agentsHtml(a, {
+    agents: agentTree({ omittedRoots: 3, note: 'The selected node is no longer in the tree.' }),
   })
-  assert.ok(cut.indexOf('</ul></div><p class="empty">3 older session(s) not shown.</p>'
-    + '<p class="empty">Tree cut at 7 nodes.</p>'
-    + '<p class="empty">The selected node is no longer in the tree.</p>') >= 0, cut)
+  assert.ok(left.indexOf('</ul></div><p class="empty">3 older session(s) not shown.</p>'
+    + '<p class="empty">The selected node is no longer in the tree.</p>') >= 0, left)
+  // An older payload's cut flag says nothing any more.
+  assert.equal(agentsHtml(a, { agents: agentTree({ truncated: true }) }).indexOf('Tree cut'), -1)
+  assert.equal(SOURCE.indexOf('Tree cut'), -1)
 })
 
 test('a hostile tree renders inert: no element and no handler the renderer did not write', () => {
@@ -3710,7 +3776,7 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   // and the kind, and every string of the running list with them: label, context, usage, key,
   // kind — and the selection and the opened nodes pointing at poisoned keys.
   const agents = poisoned(agentTree({
-    selected: detailsOf(), note: 'n', omittedRoots: 2, truncated: true, runningMore: 3,
+    selected: detailsOf(), note: 'n', omittedRoots: 2, runningMore: 3,
     runningNow: [runningItem(), runningItem({ key: AK.l1, kind: 'pending', usage: '–', waiting: true })],
   }), EVIL)
   const h = agentsHtml(a, {
@@ -3811,16 +3877,20 @@ test('a click on a toggle or a row posts what the host parses, and a second clic
   // selected one's running row closes it again.
   a.fire('document:click', event(button('agentSelect', AK.l1, 'now')))
   a.fire('document:click', event(button('agentSelect', AK.a1, 'now')))
+  // 1.6 D3: the "more" line under an open node asks for its next fifty children.
+  a.fire('document:click', event(button('agentMore', AK.wf)))
   // A button without a key is not a message worth sending.
   a.fire('document:click', event(button('agentToggle', '')))
   a.fire('document:click', event(button('agentSelect')))
   a.fire('document:click', event(button('agentSelect', '', 'now')))
+  a.fire('document:click', event(button('agentMore', '')))
   const expected = [
     { type: 'agentToggle', key: AK.s1 },
     { type: 'agentSelect', key: AK.a2 },
     { type: 'agentSelect', key: null },
     { type: 'agentSelect', key: AK.l1 },
     { type: 'agentSelect', key: null },
+    { type: 'agentMore', key: AK.wf },
   ]
   assert.deepEqual(a.posted, expected)
   // Every one of them passes the host's allow-list unchanged.
@@ -3876,6 +3946,50 @@ test('a keyboard user on the tree keeps the focus through a push of the section'
   nodeVm.runInContext('renderSection("agents");', c)
   inside.add(before)
   nodeVm.runInContext('renderSection("quota");', c)
+  assert.deepEqual(focused, [])
+})
+
+test('a keyboard user on a "more" line keeps the focus on it, and on its node\'s toggle once the line is gone', () => {
+  // 1.6 D3: a step shows fifty children more and the line counts down; after the last step the
+  // line is gone, and the focus goes to the toggle of the node it belonged to rather than nowhere.
+  const focused: string[] = []
+  const control = (act: string, key: string, name: string): Record<string, unknown> =>
+    ({ dataset: { act, key }, focus: () => { focused.push(name) } })
+  const before = control('agentMore', AK.wf, 'before')
+  let drawn = [control('agentToggle', AK.wf, 'toggle'), control('agentMore', AK.s1, 'other'), control('agentMore', AK.wf, 'after')]
+  const inside = new Set<unknown>([before])
+  const body = {
+    innerHTML: '', dataset: {}, style: {},
+    contains: (el: unknown) => inside.has(el),
+    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined,
+    getElementById: () => null,
+    querySelector: (q: string) => (q === '[data-body="agents"]' ? body : null),
+    querySelectorAll: () => [],
+    activeElement: before,
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc,
+    window: { addEventListener: () => undefined }, console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  ;(c as Record<string, unknown>).fixture = model({ sections: ['agents'], agents: agentTree(), ui: agentUi() })
+  nodeVm.runInContext('vm = fixture; renderSection("agents");', c)
+  assert.deepEqual(focused, ['after'])
+  // The last step taken: no line for the node any more — its toggle, not another node's line.
+  focused.length = 0
+  drawn = [control('agentMore', AK.s1, 'other'), control('agentToggle', AK.wf, 'toggle')]
+  nodeVm.runInContext('renderSection("agents");', c)
+  assert.deepEqual(focused, ['toggle'])
+  // A selection row that is gone still takes the focus nowhere.
+  focused.length = 0
+  const gone = control('agentSelect', AK.wf, 'gone')
+  inside.add(gone)
+  doc.activeElement = gone
+  drawn = [control('agentToggle', AK.wf, 'toggle')]
+  nodeVm.runInContext('renderSection("agents");', c)
   assert.deepEqual(focused, [])
 })
 
@@ -3947,7 +4061,9 @@ test('the agent tree speaks German on a German page', () => {
   const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   const words = ['Agents', 'running', 'done', 'failed', 'stopped', 'unknown', 'active session', 'idle session',
     '{0} · derived', '{0} · recorded', 'running for {0}', '{0} ago', 'State', 'Last activity', 'Details',
-    'Collapse {0}', 'Expand {0}', 'Tree cut at {0} nodes.', '{0} older session(s) not shown.',
+    'Collapse {0}', 'Expand {0}', '{0} older session(s) not shown.',
+    // 1.6 D3: the line under an open node that shows fifty of its children at a time.
+    '{0} more · {1} not shown', '{0} more', '{0} not shown',
     'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.',
     // 1.5.1: the running list.
     'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent']
@@ -3967,7 +4083,7 @@ test('the agent tree speaks German on a German page', () => {
   }
   const h = section({
     agents: agentTree({
-      selected: detailsOf({ rows: [] }), truncated: true, omittedRoots: 2, runningMore: 3,
+      selected: detailsOf({ rows: [] }), omittedRoots: 2, runningMore: 3,
       runningNow: [runningItem(), runningItem({ key: AK.l1, waiting: true })],
     }),
     ui: openUi({ agentSelected: AK.a1 }),
@@ -3978,13 +4094,24 @@ test('the agent tree speaks German on a German page', () => {
     'title="~Sitzung aktiv · abgeleitet"', 'title="~Sitzung ruht · abgeleitet"',
     '<span class="nobr">läuft seit <span data-live="since"', '<dt class="ag-wide">Zustand</dt>', '<dt>Letzte Aktivität</dt><dd><span class="nobr">vor <span data-live="since"',
     'aria-label="Workflow cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
-    '<p class="empty">Baum bei 7 Knoten abgeschnitten.</p>',
     '<p class="meta">Mit ⚠ markierte Ausgabewerte in den Details sind Untergrenzen.</p>',
     // The running list: its heading with everything that runs, the waiting clause, the rest counted.
     '<div class="name" role="heading" aria-level="3">Laufen gerade (5)</div>',
     '<span>wartet auf einen untergeordneten Agenten</span>', '<p class="meta">und 3 weitere</p>',
   ]) assert.ok(h.indexOf(phrase) >= 0, phrase + ' missing from ' + h)
   assert.ok(section({ ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
+  // 1.6 D3: the line under an open node that shows fifty of its children at a time, in German
+  // words and German digits.
+  const paged = (more: number, pages: number): string => section({
+    agents: agentTree({ roots: [treeNode(AK.wf, 'done', {
+      kind: 'workflow', label: 'Workflow cfe7718d', hasChildren: true, childrenTotal: more + 1, childrenMore: more,
+      children: [treeNode(AK.a2, 'done')],
+    })] }),
+    ui: agentUi({ agentsExpanded: [AK.wf], agentsMore: pages > 0 ? [{ key: AK.wf, pages }] : [] }),
+  })
+  assert.ok(paged(1234, 0).indexOf('>50 weitere · 1.234 nicht gezeigt</button>') >= 0, paged(1234, 0))
+  assert.ok(paged(12, 0).indexOf('>12 weitere</button>') >= 0)
+  assert.ok(paged(1234, 10).indexOf('<span class="ag-more">1.234 nicht gezeigt</span>') >= 0)
   // 1.6 D7: a stop, recorded — „gestoppt · aufgezeichnet".
   assert.ok(section({ agents: agentTree({ roots: [treeNode(AK.a3, 'stopped', { derived: false })] }) })
     .indexOf('title="gestoppt · aufgezeichnet"') >= 0)
@@ -4009,10 +4136,14 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   // End to end, where the tests above hand the renderer a tree of their own: the records the
   // aggregator filled from the builders' lines (test/fixtures/agentWorld.ts), the tree the view
   // model builds from them, and the markup the page writes for that tree.
-  const vm = buildViewModel(makeInput({ agg: agentWorld().agg, cfg: makeConfig() }))
+  // Every parent opened, as a reader who opened them all would have it: every node on screen —
+  // and in the payload, which carries a node's children only while it is open (1.6 D3).
+  const { agg } = agentWorld()
+  const cfg = makeConfig()
+  const opened = everyParent(agg, cfg, NOW)
+  const vm = buildViewModel(makeInput({ agg, cfg, ui: { agentsExpanded: opened } }))
   const nodes = treeNodes(vm.agents.roots)
-  // Every parent opened, as a reader who opened them all would have it: every node on screen.
-  const opened = nodes.filter((n) => n.children.length > 0).map((n) => n.key)
+  assert.deepEqual(nodes.filter((n) => n.hasChildren).map((n) => n.key).sort(), [...opened].sort())
   const h = treePart(agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi({ agentsExpanded: opened }) }))
   const rowOf = (key: string): string => {
     const at = h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + key + '"')
@@ -4076,7 +4207,9 @@ test('the running list the view model builds reaches the page first, the tree cl
     assert.equal(/>0[ <]|> 0</.test(row), false, row)
   }
   assert.equal(items.find((r) => r.kind === 'pending')?.usage, '–')
-  // The tree under it holds the two sessions and nothing else, each saying what its agents came to.
+  // The tree under it holds the two sessions and nothing else, each saying what its agents came to
+  // — the payload carries nothing below them (1.6 D3), and each keeps its toggle.
+  assert.ok(vm.agents.roots.every((r) => r.children.length === 0 && r.hasChildren && r.childrenMore === 0))
   const tree = treePart(h)
   assert.deepEqual([...tree.matchAll(/data-act="agentSelect" data-key="([^"]*)"/g)].map((m) => m[1]),
     vm.agents.roots.map((r) => r.key))

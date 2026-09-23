@@ -18,8 +18,8 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  AgentTreeVm, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS,
-  SPAN_IN_DAYS_FROM_MS, TreeNode,
+  AgentTreeVm, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
+  RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from '../src/agentTree'
 import { AgentTreeInput, agentDetails, buildAgentTree, shortIdsOf, spanText } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
@@ -115,11 +115,22 @@ function sessionRec(over: Partial<SessionRec> = {}): SessionRec {
   }
 }
 
+/**
+ * The builder's input. The rules of states, names and places are pinned on the whole tree, so
+ * the tests build the markdown's `text` mode — every node open, fifty children each (1.6 D3) —
+ * unless a test is about the dashboard's payload, which carries only what the reader opened
+ * and says `mode: 'page'` (see `page` below).
+ */
 function input(over: Partial<AgentTreeInput> = {}): AgentTreeInput {
   return {
-    agents: [], launches: [], mains: [main()], sessions: [], attribution: 'none', selected: null, tcfg,
+    agents: [], launches: [], mains: [main()], sessions: [], attribution: 'none', selected: null, mode: 'text', tcfg,
     ...over,
   }
+}
+
+/** The dashboard's payload: only the nodes in `expanded` carry their children. */
+function page(over: Partial<AgentTreeInput> = {}, now = NOW): AgentTreeVm {
+  return buildAgentTree(input({ expanded: [], ...over, mode: 'page' }), now)
 }
 
 function build(over: Partial<AgentTreeInput> = {}, now = NOW): AgentTreeVm {
@@ -886,13 +897,19 @@ test('a run\'s state is the one function of its tally, so its row and its tally 
   assert.deepEqual([...ruled].sort(), ['done', 'failed', 'running', 'stopped', 'unknown'], 'every rule was reached')
 })
 
-test('a tally is taken on the whole tree — the cut takes rows, not agents — in the reader\'s digits', () => {
+// 1.6 P3a (§3 D3): the MAX_NODES cut is gone; what a node shows is its window of fifty, and the
+// tally still counts every agent, shown or not — and closed, where the page carries none.
+test('a tally is taken on the whole tree — a window shows rows, not agents — in the reader\'s digits', () => {
   const many = Array.from({ length: 400 }, (_, i) => rec(`c${String(i).padStart(7, '0')}`, {
     firstTs: NOW - 5 * HOUR + i * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
   }))
   const cut = build({ agents: many })
-  assert.equal(cut.truncated, true)
+  assert.equal(cut.roots[0].children.length, MAX_GROUP_CHILDREN)
+  assert.equal(cut.roots[0].childrenMore, 400 - MAX_GROUP_CHILDREN)
   assert.deepEqual(cut.roots[0].tally, { started: 400, done: 400, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0 })
+  const closed = page({ agents: many })
+  assert.deepEqual([closed.roots[0].children.length, closed.roots[0].childrenMore], [0, 0])
+  assert.deepEqual(closed.roots[0].tally, cut.roots[0].tally)
   // Twelve hundred agents of a run's journal, none of them a row: grouped as the page groups figures.
   const big: Partial<AgentTreeInput> = {
     runs: [run(Array.from({ length: 1200 }, (_, i) => jagent(`a${String(i).padStart(16, '0')}`, { step: i + 1, outcome: 'completed' })))],
@@ -939,7 +956,8 @@ test('at most MAX_ROOTS sessions are listed, the newest, and the rest is counted
   assert.equal(vm.roots.length, MAX_ROOTS)
   assert.equal(vm.omittedRoots, 5)
   assert.deepEqual(vm.roots.map((r) => r.lastTs), mains.slice(0, MAX_ROOTS).map((m) => m.lastTs))
-  assert.equal(vm.truncated, false, 'leaving sessions out is not cutting the tree')
+  // Leaving sessions out takes nothing from the sessions that are listed.
+  assert.ok(vm.roots.every((r) => r.childrenMore === 0), 'a listed session lost children for the ones left out')
 })
 
 // ---------------------------------------------------------------------------
@@ -1095,29 +1113,184 @@ test('a session carries its project label only while attribution is on and the t
 // §4.5 · caps
 // ---------------------------------------------------------------------------
 
-test('MAX_NODES cuts the tree but keeps every session, the running agents and the open node', () => {
-  const done = Array.from({ length: 400 }, (_, i) => rec(`d${String(i).padStart(7, '0')}`, {
+// 1.6 P3a (§3 D3): replaces 1.5's 'MAX_NODES cuts the tree but keeps every session, the running
+// agents and the open node'. There is no cut any more: the page carries only what is open, an
+// open node at most fifty children at a time, and the payload at most MAX_PAGE_NODES nodes.
+
+/** A Claude Code agent id: `a` and 16 hex digits, the n-th of a series. */
+function hexId(n: number): string {
+  return `a${n.toString(16).padStart(16, '0')}`
+}
+
+/**
+ * The ideas round's large run, in one session: 427 agents, 164 of them with a transcript and 263
+ * its journal started without one (until P5b counted, not drawn). The records started a minute
+ * apart five hours ago, so they are drawn in the order of their number; 150 completed, 12 failed,
+ * 2 open; of the journal-only ones all but 8 completed. `extra` more journal-only agents join
+ * the run, completed; `running` lets the last record write a minute ago.
+ */
+function bigWorld(extra = 0, o: { running?: boolean } = {}): { over: Partial<AgentTreeInput>; ids: string[] } {
+  const ids = Array.from({ length: 164 }, (_, i) => hexId(i))
+  const agents = ids.map((id, i) => wfRec(id, {
+    firstTs: NOW - 5 * HOUR + i * MIN,
+    lastTs: o.running === true && i === 163 ? NOW - MIN : NOW - 5 * HOUR + i * MIN + 30_000,
+  }))
+  const journal = [
+    ...ids.map((id, i) => jagent(id, { step: i + 1, outcome: i < 150 ? 'completed' : i < 162 ? 'failed' : null })),
+    ...Array.from({ length: 263 + extra }, (_, j) =>
+      jagent(hexId(0x10000 + j), { step: 1000 + j, outcome: j < 8 ? null : 'completed' })),
+  ]
+  // The journal last changed half an hour ago: its open members are unknown, not running.
+  return { over: { agents, runs: [run(journal)] }, ids }
+}
+
+test('only what is open goes to the page: a closed run of 427 agents is one session row, however many it gains', () => {
+  const { over } = bigWorld()
+  const vm = page(over)
+  // The session alone — closed, so not even its run is in the payload — and what it holds.
+  assert.deepEqual(vm.roots.map((r) => r.key), [rootKey])
+  const root = vm.roots[0]
+  assert.deepEqual(root.children, [])
+  assert.deepEqual([root.hasChildren, root.childrenTotal, root.childrenMore], [true, 1, 0])
+  assert.equal(root.agentCount, 427)
+  assert.deepEqual(root.tally, { started: 427, done: 405, failed: 12, retried: 0, stopped: 0, running: 0, unknown: 10 })
+  assert.equal(root.tallyText, '427 started · 405 ✓ · 12 ✕ · ~10 ?')
+  // The ideas round measured 77.8 KB for this run's payload; closed it is the session's row.
+  const size = JSON.stringify(vm).length
+  assert.ok(size <= 4096, `the closed tree is ${size} bytes`)
+  // A hundred more agents in the closed run change its counts, not the payload's size: nothing
+  // of the run is in it. (Emitting the children of a closed node fails here.)
+  const grown = page(bigWorld(100).over)
+  assert.equal(grown.roots[0].tallyText, '527 started · 505 ✓ · 12 ✕ · ~10 ?')
+  assert.equal(JSON.stringify(grown).length, size)
+  // Opened, the session shows its run — closed in turn, with its own counts.
+  const opened = page({ ...over, expanded: [rootKey] })
+  const w = node(opened, wfKey)
+  assert.deepEqual([w.children.length, w.hasChildren, w.childrenTotal, w.childrenMore, w.agentCount],
+    [0, true, 164, 0, 427])
+  assert.equal(w.tallyText, root.tallyText)
+})
+
+test('an opened run shows fifty agents, the running and the selected one pinned in, and counts the rest', () => {
+  const { over, ids } = bigWorld(0, { running: true })
+  const picked = agentKey(ids[120])
+  const live = agentKey(ids[163])
+  const vm = page({ ...over, expanded: [rootKey, wfKey], selected: picked })
+  const w = node(vm, wfKey)
+  assert.equal(w.children.length, MAX_GROUP_CHILDREN)
+  assert.equal(w.childrenTotal, 164)
+  assert.equal(w.childrenMore, w.childrenTotal - MAX_GROUP_CHILDREN)
+  // The first 48 in the order the page draws them, the two pinned ones in their own places.
+  assert.deepEqual(w.children.map((c) => c.key), [...ids.slice(0, 48).map(agentKey), picked, live])
+  assert.equal(node(vm, live).state, 'running')
+  assert.equal(vm.selected?.key, picked)
+  assert.equal(vm.note, null)
+  // The agents shown are leaves here: nothing below them, nothing more to say.
+  for (const c of w.children) assert.deepEqual([c.hasChildren, c.childrenTotal, c.childrenMore], [false, 0, 0], c.key)
+  // Without a selection and nothing running, the window is the first fifty.
+  const plain = page({ ...bigWorld().over, expanded: [rootKey, wfKey] })
+  assert.deepEqual(node(plain, wfKey).children.map((c) => c.key), ids.slice(0, MAX_GROUP_CHILDREN).map(agentKey))
+})
+
+test('each "more" step shows fifty children more, at most MAX_MORE_PAGES steps; the counts follow', () => {
+  const { over, ids } = bigWorld()
+  const shown = (pages: number): TreeNode => node(page({ ...over, expanded: [rootKey, wfKey], more: [{ key: wfKey, pages }] }), wfKey)
+  assert.deepEqual([shown(1).children.length, shown(1).childrenMore], [100, 64])
+  assert.deepEqual([shown(2).children.length, shown(2).childrenMore], [150, 14])
+  assert.deepEqual([shown(3).children.length, shown(3).childrenMore], [164, 0])
+  assert.deepEqual(shown(3).children.map((c) => c.key), ids.map(agentKey))
+  // A group of 600: the last step shows 550, and the rest stays counted.
+  const crowd = Array.from({ length: 600 }, (_, i) => rec(hexId(i), {
     firstTs: NOW - 5 * HOUR + i * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
   }))
-  // Started last, so a plain cut in start order would lose exactly the node someone is watching.
-  const live = rec('ffffffff', { firstTs: NOW - 2 * MIN })
-  const picked = done[350]
-  const vm = build({
-    agents: [...done, live],
-    mains: [main(), main({ sessionId: S2, lastTs: NOW - 5 * MIN })],
-    selected: agentKey(picked.agentId),
-  })
-  assert.equal(vm.truncated, true)
-  assert.equal(all(vm.roots).length, MAX_NODES)
-  assert.equal(vm.roots.length, 2, 'a cut never drops a session')
-  assert.ok(all(vm.roots).some((n) => n.key === agentKey('ffffffff')), 'the running agent was cut')
-  assert.equal(vm.selected?.key, agentKey(picked.agentId))
-  assert.equal(vm.note, null)
-  assert.equal(vm.running, 1)
+  const at = (pages: number): TreeNode => page({ agents: crowd, expanded: [rootKey], more: [{ key: rootKey, pages }] }).roots[0]
+  const last = MAX_GROUP_CHILDREN * (1 + MAX_MORE_PAGES)
+  assert.deepEqual([at(MAX_MORE_PAGES).children.length, at(MAX_MORE_PAGES).childrenMore], [last, 600 - last])
+  // A stored count beyond the last step is held to it; a broken one counts as none.
+  assert.equal(at(MAX_MORE_PAGES + 5).children.length, last)
+  for (const pages of [0, -3, 1.5, Number.NaN]) assert.equal(at(pages).children.length, MAX_GROUP_CHILDREN, String(pages))
+  // Steps of a closed node show nothing: the node is closed.
+  const closed = page({ agents: crowd, expanded: [], more: [{ key: rootKey, pages: 3 }] }).roots[0]
+  assert.deepEqual([closed.children.length, closed.childrenMore], [0, 0])
+  // The markdown's tree opens every node with fifty children, whatever the steps say.
+  const doc = build({ agents: crowd, more: [{ key: rootKey, pages: 3 }] }).roots[0]
+  assert.deepEqual([doc.children.length, doc.childrenMore], [MAX_GROUP_CHILDREN, 600 - MAX_GROUP_CHILDREN])
+})
 
-  const small = build({ agents: done.slice(0, 10) })
-  assert.equal(small.truncated, false)
-  assert.equal(all(small.roots).length, 11)
+test('when the pinned children alone are more than the window, the path to the selection comes first, then the running in order', () => {
+  const runningOnes = Array.from({ length: 60 }, (_, i) => rec(hexId(i), { firstTs: NOW - 40 * MIN + i * 1000, lastTs: NOW - MIN }))
+  // Started last and finished: in the order it would be the 61st.
+  const picked = rec(hexId(100), { firstTs: NOW - 5 * MIN, lastTs: NOW - 4 * MIN, outcome: 'completed', outcomeTs: NOW - 4 * MIN })
+  const vm = page({ agents: [...runningOnes, picked], expanded: [rootKey], selected: agentKey(picked.agentId) })
+  const root = vm.roots[0]
+  assert.equal(root.children.length, MAX_GROUP_CHILDREN)
+  assert.deepEqual(root.children.map((c) => c.key),
+    [...runningOnes.slice(0, MAX_GROUP_CHILDREN - 1).map((r) => agentKey(r.agentId)), agentKey(picked.agentId)])
+  assert.equal(root.childrenMore, 61 - MAX_GROUP_CHILDREN)
+  assert.equal(vm.selected?.key, agentKey(picked.agentId))
+  // The running list still names every running agent the window left out.
+  assert.equal(vm.running, 60)
+  assert.equal(vm.runningNow.length + vm.runningMore, 60)
+})
+
+test('MAX_PAGE_NODES: the selection\'s path and the running first, and an opened node that no longer fits ships none and says so', () => {
+  // One session, 42 runs of 50 agents, every node opened: 1 + 42 + 42 × 50 nodes would be 2143.
+  const runs = 42
+  const wfOf = (i: number): string => `wf_${String(i).padStart(8, '0')}-000`
+  const agents = Array.from({ length: runs * 50 }, (_, n) => wfRec(hexId(n), {
+    workflowId: wfOf(Math.floor(n / 50)),
+    firstTs: NOW - 5 * HOUR + n * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
+  }))
+  const runKey = (i: number): string => `w:${S1}|${wfOf(i)}`
+  const expanded = [rootKey, ...Array.from({ length: runs }, (_, i) => runKey(i))]
+  const shipped = (vm: AgentTreeVm): number[] => vm.roots[0].children.map((w, i) => (w.children.length > 0 ? i : -1)).filter((i) => i >= 0)
+  const vm = page({ agents, expanded })
+  assert.ok(all(vm.roots).length <= MAX_PAGE_NODES, String(all(vm.roots).length))
+  // In the order the page draws them: 39 runs fit — 1 + 42 + 39 × 50 = 1993 — the last three not.
+  assert.deepEqual(shipped(vm), Array.from({ length: 39 }, (_, i) => i))
+  for (const i of [39, 40, 41]) {
+    const w = node(vm, runKey(i))
+    assert.deepEqual([w.children.length, w.childrenTotal, w.childrenMore, w.hasChildren], [0, 50, 50, true], runKey(i))
+  }
+  // The selected agent's run is placed first, so the cap never takes the selection away; a
+  // running agent's run comes next. The runs the page draws first give way instead.
+  const picked = agentKey(hexId(41 * 50 + 7))
+  const live = { ...agents[40 * 50 + 3], lastTs: NOW - MIN, outcome: null, outcomeTs: null }
+  const both = page({ agents: agents.map((r, n) => (n === 40 * 50 + 3 ? live : r)), expanded, selected: picked })
+  assert.ok(all(both.roots).length <= MAX_PAGE_NODES)
+  assert.deepEqual(shipped(both), [...Array.from({ length: 37 }, (_, i) => i), 40, 41])
+  assert.ok(all(both.roots).some((n) => n.key === picked))
+  assert.equal(both.selected?.key, picked)
+  assert.ok(all(both.roots).some((n) => n.key === agentKey(live.agentId)), 'the running agent is not on the page')
+})
+
+test('an opened node without children is ignored; a selected node inside a closed branch has no panel and no note', () => {
+  const done = rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - MIN })
+  const nested = rec('aaaa0002', { spawnerFile: agentFile('aaaa0001'), outcome: 'completed', outcomeTs: NOW - MIN })
+  const over: Partial<AgentTreeInput> = { agents: [done, nested], selected: agentKey('aaaa0002') }
+  // The session closed: the agent's row is nowhere on the page, and the panel waits for it.
+  const closed = page(over)
+  assert.deepEqual([closed.selected, closed.note], [null, null])
+  // Its parent closed too, the session open: still hidden.
+  const half = page({ ...over, expanded: [rootKey] })
+  assert.deepEqual([half.selected, half.note], [null, null])
+  assert.deepEqual(node(half, agentKey('aaaa0001')).children, [])
+  // Both open: the row is there, and so is the panel.
+  const open = page({ ...over, expanded: [rootKey, agentKey('aaaa0001')] })
+  assert.equal(open.selected?.key, agentKey('aaaa0002'))
+  // An opened key whose node has no children changes nothing.
+  const leaf = page({ ...over, expanded: [rootKey, agentKey('aaaa0001'), agentKey('aaaa0002'), 'a:nothing'] })
+  assert.deepEqual(leaf, open)
+  const n = node(leaf, agentKey('aaaa0002'))
+  assert.deepEqual([n.hasChildren, n.childrenTotal, n.childrenMore, n.children], [false, 0, 0, []])
+  // The markdown's tree prints every node, so it has the details wherever the node sits.
+  assert.equal(build(over).selected?.key, agentKey('aaaa0002'))
+  // A running agent inside a closed branch has a row in the running list, and its panel.
+  const running = page({ agents: [rec('aaaa0001')], selected: agentKey('aaaa0001') })
+  assert.deepEqual(running.runningNow.map((r) => r.key), [agentKey('aaaa0001')])
+  assert.equal(running.selected?.key, agentKey('aaaa0001'))
+  // A node gone from the records still says so.
+  assert.equal(page({ ...over, selected: agentKey('ffff0000') }).note, 'The selected node is no longer in the tree.')
 })
 
 test('running counts every running agent and launch, also on sessions beyond the list', () => {
@@ -1237,6 +1410,10 @@ test('a session and a run have details of their own', () => {
   assert.deepEqual(['Agents', 'Started', 'Turns', 'Usage', 'Tool calls'].map(wv), ['2', '11:20', '10', '2.4K', '6'])
 })
 
+// 1.6 P3a (§3.0 b, D3): pinned "a listed session's finished agent keeps its details, open branch or
+// not: its row is in the payload, inside the closed session". A closed branch is not in the
+// payload any more: its node gets its panel once the branch is open, and neither a panel nor the
+// note before; the markdown's tree, which prints every node, has it wherever it sits.
 test('the open node gets its details; a node that is gone leaves none and says so', () => {
   const agents = [rec('aaaa0001')]
   const open = build({ agents, selected: agentKey('aaaa0001') })
@@ -1280,12 +1457,17 @@ test('the open node gets its details; a node that is gone leaves none and says s
     assert.equal(finished.selected, null, `a ${outcome} agent of a session beyond the list kept its details`)
     assert.equal(finished.note, 'The selected node is no longer in the tree.', outcome)
   }
-  // A listed session's finished agent keeps its details, open branch or not: its row is in the
-  // payload, inside the closed session.
-  const listed = build({ agents: [rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - MIN })], selected: far })
+  // A listed session's finished agent: the markdown's tree has its details wherever it sits; the
+  // page has them while the session is open, and neither the panel nor the note while it is closed.
+  const finished: Partial<AgentTreeInput> = { agents: [rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - MIN })], selected: far }
+  const listed = build(finished)
   assert.equal(listed.selected?.key, far)
   assert.equal(listed.selected?.state, 'done')
   assert.equal(listed.note, null)
+  const shut = page(finished)
+  assert.deepEqual([shut.selected, shut.note], [null, null])
+  const opened = page({ ...finished, expanded: [rootKey] })
+  assert.deepEqual([opened.selected?.key, opened.selected?.state, opened.note], [far, 'done', null])
 
   assert.equal(build({ agents }).note, null)
   assert.equal(build({ agents }).selected, null)
@@ -1343,9 +1525,10 @@ test('an empty tree says which absence it is', () => {
   assert.deepEqual(none.roots, [])
   assert.equal(none.note, 'No Claude Code session in the last 7 days.')
   assert.equal(none.running, 0)
-  assert.equal(none.truncated, false)
-  // No time of its own (D12): an unchanged tree is the same tree a push later.
+  // No time of its own (D12): an unchanged tree is the same tree a push later. No cut either
+  // (1.6 D3): every omission is said on the node it was made at.
   assert.equal('updatedAt' in none, false)
+  assert.equal('truncated' in none, false)
 
   // A session two days ago that never ran an agent is not in the tree — but it was a session.
   const quiet = build({ mains: [main({ lastTs: NOW - 2 * DAY, firstTs: NOW - 2 * DAY - HOUR })] })
@@ -1525,7 +1708,8 @@ test('every message of the tree and of its markdown has a German entry, and the 
   const ours = Object.keys(keys).filter((k) => keys[k].some((site) => site.startsWith('src/agentTreeBuild.ts:')))
   // The markdown's own words for the tree.
   const text = ['Agents', 'Running', 'Done', 'Failed', 'Stopped', 'Unknown', 'Active', 'Idle', 'State', '| Detail | Value |',
-    'Tree cut at {0} nodes.', '{0} older session(s) not listed.',
+    // 1.6 D3: the line under a node the tree printed fifty children of; the cut's note is gone.
+    '… {0} more', '{0} older session(s) not listed.',
     '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.',
     // The running list above the tree, and the tree's own heading under it.
     'Running now', 'Sessions and agents', '(waiting)', 'No agent is running.', 'and {0} more']
@@ -1626,8 +1810,10 @@ function runningKeys(vm: AgentTreeVm): string[] {
   return vm.runningNow.map((r) => r.key)
 }
 
-test('every node counts the agents and launches below it — never itself, never a run — on the tree before the cut', () => {
-  const vm = build({
+// 1.6 P3a (§3 D3): pinned "on the tree before the cut"; the counts are taken on the whole tree —
+// open or closed, inside a node's window or past it — and every node says whether it has children.
+test('every node counts the agents and launches below it — never itself, never a run — on the whole tree', () => {
+  const over: Partial<AgentTreeInput> = {
     agents: [
       rec('aaaa0001', { firstTs: NOW - 40 * MIN }),
       rec('aaaa0002', { spawnerFile: agentFile('aaaa0001'), firstTs: NOW - 35 * MIN }),
@@ -1635,7 +1821,8 @@ test('every node counts the agents and launches below it — never itself, never
       wfRec('bbbb0002', { firstTs: NOW - 20 * MIN }),
     ],
     launches: [launch('pppp0001', { agentId: null, file: agentFile('aaaa0001'), ts: NOW - MIN })],
-  })
+  }
+  const vm = build(over)
   const root = vm.roots[0]
   // Five agent-like nodes below the session: two agents, the launch under the first, the run's two.
   assert.equal(root.agentCount, 5)
@@ -1644,17 +1831,26 @@ test('every node counts the agents and launches below it — never itself, never
   for (const k of [agentKey('aaaa0002'), agentKey('bbbb0001'), agentKey('bbbb0002'), 'l:toolu_pppp0001']) {
     assert.equal(node(vm, k).agentCount, 0, k)
   }
+  // Whether a node has children and how many is its own, as the tree holds it.
+  assert.deepEqual([root.hasChildren, root.childrenTotal], [true, 2], 'the first agent and the run')
+  assert.deepEqual([node(vm, agentKey('aaaa0001')).hasChildren, node(vm, agentKey('aaaa0001')).childrenTotal], [true, 2])
+  assert.deepEqual([node(vm, agentKey('aaaa0002')).hasChildren, node(vm, agentKey('aaaa0002')).childrenTotal], [false, 0])
   // A session without agents holds none.
   assert.equal(build().roots[0].agentCount, 0)
+  assert.equal(build().roots[0].hasChildren, false)
+  // The session closed on the page: no child in the payload, the same counts.
+  const closed = page(over).roots[0]
+  assert.deepEqual([closed.children, closed.agentCount, closed.hasChildren, closed.childrenTotal, closed.childrenMore],
+    [[], 5, true, 2, 0])
 
-  // Cut at MAX_NODES: the payload carries fewer children than the session holds, and the count
+  // A window of fifty: the payload carries fewer children than the session holds, and the count
   // still says how many there are.
   const many = Array.from({ length: 400 }, (_, i) => rec(`c${String(i).padStart(7, '0')}`, {
     firstTs: NOW - 5 * HOUR + i * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
   }))
   const cut = build({ agents: many })
-  assert.equal(cut.truncated, true)
-  assert.ok(cut.roots[0].children.length < 400, String(cut.roots[0].children.length))
+  assert.equal(cut.roots[0].children.length, MAX_GROUP_CHILDREN)
+  assert.equal(cut.roots[0].childrenTotal, 400)
   assert.equal(cut.roots[0].agentCount, 400)
 })
 
@@ -1718,7 +1914,9 @@ test('the running list stops at MAX_RUNNING_LIST and counts the rest, the longes
   assert.deepEqual(runningKeys(vm), agents.slice().reverse().slice(0, MAX_RUNNING_LIST).map((r) => agentKey(r.agentId)))
 })
 
-test('the running list is taken from every session, those beyond the list and the nodes beyond the cut included', () => {
+// 1.6 P3a (§3 D3): pinned "the nodes beyond the cut"; with the cut gone, the nodes the page does not
+// carry are those of closed branches and those past a window — the list names them all the same.
+test('the running list is taken from every session, those beyond the list, closed branches and full windows included', () => {
   // Beyond MAX_ROOTS: the oldest session is not listed, and its running agent still is.
   const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
     main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
@@ -1733,19 +1931,25 @@ test('the running list is taken from every session, those beyond the list and th
   assert.equal(opened.selected?.stateText, 'Running — inferred: the transcript changed 1 min ago and no result was recorded yet.')
   assert.equal(opened.note, null)
 
-  // Beyond the cut: the newer session's three hundred running agents fill the tree before the
-  // older session's one, which started first and so leads the list — though the tree left it out.
-  const crowd = Array.from({ length: MAX_NODES }, (_, i) => rec(`c${String(i).padStart(7, '0')}`, {
+  // A closed branch and a full window: the newer session's three hundred running agents are more
+  // than its window holds, and the older session's one, which started first and so leads the
+  // list, sits in a session the page has closed.
+  const crowd = Array.from({ length: 300 }, (_, i) => rec(`c${String(i).padStart(7, '0')}`, {
     sessionId: S2, firstTs: NOW - 5 * MIN + i * 100, lastTs: NOW - 30_000,
   }))
   const early = rec('eeee0001', { firstTs: NOW - 30 * MIN })
-  const vm = build({ agents: [...crowd, early], mains: [main({ lastTs: NOW - 3 * MIN }), main({ sessionId: S2, lastTs: NOW - MIN })] })
-  assert.equal(vm.truncated, true)
+  const over: Partial<AgentTreeInput> = {
+    agents: [...crowd, early], mains: [main({ lastTs: NOW - 3 * MIN }), main({ sessionId: S2, lastTs: NOW - MIN })],
+  }
+  const vm = page({ ...over, expanded: [`s:${S2}`] })
   assert.equal(vm.roots[0].key, `s:${S2}`)
-  assert.equal(all(vm.roots).some((x) => x.key === agentKey('eeee0001')), false, 'the cut kept the early agent')
+  assert.deepEqual([vm.roots[0].children.length, vm.roots[0].childrenMore], [MAX_GROUP_CHILDREN, 300 - MAX_GROUP_CHILDREN])
+  assert.equal(all(vm.roots).some((x) => x.key === agentKey('eeee0001')), false, 'the closed session showed the early agent')
   assert.equal(vm.runningNow[0].key, agentKey('eeee0001'))
-  assert.equal(vm.running, MAX_NODES + 1)
+  assert.equal(vm.running, 301)
   assert.equal(vm.runningNow.length + vm.runningMore, vm.running)
+  // The markdown's tree opens every node, and its list is the same.
+  assert.deepEqual(build(over).runningNow, vm.runningNow)
 })
 
 test('a running item says where it sits: its session, its run, its project while attribution names one', () => {

@@ -17,10 +17,10 @@ import { setBundle, setLocale } from '../src/i18n'
 import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { Attribution, Snapshot } from '../src/types'
-import { ViewModel, buildViewModel } from '../src/viewModel'
+import { ViewModel, agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
 import { QuotaHistory } from '../src/quotaHistory'
 import {
-  AGENT_CONTENT, AGENT_WORLD, agentNode, agentWorld, agentWorldFile, treeNodes,
+  AGENT_CONTENT, AGENT_WORLD, agentNode, agentWorld, agentWorldFile, everyParent, treeNodes,
 } from './fixtures/agentWorld'
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
@@ -442,14 +442,19 @@ test('a budget nothing can measure is stated, never quietly forgotten', () => {
 // markdown that prints it, never on the tree builder's helpers.
 // ---------------------------------------------------------------------------
 
-/** The Agents world's view model; `select` picks the node whose details are open. */
-function agentsVm(o: { attribution?: Attribution; agg?: Aggregator; select?: (roots: TreeNode[]) => string } = {}): ViewModel {
+/**
+ * The Agents world's view model; `select` picks the node whose details are open. The page carries
+ * only what is open (1.6 D3), and the rules below hold of every node, so every node with children
+ * is opened — unless `closed` asks for the tree as it starts.
+ */
+function agentsVm(o: { attribution?: Attribution; agg?: Aggregator; select?: (roots: TreeNode[]) => string; closed?: boolean } = {}): ViewModel {
   const attribution = o.attribution ?? 'none'
   const agg = o.agg ?? agentWorld(attribution).agg
   const config = makeConfig({ 'tokenPace.attribution': attribution })
-  const first = buildViewModel(makeInput({ agg, cfg: config }))
+  const agentsExpanded = o.closed === true ? [] : everyParent(agg, config, NOW)
+  const first = buildViewModel(makeInput({ agg, cfg: config, ui: { agentsExpanded } }))
   if (!o.select) return first
-  return buildViewModel(makeInput({ agg, cfg: config, ui: { agentSelected: o.select(first.agents.roots) } }))
+  return buildViewModel(makeInput({ agg, cfg: config, ui: { agentsExpanded, agentSelected: o.select(first.agents.roots) } }))
 }
 
 /** Every node of the tree, each with its own details open — the panel the view model builds for it. */
@@ -618,7 +623,7 @@ test('every inferred state says it was inferred, and no recorded one says so —
  * §9 of the 1.5.1 spec adds — a node's agent count, the running list and its items — nothing else.
  */
 const TREE_FIELDS = new Set([
-  'roots', 'selected', 'running', 'runningNow', 'runningMore', 'omittedRoots', 'truncated', 'note',
+  'roots', 'selected', 'running', 'runningNow', 'runningMore', 'omittedRoots', 'note',
   'key', 'kind', 'label', 'sub', 'state', 'derived', 'usage', 'lowerBound', 'duration', 'startTs', 'lastTs',
   'agentCount', 'children',
   'title', 'stateText', 'rows', 'value',
@@ -631,6 +636,9 @@ const TREE_FIELDS = new Set([
   // 1.6 P2c: a node's tally (N1) — the object, its seven counts ('running' is the tree's own
   // field name too), and its two texts.
   'tally', 'tallyText', 'tallySpoken', 'started', 'done', 'failed', 'retried', 'stopped', 'unknown',
+  // 1.6 P3a: whether a node has children, how many, and how many an open one does not show (D3).
+  // `truncated` left the tree with the MAX_NODES cut.
+  'hasChildren', 'childrenTotal', 'childrenMore',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {
@@ -707,16 +715,37 @@ test('a node\'s tally counts every agent below it once, sums to its started, and
   }
 })
 
+// 1.6 P3a (§3 D3): pinned the count against the children the page's payload carried, closed
+// branches included. The payload carries a closed node's children no more, so the rule is taken
+// on the markdown's tree, where every node is open — and the page, closed or open, says the same.
 test('a closed node counts the agents below it on the whole tree, and a leaf counts none', () => {
-  const vm = agentsVm()
+  const agg = agentWorld().agg
+  const config = makeConfig({ 'tokenPace.attribution': 'none' })
+  const text = agentTreeFor({ agg, cfg: config, ui: defaultUiState(config), now: NOW }, 'text')
   const agentLike = (n: TreeNode): number =>
     n.children.reduce((s, c) => s + agentLike(c) + (c.kind === 'agent' || c.kind === 'pending' ? 1 : 0), 0)
-  for (const n of treeNodes(vm.agents.roots)) {
-    // Nothing is cut in this world, so the count is what the payload holds below the node.
-    assert.equal(vm.agents.truncated, false)
+  const nodes = treeNodes(text.roots)
+  assert.ok(nodes.some((n) => n.kind === 'workflow') && nodes.some((n) => n.kind === 'pending'), 'the world lost a kind of node')
+  for (const n of nodes) {
+    // Nothing of this world is past a window: the count is what the tree holds below the node.
+    assert.equal(n.childrenMore, 0, n.label)
     assert.equal(n.agentCount, agentLike(n), n.label)
+    assert.deepEqual([n.hasChildren, n.childrenTotal], [n.children.length > 0, n.children.length], n.label)
     if (n.children.length === 0) assert.equal(n.agentCount, 0, n.label)
   }
+  // The page as it starts: the sessions alone, each counting what the whole tree holds below it.
+  const closed = agentsVm({ closed: true }).agents
+  assert.deepEqual(closed.roots.map((r) => r.key), text.roots.map((r) => r.key))
+  for (const r of closed.roots) {
+    const whole = text.roots.find((x) => x.key === r.key)
+    assert.ok(whole)
+    assert.deepEqual([r.children, r.childrenMore], [[], 0], r.label)
+    assert.deepEqual([r.agentCount, r.hasChildren, r.childrenTotal, r.tallyText],
+      [whole.agentCount, whole.hasChildren, whole.childrenTotal, whole.tallyText], r.label)
+  }
+  // Every node opened, the page is the markdown's tree: what the checks above ask of the page
+  // hold of the document's tree as well.
+  assert.deepEqual(agentsVm().agents.roots, text.roots)
 })
 
 test('the tree the page receives carries no key a transcript\'s content lives under, and none of the content', () => {

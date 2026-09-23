@@ -25,6 +25,7 @@ import * as vscode from 'vscode'
 import { randomBytes } from 'node:crypto'
 import script from 'webview:script'
 import { SOURCES, SOURCE_TITLE } from './adapters'
+import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES } from './agentTree'
 import { locale, t } from './i18n'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { ViewModel } from './viewModel'
@@ -42,9 +43,10 @@ type SectionField = keyof ViewModel | `ui.${keyof ViewModel['ui']}`
 const SECTION_FIELDS: Record<string, SectionField[]> = {
   summary: ['digest'],
   quota: ['quotas'],
-  // The running list and the tree, and the two pieces of view state that decide what of it is
-  // open: the nodes the reader opened, and the node whose details are shown.
-  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected'],
+  // The running list and the tree, and the three pieces of view state that decide what of it is
+  // open: the nodes the reader opened, the node whose details are shown, and how many of an
+  // open node's children the reader asked to see (1.6 D3).
+  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentsMore'],
   context: ['context'],
   kpis: ['kpis'],
   // The cache switch above the composition bars decides which parts are drawn, so the
@@ -897,6 +899,12 @@ ul { margin: 6px 0; padding-left: 18px; }
 /* A breath, not a blink: at its faintest the dot keeps most of its colour, so it never reads
    as switched off. */
 @keyframes ag-pulse { 50% { opacity: .7; } }
+/* 1.6 D3: the line under an open node that holds more children than it shows — "50 more · 377
+   not shown" — in the column of its siblings' glyphs. A borderless button like a row while one
+   more step can be taken, the dim words of a count once none can. */
+.ag-more { flex: 1 1 auto; min-width: 0; min-height: 20px; padding: 1px 4px; border: none;
+           background: none; text-align: left; font-size: 11px; font-variant-numeric: tabular-nums; }
+span.ag-more { color: var(--dim); }
 /* The running list above the tree: every row is a tree row's button, glyph, name and figures,
    stretched to the width of the list, and where the agent sits is a line of its own under the
    name. A part of that line — "Session 9d0eb37a", "Workflow cfe7718d" — keeps together while
@@ -956,8 +964,9 @@ ul { margin: 6px 0; padding-left: 18px; }
  * through the virtual module `webview:script` — so the compiler sees every line of it, which
  * it never did while this was a template string.
  *
- * The four consts in front of it are what a browser bundle cannot reach: the provider
- * registry is Node code (fs, os, path), and so is the localisation seam. They are written at
+ * The five consts in front of it are what a browser bundle cannot reach: the provider
+ * registry is Node code (fs, os, path), and so is the localisation seam; the agent tree's paging
+ * steps are src/agentTree.ts's, written here so the page cannot count them differently. They are written at
  * the top of the very same <script>, where the module below reads them out of its own scope;
  * src/webview/globals.d.ts declares them for the compiler. A function rather than a const,
  * because `t()` may only run once the host has set the bundle — at render time, not at load.
@@ -973,6 +982,8 @@ const SRC_IDS = ${inline(SOURCES)};
 const L10N = ${webviewDictionary()};
 /** The tag the host's Intl formatters use, so the page's own numbers read like the model's. */
 const LOCALE = ${inline(locale())};
+/** How many children an open agent-tree node shows per "more" step, and at most how many steps. */
+const AGENT_PAGING = ${inline({ groupChildren: MAX_GROUP_CHILDREN, morePages: MAX_MORE_PAGES })};
 ${script}`
 }
 
@@ -1130,7 +1141,6 @@ function webviewWords(): Record<string, string> {
     'Tools': t('Tools'),
     'Top projects and sessions need tokenPace.attribution.':
       t('Top projects and sessions need tokenPace.attribution.'),
-    'Tree cut at {0} nodes.': t('Tree cut at {0} nodes.'),
     'Usage': t('Usage'),
     'What': t('What'),
     'Write 1h': t('Write 1h'),
@@ -1238,8 +1248,11 @@ function webviewWords(): Record<string, string> {
     '{0} ago': t('{0} ago'),
     '{0} call(s) · {1} distinct tool(s)': t('{0} call(s) · {1} distinct tool(s)'),
     '{0} composition · last 30 days': t('{0} composition · last 30 days'),
+    '{0} more': t('{0} more'),
     '{0} more not listed': t('{0} more not listed'),
     '{0} more — set tokenPace.dashboard.modelRows': t('{0} more — set tokenPace.dashboard.modelRows'),
+    '{0} more · {1} not shown': t('{0} more · {1} not shown'),
+    '{0} not shown': t('{0} not shown'),
     '{0} of {1}': t('{0} of {1}'),
     '{0} older session(s) not shown.': t('{0} older session(s) not shown.'),
     '{0} tokens over {1} day(s)': t('{0} tokens over {1} day(s)'),

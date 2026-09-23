@@ -16,8 +16,9 @@ only the sessions showing. It is on by default, directly after `quota` in
 `tokenPace.dashboard.sections`; a list you have set yourself is kept as it is, so there the
 section appears once you add `agents` to it. The range, provider and model chips do not apply:
 the section is always the last seven days, so the filter bar stays below it. *Show Usage as
-Text* prints the running list and then the whole tree as indented lists, with the open node's
-details as a table; the Quick Pick does not carry them.
+Text* prints the running list and then the whole tree as indented lists — every node open, at
+most 50 children each (see [Opening and selection](#opening-and-selection)) — with the open
+node's details as a table; the Quick Pick does not carry them.
 
 Claude Code only. Codex writes no agent identity into its transcripts, and the section states
 nothing about Codex.
@@ -28,9 +29,10 @@ The list above the tree — `Running now (3)` — holds every agent and every la
 **running** (see [States](#states)): an agent that replied, or was launched, within the last ten
 minutes and has no recorded result — a launch whose transcript has not appeared yet included —
 and an agent that runs only because an agent it launched runs. It is taken from every session
-of the last seven days — those the tree does not list any more, and nodes the tree had to cut,
-included — so nothing that runs is missing from it because the tree is full. Running is an
-inferred state, and every row's glyph says so, as the tree's do.
+of the last seven days — those the tree does not list any more, the nodes inside a closed branch
+and those past the fifty children an opened node shows, included — so nothing that runs is
+missing from it because the tree is closed or full. Running is an inferred state, and every
+row's glyph says so, as the tree's do.
 
 **Order and cap.** The longest-running first: by the time of the agent's first line, or of the
 launch, the earliest on top; two that started at the same moment keep a fixed order. The list
@@ -69,10 +71,9 @@ id (`Session 9d0eb37a`), and with its project beside it while `tokenPace.attribu
 **Closed by default.** Only the sessions show until you open one; an opened node shows its
 children closed in turn. Each session says beside its name what its agents came to — its
 [tally](#the-tally), `12 started · 3 ✓ · 1 ✕ · 2 ↻ · 1 ■ · ~4 ● · ~1 ?` — so a closed session
-already tells a run that went well from one that did not. A node whose agents the tree had to cut
-all away, or a run whose agents no transcript shows, has nothing to open: it has no toggle, and
-its tally still says what is below it. What you open stays open (see
-[Opening and selection](#opening-and-selection)).
+already tells a run that went well from one that did not. A run whose agents no transcript shows
+has nothing to open: it has no toggle, and its tally still says what is below it. What you open
+stays open (see [Opening and selection](#opening-and-selection)).
 
 **Below a session** come its workflow runs (`Workflow cfe7718d`) and its agents, each agent
 under the agent that launched it when that one is in the same tree, otherwise directly under the
@@ -80,10 +81,24 @@ session; the agents of a run stay inside their run. Siblings are ordered by when
 launch whose transcript has not appeared yet is a node of its own, in italics and named from the
 launch — `Plan · sonnet · launched` — with no figures beside it, since nothing was counted.
 No agent sits more than **6** levels below its session: one that would sit deeper moves up, it
-is never dropped. The tree holds at most **300** nodes; past that it is cut
-(`Tree cut at 300 nodes.`), keeping every listed session, the open node and every running agent
-with the nodes above them, then the rest level by level, so every session keeps its top levels
-before any of them keeps its deepest.
+is never dropped.
+
+**Fifty at a time.** An opened node shows at most **50** of its children at a time, in the
+order above. When it has more, a line after the last one says so — `50 more · 377 not shown`,
+or `12 more` when the next fifty are the rest — and a click on it, or `Enter`, shows the next
+fifty. A node takes that step at most **10** times, so it shows up to 550 of its children; past
+that the line only counts the rest, `377 not shown`. Always among those shown, each taking the
+place of the last one that is not: every child that is running, and the one on the way to the
+node whose details are open — so the open node's row is never left out, nor a running agent's.
+
+**Only what is open goes to the page.** A closed node's children are not sent to it at all: only
+whether it has any, how many, and what the agents below it came to. A large run closed is one
+row: a run of 427 agents made a section of 77.8 KB while every node went to the page, and its
+session closed is well under 1 KB. One push of the section holds at most **2000** nodes, a
+safety cap that only many opened nodes
+of fifty children each reach: it is filled with the path to the node whose details are open and
+the running agents first, then in the order the page draws the tree, and an opened node whose
+children no longer fit shows none of them and says how many it has (`377 not shown`).
 
 **Each row** is the state glyph, the name, the usage — fresh input + cache write + output, the
 definition the tables use — and the duration from the first line to the last. A **session's** row
@@ -113,9 +128,10 @@ agent's usage is part of the figures the totals already contain: the tree adds n
 ### The tally
 
 A session, a workflow run and an agent that launched agents of its own carry the **tally** of
-every agent below them — at any depth, on the whole tree, also the ones the tree had to cut and
-the agents a workflow run's journal started whose transcript was never counted (see
-[States](#states)) — and every launch whose transcript has not appeared yet:
+every agent below them — at any depth, on the whole tree, also the ones inside a closed branch
+or past a node's first fifty, and the agents a workflow run's journal started whose transcript
+was never counted (see [States](#states)) — and every launch whose transcript has not appeared
+yet:
 
 | Part | Counts |
 |---|---|
@@ -140,7 +156,9 @@ the rows. An agent's stands only while it is closed; open, its children are on s
 own glyphs. A node with no agent below it — a session that started none, an agent that launched
 none, a launch — has no tally, rather than a `0 started`. The markdown report prints a node's
 tally after its name in brackets, on every node that has one:
-`[~Running] Workflow cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s`.
+`[~Running] Workflow cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s`. It prints
+every node, open on the dashboard or not, at most 50 children each, and one line at their depth
+for the rest: `… 377 more`.
 
 ## States
 
@@ -376,13 +394,17 @@ anything by itself. Only node keys are kept, made of the session, run, agent or 
 opened nodes' keys and the selected one's — never a label, a figure or anything from a
 transcript, and at most 200 opened nodes: opening one more forgets the one opened longest ago,
 so a node can always be opened, and the key of a node that has left the tree does not keep its
-place for good. A key whose node has gone matches nothing. The details open for a node the page
-has a row for — in the tree, inside a closed branch too, or in the running list; a selected node
-without one says so instead (`The selected node is no longer in the tree.`). That is an agent or
-a launch older than seven days, a session without agents that has been quiet for more than 24
-hours, and any node of a session beyond the 20 listed that the running list does not name — the
-session itself, or one of its agents once it has stopped running. *Clear Stored Data…* removes
-them with the rest of the dashboard view state.
+place for good. A key whose node has gone matches nothing. How many children an opened node shows
+is kept the same way: the "more" steps of at most 200 nodes, the one taken longest ago forgotten
+first, and closing a node forgets its steps — opened again, it shows its first fifty. The details
+open for a node whose row is on the page — in the tree, or in the running list. A selected node
+inside a closed branch has no row there: its details stay shut, without a word, until the branch
+is opened again, and the markdown report, which prints every node, shows them all the same. A
+selected node that is gone says so instead (`The selected node is no longer in the tree.`). That
+is an agent or a launch older than seven days, a session without agents that has been quiet for
+more than 24 hours, and any node of a session beyond the 20 listed that the running list does
+not name — the session itself, or one of its agents once it has stopped running. *Clear Stored
+Data…* removes them with the rest of the dashboard view state.
 
 ## Limits
 

@@ -1712,7 +1712,9 @@ function sessionSpan(n: Payload): string {
  * silent (N5), then the tally of the agents below it (N1), where the row shows one. A session's and
  * a run's line puts its tally before its duration (1.6 P7b, the lead's call): what the agents
  * below it came to is what the row is there to say, the span or the duration the least of it, and
- * so the first to give way. Every part is an `ag-fp` of the line, whole or not at all: the line
+ * so the first to give way — and so does a run's collector's (1.6 P10c, the lead's call):
+ * "– · 263 started · … · –", its trailing dash the first to go. Every part is an `ag-fp` of the
+ * line, whole or not at all: the line
  * never wraps, and where a narrow sidebar has no room for the last parts, fitAgentFigures takes
  * them off the line whole and ends it on "…" — never a figure torn in two, never a third line (a
  * screen reader still gets every one). A lower bound's ⚠ is inside the usage part (D10). Nothing
@@ -1734,7 +1736,7 @@ function agentFigLine(n: Payload, kind: string, state: string, tally: string[], 
     ? spokenTwin(nobr(liveSince(start as number)), since === null ? null : tr('since {0}', esc(since)))
     : nobr(kind === 'session' ? sessionSpan(n) : orDash(n.duration));
   const open = '<span class="ag-fig"' + (id ? ' id="' + esc(id) + '"' : '') + '>';
-  if (kind === 'session' || kind === 'workflow') {
+  if (kind === 'session' || kind === 'workflow' || kind === 'noreply') {
     return open + figParts(head, 0) + figParts(tally, head.length)
       + figParts([time], head.length + tally.length) + '</span>';
   }
@@ -2920,11 +2922,13 @@ function fitAgentNames(): void {
 /**
  * 1.6 N6: an agent row's figures are one line (see agentFigLine). Where a narrow sidebar leaves
  * that line too little room, its last parts come off it whole — on an agent's row the tally's last
- * counts first, then the tally, the silence, the clock; on a session's and a run's the span or the
- * duration first, then the tally's last counts (1.6 P7b) — and the line ends on "…" (`ag-cut`):
+ * counts first, then the tally, the silence, the clock; on a session's, a run's and a collector's
+ * the span or the duration first, then the tally's last counts (1.6 P7b, P10c) — and the line ends
+ * on "…" (`ag-cut`):
  * what stays is never a figure torn in two, and the row never takes a third line. A part taken off stays in the page for
- * a screen reader (`ag-gone` hides it from the eye alone), so the row still says everything to the
- * ear, and the details panel says everything to the eye. The first part — the usage, with its ⚠ —
+ * a screen reader (`ag-gone` hides it from the eye alone — its text at no size, still in the line:
+ * 1.6 P10c, so a screen reader hears it with no space of its own before the next comma), so the row
+ * still says everything to the ear, and the details panel says everything to the eye. The first part — the usage, with its ⚠ —
  * always stays. Measured first for every line and written after, so a page of rows is laid out twice
  * at most; run after every render, on a resize, when a closed section opens, and when the clock
  * grows a line (tickLive). A page without such a line costs one query.

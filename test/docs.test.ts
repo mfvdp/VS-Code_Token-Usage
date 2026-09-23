@@ -584,6 +584,40 @@ test('docs/dashboard.md and docs/numbers.md name the subagent share of a window 
   }
 })
 
+test('docs/dashboard.md and docs/numbers.md say a model window\'s share counts that window\'s models, and when no card has the line', () => {
+  // 1.6 P10c (the lead's calls on P10b Q1/Q2, Review 3 #1): both figures of a model window by its
+  // family; no line anywhere without an agent in the seven days, a measured zero with one.
+  const model = readDoc('src/viewModel.ts')
+  assert.ok(/function claudeFamily\(/.test(model) && /function windowFamily\(/.test(model), 'the family match moved: say it in the docs')
+  const dash = readDoc('docs/dashboard.md').replace(/\s+/g, ' ')
+  for (const claim of ['For a model window — `7 d Opus` — both figures count only that window\'s models',
+    'the Claude models of its family, whatever their version (`claude-opus-4-6`, `claude-opus-5`, `claude-3-opus` for Opus)',
+    'a model window whose family nothing was counted for in its hours has no line',
+    'as long as an agent ran anywhere in the last seven days',
+    'with no agent record and no subagent hour bucket in those seven days no card has the line at all']) {
+    assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
+  }
+  const numbers = doc.numbers.replace(/\s+/g, ' ')
+  for (const claim of ['for a model window (`7 d Opus`) both figures of that window\'s models only — the Claude models of its family',
+    'on no card while the last seven days hold no agent record and no subagent hour bucket']) {
+    assert.ok(numbers.includes(claim), `docs/numbers.md does not say: ${claim}`)
+  }
+})
+
+test('docs/agents.md gives a collector\'s figures in a run\'s order, and a part taken off the line as a screen reader hears it', () => {
+  // 1.6 P10c (the lead's calls on Wave C): the collector's second line is usage · tally · duration;
+  // a figure the fit took off is read as if it stood on the line (Review 3 #2).
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of ['`– · 263 started · 250 ✓ · 3 ✕ · ~10 ● · –`', 'a session\'s, a run\'s or a collector\'s span or duration',
+    'its usage, its [tally](#the-tally), then its duration, the trailing `–` the first part to give way',
+    'read as if they stood on it: `own 32K, agents 166K, 49 min 00 s`']) {
+    assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+  for (const gone of ['Its second line ends on its [tally]']) {
+    assert.equal(flat.includes(gone), false, `docs/agents.md still says: ${gone}`)
+  }
+})
+
 test('docs/agents.md and docs/dashboard.md name the 7-day block as the page writes it, and say what it does not add up', () => {
   // 1.6 L3 (P10a): the words the page and the markdown write, taken from the sources that write them.
   const page = readDoc('src/webview/main.ts')

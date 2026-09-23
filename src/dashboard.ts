@@ -904,13 +904,16 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-label > .ag-gone { position: absolute; left: 0; top: 0; width: 1px; height: 1px; clip-path: inset(50%); }
 /* Launched, but its transcript not seen yet: the name is the launch's hint, not the agent's. */
 .ag-k-pending > .ag-line .ag-label { font-style: italic; }
-/* Usage, duration and the live clock, the silence and the tally — a session's and a run's tally
-   before their span or duration (1.6 P7b): quieter than the name, and in
+/* Usage, duration and the live clock, the silence and the tally — a session's, a run's and a
+   collector's tally before their span or duration (1.6 P7b, P10c): quieter than the name, and in
    figures that do not jitter while the seconds tick — one line, whose parts the script takes
    off whole where it has no room for them (fitAgentFigures), ending it on an ellipsis; the
    browser's own ellipsis is the net under it. The silence of a running agent (1.6 N5, "silent for
    4 min") has no colour of its own: it is a fact about the clock, not an alarm. A part taken off
-   the line is out of sight and still in the page, for a screen reader. */
+   the line is out of sight and still in the page, for a screen reader. 1.6 P10c: out of sight by
+   its text at no size — in the line, where it was — and not by a box of its own: Chrome's
+   accessibility tree reads a box placed apart (absolute, clipped) as a block of its own and puts a
+   space before and after it, so the line's description read "agents 166K , 49 min 00 s". */
 .ag-fig { position: relative; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
           color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
 /* 1.6 L1: for a screen reader the line's "…" says nothing — a tree item is described by its line
@@ -920,8 +923,7 @@ ul { margin: 6px 0; padding-left: 18px; }
    part says nothing, its words are the item's name. */
 .ag-fig.ag-cut::after { content: "\\00a0…" / ""; }
 .ag-fig > .ag-fp + .ag-fp:not(:has(> .ag-t))::before { content: "" / ", "; }
-.ag-fig .ag-gone { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden;
-                   clip-path: inset(50%); }
+.ag-fig .ag-gone { font-size: 0; }
 /* 1.6 D10: the ⚠ of an output that is a lower bound, inside the usage figure — while the script's
    ROW_LOWER_BOUND_MARK is on, as it ships. The glyph comes from a fallback font whose line box is
    a pixel taller than the figures' own; held to its font size, it never makes a row taller. */

@@ -198,8 +198,10 @@ tone, is the figures: the usage — fresh input + cache write + output, the defi
 use —, the duration from the first line to the last, and for a session, a run and a closed agent
 with agents below it, the [tally](#the-tally). A session's and a run's second line is the usage,
 then the tally, then the span or the duration — `88.2K · 6 started · 2 ✓ · 1 ✕ · 19 min 50 s`: what
-the agents below came to is what such a row is there to say. An agent's is the usage, then the
-duration or the clock, then its silence and its tally.
+the agents below came to is what such a row is there to say. A run's
+[collector](#agents-without-a-counted-reply) follows the same order — `– · 263 started · 250 ✓ ·
+3 ✕ · ~10 ● · –`. An agent's is the usage, then the duration or the clock, then its silence and its
+tally.
 
 Neither line wraps, whatever the width. Where the name has no room, each part gives way in the
 order of what the row can best do without, ending on `…`, and the whole name — the model's whole id
@@ -217,10 +219,10 @@ included — is the line's title:
   its id; there the prefix word gives way — `Wo… 2026-09-03 11:57 · 0…` — and still never the time.
 
 Where the figures have no room — a narrow sidebar, a deep row — their last parts come off the line
-whole, the last first: a session's or a run's span or duration, then the tally's last counts; an
-agent's tally, then its silence and its clock. The line ends on `…`: no figure is ever cut in two,
-a screen reader still hears every one, and the details panel shows them all. The usage always
-stays.
+whole, the last first: a session's, a run's or a collector's span or duration, then the tally's
+last counts; an agent's tally, then its silence and its clock. The line ends on `…`: no figure is
+ever cut in two, a screen reader still hears every one, and the details panel shows them all. The
+usage always stays.
 
 A **session's** figures name themselves — `own 12.0M · agents 137.4M · 22 d 11 h`: what its own
 transcript used, counted from its first line, and what its agents of the last seven days used. The
@@ -263,7 +265,9 @@ as words that stand still — `since 14:20` for the time a node has been running
 no time of its own. Each row is an item of a tree (`treeitem`) and says so: its **name** is the
 node's whole name, a session's project after it, its state and — where the row shows one — its
 tally, in words: `Workflow run Tue 11:40 · cfe7718d, running, derived, 8 started, 3 done, about 2
-running`; its **figures** follow as its description, `412.3K lower bound, since 11:40`. With it a
+running`; its **figures** follow as its description, `412.3K lower bound, since 11:40` — every
+figure, the ones a narrow sidebar took off the line included, read as if they stood on it: `own
+32K, agents 166K, 49 min 00 s`. With it a
 screen reader hears the item's level, its place among its siblings and how many they are — every
 child the node has, the ones past the fifty shown included: `3 of 165` —, whether it is open, and
 whether it is the selected one. The toggle is the mouse's alone and hidden from a screen reader:
@@ -348,8 +352,9 @@ would bury the agents that did the work. So they are **counted, not listed**: on
 **collector**, the last child of its run, stands for all of them —
 `263 agent(s) without a counted reply`, or `3 agent(s) failed before their first reply` when every
 one of them failed. It has no toggle and no children; its figures are `–`, never a `0`, and it runs
-no clock, in the tree or in the running list: it has no start of its own. Its second line ends on
-its [tally](#the-tally), and its state is its members', by the rule a run's state follows (see
+no clock, in the tree or in the running list: it has no start of its own. Its second line is a
+run's — its usage, its [tally](#the-tally), then its duration, the trailing `–` the first part to
+give way —, and its state is its members', by the rule a run's state follows (see
 [States](#states)). An agent of a run whose transcript holds only rejected requests
 is kept from its first one on, with nothing counted; its first counted reply moves it out of the
 collector into a row of its own. An agent outside a run whose transcript holds only rejected

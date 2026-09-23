@@ -22,6 +22,7 @@ import {
   makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
 import { claudeLine, ctxFor } from './fixtures/helpers'
+import { markdownDocument } from '../src/textViews'
 import { toolAgg } from './helpers/toolAgg'
 import { rawManifest } from './helpers/nls'
 
@@ -1063,7 +1064,11 @@ test('the subagent share leaves every figure of the quota card as it was (1.6 N7
     return rest
   }
   assert.deepEqual(withAgents.quotas.map((q) => q.windows.map(strip)), noAgents.quotas.map((q) => q.windows.map(strip)))
-  assert.equal(noAgents.quotas[0].windows[0].agentShare, 'Subagents 0 of 7K counted here (0 %)')
+  // 1.6 P10c (pinned by P10b and changed, the lead's call on P10b Q1): the same tokens without an
+  // agent anywhere — no agent record, no subagent bucket in the seven days — have no share line at
+  // all, rather than "Subagents 0 of 7K counted here (0 %)" on every card.
+  assert.equal(noAgents.quotas[0].windows[0].agentShare, null)
+  assert.equal(noAgents.quotas[0].windows[0].agentShareParts, null)
   assert.notEqual(withAgents.quotas[0].windows[0].agentShare, noAgents.quotas[0].windows[0].agentShare)
 })
 
@@ -1126,6 +1131,109 @@ test('a window without bounds, one not begun, and one nothing was counted in hav
   // A reset that has passed: the window the reading belongs to, up to its reset.
   const due = agentShareOf(agg, win({ resetsAt: Date.UTC(2026, 8, 3, 11, 0), windowMinutes: 300 }), NOW)
   assert.equal(due?.text, 'Subagents 1K of 3K counted here (33 %)')
+})
+
+test('no share line on any card where the subagents counted nothing and no agent ran in the seven days; a measured zero stays (1.6 P10c)', () => {
+  // The lead's call on P10b Q1: with no agent record and no subagent hour bucket in the last seven
+  // days (dataQuality.agents null) a reader has no agents, and a "0 %" under every bar would be a
+  // line about agents to him. With agents elsewhere, a window they did not reach says its zero.
+  const none = buildViewModel(makeInput({ agg: agentShareAgg({ asMain: true }) }))
+  assert.equal(none.dataQuality.agents, null)
+  for (const q of none.quotas) for (const w of q.windows) assert.deepEqual([w.agentShare, w.agentShareParts], [null, null], w.label)
+  // The same world with its agents: an hour before the 5 h window — main tokens only — is a
+  // window the agents did not reach, and it says so.
+  const agg = agentShareAgg()
+  const early = win({ resetsAt: Date.UTC(2026, 8, 3, 9, 0), windowMinutes: 60 })
+  assert.equal(agentShareOf(agg, early, NOW)?.text, 'Subagents 0 of 2K counted here (0 %)')
+  const vm = buildViewModel(makeInput({ agg, quotas: [state('claude', { windows: [early] })] }))
+  assert.notEqual(vm.dataQuality.agents, null)
+  assert.equal(vm.quotas[0].windows[0].agentShare, 'Subagents 0 of 2K counted here (0 %)')
+  // The caller's word on the seven days decides a zero, and only a zero: a window the agents did
+  // reach says what they counted whatever it is told.
+  assert.equal(agentShareOf(agg, early, NOW, false), null)
+  assert.equal(agentShareOf(agg, early, NOW, true)?.text, 'Subagents 0 of 2K counted here (0 %)')
+  assert.equal(agentShareOf(agg, win(), NOW, false)?.text, 'Subagents 5.5K of 7K counted here (79 %)')
+  // Without an agent, the function finds the seven days empty itself.
+  assert.equal(agentShareOf(agentShareAgg({ asMain: true }), win(), NOW), null)
+  // A subagent bucket alone (no agent record — an old transcript's line) is an agent that ran.
+  const bucketOnly = agentShareAgg({ asMain: true })
+  const stray = path.join('/virtual', 'claude', 'projects', '-home-t-alpha', 's1', 'subagents', 'a.jsonl')
+  bucketOnly.addClaudeLine(claudeLine({ id: 'b-1', ts: daysAgo(2), final: true, usage: { input: 700 } }), ctxFor({ file: stray, isSub: true }))
+  assert.notEqual(buildViewModel(makeInput({ agg: bucketOnly })).dataQuality.agents, null)
+  assert.equal(agentShareOf(bucketOnly, win(), NOW)?.text, 'Subagents 0 of 7K counted here (0 %)')
+})
+
+/**
+ * 1.6 P10c: a world of two families in the same hours — Opus and Sonnet, each in a main session and
+ * in an agent — plus a Haiku agent, so a model window's figures can be told from the whole's.
+ *
+ *   main   claude-opus-4-6       10:00   4 000
+ *   main   claude-sonnet-4-6     10:10   2 000
+ *   agent  claude-opus-5[1m]     10:20   1 000   (the family, whatever the version and the suffix)
+ *   agent  claude-3-opus         10:30     500   (the older order of the name)
+ *   agent  claude-haiku-4-5      10:40   3 000
+ *
+ * The 7 d window counts 10.5K with 4.5K of subagents; "7 d Opus" 5.5K with 1.5K.
+ */
+function familyAgg(): Aggregator {
+  const agg = new Aggregator()
+  const slug = path.join('/virtual', 'claude', 'projects', '-home-t-alpha')
+  const main = path.join(slug, 's1.jsonl')
+  const sub = (id: string): string => path.join(slug, 's1', 'subagents', `agent-${id}.jsonl`)
+  const put = (file: string, isSub: boolean, id: string, minute: number, model: string, input: number): void => {
+    agg.addClaudeLine(claudeLine({ id, ts: Date.UTC(2026, 8, 3, 10, minute), model, final: true, sessionId: 's1', usage: { input } }),
+      ctxFor({ file, isSub }))
+  }
+  put(main, false, 'm-1', 0, 'claude-opus-4-6', 4000)
+  put(main, false, 'm-2', 10, 'claude-sonnet-4-6', 2000)
+  put(sub('a0000000000000011'), true, 's-1', 20, 'claude-opus-5[1m]', 1000)
+  put(sub('a0000000000000012'), true, 's-2', 30, 'claude-3-opus', 500)
+  put(sub('a0000000000000013'), true, 's-3', 40, 'claude-haiku-4-5', 3000)
+  return agg
+}
+
+test('a model window counts only its own family in both figures of its share; nothing of that family, no line (1.6 P10c)', () => {
+  const agg = familyAgg()
+  const week = win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 62, resetsAt: NOW + 3 * 86_400_000, windowMinutes: 10080 })
+  const opus = win({ ...week, id: 'weekly_scoped:10080:opus', label: '7 d · Opus', model: 'Opus' })
+  assert.equal(agentShareOf(agg, week, NOW)?.text, 'Subagents 4.5K of 10.5K counted here (43 %)')
+  assert.equal(agentShareOf(agg, opus, NOW)?.text, 'Subagents 1.5K of 5.5K counted here (27 %)')
+  // However the provider spells the family: its short name, lower case, the whole display name.
+  for (const model of ['opus', 'OPUS', 'Claude Opus 4.6', 'claude-opus']) {
+    assert.equal(agentShareOf(agg, { ...opus, model }, NOW)?.text, 'Subagents 1.5K of 5.5K counted here (27 %)', model)
+  }
+  // Sonnet: its main session's tokens, no agent of its own — a measured zero, since agents ran.
+  assert.equal(agentShareOf(agg, { ...opus, model: 'Sonnet' }, NOW)?.text, 'Subagents 0 of 2K counted here (0 %)')
+  // A family nothing was counted for, a name with no family in it, and a scope that names no
+  // model at all (the provider's "7 d Cowork") have no line: a denominator of none is no share.
+  for (const model of ['Fable', '4.6', 'Cowork', 'Oauth apps']) {
+    assert.equal(agentShareOf(agg, { ...opus, model }, NOW), null, model)
+  }
+  // A family counted for, but not in the window's own hours: no line either.
+  assert.equal(agentShareOf(agg, { ...opus, resetsAt: Date.UTC(2026, 8, 3, 10, 0), windowMinutes: 60 }, NOW), null)
+  // A window without a model is every model's, as before; an empty model name is none.
+  assert.equal(agentShareOf(agg, { ...opus, model: null }, NOW)?.text, 'Subagents 4.5K of 10.5K counted here (43 %)')
+  assert.equal(agentShareOf(agg, { ...opus, model: ' ' }, NOW)?.text, 'Subagents 4.5K of 10.5K counted here (43 %)')
+  // On the card, beside the window of every model: the two lines differ, the percent is the provider's.
+  const vm = buildViewModel(makeInput({ agg, quotas: [state('claude', { windows: [week, { ...opus, percent: 91 }] })] }))
+  const [all, scoped] = vm.quotas[0].windows
+  assert.equal(all.agentShare, 'Subagents 4.5K of 10.5K counted here (43 %)')
+  assert.deepEqual(scoped.agentShareParts, { sub: '1.5K', total: '5.5K', share: '27 %' })
+  assert.equal(scoped.percentText, '91%')
+  // And the markdown names the window it belongs to.
+  assert.ok(markdownDocument(vm).split('\n').includes('- 7 d · Opus: subagents 1.5K of 5.5K counted here (27 %)'), markdownDocument(vm))
+})
+
+test('a model window below the hour roll-up marks both of its figures ≈, as the window of every model does (1.6 P10c)', () => {
+  const agg = familyAgg()
+  // Ten more days of Opus in a main session, then the hours older than two days rolled up: a
+  // ten-day window reaches below them.
+  const main = path.join('/virtual', 'claude', 'projects', '-home-t-alpha', 's1.jsonl')
+  agg.addClaudeLine(claudeLine({ id: 'm-old', ts: daysAgo(5), model: 'claude-opus-4-6', final: true, sessionId: 's1', usage: { input: 9000 } }),
+    ctxFor({ file: main, isSub: false }))
+  agg.rollup(NOW, 2, 400, tcfg)
+  const opus = win({ id: 'other:14400:opus', kind: 'other', label: '10 d · Opus', model: 'Opus', resetsAt: NOW + 86_400_000, windowMinutes: 14400 })
+  assert.equal(agentShareOf(agg, opus, NOW)?.text, 'Subagents ≈1.5K of ≈5.5K counted here (27 %)')
 })
 
 test('the share is a whole percent, "<1 %" or ">99 %" where rounding would say none or all (1.6 N7)', () => {

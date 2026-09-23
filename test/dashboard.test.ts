@@ -5098,10 +5098,13 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     const shows = n.tallyText !== null && n.kind !== 'agent'
     assert.equal(row.indexOf('class="ag-t"') >= 0, shows, row)
     const group = n.kind === 'session' || n.kind === 'workflow'
-    if (shows && !group) assert.ok(row.indexOf(tallyEnd(n as unknown as Record<string, unknown>)) >= 0, row)
+    // 1.6 P10c (pinned by P7b and changed, the lead's call): a run's collector puts its tally where
+    // a run does, before its duration.
+    const tallyFirst = group || n.kind === 'noreply'
+    if (shows && !tallyFirst) assert.ok(row.indexOf(tallyEnd(n as unknown as Record<string, unknown>)) >= 0, row)
     // 1.6 P7b: a session's and a run's tally before the line's last part — its span, its duration or
     // its clock, the part the fit takes off first.
-    if (shows && group) {
+    if (shows && tallyFirst) {
       const mid = tallyFigs(n as unknown as Record<string, unknown>).map((x) => '<span class="ag-fp">' + SEP + x + '</span>').join('')
       const rest = row.slice(row.indexOf(mid) + mid.length)
       assert.ok(row.indexOf(mid) >= 0 && rest.startsWith('<span class="ag-fp">' + SEP) && rest.split('class="ag-fp"').length === 2
@@ -5372,7 +5375,9 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
     assert.equal(odd.indexOf('of them running'), -1, String(running))
     assert.ok(odd.indexOf('Running now (1)') >= 0, String(running))
   }
-  // In the tree: a leaf — no toggle, no aria-expanded — its glyph, its label, its tally, dashes.
+  // In the tree: a leaf — no toggle, no aria-expanded — its glyph, its label, dashes and its tally.
+  // 1.6 P10c (pinned by P5b/P7 and changed, the lead's call): its figures are in a run's order —
+  // the usage, the tally, then the duration, the trailing dash the first part to give way.
   const t = treePart(h)
   const at = t.indexOf('<li role="treeitem" class="ag-k-noreply"')
   assert.ok(at >= 0, t)
@@ -5383,7 +5388,7 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
     + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.n1)
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
     + '<span class="ag-text">' + olbl('263 agent(s) without a counted reply', '263 agent(s) without a counted reply')
-    + figsOf(AK.n1, fig('–'), fig('–'), ...tallyFigs(T_N1)) + '</span></span></div></li>', li)
+    + figsOf(AK.n1, fig('–'), ...tallyFigs(T_N1), fig('–')) + '</span></span></div></li>', li)
   // Running, with a start the payload gives it anyway: still no clock in the tree — dashes.
   const started = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.wf, 'running', { kind: 'workflow',
     label: 'Workflow run Tue 11:40 · cfe7718d', startTs: null, children: [{ ...collector, startTs: AG_NOW - 42_000 }] })] }),
@@ -6133,8 +6138,117 @@ test('a figures line with no room for its last parts takes them off whole and en
   // describes the tree item to, hears no "…", and a comma between two parts — none before a tally's.
   assert.match(STYLE, /\.ag-fig\.ag-cut::after \{ content: "\\00a0…" \/ ""; \}/)
   assert.match(STYLE, /\.ag-fig > \.ag-fp \+ \.ag-fp:not\(:has\(> \.ag-t\)\)::before \{ content: "" \/ ", "; \}/)
-  assert.match(STYLE, /\.ag-fig \.ag-gone \{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden;\s+clip-path: inset\(50%\); \}/)
+  // 1.6 P10c (pinned by P7 and changed, Review 3 #2): out of sight by its text at no size, in the
+  // line where it was — not absolute and clipped, which Chrome's accessibility tree reads as a
+  // block of its own and gives a space before the next comma.
+  assert.match(STYLE, /\.ag-fig \.ag-gone \{ font-size: 0; \}/)
+  const goneRule = STYLE.slice(STYLE.indexOf('.ag-fig .ag-gone {'), STYLE.indexOf('}', STYLE.indexOf('.ag-fig .ag-gone {')))
+  assert.equal(/position|clip|width|height|display/.test(goneRule), false, goneRule)
   assert.match(SOURCE, /function applyFits\(\): void \{[^}]*fitAgentFigures\(\);/)
+})
+
+/** The element that opens at `at` in `h`, to its own end (spans only, as a figures' line is). */
+function spanAt(h: string, at: number): string {
+  const re = /<span[^>]*>|<\/span>/g
+  re.lastIndex = at
+  let depth = 0
+  for (let m = re.exec(h); m; m = re.exec(h)) {
+    depth += m[0].startsWith('</') ? -1 : 1
+    if (depth === 0) return h.slice(at, m.index + m[0].length)
+  }
+  throw new Error('an unterminated span at ' + at)
+}
+
+/** A figures' line with its last `k` parts taken off, as fitAgentFigures leaves it. */
+function takeOff(line: string, k: number): string {
+  const opens: number[] = []
+  const re = /<span[^>]*>|<\/span>/g
+  let depth = 0
+  for (let m = re.exec(line); m; m = re.exec(line)) {
+    if (m[0].startsWith('</')) { depth--; continue }
+    depth++
+    if (depth === 2 && m[0] === '<span class="ag-fp">') opens.push(m.index)
+  }
+  let out = line
+  for (const at of opens.slice(opens.length - k).reverse()) {
+    out = out.slice(0, at) + '<span class="ag-fp ag-gone">' + out.slice(at + '<span class="ag-fp">'.length)
+  }
+  return out
+}
+
+/**
+ * What a screen reader gets of a figures' line — the item's description (1.6 L1) — by the rules of
+ * Chrome's accessibility tree the line's words depend on, as the harness measured them (keys.mjs):
+ * what is `aria-hidden` says nothing; every part after the first but a tally's says ", " in front of
+ * itself (the stylesheet's generated content); and an element the stylesheet places apart —
+ * `position: absolute`: a `.sr` twin, and a part taken off the line while its rule places it so — is
+ * a block of its own, with a space before and after it unless one is there already.
+ */
+function spokenLine(line: string, style: string): string {
+  const goneApart = /\.ag-fig \.ag-gone \{[^}]*position: absolute/.test(style)
+  const tokens = line.match(/<span[^>]*>|<\/span>|[^<]+/g) ?? []
+  const stack: Array<{ hidden: boolean; apart: boolean }> = []
+  let out = ''
+  let part = -1
+  const space = (): void => { if (out !== '' && !out.endsWith(' ')) out += ' ' }
+  tokens.forEach((tok, i) => {
+    if (tok.startsWith('</')) {
+      const top = stack.pop()
+      if (top && top.apart) space()
+      return
+    }
+    if (!tok.startsWith('<span')) {
+      if (!stack.some((x) => x.hidden)) out += tok
+      return
+    }
+    const cls = (/class="([^"]*)"/.exec(tok)?.[1] ?? '').split(' ')
+    const hidden = (stack.length > 0 && stack[stack.length - 1].hidden) || /aria-hidden="true"/.test(tok)
+    const apart = !hidden && (cls.includes('sr') || (goneApart && cls.includes('ag-gone')))
+    if (apart) space()
+    if (stack.length === 1 && cls.includes('ag-fp')) {
+      part++
+      // Its own tokens, to its end: does the part hold a tally?
+      let depth = 0
+      let tally = false
+      for (let j = i; j < tokens.length; j++) {
+        if (tokens[j].startsWith('</')) { if (--depth === 0) break } else if (tokens[j].startsWith('<span')) {
+          depth++
+          if (/class="ag-t"/.test(tokens[j])) tally = true
+        }
+      }
+      if (part > 0 && !tally) out += ', '
+    }
+    stack.push({ hidden, apart })
+  })
+  return out.trim()
+}
+
+test('a part taken off a figures line leaves no space of its own in what a screen reader gets: "own 1.2M, agents 434.6K, 1 h 05 min" (1.6 P10c)', () => {
+  // Review 3 #2: a part the fit takes off is still read out, and must be read as if it were on the
+  // line — the item's description (its figures' line) the same with every part on it and with any
+  // number taken off, "own 32K, agents 166K, 49 min 00 s", never "agents 166K , 49 min 00 s", which
+  // Chrome read while such a part was placed apart (absolute, clipped) — a block of its own to it.
+  const a = agentCtx()
+  const h = treePart(agentsHtml(a, { agents: agentTree(), ui: agentUi({ agentsExpanded: OPEN }) }))
+  const lineOf = (key: string): string => spanAt(h, h.indexOf('<span class="ag-fig" id="agf-' + key + '">'))
+  const partsOf = (line: string): number => line.split('<span class="ag-fp">').length - 1
+  for (const [key, said] of [
+    // A session: its two figures, its tally (words for the eye alone — the item's name says them), its span.
+    [AK.s1, 'own 1.2M, agents 434.6K, 1 h 05 min'],
+    // A running run: its usage, its tally, its clock — for the ear the clock time it started at.
+    [AK.wf, '410K, since 11:40'],
+  ] as Array<[string, string]>) {
+    const line = lineOf(key)
+    assert.ok(partsOf(line) >= 3, line)
+    for (let k = 0; k < partsOf(line); k++) {
+      assert.equal(spokenLine(takeOff(line, k), STYLE), said, key + ' with ' + k + ' part(s) taken off: ' + takeOff(line, k))
+    }
+  }
+  // The rule that made the space, for the record: with a part taken off placed apart — P7's
+  // "position: absolute; … clip-path: inset(50%)" — the same session line read with a space before its comma.
+  const placedApart = '.ag-fig .ag-gone { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }'
+  assert.equal(spokenLine(takeOff(lineOf(AK.s1), 1), placedApart), 'own 1.2M, agents 434.6K , 1 h 05 min')
+  assert.equal(spokenLine(lineOf(AK.s1), placedApart), 'own 1.2M, agents 434.6K, 1 h 05 min')
 })
 
 test('the clock fits its row again when it grows a unit, or a silence appears — and not on every tick', () => {

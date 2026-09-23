@@ -31,7 +31,7 @@ import {
   PaceConfig, effectivePace, paceVerdict, severityOf, windowDisplay, WindowDisplay, windowElapsed,
 } from './pace'
 import { explainWindow, WindowExplain } from './paceExplain'
-import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
+import { PRICES_AS_OF, PricingOptions, isCustomPricing, normalizeModel } from './prices'
 import { promptCacheText } from './promptCache'
 import { ageMinutes, compact, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
@@ -1063,6 +1063,40 @@ function agentShareWord(part: number, whole: number): string {
 }
 
 /**
+ * The family word of a Claude model id, the way the price table's family fallback reads it — the
+ * first part after "claude" that is no version: "claude-opus-4-6", "claude-opus-5[1m]" and the older
+ * "claude-3-opus" are all "opus". Null for anything that is not a Claude model id ("<synthetic>").
+ */
+function claudeFamily(model: string): string | null {
+  const parts = normalizeModel(model).split('-')
+  if (parts[0] !== 'claude') return null
+  return parts.slice(1).find((p) => p !== '' && !/^\d/.test(p)) ?? null
+}
+
+/**
+ * The family a model-scoped window names — "Opus", "opus", "Claude Opus 4.6" are all "opus" — by
+ * the same reading: its first word that is neither "claude" nor a version. Null for a name that has
+ * none.
+ */
+function windowFamily(name: string): string | null {
+  return name.toLowerCase().split(/[^a-z0-9]+/).find((p) => p !== '' && p !== 'claude' && !/^\d/.test(p)) ?? null
+}
+
+/**
+ * P10c (1.6): the models a model-scoped window counts — every Claude model id the aggregator's
+ * buckets carry whose family is the window's; `sumHours` then takes their hour buckets alone. Empty
+ * when nothing of that family was ever counted.
+ */
+function familyModels(agg: Aggregator, family: string): string[] {
+  const seen = new Map<string, boolean>()
+  for (const b of agg.all()) {
+    if (b.source !== 'claude' || seen.has(b.model)) continue
+    seen.set(b.model, claudeFamily(b.model) === family)
+  }
+  return [...seen].filter(([, match]) => match).map(([model]) => model).sort()
+}
+
+/**
  * N7 (1.6): the subagent share of one Claude window.
  *
  * Over the bounds the totals row sums the same window over — from `resetsAt − windowMinutes` to
@@ -1073,23 +1107,42 @@ function agentShareWord(part: number, whole: number): string {
  * have been rolled up, both figures are lower bounds and carry `≈` (the share of two lower bounds
  * is left unmarked — it is not a bound of anything, and the line says where it came from).
  *
+ * A model-scoped window (P10c: `w.model`, the provider's "7 d Opus") counts only its own models —
+ * both figures, the subagents' and the whole: the hour buckets of the Claude models of the window's
+ * family (`claudeFamily`), the rest of the tokens being no part of that window. A window whose
+ * family cannot be read, or whose family nothing was counted for, has no line.
+ *
  * Null for a window without a reset or a length (no bounds to sum over), for one whose start is
- * still ahead, and for one nothing was counted in: "0 of 0" is not a share. The window's percent
- * is not an input — this is a share of tokens counted here, never of the provider's quota.
+ * still ahead, and for one nothing was counted in: "0 of 0" is not a share. Null, too, where the
+ * subagents counted nothing in the window and nothing anywhere else either (P10c): with no agent
+ * record and no subagent hour bucket in the last seven days (`agentsSeen`, the data-quality line's
+ * `agents` — computed here when the caller does not pass it), a "0 %" on every card would be a line
+ * about agents to a reader who has none. Where agents ran elsewhere, a window's "0 %" stays: a
+ * measured zero. The window's percent is not an input — this is a share of tokens counted here,
+ * never of the provider's quota.
  */
 export function agentShareOf(
-  agg: Aggregator, w: Pick<QuotaWindow, 'resetsAt' | 'windowMinutes'>, now: number,
+  agg: Aggregator, w: Pick<QuotaWindow, 'resetsAt' | 'windowMinutes'> & Partial<Pick<QuotaWindow, 'model'>>, now: number,
+  agentsSeen?: boolean,
 ): { text: string; parts: AgentShareParts } | null {
   if (w.resetsAt === null || w.windowMinutes === null) return null
   if (!Number.isFinite(w.resetsAt) || !Number.isFinite(w.windowMinutes) || w.windowMinutes <= 0) return null
   const from = w.resetsAt - w.windowMinutes * 60_000
   const to = Math.min(now, w.resetsAt)
   if (!(to > from)) return null
-  const all = agg.sumHours(from, to, { source: 'claude' })
+  let models: string[] | undefined
+  if (typeof w.model === 'string' && w.model.trim() !== '') {
+    const family = windowFamily(w.model)
+    if (family === null) return null
+    models = familyModels(agg, family)
+    if (models.length === 0) return null
+  }
+  const all = agg.sumHours(from, to, { source: 'claude', models })
   const total = billable(all.bucket)
   if (!(total > 0)) return null
-  const sub = billable(agg.sumHours(from, to, { source: 'claude', isSub: true }).bucket)
+  const sub = billable(agg.sumHours(from, to, { source: 'claude', isSub: true, models }).bucket)
   if (!Number.isFinite(sub)) return null
+  if (!(sub > 0) && !(agentsSeen ?? agentTokensOf(agg, now) !== null)) return null
   const mark = (s: string): string => (all.complete ? s : `≈${s}`)
   const parts: AgentShareParts = { sub: mark(compact(sub)), total: mark(compact(total)), share: agentShareWord(sub, total) }
   return { text: t('Subagents {0} of {1} counted here ({2})', parts.sub, parts.total, parts.share), parts }
@@ -1146,6 +1199,7 @@ function quotaCard(
   forecasts: Map<string, Forecast>,
   lastEvent: number | null,
   newestDay: string | null,
+  agentsSeen: boolean,
 ): QuotaCard {
   const { now, cfg, history } = input
   const fetchedMs = q.fetchedAt !== null && Number.isFinite(q.fetchedAt) ? q.fetchedAt * 1000 : null
@@ -1178,8 +1232,9 @@ function quotaCard(
       formatTime: (ms) => formatTime(ms, tcfg),
     })
     // N7 (1.6): Claude Code's subagents are Claude's alone — Codex records no agent the section
-    // could name, and its forks are not what the Agents section counts.
-    const share = q.source === 'claude' ? agentShareOf(input.agg, w, now) : null
+    // could name, and its forks are not what the Agents section counts. P10c: a model window counts
+    // its own models only, and a reader with no agent at all gets no line.
+    const share = q.source === 'claude' ? agentShareOf(input.agg, w, now, agentsSeen) : null
     return {
       id: w.id,
       label: w.label,
@@ -1529,7 +1584,10 @@ export function buildViewModel(input: VmInput): ViewModel {
   }
 
   const forecasts = forecastsFor(quotas, history, input.fingerprints, input.forecastCfg, now, paceCfg, tcfg)
-  const cards = quotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay))
+  // N7 (1.6): the subagent tokens of the last seven days, counted once — the data-quality line
+  // prints them, and a quota card's share line is not drawn where they are none (P10c).
+  const agentTokens = agentTokensOf(agg, now)
+  const cards = quotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null))
 
   // The provider's own windows, so the totals table can hold the running 5 h and 7 d spans
   // against exactly the bounds the quota card above it draws.
@@ -1558,7 +1616,7 @@ export function buildViewModel(input: VmInput): ViewModel {
   const retroRows = retroList(quotas, history, input.fingerprints)
 
   const attributionOn = cfg.attribution !== 'none'
-  const dq = dataQuality(input, ctx, tcfg, costSummary, stats)
+  const dq = dataQuality(input, ctx, tcfg, costSummary, stats, agentTokens)
   const empty = stats.buckets === 0
   const noQuota = cards.every((c) => c.problem !== null || c.windows.length === 0)
 
@@ -1693,6 +1751,7 @@ function dataQuality(
   tcfg: TimeConfig,
   cost: ReturnType<typeof combinedCost>,
   stats: ReturnType<Aggregator['stats']>,
+  agents: DataQuality['agents'],
 ): DataQuality {
   const { cfg, agg, history, now } = input
   const totalTokens = ctx.sources.reduce(
@@ -1761,7 +1820,7 @@ function dataQuality(
           : t('status line not connected'),
     attribution: cfg.attribution,
     version: typeof __EXT_VERSION__ === 'string' ? __EXT_VERSION__ : '0.0.0',
-    agents: agentTokensOf(agg, now),
+    agents,
   }
 }
 

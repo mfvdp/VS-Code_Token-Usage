@@ -21,7 +21,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | Tokens per hour / day / model | `~/.claude/projects/**/*.jsonl` | exact | on file change |
 | Tokens per hour / day / model | `~/.codex/sessions/**/rollout-*.jsonl` (and `archived_sessions/`) | exact | on file change |
 | Output of Claude subagents, and of any response with no terminal line | the same transcripts | **lower bound** (⚠ in tooltip, tables, export and the agent details) | – |
-| Agent states done and failed | the parent's tool result or task notification, or the workflow run's journal | **recorded** | on file change; the agent tree is pushed at most every 2 s |
+| Agent states done, failed and stopped | the parent's tool result or task notification, or the workflow run's journal | **recorded** | on file change; the agent tree is pushed at most every 2 s |
 | Agent states running and unknown, sessions active and idle | the time of a transcript's last response, or of the launch | **derived** (`~` in the glyph's title), with the sentence it rests on | the same |
 | Report from Claude Code of a sync agent | the tool result that returns the agent | Claude Code's own figure — the context of the agent's last request with its reply, not what it used; shown, never added to a total | – |
 | API cost | token counts × a dated price table | **estimate** (`~`) | table checked 2026-09-06 |

@@ -116,6 +116,11 @@ test('a line without a head of its own falls back to a parse of three fields, an
   assert.deepEqual(agentsOf(agg).map((a) => [a.agentId, a.step, a.attempt, a.supersededBy]),
     [[A1, 1, 1, null], [A2, 0, 1, null], [A3, 0, 1, null]])
   assert.equal(agg.journalSkipped, 0)
+  // The head is matched at the start of the line only: an object inside a line without a head of
+  // its own — a result shaped like one — is never read as the line's head.
+  const nested = `{"agentId":"${A3}","type":"result","result":{"type":"failed","key":"${journalKey(1)}","agentId":"${A2}"}}`
+  assert.deepEqual(feed(agg, [nested]), [true])
+  assert.deepEqual(agentsOf(agg).map((a) => [a.agentId, a.outcome]), [[A1, null], [A2, null], [A3, 'completed']])
   // Beyond JOURNAL_PARSE_MAX, a line without the head is not parsed: skipped, and counted.
   const long = JSON.stringify({ label: 'x'.repeat(JOURNAL_PARSE_MAX), type: 'failed', agentId: A1, key: journalKey(1) })
   assert.ok(long.length > JOURNAL_PARSE_MAX)
@@ -330,6 +335,14 @@ test('a version 7 snapshot is read forward: no runs, the journal\'s completions 
   // A second replay rebuilds the same runs rather than doubling them.
   await replayAgents(agg, agentReplayFiles(agg, NOW))
   assert.equal(JSON.stringify(agg.runs()), expected)
+  // It derives each run anew from its journal rather than reading the journal onto what the run
+  // held: an agent the stored run lists and the journal does not is gone, a lost outcome is back.
+  const stale = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot)
+  const held = stale.runs()[0]
+  held.agents.push({ agentId: 'e0e0', step: 9, attempt: 1, outcome: 'completed', supersededBy: null })
+  held.agents[0].outcome = null
+  await replayAgents(stale, agentReplayFiles(stale, NOW))
+  assert.equal(JSON.stringify(stale.runs()), expected)
   // Written back as version 8 with the revision the host sets, and read back with it.
   agg.agentsRevision = AGENT_TABLES_REVISION
   const back = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot)

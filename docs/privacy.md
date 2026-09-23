@@ -25,8 +25,8 @@ for the `type`, the `key` and the `agentId` at the head of each line, never its 
 journal, to tell a step that was started again from a new one, and is never kept, shown or
 exported: it lives in memory only, and what the tree keeps of it is the step's ordinal. To catch agent files the recursive file watcher can miss (on Linux
 it does), the `subagents/` directories of the active sessions and the workflow directories
-inside them are also listed every five seconds while an agent runs, on every platform; the
-listing follows no link.
+inside them are also listed every five seconds while an agent runs or a Claude Code session is
+active, on every platform; the listing follows no link.
 
 `~/.claude/ide/*.lock` (which holds an `authToken` in clear text),
 `~/.claude/sessions/*.key` and the `oauthAccount` block of `~/.claude.json` are **never** touched;

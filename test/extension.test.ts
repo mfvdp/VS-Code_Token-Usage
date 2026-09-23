@@ -1574,6 +1574,12 @@ test('Copy Agent ID copies the id of the node whose details are open, and nothin
   writeAgentWorld(fx)
   const host = await activateHost(fx, REPO)
   await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  // The replay after the cold start takes the agent tables apart while it rebuilds them: a
+  // selection made meanwhile finds no node, and the view model no details to copy from. Its end
+  // is read off this fixture's saved state — a log line may be an earlier test's replay, still
+  // running when that test disposed its activation.
+  const { agg } = lazy()
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   const page = openDashboard()
   await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
   const before = state.clipboard.length
@@ -1601,11 +1607,21 @@ test('the usage document prints every node of the agent tree, though the dashboa
   writeAgentWorld(fx)
   await activateHost(fx, REPO)
   await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  // The tables are whole once the replay after the cold start has rebuilt them — read off this
+  // fixture's saved state, as a log line may be an earlier test's replay. The page's first
+  // payload may be a view model built before that — before the cold start's own frame, even.
+  const { agg } = lazy()
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   const page = openDashboard()
-  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
-  const data = page.sent.find((m) => (m as { type?: unknown }).type === 'data') as { payload: { agents: AgentTreeVm } }
-  assert.ok(data.payload.agents.roots.length > 0)
-  assert.ok(data.payload.agents.roots.every((r) => r.children.length === 0), 'the closed tree carried children to the page')
+  const pageTree = (): AgentTreeVm | undefined => {
+    const carrying = page.sent.filter((m) => {
+      const { type, key } = m as { type?: unknown; key?: unknown }
+      return type === 'data' || (type === 'section' && key === 'agents')
+    }) as Array<{ payload: { agents: AgentTreeVm } }>
+    return carrying[carrying.length - 1]?.payload.agents
+  }
+  await waitFor('the tree on the page', () => treeKeys(pageTree()?.roots ?? []).includes(`s:${ACTIVE}`))
+  assert.ok(pageTree()!.roots.every((r) => r.children.length === 0), 'the closed tree carried children to the page')
   await state.execute('tokenPace.showUsageMarkdown')
   const md = lastMarkdown()
   const at = md.indexOf('### Sessions and agents')

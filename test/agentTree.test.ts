@@ -1262,6 +1262,15 @@ test('MAX_PAGE_NODES: the selection\'s path and the running first, and an opened
   assert.ok(all(both.roots).some((n) => n.key === picked))
   assert.equal(both.selected?.key, picked)
   assert.ok(all(both.roots).some((n) => n.key === agentKey(live.agentId)), 'the running agent is not on the page')
+  // The selection comes before the running agents, too: with a running agent in each of the first
+  // 39 runs, their runs alone would fill the page (1 + 42 + 39 × 50 nodes); the selected agent's
+  // run is shipped first, and the last of the running agents' runs gives way instead.
+  const busy = agents.map((r, n) => (n % 50 === 3 && n < 39 * 50 ? { ...r, lastTs: NOW - MIN, outcome: null, outcomeTs: null } : r))
+  const crowded = page({ agents: busy, expanded, selected: picked })
+  assert.ok(all(crowded.roots).length <= MAX_PAGE_NODES)
+  assert.deepEqual(shipped(crowded), [...Array.from({ length: 38 }, (_, i) => i), 41])
+  assert.equal(crowded.selected?.key, picked)
+  assert.equal(crowded.running, 39)
 })
 
 test('an opened node without children is ignored; a selected node inside a closed branch has no panel and no note', () => {

@@ -303,7 +303,7 @@ export interface AgentLaunch {
   outcomeTs: number | null
   /** The parent's word for the end (§0a.0); null while launched, and for a snapshot before 1.6. */
   outcomeStatus: LaunchStatus | null
-  /** The parent's own report for a sync agent — shown as "parent's report", never summed. */
+  /** Claude Code's own report for a sync agent — shown as "Report from Claude Code", never summed. */
   totals: { tokens: number; durationMs: number; toolUses: number } | null
 }
 

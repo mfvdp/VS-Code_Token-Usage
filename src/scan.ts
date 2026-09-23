@@ -6,7 +6,7 @@ import { ADAPTERS, adapterFor } from './adapters'
 import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
 import { Aggregator, IngestContext, parseAgentMeta } from './agg'
 import { agentTranscriptsOf, findTranscripts, rootOf, rootsFor } from './discover'
-import { newCursor, readNewLines } from './tail'
+import { newCursor, readNewLines, sameFile } from './tail'
 import { AgentMeta, Attribution, Cursor, Source } from './types'
 
 export interface ScanProgress { done: number; total: number; file: string }
@@ -154,7 +154,8 @@ export async function replayAgents(
     if (!cur || !(cur.offset > 0)) continue
     let st: fs.Stats
     try { st = await fs.promises.stat(file) } catch { continue }
-    if (st.ino !== cur.ino || st.dev !== cur.dev) continue
+    // The tail's identity rule, so the replay reads exactly the files the scan would continue.
+    if (!sameFile(st, cur)) continue
     limits.set(file, cur.offset)
   }
   agg.beginAgentReplay(limits.keys())

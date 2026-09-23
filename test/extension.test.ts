@@ -942,13 +942,11 @@ test('activate() returns the API the extension-host smoke test reads the bar thr
 
   await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
   // Every id on the bar, with the bar's own text. The comparison goes by id rather than by
-  // position: `state.live()` records items in creation order, and an activation of an earlier
-  // test in this process can still be ticking into the same recording.
+  // position: `state.live()` records items in creation order, the API in bar order. Each id
+  // once, too — the two tests before this one dispose their activations while the cold scan
+  // still runs, and a disposed activation draws no frame into this recording.
   const items = host.api.statusBar()
-  assert.deepEqual(
-    items.map((i) => i.id).sort(),
-    [...new Set(state.live().map((i) => i.id))].sort(),
-  )
+  assert.deepEqual(items.map((i) => i.id).sort(), state.live().map((i) => i.id).sort())
   for (const item of items) assert.equal(item.text, state.textOf(item.id))
 
   // The same live seam the smoke test watches, one layer lower: the API has to follow a
@@ -1380,11 +1378,20 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
   assert.deepEqual(offsetsOf(snap), offsetsOf(v6))
 
   // The page gets the tree keyed by identifiers alone: no path and no project name reach it.
+  // The replay draws its frame once its save is done, and the file read above is on disk a
+  // moment before that frame: a page resolved in between is given the tree of the frame before,
+  // and the replayed one follows as the `agents` section when the section's interval allows.
   const page = openDashboard()
-  const data = page.sent.find((m) => (m as { type?: unknown }).type === 'data') as
-    { payload: { agents: AgentTreeVm } } | undefined
-  assert.ok(data, 'the dashboard got no full payload')
-  const keys = treeKeys(data.payload.agents.roots)
+  assert.ok(page.sent.some((m) => (m as { type?: unknown }).type === 'data'), 'the dashboard got no full payload')
+  const pageTree = (): AgentTreeVm | undefined => {
+    const carrying = page.sent.filter((m) => {
+      const { type, key } = m as { type?: unknown; key?: unknown }
+      return type === 'data' || (type === 'section' && key === 'agents')
+    }) as Array<{ payload: { agents: AgentTreeVm } }>
+    return carrying[carrying.length - 1]?.payload.agents
+  }
+  await waitFor('the replayed tree on the page', () => (pageTree()?.roots.length ?? 0) > 0)
+  const keys = treeKeys(pageTree()!.roots)
   for (const key of [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, 'a:a1a1a1', 'a:c3c3c3', `s:${IDLE}`, 'a:b1b1b1']) {
     assert.ok(keys.includes(key), `${key} is not among ${keys.join(', ')}`)
   }
@@ -1409,6 +1416,50 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
   assert.deepEqual(Object.keys(reread.agents ?? {}).sort(), [w.running, w.sync, w.idleAgent].sort())
   assert.deepEqual(fingerprintOf(reread), fingerprintOf(v6))
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a replay still saving at disposal draws no frame after it and leaves the exit state in place', async () => {
+  // Held still, the interleaving a loaded machine produced now and then: the replay after the
+  // cold start is saving the tables it rebuilt when the window goes. The frame it drew once the
+  // save was done built status bar items nothing ever disposed — into the next test's recording,
+  // too — and its temp file was the exit save's as well.
+  const fx = makeFixture()
+  const tmp = `${fx.stateFile}.tmp`
+  // The module object itself, as in `blindRecursiveWatchers`: the bundle reads `writeFile` from
+  // it at every call.
+  const promises = (require('fs') as typeof fs).promises as unknown as { writeFile: (...args: unknown[]) => Promise<void> }
+  const real = promises.writeFile
+  let release: () => void = () => undefined
+  let held: Promise<void> | null = null
+  promises.writeFile = (...args: unknown[]): Promise<void> => {
+    // The cold start's own save goes through; the replay's is the one after its log line.
+    if (held === null && args[0] === tmp && state.logText().includes('Agent replay (cold start)')) {
+      held = new Promise<void>((r) => { release = r }).then(() => real.apply(promises, args))
+      return held
+    }
+    return real.apply(promises, args)
+  }
+  try {
+    await activateHost(fx, REPO)
+    await waitFor('the replay\'s save', () => held !== null)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    const created = state.items.length
+    // The exit save's file by identity: the replay's snapshot holds the same tables, so only a
+    // file renamed over it would tell the two apart.
+    const exitFile = fs.statSync(fx.stateFile, { bigint: true }).ino
+
+    release()
+    await held
+    // What the save does next — a rename, or dropping its temp file — and the replay after it.
+    await waitFor('the save to end', () => !fs.existsSync(tmp))
+    await sleep(100)
+    assert.equal(state.items.length, created, 'a status bar item was built after disposal')
+    assert.equal(fs.statSync(fx.stateFile, { bigint: true }).ino, exitFile, 'a save under way at disposal replaced the exit state')
+    assert.deepEqual(fs.readdirSync(fx.storage).filter((n) => n.startsWith('state.json.')), [], 'a temp file was left behind')
+    assert.doesNotMatch(state.logText(), /Could not persist the snapshot/)
+  } finally {
+    promises.writeFile = real
+  }
 })
 
 test('a follower shows the agents of the leader\'s state and neither polls nor replays', async () => {

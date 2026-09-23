@@ -136,7 +136,7 @@ const SYSTEM_CLOCK: FlushClock = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
 
-export class DashboardProvider implements vscode.WebviewViewProvider {
+export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'tokenPace.dashboard'
   private view?: vscode.WebviewView
   private latest?: ViewModel
@@ -235,6 +235,16 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
       return
     }
     void vscode.commands.executeCommand(`${DashboardProvider.viewType}.focus`)
+  }
+
+  /**
+   * The extension is going. A section held back has nowhere to go any more, and without a view
+   * no flush can arm the timer again: nothing of the provider outlives the extension.
+   */
+  dispose(): void {
+    this.cancelDeferred()
+    this.view = undefined
+    this.latest = undefined
   }
 
   private flush(): void {

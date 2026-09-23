@@ -4189,6 +4189,25 @@ test('a held tree waits for nothing once the whole page is pushed, and its timer
   assert.deepEqual(r.live(), [])
 })
 
+test('a held tree dies with the provider too, and a disposed provider arms nothing again', () => {
+  const r = throttleRig()
+  r.p.update(flushVm({ agents: flushTree(1) }))
+  r.p.resolveWebviewView(r.view)
+  r.advance(AG_NOW + 500)
+  r.p.update(flushVm({ agents: flushTree(2) }))
+  const held = r.live()
+  assert.equal(held.length, 1)
+  // The extension goes while the tree waits: its timer goes with it, and nothing is sent after —
+  // not when the interval is over, not for a later model.
+  r.posted.length = 0
+  r.p.dispose()
+  assert.equal(held[0].cleared, true)
+  r.advance(AG_NOW + 5000)
+  r.p.update(flushVm({ agents: flushTree(3), digest: ['later'] }))
+  assert.deepEqual(r.posted, [])
+  assert.deepEqual(r.live(), [])
+})
+
 test('a clock that went backwards holds nothing back', () => {
   const r = throttleRig()
   r.p.update(flushVm({ agents: flushTree(1) }))

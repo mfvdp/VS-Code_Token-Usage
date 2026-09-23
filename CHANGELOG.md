@@ -34,6 +34,22 @@ This project follows [Semantic Versioning](https://semver.org/).
   a closed branch; a selection the page has no row for says so under the tree instead. What
   1.5.0 kept as folded nodes is not carried over.
 
+### Fixed
+
+* **The token history no longer multiplies when the disk comes up under another number.** A
+  file's identity was its device and inode number. The device number names the block device,
+  not the file system, and a disk that enumerates as `sda3` on one boot and `sdb3` on the next
+  gives every file a new one: every transcript was then read again from the start into the
+  buckets that already held it, and all figures of the days before grew with every such boot —
+  on the machine where it was found by a factor of two to six. A file is now the same file as
+  long as its inode is and it has not shrunk. The history that is already stored is not
+  repaired by itself: if older days look too high, run **Re-read Token History** once.
+* **Nothing is drawn or saved after the extension has shut down.** The one-time rebuild of the
+  agent tables after the first start saved and then redrew the status bar even when the window
+  had closed in the meantime, and its save shared a temporary file with the save on exit — in
+  the worst case the stored state held the start of one snapshot and the end of the other.
+  This also made the test suite fail now and then, which is what stopped the 1.5.0 release.
+
 ## 1.5.0 — 2026-09-23
 
 Tagged but not published: the release run stopped at a failing test. 1.5.1 is the first release that ships these changes.

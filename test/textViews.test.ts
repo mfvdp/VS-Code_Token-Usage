@@ -872,7 +872,7 @@ test('a backslash before a pipe cannot split a markdown table cell', () => {
  * markdown document is handed beside it (1.6 D3): every node open, where the view model's own
  * tree carries only what the dashboard has open, which here is nothing.
  */
-function agentVm(select = false): { vm: ViewModel; agentKey: string; text: AgentTreeVm } {
+function agentVm(select = false, over: Record<string, unknown> = {}): { vm: ViewModel; agentKey: string; text: AgentTreeVm } {
   const agg = buildAgg('project')
   const dir = path.dirname(CLAUDE_FILE)
   const sessionFile = path.join(dir, 'sess-alpha.jsonl')
@@ -898,8 +898,10 @@ function agentVm(select = false): { vm: ViewModel; agentKey: string; text: Agent
   agg.agents = () => [agent]
   agg.launches = () => [pending]
   const agentKey = 'a:a94f0001'
+  const { ui: uiOver, ...cfgOver } = over as { ui?: Record<string, unknown> }
   const input = makeInput({
-    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: select ? { agentSelected: agentKey } : {},
+    agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', ...cfgOver }),
+    ui: { ...(select ? { agentSelected: agentKey } : {}), ...(uiOver ?? {}) },
   })
   const vm = buildViewModel(input)
   return { vm, agentKey, text: agentTreeFor(input, 'text') }
@@ -1156,6 +1158,7 @@ test('the notes under the tree state the sessions left out, the lower bound and 
     runningMore: 0,
     omittedRoots: 3,
     note: 'The selected node is no longer in the tree.',
+    week: null,
   }
   const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
   // A recorded state carries no estimate mark; a lower bound carries ⚠ behind the figure.
@@ -1225,6 +1228,68 @@ test('the markdown prints every node of its tree, fifty children a node, and say
   assert.equal(german[german.length - 1], '  - … 1.184 weitere', german.slice(-2).join('\n'))
 })
 
+test('the 7-day block reaches the markdown between the running list and the tree while it is open — its cost column only with costs (1.6 L3)', () => {
+  // Closed, as the dashboard starts: no block in the document either.
+  const closed = agentVm()
+  assert.equal(sectionOf(markdownDocument(closed.vm, closed.text), '## Agents').some((l) => l.includes('Last 7 days')), false)
+  const { vm, text, agentKey } = agentVm(false, { ui: { agentsWeekOpen: true } })
+  const lines = sectionOf(markdownDocument(vm, text), '## Agents')
+  const head = lines.indexOf('### Last 7 days · where the agent tokens went')
+  assert.ok(head > lines.indexOf('### Running now') && head < lines.indexOf('### Sessions and agents'), lines.join('\n'))
+  const block = lines.slice(head, lines.indexOf('### Sessions and agents'))
+  const cost = vm.agents.week?.rows[0].cost
+  assert.match(cost ?? '', /^~\$/)
+  assert.deepEqual(block, [
+    '### Last 7 days · where the agent tokens went',
+    '',
+    '| Type · model | Agents | Usage | Share | Median per agent | ~Cost |',
+    '|---|---|---|---|---|---|',
+    // The model's whole id, as every line of the document writes it.
+    `| Explore · claude-opus-4-6 | 1 | 1.2K | 100 % | 1.2K | ${cost} |`,
+    `| All agents | 1 | 1.2K |  |  | ${cost} |`,
+    '',
+    '#### The largest agent',
+    '',
+    `- [~Running] Explore · claude-opus-4-6 · a94f · Session sess-alp · alpha · 1.2K · 100 % · ${cost}`,
+    '',
+  ])
+  assert.equal(vm.agents.week?.top[0].key, agentKey)
+  // Costs off: no cost column, no amount.
+  const off = agentVm(false, { ui: { agentsWeekOpen: true }, 'tokenPace.showCost': false })
+  const noCost = sectionOf(markdownDocument(off.vm, off.text), '## Agents')
+  const at = noCost.indexOf('### Last 7 days · where the agent tokens went')
+  const plain = noCost.slice(at, noCost.indexOf('### Sessions and agents'))
+  assert.equal(plain[2], '| Type · model | Agents | Usage | Share | Median per agent |')
+  assert.equal(plain[3], '|---|---|---|---|---|')
+  assert.equal(plain.join('\n').includes('$'), false, plain.join('\n'))
+  assert.equal(plain[9], '- [~Running] Explore · claude-opus-4-6 · a94f · Session sess-alp · alpha · 1.2K · 100 %')
+  // The page's tree prints it too, as the dashboard has it.
+  assert.ok(sectionOf(markdownDocument(vm), '## Agents').includes('### Last 7 days · where the agent tokens went'))
+  // An empty block says so, and a view model without the block prints nothing of it.
+  const empty = markdownDocument({ ...vm, agents: { ...vm.agents, week: { rows: [], other: null, top: [], total: '–', totalCost: null, agents: 0 } } })
+  assert.ok(sectionOf(empty, '## Agents').includes('_No agent of the last 7 days has a counted request._'), empty)
+  const none = markdownDocument({ ...vm, agents: { ...vm.agents, week: null } })
+  assert.equal(sectionOf(none, '## Agents').some((l) => l.includes('Last 7 days')), false)
+  // In German, with its pipes where the English has them.
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  let md = ''
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    const de = agentVm(false, { ui: { agentsWeekOpen: true } })
+    md = markdownDocument(de.vm, de.text)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  const german = sectionOf(md, '## Agenten')
+  const g = german.indexOf('### Letzte 7 Tage · wohin die Agent-Token gingen')
+  assert.ok(g >= 0, german.join('\n'))
+  assert.equal(german[g + 2], '| Typ · Modell | Agenten | Verbrauch | Anteil | Median je Agent | ~Kosten |')
+  assert.ok(german[g + 5].startsWith('| Alle Agenten | 1 | 1,2K |'), german[g + 5])
+  assert.equal(german[g + 7], '#### Der größte Agent')
+})
+
 test('a stop the parent recorded is printed [Stopped] — a recorded state, no estimate mark — in either language', () => {
   const { vm } = agentVm()
   const node = (key: string, state: TreeNode['state'], derived: boolean): TreeNode => ({
@@ -1237,7 +1302,7 @@ test('a stop the parent recorded is printed [Stopped] — a recorded state, no e
   const tree: AgentTreeVm = {
     roots: [{ ...node('s:sess', 'idle', true), kind: 'session', label: 'Session 12345678', agentCount: 1,
       hasChildren: true, childrenTotal: 1, children: [node('a:beef0001', 'stopped', false)] }],
-    selected: null, running: 0, runningNow: [], runningMore: 0, omittedRoots: 0, note: null,
+    selected: null, running: 0, runningNow: [], runningMore: 0, omittedRoots: 0, note: null, week: null,
   }
   const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
   assert.ok(lines.includes('  - [Stopped] Explore · claude-opus-4-6 · beef · 3.4K · 2 min 10 s'), lines.join('\n'))
@@ -1267,7 +1332,7 @@ test('an attempt the workflow journal superseded says so at the end of its line,
   const tree: AgentTreeVm = {
     roots: [{ ...node('s:sess', 'idle', false), kind: 'session', label: 'Session 12345678', derived: true, agentCount: 2,
       hasChildren: true, childrenTotal: 2, children: [node('a:beef0001', 'failed', true), node('a:beef0002', 'done', false)] }],
-    selected: null, running: 0, runningNow: [], runningMore: 0, omittedRoots: 0, note: null,
+    selected: null, running: 0, runningNow: [], runningMore: 0, omittedRoots: 0, note: null, week: null,
   }
   const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
   assert.ok(lines.includes('  - [Failed] workflow-subagent · claude-opus-4-6 · beef · 3.4K · 2 min 10 s (superseded by a later attempt)'),
@@ -1319,7 +1384,7 @@ test('the markdown prints a node\'s tally after its name, in brackets, and no ta
         }),
       ],
     })],
-    selected: null, running: 2, runningNow: [], runningMore: 0, omittedRoots: 0, note: null,
+    selected: null, running: 2, runningNow: [], runningMore: 0, omittedRoots: 0, note: null, week: null,
   }
   const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents').filter((l) => /^\s*- /.test(l))
   assert.deepEqual(lines, [

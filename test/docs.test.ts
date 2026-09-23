@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import {
   AGENT_RETENTION_DAYS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
-  PER_MINUTE_FROM_MS, SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, WEEKDAY_NAMES_WITHIN_MS,
+  PER_MINUTE_FROM_MS, SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
 import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
@@ -540,6 +540,9 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`within the last **${WEEKDAY_NAMES_WITHIN_MS / 86_400_000} days**`, 'when a start is named by its weekday'],
     // 1.6 L2 (P9): from how long an agent ran on its details say what it used per minute.
     [`From **${PER_MINUTE_FROM_MS / 60_000} minute** on, what it used **per minute**`, 'when an agent\'s pace is stated'],
+    // 1.6 L3 (P10a): the 7-day block's rows and its largest agents.
+    [`The largest usage first, at most **${WEEK_ROWS}** rows`, 'the rows of the 7-day block'],
+    [`**The ${TOP_AGENTS} largest agents** by usage`, 'the largest agents the 7-day block names'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
     [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],
@@ -549,6 +552,31 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const [claim, what] of claims) {
     assert.ok(flat.includes(claim), `docs/agents.md does not state ${what}: ${claim}`)
+  }
+})
+
+test('docs/agents.md and docs/dashboard.md name the 7-day block as the page writes it, and say what it does not add up', () => {
+  // 1.6 L3 (P10a): the words the page and the markdown write, taken from the sources that write them.
+  const page = readDoc('src/webview/main.ts')
+  const text = readDoc('src/textViews.ts')
+  const build = readDoc('src/agentTreeBuild.ts')
+  for (const [src, written] of [
+    [page, 'Last 7 days'], [page, 'Last 7 days · where the agent tokens went'], [page, 'Type · model'], [page, 'Median per agent'],
+    [page, '~Cost'], [page, 'All agents'], [page, 'No agent of the last 7 days has a counted request.'],
+    [page, 'not every agent has a price: the sum is a lower bound'], [text, 'The {0} largest agents'], [build, '{0} other combinations'],
+  ] as Array<[string, string]>) assert.ok(src.includes(`'${written}'`), `a source no longer writes: ${written}`)
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of ['## Last 7 days', '`Last 7 days` ▸', '**Last 7 days · where the agent tokens went**', '*Type · model*', '*Agents*',
+    '*Usage*', '*Share*', '*Median per agent*', '*~Cost*', '`tokenPace.showCost`', '(`3 other combinations`)', '*All agents*',
+    '*not every agent has a price: the sum is a lower bound*', '`No agent of the last 7 days has a counted request.`',
+    '### Last 7 days · where the agent tokens went', '#### The 5 largest agents', 'at its **whole usage**',
+    'are not added to each other', 'the rates of its model on the day of its last counted reply',
+    'written with more than one model', 'they count against its cap of nodes']) {
+    assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+  const dash = readDoc('docs/dashboard.md').replace(/\s+/g, ' ')
+  for (const claim of ['a `Last 7 days` button', '(agents.md#last-7-days)', 'the 7-day block\'s largest agents', 'the 7-day block\'s disclosure']) {
+    assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
   }
 })
 

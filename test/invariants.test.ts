@@ -447,14 +447,17 @@ test('a budget nothing can measure is stated, never quietly forgotten', () => {
  * only what is open (1.6 D3), and the rules below hold of every node, so every node with children
  * is opened — unless `closed` asks for the tree as it starts.
  */
-function agentsVm(o: { attribution?: Attribution; agg?: Aggregator; select?: (roots: TreeNode[]) => string; closed?: boolean } = {}): ViewModel {
+function agentsVm(o: { attribution?: Attribution; agg?: Aggregator; select?: (roots: TreeNode[]) => string; closed?: boolean;
+  week?: boolean } = {}): ViewModel {
   const attribution = o.attribution ?? 'none'
   const agg = o.agg ?? agentWorld(attribution).agg
   const config = makeConfig({ 'tokenPace.attribution': attribution })
   const agentsExpanded = o.closed === true ? [] : everyParent(agg, config, NOW)
-  const first = buildViewModel(makeInput({ agg, cfg: config, ui: { agentsExpanded } }))
+  // 1.6 L3: the 7-day block open, where a test asks for it.
+  const agentsWeekOpen = o.week === true
+  const first = buildViewModel(makeInput({ agg, cfg: config, ui: { agentsExpanded, agentsWeekOpen } }))
   if (!o.select) return first
-  return buildViewModel(makeInput({ agg, cfg: config, ui: { agentsExpanded, agentSelected: o.select(first.agents.roots) } }))
+  return buildViewModel(makeInput({ agg, cfg: config, ui: { agentsExpanded, agentsWeekOpen, agentSelected: o.select(first.agents.roots) } }))
 }
 
 /** Every node of the tree, each with its own details open — the panel the view model builds for it. */
@@ -700,6 +703,10 @@ const TREE_FIELDS = new Set([
   // its words (§2.2's `text`, named `label`, the row's own field name, since `text` is where a
   // reply's content lives).
   'overview', 'parts', 'part', 'share',
+  // 1.6 P10a (L3): the 7-day block — its rows by type and model (a row's `label`, `usage` and
+  // `share` are the tree's own field names), the line for the rest, its largest agents (a running
+  // item's `key`, `label`, `fullLabel`, `context`, `usage`; a node's `state`, `derived`), its total.
+  'week', 'type', 'model', 'agents', 'median', 'cost', 'other', 'top', 'total', 'totalCost',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {
@@ -868,8 +875,10 @@ test('the tree the page receives carries no key a transcript\'s content lives un
   // Only a test of anything if the lines and sidecars it was read from do carry the content.
   for (const s of AGENT_CONTENT) assert.ok(raw.includes(s), `the fixture lost ${s}`)
   for (const k of ['description', 'prompt', 'summary', 'outputFile', 'content', 'result']) assert.ok(raw.includes(`"${k}"`), k)
-  // The tree as each section push carries it: once with every node's details open in turn.
-  const open = everyNodeOpen('session', agg)
+  // The tree as each section push carries it: once with every node's details open in turn — and
+  // once with the 7-day block open (1.6 L3), whose rows and largest agents are made of the same records.
+  const open = [...everyNodeOpen('session', agg), { node: null, vm: agentsVm({ attribution: 'session', agg, week: true }) }]
+  assert.ok(open[open.length - 1].vm.agents.week?.top.length, 'the world has no agent for the 7-day block')
   const keys = new Set<string>()
   const walk = (v: unknown): void => {
     if (Array.isArray(v)) v.forEach(walk)

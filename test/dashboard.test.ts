@@ -3038,6 +3038,12 @@ const T_WF = tallyOf({ done: 1, running: 1 })
 const T_A3 = tallyOf({ unknown: 1 })
 
 // 1.6 N6: a row is two lines — its name, then its figures under it.
+/**
+ * 1.6 P10a (L3): the disclosure of the 7-day block at the end of the running block's first line,
+ * closed — the heading's, or the line's that says nothing runs. Pinned into every test that pins
+ * that line (they pinned it without one: the line carries it now).
+ */
+const WEEK_TOGGLE = '<button class="ag-wkbtn" data-act="agentsWeek" aria-expanded="false">Last 7 days</button>'
 /** The separator between two parts of a name: a part of its own, which never gives way. */
 const DOT = '<span class="ag-dot"> · </span>'
 /**
@@ -3701,9 +3707,13 @@ test('with both of a running node\'s rows on the page the details open under the
     assert.equal(treePart(h).split('aria-selected="true"').length - 1, 1, h)
   }
   // A place the page does not know is the tree's; a running row that is gone hands the details to
-  // the tree row, and a tree row that is hidden to the running row.
-  const odd = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: openUi({ agentSelected: AK.a1, agentSelectedIn: 'week' }) })
-  assert.deepEqual(pressed(odd), [AK.a1 + '@tree'])
+  // the tree row, and a tree row that is hidden to the running row. 1.6 P10a (L3, pinned and
+  // changed: 'week' was the unknown place here): the 7-day block's row is a place now — while the
+  // block is closed it has no row, and the tree's takes the details.
+  for (const place of ['rocket', 'week']) {
+    const odd = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: openUi({ agentSelected: AK.a1, agentSelectedIn: place }) })
+    assert.deepEqual(pressed(odd), [AK.a1 + '@tree'], place)
+  }
   const ended = agentsHtml(a, {
     agents: agentTree({ runningNow: [], selected: detailsOf() }), ui: openUi({ agentSelected: AK.a1, agentSelectedIn: 'now' }),
   })
@@ -4873,7 +4883,9 @@ test('the agent tree speaks German on a German page', () => {
     // 1.6 P7b: a session's span, the last part of its figures' line.
     'span from the first to the last line',
     // 1.6 P9 (L2): the hidden label of the line under a details panel's state.
-    'Summary']
+    'Summary',
+    // 1.6 P10a (L3): the 7-day block's disclosure at the end of the running block's first line.
+    'Last 7 days']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -4949,7 +4961,9 @@ test('the agent tree speaks German on a German page', () => {
   // words, its tally the view model's (German here) — where 1.5 named the toggle („… ausklappen“).
   assert.ok(closed.indexOf(' aria-expanded="false" aria-selected="false" aria-label="Session Tue 10:55 · 9d0eb37a · repo, '
     + 'Sitzung aktiv, abgeleitet, 4 gestartet, 3 fertig, etwa 1 laufend"') >= 0, closed)
-  assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
+  // 1.6 P10a (L3): with the 7-day block's disclosure at the end of the line, in German too.
+  assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<div class="ag-now"><p class="meta">Kein Agent läuft gerade.</p>'
+    + '<button class="ag-wkbtn" data-act="agentsWeek" aria-expanded="false">Letzte 7 Tage</button></div>') === 0)
   // 1.6 D10: the line about the lower bound is gone in German too.
   assert.equal(h.indexOf('Untergrenzen.'), -1, h)
   assert.equal(section({ agents: agentTree({ roots: [] }) }),
@@ -5127,7 +5141,7 @@ test('the running list the view model builds reaches the page first, the tree cl
   // First in the section, before the tree: the heading with the count — the running agents, as
   // the view model counts them (1.6 §2.3) —, one row per item, in order.
   assert.equal(vm.agents.running, 3)
-  assert.ok(h.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (3)</div><ul>'), h)
+  assert.ok(h.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (3)</div>' + WEEK_TOGGLE + '<ul>'), h)
   assert.ok(h.indexOf('<div class="ag-now">') < h.indexOf('<div class="agtree"'))
   const rows = [...h.slice(0, h.indexOf('<div class="agtree"')).matchAll(/data-key="([^"]*)" data-list="now"/g)].map((m) => m[1])
   assert.deepEqual(rows, items.map((r) => r.key))
@@ -5219,7 +5233,7 @@ test('the running list comes first: how many run, then a row each with its clock
   ]
   const h = agentsHtml(a, { agents: agentTree({ runningNow: items, selected: detailsOf() }), ui: agentUi({ agentSelected: AK.a1 }) })
   const now = h.slice(0, h.indexOf('<div class="agtree"'))
-  assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (3)</div><ul>'
+  assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (3)</div>' + WEEK_TOGGLE + '<ul>'
     // Waiting on the agent below it: the clause says so, after where it sits.
     + nowRow({ key: 'a:w1', names: ['general-purpose', 'opus-5'], id: 'w1w1', clock: { ts: AG_NOW - 600_000, text: '10 min 00 s' },
       usage: '4.1K', where: ['Session 9d0eb37a', 'waits for a child agent'] })
@@ -5262,7 +5276,7 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
   })
   const h = agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.wf] }) })
   const now = h.slice(0, h.indexOf('<div class="agtree"'))
-  assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (11)</div><ul>'
+  assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (11)</div>' + WEEK_TOGGLE + '<ul>'
     + nowRow({ key: AK.a1, names: ['Explore', 'opus-5'], id: 'a94f', title: 'Explore · claude-opus-5 · a94f',
       clock: { ts: AG_NOW - 42_000, text: '42 s' },
       usage: '12.3K', where: ['Session 9d0eb37a', 'Workflow run cfe7718d', 'repo'] })
@@ -5309,12 +5323,12 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
 test('the running list counts what it left out, and an item with nothing in it is dashes, never a zero', () => {
   const a = agentCtx()
   const more = agentsHtml(a, { agents: agentTree({ runningMore: 4 }) })
-  assert.ok(more.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (5)</div><ul>'), more)
+  assert.ok(more.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (5)</div>' + WEEK_TOGGLE + '<ul>'), more)
   assert.ok(more.indexOf('</li></ul><p class="meta">and 4 more</p></div><div class="agtree"') >= 0, more)
   // Only left-out ones: the heading and the count, no empty list.
   const only = agentsHtml(a, { agents: agentTree({ runningNow: [], runningMore: 2 }) })
   assert.ok(only.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (2)</div>'
-    + '<p class="meta">and 2 more</p></div>'), only)
+    + WEEK_TOGGLE + '<p class="meta">and 2 more</p></div>'), only)
   assert.equal(only.indexOf('<ul></ul>'), -1)
   // A count that is none is no line.
   for (const runningMore of [0, -1, 0.4, NaN, Infinity, null, undefined, 'three', '4', true]) {
@@ -5325,12 +5339,12 @@ test('the running list counts what it left out, and an item with nothing in it i
   // An item without a label, a usage, a start or a context: dashes, no clock, no empty line —
   // and what is not an item at all is skipped.
   const bare = agentsHtml(a, { agents: agentTree({ runningNow: [{ key: AK.a1 }, null, 7, 'x'] }) })
-  assert.ok(bare.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div><ul>'
+  assert.ok(bare.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div>' + WEEK_TOGGLE + '<ul>'
     + nowRow({ key: AK.a1, names: ['–'], title: '', clock: null, usage: '–', where: [] }) + '</ul></div>'), bare)
   assert.equal(/undefined|NaN|null|\[object Object\]|>0</.test(bare.slice(0, bare.indexOf('<div class="agtree"'))), false, bare)
   // A kind this build does not know reaches no class: it is drawn as an agent.
   const rocket = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ kind: 'rocket' })] }) })
-  assert.ok(rocket.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div><ul>'
+  assert.ok(rocket.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div>' + WEEK_TOGGLE + '<ul>'
     + '<li class="ag-k-agent">'), rocket)
   assert.equal(rocket.indexOf('rocket'), -1, rocket)
 })
@@ -5338,7 +5352,9 @@ test('the running list counts what it left out, and an item with nothing in it i
 test('with nothing running the list is one quiet line and no heading; a payload without the list says nothing', () => {
   const a = agentCtx()
   const quiet = agentsHtml(a, { agents: agentTree({ runningNow: [], runningMore: 0 }) })
-  assert.ok(quiet.startsWith('<p class="ag-now meta">No agent is running.</p><div class="agtree"'), quiet)
+  // 1.6 P10a (L3): the one line carries the 7-day block's disclosure at its end (pinned and changed:
+  // it was a bare <p class="ag-now meta">).
+  assert.ok(quiet.startsWith('<div class="ag-now"><p class="meta">No agent is running.</p>' + WEEK_TOGGLE + '</div><div class="agtree"'), quiet)
   assert.equal(quiet.indexOf('Running now'), -1, quiet)
   assert.equal(quiet.indexOf('data-list'), -1, quiet)
   // An older build's payload carries no list: no line claims that nothing runs.
@@ -5350,6 +5366,251 @@ test('with nothing running the list is one quiet line and no heading; a payload 
   // With no session at all, the section's one note says it; the list adds nothing to it.
   assert.equal(agentsHtml(a, { agents: agentTree({ roots: [], runningNow: [] }) }),
     '<p class="empty">No Claude Code session in the last 7 days.</p>')
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 L3: where the agent tokens of the last 7 days went
+// ---------------------------------------------------------------------------
+
+/**
+ * An AgentWeek of src/agentTree.ts as the tree builder writes it, with costs: two rows — one of
+ * them without a price —, a line for the rest, the two largest agents (the tree's running agent
+ * and its done Plan agent), and a total that holds only some of its agents' costs.
+ */
+function weekOf(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    rows: [
+      { type: 'workflow-subagent', model: 'claude-opus-5', label: 'workflow-subagent · opus-5', agents: 12, usage: '1.2M',
+        share: '62 %', median: '80K', cost: '~$12.40' },
+      { type: 'Explore', model: 'claude-sonnet-5', label: 'Explore · sonnet-5', agents: 3, usage: '410K', share: '21 %',
+        median: '120K', cost: '–' },
+    ],
+    other: '3 other combinations',
+    top: [
+      { key: AK.a1, label: 'Explore · opus-5 · a94f', fullLabel: 'Explore · claude-opus-5 · a94f',
+        context: 'Session 9d0eb37a · Workflow run cfe7718d · repo', state: 'running', derived: true, usage: '12.3K', share: '1 %', cost: '~$0.40' },
+      { key: AK.a2, label: 'Plan · opus-5 · b1c2', fullLabel: 'Plan · claude-opus-5 · b1c2',
+        context: 'Session 9d0eb37a · Workflow run cfe7718d · repo', state: 'done', derived: false, usage: '9.1K', share: '<1 %', cost: '–' },
+    ],
+    total: '1.9M', totalCost: '~$12.80 ⚠', agents: 18, ...over,
+  }
+}
+
+/** The 7-day block of a rendered section: from its frame to the tree's. */
+function weekPart(h: string): string {
+  const at = h.indexOf('<div class="ag-week"')
+  assert.ok(at >= 0, 'no 7-day block in ' + h)
+  return h.slice(at, h.indexOf('<div class="agtree"'))
+}
+
+/** A row of the block's largest agents, as the page writes it — a running list's row, from its own list. */
+function weekRow(o: { key: string; state: string; derived: boolean; title: string; names: string[]; id: string; figs: string[];
+  where: string[]; pressed?: boolean; panel?: string }): string {
+  const spoken = (o.state === 'running' ? 'running' : o.state) + (o.derived ? ', derived' : ', recorded')
+  const title = (o.derived ? '~' : '') + (o.state === 'running' ? 'running' : o.state) + (o.derived ? ' · derived' : ' · recorded')
+  return '<li class="ag-k-agent"><button class="ag-row" data-act="agentSelect" data-key="' + o.key
+    + '" data-list="week" aria-pressed="' + (o.pressed === true) + '">'
+    + '<span class="ag-st ag-' + o.state + '" role="img" aria-label="' + spoken + '" title="' + title + '"></span>'
+    + '<span class="ag-text">' + albl(o.title, o.names[0], o.names[1], o.id) + figs(...o.figs.map(fig))
+    + '<span class="meta ag-ctx">' + o.where.map((w) => '<span>' + w + '</span>').join(' · ') + '</span>'
+    + '</span></button>' + (o.panel ?? '') + '</li>'
+}
+
+test('the running block\'s first line carries the 7-day block\'s disclosure; open, the block stands between the list and the tree (1.6 L3)', () => {
+  const a = agentCtx()
+  // Closed, as the section starts: the disclosure at the end of the heading and of the quiet line,
+  // no block, even with one in a payload of a view state that has it closed.
+  for (const agents of [agentTree(), agentTree({ runningNow: [] }), agentTree({ week: weekOf() })]) {
+    const h = agentsHtml(a, { agents })
+    assert.ok(h.indexOf(WEEK_TOGGLE) > 0 && h.indexOf(WEEK_TOGGLE) < h.indexOf('<div class="agtree"'), h)
+    assert.equal(h.indexOf('ag-week'), -1, h)
+  }
+  // Open: the disclosure says so and names the block it opens; the block follows the running
+  // list, before the tree.
+  const h = agentsHtml(a, { agents: agentTree({ week: weekOf() }), ui: agentUi({ agentsWeekOpen: true }) })
+  const toggle = '<button class="ag-wkbtn" data-act="agentsWeek" aria-expanded="true" aria-controls="ag-week">Last 7 days</button>'
+  assert.ok(h.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div>' + toggle + '<ul>'), h)
+  const at = h.indexOf('<div class="ag-week"')
+  assert.ok(h.indexOf('</ul></div>') < at && at < h.indexOf('<div class="agtree"'), h)
+  const w = weekPart(h)
+  const heads = ['Type · model', 'Agents', 'Usage', 'Share', 'Median per agent', '~Cost']
+  const td = (i: number, v: string): string => '<td data-h="' + heads[i] + '">' + v + '</td>'
+  const lb = '<span class="ag-lb" role="img" aria-label="lower bound" title="not every agent has a price: the sum is a lower bound">⚠</span>'
+  assert.equal(w, '<div class="ag-week" id="ag-week" role="region" aria-labelledby="ag-week-h">'
+    + '<div class="name" id="ag-week-h" role="heading" aria-level="3">Last 7 days · where the agent tokens went</div>'
+    + '<div class="scroll"><table class="ag-wkt"><thead><tr>' + heads.map((x) => '<th>' + x + '</th>').join('') + '</tr></thead><tbody>'
+    // A row: its type and model as a row names them, the whole model id its title; its figures the view model's.
+    // Each part of the name whole, so a narrow column breaks it between them, never inside the model's id.
+    + '<tr>' + td(0, '<span title="workflow-subagent · claude-opus-5">' + fig('workflow-subagent') + ' · ' + fig('opus-5') + '</span>')
+    + td(1, '12') + td(2, '1.2M')
+    + td(3, '62 %') + td(4, '80K') + td(5, '~$12.40') + '</tr>'
+    + '<tr>' + td(0, '<span title="Explore · claude-sonnet-5">' + fig('Explore') + ' · ' + fig('sonnet-5') + '</span>') + td(1, '3') + td(2, '410K')
+    + td(3, '21 %') + td(4, '120K') + td(5, '–') + '</tr>'
+    // Every agent together: no share of the whole and no median, their cells empty; a cost that
+    // holds only some of the agents is a lower bound, marked as the page marks one.
+    + '<tr class="ag-wkall"><td>All agents</td>' + td(1, '18') + td(2, '1.9M') + '<td></td><td></td>' + td(5, '~$12.80 ' + lb) + '</tr>'
+    + '</tbody></table></div>'
+    + '<p class="meta">3 other combinations</p>'
+    + '<div class="name ag-wktop" role="heading" aria-level="4">The 2 largest agents</div><ul>'
+    + weekRow({ key: AK.a1, state: 'running', derived: true, title: 'Explore · claude-opus-5 · a94f', names: ['Explore', 'opus-5'], id: 'a94f',
+      figs: ['12.3K', '1 %', '~$0.40'], where: ['Session 9d0eb37a', 'Workflow run cfe7718d', 'repo'] })
+    + weekRow({ key: AK.a2, state: 'done', derived: false, title: 'Plan · claude-opus-5 · b1c2', names: ['Plan', 'opus-5'], id: 'b1c2',
+      figs: ['9.1K', '<1 %', '–'].map((x) => x.replace('<', '&lt;')), where: ['Session 9d0eb37a', 'Workflow run cfe7718d', 'repo'] })
+    + '</ul></div>', w)
+  // One agent is "the largest agent"; none leaves the heading out.
+  const one = weekPart(agentsHtml(a, { agents: agentTree({ week: weekOf({ top: [(weekOf().top as unknown[])[0]] }) }), ui: agentUi({ agentsWeekOpen: true }) }))
+  assert.ok(one.indexOf('>The largest agent</div>') >= 0, one)
+  const none = weekPart(agentsHtml(a, { agents: agentTree({ week: weekOf({ top: [], other: null }) }), ui: agentUi({ agentsWeekOpen: true }) }))
+  assert.equal(none.indexOf('largest'), -1, none)
+  assert.equal(none.indexOf('<p class="meta">'), -1, none)
+  // No agent with a counted request: one line, no table.
+  const empty = weekPart(agentsHtml(a, { agents: agentTree({ week: weekOf({ rows: [], top: [], other: null, total: '–', agents: 0 }) }),
+    ui: agentUi({ agentsWeekOpen: true }) }))
+  assert.ok(empty.endsWith('<p class="empty">No agent of the last 7 days has a counted request.</p></div>'), empty)
+  assert.equal(empty.indexOf('<table'), -1, empty)
+  // Open, but a payload without the block (an older build's): the disclosure says open, names no
+  // block, and none is drawn.
+  const old = agentsHtml(a, { agents: agentTree(), ui: agentUi({ agentsWeekOpen: true }) })
+  assert.ok(old.indexOf('<button class="ag-wkbtn" data-act="agentsWeek" aria-expanded="true">Last 7 days</button>') >= 0, old)
+  assert.equal(old.indexOf('ag-week"'), -1, old)
+  // What the payload carries is escaped, and an item that is none is skipped.
+  const poison = weekPart(agentsHtml(a, { agents: agentTree({ week: weekOf({
+    rows: [{ type: '<b>', model: '"x"', label: '<img>', agents: 'many', usage: null, share: 7, median: '', cost: '<i>' }, null, 'x'],
+    top: [{ key: 'a:<k>', label: '<s>', state: 'rocket', context: '<c>', usage: '<u>', share: '', cost: null }, null, { key: '' }],
+    other: '<o>', total: '<t>', totalCost: '<tc> ⚠', agents: -1,
+  }) }), ui: agentUi({ agentsWeekOpen: true }) }))
+  assert.equal(/<(b|img|i|s|c|u|o|t|tc|k)>/.test(poison), false, poison)
+  assert.equal(/undefined|NaN|null|\[object Object\]/.test(poison), false, poison)
+  assert.ok(poison.indexOf('title="&lt;b&gt; · &quot;x&quot;"') >= 0, poison)
+  assert.equal(poison.split('data-list="week"').length - 1, 1, poison)
+  assert.ok(poison.indexOf('class="ag-st ag-unknown"') >= 0, poison)
+})
+
+test('without costs the 7-day block names no amount: no cost column, no dollar, no cost on its agents (1.6 L3)', () => {
+  const a = agentCtx()
+  const rows = (weekOf().rows as Array<Record<string, unknown>>).map((r) => ({ ...r, cost: null }))
+  const top = (weekOf().top as Array<Record<string, unknown>>).map((x) => ({ ...x, cost: null }))
+  const w = weekPart(agentsHtml(a, { agents: agentTree({ week: weekOf({ rows, top, totalCost: null }) }),
+    ui: agentUi({ agentsWeekOpen: true }), showCost: false }))
+  assert.equal(w.indexOf('$'), -1, w)
+  assert.equal(w.indexOf('Cost'), -1, w)
+  assert.equal(w.split('<th>').length - 1, 5, w)
+  assert.equal((w.match(/<tr[ >]/g) || []).length, 4, w)
+  for (const tr of w.split('<tr').slice(2)) assert.equal((tr.match(/<td/g) || []).length, 5, tr)
+  // The largest agents' figures: the usage and the share alone.
+  assert.ok(w.indexOf(figs(fig('12.3K'), fig('1 %'))) >= 0, w)
+})
+
+test('the details open under the 7-day block\'s row the reader clicked; closed, under the node\'s other row (1.6 L3, N2)', () => {
+  const a = agentCtx()
+  const pressed = (h: string): string[] => [...h.matchAll(/data-key="([^"]*)"(?:( data-list="(?:now|week)") aria-pressed| data-pressed)="true"/g)]
+    .map((m) => m[1] + (m[2] ? '@' + m[2].slice(12, -1) : '@tree'))
+  // The running agent is in all three places — the tree (every node open), the running list, the block.
+  const page = (selectedIn: string, weekOpen = true): string => agentsHtml(a, {
+    agents: agentTree({ selected: detailsOf(), week: weekOf() }),
+    ui: openUi({ agentSelected: AK.a1, agentSelectedIn: selectedIn, agentsWeekOpen: weekOpen }),
+  })
+  const week = page('week')
+  assert.deepEqual(pressed(week), [AK.a1 + '@week'])
+  assert.equal(week.split('<div class="ag-details"').length - 1, 1, week)
+  // Inside the row's item, under its button, in the block.
+  const w = weekPart(week)
+  assert.ok(w.indexOf('</button>' + panelOf(week) + '</li>') >= 0, w)
+  assert.deepEqual(pressed(page('now')), [AK.a1 + '@now'])
+  assert.deepEqual(pressed(page('tree')), [AK.a1 + '@tree'])
+  // The block closed: its row is gone, and the tree's row takes them — the running list's where
+  // the tree has none.
+  assert.deepEqual(pressed(page('week', false)), [AK.a1 + '@tree'])
+  const noTree = agentsHtml(a, { agents: agentTree({ selected: detailsOf(), week: weekOf() }),
+    ui: agentUi({ agentSelected: AK.a1, agentSelectedIn: 'week', agentsWeekOpen: false }) })
+  assert.deepEqual(pressed(noTree), [AK.a1 + '@now'])
+  // A node the block names alone — its tree row inside a closed session, not running — opens
+  // under the block's row whatever place the view state names.
+  const only = (selectedIn: string): string => agentsHtml(a, {
+    agents: agentTree({ runningNow: [], selected: detailsOf({ key: AK.a2, title: 'Plan · claude-opus-5 · b1c2' }), week: weekOf() }),
+    ui: agentUi({ agentSelected: AK.a2, agentSelectedIn: selectedIn, agentsWeekOpen: true }),
+  })
+  for (const place of ['tree', 'now', 'week']) assert.deepEqual(pressed(only(place)), [AK.a2 + '@week'], place)
+})
+
+test('the 7-day block\'s disclosure and its rows post what the host parses; a second click on the row closes it (1.6 L3)', () => {
+  const a = agentCtx()
+  a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['agents'],
+    agents: agentTree({ selected: detailsOf(), week: weekOf() }), ui: openUi({ agentSelected: AK.a1, agentSelectedIn: 'week', agentsWeekOpen: true }) }) } })
+  a.posted.length = 0
+  const button = (act: string, key?: string, list?: string): Record<string, unknown> =>
+    ({ tagName: 'BUTTON', dataset: { act, ...(key === undefined ? {} : { key }), ...(list === undefined ? {} : { list }) } })
+  const event = (el: Record<string, unknown>): Record<string, unknown> =>
+    ({ target: { closest: () => el }, stopPropagation: () => undefined, preventDefault: () => undefined })
+  a.fire('document:click', event(button('agentsWeek')))
+  // The row the details stand under closes them; another row of the block opens its node under it.
+  a.fire('document:click', event(button('agentSelect', AK.a1, 'week')))
+  a.fire('document:click', event(button('agentSelect', AK.a2, 'week')))
+  // The same node's row of the running list moves them there.
+  a.fire('document:click', event(button('agentSelect', AK.a1, 'now')))
+  const expected = [
+    { type: 'agentsWeek' },
+    { type: 'agentSelect', key: null },
+    { type: 'agentSelect', key: AK.a2, from: 'week' },
+    { type: 'agentSelect', key: AK.a1, from: 'now' },
+  ]
+  assert.deepEqual(a.posted, expected)
+  for (const m of expected) assert.deepEqual(parseWebviewMessage(m), m)
+  // Enter and Space on the button are the browser's own click: the keydown fallback leaves them.
+  a.fire('document:keydown', { key: 'Enter', target: { closest: () => button('agentsWeek') }, preventDefault: () => undefined })
+  assert.equal(a.posted.length, expected.length)
+})
+
+test('the 7-day block speaks German on a German page (1.6 L3)', () => {
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const words = ['Last 7 days', 'Last 7 days · where the agent tokens went', 'Type · model', 'Agents', 'Usage', 'Share',
+    'Median per agent', '~Cost', 'All agents', 'The {0} largest agents', 'The largest agent',
+    'No agent of the last 7 days has a counted request.', 'not every agent has a price: the sum is a lower bound', 'lower bound']
+  const de: Record<string, string> = {}
+  for (const w of words) {
+    assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
+    assert.equal(typeof bundle[w], 'string', 'no German for ' + w)
+    de[w] = bundle[w]
+  }
+  assert.deepEqual([de['Last 7 days'], de['Last 7 days · where the agent tokens went'], de['Type · model'], de['Median per agent'],
+    de['~Cost'], de['All agents'], de['The {0} largest agents'], de['The largest agent']],
+  ['Letzte 7 Tage', 'Letzte 7 Tage · wohin die Agent-Token gingen', 'Typ · Modell', 'Median je Agent', '~Kosten', 'Alle Agenten',
+    'Die {0} größten Agenten', 'Der größte Agent'])
+  const c = makeContext()
+  nodeVm.runInContext(between(germanPage(de), /<script nonce="[A-Za-z0-9]+">/, '</script>'), c)
+  const section = (over: Record<string, unknown>): string => {
+    ;(c as Record<string, unknown>).fixture = model({ agents: agentTree(), ui: agentUi(), ...over })
+    return String(nodeVm.runInContext('vm = fixture; sAgents()', c))
+  }
+  const h = section({ agents: agentTree({ week: weekOf() }), ui: agentUi({ agentsWeekOpen: true }) })
+  for (const phrase of ['aria-expanded="true" aria-controls="ag-week">Letzte 7 Tage</button>',
+    'aria-level="3">Letzte 7 Tage · wohin die Agent-Token gingen</div>',
+    '<th>Typ · Modell</th><th>Agenten</th><th>Verbrauch</th><th>Anteil</th><th>Median je Agent</th><th>~Kosten</th>',
+    '<td data-h="Median je Agent">80K</td>', '<td>Alle Agenten</td>', 'aria-level="4">Die 2 größten Agenten</div>',
+    'aria-label="Untergrenze" title="nicht jeder Agent hat einen Preis: Die Summe ist eine Untergrenze"']) {
+    assert.ok(h.indexOf(phrase) >= 0, phrase + '\n' + h)
+  }
+  const empty = section({ agents: agentTree({ week: weekOf({ rows: [], top: [] }) }), ui: agentUi({ agentsWeekOpen: true }) })
+  assert.ok(empty.indexOf('<p class="empty">Kein Agent der letzten 7 Tage hat eine gezählte Anfrage.</p>') >= 0, empty)
+  assert.ok(section({ agents: agentTree({ week: weekOf({ top: [(weekOf().top as unknown[])[0]] }) }), ui: agentUi({ agentsWeekOpen: true }) })
+    .indexOf('>Der größte Agent</div>') >= 0)
+})
+
+test('the 7-day block\'s rows are rows of the running list\'s kind: the stylesheet stretches them and puts the details under them (1.6 L3)', () => {
+  assert.match(STYLE, /\.ag-now \{ display: grid; grid-template-columns: minmax\(0, 1fr\) auto; column-gap: 8px; align-items: center; \}/)
+  assert.match(STYLE, /\.ag-now > :not\(:first-child\):not\(\.ag-wkbtn\) \{ grid-column: 1 \/ -1; \}/)
+  // A target of 24 px (WCAG 2.5.8); the twisty drawn, silent to a screen reader.
+  assert.match(STYLE, /\.ag-wkbtn \{ justify-self: end; min-height: 24px; white-space: nowrap; \}/)
+  assert.match(STYLE, /\.ag-wkbtn::after \{ content: "\\00a0▸" \/ ""; font-size: 9px; \}/)
+  assert.match(STYLE, /\.ag-wkbtn\[aria-expanded="true"\]::after \{ content: "\\00a0▾" \/ ""; \}/)
+  assert.match(STYLE, /\.ag-week li \{ display: flex; flex-wrap: wrap; \}/)
+  assert.match(STYLE, /\.ag-week li > \.ag-details \{ flex: 1 1 100%; min-width: 0; \}/)
+  // The table's own words break only at a space, the page's "anywhere" left out; stacked, a row is
+  // its name, then its figures, as many to a line as fit, the empty cells of the row of all agents not drawn.
+  assert.match(STYLE, /\.ag-wkt \{ overflow-wrap: normal; \}/)
+  assert.match(STYLE, /\.ag-wkt th, \.ag-wkt td:first-child \{ white-space: normal; \}/)
+  assert.match(STYLE, /\.ag-wkt tr\.ag-wkall \{ border-top: 1px solid var\(--line\); \}/)
+  assert.match(STYLE, /@media \(max-width: 320px\) \{\n  \.ag-wkt td:first-child::before \{ content: none; \}\n  \.ag-wkt td:not\(:first-child\) \{ display: inline-block; margin-right: 10px; padding: 0; white-space: nowrap; \}\n  \.ag-wkt td:empty \{ display: none; \}\n\}/)
 })
 
 interface Rig {
@@ -5522,6 +5783,16 @@ test('an opened node or a selection is answered at once, and the interval counts
   assert.ok(r.sections().includes('agents'), r.sections().join())
   r.posted.length = 0
   r.advance(AG_NOW + 360)
+  r.p.update(flushVm({ agents: flushTree(1), ui: agentUi({ agentsExpanded: opened }) }))
+  assert.ok(r.sections().includes('agents'), r.sections().join())
+  // 1.6 L3: the 7-day block's disclosure is the reader's too, and is answered at once.
+  r.posted.length = 0
+  r.advance(AG_NOW + 370)
+  r.p.update(flushVm({ agents: { ...flushTree(1), week: { rows: [] } }, ui: agentUi({ agentsExpanded: opened, agentsWeekOpen: true }) }))
+  assert.ok(r.sections().includes('agents'), r.sections().join())
+  assert.equal(r.posted.find((m) => m.type === 'section' && m.key === 'agents').payload.ui.agentsWeekOpen, true)
+  r.posted.length = 0
+  r.advance(AG_NOW + 380)
   r.p.update(flushVm({ agents: flushTree(1), ui: agentUi({ agentsExpanded: opened }) }))
   assert.ok(r.sections().includes('agents'), r.sections().join())
   // A selection, which changes the details the tree carries as well, goes at once too.

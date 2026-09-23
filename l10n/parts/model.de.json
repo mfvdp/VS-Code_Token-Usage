@@ -1,5 +1,6 @@
 {
   "+{0} more": "+{0} weitere",
+  "1 other combination": "1 weitere Kombination",
   "1 rolled-up month bucket in this range has no day left and is not in these records": "1 zusammengefasster Monats-Bucket in diesem Zeitraum hat keinen Tag mehr und ist in diesen Rekorden nicht enthalten",
   "5-hour limit": "5-Stunden-Limit",
   "API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}.": "Die API-Kosten sind hypothetisch: So viel hätte dieser Verbrauch über die Anbieter-API gekostet. Im Abonnement zahlen Sie sie nicht. Preise mit Stand {0}.",
@@ -325,6 +326,7 @@
   "{0} of {1}": "{0} von {1}",
   "{0} of {1} by usage": "{0} von {1} nach Verbrauch",
   "{0} of {1} of this step": "{0} von {1} dieses Schritts",
+  "{0} other combinations": "{0} weitere Kombinationen",
   "{0} retried": "{0} wiederholt",
   "{0} rolled-up bucket in this range have no hour left and are not in the profile": "{0} zusammengefasster Bucket in diesem Zeitraum hat keine Stunde mehr und ist nicht im Profil enthalten",
   "{0} rolled-up buckets in this range have no hour left and are not in the profile": "{0} zusammengefasste Buckets in diesem Zeitraum haben keine Stunde mehr und sind nicht im Profil enthalten",

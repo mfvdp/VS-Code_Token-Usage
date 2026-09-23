@@ -11,12 +11,13 @@ The `agents` section of the [dashboard](dashboard.md) shows the Claude Code sess
 last **7 days** as a tree: each session, the workflow runs inside it, the agents it spawned and
 the agents those spawned in turn — with the state of every node, what it used and how long it
 took. Above the tree, the first thing in the section, a list names the agents that are running
-right now, so you do not have to look for them in the tree; the tree itself starts closed, with
-only the sessions showing. It is on by default, directly after `quota` in
+right now, so you do not have to look for them in the tree; its first line opens, on request, a
+block of where the agent tokens of the last seven days went (see [Last 7 days](#last-7-days));
+the tree itself starts closed, with only the sessions showing. It is on by default, directly after `quota` in
 `tokenPace.dashboard.sections`; a list you have set yourself is kept as it is, so there the
 section appears once you add `agents` to it. The range, provider and model chips do not apply:
 the section is always the last seven days, so the filter bar stays below it. *Show Usage as
-Text* prints the running list and then the whole tree as indented lists — every node open, at
+Text* prints the running list, the 7-day block while you have it open, and then the whole tree as indented lists — every node open, at
 most 50 children each (see [Opening and selection](#opening-and-selection)) — with the open
 node's details as a table; the Quick Pick does not carry them.
 
@@ -62,16 +63,72 @@ clicked, here the running list's — and the same click again closes them. It op
 tree: the panel shows whether the node's tree row is on screen or inside a closed branch — or in
 a session the tree does not list, for as long as the agent runs and the list names it (see
 [Opening and selection](#opening-and-selection)). The rows are buttons ahead of the tree, so the
-keyboard reaches them first — each a stop of the `Tab` key, then the tree, which is one (see
-[The keyboard](#the-keyboard)).
+keyboard reaches them first — the `Last 7 days` button of the first line, then each row a stop of
+the `Tab` key, then the open [7-day block](#last-7-days)'s largest agents, then the tree, which is
+one (see [The keyboard](#the-keyboard)).
 
-With nothing running, the list is one line — `No agent is running.` — with no heading. The
+With nothing running, the list is one line — `No agent is running.` — with no heading, and the
+`Last 7 days` button at its end. The
 markdown report prints the list under `### Running now`, one line per agent — `[~Running]`
 first, as the tree's lines mark an inferred state, then its name with the model's whole id, where
 it sits and its usage,
 `⚠` behind a usage that is a lower bound, `(waiting)` behind a waiting one and
 `(~10 of them running)` behind a collector — and heads the tree after it with
 `### Sessions and agents`.
+
+## Last 7 days
+
+The running list's first line — its heading `Running now (3)`, or the line `No agent is running.` —
+carries a button at its end, `Last 7 days` ▸. It opens a block under the running list, before the
+tree: **Last 7 days · where the agent tokens went**. The block is closed by default; whether it is
+open is kept with the rest of the view state (see [Opening and selection](#opening-and-selection)),
+and the button says to a screen reader whether it is open. Only while it is open is it built at all.
+
+**What it counts.** Every agent record of the seven days the tree covers that counted at least one
+request — of every session, the ones the tree does not list included — once, at its **whole usage**,
+the figure its tree row shows (fresh input + cache write + output). An agent without a counted
+request is not in it, nor a launch whose transcript was never read. A record is a whole agent: one
+that started eight days ago and wrote on into the seven is counted whole, where the hour buckets of
+the tables split the same tokens by the hour of each reply — so the block's figures and the tables'
+subagent figures are two different cuts of the same tokens, and are not added to each other.
+
+**The table.** One row per **type and model**, as the agents' names say them — `Explore ·
+opus-5`, the model's whole id in the row's title and in the markdown report; a record that names no
+type is an `Agent`. The largest usage first, at most **10** rows; the rest are counted in one line
+under the table (`3 other combinations`). The columns: *Type · model*, *Agents* (how many), *Usage*
+(theirs together), *Share* (of the whole block — every agent of the seven days, the rows the table
+leaves out included; `<1 %` for a share that rounds to none), *Median per agent* (the usage of the
+agent in the middle, or halfway between the two in the middle), and — only while
+`tokenPace.showCost` is on — *~Cost*: what their tokens would have cost through the API, marked `~`
+as every cost of the page. An agent is priced at the rates of its model on the day of its last
+counted reply, as the tables price the same tokens, at the model's standard rate (a record keeps no
+speed and no web search). An agent without a price is not in a cost: its model has none on file, or
+its replies were written with more than one model — a fallback in the middle of a run — whose
+tokens its record cannot split between them. A row none of whose agents has a price shows `–`; a
+sum that holds only some of its agents is a lower bound and carries `⚠`, titled *not every agent
+has a price: the sum is a lower bound*. A last row, *All agents*, gives how many agents the block
+holds, their usage and their cost together; a share of the whole and a median of one agent's are
+no figures of the whole, and its two cells stay empty. With costs off the block names no amount
+anywhere. In a sidebar of 320 px or less the table stacks, as every table of the page does, and
+tighter: a row's type and model on a line of their own, then its figures, each with its column's
+name, as many to a line as fit; a name too long for its column breaks between the type and the
+model, never inside either.
+
+**The largest agents.** Under the table, **The 5 largest agents** by usage — rows like the running
+list's: the state glyph and the agent's name, then its usage, its share of the block and, with
+costs on, its cost, and a line of where it sits (`Session 9d0eb37a · Workflow run cfe7718d`). A
+click on one, or `Enter` or `Space` on it, opens the agent's details under that row, as a click on
+its tree row or its running row opens them under that one (see [Details](#details)) — wherever its
+tree row is: inside a closed branch, or in a session the tree does not list. The rows are buttons
+between the running list and the tree, each a stop of the `Tab` key.
+
+With no agent of the seven days that counted a request, the block says so in one line: `No agent
+of the last 7 days has a counted request.` The markdown report prints the block while it is open,
+after the running list — `### Last 7 days · where the agent tokens went`, the table, the line for
+the rest, and `#### The 5 largest agents` with one line each: `[Done] Explore · claude-opus-5 · 94f3 ·
+Session 9d0eb37a · 1.2M · 34 %`, a cost behind it while costs are on. The block's rows are part of
+the section's push: they count against its cap of nodes (see
+[The tree](#the-tree)).
 
 ## The tree
 
@@ -131,7 +188,9 @@ session closed is well under 1 KB. The fifty an opened node shows first are its 
 safety cap that only many opened nodes
 of fifty children each reach: it is filled with the path to the node whose details are open and
 the running agents first, then in the order the page draws the tree, and an opened node whose
-children no longer fit shows none of them and says how many it has (`377 not shown`).
+children no longer fit shows none of them and says how many it has (`377 not shown`). While the
+[7-day block](#last-7-days) is open, its rows — the table's and its largest agents' — are rows of
+the push too, and the tree has that many fewer places.
 
 **Each row is two lines.** The first is the state glyph and the name — the short id at its end in
 the figures' dim tone, and a session's project after it. The second, under the name, in the dim
@@ -218,7 +277,8 @@ everywhere else.
 ### The keyboard
 
 The tree is a tree to the keyboard too, as WAI-ARIA's tree pattern describes one. It is **one stop
-of the `Tab` key**: `Tab` from the running list's last row lands on one item of the tree — the one
+of the `Tab` key**: `Tab` from the last stop before it — the running list's last row, or the last
+of the open 7-day block's largest agents — lands on one item of the tree — the one
 you were last on, else the selected node while its row is shown, else the first session — and the
 next `Tab` leaves the tree; while that item's details are open, the next `Tab` first reaches their
 *Copy ID* button, and `Shift+Tab` goes back to the item. Inside the tree the keys move from item to
@@ -487,16 +547,19 @@ A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
 
 ## Details
 
-Clicking a row — of the tree or of the running list —, or `Enter` or `Space` on it (see
+Clicking a row — of the tree, of the running list or of the [7-day block](#last-7-days)'s largest
+agents —, or `Enter` or `Space` on it (see
 [The keyboard](#the-keyboard)), opens the node's details right under that row; the same click or
 key again closes them. In the tree the panel stands inside the node's entry, between its row and its
 children, across the tree's whole width however deep the node sits; under a row of the running
-list it is that row's second line. A running agent has a row in both places: the details open
-under the one you clicked, and a click on the other moves them there. Only the row they stand
+list or of the 7-day block it is that row's second line. A running agent has a row in both the tree
+and the running list, and one of the largest agents a row in the block as well: the details open
+under the one you clicked, and a click on another moves them there. Only the row they stand
 under is pressed. When the row they stand under leaves the page — the agent stops running and
-leaves the list, or you close a node above its tree row — they move to the node's other row if
-that one is on the page; if it is not, they are not shown, without a word, and come back with
-the row (see [Opening and selection](#opening-and-selection)). The panel is drawn once, never
+leaves the list, you close the 7-day block, or you close a node above its tree row — they move to
+the node's other row if one is on the page — its tree row first, then its running row, then its
+row in the block —; if none is, they are not shown, without a word, and come back with the row
+(see [Opening and selection](#opening-and-selection)). The panel is drawn once, never
 twice.
 `Escape` anywhere in the section closes the details and puts the keyboard focus back on the row
 they stood under — in the tree on its item —; while a hover card or a sparkline's tip is open, the first `Escape` closes that
@@ -686,19 +749,22 @@ rest of the dashboard's view state — range, sort, filters, folded sections —
 own storage, so they survive a push, a reload and a restart; selecting a node never opens
 anything by itself. Only node keys are kept, made of the session, run, agent or launch id: the
 opened nodes' keys and the selected one's — with which of its rows its details open under, the
-tree's or the running list's — never a label, a figure or anything from a
+tree's, the running list's or the 7-day block's — and whether the [7-day block](#last-7-days) is
+open, never a label, a figure or anything from a
 transcript, and at most 200 opened nodes: opening one more forgets the one opened longest ago,
 so a node can always be opened, and the key of a node that has left the tree does not keep its
 place for good. A key whose node has gone matches nothing. How many children an opened node shows
 is kept the same way: the "more" steps of at most 200 nodes, the one taken longest ago forgotten
 first, and closing a node forgets its steps — opened again, it shows its first fifty. The details
-open for a node whose row is on the page — in the tree, or in the running list. A selected node
+open for a node whose row is on the page — in the tree, in the running list, or among the open
+7-day block's largest agents. A selected node
 inside a closed branch has no row there: its details stay shut, without a word, until the branch
 is opened again, and the markdown report, which prints every node, shows them all the same. A
 selected node that is gone says so instead (`The selected node is no longer in the tree.`). That
 is an agent or a launch older than seven days, a session without agents that has been quiet for
-more than 24 hours, and any node of a session beyond the 20 listed that the running list does
-not name — the session itself, or one of its agents once it has stopped running. *Clear Stored
+more than 24 hours, and any node of a session beyond the 20 listed that neither the running list
+nor the open 7-day block names — the session itself, or one of its agents once it has stopped
+running and is not among the largest. *Clear Stored
 Data…* removes them with the rest of the dashboard view state.
 
 ## Limits

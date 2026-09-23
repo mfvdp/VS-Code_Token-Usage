@@ -650,6 +650,8 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     agentSelected: null,
     agentSelectedIn: 'tree',
     agentsMore: [],
+    // 1.6 L3: the 7-day block starts closed.
+    agentsWeekOpen: false,
   })
 
   const drilled = applyMessage(ui, { type: 'drill', day: '2026-09-01' })
@@ -739,9 +741,11 @@ test('an agent node toggle opens and closes it, and the selection sets and clear
   }
 })
 
-test('a selection says which row it came from — the tree\'s or the running list\'s — and the details open under that one', () => {
+// 1.6 P10a (L3): pinned the two places of P3b — the tree's row and the running list's; the 7-day
+// block's largest agents are a third, `week`, which the parser now passes and the reducer keeps.
+test('a selection says which row it came from — the tree\'s, the running list\'s or the 7-day block\'s — and the details open under that one', () => {
   // 1.6 N2: `from` of the message becomes `ui.agentSelectedIn`; without one it is the tree.
-  assert.deepEqual([...AGENT_SELECTED_IN], ['tree', 'now'])
+  assert.deepEqual([...AGENT_SELECTED_IN], ['tree', 'now', 'week'])
   const ui = defaultUiState(cfg)
   assert.equal(ui.agentSelectedIn, 'tree')
   const fromNow = applyMessage(ui, { type: 'agentSelect', key: 'a:a94f0001', from: 'now' })
@@ -764,15 +768,20 @@ test('a selection says which row it came from — the tree\'s or the running lis
   for (const m of [
     { type: 'agentSelect', key: 'a:a94f0001', from: 'tree' },
     { type: 'agentSelect', key: 'a:a94f0001', from: 'now' },
+    { type: 'agentSelect', key: 'a:a94f0001', from: 'week' },
     { type: 'agentSelect', key: 'a:a94f0001' },
     { type: 'agentSelect', key: null },
   ]) assert.deepEqual(parseWebviewMessage(m), m)
-  for (const from of ['week', 'Now', '', null, 3, ['now'], { now: true }]) {
+  for (const from of ['Week', 'weeks', 'Now', '', null, 3, ['now'], { now: true }]) {
     assert.equal(parseWebviewMessage({ type: 'agentSelect', key: 'a:a94f0001', from }), null, JSON.stringify(from))
     assert.equal(parseWebviewMessage({ type: 'agentSelect', key: null, from }), null, JSON.stringify(from))
   }
   assert.equal(isAgentSelectedIn('now'), true)
-  assert.equal(isAgentSelectedIn('week'), false)
+  assert.equal(isAgentSelectedIn('week'), true)
+  assert.equal(isAgentSelectedIn('Week'), false)
+  // 1.6 L3: from a row of the 7-day block — the same node, moved there from the running list.
+  const fromWeek = applyMessage(fromNow, { type: 'agentSelect', key: 'a:a94f0001', from: 'week' })
+  assert.deepEqual([fromWeek.agentSelected, fromWeek.agentSelectedIn], ['a:a94f0001', 'week'])
   // The round trip: what the page posts, parsed, folded in, is the state the page is sent back.
   const round = applyMessage(ui, parseWebviewMessage({ type: 'agentSelect', key: 'l:toolu_01', from: 'now' })!)
   assert.deepEqual([round.agentSelected, round.agentSelectedIn], ['l:toolu_01', 'now'])
@@ -912,6 +921,48 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   // The markdown's tree opens every node, whatever the page has open.
   const text = agentTreeFor(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: {} }), 'text')
   assert.deepEqual(text.roots[0].children.map((c) => c.key), tree.roots[0].children.map((c) => c.key))
+})
+
+test('the 7-day block is built only while it is open, its costs only while costs are shown, and its message toggles it (1.6 L3)', () => {
+  const { agg, agentKey } = withAgents()
+  const shown = (over: Record<string, unknown>, ui: Record<string, unknown>) =>
+    buildViewModel(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', ...over }), ui })).agents
+  // Closed — the default — there is no block, and the page is not burdened with one.
+  assert.equal(shown({}, {}).week, null)
+  assert.equal(defaultUiState(cfg).agentsWeekOpen, false)
+  // Open: the one agent with a counted request, one row, its largest agent — the session's is no
+  // agent, the launch nobody read a line of counted nothing.
+  const open = shown({}, { agentsWeekOpen: true }).week
+  assert.ok(open)
+  assert.deepEqual(open.rows.map((r) => [r.type, r.model, r.label, r.agents, r.usage, r.share, r.median]),
+    [['Explore', 'claude-opus-4-6', 'Explore · opus-4-6', 1, '1.2K', '100 %', '1.2K']])
+  assert.deepEqual(open.top.map((x) => [x.key, x.context, x.usage, x.share]), [[agentKey, 'Session sess-alp · alpha', '1.2K', '100 %']])
+  assert.deepEqual([open.agents, open.total, open.other], [1, '1.2K', null])
+  // Costs are shown by default: an API estimate, marked `~`, on the row, the agent and the total.
+  assert.match(open.rows[0].cost ?? '', /^~\$\d/)
+  assert.equal(open.top[0].cost, open.rows[0].cost)
+  assert.equal(open.totalCost, open.rows[0].cost)
+  // With costs off the block names no amount anywhere.
+  const noCost = shown({ 'tokenPace.showCost': false }, { agentsWeekOpen: true }).week
+  assert.ok(noCost)
+  assert.deepEqual([noCost.rows[0].cost, noCost.top[0].cost, noCost.totalCost], [null, null, null])
+  assert.equal(JSON.stringify(noCost).includes('$'), false, JSON.stringify(noCost))
+  // The markdown's tree carries the block too, while it is open.
+  const text = agentTreeFor(makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentsWeekOpen: true } }), 'text')
+  assert.deepEqual(text.week, open)
+  // The disclosure's message carries nothing; it opens a closed block and closes an open one.
+  assert.deepEqual(parseWebviewMessage({ type: 'agentsWeek' }), { type: 'agentsWeek' })
+  assert.deepEqual(parseWebviewMessage({ type: 'agentsWeek', open: 'yes' }), { type: 'agentsWeek' })
+  const ui = defaultUiState(cfg)
+  const opened = applyMessage(ui, { type: 'agentsWeek' })
+  assert.equal(opened.agentsWeekOpen, true)
+  assert.equal(ui.agentsWeekOpen, false, 'the input state was mutated')
+  assert.equal(applyMessage(opened, { type: 'agentsWeek' }).agentsWeekOpen, false)
+  // A selection made from one of its rows stays what it is when the block closes.
+  const picked = applyMessage(opened, { type: 'agentSelect', key: agentKey, from: 'week' })
+  assert.deepEqual([picked.agentSelected, picked.agentSelectedIn], [agentKey, 'week'])
+  const closed = applyMessage(picked, { type: 'agentsWeek' })
+  assert.deepEqual([closed.agentsWeekOpen, closed.agentSelected, closed.agentSelectedIn], [false, agentKey, 'week'])
 })
 
 test('a "more" step raises an open node by one, up to MAX_MORE_PAGES; closing the node forgets it; the list keeps the newest', () => {

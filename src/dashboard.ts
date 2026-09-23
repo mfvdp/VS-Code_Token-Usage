@@ -45,8 +45,9 @@ const SECTION_FIELDS: Record<string, SectionField[]> = {
   quota: ['quotas'],
   // The running list and the tree, and the pieces of view state that decide what of it is open:
   // the nodes the reader opened, the node whose details are shown and under which of its rows
-  // (1.6 N2), and how many of an open node's children the reader asked to see (1.6 D3).
-  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentSelectedIn', 'ui.agentsMore'],
+  // (1.6 N2), how many of an open node's children the reader asked to see (1.6 D3), and whether
+  // the 7-day block is open (1.6 L3).
+  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentSelectedIn', 'ui.agentsMore', 'ui.agentsWeekOpen'],
   context: ['context'],
   kpis: ['kpis'],
   // The cache switch above the composition bars decides which parts are drawn, so the
@@ -973,6 +974,29 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-now li { display: flex; flex-wrap: wrap; }
 .ag-now .ag-k-pending .ag-label { font-style: italic; }
 .ag-ctx > span { display: inline-block; max-width: 100%; }
+/* 1.6 L3: the block's first line — its heading, or the line that says nothing runs — carries the
+   disclosure of the 7-day block at its end; what follows takes the whole width under it. The
+   disclosure is a chip like the page's other "more" buttons, 24 px high (a target, WCAG 2.5.8),
+   its twisty drawn and silent to a screen reader, which hears the button open or closed. */
+.ag-now { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
+.ag-now > :not(:first-child):not(.ag-wkbtn) { grid-column: 1 / -1; }
+.ag-wkbtn { justify-self: end; min-height: 24px; white-space: nowrap; }
+.ag-wkbtn::after { content: "\\00a0▸" / ""; font-size: 9px; }
+.ag-wkbtn[aria-expanded="true"]::after { content: "\\00a0▾" / ""; }
+/* 1.6 L3: where the agent tokens of the last 7 days went — after the running list, before the tree.
+   The table is the page's own, and stacks at a narrow width as every table does; the name of a
+   type and model and a column's head may take a second line rather than push the table out of a
+   sidebar. The row of all agents is set off by a rule. The largest agents are rows as the running
+   list's are, their details under them. */
+.ag-week { margin-bottom: 10px; }
+.ag-week > .scroll { margin-top: 4px; }
+.ag-wkt { overflow-wrap: normal; }
+.ag-wkt th, .ag-wkt td:first-child { white-space: normal; }
+.ag-wkt tr.ag-wkall { border-top: 1px solid var(--line); }
+.ag-wktop { margin-top: 8px; }
+.ag-week ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.ag-week li { display: flex; flex-wrap: wrap; }
+.ag-week li > .ag-details { flex: 1 1 100%; min-width: 0; }
 /* The details of the selected node, under its row (1.6 N2): the key figure's box around a
    two-column list, the words on the left and what the view model says about them on the right.
    In the tree it stands between the row and the node's children and steps back out of the levels
@@ -1014,6 +1038,14 @@ ul { margin: 6px 0; padding-left: 18px; }
   /* Only cells that carry a header: the sub-rows and the drill lines span the whole table
      and would otherwise be prefixed with a bare ": ". */
   td[data-h]::before { content: attr(data-h) ": "; color: var(--dim); }
+}
+/* 1.6 L3: at a narrow width the 7-day table stacks tighter than the page's other tables — a row's
+   type and model on a line of their own, then its figures, each with its column's name, as many
+   to a line as fit; the two cells the row of all agents leaves empty are not drawn at all. */
+@media (max-width: 320px) {
+  .ag-wkt td:first-child::before { content: none; }
+  .ag-wkt td:not(:first-child) { display: inline-block; margin-right: 10px; padding: 0; white-space: nowrap; }
+  .ag-wkt td:empty { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 /* The running glyph breathes only for a reader who has not asked for less motion; for anyone
@@ -1114,6 +1146,7 @@ function webviewWords(): Record<string, string> {
     'Active': t('Active'),
     'Activity': t('Activity'),
     'Agents': t('Agents'),
+    'All agents': t('All agents'),
     'Avg turn {0}': t('Avg turn {0}'),
     'Avg turn {0} · P90 {1}': t('Avg turn {0} · P90 {1}'),
     'Avg/day': t('Avg/day'),
@@ -1149,15 +1182,19 @@ function webviewWords(): Record<string, string> {
     'Hit rate': t('Hit rate'),
     'How': t('How'),
     'Key figures': t('Key figures'),
+    'Last 7 days': t('Last 7 days'),
+    'Last 7 days · where the agent tokens went': t('Last 7 days · where the agent tokens went'),
     'Last activity': t('Last activity'),
     'Longest streak {0}': t('Longest streak {0}'),
     'Longest streak {0} day · {1} → {2}': t('Longest streak {0} day · {1} → {2}'),
     'Longest streak {0} days · {1} → {2}': t('Longest streak {0} days · {1} → {2}'),
+    'Median per agent': t('Median per agent'),
     'Lower bound share {0}': t('Lower bound share {0}'),
     'Model': t('Model'),
     'Models': t('Models'),
     'No Claude Code session in the last 7 days.': t('No Claude Code session in the last 7 days.'),
     'No agent is running.': t('No agent is running.'),
+    'No agent of the last 7 days has a counted request.': t('No agent of the last 7 days has a counted request.'),
     'No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.':
       t('No budget configured. tokenPace.budgets takes your own limit per provider, period and unit.'),
     'No context reading. The Claude Code status line is what reports it.':
@@ -1217,9 +1254,12 @@ function webviewWords(): Record<string, string> {
     'Status line: {0}': t('Status line: {0}'),
     'Summary': t('Summary'),
     'Time of day': t('Time of day'),
+    'The largest agent': t('The largest agent'),
+    'The {0} largest agents': t('The {0} largest agents'),
     'Tokens': t('Tokens'),
     'Tool': t('Tool'),
     'Tools': t('Tools'),
+    'Type · model': t('Type · model'),
     'Top projects and sessions need tokenPace.attribution.':
       t('Top projects and sessions need tokenPace.attribution.'),
     'Usage': t('Usage'),
@@ -1273,6 +1313,7 @@ function webviewWords(): Record<string, string> {
     'no source answered': t('no source answered'),
     'no usage in this block': t('no usage in this block'),
     'none': t('none'),
+    'not every agent has a price: the sum is a lower bound': t('not every agent has a price: the sum is a lower bound'),
     'ok': t('ok'),
     'output': t('output'),
     'output is a lower bound: some requests had no terminal line':
@@ -1350,6 +1391,7 @@ function webviewWords(): Record<string, string> {
       t('{0} · {1} · {2} · {3} % of the week · {1} total {4}'),
     '{0}: {1} of {2}': t('{0}: {1} of {2}'),
     '~1 of them running': t('~1 of them running'),
+    '~Cost': t('~Cost'),
     '~{0} of them running': t('~{0} of them running'),
     '≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals':
       t('≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals'),

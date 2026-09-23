@@ -120,14 +120,19 @@ export interface UiState {
    * Closing a node removes its entry, so it opens with its first fifty again.
    */
   agentsMore: Array<{ key: string; pages: number }>
+  /**
+   * 1.6 L3: whether the 7-day block "where the agent tokens went" is open — below the running
+   * list, before the tree. Closed by default; the view model builds the block only while it is open.
+   */
+  agentsWeekOpen: boolean
 }
 
 /**
- * 1.6 N2: the places a selected node's details can open under — the row of the tree and the row
- * of the running list (P10a adds the row of the 7-day block's largest agents). The one list the
+ * 1.6 N2: the places a selected node's details can open under — the row of the tree, the row of
+ * the running list, and (1.6 L3) the row of the 7-day block's largest agents. The one list the
  * parser, the reducer and the restore filter check a place against.
  */
-export const AGENT_SELECTED_IN = ['tree', 'now'] as const
+export const AGENT_SELECTED_IN = ['tree', 'now', 'week'] as const
 export type AgentSelectedIn = (typeof AGENT_SELECTED_IN)[number]
 
 /** The commands the webview may ask for. Nothing outside this list is ever executed. */
@@ -167,6 +172,7 @@ export type WebviewMessage =
   | { type: 'agentToggle'; key: string }
   | { type: 'agentSelect'; key: string | null; from?: AgentSelectedIn }
   | { type: 'agentMore'; key: string }
+  | { type: 'agentsWeek' }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
   | { type: 'rendered'; sections: number }
@@ -309,6 +315,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     // The "more" row under an open node: shows the next fifty of its children.
     case 'agentMore':
       return isAgentKey(m.key) ? { type: 'agentMore', key: m.key } : null
+    // 1.6 L3: the disclosure of the 7-day block. It carries nothing: it opens a closed block and
+    // closes an open one.
+    case 'agentsWeek':
+      return { type: 'agentsWeek' }
     case 'refresh':
       return { type: 'refresh' }
     case 'command':
@@ -336,6 +346,7 @@ export function defaultUiState(cfg: Config): UiState {
     agentSelected: null,
     agentSelectedIn: 'tree',
     agentsMore: [],
+    agentsWeekOpen: false,
   }
 }
 
@@ -421,6 +432,11 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       const keep = rest.slice(Math.max(0, rest.length - MAX_AGENT_MORE + 1))
       return { ...ui, agentsMore: [...keep, { key: m.key, pages: pages + 1 }] }
     }
+    case 'agentsWeek':
+      // 1.6 L3: opens the 7-day block or closes it. A selection made from one of its rows stays
+      // what it is: closed, the details open under the node's other row where the page has one,
+      // and under the block's row again once it is opened.
+      return { ...ui, agentsWeekOpen: ui.agentsWeekOpen !== true }
     default:
       return ui
   }
@@ -1335,6 +1351,7 @@ export function agentTreeFor(
   input: Pick<VmInput, 'agg' | 'cfg' | 'ui' | 'now'>, mode: 'page' | 'text',
 ): AgentTreeVm {
   const { agg, cfg, ui } = input
+  // 1.6 L3: the 7-day block — while it is open — with its costs only while costs are shown at all.
   return buildAgentTree({
     agents: agg.agents(),
     launches: agg.launches(),
@@ -1347,19 +1364,26 @@ export function agentTreeFor(
     expanded: ui.agentsExpanded ?? [],
     more: ui.agentsMore ?? [],
     mode,
+    weekOpen: ui.agentsWeekOpen === true,
+    pricing: cfg.showCost ? pricingOf(cfg) : null,
     tcfg: readTimeConfig(cfg),
   }, input.now)
+}
+
+/** The rates every cost of the model is taken at: the configured prices, the multiplier and the rule for unknown models. */
+export function pricingOf(cfg: Config): PricingOptions {
+  return {
+    overrides: cfg.customPrices,
+    multiplier: cfg.pricing.multiplier,
+    unknownModel: cfg.unknownModelPricing,
+  }
 }
 
 export function buildViewModel(input: VmInput): ViewModel {
   const { agg, cfg, history, now, quotas, ui } = input
   const tcfg = readTimeConfig(cfg)
   const paceCfg = readPaceConfig(cfg)
-  const pricing: PricingOptions = {
-    overrides: cfg.customPrices,
-    multiplier: cfg.pricing.multiplier,
-    unknownModel: cfg.unknownModelPricing,
-  }
+  const pricing: PricingOptions = pricingOf(cfg)
   const sources: Source[] = ui.providers.length > 0 ? [...ui.providers] : [...SOURCES]
   const ctx: StatsCtx = {
     agg, tcfg, pricing, now, sources, models: ui.models, showCost: cfg.showCost,

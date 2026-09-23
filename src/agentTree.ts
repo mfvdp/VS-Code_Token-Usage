@@ -70,6 +70,14 @@ export const MAX_RUN_AGENTS = 5000
  * minute a rate is a division by a fraction of a minute — a burst of one reply, not a pace.
  */
 export const PER_MINUTE_FROM_MS = 60_000
+/**
+ * L3 (1.6): the most (type, model) rows the 7-day block "where the agent tokens went" lists, by
+ * usage; the rest are counted in one line ("3 other combinations"), and the block's total still
+ * holds them.
+ */
+export const WEEK_ROWS = 10
+/** L3: the largest agents of the 7 days the block names below its table — rows that select like the tree's. */
+export const TOP_AGENTS = 5
 
 /**
  * `stopped` (1.6 D7): the parent recorded a stop — `killed`, `cancelled` or `stopped` — which is
@@ -346,6 +354,75 @@ export interface NodeDetails {
   rows: DetailRow[]
 }
 
+/**
+ * L3 (1.6): one row of the 7-day block — the agents of one type and one model, as their names say
+ * them: the agent records of the last AGENT_RETENTION_DAYS days with at least one counted request.
+ */
+export interface AgentWeekRow {
+  /** The agent type the rows name ("Explore", "workflow-subagent"; "Agent" for a record that names none). */
+  type: string
+  /** The model id as the details and the markdown write it — the whole id, "claude-opus-5"; '–' for none known. */
+  model: string
+  /** The two as a row of the page writes them, the model in its short form: "Explore · opus-5". */
+  label: string
+  /** How many agents: records, each once. */
+  agents: number
+  /** Their usage together, compact. */
+  usage: string
+  /** Of the block's total usage — every agent of the 7 days, the rows not listed included: "34 %", "<1 %". */
+  share: string
+  /** The median usage of one of its agents, compact. */
+  median: string
+  /**
+   * What their tokens would have cost through the API, `~` in front (`costText`) — only with
+   * `tokenPace.showCost`, null otherwise. '–' when none of them has a price: its model has none on
+   * file, or each agent wrote with more than one model, whose tokens a record cannot split between
+   * them; ` ⚠` behind a sum that holds only some of them — a lower bound.
+   */
+  cost: string | null
+}
+
+/** L3 (1.6): one of the largest agents of the 7 days: a row that selects its node, as a tree row does. */
+export interface AgentWeekTop {
+  /** The node's key — selecting it opens the node's details, under this row (`from: 'week'`). */
+  key: string
+  /** The node's name as its tree row writes it (the short model). */
+  label: string
+  /** The node's `fullLabel`: the whole model id, for the markdown and a screen reader. */
+  fullLabel: string
+  /** Where it sits, as a running item says it: "Session 9d0eb37a · Workflow run cfe7718d" (+ the project). */
+  context: string
+  /** As the node's state and whether it was inferred — the row's glyph. */
+  state: NodeState
+  derived: boolean
+  usage: string
+  /** Of the block's total usage. */
+  share: string
+  /** As a row's cost: only with `tokenPace.showCost`; '–' for an agent without a price. */
+  cost: string | null
+}
+
+/**
+ * L3 (1.6): where the agent tokens of the last 7 days went — by type and model, and the largest
+ * agents. Whole agent records, each at its whole usage: an agent that started eight days ago and
+ * wrote on into the seven is counted whole, as its tree row counts it (the hour buckets split the
+ * same tokens by the hour of each reply instead).
+ */
+export interface AgentWeek {
+  /** At most WEEK_ROWS, the largest usage first. */
+  rows: AgentWeekRow[]
+  /** "3 other combinations" — the rows past WEEK_ROWS —, or null when every row is listed. */
+  other: string | null
+  /** At most TOP_AGENTS, the largest usage first. */
+  top: AgentWeekTop[]
+  /** Every agent's usage together, compact; '–' when there is none. */
+  total: string
+  /** Their cost together, as a row's is; null without `tokenPace.showCost`. */
+  totalCost: string | null
+  /** How many agents the block holds. */
+  agents: number
+}
+
 export interface AgentTreeVm {
   roots: TreeNode[]
   selected: NodeDetails | null
@@ -370,6 +447,13 @@ export interface AgentTreeVm {
    * unchanged tree serialises the same, so the host does not send it again (D12).
    */
   note: string | null
+  /**
+   * L3 (1.6): the 7-day block "where the agent tokens went" — built only while the reader has it
+   * open (`ui.agentsWeekOpen`), null otherwise. Its largest agents are rows on the page as the
+   * running list's are: their details open, wherever their tree rows are, and the rows of the
+   * block count against MAX_PAGE_NODES.
+   */
+  week: AgentWeek | null
 }
 
 /** The tree before anything was built: no roots, nothing selected, nothing claimed. */
@@ -382,5 +466,6 @@ export function emptyAgentTree(): AgentTreeVm {
     runningMore: 0,
     omittedRoots: 0,
     note: null,
+    week: null,
   }
 }

@@ -1963,10 +1963,13 @@ function nameStart(name: string, clock: string | null): [string, string] | null 
  * stands under one row of the node — its tree row or its row in the running list — and only
  * under one: `drawn` is set by the first entry that takes it.
  */
-interface AgentPanel { key: string; at: 'tree' | 'now'; d: Payload; node: Payload; drawn: boolean }
+interface AgentPanel { key: string; at: AgentPlace; d: Payload; node: Payload; drawn: boolean }
+
+/** The lists a node's row can stand in: the tree, the running list, the 7-day block's largest agents (1.6 L3). */
+type AgentPlace = 'tree' | 'now' | 'week';
 
 /** Whether the panel belongs under this row of `where`, and if so takes it: true once a page. */
-function panelHere(panel: AgentPanel | null, where: 'tree' | 'now', key: string): boolean {
+function panelHere(panel: AgentPanel | null, where: AgentPlace, key: string): boolean {
   if (!panel || panel.drawn || panel.at !== where || key === '' || key !== panel.key) return false;
   panel.drawn = true;
   return true;
@@ -1978,7 +1981,7 @@ function panelHere(panel: AgentPanel | null, where: 'tree' | 'now', key: string)
  * row, the same node's other row included, opens them under that one (see act()). Escape closes
  * them from anywhere in the section and puts the focus back on that row.
  */
-let agentPanelAt: { key: string; from: 'tree' | 'now' } | null = null;
+let agentPanelAt: { key: string; from: AgentPlace } | null = null;
 
 /**
  * 1.6 L1: an item of the tree as the keyboard knows it — a node, by its key, or the "more" line
@@ -2101,7 +2104,8 @@ function agentNowRow(it: Payload, panel: AgentPanel | null): string {
  * to open the tree to find one. Longest-running first, as the view model ordered them, and
  * what it left out counted under them. With nothing running it is one quiet line and no
  * heading. A payload without the list — an older build's — says nothing about what runs, not
- * that nothing does. The heading counts the running agents (1.6 §2.3): the view model's
+ * that nothing does. 1.6 L3: the first line — the heading or the quiet line — ends on the
+ * disclosure of the 7-day block (agentsWeekToggle). The heading counts the running agents (1.6 §2.3): the view model's
  * `running`, which a run's collector adds its running members to (D4) — the number the sessions'
  * tallies give —, where it is one; the rows otherwise.
  */
@@ -2110,14 +2114,139 @@ function agentsNow(a: Payload, panel: AgentPanel | null): string {
   const items = agentNowItems(a);
   const n = a.runningMore;
   const more = typeof n === 'number' && Number.isFinite(n) && n >= 1 ? Math.round(n) : 0;
-  if (!items.length && !more) return '<p class="ag-now meta">' + tr('No agent is running.') + '</p>';
+  // 1.6 L3: the first line — the heading, or the one line that says nothing runs — carries the
+  // disclosure of the 7-day block at its end.
+  const toggle = agentsWeekToggle(a);
+  if (!items.length && !more) return '<div class="ag-now"><p class="meta">' + tr('No agent is running.') + '</p>' + toggle + '</div>';
   const r = a.running;
   const count = typeof r === 'number' && Number.isInteger(r) && r >= items.length + more ? r : items.length + more;
   return '<div class="ag-now"><div class="name" role="heading" aria-level="3">'
-    + tr('Running now ({0})', count) + '</div>'
+    + tr('Running now ({0})', count) + '</div>' + toggle
     + (items.length ? '<ul>' + items.map((it: Payload) => agentNowRow(it, panel)).join('') + '</ul>' : '')
     + (more ? '<p class="meta">' + tr('and {0} more', more) + '</p>' : '')
     + '</div>';
+}
+
+/**
+ * 1.6 L3: whether the 7-day block is open — the reader's say, kept with the view state — and
+ * whether the view model built it for this push: the block is drawn only when both are so.
+ */
+function agentsWeekOpen(): boolean {
+  return !!vm && !!vm.ui && vm.ui.agentsWeekOpen === true;
+}
+
+function agentsWeekShown(a: Payload): boolean {
+  return agentsWeekOpen() && !!a && !!a.week && typeof a.week === 'object';
+}
+
+/**
+ * 1.6 L3 (§7a Q12): the disclosure of the 7-day block, at the end of the running block's first
+ * line — a button that says whether the block is open (`aria-expanded`) and, while it is drawn,
+ * which block it opens (`aria-controls`). It asks the host to open or close it, which keeps the
+ * state with the rest of the view state; the twisty is drawn by the stylesheet.
+ */
+function agentsWeekToggle(a: Payload): string {
+  const open = agentsWeekOpen();
+  return '<button class="ag-wkbtn" data-act="agentsWeek" aria-expanded="' + open + '"'
+    + (agentsWeekShown(a) ? ' aria-controls="ag-week"' : '') + '>' + tr('Last 7 days') + '</button>';
+}
+
+/** The largest agents the 7-day block draws: the payload's, each an object — none while the block is not drawn. */
+function agentWeekItems(a: Payload): Payload[] {
+  if (!agentsWeekShown(a) || !Array.isArray(a.week.top)) return [];
+  return a.week.top.filter((x: Payload) => !!x && typeof x === 'object' && typeof x.key === 'string' && x.key !== '');
+}
+
+/**
+ * 1.6 L3: a cost of the 7-day block as the view model wrote it — `~$4.20`, or `–` — with the
+ * ` ⚠` behind a sum that holds only some of its agents turned into the page's mark of a lower
+ * bound: titled with why, "lower bound" to a screen reader.
+ */
+function weekCost(v: Payload): string {
+  if (typeof v !== 'string' || v === '') return '–';
+  if (!/ ⚠$/.test(v)) return esc(v);
+  return esc(v.slice(0, -2)) + ' <span class="ag-lb" role="img" aria-label="' + tr('lower bound') + '" title="'
+    + tr('not every agent has a price: the sum is a lower bound') + '">⚠</span>';
+}
+
+/**
+ * 1.6 L3: one of the largest agents of the 7 days, as a row of the running list is drawn: its
+ * glyph and its name on the first line, its figures on the second — its usage, its share of the
+ * block's total and, with costs shown, its cost — and where it sits on a line of its own. It
+ * selects its node as a tree row does, and says it stands in this list (`data-list`), so the
+ * details open under it; they are drawn in its item, under the row.
+ */
+function agentWeekRow(it: Payload, panel: AgentPanel | null): string {
+  const key = typeof it.key === 'string' ? it.key : '';
+  const on = panelHere(panel, 'week', key);
+  const nobr = (f: string): string => '<span class="nobr">' + f + '</span>';
+  const figs = [orDash(it.usage), orDash(it.share)].concat(typeof it.cost === 'string' ? [weekCost(it.cost)] : []).map(nobr);
+  const where: string[] = typeof it.context === 'string' && it.context !== ''
+    ? it.context.split(' · ').map((p: string) => orDash(p)) : [];
+  return '<li class="ag-k-agent"><button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
+    + '" data-list="week" aria-pressed="' + on + '">' + agentGlyph(agentState(it.state), it.derived)
+    + '<span class="ag-text">' + agentLabel({ label: it.label, fullLabel: it.fullLabel, sub: null }, 'agent')
+    + '<span class="ag-fig">' + figParts(figs, 0) + '</span>'
+    + (where.length ? '<span class="meta ag-ctx">' + where.map(w => '<span>' + w + '</span>').join(' · ') + '</span>' : '')
+    + '</span></button>' + (on && panel ? agentDetails(panel.d, panel.node, null) : '') + '</li>';
+}
+
+/**
+ * 1.6 L3: a row's type and model as the view model wrote them — "workflow-subagent · opus-5" —
+ * each part kept whole, so a narrow column breaks the name between the two and never inside a
+ * model's id at its hyphens.
+ */
+function weekLabel(v: Payload): string {
+  if (typeof v !== 'string' || v === '') return '–';
+  return v.split(' · ').map((p: string) => '<span class="nobr">' + esc(p) + '</span>').join(' · ');
+}
+
+/** 1.6 L3: a row's type and model with the model's whole id, as its title — nothing when the payload names neither. */
+function weekTitle(r: Payload): string {
+  const whole = [r.type, r.model].filter((x: Payload) => typeof x === 'string' && x !== '').join(' · ');
+  return whole ? ' title="' + esc(whole) + '"' : '';
+}
+
+/**
+ * 1.6 L3: where the agent tokens of the last seven days went — after the running list, before the
+ * tree, while the reader has it open. A table by type and model, the largest usage first, with how
+ * many agents, their usage, its share of the whole and the median of one agent's, and — with costs
+ * shown — what it would have cost through the API; a row for all of them together; a line for the
+ * combinations the table leaves out; then the largest agents themselves, as rows that open their
+ * details. Every figure is the view model's: the page counts, sums and sorts nothing. A narrow
+ * sidebar stacks the table as it stacks every table of the page, each value with its column's name.
+ */
+function agentsWeek(a: Payload, panel: AgentPanel | null): string {
+  if (!agentsWeekShown(a)) return '';
+  const wk = a.week;
+  const rows = (Array.isArray(wk.rows) ? wk.rows : []).filter((r: Payload) => !!r && typeof r === 'object');
+  const top = agentWeekItems(a);
+  let h = '<div class="ag-week" id="ag-week" role="region" aria-labelledby="ag-week-h">'
+    + '<div class="name" id="ag-week-h" role="heading" aria-level="3">' + tr('Last 7 days · where the agent tokens went') + '</div>';
+  if (!rows.length) return h + '<p class="empty">' + tr('No agent of the last 7 days has a counted request.') + '</p></div>';
+  // The cost column only while the view model wrote a cost at all — `tokenPace.showCost` on.
+  const cost = typeof wk.totalCost === 'string';
+  const head = [tr('Type · model'), tr('Agents'), tr('Usage'), tr('Share'), tr('Median per agent')].concat(cost ? [tr('~Cost')] : []);
+  const count = (v: Payload): string => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? esc(fullNum(v)) : '–');
+  const cell = (i: number, html: string): string => '<td data-h="' + head[i] + '">' + html + '</td>';
+  h += '<div class="scroll"><table class="ag-wkt"><thead><tr>' + head.map((x) => '<th>' + x + '</th>').join('')
+    + '</tr></thead><tbody>'
+    + rows.map((r: Payload) => '<tr>'
+      + cell(0, '<span' + weekTitle(r) + '>' + weekLabel(r.label) + '</span>')
+      + cell(1, count(r.agents)) + cell(2, orDash(r.usage)) + cell(3, orDash(r.share)) + cell(4, orDash(r.median))
+      + (cost ? cell(5, weekCost(r.cost)) : '') + '</tr>').join('')
+    // Every agent of the block, the combinations the table leaves out included. A share of the
+    // whole and a median of one agent's are no figures of the whole: those two cells stay empty.
+    + '<tr class="ag-wkall"><td>' + tr('All agents') + '</td>' + cell(1, count(wk.agents)) + cell(2, orDash(wk.total))
+    + '<td></td><td></td>' + (cost ? cell(5, weekCost(wk.totalCost)) : '') + '</tr>'
+    + '</tbody></table></div>';
+  if (typeof wk.other === 'string' && wk.other !== '') h += '<p class="meta">' + esc(wk.other) + '</p>';
+  if (top.length) {
+    h += '<div class="name ag-wktop" role="heading" aria-level="4">'
+      + (top.length === 1 ? tr('The largest agent') : tr('The {0} largest agents', top.length)) + '</div>'
+      + '<ul>' + top.map((it: Payload) => agentWeekRow(it, panel)).join('') + '</ul>';
+  }
+  return h + '</div>';
 }
 
 /** The items of the running list the page draws: the payload's, each an object. */
@@ -2261,6 +2390,9 @@ function agentMix(r: Payload): string {
  * has both of the node's rows, and under the one it has otherwise: a running agent's row in the
  * list is gone once it ends, its tree row once a node above it is closed. Only that row is
  * pressed. Details for a node with no row on the page at all are drawn nowhere.
+ *
+ * 1.6 L3: between the running list and the tree, while the reader has it open, the 7-day block
+ * (agentsWeek) — whose largest agents are a third place a node's details can open under.
  */
 function sAgents(): string {
   agentPanelAt = null;
@@ -2288,7 +2420,7 @@ function sAgents(): string {
   }
   // The outer list is only the frame: its items belong to the tree itself, and the list under
   // a node is that node's group.
-  let h = agentsNow(a, panel)
+  let h = agentsNow(a, panel) + agentsWeek(a, panel)
     + '<div class="agtree" role="tree" aria-label="' + tr('Agents') + '"><ul role="none">' + nodes + '</ul></div>';
   if (panel && panel.drawn) agentPanelAt = { key: panel.key, from: panel.at };
   const omitted = Number(a.omittedRoots);
@@ -2313,13 +2445,21 @@ function agentPanelOf(a: Payload, roots: Payload[], expanded: string[], where: P
   if (!d || typeof d !== 'object' || typeof d.key !== 'string' || d.key === '') return null;
   const key = d.key;
   const items = agentNowItems(a);
-  const inNow = items.some((x: Payload) => x.key === key);
-  const inTree = agentShown(roots, expanded, key, 0);
-  const at = where === 'now' ? (inNow ? 'now' : inTree ? 'tree' : null) : (inTree ? 'tree' : inNow ? 'now' : null);
+  const tops = agentWeekItems(a);
+  const has: Record<AgentPlace, boolean> = {
+    tree: agentShown(roots, expanded, key, 0),
+    now: items.some((x: Payload) => x.key === key),
+    week: tops.some((x: Payload) => x.key === key),
+  };
+  // The row the reader clicked first, then the node's other rows: the tree's, the running list's,
+  // the 7-day block's (1.6 L3).
+  const order: AgentPlace[] = where === 'now' ? ['now', 'tree', 'week'] : where === 'week' ? ['week', 'tree', 'now'] : ['tree', 'now', 'week'];
+  const at = order.find((p) => has[p]) || null;
   if (at === null) return null;
   // The node the panel belongs to, for its clock and whether its state was recorded: its tree
-  // node where the payload carries one, else its item of the running list.
-  const node = agentNodes(roots).find((n: Payload) => n.key === key) || items.find((x: Payload) => x.key === key) || null;
+  // node where the payload carries one, else its item of the running list or of the block.
+  const node = agentNodes(roots).find((n: Payload) => n.key === key) || items.find((x: Payload) => x.key === key)
+    || tops.find((x: Payload) => x.key === key) || null;
   return { key: key, at: at, d: d, node: node, drawn: false };
 }
 
@@ -2555,8 +2695,9 @@ function keepFocus(body: Element): AgentFocus | null {
     return { act: '', key: '', list: '', tree: true, copy: li !== el };
   }
   if (!el.dataset) return null;
-  const act = el.dataset.act, key = el.dataset.key;
-  return act && key ? { act: act, key: key, list: el.dataset.list || '' } : null;
+  // 1.6 L3: the 7-day block's disclosure names no node; it is found again by what it does.
+  const act = el.dataset.act, key = el.dataset.key || '';
+  return act && (key || act === 'agentsWeek') ? { act: act, key: key, list: el.dataset.list || '' } : null;
 }
 
 /** What keepFocus found: a control by what it does and whom it names, or an item of the tree. */
@@ -2575,7 +2716,7 @@ function restoreFocus(body: Element, f: AgentFocus): void {
   const all = body.querySelectorAll<HTMLElement>('[data-act]');
   for (let i = 0; i < all.length; i++) {
     const el = all[i];
-    if (el.dataset.act === f.act && el.dataset.key === f.key && (el.dataset.list || '') === f.list) { el.focus(); return; }
+    if (el.dataset.act === f.act && (el.dataset.key || '') === f.key && (el.dataset.list || '') === f.list) { el.focus(); return; }
   }
 }
 
@@ -2905,12 +3046,17 @@ function act(el: HTMLElement): void {
     // The next fifty children of an open node; the host keeps how many, as it keeps the open ones.
     const key = el.dataset.key;
     if (key) post({ type: 'agentMore', key: key });
+  } else if (a === 'agentsWeek') {
+    // 1.6 L3: opens or closes the 7-day block; the host keeps which, as it keeps the open nodes.
+    post({ type: 'agentsWeek' });
   } else if (a === 'agentSelect') {
     // The row whose details are open under it closes them again: a second click clears the
     // selection. 1.6 N2: any other row opens them under itself — the same node's other row too,
-    // which moves them there — and says which list it stands in.
+    // which moves them there — and says which list it stands in: the tree, the running list, or
+    // (1.6 L3) the 7-day block's largest agents.
     const key = el.dataset.key;
-    const from = el.dataset.list === 'now' ? 'now' : 'tree';
+    const list = el.dataset.list;
+    const from = list === 'now' || list === 'week' ? list : 'tree';
     if (!key) return;
     const open = agentPanelAt !== null && agentPanelAt.key === key && agentPanelAt.from === from;
     post(open ? { type: 'agentSelect', key: null } : { type: 'agentSelect', key: key, from: from });
@@ -3174,7 +3320,7 @@ document.addEventListener('keydown', (ev) => {
     const li = agentItemByKey(body, at.key);
     if (li) li.focus();
   } else {
-    restoreFocus(body, { act: 'agentSelect', key: at.key, list: 'now' });
+    restoreFocus(body, { act: 'agentSelect', key: at.key, list: at.from });
   }
   post({ type: 'agentSelect', key: null });
 }, true);

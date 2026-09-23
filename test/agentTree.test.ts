@@ -20,10 +20,13 @@ import { test } from 'node:test'
 import {
   AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeState,
   PER_MINUTE_FROM_MS,
-  RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TreeNode, WEEKDAY_NAMES_WITHIN_MS,
+  RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
-import { AgentTreeInput, agentDetails, buildAgentTree, byNewestFirst, mostAtOnce, shortIdsOf, spanText } from '../src/agentTreeBuild'
+import {
+  AgentTreeInput, agentDetails, buildAgentTree, byNewestFirst, medianOf, mostAtOnce, shortIdsOf, spanText,
+} from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
+import { compact } from '../src/render'
 import { TimeConfig } from '../src/time'
 import { AgentLaunch, AgentRec, JournalAgent, MainRec, RunLaunch, RunRec, SessionRec } from '../src/types'
 import { durationText } from '../src/stats'
@@ -3227,3 +3230,217 @@ test('who spawned an agent: left out for a workflow agent no launch names, kept 
   // A direct agent keeps the row, a dash where nothing names who launched it.
   assert.equal(spawned({ agents: [rec('aaaa0001', { spawnerFile: null, meta: null })] }, 'aaaa0001'), '–')
 })
+
+// ---------------------------------------------------------------------------
+// 1.6 L3: where the agent tokens of the last 7 days went
+// ---------------------------------------------------------------------------
+
+/** A Claude Code agent id of the week's world: `a` and 16 hex digits ending on `tail`. */
+const wkId = (tail: string): string => `a${tail.padStart(16, '0')}`
+
+/**
+ * The week's world: agents whose tokens are output alone, so a usage is its output and a cost its
+ * output at the model's output rate (claude-opus-5 $25, claude-sonnet-5 $10 per million). Explore on
+ * opus-5 three times — one of them in a second session —, two workflow agents on opus-5, a Plan
+ * agent on sonnet-5, two general-purpose agents on sonnet-5 — one of them written with two models,
+ * whose tokens its record cannot split —, an Explore agent on a model without a price, and three
+ * that the block leaves out: an agent without a counted request, one older than the seven days, and
+ * a launch nobody read a line of.
+ */
+function weekWorld(): { over: Partial<AgentTreeInput>; ids: Record<string, string> } {
+  const ids = {
+    e1: wkId('e1'), e2: wkId('e2'), e3: wkId('e3'), w1: wkId('b1'), w2: wkId('b2'), p1: wkId('c1'), m1: wkId('d1'), m2: wkId('d2'),
+    u1: wkId('f1'), none: wkId('f2'), old: wkId('f3'),
+  }
+  const out = (n: number): Partial<AgentRec> => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, reasoning: 0, output: n })
+  const typed = (type: string, model: string | null = null): Partial<AgentRec> =>
+    ({ meta: { agentType: type, model, spawnDepth: 1, toolUseId: null }, spawnerFile: null })
+  const agents = [
+    rec(ids.e1, { ...out(400_000), firstTs: NOW - 50 * MIN }),
+    rec(ids.e2, { ...out(100_000), firstTs: NOW - 40 * MIN }),
+    rec(ids.e3, { ...out(200_000), sessionId: S2, sessionFile: sessionFile(S2) }),
+    wfRec(ids.w1, out(300_000)),
+    wfRec(ids.w2, out(100_000)),
+    rec(ids.p1, { ...out(50_000), ...typed('Plan'), models: ['claude-sonnet-5'] }),
+    rec(ids.m1, { ...out(30_000), ...typed('general-purpose'), models: ['claude-opus-5', 'claude-sonnet-5'] }),
+    rec(ids.m2, { ...out(10_000), ...typed('general-purpose'), models: ['claude-sonnet-5'] }),
+    rec(ids.u1, { ...out(20_000), models: ['claude-mystery-1'] }),
+    // Left out: nothing counted; older than the seven days; and the launch below.
+    rec(ids.none, { ...out(0), requests: 0, outputFinal: 0, toolCalls: 0 }),
+    rec(ids.old, { ...out(900_000), firstTs: NOW - 9 * DAY, lastTs: NOW - 8 * DAY }),
+  ]
+  return {
+    over: {
+      agents, mains: [main(), main({ sessionId: S2 })],
+      launches: [launch('pending1', { agentId: null, ts: NOW - 2 * MIN })],
+      weekOpen: true,
+    },
+    ids,
+  }
+}
+
+test('the 7-day block groups the agents with a counted request by type and model, the largest first — share, median, the largest agents', () => {
+  const { over, ids } = weekWorld()
+  const vm = build(over)
+  const w = vm.week
+  assert.ok(w)
+  // By the type and the model their names say, the model in full; the row as a page writes it.
+  assert.deepEqual(w.rows.map((r) => [r.type, r.model, r.label, r.agents, r.usage, r.share, r.median]), [
+    ['Explore', 'claude-opus-5', 'Explore · opus-5', 3, '700K', '58 %', '200K'],
+    // Two agents: the median halfway between them.
+    ['workflow-subagent', 'claude-opus-5', 'workflow-subagent · opus-5', 2, '400K', '33 %', '200K'],
+    ['Plan', 'claude-sonnet-5', 'Plan · sonnet-5', 1, '50K', '4 %', '50K'],
+    // The two-model agent under the model its name says — its last.
+    ['general-purpose', 'claude-sonnet-5', 'general-purpose · sonnet-5', 2, '40K', '3 %', '20K'],
+    ['Explore', 'claude-mystery-1', 'Explore · mystery-1', 1, '20K', '2 %', '20K'],
+  ])
+  // Every agent once, the ones without a counted request, older than seven days, or never read left out.
+  assert.deepEqual([w.agents, w.total, w.other], [9, '1.2M', null])
+  const listed = w.top.map((x) => x.key)
+  for (const id of [ids.none, ids.old]) assert.equal(listed.includes(agentKey(id)), false, id)
+  // The largest agents, the largest first — a tie by key — as their tree rows name them, where they
+  // sit as the running list says it, their state as their rows have it.
+  assert.equal(TOP_AGENTS, 5)
+  assert.deepEqual(w.top.map((x) => [x.key, x.usage, x.share, x.context]), [
+    [agentKey(ids.e1), '400K', '33 %', 'Session 9d0eb37a'],
+    [agentKey(ids.w1), '300K', '25 %', 'Session 9d0eb37a · Workflow run cfe7718d'],
+    [agentKey(ids.e3), '200K', '17 %', 'Session 5f1c2d3e'],
+    [agentKey(ids.w2), '100K', '8 %', 'Session 9d0eb37a · Workflow run cfe7718d'],
+    [agentKey(ids.e2), '100K', '8 %', 'Session 9d0eb37a'],
+  ])
+  const e1 = node(vm, agentKey(ids.e1))
+  assert.deepEqual([w.top[0].label, w.top[0].fullLabel, w.top[0].state, w.top[0].derived], [e1.label, e1.fullLabel, e1.state, e1.derived])
+  // No pricing, no cost: not a column, not a figure, not a dollar anywhere in the block.
+  assert.deepEqual([...w.rows.map((r) => r.cost), ...w.top.map((x) => x.cost), w.totalCost], Array(11).fill(null))
+  assert.equal(JSON.stringify(w).includes('$'), false)
+  // Nothing of the block is an invented zero.
+  assert.equal(/"0( |")/.test(JSON.stringify(w)), false, JSON.stringify(w))
+})
+
+test('the 7-day block\'s costs only with pricing: ~ for an estimate, – for no price, ⚠ behind a sum that holds only some', () => {
+  const { over, ids } = weekWorld()
+  const w = build({ ...over, pricing: {} }).week
+  assert.ok(w)
+  assert.deepEqual(w.rows.map((r) => r.cost), [
+    // 400K + 100K + 200K of output at $25 per million.
+    '~$17.50',
+    '~$10.00',
+    '~$0.50',
+    // The two-model agent has no price — its record cannot split its tokens between the models —,
+    // so the row's sum holds the other one only, and says so.
+    '~$0.10 ⚠',
+    // A model without a price on file.
+    '–',
+  ])
+  assert.equal(w.totalCost, '~$28.10 ⚠')
+  assert.deepEqual(w.top.map((x) => x.cost), ['~$10.00', '~$7.50', '~$5.00', '~$2.50', '~$2.50'])
+  // An agent without a price is a dash among the largest too.
+  const u1 = build({ ...over, pricing: {}, agents: (over.agents ?? []).filter((r) => r.agentId === ids.u1) }).week
+  assert.deepEqual([u1?.top.map((x) => x.cost), u1?.rows.map((r) => r.cost), u1?.totalCost], [['–'], ['–'], '–'])
+  // A custom rate is what the tables take too.
+  const custom = build({ ...over, pricing: { multiplier: 0.5 } }).week
+  assert.equal(custom?.rows[0].cost, '~$8.75')
+})
+
+test('the 7-day block: at most WEEK_ROWS rows, the rest in one line — one other combination, or {0} — in English and in German', () => {
+  const many = (n: number): AgentRec[] => Array.from({ length: n }, (_, i) =>
+    rec(wkId('9' + i.toString(16)), { meta: { agentType: `type-${String(i).padStart(2, '0')}`, model: null, spawnDepth: 1, toolUseId: null },
+      input: 0, cacheWrite: 0, cacheRead: 0, output: 1000 * (n - i) }))
+  assert.equal(WEEK_ROWS, 10)
+  const twelve = build({ agents: many(12), weekOpen: true }).week
+  assert.ok(twelve)
+  assert.equal(twelve.rows.length, WEEK_ROWS)
+  // The largest first: type-00 used the most.
+  assert.deepEqual(twelve.rows.map((r) => r.type), Array.from({ length: 10 }, (_, i) => `type-${String(i).padStart(2, '0')}`))
+  assert.equal(twelve.other, '2 other combinations')
+  // The block's total and its count hold the rows it does not list.
+  assert.deepEqual([twelve.agents, twelve.total], [12, compact(78_000)])
+  assert.equal(build({ agents: many(11), weekOpen: true }).week?.other, '1 other combination')
+  assert.equal(build({ agents: many(10), weekOpen: true }).week?.other, null)
+  const de = german(() => [build({ agents: many(12), weekOpen: true }).week?.other, build({ agents: many(11), weekOpen: true }).week?.other])
+  assert.deepEqual(de, ['2 weitere Kombinationen', '1 weitere Kombination'])
+  // A record without a type is an "Agent", as its name says it — „Agent" in German as well.
+  const bare = build({ agents: [rec(wkId('aa'), { meta: null })], launches: [], weekOpen: true }).week
+  assert.deepEqual(bare?.rows.map((r) => [r.type, r.model]), [['Agent', 'claude-opus-5']])
+  // No agent with a counted request: an empty block, no invented figure.
+  const empty = build({ agents: [rec(wkId('ab'), { requests: 0, output: 0, outputFinal: 0 })], weekOpen: true }).week
+  assert.deepEqual(empty, { rows: [], other: null, top: [], total: '–', totalCost: null, agents: 0 })
+  assert.deepEqual(build({ agents: [], weekOpen: true, pricing: {} }).week?.totalCost, '–')
+})
+
+test('medianOf: the middle one, or halfway between the two in the middle; none is no median', () => {
+  assert.equal(medianOf([3]), 3)
+  assert.equal(medianOf([5, 1, 3]), 3)
+  assert.equal(medianOf([1, 3]), 2)
+  assert.equal(medianOf([4, 1, 3, 2]), 2.5)
+  assert.ok(Number.isNaN(medianOf([])))
+  const xs = [9, 2, 7]
+  medianOf(xs)
+  assert.deepEqual(xs, [9, 2, 7], 'the input was sorted in place')
+})
+
+test('the 7-day block is built only while it is open; the markdown\'s tree carries it too', () => {
+  const { over } = weekWorld()
+  assert.equal(build({ ...over, weekOpen: false }).week, null)
+  assert.equal(build({ ...over, weekOpen: undefined }).week, null)
+  assert.equal(page({ ...over, weekOpen: false }).week, null)
+  assert.deepEqual(page(over).week, build(over).week)
+})
+
+test('the 7-day block\'s largest agents are rows on the page: their details open inside a closed branch and beyond MAX_ROOTS (§3.0 b)', () => {
+  const { over, ids } = weekWorld()
+  // Finished, so the running list does not name it; the tree closed, so the tree has no row for it.
+  const done = (r: AgentRec): AgentRec => {
+    const last = Math.min(r.lastTs, NOW - 30 * MIN)
+    return { ...r, outcome: 'completed', outcomeTs: last, outcomeStatus: 'completed', lastTs: last, firstTs: Math.min(r.firstTs, last) }
+  }
+  const agents = (over.agents ?? []).map(done)
+  const picked = agentKey(ids.e1)
+  const closed = page({ ...over, agents, weekOpen: false, selected: picked })
+  assert.equal(closed.runningNow.length, 1, 'only the launch runs')
+  assert.equal(closed.selected, null)
+  assert.equal(closed.note, null)
+  const open = page({ ...over, agents, selected: picked })
+  assert.equal(open.selected?.key, picked)
+  assert.equal(open.note, null)
+  // A session beyond MAX_ROOTS: twenty sessions more recent than the one of the largest agent.
+  const recent = Array.from({ length: MAX_ROOTS }, (_, i) => main({ sessionId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    lastTs: NOW - MIN }))
+  const far = { ...over, agents, mains: [...recent, main({ sessionId: S1, lastTs: NOW - 5 * HOUR })], selected: picked }
+  const gone = page({ ...far, weekOpen: false })
+  assert.equal(gone.roots.some((r) => r.key === rootKey), false, 'the session is listed')
+  assert.equal(gone.selected, null)
+  assert.equal(gone.note, 'The selected node is no longer in the tree.')
+  const named = page(far)
+  assert.equal(named.week?.top[0].key, picked)
+  assert.equal(named.selected?.key, picked)
+  assert.equal(named.note, null)
+})
+
+test('the 7-day block\'s rows count against MAX_PAGE_NODES: the tree has that many fewer places, the selection still first', () => {
+  // One session, 42 runs of 50 agents of four types, every node opened: 1 + 42 + 39 × 50 = 1993
+  // nodes fit the cap; with the block open — four rows and five largest agents — 1991 places are
+  // left, and 38 runs.
+  const runs = 42
+  const wfOf = (i: number): string => `wf_${String(i).padStart(8, '0')}-000`
+  const types = ['workflow-subagent', 'Explore', 'Plan', 'general-purpose']
+  const agents = Array.from({ length: runs * 50 }, (_, n) => wfRec(hexId(n), {
+    workflowId: wfOf(Math.floor(n / 50)), meta: { agentType: types[n % 4], model: null, spawnDepth: 1, toolUseId: null },
+    firstTs: NOW - 5 * HOUR + n * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
+  }))
+  const expanded = [rootKey, ...Array.from({ length: runs }, (_, i) => `w:${S1}|${wfOf(i)}`)]
+  const shipped = (vm: AgentTreeVm): number => vm.roots[0].children.filter((w) => w.children.length > 0).length
+  const closed = page({ agents, expanded })
+  assert.equal(shipped(closed), 39)
+  const open = page({ agents, expanded, weekOpen: true })
+  assert.deepEqual([open.week?.rows.length, open.week?.top.length], [4, 5])
+  assert.equal(shipped(open), 38)
+  assert.ok(all(open.roots).length + 9 <= MAX_PAGE_NODES, String(all(open.roots).length))
+  // The selection's path is still placed first: a selected agent of the oldest run.
+  const picked = agentKey(hexId(7))
+  const both = page({ agents, expanded, weekOpen: true, selected: picked })
+  assert.equal(node(both, picked).key, picked)
+  assert.equal(both.selected?.key, picked)
+  assert.ok(all(both.roots).length + 9 <= MAX_PAGE_NODES)
+})
+

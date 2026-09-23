@@ -955,13 +955,18 @@ test('stored "more" steps restore by shape — a key, a whole number of steps fr
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+// 1.6 P10a (L3) changed two lines of P3b's: a stored `week` — the 7-day block's row — is a place of
+// the list now, kept beside a selection, and a selection the page posts from it is stored; a place
+// the host does not know is still dropped whole (`Week` below).
 test('the row the details open under restores by shape, beside a selection only, and a selection from the list is stored and pushed', async () => {
-  // 1.6 N2: `ui.agentSelectedIn` is a place of the list — the tree's or the running list's — and
-  // means something only while a node is selected; anything else comes back as the tree.
+  // 1.6 N2: `ui.agentSelectedIn` is a place of the list — the tree's, the running list's or (L3)
+  // the 7-day block's — and means something only while a node is selected; anything else comes
+  // back as the tree.
   const cases: Array<[Record<string, unknown>, string]> = [
     [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'now' }, 'now'],
     [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'tree' }, 'tree'],
-    [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'week' }, 'tree'],
+    [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'week' }, 'week'],
+    [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'Week' }, 'tree'],
     [{ agentSelected: 'a:a94f0001', agentSelectedIn: ['now'] }, 'tree'],
     [{ agentSelected: 'a:a94f0001' }, 'tree'],
     [{ agentSelected: null, agentSelectedIn: 'now' }, 'tree'],
@@ -1001,12 +1006,55 @@ test('the row the details open under restores by shape, beside a selection only,
   pushes = pushesSince(before)
   assert.equal(pushes.length, 1, 'moving the details did not push the section')
   assert.equal(pushes[0].payload.ui.agentSelectedIn, 'tree')
+  // 1.6 L3: from a row of the 7-day block — stored with its place, and pushed.
+  before = page.sent.length
+  page.post({ type: 'agentSelect', key: 'a:a94f0001', from: 'week' })
+  ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  assert.deepEqual([ui?.agentSelected, ui?.agentSelectedIn], ['a:a94f0001', 'week'])
+  assert.equal(pushesSince(before).length, 1, 'a selection from the 7-day block did not push the section')
   // A place the host does not know drops the message whole: nothing stored, nothing pushed.
   before = page.sent.length
-  page.post({ type: 'agentSelect', key: 'a:a94f0002', from: 'week' })
+  page.post({ type: 'agentSelect', key: 'a:a94f0002', from: 'Week' })
   ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
-  assert.deepEqual([ui?.agentSelected, ui?.agentSelectedIn], ['a:a94f0001', 'tree'])
+  assert.deepEqual([ui?.agentSelected, ui?.agentSelectedIn], ['a:a94f0001', 'week'])
   assert.equal(pushesSince(before).length, 0)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('the 7-day block\'s disclosure is stored and pushed at once; a stored state restores by shape (1.6 L3)', async () => {
+  // Restored as a boolean, and only as one: anything else is the default, closed.
+  const cases: Array<[unknown, boolean]> = [[true, true], [false, false], ['true', false], [1, false], [null, false], [undefined, false]]
+  for (const [stored, want] of cases) {
+    const kept = new Map<string, unknown>([['tokenPace.ui', { agentsWeekOpen: stored }]])
+    const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+    await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+    await state.execute('tokenPace.setRange', '7d')
+    assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentsWeekOpen, want, JSON.stringify(stored))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  }
+  // The page's disclosure: stored, and the section pushed at once with the block in it; again, closed.
+  const host = await activateHost(makeFixture(), REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  const agentPushes = (from: number): Array<{ payload: { ui: { agentsWeekOpen: unknown }; agents: { week: unknown } } }> =>
+    page.sent.slice(from).filter((m) => {
+      const x = m as { type?: unknown; key?: unknown }
+      return x.type === 'section' && x.key === 'agents'
+    }) as Array<{ payload: { ui: { agentsWeekOpen: unknown }; agents: { week: unknown } } }>
+  let before = page.sent.length
+  page.post({ type: 'agentsWeek' })
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentsWeekOpen, true)
+  let pushes = agentPushes(before)
+  assert.equal(pushes.length, 1, 'opening the block did not push the section')
+  assert.equal(pushes[0].payload.ui.agentsWeekOpen, true)
+  assert.ok(pushes[0].payload.agents.week && typeof pushes[0].payload.agents.week === 'object', 'the push carries no block')
+  before = page.sent.length
+  page.post({ type: 'agentsWeek' })
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentsWeekOpen, false)
+  pushes = agentPushes(before)
+  assert.equal(pushes.length, 1, 'closing the block did not push the section')
+  assert.deepEqual([pushes[0].payload.ui.agentsWeekOpen, pushes[0].payload.agents.week], [false, null])
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 

@@ -1722,8 +1722,9 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
       && raw.agentSelected.length <= MAX_AGENT_KEY_CHARS)) {
     out.agentSelected = raw.agentSelected
   }
-  // 1.6 N2: which row of the selected node its details open under — a place of the list, and
-  // only beside a selection: with nothing selected the details have no place, and it is the tree.
+  // 1.6 N2: which row of the selected node its details open under — a place of the list (the
+  // tree's, the running list's, or — 1.6 L3 — the 7-day block's), and only beside a selection:
+  // with nothing selected the details have no place, and it is the tree.
   if (out.agentSelected !== null && isAgentSelectedIn(raw.agentSelectedIn)) out.agentSelectedIn = raw.agentSelectedIn
   // 1.6 D3: the "more" steps of opened nodes — a key of the same shape and a whole number of
   // steps from 1 to MAX_MORE_PAGES, anything else dropped entry by entry. A key stored twice
@@ -1738,6 +1739,8 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
     }
     out.agentsMore = [...byKey].map(([key, pages]) => ({ key, pages })).slice(-MAX_AGENT_MORE)
   }
+  // 1.6 L3: whether the 7-day block is open — a boolean, and nothing else.
+  if (typeof raw.agentsWeekOpen === 'boolean') out.agentsWeekOpen = raw.agentsWeekOpen
   return out
 }
 

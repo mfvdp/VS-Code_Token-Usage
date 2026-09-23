@@ -32,15 +32,16 @@
  */
 
 import {
-  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS,
-  MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, MixPart, NodeDetails, NodeState, PER_MINUTE_FROM_MS, RESUMED_AFTER_MS,
-  ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS, TreeNode, WEEKDAY_NAMES_WITHIN_MS,
+  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, AgentWeek, AgentWeekRow, AgentWeekTop, DetailRow, MAX_GROUP_CHILDREN,
+  MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, MixPart, NodeDetails, NodeState,
+  PER_MINUTE_FROM_MS, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS,
+  TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from './agentTree'
 import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
-import { normalizeModel } from './prices'
+import { PricingOptions, costOfBucket, normalizeModel } from './prices'
 import { compact, full } from './render'
-import { durationText, freshInput, tokens } from './stats'
+import { costText, durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, dayOf, formatTime, weekdayWords } from './time'
 import {
   AgentLaunch, AgentRec, Attribution, Bucket, Effort, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RejectedRequest,
@@ -84,6 +85,16 @@ export interface AgentTreeInput {
    * steps left aside; the details of the selected node wherever it sits.
    */
   mode?: 'page' | 'text'
+  /**
+   * `ui.agentsWeekOpen` (1.6 L3): whether the 7-day block "where the agent tokens went" is open —
+   * the only time it is built. Absent means closed.
+   */
+  weekOpen?: boolean
+  /**
+   * L3: the rates the block's costs are taken at — only while `tokenPace.showCost` is on; null or
+   * absent, the block names no cost at all.
+   */
+  pricing?: PricingOptions | null
   tcfg: TimeConfig
 }
 
@@ -1348,8 +1359,22 @@ interface Entry {
   effort: Effort | null
   /** L2: the details' line under the state — an agent's with a counted request; null elsewhere. */
   overview: string | null
+  /**
+   * L3: what the 7-day block reads of an agent with a counted request — its type and model as its
+   * name says them (the model in full), the real model ids its replies were written with, and the
+   * time of its last counted reply, whose day its price is taken for. Null for every other node.
+   */
+  week: WeekOf | null
   /** Built on demand: only the selected node's rows are ever needed. */
   rows: () => DetailRow[]
+}
+
+/** L3: an agent as the 7-day block groups and prices it (see Entry.week). */
+interface WeekOf {
+  type: string
+  model: string
+  models: readonly string[]
+  last: number
 }
 
 /** One session and everything that belongs to it, before it is a tree. */
@@ -1630,6 +1655,7 @@ function collectorEntry(sessionId: string, wf: string, members: Member[]): Entry
     tally: null,
     effort: null,
     overview: null,
+    week: null,
     rows: () => [],
   }
   e.rows = () => {
@@ -1694,6 +1720,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     tally: null,
     effort: null,
     overview: null,
+    week: null,
     rows: () => [],
   }
   // L2: the session's two figures first (D5) — its own transcript's usage is the first of them,
@@ -1751,6 +1778,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         tally: null,
         effort: null,
         overview: null,
+        week: null,
         rows: () => [],
       }
       attach(w, root)
@@ -1852,6 +1880,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       // L2: what it used, how long it ran, how many requests and tool calls it made — the line under
       // its state. An agent nothing of which was counted has none of the four.
       overview: counted ? overviewOf(c, durationText(activity - first)) : null,
+      // L3: grouped by the type and the model its name says, priced for the day of its last reply.
+      week: counted ? { type: type ?? t('Agent'), model, models, last: r.lastTs } : null,
       rows: () => [],
     }
     // L2 (1.6): the details in the order a reader asks — what the tokens were (the mix), how the
@@ -1940,6 +1970,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       tally: null,
       effort: null,
       overview: null,
+      week: null,
       rows: () => [
         { label: t('Type'), value: text(l.typeHint) ?? '–' },
         { label: t('Models'), value: text(l.modelHint) ?? '–' },
@@ -2318,6 +2349,115 @@ function clockOf(ms: number | null, now: number, tcfg: TimeConfig): string | nul
   return ms === null ? null : stamp(ms, now, tcfg)
 }
 
+// ---------------------------------------------------------------------------
+// Where the agent tokens went (1.6 L3)
+// ---------------------------------------------------------------------------
+
+/** The median of some numbers: the middle one, or halfway between the two in the middle; NaN for none. */
+export function medianOf(xs: readonly number[]): number {
+  if (xs.length === 0) return NaN
+  const v = [...xs].sort((a, b) => a - b)
+  const mid = Math.floor(v.length / 2)
+  return v.length % 2 === 1 ? v[mid] : (v[mid - 1] + v[mid]) / 2
+}
+
+/**
+ * What an agent's tokens would have cost through the API: the rates of its model on the day of
+ * its last counted reply, the way the tables price the same tokens — or null when it has no price:
+ * its model has none on file, or its replies were written with more than one model (a fallback in
+ * the middle of a run), whose tokens its record does not split between them. A record keeps no
+ * speed and no web search, so its tokens are priced at the model's standard rate, and nothing else
+ * is in the figure.
+ */
+function agentCost(e: Entry, pricing: PricingOptions, tcfg: TimeConfig): number | null {
+  const w = e.week
+  if (w === null || e.counters === null || w.models.length !== 1) return null
+  const c = costOfBucket({ ...bucketOf(e.counters, true), model: w.models[0], day: dayOf(w.last, tcfg) }, pricing)
+  return c !== null && !c.unpriced && Number.isFinite(c.usd) && c.usd >= 0 ? c.usd : null
+}
+
+/**
+ * The cost of some agents together, as the block writes it: `~` in front, as every cost on the
+ * page; '–' when none of them has a price; ` ⚠` behind a sum that holds only some of them — a
+ * lower bound, marked as the page marks one.
+ */
+function costSumText(sum: number, priced: number, of: number): string {
+  const text = priced > 0 ? costText(sum) : '–'
+  return text !== '–' && priced < of ? `${text} ⚠` : text
+}
+
+/**
+ * L3 (1.6): where the agent tokens of the last seven days went. Every agent record of the
+ * retention with a counted request — whatever session it belongs to, listed in the tree or not —
+ * once, at its whole usage (the tree's own figure): grouped by the type and the model its name
+ * says, the largest usage first, at most WEEK_ROWS of them and a line for the rest; per group how
+ * many agents, their usage, its share of the whole block and the median of one agent's. Then the
+ * TOP_AGENTS largest agents themselves, as rows that select their nodes. A cost only with
+ * `pricing` — `tokenPace.showCost` on —, and for a group or the whole only of the agents with a
+ * price, marked when that is not all of them.
+ */
+function weekOf(roots: readonly Entry[], pricing: PricingOptions | null, tcfg: TimeConfig): AgentWeek {
+  interface Counted { e: Entry; w: WeekOf; usage: number; cost: number | null }
+  const counted: Counted[] = []
+  for (const r of roots) {
+    for (const e of preorder(r)) {
+      if (e.kind !== 'agent' || e.week === null || e.counters === null || e.counters.requests <= 0) continue
+      counted.push({ e, w: e.week, usage: billable(bucketOf(e.counters, true)), cost: pricing ? agentCost(e, pricing, tcfg) : null })
+    }
+  }
+  const total = counted.reduce((sum, x) => sum + x.usage, 0)
+  const shareOf = (n: number): string => (total > 0 ? shareText(n / total) : '–')
+  const costOf = (list: readonly Counted[]): string | null => {
+    if (pricing === null) return null
+    const priced = list.filter((x) => x.cost !== null)
+    return costSumText(priced.reduce((sum, x) => sum + (x.cost as number), 0), priced.length, list.length)
+  }
+  const groups = new Map<string, { type: string; model: string; members: Counted[]; usage: number }>()
+  for (const x of counted) {
+    // Two strings of their own alphabets; the NUL between them is in neither.
+    const k = `${x.w.type}\u0000${x.w.model}`
+    let g = groups.get(k)
+    if (!g) {
+      g = { type: x.w.type, model: x.w.model, members: [], usage: 0 }
+      groups.set(k, g)
+    }
+    g.members.push(x)
+    g.usage += x.usage
+  }
+  const ranked = [...groups.values()].sort((a, b) => b.usage - a.usage || cmp(a.type, b.type) || cmp(a.model, b.model))
+  const rows: AgentWeekRow[] = ranked.slice(0, WEEK_ROWS).map((g) => ({
+    type: g.type,
+    model: g.model,
+    label: `${g.type} · ${shortModel(g.model)}`,
+    agents: g.members.length,
+    usage: compact(g.usage),
+    share: shareOf(g.usage),
+    median: compact(medianOf(g.members.map((x) => x.usage))),
+    cost: costOf(g.members),
+  }))
+  const rest = ranked.length - rows.length
+  const top: AgentWeekTop[] = [...counted].sort((a, b) => b.usage - a.usage || cmp(a.e.key, b.e.key)).slice(0, TOP_AGENTS)
+    .map((x) => ({
+      key: x.e.key,
+      label: x.e.label,
+      fullLabel: x.e.fullLabel,
+      context: contextOf(x.e),
+      state: x.e.state,
+      derived: derivedOf(x.e.state),
+      usage: x.e.usage,
+      share: shareOf(x.usage),
+      cost: pricing === null ? null : x.cost === null ? '–' : costText(x.cost),
+    }))
+  return {
+    rows,
+    other: rest <= 0 ? null : rest === 1 ? t('1 other combination') : t('{0} other combinations', full(rest)),
+    top,
+    total: counted.length > 0 ? compact(total) : '–',
+    totalCost: costOf(counted),
+    agents: counted.length,
+  }
+}
+
 /**
  * The "more" steps of an open node the reader took: a whole number from 0 to MAX_MORE_PAGES.
  * The stored list is the view state's, and was checked on the way in; it is checked again
@@ -2339,10 +2479,11 @@ function pagesFrom(more: AgentTreeInput['more']): Map<string, number> {
  * the selected node and the running children pinned in, the whole payload at most
  * MAX_PAGE_NODES nodes; in `text` mode every node is open, MAX_GROUP_CHILDREN children each.
  * Every node says, open or not, whether it has children, how many, and what the agents below it
- * came to, counted on the whole tree. Then the running agents of every session, and the details
- * of `input.selected` while its row is on the page — in the tree, or in the running list, which
- * may name a node of a session the tree does not list; `text` mode prints every node, so it
- * has the details of the selected node wherever it sits.
+ * came to, counted on the whole tree. Then the running agents of every session, the 7-day block
+ * while it is open (1.6 L3), and the details of `input.selected` while its row is on the page — in
+ * the tree, in the running list or among the block's largest agents, both of which may name a node
+ * of a session the tree does not list; `text` mode prints every node, so it has the details of the
+ * selected node wherever it sits.
  */
 export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm {
   const forest = buildForest(input, now)
@@ -2368,7 +2509,13 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
   const drawn = new Map<Entry, number>()
   for (const r of forest.roots) for (const e of preorder(r)) drawn.set(e, drawn.size)
   const liveDrawn = [...live].sort((x, y) => (drawn.get(x) ?? 0) - (drawn.get(y) ?? 0))
-  const payload = payloadOf(shown, isOpen, limitOf, selected, liveDrawn, MAX_PAGE_NODES)
+  // 1.6 L3: the 7-day block, while the reader has it open. Its largest agents are rows on the page
+  // as the running list's are (§3.0 b) — their details open wherever their tree rows are — and the
+  // block's rows are rows of the payload too, so the tree has that many fewer places under its cap.
+  const week = input.weekOpen === true ? weekOf(forest.roots, input.pricing ?? null, input.tcfg) : null
+  const weekKeys = new Set(week !== null ? week.top.map((x) => x.key) : [])
+  const cap = MAX_PAGE_NODES - (week !== null ? week.rows.length + week.top.length : 0)
+  const payload = payloadOf(shown, isOpen, limitOf, selected, liveDrawn, cap)
 
   const toNode = (e: Entry): TreeNode => {
     const kids = payload.shipped.get(e) ?? []
@@ -2402,18 +2549,20 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     }
   }
 
-  // A selected node is reachable while its session is listed, or while the running list names
-  // it — that list holds running agents of sessions beyond MAX_ROOTS too; anything else — its
+  // A selected node is reachable while its session is listed, or while the running list or the
+  // open 7-day block names it — both hold agents of sessions beyond MAX_ROOTS too; anything else — its
   // session not listed and itself not running, or gone from the records — gets the note, since
   // a stored selection that opens nothing would otherwise look like a panel that failed. A
-  // reachable node gets its details while its row is on the page: in the payload, or in the
-  // running list. One inside a closed branch has no row there and gets no panel and no note —
+  // reachable node gets its details while its row is on the page: in the payload, in the running
+  // list, or in the block. One inside a closed branch has no row there and gets no panel and no note —
   // opening the branch brings the panel back, and nothing on the page could close a panel that
   // stood for a row nobody sees. The markdown prints every node, so it always has the row.
   let top: Entry | null = selected
   while (top !== null && top.parent !== null) top = top.parent
-  const reachable = selected !== null && ((top !== null && shown.includes(top)) || listedKeys.has(selected.key))
-  const onPage = selected !== null && (whole || payload.emitted.has(selected) || listedKeys.has(selected.key))
+  const reachable = selected !== null
+    && ((top !== null && shown.includes(top)) || listedKeys.has(selected.key) || weekKeys.has(selected.key))
+  const onPage = selected !== null
+    && (whole || payload.emitted.has(selected) || listedKeys.has(selected.key) || weekKeys.has(selected.key))
   const details = selected !== null && reachable && onPage ? detailsOf(selected) : null
   let note: string | null = null
   if (forest.roots.length === 0) {
@@ -2434,6 +2583,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     runningMore: Math.max(0, live.length - MAX_RUNNING_LIST),
     omittedRoots: Math.max(0, forest.roots.length - MAX_ROOTS),
     note,
+    week,
   }
 }
 

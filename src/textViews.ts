@@ -11,7 +11,7 @@
  * Pure: no vscode. `nativeViews.ts` turns these lists and strings into commands.
  */
 
-import type { AgentTreeVm, NodeState, RunningItem, TreeNode } from './agentTree'
+import type { AgentTreeVm, AgentWeek, NodeState, RunningItem, TreeNode } from './agentTree'
 import { t } from './i18n'
 import { DEFAULT_BAR, estimate, full, renderBar } from './render'
 import type { Forecast, Source } from './types'
@@ -583,6 +583,44 @@ function runningLines(a: ViewModel['agents']): string[] {
 }
 
 /**
+ * 1.6 L3: where the agent tokens of the last seven days went, while the dashboard has the block
+ * open — after the running list, before the tree, as the page has it: the table by type and model
+ * (the model's whole id, as every line of the document writes it), a row of all agents, the line
+ * for the combinations it leaves out, then the largest agents, one line each — `[Done] Explore ·
+ * claude-opus-5 · 94f3 · Session 9d0eb37a · 1.2M · 34 %`, a cost behind them while costs are shown.
+ * The cost column only then, too: without `tokenPace.showCost` the block names no amount. A view
+ * model without the block prints nothing of it.
+ */
+function weekLines(w: AgentWeek | null | undefined): string[] {
+  if (!w || !Array.isArray(w.rows)) return []
+  const L: string[] = [`### ${t('Last 7 days · where the agent tokens went')}`, '']
+  if (w.rows.length === 0) return [...L, `_${t('No agent of the last 7 days has a counted request.')}_`, '']
+  const cost = typeof w.totalCost === 'string'
+  L.push(cost ? t('| Type · model | Agents | Usage | Share | Median per agent | ~Cost |') : t('| Type · model | Agents | Usage | Share | Median per agent |'))
+  L.push(cost ? '|---|---|---|---|---|---|' : '|---|---|---|---|---|')
+  const costCell = (v: string | null): string => (cost ? ` ${cell(v)} |` : '')
+  for (const r of w.rows) {
+    L.push(`| ${cell(`${r.type} · ${r.model}`)} | ${full(r.agents)} | ${cell(r.usage)} | ${cell(r.share)} | ${cell(r.median)} |${costCell(r.cost)}`)
+  }
+  // Every agent of the block together; a share of the whole and a median of one agent's are no
+  // figures of the whole, and their cells stay empty.
+  L.push(`| ${cell(t('All agents'))} | ${full(w.agents)} | ${cell(w.total)} |  |  |${costCell(w.totalCost)}`)
+  L.push('')
+  if (w.other) L.push(`_${cell(w.other)}_`, '')
+  if (Array.isArray(w.top) && w.top.length > 0) {
+    L.push(`#### ${w.top.length === 1 ? t('The largest agent') : t('The {0} largest agents', w.top.length)}`, '')
+    for (const x of w.top) {
+      const word = agentStateWord(x.state)
+      const state = x.derived ? estimate(word) : word
+      L.push(`- [${state}] ${cell(fullName(x))} · ${cell(x.context)} · ${cell(x.usage)} · ${cell(x.share)}`
+        + (typeof x.cost === 'string' ? ` · ${cell(x.cost)}` : ''))
+    }
+    L.push('')
+  }
+  return L
+}
+
+/**
  * The Agents section: the running list, then the same tree as the dashboard, as an indented
  * list — every node, whatever the dashboard has open: the tree built for the document (1.6 D3,
  * `text` mode), which opens every node and gives each at most fifty children, the rest said in
@@ -602,7 +640,9 @@ function agentLines(vm: ViewModel, textTree?: AgentTreeVm | null): string[] {
     return L
   }
   const running = runningLines(a)
-  if (running.length > 0) L.push(...running, `### ${t('Sessions and agents')}`, '')
+  // 1.6 L3: the 7-day block, while the dashboard has it open, between the running list and the tree.
+  const week = weekLines(a.week)
+  if (running.length > 0 || week.length > 0) L.push(...running, ...week, `### ${t('Sessions and agents')}`, '')
   // The ⚠ is explained wherever a line carries it: a running line too, which may be the only
   // line an agent has — its session not listed, or its node past its group's fifty.
   let lower = Array.isArray(a.runningNow) && a.runningNow.some((r) => r.lowerBound === true)

@@ -334,6 +334,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   /** `force` marks an event (quota update, ingest, message, config change), not a tick. */
   function render(force = false): void {
+    // After `dispose` a frame has nowhere to go. The status bar has disposed its items and
+    // forgotten them, so this one would build new items that nothing ever disposes: entries
+    // left on the bar by an extension that is gone. Work still under way at `dispose` ends
+    // here without one — the agent replay's save, the cold scan, an ingest, a fetch.
+    if (disposed) return
     const now = Date.now()
     let readingsOk = false
     try {
@@ -428,6 +433,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   const dashboard = new DashboardProvider(onMessage, say)
   context.subscriptions.push(
+    // The provider too, not only its registration: a section it holds back waits on a timer.
+    dashboard,
     vscode.window.registerWebviewViewProvider(DashboardProvider.viewType, dashboard, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
@@ -501,7 +508,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   let ingestTimer: ReturnType<typeof setTimeout> | undefined
 
   function scheduleIngest(file?: string): void {
-    if (role === 'follower') return
+    // A follower leaves the transcripts to the leader, and after `dispose` no timer is armed.
+    if (!readsTranscripts()) return
     if (file) pendingFiles.add(file)
     if (ingestTimer) return
     ingestTimer = setTimeout(() => {
@@ -631,11 +639,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   // --------------------------------------------------------------- persistence
   async function saveState(): Promise<void> {
-    if (role === 'follower' || saving) return
+    // After `dispose` the exit save has written the state and the lease is given up: a save
+    // started now could only race that one, or overwrite the file of the window that leads next.
+    if (role === 'follower' || saving || disposed) return
     saving = true
     const tmp = `${paths.state}.tmp`
     try {
       await fs.promises.writeFile(tmp, JSON.stringify(agg.toSnapshot()))
+      // `dispose` came while the file was written: the exit save has put a newer state in
+      // place, and this older one must not replace it.
+      if (disposed) {
+        await fs.promises.rm(tmp, { force: true }).catch(() => undefined)
+        return
+      }
       await fs.promises.rename(tmp, paths.state)
       snapshotBytes = fileSize(paths.state)
     } catch (err) {
@@ -647,7 +663,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   function saveStateSync(): void {
     if (role === 'follower') return
-    const tmp = `${paths.state}.tmp`
+    // A temp file of its own: a save still under way writes `state.json.tmp`, and two writers
+    // on one file can leave the start of one snapshot in front of the end of the other.
+    const tmp = `${paths.state}.exit.tmp`
     try {
       fs.writeFileSync(tmp, JSON.stringify(agg.toSnapshot()))
       fs.renameSync(tmp, paths.state)
@@ -830,6 +848,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   // --------------------------------------------------------------- quota
   function onQuotaUpdate(): void {
+    // A fetch under way at `dispose` still reports back: no frame, and no alert either.
+    if (disposed) return
     // A finished fetch, a changed credential file, a push: the memoised reading in
     // the manager describes the state before all of that.
     quotaMgr.invalidate()
@@ -1369,12 +1389,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       } finally {
         progress.dispose()
       }
+      // Disposed while the scan ran: the exit save has stored what there was, and the rest —
+      // a roll-up, a save, a frame, a fetch, a question — has no window to go to any more.
+      if (disposed) return
       rollup(Date.now())
       await saveState()
       dirty = false
     } else {
       scanning = false
     }
+    if (disposed) return
     render(true)
     // After the first frame, so the figures are on screen while the agent tables are rebuilt;
     // a follower renders the leader's and replays nothing.
@@ -1384,6 +1408,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     logQuotaSources()
     void ensureWriteConsent()
     await offerFetchOnce()
+    if (disposed) return
     await remoteHint()
   }
 }

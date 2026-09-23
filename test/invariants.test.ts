@@ -541,16 +541,21 @@ test('an agent whose output is a lower bound says so wherever its figures are, a
     assert.ok(d)
     const output = d.rows.find((r) => r.label === 'Output')
     assert.ok(output, n.label)
-    assert.equal(output.note, bound ? '⚠ lower bound' : undefined, n.label)
+    // 1.6 D10: the note says how many of its replies never finished, of how many — the node's
+    // reason, word for word, and the record's own two counts.
+    const why = bound ? `⚠ lower bound — ${rec.requests - rec.outputFinal} of ${rec.requests} replies unfinished` : null
+    assert.equal(output.note, why ?? undefined, n.label)
+    assert.equal(n.lowerBoundText, why, n.label)
     const line = lines.find((l) => l.includes(n.label))
     assert.ok(line, n.label)
     assert.equal(/ ⚠ · /.test(line), bound, line)
     if (bound) marked++
   }
-  // Claude Code's agents end on an unfinished reply: all but the quick one here, which did not.
+  // This world's agents end on an unfinished reply, all but the quick one — more than Claude Code's
+  // do (1.6 D10 measured a third), which is what makes it a test of the mark on every kind of row.
   assert.equal(marked, counted.length - 1)
   assert.equal(agentNode(vm.agents.roots, AGENT_WORLD.guide).lowerBound, false)
-  // The running list says it too: a running agent is nearly always mid-reply, and the list is
+  // The running list says it too: a running agent is often mid-reply, and the list is
   // the first thing on the page and in the document. A launch nothing was counted of never.
   const running = runningLines(vm)
   assert.equal(running.length, vm.agents.runningNow.length)
@@ -559,6 +564,7 @@ test('an agent whose output is a lower bound says so wherever its figures are, a
     const n = treeNodes(vm.agents.roots).find((x) => x.key === r.key)
     assert.ok(n, r.key)
     assert.equal(r.lowerBound, n.lowerBound, r.key)
+    assert.equal(r.lowerBoundText, n.lowerBoundText, r.key)
     assert.equal(/ ⚠( |$)/.test(running[i]), r.lowerBound, running[i])
   })
   // The markdown explains the mark, once.
@@ -645,6 +651,9 @@ const TREE_FIELDS = new Set([
   'hasChildren', 'childrenTotal', 'childrenMore',
   // 1.6 P5b: a running item's `running` — the running agents it stands for, a collector's many
   // (D4) — is the tree's own field name, listed above; the collector node brings no field.
+  // 1.6 P6: why an output is a lower bound, in numbers (D10), and whether the page may say how
+  // long a running agent has been silent (N5) — on a node and on a running item alike.
+  'lowerBoundText', 'silence',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {

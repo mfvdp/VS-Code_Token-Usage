@@ -331,5 +331,5 @@
   "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": "• Codex — der lokale „codex app-server“ wird gestartet und nach seinen Rate-Limits gefragt.\n  Dafür verlässt kein Datenverkehr von uns den Rechner.",
   "… {0} more": "… {0} weitere",
   "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ kennzeichnet eine Untergrenze: Die ältesten Stunden des Zeitraums sind bereits zu Tagessummen zusammengefasst",
-  "⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.": "⚠ kennzeichnet eine Untergrenze: Bei einer Antwort, die das Transkript nie als abgeschlossen markiert hat, zählt nur die bis dahin gemeldete Ausgabe."
+  "⚠ marks a lower bound: some replies were never marked finished, and only the output written up to then is counted.": "⚠ kennzeichnet eine Untergrenze: Einige Antworten wurden nie als abgeschlossen markiert, gezählt wird nur die bis dahin geschriebene Ausgabe."
 }

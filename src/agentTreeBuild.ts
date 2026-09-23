@@ -331,6 +331,37 @@ function usageText(c: Counters): string {
   return c.requests > 0 ? compact(billable(bucketOf(c, true))) : '–'
 }
 
+/**
+ * D10 (1.6): why an output figure is a lower bound — "⚠ lower bound — 2 of 41 replies
+ * unfinished": of the replies counted, the ones whose lines never carried a stop reason, so only
+ * the output written up to their last line is in the figure. Null when every reply finished, and
+ * for nothing counted. The row's mark and the details' Output note say the same, in these words.
+ *
+ * Measured on this machine (2026-09-23, the last seven days): 293 of 925 agents (32 %) had at
+ * least one such reply, 201 of them exactly one; 455 of the 477 such replies were followed by the
+ * result of the tool they called — a reply cut off at its tool call, not the agent's last — and
+ * only 22 were the file's last reply. So an unfinished reply is no end marker, and most finished
+ * agents are not lower bounds at all.
+ */
+function lowerBoundTextOf(c: Counters | null): string | null {
+  if (c === null || c.requests <= 0 || c.outputFinal >= c.requests) return null
+  return t('⚠ lower bound — {0} of {1} replies unfinished', full(c.requests - c.outputFinal), full(c.requests))
+}
+
+/** A tool name as the aggregator keeps it (§0a.5): its alphabet, at most 100 characters. */
+const TOOL_NAME_RE = /^[A-Za-z0-9_.:@/-]{1,100}$/
+
+/**
+ * N5 (1.6): the tool an agent's transcript called on its last line — the call it went quiet
+ * after — or null: the record names none, or its last call came on a line before the last one,
+ * so the silence is not the call's. Checked again, as every value of a record: a snapshot of
+ * another build's making may carry anything in it.
+ */
+function lastCallOf(r: AgentRec, activity: number): string | null {
+  const name = typeof r.lastTool === 'string' && TOOL_NAME_RE.test(r.lastTool) ? r.lastTool : null
+  return name !== null && stampOf(r.lastToolTs) === activity ? name : null
+}
+
 function sessionLabel(sessionId: string): string {
   return t('Session {0}', sessionId.slice(0, 8))
 }
@@ -628,6 +659,16 @@ function agentState(
       stateText: why === null
         ? t('Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.', at)
         : t('Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.', at, why),
+    }
+  }
+  // N5: the call the transcript went quiet after, when its last line made one — "after a Bash
+  // call" says more than a silence alone about where the agent may have stopped.
+  const call = lastCallOf(r, activity)
+  if (call !== null) {
+    return {
+      state: 'unknown',
+      stateText: t('Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.',
+        stamp(r.lastTs, now, tcfg), call),
     }
   }
   return {
@@ -986,9 +1027,9 @@ function recordedRows(o: Outcome | undefined, now: number, tcfg: TimeConfig): De
 
 /**
  * Turns, the token kinds of the totals table and the tool calls. Nothing counted is a dash
- * throughout — a record without a request has no zero to report. Output is marked as a lower
- * bound when a reply never reached its final line: there is no end marker in an agent's file,
- * so its last reply often stops mid-stream.
+ * throughout — a record without a request has no zero to report. Output is a lower bound when a
+ * reply never reached a line with a stop reason, and its note says how many of the replies did
+ * not (D10, see lowerBoundTextOf) — the same words the row's mark carries.
  */
 function countRows(c: Counters | null): DetailRow[] {
   if (c === null || c.requests === 0) {
@@ -997,7 +1038,8 @@ function countRows(c: Counters | null): DetailRow[] {
   }
   const b = bucketOf(c, true)
   const output: DetailRow = { label: t('Output'), value: tokens(c.output) }
-  if (c.outputFinal < c.requests) output.note = `⚠ ${t('lower bound')}`
+  const bound = lowerBoundTextOf(c)
+  if (bound !== null) output.note = bound
   return [
     { label: t('Turns'), value: full(c.requests) },
     { label: t('Usage'), value: compact(billable(b)) },
@@ -1051,6 +1093,8 @@ interface Entry {
   /** D5: a session's agents' usage, beside its own; null for every other node and a session without agents. */
   usageAgents: string | null
   lowerBound: boolean
+  /** D10: "⚠ lower bound — 2 of 41 replies unfinished" where `lowerBound`; null elsewhere. */
+  lowerBoundText: string | null
   duration: string
   startTs: number | null
   lastTs: number | null
@@ -1339,6 +1383,7 @@ function collectorEntry(sessionId: string, wf: string, members: Member[]): Entry
     usage: '–',
     usageAgents: null,
     lowerBound: false,
+    lowerBoundText: null,
     duration: '–',
     startTs: first,
     lastTs: last,
@@ -1397,6 +1442,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     usage: mainCounters ? usageText(mainCounters) : '–',
     usageAgents,
     lowerBound: mainCounters ? mainCounters.outputFinal < mainCounters.requests : false,
+    lowerBoundText: lowerBoundTextOf(mainCounters),
     duration: main && start !== null ? spanText(main.lastTs - start) : '–',
     startTs: start,
     lastTs: main ? main.lastTs : null,
@@ -1443,6 +1489,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         usage: '–',
         usageAgents: null,
         lowerBound: false,
+        lowerBoundText: null,
         duration: '–',
         startTs: null,
         lastTs: null,
@@ -1535,6 +1582,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       usage: usageText(c),
       usageAgents: null,
       lowerBound: c.outputFinal < c.requests,
+      lowerBoundText: lowerBoundTextOf(c),
       duration: counted ? durationText(activity - first) : '–',
       startTs: first,
       lastTs: activity,
@@ -1602,6 +1650,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       usage: '–',
       usageAgents: null,
       lowerBound: false,
+      lowerBoundText: null,
       duration: '–',
       startTs: l.ts,
       lastTs: Math.max(l.ts, outcomeAt ?? 0),
@@ -1704,6 +1753,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     w.counters = sum
     w.usage = usageText(sum)
     w.lowerBound = sum.outputFinal < sum.requests
+    w.lowerBoundText = lowerBoundTextOf(sum)
     // A run no agent has written to yet: its launch is its start, and the parent's last word on
     // it its last activity. It ran for no time anyone measured, so it has no duration.
     const measured = members.length > 0
@@ -1938,6 +1988,16 @@ function runningOf(roots: Entry[]): Entry[] {
   return out.sort(byStartThenKey)
 }
 
+/**
+ * N5 (1.6): whether the page may say how long a node has been silent — an agent running by its
+ * own transcript: not one that runs only because an agent below it runs (it waits, and says so),
+ * not a launch nobody has read a line of, not a collector. Its revival after an outcome (D6) and
+ * its rejected last request (N3) included: both run by their own lines.
+ */
+function silenceOf(e: Entry): boolean {
+  return e.kind === 'agent' && e.state === 'running' && !e.waiting
+}
+
 function runningItem(e: Entry): RunningItem {
   // Nothing of a launch nobody has read a line of, or of a collector's agents, was counted: the
   // builder already says '–'.
@@ -1948,12 +2008,14 @@ function runningItem(e: Entry): RunningItem {
     label: e.label,
     context: contextOf(e),
     usage: counted ? e.usage : '–',
-    // Nearly always true for a running agent: it is mid-reply. The row does not mark it (the
-    // details do); the line under the tree and the markdown's running line need to know.
+    // As the node, and in the node's words (D10): the markdown's running line marks it, and the
+    // page's row does while the page marks the tree's rows (ROW_LOWER_BOUND_MARK in the webview).
     lowerBound: counted ? e.lowerBound : false,
+    lowerBoundText: counted ? e.lowerBoundText : null,
     startTs: e.startTs,
     lastTs: e.lastTs,
     waiting: e.waiting,
+    silence: silenceOf(e),
     running: runningMembers(e),
   }
 }
@@ -2016,9 +2078,11 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
       usage: e.usage,
       usageAgents: e.usageAgents,
       lowerBound: e.lowerBound,
+      lowerBoundText: e.lowerBoundText,
       duration: e.duration,
       startTs: e.startTs,
       lastTs: e.lastTs,
+      silence: silenceOf(e),
       agentCount: counts.get(e) ?? 0,
       hasChildren: e.children.length > 0,
       childrenTotal: e.children.length,

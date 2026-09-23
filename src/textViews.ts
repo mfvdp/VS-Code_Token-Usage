@@ -610,7 +610,8 @@ function agentLines(vm: ViewModel, textTree?: AgentTreeVm | null): string[] {
   L.push('')
   const notes: string[] = []
   if (a.omittedRoots > 0) notes.push(t('{0} older session(s) not listed.', a.omittedRoots))
-  if (lower) notes.push(t('⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.'))
+  // 1.6 D10: once, at the end, in the words the details' Output note and the row's mark use.
+  if (lower) notes.push(t('⚠ marks a lower bound: some replies were never marked finished, and only the output written up to then is counted.'))
   if (a.note) notes.push(a.note)
   for (const n of notes) L.push(`_${n}_`, '')
   const d = a.selected

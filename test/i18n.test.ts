@@ -315,7 +315,10 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
   // "agents 434.6K" — since a figure in front of "agents" reads as a number of agents. D3: there
   // is no cut of the tree any more; what a node leaves out is said on the node.
   const retired = ["Parent's report", "the parent's own count, not added to any total", '{0} tokens · {1} · {2} tool calls',
-    '{0} agent(s)', '{0} own', '{0} agents', 'Tree cut at {0} nodes.']
+    '{0} agent(s)', '{0} own', '{0} agents', 'Tree cut at {0} nodes.',
+    // D10 (P6): the line under the tree about the ⚠, and the markdown note's 1.5 words.
+    'Output figures in the details marked ⚠ are lower bounds.',
+    '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.']
   const bundle = readJson(BUNDLE) as Record<string, string>
   const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts']
     .map((f) => readFileSync(join(ROOT, f), 'utf8'))

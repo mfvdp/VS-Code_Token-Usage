@@ -161,6 +161,11 @@ export const READ_CONTRACT = [
     fields: ['apiErrorStatus', 'error', 'quotaLimits'] },
   { what: 'a rejected request\'s limit', file: 'src/agg.ts', kind: 'fields', body: 'function rejectedOf(', variable: 'q',
     fields: ['rateLimitType'] },
+  // 1.6 §0a.5 (P6): the tool calls of a reply — counted for the tools table since 1.3, and since
+  // 1.6 N5 the name of the last one kept on an agent's record with its line's time. Of a block
+  // only its `type`, `name` and `id`; its `input` is never looked at.
+  { what: 'the tool calls of a reply', file: 'src/agg.ts', kind: 'fields', body: 'private countClaudeTools(', variable: 'b',
+    fields: ['type', 'name', 'id'] },
 ]
 
 /**

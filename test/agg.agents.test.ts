@@ -23,7 +23,7 @@ import { toCsv, toJson, toolsCsv } from '../src/exporter'
 import { AGENT_META_MAX_BYTES, agentReplayFiles, readAgentMeta, replayAgents, scan } from '../src/scan'
 import { newCursor } from '../src/tail'
 import { TimeConfig } from '../src/time'
-import { AgentLaunch, AgentRec, Snapshot, STATE_VERSION } from '../src/types'
+import { AgentLaunch, AgentRec, Snapshot, STATE_VERSION, TOOL_NAME_MAX_CHARS } from '../src/types'
 import { markdownDocument } from '../src/textViews'
 import { agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
@@ -159,6 +159,9 @@ test('an agent transcript gets its record on the first counted line, with the de
     outcomeStatus: null,
     // 1.6 N3: no request of it was rejected.
     rejected: null,
+    // 1.6 N5: it called no tool.
+    lastTool: null,
+    lastToolTs: null,
   })
   // The buckets hold the same figures: the record follows them, it does not count on its own.
   const sub = agg.all().filter((b) => b.isSub)
@@ -1395,8 +1398,8 @@ test('a transcript of nothing but rejected requests gets its record from the fir
 
 test('a rejection-only record survives a snapshot round trip, and the replay the revision asks for makes it again', async () => {
   // 4: the records of rejection-only transcripts (1.6 D4) are what only a replay can fill for the
-  // transcripts already read.
-  assert.equal(AGENT_TABLES_REVISION, 4)
+  // transcripts already read. (1.6 P6 raised it to 5 for the last tool call; its own test pins 5.)
+  assert.ok(AGENT_TABLES_REVISION >= 4)
   const home = tmpDir('rejected-only')
   configureRoots([home], [path.join(home, 'codex')])
   const dir = path.join(home, 'projects', CLAUDE_SLUG)
@@ -1510,5 +1513,139 @@ test('an API error line\'s text, its details and its quota block never leave the
   for (const snapshot of [outputs[0][1], outputs[1][1]]) {
     assert.equal(/"(errorDetails|apiError|upgradePaths|quotaLimits|apiErrorStatus|rateLimitType|resetsAt|overageStatus|overageDisabledReason|isUsingOverage|unifiedRateLimitFallbackAvailable|perTurnEffort|requestId|isApiErrorMessage)"/
       .test(snapshot), false, 'the snapshot holds a field of the error line')
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P6 · N5: the last tool call of an agent (§0a.5)
+// ---------------------------------------------------------------------------
+
+test('an agent keeps the name of its last tool call and the time of its line, through the tool names\' alphabet (1.6 N5)', () => {
+  const agg = new Aggregator()
+  const line = (id: string, ts: number, tools?: Array<{ name: string }>, content?: unknown[]): void => {
+    agg.addClaudeLine(claudeLine({ id, ts, agentId: 'abc123', usage: { input: 5, output: 2 }, tools, content }), AGENT_CTX)
+  }
+  const last = (): [string | null, number | null] => [agentOf(agg, AGENT).lastTool, agentOf(agg, AGENT).lastToolTs]
+  line('m1', T0, [{ name: 'Read' }])
+  assert.deepEqual(last(), ['Read', T0])
+  // A later line of the same message, with a second block: the last block of the line.
+  line('m1', T0 + 400, [{ name: 'Grep' }, { name: 'Bash' }])
+  assert.deepEqual(last(), ['Bash', T0 + 400])
+  // A reply that calls no tool leaves the last call where it was — and moves the record's time.
+  line('m2', T0 + 60_000)
+  assert.deepEqual(last(), ['Bash', T0 + 400])
+  assert.equal(agentOf(agg, AGENT).lastTs, T0 + 60_000)
+  // An MCP tool's name fits the alphabet as it is.
+  line('m3', T0 + 90_000, [{ name: 'mcp__claude_ai_Claude_Docs__batch' }])
+  assert.deepEqual(last(), ['mcp__claude_ai_Claude_Docs__batch', T0 + 90_000])
+  // A name outside it — a space, a character too many — is no name: the call is known, its name not.
+  line('m4', T0 + 120_000, [{ name: 'run this now' }])
+  assert.deepEqual(last(), [null, T0 + 120_000])
+  line('m5', T0 + 150_000, [{ name: 'T'.repeat(TOOL_NAME_MAX_CHARS + 1) }])
+  assert.deepEqual(last(), [null, T0 + 150_000])
+  line('m6', T0 + 160_000, [{ name: 'T'.repeat(TOOL_NAME_MAX_CHARS) }])
+  assert.deepEqual(last(), ['T'.repeat(TOOL_NAME_MAX_CHARS), T0 + 160_000])
+  // A line read out of order — older than the last call kept — does not move it back.
+  line('m7', T0 + 100_000, [{ name: 'Edit' }])
+  assert.deepEqual(last(), ['T'.repeat(TOOL_NAME_MAX_CHARS), T0 + 160_000])
+  // A server tool is no tool call of the table, and none of the record either.
+  line('m8', T0 + 170_000, undefined, [{ type: 'server_tool_use', id: 'srvtoolu_1', name: 'web_search', input: {} }])
+  assert.deepEqual(last(), ['T'.repeat(TOOL_NAME_MAX_CHARS), T0 + 160_000])
+  // The tools table still counts every call it counted before, the out-of-range name included.
+  assert.equal(agentOf(agg, AGENT).toolCalls, 7)
+  // A main session's record keeps no last call.
+  agg.addClaudeLine(claudeLine({ id: 'x1', ts: T0, usage: { input: 3 }, tools: [{ name: 'Bash' }] }), MAIN_CTX)
+  assert.equal('lastTool' in (agg.mains()[0] as object), false)
+})
+
+test('the last tool call survives a snapshot round trip, checked again; a snapshot of revision 4 asks for the replay that fills it', async () => {
+  // 5: the last tool call (1.6 N5) is what only a replay can fill for the transcripts already read.
+  assert.equal(AGENT_TABLES_REVISION, 5)
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, agentId: 'abc123', usage: { input: 5 }, tools: [{ name: 'Bash' }] }), AGENT_CTX)
+  const back = Aggregator.fromSnapshot(JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot)
+  assert.deepEqual([agentOf(back, AGENT).lastTool, agentOf(back, AGENT).lastToolTs], ['Bash', T0])
+  // A snapshot is a file anyone can edit: every value is checked as at ingest.
+  const edited = (rec: Record<string, unknown>): [string | null, number | null] => {
+    const s = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+    Object.assign((s.agents as Record<string, AgentRec>)[AGENT], rec)
+    const r = agentOf(Aggregator.fromSnapshot(s), AGENT)
+    return [r.lastTool, r.lastToolTs]
+  }
+  assert.deepEqual(edited({ lastTool: 'rm -rf /' }), [null, T0])
+  assert.deepEqual(edited({ lastTool: 42 }), [null, T0])
+  assert.deepEqual(edited({ lastToolTs: 'soon' }), [null, null])
+  assert.deepEqual(edited({ lastToolTs: Number.NaN }), [null, null])
+  assert.deepEqual(edited({ lastTool: undefined, lastToolTs: undefined }), [null, null])
+
+  // The replay: a snapshot of the revision before has no last call, and the replay reads it back
+  // from the lines — counting nothing twice.
+  const home = tmpDir('last-tool')
+  configureRoots([home], [path.join(home, 'codex')])
+  const dir = path.join(home, 'projects', CLAUDE_SLUG)
+  const file = path.join(dir, SESSION, 'subagents', 'agent-abc123.jsonl')
+  writeLines(path.join(dir, `${SESSION}.jsonl`), [claudeLine({ id: 'x1', ts: T0, usage: { input: 3 }, final: true })])
+  writeLines(file, [
+    claudeLine({ id: 'r1', ts: T0 + 1000, agentId: 'abc123', usage: { input: 5 }, tools: [{ name: 'Read' }] }),
+    claudeLine({ id: 'r2', ts: T0 + 5000, agentId: 'abc123', usage: { input: 5 }, tools: [{ name: 'Bash' }] }),
+  ])
+  const scanned = new Aggregator()
+  await scan(scanned)
+  assert.deepEqual([agentOf(scanned, file).lastTool, agentOf(scanned, file).lastToolTs], ['Bash', T0 + 5000])
+  const before = JSON.parse(JSON.stringify(scanned.toSnapshot())) as Snapshot
+  const old = (before.agents as unknown as Record<string, Record<string, unknown>>)[file]
+  delete old.lastTool
+  delete old.lastToolTs
+  before.agentsRevision = 4
+  const restored = Aggregator.fromSnapshot(before)
+  assert.deepEqual([agentOf(restored, file).lastTool, agentOf(restored, file).lastToolTs], [null, null])
+  assert.notEqual(restored.agentsRevision, AGENT_TABLES_REVISION, 'the host replays')
+  const counted = counting(restored)
+  await replayAgents(restored, agentReplayFiles(restored, T0 + 60_000))
+  assert.deepEqual([agentOf(restored, file).lastTool, agentOf(restored, file).lastToolTs], ['Bash', T0 + 5000])
+  assert.equal(counting(restored), counted)
+})
+
+test('a tool call\'s input never leaves the reader: only its name reaches the record, the tree and the sentence (1.6 §0a.5)', async () => {
+  // The call Claude Code writes, with synthetic content under its input — the command, its
+  // description — and the result that answers it.
+  const secret = 'TOOL-INPUT-CONTENT-7a2f'
+  const home = tmpDir('last-tool-leak')
+  configureRoots([home], [path.join(home, 'codex')])
+  const dir = path.join(home, 'projects', CLAUDE_SLUG)
+  const main = path.join(dir, `${SESSION}.jsonl`)
+  const file = path.join(dir, SESSION, 'subagents', 'agent-abc123.jsonl')
+  const at = (min: number): number => VNOW - min * 60_000
+  writeLines(main, [claudeLine({ id: 'm1', ts: at(40), sessionId: SESSION, usage: { input: 10 }, final: true })])
+  writeLines(file, [
+    claudeLine({ id: 'r1', ts: at(35), agentId: 'abc123', usage: { input: 5, output: 2 }, final: true }),
+    claudeLine({
+      id: 'r2', ts: at(30), agentId: 'abc123', usage: { input: 5, output: 2 }, final: true, stopReason: 'tool_use',
+      content: [{ type: 'tool_use', id: 'toolu_leak_1', name: 'Bash',
+        input: { command: `${secret}-command`, description: `${secret}-description`, timeout: 600000 } }],
+    }),
+  ])
+  const agg0 = new Aggregator()
+  await scan(agg0)
+  const live = JSON.stringify(agg0.toSnapshot())
+  const agg = Aggregator.fromSnapshot(JSON.parse(live) as Snapshot)
+  await replayAgents(agg, agentReplayFiles(agg, VNOW))
+  assert.deepEqual([agentOf(agg, file).lastTool, agentOf(agg, file).lastToolTs], ['Bash', at(30)])
+  assert.ok(fs.readFileSync(file, 'utf8').includes(`${secret}-command`), 'the fixture lost its command')
+  const cfg = makeConfig()
+  const input = makeInput({ agg, cfg, ui: { agentsExpanded: ['s:' + SESSION], agentSelected: 'a:abc123' } })
+  const vm = buildViewModel(input)
+  // The name is what the sentence says, and all it says of the call.
+  assert.match(vm.agents.selected?.stateText ?? '', /silent since \d\d:\d\d, after a Bash call; the agent may have been stopped\.$/)
+  const range = { from: '2026-09-01', to: '2026-09-03' }
+  const outputs: Array<[string, string]> = [
+    ['live snapshot', live], ['snapshot', JSON.stringify(agg.toSnapshot())], ['view model', JSON.stringify(vm)],
+    ['markdown', markdownDocument(vm, agentTreeFor(input, 'text'))],
+    ['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)], ['tools export', toolsCsv(agg, range)],
+  ]
+  for (const [what, out] of outputs) assert.equal(out.includes(secret), false, `${what} holds a tool call's input`)
+  // No key of the call's input either (a record's own `input` is its token count, not this one).
+  for (const snapshot of [outputs[0][1], outputs[1][1]]) {
+    assert.equal(/"(command|description|timeout)"/.test(snapshot), false, 'the snapshot holds a field of the call\'s input')
   }
 })

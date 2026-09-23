@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The six names main.ts uses but does not declare.
+ * The seven names main.ts uses but does not declare.
  *
  * `acquireVsCodeApi` is the webview host's own function, injected by VS Code before the page
  * runs. `SRC_TITLE` and `SRC_IDS` are the provider registry's two facts, `L10N` is the page's
- * translated words, `LOCALE` the language they are counted in and `AGENT_PAGING` the agent
- * tree's paging steps; all five are written in front of this module by src/dashboard.ts,
- * because the registry, the localisation seam and the tree's limits are Node code and cannot be
- * part of a browser bundle. All six are declared, never defined:
+ * translated words, `LOCALE` the language they are counted in, `AGENT_PAGING` the agent
+ * tree's paging steps and `AGENT_SILENT_MS` when a running agent's silence is stated; all six
+ * are written in front of this module by src/dashboard.ts, because the registry, the
+ * localisation seam and the tree's limits are Node code and cannot be part of a browser bundle.
+ * All seven are declared, never defined:
  * nothing here reaches the built script, so a wrong shape is a compile error and never a
  * second copy of the truth.
  */
@@ -38,3 +39,9 @@ declare const LOCALE: string
  * node of the agent tree shows per "more" step, and at most how many steps it takes.
  */
 declare const AGENT_PAGING: { groupChildren: number; morePages: number }
+
+/**
+ * src/agentTree.ts's SILENT_AFTER_MS (1.6 N5): how long a running agent's transcript may stay
+ * unchanged before its row says "silent for 4 min" — the page's clock decides when, every second.
+ */
+declare const AGENT_SILENT_MS: number

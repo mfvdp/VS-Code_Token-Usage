@@ -312,6 +312,14 @@ export interface AgentRec {
    * activity of the transcript too, which `lastTs` (the last counted reply) does not include.
    */
   rejected: RejectedRequest | null
+  /**
+   * 1.6 N5 (§0a.5): the name of the last `tool_use` block of the transcript — through the tool
+   * names' own alphabet, `[A-Za-z0-9_.:@/-]` and at most TOOL_NAME_MAX_CHARS, else null — and the
+   * time of its line. What the tree names when an agent went quiet after a call ("after a Bash
+   * call"); never the call's input. Null for a transcript without a tool call.
+   */
+  lastTool: string | null
+  lastToolTs: number | null
 }
 
 /** A launch the parent transcript recorded; the bridge from tool_use id to agent. */

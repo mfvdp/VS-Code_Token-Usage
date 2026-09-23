@@ -25,7 +25,7 @@ import * as vscode from 'vscode'
 import { randomBytes } from 'node:crypto'
 import script from 'webview:script'
 import { SOURCES, SOURCE_TITLE } from './adapters'
-import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES } from './agentTree'
+import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from './agentTree'
 import { locale, t } from './i18n'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { ViewModel } from './viewModel'
@@ -871,9 +871,15 @@ ul { margin: 6px 0; padding-left: 18px; }
 /* Launched, but its transcript not seen yet: the name is the launch's hint, not the agent's. */
 .ag-k-pending > .ag-line .ag-label { font-style: italic; }
 /* Usage, duration and the live clock: quieter than the name, and in figures that do not
-   jitter while the seconds tick. */
+   jitter while the seconds tick. The silence of a running agent (1.6 N5, "silent for 4 min")
+   follows them in the same tone, no colour of its own: it is a fact about the clock, not an
+   alarm. */
 .ag-fig { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; margin-left: auto;
           text-align: right; }
+/* 1.6 D10: the ⚠ of an output that is a lower bound, inside the usage figure — only while the
+   script's ROW_LOWER_BOUND_MARK is on. The glyph comes from a fallback font whose line box is a
+   pixel taller than the figures' own; held to its font size, it never makes a row taller. */
+.ag-lb { line-height: 1; }
 /* One glyph per state, drawn from the class and coloured with the page's own tokens only:
    green and red for what the parent recorded, the provider's blue for what still runs, the
    foreground for a session in use, and the dim tone for what the tree can only call quiet — and
@@ -969,9 +975,10 @@ span.ag-more { color: var(--dim); }
  * through the virtual module `webview:script` — so the compiler sees every line of it, which
  * it never did while this was a template string.
  *
- * The five consts in front of it are what a browser bundle cannot reach: the provider
+ * The six consts in front of it are what a browser bundle cannot reach: the provider
  * registry is Node code (fs, os, path), and so is the localisation seam; the agent tree's paging
- * steps are src/agentTree.ts's, written here so the page cannot count them differently. They are written at
+ * steps and the silence after which a running agent's row says so (1.6 N5) are
+ * src/agentTree.ts's, written here so the page cannot count them differently. They are written at
  * the top of the very same <script>, where the module below reads them out of its own scope;
  * src/webview/globals.d.ts declares them for the compiler. A function rather than a const,
  * because `t()` may only run once the host has set the bundle — at render time, not at load.
@@ -989,6 +996,8 @@ const L10N = ${webviewDictionary()};
 const LOCALE = ${inline(locale())};
 /** How many children an open agent-tree node shows per "more" step, and at most how many steps. */
 const AGENT_PAGING = ${inline({ groupChildren: MAX_GROUP_CHILDREN, morePages: MAX_MORE_PAGES })};
+/** After how long without a line a running agent's row says "silent for …" (SILENT_AFTER_MS). */
+const AGENT_SILENT_MS = ${inline(SILENT_AFTER_MS)};
 ${script}`
 }
 
@@ -1098,7 +1107,6 @@ function webviewWords(): Record<string, string> {
     'Not enough data for a summary yet.': t('Not enough data for a summary yet.'),
     'Open settings': t('Open settings'),
     'Output': t('Output'),
-    'Output figures in the details marked ⚠ are lower bounds.': t('Output figures in the details marked ⚠ are lower bounds.'),
     'Peak day {0}': t('Peak day {0}'),
     'Peak day {0} · {1}': t('Peak day {0} · {1}'),
     'Per req.': t('Per req.'),
@@ -1217,6 +1225,7 @@ function webviewWords(): Record<string, string> {
     'resets at {0}': t('resets at {0}'),
     'running': t('running'),
     'running for {0}': t('running for {0}'),
+    'silent for {0}': t('silent for {0}'),
     'scroll sideways for the remaining columns →': t('scroll sideways for the remaining columns →'),
     'shown': t('shown'),
     'some models have no price on file': t('some models have no price on file'),

@@ -143,6 +143,7 @@
   "Tue": "Di",
   "Turns": "Turns",
   "Type": "Typ",
+  "Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit einem {1}-Aufruf um {0} nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.",
   "Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit {0} nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.",
   "Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um {0} wurde abgelehnt — {1}.",
   "Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um {0} wurde abgelehnt.",
@@ -328,5 +329,6 @@
   "~empty in {0} ({1}) · low confidence": "~leer in {0} ({1}) · geringe Sicherheit",
   "~empty in {0} ({1}) · medium confidence": "~leer in {0} ({1}) · mittlere Sicherheit",
   "~ends at {0} when it resets": "~endet bei {0} beim Reset",
-  "“Usage” = fresh input + cache write + output; cache reads are listed apart because they outnumber the rest by orders of magnitude.": "„Verbrauch“ = frische Eingabe + Cache-Schreiben + Ausgabe; Cache-Lesen wird gesondert aufgeführt, weil es den Rest um Größenordnungen übertrifft."
+  "“Usage” = fresh input + cache write + output; cache reads are listed apart because they outnumber the rest by orders of magnitude.": "„Verbrauch“ = frische Eingabe + Cache-Schreiben + Ausgabe; Cache-Lesen wird gesondert aufgeführt, weil es den Rest um Größenordnungen übertrifft.",
+  "⚠ lower bound — {0} of {1} replies unfinished": "⚠ Untergrenze — {0} von {1} Antworten unvollständig"
 }

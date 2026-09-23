@@ -366,9 +366,9 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * that adds a field only a replay can fill for the transcripts already read raises it by one.
  * 1 = 1.6's runs from the workflow journals; 2 = the `Workflow` launches and their ends (N4); 3 = the
  * rejected requests of the agents (N3); 4 = the records of the agents whose transcript holds
- * nothing but rejected requests (D4).
+ * nothing but rejected requests (D4); 5 = the last tool call of an agent and its time (N5).
  */
-export const AGENT_TABLES_REVISION = 4
+export const AGENT_TABLES_REVISION = 5
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -610,6 +610,28 @@ interface TokenFigures {
   reasoning: number
 }
 
+/**
+ * What `countClaudeTools` found on one line: the calls it added to the message, and the name of
+ * the line's last `tool_use` block (1.6 N5) — null for a name outside the tool names' alphabet,
+ * `undefined` for a line without a tool call.
+ */
+interface ToolCalls {
+  added: number
+  last: string | null | undefined
+}
+
+/**
+ * 1.6 N5 (§0a.5): a line's last tool call onto an agent record — the name and the line's time —
+ * unless the record already holds a later one: the transcript's last call is what the tree names
+ * when the agent went quiet after it. A main session's record keeps none.
+ */
+function noteLastTool(rec: AgentRec | MainRec, last: string | null | undefined, at: number): void {
+  if (last === undefined || !('lastTool' in rec)) return
+  if (rec.lastToolTs !== null && rec.lastToolTs > at) return
+  rec.lastTool = last
+  rec.lastToolTs = at
+}
+
 function creditTokens(rec: AgentRec | MainRec, v: TokenFigures): void {
   rec.input += v.input
   rec.cacheWrite += v.cacheWrite
@@ -697,6 +719,10 @@ function restoreAgent(v: unknown): AgentRec | null {
     outcomeTs: known !== outcome ? null : finiteOrNull(r.outcomeTs),
     outcomeStatus,
     rejected: restoreRejected(r.rejected),
+    // 1.6 N5: the last tool call's name through the same alphabet as at ingest, and its time —
+    // a name without its time names no moment the tree could compare, and is dropped with it.
+    lastTool: finiteOrNull(r.lastToolTs) === null ? null : cleanAgentName(r.lastTool, TOOL_NAME_MAX_CHARS),
+    lastToolTs: finiteOrNull(r.lastToolTs),
   }
 }
 
@@ -1086,19 +1112,28 @@ export class Aggregator {
    * a single call. `p.day`/`p.model` place the count on the message, not on the late line.
    * With `toTable` false (a replay) the side table is left alone; only the message's own
    * memory of what it counted moves, and that memory belongs to the replay.
+   *
+   * 1.6 N5 (§0a.5): it also says which tool the line called last — the name of its last
+   * `tool_use` block, through the tool names' alphabet (`cleanAgentName`, at most
+   * TOOL_NAME_MAX_CHARS), null for a name that does not fit it, and `undefined` for a line that
+   * calls none — for the agent record, which keeps the transcript's last call and its time. Of a
+   * block only its `type`, `name` and `id` are named; its `input` is never looked at.
    */
-  private countClaudeTools(p: PendingMessage, content: unknown, toTable = true): number {
-    if (!Array.isArray(content)) return 0
+  private countClaudeTools(p: PendingMessage, content: unknown, toTable = true): ToolCalls {
+    if (!Array.isArray(content)) return { added: 0, last: undefined }
     let added = 0
+    let last: string | null | undefined
     const counts = new Map<string, number>()
     for (const c of content) {
       if (!c || typeof c !== 'object') continue
+      const b = c as { type?: unknown; name?: unknown; id?: unknown }
       // Only real tool calls: a `server_tool_use` block is already counted as webSearch /
       // webFetch on the bucket, and listing it here would report the same call twice.
-      if ((c as { type?: unknown }).type !== 'tool_use') continue
-      const name = str((c as { name?: unknown }).name)
+      if (b.type !== 'tool_use') continue
+      last = cleanAgentName(b.name, TOOL_NAME_MAX_CHARS)
+      const name = str(b.name)
       if (!name) continue
-      const id = str((c as { id?: unknown }).id)
+      const id = str(b.id)
       if (id) {
         const ids = p.toolIds ?? (p.toolIds = [])
         if (ids.includes(id)) continue
@@ -1111,7 +1146,7 @@ export class Aggregator {
       }
       counts.set(name, (counts.get(name) ?? 0) + 1)
     }
-    if (counts.size === 0) return added
+    if (counts.size === 0) return { added, last }
     const tools = p.tools ?? (p.tools = {})
     for (const [name, cand] of counts) {
       const prev = tools[name] ?? 0
@@ -1120,7 +1155,7 @@ export class Aggregator {
       if (toTable) this.addTool('claude', p.day, p.model, name, cand - prev)
       added += cand - prev
     }
-    return added
+    return { added, last }
   }
 
   // ---------------------------------------------------------------- Claude
@@ -1331,7 +1366,7 @@ export class Aggregator {
    * there and nowhere else.
    */
   private creditMessage(
-    p: PendingMessage, v: TokenFigures, final: boolean, tools: number, at: number, model: unknown,
+    p: PendingMessage, v: TokenFigures, final: boolean, tools: ToolCalls, at: number, model: unknown,
     ctx: IngestContext,
   ): void {
     const rec = ctx.isSub ? this.agentFor(ctx.file, at) : this.mainFor(ctx.file, at)
@@ -1339,9 +1374,10 @@ export class Aggregator {
     creditTokens(rec, v)
     rec.requests += 1
     if (final) rec.outputFinal += 1
-    rec.toolCalls += tools
+    rec.toolCalls += tools.added
     touchRecord(rec, at, model)
     clearRejected(rec, at)
+    noteLastTool(rec, tools.last, at)
     if (ctx.isSub) p.agent = ownerKey(ctx.file)
     else p.main = ownerKey(ctx.file)
   }
@@ -1353,7 +1389,7 @@ export class Aggregator {
    * replay's to rebuild, and crediting it here as well would count it twice.
    */
   private creditGrowth(
-    p: PendingMessage, v: TokenFigures, newlyFinal: boolean, tools: number, at: number | null,
+    p: PendingMessage, v: TokenFigures, newlyFinal: boolean, tools: ToolCalls, at: number | null,
     model: unknown, ctx: IngestContext,
   ): void {
     const key = ownerKey(ctx.file)
@@ -1374,10 +1410,11 @@ export class Aggregator {
     }
     creditTokens(rec, v)
     if (newlyFinal) rec.outputFinal += 1
-    rec.toolCalls += tools
+    rec.toolCalls += tools.added
     if (at !== null) {
       touchRecord(rec, at, model)
       clearRejected(rec, at)
+      noteLastTool(rec, tools.last, at)
     }
   }
 
@@ -1436,8 +1473,10 @@ export class Aggregator {
       outcome: kept?.outcome ?? null,
       outcomeTs: kept?.outcomeTs ?? null,
       outcomeStatus: kept?.outcomeStatus ?? null,
-      // The transcript's own lines say it again: a replay reads its rejections anew.
+      // The transcript's own lines say it again: a replay reads its rejections anew, and its tool calls.
       rejected: null,
+      lastTool: null,
+      lastToolTs: null,
     }
     this.agentMap.set(file, rec)
     this.agentFileById.set(rec.agentId, file)

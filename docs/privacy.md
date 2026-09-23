@@ -48,7 +48,9 @@ identifiers and counts, never content:
   holds the workflow's `script`, is never read; from a queued task notification the
   `<tool-use-id>` and `<status>` tags. Never the `description`, the `prompt`, the `summary`, the
   `output-file`, the `content` or the `result`, never a workflow's `script`, `scriptPath` or
-  `transcriptDir`, and never a working directory. Each of these
+  `transcriptDir`, and never a working directory. Of an agent's transcript the `name` of its last
+  tool call is kept too, with the time of its line — what the tree names when the agent went
+  quiet after it ("after a Bash call") — never the call's `input`. Each of these
   values is an identifier or a number, and an identifier is held to a small alphabet and length
   on the way in — one that does not fit is dropped, not trimmed. The agent tables keep them for
   seven days in the token snapshot, never in an export or the diagnostics report, and of them

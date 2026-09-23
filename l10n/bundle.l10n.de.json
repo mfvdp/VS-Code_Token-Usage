@@ -258,7 +258,6 @@
   "Open settings": "Einstellungen öffnen",
   "Open the official usage page": "Die offizielle Verbrauchsseite öffnen",
   "Output": "Ausgabe",
-  "Output figures in the details marked ⚠ are lower bounds.": "Mit ⚠ markierte Ausgabewerte in den Details sind Untergrenzen.",
   "Own transcript": "Eigenes Transkript",
   "P90 {0}": "P90 {0}",
   "Peak day {0}": "Spitzentag {0}",
@@ -484,6 +483,7 @@
   "Type": "Typ",
   "Unexpected error while fetching": "Unerwarteter Fehler beim Abruf",
   "Unknown": "Unbekannt",
+  "Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit einem {1}-Aufruf um {0} nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.",
   "Unknown — inferred: no result was recorded and the transcript has been silent since {0}; the agent may have been stopped.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit {0} nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.",
   "Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um {0} wurde abgelehnt — {1}.",
   "Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.": "Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um {0} wurde abgelehnt.",
@@ -742,6 +742,7 @@
   "settings.json does not contain a JSON object": "settings.json enthält kein JSON-Objekt",
   "shown": "eingeblendet",
   "sign in": "anmelden",
+  "silent for {0}": "still seit {0}",
   "since the day boundary · against yesterday": "seit der Tagesgrenze · gegenüber gestern",
   "since the day boundary · {0}": "seit der Tagesgrenze · {0}",
   "so far {0} · Avg {1}/day · {2} days left": "bisher {0} · Ø {1}/Tag · noch {2} Tage",
@@ -940,5 +941,6 @@
   "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": "• Codex — der lokale „codex app-server“ wird gestartet und nach seinen Rate-Limits gefragt.\n  Dafür verlässt kein Datenverkehr von uns den Rechner.",
   "… {0} more": "… {0} weitere",
   "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ kennzeichnet eine Untergrenze: Die ältesten Stunden des Zeitraums sind bereits zu Tagessummen zusammengefasst",
-  "⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.": "⚠ kennzeichnet eine Untergrenze: Bei einer Antwort, die das Transkript nie als abgeschlossen markiert hat, zählt nur die bis dahin gemeldete Ausgabe."
+  "⚠ lower bound — {0} of {1} replies unfinished": "⚠ Untergrenze — {0} von {1} Antworten unvollständig",
+  "⚠ marks a lower bound: some replies were never marked finished, and only the output written up to then is counted.": "⚠ kennzeichnet eine Untergrenze: Einige Antworten wurden nie als abgeschlossen markiert, gezählt wird nur die bis dahin geschriebene Ausgabe."
 }

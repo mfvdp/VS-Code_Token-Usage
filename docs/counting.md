@@ -78,9 +78,11 @@ into the agent's usage, not into any total.
 
 **Lower bounds.** A response with no terminal line has an output figure that is a floor, not a
 total. Such rows carry `⚠`, the tooltip states what share of today's responses are affected, and
-the dashboard's data-quality section carries the lower-bound share for the whole range. Almost
-every finished subagent is one: Claude Code writes no end marker into an agent's transcript, and
-the file ends on an assistant line whose `stop_reason` is still `null`.
+the dashboard's data-quality section carries the lower-bound share for the whole range. In the
+[Agents](agents.md) section the details say how many of an agent's replies never finished, of how
+many (`⚠ lower bound — 2 of 41 replies unfinished`). Measured on this machine over seven days, a
+third of the agents have such a reply — nearly always one cut off at the tool call it made, not
+the agent's last: only 22 of 925 agent transcripts end on an unfinished reply.
 
 **Upgrading.** The persisted snapshot is schema version 8; version 5, 6 and 7 are still read.
 Version 7 — everything before the workflow runs of the agent tables —, version 6 — everything

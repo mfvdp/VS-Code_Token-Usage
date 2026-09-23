@@ -49,8 +49,9 @@ its agents that has a transcript — last when none has.
 **Each row** is the running glyph, the agent's name as the tree writes it, a live
 `running for 12 min 05 s` counted from its first line (from the launch, for a launch; for a
 collector from the first line of the earliest of its agents that has a transcript, and no clock
-when none has), its usage — `–` for a launch and a collector, since nothing of them was counted —
-and under them where it sits:
+when none has), its usage — `–` for a launch and a collector, since nothing of them was counted —,
+`silent for 4 min` once the agent has not written for a while, as on its tree row (see
+[The tree](#the-tree)), and under them where it sits:
 `Session 9d0eb37a · Workflow cfe7718d`, with the session's project after it while
 `tokenPace.attribution` names one. An agent that runs only because an agent below it runs — the
 parent waiting for its child — says so on that line: `waits for a child agent`.
@@ -127,11 +128,16 @@ days the tree keeps. A session without agents shows no agents figure. The last f
 session's span from its first line to its last (its title says so), written in days and hours
 from **48 hours** on — the hours floored, so `22 d 11 h` for a session of 22 days, 11 hours and
 59 minutes — and as a duration below that. A row carries no
-lower-bound mark: the details do (`Output … ⚠ lower bound`), and while a row on screen — one of
-a session, of an opened node, or of the running list, whose agents are nearly always mid-reply
-— has one, a line under the tree says so — *Output figures in the details marked ⚠ are lower
-bounds.* A running node also says for how long:
-`running for 12 min 05 s`, counted from its first line and ticking every second. An agent's name
+lower-bound mark; the details do, with the numbers — `Output` `4.1K ⚠ lower bound — 2 of 41
+replies unfinished` (see [Why the output is a lower bound](#details)). A running node also says for how long:
+`running for 12 min 05 s`, counted from its first line and ticking every second. A running
+agent whose transcript has not changed for **3 minutes** says that too, after its figures —
+`silent for 4 min`, in whole minutes, then `1 h 05 min` — in the same quiet tone as the figures,
+from the page's own clock: it appears the second the three minutes are up, with no push, and goes
+again with the agent's next line. A pause of a minute or two is an ordinary tool call; after three
+minutes the reader may want to look. It changes no state — the agent stays running until ten
+minutes have passed — and an agent that runs only because an agent it launched runs, or a launch,
+never says it: they have no line of their own to be silent in. An agent's name
 is its type, its model and its short id — `Explore · claude-opus-5 · 94f3`. The type is the one
 the agent's sidecar names, else the one its launch asked for, else `Agent`; the model is the last
 one its transcript recorded, else the alias the sidecar or the launch names, else `–`. The **short
@@ -331,6 +337,7 @@ word for word. For an agent:
 * Running — inferred: the transcript changed 2 min ago and no result was recorded yet.
 * Running — inferred: a child agent of this agent is still running.
 * Unknown — inferred: no result was recorded and the transcript has been silent since 14:20; the agent may have been stopped.
+* Unknown — inferred: no result was recorded and the transcript has been silent since 14:20, after a Bash call; the agent may have been stopped.
 * Running — inferred: the transcript changed 1 min ago, after an outcome was recorded at 14:20.
 * Unknown — inferred: the transcript went on after an outcome was recorded at 14:20, and has been silent since 14:38.
 * Unknown — inferred: no result was recorded; the last request, at 14:20, was rejected — 5-hour limit (HTTP 429).
@@ -339,7 +346,11 @@ word for word. For an agent:
 * Running — inferred: the transcript changed 2 min ago; its last request was rejected.
 
 A stopped agent's sentence quotes the word the parent wrote — `killed`, `cancelled` or `stopped`,
-verbatim; a failed agent's is the same sentence for `failed`, `error` and `timeout`. A result recorded
+verbatim; a failed agent's is the same sentence for `failed`, `error` and `timeout`. An unknown
+agent whose transcript went quiet on a tool call — its last line called one — names the tool, as
+Claude Code wrote its name (`Bash`, `Read`, `mcp__server__tool`); one whose last line called none
+keeps the sentence without it, and one whose last request was rejected names the rejection
+instead. A result recorded
 without a time is stated without one — always so for the workflow journal's, whose lines carry no
 time. The other nodes:
 
@@ -395,7 +406,8 @@ they stood under; while a hover card or a sparkline's tip is open, the first `Es
 and the next one the details. For an agent: type,
 models, its ID, depth, started, duration, last activity (with a live `… ago` beside it) and —
 for an agent that wrote on after its outcome — what was recorded, then turns,
-usage, fresh input, cache write 5 m and 1 h, cache read, output, reasoning and tool calls, then —
+usage, fresh input, cache write 5 m and 1 h, cache read, output — with its lower bound, where it is
+one, in numbers — reasoning and tool calls, then —
 when the API rejected its last request — the `Last request` row, then
 who spawned it, its workflow run and — where the run's journal started its step more than once —
 which attempt it was. A session opens with its two figures — `Own transcript`, and
@@ -431,11 +443,18 @@ what the agent used over its run (a median 0.83 of the tree's usage). So the row
 it is, *Claude Code's own figure for this agent, never added to a total*: adding it to ours would
 count the agent twice, and it is not the same kind of figure.
 
-**Why the output is a lower bound.** Claude Code writes no end marker into an agent's
-transcript — a finished agent's file ends on an assistant line whose `stop_reason` is still
-`null` — so its last reply is counted as far as it was written, and almost every finished
-agent's output carries `⚠ lower bound` in its details. A mark on nearly every row would say
-nothing, so the tree rows carry none; the line under the tree points to the details instead.
+**Why the output is a lower bound.** A reply is written into a transcript line by line, and only
+its last line carries a stop reason. A reply none of whose lines carries one was never marked
+finished, so only the output written up to its last line is counted, and the figure is a lower
+bound. The details say how many replies that is, of how many: `⚠ lower bound — 2 of 41 replies
+unfinished`, on an agent, on a workflow run (its agents' replies) and on a session (its own
+transcript's). Counted on this machine over seven days (2026-09-23): **293 of 925 agents (32 %)**
+had at least one such reply, **201 of them exactly one**; **455 of the 477** such replies were
+followed by the result of the tool they called — cut off at the tool call, not at the end of the
+agent — and only **22** were the file's last reply. Only 22 of the 925 agent transcripts end on an
+unfinished reply, so an unfinished reply is no end marker, and most finished agents are no lower
+bound at all. The tree's rows carry no mark: the details do, and the markdown report marks the
+line — ` ⚠` behind the usage — and says once, at the end, what the mark means.
 
 ## What is read
 
@@ -444,7 +463,7 @@ Everything comes from the directory Token Pace already reads for the token count
 
 | File | Taken from it | Never read |
 |---|---|---|
-| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)); a nested agent lies flat beside the one that spawned it | any text |
+| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); a nested agent lies flat beside the one that spawned it | any text, and a tool call's `input` |
 | `agent-<id>.meta.json` beside each agent transcript | `agentType`, `model`, `spawnDepth`, `toolUseId` — from a file of at most 64 KB, never through a link | `description`, `prompt`, and every other field |
 | `<session>/subagents/workflows/<run>/journal.jsonl` | `type`, `key` and `agentId` at the head of each line, matched on the raw line — a line of at most 16 KB without that head is parsed for the same three, a longer one skipped and counted; the `key` is compared within the journal, never kept: with the keys of the same journal's other lines, to tell a step that was started again from a new one, and it is never stored, shown, exported or logged | the `result`, `label` and `phase` a line carries |
 | the transcript that launched an agent — the session's, or another agent's | an `Agent` (or `Task`) tool call: its `id` and three fields of its input, `subagent_type`, `model` and `run_in_background` | the input's `description` and `prompt` |
@@ -474,7 +493,8 @@ last time, the token counts, the number of tool calls and the recorded result wi
 word for it (one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`,
 `stopped`), and for an agent its last rejected request — its time, its HTTP status, its error
 kind and its limit, each one of the values listed above — an agent whose transcript holds nothing
-but rejected requests has a record from the first of them, its counts all zero; per launch its tool-call id, the type and model it asked for, whether it runs in the
+but rejected requests has a record from the first of them, its counts all zero —, and the name of
+its last tool call with that line's time; per launch its tool-call id, the type and model it asked for, whether it runs in the
 background, its result with that word and the parent's three totals; per `Workflow` call its
 tool-call id, the run id its result named, when it was made, and the run's end with the parent's
 word for it; per workflow run the agents
@@ -517,7 +537,8 @@ anew, and its run's agents with it.
   The keyboard focus stays on its row through a push — on the running list's row or on the
   tree's, whichever it was on.
 * The `running for …` clocks of the running list and the tree and the last activity in the
-  details tick every second in the page itself — no message, no redraw.
+  details tick every second in the page itself — no message, no redraw — and so does a running
+  agent's `silent for …`, which the same timer shows once three minutes have passed.
 * The recursive file watcher can miss the files of a directory created after it started — on
   Linux it does — so while an agent runs, or while a session is active, the agent directories of
   the active sessions are also listed every **5 seconds**, on every platform; the one-minute

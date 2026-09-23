@@ -1458,6 +1458,14 @@ const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending', 'noreply'];
  * tree the builder made.
  */
 const AGENT_MAX_DEPTH = 24;
+/**
+ * 1.6 D10: whether a row of the tree — and of the running list — marks an output that is a lower
+ * bound with ⚠, inside its usage figure, titled with the view model's reason ("⚠ lower bound — 2
+ * of 41 replies unfinished"). Off, the rows carry no mark and the details' Output note alone says
+ * it (the markdown marks its lines either way). Whether the rows carry it is the lead's call on
+ * the screenshot check of 1.6 §3 D10 (§7a Q5) — this one line turns it on.
+ */
+const ROW_LOWER_BOUND_MARK: boolean = false;
 
 function agentState(v: Payload): string {
   return AGENT_STATES.indexOf(v) >= 0 ? String(v) : 'unknown';
@@ -1539,6 +1547,46 @@ function liveSince(ts: number): string {
 }
 
 /**
+ * How long a running agent has been silent, in whole minutes (1.6 N5): "4 min", then "1 h 05 min".
+ * Minutes only — the silence is stated from three minutes on, and its seconds would tick past
+ * without saying more.
+ */
+function silentText(ms: number): string {
+  if (!Number.isFinite(ms)) return '–';
+  const m = Math.max(0, Math.floor(ms / 60000));
+  if (m < 60) return m + ' min';
+  return Math.floor(m / 60) + ' h ' + (m % 60 < 10 ? '0' : '') + (m % 60) + ' min';
+}
+
+/**
+ * 1.6 N5: the silence of a running agent — " · silent for 4 min" after the row's figures — from its
+ * last activity on, written for every node the view model says may be silent (`silence`) and shown
+ * by the page's clock only once AGENT_SILENT_MS have passed since it: until then it is there,
+ * hidden, and the timer (tickLive) shows it the second it is due, with no push. The separator is
+ * inside it, so a hidden one leaves no dot behind. No colour: the figures' own tone.
+ */
+function liveSilent(ts: number | null): string {
+  if (ts === null) return '';
+  const ms = Date.now() - ts;
+  const due = ms >= AGENT_SILENT_MS;
+  return '<span class="ag-silent" data-live="silent" data-ts="' + esc(ts) + '"' + (due ? '' : ' hidden') + '> · '
+    + '<span class="nobr">' + tr('silent for {0}', '<span class="ag-for">' + (due ? esc(silentText(ms)) : '') + '</span>')
+    + '</span></span>';
+}
+
+/**
+ * 1.6 D10: the ⚠ of an output that is a lower bound, for the end of the row's usage figure — only
+ * while ROW_LOWER_BOUND_MARK is on, and only with the view model's reason, which is its title: a
+ * mark nobody can ask about says less than none. For a screen reader it is "lower bound".
+ */
+function lowerMark(n: Payload): string {
+  if (!ROW_LOWER_BOUND_MARK || !n || n.lowerBound !== true) return '';
+  const why = typeof n.lowerBoundText === 'string' && n.lowerBoundText !== '' ? n.lowerBoundText : '';
+  if (!why) return '';
+  return ' <span class="ag-lb" role="img" aria-label="' + tr('lower bound') + '" title="' + esc(why) + '">⚠</span>';
+}
+
+/**
  * What the agents below a node came to (1.6 N1), as the view model wrote it — "427 started ·
  * 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — for the eye, and the same in words for a screen reader, which
  * would read the glyphs as shapes. Each part keeps together and the line wraps between them,
@@ -1565,7 +1613,8 @@ function agentTally(n: Payload): string {
  * agents figure at all, rather than a dash that reads as one that was not counted.
  */
 function sessionFigures(n: Payload): string[] {
-  const out = [tr('own {0}', orDash(n.usage))];
+  // 1.6 D10: a session's lower bound is its own transcript's, so the mark goes with its own figure.
+  const out = [tr('own {0}', orDash(n.usage) + lowerMark(n))];
   if (typeof n.usageAgents === 'string' && n.usageAgents !== '') out.push(tr('agents {0}', orDash(n.usageAgents)));
   out.push('<span title="' + tr('span from the first to the last line') + '">' + orDash(n.duration) + '</span>');
   return out;
@@ -1633,14 +1682,17 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   const label = orDash(n.label);
   const labelHtml = agentLabel(n.label, kind);
   // Usage and duration as the view model worded them and, only while the node runs, the time
-  // since it started, ticking. A lower bound is not marked here: almost every finished agent's
-  // output is one, and a ⚠ on nearly every row says nothing — the details mark it, and one line
-  // under the tree says where. A launch whose transcript was never seen has nothing counted,
-  // so it shows no figures at all rather than a row of dashes. Each figure is unbreakable, so
-  // a narrow sidebar wraps the line at a separator and never between a number and its unit.
+  // since it started, ticking. A lower bound is marked inside the usage figure only while
+  // ROW_LOWER_BOUND_MARK is on (1.6 D10); the details' Output note says it either way. A launch
+  // whose transcript was never seen has nothing counted, so it shows no figures at all rather
+  // than a row of dashes. Each figure is unbreakable, so a narrow sidebar wraps the line at a
+  // separator and never between a number and its unit. After them, for a running agent, how
+  // long it has been silent once that is three minutes (1.6 N5).
   const start = agentTs(n.startTs);
-  const figures = kind === 'pending' ? [] : kind === 'session' ? sessionFigures(n) : [orDash(n.usage), orDash(n.duration)];
+  const figures = kind === 'pending' ? [] : kind === 'session' ? sessionFigures(n)
+    : [orDash(n.usage) + lowerMark(n), orDash(n.duration)];
   if (state === 'running' && start !== null) figures.push(tr('running for {0}', liveSince(start)));
+  const silent = n.silence === true && figures.length ? liveSilent(agentTs(n.lastTs)) : '';
   const fold = parent
     ? '<button class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-label="'
       + (open ? tr('Collapse {0}', label) : tr('Expand {0}', label)) + '"></button>'
@@ -1662,7 +1714,7 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
     + '<span class="ag-text"><span class="ag-label">' + labelHtml + '</span>'
     + (meta.length ? '<span class="meta">' + meta.join(' · ') + '</span>' : '')
     + (figures.length
-       ? '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
+       ? '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + silent + '</span>'
        : '')
     + '</span></button>';
   // The panel after the row's line and before the children, so the node's own details stand
@@ -1742,7 +1794,10 @@ function agentNowRow(it: Payload, panel: AgentPanel | null): string {
   const start = agentTs(it.startTs);
   const figures: string[] = [];
   if (start !== null) figures.push(tr('running for {0}', liveSince(start)));
-  figures.push(orDash(it.usage));
+  // 1.6 D10: marked as the tree's row is, while the page marks rows at all.
+  figures.push(orDash(it.usage) + lowerMark(it));
+  // 1.6 N5: and how long it has been silent, as on its tree row.
+  const silent = it.silence === true ? liveSilent(agentTs(it.lastTs)) : '';
   // Each part keeps together while it fits a line and breaks inside only when it cannot.
   const where: string[] = typeof it.context === 'string' && it.context !== ''
     ? it.context.split(' · ').map((p: string) => orDash(p)) : [];
@@ -1754,7 +1809,7 @@ function agentNowRow(it: Payload, panel: AgentPanel | null): string {
   return '<li class="ag-k-' + kind + '"><button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
     + '" data-list="now" aria-pressed="' + on + '">' + agentGlyph('running', true)
     + '<span class="ag-text"><span class="ag-label">' + labelHtml + '</span>'
-    + '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
+    + '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + silent + '</span>'
     + (where.length ? '<span class="meta ag-ctx">' + where.map(w => '<span>' + w + '</span>').join(' · ') + '</span>' : '')
     + '</span></button>' + (on && panel ? agentDetails(panel.d, panel.node, null) : '') + '</li>';
 }
@@ -1865,19 +1920,6 @@ function agentDetails(d: Payload, node: Payload, depth: number | null): string {
 }
 
 /**
- * Whether a tree row on screen carries an output that is a lower bound: the nodes as they
- * arrived, bounded like the renderer, and only those of an opened node below the sessions —
- * the children of a closed one are not written at all. The running list's rows are asked
- * separately (see sAgents).
- */
-function shownLowerBound(list: Payload, expanded: string[], depth: number): boolean {
-  if (!Array.isArray(list) || depth > AGENT_MAX_DEPTH) return false;
-  return list.some((n: Payload) => !!n && typeof n === 'object' && (n.lowerBound === true
-    || (typeof n.key === 'string' && n.key !== '' && expanded.indexOf(n.key) >= 0
-      && shownLowerBound(n.children, expanded, depth + 1))));
-}
-
-/**
  * The running list, the tree, what it had to leave out, and the details of the selected node
  * under its row. Which nodes are open and which one is selected is the view state's (vm.ui), the
  * details are what the view model built for that selection (vm.agents.selected); both travel
@@ -1916,14 +1958,8 @@ function sAgents(): string {
     h += '<p class="empty">' + tr('{0} older session(s) not shown.', esc(Math.round(omitted))) + '</p>';
   }
   if (note) h += '<p class="empty">' + note + '</p>';
-  // The rows do not carry the lower-bound mark (see agentNode); this line says where it is,
-  // and only while a row on screen has one — a tree row, or a row of the running list, which
-  // is on screen whatever the tree has open, and whose agents are nearly always mid-reply.
-  const nowLower = Array.isArray(a.runningNow)
-    && a.runningNow.some((r: Payload) => !!r && typeof r === 'object' && r.lowerBound === true);
-  if (nowLower || shownLowerBound(roots, expanded, 0)) {
-    h += '<p class="meta">' + tr('Output figures in the details marked ⚠ are lower bounds.') + '</p>';
-  }
+  // 1.6 D10: no line about the lower bound under the tree any more. The details' Output note
+  // says it with its numbers, and a row marks it itself while ROW_LOWER_BOUND_MARK is on.
   return h;
 }
 
@@ -1952,13 +1988,23 @@ function agentPanelOf(a: Payload, roots: Payload[], expanded: string[], where: P
 /**
  * The page's one timer. Every second it rewrites the text of the live spans — how long a
  * running node has been running, and the last activity in the details — from the clock, and
- * does nothing else: no render, no message, no request. A page without such a span costs one
- * empty query a second.
+ * shows a running agent's silence the second it reaches AGENT_SILENT_MS (1.6 N5), with its
+ * minutes; it does nothing else: no render, no message, no request. A page without such a span
+ * costs two empty queries a second.
  */
 function tickLive(): void {
   document.querySelectorAll<HTMLElement>('[data-live="since"]').forEach(el => {
     const ts = Number(el.dataset.ts);
     if (Number.isFinite(ts)) el.textContent = sinceText(Date.now() - ts);
+  });
+  document.querySelectorAll<HTMLElement>('[data-live="silent"]').forEach(el => {
+    const ts = Number(el.dataset.ts);
+    if (!Number.isFinite(ts)) return;
+    const ms = Date.now() - ts;
+    const due = ms >= AGENT_SILENT_MS;
+    el.hidden = !due;
+    const min = typeof el.querySelector === 'function' ? el.querySelector('.ag-for') : null;
+    if (min && due) min.textContent = silentText(ms);
   });
 }
 

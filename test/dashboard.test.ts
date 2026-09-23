@@ -21,7 +21,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
-import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES } from '../src/agentTree'
+import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from '../src/agentTree'
 import { setBundle, setLocale } from '../src/i18n'
 import { agentTreeFor, buildViewModel, parseWebviewMessage } from '../src/viewModel'
 import { AGENT_WORLD, agentNode as agentNodeOf, agentWorld, everyParent, treeNodes } from './fixtures/agentWorld'
@@ -3167,7 +3167,7 @@ interface AgentCtx {
  * the messages it posts, the intervals it starts and a clock the test moves. A query for the
  * live spans answers with `spans`.
  */
-function agentCtx(spans: Array<Record<string, unknown>> = []): AgentCtx {
+function agentCtx(spans: Array<Record<string, unknown>> = [], script = SCRIPT, silent: Array<Record<string, unknown>> = []): AgentCtx {
   const posted: unknown[] = []
   const listeners: Record<string, Array<(ev: unknown) => void>> = {}
   const intervals: Array<{ fn: () => void; ms: number }> = []
@@ -3185,7 +3185,7 @@ function agentCtx(spans: Array<Record<string, unknown>> = []): AgentCtx {
       addEventListener: on('document:'),
       getElementById: () => root,
       querySelector: () => null,
-      querySelectorAll: (sel: string) => (sel === '[data-live="since"]' ? spans : []),
+      querySelectorAll: (sel: string) => (sel === '[data-live="since"]' ? spans : sel === '[data-live="silent"]' ? silent : []),
     },
     window: {
       addEventListener: on('window:'),
@@ -3194,7 +3194,7 @@ function agentCtx(spans: Array<Record<string, unknown>> = []): AgentCtx {
     console,
     clock,
   })
-  nodeVm.runInContext(SCRIPT, c)
+  nodeVm.runInContext(script, c)
   nodeVm.runInContext('Date.now = function () { return clock.t; };', c)
   const fire = (type: string, ev: Record<string, unknown>): void => {
     for (const fn of [...(listeners[type + ':capture'] ?? []), ...(listeners[type] ?? [])]) fn(ev)
@@ -3322,20 +3322,18 @@ test('a row carries the usage and duration it was given and, only while it runs,
   assert.match(STYLE, /\.ag-text \{[^}]*flex-wrap: wrap;/)
   // The workflow run and its running agent tick; done, failed, unknown and the sessions do not.
   assert.equal(h.split('data-live="since"').length - 1, 2, h)
-  // Output that is a lower bound is not marked on the row — the details mark it — and one
-  // line under the tree says so.
+  // 1.6 D10: output that is a lower bound is not marked on the row while the page ships with
+  // ROW_LOWER_BOUND_MARK off — the details' Output note says it — and the line under the tree
+  // that pointed there (1.5 PC1) is gone, closed or open, session row or not.
   assert.ok(h.indexOf(lbl('Plan', 'Opus 5', 'b1c2') + figs('12.3K', '40.0 s')) >= 0, h)
-  assert.equal(h.indexOf('⚠</span>'), -1, h)
+  assert.equal(h.indexOf('⚠'), -1, h)
   assert.equal(/ag-lb|lower-bound/.test(h), false, h)
-  assert.ok(h.endsWith('</ul></div><p class="meta">Output figures in the details marked ⚠ are lower bounds.</p>'), h)
-  // A closed run hides the only such row, and takes the line with it; so does the tree's
-  // default, where only the sessions show.
+  assert.ok(h.endsWith('</ul></div>'), h.slice(-120))
   const hidden = agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1, AK.a3] }) })
-  assert.equal(hidden.indexOf('marked ⚠'), -1, hidden)
-  assert.equal(agentsHtml(a).indexOf('marked ⚠'), -1)
-  // A session row that carries one is on screen closed as well: the line follows it.
-  const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', lowerBound: true })] })
-  assert.ok(agentsHtml(a, { agents: rootMark }).indexOf('marked ⚠') >= 0)
+  assert.equal(hidden.indexOf('⚠'), -1, hidden)
+  const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', lowerBound: true,
+    lowerBoundText: '⚠ lower bound — 1 of 9 replies unfinished' })] })
+  assert.equal(agentsHtml(a, { agents: rootMark }).indexOf('⚠'), -1)
   // Absence is a dash, never a zero: the quiet session. A launch nobody has counted yet shows
   // no figures at all — here it is not running, so not even a clock.
   assert.ok(h.indexOf(lbl('Explore', '–', 'launched') + '</span></button>') >= 0, h)
@@ -3537,7 +3535,8 @@ test('the details open inside the entry of the row that was clicked, after its l
   // Only its row is pressed; the panel is drawn once, and nowhere after the tree.
   assert.deepEqual([...h.matchAll(/data-key="([^"]*)" aria-pressed="true"/g)].map((m) => m[1]), [AK.a3])
   assert.equal(h.split('<div class="ag-details"').length - 1, 1, h)
-  assert.ok(h.endsWith('</ul></div><p class="meta">Output figures in the details marked ⚠ are lower bounds.</p>'), h.slice(-200))
+  // 1.6 D10: nothing after the tree — the line about the lower bound is gone.
+  assert.ok(h.endsWith('</ul></div>'), h.slice(-200))
   // A session's panel stands at the tree's own edge: no level to step out of.
   const top = agentsHtml(a, { agents: agentTree({ selected: detailsOf({ key: AK.s1, rows: [] }) }), ui: agentUi({ agentSelected: AK.s1 }) })
   assert.ok(panelOf(top).startsWith('<div class="ag-details" role="region" aria-label="Details">'), top)
@@ -3752,25 +3751,132 @@ test('details under a row of the running list say themselves whether the state w
   assert.equal(onPagePanel.indexOf('data-ts="' + (AG_NOW - 99_000) + '"'), -1, onPagePanel)
 })
 
-test('the ⚠ line counts the running list: with every node closed a running row with a lower bound still gets it', () => {
+// 1.6 P6 (§3 D10): pinned "the ⚠ line counts the running list" — the line under the tree ("Output
+// figures in the details marked ⚠ are lower bounds.") is gone; a row marks its own lower bound, and
+// only while the page ships with ROW_LOWER_BOUND_MARK on (see the next test).
+test('no line under the tree speaks of the lower bound, and with the mark off no row of the running list carries one', () => {
   const a = agentCtx()
-  const legend = 'Output figures in the details marked ⚠ are lower bounds.'
-  // The default page: two sessions, neither a lower bound, every agent inside a closed branch —
-  // the running agent's row in the list is the only row on screen that is one.
-  const bound = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true })] }) })
+  // The default page: every agent inside a closed branch, the running agent's list row a lower bound.
+  const bound = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true,
+    lowerBoundText: '⚠ lower bound — 2 of 41 replies unfinished' })] }) })
   assert.equal(treePart(bound).indexOf('data-key="' + AK.a1 + '"'), -1, 'the running agent\'s tree row is on screen')
-  assert.equal(bound.split(legend).length - 1, 1, bound)
-  // Under the tree, as for a tree row; the running row itself carries no mark, as a tree row does not.
-  assert.ok(bound.indexOf(legend) > bound.indexOf('<div class="agtree"'), bound)
-  assert.equal(bound.slice(0, bound.indexOf('<div class="agtree"')).indexOf('⚠'), -1, bound)
-  // No row on screen with a lower bound, no line — whatever a closed branch holds.
-  for (const lowerBound of [false, undefined, 'true', 1, null]) {
-    const h = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound })] }) })
-    assert.equal(h.indexOf(legend), -1, String(lowerBound))
+  assert.equal(bound.indexOf('⚠'), -1, bound)
+  assert.equal(/marked ⚠|lower bounds\./.test(bound), false, bound)
+  assert.ok(bound.endsWith('</ul></div>'), bound.slice(-120))
+  // The word is out of the page's dictionary, and out of the script.
+  assert.equal('Output figures in the details marked ⚠ are lower bounds.' in DICT, false)
+  assert.equal(SCRIPT.includes('Output figures in the details'), false)
+})
+
+/**
+ * The page as the lead would ship it with the rows marked (1.6 D10, §7a Q5): the one line of the
+ * script that decides it, turned on — the shipped script says `false`, exactly once.
+ */
+function markedScript(): string {
+  const off = 'const ROW_LOWER_BOUND_MARK = false;'
+  assert.equal(SCRIPT.split(off).length - 1, 1, 'the shipped page decides the row mark in one line, and ships it off')
+  assert.equal(SOURCE.split('const ROW_LOWER_BOUND_MARK: boolean = false;').length - 1, 1)
+  return SCRIPT.replace(off, 'const ROW_LOWER_BOUND_MARK = true;')
+}
+
+test('with the row mark turned on, a lower bound carries one ⚠ inside its usage figure, titled with its reason', () => {
+  const a = agentCtx([], markedScript())
+  const why = '⚠ lower bound — 2 of 41 replies unfinished'
+  const mark = (title: string): string =>
+    ' <span class="ag-lb" role="img" aria-label="lower bound" title="' + title + '">⚠</span>'
+  const tree = agentTree({
+    roots: [
+      treeNode(AK.s1, 'active', {
+        kind: 'session', label: 'Session 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', ...T_S1,
+        lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 30 replies unfinished',
+        children: [
+          treeNode(AK.a1, 'running', { lowerBound: true, lowerBoundText: why }),
+          treeNode(AK.a2, 'done', { label: 'Plan · Opus 5 · b1c2' }),
+          // A flag without its reason is no mark: nobody could ask what it means.
+          treeNode(AK.a3, 'failed', { label: 'general-purpose · Sonnet 5 · c3d4', lowerBound: true, lowerBoundText: null }),
+        ],
+      }),
+    ],
+    runningNow: [runningItem({ lowerBound: true, lowerBoundText: why })],
+  })
+  const h = agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) })
+  const tp = treePart(h)
+  // The running agent's tree row: the ⚠ inside the usage figure's own unbreakable span.
+  assert.ok(tp.indexOf('<span class="ag-fig"><span class="nobr">12.3K' + mark(why) + '</span> · <span class="nobr">40.0 s</span>') >= 0, tp)
+  // A session's is its own transcript's: on its own figure.
+  assert.ok(tp.indexOf('<span class="nobr">own 1.2M' + mark('⚠ lower bound — 1 of 30 replies unfinished') + '</span>') >= 0, tp)
+  // The done agent is no lower bound, the failed one has no reason: neither is marked.
+  assert.equal(tp.split('⚠</span>').length - 1, 2, tp)
+  // The running list's row, marked as its tree row is.
+  const now = h.slice(0, h.indexOf('<div class="agtree"'))
+  assert.ok(now.indexOf('<span class="nobr">12.3K' + mark(why) + '</span>') >= 0, now)
+  assert.equal(now.split('⚠</span>').length - 1, 1, now)
+  // Still no line under the tree.
+  assert.ok(h.endsWith('</ul></div>'), h.slice(-120))
+  // Escaped like everything else: a reason is the view model's text, not markup.
+  const odd = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true, lowerBoundText: '"><b>x' })] }) })
+  assert.ok(odd.indexOf('title="&quot;&gt;&lt;b&gt;x"') >= 0, odd)
+  // And the shipped page, with the same tree, marks nothing.
+  assert.equal(agentsHtml(agentCtx(), { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('⚠'), -1)
+})
+
+test('a running agent that is not waiting says how long it has been silent, from three minutes on, by the page clock', () => {
+  const a = agentCtx()
+  const span = (ts: number, due: string | null): string => '<span class="ag-silent" data-live="silent" data-ts="' + ts + '"'
+    + (due === null ? ' hidden' : '') + '> · <span class="nobr">silent for <span class="ag-for">' + (due ?? '') + '</span></span></span>'
+  const at = (lastTs: number, over: Record<string, unknown> = {}) => agentTree({
+    roots: [treeNode(AK.s1, 'active', {
+      kind: 'session', label: 'Session 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', ...T_S1,
+      children: [treeNode(AK.a1, 'running', { lastTs, silence: true, ...over })],
+    })],
+    runningNow: [runningItem({ lastTs, silence: true, ...over })],
+  })
+  const open = agentUi({ agentsExpanded: [AK.s1] })
+  // Written for the node the view model says may be silent — hidden until it is due, then shown:
+  // 2:59 is not yet three minutes, 3:00 is.
+  const early = agentsHtml(a, { agents: at(AG_NOW - 179_000), ui: open })
+  assert.ok(treePart(early).indexOf(span(AG_NOW - 179_000, null) + '</span>') >= 0, early)
+  const due = agentsHtml(a, { agents: at(AG_NOW - 180_000), ui: open })
+  assert.ok(treePart(due).indexOf('running for <span data-live="since" data-ts="' + (AG_NOW - 42_000) + '">42 s</span></span>'
+    + span(AG_NOW - 180_000, '3 min') + '</span>') >= 0, due)
+  // In the running list too, after its figures.
+  const list = due.slice(0, due.indexOf('<div class="agtree"'))
+  assert.ok(list.indexOf('<span class="nobr">12.3K</span>' + span(AG_NOW - 180_000, '3 min') + '</span>') >= 0, list)
+  // Minutes only, then hours and minutes.
+  assert.ok(agentsHtml(a, { agents: at(AG_NOW - 65 * 60_000 - 30_000), ui: open }).indexOf('<span class="ag-for">1 h 05 min</span>') >= 0)
+  // A node the view model does not call silent — waiting on an agent below it, a launch, a finished
+  // one — gets no such span, whatever its clock says; nor does a flag that is not `true`.
+  for (const silence of [false, undefined, 'true', 1]) {
+    assert.equal(agentsHtml(a, { agents: at(AG_NOW - 9 * 60_000, { silence }), ui: open }).indexOf('data-live="silent"'), -1, String(silence))
   }
-  // An older payload without the list claims nothing either way.
-  const older = agentTree({ runningNow: undefined })
-  assert.equal(agentsHtml(a, { agents: older }).indexOf(legend), -1)
+  // No colour of its own: the rule set gives the silence none.
+  assert.equal(/\.ag-silent\s*\{/.test(STYLE), false)
+  assert.equal(DICT['silent for {0}'], 'silent for {0}')
+})
+
+test('the page clock shows a silence the second it reaches three minutes, and counts it in minutes', () => {
+  const last = AG_NOW - 170_000
+  const min = { textContent: '' }
+  const el = { dataset: { ts: String(last) }, hidden: true, querySelector: (q: string) => (q === '.ag-for' ? min : null) }
+  const a = agentCtx([], SCRIPT, [el])
+  // The one timer, started with the first payload.
+  a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['agents'], agents: agentTree(), ui: agentUi() }) } })
+  assert.equal(a.intervals.length, 1)
+  const tick = (t: number): void => { a.clock.t = t; a.intervals[0].fn() }
+  tick(last + 179_999)
+  assert.deepEqual([el.hidden, min.textContent], [true, ''])
+  tick(last + 180_000)
+  assert.deepEqual([el.hidden, min.textContent], [false, '3 min'])
+  tick(last + 4 * 60_000 + 59_000)
+  assert.equal(min.textContent, '4 min')
+  tick(last + 65 * 60_000)
+  assert.equal(min.textContent, '1 h 05 min')
+  // A new line — the push that moves the stamp — hides it again at the next tick.
+  el.dataset.ts = String(a.clock.t - 1000)
+  tick(a.clock.t + 1000)
+  assert.equal(el.hidden, true)
+  // The threshold is src/agentTree.ts's, written into the page.
+  assert.equal(nodeVm.runInContext('AGENT_SILENT_MS', ctx), SILENT_AFTER_MS)
 })
 
 // 1.6 P3a (§3 D3): pinned "a node whose agents the tree had to cut all away has nothing to open".
@@ -4270,7 +4376,9 @@ test('the agent tree speaks German on a German page', () => {
     'Collapse {0}', 'Expand {0}', '{0} older session(s) not shown.',
     // 1.6 D3: the line under an open node that shows fifty of its children at a time.
     '{0} more · {1} not shown', '{0} more', '{0} not shown',
-    'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.',
+    'No Claude Code session in the last 7 days.',
+    // 1.6 N5: a running agent's silence; D10: what the row's ⚠ says to a screen reader.
+    'silent for {0}', 'lower bound',
     // 1.5.1: the running list.
     'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent',
     // 1.6 D4: how many of a collector's agents run.
@@ -4292,7 +4400,7 @@ test('the agent tree speaks German on a German page', () => {
   const h = section({
     agents: agentTree({
       selected: detailsOf({ rows: [] }), omittedRoots: 2, runningMore: 3,
-      runningNow: [runningItem(), runningItem({ key: AK.l1, waiting: true })],
+      runningNow: [runningItem({ silence: true, lastTs: AG_NOW - 4 * 60_000 }), runningItem({ key: AK.l1, waiting: true })],
     }),
     ui: openUi({ agentSelected: AK.a1 }),
   })
@@ -4302,7 +4410,8 @@ test('the agent tree speaks German on a German page', () => {
     'title="~Sitzung aktiv · abgeleitet"', 'title="~Sitzung ruht · abgeleitet"',
     '<span class="nobr">läuft seit <span data-live="since"', '<dt class="ag-wide">Zustand</dt>', '<dt>Letzte Aktivität</dt><dd><span class="nobr">vor <span data-live="since"',
     'aria-label="Workflow cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
-    '<p class="meta">Mit ⚠ markierte Ausgabewerte in den Details sind Untergrenzen.</p>',
+    // 1.6 N5: the silence, in German words and the page's units.
+    '<span class="nobr">still seit <span class="ag-for">4 min</span></span>',
     // The running list: its heading with everything that runs, the waiting clause, the rest counted.
     '<div class="name" role="heading" aria-level="3">Laufen gerade (5)</div>',
     '<span>wartet auf einen untergeordneten Agenten</span>', '<p class="meta">und 3 weitere</p>',
@@ -4336,6 +4445,8 @@ test('the agent tree speaks German on a German page', () => {
   // The toggle's words are the page's; the node's name is the view model's (English here).
   assert.ok(closed.indexOf('aria-label="Session 9d0eb37a ausklappen"') >= 0, closed)
   assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
+  // 1.6 D10: the line about the lower bound is gone in German too.
+  assert.equal(h.indexOf('Untergrenzen.'), -1, h)
   assert.equal(section({ agents: agentTree({ roots: [] }) }),
     '<p class="empty">Keine Claude-Code-Sitzung in den letzten 7 Tagen.</p>')
   // 1.6 D4: a collector's entry says in German how many of its agents run, in German digits.
@@ -4390,10 +4501,11 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     if (shows) assert.ok(row.indexOf(tallyHtml(String(n.tallyText), String(n.tallySpoken))) >= 0, row)
   }
   assert.ok(nodes.some((n) => n.kind === 'agent' && n.tallyText !== null), 'the world has an agent with agents below it')
-  // Nearly every agent of Claude Code ends on an unfinished reply, and the page says once where
-  // that is marked; the payload still carries the flag.
+  // The payload carries the flag and its reason (1.6 D10); the shipped page marks no row and has
+  // no line about it under the tree — the details' Output note says it.
   assert.ok(nodes.filter((n) => n.kind === 'agent' && n.lowerBound).length >= 5)
-  assert.equal(h.split('Output figures in the details marked ⚠ are lower bounds.').length - 1, 1, h)
+  assert.ok(nodes.every((n) => (n.lowerBoundText !== null) === (n.lowerBound && n.kind !== 'pending' && n.kind !== 'noreply')))
+  assert.equal(h.indexOf('marked ⚠'), -1, h)
   // A launch nothing was counted of: no figures, no mark, and no zero.
   const pending = nodes.filter((n) => n.kind === 'pending')
   assert.equal(pending.length, 1)
@@ -4466,7 +4578,10 @@ test('the running list the view model builds reaches the page first, the tree cl
     const row = h.slice(at, h.indexOf('</button>', at))
     // The live clock from its start, its usage — a dash for the launch — and where it sits.
     assert.ok(row.indexOf('<span class="nobr">running for <span data-live="since" data-ts="' + r.startTs + '">') >= 0, row)
-    assert.ok(row.indexOf('<span class="nobr">' + r.usage + '</span></span>') >= 0, row)
+    // 1.6 N5: a running agent's silence after its figures, a waiting one's, a launch's and a
+    // collector's never.
+    assert.ok(row.indexOf('<span class="nobr">' + r.usage + '</span>' + (r.silence ? '<span class="ag-silent"' : '</span>')) >= 0, row)
+    assert.equal(r.silence, r.kind === 'agent' && !r.waiting, r.key)
     // A collector says how many of its agents run, after where it sits.
     const where = [...r.context.split(' · '), ...(r.kind === 'noreply' ? ['~1 of them running'] : [])]
     assert.ok(row.indexOf('<span class="meta ag-ctx"><span>' + where.join('</span> · <span>') + '</span></span>') >= 0, row)
@@ -4485,11 +4600,12 @@ test('the running list the view model builds reaches the page first, the tree cl
     assert.ok(tree.indexOf(tallyHtml(String(r.tallyText), String(r.tallySpoken))) >= 0, r.label)
   }
   assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
-  // The running agent is mid-reply, so its output is a lower bound — and with every node closed
-  // the line under the tree still says where that is marked, for the row in the list.
+  // The running agent is mid-reply, so its output is a lower bound — its item carries the flag and
+  // the reason (1.6 D10) — and the shipped page marks neither its row nor any line under the tree.
   assert.deepEqual(items.map((r) => r.lowerBound), [true, false, false])
+  assert.deepEqual(items.map((r) => r.lowerBoundText !== null), [true, false, false])
   assert.equal(vm.agents.roots.some((r) => r.lowerBound), false, 'a session row carries the lower bound itself')
-  assert.equal(h.split('Output figures in the details marked ⚠ are lower bounds.').length - 1, 1, h)
+  assert.equal(h.indexOf('⚠'), -1, h)
 })
 
 // ---------------------------------------------------------------------------

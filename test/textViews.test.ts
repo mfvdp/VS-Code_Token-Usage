@@ -888,7 +888,7 @@ function agentVm(select = false): { vm: ViewModel; agentKey: string; text: Agent
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null, lastTool: null, lastToolTs: null,
   }
   const pending: AgentLaunch = {
     toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
@@ -994,6 +994,7 @@ test('an agent that ended on a rejected request: its sentence and its Last reque
     spawnerFile: sessionFile, firstTs: NOW - 40 * 60_000, lastTs: NOW - 30 * 60_000, models: ['claude-opus-4-6'],
     ...counts, outcome: null, outcomeTs: null, outcomeStatus: null,
     rejected: { at: NOW - 29 * 60_000, status: 429, error: 'rate_limit', limit: 'five_hour' },
+    lastTool: null, lastToolTs: null,
   }
   agg.mains = () => [main]
   agg.agents = () => [agent]
@@ -1023,7 +1024,7 @@ function detailsHead(line: string): boolean {
 function runningItem(over: Partial<RunningItem> = {}): RunningItem {
   return {
     key: 'a:a94f0001', kind: 'agent', label: 'Explore · claude-opus-5 · a94f', context: 'Session 12345678 · Workflow cfe7718d',
-    usage: '12.3K', lowerBound: false, startTs: NOW - 300_000, lastTs: NOW - 5_000, waiting: false, running: 1, ...over,
+    usage: '12.3K', lowerBound: false, lowerBoundText: null, startTs: NOW - 300_000, lastTs: NOW - 5_000, waiting: false, silence: true, running: 1, ...over,
   }
 }
 
@@ -1087,6 +1088,7 @@ test('an agent of a session the tree does not list is on its running line alone,
     workflowId: null, meta: null, metaTries: 3, spawnerFile: null, firstTs: NOW - 10 * 60_000, lastTs: NOW - 30_000,
     models: ['claude-opus-4-6'], input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700,
     reasoning: 0, requests: 5, outputFinal: 4, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
+    lastTool: null, lastToolTs: null,
   }
   agg.mains = () => mains
   agg.agents = () => [agent]
@@ -1128,7 +1130,7 @@ test('the notes under the tree state the sessions left out, the lower bound and 
   const tree: AgentTreeVm = {
     roots: [{
       key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', sub: null, state: 'done', derived: false,
-      usage: '12K', usageAgents: null, lowerBound: true, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+      usage: '12K', usageAgents: null, lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 3 replies unfinished', silence: false, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
       agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
       tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
     }],
@@ -1145,7 +1147,8 @@ test('the notes under the tree state the sessions left out, the lower bound and 
   assert.ok(lines.includes('- [Done] Session 12345678 · own 12K ⚠ · 4 min 05 s'), lines.join('\n'))
   for (const note of [
     '_3 older session(s) not listed._',
-    '_⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted._',
+    // 1.6 D10: the note's words, once at the end.
+    '_⚠ marks a lower bound: some replies were never marked finished, and only the output written up to then is counted._',
     '_The selected node is no longer in the tree._',
   ]) assert.ok(lines.includes(note), `${note}\n${lines.join('\n')}`)
   assert.equal(lines.some((l) => l.includes('Tree cut')), false)
@@ -1171,6 +1174,7 @@ test('the markdown prints every node of its tree, fifty children a node, and say
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: null }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 2 * 3_600_000 + i * 1000, lastTs: NOW - 3_600_000, models: ['claude-opus-4-6'],
     ...counts, outcome: 'completed', outcomeTs: NOW - 3_600_000, outcomeStatus: 'completed', rejected: null,
+    lastTool: null, lastToolTs: null,
   }))
   agg.mains = () => [main]
   agg.agents = () => agents
@@ -1207,7 +1211,7 @@ test('a stop the parent recorded is printed [Stopped] — a recorded state, no e
   const { vm } = agentVm()
   const node = (key: string, state: TreeNode['state'], derived: boolean): TreeNode => ({
     key, kind: 'agent', label: `Explore · claude-opus-4-6 · ${key.slice(2, 6)}`, sub: null, state, derived,
-    usage: '3.4K', usageAgents: null, lowerBound: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
   })
@@ -1236,7 +1240,7 @@ test('an attempt the workflow journal superseded says so at the end of its line,
   const { vm } = agentVm()
   const node = (key: string, state: TreeNode['state'], superseded: boolean): TreeNode => ({
     key, kind: 'agent', label: `workflow-subagent · claude-opus-4-6 · ${key.slice(2, 6)}`, sub: null, state, derived: false,
-    usage: '3.4K', usageAgents: null, lowerBound: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded, children: [],
   })
@@ -1273,7 +1277,7 @@ test('the markdown prints a node\'s tally after its name, in brackets, and no ta
   })
   const node = (key: string, kind: TreeNode['kind'], label: string, state: TreeNode['state'], over: Partial<TreeNode> = {}): TreeNode => ({
     key, kind, label, sub: null, state, derived: state !== 'done' && state !== 'failed' && state !== 'stopped',
-    usage: '3.4K', usageAgents: null, lowerBound: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: (over.children ?? []).length > 0, childrenTotal: (over.children ?? []).length, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
   })

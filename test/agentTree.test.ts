@@ -68,6 +68,7 @@ function rec(id: string, over: Partial<AgentRec> = {}): AgentRec {
     firstTs: NOW - 30 * MIN, lastTs: NOW - 1 * MIN, models: ['claude-opus-5'],
     input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 50,
     requests: 5, outputFinal: 5, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
+    lastTool: null, lastToolTs: null,
     ...over,
   }
 }
@@ -1373,7 +1374,8 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
     { label: 'Cache write 5m', value: '200' },
     { label: 'Cache write 1h', value: '–' },
     { label: 'Cache read', value: '5K' },
-    { label: 'Output', value: '700', note: '⚠ lower bound' },
+    // 1.6 D10: the note says how many replies are unfinished — one of the five here.
+    { label: 'Output', value: '700', note: '⚠ lower bound — 1 of 5 replies unfinished' },
     { label: 'Reasoning', value: '50' },
     { label: 'Tool calls', value: '3' },
     { label: 'Spawned by', value: 'Session 9d0eb37a' },
@@ -1720,7 +1722,8 @@ test('the tree speaks German with the bundle the extension ships', () => {
     'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte', 'Tool-Aufrufe',
     'Gestartet von', 'Workflow-Lauf',
   ])
-  assert.equal(vm.selected?.rows.find((r) => r.label === 'Ausgabe')?.note, '⚠ Untergrenze')
+  // 1.6 D10: with how many replies are unfinished — one of the five.
+  assert.equal(vm.selected?.rows.find((r) => r.label === 'Ausgabe')?.note, '⚠ Untergrenze — 1 von 5 Antworten unvollständig')
   // The figures in the reader's number format, too.
   assert.equal(vm.selected?.rows.find((r) => r.label === 'Verbrauch')?.value, '1,2K')
   assert.equal(german(() => agentDetails(input(over), NOW, agentKey('bbbb0001'))?.stateText),
@@ -1739,7 +1742,8 @@ test('every message of the tree and of its markdown has a German entry, and the 
   const text = ['Agents', 'Running', 'Done', 'Failed', 'Stopped', 'Unknown', 'Active', 'Idle', 'State', '| Detail | Value |',
     // 1.6 D3: the line under a node the tree printed fifty children of; the cut's note is gone.
     '… {0} more', '{0} older session(s) not listed.',
-    '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.',
+    // 1.6 D10: the note's new words.
+    '⚠ marks a lower bound: some replies were never marked finished, and only the output written up to then is counted.',
     // The running list above the tree, and the tree's own heading under it.
     'Running now', 'Sessions and agents', '(waiting)', 'No agent is running.', 'and {0} more']
   assert.ok(ours.length >= 30, `only ${ours.length} keys found in src/agentTreeBuild.ts`)
@@ -2053,8 +2057,9 @@ test('the running list carries no field the page does not need, and keys it can 
   assert.ok(vm.runningNow.length === 3)
   for (const r of vm.runningNow) {
     // 1.6 P5b (D4): `running`, the running agents an entry stands for — 1 here, a collector's many.
+    // 1.6 P6: `lowerBoundText` (D10), the node's reason, and `silence` (N5), as the node's.
     assert.deepEqual(Object.keys(r).sort(),
-      ['context', 'key', 'kind', 'label', 'lastTs', 'lowerBound', 'running', 'startTs', 'usage', 'waiting'])
+      ['context', 'key', 'kind', 'label', 'lastTs', 'lowerBound', 'lowerBoundText', 'running', 'silence', 'startTs', 'usage', 'waiting'])
     assert.ok(r.key.length > 0 && r.key.length <= MAX_AGENT_KEY_CHARS, r.key)
     assert.equal(/[\\/]/.test(r.key + r.context), false, `${r.key} ${r.context}`)
     assert.ok(r.kind === 'agent' || r.kind === 'pending')
@@ -2065,8 +2070,8 @@ test('the running list carries no field the page does not need, and keys it can 
 })
 
 test("a running item carries its node's lower bound, and a launch nothing was counted of never does", () => {
-  // A running agent is nearly always mid-reply, so its output nearly always is a lower bound —
-  // and the running list is where it is looked at first.
+  // A running agent may be mid-reply, so its output may be a lower bound — and the running list
+  // is where it is looked at first.
   const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
     main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
   const oldest = mains[MAX_ROOTS].sessionId
@@ -2085,11 +2090,13 @@ test("a running item carries its node's lower bound, and a launch nothing was co
   assert.deepEqual(bounds, {
     [agentKey('aaaa0001')]: true, [agentKey('aaaa0002')]: false, [agentKey('aaaa0003')]: true, 'l:toolu_pppp0001': false,
   })
-  // The same flag as the node's, wherever the node is on the tree.
+  // The same flag as the node's, wherever the node is on the tree — and, 1.6 D10, the same reason.
   for (const r of vm.runningNow) {
     const n = all(vm.roots).find((x) => x.key === r.key)
-    if (n) assert.equal(r.lowerBound, n.lowerBound, r.key)
+    if (n) assert.deepEqual([r.lowerBound, r.lowerBoundText], [n.lowerBound, n.lowerBoundText], r.key)
   }
+  assert.equal(vm.runningNow.find((r) => r.key === agentKey('aaaa0003'))?.lowerBoundText, '⚠ lower bound — 3 of 5 replies unfinished')
+  assert.equal(vm.runningNow.find((r) => r.key === 'l:toolu_pppp0001')?.lowerBoundText, null)
 })
 
 // ---------------------------------------------------------------------------
@@ -2646,7 +2653,7 @@ test('running counts a collector\'s running members, and the running list carrie
   const item = vm.runningNow[1]
   assert.deepEqual(item, {
     key: collectorKey, kind: 'noreply', label: '3 agent(s) without a counted reply', context: 'Session 9d0eb37a · Workflow cfe7718d',
-    usage: '–', lowerBound: false, startTs: NOW - 3 * MIN, lastTs: NOW - 3 * MIN, waiting: false, running: 3,
+    usage: '–', lowerBound: false, lowerBoundText: null, startTs: NOW - 3 * MIN, lastTs: NOW - 3 * MIN, waiting: false, silence: false, running: 3,
   })
   // Its row opens its details from the list, the tree closed.
   const picked = page({ ...over, selected: collectorKey })
@@ -2692,4 +2699,113 @@ test('the collector\'s details: its tally in words, why it has no figures, and h
   assert.equal(de?.title, '266 Agent(en) ohne gezählte Antwort')
   // Its last activity is the latest line of a member with a record — a rejection here.
   assert.equal(d.lastTs, NOW - 4 * HOUR + 2 * MIN)
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P6 · D10 the lower bound's reason, N5 silence
+// ---------------------------------------------------------------------------
+
+test('a lower bound says why in numbers — on an agent, on its run\'s and its session\'s sums — and the details say the same (1.6 D10)', () => {
+  const over: Partial<AgentTreeInput> = {
+    mains: [main({ requests: 12, outputFinal: 10 })],
+    agents: [
+      rec('aaaa0001', { requests: 5, outputFinal: 4 }),
+      // Every reply finished: no lower bound, no reason.
+      rec('aaaa0002', { requests: 5, outputFinal: 5, firstTs: NOW - 20 * MIN }),
+      wfRec('bbbb0001', { requests: 5, outputFinal: 3 }),
+      wfRec('bbbb0002', { requests: 4, outputFinal: 4, firstTs: NOW - 25 * MIN }),
+      // A workflow agent without a counted reply: the collector's, which counts nothing.
+      wfRec('bbbb0003', { requests: 0, outputFinal: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0, reasoning: 0 }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })],
+  }
+  const vm = build(over)
+  const why = (key: string): [boolean, string | null] => [node(vm, key).lowerBound, node(vm, key).lowerBoundText]
+  assert.deepEqual(why(agentKey('aaaa0001')), [true, '⚠ lower bound — 1 of 5 replies unfinished'])
+  assert.deepEqual(why(agentKey('aaaa0002')), [false, null])
+  // The run sums its agents' replies: two of the first one's five unfinished, none of the second's four.
+  assert.deepEqual(why(wfKey), [true, '⚠ lower bound — 2 of 9 replies unfinished'])
+  // The session's figure is its own transcript's, and so is its reason.
+  assert.deepEqual(why(rootKey), [true, '⚠ lower bound — 2 of 12 replies unfinished'])
+  // A launch and a collector count nothing, and say nothing of a bound.
+  assert.deepEqual(why('l:toolu_pppp0001'), [false, null])
+  assert.deepEqual(why(collectorKey), [false, null])
+  // The details' Output note is the node's reason, word for word; a finished agent's has none.
+  const output = (key: string): DetailRow | undefined => agentDetails(input(over), NOW, key)?.rows.find((r) => r.label === 'Output')
+  assert.equal(output(agentKey('aaaa0001'))?.note, '⚠ lower bound — 1 of 5 replies unfinished')
+  assert.equal(output(agentKey('aaaa0002'))?.note, undefined)
+  assert.equal(output(wfKey)?.note, '⚠ lower bound — 2 of 9 replies unfinished')
+  assert.equal(output(rootKey)?.note, '⚠ lower bound — 2 of 12 replies unfinished')
+  // Numbers in the reader's format, in German words.
+  const big = german(() => build({ agents: [rec('aaaa0001', { requests: 1234, outputFinal: 1 })] }))
+  assert.equal(node(big, agentKey('aaaa0001')).lowerBoundText, '⚠ Untergrenze — 1.233 von 1.234 Antworten unvollständig')
+  // Every node's flag and its reason come together.
+  for (const n of all(vm.roots)) assert.equal(n.lowerBoundText !== null, n.lowerBound, n.key)
+})
+
+test('an unknown agent whose transcript went quiet on a tool call names the call; any other keeps its sentence (1.6 N5)', () => {
+  const quiet = (over: Partial<AgentRec>): string | undefined =>
+    stateText({ agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, ...over })] }, agentKey('aaaa0001'))
+  const withTool = 'Unknown — inferred: no result was recorded and the transcript has been silent since 11:30, after a Bash call; the agent may have been stopped.'
+  const without = 'Unknown — inferred: no result was recorded and the transcript has been silent since 11:30; the agent may have been stopped.'
+  // The last line made the call.
+  assert.equal(quiet({ lastTool: 'Bash', lastToolTs: NOW - 30 * MIN }), withTool)
+  assert.equal(quiet({ lastTool: 'mcp__server__tool', lastToolTs: NOW - 30 * MIN }),
+    withTool.replace('a Bash call', 'a mcp__server__tool call'))
+  // The call came on a line before the last: the silence is not the call's.
+  assert.equal(quiet({ lastTool: 'Bash', lastToolTs: NOW - 31 * MIN }), without)
+  // No call, a call without a name, a name a snapshot of another build left outside the alphabet.
+  assert.equal(quiet({ lastTool: null, lastToolTs: null }), without)
+  assert.equal(quiet({ lastTool: null, lastToolTs: NOW - 30 * MIN }), without)
+  assert.equal(quiet({ lastTool: 'rm -rf /', lastToolTs: NOW - 30 * MIN }), without)
+  // A request the API rejected after it is the transcript's last word: the rejection is named instead.
+  assert.equal(quiet({ lastTool: 'Bash', lastToolTs: NOW - 30 * MIN, rejected: { at: NOW - 29 * MIN, status: 429, error: 'rate_limit', limit: 'five_hour' } }),
+    'Unknown — inferred: no result was recorded; the last request, at 11:31, was rejected — 5-hour limit (HTTP 429).')
+  // A running agent, a recorded end: their own sentences, whatever the last call was.
+  assert.equal(stateText({ agents: [rec('aaaa0001', { lastTool: 'Bash', lastToolTs: NOW - MIN })] }, agentKey('aaaa0001')),
+    'Running — inferred: the transcript changed 1 min ago and no result was recorded yet.')
+  assert.equal(stateText({ agents: [rec('aaaa0001', { lastTool: 'Bash', lastToolTs: NOW - 30 * MIN, lastTs: NOW - 30 * MIN,
+    outcome: 'completed', outcomeTs: NOW - 30 * MIN })] }, agentKey('aaaa0001')), 'Completed — the parent recorded the result at 11:30.')
+  // In German: the call's name before „-Aufruf", the time after it.
+  assert.equal(german(() => quiet({ lastTool: 'Bash', lastToolTs: NOW - 30 * MIN })),
+    'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet, und das Transkript hat sich seit einem Bash-Aufruf um 11:30 nicht mehr geändert; der Agent wurde möglicherweise abgebrochen.')
+})
+
+test('a running agent by its own transcript may say how long it has been silent; a waiting one, a launch, a finished one may not (1.6 N5)', () => {
+  const vm = build({
+    agents: [
+      rec('aaaa0001', { lastTs: NOW - 4 * MIN }),
+      // Waits on the agent it launched: it runs by what is below it, and says so.
+      rec('aaaa0002', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN }),
+      rec('aaaa0003', { lastTs: NOW - MIN, spawnerFile: agentFile('aaaa0002'), meta: { agentType: 'Plan', model: 'opus', spawnDepth: 2, toolUseId: null } }),
+      // Silent for half an hour: unknown, nothing to count.
+      rec('aaaa0004', { lastTs: NOW - 30 * MIN }),
+      // Wrote on after its recorded end (D6): running again by its own lines.
+      rec('aaaa0005', { outcome: 'completed', outcomeTs: NOW - 8 * MIN, outcomeStatus: 'completed', lastTs: NOW - 5 * MIN }),
+      rec('aaaa0006', { outcome: 'completed', outcomeTs: NOW - 3 * MIN, outcomeStatus: 'completed', lastTs: NOW - 3 * MIN }),
+      wfRec('bbbb0001', { lastTs: NOW - 2 * MIN }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })],
+  })
+  const silent = Object.fromEntries(all(vm.roots).map((n) => [n.key, n.silence]))
+  assert.deepEqual(silent, {
+    [rootKey]: false,
+    [agentKey('aaaa0001')]: true,
+    [agentKey('aaaa0002')]: false,
+    [agentKey('aaaa0003')]: true,
+    [agentKey('aaaa0004')]: false,
+    [agentKey('aaaa0005')]: true,
+    [agentKey('aaaa0006')]: false,
+    [wfKey]: false,
+    [agentKey('bbbb0001')]: true,
+    'l:toolu_pppp0001': false,
+  })
+  assert.equal(node(vm, agentKey('aaaa0002')).state, 'running')
+  assert.equal(node(vm, agentKey('aaaa0005')).state, 'running')
+  // The running list says the same of each of its entries, from the same clock: the node's last activity.
+  for (const r of vm.runningNow) {
+    assert.equal(r.silence, node(vm, r.key).silence, r.key)
+    assert.equal(r.lastTs, node(vm, r.key).lastTs, r.key)
+  }
+  assert.ok(vm.runningNow.some((r) => r.silence) && vm.runningNow.some((r) => !r.silence))
 })

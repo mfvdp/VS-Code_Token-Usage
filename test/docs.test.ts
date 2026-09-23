@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import {
   AGENT_RETENTION_DAYS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
-  SPAN_IN_DAYS_FROM_MS,
+  SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS,
 } from '../src/agentTree'
 import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
@@ -446,6 +446,8 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Failed — every one of these agents has a recorded outcome, and none completed.',
     'Failed — the workflow journal recorded a failure for each of them.',
     'Stopped — every one of these agents has a recorded outcome, and none completed: the last attempt of each step was stopped.',
+    // 1.6 N5 (P6): an agent that went quiet on a tool call names the call.
+    'Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.',
   ]
   // The run sentences 1.6 replaced are written nowhere any more.
   for (const gone of ['Failed — at least one agent of this run has a recorded failure.',
@@ -528,6 +530,8 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`at most **${MAX_RUN_AGENTS}** agents of its journal`, 'the journal agents a run keeps'],
     [`a line of at most ${JOURNAL_PARSE_MAX / 1024} KB without that head`, 'the journal fallback cap'],
     [`from **${SPAN_IN_DAYS_FROM_MS / 3_600_000} hours** on`, 'when a span is written in days'],
+    // 1.6 N5 (P6): when a running agent's row says how long it has been silent.
+    [`has not changed for **${SILENT_AFTER_MS / 60_000} minutes**`, 'when a running agent\'s silence is stated'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
     [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],
@@ -538,6 +542,24 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   for (const [claim, what] of claims) {
     assert.ok(flat.includes(claim), `docs/agents.md does not state ${what}: ${claim}`)
   }
+})
+
+test('docs/agents.md says why an output is a lower bound as measured, in the words the details use, and no row line points to it', () => {
+  // 1.6 D10 (P6): the lower bound's cause, counted on the measuring machine — replacing 1.5's
+  // "almost every finished agent", which the count contradicts — and the details' note as the
+  // builder writes it. The line under the tree that pointed to the details is gone.
+  const src = readDoc('src/agentTreeBuild.ts')
+  assert.ok(src.includes("t('⚠ lower bound — {0} of {1} replies unfinished'"), 'the builder no longer writes the reason')
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of ['`⚠ lower bound — 2 of 41 replies unfinished`', '**293 of 925 agents (32 %)**', '**201 of them exactly one**',
+    '**455 of the 477**', 'only **22** were the file\'s last reply', '`silent for 4 min`', '`1 h 05 min`']) {
+    assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+  for (const gone of ['almost every finished', 'Output figures in the details marked ⚠ are lower bounds.', 'nearly always mid-reply']) {
+    assert.equal(flat.includes(gone), false, `docs/agents.md still says: ${gone}`)
+  }
+  assert.equal(readDoc('docs/counting.md').replace(/\s+/g, ' ').includes('Almost every finished subagent'), false,
+    'docs/counting.md still calls almost every finished subagent a lower bound')
 })
 
 test('both export dialogs say that tool names are about to leave the machine', () => {

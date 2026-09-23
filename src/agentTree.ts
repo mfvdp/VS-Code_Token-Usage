@@ -42,6 +42,14 @@ export const MAX_RUNNING_LIST = 20
  * recorded the end means the agent went on, and its state is inferred from its lines again.
  */
 export const RESUMED_AFTER_MS = 60_000
+/**
+ * N5 (1.6): how long a running agent's transcript may stay unchanged before its row says so —
+ * "silent for 4 min", ticking in the page. Below it a pause between two replies is ordinary: a
+ * running agent writes a line every 0.6 s at the median, and a tool call of a minute or two is
+ * common. The state stays running either way until RUNNING_WINDOW_MS; this only says how long it
+ * has been quiet.
+ */
+export const SILENT_AFTER_MS = 3 * 60_000
 /** From this span on a session's span is written in days and hours ("22 d 11 h"), below it as a duration. */
 export const SPAN_IN_DAYS_FROM_MS = 48 * 3_600_000
 /** The fewest hex characters of an agent id a name shows; more where two agents of a session share them (D11). */
@@ -124,12 +132,26 @@ export interface TreeNode {
   /** outputFinal < requests. */
   lowerBound: boolean
   /**
+   * D10 (1.6): why the output is a lower bound, in numbers — "⚠ lower bound — 2 of 41 replies
+   * unfinished": the replies whose lines never carried a stop reason, of all the replies counted.
+   * On agents and on the sums of runs and sessions (a session's of its own transcript); null when
+   * the output is not a lower bound, and on a launch and a collector, which count nothing.
+   */
+  lowerBoundText: string | null
+  /**
    * Formatted, '–' when unknown. A session's is its span from the first line to the last, in
    * days and hours from SPAN_IN_DAYS_FROM_MS on.
    */
   duration: string
   startTs: number | null
   lastTs: number | null
+  /**
+   * N5 (1.6): an agent in state running by its own transcript — not one that only waits on an
+   * agent below it, not a launch — whose silence the page may state: from `lastTs` on, once
+   * SILENT_AFTER_MS have passed, its row says "silent for 4 min", in the page's own clock. False
+   * for every other node.
+   */
+  silence: boolean
   /**
    * Agents and pending launches anywhere below this node, counted on the whole tree — open or
    * closed, shown or not — the `started` of its tally, where it has one. 0 for a node with none
@@ -199,11 +221,15 @@ export interface RunningItem {
   usage: string
   /** As the node: the output is a lower bound (outputFinal < requests). Never for a pending launch or a collector. */
   lowerBound: boolean
+  /** D10, as the node: "⚠ lower bound — 2 of 41 replies unfinished", or null. */
+  lowerBoundText: string | null
   /** As the node. A collector's: the earliest first line of a member that has a record, else null. */
   startTs: number | null
   lastTs: number | null
   /** Running only because an agent below it runs (the roll-up), not by its own transcript. */
   waiting: boolean
+  /** N5, as the node: the page may say how long the agent has been silent, from `lastTs` on. */
+  silence: boolean
   /**
    * The running agents the entry stands for: 1 for an agent or a launch, a collector's members that
    * run (D4). What `AgentTreeVm.running` sums over every entry, listed or not.

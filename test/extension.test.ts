@@ -1333,7 +1333,7 @@ test('the poll is wanted while an agent runs or a session is active, and never f
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
-    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, hasChildren: false, childrenTotal: 0,
+    lowerBound: false, lowerBoundText: null, duration: '–', startTs: null, lastTs: null, silence: false, agentCount: 0, hasChildren: false, childrenTotal: 0,
     childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
@@ -1612,6 +1612,36 @@ test('a rejected request\'s text, its details and its quota block reach neither 
     for (const fixture of ['synthetic overage reason', 'synthetic-overage-status', 'synthetic-slug']) {
       assert.equal(text.includes(fixture), false, `the ${what} holds the fixture's ${fixture}`)
     }
+  }
+})
+
+test('a tool call\'s input reaches neither the log, the diagnostics, the markdown nor the state — only its name does (1.6 §0a.5)', async () => {
+  // The host's half of the §0a.5 leak test (test/agg.agents.test.ts has the aggregator's): the
+  // cold start reads an agent's last tool call, the replay the revision asks for reads it again,
+  // and the rest goes where the host sends it.
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const secret = 'TOOL-INPUT-HOST-CONTENT-9b4d'
+  appendLine(w.running, claudeLine({
+    id: 'msg_a1_tool', ts: T, agentId: 'a1a1a1', usage: { input: 4, output: 2 }, final: true, stopReason: 'tool_use',
+    content: [{ type: 'tool_use', id: 'toolu_host_leak', name: 'Bash', input: { command: `${secret}-command`, description: `${secret}-description` } }],
+  }))
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const { agg } = lazy()
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  await state.execute('tokenPace.copyDiagnostics')
+  const report = state.clipboard[state.clipboard.length - 1]
+  assert.ok(report && report.length > 0, 'no diagnostics were copied')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const saved = fs.readFileSync(fx.stateFile, 'utf8')
+  // It went through: the agent's record keeps the call's name and its line's time.
+  const agents = (JSON.parse(saved) as Snapshot).agents ?? {}
+  assert.deepEqual([agents[w.running]?.lastTool, agents[w.running]?.lastToolTs], ['Bash', T])
+  for (const [what, text] of [['log', state.logText()], ['diagnostics', report], ['markdown', markdown], ['state', saved]]) {
+    assert.equal(text.includes(secret), false, `the ${what} holds a tool call's input`)
   }
 })
 

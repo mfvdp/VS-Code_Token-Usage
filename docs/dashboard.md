@@ -156,13 +156,17 @@ CSV and JSON exports.
 **Accessibility.** Bars are `role="progressbar"` with `aria-valuenow` and a spoken
 `aria-valuetext`; sortable headers carry `aria-sort`; toggles carry `aria-pressed`; chart
 columns are focusable buttons. The running list's rows are buttons ahead of the tree, under a
-level-three heading. The agent tree is a `tree` of `treeitem`s with `aria-expanded` and
-`aria-selected`, its toggle and its row are buttons of their own, and every state glyph has a
-spoken label that says in words whether the state was recorded or derived (`running, derived`);
+level-three heading. The agent tree is a `tree` of `treeitem`s with `aria-level`, `aria-setsize`,
+`aria-posinset`, `aria-expanded` and `aria-selected`, each named in words — its whole name, its
+state, its tally — and described by its figures; it is one stop of the `Tab` key, and the arrow
+keys, `Home`, `End`, `Enter`, `Space` and `Escape` work in it as in any tree (roving `tabindex`,
+see [Agents](agents.md#the-keyboard)); its toggle and its row are the mouse's targets. Every state
+glyph has a spoken label that says in words whether the state was recorded or derived (`running, derived`);
 a clock that ticks every second is hidden from a screen reader and stands beside it as words that
 stand still (`since 14:20`); the toggle and the row are targets of at least 24 × 24 px, and a
 forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours. The focus
-stays on its button — in the running list or in the tree — when the section is pushed again. The webview loads no external resource of any kind — its CSP
+stays on its row — the running list's button, or the tree's item — when the section is pushed
+again. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
 range, a sort, a filter, a metric, a drill day, a section toggle, the key of an agent-tree node to

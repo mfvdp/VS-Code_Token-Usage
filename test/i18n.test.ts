@@ -313,13 +313,16 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
   // says „Tool-Aufrufe", as the runtime bundle always did. N1: a node's tally replaces the bare
   // count of its agents. D5 (lead note, §7c): a session's figures are named first — "own 1.2M",
   // "agents 434.6K" — since a figure in front of "agents" reads as a number of agents. D3: there
-  // is no cut of the tree any more; what a node leaves out is said on the node.
+  // is no cut of the tree any more; what a node leaves out is said on the node. L1: the tree's
+  // toggle is the mouse's alone, and a screen reader hears the item open or closed, not a button.
   const retired = ["Parent's report", "the parent's own count, not added to any total", '{0} tokens · {1} · {2} tool calls',
     '{0} agent(s)', '{0} own', '{0} agents', 'Tree cut at {0} nodes.',
     // D10 (P6): the line under the tree about the ⚠, and the markdown note's 1.5 words.
     'Output figures in the details marked ⚠ are lower bounds.',
     // N6 (P7): a run is a "Workflow run", named by when it started, and by its id in the running list.
     'Workflow {0}',
+    // L1 (P8): the toggle is no control of its own any more — the tree item says whether it is open.
+    'Expand {0}', 'Collapse {0}',
     '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.']
   const bundle = readJson(BUNDLE) as Record<string, string>
   const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts']

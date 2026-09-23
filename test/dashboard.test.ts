@@ -3086,11 +3086,14 @@ function runFig(ts: number, text: string, since: string | null): string {
   const eye = '<span class="nobr">running for <span data-live="since" data-ts="' + ts + '">' + text + '</span></span>'
   return since === null ? eye : '<span aria-hidden="true">' + eye + '</span><span class="sr">since ' + since + '</span>'
 }
-/** A tally's parts on the figures' line: the glyphs for the eye, the words once, after the last. */
+/**
+ * A tally's parts on the figures' line: the glyphs for the eye, hidden from a screen reader. 1.6 L1
+ * (pinned and changed: P2c wrote the words once after the last part): the words end the name of
+ * the row's tree item instead, which a screen reader announces on it — in the line as well, they
+ * would be read twice, once in the name and once in the figures its item describes itself by.
+ */
 function tallyFigs(t: Record<string, unknown>): string[] {
-  const parts = String(t.tallyText).split(' · ').map((p) => '<span class="ag-t" aria-hidden="true">' + p + '</span>')
-  parts[parts.length - 1] += '<span class="sr">' + String(t.tallySpoken) + '</span>'
-  return parts
+  return String(t.tallyText).split(' · ').map((p) => '<span class="ag-t" aria-hidden="true">' + p + '</span>')
 }
 /** The end of a figures' line that ends on a tally, after other parts: the tally's parts and the line's end. */
 const tallyEnd = (t: Record<string, unknown>): string => tallyFigs(t).map((p) => '<span class="ag-fp">' + SEP + p + '</span>').join('') + '</span>'
@@ -3169,6 +3172,29 @@ function agentUi(over: Record<string, unknown> = {}): Record<string, unknown> {
 /** The view state with every node of the tree opened — what the 1.5.0 tests saw by default. */
 function openUi(over: Record<string, unknown> = {}): Record<string, unknown> {
   return agentUi({ agentsExpanded: OPEN, ...over })
+}
+
+/**
+ * 1.6 L1: a tree item's start tag as the page writes it — its node's key, its `tabindex` (0 on the
+ * tree's one stop of the Tab key, −1 on every other), its level, its place among its siblings and
+ * how many they are, whether it is open (a node with children only) and selected, its name in
+ * words, and its figures' line, by id, as its description.
+ */
+function itemTag(key: string, o: { kind?: string; sup?: boolean; tab?: boolean; level?: number; size: number; pos: number;
+  expanded?: boolean; selected?: boolean; label: string }): string {
+  return '<li role="treeitem" class="ag-k-' + (o.kind ?? 'agent') + (o.sup === true ? ' ag-sup' : '') + '" data-key="' + key
+    + '" tabindex="' + (o.tab === true ? '0' : '-1') + '" aria-level="' + (o.level ?? 1) + '" aria-setsize="' + o.size
+    + '" aria-posinset="' + o.pos + '"' + (o.expanded === undefined ? '' : ' aria-expanded="' + o.expanded + '"')
+    + ' aria-selected="' + (o.selected === true) + '" aria-label="' + o.label + '" aria-describedby="agf-' + key + '">'
+}
+/** 1.6 L1: a node's toggle — the mouse's target, hidden from a screen reader, which hears the item open or closed. */
+const foldOf = (key: string): string => '<span class="ag-fold" data-act="agentToggle" data-key="' + key + '" aria-hidden="true"></span>'
+/** 1.6 L1: a tree row — the mouse's target that selects — and whether the details stand under it. */
+const rowOf = (key: string, pressed = false): string =>
+  '<span class="ag-row" data-act="agentSelect" data-key="' + key + '" data-pressed="' + pressed + '">'
+/** A tree row's second line (1.6 N6), carrying the id its item's description names (1.6 L1). */
+function figsOf(key: string, ...parts: string[]): string {
+  return figs(...parts).replace('<span class="ag-fig">', '<span class="ag-fig" id="agf-' + key + '">')
 }
 
 /** The tree part of a rendered section: from the tree's own frame on, the running list left out. */
@@ -3348,7 +3374,9 @@ test('an attempt the workflow journal superseded keeps its glyph and state, dimm
   })
   const h = treePart(agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) }))
   const title = 'failed · recorded · superseded by a later attempt'
-  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-agent ag-sup" aria-selected="false">') >= 0, h)
+  // 1.6 L1: the item says it too, in words, as the start of its name after its own.
+  assert.ok(h.indexOf(itemTag(AK.a2, { sup: true, level: 2, size: 2, pos: 1,
+    label: 'workflow-subagent · opus-5 · b1c2, failed, recorded, superseded by a later attempt' })) >= 0, h)
   assert.ok(h.indexOf('<span class="ag-st ag-failed" role="img" aria-label="failed, recorded, superseded by a later attempt" title="'
     + title + '">') >= 0, h)
   // Only the superseded one: the running agent beside it is drawn as ever.
@@ -3383,10 +3411,12 @@ test('a row is two lines: its name, then the usage and duration it was given —
   const h = treePart(agentsHtml(a, { ui: openUi() }))
   // The glyph in a column of its own, the two lines beside it in theirs: the name — the short id
   // dimmed, the whole name its title — and under it the figures, each part whole.
-  assert.ok(h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '" aria-pressed="false">'
+  // 1.6 L1 (pinned and changed: P7 wrote the row as a button): the row is the mouse's target inside
+  // its tree item, which is what takes the focus; its figures' line is that item's description.
+  assert.ok(h.indexOf(rowOf(AK.a1)
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
     + '<span class="ag-text">' + albl('Explore · claude-opus-5 · a94f', 'Explore', 'opus-5', 'a94f')
-    + figs(fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', '11:59')) + '</span></button>') >= 0, h)
+    + figsOf(AK.a1, fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', '11:59')) + '</span></span>') >= 0, h)
   assert.match(STYLE, /\.ag-row \{[^}]*display: flex; align-items: baseline;/)
   assert.equal(/\.ag-row \{[^}]*flex-wrap/.test(STYLE), false, 'the glyph would wrap away from its name')
   assert.match(STYLE, /\.ag-text \{[^}]*display: flex; flex-direction: column; \}/)
@@ -3398,10 +3428,10 @@ test('a row is two lines: its name, then the usage and duration it was given —
   // 1.6 P7b (pinned and changed: P7 put the tally last): a run's tally before its clock or
   // duration, which the fit takes off first.
   assert.ok(h.indexOf(slbl('Workflow run Tue 11:40 · cfe7718d', 'Workflow run', 'Tue 11:40', 'cfe7718d')
-    + figs(fig('410K'), ...tallyFigs(T_WF), clockFig(AG_NOW - 42_000, '42 s', '11:40'))) >= 0, h)
+    + figsOf(AK.wf, fig('410K'), ...tallyFigs(T_WF), clockFig(AG_NOW - 42_000, '42 s', '11:40'))) >= 0, h)
   // A lower bound without its reason is not marked — a mark nobody can ask about says less than
   // none; with its reason it is (see the ⚠ test below), and no line under the tree speaks of it.
-  assert.ok(h.indexOf(albl('Plan · opus-5 · b1c2', 'Plan', 'opus-5', 'b1c2') + figs(fig('12.3K'), fig('40.0 s'))) >= 0, h)
+  assert.ok(h.indexOf(albl('Plan · opus-5 · b1c2', 'Plan', 'opus-5', 'b1c2') + figsOf(AK.a2, fig('12.3K'), fig('40.0 s'))) >= 0, h)
   assert.equal(h.indexOf('⚠'), -1, h)
   assert.ok(h.endsWith('</ul></div>'), h.slice(-120))
   const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', lowerBound: true,
@@ -3410,22 +3440,22 @@ test('a row is two lines: its name, then the usage and duration it was given —
     + 'title="⚠ lower bound — 1 of 9 replies unfinished">⚠</span>')) >= 0)
   // Absence is a dash, never a zero: the quiet session, and a launch nobody has counted yet —
   // here it is not running, so not even a clock, and its second line is dashes.
-  assert.ok(h.indexOf(albl('Explore · – · launched', 'Explore', '–', 'launched', true) + figs(fig('–'), fig('–')) + '</span></button>') >= 0, h)
+  assert.ok(h.indexOf(albl('Explore · – · launched', 'Explore', '–', 'launched', true) + figsOf(AK.l1, fig('–'), fig('–')) + '</span></span>') >= 0, h)
   // A session's figures name what they are (D5), the name first — a figure in front of
   // "agents" would read as a number of agents, beside a tally that counts them: its own
   // transcript's usage, its agents' — never added to it, and not shown for a session without
   // agents — and its span, whose title says so.
   const span = (v: string): string => '<span title="span from the first to the last line">' + v + '</span>'
-  assert.ok(h.indexOf(slbl('Session Mon 09:00 · 1234abcd', 'Session', 'Mon 09:00', '1234abcd') + figs(fig('own –'), fig(span('–')))) >= 0, h)
+  assert.ok(h.indexOf(slbl('Session Mon 09:00 · 1234abcd', 'Session', 'Mon 09:00', '1234abcd') + figsOf(AK.s2, fig('own –'), fig(span('–')))) >= 0, h)
   // The project a session belongs to, when attribution names one, after its id on the name's
   // line, then — on the second — its figures and the tally of its agents (1.6 N1), which an opened
   // session keeps, before its span (1.6 P7b).
   assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a · repo', 'Session', 'Tue 10:55', '9d0eb37a', 'repo')
-    + figs(fig('own 1.2M'), fig('agents 434.6K'), ...tallyFigs(T_S1), fig(span('1 h 05 min')))) >= 0, h)
+    + figsOf(AK.s1, fig('own 1.2M'), fig('agents 434.6K'), ...tallyFigs(T_S1), fig(span('1 h 05 min')))) >= 0, h)
   // The sum of the two is no figure of the page.
   assert.equal(h.indexOf('1.6M'), -1, h)
   // A launch whose transcript has not been seen yet reads as the hint it is.
-  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-pending" aria-selected="false">') >= 0, h)
+  assert.ok(h.indexOf(itemTag(AK.l1, { kind: 'pending', level: 3, size: 1, pos: 1, label: 'Explore · – · launched, unknown, derived' })) >= 0, h)
   assert.match(STYLE, /\.ag-k-pending > \.ag-line \.ag-label \{ font-style: italic; \}/)
   // A running node without a start gets no clock rather than one counting from 1970 — in the
   // tree, and in the running list — and keeps its duration.
@@ -3433,13 +3463,13 @@ test('a row is two lines: its name, then the usage and duration it was given —
     agents: agentTree({ roots: [treeNode(AK.a1, 'running', { startTs: null })], runningNow: [runningItem({ startTs: null })] }),
   })
   assert.equal(nostart.indexOf('data-live'), -1, nostart)
-  assert.ok(nostart.indexOf(figs(fig('12.3K'), fig('40.0 s'))) >= 0, nostart)
+  assert.ok(nostart.indexOf(figsOf(AK.a1, fig('12.3K'), fig('40.0 s'))) >= 0, nostart)
   // Without the view model's clock time the clock stays readable: no words to stand in for it.
   const noclock = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'running', { startClock: null })] }) }))
-  assert.ok(noclock.indexOf(figs(fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', null))) >= 0, noclock)
+  assert.ok(noclock.indexOf(figsOf(AK.a1, fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', null))) >= 0, noclock)
   // A node with nothing in it is dashes, on both lines.
   const bare = agentsHtml(a, { agents: agentTree({ roots: [{ key: AK.a1 }] }) })
-  assert.ok(bare.indexOf('<span class="ag-label"><span class="ag-np">–</span></span>' + figs(fig('–'), fig('–'))) >= 0, bare)
+  assert.ok(bare.indexOf('<span class="ag-label"><span class="ag-np">–</span></span>' + figsOf(AK.a1, fig('–'), fig('–'))) >= 0, bare)
   assert.equal(/undefined|NaN|null|\[object Object\]/.test(h + nostart + bare), false)
 })
 
@@ -3450,26 +3480,28 @@ test('by default the tree is closed: only the sessions, each parent collapsed an
   assert.deepEqual([...h.matchAll(/data-act="agentSelect" data-key="([^"]*)"/g)].map((m) => m[1]), [AK.s1, AK.s2])
   for (const k of [AK.wf, AK.a1, AK.a2, AK.a3, AK.l1]) assert.equal(h.indexOf('data-key="' + k + '"'), -1, k)
   assert.equal(h.indexOf('<ul role="group">'), -1, h)
-  // The session with children is collapsed, its toggle says it opens it, and the second line of
-  // its row (1.6 N6) says what its agents came to (1.6 N1) — the glyphs for the eye, each a part of
-  // the line, and the same in words once for a screen reader, which would read the glyphs as
-  // shapes —, after its usage and before its span (1.6 P7b, pinned and changed: P7 ended the line on
-  // the tally); the session with none is a leaf, and has no tally at all rather than "0 started".
-  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
-    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
-    + '" aria-label="Expand Session Tue 10:55 · 9d0eb37a"></button>') >= 0, h)
+  // The session with children is collapsed — its item says so, and its toggle is the mouse's —, and
+  // the second line of its row (1.6 N6) says what its agents came to (1.6 N1) — the glyphs for the
+  // eye, each a part of the line, hidden from a screen reader, which would read them as shapes —,
+  // after its usage and before its span (1.6 P7b, pinned and changed: P7 ended the line on the
+  // tally); the session with none is a leaf, and has no tally at all rather than "0 started". 1.6 L1
+  // (pinned and changed: 1.5 made the toggle a button named "Expand …", P2c wrote the tally's words
+  // after its glyphs): the item is the tree's first and so its one stop of the Tab key, and its name
+  // says the rest in words — the whole name, the project, the state, the tally.
+  assert.ok(h.indexOf(itemTag(AK.s1, { kind: 'session', tab: true, size: 2, pos: 1, expanded: false, label: 'Session Tue 10:55 · 9d0eb37a · repo, active session, derived, 4 started, 1 done, 1 failed, about 1 running, about 1 unknown' })
+    + '<div class="ag-line">' + foldOf(AK.s1) + rowOf(AK.s1)) >= 0, h)
   assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a · repo', 'Session', 'Tue 10:55', '9d0eb37a', 'repo')
-    + '<span class="ag-fig"><span class="ag-fp"><span class="nobr">own 1.2M</span></span>'
+    + '<span class="ag-fig" id="agf-' + AK.s1 + '"><span class="ag-fp"><span class="nobr">own 1.2M</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="nobr">agents 434.6K</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">4 started</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✓</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✕</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ●</span></span>'
-    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ?</span>'
-    + '<span class="sr">4 started, 1 done, 1 failed, about 1 running, about 1 unknown</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ?</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="nobr"><span title="span from the first to the last line">1 h 05 min</span></span></span></span>') >= 0, h)
-  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-selected="false"><div class="ag-line">'
-    + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.s2 + '"') >= 0, h)
+  assert.ok(h.indexOf(itemTag(AK.s2, { kind: 'session', size: 2, pos: 2, label: 'Session Mon 09:00 · 1234abcd, idle session, derived' })
+    + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.s2)) >= 0, h)
+  assert.equal(h.indexOf('<span class="sr">4 started'), -1, h)
   assert.equal(h.split('class="ag-t"').length - 1, 5, h)
   assert.equal(/started|agent\(s\)/.test(h.slice(h.indexOf('data-key="' + AK.s2 + '"'))), false, h)
   assert.equal(h.indexOf('aria-expanded="true"'), -1, h)
@@ -3481,20 +3513,20 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   const a = agentCtx()
   // The reader opened the busy session: its run and its failed agent show, closed.
   const one = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1] }) }))
-  assert.ok(one.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="true" aria-selected="false">'
-    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
-    + '" aria-label="Collapse Session Tue 10:55 · 9d0eb37a"></button>') >= 0, one)
+  assert.ok(one.indexOf(itemTag(AK.s1, { kind: 'session', tab: true, size: 2, pos: 1, expanded: true, label: 'Session Tue 10:55 · 9d0eb37a · repo, active session, derived, 4 started, 1 done, 1 failed, about 1 running, about 1 unknown' })
+    + '<div class="ag-line">' + foldOf(AK.s1)) >= 0, one)
   // Opened, the session still names its project and shows its tally (1.6 N1) — before its span
   // (1.6 P7b) —: what failed or is still unknown among its agents is not something to count off the
   // rows once they show.
   assert.ok(one.indexOf('<span class="ag-proj"> · repo</span></span>') >= 0, one)
   assert.ok(one.indexOf(tallyThen(T_S1, S1_SPAN)) >= 0, one)
-  assert.ok(one.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="false" aria-selected="false">'
-    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
-    + '" aria-label="Expand Workflow run Tue 11:40 · cfe7718d"></button>') >= 0, one)
+  assert.ok(one.indexOf(itemTag(AK.wf, { kind: 'workflow', level: 2, size: 2, pos: 1, expanded: false, label: 'Workflow run Tue 11:40 · cfe7718d, running, derived, 2 started, 1 done, about 1 running' })
+    + '<div class="ag-line">' + foldOf(AK.wf)) >= 0, one)
   assert.ok(one.indexOf(tallyThen(T_WF, WF_CLOCK)) >= 0, one)
   // A closed agent with an agent below it ends its figures on its tally too.
-  assert.ok(one.indexOf('<span class="ag-sid">c3d4</span></span>' + figs(fig('12.3K'), fig('40.0 s'), ...tallyFigs(T_A3))) >= 0, one)
+  assert.ok(one.indexOf('<span class="ag-sid">c3d4</span></span>' + figsOf(AK.a3, fig('12.3K'), fig('40.0 s'), ...tallyFigs(T_A3))) >= 0, one)
+  assert.ok(one.indexOf(itemTag(AK.a3, { level: 2, size: 2, pos: 2, expanded: false,
+    label: 'general-purpose · sonnet-5 · c3d4, failed, recorded, 1 started, about 1 unknown' })) >= 0, one)
   // The children of the closed ones are not written at all.
   for (const k of [AK.a1, AK.a2, AK.l1]) assert.equal(one.indexOf('data-key="' + k + '"'), -1, k)
   assert.equal(one.split('<ul role="group">').length - 1, 1, one)
@@ -3502,18 +3534,20 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   // Everything opened: three groups, every parent says it is open; the session and the run keep
   // their tallies, the opened agent shows its child's glyph instead of its own tally.
   const open = treePart(agentsHtml(a, { ui: openUi() }))
-  assert.ok(open.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="true" aria-selected="false">'
-    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
-    + '" aria-label="Collapse Workflow run Tue 11:40 · cfe7718d"></button>') >= 0, open)
+  assert.ok(open.indexOf(itemTag(AK.wf, { kind: 'workflow', level: 2, size: 2, pos: 1, expanded: true, label: 'Workflow run Tue 11:40 · cfe7718d, running, derived, 2 started, 1 done, about 1 running' })
+    + '<div class="ag-line">' + foldOf(AK.wf)) >= 0, open)
   // A leaf has no toggle and keeps its place in the column with an empty slot.
-  assert.ok(open.indexOf('<li role="treeitem" class="ag-k-agent" aria-selected="false"><div class="ag-line">'
-    + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '"') >= 0, open)
+  assert.ok(open.indexOf(itemTag(AK.a1, { level: 3, size: 2, pos: 1, label: 'Explore · claude-opus-5 · a94f, running, derived' })
+    + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.a1)) >= 0, open)
   assert.equal(open.split('aria-expanded="true"').length - 1, 3, open)
   assert.equal(open.indexOf('aria-expanded="false"'), -1, open)
   assert.equal(open.split('<ul role="group">').length - 1, 3, open)
   assert.ok(open.indexOf(tallyThen(T_S1, S1_SPAN)) >= 0, open)
   assert.ok(open.indexOf(tallyThen(T_WF, WF_CLOCK)) >= 0, open)
-  assert.ok(open.indexOf('<span class="ag-sid">c3d4</span></span>' + figs(fig('12.3K'), fig('40.0 s')) + '</span></button>') >= 0, open)
+  assert.ok(open.indexOf('<span class="ag-sid">c3d4</span></span>' + figsOf(AK.a3, fig('12.3K'), fig('40.0 s')) + '</span></span>') >= 0, open)
+  // Its item's name drops the tally with the row: open, its children say it with their own glyphs.
+  assert.ok(open.indexOf(itemTag(AK.a3, { level: 2, size: 2, pos: 2, expanded: true,
+    label: 'general-purpose · sonnet-5 · c3d4, failed, recorded' })) >= 0, open)
   assert.equal(open.split('class="ag-t"').length - 1, 5 + 3, open)
   assert.equal(open.indexOf('agent(s)'), -1, open)
 
@@ -3533,15 +3567,17 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   const mute = agentTree({ roots: [treeNode(AK.s1, 'active', {
     kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', tallyText: '2 started · 2 ✓', tallySpoken: null, children: [treeNode(AK.a1, 'running')],
   })] })
-  assert.ok(treePart(agentsHtml(a, { agents: mute })).indexOf(tallyFigs({ tallyText: '2 started · 2 ✓', tallySpoken: '2 started · 2 ✓' })
+  const mh = treePart(agentsHtml(a, { agents: mute }))
+  assert.ok(mh.indexOf(tallyFigs({ tallyText: '2 started · 2 ✓', tallySpoken: '2 started · 2 ✓' })
     .map((p) => '<span class="ag-fp">' + SEP + p + '</span>').join('')) >= 0)
+  assert.ok(mh.indexOf(' aria-label="Session Tue 10:55 · 9d0eb37a, active session, derived, 2 started · 2 ✓"') >= 0, mh)
   // The tally is the view model's text, and like every text of it, it is escaped.
   const hostile = agentTree({ roots: [treeNode(AK.s1, 'active', {
     kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', tallyText: '<b>1</b> started', tallySpoken: '"1" <started>', children: [treeNode(AK.a1, 'running')],
   })] })
   const hh = treePart(agentsHtml(a, { agents: hostile }))
   assert.ok(hh.indexOf('<span class="ag-t" aria-hidden="true">&lt;b&gt;1&lt;/b&gt; started</span>') >= 0, hh)
-  assert.ok(hh.indexOf('<span class="sr">&quot;1&quot; &lt;started&gt;</span>') >= 0, hh)
+  assert.ok(hh.indexOf(' aria-label="Session Tue 10:55 · 9d0eb37a, active session, derived, &quot;1&quot; &lt;started&gt;"') >= 0, hh)
   // The twisty is drawn, not typed, and turns with the attribute.
   assert.match(STYLE, /\.ag-fold::before \{ content: "▾";/)
   assert.match(STYLE, /\[aria-expanded="false"\] > \.ag-line > \.ag-fold::before \{ content: "▸"; \}/)
@@ -3552,15 +3588,22 @@ test('the selected node is the one pressed row, and only a selection opens the d
   const a = agentCtx()
   const none = agentsHtml(a, { ui: openUi() })
   assert.equal(none.indexOf('aria-pressed="true"'), -1, none)
+  assert.equal(none.indexOf('data-pressed="true"'), -1, none)
   assert.equal(none.indexOf('ag-details'), -1, none)
   const h = treePart(agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: openUi({ agentSelected: AK.a1 }) }))
-  const pressed = [...h.matchAll(/data-act="agentSelect" data-key="([^"]*)" aria-pressed="true"/g)].map((m) => m[1])
+  // 1.6 L1 (pinned and changed: the row was a button, pressed by aria-pressed): the row is no
+  // control of its own, and a state of a button on it would say it is one — `data-pressed` marks it.
+  const pressed = [...h.matchAll(/data-act="agentSelect" data-key="([^"]*)" data-pressed="true"/g)].map((m) => m[1])
   assert.deepEqual(pressed, [AK.a1])
-  assert.equal(h.split('aria-pressed="false"').length - 1, 6, h)
+  assert.equal(h.split('data-pressed="false"').length - 1, 6, h)
+  assert.equal(h.indexOf('aria-pressed'), -1, h)
   // The tree says the same to a screen reader.
   assert.equal(h.split('aria-selected="true"').length - 1, 1, h)
+  // The selected item, whose row is drawn, is the tree's one stop of the Tab key.
+  assert.equal(h.split('tabindex="0"').length - 1, 1, h)
+  assert.ok(h.indexOf(' data-key="' + AK.a1 + '" tabindex="0"') >= 0, h)
   // Quieter than a pressed chip: the track's tint and the focus colour's edge.
-  assert.match(STYLE, /\.ag-row\[aria-pressed="true"\] \{ background: var\(--track\);/)
+  assert.match(STYLE, /\.ag-row\[aria-pressed="true"\], \.agtree \.ag-row\[data-pressed="true"\] \{ background: var\(--track\);/)
 })
 
 test('selecting a node opens nothing: with its tree row in a closed branch, the details open under its running row', () => {
@@ -3614,21 +3657,22 @@ test('the details open inside the entry of the row that was clicked, after its l
   })
   const panel = panelOf(h)
   assert.ok(panel.startsWith('<div class="ag-details" data-ind="1" role="region" aria-label="Details">'), panel)
-  const entry = h.indexOf('<li role="treeitem" class="ag-k-agent" aria-expanded="true" aria-selected="true">')
+  const entry = h.indexOf(itemTag(AK.a3, { tab: true, level: 2, size: 2, pos: 2, expanded: true, selected: true,
+    label: 'general-purpose · sonnet-5 · c3d4, failed, recorded' }))
   assert.ok(entry >= 0, h)
   const line = h.indexOf('<div class="ag-line">', entry)
   const group = h.indexOf('<ul role="group">', entry)
   assert.ok(line > entry && h.indexOf(panel, line) > line && h.indexOf(panel, line) < group, h)
-  assert.ok(h.indexOf('</button></div>' + panel + '<ul role="group">', entry) > entry, h)
+  assert.ok(h.indexOf('</span></span></div>' + panel + '<ul role="group">', entry) > entry, h)
   // Only its row is pressed; the panel is drawn once, and nowhere after the tree.
-  assert.deepEqual([...h.matchAll(/data-key="([^"]*)" aria-pressed="true"/g)].map((m) => m[1]), [AK.a3])
+  assert.deepEqual([...h.matchAll(/data-key="([^"]*)" data-pressed="true"/g)].map((m) => m[1]), [AK.a3])
   assert.equal(h.split('<div class="ag-details"').length - 1, 1, h)
   // 1.6 D10: nothing after the tree — the line about the lower bound is gone.
   assert.ok(h.endsWith('</ul></div>'), h.slice(-200))
   // A session's panel stands at the tree's own edge: no level to step out of.
   const top = agentsHtml(a, { agents: agentTree({ selected: detailsOf({ key: AK.s1, rows: [] }) }), ui: agentUi({ agentSelected: AK.s1 }) })
   assert.ok(panelOf(top).startsWith('<div class="ag-details" role="region" aria-label="Details">'), top)
-  assert.ok(top.indexOf('aria-pressed="true">') < top.indexOf(panelOf(top)), top)
+  assert.ok(top.indexOf('data-pressed="true">') < top.indexOf(panelOf(top)), top)
   // The level the panel steps out of comes from the page's own stylesheet, through the CSSOM
   // (the page's CSP allows no style attribute): one indent of the tree per level.
   assert.match(STYLE, /\.ag-details \{ margin: 4px 0 6px calc\(var\(--ag-ind, 0\) \* -16px\);/)
@@ -3645,7 +3689,9 @@ test('with both of a running node\'s rows on the page the details open under the
   const a = agentCtx()
   const tree = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: openUi({ agentSelected: AK.a1, agentSelectedIn: 'tree' }) })
   const now = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: openUi({ agentSelected: AK.a1, agentSelectedIn: 'now' }) })
-  const pressed = (h: string): string[] => [...h.matchAll(/data-key="([^"]*)"( data-list="now")? aria-pressed="true"/g)].map((m) => m[1] + (m[2] ? '@now' : '@tree'))
+  // 1.6 L1: a tree row says it by `data-pressed`, a running list's button by `aria-pressed`.
+  const pressed = (h: string): string[] => [...h.matchAll(/data-key="([^"]*)"(?:( data-list="now") aria-pressed| data-pressed)="true"/g)]
+    .map((m) => m[1] + (m[2] ? '@now' : '@tree'))
   assert.deepEqual(pressed(tree), [AK.a1 + '@tree'])
   assert.deepEqual(pressed(now), [AK.a1 + '@now'])
   assert.ok(tree.indexOf(panelOf(tree)) > tree.indexOf('<div class="agtree"'), tree)
@@ -3897,7 +3943,7 @@ test('a lower bound carries one ⚠ inside its usage figure, titled with its rea
   const tp = treePart(h)
   // The running agent's tree row: the ⚠ inside the usage figure's own unbreakable span, the first
   // part of the figures' line (1.6 N6), which always stays on it.
-  assert.ok(tp.indexOf('<span class="ag-fig"><span class="ag-fp">' + fig('12.3K' + mark(why)) + '</span><span class="ag-fp">' + SEP
+  assert.ok(tp.indexOf('<span class="ag-fig" id="agf-' + AK.a1 + '"><span class="ag-fp">' + fig('12.3K' + mark(why)) + '</span><span class="ag-fp">' + SEP
     + clockFig(AG_NOW - 42_000, '42 s', '11:59') + '</span></span>') >= 0, tp)
   // A session's is its own transcript's: on its own figure.
   assert.ok(tp.indexOf(fig('own 1.2M' + mark('⚠ lower bound — 1 of 30 replies unfinished'))) >= 0, tp)
@@ -3996,10 +4042,10 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
     })],
   })
   const h = treePart(agentsHtml(a, { agents: closed }))
-  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
-    + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
-    + '" aria-label="Expand Session Tue 10:55 · 9d0eb37a"></button>') >= 0, h)
-  assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a', 'Session', 'Tue 10:55', '9d0eb37a') + '<span class="ag-fig">') >= 0, h)
+  assert.ok(h.indexOf(itemTag(AK.s1, { kind: 'session', tab: true, size: 1, pos: 1, expanded: false,
+    label: 'Session Tue 10:55 · 9d0eb37a, active session, derived, 3 started, 2 done, 1 stopped' })
+    + '<div class="ag-line">' + foldOf(AK.s1)) >= 0, h)
+  assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a', 'Session', 'Tue 10:55', '9d0eb37a') + '<span class="ag-fig" id="agf-' + AK.s1 + '">') >= 0, h)
   // 1.6 P7b: its tally before its span, the part the fit takes off first.
   assert.ok(h.indexOf(tallyThen(three, fig('<span title="span from the first to the last line">40.0 s</span>'))) >= 0, h)
   assert.equal(h.indexOf('<ul role="group">'), -1, 'a closed node wrote a group')
@@ -4011,8 +4057,7 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
     const leaf = treePart(agentsHtml(a, { agents: run, ui }))
     assert.equal(leaf.indexOf('ag-fold'), -1, leaf)
     assert.equal(leaf.indexOf('aria-expanded'), -1, leaf)
-    assert.ok(leaf.indexOf('<div class="ag-line"><span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="'
-      + AK.wf + '"') >= 0, leaf)
+    assert.ok(leaf.indexOf('<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.wf)) >= 0, leaf)
     assert.ok(leaf.indexOf(tallyThen(three, fig('40.0 s'))) >= 0, leaf)
   }
   // An agent's tally stands while its children are not on screen: closed, or opened with none
@@ -4039,27 +4084,35 @@ test('an open node with more children than it shows says how many, and offers th
     })],
   })
   const open = (over: Record<string, unknown> = {}): Record<string, unknown> => agentUi({ agentsExpanded: [AK.wf], ...over })
-  const line = (words: string, control: boolean): string => '<li role="treeitem" class="ag-k-more"><div class="ag-line">'
+  // 1.6 L1 (pinned and changed: the line was a button in an item of its own): the line is an item of
+  // the node's group — a level below the node, the next place after its shown children, of as many
+  // as the node has — reached with the arrow keys, its words the mouse's target while a step can be
+  // taken.
+  const line = (words: string, control: boolean, more: number, shown = 3): string => '<li role="treeitem" class="ag-k-more" data-more="'
+    + AK.wf + '" tabindex="-1" aria-level="2" aria-setsize="' + (shown + more) + '" aria-posinset="' + (shown + 1) + '"><div class="ag-line">'
     + '<span class="ag-pad"></span>'
-    + (control ? '<button class="ag-more" data-act="agentMore" data-key="' + AK.wf + '">' + words + '</button>'
+    + (control ? '<span class="ag-more" data-act="agentMore" data-key="' + AK.wf + '">' + words + '</span>'
       : '<span class="ag-more">' + words + '</span>')
     + '</div></li>'
   const html = (agents: Record<string, unknown>, ui = open()): string => treePart(agentsHtml(a, { agents, ui }))
   // The line comes after the last child, inside the node's group.
   const many = html(run(377))
   assert.ok(many.indexOf('data-key="a:kid2"') < many.indexOf('class="ag-k-more"'), many)
-  assert.ok(many.indexOf(line('50 more · 377 not shown', true) + '</ul>') >= 0, many)
-  assert.ok(html(run(1234)).indexOf(line('50 more · 1,234 not shown', true)) >= 0)
-  assert.ok(html(run(50)).indexOf(line('50 more', true)) >= 0)
-  assert.ok(html(run(12)).indexOf(line('12 more', true)) >= 0)
+  assert.ok(many.indexOf(line('50 more · 377 not shown', true, 377) + '</ul>') >= 0, many)
+  assert.ok(html(run(1234)).indexOf(line('50 more · 1,234 not shown', true, 1234)) >= 0)
+  assert.ok(html(run(50)).indexOf(line('50 more', true, 50)) >= 0)
+  assert.ok(html(run(12)).indexOf(line('12 more', true, 12)) >= 0)
   // Nothing more, no line; a closed node, none either — its children are not on the page at all.
   assert.equal(html(run(0)).indexOf('ag-k-more'), -1)
   assert.equal(html(run(377), agentUi()).indexOf('ag-k-more'), -1)
   // The last step taken: the count alone, no control. One step before it, the control.
-  assert.ok(html(run(377), open({ agentsMore: [{ key: AK.wf, pages: 10 }] })).indexOf(line('377 not shown', false)) >= 0)
-  assert.ok(html(run(377), open({ agentsMore: [{ key: AK.wf, pages: 9 }] })).indexOf(line('50 more · 377 not shown', true)) >= 0)
-  // Open, and none of its children sent — the page had no room: the count alone.
-  assert.ok(html(run(380, [])).indexOf('<ul role="group">' + line('380 not shown', false) + '</ul>') >= 0)
+  assert.ok(html(run(377), open({ agentsMore: [{ key: AK.wf, pages: 10 }] })).indexOf(line('377 not shown', false, 377)) >= 0)
+  assert.ok(html(run(377), open({ agentsMore: [{ key: AK.wf, pages: 9 }] })).indexOf(line('50 more · 377 not shown', true, 377)) >= 0)
+  // Open, and none of its children sent — the page had no room: the count alone, the first place.
+  assert.ok(html(run(380, [])).indexOf('<ul role="group">' + line('380 not shown', false, 380, 0) + '</ul>') >= 0)
+  // The node's children say they are three of 380 as well: the ones not shown are counted.
+  assert.ok(many.indexOf(' data-key="a:kid0" tabindex="-1" aria-level="2" aria-setsize="380" aria-posinset="1"') >= 0, many)
+  assert.ok(many.indexOf(' data-key="a:kid2" tabindex="-1" aria-level="2" aria-setsize="380" aria-posinset="3"') >= 0, many)
   // A payload count that is not one is no line.
   for (const bad of [-1, 0.2, Number.NaN, '377', null]) {
     const tree = run(0)
@@ -4137,8 +4190,12 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   // (1.6 N2: the one row they are under) — and the poisoned opened nodes still open: the agent
   // under them is on screen, the launch under the failed agent, which nobody opened, is only in
   // the running list.
-  const pressedKeys = [...h.matchAll(/data-key="([^"]*)"( data-list="now")? aria-pressed="true"/g)]
+  const pressedKeys = [...h.matchAll(/data-key="([^"]*)"(?:( data-list="now") aria-pressed| data-pressed)="true"/g)]
     .map((m) => unescapeHtml(m[1]) + (m[2] ? '@now' : '@tree'))
+  // 1.6 L1: a key with a space in it names no description — the reference would split in two —
+  // and the name of its item is escaped like every other attribute.
+  assert.equal(h.indexOf('aria-describedby="agf-' + '&lt;script'), -1, h)
+  assert.ok(treePart(h).indexOf(' aria-label="' + shown) >= 0, h)
   assert.deepEqual(pressedKeys, [EVIL + AK.a1 + '@tree'])
   assert.ok(treePart(h).indexOf('<div class="ag-details" data-ind="2" role="region"') >= 0, h)
   const treeKeys = [...treePart(h).matchAll(/data-key="([^"]*)"/g)].map((m) => unescapeHtml(m[1]))
@@ -4258,9 +4315,14 @@ test('Escape in the Agents section closes the details and puts the focus back on
     ({ dataset: list === undefined ? { act, key } : { act, key, list }, focus: () => { focused.push(name) } })
   const drawn = [control('agentSelect', AK.a1, 'now-row', 'now'), control('agentToggle', AK.s1, 'toggle'),
     control('agentSelect', AK.a1, 'tree-row'), { dataset: { act: 'cmd', id: 'tokenPace.copyAgentId' }, focus: () => { focused.push('copy') } }]
+  // 1.6 L1: in the tree the focus goes to the item — the one of the node, not a "more" line under it.
+  const items = [{ dataset: { key: AK.s1 }, focus: () => { focused.push('session-item') } },
+    { dataset: { more: AK.a1 }, focus: () => { focused.push('more-item') } },
+    { dataset: { key: AK.a1 }, focus: () => { focused.push('tree-item') } }]
   let panel: unknown = { className: 'ag-details' }
   const fold = { open: true }
-  const body = { querySelector: (q: string) => (q === '.ag-details' ? panel : null), querySelectorAll: (q: string) => (q === '[data-act]' ? drawn : []) }
+  const body = { querySelector: (q: string) => (q === '.ag-details' ? panel : null),
+    querySelectorAll: (q: string) => (q === '[data-act]' ? drawn : q === '.agtree li[role="treeitem"]' ? items : []) }
   const sec = { querySelector: (q: string) => (q === '[data-body="agents"]' ? body : q === 'details' ? fold : null) }
   const inAgents = { closest: (q: string) => (q === '[data-sec="agents"]' ? sec : null) }
   const elsewhere = { closest: () => null }
@@ -4280,10 +4342,11 @@ test('Escape in the Agents section closes the details and puts the focus back on
   esc(elsewhere)
   assert.deepEqual([a.posted, focused, prevented], [[], [], 0])
   // From anywhere in the section — the Copy ID button inside the panel, say: the details close,
-  // and the focus goes to the row they stand under, the tree row, not the running list's.
+  // and the focus goes to the row they stand under, the tree's — its item, 1.6 L1 (pinned and
+  // changed: the row was a button of its own) —, not the running list's.
   esc(inAgents)
   assert.deepEqual(a.posted, [{ type: 'agentSelect', key: null }])
-  assert.deepEqual(focused, ['tree-row'])
+  assert.deepEqual(focused, ['tree-item'])
   assert.equal(prevented, 1)
   // Under the running list's row, it is that row.
   page(agentUi({ agentSelected: AK.a1, agentSelectedIn: 'now' }))
@@ -4299,7 +4362,7 @@ test('Escape in the Agents section closes the details and puts the focus back on
   esc(inAgents)
   assert.deepEqual([a.posted, focused, pop.hidden], [[], [], true])
   esc(inAgents)
-  assert.deepEqual([a.posted, focused], [[{ type: 'agentSelect', key: null }], ['tree-row']])
+  assert.deepEqual([a.posted, focused], [[{ type: 'agentSelect', key: null }], ['tree-item']])
   // The same for a sparkline's tip.
   page(openUi({ agentSelected: AK.a1 }))
   nodeVm.runInContext('sparkMark = { svg: { querySelector: function () { return null; }, parentNode: null }, g: null, k: 0 };', a.c)
@@ -4323,94 +4386,350 @@ test('Escape in the Agents section closes the details and puts the focus back on
   assert.match(SOURCE, /agentPanelAt\) return;\n  if \(openPop !== null \|\| sparkMark !== null\) return;[\s\S]{0,900}\}, true\);/)
 })
 
-test('a keyboard user on the tree keeps the focus through a push of the section', () => {
-  const focused: string[] = []
-  const control = (act: string, key: string, name: string): Record<string, unknown> =>
-    ({ dataset: { act, key }, focus: () => { focused.push(name) } })
-  const before = control('agentSelect', AK.a1, 'before')
-  const drawn = [control('agentToggle', AK.a1, 'fold'), control('agentSelect', AK.a2, 'other'),
-    control('agentSelect', AK.a1, 'after')]
-  const inside = new Set<unknown>([before])
-  const body = {
-    innerHTML: '', dataset: {}, style: {},
-    contains: (el: unknown) => inside.has(el),
-    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
-  }
-  const doc: Record<string, unknown> = {
-    addEventListener: () => undefined,
-    getElementById: () => null,
-    querySelector: (s: string) => (s === '[data-body="agents"]' || s === '[data-body="quota"]' ? body : null),
-    querySelectorAll: () => [],
-    activeElement: before,
-  }
-  const c = nodeVm.createContext({
-    acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc,
-    window: { addEventListener: () => undefined }, console,
-  })
-  nodeVm.runInContext(SCRIPT, c)
-  ;(c as Record<string, unknown>).fixture = model({ sections: ['quota', 'agents'], agents: agentTree(), ui: agentUi() })
-  nodeVm.runInContext('vm = fixture; renderSection("agents");', c)
-  // The row the reader was on, found again by what it does and whom it names — not the fold
-  // beside it, and not another row.
-  assert.deepEqual(focused, ['after'])
-  // A control that is gone takes the focus nowhere, and nothing else is focused instead.
-  focused.length = 0
-  const gone = control('agentSelect', 'a:/p/gone.jsonl', 'gone')
-  inside.add(gone)
-  doc.activeElement = gone
-  nodeVm.runInContext('renderSection("agents");', c)
-  assert.deepEqual(focused, [])
-  // A focus outside the section, or a refresh of another section, is left to the browser.
-  doc.activeElement = before
-  inside.clear()
-  nodeVm.runInContext('renderSection("agents");', c)
-  inside.add(before)
-  nodeVm.runInContext('renderSection("quota");', c)
-  assert.deepEqual(focused, [])
+// ---------------------------------------------------------------------------
+// 1.6 L1: the keyboard of a real tree
+// ---------------------------------------------------------------------------
+
+/** The items of a rendered tree that are the stop of the Tab key: a node's key, a "more" line's `more:<key>`. */
+function tabStops(h: string): string[] {
+  return [...treePart(h).matchAll(/<li role="treeitem" class="[^"]*" data-(key|more)="([^"]*)" tabindex="0"/g)]
+    .map((m) => (m[1] === 'more' ? 'more:' : '') + m[2])
+}
+
+/** Sets what the page remembers of the keyboard's place in the tree: the item, then the items above it. */
+function focusPath(c: nodeVm.Context, path: Array<[string, boolean]>, inTree = false): void {
+  nodeVm.runInContext('agentFocusPath = ' + JSON.stringify(path.map(([key, more]) => ({ key, more }))) + '; agentFocusInTree = '
+    + inTree + ';', c)
+}
+
+test('the tree is one stop of the Tab key: the item the keyboard was last on, else the selected one while its row is drawn, else the first session', () => {
+  const a = agentCtx()
+  const selected = { agents: agentTree({ selected: detailsOf() }) }
+  // Nothing selected, the keyboard never on the tree: the first session, and every other item −1.
+  const plain = agentsHtml(a, { ui: openUi() })
+  assert.deepEqual(tabStops(plain), [AK.s1])
+  assert.equal(treePart(plain).split('<li role="treeitem"').length - 1, 7)
+  assert.equal(treePart(plain).split('tabindex="-1"').length - 1, 6, plain)
+  // Selected, its row drawn: the selected item. Inside a closed branch: the first session.
+  assert.deepEqual(tabStops(agentsHtml(a, { ...selected, ui: openUi({ agentSelected: AK.a1 }) })), [AK.a1])
+  assert.deepEqual(tabStops(agentsHtml(a, { ...selected, ui: agentUi({ agentSelected: AK.a1 }) })), [AK.s1])
+  // The running list's rows are no items of the tree: they stay buttons, each a stop of its own.
+  assert.equal(agentsHtml(a, { ui: openUi() }).slice(0, agentsHtml(a, { ui: openUi() }).indexOf('<div class="agtree"')).indexOf('tabindex'), -1)
+  // The keyboard's last item wins over the selection while it is drawn; once it is not, the nearest
+  // item above it that is.
+  focusPath(a.c, [[AK.a2, false], [AK.wf, false], [AK.s1, false]])
+  assert.deepEqual(tabStops(agentsHtml(a, { ...selected, ui: openUi({ agentSelected: AK.a1 }) })), [AK.a2])
+  assert.deepEqual(tabStops(agentsHtml(a, { ...selected, ui: agentUi({ agentsExpanded: [AK.s1], agentSelected: AK.a1 }) })), [AK.wf])
+  // Nothing of it drawn, the focus elsewhere: the selected item, the first session.
+  focusPath(a.c, [['a:/p/gone.jsonl', false]])
+  assert.deepEqual(tabStops(agentsHtml(a, { ...selected, ui: openUi({ agentSelected: AK.a1 }) })), [AK.a1])
+  // Nothing of it drawn while the focus is in the tree — the push that took the item away: the
+  // first session, where restoreFocus puts the focus.
+  focusPath(a.c, [['a:/p/gone.jsonl', false]], true)
+  assert.deepEqual(tabStops(agentsHtml(a, { ...selected, ui: openUi({ agentSelected: AK.a1 }) })), [AK.s1])
+  // A "more" line can be the one.
+  const kids = Array.from({ length: 2 }, (_, i) => treeNode(`a:kid${i}`, 'done', { label: `Explore · opus-5 · k${i}` }))
+  const paged = agentTree({ roots: [treeNode(AK.wf, 'done', { kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d',
+    hasChildren: true, childrenTotal: 60, childrenMore: 58, children: kids })] })
+  focusPath(a.c, [[AK.wf, true], [AK.wf, false]])
+  assert.deepEqual(tabStops(agentsHtml(a, { agents: paged, ui: agentUi({ agentsExpanded: [AK.wf] }) })), ['more:' + AK.wf])
+  // Its node closed: the node.
+  assert.deepEqual(tabStops(agentsHtml(a, { agents: paged, ui: agentUi() })), [AK.wf])
+  // One stop, whatever the payload: a current item the render does not reach hands it to the first.
+  focusPath(a.c, [])
+  nodeVm.runInContext('var __current = agentCurrent; agentCurrent = function () { return { key: "a:nowhere", more: false }; };', a.c)
+  const lost = agentsHtml(a, { ...selected, ui: openUi({ agentSelected: AK.a1 }) })
+  nodeVm.runInContext('agentCurrent = __current;', a.c)
+  assert.deepEqual(tabStops(lost), [AK.s1])
+  assert.equal(lost.split('<div class="ag-details"').length - 1, 1, lost)
 })
 
-test('a keyboard user on a "more" line keeps the focus on it, and on its node\'s toggle once the line is gone', () => {
-  // 1.6 D3: a step shows fifty children more and the line counts down; after the last step the
-  // line is gone, and the focus goes to the toggle of the node it belonged to rather than nowhere.
+test('the Copy ID button of the details is a stop of the Tab key only while its item is the tree\'s current one', () => {
+  const a = agentCtx()
+  const copy = (h: string): string => { const at = h.indexOf('<button class="ag-copy"'); return h.slice(at, h.indexOf('>', at) + 1) }
+  const agents = agentTree({ selected: detailsOf() })
+  // The selected item is the current one: its button is reached with Tab from it.
+  assert.equal(copy(agentsHtml(a, { agents, ui: openUi({ agentSelected: AK.a1 }) })),
+    '<button class="ag-copy" data-act="cmd" data-id="tokenPace.copyAgentId">')
+  // The keyboard is on another item: the button is out of the Tab order, the tree one stop of it.
+  focusPath(a.c, [[AK.s2, false]])
+  assert.equal(copy(agentsHtml(a, { agents, ui: openUi({ agentSelected: AK.a1 }) })),
+    '<button class="ag-copy" data-act="cmd" data-id="tokenPace.copyAgentId" tabindex="-1">')
+  // Under the running list's row the panel is no part of the tree: a button like the row above it.
+  assert.equal(copy(agentsHtml(a, { agents, ui: openUi({ agentSelected: AK.a1, agentSelectedIn: 'now' }) })),
+    '<button class="ag-copy" data-act="cmd" data-id="tokenPace.copyAgentId">')
+})
+
+test('the tree\'s keys: the arrows, Home and End move the focus, → and ← open and close, Enter and Space select — and focus selects nothing', () => {
+  const move = (items: unknown[], i: number, key: string): unknown =>
+    JSON.parse(String(nodeVm.runInContext('JSON.stringify(agentKeyMove(' + JSON.stringify(items) + ', ' + i + ', ' + JSON.stringify(key) + ')) || "null"', ctx)))
+  const it = (level: number, parent: boolean, open: boolean, more = false): Record<string, unknown> => ({ level, parent, open, more })
+  // An open session: its open run with a leaf, a closed agent and a "more" line; a leaf of the
+  // session; a second session, closed.
+  const items = [it(1, true, true), it(2, true, true), it(3, false, false), it(3, true, false), it(3, false, false, true),
+    it(2, false, false), it(1, true, false)]
+  // ↓ ↑ Home End: the next, the previous, the first, the last — and no further at either end.
+  assert.deepEqual([0, 3, 6].map((i) => move(items, i, 'ArrowDown')), [{ focus: 1 }, { focus: 4 }, { focus: 6 }])
+  assert.deepEqual([0, 3, 6].map((i) => move(items, i, 'ArrowUp')), [{ focus: 0 }, { focus: 2 }, { focus: 5 }])
+  assert.deepEqual([move(items, 4, 'Home'), move(items, 2, 'End')], [{ focus: 0 }, { focus: 6 }])
+  // →: a closed node opens (the focus stays), an open one hands the focus to its first child; a
+  // leaf and a "more" line keep it.
+  assert.deepEqual([3, 6].map((i) => move(items, i, 'ArrowRight')), [{ act: 'toggle' }, { act: 'toggle' }])
+  assert.deepEqual([0, 1].map((i) => move(items, i, 'ArrowRight')), [{ focus: 1 }, { focus: 2 }])
+  assert.deepEqual([2, 4, 5].map((i) => move(items, i, 'ArrowRight')), [{ focus: 2 }, { focus: 4 }, { focus: 5 }])
+  // An open node whose children the page does not carry has nothing to move to.
+  assert.deepEqual(move([it(1, true, true), it(1, false, false)], 0, 'ArrowRight'), { focus: 0 })
+  // ←: an open node closes; anything else hands the focus to the item above it — a "more" line to
+  // its node —, a root keeps it.
+  assert.deepEqual([0, 1].map((i) => move(items, i, 'ArrowLeft')), [{ act: 'toggle' }, { act: 'toggle' }])
+  assert.deepEqual([2, 3, 4, 5].map((i) => move(items, i, 'ArrowLeft')), [{ focus: 1 }, { focus: 1 }, { focus: 1 }, { focus: 0 }])
+  assert.deepEqual(move(items, 6, 'ArrowLeft'), { focus: 6 })
+  // Enter and Space: a node selects (or clears) — the "more" line takes the next step.
+  assert.deepEqual([move(items, 2, 'Enter'), move(items, 0, ' '), move(items, 4, 'Enter'), move(items, 4, ' ')],
+    [{ act: 'select' }, { act: 'select' }, { act: 'more' }, { act: 'more' }])
+  // Any other key is not the tree's; an item that is not there moves nothing.
+  for (const key of ['a', 'Tab', 'Escape', 'PageDown', '*']) assert.equal(move(items, 2, key), null, key)
+  assert.equal(move(items, 9, 'ArrowDown'), null)
+})
+
+/**
+ * A fake tree for the keyboard tests: items with the attributes agentNode writes, each with its
+ * three targets of the mouse, and what focus() and setAttribute() do to them recorded.
+ */
+function fakeTree(spec: Array<{ key?: string; more?: string; level: number; expanded?: boolean; control?: boolean }>, focused: string[]) {
+  const tree: Record<string, unknown> = {}
+  const items = spec.map((x) => {
+    const attrs: Record<string, string> = { role: 'treeitem', 'aria-level': String(x.level), tabindex: '-1' }
+    if (x.expanded !== undefined) attrs['aria-expanded'] = String(x.expanded)
+    const name = x.more !== undefined ? 'more:' + x.more : String(x.key)
+    const li: Record<string, unknown> = {
+      dataset: x.more !== undefined ? { more: x.more } : { key: x.key },
+      getAttribute: (n: string) => (n in attrs ? attrs[n] : null),
+      setAttribute: (n: string, v: string) => { attrs[n] = v },
+      attrs,
+      focus: () => { focused.push(name) },
+    }
+    const target = (act: string): Record<string, unknown> => ({ tagName: 'SPAN', dataset: { act, key: x.more ?? x.key } })
+    li.querySelector = (q: string) => (q === ':scope > .ag-line > .ag-fold' && x.expanded !== undefined ? target('agentToggle')
+      : q === ':scope > .ag-line > .ag-row' && x.more === undefined ? target('agentSelect')
+        : q === ':scope > .ag-line > .ag-more' && x.more !== undefined ? (x.control === false ? { dataset: {} } : target('agentMore')) : null)
+    li.closest = (q: string) => (q === '.agtree' ? tree : q === 'li[role="treeitem"]' ? li : null)
+    return li
+  })
+  // The item above each one: the nearest one before it with a lower level.
+  items.forEach((li, i) => {
+    const level = spec[i].level
+    let up: unknown = null
+    for (let j = i - 1; j >= 0; j--) if (spec[j].level < level) { up = items[j]; break }
+    li.parentElement = { closest: (q: string) => (q === '.agtree li[role="treeitem"]' ? up : null) }
+  })
+  tree.querySelectorAll = (q: string) => (q === 'li[role="treeitem"]' ? items
+    : q === 'li[role="treeitem"][tabindex="0"]' ? items.filter((li) => (li.attrs as Record<string, string>).tabindex === '0')
+      : q === '.ag-details .ag-copy' ? [] : [])
+  return { tree, items }
+}
+
+test('a key on a tree item moves the focus, or asks the host through the target a click would use — and nothing else', () => {
+  const a = agentCtx()
+  a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['agents'], agents: agentTree(), ui: openUi() }) } })
+  a.posted.length = 0
   const focused: string[] = []
-  const control = (act: string, key: string, name: string): Record<string, unknown> =>
-    ({ dataset: { act, key }, focus: () => { focused.push(name) } })
-  const before = control('agentMore', AK.wf, 'before')
-  let drawn = [control('agentToggle', AK.wf, 'toggle'), control('agentMore', AK.s1, 'other'), control('agentMore', AK.wf, 'after')]
-  const inside = new Set<unknown>([before])
-  const body = {
-    innerHTML: '', dataset: {}, style: {},
-    contains: (el: unknown) => inside.has(el),
-    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
+  const { items } = fakeTree([
+    { key: AK.s1, level: 1, expanded: true }, { key: AK.wf, level: 2, expanded: true }, { key: AK.a1, level: 3 },
+    { more: AK.wf, level: 3 }, { key: AK.a3, level: 2, expanded: false }, { key: AK.s2, level: 1 },
+  ], focused)
+  let prevented = 0
+  const key = (i: number, k: string, mods: Record<string, unknown> = {}): void => a.fire('document:keydown',
+    { key: k, target: items[i], preventDefault: () => { prevented++ }, stopPropagation: () => undefined, ...mods })
+  // The arrows, Home and End: the focus moves, and no message goes to the host.
+  key(0, 'ArrowDown'); key(2, 'ArrowUp'); key(3, 'Home'); key(0, 'End'); key(5, 'ArrowDown'); key(2, 'ArrowLeft'); key(3, 'ArrowLeft')
+  key(1, 'ArrowRight')
+  assert.deepEqual(focused, [AK.wf, AK.wf, AK.s1, AK.s2, AK.wf, AK.wf, AK.a1])
+  assert.deepEqual(a.posted, [])
+  // Handled, so the page does not scroll under the tree — the end of the list included.
+  assert.equal(prevented, 8)
+  // → on a closed node and ← on an open one ask the host to open and close it; Enter and Space
+  // select — from the tree —, on the "more" line they ask for the next fifty.
+  key(4, 'ArrowRight'); key(1, 'ArrowLeft'); key(2, 'Enter'); key(5, ' '); key(3, 'Enter'); key(3, ' ')
+  assert.deepEqual(a.posted, [{ type: 'agentToggle', key: AK.a3 }, { type: 'agentToggle', key: AK.wf },
+    { type: 'agentSelect', key: AK.a1, from: 'tree' }, { type: 'agentSelect', key: AK.s2, from: 'tree' },
+    { type: 'agentMore', key: AK.wf }, { type: 'agentMore', key: AK.wf }])
+  for (const m of a.posted) assert.deepEqual(parseWebviewMessage(m), m)
+  // A "more" line at its last step is the count alone: Enter asks for nothing.
+  a.posted.length = 0
+  const last = fakeTree([{ key: AK.wf, level: 1, expanded: true }, { more: AK.wf, level: 2, control: false }], focused)
+  a.fire('document:keydown', { key: 'Enter', target: last.items[1], preventDefault: () => undefined })
+  assert.deepEqual(a.posted, [])
+  // A key with a modifier is not the tree's; nor is a key on anything but an item — the Copy ID
+  // button in its details, a row of the running list.
+  focused.length = 0
+  prevented = 0
+  for (const mod of ['altKey', 'ctrlKey', 'metaKey', 'shiftKey']) key(0, 'ArrowDown', { [mod]: true })
+  const copy = { getAttribute: () => null, closest: () => items[2], tagName: 'BUTTON', dataset: { act: 'cmd' } }
+  a.fire('document:keydown', { key: 'ArrowDown', target: copy, preventDefault: () => { prevented++ } })
+  const outside = { ...items[0], closest: () => null }
+  a.fire('document:keydown', { key: 'ArrowDown', target: outside, preventDefault: () => { prevented++ } })
+  assert.deepEqual([focused, a.posted, prevented], [[], [], 0])
+})
+
+test('the item that takes the focus becomes the tree\'s stop of the Tab key, and its details\' Copy ID button with it', () => {
+  const a = agentCtx()
+  const focused: string[] = []
+  const { tree, items } = fakeTree([{ key: AK.s1, level: 1, expanded: true }, { key: AK.a1, level: 2 }, { key: AK.a2, level: 2 }], focused)
+  ;(items[0].attrs as Record<string, string>).tabindex = '0'
+  // The Copy ID buttons of two panels: one in the item that takes the focus, one in another item.
+  const button = (owner: unknown): Record<string, unknown> => {
+    const b: Record<string, unknown> = { attrs: {} as Record<string, string> }
+    b.setAttribute = (n: string, v: string) => { (b.attrs as Record<string, string>)[n] = v }
+    b.closest = (q: string) => (q === '.ag-details' ? { parentElement: owner } : null)
+    return b
   }
-  const doc: Record<string, unknown> = {
-    addEventListener: () => undefined,
-    getElementById: () => null,
-    querySelector: (q: string) => (q === '[data-body="agents"]' ? body : null),
-    querySelectorAll: () => [],
-    activeElement: before,
-  }
+  const own = button(items[2])
+  const other = button(items[0])
+  const all = tree.querySelectorAll as (q: string) => unknown[]
+  tree.querySelectorAll = (q: string) => (q === '.ag-details .ag-copy' ? [own, other] : all(q))
+  a.fire('document:focusin', { target: items[2] })
+  assert.deepEqual(items.map((li) => (li.attrs as Record<string, string>).tabindex), ['-1', '-1', '0'])
+  assert.deepEqual([(own.attrs as Record<string, string>).tabindex, (other.attrs as Record<string, string>).tabindex], ['0', '-1'])
+  // And the page remembers it, with the items above it, for the next render.
+  assert.equal(String(nodeVm.runInContext('JSON.stringify(agentFocusPath)', a.c)),
+    JSON.stringify([{ key: AK.a2, more: false }, { key: AK.s1, more: false }]))
+  // A focus on the Copy ID button of an item's details makes that item the current one.
+  const copy: Record<string, unknown> = { closest: (q: string) => (q === 'li[role="treeitem"]' ? items[1] : q === '.ag-details' ? { parentElement: items[1] } : null) }
+  a.fire('document:focusin', { target: copy })
+  assert.deepEqual(items.map((li) => (li.attrs as Record<string, string>).tabindex), ['-1', '0', '-1'])
+  // Anything else — a row of the running list, the quota section — changes nothing.
+  a.fire('document:focusin', { target: { closest: () => null } })
+  a.fire('document:focusin', { target: null })
+  assert.deepEqual(items.map((li) => (li.attrs as Record<string, string>).tabindex), ['-1', '0', '-1'])
+})
+
+/**
+ * 1.6 L1: a fake tree item for the focus tests — the parts of an `<li role="treeitem">` the page's
+ * focus code reads: its key (or its node's, for a "more" line), the item above it, where it
+ * stands, and what its focus() does; `copy`, the Copy ID button of its details, when it has one.
+ */
+function fakeItem(ref: { key?: string; more?: string }, up: Record<string, unknown> | null, name: string, focused: string[],
+  copy = false): Record<string, unknown> {
+  const li: Record<string, unknown> = { dataset: ref.more !== undefined ? { more: ref.more } : { key: ref.key }, focus: () => { focused.push(name) } }
+  const button: Record<string, unknown> = { dataset: { act: 'cmd', id: 'tokenPace.copyAgentId' }, focus: () => { focused.push(name + ':copy') } }
+  const det = { parentElement: li }
+  button.closest = (q: string) => (q === 'li[role="treeitem"]' ? li : q === '.ag-details' ? det : null)
+  li.closest = (q: string) => (q === 'li[role="treeitem"]' ? li : q === '.agtree' ? {} : q === '.ag-details' ? null : null)
+  li.parentElement = { closest: (q: string) => (q === '.agtree li[role="treeitem"]' ? up : null) }
+  li.querySelector = (q: string) => (copy && q === ':scope > .ag-details .ag-copy' ? button : null)
+  li.copyButton = button
+  return li
+}
+
+/**
+ * A context whose agents body is `body` and whose focus is `doc.activeElement`, for renderSection:
+ * the page's tree as agentTree() with every node opened, drawn into a body that answers with the
+ * items the test gives it.
+ */
+function focusCtx(doc: Record<string, unknown>): nodeVm.Context {
   const c = nodeVm.createContext({
     acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc,
     window: { addEventListener: () => undefined }, console,
   })
   nodeVm.runInContext(SCRIPT, c)
-  ;(c as Record<string, unknown>).fixture = model({ sections: ['agents'], agents: agentTree(), ui: agentUi() })
-  nodeVm.runInContext('vm = fixture; renderSection("agents");', c)
-  assert.deepEqual(focused, ['after'])
-  // The last step taken: no line for the node any more — its toggle, not another node's line.
+  ;(c as Record<string, unknown>).fixture = model({ sections: ['quota', 'agents'], agents: agentTree(), ui: openUi() })
+  nodeVm.runInContext('vm = fixture;', c)
+  return c
+}
+
+test('a keyboard user on the tree keeps the focus through a push: on the item with the same key, else the nearest one above it', () => {
+  // 1.6 L1 (pinned and changed: 1.5.1 put the focus back on the button that did the same thing to
+  // the same node): the item takes the focus, and the push finds it again by its key — or, when it
+  // is gone, the nearest item above it that is still drawn, else the first session.
+  const focused: string[] = []
+  const inside = new Set<unknown>()
+  let items: Array<Record<string, unknown>> = []
+  const body = {
+    innerHTML: '', dataset: {}, style: {},
+    contains: (el: unknown) => inside.has(el),
+    querySelectorAll: (sel: string) => (sel === '.agtree li[role="treeitem"]' ? items : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined, getElementById: () => null,
+    querySelector: (s: string) => (s === '[data-body="agents"]' || s === '[data-body="quota"]' ? body : null),
+    querySelectorAll: () => [], activeElement: null,
+  }
+  const c = focusCtx(doc)
+  // The reader is on the running agent, in the run, in the session.
+  const s1 = fakeItem({ key: AK.s1 }, null, 's1', focused)
+  const wf = fakeItem({ key: AK.wf }, s1, 'wf', focused)
+  const a1 = fakeItem({ key: AK.a1 }, wf, 'a1', focused)
+  const push = (active: Record<string, unknown> | null, drawn: Array<Record<string, unknown>>, key = 'agents'): string[] => {
+    focused.length = 0
+    inside.clear()
+    if (active) inside.add(active)
+    doc.activeElement = active
+    items = drawn
+    nodeVm.runInContext('renderSection(' + JSON.stringify(key) + ');', c)
+    return [...focused]
+  }
+  const again = (name: string, key: string, up: Record<string, unknown> | null = null): Record<string, unknown> =>
+    fakeItem({ key }, up, name, focused)
+  // Back on the item with the same key — not on another one, and not on the first.
+  assert.deepEqual(push(a1, [again('s1-new', AK.s1), again('wf-new', AK.wf), again('a2-new', AK.a2), again('a1-new', AK.a1)]), ['a1-new'])
+  // The item gone — its run was closed — the nearest item above it that is drawn: the run.
+  assert.deepEqual(push(a1, [again('s1-new', AK.s1), again('wf-new', AK.wf), again('s2-new', AK.s2)]), ['wf-new'])
+  // The run gone too: the session.
+  assert.deepEqual(push(a1, [again('s1-new', AK.s1), again('s2-new', AK.s2)]), ['s1-new'])
+  // Nothing of its path left: the first session.
+  assert.deepEqual(push(a1, [again('s2-new', AK.s2), again('x-new', 's:/p/other.jsonl')]), ['s2-new'])
+  // The Copy ID button of the item's details: back on it while the details stand, else on the item.
+  const withCopy = fakeItem({ key: AK.a1 }, wf, 'a1', focused, true)
+  assert.deepEqual(push(withCopy.copyButton as Record<string, unknown>,
+    [again('s1-new', AK.s1), fakeItem({ key: AK.a1 }, wf, 'a1-new', focused, true)]), ['a1-new:copy'])
+  assert.deepEqual(push(withCopy.copyButton as Record<string, unknown>, [again('s1-new', AK.s1), again('a1-new', AK.a1)]), ['a1-new'])
+  // A focus outside the section, or a refresh of another section, is left to the browser.
+  assert.deepEqual(push(null, [again('s1-new', AK.s1)]), [])
+  const outside = fakeItem({ key: AK.a1 }, wf, 'a1', focused)
   focused.length = 0
-  drawn = [control('agentMore', AK.s1, 'other'), control('agentToggle', AK.wf, 'toggle')]
-  nodeVm.runInContext('renderSection("agents");', c)
-  assert.deepEqual(focused, ['toggle'])
-  // A selection row that is gone still takes the focus nowhere.
-  focused.length = 0
-  const gone = control('agentSelect', AK.wf, 'gone')
-  inside.add(gone)
-  doc.activeElement = gone
-  drawn = [control('agentToggle', AK.wf, 'toggle')]
+  doc.activeElement = outside
+  inside.clear()
   nodeVm.runInContext('renderSection("agents");', c)
   assert.deepEqual(focused, [])
+  assert.deepEqual(push(a1, [again('a1-new', AK.a1)], 'quota'), [])
+})
+
+test('a keyboard user on a "more" line keeps the focus on it, and on its node once the line is gone', () => {
+  // 1.6 D3: a step shows fifty children more and the line counts down; after the last step the
+  // line is gone. 1.6 L1 (pinned and changed: the focus went to the node's toggle): the line is an
+  // item of the node's group, found again by its node's key, and the item above it is the node's.
+  const focused: string[] = []
+  const inside = new Set<unknown>()
+  let items: Array<Record<string, unknown>> = []
+  const body = {
+    innerHTML: '', dataset: {}, style: {},
+    contains: (el: unknown) => inside.has(el),
+    querySelectorAll: (sel: string) => (sel === '.agtree li[role="treeitem"]' ? items : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined, getElementById: () => null,
+    querySelector: (q: string) => (q === '[data-body="agents"]' ? body : null),
+    querySelectorAll: () => [], activeElement: null,
+  }
+  const c = focusCtx(doc)
+  const s1 = fakeItem({ key: AK.s1 }, null, 's1', focused)
+  const wf = fakeItem({ key: AK.wf }, s1, 'wf', focused)
+  const line = fakeItem({ more: AK.wf }, wf, 'line', focused)
+  const push = (drawn: Array<Record<string, unknown>>): string[] => {
+    focused.length = 0
+    inside.clear()
+    inside.add(line)
+    doc.activeElement = line
+    items = drawn
+    nodeVm.runInContext('renderSection("agents");', c)
+    return [...focused]
+  }
+  // The line again — not another node's line, not the node it belongs to.
+  assert.deepEqual(push([fakeItem({ key: AK.wf }, s1, 'wf-new', focused), fakeItem({ more: AK.s1 }, s1, 'other-line', focused),
+    fakeItem({ more: AK.wf }, wf, 'line-new', focused)]), ['line-new'])
+  // The last step taken: no line for the node any more — the node itself.
+  assert.deepEqual(push([fakeItem({ more: AK.s1 }, s1, 'other-line', focused), fakeItem({ key: AK.wf }, s1, 'wf-new', focused)]), ['wf-new'])
 })
 
 test('a keyboard user on a row of the running list comes back to that row, not to the same node\'s tree row', () => {
@@ -4481,7 +4800,7 @@ test('the agent tree speaks German on a German page', () => {
   const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   const words = ['Agents', 'running', 'done', 'failed', 'stopped', 'unknown', 'active session', 'idle session',
     '{0} · derived', '{0} · recorded', 'running for {0}', '{0} ago', 'State', 'Last activity', 'Details',
-    'Collapse {0}', 'Expand {0}', '{0} older session(s) not shown.',
+    '{0} older session(s) not shown.',
     // 1.6 D3: the line under an open node that shows fifty of its children at a time.
     '{0} more · {1} not shown', '{0} more', '{0} not shown',
     'No Claude Code session in the last 7 days.',
@@ -4521,7 +4840,11 @@ test('the agent tree speaks German on a German page', () => {
     'title="fehlgeschlagen · aufgezeichnet"', 'title="~unbekannt · abgeleitet"',
     'title="~Sitzung aktiv · abgeleitet"', 'title="~Sitzung ruht · abgeleitet"',
     '<span class="nobr">läuft seit <span data-live="since"', '<dt class="ag-wide">Zustand</dt>', '<dt>Letzte Aktivität</dt><dd><span class="nobr">vor <span data-live="since"',
-    'aria-label="Workflow run Tue 11:40 · cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
+    '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
+    // 1.6 L1: a tree item's name — the view model's words, in this test English, and the page's
+    // state words, German (pinned and changed: 1.5 named the toggle „… einklappen“).
+    ' aria-expanded="true" aria-selected="false" aria-label="Workflow run Tue 11:40 · cfe7718d, läuft, abgeleitet, 2 started, ',
+    ' aria-label="Session Tue 10:55 · 9d0eb37a · repo, Sitzung aktiv, abgeleitet, 4 started, ',
     // 1.6 N5: the silence, in German words and the page's units.
     '<span class="nobr">still seit <span class="ag-for">4 min</span></span>',
     // 1.6 N9: the state and the clocks for a screen reader, in German.
@@ -4531,7 +4854,9 @@ test('the agent tree speaks German on a German page', () => {
     '<div class="name" role="heading" aria-level="3">Laufen gerade (5)</div>',
     '<span>wartet auf einen untergeordneten Agenten</span>', '<p class="meta">und 3 weitere</p>',
   ]) assert.ok(h.indexOf(phrase) >= 0, phrase + ' missing from ' + h)
-  assert.ok(section({ ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('aria-label="Workflow run Tue 11:40 · cfe7718d ausklappen"') >= 0)
+  assert.ok(section({ ui: agentUi({ agentsExpanded: [AK.s1] }) })
+    .indexOf(' aria-expanded="false" aria-selected="false" aria-label="Workflow run Tue 11:40 · cfe7718d, läuft, abgeleitet, ') >= 0)
+  assert.equal(/einklappen|ausklappen/.test(h), false, h)
   // 1.6 D3: the line under an open node that shows fifty of its children at a time, in German
   // words and German digits.
   const paged = (more: number, pages: number): string => section({
@@ -4541,8 +4866,8 @@ test('the agent tree speaks German on a German page', () => {
     })] }),
     ui: agentUi({ agentsExpanded: [AK.wf], agentsMore: pages > 0 ? [{ key: AK.wf, pages }] : [] }),
   })
-  assert.ok(paged(1234, 0).indexOf('>50 weitere · 1.234 nicht gezeigt</button>') >= 0, paged(1234, 0))
-  assert.ok(paged(12, 0).indexOf('>12 weitere</button>') >= 0)
+  assert.ok(paged(1234, 0).indexOf('data-act="agentMore" data-key="' + AK.wf + '">50 weitere · 1.234 nicht gezeigt</span>') >= 0, paged(1234, 0))
+  assert.ok(paged(12, 0).indexOf('data-act="agentMore" data-key="' + AK.wf + '">12 weitere</span>') >= 0)
   assert.ok(paged(1234, 10).indexOf('<span class="ag-more">1.234 nicht gezeigt</span>') >= 0)
   // 1.6 D7: a stop, recorded — „gestoppt · aufgezeichnet".
   assert.ok(section({ agents: agentTree({ roots: [treeNode(AK.a3, 'stopped', { derived: false })] }) })
@@ -4558,8 +4883,10 @@ test('the agent tree speaks German on a German page', () => {
   // 1.6 P7b: before the span, whose title is the page's words, German on a German page.
   assert.ok(closed.indexOf(tallyThen({ tallyText: '4 gestartet · 3 ✓ · ~1 ●', tallySpoken: '4 gestartet, 3 fertig, etwa 1 laufend' },
     fig('<span title="Spanne von der ersten bis zur letzten Zeile">1 h 05 min</span>'))) >= 0, closed)
-  // The toggle's words are the page's; the node's name is the view model's (English here).
-  assert.ok(closed.indexOf('aria-label="Session Tue 10:55 · 9d0eb37a ausklappen"') >= 0, closed)
+  // 1.6 L1: the item's name — the node's name the view model's (English here), its state the page's
+  // words, its tally the view model's (German here) — where 1.5 named the toggle („… ausklappen“).
+  assert.ok(closed.indexOf(' aria-expanded="false" aria-selected="false" aria-label="Session Tue 10:55 · 9d0eb37a · repo, '
+    + 'Sitzung aktiv, abgeleitet, 4 gestartet, 3 fertig, etwa 1 laufend"') >= 0, closed)
   assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
   // 1.6 D10: the line about the lower bound is gone in German too.
   assert.equal(h.indexOf('Untergrenzen.'), -1, h)
@@ -4589,17 +4916,18 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   const nodes = treeNodes(vm.agents.roots)
   assert.deepEqual(nodes.filter((n) => n.hasChildren).map((n) => n.key).sort(), [...opened].sort())
   const h = treePart(agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi({ agentsExpanded: opened }) }))
-  const rowOf = (key: string): string => {
-    const at = h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + key + '"')
+  // 1.6 L1: the row is the mouse's target inside its item, up to the end of the item's line.
+  const rowIn = (key: string): string => {
+    const at = h.indexOf(rowOf(key))
     assert.ok(at >= 0, 'no row for ' + key)
-    return h.slice(at, h.indexOf('</button>', at))
+    return h.slice(at, h.indexOf('</div>', at))
   }
   const words: Record<string, string> = {
     running: 'running', done: 'done', failed: 'failed', stopped: 'stopped', unknown: 'unknown', active: 'active session',
     idle: 'idle session',
   }
   for (const n of nodes) {
-    const row = rowOf(n.key)
+    const row = rowIn(n.key)
     // The state the builder decided, and whether it inferred it or found it recorded.
     // 1.6 D7: an attempt the journal superseded says why its row is dimmed.
     const title = (n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded')
@@ -4612,7 +4940,7 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     // Its usage first among the figures on the second line — a session's named, "own 23.3K", a
     // launch's a dash — and marked there (1.6 D10, as shipped) exactly when it is a lower bound
     // with its reason, titled with that reason.
-    assert.ok(row.indexOf('<span class="ag-fig"><span class="ag-fp"><span class="nobr">' + (n.kind === 'session' ? 'own ' : '') + n.usage) >= 0, row)
+    assert.ok(row.indexOf('<span class="ag-fig" id="agf-' + n.key + '"><span class="ag-fp"><span class="nobr">' + (n.kind === 'session' ? 'own ' : '') + n.usage) >= 0, row)
     const marked = n.lowerBound && n.lowerBoundText !== null
     assert.equal(row.split('class="ag-lb"').length - 1, marked ? 1 : 0, row)
     if (marked) assert.ok(row.indexOf('<span class="ag-lb" role="img" aria-label="lower bound" title="' + n.lowerBoundText + '">⚠</span>') >= 0, row)
@@ -4644,6 +4972,25 @@ test('the tree the view model builds reaches the page with its dashes, its marks
       assert.ok(row.indexOf('<span class="ag-np ag-type">' + type + '</span><span class="ag-np ag-model"> · ' + model + '</span>') >= 0, row)
     }
   }
+  // 1.6 L1: every item of the tree the builder made — its level, its place among its siblings and
+  // how many they are (every child of the forest, shown or not), open or not, selected or not, and
+  // its name in words: the whole name (a session's project after it), its state, and — where its
+  // row shows one — its tally; its figures its description. One of them is the stop of the Tab key.
+  const reKey = (k: string): string => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const walk = (list: typeof vm.agents.roots, level: number, size: number): void => list.forEach((n, i) => {
+    const m = new RegExp('<li role="treeitem" class="ag-k-' + n.kind + '(?: ag-sup)?" data-key="' + reKey(n.key)
+      + '" tabindex="(0|-1)" aria-level="(\\d+)" aria-setsize="(\\d+)" aria-posinset="(\\d+)"( aria-expanded="(?:true|false)")?'
+      + ' aria-selected="false" aria-label="([^"]*)" aria-describedby="agf-' + reKey(n.key) + '">').exec(h)
+    assert.ok(m, 'no item for ' + n.key)
+    const said = (n.derived ? words[n.state] + ', derived' : words[n.state] + ', recorded') + (n.superseded ? ', superseded by a later attempt' : '')
+    const tally = n.tallyText !== null && n.kind !== 'agent' ? ', ' + n.tallySpoken : ''
+    assert.deepEqual([m[2], m[3], m[4], !!m[5], m[6]], [String(level), String(size), String(i + 1), n.hasChildren,
+      n.fullLabel + (n.sub ? ' · ' + n.sub : '') + ', ' + said + tally], n.key)
+    walk(n.children, level + 1, n.childrenTotal)
+  })
+  walk(vm.agents.roots, 1, vm.agents.roots.length)
+  assert.equal(h.split('tabindex="0"').length - 1, 1, h)
+  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" data-key="' + vm.agents.roots[0].key + '" tabindex="0"') >= 0, h)
   assert.ok(nodes.some((n) => (n.kind === 'session' || n.kind === 'workflow') && n.startClock !== null && n.tallyText !== null))
   assert.ok(nodes.some((n) => n.kind === 'agent' && n.tallyText !== null), 'the world has an agent with agents below it')
   // The payload carries the flag and its reason (1.6 D10); the shipped page marks the rows (P7) and
@@ -4655,8 +5002,8 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   // A launch nothing was counted of: a dash for its usage on its second line, no mark, and no zero.
   const pending = nodes.filter((n) => n.kind === 'pending')
   assert.equal(pending.length, 1)
-  const p = rowOf(pending[0].key)
-  assert.ok(p.indexOf('<span class="ag-fig"><span class="ag-fp"><span class="nobr">–</span></span>') >= 0, p)
+  const p = rowIn(pending[0].key)
+  assert.ok(p.indexOf('<span class="ag-fig" id="agf-' + pending[0].key + '"><span class="ag-fp"><span class="nobr">–</span></span>') >= 0, p)
   assert.equal(/>0[ <]|> 0</.test(p), false, p)
 })
 
@@ -4676,7 +5023,7 @@ test('the details the view model builds open under the row that was clicked, and
   // A finished agent selected in the opened tree: the panel inside its entry, its row pressed.
   const inTree = page({ agentsExpanded: opened, agentSelected: failed.key, agentSelectedIn: 'tree' })
   assert.equal(inTree.vm.agents.selected?.key, failed.key)
-  const at = inTree.h.indexOf('data-key="' + failed.key + '" aria-pressed="true">')
+  const at = inTree.h.indexOf('data-key="' + failed.key + '" data-pressed="true">')
   assert.ok(at >= 0, inTree.h)
   const panel = panelOf(inTree.h)
   assert.ok(inTree.h.indexOf(panel) > at && inTree.h.indexOf(panel) > inTree.h.indexOf('<div class="agtree"'), inTree.h)
@@ -4687,6 +5034,7 @@ test('the details the view model builds open under the row that was clicked, and
   assert.deepEqual([closed.vm.agents.selected, closed.vm.agents.note], [null, null])
   assert.equal(closed.h.indexOf('ag-details'), -1, closed.h)
   assert.equal(closed.h.indexOf('aria-pressed="true"'), -1, closed.h)
+  assert.equal(closed.h.indexOf('data-pressed="true"'), -1, closed.h)
   assert.equal(closed.h.indexOf('The selected node is no longer in the tree.'), -1, closed.h)
   assert.equal(page({ agentsExpanded: opened, agentSelected: failed.key }).h, inTree.h)
   // The running agent, clicked in the running list while its tree row is on the page as well:
@@ -4696,9 +5044,9 @@ test('the details the view model builds open under the row that was clicked, and
   const nowPanel = panelOf(fromNow.h)
   assert.ok(fromNow.h.indexOf('data-key="' + running.key + '" data-list="now" aria-pressed="true">') < fromNow.h.indexOf(nowPanel)
     && fromNow.h.indexOf(nowPanel) < fromNow.h.indexOf('<div class="agtree"'), fromNow.h)
-  assert.ok(treePart(fromNow.h).indexOf('data-key="' + running.key + '" aria-pressed="false">') >= 0, fromNow.h)
+  assert.ok(treePart(fromNow.h).indexOf('data-key="' + running.key + '" data-pressed="false">') >= 0, fromNow.h)
   const fromTree = page({ agentsExpanded: opened, agentSelected: running.key, agentSelectedIn: 'tree' })
-  assert.ok(treePart(fromTree.h).indexOf('data-key="' + running.key + '" aria-pressed="true">') >= 0, fromTree.h)
+  assert.ok(treePart(fromTree.h).indexOf('data-key="' + running.key + '" data-pressed="true">') >= 0, fromTree.h)
   assert.ok(fromTree.h.indexOf('data-key="' + running.key + '" data-list="now" aria-pressed="false">') >= 0, fromTree.h)
   // The view model is the same for both: where the panel stands is the page's say alone.
   assert.deepEqual(fromNow.vm.agents, fromTree.vm.agents)
@@ -4880,11 +5228,13 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
   const at = t.indexOf('<li role="treeitem" class="ag-k-noreply"')
   assert.ok(at >= 0, t)
   const li = t.slice(at, t.indexOf('</li>', at) + 5)
-  assert.equal(li, '<li role="treeitem" class="ag-k-noreply" aria-selected="false"><div class="ag-line"><span class="ag-pad"></span>'
-    + '<button class="ag-row" data-act="agentSelect" data-key="' + AK.n1 + '" aria-pressed="false">'
+  // 1.6 L1: an item of its run's group like its siblings, the last place of two, its name in words.
+  assert.equal(li, itemTag(AK.n1, { kind: 'noreply', level: 2, size: 2, pos: 2,
+    label: '263 agent(s) without a counted reply, running, derived, 263 started, 250 done, 3 failed, about 10 running' })
+    + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.n1)
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
     + '<span class="ag-text">' + olbl('263 agent(s) without a counted reply', '263 agent(s) without a counted reply')
-    + figs(fig('–'), fig('–'), ...tallyFigs(T_N1)) + '</span></button></div></li>', li)
+    + figsOf(AK.n1, fig('–'), fig('–'), ...tallyFigs(T_N1)) + '</span></span></div></li>', li)
   // Running, with a start the payload gives it anyway: still no clock in the tree — dashes.
   const started = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.wf, 'running', { kind: 'workflow',
     label: 'Workflow run Tue 11:40 · cfe7718d', startTs: null, children: [{ ...collector, startTs: AG_NOW - 42_000 }] })] }),
@@ -5238,7 +5588,7 @@ test('a name is one line: an agent\'s model gives way before its type and its sh
   const a = agentCtx()
   const h = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'done', { label: 'general-purpose · opus-5 · a94f',
     fullLabel: 'general-purpose · claude-opus-5 · a94f' })] }) }))
-  const label = h.slice(h.indexOf('<span class="ag-label"'), h.indexOf('<span class="ag-fig">'))
+  const label = h.slice(h.indexOf('<span class="ag-label"'), h.indexOf('<span class="ag-fig" id="agf-' + AK.a1 + '">'))
   assert.equal(label, albl('general-purpose · claude-opus-5 · a94f', 'general-purpose', 'opus-5', 'a94f'))
   assert.match(STYLE, /\.ag-label \{ position: relative; display: flex; min-width: 0; overflow: hidden; \}/)
   assert.match(STYLE, /\.ag-label > span \{ flex: none; overflow: hidden; white-space: pre; text-overflow: ellipsis; \}/)
@@ -5373,7 +5723,10 @@ test('a figures line with no room for its last parts takes them off whole and en
   assert.deepEqual([gone(cut), cut.cls.has('ag-cut')], [[false, false, false, false], false])
   // The page's rules: a part taken off is out of sight and still in the page for a screen reader;
   // the line ends on "…"; the fit runs with the page's other fits, after every render and resize.
-  assert.match(STYLE, /\.ag-fig\.ag-cut::after \{ content: "\\00a0…"; \}/)
+  // 1.6 L1 (pinned and changed: the "…" had no text alternative): a screen reader, which the line
+  // describes the tree item to, hears no "…", and a comma between two parts — none before a tally's.
+  assert.match(STYLE, /\.ag-fig\.ag-cut::after \{ content: "\\00a0…" \/ ""; \}/)
+  assert.match(STYLE, /\.ag-fig > \.ag-fp \+ \.ag-fp:not\(:has\(> \.ag-t\)\)::before \{ content: "" \/ ", "; \}/)
   assert.match(STYLE, /\.ag-fig \.ag-gone \{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden;\s+clip-path: inset\(50%\); \}/)
   assert.match(SOURCE, /function applyFits\(\): void \{[^}]*fitAgentFigures\(\);/)
 })
@@ -5433,7 +5786,9 @@ test('the fold and the row are targets of 24 × 24 px at least, and a forced-col
   const block = forced.slice(0, forced.indexOf('\n}') + 2)
   assert.match(block, /\.ag-st::before, \.ag-lb \{ color: CanvasText; \}/)
   assert.match(block, /\.ag-fold::before \{ color: ButtonText; \}/)
-  assert.match(block, /\.ag-row\[aria-pressed="true"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/)
+  assert.match(block, /\.ag-row\[aria-pressed="true"\], \.agtree \.ag-row\[data-pressed="true"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/)
+  // 1.6 L1: the item the keyboard is on, a ring of the text colour round its line.
+  assert.match(block, /\.agtree li\[role="treeitem"\]:focus-visible > \.ag-line \{ outline: 2px solid CanvasText; \}/)
   assert.equal(/forced-color-adjust/.test(STYLE), false)
 })
 

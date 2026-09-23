@@ -585,6 +585,30 @@ test('docs/agents.md says what gives way on a name — the model, the project, t
   assert.ok(/const AGENT_MODEL_ROOM_EM = 1\.9;/.test(page), 'the model\'s least room changed: say it in docs/agents.md')
 })
 
+// 1.6 L1 (P8): the keyboard of the tree — one stop of the Tab key, the tree pattern's keys — in a
+// table the page's own key handling is held to, key by key.
+test('docs/agents.md lists the keys of the agent tree, and the page handles exactly those', () => {
+  const page = readDoc('src/webview/main.ts')
+  const at = page.indexOf('function agentKeyMove(')
+  assert.ok(at >= 0, 'the page no longer has agentKeyMove')
+  const body = page.slice(at, page.indexOf('\n}\n', at))
+  assert.deepEqual([...body.matchAll(/case '([^']+)':/g)].map((m) => m[1]),
+    ['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter', ' '], 'the tree\'s keys changed: say it in docs/agents.md')
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of ['### The keyboard', 'one stop of the `Tab` key', '| `↓` / `↑` | the next / the previous item shown |',
+    '| `Home` / `End` | the first / the last item shown |', '| `→` | on a closed node, opens it; on an open one, moves to its first child |',
+    '| `←` | on an open node, closes it; elsewhere, moves to the node above |', '| `Enter` / `Space` |', '**Moving selects nothing**',
+    '*Copy ID* button', 'else on the nearest item above it that is still shown', '`3 of 165`']) {
+    assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+  for (const gone of ['since the toggle and the row are buttons of their own', 'on the running list\'s row or on the tree\'s, whichever it was on']) {
+    assert.equal(flat.includes(gone), false, `docs/agents.md still says: ${gone}`)
+  }
+  const dash = readDoc('docs/dashboard.md').replace(/\s+/g, ' ')
+  assert.ok(dash.includes('one stop of the `Tab` key'), 'docs/dashboard.md does not say the tree is one stop of the Tab key')
+  assert.equal(dash.includes('its toggle and its row are buttons of their own'), false, 'docs/dashboard.md still calls the toggle and the row buttons')
+})
+
 test('docs/agents.md says why an output is a lower bound as measured, in the words the details use, and no row line points to it', () => {
   // 1.6 D10 (P6): the lower bound's cause, counted on the measuring machine — replacing 1.5's
   // "almost every finished agent", which the count contradicts — and the details' note as the

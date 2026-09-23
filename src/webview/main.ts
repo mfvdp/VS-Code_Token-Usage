@@ -1441,6 +1441,9 @@ function sDrill(): string {
 // the sentence that derives it, the tally of the agents below a node — and so is every row of the
 // details panel. What is decided here is the structure, which nodes are open and which one is
 // selected, and one thing a view model cannot deliver: a clock that moves between two pushes.
+// 1.6 L1: and the keyboard — the tree is WAI-ARIA's tree pattern, one stop of the Tab key with
+// roving tabindex on its items (agentTab, agentRove), the pattern's keys (agentKeyMove), the focus
+// found again by key after a push (keepFocus, restoreFocus).
 
 /**
  * The states a node can be drawn in. A state this build does not know is drawn as unknown.
@@ -1630,18 +1633,26 @@ function lowerMark(n: Payload): string {
 
 /**
  * What the agents below a node came to (1.6 N1), as the view model wrote it — "427 started ·
- * 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — for the eye, and the same in words for a screen reader, which
- * would read the glyphs as shapes. The tally ends the figures' line of its row (1.6 N6): each of
- * its parts is a part of that line of its own (`ag-fp`), hidden from a screen reader, which gets
- * the words once, after them. Nothing for a node without a tally: no count is not a count of none.
+ * 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — for the eye. The tally is a part of its row's figures' line
+ * (1.6 N6): each of its parts is a part of that line of its own (`ag-fp`), hidden from a screen
+ * reader, which would read the glyphs as shapes. The same in words — `tallySpoken` — is the end of
+ * the tree item's name (1.6 L1, see agentSpoken), which a screen reader announces on the item.
+ * Nothing for a node without a tally: no count is not a count of none.
  */
 function agentTally(n: Payload): string[] {
   const shown = typeof n.tallyText === 'string' && n.tallyText !== '' ? n.tallyText : '';
   if (!shown) return [];
-  const spoken = typeof n.tallySpoken === 'string' && n.tallySpoken !== '' ? n.tallySpoken : shown;
-  const parts = shown.split(' · ').map((p: string) => '<span class="ag-t" aria-hidden="true">' + esc(p) + '</span>');
-  parts[parts.length - 1] += '<span class="sr">' + esc(spoken) + '</span>';
-  return parts;
+  return shown.split(' · ').map((p: string) => '<span class="ag-t" aria-hidden="true">' + esc(p) + '</span>');
+}
+
+/**
+ * A tally in words (1.6 N1) — "427 started, 112 done, 12 failed, …" — for the name of its tree
+ * item; the glyphs are read out rather than nothing when the view model sent no words.
+ */
+function agentTallyWords(n: Payload): string {
+  const shown = typeof n.tallyText === 'string' && n.tallyText !== '' ? n.tallyText : '';
+  if (!shown) return '';
+  return typeof n.tallySpoken === 'string' && n.tallySpoken !== '' ? n.tallySpoken : shown;
 }
 
 /**
@@ -1679,8 +1690,11 @@ function sessionSpan(n: Payload): string {
  * screen reader still gets every one). A lower bound's ⚠ is inside the usage part (D10). Nothing
  * of a launch nobody has read a line of, or of a collector's agents, was counted: dashes, and a
  * collector no clock at all (1.6, lead note).
+ *
+ * 1.6 L1: the line carries an `id` in the tree — its item's description (`aria-describedby`), so a
+ * screen reader on the item gets its figures after its name: "12.3K lower bound since 14:20".
  */
-function agentFigLine(n: Payload, kind: string, state: string, tally: string[]): string {
+function agentFigLine(n: Payload, kind: string, state: string, tally: string[], id = ''): string {
   const start = kind === 'noreply' ? null : agentTs(n.startTs);
   const clock = state === 'running' && start !== null;
   const nobr = (f: string): string => '<span class="nobr">' + f + '</span>';
@@ -1691,12 +1705,13 @@ function agentFigLine(n: Payload, kind: string, state: string, tally: string[]):
   const time = clock
     ? spokenTwin(nobr(liveSince(start as number)), since === null ? null : tr('since {0}', esc(since)))
     : nobr(kind === 'session' ? sessionSpan(n) : orDash(n.duration));
+  const open = '<span class="ag-fig"' + (id ? ' id="' + esc(id) + '"' : '') + '>';
   if (kind === 'session' || kind === 'workflow') {
-    return '<span class="ag-fig">' + figParts(head, 0) + figParts(tally, head.length)
+    return open + figParts(head, 0) + figParts(tally, head.length)
       + figParts([time], head.length + tally.length) + '</span>';
   }
   const silent = n.silence === true && kind === 'agent' ? liveSilent(agentTs(n.lastTs), agentClock(n.lastClock)) : '';
-  return '<span class="ag-fig">' + figParts(head.concat([time]), 0) + silent + figParts(tally, head.length + 1) + '</span>';
+  return open + figParts(head.concat([time]), 0) + silent + figParts(tally, head.length + 1) + '</span>';
 }
 
 /**
@@ -1721,18 +1736,39 @@ function agentPagesOf(key: string): number {
   return 0;
 }
 
+/** How many children of an open node the payload does not carry (1.6 D3); 0 when it carries them all. */
+function agentRest(n: Payload): number {
+  const v = n.childrenMore;
+  return typeof v === 'number' && Number.isFinite(v) && v >= 1 ? Math.round(v) : 0;
+}
+
+/**
+ * How many children a node has, for the `aria-setsize` of each of them (1.6 L1): the view model's
+ * `childrenTotal` — the children in the forest, shown or not —, never fewer than the page carries
+ * and the "more" line counts.
+ */
+function agentSetSize(n: Payload, shown: number): number {
+  const t = n.childrenTotal;
+  const total = typeof t === 'number' && Number.isInteger(t) && t >= 0 ? t : 0;
+  return Math.max(total, shown + agentRest(n));
+}
+
 /**
  * The line after the last child of an open node that holds more children than the payload
  * carries (1.6 D3): "50 more · 377 not shown" — how many the next step shows, and how many are
  * not shown now — or "12 more" when the next step shows the rest. While a step can be taken it
- * is a button asking the host for the next fifty; once the node took its last step, or when the
- * page had no room for any of its children at all (the payload's cap, where another step would
- * only ask for more), it is the count alone: "377 not shown". The numbers are the view model's
- * and the paging steps src/agentTree.ts's; nothing here decides which children those are.
+ * asks the host for the next fifty; once the node took its last step, or when the page had no
+ * room for any of its children at all (the payload's cap, where another step would only ask for
+ * more), it is the count alone: "377 not shown". The numbers are the view model's and the paging
+ * steps src/agentTree.ts's; nothing here decides which children those are.
+ *
+ * 1.6 L1: the line is an item of the tree like its siblings — a treeitem of the node's group, one
+ * level below the node, the next place after its shown children — reached with the arrow keys,
+ * and Enter or Space takes the step; for the mouse, the words are the target (`data-act`). It
+ * names its node in `data-more`, which is how the focus finds it again after a push.
  */
-function agentMoreRow(n: Payload, key: string, shown: number): string {
-  const v = n.childrenMore;
-  const rest = typeof v === 'number' && Number.isFinite(v) && v >= 1 ? Math.round(v) : 0;
+function agentMoreRow(n: Payload, key: string, shown: number, level: number, size: number, rove: AgentRoving): string {
+  const rest = agentRest(n);
   if (!rest || !key) return '';
   const step = Math.min(AGENT_PAGING.groupChildren, rest);
   const control = shown > 0 && agentPagesOf(key) < AGENT_PAGING.morePages;
@@ -1740,31 +1776,45 @@ function agentMoreRow(n: Payload, key: string, shown: number): string {
     : rest <= step ? tr('{0} more', esc(fullNum(step)))
       : tr('{0} more · {1} not shown', esc(fullNum(step)), esc(fullNum(rest)));
   const body = control
-    ? '<button class="ag-more" data-act="agentMore" data-key="' + esc(key) + '">' + words + '</button>'
+    ? '<span class="ag-more" data-act="agentMore" data-key="' + esc(key) + '">' + words + '</span>'
     : '<span class="ag-more">' + words + '</span>';
-  return '<li role="treeitem" class="ag-k-more"><div class="ag-line"><span class="ag-pad"></span>' + body + '</div></li>';
+  return '<li role="treeitem" class="ag-k-more" data-more="' + esc(key) + '" tabindex="' + agentTab(rove, { key: key, more: true })
+    + '" aria-level="' + level + '" aria-setsize="' + size + '" aria-posinset="' + (shown + 1) + '">'
+    + '<div class="ag-line"><span class="ag-pad"></span>' + body + '</div></li>';
 }
 
 /**
  * One node and, once the reader opened it, what the view model sent of everything under it. The
  * tree starts closed: only the sessions are drawn, and each says what the agents below it came
- * to. The toggle and the row are two buttons of their own, so both are reached with the
- * keyboard and announced as what they do; a leaf has no toggle and keeps its place in the
- * column with an empty slot. A closed node's children are not in the payload at all (1.6 D3):
- * whether it has any is the node's own say (`hasChildren`), which open nodes are open is the
- * reader's, kept with the view state, and the next push brings the children the moment a node
- * is opened — at most fifty at a time, and a line after them says how many more there are.
+ * to. A leaf has no toggle and keeps its place in the column with an empty slot. A closed node's
+ * children are not in the payload at all (1.6 D3): whether it has any is the node's own say
+ * (`hasChildren`), which open nodes are open is the reader's, kept with the view state, and the
+ * next push brings the children the moment a node is opened — at most fifty at a time, and a
+ * line after them says how many more there are.
  *
  * 1.6 N6: every row is two lines — its glyph and its name ("Explore · opus-5 · 94f3", the short id
  * dimmed; a session's project after it), then its figures under the name (see agentFigLine). Both
  * lines keep to one line whatever the width: a name too long for it gives way where it is worth
  * least — an agent's model, a session's project, a session's or a run's short id (1.6 P7b, see
  * agentLabel) — and says itself whole in its title.
+ *
+ * 1.6 L1: the tree is a tree to the keyboard as well (WAI-ARIA's tree pattern). The item — the
+ * `<li role="treeitem">` — is what takes the focus, one item at a time (`tabindex` 0 on the
+ * current one, see agentTab, −1 on every other), and the keys are the tree's (agentTreeKeys).
+ * Its level, its place among its siblings and how many they are — the view model's
+ * `childrenTotal`, the ones the payload does not carry counted — are its `aria-level`,
+ * `aria-posinset` and `aria-setsize`; `aria-expanded` on a node with children, `aria-selected` on
+ * every node. Its name is words (agentSpoken), its figures its description. The toggle and the
+ * row inside it are the mouse's targets, no controls of their own: the toggle hidden from a screen
+ * reader — the item says whether it is open —, the row the part a click selects by, which
+ * `data-pressed` marks while the details stand under it.
  */
-function agentNode(n: Payload, expanded: string[], selected: string | null, panel: AgentPanel | null, depth: number): string {
+function agentNode(n: Payload, expanded: string[], selected: string | null, panel: AgentPanel | null,
+  depth: number, pos: number, size: number, rove: AgentRoving): string {
   if (!n || typeof n !== 'object') return '';
   const key = typeof n.key === 'string' ? n.key : '';
-  const kids = depth < AGENT_MAX_DEPTH && Array.isArray(n.children) ? n.children : [];
+  const kids = (depth < AGENT_MAX_DEPTH && Array.isArray(n.children) ? n.children : [])
+    .filter((c: Payload) => !!c && typeof c === 'object');
   const parent = n.hasChildren === true || kids.length > 0;
   const open = key !== '' && expanded.indexOf(key) >= 0;
   const on = key !== '' && key === selected;
@@ -1774,10 +1824,10 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   const kind = AGENT_KINDS.indexOf(n.kind) >= 0 ? String(n.kind) : 'agent';
   // 1.6 D7: an attempt the workflow journal superseded — dimmed, its own state kept.
   const superseded = n.superseded === true;
-  const label = orDash(n.label);
+  // Before the children: the current item is the first one in document order that is it.
+  const tab = agentTab(rove, { key: key, more: false });
   const fold = parent
-    ? '<button class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-label="'
-      + (open ? tr('Collapse {0}', label) : tr('Expand {0}', label)) + '"></button>'
+    ? '<span class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-hidden="true"></span>'
     : '<span class="ag-pad"></span>';
   // The tally of the agents below the node (1.6 N1) ends the figures' line. A session's and a
   // run's stand whether the node is open or not: what failed, was retried or is still unknown
@@ -1786,21 +1836,53 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   // tally is the view model's, taken on the whole tree, so it counts the children the page does
   // not carry as well.
   const tally = kind === 'agent' && parent && open && kids.length ? [] : agentTally(n);
-  const row = '<button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
-    + '" aria-pressed="' + here + '">' + agentGlyph(state, n.derived, superseded)
-    + '<span class="ag-text">' + agentLabel(n, kind) + agentFigLine(n, kind, state, tally) + '</span></button>';
+  const fid = agentFigId(key);
+  const row = '<span class="ag-row" data-act="agentSelect" data-key="' + esc(key)
+    + '" data-pressed="' + here + '">' + agentGlyph(state, n.derived, superseded)
+    + '<span class="ag-text">' + agentLabel(n, kind) + agentFigLine(n, kind, state, tally, fid) + '</span></span>';
   // The panel after the row's line and before the children, so the node's own details stand
   // between it and what is below it; it takes the tree's whole width, however deep the node.
-  const details = here && panel ? agentDetails(panel.d, panel.node, depth) : '';
+  // Its Copy ID button is a stop of the Tab key only while the item it belongs to is the current one.
+  const details = here && panel ? agentDetails(panel.d, panel.node, depth, tab === '0') : '';
+  const total = agentSetSize(n, kids.length);
   const group = parent && open
-    ? kids.map((c: Payload) => agentNode(c, expanded, selected, panel, depth + 1)).join('') + agentMoreRow(n, key, kids.length)
+    ? kids.map((c: Payload, i: number) => agentNode(c, expanded, selected, panel, depth + 1, i + 1, total, rove)).join('')
+      + agentMoreRow(n, key, kids.length, depth + 2, total, rove)
     : '';
-  return '<li role="treeitem" class="ag-k-' + esc(kind) + (superseded ? ' ag-sup' : '') + '"'
-    + (parent ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '">'
+  return '<li role="treeitem" class="ag-k-' + esc(kind) + (superseded ? ' ag-sup' : '') + '" data-key="' + esc(key)
+    + '" tabindex="' + tab + '" aria-level="' + (depth + 1) + '" aria-setsize="' + size + '" aria-posinset="' + pos + '"'
+    + (parent ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '"'
+    + ' aria-label="' + agentSpoken(n, state, superseded, tally.length > 0) + '"'
+    + (fid ? ' aria-describedby="' + esc(fid) + '"' : '') + '>'
     + '<div class="ag-line">' + fold + row + '</div>'
     + details
     + (group ? '<ul role="group">' + group + '</ul>' : '')
     + '</li>';
+}
+
+/**
+ * 1.6 L1: a tree item's name for a screen reader — its node's whole name (`fullLabel`, the model's
+ * whole id; a session's project after it, as its title has it), its state in words (N9: "running,
+ * derived"; a superseded attempt says so) and, where its row shows a tally, the tally in words:
+ * "Explore · claude-opus-5 · 94f3, running, derived", "Workflow run Tue 11:40 · cfe7718d, running,
+ * derived, 8 started, 3 done, about 2 running". Escaped: it is an attribute.
+ */
+function agentSpoken(n: Payload, state: string, superseded: boolean, withTally: boolean): string {
+  const full = typeof n.fullLabel === 'string' && n.fullLabel !== '' ? n.fullLabel
+    : typeof n.label === 'string' && n.label !== '' ? n.label : '–';
+  const sub = typeof n.sub === 'string' && n.sub !== '' ? ' · ' + n.sub : '';
+  const said = agentStateSpoken(state, n.derived) + (superseded ? ', ' + tr('superseded by a later attempt') : '');
+  const tally = withTally ? agentTallyWords(n) : '';
+  return esc(full + sub) + ', ' + said + (tally ? ', ' + esc(tally) : '');
+}
+
+/**
+ * 1.6 L1: the id of a tree row's figures' line — its item's `aria-describedby` — made of the node's
+ * key, which is one in the tree; none for a key that could not be one (empty, or with a space,
+ * which would split the reference in two).
+ */
+function agentFigId(key: string): string {
+  return key !== '' && !/\s/.test(key) ? 'agf-' + key : '';
 }
 
 /**
@@ -1899,6 +1981,66 @@ function panelHere(panel: AgentPanel | null, where: 'tree' | 'now', key: string)
 let agentPanelAt: { key: string; from: 'tree' | 'now' } | null = null;
 
 /**
+ * 1.6 L1: an item of the tree as the keyboard knows it — a node, by its key, or the "more" line
+ * under the node of that key.
+ */
+interface AgentItemRef { key: string; more: boolean }
+
+/**
+ * The item the keyboard was last on in the tree, then the items above it, the nearest first —
+ * kept across renders, so the tree's one stop of the Tab key stays where the reader left it, and
+ * the focus finds its way back after a push, to the item or, when that one is gone, to the nearest
+ * one above it that is still drawn. Empty until the tree first had the focus.
+ */
+let agentFocusPath: AgentItemRef[] = [];
+
+/** Whether the focus is on the tree while its section is rewritten under it; only during that render. */
+let agentFocusInTree = false;
+
+/** The current item of one render — the one whose `tabindex` is 0 — and whether it was written yet. */
+interface AgentRoving { current: AgentItemRef | null; taken: boolean }
+
+/**
+ * The `tabindex` of the next item written: 0 for the current one, −1 for every other (roving
+ * `tabindex`). Without a current item the first one written — the first session — is it. One
+ * item a render, whatever the payload holds.
+ */
+function agentTab(rove: AgentRoving, ref: AgentItemRef): string {
+  if (rove.taken) return '-1';
+  if (rove.current !== null && (rove.current.key !== ref.key || rove.current.more !== ref.more)) return '-1';
+  rove.taken = true;
+  return '0';
+}
+
+/**
+ * The item that is the tree's stop of the Tab key in this render (1.6 L1): the one the keyboard was
+ * last on while it is drawn, else the nearest one above it that is — while the focus is in the
+ * tree, else the first session; with the focus elsewhere the selected node when its row is drawn,
+ * else the first session (null).
+ */
+function agentCurrent(roots: Payload[], expanded: string[], selected: string | null): AgentItemRef | null {
+  for (const p of agentFocusPath) {
+    if (p.more ? agentMoreShown(roots, expanded, p.key, 0) : agentShown(roots, expanded, p.key, 0)) return p;
+  }
+  if (!agentFocusInTree && selected !== null && agentShown(roots, expanded, selected, 0)) return { key: selected, more: false };
+  return null;
+}
+
+/**
+ * Whether the "more" line under the node of `key` is drawn: the node is drawn, open, has children
+ * and holds more of them than the payload carries — the rule agentNode and agentMoreRow draw it by.
+ */
+function agentMoreShown(list: Payload, expanded: string[], key: string, depth: number): boolean {
+  if (!Array.isArray(list)) return false;
+  return list.some((n: Payload) => {
+    if (!n || typeof n !== 'object' || typeof n.key !== 'string' || n.key === '' || expanded.indexOf(n.key) < 0) return false;
+    const kids = depth < AGENT_MAX_DEPTH && Array.isArray(n.children) ? n.children : [];
+    if (n.key === key && agentRest(n) > 0 && (n.hasChildren === true || kids.some((c: Payload) => !!c && typeof c === 'object'))) return true;
+    return depth < AGENT_MAX_DEPTH && agentMoreShown(n.children, expanded, key, depth + 1);
+  });
+}
+
+/**
  * Whether the row of `key` is drawn in the tree: the node is in the payload and every node above
  * it is open — the rule agentNode draws by, bounded the same way.
  */
@@ -1913,9 +2055,10 @@ function agentShown(list: Payload, expanded: string[], key: string, depth: numbe
  * One row of the running list: the running glyph and the node's name on its first line, as the
  * tree row writes them (1.6 N6), its figures on the second — its usage, how long it has been
  * running (the live clock) and, from three minutes on, how long it has been silent — and under
- * them, a line of its own, where it sits. The row is the same button a tree row is, with the same
- * message, so it opens the same details; `data-list` tells it apart from that tree row, which may
- * be on the page as well, when the focus is put back after a push. A pending launch reads as the
+ * them, a line of its own, where it sits. The row sends the message a tree row sends, so it opens
+ * the same details; unlike a tree row it is a button of its own (1.6 L1: the running list stays a
+ * list of buttons, each a stop of the Tab key, ahead of the tree); `data-list` tells it apart from
+ * that tree row, which may be on the page as well. A pending launch reads as the
  * hint it is, as in the tree. A run's collector (1.6 D4) is one row for all of its agents without
  * a counted reply, and says how many of them run in the clock's place: it has no start of its own
  * to run a clock from (lead note on P5b).
@@ -2019,8 +2162,12 @@ function agentNodes(roots: Payload[]): Payload[] {
  * tree `depth` is the node's level, which the panel steps back out of (`data-ind`, see
  * applyStyles), so it takes the tree's whole width however deep the node sits; under a row of the
  * running list it is null.
+ *
+ * 1.6 L1: in the tree the panel belongs to its item, and its Copy ID button is reached with Tab
+ * from that item — only while it is the tree's current item (`reach`); otherwise the button is
+ * out of the Tab order, and the tree stays one stop of it.
  */
-function agentDetails(d: Payload, node: Payload, depth: number | null): string {
+function agentDetails(d: Payload, node: Payload, depth: number | null, reach = true): string {
   const derived = node && typeof node.derived === 'boolean' ? node.derived : d.derived;
   const lastTs = (node ? agentTs(node.lastTs) : null) || agentTs(d.lastTs);
   // Unbreakable, like the figures of a row: the clock's text is rewritten every second, and a
@@ -2042,7 +2189,8 @@ function agentDetails(d: Payload, node: Payload, depth: number | null): string {
     const note = hasNote ? '<span class="meta">' + esc(r.note) + '</span>' : '';
     // One button per panel, on the first row that asks for it.
     const copy = r.copy === true && !copied
-      ? ' <button class="ag-copy" data-act="cmd" data-id="tokenPace.copyAgentId">' + tr('Copy ID') + '</button>' : '';
+      ? ' <button class="ag-copy" data-act="cmd" data-id="tokenPace.copyAgentId"' + (reach ? '' : ' tabindex="-1"') + '>'
+        + tr('Copy ID') + '</button>' : '';
     if (copy) copied = true;
     // An id has no space to break at, and a launch's tool_use id is wider than the value column
     // of a narrow sidebar: it may break anywhere rather than run out of the panel.
@@ -2088,11 +2236,21 @@ function sAgents(): string {
     ? ui.agentsExpanded.filter((k: Payload) => typeof k === 'string') : [];
   const selected = typeof ui.agentSelected === 'string' ? ui.agentSelected : null;
   const panel = agentPanelOf(a, roots, expanded, ui.agentSelectedIn);
+  // 1.6 L1: the tree's one stop of the Tab key. A current item the render does not reach after all
+  // — a payload that is no tree the builder made — hands it to the first session.
+  const items = roots.filter((n: Payload) => !!n && typeof n === 'object');
+  const draw = (rove: AgentRoving): string => items
+    .map((n: Payload, i: number) => agentNode(n, expanded, selected, panel, 0, i + 1, items.length, rove)).join('');
+  const rove: AgentRoving = { current: agentCurrent(roots, expanded, selected), taken: false };
+  let nodes = draw(rove);
+  if (!rove.taken && rove.current !== null) {
+    if (panel) panel.drawn = false;
+    nodes = draw({ current: null, taken: false });
+  }
   // The outer list is only the frame: its items belong to the tree itself, and the list under
   // a node is that node's group.
   let h = agentsNow(a, panel)
-    + '<div class="agtree" role="tree" aria-label="' + tr('Agents') + '"><ul role="none">'
-    + roots.map((n: Payload) => agentNode(n, expanded, selected, panel, 0)).join('') + '</ul></div>';
+    + '<div class="agtree" role="tree" aria-label="' + tr('Agents') + '"><ul role="none">' + nodes + '</ul></div>';
   if (panel && panel.drawn) agentPanelAt = { key: panel.key, from: panel.at };
   const omitted = Number(a.omittedRoots);
   if (omitted > 0) {
@@ -2316,10 +2474,15 @@ function renderSection(key: string): void {
   // a node that has just left the document.
   if (sparkMark && body.contains && body.contains(sparkMark.svg)) sparkMark = null;
   // The agents section is rewritten every few seconds while agents run. A keyboard user on a
-  // row of the running list, or on a toggle or a row of the tree, stays there; dropping the
-  // focus would send them back to the top of the page with every push.
+  // row of the running list, or on an item of the tree, stays there; dropping the focus would
+  // send them back to the top of the page with every push.
   const focus = key === 'agents' ? keepFocus(body) : null;
-  body.innerHTML = render();
+  agentFocusInTree = !!(focus && focus.tree);
+  try {
+    body.innerHTML = render();
+  } finally {
+    agentFocusInTree = false;
+  }
   applyStyles();
   restorePop(keep);
   if (focus) restoreFocus(body, focus);
@@ -2336,35 +2499,165 @@ function renderSection(key: string): void {
 }
 
 /**
- * The control the focus is on inside `body`, by what it does, what it names and which list it
- * stands in; null otherwise. The list matters because a running agent has two rows that do the
- * same thing — one in the running list, one in the tree — and a keyboard user on either has to
- * come back to that one, not to whichever comes first.
+ * Where the focus is inside `body`, to put it back after the body is rewritten; null when it is
+ * elsewhere. On an item of the agent tree (1.6 L1) — or on the Copy ID button of its details,
+ * which belong to it — `tree`: the item is found again by the path agentFocusPath keeps, taken
+ * here. On a control otherwise, by what it does, what it names and which list it stands in. The
+ * list matters because a running agent has two rows that do the same thing — one in the running
+ * list, one in the tree — and a keyboard user on either has to come back to that one, not to
+ * whichever comes first.
  */
-function keepFocus(body: Element): { act: string; key: string; list: string } | null {
+function keepFocus(body: Element): AgentFocus | null {
   const el = document.activeElement as HTMLElement | null;
-  if (!el || !el.dataset || !body.contains || !body.contains(el)) return null;
+  if (!el || !body.contains || !body.contains(el)) return null;
+  const li = agentItemOf(el);
+  if (li) {
+    agentFocusPath = agentPathOf(li);
+    return { act: '', key: '', list: '', tree: true, copy: li !== el };
+  }
+  if (!el.dataset) return null;
   const act = el.dataset.act, key = el.dataset.key;
   return act && key ? { act: act, key: key, list: el.dataset.list || '' } : null;
 }
 
+/** What keepFocus found: a control by what it does and whom it names, or an item of the tree. */
+interface AgentFocus { act: string; key: string; list: string; tree?: boolean; copy?: boolean }
+
 /**
  * Puts the focus back on the control that does the same thing to the same node, in the same
- * list. A "more" line that is gone — its node shows every child now — hands the focus to that
- * node's toggle, so it does not fall out of the tree.
+ * list — or, for the tree (1.6 L1), on the item with the same key, else on the nearest item above
+ * it that is still drawn (a "more" line that is gone — its node shows every child now — hands it
+ * to that node), else on the first session; and back on the Copy ID button when it was there and
+ * its item's details still stand. A control that is gone takes the focus nowhere.
  */
-function restoreFocus(body: Element, f: { act: string; key: string; list: string }): void {
+function restoreFocus(body: Element, f: AgentFocus): void {
   if (!body.querySelectorAll) return;
+  if (f.tree) { agentFocusBack(body, f.copy === true); return; }
   const all = body.querySelectorAll<HTMLElement>('[data-act]');
-  const same = (el: HTMLElement, act: string): boolean =>
-    el.dataset.act === act && el.dataset.key === f.key && (el.dataset.list || '') === f.list;
   for (let i = 0; i < all.length; i++) {
-    if (same(all[i], f.act)) { all[i].focus(); return; }
+    const el = all[i];
+    if (el.dataset.act === f.act && el.dataset.key === f.key && (el.dataset.list || '') === f.list) { el.focus(); return; }
   }
-  if (f.act !== 'agentMore') return;
-  for (let i = 0; i < all.length; i++) {
-    if (same(all[i], 'agentToggle')) { all[i].focus(); return; }
+}
+
+/** The item of the tree `el` is — or whose details panel holds it (the Copy ID button); null otherwise. */
+function agentItemOf(el: Payload): HTMLElement | null {
+  if (!el || typeof el.closest !== 'function') return null;
+  const li = el.closest('li[role="treeitem"]');
+  if (!li || typeof li.closest !== 'function' || !li.closest('.agtree')) return null;
+  if (li === el) return li;
+  const det = el.closest('.ag-details');
+  return det && det.parentElement === li ? li : null;
+}
+
+/** An item of the tree as the keyboard knows it (AgentItemRef): its node's key, or its node's for a "more" line. */
+function agentRefOf(li: Payload): AgentItemRef {
+  const d = li && li.dataset ? li.dataset : {};
+  return typeof d.more === 'string' ? { key: d.more, more: true } : { key: typeof d.key === 'string' ? d.key : '', more: false };
+}
+
+/** The item and every item above it in the tree, the nearest first. */
+function agentPathOf(li: Payload): AgentItemRef[] {
+  const out: AgentItemRef[] = [];
+  let x = li;
+  while (x && out.length <= AGENT_MAX_DEPTH + 1) {
+    out.push(agentRefOf(x));
+    const up = x.parentElement;
+    x = up && typeof up.closest === 'function' ? up.closest('.agtree li[role="treeitem"]') : null;
   }
+  return out;
+}
+
+/** The item of the node of `key` among the tree's items in `body` — never a "more" line — or null. */
+function agentItemByKey(body: Element, key: string): HTMLElement | null {
+  const items = Array.from(body.querySelectorAll<HTMLElement>('.agtree li[role="treeitem"]'));
+  return items.find((x) => { const r = agentRefOf(x); return !r.more && r.key === key; }) || null;
+}
+
+/** Puts the focus back on the tree after a push (restoreFocus): the item, the nearest one above it, the first session. */
+function agentFocusBack(body: Element, copy: boolean): void {
+  const items = Array.from(body.querySelectorAll<HTMLElement>('.agtree li[role="treeitem"]'));
+  for (let k = 0; k < agentFocusPath.length; k++) {
+    const p = agentFocusPath[k];
+    const li = items.find((x) => { const r = agentRefOf(x); return r.key === p.key && r.more === p.more; });
+    if (!li) continue;
+    const button = copy && k === 0 && li.querySelector ? li.querySelector<HTMLElement>(':scope > .ag-details .ag-copy') : null;
+    (button || li).focus();
+    return;
+  }
+  if (items.length) items[0].focus();
+}
+
+/**
+ * 1.6 L1: the item that took the focus — by the keyboard, by a click on it or on its details, or
+ * put back after a push — is the tree's one stop of the Tab key from now on: `tabindex` 0 on it,
+ * −1 on the one before, and its details' Copy ID button (only its own) in the Tab order after it.
+ */
+function agentRove(li: HTMLElement): void {
+  const tree = li.closest ? li.closest('.agtree') : null;
+  if (!tree) return;
+  tree.querySelectorAll<HTMLElement>('li[role="treeitem"][tabindex="0"]').forEach((x) => { if (x !== li) x.setAttribute('tabindex', '-1'); });
+  li.setAttribute('tabindex', '0');
+  tree.querySelectorAll<HTMLElement>('.ag-details .ag-copy').forEach((b) => {
+    const det = b.closest ? b.closest('.ag-details') : null;
+    b.setAttribute('tabindex', det && det.parentElement === li ? '0' : '-1');
+  });
+  agentFocusPath = agentPathOf(li);
+}
+
+/** An item of the tree for agentKeyMove: its level, whether it is a node with children and open, whether it is a "more" line. */
+interface AgentKeyItem { level: number; parent: boolean; open: boolean; more: boolean }
+
+/**
+ * 1.6 L1: what a key does on the item `i` of the tree's drawn items, in document order (WAI-ARIA's
+ * tree pattern): the item to move the focus to, or what to ask the host for — to open or close
+ * the node (`toggle`), to select it or clear its selection (`select`), the next fifty children
+ * (`more`) —, or null for a key that is not the tree's. The focus moves only; it selects nothing.
+ *
+ * - ↓ / ↑: the next / the previous item; Home / End: the first / the last.
+ * - →: a closed node opens; on an open one the focus goes to its first child; elsewhere nothing.
+ * - ←: an open node closes; elsewhere the focus goes to the item above it, if there is one.
+ * - Enter, Space: a node is selected — or, whose details stand under its row, cleared —; on a
+ *   "more" line the next fifty.
+ */
+function agentKeyMove(items: AgentKeyItem[], i: number, key: string): { focus?: number; act?: 'toggle' | 'select' | 'more' } | null {
+  const it = items[i];
+  if (!it) return null;
+  const last = items.length - 1;
+  switch (key) {
+    case 'ArrowDown': return { focus: Math.min(i + 1, last) };
+    case 'ArrowUp': return { focus: Math.max(i - 1, 0) };
+    case 'Home': return { focus: 0 };
+    case 'End': return { focus: last };
+    case 'ArrowRight':
+      if (it.more || !it.parent) return { focus: i };
+      if (!it.open) return { act: 'toggle' };
+      return { focus: i < last && items[i + 1].level === it.level + 1 ? i + 1 : i };
+    case 'ArrowLeft':
+      if (!it.more && it.parent && it.open) return { act: 'toggle' };
+      for (let j = i - 1; j >= 0; j--) if (items[j].level < it.level) return { focus: j };
+      return { focus: i };
+    case 'Enter':
+    case ' ':
+      return { act: it.more ? 'more' : 'select' };
+    default:
+      return null;
+  }
+}
+
+/** An item as agentKeyMove reads it, from the attributes agentNode and agentMoreRow write. */
+function agentKeyItem(li: HTMLElement): AgentKeyItem {
+  const level = Number(li.getAttribute('aria-level'));
+  const exp = li.getAttribute('aria-expanded');
+  return { level: Number.isFinite(level) && level >= 1 ? level : 1, parent: exp === 'true' || exp === 'false',
+    open: exp === 'true', more: !!li.dataset && typeof li.dataset.more === 'string' };
+}
+
+/** The mouse's target inside an item that does what a key asked for: its toggle, its row, its "more" words. */
+function agentControlOf(li: HTMLElement, what: 'toggle' | 'select' | 'more'): HTMLElement | null {
+  const cls = what === 'toggle' ? 'ag-fold' : what === 'select' ? 'ag-row' : 'ag-more';
+  const el = li.querySelector ? li.querySelector<HTMLElement>(':scope > .ag-line > .' + cls) : null;
+  return el && el.dataset && el.dataset.act ? el : null;
 }
 
 /**
@@ -2836,9 +3129,51 @@ document.addEventListener('keydown', (ev) => {
   if (!body || !body.querySelector('.ag-details') || (fold && !fold.open)) return;
   const at = agentPanelAt;
   ev.preventDefault();
-  restoreFocus(body, { act: 'agentSelect', key: at.key, list: at.from === 'now' ? 'now' : '' });
+  // 1.6 L1: in the tree the row is its item's — the item takes the focus, as it takes it anywhere
+  // in the tree; in the running list it is the row's own button.
+  if (at.from === 'tree') {
+    const li = agentItemByKey(body, at.key);
+    if (li) li.focus();
+  } else {
+    restoreFocus(body, { act: 'agentSelect', key: at.key, list: 'now' });
+  }
   post({ type: 'agentSelect', key: null });
 }, true);
+
+// -- the agent tree: the keyboard -------------------------------------------
+//
+// 1.6 L1: WAI-ARIA's tree pattern. The tree is one stop of the Tab key; inside it the keys of
+// agentKeyMove move the focus from item to item, open and close nodes, select them and take the
+// "more" steps — through the very targets the mouse clicks (act), so a key asks the host for
+// nothing a click would not. Only a key on the item itself, and without a modifier: in its details
+// the Copy ID button keeps its own keys, and a key with Ctrl, Alt, Meta or Shift is not the tree's.
+document.addEventListener('keydown', (ev) => {
+  if (!vm || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+  const li = ev.target as HTMLElement | null;
+  if (!li || typeof li.getAttribute !== 'function' || li.getAttribute('role') !== 'treeitem' || typeof li.closest !== 'function') return;
+  const tree = li.closest('.agtree');
+  if (!tree) return;
+  const all = Array.from(tree.querySelectorAll<HTMLElement>('li[role="treeitem"]'));
+  const i = all.indexOf(li);
+  if (i < 0) return;
+  const move = agentKeyMove(all.map(agentKeyItem), i, ev.key);
+  if (move === null) return;
+  // Handled, whatever it does: an arrow never scrolls the page under the tree, Space neither.
+  ev.preventDefault();
+  if (typeof move.focus === 'number') {
+    const to = all[move.focus];
+    if (to && to !== li) to.focus();
+    return;
+  }
+  const control = move.act ? agentControlOf(li, move.act) : null;
+  if (control) act(control);
+});
+// The item that takes the focus is the tree's stop of the Tab key (agentRove) — the keyboard's
+// and a click's alike: a click on a row focuses its item, the one element of it that can take it.
+document.addEventListener('focusin', (ev) => {
+  const li = agentItemOf(ev.target);
+  if (li) agentRove(li);
+});
 
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.
 window.addEventListener('resize', () => { if (vm) applyFits(); });

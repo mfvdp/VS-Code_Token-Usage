@@ -62,7 +62,8 @@ clicked, here the running list's — and the same click again closes them. It op
 tree: the panel shows whether the node's tree row is on screen or inside a closed branch — or in
 a session the tree does not list, for as long as the agent runs and the list names it (see
 [Opening and selection](#opening-and-selection)). The rows are buttons ahead of the tree, so the
-keyboard reaches them first.
+keyboard reaches them first — each a stop of the `Tab` key, then the tree, which is one (see
+[The keyboard](#the-keyboard)).
 
 With nothing running, the list is one line — `No agent is running.` — with no heading. The
 markdown report prints the list under `### Running now`, one line per agent — `[~Running]`
@@ -113,8 +114,9 @@ is never dropped.
 
 **Fifty at a time.** An opened node shows at most **50** of its children at a time, in the
 order above. When it has more, a line after the last one says so — `50 more · 377 not shown`,
-or `12 more` when the next fifty are the rest — and a click on it, or `Enter`, shows the next
-fifty. A node takes that step at most **10** times, so it shows up to 550 of its children; past
+or `12 more` when the next fifty are the rest — and a click on it, or `Enter` or `Space` on it,
+shows the next fifty: the line is an item of the tree like the node's children, reached with the
+arrow keys. A node takes that step at most **10** times, so it shows up to 550 of its children; past
 that the line only counts the rest, `377 not shown`. Always among those shown, each taking the
 place of the last one that is not: every child that is running, the one on the way to the node
 whose details are open, and a run's collector, which stays its last child — so the open node's
@@ -199,11 +201,45 @@ marks: a glyph is `running, derived` or `done, recorded` (its title keeps `~runn
 tally is read in words, and a clock that ticks every second is hidden from it and stands beside it
 as words that stand still — `since 14:20` for the time a node has been running, `silent since
 14:21` for a silence — from the clock times the view model sends with each node; the page formats
-no time of its own. The toggle is 24 px wide and high and a row at least 24 px high, so neither is
-a target smaller than 24 × 24 px (WCAG 2.5.8). In a forced-colours theme — Windows High Contrast —
-the glyphs and the `⚠` take the text colour, the toggle's arrow the button's, and the open row,
-whose tint the theme removes, a 2 px outline in the highlight colour; the theme's own colours are
-left on everywhere else.
+no time of its own. Each row is an item of a tree (`treeitem`) and says so: its **name** is the
+node's whole name, a session's project after it, its state and — where the row shows one — its
+tally, in words: `Workflow run Tue 11:40 · cfe7718d, running, derived, 8 started, 3 done, about 2
+running`; its **figures** follow as its description, `412.3K lower bound, since 11:40`. With it a
+screen reader hears the item's level, its place among its siblings and how many they are — every
+child the node has, the ones past the fifty shown included: `3 of 165` —, whether it is open, and
+whether it is the selected one. The toggle is the mouse's alone and hidden from a screen reader:
+the item says whether it is open. The toggle is 24 px wide and high and a row at least 24 px high,
+so neither is a target smaller than 24 × 24 px (WCAG 2.5.8). In a forced-colours theme —
+Windows High Contrast — the glyphs and the `⚠` take the text colour, the toggle's arrow the
+button's, the open row, whose tint the theme removes, a 2 px outline in the highlight colour, and
+the item the keyboard is on a 2 px ring in the text colour; the theme's own colours are left on
+everywhere else.
+
+### The keyboard
+
+The tree is a tree to the keyboard too, as WAI-ARIA's tree pattern describes one. It is **one stop
+of the `Tab` key**: `Tab` from the running list's last row lands on one item of the tree — the one
+you were last on, else the selected node while its row is shown, else the first session — and the
+next `Tab` leaves the tree; while that item's details are open, the next `Tab` first reaches their
+*Copy ID* button, and `Shift+Tab` goes back to the item. Inside the tree the keys move from item to
+item:
+
+| Key | On an item of the tree |
+|---|---|
+| `↓` / `↑` | the next / the previous item shown |
+| `Home` / `End` | the first / the last item shown |
+| `→` | on a closed node, opens it; on an open one, moves to its first child |
+| `←` | on an open node, closes it; elsewhere, moves to the node above |
+| `Enter` / `Space` | opens the node's details under its row, or closes them again; on a `50 more` line, shows the next fifty |
+| `Escape` | closes the details (see [Details](#details)) |
+
+**Moving selects nothing**: the arrows only move the focus, the details open with `Enter` or
+`Space` — or a click. A key with `Ctrl`, `Alt`, `Shift` or `Meta` is left to VS Code. The item the
+focus is on has a ring round its line in the theme's focus colour; a click on a row focuses its
+item as well, without the ring. When the section is pushed again while the focus is in the tree,
+it stays on the item with the same node, else on the nearest item above it that is still shown —
+the node a `50 more` line belonged to, once it shows every child; the run, when newer agents push
+the one you were on out of its first fifty —, else on the first session.
 
 ### The tally
 
@@ -451,9 +487,9 @@ A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
 
 ## Details
 
-Clicking a row — of the tree or of the running list, or `Enter` on it, since the toggle and the
-row are buttons of their own — opens the node's details right under that row; the same click
-again closes them. In the tree the panel stands inside the node's entry, between its row and its
+Clicking a row — of the tree or of the running list —, or `Enter` or `Space` on it (see
+[The keyboard](#the-keyboard)), opens the node's details right under that row; the same click or
+key again closes them. In the tree the panel stands inside the node's entry, between its row and its
 children, across the tree's whole width however deep the node sits; under a row of the running
 list it is that row's second line. A running agent has a row in both places: the details open
 under the one you clicked, and a click on the other moves them there. Only the row they stand
@@ -463,7 +499,7 @@ that one is on the page; if it is not, they are not shown, without a word, and c
 the row (see [Opening and selection](#opening-and-selection)). The panel is drawn once, never
 twice.
 `Escape` anywhere in the section closes the details and puts the keyboard focus back on the row
-they stood under; while a hover card or a sparkline's tip is open, the first `Escape` closes that
+they stood under — in the tree on its item —; while a hover card or a sparkline's tip is open, the first `Escape` closes that
 and the next one the details. For an agent: type,
 models, its ID, depth, started, duration, last activity (with a live `… ago` beside it) and —
 for an agent that wrote on after its outcome — what was recorded, then turns,
@@ -597,8 +633,9 @@ anew, and its run's agents with it.
 * The section is pushed at most once every **2 seconds**. A running agent writes a line every
   0.6 seconds at the median, and every push redraws the running list and the tree; the other
   sections are not held back by it, and opening a node or a click of yours is answered at once.
-  The keyboard focus stays on its row through a push — on the running list's row or on the
-  tree's, whichever it was on.
+  The keyboard focus stays on its row through a push — on the running list's row, or on the
+  tree's item it was on, else the nearest item above it that is still shown (see
+  [The keyboard](#the-keyboard)).
 * The clocks of the running list (`running for …`) and of the tree (the time since the start, in
   the duration's place) and the last activity in the details tick every second in the page itself
   — no message, no redraw — and so does a running agent's `silent for …`, which the same timer
@@ -617,8 +654,8 @@ anew, and its run's agents with it.
 
 ## Opening and selection
 
-A node with children has a toggle (▸ closed, ▾ open) in front of its row; the tree starts with
-every node closed. Which nodes you opened and which node's details are open are kept with the
+A node with children has a toggle (▸ closed, ▾ open) in front of its row — a click on it, or `→` and
+`←` on the item, opens and closes it; the tree starts with every node closed. Which nodes you opened and which node's details are open are kept with the
 rest of the dashboard's view state — range, sort, filters, folded sections — in the extension's
 own storage, so they survive a push, a reload and a restart; selecting a node never opens
 anything by itself. Only node keys are kept, made of the session, run, agent or launch id: the

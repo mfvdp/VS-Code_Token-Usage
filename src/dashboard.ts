@@ -845,11 +845,13 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .foot li { margin-bottom: 2px; }
 ul { margin: 6px 0; padding-left: 18px; }
 /* The agent tree: one list per level, each indented 16 px, so a node's children start under its
-   glyph and the glyphs of one level stand in a column. A row is two buttons — the fold, and the
-   row itself, which opens the node's details — without a chip's border: a tree of bordered
-   buttons reads as a wall of controls rather than as a tree. The hover and the focus ring are
-   every button's. 1.6 N9: both are targets of at least 24 × 24 px (WCAG 2.5.8) — the fold 24 px
-   wide and high, the row at least 24 px high. */
+   glyph and the glyphs of one level stand in a column. A row is two targets of the mouse — the
+   fold, and the row itself, which opens the node's details — without a chip's border: a tree of
+   bordered buttons reads as a wall of controls rather than as a tree. 1.6 N9: both are targets of
+   at least 24 × 24 px (WCAG 2.5.8) — the fold 24 px wide and high, the row at least 24 px high.
+   1.6 L1: neither is a control of its own — the item they stand in is what takes the focus (the
+   tree's keyboard, see the script) — so they take a button's box, colour and pointer here, and
+   the running list's rows, which stay buttons, keep theirs. */
 .agtree ul { list-style: none; margin: 0; padding: 0; }
 .agtree ul ul { padding-left: 16px; }
 .ag-line { display: flex; align-items: flex-start; }
@@ -857,19 +859,28 @@ ul { margin: 6px 0; padding-left: 18px; }
 /* The arrow stands at the top, on the name's line — a button would centre it in its 24 px — and
    the target is 24 px high all the same. */
 .ag-fold { border: none; background: none; padding: 0; line-height: 17px; color: var(--dim);
-           display: flex; align-items: flex-start; justify-content: center; }
+           display: flex; align-items: flex-start; justify-content: center; box-sizing: border-box;
+           cursor: pointer; user-select: none; }
 /* The twisty is drawn, like the section heads', so it never ends up in the copied text. */
 .ag-fold::before { content: "▾"; font-size: 9px; }
 [aria-expanded="false"] > .ag-line > .ag-fold::before { content: "▸"; }
 .ag-row { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 4px;
           min-height: 24px; padding: 1px 4px; border: none; background: none; text-align: left;
-          font-size: var(--vscode-font-size); }
+          font-size: var(--vscode-font-size); box-sizing: border-box; border-radius: 3px;
+          color: var(--vscode-foreground); line-height: normal; cursor: pointer; }
+.agtree .ag-row { user-select: none; }
+.agtree .ag-row:hover { background: var(--vscode-toolbar-hoverBackground, var(--track)); }
+/* 1.6 L1: the item the keyboard is on. Its ring is drawn round its line — the toggle and the row —
+   and not round the item, which holds its details and its children as well; inside the line, so
+   a row as wide as the sidebar keeps it whole. A click focuses the item too, and draws no ring. */
+.agtree li[role="treeitem"]:focus { outline: none; }
+.agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 /* 1.6 N6: the glyph keeps its column, and beside it the row is two lines — the name, then the
    figures under it, left-aligned with it. Neither ever wraps: a row is two lines at any width. */
 .ag-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 /* The open node: the track's tint and the focus colour's edge — the page's own two marks for
    "this one", quieter than a pressed chip, which would paint a whole row in the button colour. */
-.ag-row[aria-pressed="true"] { background: var(--track); color: var(--vscode-foreground);
+.ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"] { background: var(--track); color: var(--vscode-foreground);
                                box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
 /* The name on one line (1.6 P7b, the lead's call). When the line has no room for all of it, its
    parts give way one after the other, each on an ellipsis — first what the row can best do
@@ -901,7 +912,13 @@ ul { margin: 6px 0; padding-left: 18px; }
    the line is out of sight and still in the page, for a screen reader. */
 .ag-fig { position: relative; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
           color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
-.ag-fig.ag-cut::after { content: "\\00a0…"; }
+/* 1.6 L1: for a screen reader the line's "…" says nothing — a tree item is described by its line
+   (aria-describedby) —, and its parts stand apart: the dot the eye gets between two of them is
+   hidden from it, so each part after the first says ", " in front of itself instead — the text
+   alternative of an empty generated content, nothing to see — "12.3K, since 14:20"; a tally's
+   part says nothing, its words are the item's name. */
+.ag-fig.ag-cut::after { content: "\\00a0…" / ""; }
+.ag-fig > .ag-fp + .ag-fp:not(:has(> .ag-t))::before { content: "" / ", "; }
 .ag-fig .ag-gone { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden;
                    clip-path: inset(50%); }
 /* 1.6 D10: the ⚠ of an output that is a lower bound, inside the usage figure — while the script's
@@ -940,8 +957,13 @@ ul { margin: 6px 0; padding-left: 18px; }
    not shown" — in the column of its siblings' glyphs. A borderless button like a row while one
    more step can be taken, the dim words of a count once none can; 24 px high, a target (N9). */
 .ag-more { flex: 1 1 auto; min-width: 0; min-height: 24px; padding: 1px 4px; border: none;
-           background: none; text-align: left; font-size: 11px; font-variant-numeric: tabular-nums; }
-span.ag-more { color: var(--dim); }
+           background: none; text-align: left; font-size: 11px; font-variant-numeric: tabular-nums;
+           box-sizing: border-box; border-radius: 3px; user-select: none; }
+/* 1.6 L1: while a step can be taken the words are the mouse's target — the item is the keyboard's —
+   in the foreground colour and centred in their 24 px as a button's would be; the count alone is dim. */
+.ag-more[data-act] { display: flex; align-items: center; cursor: pointer; }
+.ag-more[data-act]:hover { background: var(--vscode-toolbar-hoverBackground, var(--track)); }
+.ag-more:not([data-act]) { color: var(--dim); }
 /* The running list above the tree: every row is a tree row's button, glyph, name and figures,
    stretched to the width of the list, and where the agent sits is a line of its own under the
    figures. A part of that line — "Session 9d0eb37a", "Workflow run cfe7718d" — keeps together
@@ -996,12 +1018,14 @@ span.ag-more { color: var(--dim); }
 }
 /* 1.6 N9: in a forced-colours theme (Windows High Contrast) the agent tree's marks take the
    system's colours — the glyphs and the ⚠ the text's, the twisty a button's — and the open row,
-   whose tint and edge the theme removes, a 2 px outline in the highlight colour. The theme's own
-   adjustment is left on everywhere else. */
+   whose tint and edge the theme removes, a 2 px outline in the highlight colour. 1.6 L1: the item
+   the keyboard is on, a 2 px ring round its line in the text colour — never the highlight's, so an
+   open row that has the focus shows both. The theme's own adjustment is left on everywhere else. */
 @media (forced-colors: active) {
   .ag-st::before, .ag-lb { color: CanvasText; }
   .ag-fold::before { color: ButtonText; }
-  .ag-row[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 2px solid CanvasText; }
 }
 `
 
@@ -1097,7 +1121,6 @@ function webviewWords(): Record<string, string> {
     'Calibration {0} {1}: {2}': t('Calibration {0} {1}: {2}'),
     'Calls': t('Calls'),
     'Chart': t('Chart'),
-    'Collapse {0}': t('Collapse {0}'),
     'Compared with': t('Compared with'),
     'Connect the status line': t('Connect the status line'),
     'Consent: {0} · {1} · attribution {2} · v{3}': t('Consent: {0} · {1} · attribution {2} · v{3}'),
@@ -1109,7 +1132,6 @@ function webviewWords(): Record<string, string> {
     'Day {0}': t('Day {0}'),
     'Details': t('Details'),
     'Duration': t('Duration'),
-    'Expand {0}': t('Expand {0}'),
     'Extra usage': t('Extra usage'),
     'Extra usage (billed)': t('Extra usage (billed)'),
     'Fetch quota now': t('Fetch quota now'),

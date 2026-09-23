@@ -43,18 +43,19 @@ row's glyph says so, as the tree's do.
 **Order and cap.** The longest-running first: by the time of the agent's first line, or of the
 launch, the earliest on top; two that started at the same moment keep a fixed order. The list
 holds at most **20** running agents; the rest are counted under it (`and 3 more`). A collector is
-one row of them however many of its agents run, and sorts by the first line of the earliest of
-its agents that has a transcript — last when none has.
+one row of them however many of its agents run; it has no start of its own, so it comes last.
 
-**Each row** is the running glyph, the agent's name as the tree writes it, a live
-`running for 12 min 05 s` counted from its first line (from the launch, for a launch; for a
-collector from the first line of the earliest of its agents that has a transcript, and no clock
-when none has), its usage — `–` for a launch and a collector, since nothing of them was counted —,
-`silent for 4 min` once the agent has not written for a while, as on its tree row (see
-[The tree](#the-tree)), and under them where it sits:
-`Session 9d0eb37a · Workflow cfe7718d`, with the session's project after it while
-`tokenPace.attribution` names one. An agent that runs only because an agent below it runs — the
-parent waiting for its child — says so on that line: `waits for a child agent`.
+**Each row** is two lines, as a tree row is (see [The tree](#the-tree)): the running glyph and the
+agent's name as the tree writes it — `Explore · opus-5 · 94f3` —, then its usage — `–` for a launch
+and a collector, since nothing of them was counted, `⚠` inside it where it is a lower bound —, a
+live `running for 12 min 05 s` counted from its first line (from the launch, for a launch) and
+`silent for 4 min` once the agent has not written for a while; and under them, a line of its own,
+where it sits: `Session 9d0eb37a · Workflow run cfe7718d`, the session and the run by their ids,
+with the session's project after them while `tokenPace.attribution` names one. An agent that runs
+only because an agent below it runs — the parent waiting for its child — says so on that line:
+`waits for a child agent`. A collector has **no clock**: the earliest first line among its agents
+may be a request the API rejected for an agent that failed long before, and a clock from it would
+claim a precision nobody has — its row says `~10 of them running` in the clock's place.
 
 **A click on a row** opens the same details a click on its tree row opens — under the row you
 clicked, here the running list's — and the same click again closes them. It opens nothing in the
@@ -65,7 +66,8 @@ keyboard reaches them first.
 
 With nothing running, the list is one line — `No agent is running.` — with no heading. The
 markdown report prints the list under `### Running now`, one line per agent — `[~Running]`
-first, as the tree's lines mark an inferred state, then its name, where it sits and its usage,
+first, as the tree's lines mark an inferred state, then its name with the model's whole id, where
+it sits and its usage,
 `⚠` behind a usage that is a lower bound, `(waiting)` behind a waiting one and
 `(~10 of them running)` behind a collector — and heads the tree after it with
 `### Sessions and agents`.
@@ -75,25 +77,35 @@ first, as the tree's lines mark an inferred state, then its name, where it sits 
 **Sessions** are the roots, the most recent first. A session is listed when its own transcript
 recorded a response within the last 24 hours, or when it has an agent or a launch from the last
 seven days, or a workflow run whose journal changed in them. At most **20** sessions are listed; the rest are counted under the tree
-(`3 older session(s) not shown.`). A session is labelled with the first eight characters of its
-id (`Session 9d0eb37a`), and with its project beside it while `tokenPace.attribution` is
+(`3 older session(s) not shown.`). A session is **named by when it started**, then by the first
+eight characters of its id: `Session Tue 14:20 · 9d0eb37a` — its first line's weekday and clock
+time while that lies within the last **6 days**, its date and clock time before that
+(`Session 2026-09-01 14:20 · 9d0eb37a`), in the zone `tokenPace.timezone` names and the clock
+format the rest of the page uses; the date is the calendar's, whatever `tokenPace.dayBoundaryHour`
+says. Six days and not seven, so no two starts a weekday could name are in it. A session whose
+own transcript was never read has no first line and is named by its id alone (`Session 9d0eb37a`).
+The id is in the figures' dim tone; the project follows it while `tokenPace.attribution` is
 `project` or `session` — the label the Sessions table shows, hashed too under
 `showProjectNames: hash`. With `attribution: none` no project is named anywhere in the tree.
 
 **Closed by default.** Only the sessions show until you open one; an opened node shows its
-children closed in turn. Each session says beside its name what its agents came to — its
+children closed in turn. Each session says under its name what its agents came to — its
 [tally](#the-tally), `12 started · 3 ✓ · 1 ✕ · 2 ↻ · 1 ■ · ~4 ● · ~1 ?` — so a closed session
 already tells a run that went well from one that did not. A run whose agents no transcript shows
 has nothing to open: it has no toggle, and its tally still says what is below it. What you open
 stays open (see [Opening and selection](#opening-and-selection)).
 
-**Below a session** come its workflow runs (`Workflow cfe7718d`) and its agents, each agent
-under the agent that launched it when that one is in the same tree, otherwise directly under the
-session; the agents of a run stay inside their run. Siblings are ordered by when they started. A
-launch whose transcript has not appeared yet is a node of its own, in italics and named from the
-launch — `Plan · sonnet · launched` — with no figures beside it, since nothing was counted. A
-workflow run is a node from the moment its session launched it, before any agent of it has
-written: with `–` for its figures and nothing to open until one does. A run's agents without a
+**Below a session** come its workflow runs and its agents, each agent under the agent that
+launched it when that one is in the same tree, otherwise directly under the session; the agents
+of a run stay inside their run. A run is named like a session, by when it started — its first
+agent's first line, or its launch: `Workflow run Tue 00:19 · cfe7718d`. Siblings — the children of
+a session, of a run and of an agent alike — are in **plain time order, the newest start first**,
+whatever state each is in: the glyph, the state's word and the tally say that, the order says
+when; a node without a known start comes after the others, and a run's collector is always its
+last child. A launch whose transcript has not appeared yet is a node of its own, in italics and
+named from the launch — `Plan · sonnet · launched` — with `–` for its figures, since nothing was
+counted. A workflow run is a node from the moment its session launched it, before any agent of it
+has written: with `–` for its figures and nothing to open until one does. A run's agents without a
 counted reply are one node, the run's last child: its
 [collector](#agents-without-a-counted-reply).
 No agent sits more than **6** levels below its session: one that would sit deeper moves up, it
@@ -113,24 +125,36 @@ the collector, then the running children.
 **Only what is open goes to the page.** A closed node's children are not sent to it at all: only
 whether it has any, how many, and what the agents below it came to. A large run closed is one
 row: a run of 427 agents made a section of 77.8 KB while every node went to the page, and its
-session closed is well under 1 KB. One push of the section holds at most **2000** nodes, a
+session closed is well under 1 KB. The fifty an opened node shows first are its newest fifty. One push of the section holds at most **2000** nodes, a
 safety cap that only many opened nodes
 of fifty children each reach: it is filled with the path to the node whose details are open and
 the running agents first, then in the order the page draws the tree, and an opened node whose
 children no longer fit shows none of them and says how many it has (`377 not shown`).
 
-**Each row** is the state glyph, the name, the usage — fresh input + cache write + output, the
-definition the tables use — and the duration from the first line to the last. A **session's** row
-names its two figures — `own 12.0M · agents 137.4M · 22 d 11 h`: what its own transcript used,
-counted from its first line, and what its agents of the last seven days used. The two are never
-added: they cover different spans, a session's own transcript often weeks, its agents the seven
-days the tree keeps. A session without agents shows no agents figure. The last figure is the
-session's span from its first line to its last (its title says so), written in days and hours
-from **48 hours** on — the hours floored, so `22 d 11 h` for a session of 22 days, 11 hours and
-59 minutes — and as a duration below that. A row carries no
-lower-bound mark; the details do, with the numbers — `Output` `4.1K ⚠ lower bound — 2 of 41
-replies unfinished` (see [Why the output is a lower bound](#details)). A running node also says for how long:
-`running for 12 min 05 s`, counted from its first line and ticking every second. A running
+**Each row is two lines.** The first is the state glyph and the name — the short id at its end in
+the figures' dim tone, and a session's project after it. The second, under the name, in the dim
+tone, is the figures: the usage — fresh input + cache write + output, the definition the tables
+use —, the duration from the first line to the last, and for a session, a run and a closed agent
+with agents below it, the [tally](#the-tally). Neither line wraps, whatever the width: where the
+name has no room, a session's project gives way first, then the name's first part — an agent's
+type, a session's or a run's start — ending on `…`, never the model or the short id, and the whole
+name is the line's title. Where the figures have no room — a narrow sidebar, a deep row — their
+last parts come off the line whole, the tally's last counts first, then the tally, the silence and
+the clock, and the line ends on `…`: no figure is ever cut in two, a screen reader still hears
+every one, and the details panel shows them all. The usage always stays.
+
+A **session's** figures name themselves — `own 12.0M · agents 137.4M · 22 d 11 h`: what its own
+transcript used, counted from its first line, and what its agents of the last seven days used. The
+two are never added: they cover different spans, a session's own transcript often weeks, its
+agents the seven days the tree keeps. A session without agents shows no agents figure. The last
+figure is the session's span from its first line to its last (its title says so), written in days
+and hours from **48 hours** on — the hours floored, so `22 d 11 h` for a session of 22 days, 11
+hours and 59 minutes — and as a duration below that. A usage that is a **lower bound** carries
+`⚠` inside it, its title the reason — `⚠ lower bound — 2 of 41 replies unfinished` — and the
+details' Output row says the same (see [Why the output is a lower bound](#details)); a session's
+mark is its own transcript's, on its own figure. A running node shows, in its duration's place,
+for how long it has been running, counted from its first line and ticking every second —
+`12 min 05 s`; the running list's row says `running for 12 min 05 s`. A running
 agent whose transcript has not changed for **3 minutes** says that too, after its figures —
 `silent for 4 min`, in whole minutes, then `1 h 05 min` — in the same quiet tone as the figures,
 from the page's own clock: it appears the second the three minutes are up, with no push, and goes
@@ -138,9 +162,12 @@ again with the agent's next line. A pause of a minute or two is an ordinary tool
 minutes the reader may want to look. It changes no state — the agent stays running until ten
 minutes have passed — and an agent that runs only because an agent it launched runs, or a launch,
 never says it: they have no line of their own to be silent in. An agent's name
-is its type, its model and its short id — `Explore · claude-opus-5 · 94f3`. The type is the one
+is its type, its model and its short id — `Explore · opus-5 · 94f3`. The type is the one
 the agent's sidecar names, else the one its launch asked for, else `Agent`; the model is the last
-one its transcript recorded, else the alias the sidecar or the launch names, else `–`. The **short
+one its transcript recorded, else the alias the sidecar or the launch names, else `–` — on the
+row in its short form, without the `claude-` every Claude model id starts with. The details'
+title and Models row, the markdown report and a screen reader get the whole id:
+`Explore · claude-opus-5 · 94f3`. The **short
 id** is the start of the agent's id that no other agent of the same session starts with — the
 agents a run's journal names without a transcript included, since a sentence may name one — at
 least **4** characters long: Claude Code's ids are `a` and 16 hex digits, and the `a`, which
@@ -148,6 +175,17 @@ every one of them carries, is left off. Four characters keep nearly every agent 
 agents of a session share them, both names carry as many as it takes — measured over a week on one
 machine, 917 of 925 agents needed four and 8 needed five. The whole id is in the details. An
 agent's usage is part of the figures the totals already contain: the tree adds nothing to any sum.
+
+**Without the colours, the glyphs and the mouse.** A screen reader gets words where the eye gets
+marks: a glyph is `running, derived` or `done, recorded` (its title keeps `~running · derived`), a
+tally is read in words, and a clock that ticks every second is hidden from it and stands beside it
+as words that stand still — `since 14:20` for the time a node has been running, `silent since
+14:21` for a silence — from the clock times the view model sends with each node; the page formats
+no time of its own. The toggle is 24 px wide and high and a row at least 24 px high, so neither is
+a target smaller than 24 × 24 px (WCAG 2.5.8). In a forced-colours theme — Windows High Contrast —
+the glyphs and the `⚠` take the text colour, the toggle's arrow the button's, and the open row,
+whose tint the theme removes, a 2 px outline in the highlight colour; the theme's own colours are
+left on everywhere else.
 
 ### The tally
 
@@ -175,13 +213,14 @@ There is no "x of y": `started` is the one total. A screen reader gets the same 
 *12 started, 3 done, 1 failed, 2 retried, 1 stopped, about 4 running, about 1 unknown* — in place
 of the glyphs.
 
-A session's and a run's tally stand beside the name whether the node is open or closed: what
+A session's and a run's tally end the second line of the row whether the node is open or closed: what
 failed, was retried or is still unknown among a few hundred agents is not something to count off
 the rows. An agent's stands only while it is closed; open, its children are on screen with their
 own glyphs. A node with no agent below it — a session that started none, an agent that launched
 none, a launch — has no tally, rather than a `0 started`. The markdown report prints a node's
 tally after its name in brackets, on every node that has one:
-`[~Running] Workflow cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s`. It prints
+`[~Running] Workflow run Tue 11:50 · cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s` — the
+names the tree's, the id plain and the model whole. It prints
 every node, open on the dashboard or not, at most 50 children each, and one line at their depth
 for the rest: `… 377 more`.
 
@@ -194,9 +233,10 @@ leaves many of them. Each is a member of its run, but none has a figure to show,
 would bury the agents that did the work. So they are **counted, not listed**: one node, the
 **collector**, the last child of its run, stands for all of them —
 `263 agent(s) without a counted reply`, or `3 agent(s) failed before their first reply` when every
-one of them failed. It has no toggle and no children; its figures are `–`, never a `0`; beside its
-label stands its [tally](#the-tally), and its state is its members', by the rule a run's state
-follows (see [States](#states)). An agent of a run whose transcript holds only rejected requests
+one of them failed. It has no toggle and no children; its figures are `–`, never a `0`, and it runs
+no clock, in the tree or in the running list: it has no start of its own. Its second line ends on
+its [tally](#the-tally), and its state is its members', by the rule a run's state follows (see
+[States](#states)). An agent of a run whose transcript holds only rejected requests
 is kept from its first one on, with nothing counted; its first counted reply moves it out of the
 collector into a row of its own. An agent outside a run whose transcript holds only rejected
 requests keeps a row of its own — there are few — with `–` for its figures and the sentence that
@@ -273,7 +313,9 @@ again, the attempt before it is superseded: a failed one was retried
 (agent 2e3d).*), one that had recorded nothing yet was replaced — stopped, not unknown
 (*Stopped, replaced — the workflow journal started the same step again (agent 2e3d) before this
 agent recorded a result.*) — and a completed one was run again. The sentence names the next
-attempt by its short id. A superseded attempt keeps its own glyph and state; its row is dimmed,
+attempt by its short id. A superseded attempt keeps its own glyph and state; its row is dimmed —
+its glyph and its name faded to 65 %, its short id and figures in their dim tone as on any row, so
+every word of it still reads at 3:1 or better in the light and the dark theme —,
 its glyph's title adds `superseded by a later attempt`, and its markdown line ends on
 `(superseded by a later attempt)`; the [tally](#the-tally) counts it under `↻`, not under its
 own state. The details of an agent whose step was started more than once
@@ -453,8 +495,10 @@ had at least one such reply, **201 of them exactly one**; **455 of the 477** suc
 followed by the result of the tool they called — cut off at the tool call, not at the end of the
 agent — and only **22** were the file's last reply. Only 22 of the 925 agent transcripts end on an
 unfinished reply, so an unfinished reply is no end marker, and most finished agents are no lower
-bound at all. The tree's rows carry no mark: the details do, and the markdown report marks the
-line — ` ⚠` behind the usage — and says once, at the end, what the mark means.
+bound at all. The rows of the tree and of the running list carry the mark inside the usage — `⚠`,
+its title the reason, *lower bound* to a screen reader —, the details' Output row says it with the
+numbers, and the markdown report marks the line — ` ⚠` behind the usage — and says once, at the
+end, what the mark means. No line under the tree speaks of it.
 
 ## What is read
 
@@ -536,9 +580,11 @@ anew, and its run's agents with it.
   sections are not held back by it, and opening a node or a click of yours is answered at once.
   The keyboard focus stays on its row through a push — on the running list's row or on the
   tree's, whichever it was on.
-* The `running for …` clocks of the running list and the tree and the last activity in the
-  details tick every second in the page itself — no message, no redraw — and so does a running
-  agent's `silent for …`, which the same timer shows once three minutes have passed.
+* The clocks of the running list (`running for …`) and of the tree (the time since the start, in
+  the duration's place) and the last activity in the details tick every second in the page itself
+  — no message, no redraw — and so does a running agent's `silent for …`, which the same timer
+  shows once three minutes have passed. When a clock grows a unit — `59 s` to `1 min 00 s` — or a
+  silence appears, its row's figures are fitted to the line again.
 * The recursive file watcher can miss the files of a directory created after it started — on
   Linux it does — so while an agent runs, or while a session is active, the agent directories of
   the active sessions are also listed every **5 seconds**, on every platform; the one-minute

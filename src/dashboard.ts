@@ -844,41 +844,59 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
 .foot { margin-top: 18px; font-size: 10px; color: var(--dim); line-height: 1.6; }
 .foot li { margin-bottom: 2px; }
 ul { margin: 6px 0; padding-left: 18px; }
-/* The agent tree: one list per level, each indented by the width of a fold, so a node's
-   children start under its glyph and the glyphs of one level stand in a column. A row is two
-   buttons — the fold, and the row itself, which opens the node's details — without a chip's
-   border: a tree of bordered buttons reads as a wall of controls rather than as a tree. The
-   hover and the focus ring are every button's. */
+/* The agent tree: one list per level, each indented 16 px, so a node's children start under its
+   glyph and the glyphs of one level stand in a column. A row is two buttons — the fold, and the
+   row itself, which opens the node's details — without a chip's border: a tree of bordered
+   buttons reads as a wall of controls rather than as a tree. The hover and the focus ring are
+   every button's. 1.6 N9: both are targets of at least 24 × 24 px (WCAG 2.5.8) — the fold 24 px
+   wide and high, the row at least 24 px high. */
 .agtree ul { list-style: none; margin: 0; padding: 0; }
 .agtree ul ul { padding-left: 16px; }
 .ag-line { display: flex; align-items: flex-start; }
-.ag-fold, .ag-pad { flex: none; width: 16px; min-height: 20px; }
-.ag-fold { border: none; background: none; padding: 0; line-height: 20px; color: var(--dim); }
+.ag-fold, .ag-pad { flex: none; width: 24px; min-height: 24px; }
+/* The arrow stands at the top, on the name's line — a button would centre it in its 24 px — and
+   the target is 24 px high all the same. */
+.ag-fold { border: none; background: none; padding: 0; line-height: 17px; color: var(--dim);
+           display: flex; align-items: flex-start; justify-content: center; }
 /* The twisty is drawn, like the section heads', so it never ends up in the copied text. */
 .ag-fold::before { content: "▾"; font-size: 9px; }
 [aria-expanded="false"] > .ag-line > .ag-fold::before { content: "▸"; }
 .ag-row { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 4px;
-          min-height: 20px; padding: 1px 4px; border: none; background: none; text-align: left;
+          min-height: 24px; padding: 1px 4px; border: none; background: none; text-align: left;
           font-size: var(--vscode-font-size); }
-/* The glyph keeps its column; name, project and figures wrap beside it, never under it. */
-.ag-text { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline;
-           gap: 0 6px; }
+/* 1.6 N6: the glyph keeps its column, and beside it the row is two lines — the name, then the
+   figures under it, left-aligned with it. Neither ever wraps: a row is two lines at any width. */
+.ag-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 /* The open node: the track's tint and the focus colour's edge — the page's own two marks for
    "this one", quieter than a pressed chip, which would paint a whole row in the button colour. */
 .ag-row[aria-pressed="true"] { background: var(--track); color: var(--vscode-foreground);
                                box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
-.ag-label { min-width: 0; }
+/* The name on one line. When the line has no room for all of it, a session's project gives way
+   first, then the name's first part — an agent's type, a session's or a run's start — ending on
+   an ellipsis; the rest of the name and the short id never. (Only the first part may shrink: a
+   part that shrank by a fraction of a pixel would already end on an ellipsis.) The id and the
+   project are in the figures' dim tone (§7a Q11). */
+.ag-label { display: flex; min-width: 0; overflow: hidden; }
+.ag-label > span { flex: none; overflow: hidden; white-space: pre; text-overflow: ellipsis; }
+.ag-label > .ag-np:first-child { flex-shrink: 1; min-width: 1.5em; }
+.ag-label > .ag-sid { color: var(--dim); }
+.ag-label > .ag-proj { flex-shrink: 1000000; min-width: 0; color: var(--dim); }
 /* Launched, but its transcript not seen yet: the name is the launch's hint, not the agent's. */
 .ag-k-pending > .ag-line .ag-label { font-style: italic; }
-/* Usage, duration and the live clock: quieter than the name, and in figures that do not
-   jitter while the seconds tick. The silence of a running agent (1.6 N5, "silent for 4 min")
-   follows them in the same tone, no colour of its own: it is a fact about the clock, not an
-   alarm. */
-.ag-fig { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; margin-left: auto;
-          text-align: right; }
-/* 1.6 D10: the ⚠ of an output that is a lower bound, inside the usage figure — only while the
-   script's ROW_LOWER_BOUND_MARK is on. The glyph comes from a fallback font whose line box is a
-   pixel taller than the figures' own; held to its font size, it never makes a row taller. */
+/* Usage, duration and the live clock, the silence and the tally: quieter than the name, and in
+   figures that do not jitter while the seconds tick — one line, whose parts the script takes
+   off whole where it has no room for them (fitAgentFigures), ending it on an ellipsis; the
+   browser's own ellipsis is the net under it. The silence of a running agent (1.6 N5, "silent for
+   4 min") has no colour of its own: it is a fact about the clock, not an alarm. A part taken off
+   the line is out of sight and still in the page, for a screen reader. */
+.ag-fig { position: relative; display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+          color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ag-fig.ag-cut::after { content: "\\00a0…"; }
+.ag-fig .ag-gone { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden;
+                   clip-path: inset(50%); }
+/* 1.6 D10: the ⚠ of an output that is a lower bound, inside the usage figure — while the script's
+   ROW_LOWER_BOUND_MARK is on, as it ships. The glyph comes from a fallback font whose line box is
+   a pixel taller than the figures' own; held to its font size, it never makes a row taller. */
 .ag-lb { line-height: 1; }
 /* One glyph per state, drawn from the class and coloured with the page's own tokens only:
    green and red for what the parent recorded, the provider's blue for what still runs, the
@@ -898,28 +916,28 @@ ul { margin: 6px 0; padding-left: 18px; }
    from it. */
 .sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
       overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* 1.6 D7: an attempt the workflow journal superseded keeps its glyph, dimmed — at .8 a failed or
-   stopped glyph still stands out 3:1 in both themes — and its words take the dim tone. */
-.ag-sup > .ag-line > .ag-row .ag-st { opacity: .8; }
-.ag-sup > .ag-line > .ag-row .ag-label { color: var(--dim); }
+/* 1.6 D7: an attempt the workflow journal superseded keeps its glyph and its name, faded — to .65
+   (1.6 P7, the lead's call on the pictures: at .8 the dimming was hardly seen on the dark theme).
+   Its short id and its figures are in the dim tone already and stay so: faded as well, they would
+   fall below 3:1 on the light theme, and every word of the row keeps 3:1 in both. */
+.ag-sup > .ag-line > .ag-row > .ag-st, .ag-sup > .ag-line > .ag-row .ag-np { opacity: .65; }
 /* A breath, not a blink: at its faintest the dot keeps most of its colour, so it never reads
    as switched off. */
 @keyframes ag-pulse { 50% { opacity: .7; } }
 /* 1.6 D3: the line under an open node that holds more children than it shows — "50 more · 377
    not shown" — in the column of its siblings' glyphs. A borderless button like a row while one
-   more step can be taken, the dim words of a count once none can. */
-.ag-more { flex: 1 1 auto; min-width: 0; min-height: 20px; padding: 1px 4px; border: none;
+   more step can be taken, the dim words of a count once none can; 24 px high, a target (N9). */
+.ag-more { flex: 1 1 auto; min-width: 0; min-height: 24px; padding: 1px 4px; border: none;
            background: none; text-align: left; font-size: 11px; font-variant-numeric: tabular-nums; }
 span.ag-more { color: var(--dim); }
 /* The running list above the tree: every row is a tree row's button, glyph, name and figures,
    stretched to the width of the list, and where the agent sits is a line of its own under the
-   name. A part of that line — "Session 9d0eb37a", "Workflow cfe7718d" — keeps together while
-   it fits and breaks inside only when a narrow sidebar leaves it no line wide enough. */
+   figures. A part of that line — "Session 9d0eb37a", "Workflow run cfe7718d" — keeps together
+   while it fits and breaks inside only when a narrow sidebar leaves it no line wide enough. */
 .ag-now { margin-bottom: 10px; }
 .ag-now ul { list-style: none; margin: 4px 0 0; padding: 0; }
 .ag-now li { display: flex; flex-wrap: wrap; }
 .ag-now .ag-k-pending .ag-label { font-style: italic; }
-.ag-ctx { flex: 1 1 100%; }
 .ag-ctx > span { display: inline-block; max-width: 100%; }
 /* The details of the selected node, under its row (1.6 N2): the key figure's box around a
    two-column list, the words on the left and what the view model says about them on the right.
@@ -963,6 +981,15 @@ span.ag-more { color: var(--dim); }
    else it is a steady dot, and the state is in its title either way. */
 @media (prefers-reduced-motion: no-preference) {
   .ag-running::before { animation: ag-pulse 2s ease-in-out infinite; }
+}
+/* 1.6 N9: in a forced-colours theme (Windows High Contrast) the agent tree's marks take the
+   system's colours — the glyphs and the ⚠ the text's, the twisty a button's — and the open row,
+   whose tint and edge the theme removes, a 2 px outline in the highlight colour. The theme's own
+   adjustment is left on everywhere else. */
+@media (forced-colors: active) {
+  .ag-st::before, .ag-lb { color: CanvasText; }
+  .ag-fold::before { color: ButtonText; }
+  .ag-row[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
 `
 
@@ -1226,6 +1253,8 @@ function webviewWords(): Record<string, string> {
     'running': t('running'),
     'running for {0}': t('running for {0}'),
     'silent for {0}': t('silent for {0}'),
+    'silent since {0}': t('silent since {0}'),
+    'since {0}': t('since {0}'),
     'scroll sideways for the remaining columns →': t('scroll sideways for the remaining columns →'),
     'shown': t('shown'),
     'some models have no price on file': t('some models have no price on file'),
@@ -1272,6 +1301,8 @@ function webviewWords(): Record<string, string> {
     '{0} tokens over {1} day(s)': t('{0} tokens over {1} day(s)'),
     '{0} · derived': t('{0} · derived'),
     '{0} · recorded': t('{0} · recorded'),
+    '{0}, derived': t('{0}, derived'),
+    '{0}, recorded': t('{0}, recorded'),
     '{0} · {1} · {2} · {3} % of the day · {1} total {4}':
       t('{0} · {1} · {2} · {3} % of the day · {1} total {4}'),
     '{0} · {1} · {2} · {3} % of the week · {1} total {4}':

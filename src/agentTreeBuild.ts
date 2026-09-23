@@ -34,14 +34,14 @@
 import {
   AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS,
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeDetails, NodeState, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS,
-  RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS, TreeNode,
+  RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS, TreeNode, WEEKDAY_NAMES_WITHIN_MS,
 } from './agentTree'
 import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
 import { normalizeModel } from './prices'
 import { compact, full } from './render'
 import { durationText, freshInput, tokens } from './stats'
-import { TimeConfig, ageText, dayOf, formatTime } from './time'
+import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, dayOf, formatTime, weekdayWords } from './time'
 import {
   AgentLaunch, AgentRec, Attribution, Bucket, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RejectedRequest, RunLaunch,
   RunRec, SessionRec, emptyBucket,
@@ -362,12 +362,49 @@ function lastCallOf(r: AgentRec, activity: number): string | null {
   return name !== null && stampOf(r.lastToolTs) === activity ? name : null
 }
 
-function sessionLabel(sessionId: string): string {
+/**
+ * N6 (1.6): a model id as a row names it — without the `claude-` every Claude model id starts
+ * with, so "claude-opus-5" is "opus-5" on the row. The details' Models row, the markdown and a
+ * screen reader's name keep the whole id (`fullLabel`).
+ */
+function shortModel(id: string): string {
+  return id.replace(/^claude-/, '')
+}
+
+/**
+ * N6: when a session or a run started, as its name says it — "Tue 00:19" within the last
+ * WEEKDAY_NAMES_WITHIN_MS, "2026-09-01 00:19" before that — in the configured zone, the day of
+ * the clock reading itself (the day boundary is a rule for counting usage, not for naming a time).
+ */
+function startName(ms: number, now: number, tcfg: TimeConfig): string {
+  const time = formatTime(ms, tcfg)
+  return now - ms < WEEKDAY_NAMES_WITHIN_MS
+    ? `${weekdayWords()[calendarWeekdayOf(ms, tcfg)]} ${time}`
+    : `${calendarDayOf(ms, tcfg)} ${time}`
+}
+
+/** A session by its id alone — "Session 9d0eb37a": where an agent sits, and the name without a start. */
+function sessionIdName(sessionId: string): string {
   return t('Session {0}', sessionId.slice(0, 8))
 }
 
-function workflowLabel(workflowId: string): string {
-  return t('Workflow {0}', workflowId.replace(/^wf_/, '').slice(0, 8))
+/** N6: "Session Tue 14:20 · 9d0eb37a" — by its first line, then its id; the id alone without a first line. */
+function sessionName(sessionId: string, start: number | null, now: number, tcfg: TimeConfig): string {
+  return start === null ? sessionIdName(sessionId) : t('Session {0} · {1}', startName(start, now, tcfg), sessionId.slice(0, 8))
+}
+
+function runId8(workflowId: string): string {
+  return workflowId.replace(/^wf_/, '').slice(0, 8)
+}
+
+/** A run by its id alone — "Workflow run cfe7718d": where an agent sits, and the name without a start. */
+function runIdName(workflowId: string): string {
+  return t('Workflow run {0}', runId8(workflowId))
+}
+
+/** N6: "Workflow run Tue 00:19 · cfe7718d" — by its start, then its id; the id alone without a start. */
+function runName(workflowId: string, start: number | null, now: number, tcfg: TimeConfig): string {
+  return start === null ? runIdName(workflowId) : t('Workflow run {0} · {1}', startName(start, now, tcfg), runId8(workflowId))
 }
 
 // ---------------------------------------------------------------------------
@@ -1085,7 +1122,15 @@ function depthText(v: unknown): string {
 interface Entry {
   key: string
   kind: TreeNode['kind']
+  /** N6: the row's name, the model in its short form. */
   label: string
+  /** N6: the same with the whole model id — details, markdown, a screen reader's name. */
+  fullLabel: string
+  /**
+   * A session's and a run's name by its id alone — "Session 9d0eb37a", "Workflow run cfe7718d" —
+   * for the running list's line of where an agent sits; null for every other node.
+   */
+  idName: string | null
   sub: string | null
   state: NodeState
   stateText: string
@@ -1155,12 +1200,18 @@ function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** Siblings by when they started, the oldest first; a run's collector (D4) always last. */
-function byStart(a: Entry, b: Entry): number {
+/**
+ * N6 (1.6, lead note "Zeitfolge"): siblings in plain time order, the newest start first — the
+ * children of a session, of a run and of an agent alike, whatever state each is in: the glyph,
+ * the word and the tally say that, the order says when. A node without a known start after the
+ * others, then by key, so the order is stable; a run's collector (D4) always last, since it
+ * stands for agents of every start.
+ */
+export function byNewestFirst(a: Pick<Entry, 'kind' | 'startTs' | 'key'>, b: Pick<Entry, 'kind' | 'startTs' | 'key'>): number {
   if ((a.kind === 'noreply') !== (b.kind === 'noreply')) return a.kind === 'noreply' ? 1 : -1
-  const x = a.startTs ?? Infinity
-  const y = b.startTs ?? Infinity
-  return x < y ? -1 : x > y ? 1 : cmp(a.key, b.key)
+  const x = a.startTs ?? -Infinity
+  const y = b.startTs ?? -Infinity
+  return x > y ? -1 : x < y ? 1 : cmp(a.key, b.key)
 }
 
 function* preorder(e: Entry): Generator<Entry> {
@@ -1362,21 +1413,23 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
  * no request, their transcript nothing but requests the API rejected. Hundreds of them are no
  * reading anyone can do row by row, and none has a figure to show: they are counted, not listed —
  * in the collector's label and tally, in its state (the rule a run's state follows, over them),
- * and in every count above it. Its figures are dashes; its start the earliest first line of a
- * member that has a record, its last activity the latest line of one, and neither when none has.
+ * and in every count above it. Its figures are dashes; it has no start of its own, so no clock
+ * (1.6, lead note); its last activity is the latest line of a member that has a record, and none
+ * when none has.
  */
 function collectorEntry(sessionId: string, wf: string, members: Member[]): Entry {
   const st = collectorState(members)
-  let first: number | null = null
   let last: number | null = null
   for (const m of members) {
-    if (m.startTs !== null && (first === null || m.startTs < first)) first = m.startTs
     if (m.lastTs !== null && (last === null || m.lastTs > last)) last = m.lastTs
   }
+  const label = collectorLabel(members)
   const e: Entry = {
     key: fitKey('n:', `${sessionId}|${wf}`),
     kind: 'noreply',
-    label: collectorLabel(members),
+    label,
+    fullLabel: label,
+    idName: null,
     sub: null,
     state: st.state,
     stateText: st.stateText,
@@ -1385,7 +1438,9 @@ function collectorEntry(sessionId: string, wf: string, members: Member[]): Entry
     lowerBound: false,
     lowerBoundText: null,
     duration: '–',
-    startTs: first,
+    // No start of its own (lead note on P5b): the earliest first line among its members may be a
+    // rejected request of an agent that failed long ago, so no clock runs from it anywhere.
+    startTs: null,
     lastTs: last,
     id: null,
     parent: null,
@@ -1432,10 +1487,13 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const agentSum = noCounters()
   for (const r of a.agents) addInto(agentSum, countersOf(r))
   const usageAgents = a.agents.length > 0 ? usageText(agentSum) : null
+  const name = sessionName(a.sessionId, start, now, tcfg)
   const root: Entry = {
     key: fitKey('s:', a.sessionId),
     kind: 'session',
-    label: sessionLabel(a.sessionId),
+    label: name,
+    fullLabel: name,
+    idName: sessionIdName(a.sessionId),
     // Attribution off: no project names anywhere, and the tree does not make an exception.
     sub: env.attribution !== 'none' ? env.project : null,
     ...sessionState(main, now, tcfg),
@@ -1479,10 +1537,14 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const workflowOf = (wf: string): Entry => {
     let w = workflows.get(wf)
     if (!w) {
+      // Named by its id until its start is known — set below, once its members are in.
+      const name = runIdName(wf)
       w = {
         key: fitKey('w:', `${a.sessionId}|${wf}`),
         kind: 'workflow',
-        label: workflowLabel(wf),
+        label: name,
+        fullLabel: name,
+        idName: name,
         sub: null,
         state: 'unknown',
         stateText: '',
@@ -1531,9 +1593,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const spawnedBy = (file: string | null): string => {
     if (file === null) return '–'
     const id = agentIdOf(file)
-    if (id !== null) return byAgent.get(id)?.label ?? '–'
+    if (id !== null) return byAgent.get(id)?.fullLabel ?? '–'
     const place = sessionOfPath(file)
-    return place !== null && place.main && place.sessionId === a.sessionId ? root.label : '–'
+    return place !== null && place.main && place.sessionId === a.sessionId ? root.fullLabel : '–'
   }
   // D4: the agents of each run whose record counted no reply — its transcript nothing but requests
   // the API rejected — by run: members of their run's collector, not nodes of their own.
@@ -1572,10 +1634,14 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     // D4: an agent outside a run whose record counted no reply keeps a node of its own — there are
     // few — with dashes for every figure: nothing of it was counted, its time on the clock included.
     const counted = c.requests > 0
+    // N6: the row names the model in its short form, the details and the markdown in full.
+    const model = lastModel || alias || '–'
     const e: Entry = {
       key: fitKey('a:', r.agentId),
       kind: 'agent',
-      label: `${type ?? t('Agent')} · ${lastModel || alias || '–'} · ${shortOf(r.agentId)}`,
+      label: `${type ?? t('Agent')} · ${shortModel(model)} · ${shortOf(r.agentId)}`,
+      fullLabel: `${type ?? t('Agent')} · ${model} · ${shortOf(r.agentId)}`,
+      idName: null,
       sub: null,
       state: st.state,
       stateText: st.stateText,
@@ -1608,7 +1674,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       ...countRows(c),
       ...rejectedRows(rejected, now, tcfg),
       { label: t('Spawned by'), value: spawnedBy(spawnerFileOf.get(e) ?? null) },
-      { label: t('Workflow run'), value: wf !== null ? workflowLabel(wf) : '–' },
+      // The run by the name its row carries (N6): the rows are built once the tree is.
+      { label: t('Workflow run'), value: wf !== null ? workflows.get(wf)?.label ?? runIdName(wf) : '–' },
       // D7: which attempt at its step this agent is, where the journal started the step more than once.
       ...(attempts >= 2 && journal !== null && Number.isInteger(journal.attempt) && journal.attempt >= 1
         ? [{ label: t('Attempt'), value: t('{0} of {1} of this step', full(journal.attempt), full(attempts)) }]
@@ -1640,10 +1707,13 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const pendings = [...a.pendings].sort((x, y) => x.ts - y.ts || cmp(x.toolUseId, y.toolUseId))
   for (const l of pendings) {
     const outcomeAt = stampOf(l.outcomeTs)
+    const hint = text(l.modelHint) ?? '–'
     const e: Entry = {
       key: fitKey('l:', l.toolUseId),
       kind: 'pending',
-      label: t('{0} · {1} · launched', text(l.typeHint) ?? t('Agent'), text(l.modelHint) ?? '–'),
+      label: t('{0} · {1} · launched', text(l.typeHint) ?? t('Agent'), shortModel(hint)),
+      fullLabel: t('{0} · {1} · launched', text(l.typeHint) ?? t('Agent'), hint),
+      idName: null,
       sub: null,
       ...pendingState(l, now, tcfg),
       // No transcript, so nothing was counted: dashes, never zeros.
@@ -1767,6 +1837,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     w.startTs = first
     w.lastTs = last
     w.duration = measured && first !== null && last !== null ? durationText(last - first) : '–'
+    // N6: a run is named by when it started — its first member's line, or its launch.
+    w.label = runName(wf, first, now, tcfg)
+    w.fullLabel = w.label
     const dropped = run !== null && typeof run.agentsDropped === 'number' && Number.isInteger(run.agentsDropped)
       && run.agentsDropped > 0 ? run.agentsDropped : 0
     // A run whose agents nobody has seen yet has no count to state: '–', never an invented 0.
@@ -1807,7 +1880,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     e.tally = tally.started > 0 ? tally : null
   }
 
-  for (const e of preorder(root)) e.children.sort(byStart)
+  for (const e of preorder(root)) e.children.sort(byNewestFirst)
   return root
 }
 
@@ -1908,7 +1981,7 @@ function payloadOf(
  */
 function detailsOf(e: Entry): NodeDetails {
   return {
-    key: e.key, title: e.label, state: e.state, derived: derivedOf(e.state), stateText: e.stateText,
+    key: e.key, title: e.fullLabel, state: e.state, derived: derivedOf(e.state), stateText: e.stateText,
     lastTs: e.lastTs, id: e.id, rows: e.rows(),
   }
 }
@@ -1933,8 +2006,9 @@ function agentCounts(roots: Entry[]): Map<Entry, number> {
 
 /**
  * Where a running node sits, in the words of the nodes above it: its session, the run it
- * belongs to if any, and the session's project while attribution names one (`sub` is null
- * otherwise, see buildRoot).
+ * belongs to if any — by their ids, "Session 9d0eb37a · Workflow run cfe7718d" (N6: a line of
+ * where the agent is, not a second pair of names by start time) — and the session's project
+ * while attribution names one (`sub` is null otherwise, see buildRoot).
  */
 function contextOf(e: Entry): string {
   let root = e
@@ -1943,7 +2017,8 @@ function contextOf(e: Entry): string {
     if (run === null && p.kind === 'workflow') run = p
     root = p
   }
-  return [root.label, run?.label ?? null, root.sub].filter((s): s is string => !!s).join(' · ')
+  return [root.idName ?? root.label, run !== null ? run.idName ?? run.label : null, root.sub]
+    .filter((s): s is string => !!s).join(' · ')
 }
 
 /** Longest-running first: the earliest start; a node without one last; then by key, so the order is stable. */
@@ -1998,26 +2073,39 @@ function silenceOf(e: Entry): boolean {
   return e.kind === 'agent' && e.state === 'running' && !e.waiting
 }
 
-function runningItem(e: Entry): RunningItem {
+function runningItem(e: Entry, now: number, tcfg: TimeConfig): RunningItem {
   // Nothing of a launch nobody has read a line of, or of a collector's agents, was counted: the
   // builder already says '–'.
   const counted = e.kind === 'agent'
+  // A collector has no start of its own (its node has none), so no clock runs for it here either.
+  const start = e.kind === 'noreply' ? null : e.startTs
   return {
     key: e.key,
     kind: e.kind === 'pending' ? 'pending' : e.kind === 'noreply' ? 'noreply' : 'agent',
     label: e.label,
+    fullLabel: e.fullLabel,
     context: contextOf(e),
     usage: counted ? e.usage : '–',
     // As the node, and in the node's words (D10): the markdown's running line marks it, and the
     // page's row does while the page marks the tree's rows (ROW_LOWER_BOUND_MARK in the webview).
     lowerBound: counted ? e.lowerBound : false,
     lowerBoundText: counted ? e.lowerBoundText : null,
-    startTs: e.startTs,
+    startTs: start,
     lastTs: e.lastTs,
+    startClock: clockOf(start, now, tcfg),
+    lastClock: clockOf(e.lastTs, now, tcfg),
     waiting: e.waiting,
     silence: silenceOf(e),
     running: runningMembers(e),
   }
+}
+
+/**
+ * N9 (1.6): a node's time as a clock time — "14:20" today, "2026-09-01 14:20" on another day —
+ * for the words a screen reader gets in place of a ticking clock; null where the time is.
+ */
+function clockOf(ms: number | null, now: number, tcfg: TimeConfig): string | null {
+  return ms === null ? null : stamp(ms, now, tcfg)
 }
 
 /**
@@ -2064,7 +2152,13 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
   const pages = whole ? new Map<string, number>() : pagesFrom(input.more)
   const isOpen = (e: Entry): boolean => whole || opened.has(e.key)
   const limitOf = (e: Entry): number => MAX_GROUP_CHILDREN * (1 + (pages.get(e.key) ?? 0))
-  const payload = payloadOf(shown, isOpen, limitOf, selected, live, MAX_PAGE_NODES)
+  // The running nodes in the order the page draws them (1.6 N6: the newest first), so the cap —
+  // after the selection — keeps the running rows nearest the top, as a window pins its running
+  // children in display order; the running list keeps its own order, the longest-running first.
+  const drawn = new Map<Entry, number>()
+  for (const r of forest.roots) for (const e of preorder(r)) drawn.set(e, drawn.size)
+  const liveDrawn = [...live].sort((x, y) => (drawn.get(x) ?? 0) - (drawn.get(y) ?? 0))
+  const payload = payloadOf(shown, isOpen, limitOf, selected, liveDrawn, MAX_PAGE_NODES)
 
   const toNode = (e: Entry): TreeNode => {
     const kids = payload.shipped.get(e) ?? []
@@ -2072,6 +2166,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
       key: e.key,
       kind: e.kind,
       label: e.label,
+      fullLabel: e.fullLabel,
       sub: e.sub,
       state: e.state,
       derived: derivedOf(e.state),
@@ -2082,6 +2177,8 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
       duration: e.duration,
       startTs: e.startTs,
       lastTs: e.lastTs,
+      startClock: clockOf(e.startTs, now, input.tcfg),
+      lastClock: clockOf(e.lastTs, now, input.tcfg),
       silence: silenceOf(e),
       agentCount: counts.get(e) ?? 0,
       hasChildren: e.children.length > 0,
@@ -2123,7 +2220,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     roots: shown.map(toNode),
     selected: details,
     running,
-    runningNow: listed.map(runningItem),
+    runningNow: listed.map((e) => runningItem(e, now, input.tcfg)),
     runningMore: Math.max(0, live.length - MAX_RUNNING_LIST),
     omittedRoots: Math.max(0, forest.roots.length - MAX_ROOTS),
     note,

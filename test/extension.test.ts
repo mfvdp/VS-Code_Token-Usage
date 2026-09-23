@@ -1332,7 +1332,7 @@ test('the poll is wanted while an agent runs or a session is active, and never f
   // a run started next was left to a watcher that can miss it.
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
-    key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
+    key: 'a:0', kind: 'agent', label: 'Agent', fullLabel: 'Agent', startClock: null, lastClock: null, sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
     lowerBound: false, lowerBoundText: null, duration: '–', startTs: null, lastTs: null, silence: false, agentCount: 0, hasChildren: false, childrenTotal: 0,
     childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
   })
@@ -1571,7 +1571,8 @@ test('a Workflow call\'s script and its result\'s summary, paths and names reach
   // and the run reads done by it.
   const launches = Object.values((JSON.parse(saved) as Snapshot).runLaunches ?? {})
   assert.deepEqual(launches.map((l) => [l.toolUseId, l.runId, l.outcome, l.outcomeStatus]), [['toolu_wfhost01', RUN, 'completed', 'completed']])
-  assert.match(markdown, /\[Done\] Workflow c0ffee00/)
+  // 1.6 N6: named by its start, then its id.
+  assert.match(markdown, /\[Done\] Workflow run [^·]+ · c0ffee00/)
   for (const [what, text] of [['log', state.logText()], ['diagnostics', report], ['markdown', markdown], ['state', saved]]) {
     assert.equal(text.includes(secret), false, `the ${what} holds the call's script, the result's summary or the notification's`)
     for (const fixture of ['synthetic workflow', 'synthetic-workflow-name', '/tmp/synthetic/', 'local_workflow']) {
@@ -1727,8 +1728,9 @@ test('the usage document prints every node of the agent tree, though the dashboa
   assert.ok(at >= 0, md)
   const tree = md.slice(at, md.indexOf('\n## ', at) < 0 ? undefined : md.indexOf('\n## ', at))
   // The sessions, the run inside the active one and its agent, the sync agent and the idle one's.
-  assert.match(tree, /\n- \[[^\]]+\] Session a0a0a0a0/)
-  assert.match(tree, /\n {2}- \[[^\]]+\] Workflow c0ffee00/)
+  // 1.6 N6: sessions and runs named by their start, then their id.
+  assert.match(tree, /\n- \[[^\]]+\] Session [^·]+ · a0a0a0a0/)
+  assert.match(tree, /\n {2}- \[[^\]]+\] Workflow run [^·]+ · c0ffee00/)
   assert.match(tree, /\n {4}- \[[^\]]+\] workflow-subagent · claude-[^ ]+ · a1a1 · /)
   assert.match(tree, /\n {2}- \[[^\]]+\] Explore · claude-[^ ]+ · c3c3 · /)
   assert.match(tree, /\n {2}- \[[^\]]+\] Agent · claude-[^ ]+ · b1b1 · /)

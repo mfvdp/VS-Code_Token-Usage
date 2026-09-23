@@ -4,9 +4,9 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import {
-  addDays, ageText, dayCount, dayOf, dayOfHour, daysBetween, formatReset, formatTime, hourIndex,
+  addDays, ageText, calendarDayOf, calendarWeekdayOf, dayCount, dayOf, dayOfHour, daysBetween, formatReset, formatTime, hourIndex,
   lastDays, localHourOfDay, monthOf, previousRange, rangeFor, relativeShort, relativeTime,
-  resolveZone, TimeConfig, weekdayOf,
+  resolveZone, TimeConfig, weekdayOf, weekdayWords,
 } from '../src/time'
 
 const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
@@ -227,4 +227,20 @@ test('relativeTime keeps its long form (tooltips, tables)', () => {
   assert.equal(relativeTime((2 * 3600 + 14 * 60) * 1000, now), 'in 2 h 14 min')
   assert.equal(relativeTime(-180_000, now), '3 min ago')
   assert.equal(relativeTime(60 * 3_600_000, now), 'in 2 d 12 h')
+})
+
+test('the calendar day and weekday of an instant follow the zone and leave the day boundary aside (1.6 N6)', () => {
+  // 23:30 UTC on Wednesday 2026-09-02 is Thursday 01:30 in Berlin and still Wednesday in New York.
+  const ms = Date.UTC(2026, 8, 2, 23, 30)
+  assert.equal(calendarDayOf(ms, utc), '2026-09-02')
+  assert.equal(calendarDayOf(ms, berlin), '2026-09-03')
+  assert.equal(calendarWeekdayOf(ms, utc), 3)
+  assert.equal(calendarWeekdayOf(ms, berlin), 4)
+  assert.equal(calendarWeekdayOf(ms, ny), 3)
+  // A day boundary at 06:00 counts 01:30 into the day before; the calendar does not.
+  const late = { ...berlin, dayBoundaryHour: 6 }
+  assert.equal(dayOf(ms, late), '2026-09-02')
+  assert.equal(calendarDayOf(ms, late), '2026-09-03')
+  assert.equal(calendarWeekdayOf(ms, late), 4)
+  assert.deepEqual(weekdayWords(), ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
 })

@@ -860,12 +860,14 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   assert.equal('updatedAt' in tree, false)
   assert.equal(tree.roots.length, 1)
   const root = tree.roots[0]
-  assert.equal(root.label, 'Session sess-alp')
+  // 1.6 N6: named by its first line in the configured zone, then its id.
+  assert.equal(root.label, 'Session Thu 09:00 · sess-alp')
   // The project label comes from the attribution table — the same one the Sessions table reads.
   assert.equal(root.sub, 'alpha')
   // Quiet itself for 45 minutes, but its agent and its launch run: active, through them.
   assert.equal(root.state, 'active')
-  assert.deepEqual(root.children.map((c) => [c.kind, c.state]), [['agent', 'running'], ['pending', 'running']])
+  // The newest first (1.6 N6): the launch came after the agent started.
+  assert.deepEqual(root.children.map((c) => [c.kind, c.state]), [['pending', 'running'], ['agent', 'running']])
   assert.equal(tree.running, 2)
   // A closed session says what it holds: the agent and the launch below it.
   assert.equal(root.agentCount, 2)
@@ -876,10 +878,12 @@ test('the view model carries the agent tree of the aggregator, with the selectio
   // The running list: both, the one that started first on top, each with where it sits — the
   // project too, while attribution names one — and a launch with nothing counted as a dash.
   assert.deepEqual(tree.runningNow.map((r) => [r.kind, r.key, r.label, r.context, r.usage, r.waiting]), [
-    ['agent', agentKey, 'Explore · claude-opus-4-6 · a94f', 'Session sess-alp · alpha', '1.2K', false],
+    // 1.6 N6: the row's name has the model short; `fullLabel` keeps the whole id.
+    ['agent', agentKey, 'Explore · opus-4-6 · a94f', 'Session sess-alp · alpha', '1.2K', false],
     ['pending', 'l:toolu_02', 'Plan · – · launched', 'Session sess-alp · alpha', '–', false],
   ])
   assert.deepEqual(tree.runningNow.map((r) => r.startTs), [NOW - 20 * 60_000, NOW - 2 * 60_000])
+  assert.equal(tree.runningNow[0].fullLabel, 'Explore · claude-opus-4-6 · a94f')
   assert.equal(tree.runningMore, 0)
 
   // Attribution off: the same tree without a project name, in the running list as well.

@@ -517,7 +517,8 @@ test('a launch whose agent was never read shows no figure of its own — dashes,
   assert.equal(d.key, p.key)
   assert.deepEqual(d.rows.map((r) => r.label), ['Type', 'Models', 'ID', 'Started', 'Spawned by'])
   // The markdown prints the same two dashes, and no zero anywhere on the line.
-  const line = agentLines(vm).find((l) => l.includes(p.label))
+  // 1.6 N6: a markdown line names a node in full — the model's whole id.
+  const line = agentLines(vm).find((l) => l.includes(p.fullLabel))
   assert.ok(line, agentLines(vm).join('\n'))
   assert.match(line, / · – · –$/)
   assert.equal(/(^|\s)0(\s|$)/.test(line), false, line)
@@ -546,8 +547,9 @@ test('an agent whose output is a lower bound says so wherever its figures are, a
     const why = bound ? `⚠ lower bound — ${rec.requests - rec.outputFinal} of ${rec.requests} replies unfinished` : null
     assert.equal(output.note, why ?? undefined, n.label)
     assert.equal(n.lowerBoundText, why, n.label)
-    const line = lines.find((l) => l.includes(n.label))
-    assert.ok(line, n.label)
+    // 1.6 N6: a markdown line names a node in full — the model's whole id.
+    const line = lines.find((l) => l.includes(n.fullLabel))
+    assert.ok(line, n.fullLabel)
     assert.equal(/ ⚠ · /.test(line), bound, line)
     if (bound) marked++
   }
@@ -594,7 +596,7 @@ test('an agent with no counted request is dashes throughout — no figure of it 
     assert.equal(d.rows.find((r) => r.label === label)?.value, '–', label)
   }
   assert.equal(d.rows.some((r) => /^0(\s|$)/.test(r.value)), false, JSON.stringify(d.rows))
-  const line = agentLines(vm).find((l) => l.includes(n.label))
+  const line = agentLines(vm).find((l) => l.includes(n.fullLabel))
   assert.ok(line)
   assert.equal(/(^|\s)0(\s|$)/.test(line), false, line)
 })
@@ -638,6 +640,9 @@ const TREE_FIELDS = new Set([
   'agentCount', 'children',
   'title', 'stateText', 'rows', 'value',
   'context', 'waiting',
+  // 1.6 P7: a node's and a running item's name with the whole model id (N6), and the clock times of
+  // its start and last activity for the static screen-reader words (N9).
+  'fullLabel', 'startClock', 'lastClock',
   // 1.6 P1: a session's agents' usage (D5), what Copy ID copies (D11), and a row's own layout,
   // clock and copy marks (R5, D11). `updatedAt` left the tree (D12).
   'usageAgents', 'id', 'live', 'copy',
@@ -690,7 +695,8 @@ test('the running list claims nothing the tree does not: running nodes only, a l
     // with no zero either.
     const lines = runningLines(vm)
     assert.ok(lines.length > 0, agentSection(vm).join('\n'))
-    assert.deepEqual(lines.map((l) => vm.agents.runningNow.findIndex((r) => l.startsWith(`- [~Running] ${r.label} · `))),
+    // 1.6 N6: in full, as the tree's lines are.
+    assert.deepEqual(lines.map((l) => vm.agents.runningNow.findIndex((r) => l.startsWith(`- [~Running] ${r.fullLabel} · `))),
       vm.agents.runningNow.map((_, i) => i))
     for (const l of lines) assert.equal(/(^|\s)0(\s|$)/.test(l), false, l)
   }

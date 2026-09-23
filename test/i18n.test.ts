@@ -318,6 +318,8 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
     '{0} agent(s)', '{0} own', '{0} agents', 'Tree cut at {0} nodes.',
     // D10 (P6): the line under the tree about the ⚠, and the markdown note's 1.5 words.
     'Output figures in the details marked ⚠ are lower bounds.',
+    // N6 (P7): a run is a "Workflow run", named by when it started, and by its id in the running list.
+    'Workflow {0}',
     '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.']
   const bundle = readJson(BUNDLE) as Record<string, string>
   const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts']

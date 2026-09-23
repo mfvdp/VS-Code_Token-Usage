@@ -939,11 +939,13 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   // Inferred states carry the estimate mark; its agent and the launch run, so the session,
   // quiet itself, is active through them. The markdown prints every node, open or not — the
   // tree built for it (1.6 D3), while the dashboard's has the session closed. A session names
-  // its own figure and its agents' (1.6 D5), never their sum.
+  // its own figure and its agents' (1.6 D5), never their sum. Names are the tree's (1.6 N6): the
+  // session by its first line, an agent with its model's whole id.
   assert.deepEqual(lines.slice(tree).filter((l) => /^\s*- /.test(l)), [
-    '- [~Active] Session sess-alp — alpha (2 started · ~2 ●) · own 1.2K · agents 1.2K · 2 h 15 min',
-    '  - [~Running] Explore · claude-opus-4-6 · a94f · 1.2K · 19 min 00 s',
+    '- [~Active] Session Thu 09:00 · sess-alp — alpha (2 started · ~2 ●) · own 1.2K · agents 1.2K · 2 h 15 min',
+    // The newest first (1.6 N6): the launch came after the agent started.
     '  - [~Running] Plan · – · launched · – · –',
+    '  - [~Running] Explore · claude-opus-4-6 · a94f · 1.2K · 19 min 00 s',
   ])
   assert.equal(lines[tree - 1], '', 'the list and the heading run together')
   // Nothing here is a lower bound, so the mark is not explained; nothing waits.
@@ -962,7 +964,7 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   assert.equal(rows[0], `| State | ${d.stateText} |`)
   assert.ok(rows.includes('| Type | Explore |'), rows.join('\n'))
   assert.ok(rows.includes('| Last activity | 11:59 · 1 min ago |'), rows.join('\n'))
-  assert.ok(rows.includes('| Spawned by | Session sess-alp |'), rows.join('\n'))
+  assert.ok(rows.includes('| Spawned by | Session Thu 09:00 · sess-alp |'), rows.join('\n'))
 
   // Nothing selected: the lists and no table.
   const quiet = agentVm()
@@ -971,7 +973,7 @@ test('the agent tree reaches the markdown as an indented list, right after the q
   // Without the document's own tree the page's is printed: here the closed session alone.
   const page = sectionOf(markdownDocument(vm), '## Agents')
   assert.deepEqual(page.slice(page.indexOf('### Sessions and agents')).filter((l) => /^\s*- /.test(l)),
-    ['- [~Active] Session sess-alp — alpha (2 started · ~2 ●) · own 1.2K · agents 1.2K · 2 h 15 min'])
+    ['- [~Active] Session Thu 09:00 · sess-alp — alpha (2 started · ~2 ●) · own 1.2K · agents 1.2K · 2 h 15 min'])
 })
 
 test('an agent that ended on a rejected request: its sentence and its Last request row in the table, its session\'s count', () => {
@@ -1023,8 +1025,12 @@ function detailsHead(line: string): boolean {
 /** One RunningItem, in the shape src/agentTree.ts gives it. */
 function runningItem(over: Partial<RunningItem> = {}): RunningItem {
   return {
-    key: 'a:a94f0001', kind: 'agent', label: 'Explore · claude-opus-5 · a94f', context: 'Session 12345678 · Workflow cfe7718d',
-    usage: '12.3K', lowerBound: false, lowerBoundText: null, startTs: NOW - 300_000, lastTs: NOW - 5_000, waiting: false, silence: true, running: 1, ...over,
+    // 1.6 N6: the row's name has the model short, `fullLabel` the whole id the markdown prints.
+    key: 'a:a94f0001', kind: 'agent', label: 'Explore · opus-5 · a94f',
+    fullLabel: over.fullLabel ?? over.label ?? 'Explore · claude-opus-5 · a94f',
+    context: 'Session 12345678 · Workflow run cfe7718d',
+    usage: '12.3K', lowerBound: false, lowerBoundText: null, startTs: NOW - 300_000, lastTs: NOW - 5_000, startClock: '11:55', lastClock: '11:59',
+    waiting: false, silence: true, running: 1, ...over,
   }
 }
 
@@ -1050,13 +1056,13 @@ test('the running list prints every item, marks the waiting ones and the lower b
   // Every item is running, which is inferred: the tree's mark, word for word. A usage that is
   // a lower bound carries ⚠ behind it, as on the tree's lines.
   assert.deepEqual(lines.slice(now + 1, tree).filter(Boolean), [
-    '- [~Running] general-purpose · claude-opus-5 · b1c2 · Session 12345678 · Workflow cfe7718d · 12.3K ⚠ (waiting)',
-    '- [~Running] Explore · claude-opus-5 · a94f · Session 12345678 · Workflow cfe7718d · 12.3K',
+    '- [~Running] general-purpose · claude-opus-5 · b1c2 · Session 12345678 · Workflow run cfe7718d · 12.3K ⚠ (waiting)',
+    '- [~Running] Explore · claude-opus-5 · a94f · Session 12345678 · Workflow run cfe7718d · 12.3K',
     '- [~Running] Plan · sonnet · launched · Session 12345678 · –',
     // A pipe and a newline stay text: one item, one line.
     '- [~Running] Explore \\| a b · Session 12345678 · pro\\|ject · 12.3K',
-    '- [~Running] 263 agent(s) without a counted reply · Session 12345678 · Workflow cfe7718d · – (~10 of them running)',
-    '- [~Running] 2 agent(s) without a counted reply · Session 12345678 · Workflow cfe7718d · – (~1 of them running)',
+    '- [~Running] 263 agent(s) without a counted reply · Session 12345678 · Workflow run cfe7718d · – (~10 of them running)',
+    '- [~Running] 2 agent(s) without a counted reply · Session 12345678 · Workflow run cfe7718d · – (~1 of them running)',
     '_and 3 more_',
   ])
   // The mark is explained under the tree, once, although no line of the tree carries it.
@@ -1120,7 +1126,7 @@ test('with nothing running the markdown says so in one line, and an older model 
   delete older.runningMore
   const old = sectionOf(markdownDocument({ ...vm, agents: older as AgentTreeVm }), '## Agents')
   assert.equal(old.some((l) => l.startsWith('### ') || l.includes('No agent is running')), false, old.join('\n'))
-  assert.ok(old.some((l) => l.startsWith('- [~Active] Session sess-alp')), old.join('\n'))
+  assert.ok(old.some((l) => l.startsWith('- [~Active] Session Thu 09:00 · sess-alp')), old.join('\n'))
 })
 
 // 1.6 P3a (§3 D3): pinned "Tree cut at {0} nodes." among the notes; there is no cut any more — what
@@ -1129,8 +1135,9 @@ test('the notes under the tree state the sessions left out, the lower bound and 
   const { vm } = agentVm()
   const tree: AgentTreeVm = {
     roots: [{
-      key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', sub: null, state: 'done', derived: false,
+      key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', fullLabel: 'Session 12345678', sub: null, state: 'done', derived: false,
       usage: '12K', usageAgents: null, lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 3 replies unfinished', silence: false, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+      startClock: null, lastClock: null,
       agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
       tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
     }],
@@ -1188,8 +1195,10 @@ test('the markdown prints every node of its tree, fifty children a node, and say
   }
   const printed = lines(markdownDocument(vm, text), '## Agents', '### Sessions and agents')
   assert.equal(printed.length, 1 + MAX_GROUP_CHILDREN + 1, printed.slice(0, 3).join('\n'))
-  assert.ok(printed[0].startsWith('- [~Idle] Session sess-alp') && printed[0].includes(' (1,234 started · 1,234 ✓) · '), printed[0])
+  assert.ok(printed[0].startsWith('- [~Idle] Session Thu 09:00 · sess-alp') && printed[0].includes(' (1,234 started · 1,234 ✓) · '), printed[0])
   assert.ok(printed.slice(1, 1 + MAX_GROUP_CHILDREN).every((l) => l.startsWith('  - [Done] Explore · claude-opus-4-6 · ')), printed[1])
+  // The fifty the document prints are the newest fifty (1.6 N6): the last started, agent 1233 (0x4d1), first.
+  assert.equal(printed[1], '  - [Done] Explore · claude-opus-4-6 · 00000000000004d1 · 1.2K · 39 min 27 s')
   assert.equal(printed[printed.length - 1], `  - … ${(1234 - MAX_GROUP_CHILDREN).toLocaleString('en-US')} more`)
   // The page's own tree: the session closed, nothing below it, nothing more to say.
   assert.deepEqual(lines(markdownDocument(vm), '## Agents', '### Sessions and agents').length, 1)
@@ -1210,7 +1219,8 @@ test('the markdown prints every node of its tree, fifty children a node, and say
 test('a stop the parent recorded is printed [Stopped] — a recorded state, no estimate mark — in either language', () => {
   const { vm } = agentVm()
   const node = (key: string, state: TreeNode['state'], derived: boolean): TreeNode => ({
-    key, kind: 'agent', label: `Explore · claude-opus-4-6 · ${key.slice(2, 6)}`, sub: null, state, derived,
+    key, kind: 'agent', label: `Explore · opus-4-6 · ${key.slice(2, 6)}`, fullLabel: `Explore · claude-opus-4-6 · ${key.slice(2, 6)}`,
+    startClock: null, lastClock: null, sub: null, state, derived,
     usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
@@ -1239,7 +1249,8 @@ test('an attempt the workflow journal superseded says so at the end of its line,
   // 1.6 D7 (P2b): the dashboard dims the row; the markdown has no dim, so the line says it.
   const { vm } = agentVm()
   const node = (key: string, state: TreeNode['state'], superseded: boolean): TreeNode => ({
-    key, kind: 'agent', label: `workflow-subagent · claude-opus-4-6 · ${key.slice(2, 6)}`, sub: null, state, derived: false,
+    key, kind: 'agent', label: `workflow-subagent · opus-4-6 · ${key.slice(2, 6)}`, fullLabel: `workflow-subagent · claude-opus-4-6 · ${key.slice(2, 6)}`,
+    startClock: null, lastClock: null, sub: null, state, derived: false,
     usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded, children: [],
@@ -1276,7 +1287,7 @@ test('the markdown prints a node\'s tally after its name, in brackets, and no ta
     tally: { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0, ...t }, tallyText: text, tallySpoken: spoken,
   })
   const node = (key: string, kind: TreeNode['kind'], label: string, state: TreeNode['state'], over: Partial<TreeNode> = {}): TreeNode => ({
-    key, kind, label, sub: null, state, derived: state !== 'done' && state !== 'failed' && state !== 'stopped',
+    key, kind, label, fullLabel: label, startClock: null, lastClock: null, sub: null, state, derived: state !== 'done' && state !== 'failed' && state !== 'stopped',
     usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: (over.children ?? []).length > 0, childrenTotal: (over.children ?? []).length, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
@@ -1322,7 +1333,7 @@ test('the markdown prints a node\'s tally after its name, in brackets, and no ta
     setBundle(undefined)
     setLocale(undefined)
   }
-  assert.ok(sectionOf(md, '## Agenten').includes('- [~Aktiv] Sitzung sess-alp — alpha (2 gestartet · ~2 ●) · eigen 1,2K · Agenten 1,2K · 2 h 15 min'), md)
+  assert.ok(sectionOf(md, '## Agenten').includes('- [~Aktiv] Sitzung Do 09:00 · sess-alp — alpha (2 gestartet · ~2 ●) · eigen 1,2K · Agenten 1,2K · 2 h 15 min'), md)
 })
 
 test('an empty tree is one sentence; a tree that was never built is no section at all', () => {
@@ -1350,7 +1361,7 @@ test('the markdown tree speaks German with the shipped bundle', () => {
     setLocale(undefined)
   }
   const lines = sectionOf(md, '## Agenten')
-  assert.ok(lines.includes('- [~Aktiv] Sitzung sess-alp — alpha (2 gestartet · ~2 ●) · eigen 1,2K · Agenten 1,2K · 2 h 15 min'), lines.join('\n'))
+  assert.ok(lines.includes('- [~Aktiv] Sitzung Do 09:00 · sess-alp — alpha (2 gestartet · ~2 ●) · eigen 1,2K · Agenten 1,2K · 2 h 15 min'), lines.join('\n'))
   assert.ok(lines.includes('  - [~Läuft] Plan · – · gestartet · – · –'), lines.join('\n'))
   // The running list and the tree's heading, German too.
   assert.ok(lines.indexOf('### Laufen gerade') >= 0
@@ -1361,7 +1372,7 @@ test('the markdown tree speaks German with the shipped bundle', () => {
   assert.equal(bundle['and {0} more'], 'und {0} weitere')
   assert.ok(lines.includes('| Detail | Wert |'), lines.join('\n'))
   assert.ok(lines.some((l) => l.startsWith('| Zustand | Läuft — abgeleitet: ')), lines.join('\n'))
-  assert.ok(lines.includes('| Gestartet von | Sitzung sess-alp |'), lines.join('\n'))
+  assert.ok(lines.includes('| Gestartet von | Sitzung Do 09:00 · sess-alp |'), lines.join('\n'))
 })
 
 test('a run\'s collector is one line of the markdown tree, the last under its run: its tally after its label, dashes for its figures', () => {
@@ -1372,13 +1383,13 @@ test('a run\'s collector is one line of the markdown tree, the last under its ru
   const print = (): string[] => sectionOf(markdownDocument(buildViewModel(input), agentTreeFor(input, 'text')), '## Agents')
   const lines = print()
   const tree = lines.slice(lines.indexOf('### Sessions and agents'))
-  const run = tree.findIndex((l) => l.startsWith('  - [~Running] Workflow cfe7718d'))
+  const run = tree.findIndex((l) => l.startsWith('  - [~Running] Workflow run ') && l.includes(' · cfe7718d '))
   assert.ok(run >= 0, tree.join('\n'))
   const under = tree.slice(run + 1).filter((l, i, all) => all.slice(0, i + 1).every((x) => x.startsWith('    - ')))
   assert.equal(under[under.length - 1], '    - [~Running] 2 agent(s) without a counted reply (2 started · 1 ✕ · ~1 ●) · – · –', under.join('\n'))
   assert.equal(under.filter((l) => l.includes('without a counted reply')).length, 1)
   // The running list: one line for both, saying how many of them run.
-  assert.ok(lines.includes('- [~Running] 2 agent(s) without a counted reply · Session 3f9a2c1d · Workflow cfe7718d · – (~1 of them running)'),
+  assert.ok(lines.includes('- [~Running] 2 agent(s) without a counted reply · Session 3f9a2c1d · Workflow run cfe7718d · – (~1 of them running)'),
     lines.join('\n'))
   // In German.
   const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
@@ -1392,6 +1403,6 @@ test('a run\'s collector is one line of the markdown tree, the last under its ru
     setLocale(undefined)
   }
   assert.ok(de.includes('    - [~Läuft] 2 Agent(en) ohne gezählte Antwort (2 gestartet · 1 ✕ · ~1 ●) · – · –'), de.join('\n'))
-  assert.ok(de.includes('- [~Läuft] 2 Agent(en) ohne gezählte Antwort · Sitzung 3f9a2c1d · Workflow cfe7718d · – (~1 davon läuft)'),
+  assert.ok(de.includes('- [~Läuft] 2 Agent(en) ohne gezählte Antwort · Sitzung 3f9a2c1d · Workflow-Lauf cfe7718d · – (~1 davon läuft)'),
     de.join('\n'))
 })

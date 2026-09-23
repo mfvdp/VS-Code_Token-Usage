@@ -371,7 +371,8 @@ test('a run nothing but its launch shows is running for ten minutes, then unknow
   const root = vm.roots.find((r) => r.key === `s:${SESSION}`)
   assert.ok(root)
   assert.ok(root.children.some((c) => c.key === RUN_KEY), 'the run sits under its session')
-  assert.deepEqual([node.kind, node.label, node.state, node.derived], ['workflow', 'Workflow 5eed1234', 'running', true])
+  // 1.6 N6: named by its launch, the run's start: its weekday and clock time, then its id.
+  assert.deepEqual([node.kind, node.label, node.state, node.derived], ['workflow', `Workflow run Thu ${clock(NOW - 2 * MIN)} · 5eed1234`, 'running', true])
   assert.equal(details.stateText, 'Running — inferred: the parent launched this run 2 min ago and no agent has written yet.')
   assert.deepEqual([node.hasChildren, node.childrenTotal, node.agentCount, node.tally, node.tallyText], [false, 0, 0, null, null])
   assert.deepEqual([node.usage, node.duration, node.startTs], ['–', '–', NOW - 2 * MIN])
@@ -400,7 +401,7 @@ test('a run nothing but its launch shows is running for ten minutes, then unknow
   const cfg = makeConfig()
   const input = makeInput({ agg: bare, cfg })
   const md = markdownDocument(buildViewModel(input), agentTreeFor(input, 'text'))
-  assert.match(md, /\[~Running\] Workflow 5eed1234 · – · –/)
+  assert.match(md, /\[~Running\] Workflow run Thu [^·]+ · 5eed1234 · – · –/)
 })
 
 test('a run launched from an agent\'s own transcript belongs to that agent\'s session', () => {

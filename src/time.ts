@@ -157,6 +157,36 @@ export function weekdayOf(day: string, cfg: TimeConfig): number {
   return (new Date(ms).getUTCDay() - start + 7) % 7
 }
 
+/**
+ * The calendar day of an instant in the configured zone — the date its clock reading belongs to,
+ * `dayBoundaryHour` left aside. For a name that pairs a date with a clock time ("2026-09-01 02:30"):
+ * the boundary is a rule for counting usage into days, and moving a 02:30 start to the day before
+ * would put it on a date its own clock never showed.
+ */
+export function calendarDayOf(ms: number, cfg: TimeConfig): string {
+  const p = partsOf(ms, resolveZone(cfg.zone))
+  return `${pad4(p.year)}-${pad2(p.month)}-${pad2(p.day)}`
+}
+
+/**
+ * The weekday of an instant's calendar day in the configured zone — 0 = Sunday … 6 = Saturday,
+ * whatever the configured first day of the week; the day boundary left aside, as in
+ * calendarDayOf. For "Tue 00:19": the weekday of the day the clock reading belongs to.
+ */
+export function calendarWeekdayOf(ms: number, cfg: TimeConfig): number {
+  const d = dayMs(calendarDayOf(ms, cfg))
+  return Number.isFinite(d) ? new Date(d).getUTCDay() : 0
+}
+
+/**
+ * The seven weekday abbreviations, Sunday first, in the bundle's language — "Mon", „Mo". Built
+ * on the call: the bundle is installed at activation, and a table filled before that would stay
+ * English for good.
+ */
+export function weekdayWords(): string[] {
+  return [t('Sun'), t('Mon'), t('Tue'), t('Wed'), t('Thu'), t('Fri'), t('Sat')]
+}
+
 export function addDays(day: string, n: number): string {
   const ms = dayMs(day)
   if (!Number.isFinite(ms)) return day

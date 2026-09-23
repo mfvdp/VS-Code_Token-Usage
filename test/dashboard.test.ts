@@ -3000,7 +3000,10 @@ const AK = {
 function treeNode(key: string, state: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   const kids = Array.isArray(over.children) ? over.children.length : 0
   return {
-    key, kind: 'agent', label: 'Explore · Opus 5 · a94f', sub: null, state,
+    // 1.6 N6: the row's name has the model short, `fullLabel` the whole id; N9: the clock times.
+    key, kind: 'agent', label: 'Explore · opus-5 · a94f',
+    fullLabel: over.fullLabel ?? (typeof over.label === 'string' ? over.label : 'Explore · claude-opus-5 · a94f'),
+    startClock: '11:59', lastClock: '11:59', sub: null, state,
     derived: state !== 'done' && state !== 'failed', usage: '12.3K', lowerBound: false,
     duration: '40.0 s', startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, agentCount: 0,
     hasChildren: kids > 0, childrenTotal: kids, childrenMore: 0,
@@ -3029,27 +3032,61 @@ function tallyOf(n: { done?: number; failed?: number; retried?: number; stopped?
   }
 }
 
-/**
- * The markup the page writes for a tally: its parts for the eye, unbreakable each, the space in
- * front of each separator a no-break space — a line breaks after a dot, never before one — and
- * its words for the ear.
- */
-function tallyHtml(text: string, spoken: string): string {
-  return '<span class="ag-tally"><span aria-hidden="true">'
-    + text.split(' · ').map((p) => '<span class="nobr">' + p + '</span>').join('\u00a0· ')
-    + '</span><span class="sr">' + spoken + '</span></span>'
-}
-
 /** The session's, the run's and the failed agent's tallies of agentTree() below. */
 const T_S1 = tallyOf({ done: 1, failed: 1, running: 1, unknown: 1 })
 const T_WF = tallyOf({ done: 1, running: 1 })
 const T_A3 = tallyOf({ unknown: 1 })
-const tallyMarkup = (t: Record<string, unknown>): string => tallyHtml(String(t.tallyText), String(t.tallySpoken))
+
+// 1.6 N6: a row is two lines — its name, then its figures under it.
+/** The separator between two parts of a name: a part of its own, which never gives way. */
+const DOT = '<span class="ag-dot"> · </span>'
+/**
+ * A row's first line as the page writes it: the parts of the name — only the first one may give
+ * way — then, for an agent, a session and a run, the short id in the dim tone, and a session's
+ * project; titled with the whole name.
+ */
+function lbl(title: string, names: string[], id: string | null = null, proj = ''): string {
+  return '<span class="ag-label" title="' + title + '">'
+    + names.map((p, i) => (i ? DOT : '') + '<span class="ag-np">' + p + '</span>').join('')
+    + (id !== null ? DOT + '<span class="ag-sid">' + id + '</span>' : '')
+    + (proj ? '<span class="ag-proj"> · ' + proj + '</span>' : '') + '</span>'
+}
+/** The separator in front of every part of a figures' line but the first, hidden from a screen reader. */
+const SEP = '<span aria-hidden="true"> · </span>'
+/** One figure of a row, unbreakable. */
+const fig = (v: string): string => '<span class="nobr">' + v + '</span>'
+/**
+ * A row's second line: its parts, each an `ag-fp` with the separator in front of it but the first,
+ * and anything the page writes between them (a silence) where `between` puts it.
+ */
+function figs(...parts: string[]): string {
+  return '<span class="ag-fig">' + parts.map((p, i) => '<span class="ag-fp">' + (i ? SEP : '') + p + '</span>').join('') + '</span>'
+}
+/** A tree row's live clock in the duration's place (N6), and the words that stand still for a screen reader (N9). */
+function clockFig(ts: number, text: string, since: string | null): string {
+  const eye = '<span class="nobr"><span data-live="since" data-ts="' + ts + '">' + text + '</span></span>'
+  return since === null ? eye : '<span aria-hidden="true">' + eye + '</span><span class="sr">since ' + since + '</span>'
+}
+/** The same in the running list, which says what it counts: "running for 42 s". */
+function runFig(ts: number, text: string, since: string | null): string {
+  const eye = '<span class="nobr">running for <span data-live="since" data-ts="' + ts + '">' + text + '</span></span>'
+  return since === null ? eye : '<span aria-hidden="true">' + eye + '</span><span class="sr">since ' + since + '</span>'
+}
+/** A tally's parts on the figures' line: the glyphs for the eye, the words once, after the last. */
+function tallyFigs(t: Record<string, unknown>): string[] {
+  const parts = String(t.tallyText).split(' · ').map((p) => '<span class="ag-t" aria-hidden="true">' + p + '</span>')
+  parts[parts.length - 1] += '<span class="sr">' + String(t.tallySpoken) + '</span>'
+  return parts
+}
+/** The end of a figures' line that ends on a tally, after other parts: the tally's parts and the line's end. */
+const tallyEnd = (t: Record<string, unknown>): string => tallyFigs(t).map((p) => '<span class="ag-fp">' + SEP + p + '</span>').join('') + '</span>'
 
 /** One RunningItem of src/agentTree.ts: the running agent of the tree below, where it sits. */
 function runningItem(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    key: AK.a1, kind: 'agent', label: 'Explore · Opus 5 · a94f', context: 'Session 9d0eb37a · Workflow cfe7718d · repo',
+    key: AK.a1, kind: 'agent', label: 'Explore · opus-5 · a94f',
+    fullLabel: over.fullLabel ?? (typeof over.label === 'string' ? over.label : 'Explore · claude-opus-5 · a94f'),
+    startClock: '11:59', lastClock: '11:59', context: 'Session 9d0eb37a · Workflow run cfe7718d · repo',
     usage: '12.3K', lowerBound: false, startTs: AG_NOW - 42_000, lastTs: AG_NOW - 5_000, waiting: false, running: 1, ...over,
   }
 }
@@ -3065,18 +3102,18 @@ function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> 
   return {
     roots: [
       treeNode(AK.s1, 'active', {
-        kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min',
+        kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', sub: 'repo', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min',
         ...T_S1,
         children: [
           treeNode(AK.wf, 'running', {
-            kind: 'workflow', label: 'Workflow cfe7718d', usage: '410K', ...T_WF,
+            kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', usage: '410K', ...T_WF,
             children: [
               treeNode(AK.a1, 'running'),
-              treeNode(AK.a2, 'done', { label: 'Plan · Opus 5 · b1c2', lowerBound: true }),
+              treeNode(AK.a2, 'done', { label: 'Plan · opus-5 · b1c2', lowerBound: true }),
             ],
           }),
           treeNode(AK.a3, 'failed', {
-            label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3,
+            label: 'general-purpose · sonnet-5 · c3d4', ...T_A3,
             children: [
               treeNode(AK.l1, 'unknown', {
                 kind: 'pending', label: 'Explore · – · launched', usage: '–', duration: '–',
@@ -3086,7 +3123,7 @@ function agentTree(over: Record<string, unknown> = {}): Record<string, unknown> 
           }),
         ],
       }),
-      treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', usage: '–', duration: '–' }),
+      treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', usage: '–', duration: '–' }),
     ],
     selected: null, running: 1, runningNow: [runningItem()], runningMore: 0,
     omittedRoots: 0, note: null,
@@ -3134,11 +3171,11 @@ function panelOf(h: string): string {
  */
 function detailsOf(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    key: AK.a1, title: 'Explore · Opus 5 · a94f', state: 'running', derived: true, lastTs: AG_NOW - 5_000,
+    key: AK.a1, title: 'Explore · claude-opus-5 · a94f', state: 'running', derived: true, lastTs: AG_NOW - 5_000,
     stateText: 'Running — inferred: the transcript changed 5 s ago and no result was recorded yet.',
     rows: [
       { label: 'Type', value: 'Explore' },
-      { label: 'Model', value: 'Opus 5' },
+      { label: 'Model', value: 'claude-opus-5' },
       { label: 'ID', value: 'a94f3c2e10b7d5e19', copy: true },
       { label: 'Depth', value: '' },
       { label: 'Last activity', value: '11:59:55', note: '5 s ago', live: 'ago' },
@@ -3233,12 +3270,15 @@ test('the agent tree draws every state with a glyph of its own and marks each in
   assert.ok(h.startsWith('<div class="agtree" role="tree" aria-label="Agents"><ul role="none">'
     + '<li role="treeitem" class="ag-k-session"'), h)
   const glyphs = [...h.matchAll(/<span class="ag-st ag-([a-z]+)" role="img" aria-label="([^"]*)" title="([^"]*)"><\/span>/g)]
-  // One glyph per node, all six states among them, and what a screen reader hears is the title.
+  // One glyph per node, all six states among them.
   assert.deepEqual(glyphs.map((m) => m[1]), ['active', 'running', 'running', 'done', 'failed', 'unknown', 'idle'])
   for (const m of glyphs) {
-    assert.equal(m[2], m[3], m[0])
     // The tilde on everything the tree builder inferred, none on what the parent recorded.
     assert.equal(m[3].startsWith('~'), m[1] !== 'done' && m[1] !== 'failed', m[0])
+    // 1.6 N9 (pinned and changed: 1.5 read the title out): a screen reader hears the state in
+    // words — "running, derived" — without the tilde, which it would read as a sign.
+    assert.equal(m[2], m[3].replace(/^~/, '').replace(/ · (derived|recorded)$/, ', $1'), m[0])
+    assert.equal(m[2].includes('~'), false, m[0])
   }
   assert.deepEqual([...new Set(glyphs.map((m) => m[3]))], [
     '~active session · derived', '~running · derived', 'done · recorded', 'failed · recorded',
@@ -3263,7 +3303,7 @@ test('the agent tree draws every state with a glyph of its own and marks each in
   // tilde — and never drawn as a failure.
   assert.match(STYLE, /\.ag-stopped::before \{ content: "■"; color: var\(--dim\); \}/)
   const stopped = agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a3, 'stopped', { derived: false })] }) })
-  assert.ok(stopped.indexOf('<span class="ag-st ag-stopped" role="img" aria-label="stopped · recorded" title="stopped · recorded">') >= 0,
+  assert.ok(stopped.indexOf('<span class="ag-st ag-stopped" role="img" aria-label="stopped, recorded" title="stopped · recorded">') >= 0,
     stopped)
   assert.equal(/ag-failed|~stopped/.test(stopped), false, stopped)
 })
@@ -3274,9 +3314,9 @@ test('an attempt the workflow journal superseded keeps its glyph and state, dimm
   const a = agentCtx()
   const tree = agentTree({
     roots: [treeNode(AK.s1, 'active', {
-      kind: 'session', label: 'Session 9d0eb37a', agentCount: 2,
+      kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', agentCount: 2,
       children: [
-        treeNode(AK.a2, 'failed', { derived: false, superseded: true, label: 'workflow-subagent · Opus 5 · b1c2' }),
+        treeNode(AK.a2, 'failed', { derived: false, superseded: true, label: 'workflow-subagent · opus-5 · b1c2' }),
         treeNode(AK.a1, 'running', { superseded: false }),
       ],
     })],
@@ -3284,13 +3324,16 @@ test('an attempt the workflow journal superseded keeps its glyph and state, dimm
   const h = treePart(agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) }))
   const title = 'failed · recorded · superseded by a later attempt'
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-agent ag-sup" aria-selected="false">') >= 0, h)
-  assert.ok(h.indexOf('<span class="ag-st ag-failed" role="img" aria-label="' + title + '" title="' + title + '">') >= 0, h)
+  assert.ok(h.indexOf('<span class="ag-st ag-failed" role="img" aria-label="failed, recorded, superseded by a later attempt" title="'
+    + title + '">') >= 0, h)
   // Only the superseded one: the running agent beside it is drawn as ever.
   assert.equal(h.split('ag-sup').length - 1, 1, h)
-  assert.ok(h.indexOf('aria-label="~running · derived" title="~running · derived"') >= 0, h)
-  // The dimming is the stylesheet's: the glyph fainter, the words in the dim tone, no new colour.
-  assert.match(STYLE, /\.ag-sup > \.ag-line > \.ag-row \.ag-st \{ opacity: \.8; \}/)
-  assert.match(STYLE, /\.ag-sup > \.ag-line > \.ag-row \.ag-label \{ color: var\(--dim\); \}/)
+  assert.ok(h.indexOf('aria-label="running, derived" title="~running · derived"') >= 0, h)
+  // The dimming is the stylesheet's, no new colour: 1.6 P7 (pinned and changed, the lead's call on
+  // the pictures) fades the glyph and the name to .65 — at .8, and the name in the dim tone, the row
+  // was hardly dimmed on the dark theme; the short id and the figures are dim already and stay so.
+  assert.match(STYLE, /\.ag-sup > \.ag-line > \.ag-row > \.ag-st, \.ag-sup > \.ag-line > \.ag-row \.ag-np \{ opacity: \.65; \}/)
+  assert.equal(/\.ag-sup[^{]*\{[^}]*color:/.test(STYLE), false, 'a superseded row has a colour of its own')
   // A payload that does not say `true` is not dimmed.
   const plain = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a2, 'failed', { superseded: 'yes' })] }) }))
   assert.equal(plain.indexOf('ag-sup'), -1, plain)
@@ -3301,68 +3344,71 @@ test('an attempt the workflow journal superseded keeps its glyph and state, dimm
   assert.equal(bundle['superseded by a later attempt'], 'durch einen späteren Versuch ersetzt')
 })
 
-test('a row carries the usage and duration it was given and, only while it runs, a live clock', () => {
+// 1.6 N6 (pinned and changed): a row is two lines — the name, then the figures under it, in the
+// dim tone — where 1.5 put the figures beside the name and let them wrap. The live clock takes the
+// duration's place; a launch shows dashes on its second line rather than no line at all. 1.6 D10
+// (the lead's call, §7a Q5): the rows carry their ⚠ now, the page ships with ROW_LOWER_BOUND_MARK on.
+test('a row is two lines: its name, then the usage and duration it was given — while it runs, a live clock in the duration\'s place', () => {
   const a = agentCtx()
   // Every node opened; the running list's own row of the running agent is left out of the counts.
   const h = treePart(agentsHtml(a, { ui: openUi() }))
-  // The figures of a row, each one unbreakable, so a narrow sidebar wraps at a separator.
-  const figs = (...parts: string[]): string =>
-    '<span class="ag-fig">' + parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
-  // The name breaks only between its parts, never at the hyphen of a model id.
-  const lbl = (...parts: string[]): string =>
-    '<span class="ag-label">' + parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ') + '</span>'
-  const since = '<span data-live="since" data-ts="' + (AG_NOW - 42_000) + '">42 s</span>'
-  // The glyph in a column of its own, the words beside it in theirs.
+  // The glyph in a column of its own, the two lines beside it in theirs: the name — the short id
+  // dimmed, the whole name its title — and under it the figures, each part whole.
   assert.ok(h.indexOf('<button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '" aria-pressed="false">'
-    + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
-    + '<span class="ag-text">' + lbl('Explore', 'Opus 5', 'a94f')
-    + figs('12.3K', '40.0 s', 'running for ' + since) + '</span></button>') >= 0, h)
+    + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
+    + '<span class="ag-text">' + lbl('Explore · claude-opus-5 · a94f', ['Explore', 'opus-5'], 'a94f')
+    + figs(fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', '11:59')) + '</span></button>') >= 0, h)
   assert.match(STYLE, /\.ag-row \{[^}]*display: flex; align-items: baseline;/)
   assert.equal(/\.ag-row \{[^}]*flex-wrap/.test(STYLE), false, 'the glyph would wrap away from its name')
-  assert.match(STYLE, /\.ag-text \{[^}]*flex-wrap: wrap;/)
+  assert.match(STYLE, /\.ag-text \{[^}]*display: flex; flex-direction: column; \}/)
+  // Neither line wraps: a row is two lines at any width.
+  assert.match(STYLE, /\.ag-label \{ display: flex; min-width: 0; overflow: hidden; \}/)
+  assert.match(STYLE, /\.ag-fig \{[^}]*overflow: hidden; white-space: nowrap; text-overflow: ellipsis;[^}]*color: var\(--dim\);/)
   // The workflow run and its running agent tick; done, failed, unknown and the sessions do not.
   assert.equal(h.split('data-live="since"').length - 1, 2, h)
-  // 1.6 D10: output that is a lower bound is not marked on the row while the page ships with
-  // ROW_LOWER_BOUND_MARK off — the details' Output note says it — and the line under the tree
-  // that pointed there (1.5 PC1) is gone, closed or open, session row or not.
-  assert.ok(h.indexOf(lbl('Plan', 'Opus 5', 'b1c2') + figs('12.3K', '40.0 s')) >= 0, h)
+  assert.ok(h.indexOf(lbl('Workflow run Tue 11:40 · cfe7718d', ['Workflow run Tue 11:40'], 'cfe7718d')
+    + figs(fig('410K'), clockFig(AG_NOW - 42_000, '42 s', '11:59'), ...tallyFigs(T_WF))) >= 0, h)
+  // A lower bound without its reason is not marked — a mark nobody can ask about says less than
+  // none; with its reason it is (see the ⚠ test below), and no line under the tree speaks of it.
+  assert.ok(h.indexOf(lbl('Plan · opus-5 · b1c2', ['Plan', 'opus-5'], 'b1c2') + figs(fig('12.3K'), fig('40.0 s'))) >= 0, h)
   assert.equal(h.indexOf('⚠'), -1, h)
-  assert.equal(/ag-lb|lower-bound/.test(h), false, h)
   assert.ok(h.endsWith('</ul></div>'), h.slice(-120))
-  const hidden = agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1, AK.a3] }) })
-  assert.equal(hidden.indexOf('⚠'), -1, hidden)
-  const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session 1234abcd', lowerBound: true,
-    lowerBoundText: '⚠ lower bound — 1 of 9 replies unfinished' })] })
-  assert.equal(agentsHtml(a, { agents: rootMark }).indexOf('⚠'), -1)
-  // Absence is a dash, never a zero: the quiet session. A launch nobody has counted yet shows
-  // no figures at all — here it is not running, so not even a clock.
-  assert.ok(h.indexOf(lbl('Explore', '–', 'launched') + '</span></button>') >= 0, h)
+  const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', lowerBound: true,
+    lowerBoundText: '⚠ lower bound — 1 of 9 replies unfinished', usage: '12K' })] })
+  assert.ok(agentsHtml(a, { agents: rootMark }).indexOf(fig('own 12K <span class="ag-lb" role="img" aria-label="lower bound" '
+    + 'title="⚠ lower bound — 1 of 9 replies unfinished">⚠</span>')) >= 0)
+  // Absence is a dash, never a zero: the quiet session, and a launch nobody has counted yet —
+  // here it is not running, so not even a clock, and its second line is dashes.
+  assert.ok(h.indexOf(lbl('Explore · – · launched', ['Explore', '–', 'launched']) + figs(fig('–'), fig('–')) + '</span></button>') >= 0, h)
   // A session's figures name what they are (D5), the name first — a figure in front of
   // "agents" would read as a number of agents, beside a tally that counts them: its own
   // transcript's usage, its agents' — never added to it, and not shown for a session without
   // agents — and its span, whose title says so.
   const span = (v: string): string => '<span title="span from the first to the last line">' + v + '</span>'
-  assert.ok(h.indexOf(lbl('Session 1234abcd') + figs('own –', span('–'))) >= 0, h)
-  // The project a session belongs to, when attribution names one, beside its name, then the
-  // tally of its agents (1.6 N1), which an opened session keeps.
-  assert.ok(h.indexOf(lbl('Session 9d0eb37a') + '<span class="meta">repo · ' + tallyMarkup(T_S1) + '</span>'
-    + figs('own 1.2M', 'agents 434.6K', span('1 h 05 min'))) >= 0, h)
+  assert.ok(h.indexOf(lbl('Session Mon 09:00 · 1234abcd', ['Session Mon 09:00'], '1234abcd') + figs(fig('own –'), fig(span('–')))) >= 0, h)
+  // The project a session belongs to, when attribution names one, after its id on the name's
+  // line, then — on the second — its figures and the tally of its agents (1.6 N1), which an opened
+  // session keeps.
+  assert.ok(h.indexOf(lbl('Session Tue 10:55 · 9d0eb37a · repo', ['Session Tue 10:55'], '9d0eb37a', 'repo')
+    + figs(fig('own 1.2M'), fig('agents 434.6K'), fig(span('1 h 05 min')), ...tallyFigs(T_S1))) >= 0, h)
   // The sum of the two is no figure of the page.
   assert.equal(h.indexOf('1.6M'), -1, h)
   // A launch whose transcript has not been seen yet reads as the hint it is.
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-pending" aria-selected="false">') >= 0, h)
   assert.match(STYLE, /\.ag-k-pending > \.ag-line \.ag-label \{ font-style: italic; \}/)
   // A running node without a start gets no clock rather than one counting from 1970 — in the
-  // tree, and in the running list.
+  // tree, and in the running list — and keeps its duration.
   const nostart = agentsHtml(a, {
     agents: agentTree({ roots: [treeNode(AK.a1, 'running', { startTs: null })], runningNow: [runningItem({ startTs: null })] }),
   })
   assert.equal(nostart.indexOf('data-live'), -1, nostart)
-  // A node with nothing in it is dashes.
+  assert.ok(nostart.indexOf(figs(fig('12.3K'), fig('40.0 s'))) >= 0, nostart)
+  // Without the view model's clock time the clock stays readable: no words to stand in for it.
+  const noclock = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'running', { startClock: null })] }) }))
+  assert.ok(noclock.indexOf(figs(fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', null))) >= 0, noclock)
+  // A node with nothing in it is dashes, on both lines.
   const bare = agentsHtml(a, { agents: agentTree({ roots: [{ key: AK.a1 }] }) })
-  assert.ok(bare.indexOf(lbl('–') + figs('–', '–')) >= 0, bare)
-  // No lower bound on a row on screen, no line about one.
-  assert.equal(bare.indexOf('marked ⚠'), -1, bare)
+  assert.ok(bare.indexOf('<span class="ag-label"><span class="ag-np">–</span></span>' + figs(fig('–'), fig('–'))) >= 0, bare)
   assert.equal(/undefined|NaN|null|\[object Object\]/.test(h + nostart + bare), false)
 })
 
@@ -3373,20 +3419,26 @@ test('by default the tree is closed: only the sessions, each parent collapsed an
   assert.deepEqual([...h.matchAll(/data-act="agentSelect" data-key="([^"]*)"/g)].map((m) => m[1]), [AK.s1, AK.s2])
   for (const k of [AK.wf, AK.a1, AK.a2, AK.a3, AK.l1]) assert.equal(h.indexOf('data-key="' + k + '"'), -1, k)
   assert.equal(h.indexOf('<ul role="group">'), -1, h)
-  // The session with children is collapsed, its toggle says it opens it, and its meta line says
-  // beside the project what its agents came to (1.6 N1) — the glyphs for the eye, each part
-  // unbreakable, and the same in words for a screen reader, which would read the glyphs as
-  // shapes; the session with none is a leaf, and has no tally at all rather than "0 started".
+  // The session with children is collapsed, its toggle says it opens it, and the second line of
+  // its row (1.6 N6) ends on what its agents came to (1.6 N1) — the glyphs for the eye, each a
+  // part of the line, and the same in words once for a screen reader, which would read the glyphs
+  // as shapes; the session with none is a leaf, and has no tally at all rather than "0 started".
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
-    + '" aria-label="Expand Session 9d0eb37a"></button>') >= 0, h)
-  assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
-    + '<span class="meta">repo · <span class="ag-tally"><span aria-hidden="true"><span class="nobr">4 started</span>\u00a0· '
-    + '<span class="nobr">1 ✓</span>\u00a0· <span class="nobr">1 ✕</span>\u00a0· <span class="nobr">~1 ●</span>\u00a0· <span class="nobr">~1 ?</span>'
-    + '</span><span class="sr">4 started, 1 done, 1 failed, about 1 running, about 1 unknown</span></span></span>') >= 0, h)
+    + '" aria-label="Expand Session Tue 10:55 · 9d0eb37a"></button>') >= 0, h)
+  assert.ok(h.indexOf(lbl('Session Tue 10:55 · 9d0eb37a · repo', ['Session Tue 10:55'], '9d0eb37a', 'repo')
+    + '<span class="ag-fig"><span class="ag-fp"><span class="nobr">own 1.2M</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="nobr">agents 434.6K</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="nobr"><span title="span from the first to the last line">1 h 05 min</span></span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">4 started</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✓</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✕</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ●</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ?</span>'
+    + '<span class="sr">4 started, 1 done, 1 failed, about 1 running, about 1 unknown</span></span></span>') >= 0, h)
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-selected="false"><div class="ag-line">'
     + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.s2 + '"') >= 0, h)
-  assert.equal(h.split('class="ag-tally"').length - 1, 1, h)
+  assert.equal(h.split('class="ag-t"').length - 1, 5, h)
   assert.equal(/started|agent\(s\)/.test(h.slice(h.indexOf('data-key="' + AK.s2 + '"'))), false, h)
   assert.equal(h.indexOf('aria-expanded="true"'), -1, h)
   // The screen reader's words are out of sight and still read: the page's visually hidden rule.
@@ -3399,15 +3451,17 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   const one = treePart(agentsHtml(a, { ui: agentUi({ agentsExpanded: [AK.s1] }) }))
   assert.ok(one.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="true" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
-    + '" aria-label="Collapse Session 9d0eb37a"></button>') >= 0, one)
-  // Opened, the session still names its project and its tally (1.6 N1): what failed or is still
-  // unknown among its agents is not something to count off the rows once they show.
-  assert.ok(one.indexOf('<span class="nobr">Session 9d0eb37a</span></span><span class="meta">repo · ' + tallyMarkup(T_S1) + '</span>') >= 0, one)
+    + '" aria-label="Collapse Session Tue 10:55 · 9d0eb37a"></button>') >= 0, one)
+  // Opened, the session still names its project and ends its figures on its tally (1.6 N1): what
+  // failed or is still unknown among its agents is not something to count off the rows once they show.
+  assert.ok(one.indexOf('<span class="ag-proj"> · repo</span></span>') >= 0, one)
+  assert.ok(one.indexOf(tallyEnd(T_S1)) >= 0, one)
   assert.ok(one.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
-    + '" aria-label="Expand Workflow cfe7718d"></button>') >= 0, one)
-  assert.ok(one.indexOf('<span class="nobr">Workflow cfe7718d</span></span><span class="meta">' + tallyMarkup(T_WF) + '</span>') >= 0, one)
-  assert.ok(one.indexOf('<span class="nobr">c3d4</span></span><span class="meta">' + tallyMarkup(T_A3) + '</span>') >= 0, one)
+    + '" aria-label="Expand Workflow run Tue 11:40 · cfe7718d"></button>') >= 0, one)
+  assert.ok(one.indexOf(tallyEnd(T_WF)) >= 0, one)
+  // A closed agent with an agent below it ends its figures on its tally too.
+  assert.ok(one.indexOf('<span class="ag-sid">c3d4</span></span>' + figs(fig('12.3K'), fig('40.0 s'), ...tallyFigs(T_A3))) >= 0, one)
   // The children of the closed ones are not written at all.
   for (const k of [AK.a1, AK.a2, AK.l1]) assert.equal(one.indexOf('data-key="' + k + '"'), -1, k)
   assert.equal(one.split('<ul role="group">').length - 1, 1, one)
@@ -3417,17 +3471,17 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   const open = treePart(agentsHtml(a, { ui: openUi() }))
   assert.ok(open.indexOf('<li role="treeitem" class="ag-k-workflow" aria-expanded="true" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.wf
-    + '" aria-label="Collapse Workflow cfe7718d"></button>') >= 0, open)
+    + '" aria-label="Collapse Workflow run Tue 11:40 · cfe7718d"></button>') >= 0, open)
   // A leaf has no toggle and keeps its place in the column with an empty slot.
   assert.ok(open.indexOf('<li role="treeitem" class="ag-k-agent" aria-selected="false"><div class="ag-line">'
     + '<span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="' + AK.a1 + '"') >= 0, open)
   assert.equal(open.split('aria-expanded="true"').length - 1, 3, open)
   assert.equal(open.indexOf('aria-expanded="false"'), -1, open)
   assert.equal(open.split('<ul role="group">').length - 1, 3, open)
-  assert.ok(open.indexOf('<span class="meta">repo · ' + tallyMarkup(T_S1) + '</span>') >= 0, open)
-  assert.ok(open.indexOf('<span class="nobr">Workflow cfe7718d</span></span><span class="meta">' + tallyMarkup(T_WF) + '</span>') >= 0, open)
-  assert.ok(open.indexOf('<span class="nobr">c3d4</span></span><span class="ag-fig">') >= 0, open)
-  assert.equal(open.split('class="ag-tally"').length - 1, 2, open)
+  assert.ok(open.indexOf(tallyEnd(T_S1)) >= 0, open)
+  assert.ok(open.indexOf(tallyEnd(T_WF)) >= 0, open)
+  assert.ok(open.indexOf('<span class="ag-sid">c3d4</span></span>' + figs(fig('12.3K'), fig('40.0 s')) + '</span></button>') >= 0, open)
+  assert.equal(open.split('class="ag-t"').length - 1, 5 + 3, open)
   assert.equal(open.indexOf('agent(s)'), -1, open)
 
   // Opening a node below a closed one shows nothing of it: the session decides first.
@@ -3437,22 +3491,23 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   // count alone is no tally. Words missing, the glyphs are read out rather than nothing.
   for (const tallyText of [undefined, '', 7, null, {}, ['4 started']]) {
     const odd = agentTree({ roots: [treeNode(AK.s1, 'active', {
-      kind: 'session', label: 'Session 9d0eb37a', agentCount: 4, tallyText, tallySpoken: '4 started', children: [treeNode(AK.a1, 'running')],
+      kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', agentCount: 4, tallyText, tallySpoken: '4 started', children: [treeNode(AK.a1, 'running')],
     })] })
     const oh = treePart(agentsHtml(a, { agents: odd }))
-    assert.equal(oh.indexOf('ag-tally'), -1, String(tallyText))
+    assert.equal(oh.indexOf('ag-t"'), -1, String(tallyText))
     assert.equal(/started|agent\(s\)|>0</.test(oh), false, oh)
   }
   const mute = agentTree({ roots: [treeNode(AK.s1, 'active', {
-    kind: 'session', label: 'Session 9d0eb37a', tallyText: '2 started · 2 ✓', tallySpoken: null, children: [treeNode(AK.a1, 'running')],
+    kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', tallyText: '2 started · 2 ✓', tallySpoken: null, children: [treeNode(AK.a1, 'running')],
   })] })
-  assert.ok(treePart(agentsHtml(a, { agents: mute })).indexOf(tallyHtml('2 started · 2 ✓', '2 started · 2 ✓')) >= 0)
+  assert.ok(treePart(agentsHtml(a, { agents: mute })).indexOf(tallyFigs({ tallyText: '2 started · 2 ✓', tallySpoken: '2 started · 2 ✓' })
+    .map((p) => '<span class="ag-fp">' + SEP + p + '</span>').join('')) >= 0)
   // The tally is the view model's text, and like every text of it, it is escaped.
   const hostile = agentTree({ roots: [treeNode(AK.s1, 'active', {
-    kind: 'session', label: 'Session 9d0eb37a', tallyText: '<b>1</b> started', tallySpoken: '"1" <started>', children: [treeNode(AK.a1, 'running')],
+    kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', tallyText: '<b>1</b> started', tallySpoken: '"1" <started>', children: [treeNode(AK.a1, 'running')],
   })] })
   const hh = treePart(agentsHtml(a, { agents: hostile }))
-  assert.ok(hh.indexOf('<span class="nobr">&lt;b&gt;1&lt;/b&gt; started</span>') >= 0, hh)
+  assert.ok(hh.indexOf('<span class="ag-t" aria-hidden="true">&lt;b&gt;1&lt;/b&gt; started</span>') >= 0, hh)
   assert.ok(hh.indexOf('<span class="sr">&quot;1&quot; &lt;started&gt;</span>') >= 0, hh)
   // The twisty is drawn, not typed, and turns with the attribute.
   assert.match(STYLE, /\.ag-fold::before \{ content: "▾";/)
@@ -3512,7 +3567,7 @@ test('selecting a node opens nothing: with its tree row in a closed branch, the 
   assert.ok(beyond.indexOf('data-key="' + far + '" data-list="now" aria-pressed="true"') >= 0, beyond)
   assert.ok(farPanel.indexOf('<dt>Last activity</dt><dd><span class="nobr"><span data-live="since" data-ts="'
     + (AG_NOW - 7_000) + '">7 s</span> ago</span></dd>') >= 0, farPanel)
-  assert.ok(farPanel.indexOf('aria-label="~running · derived"') >= 0, farPanel)
+  assert.ok(farPanel.indexOf('aria-label="running, derived" title="~running · derived"') >= 0, farPanel)
 })
 
 test('the details open inside the entry of the row that was clicked, after its line and before its children, once a page', () => {
@@ -3521,7 +3576,7 @@ test('the details open inside the entry of the row that was clicked, after its l
   // the levels above it, so it takes the tree's whole width at any depth.
   const a = agentCtx()
   const h = agentsHtml(a, {
-    agents: agentTree({ selected: detailsOf({ key: AK.a3, title: 'general-purpose · Sonnet 5 · c3d4', state: 'failed', derived: false }) }),
+    agents: agentTree({ selected: detailsOf({ key: AK.a3, title: 'general-purpose · sonnet-5 · c3d4', state: 'failed', derived: false }) }),
     ui: openUi({ agentSelected: AK.a3 }),
   })
   const panel = panelOf(h)
@@ -3605,20 +3660,21 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
     && h.indexOf('<div class="ag-details"') < h.indexOf('<div class="agtree"'), h)
   const panel = panelOf(h)
   assert.ok(panel.startsWith('<div class="ag-details" role="region" aria-label="Details">'
-    + '<div class="name">Explore · Opus 5 · a94f</div><dl>'
+    + '<div class="name">Explore · claude-opus-5 · a94f</div><dl>'
     + '<dt class="ag-wide">State</dt><dd class="ag-wide"><span class="ag-st ag-running" role="img" '
-    + 'aria-label="~running · derived" title="~running · derived"></span> '
+    + 'aria-label="running, derived" title="~running · derived"></span> '
     + 'Running — inferred: the transcript changed 5 s ago and no result was recorded yet.</dd>'
-    + '<dt>Type</dt><dd>Explore</dd><dt>Model</dt><dd>Opus 5</dd>'), panel)
+    + '<dt>Type</dt><dd>Explore</dd><dt>Model</dt><dd>claude-opus-5</dd>'), panel)
   // Absent is a dash, whether the model sent an empty text, a dash or nothing at all.
   assert.ok(panel.indexOf('<dt>Depth</dt><dd>–</dd>') >= 0, panel)
   assert.ok(panel.indexOf('<dt>Spawned by</dt><dd>–</dd>') >= 0, panel)
   assert.ok(panel.indexOf('<dt>Workflow run</dt><dd>–</dd>') >= 0, panel)
   assert.ok(panel.indexOf('<dt>Output</dt><dd>1.2K <span class="meta">⚠ lower bound</span></dd>') >= 0, panel)
   // The row the model marks live keeps its time and gains the clock — once, in place of the age
-  // the view model wrote beside it: one age per row, never two.
-  assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:59:55 · <span class="nobr"><span data-live="since" data-ts="'
-    + (AG_NOW - 5_000) + '">5 s</span> ago</span></dd>') >= 0, panel)
+  // the view model wrote beside it: one age per row, never two. 1.6 N9: the ticking age is for the
+  // eye alone; the row's own time beside it is what a screen reader reads.
+  assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:59:55 · <span aria-hidden="true"><span class="nobr"><span data-live="since" data-ts="'
+    + (AG_NOW - 5_000) + '">5 s</span> ago</span></span></dd>') >= 0, panel)
   assert.equal(panel.split('Last activity').length - 1, 1, panel)
   assert.equal(panel.indexOf('<span class="meta">5 s ago</span>'), -1, panel)
   // Claude Code's report is a sentence, not a figure, because the row says so (kind): it takes
@@ -3673,21 +3729,21 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   })
   const pendingPanel = pending.slice(pending.indexOf('<div class="ag-details"'))
   assert.equal(pendingPanel.indexOf('data-live'), -1, pendingPanel)
-  assert.ok(pendingPanel.indexOf('aria-label="~unknown · derived"') >= 0, pendingPanel)
+  assert.ok(pendingPanel.indexOf('aria-label="unknown, derived"') >= 0, pendingPanel)
   // A recorded state is no estimate in the panel either.
   const done = agentsHtml(a, {
     agents: agentTree({ selected: detailsOf({ key: AK.a2, state: 'done', derived: false, stateText: 'Completed — the parent recorded the result at 11:59.' }) }),
     ui: openUi({ agentSelected: AK.a2 }),
   })
   assert.ok(done.indexOf('<dt class="ag-wide">State</dt><dd class="ag-wide"><span class="ag-st ag-done" role="img" '
-    + 'aria-label="done · recorded" title="done · recorded"></span> Completed — the parent recorded the result at 11:59.</dd>') >= 0, done)
+    + 'aria-label="done, recorded" title="done · recorded"></span> Completed — the parent recorded the result at 11:59.</dd>') >= 0, done)
   // A details payload with nothing in it but the key of a row on the page is dashes — and the
   // clock of the node its row is, the one thing the page adds.
   const empty = agentsHtml(a, { agents: agentTree({ selected: { key: AK.s1 } }), ui: agentUi({ agentSelected: AK.s1 }) })
   assert.equal(panelOf(empty),
     '<div class="ag-details" role="region" aria-label="Details"><div class="name">–</div><dl>'
     + '<dt class="ag-wide">State</dt><dd class="ag-wide"><span class="ag-st ag-unknown" role="img" '
-    + 'aria-label="~unknown · derived" title="~unknown · derived"></span> –</dd>'
+    + 'aria-label="unknown, derived" title="~unknown · derived"></span> –</dd>'
     + '<dt>Last activity</dt><dd><span class="nobr"><span data-live="since" data-ts="' + (AG_NOW - 5_000) + '">5 s</span> ago</span></dd>'
     + '</dl></div>')
   // Two columns at every width; the sentences span both.
@@ -3722,23 +3778,23 @@ test('details under a row of the running list say themselves whether the state w
     assert.equal(treePart(h).indexOf('data-key="' + far + '"'), -1, 'the node has a tree row on the page after all')
     const panel = panelOf(h)
     assert.ok(h.indexOf('data-key="' + far + '" data-list="now" aria-pressed="true"') < h.indexOf(panel), h)
-    assert.ok(panel.indexOf('<dd class="ag-wide"><span class="ag-st ag-' + state + '" role="img" aria-label="' + title
-      + '" title="' + title + '"></span> ' + stateText + '</dd>') >= 0, panel)
+    assert.ok(panel.indexOf('<dd class="ag-wide"><span class="ag-st ag-' + state + '" role="img" aria-label="'
+      + title.replace(' · ', ', ') + '" title="' + title + '"></span> ' + stateText + '</dd>') >= 0, panel)
     assert.equal(panel.indexOf('~' + state), -1, panel)
     // The clock ticks from the details' own last activity, in place of the note, once.
-    assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:58:55 · <span class="nobr"><span data-live="since" data-ts="'
-      + (AG_NOW - 65_000) + '">1 min 05 s</span> ago</span></dd>') >= 0, panel)
+    assert.ok(panel.indexOf('<dt>Last activity</dt><dd>11:58:55 · <span aria-hidden="true"><span class="nobr"><span data-live="since" data-ts="'
+      + (AG_NOW - 65_000) + '">1 min 05 s</span> ago</span></span></dd>') >= 0, panel)
     assert.equal(panel.indexOf('1 min ago'), -1, panel)
   }
   // An inferred state says so the same way, and details that say nothing — a payload from a
   // build before the flag — are never called recorded, whatever state they name.
   const running = agentsHtml(a, { agents: agentTree({ runningNow: [only], selected: detailsOf({ key: far }) }), ui: agentUi({ agentSelected: far }) })
-  assert.ok(panelOf(running).indexOf('aria-label="~running · derived"') >= 0, running)
+  assert.ok(panelOf(running).indexOf('aria-label="running, derived"') >= 0, running)
   const unsaid = agentsHtml(a, {
     agents: agentTree({ runningNow: [only], selected: detailsOf({ key: far, state: 'done', derived: 'no', lastTs: 'soon' }) }),
     ui: agentUi({ agentSelected: far }),
   })
-  assert.ok(panelOf(unsaid).indexOf('aria-label="~done · derived"') >= 0, unsaid)
+  assert.ok(panelOf(unsaid).indexOf('aria-label="done, derived"') >= 0, unsaid)
   assert.equal(panelOf(unsaid).indexOf('data-live'), -1, unsaid)
   // A row of the tree says what the panel says: the node's flag and clock come first.
   const onPage = agentsHtml(a, {
@@ -3746,21 +3802,23 @@ test('details under a row of the running list say themselves whether the state w
     ui: openUi({ agentSelected: AK.a2 }),
   })
   const onPagePanel = panelOf(onPage)
-  assert.ok(onPagePanel.indexOf('aria-label="done · recorded"') >= 0, onPagePanel)
+  assert.ok(onPagePanel.indexOf('aria-label="done, recorded"') >= 0, onPagePanel)
   assert.ok(onPagePanel.indexOf('data-ts="' + (AG_NOW - 5_000) + '"') >= 0, onPagePanel)
   assert.equal(onPagePanel.indexOf('data-ts="' + (AG_NOW - 99_000) + '"'), -1, onPagePanel)
 })
 
 // 1.6 P6 (§3 D10): pinned "the ⚠ line counts the running list" — the line under the tree ("Output
-// figures in the details marked ⚠ are lower bounds.") is gone; a row marks its own lower bound, and
-// only while the page ships with ROW_LOWER_BOUND_MARK on (see the next test).
-test('no line under the tree speaks of the lower bound, and with the mark off no row of the running list carries one', () => {
+// figures in the details marked ⚠ are lower bounds.") is gone; a row marks its own lower bound.
+// 1.6 P7 (pinned and changed, the lead's call on the pictures, §7a Q5): the page ships with the
+// rows marked — P6 pinned the running list's row unmarked while the mark was off.
+test('no line under the tree speaks of the lower bound, and the running list\'s row marks its own', () => {
   const a = agentCtx()
   // The default page: every agent inside a closed branch, the running agent's list row a lower bound.
-  const bound = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true,
-    lowerBoundText: '⚠ lower bound — 2 of 41 replies unfinished' })] }) })
+  const why = '⚠ lower bound — 2 of 41 replies unfinished'
+  const bound = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true, lowerBoundText: why })] }) })
   assert.equal(treePart(bound).indexOf('data-key="' + AK.a1 + '"'), -1, 'the running agent\'s tree row is on screen')
-  assert.equal(bound.indexOf('⚠'), -1, bound)
+  assert.equal(bound.split('⚠').length - 1, 2, bound)
+  assert.ok(bound.indexOf(fig('12.3K <span class="ag-lb" role="img" aria-label="lower bound" title="' + why + '">⚠</span>')) >= 0, bound)
   assert.equal(/marked ⚠|lower bounds\./.test(bound), false, bound)
   assert.ok(bound.endsWith('</ul></div>'), bound.slice(-120))
   // The word is out of the page's dictionary, and out of the script.
@@ -3769,31 +3827,34 @@ test('no line under the tree speaks of the lower bound, and with the mark off no
 })
 
 /**
- * The page as the lead would ship it with the rows marked (1.6 D10, §7a Q5): the one line of the
- * script that decides it, turned on — the shipped script says `false`, exactly once.
+ * The page without the rows' ⚠ — the alternative the lead decided against (1.6 D10, §7a Q5; on
+ * since P7): the one line of the script that decides it, turned off — the shipped script says
+ * `true`, exactly once.
  */
-function markedScript(): string {
-  const off = 'const ROW_LOWER_BOUND_MARK = false;'
-  assert.equal(SCRIPT.split(off).length - 1, 1, 'the shipped page decides the row mark in one line, and ships it off')
-  assert.equal(SOURCE.split('const ROW_LOWER_BOUND_MARK: boolean = false;').length - 1, 1)
-  return SCRIPT.replace(off, 'const ROW_LOWER_BOUND_MARK = true;')
+function unmarkedScript(): string {
+  const on = 'const ROW_LOWER_BOUND_MARK = true;'
+  assert.equal(SCRIPT.split(on).length - 1, 1, 'the shipped page decides the row mark in one line, and ships it on')
+  assert.equal(SOURCE.split('const ROW_LOWER_BOUND_MARK: boolean = true;').length - 1, 1)
+  return SCRIPT.replace(on, 'const ROW_LOWER_BOUND_MARK = false;')
 }
 
-test('with the row mark turned on, a lower bound carries one ⚠ inside its usage figure, titled with its reason', () => {
-  const a = agentCtx([], markedScript())
+// 1.6 P7 (pinned and changed): P6 pinned this with the mark turned on by hand and the shipped page
+// unmarked; the page ships marked now, and turned off it marks nothing.
+test('a lower bound carries one ⚠ inside its usage figure, titled with its reason — as shipped — and none with the mark off', () => {
+  const a = agentCtx()
   const why = '⚠ lower bound — 2 of 41 replies unfinished'
   const mark = (title: string): string =>
     ' <span class="ag-lb" role="img" aria-label="lower bound" title="' + title + '">⚠</span>'
   const tree = agentTree({
     roots: [
       treeNode(AK.s1, 'active', {
-        kind: 'session', label: 'Session 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', ...T_S1,
+        kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', ...T_S1,
         lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 30 replies unfinished',
         children: [
           treeNode(AK.a1, 'running', { lowerBound: true, lowerBoundText: why }),
-          treeNode(AK.a2, 'done', { label: 'Plan · Opus 5 · b1c2' }),
+          treeNode(AK.a2, 'done', { label: 'Plan · opus-5 · b1c2' }),
           // A flag without its reason is no mark: nobody could ask what it means.
-          treeNode(AK.a3, 'failed', { label: 'general-purpose · Sonnet 5 · c3d4', lowerBound: true, lowerBoundText: null }),
+          treeNode(AK.a3, 'failed', { label: 'general-purpose · sonnet-5 · c3d4', lowerBound: true, lowerBoundText: null }),
         ],
       }),
     ],
@@ -3801,49 +3862,58 @@ test('with the row mark turned on, a lower bound carries one ⚠ inside its usag
   })
   const h = agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) })
   const tp = treePart(h)
-  // The running agent's tree row: the ⚠ inside the usage figure's own unbreakable span.
-  assert.ok(tp.indexOf('<span class="ag-fig"><span class="nobr">12.3K' + mark(why) + '</span> · <span class="nobr">40.0 s</span>') >= 0, tp)
+  // The running agent's tree row: the ⚠ inside the usage figure's own unbreakable span, the first
+  // part of the figures' line (1.6 N6), which always stays on it.
+  assert.ok(tp.indexOf('<span class="ag-fig"><span class="ag-fp">' + fig('12.3K' + mark(why)) + '</span><span class="ag-fp">' + SEP
+    + clockFig(AG_NOW - 42_000, '42 s', '11:59') + '</span></span>') >= 0, tp)
   // A session's is its own transcript's: on its own figure.
-  assert.ok(tp.indexOf('<span class="nobr">own 1.2M' + mark('⚠ lower bound — 1 of 30 replies unfinished') + '</span>') >= 0, tp)
+  assert.ok(tp.indexOf(fig('own 1.2M' + mark('⚠ lower bound — 1 of 30 replies unfinished'))) >= 0, tp)
   // The done agent is no lower bound, the failed one has no reason: neither is marked.
   assert.equal(tp.split('⚠</span>').length - 1, 2, tp)
   // The running list's row, marked as its tree row is.
   const now = h.slice(0, h.indexOf('<div class="agtree"'))
-  assert.ok(now.indexOf('<span class="nobr">12.3K' + mark(why) + '</span>') >= 0, now)
+  assert.ok(now.indexOf(fig('12.3K' + mark(why))) >= 0, now)
   assert.equal(now.split('⚠</span>').length - 1, 1, now)
   // Still no line under the tree.
   assert.ok(h.endsWith('</ul></div>'), h.slice(-120))
   // Escaped like everything else: a reason is the view model's text, not markup.
   const odd = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true, lowerBoundText: '"><b>x' })] }) })
   assert.ok(odd.indexOf('title="&quot;&gt;&lt;b&gt;x"') >= 0, odd)
-  // And the shipped page, with the same tree, marks nothing.
-  assert.equal(agentsHtml(agentCtx(), { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('⚠'), -1)
+  // The alternative, the page's one line turned off: the same tree marks nothing.
+  assert.equal(agentsHtml(agentCtx([], unmarkedScript()), { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('⚠'), -1)
 })
 
 test('a running agent that is not waiting says how long it has been silent, from three minutes on, by the page clock', () => {
   const a = agentCtx()
-  const span = (ts: number, due: string | null): string => '<span class="ag-silent" data-live="silent" data-ts="' + ts + '"'
-    + (due === null ? ' hidden' : '') + '> · <span class="nobr">silent for <span class="ag-for">' + (due ?? '') + '</span></span></span>'
+  // 1.6 N6: a part of the figures' line of its own, its dot inside it; N9: the ticking minutes for
+  // the eye, "silent since 11:59" — the view model's lastClock — for a screen reader.
+  const span = (ts: number, due: string | null): string => '<span class="ag-fp ag-silent" data-live="silent" data-ts="' + ts + '"'
+    + (due === null ? ' hidden' : '') + '>' + SEP + '<span aria-hidden="true"><span class="nobr">silent for <span class="ag-for">'
+    + (due ?? '') + '</span></span></span><span class="sr">silent since 11:59</span></span>'
   const at = (lastTs: number, over: Record<string, unknown> = {}) => agentTree({
     roots: [treeNode(AK.s1, 'active', {
-      kind: 'session', label: 'Session 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', ...T_S1,
+      kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', ...T_S1,
       children: [treeNode(AK.a1, 'running', { lastTs, silence: true, ...over })],
     })],
     runningNow: [runningItem({ lastTs, silence: true, ...over })],
   })
   const open = agentUi({ agentsExpanded: [AK.s1] })
   // Written for the node the view model says may be silent — hidden until it is due, then shown:
-  // 2:59 is not yet three minutes, 3:00 is.
+  // 2:59 is not yet three minutes, 3:00 is. After the clock, before any tally.
   const early = agentsHtml(a, { agents: at(AG_NOW - 179_000), ui: open })
   assert.ok(treePart(early).indexOf(span(AG_NOW - 179_000, null) + '</span>') >= 0, early)
   const due = agentsHtml(a, { agents: at(AG_NOW - 180_000), ui: open })
-  assert.ok(treePart(due).indexOf('running for <span data-live="since" data-ts="' + (AG_NOW - 42_000) + '">42 s</span></span>'
+  assert.ok(treePart(due).indexOf(clockFig(AG_NOW - 42_000, '42 s', '11:59') + '</span>'
     + span(AG_NOW - 180_000, '3 min') + '</span>') >= 0, due)
   // In the running list too, after its figures.
   const list = due.slice(0, due.indexOf('<div class="agtree"'))
-  assert.ok(list.indexOf('<span class="nobr">12.3K</span>' + span(AG_NOW - 180_000, '3 min') + '</span>') >= 0, list)
+  assert.ok(list.indexOf(runFig(AG_NOW - 42_000, '42 s', '11:59') + '</span>' + span(AG_NOW - 180_000, '3 min') + '</span>') >= 0, list)
   // Minutes only, then hours and minutes.
   assert.ok(agentsHtml(a, { agents: at(AG_NOW - 65 * 60_000 - 30_000), ui: open }).indexOf('<span class="ag-for">1 h 05 min</span>') >= 0)
+  // Without the view model's clock time there are no static words: the minutes stay readable.
+  const mute = agentsHtml(a, { agents: at(AG_NOW - 180_000, { lastClock: null }), ui: open })
+  assert.ok(treePart(mute).indexOf('<span class="ag-fp ag-silent" data-live="silent" data-ts="' + (AG_NOW - 180_000) + '">' + SEP
+    + '<span class="nobr">silent for <span class="ag-for">3 min</span></span></span>') >= 0, mute)
   // A node the view model does not call silent — waiting on an agent below it, a launch, a finished
   // one — gets no such span, whatever its clock says; nor does a flag that is not `true`.
   for (const silence of [false, undefined, 'true', 1]) {
@@ -3852,6 +3922,7 @@ test('a running agent that is not waiting says how long it has been silent, from
   // No colour of its own: the rule set gives the silence none.
   assert.equal(/\.ag-silent\s*\{/.test(STYLE), false)
   assert.equal(DICT['silent for {0}'], 'silent for {0}')
+  assert.equal(DICT['silent since {0}'], 'silent since {0}')
 })
 
 test('the page clock shows a silence the second it reaches three minutes, and counts it in minutes', () => {
@@ -3888,19 +3959,19 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
   const three = tallyOf({ done: 2, stopped: 1 })
   const closed = agentTree({
     roots: [treeNode(AK.s1, 'active', {
-      kind: 'session', label: 'Session 9d0eb37a', ...three, hasChildren: true, childrenTotal: 2, children: [],
+      kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', ...three, hasChildren: true, childrenTotal: 2, children: [],
     })],
   })
   const h = treePart(agentsHtml(a, { agents: closed }))
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" aria-expanded="false" aria-selected="false">'
     + '<div class="ag-line"><button class="ag-fold" data-act="agentToggle" data-key="' + AK.s1
-    + '" aria-label="Expand Session 9d0eb37a"></button>') >= 0, h)
-  assert.ok(h.indexOf('<span class="ag-label"><span class="nobr">Session 9d0eb37a</span></span>'
-    + '<span class="meta">' + tallyHtml('3 started · 2 ✓ · 1 ■', '3 started, 2 done, 1 stopped') + '</span>') >= 0, h)
+    + '" aria-label="Expand Session Tue 10:55 · 9d0eb37a"></button>') >= 0, h)
+  assert.ok(h.indexOf(lbl('Session Tue 10:55 · 9d0eb37a', ['Session Tue 10:55'], '9d0eb37a') + '<span class="ag-fig">') >= 0, h)
+  assert.ok(h.indexOf(tallyEnd(three)) >= 0, h)
   assert.equal(h.indexOf('<ul role="group">'), -1, 'a closed node wrote a group')
   // A run of journal-only agents: agents below it, no child to open. A leaf, whatever is stored.
   const run = agentTree({
-    roots: [treeNode(AK.wf, 'unknown', { kind: 'workflow', label: 'Workflow cfe7718d', ...three, children: [] })],
+    roots: [treeNode(AK.wf, 'unknown', { kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', ...three, children: [] })],
   })
   for (const ui of [agentUi(), agentUi({ agentsExpanded: [AK.wf] })]) {
     const leaf = treePart(agentsHtml(a, { agents: run, ui }))
@@ -3908,17 +3979,17 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
     assert.equal(leaf.indexOf('aria-expanded'), -1, leaf)
     assert.ok(leaf.indexOf('<div class="ag-line"><span class="ag-pad"></span><button class="ag-row" data-act="agentSelect" data-key="'
       + AK.wf + '"') >= 0, leaf)
-    assert.ok(leaf.indexOf(tallyHtml('3 started · 2 ✓ · 1 ■', '3 started, 2 done, 1 stopped')) >= 0, leaf)
+    assert.ok(leaf.indexOf(tallyEnd(three)) >= 0, leaf)
   }
   // An agent's tally stands while its children are not on screen: closed, or opened with none
   // of them sent (the payload's cap); with its children drawn it has none.
   const agent = (children: unknown[], more = 0): Record<string, unknown> => agentTree({ roots: [treeNode(AK.a3, 'failed', {
-    label: 'general-purpose · Sonnet 5 · c3d4', ...T_A3, hasChildren: true, childrenTotal: 1, childrenMore: more, children,
+    label: 'general-purpose · sonnet-5 · c3d4', ...T_A3, hasChildren: true, childrenTotal: 1, childrenMore: more, children,
   })] })
-  assert.ok(treePart(agentsHtml(a, { agents: agent([]) })).indexOf(tallyMarkup(T_A3)) >= 0)
-  assert.ok(treePart(agentsHtml(a, { agents: agent([], 1), ui: agentUi({ agentsExpanded: [AK.a3] }) })).indexOf(tallyMarkup(T_A3)) >= 0)
+  assert.ok(treePart(agentsHtml(a, { agents: agent([]) })).indexOf(tallyEnd(T_A3)) >= 0)
+  assert.ok(treePart(agentsHtml(a, { agents: agent([], 1), ui: agentUi({ agentsExpanded: [AK.a3] }) })).indexOf(tallyEnd(T_A3)) >= 0)
   const drawn = treePart(agentsHtml(a, { agents: agent([treeNode(AK.l1, 'unknown', { kind: 'pending' })]), ui: agentUi({ agentsExpanded: [AK.a3] }) }))
-  assert.equal(drawn.indexOf('ag-tally'), -1, drawn)
+  assert.equal(drawn.indexOf('ag-t"'), -1, drawn)
 })
 
 test('an open node with more children than it shows says how many, and offers the next fifty while it can', () => {
@@ -3927,10 +3998,10 @@ test('an open node with more children than it shows says how many, and offers th
   // `agentMore` for the node, while another step can be taken; the count alone once it took its
   // last one, or when the payload had no room for any of its children.
   const a = agentCtx()
-  const kids = Array.from({ length: 3 }, (_, i) => treeNode(`a:kid${i}`, 'done', { label: `Explore · Opus 5 · k${i}` }))
+  const kids = Array.from({ length: 3 }, (_, i) => treeNode(`a:kid${i}`, 'done', { label: `Explore · opus-5 · k${i}` }))
   const run = (more: number, children = kids): Record<string, unknown> => agentTree({
     roots: [treeNode(AK.wf, 'done', {
-      kind: 'workflow', label: 'Workflow cfe7718d', hasChildren: true, childrenTotal: children.length + more, childrenMore: more, children,
+      kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', hasChildren: true, childrenTotal: children.length + more, childrenMore: more, children,
     })],
   })
   const open = (over: Record<string, unknown> = {}): Record<string, unknown> => agentUi({ agentsExpanded: [AK.wf], ...over })
@@ -4016,7 +4087,7 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   // The poison is on the page as text — in the labels, the notes and the details alike.
   const shown = '&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(2)&gt;&quot; '
     + 'onmouseover=&quot;alert(3)&#39; `x` '
-  for (const where of ['<span class="ag-label"><span class="nobr">' + shown, '<p class="empty">' + shown + 'n</p>',
+  for (const where of ['<span class="ag-np">' + shown, '<span class="ag-label" title="' + shown, '<p class="empty">' + shown + 'n</p>',
     '<div class="name">' + shown, '<dt>' + shown + 'Type</dt>',
     // The running list's context and usage, as text too.
     '<span class="meta ag-ctx"><span>' + shown + 'Session 9d0eb37a</span>', '<span class="nobr">' + shown + '12.3K</span>']) {
@@ -4382,7 +4453,9 @@ test('the agent tree speaks German on a German page', () => {
     // 1.5.1: the running list.
     'Running now ({0})', 'and {0} more', 'No agent is running.', 'waits for a child agent',
     // 1.6 D4: how many of a collector's agents run.
-    '~1 of them running', '~{0} of them running']
+    '~1 of them running', '~{0} of them running',
+    // 1.6 N9: the state and the clocks in words for a screen reader.
+    '{0}, derived', '{0}, recorded', 'since {0}', 'silent since {0}']
   const de: Record<string, string> = {}
   for (const w of words) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, w), w + ' is not a word of the page')
@@ -4409,19 +4482,22 @@ test('the agent tree speaks German on a German page', () => {
     'title="fehlgeschlagen · aufgezeichnet"', 'title="~unbekannt · abgeleitet"',
     'title="~Sitzung aktiv · abgeleitet"', 'title="~Sitzung ruht · abgeleitet"',
     '<span class="nobr">läuft seit <span data-live="since"', '<dt class="ag-wide">Zustand</dt>', '<dt>Letzte Aktivität</dt><dd><span class="nobr">vor <span data-live="since"',
-    'aria-label="Workflow cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
+    'aria-label="Workflow run Tue 11:40 · cfe7718d einklappen"', '<p class="empty">2 ältere Sitzung(en) nicht angezeigt.</p>',
     // 1.6 N5: the silence, in German words and the page's units.
     '<span class="nobr">still seit <span class="ag-for">4 min</span></span>',
+    // 1.6 N9: the state and the clocks for a screen reader, in German.
+    'aria-label="läuft, abgeleitet" title="~läuft · abgeleitet"', 'aria-label="fertig, aufgezeichnet" title="fertig · aufgezeichnet"',
+    '<span class="sr">seit 11:59</span>', '<span class="sr">still seit 11:59</span>',
     // The running list: its heading with everything that runs, the waiting clause, the rest counted.
     '<div class="name" role="heading" aria-level="3">Laufen gerade (5)</div>',
     '<span>wartet auf einen untergeordneten Agenten</span>', '<p class="meta">und 3 weitere</p>',
   ]) assert.ok(h.indexOf(phrase) >= 0, phrase + ' missing from ' + h)
-  assert.ok(section({ ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
+  assert.ok(section({ ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('aria-label="Workflow run Tue 11:40 · cfe7718d ausklappen"') >= 0)
   // 1.6 D3: the line under an open node that shows fifty of its children at a time, in German
   // words and German digits.
   const paged = (more: number, pages: number): string => section({
     agents: agentTree({ roots: [treeNode(AK.wf, 'done', {
-      kind: 'workflow', label: 'Workflow cfe7718d', hasChildren: true, childrenTotal: more + 1, childrenMore: more,
+      kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', hasChildren: true, childrenTotal: more + 1, childrenMore: more,
       children: [treeNode(AK.a2, 'done')],
     })] }),
     ui: agentUi({ agentsExpanded: [AK.wf], agentsMore: pages > 0 ? [{ key: AK.wf, pages }] : [] }),
@@ -4435,15 +4511,15 @@ test('the agent tree speaks German on a German page', () => {
   // The tree's default: the closed session's tally, in the words the view model wrote — German
   // when it was built in German (1.6 N1); the page translates nothing of it.
   const closed = section({ agents: agentTree({ roots: [treeNode(AK.s1, 'active', {
-    kind: 'session', label: 'Session 9d0eb37a', sub: 'repo', usage: '1.2M', duration: '1 h 05 min', agentCount: 4,
+    kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', sub: 'repo', usage: '1.2M', duration: '1 h 05 min', agentCount: 4,
     tally: { started: 4, done: 3, failed: 0, retried: 0, stopped: 0, running: 1, unknown: 0 },
     tallyText: '4 gestartet · 3 ✓ · ~1 ●', tallySpoken: '4 gestartet, 3 fertig, etwa 1 laufend',
     children: [treeNode(AK.a1, 'running')],
   })] }) })
-  assert.ok(closed.indexOf('<span class="meta">repo · ' + tallyHtml('4 gestartet · 3 ✓ · ~1 ●', '4 gestartet, 3 fertig, etwa 1 laufend')
-    + '</span>') >= 0, closed)
+  assert.ok(closed.indexOf(tallyEnd({ tallyText: '4 gestartet · 3 ✓ · ~1 ●', tallySpoken: '4 gestartet, 3 fertig, etwa 1 laufend' })) >= 0,
+    closed)
   // The toggle's words are the page's; the node's name is the view model's (English here).
-  assert.ok(closed.indexOf('aria-label="Session 9d0eb37a ausklappen"') >= 0, closed)
+  assert.ok(closed.indexOf('aria-label="Session Tue 10:55 · 9d0eb37a ausklappen"') >= 0, closed)
   assert.ok(section({ agents: agentTree({ runningNow: [] }) }).indexOf('<p class="ag-now meta">Kein Agent läuft gerade.</p>') === 0)
   // 1.6 D10: the line about the lower bound is gone in German too.
   assert.equal(h.indexOf('Untergrenzen.'), -1, h)
@@ -4455,8 +4531,9 @@ test('the agent tree speaks German on a German page', () => {
       startTs: null, lastTs: null, running }),
   ] }) })
   assert.ok(collected(1234).indexOf('<div class="name" role="heading" aria-level="3">Laufen gerade (1235)</div>') >= 0, collected(1234))
-  assert.ok(collected(1234).indexOf('<span>~1.234 davon laufen</span>') >= 0, collected(1234))
-  assert.ok(collected(1).indexOf('<span>~1 davon läuft</span>') >= 0, collected(1))
+  // On its figures' line, in the clock's place (1.6, the lead's note on P5b: no clock for it).
+  assert.ok(collected(1234).indexOf('<span class="nobr">~1.234 davon laufen</span>') >= 0, collected(1234))
+  assert.ok(collected(1).indexOf('<span class="nobr">~1 davon läuft</span>') >= 0, collected(1))
 })
 
 test('the tree the view model builds reaches the page with its dashes, its marks and its derivations', () => {
@@ -4487,30 +4564,36 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     // 1.6 D7: an attempt the journal superseded says why its row is dimmed.
     const title = (n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded')
       + (n.superseded ? ' · superseded by a later attempt' : '')
-    assert.ok(row.indexOf('<span class="ag-st ag-' + n.state + '" role="img" aria-label="' + title + '" title="' + title + '">') >= 0, row)
-    // Its usage first among the figures — a session's named, "own 23.3K" — and no mark on the
-    // row: the details carry it.
-    if (n.kind !== 'pending') {
-      assert.ok(row.indexOf('<span class="ag-fig"><span class="nobr">' + (n.kind === 'session' ? 'own ' : '') + n.usage) >= 0, row)
-    }
-    assert.equal(row.indexOf('⚠'), -1, row)
+    // 1.6 N9: for a screen reader the state in words, without the tilde.
+    const spoken = words[n.state] + (n.derived ? ', derived' : ', recorded') + (n.superseded ? ', superseded by a later attempt' : '')
+    assert.ok(row.indexOf('<span class="ag-st ag-' + n.state + '" role="img" aria-label="' + spoken + '" title="' + title + '">') >= 0, row)
+    // 1.6 N6: the name's line titled with the whole name, the model's whole id.
+    assert.ok(row.indexOf('<span class="ag-label" title="' + n.fullLabel + (n.sub ? ' · ' + n.sub : '') + '">') >= 0, row)
+    // Its usage first among the figures on the second line — a session's named, "own 23.3K", a
+    // launch's a dash — and marked there (1.6 D10, as shipped) exactly when it is a lower bound
+    // with its reason, titled with that reason.
+    assert.ok(row.indexOf('<span class="ag-fig"><span class="ag-fp"><span class="nobr">' + (n.kind === 'session' ? 'own ' : '') + n.usage) >= 0, row)
+    const marked = n.lowerBound && n.lowerBoundText !== null
+    assert.equal(row.split('class="ag-lb"').length - 1, marked ? 1 : 0, row)
+    if (marked) assert.ok(row.indexOf('<span class="ag-lb" role="img" aria-label="lower bound" title="' + n.lowerBoundText + '">⚠</span>') >= 0, row)
     // 1.6 N1: every node opened, so a session's and a run's tally stand, an agent's does not —
     // its children show their own glyphs — and a node without agents below has none.
     const shows = n.tallyText !== null && n.kind !== 'agent'
-    assert.equal(row.indexOf('class="ag-tally"') >= 0, shows, row)
-    if (shows) assert.ok(row.indexOf(tallyHtml(String(n.tallyText), String(n.tallySpoken))) >= 0, row)
+    assert.equal(row.indexOf('class="ag-t"') >= 0, shows, row)
+    if (shows) assert.ok(row.indexOf(tallyEnd(n as unknown as Record<string, unknown>)) >= 0, row)
   }
   assert.ok(nodes.some((n) => n.kind === 'agent' && n.tallyText !== null), 'the world has an agent with agents below it')
-  // The payload carries the flag and its reason (1.6 D10); the shipped page marks no row and has
-  // no line about it under the tree — the details' Output note says it.
+  // The payload carries the flag and its reason (1.6 D10); the shipped page marks the rows (P7) and
+  // has no line about it under the tree.
   assert.ok(nodes.filter((n) => n.kind === 'agent' && n.lowerBound).length >= 5)
   assert.ok(nodes.every((n) => (n.lowerBoundText !== null) === (n.lowerBound && n.kind !== 'pending' && n.kind !== 'noreply')))
+  assert.equal(h.split('class="ag-lb"').length - 1, nodes.filter((n) => n.lowerBoundText !== null).length, h)
   assert.equal(h.indexOf('marked ⚠'), -1, h)
-  // A launch nothing was counted of: no figures, no mark, and no zero.
+  // A launch nothing was counted of: a dash for its usage on its second line, no mark, and no zero.
   const pending = nodes.filter((n) => n.kind === 'pending')
   assert.equal(pending.length, 1)
   const p = rowOf(pending[0].key)
-  assert.equal(p.indexOf('–</span> · <span class="nobr">–'), -1, p)
+  assert.ok(p.indexOf('<span class="ag-fig"><span class="ag-fp"><span class="nobr">–</span></span>') >= 0, p)
   assert.equal(/>0[ <]|> 0</.test(p), false, p)
 })
 
@@ -4534,7 +4617,7 @@ test('the details the view model builds open under the row that was clicked, and
   assert.ok(at >= 0, inTree.h)
   const panel = panelOf(inTree.h)
   assert.ok(inTree.h.indexOf(panel) > at && inTree.h.indexOf(panel) > inTree.h.indexOf('<div class="agtree"'), inTree.h)
-  assert.ok(panel.indexOf('<div class="name">' + failed.label + '</div>') >= 0, panel)
+  assert.ok(panel.indexOf('<div class="name">' + failed.fullLabel + '</div>') >= 0, panel)
   // Its run closed: the row is hidden, the running list does not name it — no panel, no note,
   // nothing pressed. Opened again, the panel is back.
   const closed = page({ agentsExpanded: opened.filter((k) => !k.startsWith('w:')), agentSelected: failed.key })
@@ -4564,7 +4647,9 @@ test('the running list the view model builds reaches the page first, the tree cl
   const items = vm.agents.runningNow
   // The world's running agent, its run's collector (1.6 D4) — one entry for its agents without a
   // counted reply, one of which runs — and its launch waiting for a transcript.
-  assert.deepEqual(items.map((r) => [r.kind, r.running]), [['agent', 1], ['noreply', 1], ['pending', 1]])
+  // The collector last (1.6, the lead's note on P5b, pinned and changed): it has no start of its
+  // own, and the list is the longest-running first.
+  assert.deepEqual(items.map((r) => [r.kind, r.running]), [['agent', 1], ['pending', 1], ['noreply', 1]])
   const h = agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi() })
   // First in the section, before the tree: the heading with the count — the running agents, as
   // the view model counts them (1.6 §2.3) —, one row per item, in order.
@@ -4576,15 +4661,24 @@ test('the running list the view model builds reaches the page first, the tree cl
   for (const r of items) {
     const at = h.indexOf('data-key="' + r.key + '" data-list="now"')
     const row = h.slice(at, h.indexOf('</button>', at))
-    // The live clock from its start, its usage — a dash for the launch — and where it sits.
-    assert.ok(row.indexOf('<span class="nobr">running for <span data-live="since" data-ts="' + r.startTs + '">') >= 0, row)
+    // Its usage — a dash for the launch and the collector, marked where it is a lower bound — then
+    // the live clock from its start, with the words for a screen reader; a collector has no start
+    // of its own (1.6, the lead's note on P5b) and says how many of its agents run instead.
+    assert.ok(row.indexOf('<span class="ag-fig"><span class="ag-fp"><span class="nobr">' + r.usage
+      + (r.lowerBound ? ' <span class="ag-lb"' : '</span>')) >= 0, row)
+    if (r.kind === 'noreply') {
+      assert.equal(row.indexOf('data-live="since"'), -1, row)
+      assert.ok(row.indexOf(fig('~1 of them running')) >= 0, row)
+    } else {
+      assert.ok(row.indexOf('<span class="nobr">running for <span data-live="since" data-ts="' + r.startTs + '">') >= 0, row)
+      assert.ok(row.indexOf('<span class="sr">since ' + r.startClock + '</span>') >= 0, row)
+    }
     // 1.6 N5: a running agent's silence after its figures, a waiting one's, a launch's and a
     // collector's never.
-    assert.ok(row.indexOf('<span class="nobr">' + r.usage + '</span>' + (r.silence ? '<span class="ag-silent"' : '</span>')) >= 0, row)
+    assert.equal(row.indexOf('<span class="ag-fp ag-silent"') >= 0, r.silence, row)
     assert.equal(r.silence, r.kind === 'agent' && !r.waiting, r.key)
-    // A collector says how many of its agents run, after where it sits.
-    const where = [...r.context.split(' · '), ...(r.kind === 'noreply' ? ['~1 of them running'] : [])]
-    assert.ok(row.indexOf('<span class="meta ag-ctx"><span>' + where.join('</span> · <span>') + '</span></span>') >= 0, row)
+    // Where it sits.
+    assert.ok(row.indexOf('<span class="meta ag-ctx"><span>' + r.context.split(' · ').join('</span> · <span>') + '</span></span>') >= 0, row)
     assert.equal(/>0[ <]|> 0</.test(row), false, row)
   }
   assert.equal(items.find((r) => r.kind === 'pending')?.usage, '–')
@@ -4597,32 +4691,40 @@ test('the running list the view model builds reaches the page first, the tree cl
     vm.agents.roots.map((r) => r.key))
   for (const r of vm.agents.roots) {
     assert.equal(r.tally?.started, r.agentCount, r.label)
-    assert.ok(tree.indexOf(tallyHtml(String(r.tallyText), String(r.tallySpoken))) >= 0, r.label)
+    assert.ok(tree.indexOf(tallyEnd(r as unknown as Record<string, unknown>)) >= 0, r.label)
   }
   assert.equal(tree.indexOf('aria-expanded="true"'), -1, tree)
   // The running agent is mid-reply, so its output is a lower bound — its item carries the flag and
-  // the reason (1.6 D10) — and the shipped page marks neither its row nor any line under the tree.
+  // the reason (1.6 D10) — and the shipped page marks its row (P7), and no line under the tree.
   assert.deepEqual(items.map((r) => r.lowerBound), [true, false, false])
   assert.deepEqual(items.map((r) => r.lowerBoundText !== null), [true, false, false])
   assert.equal(vm.agents.roots.some((r) => r.lowerBound), false, 'a session row carries the lower bound itself')
-  assert.equal(h.indexOf('⚠'), -1, h)
+  assert.equal(h.split('class="ag-lb"').length - 1, 1, h)
 })
 
 // ---------------------------------------------------------------------------
 // 1.5.1: the running list
 // ---------------------------------------------------------------------------
 
-/** One row of the running list exactly as the page writes it. */
-function nowRow(o: { key: string; kind?: string; parts: string[]; clock?: { ts: number; text: string } | null;
+/**
+ * One row of the running list exactly as the page writes it (1.6 N6): the glyph, the name as a tree
+ * row writes it — its title the whole name —, the figures under it — the usage, then the live clock
+ * with its words for a screen reader, or for a collector how many of its agents run — and where it
+ * sits, a line of its own under them.
+ */
+function nowRow(o: { key: string; kind?: string; title?: string; names: string[]; id?: string | null;
+  clock?: { ts: number; text: string; since?: string | null } | null; members?: string;
   usage: string; where: string[]; pressed?: boolean; panel?: string }): string {
-  const figs = [...(o.clock ? ['running for <span data-live="since" data-ts="' + o.clock.ts + '">' + o.clock.text + '</span>'] : []), o.usage]
-  // 1.6 D4: a collector's name is words, which wrap like any sentence — no parts to keep together.
-  const label = o.kind === 'noreply' ? o.parts.join(' · ') : o.parts.map((p) => '<span class="nobr">' + p + '</span>').join(' · ')
+  const parts = [fig(o.usage)]
+  if (o.clock) parts.push(runFig(o.clock.ts, o.clock.text, o.clock.since === undefined ? '11:59' : o.clock.since))
+  if (o.members) parts.push(fig(o.members))
+  const title = o.title ?? [...o.names, ...(o.id ? [o.id] : [])].join(' · ')
   return '<li class="ag-k-' + (o.kind ?? 'agent') + '"><button class="ag-row" data-act="agentSelect" data-key="' + o.key
     + '" data-list="now" aria-pressed="' + (o.pressed === true) + '">'
-    + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
-    + '<span class="ag-text"><span class="ag-label">' + label + '</span>'
-    + '<span class="ag-fig">' + figs.map((f) => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
+    + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
+    + '<span class="ag-text">' + (title === '' ? '<span class="ag-label">' + o.names.map((p) => '<span class="ag-np">' + p + '</span>').join('')
+      + '</span>' : lbl(title, o.names, o.id ?? null))
+    + figs(...parts)
     + (o.where.length ? '<span class="meta ag-ctx">' + o.where.map((w) => '<span>' + w + '</span>').join(' · ') + '</span>' : '')
     + '</span></button>' + (o.panel ?? '') + '</li>'
 }
@@ -4630,7 +4732,7 @@ function nowRow(o: { key: string; kind?: string; parts: string[]; clock?: { ts: 
 test('the running list comes first: how many run, then a row each with its clock, its usage and where it sits', () => {
   const a = agentCtx()
   const items = [
-    runningItem({ key: 'a:w1', label: 'general-purpose · Opus 5 · w1w1', context: 'Session 9d0eb37a',
+    runningItem({ key: 'a:w1', label: 'general-purpose · opus-5 · w1w1', context: 'Session 9d0eb37a',
       usage: '4.1K', startTs: AG_NOW - 600_000, waiting: true }),
     runningItem(),
     runningItem({ key: AK.l1, kind: 'pending', label: 'Plan · sonnet · launched', context: 'Session 9d0eb37a · repo',
@@ -4640,22 +4742,23 @@ test('the running list comes first: how many run, then a row each with its clock
   const now = h.slice(0, h.indexOf('<div class="agtree"'))
   assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (3)</div><ul>'
     // Waiting on the agent below it: the clause says so, after where it sits.
-    + nowRow({ key: 'a:w1', parts: ['general-purpose', 'Opus 5', 'w1w1'], clock: { ts: AG_NOW - 600_000, text: '10 min 00 s' },
+    + nowRow({ key: 'a:w1', names: ['general-purpose', 'opus-5'], id: 'w1w1', clock: { ts: AG_NOW - 600_000, text: '10 min 00 s' },
       usage: '4.1K', where: ['Session 9d0eb37a', 'waits for a child agent'] })
     // The selected one is pressed, and — its tree row inside a closed branch — its details are
-    // the second line of its item (1.6 N2).
-    + nowRow({ key: AK.a1, parts: ['Explore', 'Opus 5', 'a94f'], clock: { ts: AG_NOW - 42_000, text: '42 s' },
-      usage: '12.3K', where: ['Session 9d0eb37a', 'Workflow cfe7718d', 'repo'], pressed: true, panel: panelOf(h) })
-    // A launch nobody has read a line of: its clock, and a dash for what it used.
-    + nowRow({ key: AK.l1, kind: 'pending', parts: ['Plan', 'sonnet', 'launched'], clock: { ts: AG_NOW - 90_000, text: '1 min 30 s' },
+    // the second line of its item (1.6 N2). Its title is its whole name, the model's whole id.
+    + nowRow({ key: AK.a1, names: ['Explore', 'opus-5'], id: 'a94f', title: 'Explore · claude-opus-5 · a94f',
+      clock: { ts: AG_NOW - 42_000, text: '42 s' },
+      usage: '12.3K', where: ['Session 9d0eb37a', 'Workflow run cfe7718d', 'repo'], pressed: true, panel: panelOf(h) })
+    // A launch nobody has read a line of: a dash for what it used, and its clock.
+    + nowRow({ key: AK.l1, kind: 'pending', names: ['Plan', 'sonnet', 'launched'], clock: { ts: AG_NOW - 90_000, text: '1 min 30 s' },
       usage: '–', where: ['Session 9d0eb37a', 'repo'] })
     + '</ul></div>', now)
   // The rows are the first buttons of the section, the tree's after them.
   const acts = [...h.matchAll(/data-act="([a-zA-Z]+)" data-key="([^"]*)"/g)].map((m) => m[2])
   assert.deepEqual(acts.slice(0, 3), ['a:w1', AK.a1, AK.l1])
   // Each part of where it sits keeps together while it fits and breaks inside only when not;
-  // the line is one of its own under the name and the figures; a launch's name is italic.
-  assert.match(STYLE, /\.ag-ctx \{ flex: 1 1 100%; \}/)
+  // the line is one of its own under the name and the figures — the rows' text a column (1.6 N6)
+  // —; a launch's name is italic.
   assert.match(STYLE, /\.ag-ctx > span \{ display: inline-block; max-width: 100%; \}/)
   assert.match(STYLE, /\.ag-now li \{ display: flex; flex-wrap: wrap; \}/)
   assert.match(STYLE, /\.ag-now \.ag-k-pending \.ag-label \{ font-style: italic; \}/)
@@ -4672,24 +4775,30 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
     kind: 'noreply', label: '263 agent(s) without a counted reply', usage: '–', duration: '–', startTs: null, lastTs: null, ...T_N1,
   })
   const tree = agentTree({
-    roots: [treeNode(AK.wf, 'running', { kind: 'workflow', label: 'Workflow cfe7718d', ...tallyOf({ done: 250, failed: 3, running: 11 }),
+    roots: [treeNode(AK.wf, 'running', { kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', ...tallyOf({ done: 250, failed: 3, running: 11 }),
       children: [treeNode(AK.a1, 'running'), collector] })],
     running: 11,
     runningNow: [runningItem(), runningItem({ key: AK.n1, kind: 'noreply', label: '263 agent(s) without a counted reply',
-      context: 'Session 9d0eb37a · Workflow cfe7718d · repo', usage: '–', startTs: null, lastTs: null, running: 10 })],
+      context: 'Session 9d0eb37a · Workflow run cfe7718d · repo', usage: '–', startTs: null, lastTs: null, running: 10 })],
   })
   const h = agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.wf] }) })
   const now = h.slice(0, h.indexOf('<div class="agtree"'))
   assert.equal(now, '<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (11)</div><ul>'
-    + nowRow({ key: AK.a1, parts: ['Explore', 'Opus 5', 'a94f'], clock: { ts: AG_NOW - 42_000, text: '42 s' },
-      usage: '12.3K', where: ['Session 9d0eb37a', 'Workflow cfe7718d', 'repo'] })
-    // No start of its own when none of its agents has a record: no clock, a dash for its usage.
-    + nowRow({ key: AK.n1, kind: 'noreply', parts: ['263 agent(s) without a counted reply'], clock: null, usage: '–',
-      where: ['Session 9d0eb37a', 'Workflow cfe7718d', 'repo', '~10 of them running'] })
+    + nowRow({ key: AK.a1, names: ['Explore', 'opus-5'], id: 'a94f', title: 'Explore · claude-opus-5 · a94f',
+      clock: { ts: AG_NOW - 42_000, text: '42 s' },
+      usage: '12.3K', where: ['Session 9d0eb37a', 'Workflow run cfe7718d', 'repo'] })
+    // No start of its own (1.6, the lead's note on P5b): no clock, a dash for its usage, and how
+    // many of its agents run in the clock's place.
+    + nowRow({ key: AK.n1, kind: 'noreply', names: ['263 agent(s) without a counted reply'], clock: null, usage: '–',
+      members: '~10 of them running', where: ['Session 9d0eb37a', 'Workflow run cfe7718d', 'repo'] })
     + '</ul></div>', now)
   // With one running member, the words for one.
   const one = agentsHtml(a, { agents: agentTree({ running: 1, runningNow: [runningItem({ key: AK.n1, kind: 'noreply', usage: '–', running: 1 })] }) })
-  assert.ok(one.indexOf('<span>~1 of them running</span>') >= 0 && one.indexOf('Running now (1)') >= 0, one)
+  assert.ok(one.indexOf(fig('~1 of them running')) >= 0 && one.indexOf('Running now (1)') >= 0, one)
+  // A start the payload gives a collector anyway runs no clock: it has none of its own.
+  const clocked = agentsHtml(a, { agents: agentTree({ running: 1, runningNow: [runningItem({ key: AK.n1, kind: 'noreply', usage: '–', running: 1,
+    startTs: AG_NOW - 42_000 })] }) })
+  assert.equal(clocked.indexOf('data-live'), -1, clocked)
   // A count the page cannot trust is no clause, and a heading that would count fewer than the
   // rows counts the rows.
   for (const running of [0, -2, 1.5, NaN, '10', null, undefined]) {
@@ -4704,10 +4813,14 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
   const li = t.slice(at, t.indexOf('</li>', at) + 5)
   assert.equal(li, '<li role="treeitem" class="ag-k-noreply" aria-selected="false"><div class="ag-line"><span class="ag-pad"></span>'
     + '<button class="ag-row" data-act="agentSelect" data-key="' + AK.n1 + '" aria-pressed="false">'
-    + '<span class="ag-st ag-running" role="img" aria-label="~running · derived" title="~running · derived"></span>'
-    + '<span class="ag-text"><span class="ag-label">263 agent(s) without a counted reply</span>'
-    + '<span class="meta">' + tallyMarkup(T_N1) + '</span>'
-    + '<span class="ag-fig"><span class="nobr">–</span> · <span class="nobr">–</span></span></span></button></div></li>', li)
+    + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
+    + '<span class="ag-text">' + lbl('263 agent(s) without a counted reply', ['263 agent(s) without a counted reply'])
+    + figs(fig('–'), fig('–'), ...tallyFigs(T_N1)) + '</span></button></div></li>', li)
+  // Running, with a start the payload gives it anyway: still no clock in the tree — dashes.
+  const started = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.wf, 'running', { kind: 'workflow',
+    label: 'Workflow run Tue 11:40 · cfe7718d', startTs: null, children: [{ ...collector, startTs: AG_NOW - 42_000 }] })] }),
+  ui: agentUi({ agentsExpanded: [AK.wf] }) }))
+  assert.equal(started.indexOf('data-live'), -1, started)
   // Last in its run, after the agents.
   assert.ok(t.indexOf('data-key="' + AK.a1 + '"') < at, t)
 })
@@ -4732,7 +4845,7 @@ test('the running list counts what it left out, and an item with nothing in it i
   // and what is not an item at all is skipped.
   const bare = agentsHtml(a, { agents: agentTree({ runningNow: [{ key: AK.a1 }, null, 7, 'x'] }) })
   assert.ok(bare.startsWith('<div class="ag-now"><div class="name" role="heading" aria-level="3">Running now (1)</div><ul>'
-    + nowRow({ key: AK.a1, parts: ['–'], clock: null, usage: '–', where: [] }) + '</ul></div>'), bare)
+    + nowRow({ key: AK.a1, names: ['–'], title: '', clock: null, usage: '–', where: [] }) + '</ul></div>'), bare)
   assert.equal(/undefined|NaN|null|\[object Object\]|>0</.test(bare.slice(0, bare.indexOf('<div class="agtree"'))), false, bare)
   // A kind this build does not know reaches no class: it is drawn as an agent.
   const rocket = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ kind: 'rocket' })] }) })
@@ -5046,13 +5159,138 @@ test('a fragment for a section with no body on the page updates the model and re
   assert.equal(nodeVm.runInContext('vm.records.marker', a.c), 7, 'the payload was dropped')
 })
 
-test('a label breaks only between its parts, never inside a hyphenated model id', () => {
+// 1.6 N6 (pinned and changed): 1.5 let a name wrap between its parts; a row is two lines now, so the
+// name is one — no part of it wraps, and where it has no room its first part gives way, never the
+// model id or the short id.
+test('a name is one line: its parts never wrap, only its first part gives way, and the model id and the short id never', () => {
   const a = agentCtx()
-  const h = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'done', { label: 'general-purpose · claude-opus-5 · a94f' })] }) }))
-  const label = h.slice(h.indexOf('<span class="ag-label">'), h.indexOf('</span><span class="ag-fig">') + 7)
-  assert.equal(label, '<span class="ag-label"><span class="nobr">general-purpose</span> · '
-    + '<span class="nobr">claude-opus-5</span> · <span class="nobr">a94f</span></span>')
-  assert.equal(label.split('<span class="nobr">').length - 1, 3)
+  const h = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, 'done', { label: 'general-purpose · opus-5 · a94f',
+    fullLabel: 'general-purpose · claude-opus-5 · a94f' })] }) }))
+  const label = h.slice(h.indexOf('<span class="ag-label"'), h.indexOf('<span class="ag-fig">'))
+  assert.equal(label, lbl('general-purpose · claude-opus-5 · a94f', ['general-purpose', 'opus-5'], 'a94f'))
+  assert.match(STYLE, /\.ag-label > span \{ flex: none; overflow: hidden; white-space: pre; text-overflow: ellipsis; \}/)
+  assert.match(STYLE, /\.ag-label > \.ag-np:first-child \{ flex-shrink: 1; min-width: 1\.5em; \}/)
+  // The short id and a session's project in the dim tone; the project gives way first.
+  assert.match(STYLE, /\.ag-label > \.ag-sid \{ color: var\(--dim\); \}/)
+  assert.match(STYLE, /\.ag-label > \.ag-proj \{ flex-shrink: 1000000; min-width: 0; color: var\(--dim\); \}/)
+  // A launch's last word is no id, and a collector's name is words: nothing of either is dimmed.
+  const launch = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.l1, 'running', { kind: 'pending', label: 'Plan · sonnet · launched' })] }) }))
+  assert.equal(launch.indexOf('ag-sid'), -1, launch)
+  const words = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.n1, 'running', { kind: 'noreply', label: '2 agent(s) without a counted reply' })] }) }))
+  assert.ok(words.indexOf(lbl('2 agent(s) without a counted reply', ['2 agent(s) without a counted reply'])) >= 0, words)
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P7 · N6 two-line rows, N9 accessibility basics
+// ---------------------------------------------------------------------------
+
+/** A fake part of a figures' line: where its right edge is, and the classes the fit gives it. */
+function fakePart(right: number, hidden = false): { right: number; hidden: boolean; classList: { contains: (c: string) => boolean; add: (c: string) => void; remove: (c: string) => void; has: Set<string> }; getBoundingClientRect: () => { right: number } } {
+  const has = new Set(['ag-fp'])
+  return {
+    right, hidden, getBoundingClientRect: () => ({ right }),
+    classList: { contains: (c: string) => has.has(c), add: (c: string) => { has.add(c) }, remove: (c: string) => { has.delete(c) }, has },
+  }
+}
+
+test('a figures line with no room for its last parts takes them off whole and ends on an ellipsis; the first part always stays', () => {
+  const a = agentCtx()
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  const lineOf = (parts: ReturnType<typeof fakePart>[], clientWidth: number, scrollWidth: number) => {
+    const cls = new Set<string>()
+    return {
+      parts, clientWidth, scrollWidth, children: parts, cls,
+      getBoundingClientRect: () => ({ left: 0, right: clientWidth }),
+      classList: { contains: (c: string) => cls.has(c), add: (c: string) => { cls.add(c) }, remove: (c: string) => { cls.delete(c) } },
+      querySelectorAll: (q: string) => (q === '.ag-gone' ? parts.filter((p) => p.classList.has.has('ag-gone')) : []),
+    }
+  }
+  // 120 px of room, four parts ending at 50, 100, 150 and 200 px: the ellipsis needs 1.4 × 11 px,
+  // so the first two stay and the last two go — whole.
+  const cut = lineOf([fakePart(50), fakePart(100), fakePart(150), fakePart(200)], 120, 200)
+  // A line that fits is left alone, and so is one inside a closed section (no width at all).
+  const fits = lineOf([fakePart(40), fakePart(90)], 120, 90)
+  const shut = lineOf([fakePart(0), fakePart(0)], 0, 0)
+  // A hidden part (a silence not yet due) is not a part of the line.
+  const quiet = lineOf([fakePart(50), fakePart(100), fakePart(300, true)], 120, 130)
+  // However narrow, the first part — the usage and its ⚠ — stays.
+  const narrow = lineOf([fakePart(80), fakePart(160)], 60, 160)
+  doc.querySelectorAll = (q: string) => (q === '.ag-fig' ? [cut, fits, shut, quiet, narrow] : [])
+  nodeVm.runInContext('fitAgentFigures()', a.c)
+  const gone = (l: { parts: ReturnType<typeof fakePart>[] }): boolean[] => l.parts.map((p) => p.classList.has.has('ag-gone'))
+  assert.deepEqual(gone(cut), [false, false, true, true])
+  assert.equal(cut.cls.has('ag-cut'), true)
+  assert.deepEqual([gone(fits), fits.cls.has('ag-cut')], [[false, false], false])
+  assert.deepEqual([gone(shut), shut.cls.has('ag-cut')], [[false, false], false])
+  assert.deepEqual([gone(quiet), quiet.cls.has('ag-cut')], [[false, false, false], true])
+  assert.deepEqual([gone(narrow), narrow.cls.has('ag-cut')], [[false, true], true])
+  // Fitted again with more room — a resize —, the parts come back.
+  cut.clientWidth = 300
+  cut.scrollWidth = 200
+  nodeVm.runInContext('fitAgentFigures()', a.c)
+  assert.deepEqual([gone(cut), cut.cls.has('ag-cut')], [[false, false, false, false], false])
+  // The page's rules: a part taken off is out of sight and still in the page for a screen reader;
+  // the line ends on "…"; the fit runs with the page's other fits, after every render and resize.
+  assert.match(STYLE, /\.ag-fig\.ag-cut::after \{ content: "\\00a0…"; \}/)
+  assert.match(STYLE, /\.ag-fig \.ag-gone \{ position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden;\s+clip-path: inset\(50%\); \}/)
+  assert.match(SOURCE, /function applyFits\(\): void \{[^}]*fitAgentFigures\(\);/)
+})
+
+test('the clock fits its row again when it grows a unit, or a silence appears — and not on every tick', () => {
+  const since = { dataset: { ts: String(AG_NOW - 59_000) }, textContent: '59 s' }
+  const a = agentCtx([since])
+  let fitted = 0
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  const before = doc.querySelectorAll as (q: string) => unknown[]
+  doc.querySelectorAll = (q: string) => { if (q === '.ag-fig') fitted++; return before(q) }
+  a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['agents'], agents: agentTree(), ui: agentUi() }) } })
+  const tick = (t: number): void => { a.clock.t = t; a.intervals[0].fn() }
+  fitted = 0
+  tick(AG_NOW + 500)
+  assert.deepEqual([since.textContent, fitted], ['59 s', 0])
+  tick(AG_NOW + 1_000)
+  assert.deepEqual([since.textContent, fitted], ['1 min 00 s', 1])
+  tick(AG_NOW + 2_000)
+  assert.deepEqual([since.textContent, fitted], ['1 min 01 s', 1])
+})
+
+test('every ticking clock of a row is hidden from a screen reader, and its words stand still beside it', () => {
+  // 1.6 N9: "running for 12 min 05 s" rewritten every second is "since 14:20" to the ear — the
+  // view model's startClock; the page formats no time itself.
+  const a = agentCtx()
+  const h = agentsHtml(a, { ui: openUi() })
+  const live = h.split('data-live="since"').length - 1
+  assert.equal(live, 3, h)
+  assert.equal(h.split('<span aria-hidden="true"><span class="nobr">').length - 1, live, h)
+  assert.equal(h.split('<span class="sr">since 11:59</span>').length - 1, live, h)
+  // The glyph's name is the state in words; its title, for the eye, keeps the page's "~running · derived".
+  assert.ok(h.indexOf('aria-label="running, derived" title="~running · derived"') >= 0, h)
+  assert.ok(h.indexOf('aria-label="done, recorded" title="done · recorded"') >= 0, h)
+  assert.equal(/aria-label="~/.test(h), false, h)
+  // The words are the page's, and German on a German page.
+  for (const w of ['{0}, derived', '{0}, recorded', 'since {0}', 'silent since {0}']) assert.equal(DICT[w], w)
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.deepEqual(['{0}, derived', '{0}, recorded', 'since {0}', 'silent since {0}'].map((w) => bundle[w]),
+    ['{0}, abgeleitet', '{0}, aufgezeichnet', 'seit {0}', 'still seit {0}'])
+})
+
+test('the fold and the row are targets of 24 × 24 px at least, and a forced-colours theme draws the tree in system colours', () => {
+  // 1.6 N9, WCAG 2.5.8: the fold 24 px wide and high, the row and the "more" line 24 px high.
+  assert.match(STYLE, /\.ag-fold, \.ag-pad \{ flex: none; width: 24px; min-height: 24px; \}/)
+  // The arrow on the name's line; the target 24 px high whatever the arrow's line.
+  assert.match(STYLE, /\.ag-fold \{[^}]*line-height: 17px;/)
+  assert.match(STYLE, /\.ag-row \{[^}]*min-height: 24px;/)
+  assert.match(STYLE, /\.ag-more \{[^}]*min-height: 24px;/)
+  // Windows High Contrast: glyphs and ⚠ in the text colour, the twisty a button's, the open row a
+  // 2 px outline in the highlight colour — its tint and edge are gone in such a theme — and the
+  // theme's own adjustment left on.
+  const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active) {'))
+  assert.ok(forced.length > 40, 'no forced-colours block')
+  const block = forced.slice(0, forced.indexOf('\n}') + 2)
+  assert.match(block, /\.ag-st::before, \.ag-lb \{ color: CanvasText; \}/)
+  assert.match(block, /\.ag-fold::before \{ color: ButtonText; \}/)
+  assert.match(block, /\.ag-row\[aria-pressed="true"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/)
+  assert.equal(/forced-color-adjust/.test(STYLE), false)
 })
 
 test('the quota name keeps its nowrap alone, and the running dot never fades below 0.7', () => {

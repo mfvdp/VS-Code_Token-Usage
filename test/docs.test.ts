@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import {
   AGENT_RETENTION_DAYS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
-  SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS,
+  SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
 import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
@@ -532,6 +532,8 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`from **${SPAN_IN_DAYS_FROM_MS / 3_600_000} hours** on`, 'when a span is written in days'],
     // 1.6 N5 (P6): when a running agent's row says how long it has been silent.
     [`has not changed for **${SILENT_AFTER_MS / 60_000} minutes**`, 'when a running agent\'s silence is stated'],
+    // 1.6 N6 (P7): how far back a session's or a run's start is named by its weekday.
+    [`within the last **${WEEKDAY_NAMES_WITHIN_MS / 86_400_000} days**`, 'when a start is named by its weekday'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
     [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],
@@ -541,6 +543,27 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const [claim, what] of claims) {
     assert.ok(flat.includes(claim), `docs/agents.md does not state ${what}: ${claim}`)
+  }
+})
+
+test('docs/agents.md names sessions and runs by their start, rows as two lines in time order, and what a screen reader gets', () => {
+  // 1.6 N6 (P7, the lead's notes): the names by start time, the short model, the newest first, the
+  // two-line row; N9: the words for a screen reader, the 24 px targets, the forced-colours theme.
+  const src = readDoc('src/agentTreeBuild.ts')
+  for (const written of ['Session {0} · {1}', 'Workflow run {0} · {1}', 'Workflow run {0}']) {
+    assert.ok(src.includes(`'${written}'`), `src/agentTreeBuild.ts no longer writes: ${written}`)
+  }
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of ['`Session Tue 14:20 · 9d0eb37a`', '`Session 2026-09-01 14:20 · 9d0eb37a`', '`Session 9d0eb37a`',
+    '`Workflow run Tue 00:19 · cfe7718d`', '`Session 9d0eb37a · Workflow run cfe7718d`', 'plain time order, the newest start first',
+    '`Explore · opus-5 · 94f3`', '`Explore · claude-opus-5 · 94f3`', '**Each row is two lines.**', 'no figure is ever cut in two',
+    '`running, derived`', '`since 14:20`', '24 × 24 px', 'forced-colours theme', 'it runs no clock',
+    '`~10 of them running` in the clock\'s place', '`tokenPace.timezone`']) {
+    assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+  for (const gone of ['Siblings are ordered by when they started', 'A row carries no lower-bound mark', 'The tree\'s rows carry no mark',
+    '`Workflow cfe7718d`']) {
+    assert.equal(flat.includes(gone), false, `docs/agents.md still says: ${gone}`)
   }
 })
 

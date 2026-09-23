@@ -50,6 +50,12 @@ export const RESUMED_AFTER_MS = 60_000
  * has been quiet.
  */
 export const SILENT_AFTER_MS = 3 * 60_000
+/**
+ * N6 (1.6): how far back a session's or a run's start is named by its weekday — "Tue 00:19" —
+ * rather than its date, "2026-09-01 00:19". Six days, so no two starts a weekday name could
+ * stand for lie in the window: the same weekday a week ago is outside it.
+ */
+export const WEEKDAY_NAMES_WITHIN_MS = 6 * 86_400_000
 /** From this span on a session's span is written in days and hours ("22 d 11 h"), below it as a duration. */
 export const SPAN_IN_DAYS_FROM_MS = 48 * 3_600_000
 /** The fewest hex characters of an agent id a name shows; more where two agents of a session share them (D11). */
@@ -108,11 +114,23 @@ export interface TreeNode {
    */
   kind: 'session' | 'workflow' | 'agent' | 'pending' | 'noreply'
   /**
-   * "Explore · claude-opus-5 · 94f3" / "Session 9d0eb37a" / "Workflow cfe7718d". An agent's id
-   * part is its short id: the fewest characters of its id, from MIN_SHORT_ID on, that no other
-   * agent of the same session shares — without the leading `a` of Claude Code's `a` + 16 hex.
+   * N6 (1.6): the name the row writes on its first line — "Explore · opus-5 · 94f3", "Session Tue
+   * 14:20 · 9d0eb37a", "Workflow run Tue 00:19 · 0133faf9". An agent's last part is its short id:
+   * the fewest characters of its id, from MIN_SHORT_ID on, that no other agent of the same session
+   * shares — without the leading `a` of Claude Code's `a` + 16 hex; its model is the short form,
+   * without the leading `claude-` (the details' Models row keeps the whole id). A session's and a
+   * run's last part is the first eight characters of its id, after its start as a weekday and a
+   * clock time (WEEKDAY_NAMES_WITHIN_MS), or a date and a clock time; without a known start, the
+   * name is the id alone — "Session 9d0eb37a". The page dims the last part of an agent's, a
+   * session's and a run's name.
    */
   label: string
+  /**
+   * N6: the same name with the whole model id — "Explore · claude-opus-5 · 94f3" — for the
+   * details' title, the markdown and a screen reader's name of the row; equal to `label` for a
+   * session, a run and a collector, whose names carry no model.
+   */
+  fullLabel: string
   /** Secondary text, e.g. the project label when attribution allows one. */
   sub: string | null
   state: NodeState
@@ -143,8 +161,17 @@ export interface TreeNode {
    * days and hours from SPAN_IN_DAYS_FROM_MS on.
    */
   duration: string
+  /** Null for a run's collector (1.6 D4, lead note): its members' earliest line is no start of its own. */
   startTs: number | null
   lastTs: number | null
+  /**
+   * N9 (1.6): `startTs` and `lastTs` as clock times in the configured zone — "14:20" today,
+   * "2026-09-01 14:20" on another day, the details' own form — for the static words a screen
+   * reader gets in place of a ticking clock ("since 14:20", "silent since 14:21"). The page
+   * formats no time itself. Null where the time is.
+   */
+  startClock: string | null
+  lastClock: string | null
   /**
    * N5 (1.6): an agent in state running by its own transcript — not one that only waits on an
    * agent below it, not a launch — whose silence the page may state: from `lastTs` on, once
@@ -198,7 +225,8 @@ export interface TreeNode {
   superseded: boolean
   /**
    * The children this payload carries: none while the node is closed (D3), at most its window
-   * while it is open — in the order the page draws them.
+   * while it is open — in the order the page draws them: by start, the newest first (N6, lead
+   * note "Zeitfolge"), a run's collector last.
    */
   children: TreeNode[]
 }
@@ -213,9 +241,15 @@ export interface RunningItem {
   /** The node key — selecting it opens the same details as the tree row. */
   key: string
   kind: 'agent' | 'pending' | 'noreply'
-  /** The node label. */
+  /** The node's name, as its tree row writes it (N6: the short model). */
   label: string
-  /** "Session 9d0eb37a · Workflow 8a71f8cc", plus " · <project>" when attribution allows a label. */
+  /** The node's `fullLabel`: the whole model id, for the markdown and a screen reader. */
+  fullLabel: string
+  /**
+   * "Session 9d0eb37a · Workflow run 8a71f8cc", plus " · <project>" when attribution allows a
+   * label: the id-only names of the session and the run, not the names by start time the tree's
+   * rows carry (N6) — a line of where the agent sits, not a second name for it.
+   */
   context: string
   /** As the node: '–' when nothing was counted; a pending launch is always '–'. */
   usage: string
@@ -223,9 +257,16 @@ export interface RunningItem {
   lowerBound: boolean
   /** D10, as the node: "⚠ lower bound — 2 of 41 replies unfinished", or null. */
   lowerBoundText: string | null
-  /** As the node. A collector's: the earliest first line of a member that has a record, else null. */
+  /**
+   * As the node. Null for a collector (1.6 D4, lead note): the earliest first line among its
+   * members may be a rejected request of an agent that failed long ago, and a clock from it
+   * would claim a precision nobody has — its entry says how many of them run instead.
+   */
   startTs: number | null
   lastTs: number | null
+  /** N9, as the node: the clock times of `startTs` and `lastTs` for the static screen-reader words. */
+  startClock: string | null
+  lastClock: string | null
   /** Running only because an agent below it runs (the roll-up), not by its own transcript. */
   waiting: boolean
   /** N5, as the node: the page may say how long the agent has been silent, from `lastTs` on. */

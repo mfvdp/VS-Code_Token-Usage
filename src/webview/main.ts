@@ -1462,10 +1462,11 @@ const AGENT_MAX_DEPTH = 24;
  * 1.6 D10: whether a row of the tree — and of the running list — marks an output that is a lower
  * bound with ⚠, inside its usage figure, titled with the view model's reason ("⚠ lower bound — 2
  * of 41 replies unfinished"). Off, the rows carry no mark and the details' Output note alone says
- * it (the markdown marks its lines either way). Whether the rows carry it is the lead's call on
- * the screenshot check of 1.6 §3 D10 (§7a Q5) — this one line turns it on.
+ * it (the markdown marks its lines either way). On since 1.6 P7: the lead's call on the screenshot
+ * check of 1.6 §3 D10 (§7a Q5) — six of 22 rows marked, none taller, the mark in the figures' line
+ * where it does not compete with the glyphs. This one line turns it off again.
  */
-const ROW_LOWER_BOUND_MARK: boolean = false;
+const ROW_LOWER_BOUND_MARK: boolean = true;
 
 function agentState(v: Payload): string {
   return AGENT_STATES.indexOf(v) >= 0 ? String(v) : 'unknown';
@@ -1496,14 +1497,27 @@ function agentStateTitle(state: string, derived: Payload): string {
 }
 
 /**
+ * A node's state for a screen reader (1.6 N9): "running, derived", "done, recorded" — words, as
+ * the title says them for the eye ("~running · derived"), without the tilde a screen reader would
+ * read as a sign. A node that does not say which it is counts as derived, as its title does.
+ */
+function agentStateSpoken(state: string, derived: Payload): string {
+  const w = agentStateWord(state);
+  return derived === false ? tr('{0}, recorded', w) : tr('{0}, derived', w);
+}
+
+/**
  * The glyph itself is drawn by the stylesheet from the state class, so it never ends up in the
- * copied text of the page; the image role and its label are what a screen reader gets instead.
- * An attempt the workflow journal superseded (1.6 D7) keeps its own glyph — dimmed with its row —
- * and its title and label say why it is dimmed.
+ * copied text of the page; the image role and its label are what a screen reader gets instead —
+ * the state in words (1.6 N9), where the title keeps the page's "~running · derived". An attempt
+ * the workflow journal superseded (1.6 D7) keeps its own glyph — dimmed with its row — and its
+ * title and label say why it is dimmed.
  */
 function agentGlyph(state: string, derived: Payload, superseded = false): string {
-  const title = agentStateTitle(state, derived) + (superseded ? ' · ' + tr('superseded by a later attempt') : '');
-  return '<span class="ag-st ag-' + esc(state) + '" role="img" aria-label="' + title + '" title="'
+  const why = superseded ? tr('superseded by a later attempt') : '';
+  const title = agentStateTitle(state, derived) + (why ? ' · ' + why : '');
+  const spoken = agentStateSpoken(state, derived) + (why ? ', ' + why : '');
+  return '<span class="ag-st ag-' + esc(state) + '" role="img" aria-label="' + spoken + '" title="'
     + title + '"></span>';
 }
 
@@ -1547,6 +1561,24 @@ function liveSince(ts: number): string {
 }
 
 /**
+ * A clock time of the view model's — `startClock`, `lastClock` (1.6 N9): "14:20", or "2026-09-01
+ * 14:20" on another day — or null. The page formats no time of its own.
+ */
+function agentClock(v: Payload): string | null {
+  return typeof v === 'string' && v !== '' ? v : null;
+}
+
+/**
+ * 1.6 N9: a ticking part of a row for the eye, and for a screen reader the same fact as words
+ * that stand still — "running for 12 min 05 s" is "since 14:20" to the ear, which a clock
+ * rewritten every second would otherwise interrupt, or be read out of date. Without the view
+ * model's clock time there are no such words, and the ticking part stays readable.
+ */
+function spokenTwin(eye: string, words: string | null): string {
+  return words === null ? eye : '<span aria-hidden="true">' + eye + '</span><span class="sr">' + words + '</span>';
+}
+
+/**
  * How long a running agent has been silent, in whole minutes (1.6 N5): "4 min", then "1 h 05 min".
  * Minutes only — the silence is stated from three minutes on, and its seconds would tick past
  * without saying more.
@@ -1563,15 +1595,19 @@ function silentText(ms: number): string {
  * last activity on, written for every node the view model says may be silent (`silence`) and shown
  * by the page's clock only once AGENT_SILENT_MS have passed since it: until then it is there,
  * hidden, and the timer (tickLive) shows it the second it is due, with no push. The separator is
- * inside it, so a hidden one leaves no dot behind. No colour: the figures' own tone.
+ * inside it, so a hidden one leaves no dot behind. No colour: the figures' own tone. It is a part
+ * of the figures' line (`ag-fp`) of its own. For a screen reader (1.6 N9) the ticking minutes are
+ * "silent since 14:21", from the view model's `lastClock`, and shown and hidden with them.
  */
-function liveSilent(ts: number | null): string {
+function liveSilent(ts: number | null, clock: string | null): string {
   if (ts === null) return '';
   const ms = Date.now() - ts;
   const due = ms >= AGENT_SILENT_MS;
-  return '<span class="ag-silent" data-live="silent" data-ts="' + esc(ts) + '"' + (due ? '' : ' hidden') + '> · '
-    + '<span class="nobr">' + tr('silent for {0}', '<span class="ag-for">' + (due ? esc(silentText(ms)) : '') + '</span>')
-    + '</span></span>';
+  const eye = '<span class="nobr">' + tr('silent for {0}', '<span class="ag-for">' + (due ? esc(silentText(ms)) : '') + '</span>')
+    + '</span>';
+  return '<span class="ag-fp ag-silent" data-live="silent" data-ts="' + esc(ts) + '"' + (due ? '' : ' hidden') + '>'
+    + '<span aria-hidden="true"> · </span>'
+    + spokenTwin(eye, clock === null ? null : tr('silent since {0}', esc(clock))) + '</span>';
 }
 
 /**
@@ -1589,18 +1625,17 @@ function lowerMark(n: Payload): string {
 /**
  * What the agents below a node came to (1.6 N1), as the view model wrote it — "427 started ·
  * 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — for the eye, and the same in words for a screen reader, which
- * would read the glyphs as shapes. Each part keeps together and the line wraps between them,
- * only ever after a separator: the space in front of each dot does not break, so no line of a
- * narrow sidebar starts with one. Nothing for a node without a tally: no count is not a count
- * of none.
+ * would read the glyphs as shapes. The tally ends the figures' line of its row (1.6 N6): each of
+ * its parts is a part of that line of its own (`ag-fp`), hidden from a screen reader, which gets
+ * the words once, after them. Nothing for a node without a tally: no count is not a count of none.
  */
-function agentTally(n: Payload): string {
+function agentTally(n: Payload): string[] {
   const shown = typeof n.tallyText === 'string' && n.tallyText !== '' ? n.tallyText : '';
-  if (!shown) return '';
+  if (!shown) return [];
   const spoken = typeof n.tallySpoken === 'string' && n.tallySpoken !== '' ? n.tallySpoken : shown;
-  return '<span class="ag-tally"><span aria-hidden="true">'
-    + shown.split(' · ').map((p: string) => '<span class="nobr">' + esc(p) + '</span>').join('\u00a0· ')
-    + '</span><span class="sr">' + esc(spoken) + '</span></span>';
+  const parts = shown.split(' · ').map((p: string) => '<span class="ag-t" aria-hidden="true">' + esc(p) + '</span>');
+  parts[parts.length - 1] += '<span class="sr">' + esc(spoken) + '</span>';
+  return parts;
 }
 
 /**
@@ -1618,6 +1653,44 @@ function sessionFigures(n: Payload): string[] {
   if (typeof n.usageAgents === 'string' && n.usageAgents !== '') out.push(tr('agents {0}', orDash(n.usageAgents)));
   out.push('<span title="' + tr('span from the first to the last line') + '">' + orDash(n.duration) + '</span>');
   return out;
+}
+
+/**
+ * 1.6 N6: the second line of a row — its figures, in the dim tone, under its name: what it used
+ * (a session: its own transcript's and, apart, its agents'), then its duration or — while it runs —
+ * the live clock since its start in the duration's place, then how long a running agent has been
+ * silent (N5), then the tally of the agents below it (N1), where the row shows one. Every part is
+ * an `ag-fp` of the line, whole or not at all: the line never wraps, and where a narrow sidebar
+ * has no room for the last parts, fitAgentFigures takes them off the line whole and ends it on
+ * "…" — never a figure torn in two, never a third line (a screen reader still gets every one).
+ * A lower bound's ⚠ is inside the usage part (D10). Nothing of a launch nobody has read a line of,
+ * or of a collector's agents, was counted: dashes, and a collector no clock at all (1.6, lead note).
+ */
+function agentFigLine(n: Payload, kind: string, state: string, tally: string[]): string {
+  const start = kind === 'noreply' ? null : agentTs(n.startTs);
+  const clock = state === 'running' && start !== null;
+  const figs = kind === 'session' ? sessionFigures(n)
+    : [orDash(n.usage) + lowerMark(n)].concat(clock ? [] : [orDash(n.duration)]);
+  const head = figs.map((f: string) => '<span class="nobr">' + f + '</span>');
+  if (clock) {
+    // In the duration's place, the time since the start, ticking: the running glyph beside the
+    // name says what it counts, and the line has no room to spare for "running for" at 260 px.
+    const eye = '<span class="nobr">' + liveSince(start as number) + '</span>';
+    const since = agentClock(n.startClock);
+    head.push(spokenTwin(eye, since === null ? null : tr('since {0}', esc(since))));
+  }
+  const silent = n.silence === true && kind === 'agent' ? liveSilent(agentTs(n.lastTs), agentClock(n.lastClock)) : '';
+  return '<span class="ag-fig">' + figParts(head, 0) + silent + figParts(tally, head.length) + '</span>';
+}
+
+/**
+ * Parts of a figures' line, each an `ag-fp` of its own with the separator in front of it — so a
+ * part that fitAgentFigures takes off the line takes its dot with it — the first one of the
+ * line without. `from` is how many parts stand before these on the line.
+ */
+function figParts(parts: string[], from: number): string {
+  return parts.map((p: string, i: number) => '<span class="ag-fp">'
+    + (from + i > 0 ? '<span aria-hidden="true"> · </span>' : '') + p + '</span>').join('');
 }
 
 /**
@@ -1665,6 +1738,11 @@ function agentMoreRow(n: Payload, key: string, shown: number): string {
  * whether it has any is the node's own say (`hasChildren`), which open nodes are open is the
  * reader's, kept with the view state, and the next push brings the children the moment a node
  * is opened — at most fifty at a time, and a line after them says how many more there are.
+ *
+ * 1.6 N6: every row is two lines — its glyph and its name ("Explore · opus-5 · 94f3", the short id
+ * dimmed; a session's project after it), then its figures under the name (see agentFigLine). Both
+ * lines keep to one line whatever the width: a name too long for it gives way from its type on,
+ * never its id, and says itself whole in its title.
  */
 function agentNode(n: Payload, expanded: string[], selected: string | null, panel: AgentPanel | null, depth: number): string {
   if (!n || typeof n !== 'object') return '';
@@ -1677,46 +1755,23 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   const here = panelHere(panel, 'tree', key);
   const state = agentState(n.state);
   const kind = AGENT_KINDS.indexOf(n.kind) >= 0 ? String(n.kind) : 'agent';
-  // 1.6 D7: an attempt the workflow journal started its step again after — dimmed, its own state kept.
+  // 1.6 D7: an attempt the workflow journal superseded — dimmed, its own state kept.
   const superseded = n.superseded === true;
   const label = orDash(n.label);
-  const labelHtml = agentLabel(n.label, kind);
-  // Usage and duration as the view model worded them and, only while the node runs, the time
-  // since it started, ticking. A lower bound is marked inside the usage figure only while
-  // ROW_LOWER_BOUND_MARK is on (1.6 D10); the details' Output note says it either way. A launch
-  // whose transcript was never seen has nothing counted, so it shows no figures at all rather
-  // than a row of dashes. Each figure is unbreakable, so a narrow sidebar wraps the line at a
-  // separator and never between a number and its unit. After them, for a running agent, how
-  // long it has been silent once that is three minutes (1.6 N5).
-  const start = agentTs(n.startTs);
-  const figures = kind === 'pending' ? [] : kind === 'session' ? sessionFigures(n)
-    : [orDash(n.usage) + lowerMark(n), orDash(n.duration)];
-  if (state === 'running' && start !== null) figures.push(tr('running for {0}', liveSince(start)));
-  const silent = n.silence === true && figures.length ? liveSilent(agentTs(n.lastTs)) : '';
   const fold = parent
     ? '<button class="ag-fold" data-act="agentToggle" data-key="' + esc(key) + '" aria-label="'
       + (open ? tr('Collapse {0}', label) : tr('Expand {0}', label)) + '"></button>'
     : '<span class="ag-pad"></span>';
-  // The meta line: the project a session belongs to, when attribution names one, and the tally
-  // of the agents below the node (1.6 N1). A session's and a run's stand whether the node is
-  // open or not: what failed, was retried or is still unknown among 400 agents is not something
-  // to count off the rows. An agent's stands only while its children are on screen with their
-  // own glyphs: closed, or open with none of them sent. The tally is the view model's, taken on
-  // the whole tree, so it counts the children the page does not carry as well.
-  const tally = kind === 'agent' && parent && open && kids.length ? '' : agentTally(n);
-  const meta: string[] = [];
-  if (typeof n.sub === 'string' && n.sub) meta.push(esc(n.sub));
-  if (tally) meta.push(tally);
-  // The glyph keeps its column, and the words beside it wrap within theirs: a long agent type
-  // in a narrow sidebar breaks its own line rather than leaving the glyph alone on one.
+  // The tally of the agents below the node (1.6 N1) ends the figures' line. A session's and a
+  // run's stand whether the node is open or not: what failed, was retried or is still unknown
+  // among 400 agents is not something to count off the rows. An agent's stands only while its
+  // children are on screen with their own glyphs: closed, or open with none of them sent. The
+  // tally is the view model's, taken on the whole tree, so it counts the children the page does
+  // not carry as well.
+  const tally = kind === 'agent' && parent && open && kids.length ? [] : agentTally(n);
   const row = '<button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
     + '" aria-pressed="' + here + '">' + agentGlyph(state, n.derived, superseded)
-    + '<span class="ag-text"><span class="ag-label">' + labelHtml + '</span>'
-    + (meta.length ? '<span class="meta">' + meta.join(' · ') + '</span>' : '')
-    + (figures.length
-       ? '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + silent + '</span>'
-       : '')
-    + '</span></button>';
+    + '<span class="ag-text">' + agentLabel(n, kind) + agentFigLine(n, kind, state, tally) + '</span></button>';
   // The panel after the row's line and before the children, so the node's own details stand
   // between it and what is below it; it takes the tree's whole width, however deep the node.
   const details = here && panel ? agentDetails(panel.d, panel.node, depth) : '';
@@ -1732,16 +1787,34 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
 }
 
 /**
- * A node's name as the row writes it. It breaks only between its parts: "Explore ·
- * claude-opus-5 · a94f" in a narrow sidebar wraps at a separator, never at the hyphen inside a
- * model id. A run's collector (1.6 D4) is named in words — "263 agent(s) without a counted
- * reply" — which wrap between them like any sentence: kept on one line, the name is wider than a
- * narrow sidebar.
+ * A row's first line after its glyph: the node's name as the view model wrote it (1.6 N6) —
+ * "Explore · opus-5 · 94f3", "Session Tue 14:20 · 9d0eb37a", "Workflow run Tue 00:19 · cfe7718d" —
+ * on one line. The last part of an agent's, a session's and a run's name is its short id, in the
+ * dim tone (§7a Q11); a session's project follows it, dim as well, while attribution names one.
+ * When the line has no room for all of it, the project gives way first, then the name from its
+ * first part on — the type, then the model — each cut with an ellipsis, and the id never; the
+ * whole name, the model id in full, is the line's title. A launch's name is the hint it was
+ * launched with, "… · launched", its last word no id; a run's collector (1.6 D4) is named in
+ * words — "263 agent(s) without a counted reply" — cut like any name.
  */
-function agentLabel(v: Payload, kind: string): string {
-  if (kind === 'noreply') return orDash(v);
+function agentLabel(n: Payload, kind: string): string {
+  const v = n.label;
   const parts = typeof v === 'string' && v !== '' ? v.split(' · ') : ['–'];
-  return parts.map((p: string) => '<span class="nobr">' + orDash(p) + '</span>').join(' · ');
+  const idLast = (kind === 'agent' || kind === 'session' || kind === 'workflow') && parts.length >= 2;
+  const id = idLast ? parts.pop() as string : null;
+  const names = kind === 'noreply' ? [parts.join(' · ')] : parts;
+  const sub = typeof n.sub === 'string' && n.sub !== '' ? n.sub : '';
+  const full = typeof n.fullLabel === 'string' && n.fullLabel !== '' ? n.fullLabel : typeof v === 'string' ? v : '';
+  const title = full ? full + (sub ? ' · ' + sub : '') : '';
+  // The separators are parts of their own, which never give way, so a part cut short keeps its
+  // dot and its space in front of the next one.
+  const dot = '<span class="ag-dot"> · </span>';
+  return '<span class="ag-label"' + (title ? ' title="' + esc(title) + '"' : '') + '>'
+    + names.map((p: string, i: number) => (i ? dot : '') + '<span class="ag-np">' + orDash(p) + '</span>').join('')
+    + (id !== null ? dot + '<span class="ag-sid">' + orDash(id) + '</span>' : '')
+    // The project's dot goes with it: it gives way first, and whole.
+    + (sub ? '<span class="ag-proj"> · ' + esc(sub) + '</span>' : '')
+    + '</span>';
 }
 
 /**
@@ -1778,38 +1851,44 @@ function agentShown(list: Payload, expanded: string[], key: string, depth: numbe
 }
 
 /**
- * One row of the running list: the running glyph, the node's name, how long it has been
- * running — the live clock — and its usage, and under them where it sits. The row is the same
- * button a tree row is, with the same message, so it opens the same details; `data-list` tells
- * it apart from that tree row, which may be on the page as well, when the focus is put back
- * after a push. A pending launch reads as the hint it is, as in the tree. A run's collector (1.6
- * D4) is one row for all of its agents without a counted reply, and says how many of them run.
+ * One row of the running list: the running glyph and the node's name on its first line, as the
+ * tree row writes them (1.6 N6), its figures on the second — its usage, how long it has been
+ * running (the live clock) and, from three minutes on, how long it has been silent — and under
+ * them, a line of its own, where it sits. The row is the same button a tree row is, with the same
+ * message, so it opens the same details; `data-list` tells it apart from that tree row, which may
+ * be on the page as well, when the focus is put back after a push. A pending launch reads as the
+ * hint it is, as in the tree. A run's collector (1.6 D4) is one row for all of its agents without
+ * a counted reply, and says how many of them run in the clock's place: it has no start of its own
+ * to run a clock from (lead note on P5b).
  */
 function agentNowRow(it: Payload, panel: AgentPanel | null): string {
   const key = typeof it.key === 'string' ? it.key : '';
   // 1.6 N2: the row is pressed while the details stand under it, and they stand in its item.
   const on = panelHere(panel, 'now', key);
   const kind = it.kind === 'pending' || it.kind === 'noreply' ? String(it.kind) : 'agent';
-  const labelHtml = agentLabel(it.label, kind);
-  const start = agentTs(it.startTs);
-  const figures: string[] = [];
-  if (start !== null) figures.push(tr('running for {0}', liveSince(start)));
+  const start = kind === 'noreply' ? null : agentTs(it.startTs);
   // 1.6 D10: marked as the tree's row is, while the page marks rows at all.
-  figures.push(orDash(it.usage) + lowerMark(it));
+  const head = ['<span class="nobr">' + orDash(it.usage) + lowerMark(it) + '</span>'];
+  if (start !== null) {
+    const eye = '<span class="nobr">' + tr('running for {0}', liveSince(start)) + '</span>';
+    const since = agentClock(it.startClock);
+    head.push(spokenTwin(eye, since === null ? null : tr('since {0}', esc(since))));
+  }
+  const members = typeof it.running === 'number' && Number.isInteger(it.running) && it.running >= 1 ? it.running : 0;
+  if (kind === 'noreply' && members > 0) {
+    head.push('<span class="nobr">' + (members === 1 ? tr('~1 of them running') : tr('~{0} of them running', esc(fullNum(members))))
+      + '</span>');
+  }
   // 1.6 N5: and how long it has been silent, as on its tree row.
-  const silent = it.silence === true ? liveSilent(agentTs(it.lastTs)) : '';
+  const silent = it.silence === true && kind === 'agent' ? liveSilent(agentTs(it.lastTs), agentClock(it.lastClock)) : '';
   // Each part keeps together while it fits a line and breaks inside only when it cannot.
   const where: string[] = typeof it.context === 'string' && it.context !== ''
     ? it.context.split(' · ').map((p: string) => orDash(p)) : [];
   if (it.waiting === true) where.push(tr('waits for a child agent'));
-  const members = typeof it.running === 'number' && Number.isInteger(it.running) && it.running >= 1 ? it.running : 0;
-  if (kind === 'noreply' && members > 0) {
-    where.push(members === 1 ? tr('~1 of them running') : tr('~{0} of them running', esc(fullNum(members))));
-  }
   return '<li class="ag-k-' + kind + '"><button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
     + '" data-list="now" aria-pressed="' + on + '">' + agentGlyph('running', true)
-    + '<span class="ag-text"><span class="ag-label">' + labelHtml + '</span>'
-    + '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + silent + '</span>'
+    + '<span class="ag-text">' + agentLabel({ label: it.label, fullLabel: it.fullLabel, sub: null }, kind)
+    + '<span class="ag-fig">' + figParts(head, 0) + silent + '</span>'
     + (where.length ? '<span class="meta ag-ctx">' + where.map(w => '<span>' + w + '</span>').join(' · ') + '</span>' : '')
     + '</span></button>' + (on && panel ? agentDetails(panel.d, panel.node, null) : '') + '</li>';
 }
@@ -1888,6 +1967,9 @@ function agentDetails(d: Payload, node: Payload, depth: number | null): string {
   // Unbreakable, like the figures of a row: the clock's text is rewritten every second, and a
   // narrow value column would otherwise tear "40 s" across two lines.
   const ago = lastTs === null ? '' : '<span class="nobr">' + tr('{0} ago', liveSince(lastTs)) + '</span>';
+  // 1.6 N9: beside the row's own time ("11:59"), the ticking age is for the eye alone — the time
+  // is the words a screen reader gets, and they stand still.
+  const agoBeside = ago ? '<span aria-hidden="true">' + ago + '</span>' : '';
   const lastLabel = tr('Last activity');
   let placed = !ago;
   let copied = false;
@@ -1907,7 +1989,7 @@ function agentDetails(d: Payload, node: Payload, depth: number | null): string {
     // of a narrow sidebar: it may break anywhere rather than run out of the panel.
     const value = copy ? '<span class="ag-id">' + orDash(r.value) + '</span>' : orDash(r.value);
     rows += '<dt' + wide + '>' + orDash(r.label) + '</dt><dd' + wide + '>' + value
-      + (live ? ' · ' + ago : note ? (wide ? ' · ' : ' ') + note : '')
+      + (live ? ' · ' + agoBeside : note ? (wide ? ' · ' : ' ') + note : '')
       + copy + '</dd>';
   }
   const own = placed ? '' : '<dt>' + lastLabel + '</dt><dd>' + ago + '</dd>';
@@ -1993,19 +2075,31 @@ function agentPanelOf(a: Payload, roots: Payload[], expanded: string[], where: P
  * costs two empty queries a second.
  */
 function tickLive(): void {
+  // 1.6 N6: a clock that grows a unit ("59 s" → "1 min 00 s"), and a silence that appears, may
+  // no longer leave room on its row's figures' line; the line is fitted again then, and only then.
+  let grown = false;
   document.querySelectorAll<HTMLElement>('[data-live="since"]').forEach(el => {
     const ts = Number(el.dataset.ts);
-    if (Number.isFinite(ts)) el.textContent = sinceText(Date.now() - ts);
+    if (!Number.isFinite(ts)) return;
+    const next = sinceText(Date.now() - ts);
+    if (typeof el.textContent === 'string' && el.textContent.length !== next.length) grown = true;
+    el.textContent = next;
   });
   document.querySelectorAll<HTMLElement>('[data-live="silent"]').forEach(el => {
     const ts = Number(el.dataset.ts);
     if (!Number.isFinite(ts)) return;
     const ms = Date.now() - ts;
     const due = ms >= AGENT_SILENT_MS;
+    if (el.hidden === due) grown = true;
     el.hidden = !due;
     const min = typeof el.querySelector === 'function' ? el.querySelector('.ag-for') : null;
-    if (min && due) min.textContent = silentText(ms);
+    if (min && due) {
+      const next = silentText(ms);
+      if (typeof min.textContent === 'string' && min.textContent.length !== next.length) grown = true;
+      min.textContent = next;
+    }
   });
+  if (grown) fitAgentFigures();
 }
 
 let liveTimer: number | null = null;
@@ -2237,6 +2331,44 @@ function applyFits(): void {
   fitChart();
   fitScroll();
   scrollHeat();
+  fitAgentFigures();
+}
+
+/**
+ * 1.6 N6: an agent row's figures are one line (see agentFigLine). Where a narrow sidebar leaves
+ * that line too little room, its last parts come off it whole — the tally's last counts first, then
+ * the tally, the silence, the clock — and the line ends on "…" (`ag-cut`): what stays is never a
+ * figure torn in two, and the row never takes a third line. A part taken off stays in the page for
+ * a screen reader (`ag-gone` hides it from the eye alone), so the row still says everything to the
+ * ear, and the details panel says everything to the eye. The first part — the usage, with its ⚠ —
+ * always stays. Measured first for every line and written after, so a page of rows is laid out twice
+ * at most; run after every render, on a resize, when a closed section opens, and when the clock
+ * grows a line (tickLive). A page without such a line costs one query.
+ */
+function fitAgentFigures(): void {
+  const lines = document.querySelectorAll<HTMLElement>('.ag-fig');
+  if (!lines.length) return;
+  lines.forEach(el => {
+    if (!el.classList) return;
+    el.classList.remove('ag-cut');
+    el.querySelectorAll<HTMLElement>('.ag-gone').forEach(p => p.classList.remove('ag-gone'));
+  });
+  const plan: Array<{ el: HTMLElement; gone: HTMLElement[] }> = [];
+  lines.forEach(el => {
+    if (typeof el.getBoundingClientRect !== 'function' || !(el.scrollWidth > el.clientWidth + 0.5)) return;
+    const parts = Array.from(el.children).filter(p => p.classList && p.classList.contains('ag-fp')
+      && !(p as HTMLElement).hidden) as HTMLElement[];
+    // The room the ellipsis needs at the end of the line: a no-break space and the ellipsis.
+    const size = (typeof getComputedStyle === 'function' ? parseFloat(getComputedStyle(el).fontSize) : NaN) || 11;
+    const room = el.getBoundingClientRect().left + el.clientWidth - size * 1.4;
+    let keep = parts.length;
+    while (keep > 1 && parts[keep - 1].getBoundingClientRect().right > room) keep--;
+    plan.push({ el: el, gone: parts.slice(keep) });
+  });
+  plan.forEach(x => {
+    x.el.classList.add('ag-cut');
+    x.gone.forEach(p => p.classList.add('ag-gone'));
+  });
 }
 
 /**
@@ -2627,6 +2759,9 @@ document.addEventListener('keydown', (ev) => {
 
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.
 window.addEventListener('resize', () => { if (vm) applyFits(); });
+// 1.6 N6: a section opened after its render was laid out with no width at all; its agent rows'
+// figures are fitted to the width it has now. The toggle event does not bubble.
+document.addEventListener('toggle', () => { if (vm) fitAgentFigures(); }, true);
 
 window.addEventListener('message', (ev) => {
   // Only the host drives the page. Measured in a real window: VS Code delivers the host's

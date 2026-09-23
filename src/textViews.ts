@@ -513,6 +513,14 @@ function agentStateWord(state: NodeState): string {
 }
 
 /**
+ * The name a markdown line gives a node (1.6 N6): its `fullLabel`, the whole model id — the page's
+ * row shortens it ("opus-5"), a document keeps it — or its label, from a view model without one.
+ */
+function fullName(n: { label: string; fullLabel?: string }): string {
+  return typeof n.fullLabel === 'string' && n.fullLabel !== '' ? n.fullLabel : n.label
+}
+
+/**
  * "[~Running] Explore · claude-opus-5 · 94f3 · 12.3K · 4 min 05 s". An inferred state carries
  * the estimate mark, a recorded one does not — the same distinction the dashboard draws — and
  * a usage whose output is a lower bound carries ⚠. A session names its two figures, as its
@@ -522,7 +530,8 @@ function agentStateWord(state: NodeState): string {
  * a row the dashboard dims — says so at the end: "(superseded by a later attempt)". A node
  * with agents below it — a session, a run, an agent that launched others — carries their tally
  * after its name, in brackets so its counts do not run into the figures (1.6 N1):
- * "[~Running] Workflow cfe7718d (6 started · 2 ✓ · 1 ✕ · 2 ↻ · ~1 ●) · 1.2M · 4 min 10 s".
+ * "[~Running] Workflow run Tue 11:50 · cfe7718d (6 started · 2 ✓ · 1 ✕ · 2 ↻ · ~1 ●) · 1.2M · 4 min 10 s".
+ * The names are the tree's (N6), the id plain where the page dims it.
  * The document prints every node, so an agent's tally stands beside its children's lines, as
  * a session's and a run's do.
  */
@@ -530,7 +539,7 @@ function agentNodeLine(n: TreeNode): string {
   const word = agentStateWord(n.state)
   const state = n.derived ? estimate(word) : word
   const tally = typeof n.tallyText === 'string' && n.tallyText !== '' ? ` (${cell(n.tallyText)})` : ''
-  const name = (n.sub ? `${cell(n.label)} — ${cell(n.sub)}` : cell(n.label)) + tally
+  const name = (n.sub ? `${cell(fullName(n))} — ${cell(n.sub)}` : cell(fullName(n))) + tally
   const mark = n.lowerBound ? ' ⚠' : ''
   if (n.kind === 'session') {
     const agents = typeof n.usageAgents === 'string' && n.usageAgents !== ''
@@ -542,18 +551,18 @@ function agentNodeLine(n: TreeNode): string {
 }
 
 /**
- * "[~Running] Explore · claude-opus-5 · a94f · Session 9d0eb37a · Workflow cfe7718d · 12.3K ⚠"
+ * "[~Running] Explore · claude-opus-5 · a94f · Session 9d0eb37a · Workflow run cfe7718d · 12.3K ⚠"
  * — a running agent, where it sits and what it used. Running is inferred, and the line says so
  * as the tree's lines do; a usage that is a lower bound carries ⚠ as there; "(waiting)" when
  * it runs only because an agent below it does. For an agent of a session the tree does not
  * list, this line is all the document says of it. A run's collector (1.6 D4) is one line for
  * all of its agents without a counted reply, and says how many of them run:
- * "[~Running] 263 agent(s) without a counted reply · Session 0133faf9 · Workflow 7e21c0de · – (~10 of them running)".
+ * "[~Running] 263 agent(s) without a counted reply · Session 0133faf9 · Workflow run 7e21c0de · – (~10 of them running)".
  */
 function runningLine(r: RunningItem): string {
   const members = r.kind === 'noreply' && typeof r.running === 'number' && Number.isInteger(r.running) && r.running >= 1
     ? ` (${r.running === 1 ? t('~1 of them running') : t('~{0} of them running', full(r.running))})` : ''
-  return `- [${estimate(t('Running'))}] ${cell(r.label)} · ${cell(r.context)} · ${cell(r.usage)}`
+  return `- [${estimate(t('Running'))}] ${cell(fullName(r))} · ${cell(r.context)} · ${cell(r.usage)}`
     + `${r.lowerBound === true ? ' ⚠' : ''}${r.waiting ? ` ${t('(waiting)')}` : ''}${members}`
 }
 

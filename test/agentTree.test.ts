@@ -19,12 +19,12 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import {
   AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeState,
-  RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TreeNode,
+  RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TreeNode, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
-import { AgentTreeInput, agentDetails, buildAgentTree, shortIdsOf, spanText } from '../src/agentTreeBuild'
+import { AgentTreeInput, agentDetails, buildAgentTree, byNewestFirst, shortIdsOf, spanText } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
 import { TimeConfig } from '../src/time'
-import { AgentLaunch, AgentRec, JournalAgent, MainRec, RunRec, SessionRec } from '../src/types'
+import { AgentLaunch, AgentRec, JournalAgent, MainRec, RunLaunch, RunRec, SessionRec } from '../src/types'
 import { durationText } from '../src/stats'
 import { MAX_AGENT_KEY_CHARS } from '../src/viewModel'
 import { ROOT } from './helpers/nls'
@@ -323,7 +323,8 @@ test('a launch whose transcript was never seen is a pending node under whoever l
 
   const d = agentDetails(input(over), NOW, fresh.key)
   assert.deepEqual(d?.rows.map((r) => [r.label, r.value]), [
-    ['Type', 'Plan'], ['Models', 'sonnet'], ['ID', 'toolu_pppp0001'], ['Started', '11:58'], ['Spawned by', 'Session 9d0eb37a'],
+    // 1.6 N6: who launched it by the name its row carries — the session by its first line, then its id.
+    ['Type', 'Plan'], ['Models', 'sonnet'], ['ID', 'toolu_pppp0001'], ['Started', '11:58'], ['Spawned by', 'Session Tue 10:00 · 9d0eb37a'],
   ])
   // What Copy ID copies for a launch: its tool_use id, the one the ID row shows.
   assert.equal(d?.id, 'toolu_pppp0001')
@@ -378,7 +379,8 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
 
   const running = run([wfRec('eeee0001'), failed('eeee0002')])
   assert.equal(running.w.kind, 'workflow')
-  assert.equal(running.w.label, 'Workflow cfe7718d')
+  // 1.6 N6 (pinned and changed): a run is named by when it started — its first agent's first line.
+  assert.equal(running.w.label, 'Workflow run Tue 11:30 · cfe7718d')
   assert.deepEqual([running.w.state, running.w.derived], ['running', true])
   assert.equal(running.text, 'Running — inferred: at least one agent of this run is running.')
   assert.equal(parentOf(running.vm, running.w.key)?.key, rootKey)
@@ -959,7 +961,8 @@ test('roots are the sessions of the last day and the sessions with agents in ret
       rec('aaaa0002', { sessionId: 'dddd4444-expired', firstTs: NOW - 8 * DAY - 10 * MIN, lastTs: NOW - 8 * DAY }),
     ],
   })
-  assert.deepEqual(vm.roots.map((r) => r.label), ['Session aaaa1111', 'Session cccc3333'])
+  // 1.6 N6: named by the first line, as a weekday and a clock time within six days.
+  assert.deepEqual(vm.roots.map((r) => r.label), ['Session Tue 10:00 · aaaa1111', 'Session Sat 11:00 · cccc3333'])
   assert.equal(vm.omittedRoots, 0)
   assert.deepEqual(vm.roots[1].children.map((c) => c.key), [agentKey('aaaa0001')])
 })
@@ -990,8 +993,9 @@ test('a nested agent sits under the agent that spawned it, found by its spawner 
   })
   const root = vm.roots[0]
   assert.deepEqual(root.children.map((c) => c.key), [agentKey('aaaa0001')])
-  // Children in the order they started, whatever order the records came in.
-  assert.deepEqual(root.children[0].children.map((c) => c.key), [agentKey('aaaa0002'), agentKey('aaaa0003')])
+  // Children by when they started, the newest first (1.6 N6, pinned and changed: 1.5 put the
+  // oldest first), whatever order the records came in.
+  assert.deepEqual(root.children[0].children.map((c) => c.key), [agentKey('aaaa0003'), agentKey('aaaa0002')])
 })
 
 test('a spawner cycle, a self-spawn and a spawner in another session all end at the session, each node once', () => {
@@ -1049,7 +1053,10 @@ test('a run keeps its own agents, even one another agent launched', () => {
 // §4.5 · labels, usage, duration
 // ---------------------------------------------------------------------------
 
-test('an agent is named by its type, its last model through the model-name helper and its short id', () => {
+// 1.6 N6 (pinned and changed): the row's name carries the model in its short form, without the
+// `claude-` every Claude model id starts with; `fullLabel` keeps the whole id for the details, the
+// markdown and a screen reader. The session is named by its first line (see the next tests).
+test('an agent is named by its type, its last model through the model-name helper — short on the row, whole in full — and its short id', () => {
   const vm = build({
     agents: [
       // Claude Code's own shape, `a` + 16 hex: the `a` every id carries is left off the name.
@@ -1061,20 +1068,35 @@ test('an agent is named by its type, its last model through the model-name helpe
       rec('ef000005', { models: [], meta: null, spawnerFile: null }),
       rec('f0000006', { models: ['claude-sonnet-5', '<synthetic>'] }),
     ],
-    launches: [launch('def00004', { typeHint: 'Plan', modelHint: 'sonnet' })],
+    launches: [launch('def00004', { typeHint: 'Plan', modelHint: 'sonnet' }),
+      launch('pppp0001', { agentId: null, typeHint: 'Plan', modelHint: 'claude-sonnet-5', ts: NOW - 2 * MIN })],
   })
   const label = (id: string): string => node(vm, agentKey(id)).label
-  assert.equal(label('a94f3c2e10b7d5e19'), 'Explore · claude-opus-5 · 94f3')
+  const full = (id: string): string => node(vm, agentKey(id)).fullLabel
+  assert.equal(label('a94f3c2e10b7d5e19'), 'Explore · opus-5 · 94f3')
+  assert.equal(full('a94f3c2e10b7d5e19'), 'Explore · claude-opus-5 · 94f3')
   // Any other id is taken as it is: four characters, since no other id of the session shares them.
-  assert.equal(label('abcd0001'), 'Explore · claude-opus-5 · abcd')
+  assert.equal(label('abcd0001'), 'Explore · opus-5 · abcd')
+  assert.equal(full('abcd0001'), 'Explore · claude-opus-5 · abcd')
   // A placeholder no model wrote is not the agent's model.
-  assert.equal(label('f0000006'), 'Explore · claude-sonnet-5 · f000')
-  assert.equal(label('bcde0002'), 'Explore · claude-haiku-4-5 · bcde')
-  // No real model seen yet: the alias the sidecar or the launch asked for.
+  assert.equal(label('f0000006'), 'Explore · sonnet-5 · f000')
+  assert.equal(label('bcde0002'), 'Explore · haiku-4-5 · bcde')
+  assert.equal(full('bcde0002'), 'Explore · claude-haiku-4-5 · bcde')
+  // No real model seen yet: the alias the sidecar or the launch asked for — no prefix to leave off.
   assert.equal(label('cdef0003'), 'Explore · opus · cdef')
+  assert.equal(full('cdef0003'), 'Explore · opus · cdef')
   assert.equal(label('def00004'), 'Plan · sonnet · def0')
   assert.equal(label('ef000005'), 'Agent · – · ef00')
-  assert.equal(vm.roots[0].label, 'Session 9d0eb37a')
+  assert.equal(full('ef000005'), 'Agent · – · ef00')
+  // A launch's hint the same way: short on the row, whole in full.
+  const pending = node(vm, 'l:toolu_pppp0001')
+  assert.deepEqual([pending.label, pending.fullLabel], ['Plan · sonnet-5 · launched', 'Plan · claude-sonnet-5 · launched'])
+  // The details' title and Models row keep the whole id.
+  const d = agentDetails(input({ agents: [rec('a94f3c2e10b7d5e19', { models: ['claude-opus-5'] })] }), NOW, agentKey('a94f3c2e10b7d5e19'))
+  assert.equal(d?.title, 'Explore · claude-opus-5 · 94f3')
+  assert.equal(d?.rows.find((r) => r.label === 'Models')?.value, 'claude-opus-5')
+  assert.equal(vm.roots[0].label, 'Session Tue 10:00 · 9d0eb37a')
+  assert.equal(vm.roots[0].fullLabel, vm.roots[0].label)
 })
 
 test('usage is the billable tokens of the tables, a dash when nothing was counted, and a lower bound is flagged', () => {
@@ -1141,18 +1163,21 @@ function hexId(n: number): string {
  * The ideas round's large run, in one session: 427 agents, 164 of them with a transcript and 263
  * its journal started without one — drawn in one collector, the run's last child (1.6 P5b, D4),
  * so the run has 165 children. The records started a minute
- * apart five hours ago, so they are drawn in the order of their number; 150 completed, 12 failed,
- * 2 open; of the journal-only ones all but 8 completed. `extra` more journal-only agents join
- * the run, completed; `running` lets the last record write a minute ago.
+ * apart five hours ago, so they are drawn in the reverse order of their number — the newest first
+ * (1.6 N6); 150 completed, 12 failed, 2 open; of the journal-only ones all but 8 completed. `extra`
+ * more journal-only agents join the run, completed; `running` lets the first record — the oldest,
+ * drawn last — write a minute ago.
  */
 function bigWorld(extra = 0, o: { running?: boolean } = {}): { over: Partial<AgentTreeInput>; ids: string[] } {
   const ids = Array.from({ length: 164 }, (_, i) => hexId(i))
   const agents = ids.map((id, i) => wfRec(id, {
     firstTs: NOW - 5 * HOUR + i * MIN,
-    lastTs: o.running === true && i === 163 ? NOW - MIN : NOW - 5 * HOUR + i * MIN + 30_000,
+    lastTs: o.running === true && i === 0 ? NOW - MIN : NOW - 5 * HOUR + i * MIN + 30_000,
   }))
+  // With `running`, the first record is open in the journal too, so it runs by its fresh line.
   const journal = [
-    ...ids.map((id, i) => jagent(id, { step: i + 1, outcome: i < 150 ? 'completed' : i < 162 ? 'failed' : null })),
+    ...ids.map((id, i) => jagent(id, { step: i + 1,
+      outcome: o.running === true && i === 0 ? null : i < 150 ? 'completed' : i < 162 ? 'failed' : null })),
     ...Array.from({ length: 263 + extra }, (_, j) =>
       jagent(hexId(0x10000 + j), { step: 1000 + j, outcome: j < 8 ? null : 'completed' })),
   ]
@@ -1190,16 +1215,19 @@ test('only what is open goes to the page: a closed run of 427 agents is one sess
 
 test('an opened run shows fifty agents, the running and the selected one pinned in, and counts the rest', () => {
   const { over, ids } = bigWorld(0, { running: true })
-  const picked = agentKey(ids[120])
-  const live = agentKey(ids[163])
+  // 1.6 N6 (pinned and changed): the window takes the children in the page's order, the newest
+  // first — so the selected and the running agent are old ones here, far past the first fifty.
+  const picked = agentKey(ids[20])
+  const live = agentKey(ids[0])
   const vm = page({ ...over, expanded: [rootKey, wfKey], selected: picked })
   const w = node(vm, wfKey)
   assert.equal(w.children.length, MAX_GROUP_CHILDREN)
   assert.equal(w.childrenTotal, 165)
   assert.equal(w.childrenMore, w.childrenTotal - MAX_GROUP_CHILDREN)
+  const newest = [...ids].reverse().map(agentKey)
   // The first 47 in the order the page draws them, the three pinned ones in their own places —
   // 1.6 P5b (D4): the collector is pinned too, always last (pinned 48 and the two before).
-  assert.deepEqual(w.children.map((c) => c.key), [...ids.slice(0, 47).map(agentKey), picked, live, collectorKey])
+  assert.deepEqual(w.children.map((c) => c.key), [...newest.slice(0, 47), picked, live, collectorKey])
   assert.equal(node(vm, live).state, 'running')
   assert.equal(vm.selected?.key, picked)
   assert.equal(vm.note, null)
@@ -1209,7 +1237,7 @@ test('an opened run shows fifty agents, the running and the selected one pinned 
   // Without a selection and nothing running, the window is the first forty-nine and the collector.
   const plain = page({ ...bigWorld().over, expanded: [rootKey, wfKey] })
   assert.deepEqual(node(plain, wfKey).children.map((c) => c.key),
-    [...ids.slice(0, MAX_GROUP_CHILDREN - 1).map(agentKey), collectorKey])
+    [...[...ids].reverse().slice(0, MAX_GROUP_CHILDREN - 1).map(agentKey), collectorKey])
 })
 
 test('each "more" step shows fifty children more, at most MAX_MORE_PAGES steps; the counts follow', () => {
@@ -1219,7 +1247,7 @@ test('each "more" step shows fifty children more, at most MAX_MORE_PAGES steps; 
   assert.deepEqual([shown(1).children.length, shown(1).childrenMore], [100, 65])
   assert.deepEqual([shown(2).children.length, shown(2).childrenMore], [150, 15])
   assert.deepEqual([shown(3).children.length, shown(3).childrenMore], [165, 0])
-  assert.deepEqual(shown(3).children.map((c) => c.key), [...ids.map(agentKey), collectorKey])
+  assert.deepEqual(shown(3).children.map((c) => c.key), [...[...ids].reverse().map(agentKey), collectorKey])
   // A group of 600: the last step shows 550, and the rest stays counted.
   const crowd = Array.from({ length: 600 }, (_, i) => rec(hexId(i), {
     firstTs: NOW - 5 * HOUR + i * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
@@ -1240,13 +1268,14 @@ test('each "more" step shows fifty children more, at most MAX_MORE_PAGES steps; 
 
 test('when the pinned children alone are more than the window, the path to the selection comes first, then the running in order', () => {
   const runningOnes = Array.from({ length: 60 }, (_, i) => rec(hexId(i), { firstTs: NOW - 40 * MIN + i * 1000, lastTs: NOW - MIN }))
-  // Started last and finished: in the order it would be the 61st.
-  const picked = rec(hexId(100), { firstTs: NOW - 5 * MIN, lastTs: NOW - 4 * MIN, outcome: 'completed', outcomeTs: NOW - 4 * MIN })
+  // Started first and finished: in the order — the newest first (1.6 N6) — it would be the 61st.
+  const picked = rec(hexId(100), { firstTs: NOW - 50 * MIN, lastTs: NOW - 45 * MIN, outcome: 'completed', outcomeTs: NOW - 45 * MIN })
   const vm = page({ agents: [...runningOnes, picked], expanded: [rootKey], selected: agentKey(picked.agentId) })
   const root = vm.roots[0]
   assert.equal(root.children.length, MAX_GROUP_CHILDREN)
+  // The selection's path first, then the running ones in the page's order, the newest of them.
   assert.deepEqual(root.children.map((c) => c.key),
-    [...runningOnes.slice(0, MAX_GROUP_CHILDREN - 1).map((r) => agentKey(r.agentId)), agentKey(picked.agentId)])
+    [...[...runningOnes].reverse().slice(0, MAX_GROUP_CHILDREN - 1).map((r) => agentKey(r.agentId)), agentKey(picked.agentId)])
   assert.equal(root.childrenMore, 61 - MAX_GROUP_CHILDREN)
   assert.equal(vm.selected?.key, agentKey(picked.agentId))
   // The running list still names every running agent the window left out.
@@ -1267,26 +1296,30 @@ test('MAX_PAGE_NODES: the selection\'s path and the running first, and an opened
   const shipped = (vm: AgentTreeVm): number[] => vm.roots[0].children.map((w, i) => (w.children.length > 0 ? i : -1)).filter((i) => i >= 0)
   const vm = page({ agents, expanded })
   assert.ok(all(vm.roots).length <= MAX_PAGE_NODES, String(all(vm.roots).length))
-  // In the order the page draws them: 39 runs fit — 1 + 42 + 39 × 50 = 1993 — the last three not.
+  // In the order the page draws them — the newest run first (1.6 N6): run 41 on top, run 0 at the
+  // bottom — 39 runs fit — 1 + 42 + 39 × 50 = 1993 — the last three not: the three oldest.
   assert.deepEqual(shipped(vm), Array.from({ length: 39 }, (_, i) => i))
-  for (const i of [39, 40, 41]) {
+  assert.equal(vm.roots[0].children[0].key, runKey(41))
+  for (const i of [2, 1, 0]) {
     const w = node(vm, runKey(i))
     assert.deepEqual([w.children.length, w.childrenTotal, w.childrenMore, w.hasChildren], [0, 50, 50, true], runKey(i))
   }
   // The selected agent's run is placed first, so the cap never takes the selection away; a
-  // running agent's run comes next. The runs the page draws first give way instead.
-  const picked = agentKey(hexId(41 * 50 + 7))
-  const live = { ...agents[40 * 50 + 3], lastTs: NOW - MIN, outcome: null, outcomeTs: null }
-  const both = page({ agents: agents.map((r, n) => (n === 40 * 50 + 3 ? live : r)), expanded, selected: picked })
+  // running agent's run comes next. The runs the page draws first give way instead. (Both in the
+  // oldest runs, drawn last: 41 and 40 in the page's order.)
+  const picked = agentKey(hexId(0 * 50 + 7))
+  const live = { ...agents[1 * 50 + 3], lastTs: NOW - MIN, outcome: null, outcomeTs: null }
+  const both = page({ agents: agents.map((r, n) => (n === 1 * 50 + 3 ? live : r)), expanded, selected: picked })
   assert.ok(all(both.roots).length <= MAX_PAGE_NODES)
   assert.deepEqual(shipped(both), [...Array.from({ length: 37 }, (_, i) => i), 40, 41])
   assert.ok(all(both.roots).some((n) => n.key === picked))
   assert.equal(both.selected?.key, picked)
   assert.ok(all(both.roots).some((n) => n.key === agentKey(live.agentId)), 'the running agent is not on the page')
   // The selection comes before the running agents, too: with a running agent in each of the first
-  // 39 runs, their runs alone would fill the page (1 + 42 + 39 × 50 nodes); the selected agent's
-  // run is shipped first, and the last of the running agents' runs gives way instead.
-  const busy = agents.map((r, n) => (n % 50 === 3 && n < 39 * 50 ? { ...r, lastTs: NOW - MIN, outcome: null, outcomeTs: null } : r))
+  // 39 runs the page draws, their runs alone would fill the page (1 + 42 + 39 × 50 nodes); the
+  // selected agent's run is shipped first, and the last of the running agents' runs in the page's
+  // order gives way instead.
+  const busy = agents.map((r, n) => (n % 50 === 3 && n >= 3 * 50 ? { ...r, lastTs: NOW - MIN, outcome: null, outcomeTs: null } : r))
   const crowded = page({ agents: busy, expanded, selected: picked })
   assert.ok(all(crowded.roots).length <= MAX_PAGE_NODES)
   assert.deepEqual(shipped(crowded), [...Array.from({ length: 38 }, (_, i) => i), 41])
@@ -1378,7 +1411,8 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
     { label: 'Output', value: '700', note: '⚠ lower bound — 1 of 5 replies unfinished' },
     { label: 'Reasoning', value: '50' },
     { label: 'Tool calls', value: '3' },
-    { label: 'Spawned by', value: 'Session 9d0eb37a' },
+    // 1.6 N6: the session by the name its row carries.
+    { label: 'Spawned by', value: 'Session Tue 10:00 · 9d0eb37a' },
     { label: 'Workflow run', value: '–' },
     // D9: Claude Code's own figures, named for what they are — the context of the last request
     // with its reply — and a sentence, which takes the whole width.
@@ -1408,7 +1442,7 @@ test('a session and a run have details of their own', () => {
   }
   const s = agentDetails(input(over), NOW, rootKey)
   assert.ok(s)
-  assert.equal(s.title, 'Session 9d0eb37a')
+  assert.equal(s.title, 'Session Tue 10:00 · 9d0eb37a')
   // D5: its own figure and its agents' first, a first line and a span in place of a start and a
   // duration; the ID row last.
   assert.deepEqual(s.rows.map((r) => r.label), [
@@ -1468,7 +1502,7 @@ test('the open node gets its details; a node that is gone leaves none and says s
   assert.equal(beyond.selected, null)
   assert.equal(beyond.note, 'The selected node is no longer in the tree.')
   // …while its details can still be asked for directly.
-  assert.equal(agentDetails(input({ mains }), NOW, beyondKey)?.title, 'Session 00000020')
+  assert.equal(agentDetails(input({ mains }), NOW, beyondKey)?.title, 'Session Tue 11:00 · 00000020')
 
   // An agent of that session opens while it runs, because the running list has a row for it;
   // once it has finished it has none, and the panel gives way to the note — it does not stay
@@ -1613,7 +1647,7 @@ test('keys stay short however deep the files lie, stay apart where names share a
   for (const k of keys) assert.ok(k.length <= MAX_AGENT_KEY_CHARS, `${k.length}: ${k}`)
   assert.equal(new Set(keys).size, keys.length, 'two nodes share a key')
   assert.deepEqual([node(vm, agentKey('aaaa0001')).label, node(vm, agentKey('aaaa0002')).label],
-    ['Explore · claude-opus-5 · aaaa0001', 'Explore · claude-opus-5 · aaaa0002'], 'the two rows read alike')
+    ['Explore · opus-5 · aaaa0001', 'Explore · opus-5 · aaaa0002'], 'the two rows read alike')
 
   // Stable: a later build and the records in another order give the same keys.
   const again = build({ ...over, agents: [...(over.agents ?? [])].reverse() }, NOW + 3 * MIN)
@@ -1712,9 +1746,10 @@ test('the tree speaks German with the bundle the extension ships', () => {
     selected: agentKey('aaaa0001'),
   }
   const vm = german(() => build(over))
-  assert.equal(vm.roots[0].label, 'Sitzung 9d0eb37a')
+  // 1.6 N6: the German weekday words, the run a „Workflow-Lauf".
+  assert.equal(vm.roots[0].label, 'Sitzung Di 10:00 · 9d0eb37a')
   assert.equal(node(vm, 'l:toolu_pppp0001').label, 'Agent · – · gestartet')
-  assert.equal(node(vm, wfKey).label, 'Workflow cfe7718d')
+  assert.equal(node(vm, wfKey).label, 'Workflow-Lauf Di 11:20 · cfe7718d')
   assert.equal(vm.selected?.stateText,
     'Läuft — abgeleitet: Das Transkript hat sich vor 1 min geändert, und es wurde noch kein Ergebnis aufgezeichnet.')
   assert.deepEqual(vm.selected?.rows.map((r) => r.label), [
@@ -1996,24 +2031,26 @@ test('a running item says where it sits: its session, its run, its project while
     launches: [launch('pppp0001', { agentId: null, file: agentFile('bbbb0001', S1, WF), ts: NOW - 2 * MIN })],
     sessions: [sessionRec()],
   }
+  // 1.6 N6 (pinned and changed): the session and the run by their ids — the id-only names, not the
+  // names by start time the rows carry — and a run is a "Workflow run", as its row calls it.
   const contexts = (vm: AgentTreeVm): string[][] => vm.runningNow.map((r) => [r.key, r.context])
   assert.deepEqual(contexts(build({ ...over, attribution: 'project' })), [
     [agentKey('aaaa0001'), 'Session 9d0eb37a · alpha'],
-    [agentKey('bbbb0001'), 'Session 9d0eb37a · Workflow cfe7718d · alpha'],
-    [agentKey('bbbb0002'), 'Session 9d0eb37a · Workflow cfe7718d · alpha'],
+    [agentKey('bbbb0001'), 'Session 9d0eb37a · Workflow run cfe7718d · alpha'],
+    [agentKey('bbbb0002'), 'Session 9d0eb37a · Workflow run cfe7718d · alpha'],
     // A launch from inside the run sits in the run.
-    ['l:toolu_pppp0001', 'Session 9d0eb37a · Workflow cfe7718d · alpha'],
+    ['l:toolu_pppp0001', 'Session 9d0eb37a · Workflow run cfe7718d · alpha'],
   ])
   // Attribution off: no project anywhere, the list included.
   assert.deepEqual(contexts(build({ ...over, attribution: 'none' })), [
     [agentKey('aaaa0001'), 'Session 9d0eb37a'],
-    [agentKey('bbbb0001'), 'Session 9d0eb37a · Workflow cfe7718d'],
-    [agentKey('bbbb0002'), 'Session 9d0eb37a · Workflow cfe7718d'],
-    ['l:toolu_pppp0001', 'Session 9d0eb37a · Workflow cfe7718d'],
+    [agentKey('bbbb0001'), 'Session 9d0eb37a · Workflow run cfe7718d'],
+    [agentKey('bbbb0002'), 'Session 9d0eb37a · Workflow run cfe7718d'],
+    ['l:toolu_pppp0001', 'Session 9d0eb37a · Workflow run cfe7718d'],
   ])
   // In German, the words the tree's own labels use.
   assert.deepEqual(german(() => build({ ...over, attribution: 'none' })).runningNow.map((r) => r.context).slice(0, 2),
-    ['Sitzung 9d0eb37a', 'Sitzung 9d0eb37a · Workflow cfe7718d'])
+    ['Sitzung 9d0eb37a', 'Sitzung 9d0eb37a · Workflow-Lauf cfe7718d'])
 })
 
 test('an item waits when the roll-up made it running, and says so; one running by its own transcript does not', () => {
@@ -2058,8 +2095,11 @@ test('the running list carries no field the page does not need, and keys it can 
   for (const r of vm.runningNow) {
     // 1.6 P5b (D4): `running`, the running agents an entry stands for — 1 here, a collector's many.
     // 1.6 P6: `lowerBoundText` (D10), the node's reason, and `silence` (N5), as the node's.
+    // 1.6 P7: `fullLabel` (N6), the name with the whole model id, and the clock times of its start
+    // and last activity for the static screen-reader words (N9).
     assert.deepEqual(Object.keys(r).sort(),
-      ['context', 'key', 'kind', 'label', 'lastTs', 'lowerBound', 'lowerBoundText', 'running', 'silence', 'startTs', 'usage', 'waiting'])
+      ['context', 'fullLabel', 'key', 'kind', 'label', 'lastClock', 'lastTs', 'lowerBound', 'lowerBoundText', 'running', 'silence',
+        'startClock', 'startTs', 'usage', 'waiting'])
     assert.ok(r.key.length > 0 && r.key.length <= MAX_AGENT_KEY_CHARS, r.key)
     assert.equal(/[\\/]/.test(r.key + r.context), false, `${r.key} ${r.context}`)
     assert.ok(r.kind === 'agent' || r.kind === 'pending')
@@ -2247,10 +2287,10 @@ test('short ids: the fewest characters from four on that no other agent of the s
   }
   const vm = build(over)
   const label = (id: string): string => node(vm, agentKey(id)).label
-  assert.equal(label(A), 'Explore · claude-opus-5 · 3f2a1')
-  assert.equal(label(B), 'Explore · claude-opus-5 · 3f2a7')
-  assert.equal(label(C), 'Explore · claude-opus-5 · 9c0d')
-  assert.equal(label('a3f2a000000000000'), 'Explore · claude-opus-5 · 3f2a')
+  assert.equal(label(A), 'Explore · opus-5 · 3f2a1')
+  assert.equal(label(B), 'Explore · opus-5 · 3f2a7')
+  assert.equal(label(C), 'Explore · opus-5 · 9c0d')
+  assert.equal(label('a3f2a000000000000'), 'Explore · opus-5 · 3f2a')
   // Keys stay the full id.
   assert.equal(node(vm, agentKey(A)).key, `a:${A}`)
   // The whole id is in the details, in the row Copy ID copies, and it is what Copy ID copies.
@@ -2260,7 +2300,8 @@ test('short ids: the fewest characters from four on that no other agent of the s
   const launched = build({ launches: [launch('pppp0001', { agentId: null, ts: NOW - MIN })], selected: 'l:toolu_pppp0001' })
   assert.equal(launched.selected?.id, 'toolu_pppp0001')
   // The running list names an agent as the tree does.
-  assert.ok(vm.runningNow.some((r) => r.label === 'Explore · claude-opus-5 · 3f2a1'), JSON.stringify(vm.runningNow))
+  assert.ok(vm.runningNow.some((r) => r.label === 'Explore · opus-5 · 3f2a1' && r.fullLabel === 'Explore · claude-opus-5 · 3f2a1'),
+    JSON.stringify(vm.runningNow))
 })
 
 // ---------------------------------------------------------------------------
@@ -2475,7 +2516,8 @@ test('a run\'s agents without a counted reply are one collector, its last child:
   const w = node(vm, wfKey)
   // 161 agents and one collector — no node for any of the 266 without a counted reply.
   assert.deepEqual([w.children.length, w.childrenTotal, w.childrenMore], [162, 162, 0])
-  assert.deepEqual(w.children.map((c) => c.key), [...ids.map(agentKey), collectorKey])
+  // The newest first (1.6 N6), the collector last.
+  assert.deepEqual(w.children.map((c) => c.key), [...[...ids].reverse().map(agentKey), collectorKey])
   assert.deepEqual(all(vm.roots).filter((n) => n.kind === 'noreply').map((n) => n.key), [collectorKey])
   assert.equal(all(vm.roots).length, 1 + 1 + 162)
   for (const id of [...rejectedIds, ...onlyIds]) assert.equal(all(vm.roots).some((n) => n.key === agentKey(id)), false, id)
@@ -2484,6 +2526,10 @@ test('a run\'s agents without a counted reply are one collector, its last child:
   assert.equal(c.kind, 'noreply')
   assert.equal(c.label, '266 agent(s) without a counted reply')
   assert.deepEqual([c.usage, c.duration, c.usageAgents, c.lowerBound, c.superseded], ['–', '–', null, false, false])
+  // No start of its own, so no clock anywhere (1.6, the lead's note on P5b): its members' earliest
+  // line may be a rejection of an agent that failed hours ago. Its last line it keeps.
+  assert.deepEqual([c.startTs, c.startClock], [null, null])
+  assert.equal(c.lastTs, NOW - 4 * HOUR + 2 * MIN)
   assert.deepEqual([c.hasChildren, c.childrenTotal, c.childrenMore, c.children], [false, 0, 0, []])
   assert.equal(c.agentCount, 266)
   assert.deepEqual(c.tally, { started: 266, done: 255, failed: 3, retried: 0, stopped: 0, running: 0, unknown: 8 })
@@ -2599,7 +2645,8 @@ test('a later counted reply moves an agent out of the collector into a node of i
   const replied = rejectedOnly(J3, NOW - 39 * MIN, { requests: 1, outputFinal: 1, input: 40, output: 12, lastTs: NOW - 38 * MIN, rejected: null })
   const after: Partial<AgentTreeInput> = { ...before, agents: [silentWf(J1), rejectedOnly(J2, NOW - 40 * MIN), replied] }
   const vm = build(after)
-  assert.deepEqual(node(vm, wfKey).children.map((c) => c.key), [agentKey(J1), agentKey(J3), collectorKey])
+  // The newest first (1.6 N6): J3 started a minute after J1; the collector last.
+  assert.deepEqual(node(vm, wfKey).children.map((c) => c.key), [agentKey(J3), agentKey(J1), collectorKey])
   assert.deepEqual([node(vm, collectorKey).agentCount, node(vm, collectorKey).label], [1, '1 agent(s) failed before their first reply'])
   assert.notEqual(node(vm, agentKey(J3)).usage, '–')
   assert.equal(node(vm, wfKey).agentCount, 3)
@@ -2642,23 +2689,28 @@ test('running counts a collector\'s running members, and the running list carrie
   const vm = page(over)
   const whole = build(over)
   const c = node(whole, collectorKey)
-  assert.deepEqual([c.state, c.tally?.running, c.startTs], ['running', 3, NOW - 3 * MIN])
+  // 1.6 (the lead's note on P5b, pinned and changed): no start of its own, so no clock — P5b gave
+  // it the earliest first line of a member with a record.
+  assert.deepEqual([c.state, c.tally?.running, c.startTs, c.startClock], ['running', 3, null, null])
   // The host's number, the session's tally and the running list say the same: four.
   assert.equal(vm.running, 4)
   assert.equal(vm.roots[0].tally?.running, 4)
   assert.deepEqual(vm.runningNow.map((r) => [r.key, r.kind, r.running]), [[agentKey(J1), 'agent', 1], [collectorKey, 'noreply', 3]])
   assert.equal(vm.runningNow.reduce((s, r) => s + r.running, 0) , vm.running)
   // The collector's entry: its label, its run's context, a dash for its usage, no bound, no wait —
-  // and its start the earliest first line of a member with a record.
+  // and no start (1.6, the lead's note on P5b: the page shows how many of its members run instead
+  // of a clock, which an earliest first line would make false precision). Its last line it keeps.
   const item = vm.runningNow[1]
   assert.deepEqual(item, {
-    key: collectorKey, kind: 'noreply', label: '3 agent(s) without a counted reply', context: 'Session 9d0eb37a · Workflow cfe7718d',
-    usage: '–', lowerBound: false, lowerBoundText: null, startTs: NOW - 3 * MIN, lastTs: NOW - 3 * MIN, waiting: false, silence: false, running: 3,
+    key: collectorKey, kind: 'noreply', label: '3 agent(s) without a counted reply', fullLabel: '3 agent(s) without a counted reply',
+    context: 'Session 9d0eb37a · Workflow run cfe7718d',
+    usage: '–', lowerBound: false, lowerBoundText: null, startTs: null, lastTs: NOW - 3 * MIN, startClock: null, lastClock: '11:57',
+    waiting: false, silence: false, running: 3,
   })
   // Its row opens its details from the list, the tree closed.
   const picked = page({ ...over, selected: collectorKey })
   assert.equal(picked.selected?.key, collectorKey)
-  // Without a member that has a record, it has no start: last in the list.
+  // Without a member that has a record, it has no start either: last in the list.
   const noRecord: Partial<AgentTreeInput> = { ...over, agents: [wfRec(J1, { firstTs: NOW - 30 * MIN, lastTs: NOW - MIN })] }
   const listed = page(noRecord).runningNow
   assert.deepEqual(listed.map((r) => [r.key, r.startTs, r.running]), [[agentKey(J1), NOW - 30 * MIN, 1], [collectorKey, null, 3]])
@@ -2808,4 +2860,131 @@ test('a running agent by its own transcript may say how long it has been silent;
     assert.equal(r.lastTs, node(vm, r.key).lastTs, r.key)
   }
   assert.ok(vm.runningNow.some((r) => r.silence) && vm.runningNow.some((r) => !r.silence))
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P7 · N6: names by start time, the newest first; N9: the clock times behind the static words
+// ---------------------------------------------------------------------------
+
+test('a session and a run are named by when they started — a weekday within six days, a date before — then their id', () => {
+  const at = (firstTs: number, over: Partial<AgentTreeInput> = {}): AgentTreeVm =>
+    build({ mains: [main({ firstTs })], agents: [wfRec('bbbb0001', { firstTs, lastTs: NOW - MIN })], ...over })
+  const names = (vm: AgentTreeVm): string[] => [vm.roots[0].label, node(vm, wfKey).label]
+  // NOW is Tuesday 2026-09-22 12:00 UTC.
+  assert.deepEqual(names(at(NOW - 2 * HOUR)), ['Session Tue 10:00 · 9d0eb37a', 'Workflow run Tue 10:00 · cfe7718d'])
+  assert.deepEqual(names(at(NOW - 3 * DAY - HOUR)), ['Session Sat 11:00 · 9d0eb37a', 'Workflow run Sat 11:00 · cfe7718d'])
+  // The window: a minute inside six days is a weekday (Wednesday — the Tuesday a week ago is not in it)…
+  assert.deepEqual(names(at(NOW - WEEKDAY_NAMES_WITHIN_MS + MIN)), ['Session Wed 12:01 · 9d0eb37a', 'Workflow run Wed 12:01 · cfe7718d'])
+  // …exactly six days back, and before, a date: the same weekday a week ago would read as this one.
+  assert.deepEqual(names(at(NOW - WEEKDAY_NAMES_WITHIN_MS)), ['Session 2026-09-16 12:00 · 9d0eb37a', 'Workflow run 2026-09-16 12:00 · cfe7718d'])
+  const old = build({ mains: [main({ firstTs: NOW - 22 * DAY - 11 * HOUR })] })
+  assert.equal(old.roots[0].label, 'Session 2026-08-31 01:00 · 9d0eb37a')
+  // No start known: the id alone — a session whose transcript was never read.
+  const bare = build({ mains: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] })
+  assert.equal(bare.roots[0].label, 'Session 9d0eb37a')
+  // A run nothing but its launch shows is named by its launch (N4).
+  const launched: RunLaunch = {
+    toolUseId: 'toolu_wf1', file: sessionFile(), ts: NOW - 2 * MIN, runId: WF, outcome: 'launched', outcomeStatus: null, outcomeTs: null,
+  }
+  assert.equal(node(build({ runLaunches: [launched] }), wfKey).label, 'Workflow run Tue 11:58 · cfe7718d')
+  // The zone is the configured one, and the weekday the calendar's: 23:30 UTC on Monday is
+  // Tuesday 01:30 in Berlin; a day boundary at 06:00 does not move the name to the day before.
+  const berlin: TimeConfig = { ...tcfg, zone: 'Europe/Berlin', dayBoundaryHour: 6 }
+  const late = build({ mains: [main({ firstTs: Date.UTC(2026, 8, 21, 23, 30) })], tcfg: berlin })
+  assert.equal(late.roots[0].label, 'Session Tue 01:30 · 9d0eb37a')
+  // A name has no model: the full name is the name.
+  assert.equal(at(NOW - 2 * HOUR).roots[0].fullLabel, 'Session Tue 10:00 · 9d0eb37a')
+  assert.equal(node(at(NOW - 2 * HOUR), wfKey).fullLabel, 'Workflow run Tue 10:00 · cfe7718d')
+})
+
+test('the names by start time speak German: „Sitzung", „Workflow-Lauf", the weekday words Mo–So', () => {
+  const words = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
+  // NOW is a Tuesday; each of the six days before it has its own German word.
+  for (let back = 0; back < 6; back++) {
+    const firstTs = NOW - back * DAY - HOUR
+    const vm = german(() => build({ mains: [main({ firstTs })], agents: [wfRec('bbbb0001', { firstTs, lastTs: NOW - MIN })] }))
+    const w = words[new Date(firstTs).getUTCDay()]
+    assert.equal(vm.roots[0].label, `Sitzung ${w} 11:00 · 9d0eb37a`)
+    assert.equal(node(vm, wfKey).label, `Workflow-Lauf ${w} 11:00 · cfe7718d`)
+  }
+  const dated = german(() => build({ mains: [main({ firstTs: NOW - 10 * DAY })] }))
+  assert.equal(dated.roots[0].label, 'Sitzung 2026-09-12 12:00 · 9d0eb37a')
+  const bare = german(() => build({ mains: [], runLaunches: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] }))
+  assert.equal(bare.roots[0].label, 'Sitzung 9d0eb37a')
+  // The running list's line of where an agent sits: the ids alone, in German.
+  const live = german(() => build({ agents: [wfRec('bbbb0001', { lastTs: NOW - MIN })] }))
+  assert.equal(live.runningNow[0].context, 'Sitzung 9d0eb37a · Workflow-Lauf cfe7718d')
+})
+
+test('the children of a session, a run and an agent are in plain time order, the newest first, whatever their state; the collector last', () => {
+  // One session: a run and direct agents side by side, each in another state, their starts
+  // interleaved, one launch whose start is its own; and in the run a collector.
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      rec('aaaa0001', { firstTs: NOW - 50 * MIN, lastTs: NOW - 45 * MIN, outcome: 'failed', outcomeTs: NOW - 45 * MIN }),
+      rec('aaaa0002', { firstTs: NOW - 20 * MIN, lastTs: NOW - MIN }),
+      rec('aaaa0003', { firstTs: NOW - 35 * MIN, lastTs: NOW - 30 * MIN, outcome: 'completed', outcomeTs: NOW - 30 * MIN }),
+      rec('aaaa0004', { firstTs: NOW - 40 * MIN, lastTs: NOW - 35 * MIN, outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 35 * MIN }),
+      wfRec('bbbb0001', { firstTs: NOW - 25 * MIN, lastTs: NOW - 24 * MIN, outcome: 'completed', outcomeTs: NOW - 24 * MIN }),
+      wfRec('bbbb0002', { firstTs: NOW - 5 * MIN, lastTs: NOW - 4 * MIN, outcome: 'failed', outcomeTs: NOW - 4 * MIN }),
+      wfRec('bbbb0003', { firstTs: NOW - 15 * MIN, lastTs: NOW - 2 * MIN }),
+      // A nested agent's children the same way: the later one first.
+      rec('cccc0001', { firstTs: NOW - 12 * MIN, spawnerFile: agentFile('aaaa0003') }),
+      rec('cccc0002', { firstTs: NOW - 9 * MIN, spawnerFile: agentFile('aaaa0003') }),
+    ],
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - 22 * MIN })],
+    // The run's journal started one agent no transcript was read of: the collector.
+    runs: [run([jagent('bbbb0001', { step: 1 }), jagent('bbbb0002', { step: 2 }), jagent('bbbb0003', { step: 3 }),
+      jagent('dddd0001', { step: 4 })])],
+  }
+  const vm = build(over)
+  // The run started with its first agent, 25 minutes ago: between the launch (22) and 0003 (35).
+  assert.deepEqual(vm.roots[0].children.map((c) => c.key), [
+    agentKey('aaaa0002'), 'l:toolu_pppp0001', wfKey, agentKey('aaaa0003'), agentKey('aaaa0004'), agentKey('aaaa0001'),
+  ])
+  // Running, unknown, done, stopped and failed mixed in time order — no state ranks before another
+  // (the lead's note withdrew N6's order by state: failed first would have put 0001 on top).
+  assert.deepEqual(vm.roots[0].children.map((c) => c.state), ['running', 'unknown', 'running', 'done', 'stopped', 'failed'])
+  assert.deepEqual(node(vm, wfKey).children.map((c) => c.key), [agentKey('bbbb0002'), agentKey('bbbb0003'), agentKey('bbbb0001'), collectorKey])
+  assert.deepEqual(node(vm, agentKey('aaaa0003')).children.map((c) => c.key), [agentKey('cccc0002'), agentKey('cccc0001')])
+  // The page's payload the same, and the order does not depend on the order the records came in.
+  const opened = page({ ...over, expanded: [rootKey, wfKey] })
+  assert.deepEqual(opened.roots[0].children.map((c) => c.key), vm.roots[0].children.map((c) => c.key))
+  const shuffled = build({ ...over, agents: [...(over.agents ?? [])].reverse() })
+  assert.deepEqual(all(shuffled.roots).map((n) => n.key), all(vm.roots).map((n) => n.key))
+  // Roots stay the most recent first by their last activity.
+  const two = build({ mains: [main({ lastTs: NOW - 30 * MIN, firstTs: NOW - HOUR }), main({ sessionId: S2, lastTs: NOW - MIN, firstTs: NOW - 5 * HOUR })] })
+  assert.deepEqual(two.roots.map((r) => r.key), [`s:${S2}`, rootKey])
+})
+
+test('byNewestFirst: the later start first, an unknown start after every known one, then the key; a collector always last', () => {
+  const e = (key: string, startTs: number | null, kind: TreeNode['kind'] = 'agent'): { key: string; startTs: number | null; kind: TreeNode['kind'] } =>
+    ({ key, startTs, kind })
+  const list = [e('a:1', 100), e('n:x', null, 'noreply'), e('a:2', 300), e('a:4', null), e('a:3', 300), e('w:y', 200, 'workflow'), e('a:0', null)]
+  assert.deepEqual([...list].sort(byNewestFirst).map((x) => x.key), ['a:2', 'a:3', 'w:y', 'a:1', 'a:0', 'a:4', 'n:x'])
+  // A collector with the latest start of all is still last.
+  assert.deepEqual([e('n:x', 999, 'noreply'), e('a:1', 1)].sort(byNewestFirst).map((x) => x.key), ['a:1', 'n:x'])
+})
+
+test('every node and running item carries its start and last activity as clock times for the static words, and none it has no time for', () => {
+  const vm = build({
+    mains: [main({ firstTs: NOW - 2 * DAY - 3 * HOUR, lastTs: NOW - 2 * MIN })],
+    agents: [rec('aaaa0001', { firstTs: NOW - 30 * MIN, lastTs: NOW - MIN })],
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - 2 * MIN })],
+  })
+  const root = vm.roots[0]
+  // Today "HH:MM", another day "YYYY-MM-DD HH:MM" — the details' own form.
+  assert.deepEqual([root.startClock, root.lastClock], ['2026-09-20 09:00', '11:58'])
+  const a = node(vm, agentKey('aaaa0001'))
+  assert.deepEqual([a.startClock, a.lastClock], ['11:30', '11:59'])
+  const item = vm.runningNow.find((r) => r.key === agentKey('aaaa0001'))
+  assert.deepEqual([item?.startClock, item?.lastClock], ['11:30', '11:59'])
+  const p = node(vm, 'l:toolu_pppp0001')
+  assert.deepEqual([p.startClock, p.lastClock], ['11:58', '11:58'])
+  // A session whose own transcript was never read has no time: no clock either.
+  const bare = build({ mains: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] }).roots[0]
+  assert.deepEqual([bare.startTs, bare.startClock, bare.lastTs, bare.lastClock], [null, null, null, null])
+  // In the configured zone.
+  const ny = build({ tcfg: { ...tcfg, zone: 'America/New_York' }, agents: [rec('aaaa0001', { firstTs: NOW - 30 * MIN, lastTs: NOW - MIN })] })
+  assert.equal(node(ny, agentKey('aaaa0001')).startClock, '07:30')
 })

@@ -14,7 +14,8 @@
  *     Explore · sonnet          launched in the background, stopped: a task notification says `killed`
  *     Workflow cfe7718d         running — launched by a `Workflow` call whose result names the run, no end recorded yet
  *       workflow-subagent       done — the workflow journal recorded it, at no time of its own
- *       workflow-subagent       failed — a task notification recorded it
+ *       workflow-subagent       failed — a task notification recorded it, after the API rejected its last
+ *                               request on the 5-hour limit (1.6 N3)
  *       workflow-subagent       failed, retried — the journal recorded the failure and started its step again
  *       workflow-subagent       done — that retry, completed by the journal
  *       workflow-subagent       stopped, replaced — the journal started its step again before it recorded anything
@@ -26,7 +27,8 @@
  * Every launch, result, notification, journal line and sidecar carries the description,
  * prompt, summary, answer and output path the builders write (`AGENT_CONTENT`) — a journal line
  * its key, label, phase and result too, the `Workflow` call its script and the result that
- * answers it its summary, paths and names — which is content no view may hold. Nearly every agent
+ * answers it its summary, paths and names, the rejected request the error's text and the quota block
+ * beside its limit — which is content no view may hold. Nearly every agent
  * transcript ends on a line whose reply was never marked finished, as Claude Code's do, so nearly
  * every agent's output is a lower bound.
  */
@@ -38,7 +40,7 @@ import type { Config } from '../../src/config'
 import { Attribution } from '../../src/types'
 import { agentTreeFor, defaultUiState } from '../../src/viewModel'
 import {
-  CLAUDE_ROOT, ClaudeUsage, agentResultLine, agentToolUseLine, claudeLine, ctxFor, journalKey, journalLine, metaJson,
+  CLAUDE_ROOT, ClaudeUsage, agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, ctxFor, journalKey, journalLine, metaJson,
   queueOperationLine, workflowResultLine, workflowToolUseLine,
 } from './helpers'
 
@@ -83,6 +85,9 @@ export const AGENT_CONTENT = [
   // 1.6 N4: the `Workflow` call's input and the result that answers it.
   'synthetic workflow script', 'synthetic workflow args', 'synthetic workflow description', 'synthetic workflow summary',
   'synthetic workflow answer', 'synthetic-workflow-name', '/tmp/synthetic/workflows', '/tmp/synthetic/transcripts',
+  // 1.6 N3: a rejected request's text, its details and what its quota block holds beside the limit.
+  'synthetic API error text', 'synthetic API error details', 'synthetic upgrade path', 'synthetic overage reason',
+  'synthetic-overage-status',
 ]
 
 const SLUG = path.join(CLAUDE_ROOT, '-home-t-alpha')
@@ -242,6 +247,13 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
   turn(f(W.wfDone), 'wd-2', at(11, 47, 30), OPUS, { input: 3, cacheWrite: 1200, cacheRead: 14500, output: 2100 }, { agentId: W.wfDone, final: false })
   journal('result', W.wfDone, 'done', at(11, 47, 40))
   turn(f(W.wfFailed), 'wf-2', at(11, 49, 50), OPUS, { input: 2, cacheWrite: 800, cacheRead: 12600, output: 410 }, { agentId: W.wfFailed, final: false })
+  // 1.6 N3: its next request is rejected on the 5-hour limit — the line Claude Code writes for it,
+  // the error's text and the quota block's other values fixture text — and then the parent
+  // records the failure.
+  read(f(W.wfFailed), apiErrorLine({
+    id: 'wf-err', ts: at(11, 50), agentId: W.wfFailed, errorDetails: 'synthetic API error details',
+    upgradePaths: ['synthetic upgrade path'],
+  }))
   read(MAIN, queueOperationLine({ ts: at(11, 50, 5), toolUseId: TU.wfFailed, status: 'failed' }))
   // An attempt the journal replaced: its step is started again before it recorded anything, by
   // the agent that is running now.

@@ -154,6 +154,13 @@ export const READ_CONTRACT = [
     fields: ['totalTokens', 'totalDurationMs', 'totalToolUseCount'] },
   { what: 'the task notification', file: 'src/agg.ts', kind: 'tags', pattern: /const NOTE_\w+_RE = \/<([a-z-]+)>/g,
     fields: ['tool-use-id', 'status'] },
+  // 1.6 §0a.2 (P5a): an API error line of an agent's transcript — the request it rejected: its HTTP
+  // status, its error kind and, of its `quotaLimits` block (a plain object), the limit that refused
+  // it. Never its message, which holds the error's text, nor anything else of the block.
+  { what: 'a rejected request', file: 'src/agg.ts', kind: 'fields', body: 'function rejectedOf(', variable: 'd',
+    fields: ['apiErrorStatus', 'error', 'quotaLimits'] },
+  { what: 'a rejected request\'s limit', file: 'src/agg.ts', kind: 'fields', body: 'function rejectedOf(', variable: 'q',
+    fields: ['rateLimitType'] },
 ]
 
 /**

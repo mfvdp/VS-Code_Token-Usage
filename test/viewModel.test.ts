@@ -837,7 +837,7 @@ function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggrega
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null,
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
   }
   const pending: AgentLaunch = {
     toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',

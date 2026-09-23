@@ -540,8 +540,9 @@ function runHome(prefix: string, secret: string): { main: string; journal: strin
 }
 
 test('the replay the revision asks for finds the run launches in the transcripts again', async () => {
-  // 2: the run launches (1.6 N4) are a table only a replay can fill for what was already read.
-  assert.equal(AGENT_TABLES_REVISION, 2)
+  // 2: the run launches (1.6 N4) are a table only a replay can fill for what was already read. (A
+  // later package raises the revision again — 3 for the rejected requests, P5a — and pins its own.)
+  assert.ok(AGENT_TABLES_REVISION >= 2, String(AGENT_TABLES_REVISION))
   runHome('runs-replay', 'RUN-REPLAY')
   const agg = new Aggregator()
   await scan(agg)

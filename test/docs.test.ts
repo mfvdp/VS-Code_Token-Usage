@@ -364,7 +364,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
   for (const what of ['the identity sidecar', 'the workflow journal', 'the workflow journal (fallback)', 'an agent launch',
     'the tool result', 'the reported totals', 'the task notification',
     // 1.6 §0a.3 (P4): the launch blocks of a reply, and the result that answers a `Workflow` call.
-    'the launch blocks', 'the workflow result']) {
+    'the launch blocks', 'the workflow result',
+    // 1.6 §0a.2 (P5a): an agent's rejected request, and the limit that refused it.
+    'a rejected request', 'a rejected request\'s limit']) {
     assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
   }
   for (const row of READ_CONTRACT) {
@@ -377,9 +379,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
   }
   // And what stays out, in the words both pages promise it in. 1.6 §0a.1 (P2b): a journal line's
   // `label` and `phase`; §0a.3 (P4): a `Workflow` call's `script` and its result's `scriptPath`
-  // and `transcriptDir`.
+  // and `transcriptDir`; §0a.2 (P5a): an API error line's `errorDetails`.
   for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result', 'label', 'phase',
-    'script', 'scriptPath', 'transcriptDir']) {
+    'script', 'scriptPath', 'transcriptDir', 'errorDetails']) {
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
@@ -431,6 +433,12 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.',
     'Running — inferred: the parent launched this run {0} and no agent has written yet.',
     'Unknown — inferred: the parent launched this run at {0}, but no agent of it was ever seen.',
+    // 1.6 N3 (P5a): an agent whose last request the API rejected — with the reason the line gave,
+    // and without one when it gave none.
+    'Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.',
+    'Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.',
+    'Running — inferred: the transcript changed {0}; its last request was rejected — {1}.',
+    'Running — inferred: the transcript changed {0}; its last request was rejected.',
   ]
   // The run sentences 1.6 replaced are written nowhere any more.
   for (const gone of ['Failed — at least one agent of this run has a recorded failure.',

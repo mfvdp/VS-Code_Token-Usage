@@ -25,7 +25,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import {
-  agentResultLine, agentToolUseLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
+  agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
   journalKey, journalLine, metaJson, queueOperationLine, snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine,
 } from './fixtures/helpers'
 import {
@@ -1575,6 +1575,41 @@ test('a Workflow call\'s script and its result\'s summary, paths and names reach
   for (const [what, text] of [['log', state.logText()], ['diagnostics', report], ['markdown', markdown], ['state', saved]]) {
     assert.equal(text.includes(secret), false, `the ${what} holds the call's script, the result's summary or the notification's`)
     for (const fixture of ['synthetic workflow', 'synthetic-workflow-name', '/tmp/synthetic/', 'local_workflow']) {
+      assert.equal(text.includes(fixture), false, `the ${what} holds the fixture's ${fixture}`)
+    }
+  }
+})
+
+test('a rejected request\'s text, its details and its quota block reach neither the log, the diagnostics, the markdown nor the state (1.6 §0a.2)', async () => {
+  // The host's half of the §0a.2 leak test (test/agg.agents.test.ts has the aggregator's): the
+  // cold start reads the error lines of an agent's transcript and of a main one, the replay the
+  // revision asks for reads them again, and the rest goes where the host sends it.
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const secret = 'API-ERROR-HOST-CONTENT-3a7f'
+  appendLine(w.running, apiErrorLine({
+    id: 'msg_a1_err', ts: T, agentId: 'a1a1a1', text: `${secret}-text`, errorDetails: `${secret}-details`,
+    apiError: `${secret}-api`, upgradePaths: [`${secret}-upgrade`],
+  }))
+  appendLine(w.activeMain, apiErrorLine({ id: 'msg_act_err', ts: T, text: `${secret}-main`, errorDetails: `${secret}-main-details` }))
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const { agg } = lazy()
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  await state.execute('tokenPace.copyDiagnostics')
+  const report = state.clipboard[state.clipboard.length - 1]
+  assert.ok(report && report.length > 0, 'no diagnostics were copied')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const saved = fs.readFileSync(fx.stateFile, 'utf8')
+  // It went through: the agent's record keeps its rejection — three values and a time — and
+  // the main session's error line was read for nothing.
+  const agents = (JSON.parse(saved) as Snapshot).agents ?? {}
+  assert.deepEqual(agents[w.running]?.rejected, { at: T, status: 429, error: 'rate_limit', limit: 'five_hour' })
+  for (const [what, text] of [['log', state.logText()], ['diagnostics', report], ['markdown', markdown], ['state', saved]]) {
+    assert.equal(text.includes(secret), false, `the ${what} holds an error line's text, details, API error or upgrade offer`)
+    for (const fixture of ['synthetic overage reason', 'synthetic-overage-status', 'synthetic-slug']) {
       assert.equal(text.includes(fixture), false, `the ${what} holds the fixture's ${fixture}`)
     }
   }

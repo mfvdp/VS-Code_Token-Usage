@@ -237,6 +237,29 @@ export type LaunchStatus = 'completed' | 'failed' | 'error' | 'timeout' | 'kille
  */
 export type RecordedOutcome = 'completed' | 'failed' | 'stopped'
 
+/**
+ * The `error` of an API error line (1.6 §0a.2), through its allow-list — the kinds Claude Code
+ * writes there. Any other value is no kind (null).
+ */
+export type ApiErrorKind =
+  | 'rate_limit' | 'server_error' | 'invalid_request' | 'authentication_failed' | 'max_output_tokens' | 'overloaded'
+/** The `quotaLimits.rateLimitType` of a rejected request (1.6 §0a.2): which limit refused it. */
+export type RateLimitKind = 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seven_day_sonnet'
+
+/**
+ * The last rejected request of an agent's transcript (1.6 N3, §0a.2): the time of its error line
+ * and three values of it, each through its allow-list — never the error's text. A later counted
+ * reply of the same transcript clears it.
+ */
+export interface RejectedRequest {
+  at: number
+  /** `apiErrorStatus`, an integer 100..599. */
+  status: number | null
+  error: ApiErrorKind | null
+  /** `quotaLimits.rateLimitType`. */
+  limit: RateLimitKind | null
+}
+
 /** Identity of a subagent transcript, from `agent-<id>.meta.json`. Four fields; nothing else is read. */
 export interface AgentMeta {
   /** ≤ 40 chars, alphabet [A-Za-z0-9_.:@/-]. */
@@ -283,6 +306,12 @@ export interface AgentRec {
    * without one — from a snapshot written before 1.6. A `stopped` outcome always has one.
    */
   outcomeStatus: LaunchStatus | null
+  /**
+   * 1.6 N3: the last request of the transcript that the API rejected — a rate limit, a server
+   * error — when no counted reply came after it; a later counted reply clears it. Its time is
+   * activity of the transcript too, which `lastTs` (the last counted reply) does not include.
+   */
+  rejected: RejectedRequest | null
 }
 
 /** A launch the parent transcript recorded; the bridge from tool_use id to agent. */

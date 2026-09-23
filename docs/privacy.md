@@ -52,7 +52,15 @@ identifiers and counts, never content:
   values is an identifier or a number, and an identifier is held to a small alphabet and length
   on the way in — one that does not fit is dropped, not trimmed. The agent tables keep them for
   seven days in the token snapshot, never in an export or the diagnostics report, and of them
-  the log only ever gets counts.
+  the log only ever gets counts;
+* for the agent tree too, of an API error line in an agent's transcript — the line Claude Code
+  writes in place of a reply when the API rejected a request — the HTTP status `apiErrorStatus`,
+  the `error` kind and, of its `quotaLimits` block, the `rateLimitType`: which limit refused the
+  request. Each is held to the values Claude Code writes (a status from 100 to 599, six error
+  kinds, four limits), and the agent's record keeps the last one with its time. Never the line's
+  `message`, which holds the error's text, never its `errorDetails`, its `apiError` or its
+  `requestId`, and nothing else of `quotaLimits` — not its reset time, its overage state or its
+  upgrade offers. A main session's error lines are not read for it at all.
 
 Nothing is written except the extension's own state in its `globalStorage`, with exactly two
 opt-in exceptions, each behind its own consent dialog and each with a backup or a

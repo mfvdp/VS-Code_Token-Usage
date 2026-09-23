@@ -187,6 +187,37 @@ or `stopped` for an agent that was halted — is an end of its own: `■`, in th
 sentence quotes the parent's word as it was written, `‘killed’`. Only `failed`, `error` and
 `timeout` make an agent failed.
 
+**Why an agent ended: a rejected request.** When the API refuses a request of an agent — a usage
+limit, a server error — Claude Code writes an error line into the agent's transcript in place of a
+reply. The last one is kept for the agent while no counted reply follows it (a reply that does
+clears it), and its time counts as the transcript's last activity. An agent that ended on one and
+has no recorded end reads unknown, as any silent agent does, but its sentence says why rather
+than that it may have been stopped — *Unknown — inferred: no result was recorded; the last
+request, at 14:20, was rejected — 5-hour limit (HTTP 429).* — and one within its ten minutes
+reads running with the rejection named: *Running — inferred: the transcript changed 2 min ago;
+its last request was rejected — 5-hour limit (HTTP 429).* Whatever its state, its details carry
+the row `Last request` — `rejected at 14:20 — 5-hour limit (HTTP 429)` — and a workflow run's and
+a session's details count their agents that ended so, one row per reason:
+`Ended on a rejected request` — `5-hour limit (HTTP 429): 12`. The reason is the limit that
+refused a rate-limited request, else the kind of error:
+
+| The line says | The reason reads |
+|---|---|
+| `rateLimitType` `five_hour` | 5-hour limit |
+| `rateLimitType` `seven_day` | weekly limit |
+| `rateLimitType` `seven_day_opus` or `seven_day_sonnet` | weekly model limit |
+| `error` `rate_limit`, no limit named | usage limit |
+| `error` `server_error` | server error |
+| `error` `overloaded` | overloaded |
+| `error` `invalid_request` | invalid request |
+| `error` `authentication_failed` | authentication failed |
+| `error` `max_output_tokens` | output limit |
+
+followed by the HTTP status in brackets, `(HTTP 429)`; either part is left out when the line does
+not give it, and a line that gives neither is stated as *rejected* alone — *Unknown — inferred: no
+result was recorded; the last request, at 14:20, was rejected.* A rejection is never counted as a
+request or a token: the line's usage is all zeros.
+
 **Retried and replaced.** A workflow run's journal records, for every agent it starts, which step
 of the run the agent works on — by a key it compares with the other lines of the same journal
 and never keeps — and ends the agent with a result or a failure. When the journal starts a step
@@ -260,6 +291,10 @@ word for word. For an agent:
 * Unknown — inferred: no result was recorded and the transcript has been silent since 14:20; the agent may have been stopped.
 * Running — inferred: the transcript changed 1 min ago, after an outcome was recorded at 14:20.
 * Unknown — inferred: the transcript went on after an outcome was recorded at 14:20, and has been silent since 14:38.
+* Unknown — inferred: no result was recorded; the last request, at 14:20, was rejected — 5-hour limit (HTTP 429).
+* Unknown — inferred: no result was recorded; the last request, at 14:20, was rejected.
+* Running — inferred: the transcript changed 2 min ago; its last request was rejected — server error (HTTP 529).
+* Running — inferred: the transcript changed 2 min ago; its last request was rejected.
 
 A stopped agent's sentence quotes the word the parent wrote — `killed`, `cancelled` or `stopped`,
 verbatim; a failed agent's is the same sentence for `failed`, `error` and `timeout`. A result recorded
@@ -306,16 +341,19 @@ they stood under; while a hover card or a sparkline's tip is open, the first `Es
 and the next one the details. For an agent: type,
 models, its ID, depth, started, duration, last activity (with a live `… ago` beside it) and —
 for an agent that wrote on after its outcome — what was recorded, then turns,
-usage, fresh input, cache write 5 m and 1 h, cache read, output, reasoning and tool calls, then
+usage, fresh input, cache write 5 m and 1 h, cache read, output, reasoning and tool calls, then —
+when the API rejected its last request — the `Last request` row, then
 who spawned it, its workflow run and — where the run's journal started its step more than once —
 which attempt it was. A session opens with its two figures — `Own transcript`, and
 `Agents, last 7 days` with what it is not: *not added to the own figure — the two cover different
 spans* — then its project (only while attribution allows one), its models, `Since first line`
 and `Span` in place of a start and a duration, the last activity, the counts of its own
-transcript, how many agents it has and its ID; a workflow run how many
+transcript, how many agents it has, how many of them ended on a rejected request, by reason, and
+its ID; a workflow run how many
 agents it has — the ones its journal started without a counted transcript included, and how many
 it did not list —, how often it was launched when it was resumed, its times, the end its parent
-recorded when an agent wrote on after it, the counts summed over its agents and its ID; a launch
+recorded when an agent wrote on after it, the counts summed over its agents, how many of them
+ended on a rejected request, by reason, and its ID; a launch
 the type and model it asked for,
 its ID, when it was made and who made it. Anything absent is `–`, and a record without a single
 request shows dashes, never zeros. Every row says itself how it is laid out — a figure beside its
@@ -355,6 +393,7 @@ Everything comes from the directory Token Pace already reads for the token count
 | the transcript that launched an agent — the session's, or another agent's | an `Agent` (or `Task`) tool call: its `id` and three fields of its input, `subagent_type`, `model` and `run_in_background` | the input's `description` and `prompt` |
 | the same | the tool result that answers it: `agentId`, `status`, `totalTokens`, `totalDurationMs` and `totalToolUseCount`, and the `tool_use_id` it answers | its content — the prompt and the answer it also carries |
 | the same | a queued task notification, the way a background agent's end arrives: the `<tool-use-id>` and `<status>` tags inside it | its `<summary>` and its `<output-file>` |
+| `<session>/subagents/…/agent-<id>.jsonl`, an API error line (`isApiErrorMessage`) — a request the API rejected | `apiErrorStatus` (an HTTP status, 100 to 599), `error` (one of `rate_limit`, `server_error`, `invalid_request`, `authentication_failed`, `max_output_tokens`, `overloaded`) and, of its `quotaLimits` block, the `rateLimitType` (one of `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`); any other value is none; a main session's error lines are skipped | its `message` — the error's text —, `errorDetails`, `apiError`, `perTurnEffort`, `requestId`, and everything else of `quotaLimits`: its `status`, `resetsAt`, `overageStatus`, `overageDisabledReason`, `isUsingOverage`, `upgradePaths` and `unifiedRateLimitFallbackAvailable` |
 | the transcript that launched a workflow run | a `Workflow` tool call: its `id` alone — of a reply's `tool_use` blocks the `type`, the `name` and the `id` are read, and the `input` only of an `Agent` or `Task` call; from the tool result that answers it the `runId` (`wf_` and at most 61 characters of `[A-Za-z0-9_-]`) and the `status`, and the `tool_use_id` it answers; the run's end arrives as a task notification, read as above | the call's whole input — its `script`, `scriptPath`, `args` and `description` — and the result's `summary`, `scriptPath`, `transcriptDir` (a path), `workflowName`, `taskId` and `taskType` |
 
 So from a `Workflow` tool call its `id`, and from the result that answers it the `runId` and the
@@ -364,7 +403,7 @@ carries one — a journal line carries none, so a run's last activity is its jou
 modification time. For the agent tables nothing
 else is read: never a `description`, a `prompt`, a `summary`, an `output-file`, a `content`, a
 `result`, a `label` or a `phase`, never a workflow's `script`, `scriptPath` or `transcriptDir`,
-never a working directory, never any text. Every string that is kept is an identifier and is checked on the way in: a type or a
+never an API error's text or its `errorDetails`, never a working directory, never any text. Every string that is kept is an identifier and is checked on the way in: a type or a
 model alias is at most 40 characters of `[A-Za-z0-9_.:@/-]`, a model id from a response at most
 64 of the same, an id at most 64 characters of `[A-Za-z0-9_-]`, a depth a whole number from 1 to
 99. A value that does not fit is dropped whole rather than trimmed into a string nobody wrote,
@@ -376,7 +415,8 @@ What is kept lives in the token snapshot (`state.json` in the extension's own st
 transcript and per session transcript the ids, the agent's type and model names, the first and
 last time, the token counts, the number of tool calls and the recorded result with the parent's
 word for it (one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`,
-`stopped`); per launch its tool-call id, the type and model it asked for, whether it runs in the
+`stopped`), and for an agent its last rejected request — its time, its HTTP status, its error
+kind and its limit, each one of the values listed above; per launch its tool-call id, the type and model it asked for, whether it runs in the
 background, its result with that word and the parent's three totals; per `Workflow` call its
 tool-call id, the run id its result named, when it was made, and the run's end with the parent's
 word for it; per workflow run the agents
@@ -464,7 +504,8 @@ Data…* removes them with the rest of the dashboard view state.
   side reads the transcripts.
 * **No end marker.** An agent that was stopped without its parent recording it — interrupted,
   its session closed, its process gone — has no recorded result, so ten minutes after its last
-  reply it reads `unknown`, never `done`. Only a stop the parent recorded reads `stopped`.
+  reply it reads `unknown`, never `done`. Only a stop the parent recorded reads `stopped`. One that
+  ended on a request the API rejected says so, with the reason the error line gives.
 * **Waiting can look like silence.** The states are read from replies. An agent waiting on an
   agent it launched reads `running` while that agent runs, and a session reads `active` while
   one of its agents runs — both say they were inferred from below. An agent that waits longer

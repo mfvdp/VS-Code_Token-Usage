@@ -887,7 +887,7 @@ function agentVm(select = false): { vm: ViewModel; agentKey: string; text: Agent
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null,
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
   }
   const pending: AgentLaunch = {
     toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
@@ -973,6 +973,46 @@ test('the agent tree reaches the markdown as an indented list, right after the q
     ['- [~Active] Session sess-alp — alpha (2 started · ~2 ●) · own 1.2K · agents 1.2K · 2 h 15 min'])
 })
 
+test('an agent that ended on a rejected request: its sentence and its Last request row in the table, its session\'s count', () => {
+  // 1.6 N3. The markdown prints the details the builder wrote, the sentence first; nothing on the
+  // tree's lines — a rejection is a detail, not a figure.
+  const agg = buildAgg('project')
+  const dir = path.dirname(CLAUDE_FILE)
+  const sessionFile = path.join(dir, 'sess-alpha.jsonl')
+  const counts = {
+    input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 0,
+    requests: 5, outputFinal: 5, toolCalls: 3,
+  }
+  const main: MainRec = {
+    source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
+    models: ['claude-opus-4-6'], ...counts,
+  }
+  const agent: AgentRec = {
+    source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
+    spawnerFile: sessionFile, firstTs: NOW - 40 * 60_000, lastTs: NOW - 30 * 60_000, models: ['claude-opus-4-6'],
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null,
+    rejected: { at: NOW - 29 * 60_000, status: 429, error: 'rate_limit', limit: 'five_hour' },
+  }
+  agg.mains = () => [main]
+  agg.agents = () => [agent]
+  agg.launches = () => []
+  const cfg = makeConfig({ 'tokenPace.attribution': 'project' })
+  const doc = (key: string): string[] => {
+    const input = makeInput({ agg, cfg, ui: { agentSelected: key } })
+    return sectionOf(markdownDocument(buildViewModel(input), agentTreeFor(input, 'text')), '## Agents')
+  }
+  const lines = doc('a:a94f0001')
+  const rows = lines.filter((l) => l.startsWith('| '))
+  assert.equal(rows[0], '| Detail | Value |')
+  assert.equal(rows[1], '| State | Unknown — inferred: no result was recorded; the last request, at 11:31, was rejected — 5-hour limit (HTTP 429). |')
+  assert.ok(rows.includes('| Last request | rejected at 11:31 — 5-hour limit (HTTP 429) |'), rows.join('\n'))
+  assert.ok(rows.includes('| Last activity | 11:31 · 29 min ago |'), rows.join('\n'))
+  assert.ok(lines.includes('  - [~Unknown] Explore · claude-opus-4-6 · a94f · 1.2K · 11 min 00 s'), lines.join('\n'))
+  const session = doc('s:sess-alpha').filter((l) => l.startsWith('| '))
+  assert.ok(session.includes('| Ended on a rejected request | 5-hour limit (HTTP 429): 1 |'), session.join('\n'))
+})
+
 /** A `### ` heading of the Agents section other than its two fixed ones: a details table's. */
 function detailsHead(line: string): boolean {
   return line.startsWith('### ') && line !== '### Running now' && line !== '### Sessions and agents'
@@ -1040,7 +1080,7 @@ test('an agent of a session the tree does not list is on its running line alone,
     source: 'claude', agentId: 'f00d0001', sessionId: oldest, sessionFile: path.join(dir, `${oldest}.jsonl`),
     workflowId: null, meta: null, metaTries: 3, spawnerFile: null, firstTs: NOW - 10 * 60_000, lastTs: NOW - 30_000,
     models: ['claude-opus-4-6'], input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700,
-    reasoning: 0, requests: 5, outputFinal: 4, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null,
+    reasoning: 0, requests: 5, outputFinal: 4, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
   }
   agg.mains = () => mains
   agg.agents = () => [agent]
@@ -1124,7 +1164,7 @@ test('the markdown prints every node of its tree, fifty children a node, and say
     source: 'claude', agentId: `a${i.toString(16).padStart(16, '0')}`, sessionId: 'sess-alpha', sessionFile, workflowId: null,
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: null }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 2 * 3_600_000 + i * 1000, lastTs: NOW - 3_600_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: 'completed', outcomeTs: NOW - 3_600_000, outcomeStatus: 'completed',
+    ...counts, outcome: 'completed', outcomeTs: NOW - 3_600_000, outcomeStatus: 'completed', rejected: null,
   }))
   agg.mains = () => [main]
   agg.agents = () => agents

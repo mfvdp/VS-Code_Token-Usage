@@ -9,8 +9,8 @@ import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  AgentLaunch, AgentMeta, AgentRec, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, JournalAgent, LaunchStatus,
-  PendingMessage, RecordedOutcome, Resolution, RunLaunch, RunRec, SessionRec,
+  AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, JournalAgent,
+  LaunchStatus, PendingMessage, RateLimitKind, RecordedOutcome, RejectedRequest, Resolution, RunLaunch, RunRec, SessionRec,
   Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
   TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
@@ -364,9 +364,10 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * The revision of the agent tables. The host replays the retained transcripts and journals once
  * whenever the snapshot's `agentsRevision` differs (see `Aggregator.agentsRevision`): a build
  * that adds a field only a replay can fill for the transcripts already read raises it by one.
- * 1 = 1.6's runs from the workflow journals; 2 = the `Workflow` launches and their ends (N4).
+ * 1 = 1.6's runs from the workflow journals; 2 = the `Workflow` launches and their ends (N4); 3 = the
+ * rejected requests of the agents (N3).
  */
-export const AGENT_TABLES_REVISION = 2
+export const AGENT_TABLES_REVISION = 3
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -411,7 +412,8 @@ function journalHead(raw: string): JournalHead | null | 'skip' {
 
 /**
  * Whether a raw Claude line is worth parsing. Parsing is most of what a scan costs, so a line
- * is looked at first: a response carries "usage"; an agent's result is a `toolUseResult` with
+ * is looked at first: a response carries "usage" — an API error line an all-zero one (981 of 981
+ * on the measuring machine), which is how a rejected request (1.6 N3) is read; an agent's result is a `toolUseResult` with
  * an `agentId` *key* after it, a workflow run's (1.6 N4) one with a `runId` key — a key, because
  * inside a JSON string the quotes around the word would be escaped, so a tool's output that
  * merely mentions it does not pass; a background agent's or run's end is a task notification,
@@ -521,6 +523,52 @@ function reportedTotals(r: Record<string, unknown>): AgentLaunch['totals'] {
   return ok(tokens) && ok(durationMs) && ok(toolUses) ? { tokens, durationMs, toolUses } : null
 }
 
+/** The `error` values an API error line may give (1.6 §0a.2) — every one Claude Code writes there. */
+const API_ERROR_KINDS: readonly ApiErrorKind[] = [
+  'rate_limit', 'server_error', 'invalid_request', 'authentication_failed', 'max_output_tokens', 'overloaded',
+]
+/** The limits a rejected request may name in its `quotaLimits.rateLimitType`. */
+const RATE_LIMIT_KINDS: readonly RateLimitKind[] = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']
+
+/** An HTTP status: a whole number from 100 to 599, or null. */
+function httpStatus(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 100 && v <= 599 ? v : null
+}
+
+function apiErrorKind(v: unknown): ApiErrorKind | null {
+  return typeof v === 'string' && (API_ERROR_KINDS as readonly string[]).includes(v) ? v as ApiErrorKind : null
+}
+
+function rateLimitKind(v: unknown): RateLimitKind | null {
+  return typeof v === 'string' && (RATE_LIMIT_KINDS as readonly string[]).includes(v) ? v as RateLimitKind : null
+}
+
+/**
+ * What an API error line says of the request it rejected (1.6 N3, §0a.2): three values, each
+ * through its allow-list — the HTTP status `apiErrorStatus`, the `error` kind, and of the
+ * `quotaLimits` block, when it is a plain object, the limit that refused it (`rateLimitType`).
+ * Nothing else of the line is read: its message holds the error's text, and the block beside the
+ * limit an account's reset times and upgrade offers.
+ */
+export function rejectedOf(d: any): Omit<RejectedRequest, 'at'> {
+  const q = d.quotaLimits
+  const plain = q !== null && typeof q === 'object' && !Array.isArray(q)
+  return {
+    status: httpStatus(d.apiErrorStatus),
+    error: apiErrorKind(d.error),
+    limit: plain ? rateLimitKind(q.rateLimitType) : null,
+  }
+}
+
+/** A rejected request as a snapshot carries it, every value checked as at ingest; null when its time is not one. */
+function restoreRejected(v: unknown): RejectedRequest | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const r = v as Record<string, unknown>
+  const at = finiteOrNull(r.at)
+  if (at === null || at <= 0) return null
+  return { at, status: httpStatus(r.status), error: apiErrorKind(r.error), limit: rateLimitKind(r.limit) }
+}
+
 /** The tool call a tool result answers: the `tool_use_id` of its first `tool_result` block. */
 function toolResultId(message: unknown): string | null {
   const content = message && typeof message === 'object' ? (message as { content?: unknown }).content : undefined
@@ -576,6 +624,14 @@ function touchRecord(rec: AgentRec | MainRec, at: number, model: unknown): void 
   if (at > rec.lastTs) rec.lastTs = at
   const id = cleanAgentName(model, AGENT_MODEL_MAX_CHARS)
   if (id && rec.models.length < AGENT_MODELS_MAX && !rec.models.includes(id)) rec.models.push(id)
+}
+
+/**
+ * A counted reply at `at` answers the agent's last request: a rejection recorded at that time or
+ * before it is no longer the transcript's last word (1.6 N3). A main session's record has none.
+ */
+function clearRejected(rec: AgentRec | MainRec, at: number): void {
+  if ('rejected' in rec && rec.rejected !== null && at >= rec.rejected.at) rec.rejected = null
 }
 
 /** Whether a launch's outcome is an end — completed, failed or stopped — and not "launched". */
@@ -639,6 +695,7 @@ function restoreAgent(v: unknown): AgentRec | null {
     // A stop dropped for want of its word takes its time along.
     outcomeTs: known !== outcome ? null : finiteOrNull(r.outcomeTs),
     outcomeStatus,
+    rejected: restoreRejected(r.rejected),
   }
 }
 
@@ -782,7 +839,7 @@ function restoreRun(v: unknown): RunRec | null {
  * record per agent transcript and per main session (the same dedupe as the buckets), the
  * launches of agents and of workflow runs a parent recorded, and the workflow runs as their
  * journals record them. They hold identifiers, times and counts — never a description, a
- * prompt, a script, a result or a journal's key.
+ * prompt, a script, a result, a journal's key or an API error's text.
  */
 export class Aggregator {
   private buckets = new Map<string, Bucket>()
@@ -1086,12 +1143,18 @@ export class Aggregator {
   private claudeResponse(d: any, ctx: IngestContext): boolean {
     const m = d.message
     if (!m || typeof m !== 'object') return false
-    // Placeholder and error lines carry all-zero usage and would only inflate the request count.
-    if (m.model === '<synthetic>' || d.isApiErrorMessage) return false
     const parsed = Date.parse(d.timestamp ?? '')
     // The agent tables take a line's own time or nothing: a record dated "now" would show an
     // agent that finished last week as running. The buckets keep the fallback they always had.
     const at = Number.isFinite(parsed) ? parsed : null
+    // Placeholder and error lines carry all-zero usage and would only inflate the request count.
+    // In an agent's transcript an error line is a request the API rejected (1.6 N3, §0a.2): the
+    // agent's record keeps what `rejectedOf` reads of it, and nothing is counted. A main
+    // transcript's error lines stay skipped.
+    if (d.isApiErrorMessage) {
+      return d.isApiErrorMessage === true && ctx.isSub && at !== null ? this.noteRejected(ctx.file, at, rejectedOf(d)) : false
+    }
+    if (m.model === '<synthetic>') return false
     const launched = at !== null && this.noteLaunches(m.content, at, ctx)
     const u = m.usage
     if (!u || typeof u !== 'object') return launched
@@ -1277,6 +1340,7 @@ export class Aggregator {
     if (final) rec.outputFinal += 1
     rec.toolCalls += tools
     touchRecord(rec, at, model)
+    clearRejected(rec, at)
     if (ctx.isSub) p.agent = ownerKey(ctx.file)
     else p.main = ownerKey(ctx.file)
   }
@@ -1310,7 +1374,29 @@ export class Aggregator {
     creditTokens(rec, v)
     if (newlyFinal) rec.outputFinal += 1
     rec.toolCalls += tools
-    if (at !== null) touchRecord(rec, at, model)
+    if (at !== null) {
+      touchRecord(rec, at, model)
+      clearRejected(rec, at)
+    }
+  }
+
+  /**
+   * A request the API rejected, in an agent's transcript (1.6 N3, §0a.2): the agent's last
+   * rejection, with the error line's time — the latest one, and only while no counted reply of
+   * the transcript is later (a counted reply clears it, `clearRejected`). Onto the record the
+   * transcript's counted lines made; a transcript of nothing but rejections has none yet, and
+   * its rejections are not kept. True when the record changed.
+   */
+  private noteRejected(file: string, at: number, r: Omit<RejectedRequest, 'at'>): boolean {
+    const rec = this.agentMap.get(file)
+    if (!rec || at < rec.lastTs) return false
+    const prev = rec.rejected
+    if (prev !== null) {
+      if (prev.at > at) return false
+      if (prev.at === at && prev.status === r.status && prev.error === r.error && prev.limit === r.limit) return false
+    }
+    rec.rejected = { at, status: r.status, error: r.error, limit: r.limit }
+    return true
   }
 
   /**
@@ -1347,6 +1433,8 @@ export class Aggregator {
       outcome: kept?.outcome ?? null,
       outcomeTs: kept?.outcomeTs ?? null,
       outcomeStatus: kept?.outcomeStatus ?? null,
+      // The transcript's own lines say it again: a replay reads its rejections anew.
+      rejected: null,
     }
     this.agentMap.set(file, rec)
     this.agentFileById.set(rec.agentId, file)
@@ -1839,7 +1927,7 @@ export class Aggregator {
    */
   private pruneAgents(horizon: number): void {
     for (const [file, rec] of this.agentMap) {
-      if (Math.max(rec.lastTs, rec.outcomeTs ?? 0) < horizon) this.dropAgent(file, rec)
+      if (Math.max(rec.lastTs, rec.outcomeTs ?? 0, rec.rejected?.at ?? 0) < horizon) this.dropAgent(file, rec)
     }
     for (const [id, launch] of this.launchMap) {
       if (Math.max(launch.ts, launch.outcomeTs ?? 0) < horizon) this.dropLaunch(id, launch)

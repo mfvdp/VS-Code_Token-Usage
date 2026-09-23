@@ -16,17 +16,21 @@ import { adapterFor } from '../src/adapters'
 import { AGENT_RETENTION_DAYS } from '../src/agentTree'
 import {
   AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_MODELS_MAX, AGENT_NAME_MAX_CHARS, AGENT_TABLES_REVISION, Aggregator,
-  IngestContext, claudePlacement, cleanAgentId, cleanAgentName, parseAgentMeta,
+  IngestContext, claudePlacement, cleanAgentId, cleanAgentName, parseAgentMeta, rejectedOf,
 } from '../src/agg'
 import { agentTranscriptsOf, configureRoots } from '../src/discover'
+import { toCsv, toJson, toolsCsv } from '../src/exporter'
 import { AGENT_META_MAX_BYTES, agentReplayFiles, readAgentMeta, replayAgents, scan } from '../src/scan'
 import { newCursor } from '../src/tail'
 import { TimeConfig } from '../src/time'
 import { AgentLaunch, AgentRec, Snapshot, STATE_VERSION } from '../src/types'
+import { markdownDocument } from '../src/textViews'
+import { agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
-  CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, claudeLine, ctxFor, iso, journalLine,
+  CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, ctxFor, iso, journalLine,
   metaJson, queueOperationLine, tmpDir, workflowResultLine,
 } from './fixtures/helpers'
+import { NOW as VNOW, makeConfig, makeInput } from './fixtures/viewFixtures'
 
 /** Roots are module state; the next test file must not inherit a scratch directory. */
 after(() => { configureRoots() })
@@ -153,6 +157,8 @@ test('an agent transcript gets its record on the first counted line, with the de
     outcome: null,
     outcomeTs: null,
     outcomeStatus: null,
+    // 1.6 N3: no request of it was rejected.
+    rejected: null,
   })
   // The buckets hold the same figures: the record follows them, it does not count on its own.
   const sub = agg.all().filter((b) => b.isSub)
@@ -1217,4 +1223,210 @@ test('a hand-edited snapshot cannot put a field or a string into the agent table
     { agentId: 'c0ffee', step: 2, attempt: 1, outcome: 'completed', supersededBy: null },
     { agentId: 'a0', step: 0, attempt: 1, outcome: null, supersededBy: null },
   ])
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 N3, §0a.2: a request the API rejected
+// ---------------------------------------------------------------------------
+
+/** An API error line in the test agent's transcript, `ms` after T0. */
+function rejection(ms: number, o: Partial<Parameters<typeof apiErrorLine>[0]> = {}): string {
+  return apiErrorLine({ id: `err_${ms}`, ts: T0 + ms, agentId: 'abc123', ...o })
+}
+
+test('an agent\'s rejected request is its record\'s last rejection — three values through their allow-lists, nothing counted', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'r1', ts: T0, agentId: 'abc123', usage: { input: 50, output: 10 }, final: true }), AGENT_CTX)
+  const counted = counting(agg)
+  const before = { ...agentOf(agg, AGENT) }
+  assert.equal(agg.addClaudeLine(rejection(60_000), AGENT_CTX), true)
+  assert.deepEqual(agentOf(agg, AGENT).rejected, { at: T0 + 60_000, status: 429, error: 'rate_limit', limit: 'five_hour' })
+  // Not a request, not a token, not a reply: the record's counts and last reply, and every bucket,
+  // stay as they were — the error line's usage is all zeros and would only add a request.
+  assert.equal(counting(agg), counted)
+  assert.deepEqual({ ...agentOf(agg, AGENT), rejected: null }, before)
+  // The same line read again changes nothing; a later one takes its place, an earlier one does not.
+  assert.equal(agg.addClaudeLine(rejection(60_000), AGENT_CTX), false)
+  assert.equal(agg.addClaudeLine(rejection(90_000, { status: 529, error: 'server_error', quotaLimits: null }), AGENT_CTX), true)
+  assert.deepEqual(agentOf(agg, AGENT).rejected, { at: T0 + 90_000, status: 529, error: 'server_error', limit: null })
+  assert.equal(agg.addClaudeLine(rejection(70_000), AGENT_CTX), false)
+  // Values outside the allow-lists are none: an unknown error, a status of 42, a limit nobody
+  // writes, a quota block that is no plain object.
+  agg.addClaudeLine(rejection(120_000, { status: 42, error: 'teapot', rateLimitType: 'monthly' }), AGENT_CTX)
+  assert.deepEqual(agentOf(agg, AGENT).rejected, { at: T0 + 120_000, status: null, error: null, limit: null })
+  agg.addClaudeLine(rejection(130_000, { status: null, error: null, quotaLimits: ['five_hour'] }), AGENT_CTX)
+  assert.deepEqual(agentOf(agg, AGENT).rejected, { at: T0 + 130_000, status: null, error: null, limit: null })
+  assert.equal(counting(agg), counted)
+  // The reader on its own: every allow-listed value, and the edges of each list.
+  for (const error of ['rate_limit', 'server_error', 'invalid_request', 'authentication_failed', 'max_output_tokens', 'overloaded']) {
+    assert.equal(rejectedOf({ error }).error, error)
+  }
+  for (const limit of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet']) {
+    assert.equal(rejectedOf({ quotaLimits: { rateLimitType: limit } }).limit, limit)
+  }
+  for (const [status, want] of [[100, 100], [599, 599], [99, null], [600, null], [429.5, null], ['429', null], [NaN, null]] as const) {
+    assert.equal(rejectedOf({ apiErrorStatus: status }).status, want, String(status))
+  }
+  assert.deepEqual(rejectedOf({ error: 'RATE_LIMIT', quotaLimits: 'five_hour' }), { status: null, error: null, limit: null })
+  assert.deepEqual(rejectedOf({ quotaLimits: null }), { status: null, error: null, limit: null })
+})
+
+test('a later counted reply clears the rejection; a main session\'s error lines and a rejection before the last reply are not kept', () => {
+  const agg = new Aggregator()
+  // Before the transcript's first counted reply there is no record to keep it on (1.6 D4 makes one).
+  assert.equal(agg.addClaudeLine(rejection(0), AGENT_CTX), false)
+  assert.equal(agg.agents().length, 0)
+  agg.addClaudeLine(claudeLine({ id: 'r1', ts: T0 + 10_000, agentId: 'abc123', usage: { input: 5 }, final: true }), AGENT_CTX)
+  assert.equal(agentOf(agg, AGENT).rejected, null, 'the earlier rejection was answered by this reply')
+  agg.addClaudeLine(rejection(20_000), AGENT_CTX)
+  assert.notEqual(agentOf(agg, AGENT).rejected, null)
+  // A retry that went through: the next counted reply clears it — its first line, or a later
+  // line of a message already counted.
+  agg.addClaudeLine(claudeLine({ id: 'r2', ts: T0 + 30_000, agentId: 'abc123', usage: { input: 7 } }), AGENT_CTX)
+  assert.equal(agentOf(agg, AGENT).rejected, null)
+  agg.addClaudeLine(rejection(40_000), AGENT_CTX)
+  agg.addClaudeLine(claudeLine({ id: 'r2', ts: T0 + 45_000, agentId: 'abc123', usage: { input: 7, output: 9 }, final: true }), AGENT_CTX)
+  assert.equal(agentOf(agg, AGENT).rejected, null)
+  // A rejection dated before the transcript's last counted reply is not its last request.
+  assert.equal(agg.addClaudeLine(rejection(44_000), AGENT_CTX), false)
+  assert.equal(agentOf(agg, AGENT).rejected, null)
+  // A main transcript's error lines stay skipped, as in 1.5; an error flag that is no `true` is no
+  // rejection either — and neither is counted.
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, usage: { input: 10 }, final: true }), MAIN_CTX)
+  const before = JSON.stringify(agg.toSnapshot())
+  assert.equal(agg.addClaudeLine(apiErrorLine({ id: 'e-main', ts: T0 + 50_000 }), MAIN_CTX), false)
+  const odd = JSON.parse(rejection(50_000)) as Record<string, unknown>
+  odd.isApiErrorMessage = 'true'
+  assert.equal(agg.addClaudeLine(JSON.stringify(odd), AGENT_CTX), false)
+  assert.equal(JSON.stringify(agg.toSnapshot()), before)
+})
+
+test('a rejection survives a snapshot round trip and the roll-up, and a hand-edited one keeps only what this build writes', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'r1', ts: T0, agentId: 'abc123', usage: { input: 5 }, final: true }), AGENT_CTX)
+  agg.addClaudeLine(rejection(DAY, { status: 529, error: 'overloaded', quotaLimits: null }), AGENT_CTX)
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  assert.deepEqual(agentOf(Aggregator.fromSnapshot(snap), AGENT).rejected, { at: T0 + DAY, status: 529, error: 'overloaded', limit: null })
+  const edit = (v: unknown): AgentRec['rejected'] => {
+    const s = JSON.parse(JSON.stringify(snap)) as Snapshot
+    ;(s.agents as unknown as Record<string, Record<string, unknown>>)[AGENT].rejected = v
+    return agentOf(Aggregator.fromSnapshot(s), AGENT).rejected
+  }
+  assert.deepEqual(edit({ at: T0 + DAY, status: 42, error: 'teapot', limit: 'monthly', text: 'EDITED-SECRET' }),
+    { at: T0 + DAY, status: null, error: null, limit: null })
+  for (const bad of [{ at: 'yesterday', status: 429 }, { status: 429 }, 'rejected', [T0], null, { at: -5 }]) {
+    assert.equal(edit(bad), null, JSON.stringify(bad))
+  }
+  // The roll-up keeps the agent seven days after its last line — a rejection is one.
+  const now = T0 + (AGENT_RETENTION_DAYS + 0.5) * DAY
+  agg.rollup(now, 45, 400, utc)
+  assert.deepEqual(agg.agentEntries().map(([f]) => f), [AGENT], 'its rejection is within the seven days')
+  agg.rollup(now + DAY, 45, 400, utc)
+  assert.equal(agg.agents().length, 0)
+})
+
+test('the replay the revision asks for reads the rejections again', async () => {
+  // 3: an agent's rejected request (1.6 N3) is a field only a replay can fill for what was already read.
+  assert.equal(AGENT_TABLES_REVISION, 3)
+  const home = tmpDir('rejected-replay')
+  configureRoots([home], [path.join(home, 'codex')])
+  const file = path.join(home, 'projects', CLAUDE_SLUG, SESSION, 'subagents', 'agent-abc123.jsonl')
+  writeLines(path.join(home, 'projects', CLAUDE_SLUG, `${SESSION}.jsonl`), [claudeLine({ id: 'm1', ts: T0, usage: { input: 3 }, final: true })])
+  writeLines(file, [
+    claudeLine({ id: 'r1', ts: T0 + 1000, agentId: 'abc123', usage: { input: 5 }, final: true }),
+    rejection(2000), rejection(3000, { rateLimitType: 'seven_day' }),
+  ])
+  const agg = new Aggregator()
+  await scan(agg)
+  const want = { at: T0 + 3000, status: 429, error: 'rate_limit', limit: 'seven_day' }
+  assert.deepEqual(agentOf(agg, file).rejected, want)
+  // A snapshot of the revision before knows no rejection, and asks for the replay…
+  const before = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  delete (before.agents as Record<string, Partial<AgentRec>>)[file].rejected
+  before.agentsRevision = 2
+  const restored = Aggregator.fromSnapshot(before)
+  assert.equal(agentOf(restored, file).rejected, null)
+  assert.notEqual(restored.agentsRevision, AGENT_TABLES_REVISION, 'the host replays')
+  // …which finds it in the transcript again, and counts nothing twice.
+  const counted = counting(restored)
+  await replayAgents(restored, agentReplayFiles(restored, T0 + 60_000))
+  assert.deepEqual(agentOf(restored, file).rejected, want)
+  assert.equal(counting(restored), counted)
+})
+
+test('an API error line\'s text, its details and its quota block never leave the reader (1.6 §0a.2)', async () => {
+  // The line Claude Code writes, with synthetic content under every key beside the three read:
+  // the error's text in `message.content[0].text`, `errorDetails`, `apiError`, and the quota
+  // block's upgrade offers and overage state.
+  const secret = 'API-ERROR-CONTENT-5c1e'
+  const home = tmpDir('rejected-leak')
+  configureRoots([home], [path.join(home, 'codex')])
+  const dir = path.join(home, 'projects', CLAUDE_SLUG)
+  const main = path.join(dir, `${SESSION}.jsonl`)
+  const file = path.join(dir, SESSION, 'subagents', 'agent-abc123.jsonl')
+  const wfFile = path.join(dir, SESSION, 'subagents', 'workflows', WF, 'agent-def456.jsonl')
+  const at = (min: number): number => VNOW - min * 60_000
+  const error = (id: string, agentId: string, ts: number, o: Partial<Parameters<typeof apiErrorLine>[0]> = {}): string => apiErrorLine({
+    id, ts, agentId, text: `${secret}-text-${id}`, errorDetails: `${secret}-details-${id}`, apiError: `${secret}-api-${id}`,
+    upgradePaths: [`${secret}-upgrade-${id}`], ...o,
+  })
+  writeLines(main, [claudeLine({ id: 'm1', ts: at(30), sessionId: SESSION, usage: { input: 10 }, final: true })])
+  writeLines(file, [
+    claudeLine({ id: 'r1', ts: at(25), agentId: 'abc123', usage: { input: 5, output: 2 }, final: true }),
+    error('e1', 'abc123', at(24)),
+  ])
+  writeLines(wfFile, [
+    claudeLine({ id: 'w1', ts: at(20), agentId: 'def456', usage: { input: 5 }, final: true }),
+    error('e2', 'def456', at(2), { status: 529, error: 'server_error', quotaLimits: null }),
+  ])
+  // A main session's error line carries the same content — and is not read at all.
+  fs.appendFileSync(main, `${apiErrorLine({ id: 'e3', ts: at(1), text: `${secret}-main`, errorDetails: `${secret}-main-details` })}\n`)
+  const agg0 = new Aggregator()
+  await scan(agg0)
+  // A restart — a snapshot round trip — and a replay over everything.
+  const live = JSON.stringify(agg0.toSnapshot())
+  const agg = Aggregator.fromSnapshot(JSON.parse(live) as Snapshot)
+  await replayAgents(agg, agentReplayFiles(agg, VNOW))
+  // Only a test of anything if the lines went through, and carry what they must not give away.
+  // (The three values alone: whatever else a record might keep is the assertions' below to find.)
+  const three = (x: AgentRec['rejected']): unknown => x && { at: x.at, status: x.status, error: x.error, limit: x.limit }
+  assert.deepEqual(three(agentOf(agg, file).rejected), { at: at(24), status: 429, error: 'rate_limit', limit: 'five_hour' })
+  assert.deepEqual(three(agentOf(agg, wfFile).rejected), { at: at(2), status: 529, error: 'server_error', limit: null })
+  const raw = fs.readFileSync(file, 'utf8')
+  for (const s of [`${secret}-text-e1`, `${secret}-details-e1`, `${secret}-api-e1`, `${secret}-upgrade-e1`,
+    'synthetic overage reason', 'synthetic-overage-status', '"resetsAt"', '"perTurnEffort"', '"requestId"']) {
+    assert.ok(raw.includes(s), `the fixture lost ${s}`)
+  }
+
+  const cfg = makeConfig()
+  const outputs: Array<[string, string]> = [['live snapshot', live], ['snapshot', JSON.stringify(agg.toSnapshot())]]
+  const vm = buildViewModel(makeInput({ agg, cfg }))
+  const text = agentTreeFor(makeInput({ agg, cfg }), 'text')
+  const keys = (nodes: typeof vm.agents.roots): string[] => nodes.flatMap((n) => [n.key, ...keys(n.children)])
+  const nodeKeys = keys(text.roots)
+  assert.ok(nodeKeys.includes('a:abc123') && nodeKeys.includes('a:def456'), nodeKeys.join(', '))
+  let rows = 0
+  for (const key of nodeKeys) {
+    const input = makeInput({ agg, cfg, ui: { agentsExpanded: nodeKeys, agentSelected: key } })
+    const open = buildViewModel(input)
+    rows += (open.agents.selected?.rows ?? []).filter((r) => r.label === 'Last request' || r.label === 'Ended on a rejected request').length
+    outputs.push([`view model ${key}`, JSON.stringify(open)], [`markdown ${key}`, markdownDocument(open, agentTreeFor(input, 'text'))])
+  }
+  // The rejections are on the page — two agents, their run and their session.
+  assert.ok(rows >= 5, `only ${rows} rejection rows`)
+  const range = { from: '2026-09-01', to: '2026-09-03' }
+  outputs.push(['json export', toJson(agg, range, cfg, utc)], ['csv export', toCsv(agg, range, cfg, utc)],
+    ['tools export', toolsCsv(agg, range)])
+  for (const [what, out] of outputs) {
+    assert.equal(out.includes(secret), false, `${what} holds an error line's text, details, API error or upgrade offer`)
+    for (const s of ['synthetic overage reason', 'synthetic-overage-status', 'synthetic-slug']) {
+      assert.equal(out.includes(s), false, `${what} holds ${s}`)
+    }
+  }
+  // The stored state has no field of the line's other keys at all, and none of the three read
+  // under its own name: the record keeps its values as `status`, `error` and `limit`.
+  for (const snapshot of [outputs[0][1], outputs[1][1]]) {
+    assert.equal(/"(errorDetails|apiError|upgradePaths|quotaLimits|apiErrorStatus|rateLimitType|resetsAt|overageStatus|overageDisabledReason|isUsingOverage|unifiedRateLimitFallbackAvailable|perTurnEffort|requestId|isApiErrorMessage)"/
+      .test(snapshot), false, 'the snapshot holds a field of the error line')
+  }
 })

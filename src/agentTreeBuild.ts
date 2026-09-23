@@ -43,8 +43,8 @@ import { compact, full } from './render'
 import { durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, dayOf, formatTime } from './time'
 import {
-  AgentLaunch, AgentRec, Attribution, Bucket, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RunLaunch, RunRec,
-  SessionRec, emptyBucket,
+  AgentLaunch, AgentRec, Attribution, Bucket, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RejectedRequest, RunLaunch,
+  RunRec, SessionRec, emptyBucket,
 } from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
@@ -339,6 +339,100 @@ function workflowLabel(workflowId: string): string {
   return t('Workflow {0}', workflowId.replace(/^wf_/, '').slice(0, 8))
 }
 
+// ---------------------------------------------------------------------------
+// Rejected requests (1.6 N3)
+// ---------------------------------------------------------------------------
+
+const API_ERRORS: ReadonlySet<string> = new Set([
+  'rate_limit', 'server_error', 'invalid_request', 'authentication_failed', 'max_output_tokens', 'overloaded',
+])
+const RATE_LIMITS: ReadonlySet<string> = new Set(['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'])
+
+/**
+ * The request an agent's transcript ended on, when the API rejected it: the record's rejection,
+ * while it is no earlier than the transcript's last counted reply — the aggregator clears it when
+ * a reply follows, and this says the same of a record that did not come through it. Every value
+ * is checked again: a snapshot of another build's making may carry anything in it.
+ */
+function rejectionOf(r: AgentRec): RejectedRequest | null {
+  const x: unknown = r.rejected
+  if (!x || typeof x !== 'object') return null
+  const v = x as Partial<Record<keyof RejectedRequest, unknown>>
+  const at = stampOf(v.at)
+  if (at === null || at < r.lastTs) return null
+  const status = typeof v.status === 'number' && Number.isInteger(v.status) && v.status >= 100 && v.status <= 599 ? v.status : null
+  const error = typeof v.error === 'string' && API_ERRORS.has(v.error) ? v.error as RejectedRequest['error'] : null
+  const limit = typeof v.limit === 'string' && RATE_LIMITS.has(v.limit) ? v.limit as RejectedRequest['limit'] : null
+  return { at, status, error, limit }
+}
+
+/**
+ * Why the API rejected a request, as a noun phrase: the limit that refused it — for a rate limit,
+ * the only error Claude Code names a limit for — else the kind of error; null when the line named
+ * neither.
+ */
+function rejectionReason(x: RejectedRequest): string | null {
+  if (x.error === 'rate_limit' || x.error === null) {
+    switch (x.limit) {
+      case 'five_hour': return t('5-hour limit')
+      case 'seven_day': return t('weekly limit')
+      case 'seven_day_opus':
+      case 'seven_day_sonnet':
+        return t('weekly model limit')
+      default: break
+    }
+    return x.error === 'rate_limit' ? t('usage limit') : null
+  }
+  switch (x.error) {
+    case 'server_error': return t('server error')
+    case 'overloaded': return t('overloaded')
+    case 'invalid_request': return t('invalid request')
+    case 'authentication_failed': return t('authentication failed')
+    case 'max_output_tokens': return t('output limit')
+    default: return null
+  }
+}
+
+/**
+ * "5-hour limit (HTTP 429)": the reason and the HTTP status the error line gave, each left out
+ * when it gave none — "server error", "HTTP 529" — and null when it gave neither.
+ */
+function rejectionText(x: RejectedRequest): string | null {
+  const reason = rejectionReason(x)
+  const http = x.status !== null ? `HTTP ${x.status}` : null
+  if (reason !== null && http !== null) return `${reason} (${http})`
+  return reason ?? http
+}
+
+/** The `Last request` row of an agent whose last request was rejected: when, and why. */
+function rejectedRows(x: RejectedRequest | null, now: number, tcfg: TimeConfig): DetailRow[] {
+  if (x === null) return []
+  const at = stamp(x.at, now, tcfg)
+  const why = rejectionText(x)
+  return [{
+    label: t('Last request'),
+    value: why === null ? t('rejected at {0}', at) : t('rejected at {0} — {1}', at, why),
+    kind: 'sentence',
+  }]
+}
+
+/**
+ * A run's or a session's agents that ended on a rejected request, one row per reason — "5-hour
+ * limit (HTTP 429): 12" —, the most frequent first. A rejection whose line named no reason is
+ * counted under `–`. None, no row.
+ */
+function endedRejectedRows(e: Entry): DetailRow[] {
+  const counts = new Map<string, number>()
+  for (const x of preorder(e)) {
+    if (x === e || x.rejected === null) continue
+    const why = rejectionText(x.rejected) ?? '–'
+    counts.set(why, (counts.get(why) ?? 0) + 1)
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0])).map(([why, n]) => ({
+    label: t('Ended on a rejected request'), value: `${why}: ${full(n)}`, kind: 'sentence' as const,
+  }))
+}
+
 interface StateOf {
   state: NodeState
   stateText: string
@@ -435,8 +529,16 @@ function recordedOutcome(r: AgentRec, launch: AgentLaunch | null): Outcome | nul
  * journal's carries none, so it never is — and a line written in the minute after the result
  * is the tail of the same reply, not a new start.
  */
-function resumedAfter(o: Outcome, r: AgentRec): boolean {
-  return o.at !== null && r.lastTs > o.at + RESUMED_AFTER_MS
+function resumedAfter(o: Outcome, activity: number): boolean {
+  return o.at !== null && activity > o.at + RESUMED_AFTER_MS
+}
+
+/**
+ * When an agent's transcript last changed: its last counted reply, or the request the API
+ * rejected after it (N3) — an error line is a line of the transcript too.
+ */
+function activityOf(r: AgentRec, rejected: RejectedRequest | null): number {
+  return rejected !== null ? Math.max(r.lastTs, rejected.at) : r.lastTs
 }
 
 /**
@@ -470,14 +572,19 @@ function journalState(j: JournalAgent, next: string | null): StateOf | null {
 /**
  * An agent's state: what the parent recorded — with its time, so the agent's own lines can
  * outlive it (D6) — then what the run's journal recorded, which has no time and is never
- * outlived; failing both, what its transcript's clock says.
+ * outlived; failing both, what its transcript's clock says. A request the API rejected after the
+ * last counted reply (N3) is the transcript's latest line: its time counts as activity, and an
+ * inferred state names it — an agent that ended on a rate limit is not one that "may have been
+ * stopped".
  */
 function agentState(
-  r: AgentRec, launch: AgentLaunch | null, journal: StateOf | null, now: number, tcfg: TimeConfig,
+  r: AgentRec, launch: AgentLaunch | null, journal: StateOf | null, rejected: RejectedRequest | null, now: number,
+  tcfg: TimeConfig,
 ): StateOf {
   const o = recordedOutcome(r, launch)
-  const last = Math.max(r.lastTs, launch ? launch.ts : 0)
-  if (o && o.at !== null && resumedAfter(o, r)) {
+  const activity = activityOf(r, rejected)
+  const last = Math.max(activity, launch ? launch.ts : 0)
+  if (o && o.at !== null && resumedAfter(o, activity)) {
     const at = stamp(o.at, now, tcfg)
     if (now - last <= RUNNING_WINDOW_MS) {
       return {
@@ -489,16 +596,34 @@ function agentState(
     return {
       state: 'unknown',
       stateText: t('Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.',
-        at, stamp(r.lastTs, now, tcfg)),
+        at, stamp(activity, now, tcfg)),
       resumed: o,
     }
   }
   if (o) return outcomeState(o, now, tcfg)
   if (journal) return journal
+  const why = rejected !== null ? rejectionText(rejected) : null
   if (now - last <= RUNNING_WINDOW_MS) {
+    if (rejected !== null) {
+      return {
+        state: 'running',
+        stateText: why === null
+          ? t('Running — inferred: the transcript changed {0}; its last request was rejected.', ago(last, now))
+          : t('Running — inferred: the transcript changed {0}; its last request was rejected — {1}.', ago(last, now), why),
+      }
+    }
     return {
       state: 'running',
       stateText: t('Running — inferred: the transcript changed {0} and no result was recorded yet.', ago(last, now)),
+    }
+  }
+  if (rejected !== null) {
+    const at = stamp(rejected.at, now, tcfg)
+    return {
+      state: 'unknown',
+      stateText: why === null
+        ? t('Unknown — inferred: no result was recorded; the last request, at {0}, was rejected.', at)
+        : t('Unknown — inferred: no result was recorded; the last request, at {0}, was rejected — {1}.', at, why),
     }
   }
   return {
@@ -876,6 +1001,11 @@ interface Entry {
   /** D7: an attempt its run's journal started the same step again after. */
   superseded: boolean
   /**
+   * N3: an agent's last request, when the API rejected it after the transcript's last counted
+   * reply; null for every other node. A run and a session count them (`endedRejectedRows`).
+   */
+  rejected: RejectedRequest | null
+  /**
    * A workflow run's members its journal started and no transcript of which was counted (D2):
    * counted in the run's state and in every agent count above it, with no row of their own
    * (their collector comes with D4). Empty for every other node.
@@ -994,7 +1124,9 @@ function settle(e: Entry, up: Map<Entry, Entry | null>): void {
 function buildForest(input: AgentTreeInput, now: number): Forest {
   const tcfg = input.tcfg
   const since = now - AGENT_RETENTION_DAYS * DAY_MS
-  const agents = (input.agents ?? []).filter((r) => validAgent(r) && r.lastTs >= since)
+  // An agent is in the retention while its transcript is: its last counted reply, or the request
+  // the API rejected after it (N3).
+  const agents = (input.agents ?? []).filter((r) => validAgent(r) && activityOf(r, rejectionOf(r)) >= since)
   const launches = (input.launches ?? []).filter((l) => validLaunch(l) && l.ts >= since)
   const mains = (input.mains ?? []).filter((m) => validMain(m) && m.lastTs >= since)
 
@@ -1152,6 +1284,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     workflowId: null,
     counters: mainCounters,
     superseded: false,
+    rejected: null,
     journalOnly: [],
     journalMembers: [],
     tally: null,
@@ -1170,6 +1303,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     ...timeRows(root.startTs, root.lastTs, now, tcfg, true),
     ...countRows(mainCounters),
     { label: t('Agents'), value: full(membersBelow(root)) },
+    ...endedRejectedRows(root),
     idRow(a.sessionId),
   ]
 
@@ -1197,6 +1331,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         workflowId: wf,
         counters: null,
         superseded: false,
+        rejected: null,
         journalOnly: [],
         journalMembers: [],
         tally: null,
@@ -1245,7 +1380,10 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const view = wf !== null ? a.runs.get(wf) ?? null : null
     const journal = view?.byAgent.get(r.agentId) ?? null
     const next = journal !== null ? text(journal.supersededBy) : null
-    const st = agentState(r, launch, journal ? journalState(journal, next !== null ? shortOf(next) : null) : null, now, tcfg)
+    // N3: the request the transcript ended on, when the API rejected it — activity of its own.
+    const rejected = rejectionOf(r)
+    const activity = activityOf(r, rejected)
+    const st = agentState(r, launch, journal ? journalState(journal, next !== null ? shortOf(next) : null) : null, rejected, now, tcfg)
     const step = journal !== null && typeof journal.step === 'number' && Number.isInteger(journal.step) ? journal.step : 0
     const attempts = step > 0 ? view?.attempts.get(step) ?? 0 : 0
     const e: Entry = {
@@ -1258,9 +1396,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       usage: usageText(c),
       usageAgents: null,
       lowerBound: c.outputFinal < c.requests,
-      duration: durationText(r.lastTs - first),
+      duration: durationText(activity - first),
       startTs: first,
-      lastTs: r.lastTs,
+      lastTs: activity,
       id: r.agentId,
       parent: null,
       children: [],
@@ -1268,6 +1406,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       workflowId: wf,
       counters: c,
       superseded: next !== null,
+      rejected,
       journalOnly: [],
       journalMembers: [],
       tally: null,
@@ -1281,6 +1420,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       ...timeRows(e.startTs, e.lastTs, now, tcfg),
       ...recordedRows(st.resumed, now, tcfg),
       ...countRows(c),
+      ...rejectedRows(rejected, now, tcfg),
       { label: t('Spawned by'), value: spawnedBy(spawnerFileOf.get(e) ?? null) },
       { label: t('Workflow run'), value: wf !== null ? workflowLabel(wf) : '–' },
       // D7: which attempt at its step this agent is, where the journal started the step more than once.
@@ -1334,6 +1474,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       workflowId: null,
       counters: null,
       superseded: false,
+      rejected: null,
       journalOnly: [],
       journalMembers: [],
       tally: null,
@@ -1447,6 +1588,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       ...timeRows(w.startTs, w.lastTs, now, tcfg),
       ...recordedRows(st.resumed, now, tcfg),
       ...countRows(sum),
+      ...endedRejectedRows(w),
       idRow(wf),
     ]
   }

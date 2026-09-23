@@ -404,6 +404,94 @@ export function workflowResultLine(o: WorkflowResultOpts): string {
   return JSON.stringify(line)
 }
 
+export interface ApiErrorOpts {
+  /** The message id — every error line has one of its own. */
+  id: string
+  ts: number
+  /** A line of this agent's own transcript (every rejection 1.6 reads is one). */
+  agentId?: string
+  /** `apiErrorStatus`; 429 unless given, left out when null (14 of 981 lines have none). */
+  status?: unknown
+  /** `error`; `rate_limit` unless given, left out when null. */
+  error?: unknown
+  /** `quotaLimits.rateLimitType`; `five_hour` unless given. */
+  rateLimitType?: unknown
+  /** The whole `quotaLimits` value instead of the built block; null leaves the key out. */
+  quotaLimits?: unknown
+  /** The error's text, the line's `message.content[0].text` — content. */
+  text?: string
+  /** `errorDetails` (a string on 48 lines) and `apiError` (17): content too, left out unless given. */
+  errorDetails?: string
+  apiError?: string
+  /** `quotaLimits.upgradePaths` (280 lines): strings, left out unless given. */
+  upgradePaths?: string[]
+}
+
+/**
+ * The assistant line Claude Code writes for a request the API rejected — `isApiErrorMessage`,
+ * a `<synthetic>` message with all-zero usage whose one text block is the error's text, and
+ * beside it `apiErrorStatus`, `error` and the `quotaLimits` block (checked 2026-09-23, key names
+ * and types only: 852 such lines in agent transcripts, keys in this order). Every string that is
+ * not an allow-listed value is fixture text; of the line only `apiErrorStatus`, `error` and
+ * `quotaLimits.rateLimitType` may be read.
+ */
+export function apiErrorLine(o: ApiErrorOpts): string {
+  const line: Record<string, unknown> = { parentUuid: 'uuid-parent-0000', isSidechain: o.agentId !== undefined }
+  if (o.agentId !== undefined) line.agentId = o.agentId
+  const quota: Record<string, unknown> = {
+    status: 'rejected',
+    resetsAt: Math.floor(o.ts / 1000) + 3600,
+    unifiedRateLimitFallbackAvailable: false,
+    rateLimitType: o.rateLimitType === undefined ? 'five_hour' : o.rateLimitType,
+    overageStatus: 'synthetic-overage-status',
+    overageDisabledReason: 'synthetic overage reason',
+    isUsingOverage: false,
+  }
+  if (o.upgradePaths !== undefined) quota.upgradePaths = o.upgradePaths
+  Object.assign(line, {
+    type: 'assistant',
+    uuid: `uuid-${o.id}`,
+    timestamp: iso(o.ts),
+    message: {
+      id: o.id,
+      container: null,
+      model: '<synthetic>',
+      role: 'assistant',
+      stop_details: null,
+      stop_reason: 'stop_sequence',
+      stop_sequence: '',
+      type: 'message',
+      usage: {
+        input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0,
+        server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 }, service_tier: null,
+        cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 }, inference_geo: null,
+        iterations: null, speed: null, output_tokens_details: null,
+      },
+      content: [{ type: 'text', text: o.text ?? 'synthetic API error text' }],
+      context_management: null,
+      diagnostics: null,
+    },
+    requestId: `req_${o.id}`,
+  })
+  if (o.quotaLimits !== null) line.quotaLimits = o.quotaLimits === undefined ? quota : o.quotaLimits
+  if (o.error !== null) line.error = o.error === undefined ? 'rate_limit' : o.error
+  line.isApiErrorMessage = true
+  if (o.status !== null) line.apiErrorStatus = o.status === undefined ? 429 : o.status
+  if (o.errorDetails !== undefined) line.errorDetails = o.errorDetails
+  if (o.apiError !== undefined) line.apiError = o.apiError
+  Object.assign(line, {
+    perTurnEffort: null,
+    userType: 'external',
+    entrypoint: 'cli',
+    cwd: '/home/tester/proj-alpha',
+    sessionId: 'sess-0001',
+    version: '9.9.9',
+    gitBranch: 'main',
+    slug: 'synthetic-slug',
+  })
+  return JSON.stringify(line)
+}
+
 /**
  * A journal key in the shape Claude Code writes — `v2:` and 64 hex digits (5643 of 5643 keys on
  * the measuring machine) — made from a step name: the sha256 of `synthetic-journal-step-<step>`.

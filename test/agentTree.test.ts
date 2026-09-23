@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  AgentTreeVm, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
+  AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
   RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from '../src/agentTree'
 import { AgentTreeInput, agentDetails, buildAgentTree, shortIdsOf, spanText } from '../src/agentTreeBuild'
@@ -67,7 +67,7 @@ function rec(id: string, over: Partial<AgentRec> = {}): AgentRec {
     metaTries: 1, spawnerFile: sessionFile(session),
     firstTs: NOW - 30 * MIN, lastTs: NOW - 1 * MIN, models: ['claude-opus-5'],
     input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 50,
-    requests: 5, outputFinal: 5, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null,
+    requests: 5, outputFinal: 5, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
     ...over,
   }
 }
@@ -2233,4 +2233,171 @@ test('short ids: the fewest characters from four on that no other agent of the s
   assert.equal(launched.selected?.id, 'toolu_pppp0001')
   // The running list names an agent as the tree does.
   assert.ok(vm.runningNow.some((r) => r.label === 'Explore · claude-opus-5 · 3f2a1'), JSON.stringify(vm.runningNow))
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 N3 · why an agent ended: the rejected request
+// ---------------------------------------------------------------------------
+
+/** A request the API rejected: 429 on the 5-hour limit unless said otherwise. */
+function rejected(at: number, over: Partial<NonNullable<AgentRec['rejected']>> = {}): NonNullable<AgentRec['rejected']> {
+  return { at, status: 429, error: 'rate_limit', limit: 'five_hour', ...over }
+}
+
+/** One row of a node's details, by its label. */
+function detailRow(over: Partial<AgentTreeInput>, key: string, label: string): DetailRow | undefined {
+  return agentDetails(input(over), NOW, key)?.rows.find((r) => r.label === label)
+}
+
+test('an agent that ended on a rejected request says why — unknown with the reason, running within its ten minutes', () => {
+  // Its last counted reply at 11:30, its next request rejected at 11:31: silent since.
+  const silent: Partial<AgentTreeInput> = {
+    agents: [rec('cccc0001', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 29 * MIN) })],
+    selected: agentKey('cccc0001'),
+  }
+  const vm = build(silent)
+  const n = node(vm, agentKey('cccc0001'))
+  assert.deepEqual([n.state, n.derived], ['unknown', true])
+  assert.equal(vm.selected?.stateText,
+    'Unknown — inferred: no result was recorded; the last request, at 11:31, was rejected — 5-hour limit (HTTP 429).')
+  // The error line is the transcript's last line: its time is the node's last activity.
+  assert.equal(n.lastTs, NOW - 29 * MIN)
+  assert.equal(n.duration, '1 min 00 s')
+  assert.deepEqual(vm.selected?.rows.find((r) => r.label === 'Last request'),
+    { label: 'Last request', value: 'rejected at 11:31 — 5-hour limit (HTTP 429)', kind: 'sentence' })
+  assert.deepEqual(vm.selected?.rows.find((r) => r.label === 'Last activity')?.value, '11:31')
+  // After Tool calls, before Spawned by (1.6 L2's place for it).
+  const labels = vm.selected?.rows.map((r) => r.label) ?? []
+  assert.equal(labels.indexOf('Last request'), labels.indexOf('Tool calls') + 1, labels.join(', '))
+  assert.equal(labels.indexOf('Spawned by'), labels.indexOf('Last request') + 1, labels.join(', '))
+
+  // Within its ten minutes — measured from the rejection, a line of the transcript like any other —
+  // it still reads running (§7 Q17), and the sentence names the rejection.
+  const fresh: Partial<AgentTreeInput> = {
+    agents: [rec('cccc0002', { lastTs: NOW - 15 * MIN, rejected: rejected(NOW - 2 * MIN, { status: 529, error: 'server_error', limit: null }) })],
+  }
+  assert.deepEqual([node(build(fresh), agentKey('cccc0002')).state], ['running'])
+  assert.equal(stateText(fresh, agentKey('cccc0002')),
+    'Running — inferred: the transcript changed 2 min ago; its last request was rejected — server error (HTTP 529).')
+
+  // A line that named neither a reason nor a status: the sentences end on "was rejected".
+  const bare = { status: null, error: null, limit: null }
+  assert.equal(stateText({ agents: [rec('cccc0003', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 29 * MIN, bare) })] }, agentKey('cccc0003')),
+    'Unknown — inferred: no result was recorded; the last request, at 11:31, was rejected.')
+  assert.equal(stateText({ agents: [rec('cccc0004', { lastTs: NOW - 5 * MIN, rejected: rejected(NOW - 3 * MIN, bare) })] }, agentKey('cccc0004')),
+    'Running — inferred: the transcript changed 3 min ago; its last request was rejected.')
+  assert.equal(detailRow({ agents: [rec('cccc0003', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 29 * MIN, bare) })] },
+    agentKey('cccc0003'), 'Last request')?.value, 'rejected at 11:31')
+  // Each part is left out alone: a status without a reason, a reason without a status.
+  assert.equal(detailRow({ agents: [rec('cccc0005', { rejected: rejected(NOW - 30 * 1000, { error: null, limit: null, status: 529 }) })] },
+    agentKey('cccc0005'), 'Last request')?.value, 'rejected at 11:59 — HTTP 529')
+  assert.equal(detailRow({ agents: [rec('cccc0006', { rejected: rejected(NOW - 30 * 1000, { error: 'invalid_request', limit: null, status: null }) })] },
+    agentKey('cccc0006'), 'Last request')?.value, 'rejected at 11:59 — invalid request')
+})
+
+test('the "may have been stopped" sentence stays only where no rejection is known, and a recorded end keeps its own', () => {
+  const quiet = (over: Partial<AgentRec> = {}): Partial<AgentTreeInput> => ({ agents: [rec('dddd0001', { lastTs: NOW - 30 * MIN, ...over })] })
+  const stopped = 'Unknown — inferred: no result was recorded and the transcript has been silent since 11:30; the agent may have been stopped.'
+  assert.equal(stateText(quiet(), agentKey('dddd0001')), stopped)
+  assert.equal(detailRow(quiet(), agentKey('dddd0001'), 'Last request'), undefined)
+  // A rejection before the last counted reply was answered: it is not the transcript's last word.
+  assert.equal(stateText(quiet({ rejected: rejected(NOW - 31 * MIN) }), agentKey('dddd0001')), stopped)
+  assert.equal(detailRow(quiet({ rejected: rejected(NOW - 31 * MIN) }), agentKey('dddd0001'), 'Last request'), undefined)
+  // One that a snapshot of another build's making garbled is none either.
+  assert.equal(stateText(quiet({ rejected: { at: 'yesterday' } as unknown as AgentRec['rejected'] }), agentKey('dddd0001')), stopped)
+  // An end the parent or the journal recorded keeps its sentence; the details still say what the
+  // last request came to — in any state.
+  const failed: Partial<AgentTreeInput> = {
+    agents: [rec('dddd0002', { lastTs: NOW - 10 * MIN, rejected: rejected(NOW - 9 * MIN), outcome: 'failed', outcomeTs: NOW - 9 * MIN + 5000, outcomeStatus: 'failed' })],
+  }
+  assert.equal(stateText(failed, agentKey('dddd0002')), 'Failed — the parent recorded the failure at 11:51.')
+  assert.equal(detailRow(failed, agentKey('dddd0002'), 'Last request')?.value, 'rejected at 11:51 — 5-hour limit (HTTP 429)')
+  const journalled: Partial<AgentTreeInput> = {
+    agents: [wfRec('dddd0003', { lastTs: NOW - 40 * MIN, rejected: rejected(NOW - 39 * MIN, { limit: 'seven_day' }) })],
+    runs: [run([jagent('dddd0003', { outcome: 'failed' })])],
+  }
+  assert.equal(stateText(journalled, agentKey('dddd0003')), 'Failed — the workflow journal recorded the failure.')
+  assert.equal(detailRow(journalled, agentKey('dddd0003'), 'Last request')?.value, 'rejected at 11:21 — weekly limit (HTTP 429)')
+  // A request rejected more than a minute after the parent's recorded end is the transcript going
+  // on after it (1.6 D6): the outcome no longer decides the state.
+  const after: Partial<AgentTreeInput> = {
+    agents: [rec('dddd0004', { lastTs: NOW - 20 * MIN, outcome: 'completed', outcomeTs: NOW - 20 * MIN, outcomeStatus: 'completed', rejected: rejected(NOW - 4 * MIN) })],
+  }
+  assert.equal(stateText(after, agentKey('dddd0004')), 'Running — inferred: the transcript changed 4 min ago, after an outcome was recorded at 11:40.')
+})
+
+test('each reason a rejected request gives, in English and in German', () => {
+  const cases: Array<[Partial<NonNullable<AgentRec['rejected']>>, string, string]> = [
+    [{ error: 'rate_limit', limit: 'five_hour' }, '5-hour limit', '5-Stunden-Limit'],
+    [{ error: 'rate_limit', limit: 'seven_day' }, 'weekly limit', 'Wochenlimit'],
+    [{ error: 'rate_limit', limit: 'seven_day_opus' }, 'weekly model limit', 'wöchentliches Modell-Limit'],
+    [{ error: 'rate_limit', limit: 'seven_day_sonnet' }, 'weekly model limit', 'wöchentliches Modell-Limit'],
+    [{ error: 'rate_limit', limit: null }, 'usage limit', 'Nutzungslimit'],
+    // The limit names a rate limit; a line without an error kind still has one.
+    [{ error: null, limit: 'five_hour' }, '5-hour limit', '5-Stunden-Limit'],
+    [{ error: 'server_error', limit: null }, 'server error', 'Serverfehler'],
+    [{ error: 'overloaded', limit: null }, 'overloaded', 'überlastet'],
+    [{ error: 'invalid_request', limit: null }, 'invalid request', 'ungültige Anfrage'],
+    [{ error: 'authentication_failed', limit: null }, 'authentication failed', 'Anmeldung fehlgeschlagen'],
+    [{ error: 'max_output_tokens', limit: null }, 'output limit', 'Ausgabelimit'],
+  ]
+  for (const [over, en, de] of cases) {
+    const world: Partial<AgentTreeInput> = { agents: [rec('eeee0001', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 29 * MIN, over) })] }
+    assert.equal(detailRow(world, agentKey('eeee0001'), 'Last request')?.value, `rejected at 11:31 — ${en} (HTTP 429)`, JSON.stringify(over))
+    const g = german(() => agentDetails(input(world), NOW, agentKey('eeee0001')))
+    assert.equal(g?.rows.find((r) => r.label === 'Letzte Anfrage')?.value, `abgelehnt um 11:31 — ${de} (HTTP 429)`, JSON.stringify(over))
+    assert.equal(g?.stateText,
+      `Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um 11:31 wurde abgelehnt — ${de} (HTTP 429).`)
+  }
+  // The other three sentences in German.
+  const running: Partial<AgentTreeInput> = { agents: [rec('eeee0002', { lastTs: NOW - 5 * MIN, rejected: rejected(NOW - 2 * MIN) })] }
+  assert.equal(german(() => stateText(running, agentKey('eeee0002'))),
+    'Läuft — abgeleitet: Das Transkript hat sich vor 2 min geändert; seine letzte Anfrage wurde abgelehnt — 5-Stunden-Limit (HTTP 429).')
+  const bare = { status: null, error: null, limit: null }
+  assert.equal(german(() => stateText({ agents: [rec('eeee0003', { lastTs: NOW - 5 * MIN, rejected: rejected(NOW - 2 * MIN, bare) })] }, agentKey('eeee0003'))),
+    'Läuft — abgeleitet: Das Transkript hat sich vor 2 min geändert; seine letzte Anfrage wurde abgelehnt.')
+  const quiet: Partial<AgentTreeInput> = { agents: [rec('eeee0004', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 29 * MIN, bare) })] }
+  assert.equal(german(() => stateText(quiet, agentKey('eeee0004'))),
+    'Unbekannt — abgeleitet: Es wurde kein Ergebnis aufgezeichnet; die letzte Anfrage um 11:31 wurde abgelehnt.')
+  assert.equal(german(() => agentDetails(input(quiet), NOW, agentKey('eeee0004'))?.rows.find((r) => r.label === 'Letzte Anfrage')?.value),
+    'abgelehnt um 11:31')
+})
+
+test('a run and a session count their agents that ended on a rejected request, one row per reason', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      wfRec('ffff0001', { lastTs: NOW - 40 * MIN, rejected: rejected(NOW - 39 * MIN) }),
+      wfRec('ffff0002', { lastTs: NOW - 40 * MIN, rejected: rejected(NOW - 38 * MIN) }),
+      wfRec('ffff0003', { lastTs: NOW - 40 * MIN, rejected: rejected(NOW - 37 * MIN, { status: 529, error: 'server_error', limit: null }) }),
+      // A reply after its rejection: not one that ended on it.
+      wfRec('ffff0004', { lastTs: NOW - 30 * MIN, rejected: rejected(NOW - 31 * MIN) }),
+      wfRec('ffff0005', { lastTs: NOW - 30 * MIN }),
+      // A direct agent of the session, and one whose line named nothing.
+      rec('ffff0006', { lastTs: NOW - 40 * MIN, rejected: rejected(NOW - 36 * MIN, { status: null, error: 'invalid_request', limit: null }) }),
+      rec('ffff0007', { lastTs: NOW - 40 * MIN, rejected: rejected(NOW - 35 * MIN, { status: null, error: null, limit: null }) }),
+    ],
+  }
+  const rows = (key: string): Array<[string, string, string | undefined]> => (agentDetails(input(over), NOW, key)?.rows ?? [])
+    .filter((r) => r.label === 'Ended on a rejected request').map((r) => [r.label, r.value, r.kind])
+  const label = 'Ended on a rejected request'
+  // The most frequent first, then by the words.
+  assert.deepEqual(rows(wfKey), [[label, '5-hour limit (HTTP 429): 2', 'sentence'], [label, 'server error (HTTP 529): 1', 'sentence']])
+  // A session counts every agent below it, its runs' included; a line that named nothing is `–`.
+  assert.deepEqual(rows(rootKey), [
+    [label, '5-hour limit (HTTP 429): 2', 'sentence'], [label, 'invalid request: 1', 'sentence'],
+    [label, 'server error (HTTP 529): 1', 'sentence'], [label, '–: 1', 'sentence'],
+  ])
+  // After the summed counts, before the ID.
+  const run = agentDetails(input(over), NOW, wfKey)?.rows.map((r) => r.label) ?? []
+  assert.equal(run.indexOf(label), run.indexOf('Tool calls') + 1, run.join(', '))
+  assert.equal(run[run.length - 1], 'ID')
+  const session = agentDetails(input(over), NOW, rootKey)?.rows.map((r) => r.label) ?? []
+  assert.equal(session.indexOf(label), session.indexOf('Agents') + 1, session.join(', '))
+  // In German.
+  const de = german(() => agentDetails(input(over), NOW, wfKey)?.rows.filter((r) => r.label === 'Endete mit abgelehnter Anfrage').map((r) => r.value))
+  assert.deepEqual(de, ['5-Stunden-Limit (HTTP 429): 2', 'Serverfehler (HTTP 529): 1'])
+  // No agent ended so: no row, rather than a 0.
+  const none = { agents: [wfRec('ffff0005', { lastTs: NOW - 30 * MIN })] }
+  assert.equal(agentDetails(input(none), NOW, wfKey)?.rows.some((r) => r.label === label), false)
+  assert.equal(agentDetails(input(none), NOW, rootKey)?.rows.some((r) => r.label === label), false)
 })

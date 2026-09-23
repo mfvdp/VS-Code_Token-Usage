@@ -134,6 +134,7 @@
   "Status line mirror (statusline-mirror.json)": "Statuszeilen-Spiegel (statusline-mirror.json)",
   "Status line updated {0}.": "Statuszeile aktualisiert {0}.",
   "Status line: {0}": "Statuszeile: {0}",
+  "Stopped": "Gestoppt",
   "Streak {0} day(s) · longest {1} · active {2} · peak {3}": "Serie {0} Tag(e) · längste {1} · aktiv {2} · Spitze {3}",
   "Summary": "Zusammenfassung",
   "Switch it off again with the setting \"tokenPace.writeQuotaCache\".": "Schalten Sie es mit der Einstellung „tokenPace.writeQuotaCache“ wieder aus.",

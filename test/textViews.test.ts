@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
-import { AgentTreeVm, MAX_NODES, MAX_ROOTS, RunningItem, emptyAgentTree } from '../src/agentTree'
+import { AgentTreeVm, MAX_NODES, MAX_ROOTS, RunningItem, TreeNode, emptyAgentTree } from '../src/agentTree'
 import { setBundle, setLocale } from '../src/i18n'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
@@ -882,11 +882,11 @@ function agentVm(select = false): { vm: ViewModel; agentKey: string } {
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
     meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: null, outcomeTs: null,
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null,
   }
   const pending: AgentLaunch = {
     toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
-    modelHint: null, background: true, outcome: 'launched', outcomeTs: null, totals: null,
+    modelHint: null, background: true, outcome: 'launched', outcomeTs: null, outcomeStatus: null, totals: null,
   }
   agg.mains = () => [main]
   agg.agents = () => [agent]
@@ -1028,7 +1028,7 @@ test('an agent of a session the tree does not list is on its running line alone,
     source: 'claude', agentId: 'f00d0001', sessionId: oldest, sessionFile: path.join(dir, `${oldest}.jsonl`),
     workflowId: null, meta: null, metaTries: 3, spawnerFile: null, firstTs: NOW - 10 * 60_000, lastTs: NOW - 30_000,
     models: ['claude-opus-4-6'], input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700,
-    reasoning: 0, requests: 5, outputFinal: 4, toolCalls: 3, outcome: null, outcomeTs: null,
+    reasoning: 0, requests: 5, outputFinal: 4, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null,
   }
   agg.mains = () => mains
   agg.agents = () => [agent]
@@ -1090,6 +1090,33 @@ test('the notes under the tree state the cut, the sessions left out, the lower b
     '_The selected node is no longer in the tree._',
   ]) assert.ok(lines.includes(note), `${note}\n${lines.join('\n')}`)
   assert.equal(lines.some(detailsHead), false)
+})
+
+test('a stop the parent recorded is printed [Stopped] — a recorded state, no estimate mark — in either language', () => {
+  const { vm } = agentVm()
+  const node = (key: string, state: TreeNode['state'], derived: boolean): TreeNode => ({
+    key, kind: 'agent', label: `Explore · claude-opus-4-6 · ${key.slice(2, 6)}`, sub: null, state, derived,
+    usage: '3.4K', usageAgents: null, lowerBound: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    agentCount: 0, children: [],
+  })
+  const tree: AgentTreeVm = {
+    roots: [{ ...node('s:sess', 'idle', true), kind: 'session', label: 'Session 12345678', agentCount: 1,
+      children: [node('a:beef0001', 'stopped', false)] }],
+    selected: null, running: 0, runningNow: [], runningMore: 0, omittedRoots: 0, truncated: false, note: null,
+  }
+  const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
+  assert.ok(lines.includes('  - [Stopped] Explore · claude-opus-4-6 · beef · 3.4K · 2 min 10 s'), lines.join('\n'))
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  let md = ''
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    md = markdownDocument({ ...vm, agents: tree })
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.ok(sectionOf(md, '## Agenten').includes('  - [Gestoppt] Explore · claude-opus-4-6 · beef · 3.4K · 2 min 10 s'), md)
 })
 
 test('an empty tree is one sentence; a tree that was never built is no section at all', () => {

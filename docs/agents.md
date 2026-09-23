@@ -113,7 +113,8 @@ agent's usage is part of the figures the totals already contain: the tree adds n
 | Glyph | State | Kind | When |
 |---|---|---|---|
 | ✓ | done | recorded | the parent's tool result or task notification says `completed`, or the workflow run's journal holds a result for the agent |
-| ✕ | failed | recorded | the parent recorded `failed`, `error`, `killed`, `cancelled` or `timeout` |
+| ✕ | failed | recorded | the parent recorded `failed`, `error` or `timeout` |
+| ■ | stopped | recorded | the parent recorded `killed`, `cancelled` or `stopped` — an end, but not a failure |
 | ● | running | derived | nothing was recorded yet, and the agent replied — or was launched — within the last **10 minutes**, or an agent it launched is running |
 | ? | unknown | derived | nothing was recorded, and the agent has been silent for longer than that |
 | ● | active | derived | a session whose own transcript recorded a response within the last 10 minutes, or one of whose agents is running |
@@ -127,31 +128,40 @@ after that. Its details keep what was recorded in a row of their own, `Recorded`
 `done at 14:20`. A line within that minute is the tail of the same reply and changes nothing. The
 workflow journal's result carries no time, so it is never outlived.
 
-A **workflow run** is running while one of its agents runs, failed when one of them failed, done
-when every one of them has a recorded result, and unknown otherwise. A **launch** whose
-transcript never appeared is running for ten minutes after the launch and unknown after that,
-unless the parent records its result, which makes it done or failed like any agent.
+**Stopped is not failed.** A stop the parent recorded — Claude Code writes `killed`, `cancelled`
+or `stopped` for an agent that was halted — is an end of its own: `■`, in the dim tone, and its
+sentence quotes the parent's word as it was written, `‘killed’`. Only `failed`, `error` and
+`timeout` make an agent failed.
 
-Only done and failed are facts: somebody recorded them. Everything else is inferred from when a
-file last changed, and says so — the glyph's title reads `~running · derived` where a recorded
-state reads `done · recorded`, and the markdown list prints `[~Running]` against `[Done]`. The
-running glyph pulses unless the system asks for reduced motion, and every colour is one the rest
-of the page already uses.
+A **workflow run** is running while one of its agents runs, failed when one of them failed, done
+when every one of them has a recorded outcome and at least one completed, stopped when every one
+of them was stopped, and unknown otherwise. A **launch** whose transcript never appeared is
+running for ten minutes after the launch and unknown after that, unless the parent records its
+end, which makes it done, failed or stopped like any agent.
+
+Only done, failed and stopped are facts: somebody recorded them. Everything else is inferred from
+when a file last changed, and says so — the glyph's title reads `~running · derived` where a
+recorded state reads `done · recorded` or `stopped · recorded`, and the markdown list prints
+`[~Running]` against `[Done]` and `[Stopped]`. The running glyph pulses unless the system asks for
+reduced motion, and every colour is one the rest of the page already uses.
 
 **The sentences.** The details panel opens with the state and the sentence it was derived with,
 word for word. For an agent:
 
 * Completed — the parent recorded the result at 14:20.
 * Failed — the parent recorded the failure at 14:20.
+* Stopped — the parent recorded ‘killed’ at 14:20.
 * Running — inferred: the transcript changed 2 min ago and no result was recorded yet.
 * Running — inferred: a child agent of this agent is still running.
 * Unknown — inferred: no result was recorded and the transcript has been silent since 14:20; the agent may have been stopped.
 * Running — inferred: the transcript changed 1 min ago, after an outcome was recorded at 14:20.
 * Unknown — inferred: the transcript went on after an outcome was recorded at 14:20, and has been silent since 14:38.
 
-A result recorded without a time is stated without one. Today that is the case for every agent
-of a workflow run that no launch accounts for: the run's journal completes it, and its lines
-carry no time — *Completed — the workflow journal recorded the result.* The other nodes:
+A stopped agent's sentence quotes the word the parent wrote — `killed`, `cancelled` or `stopped`,
+verbatim; a failed agent's is the same sentence for `failed`, `error` and `timeout`. A result recorded
+without a time is stated without one. Today that is the case for every agent of a workflow run
+that no launch accounts for: the run's journal completes it, and its lines carry no time —
+*Completed — the workflow journal recorded the result.* The other nodes:
 
 | Node | Sentence |
 |---|---|
@@ -162,6 +172,7 @@ carry no time — *Completed — the workflow journal recorded the result.* The 
 | Workflow run | Running — inferred: at least one agent of this run is running. |
 | Workflow run | Failed — at least one agent of this run has a recorded failure. |
 | Workflow run | Done — every agent of this run has a recorded result. |
+| Workflow run | Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped. |
 | Workflow run | Unknown — inferred: not every agent of this run has a recorded result, and none is running. |
 | Launch | Running — inferred: the parent recorded the launch 1 min ago and no result yet; the agent's transcript has not been seen yet. |
 | Launch | Unknown — inferred: the parent recorded the launch at 14:20 but no result, and the agent's transcript was never seen; the agent may have been stopped. |
@@ -234,9 +245,10 @@ instead. The log gets counts, never a value.
 
 What is kept lives in the token snapshot (`state.json` in the extension's own storage): per agent
 transcript and per session transcript the ids, the agent's type and model names, the first and
-last time, the token counts, the number of tool calls and the recorded result; per launch its
-tool-call id, the type and model it asked for, whether it runs in the background, its result and
-the parent's three totals. The records are keyed by the transcript's path, as every transcript's
+last time, the token counts, the number of tool calls and the recorded result with the parent's
+word for it (one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`,
+`stopped`); per launch its tool-call id, the type and model it asked for, whether it runs in the
+background, its result with that word and the parent's three totals. The records are keyed by the transcript's path, as every transcript's
 read position always was. None of it is part of the CSV or JSON export, the clipboard summary or
 the diagnostics report. The tables do not depend on `tokenPace.attribution` — see
 [Sessions and projects](sessions.md).
@@ -301,9 +313,9 @@ them with the rest of the dashboard view state.
   computer, or the far side of a remote or a container this extension does not run in — is
   invisible here; see [Windows, WSL and remote development](windows-wsl-remote.md) for which
   side reads the transcripts.
-* **No end marker.** An agent that was stopped — interrupted, its session closed, its process
-  gone — has no recorded result, so ten minutes after its last reply it reads `unknown`, never
-  `done`.
+* **No end marker.** An agent that was stopped without its parent recording it — interrupted,
+  its session closed, its process gone — has no recorded result, so ten minutes after its last
+  reply it reads `unknown`, never `done`. Only a stop the parent recorded reads `stopped`.
 * **Waiting can look like silence.** The states are read from replies. An agent waiting on an
   agent it launched reads `running` while that agent runs, and a session reads `active` while
   one of its agents runs — both say they were inferred from below. An agent that waits longer

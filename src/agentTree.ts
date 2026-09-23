@@ -33,7 +33,11 @@ export const SPAN_IN_DAYS_FROM_MS = 48 * 3_600_000
 /** The fewest hex characters of an agent id a name shows; more where two agents of a session share them (D11). */
 export const MIN_SHORT_ID = 4
 
-export type NodeState = 'running' | 'done' | 'failed' | 'unknown' | 'active' | 'idle'
+/**
+ * `stopped` (1.6 D7): the parent recorded a stop — `killed`, `cancelled` or `stopped` — which is
+ * an end, but not a failure.
+ */
+export type NodeState = 'running' | 'done' | 'failed' | 'stopped' | 'unknown' | 'active' | 'idle'
 
 export interface TreeNode {
   /** Stable, never a path: `s:<sessionId>` | `w:<sessionId>|<wfId>` | `a:<agentId>` | `l:<toolUseId>`. */
@@ -49,7 +53,7 @@ export interface TreeNode {
   /** Secondary text, e.g. the project label when attribution allows one. */
   sub: string | null
   state: NodeState
-  /** True for running/unknown/active/idle (inferred), false for done/failed (recorded). */
+  /** True for running/unknown/active/idle (inferred), false for done/failed/stopped (recorded). */
   derived: boolean
   /**
    * Formatted billable tokens, '–' when nothing counted. A session's is its own transcript's

@@ -16,7 +16,7 @@ npm run watch          # the same, rebuilt on change
 npm run typecheck      # tsc --noEmit
 npm test               # builds the tests, then node --test "out-test/*.test.js"
 npm run test:e2e       # the extension-host smoke test in a real window (needs a display)
-npm run check:privacy  # http(s) literals in dist/ against the allow-list
+npm run check:privacy  # http(s) literals in dist/ against the allow-list, and the read contract
 npm run package        # build + privacy check + vsce package
 ```
 

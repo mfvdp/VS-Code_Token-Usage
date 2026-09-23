@@ -1442,8 +1442,11 @@ function sDrill(): string {
 // details panel. What is decided here is the structure, which nodes are open and which one is
 // selected, and one thing a view model cannot deliver: a clock that moves between two pushes.
 
-/** The states a node can be drawn in. A state this build does not know is drawn as unknown. */
-const AGENT_STATES = ['running', 'done', 'failed', 'unknown', 'active', 'idle'];
+/**
+ * The states a node can be drawn in. A state this build does not know is drawn as unknown.
+ * `stopped` (1.6): the parent recorded a stop — an end, but no failure.
+ */
+const AGENT_STATES = ['running', 'done', 'failed', 'stopped', 'unknown', 'active', 'idle'];
 /** The kinds of node. Only these ever reach a class name. */
 const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending'];
 /**
@@ -1460,11 +1463,11 @@ function agentState(v: Payload): string {
 /**
  * A node's state in words, for the title of its glyph. Built on the call, like displayWords(),
  * because the words are the reader's language. Only a session is active or idle, and its words
- * name it; the other four are the states of an agent, a workflow run or a pending launch.
+ * name it; the other five are the states of an agent, a workflow run or a pending launch.
  */
 function agentStateWord(state: string): string {
   const words: Record<string, string> = {
-    running: tr('running'), done: tr('done'), failed: tr('failed'), unknown: tr('unknown'),
+    running: tr('running'), done: tr('done'), failed: tr('failed'), stopped: tr('stopped'), unknown: tr('unknown'),
     active: tr('active session'), idle: tr('idle session'),
   };
   return word(words, state);

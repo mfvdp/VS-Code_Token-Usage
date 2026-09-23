@@ -8,9 +8,10 @@
  * out, and nothing here reads a file or a clock. Every state is decided here and nowhere
  * else — the webview and the markdown only print it — and every state carries the sentence
  * that says what it rests on, because a "running" nobody can check is a claim, not a reading:
- *  - an agent is done or failed only when its parent (or the workflow journal) recorded it —
- *    and while its transcript did not go on more than RESUMED_AFTER_MS after the parent's
- *    record, which makes its state an inference again;
+ *  - an agent is done, failed or stopped only when its parent (or, for done, the workflow
+ *    journal) recorded it — and while its transcript did not go on more than RESUMED_AFTER_MS
+ *    after the parent's record, which makes its state an inference again; a stop the parent
+ *    recorded (`killed`, `cancelled`, `stopped`) is an end of its own, never a failure;
  *  - it is running while its transcript changed within RUNNING_WINDOW_MS and nothing was
  *    recorded yet;
  *  - anything else is unknown, never done: Claude Code writes no end marker into an agent's
@@ -31,13 +32,15 @@ import {
   NodeDetails, NodeState, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS,
   SPAN_IN_DAYS_FROM_MS, TreeNode,
 } from './agentTree'
-import { billable } from './agg'
+import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
 import { normalizeModel } from './prices'
 import { compact, full } from './render'
 import { durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, dayOf, formatTime } from './time'
-import { AgentLaunch, AgentRec, Attribution, Bucket, MainRec, SessionRec, emptyBucket } from './types'
+import {
+  AgentLaunch, AgentRec, Attribution, Bucket, LaunchStatus, MainRec, RecordedOutcome, SessionRec, emptyBucket,
+} from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
 export interface AgentTreeInput {
@@ -193,9 +196,9 @@ function sessionOfPath(file: string): { sessionId: string; main: boolean } | nul
 // Words
 // ---------------------------------------------------------------------------
 
-/** Whether a state is inferred. Only a recorded outcome is a fact. */
+/** Whether a state is inferred. Only a recorded outcome — done, failed or stopped — is a fact. */
 function derivedOf(state: NodeState): boolean {
-  return state !== 'done' && state !== 'failed'
+  return state !== 'done' && state !== 'failed' && state !== 'stopped'
 }
 
 /** "14:20" today, "2026-09-01 14:20" on any other day — the Sessions table's own form. */
@@ -273,10 +276,40 @@ interface StateOf {
   resumed?: Outcome
 }
 
-interface Outcome { outcome: 'completed' | 'failed'; at: number | null; by: 'parent' | 'journal' }
+/**
+ * A recorded end: what it was, when, by whom, and the parent's own word for it (D7) — a stop is
+ * only ever an outcome with its word, since the sentence quotes it.
+ */
+type Outcome = { at: number | null; by: 'parent' | 'journal' } & Ended
+
+/** An end and the word it was recorded with: a completion or a failure may lack one, a stop never does. */
+type Ended = { outcome: 'completed' | 'failed'; word: LaunchStatus | null } | { outcome: 'stopped'; word: LaunchStatus }
+
+/**
+ * The parent's word, when it is one of the seven the aggregator's status map knows and says this
+ * outcome; null otherwise.
+ */
+function wordOf(v: unknown, outcome: RecordedOutcome): LaunchStatus | null {
+  return outcomeOfStatus(v) === outcome ? v as LaunchStatus : null
+}
+
+/** An outcome with its word, or null for a stop without one — which the aggregator never records. */
+function ended(outcome: RecordedOutcome, word: LaunchStatus | null): Ended | null {
+  if (outcome === 'stopped') return word === null ? null : { outcome, word }
+  return { outcome, word }
+}
 
 function outcomeState(o: Outcome, now: number, tcfg: TimeConfig): StateOf {
   const at = o.at === null ? null : stamp(o.at, now, tcfg)
+  if (o.outcome === 'stopped') {
+    // D7: the parent's own word, verbatim — ‘killed’, ‘cancelled’ or ‘stopped’.
+    return {
+      state: 'stopped',
+      stateText: at === null
+        ? t('Stopped — the parent recorded ‘{0}’.', o.word)
+        : t('Stopped — the parent recorded ‘{0}’ at {1}.', o.word, at),
+    }
+  }
   if (o.outcome === 'failed') {
     return {
       state: 'failed',
@@ -301,24 +334,34 @@ function outcomeState(o: Outcome, now: number, tcfg: TimeConfig): StateOf {
   }
 }
 
-function launchOutcome(l: AgentLaunch | null): 'completed' | 'failed' | null {
-  return l && (l.outcome === 'completed' || l.outcome === 'failed') ? l.outcome : null
+/**
+ * A launch's recorded end, with the parent's word. A stop whose word is missing is no outcome:
+ * the aggregator never records one without it, so such a record came from somewhere else.
+ */
+function launchOutcome(l: AgentLaunch | null): Ended | null {
+  if (!l || (l.outcome !== 'completed' && l.outcome !== 'failed' && l.outcome !== 'stopped')) return null
+  return ended(l.outcome, wordOf(l.outcomeStatus, l.outcome))
 }
 
 /**
  * What was recorded about an agent, and by whom. The record's own outcome first; the launch's
  * when the record has none yet — the parent may have written its result before the agent's
  * file was read. A completed workflow agent that no launch accounts for was completed by the
- * workflow journal, the only other source that records one.
+ * workflow journal, the only other source that records one. A stop is the parent's alone, and
+ * only with its word.
  */
 function recordedOutcome(r: AgentRec, launch: AgentLaunch | null): Outcome | null {
   const fromLaunch = launchOutcome(launch)
-  if (r.outcome === 'completed' || r.outcome === 'failed') {
-    const byParent = fromLaunch === r.outcome || !(r.workflowId && r.outcome === 'completed')
-    const at = stampOf(r.outcomeTs) ?? (fromLaunch === r.outcome ? stampOf(launch?.outcomeTs) : null)
-    return { outcome: r.outcome, at, by: byParent ? 'parent' : 'journal' }
+  const same = fromLaunch !== null && fromLaunch.outcome === r.outcome
+  if (r.outcome === 'completed' || r.outcome === 'failed' || r.outcome === 'stopped') {
+    const own = ended(r.outcome, wordOf(r.outcomeStatus, r.outcome) ?? (same ? fromLaunch.word : null))
+    if (own) {
+      const byParent = same || !(r.workflowId && r.outcome === 'completed')
+      const at = stampOf(r.outcomeTs) ?? (same ? stampOf(launch?.outcomeTs) : null)
+      return { ...own, at, by: byParent ? 'parent' : 'journal' }
+    }
   }
-  if (fromLaunch) return { outcome: fromLaunch, at: stampOf(launch?.outcomeTs), by: 'parent' }
+  if (fromLaunch) return { ...fromLaunch, at: stampOf(launch?.outcomeTs), by: 'parent' }
   return null
 }
 
@@ -368,7 +411,7 @@ function agentState(r: AgentRec, launch: AgentLaunch | null, now: number, tcfg: 
 /** A launch whose agent file was never seen: the launch time is all the activity there is. */
 function pendingState(l: AgentLaunch, now: number, tcfg: TimeConfig): StateOf {
   const o = launchOutcome(l)
-  if (o) return outcomeState({ outcome: o, at: stampOf(l.outcomeTs), by: 'parent' }, now, tcfg)
+  if (o) return outcomeState({ ...o, at: stampOf(l.outcomeTs), by: 'parent' }, now, tcfg)
   if (now - l.ts <= RUNNING_WINDOW_MS) {
     return {
       state: 'running',
@@ -396,7 +439,11 @@ function sessionState(main: MainRec | null, now: number, tcfg: TimeConfig): Stat
   }
 }
 
-/** A workflow run from its agents: one running makes it running, one failure makes it failed. */
+/**
+ * A workflow run from its agents: one running makes it running, one failure makes it failed.
+ * A stop is an end too (D7): a run whose every agent ended — completed or stopped — is done
+ * while one of them completed, and stopped when every one of them was stopped.
+ */
 function workflowState(states: NodeState[]): StateOf {
   if (states.includes('running')) {
     return { state: 'running', stateText: t('Running — inferred: at least one agent of this run is running.') }
@@ -404,8 +451,14 @@ function workflowState(states: NodeState[]): StateOf {
   if (states.includes('failed')) {
     return { state: 'failed', stateText: t('Failed — at least one agent of this run has a recorded failure.') }
   }
-  if (states.length > 0 && states.every((s) => s === 'done')) {
-    return { state: 'done', stateText: t('Done — every agent of this run has a recorded result.') }
+  if (states.length > 0 && states.every((s) => s === 'done' || s === 'stopped')) {
+    if (states.includes('done')) {
+      return { state: 'done', stateText: t('Done — every agent of this run has a recorded result.') }
+    }
+    return {
+      state: 'stopped',
+      stateText: t('Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.'),
+    }
   }
   return { state: 'unknown', stateText: t('Unknown — inferred: not every agent of this run has a recorded result, and none is running.') }
 }
@@ -442,10 +495,8 @@ function idRow(id: string): DetailRow {
  */
 function recordedRows(o: Outcome | undefined, now: number, tcfg: TimeConfig): DetailRow[] {
   if (!o || o.at === null) return []
-  return [{
-    label: t('Recorded'),
-    value: t('{0} at {1}', o.outcome === 'failed' ? t('failed') : t('done'), stamp(o.at, now, tcfg)),
-  }]
+  const word = o.outcome === 'failed' ? t('failed') : o.outcome === 'stopped' ? t('stopped') : t('done')
+  return [{ label: t('Recorded'), value: t('{0} at {1}', word, stamp(o.at, now, tcfg)) }]
 }
 
 /**

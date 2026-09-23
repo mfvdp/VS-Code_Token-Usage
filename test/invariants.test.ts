@@ -595,7 +595,7 @@ test('every inferred state says it was inferred, and no recorded one says so —
     const open = build()
     // Every state the tree can show is in the world, so the rule is tried on each of them.
     assert.deepEqual([...new Set(open.map((x) => x.node.state))].sort(),
-      ['active', 'done', 'failed', 'idle', 'running', 'unknown'], lang)
+      ['active', 'done', 'failed', 'idle', 'running', 'stopped', 'unknown'], lang)
     for (const { node, vm } of open) {
       const d = vm.agents.selected
       assert.ok(d, `${lang}: no details for ${node.key}`)
@@ -605,8 +605,11 @@ test('every inferred state says it was inferred, and no recorded one says so —
       // Every inferred state says so — unknown included — and no recorded one does.
       assert.equal(says, node.derived, where)
     }
-    // Only a recorded outcome is a fact, and the tree only calls those two states recorded.
-    for (const { node } of open) assert.equal(node.derived, node.state !== 'done' && node.state !== 'failed', node.key)
+    // Only a recorded outcome is a fact, and the tree only calls those three states recorded —
+    // 1.6 D7: a stop the parent recorded is the third.
+    for (const { node } of open) {
+      assert.equal(node.derived, node.state !== 'done' && node.state !== 'failed' && node.state !== 'stopped', node.key)
+    }
   }
 })
 

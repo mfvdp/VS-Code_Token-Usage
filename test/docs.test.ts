@@ -331,51 +331,45 @@ test('the promise about transcript contents matches what the tool table stores',
   assert.match(attribution, /no tool argument and no tool result/)
 })
 
-/**
- * The body of one function or method of a source file: from its signature to the closing brace
- * at the indentation the signature stands at. Enough to see which fields it reads.
- */
-function bodyOf(src: string, signature: string): string {
-  const at = src.indexOf(signature)
-  assert.ok(at >= 0, `the source no longer contains ${signature}`)
-  const lineStart = src.lastIndexOf('\n', at) + 1
-  const indent = (/^[ \t]*/.exec(src.slice(lineStart, at)) as RegExpExecArray)[0]
-  const end = src.indexOf(`\n${indent}}`, at)
-  assert.ok(end > at, `${signature} has no closing brace at its own indentation`)
-  return src.slice(at, end)
+/** One row of the read contract (scripts/check-privacy.mjs): a reader and the fields it may name. */
+interface ReadContractRow {
+  what: string
+  file: string
+  kind: 'fields' | 'regex' | 'tags'
+  fields: string[]
 }
 
-/** The distinct `<variable>.<field>` names a body reads, in order of first appearance. */
-function fieldsRead(body: string, variable: string): string[] {
-  return [...new Set([...body.matchAll(new RegExp(`\\b${variable}\\??\\.([A-Za-z_]+)`, 'g'))].map((m) => m[1]))]
+// The contract is a plain .mjs so `npm run check:privacy` needs no build step; required here
+// rather than imported, as test/privacy.test.ts does, so the TypeScript build needs no .mjs
+// declaration file.
+const { READ_CONTRACT, checkReadContract } = require('../scripts/check-privacy.mjs') as {
+  READ_CONTRACT: ReadContractRow[]
+  checkReadContract: (read?: (file: string) => string) => Array<{
+    what: string; file: string; unlisted: string[]; unread: string[]; error: string | null
+  }>
 }
 
 /**
  * What the agent tables take out of the files they read, as the aggregator's own parsers read
- * it. The lists are the documented contract: a parser that starts to read one more field fails
- * here until the privacy page and the agents page name it too.
+ * it. The read contract of scripts/check-privacy.mjs is the documented list, one row per reader:
+ * a parser that starts to read one more field fails here — and in `node scripts/check-privacy.mjs`
+ * — until the contract lists it, and then until the privacy page and the agents page name it too.
  */
 test('the privacy and agents pages name every field the agent tables read, and the ones they never do', () => {
-  const src = readDoc('src/agg.ts')
-  const read: Array<[string, string[], string[]]> = [
-    ['the identity sidecar', fieldsRead(bodyOf(src, 'function cleanMeta('), 'o'),
-      ['agentType', 'model', 'spawnDepth', 'toolUseId']],
-    ['the workflow journal', fieldsRead(bodyOf(src, 'addWorkflowJournalLine(raw'), 'd'), ['type', 'agentId']],
-    ['an agent launch', fieldsRead(bodyOf(src, 'private noteLaunches('), 'input'),
-      ['subagent_type', 'model', 'run_in_background']],
-    ['the tool result', [...fieldsRead(bodyOf(src, 'private agentResult('), 'r'),
-      ...fieldsRead(bodyOf(src, 'function reportedTotals('), 'r')],
-    ['agentId', 'status', 'totalTokens', 'totalDurationMs', 'totalToolUseCount']],
-    ['the task notification', [...src.matchAll(/const NOTE_\w+_RE = \/<([a-z-]+)>/g)].map((m) => m[1]),
-      ['tool-use-id', 'status']],
-  ]
-  for (const [what, actual, documented] of read) {
-    assert.deepEqual(actual, documented,
-      `src/agg.ts reads other fields of ${what} than the documentation names — update docs/privacy.md, docs/agents.md and this list`)
-    for (const field of documented) {
-      const span = what === 'the task notification' ? `\`<${field}>\`` : `\`${field}\``
-      assert.ok(doc.privacy.includes(span), `docs/privacy.md does not name ${span} of ${what}`)
-      assert.ok(doc.agents.includes(span), `docs/agents.md does not name ${span} of ${what}`)
+  assert.deepEqual(checkReadContract((file) => readDoc(file)), [],
+    'src/agg.ts reads other fields than the read contract lists — update READ_CONTRACT in scripts/check-privacy.mjs, docs/privacy.md and docs/agents.md')
+  // The readers 1.5 documented stay in the contract: a row cannot leave it unnoticed.
+  const readers = READ_CONTRACT.map((row) => row.what)
+  for (const what of ['the identity sidecar', 'the workflow journal', 'an agent launch', 'the tool result',
+    'the reported totals', 'the task notification']) {
+    assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
+  }
+  for (const row of READ_CONTRACT) {
+    assert.ok(row.fields.length > 0, `the read contract's row for ${row.what} lists no field`)
+    for (const field of row.fields) {
+      const span = row.kind === 'tags' ? `\`<${field}>\`` : `\`${field}\``
+      assert.ok(doc.privacy.includes(span), `docs/privacy.md does not name ${span} of ${row.what}`)
+      assert.ok(doc.agents.includes(span), `docs/agents.md does not name ${span} of ${row.what}`)
     }
   }
   // And what stays out, in the words both pages promise it in.
@@ -412,6 +406,9 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     // 1.6 D6: an agent that wrote on after its outcome.
     'Running — inferred: the transcript changed {0}, after an outcome was recorded at {1}.',
     'Unknown — inferred: the transcript went on after an outcome was recorded at {0}, and has been silent since {1}.',
+    // 1.6 D7 (P2a): a stop the parent recorded, in its own word; a run whose every agent was stopped.
+    'Stopped — the parent recorded ‘{0}’ at {1}.',
+    'Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.',
   ]
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const sentence of quoted) {
@@ -421,11 +418,20 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     const pattern = sentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{\d\\\}/g, '[^|]+?')
     assert.match(flat, new RegExp(pattern), `docs/agents.md does not quote: ${sentence}`)
   }
-  const written = [...src.matchAll(/\bt\((['"])((?:Completed|Failed|Running|Unknown|Active|Idle|Done) — .*?)\1/g)]
+  // 1.6 D7: the finder knows the stopped states and the ", retried" / ", replaced" twins P2b adds.
+  const written = [...src.matchAll(
+    /\bt\((['"])((?:Completed|Failed|Running|Unknown|Active|Idle|Done|Stopped)(?:, (?:retried|replaced))? — .*?)\1/g)]
     .map((m) => m[2])
   assert.ok(written.length >= quoted.length, `only ${written.length} state sentences found in src/agentTreeBuild.ts`)
+  // A sentence is covered when the page quotes it or its twin: the same sentence without the
+  // time at its end, written where the time is unknown — "… recorded ‘{0}’." beside "… recorded
+  // ‘{0}’ at {1}." — whichever of the two the page quotes.
+  const timeless = (x: string): string | null => {
+    const at = / at \{\d\}\.$/.exec(x)
+    return at === null ? null : x.slice(0, at.index) + '.'
+  }
   const covered = (s: string): boolean => quoted.includes(s)
-    || quoted.includes(s.replace(/\.$/, ' at {0}.')) || quoted.includes(s.replace(/ at \{0\}\.$/, '.'))
+    || quoted.some((q) => timeless(q) === s) || (timeless(s) !== null && quoted.includes(timeless(s) as string))
   assert.deepEqual(written.filter((s) => !covered(s)), [], 'a state sentence the agents page does not quote')
 })
 

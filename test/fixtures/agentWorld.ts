@@ -11,6 +11,7 @@
  *     Explore · haiku           done, with the parent's report; its last reply unfinished
  *       Plan · sonnet           depth 2, launched from the Explore agent's own transcript: done
  *     Agent · sonnet            launched in the background, no sidecar, silent since 11:38: unknown
+ *     Explore · sonnet          launched in the background, stopped: a task notification says `killed`
  *     Workflow cfe7718d         running
  *       workflow-subagent       done — the workflow journal recorded it, at no time of its own
  *       workflow-subagent       failed — a task notification recorded it
@@ -46,6 +47,8 @@ export const AGENT_WORLD = {
   explore: 'a94f3c2e10b7d5e19',
   plan: 'b1c24e6f8a0d3b5c7',
   silent: 'c3d45f7a9b1e2c4d6',
+  // 1.6 D7: a stop the parent recorded — not a failure.
+  stopped: '2c3d4e5f6a7b8c9d0',
   wfDone: 'd4e56a8b0c2f4e6a8',
   wfFailed: 'e5f67b9c1d3a5f7b9',
   wfRunning: 'f6a78c0d2e4b6a8c0',
@@ -90,6 +93,7 @@ const TU = {
   explore: 'toolu_01XkP4mQ7rT2vW9yB3nC6dF8',
   plan: 'toolu_01Hc5jL8pS1uV4xZ7aD0eG3k',
   silent: 'toolu_01Mw2qR5tY8bE1hK4nP7sU0x',
+  stopped: 'toolu_01Sk8vN2qW5zA8dG1jM4pT7y',
   wfFailed: 'toolu_01Ga6kN9qT2wZ5cF8jM1pS4v',
   pending: 'toolu_01Rb3fJ6mV9yC2gL5oR8uX1a',
   guide: 'toolu_01Ld7hP0sW3zD6iM9qT2xB5e',
@@ -173,6 +177,14 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
   turn(f(W.silent), 's-1', at(11, 26, 5), SONNET, { input: 7, cacheWrite: 8800, output: 460 }, { agentId: W.silent, tools: ['Bash'] })
   sidecar(W.silent, null)
   turn(f(W.silent), 's-2', at(11, 38, 20), SONNET, { input: 2, cacheWrite: 700, cacheRead: 10400, output: 890 }, { agentId: W.silent, final: false })
+  // Another background agent, halted: its parent's task notification says `killed` — a stop,
+  // recorded, and no failure (1.6 D7). Its transcript ends mid-reply, before the notification.
+  read(MAIN, agentToolUseLine({ id: 'm-3s', ts: at(11, 30), toolUseId: TU.stopped, subagentType: 'Explore', model: 'sonnet', background: true }))
+  read(MAIN, agentResultLine({ ts: at(11, 30, 1), toolUseId: TU.stopped, agentId: W.stopped, status: 'async_launched' }))
+  turn(f(W.stopped), 'k-1', at(11, 30, 5), SONNET, { input: 6, cacheWrite: 7900, output: 380 }, { agentId: W.stopped, tools: ['Grep'] })
+  sidecar(W.stopped, { agentType: 'Explore', model: 'sonnet', spawnDepth: 1, toolUseId: TU.stopped })
+  turn(f(W.stopped), 'k-2', at(11, 33, 40), SONNET, { input: 3, cacheWrite: 900, cacheRead: 7900, output: 540 }, { agentId: W.stopped, final: false })
+  read(MAIN, queueOperationLine({ ts: at(11, 34), toolUseId: TU.stopped, status: 'killed' }))
   // The workflow run: a tool call that launches no agent, and three agents in the run's directory.
   turn(MAIN, 'm-4', at(11, 40), OPUS, { input: 20, cacheWrite: 1900, cacheRead: 19700, output: 310 }, { tools: ['Workflow'] })
   turn(f(W.wfDone), 'wd-1', at(11, 40, 10), OPUS, { input: 9, cacheWrite: 11200, output: 700 }, { agentId: W.wfDone, tools: ['Read'] })

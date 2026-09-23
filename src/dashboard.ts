@@ -874,11 +874,13 @@ ul { margin: 6px 0; padding-left: 18px; }
           text-align: right; }
 /* One glyph per state, drawn from the class and coloured with the page's own tokens only:
    green and red for what the parent recorded, the provider's blue for what still runs, the
-   foreground for a session in use, and the dim tone for what the tree can only call quiet. */
+   foreground for a session in use, and the dim tone for what the tree can only call quiet — and
+   for a stop the parent recorded, which is an end but neither a success nor a failure. */
 .ag-st { flex: none; display: inline-block; width: 12px; text-align: center; font-size: 10px; }
 .ag-running::before { content: "●"; color: var(--claude); }
 .ag-done::before { content: "✓"; color: var(--ok); }
 .ag-failed::before { content: "✕"; color: var(--error); }
+.ag-stopped::before { content: "■"; color: var(--dim); }
 .ag-unknown::before { content: "?"; color: var(--dim); }
 .ag-active::before { content: "●"; color: var(--vscode-foreground); }
 .ag-idle::before { content: "○"; color: var(--dim); }
@@ -1194,6 +1196,7 @@ function webviewWords(): Record<string, string> {
     'span from the first to the last line': t('span from the first to the last line'),
     'sparkline: last 7 days': t('sparkline: last 7 days'),
     'stale': t('stale'),
+    'stopped': t('stopped'),
     'streak {0} · longest {1} · active {2}': t('streak {0} · longest {1} · active {2}'),
     'sub': t('sub'),
     'thisMonth': t('thisMonth'),

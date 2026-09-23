@@ -225,6 +225,18 @@ export interface SessionRec {
 
 export type Attribution = 'none' | 'project' | 'session'
 
+/**
+ * A recorder's own word for how a launch or run ended — one of the allow-listed status values
+ * of a tool result or a task notification, never free text. Kept beside the outcome it maps to,
+ * so a sentence can quote it ("the parent recorded ‘killed’").
+ */
+export type LaunchStatus = 'completed' | 'failed' | 'error' | 'timeout' | 'killed' | 'cancelled' | 'stopped'
+/**
+ * What a recorded end means for the tree: `completed`; `failed` for failed, error and timeout;
+ * `stopped` (new in 1.6, D7) for killed, cancelled and stopped — a stop is not a failure.
+ */
+export type RecordedOutcome = 'completed' | 'failed' | 'stopped'
+
 /** Identity of a subagent transcript, from `agent-<id>.meta.json`. Four fields; nothing else is read. */
 export interface AgentMeta {
   /** ≤ 40 chars, alphabet [A-Za-z0-9_.:@/-]. */
@@ -261,8 +273,14 @@ export interface AgentRec {
   input: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
   output: number; reasoning: number; requests: number; outputFinal: number; toolCalls: number
   /** From the launch record or the workflow journal. */
-  outcome: 'completed' | 'failed' | null
+  outcome: RecordedOutcome | null
   outcomeTs: number | null
+  /**
+   * The parent's own word for the end (§0a.0), for the sentence; null when the outcome came
+   * without one — from the workflow journal, or from a snapshot written before 1.6. A `stopped`
+   * outcome always has one.
+   */
+  outcomeStatus: LaunchStatus | null
 }
 
 /** A launch the parent transcript recorded; the bridge from tool_use id to agent. */
@@ -279,8 +297,10 @@ export interface AgentLaunch {
   /** `input.model`, sanitised. */
   modelHint: string | null
   background: boolean
-  outcome: 'launched' | 'completed' | 'failed' | null
+  outcome: 'launched' | RecordedOutcome | null
   outcomeTs: number | null
+  /** The parent's word for the end (§0a.0); null while launched, and for a snapshot before 1.6. */
+  outcomeStatus: LaunchStatus | null
   /** The parent's own report for a sync agent — shown as "parent's report", never summed. */
   totals: { tokens: number; durationMs: number; toolUses: number } | null
 }

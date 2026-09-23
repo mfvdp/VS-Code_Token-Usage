@@ -505,6 +505,7 @@ function agentStateWord(state: NodeState): string {
     case 'running': return t('Running')
     case 'done': return t('Done')
     case 'failed': return t('Failed')
+    case 'stopped': return t('Stopped')
     case 'unknown': return t('Unknown')
     case 'active': return t('Active')
     case 'idle': return t('Idle')

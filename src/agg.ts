@@ -9,7 +9,8 @@ import { AGENT_RETENTION_DAYS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  AgentLaunch, AgentMeta, AgentRec, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, PendingMessage, Resolution, SessionRec,
+  AgentLaunch, AgentMeta, AgentRec, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, LaunchStatus, PendingMessage,
+  RecordedOutcome, Resolution, SessionRec,
   Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
   TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
@@ -347,22 +348,51 @@ function worthParsing(raw: string): boolean {
 }
 
 /**
- * What a reported status means for a launch. A status this build does not know is no result
- * and leaves the launch as it was (undefined).
+ * What a recorded status word means (§0a.0 of the 1.6 spec): `completed`; a failure for
+ * `failed`, `error` and `timeout`; a stop — not a failure — for `killed`, `cancelled` and
+ * `stopped`. The same map for a tool result and a task notification. Null for any other value,
+ * which is no word this build knows.
  */
-function launchOutcome(status: unknown): 'launched' | 'completed' | 'failed' | undefined {
+export function outcomeOfStatus(status: unknown): RecordedOutcome | null {
   switch (status) {
-    case 'async_launched': return 'launched'
     case 'completed': return 'completed'
     case 'failed':
     case 'error':
-    case 'killed':
-    case 'cancelled':
     case 'timeout':
       return 'failed'
+    case 'killed':
+    case 'cancelled':
+    case 'stopped':
+      return 'stopped'
     default:
-      return undefined
+      return null
   }
+}
+
+/** A launch's recorded end and the parent's own word for it, or "launched" (no word). */
+interface LaunchNews {
+  outcome: 'launched' | RecordedOutcome
+  status: LaunchStatus | null
+}
+
+/**
+ * What a reported status means for a launch: `async_launched` is a background start, the seven
+ * words of `outcomeOfStatus` an end, each kept with its word. A status this build does not know
+ * is no result and leaves the launch as it was (undefined).
+ */
+function launchOutcome(status: unknown): LaunchNews | undefined {
+  if (status === 'async_launched') return { outcome: 'launched', status: null }
+  const outcome = outcomeOfStatus(status)
+  return outcome === null ? undefined : { outcome, status: status as LaunchStatus }
+}
+
+/**
+ * A recorded word as a snapshot carries it, kept only while it is one of the seven and says the
+ * outcome it is stored beside — anything else is no word (null).
+ */
+function restoreStatus(v: unknown, outcome: unknown): LaunchStatus | null {
+  const mapped = outcomeOfStatus(v)
+  return mapped !== null && mapped === outcome ? v as LaunchStatus : null
 }
 
 /** The parent's own report of a finished sync agent — only when all three numbers are there. */
@@ -431,11 +461,17 @@ function touchRecord(rec: AgentRec | MainRec, at: number, model: unknown): void 
   if (id && rec.models.length < AGENT_MODELS_MAX && !rec.models.includes(id)) rec.models.push(id)
 }
 
-/** A launch's recorded result onto an agent record that has none yet. */
+/** Whether a launch's outcome is an end — completed, failed or stopped — and not "launched". */
+function isEnd(outcome: AgentLaunch['outcome']): outcome is RecordedOutcome {
+  return outcome === 'completed' || outcome === 'failed' || outcome === 'stopped'
+}
+
+/** A launch's recorded result onto an agent record that has none yet, with the parent's word. */
 function adoptOutcome(rec: AgentRec, launch: AgentLaunch): boolean {
-  if (rec.outcome !== null || (launch.outcome !== 'completed' && launch.outcome !== 'failed')) return false
+  if (rec.outcome !== null || !isEnd(launch.outcome)) return false
   rec.outcome = launch.outcome
   rec.outcomeTs = launch.outcomeTs
+  rec.outcomeStatus = launch.outcomeStatus
   return true
 }
 
@@ -461,6 +497,12 @@ function restoreAgent(v: unknown): AgentRec | null {
   const lastTs = finiteOrNull(r.lastTs)
   if (r.source !== 'claude' || agentId === null || firstTs === null || lastTs === null) return null
   if (typeof r.sessionFile !== 'string' || !r.sessionFile) return null
+  // 1.6 (D7): a stop is recorded with the parent's word — the sentence quotes it — so a stop
+  // without one is no outcome a snapshot can be trusted with; a completion or a failure written
+  // before 1.6 has no word and keeps its outcome.
+  const known = r.outcome === 'completed' || r.outcome === 'failed' || r.outcome === 'stopped' ? r.outcome : null
+  const outcomeStatus = restoreStatus(r.outcomeStatus, known)
+  const outcome = known === 'stopped' && outcomeStatus === null ? null : known
   return {
     source: 'claude',
     agentId,
@@ -476,8 +518,10 @@ function restoreAgent(v: unknown): AgentRec | null {
     input: num(r.input), cacheWrite: num(r.cacheWrite), cacheWrite1h: num(r.cacheWrite1h),
     cacheRead: num(r.cacheRead), output: num(r.output), reasoning: num(r.reasoning),
     requests: num(r.requests), outputFinal: num(r.outputFinal), toolCalls: num(r.toolCalls),
-    outcome: r.outcome === 'completed' || r.outcome === 'failed' ? r.outcome : null,
-    outcomeTs: finiteOrNull(r.outcomeTs),
+    outcome,
+    // A stop dropped for want of its word takes its time along.
+    outcomeTs: known !== outcome ? null : finiteOrNull(r.outcomeTs),
+    outcomeStatus,
   }
 }
 
@@ -487,7 +531,11 @@ function restoreLaunch(v: unknown): AgentLaunch | null {
   const toolUseId = cleanAgentId(r.toolUseId)
   const ts = finiteOrNull(r.ts)
   if (toolUseId === null || ts === null || typeof r.file !== 'string' || !r.file) return null
-  const outcome = r.outcome === 'launched' || r.outcome === 'completed' || r.outcome === 'failed' ? r.outcome : null
+  const known = r.outcome === 'launched' || r.outcome === 'completed' || r.outcome === 'failed' || r.outcome === 'stopped'
+    ? r.outcome : null
+  // As for an agent record: a stop keeps its outcome only with the parent's word beside it.
+  const outcomeStatus = restoreStatus(r.outcomeStatus, known)
+  const outcome = known === 'stopped' && outcomeStatus === null ? null : known
   const totals = r.totals && typeof r.totals === 'object' ? r.totals as Record<string, unknown> : null
   return {
     toolUseId,
@@ -498,7 +546,8 @@ function restoreLaunch(v: unknown): AgentLaunch | null {
     modelHint: cleanAgentName(r.modelHint),
     background: r.background === true,
     outcome,
-    outcomeTs: finiteOrNull(r.outcomeTs),
+    outcomeTs: known !== outcome ? null : finiteOrNull(r.outcomeTs),
+    outcomeStatus,
     totals: totals
       ? reportedTotals({ totalTokens: totals.tokens, totalDurationMs: totals.durationMs, totalToolUseCount: totals.toolUses })
       : null,
@@ -1090,6 +1139,7 @@ export class Aggregator {
       output: 0, reasoning: 0, requests: 0, outputFinal: 0, toolCalls: 0,
       outcome: kept?.outcome ?? null,
       outcomeTs: kept?.outcomeTs ?? null,
+      outcomeStatus: kept?.outcomeStatus ?? null,
     }
     this.agentMap.set(file, rec)
     this.agentFileById.set(rec.agentId, file)
@@ -1114,6 +1164,8 @@ export class Aggregator {
       this.journalResultMap.delete(rec.agentId)
       rec.outcome = 'completed'
       rec.outcomeTs = journal > 0 ? journal : null
+      // The journal writes no status word: a word the parent wrote said another outcome.
+      rec.outcomeStatus = null
     }
   }
 
@@ -1178,6 +1230,7 @@ export class Aggregator {
         background: input?.run_in_background === true,
         outcome: null,
         outcomeTs: null,
+        outcomeStatus: null,
         totals: null,
       }
       this.launchMap.set(toolUseId, launch)
@@ -1213,7 +1266,7 @@ export class Aggregator {
       if (at === null) return false
       launch = {
         toolUseId, file: ctx.file, ts: at, agentId: null, typeHint: null, modelHint: null,
-        background: status === 'async_launched', outcome: null, outcomeTs: null, totals: null,
+        background: status === 'async_launched', outcome: null, outcomeTs: null, outcomeStatus: null, totals: null,
       }
       this.launchMap.set(toolUseId, launch)
       changed = true
@@ -1226,8 +1279,8 @@ export class Aggregator {
       changed = true
     }
     this.launchByAgent.set(agentId, toolUseId)
-    const outcome = launchOutcome(status)
-    if (outcome) changed = this.applyOutcome(launch, outcome, at, outcome === 'completed' ? reportedTotals(r) : null) || changed
+    const news = launchOutcome(status)
+    if (news) changed = this.applyOutcome(launch, news, at, news.outcome === 'completed' ? reportedTotals(r) : null) || changed
     return this.propagateOutcome(launch) || changed
   }
 
@@ -1245,21 +1298,21 @@ export class Aggregator {
     const launch = id ? this.launchMap.get(id[1]) : undefined
     if (!launch) return false
     const status = NOTE_STATUS_RE.exec(text)
-    const outcome = status ? launchOutcome(status[1]) : undefined
-    if (!outcome) return false
-    const changed = this.applyOutcome(launch, outcome, lineTime(d), null)
+    const news = status ? launchOutcome(status[1]) : undefined
+    if (!news) return false
+    const changed = this.applyOutcome(launch, news, lineTime(d), null)
     return this.propagateOutcome(launch) || changed
   }
 
   /**
    * An outcome onto a launch. "Launched" never takes back a result — a re-read line or a late
-   * copy must not revive a finished agent — and a result already recorded keeps the time it
-   * was first recorded at.
+   * copy must not revive a finished agent — and a result already recorded keeps the time and
+   * the word it was first recorded with: a notification that repeats a stop in another word
+   * ("killed" after "stopped") is the same stop. A word arriving for an outcome that had none
+   * (a snapshot written before 1.6) is taken.
    */
-  private applyOutcome(
-    launch: AgentLaunch, outcome: 'launched' | 'completed' | 'failed', at: number | null,
-    totals: AgentLaunch['totals'],
-  ): boolean {
+  private applyOutcome(launch: AgentLaunch, news: LaunchNews, at: number | null, totals: AgentLaunch['totals']): boolean {
+    const outcome = news.outcome
     if (outcome === 'launched') {
       if (launch.outcome !== null) return false
       launch.outcome = 'launched'
@@ -1269,10 +1322,17 @@ export class Aggregator {
     if (launch.outcome !== outcome) {
       launch.outcome = outcome
       launch.outcomeTs = at
+      launch.outcomeStatus = news.status
       changed = true
-    } else if (launch.outcomeTs === null && at !== null) {
-      launch.outcomeTs = at
-      changed = true
+    } else {
+      if (launch.outcomeTs === null && at !== null) {
+        launch.outcomeTs = at
+        changed = true
+      }
+      if (launch.outcomeStatus === null && news.status !== null) {
+        launch.outcomeStatus = news.status
+        changed = true
+      }
     }
     const t = launch.totals
     if (totals && (!t || t.tokens !== totals.tokens || t.durationMs !== totals.durationMs || t.toolUses !== totals.toolUses)) {
@@ -1289,10 +1349,11 @@ export class Aggregator {
     const rec = file !== undefined ? this.agentMap.get(file) : undefined
     if (!rec) return false
     let changed = false
-    if ((launch.outcome === 'completed' || launch.outcome === 'failed')
-      && (rec.outcome !== launch.outcome || rec.outcomeTs !== launch.outcomeTs)) {
+    if (isEnd(launch.outcome)
+      && (rec.outcome !== launch.outcome || rec.outcomeTs !== launch.outcomeTs || rec.outcomeStatus !== launch.outcomeStatus)) {
       rec.outcome = launch.outcome
       rec.outcomeTs = launch.outcomeTs
+      rec.outcomeStatus = launch.outcomeStatus
       changed = true
     }
     if (rec.spawnerFile === null) {
@@ -1332,6 +1393,8 @@ export class Aggregator {
     }
     rec.outcome = 'completed'
     rec.outcomeTs = at
+    // The journal writes no status word; a word the parent wrote said another outcome.
+    rec.outcomeStatus = null
     return true
   }
 

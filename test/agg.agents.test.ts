@@ -146,6 +146,7 @@ test('an agent transcript gets its record on the first counted line, with the de
     output: 43, reasoning: 3, requests: 2, outputFinal: 1, toolCalls: 0,
     outcome: null,
     outcomeTs: null,
+    outcomeStatus: null,
   })
   // The buckets hold the same figures: the record follows them, it does not count on its own.
   const sub = agg.all().filter((b) => b.isSub)
@@ -263,11 +264,11 @@ test('an Agent or Task tool_use is a launch, made once however often the stream 
   assert.deepEqual(agg.launches(), [
     {
       toolUseId: 'toolu_01A', file: MAIN, ts: T0, agentId: null, typeHint: 'Explore', modelHint: 'haiku',
-      background: true, outcome: null, outcomeTs: null, totals: null,
+      background: true, outcome: null, outcomeTs: null, outcomeStatus: null, totals: null,
     },
     {
       toolUseId: 'toolu_01B', file: MAIN, ts: T0 + 1000, agentId: null, typeHint: null, modelHint: null,
-      background: false, outcome: null, outcomeTs: null, totals: null,
+      background: false, outcome: null, outcomeTs: null, outcomeStatus: null, totals: null,
     },
   ])
   // The launching message is one request with one tool call, however often it was read.
@@ -291,25 +292,30 @@ test('a launch takes its hints only when they fit the alphabet and the cap', () 
 })
 
 test('the parent\'s result names the agent and maps its status', () => {
-  const cases: Array<[string, AgentLaunch['outcome']]> = [
-    ['async_launched', 'launched'],
-    ['completed', 'completed'],
-    ['failed', 'failed'],
-    ['error', 'failed'],
-    ['killed', 'failed'],
-    ['cancelled', 'failed'],
-    ['timeout', 'failed'],
-    ['paused', null],
-    ['', null],
+  // 1.6 D7: a stop is not a failure. `killed`, `cancelled` and `stopped` are a stop of their own;
+  // only `failed`, `error` and `timeout` fail. The parent's word is kept beside the outcome.
+  const cases: Array<[string, AgentLaunch['outcome'], AgentLaunch['outcomeStatus']]> = [
+    ['async_launched', 'launched', null],
+    ['completed', 'completed', 'completed'],
+    ['failed', 'failed', 'failed'],
+    ['error', 'failed', 'error'],
+    ['timeout', 'failed', 'timeout'],
+    ['killed', 'stopped', 'killed'],
+    ['cancelled', 'stopped', 'cancelled'],
+    ['stopped', 'stopped', 'stopped'],
+    ['paused', null, null],
+    ['Killed', null, null],
+    ['', null, null],
   ]
-  for (const [status, want] of cases) {
+  for (const [status, want, word] of cases) {
     const agg = new Aggregator()
     agg.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0, toolUseId: 'toolu_s' }), MAIN_CTX)
     agg.addClaudeLine(agentResultLine({ ts: T0 + 5000, toolUseId: 'toolu_s', agentId: 'abc123', status, totals: TOTALS }), MAIN_CTX)
     const launch = launchOf(agg, 'toolu_s')
     assert.equal(launch.agentId, 'abc123', status)
     assert.equal(launch.outcome, want, status)
-    assert.equal(launch.outcomeTs, want === 'completed' || want === 'failed' ? T0 + 5000 : null, status)
+    assert.equal(launch.outcomeStatus, word, status)
+    assert.equal(launch.outcomeTs, want === 'completed' || want === 'failed' || want === 'stopped' ? T0 + 5000 : null, status)
     // The parent's report is kept for a completed sync agent only.
     assert.deepEqual(launch.totals, want === 'completed' ? TOTALS : null, status)
   }
@@ -326,7 +332,7 @@ test('a result without its launch line stands in for it; the usage it reports is
   assert.equal(agg.addClaudeLine(agentResultLine({ ts: T0 + 10, toolUseId: 'toolu_y', agentId: 'def456', status: 'async_launched' }), MAIN_CTX), true)
   assert.deepEqual(launchOf(agg, 'toolu_x'), {
     toolUseId: 'toolu_x', file: MAIN, ts: T0, agentId: 'abc123', typeHint: null, modelHint: null,
-    background: false, outcome: 'completed', outcomeTs: T0, totals: TOTALS,
+    background: false, outcome: 'completed', outcomeTs: T0, outcomeStatus: 'completed', totals: TOTALS,
   })
   assert.equal(launchOf(agg, 'toolu_y').background, true)
   // The agent's own usage summary rides on the result; it was counted in the agent's transcript.
@@ -390,6 +396,94 @@ test('a task notification ends a background launch; an unknown id is someone els
   failing.addClaudeLine(queueOperationLine({ ts: T0 + 700, toolUseId: 'toolu_f', status: 'failed' }), MAIN_CTX)
   assert.equal(launchOf(failing, 'toolu_f').outcome, 'failed')
   assert.equal(launchOf(failing, 'toolu_f').outcomeTs, T0 + 700)
+})
+
+test('a stop the parent records is a stop, not a failure, and keeps the parent\'s word', () => {
+  // 1.6 D7 (§0a.0): the notification's `killed`, `cancelled` and `stopped` are a stop; its word is
+  // kept for the sentence, and reaches the agent's record with the outcome.
+  for (const word of ['killed', 'cancelled', 'stopped'] as const) {
+    const agg = new Aggregator()
+    agg.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0, toolUseId: 'toolu_bg', background: true }), MAIN_CTX)
+    agg.addClaudeLine(agentResultLine({ ts: T0 + 100, toolUseId: 'toolu_bg', agentId: 'abc123', status: 'async_launched' }), MAIN_CTX)
+    agg.addClaudeLine(claudeLine({ id: 's1', ts: T0 + 1000, agentId: 'abc123', usage: { input: 1 } }), AGENT_CTX)
+    assert.equal(launchOf(agg, 'toolu_bg').outcomeStatus, null, 'launched carries no word')
+    assert.equal(agg.addClaudeLine(queueOperationLine({ ts: T0 + 5000, toolUseId: 'toolu_bg', status: word }), MAIN_CTX), true)
+    const launch = launchOf(agg, 'toolu_bg')
+    assert.deepEqual([launch.outcome, launch.outcomeStatus, launch.outcomeTs], ['stopped', word, T0 + 5000], word)
+    const rec = agentOf(agg, AGENT)
+    assert.deepEqual([rec.outcome, rec.outcomeStatus, rec.outcomeTs], ['stopped', word, T0 + 5000], word)
+    // The same stop reported again in another word is the same stop: the first word and time stay.
+    const again = word === 'killed' ? 'stopped' : 'killed'
+    assert.equal(agg.addClaudeLine(queueOperationLine({ ts: T0 + 6000, toolUseId: 'toolu_bg', status: again }), MAIN_CTX), false)
+    assert.deepEqual([launchOf(agg, 'toolu_bg').outcomeStatus, agentOf(agg, AGENT).outcomeStatus], [word, word])
+    // A later end of another kind replaces it, word and time together.
+    assert.equal(agg.addClaudeLine(queueOperationLine({ ts: T0 + 7000, toolUseId: 'toolu_bg', status: 'completed' }), MAIN_CTX), true)
+    assert.deepEqual([agentOf(agg, AGENT).outcome, agentOf(agg, AGENT).outcomeStatus, agentOf(agg, AGENT).outcomeTs],
+      ['completed', 'completed', T0 + 7000])
+  }
+  // A failure keeps its own word too: `failed`, `error` and `timeout` fail, and say which.
+  for (const word of ['failed', 'error', 'timeout'] as const) {
+    const agg = new Aggregator()
+    agg.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0, toolUseId: 'toolu_f', background: true }), MAIN_CTX)
+    agg.addClaudeLine(queueOperationLine({ ts: T0 + 700, toolUseId: 'toolu_f', status: word }), MAIN_CTX)
+    assert.deepEqual([launchOf(agg, 'toolu_f').outcome, launchOf(agg, 'toolu_f').outcomeStatus], ['failed', word], word)
+  }
+  // The cold scan's order: the parent's transcript first, the agent's after — the record adopts
+  // the stop with its word when it is made.
+  const cold = new Aggregator()
+  cold.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0, toolUseId: 'toolu_bg', background: true }), MAIN_CTX)
+  cold.addClaudeLine(agentResultLine({ ts: T0 + 100, toolUseId: 'toolu_bg', agentId: 'abc123', status: 'async_launched' }), MAIN_CTX)
+  cold.addClaudeLine(queueOperationLine({ ts: T0 + 5000, toolUseId: 'toolu_bg', status: 'killed' }), MAIN_CTX)
+  cold.addClaudeLine(claudeLine({ id: 's1', ts: T0 + 1000, agentId: 'abc123', usage: { input: 1 } }), AGENT_CTX)
+  const rec = agentOf(cold, AGENT)
+  assert.deepEqual([rec.outcome, rec.outcomeStatus, rec.outcomeTs], ['stopped', 'killed', T0 + 5000])
+  // A word the map does not know is no end at all.
+  const odd = new Aggregator()
+  odd.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0, toolUseId: 'toolu_o', background: true }), MAIN_CTX)
+  assert.equal(odd.addClaudeLine(queueOperationLine({ ts: T0 + 700, toolUseId: 'toolu_o', status: 'aborted' }), MAIN_CTX), false)
+  assert.deepEqual([launchOf(odd, 'toolu_o').outcome, launchOf(odd, 'toolu_o').outcomeStatus], [null, null])
+})
+
+test('the parent\'s word survives a snapshot round trip, and a stop without its word is no outcome', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0, toolUseId: 'toolu_bg', background: true }), MAIN_CTX)
+  agg.addClaudeLine(agentResultLine({ ts: T0 + 100, toolUseId: 'toolu_bg', agentId: 'abc123', status: 'async_launched' }), MAIN_CTX)
+  agg.addClaudeLine(claudeLine({ id: 's1', ts: T0 + 1000, agentId: 'abc123', usage: { input: 1 } }), AGENT_CTX)
+  agg.addClaudeLine(queueOperationLine({ ts: T0 + 5000, toolUseId: 'toolu_bg', status: 'cancelled' }), MAIN_CTX)
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  const back = Aggregator.fromSnapshot(snap)
+  assert.deepEqual(JSON.parse(JSON.stringify(back.toSnapshot())), snap)
+  assert.deepEqual([agentOf(back, AGENT).outcome, agentOf(back, AGENT).outcomeStatus], ['stopped', 'cancelled'])
+  assert.deepEqual([launchOf(back, 'toolu_bg').outcome, launchOf(back, 'toolu_bg').outcomeStatus], ['stopped', 'cancelled'])
+
+  const edit = (agent: Record<string, unknown>, launch: Record<string, unknown>): Aggregator => {
+    const s = JSON.parse(JSON.stringify(snap)) as Snapshot
+    const raw = s as unknown as Record<string, Record<string, Record<string, unknown>>>
+    for (const [k, v] of Object.entries(agent)) {
+      if (v === undefined) delete raw.agents[AGENT][k]
+      else raw.agents[AGENT][k] = v
+    }
+    for (const [k, v] of Object.entries(launch)) {
+      if (v === undefined) delete raw.launches.toolu_bg[k]
+      else raw.launches.toolu_bg[k] = v
+    }
+    return Aggregator.fromSnapshot(s)
+  }
+  // Written before 1.6: a completion or a failure without a word keeps its outcome.
+  const before = edit({ outcome: 'failed', outcomeStatus: undefined }, { outcome: 'completed', outcomeStatus: undefined })
+  assert.deepEqual([agentOf(before, AGENT).outcome, agentOf(before, AGENT).outcomeStatus, agentOf(before, AGENT).outcomeTs],
+    ['failed', null, T0 + 5000])
+  assert.deepEqual([launchOf(before, 'toolu_bg').outcome, launchOf(before, 'toolu_bg').outcomeStatus], ['completed', null])
+  // A stop needs its word — the sentence quotes it: without one it is no outcome, time and all.
+  const wordless = edit({ outcomeStatus: undefined }, { outcomeStatus: null })
+  assert.deepEqual([agentOf(wordless, AGENT).outcome, agentOf(wordless, AGENT).outcomeTs], [null, null])
+  assert.deepEqual([launchOf(wordless, 'toolu_bg').outcome, launchOf(wordless, 'toolu_bg').outcomeTs], [null, null])
+  // A word that is none of the seven, or says another outcome, is dropped; the outcome it says
+  // nothing about stays where it can stand without one.
+  const odd = edit({ outcome: 'failed', outcomeStatus: 'killed' }, { outcome: 'completed', outcomeStatus: 'EDITED <b>' })
+  assert.deepEqual([agentOf(odd, AGENT).outcome, agentOf(odd, AGENT).outcomeStatus], ['failed', null])
+  assert.deepEqual([launchOf(odd, 'toolu_bg').outcome, launchOf(odd, 'toolu_bg').outcomeStatus], ['completed', null])
+  assert.equal(JSON.stringify(odd.toSnapshot()).includes('EDITED'), false)
 })
 
 // ---------------------------------------------------------------------------

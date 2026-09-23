@@ -3193,9 +3193,16 @@ test('the agent tree draws every state with a glyph of its own and marks each in
   assert.ok(odd.indexOf('<span class="ag-st ag-unknown"') >= 0, odd)
   assert.equal(/exploded|rocket/.test(odd), false, odd)
   // Each glyph is the stylesheet's, drawn from the class in a colour of the page.
-  for (const s of ['running', 'done', 'failed', 'unknown', 'active', 'idle']) {
+  for (const s of ['running', 'done', 'failed', 'stopped', 'unknown', 'active', 'idle']) {
     assert.match(STYLE, new RegExp('\\.ag-' + s + '::before \\{ content: "[^"]+"; color: var\\(--[a-zA-Z-]+\\); \\}'), s)
   }
+  // 1.6 D7: a stop the parent recorded is a state of its own — ■ in the dim tone, recorded, no
+  // tilde — and never drawn as a failure.
+  assert.match(STYLE, /\.ag-stopped::before \{ content: "■"; color: var\(--dim\); \}/)
+  const stopped = agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a3, 'stopped', { derived: false })] }) })
+  assert.ok(stopped.indexOf('<span class="ag-st ag-stopped" role="img" aria-label="stopped · recorded" title="stopped · recorded">') >= 0,
+    stopped)
+  assert.equal(/ag-failed|~stopped/.test(stopped), false, stopped)
 })
 
 test('a row carries the usage and duration it was given and, only while it runs, a live clock', () => {
@@ -3825,7 +3832,7 @@ test('the running glyph pulses only for a reader who allows motion, and the tree
 
 test('the agent tree speaks German on a German page', () => {
   const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
-  const words = ['Agents', 'running', 'done', 'failed', 'unknown', 'active session', 'idle session',
+  const words = ['Agents', 'running', 'done', 'failed', 'stopped', 'unknown', 'active session', 'idle session',
     '{0} · derived', '{0} · recorded', 'running for {0}', '{0} ago', 'State', 'Last activity', 'Details',
     'Collapse {0}', 'Expand {0}', 'Tree cut at {0} nodes.', '{0} older session(s) not shown.',
     'No Claude Code session in the last 7 days.', 'Output figures in the details marked ⚠ are lower bounds.',
@@ -3865,6 +3872,9 @@ test('the agent tree speaks German on a German page', () => {
     '<span>wartet auf einen untergeordneten Agenten</span>', '<p class="meta">und 3 weitere</p>',
   ]) assert.ok(h.indexOf(phrase) >= 0, phrase + ' missing from ' + h)
   assert.ok(section({ ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('aria-label="Workflow cfe7718d ausklappen"') >= 0)
+  // 1.6 D7: a stop, recorded — „gestoppt · aufgezeichnet".
+  assert.ok(section({ agents: agentTree({ roots: [treeNode(AK.a3, 'stopped', { derived: false })] }) })
+    .indexOf('title="gestoppt · aufgezeichnet"') >= 0)
   // The tree's default: the closed session counts its agents in German.
   const closed = section({})
   assert.ok(closed.indexOf('<span class="meta">repo · <span class="nobr">4 Agent(en)</span></span>') >= 0, closed)
@@ -3890,7 +3900,8 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     return h.slice(at, h.indexOf('</button>', at))
   }
   const words: Record<string, string> = {
-    running: 'running', done: 'done', failed: 'failed', unknown: 'unknown', active: 'active session', idle: 'idle session',
+    running: 'running', done: 'done', failed: 'failed', stopped: 'stopped', unknown: 'unknown', active: 'active session',
+    idle: 'idle session',
   }
   for (const n of nodes) {
     const row = rowOf(n.key)

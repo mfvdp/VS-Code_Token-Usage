@@ -67,7 +67,7 @@ function rec(id: string, over: Partial<AgentRec> = {}): AgentRec {
     metaTries: 1, spawnerFile: sessionFile(session),
     firstTs: NOW - 30 * MIN, lastTs: NOW - 1 * MIN, models: ['claude-opus-5'],
     input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 50,
-    requests: 5, outputFinal: 5, toolCalls: 3, outcome: null, outcomeTs: null,
+    requests: 5, outputFinal: 5, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null,
     ...over,
   }
 }
@@ -84,7 +84,8 @@ function wfRec(id: string, over: Partial<AgentRec> = {}): AgentRec {
 function launch(id: string, over: Partial<AgentLaunch> = {}): AgentLaunch {
   return {
     toolUseId: `toolu_${id}`, file: sessionFile(), ts: NOW - 31 * MIN, agentId: id,
-    typeHint: 'Explore', modelHint: 'opus', background: false, outcome: null, outcomeTs: null, totals: null,
+    typeHint: 'Explore', modelHint: 'opus', background: false, outcome: null, outcomeTs: null, outcomeStatus: null,
+    totals: null,
     ...over,
   }
 }
@@ -358,6 +359,102 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
   assert.equal(u.w.startTs, NOW - 40 * MIN)
   assert.equal(u.w.lastTs, NOW - 1 * MIN)
   assert.equal(u.w.duration, '39 min 00 s')
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 D7 · a stop is not a failure
+// ---------------------------------------------------------------------------
+
+test('a stop the parent recorded is stopped — recorded, in the parent\'s own word — and never failed', () => {
+  // killed, cancelled and stopped are a stop; failed, error and timeout a failure, as before.
+  const stop = (id: string, word: AgentRec['outcomeStatus'], outcomeTs: number | null = NOW - 5 * MIN): Partial<AgentTreeInput> => ({
+    agents: [rec(id, { outcome: 'stopped', outcomeStatus: word, outcomeTs, lastTs: NOW - 5 * MIN })],
+    launches: [launch(id, { outcome: 'stopped', outcomeStatus: word, outcomeTs })],
+  })
+  for (const word of ['killed', 'cancelled', 'stopped'] as const) {
+    const over = stop('aaaa0001', word)
+    const n = node(build(over), agentKey('aaaa0001'))
+    assert.deepEqual([n.state, n.derived], ['stopped', false], word)
+    assert.equal(stateText(over, n.key), `Stopped — the parent recorded ‘${word}’ at 11:55.`)
+    const d = agentDetails(input(over), NOW, n.key)
+    assert.deepEqual([d?.state, d?.derived], ['stopped', false], word)
+  }
+  // Without a time the sentence says none, rather than inventing one.
+  assert.equal(stateText(stop('aaaa0002', 'killed', null), agentKey('aaaa0002')), 'Stopped — the parent recorded ‘killed’.')
+  // The launch alone carries the stop when the record has none yet (a cold scan's order).
+  const fromLaunch: Partial<AgentTreeInput> = {
+    agents: [rec('aaaa0003', { lastTs: NOW - 40 * MIN, firstTs: NOW - 50 * MIN })],
+    launches: [launch('aaaa0003', { outcome: 'stopped', outcomeStatus: 'cancelled', outcomeTs: NOW - 3 * MIN })],
+  }
+  assert.equal(node(build(fromLaunch), agentKey('aaaa0003')).state, 'stopped')
+  assert.equal(stateText(fromLaunch, agentKey('aaaa0003')), 'Stopped — the parent recorded ‘cancelled’ at 11:57.')
+  // failed, error and timeout keep the failure's sentence of 1.5, whichever word it was.
+  for (const word of ['failed', 'error', 'timeout'] as const) {
+    const over: Partial<AgentTreeInput> = {
+      agents: [rec('aaaa0004', { outcome: 'failed', outcomeStatus: word, outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })],
+      launches: [launch('aaaa0004', { outcome: 'failed', outcomeStatus: word, outcomeTs: NOW - 5 * MIN })],
+    }
+    assert.equal(node(build(over), agentKey('aaaa0004')).state, 'failed', word)
+    assert.equal(stateText(over, agentKey('aaaa0004')), 'Failed — the parent recorded the failure at 11:55.', word)
+  }
+  // A stop without its word — no record this build writes — is no recorded outcome: the state is
+  // inferred from the transcript, as for an agent nothing was recorded for.
+  const wordless: Partial<AgentTreeInput> = {
+    agents: [rec('aaaa0005', { outcome: 'stopped', outcomeStatus: null, outcomeTs: NOW - 5 * MIN, lastTs: NOW - 30 * MIN })],
+  }
+  assert.deepEqual([node(build(wordless), agentKey('aaaa0005')).state, node(build(wordless), agentKey('aaaa0005')).derived],
+    ['unknown', true])
+  // Nor is a word that says another outcome.
+  const crossed: Partial<AgentTreeInput> = {
+    agents: [rec('aaaa0006', { outcome: 'stopped', outcomeStatus: 'failed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 30 * MIN })],
+  }
+  assert.equal(node(build(crossed), agentKey('aaaa0006')).state, 'unknown')
+  // A launch whose transcript never came, stopped by its parent.
+  const pending: Partial<AgentTreeInput> = {
+    launches: [launch('pppp0001', { agentId: null, ts: NOW - 40 * MIN, outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 20 * MIN })],
+  }
+  const p = node(build(pending), 'l:toolu_pppp0001')
+  assert.deepEqual([p.kind, p.state, p.derived], ['pending', 'stopped', false])
+  assert.equal(stateText(pending, p.key), 'Stopped — the parent recorded ‘killed’ at 11:40.')
+  // In German, with the word verbatim.
+  assert.equal(german(() => stateText(stop('aaaa0001', 'killed'), agentKey('aaaa0001'))),
+    'Gestoppt — der Elternprozess hat ‚killed‘ um 11:55 aufgezeichnet.')
+  assert.equal(german(() => stateText(stop('aaaa0002', 'cancelled', null), agentKey('aaaa0002'))),
+    'Gestoppt — der Elternprozess hat ‚cancelled‘ aufgezeichnet.')
+})
+
+test('a run whose agents all ended is done while one completed, and stopped when every one was stopped', () => {
+  const run = (agents: AgentRec[]): { w: TreeNode; text: string | undefined } =>
+    ({ w: node(build({ agents }), wfKey), text: stateText({ agents }, wfKey) })
+  const done = (id: string): AgentRec => wfRec(id, { outcome: 'completed', outcomeTs: NOW - 5 * MIN })
+  const stopped = (id: string): AgentRec =>
+    wfRec(id, { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
+  const failed = (id: string): AgentRec => wfRec(id, { outcome: 'failed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
+
+  const mixed = run([done('eeee0001'), stopped('eeee0002')])
+  assert.deepEqual([mixed.w.state, mixed.w.derived], ['done', false])
+  assert.equal(mixed.text, 'Done — every agent of this run has a recorded result.')
+  const all = run([stopped('eeee0001'), stopped('eeee0002')])
+  assert.deepEqual([all.w.state, all.w.derived], ['stopped', false])
+  assert.equal(all.text,
+    'Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.')
+  // A stop is no failure; a failure beside it still fails the run (P2b's tally replaces this rule).
+  assert.equal(run([stopped('eeee0001'), failed('eeee0002')]).w.state, 'failed')
+  assert.equal(run([stopped('eeee0001'), wfRec('eeee0002')]).w.state, 'running')
+  assert.equal(german(() => run([stopped('eeee0001')]).text),
+    'Gestoppt — für jeden Agenten dieses Laufs ist ein Ausgang aufgezeichnet, und keiner wurde abgeschlossen: Der letzte Versuch jedes Schritts wurde gestoppt.')
+})
+
+test('a stopped agent that wrote on after its stop is inferred again, and its Recorded row says stopped', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [rec('aaaa0001', { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 10 * MIN, lastTs: NOW - 8 * MIN })],
+    launches: [launch('aaaa0001', { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 10 * MIN })],
+    selected: agentKey('aaaa0001'),
+  }
+  const n = node(build(over), agentKey('aaaa0001'))
+  assert.deepEqual([n.state, n.derived], ['running', true])
+  assert.equal(build(over).selected?.rows.find((r) => r.label === 'Recorded')?.value, 'stopped at 11:50')
+  assert.deepEqual(german(() => build(over).selected?.rows.find((r) => r.label === 'Aufgezeichnet')?.value), 'gestoppt um 11:50')
 })
 
 // ---------------------------------------------------------------------------
@@ -972,7 +1069,7 @@ test('every message of the tree and of its markdown has a German entry, and the 
   const keys = (JSON.parse(r.stdout) as { keys: Record<string, string[]> }).keys
   const ours = Object.keys(keys).filter((k) => keys[k].some((site) => site.startsWith('src/agentTreeBuild.ts:')))
   // The markdown's own words for the tree.
-  const text = ['Agents', 'Running', 'Done', 'Failed', 'Unknown', 'Active', 'Idle', 'State', '| Detail | Value |',
+  const text = ['Agents', 'Running', 'Done', 'Failed', 'Stopped', 'Unknown', 'Active', 'Idle', 'State', '| Detail | Value |',
     'Tree cut at {0} nodes.', '{0} older session(s) not listed.',
     '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.',
     // The running list above the tree, and the tree's own heading under it.

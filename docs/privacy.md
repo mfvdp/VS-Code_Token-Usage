@@ -65,6 +65,10 @@ literal and matches it against a small allow-list (`api.anthropic.com`, the two 
 pages, and documentation links that only ever appear as text). It runs in CI on all three
 platforms and in the release workflow, and it fails the build on anything else — a price feed, a
 status page or a CDN font would otherwise be a two-line change nobody notices in review.
+The same command checks the **read contract**: a table in `scripts/check-privacy.mjs` names, for
+every reader of a Claude Code file, the fields it may take — the ones this page lists above — and
+the check fails when a reader takes a field the table does not list, or no longer takes one it
+does. The documentation tests hold this page and the agents page to the same table.
 
 The webview loads no external resource at all, no telemetry of any kind is collected, and there
 is no endpoint setting to point somewhere else.

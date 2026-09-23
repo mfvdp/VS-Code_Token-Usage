@@ -58,8 +58,8 @@ import {
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
 import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
 import {
-  agentTreeFor, applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, MAX_AGENT_EXPANDED,
-  MAX_AGENT_KEY_CHARS, RANGE_PRESETS, UiState, ViewModel,
+  agentTreeFor, applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, isAgentSelectedIn,
+  MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, RANGE_PRESETS, UiState, ViewModel,
   WebviewMessage,
 } from './viewModel'
 
@@ -1722,6 +1722,9 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
       && raw.agentSelected.length <= MAX_AGENT_KEY_CHARS)) {
     out.agentSelected = raw.agentSelected
   }
+  // 1.6 N2: which row of the selected node its details open under — a place of the list, and
+  // only beside a selection: with nothing selected the details have no place, and it is the tree.
+  if (out.agentSelected !== null && isAgentSelectedIn(raw.agentSelectedIn)) out.agentSelectedIn = raw.agentSelectedIn
   // 1.6 D3: the "more" steps of opened nodes — a key of the same shape and a whole number of
   // steps from 1 to MAX_MORE_PAGES, anything else dropped entry by entry. A key stored twice
   // keeps its last entry, and a list over the cap its newest, as a step at the cap does.

@@ -45,10 +45,10 @@ usage — `–` for a launch, since nothing of it was counted — and under them
 `tokenPace.attribution` names one. An agent that runs only because an agent below it runs — the
 parent waiting for its child — says so on that line: `waits for a child agent`.
 
-**A click on a row** opens the same details a click on its tree row opens, under the tree, and
-the same click again closes them. It opens nothing in the tree: the panel shows whether the
-node's tree row is on screen or inside a closed branch — or in a session the tree does not
-list, for as long as the agent runs and the list names it (see
+**A click on a row** opens the same details a click on its tree row opens — under the row you
+clicked, here the running list's — and the same click again closes them. It opens nothing in the
+tree: the panel shows whether the node's tree row is on screen or inside a closed branch — or in
+a session the tree does not list, for as long as the agent runs and the list names it (see
 [Opening and selection](#opening-and-selection)). The rows are buttons ahead of the tree, so the
 keyboard reaches them first.
 
@@ -265,8 +265,19 @@ A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
 ## Details
 
 Clicking a row — of the tree or of the running list, or `Enter` on it, since the toggle and the
-row are buttons of their own — opens the node's details under the tree; the same click again
-closes them. For an agent: type,
+row are buttons of their own — opens the node's details right under that row; the same click
+again closes them. In the tree the panel stands inside the node's entry, between its row and its
+children, across the tree's whole width however deep the node sits; under a row of the running
+list it is that row's second line. A running agent has a row in both places: the details open
+under the one you clicked, and a click on the other moves them there. Only the row they stand
+under is pressed. When the row they stand under leaves the page — the agent stops running and
+leaves the list, or you close a node above its tree row — they move to the node's other row if
+that one is on the page; if it is not, they are not shown, without a word, and come back with
+the row (see [Opening and selection](#opening-and-selection)). The panel is drawn once, never
+twice.
+`Escape` anywhere in the section closes the details and puts the keyboard focus back on the row
+they stood under; while a hover card or a sparkline's tip is open, the first `Escape` closes that
+and the next one the details. For an agent: type,
 models, its ID, depth, started, duration, last activity (with a live `… ago` beside it) and —
 for an agent that wrote on after its outcome — what was recorded, then turns,
 usage, fresh input, cache write 5 m and 1 h, cache read, output, reasoning and tool calls, then
@@ -391,7 +402,8 @@ every node closed. Which nodes you opened and which node's details are open are 
 rest of the dashboard's view state — range, sort, filters, folded sections — in the extension's
 own storage, so they survive a push, a reload and a restart; selecting a node never opens
 anything by itself. Only node keys are kept, made of the session, run, agent or launch id: the
-opened nodes' keys and the selected one's — never a label, a figure or anything from a
+opened nodes' keys and the selected one's — with which of its rows its details open under, the
+tree's or the running list's — never a label, a figure or anything from a
 transcript, and at most 200 opened nodes: opening one more forgets the one opened longest ago,
 so a node can always be opened, and the key of a node that has left the tree does not keep its
 place for good. A key whose node has gone matches nothing. How many children an opened node shows

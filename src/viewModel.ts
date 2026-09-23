@@ -108,6 +108,12 @@ export interface UiState {
   /** The agent tree node whose details are open, or null. */
   agentSelected: string | null
   /**
+   * 1.6 N2: which row of the selected node its details open under, when the page has more than
+   * one — its row in the tree, or its row in the running list. The row the reader clicked; the
+   * other one, when only one of them is on the page. 'tree' while nothing is selected.
+   */
+  agentSelectedIn: AgentSelectedIn
+  /**
    * 1.6 D3: the opened nodes whose "more" row the reader pressed, and how often — each step
    * shows MAX_GROUP_CHILDREN children more, at most MAX_MORE_PAGES steps. The most recently
    * raised last, at most MAX_AGENT_MORE entries: one more forgets the one raised longest ago.
@@ -115,6 +121,14 @@ export interface UiState {
    */
   agentsMore: Array<{ key: string; pages: number }>
 }
+
+/**
+ * 1.6 N2: the places a selected node's details can open under — the row of the tree and the row
+ * of the running list (P10a adds the row of the 7-day block's largest agents). The one list the
+ * parser, the reducer and the restore filter check a place against.
+ */
+export const AGENT_SELECTED_IN = ['tree', 'now'] as const
+export type AgentSelectedIn = (typeof AGENT_SELECTED_IN)[number]
 
 /** The commands the webview may ask for. Nothing outside this list is ever executed. */
 export const WEBVIEW_COMMANDS = [
@@ -151,7 +165,7 @@ export type WebviewMessage =
   | { type: 'drill'; day: string | null }
   | { type: 'toggleSection'; key: DashboardSectionKey }
   | { type: 'agentToggle'; key: string }
-  | { type: 'agentSelect'; key: string | null }
+  | { type: 'agentSelect'; key: string | null; from?: AgentSelectedIn }
   | { type: 'agentMore'; key: string }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
@@ -188,6 +202,10 @@ export const MAX_AGENT_EXPANDED = 200
 
 function isAgentKey(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0 && v.length <= MAX_AGENT_KEY_CHARS
+}
+
+export function isAgentSelectedIn(v: unknown): v is AgentSelectedIn {
+  return typeof v === 'string' && (AGENT_SELECTED_IN as readonly string[]).includes(v)
 }
 
 /**
@@ -279,9 +297,15 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     // node the tree builder made, and a key that matches none selects nothing.
     case 'agentToggle':
       return isAgentKey(m.key) ? { type: 'agentToggle', key: m.key } : null
-    case 'agentSelect':
-      if (m.key === null) return { type: 'agentSelect', key: null }
-      return isAgentKey(m.key) ? { type: 'agentSelect', key: m.key } : null
+    // 1.6 N2: `from` says which row of the node was clicked — the tree's or the running list's —
+    // so the details open under that one. Absent it is the tree; a place outside the list drops
+    // the message whole, as every other value out of range does.
+    case 'agentSelect': {
+      if (m.from !== undefined && !isAgentSelectedIn(m.from)) return null
+      const from = m.from === undefined ? {} : { from: m.from as AgentSelectedIn }
+      if (m.key === null) return { type: 'agentSelect', key: null, ...from }
+      return isAgentKey(m.key) ? { type: 'agentSelect', key: m.key, ...from } : null
+    }
     // The "more" row under an open node: shows the next fifty of its children.
     case 'agentMore':
       return isAgentKey(m.key) ? { type: 'agentMore', key: m.key } : null
@@ -310,6 +334,7 @@ export function defaultUiState(cfg: Config): UiState {
     collapsed: [],
     agentsExpanded: [],
     agentSelected: null,
+    agentSelectedIn: 'tree',
     agentsMore: [],
   }
 }
@@ -373,11 +398,15 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       const keep = ui.agentsExpanded.slice(Math.max(0, ui.agentsExpanded.length - MAX_AGENT_EXPANDED + 1))
       return { ...ui, agentsExpanded: [...keep, m.key] }
     }
-    case 'agentSelect':
+    case 'agentSelect': {
       // A selection opens the details and nothing else: which nodes are open stays what the
-      // reader made it, whether the selected one is on screen or not.
+      // reader made it, whether the selected one is on screen or not. 1.6 N2: the details open
+      // under the row the reader clicked — `from`, the tree's when the message does not say — so
+      // the same node selected from its other row moves them there; closing them forgets the place.
       if (m.key !== null && !isAgentKey(m.key)) return ui
-      return ui.agentSelected === m.key ? ui : { ...ui, agentSelected: m.key }
+      const from: AgentSelectedIn = m.key === null ? 'tree' : m.from !== undefined && isAgentSelectedIn(m.from) ? m.from : 'tree'
+      return ui.agentSelected === m.key && ui.agentSelectedIn === from ? ui : { ...ui, agentSelected: m.key, agentSelectedIn: from }
+    }
     case 'agentMore': {
       // One step more of an open node's children. A "more" row only stands under an open node,
       // so a key that is not open changes nothing — it would only grow the list with an entry

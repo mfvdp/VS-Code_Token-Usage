@@ -43,10 +43,10 @@ type SectionField = keyof ViewModel | `ui.${keyof ViewModel['ui']}`
 const SECTION_FIELDS: Record<string, SectionField[]> = {
   summary: ['digest'],
   quota: ['quotas'],
-  // The running list and the tree, and the three pieces of view state that decide what of it is
-  // open: the nodes the reader opened, the node whose details are shown, and how many of an
-  // open node's children the reader asked to see (1.6 D3).
-  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentsMore'],
+  // The running list and the tree, and the pieces of view state that decide what of it is open:
+  // the nodes the reader opened, the node whose details are shown and under which of its rows
+  // (1.6 N2), and how many of an open node's children the reader asked to see (1.6 D3).
+  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentSelectedIn', 'ui.agentsMore'],
   context: ['context'],
   kpis: ['kpis'],
   // The cache switch above the composition bars decides which parts are drawn, so the
@@ -911,13 +911,18 @@ span.ag-more { color: var(--dim); }
    it fits and breaks inside only when a narrow sidebar leaves it no line wide enough. */
 .ag-now { margin-bottom: 10px; }
 .ag-now ul { list-style: none; margin: 4px 0 0; padding: 0; }
-.ag-now li { display: flex; }
+.ag-now li { display: flex; flex-wrap: wrap; }
 .ag-now .ag-k-pending .ag-label { font-style: italic; }
 .ag-ctx { flex: 1 1 100%; }
 .ag-ctx > span { display: inline-block; max-width: 100%; }
-/* The details of the selected node, under the tree: the key figure's box around a two-column
-   list, the words on the left and what the view model says about them on the right. */
-.ag-details { margin-top: 8px; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+/* The details of the selected node, under its row (1.6 N2): the key figure's box around a
+   two-column list, the words on the left and what the view model says about them on the right.
+   In the tree it stands between the row and the node's children and steps back out of the levels
+   above it — --ag-ind is the node's level, set from data-ind — so it takes the tree's whole width
+   however deep the node sits; in the running list it is a line of its own under the row. */
+.ag-details { margin: 4px 0 6px calc(var(--ag-ind, 0) * -16px); border: 1px solid var(--line); border-radius: 4px;
+              padding: 6px 8px; }
+.ag-now li > .ag-details { flex: 1 1 100%; min-width: 0; }
 .ag-details dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 10px;
                  margin: 6px 0 0; font-size: 11px; }
 .ag-details dt { color: var(--dim); }

@@ -955,6 +955,61 @@ test('stored "more" steps restore by shape — a key, a whole number of steps fr
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+test('the row the details open under restores by shape, beside a selection only, and a selection from the list is stored and pushed', async () => {
+  // 1.6 N2: `ui.agentSelectedIn` is a place of the list — the tree's or the running list's — and
+  // means something only while a node is selected; anything else comes back as the tree.
+  const cases: Array<[Record<string, unknown>, string]> = [
+    [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'now' }, 'now'],
+    [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'tree' }, 'tree'],
+    [{ agentSelected: 'a:a94f0001', agentSelectedIn: 'week' }, 'tree'],
+    [{ agentSelected: 'a:a94f0001', agentSelectedIn: ['now'] }, 'tree'],
+    [{ agentSelected: 'a:a94f0001' }, 'tree'],
+    [{ agentSelected: null, agentSelectedIn: 'now' }, 'tree'],
+  ]
+  for (const [stored, want] of cases) {
+    const kept = new Map<string, unknown>([['tokenPace.ui', stored]])
+    const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+    await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+    await state.execute('tokenPace.setRange', '7d')
+    const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+    assert.equal(ui?.agentSelectedIn, want, JSON.stringify(stored))
+    assert.equal(ui?.agentSelected, stored.agentSelected ?? null, JSON.stringify(stored))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  }
+  // What the page posts from a row of the running list is stored with its place, and the section
+  // is pushed at once, carrying it; a selection from the same node's tree row moves it back.
+  const host = await activateHost(makeFixture(), REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  const pushesSince = (from: number): Array<{ payload: { ui: { agentSelected: unknown; agentSelectedIn: unknown } } }> =>
+    page.sent.slice(from).filter((m) => {
+      const x = m as { type?: unknown; key?: unknown }
+      return x.type === 'section' && x.key === 'agents'
+    }) as Array<{ payload: { ui: { agentSelected: unknown; agentSelectedIn: unknown } } }>
+  let before = page.sent.length
+  page.post({ type: 'agentSelect', key: 'a:a94f0001', from: 'now' })
+  let ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  assert.deepEqual([ui?.agentSelected, ui?.agentSelectedIn], ['a:a94f0001', 'now'])
+  let pushes = pushesSince(before)
+  assert.equal(pushes.length, 1, 'the agents section was not pushed')
+  assert.deepEqual([pushes[0].payload.ui.agentSelected, pushes[0].payload.ui.agentSelectedIn], ['a:a94f0001', 'now'])
+  before = page.sent.length
+  page.post({ type: 'agentSelect', key: 'a:a94f0001', from: 'tree' })
+  ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  assert.deepEqual([ui?.agentSelected, ui?.agentSelectedIn], ['a:a94f0001', 'tree'])
+  pushes = pushesSince(before)
+  assert.equal(pushes.length, 1, 'moving the details did not push the section')
+  assert.equal(pushes[0].payload.ui.agentSelectedIn, 'tree')
+  // A place the host does not know drops the message whole: nothing stored, nothing pushed.
+  before = page.sent.length
+  page.post({ type: 'agentSelect', key: 'a:a94f0002', from: 'week' })
+  ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+  assert.deepEqual([ui?.agentSelected, ui?.agentSelectedIn], ['a:a94f0001', 'tree'])
+  assert.equal(pushesSince(before).length, 0)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
 test('a reader with 200 stored opened nodes, all long gone, can still open one: the oldest gives way', async () => {
   // Nothing prunes the key of a node that has left the tree — a session past the list, an agent
   // past the seven days — so a regular reader reaches the cap with keys that match nothing. The

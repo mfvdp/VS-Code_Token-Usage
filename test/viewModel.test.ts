@@ -13,7 +13,7 @@ import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quot
 import { RESET_JITTER_MS } from '../src/resetRule'
 import { MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
 import {
-  DASHBOARD_SECTION_KEYS, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
+  AGENT_SELECTED_IN, DASHBOARD_SECTION_KEYS, isAgentSelectedIn, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
   SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
   forecastsFor, SparkVm, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
@@ -648,6 +648,7 @@ test('applyMessage folds a message into the UI state and nothing more', () => {
     collapsed: [],
     agentsExpanded: [],
     agentSelected: null,
+    agentSelectedIn: 'tree',
     agentsMore: [],
   })
 
@@ -736,6 +737,45 @@ test('an agent node toggle opens and closes it, and the selection sets and clear
     { type: 'agentSelect', key: long }, { type: 'agentSelect', key: ['a'] }]) {
     assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
   }
+})
+
+test('a selection says which row it came from — the tree\'s or the running list\'s — and the details open under that one', () => {
+  // 1.6 N2: `from` of the message becomes `ui.agentSelectedIn`; without one it is the tree.
+  assert.deepEqual([...AGENT_SELECTED_IN], ['tree', 'now'])
+  const ui = defaultUiState(cfg)
+  assert.equal(ui.agentSelectedIn, 'tree')
+  const fromNow = applyMessage(ui, { type: 'agentSelect', key: 'a:a94f0001', from: 'now' })
+  assert.deepEqual([fromNow.agentSelected, fromNow.agentSelectedIn], ['a:a94f0001', 'now'])
+  assert.equal(ui.agentSelectedIn, 'tree', 'the input state was mutated')
+  // The same node from its other row moves the details there; from the same row again, nothing
+  // changes, and says so by identity.
+  const moved = applyMessage(fromNow, { type: 'agentSelect', key: 'a:a94f0001', from: 'tree' })
+  assert.deepEqual([moved.agentSelected, moved.agentSelectedIn], ['a:a94f0001', 'tree'])
+  assert.equal(applyMessage(fromNow, { type: 'agentSelect', key: 'a:a94f0001', from: 'now' }), fromNow)
+  assert.equal(applyMessage(moved, { type: 'agentSelect', key: 'a:a94f0001' }), moved)
+  // Without a place it is the tree's, from the list too; closing the details forgets the place.
+  assert.equal(applyMessage(fromNow, { type: 'agentSelect', key: 'a:a94f0002' }).agentSelectedIn, 'tree')
+  const closed = applyMessage(fromNow, { type: 'agentSelect', key: null })
+  assert.deepEqual([closed.agentSelected, closed.agentSelectedIn], [null, 'tree'])
+  assert.equal(applyMessage(ui, { type: 'agentSelect', key: null, from: 'now' }), ui)
+  // A selection moves nothing else: the opened nodes stay the reader's.
+  assert.deepEqual(fromNow.agentsExpanded, [])
+  // The parser passes a place of the list unchanged and drops a message with any other whole.
+  for (const m of [
+    { type: 'agentSelect', key: 'a:a94f0001', from: 'tree' },
+    { type: 'agentSelect', key: 'a:a94f0001', from: 'now' },
+    { type: 'agentSelect', key: 'a:a94f0001' },
+    { type: 'agentSelect', key: null },
+  ]) assert.deepEqual(parseWebviewMessage(m), m)
+  for (const from of ['week', 'Now', '', null, 3, ['now'], { now: true }]) {
+    assert.equal(parseWebviewMessage({ type: 'agentSelect', key: 'a:a94f0001', from }), null, JSON.stringify(from))
+    assert.equal(parseWebviewMessage({ type: 'agentSelect', key: null, from }), null, JSON.stringify(from))
+  }
+  assert.equal(isAgentSelectedIn('now'), true)
+  assert.equal(isAgentSelectedIn('week'), false)
+  // The round trip: what the page posts, parsed, folded in, is the state the page is sent back.
+  const round = applyMessage(ui, parseWebviewMessage({ type: 'agentSelect', key: 'l:toolu_01', from: 'now' })!)
+  assert.deepEqual([round.agentSelected, round.agentSelectedIn], ['l:toolu_01', 'now'])
 })
 
 test('at most MAX_AGENT_EXPANDED nodes are kept open; at the cap an open forgets the oldest, and closing always works', () => {

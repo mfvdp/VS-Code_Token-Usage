@@ -41,6 +41,7 @@
   "config.statusBar.show.enum.cost": "Hypothetical API cost for the summary period — needs tokenPace.showCost",
   "config.statusBar.show.enum.forecast": "Burn-rate forecast, e.g. “~empty in 40 min” — needs tokenPace.quotaHistoryDays above 0",
   "config.statusBar.show.enum.budget": "The budget closest to its own limit, e.g. “budget 63 %” — needs tokenPace.budgets",
+  "config.statusBar.show.enum.agents": "Running agents, e.g. “~22 running” — inferred from their transcripts; hidden while none runs",
   "config.windowSelect.description": "Which quota windows appear in the status bar. The default `worstPace` gives each tool **one** entry: the window that needs attention — the worst pace verdict, and within one verdict the most-utilised of those windows.\n\n`all` puts every window in the bar and can produce up to nine entries. The command *Token Pace: Cycle Status Bar Windows* steps through these values without opening the settings.",
   "config.windowSelect.enum.all": "Every window as its own entry, including model-scoped ones — “CC 5h 25%”, “CC 7d 69%”, “CC Fable 7d 12%”",
   "config.windowSelect.enum.leading": "Only the most-utilised window per tool — “CC 7d 69%”",

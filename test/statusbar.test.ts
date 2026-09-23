@@ -5,8 +5,9 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import type { BudgetRow } from '../src/budget'
 import { Config, sanitize } from '../src/config'
+import { RUNNING_WINDOW_MS, RunningItem } from '../src/agentTree'
 import {
-  autoExplain, buildItems, footerLine, itemModel, makeContext, previewItems, problemText,
+  AGENTS_TOOLTIP_ITEMS, AgentsReading, autoExplain, buildItems, footerLine, itemModel, makeContext, previewItems, problemText,
   problemTooltip, quotaTooltip, selectWindows, StatusTextInput, tokenTooltip, UsageSource,
 } from '../src/statusText'
 import { emptyBucket, Forecast, ProblemKind, QuotaState, QuotaWindow } from '../src/types'
@@ -1087,4 +1088,121 @@ test('a hostile window label, model name or problem text stays inside a code spa
   assert.ok(tip.includes('`**bold**|<b>x</b>`'), tip)
   assert.equal(tip.includes('| **bold**'), false, 'the label reached the table raw')
   assert.equal(tip.includes('``'), false, 'an empty span: a backtick from the value survived')
+})
+
+// ---------------------------------------------------------------------------
+// Running agents (1.6 O1)
+// ---------------------------------------------------------------------------
+
+function running(n: number, over: Partial<RunningItem> = {}): RunningItem {
+  return {
+    key: `a:a${String(n).padStart(16, '0')}`, kind: 'agent',
+    label: `Explore · opus-5 · ${1000 + n}`, fullLabel: `Explore · claude-opus-5 · ${1000 + n}`,
+    context: 'Session 9d0eb37a · Workflow run cfe7718d', usage: '12K', lowerBound: false, lowerBoundText: null,
+    startTs: NOW - (n + 1) * 60_000, lastTs: NOW - 20_000, startClock: '11:5' + n, lastClock: '11:59',
+    waiting: false, silence: false, running: 1, ...over,
+  }
+}
+
+function agents(items: RunningItem[], over: Partial<AgentsReading> = {}): AgentsReading {
+  return { running: items.reduce((sum, i) => sum + i.running, 0), now: items, more: 0, ...over }
+}
+
+const AGENTS_ON = { 'tokenPace.statusBar.show': ['claudeQuota', 'agents', 'tokens'] }
+
+test('the agents entry counts the running agents, one word for one and one for many', () => {
+  const on = cfg(AGENTS_ON)
+  const three = agents([running(1), running(2), running(3)])
+  assert.deepEqual(textsOf({ cfg: on, agents: three }).filter((t) => t.includes('running')), ['~3 running'])
+  assert.deepEqual(textsOf({ cfg: on, agents: agents([running(1)]) }).filter((t) => t.includes('running')), ['~1 running'])
+  // The count is the tree's — a collector's running members included —, not the list's rows.
+  const collector = running(9, { key: 'n:s|wf', kind: 'noreply', running: 10, startTs: null })
+  assert.deepEqual(textsOf({ cfg: on, agents: agents([running(1), collector]) }).filter((t) => t.includes('running')), ['~11 running'])
+  // Its place is where statusBar.show puts it, with the priorities of that order.
+  const items = buildItems(input({ cfg: on, agents: three }))
+  assert.deepEqual(items.map((m) => m.id), ['tokenPace.quota.claude.session.300', 'tokenPace.agents', 'tokenPace.tokens'])
+  assert.deepEqual(items.map((m) => m.priorityKey), ['1000', '999', '998'])
+  assert.equal(items[1].name, 'Token Pace — running agents')
+})
+
+test('the agents entry is hidden while nothing runs, without a tree, and when it is not asked for', () => {
+  const on = cfg(AGENTS_ON)
+  const has = (p: Partial<StatusTextInput>): boolean => buildItems(input(p)).some((m) => m.id === 'tokenPace.agents')
+  assert.equal(has({ cfg: on, agents: agents([]) }), false, 'no "~0 running" (1.6 §7a Q6)')
+  assert.equal(has({ cfg: on, agents: agents([], { running: 0, more: 0 }) }), false)
+  assert.equal(has({ cfg: on, agents: null }), false, 'no tree, no entry')
+  assert.equal(has({ cfg: on }), false)
+  assert.equal(has({ cfg: on, agents: { running: Number.NaN, now: [], more: 0 } }), false)
+  // Off by default: the default list does not name it.
+  assert.equal(has({ agents: agents([running(1)]) }), false)
+  assert.equal(has({ cfg: on, agents: agents([running(1)]) }), true)
+})
+
+test('the agents entry has no colour, no alarm and no word for done, and clicks as configured', () => {
+  for (const colorMode of ['theme', 'monochrome']) {
+    const m = buildItems(input({ cfg: cfg({ ...AGENTS_ON, 'tokenPace.colorMode': colorMode }), agents: agents([running(1), running(2)]) }))
+      .find((i) => i.id === 'tokenPace.agents')
+    assert.ok(m)
+    assert.equal(m.colorId, null)
+    assert.equal(m.alarm, false)
+    assert.doesNotMatch(`${m.text}\n${m.tooltipMarkdown}`, /\bdone\b|\bfinished\b|\$\(warning\)|\$\(error\)/)
+  }
+  const of = (action: string) => buildItems(input({ cfg: cfg({ ...AGENTS_ON, 'tokenPace.clickAction': action }), agents: agents([running(1)]) }))
+    .find((i) => i.id === 'tokenPace.agents')!
+  assert.equal(of('dashboard').command, 'tokenPace.showDashboard')
+  assert.equal(of('menu').command, 'tokenPace.menu')
+  assert.equal(of('refresh').command, 'tokenPace.refreshQuota')
+  // No provider to open the page of: the chooser, as the other entries without one do.
+  assert.equal(of('openWebsite').command, 'tokenPace.openUsagePage')
+  assert.equal(of('openWebsite').commandArgs, undefined)
+})
+
+test('the agents tooltip says what running means, names at most five entries and counts the rest', () => {
+  const on = cfg(AGENTS_ON)
+  const seven = [1, 2, 3, 4, 5, 6, 7].map((n) => running(n))
+  const tip = buildItems(input({ cfg: on, agents: agents(seven) })).find((m) => m.id === 'tokenPace.agents')!.tooltipMarkdown
+  const lines = tip.split('\n')
+  assert.equal(lines[0], 'Agents running now — inferred from their transcripts (changed within the last 10 minutes, no result recorded).')
+  // The sentence's ten minutes are the running window's.
+  assert.equal(RUNNING_WINDOW_MS, 10 * 60_000)
+  const listed = lines.filter((l) => l.startsWith('- '))
+  assert.equal(AGENTS_TOOLTIP_ITEMS, 5)
+  assert.deepEqual(listed, seven.slice(0, 5).map((r) => `- \`${r.fullLabel} · ${r.context}\``))
+  assert.ok(lines.includes('and 2 more'), tip)
+  assert.ok(tip.includes('[Dashboard](command:tokenPace.showDashboard)'), 'the action footer')
+  // The entries beyond the running list's own cap count too.
+  const capped = buildItems(input({ cfg: on, agents: agents(seven, { more: 3, running: 10 }) })).find((m) => m.id === 'tokenPace.agents')!
+  assert.equal(capped.text, '~10 running')
+  assert.ok(capped.tooltipMarkdown.split('\n').includes('and 5 more'), capped.tooltipMarkdown)
+  // Five or fewer: no "more".
+  const five = buildItems(input({ cfg: on, agents: agents(seven.slice(0, 5)) })).find((m) => m.id === 'tokenPace.agents')!
+  assert.doesNotMatch(five.tooltipMarkdown, /more/)
+  // A collector says how many of its agents run, as the markdown's running line does.
+  const collector = running(9, { key: 'n:s|wf', kind: 'noreply', running: 10, startTs: null,
+    label: '263 agent(s) without a counted reply', fullLabel: '263 agent(s) without a counted reply' })
+  const withCollector = buildItems(input({ cfg: on, agents: agents([running(1), collector]) })).find((m) => m.id === 'tokenPace.agents')!
+  assert.ok(withCollector.tooltipMarkdown.includes(`- \`${collector.fullLabel} · ${collector.context}\` (~10 of them running)`), withCollector.tooltipMarkdown)
+  // tokenPace.tooltip: off leaves no tooltip at all.
+  const off = buildItems(input({ cfg: cfg({ ...AGENTS_ON, 'tokenPace.tooltip': 'off' }), agents: agents([running(1)]) }))
+  assert.equal(off.find((m) => m.id === 'tokenPace.agents')!.tooltipMarkdown, '')
+})
+
+test('a hostile agent type or project name stays inside a code span of the agents tooltip', () => {
+  // The type comes from a sidecar and the project from a directory name: borrowed strings, which
+  // the trusted, HTML-enabled tooltip must print and not obey.
+  const evil = running(1, { fullLabel: '**x**|<img src=x>`[y](command:tokenPace.rescan)', context: 'Session 9d0eb37a · <b>p</b>`' })
+  const tip = buildItems(input({ cfg: cfg(AGENTS_ON), agents: agents([evil]) })).find((m) => m.id === 'tokenPace.agents')!.tooltipMarkdown
+  assert.ok(tip.includes('- `**x**|<img src=x>[y](command:tokenPace.rescan) · Session 9d0eb37a · <b>p</b>`'), tip)
+  assert.equal(tip.includes('``'), false, tip)
+})
+
+test('the preview shows the running agents as many and as one, and colours neither', () => {
+  const items = previewItems(cfg({}), NOW).filter((m) => m.text.includes(' running'))
+  assert.deepEqual(items.map((m) => m.text), ['[preview] ~3 running', '[preview] ~1 running'])
+  for (const m of items) {
+    assert.equal(m.colorId, null)
+    assert.equal(m.alarm, false)
+    assert.ok(m.tooltipMarkdown.includes('Agents running now'), m.tooltipMarkdown)
+    assert.doesNotMatch(m.tooltipMarkdown, /NaN|undefined/)
+  }
 })

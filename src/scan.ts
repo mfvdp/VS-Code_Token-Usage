@@ -237,15 +237,20 @@ export function agentReplayFiles(agg: Aggregator, now: number): string[] {
 
 /**
  * The main transcripts of the Claude sessions that are active now: a session whose own record,
- * or one of whose agents' records, has a line within SESSION_ACTIVE_MS. The paths are the ones
- * the aggregator keys its main records by and the `sessionFile` its agent records name — never a
- * node key of the tree, which carries no path — and only those below a configured Claude root,
- * like every other file this module reads.
+ * or one of whose agents' records, has a line within SESSION_ACTIVE_MS. An agent's line is a
+ * counted reply or a request the API rejected (1.6 P5b, §7c): a transcript of nothing but
+ * rejections keeps its first one as its last reply time, and only its latest rejection says it
+ * is still being written. The paths are the ones the aggregator keys its main records by and the
+ * `sessionFile` its agent records name — never a node key of the tree, which carries no path —
+ * and only those below a configured Claude root, like every other file this module reads.
  */
 export function activeAgentSessions(agg: Aggregator, now: number): string[] {
   const out = new Set<string>()
   for (const [file, main] of agg.mainEntries()) if (now - main.lastTs <= SESSION_ACTIVE_MS) out.add(file)
-  for (const rec of agg.agents()) if (now - rec.lastTs <= SESSION_ACTIVE_MS) out.add(rec.sessionFile)
+  for (const rec of agg.agents()) {
+    const rejected = rec.rejected !== null && Number.isFinite(rec.rejected.at) ? rec.rejected.at : 0
+    if (now - Math.max(rec.lastTs, rejected) <= SESSION_ACTIVE_MS) out.add(rec.sessionFile)
+  }
   return [...out].filter((file) => rootOf(file)?.source === 'claude').sort()
 }
 

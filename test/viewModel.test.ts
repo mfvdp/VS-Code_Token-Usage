@@ -1236,6 +1236,53 @@ test('a model window below the hour roll-up marks both of its figures ≈, as th
   assert.equal(agentShareOf(agg, opus, NOW)?.text, 'Subagents ≈1.5K of ≈5.5K counted here (27 %)')
 })
 
+test('one view-model build sums its hour spans in one pass, the subagent share sharing the totals rows\' sums (1.6 L5, Review 3)', () => {
+  // The totals table's two window rows per provider, each Claude window's two share figures —
+  // over the very bounds of its totals row — and the data-quality line's seven days: seven passes
+  // over the hour buckets and more until P11, one now. The figures are exactly the ones each
+  // pass gave alone.
+  const agg = familyAgg()
+  const week = win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 62, resetsAt: NOW + 3 * 86_400_000, windowMinutes: 10080 })
+  const opus = win({ ...week, id: 'weekly_scoped:10080:opus', label: '7 d · Opus', model: 'Opus' })
+  const input = makeInput({ agg, quotas: [state('claude', { windows: [win(), week, opus] }), state('codex')] })
+  const alone = buildViewModel(input)
+  const sums: string[] = []
+  let passes = 0
+  const one = agg.sumHours.bind(agg)
+  const many = agg.sumHoursMany.bind(agg)
+  agg.sumHours = (fromMs, toMs, filter) => { sums.push(`${fromMs}|${toMs}`); return one(fromMs, toMs, filter) }
+  agg.sumHoursMany = (queries) => { passes++; return many(queries) }
+  const shared = buildViewModel(input)
+  assert.equal(passes, 1)
+  assert.deepEqual(sums, [], `hour spans summed on their own: ${sums.join(', ')}`)
+  assert.deepEqual(JSON.parse(JSON.stringify(shared)), JSON.parse(JSON.stringify(alone)))
+  // The shares are the ones `agentShareOf` gives alone, and the totals rows the same numbers.
+  assert.equal(shared.quotas[0].windows[1].agentShare, agentShareOf(familyAgg(), week, NOW)?.text)
+  assert.equal(shared.quotas[0].windows[2].agentShare, 'Subagents 1.5K of 5.5K counted here (27 %)')
+  const claudeRows = shared.totals.find((t) => t.source === 'claude')!.rows
+  assert.ok(claudeRows.some((r) => r.label === 'Current 7 d window' && r.usage === '10.5K'), JSON.stringify(claudeRows.map((r) => [r.label, r.usage])))
+})
+
+test('sumHoursMany answers every query as sumHours does alone, in one pass', () => {
+  const agg = familyAgg()
+  agg.rollup(NOW, 0, 400, tcfg)
+  const fresh = familyAgg()
+  const queries = [
+    { fromMs: Date.UTC(2026, 8, 3, 10, 0), toMs: NOW },
+    { fromMs: Date.UTC(2026, 8, 3, 10, 0), toMs: NOW, filter: { source: 'claude' as const, isSub: true } },
+    { fromMs: Date.UTC(2026, 8, 3, 10, 15), toMs: Date.UTC(2026, 8, 3, 10, 45), filter: { models: ['claude-opus-4-6', 'claude-3-opus'] } },
+    { fromMs: NOW, toMs: NOW - 1 },
+    { fromMs: Number.NaN, toMs: NOW },
+    { fromMs: daysAgo(30), toMs: NOW, filter: { source: 'codex' as const } },
+  ]
+  for (const a of [agg, fresh]) {
+    const got = a.sumHoursMany(queries)
+    assert.equal(got.length, queries.length)
+    queries.forEach((q, i) => assert.deepEqual(got[i], a.sumHours(q.fromMs, q.toMs, q.filter), JSON.stringify(q)))
+  }
+  assert.deepEqual(fresh.sumHoursMany([]), [])
+})
+
 test('the share is a whole percent, "<1 %" or ">99 %" where rounding would say none or all (1.6 N7)', () => {
   const agg = new Aggregator()
   const main = path.join('/virtual', 'claude', 'projects', '-home-t-alpha', 's1.jsonl')

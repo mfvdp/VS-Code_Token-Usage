@@ -9,7 +9,7 @@ import {
   readAlertConfig,
 } from '../src/config'
 import type { Config } from '../src/config'
-import { readManifest } from './helpers/nls'
+import { englishNls, germanNls, readManifest } from './helpers/nls'
 
 interface Property {
   type?: string | string[]
@@ -412,6 +412,23 @@ test('the budget section and entry are contributed but not switched on', () => {
   assert.ok(sections.includes('budget'), 'dashboard.sections cannot show the budgets')
   assert.equal((properties['tokenPace.dashboard.sections'].default as string[]).includes('budget'), false)
   assert.deepEqual(sanitize({ 'tokenPace.dashboard.sections': ['budget'] }).dashboard.sections, ['budget'])
+})
+
+test('the agents entry is contributed but not switched on, and is the one value 1.6 adds (1.6 O1)', () => {
+  const bar = properties['tokenPace.statusBar.show'].items?.enum ?? []
+  assert.ok(bar.includes('agents'), 'statusBar.show cannot show the running agents')
+  assert.equal((properties['tokenPace.statusBar.show'].default as string[]).includes('agents'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.statusBar.show': ['agents'] }).statusBar.show, ['agents'])
+  assert.deepEqual(sanitize({}).statusBar.show.includes('agents'), false)
+  // The manifest's values are the ones config.ts keeps, in the same order, `agents` last.
+  const kept = sanitize({ 'tokenPace.statusBar.show': [...bar].reverse() }).statusBar.show
+  assert.deepEqual([...kept].reverse(), bar)
+  assert.equal(bar[bar.length - 1], 'agents')
+  // Its description says what the entry is and that it is inferred, in both languages.
+  assert.equal(englishNls['config.statusBar.show.enum.agents'],
+    'Running agents, e.g. “~22 running” — inferred from their transcripts; hidden while none runs')
+  assert.equal(germanNls['config.statusBar.show.enum.agents'],
+    'Laufende Agenten, z. B. “~22 laufen” — abgeleitet aus ihren Transkripten; ausgeblendet, solange keiner läuft')
 })
 
 test('a budget the user did not state does not exist, and a broken one is dropped whole', () => {

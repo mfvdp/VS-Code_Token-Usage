@@ -15,7 +15,10 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
+import type { RunningItem } from '../src/agentTree'
 import { ConsentUi, disclosure, NetworkConsent, writeConsentDisclosure } from '../src/consent'
 import { toMarkdownSummary } from '../src/exporter'
 import { setBundle, setLocale } from '../src/i18n'
@@ -82,6 +85,13 @@ const DE: Record<string, string> = {
   'Subagent tokens in the hour buckets, last 7 days': 'Subagent-Token in den Stunden-Buckets, letzte 7 Tage',
   'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.':
     'Die beiden unterscheiden sich systembedingt: Ein Datensatz umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.',
+  // 1.6 O1: the running agents in the status bar.
+  '~{0} running': '~{0} laufen',
+  '~1 running': '~1 läuft',
+  'Agents running now — inferred from their transcripts (changed within the last 10 minutes, no result recorded).':
+    'Agenten, die gerade laufen — abgeleitet aus ihren Transkripten (in den letzten 10 Minuten geändert, kein Ergebnis aufgezeichnet).',
+  'and {0} more': 'und {0} weitere',
+  'Token Pace — running agents': 'Token Pace — laufende Agenten',
 }
 
 /** The seam is module state; every test that changes it puts it back. */
@@ -190,6 +200,31 @@ test('the status bar text, its tooltip and the preview follow the bundle', () =>
   const preview = german(() => previewItems(makeConfig({}), NOW))
   assert.ok(preview.every((i) => i.text.startsWith('[Vorschau] ')), preview[0].text)
   assert.ok(previewItems(makeConfig({}), NOW).every((i) => i.text.startsWith('[preview] ')))
+})
+
+test('the running agents in the status bar speak German, and every word is the bundle\'s own (1.6 O1)', () => {
+  const item = (n: number): RunningItem => ({
+    key: `a:a${n}`, kind: 'agent', label: `Explore · opus-5 · 10${n}`, fullLabel: `Explore · claude-opus-5 · 10${n}`,
+    context: 'Sitzung 9d0eb37a', usage: '1K', lowerBound: false, lowerBoundText: null, startTs: NOW - 60_000,
+    lastTs: NOW, startClock: null, lastClock: null, waiting: false, silence: false, running: 1,
+  })
+  const on = makeConfig({ 'tokenPace.statusBar.show': ['agents'] })
+  const of = (n: number, more = 0): ReturnType<typeof buildItems>[number] => german(() => buildItems({
+    ...statusInput([]), cfg: on, agents: { running: n + more, now: Array.from({ length: n }, (_, i) => item(i)), more },
+  }))[0]
+  assert.equal(of(3).text, '~3 laufen')
+  assert.equal(of(1).text, '~1 läuft')
+  assert.equal(of(1).name, 'Token Pace — laufende Agenten')
+  assert.equal(of(1234).text, '~1.234 laufen', 'the count in German digits')
+  const tip = of(7, 2).tooltipMarkdown
+  assert.ok(tip.startsWith('Agenten, die gerade laufen — abgeleitet aus ihren Transkripten'), tip)
+  assert.ok(tip.split('\n').includes('und 4 weitere'), tip)
+  // Every word of the entry is the committed bundle's, not only this file's excerpt of it.
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  for (const key of ['~{0} running', '~1 running', 'Token Pace — running agents', 'and {0} more',
+    'Agents running now — inferred from their transcripts (changed within the last 10 minutes, no result recorded).']) {
+    assert.equal(bundle[key], DE[key], key)
+  }
 })
 
 test('a reset that has passed keeps its own sentence in any language', () => {

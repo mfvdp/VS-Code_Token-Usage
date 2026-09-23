@@ -76,6 +76,14 @@ it sits and its usage,
 `(~10 of them running)` behind a collector — and heads the tree after it with
 `### Sessions and agents`.
 
+**In the status bar.** `agents` in `tokenPace.statusBar.show` — off by default — puts the
+heading's count on the status bar: `~3 running`, `~1 running`. It is hidden while nothing runs,
+has no colour and no alarm, and says nothing when an agent finishes. Its tooltip says what
+running means, names the first five rows of the list — the agent's name with the model's whole
+id, and where it sits; a collector with `(~10 of them running)` — and counts the rows it leaves
+out (`and 2 more`). A click does what `tokenPace.clickAction` says, as on every other entry. See
+[the status bar](status-bar.md).
+
 ## Last 7 days
 
 The running list's first line — its heading `Running now (3)`, or the line `No agent is running.` —
@@ -712,7 +720,10 @@ Claude transcripts and journals that changed in the last seven days — each rea
 tokens were already counted, so no token is counted twice and no total moves. The snapshot states
 which revision of the agent tables it holds; an update that adds something only such a rebuild can
 fill in raises the revision, and the rebuild runs once more. *Re-read Token History* rebuilds them
-with everything else. The log states how much was read, in counts only.
+with everything else. A first start with no stored state, a re-read and a switch of
+`tokenPace.attribution` read every line from its first byte and fill the agent tables as they go,
+so no rebuild follows them — the tree does not stand half built for a moment after they end. The
+log states how much was read, in counts only.
 
 **A journal's keys after a restart.** The keys a journal's lines carry live in memory only. After
 a restart, before a journal's next lines are read, it is read once from its start up to where it
@@ -745,6 +756,18 @@ anew, and its run's agents with it.
   With every session idle and nothing running, the listing stops.
 * The tree carries no time of its own, so a tree that did not change is not sent to the page
   again.
+* **Only what changed is rebuilt.** A read that changed the agent tables alone — a journal line,
+  a result or a notification the parent recorded, a sidecar — rebuilds the Agents section and the
+  status bar entry, nothing else. A running agent's reply also counts tokens, which the other
+  sections show: while agents write, those sections are rebuilt at most once every **5 seconds**,
+  the tree and the status bar at every read. So while agents run, the figures of the other
+  sections can be up to five seconds behind the tree; the status bar's token entry is not.
+* **Saved every 10 seconds while agents run.** While the agent directories are listed (above), the
+  state is saved at most once every **10 seconds** instead of every 5, and closing the window saves
+  what is left. With several windows open the ones that follow the leading window read its saved
+  state, so while agents run they see an agent's change up to about 11 seconds late. A window that
+  takes over the lead reads on from the last save: the cursors and the counts are saved together,
+  so nothing is lost and nothing counted twice.
 
 ## Opening and selection
 
@@ -794,4 +817,6 @@ Data…* removes them with the rest of the dashboard view state.
 
 The section has no setting of its own. The gear in its header opens the two it depends on:
 `tokenPace.dashboard.sections`, where `agents` can be moved or removed, and
-`tokenPace.attribution`, which decides whether a session may name its project.
+`tokenPace.attribution`, which decides whether a session may name its project. The running count
+can also go on the status bar: `agents` in `tokenPace.statusBar.show` (see
+[Running now](#running-now)).

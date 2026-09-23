@@ -16,7 +16,7 @@
 import { SOURCES, USAGE_PAGE } from './adapters'
 import { AGENT_RETENTION_DAYS, AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { buildAgentTree } from './agentTreeBuild'
-import { Aggregator, Metric, billable } from './agg'
+import { Aggregator, HourQuery, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
 import {
   Config, contextNote, DashboardSection, PlanSource, planNameOf, planText, readPaceConfig,
@@ -40,12 +40,12 @@ import { turnedOver } from './resetRule'
 import type { ContextReading, PromptCacheReading } from './quotaSources'
 import {
   CacheEconomyRow, CalendarRows, ChartData, ChartSeries,
-  CompositionEntry, DrillData, HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
+  CompositionEntry, DrillData, HeatmapData, HourSums, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
   ModelSort, ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData,
   SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, TotalsWindow,
   cacheEconomy, cacheStates, calendar, chart, composition,
   drill as drillStats, filterFor, heatmap, hours, kpis, localBlock, modelTable, planFactors,
-  projectRows, records as recordsOf, sessionRows, totalsFor,
+  projectRows, records as recordsOf, sessionRows, totalsFor, totalsWindowSpans,
 } from './stats'
 import {
   DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatDay, formatReset,
@@ -1085,15 +1085,50 @@ function windowFamily(name: string): string | null {
 /**
  * P10c (1.6): the models a model-scoped window counts — every Claude model id the aggregator's
  * buckets carry whose family is the window's; `sumHours` then takes their hour buckets alone. Empty
- * when nothing of that family was ever counted.
+ * when nothing of that family was ever counted. The model ids come from the build's hour sums
+ * (`HourSums.modelsOf`), one pass however many windows ask.
  */
-function familyModels(agg: Aggregator, family: string): string[] {
-  const seen = new Map<string, boolean>()
-  for (const b of agg.all()) {
-    if (b.source !== 'claude' || seen.has(b.model)) continue
-    seen.set(b.model, claudeFamily(b.model) === family)
+function familyModels(hours: HourSums, family: string): string[] {
+  return hours.modelsOf('claude').filter((model) => claudeFamily(model) === family)
+}
+
+/**
+ * N7: where a window's share is summed — the totals row's bounds and, for a model-scoped window,
+ * its family's models — or null for a window that has no share to sum (no bounds, a start still
+ * ahead, a family nothing was counted for). The part of `agentShareOf` that needs no sum, so a
+ * build can ask for every window's sums together (`agentShareQueries`).
+ */
+function agentShareSpan(
+  hours: HourSums, w: Pick<QuotaWindow, 'resetsAt' | 'windowMinutes'> & Partial<Pick<QuotaWindow, 'model'>>, now: number,
+): { from: number; to: number; models: string[] | undefined } | null {
+  if (w.resetsAt === null || w.windowMinutes === null) return null
+  if (!Number.isFinite(w.resetsAt) || !Number.isFinite(w.windowMinutes) || w.windowMinutes <= 0) return null
+  const from = w.resetsAt - w.windowMinutes * 60_000
+  const to = Math.min(now, w.resetsAt)
+  if (!(to > from)) return null
+  let models: string[] | undefined
+  if (typeof w.model === 'string' && w.model.trim() !== '') {
+    const family = windowFamily(w.model)
+    if (family === null) return null
+    models = familyModels(hours, family)
+    if (models.length === 0) return null
   }
-  return [...seen].filter(([, match]) => match).map(([model]) => model).sort()
+  return { from, to, models }
+}
+
+/** The two hour sums a window's share takes — all Claude tokens of the span and the subagents' — as `HourSums.prefetch` asks for them. */
+function agentShareQueries(hours: HourSums, w: QuotaWindow, now: number): HourQuery[] {
+  const span = agentShareSpan(hours, w, now)
+  if (span === null) return []
+  return [
+    { fromMs: span.from, toMs: span.to, filter: { source: 'claude', models: span.models } },
+    { fromMs: span.from, toMs: span.to, filter: { source: 'claude', isSub: true, models: span.models } },
+  ]
+}
+
+/** The data-quality line's span of subagent hour buckets: the last seven days (`agentTokensOf`). */
+function agentTokensQuery(now: number): HourQuery {
+  return { fromMs: now - AGENT_RETENTION_DAYS * 86_400_000, toMs: now, filter: { source: 'claude', isSub: true } }
 }
 
 /**
@@ -1120,29 +1155,23 @@ function familyModels(agg: Aggregator, family: string): string[] {
  * about agents to a reader who has none. Where agents ran elsewhere, a window's "0 %" stays: a
  * measured zero. The window's percent is not an input — this is a share of tokens counted here,
  * never of the provider's quota.
+ *
+ * `hours` are the view-model build's shared hour sums (1.6 L5): the whole of the window is the very
+ * sum its totals row takes. Left out, the two sums are made here.
  */
 export function agentShareOf(
   agg: Aggregator, w: Pick<QuotaWindow, 'resetsAt' | 'windowMinutes'> & Partial<Pick<QuotaWindow, 'model'>>, now: number,
-  agentsSeen?: boolean,
+  agentsSeen?: boolean, hours: HourSums = new HourSums(agg),
 ): { text: string; parts: AgentShareParts } | null {
-  if (w.resetsAt === null || w.windowMinutes === null) return null
-  if (!Number.isFinite(w.resetsAt) || !Number.isFinite(w.windowMinutes) || w.windowMinutes <= 0) return null
-  const from = w.resetsAt - w.windowMinutes * 60_000
-  const to = Math.min(now, w.resetsAt)
-  if (!(to > from)) return null
-  let models: string[] | undefined
-  if (typeof w.model === 'string' && w.model.trim() !== '') {
-    const family = windowFamily(w.model)
-    if (family === null) return null
-    models = familyModels(agg, family)
-    if (models.length === 0) return null
-  }
-  const all = agg.sumHours(from, to, { source: 'claude', models })
+  const span = agentShareSpan(hours, w, now)
+  if (span === null) return null
+  const { from, to, models } = span
+  const all = hours.get(from, to, { source: 'claude', models })
   const total = billable(all.bucket)
   if (!(total > 0)) return null
-  const sub = billable(agg.sumHours(from, to, { source: 'claude', isSub: true, models }).bucket)
+  const sub = billable(hours.get(from, to, { source: 'claude', isSub: true, models }).bucket)
   if (!Number.isFinite(sub)) return null
-  if (!(sub > 0) && !(agentsSeen ?? agentTokensOf(agg, now) !== null)) return null
+  if (!(sub > 0) && !(agentsSeen ?? agentTokensOf(agg, now, hours) !== null)) return null
   const mark = (s: string): string => (all.complete ? s : `≈${s}`)
   const parts: AgentShareParts = { sub: mark(compact(sub)), total: mark(compact(total)), share: agentShareWord(sub, total) }
   return { text: t('Subagents {0} of {1} counted here ({2})', parts.sub, parts.total, parts.share), parts }
@@ -1160,7 +1189,7 @@ export function agentShareOf(
  * agent that started eight days ago is whole in its record and only partly in the buckets — which
  * is what the note says; neither is corrected by the other.
  */
-function agentTokensOf(agg: Aggregator, now: number): DataQuality['agents'] {
+function agentTokensOf(agg: Aggregator, now: number, hourSums: HourSums = new HourSums(agg)): DataQuality['agents'] {
   const since = now - AGENT_RETENTION_DAYS * 86_400_000
   const byId = new Map<string, AgentRec>()
   for (const r of agg.agents()) {
@@ -1180,7 +1209,8 @@ function agentTokensOf(agg: Aggregator, now: number): DataQuality['agents'] {
     })
     if (Number.isFinite(use) && use > 0) records += use
   }
-  const hours = agg.sumHours(since, now, { source: 'claude', isSub: true })
+  const q = agentTokensQuery(now)
+  const hours = hourSums.get(q.fromMs, q.toMs, q.filter)
   const buckets = billable(hours.bucket)
   if (!(records > 0) && !(buckets > 0)) return null
   return {
@@ -1234,7 +1264,7 @@ function quotaCard(
     // N7 (1.6): Claude Code's subagents are Claude's alone — Codex records no agent the section
     // could name, and its forks are not what the Agents section counts. P10c: a model window counts
     // its own models only, and a reader with no agent at all gets no line.
-    const share = q.source === 'claude' ? agentShareOf(input.agg, w, now, agentsSeen) : null
+    const share = q.source === 'claude' ? agentShareOf(input.agg, w, now, agentsSeen, ctx.hours) : null
     return {
       id: w.id,
       label: w.label,
@@ -1565,11 +1595,15 @@ export function buildViewModel(input: VmInput): ViewModel {
   const paceCfg = readPaceConfig(cfg)
   const pricing: PricingOptions = pricingOf(cfg)
   const sources: Source[] = ui.providers.length > 0 ? [...ui.providers] : [...SOURCES]
+  // 1.6 L5 (Review 3): every hour span of this build summed once, and shared by the tables that
+  // sum the same one — see `HourSums` and the prefetch below.
+  const hourSums = new HourSums(agg)
   const ctx: StatsCtx = {
     agg, tcfg, pricing, now, sources, models: ui.models, showCost: cfg.showCost,
     // Stated rather than inferred: with attribution off the session table is empty, and the
     // records must say "switched off" instead of "nothing worth showing".
     attribution: cfg.attribution,
+    hours: hourSums,
   }
   const range = input.range
   const previous = previousRange(range)
@@ -1584,10 +1618,6 @@ export function buildViewModel(input: VmInput): ViewModel {
   }
 
   const forecasts = forecastsFor(quotas, history, input.fingerprints, input.forecastCfg, now, paceCfg, tcfg)
-  // N7 (1.6): the subagent tokens of the last seven days, counted once — the data-quality line
-  // prints them, and a quota card's share line is not drawn where they are none (P10c).
-  const agentTokens = agentTokensOf(agg, now)
-  const cards = quotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null))
 
   // The provider's own windows, so the totals table can hold the running 5 h and 7 d spans
   // against exactly the bounds the quota card above it draws.
@@ -1599,6 +1629,21 @@ export function buildViewModel(input: VmInput): ViewModel {
   // 7 and 30 days, this week, this month, all time) of every provider and model, and the
   // composition bars and the cache economy take the last 30 days and say so.
   const whole: StatsCtx = { ...ctx, sources: [...SOURCES], models: [] }
+
+  // 1.6 L5 (Review 3): the hour spans this build sums, in one pass over the buckets — the totals
+  // table's window rows of every provider, each Claude window's subagent share over the very same
+  // bounds (its whole is the totals row's sum, shared), and the data-quality line's seven days.
+  hourSums.prefetch([
+    ...whole.sources.flatMap((source) => totalsWindowSpans(now, windowsOf(source))
+      .map((span): HourQuery => ({ fromMs: span.fromMs, toMs: span.toMs, filter: filterFor(whole, source) }))),
+    ...quotas.filter((q) => q.source === 'claude').flatMap((q) => q.windows.flatMap((w) => agentShareQueries(hourSums, w, now))),
+    agentTokensQuery(now),
+  ])
+
+  // N7 (1.6): the subagent tokens of the last seven days, counted once — the data-quality line
+  // prints them, and a quota card's share line is not drawn where they are none (P10c).
+  const agentTokens = agentTokensOf(agg, now, hourSums)
+  const cards = quotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null))
   const month = rangeFor('30d', now, tcfg)
   const totals = whole.sources.map((source) => ({
     source,

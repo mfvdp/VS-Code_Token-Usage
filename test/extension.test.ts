@@ -1373,6 +1373,36 @@ test('a poll pass lists the agent files of active sessions only and hands on the
   assert.deepEqual(scan.activeAgentSessions(agg.Aggregator.fromSnapshot(snap), now), [active, lively].sort())
 })
 
+test('an agent that writes nothing but rejected requests keeps its session in the poll while they keep coming (1.6 P5b #5)', async () => {
+  // A transcript of nothing but requests the API rejected has its record from its first one
+  // (D4), and a later rejection moves only the record's rejection, not its last reply: the check
+  // read the last reply alone, so a session whose one agent kept being rejected dropped out of the
+  // poll ten minutes after the first rejection, while the agent was still being written.
+  const { scan, agg, discover } = lazy()
+  const home = tmpDir('tp-poll-rejected')
+  const at = (...p: string[]): string => path.join(home, 'projects', '-tmp-poll', ...p)
+  const now = Date.now()
+  const main = at('s-rejected.jsonl')
+  const agent = at('s-rejected', 'subagents', 'agent-ab12.jsonl')
+  writeLines(main, [claudeLine({ id: 'm1', ts: now - HOUR, usage: { input: 1 } })])
+  writeLines(agent, [apiErrorLine({ id: 'r1', ts: now - HOUR, agentId: 'ab12' })])
+  discover.configureRoots([home], [path.join(home, 'codex')])
+  const a = new agg.Aggregator()
+  await scan.scan(a)
+  assert.deepEqual(scan.activeAgentSessions(a, now), [], 'one rejection an hour ago is no activity now')
+
+  appendLine(agent, apiErrorLine({ id: 'r2', ts: now - MINUTE, agentId: 'ab12' }))
+  await scan.scan(a, { files: [agent] })
+  const rec = a.agents().find((r) => r.agentId === 'ab12')
+  assert.ok(rec)
+  assert.equal(rec.requests, 0)
+  assert.equal(rec.lastTs, now - HOUR, 'a rejection moved the last reply')
+  assert.equal(rec.rejected?.at, now - MINUTE)
+  assert.deepEqual(scan.activeAgentSessions(a, now), [main])
+  // And ten minutes after the latest one the session is idle again.
+  assert.deepEqual(scan.activeAgentSessions(a, now - MINUTE + 11 * MINUTE), [])
+})
+
 test('the poll is wanted while an agent runs or a session is active, and never for an idle one', () => {
   // 1.6 D8: an active session may start a workflow run at any moment, and a `Workflow` call
   // leaves no launch the tree could wait on — so an active session is enough, whatever is below
@@ -1463,6 +1493,259 @@ test('the poll keeps one timer at most, never runs two passes at once, and outli
   assert.equal(failures, 2)
   failing.dispose()
   assert.equal(t.cleared, true)
+})
+
+// ---------------------------------------------------------------------------
+// The live cost (1.6 L5)
+// ---------------------------------------------------------------------------
+
+/** A LiveCadence with spies for its two rebuilds. */
+function cadenceWithSpies(minMs?: number): {
+  cadence: InstanceType<ReturnType<typeof lazy>['ext']['LiveCadence']>
+  full: number[]
+  agents: number[]
+  failNext: { value: boolean }
+} {
+  const { ext } = lazy()
+  const full: number[] = []
+  const agents: number[] = []
+  const failNext = { value: false }
+  const cadence = new ext.LiveCadence({
+    full: (now) => {
+      if (failNext.value) { failNext.value = false; return false }
+      full.push(now)
+      return true
+    },
+    agents: (now) => { agents.push(now) },
+  }, minMs)
+  return { cadence, full, agents, failNext }
+}
+
+test('a change of the agent tables alone rebuilds the Agents section alone, never the whole view model (1.6 L5)', () => {
+  const { ext } = lazy()
+  assert.equal(ext.VM_MIN_INTERVAL_MS, 5000)
+  const { cadence, full, agents } = cadenceWithSpies()
+  // No whole model yet: an ingest builds it — there is nothing an Agents section could go onto.
+  assert.equal(cadence.ingested({ buckets: false, agents: true }, 1_000), 'full')
+  assert.deepEqual(full, [1_000])
+  // A journal line, a parent's result, a sidecar a moment later: the section alone, again and again.
+  for (const at of [1_400, 1_800, 7_000, 60_000]) assert.equal(cadence.ingested({ buckets: false, agents: true }, at), 'agents')
+  assert.deepEqual(full, [1_000], 'buildViewModel ran for a change of the agent tables')
+  assert.deepEqual(agents, [1_400, 1_800, 7_000, 60_000])
+  assert.equal(cadence.stale, false)
+  // Nothing changed at all: nothing is rebuilt.
+  assert.equal(cadence.ingested({ buckets: false, agents: false }, 61_000), 'none')
+  assert.deepEqual(agents.length, 4)
+  // An event is whole, always; so is a tick once the interval has passed — as before 1.6.
+  cadence.event(61_500)
+  cadence.tick(62_000)
+  cadence.tick(66_499)
+  cadence.tick(66_500)
+  assert.deepEqual(full, [1_000, 61_500, 66_500])
+})
+
+test('a burst of bucket lines over 12 s makes at most three whole rebuilds, and every change reaches one within the interval (1.6 L5)', () => {
+  const { cadence, full, agents } = cadenceWithSpies()
+  cadence.event(0)
+  // An ingest every 400 ms (the debounce) with tokens of a running agent, and the one-second tick.
+  let pendingSince: number | null = null
+  let longestWait = 0
+  const plans: string[] = []
+  for (let at = 100; at <= 12_000; at += 100) {
+    const before = full.length
+    if (at % 400 === 0) {
+      plans.push(cadence.ingested({ buckets: true, agents: true }, at))
+      if (full.length === before && pendingSince === null) pendingSince = at
+    }
+    if (at % 1000 === 0) cadence.tick(at)
+    if (full.length > before && pendingSince !== null) {
+      longestWait = Math.max(longestWait, at - pendingSince)
+      pendingSince = null
+    }
+  }
+  const whole = full.filter((at) => at > 0)
+  assert.ok(whole.length <= 3, `${whole.length} whole rebuilds: ${whole.join(', ')}`)
+  assert.ok(whole.length >= 2, 'the deferred bucket changes never reached a whole rebuild')
+  // 1.5 rebuilt the whole model on every ingest: thirty of them here. Now each is either the
+  // whole model (when the interval has passed) or the Agents section alone — the tree stays live.
+  assert.equal(plans.length, 30)
+  assert.ok(plans.every((p) => p === 'full' || p === 'agents'), plans.join(', '))
+  assert.equal(agents.length, plans.filter((p) => p === 'agents').length)
+  assert.ok(longestWait <= 5000, `a bucket change waited ${longestWait} ms`)
+  // The last change is still waiting, and the next tick past the interval takes it.
+  assert.equal(cadence.stale, true)
+  cadence.tick(full[full.length - 1] + 5000)
+  assert.equal(cadence.stale, false)
+})
+
+test('a whole rebuild that failed leaves the bucket change stale and is tried again at the next tick (1.6 L5)', () => {
+  const { cadence, full, failNext } = cadenceWithSpies()
+  cadence.event(0)
+  cadence.ingested({ buckets: true, agents: false }, 1_000)
+  assert.equal(cadence.stale, true)
+  failNext.value = true
+  cadence.tick(5_000)
+  assert.equal(cadence.stale, true, 'a failed build took the change with it')
+  cadence.tick(6_000)
+  assert.deepEqual(full, [0, 6_000])
+  assert.equal(cadence.stale, false)
+  // A clock that went back is no interval: the next frame is whole.
+  cadence.ingested({ buckets: true, agents: false }, 3_000)
+  assert.deepEqual(full, [0, 6_000, 3_000])
+})
+
+test('the timed save runs every 10 s while the agent poll is on and every 5 s while it is off (1.6 L5)', () => {
+  const { ext } = lazy()
+  assert.equal(ext.SAVE_MS, 5000)
+  assert.equal(ext.AGENT_SAVE_MS, 10_000)
+  const saves = (pollOn: boolean): number[] => {
+    const out: number[] = []
+    let last: number | null = null
+    // The save timer's ticks, a few milliseconds early or late each.
+    for (let i = 1; i <= 12; i++) {
+      const at = i * ext.SAVE_MS + (i % 2 === 0 ? 7 : -7)
+      if (ext.timedSaveDue(at, last, pollOn)) { out.push(at); last = at }
+    }
+    return out
+  }
+  const on = saves(true)
+  assert.equal(on.length, 6)
+  for (let i = 1; i < on.length; i++) assert.ok(Math.abs(on[i] - on[i - 1] - 10_000) <= 20, on.join(', '))
+  assert.equal(saves(false).length, 12)
+  // The first tick always saves, and a clock that went back is no reason to wait.
+  assert.equal(ext.timedSaveDue(1_000, null, true), true)
+  assert.equal(ext.timedSaveDue(1_000, 50_000, true), true)
+})
+
+test('a journal line pushes the Agents section and the status bar entry alone; a whole rebuild would have pushed more (1.6 L5, O1)', async () => {
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const RUN3 = 'wf_e0e0e0e0-5555-4555'
+  const intervals = holdIntervals()
+  const seeAgain = blindRecursiveWatchers()
+  try {
+    await activateHost(fx, REPO, { settings: { 'tokenPace.statusBar.show': ['claudeQuota', 'agents', 'tokens'] } })
+    const { agg } = lazy()
+    await waitFor('the whole tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+    // O1: the running workflow agent, on the bar.
+    await waitFor('the agents entry', () => state.textOf('tokenPace.agents') === '~1 running')
+    const page = openDashboard()
+    await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+    // The session opened, so its runs are on the page.
+    page.post({ type: 'agentToggle', key: `s:${ACTIVE}` })
+    await sleep(500)
+    const mark = page.sent.length
+
+    // A new run's journal — its first line, an agent started and no transcript of it yet: the
+    // agent tables change, no bucket does. A new file too, which a whole rebuild would count.
+    writeLines(path.join(w.project, ACTIVE, 'subagents', 'workflows', RUN3, 'journal.jsonl'),
+      [journalLine({ type: 'started', agentId: 'a3a3a3' })])
+    assert.ok(intervals.fire(60_000) > 0, 'no sweep interval is armed')
+    const runKey = `w:${ACTIVE}|${RUN3}`
+    const pushedAfter = (from: number): Array<{ type?: unknown; key?: unknown; payload?: { agents?: AgentTreeVm } }> =>
+      page.sent.slice(from) as Array<{ type?: unknown; key?: unknown; payload?: { agents?: AgentTreeVm } }>
+    await waitFor('the new run on the page', () => pushedAfter(mark).some((m) =>
+      m.type === 'section' && m.key === 'agents' && treeKeys(m.payload?.agents?.roots ?? []).includes(runKey)))
+    await sleep(300)
+    assert.deepEqual(pushedAfter(mark).map((m) => `${String(m.type)} ${String(m.key)}`), pushedAfter(mark).map(() => 'section agents'),
+      'a change of the agent tables alone pushed more than the Agents section')
+    // The entry followed the tree without a tick of its own: the run's journal-only agent runs too.
+    assert.equal(state.textOf('tokenPace.agents'), '~2 running')
+
+    // What the whole view model would have said: one file more on the data-quality line.
+    const mark2 = page.sent.length
+    page.post({ type: 'refresh' })
+    await waitFor('the data-quality section', () => pushedAfter(mark2).some((m) => m.type === 'section' && m.key === 'dataQuality'))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    seeAgain()
+    intervals.restore()
+  }
+})
+
+test('while the agent poll is on the state is saved every 10 s, while it is off every 5 s, and the exit save writes what is left (1.6 L5)', async () => {
+  const promises = (require('fs') as typeof fs).promises as unknown as {
+    writeFile: (...args: unknown[]) => Promise<void>
+    rename: (...args: unknown[]) => Promise<void>
+  }
+  const nodeFs = require('fs') as { writeFileSync: (...args: unknown[]) => void }
+  const realWrite = promises.writeFile
+  const realRename = promises.rename
+  const realWriteSync = nodeFs.writeFileSync
+  const renamed: string[] = []
+  const realNow = Date.now
+  let offset = 0
+  const writes: string[] = []
+  const ROLLUP_MS = 6 * 60 * 60_000
+  const run = async (fx: Fixture, pollOn: boolean): Promise<{ timed: number[]; exit: number }> => {
+    const tmp = `${fx.stateFile}.tmp`
+    const exitTmp = `${fx.stateFile}.exit.tmp`
+    writes.length = 0
+    renamed.length = 0
+    // A save has ended once its temp file was renamed into place: the write is under way before
+    // the temp file exists, so its absence says nothing.
+    const saved = (): number => writes.filter((f) => f === tmp).length
+    const ended = (): boolean => renamed.filter((f) => f === tmp).length === saved()
+    const intervals = holdIntervals()
+    try {
+      await activateHost(fx, REPO)
+      await waitFor('the cold start\'s save', () => saved() > 0 && ended())
+      if (pollOn) await waitFor('the poll to start', () => state.logText().includes('Agent poll: on'))
+      else {
+        await sleep(300)
+        assert.doesNotMatch(state.logText(), /Agent poll: on/)
+      }
+      const timed: number[] = []
+      for (let tick = 1; tick <= 4; tick++) {
+        offset += 5000
+        // The roll-up leaves the state to be saved, as an ingest would.
+        assert.ok(intervals.fire(ROLLUP_MS) > 0)
+        const before = saved()
+        assert.ok(intervals.fire(5000) > 0, 'no save interval is armed')
+        await waitFor('the save to end', ended)
+        if (saved() > before) timed.push(tick)
+      }
+      // One more change nothing saves before the window goes: the exit save writes it.
+      intervals.fire(ROLLUP_MS)
+      assert.deepEqual(disposeAll(LIVE.pop()!), [])
+      return { timed, exit: writes.filter((f) => f === exitTmp).length }
+    } finally {
+      intervals.restore()
+    }
+  }
+  promises.writeFile = (...args: unknown[]): Promise<void> => {
+    writes.push(String(args[0]))
+    return realWrite.apply(promises, args)
+  }
+  promises.rename = (...args: unknown[]): Promise<void> =>
+    realRename.apply(promises, args).then(() => { renamed.push(String(args[0])) })
+  nodeFs.writeFileSync = (...args: unknown[]): void => {
+    writes.push(String(args[0]))
+    realWriteSync.apply(nodeFs, args)
+  }
+  Date.now = () => realNow() + offset
+  try {
+    // An agent at work in an active session: the poll is on, and every second tick saves.
+    const busy = makeFixture()
+    writeAgentWorld(busy)
+    const on = await run(busy, true)
+    assert.deepEqual(on.timed, [1, 3], `timed saves at ticks ${on.timed.join(', ')}`)
+    assert.equal(on.exit, 1, 'no exit save')
+    assert.ok(readState(busy)?.agents, 'the exit state is not whole')
+
+    // Every session quiet for eleven minutes and no agent: the poll is off, and every tick saves.
+    const quiet = makeFixture()
+    const own = path.join(quiet.claudeRoot, '-tmp-token-pace-synthetic', '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl')
+    fs.writeFileSync(own, fs.readFileSync(own, 'utf8').split(new Date(T).toISOString()).join(new Date(T - 11 * MINUTE).toISOString()))
+    const off = await run(quiet, false)
+    assert.deepEqual(off.timed, [1, 2, 3, 4], `timed saves at ticks ${off.timed.join(', ')}`)
+    assert.equal(off.exit, 1, 'no exit save')
+  } finally {
+    promises.writeFile = realWrite
+    promises.rename = realRename
+    nodeFs.writeFileSync = realWriteSync
+    Date.now = realNow
+  }
 })
 
 test('while an agent runs, the poll hands the new and changed files of active sessions to the ingest, never an idle one, and stops when nothing runs and no session is active', async () => {
@@ -1722,12 +2005,12 @@ test('Copy Agent ID copies the id of the node whose details are open, and nothin
   writeAgentWorld(fx)
   const host = await activateHost(fx, REPO)
   await waitFor('the cold start', () => state.logText().includes('Cold start done'))
-  // The replay after the cold start takes the agent tables apart while it rebuilds them: a
-  // selection made meanwhile finds no node, and the view model no details to copy from. Its end
-  // is read off this fixture's saved state — a log line may be an earlier test's replay, still
-  // running when that test disposed its activation.
+  // The tables are whole once the cold start has saved them, marked of this build's revision
+  // (1.6 L5: a first start reads every line itself and replays nothing). Read off this fixture's
+  // saved state — a log line may be an earlier test's, still running when that test disposed its
+  // activation.
   const { agg } = lazy()
-  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  await waitFor('the whole tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   const page = openDashboard()
   await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
   const before = state.clipboard.length
@@ -1755,11 +2038,12 @@ test('the usage document prints every node of the agent tree, though the dashboa
   writeAgentWorld(fx)
   await activateHost(fx, REPO)
   await waitFor('the cold start', () => state.logText().includes('Cold start done'))
-  // The tables are whole once the replay after the cold start has rebuilt them — read off this
-  // fixture's saved state, as a log line may be an earlier test's replay. The page's first
-  // payload may be a view model built before that — before the cold start's own frame, even.
+  // The tables are whole once the cold start has saved them, marked of this build's revision
+  // (1.6 L5) — read off this fixture's saved state, as a log line may be an earlier test's. The
+  // page's first payload may be a view model built before that — before the cold start's own
+  // frame, even.
   const { agg } = lazy()
-  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  await waitFor('the whole tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   const page = openDashboard()
   const pageTree = (): AgentTreeVm | undefined => {
     const carrying = page.sent.filter((m) => {
@@ -1785,7 +2069,7 @@ test('the usage document prints every node of the agent tree, though the dashboa
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
-test('the agent tables of an upgraded snapshot are replayed once after the cold start, not on the next start, and by a re-read', async () => {
+test('the agent tables of an upgraded snapshot are replayed once after the cold start, not on the next start, and not after a re-read', async () => {
   const fx = makeFixture()
   const w = writeAgentWorld(fx)
   const fixtureMain = path.join(w.project, '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl')
@@ -1849,14 +2133,58 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
   await sleep(300)
   assert.doesNotMatch(state.logText(), /Agent replay/)
 
-  // --- "Re-read token history" replays over what it has just read ---------------
+  // --- "Re-read token history" reads every line itself, and replays nothing ------
+  // 1.6 L5 (§7c, Review 1 #2): until P11 the re-read replayed over what it had just read — the
+  // same lines once more, the tree half built meanwhile. Its scan starts with no cursor, so the
+  // tables it leaves are of this build's revision, and the state says so.
   await state.execute('tokenPace.rescan')
-  assert.match(state.logText(), /Agent replay \(re-read\): \d+ file\(s\) read again/)
+  assert.doesNotMatch(state.logText(), /Agent replay/)
   const reread = readState(fx)
   assert.ok(reread)
   assert.equal(reread.agentsRevision, agg.AGENT_TABLES_REVISION)
   assert.deepEqual(Object.keys(reread.agents ?? {}).sort(), [w.running, w.sync, w.idleAgent].sort())
+  assert.equal(reread.agents?.[w.sync]?.outcome, 'completed')
+  assert.equal(reread.agents?.[w.sync]?.meta?.agentType, 'Explore')
+  assert.equal(reread.launches?.toolu_sync01?.agentId, 'c3c3c3')
+  assert.deepEqual(Object.keys(reread.mains ?? {}).sort(), [fixtureMain, w.activeMain, w.idleMain].sort())
   assert.deepEqual(fingerprintOf(reread), fingerprintOf(v6))
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a first start with no stored state reads the agent tables whole and replays nothing; a state of an older revision is replayed (1.6 L5)', async () => {
+  // §7c (Review 1 #2): the cold scan of a first start reads every line from the first byte, so
+  // the replay that followed it read the same lines again — and took the tables apart while it
+  // did, the tree half built for that while.
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const { agg } = lazy()
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitFor('the state to be saved', () => readState(fx) !== null)
+  const first = readState(fx)!
+  assert.equal(first.agentsRevision, agg.AGENT_TABLES_REVISION, 'the cold scan did not mark its tables of this revision')
+  await sleep(300)
+  assert.doesNotMatch(state.logText(), /Agent replay/)
+  // Whole without it: every agent, the sync agent's outcome and identity, its launch, every session.
+  assert.deepEqual(Object.keys(first.agents ?? {}).sort(), [w.running, w.sync, w.idleAgent].sort())
+  assert.equal(first.agents?.[w.sync]?.outcome, 'completed')
+  assert.equal(first.agents?.[w.sync]?.meta?.agentType, 'Explore')
+  assert.equal(first.agents?.[w.running]?.workflowId, RUN)
+  assert.equal(first.launches?.toolu_sync01?.agentId, 'c3c3c3')
+  assert.deepEqual((first.runs?.[`${ACTIVE}|${RUN}`]?.agents ?? []).map((a) => a.agentId), ['a1a1a1'])
+  await state.execute('tokenPace.showUsageMarkdown')
+  assert.match(lastMarkdown(), /\[~Running\] workflow-subagent · claude-[^ ]+ · a1a1/)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // A stored state whose tables are of an older revision — read on from its cursors — is still
+  // replayed once, as every upgrade is.
+  const older = readState(fx)!
+  older.agentsRevision = agg.AGENT_TABLES_REVISION - 1
+  fs.writeFileSync(fx.stateFile, JSON.stringify(older))
+  await activateHost(fx, REPO)
+  await waitFor('the replay after the cold start', () => /Agent replay \(cold start\): \d+ file\(s\) read again/.test(state.logText()))
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  assert.deepEqual(Object.keys(readState(fx)?.agents ?? {}).sort(), [w.running, w.sync, w.idleAgent].sort())
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
@@ -1864,8 +2192,12 @@ test('a replay still saving at disposal draws no frame after it and leaves the e
   // Held still, the interleaving a loaded machine produced now and then: the replay after the
   // cold start is saving the tables it rebuilt when the window goes. The frame it drew once the
   // save was done built status bar items nothing ever disposed — into the next test's recording,
-  // too — and its temp file was the exit save's as well.
+  // too — and its temp file was the exit save's as well. 1.6 L5: a first start with no stored
+  // state replays nothing any more, so the window starts from a stored state whose tables were
+  // never replayed — revision 0, as a build before 1.6 leaves them.
   const fx = makeFixture()
+  const seeded = await seedSnapshot(fx, 8)
+  assert.equal(seeded.agentsRevision, 0)
   const tmp = `${fx.stateFile}.tmp`
   // The module object itself, as in `blindRecursiveWatchers`: the bundle reads `writeFile` from
   // it at every call.

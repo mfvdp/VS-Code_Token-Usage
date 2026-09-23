@@ -14,7 +14,7 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `statusBar.show` | `["claudeQuota","codexQuota","tokens"]` | Which entries the status bar shows **and in which order**: `claudeQuota`, `codexQuota`, `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`. Empty hides the bar. `cost` needs `showCost`, `forecast` needs `quotaHistoryDays` above 0, `context` needs the connected status line, `budget` needs `budgets` |
+| `statusBar.show` | `["claudeQuota","codexQuota","tokens"]` | Which entries the status bar shows **and in which order**: `claudeQuota`, `codexQuota`, `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`, `agents`. Empty hides the bar. `cost` needs `showCost`, `forecast` needs `quotaHistoryDays` above 0, `context` needs the connected status line, `budget` needs `budgets`, `agents` shows only while a Claude Code agent runs |
 | `windowSelect` | `worstPace` | Which quota windows appear: `worstPace` (one entry per tool — the window that needs attention), `all`, `leading`, `session`, `weekly`, `auto` |
 | `density` | `full` | `full`, `compact` (one item per provider), `minimal` (one item in total) |
 | `clickAction` | `dashboard` | What a click does: `dashboard`, `menu`, `refresh`, `openWebsite`. A problem state always performs its repair instead |

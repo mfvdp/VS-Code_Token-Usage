@@ -27,7 +27,7 @@ import { AgentLaunch, AgentRec, Snapshot, STATE_VERSION, TOOL_NAME_MAX_CHARS } f
 import { markdownDocument } from '../src/textViews'
 import { agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
-  CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, ctxFor, iso, journalLine,
+  CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, codexTokenCount, ctxFor, iso, journalLine,
   metaJson, queueOperationLine, tmpDir, workflowResultLine,
 } from './fixtures/helpers'
 import { NOW as VNOW, makeConfig, makeInput } from './fixtures/viewFixtures'
@@ -1834,4 +1834,64 @@ test('a nested effort, a proposal\'s text and an error line\'s effort never leav
     assert.equal(/"effort":"(M|medium|low)"/.test(out), false, `${what} holds an effort that is no reply's own`)
     assert.equal(/perTurnEffort|proposals/.test(out), false, `${what} names a field the reader never reads`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 L5: what a read changed — the buckets, the agent tables — reset on read
+// ---------------------------------------------------------------------------
+
+test('takeChanges says what the reads changed — the buckets or the agent tables — and starts afresh on every call (1.6 L5)', () => {
+  const agg = new Aggregator()
+  const none = { buckets: false, agents: false }
+  assert.deepEqual(agg.takeChanges(), none)
+
+  // A reply of a main session: its tokens, and the session's record the tree roots on.
+  assert.equal(agg.addClaudeLine(claudeLine({ id: 'msg_m1', ts: T0, usage: { input: 10, output: 1 }, final: true }), MAIN_CTX), true)
+  assert.deepEqual(agg.takeChanges(), { buckets: true, agents: true })
+  assert.deepEqual(agg.takeChanges(), none, 'not reset on read')
+
+  // An agent launch without tokens: a launch, no bucket.
+  agg.addClaudeLine(agentToolUseLine({ id: 'msg_m2', ts: T0 + 1000, toolUseId: 'toolu_c1', subagentType: 'Explore' }), MAIN_CTX)
+  const launch = agg.takeChanges()
+  assert.equal(launch.agents, true)
+  // The launch line carries the parent's usage too, which is counted: buckets as well.
+  assert.equal(launch.buckets, true)
+
+  // The parent's result, a notification, a journal line, a sidecar: the agent tables alone.
+  assert.equal(agg.addClaudeLine(agentResultLine({ ts: T0 + 2000, toolUseId: 'toolu_c1', agentId: 'abc123', status: 'async_launched' }), MAIN_CTX), true)
+  assert.deepEqual(agg.takeChanges(), { buckets: false, agents: true })
+  assert.equal(agg.addClaudeLine(queueOperationLine({ ts: T0 + 3000, toolUseId: 'toolu_c1', status: 'completed' }), MAIN_CTX), true)
+  assert.deepEqual(agg.takeChanges(), { buckets: false, agents: true })
+  assert.equal(agg.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'def456' }), JOURNAL_CTX), true)
+  assert.deepEqual(agg.takeChanges(), { buckets: false, agents: true })
+  agg.noteJournalRead(JOURNAL, T0 + 4000)
+  assert.deepEqual(agg.takeChanges(), { buckets: false, agents: true })
+  agg.noteJournalRead(JOURNAL, T0 + 4000)
+  assert.deepEqual(agg.takeChanges(), none, 'the same journal time again is no change')
+  agg.addClaudeLine(claudeLine({ id: 'msg_a1', ts: T0 + 5000, agentId: 'abc123', usage: { input: 20, output: 2 } }), AGENT_CTX)
+  agg.takeChanges()
+  agg.setAgentMeta(AGENT, parseAgentMeta(metaJson({ agentType: 'Explore', toolUseId: 'toolu_c1' })))
+  assert.deepEqual(agg.takeChanges(), { buckets: false, agents: true })
+  // A rejected request of the agent: its record, no token.
+  assert.equal(agg.addClaudeLine(apiErrorLine({ id: 'err_1', ts: T0 + 6000, agentId: 'abc123' }), AGENT_CTX), true)
+  assert.deepEqual(agg.takeChanges(), { buckets: false, agents: true })
+
+  // A Codex reply: its buckets alone — Codex writes no agent table.
+  const cur = newCursor()
+  agg.addCodexLine(codexTokenCount({ ts: T0 + 7000, total: { input: 100, cached: 0, output: 10, total: 110 } }), cur,
+    ctxFor({ file: '/virtual/codex/sessions/rollout-1.jsonl' }))
+  assert.deepEqual(agg.takeChanges(), { buckets: true, agents: false })
+
+  // A line that changes nothing, and a query, change nothing.
+  assert.equal(agg.addClaudeLine('{"type":"summary","summary":"synthetic"}', MAIN_CTX), false)
+  agg.sumHours(T0 - 3_600_000, T0 + 3_600_000)
+  agg.agents()
+  agg.toSnapshot()
+  assert.deepEqual(agg.takeChanges(), none)
+
+  // A replay rebuilds the agent tables and nothing that counts.
+  agg.beginAgentReplay([AGENT])
+  agg.addClaudeLine(claudeLine({ id: 'msg_a1', ts: T0 + 5000, agentId: 'abc123', usage: { input: 20, output: 2 } }), { ...AGENT_CTX, agentsOnly: true })
+  agg.endAgentReplay()
+  assert.deepEqual(agg.takeChanges(), { buckets: false, agents: true })
 })

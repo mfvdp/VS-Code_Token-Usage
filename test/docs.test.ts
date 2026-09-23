@@ -26,7 +26,7 @@ import { PaceConfig, paceVerdict } from '../src/pace'
 import { priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
 import { AGENT_META_MAX_BYTES } from '../src/scan'
-import { selectWindows, viewOf, windowValue } from '../src/statusText'
+import { buildItems, selectWindows, viewOf, windowValue } from '../src/statusText'
 import { formatReset, TimeConfig } from '../src/time'
 import { QuotaState, QuotaWindow } from '../src/types'
 import { MAX_AGENT_EXPANDED } from '../src/viewModel'
@@ -513,6 +513,11 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   const id = /const ID_ALPHABET = \/\^(\[[^\]]+\])\+\$\//.exec(agg)
   const depth = /const MAX_SPAWN_DEPTH = (\d+)/.exec(agg)
   assert.ok(name && id && depth, 'src/agg.ts no longer states its agent alphabets and depth cap')
+  const host = readDoc('src/extension.ts').replace(/_/g, '')
+  const wholeEvery = /export const VMMININTERVALMS = (\d+)/.exec(host)
+  const saveEvery = /export const SAVEMS = (\d+)/.exec(host)
+  const agentSave = /export const AGENTSAVEMS = (\d+)/.exec(host)
+  assert.ok(wholeEvery && saveEvery && agentSave, 'src/extension.ts no longer states its rebuild and save intervals')
   const claims: Array<[string, string]> = [
     [`the last **${AGENT_RETENTION_DAYS} days**`, 'what the tree covers'],
     [`**${AGENT_RETENTION_DAYS} days** after its last line`, 'when a record is dropped'],
@@ -542,6 +547,9 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`From **${PER_MINUTE_FROM_MS / 60_000} minute** on, what it used **per minute**`, 'when an agent\'s pace is stated'],
     // 1.6 L3 (P10a): the 7-day block's rows and its largest agents.
     [`The largest usage first, at most **${WEEK_ROWS}** rows`, 'the rows of the 7-day block'],
+    // 1.6 L5 (P11): how often the other sections follow while agents write, and the save cadence.
+    [`at most once every **${Number(wholeEvery[1]) / 1000} seconds**, the tree and the status bar at every read`, 'the whole rebuild\'s interval'],
+    [`the state is saved at most once every **${Number(agentSave[1]) / 1000} seconds** instead of every ${Number(saveEvery[1]) / 1000}`, 'the save cadence while agents run'],
     [`**The ${TOP_AGENTS} largest agents** by usage`, 'the largest agents the 7-day block names'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],
@@ -553,6 +561,38 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   for (const [claim, what] of claims) {
     assert.ok(flat.includes(claim), `docs/agents.md does not state ${what}: ${claim}`)
   }
+})
+
+test('the status bar pages, the settings page and the setting itself name the agents entry as the status bar writes it (1.6 O1)', () => {
+  const on = sanitize({ 'tokenPace.statusBar.show': ['agents'] })
+  const item = (n: number) => buildItems({
+    quotas: [], agg: { sum: () => { throw new Error('unused') }, cost: () => { throw new Error('unused') } },
+    cfg: on, now: 0, forecasts: new Map(), role: 'single', scanning: false, consent: 'granted',
+    agents: { running: n, now: [], more: 0 },
+  })[0]
+  const three = item(3).text
+  const one = item(1).text
+  const many = item(22).text
+  assert.deepEqual([three, one, many], ['~3 running', '~1 running', '~22 running'])
+  // The entry is listed wherever the entries are, and its two texts are the ones the code writes.
+  assert.match(doc.statusBar, /`forecast`, `budget`, `agents`\. The array order/)
+  assert.ok(doc.statusBar.includes(`\`${three}\`, \`${one}\``), 'docs/status-bar.md does not quote the entry')
+  assert.ok(doc.statusBar.split('\n').some((l) => l.startsWith(`| \`${three}\` / \`${one}\` |`)), 'docs/status-bar.md has no row for the entry')
+  for (const text of [three, one]) {
+    assert.ok(STATES.split('\n').some((l) => l.startsWith(`| \`${text}\` |`)), `docs/status-bar-states.md has no row for ${text}`)
+  }
+  assert.match(doc.settings, /`forecast`, `budget`, `agents`\. Empty hides the bar/)
+  assert.match(doc.agents, /`agents` in `tokenPace\.statusBar\.show` — off by default/)
+  // Off by default, and the example in its description is the entry's own text, in both languages.
+  const setting = properties['tokenPace.statusBar.show'] as { default?: string[]; items?: { enum?: string[]; enumDescriptions?: string[] } }
+  assert.equal(setting.default?.includes('agents'), false)
+  const at = setting.items?.enum?.indexOf('agents') ?? -1
+  assert.ok(at >= 0)
+  assert.ok(setting.items?.enumDescriptions?.[at]?.includes(`“${many}”`), setting.items?.enumDescriptions?.[at])
+  const bundle = JSON.parse(readDoc('l10n/bundle.l10n.de.json')) as Record<string, string>
+  const de = JSON.parse(readDoc('package.nls.de.json')) as Record<string, string>
+  assert.ok(de['config.statusBar.show.enum.agents'].includes(`“${bundle['~{0} running'].replace('{0}', '22')}”`),
+    de['config.statusBar.show.enum.agents'])
 })
 
 test('docs/dashboard.md and docs/numbers.md name the subagent share of a window and the records against the buckets, as the views write them', () => {

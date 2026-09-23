@@ -25,7 +25,7 @@ import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
 import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
 import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
-import { AGENT_TABLES_REVISION, Aggregator } from './agg'
+import { AGENT_TABLES_REVISION, Aggregator, IngestChanges } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
 import {
@@ -65,9 +65,21 @@ import {
 
 /** Status bar cadence: countdowns and ages have to move, so this cannot be slower. */
 const TICK_MS = 1000
-/** The dashboard model is rebuilt on events and otherwise at most this often. */
-const VM_MIN_INTERVAL_MS = 5000
-const SAVE_MS = 5000
+/**
+ * The dashboard model is rebuilt on events and otherwise at most this often — and, since 1.6 (L5),
+ * after an ingest that changed the buckets at most this often too: the agent tree follows every
+ * ingest at once, the rest of the page the next whole rebuild.
+ */
+export const VM_MIN_INTERVAL_MS = 5000
+/** The timed save's period. */
+export const SAVE_MS = 5000
+/**
+ * 1.6 L5: while the agent poll is on — agents at work, their lines arriving every few seconds —
+ * the timed save runs at most this often. The replay's save, the exit save and a lost lease are
+ * not affected: the snapshot's cursors and counts are always saved together, so the next leader
+ * reads on from whatever the last save held.
+ */
+export const AGENT_SAVE_MS = 10_000
 const INGEST_DEBOUNCE_MS = 400
 const SWEEP_MS = 60_000
 const QUOTA_TICK_MS = 30_000
@@ -220,7 +232,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   let quotas: QuotaState[] = []
   let forecasts = new Map<string, Forecast>()
   let latestVm: ViewModel | undefined
-  let lastVmAt = 0
+  /** When the timed save last wrote the state (1.6 L5: at most every AGENT_SAVE_MS while agents run). */
+  let lastTimedSave: number | null = null
   /** The input of the last status-bar render; the extension API reads the bar through it. */
   let lastStatusInput: StatusInput | null = null
   let role: Role = 'single'
@@ -318,10 +331,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     })
   }
 
-  function rebuildVm(now: number): void {
+  /** The whole view model, and everything that follows it; true when the model was built. */
+  function rebuildVm(now: number): boolean {
+    let built = false
     try {
+      // Whatever the reads changed up to here is in this model (1.6 L5); the next ingest reports
+      // only what comes after it.
+      agg.takeChanges()
       latestVm = buildVm(now)
-      lastVmAt = now
+      built = true
       // The poll follows the newest tree there is, before a view could fail on it.
       updateAgentPoll()
       dashboard.update(latestVm)
@@ -330,37 +348,55 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // A broken view must never take the status bar down with it.
       log.error(`Building the view model failed: ${err}`)
     }
+    return built
   }
 
-  /** `force` marks an event (quota update, ingest, message, config change), not a tick. */
-  function render(force = false): void {
-    // After `dispose` a frame has nowhere to go. The status bar has disposed its items and
-    // forgotten them, so this one would build new items that nothing ever disposes: entries
-    // left on the bar by an extension that is gone. Work still under way at `dispose` ends
-    // here without one — the agent replay's save, the cold scan, an ingest, a fetch.
-    if (disposed) return
-    const now = Date.now()
-    let readingsOk = false
+  /**
+   * 1.6 L5: the Agents section alone, on the last whole view model — what a change of the agent
+   * tables alone needs, and what a bucket change gets at once while the rest of the page waits for
+   * the next whole rebuild. The tree is built exactly as the whole model builds it; every other
+   * field is the last model's, so the page's other sections compare equal and are not pushed.
+   */
+  function rebuildAgents(now: number): void {
+    const vm = latestVm
+    if (vm === undefined) return
+    try {
+      latestVm = { ...vm, agents: agentTreeFor({ agg, cfg, ui, now }, 'page') }
+      updateAgentPoll()
+      dashboard.update(latestVm)
+      views.refreshMarkdown()
+    } catch (err) {
+      log.error(`Building the agent tree failed: ${err}`)
+    }
+  }
+
+  const cadence = new LiveCadence({ full: rebuildVm, agents: rebuildAgents })
+
+  /** The quota readings and their forecasts for this frame; false when they could not be read. */
+  function readQuotas(now: number): boolean {
     try {
       quotas = quotaMgr.current(now)
       forecasts = forecastsFor(
         quotas, history, quotaMgr.fingerprints(), forecastConfig(), now, readPaceConfig(cfg), readTimeConfig(cfg),
       )
-      readingsOk = true
+      return true
     } catch (err) {
       log.error(`Reading the current quota failed: ${err}`)
+      return false
     }
-    // The view model is built first so the status bar can take the budget rows from it
-    // rather than deriving them a second time; `rebuildVm` swallows its own errors, so a
-    // broken view still cannot take the bar down with it.
-    if (force || now - lastVmAt >= VM_MIN_INTERVAL_MS) rebuildVm(now)
-    if (!readingsOk) return
+  }
+
+  function drawStatusBar(now: number): void {
     try {
+      const tree = latestVm?.agents
       const input: StatusInput = {
         quotas, agg, cfg, now, forecasts, role, scanning, consent: consent.state(),
         context: quotaMgr.contextReading(),
         promptCache: quotaMgr.promptCacheReading(),
         budgets: latestVm?.budgets ?? [],
+        // 1.6 O1: the running agents of the newest tree there is — the same count the running
+        // list's heading and the poll read. No tree, no entry.
+        agents: tree ? { running: tree.running, now: tree.runningNow, more: tree.runningMore } : null,
       }
       statusBar.update(input)
       // Kept for the extension API (see `TokenPaceApi`): `buildItems` is pure, so re-running
@@ -371,6 +407,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     } catch (err) {
       log.error(`Rendering the status bar failed: ${err}`)
     }
+  }
+
+  /** `force` marks an event (quota update, message, config change, a scan's end), not a tick. */
+  function render(force = false): void {
+    // After `dispose` a frame has nowhere to go. The status bar has disposed its items and
+    // forgotten them, so this one would build new items that nothing ever disposes: entries
+    // left on the bar by an extension that is gone. Work still under way at `dispose` ends
+    // here without one — the agent replay's save, the cold scan, an ingest, a fetch.
+    if (disposed) return
+    const now = Date.now()
+    const readingsOk = readQuotas(now)
+    // The view model is built first so the status bar can take the budget rows from it
+    // rather than deriving them a second time; `rebuildVm` swallows its own errors, so a
+    // broken view still cannot take the bar down with it.
+    if (force) cadence.event(now)
+    else cadence.tick(now)
+    if (readingsOk) drawStatusBar(now)
+  }
+
+  /**
+   * 1.6 L5: the frame after an ingest, sized by what the ingest changed (`Aggregator.takeChanges`):
+   * the agent tables alone rebuild the Agents section and nothing else; the buckets rebuild the
+   * whole view model when the last whole one is VM_MIN_INTERVAL_MS old, else the Agents section
+   * now and the rest with the next whole rebuild — the tick's, within the interval. The status bar
+   * is drawn either way: its figures come from the aggregator itself.
+   */
+  function renderIngest(changes: IngestChanges): void {
+    if (disposed) return
+    const now = Date.now()
+    const readingsOk = readQuotas(now)
+    cadence.ingested(changes, now)
+    if (readingsOk) drawStatusBar(now)
   }
 
   /**
@@ -491,14 +559,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   async function coldScan(onProgress: (done: number, total: number) => void = () => {}): Promise<void> {
     scanning = true
+    // 1.6 L5 (§7c, Review 1 #2): a scan that starts with no cursor at all — the first start, a
+    // re-read, a switch of the attribution — reads every line from the first byte through this
+    // build's readers, so the agent tables it leaves are of this build's revision already, and the
+    // replay after it would only read the same lines again, the tree half built meanwhile. It is
+    // marked so, and the replay runs only after a stored state that was read on from its cursors.
+    const fromNothing = agg.cursors.size === 0
     try {
       const snapshot = await runWorker(agg.toSnapshot(), onProgress)
       agg = Aggregator.fromSnapshot(snapshot, cfg.attribution)
       agg.timeConfig = readTimeConfig(cfg)
+      if (fromNothing) agg.agentsRevision = AGENT_TABLES_REVISION
       log.info(`Cold start done: ${snapshot.buckets.length} bucket(s), ${Object.keys(snapshot.cursors).length} file(s)`)
     } catch (err) {
       log.error(`Cold start in the worker failed, falling back to the main thread: ${err}`)
-      await scan(agg, { ctx: scanContext() }).catch((e) => log.error(`The fallback failed too: ${e}`))
+      const target = agg
+      const done = await scan(target, { ctx: scanContext() }).then(() => true, (e) => {
+        log.error(`The fallback failed too: ${e}`)
+        return false
+      })
+      // Only a scan that read everything leaves whole tables; one that failed half-way is replayed.
+      if (fromNothing && done && target === agg) target.agentsRevision = AGENT_TABLES_REVISION
     } finally {
       scanning = false
       dirty = true
@@ -533,7 +614,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
           log.debug(`Ingest: ${files ? `${files.length} changed file(s)` : 'every known file'}`
             + ` → ${n} counted line(s)${skipped > 0 ? `, ${skipped} journal line(s) skipped` : ''}`)
           // A counted Codex line can carry a fresh rate-limit block — same memo rule as the cold scan.
-          if (n > 0) { dirty = true; quotaMgr.invalidate(); render(true) }
+          // What the lines changed decides how much of the page is rebuilt (1.6 L5).
+          if (n > 0) { dirty = true; quotaMgr.invalidate(); renderIngest(target.takeChanges()) }
         })
         .catch((err) => log.error(`Ingest failed: ${err}`))
         .finally(() => {
@@ -606,8 +688,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
    * would give the tree only what is written from now on; `replayAgents` reads the Claude
    * transcripts and journals of the agent retention once more, up to what was counted, for the
    * agent tables and nothing else. Due whenever this aggregator's tables are not of the current
-   * revision (AGENT_TABLES_REVISION) — after the cold start, after a re-read, after an update
-   * that raised it — and never while a scan or an ingest moves the data, nor in a follower,
+   * revision (AGENT_TABLES_REVISION) — after a cold start that read on from a stored state of an
+   * older revision, after an update that raised it; not after a scan that started with no cursor
+   * at all, which read every line itself (1.6 L5, `coldScan`) — and never while a scan or an ingest
+   * moves the data, nor in a follower,
    * which renders the leader's tables. A replay that had to wait is retried when the next ingest
    * ends (the sweep brings one every minute). Counts and a duration are logged; never a path or
    * a line.
@@ -1045,8 +1129,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         agg.timeConfig = readTimeConfig(cfg)
         await coldScan()
         rollup(Date.now())
-        // The re-read fed the agent tables from its own lines; the replay goes over them the
-        // way it does after an upgrade and marks them replayed, so the next start does not.
+        // The re-read fed the agent tables from its own lines, every one from the first byte, and
+        // marked them of this build's revision (1.6 L5): the replay below has nothing to do then.
+        // It stays for a re-read whose scan failed half-way, whose tables are not whole.
         await replayAgentTables('re-read')
         await saveState()
         render(true)
@@ -1350,8 +1435,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   every(LEASE_MS, updateRole)
   every(ALERT_MS, () => runAlerts(Date.now()))
   every(SAVE_MS, () => {
-    // A replay saves when it is done; half of one is not worth a write.
-    if (!dirty || scanning || ingesting || replayRun !== null) return
+    // A replay saves when it is done; half of one is not worth a write. A save still under way
+    // keeps the state dirty for the next tick: it would refuse this one and lose the change.
+    if (!dirty || scanning || ingesting || replayRun !== null || saving) return
+    // 1.6 L5: while agents run, every few seconds brings a line, and the state file is rewritten
+    // at most every AGENT_SAVE_MS instead of at every tick of this timer.
+    const now = Date.now()
+    if (!timedSaveDue(now, lastTimedSave, agentPoll.on)) return
+    lastTimedSave = now
     dirty = false
     void saveState()
   })
@@ -1522,6 +1613,93 @@ export class AgentPoll {
       .catch(() => undefined)
       .finally(() => { this.busy = false })
   }
+}
+
+// ---------------------------------------------------------------------------
+// The live cost (1.6 L5): which rebuild an ingest is worth, and how often the state is saved —
+// kept out of `activate`, like the poll, so a test can hold them with a clock of its own
+// ---------------------------------------------------------------------------
+
+/** The two rebuilds the host can make. */
+export interface RebuildSteps {
+  /** The whole view model — `buildViewModel` — and everything after it; true when the model was built. */
+  full(now: number): boolean
+  /** The Agents section alone, on the last whole view model (`agentTreeFor`), and everything after it. */
+  agents(now: number): void
+}
+
+/**
+ * When the whole view model is rebuilt, and when the Agents section alone is.
+ *
+ * The whole model is the expensive half — every table, the chart, the heatmap — and a running
+ * agent writes a line into its transcript every few seconds. Its record changes the agent tables,
+ * and its reply's tokens the buckets. So: an event (a quota update, a message, a setting, a scan's
+ * end) rebuilds the whole model at once, as before 1.6; the one-second tick rebuilds it once
+ * VM_MIN_INTERVAL_MS have passed since the last whole rebuild, as before 1.6 — the quota
+ * countdowns and every "… ago" depend on that. An ingest that changed the agent tables alone
+ * rebuilds the Agents section alone. An ingest that changed the buckets rebuilds the whole model
+ * when the last one is at least the interval old; otherwise the Agents section now, and the bucket
+ * change is marked stale (`stale`, the host's `vmStale`) until the next whole rebuild takes it —
+ * the tick's at the latest, or the next ingest's once the interval has passed.
+ */
+export class LiveCadence {
+  private lastFull: number | null = null
+  private staleFlag = false
+
+  constructor(private readonly steps: RebuildSteps, private readonly minMs = VM_MIN_INTERVAL_MS) {}
+
+  /** A bucket change the last whole view model does not hold yet. */
+  get stale(): boolean {
+    return this.staleFlag
+  }
+
+  /** An event: the whole view model, now. */
+  event(now: number): void {
+    this.runFull(now)
+  }
+
+  /** The one-second tick: the whole view model once the interval has passed since the last one. */
+  tick(now: number): void {
+    if (this.due(now)) this.runFull(now)
+  }
+
+  /** After an ingest, by what it changed; says which rebuild ran. */
+  ingested(changes: IngestChanges, now: number): 'full' | 'agents' | 'none' {
+    if (changes.buckets) this.staleFlag = true
+    // No whole model yet: there is nothing an Agents section alone could be put onto.
+    if ((this.staleFlag || this.lastFull === null) && this.due(now)) {
+      this.runFull(now)
+      return 'full'
+    }
+    if (!changes.buckets && !changes.agents) return 'none'
+    this.steps.agents(now)
+    return 'agents'
+  }
+
+  /** Never built, the interval passed — or the clock went back, which no interval can be measured on. */
+  private due(now: number): boolean {
+    return this.lastFull === null || now < this.lastFull || now - this.lastFull >= this.minMs
+  }
+
+  private runFull(now: number): void {
+    // Cleared before the build: whatever the build reads is in it. A build that failed leaves the
+    // change stale and the interval unmeasured, so the next tick tries again.
+    const stale = this.staleFlag
+    this.staleFlag = false
+    if (this.steps.full(now)) this.lastFull = now
+    else this.staleFlag = stale
+  }
+}
+
+/**
+ * Whether a tick of the timed save may write the state: always while the agent poll is off; while
+ * it is on, once AGENT_SAVE_MS have passed since the last timed save. The timer ticks every
+ * SAVE_MS and a tick comes a little early or late: half a period of slack keeps the cadence at
+ * every second tick rather than every third.
+ */
+export function timedSaveDue(now: number, lastSave: number | null, pollOn: boolean): boolean {
+  if (!pollOn || lastSave === null || now < lastSave) return true
+  return now - lastSave >= AGENT_SAVE_MS - SAVE_MS / 2
 }
 
 // ---------------------------------------------------------------------------

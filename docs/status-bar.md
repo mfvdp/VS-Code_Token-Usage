@@ -15,13 +15,18 @@ Part of the [Token Pace documentation](../README.md#documentation).
 ```
 
 * **Entries.** `tokenPace.statusBar.show` is an ordered array of `claudeQuota`, `codexQuota`,
-  `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`. The array order is the display
+  `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`, `agents`. The array order is the display
   order (drag the rows in the settings UI); the order *inside* one entry is fixed. An empty
   list hides the status bar entirely. `context` is off by default and appears only while the
   Claude Code status line is connected — it is one session's context window, never an account
   figure. `budget` is off by default too and shows the configured budget closest to its own
   limit (`budget 63 %`, `budget ~63 %` for a money budget, `budget 118 % over`); the tooltip
-  lists all of them.
+  lists all of them. `agents` is off by default as well and counts the Claude Code agents running
+  right now — `~3 running`, `~1 running` — the same count as the heading of the
+  [running list](agents.md#running-now), so inferred and marked `~`; it is hidden while none runs.
+  It has no colour, no alarm and no word for a finished agent. Its tooltip says what running
+  means, names the first five entries of the running list — the agent's name with the model's
+  whole id, and where it sits — and counts the rest (`and 2 more`).
 * **Density.** `full` (default) gives every window its own entry, `compact` folds a provider's
   windows into one item (`CC 25%·2h14m | 69%·6d`), `minimal` folds every provider into a
   single `TP 69% ▲`. Problem states are never folded — a named cause is the point.
@@ -77,6 +82,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `CC $(graph) 5h ~empty in 40m` | the forecast entry — an estimate, and it carries `~` |
 | `Σ 4.6M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope`; the period is always named |
 | `~$1.23 · today ⚠` | hypothetical API cost; `⚠` means some tokens have no price and are missing from the sum |
+| `~3 running` / `~1 running` | the `agents` entry: Claude Code agents running right now, inferred from their transcripts (changed within the last 10 minutes, no result recorded) — hidden while none runs |
 | `$(shield) CC consent`, `$(key) CC no token`, `$(cloud-offline) CC offline`, … | a named cause replaces the figure, and the click performs the repair for *that* cause |
 
 The full matrix — every text, which state wins, which colour, and the one thing to check —

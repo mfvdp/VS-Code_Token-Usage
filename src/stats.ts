@@ -16,7 +16,7 @@
  */
 
 import { SOURCES, SOURCE_TITLE, maybeAdapterFor } from './adapters'
-import { Aggregator, BucketFilter, Metric, billable } from './agg'
+import { Aggregator, BucketFilter, HourQuery, Metric, billable } from './agg'
 import { locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
@@ -393,6 +393,76 @@ export interface StatsCtx {
    * that forgets the field loses no rows it was entitled to.
    */
   attribution?: Attribution
+  /**
+   * 1.6 L5 (Review 3): the hour sums of the view-model build this context belongs to, each span
+   * summed once and shared — see `HourSums`. Left out, every hour span is summed on its own.
+   */
+  hours?: HourSums
+}
+
+/**
+ * The hour sums of one view-model build (1.6 L5, Review 3). A build sums the same spans of hour
+ * buckets several times over — the totals table's two window rows per provider, each Claude
+ * window's subagent share (its subagents and its whole, over the very bounds of the totals row),
+ * the data-quality line's last seven days — and each `sumHours` walked every bucket again. Here
+ * each span and filter is summed once: the ones the build knows it will ask for together in one
+ * pass (`prefetch`), any other on its first request; every later request of it is answered from
+ * memory. The answers are exactly `sumHours`' — it is the same rule, asked once. Made for one
+ * build and dropped with it: the buckets move on between two builds.
+ */
+export class HourSums {
+  private readonly memo = new Map<string, { bucket: Bucket; complete: boolean }>()
+  private readonly modelMemo = new Map<Source, string[]>()
+
+  constructor(private readonly agg: Aggregator) {}
+
+  /** Sums every query not answered yet, together in one pass over the buckets. */
+  prefetch(queries: readonly HourQuery[]): void {
+    const missing = new Map<string, HourQuery>()
+    for (const q of queries) {
+      const key = hourQueryKey(q)
+      if (!this.memo.has(key) && !missing.has(key)) missing.set(key, q)
+    }
+    if (missing.size === 0) return
+    const answers = this.agg.sumHoursMany([...missing.values()])
+    let i = 0
+    for (const key of missing.keys()) this.memo.set(key, answers[i++])
+  }
+
+  /** `sumHours(fromMs, toMs, filter)`, from memory when it was asked before. A copy: the caller may not change the shared sum. */
+  get(fromMs: number, toMs: number, filter?: BucketFilter): { bucket: Bucket; complete: boolean } {
+    const key = hourQueryKey({ fromMs, toMs, filter })
+    let r = this.memo.get(key)
+    if (!r) {
+      r = this.agg.sumHours(fromMs, toMs, filter)
+      this.memo.set(key, r)
+    }
+    return { bucket: { ...r.bucket }, complete: r.complete }
+  }
+
+  /** The distinct model ids the buckets of a source carry, sorted — one pass per build, however often asked. */
+  modelsOf(source: Source): string[] {
+    let models = this.modelMemo.get(source)
+    if (!models) {
+      const seen = new Set<string>()
+      for (const b of this.agg.all()) if (b.source === source) seen.add(b.model)
+      models = [...seen].sort()
+      this.modelMemo.set(source, models)
+    }
+    return [...models]
+  }
+}
+
+/** What makes two hour sums the same one: the bounds and the filter, as `sumHours` reads it. */
+function hourQueryKey(q: HourQuery): string {
+  const f = q.filter ?? {}
+  const models = f.models && f.models.length > 0 ? f.models.join('\u0001') : ''
+  return `${q.fromMs}|${q.toMs}|${f.source ?? ''}|${f.isSub === undefined ? '' : String(f.isSub)}|${f.tier ?? ''}|${models}`
+}
+
+/** An hour sum through the build's shared sums when the context has them, else on its own. */
+function sumHoursOf(ctx: StatsCtx, fromMs: number, toMs: number, filter?: BucketFilter): { bucket: Bucket; complete: boolean } {
+  return ctx.hours ? ctx.hours.get(fromMs, toMs, filter) : ctx.agg.sumHours(fromMs, toMs, filter)
 }
 
 const MS_HOUR = 3_600_000
@@ -671,7 +741,7 @@ function hourSpanRow(
   toMs: number,
   showListPrice: boolean,
 ): TotalRow {
-  const { bucket, complete } = ctx.agg.sumHours(fromMs, toMs, filterFor(ctx, source))
+  const { bucket, complete } = sumHoursOf(ctx, fromMs, toMs, filterFor(ctx, source))
   const b = { ...bucket, source }
   const c = hourSpanCost(ctx, source, Math.floor(fromMs / MS_HOUR), Math.ceil(toMs / MS_HOUR))
   const use = billable(b)
@@ -723,6 +793,22 @@ function windowRows(
   windows: TotalsWindow[],
   showListPrice: boolean,
 ): TotalRow[] {
+  return totalsWindowSpans(ctx.now, windows).map((span) => hourSpanRow(
+    ctx, source,
+    span.reported ? t('Current {0} window', span.label) : t('Last {0}', span.label),
+    span.fromMs, span.toMs, showListPrice,
+  ))
+}
+
+/**
+ * The spans the two window rows of the totals table sum, in their order: a reported window's own
+ * bounds where the provider reports one of that length with a reset time, else the trailing span
+ * of the same length ending now (see `windowRows`). Exported for the view model, which asks for
+ * these sums together with the other hour spans of its build (`HourSums.prefetch`).
+ */
+export function totalsWindowSpans(
+  now: number, windows: TotalsWindow[],
+): Array<{ label: string; reported: boolean; fromMs: number; toMs: number }> {
   return TOTALS_WINDOW_SPANS.map((span) => {
     const spanMs = span.minutes * 60_000
     const reported = windows.find((w) =>
@@ -734,14 +820,12 @@ function windowRows(
       // match the 5 h row, and a bound a minute off the card's is a different hour bucket
       // once `sumHours` rounds outward. The nominal span only names the row.
       const fromMs = reported.resetsAt - reported.windowMinutes * 60_000
-      const toMs = Math.min(ctx.now, reported.resetsAt)
+      const toMs = Math.min(now, reported.resetsAt)
       // A reset further out than the window is long puts the window's start in the future;
       // there is no elapsed span to sum then, and the trailing span below is the honest answer.
-      if (toMs > fromMs) {
-        return hourSpanRow(ctx, source, t('Current {0} window', span.label), fromMs, toMs, showListPrice)
-      }
+      if (toMs > fromMs) return { label: span.label, reported: true, fromMs, toMs }
     }
-    return hourSpanRow(ctx, source, t('Last {0}', span.label), ctx.now - spanMs, ctx.now, showListPrice)
+    return { label: span.label, reported: false, fromMs: now - spanMs, toMs: now }
   })
 }
 
@@ -2203,7 +2287,7 @@ function firstUsedHour(ctx: StatsCtx, source: Source, fromHour: number, toHour: 
 export function localBlock(ctx: StatsCtx, source: Source, now: number = ctx.now): LocalBlockRow | null {
   if (!Number.isFinite(now)) return null
   const fromMs = now - LOCAL_BLOCK_HOURS * MS_HOUR
-  const { bucket, complete } = ctx.agg.sumHours(fromMs, now, filterFor(ctx, source))
+  const { bucket, complete } = sumHoursOf(ctx, fromMs, now, filterFor(ctx, source))
   const b = { ...bucket, source }
   const use = billable(b)
   // Nothing counted is nothing to say. An empty row would state a measured idle span, and

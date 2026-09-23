@@ -13,6 +13,8 @@
  */
 
 import { LABEL, SOURCES, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
+// Type only: the status bar is handed the running list the agent tree built, never the tree builder.
+import type { RunningItem } from './agentTree'
 import { billable, BucketFilter, CostSummary } from './agg'
 import { BudgetRow, worstBudget } from './budget'
 import { Config, contextNote, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './config'
@@ -107,6 +109,19 @@ export interface StatusTextInput {
    * zero: a budget nobody configured is not a budget at 0 %.
    */
   budgets?: BudgetRow[]
+  /**
+   * 1.6 O1: the running agents of the last agent tree — how many run (`AgentTreeVm.running`, the
+   * count the running list's heading and the poll read), the running list's entries and how many
+   * of them it leaves out. Absent or null without a tree: no tree is no entry, not "~0 running".
+   */
+  agents?: AgentsReading | null
+}
+
+/** 1.6 O1: what the `agents` entry is drawn from — three fields of the agent tree, as the host hands them on. */
+export interface AgentsReading {
+  running: number
+  now: readonly RunningItem[]
+  more: number
 }
 
 /** One status bar entry, fully decided. The vscode layer copies these fields verbatim. */
@@ -138,6 +153,7 @@ export type ItemSpec =
   | { kind: 'summary'; sources: Source[] }
   | { kind: 'context'; c: ContextReading }
   | { kind: 'budget'; b: BudgetRow }
+  | { kind: 'agents'; a: AgentsReading }
   | { kind: 'tokens' }
   | { kind: 'cost' }
 
@@ -1123,6 +1139,53 @@ export function budgetTooltip(rows: BudgetRow[], ctx: RenderContext): string {
   return out.join('\n')
 }
 
+// ---------------------------------------------------------------------------
+// Running agents (1.6 O1) — the running list of the Agents section, in one entry
+// ---------------------------------------------------------------------------
+
+/** The running list's entries the agents tooltip names; the rest are counted under them. */
+export const AGENTS_TOOLTIP_ITEMS = 5
+
+/**
+ * The entry's figure: how many agents run, inferred and marked so — `~3 running`, `~1 running`.
+ * A count of agents, the collectors' running members included, as the running list's heading
+ * counts them.
+ */
+export function agentsValue(a: AgentsReading): string {
+  return a.running === 1 ? t('~1 running') : t('~{0} running', full(a.running))
+}
+
+/**
+ * What the entry stands for, and the first AGENTS_TOOLTIP_ITEMS entries of the running list — as
+ * the list orders them, the longest-running first — each its name and where it sits, then how
+ * many entries it leaves out, the list's own and the ones beyond it. Names and places are borrowed
+ * strings (an agent type, a model id, a project's name) and go into code spans, as every such
+ * string of this file does. A collector's entry says how many of its agents run, as the markdown's
+ * running line does.
+ */
+export function agentsTooltip(a: AgentsReading, ctx: RenderContext): string {
+  if (ctx.cfg.tooltip === 'off') return ''
+  const out: string[] = [
+    t('Agents running now — inferred from their transcripts (changed within the last 10 minutes, no result recorded).'),
+    '',
+  ]
+  const shown = a.now.slice(0, AGENTS_TOOLTIP_ITEMS)
+  for (const item of shown) {
+    const many = item.kind === 'noreply' && Number.isFinite(item.running) && item.running > 0
+      ? ` (${item.running === 1 ? t('~1 of them running') : t('~{0} of them running', full(item.running))})`
+      : ''
+    out.push(`- ${span(`${item.fullLabel} · ${item.context}`)}${many}`)
+  }
+  const rest = Math.max(0, a.now.length - shown.length) + (Number.isFinite(a.more) && a.more > 0 ? a.more : 0)
+  if (rest > 0) {
+    if (shown.length > 0) out.push('')
+    out.push(t('and {0} more', full(rest)))
+  }
+  out.push('')
+  out.push(footerLine(ctx))
+  return out.join('\n')
+}
+
 export function problemTooltip(q: QuotaState, ctx: RenderContext): string {
   const { cfg } = ctx
   if (cfg.tooltip === 'off') return ''
@@ -1321,6 +1384,22 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         priorityKey: '1000',
       }
     }
+    case 'agents': {
+      const click = clickCommand(cfg, null)
+      return {
+        id: 'tokenPace.agents',
+        // No colour, no alarm and no word for "done" (1.6 §0b): the entry counts what runs, and
+        // an agent at work is no warning.
+        text: agentsValue(spec.a),
+        colorId: null,
+        alarm: false,
+        tooltipMarkdown: agentsTooltip(spec.a, ctx),
+        command: click.command,
+        commandArgs: click.args,
+        name: t('Token Pace — running agents'),
+        priorityKey: '1000',
+      }
+    }
     case 'tokens': {
       const { from, to } = periodRange(ctx)
       let total = 0
@@ -1482,6 +1561,16 @@ export function buildItems(input: StatusTextInput): ItemModel[] {
         if (worst) out.push(itemModel({ kind: 'budget', b: worst }, ctx))
         break
       }
+      case 'agents': {
+        // Hidden while nothing runs, and without a tree (1.6 §7a Q6), like the context entry
+        // without a reading: the bar is quiet when nothing happens, and says nothing about agents
+        // to a reader who may run none.
+        const a = ctx.agents
+        if (a && Number.isFinite(a.running) && a.running > 0 && Array.isArray(a.now)) {
+          out.push(itemModel({ kind: 'agents', a }, ctx))
+        }
+        break
+      }
       case 'tokens':
         out.push(itemModel({ kind: 'tokens' }, ctx))
         break
@@ -1559,6 +1648,29 @@ function previewBudget(share: number, over: boolean): BudgetRow {
   }
 }
 
+/** Synthetic running agents for the preview: invented names in a session and run that never existed. */
+function previewAgents(now: number, types: string[]): AgentsReading {
+  const context = `${t('Session {0}', '9d0eb37a')} · ${t('Workflow run {0}', 'cfe7718d')}`
+  const items: RunningItem[] = types.map((type, i) => ({
+    key: `a:preview${i}`,
+    kind: 'agent',
+    label: `${type} · opus-4-6 · 3f2${i}`,
+    fullLabel: `${type} · claude-opus-4-6 · 3f2${i}`,
+    context,
+    usage: '12.4K',
+    lowerBound: false,
+    lowerBoundText: null,
+    startTs: now - (i + 2) * 60_000,
+    lastTs: now - 20_000,
+    startClock: null,
+    lastClock: null,
+    waiting: false,
+    silence: false,
+    running: 1,
+  }))
+  return { running: items.length, now: items, more: 0 }
+}
+
 export function previewItems(cfg: Config, now: number): ItemModel[] {
   const hour = 3_600_000
   const base: StatusTextInput = {
@@ -1628,6 +1740,9 @@ export function previewItems(cfg: Config, now: number): ItemModel[] {
   // A budget under its limit and one over it — the second is the only state that adds a word.
   push({ kind: 'budget', b: previewBudget(38, false) })
   push({ kind: 'budget', b: previewBudget(118, true) })
+  // 1.6 O1: the running agents, as many and as one — the two words the entry has.
+  push({ kind: 'agents', a: previewAgents(now, ['Explore', 'Plan', 'general-purpose']) })
+  push({ kind: 'agents', a: previewAgents(now, ['Explore']) })
   push({ kind: 'tokens' })
   push({ kind: 'cost' })
 

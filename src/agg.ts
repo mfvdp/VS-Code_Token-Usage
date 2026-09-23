@@ -33,6 +33,25 @@ export interface BucketFilter {
   tier?: Tier
 }
 
+/** One sum of hour buckets over `[fromMs, toMs)`, as `Aggregator.sumHours` takes it — a query of `sumHoursMany`. */
+export interface HourQuery {
+  fromMs: number
+  toMs: number
+  filter?: BucketFilter
+}
+
+/**
+ * 1.6 L5: what the reads since the host last asked have changed (`Aggregator.takeChanges`). `buckets`
+ * is every table a counted line writes besides the agent tables — the buckets, and the session and
+ * tool tables written with them —, `agents` the agent tables: agents, launches, main sessions, runs
+ * and their launches. Either can be set without the other: a journal line or a parent's result
+ * writes only the agent tables, a Codex line only the buckets.
+ */
+export interface IngestChanges {
+  buckets: boolean
+  agents: boolean
+}
+
 /**
  * What the tool side table can be asked. It is keyed by source, day, model and name only:
  * subagent and tier are bucket dimensions the table does not carry, and answering them
@@ -983,6 +1002,8 @@ export class Aggregator {
   private rollupState = { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }
   /** Which revision of the agent tables the replay last built (AGENT_TABLES_REVISION); persisted. */
   private agentsRevisionValue = 0
+  /** 1.6 L5: what was written since `takeChanges` was last asked. Not persisted. */
+  private changes: IngestChanges = { buckets: false, agents: false }
   /** dayOfHour goes through Intl and is hit for every bucket on every query — memoised. */
   private dayMemoKey = ''
   private dayMemo = new Map<number, string>()
@@ -1034,6 +1055,8 @@ export class Aggregator {
    * the next roll-up would fold them again, double-shifting nothing but confusing sums.
    */
   bucketFor(source: Source, hour: number, day: string, model: string, isSub: boolean, tier: Tier): Bucket {
+    // Asked for by the counting alone — every ingest that adds to a bucket gets it here (1.6 L5).
+    this.changes.buckets = true
     const hh = this.hourHorizon()
     if (hh === null || hour >= hh) return this.get(source, 'h', hour, day, model, isSub, tier)
     const rolledDay = this.dayOfHourMemo(hour, this.timeConfig)
@@ -1122,6 +1145,8 @@ export class Aggregator {
    */
   private addTool(source: Source, day: string, model: string, name: string, n: number): void {
     if (!(n > 0) || !name || !day) return
+    // The tool table is one of the tables the whole view model reads, as the buckets are (1.6 L5).
+    this.changes.buckets = true
     const clean = name.length > TOOL_NAME_MAX_CHARS ? name.slice(0, TOOL_NAME_MAX_CHARS) : name
     const k = toolKey({ source, day, model, name: clean })
     const have = this.toolStats.get(k)
@@ -1226,10 +1251,15 @@ export class Aggregator {
     let d: any
     try { d = JSON.parse(raw) } catch { return false }
     if (!d || typeof d !== 'object') return false
-    if (d.type === 'assistant') return this.claudeResponse(d, ctx)
-    if (d.type === 'user') return this.agentResult(d, ctx)
-    if (d.type === 'queue-operation') return this.agentNotification(d)
-    return false
+    const changed = d.type === 'assistant' ? this.claudeResponse(d, ctx)
+      : d.type === 'user' ? this.agentResult(d, ctx)
+        : d.type === 'queue-operation' ? this.agentNotification(d)
+          : false
+    // 1.6 L5: a Claude line that changed anything reached an agent table — the record of the
+    // transcript it is in (an agent's, or the main session's the tree roots on), a launch, a run's
+    // launch or an outcome. Its buckets, where it has any, mark themselves (`bucketFor`).
+    if (changed) this.changes.agents = true
+    return changed
   }
 
   /** One assistant line: its tokens onto buckets, session and agent tables, and its launches. */
@@ -1822,22 +1852,28 @@ export class Aggregator {
     if (!run) {
       run = { source: 'claude', sessionId, workflowId, journalFile: ctx.file, agents: [], agentsDropped: 0, steps: 0, lastTs: 0 }
       this.runMap.set(runKey, run)
+      this.changes.agents = true
     }
     run.journalFile = ctx.file
     const index = this.runIndex(runKey, run)
-    if (head.type === 'started') return this.journalStarted(run, index, steps, head.key, head.agentId)
+    if (head.type === 'started') {
+      const started = this.journalStarted(run, index, steps, head.key, head.agentId)
+      if (started) this.changes.agents = true
+      return started
+    }
     let agent = index.get(head.agentId)
     if (!agent) {
       // Never observed: an end for an agent the journal did not start. Taken as its start — unless
       // the run is full, where it may be one of the agents counted and not listed.
       if (run.agents.length >= MAX_RUN_AGENTS) return false
-      this.journalStarted(run, index, steps, head.key, head.agentId)
+      if (this.journalStarted(run, index, steps, head.key, head.agentId)) this.changes.agents = true
       agent = index.get(head.agentId)
       if (!agent) return false
     }
     const outcome = head.type === 'result' ? 'completed' : 'failed'
     if (agent.outcome === outcome) return false
     agent.outcome = outcome
+    this.changes.agents = true
     return true
   }
 
@@ -1910,7 +1946,10 @@ export class Aggregator {
   noteJournalRead(file: string, mtime: number | undefined): void {
     if (typeof mtime !== 'number' || !Number.isFinite(mtime) || mtime <= 0) return
     const run = this.runOfJournal(file)?.run
-    if (run) run.lastTs = mtime
+    if (run && run.lastTs !== mtime) {
+      run.lastTs = mtime
+      this.changes.agents = true
+    }
   }
 
   /** Whether a journal's step map is in memory — made by its first line, a rebuild or a reset. */
@@ -1931,6 +1970,7 @@ export class Aggregator {
       at.run.agentsDropped = 0
       at.run.steps = 0
       this.runAgentIndex.delete(at.key)
+      this.changes.agents = true
     }
     this.journalSteps.set(file, new Map())
   }
@@ -1954,6 +1994,7 @@ export class Aggregator {
     if (!clean) return
     rec.meta = clean
     this.linkMeta(file, rec)
+    this.changes.agents = true
   }
 
   /** Subagent transcripts, in the order they were first counted. */
@@ -1984,6 +2025,19 @@ export class Aggregator {
   set agentsRevision(v: number) { this.agentsRevisionValue = count(v) }
 
   /**
+   * 1.6 L5: what the reads since the last call changed, and a fresh start for the next — reset on
+   * read. The host asks after every ingest: a change of the agent tables alone rebuilds the Agents
+   * section and nothing else, and a bucket change the whole view model at most every few seconds.
+   * Set by the writes themselves — a bucket or tool row the counting adds to, a record, launch, run
+   * or sidecar of the agent tables —, never by a query.
+   */
+  takeChanges(): IngestChanges {
+    const out = this.changes
+    this.changes = { buckets: false, agents: false }
+    return out
+  }
+
+  /**
    * Starts a replay over `files` (`replayAgents` in scan.ts): what these transcripts and
    * journals gave the agent tables is taken out, so reading them again from the start rebuilds
    * it instead of adding to it. What the lines cannot give back — an agent's sidecar, its
@@ -1992,6 +2046,7 @@ export class Aggregator {
   beginAgentReplay(files: Iterable<string>): void {
     this.replayPending.clear()
     this.replayKept.clear()
+    this.changes.agents = true
     const set = new Set(files)
     for (const file of set) {
       if (isWorkflowJournal(file)) {
@@ -2681,6 +2736,36 @@ export class Aggregator {
     }
     const hh = this.hourHorizon()
     return { bucket: out, complete: hh === null || fromHour >= hh }
+  }
+
+  /**
+   * Several `sumHours` in one pass over the buckets (1.6 L5, Review 3): the answer to each query is
+   * the one `sumHours` gives it alone — the same hour rounding, the same filter, the same
+   * completeness — in the order of the queries. A view-model build asks for a handful of spans
+   * (the quota windows' own, for the totals rows and for the subagent share, and the last seven
+   * days), and each pass of its own walked every bucket again.
+   */
+  sumHoursMany(queries: readonly HourQuery[]): Array<{ bucket: Bucket; complete: boolean }> {
+    const hh = this.hourHorizon()
+    const asked = queries.map((q) => {
+      const out = emptyBucket(q.filter?.source ?? 'claude', '*', false, 'standard', 'h', null, localDay(q.fromMs))
+      const valid = Number.isFinite(q.fromMs) && Number.isFinite(q.toMs) && q.toMs > q.fromMs
+      const fromHour = valid ? hourIndex(q.fromMs) : 0
+      const toHour = valid ? Math.ceil(q.toMs / MS_HOUR) : 0
+      return { out, valid, fromHour, toHour, filter: q.filter, complete: !valid || hh === null || fromHour >= hh }
+    })
+    const open = asked.filter((a) => a.valid)
+    if (open.length > 0) {
+      for (const b of this.buckets.values()) {
+        if (b.res !== 'h' || b.hour === null) continue
+        for (const a of open) {
+          if (b.hour < a.fromHour || b.hour >= a.toHour) continue
+          if (!this.matches(b, a.filter)) continue
+          mergeInto(a.out, b)
+        }
+      }
+    }
+    return asked.map((a) => ({ bucket: a.out, complete: a.complete }))
   }
 }
 

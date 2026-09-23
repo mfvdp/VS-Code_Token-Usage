@@ -479,6 +479,13 @@ function dataQualityLines(vm: ViewModel): string[] {
       d.history.samples, Math.round(d.history.bytes / 1024), d.history.oldest ?? '–'),
     t('Consent: {0} · {1} · attribution {2} · v{3}', d.consent, d.leader, d.attribution, d.version),
   ]
+  // 1.6 N7: the subagent tokens of the last seven days counted two ways — after the lower-bound
+  // line, where the dashboard's list has them — and the note on why the two differ, a line of its own.
+  if (d.agents) {
+    out.splice(3, 0,
+      `${t('Agent records, last 7 days')}: ${d.agents.records} · ${t('Subagent tokens in the hour buckets, last 7 days')}: ${d.agents.buckets}`,
+      d.agents.note)
+  }
   for (const q of d.quota) {
     const cands = q.candidates.length > 0
       ? q.candidates.map((c) => `${c.id} ${c.ok ? `${c.ageSec === null ? t('ok') : t('{0} min', Math.round(c.ageSec / 60))}` : (c.problem ?? t('unavailable'))}`).join(' · ')
@@ -729,6 +736,15 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
           + `${cell(w.reset)} | ${cell(forecastCell)} |`)
       }
       L.push('')
+      // 1.6 N7: under the table, the subagent share of what this machine counted over each
+      // window — the card's dim line, named by its window, in the table's order. Tokens, never
+      // quota points: the figures are the view model's, `≈` included.
+      const shares = q.windows.filter((w) => w.agentShareParts)
+      for (const w of shares) {
+        const p = w.agentShareParts as NonNullable<typeof w.agentShareParts>
+        L.push(`- ${cell(t('{0}: subagents {1} of {2} counted here ({3})', w.label, p.sub, p.total, p.share))}`)
+      }
+      if (shares.length > 0) L.push('')
       // Why each bar has its colour, one line per window in the table's order: the dashboard
       // shows this on hover, and a document read without one needs it in the text.
       for (const w of q.windows) {

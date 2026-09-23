@@ -204,3 +204,57 @@ export function makeInput(o: FixtureOptions = {}): VmInput {
     forecastCfg: DEFAULT_FORECAST_CONFIG,
   }
 }
+
+/** 1.6 N7: the two agents of `agentShareAgg`, by id. */
+export const SHARE_AGENTS = { recent: 'a0000000000000001', long: 'a0000000000000002' } as const
+
+/**
+ * 1.6 N7: a small Claude world whose subagent shares are known by hand, over the two Claude
+ * windows of `state('claude')` — 5 h from 09:00 to NOW, 7 d from four days back to NOW:
+ *
+ *   main   11:00         1 000 in +   500 out = 1 500
+ *   agent  11:30 (recent) 3 000 in + 1 500 out = 4 500
+ *   agent  10:30 (long)   1 000 in             = 1 000   — its first line eight days back: 2 000 in
+ *   main   08:59         2 000 in             = 2 000   — hour 8, outside the 5 h window
+ *   main   three days back 2 000 in           = 2 000
+ *
+ * so the 5 h window counts 7K with 5.5K of subagents (79 %) and the 7 d window 11K (50 %); the
+ * agent records hold 7.5K (the long agent whole), the subagent hour buckets of the last seven
+ * days 5.5K. `asMain` writes the two agents' lines as main-session lines instead: the same tokens
+ * in the same hours, no subagent. Codex has one line in the 5 h window, so its card has tokens too.
+ */
+export function agentShareAgg(o: { asMain?: boolean } = {}): Aggregator {
+  const agg = new Aggregator()
+  const slug = path.join('/virtual', 'claude', 'projects', '-home-t-alpha')
+  const main = path.join(slug, 's1.jsonl')
+  const agentFile = (id: string): string => path.join(slug, 's1', 'subagents', `agent-${id}.jsonl`)
+  let ino = 10
+  const line = (file: string, isSub: boolean, id: string, ts: number, input: number, output: number, agentId?: string): void => {
+    if (!agg.cursors.has(file)) agg.cursors.set(file, { offset: 0, size: 0, ino: ino++, dev: 1 })
+    agg.addClaudeLine(claudeLine({
+      id, ts, model: 'claude-opus-4-6', final: true, cwd: '/home/t/alpha', sessionId: 's1', agentId,
+      usage: { input, output },
+    }), ctx(file, 'none', isSub))
+  }
+  const agent = (agentId: string, id: string, ts: number, input: number, output: number): void => {
+    if (o.asMain === true) line(main, false, id, ts, input, output)
+    else line(agentFile(agentId), true, id, ts, input, output, agentId)
+  }
+  line(main, false, 'm-1', Date.UTC(2026, 8, 3, 11, 0), 1000, 500)
+  agent(SHARE_AGENTS.recent, 'a-1', Date.UTC(2026, 8, 3, 11, 30), 3000, 1500)
+  agent(SHARE_AGENTS.long, 'l-1', daysAgo(8), 2000, 0)
+  agent(SHARE_AGENTS.long, 'l-2', Date.UTC(2026, 8, 3, 10, 30), 1000, 0)
+  line(main, false, 'm-2', Date.UTC(2026, 8, 3, 8, 59), 2000, 0)
+  line(main, false, 'm-3', daysAgo(3), 2000, 0)
+  const codexCur: Cursor = { offset: 0, size: 0, ino: ino++, dev: 1 }
+  agg.cursors.set(CODEX_FILE, codexCur)
+  const x = ctx(CODEX_FILE)
+  agg.addCodexLine(codexMeta({ ts: hoursAgo(2), id: 'thread-1', cwd: '/home/t/beta' }), codexCur, x)
+  agg.addCodexLine(codexTurnContext(hoursAgo(2), 'gpt-5.3-codex'), codexCur, x)
+  agg.addCodexLine(codexTokenCount({
+    ts: hoursAgo(1),
+    total: { total: 12000, input: 9000, cached: 6000, output: 3000, reasoning: 800 },
+    last: { total: 12000, input: 9000, cached: 6000, output: 3000, reasoning: 800 },
+  }), codexCur, x)
+  return agg
+}

@@ -20,7 +20,7 @@ import { markdownDocument, quickPickItems } from '../src/textViews'
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
 import { SOURCE_TITLE, ViewModel, agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
-  CLAUDE_FILE, FINGERPRINT, NOW, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
+  CLAUDE_FILE, FINGERPRINT, NOW, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
 } from './fixtures/viewFixtures'
 import { deltaBadge } from '../src/render'
 import { ROOT } from './helpers/nls'
@@ -255,6 +255,52 @@ test('the data-quality lines are identical in both renderings', () => {
     || i.label.startsWith('Calibration '))
   assert.ok(dqItems.length >= 4)
   for (const i of dqItems) assert.ok(md.includes(`- ${i.label}`), i.label)
+})
+
+test('the markdown prints each window\'s subagent share under the window table, named by its window (1.6 N7)', () => {
+  const history = makeHistory()
+  fillHistory(history)
+  const vm = buildViewModel(makeInput({ agg: agentShareAgg(), history }))
+  const lines = markdownDocument(vm).split('\n')
+  const claude = lines.findIndex((l) => l.startsWith('### Claude Code'))
+  assert.ok(claude >= 0, lines.slice(0, 20).join('\n'))
+  const head = lines.indexOf('| Window | Used | Elapsed | Pace | Resets | Forecast |', claude)
+  // The table, a blank line, then one line per window with a share, in the table's order.
+  let end = head + 2
+  while (lines[end].startsWith('| ')) end++
+  assert.equal(lines[end], '')
+  assert.deepEqual(lines.slice(end + 1, end + 4), [
+    '- 5 h: subagents 5.5K of 7K counted here (79 %)',
+    '- 7 d: subagents 5.5K of 11K counted here (50 %)',
+    '',
+  ])
+  // Codex: no line — its card is followed by its own table and nothing that names subagents.
+  const codex = lines.findIndex((l, i) => i > claude && l.startsWith('### Codex'))
+  assert.ok(codex > claude)
+  assert.equal(lines.slice(codex).some((l) => l.includes('subagents') && l.includes('counted here')), false)
+  // Only a window with a share gets a line: none at all without one.
+  const bare = markdownDocument(buildViewModel(makeInput({ agg: new Aggregator() })))
+  assert.equal(bare.includes('counted here'), false)
+})
+
+test('the data-quality line of the subagent tokens and its note reach both renderings (1.6 N7)', () => {
+  const vm = buildViewModel(makeInput({ agg: agentShareAgg() }))
+  const md = markdownDocument(vm)
+  const line = 'Agent records, last 7 days: 7.5K · Subagent tokens in the hour buckets, last 7 days: 5.5K'
+  const note = 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.'
+  const dq = md.slice(md.indexOf('## Data quality'))
+  const bullets = dq.split('\n').filter((l) => l.startsWith('- '))
+  // After the lower-bound line, as the dashboard lists it, the note right under it.
+  const at = bullets.indexOf(`- ${line}`)
+  assert.ok(at > 0, dq)
+  assert.ok(bullets[at - 1].startsWith('- Lower bound share: '), bullets[at - 1])
+  assert.equal(bullets[at + 1], `- ${note}`)
+  const labels = quickPickItems(vm).map((i) => i.label)
+  assert.ok(labels.includes(line), labels.join('\n'))
+  assert.ok(labels.includes(note))
+  // Nothing to compare, no line.
+  const none = markdownDocument(buildViewModel(makeInput()))
+  assert.equal(none.includes('Agent records, last 7 days'), false)
 })
 
 test('projects and sessions reach both renderings when attribution is on', () => {

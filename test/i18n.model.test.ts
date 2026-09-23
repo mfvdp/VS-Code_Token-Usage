@@ -29,7 +29,7 @@ import { paceVerdict } from '../src/pace'
 import { buildViewModel } from '../src/viewModel'
 import { ROOT } from './helpers/nls'
 import {
-  NOW, fillHistory, makeConfig, makeHistory, makeInput, state, win,
+  NOW, agentShareAgg, fillHistory, makeConfig, makeHistory, makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
 
 /** The bundle the extension ships, so the test reads the very words a German user sees. */
@@ -181,4 +181,21 @@ test('a verdict built in German is the same judgement, only in other words', () 
   assert.equal(de.text, '20 % dem Tempo voraus')
   assert.equal(de.level, english.level)
   assert.equal(de.points, english.points)
+})
+
+test('the subagent share of a window and the data-quality line speak German, with German figures (1.6 N7)', () => {
+  german(() => {
+    const vm = buildViewModel(makeInput({ agg: agentShareAgg() }))
+    assert.equal(vm.quotas[0].windows[0].agentShare, 'Subagenten 5,5K von 7K hier gezählt (79 %)')
+    assert.deepEqual(vm.quotas[0].windows[0].agentShareParts, { sub: '5,5K', total: '7K', share: '79 %' })
+    assert.deepEqual(vm.dataQuality.agents, {
+      records: '7,5K',
+      buckets: '5,5K',
+      note: 'Die beiden unterscheiden sich systembedingt: Ein Datensatz umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.',
+    })
+    const rolled = agentShareAgg()
+    rolled.rollup(NOW, 2, 400, timeConfig(makeConfig()))
+    assert.equal(buildViewModel(makeInput({ agg: rolled })).quotas[0].windows[1].agentShare,
+      'Subagenten ≈5,5K von ≈9K hier gezählt (61 %)')
+  })
 })

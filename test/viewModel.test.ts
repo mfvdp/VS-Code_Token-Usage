@@ -14,12 +14,12 @@ import { RESET_JITTER_MS } from '../src/resetRule'
 import { MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
 import {
   AGENT_SELECTED_IN, DASHBOARD_SECTION_KEYS, isAgentSelectedIn, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
-  SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
+  SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentShareOf, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
   forecastsFor, SparkVm, parseWebviewMessage, sparkOf,
 } from '../src/viewModel'
 import {
-  CLAUDE_FILE, FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
-  timeConfig, win,
+  CLAUDE_FILE, FINGERPRINT, NOW, SHARE_AGENTS, TODAY, agentShareAgg, buildAgg, daysAgo, fillHistory, makeConfig, makeHistory,
+  makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
 import { claudeLine, ctxFor } from './fixtures/helpers'
 import { toolAgg } from './helpers/toolAgg'
@@ -1016,6 +1016,180 @@ test('a session without agents is keyed by its id, never by the transcript path 
   const vm = buildViewModel(makeInput({ agg }))
   assert.equal(vm.agents.roots[0].key, 's:s1')
   assert.equal(vm.agents.roots[0].usage, '–')
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 N7: the subagent share of each quota window, and the records against the buckets
+// ---------------------------------------------------------------------------
+
+test('each Claude window says how much of what was counted over its own bounds came from subagents (1.6 N7)', () => {
+  const vm = buildViewModel(makeInput({ agg: agentShareAgg() }))
+  const [five, seven] = vm.quotas[0].windows
+  // By hand (viewFixtures.agentShareAgg): 5 h = 1.5K main + 4.5K + 1K of agents; 7 d adds 4K of main.
+  assert.equal(five.agentShare, 'Subagents 5.5K of 7K counted here (79 %)')
+  assert.deepEqual(five.agentShareParts, { sub: '5.5K', total: '7K', share: '79 %' })
+  assert.equal(seven.agentShare, 'Subagents 5.5K of 11K counted here (50 %)')
+  // The bounds are the totals row's: its "Current … window" usage is the line's whole figure.
+  const rows = vm.totals.find((t) => t.source === 'claude')?.rows ?? []
+  assert.equal(rows[0].label, 'Current 5 h window')
+  assert.equal(rows[0].usage, five.agentShareParts?.total)
+  assert.equal(rows[1].usage, seven.agentShareParts?.total)
+  // Codex: never — its card has tokens in the same hours, and still no line.
+  const codex = vm.quotas.find((q) => q.source === 'codex')
+  assert.ok(codex && codex.windows.length > 0)
+  for (const w of codex.windows) {
+    assert.equal(w.agentShare, null)
+    assert.equal(w.agentShareParts, null)
+  }
+  // A share of tokens, never of the quota: no figure of the card is in the line, and the line is
+  // in no sentence of the card.
+  for (const w of vm.quotas[0].windows) {
+    const said = [w.percentText, w.verdict.text, w.stateText, w.resetLine, w.aria.text, ...w.explain.lines.map(String)].join(' | ')
+    assert.equal(said.includes('Subagents'), false, said)
+    assert.equal(said.includes('counted here'), false, said)
+  }
+})
+
+test('the subagent share leaves every figure of the quota card as it was (1.6 N7)', () => {
+  // The same tokens in the same hours, once from two agents and once from the main session: the
+  // provider's percentage, its verdict, its explanation and its forecast cannot move.
+  const quotas = [state('claude'), state('codex')]
+  const history = makeHistory()
+  fillHistory(history)
+  const withAgents = buildViewModel(makeInput({ agg: agentShareAgg(), quotas, history }))
+  const noAgents = buildViewModel(makeInput({ agg: agentShareAgg({ asMain: true }), quotas, history }))
+  const strip = (w: WindowVm): Record<string, unknown> => {
+    const { agentShare, agentShareParts, ...rest } = w
+    return rest
+  }
+  assert.deepEqual(withAgents.quotas.map((q) => q.windows.map(strip)), noAgents.quotas.map((q) => q.windows.map(strip)))
+  assert.equal(noAgents.quotas[0].windows[0].agentShare, 'Subagents 0 of 7K counted here (0 %)')
+  assert.notEqual(withAgents.quotas[0].windows[0].agentShare, noAgents.quotas[0].windows[0].agentShare)
+})
+
+test('the subagent share marks both figures ≈ once its window reaches below the hour roll-up (1.6 N7)', () => {
+  const agg = agentShareAgg()
+  // Two days of hour buckets: the 7 d window starts four days back, the 5 h window this morning.
+  agg.rollup(NOW, 2, 400, tcfg)
+  const [five, seven] = buildViewModel(makeInput({ agg })).quotas[0].windows
+  assert.equal(five.agentShare, 'Subagents 5.5K of 7K counted here (79 %)')
+  // The main line three days back is in a day bucket now: the rest is what the hours still hold.
+  assert.equal(seven.agentShare, 'Subagents ≈5.5K of ≈9K counted here (61 %)')
+  assert.deepEqual(seven.agentShareParts, { sub: '≈5.5K', total: '≈9K', share: '61 %' })
+})
+
+test('a ≈ on a subagent share or on the buckets alone still brings the legend that explains it (1.6 N7)', () => {
+  const legend = '~ = estimate · ≈ = lower bound · measured = read from the provider · derived = computed from measured values.'
+  // Eight days of hour buckets: no totals row reaches below the roll-up, nor do the last seven days
+  // of the data-quality line — but a ten-day window nine days in does: its share is marked, and so
+  // is the page.
+  const agg = agentShareAgg()
+  agg.rollup(NOW, 8, 400, tcfg)
+  const quotas = [state('claude', { windows: [
+    win(),
+    win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 62, resetsAt: NOW + 3 * 86_400_000, windowMinutes: 10080 }),
+    win({ id: 'other:14400', kind: 'other', label: '10 d', percent: 30, resetsAt: NOW + 86_400_000, windowMinutes: 14400 }),
+  ] })]
+  const vm = buildViewModel(makeInput({ agg, quotas }))
+  assert.equal(vm.totals.some((t) => t.rows.some((r) => r.approx)), false)
+  assert.equal(vm.dataQuality.agents?.buckets.startsWith('≈'), false)
+  assert.equal(vm.quotas[0].windows[1].agentShare?.includes('≈'), false)
+  assert.ok(String(vm.quotas[0].windows[2].agentShare).includes('≈'), String(vm.quotas[0].windows[2].agentShare))
+  assert.ok(vm.footnotes.includes(legend), vm.footnotes.join('\n'))
+  // Without any ≈ the legend does not mention it.
+  const plain = buildViewModel(makeInput({ agg: agentShareAgg(), quotas }))
+  assert.equal(plain.footnotes.some((f) => f.includes('≈')), false, plain.footnotes.join('\n'))
+})
+
+test('a window without bounds, one not begun, and one nothing was counted in have no subagent line (1.6 N7)', () => {
+  const agg = agentShareAgg()
+  for (const w of [
+    win({ resetsAt: null, windowMinutes: null }),
+    win({ resetsAt: null }),
+    win({ windowMinutes: null }),
+    win({ resetsAt: Number.NaN }),
+    win({ windowMinutes: Number.POSITIVE_INFINITY }),
+    win({ windowMinutes: 0 }),
+    // Its start is still ahead: five hours that end in eleven.
+    win({ resetsAt: NOW + 11 * 3_600_000 }),
+  ]) {
+    assert.equal(agentShareOf(agg, w, NOW), null, JSON.stringify(w))
+    const vm = buildViewModel(makeInput({ agg, quotas: [state('claude', { windows: [w] })] }))
+    assert.equal(vm.quotas[0].windows[0].agentShare, null)
+    assert.equal(vm.quotas[0].windows[0].agentShareParts, null)
+  }
+  // Nothing counted in the window: "0 of 0" is not a share.
+  assert.equal(agentShareOf(new Aggregator(), win(), NOW), null)
+  assert.equal(agentShareOf(agg, win({ resetsAt: daysAgo(20), windowMinutes: 300 }), NOW), null)
+  const empty = buildViewModel(makeInput({ agg: new Aggregator() }))
+  for (const q of empty.quotas) for (const w of q.windows) assert.equal(w.agentShare, null)
+  // A reset that has passed: the window the reading belongs to, up to its reset.
+  const due = agentShareOf(agg, win({ resetsAt: Date.UTC(2026, 8, 3, 11, 0), windowMinutes: 300 }), NOW)
+  assert.equal(due?.text, 'Subagents 1K of 3K counted here (33 %)')
+})
+
+test('the share is a whole percent, "<1 %" or ">99 %" where rounding would say none or all (1.6 N7)', () => {
+  const agg = new Aggregator()
+  const main = path.join('/virtual', 'claude', 'projects', '-home-t-alpha', 's1.jsonl')
+  const sub = path.join('/virtual', 'claude', 'projects', '-home-t-alpha', 's1', 'subagents', 'agent-a0000000000000009.jsonl')
+  const put = (file: string, id: string, input: number, h: number): void => {
+    agg.addClaudeLine(claudeLine({ id, ts: Date.UTC(2026, 8, 3, h, 0), final: true, usage: { input } }),
+      ctxFor({ file, isSub: file === sub }))
+  }
+  put(main, 'm-1', 1_000_000, 10)
+  put(sub, 's-1', 2_000, 11)
+  const five = (): string | null => agentShareOf(agg, win(), NOW)?.parts.share ?? null
+  assert.equal(five(), '<1 %')
+  put(sub, 's-2', 1_000_000_000, 11)
+  assert.equal(five(), '>99 %')
+  const only = new Aggregator()
+  only.addClaudeLine(claudeLine({ id: 's-3', ts: Date.UTC(2026, 8, 3, 11, 0), final: true, usage: { input: 500 } }),
+    ctxFor({ file: sub, isSub: true }))
+  assert.equal(agentShareOf(only, win(), NOW)?.text, 'Subagents 500 of 500 counted here (100 %)')
+})
+
+test('the data-quality line holds the agent records against the subagent hour buckets of the last 7 days (1.6 N7)', () => {
+  const agg = agentShareAgg()
+  const d = buildViewModel(makeInput({ agg })).dataQuality
+  // The long agent whole in its record (3K, its first line eight days back); in the buckets only
+  // the hour of each reply inside the seven days.
+  assert.deepEqual(d.agents, {
+    records: '7.5K',
+    buckets: '5.5K',
+    note: 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.',
+  })
+  // The records are the ones the 7-day block sums, by the same rule.
+  const open = buildViewModel(makeInput({ agg, ui: { agentsWeekOpen: true } }))
+  assert.equal(open.agents.week?.total, open.dataQuality.agents?.records)
+  // The same tokens without an agent: no record, and no subagent bucket either — no line.
+  assert.equal(buildViewModel(makeInput({ agg: agentShareAgg({ asMain: true }) })).dataQuality.agents, null)
+  assert.equal(buildViewModel(makeInput({ agg: new Aggregator(), quotas: [] })).dataQuality.agents, null)
+  // Codex alone has no agent line, whatever its forks.
+  assert.equal(buildViewModel(makeInput()).dataQuality.agents, null)
+})
+
+test('the data-quality line marks the buckets ≈ below the roll-up and counts a record only in the retention (1.6 N7)', () => {
+  const agg = agentShareAgg()
+  agg.rollup(NOW, 2, 400, tcfg)
+  const d = buildViewModel(makeInput({ agg })).dataQuality.agents
+  assert.equal(d?.records, '7.5K')
+  assert.equal(d?.buckets, '≈5.5K')
+  // An agent whose transcript last changed eight days ago is out of the retention — the record
+  // the tree no longer shows is not in the line either — while one read under two paths counts once.
+  const old = agentShareAgg()
+  const stale = path.join('/virtual', 'claude', 'projects', '-home-t-alpha', 's0', 'subagents', 'agent-a00000000000000aa.jsonl')
+  old.addClaudeLine(claudeLine({ id: 'o-1', ts: daysAgo(8), final: true, usage: { input: 90_000 } }), ctxFor({ file: stale, isSub: true }))
+  const twice = path.join('/virtual', 'claude', 'projects', '-home-t-beta', 's1', 'subagents', `agent-${SHARE_AGENTS.recent}.jsonl`)
+  old.addClaudeLine(claudeLine({ id: 'r-1', ts: Date.UTC(2026, 8, 3, 9, 30), final: true, usage: { input: 40_000 } }),
+    ctxFor({ file: twice, isSub: true }))
+  // Both are records of the aggregator: the line leaves them out, not the ingest.
+  assert.equal(old.agents().filter((r) => r.agentId === SHARE_AGENTS.recent).length, 2)
+  assert.ok(old.agents().some((r) => r.agentId === 'a00000000000000aa'))
+  const twin = buildViewModel(makeInput({ agg: old })).dataQuality.agents
+  // The newer of the two records of one id is its record: the 11:30 one of 4.5K, not the other.
+  assert.equal(twin?.records, '7.5K')
+  // The buckets hold every reply of the seven days, the second path's included.
+  assert.equal(twin?.buckets, '45.5K')
 })
 
 test('with nothing ingested the agent tree is empty and says which absence it is', () => {

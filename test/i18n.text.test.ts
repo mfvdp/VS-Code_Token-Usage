@@ -28,7 +28,7 @@ import { markdownDocument, quickPickItems } from '../src/textViews'
 import { QuotaState } from '../src/types'
 import { buildViewModel, ViewModel } from '../src/viewModel'
 import {
-  NOW, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
+  NOW, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
 } from './fixtures/viewFixtures'
 
 /**
@@ -75,6 +75,13 @@ const DE: Record<string, string> = {
     'Führen Sie zuerst „Token Pace: Claude-Statuszeile trennen“ aus — das Löschen von Dateien hier stellt die settings.json von Claude Code nicht wieder her.',
   'Tokens — {0}': 'Token — {0}',
   'Summary': 'Zusammenfassung',
+  // 1.6 N7: the subagent share under the window table, and the data-quality line with its note.
+  'Subagents {0} of {1} counted here ({2})': 'Subagenten {0} von {1} hier gezählt ({2})',
+  '{0}: subagents {1} of {2} counted here ({3})': '{0}: Subagenten {1} von {2} hier gezählt ({3})',
+  'Agent records, last 7 days': 'Agent-Datensätze, letzte 7 Tage',
+  'Subagent tokens in the hour buckets, last 7 days': 'Subagent-Token in den Stunden-Buckets, letzte 7 Tage',
+  'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.':
+    'Die beiden unterscheiden sich systembedingt: Ein Datensatz umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.',
 }
 
 /** The seam is module state; every test that changes it puts it back. */
@@ -129,6 +136,15 @@ test('the markdown document and the QuickPick are rendered in the bundle languag
   // And with no bundle the very same call is English again.
   assert.ok(markdownDocument(vm).startsWith('# Token Pace — usage'))
   assert.equal(quickPickItems(vm)[0].label, 'Open dashboard')
+})
+
+test('the subagent share under the window table and the data-quality line follow the bundle (1.6 N7)', () => {
+  const md = german(() => markdownDocument(buildViewModel(makeInput({ agg: agentShareAgg() }))))
+  assert.ok(md.includes('- 5 h: Subagenten 5,5K von 7K hier gezählt (79 %)'), md)
+  assert.ok(md.includes('- 7 d: Subagenten 5,5K von 11K hier gezählt (50 %)'), md)
+  assert.ok(md.includes('- Agent-Datensätze, letzte 7 Tage: 7,5K · Subagent-Token in den Stunden-Buckets, letzte 7 Tage: 5,5K'), md)
+  assert.ok(md.includes('- Die beiden unterscheiden sich systembedingt: Ein Datensatz umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.'), md)
+  assert.equal(/subagents|counted here|Agent records/.test(md), false, md)
 })
 
 test('the clipboard summary follows the bundle too', () => {

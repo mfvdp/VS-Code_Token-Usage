@@ -1089,6 +1089,79 @@ test('the card keeps its short age but neither the freshness row nor the officia
   assert.ok(h.indexOf('2 min ago') >= 0, h)
 })
 
+// 1.6 N7: the subagent share of what this machine counted over a window — a dim line under the
+// bar (after the forecast, before the sparkline), in the view model's words; no line without one.
+test('a window carries its subagent share as a dim line under the bar, and none without one', () => {
+  const share = 'Subagents 5.5K of 7K counted here (79 %)'
+  const h = render('sQuota()', {
+    quotas: [card({ windows: [win({ agentShare: share, agentShareParts: { sub: '5.5K', total: '7K', share: '79 %' },
+      forecast: { state: 'eta', text: '~empty in 3 h' }, spark: { points: [], slots: 672, from: 0, to: 1 } })] })],
+  })
+  // The percent kept whole: a narrow sidebar broke "79 %" between the figure and its unit.
+  const line = '<div class="meta agshare">Subagents 5.5K of 7K counted here (<span class="nobr">79 %</span>)</div>'
+  assert.equal(h.split('class="meta agshare"').length - 1, 1, h)
+  const at = h.indexOf(line)
+  assert.ok(at > h.indexOf('role="progressbar"'), h)
+  assert.ok(at > h.indexOf('~empty in 3 h'), 'the share comes after the forecast line: ' + h)
+  // The figure in the header is the provider's, untouched by it.
+  assert.ok(h.indexOf('<b>61 %</b>') >= 0, h)
+  assert.ok(h.indexOf('<b>61 %</b>') < at, h)
+  assert.match(STYLE, /\n\.meta \{ color: var\(--dim\); font-size: 11px; \}/)
+  // Escaped like every word the model hands over; absent, empty or not a string: no line.
+  const odd = render('sQuota()', { quotas: [card({ windows: [win({ agentShare: '<img src=x onerror=alert(1)>' })] })] })
+  assert.ok(odd.indexOf('<div class="meta agshare">&lt;img src=x onerror=alert(1)&gt;</div>') >= 0, odd)
+  // The share is found in the escaped line and escaped itself: "<1 %" stays text.
+  const tiny = render('sQuota()', { quotas: [card({ windows: [win({ agentShare: 'Subagents 2K of 1M counted here (<1 %)',
+    agentShareParts: { sub: '2K', total: '1M', share: '<1 %' } })] })] })
+  assert.ok(tiny.indexOf('<div class="meta agshare">Subagents 2K of 1M counted here (<span class="nobr">&lt;1 %</span>)</div>') >= 0, tiny)
+  // Parts that are not in the line, or not strings, wrap nothing.
+  for (const agentShareParts of [null, { share: 'x %' }, { share: 5 }, 'parts']) {
+    const plain = render('sQuota()', { quotas: [card({ windows: [win({ agentShare: share, agentShareParts })] })] })
+    assert.ok(plain.indexOf('<div class="meta agshare">' + share + '</div>') >= 0, JSON.stringify(agentShareParts) + ': ' + plain)
+  }
+  for (const agentShare of [null, undefined, '', 42, { text: 'x' }]) {
+    const none = render('sQuota()', { quotas: [card({ windows: [win({ agentShare })] })] })
+    assert.equal(none.indexOf('agshare'), -1, JSON.stringify(agentShare) + ': ' + none)
+  }
+})
+
+/** 1.6 N7: a data-quality block as the view model builds it, with `over` on top. */
+function dataQualityOf(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    roots: ['~/.claude'], files: 2, oldestDay: '2026-08-01', newestDay: '2026-09-03',
+    buckets: { hour: 10, day: 5, month: 0 }, snapshotBytes: 4096, lowerBoundShare: '3 %',
+    unpricedModels: [], familyPriced: [], quota: [], consent: 'network access granted', leader: 'leader',
+    retention: { hourDays: 45, days: 400, historyDays: 30 }, history: { samples: 3, bytes: 2048, oldest: null },
+    calibration: [], bridge: null, attribution: 'none', version: '1.6.0', agents: null, ...over,
+  }
+}
+
+test('the data-quality list holds the agent records against the subagent hour buckets, with its note (1.6 N7)', () => {
+  const agents = { records: '7.5K', buckets: '≈5.5K', note: 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.' }
+  const h = render('sDataQuality()', { dataQuality: dataQualityOf({ agents }) })
+  const item = '<li>Agent records, last 7 days: 7.5K · Subagent tokens in the hour buckets, last 7 days: ≈5.5K'
+    + '<div class="meta agnote">' + agents.note + '</div></li>'
+  assert.ok(h.indexOf(item) >= 0, h)
+  // After the lower-bound line, before the retention, as the markdown lists it.
+  assert.ok(h.indexOf('Lower bound share 3 %') < h.indexOf(item), h)
+  assert.ok(h.indexOf(item) < h.indexOf('Retention 45 d hourly'), h)
+  // The view model's words and figures, escaped; only the two labels are the page's.
+  const odd = render('sDataQuality()', { dataQuality: dataQualityOf({ agents: { records: '<b>', buckets: '&', note: '<i>n</i>' } }) })
+  assert.ok(odd.indexOf('Agent records, last 7 days: &lt;b&gt; · Subagent tokens in the hour buckets, last 7 days: &amp;'
+    + '<div class="meta agnote">&lt;i&gt;n&lt;/i&gt;</div>') >= 0, odd)
+  for (const x of [null, undefined, { records: 1, buckets: '2', note: 'n' }, 'agents']) {
+    const none = render('sDataQuality()', { dataQuality: dataQualityOf({ agents: x }) })
+    assert.equal(none.indexOf('Agent records'), -1, JSON.stringify(x) + ': ' + none)
+  }
+  // The labels are the page's words, German on a German page.
+  for (const k of ['Agent records, last 7 days', 'Subagent tokens in the hour buckets, last 7 days']) {
+    assert.ok(Object.prototype.hasOwnProperty.call(DICT, k), k)
+  }
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['Agent records, last 7 days'], 'Agent-Datensätze, letzte 7 Tage')
+  assert.equal(bundle['Subagent tokens in the hour buckets, last 7 days'], 'Subagent-Token in den Stunden-Buckets, letzte 7 Tage')
+})
+
 test('the state is dropped when the verdict already says the same word', () => {
   const h = render('sQuota()', {
     quotas: [card({

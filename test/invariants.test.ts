@@ -23,7 +23,7 @@ import {
   AGENT_CONTENT, AGENT_WORLD, agentNode, agentWorld, agentWorldFile, everyParent, treeNodes,
 } from './fixtures/agentWorld'
 import {
-  FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
+  FINGERPRINT, NOW, TODAY, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
   timeConfig, win,
 } from './fixtures/viewFixtures'
 import { ROOT } from './helpers/nls'
@@ -104,6 +104,31 @@ test('a cost that cannot be complete is labelled a lower bound wherever it is sh
   assert.ok(vm.footnotes.some((f) => f.includes('lower bound')))
   assert.ok(toMarkdownSummary(vm).includes('lower bound'))
   assert.ok(vm.totals.some((t) => t.rows.some((r) => r.costPartial)))
+})
+
+test('the subagent share is a share of tokens: no view prints a quota figure the agents moved (1.6 N7)', () => {
+  // The same tokens in the same hours, from two agents and from the main session alone.
+  const history = makeHistory()
+  fillHistory(history)
+  const quotas = [state('claude'), state('codex')]
+  const views = (agg: Aggregator): { card: unknown; picks: unknown; table: string[] } => {
+    const vm = buildViewModel(makeInput({ agg, quotas, history }))
+    const md = markdownDocument(vm).split('\n')
+    return {
+      card: vm.quotas.map((q) => q.windows.map((w) => [w.percent, w.percentText, w.level, w.verdict, w.elapsed, w.aria, w.explain, w.forecast])),
+      picks: quickPickItems(vm).filter((i) => vm.quotas.some((q) => q.windows.some((w) => i.label.startsWith(`${w.label} `))))
+        .map((i) => [i.label, i.description, i.detail]),
+      table: md.filter((l) => /^\| (5 h|7 d) \|/.test(l)),
+    }
+  }
+  const agents = views(agentShareAgg())
+  const alone = views(agentShareAgg({ asMain: true }))
+  assert.ok(agents.table.length >= 2, agents.table.join('\n'))
+  assert.deepEqual(agents, alone)
+  // And the line never says "quota", "%" of a window or points — it names what it counts.
+  const w = buildViewModel(makeInput({ agg: agentShareAgg(), quotas })).quotas[0].windows[0]
+  assert.match(String(w.agentShare), /^Subagents \S+ of \S+ counted here \((<|>)?\d+ %\)$/)
+  assert.equal(/quota|point|used|window/i.test(String(w.agentShare)), false, String(w.agentShare))
 })
 
 test('a window without a clock gets no pace, no elapsed and no projected end', () => {

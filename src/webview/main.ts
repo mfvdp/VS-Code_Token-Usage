@@ -524,6 +524,13 @@ function quotaCard(q: Payload): string {
     if (f && f.text && trusted && printed.indexOf(f.text.toLowerCase()) < 0) {
       h += '<div class="meta">' + esc(f.text) + '</div>';
     }
+    // 1.6 N7: how much of what this machine counted over the window came from Claude Code's
+    // subagents — the view model's words, a share of tokens and never of the quota, dim like every
+    // line of the card that is not the provider's reading. Absent (Codex, no bounds, nothing
+    // counted, an older build) is no line at all.
+    if (typeof w.agentShare === 'string' && w.agentShare) {
+      h += '<div class="meta agshare">' + shareLine(w.agentShare, w.agentShareParts) + '</div>';
+    }
     if (hasSpark(w.spark)) h += sparkSvg(w.spark, { src: q.source, win: w.id });
     if (ex) h += explainPop(ex, popId);
     h += '</div>';
@@ -617,6 +624,19 @@ function quotaInvitation(): string {
     + '</button>'
     + (why ? '<div class="meta">' + why + '</div>' : '')
     + '</div>';
+}
+
+/**
+ * 1.6 N7: a window's subagent share line, escaped, with its percent kept whole — "58 %" is a figure
+ * and its unit, and a 260 px sidebar broke the line between the two. The words are the view model's;
+ * the one figure with a space in it, the share, is found where the line ends it and wrapped. The
+ * token figures ("≈176.5K") have no break opportunity of their own.
+ */
+function shareLine(text: string, parts: Payload): string {
+  const s = esc(text);
+  const p = parts && typeof parts.share === 'string' && parts.share ? esc(parts.share) : '';
+  const at = p ? s.lastIndexOf(p) : -1;
+  return at < 0 ? s : s.slice(0, at) + '<span class="nobr">' + p + '</span>' + s.slice(at + p.length);
 }
 
 function sQuota(): string {
@@ -1382,6 +1402,14 @@ function sDataQuality(): string {
   li.push(tr('Lower bound share {0}', esc(d.lowerBoundShare))
     + (d.unpricedModels.length ? ' · ' + tr('unpriced: {0}', d.unpricedModels.map(esc).join(', ')) : '')
     + (d.familyPriced.length ? ' · ' + tr('family-priced: {0}', d.familyPriced.map(esc).join(', ')) : ''));
+  // 1.6 N7: the subagent tokens of the last seven days counted two ways, and why the two differ.
+  // The figures and the note are the view model's; only the two labels are the page's.
+  const ag = d.agents;
+  if (ag && typeof ag.records === 'string' && typeof ag.buckets === 'string') {
+    li.push(tr('Agent records, last 7 days') + ': ' + esc(ag.records) + ' · '
+      + tr('Subagent tokens in the hour buckets, last 7 days') + ': ' + esc(ag.buckets)
+      + (typeof ag.note === 'string' && ag.note ? '<div class="meta agnote">' + esc(ag.note) + '</div>' : ''));
+  }
   li.push(tr('Retention {0} d hourly · {1} d daily · {2} d quota history',
     d.retention.hourDays, d.retention.days, d.retention.historyDays));
   li.push(tr('Quota history {0} samples · {1} KB · oldest {2}',

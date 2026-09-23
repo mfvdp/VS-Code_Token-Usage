@@ -555,6 +555,33 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   }
 })
 
+test('docs/dashboard.md and docs/numbers.md name the subagent share of a window and the records against the buckets, as the views write them', () => {
+  // 1.6 N7 (P10b): the words the view model, the markdown and the page write, taken from the sources that write them.
+  const model = readDoc('src/viewModel.ts')
+  const text = readDoc('src/textViews.ts')
+  const page = readDoc('src/webview/main.ts')
+  for (const [src, written] of [
+    [model, 'Subagents {0} of {1} counted here ({2})'],
+    [model, 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.'],
+    [text, '{0}: subagents {1} of {2} counted here ({3})'],
+    [page, 'Agent records, last 7 days'], [page, 'Subagent tokens in the hour buckets, last 7 days'],
+  ] as Array<[string, string]>) assert.ok(src.includes(`'${written}'`), `a source no longer writes: ${written}`)
+  const dash = readDoc('docs/dashboard.md').replace(/\s+/g, ' ')
+  for (const claim of ['`Subagents 4.7M of 5.5M counted here (86 %)`', '`5 h: subagents 4.7M of 5.5M counted here (86 %)`',
+    'a share of **tokens**, never of the quota', 'never moves the window\'s percentage', 'both figures carry `≈`',
+    'every Codex window have no such line', '`Current 5 h window` and `Current 7 d window`', '`<1 %` or `>99 %`',
+    '`Agent records, last 7 days`', '`Subagent tokens in the hour buckets, last 7 days`',
+    '*the two differ by construction: a record keeps a whole agent, a bucket the hour of each reply*']) {
+    assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
+  }
+  const numbers = doc.numbers.replace(/\s+/g, ' ')
+  for (const claim of ['| Subagent share of a Claude window (`Subagents 4.7M of 5.5M counted here (86 %)`) |',
+    'A share of tokens, **never of the quota**', '`≈` on both figures', 'Claude only',
+    '| Agent records against subagent hour buckets (data quality) |', 'a record keeps a whole agent, a bucket the hour of each reply']) {
+    assert.ok(numbers.includes(claim), `docs/numbers.md does not say: ${claim}`)
+  }
+})
+
 test('docs/agents.md and docs/dashboard.md name the 7-day block as the page writes it, and say what it does not add up', () => {
   // 1.6 L3 (P10a): the words the page and the markdown write, taken from the sources that write them.
   const page = readDoc('src/webview/main.ts')

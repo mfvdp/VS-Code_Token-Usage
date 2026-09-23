@@ -14,7 +14,7 @@
  */
 
 import { SOURCES, USAGE_PAGE } from './adapters'
-import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
+import { AGENT_RETENTION_DAYS, AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { buildAgentTree } from './agentTreeBuild'
 import { Aggregator, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
@@ -33,7 +33,7 @@ import {
 import { explainWindow, WindowExplain } from './paceExplain'
 import { PRICES_AS_OF, PricingOptions, isCustomPricing } from './prices'
 import { promptCacheText } from './promptCache'
-import { ageMinutes, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
+import { ageMinutes, compact, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
 import { turnedOver } from './resetRule'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
@@ -52,8 +52,8 @@ import {
   formatTime, rangeFor, isDay, previousRange, relativeShort,
 } from './time'
 import {
-  Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
-  QuotaState, QuotaWindow, Source, TOOL_NAME_CAP,
+  AgentRec, Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
+  QuotaState, QuotaWindow, Source, TOOL_NAME_CAP, emptyBucket,
 } from './types'
 
 export type {
@@ -498,6 +498,28 @@ export interface WindowVm {
    * Pick carries its first two lines — every view the same words, none of them its own.
    */
   explain: WindowExplain
+  /**
+   * N7 (1.6): how much of what this machine counted over the window's own bounds came from Claude
+   * Code's subagents — "Subagents 4.7M of 5.5M counted here (86 %)". A share of **tokens**, never of
+   * the quota: the provider's percentage covers every client of the account, the local count only
+   * the transcripts on this machine, so the two are never multiplied into each other and nothing
+   * here moves `percent`. `≈` in front of both figures once the window reaches below the hour
+   * buckets' roll-up. Null for Codex, for a window without a reset or a length, and for a window
+   * nothing was counted in — see `agentShareOf`.
+   */
+  agentShare: string | null
+  /**
+   * N7: the three figures of `agentShare` — the subagents' tokens, all Claude tokens, the share —
+   * for the view that words the line its own way (the markdown report: "5 h: subagents …").
+   */
+  agentShareParts: AgentShareParts | null
+}
+
+/** N7 (1.6): the figures of one window's subagent share, as the line prints them (`≈` included). */
+export interface AgentShareParts {
+  sub: string
+  total: string
+  share: string
 }
 
 export interface QuotaCard {
@@ -616,6 +638,14 @@ export interface DataQuality {
   bridge: string | null
   attribution: Attribution
   version: string
+  /**
+   * N7 (1.6): the subagent tokens of the last seven days counted two ways, side by side — the agent
+   * records' usage (each agent whole, the records the tree and its 7-day block are built from)
+   * and the subagent tokens of the hour buckets (the hour of each reply, `≈` when those seven days
+   * reach below the hour buckets' roll-up) — with the note that says why the two need not agree.
+   * Claude Code only. Null when neither holds a token.
+   */
+  agents: { records: string; buckets: string; note: string } | null
 }
 
 export interface VmInput {
@@ -1017,6 +1047,96 @@ function printableForecast(f: Forecast | null): Forecast | null {
   return f.state === 'measuring' ? { ...f, text: '' } : f
 }
 
+/**
+ * A share as the subagent line writes it: a whole percent; "<1 %" for a share that is something
+ * but rounds to nothing, ">99 %" for one that is not everything but rounds to all of it — "0 %"
+ * beside a figure that is not zero, or "100 %" beside a total the subagents did not make alone,
+ * would be the line contradicting its own two figures.
+ */
+function agentShareWord(part: number, whole: number): string {
+  if (!(part > 0)) return `${full(0)} %`
+  if (part >= whole) return `${full(100)} %`
+  const share = part / whole
+  if (share < 0.005) return `<${full(1)} %`
+  if (share >= 0.995) return `>${full(99)} %`
+  return `${full(Math.round(share * 100))} %`
+}
+
+/**
+ * N7 (1.6): the subagent share of one Claude window.
+ *
+ * Over the bounds the totals row sums the same window over — from `resetsAt − windowMinutes` to
+ * `min(now, resetsAt)` — the Claude tokens of the hour buckets that came from subagent
+ * transcripts, against all Claude tokens of them: usage as every table counts it (`billable`),
+ * whatever the page's chips say, since the quota card above follows no chip either. Only hour
+ * buckets can answer a span that does not start at a day boundary; once the oldest hours of it
+ * have been rolled up, both figures are lower bounds and carry `≈` (the share of two lower bounds
+ * is left unmarked — it is not a bound of anything, and the line says where it came from).
+ *
+ * Null for a window without a reset or a length (no bounds to sum over), for one whose start is
+ * still ahead, and for one nothing was counted in: "0 of 0" is not a share. The window's percent
+ * is not an input — this is a share of tokens counted here, never of the provider's quota.
+ */
+export function agentShareOf(
+  agg: Aggregator, w: Pick<QuotaWindow, 'resetsAt' | 'windowMinutes'>, now: number,
+): { text: string; parts: AgentShareParts } | null {
+  if (w.resetsAt === null || w.windowMinutes === null) return null
+  if (!Number.isFinite(w.resetsAt) || !Number.isFinite(w.windowMinutes) || w.windowMinutes <= 0) return null
+  const from = w.resetsAt - w.windowMinutes * 60_000
+  const to = Math.min(now, w.resetsAt)
+  if (!(to > from)) return null
+  const all = agg.sumHours(from, to, { source: 'claude' })
+  const total = billable(all.bucket)
+  if (!(total > 0)) return null
+  const sub = billable(agg.sumHours(from, to, { source: 'claude', isSub: true }).bucket)
+  if (!Number.isFinite(sub)) return null
+  const mark = (s: string): string => (all.complete ? s : `≈${s}`)
+  const parts: AgentShareParts = { sub: mark(compact(sub)), total: mark(compact(total)), share: agentShareWord(sub, total) }
+  return { text: t('Subagents {0} of {1} counted here ({2})', parts.sub, parts.total, parts.share), parts }
+}
+
+/**
+ * N7 (1.6): the data-quality line that holds the two counts of the subagent tokens of the last
+ * seven days against each other.
+ *
+ * The records are the ones the agent tree and its 7-day block are built from, taken by the same
+ * rule: in the retention while the transcript is — its last counted reply, or a request the API
+ * rejected after it —, one record per agent id (two would be one transcript read under two paths:
+ * the newer), and only with a counted request; each at its whole usage. The buckets are the
+ * subagent hour buckets of Claude over the same seven days. The two differ by construction — an
+ * agent that started eight days ago is whole in its record and only partly in the buckets — which
+ * is what the note says; neither is corrected by the other.
+ */
+function agentTokensOf(agg: Aggregator, now: number): DataQuality['agents'] {
+  const since = now - AGENT_RETENTION_DAYS * 86_400_000
+  const byId = new Map<string, AgentRec>()
+  for (const r of agg.agents()) {
+    if (!r || typeof r.agentId !== 'string' || r.agentId === '' || !(Number.isFinite(r.lastTs) && r.lastTs > 0)) continue
+    const rejected = r.rejected && typeof r.rejected.at === 'number' && Number.isFinite(r.rejected.at) && r.rejected.at >= r.lastTs
+      ? r.rejected.at : r.lastTs
+    if (Math.max(r.lastTs, rejected) < since) continue
+    const prev = byId.get(r.agentId)
+    if (!prev || r.lastTs > prev.lastTs) byId.set(r.agentId, r)
+  }
+  let records = 0
+  for (const r of byId.values()) {
+    if (!(r.requests > 0)) continue
+    const use = billable({
+      ...emptyBucket('claude', '*', true, 'standard', 'd', null, ''),
+      input: r.input, cacheWrite: r.cacheWrite, output: r.output,
+    })
+    if (Number.isFinite(use) && use > 0) records += use
+  }
+  const hours = agg.sumHours(since, now, { source: 'claude', isSub: true })
+  const buckets = billable(hours.bucket)
+  if (!(records > 0) && !(buckets > 0)) return null
+  return {
+    records: compact(records),
+    buckets: hours.complete ? compact(buckets) : `≈${compact(buckets)}`,
+    note: t('The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.'),
+  }
+}
+
 function quotaCard(
   q: QuotaState,
   input: VmInput,
@@ -1057,6 +1177,9 @@ function quotaCard(
       staleAfterMinutes: cfg.staleAfterMinutes,
       formatTime: (ms) => formatTime(ms, tcfg),
     })
+    // N7 (1.6): Claude Code's subagents are Claude's alone — Codex records no agent the section
+    // could name, and its forks are not what the Agents section counts.
+    const share = q.source === 'claude' ? agentShareOf(input.agg, w, now) : null
     return {
       id: w.id,
       label: w.label,
@@ -1086,6 +1209,8 @@ function quotaCard(
           : `${w.label}: ${text}, ${verdict.text}`,
       },
       explain,
+      agentShare: share?.text ?? null,
+      agentShareParts: share?.parts ?? null,
     }
   })
 
@@ -1636,6 +1761,7 @@ function dataQuality(
           : t('status line not connected'),
     attribution: cfg.attribution,
     version: typeof __EXT_VERSION__ === 'string' ? __EXT_VERSION__ : '0.0.0',
+    agents: agentTokensOf(agg, now),
   }
 }
 
@@ -1664,7 +1790,11 @@ function footnotesFor(vm: ViewModel, cfg: Config): string[] {
   // The glyph legend every view prints. `≈` is only explained where it can appear: the
   // QuickPick has no room for the sentence under the table, so the mark it prints beside a
   // window row would otherwise reach that reader with nothing anywhere saying what it means.
+  // 1.6 N7: a window's subagent share and the data-quality line's buckets carry the same mark, over
+  // spans no totals row need share — a model window of its own reset, the last seven days.
   const approx = vm.totals.some((row) => row.rows.some((r) => r.approx))
+    || vm.quotas.some((q) => q.windows.some((w) => w.agentShareParts !== null && w.agentShareParts.total.startsWith('≈')))
+    || (vm.dataQuality.agents !== null && vm.dataQuality.agents.buckets.startsWith('≈'))
   out.push(approx
     ? t('~ = estimate · ≈ = lower bound · measured = read from the provider · derived = computed from measured values.')
     : t('~ = estimate · measured = read from the provider · derived = computed from measured values.'))

@@ -258,6 +258,7 @@
   "some models unpriced": "einige Modelle ohne Preis",
   "stale": "veraltet",
   "status line": "Statuszeile",
+  "superseded by a later attempt": "durch einen späteren Versuch ersetzt",
   "today: fresh {0} · cache write {1}{2} · cache read {3} · output {4} · reasoning {5} · cache hit {6}": "heute: frische Eingabe {0} · Cache-Schreiben {1}{2} · Cache-Lesen {3} · Ausgabe {4} · Denkschritte {5} · Cache-Treffer {6}",
   "token expired": "Token abgelaufen",
   "transcript": "Transkript",

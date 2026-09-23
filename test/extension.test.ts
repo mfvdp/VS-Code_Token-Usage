@@ -26,7 +26,7 @@ import * as os from 'os'
 import * as path from 'path'
 import {
   agentResultLine, agentToolUseLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
-  journalLine, metaJson, snakeRateLimits, tmpDir,
+  journalKey, journalLine, metaJson, snakeRateLimits, tmpDir,
 } from './fixtures/helpers'
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
@@ -434,7 +434,7 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
     cursors: Record<string, unknown>
   }
   assert.equal(snap.version, STATE_VERSION)
-  assert.equal(snap.version, 7)
+  assert.equal(snap.version, 8)
   // Two Claude models plus one Codex model, all in the same hour.
   assert.equal(snap.buckets.length, 3)
   assert.equal(Object.keys(snap.cursors).length, 2)
@@ -1064,10 +1064,12 @@ function writeAgentWorld(fx: Fixture): AgentWorld {
 
 /**
  * Scans the fixture in this process and leaves the result where the extension keeps its state:
- * as this build writes it (7), or as a build before the agent tables did (6) — every line
- * counted, every cursor at its file's end, and no agent table at all.
+ * as this build writes it (8), or as a build before the agent tables did (6) — every line
+ * counted, every cursor at its file's end, and no agent table at all. 1.6 P2b: this build writes
+ * version 8 (it was 7), and a version 6 has no runs and no revision to delete (it had no
+ * `journalResults`/`agentsReplayed` either).
  */
-async function seedSnapshot(fx: Fixture, version: 6 | 7): Promise<Snapshot> {
+async function seedSnapshot(fx: Fixture, version: 6 | 8): Promise<Snapshot> {
   const { agg, scan, discover } = lazy()
   discover.configureRoots([fx.claudeDir], [fx.codexDir])
   const a = new agg.Aggregator()
@@ -1078,8 +1080,8 @@ async function seedSnapshot(fx: Fixture, version: 6 | 7): Promise<Snapshot> {
     delete snap.agents
     delete snap.launches
     delete snap.mains
-    delete snap.journalResults
-    delete snap.agentsReplayed
+    delete snap.runs
+    delete snap.agentsRevision
     for (const p of Object.values(snap.pending)) {
       delete p.agent
       delete p.main
@@ -1221,7 +1223,7 @@ test('the poll is wanted while an agent runs or a session is active, and never f
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
-    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, children: [], ...over,
+    lowerBound: false, duration: '–', startTs: null, lastTs: null, agentCount: 0, superseded: false, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
   const waiting = node({ key: 'l:toolu_x', kind: 'pending', state: 'unknown', derived: true })
@@ -1321,7 +1323,7 @@ test('while an agent runs, the poll hands the new and changed files of active se
   // A state that has been replayed already: the cold start reads every line itself, and
   // nothing waits for a replay.
   const replayed = new agg.Aggregator()
-  replayed.agentsReplayed = true
+  replayed.agentsRevision = agg.AGENT_TABLES_REVISION
   fs.mkdirSync(fx.storage, { recursive: true })
   fs.writeFileSync(fx.stateFile, JSON.stringify(replayed.toSnapshot()))
   const base = EXPECTED_BILLABLE + w.billable
@@ -1363,11 +1365,70 @@ test('while an agent runs, the poll hands the new and changed files of active se
     assert.equal(intervals.armed(), 0, 'an interval outlived the extension')
     // The state written on the way out: what the poll found was counted, the idle session was
     // never read again.
-    const agents = readState(fx)?.agents ?? {}
-    assert.equal(agents[second]?.outcome, 'completed')
-    assert.equal(agents[w.running]?.outcome, 'completed')
+    const saved = readState(fx)
+    const agents = saved?.agents ?? {}
+    // 1.6 P2b: the journals' results are their runs' now, not written onto the agents' records.
+    const ended = (run: string): Array<[string, string | null]> =>
+      (saved?.runs?.[`${ACTIVE}|${run}`]?.agents ?? []).map((a) => [a.agentId, a.outcome])
+    assert.deepEqual(ended(RUN2), [['a2a2a2', 'completed']])
+    assert.deepEqual(ended(RUN), [['a1a1a1', 'completed']])
+    assert.equal(agents[second]?.requests, 1)
     assert.equal(agents[w.idleAgent]?.input, 17)
     assert.equal(agents[idleNew], undefined)
+  } finally {
+    seeAgain()
+    intervals.restore()
+  }
+})
+
+test('a journal\'s keys, labels, phases and results reach neither the log, the diagnostics, the markdown nor the state (1.6 §0a.1)', async () => {
+  // The host's half of the §0a.1 leak test (test/agg.journal.test.ts has the aggregator's): the
+  // cold start reads the journal in the worker, the next line of it is read on the main thread —
+  // after the rebuild pass has read the keys again — and the rest goes where the host sends it.
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const secret = 'JOURNAL-HOST-CONTENT-3b9e'
+  // The fixture's run started a1a1a1 under the key of step "a1a1a1"; the same step again replaces it.
+  appendLine(w.journal, journalLine({ type: 'started', agentId: 'a1a1a2', step: 'a1a1a1', label: `${secret}-label`, phase: `${secret}-phase` }))
+  const { agg, ext } = lazy()
+  const replayed = new agg.Aggregator()
+  replayed.agentsRevision = agg.AGENT_TABLES_REVISION
+  fs.mkdirSync(fx.storage, { recursive: true })
+  fs.writeFileSync(fx.stateFile, JSON.stringify(replayed.toSnapshot()))
+  const intervals = holdIntervals()
+  const seeAgain = blindRecursiveWatchers()
+  try {
+    await activateHost(fx, REPO)
+    await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+    await waitFor('the poll to start', () => state.logText().includes('Agent poll: on'))
+    // A result and a third start of the step, read by a pass of the poll on the main thread.
+    appendLine(w.journal, journalLine({ type: 'result', agentId: 'a1a1a2', step: 'a1a1a1', result: { summary: `${secret}-result` } }))
+    appendLine(w.journal, journalLine({ type: 'started', agentId: 'a1a1a3', step: 'a1a1a1', label: `${secret}-label` }))
+    const ingests = state.logText().split('Ingest:').length
+    assert.ok(intervals.fire(ext.AGENT_POLL_MS) > 0, 'no interval of the poll\'s period is armed')
+    await waitFor('the journal to be read on', () => state.logText().split('Ingest:').length > ingests)
+    await state.execute('tokenPace.showUsageMarkdown')
+    const markdown = lastMarkdown()
+    await state.execute('tokenPace.copyDiagnostics')
+    const report = state.clipboard[state.clipboard.length - 1]
+    assert.ok(report && report.length > 0, 'no diagnostics were copied')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    const saved = fs.readFileSync(fx.stateFile, 'utf8')
+    // It went through: the rebuilt keys told the third start from a new step.
+    const run = (JSON.parse(saved) as Snapshot).runs?.[`${ACTIVE}|${RUN}`]
+    assert.deepEqual(run?.agents.map((a) => [a.agentId, a.step, a.attempt, a.outcome, a.supersededBy]), [
+      ['a1a1a1', 1, 1, 'stopped', 'a1a1a2'], ['a1a1a2', 1, 2, 'completed', 'a1a1a3'], ['a1a1a3', 1, 3, null, null],
+    ])
+    const key = journalKey('a1a1a1')
+    assert.ok(fs.readFileSync(w.journal, 'utf8').includes(key), 'the fixture lost its key')
+    const hex = key.slice(3)
+    const runs = Array.from({ length: hex.length - 15 }, (_, i) => hex.slice(i, i + 16))
+    for (const [what, text] of [['log', state.logText()], ['diagnostics', report], ['markdown', markdown], ['state', saved]]) {
+      assert.equal(text.includes(key), false, `the ${what} holds the journal key`)
+      assert.equal(runs.find((r) => text.includes(r)), undefined, `the ${what} holds 16 hex digits of the journal key`)
+      assert.equal(text.includes(secret), false, `the ${what} holds a journal line's label, phase or result`)
+      assert.equal(text.includes('synthetic journal'), false, `the ${what} holds the fixture's journal content`)
+    }
   } finally {
     seeAgain()
     intervals.restore()
@@ -1429,7 +1490,8 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
   assert.equal(claudeFiles, 7)
 
   await activateHost(fx, REPO)
-  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsReplayed === true)
+  const { agg } = lazy()
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   assert.match(state.logText(),
     new RegExp(`Agent replay \\(cold start\\): ${claudeFiles} file\\(s\\) read again, \\d+ change\\(s\\), \\d+ ms`))
   const snap = readState(fx)
@@ -1480,7 +1542,7 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
   assert.match(state.logText(), /Agent replay \(re-read\): \d+ file\(s\) read again/)
   const reread = readState(fx)
   assert.ok(reread)
-  assert.equal(reread.agentsReplayed, true)
+  assert.equal(reread.agentsRevision, agg.AGENT_TABLES_REVISION)
   assert.deepEqual(Object.keys(reread.agents ?? {}).sort(), [w.running, w.sync, w.idleAgent].sort())
   assert.deepEqual(fingerprintOf(reread), fingerprintOf(v6))
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
@@ -1535,8 +1597,8 @@ test('a follower shows the agents of the leader\'s state and neither polls nor r
   writeAgentWorld(fx)
   // The leader's state as this build writes it, with a running agent — never replayed, which a
   // leader would do now and a follower must leave to the leader.
-  const leader = await seedSnapshot(fx, 7)
-  assert.equal(leader.agentsReplayed, false)
+  const leader = await seedSnapshot(fx, 8)
+  assert.equal(leader.agentsRevision, 0)
   const written = fs.readFileSync(fx.stateFile, 'utf8')
   fs.writeFileSync(fx.leaderFile, JSON.stringify({
     pid: process.pid, id: 'another-window-0123456789abcdef', expiresAt: Date.now() + 120_000,

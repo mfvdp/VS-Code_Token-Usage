@@ -15,15 +15,19 @@
  *     Workflow cfe7718d         running
  *       workflow-subagent       done — the workflow journal recorded it, at no time of its own
  *       workflow-subagent       failed — a task notification recorded it
- *       workflow-subagent       running — its transcript changed 25 s ago
+ *       workflow-subagent       failed, retried — the journal recorded the failure and started its step again
+ *       workflow-subagent       done — that retry, completed by the journal
+ *       workflow-subagent       stopped, replaced — the journal started its step again before it recorded anything
+ *       workflow-subagent       running — its transcript changed 25 s ago; the attempt that replaced the one above
  *     Plan · sonnet · launched  a background launch two minutes ago, no transcript yet
  *   Session 8e1d4b7a — idle since 09:20
  *     claude-code-guide         done in 48 s, its last reply finished
  *
  * Every launch, result, notification, journal line and sidecar carries the description,
- * prompt, summary, answer and output path the builders write (`AGENT_CONTENT`), which is
- * content no view may hold. Nearly every agent transcript ends on a line whose reply was never
- * marked finished, as Claude Code's do, so nearly every agent's output is a lower bound.
+ * prompt, summary, answer and output path the builders write (`AGENT_CONTENT`) — a journal line
+ * its key, label, phase and result too — which is content no view may hold. Nearly every agent
+ * transcript ends on a line whose reply was never marked finished, as Claude Code's do, so nearly
+ * every agent's output is a lower bound.
  */
 
 import * as path from 'path'
@@ -31,7 +35,7 @@ import { Aggregator, parseAgentMeta } from '../../src/agg'
 import type { TreeNode } from '../../src/agentTree'
 import { Attribution } from '../../src/types'
 import {
-  CLAUDE_ROOT, ClaudeUsage, agentResultLine, agentToolUseLine, claudeLine, ctxFor, journalLine, metaJson,
+  CLAUDE_ROOT, ClaudeUsage, agentResultLine, agentToolUseLine, claudeLine, ctxFor, journalKey, journalLine, metaJson,
   queueOperationLine,
 } from './helpers'
 
@@ -52,19 +56,27 @@ export const AGENT_WORLD = {
   wfDone: 'd4e56a8b0c2f4e6a8',
   wfFailed: 'e5f67b9c1d3a5f7b9',
   wfRunning: 'f6a78c0d2e4b6a8c0',
+  // 1.6 D2, D7: a failure the journal retried, the retry, and an attempt it replaced.
+  wfRetryFail: '7a8b9c0d1e2f3a4b5',
+  wfRetry: '8b9c0d1e2f3a4b5c6',
+  wfReplaced: '9c0d1e2f3a4b5c6d7',
   pending: '0a1b2c3d4e5f6a7b8',
   guide: '1b2c3d4e5f6a7b8c9',
 } as const
 
+/** The steps of the world's run: each journal line carries the key of one of them. */
+const STEPS = ['done', 'retry', 'run'] as const
+
 /**
  * The content the builders put into the world's lines and sidecars. The world is only worth
  * testing against if it really carries every one of them — `agentWorld` returns its raw text
- * so a test can say so.
+ * so a test can say so. The journal's keys are content too: they are compared, never kept.
  */
 export const AGENT_CONTENT = [
   'synthetic launch description', 'synthetic launch prompt', 'synthetic result description',
   'synthetic result prompt', 'synthetic agent answer', 'synthetic summary', '/tmp/synthetic/tasks',
-  'synthetic journal summary', 'synthetic-journal-key', 'synthetic meta description', 'synthetic meta prompt',
+  'synthetic journal summary', 'synthetic journal label', 'synthetic journal phase', 'synthetic meta description',
+  'synthetic meta prompt', ...STEPS.map((step) => journalKey(step)),
 ]
 
 const SLUG = path.join(CLAUDE_ROOT, '-home-t-alpha')
@@ -79,7 +91,8 @@ export function shortIdOf(id: string): string {
 
 /** Where an agent's transcript lies: under its session's `subagents`, a run's one level deeper. */
 export function agentWorldFile(id: string): string {
-  if (id === AGENT_WORLD.wfDone || id === AGENT_WORLD.wfFailed || id === AGENT_WORLD.wfRunning) {
+  const W = AGENT_WORLD
+  if ([W.wfDone, W.wfFailed, W.wfRunning, W.wfRetryFail, W.wfRetry, W.wfReplaced].includes(id as typeof W.wfDone)) {
     return path.join(WF_DIR, `agent-${id}.jsonl`)
   }
   const session = id === AGENT_WORLD.guide ? AGENT_WORLD.quiet : AGENT_WORLD.session
@@ -127,10 +140,16 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
     raw.push(text)
     agg.setAgentMeta(agentWorldFile(id), text === '' ? null : parseAgentMeta(text))
   }
-  const journal = (type: 'started' | 'result', agentId: string): void => {
-    const line = journalLine({ type, agentId })
+  /**
+   * A journal line, and the journal's mtime after it — the time a scan hands over, as the lines
+   * carry none of their own.
+   */
+  const journal = (type: 'started' | 'result' | 'failed', agentId: string, step: typeof STEPS[number], ts: number): void => {
+    const line = journalLine({ type, agentId, step })
     raw.push(line)
-    agg.addWorkflowJournalLine(line, ctx(path.join(WF_DIR, 'journal.jsonl')))
+    const file = path.join(WF_DIR, 'journal.jsonl')
+    agg.addWorkflowJournalLine(line, ctx(file))
+    agg.noteJournalRead(file, ts)
   }
   const W = AGENT_WORLD
   const f = agentWorldFile
@@ -189,19 +208,37 @@ export function agentWorld(attribution: Attribution = 'none'): { agg: Aggregator
   turn(MAIN, 'm-4', at(11, 40), OPUS, { input: 20, cacheWrite: 1900, cacheRead: 19700, output: 310 }, { tools: ['Workflow'] })
   turn(f(W.wfDone), 'wd-1', at(11, 40, 10), OPUS, { input: 9, cacheWrite: 11200, output: 700 }, { agentId: W.wfDone, tools: ['Read'] })
   sidecar(W.wfDone, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
-  journal('started', W.wfDone)
+  journal('started', W.wfDone, 'done', at(11, 40, 11))
   // The journal records no failure: a run's agent can only fail through a launch its sidecar names.
   read(MAIN, agentToolUseLine({ id: 'm-5', ts: at(11, 40, 30), toolUseId: TU.wfFailed, subagentType: 'workflow-subagent', model: 'opus', background: true }))
   read(MAIN, agentResultLine({ ts: at(11, 40, 31), toolUseId: TU.wfFailed, agentId: W.wfFailed, status: 'async_launched' }))
   turn(f(W.wfFailed), 'wf-1', at(11, 40, 40), OPUS, { input: 9, cacheWrite: 10400, output: 640 }, { agentId: W.wfFailed, tools: ['Read'] })
   sidecar(W.wfFailed, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: TU.wfFailed })
+  // A step that failed and was started again: the journal records the failure, then a second
+  // attempt of the same step (the same key), which it completes.
+  turn(f(W.wfRetryFail), 'rf-1', at(11, 41), OPUS, { input: 7, cacheWrite: 9800, output: 520 }, { agentId: W.wfRetryFail, tools: ['Read'] })
+  sidecar(W.wfRetryFail, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
+  journal('started', W.wfRetryFail, 'retry', at(11, 41, 1))
+  turn(f(W.wfRetryFail), 'rf-2', at(11, 43), OPUS, { input: 2, cacheWrite: 600, cacheRead: 9800, output: 330 }, { agentId: W.wfRetryFail, final: false })
+  journal('failed', W.wfRetryFail, 'retry', at(11, 43, 10))
+  turn(f(W.wfRetry), 'ry-1', at(11, 43, 20), OPUS, { input: 8, cacheWrite: 10100, output: 580 }, { agentId: W.wfRetry, tools: ['Read'] })
+  sidecar(W.wfRetry, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
+  journal('started', W.wfRetry, 'retry', at(11, 43, 21))
+  turn(f(W.wfRetry), 'ry-2', at(11, 45), OPUS, { input: 2, cacheWrite: 700, cacheRead: 10100, output: 910 }, { agentId: W.wfRetry, final: false })
+  journal('result', W.wfRetry, 'retry', at(11, 45, 10))
   turn(f(W.wfDone), 'wd-2', at(11, 47, 30), OPUS, { input: 3, cacheWrite: 1200, cacheRead: 14500, output: 2100 }, { agentId: W.wfDone, final: false })
-  journal('result', W.wfDone)
+  journal('result', W.wfDone, 'done', at(11, 47, 40))
   turn(f(W.wfFailed), 'wf-2', at(11, 49, 50), OPUS, { input: 2, cacheWrite: 800, cacheRead: 12600, output: 410 }, { agentId: W.wfFailed, final: false })
   read(MAIN, queueOperationLine({ ts: at(11, 50, 5), toolUseId: TU.wfFailed, status: 'failed' }))
+  // An attempt the journal replaced: its step is started again before it recorded anything, by
+  // the agent that is running now.
+  turn(f(W.wfReplaced), 'rp-1', at(11, 50, 30), OPUS, { input: 6, cacheWrite: 9400, output: 450 }, { agentId: W.wfReplaced, tools: ['Grep'] })
+  sidecar(W.wfReplaced, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
+  journal('started', W.wfReplaced, 'run', at(11, 50, 31))
+  turn(f(W.wfReplaced), 'rp-2', at(11, 51, 10), OPUS, { input: 2, cacheWrite: 500, cacheRead: 9400, output: 280 }, { agentId: W.wfReplaced, final: false })
   turn(f(W.wfRunning), 'wr-1', at(11, 52), OPUS, { input: 8, cacheWrite: 12100, output: 760 }, { agentId: W.wfRunning, tools: ['Read'] })
   sidecar(W.wfRunning, { agentType: 'workflow-subagent', model: 'opus', spawnDepth: 1, toolUseId: null })
-  journal('started', W.wfRunning)
+  journal('started', W.wfRunning, 'run', at(11, 52, 1))
   // A launch whose agent has not written a line yet.
   read(MAIN, agentToolUseLine({ id: 'm-6', ts: at(11, 58), toolUseId: TU.pending, subagentType: 'Plan', model: 'sonnet', background: true }))
   read(MAIN, agentResultLine({ ts: at(11, 58, 1), toolUseId: TU.pending, agentId: W.pending, status: 'async_launched' }))

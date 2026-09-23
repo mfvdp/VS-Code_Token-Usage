@@ -15,7 +15,7 @@ import * as path from 'path'
 import { adapterFor } from '../src/adapters'
 import { AGENT_RETENTION_DAYS } from '../src/agentTree'
 import {
-  AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_MODELS_MAX, AGENT_NAME_MAX_CHARS, Aggregator,
+  AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_MODELS_MAX, AGENT_NAME_MAX_CHARS, AGENT_TABLES_REVISION, Aggregator,
   IngestContext, claudePlacement, cleanAgentId, cleanAgentName, parseAgentMeta,
 } from '../src/agg'
 import { agentTranscriptsOf, configureRoots } from '../src/discover'
@@ -74,9 +74,15 @@ function counting(agg: Aggregator): string {
   })
 }
 
-function agentTables(agg: Aggregator): Pick<Snapshot, 'agents' | 'launches' | 'mains' | 'journalResults'> {
+function agentTables(agg: Aggregator): Pick<Snapshot, 'agents' | 'launches' | 'mains' | 'runs'> {
   const s = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
-  return { agents: s.agents, launches: s.launches, mains: s.mains, journalResults: s.journalResults }
+  return { agents: s.agents, launches: s.launches, mains: s.mains, runs: s.runs }
+}
+
+/** The journal agents of the one run of these tests, as the snapshot writes them. */
+function journalOf(agg: Aggregator): Array<{ agentId: string; outcome: string | null }> {
+  const run = agg.runs().find((r) => r.workflowId === WF)
+  return (run?.agents ?? []).map((a) => ({ agentId: a.agentId, outcome: a.outcome }))
 }
 
 // ---------------------------------------------------------------------------
@@ -490,42 +496,40 @@ test('the parent\'s word survives a snapshot round trip, and a stop without its 
 // Workflow journal
 // ---------------------------------------------------------------------------
 
-test('the workflow journal records a result, and holds it when it comes before the agent', () => {
+// 1.6 P2b (§3 D2): this test pinned 1.5's journal, which wrote its result onto the agent's record
+// and kept a result that came before its agent waiting in `journalResults`. The journal's view of
+// an agent now lives in its run (`RunRec`) and is joined by the tree; the record keeps the
+// parent's outcome alone. Rewritten to that rule — the journal-only cases are in agg.journal.test.ts.
+test('the workflow journal records a result on its run, whichever is read first, the agent or the journal', () => {
   const agg = new Aggregator()
   agg.addClaudeLine(claudeLine({ id: 'w1', ts: T0, agentId: 'def456', usage: { input: 1 } }), WF_CTX)
   assert.equal(agentOf(agg, WF_AGENT).workflowId, WF)
-  assert.equal(agg.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'def456' }), JOURNAL_CTX), false)
+  // A start makes the agent a member of its run now: it counts in the run's state.
+  assert.equal(agg.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'def456' }), JOURNAL_CTX), true)
   assert.equal(agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456' }), JOURNAL_CTX), true)
-  // Journal lines carry no time: the result's time is unknown, not "now".
-  assert.equal(agentOf(agg, WF_AGENT).outcome, 'completed')
-  assert.equal(agentOf(agg, WF_AGENT).outcomeTs, null)
+  assert.deepEqual(journalOf(agg), [{ agentId: 'def456', outcome: 'completed' }])
+  // The record keeps the parent's outcome alone; the journal writes none onto it, and no time.
+  assert.deepEqual([agentOf(agg, WF_AGENT).outcome, agentOf(agg, WF_AGENT).outcomeTs], [null, null])
+  // The same line again changes nothing.
   assert.equal(agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456' }), JOURNAL_CTX), false)
-  // A line that does carry its own time supplies the missing one.
-  assert.equal(agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456', ts: T0 + 70 }), JOURNAL_CTX), true)
-  assert.equal(agentOf(agg, WF_AGENT).outcomeTs, T0 + 70)
 
-  // The ordering race: the journal was read before the agent's transcript.
+  // The ordering race: the journal was read before the agent's transcript. Nothing waits: the
+  // run holds the result, and the record the transcript makes later is joined to it by id.
   const race = new Aggregator()
-  assert.equal(race.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'def456' }), JOURNAL_CTX), false)
-  assert.equal(race.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456', ts: T0 + 500 }), JOURNAL_CTX), true)
+  race.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'def456' }), JOURNAL_CTX)
+  race.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456' }), JOURNAL_CTX)
   assert.equal(race.agents().length, 0, 'a journal line makes no agent record')
-  assert.deepEqual(race.toSnapshot().journalResults, { def456: T0 + 500 })
+  assert.deepEqual(journalOf(race), [{ agentId: 'def456', outcome: 'completed' }])
   race.addClaudeLine(claudeLine({ id: 'w1', ts: T0, agentId: 'def456', usage: { input: 1 } }), WF_CTX)
-  assert.equal(agentOf(race, WF_AGENT).outcome, 'completed')
-  assert.equal(agentOf(race, WF_AGENT).outcomeTs, T0 + 500)
-  assert.deepEqual(race.toSnapshot().journalResults, {})
+  assert.equal(agentOf(race, WF_AGENT).outcome, null)
+  assert.deepEqual(journalOf(race), [{ agentId: 'def456', outcome: 'completed' }])
 
-  // Waiting without a time, it is 0 — and the record's time stays unknown.
-  const timeless = new Aggregator()
-  timeless.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456' }), JOURNAL_CTX)
-  assert.deepEqual(timeless.toSnapshot().journalResults, { def456: 0 })
-  timeless.addClaudeLine(claudeLine({ id: 'w1', ts: T0, agentId: 'def456', usage: { input: 1 } }), WF_CTX)
-  assert.equal(agentOf(timeless, WF_AGENT).outcomeTs, null)
-
-  // Nothing else in a journal is a result.
-  for (const raw of ['{"type":"result"', '{"type":"result","agentId":"<b>x</b>"}', '{"type":"other","agentId":"def456","result":1}', '[]']) {
+  // Nothing else in a journal is a start or an end.
+  for (const raw of ['{"type":"result"', '{"type":"result","agentId":"<b>x</b>"}', '{"type":"other","agentId":"def456","result":1}',
+    '[]', journalLine({ type: 'launched' })]) {
     assert.equal(agg.addWorkflowJournalLine(raw, JOURNAL_CTX), false, raw)
   }
+  assert.deepEqual(journalOf(agg), [{ agentId: 'def456', outcome: 'completed' }])
 })
 
 test('the Claude adapter reads a journal as a journal, never as a transcript', () => {
@@ -536,10 +540,10 @@ test('the Claude adapter reads a journal as a journal, never as a transcript', (
   assert.equal(claude.ingest(claudeLine({ id: 'j1', ts: T0, usage: { input: 100 } }), cur, JOURNAL_CTX, agg), false)
   assert.equal(claude.ingest(journalLine({ type: 'result', agentId: 'def456' }), cur, JOURNAL_CTX, agg), true)
   assert.equal(agg.all().length, 0)
-  assert.deepEqual(agg.toSnapshot().journalResults, { def456: 0 })
+  assert.deepEqual(journalOf(agg), [{ agentId: 'def456', outcome: 'completed' }])
   // Every other file goes on to the transcript reader.
   assert.equal(claude.ingest(claudeLine({ id: 'j2', ts: T0, agentId: 'def456', usage: { input: 1 } }), cur, WF_CTX, agg), true)
-  assert.equal(agentOf(agg, WF_AGENT).outcome, 'completed')
+  assert.equal(agentOf(agg, WF_AGENT).requests, 1)
 })
 
 // ---------------------------------------------------------------------------
@@ -877,8 +881,11 @@ test('a scan builds the whole tree\'s records from a session on disk', async () 
   const wf = agentOf(agg, w.wfAgent)
   assert.equal(wf.workflowId, WF)
   assert.equal(wf.sessionFile, w.main)
-  assert.equal(wf.outcome, 'completed')
-  assert.equal(wf.outcomeTs, null)
+  // The journal's result is its run's (1.6 D2), not the record's.
+  assert.equal(wf.outcome, null)
+  assert.deepEqual(journalOf(agg), [{ agentId: 'def456', outcome: 'completed' }])
+  const run = agg.runs()[0]
+  assert.equal(run.lastTs, fs.statSync(w.journal).mtimeMs, 'the journal\'s mtime, handed over after the read')
   assert.deepEqual(wf.meta, { agentType: 'workflow-subagent', model: 'fable', spawnDepth: 1, toolUseId: null })
 
   assert.deepEqual(agg.mainEntries().map(([f, m]) => [f, m.requests]), [[w.main, 3]])
@@ -989,7 +996,7 @@ test('replayAgents rebuilds the agent tables from what was counted, and nothing 
   for (const p of Object.values(snap.pending)) { delete p.agent; delete p.main }
   const agg = Aggregator.fromSnapshot(snap)
   assert.equal(agg.agents().length, 0)
-  assert.equal(agg.agentsReplayed, false)
+  assert.equal(agg.agentsRevision, 0)
   const before = counting(agg)
 
   // A line appended since the last scan belongs to the next scan, and a new file too.
@@ -1002,7 +1009,7 @@ test('replayAgents rebuilds the agent tables from what was counted, and nothing 
   assert.ok((await replayAgents(agg, [...files, fresh, path.join(w.home, 'elsewhere.jsonl')])) > 0)
   assert.equal(counting(agg), before, 'no bucket, open message, session, tool or cursor moved')
   assert.deepEqual(agentTables(agg), expected)
-  assert.equal(agg.agentsReplayed, false, 'the flag is the host\'s to set once the replay is saved')
+  assert.equal(agg.agentsRevision, 0, 'the revision is the host\'s to set once the replay is saved')
 
   // A second replay rebuilds the same tables rather than doubling them.
   await replayAgents(agg, agentReplayFiles(agg, Date.now()))
@@ -1046,7 +1053,9 @@ test('agentTranscriptsOf lists a session\'s agents and workflow runs, two levels
 // Retention and the snapshot
 // ---------------------------------------------------------------------------
 
-test('the roll-up keeps agents, launches, main sessions and waiting results for seven days', () => {
+// 1.6 P2b: "waiting results" became runs — a journal's result no longer waits for its agent; the
+// run holds it, and the run is kept for seven days after its journal last changed.
+test('the roll-up keeps agents, launches, main sessions and runs for seven days', () => {
   const now = T0
   const old = now - (AGENT_RETENTION_DAYS + 1) * DAY
   const recent = now - DAY
@@ -1054,30 +1063,32 @@ test('the roll-up keeps agents, launches, main sessions and waiting results for 
   const oldMain = path.join(SLUG_DIR, 'old-session.jsonl')
   const oldAgent = path.join(SLUG_DIR, 'old-session', 'subagents', 'agent-0001d.jsonl')
   const lateAgent = path.join(SLUG_DIR, SESSION, 'subagents', 'agent-1a7e.jsonl')
+  const oldJournal = path.join(SLUG_DIR, 'old-session', 'subagents', 'workflows', 'wf_old', 'journal.jsonl')
   agg.addClaudeLine(agentToolUseLine({ id: 'o1', ts: old, toolUseId: 'toolu_old' }), ctxFor({ file: oldMain }))
   agg.addClaudeLine(claudeLine({ id: 'o2', ts: old + 1000, agentId: '0001d', usage: { input: 1 } }), ctxFor({ file: oldAgent, isSub: true }))
   agg.addClaudeLine(agentToolUseLine({ id: 'r1', ts: recent, toolUseId: 'toolu_new' }), MAIN_CTX)
   agg.addClaudeLine(claudeLine({ id: 'r2', ts: recent + 1000, agentId: 'abc123', usage: { input: 1 } }), AGENT_CTX)
-  // Its last line is old, but its result came in lately: it stays.
+  // Its last line is old, but the parent recorded its result lately: it stays.
   agg.addClaudeLine(claudeLine({ id: 'l1', ts: old, agentId: '1a7e', usage: { input: 1 } }), ctxFor({ file: lateAgent, isSub: true }))
-  agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: '1a7e', ts: recent }), JOURNAL_CTX)
-  // Waiting results: one of unknown time, one recent, one old.
-  agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'wait0' }), JOURNAL_CTX)
-  agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'wait1', ts: recent }), JOURNAL_CTX)
-  agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'wait2', ts: old }), JOURNAL_CTX)
+  agg.addClaudeLine(agentResultLine({ ts: recent, toolUseId: 'toolu_late', agentId: '1a7e' }), MAIN_CTX)
+  // A run whose journal changed a day ago, and one whose journal changed eight days ago.
+  agg.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'wait1' }), JOURNAL_CTX)
+  agg.noteJournalRead(JOURNAL, recent)
+  agg.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'wait2' }), ctxFor({ file: oldJournal, isSub: true }))
+  agg.noteJournalRead(oldJournal, old)
   assert.equal(agg.mains().length, 2)
+  assert.equal(agg.runs().length, 2)
   const buckets = agg.all().length
 
   agg.rollup(now, 45, 400, utc)
   assert.deepEqual(agg.agentEntries().map(([f]) => f).sort(), [AGENT, lateAgent].sort())
-  assert.deepEqual(agg.launches().map((l) => l.toolUseId), ['toolu_new'])
+  assert.deepEqual(agg.launches().map((l) => l.toolUseId).sort(), ['toolu_late', 'toolu_new'])
   assert.deepEqual(agg.mainEntries().map(([f]) => f), [MAIN], 'the old main session is gone')
-  assert.deepEqual(agg.toSnapshot().journalResults, { wait1: recent })
+  assert.deepEqual(agg.runs().map((r) => r.workflowId), [WF])
+  assert.equal(agg.journalInMemory(oldJournal), false, 'the pruned run takes its step map along')
+  assert.equal(agg.journalInMemory(JOURNAL), true)
   // The buckets keep their own, far longer retention.
   assert.equal(agg.all().length, buckets)
-  // The pruned agent is gone from the lookups too: a result for it now waits for a transcript.
-  agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: '0001d', ts: now }), JOURNAL_CTX)
-  assert.equal(agg.toSnapshot().journalResults?.['0001d'], now)
   // Running it again changes nothing.
   const once = JSON.stringify(agentTables(agg))
   agg.rollup(now, 45, 400, utc)
@@ -1092,36 +1103,41 @@ function sampleAgg(): Aggregator {
   agg.addClaudeLine(claudeLine({ id: 'a1', ts: T0 + 2000, agentId: 'abc123', usage: { input: 50, output: 10 }, tools: [{ name: 'Read', id: 'toolu_r' }] }), AGENT_CTX)
   agg.setAgentMeta(AGENT, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_bg' })
   agg.addClaudeLine(claudeLine({ id: 'w1', ts: T0 + 3000, agentId: 'def456', usage: { input: 3 } }), WF_CTX)
-  agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'c0ffee', ts: T0 + 4000 }), JOURNAL_CTX)
+  agg.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'def456', step: 'one' }), JOURNAL_CTX)
+  agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'c0ffee' }), JOURNAL_CTX)
+  agg.noteJournalRead(JOURNAL, T0 + 4000)
   return agg
 }
 
-test('the agent tables survive a snapshot round trip at version 7, lookups included', () => {
+// 1.6 P2b: pinned version 7, `journalResults` and `agentsReplayed`; the snapshot is version 8 now,
+// with the runs and the agent tables' revision in their place.
+test('the agent tables survive a snapshot round trip at version 8, lookups included', () => {
   const agg = sampleAgg()
-  agg.agentsReplayed = true
+  agg.agentsRevision = AGENT_TABLES_REVISION
   const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
   assert.equal(snap.version, STATE_VERSION)
-  assert.equal(STATE_VERSION, 7)
+  assert.equal(STATE_VERSION, 8)
   assert.deepEqual(Object.keys(snap.agents ?? {}).sort(), [AGENT, WF_AGENT].sort())
   assert.deepEqual(Object.keys(snap.launches ?? {}), ['toolu_bg'])
   assert.deepEqual(Object.keys(snap.mains ?? {}), [MAIN])
-  assert.deepEqual(snap.journalResults, { c0ffee: T0 + 4000 })
-  assert.equal(snap.agentsReplayed, true)
+  assert.deepEqual(Object.keys(snap.runs ?? {}), [`${SESSION}|${WF}`])
+  assert.deepEqual(snap.runs?.[`${SESSION}|${WF}`]?.agents.map((a) => [a.agentId, a.step, a.attempt, a.outcome]),
+    [['def456', 1, 1, null], ['c0ffee', 2, 1, 'completed']])
+  assert.equal(snap.runs?.[`${SESSION}|${WF}`]?.lastTs, T0 + 4000)
+  assert.equal(snap.agentsRevision, AGENT_TABLES_REVISION)
+  assert.equal('journalResults' in snap, false, 'version 7\'s waiting results are no longer written')
+  assert.equal('agentsReplayed' in snap, false)
   assert.equal(snap.pending.a1.agent, 'agent-abc123')
 
   const back = Aggregator.fromSnapshot(snap)
   assert.deepEqual(JSON.parse(JSON.stringify(back.toSnapshot())), snap)
-  assert.equal(back.agentsReplayed, true)
+  assert.equal(back.agentsRevision, AGENT_TABLES_REVISION)
   // The lookups are rebuilt with the tables: the notification finds its launch, the launch its agent…
   assert.equal(back.addClaudeLine(queueOperationLine({ ts: T0 + 9000, toolUseId: 'toolu_bg', status: 'completed' }), MAIN_CTX), true)
   assert.equal(agentOf(back, AGENT).outcome, 'completed')
-  // …a journal line its agent by id, and a waiting result the agent that turns up.
-  back.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456' }), JOURNAL_CTX)
-  assert.equal(agentOf(back, WF_AGENT).outcome, 'completed')
-  const waiting = path.join(SLUG_DIR, SESSION, 'subagents', 'workflows', WF, 'agent-c0ffee.jsonl')
-  back.addClaudeLine(claudeLine({ id: 'c1', ts: T0 + 5000, agentId: 'c0ffee', usage: { input: 1 } }), ctxFor({ file: waiting, isSub: true }))
-  assert.equal(agentOf(back, waiting).outcomeTs, T0 + 4000)
-  assert.deepEqual(back.toSnapshot().journalResults, {})
+  // …and a journal line its run's agent by id.
+  back.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'def456', step: 'one' }), JOURNAL_CTX)
+  assert.deepEqual(journalOf(back), [{ agentId: 'def456', outcome: 'completed' }, { agentId: 'c0ffee', outcome: 'completed' }])
   // The agent's open message goes on after the restore — onto its record, and once.
   back.addClaudeLine(claudeLine({ id: 'a1', ts: T0 + 2500, agentId: 'abc123', usage: { input: 50, output: 30 }, final: true }), AGENT_CTX)
   const rec = agentOf(back, AGENT)
@@ -1130,9 +1146,11 @@ test('the agent tables survive a snapshot round trip at version 7, lookups inclu
   assert.equal(rec.outputFinal, 1)
 })
 
+// 1.6 P2b: pinned `agentsReplayed` and version 7 as the written version; a version 6 or 5 now
+// states revision 0 — the replay is due — and is written back as version 8.
 test('a version 6 or 5 snapshot loads without agent tables and asks for the replay', () => {
   const agg = sampleAgg()
-  agg.agentsReplayed = true
+  agg.agentsRevision = AGENT_TABLES_REVISION
   const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
   for (const version of [6, 5]) {
     // Even with the tables in it: a version 6 build could not have written them.
@@ -1140,13 +1158,13 @@ test('a version 6 or 5 snapshot loads without agent tables and asks for the repl
     assert.equal(old.agents().length, 0, `v${version}`)
     assert.equal(old.launches().length, 0, `v${version}`)
     assert.equal(old.mains().length, 0, `v${version}`)
-    assert.deepEqual(old.toSnapshot().journalResults, {}, `v${version}`)
-    assert.equal(old.agentsReplayed, false, `v${version}`)
-    // The counting loads as before, and is written back as version 7.
+    assert.equal(old.runs().length, 0, `v${version}`)
+    assert.equal(old.agentsRevision, 0, `v${version}`)
+    // The counting loads as before, and is written back as version 8.
     assert.deepEqual(old.all(), agg.all(), `v${version}`)
-    assert.equal(old.toSnapshot().version, 7)
+    assert.equal(old.toSnapshot().version, 8)
   }
-  assert.equal(Aggregator.fromSnapshot({ ...snap, version: 8 }).all().length, 0)
+  assert.equal(Aggregator.fromSnapshot({ ...snap, version: 9 }).all().length, 0)
 })
 
 test('a hand-edited snapshot cannot put a field or a string into the agent tables', () => {
@@ -1160,8 +1178,12 @@ test('a hand-edited snapshot cannot put a field or a string into the agent table
   raw.launches.toolu_bg.prompt = 'EDITED-SECRET'
   raw.launches.junk = 5 as unknown as Record<string, unknown>
   raw.mains[MAIN].summary = 'EDITED-SECRET'
-  raw.journalResults['<b>x</b>'] = 1 as unknown as Record<string, unknown>
-  raw.journalResults.negative = -5 as unknown as Record<string, unknown>
+  const run = raw.runs[`${SESSION}|${WF}`] as unknown as Record<string, unknown> & { agents: Array<Record<string, unknown>> }
+  run.label = 'EDITED-SECRET'
+  run.agents[0].key = 'EDITED-SECRET'
+  run.agents.push({ agentId: '<b>x</b>', step: 1, attempt: 1, outcome: 'completed', supersededBy: null })
+  run.agents.push({ agentId: 'a0', step: -3, attempt: 0, outcome: 'stopped', supersededBy: null })
+  raw.runs.junk = { source: 'claude', sessionId: 'EDITED SECRET', workflowId: '../x', agents: [] }
   const back = Aggregator.fromSnapshot(snap)
   const json = JSON.stringify(back.toSnapshot())
   assert.equal(json.includes('EDITED'), false)
@@ -1170,5 +1192,12 @@ test('a hand-edited snapshot cannot put a field or a string into the agent table
   assert.deepEqual(agentOf(back, AGENT).models, ['claude-opus-4-6'])
   assert.equal(launchOf(back, 'toolu_bg').typeHint, null)
   assert.equal(back.launches().length, 1)
-  assert.deepEqual(back.toSnapshot().journalResults, { c0ffee: T0 + 4000 })
+  // A run keeps the fields this build writes, each checked: a stop without the attempt that
+  // replaced it is none, a step or an attempt out of range is the default.
+  assert.deepEqual(back.runs().map((r) => r.workflowId), [WF])
+  assert.deepEqual(back.runs()[0].agents, [
+    { agentId: 'def456', step: 1, attempt: 1, outcome: null, supersededBy: null },
+    { agentId: 'c0ffee', step: 2, attempt: 1, outcome: 'completed', supersededBy: null },
+    { agentId: 'a0', step: 0, attempt: 1, outcome: null, supersededBy: null },
+  ])
 })

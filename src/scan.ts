@@ -4,7 +4,7 @@
 import * as fs from 'fs'
 import { ADAPTERS, adapterFor } from './adapters'
 import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
-import { Aggregator, IngestContext, parseAgentMeta } from './agg'
+import { Aggregator, IngestContext, isWorkflowJournal, parseAgentMeta } from './agg'
 import { agentTranscriptsOf, findTranscripts, rootOf, rootsFor } from './discover'
 import { newCursor, readNewLines, sameFile } from './tail'
 import { AgentMeta, Attribution, Cursor, Source } from './types'
@@ -62,13 +62,28 @@ export async function scan(agg: Aggregator, opts: ScanOptions = {}): Promise<num
     // A `const` so the callbacks below close over a cursor the compiler knows is present.
     const cur = known
     const ctx: IngestContext = { ...scanCtx, file, isSub: adapter.isSub(file) }
+    // A workflow journal's step map lives in memory only (1.6 §0a.1): after a restart it is
+    // rebuilt from the file up to the cursor before the file is read on, or a step started
+    // again would read as a new one. Only when there is something to read on: a sweep meets
+    // every journal of every run, and one that did not change needs no keys yet.
+    const journal = source === 'claude' && isWorkflowJournal(file)
+    if (journal && cur.offset > 0 && !agg.journalInMemory(file)
+      && (await changedSinceCursor([file], agg.cursors)).length > 0) {
+      await rebuildJournal(agg, file, cur, scanCtx)
+    }
 
     await readNewLines(
       file, cur,
       (line) => { if (adapter.ingest(line, cur, ctx, agg)) counted++ },
       undefined,
-      () => adapter.resetCursor(cur),
+      () => {
+        adapter.resetCursor(cur)
+        // A journal read from its first byte again derives its run's agents anew.
+        if (journal) agg.resetJournal(file)
+      },
     )
+    // The journal's lines carry no time: its mtime, which the tail sets after the lines, is the run's.
+    if (journal) agg.noteJournalRead(file, cur.mtime)
     // After the lines: an agent's record is made by its first counted line, and only a
     // record asks for its sidecar.
     counted += await readSidecar(agg, file, ctx)
@@ -116,6 +131,32 @@ export async function readAgentMeta(file: string): Promise<AgentMeta | null> {
   }
 }
 
+/**
+ * The rebuild pass of a workflow journal (1.6 D7): its lines from the first byte up to what the
+ * cursor has consumed, through the journal reader again, after the run's journal agents and the
+ * journal's step map were dropped (`resetJournal`) — so the keys are back in memory, and the run
+ * is what it was. Idempotent. A file that is no longer the one the cursor measured is left to the
+ * tail, which reads it from the start and resets the journal itself. Returns the lines read, a
+ * count only.
+ */
+export async function rebuildJournal(
+  agg: Aggregator, file: string, cur: Cursor, ctx: ScanContext = NO_ATTRIBUTION,
+): Promise<number> {
+  let st: fs.Stats
+  try { st = await fs.promises.stat(file) } catch { return 0 }
+  if (!sameFile(st, cur)) return 0
+  agg.resetJournal(file)
+  const own = newCursor()
+  const journalCtx: IngestContext = { ...ctx, file, isSub: true }
+  let lines = 0
+  await readNewLines(file, own, (line) => {
+    lines++
+    agg.addWorkflowJournalLine(line, journalCtx)
+  }, cur.offset)
+  agg.noteJournalRead(file, own.mtime)
+  return lines
+}
+
 /** Reads the sidecar an agent's record still waits for; 1 when it gave the record an identity. */
 async function readSidecar(agg: Aggregator, file: string, ctx: IngestContext): Promise<number> {
   if (!ctx.isSub || !agg.needsAgentMeta(file)) return 0
@@ -125,8 +166,9 @@ async function readSidecar(agg: Aggregator, file: string, ctx: IngestContext): P
 }
 
 /**
- * Rebuilds the agent tables — agents, launches, main sessions, journal results — from
- * transcripts whose tokens were counted before those tables existed (a version 6 snapshot).
+ * Rebuilds the agent tables — agents, launches, main sessions, and the workflow runs from their
+ * journals — from transcripts whose tokens were counted before those tables existed (a version 6
+ * snapshot), or before a table of this build did (`AGENT_TABLES_REVISION`).
  * Each file is read from the start with a throwaway cursor and `agentsOnly` set, so no
  * bucket, open message, session, tool row or cursor is touched: the counting stays exactly
  * what it was, and `agg.cursors` is only ever read.
@@ -165,6 +207,7 @@ export async function replayAgents(
       const cur = newCursor()
       const replayCtx: IngestContext = { ...ctx, file, isSub: adapter.isSub(file), agentsOnly: true }
       await readNewLines(file, cur, (line) => { if (adapter.ingest(line, cur, replayCtx, agg)) changed++ }, limit)
+      if (isWorkflowJournal(file)) agg.noteJournalRead(file, cur.mtime)
       changed += await readSidecar(agg, file, replayCtx)
     }
   } finally {

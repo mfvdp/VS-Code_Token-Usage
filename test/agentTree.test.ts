@@ -24,7 +24,7 @@ import {
 import { AgentTreeInput, agentDetails, buildAgentTree, shortIdsOf, spanText } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
 import { TimeConfig } from '../src/time'
-import { AgentLaunch, AgentRec, MainRec, SessionRec } from '../src/types'
+import { AgentLaunch, AgentRec, JournalAgent, MainRec, RunRec, SessionRec } from '../src/types'
 import { durationText } from '../src/stats'
 import { MAX_AGENT_KEY_CHARS } from '../src/viewModel'
 import { ROOT } from './helpers/nls'
@@ -79,6 +79,21 @@ function wfRec(id: string, over: Partial<AgentRec> = {}): AgentRec {
     meta: { agentType: 'workflow-subagent', model: null, spawnDepth: 1, toolUseId: null },
     ...over,
   })
+}
+
+/** An agent as the run's journal records it: a step of its own, the first attempt, no end yet. */
+function jagent(id: string, over: Partial<JournalAgent> = {}): JournalAgent {
+  return { agentId: id, step: 0, attempt: 1, outcome: null, supersededBy: null, ...over }
+}
+
+/** The run WF of session S1 as its journal records it; the journal last changed half an hour ago. */
+function run(agents: JournalAgent[], over: Partial<RunRec> = {}): RunRec {
+  return {
+    source: 'claude', sessionId: S1, workflowId: WF,
+    journalFile: path.join(PROJ, S1, 'subagents', 'workflows', WF, 'journal.jsonl'),
+    agents, agentsDropped: 0, steps: new Set(agents.map((a) => a.step).filter((n) => n > 0)).size, lastTs: NOW - 30 * MIN,
+    ...over,
+  }
 }
 
 function launch(id: string, over: Partial<AgentLaunch> = {}): AgentLaunch {
@@ -174,20 +189,31 @@ test('an agent the parent recorded is done or failed, and the sentence names who
   assert.equal(stateText(over, failed.key), 'Failed — the parent recorded the failure at 2026-09-21 10:00.')
 })
 
-test('a workflow agent completed by the journal says so, and a missing time is left out rather than invented', () => {
+// 1.6 P2b (§3 D2): pinned 1.5's journal, whose result came on the agent's own record — with a
+// time, where a journal line had one. The journal's view is its run's now (`RunRec`), joined by
+// agent id, and carries no time; a workflow agent's own outcome is the parent's.
+test('a workflow agent completed or failed by the journal says so, without a time — the journal writes none', () => {
   const over: Partial<AgentTreeInput> = {
     agents: [
-      wfRec('bbbb0001', { outcome: 'completed', outcomeTs: NOW - 4 * MIN }),
-      wfRec('bbbb0002', { outcome: 'completed', outcomeTs: null }),
+      wfRec('bbbb0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN }),
+      wfRec('bbbb0002', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN }),
+      wfRec('bbbb0005', { outcome: 'completed', outcomeTs: NOW - 4 * MIN, lastTs: NOW - 4 * MIN }),
       rec('bbbb0003', { outcome: 'completed', outcomeTs: null }),
       rec('bbbb0004', { outcome: 'failed', outcomeTs: null }),
     ],
+    runs: [run([jagent('bbbb0001', { outcome: 'completed' }), jagent('bbbb0002', { outcome: 'failed' }), jagent('bbbb0005')])],
   }
-  assert.equal(stateText(over, agentKey('bbbb0001')),
-    'Completed — the workflow journal recorded the result at 11:56.')
-  assert.equal(stateText(over, agentKey('bbbb0002')), 'Completed — the workflow journal recorded the result.')
+  const vm = build(over)
+  assert.deepEqual(['bbbb0001', 'bbbb0002'].map((id) => [node(vm, agentKey(id)).state, node(vm, agentKey(id)).derived]),
+    [['done', false], ['failed', false]])
+  assert.equal(stateText(over, agentKey('bbbb0001')), 'Completed — the workflow journal recorded the result.')
+  assert.equal(stateText(over, agentKey('bbbb0002')), 'Failed — the workflow journal recorded the failure.')
+  // A workflow agent's own outcome came from its parent — a launch, a notification — and says so.
+  assert.equal(stateText(over, agentKey('bbbb0005')), 'Completed — the parent recorded the result at 11:56.')
   assert.equal(stateText(over, agentKey('bbbb0003')), 'Completed — the parent recorded the result.')
   assert.equal(stateText(over, agentKey('bbbb0004')), 'Failed — the parent recorded the failure.')
+  // Without the run, the same records have no journal to take an outcome from.
+  assert.equal(node(build({ ...over, runs: [] }), agentKey('bbbb0001')).state, 'unknown')
 })
 
 test('an outcome the parent recorded before the agent record carried it is still an outcome', () => {
@@ -321,14 +347,18 @@ test('agents whose session transcript was never read still get their session, wh
   assert.deepEqual(root.children.map((c) => c.key), [agentKey('aaaa0001')])
 })
 
+// 1.6 P2b (§3.0 a): pinned 1.5's rule that one failure makes a run failed. A run is failed now only
+// when every member is closed and none completed; one completion makes it done, and the failures
+// beside it are the tally's to show (P2c).
 test('a workflow run is running, failed, done or unknown from its agents', () => {
   const run = (agents: AgentRec[]): { vm: AgentTreeVm; w: TreeNode; text: string | undefined } => {
     const vm = build({ agents })
     return { vm, w: node(vm, wfKey), text: stateText({ agents }, wfKey) }
   }
-  const done = (id: string): AgentRec => wfRec(id, { outcome: 'completed', outcomeTs: NOW - 5 * MIN })
-  // A failure is the parent's record, and its last line comes with it (D6: one that goes on after
-  // the record is inferred again).
+  // An outcome is the parent's record, and its last line comes with it (D6: one that goes on after
+  // the record is inferred again). 1.6 P2b: a completion on the record is the parent's too — 1.5
+  // took a run agent's completion for the journal's, which is never outlived.
+  const done = (id: string): AgentRec => wfRec(id, { outcome: 'completed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
   const failed = (id: string): AgentRec => wfRec(id, { outcome: 'failed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
   const silent = (id: string): AgentRec => wfRec(id, { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })
 
@@ -341,13 +371,17 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
   assert.deepEqual(running.w.children.map((c) => c.key).sort(),
     [agentKey('eeee0001'), agentKey('eeee0002')].sort())
 
-  const f = run([done('eeee0001'), failed('eeee0002')])
+  const one = run([done('eeee0001'), failed('eeee0002')])
+  assert.deepEqual([one.w.state, one.w.derived], ['done', false], 'one failure beside a completion does not fail the run')
+  assert.equal(one.text, 'Done — every agent of this run has a recorded outcome, and at least one completed.')
+
+  const f = run([failed('eeee0001'), failed('eeee0002')])
   assert.deepEqual([f.w.state, f.w.derived], ['failed', false])
-  assert.equal(f.text, 'Failed — at least one agent of this run has a recorded failure.')
+  assert.equal(f.text, 'Failed — every agent of this run has a recorded outcome, and none completed.')
 
   const d = run([done('eeee0001'), done('eeee0002')])
   assert.deepEqual([d.w.state, d.w.derived], ['done', false])
-  assert.equal(d.text, 'Done — every agent of this run has a recorded result.')
+  assert.equal(d.text, 'Done — every agent of this run has a recorded outcome, and at least one completed.')
 
   const u = run([done('eeee0001'), silent('eeee0002')])
   assert.deepEqual([u.w.state, u.w.derived], ['unknown', true])
@@ -357,8 +391,8 @@ test('a workflow run is running, failed, done or unknown from its agents', () =>
   // its last line.
   assert.equal(u.w.usage, '2.4K')
   assert.equal(u.w.startTs, NOW - 40 * MIN)
-  assert.equal(u.w.lastTs, NOW - 1 * MIN)
-  assert.equal(u.w.duration, '39 min 00 s')
+  assert.equal(u.w.lastTs, NOW - 5 * MIN)
+  assert.equal(u.w.duration, '35 min 00 s')
 })
 
 // ---------------------------------------------------------------------------
@@ -426,19 +460,20 @@ test('a stop the parent recorded is stopped — recorded, in the parent\'s own w
 test('a run whose agents all ended is done while one completed, and stopped when every one was stopped', () => {
   const run = (agents: AgentRec[]): { w: TreeNode; text: string | undefined } =>
     ({ w: node(build({ agents }), wfKey), text: stateText({ agents }, wfKey) })
-  const done = (id: string): AgentRec => wfRec(id, { outcome: 'completed', outcomeTs: NOW - 5 * MIN })
+  const done = (id: string): AgentRec => wfRec(id, { outcome: 'completed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
   const stopped = (id: string): AgentRec =>
     wfRec(id, { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
   const failed = (id: string): AgentRec => wfRec(id, { outcome: 'failed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN })
 
   const mixed = run([done('eeee0001'), stopped('eeee0002')])
   assert.deepEqual([mixed.w.state, mixed.w.derived], ['done', false])
-  assert.equal(mixed.text, 'Done — every agent of this run has a recorded result.')
+  // 1.6 P2b: the done sentence of §3 D2 replaces 1.5's "… has a recorded result."
+  assert.equal(mixed.text, 'Done — every agent of this run has a recorded outcome, and at least one completed.')
   const all = run([stopped('eeee0001'), stopped('eeee0002')])
   assert.deepEqual([all.w.state, all.w.derived], ['stopped', false])
   assert.equal(all.text,
     'Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.')
-  // A stop is no failure; a failure beside it still fails the run (P2b's tally replaces this rule).
+  // A stop is no failure; with nothing completed, a failure beside it fails the run (§3.0 a).
   assert.equal(run([stopped('eeee0001'), failed('eeee0002')]).w.state, 'failed')
   assert.equal(run([stopped('eeee0001'), wfRec('eeee0002')]).w.state, 'running')
   assert.equal(german(() => run([stopped('eeee0001')]).text),
@@ -455,6 +490,255 @@ test('a stopped agent that wrote on after its stop is inferred again, and its Re
   assert.deepEqual([n.state, n.derived], ['running', true])
   assert.equal(build(over).selected?.rows.find((r) => r.label === 'Recorded')?.value, 'stopped at 11:50')
   assert.deepEqual(german(() => build(over).selected?.rows.find((r) => r.label === 'Aufgezeichnet')?.value), 'gestoppt um 11:50')
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 D2, D7 · the workflow journal: failures, retries, replacements
+// ---------------------------------------------------------------------------
+
+/** Ids in Claude Code's `a` + 16 hex shape, so the short ids the sentences name are four characters. */
+const J1 = 'a1f2e3d4c5b6a7980'
+const J2 = 'a2e3d4c5b6a798001'
+const J3 = 'a3d4c5b6a79800112'
+const J4 = 'a4c5b6a7980011223'
+const silentWf = (id: string, over: Partial<AgentRec> = {}): AgentRec =>
+  wfRec(id, { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN, ...over })
+
+test('a failed line of the journal makes its agent failed, recorded, in the journal\'s words — even two minutes after its last line', () => {
+  // The mutation the spec names: without the failed branch this agent, silent for two minutes,
+  // would read running for eight more.
+  const over: Partial<AgentTreeInput> = {
+    agents: [wfRec(J1, { lastTs: NOW - 2 * MIN, firstTs: NOW - 12 * MIN })],
+    runs: [run([jagent(J1, { step: 1, outcome: 'failed' })])],
+  }
+  const n = node(build(over), agentKey(J1))
+  assert.deepEqual([n.state, n.derived, n.superseded], ['failed', false, false])
+  assert.equal(stateText(over, n.key), 'Failed — the workflow journal recorded the failure.')
+  // Alone in its run, a failure fails the run: every member is closed and none completed.
+  assert.deepEqual([node(build(over), wfKey).state, stateText(over, wfKey)],
+    ['failed', 'Failed — every agent of this run has a recorded outcome, and none completed.'])
+})
+
+test('one failure among completed agents leaves the run done; every member failed fails it', () => {
+  const agents = [silentWf(J1), silentWf(J2), silentWf(J3)]
+  const mixed: Partial<AgentTreeInput> = {
+    agents,
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2, outcome: 'failed' }),
+      jagent(J3, { step: 3, outcome: 'completed' })])],
+  }
+  assert.equal(node(build(mixed), agentKey(J2)).state, 'failed')
+  assert.deepEqual([node(build(mixed), wfKey).state, node(build(mixed), wfKey).derived], ['done', false])
+  assert.equal(stateText(mixed, wfKey), 'Done — every agent of this run has a recorded outcome, and at least one completed.')
+  const all: Partial<AgentTreeInput> = {
+    agents,
+    runs: [run([jagent(J1, { step: 1, outcome: 'failed' }), jagent(J2, { step: 2, outcome: 'failed' }),
+      jagent(J3, { step: 3, outcome: 'failed' })])],
+  }
+  assert.deepEqual([node(build(all), wfKey).state, stateText(all, wfKey)],
+    ['failed', 'Failed — every agent of this run has a recorded outcome, and none completed.'])
+  // One member still open — no record of an end, silent — keeps the run unknown, whatever failed.
+  const open: Partial<AgentTreeInput> = {
+    agents,
+    runs: [run([jagent(J1, { step: 1, outcome: 'failed' }), jagent(J2, { step: 2, outcome: 'completed' }), jagent(J3, { step: 3 })])],
+  }
+  assert.equal(node(build(open), wfKey).state, 'unknown')
+})
+
+test('a failure the journal retried is failed, superseded and dimmed, and names the attempt that followed it', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1), silentWf(J2, { lastTs: NOW - 20 * MIN })],
+    runs: [run([
+      jagent(J1, { step: 1, attempt: 1, outcome: 'failed', supersededBy: J2 }),
+      jagent(J2, { step: 1, attempt: 2, outcome: 'completed' }),
+    ])],
+    selected: agentKey(J1),
+  }
+  const vm = build(over)
+  const first = node(vm, agentKey(J1))
+  // It keeps its own state — a failure is a failure — and only the flag says a retry followed.
+  assert.deepEqual([first.state, first.derived, first.superseded], ['failed', false, true])
+  assert.equal(stateText(over, first.key),
+    'Failed, retried — the workflow journal recorded the failure and started the same step again (agent 2e3d).')
+  const second = node(vm, agentKey(J2))
+  assert.deepEqual([second.state, second.superseded], ['done', false])
+  // The retry completed: the run is done, and its failed first attempt is no final failure.
+  assert.equal(node(vm, wfKey).state, 'done')
+  // Which attempt each is, in the details, where the step was started more than once.
+  assert.deepEqual(vm.selected?.rows.find((r) => r.label === 'Attempt'), { label: 'Attempt', value: '1 of 2 of this step' })
+  assert.equal(build({ ...over, selected: agentKey(J2) }).selected?.rows.find((r) => r.label === 'Attempt')?.value,
+    '2 of 2 of this step')
+  // The row sits after the workflow run.
+  const labels = vm.selected?.rows.map((r) => r.label) ?? []
+  assert.equal(labels.indexOf('Attempt'), labels.indexOf('Workflow run') + 1, labels.join(', '))
+  // A retried failure whose retry failed as well: the run failed, on its last attempt.
+  const twice: Partial<AgentTreeInput> = {
+    ...over,
+    runs: [run([
+      jagent(J1, { step: 1, attempt: 1, outcome: 'failed', supersededBy: J2 }),
+      jagent(J2, { step: 1, attempt: 2, outcome: 'failed' }),
+    ])],
+  }
+  assert.equal(node(build(twice), wfKey).state, 'failed')
+})
+
+test('an attempt the journal replaced before it recorded anything is stopped — replaced — and not "?"', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1), wfRec(J2)],
+    runs: [run([
+      jagent(J1, { step: 4, attempt: 1, outcome: 'stopped', supersededBy: J2 }),
+      jagent(J2, { step: 4, attempt: 2 }),
+    ], { steps: 4 })],
+  }
+  const vm = build(over)
+  const replaced = node(vm, agentKey(J1))
+  assert.deepEqual([replaced.state, replaced.derived, replaced.superseded], ['stopped', false, true])
+  assert.equal(stateText(over, replaced.key),
+    'Stopped, replaced — the workflow journal started the same step again (agent 2e3d) before this agent recorded a result.')
+  // The replacement runs by its own clock, and the run with it.
+  assert.deepEqual([node(vm, agentKey(J2)).state, node(vm, agentKey(J2)).superseded], ['running', false])
+  assert.equal(node(vm, wfKey).state, 'running')
+  // Every attempt of every step closed, the last one of each stopped: the run is stopped.
+  const stoppedRun: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1), silentWf(J2)],
+    runs: [run([
+      jagent(J1, { step: 1, attempt: 1, outcome: 'failed', supersededBy: J2 }),
+      jagent(J2, { step: 1, attempt: 2, outcome: 'stopped', supersededBy: J3 }),
+      jagent(J3, { step: 1, attempt: 3, outcome: 'stopped', supersededBy: J4 }),
+      jagent(J4, { step: 1, attempt: 4, outcome: 'stopped', supersededBy: 'a9999999999999999' }),
+    ])],
+  }
+  const sv = build(stoppedRun)
+  // J3 and J4 have no record: counted in the run, not drawn — and J4's replacement neither.
+  assert.equal(node(sv, wfKey).agentCount, 4)
+  // Every member superseded here — a hand-made run: nothing is open, nothing completed or failed
+  // for good, so the run is stopped.
+  assert.equal(node(sv, wfKey).state, 'stopped')
+  // In German.
+  assert.equal(german(() => stateText(over, replaced.key)),
+    'Gestoppt, ersetzt — das Workflow-Journal hat denselben Schritt erneut gestartet (Agent 2e3d), bevor dieser Agent ein Ergebnis aufgezeichnet hat.')
+})
+
+test('the parent\'s record beats the journal\'s, and the journal\'s end is never outlived', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [
+      wfRec(J1, { outcome: 'completed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN }),
+      // Written a minute ago, and the journal recorded its result: done, never revived.
+      wfRec(J2, { lastTs: NOW - MIN }),
+    ],
+    runs: [run([jagent(J1, { step: 1, outcome: 'failed', supersededBy: J3 }), jagent(J3, { step: 1, attempt: 2 }),
+      jagent(J2, { step: 2, outcome: 'completed' })])],
+  }
+  const vm = build(over)
+  // The parent's outcome and sentence; the journal's supersession still dims the row.
+  assert.deepEqual([node(vm, agentKey(J1)).state, node(vm, agentKey(J1)).superseded], ['done', true])
+  assert.equal(stateText(over, agentKey(J1)), 'Completed — the parent recorded the result at 11:55.')
+  assert.deepEqual([node(vm, agentKey(J2)).state, node(vm, agentKey(J2)).derived], ['done', false])
+  assert.equal(agentDetails(input(over), NOW, agentKey(J2))?.rows.some((r) => r.label === 'Recorded'), false)
+  // A step started once has no Attempt row, nor has an agent without a key (step 0).
+  assert.equal(agentDetails(input(over), NOW, agentKey(J2))?.rows.some((r) => r.label === 'Attempt'), false)
+  const keyless: Partial<AgentTreeInput> = { agents: [silentWf(J1)], runs: [run([jagent(J1, { step: 0 }), jagent(J2, { step: 0 })])] }
+  assert.equal(agentDetails(input(keyless), NOW, agentKey(J1))?.rows.some((r) => r.label === 'Attempt'), false)
+})
+
+test('an agent the journal started without a counted transcript is a member of its run: counted, in its state, not drawn', () => {
+  const journalOnly = [jagent(J2, { step: 2 }), jagent(J3, { step: 3, outcome: 'failed' }), jagent(J4, { step: 4, outcome: 'completed' })]
+  const quiet: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), ...journalOnly], { lastTs: NOW - 30 * MIN })],
+  }
+  const vm = build(quiet)
+  const w = node(vm, wfKey)
+  // Four members, one drawn: the count says so on the run and on its session.
+  assert.deepEqual(w.children.map((c) => c.key), [agentKey(J1)])
+  assert.equal(w.agentCount, 4)
+  assert.equal(node(vm, rootKey).agentCount, 4)
+  assert.equal(agentDetails(input(quiet), NOW, wfKey)?.rows.find((r) => r.label === 'Agents')?.value, '4')
+  assert.equal(agentDetails(input(quiet), NOW, rootKey)?.rows.find((r) => r.label === 'Agents')?.value, '4')
+  // J2 has no end and the journal has been quiet for half an hour: unknown — so is the run.
+  assert.equal(w.state, 'unknown')
+  // A journal written within the ten minutes makes its open member running, and the run with it.
+  const fresh: Partial<AgentTreeInput> = { ...quiet, runs: [run(quiet.runs![0].agents, { lastTs: NOW - 2 * MIN })] }
+  assert.equal(node(build(fresh), wfKey).state, 'running')
+  // So does a sibling that runs by its own transcript.
+  const sibling: Partial<AgentTreeInput> = { ...quiet, agents: [wfRec(J1)], runs: [run([jagent(J1, { step: 1 }), ...journalOnly])] }
+  assert.equal(node(build(sibling), wfKey).state, 'running')
+  // Every journal-only member closed, one completion: done.
+  const closed: Partial<AgentTreeInput> = {
+    ...quiet, runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2, outcome: 'failed' })])],
+  }
+  assert.equal(node(build(closed), wfKey).state, 'done')
+  // None of them is a row of the running list: that is D4's collector's, later.
+  assert.deepEqual(build(fresh).runningNow.map((r) => r.key), [])
+})
+
+test('a run its journal knows and no record of which was counted is still a node of its session', () => {
+  const over: Partial<AgentTreeInput> = {
+    mains: [main({ lastTs: NOW - 3 * DAY, firstTs: NOW - 3 * DAY - HOUR })],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2 })], { lastTs: NOW - 2 * DAY })],
+  }
+  const vm = build(over)
+  // The session is older than a day and has no agent record: its run brings it into the tree.
+  const w = node(vm, wfKey)
+  assert.deepEqual([w.children.length, w.agentCount, w.state], [0, 2, 'unknown'])
+  assert.deepEqual([w.usage, w.duration], ['–', '–'], 'nothing of it was counted: dashes, never zeros')
+  // A run whose journal is older than the retention is not.
+  assert.equal(build({ ...over, runs: [run(over.runs![0].agents, { lastTs: NOW - 8 * DAY })] }).roots.length, 0)
+})
+
+test('a run beyond MAX_RUN_AGENTS says how many agents it did not list', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' })], { agentsDropped: 12 })],
+    selected: wfKey,
+  }
+  assert.deepEqual(build(over).selected?.rows.find((r) => r.label === 'Agents'),
+    { label: 'Agents', value: '1', note: '12 further agents not listed', kind: 'sentence' })
+  assert.deepEqual(german(() => build(over).selected?.rows.find((r) => r.label === 'Agenten')?.note), '12 weitere Agenten nicht aufgeführt')
+})
+
+test('a short id keeps apart the agents the journal names without a record, too', () => {
+  // J1 and a journal-only agent share their first four hex: both names — and the sentence that
+  // names the next attempt — carry five.
+  const twin = 'a1f2e9d4c5b6a7980'
+  const over: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'failed', supersededBy: twin }), jagent(twin, { step: 1, attempt: 2 })])],
+  }
+  const n = node(build(over), agentKey(J1))
+  assert.ok(n.label.endsWith(' · 1f2e3'), n.label)
+  assert.equal(stateText(over, n.key),
+    'Failed, retried — the workflow journal recorded the failure and started the same step again (agent 1f2e9).')
+})
+
+test('the journal and run sentences, the Attempt row and the dimmed rows speak German', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [silentWf(J1), silentWf(J2)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'failed', supersededBy: J2 }), jagent(J2, { step: 1, attempt: 2, outcome: 'failed' })])],
+    selected: agentKey(J1),
+  }
+  assert.equal(german(() => stateText(over, agentKey(J1))),
+    'Fehlgeschlagen, wiederholt — das Workflow-Journal hat den Fehlschlag aufgezeichnet und denselben Schritt erneut gestartet (Agent 2e3d).')
+  assert.equal(german(() => stateText({ ...over, runs: [run([jagent(J1, { outcome: 'failed' })])] }, agentKey(J1))),
+    'Fehlgeschlagen — das Workflow-Journal hat den Fehlschlag aufgezeichnet.')
+  assert.deepEqual(german(() => build(over).selected?.rows.find((r) => r.label === 'Versuch')?.value), '1 von 2 dieses Schritts')
+  assert.equal(german(() => stateText(over, wfKey)),
+    'Fehlgeschlagen — für jeden Agenten dieses Laufs ist ein Ausgang aufgezeichnet, und keiner wurde abgeschlossen.')
+  const done: Partial<AgentTreeInput> = { ...over, agents: [silentWf(J1)], runs: [run([jagent(J1, { outcome: 'completed' })])] }
+  assert.equal(german(() => stateText(done, wfKey)),
+    'Fertig — für jeden Agenten dieses Laufs ist ein Ausgang aufgezeichnet, und mindestens einer wurde abgeschlossen.')
+})
+
+test('a session with nothing but a journal-only member at work is active through it', () => {
+  const over: Partial<AgentTreeInput> = {
+    mains: [main({ lastTs: NOW - 30 * MIN })],
+    agents: [silentWf(J1)],
+    runs: [run([jagent(J1, { step: 1, outcome: 'completed' }), jagent(J2, { step: 2 })], { lastTs: NOW - MIN })],
+  }
+  const root = build(over).roots[0]
+  assert.deepEqual([root.state, root.derived], ['active', true])
+  assert.equal(stateText(over, root.key), 'Active — inferred: an agent of this session is running.')
+  // Every node that is no superseded attempt says so.
+  for (const n of all(build(over).roots)) assert.equal(n.superseded, false, n.key)
 })
 
 // ---------------------------------------------------------------------------
@@ -1038,8 +1322,10 @@ function german<T>(run: () => T): T {
 
 test('the tree speaks German with the bundle the extension ships', () => {
   const over: Partial<AgentTreeInput> = {
-    agents: [rec('aaaa0001', { outputFinal: 4 }), wfRec('bbbb0001', { outcome: 'completed', outcomeTs: NOW - 5 * MIN })],
+    agents: [rec('aaaa0001', { outputFinal: 4 }), wfRec('bbbb0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })],
     launches: [launch('pppp0001', { agentId: null, typeHint: null, modelHint: null, ts: NOW - MIN })],
+    // 1.6 P2b: the journal's result comes from the run, with no time.
+    runs: [run([jagent('bbbb0001', { outcome: 'completed' })])],
     selected: agentKey('aaaa0001'),
   }
   const vm = german(() => build(over))
@@ -1057,7 +1343,7 @@ test('the tree speaks German with the bundle the extension ships', () => {
   // The figures in the reader's number format, too.
   assert.equal(vm.selected?.rows.find((r) => r.label === 'Verbrauch')?.value, '1,2K')
   assert.equal(german(() => agentDetails(input(over), NOW, agentKey('bbbb0001'))?.stateText),
-    'Fertig — das Workflow-Journal hat das Ergebnis um 11:55 aufgezeichnet.')
+    'Fertig — das Workflow-Journal hat das Ergebnis aufgezeichnet.')
   assert.equal(german(() => build({ ...over, selected: 'l:gone' })).note, 'Der ausgewählte Knoten ist nicht mehr im Baum.')
   assert.equal(german(() => build({ mains: [] })).note, 'Keine Claude-Code-Sitzung in den letzten 7 Tagen.')
 })
@@ -1509,13 +1795,14 @@ test('an agent that writes on more than a minute after its recorded outcome is i
   const labels = build(quiet).selected?.rows.map((r) => r.label) ?? []
   assert.equal(labels.indexOf('Recorded'), labels.indexOf('Last activity') + 1, labels.join(', '))
 
-  // The workflow journal's result carries no time and is never outlived — nor one it was given.
+  // The workflow journal's result carries no time and is never outlived (1.6 P2b: it comes from
+  // the run now, not from the record — a record's outcome with a time is the parent's, above).
   const journal: Partial<AgentTreeInput> = {
-    agents: [wfRec('bbbb0001', { outcome: 'completed', outcomeTs: null, lastTs: NOW - MIN }),
-      wfRec('bbbb0002', { outcome: 'completed', outcomeTs: NOW - 20 * MIN, lastTs: NOW - MIN })],
+    agents: [wfRec('bbbb0001', { lastTs: NOW - MIN }), wfRec('bbbb0002', { lastTs: NOW - MIN })],
+    runs: [run([jagent('bbbb0001', { outcome: 'completed' }), jagent('bbbb0002', { outcome: 'failed' })])],
   }
-  for (const id of ['bbbb0001', 'bbbb0002']) {
-    assert.equal(node(build(journal), agentKey(id)).state, 'done', id)
+  for (const [id, state] of [['bbbb0001', 'done'], ['bbbb0002', 'failed']]) {
+    assert.equal(node(build(journal), agentKey(id)).state, state, id)
     assert.equal(agentDetails(input(journal), NOW, agentKey(id))?.rows.some((r) => r.label === 'Recorded'), false, id)
   }
   // An outcome recorded without a time cannot be outlived either.

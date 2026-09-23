@@ -1069,7 +1069,7 @@ test('the notes under the tree state the cut, the sessions left out, the lower b
     roots: [{
       key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', sub: null, state: 'done', derived: false,
       usage: '12K', usageAgents: null, lowerBound: true, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
-      agentCount: 0, children: [],
+      agentCount: 0, superseded: false, children: [],
     }],
     selected: null,
     running: 0,
@@ -1097,7 +1097,7 @@ test('a stop the parent recorded is printed [Stopped] — a recorded state, no e
   const node = (key: string, state: TreeNode['state'], derived: boolean): TreeNode => ({
     key, kind: 'agent', label: `Explore · claude-opus-4-6 · ${key.slice(2, 6)}`, sub: null, state, derived,
     usage: '3.4K', usageAgents: null, lowerBound: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
-    agentCount: 0, children: [],
+    agentCount: 0, superseded: false, children: [],
   })
   const tree: AgentTreeVm = {
     roots: [{ ...node('s:sess', 'idle', true), kind: 'session', label: 'Session 12345678', agentCount: 1,
@@ -1117,6 +1117,37 @@ test('a stop the parent recorded is printed [Stopped] — a recorded state, no e
     setLocale(undefined)
   }
   assert.ok(sectionOf(md, '## Agenten').includes('  - [Gestoppt] Explore · claude-opus-4-6 · beef · 3.4K · 2 min 10 s'), md)
+})
+
+test('an attempt the workflow journal superseded says so at the end of its line, in either language', () => {
+  // 1.6 D7 (P2b): the dashboard dims the row; the markdown has no dim, so the line says it.
+  const { vm } = agentVm()
+  const node = (key: string, state: TreeNode['state'], superseded: boolean): TreeNode => ({
+    key, kind: 'agent', label: `workflow-subagent · claude-opus-4-6 · ${key.slice(2, 6)}`, sub: null, state, derived: false,
+    usage: '3.4K', usageAgents: null, lowerBound: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    agentCount: 0, superseded, children: [],
+  })
+  const tree: AgentTreeVm = {
+    roots: [{ ...node('s:sess', 'idle', false), kind: 'session', label: 'Session 12345678', derived: true, agentCount: 2,
+      children: [node('a:beef0001', 'failed', true), node('a:beef0002', 'done', false)] }],
+    selected: null, running: 0, runningNow: [], runningMore: 0, omittedRoots: 0, truncated: false, note: null,
+  }
+  const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
+  assert.ok(lines.includes('  - [Failed] workflow-subagent · claude-opus-4-6 · beef · 3.4K · 2 min 10 s (superseded by a later attempt)'),
+    lines.join('\n'))
+  assert.ok(lines.includes('  - [Done] workflow-subagent · claude-opus-4-6 · beef · 3.4K · 2 min 10 s'), lines.join('\n'))
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  let md = ''
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    md = markdownDocument({ ...vm, agents: tree })
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.ok(sectionOf(md, '## Agenten')
+    .includes('  - [Fehlgeschlagen] workflow-subagent · claude-opus-4-6 · beef · 3.4K · 2 min 10 s (durch einen späteren Versuch ersetzt)'), md)
 })
 
 test('an empty tree is one sentence; a tree that was never built is no section at all', () => {

@@ -7,6 +7,7 @@
  * and numbers — no line here was ever part of a real transcript.
  */
 
+import { createHash } from 'crypto'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -314,13 +315,45 @@ export function queueOperationLine(o: QueueOperationOpts): string {
 }
 
 /**
- * One line of a workflow run's `journal.jsonl`. Journal lines carry no time today; `ts`
- * adds one, for the rule that a line's own time wins when there is one.
+ * A journal key in the shape Claude Code writes — `v2:` and 64 hex digits (5643 of 5643 keys on
+ * the measuring machine) — made from a step name: the sha256 of `synthetic-journal-step-<step>`.
+ * The same step gives the same key, so a step started again is a retry or a replacement.
  */
-export function journalLine(o: { type: 'started' | 'result'; agentId: string; result?: unknown; ts?: number }): string {
-  const line: Record<string, unknown> = { type: o.type, key: `synthetic-journal-key-${o.agentId}`, agentId: o.agentId }
+export function journalKey(step: string | number, version = 'v2'): string {
+  return `${version}:${createHash('sha256').update(`synthetic-journal-step-${step}`).digest('hex')}`
+}
+
+export interface JournalLineOpts {
+  type: 'started' | 'result' | 'failed' | 'launched'
+  /** Absent only on `launched`, which carries its type alone. */
+  agentId?: string
+  /** The step whose key the line carries; the agent's own id unless given — one step per agent. */
+  step?: string | number
+  /** The key itself instead of `journalKey(step)`; null leaves it out. */
+  key?: string | null
+  /** A `result` line's result; synthetic content by default. */
+  result?: unknown
+  /** A `started` line's label and phase (1405 of 2861 carry them); synthetic content by default. */
+  label?: string | null
+  phase?: string | null
+}
+
+/**
+ * One line of a workflow run's `journal.jsonl`, keys in the order Claude Code writes them:
+ * `type`, `key`, `agentId`, then — on a started line — `label` and `phase`, on a result line the
+ * `result`. Journal lines carry no time. `launched` is `{"type":"launched"}` and nothing else.
+ */
+export function journalLine(o: JournalLineOpts): string {
+  if (o.type === 'launched') return JSON.stringify({ type: 'launched' })
+  const line: Record<string, unknown> = { type: o.type }
+  const key = o.key !== undefined ? o.key : journalKey(o.step ?? o.agentId ?? 'none')
+  if (key !== null) line.key = key
+  if (o.agentId !== undefined) line.agentId = o.agentId
+  if (o.type === 'started') {
+    if (o.label !== null) line.label = o.label ?? 'synthetic journal label'
+    if (o.phase !== null) line.phase = o.phase ?? 'synthetic journal phase'
+  }
   if (o.type === 'result') line.result = o.result ?? { summary: 'synthetic journal summary', changedFiles: ['src/x.ts'] }
-  if (o.ts !== undefined) line.timestamp = iso(o.ts)
   return JSON.stringify(line)
 }
 

@@ -14,10 +14,10 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
 import {
-  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS,
-  ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS,
+  AGENT_RETENTION_DAYS, MAX_NODES, MAX_ROOTS, MAX_RUN_AGENTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID,
+  RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS,
 } from '../src/agentTree'
-import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS } from '../src/agg'
+import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
@@ -360,8 +360,8 @@ test('the privacy and agents pages name every field the agent tables read, and t
     'src/agg.ts reads other fields than the read contract lists — update READ_CONTRACT in scripts/check-privacy.mjs, docs/privacy.md and docs/agents.md')
   // The readers 1.5 documented stay in the contract: a row cannot leave it unnoticed.
   const readers = READ_CONTRACT.map((row) => row.what)
-  for (const what of ['the identity sidecar', 'the workflow journal', 'an agent launch', 'the tool result',
-    'the reported totals', 'the task notification']) {
+  for (const what of ['the identity sidecar', 'the workflow journal', 'the workflow journal (fallback)', 'an agent launch',
+    'the tool result', 'the reported totals', 'the task notification']) {
     assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
   }
   for (const row of READ_CONTRACT) {
@@ -372,8 +372,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
       assert.ok(doc.agents.includes(span), `docs/agents.md does not name ${span} of ${row.what}`)
     }
   }
-  // And what stays out, in the words both pages promise it in.
-  for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result']) {
+  // And what stays out, in the words both pages promise it in. 1.6 §0a.1 (P2b): a journal line's
+  // `label` and `phase`.
+  for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result', 'label', 'phase']) {
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
@@ -398,8 +399,11 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Idle — inferred: the session transcript has been silent since {0}.',
     "Unknown — inferred: the session's own transcript has not been read; only its agents were.",
     'Running — inferred: at least one agent of this run is running.',
-    'Failed — at least one agent of this run has a recorded failure.',
-    'Done — every agent of this run has a recorded result.',
+    // 1.6 D2 (P2b): a run is decided by its members' outcomes — its old "Failed — at least one agent
+    // of this run has a recorded failure." and "Done — every agent of this run has a recorded
+    // result." are gone from the builder and the page.
+    'Done — every agent of this run has a recorded outcome, and at least one completed.',
+    'Failed — every agent of this run has a recorded outcome, and none completed.',
     'Unknown — inferred: not every agent of this run has a recorded result, and none is running.',
     "Running — inferred: the parent recorded the launch {0} and no result yet; the agent's transcript has not been seen yet.",
     "Unknown — inferred: the parent recorded the launch at {0} but no result, and the agent's transcript was never seen; the agent may have been stopped.",
@@ -409,7 +413,17 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     // 1.6 D7 (P2a): a stop the parent recorded, in its own word; a run whose every agent was stopped.
     'Stopped — the parent recorded ‘{0}’ at {1}.',
     'Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.',
+    // 1.6 D2, D7 (P2b): what the workflow journal recorded — a failure, a retry, a replacement.
+    'Failed — the workflow journal recorded the failure.',
+    'Failed, retried — the workflow journal recorded the failure and started the same step again (agent {0}).',
+    'Stopped, replaced — the workflow journal started the same step again (agent {0}) before this agent recorded a result.',
   ]
+  // The two run sentences 1.6 replaced are written nowhere any more.
+  for (const gone of ['Failed — at least one agent of this run has a recorded failure.',
+    'Done — every agent of this run has a recorded result.']) {
+    assert.equal(src.includes(gone), false, `src/agentTreeBuild.ts still writes: ${gone}`)
+    assert.equal(doc.agents.replace(/\s+/g, ' ').includes(gone), false, `docs/agents.md still quotes: ${gone}`)
+  }
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const sentence of quoted) {
     assert.ok(src.includes(`'${sentence}'`) || src.includes(`"${sentence}"`),
@@ -457,6 +471,8 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`at most **${MAX_RUNNING_LIST}** running agents`, 'the running list cap'],
     [`more than **${RESUMED_AFTER_MS / 1000} seconds** after`, 'how late a line may follow a recorded outcome'],
     [`at least **${MIN_SHORT_ID}** characters`, 'the shortest short id'],
+    [`at most **${MAX_RUN_AGENTS}** agents of its journal`, 'the journal agents a run keeps'],
+    [`a line of at most ${JOURNAL_PARSE_MAX / 1024} KB without that head`, 'the journal fallback cap'],
     [`from **${SPAN_IN_DAYS_FROM_MS / 3_600_000} hours** on`, 'when a span is written in days'],
     [`at most ${AGENT_META_MAX_BYTES / 1024} KB`, 'the sidecar size cap'],
     [`at most ${AGENT_NAME_MAX_CHARS} characters of \`${name[1]}\``, 'the type and alias cap'],

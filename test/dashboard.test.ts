@@ -3205,6 +3205,39 @@ test('the agent tree draws every state with a glyph of its own and marks each in
   assert.equal(/ag-failed|~stopped/.test(stopped), false, stopped)
 })
 
+test('an attempt the workflow journal superseded keeps its glyph and state, dimmed, and says why — in either language', () => {
+  // 1.6 D7 (P2b): a failure retried, a run replaced, a step re-run — its own state stays, the row
+  // is dimmed, and the glyph's title and label say what the dimming means.
+  const a = agentCtx()
+  const tree = agentTree({
+    roots: [treeNode(AK.s1, 'active', {
+      kind: 'session', label: 'Session 9d0eb37a', agentCount: 2,
+      children: [
+        treeNode(AK.a2, 'failed', { derived: false, superseded: true, label: 'workflow-subagent · Opus 5 · b1c2' }),
+        treeNode(AK.a1, 'running', { superseded: false }),
+      ],
+    })],
+  })
+  const h = treePart(agentsHtml(a, { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) }))
+  const title = 'failed · recorded · superseded by a later attempt'
+  assert.ok(h.indexOf('<li role="treeitem" class="ag-k-agent ag-sup" aria-selected="false">') >= 0, h)
+  assert.ok(h.indexOf('<span class="ag-st ag-failed" role="img" aria-label="' + title + '" title="' + title + '">') >= 0, h)
+  // Only the superseded one: the running agent beside it is drawn as ever.
+  assert.equal(h.split('ag-sup').length - 1, 1, h)
+  assert.ok(h.indexOf('aria-label="~running · derived" title="~running · derived"') >= 0, h)
+  // The dimming is the stylesheet's: the glyph fainter, the words in the dim tone, no new colour.
+  assert.match(STYLE, /\.ag-sup > \.ag-line > \.ag-row \.ag-st \{ opacity: \.8; \}/)
+  assert.match(STYLE, /\.ag-sup > \.ag-line > \.ag-row \.ag-label \{ color: var\(--dim\); \}/)
+  // A payload that does not say `true` is not dimmed.
+  const plain = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a2, 'failed', { superseded: 'yes' })] }) }))
+  assert.equal(plain.indexOf('ag-sup'), -1, plain)
+  assert.equal(plain.indexOf('superseded'), -1, plain)
+  // The word is the page's, and German on a German page.
+  assert.ok(Object.prototype.hasOwnProperty.call(DICT, 'superseded by a later attempt'))
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['superseded by a later attempt'], 'durch einen späteren Versuch ersetzt')
+})
+
 test('a row carries the usage and duration it was given and, only while it runs, a live clock', () => {
   const a = agentCtx()
   // Every node opened; the running list's own row of the running agent is left out of the counts.
@@ -3906,7 +3939,9 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   for (const n of nodes) {
     const row = rowOf(n.key)
     // The state the builder decided, and whether it inferred it or found it recorded.
-    const title = n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded'
+    // 1.6 D7: an attempt the journal superseded says why its row is dimmed.
+    const title = (n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded')
+      + (n.superseded ? ' · superseded by a later attempt' : '')
     assert.ok(row.indexOf('<span class="ag-st ag-' + n.state + '" role="img" aria-label="' + title + '" title="' + title + '">') >= 0, row)
     // Its usage first among the figures, and no mark on the row: the details carry it.
     if (n.kind !== 'pending') assert.ok(row.indexOf('<span class="ag-fig"><span class="nobr">' + n.usage) >= 0, row)

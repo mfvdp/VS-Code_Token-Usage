@@ -125,10 +125,14 @@ const fromRepo = (file: string): string => readFileSync(join(REPO, file), 'utf8'
 
 test('the read contract holds for the shipped sources: every reader names exactly the fields its row lists', () => {
   assert.deepEqual(contract.checkReadContract(fromRepo), [])
-  // 1.5's readers, moved into the table unchanged (1.6 P2a).
+  // 1.5's readers, moved into the table unchanged (1.6 P2a) — the journal's since changed by P2b.
   const byWhat = new Map(contract.READ_CONTRACT.map((row) => [row.what, row]))
   assert.deepEqual(byWhat.get('the identity sidecar')?.fields, ['agentType', 'model', 'spawnDepth', 'toolUseId'])
-  assert.deepEqual(byWhat.get('the workflow journal')?.fields, ['type', 'agentId'])
+  // 1.6 P2b (§0a.1): the journal's head is read on the raw line, its `key` compared within the
+  // journal; the fallback parses a short line without the head for the same three fields.
+  assert.deepEqual(byWhat.get('the workflow journal')?.fields, ['type', 'key', 'agentId'])
+  assert.equal(byWhat.get('the workflow journal')?.kind, 'regex')
+  assert.deepEqual(byWhat.get('the workflow journal (fallback)')?.fields, ['type', 'key', 'agentId'])
   assert.deepEqual(byWhat.get('an agent launch')?.fields, ['subagent_type', 'model', 'run_in_background'])
   assert.deepEqual(byWhat.get('the tool result')?.fields, ['agentId', 'status'])
   assert.deepEqual(byWhat.get('the reported totals')?.fields, ['totalTokens', 'totalDurationMs', 'totalToolUseCount'])

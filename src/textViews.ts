@@ -519,7 +519,8 @@ function agentStateWord(state: NodeState): string {
  * a usage whose output is a lower bound carries ⚠. A session names its two figures, as its
  * dashboard row does — "12.0M own · 137.4M agents · 22 d 11 h": what its own transcript used
  * and what its agents of the last seven days used, never added, then its span; a session
- * without agents has no agents figure.
+ * without agents has no agents figure. An attempt the workflow journal superseded (1.6 D7) —
+ * a row the dashboard dims — says so at the end: "(superseded by a later attempt)".
  */
 function agentNodeLine(n: TreeNode): string {
   const word = agentStateWord(n.state)
@@ -531,7 +532,8 @@ function agentNodeLine(n: TreeNode): string {
       ? ` · ${t('{0} agents', cell(n.usageAgents))}` : ''
     return `[${state}] ${name} · ${t('{0} own', cell(n.usage))}${mark}${agents} · ${cell(n.duration)}`
   }
-  return `[${state}] ${name} · ${cell(n.usage)}${mark} · ${cell(n.duration)}`
+  const superseded = n.superseded === true ? ` (${t('superseded by a later attempt')})` : ''
+  return `[${state}] ${name} · ${cell(n.usage)}${mark} · ${cell(n.duration)}${superseded}`
 }
 
 /**

@@ -25,7 +25,7 @@ import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
 import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
 import { AgentTreeVm } from './agentTree'
-import { Aggregator } from './agg'
+import { AGENT_TABLES_REVISION, Aggregator } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
 import {
@@ -520,11 +520,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       const files = pendingFiles.size > 0 ? [...pendingFiles] : undefined
       pendingFiles.clear()
       ingesting = true
-      void scan(agg, { files, ctx: scanContext() })
+      const target = agg
+      const skippedBefore = target.journalSkipped
+      void scan(target, { files, ctx: scanContext() })
         .then((n) => {
-          // Counts only — a line is never logged, in no mode and to no sink.
+          // Counts only — a line is never logged, in no mode and to no sink. A journal line too
+          // long to be read without its head is skipped (1.6 §0a.1), and only counted here.
+          const skipped = target.journalSkipped - skippedBefore
           log.debug(`Ingest: ${files ? `${files.length} changed file(s)` : 'every known file'}`
-            + ` → ${n} counted line(s)`)
+            + ` → ${n} counted line(s)${skipped > 0 ? `, ${skipped} journal line(s) skipped` : ''}`)
           // A counted Codex line can carry a fresh rate-limit block — same memo rule as the cold scan.
           if (n > 0) { dirty = true; quotaMgr.invalidate(); render(true) }
         })
@@ -594,26 +598,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   /**
    * The one-time replay of the agent tables. A snapshot written by a build without them
-   * (version 6) holds cursors past every line its transcripts had, so the ingest alone would
-   * give the tree only what is written from now on; `replayAgents` reads the Claude transcripts
-   * of the agent retention once more, up to what was counted, for the agent tables and nothing
-   * else. Due whenever this aggregator was never replayed — after the cold start, after a
-   * re-read — and never while a scan or an ingest moves the data, nor in a follower, which
-   * renders the leader's tables. A replay that had to wait is retried when the next ingest ends
-   * (the sweep brings one every minute). Counts and a duration are logged; never a path or a line.
+   * (version 6), or without a table this build fills from lines already read — the workflow
+   * runs of version 8 —, holds cursors past every line its transcripts had, so the ingest alone
+   * would give the tree only what is written from now on; `replayAgents` reads the Claude
+   * transcripts and journals of the agent retention once more, up to what was counted, for the
+   * agent tables and nothing else. Due whenever this aggregator's tables are not of the current
+   * revision (AGENT_TABLES_REVISION) — after the cold start, after a re-read, after an update
+   * that raised it — and never while a scan or an ingest moves the data, nor in a follower,
+   * which renders the leader's tables. A replay that had to wait is retried when the next ingest
+   * ends (the sweep brings one every minute). Counts and a duration are logged; never a path or
+   * a line.
    */
   function replayAgentTables(why: 'cold start' | 're-read' | 'deferred'): Promise<void> {
     if (replayRun) return replayRun
-    if (!readsTranscripts() || replayFailed || scanning || ingesting || agg.agentsReplayed) return Promise.resolve()
+    if (!readsTranscripts() || replayFailed || scanning || ingesting || agg.agentsRevision === AGENT_TABLES_REVISION) {
+      return Promise.resolve()
+    }
     const target = agg
     const started = Date.now()
     replayRun = (async () => {
       try {
         const files = agentReplayFiles(target, started)
+        const skippedBefore = target.journalSkipped
         const changed = await replayAgents(target, files, scanContext())
-        target.agentsReplayed = true
+        target.agentsRevision = AGENT_TABLES_REVISION
+        const skipped = target.journalSkipped - skippedBefore
         log.info(`Agent replay (${why}): ${files.length} file(s) read again, ${changed} change(s),`
-          + ` ${Date.now() - started} ms`)
+          + ` ${Date.now() - started} ms${skipped > 0 ? `, ${skipped} journal line(s) skipped` : ''}`)
         // A re-read or a lost lease can have put another aggregator in place meanwhile; this
         // one is gone then, and there is nothing of it to save or show.
         if (target !== agg || !readsTranscripts()) return

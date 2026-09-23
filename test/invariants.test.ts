@@ -626,6 +626,8 @@ const TREE_FIELDS = new Set([
   // 1.6 P1: a session's agents' usage (D5), what Copy ID copies (D11), and a row's own layout,
   // clock and copy marks (R5, D11). `updatedAt` left the tree (D12).
   'usageAgents', 'id', 'live', 'copy',
+  // 1.6 P2b: an attempt the workflow journal superseded (D7).
+  'superseded',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {

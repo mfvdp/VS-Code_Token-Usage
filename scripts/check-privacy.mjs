@@ -132,8 +132,13 @@ export function filesToScan() {
 export const READ_CONTRACT = [
   { what: 'the identity sidecar', file: 'src/agg.ts', kind: 'fields', body: 'function cleanMeta(', variable: 'o',
     fields: ['agentType', 'model', 'spawnDepth', 'toolUseId'] },
-  { what: 'the workflow journal', file: 'src/agg.ts', kind: 'fields', body: 'addWorkflowJournalLine(raw', variable: 'd',
-    fields: ['type', 'agentId'] },
+  // 1.6 §0a.1 (P2b): the journal's head is matched on the raw line, and the `key` joins `type` and
+  // `agentId` — compared within the journal, never kept. The fallback parses a short line without
+  // the head and picks the same three.
+  { what: 'the workflow journal', file: 'src/agg.ts', kind: 'regex', regex: 'JOURNAL_HEAD_RE',
+    fields: ['type', 'key', 'agentId'] },
+  { what: 'the workflow journal (fallback)', file: 'src/agg.ts', kind: 'fields', body: 'function journalFallback(', variable: 'd',
+    fields: ['type', 'key', 'agentId'] },
   { what: 'an agent launch', file: 'src/agg.ts', kind: 'fields', body: 'private noteLaunches(', variable: 'input',
     fields: ['subagent_type', 'model', 'run_in_background'] },
   { what: 'the tool result', file: 'src/agg.ts', kind: 'fields', body: 'private agentResult(', variable: 'r',

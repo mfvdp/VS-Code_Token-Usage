@@ -272,13 +272,15 @@ export interface AgentRec {
   models: string[]
   input: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
   output: number; reasoning: number; requests: number; outputFinal: number; toolCalls: number
-  /** From the launch record or the workflow journal. */
+  /**
+   * Recorded by the parent only — its tool result or a task notification. The workflow
+   * journal's view of a run's agent lives in `RunRec` since 1.6 and is joined at view time.
+   */
   outcome: RecordedOutcome | null
   outcomeTs: number | null
   /**
    * The parent's own word for the end (§0a.0), for the sentence; null when the outcome came
-   * without one — from the workflow journal, or from a snapshot written before 1.6. A `stopped`
-   * outcome always has one.
+   * without one — from a snapshot written before 1.6. A `stopped` outcome always has one.
    */
   outcomeStatus: LaunchStatus | null
 }
@@ -316,6 +318,49 @@ export interface MainRec {
   output: number; reasoning: number; requests: number; outputFinal: number; toolCalls: number
 }
 
+/**
+ * One agent as its run's journal records it (1.6 D2, D7): its id, which step of the run it
+ * works on and which attempt at that step it is, and the outcome the journal gave it. No key, no
+ * label, no result — the journal's `key` only ever tells two steps apart, in memory (see
+ * `Aggregator.journalSteps`), and never reaches a record.
+ */
+export interface JournalAgent {
+  agentId: string
+  /** 1-based ordinal of the journal key within this journal, in order of first sighting; 0 = no key. */
+  step: number
+  /** 1-based: the how-many-th `started` of its step this agent is. */
+  attempt: number
+  /**
+   * `completed` for a `result` line, `failed` for a `failed` line; `stopped` = replaced: a later
+   * start of the same step came before this one recorded anything. Null while the journal says
+   * nothing of its end.
+   */
+  outcome: 'completed' | 'failed' | 'stopped' | null
+  /** The next attempt of the same step, when the journal started one. */
+  supersededBy: string | null
+}
+
+/**
+ * A workflow run as its journal records it, keyed `${sessionId}|${workflowId}`. Kept for
+ * AGENT_RETENTION_DAYS after the journal last changed, like the agent records.
+ */
+export interface RunRec {
+  source: 'claude'
+  sessionId: string
+  /** The directory name under `subagents/workflows/`. */
+  workflowId: string
+  /** The run's `journal.jsonl` — the key its step map is kept under in memory. */
+  journalFile: string | null
+  /** In the order of their `started` line; at most MAX_RUN_AGENTS. */
+  agents: JournalAgent[]
+  /** `started` lines beyond MAX_RUN_AGENTS: counted, not listed. */
+  agentsDropped: number
+  /** Distinct steps (keys) seen. */
+  steps: number
+  /** The journal file's mtime at the last read — journal lines carry no time (observed: none). 0 until read. */
+  lastTs: number
+}
+
 export interface Snapshot {
   /** Schema version of the persisted state. */
   version: number
@@ -334,32 +379,38 @@ export interface Snapshot {
   toolsTruncated?: string[]
   /**
    * Subagent transcripts, keyed by path (version 7). Absent in older snapshots, which load
-   * with none — as do the three tables below.
+   * with none — as do the tables below.
    */
   agents?: Record<string, AgentRec>
   /** Agent launches the parent transcripts recorded, keyed by tool_use id. */
   launches?: Record<string, AgentLaunch>
   /** Main Claude sessions for the agent tree's roots, keyed by path. */
   mains?: Record<string, MainRec>
-  /** Workflow journal results for agents not seen yet: agentId → ts (0 when unknown). */
-  journalResults?: Record<string, number>
   /**
-   * Whether the one-time agent replay over the retained transcripts has run. Only a version
-   * 7 snapshot can say yes: an older one was written before the agent tables existed.
+   * Workflow runs as their journals record them, keyed `${sessionId}|${workflowId}` (version 8).
+   * A version 7 snapshot has none: the replay rebuilds them from the journals.
    */
-  agentsReplayed?: boolean
+  runs?: Record<string, RunRec>
+  /**
+   * Which revision of the agent tables the one-time replay last built (`AGENT_TABLES_REVISION`
+   * in agg.ts); absent means 0 — never replayed by this build. Replaces 1.5's `agentsReplayed`:
+   * a build that adds a field only a replay can fill for the transcripts already read raises the
+   * revision, and the host replays once more. Version 7's `journalResults` and `agentsReplayed`
+   * are no longer written; a version 7 snapshot is read forward without them.
+   */
+  agentsRevision?: number
 }
 
-export const STATE_VERSION = 7
+export const STATE_VERSION = 8
 
 /**
- * Snapshot versions this build can load. Each older version lacks one table that simply
- * starts empty, so it maps forward instead of forcing every user into a cold re-read:
- * 5 has no tool side table, 6 no agent tables (agents, launches, main sessions, journal
- * results). Tool counts then start at the next ingest; the agent tables are rebuilt once
- * from the transcripts still on disk, because a 6 never says `agentsReplayed`.
+ * Snapshot versions this build can load. Each older version lacks a table that simply starts
+ * empty, so it maps forward instead of forcing every user into a cold re-read: 5 has no tool
+ * side table, 6 no agent tables (agents, launches, main sessions), 7 no workflow runs. Tool
+ * counts then start at the next ingest; the agent tables and the runs are rebuilt once from the
+ * transcripts and journals still on disk, because none of them states the agent tables' revision.
  */
-export const READABLE_STATE_VERSIONS: readonly number[] = [5, 6, 7]
+export const READABLE_STATE_VERSIONS: readonly number[] = [5, 6, 7, 8]
 
 export type WindowKind = 'session' | 'weekly' | 'other'
 

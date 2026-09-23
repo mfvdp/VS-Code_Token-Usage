@@ -32,6 +32,11 @@ export const RESUMED_AFTER_MS = 60_000
 export const SPAN_IN_DAYS_FROM_MS = 48 * 3_600_000
 /** The fewest hex characters of an agent id a name shows; more where two agents of a session share them (D11). */
 export const MIN_SHORT_ID = 4
+/**
+ * Journal agents kept per workflow run (D2): a `started` line beyond this is counted in
+ * `RunRec.agentsDropped`, not listed. The largest run on the measuring machine had 427.
+ */
+export const MAX_RUN_AGENTS = 5000
 
 /**
  * `stopped` (1.6 D7): the parent recorded a stop — `killed`, `cancelled` or `stopped` — which is
@@ -77,9 +82,17 @@ export interface TreeNode {
   lastTs: number | null
   /**
    * Agents and pending launches anywhere below this node, counted on the whole tree before the
-   * MAX_NODES cut — what a collapsed row says it holds. 0 for a node with none below it.
+   * MAX_NODES cut — what a collapsed row says it holds. 0 for a node with none below it. A
+   * workflow run's count includes the agents its journal started whose transcript was never
+   * counted (1.6 D2): they are members of the run, though no row of their own is drawn for them.
    */
   agentCount: number
+  /**
+   * D7: an attempt the workflow journal started its step again after — a failure retried, a
+   * run replaced before it recorded anything, or a completed step re-run. It keeps its own state
+   * and glyph; the page dims the row. False for every other node.
+   */
+  superseded: boolean
   children: TreeNode[]
 }
 

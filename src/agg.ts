@@ -5,12 +5,12 @@ import { createHash } from 'crypto'
 import * as path from 'path'
 // Value import, and safe: `adapters` imports this module for types only, so the cycle is erased.
 import { isKnownSource } from './adapters'
-import { AGENT_RETENTION_DAYS } from './agentTree'
+import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  AgentLaunch, AgentMeta, AgentRec, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, LaunchStatus, PendingMessage,
-  RecordedOutcome, Resolution, SessionRec,
+  AgentLaunch, AgentMeta, AgentRec, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, JournalAgent, LaunchStatus,
+  PendingMessage, RecordedOutcome, Resolution, RunRec, SessionRec,
   Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
   TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
@@ -22,7 +22,7 @@ export interface IngestContext {
   attribution: Attribution
   projectSalt: string
   hashProjects: boolean
-  /** Replay: touch only agents/launches/mains/journal, never buckets, pending, sessions, tools or cursors. */
+  /** Replay: touch only agents/launches/mains/runs, never buckets, pending, sessions, tools or cursors. */
   agentsOnly?: boolean
 }
 
@@ -333,6 +333,71 @@ const NOTE_TOOL_USE_ID_RE = /<tool-use-id>([A-Za-z0-9_-]{1,64})<\/tool-use-id>/
 const NOTE_STATUS_RE = /<status>([a-z_]{1,20})<\/status>/
 
 /**
+ * The head of a workflow journal line (1.6 §0a.1): its `type`, its `key` and its `agentId`, in the
+ * order Claude Code writes them — `{"type":…,"key":…,"agentId":…` on every line of the measuring
+ * machine — matched at the start of the raw line. The rest of the line — an agent's `result`, a
+ * step's `label` and `phase` — is never parsed. A key outside its allow-list makes the key group
+ * fail and the agentId group with it; such a line has no head (see `journalHead`).
+ */
+export const JOURNAL_HEAD_RE = /^\{"type":"(started|result|failed|launched)"(?:,"key":"(v[0-9]{1,2}:[0-9a-f]{64})")?(?:,"agentId":"([A-Za-z0-9_-]{1,64})")?(?=[,}])/
+/** A journal key: Claude Code writes `v2:` and 64 hex digits; `v1:` is accepted too, and nothing else. */
+const JOURNAL_KEY_RE = /^v[0-9]{1,2}:[0-9a-f]{64}$/
+/**
+ * A journal line without the head is parsed only up to this size (`journalFallback`); a longer
+ * one is skipped and counted, never read. Observed: no line needs the fallback at all.
+ */
+export const JOURNAL_PARSE_MAX = 16 * 1024
+
+/**
+ * The revision of the agent tables. The host replays the retained transcripts and journals once
+ * whenever the snapshot's `agentsRevision` differs (see `Aggregator.agentsRevision`): a build
+ * that adds a field only a replay can fill for the transcripts already read raises it by one.
+ * 1 = 1.6's runs from the workflow journals.
+ */
+export const AGENT_TABLES_REVISION = 1
+
+/** Whether a Claude file is a workflow run's journal rather than a transcript. */
+export function isWorkflowJournal(file: string): boolean {
+  return path.basename(file) === 'journal.jsonl'
+}
+
+/** What a journal line says: its type, its key (null without one, or outside the allow-list) and its agent. */
+interface JournalHead {
+  type: 'started' | 'result' | 'failed' | 'launched'
+  key: string | null
+  agentId: string | null
+}
+
+/**
+ * The fallback for a journal line the head does not match, at most JOURNAL_PARSE_MAX: parsed, the
+ * same three fields picked through the same allow-lists — a key that fails its pattern is none,
+ * which puts the agent at step 0 — and nothing of the parsed object kept.
+ */
+function journalFallback(raw: string): JournalHead | null {
+  let d: any
+  try { d = JSON.parse(raw) } catch { return null }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null
+  const type: unknown = d.type
+  if (type !== 'started' && type !== 'result' && type !== 'failed' && type !== 'launched') return null
+  const key: unknown = d.key
+  return { type, key: typeof key === 'string' && JOURNAL_KEY_RE.test(key) ? key : null, agentId: cleanAgentId(d.agentId) }
+}
+
+/**
+ * The head of a journal line, by the anchored pattern; the fallback for a short line without one;
+ * 'skip' for a longer one. A `started`, `result` or `failed` whose head names no agent — its key
+ * was outside the allow-list, or it had none of the two — counts as no head.
+ */
+function journalHead(raw: string): JournalHead | null | 'skip' {
+  const m = JOURNAL_HEAD_RE.exec(raw)
+  if (m && (m[1] === 'launched' || m[3] !== undefined)) {
+    return { type: m[1] as JournalHead['type'], key: m[2] ?? null, agentId: m[3] ?? null }
+  }
+  if (raw.length > JOURNAL_PARSE_MAX || Buffer.byteLength(raw, 'utf8') > JOURNAL_PARSE_MAX) return 'skip'
+  return journalFallback(raw)
+}
+
+/**
  * Whether a raw Claude line is worth parsing. Parsing is most of what a scan costs, so a line
  * is looked at first: a response carries "usage"; an agent's result is a `toolUseResult` with
  * an `agentId` *key* after it — a key, because inside a JSON string the quotes around the word
@@ -572,6 +637,56 @@ function restoreMain(v: unknown): MainRec | null {
   }
 }
 
+function count(v: unknown): number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : 0
+}
+
+function restoreJournalAgent(v: unknown): JournalAgent | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const agentId = cleanAgentId(r.agentId)
+  if (agentId === null) return null
+  const supersededBy = cleanAgentId(r.supersededBy)
+  const known = r.outcome === 'completed' || r.outcome === 'failed' || r.outcome === 'stopped' ? r.outcome : null
+  return {
+    agentId,
+    step: count(r.step),
+    attempt: typeof r.attempt === 'number' && Number.isInteger(r.attempt) && r.attempt >= 1 ? r.attempt : 1,
+    // The journal's stop is a replacement: without the attempt that replaced it, it is none.
+    outcome: known === 'stopped' && supersededBy === null ? null : known,
+    supersededBy,
+  }
+}
+
+function restoreRun(v: unknown): RunRec | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const workflowId = cleanAgentId(r.workflowId)
+  const sessionId = typeof r.sessionId === 'string' ? clipId(r.sessionId) : ''
+  if (r.source !== 'claude' || workflowId === null || sessionId === '') return null
+  const agents: JournalAgent[] = []
+  const seen = new Set<string>()
+  for (const x of Array.isArray(r.agents) ? r.agents : []) {
+    if (agents.length >= MAX_RUN_AGENTS) break
+    const a = restoreJournalAgent(x)
+    if (a && !seen.has(a.agentId)) {
+      seen.add(a.agentId)
+      agents.push(a)
+    }
+  }
+  const lastTs = finiteOrNull(r.lastTs)
+  return {
+    source: 'claude',
+    sessionId,
+    workflowId,
+    journalFile: typeof r.journalFile === 'string' && r.journalFile ? r.journalFile : null,
+    agents,
+    agentsDropped: count(r.agentsDropped),
+    steps: count(r.steps),
+    lastTs: lastTs !== null && lastTs > 0 ? lastTs : 0,
+  }
+}
+
 /**
  * Collects token counts from both tools.
  *
@@ -590,8 +705,8 @@ function restoreMain(v: unknown): MainRec | null {
  *
  * Beside the counting, Claude lines feed four agent tables for the Agents section: one
  * record per agent transcript and per main session (the same dedupe as the buckets), the
- * launches a parent recorded, and workflow journal results that came in before their agent.
- * They hold identifiers, times and counts — never a description, a prompt or a result.
+ * launches a parent recorded, and the workflow runs as their journals record them. They hold
+ * identifiers, times and counts — never a description, a prompt, a result or a journal's key.
  */
 export class Aggregator {
   private buckets = new Map<string, Bucket>()
@@ -603,8 +718,21 @@ export class Aggregator {
   private launchMap = new Map<string, AgentLaunch>()
   /** Main Claude sessions, keyed by path: the tree's roots, kept whatever `attribution` says. */
   private mainMap = new Map<string, MainRec>()
-  /** Workflow journal results that arrived before their agent's transcript: agentId → ts (0 unknown). */
-  private journalResultMap = new Map<string, number>()
+  /** Workflow runs as their journals record them, keyed `${sessionId}|${workflowId}`. */
+  private runMap = new Map<string, RunRec>()
+  /** A run's journal agents by id, derived from `runMap` (rebuilt on restore). */
+  private runAgentIndex = new Map<string, Map<string, JournalAgent>>()
+  /**
+   * The journal keys, per journal file: key → the step's ordinal and the agent of its latest
+   * attempt. The only place a key lives (§0a.1): it is compared with the keys of the same
+   * journal to tell a step started again from a new one, and never reaches a record, the
+   * snapshot, a view, an export or the log. Not persisted: a journal's map is rebuilt from the
+   * file up to its cursor before the file is read on (`rebuildJournal` in scan.ts). An entry —
+   * possibly empty — means "in memory".
+   */
+  private journalSteps = new Map<string, Map<string, { step: number; lastAgent: string }>>()
+  /** Journal lines skipped as too long to parse without a head — a count, never a line. */
+  journalSkipped = 0
   /**
    * Lookups between the agent tables, derived from them and rebuilt on restore: an agent's
    * file by its id and by the tool_use id its sidecar names; a launch by the agent the
@@ -634,8 +762,8 @@ export class Aggregator {
   /** Zone used to address late lines into rolled-up buckets and to map hours to days. */
   timeConfig: TimeConfig = SYSTEM_TIME_CONFIG
   private rollupState = { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }
-  /** Whether the one-time agent replay has run; persisted with the snapshot. */
-  private agentsReplayedFlag = false
+  /** Which revision of the agent tables the replay last built (AGENT_TABLES_REVISION); persisted. */
+  private agentsRevisionValue = 0
   /** dayOfHour goes through Intl and is hit for every bucket on every query — memoised. */
   private dayMemoKey = ''
   private dayMemo = new Map<number, string>()
@@ -1110,8 +1238,9 @@ export class Aggregator {
   /**
    * The record of an agent transcript, made by its first counted line: its identity from the
    * file name, its session and workflow run from where it sits (`claudePlacement`). Null for a
-   * file below `subagents` that is no agent transcript. What was recorded before the
-   * transcript came in — the parent's result, the workflow journal — joins it here.
+   * file below `subagents` that is no agent transcript. What the parent recorded before the
+   * transcript came in joins it here; the workflow journal's view stays with the run (`runMap`)
+   * and is joined by the tree at view time.
    */
   private agentFor(file: string, at: number): AgentRec | null {
     const have = this.agentMap.get(file)
@@ -1158,15 +1287,6 @@ export class Aggregator {
     }
     // A record a replay rebuilds keeps its sidecar, and with it the link that names.
     this.linkMeta(file, rec)
-    // The workflow journal recorded the result before the transcript was read.
-    const journal = this.journalResultMap.get(rec.agentId)
-    if (journal !== undefined) {
-      this.journalResultMap.delete(rec.agentId)
-      rec.outcome = 'completed'
-      rec.outcomeTs = journal > 0 ? journal : null
-      // The journal writes no status word: a word the parent wrote said another outcome.
-      rec.outcomeStatus = null
-    }
   }
 
   /** The link a sidecar's tool_use id makes: the launch it names is the agent's spawner. */
@@ -1364,38 +1484,150 @@ export class Aggregator {
   }
 
   /**
-   * One line of a workflow's `journal.jsonl`. Two fields are read — `type` and `agentId` — and
-   * never the workflow's key or the agent's result. Only a `result` changes anything (a
-   * `started` line is followed by the agent's own transcript): the agent is recorded as
-   * completed, or — when its transcript was not read yet — the result waits for it. Journal
-   * lines carry no time of their own today; the result's time is then unknown, never "now".
+   * One line of a workflow's `journal.jsonl` (1.6 §0a.1, D2, D7). Three fields are read — `type`,
+   * `key` and `agentId`, through the anchored head (`JOURNAL_HEAD_RE`) — and never the agent's
+   * `result`, the step's `label` or its `phase`. A `started` line makes the agent a member of its
+   * run: a step's first start is attempt 1, and a start of a step already seen supersedes the
+   * attempt before — a previous attempt without an outcome of its own was replaced (`stopped`).
+   * `result` records the agent as completed, `failed` as failed; the later line wins. `launched`
+   * carries only its type and changes nothing. Journal lines carry no time: the run keeps the
+   * journal's mtime instead (`noteJournalRead`). The key is compared within this journal and kept
+   * nowhere but `journalSteps`.
    */
   addWorkflowJournalLine(raw: string, ctx: IngestContext): boolean {
-    if (raw.indexOf('"result"') < 0) return false
-    let d: any
-    try { d = JSON.parse(raw) } catch { return false }
-    if (!d || typeof d !== 'object' || d.type !== 'result') return false
-    const agentId = cleanAgentId(d.agentId)
-    if (agentId === null) return false
-    const at = lineTime(d) ?? finiteOrNull(this.cursors.get(ctx.file)?.lastTs)
-    const file = this.agentFileById.get(agentId)
-    const rec = file !== undefined ? this.agentMap.get(file) : undefined
-    if (!rec) {
-      const v = at ?? 0
-      if (this.journalResultMap.get(agentId) === v) return false
-      this.journalResultMap.set(agentId, v)
-      return true
+    const place = claudePlacement(ctx.file, true)
+    const workflowId = cleanAgentId(place.workflowId)
+    const sessionId = place.parent === null ? '' : clipId(place.parent)
+    if (workflowId === null || sessionId === '') return false
+    // The journal's step map is in memory from its first line on, whatever the line says — so a
+    // journal whose lines carry no key is not read again for its keys on every tail.
+    let steps = this.journalSteps.get(ctx.file)
+    if (!steps) {
+      steps = new Map()
+      this.journalSteps.set(ctx.file, steps)
     }
-    if (rec.outcome === 'completed') {
-      if (rec.outcomeTs !== null || at === null) return false
-      rec.outcomeTs = at
-      return true
+    const head = journalHead(raw)
+    if (head === 'skip') {
+      this.journalSkipped++
+      return false
     }
-    rec.outcome = 'completed'
-    rec.outcomeTs = at
-    // The journal writes no status word; a word the parent wrote said another outcome.
-    rec.outcomeStatus = null
+    if (head === null || head.type === 'launched' || head.agentId === null) return false
+    const runKey = `${sessionId}|${workflowId}`
+    let run = this.runMap.get(runKey)
+    if (!run) {
+      run = { source: 'claude', sessionId, workflowId, journalFile: ctx.file, agents: [], agentsDropped: 0, steps: 0, lastTs: 0 }
+      this.runMap.set(runKey, run)
+    }
+    run.journalFile = ctx.file
+    const index = this.runIndex(runKey, run)
+    if (head.type === 'started') return this.journalStarted(run, index, steps, head.key, head.agentId)
+    let agent = index.get(head.agentId)
+    if (!agent) {
+      // Never observed: an end for an agent the journal did not start. Taken as its start — unless
+      // the run is full, where it may be one of the agents counted and not listed.
+      if (run.agents.length >= MAX_RUN_AGENTS) return false
+      this.journalStarted(run, index, steps, head.key, head.agentId)
+      agent = index.get(head.agentId)
+      if (!agent) return false
+    }
+    const outcome = head.type === 'result' ? 'completed' : 'failed'
+    if (agent.outcome === outcome) return false
+    agent.outcome = outcome
     return true
+  }
+
+  /**
+   * A `started` line: the agent joins its run as the next attempt of its step. The attempt before
+   * it — the step's latest — is superseded by it, and one that recorded nothing was replaced
+   * (D7). A line without a key is step 0, which has no attempts to compare. An agent the run
+   * already lists is a line read again and changes nothing; beyond MAX_RUN_AGENTS a start is
+   * counted, not listed — it still supersedes the attempt before it.
+   */
+  private journalStarted(
+    run: RunRec, index: Map<string, JournalAgent>, steps: Map<string, { step: number; lastAgent: string }>,
+    key: string | null, agentId: string,
+  ): boolean {
+    if (index.has(agentId)) return false
+    let step = 0
+    let attempt = 1
+    if (key !== null) {
+      const seen = steps.get(key)
+      if (seen) {
+        step = seen.step
+        const prev = index.get(seen.lastAgent)
+        if (prev) {
+          attempt = prev.attempt + 1
+          if (prev.outcome === null) prev.outcome = 'stopped'
+          prev.supersededBy = agentId
+        }
+        seen.lastAgent = agentId
+      } else {
+        // The run's own count, not the map's size: a map that was not rebuilt (a caller that
+        // skipped `rebuildJournal`) must not hand out an ordinal the run already uses.
+        step = ++run.steps
+        steps.set(key, { step, lastAgent: agentId })
+      }
+    }
+    if (run.agents.length >= MAX_RUN_AGENTS) {
+      run.agentsDropped++
+      return true
+    }
+    const agent: JournalAgent = { agentId, step, attempt, outcome: null, supersededBy: null }
+    run.agents.push(agent)
+    index.set(agentId, agent)
+    return true
+  }
+
+  /** A run's journal agents by id, made on first use. */
+  private runIndex(runKey: string, run: RunRec): Map<string, JournalAgent> {
+    let index = this.runAgentIndex.get(runKey)
+    if (!index) {
+      index = new Map(run.agents.map((a) => [a.agentId, a]))
+      this.runAgentIndex.set(runKey, index)
+    }
+    return index
+  }
+
+  /** The run a journal file belongs to, by where it sits; its key and record, or null. */
+  private runOfJournal(file: string): { key: string; run: RunRec | undefined } | null {
+    const place = claudePlacement(file, true)
+    const workflowId = cleanAgentId(place.workflowId)
+    if (workflowId === null || place.parent === null) return null
+    const key = `${clipId(place.parent)}|${workflowId}`
+    return { key, run: this.runMap.get(key) }
+  }
+
+  /**
+   * After a read of a journal: its modification time is the run's last activity, as the
+   * journal's lines carry no time of their own. `readNewLines` sets the cursor's mtime only after
+   * the lines, so the reader hands it over here (scan.ts, the replay and the rebuild pass alike).
+   */
+  noteJournalRead(file: string, mtime: number | undefined): void {
+    if (typeof mtime !== 'number' || !Number.isFinite(mtime) || mtime <= 0) return
+    const run = this.runOfJournal(file)?.run
+    if (run) run.lastTs = mtime
+  }
+
+  /** Whether a journal's step map is in memory — made by its first line, a rebuild or a reset. */
+  journalInMemory(file: string): boolean {
+    return this.journalSteps.has(file)
+  }
+
+  /**
+   * Before a journal is read from its first byte again — the rebuild pass after a restart, a
+   * cursor reset on rotation or truncation, the replay: the run's journal agents and the
+   * journal's step map are dropped, so the read derives them anew instead of adding to them.
+   * The run itself, and the time of its last read, stay.
+   */
+  resetJournal(file: string): void {
+    const at = this.runOfJournal(file)
+    if (at?.run) {
+      at.run.agents = []
+      at.run.agentsDropped = 0
+      at.run.steps = 0
+      this.runAgentIndex.delete(at.key)
+    }
+    this.journalSteps.set(file, new Map())
   }
 
   /** Whether the agent file has a record whose sidecar is still unread (fewer than 3 tries). */
@@ -1425,6 +1657,8 @@ export class Aggregator {
   launches(): AgentLaunch[] { return [...this.launchMap.values()] }
   /** Main Claude sessions, the tree's roots. */
   mains(): MainRec[] { return [...this.mainMap.values()] }
+  /** Workflow runs as their journals record them. */
+  runs(): RunRec[] { return [...this.runMap.values()] }
 
   /**
    * The agent records with the path each is keyed by. The tree needs it: a node's key is the
@@ -1434,20 +1668,29 @@ export class Aggregator {
   /** The main session records with their path — the key every agent's `sessionFile` names. */
   mainEntries(): Array<[file: string, rec: MainRec]> { return [...this.mainMap] }
 
-  get agentsReplayed(): boolean { return this.agentsReplayedFlag }
-  set agentsReplayed(v: boolean) { this.agentsReplayedFlag = v }
+  /**
+   * Which revision of the agent tables the one-time replay last built: 0 for a snapshot this
+   * build never replayed (every version before 8, and a version 8 written before its replay).
+   * The host replays while it differs from AGENT_TABLES_REVISION and sets it once the replay ran.
+   */
+  get agentsRevision(): number { return this.agentsRevisionValue }
+  set agentsRevision(v: number) { this.agentsRevisionValue = count(v) }
 
   /**
-   * Starts a replay over `files` (`replayAgents` in scan.ts): what these transcripts gave the
-   * agent tables is taken out, so reading them again from the start rebuilds it instead of
-   * adding to it. What the lines cannot give back — an agent's sidecar, its spawner, a
-   * recorded result — is kept aside and carried into the rebuilt record.
+   * Starts a replay over `files` (`replayAgents` in scan.ts): what these transcripts and
+   * journals gave the agent tables is taken out, so reading them again from the start rebuilds
+   * it instead of adding to it. What the lines cannot give back — an agent's sidecar, its
+   * spawner, the parent's recorded result — is kept aside and carried into the rebuilt record.
    */
   beginAgentReplay(files: Iterable<string>): void {
     this.replayPending.clear()
     this.replayKept.clear()
     const set = new Set(files)
     for (const file of set) {
+      if (isWorkflowJournal(file)) {
+        this.resetJournal(file)
+        continue
+      }
       const rec = this.agentMap.get(file)
       if (rec) {
         this.replayKept.set(file, rec)
@@ -1478,8 +1721,8 @@ export class Aggregator {
 
   /**
    * Drops what the agent tables hold beyond their retention: an agent or a main session whose
-   * last line, a launch whose last news, and a waiting journal result older than `horizon`. A
-   * journal result of unknown time counts as old — it can only have waited since before.
+   * last line, a launch whose last news, and a run whose journal last changed before `horizon` —
+   * the run with its step map.
    */
   private pruneAgents(horizon: number): void {
     for (const [file, rec] of this.agentMap) {
@@ -1489,7 +1732,12 @@ export class Aggregator {
       if (Math.max(launch.ts, launch.outcomeTs ?? 0) < horizon) this.dropLaunch(id, launch)
     }
     for (const [file, rec] of this.mainMap) if (rec.lastTs < horizon) this.mainMap.delete(file)
-    for (const [id, ts] of this.journalResultMap) if (ts < horizon) this.journalResultMap.delete(id)
+    for (const [key, run] of this.runMap) {
+      if (run.lastTs >= horizon) continue
+      this.runMap.delete(key)
+      this.runAgentIndex.delete(key)
+      if (run.journalFile !== null) this.journalSteps.delete(run.journalFile)
+    }
   }
 
   /** The lookups between the agent tables, from the tables themselves (after a restore). */
@@ -1502,6 +1750,7 @@ export class Aggregator {
       if (rec.meta?.toolUseId) this.agentFileByToolUse.set(rec.meta.toolUseId, file)
     }
     for (const [id, launch] of this.launchMap) if (launch.agentId !== null) this.launchByAgent.set(launch.agentId, id)
+    this.runAgentIndex.clear()
   }
 
   // ----------------------------------------------------------------- Codex
@@ -1707,8 +1956,8 @@ export class Aggregator {
       agents: Object.fromEntries(this.agentMap),
       launches: Object.fromEntries(this.launchMap),
       mains: Object.fromEntries(this.mainMap),
-      journalResults: Object.fromEntries(this.journalResultMap),
-      agentsReplayed: this.agentsReplayedFlag,
+      runs: Object.fromEntries(this.runMap),
+      agentsRevision: this.agentsRevisionValue,
     }
   }
 
@@ -1719,10 +1968,12 @@ export class Aggregator {
    * project/session): those can only come from a re-read. The other direction just
    * drops the table; project and session share one record shape and switch freely.
    *
-   * Versions 5 and 6 are read as well: each lacks one table that simply starts empty —
-   * the tool side table (5), the agent tables (6) — and a cold re-read of every transcript
-   * would be a steep price for tables that have no history yet either way. A 6 also says
-   * the agent replay has not run, so the host rebuilds the agent tables once.
+   * Versions 5, 6 and 7 are read as well: each lacks a table that simply starts empty — the
+   * tool side table (5), the agent tables (6), the workflow runs (7) — and a cold re-read of
+   * every transcript would be a steep price for tables that have no history yet either way.
+   * None of them states the agent tables' revision, so the host replays them once. A version 7
+   * agent record may carry a completion the workflow journal wrote onto it (1.5 did); that one is
+   * taken back, as the run rebuilt by the replay holds the journal's view since 1.6.
    */
   static fromSnapshot(s: Snapshot | undefined, attribution: Attribution = 'none'): Aggregator {
     const a = new Aggregator()
@@ -1773,8 +2024,8 @@ export class Aggregator {
       }
     }
     a.firstIngest = typeof s.firstIngest === 'number' && Number.isFinite(s.firstIngest) ? s.firstIngest : null
-    // The agent tables came with version 7. They do not depend on `attribution`: the tree's
-    // roots are kept whatever the session table is set to.
+    // The agent tables came with version 7, the runs with 8. They do not depend on
+    // `attribution`: the tree's roots are kept whatever the session table is set to.
     if (s.version >= 7) {
       for (const [file, v] of Object.entries(s.agents ?? {})) {
         const rec = restoreAgent(v)
@@ -1788,14 +2039,40 @@ export class Aggregator {
         const rec = restoreMain(v)
         if (file && rec) a.mainMap.set(file, rec)
       }
-      for (const [id, v] of Object.entries(s.journalResults ?? {})) {
-        const agentId = cleanAgentId(id)
-        if (agentId !== null && typeof v === 'number' && Number.isFinite(v) && v >= 0) a.journalResultMap.set(agentId, v)
+      if (s.version === 7) a.forwardFromV7()
+      if (s.version >= 8) {
+        for (const v of Object.values(s.runs ?? {})) {
+          const run = restoreRun(v)
+          if (run) a.runMap.set(`${run.sessionId}|${run.workflowId}`, run)
+        }
+        a.agentsRevisionValue = count(s.agentsRevision)
       }
       a.reindexAgents()
-      a.agentsReplayedFlag = s.agentsReplayed === true
     }
     return a
+  }
+
+  /**
+   * Version 7 → 8: 1.5 wrote the workflow journal's result onto the agent's record; since 1.6 a
+   * record's outcome is the parent's alone, and the journal's view lives in the run the replay
+   * rebuilds. A workflow agent's completion that no launch of it carries is the journal's, and is
+   * taken back. `journalResults` is not read at all: the replay finds those results in the
+   * journals again.
+   */
+  private forwardFromV7(): void {
+    const completed = new Set<string>()
+    for (const launch of this.launchMap.values()) {
+      if (launch.outcome !== 'completed') continue
+      if (launch.agentId !== null) completed.add(launch.agentId)
+      completed.add(`toolu:${launch.toolUseId}`)
+    }
+    for (const rec of this.agentMap.values()) {
+      if (rec.workflowId === null || rec.outcome !== 'completed') continue
+      if (completed.has(rec.agentId) || (rec.meta?.toolUseId && completed.has(`toolu:${rec.meta.toolUseId}`))) continue
+      rec.outcome = null
+      rec.outcomeTs = null
+      rec.outcomeStatus = null
+    }
   }
 
   /** Drops per-session data (attribution switched off). */

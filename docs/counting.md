@@ -57,8 +57,10 @@ session, `<session>/subagents/agent-<id>.jsonl` one of its agents — an agent s
 agent lies flat beside it — and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` an agent
 of a workflow run. The placement is read from the nearest `subagents` directory above the file,
 at every depth. A run's `journal.jsonl` sits beside its agents with the same suffix, but it is
-the run's own record, not a transcript: it is never counted, only `type` and `agentId` of its
-lines are read, and a result line marks that agent completed. An agent's tokens have always been
+the run's own record, not a transcript: it is never counted, only `type`, `key` and `agentId`
+at the head of its lines are read — the key only compared within the journal, never kept — and
+its lines say which agents the run started, which completed, which failed and which step was
+started again. An agent's tokens have always been
 part of the totals; the
 [Agents](agents.md) section adds a view of them, not a count. Beside the buckets every agent
 transcript and every session transcript of the last seven days gets a small record of its own,
@@ -80,11 +82,14 @@ the dashboard's data-quality section carries the lower-bound share for the whole
 every finished subagent is one: Claude Code writes no end marker into an agent's transcript, and
 the file ends on an assistant line whose `stop_reason` is still `null`.
 
-**Upgrading.** The persisted snapshot is schema version 7. Version 6 — everything before the agent
-tables — and version 5 — everything before the tool table — are read forward rather than thrown
-away, so no upgrade forces a cold re-read: a table the older version did not have starts empty.
-Tool counting then starts with the next ingest, and the section states the first day it has a row
-for; the agent tables are rebuilt once from the transcripts of the last seven days, each read only
-as far as its tokens were already counted, so no token is counted twice and no total moves. Any
+**Upgrading.** The persisted snapshot is schema version 8; version 5, 6 and 7 are still read.
+Version 7 — everything before the workflow runs of the agent tables —, version 6 — everything
+before the agent tables — and version 5 — everything before the tool table — are read forward
+rather than thrown away, so no upgrade forces a cold re-read: a table the older version did not
+have starts empty. Tool counting then starts with the next ingest, and the section states the
+first day it has a row for; the agent tables and the workflow runs are rebuilt once from the
+transcripts and journals of the last seven days, each read only as far as its tokens were already
+counted, so no token is counted twice and no total moves. A version 7 agent record whose
+completion came from the workflow journal gives it back: the rebuilt run holds the journal's view. Any
 older version is discarded and the transcripts are read again from scratch — nothing is lost
 that the transcripts still hold, it just takes a moment on the first start.

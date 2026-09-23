@@ -1487,9 +1487,11 @@ function agentStateTitle(state: string, derived: Payload): string {
 /**
  * The glyph itself is drawn by the stylesheet from the state class, so it never ends up in the
  * copied text of the page; the image role and its label are what a screen reader gets instead.
+ * An attempt the workflow journal superseded (1.6 D7) keeps its own glyph — dimmed with its row —
+ * and its title and label say why it is dimmed.
  */
-function agentGlyph(state: string, derived: Payload): string {
-  const title = agentStateTitle(state, derived);
+function agentGlyph(state: string, derived: Payload, superseded = false): string {
+  const title = agentStateTitle(state, derived) + (superseded ? ' · ' + tr('superseded by a later attempt') : '');
   return '<span class="ag-st ag-' + esc(state) + '" role="img" aria-label="' + title + '" title="'
     + title + '"></span>';
 }
@@ -1569,6 +1571,8 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, dept
   const on = key !== '' && key === selected;
   const state = agentState(n.state);
   const kind = AGENT_KINDS.indexOf(n.kind) >= 0 ? String(n.kind) : 'agent';
+  // 1.6 D7: an attempt the workflow journal started its step again after — dimmed, its own state kept.
+  const superseded = n.superseded === true;
   const label = orDash(n.label);
   // The name breaks only between its parts: "Explore · claude-opus-5 · a94f" in a narrow
   // sidebar wraps at a separator, never at the hyphen inside a model id.
@@ -1599,14 +1603,14 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, dept
   // The glyph keeps its column, and the words beside it wrap within theirs: a long agent type
   // in a narrow sidebar breaks its own line rather than leaving the glyph alone on one.
   const row = '<button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
-    + '" aria-pressed="' + on + '">' + agentGlyph(state, n.derived)
+    + '" aria-pressed="' + on + '">' + agentGlyph(state, n.derived, superseded)
     + '<span class="ag-text"><span class="ag-label">' + labelHtml + '</span>'
     + (meta.length ? '<span class="meta">' + meta.join(' · ') + '</span>' : '')
     + (figures.length
        ? '<span class="ag-fig">' + figures.map(f => '<span class="nobr">' + f + '</span>').join(' · ') + '</span>'
        : '')
     + '</span></button>';
-  return '<li role="treeitem" class="ag-k-' + esc(kind) + '"'
+  return '<li role="treeitem" class="ag-k-' + esc(kind) + (superseded ? ' ag-sup' : '') + '"'
     + (kids.length ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '">'
     + '<div class="ag-line">' + fold + row + '</div>'
     + (kids.length && open

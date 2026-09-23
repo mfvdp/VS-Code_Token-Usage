@@ -884,6 +884,10 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-unknown::before { content: "?"; color: var(--dim); }
 .ag-active::before { content: "●"; color: var(--vscode-foreground); }
 .ag-idle::before { content: "○"; color: var(--dim); }
+/* 1.6 D7: an attempt the workflow journal superseded keeps its glyph, dimmed — at .8 a failed or
+   stopped glyph still stands out 3:1 in both themes — and its words take the dim tone. */
+.ag-sup > .ag-line > .ag-row .ag-st { opacity: .8; }
+.ag-sup > .ag-line > .ag-row .ag-label { color: var(--dim); }
 /* A breath, not a blink: at its faintest the dot keeps most of its colour, so it never reads
    as switched off. */
 @keyframes ag-pulse { 50% { opacity: .7; } }
@@ -1199,6 +1203,7 @@ function webviewWords(): Record<string, string> {
     'stopped': t('stopped'),
     'streak {0} · longest {1} · active {2}': t('streak {0} · longest {1} · active {2}'),
     'sub': t('sub'),
+    'superseded by a later attempt': t('superseded by a later attempt'),
     'thisMonth': t('thisMonth'),
     'thisWeek': t('thisWeek'),
     'time elapsed': t('time elapsed'),

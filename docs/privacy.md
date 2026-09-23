@@ -20,8 +20,10 @@ Inside `~/.claude/projects/` two small files beside the agent transcripts are re
 [Agents](agents.md) section: the `agent-<id>.meta.json` next to each agent transcript, for four
 fields — `agentType`, `model`, `spawnDepth` and `toolUseId`, never its `description` or its
 `prompt`, and only from a regular file of at most 64 KB — and a workflow run's `journal.jsonl`,
-for the `type` and `agentId` of each line (and its time, should a line ever carry one), never
-its `key` or its `result`. To catch agent files the recursive file watcher can miss (on Linux
+for the `type`, the `key` and the `agentId` at the head of each line, never its `result`, its
+`label` or its `phase`. The `key` of a journal line is compared with the other lines of the same
+journal, to tell a step that was started again from a new one, and is never kept, shown or
+exported: it lives in memory only, and what the tree keeps of it is the step's ordinal. To catch agent files the recursive file watcher can miss (on Linux
 it does), the `subagents/` directories of the active sessions and the workflow directories
 inside them are also listed every five seconds while an agent runs, on every platform; the
 listing follows no link.

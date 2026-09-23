@@ -60,7 +60,7 @@ tree after it with `### Sessions and agents`.
 
 **Sessions** are the roots, the most recent first. A session is listed when its own transcript
 recorded a response within the last 24 hours, or when it has an agent or a launch from the last
-seven days. At most **20** sessions are listed; the rest are counted under the tree
+seven days, or a workflow run whose journal changed in them. At most **20** sessions are listed; the rest are counted under the tree
 (`3 older session(s) not shown.`). A session is labelled with the first eight characters of its
 id (`Session 9d0eb37a`), and with its project beside it while `tokenPace.attribution` is
 `project` or `session` — the label the Sessions table shows, hashed too under
@@ -69,9 +69,11 @@ id (`Session 9d0eb37a`), and with its project beside it while `tokenPace.attribu
 **Closed by default.** Only the sessions show until you open one; an opened node shows its
 children closed in turn. A closed node says how many agents are below it — `4 agent(s)` beside
 its name, counting every agent and launch at any depth under it, on the whole tree, also those
-the tree had to cut — and says nothing once it is open. A node whose agents the tree had to cut
-all away has nothing to open: it has no toggle, and its count still says what is below it. What
-you open stays open (see [Opening and selection](#opening-and-selection)).
+the tree had to cut and the agents a workflow run's journal started whose transcript was never
+counted (see [States](#states)) — and says nothing once it is open. A node whose agents the tree
+had to cut all away, or a run whose agents no transcript shows, has nothing to open: it has no
+toggle, and its count still says what is below it. What you open stays open (see
+[Opening and selection](#opening-and-selection)).
 
 **Below a session** come its workflow runs (`Workflow cfe7718d`) and its agents, each agent
 under the agent that launched it when that one is in the same tree, otherwise directly under the
@@ -101,7 +103,8 @@ bounds.* A running node also says for how long:
 is its type, its model and its short id — `Explore · claude-opus-5 · 94f3`. The type is the one
 the agent's sidecar names, else the one its launch asked for, else `Agent`; the model is the last
 one its transcript recorded, else the alias the sidecar or the launch names, else `–`. The **short
-id** is the start of the agent's id that no other agent of the same session starts with, at
+id** is the start of the agent's id that no other agent of the same session starts with — the
+agents a run's journal names without a transcript included, since a sentence may name one — at
 least **4** characters long: Claude Code's ids are `a` and 16 hex digits, and the `a`, which
 every one of them carries, is left off. Four characters keep nearly every agent apart; where two
 agents of a session share them, both names carry as many as it takes — measured over a week on one
@@ -113,8 +116,8 @@ agent's usage is part of the figures the totals already contain: the tree adds n
 | Glyph | State | Kind | When |
 |---|---|---|---|
 | ✓ | done | recorded | the parent's tool result or task notification says `completed`, or the workflow run's journal holds a result for the agent |
-| ✕ | failed | recorded | the parent recorded `failed`, `error` or `timeout` |
-| ■ | stopped | recorded | the parent recorded `killed`, `cancelled` or `stopped` — an end, but not a failure |
+| ✕ | failed | recorded | the parent recorded `failed`, `error` or `timeout`, or the workflow run's journal recorded a failure for the agent |
+| ■ | stopped | recorded | the parent recorded `killed`, `cancelled` or `stopped` — an end, but not a failure — or the run's journal started the agent's step again before the agent recorded anything: it was replaced |
 | ● | running | derived | nothing was recorded yet, and the agent replied — or was launched — within the last **10 minutes**, or an agent it launched is running |
 | ? | unknown | derived | nothing was recorded, and the agent has been silent for longer than that |
 | ● | active | derived | a session whose own transcript recorded a response within the last 10 minutes, or one of whose agents is running |
@@ -133,11 +136,35 @@ or `stopped` for an agent that was halted — is an end of its own: `■`, in th
 sentence quotes the parent's word as it was written, `‘killed’`. Only `failed`, `error` and
 `timeout` make an agent failed.
 
-A **workflow run** is running while one of its agents runs, failed when one of them failed, done
-when every one of them has a recorded outcome and at least one completed, stopped when every one
-of them was stopped, and unknown otherwise. A **launch** whose transcript never appeared is
-running for ten minutes after the launch and unknown after that, unless the parent records its
-end, which makes it done, failed or stopped like any agent.
+**Retried and replaced.** A workflow run's journal records, for every agent it starts, which step
+of the run the agent works on — by a key it compares with the other lines of the same journal
+and never keeps — and ends the agent with a result or a failure. When the journal starts a step
+again, the attempt before it is superseded: a failed one was retried
+(*Failed, retried — the workflow journal recorded the failure and started the same step again
+(agent 2e3d).*), one that had recorded nothing yet was replaced — stopped, not unknown
+(*Stopped, replaced — the workflow journal started the same step again (agent 2e3d) before this
+agent recorded a result.*) — and a completed one was run again. The sentence names the next
+attempt by its short id. A superseded attempt keeps its own glyph and state; its row is dimmed,
+its glyph's title adds `superseded by a later attempt`, and its markdown line ends on
+`(superseded by a later attempt)`. The details of an agent whose step was started more than once
+say which attempt it was — `Attempt`: `1 of 2 of this step`. What the parent recorded comes first:
+a result the parent recorded for an agent beats the journal's; the journal's ends carry no time
+and are never outlived.
+
+A **workflow run** is decided by its members — its agents, the launches inside it, and the agents
+its journal started whose transcript was never counted — and a superseded attempt is closed
+whatever its own state: it was retried. The run is running while a member runs; unknown while a
+member has neither a recorded end nor runs; and once every member is closed, done when one of
+them completed — one failure among completed agents does not fail a run —, failed when none
+completed and one failed, and stopped when the last attempt of every step was stopped. An agent
+the journal started without a counted transcript has no row of its own: it counts in its run's
+state, in the count of every node above it and in the run's `Agents` row, and it is running while
+the journal changed within the last ten minutes or another member of the run runs, unknown after
+that, unless the journal recorded its end. A run keeps at most **5000** agents of its journal;
+further starts are counted, not listed, and its details say so (`12 further agents not listed`).
+A **launch** whose transcript never appeared is running for ten minutes after the launch and
+unknown after that, unless the parent records its end, which makes it done, failed or stopped
+like any agent.
 
 Only done, failed and stopped are facts: somebody recorded them. Everything else is inferred from
 when a file last changed, and says so — the glyph's title reads `~running · derived` where a
@@ -151,6 +178,10 @@ word for word. For an agent:
 * Completed — the parent recorded the result at 14:20.
 * Failed — the parent recorded the failure at 14:20.
 * Stopped — the parent recorded ‘killed’ at 14:20.
+* Completed — the workflow journal recorded the result.
+* Failed — the workflow journal recorded the failure.
+* Failed, retried — the workflow journal recorded the failure and started the same step again (agent 2e3d).
+* Stopped, replaced — the workflow journal started the same step again (agent 2e3d) before this agent recorded a result.
 * Running — inferred: the transcript changed 2 min ago and no result was recorded yet.
 * Running — inferred: a child agent of this agent is still running.
 * Unknown — inferred: no result was recorded and the transcript has been silent since 14:20; the agent may have been stopped.
@@ -159,9 +190,8 @@ word for word. For an agent:
 
 A stopped agent's sentence quotes the word the parent wrote — `killed`, `cancelled` or `stopped`,
 verbatim; a failed agent's is the same sentence for `failed`, `error` and `timeout`. A result recorded
-without a time is stated without one. Today that is the case for every agent of a workflow run
-that no launch accounts for: the run's journal completes it, and its lines carry no time —
-*Completed — the workflow journal recorded the result.* The other nodes:
+without a time is stated without one — always so for the workflow journal's, whose lines carry no
+time. The other nodes:
 
 | Node | Sentence |
 |---|---|
@@ -170,8 +200,8 @@ that no launch accounts for: the run's journal completes it, and its lines carry
 | Session | Idle — inferred: the session transcript has been silent since 09:12. |
 | Session | Unknown — inferred: the session's own transcript has not been read; only its agents were. |
 | Workflow run | Running — inferred: at least one agent of this run is running. |
-| Workflow run | Failed — at least one agent of this run has a recorded failure. |
-| Workflow run | Done — every agent of this run has a recorded result. |
+| Workflow run | Done — every agent of this run has a recorded outcome, and at least one completed. |
+| Workflow run | Failed — every agent of this run has a recorded outcome, and none completed. |
 | Workflow run | Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped. |
 | Workflow run | Unknown — inferred: not every agent of this run has a recorded result, and none is running. |
 | Launch | Running — inferred: the parent recorded the launch 1 min ago and no result yet; the agent's transcript has not been seen yet. |
@@ -187,12 +217,14 @@ closes them. For an agent: type,
 models, its ID, depth, started, duration, last activity (with a live `… ago` beside it) and —
 for an agent that wrote on after its outcome — what was recorded, then turns,
 usage, fresh input, cache write 5 m and 1 h, cache read, output, reasoning and tool calls, then
-who spawned it and its workflow run. A session opens with its two figures — `Own transcript`, and
+who spawned it, its workflow run and — where the run's journal started its step more than once —
+which attempt it was. A session opens with its two figures — `Own transcript`, and
 `Agents, last 7 days` with what it is not: *not added to the own figure — the two cover different
 spans* — then its project (only while attribution allows one), its models, `Since first line`
 and `Span` in place of a start and a duration, the last activity, the counts of its own
 transcript, how many agents it has and its ID; a workflow run how many
-agents it has, the counts summed over them and its ID; a launch the type and model it asked for,
+agents it has — the ones its journal started without a counted transcript included, and how many
+it did not list — the counts summed over them and its ID; a launch the type and model it asked for,
 its ID, when it was made and who made it. Anything absent is `–`, and a record without a single
 request shows dashes, never zeros. Every row says itself how it is laid out — a figure beside its
 label, or a sentence under it across the whole width — and which row the live clock ticks in;
@@ -227,15 +259,15 @@ Everything comes from the directory Token Pace already reads for the token count
 |---|---|---|
 | `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)); a nested agent lies flat beside the one that spawned it | any text |
 | `agent-<id>.meta.json` beside each agent transcript | `agentType`, `model`, `spawnDepth`, `toolUseId` — from a file of at most 64 KB, never through a link | `description`, `prompt`, and every other field |
-| `<session>/subagents/workflows/<run>/journal.jsonl` | `type` and `agentId` of each line | the `key` and the `result` a line carries |
+| `<session>/subagents/workflows/<run>/journal.jsonl` | `type`, `key` and `agentId` at the head of each line, matched on the raw line — a line of at most 16 KB without that head is parsed for the same three, a longer one skipped and counted; the `key` is compared within the journal, never kept: with the keys of the same journal's other lines, to tell a step that was started again from a new one, and it is never stored, shown, exported or logged | the `result`, `label` and `phase` a line carries |
 | the transcript that launched an agent — the session's, or another agent's | an `Agent` (or `Task`) tool call: its `id` and three fields of its input, `subagent_type`, `model` and `run_in_background` | the input's `description` and `prompt` |
 | the same | the tool result that answers it: `agentId`, `status`, `totalTokens`, `totalDurationMs` and `totalToolUseCount`, and the `tool_use_id` it answers | its content — the prompt and the answer it also carries |
 | the same | a queued task notification, the way a background agent's end arrives: the `<tool-use-id>` and `<status>` tags inside it | its `<summary>` and its `<output-file>` |
 
-Each of those lines also gives its own time stamp, where it carries one — a journal line today
-carries none. For the agent tables nothing else is read: never a `description`, a `prompt`, a
-`summary`, an `output-file`, a `content` or a `result`, never a working directory, never any
-text. Every string that is kept is an identifier and is checked on the way in: a type or a
+Each of those lines also gives its own time stamp, where it carries one — a journal line carries
+none, so a run's last activity is its journal's modification time. For the agent tables nothing
+else is read: never a `description`, a `prompt`, a `summary`, an `output-file`, a `content`, a
+`result`, a `label` or a `phase`, never a working directory, never any text. Every string that is kept is an identifier and is checked on the way in: a type or a
 model alias is at most 40 characters of `[A-Za-z0-9_.:@/-]`, a model id from a response at most
 64 of the same, an id at most 64 characters of `[A-Za-z0-9_-]`, a depth a whole number from 1 to
 99. A value that does not fit is dropped whole rather than trimmed into a string nobody wrote,
@@ -248,23 +280,35 @@ transcript and per session transcript the ids, the agent's type and model names,
 last time, the token counts, the number of tool calls and the recorded result with the parent's
 word for it (one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`,
 `stopped`); per launch its tool-call id, the type and model it asked for, whether it runs in the
-background, its result with that word and the parent's three totals. The records are keyed by the transcript's path, as every transcript's
-read position always was. None of it is part of the CSV or JSON export, the clipboard summary or
+background, its result with that word and the parent's three totals; per workflow run the agents
+its journal started, each with the ordinal of its step, its attempt, the journal's outcome and the
+attempt that superseded it, how many further ones it did not list, and when the journal last
+changed — never a key. The records are keyed by the transcript's path, as every transcript's read
+position always was. None of it is part of the CSV or JSON export, the clipboard summary or
 the diagnostics report. The tables do not depend on `tokenPace.attribution` — see
 [Sessions and projects](sessions.md).
 
 ## Kept for seven days
 
-A record is dropped at the first roll-up **7 days** after its last line, whatever
-`tokenPace.retentionDays` says, and the tree never shows an older one. There is no setting for
+A record is dropped at the first roll-up **7 days** after its last line — a workflow run 7 days
+after its journal last changed — whatever `tokenPace.retentionDays` says, and the tree never shows
+an older one. There is no setting for
 it: the tree has nothing to show for older agents, and the snapshot would carry them along on
 every save.
 
-**The one-time rebuild.** A snapshot written before 1.5 has no agent tables. On the first start
-after the update they are rebuilt once from the Claude transcripts that changed in the last seven
-days — each read only as far as its tokens were already counted, so no token is counted twice and
-no total moves. *Re-read Token History* rebuilds them with everything else. The log states how
-much was read, in counts only.
+**The one-time rebuild.** A snapshot written before 1.5 has no agent tables, and one written
+before 1.6 no workflow runs. On the first start after the update they are rebuilt once from the
+Claude transcripts and journals that changed in the last seven days — each read only as far as its
+tokens were already counted, so no token is counted twice and no total moves. The snapshot states
+which revision of the agent tables it holds; an update that adds something only such a rebuild can
+fill in raises the revision, and the rebuild runs once more. *Re-read Token History* rebuilds them
+with everything else. The log states how much was read, in counts only.
+
+**A journal's keys after a restart.** The keys a journal's lines carry live in memory only. After
+a restart, before a journal's next lines are read, it is read once from its start up to where it
+had been read — for its keys, so a step started again after the restart is still told from a new
+one; the run it rebuilds is the one the snapshot held. A journal rewritten from the start is read
+anew, and its run's agents with it.
 
 ## Live
 

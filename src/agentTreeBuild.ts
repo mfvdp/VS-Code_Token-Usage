@@ -8,10 +8,11 @@
  * out, and nothing here reads a file or a clock. Every state is decided here and nowhere
  * else — the webview and the markdown only print it — and every state carries the sentence
  * that says what it rests on, because a "running" nobody can check is a claim, not a reading:
- *  - an agent is done, failed or stopped only when its parent (or, for done, the workflow
- *    journal) recorded it — and while its transcript did not go on more than RESUMED_AFTER_MS
- *    after the parent's record, which makes its state an inference again; a stop the parent
- *    recorded (`killed`, `cancelled`, `stopped`) is an end of its own, never a failure;
+ *  - an agent is done, failed or stopped only when its parent or its run's workflow journal
+ *    recorded it — the parent's record first, and only while its transcript did not go on more
+ *    than RESUMED_AFTER_MS after it, which makes its state an inference again; a stop the parent
+ *    recorded (`killed`, `cancelled`, `stopped`) is an end of its own, never a failure, and so is
+ *    an attempt the journal replaced by starting its step again before it recorded anything;
  *  - it is running while its transcript changed within RUNNING_WINDOW_MS and nothing was
  *    recorded yet;
  *  - anything else is unknown, never done: Claude Code writes no end marker into an agent's
@@ -39,7 +40,8 @@ import { compact, full } from './render'
 import { durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, dayOf, formatTime } from './time'
 import {
-  AgentLaunch, AgentRec, Attribution, Bucket, LaunchStatus, MainRec, RecordedOutcome, SessionRec, emptyBucket,
+  AgentLaunch, AgentRec, Attribution, Bucket, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RunRec, SessionRec,
+  emptyBucket,
 } from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
@@ -50,6 +52,11 @@ export interface AgentTreeInput {
   /** The attribution table — the only place a session's project label comes from. */
   sessions: readonly SessionRec[]
   attribution: Attribution
+  /**
+   * The workflow runs as their journals record them (1.6 D2, D7): which agents each started, and
+   * what the journal says of their ends. Absent means none.
+   */
+  runs?: readonly RunRec[]
   /** `ui.agentSelected`: the node whose details are open, or null. */
   selected: string | null
   tcfg: TimeConfig
@@ -147,6 +154,42 @@ function validLaunch(l: AgentLaunch): boolean {
 
 function validMain(m: MainRec): boolean {
   return !!m && text(m.sessionId) !== null && stampOf(m.lastTs) !== null
+}
+
+function validRun(r: RunRec): boolean {
+  return !!r && text(r.sessionId) !== null && text(r.workflowId) !== null && Array.isArray(r.agents)
+}
+
+function validJournalAgent(j: JournalAgent): boolean {
+  return !!j && typeof j === 'object' && text(j.agentId) !== null
+}
+
+/** The journal's outcome of an agent, or null: a stop is a replacement, and only ever one with the attempt that replaced it. */
+function journalOutcome(j: JournalAgent): JournalAgent['outcome'] {
+  if (j.outcome === 'completed' || j.outcome === 'failed') return j.outcome
+  return j.outcome === 'stopped' && text(j.supersededBy) !== null ? 'stopped' : null
+}
+
+/**
+ * One run's journal, as the tree reads it: its agents by id, and how many attempts each step had
+ * — the `Attempt` row names both numbers.
+ */
+interface RunView {
+  run: RunRec
+  byAgent: Map<string, JournalAgent>
+  attempts: Map<number, number>
+}
+
+function runView(run: RunRec): RunView {
+  const byAgent = new Map<string, JournalAgent>()
+  const attempts = new Map<number, number>()
+  for (const j of run.agents) {
+    if (!validJournalAgent(j) || byAgent.has(j.agentId)) continue
+    byAgent.set(j.agentId, j)
+    const step = typeof j.step === 'number' && Number.isInteger(j.step) && j.step > 0 ? j.step : 0
+    if (step > 0) attempts.set(step, (attempts.get(step) ?? 0) + 1)
+  }
+  return { run, byAgent, attempts }
 }
 
 /**
@@ -277,10 +320,11 @@ interface StateOf {
 }
 
 /**
- * A recorded end: what it was, when, by whom, and the parent's own word for it (D7) — a stop is
- * only ever an outcome with its word, since the sentence quotes it.
+ * An end the parent recorded: what it was, when, and the parent's own word for it (D7) — a stop is
+ * only ever an outcome with its word, since the sentence quotes it. The workflow journal's view
+ * of an agent is its run's (`JournalAgent`), and has no time.
  */
-type Outcome = { at: number | null; by: 'parent' | 'journal' } & Ended
+type Outcome = { at: number | null } & Ended
 
 /** An end and the word it was recorded with: a completion or a failure may lack one, a stop never does. */
 type Ended = { outcome: 'completed' | 'failed'; word: LaunchStatus | null } | { outcome: 'stopped'; word: LaunchStatus }
@@ -318,14 +362,6 @@ function outcomeState(o: Outcome, now: number, tcfg: TimeConfig): StateOf {
         : t('Failed — the parent recorded the failure at {0}.', at),
     }
   }
-  if (o.by === 'journal') {
-    return {
-      state: 'done',
-      stateText: at === null
-        ? t('Completed — the workflow journal recorded the result.')
-        : t('Completed — the workflow journal recorded the result at {0}.', at),
-    }
-  }
   return {
     state: 'done',
     stateText: at === null
@@ -344,11 +380,10 @@ function launchOutcome(l: AgentLaunch | null): Ended | null {
 }
 
 /**
- * What was recorded about an agent, and by whom. The record's own outcome first; the launch's
- * when the record has none yet — the parent may have written its result before the agent's
- * file was read. A completed workflow agent that no launch accounts for was completed by the
- * workflow journal, the only other source that records one. A stop is the parent's alone, and
- * only with its word.
+ * What the parent recorded about an agent. The record's own outcome first; the launch's when the
+ * record has none yet — the parent may have written its result before the agent's file was
+ * read. Since 1.6 a record's outcome is the parent's alone: the workflow journal's view of the
+ * agent is its run's, and `agentState` takes it after this one. A stop only with its word.
  */
 function recordedOutcome(r: AgentRec, launch: AgentLaunch | null): Outcome | null {
   const fromLaunch = launchOutcome(launch)
@@ -356,12 +391,11 @@ function recordedOutcome(r: AgentRec, launch: AgentLaunch | null): Outcome | nul
   if (r.outcome === 'completed' || r.outcome === 'failed' || r.outcome === 'stopped') {
     const own = ended(r.outcome, wordOf(r.outcomeStatus, r.outcome) ?? (same ? fromLaunch.word : null))
     if (own) {
-      const byParent = same || !(r.workflowId && r.outcome === 'completed')
       const at = stampOf(r.outcomeTs) ?? (same ? stampOf(launch?.outcomeTs) : null)
-      return { ...own, at, by: byParent ? 'parent' : 'journal' }
+      return { ...own, at }
     }
   }
-  if (fromLaunch) return { ...fromLaunch, at: stampOf(launch?.outcomeTs), by: 'parent' }
+  if (fromLaunch) return { ...fromLaunch, at: stampOf(launch?.outcomeTs) }
   return null
 }
 
@@ -372,10 +406,45 @@ function recordedOutcome(r: AgentRec, launch: AgentLaunch | null): Outcome | nul
  * is the tail of the same reply, not a new start.
  */
 function resumedAfter(o: Outcome, r: AgentRec): boolean {
-  return o.by === 'parent' && o.at !== null && r.lastTs > o.at + RESUMED_AFTER_MS
+  return o.at !== null && r.lastTs > o.at + RESUMED_AFTER_MS
 }
 
-function agentState(r: AgentRec, launch: AgentLaunch | null, now: number, tcfg: TimeConfig): StateOf {
+/**
+ * What the workflow journal recorded of an agent (D2, D7), with no time — the journal writes
+ * none: its result, its failure — retried, when the journal started the same step again — or
+ * its replacement, a start of the same step before this attempt recorded anything. `next` is the
+ * short id of the attempt that superseded it. Null when the journal recorded no end.
+ */
+function journalState(j: JournalAgent, next: string | null): StateOf | null {
+  const outcome = journalOutcome(j)
+  if (outcome === 'completed') {
+    return { state: 'done', stateText: t('Completed — the workflow journal recorded the result.') }
+  }
+  if (outcome === 'failed') {
+    return {
+      state: 'failed',
+      stateText: next !== null
+        ? t('Failed, retried — the workflow journal recorded the failure and started the same step again (agent {0}).', next)
+        : t('Failed — the workflow journal recorded the failure.'),
+    }
+  }
+  if (outcome === 'stopped' && next !== null) {
+    return {
+      state: 'stopped',
+      stateText: t('Stopped, replaced — the workflow journal started the same step again (agent {0}) before this agent recorded a result.', next),
+    }
+  }
+  return null
+}
+
+/**
+ * An agent's state: what the parent recorded — with its time, so the agent's own lines can
+ * outlive it (D6) — then what the run's journal recorded, which has no time and is never
+ * outlived; failing both, what its transcript's clock says.
+ */
+function agentState(
+  r: AgentRec, launch: AgentLaunch | null, journal: StateOf | null, now: number, tcfg: TimeConfig,
+): StateOf {
   const o = recordedOutcome(r, launch)
   const last = Math.max(r.lastTs, launch ? launch.ts : 0)
   if (o && o.at !== null && resumedAfter(o, r)) {
@@ -395,6 +464,7 @@ function agentState(r: AgentRec, launch: AgentLaunch | null, now: number, tcfg: 
     }
   }
   if (o) return outcomeState(o, now, tcfg)
+  if (journal) return journal
   if (now - last <= RUNNING_WINDOW_MS) {
     return {
       state: 'running',
@@ -411,7 +481,7 @@ function agentState(r: AgentRec, launch: AgentLaunch | null, now: number, tcfg: 
 /** A launch whose agent file was never seen: the launch time is all the activity there is. */
 function pendingState(l: AgentLaunch, now: number, tcfg: TimeConfig): StateOf {
   const o = launchOutcome(l)
-  if (o) return outcomeState({ ...o, at: stampOf(l.outcomeTs), by: 'parent' }, now, tcfg)
+  if (o) return outcomeState({ ...o, at: stampOf(l.outcomeTs) }, now, tcfg)
   if (now - l.ts <= RUNNING_WINDOW_MS) {
     return {
       state: 'running',
@@ -439,28 +509,53 @@ function sessionState(main: MainRec | null, now: number, tcfg: TimeConfig): Stat
   }
 }
 
+/** A member of a workflow run as its state rule counts it: its state, and whether a later attempt superseded it. */
+interface Member {
+  state: NodeState
+  superseded: boolean
+}
+
 /**
- * A workflow run from its agents: one running makes it running, one failure makes it failed.
- * A stop is an end too (D7): a run whose every agent ended — completed or stopped — is done
- * while one of them completed, and stopped when every one of them was stopped.
+ * A workflow run from its members (§3.0 a of the 1.6 spec) — its agents with a record, the ones
+ * its journal started without one, and the launches inside it. An attempt the journal superseded
+ * is closed, whatever its own state: it was retried. Of the others, one running makes the run
+ * running; one open — neither recorded nor running — makes it unknown; with every member closed,
+ * one completion makes it done, whatever failed beside it (the failures are the run's to show,
+ * not its end); else a failure makes it failed; else the last attempt of every step was stopped.
+ * One failure among completed agents never fails a run.
  */
-function workflowState(states: NodeState[]): StateOf {
-  if (states.includes('running')) {
+function workflowState(members: readonly Member[]): StateOf {
+  const open = members.filter((m) => !m.superseded)
+  if (open.some((m) => m.state === 'running')) {
     return { state: 'running', stateText: t('Running — inferred: at least one agent of this run is running.') }
   }
-  if (states.includes('failed')) {
-    return { state: 'failed', stateText: t('Failed — at least one agent of this run has a recorded failure.') }
+  if (members.length === 0 || open.some((m) => m.state !== 'done' && m.state !== 'failed' && m.state !== 'stopped')) {
+    return { state: 'unknown', stateText: t('Unknown — inferred: not every agent of this run has a recorded result, and none is running.') }
   }
-  if (states.length > 0 && states.every((s) => s === 'done' || s === 'stopped')) {
-    if (states.includes('done')) {
-      return { state: 'done', stateText: t('Done — every agent of this run has a recorded result.') }
-    }
-    return {
-      state: 'stopped',
-      stateText: t('Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.'),
-    }
+  if (open.some((m) => m.state === 'done')) {
+    return { state: 'done', stateText: t('Done — every agent of this run has a recorded outcome, and at least one completed.') }
   }
-  return { state: 'unknown', stateText: t('Unknown — inferred: not every agent of this run has a recorded result, and none is running.') }
+  if (open.some((m) => m.state === 'failed')) {
+    return { state: 'failed', stateText: t('Failed — every agent of this run has a recorded outcome, and none completed.') }
+  }
+  return {
+    state: 'stopped',
+    stateText: t('Stopped — every agent of this run has a recorded outcome, and none completed: the last attempt of each step was stopped.'),
+  }
+}
+
+/**
+ * The state of an agent its run's journal started but no transcript of which was counted (D2):
+ * what the journal recorded; else running while the journal changed within RUNNING_WINDOW_MS or
+ * one of the run's other members runs — the run is at work, and this one may be what it waits
+ * on —, else unknown. A member of the run, counted in its state and its count; no row of its own.
+ */
+function journalOnlyState(j: JournalAgent, run: RunRec, siblingRuns: boolean, now: number): NodeState {
+  const outcome = journalOutcome(j)
+  if (outcome === 'completed') return 'done'
+  if (outcome !== null) return outcome
+  const last = stampOf(run.lastTs)
+  return siblingRuns || (last !== null && now - last <= RUNNING_WINDOW_MS) ? 'running' : 'unknown'
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +677,14 @@ interface Entry {
   workflowId: string | null
   /** The measured counters behind `usage`, where there are any. */
   counters: Counters | null
+  /** D7: an attempt its run's journal started the same step again after. */
+  superseded: boolean
+  /**
+   * A workflow run's members its journal started and no transcript of which was counted (D2):
+   * counted in the run's state and in every agent count above it, with no row of their own
+   * (their collector comes with D4). Empty for every other node.
+   */
+  journalOnly: JournalAgent[]
   /** Built on demand: only the selected node's rows are ever needed. */
   rows: () => DetailRow[]
 }
@@ -592,6 +695,8 @@ interface RootAcc {
   main: MainRec | null
   agents: AgentRec[]
   pendings: AgentLaunch[]
+  /** Its workflow runs as their journals record them, by run id. */
+  runs: Map<string, RunView>
 }
 
 interface Forest {
@@ -634,6 +739,16 @@ function attach(child: Entry, parent: Entry): void {
 
 function isAgentLike(e: Entry): boolean {
   return e.kind === 'agent' || e.kind === 'pending'
+}
+
+/** The agents and launches below a node, its runs' journal-only members included — what its count says. */
+function membersBelow(e: Entry): number {
+  let n = 0
+  for (const x of preorder(e)) {
+    if (x !== e && isAgentLike(x)) n++
+    n += x.journalOnly.length
+  }
+  return n
 }
 
 /**
@@ -725,12 +840,27 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
   const accFor = (sessionId: string): RootAcc => {
     let a = accs.get(sessionId)
     if (!a) {
-      a = { sessionId, main: null, agents: [], pendings: [] }
+      a = { sessionId, main: null, agents: [], pendings: [], runs: new Map() }
       accs.set(sessionId, a)
     }
     return a
   }
   for (const r of recById.values()) accFor(r.sessionId).agents.push(r)
+  // A run is in the tree while its journal changed within the retention, or while one of its
+  // agents' records is: the journal's view of those agents joins them by id.
+  const recordedRuns = new Set<string>()
+  for (const r of recById.values()) {
+    const wf = text(r.workflowId)
+    if (wf !== null) recordedRuns.add(`${r.sessionId}|${wf}`)
+  }
+  for (const run of input.runs ?? []) {
+    if (!validRun(run)) continue
+    const key = `${run.sessionId}|${run.workflowId}`
+    const last = stampOf(run.lastTs)
+    if (!recordedRuns.has(key) && (last === null || last < since)) continue
+    const acc = accFor(run.sessionId)
+    if (!acc.runs.has(run.workflowId)) acc.runs.set(run.workflowId, runView(run))
+  }
   // The session a launch belongs to: its agent's, when an agent launched it, else its file's.
   const sessionOfLaunch = (file: string): string | null => {
     const id = agentIdOf(file)
@@ -751,7 +881,8 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
   const roots: Entry[] = []
   for (const a of accs.values()) {
     const recent = a.main !== null && a.main.lastTs >= now - ROOT_WINDOW_MS
-    if (!recent && a.agents.length === 0 && a.pendings.length === 0) continue
+    const journalled = [...a.runs.values()].some((v) => v.byAgent.size > 0)
+    if (!recent && a.agents.length === 0 && a.pendings.length === 0 && !journalled) continue
     const root = buildRoot(a, {
       now, tcfg, attribution: input.attribution, project: projects.get(a.sessionId) ?? null, launchOf,
     })
@@ -801,6 +932,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     waiting: false,
     workflowId: null,
     counters: mainCounters,
+    superseded: false,
+    journalOnly: [],
     rows: () => [],
   }
   root.rows = () => [
@@ -815,7 +948,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     { label: t('Models'), value: modelsOf(main?.models).join(', ') || '–' },
     ...timeRows(root.startTs, root.lastTs, now, tcfg, true),
     ...countRows(mainCounters),
-    { label: t('Agents'), value: full([...preorder(root)].filter(isAgentLike).length) },
+    { label: t('Agents'), value: full(membersBelow(root)) },
     idRow(a.sessionId),
   ]
 
@@ -842,6 +975,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         waiting: false,
         workflowId: wf,
         counters: null,
+        superseded: false,
+        journalOnly: [],
         rows: () => [],
       }
       attach(w, root)
@@ -851,8 +986,19 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   }
 
   const ordered = [...a.agents].sort((x, y) => firstOf(x) - firstOf(y) || cmp(x.agentId, y.agentId))
-  // D11: per session, as few characters of each id as keep it apart from the others.
-  const shortIds = shortIdsOf(a.agents.map((r) => r.agentId))
+  // D11: per session, as few characters of each id as keep it apart from the others — the agents
+  // its runs' journals started without a record included, since a sentence names an attempt
+  // that superseded another by its short id, and that attempt may have no record yet.
+  const journalIds: string[] = []
+  for (const v of a.runs.values()) {
+    for (const j of v.byAgent.values()) {
+      journalIds.push(j.agentId)
+      const next = text(j.supersededBy)
+      if (next !== null) journalIds.push(next)
+    }
+  }
+  const shortIds = shortIdsOf([...a.agents.map((r) => r.agentId), ...journalIds])
+  const shortOf = (id: string): string => shortIds.get(id) ?? id
   const byAgent = new Map<string, Entry>()
   const spawnerFileOf = new Map<Entry, string | null>()
   /** Who launched a node, by name: an agent of this session, the session itself, or '–'. */
@@ -872,11 +1018,17 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     const type = text(r.meta?.agentType) ?? text(launch?.typeHint)
     const alias = text(r.meta?.model) ?? text(launch?.modelHint)
     const lastModel = models.length > 0 ? normalizeModel(models[models.length - 1]) : ''
-    const st = agentState(r, launch, now, tcfg)
+    // The journal's view of a run's agent, joined by id within its run (D2, D7).
+    const view = wf !== null ? a.runs.get(wf) ?? null : null
+    const journal = view?.byAgent.get(r.agentId) ?? null
+    const next = journal !== null ? text(journal.supersededBy) : null
+    const st = agentState(r, launch, journal ? journalState(journal, next !== null ? shortOf(next) : null) : null, now, tcfg)
+    const step = journal !== null && typeof journal.step === 'number' && Number.isInteger(journal.step) ? journal.step : 0
+    const attempts = step > 0 ? view?.attempts.get(step) ?? 0 : 0
     const e: Entry = {
       key: fitKey('a:', r.agentId),
       kind: 'agent',
-      label: `${type ?? t('Agent')} · ${lastModel || alias || '–'} · ${shortIds.get(r.agentId) ?? r.agentId}`,
+      label: `${type ?? t('Agent')} · ${lastModel || alias || '–'} · ${shortOf(r.agentId)}`,
       sub: null,
       state: st.state,
       stateText: st.stateText,
@@ -892,6 +1044,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       waiting: false,
       workflowId: wf,
       counters: c,
+      superseded: next !== null,
+      journalOnly: [],
       rows: () => [],
     }
     e.rows = () => [
@@ -904,6 +1058,10 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       ...countRows(c),
       { label: t('Spawned by'), value: spawnedBy(spawnerFileOf.get(e) ?? null) },
       { label: t('Workflow run'), value: wf !== null ? workflowLabel(wf) : '–' },
+      // D7: which attempt at its step this agent is, where the journal started the step more than once.
+      ...(attempts >= 2 && journal !== null && Number.isInteger(journal.attempt) && journal.attempt >= 1
+        ? [{ label: t('Attempt'), value: t('{0} of {1} of this step', full(journal.attempt), full(attempts)) }]
+        : []),
       ...reportRows(launch),
     ]
     byAgent.set(r.agentId, e)
@@ -950,6 +1108,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       waiting: false,
       workflowId: null,
       counters: null,
+      superseded: false,
+      journalOnly: [],
       rows: () => [
         { label: t('Type'), value: text(l.typeHint) ?? '–' },
         { label: t('Models'), value: text(l.modelHint) ?? '–' },
@@ -981,14 +1141,18 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   }
   let anyRunning = false
   for (const c of root.children) if (rollUp(c)) anyRunning = true
-  // A session whose agents do the work while its own transcript waits is in use all the same.
-  if (anyRunning && root.state !== 'active') {
-    root.state = 'active'
-    root.stateText = t('Active — inferred: an agent of this session is running.')
+
+  // The agents a run's journal started whose transcript no record holds (D2): members of the run
+  // all the same. A run with nothing but such members is a run of the session too.
+  for (const [wf, view] of a.runs) {
+    const recorded = new Set(a.agents.filter((r) => text(r.workflowId) === wf).map((r) => r.agentId))
+    const only = [...view.byAgent.values()].filter((j) => !recorded.has(j.agentId))
+    if (only.length === 0) continue
+    workflowOf(wf).journalOnly = only
   }
 
   // A run is summed from the agents inside it, on the whole tree: the cap below may hide some
-  // of them, but it does not change what the run used.
+  // of them, but it does not change what the run used. Its state is its members' (§3.0 a).
   for (const [wf, w] of workflows) {
     const members = [...preorder(w)].filter(isAgentLike)
     const sum = noCounters()
@@ -999,7 +1163,13 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       if (m.startTs !== null && (first === null || m.startTs < first)) first = m.startTs
       if (m.lastTs !== null && (last === null || m.lastTs > last)) last = m.lastTs
     }
-    const st = workflowState(members.map((m) => m.state))
+    const run = a.runs.get(wf)?.run ?? null
+    const siblingRuns = members.some((m) => m.state === 'running')
+    const only: Member[] = run === null ? [] : w.journalOnly.map((j) => ({
+      state: journalOnlyState(j, run, siblingRuns, now), superseded: text(j.supersededBy) !== null,
+    }))
+    if (only.some((m) => m.state === 'running')) anyRunning = true
+    const st = workflowState([...members.map((m) => ({ state: m.state, superseded: m.superseded })), ...only])
     w.state = st.state
     w.stateText = st.stateText
     w.counters = sum
@@ -1008,12 +1178,25 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     w.startTs = first
     w.lastTs = last
     w.duration = first !== null && last !== null ? durationText(last - first) : '–'
+    const dropped = run !== null && typeof run.agentsDropped === 'number' && Number.isInteger(run.agentsDropped)
+      && run.agentsDropped > 0 ? run.agentsDropped : 0
+    const agentsRow: DetailRow = dropped > 0
+      ? {
+        label: t('Agents'), value: full(members.length + only.length),
+        note: t('{0} further agents not listed', full(dropped)), kind: 'sentence',
+      }
+      : { label: t('Agents'), value: full(members.length + only.length) }
     w.rows = () => [
-      { label: t('Agents'), value: full(members.length) },
+      agentsRow,
       ...timeRows(w.startTs, w.lastTs, now, tcfg),
       ...countRows(sum),
       idRow(wf),
     ]
+  }
+  // A session whose agents do the work while its own transcript waits is in use all the same.
+  if (anyRunning && root.state !== 'active') {
+    root.state = 'active'
+    root.stateText = t('Active — inferred: an agent of this session is running.')
   }
 
   for (const e of preorder(root)) e.children.sort(byStart)
@@ -1086,8 +1269,9 @@ function detailsOf(e: Entry): NodeDetails {
  */
 function agentCounts(roots: Entry[]): Map<Entry, number> {
   const out = new Map<Entry, number>()
+  // A run's journal-only members (D2) count where its drawn agents do.
   const count = (e: Entry): number => {
-    let n = 0
+    let n = e.journalOnly.length
     for (const c of e.children) n += count(c) + (isAgentLike(c) ? 1 : 0)
     out.set(e, n)
     return n
@@ -1190,6 +1374,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     startTs: e.startTs,
     lastTs: e.lastTs,
     agentCount: counts.get(e) ?? 0,
+    superseded: e.superseded,
     children: e.children.filter((c) => kept.has(c)).map(toNode),
   })
 

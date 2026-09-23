@@ -1342,6 +1342,7 @@ export function buildViewModel(input: VmInput): ViewModel {
       agents: agg.agents(),
       launches: agg.launches(),
       mains: agg.mains(),
+      runs: agg.runs(),
       sessions: agg.sessions(),
       attribution: cfg.attribution,
       selected: ui.agentSelected ?? null,

@@ -86,7 +86,8 @@ drawn under 4 px tall, which the ring would cover whole: it keeps its pattern or
 alone, the dots of `other` in its middle. Two colours cannot carry the providers' hues, so there
 the provider is told by the legend's headings, the band's tooltip and the order of the bands in a
 column. The value labels over the columns and the dates under them are thinned to the width a
-column actually has — every second, third or sixth one where they would crowd, each column's total
+column actually has — only every n-th one where they would crowd (over 30 days every third value and
+every fourth date in a 420 px sidebar, every seventh and every eighth at 260 px), each column's total
 still in its tooltip — and fitted again when the sidebar is resized and when a folded chart section is
 opened. The cost line, when switched on, runs through the column centres over a halo in the page
 background, with a dot per column, on its own axis.

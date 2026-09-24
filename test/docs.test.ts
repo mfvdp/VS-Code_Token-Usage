@@ -2169,9 +2169,13 @@ test('the 1.7.0 release notes: the newest entry, in the order a store page reads
 test('docs/dashboard.md says the chart\'s labels are thinned to the width a column has, also when a folded section is opened, as the page\'s one toggle listener does (1.8 L-6)', () => {
   const dash = doc.dashboard.replace(/\s+/g, ' ')
   for (const claim of ['The value labels over the columns and the dates under them are thinned to the width a column actually has',
-    'each column\'s total still in its tooltip', 'fitted again when the sidebar is resized and when a folded chart section is opened']) {
+    'each column\'s total still in its tooltip', 'fitted again when the sidebar is resized and when a folded chart section is opened',
+    // 1.8 Review 1: the step is the column width's (fitChart: 30 px a value, 34 px a date) — over the default
+    // 30 days the harness measures every 3rd value and 4th date at 420 px, every 7th and 8th at 260 px.
+    'only every n-th one where they would crowd (over 30 days every third value and every fourth date in a 420 px sidebar, every seventh and every eighth at 260 px)']) {
     assert.ok(dash.includes(claim), 'docs/dashboard.md does not say: ' + claim)
   }
+  assert.equal(dash.includes('every second, third or sixth one'), false, 'docs/dashboard.md names steps the fit does not take')
   const src = readDoc('src/webview/main.ts')
   assert.ok(src.includes("document.addEventListener('toggle', () => { if (vm) applyFits(); }, true);"), 'opening a section no longer runs every fit: say it in the docs')
   assert.ok(src.includes("window.addEventListener('resize', () => { if (vm) applyFits(); });"), 'a resize no longer runs every fit: say it in the docs')

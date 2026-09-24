@@ -7160,6 +7160,20 @@ test('the page never reads the host\'s budgets: the webview source and the shipp
   assert.equal(/allBudgets/.test(SCRIPT), false, 'the shipped script names allBudgets')
 })
 
+test('the host holds back exactly the sections the page leaves out: CLAUDE_ONLY_KEYS is the page\'s CLAUDE_ONLY_SECTIONS (1.8 L-1, Review 1)', () => {
+  // A key the host held back that the page still drew would leave that section stale under Codex;
+  // a key the page leaves out that the host still pushed would cost the bytes L-1 saves.
+  const list = (text: string, re: RegExp): string[] => {
+    const m = re.exec(text)
+    assert.ok(m, String(re))
+    return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1])
+  }
+  const host = list(readFileSync(join(__dirname, '..', 'src', 'dashboard.ts'), 'utf8'), /const CLAUDE_ONLY_KEYS: readonly string\[\] = \[([^\]]*)\]/)
+  const page = list(SOURCE, /const CLAUDE_ONLY_SECTIONS = \[([^\]]*)\];/)
+  assert.deepEqual(host, page)
+  assert.deepEqual(host, ['agents', 'context'])
+})
+
 
 // 1.6 N6 (pinned and changed): 1.5 let a name wrap between its parts; a row is two lines now, so the
 // name is one — no part of it wraps. 1.6 P7b (pinned and changed, the lead's call: P7 let the first

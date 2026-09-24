@@ -21,8 +21,9 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
-import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from '../src/agentTree'
-import { setBundle, setLocale } from '../src/i18n'
+import { EARLIER_KEY, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from '../src/agentTree'
+import { tallySpoken, tallyText } from '../src/agentTreeBuild'
+import { setBundle, setLocale, t } from '../src/i18n'
 import { agentTreeFor, buildViewModel, parseWebviewMessage } from '../src/viewModel'
 import { AGENT_WORLD, agentNode as agentNodeOf, agentWorld, everyParent, treeNodes } from './fixtures/agentWorld'
 import { NOW, makeConfig, makeInput } from './fixtures/viewFixtures'
@@ -5181,7 +5182,7 @@ test('the tree\'s keys: the arrows, Home and End move the focus, → and ← ope
  * A fake tree for the keyboard tests: items with the attributes agentNode writes, each with its
  * three targets of the mouse, and what focus() and setAttribute() do to them recorded.
  */
-function fakeTree(spec: Array<{ key?: string; more?: string; level: number; expanded?: boolean; control?: boolean }>, focused: string[]) {
+function fakeTree(spec: Array<{ key?: string; more?: string; level: number; expanded?: boolean; control?: boolean; row?: string }>, focused: string[]) {
   const tree: Record<string, unknown> = {}
   const items = spec.map((x) => {
     const attrs: Record<string, string> = { role: 'treeitem', 'aria-level': String(x.level), tabindex: '-1' }
@@ -5196,7 +5197,8 @@ function fakeTree(spec: Array<{ key?: string; more?: string; level: number; expa
     }
     const target = (act: string): Record<string, unknown> => ({ tagName: 'SPAN', dataset: { act, key: x.more ?? x.key } })
     li.querySelector = (q: string) => (q === ':scope > .ag-line > .ag-fold' && x.expanded !== undefined ? target('agentToggle')
-      : q === ':scope > .ag-line > .ag-row' && x.more === undefined ? target('agentSelect')
+      // 1.7 F2: the group of earlier sessions' row opens and closes it (`row: 'agentToggle'`).
+      : q === ':scope > .ag-line > .ag-row' && x.more === undefined ? target(x.row ?? 'agentSelect')
         : q === ':scope > .ag-line > .ag-more' && x.more !== undefined ? (x.control === false ? { dataset: {} } : target('agentMore')) : null)
     li.closest = (q: string) => (q === '.agtree' ? tree : q === 'li[role="treeitem"]' ? li : null)
     return li
@@ -5620,6 +5622,9 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     idle: 'idle session',
   }
   for (const n of nodes) {
+    // 1.7 F2: the group of earlier sessions (the quiet session's) is a container with no state — its
+    // row is checked on its own below.
+    if (n.kind === 'group') continue
     const row = rowIn(n.key)
     // The state the builder decided, and whether it inferred it or found it recorded.
     // 1.6 D7: an attempt the journal superseded says why its row is dimmed.
@@ -5677,19 +5682,39 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   // row shows one — its tally; its figures its description. One of them is the stop of the Tab key.
   const reKey = (k: string): string => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const walk = (list: typeof vm.agents.roots, level: number, size: number): void => list.forEach((n, i) => {
+    // 1.7 F2: the group of earlier sessions is nothing to select — no `aria-selected` — and its name
+    // is its words and its sessions' tally, no state.
+    const group = n.kind === 'group'
     const m = new RegExp('<li role="treeitem" class="ag-k-' + n.kind + '(?: ag-sup)?" data-key="' + reKey(n.key)
       + '" tabindex="(0|-1)" aria-level="(\\d+)" aria-setsize="(\\d+)" aria-posinset="(\\d+)"( aria-expanded="(?:true|false)")?'
-      + ' aria-selected="false" aria-label="([^"]*)" aria-describedby="agf-' + reKey(n.key) + '">').exec(h)
+      + (group ? '' : ' aria-selected="false"') + ' aria-label="([^"]*)"' + (group ? '' : ' aria-describedby="agf-' + reKey(n.key) + '"') + '>').exec(h)
     assert.ok(m, 'no item for ' + n.key)
     const said = (n.derived ? words[n.state] + ', derived' : words[n.state] + ', recorded') + (n.superseded ? ', superseded by a later attempt' : '')
     const tally = n.tallyText !== null && n.kind !== 'agent' ? ', ' + n.tallySpoken : ''
     assert.deepEqual([m[2], m[3], m[4], !!m[5], m[6]], [String(level), String(size), String(i + 1), n.hasChildren,
-      n.fullLabel + (n.sub ? ' · ' + n.sub : '') + ', ' + said + tally], n.key)
+      group ? n.fullLabel + tally : n.fullLabel + (n.sub ? ' · ' + n.sub : '') + ', ' + said + tally], n.key)
     walk(n.children, level + 1, n.childrenTotal)
   })
   walk(vm.agents.roots, 1, vm.agents.roots.length)
   assert.equal(h.split('tabindex="0"').length - 1, 1, h)
   assert.ok(h.indexOf('<li role="treeitem" class="ag-k-session" data-key="' + vm.agents.roots[0].key + '" tabindex="0"') >= 0, h)
+  // 1.7 F2: the quiet session is an earlier one — in the one group of earlier sessions, the tree's
+  // last root, opened here with every other parent. Its row opens and closes it (agentToggle, never
+  // agentSelect), its glyph column is kept with nothing drawn in it, its name is its words, and its
+  // second line is what its sessions' agents came to and nothing else.
+  const groups = nodes.filter((n) => n.kind === 'group')
+  assert.deepEqual(groups.map((n) => n.key), [EARLIER_KEY])
+  assert.equal(vm.agents.roots[vm.agents.roots.length - 1].key, EARLIER_KEY)
+  const g = groups[0]
+  assert.deepEqual([g.label, g.children.map((c) => c.kind)], ['Earlier sessions (1)', ['session']])
+  const gAt = h.indexOf('<span class="ag-row" data-act="agentToggle" data-key="' + EARLIER_KEY + '" data-pressed="false">'
+    + '<span class="ag-st ag-none" aria-hidden="true"></span><span class="ag-text">')
+  assert.ok(gAt >= 0, h)
+  const gRow = h.slice(gAt, h.indexOf('</div>', gAt))
+  assert.ok(gRow.indexOf(olbl(g.fullLabel, g.label)) >= 0, gRow)
+  assert.ok(gRow.indexOf(figs(...(g.tallyText !== null ? tallyFigs(g as unknown as Record<string, unknown>) : ['–'])) + '</span></span>') >= 0, gRow)
+  assert.equal(gRow.indexOf('role="img"'), -1, gRow)
+  assert.equal(h.indexOf('data-act="agentSelect" data-key="' + EARLIER_KEY + '"'), -1, h)
   assert.ok(nodes.some((n) => (n.kind === 'session' || n.kind === 'workflow') && n.startClock !== null && n.tallyText !== null))
   assert.ok(nodes.some((n) => n.kind === 'agent' && n.tallyText !== null), 'the world has an agent with agents below it')
   // The payload carries the flag and its reason (1.6 D10); the shipped page marks the rows (P7) and
@@ -5797,14 +5822,21 @@ test('the running list the view model builds reaches the page first, the tree cl
   }
   assert.equal(items.find((r) => r.kind === 'pending')?.usage, '–')
   assert.equal(items.find((r) => r.kind === 'noreply')?.usage, '–')
-  // The tree under it holds the two sessions and nothing else, each saying what its agents came to
+  // The tree under it holds the busy session and — 1.7 F2 (pinned and changed) — the closed group of
+  // earlier sessions, the quiet one inside it, and nothing else, each saying what its agents came to
   // — the payload carries nothing below them (1.6 D3), and each keeps its toggle.
+  assert.deepEqual(vm.agents.roots.map((r) => r.kind), ['session', 'group'])
   assert.ok(vm.agents.roots.every((r) => r.children.length === 0 && r.hasChildren && r.childrenMore === 0))
   const tree = treePart(h)
-  assert.deepEqual([...tree.matchAll(/data-act="agentSelect" data-key="([^"]*)"/g)].map((m) => m[1]),
+  assert.deepEqual([...tree.matchAll(/data-act="agent(?:Select|Toggle)" data-key="([^"]*)" data-pressed/g)].map((m) => m[1]),
     vm.agents.roots.map((r) => r.key))
   for (const r of vm.agents.roots) {
     assert.equal(r.tally?.started, r.agentCount, r.label)
+    // The group: its sessions' tally is its whole second line.
+    if (r.kind === 'group') {
+      assert.ok(tree.indexOf(figs(...tallyFigs(r as unknown as Record<string, unknown>)) + '</span></span>') >= 0, r.label)
+      continue
+    }
     // 1.6 P7b: the tally, then the span — the line's last part — and the line's end.
     const mid = tallyFigs(r as unknown as Record<string, unknown>).map((x) => '<span class="ag-fp">' + SEP + x + '</span>').join('')
     assert.ok(tree.indexOf(mid + '<span class="ag-fp">' + SEP + fig('<span title="span from the first to the last line">' + r.duration
@@ -7212,4 +7244,112 @@ test('the quota name keeps its nowrap alone, and the running dot never fades bel
   assert.equal(/(^|\n)\.row > \.name \{ white-space: nowrap; \}/.test(STYLE), false, 'the rule reaches every card again')
   assert.match(STYLE, /@keyframes ag-pulse \{ 50% \{ opacity: \.7; \} \}/)
   assert.match(STYLE, /@media \(prefers-reduced-motion: no-preference\) \{\n {2}\.ag-running::before \{ animation: ag-pulse/)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 F2 · the group of earlier sessions on the page
+// ---------------------------------------------------------------------------
+
+/** 1.7 F2: the group of earlier sessions as the view model sends it — five sessions, 23 agents, closed. */
+function earlierNode(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const tally = { started: 23, done: 20, failed: 3, retried: 0, stopped: 0, running: 0, unknown: 0 }
+  return treeNode(EARLIER_KEY, 'idle', {
+    kind: 'group', label: 'Earlier sessions (5)', fullLabel: 'Earlier sessions (5)', usage: '–', usageAgents: null, duration: '–',
+    startTs: null, startClock: null, lastTs: AG_NOW - 3_600_000, lastClock: '11:00', agentCount: 23,
+    hasChildren: true, childrenTotal: 5, tally, tallyText: tallyText(tally), tallySpoken: tallySpoken(tally), ...over,
+  })
+}
+
+test('1.7 F2: the group of earlier sessions is the last root — a toggle for a row, its glyph column empty, its name its words and its tally', () => {
+  const a = agentCtx()
+  const tree = agentTree()
+  const roots = [...(tree.roots as Array<Record<string, unknown>>).slice(0, 1), earlierNode()]
+  const h = treePart(agentsHtml(a, { agents: agentTree({ roots }) }))
+  // The item: the group's class, closed, level 1, the last of the two roots, no aria-selected (it is
+  // nothing to select), and its name its words and the tally in words — no state words.
+  // Its figures' line is its tally, which its name says in words already: no description either.
+  const groupTag = (o: Parameters<typeof itemTag>[1]): string => itemTag(EARLIER_KEY, o)
+    .replace(' aria-selected="false"', '').replace(' aria-describedby="agf-' + EARLIER_KEY + '"', '')
+  const item = groupTag({ kind: 'group', size: 2, pos: 2, expanded: false, label: 'Earlier sessions (5), 23 started, 20 done, 3 failed' })
+  assert.ok(h.indexOf(item) >= 0, h)
+  assert.equal(/data-key="g:earlier"[^>]*aria-(selected|describedby)/.test(h), false, h)
+  // Its line: the fold, then the row — which opens and closes it, never selects it — with the glyph
+  // column kept and nothing in it, the name in one part, and the tally alone on the second line.
+  const line = h.slice(h.indexOf(item) + item.length, h.indexOf('</div>', h.indexOf(item)))
+  assert.equal(line, '<div class="ag-line">' + foldOf(EARLIER_KEY)
+    + '<span class="ag-row" data-act="agentToggle" data-key="' + EARLIER_KEY + '" data-pressed="false">'
+    + '<span class="ag-st ag-none" aria-hidden="true"></span><span class="ag-text">' + olbl('Earlier sessions (5)', 'Earlier sessions (5)')
+    + figs(...tallyFigs({ tallyText: '23 started · 20 ✓ · 3 ✕' })) + '</span></span>')
+  assert.equal(h.indexOf('data-act="agentSelect" data-key="' + EARLIER_KEY + '"'), -1)
+  // No state glyph, no state class, no state words.
+  assert.equal(line.indexOf('role="img"'), -1, line)
+  assert.equal(/ag-idle|idle session|derived/.test(line), false, line)
+  // None of its sessions has an agent: a dash on its second line, never "0 started".
+  const bare = treePart(agentsHtml(a, { agents: agentTree({ roots: [earlierNode({ tally: null, tallyText: null, tallySpoken: null, agentCount: 0 })] }) }))
+  assert.ok(bare.indexOf(figs('–') + '</span></span>') >= 0, bare)
+  assert.ok(bare.indexOf('aria-label="Earlier sessions (5)">') >= 0, bare)
+  assert.equal(/\b0 started/.test(bare), false, bare)
+  // Opened: its sessions one level in, counted among the group's own.
+  const kids = [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', usage: '–', duration: '–', startClock: '2026-09-21 09:00' })]
+  const open = treePart(agentsHtml(a, { agents: agentTree({ roots: [earlierNode({ children: kids })] }), ui: agentUi({ agentsExpanded: [EARLIER_KEY] }) }))
+  assert.ok(open.indexOf(groupTag({ kind: 'group', tab: true, size: 1, pos: 1, expanded: true,
+    label: 'Earlier sessions (5), 23 started, 20 done, 3 failed' })) >= 0, open)
+  assert.ok(open.indexOf('<ul role="group">' + itemTag(AK.s2, { kind: 'session', level: 2, size: 5, pos: 1,
+    label: 'Session Mon 09:00 · 1234abcd, idle session, derived' })) >= 0, open)
+  // A payload that names it as the selection gets no panel under it.
+  const sel = agentsHtml(a, { agents: agentTree({ roots: [earlierNode()], selected: { key: EARLIER_KEY, title: 'x', state: 'idle', derived: true,
+    stateText: 'x', lastTs: null, overview: null, id: null, rows: [] } }), ui: agentUi({ agentSelected: EARLIER_KEY }) })
+  assert.equal(sel.indexOf('ag-details'), -1, sel)
+  // The stylesheet keeps the empty column's width and draws a space that says nothing.
+  assert.match(STYLE, /\.ag-none::before \{ content: "\\00a0" \/ ""; \}/)
+})
+
+test('1.7 F2: a click on the group\'s row and Enter on its item post agentToggle for it — never agentSelect', () => {
+  const a = agentCtx()
+  a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['agents'],
+    agents: agentTree({ roots: [...(agentTree().roots as Array<Record<string, unknown>>), earlierNode()] }), ui: agentUi() }) } })
+  a.posted.length = 0
+  const event = (el: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> =>
+    ({ target: { closest: () => el }, stopPropagation: () => undefined, preventDefault: () => undefined, ...extra })
+  // The row's target as the page draws it: data-act="agentToggle", the group's key.
+  a.fire('document:click', event({ tagName: 'SPAN', dataset: { act: 'agentToggle', key: EARLIER_KEY } }))
+  // The keyboard: Enter and Space on the group's item go through its row — which toggles; → opens it,
+  // ← on it open closes it (1.6 L1, as on every parent).
+  const focused: string[] = []
+  const { items } = fakeTree([
+    { key: AK.s1, level: 1, expanded: false }, { key: EARLIER_KEY, level: 1, expanded: false, row: 'agentToggle' },
+  ], focused)
+  const key = (i: number, k: string): void => a.fire('document:keydown', { key: k, target: items[i], preventDefault: () => undefined, stopPropagation: () => undefined })
+  key(1, 'Enter'); key(1, ' '); key(1, 'ArrowRight')
+  const opened = fakeTree([{ key: AK.s1, level: 1, expanded: false }, { key: EARLIER_KEY, level: 1, expanded: true, row: 'agentToggle' },
+    { key: AK.s2, level: 2, expanded: false }], focused)
+  a.fire('document:keydown', { key: 'ArrowLeft', target: opened.items[1], preventDefault: () => undefined })
+  a.fire('document:keydown', { key: 'ArrowRight', target: opened.items[1], preventDefault: () => undefined })
+  a.fire('document:keydown', { key: 'End', target: opened.items[0], preventDefault: () => undefined })
+  const toggle = { type: 'agentToggle', key: EARLIER_KEY }
+  assert.deepEqual(a.posted, [toggle, toggle, toggle, toggle, toggle])
+  // → on the open group moves into it, End onto the last item; nothing is selected.
+  assert.deepEqual(focused, [AK.s2, AK.s2])
+  for (const m of a.posted) assert.deepEqual(parseWebviewMessage(m), m)
+})
+
+test('1.7 F2: the group\'s words on a German page are the view model\'s — „Frühere Sitzungen (5), 23 gestartet, 20 fertig, 3 fehlgeschlagen"', () => {
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const tally = { started: 23, done: 20, failed: 3, retried: 0, stopped: 0, running: 0, unknown: 0 }
+  let label = ''
+  let spoken = ''
+  let shown = ''
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    label = t('Earlier sessions ({0})', '5')
+    spoken = tallySpoken(tally)
+    shown = tallyText(tally)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.deepEqual([label, spoken], ['Frühere Sitzungen (5)', '23 gestartet, 20 fertig, 3 fehlgeschlagen'])
+  const h = treePart(agentsHtml(agentCtx(), { agents: agentTree({ roots: [earlierNode({ label, fullLabel: label, tallyText: shown, tallySpoken: spoken })] }) }))
+  assert.ok(h.indexOf('aria-label="Frühere Sitzungen (5), 23 gestartet, 20 fertig, 3 fehlgeschlagen"') >= 0, h)
 })

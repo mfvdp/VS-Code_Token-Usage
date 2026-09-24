@@ -148,6 +148,7 @@
   "Drill-down {0}": "Detailansicht {0}",
   "Duration": "Dauer",
   "Each of them is the documented exchange format (schema_version 1) other tools read, so a\npanel, a shell prompt and this extension can share one fetch instead of three.": "Jede davon ist das dokumentierte Austauschformat (schema_version 1), das andere Werkzeuge lesen,\nsodass ein Panel, ein Shell-Prompt und diese Erweiterung sich einen Abruf statt dreier teilen.",
+  "Earlier sessions ({0})": "Frühere Sitzungen ({0})",
   "Effort": "Effort",
   "Empty response (fail_count {0})": "Leere Antwort (fail_count {0})",
   "Ended on a rejected request": "Endete mit abgelehnter Anfrage",

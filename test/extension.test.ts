@@ -32,7 +32,7 @@ import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
 } from './helpers/fakeVscode'
 // Shapes and constants only: agentTree.ts imports nothing, so loading it early reads no setting.
-import { AgentTreeVm, emptyAgentTree, TreeNode } from '../src/agentTree'
+import { AgentTreeVm, EARLIER_KEY, emptyAgentTree, TreeNode } from '../src/agentTree'
 // Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`, and
 // `lazy` for the modules below it.
 import type { TokenPaceApi } from '../src/extension'
@@ -1747,6 +1747,42 @@ test('the poll is wanted while an agent runs or a session is active, and never f
     false, 'an active state below the roots')
 })
 
+test('1.7 F2: the poll reads the active sessions, which are all roots — the group of earlier sessions never wants it', () => {
+  const { ext } = lazy()
+  const node = (over: Partial<TreeNode>): TreeNode => ({
+    key: 'a:0', kind: 'agent', label: 'Agent', fullLabel: 'Agent', startClock: null, lastClock: null, sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
+    lowerBound: false, lowerBoundText: null, duration: '–', startTs: null, lastTs: null, silence: false, hookWait: null, agentCount: 0, hasChildren: false, childrenTotal: 0,
+    childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
+  })
+  const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
+  const idle = node({ key: 's:1', kind: 'session', state: 'idle', derived: true, hasChildren: true, childrenTotal: 1, children: [node({})] })
+  const group = (children: TreeNode[]): TreeNode => node({ key: EARLIER_KEY, kind: 'group', label: 'Earlier sessions (1)', fullLabel: 'Earlier sessions (1)',
+    state: 'idle', derived: true, hasChildren: true, childrenTotal: children.length, children })
+  // The group closed or open, alone: nothing is active, nothing runs — no poll.
+  assert.equal(ext.agentPollWanted(tree([group([])])), false, 'a closed group of earlier sessions')
+  assert.equal(ext.agentPollWanted(tree([group([idle])])), false, 'an open one')
+  // An active session beside it: the poll, as in 1.6.
+  assert.equal(ext.agentPollWanted(tree([node({ key: 's:2', kind: 'session', state: 'active' }), group([idle])])), true)
+  // What runs is counted on every root, the group's sessions included — none of which runs.
+  assert.equal(ext.agentPollWanted(tree([group([idle])], 1)), true)
+  // The real builder's tree: an active session and an idle one, the idle one in the group — the
+  // poll wanted for the active one alone; the idle one alone, not.
+  const { buildAgentTree } = require('../src/agentTreeBuild') as typeof import('../src/agentTreeBuild')
+  const now = Date.UTC(2026, 8, 24, 12, 0, 0)
+  const main = (sessionId: string, lastTs: number) => ({
+    source: 'claude' as const, sessionId, firstTs: lastTs - 3_600_000, lastTs, models: [], input: 1, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
+    output: 1, reasoning: 0, requests: 1, outputFinal: 1, toolCalls: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+  })
+  const tcfg = { zone: 'utc' as const, dayBoundaryHour: 0, startOfWeek: 'monday' as const, hourCycle: 'h23' as const }
+  const built = (mains: ReturnType<typeof main>[]): AgentTreeVm => buildAgentTree({ agents: [], launches: [], mains, sessions: [], attribution: 'none', selected: null, tcfg }, now)
+  const both = built([main('s-active', now - 60_000), main('s-idle', now - 3_600_000)])
+  assert.deepEqual(both.roots.map((r) => r.kind), ['session', 'group'])
+  assert.equal(ext.agentPollWanted(both), true)
+  const quiet = built([main('s-idle', now - 3_600_000)])
+  assert.deepEqual(quiet.roots.map((r) => r.kind), ['group'])
+  assert.equal(ext.agentPollWanted(quiet), false)
+})
+
 test('the poll keeps one timer at most, never runs two passes at once, and outlives no failure', async () => {
   const { ext } = lazy()
   const made: Array<{ fn: () => void; ms: number; cleared: boolean }> = []
@@ -2760,12 +2796,15 @@ test('the usage document prints every node of the agent tree, though the dashboa
   assert.ok(at >= 0, md)
   const tree = md.slice(at, md.indexOf('\n## ', at) < 0 ? undefined : md.indexOf('\n## ', at))
   // The sessions, the run inside the active one and its agent, the sync agent and the idle one's.
-  // 1.6 N6: sessions and runs named by their start, then their id.
+  // 1.6 N6: sessions and runs named by their start, then their id. 1.7 F2 (pinned and changed): the
+  // idle session is an earlier one — in the group of earlier sessions, a depth-0 item without a
+  // state, the session one level in and its agent two.
   assert.match(tree, /\n- \[[^\]]+\] Session [^·]+ · a0a0a0a0/)
   assert.match(tree, /\n {2}- \[[^\]]+\] Workflow run [^·]+ · c0ffee00/)
   assert.match(tree, /\n {4}- \[[^\]]+\] workflow-subagent · claude-[^ ]+ · a1a1 · /)
   assert.match(tree, /\n {2}- \[[^\]]+\] Explore · claude-[^ ]+ · c3c3 · /)
-  assert.match(tree, /\n {2}- \[[^\]]+\] Agent · claude-[^ ]+ · b1b1 · /)
+  assert.match(tree, /\n- Earlier sessions \(1\) \(1 started · ~1 \?\)\n {2}- \[~Idle\] Session [^·]+ · b0b0b0b0 /)
+  assert.match(tree, /\n {4}- \[[^\]]+\] Agent · claude-[^ ]+ · b1b1 · /)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
@@ -2810,9 +2849,9 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
     return carrying[carrying.length - 1]?.payload.agents
   }
   // 1.6 D3: the page carries a node's children only while it is open, so the reader opens the two
-  // sessions and the run.
-  for (const key of [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, `s:${IDLE}`]) page.post({ type: 'agentToggle', key })
-  const wanted = [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, 'a:a1a1a1', 'a:c3c3c3', `s:${IDLE}`, 'a:b1b1b1']
+  // sessions and the run — and (1.7 F2) the group of earlier sessions the idle one sits in.
+  for (const key of [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, EARLIER_KEY, `s:${IDLE}`]) page.post({ type: 'agentToggle', key })
+  const wanted = [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, 'a:a1a1a1', 'a:c3c3c3', EARLIER_KEY, `s:${IDLE}`, 'a:b1b1b1']
   // 1.6 R2: the wait is capped by the host's own rebuild interval, not by the generous default.
   // A section the throttle holds back goes out within its interval, and that one is shorter: a
   // tree that is not on the page by then is late for a reason of its own.
@@ -2830,7 +2869,8 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
     assert.ok(keys.includes(key), `${key} is not among ${keys.join(', ')}`)
   }
   for (const key of keys) {
-    assert.match(key, /^[swal]:[^\\/]+$/)
+    // 1.7 F2: and the group's own key, which names no record.
+    assert.match(key, key === EARLIER_KEY ? /^g:earlier$/ : /^[swal]:[^\\/]+$/)
     assert.equal(key.includes('token-pace-synthetic'), false, key)
   }
   assert.deepEqual(disposeAll(LIVE.pop()!), [])

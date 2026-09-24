@@ -25,7 +25,8 @@
  *                               failure recorded by the journal, and one the journal started four minutes
  *                               ago whose transcript has not appeared, running beside the agent above
  *     Plan · sonnet · launched  a background launch two minutes ago, no transcript yet
- *   Session 8e1d4b7a — idle since 09:20
+ *   Session 8e1d4b7a — idle since 09:20 (1.7 F2: an earlier session, in the group of earlier
+ *                             sessions after the busy one)
  *     claude-code-guide         done in 48 s, its last reply finished
  *
  * Every launch, result, notification, journal line and sidecar carries the description,

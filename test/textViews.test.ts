@@ -14,7 +14,8 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
-import { AgentTreeVm, MAX_GROUP_CHILDREN, MAX_ROOTS, RunningItem, TreeNode, emptyAgentTree } from '../src/agentTree'
+import { AgentTreeVm, EARLIER_KEY, MAX_GROUP_CHILDREN, MAX_ROOTS, RunningItem, TreeNode, emptyAgentTree } from '../src/agentTree'
+import { tallySpoken, tallyText } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
 import { PICK_RUNNING_ITEMS, PickItem, markdownDocument, noIcons, quickPickItems } from '../src/textViews'
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
@@ -1186,7 +1187,10 @@ test('an agent that ended on a rejected request: its sentence and its Last reque
   assert.equal(rows[1], '| State | Unknown — inferred: no result was recorded; the last request, at 11:31, was rejected — 5-hour limit (HTTP 429). |')
   assert.ok(rows.includes('| Last request | rejected at 11:31 — 5-hour limit (HTTP 429) |'), rows.join('\n'))
   assert.ok(rows.includes('| Last activity | 11:31 · 29 min ago |'), rows.join('\n'))
-  assert.ok(lines.includes('  - [~Unknown] Explore · claude-opus-4-6 · a94f · 1.2K · 11 min 00 s'), lines.join('\n'))
+  // 1.7 F2 (pinned and changed): the session, three quarters of an hour quiet, is an earlier one —
+  // in the group of earlier sessions, a depth-0 item without a state; its agent two levels in.
+  assert.ok(lines.includes('- Earlier sessions (1) (1 started · ~1 ?)'), lines.join('\n'))
+  assert.ok(lines.includes('    - [~Unknown] Explore · claude-opus-4-6 · a94f · 1.2K · 11 min 00 s'), lines.join('\n'))
   const session = doc('s:sess-alpha').filter((l) => l.startsWith('| '))
   assert.ok(session.includes('| Ended on a rejected request | 5-hour limit (HTTP 429): 1 |'), session.join('\n'))
 })
@@ -1257,9 +1261,11 @@ test('an agent of a session the tree does not list is on its running line alone,
   // the note under the tree explains it.
   const agg = buildAgg('project')
   const dir = path.dirname(CLAUDE_FILE)
+  // 1.7 F2 (pinned and changed): ten seconds apart, so every one of them is active and the oldest is
+  // beyond MAX_ROOTS; a minute apart, the eleventh on would be earlier sessions, in the group.
   const mains: MainRec[] = Array.from({ length: MAX_ROOTS + 1 }, (_, i) => ({
     source: 'claude', sessionId: `${String(i).padStart(8, '0')}-s`, firstTs: NOW - 3_600_000,
-    lastTs: NOW - (i + 1) * 60_000, models: ['claude-opus-4-6'], input: 10, cacheWrite: 0, cacheWrite1h: 0,
+    lastTs: NOW - (i + 1) * 10_000, models: ['claude-opus-4-6'], input: 10, cacheWrite: 0, cacheWrite1h: 0,
     cacheRead: 0, output: 5, reasoning: 0, requests: 1, outputFinal: 1, toolCalls: 0,
     ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }))
@@ -1370,14 +1376,18 @@ test('the markdown prints every node of its tree, fifty children a node, and say
     return all.slice(Math.max(0, all.indexOf(tree))).filter((l) => /^\s*- /.test(l))
   }
   const printed = lines(markdownDocument(vm, text), '## Agents', '### Sessions and agents')
-  assert.equal(printed.length, 1 + MAX_GROUP_CHILDREN + 1, printed.slice(0, 3).join('\n'))
-  assert.ok(printed[0].startsWith('- [~Idle] Session Thu 09:00 · sess-alp') && printed[0].includes(' (1,234 started · 1,234 ✓) · '), printed[0])
-  assert.ok(printed.slice(1, 1 + MAX_GROUP_CHILDREN).every((l) => l.startsWith('  - [Done] Explore · claude-opus-4-6 · ')), printed[1])
+  // 1.7 F2 (pinned and changed): the idle session is an earlier one, one level in under the group of
+  // earlier sessions — the group's line first, its tally the session's; the session's agents two
+  // levels in, and so is the line for the rest.
+  assert.equal(printed.length, 2 + MAX_GROUP_CHILDREN + 1, printed.slice(0, 3).join('\n'))
+  assert.equal(printed[0], '- Earlier sessions (1) (1,234 started · 1,234 ✓)')
+  assert.ok(printed[1].startsWith('  - [~Idle] Session Thu 09:00 · sess-alp') && printed[1].includes(' (1,234 started · 1,234 ✓) · '), printed[1])
+  assert.ok(printed.slice(2, 2 + MAX_GROUP_CHILDREN).every((l) => l.startsWith('    - [Done] Explore · claude-opus-4-6 · ')), printed[2])
   // The fifty the document prints are the newest fifty (1.6 N6): the last started, agent 1233 (0x4d1), first.
-  assert.equal(printed[1], '  - [Done] Explore · claude-opus-4-6 · 00000000000004d1 · 1.2K · 39 min 27 s')
-  assert.equal(printed[printed.length - 1], `  - … ${(1234 - MAX_GROUP_CHILDREN).toLocaleString('en-US')} more`)
-  // The page's own tree: the session closed, nothing below it, nothing more to say.
-  assert.deepEqual(lines(markdownDocument(vm), '## Agents', '### Sessions and agents').length, 1)
+  assert.equal(printed[2], '    - [Done] Explore · claude-opus-4-6 · 00000000000004d1 · 1.2K · 39 min 27 s')
+  assert.equal(printed[printed.length - 1], `    - … ${(1234 - MAX_GROUP_CHILDREN).toLocaleString('en-US')} more`)
+  // The page's own tree: the group closed, nothing below it, nothing more to say.
+  assert.deepEqual(lines(markdownDocument(vm), '## Agents', '### Sessions and agents'), ['- Earlier sessions (1) (1,234 started · 1,234 ✓)'])
   const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   let md = ''
   try {
@@ -1389,7 +1399,8 @@ test('the markdown prints every node of its tree, fifty children a node, and say
     setLocale(undefined)
   }
   const german = lines(md, '## Agenten', '### Sitzungen und Agenten')
-  assert.equal(german[german.length - 1], '  - … 1.184 weitere', german.slice(-2).join('\n'))
+  assert.equal(german[german.length - 1], '    - … 1.184 weitere', german.slice(-2).join('\n'))
+  assert.equal(german[0], '- Frühere Sitzungen (1) (1.234 gestartet · 1.234 ✓)')
 })
 
 test('the 7-day block reaches the markdown between the running list and the tree while it is open — its cost column only with costs (1.6 L3)', () => {
@@ -1948,4 +1959,121 @@ test('the switch\'s words in the text views speak German with the shipped bundle
   assert.equal(reason, 'Nur Claude Code — ausgeblendet, solange Codex ausgewählt ist.')
   assert.equal(md.includes('## Agenten'), false)
   assert.ok(first.startsWith('Codex · '), first)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 F2 · the earlier sessions in the document and the Quick Pick
+// ---------------------------------------------------------------------------
+
+/**
+ * 1.7 F2: `active` sessions a minute apart and `idle` ones half an hour apart from an hour on, each
+ * with one agent — the active ones' running, the idle ones' done, the first idle one's with a nested
+ * agent under it — on the fixtures' clock.
+ */
+function earlierAgg(active: number, idle: number): Aggregator {
+  const agg = buildAgg('none')
+  const dir = path.dirname(CLAUDE_FILE)
+  const counts = { input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 0, requests: 5, outputFinal: 5, toolCalls: 3 }
+  const mains: MainRec[] = []
+  const agents: AgentRec[] = []
+  const agentOf = (id: string, sessionId: string, lastTs: number, over: Partial<AgentRec> = {}): AgentRec => ({
+    source: 'claude', agentId: id, sessionId, sessionFile: path.join(dir, `${sessionId}.jsonl`), workflowId: null,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: null, parentAgentId: null }, metaTries: 1,
+    spawnerFile: path.join(dir, `${sessionId}.jsonl`), firstTs: lastTs - 10 * 60_000, lastTs, models: ['claude-opus-4-6'],
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null, toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0,
+    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, ...over,
+  })
+  for (let i = 0; i < active + idle; i++) {
+    const sessionId = `${i < active ? 'act' : 'idl'}${String(i).padStart(5, '0')}-s`
+    const lastTs = i < active ? NOW - (i + 1) * 60_000 : NOW - (60 + 30 * (i - active)) * 60_000
+    mains.push({ source: 'claude', sessionId, firstTs: lastTs - 3_600_000, lastTs, models: ['claude-opus-4-6'], ...counts,
+      ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null })
+    const id = `${String(i).padStart(4, '0')}aaaa`
+    agents.push(i < active ? agentOf(id, sessionId, NOW - 30_000)
+      : agentOf(id, sessionId, lastTs - 5 * 60_000, { outcome: 'completed', outcomeTs: lastTs - 5 * 60_000, outcomeStatus: 'completed' }))
+    if (i === active) {
+      agents.push(agentOf(`${String(i).padStart(4, '0')}bbbb`, sessionId, lastTs - 6 * 60_000, {
+        spawnerFile: null, outcome: 'completed', outcomeTs: lastTs - 6 * 60_000, outcomeStatus: 'completed',
+        meta: { agentType: 'Plan', model: 'opus', spawnDepth: 2, toolUseId: null, parentAgentId: id },
+      }))
+    }
+  }
+  agg.mains = () => mains
+  agg.agents = () => agents
+  agg.launches = () => []
+  return agg
+}
+
+test('1.7 F2: the document prints the group open — a depth-0 item without a state or a figure, its sessions one level in, each with its subtree', () => {
+  const input = makeInput({ agg: earlierAgg(1, 2) })
+  const vm = buildViewModel(input)
+  const text = agentTreeFor(input, 'text')
+  assert.deepEqual(text.roots.map((r) => r.kind), ['session', 'group'])
+  const all = sectionOf(markdownDocument(vm, text), '## Agents')
+  const tree = all.slice(all.indexOf('### Sessions and agents')).filter((l) => /^\s*- /.test(l))
+  assert.deepEqual(tree.map((l) => l.replace(/ · .*$/, '').replace(/ \(.*$/, '')), [
+    '- [~Active] Session Thu 10:59',
+    '  - [~Running] Explore',
+    // (Its count in brackets, cut off here with every bracket; the whole line below.)
+    '- Earlier sessions',
+    '  - [~Idle] Session Thu 10:00',
+    '    - [Done] Explore',
+    '      - [Done] Plan',
+    '  - [~Idle] Session Thu 09:30',
+    '    - [Done] Explore',
+  ])
+  // The group's line: its words and what its sessions' agents came to — no [state], no figure.
+  const g = tree[2]
+  assert.equal(g, '- Earlier sessions (2) (3 started · 3 ✓)')
+  assert.equal(g.includes('['), false)
+  assert.equal(/own |agents |–|\d+\.\dK|min/.test(g), false, g)
+  // The page's own tree has the group closed: its line, and nothing under it.
+  const page = sectionOf(markdownDocument(vm), '## Agents')
+  const shut = page.slice(page.indexOf('### Sessions and agents')).filter((l) => /^\s*- /.test(l))
+  assert.deepEqual(shut.slice(-1), ['- Earlier sessions (2) (3 started · 3 ✓)'])
+  assert.equal(shut.some((l) => l.startsWith('  - [~Idle]')), false)
+  // German: „Frühere Sitzungen (2)".
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['Earlier sessions ({0})'], 'Frühere Sitzungen ({0})')
+  let md = ''
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    md = markdownDocument(buildViewModel(input), agentTreeFor(input, 'text'))
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.ok(md.split('\n').includes('- Frühere Sitzungen (2) (3 gestartet · 3 ✓)'), md)
+})
+
+test('1.7 F2: the Quick Pick counts the closed group\'s sessions with its own tally, and past the caps names the sessions it lists', () => {
+  // A world where the group is closed, as the dashboard starts: the summary is the 1.6 sum over
+  // every listed session — the tree without the group, every session a root — to the digit.
+  const input = makeInput({ agg: earlierAgg(3, 4) })
+  const vm = buildViewModel(input)
+  assert.deepEqual(vm.agents.roots.map((r) => [r.kind, r.children.length]), [['session', 0], ['session', 0], ['session', 0], ['group', 0]])
+  const text = agentTreeFor(input, 'text')
+  const sessions = text.roots.flatMap((r) => (r.kind === 'group' ? r.children : [r]))
+  assert.equal(sessions.length, 7)
+  const sum = { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0 }
+  for (const r of sessions) for (const k of Object.keys(sum) as Array<keyof typeof sum>) sum[k] += r.tally?.[k] ?? 0
+  const last = agentGroup(quickPickItems(vm)).at(-1)
+  assert.equal(last?.label, `Last 7 days: ${tallyText(sum)}`)
+  assert.equal(last?.label, 'Last 7 days: 8 started · 5 ✓ · ~3 ●')
+  assert.equal(last?.detail, tallySpoken(sum))
+  assert.equal(last?.description, undefined)
+  // Twenty-five earlier sessions: the group holds twenty, the note counts five, and the row names
+  // the sessions the tree lists — the three active ones and the group's twenty.
+  const many = buildViewModel(makeInput({ agg: earlierAgg(3, 25) }))
+  assert.equal(many.agents.omittedRoots, 5)
+  assert.equal(many.agents.roots[3].childrenTotal, MAX_ROOTS)
+  const row = agentGroup(quickPickItems(many)).at(-1)
+  assert.match(row?.label ?? '', / · the 23 most recent sessions of the last 7 days$/)
+  assert.equal(row?.description, '5 older session(s) not counted.')
+  // Counted: the three active sessions' agents and the twenty in the group (the first one's two).
+  assert.match(row?.label ?? '', /^24 started · 21 ✓ · ~3 ● · /)
+  // The group's own key never reaches a Quick Pick item.
+  assert.equal(quickPickItems(many).some((i) => JSON.stringify(i).includes(EARLIER_KEY)), false)
 })

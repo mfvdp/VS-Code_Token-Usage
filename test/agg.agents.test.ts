@@ -13,7 +13,7 @@ import { after, test } from 'node:test'
 import * as fs from 'fs'
 import * as path from 'path'
 import { adapterFor } from '../src/adapters'
-import { AGENT_RETENTION_DAYS } from '../src/agentTree'
+import { AGENT_RETENTION_DAYS, EARLIER_KEY } from '../src/agentTree'
 import {
   AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_MODELS_MAX, AGENT_NAME_MAX_CHARS, AGENT_TABLES_REVISION, Aggregator,
   IngestContext, claudePlacement, cleanAgentId, cleanAgentName, parseAgentMeta, rejectedOf,
@@ -1687,7 +1687,8 @@ test('a tool call\'s input never leaves the reader: only its name reaches the re
   assert.deepEqual([agentOf(agg, file).lastTool, agentOf(agg, file).lastToolTs], ['Bash', at(30)])
   assert.ok(fs.readFileSync(file, 'utf8').includes(`${secret}-command`), 'the fixture lost its command')
   const cfg = makeConfig()
-  const input = makeInput({ agg, cfg, ui: { agentsExpanded: ['s:' + SESSION], agentSelected: 'a:abc123' } })
+  // 1.7 F2: the session is quiet by now — an earlier one, in the group, which the reader opens too.
+  const input = makeInput({ agg, cfg, ui: { agentsExpanded: [EARLIER_KEY, 's:' + SESSION], agentSelected: 'a:abc123' } })
   const vm = buildViewModel(input)
   // The name is what the sentence says, and all it says of the call.
   assert.match(vm.agents.selected?.stateText ?? '', /silent since \d\d:\d\d, after a Bash call; the agent may have been stopped\.$/)
@@ -1870,7 +1871,8 @@ test('a nested effort, a proposal\'s text and an error line\'s effort never leav
   assert.deepEqual([agentOf(agg, file).effort, agentOf(agg, file).efforts], ['xhigh', ['xhigh']])
   assert.ok(fs.readFileSync(file, 'utf8').includes(`${secret} proposal`), 'the fixture lost its proposal')
   const cfg = makeConfig()
-  const input = makeInput({ agg, cfg, ui: { agentsExpanded: ['s:' + SESSION], agentSelected: 'a:abc123' } })
+  // 1.7 F2: the session is quiet by now — an earlier one, in the group, which the reader opens too.
+  const input = makeInput({ agg, cfg, ui: { agentsExpanded: [EARLIER_KEY, 's:' + SESSION], agentSelected: 'a:abc123' } })
   const vm = buildViewModel(input)
   assert.equal(vm.agents.selected?.rows.find((r) => r.label === 'Effort')?.value, 'xhigh')
   const session = buildViewModel({ ...input, ui: { ...input.ui, agentSelected: 's:' + SESSION } })

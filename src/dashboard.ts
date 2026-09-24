@@ -975,6 +975,10 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-unknown::before { content: "?"; color: var(--dim); }
 .ag-active::before { content: "●"; color: var(--vscode-foreground); }
 .ag-idle::before { content: "○"; color: var(--dim); }
+/* 1.7 F2: the group of earlier sessions has no state and so no glyph — its column is kept, so its
+   name starts where the sessions' names start, and holds a space that draws nothing and says
+   nothing (the span is hidden from a screen reader as well). */
+.ag-none::before { content: "\\00a0" / ""; }
 /* Words for a screen reader alone: out of sight and out of the copied text's way, still in the
    accessibility tree. A node's tally (1.6 N1) is glyphs for the eye — "112 ✓ · 12 ✕" — which a
    screen reader would read as shapes; the words stand beside them, and the glyphs are hidden

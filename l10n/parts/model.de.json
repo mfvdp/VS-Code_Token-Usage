@@ -44,6 +44,7 @@
   "Depth": "Tiefe",
   "Done — every agent of this run has a recorded outcome, and at least one completed.": "Fertig — für jeden Agenten dieses Laufs ist ein Ausgang aufgezeichnet, und mindestens einer wurde abgeschlossen.",
   "Done — every one of these agents has a recorded outcome, and at least one completed.": "Fertig — für jeden dieser Agenten ist ein Ausgang aufgezeichnet, und mindestens einer wurde abgeschlossen.",
+  "Earlier sessions ({0})": "Frühere Sitzungen ({0})",
   "Effort": "Effort",
   "Empty response (fail_count {0})": "Leere Antwort (fail_count {0})",
   "Ended on a rejected request": "Endete mit abgelehnter Anfrage",

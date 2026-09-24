@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  AgentTreeVm, DetailRow, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeState,
+  AgentTreeVm, DetailRow, EARLIER_KEY, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, NodeState,
   PER_MINUTE_FROM_MS,
   RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
@@ -154,6 +154,26 @@ function node(vm: AgentTreeVm, key: string): TreeNode {
   const n = all(vm.roots).find((x) => x.key === key)
   assert.ok(n, `no node ${key} in ${all(vm.roots).map((x) => x.key).join(', ')}`)
   return n
+}
+
+/**
+ * 1.7 F2: every session the tree lists — the active roots, then the earlier ones the group of
+ * earlier sessions holds (a group ships its sessions while it is open, and the `text` mode opens
+ * every node).
+ */
+function sessionsOf(vm: AgentTreeVm): TreeNode[] {
+  return vm.roots.flatMap((r) => (r.kind === 'group' ? r.children : [r]))
+}
+
+/**
+ * 1.7 F2: `n` sessions, every one of them active — the newest first, ten seconds apart, so the
+ * oldest of MAX_ROOTS + 5 is still within SESSION_ACTIVE_MS — for the tests of a session beyond
+ * MAX_ROOTS among the active ones. (A minute apart, as 1.6's tests had them, the eleventh is idle
+ * and sits in the group of earlier sessions since 1.7.)
+ */
+function activeMains(n: number): MainRec[] {
+  return Array.from({ length: n }, (_, i) =>
+    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * 10_000, firstTs: NOW - HOUR }))
 }
 
 /** Distance from the root; the root itself is 0. */
@@ -379,8 +399,12 @@ test('a session is active while its transcript changed within ten minutes and id
   assert.equal(stateText(activeOver, active.key), 'Active — inferred: the session transcript changed 2 min ago.')
 
   const idleOver = { mains: [main({ lastTs: NOW - 30 * MIN })] }
-  const idle = build(idleOver).roots[0]
-  assert.deepEqual([idle.state, idle.derived], ['idle', true])
+  // 1.7 F2 (pinned and changed): an idle session is no root of its own — it sits in the group of
+  // earlier sessions, the tree's only root here.
+  const idleVm = build(idleOver)
+  assert.deepEqual(idleVm.roots.map((r) => r.kind), ['group'])
+  const idle = idleVm.roots[0].children[0]
+  assert.deepEqual([idle.kind, idle.state, idle.derived], ['session', 'idle', true])
   assert.equal(stateText(idleOver, idle.key), 'Idle — inferred: the session transcript has been silent since 11:30.')
 })
 
@@ -388,8 +412,10 @@ test('agents whose session transcript was never read still get their session, wh
   // Silent agents: a running one would make the session active through it (see the roll-up).
   const over = { mains: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] }
   const vm = build(over)
-  assert.equal(vm.roots.length, 1)
-  const root = vm.roots[0]
+  // 1.7 F2 (pinned and changed): a session in state unknown is an earlier one — in the group.
+  assert.deepEqual(vm.roots.map((r) => r.kind), ['group'])
+  assert.equal(sessionsOf(vm).length, 1)
+  const root = sessionsOf(vm)[0]
   assert.equal(root.key, rootKey)
   assert.equal(root.label, 'Session 9d0eb37a')
   assert.deepEqual([root.state, root.derived, root.usage, root.duration, root.startTs, root.lastTs],
@@ -1004,15 +1030,19 @@ test('roots are the sessions of the last day and the sessions with agents in ret
       rec('aaaa0002', { sessionId: 'dddd4444-expired', firstTs: NOW - 8 * DAY - 10 * MIN, lastTs: NOW - 8 * DAY }),
     ],
   })
-  // 1.6 N6: named by the first line, as a weekday and a clock time within six days.
-  assert.deepEqual(vm.roots.map((r) => r.label), ['Session Tue 10:00 · aaaa1111', 'Session Sat 11:00 · cccc3333'])
+  // 1.6 N6: named by the first line, as a weekday and a clock time within six days. 1.7 F2 (pinned
+  // and changed): neither is active — an hour and three days quiet —, so both are in the group of
+  // earlier sessions, in the same order.
+  assert.deepEqual(vm.roots.map((r) => r.label), ['Earlier sessions (2)'])
+  assert.deepEqual(sessionsOf(vm).map((r) => r.label), ['Session Tue 10:00 · aaaa1111', 'Session Sat 11:00 · cccc3333'])
   assert.equal(vm.omittedRoots, 0)
-  assert.deepEqual(vm.roots[1].children.map((c) => c.key), [agentKey('aaaa0001')])
+  assert.deepEqual(sessionsOf(vm)[1].children.map((c) => c.key), [agentKey('aaaa0001')])
 })
 
 test('at most MAX_ROOTS sessions are listed, the newest, and the rest is counted', () => {
-  const mains = Array.from({ length: MAX_ROOTS + 5 }, (_, i) =>
-    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  // 1.7 F2 (pinned and changed): the cap on the active sessions — every one of them active; the
+  // cap inside the group of earlier sessions is the F2 test's.
+  const mains = activeMains(MAX_ROOTS + 5)
   const vm = build({ mains })
   assert.equal(vm.roots.length, MAX_ROOTS)
   assert.equal(vm.omittedRoots, 5)
@@ -1400,8 +1430,8 @@ test('an opened node without children is ignored; a selected node inside a close
 })
 
 test('running counts every running agent and launch, also on sessions beyond the list', () => {
-  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
-    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  // 1.7 F2: every session active, so the oldest is beyond MAX_ROOTS rather than in the group.
+  const mains = activeMains(MAX_ROOTS + 1)
   const oldest = mains[mains.length - 1].sessionId
   const vm = build({
     mains,
@@ -1585,8 +1615,8 @@ test('the open node gets its details; a node that is gone leaves none and says s
   // A session beyond the list has no row on the page — not in the tree, and a session is never
   // in the running list — so its details are not open either: a panel nothing on the page can
   // close, coming back with every reload, is worse than saying why nothing shows.
-  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
-    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  // 1.7 F2: every session active, so the oldest is beyond MAX_ROOTS rather than in the group.
+  const mains = activeMains(MAX_ROOTS + 1)
   const oldest = mains[MAX_ROOTS].sessionId
   const beyondKey = `s:${oldest}`
   const beyond = build({ mains, selected: beyondKey })
@@ -1633,8 +1663,8 @@ test('the open node gets its details; a node that is gone leaves none and says s
 test('a running agent of a session beyond the list opens only while the running list names it', () => {
   // Every agent of the oldest session runs; the list holds the MAX_RUNNING_LIST that started
   // first, so the last one to start has a row nowhere on the page.
-  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
-    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  // 1.7 F2: every session active, so the oldest is beyond MAX_ROOTS rather than in the group.
+  const mains = activeMains(MAX_ROOTS + 1)
   const oldest = mains[MAX_ROOTS].sessionId
   const agents = Array.from({ length: MAX_RUNNING_LIST + 1 }, (_, i) =>
     rec(`b${String(i).padStart(7, '0')}`, { sessionId: oldest, firstTs: NOW - 40 * MIN + i * MIN }))
@@ -1664,7 +1694,11 @@ test('the details say for themselves whether the state was recorded and when the
     mains: [main(), main({ sessionId: S2, lastTs: NOW - 3 * HOUR, firstTs: NOW - 4 * HOUR })],
   }
   const vm = build(over)
-  const nodes = all(vm.roots)
+  // 1.7 F2 (pinned and changed): the idle session S2 is in the group of earlier sessions, which
+  // is a container with no details of its own — every other node has them.
+  assert.equal(vm.roots[vm.roots.length - 1].kind, 'group')
+  assert.equal(agentDetails(input(over), NOW, EARLIER_KEY), null)
+  const nodes = all(vm.roots).filter((n) => n.kind !== 'group')
   assert.deepEqual([...new Set(nodes.map((n) => n.state))].sort(), ['active', 'done', 'failed', 'idle', 'running', 'unknown'])
   for (const n of nodes) {
     const d = agentDetails(input(over), NOW, n.key)
@@ -2132,8 +2166,8 @@ test('the running list stops at MAX_RUNNING_LIST and counts the rest, the longes
 // carry are those of closed branches and those past a window — the list names them all the same.
 test('the running list is taken from every session, those beyond the list, closed branches and full windows included', () => {
   // Beyond MAX_ROOTS: the oldest session is not listed, and its running agent still is.
-  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
-    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  // 1.7 F2: every session active, so the oldest is beyond MAX_ROOTS rather than in the group.
+  const mains = activeMains(MAX_ROOTS + 1)
   const oldest = mains[MAX_ROOTS].sessionId
   const far = build({ mains, agents: [rec('aaaa0001', { sessionId: oldest })] })
   assert.equal(far.omittedRoots, 1)
@@ -2260,8 +2294,8 @@ test('the running list carries no field the page does not need, and keys it can 
 test("a running item carries its node's lower bound, and a launch nothing was counted of never does", () => {
   // A running agent may be mid-reply, so its output may be a lower bound — and the running list
   // is where it is looked at first.
-  const mains = Array.from({ length: MAX_ROOTS + 1 }, (_, i) =>
-    main({ sessionId: `${String(i).padStart(8, '0')}-s`, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR }))
+  // 1.7 F2: every session active, so the oldest is beyond MAX_ROOTS rather than in the group.
+  const mains = activeMains(MAX_ROOTS + 1)
   const oldest = mains[MAX_ROOTS].sessionId
   const vm = build({
     mains,
@@ -3036,9 +3070,10 @@ test('a session and a run are named by when they started — a weekday within si
   assert.deepEqual(names(at(NOW - WEEKDAY_NAMES_WITHIN_MS)), ['Session 2026-09-16 12:00 · 9d0eb37a', 'Workflow run 2026-09-16 12:00 · cfe7718d'])
   const old = build({ mains: [main({ firstTs: NOW - 22 * DAY - 11 * HOUR })] })
   assert.equal(old.roots[0].label, 'Session 2026-08-31 01:00 · 9d0eb37a')
-  // No start known: the id alone — a session whose transcript was never read.
+  // No start known: the id alone — a session whose transcript was never read (1.7 F2: in the group
+  // of earlier sessions, its state unknown).
   const bare = build({ mains: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] })
-  assert.equal(bare.roots[0].label, 'Session 9d0eb37a')
+  assert.equal(sessionsOf(bare)[0].label, 'Session 9d0eb37a')
   // A run nothing but its launch shows is named by its launch (N4).
   const launched: RunLaunch = {
     toolUseId: 'toolu_wf1', file: sessionFile(), ts: NOW - 2 * MIN, runId: WF, outcome: 'launched', outcomeStatus: null, outcomeTs: null,
@@ -3067,7 +3102,9 @@ test('the names by start time speak German: „Sitzung", „Workflow-Lauf", the 
   const dated = german(() => build({ mains: [main({ firstTs: NOW - 10 * DAY })] }))
   assert.equal(dated.roots[0].label, 'Sitzung 2026-09-12 12:00 · 9d0eb37a')
   const bare = german(() => build({ mains: [], runLaunches: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] }))
-  assert.equal(bare.roots[0].label, 'Sitzung 9d0eb37a')
+  // 1.7 F2: in the group of earlier sessions, which speaks German too.
+  assert.equal(sessionsOf(bare)[0].label, 'Sitzung 9d0eb37a')
+  assert.equal(bare.roots[0].label, 'Frühere Sitzungen (1)')
   // The running list's line of where an agent sits: the ids alone, in German.
   const live = german(() => build({ agents: [wfRec('bbbb0001', { lastTs: NOW - MIN })] }))
   assert.equal(live.runningNow[0].context, 'Sitzung 9d0eb37a · Workflow-Lauf cfe7718d')
@@ -3109,9 +3146,14 @@ test('the children of a session, a run and an agent are in plain time order, the
   assert.deepEqual(opened.roots[0].children.map((c) => c.key), vm.roots[0].children.map((c) => c.key))
   const shuffled = build({ ...over, agents: [...(over.agents ?? [])].reverse() })
   assert.deepEqual(all(shuffled.roots).map((n) => n.key), all(vm.roots).map((n) => n.key))
-  // Roots stay the most recent first by their last activity.
-  const two = build({ mains: [main({ lastTs: NOW - 30 * MIN, firstTs: NOW - HOUR }), main({ sessionId: S2, lastTs: NOW - MIN, firstTs: NOW - 5 * HOUR })] })
+  // Roots stay the most recent first by their last activity. 1.7 F2 (pinned and changed): two
+  // active sessions for it — a session quiet for half an hour is an earlier one, in the group after
+  // the active ones, whatever its start.
+  const two = build({ mains: [main({ lastTs: NOW - 8 * MIN, firstTs: NOW - HOUR }), main({ sessionId: S2, lastTs: NOW - MIN, firstTs: NOW - 5 * HOUR })] })
   assert.deepEqual(two.roots.map((r) => r.key), [`s:${S2}`, rootKey])
+  const split = build({ mains: [main({ lastTs: NOW - 30 * MIN, firstTs: NOW - HOUR }), main({ sessionId: S2, lastTs: NOW - MIN, firstTs: NOW - 5 * HOUR })] })
+  assert.deepEqual(split.roots.map((r) => r.key), [`s:${S2}`, EARLIER_KEY])
+  assert.deepEqual(split.roots[1].children.map((r) => r.key), [rootKey])
 })
 
 test('byNewestFirst: the later start first, an unknown start after every known one, then the key; a collector always last', () => {
@@ -3139,7 +3181,8 @@ test('every node and running item carries its start and last activity as clock t
   const p = node(vm, 'l:toolu_pppp0001')
   assert.deepEqual([p.startClock, p.lastClock], ['11:58', '11:58'])
   // A session whose own transcript was never read has no time: no clock either.
-  const bare = build({ mains: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] }).roots[0]
+  // 1.7 F2: in the group of earlier sessions.
+  const bare = sessionsOf(build({ mains: [], agents: [rec('aaaa0001', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN })] }))[0]
   assert.deepEqual([bare.startTs, bare.startClock, bare.lastTs, bare.lastClock], [null, null, null, null])
   // In the configured zone.
   const ny = build({ tcfg: { ...tcfg, zone: 'America/New_York' }, agents: [rec('aaaa0001', { firstTs: NOW - 30 * MIN, lastTs: NOW - MIN })] })
@@ -3675,4 +3718,200 @@ test('an agent whose sidecar names its parent hangs under it when no launch name
     expanded: [rootKey, wfKey] }
   assert.deepEqual(node(build(inRun), wfKey).children.map((c) => c.key), [agentKey(child)])
   assert.equal(rowsOf(inRun, agentKey(child)).get('Spawned by')?.value, node(build(inRun), agentKey(parent)).fullLabel)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 F2 · earlier sessions: one closed group
+// ---------------------------------------------------------------------------
+
+/**
+ * 1.7 F2: three active sessions — a minute, two and three minutes quiet —, twenty-five idle ones —
+ * half an hour apart from half an hour on — and one whose own transcript was never read (state
+ * unknown), its agent last seen between the fifth and the sixth idle one.
+ */
+function earlierWorld(): { over: Partial<AgentTreeInput>; active: string[]; earlier: string[]; unknown: string } {
+  const active = [0, 1, 2].map((i) => `act0000${i}-0000-4000-8000-000000000000`)
+  const idle = Array.from({ length: 25 }, (_, i) => `idl000${String(i).padStart(2, '0')}-0000-4000-8000-000000000000`)
+  const unknown = 'unk00000-0000-4000-8000-000000000000'
+  const mains = [
+    ...active.map((sessionId, i) => main({ sessionId, lastTs: NOW - (i + 1) * MIN, firstTs: NOW - HOUR })),
+    ...idle.map((sessionId, i) => main({ sessionId, lastTs: NOW - (30 + 30 * i) * MIN, firstTs: NOW - (90 + 30 * i) * MIN })),
+  ]
+  const agents = [rec('dddd0001', { sessionId: unknown, firstTs: NOW - 170 * MIN, lastTs: NOW - 165 * MIN })]
+  // By recency: the five idle ones up to 150 min, the unknown one at 165, then the rest.
+  const earlier = [...idle.slice(0, 5), unknown, ...idle.slice(5)]
+  return { over: { mains, agents }, active, earlier, unknown }
+}
+
+test('1.7 F2: the active sessions are the roots, every other one — idle or unknown — is in one group after them, MAX_ROOTS of them', () => {
+  const w = earlierWorld()
+  const vm = build(w.over)
+  // Three sessions and the group, always the last root.
+  assert.deepEqual(vm.roots.map((r) => r.kind), ['session', 'session', 'session', 'group'])
+  assert.deepEqual(vm.roots.slice(0, 3).map((r) => r.key), w.active.map((s) => `s:${s}`))
+  assert.ok(vm.roots.slice(0, 3).every((r) => r.state === 'active'))
+  const g = vm.roots[3]
+  // Its words count the sessions it holds — MAX_ROOTS of the twenty-six — and the rest are the
+  // note's: 26 − 20.
+  assert.deepEqual([g.key, g.label, g.fullLabel], [EARLIER_KEY, 'Earlier sessions (20)', 'Earlier sessions (20)'])
+  assert.equal(vm.omittedRoots, 6)
+  assert.deepEqual([g.hasChildren, g.childrenTotal, g.childrenMore], [true, MAX_ROOTS, 0])
+  // The newest first, the unknown session among them by its time — between the fifth and the sixth.
+  assert.deepEqual(g.children.map((c) => c.key), w.earlier.slice(0, MAX_ROOTS).map((s) => `s:${s}`))
+  assert.deepEqual([g.children[5].key, g.children[5].state], [`s:${w.unknown}`, 'unknown'])
+  assert.ok(g.children.every((c) => c.kind === 'session' && c.state !== 'active'))
+  // A container: dashes, no start, its newest member's last activity, no marker of any kind.
+  assert.deepEqual([g.state, g.derived, g.usage, g.usageAgents, g.duration, g.startTs, g.startClock, g.lastTs, g.lastClock],
+    ['idle', true, '–', null, '–', null, null, NOW - 30 * MIN, '11:30'])
+  assert.deepEqual([g.hookWait, g.silence, g.superseded, g.lowerBound, g.lowerBoundText, g.sub], [null, false, false, false, null, null])
+  // Its tally is the one agent below it — the unknown session's —, and so is its count.
+  assert.deepEqual([g.tallyText, g.agentCount], ['1 started · ~1 ?', 1])
+  // A session sits in one place only.
+  const keys = all(vm.roots).filter((n) => n.kind === 'session').map((n) => n.key)
+  assert.equal(new Set(keys).size, keys.length)
+  assert.equal(keys.length, 3 + MAX_ROOTS)
+  // The page as it starts: the group closed — one row of the payload, what it holds counted.
+  const shut = page(w.over)
+  assert.deepEqual(shut.roots.map((r) => r.key), vm.roots.map((r) => r.key))
+  assert.deepEqual([shut.roots[3].children, shut.roots[3].childrenTotal, shut.roots[3].label], [[], MAX_ROOTS, 'Earlier sessions (20)'])
+  assert.equal(all(shut.roots).length, 3 + 1, 'the closed group is one node of the payload')
+  // Opened, its sessions come — and count — only then (1.6 D3), each closed itself.
+  const opened = page({ ...w.over, expanded: [EARLIER_KEY] })
+  assert.equal(all(opened.roots).length, 3 + 1 + MAX_ROOTS)
+  assert.deepEqual(opened.roots[3].children.map((c) => c.key), g.children.map((c) => c.key))
+  // Past MAX_ROOTS among the active sessions too: those are counted in the same note.
+  const many = build({ mains: [...activeMains(MAX_ROOTS + 2), ...(w.over.mains ?? [])], agents: w.over.agents })
+  assert.equal(many.roots.filter((r) => r.kind === 'session').length, MAX_ROOTS)
+  assert.equal(many.omittedRoots, 2 + 3 + 6)
+})
+
+test('1.7 F2: the group counts what its sessions\' agents came to, closed or open — their tallies summed, not the rows it ships', () => {
+  const E1 = 'eeee0001-0000-4000-8000-000000000000'
+  const E2 = 'eeee0002-0000-4000-8000-000000000000'
+  const E3 = 'eeee0003-0000-4000-8000-000000000000'
+  const quiet = (sessionId: string, h: number): MainRec => main({ sessionId, lastTs: NOW - h * HOUR, firstTs: NOW - (h + 1) * HOUR })
+  const past = (id: string, sessionId: string, over: Partial<AgentRec> = {}): AgentRec =>
+    rec(id, { sessionId, firstTs: NOW - 3 * HOUR, lastTs: NOW - 2 * HOUR - 30 * MIN, ...over })
+  const over: Partial<AgentTreeInput> = {
+    mains: [main(), quiet(E1, 1), quiet(E2, 2), quiet(E3, 3)],
+    agents: [
+      rec('aaaa0001'),
+      past('bbbb0001', E1, { outcome: 'completed', outcomeTs: NOW - 2 * HOUR - 30 * MIN }),
+      past('bbbb0002', E1, { outcome: 'failed', outcomeTs: NOW - 2 * HOUR - 30 * MIN }),
+      past('bbbb0003', E1, { outcome: 'completed', outcomeTs: NOW - 2 * HOUR - 30 * MIN }),
+      past('cccc0001', E2, { outcome: 'stopped', outcomeStatus: 'killed', outcomeTs: NOW - 2 * HOUR - 30 * MIN }),
+      past('cccc0002', E2),
+    ],
+  }
+  const vm = build(over)
+  const g = vm.roots[vm.roots.length - 1]
+  assert.equal(g.kind, 'group')
+  assert.deepEqual(g.children.map((c) => c.key), [`s:${E1}`, `s:${E2}`, `s:${E3}`])
+  // Field by field the sum of its sessions' own tallies — the one without agents has none.
+  assert.equal(g.children[2].tally, null)
+  const sum = { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0 }
+  for (const c of g.children) for (const k of Object.keys(sum) as Array<keyof typeof sum>) sum[k] += c.tally?.[k] ?? 0
+  assert.deepEqual(g.tally, sum)
+  assert.deepEqual(sum, { started: 5, done: 2, failed: 1, retried: 0, stopped: 1, running: 0, unknown: 1 })
+  assert.equal(g.tallyText, '5 started · 2 ✓ · 1 ✕ · 1 ■ · ~1 ?')
+  assert.equal(g.tallySpoken, '5 started, 2 done, 1 failed, 1 stopped, about 1 unknown')
+  assert.equal(g.agentCount, g.children.reduce((n, c) => n + c.agentCount, 0))
+  // Closed, as the page starts, it ships none of them and says the same.
+  const shut = page(over).roots[vm.roots.length - 1]
+  assert.deepEqual([shut.key, shut.children], [EARLIER_KEY, []])
+  assert.deepEqual([shut.tally, shut.tallyText, shut.tallySpoken, shut.agentCount], [g.tally, g.tallyText, g.tallySpoken, g.agentCount])
+  // Sessions none of which has an agent: no tally — a dash on the page, never "0 started".
+  const none = build({ mains: [main(), quiet(E3, 3)] })
+  assert.deepEqual([none.roots[1].kind, none.roots[1].tally, none.roots[1].tallyText, none.roots[1].agentCount], ['group', null, null, 0])
+})
+
+test('1.7 F2: a session moves out of the group when an agent of it starts running, and the running list is the same with and without the group', () => {
+  const quietSession = main({ lastTs: NOW - 30 * MIN, firstTs: NOW - 2 * HOUR })
+  const before: Partial<AgentTreeInput> = { mains: [quietSession], agents: [rec('aaaa0001', { firstTs: NOW - 40 * MIN, lastTs: NOW - 20 * MIN })] }
+  const was = build(before)
+  assert.deepEqual(was.roots.map((r) => r.key), [EARLIER_KEY])
+  assert.deepEqual(was.roots[0].children.map((c) => [c.key, c.state]), [[rootKey, 'idle']])
+  // A line a minute ago: the agent runs, the session is active by the roll-up — a root again, and
+  // its sentence says why.
+  const after: Partial<AgentTreeInput> = { ...before, agents: [rec('aaaa0001', { firstTs: NOW - 40 * MIN, lastTs: NOW - MIN })] }
+  const now = build(after)
+  assert.deepEqual(now.roots.map((r) => [r.key, r.state]), [[rootKey, 'active']])
+  assert.equal(stateText(after, rootKey), 'Active — inferred: an agent of this session is running.')
+  // The running list is built before the split: every key, in the same order, with and without it —
+  // and no running node is ever inside the group.
+  for (const over of [before, after, earlierWorld().over, { ...earlierWorld().over, agents: [...(earlierWorld().over.agents ?? []), rec('ffff0001', { sessionId: 'idl00007-0000-4000-8000-000000000000' })] }]) {
+    for (const mode of ['page', 'text'] as const) {
+      const split = buildAgentTree(input({ ...over, mode }), NOW)
+      const flat = buildAgentTree(input({ ...over, mode, split: false }), NOW)
+      assert.deepEqual([split.running, split.runningNow, split.runningMore], [flat.running, flat.runningNow, flat.runningMore], mode)
+      const group = split.roots.find((r) => r.kind === 'group')
+      if (group) assert.equal(all(group.children).some((n) => n.state === 'running'), false, 'a running node in the group')
+      // Without the split every session is a root, as in 1.6.
+      assert.equal(flat.roots.some((r) => r.kind === 'group'), false)
+    }
+  }
+})
+
+test('1.7 F2: no earlier session, no group; no active one, the group alone; nothing at all, the 1.6 note', () => {
+  const onlyActive = build({ mains: [main(), main({ sessionId: S2, lastTs: NOW - 3 * MIN })] })
+  assert.deepEqual(onlyActive.roots.map((r) => r.kind), ['session', 'session'])
+  const onlyEarlier = build({ mains: [main({ lastTs: NOW - 3 * HOUR }), main({ sessionId: S2, lastTs: NOW - 2 * HOUR })] })
+  assert.deepEqual(onlyEarlier.roots.map((r) => [r.kind, r.label]), [['group', 'Earlier sessions (2)']])
+  assert.deepEqual(onlyEarlier.roots[0].children.map((c) => c.key), [`s:${S2}`, rootKey])
+  assert.equal(onlyEarlier.note, null)
+  const nothing = build({ mains: [] })
+  assert.deepEqual([nothing.roots, nothing.note, nothing.omittedRoots], [[], 'No Claude Code session in the last 7 days.', 0])
+  // In German, the group's words too.
+  assert.equal(german(() => build({ mains: [main({ lastTs: NOW - 3 * HOUR })] })).roots[0].label, 'Frühere Sitzungen (1)')
+})
+
+test('1.7 F2: a node inside the closed group has no panel and no note; opened, its details come back; the group itself has none', () => {
+  const E1 = 'eeee0001-0000-4000-8000-000000000000'
+  const over: Partial<AgentTreeInput> = {
+    mains: [main(), main({ sessionId: E1, lastTs: NOW - 2 * HOUR, firstTs: NOW - 3 * HOUR })],
+    agents: [rec('bbbb0001', { sessionId: E1, firstTs: NOW - 3 * HOUR, lastTs: NOW - 2 * HOUR - 10 * MIN, outcome: 'completed', outcomeTs: NOW - 2 * HOUR - 10 * MIN })],
+  }
+  const agent = agentKey('bbbb0001')
+  const session = `s:${E1}`
+  // Closed: no row for it on the page, so no panel — and no note, since opening the group brings it back.
+  const shut = page({ ...over, selected: agent })
+  assert.deepEqual([shut.selected, shut.note], [null, null])
+  // The group open, the session closed: still inside a closed branch.
+  const half = page({ ...over, selected: agent, expanded: [EARLIER_KEY] })
+  assert.deepEqual([half.selected, half.note], [null, null])
+  // Both open: its details, as anywhere in the tree; the session's own too.
+  const opened = page({ ...over, selected: agent, expanded: [EARLIER_KEY, session] })
+  assert.deepEqual([opened.selected?.key, opened.selected?.state, opened.note], [agent, 'done', null])
+  assert.deepEqual(opened.selected, agentDetails(input(over), NOW, agent))
+  assert.equal(page({ ...over, selected: session, expanded: [EARLIER_KEY] }).selected?.key, session)
+  // The markdown prints every node, so it has the details wherever the node sits.
+  assert.equal(build({ ...over, selected: agent }).selected?.key, agent)
+  // The group has no details: a stored selection of it — none can be made — opens none and leaves no note.
+  for (const expanded of [[], [EARLIER_KEY]]) {
+    const g = page({ ...over, selected: EARLIER_KEY, expanded })
+    assert.deepEqual([g.selected, g.note], [null, null], expanded.join())
+  }
+  assert.deepEqual([build({ mains: [main()], selected: EARLIER_KEY }).selected, build({ mains: [main()], selected: EARLIER_KEY }).note], [null, null])
+  assert.equal(agentDetails(input(over), NOW, EARLIER_KEY), null)
+  // A selected session that turns idle moves into the group, which stays closed: nothing opens by itself.
+  const selectedActive = page({ mains: [main()], selected: rootKey, expanded: [] })
+  assert.equal(selectedActive.selected?.key, rootKey)
+  const turnedIdle = page({ mains: [main({ lastTs: NOW - 20 * MIN })], selected: rootKey, expanded: [] })
+  assert.deepEqual([turnedIdle.roots.map((r) => r.key), turnedIdle.roots[0].children, turnedIdle.selected, turnedIdle.note],
+    [[EARLIER_KEY], [], null, null])
+})
+
+test('1.7 F2: the export reads the forest — the same agents with and without the group', () => {
+  const w = earlierWorld()
+  const over: Partial<AgentTreeInput> = {
+    ...w.over,
+    agents: [...(w.over.agents ?? []), rec('aaaa0001', { sessionId: w.active[0] }),
+      rec('bbbb0001', { sessionId: w.earlier[2], firstTs: NOW - 3 * HOUR, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR }),
+      // In a session past the group's MAX_ROOTS: no row anywhere, a row of the export all the same.
+      rec('cccc0001', { sessionId: w.earlier[24], firstTs: NOW - 13 * HOUR, lastTs: NOW - 12 * HOUR - 50 * MIN })],
+  }
+  assert.equal(build(over).roots.some((r) => r.kind === 'group'), true)
+  const views = agentRecordViews(input(over), NOW)
+  assert.deepEqual(views, agentRecordViews(input({ ...over, split: false }), NOW))
+  assert.deepEqual(views.map((v) => v.agentId).sort(), ['aaaa0001', 'bbbb0001', 'cccc0001', 'dddd0001'])
 })

@@ -13,7 +13,8 @@ the agents those spawned in turn — with the state of every node, what it used 
 took. Above the tree, the first thing in the section, a list names the agents that are running
 right now, so you do not have to look for them in the tree; its first line opens, on request, a
 block of where the agent tokens of the last seven days went (see [Last 7 days](#last-7-days));
-the tree itself starts closed, with only the sessions showing. It is on by default, directly after `quota` in
+the tree itself starts closed, with only the active sessions showing and, after them, one closed
+row that holds every other session (see [The tree](#the-tree)). It is on by default, directly after `quota` in
 `tokenPace.dashboard.sections`; a list you have set yourself is kept as it is, so there the
 section appears once you add `agents` to it. The range and model chips do not apply:
 the section is always the last seven days, so the filter bar stays below it. The provider switch at
@@ -23,9 +24,11 @@ Text* prints the running list, the 7-day block while you have it open, and then 
 sessions it lists as indented lists — every node open, at most 50 children each and at most 2000
 nodes in all (see [The tally](#the-tally)) — with the open node's details as a table. *Show Usage (Quick Pick)* has a group `Agents` after the quota: the
 first five entries of the running list, one row for the rest, and the sessions' tallies added
-together — `Last 7 days: 14 started · 5 ✓ · 2 ✕ · …`, in words beside it —, every row opening the
-dashboard; past the 20 sessions the tree lists, that row names the sessions it counts and how
-many older ones it leaves out (`14 started · … · the 20 most recent sessions of the last 7 days`). The CSV and JSON exports carry the agents too (see [Export and diagnostics](export.md)).
+together — the earlier sessions' too, whose group is closed on the dashboard —
+(`Last 7 days: 14 started · 5 ✓ · 2 ✕ · …`, in words beside it), every row opening the
+dashboard; past the sessions the tree lists — at most 20 active ones and 20 earlier ones — that
+row names how many sessions it counts and how many older ones it leaves out
+(`14 started · … · the 23 most recent sessions of the last 7 days`). The CSV and JSON exports carry the agents too (see [Export and diagnostics](export.md)).
 
 Claude Code only. Codex writes no agent identity into its transcripts, and the section states
 nothing about Codex.
@@ -150,10 +153,13 @@ the section's push: they count against its cap of nodes (see
 
 ## The tree
 
-**Sessions** are the roots, the most recent first. A session is listed when its own transcript
-recorded a response within the last 24 hours, or when it has an agent or a launch from the last
-seven days, or a workflow run whose journal changed in them. At most **20** sessions are listed; the rest are counted under the tree
-(`3 older session(s) not shown.`). A session is **named by when it started**, then by the first
+**Active sessions** are the roots, the most recent first; every other session is in one closed
+row after them, the earlier sessions. A session is in the tree when its own
+transcript recorded a response within the last 24 hours, or when it has an agent or a launch from
+the last seven days, or a workflow run whose journal changed in them; it is active while its own
+transcript recorded a response within the last ten minutes, or while one of its agents runs. At most **20**
+sessions are listed as roots, and at most **20** inside the group of earlier sessions; the rest are
+counted under the tree (`3 older session(s) not shown.`). A session is **named by when it started**, then by the first
 eight characters of its id: `Session Tue 14:20 · 9d0eb37a` — its first line's weekday and clock
 time while that lies within the last **6 days**, its date and clock time before that
 (`Session 2026-09-01 14:20 · 9d0eb37a`), in the zone `tokenPace.timezone` names and the clock
@@ -164,8 +170,25 @@ The id is in the figures' dim tone; the project follows it while `tokenPace.attr
 `project` or `session` — the label the Sessions table shows, hashed too under
 `showProjectNames: hash`. With `attribution: none` no project is named anywhere in the tree.
 
-**Closed by default.** Only the sessions show until you open one; an opened node shows its
-children closed in turn. Each session says under its name what its agents came to — its
+**Earlier sessions.** Every session that is not active — idle, or one whose own transcript was
+never read — sits in one row after the active ones, always the last root: `Earlier sessions (12)`,
+its number the sessions it holds, the most recent first inside it. It starts closed, and opens and
+closes like any node — a click on its row or its toggle, `Enter`, `Space`, `→` and `←` on it — and
+stays as you left it. It is a container, not a thing with a state: it has no glyph (its column is
+kept empty, so its name starts where the sessions' names start), no details and no figures of its
+own; its second line is what the agents of the sessions it holds came to, their tallies added —
+`40 started · 31 ✓ · 3 ✕ · 6 ↻`, the same whether it is open or closed — or `–` when none of them
+started an agent. A session moves out of the group as soon as it is active again — its own
+transcript changes, or an agent of it starts running, and its state then says so (`Active —
+inferred: an agent of this session is running.`) — and back into it once it is idle, so a running
+agent is never inside the group, and the running list above the tree is the same with the group as
+without it. Nothing opens by itself: a session whose details are open and that turns idle moves
+into the closed group, and its details come back when you open the group again. The markdown
+report prints the group as a list item without a state or a figure, its sessions one level in:
+`- Earlier sessions (12) (40 started · 31 ✓ · 3 ✕ · 6 ↻)`.
+
+**Closed by default.** Only the active sessions and the group of earlier ones show until you open
+one; an opened node shows its children closed in turn. Each session says under its name what its agents came to — its
 [tally](#the-tally), `12 started · 3 ✓ · 1 ✕ · 2 ↻ · 1 ■ · ~4 ● · ~1 ?` — so a closed session
 already tells a run that went well from one that did not. A run whose agents no transcript shows
 has nothing to open: it has no toggle, and its tally still says what is below it. What you open
@@ -363,7 +386,8 @@ none, a launch — has no tally, rather than a `0 started`. The markdown report 
 tally after its name in brackets, on every node that has one:
 `[~Running] Workflow run Tue 11:50 · cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s` — the
 names the tree's, the id plain and the model whole. It prints
-every node of the 20 sessions the tree lists, open on the dashboard or not, at most 50 children
+every node of the sessions the tree lists — the active ones and, open, the group of earlier ones —,
+open on the dashboard or not, at most 50 children
 each, and one line at their depth for the rest: `… 377 more`. It keeps to the page's cap as well
 — at most **2000** nodes in the whole report, filled in the same order —, so a node whose fifty
 no longer fit prints none of them, only the line for all of its children.
@@ -951,7 +975,8 @@ A node with children has a toggle (▸ closed, ▾ open) in front of its row —
 `←` on the item, opens and closes it; the tree starts with every node closed. Which nodes you opened and which node's details are open are kept with the
 rest of the dashboard's view state — range, sort, filters, folded sections — in the extension's
 own storage, so they survive a push, a reload and a restart; selecting a node never opens
-anything by itself. Only node keys are kept, made of the session, run, agent or launch id: the
+anything by itself. Only node keys are kept, made of the session, run, agent or launch id — and
+the one key of the group of earlier sessions, which names none —: the
 opened nodes' keys and the selected one's — with which of its rows its details open under, the
 tree's, the running list's or the 7-day block's — and whether the [7-day block](#last-7-days) is
 open, never a label, a figure or anything from a
@@ -961,12 +986,15 @@ place for good. A key whose node has gone matches nothing. How many children an 
 is kept the same way: the "more" steps of at most 200 nodes, the one taken longest ago forgotten
 first, and closing a node forgets its steps — opened again, it shows its first fifty. The details
 open for a node whose row is on the page — in the tree, in the running list, or among the open
-7-day block's largest agents. A selected node
-inside a closed branch has no row there: its details stay shut, without a word, until the branch
-is opened again, and the markdown report, which prints every node, shows them all the same. A
+7-day block's largest agents. The group of earlier sessions has no details: a click on its row
+opens or closes it. A selected node
+inside a closed branch has no row there — inside the closed group of earlier sessions too —: its
+details stay shut, without a word, until the branch is opened again, and the markdown report,
+which prints every node, shows them all the same. A
 selected node that is gone says so instead (`The selected node is no longer in the tree.`). That
 is an agent or a launch older than seven days, a session without agents that has been quiet for
-more than 24 hours, and any node of a session beyond the 20 listed that neither the running list
+more than 24 hours, and any node of a session beyond the 20 active ones listed or the 20 the group
+of earlier sessions holds that neither the running list
 nor the open 7-day block names — the session itself, or one of its agents once it has stopped
 running and is not among the largest. *Clear Stored
 Data…* removes them with the rest of the dashboard view state.

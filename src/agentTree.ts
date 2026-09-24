@@ -17,7 +17,17 @@ export const RUNNING_WINDOW_MS = 10 * 60_000
 export const SESSION_ACTIVE_MS = 10 * 60_000
 /** Sessions without agents appear only if active within this. */
 export const ROOT_WINDOW_MS = 24 * 3_600_000
+/**
+ * The most sessions the tree lists as roots — and, 1.7 F2, the most earlier sessions the one group
+ * of them holds; the sessions past either are counted in `AgentTreeVm.omittedRoots`.
+ */
 export const MAX_ROOTS = 20
+/**
+ * 1.7 F2: the key of the one group of earlier sessions — every session that is not active, in one
+ * closed row after the active ones. A prefix no other node key has (`s:` `w:` `a:` `l:` `n:`), and
+ * no identifier in it: the group stands for no record.
+ */
+export const EARLIER_KEY = 'g:earlier'
 export const MAX_TREE_DEPTH = 6
 /**
  * D3 (1.6): the children an opened node shows at first, and how many more each "more" step shows —
@@ -154,7 +164,7 @@ export interface AgentTally {
 export interface TreeNode {
   /**
    * Stable, never a path: `s:<sessionId>` | `w:<sessionId>|<wfId>` | `a:<agentId>` | `l:<toolUseId>`
-   * | `n:<sessionId>|<wfId>` (a run's collector, D4).
+   * | `n:<sessionId>|<wfId>` (a run's collector, D4) | `g:earlier` (the earlier sessions, 1.7 F2).
    */
   key: string
   /**
@@ -162,9 +172,13 @@ export interface TreeNode {
    * every agent of the run without a counted reply — started by the run's journal with no
    * transcript read, or with a transcript of nothing but rejected requests — always the run's
    * last child, counted, not listed: no children, dashes for its figures, its members in its
-   * label, its tally and its state.
+   * label, its tally and its state. `group` (1.7 F2) = the earlier sessions: every session that is
+   * not active, in one row after the active ones, always the last root — a container, not a thing
+   * with a state: no details, no glyph, dashes for its figures; its label counts the sessions it
+   * holds, its tally sums theirs. Its `state` (`idle`, derived) is only there because every node
+   * has one; no renderer shows it.
    */
-  kind: 'session' | 'workflow' | 'agent' | 'pending' | 'noreply'
+  kind: 'session' | 'workflow' | 'agent' | 'pending' | 'noreply' | 'group'
   /**
    * N6 (1.6): the name the row writes on its first line — "Explore · opus-5 · 94f3", "Session Tue
    * 14:20 · 9d0eb37a", "Workflow run Tue 00:19 · 0133faf9". An agent's last part is its short id:
@@ -473,6 +487,10 @@ export interface AgentWeek {
 }
 
 export interface AgentTreeVm {
+  /**
+   * 1.7 F2: the active sessions, most recent first, at most MAX_ROOTS — then, when any session is
+   * not active, one node of kind `group` (`EARLIER_KEY`), always last, which holds them.
+   */
   roots: TreeNode[]
   selected: NodeDetails | null
   /**
@@ -489,7 +507,10 @@ export interface AgentTreeVm {
   runningNow: RunningItem[]
   /** Running agents and launches beyond MAX_RUNNING_LIST, not listed. */
   runningMore: number
-  /** Roots beyond MAX_ROOTS. */
+  /**
+   * Sessions the tree does not list: the active ones beyond MAX_ROOTS, and (1.7 F2) the earlier
+   * ones beyond the MAX_ROOTS the group holds.
+   */
   omittedRoots: number
   /**
    * E.g. "No Claude Code session in the last 7 days." The tree carries no time of its own: an

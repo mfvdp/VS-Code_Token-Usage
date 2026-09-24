@@ -410,12 +410,14 @@ const TALLY_FIELDS = ['started', 'done', 'failed', 'retried', 'stopped', 'runnin
 /**
  * What the listed sessions' agents came to together — each session's tally, counted on its whole
  * tree, summed field by field; null when no session has an agent, as a session without one has no
- * tally (never "0 started"). A field that is not a count counts nothing.
+ * tally (never "0 started"). A field that is not a count counts nothing. 1.7 F2: the group of
+ * earlier sessions counts with its own tally — the sum of its sessions' — since a closed group
+ * ships none of them.
  */
 function combinedTally(roots: readonly TreeNode[]): AgentTally | null {
   const sum: AgentTally = { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0 }
   for (const r of roots) {
-    const x = r.kind === 'session' ? r.tally : null
+    const x = r.kind === 'session' || r.kind === 'group' ? r.tally : null
     if (!x || typeof x !== 'object') continue
     for (const k of TALLY_FIELDS) {
       const n = x[k]
@@ -423,6 +425,19 @@ function combinedTally(roots: readonly TreeNode[]): AgentTally | null {
     }
   }
   return sum.started > 0 ? sum : null
+}
+
+/**
+ * 1.7 F2: how many sessions the tree lists — its session roots, and the sessions the group of
+ * earlier sessions holds (its `childrenTotal`, which a closed group ships none of).
+ */
+function listedSessions(roots: readonly TreeNode[]): number {
+  let n = 0
+  for (const r of roots) {
+    if (r.kind === 'session') n++
+    else if (r.kind === 'group' && typeof r.childrenTotal === 'number' && Number.isInteger(r.childrenTotal) && r.childrenTotal > 0) n += r.childrenTotal
+  }
+  return n
 }
 
 /**
@@ -464,12 +479,13 @@ function agentPickLines(vm: ViewModel): PickItem[] {
     // Every session the tree has, or — past MAX_ROOTS — the ones it lists, and the row says so:
     // the older sessions' agents are in no tally the view model carries. The span leads the row
     // (1.6 P16, §7c Wave D): as a ' · last 7 days' tail it read as one more part of the tally,
-    // whose parts the same separator joins.
+    // whose parts the same separator joins. 1.7 F2: the sessions listed are the active roots and
+    // the ones the group of earlier sessions holds.
     const omitted = typeof a.omittedRoots === 'number' && a.omittedRoots > 0 ? a.omittedRoots : 0
     out.push({
       label: omitted === 0
         ? t('Last 7 days: {0}', tallyText(tally))
-        : t('{0} · the {1} most recent sessions of the last 7 days', tallyText(tally), full(a.roots.length)),
+        : t('{0} · the {1} most recent sessions of the last 7 days', tallyText(tally), full(listedSessions(a.roots))),
       description: omitted > 0 ? t('{0} older session(s) not counted.', full(omitted)) : undefined,
       detail: tallySpoken(tally),
       command: 'tokenPace.showDashboard',
@@ -676,9 +692,13 @@ function fullName(n: { label: string; fullLabel?: string }): string {
  * a session's and a run's do.
  */
 function agentNodeLine(n: TreeNode): string {
+  const tally = typeof n.tallyText === 'string' && n.tallyText !== '' ? ` (${cell(n.tallyText)})` : ''
+  // 1.7 F2: the group of earlier sessions is a container, not a thing with a state: its words and
+  // what its sessions' agents came to — "Earlier sessions (12) (40 started · 31 ✓ · 3 ✕ · 6 ↻)" —
+  // without a [state] and without figures; its sessions follow one level in.
+  if (n.kind === 'group') return `${cell(fullName(n))}${tally}`
   const word = agentStateWord(n.state)
   const state = n.derived ? estimate(word) : word
-  const tally = typeof n.tallyText === 'string' && n.tallyText !== '' ? ` (${cell(n.tallyText)})` : ''
   const name = (n.sub ? `${cell(fullName(n))} — ${cell(n.sub)}` : cell(fullName(n))) + tally
   const mark = n.lowerBound ? ' ⚠' : ''
   // 1.6 O4: the agent hook's marker after the usage, where the dashboard's row has it.

@@ -21,6 +21,7 @@ import {
   AGENT_ID_MAX_CHARS, AGENT_TABLES_REVISION, Aggregator, PENDING_MODE_MAX, PERMISSION_MODE_RE, TOOL_ERROR_LITERAL, cacheMissOf,
   compactionOf, permissionModeOf, toolErrorsOf, versionOf,
 } from '../src/agg'
+import { EARLIER_KEY } from '../src/agentTree'
 import { configureRoots } from '../src/discover'
 import { agentRows, agentsCsv, toCsv, toJson } from '../src/exporter'
 import { agentReplayFiles, replayAgents, scan } from '../src/scan'
@@ -514,7 +515,8 @@ function pageOf(vm: ViewModel): string {
 /** Everything that leaves the aggregator: the snapshot, the view models, the page, the markdown, the exports. */
 function outputsOf(agg: Aggregator, live: Aggregator): Array<[string, string]> {
   const cfg = makeConfig()
-  const ui: Partial<UiState> = { agentsExpanded: [`s:${SESSION}`, 'a:abc123'], agentSelected: 'a:abc123' }
+  // 1.7 F2: the session is quiet by now — an earlier one, in the group, which the reader opens too.
+  const ui: Partial<UiState> = { agentsExpanded: [EARLIER_KEY, `s:${SESSION}`, 'a:abc123'], agentSelected: 'a:abc123' }
   const input = makeInput({ agg, cfg, ui })
   const vms = ['a:abc123', 'a:0ff1ce', `s:${SESSION}`].map((key) => buildViewModel({ ...input, ui: { ...input.ui, agentSelected: key } }))
   const range = { from: '2026-09-01', to: '2026-09-03' }
@@ -530,7 +532,7 @@ function outputsOf(agg: Aggregator, live: Aggregator): Array<[string, string]> {
 
 /** The details rows the view model gives the node, by label. */
 function detailsOf(agg: Aggregator, key: string): Map<string, string> {
-  const input = makeInput({ agg, cfg: makeConfig(), ui: { agentsExpanded: [`s:${SESSION}`, 'a:abc123'], agentSelected: key } })
+  const input = makeInput({ agg, cfg: makeConfig(), ui: { agentsExpanded: [EARLIER_KEY, `s:${SESSION}`, 'a:abc123'], agentSelected: key } })
   return new Map((buildViewModel(input).agents.selected?.rows ?? []).map((r) => [r.label, r.note ? `${r.value} | ${r.note}` : r.value]))
 }
 
@@ -615,9 +617,10 @@ test('§0a.11 leak test: the sidecar\'s parent links the nested agent to its spa
   assert.equal(agentOf(agg, w.nested).meta?.parentAgentId, 'abc123')
   assert.equal(agentOf(agg, w.nested).spawnerFile, null, 'no launch names its spawner: the sidecar does')
   // In the tree it hangs under the agent that spawned it, and its details name that agent.
-  const input = makeInput({ agg, cfg: makeConfig(), ui: { agentsExpanded: [`s:${SESSION}`, 'a:abc123'], agentSelected: 'a:0ff1ce' } })
+  const input = makeInput({ agg, cfg: makeConfig(), ui: { agentsExpanded: [EARLIER_KEY, `s:${SESSION}`, 'a:abc123'], agentSelected: 'a:0ff1ce' } })
   const vm = buildViewModel(input)
-  const bg = vm.agents.roots[0].children.find((c) => c.key === 'a:abc123')
+  // 1.7 F2: the session, quiet by now, is the first the group of earlier sessions holds.
+  const bg = vm.agents.roots[0].children[0].children.find((c) => c.key === 'a:abc123')
   assert.deepEqual(bg?.children.map((c) => c.key), ['a:0ff1ce'])
   assert.equal(vm.agents.selected?.rows.find((r) => r.label === 'Spawned by')?.value, bg?.fullLabel)
   assert.equal(agentRows(agg, { from: '2026-09-01', to: '2026-09-03' }, makeConfig(), utc, VNOW).find((r) => r.agentId === '0ff1ce')?.spawnedBy, 'abc123')

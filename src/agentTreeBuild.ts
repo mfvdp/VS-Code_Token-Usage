@@ -33,7 +33,7 @@
  */
 
 import {
-  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, AgentWeek, AgentWeekRow, AgentWeekTop, DetailRow, HOOK_MAX_AGE_MS, HookEntry,
+  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, AgentWeek, AgentWeekRow, AgentWeekTop, DetailRow, EARLIER_KEY, HOOK_MAX_AGE_MS, HookEntry,
   HookWait, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, MixPart,
   NodeDetails, NodeState, PER_MINUTE_FROM_MS, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS,
   SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS, hookKey,
@@ -103,6 +103,13 @@ export interface AgentTreeInput {
    * then no node carries a marker.
    */
   hook?: ReadonlyMap<string, HookEntry>
+  /**
+   * 1.7 F2: `false` lists every session as a root of its own, as 1.6 did — no group of earlier
+   * sessions. Absent (the default) splits them. Only the tests pass it, to hold what the split must
+   * not change — the running list, the tallies, the export — equal with and without it; the view
+   * model never does.
+   */
+  split?: boolean
   tcfg: TimeConfig
 }
 
@@ -2556,7 +2563,9 @@ function agentCounts(roots: Entry[]): Map<Entry, number> {
 function contextOf(e: Entry): string {
   let root = e
   let run: Entry | null = null
-  for (let p = e.parent; p !== null; p = p.parent) {
+  // 1.7 F2: an earlier session's node sits in the group of earlier sessions, which is where it is
+  // on the page, not where it belongs: the line names its session, never the group.
+  for (let p = e.parent; p !== null && p.kind !== 'group'; p = p.parent) {
     if (run === null && p.kind === 'workflow') run = p
     root = p
   }
@@ -2765,6 +2774,71 @@ function weekOf(roots: readonly Entry[], pricing: PricingOptions | null, tcfg: T
 }
 
 /**
+ * 1.7 F2: the one group of earlier sessions — every root that is not active, most recent first, at
+ * most MAX_ROOTS of them (the caller cuts) — as a node of the page's roots, always the last one. A
+ * container, not a thing with a state: its label counts the sessions it holds ("Earlier sessions
+ * (12)"), its tally is theirs summed field by field — each session's own, taken on the whole
+ * forest, so a closed group that ships no child still says what their agents came to — and so is
+ * its count of agents; its figures are dashes, its last activity its newest member's, and it has
+ * no details, no id and no start (§2.7 of the 1.7 spec). `idle` and derived only because every
+ * node has a state; no renderer shows it.
+ *
+ * The sessions become its children for the page's paths — the payload ships them only while the
+ * group is open (1.6 D3), and a node inside it is reachable through it — and nothing else changes:
+ * the forest's keys, the running list, the sessions' own tallies and the 7-day block were taken
+ * before, and the line of where an agent sits names its session, never the group (contextOf).
+ */
+function earlierGroup(sessions: readonly Entry[], counts: Map<Entry, number>): Entry {
+  const sum = noTally()
+  let agents = 0
+  let last: number | null = null
+  for (const s of sessions) {
+    if (s.tally !== null) for (const k of Object.keys(sum) as Array<keyof AgentTally>) sum[k] += s.tally[k]
+    agents += counts.get(s) ?? 0
+    const at = s.lastTs ?? (latest(s) || null)
+    if (at !== null && (last === null || at > last)) last = at
+  }
+  const label = t('Earlier sessions ({0})', full(sessions.length))
+  const g: Entry = {
+    key: EARLIER_KEY,
+    kind: 'group',
+    label,
+    fullLabel: label,
+    idName: null,
+    sub: null,
+    state: 'idle',
+    stateText: '',
+    usage: '–',
+    usageAgents: null,
+    lowerBound: false,
+    lowerBoundText: null,
+    duration: '–',
+    startTs: null,
+    lastTs: last,
+    id: null,
+    parent: null,
+    children: [],
+    waiting: false,
+    workflowId: null,
+    counters: null,
+    superseded: false,
+    rejected: null,
+    collected: [],
+    // A group of sessions none of which has an agent claims no "0 started": a dash, as a session's.
+    tally: sum.started > 0 ? sum : null,
+    effort: null,
+    overview: null,
+    week: null,
+    hookWait: null,
+    hookAt: null,
+    rows: () => [],
+  }
+  for (const s of sessions) attach(s, g)
+  counts.set(g, agents)
+  return g
+}
+
+/**
  * The "more" steps of an open node the reader took: a whole number from 0 to MAX_MORE_PAGES.
  * The stored list is the view state's, and was checked on the way in; it is checked again
  * here, since a count out of range would ask for a window nobody can page back from.
@@ -2779,8 +2853,10 @@ function pagesFrom(more: AgentTreeInput['more']): Map<string, number> {
 }
 
 /**
- * The tree for the view model (1.6 D3): at most MAX_ROOTS sessions, most recent first; of them
- * only what is open — in `page` mode a node carries its children only while the reader opened
+ * The tree for the view model (1.6 D3): at most MAX_ROOTS active sessions, most recent first, then
+ * (1.7 F2) one closed group of the earlier ones — every session that is not active, at most
+ * MAX_ROOTS of them, most recent first; of them only what is open — in `page` mode a node carries
+ * its children only while the reader opened
  * it, at most MAX_GROUP_CHILDREN of them and as many again per "more" step, with the path to
  * the selected node and the running children pinned in, the whole payload at most
  * MAX_PAGE_NODES nodes; in `text` mode every node is open, MAX_GROUP_CHILDREN children each.
@@ -2794,7 +2870,16 @@ function pagesFrom(more: AgentTreeInput['more']): Map<string, number> {
 export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm {
   const forest = buildForest(input, now)
   const whole = input.mode === 'text'
-  const shown = forest.roots.slice(0, MAX_ROOTS)
+  // 1.7 F2: the roots split, in their order, into the active sessions — an own line within
+  // SESSION_ACTIVE_MS, or a running member (the roll-up of buildRoot), so no running node is ever
+  // among the others — and the earlier ones, idle or unknown, which the page shows in one group
+  // after them. A presentation of the roots, never a filter of the forest: the running list, the
+  // tallies, the counts and the 7-day block below are all taken on every root.
+  const split = input.split !== false
+  const active = split ? forest.roots.filter((r) => r.state === 'active') : forest.roots
+  const earlier = split ? forest.roots.filter((r) => r.state !== 'active') : []
+  const listedActive = active.slice(0, MAX_ROOTS)
+  const inGroup = earlier.slice(0, MAX_ROOTS)
   const selectedKey = text(input.selected)
   const selected = selectedKey !== null ? forest.byKey.get(selectedKey) ?? null : null
   // Every root, listed or not: the host polls while anything runs, wherever it sits — every
@@ -2805,6 +2890,8 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
   const listed = live.slice(0, MAX_RUNNING_LIST)
   const listedKeys = new Set(listed.map((e) => e.key))
   const counts = agentCounts(forest.roots)
+  const group = inGroup.length > 0 ? earlierGroup(inGroup, counts) : null
+  const shown = group !== null ? [...listedActive, group] : listedActive
   const opened = new Set(Array.isArray(input.expanded) ? input.expanded.filter((k) => typeof k === 'string') : [])
   const pages = whole ? new Map<string, number>() : pagesFrom(input.more)
   const isOpen = (e: Entry): boolean => whole || opened.has(e.key)
@@ -2856,14 +2943,16 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     }
   }
 
-  // A selected node is reachable while its session is listed, or while the running list or the
+  // A selected node is reachable while its session is listed — among the active roots, or (1.7
+  // F2) in the group of earlier sessions, open or closed —, or while the running list or the
   // open 7-day block names it — both hold agents of sessions beyond MAX_ROOTS too; anything else — its
   // session not listed and itself not running, or gone from the records — gets the note, since
   // a stored selection that opens nothing would otherwise look like a panel that failed. A
   // reachable node gets its details while its row is on the page: in the payload, in the running
   // list, or in the block. One inside a closed branch has no row there and gets no panel and no note —
   // opening the branch brings the panel back, and nothing on the page could close a panel that
-  // stood for a row nobody sees. The markdown prints every node, so it always has the row.
+  // stood for a row nobody sees — a node inside the closed group of earlier sessions (1.7 F2) is such
+  // a node. The markdown prints every node, so it always has the row.
   let top: Entry | null = selected
   while (top !== null && top.parent !== null) top = top.parent
   const reachable = selected !== null
@@ -2879,7 +2968,9 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
       ? t('No agent in the last {0} days, and no Claude Code session in the last {1} hours.',
         AGENT_RETENTION_DAYS, ROOT_WINDOW_MS / HOUR_MS)
       : t('No Claude Code session in the last 7 days.')
-  } else if (selectedKey !== null && !reachable) {
+  } else if (selectedKey !== null && !reachable && selectedKey !== EARLIER_KEY) {
+    // 1.7 F2: the group has no details, and a stored selection of it — none can be made — is a
+    // node without details: no panel, and no note that it is gone.
     note = t('The selected node is no longer in the tree.')
   }
   return {
@@ -2888,7 +2979,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
     running,
     runningNow: listed.map((e) => runningItem(e, now, input.tcfg)),
     runningMore: Math.max(0, live.length - MAX_RUNNING_LIST),
-    omittedRoots: Math.max(0, forest.roots.length - MAX_ROOTS),
+    omittedRoots: (active.length - listedActive.length) + (earlier.length - inGroup.length),
     note,
     week,
   }
@@ -2899,6 +2990,8 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
  * null when no node has that key.
  */
 export function agentDetails(input: AgentTreeInput, now: number, key: string): NodeDetails | null {
+  // 1.7 F2: the group of earlier sessions is a container, not a node with details.
+  if (key === EARLIER_KEY) return null
   const e = buildForest(input, now).byKey.get(key)
   return e ? detailsOf(e) : null
 }

@@ -17,7 +17,7 @@ import { after, test } from 'node:test'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as nodeVm from 'node:vm'
-import { NodeDetails, RESUMED_AFTER_MS, TreeNode } from '../src/agentTree'
+import { EARLIER_KEY, NodeDetails, RESUMED_AFTER_MS, TreeNode } from '../src/agentTree'
 import { AGENT_TABLES_REVISION, Aggregator } from '../src/agg'
 import { configureRoots } from '../src/discover'
 import { agentsCsv, toCsv, toJson } from '../src/exporter'
@@ -656,7 +656,8 @@ test('§0a.12 leak test: a record\'s script, logs, prompts, results and account 
   assert.deepEqual(Object.keys(runOfAgg(agg).record as object).sort(), [...RUN_RECORD_KEYS].sort())
 
   const cfg = makeConfig()
-  const expanded = [`s:${SESSION}`, RUN_KEY]
+  // 1.7 F2: the session is quiet by now — an earlier one, in the group, which the reader opens too.
+  const expanded = [EARLIER_KEY, `s:${SESSION}`, RUN_KEY]
   const input = makeInput({ agg, cfg, ui: { agentsExpanded: expanded, agentSelected: RUN_KEY } })
   const vm = buildViewModel(input)
   assert.equal(vm.agents.selected?.key, RUN_KEY)

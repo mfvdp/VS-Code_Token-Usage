@@ -583,7 +583,9 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   const claims: Array<[string, string]> = [
     [`the last **${AGENT_RETENTION_DAYS} days**`, 'what the tree covers'],
     [`**${AGENT_RETENTION_DAYS} days** after its last line`, 'when a record is dropped'],
-    [`At most **${MAX_ROOTS}** sessions`, 'the session cap'],
+    // 1.7 F2 (pinned and changed): the cap on the active sessions, and the same cap inside the group
+    // of earlier sessions.
+    [`At most **${MAX_ROOTS}** sessions are listed as roots, and at most **${MAX_ROOTS}** inside the group of earlier sessions`, 'the session caps'],
     // 1.6 D3 (§7a Q15): the node cap became a window per node and a stated cap on the payload.
     [`at most **${MAX_GROUP_CHILDREN}** of its children at a time`, 'the window of an opened node'],
     [`at most **${MAX_MORE_PAGES}** times`, 'the most "more" steps of one node'],
@@ -635,6 +637,30 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
   for (const [claim, what] of claims) {
     assert.ok(flat.includes(claim), `docs/agents.md does not state ${what}: ${claim}`)
   }
+})
+
+test('docs/agents.md says what the group of earlier sessions is, as the tree builds it (1.7 F2)', () => {
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of [
+    '**Active sessions** are the roots, the most recent first; every other session is in one closed row after them',
+    'Every session that is not active — idle, or one whose own transcript was never read — sits in one row after the active ones, always the last root: `Earlier sessions (12)`',
+    'It is a container, not a thing with a state: it has no glyph',
+    'no details and no figures of its own; its second line is what the agents of the sessions it holds came to, their tallies added',
+    'or `–` when none of them started an agent',
+    '`Active — inferred: an agent of this session is running.`',
+    'so a running agent is never inside the group, and the running list above the tree is the same with the group as without it',
+    '`- Earlier sessions (12) (40 started · 31 ✓ · 3 ✕ · 6 ↻)`',
+    'The group of earlier sessions has no details: a click on its row opens or closes it.',
+    'inside the closed group of earlier sessions too',
+    '`14 started · … · the 23 most recent sessions of the last 7 days`',
+  ]) assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  // The sentences the tree's own words say, word for word.
+  const tree = readDoc('src/agentTreeBuild.ts')
+  assert.ok(tree.includes("t('Earlier sessions ({0})'"), 'the group is no longer named so')
+  assert.ok(tree.includes("t('Active — inferred: an agent of this session is running.')"))
+  assert.equal(flat.includes('Only the sessions show until you open one'), false, 'docs/agents.md still says only the sessions show')
+  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('only the active sessions show, every other session in one closed row after them'),
+    'docs/dashboard.md\'s agents row does not name the group')
 })
 
 test('the agent hook is documented as it works: installed by you, removed by you, Node.js required, the tree\'s words (1.6 O4)', () => {
@@ -1596,7 +1622,8 @@ test('docs/agents.md states the node cap for the markdown report too, what does 
     // Review 1 #3: MAX_PAGE_NODES applies in text mode as well — the report prints the line for a node that no longer fits.
     `at most **${MAX_PAGE_NODES}** nodes in the whole report, filled in the same order`,
     `at most 50 children each and at most ${MAX_PAGE_NODES} nodes in all`,
-    `every node of the ${MAX_ROOTS} sessions the tree lists`,
+    // 1.7 F2 (pinned and changed): the report prints the group of earlier sessions open.
+    'every node of the sessions the tree lists — the active ones and, open, the group of earlier ones —',
     // §7c Wave C: the running list's items do not count against the cap, the 7-day block's rows do.
     `The running list's rows are not among the ${MAX_PAGE_NODES} — the list is sent whole, at most ${MAX_RUNNING_LIST} rows.`,
     'its rows — the table\'s and its largest agents\' — are rows of the push too',

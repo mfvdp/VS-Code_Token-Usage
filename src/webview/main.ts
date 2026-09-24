@@ -1527,9 +1527,11 @@ function sDrill(): string {
 const AGENT_STATES = ['running', 'done', 'failed', 'stopped', 'unknown', 'active', 'idle'];
 /**
  * The kinds of node. Only these ever reach a class name. `noreply` (1.6 D4): a run's collector —
- * the run's agents without a counted reply, counted in one row, never listed.
+ * the run's agents without a counted reply, counted in one row, never listed. `group` (1.7 F2): the
+ * earlier sessions — every session that is not active, in one row after the active ones: a
+ * container with no state, no glyph and no details, which a click and Enter open and close.
  */
-const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending', 'noreply'];
+const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending', 'noreply', 'group'];
 /**
  * Far deeper than the tree builder ever nests (MAX_TREE_DEPTH in src/agentTree.ts, with the
  * session and the workflow run above it), so the guard only ever stops a payload that is not a
@@ -1805,6 +1807,11 @@ function sessionSpan(n: Payload): string {
  * screen reader on the item gets its figures after its name: "12.3K lower bound, since 14:20".
  */
 function agentFigLine(n: Payload, kind: string, state: string, tally: string[], id = ''): string {
+  // 1.7 F2: the group of earlier sessions has no figure of its own — what their agents came to is
+  // the whole line, or a dash when none of them has an agent (no count is not a count of none).
+  if (kind === 'group') {
+    return '<span class="ag-fig"' + (id ? ' id="' + esc(id) + '"' : '') + '>' + figParts(tally.length ? tally : ['–'], 0) + '</span>';
+  }
   const start = kind === 'noreply' ? null : agentTs(n.startTs);
   const clock = state === 'running' && start !== null;
   const nobr = (f: string): string => '<span class="nobr">' + f + '</span>';
@@ -1919,6 +1926,11 @@ function agentMoreRow(n: Payload, key: string, shown: number, level: number, siz
  * row inside it are the mouse's targets, no controls of their own: the toggle hidden from a screen
  * reader — the item says whether it is open —, the row the part a click selects by, which
  * `data-pressed` marks while the details stand under it.
+ *
+ * 1.7 F2: the group of earlier sessions (`kind: 'group'`, the last root) is drawn like a node with
+ * children and differs in four things: its row toggles it (`agentToggle`, a click and Enter alike),
+ * its glyph column is kept empty (`ag-none`), its second line is its sessions' tally alone, and its
+ * item carries no `aria-selected` and no description — no details ever stand under it.
  */
 function agentNode(n: Payload, expanded: string[], selected: string | null, panel: AgentPanel | null,
   depth: number, pos: number, size: number, rove: AgentRoving): string {
@@ -1929,10 +1941,13 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   const parent = n.hasChildren === true || kids.length > 0;
   const open = key !== '' && expanded.indexOf(key) >= 0;
   const on = key !== '' && key === selected;
-  // 1.6 N2: the details open inside this entry when they belong under this row — once a page.
-  const here = panelHere(panel, 'tree', key);
-  const state = agentState(n.state);
   const kind = AGENT_KINDS.indexOf(n.kind) >= 0 ? String(n.kind) : 'agent';
+  // 1.7 F2: the group of earlier sessions is a container — no details stand under it, whatever a
+  // payload says.
+  const group = kind === 'group';
+  // 1.6 N2: the details open inside this entry when they belong under this row — once a page.
+  const here = !group && panelHere(panel, 'tree', key);
+  const state = agentState(n.state);
   // 1.6 D7: an attempt the workflow journal superseded — dimmed, its own state kept.
   const superseded = n.superseded === true;
   // Before the children: the current item is the first one in document order that is it.
@@ -1947,27 +1962,37 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   // tally is the view model's, taken on the whole tree, so it counts the children the page does
   // not carry as well.
   const tally = kind === 'agent' && parent && open && kids.length ? [] : agentTally(n);
-  const fid = agentFigId(key);
-  const row = '<span class="ag-row" data-act="agentSelect" data-key="' + esc(key)
-    + '" data-pressed="' + here + '">' + agentGlyph(state, n.derived, superseded)
+  // 1.7 F2: the group's figures' line is its tally, which its name already says in words — it
+  // describes the item by nothing more, so it is no description of it.
+  const fid = group ? '' : agentFigId(key);
+  // 1.7 F2: the group's row opens and closes it, as its toggle does — it has nothing to select —,
+  // and its glyph column is kept with nothing in it (`ag-none`), so its name starts where the
+  // sessions' names start.
+  const row = '<span class="ag-row" data-act="' + (group ? 'agentToggle' : 'agentSelect') + '" data-key="' + esc(key)
+    + '" data-pressed="' + here + '">'
+    + (group ? '<span class="ag-st ag-none" aria-hidden="true"></span>' : agentGlyph(state, n.derived, superseded))
     + '<span class="ag-text">' + agentLabel(n, kind) + agentFigLine(n, kind, state, tally, fid) + '</span></span>';
   // The panel after the row's line and before the children, so the node's own details stand
   // between it and what is below it; it takes the tree's whole width, however deep the node.
   // Its Copy ID button is a stop of the Tab key only while the item it belongs to is the current one.
   const details = here && panel ? agentDetails(panel.d, panel.node, depth, tab === '0') : '';
   const total = agentSetSize(n, kids.length);
-  const group = parent && open
+  const below = parent && open
     ? kids.map((c: Payload, i: number) => agentNode(c, expanded, selected, panel, depth + 1, i + 1, total, rove)).join('')
       + agentMoreRow(n, key, kids.length, depth + 2, total, rove)
     : '';
+  // 1.7 F2: the group is no thing with a state, and nothing to select: its name is its words and
+  // what its sessions' agents came to — "Earlier sessions (5), 23 started, 20 done, 3 failed" —
+  // and it carries no `aria-selected` (and, above, no description).
+  const spoken = group ? agentGroupSpoken(n, tally.length > 0) : agentSpoken(n, state, superseded, tally.length > 0);
   return '<li role="treeitem" class="ag-k-' + esc(kind) + (superseded ? ' ag-sup' : '') + '" data-key="' + esc(key)
     + '" tabindex="' + tab + '" aria-level="' + (depth + 1) + '" aria-setsize="' + size + '" aria-posinset="' + pos + '"'
-    + (parent ? ' aria-expanded="' + open + '"' : '') + ' aria-selected="' + on + '"'
-    + ' aria-label="' + agentSpoken(n, state, superseded, tally.length > 0) + '"'
+    + (parent ? ' aria-expanded="' + open + '"' : '') + (group ? '' : ' aria-selected="' + on + '"')
+    + ' aria-label="' + spoken + '"'
     + (fid ? ' aria-describedby="' + esc(fid) + '"' : '') + '>'
     + '<div class="ag-line">' + fold + row + '</div>'
     + details
-    + (group ? '<ul role="group">' + group + '</ul>' : '')
+    + (below ? '<ul role="group">' + below + '</ul>' : '')
     + '</li>';
 }
 
@@ -1985,6 +2010,18 @@ function agentSpoken(n: Payload, state: string, superseded: boolean, withTally: 
   const said = agentStateSpoken(state, n.derived) + (superseded ? ', ' + tr('superseded by a later attempt') : '');
   const tally = withTally ? agentTallyWords(n) : '';
   return esc(full + sub) + ', ' + said + (tally ? ', ' + esc(tally) : '');
+}
+
+/**
+ * 1.7 F2: the group of earlier sessions for a screen reader — its words ("Earlier sessions (5)")
+ * and, where its row shows a tally, the tally in words; no state words, since it has no state.
+ * Escaped: it is an attribute.
+ */
+function agentGroupSpoken(n: Payload, withTally: boolean): string {
+  const full = typeof n.fullLabel === 'string' && n.fullLabel !== '' ? n.fullLabel
+    : typeof n.label === 'string' && n.label !== '' ? n.label : '–';
+  const tally = withTally ? agentTallyWords(n) : '';
+  return esc(full) + (tally ? ', ' + esc(tally) : '');
 }
 
 /**
@@ -2992,7 +3029,8 @@ interface AgentKeyItem { level: number; parent: boolean; open: boolean; more: bo
  * - →: a closed node opens; on an open one the focus goes to its first child; elsewhere nothing.
  * - ←: an open node closes; elsewhere the focus goes to the item above it, if there is one.
  * - Enter, Space: a node is selected — or, whose details stand under its row, cleared —; on a
- *   "more" line the next fifty.
+ *   "more" line the next fifty. 1.7 F2: on the group of earlier sessions, whose row is a toggle
+ *   (agentNode), the same target opens and closes it.
  */
 function agentKeyMove(items: AgentKeyItem[], i: number, key: string): { focus?: number; act?: 'toggle' | 'select' | 'more' } | null {
   const it = items[i];

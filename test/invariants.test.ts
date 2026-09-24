@@ -12,10 +12,12 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import type { TreeNode } from '../src/agentTree'
+import { AgentTreeInput, buildAgentTree } from '../src/agentTreeBuild'
 import { agentRows, agentsCsv, toCsv, toJson, toMarkdownSummary, toolsCsv } from '../src/exporter'
 import { setBundle, setLocale } from '../src/i18n'
 import { StatsCtx, calendar, heatmap, totalRow } from '../src/stats'
 import { markdownDocument, quickPickItems } from '../src/textViews'
+import { readTimeConfig } from '../src/config'
 import { Attribution, Snapshot } from '../src/types'
 import { ViewModel, agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
 import { QuotaHistory } from '../src/quotaHistory'
@@ -535,9 +537,13 @@ function agentsVm(o: { attribution?: Attribution; agg?: Aggregator; select?: (ro
   return buildViewModel(makeInput({ agg, cfg: config, ui: { agentsExpanded, agentsWeekOpen, agentSelected: o.select(first.agents.roots) } }))
 }
 
-/** Every node of the tree, each with its own details open — the panel the view model builds for it. */
+/**
+ * Every node of the tree, each with its own details open — the panel the view model builds for it.
+ * 1.7 F2: every node but the group of earlier sessions, a container that has no details (a
+ * selection of it opens none and leaves no note — the F2 test of agentTree.test.ts).
+ */
 function everyNodeOpen(attribution: Attribution = 'none', agg = agentWorld(attribution).agg): Array<{ node: TreeNode; vm: ViewModel }> {
-  return treeNodes(agentsVm({ attribution, agg }).agents.roots)
+  return treeNodes(agentsVm({ attribution, agg }).agents.roots).filter((node) => node.kind !== 'group')
     .map((node) => ({ node, vm: agentsVm({ attribution, agg, select: () => node.key }) }))
 }
 
@@ -872,8 +878,10 @@ test('a node\'s tally counts every agent below it once, sums to its started, and
     const inCollectors = (n: TreeNode): number => collected(n).reduce((sum, c) => sum + (c.tally?.started ?? 0), 0)
     for (const n of nodes) {
       const members = below(n)
+      // 1.7 F2 (pinned and changed): and on the group of earlier sessions, whose tally is its
+      // sessions' summed — every agent below it, counted once.
       const want = members.length + inCollectors(n) > 0
-        && (n.kind === 'session' || n.kind === 'workflow' || n.kind === 'agent' || n.kind === 'noreply')
+        && (n.kind === 'session' || n.kind === 'workflow' || n.kind === 'agent' || n.kind === 'noreply' || n.kind === 'group')
       assert.equal(n.tally !== null, want, `${lang} ${n.label}`)
       assert.equal(n.tallyText !== null, want, `${lang} ${n.label}`)
       assert.equal(n.tallySpoken !== null, want, `${lang} ${n.label}`)
@@ -905,6 +913,53 @@ test('a node\'s tally counts every agent below it once, sums to its started, and
       assert.ok(vm.agents.roots.some((r) => (r.tally?.[f] ?? 0) > 0), `${lang}: no session with ${f}`)
     }
   }
+})
+
+/**
+ * 1.7 F2: the Agents world's tree built straight from the aggregator's tables, as `agentTreeFor`
+ * builds it — with the group of earlier sessions, or (`split: false`, the tests' switch) without.
+ */
+function worldTree(agg: Aggregator, attribution: Attribution, at: number, over: Partial<AgentTreeInput> = {}): ReturnType<typeof buildAgentTree> {
+  const cfg = makeConfig({ 'tokenPace.attribution': attribution })
+  return buildAgentTree({
+    agents: agg.agents(), launches: agg.launches(), mains: agg.mains(), runs: agg.runs(), runLaunches: agg.runLaunches(),
+    sessions: agg.sessions(), attribution: cfg.attribution, selected: null, tcfg: readTimeConfig(cfg), ...over,
+  }, at)
+}
+
+test('1.7 F2: the group of earlier sessions is a presentation of the roots — the running list, every session and its tally the same without it', () => {
+  // The world's clock and two later ones: at NOW the quiet session is earlier and the busy one
+  // active; ten minutes on and later the busy one's own transcript is quiet too, and only what runs
+  // keeps it active (the roll-up) — or, past the running window, nothing does.
+  for (const attribution of ['none', 'session'] as const) {
+    const agg = agentWorld(attribution).agg
+    for (const at of [NOW, NOW + 11 * 60_000, NOW + 45 * 60_000]) {
+      for (const mode of ['page', 'text'] as const) {
+        const split = worldTree(agg, attribution, at, { mode })
+        const flat = worldTree(agg, attribution, at, { mode, split: false })
+        const where = `${attribution} +${(at - NOW) / 60_000} min ${mode}`
+        // Every key of the running list, in its order, and its counts.
+        assert.deepEqual([split.running, split.runningNow, split.runningMore], [flat.running, flat.runningNow, flat.runningMore], where)
+        assert.equal(flat.roots.some((r) => r.kind === 'group'), false, where)
+        const group = split.roots.filter((r) => r.kind === 'group')
+        assert.ok(group.length <= 1 && (group.length === 0 || split.roots[split.roots.length - 1] === group[0]), where)
+        // No running node inside the group, ever: a session with one running is active.
+        for (const g of group) assert.equal(treeNodes(g.children).some((n) => n.state === 'running'), false, where)
+        if (mode !== 'text') continue
+        // Every session as it was — the same node, its tally and its subtree —, only its place moved.
+        const sessions = split.roots.flatMap((r) => (r.kind === 'group' ? r.children : [r]))
+        assert.deepEqual([...sessions].sort((x, y) => (x.key < y.key ? -1 : 1)), [...flat.roots].sort((x, y) => (x.key < y.key ? -1 : 1)), where)
+        assert.deepEqual(sessions.map((r) => r.state === 'active'), sessions.map((_, i) => i < split.roots.length - group.length), where)
+        for (const g of group) {
+          assert.equal(g.tally?.started ?? 0, g.children.reduce((n, c) => n + (c.tally?.started ?? 0), 0), where)
+          assert.equal(g.agentCount, g.children.reduce((n, c) => n + c.agentCount, 0), where)
+        }
+      }
+    }
+  }
+  // The world as it ships has one of each: the busy session active, the quiet one in the group.
+  const shipped = worldTree(agentWorld('none').agg, 'none', NOW, { mode: 'text' })
+  assert.deepEqual(shipped.roots.map((r) => r.kind), ['session', 'group'])
 })
 
 // 1.6 P3a (§3 D3): pinned the count against the children the page's payload carried, closed

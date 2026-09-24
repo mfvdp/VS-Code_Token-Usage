@@ -14,7 +14,7 @@ import { AgentLaunch, AgentRec, MainRec, ProblemKind, QuotaSample, QuotaState, Q
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
-import { MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
+import { EARLIER_KEY, MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
 import {
   AGENT_SELECTED_IN, DASHBOARD_SECTION_KEYS, isAgentSelectedIn, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
   SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentShareOf, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
@@ -1126,9 +1126,12 @@ test('a session without agents is keyed by its id, never by the transcript path 
     input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0,
     outputFinal: 0, toolCalls: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }]
-  const vm = buildViewModel(makeInput({ agg }))
-  assert.equal(vm.agents.roots[0].key, 's:s1')
-  assert.equal(vm.agents.roots[0].usage, '–')
+  // 1.7 F2 (pinned and changed): half an hour quiet, the session is an earlier one — inside the
+  // group of earlier sessions, which the reader opens to see it.
+  const vm = buildViewModel(makeInput({ agg, ui: { agentsExpanded: [EARLIER_KEY] } }))
+  assert.deepEqual(vm.agents.roots.map((r) => r.key), [EARLIER_KEY])
+  assert.equal(vm.agents.roots[0].children[0].key, 's:s1')
+  assert.equal(vm.agents.roots[0].children[0].usage, '–')
 })
 
 // ---------------------------------------------------------------------------

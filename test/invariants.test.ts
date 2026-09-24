@@ -933,15 +933,24 @@ function worldTree(agg: Aggregator, attribution: Attribution, at: number, over: 
 
 test('1.7 F2: the group of earlier sessions is a presentation of the roots — the running list, every session and its tally the same without it', () => {
   // The world's clock and two later ones: at NOW the quiet session is earlier and the busy one
-  // active; ten minutes on and later the busy one's own transcript is quiet too, and only what runs
-  // keeps it active (the roll-up) — or, past the running window, nothing does.
+  // active; eleven minutes on and later nothing runs any more and both are earlier. 1.7 review 3:
+  // and the world at NOW with every session's own transcript a quarter of an hour quiet — then only
+  // what runs keeps the busy one active (the roll-up), the one case that holds a running node out of
+  // the group; none of the three clocks alone reaches it (its agents' last lines are older than its
+  // own).
   for (const attribution of ['none', 'session'] as const) {
     const agg = agentWorld(attribution).agg
-    for (const at of [NOW, NOW + 11 * 60_000, NOW + 45 * 60_000]) {
+    const quiet: Partial<AgentTreeInput> = { mains: agg.mains().map((m) => ({ ...m, lastTs: m.lastTs - 15 * 60_000 })) }
+    const cases: Array<[number, Partial<AgentTreeInput>, string]> = [
+      [NOW, {}, ''], [NOW + 11 * 60_000, {}, ''], [NOW + 45 * 60_000, {}, ''], [NOW, quiet, ' own lines quiet'],
+    ]
+    for (const [at, over, how] of cases) {
       for (const mode of ['page', 'text'] as const) {
-        const split = worldTree(agg, attribution, at, { mode })
-        const flat = worldTree(agg, attribution, at, { mode, split: false })
-        const where = `${attribution} +${(at - NOW) / 60_000} min ${mode}`
+        const split = worldTree(agg, attribution, at, { ...over, mode })
+        const flat = worldTree(agg, attribution, at, { ...over, mode, split: false })
+        const where = `${attribution} +${(at - NOW) / 60_000} min${how} ${mode}`
+        // The quiet case is the roll-up's: the busy session a root, active through what runs.
+        if (over === quiet) assert.ok(split.running > 0 && split.roots[0].kind === 'session' && split.roots[0].state === 'active', where)
         // Every key of the running list, in its order, and its counts.
         assert.deepEqual([split.running, split.runningNow, split.runningMore], [flat.running, flat.runningNow, flat.runningMore], where)
         assert.equal(flat.roots.some((r) => r.kind === 'group'), false, where)

@@ -2189,7 +2189,8 @@ interface AgentRoving { current: AgentItemRef | null; taken: boolean }
 
 /**
  * The `tabindex` of the next item written: 0 for the current one, −1 for every other (roving
- * `tabindex`). Without a current item the first one written — the first session — is it. One
+ * `tabindex`). Without a current item the first one written — the first session, or (1.7 F2) the
+ * group of earlier sessions when no session is active — is it. One
  * item a render, whatever the payload holds.
  */
 function agentTab(rove: AgentRoving, ref: AgentItemRef): string {
@@ -2202,8 +2203,9 @@ function agentTab(rove: AgentRoving, ref: AgentItemRef): string {
 /**
  * The item that is the tree's stop of the Tab key in this render (1.6 L1): the one the keyboard was
  * last on while it is drawn, else the nearest one above it that is — while the focus is in the
- * tree, else the first session; with the focus elsewhere the selected node when its row is drawn,
- * else the first session (null).
+ * tree, else the first item; with the focus elsewhere the selected node when its row is drawn,
+ * else the first item (null) — the first session, or (1.7 F2) the group of earlier sessions when no
+ * session is active.
  */
 function agentCurrent(roots: Payload[], expanded: string[], selected: string | null): AgentItemRef | null {
   for (const p of agentFocusPath) {
@@ -2608,7 +2610,7 @@ function sAgents(): string {
   const selected = typeof ui.agentSelected === 'string' ? ui.agentSelected : null;
   const panel = agentPanelOf(a, roots, expanded, ui.agentSelectedIn);
   // 1.6 L1: the tree's one stop of the Tab key. A current item the render does not reach after all
-  // — a payload that is no tree the builder made — hands it to the first session.
+  // — a payload that is no tree the builder made — hands it to the first item.
   const items = roots.filter((n: Payload) => !!n && typeof n === 'object');
   const draw = (rove: AgentRoving): string => items
     .map((n: Payload, i: number) => agentNode(n, expanded, selected, panel, 0, i + 1, items.length, rove)).join('');
@@ -2977,7 +2979,8 @@ interface AgentFocus { act: string; key: string; list: string; src?: string; tre
  * Puts the focus back on the control that does the same thing to the same node, in the same
  * list — or, for the tree (1.6 L1), on the item with the same key, else on the nearest item above
  * it that is still drawn (a "more" line that is gone — its node shows every child now — hands it
- * to that node), else on the first session; and back on the Copy ID button when it was there and
+ * to that node), else on the first item (the first session, or the group of earlier sessions when
+ * no session is active, 1.7 F2); and back on the Copy ID button when it was there and
  * its item's details still stand. A control that is gone takes the focus nowhere.
  */
 function restoreFocus(body: Element, f: AgentFocus): void {
@@ -3025,7 +3028,7 @@ function agentItemByKey(body: Element, key: string): HTMLElement | null {
   return items.find((x) => { const r = agentRefOf(x); return !r.more && r.key === key; }) || null;
 }
 
-/** Puts the focus back on the tree after a push (restoreFocus): the item, the nearest one above it, the first session. */
+/** Puts the focus back on the tree after a push (restoreFocus): the item, the nearest one above it, the first item. */
 function agentFocusBack(body: Element, copy: boolean): void {
   const items = Array.from(body.querySelectorAll<HTMLElement>('.agtree li[role="treeitem"]'));
   for (let k = 0; k < agentFocusPath.length; k++) {

@@ -112,7 +112,10 @@ identifiers and counts, never content:
   tool result, told by the line's top-level `type`: on a line the count does not parse, by the
   unescaped literal `"type":"user"` on the raw line, which is never parsed for it; never the prompt,
   the tool result or anything else of the line, and bookkeeping lines (attachments, system lines,
-  file-history snapshots, titles, modes) do not count. Nothing of an agent's transcript is kept for it.
+  file-history snapshots, titles, modes) do not count. Those two facts serve only the checks of the
+  opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) (1.8), which types nothing
+  unless that reply ended its turn (`end_turn`) and the newest message line is not the user's; the
+  checks compare them and nothing more. Nothing of an agent's transcript is kept for it.
   The main session's record keeps these seven days in the token snapshot; none of the exports, the
   diagnostics report or the log carries them;
 * for the Codex prompt-cache line (1.8), of the Codex rollouts one value for the machine: the time and

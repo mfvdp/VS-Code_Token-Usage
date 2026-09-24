@@ -193,14 +193,84 @@ GPT-6, with one line:
 Codex prompt cache · last request at 14:22 · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until 14:52, perhaps longer.
 ```
 
-OpenAI documents that minimum for its API — "A cached prefix remains eligible for reuse for 30 minutes
-after its most recent write or reuse, though OpenAI may retain it longer" —; whether it holds for Codex
-on a ChatGPT plan is not documented, hence the `~`. It is a minimum, not an expiry: the line has no
-countdown, no cooling and no cold, and no cost — a cold Codex prompt costs the plain input rate, and
-OpenAI charges no cache write. Earlier models (GPT-5.5 and before) state no such minimum and get no
-line; a forked rollout's turns are its parent's history and move nothing. Nothing is said per Codex
-session, nothing appears in the status bar, and the markdown view and the Quick Pick carry the same
-line under the Codex card.
+OpenAI documents that minimum for its API — "A cached prefix remains eligible for reuse for 30
+minutes after its most recent write or reuse, though OpenAI may retain it longer" —; whether it
+holds for Codex on a ChatGPT plan is not documented, hence the `~`. It is a minimum, not an expiry:
+the line has no countdown, no cooling and no cold, and no cost — a cold Codex prompt costs the plain
+input rate, and OpenAI charges no cache write. Earlier models (GPT-5.5 and before) state no such
+minimum and get no line; a forked rollout's turns are its parent's history and move nothing, and a
+turn dated more than ten seconds after now — written by a clock ahead of this one — gives no line
+either. Nothing is said per Codex session, nothing appears in the status bar, and the markdown view
+and the Quick Pick carry the same line under the Codex card.
+
+## Keep-warm in a terminal (opt-in)
+
+<!-- 1.8 P9 draft: the checks, as src/keepWarm.ts makes them. P10 adds the setting, the countdown,
+the consent and the accounting; P11 finishes this section (the terms passage and its link). -->
+
+Off by default. With `tokenPace.cacheKeepWarm` switched on and your consent given, Token Pace keeps
+a Claude Code session's one-hour prompt cache warm by typing one fixed line into the VS Code terminal
+that runs the session and pressing Enter — `Ignore this message. No action. No response.` — so that
+Claude Code itself sends a request that reads the cache before it expires. Claude Code sends it with
+its own login; Token Pace reads no credential and sends nothing over the network. It is the one thing
+Token Pace ever does on its own, and it does it only while every check below holds — once when a
+one-minute countdown starts in the status bar, and all of them again when the countdown ends:
+
+1. **Switched on and allowed** — the setting is on, you allowed it in its consent dialog, and the
+   workspace is trusted: never in Restricted Mode.
+2. **Measured, never estimated** — the [status-line bridge](quota-sources.md#claude-status-line-bridge-opt-in)
+   reports the session's cache: a one-hour cache, warm, with the time it expires. A session only the
+   transcript's estimate (`~`) describes never gets a line.
+3. **Three minutes or less** — the countdown starts once the cache has 3 minutes or less of warmth
+   left, so the line goes at about 2 minutes left, and never within the last minute before the
+   expiry: a window that was asleep at that moment sends nothing late, and a countdown that could not
+   end in time does not start. The cooling warning on the card still starts at 5 minutes.
+4. **The session is idle** — its newest reply is at least a minute old and ended its turn
+   (`end_turn`), and nothing of the user's came after it. A prompt or a tool result as the newest
+   message line means Claude Code is still at the reply, or waits in a permission dialog or a
+   question: Claude Code writes a reply that calls a tool only once the tool has finished, so while
+   such a dialog stands open the transcript's newest line is the user's. A reply that stopped for a
+   tool, was cut off, or paused is no idle turn either.
+5. **No agent running** — no subagent of the session is in the running list; its end could wake the
+   conversation at any moment.
+6. **No permission request** — with the [agent hook](agents.md#the-agent-hook) installed, no
+   permission request of the session after its newest reply. A wait for input passes: after a
+   finished turn it is Claude Code's idle prompt.
+7. **Exactly one terminal** — exactly one terminal of this window runs `claude` (a path ending in it,
+   or `claude.exe`), as VS Code's shell integration reports it with medium or high confidence, in the
+   folder the session's transcript belongs to. Claude Code in the Claude Code extension's own panel —
+   its default — is out of reach: such a session gets the warning, never a line. A terminal without
+   shell integration says nothing, and two candidates are one too many. The terminal's name, its
+   output and its environment are never read.
+8. **Not touched since** — that terminal has not been the active terminal of the focused window since
+   the session's newest reply: keys reach Claude Code's input line only through it. A window opened
+   after that reply cannot know, and sends nothing.
+9. **At most 3 lines in a row** per idle phase of the session — about three more hours warm; a
+   request of your own starts a new phase.
+10. **Not near a limit** — no Claude quota window at 90 % or more, or reached. Without a quota reading
+    this check does not block.
+11. **The last line was answered** — by a request of the session within 2 minutes; otherwise
+    keep-warm stops for the rest of the idle phase.
+12. **Not cancelled** — a click on the countdown cancels the line and keep-warm for the rest of the
+    idle phase.
+
+**What no check can see.** Token Pace cannot read Claude Code's input line: **text you typed there
+and did not send is sent together with the line** — type nothing into the Claude terminal while the
+countdown runs. And it cannot see a dialog the transcript does not show. The terminal is recognised
+by its folder, not by its session: another Claude Code session of the same folder, in a terminal of
+this window, would get the line instead — check 11 then stops keep-warm after that one line.
+
+The limits are constants of the code, not settings:
+
+| Constant | Value | What it is |
+|---|---|---|
+| `KEEPWARM_LEAD_MS` | 3 minutes | how close to the stated expiry the countdown may start |
+| `KEEPWARM_COUNTDOWN_MS` | 60 seconds | the visible countdown before every line |
+| `KEEPWARM_SEND_MARGIN_MS` | 60 seconds | how long before the expiry the line goes at the latest |
+| `KEEPWARM_IDLE_MIN_MS` | 60 seconds | how old the session's newest reply must be |
+| `KEEPWARM_VERIFY_MS` | 2 minutes | how soon a request of the session must answer a line |
+| `KEEPWARM_MAX_PER_IDLE` | 3 | lines per idle phase of a session |
+| `KEEPWARM_QUOTA_STOP_PERCENT` | 90 % | the quota window share from which no line goes |
 
 ## One reading per session
 
@@ -274,14 +344,14 @@ Pace keeps its newest request that read or wrote the cache, that is, the newest 
 
 A later line of the same reply grows its size and keeps its time; a late line of an older reply
 changes nothing; an error line and a placeholder reply are no requests. Two further facts are kept
-with it, for the checks of the opt-in keep-warm line rather than for the estimate: the reply's
-`stop_reason` — one of `end_turn`, `tool_use`, `max_tokens`, `stop_sequence`, `pause_turn` and
-`refusal`; any other value counts as none — and whether the transcript's newest message line is the
-user's, a prompt or a tool result. Claude Code writes a reply that calls a tool only once the tool
-has finished, so while a permission dialog or a question stands open the newest line is the user's.
-Only a line's top-level `type` decides — a user line is recognised on the raw line and never parsed
-for it —, and lines that are no message (attachments, system lines, file-history snapshots, the
-session's title and mode lines) do not count.
+with it, for the checks of the opt-in [keep-warm line](#keep-warm-in-a-terminal-opt-in) rather than
+for the estimate: the reply's `stop_reason` — one of `end_turn`, `tool_use`, `max_tokens`,
+`stop_sequence`, `pause_turn` and `refusal`; any other value counts as none — and whether the
+transcript's newest message line is the user's, a prompt or a tool result. Claude Code writes a
+reply that calls a tool only once the tool has finished, so while a permission dialog or a question
+stands open the newest line is the user's. Only a line's top-level `type` decides — a user line is
+recognised on the raw line and never parsed for it —, and lines that are no message (attachments,
+system lines, file-history snapshots, the session's title and mode lines) do not count.
 
 No field is read for any of it that the token count did not read before. It is kept with the
 session's record in the token snapshot for seven days, never logged and never exported, and the

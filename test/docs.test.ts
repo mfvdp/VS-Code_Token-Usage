@@ -2378,6 +2378,59 @@ test('the prompt-cache page states the watch as the code has it, and 1.3\'s "nev
 })
 
 /**
+ * 1.8 P9 (§3 B2 "Docs", §7a Q19): the prompt-cache page's keep-warm section — a draft P10 grows and
+ * P11 finishes — names every guard in reader words with Q19's numbers, states the constants as
+ * src/keepWarm.ts has them, the line word for word, what no check can see, and nothing of the spec's
+ * superseded four minutes; the privacy page points the two §0a.5 facts at it.
+ */
+test('the prompt-cache page\'s keep-warm section states the checks and the constants as src/keepWarm.ts has them (1.8 P9)', () => {
+  const kw = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  const coolingMinutes = (require('../src/cacheWatch') as typeof import('../src/cacheWatch')).CACHE_COOLING_LEAD_MS / 60_000
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  const page = doc.promptCache
+  const head = '\n## Keep-warm in a terminal (opt-in)\n'
+  assert.ok(page.includes(head), 'docs/prompt-cache.md has no keep-warm section')
+  const from = page.indexOf(head)
+  const section = page.slice(from, page.indexOf('\n## ', from + head.length))
+  const text = flat(section)
+  const minutes = (ms: number): string => `${ms / 60_000} minutes`
+  const seconds = (ms: number): string => `${ms / 1000} seconds`
+  for (const [name, value] of [
+    ['KEEPWARM_LEAD_MS', minutes(kw.KEEPWARM_LEAD_MS)], ['KEEPWARM_COUNTDOWN_MS', seconds(kw.KEEPWARM_COUNTDOWN_MS)],
+    ['KEEPWARM_SEND_MARGIN_MS', seconds(kw.KEEPWARM_SEND_MARGIN_MS)], ['KEEPWARM_IDLE_MIN_MS', seconds(kw.KEEPWARM_IDLE_MIN_MS)],
+    ['KEEPWARM_VERIFY_MS', minutes(kw.KEEPWARM_VERIFY_MS)], ['KEEPWARM_MAX_PER_IDLE', String(kw.KEEPWARM_MAX_PER_IDLE)],
+    ['KEEPWARM_QUOTA_STOP_PERCENT', `${kw.KEEPWARM_QUOTA_STOP_PERCENT} %`],
+  ] as const) {
+    assert.ok(section.includes(`| \`${name}\` | ${value} |`), `the keep-warm section does not state ${name} = ${value}`)
+  }
+  // One numbered check per guard of the decision.
+  const guards = new Set(Object.values(kw.KEEPWARM_GUARD_OF))
+  assert.equal([...section.matchAll(/^\d+\. \*\*/gm)].length, guards.size, 'the section does not list one check per guard')
+  // Q19's numbers in words, derived from the constants.
+  const lead = kw.KEEPWARM_LEAD_MS / 60_000
+  for (const claim of [
+    `once the cache has ${lead} minutes or less of warmth left`,
+    `so the line goes at about ${(kw.KEEPWARM_LEAD_MS - kw.KEEPWARM_COUNTDOWN_MS) / 60_000} minutes left`,
+    'never within the last minute before the expiry', 'a window that was asleep at that moment sends nothing late',
+    `The cooling warning on the card still starts at ${coolingMinutes} minutes`,
+    `At most ${kw.KEEPWARM_MAX_PER_IDLE} lines in a row`, `at ${kw.KEEPWARM_QUOTA_STOP_PERCENT} % or more, or reached`,
+    `within ${kw.KEEPWARM_VERIFY_MS / 60_000} minutes`, 'at least a minute old and ended its turn (`end_turn`)',
+    'Claude Code writes a reply that calls a tool only once the tool has finished',
+    'such a session gets the warning, never a line', 'The terminal\'s name, its output and its environment are never read.',
+    'text you typed there and did not send is sent together with the line',
+    'type nothing into the Claude terminal while the countdown runs', 'Without a quota reading this check does not block.',
+    `\`${kw.KEEP_WARM_LINE}\``, '`tokenPace.cacheKeepWarm`', 'never in Restricted Mode',
+  ]) {
+    assert.ok(text.includes(claim), `the keep-warm section does not say: ${claim}`)
+  }
+  // The spec's older numbers are superseded by Q19.
+  for (const stale of ['4 minutes', 'four minutes', '55 minutes']) assert.equal(text.includes(stale), false, `the keep-warm section still says ${stale}`)
+  // The privacy page's §0a.5 facts point at the section; the estimate section links it.
+  assert.ok(flat(doc.privacy).includes('Those two facts serve only the checks of the opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)'))
+  assert.ok(flat(page).includes('for the checks of the opt-in [keep-warm line](#keep-warm-in-a-terminal-opt-in)'))
+})
+
+/**
  * 1.8 P7 (§3 A5, A8): the status-bar pages, the settings page and the setting itself name the `cache`
  * entry as the status bar writes it — every text taken from `buildItems`, not written out here —, the
  * ids table has its id, and status-bar.md's tooltip paragraph no longer promises that the prompt cache

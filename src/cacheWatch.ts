@@ -328,11 +328,14 @@ export function codexRetentionKnown(model: string): boolean {
 /**
  * A6: the Codex card's one line — when the newest turn was, and until when OpenAI keeps its prefix at
  * least ("~until 14:52, perhaps longer") — or null: no turn, a turn more than CODEX_RETENTION_MS ago,
- * or a model the minimum is not documented for. No cost, no countdown: whether the API's rules hold
- * for Codex traffic on a ChatGPT plan is not known, and a minimum says nothing about the end.
+ * a turn dated after now (more than BRIDGE_SKEW_MS: a rollout written by a clock ahead of this one,
+ * which would say "last request at" a time still to come), or a model the minimum is not documented
+ * for. No cost, no countdown: whether the API's rules hold for Codex traffic on a ChatGPT plan is not
+ * known, and a minimum says nothing about the end.
  */
 export function codexCacheText(turn: CodexTurn | null, now: number, tcfg: TimeConfig): string | null {
   if (!turn || !finite(turn.at) || turn.at <= 0 || !(now < turn.at + CODEX_RETENTION_MS)) return null
+  if (!(turn.at <= now + BRIDGE_SKEW_MS)) return null
   if (!codexRetentionKnown(turn.model)) return null
   return t('Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.',
     clockStamp(turn.at, now, tcfg), clockStamp(turn.at + CODEX_RETENTION_MS, now, tcfg))

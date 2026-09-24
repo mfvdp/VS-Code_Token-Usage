@@ -386,6 +386,18 @@ test('Codex: a GPT-5.6 turn within 30 minutes gives the "at least until" line, n
   assert.equal(codexCacheText({ at, model: 'gpt-5.5' }, NOW, tcfg), null)
 })
 
+test('Codex: a turn dated after now (a clock ahead of this one) gives no line; within BRIDGE_SKEW_MS it does (1.8 P9, §7c wave 2 fact 11)', () => {
+  // Without the guard a rollout written 5 minutes ahead read "last request at 14:52 … ~until 15:22"
+  // at 14:47 — a request still to come.
+  assert.equal(codexCacheText({ at: NOW + 5 * MIN, model: 'gpt-5.6-sol' }, NOW, tcfg), null)
+  assert.equal(codexCacheText({ at: NOW + BRIDGE_SKEW_MS + 1, model: 'gpt-5.6-sol' }, NOW, tcfg), null)
+  assert.ok(codexCacheText({ at: NOW + BRIDGE_SKEW_MS, model: 'gpt-5.6-sol' }, NOW, tcfg), 'a few seconds of skew are slack, as for the bridge')
+  assert.ok(codexCacheText({ at: NOW, model: 'gpt-5.6-sol' }, NOW, tcfg))
+  // Nothing else of the line changes: the words of a turn 10 minutes ago are the same.
+  assert.equal(codexCacheText({ at: NOW - 10 * MIN, model: 'gpt-5.6-sol' }, NOW, tcfg),
+    'Codex prompt cache · last request at 14:37 · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until 15:07, perhaps longer.')
+})
+
 test('codexRetentionKnown: GPT-5.6 and later and GPT-6, not the models with another retention', () => {
   for (const m of ['gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-6-astra', 'gpt-6.1', 'gpt-5.6', 'gpt-5.10', 'gpt-7', 'openai/GPT-5.6-Terra', 'gpt-10']) {
     assert.equal(codexRetentionKnown(m), true, m)

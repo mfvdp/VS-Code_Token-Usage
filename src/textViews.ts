@@ -80,6 +80,26 @@ function withSource(source: Source, label: string): string {
 }
 
 /**
+ * 1.7 F1: the provider the dashboard's switch shows, by its title — "Codex" — or null under All
+ * (and for a view model from a build without the switch). The text views follow the switch as the
+ * page does: the view model is already narrowed, and they name the narrowing once.
+ */
+export function viewTitle(vm: ViewModel): string | null {
+  const view: string | undefined = vm.provider
+  if (view === undefined || view === 'all') return null
+  return Object.prototype.hasOwnProperty.call(SOURCE_TITLE, view) ? SOURCE_TITLE[view as Source] : null
+}
+
+/**
+ * 1.7 F1 (§7a Q7): the Claude Code–only parts — Agents and Context window — are left out while the
+ * switch shows another provider; `claudeOnly` is the view model's reason, and no view prints a
+ * placeholder for them.
+ */
+function claudeOnlyHidden(vm: ViewModel): boolean {
+  return typeof vm.claudeOnly === 'string' && vm.claudeOnly !== ''
+}
+
+/**
  * The forecast states in words. No fallback on purpose: an unknown state prints nothing
  * rather than leaking an identifier like "resetsFirst" into a sentence.
  *
@@ -194,9 +214,12 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     pending = label
   }
 
+  // 1.7 F1 (§7a Q4): while the switch shows one provider the first line names it, so a reader who
+  // opened the list from a status-bar item of the other provider sees why its figures are missing.
+  const shown = viewTitle(vm)
   add({
     label: t('Open dashboard'),
-    description: `${vm.range.label} · ${vm.range.from} → ${vm.range.to}`,
+    description: `${shown !== null ? `${shown} · ` : ''}${vm.range.label} · ${vm.range.from} → ${vm.range.to}`,
     detail: t('generated {0}', vm.generatedAt),
     command: 'tokenPace.showDashboard',
   })
@@ -256,15 +279,16 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
   }
 
   // 1.6 O2: the agents, after the quota as the dashboard has them — the running ones and what
-  // the sessions' agents came to.
+  // the sessions' agents came to. 1.7 F1: not while the switch shows another provider (§7a Q7).
+  const claudeParts = !claudeOnlyHidden(vm)
   group(t('Agents'))
-  for (const row of agentPickLines(vm)) add(row)
+  if (claudeParts) for (const row of agentPickLines(vm)) add(row)
 
   group(t('Summary'))
   for (const s of vm.digest) add({ label: s })
 
   group(t('Context window'))
-  if (vm.context) {
+  if (claudeParts && vm.context) {
     add({
       label: t('Context window: {0}', vm.context.text),
       description: vm.context.note,
@@ -807,7 +831,10 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
   const L: string[] = []
   L.push(`# ${t('Token Pace — usage')}`)
   L.push('')
-  L.push(`*${vm.range.label} · ${vm.range.from} → ${vm.range.to} · ${t('generated {0}', vm.generatedAt)}*`)
+  // 1.7 F1: the range line ends with the provider the switch shows, while it shows one.
+  const shown = viewTitle(vm)
+  L.push(`*${vm.range.label} · ${vm.range.from} → ${vm.range.to} · ${t('generated {0}', vm.generatedAt)}`
+    + `${shown !== null ? ` · ${t('{0} only', shown)}` : ''}*`)
   if (vm.preview) L.push('', `> **${t('Preview data — not a reading.')}**`)
   L.push('')
 
@@ -888,8 +915,10 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
     L.push('')
   }
 
-  // Where the dashboard has it: directly after the quota cards.
-  L.push(...agentLines(vm, textTree))
+  // Where the dashboard has it: directly after the quota cards. 1.7 F1: not while the switch shows
+  // another provider — the section is left out, as the page leaves it out (§7a Q7).
+  const claudeParts = !claudeOnlyHidden(vm)
+  if (claudeParts) L.push(...agentLines(vm, textTree))
 
   if (vm.digest.length > 0) {
     L.push(`## ${t('Summary')}`, '')
@@ -897,7 +926,7 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
     L.push('')
   }
 
-  if (vm.context) {
+  if (claudeParts && vm.context) {
     L.push(`## ${t('Context window')}`, '')
     L.push(`${vm.context.text} — ${vm.context.note}`
       + (vm.context.ageText ? ` · ${t('updated {0}', vm.context.ageText)}` : '')

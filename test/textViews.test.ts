@@ -1812,3 +1812,114 @@ test('the Quick Pick\'s agents speak German with the shipped bundle (1.6 O2)', (
   assert.equal(tail.description, '3 ältere Sitzung(en) nicht mitgezählt.')
   assert.equal(bundle['waits for a child agent'], 'wartet auf einen untergeordneten Agenten')
 })
+
+// ---------------------------------------------------------------------------
+// 1.7 F1: the text views follow the provider switch
+// ---------------------------------------------------------------------------
+
+/** A world with agents, a context reading, both providers' history and a budget of each scope, under `providers`. */
+function switchWorld(providers?: ('claude' | 'codex')[]): { vm: ViewModel; text: AgentTreeVm } {
+  const { agg } = agentWorld()
+  const history = makeHistory()
+  fillHistory(history)
+  fillHistory(history, 'codex')
+  const input = {
+    ...makeInput({
+      agg, history,
+      cfg: makeConfig({
+        'tokenPace.budgets': [
+          { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+          { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+          { scope: 'codex', period: 'month', unit: 'tokens', limit: 1_000_000 },
+        ],
+        'tokenPace.calibration.show': true,
+      }),
+      ...(providers ? { ui: { providers } } : {}),
+    }),
+    context: { used: 128_000, size: 200_000, usedPct: 64, fetchedAt: Math.round((NOW - 120_000) / 1000) },
+  }
+  return { vm: buildViewModel(input), text: agentTreeFor(input, 'text') }
+}
+
+const CLAUDE_ONLY_LINE = 'Claude Code only — not shown while Codex is selected.'
+
+test('under Codex the markdown, the Quick Pick and Copy Summary follow the switch: no Claude line, no Agents or Context part, the provider named once (1.7 F1, §7a Q7)', () => {
+  const { toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
+  const all = switchWorld()
+  const codex = switchWorld(['codex'])
+  assert.equal(codex.vm.claudeOnly, CLAUDE_ONLY_LINE)
+  // Under All: every part, and the range line as 1.6 wrote it.
+  const mdAll = markdownDocument(all.vm, all.text)
+  for (const heading of ['## Agents', '## Context window', '## Tokens — Claude Code', '## Tokens — Codex']) {
+    assert.ok(mdAll.includes(heading), `All: ${heading} missing`)
+  }
+  assert.ok(mdAll.split('\n').some((l) => l.startsWith('### Claude Code')), 'All: the Claude card is missing')
+  const rangeAll = mdAll.split('\n')[2]
+  assert.ok(rangeAll.startsWith(`*${all.vm.range.label} · `) && !rangeAll.includes(' only'), rangeAll)
+  // Under Codex: the Codex figures alone; the two Claude Code–only parts are left out — no heading,
+  // no placeholder, the reason nowhere in the text.
+  const md = markdownDocument(codex.vm, codex.text)
+  assert.equal(md.includes('## Agents'), false, 'the Agents section is in the Codex markdown')
+  assert.equal(md.includes('## Context window'), false, 'the Context window section is in the Codex markdown')
+  assert.equal(md.includes(CLAUDE_ONLY_LINE), false)
+  assert.equal(md.includes('Claude Code'), false, md.split('\n').filter((l) => l.includes('Claude Code')).join('\n'))
+  assert.equal(/claude-/.test(md), false, md.split('\n').filter((l) => /claude-/.test(l)).join('\n'))
+  assert.ok(md.includes('## Tokens — Codex'))
+  assert.ok(md.includes('- Showing Codex only — the provider switch at the top of the dashboard; ‘All’ shows every provider.'))
+  const range = md.split('\n')[2]
+  assert.ok(range.endsWith(' · Codex only*'), range)
+  assert.equal(range, rangeAll.replace(/\*$/, ' · Codex only*'))
+  // The Quick Pick: its first line names the provider; no Agents and no Context window group.
+  const items = quickPickItems(codex.vm)
+  assert.ok(items[0].description?.startsWith('Codex · '), items[0].description)
+  assert.equal(items[0].description, `Codex · ${quickPickItems(all.vm)[0].description}`)
+  const heads = items.filter((i) => i.separator === true).map((i) => i.label)
+  assert.equal(heads.includes('Agents'), false, heads.join(', '))
+  assert.equal(heads.includes('Context window'), false, heads.join(', '))
+  assert.ok(quickPickItems(all.vm).some((i) => i.separator === true && i.label === 'Agents'))
+  const said = items.map((i) => [i.label, i.description ?? '', i.detail ?? ''].join(' | '))
+  assert.deepEqual(said.filter((l) => l.includes('Claude Code') || /claude-/.test(l) || l.includes(CLAUDE_ONLY_LINE)), [])
+  // Copy Summary: the same view model, its heading naming the provider.
+  const summary = toMarkdownSummary(codex.vm)
+  assert.ok(summary.split('\n')[0].endsWith(' · Codex only'), summary.split('\n')[0])
+  assert.equal(summary.includes('Claude Code'), false)
+  assert.equal(toMarkdownSummary(all.vm).split('\n')[0].includes(' only'), false)
+})
+
+test('under Claude Code the text views keep the Agents and Context parts and name the provider (1.7 F1)', () => {
+  const { toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
+  const claude = switchWorld(['claude'])
+  assert.equal(claude.vm.claudeOnly, null)
+  const md = markdownDocument(claude.vm, claude.text)
+  assert.ok(md.includes('## Agents') && md.includes('## Context window'))
+  assert.equal(md.includes('## Tokens — Codex'), false)
+  assert.ok(md.split('\n')[2].endsWith(' · Claude Code only*'), md.split('\n')[2])
+  const items = quickPickItems(claude.vm)
+  assert.ok(items[0].description?.startsWith('Claude Code · '), items[0].description)
+  const heads = items.filter((i) => i.separator === true).map((i) => i.label)
+  assert.ok(heads.includes('Agents') && heads.includes('Context window'), heads.join(', '))
+  assert.ok(toMarkdownSummary(claude.vm).split('\n')[0].endsWith(' · Claude Code only'))
+})
+
+test('the switch\'s words in the text views speak German with the shipped bundle (1.7 F1)', () => {
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  let md = ''
+  let first = ''
+  let reason: string | null = null
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    const codex = switchWorld(['codex'])
+    md = markdownDocument(codex.vm, codex.text)
+    first = quickPickItems(codex.vm)[0].description ?? ''
+    reason = codex.vm.claudeOnly
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.ok(md.split('\n')[2].endsWith(' · nur Codex*'), md.split('\n')[2])
+  assert.ok(md.includes('- Nur Codex angezeigt — Anbieterschalter oben im Dashboard; ‚Alle‘ zeigt alle Anbieter.'), md)
+  assert.equal(reason, 'Nur Claude Code — ausgeblendet, solange Codex ausgewählt ist.')
+  assert.equal(md.includes('## Agenten'), false)
+  assert.ok(first.startsWith('Codex · '), first)
+})

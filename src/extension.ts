@@ -25,7 +25,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
-import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
+import { ADAPTERS, SOURCES } from './adapters'
 import {
   HOOK_MIRROR_NAME, HOOK_SCRIPT_NAME, HookMirror, hookSetupDocument, installHookScript, refreshHookScript,
 } from './agentHook'
@@ -64,7 +64,7 @@ import { DayRange, dayOf, RangePreset, rangeFor } from './time'
 import { Forecast, PaceVerdict, QuotaState, Snapshot, Source } from './types'
 import {
   agentTreeFor, applyMessage, buildViewModel, DASHBOARD_SECTION_KEYS, defaultUiState, forecastsFor, isAgentSelectedIn, isChartSplit,
-  MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, RANGE_PRESETS, UiState, ViewModel,
+  MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, providerViewOf, RANGE_PRESETS, UiState, viewSources, ViewModel,
   WebviewMessage,
 } from './viewModel'
 
@@ -426,7 +426,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         quotas, agg, cfg, now, forecasts, role, scanning, consent: consent.state(),
         context: quotaMgr.contextReading(),
         promptCache: quotaMgr.promptCacheReading(),
-        budgets: latestVm?.budgets ?? [],
+        // 1.7 F1: every budget, whatever the dashboard's provider switch shows — the bar follows no view.
+        budgets: latestVm?.allBudgets ?? [],
         // 1.6 O1: the running agents of the newest tree there is — the same count the running
         // list's heading and the poll read. No tree, no entry.
         agents: tree ? { running: tree.running, now: tree.runningNow, more: tree.runningMore } : null,
@@ -1064,7 +1065,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     }
     // A budget is measured on the local buckets, so a half-read history would announce a
     // share that is only going to rise. The rows are the view model's own — one derivation.
-    const budgets = scanning ? [] : latestVm?.budgets ?? []
+    // 1.7 F1: every budget — an alert follows no view of the dashboard.
+    const budgets = scanning ? [] : latestVm?.allBudgets ?? []
     void alerts.evaluate(quotas, verdicts, forecasts, now, budgets)
       .then((decisions) => {
         for (const d of decisions) {
@@ -2056,9 +2058,13 @@ function restoreUi(raw: unknown, cfg: Config): UiState {
   if (isRecord(sort) && typeof sort.key === 'string' && (sort.dir === 'asc' || sort.dir === 'desc')) {
     out.sort = { key: sort.key, dir: sort.dir }
   }
+  // 1.7 F1: the stored list is the provider switch's state — one source, or every one. Read as the
+  // switch reads it (`providerViewOf`, which checks every entry itself) and written back as it
+  // writes it (`viewSources`): exactly one known source is that provider, anything else — both in
+  // either order, none, an unknown one beside a known one, not a list at all — is All, every
+  // source in registry order.
   if (Array.isArray(raw.providers)) {
-    const providers = raw.providers.filter(isKnownSource)
-    if (providers.length > 0) out.providers = providers
+    out.providers = viewSources(providerViewOf(raw.providers as Source[]))
   }
   if (Array.isArray(raw.models)) {
     out.models = raw.models.filter((m): m is string => typeof m === 'string').slice(0, 50)

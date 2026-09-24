@@ -416,6 +416,55 @@ test('a token budget and a money budget are never combined into one figure', () 
   assert.equal(worst.key, money.share! >= tokens.share! ? money.key : tokens.key)
 })
 
+/** The registry's titles, as the views print them. */
+const SOURCE_TITLE_OF = { claude: 'Claude Code', codex: 'Codex' } as const
+
+test('the provider switch hides what it does not show and recomputes nothing it shows (1.7 F1)', () => {
+  // A figure that changed because a provider was picked would be a second answer under the same
+  // label. Under one provider every card, every Tokens row, every budget row, every history row and
+  // every per-provider data-quality part is the one All shows for it, figure for figure; the other
+  // provider is in none of them, and no text view names it in its Quota or Tokens part.
+  const history = makeHistory()
+  fillHistory(history)
+  fillHistory(history, 'codex')
+  const input = makeInput({
+    history,
+    cfg: makeConfig({
+      'tokenPace.budgets': [
+        { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+        { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+        { scope: 'codex', period: 'month', unit: 'tokens', limit: 1_000_000 },
+      ],
+      'tokenPace.planPriceUsd': { claude: 200, codex: 20 },
+      'tokenPace.calibration.show': true,
+    }),
+  })
+  const all = buildViewModel(input)
+  for (const source of ['claude', 'codex'] as const) {
+    const other = source === 'claude' ? 'codex' : 'claude'
+    const vm = buildViewModel({ ...input, ui: { ...input.ui, providers: [source] } })
+    const mine = <T extends { source: string }>(rows: T[]): T[] => rows.filter((r) => r.source === source)
+    assert.deepEqual(vm.quotas, mine(all.quotas), `${source}: cards`)
+    assert.deepEqual(vm.totals, mine(all.totals), `${source}: totals`)
+    assert.deepEqual(vm.composition, mine(all.composition), `${source}: composition`)
+    assert.deepEqual(vm.cacheEconomy, mine(all.cacheEconomy), `${source}: cache economy`)
+    assert.deepEqual(vm.planFactor, mine(all.planFactor), `${source}: plan factor`)
+    assert.deepEqual(vm.retro, mine(all.retro), `${source}: history`)
+    assert.deepEqual(vm.dataQuality.quota, mine(all.dataQuality.quota), `${source}: quota sources`)
+    assert.deepEqual(vm.dataQuality.calibration, mine(all.dataQuality.calibration), `${source}: calibration`)
+    assert.deepEqual(vm.budgets, all.budgets.filter((b) => b.scope !== other), `${source}: budgets`)
+    assert.deepEqual(vm.allBudgets, all.budgets, `${source}: every budget for the status bar and the alerts`)
+    // The other provider's title in no Quota or Tokens part of either text view.
+    const md = markdownDocument(vm)
+    const quotaPart = md.slice(md.indexOf('## Quota'), md.indexOf('## Key figures'))
+    const tokensPart = md.slice(md.indexOf('## Tokens —'), md.indexOf('## Calendar'))
+    for (const [what, text] of [['quota', quotaPart], ['tokens', tokensPart]] as const) {
+      assert.ok(text.length > 0, `${source}: no ${what} part`)
+      assert.equal(text.includes(`${SOURCE_TITLE_OF[other]}`), false, `${source}: ${other} in the ${what} part:\n${text}`)
+    }
+  }
+})
+
 test('a budget with no local data for its period is a dash, never 0 %', () => {
   const vm = buildViewModel(makeInput({
     agg: new Aggregator(), quotas: [],

@@ -313,6 +313,7 @@
   "{0} of {1} tokens": "{0} von {1} Token",
   "{0} older session(s) not counted.": "{0} ältere Sitzung(en) nicht mitgezählt.",
   "{0} older session(s) not listed.": "{0} ältere Sitzung(en) nicht aufgeführt.",
+  "{0} only": "nur {0}",
   "{0} req": "{0} Anfr.",
   "{0} session(s) · hit {1}": "{0} Sitzung(en) · Treffer {1}",
   "{0} tokens have no price ({1}) — they are missing from the cost, not billed at a guess.": "{0} Token haben keinen Preis ({1}) — sie fehlen in den Kosten und werden nicht auf Verdacht berechnet.",

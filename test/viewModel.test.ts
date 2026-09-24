@@ -6,7 +6,10 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
-import { rangeFor } from '../src/time'
+import { dayOf, rangeFor } from '../src/time'
+import { SOURCES } from '../src/adapters'
+import { budgetRows } from '../src/budget'
+import { StatsCtx, cacheEconomy, calendar, composition, planFactors, totalsFor } from '../src/stats'
 import { AgentLaunch, AgentRec, MainRec, ProblemKind, QuotaSample, QuotaState, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
@@ -15,7 +18,7 @@ import { MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
 import {
   AGENT_SELECTED_IN, DASHBOARD_SECTION_KEYS, isAgentSelectedIn, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
   SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentShareOf, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
-  forecastsFor, SparkVm, parseWebviewMessage, sparkOf,
+  forecastsFor, SparkVm, parseWebviewMessage, pricingOf, providerViewOf, sparkOf, viewSources,
 } from '../src/viewModel'
 import {
   CLAUDE_FILE, FINGERPRINT, NOW, SHARE_AGENTS, TODAY, agentShareAgg, buildAgg, daysAgo, fillHistory, makeConfig, makeHistory,
@@ -263,22 +266,32 @@ test('the price date is stated once, in the footnote that needs it', () => {
   assert.equal(custom.footnotes.filter((f) => f.includes('configured rates')).length, 1)
 })
 
-test('the model filter and the provider filter reach every filtered section, and not the Tokens section', () => {
+// 1.7 F1 (pinned and changed): 1.6's provider chips stopped at the Tokens section, which showed every
+// provider whatever they said. The provider switch stands above the whole page, so it reaches the
+// Tokens section too; the model chips still do not.
+test('the model filter and the provider switch reach every filtered section; the switch reaches the Tokens section and the model filter does not (1.7 F1)', () => {
   const only = buildViewModel(makeInput({ ui: { providers: ['codex'], models: ['gpt-5.3-codex'] } }))
   assert.deepEqual(only.models.rows.map((r) => r.model), ['gpt-5.3-codex'])
   assert.equal(only.chart.series.length, 1)
-  // The Tokens section sits above the filter bar with the quota cards and is fixed periods of
-  // everything: both providers, every model, whatever the chips say — a table up there that
-  // quietly narrowed would be read as the whole.
+  // The Tokens section is fixed periods of every model of the provider the switch shows — a table
+  // up there that quietly narrowed to a model chip would be read as the provider's whole.
   const whole = buildViewModel(makeInput())
-  assert.equal(only.totals.length, 2)
-  assert.deepEqual(only.totals.map((t) => t.source), ['claude', 'codex'])
-  assert.deepEqual(only.totals, whole.totals)
-  assert.deepEqual(only.composition, whole.composition)
-  assert.deepEqual(only.cacheEconomy, whole.cacheEconomy)
-  assert.deepEqual(only.calendar, whole.calendar)
-  assert.deepEqual(only.planFactor, whole.planFactor)
-  assert.equal(only.cacheEconomy.length, 2)
+  const codex = buildViewModel(makeInput({ ui: { providers: ['codex'] } }))
+  assert.equal(only.totals.length, 1)
+  assert.deepEqual(only.totals.map((t) => t.source), ['codex'])
+  // The model chip does not reach it: the same tables as the switch alone gives.
+  assert.deepEqual(only.totals, codex.totals)
+  assert.deepEqual(only.composition, codex.composition)
+  assert.deepEqual(only.cacheEconomy, codex.cacheEconomy)
+  assert.deepEqual(only.calendar, codex.calendar)
+  assert.deepEqual(only.planFactor, codex.planFactor)
+  // And they are the Codex part of All's, figure for figure: the switch hides, it recomputes nothing.
+  assert.deepEqual(only.totals, whole.totals.filter((t) => t.source === 'codex'))
+  assert.deepEqual(only.composition, whole.composition.filter((c) => c.source === 'codex'))
+  assert.deepEqual(only.cacheEconomy, whole.cacheEconomy.filter((c) => c.source === 'codex'))
+  assert.equal(only.cacheEconomy.length, 1)
+  // The calendar periods are one sum over the view's providers: Codex's alone is less than both.
+  assert.notDeepEqual(only.calendar, whole.calendar)
 })
 
 test('the chart is stacked by provider and model and carries the configured style', () => {
@@ -1946,16 +1959,29 @@ test('a budget is measured against the number the user typed and nothing else', 
   assert.ok(tokens.text.startsWith('Claude Code · today: '), tokens.text)
 })
 
-test('the panel filters cannot move a budget', () => {
+// 1.7 F1 (pinned and extended): the chips never moved a budget's figures, and the switch does not
+// either — it picks the rows: scope `total` and the shown provider's own.
+test('the panel filters cannot move a budget; the provider switch only picks its rows (1.7 F1)', () => {
   // A budget is a standing limit. A provider chip is a question about the table below it,
   // and a limit that shrank because a chip was clicked would be a different question under
   // the same label.
-  const cfgWith = makeConfig({ 'tokenPace.budgets': BUDGETS })
+  const cfgWith = makeConfig({ 'tokenPace.budgets': [...BUDGETS, { scope: 'codex', period: 'month', unit: 'tokens', limit: 1_000_000 }] })
   const all = buildViewModel(makeInput({ agg: buildAgg(), cfg: cfgWith }))
+  assert.deepEqual(all.budgets.map((b) => b.scope), ['total', 'claude', 'codex'])
   const filtered = buildViewModel(makeInput({
     agg: buildAgg(), cfg: cfgWith, ui: { providers: ['codex'], models: ['gpt-5.3-codex'] },
   }))
-  assert.deepEqual(filtered.budgets.map((b) => b.used), all.budgets.map((b) => b.used))
+  // Under Codex: the total and the Codex budget, the Claude one not shown — every figure All's.
+  assert.deepEqual(filtered.budgets.map((b) => b.scope), ['total', 'codex'])
+  assert.deepEqual(filtered.budgets, all.budgets.filter((b) => b.scope !== 'claude'))
+  assert.deepEqual(filtered.budgets.map((b) => b.used), all.budgets.filter((b) => b.scope !== 'claude').map((b) => b.used))
+  // Under Claude Code the other way round.
+  const claude = buildViewModel(makeInput({ agg: buildAgg(), cfg: cfgWith, ui: { providers: ['claude'], models: ['claude-opus-4-6'] } }))
+  assert.deepEqual(claude.budgets, all.budgets.filter((b) => b.scope !== 'codex'))
+  // The status bar and the alerts read every row, whatever the switch shows.
+  assert.deepEqual(filtered.allBudgets, all.budgets)
+  assert.deepEqual(claude.allBudgets, all.budgets)
+  assert.equal(all.allBudgets, all.budgets, 'under All the rows shown are every row')
   // The tables beside them did move, so the filter really was applied.
   assert.notDeepEqual(filtered.models.rows.map((m) => m.model), all.models.rows.map((m) => m.model))
 })
@@ -2214,4 +2240,185 @@ test('a view-model build copies the buckets exactly once, and every table reads 
     assert.ok(unshared.calls > 1, `${what}: the unshared build made ${unshared.calls} copies; the comparison compares nothing`)
     assert.deepEqual(shared.value, unshared.value, `${what}: the shared copy changed a figure`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 F1: the provider switch — one provider, or every one
+// ---------------------------------------------------------------------------
+
+/** Budgets of all three scopes, and the calibration and plan prices shown, so every per-provider part has rows. */
+const F1_CFG = {
+  'tokenPace.budgets': [
+    { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+    { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+    { scope: 'codex', period: 'month', unit: 'tokens', limit: 1_000_000 },
+  ],
+  'tokenPace.planPriceUsd': { claude: 200, codex: 20 },
+  'tokenPace.calibration.show': true,
+  'tokenPace.attribution': 'project',
+}
+
+/** The switch's world: agents (one running), every per-provider part filled, a reading of the prompt cache. */
+function f1Input(providers?: ('claude' | 'codex')[]): ReturnType<typeof makeInput> {
+  const { agg } = withAgents()
+  const history = makeHistory()
+  fillHistory(history)
+  fillHistory(history, 'codex')
+  const input = makeInput({ agg, history, cfg: makeConfig(F1_CFG), ...(providers ? { ui: { providers } } : {}) })
+  return { ...input, promptCache: CACHE }
+}
+
+const CLAUDE_ONLY_CODEX = 'Claude Code only — not shown while Codex is selected.'
+const SHOWING = (title: string): string => `Showing ${title} only — the provider switch at the top of the dashboard; ‘All’ shows every provider.`
+
+test('under All the switch changes nothing 1.6 built from every provider: each field is its stats function over every source, in registry order, whatever order the list was stored in (1.7 F1)', () => {
+  const plain = buildViewModel(f1Input())
+  for (const order of [['claude', 'codex'], ['codex', 'claude']] as const) {
+    const input = f1Input([...order])
+    const vm = buildViewModel(input)
+    assert.equal(vm.provider, 'all', order.join())
+    assert.equal(vm.claudeOnly, null, order.join())
+    // The same stats functions, called here with every source as 1.6 called them.
+    const cfgX = input.cfg
+    const tcfgX = timeConfig(cfgX)
+    const ctx: StatsCtx = {
+      agg: input.agg, tcfg: tcfgX, pricing: pricingOf(cfgX), now: NOW, sources: [...SOURCES], models: [],
+      showCost: cfgX.showCost, attribution: cfgX.attribution,
+    }
+    const month = rangeFor('30d', NOW, tcfgX)
+    const st = input.agg.stats()
+    const firstDay = input.agg.firstIngest !== null ? dayOf(input.agg.firstIngest, tcfgX) : st.oldestDay
+    const windowsOf = (source: 'claude' | 'codex') => input.quotas.find((q) => q.source === source)?.windows ?? []
+    assert.deepEqual(vm.totals, SOURCES.map((source) => ({
+      source, title: SOURCE_TITLE[source],
+      rows: totalsFor(ctx, source, null, null, firstDay, cfgX.pricing.showListPrice, windowsOf(source)),
+    })), `${order.join()}: totals`)
+    assert.deepEqual(vm.composition, composition(ctx, month), `${order.join()}: composition`)
+    assert.deepEqual(vm.cacheEconomy, cacheEconomy(ctx, month), `${order.join()}: cache economy`)
+    assert.deepEqual(vm.calendar, calendar(ctx), `${order.join()}: calendar`)
+    assert.deepEqual(vm.planFactor, planFactors(ctx, cfgX.planPriceUsd), `${order.join()}: plan factor`)
+    assert.deepEqual(vm.budgets, budgetRows(ctx, cfgX.budgets, NOW), `${order.join()}: budgets`)
+    assert.deepEqual(vm.dataQuality.quota, SOURCES.map((source) => ({
+      source, candidates: input.candidates[source], drift: input.drift[source],
+    })), `${order.join()}: data quality`)
+    // Every provider still in every one of them, and the rest as the default list builds it.
+    assert.deepEqual(vm.quotas.map((q) => q.source), ['claude', 'codex'])
+    assert.deepEqual(vm.totals.map((x) => x.source), ['claude', 'codex'])
+    assert.deepEqual(vm.planFactor.map((x) => x.source), ['claude', 'codex'])
+    assert.deepEqual([...new Set(vm.retro.map((r) => r.source))], ['claude', 'codex'])
+    assert.deepEqual(vm.budgets.map((b) => b.scope), ['total', 'claude', 'codex'])
+    for (const field of ['quotas', 'retro', 'dataQuality', 'agents', 'context', 'kpis', 'models', 'chart', 'footnotes'] as const) {
+      assert.deepEqual(vm[field], plain[field], `${order.join()}: ${field}`)
+    }
+    assert.equal(vm.footnotes.some((f) => f.startsWith('Showing ')), false, `${order.join()}: a switch footnote under All`)
+  }
+})
+
+test('under Codex only Codex is shown — its card, its tokens, its models, its budgets — and the agent tree is still built whole (1.7 F1)', () => {
+  const all = buildViewModel(f1Input())
+  const vm = buildViewModel(f1Input(['codex']))
+  assert.equal(vm.provider, 'codex')
+  assert.equal(vm.claudeOnly, CLAUDE_ONLY_CODEX)
+  // The quota section: the Codex card alone, the very card All shows.
+  assert.deepEqual(vm.quotas.map((q) => q.source), ['codex'])
+  assert.deepEqual(vm.quotas, all.quotas.filter((q) => q.source === 'codex'))
+  // The Tokens section: Codex only, every model of it, the fixed periods.
+  assert.deepEqual(vm.totals.map((x) => x.source), ['codex'])
+  assert.deepEqual(vm.totals, all.totals.filter((x) => x.source === 'codex'))
+  assert.deepEqual(vm.composition.map((x) => x.source), ['codex'])
+  assert.deepEqual(vm.cacheEconomy.map((x) => x.source), ['codex'])
+  assert.deepEqual(vm.planFactor.map((x) => x.source), ['codex'])
+  // No Claude model anywhere below.
+  assert.ok(vm.models.rows.length > 0)
+  assert.ok(vm.models.rows.every((r) => r.source === 'codex'), vm.models.rows.map((r) => r.model).join())
+  assert.ok(vm.chart.series.length > 0)
+  assert.ok(vm.chart.series.every((x) => x.source === 'codex'), vm.chart.series.map((x) => x.key).join())
+  assert.deepEqual(toolVm({}, { providers: ['codex'] }).tools.rows.map((r) => r.name), ['exec'])
+  // The agent tree is the host's too (the poll, the status bar): whole, the running agent and the
+  // launch in it.
+  assert.equal(all.agents.running, 2)
+  assert.equal(vm.agents.running, all.agents.running)
+  assert.deepEqual(vm.agents, all.agents)
+  assert.deepEqual(vm.context, all.context)
+  // Budgets: the total and the Codex one, not the Claude one — the same figures as under All.
+  assert.deepEqual(vm.budgets.map((b) => b.scope), ['total', 'codex'])
+  const total = vm.budgets.find((b) => b.scope === 'total')
+  assert.equal(total?.used, all.budgets.find((b) => b.scope === 'total')?.used)
+  assert.deepEqual(vm.allBudgets, all.budgets)
+  // The history and the data quality's per-provider parts: Codex's.
+  assert.ok(vm.retro.length > 0)
+  assert.ok(vm.retro.every((r) => r.source === 'codex'))
+  assert.deepEqual(vm.dataQuality.quota.map((q) => q.source), ['codex'])
+  assert.ok(vm.dataQuality.calibration.length > 0)
+  assert.ok(vm.dataQuality.calibration.every((c) => c.source === 'codex'))
+  assert.notEqual(all.dataQuality.agents, null)
+  assert.equal(vm.dataQuality.agents, null)
+  // The lines about the machine stay whole.
+  for (const key of ['roots', 'files', 'oldestDay', 'newestDay', 'buckets', 'snapshotBytes', 'consent', 'leader', 'retention',
+    'history', 'bridge', 'attribution', 'version'] as const) {
+    assert.deepEqual(vm.dataQuality[key], all.dataQuality[key], key)
+  }
+  // The footnote says what the page shows, first, once; All has none.
+  assert.equal(vm.footnotes[0], SHOWING('Codex'))
+  assert.equal(vm.footnotes.filter((f) => f.startsWith('Showing ')).length, 1)
+  assert.equal(all.footnotes.some((f) => f.startsWith('Showing ')), false)
+})
+
+test('under Claude Code the Claude card keeps its prompt-cache line and its subagent shares, and nothing is left out (1.7 F1)', () => {
+  const all = buildViewModel(f1Input())
+  const vm = buildViewModel(f1Input(['claude']))
+  assert.equal(vm.provider, 'claude')
+  assert.equal(vm.claudeOnly, null)
+  assert.deepEqual(vm.quotas.map((q) => q.source), ['claude'])
+  assert.deepEqual(vm.quotas, all.quotas.filter((q) => q.source === 'claude'))
+  assert.ok(vm.quotas[0].promptCache !== null, 'the prompt-cache line is gone')
+  assert.ok(vm.quotas[0].windows.some((w) => w.agentShare !== null), 'the subagent share is gone')
+  assert.deepEqual(vm.agents, all.agents)
+  assert.ok(vm.agents.roots.length > 0)
+  assert.notEqual(vm.dataQuality.agents, null)
+  assert.deepEqual(vm.dataQuality.agents, all.dataQuality.agents)
+  assert.deepEqual(vm.totals.map((x) => x.source), ['claude'])
+  assert.deepEqual(vm.budgets.map((b) => b.scope), ['total', 'claude'])
+  assert.equal(vm.footnotes[0], SHOWING('Claude Code'))
+  // The subagent share over the same bounds as the Claude totals row: the whole is its usage.
+  const rows = vm.totals[0].rows
+  assert.equal(rows[0].usage, all.totals[0].rows[0].usage)
+})
+
+test('the switch message names one of its states; a new view shows its sources and clears the model chips, the same view is the same object (1.7 F1)', () => {
+  for (const provider of ['all', 'claude', 'codex'] as const) {
+    assert.deepEqual(parseWebviewMessage({ type: 'setProvider', provider }), { type: 'setProvider', provider })
+  }
+  for (const provider of ['gemini', null, ['claude'], 'CLAUDE', undefined, 1, '', 'All']) {
+    assert.equal(parseWebviewMessage({ type: 'setProvider', provider }), null, JSON.stringify(provider) ?? 'undefined')
+  }
+  assert.equal(parseWebviewMessage({ type: 'setProvider' }), null)
+  const ui = { ...defaultUiState(cfg), models: ['claude-opus-4-6'] }
+  // The view shown already: nothing to store, by identity.
+  assert.equal(applyMessage(ui, { type: 'setProvider', provider: 'all' }), ui)
+  const codex = applyMessage(ui, { type: 'setProvider', provider: 'codex' })
+  assert.deepEqual(codex.providers, ['codex'])
+  assert.deepEqual(codex.models, [], 'a model chip survived the change of provider')
+  assert.deepEqual(ui.models, ['claude-opus-4-6'], 'the input state was mutated')
+  assert.equal(applyMessage(codex, { type: 'setProvider', provider: 'codex' }), codex)
+  const back = applyMessage({ ...codex, models: ['gpt-5.3-codex'] }, { type: 'setProvider', provider: 'all' })
+  assert.deepEqual(back.providers, ['claude', 'codex'])
+  assert.deepEqual(back.models, [], 'a change to All kept the model chips')
+  assert.deepEqual(applyMessage(ui, { type: 'setProvider', provider: 'claude' }).providers, ['claude'])
+  // A value that is no state of the switch changes nothing, even past the parser.
+  assert.equal(applyMessage(ui, { type: 'setProvider', provider: 'gemini' as never }), ui)
+  // The stored list and the view: exactly one known source is that source, anything else All.
+  assert.equal(providerViewOf(['claude']), 'claude')
+  assert.equal(providerViewOf(['codex']), 'codex')
+  for (const list of [[], ['claude', 'codex'], ['codex', 'claude'], ['claude', 'claude'], ['x'], ['all'], ['claude', 'x']]) {
+    assert.equal(providerViewOf(list as never), 'all', JSON.stringify(list))
+  }
+  assert.deepEqual(viewSources('all'), ['claude', 'codex'])
+  assert.deepEqual(viewSources('codex'), ['codex'])
+  // So the chips' message can store no other subset either: both, in any order, or none, is All.
+  for (const providers of [['codex', 'claude'], [], ['claude', 'codex']] as const) {
+    assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: [...providers], models: [] }).providers, ['claude', 'codex'])
+  }
+  assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'] }).models, ['m'],
+    'the model chips\' own message cleared the models')
 })

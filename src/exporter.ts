@@ -18,6 +18,7 @@ import { AgentRecordView, agentRecordViews } from './agentTreeBuild'
 import { Config } from './config'
 import { t } from './i18n'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing } from './prices'
+import { viewTitle } from './textViews'
 import { TimeConfig, dayOfHour, dayOf as dayOfInstant } from './time'
 import { Bucket, TOOL_NAME_CAP } from './types'
 import type { ViewModel } from './viewModel'
@@ -483,7 +484,11 @@ export function toMarkdownSummary(vm: ViewModel): string {
   const L: string[] = []
   // The range bounds are dates, not words: they stay outside the key, which is then the same
   // one the QuickPick titles itself with.
-  L.push(`# ${t('Token Pace — {0}', vm.range.label)} (${vm.range.from} → ${vm.range.to})`)
+  // 1.7 F1: the summary follows the dashboard's provider switch, as the markdown view does, and its
+  // heading names the provider while the switch shows one.
+  const shown = viewTitle(vm)
+  L.push(`# ${t('Token Pace — {0}', vm.range.label)} (${vm.range.from} → ${vm.range.to})`
+    + (shown !== null ? ` · ${t('{0} only', shown)}` : ''))
   L.push('')
   if (vm.preview) L.push(`> **${t('Preview data — not a reading.')}**`, '')
 

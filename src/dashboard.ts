@@ -39,16 +39,21 @@ import type { ViewModel } from './viewModel'
  */
 type SectionField = keyof ViewModel | `ui.${keyof ViewModel['ui']}`
 
-/** Section keys the webview renders, in the order `dashboard.sections` gives them. */
-const SECTION_FIELDS: Record<string, SectionField[]> = {
+/**
+ * Section keys the webview renders, in the order `dashboard.sections` gives them. Exported for the
+ * test that holds a provider switch to exactly the fragments whose fields it changed (1.7 F1).
+ */
+export const SECTION_FIELDS: Readonly<Record<string, SectionField[]>> = {
   summary: ['digest'],
   quota: ['quotas'],
   // The running list and the tree, and the pieces of view state that decide what of it is open:
   // the nodes the reader opened, the node whose details are shown and under which of its rows
   // (1.6 N2), how many of an open node's children the reader asked to see (1.6 D3), and whether
-  // the 7-day block is open (1.6 L3).
-  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentSelectedIn', 'ui.agentsMore', 'ui.agentsWeekOpen'],
-  context: ['context'],
+  // the 7-day block is open (1.6 L3). 1.7 F1: and the provider switch — while it excludes Claude
+  // the section is not drawn, `claudeOnly` saying why — so a switch pushes its going and its
+  // return as the fragments they are.
+  agents: ['agents', 'ui.agentsExpanded', 'ui.agentSelected', 'ui.agentSelectedIn', 'ui.agentsMore', 'ui.agentsWeekOpen', 'provider', 'claudeOnly'],
+  context: ['context', 'provider', 'claudeOnly'],
   kpis: ['kpis'],
   // The cache switch above the composition bars decides which parts are drawn, so the
   // section follows it — and nothing else the reader may do to the view state.
@@ -67,6 +72,8 @@ const SECTION_FIELDS: Record<string, SectionField[]> = {
   drill: ['drill'],
   // Chrome that is always present. `footer` carries the generated-at line, which changes on
   // every tick — keeping it in its own node is what stops a full re-render every minute.
+  // 1.7 F1: the provider switch, the page's first block.
+  provider: ['provider'],
   notices: ['firstRun', 'preview'],
   controls: ['range', 'ui', 'models'],
   footer: ['footnotes', 'pricing', 'generatedAt'],
@@ -370,8 +377,12 @@ export function layoutKey(vm: ViewModel): string {
 
 const LAYOUT_FIELDS: SectionField[] = ['sections', 'showCost']
 
-/** The pieces of the page that are always there, whatever `dashboard.sections` lists. */
-const CHROME_SECTIONS = ['notices', 'controls', 'footer', 'drill']
+/**
+ * The pieces of the page that are always there, whatever `dashboard.sections` lists. 1.7 F1: the
+ * provider switch first; a page without its block (a build before 1.7 P7) has no body for the
+ * fragment, and `renderSection` leaves it at the model.
+ */
+const CHROME_SECTIONS = ['provider', 'notices', 'controls', 'footer', 'drill']
 
 /** The keys a section push may carry: the listed sections and the chrome around them. */
 export function shownSections(vm: ViewModel): Set<string> {
@@ -386,9 +397,18 @@ function uiField(f: SectionField): string {
   return f.slice(UI_FIELD.length)
 }
 
-/** The `ui.<field>` dependencies of a section — what only the reader's own clicks change. */
+/**
+ * View-model fields that are the reader's own click as much as a `ui.<field>` is: the provider
+ * switch (1.7 F1) is `ui.providers` in the form the sections are built from.
+ */
+const VIEW_STATE_FIELDS: readonly SectionField[] = ['provider']
+
+/**
+ * The view-state dependencies of a section — its `ui.<field>`s and the provider switch: what only
+ * the reader's own clicks change, and what a held-back section answers at once.
+ */
 function uiFieldsOf(fields: SectionField[]): SectionField[] {
-  return fields.filter((f) => f.startsWith(UI_FIELD))
+  return fields.filter((f) => f.startsWith(UI_FIELD) || VIEW_STATE_FIELDS.includes(f))
 }
 
 /**

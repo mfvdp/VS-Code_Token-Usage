@@ -78,6 +78,35 @@ export { SOURCE_TITLE }
 /** Whether the composition bar shows the cache parts or the rest of the mix without them. */
 export type CompositionCache = 'all' | 'noCache'
 
+/**
+ * 1.7 F1: what the provider switch at the top of the dashboard shows — one provider, or every one
+ * (`all`, the page as 1.6 drew it). View state, stored as the list `UiState.providers` it has
+ * always been: one source, or all of them.
+ */
+export type ProviderView = 'all' | Source
+
+/** 1.7 F1: a value the switch can show — `all` or a known source; the one check the parser and the reducer make. */
+export function isProviderView(v: unknown): v is ProviderView {
+  return v === 'all' || (typeof v === 'string' && (SOURCES as readonly string[]).includes(v))
+}
+
+/**
+ * 1.7 F1: the view a stored provider list stands for. Exactly one known source is that source;
+ * anything else — every source in either order, none, a source twice, an unknown one, a subset a
+ * third provider would allow — is `all`. So every list a 1.6 build could store maps onto a state
+ * of the switch, and none needs a migration.
+ */
+export function providerViewOf(providers: readonly Source[]): ProviderView {
+  if (!Array.isArray(providers) || providers.length !== 1) return 'all'
+  const only: unknown = providers[0]
+  return typeof only === 'string' && (SOURCES as readonly string[]).includes(only) ? (only as Source) : 'all'
+}
+
+/** 1.7 F1: the sources a view shows — every one in registry order for `all`, else the one. */
+export function viewSources(view: ProviderView): Source[] {
+  return view !== 'all' && isProviderView(view) ? [view] : [...SOURCES]
+}
+
 export interface UiState {
   range: RangePreset | { from: string; to: string }
   sort: { key: string; dir: 'asc' | 'desc' }
@@ -169,6 +198,8 @@ export type WebviewMessage =
   | { type: 'setRange'; from: string; to: string }
   | { type: 'setSort'; key: ModelSortKey; dir: 'asc' | 'desc' }
   | { type: 'setFilter'; providers: Source[]; models: string[] }
+  /** 1.7 F1: the provider switch — one provider, or every one. */
+  | { type: 'setProvider'; provider: ProviderView }
   | { type: 'setMetric'; metric: Metric }
   | { type: 'setCompositionCache'; mode: CompositionCache }
   | { type: 'setHeatmapMetric'; metric: 'usage' | 'cost' }
@@ -284,6 +315,10 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       const seen = new Set(providers)
       return { type: 'setFilter', providers: [...seen] as Source[], models: [...new Set(models)] }
     }
+    // 1.7 F1: the provider switch names one of its states — `all` or a known source, exactly as
+    // written; a list, a case variant or a provider this build does not know drops the message.
+    case 'setProvider':
+      return isProviderView(m.provider) ? { type: 'setProvider', provider: m.provider } : null
     case 'setMetric':
       return typeof m.metric === 'string' && (METRICS as string[]).includes(m.metric)
         ? { type: 'setMetric', metric: m.metric as Metric }
@@ -383,12 +418,22 @@ export function applyMessage(ui: UiState, m: WebviewMessage): UiState {
       return { ...ui, sort: { key: m.key, dir: m.dir } }
     case 'setFilter':
       // Switching every provider off would leave a dashboard of dashes that looks broken;
-      // the last one stays on.
+      // the last one stays on. 1.7 F1: the list is stored as a state of the provider switch —
+      // one source, or every one in registry order — so no message can store a subset the
+      // switch cannot show (an empty list is every provider, as it was).
       return {
         ...ui,
-        providers: m.providers.length > 0 ? m.providers : [...SOURCES],
+        providers: viewSources(providerViewOf(m.providers)),
         models: m.models,
       }
+    case 'setProvider': {
+      // 1.7 F1: the view already shown changes nothing — the same object, nothing to persist.
+      // Another one shows its sources and clears the model chips: a chip belongs to its
+      // provider's models, and one kept across the change would empty every filtered section
+      // (§7a Q3: a change to All included, one rule).
+      if (!isProviderView(m.provider) || providerViewOf(ui.providers) === m.provider) return ui
+      return { ...ui, providers: viewSources(m.provider), models: [] }
+    }
     case 'setMetric':
       return { ...ui, metric: m.metric }
     case 'setCompositionCache':
@@ -670,7 +715,8 @@ export interface DataQuality {
    * records' usage (each agent whole, the records the tree and its 7-day block are built from)
    * and the subagent tokens of the hour buckets (the hour of each reply, `≈` when those seven days
    * reach below the hour buckets' roll-up) — with the note that says why the two need not agree.
-   * Claude Code only. Null when neither holds a token.
+   * Claude Code only. Null when neither holds a token, and (1.7 F1) while the provider switch
+   * shows another provider.
    */
   agents: { records: string; buckets: string; note: string } | null
 }
@@ -723,6 +769,21 @@ export interface ViewModel {
   pricing: { asOf: string; custom: boolean; showList: boolean }
   range: DayRange & { previous: DayRange | null; presets: RangePreset[] }
   ui: UiState
+  /**
+   * 1.7 F1: what the provider switch shows — the view `ui.providers` stands for. Every section
+   * below the switch follows it (the per-section rules are `buildViewModel`'s); `all` is the page
+   * as 1.6 built it.
+   */
+  provider: ProviderView
+  /**
+   * 1.7 F1: why the Claude Code–only sections — Agents and Context window — are not shown while
+   * the view excludes Claude: "Claude Code only — not shown while Codex is selected."; null while
+   * it includes Claude. The renderers leave those sections out (§7a Q7) and this is the reason, in
+   * words. `agents` and `context` are still built whole: the host's agent poll and the status
+   * bar's agents entry read `agents` (extension.ts), and neither follows the switch.
+   */
+  claudeOnly: string | null
+  /** The cards of the providers the view shows, in the order the quota states came. */
   quotas: QuotaCard[]
   /** The Agents section: the agents running now, and the session → workflow → agent tree with derived states. */
   agents: AgentTreeVm
@@ -746,11 +807,19 @@ export interface ViewModel {
   /**
    * The user's own budgets, in the order they were configured.
    *
-   * Deliberately not filtered by the panel's provider and model chips: a budget is a
-   * standing limit, and a number that shrank because a chip was clicked would be a
-   * different question wearing the same label.
+   * Deliberately not measured through the panel's provider switch and model chips: a budget is
+   * a standing limit, and a number that shrank because a chip was clicked would be a different
+   * question wearing the same label. 1.7 F1: the switch only picks the rows — scope `total` and
+   * the shown provider's own; the other provider's budget is not shown under one provider — and
+   * every figure on a row is the one All shows.
    */
   budgets: BudgetRow[]
+  /**
+   * 1.7 F1: every budget row, whatever the switch shows — `budgets` under All, the same rows. What
+   * the status bar's budget item and the budget alerts read (extension.ts): the switch is the
+   * dashboard's view state and governs neither (§3 F1 item 9). No view prints it.
+   */
+  allBudgets: BudgetRow[]
   retro: { source: Source; windowId: string; label: string; retro: Retro; text: string }[]
   projects: { rows: ProjectRow[]; enabled: boolean }
   sessions: { rows: SessionRow[]; enabled: boolean; cacheStates: { session: string; text: string }[] }
@@ -1594,8 +1663,10 @@ export function toolRows(ctx: StatsCtx, range: DayRange, limit: number): ToolsDa
 /**
  * The Agents section's tree, from the aggregator's tables and the view state: `page` for the
  * dashboard — only what the reader opened (1.6 D3) — and `text` for the markdown document, which
- * prints every node. Range-free like the quota cards, and deliberately blind to the provider and
- * model chips: the tree is the Claude Code sessions of the last days, whatever the tables filter.
+ * prints every node. Range-free like the quota cards, and deliberately blind to the provider switch
+ * and the model chips: the tree is the Claude Code sessions of the last days, whatever the tables
+ * filter — the host's agent poll and the status bar read it too (1.7 F1: under another provider
+ * the views leave the section out, `ViewModel.claudeOnly`, and the tree is still built whole).
  */
 export function agentTreeFor(
   input: Pick<VmInput, 'agg' | 'cfg' | 'ui' | 'now' | 'hook'>, mode: 'page' | 'text',
@@ -1644,7 +1715,14 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   const tcfg = readTimeConfig(cfg)
   const paceCfg = readPaceConfig(cfg)
   const pricing: PricingOptions = pricingOf(cfg)
-  const sources: Source[] = ui.providers.length > 0 ? [...ui.providers] : [...SOURCES]
+  // 1.7 F1: the provider switch. One view, and the sources it shows in registry order — whatever
+  // order the stored list has — for every section that follows it: the statistics as before, and
+  // now the quota cards, the Tokens section, the budgets' rows, the history and the data quality's
+  // per-provider parts too (the rules are at each of them below).
+  const view = providerViewOf(ui.providers)
+  const sources: Source[] = viewSources(view)
+  const claudeShown = sources.includes('claude')
+  const shownQuotas = quotas.filter((q) => sources.includes(q.source))
   // 1.7 P-A: the buckets copied once for the whole build — every table walks this one array
   // (`StatsCtx.buckets`; the Tokens and budget contexts are spreads of `ctx` and carry it, the drill
   // takes `ctx` itself), and so do the hour sums' model lists. Read only.
@@ -1679,11 +1757,12 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   const windowsOf = (source: Source): TotalsWindow[] =>
     quotas.find((q) => q.source === source)?.windows ?? []
   // The Tokens section follows no chip. It sits above the filter bar with the quota cards, and
-  // a table up there that quietly narrowed to the range, provider or model picked below would
-  // be read as the whole — so its rows are fixed periods (the running windows, today, the last
-  // 7 and 30 days, this week, this month, all time) of every provider and model, and the
-  // composition bars and the cache economy take the last 30 days and say so.
-  const whole: StatsCtx = { ...ctx, sources: [...SOURCES], models: [] }
+  // a table up there that quietly narrowed to the range or model picked below would be read as
+  // the whole — so its rows are fixed periods (the running windows, today, the last 7 and 30
+  // days, this week, this month, all time) of every model, and the composition bars and the
+  // cache economy take the last 30 days and say so. 1.7 F1: of the providers the switch shows —
+  // the switch stands above everything, the section included — in registry order.
+  const whole: StatsCtx = { ...ctx, sources: viewSources(view), models: [] }
 
   // 1.6 L5 (Review 3): the hour spans this build sums, in one pass over the buckets — the totals
   // table's window rows of every provider, each Claude window's subagent share over the very same
@@ -1691,14 +1770,17 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   hourSums.prefetch([
     ...whole.sources.flatMap((source) => totalsWindowSpans(now, windowsOf(source))
       .map((span): HourQuery => ({ fromMs: span.fromMs, toMs: span.toMs, filter: filterFor(whole, source) }))),
-    ...quotas.filter((q) => q.source === 'claude').flatMap((q) => q.windows.flatMap((w) => agentShareQueries(hourSums, w, now))),
-    agentTokensQuery(now),
+    ...shownQuotas.filter((q) => q.source === 'claude').flatMap((q) => q.windows.flatMap((w) => agentShareQueries(hourSums, w, now))),
+    ...(claudeShown ? [agentTokensQuery(now)] : []),
   ])
 
   // N7 (1.6): the subagent tokens of the last seven days, counted once — the data-quality line
-  // prints them, and a quota card's share line is not drawn where they are none (P10c).
-  const agentTokens = agentTokensOf(agg, now, hourSums)
-  const cards = quotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null))
+  // prints them, and a quota card's share line is not drawn where they are none (P10c). Claude
+  // Code's alone: while the view excludes Claude neither the line nor a Claude card is shown.
+  const agentTokens = claudeShown ? agentTokensOf(agg, now, hourSums) : null
+  // 1.7 F1: the cards of the providers the view shows; a Claude card keeps its prompt-cache line
+  // and its subagent shares.
+  const cards = shownQuotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null))
   const month = rangeFor('30d', now, tcfg)
   const totals = whole.sources.map((source) => ({
     source,
@@ -1713,12 +1795,19 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   const kpiRow = kpis(ctx, range, previous)
   const cache = cacheEconomy(whole, month)
 
-  const retroRows = retroList(quotas, history, input.fingerprints)
+  // 1.7 F1: the reset history of the providers the view shows.
+  const retroRows = retroList(shownQuotas, history, input.fingerprints)
+  // Every budget as it stands (see `ViewModel.budgets`), and the rows the view shows of them:
+  // scope `total` and the shown provider's own. Under All the very same list.
+  const allBudgets = budgetRows({ ...ctx, sources: [...SOURCES], models: [] }, cfg.budgets, now)
+  const budgets = view === 'all' ? allBudgets : allBudgets.filter((b) => b.scope === 'total' || sources.includes(b.scope))
 
   const attributionOn = cfg.attribution !== 'none'
-  const dq = dataQuality(input, ctx, tcfg, costSummary, stats, agentTokens)
+  const dq = dataQuality(input, ctx, tcfg, costSummary, stats, agentTokens, sources)
   const empty = stats.buckets === 0
-  const noQuota = cards.every((c) => c.problem !== null || c.windows.length === 0)
+  // The first-run box is about the machine, not about the view: "no quota" is every provider's,
+  // whichever one the switch shows — the same answer a card-by-card test gave in 1.6.
+  const noQuota = quotas.every((q) => !q.ok || q.windows.length === 0)
 
   const vm: ViewModel = {
     generatedAt: formatTime(now, tcfg),
@@ -1728,6 +1817,8 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     pricing: { asOf: PRICES_AS_OF, custom: isCustomPricing(pricing), showList: cfg.pricing.showListPrice },
     range: { ...range, previous, presets: RANGE_PRESETS },
     ui,
+    provider: view,
+    claudeOnly: claudeShown || view === 'all' ? null : claudeOnlyText(view),
     quotas: cards,
     // Only what the reader opened goes to the page (1.6 D3); see agentTreeFor.
     agents: agentTreeFor(input, 'page'),
@@ -1751,7 +1842,8 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     tools: toolRows(ctx, range, cfg.dashboard.topN),
     // Every provider, no model filter: see `ViewModel.budgets`. The period bounds come from
     // `now`, never from the selected range — a month budget is about the month.
-    budgets: budgetRows({ ...ctx, sources: [...SOURCES], models: [] }, cfg.budgets, now),
+    budgets,
+    allBudgets,
     retro: retroRows,
     projects: { rows: attributionOn ? projectRows(ctx) : [], enabled: attributionOn },
     sessions: {
@@ -1852,6 +1944,7 @@ function dataQuality(
   cost: ReturnType<typeof combinedCost>,
   stats: ReturnType<Aggregator['stats']>,
   agents: DataQuality['agents'],
+  sources: readonly Source[],
 ): DataQuality {
   const { cfg, agg, history, now } = input
   const totalTokens = ctx.sources.reduce(
@@ -1861,7 +1954,8 @@ function dataQuality(
   const size = history.size()
   const calib: DataQuality['calibration'] = []
   if (cfg.calibration.show) {
-    for (const q of input.quotas) {
+    // 1.7 F1: the calibration of the providers the view shows.
+    for (const q of input.quotas.filter((x) => sources.includes(x.source))) {
       const fp = input.fingerprints[q.source] ?? ''
       for (const w of q.windows) {
         const c = calibration(
@@ -1886,7 +1980,9 @@ function dataQuality(
     lowerBoundShare: percentOf(cost.unpricedTokens + cost.fastUnpricedTokens, totalTokens),
     unpricedModels: cost.unpricedModels,
     familyPriced: cost.familyPriced,
-    quota: SOURCES.map((source) => ({
+    // 1.7 F1: the per-provider parts follow the view — the sources that could answer and the
+    // drift of the providers it shows (§7a Q6); every line about the machine stays whole.
+    quota: SOURCES.filter((source) => sources.includes(source)).map((source) => ({
       source,
       candidates: input.candidates[source] ?? [],
       drift: input.drift[source] ?? [],
@@ -1930,8 +2026,22 @@ function calibrationText(c: Calibration | null): string {
     c.factor.toFixed(1), c.low.toFixed(1), c.high.toFixed(1), c.basisHours.toFixed(1)))
 }
 
+/**
+ * 1.7 F1: the line the Claude Code–only sections stand for while the view shows another provider,
+ * named by the registry's title — "Claude Code only — not shown while Codex is selected.".
+ */
+function claudeOnlyText(view: Exclude<ProviderView, 'all'>): string {
+  return t('Claude Code only — not shown while {0} is selected.', SOURCE_TITLE[view] ?? view)
+}
+
 function footnotesFor(vm: ViewModel, cfg: Config): string[] {
   const out: string[] = []
+  // 1.7 F1: first, while the view is one provider — it qualifies every figure on the page, as the
+  // switch at the top of the dashboard stands above all of them.
+  if (vm.provider !== 'all') {
+    out.push(t('Showing {0} only — the provider switch at the top of the dashboard; ‘All’ shows every provider.',
+      SOURCE_TITLE[vm.provider] ?? vm.provider))
+  }
   out.push(t('“Usage” = fresh input + cache write + output; cache reads are listed apart because they outnumber the rest by orders of magnitude.'))
   if (vm.showCost) {
     // The only place the price date is stated. Every view prints these footnotes verbatim, so

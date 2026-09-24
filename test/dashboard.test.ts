@@ -6416,6 +6416,60 @@ test('the host pushes a fragment only for a section on the page, or for the chro
   assert.deepEqual(r.sections(), ['records'])
 })
 
+test('a provider switch pushes the switch and exactly the sections whose fields it changed — never a whole page, the Agents section at once (1.7 F1)', () => {
+  const { SECTION_FIELDS } = loadDashboard()
+  const { DASHBOARD_SECTION_KEYS } = require('../src/viewModel') as typeof import('../src/viewModel')
+  // Every section on the page, and something in each of the per-provider parts.
+  const cfg = makeConfig({
+    'tokenPace.dashboard.sections': [...DASHBOARD_SECTION_KEYS],
+    'tokenPace.attribution': 'session',
+    'tokenPace.budgets': [
+      { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+      { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+    ],
+  })
+  const built = (providers: ('claude' | 'codex')[]): any => buildViewModel(makeInput({ cfg, ui: { providers } }))
+  const all = built(['claude', 'codex'])
+  const codex = built(['codex'])
+  // What each section is compared by, as the provider compares it: a `ui.<field>` by that field.
+  const field = (vm: any, f: string): unknown => (f.startsWith('ui.') ? vm.ui[f.slice(3)] : vm[f])
+  const changed = (a: any, b: any): string[] => Object.entries(SECTION_FIELDS)
+    .filter(([, fields]) => JSON.stringify(fields.map((f) => field(a, f))) !== JSON.stringify(fields.map((f) => field(b, f))))
+    .map(([key]) => key).sort()
+  const r = throttleRig()
+  r.p.update(all)
+  r.p.resolveWebviewView(r.view)
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  r.posted.length = 0
+  r.advance(AG_NOW + 10_000)
+  r.p.update(codex)
+  assert.deepEqual(r.posted.map((m) => m.type).filter((x) => x !== 'section'), [], 'a switch pushed a whole page')
+  assert.deepEqual([...r.sections()].sort(), changed(all, codex))
+  // By name, so the comparison above cannot agree with a list that forgot one: the switch itself,
+  // the sections that follow it, the two Claude Code–only ones going, the bar and the footnote.
+  for (const key of ['provider', 'quota', 'agents', 'context', 'tokens', 'summary', 'kpis', 'chart', 'models', 'budget',
+    'history', 'dataQuality', 'controls', 'footer']) {
+    assert.ok(r.sections().includes(key), `${key} was not pushed: ${r.sections().join()}`)
+  }
+  // Chrome the switch does not change stays where it is.
+  for (const key of ['notices', 'drill']) assert.equal(r.sections().includes(key), false, `${key} was pushed`)
+  // The fragments carry what the page draws the switch and the two sections from.
+  const push = (key: string): any => r.posted.find((m) => m.type === 'section' && m.key === key)
+  assert.deepEqual(push('provider').payload, { provider: 'codex' })
+  assert.equal(push('agents').payload.claudeOnly, 'Claude Code only — not shown while Codex is selected.')
+  assert.equal(push('context').payload.provider, 'codex')
+  // Back to All 300 ms later: the Agents section is the reader's own click, answered at once —
+  // its two seconds bound live data, not the switch — and it comes back as a fragment again.
+  r.posted.length = 0
+  r.advance(AG_NOW + 10_300)
+  r.p.update(built(['claude', 'codex']))
+  assert.deepEqual(r.posted.map((m) => m.type).filter((x) => x !== 'section'), [])
+  assert.ok(r.sections().includes('agents'), r.sections().join())
+  assert.equal(push('agents').payload.claudeOnly, null)
+  assert.deepEqual(r.live(), [], 'a section of the switch was held back')
+  assert.deepEqual([...r.sections()].sort(), changed(codex, all))
+})
+
 test('a fragment for a section with no body on the page updates the model and rewrites nothing', () => {
   const a = agentCtx()
   a.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['agents'], agents: agentTree(), ui: agentUi() }) } })

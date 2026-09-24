@@ -96,7 +96,10 @@ names every file written, the companions included.
 cache economy, the digest and the footnotes. The `~` and the lower-bound marks travel with the
 numbers, and so does the sentence of a transient failure of our own fetch after the reading shown —
 `_Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next attempt in
-1h12m_` under the provider's heading, as the markdown view prints it.
+1h12m_` under the provider's heading, as the markdown view prints it. It follows the dashboard's
+provider switch as the markdown view does: under one provider it carries that provider's figures
+alone and its heading ends `· Codex only`. The CSV and JSON exports and *Copy Diagnostics* follow
+neither the switch nor the chips: the exports write every provider's rows of the range.
 
 **Copy Diagnostics** builds a report from a field **allow-list**, not by dumping and redacting.
 An unknown field makes the builder throw, so a leak cannot be introduced silently. It contains:

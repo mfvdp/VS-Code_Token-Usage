@@ -1002,6 +1002,57 @@ test('a stored chart stack from an older build is ignored, and the rest of the s
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+test('a stored provider list restores as a state of the provider switch: one known source, or every one (1.7 F1)', async () => {
+  // The switch's state is the list 1.6 stored for its chips. Read as the switch reads it and
+  // written back as it writes it: exactly one known source is that provider; both in either
+  // order, none, an unknown one — beside a known one too — or no list at all is All, every
+  // source in registry order. `setRange` writes the whole restored state back.
+  const cases: Array<[unknown, string[]]> = [
+    [['claude'], ['claude']],
+    [['codex'], ['codex']],
+    [['codex', 'claude'], ['claude', 'codex']],
+    [[], ['claude', 'codex']],
+    [['x'], ['claude', 'codex']],
+    ['claude', ['claude', 'codex']],
+    [['claude', 'x'], ['claude', 'codex']],
+  ]
+  for (const [stored, want] of cases) {
+    const kept = new Map<string, unknown>([['tokenPace.ui', { range: '30d', providers: stored, models: ['claude-opus-4-6'] }]])
+    const host = await activateHost(makeFixture(), REPO, { globalState: kept })
+    await state.execute('tokenPace.setRange', '7d')
+    const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
+    assert.deepEqual(ui?.providers, want, JSON.stringify(stored))
+    // Restoring changes no other field: the model chips stay as they were stored.
+    assert.deepEqual(ui?.models, ['claude-opus-4-6'], JSON.stringify(stored))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  }
+})
+
+test('the provider switch governs the text views, never the status bar: a Claude budget stays on the bar while Codex is shown (1.7 F1)', async () => {
+  // The switch is the dashboard's view state (§3 F1 item 9). The markdown view follows it — under
+  // Codex it has no Claude budget to print and says which provider it shows — while the status
+  // bar's budget item, like the budget alerts, reads every budget whatever the switch shows.
+  const kept = new Map<string, unknown>([['tokenPace.ui', { range: '30d', providers: ['codex'] }]])
+  await activateHost(makeFixture(), REPO, {
+    globalState: kept,
+    settings: {
+      'tokenPace.statusBar.show': ['budget', 'tokens'],
+      'tokenPace.dashboard.sections': ['budget'],
+      'tokenPace.budgets': [{ scope: 'claude', period: 'month', unit: 'tokens', limit: 1000 }],
+    },
+  })
+  await waitOwnColdStart(state, 'the cold scan')
+  await waitFor('the budget entry', () => state.textOf(BUDGET_ITEM) !== undefined)
+  const text = String(state.textOf(BUDGET_ITEM))
+  assert.match(text, /^budget \d+ %/, text)
+
+  await state.execute('tokenPace.showUsageMarkdown')
+  const md = lastMarkdown()
+  assert.equal(md.includes('## Budgets'), false, md)
+  assert.ok(md.split('\n')[2].endsWith(' · Codex only*'), md.split('\n')[2])
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
 test('stored opened agent nodes and the selection restore by shape; over-long keys are dropped', async () => {
   // The two agent tree fields are opaque node keys: only their shape is checked on restore —
   // strings of at most 200 chars, at most 200 opened nodes, a selection that is such a string

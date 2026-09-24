@@ -119,6 +119,10 @@ export class StatusBar implements vscode.Disposable {
       const it = entry.item
       it.name = m.name
       it.text = m.text
+      // 1.8 A7: an item whose text is too short to say what it is (`$(watch) cache 4m`) carries the
+      // words a screen reader says instead; every other item is read by its text, as before. Set on
+      // every render, so an id that loses its words loses them on the bar too. The item keeps `name`.
+      it.accessibilityInformation = m.ariaLabel ? { label: m.ariaLabel } : undefined
       it.tooltip = m.tooltipMarkdown === '' ? undefined : markdown(m.tooltipMarkdown)
       // Either an alarm background or a coloured foreground, never both: once a background
       // is set the workbench replaces the foreground and discards `color` silently.

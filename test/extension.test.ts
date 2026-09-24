@@ -1223,6 +1223,47 @@ test('the provider switch reaches neither the agent poll, the status bar\'s agen
   }
 })
 
+test('the cache entry counts down a session\'s cooling one-hour cache estimated from its transcript, with its words for a screen reader, whatever the dashboard shows (1.8 A5, A7, §3.0 a)', async () => {
+  // A second main transcript of the synthetic project: its newest reply wrote the one-hour cache 57
+  // minutes ago, so its cache — by the transcript's estimate — cools now. No status line: every figure
+  // is the transcript's and carries `~`. The dashboard's view is stored as Codex: the bar follows no view.
+  const fx = makeFixture()
+  const at = Date.now() - 57 * 60_000
+  const id = 'c0c0a1a1-5b6c-4d7e-8f90-a1b2c3d4e5f6'
+  fs.writeFileSync(path.join(fx.claudeRoot, '-tmp-token-pace-synthetic', `${id}.jsonl`), [
+    claudeLine({ id: 'msg_cache_a', ts: at - 3_600_000, usage: { input: 10, cacheRead: 1000, output: 10 }, final: true }),
+    claudeLine({ id: 'msg_cache_b', ts: at, model: 'claude-opus-5-5', usage: { input: 300, cacheWrite: 2000, cacheWrite1h: 2000, cacheRead: 150_000 }, final: true }),
+  ].join('\n') + '\n')
+  const kept = new Map<string, unknown>([['tokenPace.ui', { range: '30d', providers: ['codex'] }]])
+  const host = await activateHost(fx, REPO, { globalState: kept, settings: { 'tokenPace.statusBar.show': ['claudeQuota', 'cache', 'tokens'] } })
+  // Three minutes of warmth left when the test starts; a slow machine may take a minute or two of them.
+  await waitFor('the cache entry', () => /^\$\(watch\) cache ~(?:[123]m|\d+s)$/.test(state.textOf('tokenPace.cache') ?? ''))
+  const item = state.live().find((i) => i.id === 'tokenPace.cache') as unknown as {
+    accessibilityInformation?: { label?: string }; name?: string; color?: unknown; backgroundColor?: unknown; tooltip?: { value?: string }
+  }
+  assert.match(item.accessibilityInformation?.label ?? '', /^Prompt cache of Session .+ · c0c0a1a1 cools in about (?:[123] m )?\d+ s \(estimated\)$/,
+    JSON.stringify(item.accessibilityInformation))
+  assert.equal(item.name, 'Token Pace — prompt cache')
+  assert.equal(item.color, undefined)
+  assert.equal(item.backgroundColor, undefined)
+  assert.match(String(item.tooltip?.value), /^\*\*Prompt cache cooling\*\*\n\n\$\(watch\) `Session .+ · c0c0a1a1` · prompt cache cools in ~(?:[123] m )?\d+ s \(1 h TTL, estimated from the transcript\)\n\n_A cold start after ~\d\d:\d\d(?: [AP]M)? re-writes ~152\.3K tokens/)
+  // The Claude quota item's tooltip lists the session as the card does; every other item is read by its text.
+  const quota = state.live().find((i) => i.id.startsWith('tokenPace.quota.claude.'))
+  assert.ok(quota, state.live().map((i) => i.id).join())
+  assert.match(String((quota.tooltip as { value?: string })?.value), /\$\(database\) `Session .+ · c0c0a1a1` · prompt cache cools in ~/)
+  for (const other of state.live().filter((i) => i.id !== 'tokenPace.cache')) {
+    assert.equal((other as unknown as { accessibilityInformation?: unknown }).accessibilityInformation, undefined, other.id)
+  }
+  // The API's view of the bar says the same: the entry after the quota window, before the tokens.
+  const ids = host.api.statusBar().map((i) => i.id)
+  assert.ok(ids.indexOf('tokenPace.cache') > 0 && ids.indexOf('tokenPace.cache') < ids.indexOf('tokenPace.tokens'), ids.join())
+  // Switched off in the settings, the entry goes.
+  state.set('tokenPace.statusBar.show', ['claudeQuota', 'tokens'])
+  state.fireConfigChange(['tokenPace.statusBar.show'])
+  await waitFor('the entry to go', () => state.textOf('tokenPace.cache') === undefined)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
 test('the page gets no copy of the host\'s budgets: under Codex no push carries allBudgets, while the bar\'s budget item and the budget alerts still read every budget (1.8 L-3)', async () => {
   // §3.0 (j): the status bar and the budget alerts read `latestVm.allBudgets` in the host; only the
   // page's payload loses the field. A Claude budget, a stored Codex view: the page shows no budget

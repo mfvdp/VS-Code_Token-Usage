@@ -58,6 +58,8 @@ entry (right-click on the status bar):
 | Forecast | `tokenPace.forecast.<source>` |
 | Context window | `tokenPace.context` |
 | Budget | `tokenPace.budget` |
+| Running agents | `tokenPace.agents` |
+| Prompt cache | `tokenPace.cache` |
 | Tokens | `tokenPace.tokens` |
 | API cost | `tokenPace.cost` |
 | Collective item (`density: minimal`) | `tokenPace.summary` |
@@ -115,6 +117,10 @@ Two modifiers apply on top:
 | `budget 118 % over` | the same, past the limit you stated | default | No colour and no alarm: the limit is yours, and a provider's warning vocabulary would misrepresent it. Rows without local data for the period cannot win the comparison — an unread period is not a quiet one. |
 | `~3 running` | the Claude Code agents running right now (`statusBar.show` contains `agents`) | default | Inferred, so it carries `~`: an agent whose transcript changed within the last 10 minutes and that has no recorded result, a launch whose transcript has not appeared yet, and the running agents of a run's collector — the count the running list of the Agents section heads. No colour and no alarm; the tooltip names five of them and counts the rest. |
 | `~1 running` | the same, one agent | default | With none running the entry is absent, never `~0 running`. |
+| `$(watch) cache 4m` | a Claude Code session's one-hour prompt cache in its last five minutes, as the status line reports it (`statusBar.show` contains `cache`) | default | The whole minutes left until the stated expiry of the session whose cache expires first. No colour and no alarm: it is the price of the next request, not the quota. Hidden while no watched cache is cooling — a warm cache is not news, and the dashboard's Claude card lists a cold one for another hour. A five-minute cache is never watched. The tooltip names each cooling session with what a cold start would cost; a screen reader hears `Prompt cache of Session Tue 14:20 · 9d0eb37a cools in 4 m 10 s`. |
+| `$(watch) cache ~4m` | the same, the expiry estimated from the session's transcript: its newest request that read or wrote the cache, plus one hour | default | The status line has not described the session's newest request — it is not connected, or it ran for another session. An estimate, so it carries `~`, and a screen reader hears `… cools in about 4 m 10 s (estimated)`. [Prompt cache](prompt-cache.md) says why the estimate can be off in either direction. |
+| `$(watch) cache 45s` / `$(watch) cache ~45s` | the same, under a minute left | default | The seconds, counting down each second. |
+| `$(watch) cache 4m +1` | the same, and one more session's cache cooling at the same time (`+2` for two) | default | The countdown is the soonest one's; the tooltip lists up to three and counts the rest. |
 | `Σ 4.6M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope` | default | Fresh input + cache write + output; cache reads are listed separately in the tooltip. |
 | `$(sync~spin) reading history …` | the token item during a cold scan | default | The figures are still growing; they are not a total yet. |
 | `~$1.23 · today` / `~$12.30 · 7d` | hypothetical API cost | default | Estimate. `⚠` appended means some tokens have no price and are missing from the sum. |
@@ -159,7 +165,10 @@ is the whole point, and the provider label has to stay readable.
   the plan name beside it: what the provider states, else `tokenPace.planName`, and the second
   kind always prints as `plan Max 20x (as configured)`),
   the window table `Window | Used | Elapsed | Pace | Resets`, a forecast line per window
-  that has one, the `windowSelect: auto` explanation, extra usage, the freshness line, the
+  that has one, on the Claude tooltip the sessions whose one-hour prompt cache cools or has gone
+  cold (at most three, each its state and its cost, then the count of the rest) and the status
+  line's own prompt-cache row for a session they do not list, the `windowSelect: auto`
+  explanation, extra usage, the freshness line, the
   token tables for today / 7 days / 30 days, the composition and cache-hit line, the
   provenance line, the explanations (`tooltipExplanations`) and the action footer.
 * **compact** — title, table, freshness, footer. At most twelve lines.

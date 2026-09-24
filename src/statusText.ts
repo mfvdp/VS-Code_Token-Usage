@@ -17,12 +17,13 @@ import { LABEL, SOURCES, SOURCE_TITLE as TITLE, USAGE_PAGE } from './adapters'
 import type { RunningItem } from './agentTree'
 import { billable, BucketFilter, CostSummary } from './agg'
 import { BudgetRow, worstBudget } from './budget'
+import { CACHE_WATCH_MAX, CachePhase, CacheWatchEntry, cacheCostText, cacheLineText, cacheMoreText } from './cacheWatch'
 import { Config, contextNote, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
 import { t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
 import { isCustomPricing, PricingOptions } from './prices'
-import { promptCacheText } from './promptCache'
+import { countdownText, promptCacheText } from './promptCache'
 // Type only: this module renders, it never reads a file, and `quotaSources` does.
 import type { ContextReading, PromptCacheReading } from './quotaSources'
 import {
@@ -102,10 +103,20 @@ export interface StatusTextInput {
    */
   context?: ContextReading | null
   /**
-   * The prompt cache the status line last reported, or null. One row of the Claude tooltip
-   * while the bridge delivers it; absent otherwise, never estimated.
+   * The prompt cache the status line last reported, or null — the 1.3 row of the Claude tooltip,
+   * the bridge's words, while the bridge delivers it. Since 1.8 it gives way to `cacheWatch` for a
+   * session the tooltip lists there (§3.0 b): one row per session.
    */
   promptCache?: PromptCacheReading | null
+  /**
+   * 1.8 A5: every session whose one-hour prompt cache is watched in this frame — `watchCaches` over
+   * every status-line reading and every main session's record, uncapped and in its order (cooling
+   * first, then cold, then warm). Measured where the status line describes the session, estimated
+   * from the transcript (`~`) where not. The `cache` entry is drawn from its cooling entries, the
+   * Claude quota tooltip from its first CACHE_WATCH_MAX cooling or cold ones. It follows no view of
+   * the dashboard. Absent or null: nothing is watched — no entry and no rows, never a dash.
+   */
+  cacheWatch?: readonly CacheWatchEntry[] | null
   /**
    * The budget rows of the last view-model build. Optional, because every caller that only
    * renders quota (the preview, most tests) has none — and an absent list is no entry, not a
@@ -143,6 +154,12 @@ export interface ItemModel {
   commandArgs?: unknown[]
   /** Human-readable name for the status bar's own context menu. */
   name: string
+  /**
+   * 1.8 A7: the words a screen reader says for the item, when its text is too short to say them —
+   * `$(watch) cache 4m` is read as "Prompt cache of Session Thu 11:05 · 9d0eb37a cools in 4 m 10 s".
+   * Absent otherwise: the reader then says the text, as for every other item.
+   */
+  ariaLabel?: string
   /** The priority as a string, highest first — 1000 minus the item's position. */
   priorityKey: string
 }
@@ -157,6 +174,7 @@ export type ItemSpec =
   | { kind: 'context'; c: ContextReading }
   | { kind: 'budget'; b: BudgetRow }
   | { kind: 'agents'; a: AgentsReading }
+  | { kind: 'cache'; entries: CacheWatchEntry[] }
   | { kind: 'tokens' }
   | { kind: 'cost' }
 
@@ -942,9 +960,29 @@ function quotaBlock(q: QuotaState, ctx: RenderContext, compactMode: boolean): st
     out.push('')
     out.push(forecasts.join('\n\n'))
   }
+  // 1.8 A5: the sessions whose one-hour prompt cache cools or went cold — the dashboard card's
+  // lines, at most CACHE_WATCH_MAX of them, each its state and its cost, then how many more there are.
+  const listed = q.source === 'claude' ? cacheRows(ctx, ['cooling', 'cold']) : []
+  const shown = listed.slice(0, CACHE_WATCH_MAX)
+  for (const e of shown) {
+    out.push('')
+    out.push(`$(database) ${cacheRowText(e, ctx)}`)
+    const cost = cacheCostText(e, now, tcfg, ctx.pricing, cfg.showCost)
+    if (cost !== null) {
+      out.push('')
+      out.push(`_${cost}_`)
+    }
+  }
+  const more = cacheMoreText(listed.length - shown.length)
+  if (more !== null) {
+    out.push('')
+    out.push(more)
+  }
   // The bridge's prompt-cache line, the same words as the dashboard card: one session's
   // cache, only while the status line reports it, with a dash for every part it left out.
-  if (q.source === 'claude' && ctx.promptCache) {
+  // Not for a session the rows above list (1.8 §3.0 b): one row per session.
+  const pcSession = ctx.promptCache?.sessionId ?? null
+  if (q.source === 'claude' && ctx.promptCache && !(pcSession !== null && shown.some((e) => e.sessionId === pcSession))) {
     out.push('')
     const pc = promptCacheText(ctx.promptCache, now, (ms) => formatTime(ms, tcfg), cfg.staleAfterMinutes)
     // The age of the reading, beside the line it built: the freshness row below belongs to
@@ -1239,6 +1277,99 @@ export function agentsTooltip(a: AgentsReading, ctx: RenderContext): string {
   return out.join('\n')
 }
 
+// ---------------------------------------------------------------------------
+// The prompt cache (1.8 A5) — a one-hour cache in its last five minutes
+// ---------------------------------------------------------------------------
+
+/**
+ * The watched sessions of this frame in the given phases, in the order `watchCaches` gave them —
+ * never re-sorted here, so the bar, its tooltip and the Claude quota tooltip name the same session
+ * first as the dashboard card does. An entry without a finite expiry is no entry.
+ */
+function cacheRows(ctx: RenderContext, phases: readonly CachePhase[]): CacheWatchEntry[] {
+  const list = Array.isArray(ctx.cacheWatch) ? ctx.cacheWatch : []
+  return list.filter((e) => !!e && phases.includes(e.phase) && finite(e.expiresAt))
+}
+
+/**
+ * A session's state line as a tooltip row: the dashboard card's words, the session's name in a code
+ * span as every name of this file is. A session name carries only the first eight characters of an
+ * id and a time, but the tooltip is a trusted MarkdownString with HTML enabled, and the rule is kept
+ * without exception.
+ */
+function cacheRowText(e: CacheWatchEntry, ctx: RenderContext): string {
+  return cacheLineText({ ...e, name: span(e.name) }, ctx.now, ctx.tcfg)
+}
+
+/**
+ * The `cache` entry's countdown: the whole minutes left (`4m` for 4 m 10 s — never more than is
+ * left, as every countdown of the bar rounds down), the seconds under a minute (`45s`) — the same in
+ * every language.
+ */
+export function cacheCountdownShort(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return total >= 60 ? `${Math.floor(total / 60)}m` : `${total}s`
+}
+
+/**
+ * `4m`, `~4m` (an estimate from the transcript), `45s`, and `4m +1` while another session's cache
+ * cools too — of the session whose cache expires first.
+ */
+export function cacheValue(entries: readonly CacheWatchEntry[], now: number): string {
+  const first = entries[0]
+  const left = cacheCountdownShort(first.expiresAt - now)
+  const more = entries.length - 1
+  return `${first.source === 'transcript' ? estimate(left) : left}${more > 0 ? ` +${full(more)}` : ''}`
+}
+
+/**
+ * 1.8 A7: what a screen reader says for the entry — the session, the countdown in its long form, the
+ * estimate in words, and how many more sessions' caches cool. Four whole sentences, never one glued
+ * together, so a translator sees each whole.
+ */
+function cacheAriaLabel(entries: readonly CacheWatchEntry[], now: number): string {
+  const first = entries[0]
+  const left = countdownText(first.expiresAt - now)
+  const more = entries.length - 1
+  if (first.source === 'transcript') {
+    return more > 0
+      ? t('Prompt cache of {0} cools in about {1} (estimated), and {2} more', first.name, left, full(more))
+      : t('Prompt cache of {0} cools in about {1} (estimated)', first.name, left)
+  }
+  return more > 0
+    ? t('Prompt cache of {0} cools in {1}, and {2} more', first.name, left, full(more))
+    : t('Prompt cache of {0} cools in {1}', first.name, left)
+}
+
+/**
+ * The `cache` entry's tooltip: a heading, then per cooling session — at most CACHE_WATCH_MAX, the
+ * soonest first — its state line and, under it, what a cold start would cost; how many more cool;
+ * the action row. `compact` keeps the state lines and leaves the cost lines to the full tooltip.
+ */
+export function cacheTooltip(entries: readonly CacheWatchEntry[], ctx: RenderContext): string {
+  const { cfg } = ctx
+  if (cfg.tooltip === 'off') return ''
+  const out: string[] = [`**${t('Prompt cache cooling')}**`]
+  const shown = entries.slice(0, CACHE_WATCH_MAX)
+  for (const e of shown) {
+    out.push('')
+    out.push(`$(watch) ${cacheRowText(e, ctx)}`)
+    const cost = cfg.tooltip === 'compact' ? null : cacheCostText(e, ctx.now, ctx.tcfg, ctx.pricing, cfg.showCost)
+    if (cost !== null) {
+      out.push('')
+      out.push(`_${cost}_`)
+    }
+  }
+  const rest = entries.length - shown.length
+  if (rest > 0) {
+    out.push('')
+    out.push(t('and {0} more', full(rest)))
+  }
+  out.push('')
+  out.push(footerLine(ctx))
+  return out.join('\n')
+}
+
 export function problemTooltip(q: QuotaState, ctx: RenderContext): string {
   const { cfg } = ctx
   if (cfg.tooltip === 'off') return ''
@@ -1454,6 +1585,23 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
         priorityKey: '1000',
       }
     }
+    case 'cache': {
+      const click = clickCommand(cfg, null)
+      return {
+        id: 'tokenPace.cache',
+        // No colour and no alarm (1.8 §0b.6): a cache that cools is a fact about the next request's
+        // price, not a warning about the quota; the countdown and the `~` are the whole statement.
+        text: `$(watch) ${t('cache {0}', cacheValue(spec.entries, now))}`,
+        colorId: null,
+        alarm: false,
+        tooltipMarkdown: cacheTooltip(spec.entries, ctx),
+        command: click.command,
+        commandArgs: click.args,
+        name: t('Token Pace — prompt cache'),
+        ariaLabel: cacheAriaLabel(spec.entries, now),
+        priorityKey: '1000',
+      }
+    }
     case 'tokens': {
       const { from, to } = periodRange(ctx)
       let total = 0
@@ -1625,6 +1773,14 @@ export function buildItems(input: StatusTextInput): ItemModel[] {
         }
         break
       }
+      case 'cache': {
+        // 1.8 A5 (§7a Q5): only while a watched one-hour cache is cooling — its last five minutes —,
+        // hidden while every one is warm or already cold, as the agents entry is while nothing runs:
+        // a warm cache is not news, and a cold one is the dashboard card's to say.
+        const cooling = cacheRows(ctx, ['cooling'])
+        if (cooling.length > 0) out.push(itemModel({ kind: 'cache', entries: cooling }, ctx))
+        break
+      }
       case 'tokens':
         out.push(itemModel({ kind: 'tokens' }, ctx))
         break
@@ -1700,6 +1856,17 @@ function previewBudget(share: number, over: boolean): BudgetRow {
     unmeasurable: null,
     text: t('{0}: {1} of {2} · {3} %', label, `~$${share * 2}`, '$200', share),
   }
+}
+
+/**
+ * 1.8 A5: synthetic cooling prompt caches for the preview — invented sessions that never existed,
+ * `left` ms before their expiry each, measured or estimated, 152.3K tokens on Claude Opus 5.5.
+ */
+function previewCache(now: number, list: Array<{ id: string; left: number; source: 'bridge' | 'transcript' }>): CacheWatchEntry[] {
+  return list.map((c) => ({
+    sessionId: `${c.id}-0000-4000-8000-000000000000`, name: t('Session {0}', c.id), source: c.source, ttl: '1h',
+    expiresAt: now + c.left, phase: 'cooling', recache: 152_300, model: 'claude-opus-5-5',
+  }))
 }
 
 /** Synthetic running agents for the preview: invented names in a session and run that never existed. */
@@ -1798,6 +1965,12 @@ export function previewItems(cfg: Config, now: number): ItemModel[] {
   // 1.6 O1: the running agents, as many and as one — the two words the entry has.
   push({ kind: 'agents', a: previewAgents(now, ['Explore', 'Plan', 'general-purpose']) })
   push({ kind: 'agents', a: previewAgents(now, ['Explore']) })
+  // 1.8 A5: a prompt cache cooling — measured, with a second session's cooling too, and estimated
+  // under a minute.
+  push({ kind: 'cache', entries: previewCache(now, [
+    { id: '9d0eb37a', left: 250_000, source: 'bridge' }, { id: '5f1c2d3e', left: 200_000, source: 'transcript' },
+  ]) })
+  push({ kind: 'cache', entries: previewCache(now, [{ id: '9d0eb37a', left: 45_000, source: 'transcript' }]) })
   push({ kind: 'tokens' })
   push({ kind: 'cost' })
 
@@ -1808,6 +1981,7 @@ export function previewItems(cfg: Config, now: number): ItemModel[] {
     id: `tokenPace.preview.${i}`,
     text: `${mark} ${m.text}`,
     name: `${mark} ${m.name}`,
+    ...(m.ariaLabel === undefined ? {} : { ariaLabel: `${mark} ${m.ariaLabel}` }),
     command: 'tokenPace.previewStatusBar',
     commandArgs: undefined,
     priorityKey: String(1000 - i),

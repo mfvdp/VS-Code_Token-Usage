@@ -313,7 +313,8 @@
                 "cost",
                 "forecast",
                 "budget",
-                "agents"
+                "agents",
+                "cache"
               ],
               "enumDescriptions": [
                 "%config.statusBar.show.enum.claudeQuota%",
@@ -324,7 +325,8 @@
                 "%config.statusBar.show.enum.cost%",
                 "%config.statusBar.show.enum.forecast%",
                 "%config.statusBar.show.enum.budget%",
-                "%config.statusBar.show.enum.agents%"
+                "%config.statusBar.show.enum.agents%",
+                "%config.statusBar.show.enum.cache%"
               ]
             },
             "markdownDescription": "%config.statusBar.show.description%"

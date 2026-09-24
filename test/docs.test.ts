@@ -916,13 +916,14 @@ test('the status bar pages, the settings page and the setting itself name the ag
   const many = item(22).text
   assert.deepEqual([three, one, many], ['~3 running', '~1 running', '~22 running'])
   // The entry is listed wherever the entries are, and its two texts are the ones the code writes.
-  assert.match(doc.statusBar, /`forecast`, `budget`, `agents`\. The array order/)
+  // (1.8 A5, pinned and changed: the lists end with `cache` now, after `agents`.)
+  assert.match(doc.statusBar, /`forecast`, `budget`, `agents`, `cache`\. The array order/)
   assert.ok(doc.statusBar.includes(`\`${three}\`, \`${one}\``), 'docs/status-bar.md does not quote the entry')
   assert.ok(doc.statusBar.split('\n').some((l) => l.startsWith(`| \`${three}\` / \`${one}\` |`)), 'docs/status-bar.md has no row for the entry')
   for (const text of [three, one]) {
     assert.ok(STATES.split('\n').some((l) => l.startsWith(`| \`${text}\` |`)), `docs/status-bar-states.md has no row for ${text}`)
   }
-  assert.match(doc.settings, /`forecast`, `budget`, `agents`\. Empty hides the bar/)
+  assert.match(doc.settings, /`forecast`, `budget`, `agents`, `cache`\. Empty hides the bar/)
   assert.match(doc.agents, /`agents` in `tokenPace\.statusBar\.show` — off by default/)
   // Off by default, and the example in its description is the entry's own text, in both languages.
   const setting = properties['tokenPace.statusBar.show'] as { default?: string[]; items?: { enum?: string[]; enumDescriptions?: string[] } }
@@ -1715,9 +1716,13 @@ test('the release page names the two secrets, keeps the token expiry out of the 
 
 test('the tooltip chapter states the prompt-cache row, and only for a connected bridge', () => {
   // The row exists because the status line delivered a reading; without the bridge there is
-  // nothing to show, and nothing about the cache may be derived from the token buckets.
-  assert.match(doc.statusBar, /status-line bridge is connected, one further row states the prompt cache/)
-  assert.match(doc.statusBar, /Without the bridge the row is absent\nrather than estimated/)
+  // nothing to show of it. 1.8 A5 (pinned and changed: "Without the bridge the row is absent rather
+  // than estimated" is gone, spec fact 3): the sessions' rows before it are estimated from the
+  // transcript where the bridge does not describe a session, and say so; the 1.3 row stays the bridge's.
+  const flat = doc.statusBar.replace(/\s+/g, ' ')
+  assert.match(flat, /status-line bridge is connected, one further row states the prompt cache that status line last reported/)
+  assert.equal(flat.includes('absent rather than estimated'), false)
+  assert.ok(flat.includes('where it does not, they are estimated from the session\'s transcript, carry `~`'))
 })
 
 test('the settings page says that a plan name is cleaned before it is printed', () => {
@@ -2023,7 +2028,8 @@ test('the provider switch is named where a reader looks: its three buttons, „A
   // What it does not reach: the bar, the budget item, the agents entry, the alerts — where a reader looks.
   const bar = flatText(doc.statusBar)
   assert.ok(bar.includes('**The dashboard\'s provider switch does not reach the bar.**')
-    && bar.includes('the entries, their tooltips, the `budget` entry (every budget), the `agents` entry and the alerts stay as the settings above make them'),
+    // 1.8 A5 (pinned and changed: the `cache` entry joined the list).
+    && bar.includes('the entries, their tooltips, the `budget` entry (every budget), the `agents` entry, the `cache` entry and the alerts stay as the settings above make them'),
     'docs/status-bar.md does not say the switch governs nothing on the bar')
   assert.ok(flatText(doc.budgetsAlerts).includes('the switch hides a row, it never moves a figure')
     && flatText(doc.budgetsAlerts).includes('the status bar\'s `budget` entry and the budget alerts keep every budget, whatever the switch shows'),
@@ -2369,4 +2375,64 @@ test('the prompt-cache page states the watch as the code has it, and 1.3\'s "nev
   const vmSrc = prose('src/viewModel.ts')
   assert.equal(vmSrc.includes('nothing here is ever estimated from the transcripts'), false, 'QuotaCard.promptCache still promises no estimate')
   assert.equal(vmSrc.includes('like the context window, this figure has no second source'), false, 'VmInput.promptCache still promises no estimate')
+})
+
+/**
+ * 1.8 P7 (§3 A5, A8): the status-bar pages, the settings page and the setting itself name the `cache`
+ * entry as the status bar writes it — every text taken from `buildItems`, not written out here —, the
+ * ids table has its id, and status-bar.md's tooltip paragraph no longer promises that the prompt cache
+ * is never estimated (spec fact 3's last place; P6 took the other four).
+ */
+test('the status bar pages, the settings page and the setting name the cache entry as the status bar writes it; the tooltip paragraph no longer promises "no estimate" (1.8 P7)', () => {
+  const cw = require('../src/cacheWatch') as typeof import('../src/cacheWatch')
+  const NOW = Date.UTC(2026, 8, 24, 14, 47, 50)
+  const entry = (left: number, source: 'bridge' | 'transcript', id = '9d0eb37a-0000'): import('../src/cacheWatch').CacheWatchEntry => ({
+    sessionId: id, name: `Session Tue 14:20 · ${id.slice(0, 8)}`, source, ttl: '1h', expiresAt: NOW + left,
+    phase: cw.cachePhase(NOW + left, NOW)!, recache: 152_300, model: 'claude-opus-5-5',
+  })
+  const item = (entries: import('../src/cacheWatch').CacheWatchEntry[]) => buildItems({
+    quotas: [], agg: { sum: () => { throw new Error('unused') }, cost: () => { throw new Error('unused') } },
+    cfg: sanitize({ 'tokenPace.statusBar.show': ['cache'], 'tokenPace.timezone': 'utc' }), now: NOW, forecasts: new Map(),
+    role: 'single', scanning: false, consent: 'granted', cacheWatch: entries,
+  })[0]
+  const measured = item([entry(250_000, 'bridge')])
+  const estimated = item([entry(250_000, 'transcript')])
+  const seconds = item([entry(45_000, 'bridge')])
+  const secondsEstimated = item([entry(45_000, 'transcript')])
+  const two = item([entry(250_000, 'bridge'), entry(270_000, 'transcript', '5f1c2d3e-0000')])
+  assert.deepEqual([measured.text, estimated.text, seconds.text, secondsEstimated.text, two.text],
+    ['$(watch) cache 4m', '$(watch) cache ~4m', '$(watch) cache 45s', '$(watch) cache ~45s', '$(watch) cache 4m +1'])
+  // Listed wherever the entries are; its texts, its id and its spoken words are the code's.
+  assert.match(doc.statusBar, /`budget`, `agents`, `cache`\. The array order/)
+  for (const text of [measured.text, estimated.text, seconds.text, two.text]) {
+    assert.ok(doc.statusBar.includes(`\`${text}\``), `docs/status-bar.md does not quote ${text}`)
+  }
+  assert.ok(doc.statusBar.split('\n').some((l) => l.startsWith(`| \`${measured.text}\` / \`${estimated.text}\` |`)), 'docs/status-bar.md has no row for the entry')
+  for (const row of [`| \`${measured.text}\` |`, `| \`${estimated.text}\` |`, `| \`${seconds.text}\` / \`${secondsEstimated.text}\` |`, `| \`${two.text}\` |`]) {
+    assert.ok(STATES.split('\n').some((l) => l.startsWith(row)), `docs/status-bar-states.md has no row ${row}`)
+  }
+  assert.ok(STATES.includes(`| Prompt cache | \`${measured.id}\` |`), 'docs/status-bar-states.md does not list the id')
+  const flat = (x: string): string => x.replace(/\s+/g, ' ')
+  for (const [name, page] of [['docs/status-bar.md', doc.statusBar], ['docs/status-bar-states.md', STATES], ['docs/prompt-cache.md', doc.promptCache]] as const) {
+    assert.ok(flat(page).includes(measured.ariaLabel as string), `${name} does not say what a screen reader hears: ${measured.ariaLabel}`)
+  }
+  assert.equal(measured.ariaLabel, 'Prompt cache of Session Tue 14:20 · 9d0eb37a cools in 4 m 10 s')
+  assert.ok(flat(doc.statusBar).includes('`… cools in about 4 m 10 s (estimated)`') && estimated.ariaLabel?.endsWith('cools in about 4 m 10 s (estimated)'))
+  assert.match(doc.settings, /`agents` shows only while a Claude Code agent runs, `cache` only in the last five minutes of a Claude Code session's one-hour \[prompt cache\]\(prompt-cache\.md\)/)
+  assert.ok(flat(doc.promptCache).includes('The opt-in entry `cache` in `tokenPace.statusBar.show` (not in the default) shows only while a watched cache is cooling'))
+  // Off by default, and the example in its description is the entry's own text without its icon, in both languages.
+  const setting = properties['tokenPace.statusBar.show'] as { default?: string[]; items?: { enum?: string[]; enumDescriptions?: string[] } }
+  assert.equal(setting.default?.includes('cache'), false)
+  const at = setting.items?.enum?.indexOf('cache') ?? -1
+  assert.ok(at >= 0)
+  const bare = (text: string): string => text.replace('$(watch) ', '')
+  assert.ok(setting.items?.enumDescriptions?.[at]?.includes(`“${bare(measured.text)}”`) && setting.items?.enumDescriptions?.[at]?.includes(`“${bare(estimated.text)}”`),
+    setting.items?.enumDescriptions?.[at])
+  const bundle = JSON.parse(readDoc('l10n/bundle.l10n.de.json')) as Record<string, string>
+  const de = JSON.parse(readDoc('package.nls.de.json')) as Record<string, string>
+  assert.ok(de['config.statusBar.show.enum.cache'].includes(`“${bundle['cache {0}'].replace('{0}', '4m')}”`), de['config.statusBar.show.enum.cache'])
+  // Spec fact 3, the last of its five places: the tooltip paragraph says the estimate, not its absence.
+  assert.equal(flat(doc.statusBar).includes('absent rather than estimated'), false, 'docs/status-bar.md still promises no estimate')
+  assert.ok(flat(doc.statusBar).includes('estimated from the session\'s transcript, carry `~` and say *estimated from the transcript*'))
+  assert.ok(flat(doc.statusBar).includes('unless its session is one of the rows above: one row per session'))
 })

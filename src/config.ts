@@ -143,7 +143,7 @@ export const CONFIG_KEYS: string[] = [
 
 export type StatusBarEntry =
   | 'claudeQuota' | 'codexQuota' | 'extra' | 'context' | 'tokens' | 'cost' | 'forecast'
-  | 'budget' | 'agents'
+  | 'budget' | 'agents' | 'cache'
 export type WindowSelect = 'all' | 'leading' | 'worstPace' | 'session' | 'weekly' | 'auto'
 export type LegacyWindows = 'all' | 'leading'
 export type Density = 'full' | 'compact' | 'minimal'
@@ -193,8 +193,9 @@ export type AlertBasis = 'used' | 'remaining'
 export type AlertWindowCondition = 'any' | 'sessionOnly' | 'weeklyOnly'
 
 const STATUS_BAR_ENTRIES: readonly StatusBarEntry[] = [
-  // 1.6 O1: `agents` is the one setting value 1.6 adds — offered, never in the default.
-  'claudeQuota', 'codexQuota', 'extra', 'context', 'tokens', 'cost', 'forecast', 'budget', 'agents',
+  // 1.6 O1: `agents` is the one setting value 1.6 adds — offered, never in the default. 1.8 A5: `cache`
+  // (a one-hour prompt cache in its last five minutes) is the one value 1.8 adds, the same way.
+  'claudeQuota', 'codexQuota', 'extra', 'context', 'tokens', 'cost', 'forecast', 'budget', 'agents', 'cache',
 ]
 const WINDOW_SELECTS: readonly WindowSelect[] = ['all', 'leading', 'worstPace', 'session', 'weekly', 'auto']
 const LEGACY_WINDOWS: readonly LegacyWindows[] = ['all', 'leading']

@@ -583,6 +583,24 @@ function quotaCard(q: Payload): string {
   // Only ever present when the provider reported no window at all. It is a count, not a
   // window: no bar, no percentage, no pace — the sentence itself says what it is not.
   if (q.localBlock) h += '<div class="box info" role="status">' + esc(q.localBlock.text) + '</div>';
+  // 1.8 A5: the Claude card's prompt-cache block — per session whose one-hour cache cools or went
+  // cold, at most three, the most urgent first: its state line, then what a cold start would cost;
+  // then how many more there are. Every word is the view model's (the `~` of an estimate and "estimated
+  // from the transcript" included), in the dim tone of the card's other lines, and no live region: the
+  // section is rewritten every few seconds while a line counts down. Nothing while none cools — a warm
+  // cache is not news. No button: the keep-warm prompt is not built (1.8 §7a Q1).
+  const cw = q.cacheWatch && Array.isArray(q.cacheWatch.lines) ? q.cacheWatch : null;
+  if (cw) {
+    for (const l of cw.lines) {
+      if (!l || typeof l.text !== 'string' || !l.text) continue;
+      h += '<div class="meta pc-line">' + esc(l.text) + '</div>';
+      if (typeof l.cost === 'string' && l.cost) h += '<div class="meta pc-cost">' + esc(l.cost) + '</div>';
+    }
+    if (typeof cw.moreText === 'string' && cw.moreText) h += '<div class="meta pc-more">' + esc(cw.moreText) + '</div>';
+  }
+  // 1.8 A6: the Codex card's one line — until when OpenAI keeps the prompt prefix at least — last on
+  // that card, the view model's words.
+  if (typeof q.codexCache === 'string' && q.codexCache) h += '<div class="meta pc-codex">' + esc(q.codexCache) + '</div>';
   // The bridge's prompt-cache line, last, and only when the status line delivered one: the
   // words are the view model's, dashes included, and the countdown in them is as of the
   // model's own clock — nothing here ticks on its own.

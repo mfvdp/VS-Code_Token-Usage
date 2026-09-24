@@ -569,6 +569,11 @@ p { margin: 6px 0; }
 .dim { color: var(--dim); }
 .meta { color: var(--dim); font-size: 11px; }
 .meta.warn { color: var(--warn); }
+/* 1.8 A5, A6: the quota cards' prompt-cache lines — a session's state line (pc-line) with its cost line
+   right under it (pc-cost), the count of the rest (pc-more), the Codex card's line (pc-codex). The dim tone
+   of .meta and no colour of their own: the phase is said in words. A little air above each state line, so
+   that two sessions read as two, and above the lines that close a card. */
+.pc-line, .pc-more, .pc-codex { margin-top: 4px; }
 .card { margin-bottom: 14px; }
 /* The two provider cards ran into one another; a hairline says where one ends. Scoped to the
    quota body, because a "card" elsewhere on the page is a row of a list that needs no rule. */

@@ -26,7 +26,9 @@ import { tallySpoken, tallyText } from '../src/agentTreeBuild'
 import { setBundle, setLocale, t } from '../src/i18n'
 import { agentTreeFor, buildViewModel, parseWebviewMessage } from '../src/viewModel'
 import { AGENT_WORLD, agentNode as agentNodeOf, agentWorld, everyParent, treeNodes } from './fixtures/agentWorld'
-import { NOW, makeConfig, makeInput } from './fixtures/viewFixtures'
+import { NOW, addCacheSession, buildAgg, makeConfig, makeInput } from './fixtures/viewFixtures'
+import { codexMeta, codexTokenCount, codexTurnContext, ctxFor } from './fixtures/helpers'
+import type { PromptCacheReading } from '../src/quotaSources'
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -8204,4 +8206,191 @@ test('1.8 L-6: opening a folded section runs every fit — the script registers 
   a.fire('document:toggle', {})
   assert.deepEqual(values.map((v, i) => [i, v.hidden]).filter(([, hid]) => !hid).map(([i]) => i), [0, 6, 12, 18, 24])
   assert.deepEqual(dates.map((d) => d.firstElementChild.textContent).filter(Boolean), ['09-01', '09-07', '09-13', '09-19', '09-25'])
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 A5, A6, A7: the Claude card's prompt-cache block and the Codex card's line, on the page
+// ---------------------------------------------------------------------------
+
+const PC_STATE = 'Session Thu 11:05 · 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)'
+const PC_COST = 'A cold start after 12:04 re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).'
+const PC_COLD = 'Session Thu 09:40 · aaaa1111 · prompt cache cold since ~11:40 (1 h TTL, estimated from the transcript)'
+const PC_COLD_COST = 'The next request re-writes ~152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).'
+
+/** The Claude card's block as the view model hands it on: `lines` with their cost lines, the count of the rest. */
+function cacheBlock(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const lines = [
+    { shortId: '9d0eb37a', phase: 'cooling', source: 'bridge', text: PC_STATE, cost: PC_COST },
+    { shortId: 'aaaa1111', phase: 'cold', source: 'transcript', text: PC_COLD, cost: PC_COLD_COST },
+  ]
+  return { lines, more: 0, moreText: null, all: lines, allMoreText: null, keepWarm: null, ...over }
+}
+
+test('the Claude card lists each cooling or cold session after its windows: the state line, the cost line under it, both dim; the count; the 1.3 line last (1.8 A5)', () => {
+  const line13 = 'prompt cache warm · expires in 20 m 0 s (1 h TTL) · hit ratio 90 %'
+  const h = render('sQuota()', {
+    quotas: [card({
+      cacheWatch: cacheBlock({ more: 2, moreText: '2 more sessions with a cooling or cold prompt cache' }),
+      promptCache: { text: line13, note: 'n', expired: false },
+      extra: { text: '$12 of $50', utilization: 24, enabled: true, billed: true },
+    })],
+  })
+  const block = '<div class="meta pc-line">' + PC_STATE + '</div><div class="meta pc-cost">' + PC_COST + '</div>'
+    + '<div class="meta pc-line">' + PC_COLD + '</div><div class="meta pc-cost">' + PC_COLD_COST + '</div>'
+    + '<div class="meta pc-more">2 more sessions with a cooling or cold prompt cache</div>'
+  assert.ok(h.indexOf(block + '<div class="meta" title="n">' + line13 + '</div></div>') >= 0, h)
+  // After the windows and the extra usage: where the 1.3 line has stood since 1.3.
+  assert.ok(h.indexOf(block) > h.lastIndexOf('class="win"'), h)
+  assert.ok(h.indexOf(block) > h.indexOf('Extra usage'), h)
+  // No button of any kind (the keep-warm prompt is not built, §7a Q1), no live region, no glyph.
+  const only = h.slice(h.indexOf(block), h.indexOf(block) + block.length)
+  assert.equal(/<button|role=|aria-live|tabindex/.test(only), false, only)
+  // A line without a cost line has none; nothing to list is no block; a warm-only block draws nothing.
+  const bare = render('sQuota()', { quotas: [card({ cacheWatch: cacheBlock({ lines: [{ shortId: '9d0eb37a', phase: 'cooling', source: 'bridge', text: PC_STATE, cost: null }] }) })] })
+  assert.ok(bare.indexOf('<div class="meta pc-line">' + PC_STATE + '</div></div>') >= 0, bare)
+  assert.equal(bare.indexOf('pc-cost'), -1, bare)
+  for (const cacheWatch of [null, undefined, cacheBlock({ lines: [], all: [{ text: 'x · prompt cache warm · cools in 30 m 0 s (1 h TTL)' }] }), { lines: 'x' }, 42]) {
+    const none = render('sQuota()', { quotas: [card({ cacheWatch })] })
+    assert.equal(/pc-(line|cost|more)/.test(none), false, JSON.stringify(cacheWatch) + ': ' + none)
+    assert.equal(none.indexOf('prompt cache'), -1, none)
+  }
+  // Escaped like every word the model hands over.
+  const odd = render('sQuota()', { quotas: [card({ cacheWatch: cacheBlock({ lines: [{ text: '<img src=x onerror=alert(1)>', cost: '"&' }] }) })] })
+  assert.ok(odd.indexOf('<div class="meta pc-line">&lt;img src=x onerror=alert(1)&gt;</div><div class="meta pc-cost">&quot;&amp;</div>') >= 0, odd)
+})
+
+test('the Codex card ends with its one prompt-cache line, dim, the view model\'s words; none without one (1.8 A6)', () => {
+  const line = 'Codex prompt cache · last request at 11:50 · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until 12:20, perhaps longer.'
+  const h = render('sQuota()', { quotas: [card(), card({ source: 'codex', title: 'Codex', codexCache: line })] })
+  assert.ok(h.indexOf('<div class="meta pc-codex">' + line + '</div></div>') > h.indexOf('Codex</span>'), h)
+  assert.equal(h.split('pc-codex').length - 1, 1, h)
+  for (const codexCache of [null, undefined, '', 7]) {
+    assert.equal(render('sQuota()', { quotas: [card({ source: 'codex', title: 'Codex', codexCache })] }).indexOf('pc-codex'), -1)
+  }
+})
+
+test('the prompt-cache lines are dim text with no colour of their own, and the forced-colours block leaves them to the theme (1.8 A7)', () => {
+  assert.match(STYLE, /\.pc-line, \.pc-more, \.pc-codex \{ margin-top: 4px; \}/)
+  const rules = STYLE.replace(/\/\*[\s\S]*?\*\//g, '').split('}').filter((r) => /\.pc-/.test(r))
+  assert.equal(rules.length, 1, rules.join('}'))
+  assert.equal(/color|background|forced-color-adjust/.test(rules[0]), false, rules[0])
+  // The page's script writes them as .meta lines: the card's dim tone, which the harness holds to 4.5:1.
+  assert.match(SOURCE, /'<div class="meta pc-line">'/)
+  assert.match(SOURCE, /'<div class="meta pc-cost">'/)
+  assert.match(SOURCE, /'<div class="meta pc-codex">'/)
+})
+
+const PC_S1 = '9d0eb37a-0000-4000-8000-000000000001'
+const PC_S2 = '5f1c2d3e-0000-4000-8000-000000000002'
+const PC_T1 = 'aaaa1111-0000-4000-8000-000000000004'
+const PC_T2 = 'bbbb2222-0000-4000-8000-000000000005'
+
+/** A bridge reading of `sessionId`: a 1 h cache expiring at `expiresAt`, read a minute ago, 152 300 tokens on Opus 5.5. */
+function pcReading(sessionId: string, expiresAt: number): PromptCacheReading {
+  return { warm: true, ttl: '1h', expiresAt, hitRatio: 0.9, readAt: Math.floor((NOW - 60_000) / 1000), sessionId, recacheIfCold: 152_300, model: 'claude-opus-5-5' }
+}
+
+/**
+ * A real view model: the fixture's world plus a transcript session cooling (its newest request 56
+ * minutes ago), a bridge session cooling with 4 m 10 s left, a bridge session cold for 20 minutes, a
+ * transcript session warm with 30 minutes left, and — with `codex` — a GPT-5.6 turn 10 minutes ago.
+ */
+function cacheWorld(o: { cfg?: Record<string, unknown>; providers?: ('claude' | 'codex')[]; codex?: boolean } = {}): Record<string, unknown> {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: PC_T1, at: NOW - 56 * 60_000 })
+  addCacheSession(agg, { sessionId: PC_T2, at: NOW - 30 * 60_000, model: 'claude-fable-5-1' })
+  if (o.codex) {
+    const file = join('/virtual', 'codex', 'sessions', 'rollout-cache.jsonl')
+    const cur = { offset: 0, size: 0, ino: 91, dev: 1 }
+    agg.cursors.set(file, cur)
+    const c = ctxFor({ file })
+    const at = NOW - 10 * 60_000
+    agg.addCodexLine(codexMeta({ ts: at - 60_000, id: 'thread-0091' }), cur, c)
+    agg.addCodexLine(codexTurnContext(at - 60_000, 'gpt-5.6-sol'), cur, c)
+    agg.addCodexLine(codexTokenCount({ ts: at, total: { input: 900, cached: 600, output: 40, total: 940 } }), cur, c)
+  }
+  const promptCaches = [pcReading(PC_S1, NOW + 4 * 60_000 + 10_000), pcReading(PC_S2, NOW - 20 * 60_000)]
+  const input = {
+    ...makeInput({ agg, cfg: makeConfig({ 'tokenPace.dashboard.sections': ['quota'], ...(o.cfg ?? {}) }), ...(o.providers ? { ui: { providers: o.providers } } : {}) }),
+    promptCaches, promptCache: promptCaches[0],
+  }
+  return JSON.parse(JSON.stringify(buildViewModel(input))) as Record<string, unknown>
+}
+
+/** The quota cards of a rendered page, each its own markup, by the card's title. */
+function cardsOf(html: string): Array<{ title: string; html: string }> {
+  return html.split('<div class="card">').slice(1).map((c) => ({ title: (/<span class="name">([^<]*)<\/span>/.exec(c) ?? [])[1] ?? '', html: c }))
+}
+
+test('from a real view model: three lines and their costs on the Claude card, none for the warm session, no money with costs off (1.8 A5)', () => {
+  const [claude, codex] = cardsOf(pageOf(cacheWorld()))
+  assert.equal(claude.title, 'Claude Code')
+  const states = [...claude.html.matchAll(/<div class="meta pc-line">([^<]*)<\/div>/g)].map((m) => m[1])
+  const costs = [...claude.html.matchAll(/<div class="meta pc-cost">([^<]*)<\/div>/g)].map((m) => m[1])
+  assert.deepEqual(states, [
+    'Session Thu 10:04 · aaaa1111 · prompt cache cools in ~4 m 0 s (1 h TTL, estimated from the transcript)',
+    'Session 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)',
+    'Session 5f1c2d3e · prompt cache cold since 11:40 (1 h TTL)',
+  ])
+  assert.equal(costs.length, 3)
+  assert.ok(costs.every((c) => c.includes('~$')), costs.join('\n'))
+  // The warm session is the markdown's; the card says nothing of it. The latest mirror's session is listed, so no 1.3 line.
+  assert.equal(claude.html.includes('bbbb2222'), false, claude.html)
+  assert.equal(claude.html.includes('hit ratio'), false, claude.html)
+  // The block stands after the card's last window.
+  assert.ok(claude.html.indexOf('pc-line') > claude.html.lastIndexOf('class="win"'), claude.html)
+  // The Codex card has no block: its turns are GPT-5.3 here, for which OpenAI states no minimum.
+  assert.equal(/pc-/.test(codex.html), false, codex.html)
+  // Costs off: the factors stay, no money anywhere on the card.
+  const [plain] = cardsOf(pageOf(cacheWorld({ cfg: { 'tokenPace.showCost': false } })))
+  const block = [...plain.html.matchAll(/<div class="meta pc-(?:line|cost|more)">([^<]*)<\/div>/g)].map((m) => m[1]).join('\n')
+  assert.ok(block.includes('(2× input)'), block)
+  assert.equal(block.includes('$'), false, block)
+})
+
+test('the provider switch: under Codex no Claude card and so no block, the Codex line on its card; under Claude Code no Codex line (1.8 §3 A8 test 14)', () => {
+  const all = cardsOf(pageOf(cacheWorld({ codex: true })))
+  assert.deepEqual(all.map((c) => c.title), ['Claude Code', 'Codex'])
+  assert.equal(all[0].html.split('pc-line').length - 1, 3)
+  assert.equal(all[0].html.includes('pc-codex'), false)
+  const line = 'Codex prompt cache · last request at 11:50 · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until 12:20, perhaps longer.'
+  assert.ok(all[1].html.includes('<div class="meta pc-codex">' + line + '</div>'), all[1].html)
+  const codex = pageOf(cacheWorld({ codex: true, providers: ['codex'] }))
+  assert.deepEqual(cardsOf(codex).map((c) => c.title), ['Codex'])
+  assert.equal(/pc-(line|cost|more)|prompt cache cools|prompt cache cold/.test(codex), false, codex)
+  assert.equal(codex.split('pc-codex').length - 1, 1, codex)
+  const claude = pageOf(cacheWorld({ codex: true, providers: ['claude'] }))
+  assert.deepEqual(cardsOf(claude).map((c) => c.title), ['Claude Code'])
+  assert.equal(claude.includes('pc-codex') || claude.includes('Codex prompt cache'), false, claude)
+  assert.equal(claude.split('pc-line').length - 1, 3)
+})
+
+test('one line per session on the page, at any minute: the Claude card names a session once, the 1.3 line only while its session is not listed (1.8 §3 A8 test 11)', () => {
+  // The P6 invariant's world: session 9d0eb37a has its transcript's newest cache request and a bridge
+  // reading written a minute later — the latest mirror, the 1.3 line —, aaaa1111 its transcript only.
+  const T = NOW - 30 * 60_000
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: PC_S1, at: T })
+  addCacheSession(agg, { sessionId: PC_T1, at: T + 7 * 60_000 })
+  const reading: PromptCacheReading = {
+    warm: true, ttl: '1h', expiresAt: T + 3_600_000 + 30_000, hitRatio: 0.9, readAt: Math.floor((T + 60_000) / 1000),
+    sessionId: PC_S1, recacheIfCold: 152_300, model: 'claude-opus-5-5',
+  }
+  const base = makeInput({ agg, cfg: makeConfig({ 'tokenPace.dashboard.sections': ['quota'] }) })
+  const names = (html: string, id: string): number => html.split(`· ${id.slice(0, 8)} ·`).length - 1 + html.split(`Session ${id.slice(0, 8)} ·`).length - 1
+  let listedMinutes = 0
+  for (let now = reading.expiresAt! - 70 * 60_000; now <= reading.expiresAt! + 70 * 60_000; now += 60_000) {
+    const vm = JSON.parse(JSON.stringify(buildViewModel({ ...base, now, promptCache: reading, promptCaches: [reading] }))) as Record<string, unknown>
+    const claude = cardsOf(pageOf(vm))[0].html
+    const old = claude.split('<div class="meta" title=').length - 1 + claude.split('<div class="meta warn" title=').length - 1
+    const listed = /<div class="meta pc-line">[^<]*9d0eb37a/.test(claude)
+    if (listed) listedMinutes++
+    assert.ok(names(claude, PC_S1) + old <= 1, `the card names 9d0eb37a twice at ${now}`)
+    assert.ok(names(claude, PC_T1) <= 1, `the card names aaaa1111 twice at ${now}`)
+    // Mutation check (§3 A8 test 11): the 1.3 line printed always fails here.
+    assert.equal(old === 0, listed, `the 1.3 line at ${now}: listed ${listed}`)
+    // Every state line has its cost line right under it.
+    assert.equal(claude.split('pc-line').length, claude.split('pc-cost').length, `at ${now}`)
+  }
+  assert.equal(listedMinutes, 65)
 })

@@ -162,6 +162,15 @@ shows them.
 * **Quick Pick** (*Show Usage (Quick Pick)*) — in the quota group after the Claude windows: one item
   per line of the card, the state as its label and the cost as its description, then the count of the
   rest.
+* **Status bar** — the Claude quota item's tooltip lists the card's lines, at most three, each its state
+  and its cost, then the count of the rest; the status line's own row stands after them for a session
+  they do not list. The opt-in entry `cache` in `tokenPace.statusBar.show` (not in the default) shows
+  only while a watched cache is cooling — its last five minutes: `$(watch) cache 4m`, `$(watch) cache
+  ~4m` for an estimate, `45s` under a minute, `+1` for each further session cooling; hidden while none is
+  cooling. It has no colour and no alarm, and a screen reader hears it
+  in words: `Prompt cache of Session Tue 14:20 · 9d0eb37a cools in 4 m 10 s`. Its tooltip lists the
+  cooling sessions with their cost lines ([Status bar](status-bar.md)). Neither follows the dashboard's
+  provider switch: the bar shows the same under every view.
 * *Copy Usage Summary*, the exports, *Copy Diagnostics* and the data-quality section say nothing of
   it: a cooling cache is a moment, not a record.
 

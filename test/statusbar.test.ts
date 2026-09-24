@@ -14,9 +14,11 @@ import type { BudgetRow } from '../src/budget'
 import { Config, sanitize } from '../src/config'
 import { RUNNING_WINDOW_MS, RunningItem } from '../src/agentTree'
 import {
-  AGENTS_TOOLTIP_ITEMS, AgentsReading, autoExplain, buildItems, footerLine, itemModel, makeContext, previewItems, problemText,
+  AGENTS_TOOLTIP_ITEMS, AgentsReading, autoExplain, buildItems, footerLine, ItemModel, itemModel, makeContext, previewItems, problemText,
   problemTooltip, problemView, quotaTooltip, selectWindows, StatusTextInput, summaryTooltip, tokenTooltip, UsageSource,
 } from '../src/statusText'
+import { CACHE_WATCH_MAX, CacheWatchEntry, cachePhase, watchCaches } from '../src/cacheWatch'
+import { addCacheSession, buildAgg } from './fixtures/viewFixtures'
 import { emptyBucket, Forecast, ProblemKind, QuotaState, QuotaWindow } from '../src/types'
 import type { ViewModel } from '../src/viewModel'
 
@@ -711,6 +713,11 @@ const VSCODE_STUB: any = {
   commands: { executeCommand: () => undefined },
   window: { showQuickPick: async () => undefined },
   QuickPickItemKind: { Separator: -1 },
+  // 1.8 A7: what StatusBar.update touches besides the window's createStatusBarItem (barStub below). Here
+  // from the start, because the bundle's module object sees only the keys its first require found.
+  StatusBarAlignment: { Left: 1, Right: 2 },
+  ThemeColor: class { constructor(readonly id: string) {} },
+  MarkdownString: class { isTrusted: unknown = false; supportThemeIcons = false; supportHtml = false; constructor(public value = '') {} },
 }
 
 function stubVscode(): void {
@@ -1416,4 +1423,327 @@ test('a permanent cause beside a reading adds no suffix and no tooltip line; a t
   // German: nothing of it either.
   assert.equal(german(() => buildItems(input({ quotas: [failedReading({
     lastFailure: { at: NOW - 20 * 60_000, problem: 'Anmeldedaten abgelehnt', kind: 'unauthorized' } })] }))[0].text).includes('neuer Versuch'), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 A5, A7 (§3 A8 test 13): the `cache` entry, its tooltip, the Claude quota tooltip's rows
+// ---------------------------------------------------------------------------
+
+const CACHE_ON = { 'tokenPace.statusBar.show': ['claudeQuota', 'cache', 'tokens'] }
+const S_BRIDGE = '9d0eb37a-0000-4000-8000-000000000001'
+const S_TX = 'aaaa1111-0000-4000-8000-000000000002'
+
+/** A watched session as `watchCaches` hands it on: its phase at NOW from its expiry `left` ms away. */
+function watched(o: { id?: string; left: number; source?: 'bridge' | 'transcript'; name?: string; recache?: number | null }): CacheWatchEntry {
+  const expiresAt = NOW + o.left
+  const phase = cachePhase(expiresAt, NOW)
+  assert.ok(phase !== null, `nothing is watched ${o.left} ms from its expiry`)
+  const id = o.id ?? S_BRIDGE
+  return {
+    sessionId: id, name: o.name ?? `Session Thu 11:05 · ${id.slice(0, 8)}`, source: o.source ?? 'bridge', ttl: '1h',
+    expiresAt, phase, recache: o.recache === undefined ? 152_300 : o.recache, model: 'claude-opus-5-5',
+  }
+}
+const COOL = 4 * 60_000 + 10_000
+
+function cacheItem(entries: CacheWatchEntry[] | null | undefined, over: Record<string, unknown> = {}): ItemModel | undefined {
+  return buildItems(input({ cfg: cfg({ ...CACHE_ON, ...over }), cacheWatch: entries })).find((m) => m.id === 'tokenPace.cache')
+}
+
+test('the cache entry is offered and not switched on: not in the default, and only where the list names it (1.8 A5)', () => {
+  assert.equal(sanitize({}).statusBar.show.includes('cache'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.statusBar.show': ['cache'] }).statusBar.show, ['cache'])
+  const cooling = [watched({ left: COOL })]
+  // The default bar: no entry, whatever cools.
+  assert.equal(buildItems(input({ cacheWatch: cooling })).some((m) => m.id === 'tokenPace.cache'), false)
+  // Asked for: where the list puts it, between the quota window and the tokens.
+  const items = buildItems(input({ cfg: cfg(CACHE_ON), cacheWatch: cooling }))
+  assert.deepEqual(items.map((m) => m.id), ['tokenPace.quota.claude.session.300', 'tokenPace.cache', 'tokenPace.tokens'])
+  assert.equal(items[1].priorityKey, '999')
+  assert.equal(items[1].name, 'Token Pace — prompt cache')
+})
+
+test('the cache entry shows only while a watched cache is cooling: none while warm, cold or unwatched (1.8 A5, §3 A8 test 13)', () => {
+  // Mutation check (§3 A8 test 13): an entry drawn from warm caches too fails the first case here.
+  assert.equal(cacheItem([watched({ left: 5 * 60_000 + 1 })]), undefined, 'a warm cache is not news')
+  assert.equal(cacheItem([watched({ left: 30 * 60_000 }), watched({ id: S_TX, left: 50 * 60_000, source: 'transcript' })]), undefined)
+  assert.equal(cacheItem([watched({ left: -20 * 60_000 })]), undefined, 'a cold cache is the card\'s to say')
+  assert.equal(cacheItem([watched({ left: 0 })]), undefined, 'at its expiry the cache is cold')
+  for (const none of [[], null, undefined]) assert.equal(cacheItem(none), undefined, JSON.stringify(none))
+  // The lead's boundary: five minutes before the expiry it cools.
+  assert.equal(cacheItem([watched({ left: 5 * 60_000 })])?.text, '$(watch) cache 5m')
+  // A cooling session among warm and cold ones: the entry, and it counts the cooling ones alone.
+  const mixed = [watched({ left: 2 * 60_000 }), watched({ id: S_TX, left: -10 * 60_000 }), watched({ id: '7a7a7a7a-0000', left: 20 * 60_000 })]
+  assert.equal(cacheItem(mixed)?.text, '$(watch) cache 2m')
+})
+
+test('the cache entry\'s text: the countdown in minutes, the seconds under a minute, `~` for an estimate, `+1` for another cooling session (1.8 A5)', () => {
+  assert.equal(cacheItem([watched({ left: COOL })])?.text, '$(watch) cache 4m')
+  assert.equal(cacheItem([watched({ left: COOL, source: 'transcript' })])?.text, '$(watch) cache ~4m')
+  assert.equal(cacheItem([watched({ left: 45_000 })])?.text, '$(watch) cache 45s')
+  assert.equal(cacheItem([watched({ left: 45_000, source: 'transcript' })])?.text, '$(watch) cache ~45s')
+  assert.equal(cacheItem([watched({ left: 59_999 })])?.text, '$(watch) cache 59s')
+  assert.equal(cacheItem([watched({ left: 60_000 })])?.text, '$(watch) cache 1m')
+  // The session whose cache expires first speaks; the others are counted.
+  assert.equal(cacheItem([watched({ left: COOL }), watched({ id: S_TX, left: 4.5 * 60_000, source: 'transcript' })])?.text, '$(watch) cache 4m +1')
+  assert.equal(cacheItem([watched({ left: 30_000, source: 'transcript' }), watched({ id: S_TX, left: COOL }), watched({ id: '7a7a7a7a-0000', left: COOL })])?.text,
+    '$(watch) cache ~30s +2')
+  // The order is the watch list's: the real one, cooling by expiry.
+  const readings = [S_BRIDGE, S_TX].map((sessionId, i) => ({
+    warm: true, ttl: '1h' as const, expiresAt: NOW + (i === 0 ? COOL : 90_000), hitRatio: 0.9, readAt: Math.floor(NOW / 1000) - 60,
+    sessionId, recacheIfCold: 152_300, model: 'claude-opus-5-5',
+  }))
+  const list = watchCaches({ readings, mains: [], tcfg: { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' } }, NOW, Infinity)
+  assert.equal(cacheItem(list)?.text, '$(watch) cache 1m +1')
+  // German: the word is the bundle's, the countdown the same in both languages.
+  assert.equal(german(() => cacheItem([watched({ left: COOL })])?.text), '$(watch) Cache 4m')
+  assert.equal(german(() => cacheItem([watched({ left: COOL, source: 'transcript' })])?.text), '$(watch) Cache ~4m')
+  assert.equal(german(() => cacheItem([watched({ left: 45_000 })])?.text), '$(watch) Cache 45s')
+  assert.equal(german(() => cacheItem([watched({ left: COOL }), watched({ id: S_TX, left: 4.5 * 60_000 })])?.text), '$(watch) Cache 4m +1')
+  assert.equal(german(() => cacheItem([watched({ left: COOL })])?.name), 'Token Pace — Prompt-Cache')
+})
+
+test('the cache entry has no colour and no alarm in any mode, and clicks as configured (1.8 §0b.6)', () => {
+  for (const over of [{}, { 'tokenPace.colorMode': 'monochrome' }, { 'tokenPace.indicator': 'color' }, { 'tokenPace.indicator': 'none' }]) {
+    const m = cacheItem([watched({ left: 30_000 })], over)
+    assert.ok(m, JSON.stringify(over))
+    assert.equal(m.colorId, null, JSON.stringify(over))
+    assert.equal(m.alarm, false, JSON.stringify(over))
+  }
+  const of = (action: string): ItemModel => cacheItem([watched({ left: COOL })], { 'tokenPace.clickAction': action })!
+  assert.equal(of('dashboard').command, 'tokenPace.showDashboard')
+  assert.equal(of('menu').command, 'tokenPace.menu')
+  assert.equal(of('refresh').command, 'tokenPace.refreshQuota')
+  // Not a provider's item: the usage page it opens is the menu's choice, as for context and agents.
+  assert.equal(of('openWebsite').command, 'tokenPace.openUsagePage')
+  assert.equal(of('openWebsite').commandArgs, undefined)
+})
+
+test('the cache entry says in words what its short text means, for a screen reader; no other item has words of its own (1.8 A7)', () => {
+  assert.equal(cacheItem([watched({ left: COOL })])?.ariaLabel, 'Prompt cache of Session Thu 11:05 · 9d0eb37a cools in 4 m 10 s')
+  assert.equal(cacheItem([watched({ left: COOL, source: 'transcript' })])?.ariaLabel,
+    'Prompt cache of Session Thu 11:05 · 9d0eb37a cools in about 4 m 10 s (estimated)')
+  assert.equal(cacheItem([watched({ left: 45_000 }), watched({ id: S_TX, left: COOL, source: 'transcript' })])?.ariaLabel,
+    'Prompt cache of Session Thu 11:05 · 9d0eb37a cools in 45 s, and 1 more')
+  assert.equal(cacheItem([watched({ left: 45_000, source: 'transcript' }), watched({ id: S_TX, left: COOL }), watched({ id: '7a7a7a7a-0000', left: COOL })])?.ariaLabel,
+    'Prompt cache of Session Thu 11:05 · 9d0eb37a cools in about 45 s (estimated), and 2 more')
+  assert.equal(german(() => cacheItem([watched({ left: COOL, name: 'Sitzung Do 11:05 · 9d0eb37a' })])?.ariaLabel),
+    'Prompt-Cache von Sitzung Do 11:05 · 9d0eb37a kühlt in 4 m 10 s ab')
+  assert.equal(german(() => cacheItem([watched({ left: COOL, source: 'transcript', name: 'Sitzung Do 11:05 · 9d0eb37a' })])?.ariaLabel),
+    'Prompt-Cache von Sitzung Do 11:05 · 9d0eb37a kühlt in etwa 4 m 10 s ab (geschätzt)')
+  assert.equal(german(() => cacheItem([watched({ left: COOL, name: 'Sitzung Do 11:05 · 9d0eb37a' }), watched({ id: S_TX, left: 4.5 * 60_000 })])?.ariaLabel),
+    'Prompt-Cache von Sitzung Do 11:05 · 9d0eb37a kühlt in 4 m 10 s ab und 1 weitere')
+  // Every other entry is read by its text.
+  const all = buildItems(input({
+    cfg: cfg({ 'tokenPace.statusBar.show': ['claudeQuota', 'context', 'tokens', 'cost', 'cache'] }),
+    context: { used: 1000, size: 2000, usedPct: 50, fetchedAt: Math.floor(NOW / 1000) }, cacheWatch: [watched({ left: COOL })],
+  }))
+  assert.deepEqual(all.filter((m) => m.ariaLabel !== undefined).map((m) => m.id), ['tokenPace.cache'])
+})
+
+test('the cache entry\'s tooltip: the cooling sessions, each its state and its cost, at most three, then the count and the action row (1.8 A5)', () => {
+  const tip = cacheItem([watched({ left: COOL }), watched({ id: S_TX, left: 4.5 * 60_000, source: 'transcript', name: 'Session Thu 10:04 · aaaa1111' })])!
+    .tooltipMarkdown
+  const lines = tip.split('\n')
+  assert.equal(lines[0], '**Prompt cache cooling**')
+  assert.deepEqual(lines.slice(1, 10), [
+    '', '$(watch) `Session Thu 11:05 · 9d0eb37a` · prompt cache cools in 4 m 10 s (1 h TTL)',
+    '', '_A cold start after 12:04 re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03)._',
+    '', '$(watch) `Session Thu 10:04 · aaaa1111` · prompt cache cools in ~4 m 30 s (1 h TTL, estimated from the transcript)',
+    '', '_A cold start after ~12:04 re-writes ~152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03)._',
+    '',
+  ])
+  assert.equal(lines[10], footerLine(makeContext(input({ cfg: cfg(CACHE_ON) }))))
+  assert.equal(lines.length, 11)
+  // Four cooling sessions: three rows and the count of the fourth.
+  const four = cacheItem([30_000, 60_000, 90_000, 120_000].map((left, i) => watched({ id: `${i}0000000-0000`, left })))!.tooltipMarkdown
+  assert.equal(four.split('\n').filter((l) => l.startsWith('$(watch) ')).length, 3)
+  assert.ok(four.split('\n').includes('and 1 more'), four)
+  // Costs off: the rates variant; an unknown size: no cost line.
+  const plain = cacheItem([watched({ left: COOL })], { 'tokenPace.showCost': false })!.tooltipMarkdown
+  assert.ok(plain.includes('_A cold start after 12:04 re-writes 152.3K tokens at the 1 h write rate (2× input) instead of reading them from the cache (0.05× input)._'), plain)
+  assert.equal(plain.includes('$1'), false, plain)
+  assert.equal(cacheItem([watched({ left: COOL, recache: null })])!.tooltipMarkdown.includes('cold start'), false)
+  // Compact keeps the rows, not the cost lines; off is no tooltip.
+  const compactTip = cacheItem([watched({ left: COOL })], { 'tokenPace.tooltip': 'compact' })!.tooltipMarkdown
+  assert.ok(compactTip.includes('prompt cache cools in 4 m 10 s'), compactTip)
+  assert.equal(compactTip.includes('cold start'), false, compactTip)
+  assert.ok(compactTip.split('\n').length <= 12)
+  assert.equal(cacheItem([watched({ left: COOL })], { 'tokenPace.tooltip': 'off' })!.tooltipMarkdown, '')
+  // German: the heading and the rows in the bundle's words.
+  const de = german(() => cacheItem([watched({ left: COOL, name: 'Sitzung Do 11:05 · 9d0eb37a' })])!.tooltipMarkdown)
+  assert.ok(de.startsWith('**Prompt-Cache kühlt ab**\n\n$(watch) `Sitzung Do 11:05 · 9d0eb37a` · Prompt-Cache kühlt in 4 m 10 s ab (1 h TTL)'), de)
+  assert.ok(de.includes('\n_Ein Kaltstart nach 12:04 schreibt 152,3K Token zum 1-h-Schreibpreis neu (2× Eingabe, ~$1,22), statt sie aus dem Cache zu lesen (0,05× Eingabe, ~$0,03)._\n'), de)
+})
+
+test('a session name stays inside a code span of the tooltips, whatever it holds (1.8 A5)', () => {
+  const evil = watched({ left: COOL, name: 'Session **x**|<img src=x onerror=alert(1)>`' })
+  const q = state()
+  const ctx = makeContext(input({ cfg: cfg(CACHE_ON), cacheWatch: [evil] }))
+  for (const tip of [cacheItem([evil])!.tooltipMarkdown, quotaTooltip(q, ctx)]) {
+    assert.ok(tip.includes('`Session **x**|<img src=x onerror=alert(1)>` · prompt cache cools in 4 m 10 s (1 h TTL)'), tip)
+    assert.equal(tip.includes('``'), false, tip)
+  }
+})
+
+/** The window's createStatusBarItem for StatusBar.update, recording every item it creates. */
+function barStub(): { items: Array<Record<string, any>>; restore(): void } {
+  const items: Array<Record<string, any>> = []
+  const saved = VSCODE_STUB.window
+  VSCODE_STUB.window = {
+    ...saved,
+    createStatusBarItem: (id: string, alignment: number, priority: number) => {
+      const it: Record<string, any> = { id, alignment, priority, disposed: false, visible: false,
+        show() { this.visible = true }, dispose() { this.disposed = true; this.visible = false } }
+      items.push(it)
+      return it
+    },
+  }
+  return { items, restore: () => { VSCODE_STUB.window = saved } }
+}
+
+test('the bar hands the entry\'s words to VS Code as its accessibility label, keeps its name, and links only its own commands (1.8 A7)', () => {
+  const { StatusBar } = loadStatusBar()
+  const stub = barStub()
+  try {
+    const bar = new StatusBar()
+    const agg = fakeAgg() as unknown as Parameters<typeof bar.update>[0]['agg']
+    bar.update({ ...input({ cfg: cfg(CACHE_ON), cacheWatch: [watched({ left: COOL })] }), agg })
+    const live = stub.items.filter((i) => !i.disposed)
+    const item = live.find((i) => i.id === 'tokenPace.cache')
+    assert.ok(item, 'no cache item on the bar')
+    assert.deepEqual(item.accessibilityInformation, { label: 'Prompt cache of Session Thu 11:05 · 9d0eb37a cools in 4 m 10 s' })
+    assert.equal(item.name, 'Token Pace — prompt cache')
+    assert.equal(item.text, '$(watch) cache 4m')
+    assert.equal(item.color, undefined)
+    assert.equal(item.backgroundColor, undefined)
+    // Every other item is read by its text.
+    for (const other of live.filter((i) => i.id !== 'tokenPace.cache')) assert.equal(other.accessibilityInformation, undefined, other.id)
+    // The tooltip links only the commands the bar trusts, and every one it links is trusted.
+    const trusted: string[] = item.tooltip.isTrusted.enabledCommands
+    const linked = [...String(item.tooltip.value).matchAll(/\(command:([A-Za-z.]+)[^)]*\)/g)].map((m) => m[1])
+    assert.ok(linked.length >= 4, String(item.tooltip.value))
+    for (const id of linked) assert.ok(trusted.includes(id), `the tooltip links ${id}, which the bar does not trust`)
+    assert.ok(trusted.every((id) => /^tokenPace\.[A-Za-z]+$/.test(id)), trusted.join())
+    // The cache warms again (a request): the entry goes.
+    bar.update({ ...input({ cfg: cfg(CACHE_ON), cacheWatch: [] }), agg })
+    assert.equal(item.disposed, true)
+    bar.dispose()
+  } finally {
+    stub.restore()
+  }
+})
+
+test('the Claude quota tooltip lists the cooling and cold sessions as the card does, and the 1.3 row only for a session it does not list (1.8 A5, §3.0 b)', () => {
+  const reading = {
+    warm: true, ttl: '1h' as const, expiresAt: NOW + COOL, hitRatio: 0.9, readAt: Math.floor(NOW / 1000) - 60,
+    sessionId: S_BRIDGE, recacheIfCold: 152_300, model: 'claude-opus-5-5',
+  }
+  const cold = watched({ id: S_TX, left: -20 * 60_000, source: 'transcript', name: 'Session Thu 09:40 · aaaa1111' })
+  const tip = buildItems(input({ promptCache: reading, cacheWatch: [watched({ left: COOL }), cold, watched({ id: '7a7a7a7a-0000', left: 20 * 60_000 })] }))[0]
+    .tooltipMarkdown
+  const lines = tip.split('\n')
+  const at = lines.indexOf('$(database) `Session Thu 11:05 · 9d0eb37a` · prompt cache cools in 4 m 10 s (1 h TTL)')
+  assert.ok(at > 0, tip)
+  assert.deepEqual(lines.slice(at, at + 7), [
+    '$(database) `Session Thu 11:05 · 9d0eb37a` · prompt cache cools in 4 m 10 s (1 h TTL)', '',
+    '_A cold start after 12:04 re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03)._', '',
+    '$(database) `Session Thu 09:40 · aaaa1111` · prompt cache cold since ~11:40 (1 h TTL, estimated from the transcript)', '',
+    '_The next request re-writes ~152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03)._',
+  ])
+  // Below the window table, above the freshness line; the warm session is not a row; the latest
+  // mirror's session is listed, so its 1.3 row gives way.
+  assert.ok(tip.indexOf('$(database)') > tip.indexOf('| 5 h |'), tip)
+  assert.ok(tip.lastIndexOf('$(database)') < tip.indexOf('Updated '), tip)
+  assert.equal(tip.includes('7a7a7a7a'), false, tip)
+  assert.equal(tip.includes('$(database) prompt cache'), false, tip)
+  // A session the rows do not list keeps the 1.3 row: here the latest mirror is a warm session's.
+  const warm = { ...reading, sessionId: '7a7a7a7a-0000', expiresAt: NOW + 20 * 60_000 }
+  const both = buildItems(input({ promptCache: warm, cacheWatch: [watched({ left: COOL }), watched({ id: '7a7a7a7a-0000', left: 20 * 60_000 })] }))[0].tooltipMarkdown
+  assert.ok(both.includes('$(database) `Session Thu 11:05 · 9d0eb37a` · prompt cache cools'), both)
+  assert.ok(both.includes('$(database) prompt cache warm · expires in 20 m 0 s (1 h TTL) · hit ratio 90 %'), both)
+  // More than three: three rows and the card's count.
+  const five = buildItems(input({ cacheWatch: [30_000, 60_000, 90_000, 120_000, 150_000].map((left, i) => watched({ id: `${i}0000000-0000`, left })) }))[0]
+    .tooltipMarkdown
+  assert.equal(five.split('\n').filter((l) => l.startsWith('$(database) ')).length, 3)
+  assert.ok(five.split('\n').includes('2 more sessions with a cooling or cold prompt cache'), five)
+  // The collective item carries the rows too; the compact tooltip, the Codex item and a bare bar none.
+  assert.ok(buildItems(input({ cacheWatch: [cold], cfg: cfg({ 'tokenPace.density': 'minimal' }) }))[0].tooltipMarkdown.includes('prompt cache cold since ~11:40'))
+  assert.equal(buildItems(input({ cacheWatch: [cold], cfg: cfg({ 'tokenPace.tooltip': 'compact' }) }))[0].tooltipMarkdown.includes('prompt cache'), false)
+  const codex = buildItems(input({ quotas: [state({ source: 'codex' })], cacheWatch: [cold], cfg: cfg({ 'tokenPace.statusBar.show': ['codexQuota'] }) }))[0]
+  assert.equal(codex.tooltipMarkdown.includes('prompt cache'), false, codex.tooltipMarkdown)
+  assert.equal(buildItems(input({ cacheWatch: null }))[0].tooltipMarkdown.includes('prompt cache'), false)
+  // German rows.
+  const de = german(() => buildItems(input({ cacheWatch: [{ ...cold, name: 'Sitzung Do 09:40 · aaaa1111' }] }))[0].tooltipMarkdown)
+  assert.ok(de.includes('$(database) `Sitzung Do 09:40 · aaaa1111` · Prompt-Cache kalt seit ~11:40 (1 h TTL, geschätzt aus dem Transkript)'), de)
+})
+
+test('one row per session in the tooltips, at any minute: the Claude quota tooltip and the cache entry\'s name a session once, the 1.3 row only while its session is not listed (1.8 §3 A8 test 11)', () => {
+  // The P6 invariant's world, through the status bar: session 9d0eb37a has its transcript's newest cache
+  // request and a bridge reading a minute later — the latest mirror, the 1.3 row —, aaaa1111 its transcript only.
+  const T = NOW - 30 * 60_000
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: S_BRIDGE, at: T })
+  addCacheSession(agg, { sessionId: S_TX, at: T + 7 * 60_000 })
+  const reading = {
+    warm: true, ttl: '1h' as const, expiresAt: T + 3_600_000 + 30_000, hitRatio: 0.9, readAt: Math.floor((T + 60_000) / 1000),
+    sessionId: S_BRIDGE, recacheIfCold: 152_300, model: 'claude-opus-5-5',
+  }
+  const tcfg = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' } as const
+  const mentions = (lines: string[], id: string): number => lines.filter((l) => l.includes(`· ${id.slice(0, 8)}\``)).length
+  let listedMinutes = 0, oldMinutes = 0, coolingMinutes = 0
+  for (let now = reading.expiresAt - 70 * 60_000; now <= reading.expiresAt + 70 * 60_000; now += 60_000) {
+    const cacheWatch = watchCaches({ readings: [reading], mains: agg.mainEntries(), tcfg }, now, Infinity)
+    const quota = state({ fetchedAt: Math.floor(now / 1000) - 60 })
+    const items = buildItems(input({ quotas: [quota], now, promptCache: reading, cacheWatch, cfg: cfg(CACHE_ON) }))
+    const tip = items[0].tooltipMarkdown.split('\n')
+    const old = tip.filter((l) => l.startsWith('$(database) prompt cache')).length
+    const listed = cacheWatch.filter((e) => e.phase !== 'warm').slice(0, CACHE_WATCH_MAX).some((e) => e.sessionId === S_BRIDGE)
+    assert.ok(mentions(tip, S_BRIDGE) + old <= 1, `the quota tooltip names 9d0eb37a twice at ${now}`)
+    assert.ok(mentions(tip, S_TX) <= 1, `the quota tooltip names aaaa1111 twice at ${now}`)
+    // Mutation check (§3 A8 test 11): a 1.3 row printed always fails here.
+    assert.equal(old === 0, listed, `the 1.3 row at ${now}: listed ${listed}`)
+    assert.equal(mentions(tip, S_BRIDGE), listed ? 1 : 0, `at ${now}`)
+    if (listed) listedMinutes++
+    else oldMinutes++
+    const bar = items.find((m) => m.id === 'tokenPace.cache')
+    if (bar) {
+      coolingMinutes++
+      const lines = bar.tooltipMarkdown.split('\n')
+      assert.ok(mentions(lines, S_BRIDGE) <= 1 && mentions(lines, S_TX) <= 1, `the cache tooltip names a session twice at ${now}`)
+      assert.equal(lines.some((l) => l.startsWith('$(database)')), false, 'the cache tooltip carries the 1.3 row')
+    }
+    assert.equal(!!bar, cacheWatch.some((e) => e.phase === 'cooling'), `the entry at ${now}`)
+  }
+  assert.equal(listedMinutes, 65)
+  assert.ok(oldMinutes > 0 && coolingMinutes >= 5, JSON.stringify({ oldMinutes, coolingMinutes }))
+})
+
+test('a mirror with text under every neighbouring key reaches neither the cache entry, its words nor its tooltip — of the id only its first eight characters (1.8 §0a.1 leak test)', () => {
+  const file = join(scratchDir('sb-leak-cache'), 'statusline-mirror.json')
+  writeLeakyMirror(file, NOW - 60_000, NOW)
+  const r = readStatuslineMirror(file)
+  assert.ok(r.promptCache !== null)
+  const reading = { ...r.promptCache, readAt: r.state.fetchedAt, sessionId: r.sessionId, model: r.model?.id ?? null }
+  // 46 minutes on, the reading's one-hour cache has four minutes left: it cools.
+  const now = NOW + 46 * 60_000
+  const cacheWatch = watchCaches({ readings: [reading], mains: [], tcfg: { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' } }, now, Infinity)
+  const items = buildItems(input({ now, promptCache: reading, cacheWatch, cfg: cfg(CACHE_ON), quotas: [state({ fetchedAt: Math.floor(now / 1000) - 60 })] }))
+  const item = items.find((m) => m.id === 'tokenPace.cache')
+  assert.ok(item && item.ariaLabel?.includes('Session 9d0eb37a'), JSON.stringify(item))
+  const text = JSON.stringify(items)
+  for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the bar holds ${secret}`)
+  assert.equal(text.includes(LEAK_SESSION_ID.slice(8)), false, 'the bar holds the session id past its first eight characters')
+})
+
+test('the preview shows the prompt cache cooling, measured with a second session and estimated under a minute, in no colour (1.8 A5)', () => {
+  const items = previewItems(cfg({}), NOW).filter((m) => m.text.includes('$(watch)'))
+  assert.deepEqual(items.map((m) => m.text), ['[preview] $(watch) cache 4m +1', '[preview] $(watch) cache ~45s'])
+  for (const m of items) {
+    assert.equal(m.colorId, null)
+    assert.equal(m.alarm, false)
+    assert.ok(m.ariaLabel?.startsWith('[preview] Prompt cache of Session 9d0eb37a cools in '), m.ariaLabel)
+    assert.ok(m.tooltipMarkdown.startsWith('**Prompt cache cooling**'), m.tooltipMarkdown)
+    assert.doesNotMatch(`${m.tooltipMarkdown}${m.ariaLabel}`, /NaN|undefined/)
+  }
 })

@@ -36,6 +36,7 @@ import {
   BRIDGE_SCRIPT_NAME, BridgePaths, migrateBridge, narrowMirrorFile, refreshBridgeScript, registerBridgeCommands,
   state as bridgeState,
 } from './bridge'
+import { CacheWatchEntry, watchCaches } from './cacheWatch'
 import {
   affects, Config, CONFIG_KEYS, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
 } from './config'
@@ -434,6 +435,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     }
   }
 
+  /**
+   * 1.8 A5: the watched prompt caches for the status bar — the same `watchCaches` the Claude card's
+   * block is cut from, over the same readings (`current()` filled them this frame) and the same main
+   * records, uncapped so the entry can count every cooling session. A failure costs the bar these
+   * rows, never the rest of it.
+   */
+  function cacheWatchFor(now: number): CacheWatchEntry[] {
+    try {
+      return watchCaches({ readings: quotaMgr.promptCacheReadings(now), mains: agg.mainEntries(), tcfg: readTimeConfig(cfg) }, now, Infinity)
+    } catch (err) {
+      log.error(`Watching the prompt caches failed: ${err}`)
+      return []
+    }
+  }
+
   function drawStatusBar(now: number): void {
     try {
       const tree = latestVm?.agents
@@ -446,6 +462,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         // 1.6 O1: the running agents of the newest tree there is — the same count the running
         // list's heading and the poll read. No tree, no entry.
         agents: tree ? { running: tree.running, now: tree.runningNow, more: tree.runningMore } : null,
+        // 1.8 A5: every session's one-hour prompt cache, this frame — the `cache` entry counts down
+        // each second, and the Claude quota tooltip lists what cools. Like the rest of the bar it
+        // follows no view of the dashboard (§3.0 a).
+        cacheWatch: cacheWatchFor(now),
       }
       statusBar.update(input)
       // Kept for the extension API (see `TokenPaceApi`): `buildItems` is pure, so re-running

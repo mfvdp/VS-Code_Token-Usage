@@ -22,7 +22,7 @@ interface Property {
   markdownDescription?: string
   description?: string
   deprecationMessage?: string
-  items?: { enum?: string[] }
+  items?: { enum?: string[]; enumDescriptions?: string[] }
 }
 
 /**
@@ -420,15 +420,32 @@ test('the agents entry is contributed but not switched on, and is the one value 
   assert.equal((properties['tokenPace.statusBar.show'].default as string[]).includes('agents'), false)
   assert.deepEqual(sanitize({ 'tokenPace.statusBar.show': ['agents'] }).statusBar.show, ['agents'])
   assert.deepEqual(sanitize({}).statusBar.show.includes('agents'), false)
-  // The manifest's values are the ones config.ts keeps, in the same order, `agents` last.
+  // The manifest's values are the ones config.ts keeps, in the same order, `agents` after the 1.5
+  // values (1.8 A5, pinned and changed: `agents` was last; `cache` follows it now).
   const kept = sanitize({ 'tokenPace.statusBar.show': [...bar].reverse() }).statusBar.show
   assert.deepEqual([...kept].reverse(), bar)
-  assert.equal(bar[bar.length - 1], 'agents')
+  assert.equal(bar[bar.indexOf('budget') + 1], 'agents')
   // Its description says what the entry is and that it is inferred, in both languages.
   assert.equal(englishNls['config.statusBar.show.enum.agents'],
     'Running agents, e.g. “~22 running” — inferred from their transcripts; hidden while none runs')
   assert.equal(germanNls['config.statusBar.show.enum.agents'],
     'Laufende Agenten, z. B. “~22 laufen” — abgeleitet aus ihren Transkripten; ausgeblendet, solange keiner läuft')
+})
+
+test('the cache entry is contributed but not switched on, and is the one value 1.8 adds (1.8 A5)', () => {
+  const bar = properties['tokenPace.statusBar.show'].items?.enum ?? []
+  assert.equal(bar[bar.length - 1], 'cache', 'statusBar.show cannot show the prompt cache, or not last')
+  assert.equal((properties['tokenPace.statusBar.show'].default as string[]).includes('cache'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.statusBar.show': ['cache'] }).statusBar.show, ['cache'])
+  assert.deepEqual(sanitize({}).statusBar.show.includes('cache'), false)
+  assert.deepEqual(sanitize({ 'tokenPace.statusBar.show': ['cache', 'tokens', 'cache'] }).statusBar.show, ['cache', 'tokens'])
+  // Its description names the entry's own text, off by default and hidden while nothing cools, in both languages.
+  const descriptions = properties['tokenPace.statusBar.show'].items?.enumDescriptions ?? []
+  assert.equal(descriptions[bar.indexOf('cache')], englishNls['config.statusBar.show.enum.cache'])
+  assert.equal(englishNls['config.statusBar.show.enum.cache'],
+    'The one-hour prompt cache of a Claude Code session in its last five minutes, e.g. “cache 4m” — “cache ~4m” when estimated from the transcript; hidden while none is cooling')
+  assert.equal(germanNls['config.statusBar.show.enum.cache'],
+    'Der Ein-Stunden-Prompt-Cache einer Claude-Code-Sitzung in seinen letzten fünf Minuten, z. B. “Cache 4m” — “Cache ~4m”, wenn aus dem Transkript geschätzt; ausgeblendet, solange keiner abkühlt')
 })
 
 test('a budget the user did not state does not exist, and a broken one is dropped whole', () => {

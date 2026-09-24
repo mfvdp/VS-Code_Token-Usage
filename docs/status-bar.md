@@ -15,7 +15,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 ```
 
 * **Entries.** `tokenPace.statusBar.show` is an ordered array of `claudeQuota`, `codexQuota`,
-  `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`, `agents`. The array order is the display
+  `extra`, `context`, `tokens`, `cost`, `forecast`, `budget`, `agents`, `cache`. The array order is the display
   order (drag the rows in the settings UI); the order *inside* one entry is fixed. An empty
   list hides the status bar entirely. `context` is off by default and appears only while the
   Claude Code status line is connected — it is one session's context window, never an account
@@ -26,10 +26,20 @@ Part of the [Token Pace documentation](../README.md#documentation).
   [running list](agents.md#running-now), so inferred and marked `~`; it is hidden while none runs.
   It has no colour, no alarm and no word for a finished agent. Its tooltip says what running
   means, names the first five entries of the running list — the agent's name with the model's
-  whole id, and where it sits — and counts the rest (`and 2 more`).
+  whole id, and where it sits — and counts the rest (`and 2 more`). `cache` is off by default as
+  well and appears only in the last five minutes of a Claude Code session's one-hour
+  [prompt cache](prompt-cache.md): `$(watch) cache 4m`, under a minute `$(watch) cache 45s`, with
+  `~` when the expiry is estimated from the session's transcript rather than reported by the status
+  line (`$(watch) cache ~4m`), and `+1` for every further session whose cache cools at the same time
+  (`$(watch) cache 4m +1`). The countdown is the session's whose cache expires first, in whole
+  minutes left. It is hidden while no watched cache is cooling: a warm cache is not news, and a
+  cold one is the dashboard's Claude card's to say. No colour, no alarm; a screen reader hears it in words
+  (`Prompt cache of Session Tue 14:20 · 9d0eb37a cools in 4 m 10 s`, `… cools in about 4 m 10 s
+  (estimated)`). Its tooltip names each cooling session — at most three, then `and 1 more` —, what
+  a cold start would cost (the compact tooltip leaves the cost lines out), and the action row.
 * **The dashboard's provider switch does not reach the bar.** Whatever the switch at the top of the
   dashboard shows — `Claude Code`, `Codex` or `All` —, the entries, their tooltips, the `budget`
-  entry (every budget), the `agents` entry and the alerts stay as the settings above make them: the
+  entry (every budget), the `agents` entry, the `cache` entry and the alerts stay as the settings above make them: the
   switch is a view of the dashboard, the markdown view, the Quick Pick and *Copy Usage Summary*, and
   a view of the panel does not hide a quota window from the bar ([Dashboard](dashboard.md)).
 * **Density.** `full` (default) gives every window its own entry, `compact` folds a provider's
@@ -106,6 +116,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `Σ 4.6M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope`; the period is always named |
 | `~$1.23 · today ⚠` | hypothetical API cost; `⚠` means some tokens have no price and are missing from the sum |
 | `~3 running` / `~1 running` | the `agents` entry: Claude Code agents running right now, inferred from their transcripts (changed within the last 10 minutes, no result recorded) — hidden while none runs |
+| `$(watch) cache 4m` / `$(watch) cache ~4m` | the `cache` entry: a Claude Code session's one-hour prompt cache expires in four minutes — `~` when the expiry is estimated from the transcript; `45s` under a minute, `+1` for each further session cooling. Hidden while none cools |
 | `$(shield) CC consent`, `$(key) CC no token`, `$(cloud-offline) CC offline`, … | a named cause replaces the figure, and the click performs the repair for *that* cause |
 
 The full matrix — every text, which state wins, which colour, and the one thing to check —
@@ -132,11 +143,16 @@ footer. `tooltipExplanations` is **off** by default — the paragraphs are worth
 not on every hover; `true` brings them back. The uncertainty markers (`~`, `⚠`) and the
 provenance line are never hidden by it.
 
-When the Claude status-line bridge is connected, one further row states the prompt cache that
-status line last reported — warm or cold, its TTL, the countdown to its expiry and the hit
-ratio, each part a `–` where the reading did not carry it. Without the bridge the row is absent
-rather than estimated: the token buckets know what was read from the cache, not whether the
-cache is still alive.
+The Claude tooltip also lists the Claude Code sessions whose one-hour prompt cache is cooling or
+has gone cold within the hour — at most three, the most urgent first, then how many more — each as
+the dashboard's Claude card says it: its state (`$(database) Session Tue 14:20 · 9d0eb37a · prompt
+cache cools in 4 m 10 s (1 h TTL)`) and, under it, what a cold start would cost. Where the status-line
+bridge describes the session the figures are the ones Claude Code reports; where it does not, they are
+estimated from the session's transcript, carry `~` and say *estimated from the transcript*
+([Prompt cache](prompt-cache.md)). When the Claude status-line bridge is connected, one further row states the prompt
+cache that status line last reported — warm or cold, its TTL, the countdown to its expiry and the hit
+ratio, each part a `–` where the reading did not carry it —, unless its session is one of the rows
+above: one row per session. The compact tooltip leaves all of them out.
 
 Only this extension's own argument-less commands are ever linked from the tooltip, and a link
 that would do nothing in the current state — *Fetch now* while consent is denied, in

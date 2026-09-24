@@ -3773,3 +3773,137 @@ test('Clear Stored Data lists keepwarm.json and deletes it alone (1.8 §0a.7)', 
   assert.match(state.logText(), /Stored data removed: Keep-warm requests \(keepwarm\.json\)/)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
+
+test('1.8 review 3: keep-warm end to end in a fake HOME — switched on and allowed, armed on the bridge\'s reading, one line at zero into the Claude terminal, answered and counted, and nothing of the terminal in any output (§3 B2, §0a.6–§0a.8)', async () => {
+  const fx = makeFixture()
+  const realNow = Date.now.bind(Date)
+  // The scenario spans about 70 minutes of the host's clock. Where they would cross midnight, it runs
+  // three hours later: the log's clock and "today" of the accounting line then need no date.
+  const crosses = new Date(realNow()).toDateString() !== new Date(realNow() + 75 * 60_000).toDateString()
+  let offset = crosses ? 3 * 3_600_000 : 0
+  Date.now = (): number => realNow() + offset
+  try {
+    const kept = new Map<string, unknown>()
+    await activateHost(fx, REPO, { globalState: kept, settings: { 'tokenPace.statusBar.show': ['claudeQuota', 'tokens'] } })
+    const page = openDashboard()
+    await waitOwnColdStart(state)
+    assert.equal(state.terminalListeners(), 0, 'the terminals are listened to with the setting off')
+    // Switched on: the consent, allowed; from now on the host listens to this window's terminals.
+    state.answers.push('Allow keep-warm')
+    state.set('tokenPace.cacheKeepWarm', true)
+    state.fireConfigChange(['tokenPace.cacheKeepWarm'])
+    await waitFor('the consent', () => kept.get('tokenPace.keepWarmConsent') === 'granted')
+    await waitFor('the host listening', () => state.terminalListeners() === 4)
+    // The user opens a terminal, starts Claude Code in the project, prompts there and leaves the window.
+    const cwd = '/home/u/synthetic-project'
+    const commandLine = 'claude --api-key synthetic-secret-123'
+    const terminal = state.openTerminal({ shell: 'claude', name: 'SYNTHETIC-CONVERSATION-SUMMARY' })
+    state.setActiveTerminal(terminal)
+    state.startExecution(terminal, { commandLine, confidence: 2, cwd })
+    await sleep(30)
+    state.fireWindowState(false)
+    await sleep(30)
+    // Claude answers and writes the one-hour cache; the status line runs a second later.
+    const reply = Date.now()
+    const project = path.join(fx.claudeRoot, '-home-u-synthetic-project')
+    const transcript = path.join(project, `${LEAK_SESSION_ID}.jsonl`)
+    fs.mkdirSync(project, { recursive: true })
+    fs.writeFileSync(transcript, [
+      promptLine({ ts: reply - 2_000 }),
+      claudeLine({ id: 'msg_kw_e2e_a', ts: reply, model: 'claude-opus-5-5', final: true, sessionId: LEAK_SESSION_ID, cwd,
+        usage: { input: 300, cacheWrite: 2000, cacheWrite1h: 2000, cacheRead: 150_000, output: 40 } }),
+    ].join('\n') + '\n')
+    await sleep(1_100)
+    const payload = leakyStatusPayload(reply)
+    fs.writeFileSync(path.join(fx.storage, 'statusline-mirror.json'), JSON.stringify({
+      schema_version: 1, written_at: Date.now(),
+      payload: { ...payload, prompt_cache: { ...(payload.prompt_cache as Record<string, unknown>), expires_at: Math.floor((reply + 3_600_000) / 1000) } },
+    }))
+    // The markdown lists every watched session: the bridge's words, measured — no `~`, no estimate.
+    for (let i = 0; ; i++) {
+      await state.execute('tokenPace.showUsageMarkdown')
+      const line = lastMarkdown().split('\n').find((l) => l.includes('9d0eb37a · prompt cache warm'))
+      if (line !== undefined && !line.includes('~') && !line.includes('estimated')) break
+      if (i > 60) throw new Error(`the session is not watched on the bridge's reading: ${line}`)
+      await sleep(300)
+    }
+    assert.equal(state.live().some((i) => i.id === 'tokenPace.keepWarm'), false, 'a countdown with an hour of warmth left')
+    // 57 minutes on: 2 m 50 s of warmth left — the countdown starts.
+    offset += reply + 3_600_000 - 170_000 - Date.now()
+    await waitFor('the countdown', () => state.live().some((i) => i.id === 'tokenPace.keepWarm'))
+    const item = state.live().find((i) => i.id === 'tokenPace.keepWarm')!
+    assert.match(item.text, /^\$\(watch\) keep warm in \d+ s · cancel$/)
+    assert.equal(item.command, 'tokenPace.cancelKeepWarm')
+    assert.match(state.logText(), /keep-warm: countdown started for session 9d0eb37a; the cache expires at \d\d?:\d\d/)
+    const kwOf = (): { notes?: Array<{ kind: string; text: string }>; today?: string | null } | null => {
+      const last = [...page.sent].reverse().find((m) => Array.isArray((m as { payload?: { quotas?: unknown } }).payload?.quotas)) as
+        { payload: { quotas: Array<{ source: string; cacheWatch?: { keepWarm?: { notes?: Array<{ kind: string; text: string }>; today?: string | null } | null } | null }> } } | undefined
+      return last?.payload.quotas.find((q) => q.source === 'claude')?.cacheWatch?.keepWarm ?? null
+    }
+    await waitFor('the armed note on the card', () => (kwOf()?.notes ?? []).some((n) => n.kind === 'armed'))
+    assert.deepEqual(state.sent, [], 'a line before the countdown ended')
+    // The countdown's minute passes: at zero the guards again, and the line — once.
+    offset += 60_000
+    await waitFor('the line', () => state.sent.length > 0)
+    await sleep(2_500)
+    // (`state.sent` read through a function: the assertion above narrowed the property to an empty array.)
+    const sent = (): FakeVscodeState['sent'] => state.sent
+    assert.deepEqual(sent().map((s) => [s.terminal === terminal, s.text, s.execute]), [[true, 'Ignore this message. No action. No response.', true]])
+    assert.match(state.logText(), /keep-warm: line sent to the terminal of session 9d0eb37a; the cache expires at \d\d?:\d\d/)
+    assert.equal(state.live().find((i) => i.id === 'tokenPace.keepWarm')?.text, '$(watch) keep-warm line sent')
+    // Claude Code wrote the line as the user's prompt and answered it: one request, counted today.
+    const sentAt = Date.now()
+    fs.appendFileSync(transcript, [
+      promptLine({ ts: sentAt + 400 }),
+      claudeLine({ id: 'msg_kw_e2e_b', ts: sentAt + 3_000, model: 'claude-opus-5-5', final: true, sessionId: LEAK_SESSION_ID, cwd,
+        usage: { input: 20, cacheRead: 152_000, output: 12 } }),
+    ].join('\n') + '\n')
+    offset += 5_000
+    const file = path.join(fx.storage, 'keepwarm.json')
+    await waitFor('the answer counted', () => fs.existsSync(file))
+    const counted = JSON.parse(fs.readFileSync(file, 'utf8')) as { v: number; days: Record<string, { requests: number; tokens: number }> }
+    assert.equal(counted.v, 1)
+    assert.deepEqual(Object.values(counted.days), [{ requests: 1, tokens: 32 }])
+    assert.match(state.logText(), /keep-warm: the line to session 9d0eb37a was answered/)
+    await waitFor('the accounting line on the card', () => kwOf()?.today === 'Keep-warm requests today: 1 · 32 tokens')
+    // Every output there is.
+    await state.execute('tokenPace.showUsageMarkdown')
+    const markdown = lastMarkdown()
+    assert.ok(markdown.includes('Keep-warm requests today: 1 · 32 tokens'), 'the markdown lacks the accounting line')
+    await state.execute('tokenPace.showUsageQuickPick')
+    await state.execute('tokenPace.copySummary')
+    await state.execute('tokenPace.copyDiagnostics')
+    const uri = (HOST.api as { Uri: { file(p: string): unknown } }).Uri.file
+    state.answers.push(uri(path.join(fx.data, 'out', 'usage.csv')), undefined)
+    await state.execute('tokenPace.exportCsv')
+    state.answers.push(uri(path.join(fx.data, 'out', 'usage.json')), undefined)
+    await state.execute('tokenPace.exportJson')
+    const outputs: Array<[string, string]> = [
+      ['page', JSON.stringify(page.sent)],
+      ['markdown', markdown],
+      ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+      ['status bar', JSON.stringify(state.items.map((i) => ({ ...i })))],
+      ['clipboard', state.clipboard.join('\n')],
+      ['exports', JSON.stringify(state.writes)],
+      ['log', state.logText()],
+      ['keepwarm.json', fs.readFileSync(file, 'utf8')],
+    ]
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    outputs.push(['state', fs.readFileSync(fx.stateFile, 'utf8')])
+    for (const f of fs.readdirSync(fx.storage)) {
+      const p = path.join(fx.storage, f)
+      if (fs.statSync(p).isFile()) outputs.push([`storage ${f}`, fs.readFileSync(p, 'utf8')])
+    }
+    // The session's id is not the terminal's: the Agents tree, the snapshot and the mirror carry it as
+    // before 1.8; what B2 must keep out is everything of the terminal.
+    for (const [what, text] of outputs) {
+      for (const secret of [commandLine, 'synthetic-secret-123', '--api-key', cwd, 'SYNTHETIC-CONVERSATION-SUMMARY']) {
+        assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+      }
+    }
+    assert.equal(state.nameReads, 0, 'a terminal\'s name was read')
+    assert.equal(state.outputReads, 0, 'a terminal\'s output was read')
+  } finally {
+    Date.now = realNow
+  }
+})

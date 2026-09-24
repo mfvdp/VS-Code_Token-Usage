@@ -701,3 +701,56 @@ test('keepWarmHost.ts reads nothing of a terminal but its executions, its shell 
   assert.equal(/creationOptions|\.env\b|processId/.test(src), false, 'a terminal\'s environment or process is read')
   assert.equal((src.match(/\.sendText\(/g) ?? []).length, 1, 'more than one place types into a terminal')
 })
+
+// ---------------------------------------------------------------------------
+// 1.8 review 3: the send stage, block by block
+// ---------------------------------------------------------------------------
+
+test('the send stage, block by block: what changed during the countdown keeps the line back at zero, with its block in the log (§3 B2 "all again", review 3)', () => {
+  type Case = [what: string, block: string, during: (r: Rig) => Partial<KeepWarmFrame> | void]
+  const cases: Case[] = [
+    // The user typed a prompt: the newest message line is the user's, no reply yet (§0a.5, probe P-6).
+    ['a user line newest', 'openTool', (r) => { r.w.line(promptLine({ ts: NOW + 20 * SEC })) }],
+    // A subagent of the session started.
+    ['a running agent', 'agentRunning', () => ({
+      tree: { ...emptyAgentTree(), running: 1, roots: [{ key: `s:${SID}`, tally: { running: 1 } }] } as unknown as KeepWarmFrame['tree'],
+    })],
+    // A second terminal of this window runs Claude Code in the same folder.
+    ['a second matching terminal', 'ambiguousTerminal', (r) => {
+      const second = r.state.openTerminal({ shell: 'claude' })
+      r.state.startExecution(second, { commandLine: 'claude --resume', cwd: SECRET_CWD })
+    }],
+    // The armed terminal closed, and another one runs Claude Code in the folder now: the line goes into
+    // the terminal the countdown was started for, or nowhere.
+    ['another terminal in the armed one\'s place', 'noTerminal', (r) => {
+      r.state.closeTerminal(terminalOf(r))
+      const next = r.state.openTerminal({ shell: 'claude' })
+      r.state.startExecution(next, { commandLine: 'claude', cwd: SECRET_CWD })
+    }],
+    // The user came back to the window, the Claude terminal active.
+    ['the terminal focused since the reply', 'typedSince', (r) => {
+      r.clock.now = NOW + 20 * SEC
+      r.state.fireWindowState(true)
+    }],
+    // A Claude window reached 90 %.
+    ['90 % of a quota window', 'quota', (r) => {
+      r.w.quotas[0] = { ...r.w.quotas[0], windows: [{ ...r.w.quotas[0].windows[0], percent: 90 }] }
+    }],
+    // The bridge's reading went (Clear Stored Data…): only the transcript's estimate describes the cache.
+    ['a transcript-sourced entry', 'noBridge', (r) => { r.w.readings.length = 0 }],
+    // Consent withdrawn, and the workspace no longer trusted: G1 ends the countdown at once.
+    ['consent withdrawn', 'consent', () => ({ consent: 'unasked' })],
+    ['Restricted Mode', 'restricted', () => ({ trusted: false })],
+  ]
+  for (const [what, block, during] of cases) {
+    const r = rig()
+    r.tick(NOW)
+    assert.ok(r.item(), `${what}: no countdown`)
+    run(r, NOW + SEC, NOW + 19 * SEC)
+    const over = during(r) ?? {}
+    run(r, NOW + 20 * SEC, NOW + KEEPWARM_COUNTDOWN_MS + 5 * SEC, over)
+    assert.deepEqual(r.state.sent, [], `${what}: a line went`)
+    assert.ok(r.logs.includes(`info keep-warm: not sent (${block})`), `${what}: ${r.logs.filter((l) => l.includes('not ')).join(' | ')}`)
+    assert.equal(r.item(), undefined, `${what}: the item stayed`)
+  }
+})

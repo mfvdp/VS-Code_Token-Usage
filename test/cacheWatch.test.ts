@@ -19,7 +19,7 @@ import {
   watchCaches,
 } from '../src/cacheWatch'
 import { setBundle, setLocale } from '../src/i18n'
-import { PRICES, PricingOptions, priceOf } from '../src/prices'
+import { PRICES, PricingOptions, cacheRatesOf, priceOf } from '../src/prices'
 import type { PromptCacheReading } from '../src/quotaSources'
 import { TimeConfig, dayOf } from '../src/time'
 import { LastRequest, MainRec } from '../src/types'
@@ -334,6 +334,31 @@ test('no borrowed rate: an unpriced model, a family price and a missing model gi
   // An unknown or empty size: no cost line at all.
   assert.equal(cacheCostText(entry({ recache: null }), NOW, tcfg, NO_PRICING, true), null)
   assert.equal(cacheCostText(entry({ recache: 0 }), NOW, tcfg, NO_PRICING, true), null)
+})
+
+test('a custom input price of 0 (review 3): no factor divides by it — the words alone, and nothing that is not a number in the line', () => {
+  const zero: PricingOptions = { overrides: { 'claude-opus-5-5': { input: 0, cacheWrite1h: 25, cacheRead: 1 } } }
+  // The rates are the user's, input 0 among them: a comparison against it would be ∞× and NaN×.
+  assert.equal(cacheRatesOf('claude-opus-5-5', dayOf(NOW, tcfg), zero)?.input, 0)
+  assert.equal(factorText(25 / 0), '–')
+  assert.equal(factorText(0 / 0), '–')
+  const lines = [
+    cacheCostText(entry(), NOW, tcfg, zero, true), cacheCostText(entry(), NOW, tcfg, zero, false),
+    cacheCostText(entry({ phase: 'cold' }), NOW + MIN, tcfg, zero, true), cacheCostText(entry({ source: 'transcript' }), NOW, tcfg, zero, true),
+    german(() => cacheCostText(entry(), NOW, tcfg, zero, true)),
+  ]
+  assert.deepEqual(lines, [
+    'A cold start after 14:52 re-writes 152.3K tokens instead of reading them from the cache.',
+    'A cold start after 14:52 re-writes 152.3K tokens instead of reading them from the cache.',
+    'The next request re-writes 152.3K tokens instead of reading them from the cache.',
+    'A cold start after ~14:52 re-writes ~152.3K tokens instead of reading them from the cache.',
+    'Ein Kaltstart nach 14:52 schreibt 152,3K Token neu, statt sie aus dem Cache zu lesen.',
+  ])
+  for (const l of lines) assert.equal(/NaN|Infinity|∞|–|×/.test(l ?? ''), false, String(l))
+  // Free cache rates against a priced input are a comparison: 0× — a number, not an absence.
+  const free: PricingOptions = { overrides: { 'claude-opus-5-5': { input: 10, cacheWrite1h: 0, cacheRead: 0 } } }
+  assert.equal(cacheCostText(entry(), NOW, tcfg, free, false),
+    'A cold start after 14:52 re-writes 152.3K tokens at the 1 h write rate (0× input) instead of reading them from the cache (0× input).')
 })
 
 test('a transcript entry\'s count and time carry ~; a bridge entry\'s do not', () => {

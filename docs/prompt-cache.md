@@ -273,16 +273,18 @@ warm. Click to cancel.` —, and a screen reader hears `Keep-warm line for Sessi
 in 42 seconds, activate to cancel`. **A click cancels** the line and keep-warm for the rest of the
 session's idle phase, and so does *Token Pace: Cancel the Keep-Warm Line*. At zero every check runs
 again with the facts of that moment; only if all still hold does the line go, into the terminal the
-countdown was started for, and the item reads `$(watch) keep-warm line sent` for 10 seconds. One
-countdown at a time per window; only the window whose terminal runs the session starts one.
+countdown was started for, and the item reads `$(watch) keep-warm line sent` for 10 seconds. Every
+line is logged — `keep-warm: line sent to the terminal of session 9d0eb37a; the cache expires at
+14:57` —, and so is its answer or the lack of one. One countdown at a time per window; only the
+window whose terminal runs the session starts one.
 
 **On the Claude card**, under the session's lines: `Keep-warm line for this session in 42 s — cancel
 it in the status bar.` while a countdown runs; `Keep-warm cannot reach this session: it does not run
 in a VS Code terminal of this window.` for a cooling session the status line measures and no terminal
 of this window runs — the panel's sessions among them —; `Keep-warm stopped for this session: the
 last line got no answer within two minutes.` after check 11 stopped it. Every other reason is a line
-of the log only (with `tokenPace.debug` on) — [Troubleshooting](troubleshooting.md#no-keep-warm-line-was-sent)
-names each in words.
+of the log only — at the end of a countdown always, before one with `tokenPace.debug` on;
+[Troubleshooting](troubleshooting.md#no-keep-warm-line-was-sent) names each in words.
 
 **Counted apart.** A line answered by a request of the session — its first line within two minutes
 of the line — counts one request, and the billable tokens of that answer (fresh input, cache write

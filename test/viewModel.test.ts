@@ -27,6 +27,9 @@ import {
 import { claudeLine, codexMeta, codexTokenCount, codexTurnContext, ctxFor } from './fixtures/helpers'
 import type { PromptCacheReading } from '../src/quotaSources'
 import { markdownDocument } from '../src/textViews'
+import { watchCaches } from '../src/cacheWatch'
+import { readTimeConfig } from '../src/config'
+import { buildItems } from '../src/statusText'
 import { toolAgg } from './helpers/toolAgg'
 import { ROOT, rawManifest } from './helpers/nls'
 import { readFileSync } from 'node:fs'
@@ -2578,6 +2581,30 @@ test('the Claude card lists its cooling and cold sessions with a cost line each,
   const codex = vm.quotas.find((q) => q.source === 'codex')
   assert.equal(codex?.cacheWatch, null)
   assert.equal(codex?.promptCache, null)
+})
+
+test('a custom input price of 0 reaches the card, the markdown and the bar\'s tooltip as the words alone — no NaN, no Infinity (review 3, §3 A4)', () => {
+  const zero = { 'tokenPace.customPrices': { 'claude-opus-5-5': { input: 0, cacheWrite1h: 25, cacheRead: 1 } } }
+  const vm = buildViewModel(cacheInput({}, zero))
+  const block = vm.quotas.find((q) => q.source === 'claude')?.cacheWatch
+  assert.ok(block && block.lines.length === 3, 'no prompt-cache block')
+  assert.deepEqual(block.lines.map((l) => l.cost), [
+    'A cold start after ~12:04 re-writes ~152.3K tokens instead of reading them from the cache.',
+    'A cold start after 12:04 re-writes 152.3K tokens instead of reading them from the cache.',
+    'The next request re-writes 152.3K tokens instead of reading them from the cache.',
+  ])
+  const md = markdownDocument(vm)
+  assert.ok(md.includes('A cold start after 12:04 re-writes 152.3K tokens instead of reading them from the cache.'), md)
+  const bar = cacheInput({}, { ...zero, 'tokenPace.statusBar.show': ['claudeQuota', 'cache'] })
+  const watched = watchCaches({ readings: bar.promptCaches ?? [], mains: bar.agg.mainEntries(), tcfg: readTimeConfig(bar.cfg) }, NOW, Infinity)
+  const items = buildItems({
+    quotas: bar.quotas, agg: bar.agg, cfg: bar.cfg, now: NOW, forecasts: new Map(), role: 'single', scanning: false, consent: 'granted', cacheWatch: watched,
+  })
+  const tips = items.map((m) => m.tooltipMarkdown ?? '').join('\n')
+  assert.ok(tips.includes('re-writes 152.3K tokens instead of reading them from the cache.'), tips)
+  for (const [what, text] of [['view model', JSON.stringify(vm)], ['markdown', md], ['tooltips', tips]] as const) {
+    assert.equal(/NaN|Infinity|∞/.test(text), false, `${what}: ${text.match(/.{0,60}(NaN|Infinity|∞).{0,20}/)?.[0]}`)
+  }
 })
 
 test('the 1.3 line stays for a session the block does not list: a warm 1 h cache, a 5 m cache, a reading without a session id (1.8 §3.0 b)', () => {

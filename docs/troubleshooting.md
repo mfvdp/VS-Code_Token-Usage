@@ -102,9 +102,10 @@ it. When it does not do what you expect:
 ## No keep-warm line was sent
 
 The opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) goes only when every one
-of its checks holds, twice: when the countdown would start, and when it ends. With `tokenPace.debug`
-on, the log names the check that held it back — `keep-warm: session 9d0eb37a not armed (typedSince)`
-before a countdown, `keep-warm: not sent (notIdle)` at its end —, in these words:
+of its checks holds, twice: when the countdown would start, and when it ends. The log names the
+check that held it back — `keep-warm: not sent (notIdle)` when a countdown ended without its line,
+and, with `tokenPace.debug` on, `keep-warm: session 9d0eb37a not armed (typedSince)` when none
+started —, in these words:
 
 * **`off`, `consent`, `restricted`** — `tokenPace.cacheKeepWarm` is off; its consent was refused or
   never given (a refusal is not asked about again until you switch the setting off and on); or the

@@ -130,8 +130,10 @@ export function filesToScan() {
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
+  // 1.6 §0a.11 (P13a): the sidecar's fifth field, the spawning agent's id — the spawner link when
+  // no launch names one.
   { what: 'the identity sidecar', file: 'src/agg.ts', kind: 'fields', body: 'function cleanMeta(', variable: 'o',
-    fields: ['agentType', 'model', 'spawnDepth', 'toolUseId'] },
+    fields: ['agentType', 'model', 'spawnDepth', 'toolUseId', 'parentAgentId'] },
   // 1.6 §0a.1 (P2b): the journal's head is matched on the raw line, and the `key` joins `type` and
   // `agentId` — compared within the journal, never kept. The fallback parses a short line without
   // the head and picks the same three.
@@ -170,6 +172,30 @@ export const READ_CONTRACT = [
   // top-level `effort`, one of five levels. Never a nested one, never an error line's `perTurnEffort`.
   { what: 'the effort of a response', file: 'src/agg.ts', kind: 'fields', body: 'function effortOf(', variable: 'd',
     fields: ['effort'] },
+  // 1.6 §0a.6 (P13a): the tool results marked as errors, counted on the raw line by the literal
+  // `"is_error":true` — the line is not parsed for it, and the result is never read.
+  { what: 'tool errors', file: 'src/agg.ts', kind: 'regex', regex: 'TOOL_ERROR_LITERAL',
+    fields: ['is_error'] },
+  // 1.6 §0a.7 (P13a): why the cache missed on an agent's response — of the message's diagnostics,
+  // the reason's type and the input tokens it states. Nothing else of the diagnostics.
+  { what: 'a cache miss', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'm',
+    fields: ['diagnostics'] },
+  { what: 'a cache miss\'s diagnostics', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'g',
+    fields: ['cache_miss_reason'] },
+  { what: 'a cache miss\'s reason', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'x',
+    fields: ['type', 'cache_missed_input_tokens'] },
+  // 1.6 §0a.8 (P13a): the Claude Code version that wrote a line.
+  { what: 'the writer\'s version', file: 'src/agg.ts', kind: 'fields', body: 'function versionOf(', variable: 'd',
+    fields: ['version'] },
+  // 1.6 §0a.9 (P13a): a prompt line's permission mode, matched on the raw line — never parsed.
+  { what: 'the permission mode', file: 'src/agg.ts', kind: 'regex', regex: 'PERMISSION_MODE_RE',
+    fields: ['permissionMode'] },
+  // 1.6 §0a.10 (P13a): a compaction's line — its type and subtype, and of its metadata the trigger
+  // and the context before and after. Never the segment it preserved, nor the summary line.
+  { what: 'a compaction', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'd',
+    fields: ['type', 'subtype', 'compactMetadata'] },
+  { what: 'a compaction\'s metadata', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'c',
+    fields: ['trigger', 'preTokens', 'postTokens'] },
 ]
 
 /**

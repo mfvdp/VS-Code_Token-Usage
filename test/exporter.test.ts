@@ -373,7 +373,8 @@ test('every agent record of the tree is a row, with the state, type and model it
     models: ['claude-haiku-4-5'], effort: 'high', state: 'done', derived: false, outcome: 'completed', outcomeStatus: 'completed',
     attempt: null, firstTs: '2026-09-03T08:52:05.000Z', lastTs: '2026-09-03T08:52:53.000Z', requests: 2, outputFinal: 2,
     input: 9, cacheWrite5m: 9400, cacheWrite1h: 0, cacheRead: 8100, output: 1070, reasoning: 0, usage: 9 + 9400 + 1070,
-    toolCalls: 1, toolErrors: null, spawnedBy: 'session', report: { tokens: 18_900, durationMs: 51_000, toolUses: 1 },
+    // 1.6 P13a (O3, pinned and changed): the record counts its tool errors now — none of its one call.
+    toolCalls: 1, toolErrors: 0, spawnedBy: 'session', report: { tokens: 18_900, durationMs: 51_000, toolUses: 1 },
   })
   assert.equal(row(W.wfRunning).workflowId, W.workflow)
   // Every session's agents, not only the sessions the page lists: both sessions are here.

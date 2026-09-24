@@ -880,13 +880,13 @@ function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggrega
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   const agent: AgentRec = {
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
-    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01', parentAgentId: null }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null, lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null, lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null, toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   const pending: AgentLaunch = {
     toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
@@ -1051,7 +1051,7 @@ test('a session without agents is keyed by its id, never by the transcript path 
   agg.mains = () => [{
     source: 'claude', sessionId: 's1', firstTs: NOW - 3_600_000, lastTs: NOW - 30 * 60_000, models: [],
     input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0,
-    outputFinal: 0, toolCalls: 0,
+    outputFinal: 0, toolCalls: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }]
   const vm = buildViewModel(makeInput({ agg }))
   assert.equal(vm.agents.roots[0].key, 's:s1')

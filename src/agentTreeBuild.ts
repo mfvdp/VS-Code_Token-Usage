@@ -44,8 +44,8 @@ import { compact, full } from './render'
 import { costText, durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, dayOf, formatTime, weekdayWords } from './time'
 import {
-  AgentLaunch, AgentRec, Attribution, Bucket, Effort, JournalAgent, LaunchStatus, MainRec, RecordedOutcome, RejectedRequest,
-  RunLaunch, RunRec, SessionRec, emptyBucket,
+  AgentLaunch, AgentRec, Attribution, Bucket, CompactionRec, Effort, JournalAgent, LaunchStatus, MainRec, RecordedOutcome,
+  RejectedRequest, RunLaunch, RunRec, SessionRec, emptyBucket,
 } from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
@@ -1145,6 +1145,123 @@ function reportRows(l: AgentLaunch | null): DetailRow[] {
   }]
 }
 
+// ---------------------------------------------------------------------------
+// 1.6 O3: further metadata without content
+// ---------------------------------------------------------------------------
+
+/** A whole count of at least 0, or null for anything else — a snapshot of another build's making may carry anything. */
+function wholeCount(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null
+}
+
+/** A token figure of at least 0, or null. */
+function tokenFigure(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null
+}
+
+/**
+ * O3 (§0a.6): how many of an agent's tool calls came back marked as an error — "3 of 41 tool calls".
+ * Only for an agent that called a tool or had one fail, and only while its record counts them: a
+ * record restored from before O3 that the replay could not read again says nothing, never a zero.
+ */
+function toolErrorRows(r: AgentRec, c: Counters): DetailRow[] {
+  const errors = wholeCount(r.toolErrors)
+  if (errors === null || c.requests <= 0 || (errors === 0 && c.toolCalls <= 0)) return []
+  return [{ label: t('Tool errors'), value: t('{0} of {1} tool calls', full(errors), full(c.toolCalls)) }]
+}
+
+/** The six reasons a cache miss may have, in the order the words list them when they are as frequent. */
+const CACHE_MISS_ORDER = [
+  'previous_message_not_found', 'unavailable', 'messages_changed', 'model_changed', 'tools_changed', 'system_changed',
+] as const
+
+/** A reason in the reader's words. A switch rather than a table: `t()` needs a literal message. */
+function cacheMissWord(kind: typeof CACHE_MISS_ORDER[number]): string {
+  switch (kind) {
+    case 'previous_message_not_found': return t('previous message not found')
+    case 'unavailable': return t('cache unavailable')
+    case 'messages_changed': return t('messages changed')
+    case 'model_changed': return t('model changed')
+    case 'tools_changed': return t('tools changed')
+    default: return t('system prompt changed')
+  }
+}
+
+/**
+ * O3 (§0a.7): why the cache missed on an agent's requests — "model changed 3 · cache unavailable 1",
+ * the most frequent reason first — and, as its note, the input tokens those misses state were not
+ * read from the cache (Claude Code gives the figure for a changed message, model, tool set or system
+ * prompt, not for an unavailable cache or a previous message it could not find): only a stated figure
+ * is summed, and no note says "0" for none stated. No miss, no row.
+ */
+function cacheMissRows(r: AgentRec): DetailRow[] {
+  const by: unknown = r.cacheMisses
+  if (!by || typeof by !== 'object') return []
+  const counts = CACHE_MISS_ORDER
+    .map((kind) => [kind, wholeCount((by as Record<string, unknown>)[kind]) ?? 0] as const)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+  if (counts.length === 0) return []
+  const tokensMissed = tokenFigure(r.cacheMissedTokens) ?? 0
+  return [{
+    label: t('Cache misses'),
+    value: counts.map(([kind, n]) => `${cacheMissWord(kind)} ${full(n)}`).join(' · '),
+    ...(tokensMissed > 0 ? { note: t('{0} tokens not read from the cache', compact(tokensMissed)) } : {}),
+    kind: 'sentence',
+  }]
+}
+
+/**
+ * O3 (§0a.10): how often a transcript was compacted, and the last time — "2 · last at 14:20 (manual,
+ * 167.2K → 12.4K)": when, whether it was asked for, the context before and after it. No compaction,
+ * no row; a part the line did not give is `–`.
+ */
+function compactionRows(r: AgentRec | MainRec | null, now: number, tcfg: TimeConfig): DetailRow[] {
+  const n = r === null ? null : wholeCount(r.compactions)
+  if (r === null || n === null || n === 0) return []
+  const last: unknown = r.lastCompaction
+  const c = last && typeof last === 'object' ? last as Partial<Record<keyof CompactionRec, unknown>> : null
+  const at = c !== null ? stampOf(c.at) : null
+  if (c === null || at === null) return [{ label: t('Compactions'), value: full(n) }]
+  const trigger = c.trigger === 'manual' ? t('manual') : c.trigger === 'auto' ? t('auto') : '–'
+  const figure = (v: unknown): string => {
+    const x = tokenFigure(v)
+    return x === null ? '–' : compact(x)
+  }
+  return [{
+    label: t('Compactions'),
+    value: t('{0} · last at {1} ({2}, {3} → {4})', full(n), stamp(at, now, tcfg), trigger, figure(c.preTokens), figure(c.postTokens)),
+    kind: 'sentence',
+  }]
+}
+
+/** A Claude Code version as its lines write it — three numbers — else none. */
+const VERSION_SHAPE = /^\d{1,3}\.\d{1,3}\.\d{1,4}$/
+const PERMISSION_MODES: ReadonlySet<string> = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'])
+
+/**
+ * O3 (§0a.8, §0a.9): which Claude Code wrote the transcript — its version, a dash where its lines
+ * named none — and the permission mode its prompt line named, as Claude Code writes the word, only
+ * where one was named (an agent's transcript names none on this machine).
+ */
+function writerRows(r: AgentRec | MainRec | null): DetailRow[] {
+  const version: unknown = r?.ccVersion
+  const mode: unknown = r?.permissionMode
+  return [
+    { label: t('Claude Code version'), value: typeof version === 'string' && VERSION_SHAPE.test(version) ? version : '–' },
+    ...(typeof mode === 'string' && PERMISSION_MODES.has(mode) ? [{ label: t('Permission mode'), value: mode }] : []),
+  ]
+}
+
+/**
+ * O3 (§0a.11): the agent that spawned this one, as its sidecar names it — the link when no launch
+ * names a spawner. Checked again as an id.
+ */
+function parentAgentIdOf(r: AgentRec): string | null {
+  const v: unknown = r.meta?.parentAgentId
+  return typeof v === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(v) && v !== r.agentId ? v : null
+}
+
 function depthText(v: unknown): string {
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 ? String(v) : '–'
 }
@@ -1761,9 +1878,13 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     { label: t('Models'), value: modelsOf(main?.models).join(', ') || '–' },
     ...timeRows(root.startTs, root.lastTs, now, tcfg, true),
     ...countRows(mainCounters, false),
+    // O3: how often its own transcript was compacted.
+    ...compactionRows(main, now, tcfg),
     { label: t('Agents'), value: full(membersBelow(root)) },
     ...endedRejectedRows(root),
     ...effortCountRows(root),
+    // O3: the Claude Code that wrote its transcript, and the permission mode it ran in.
+    ...writerRows(main),
     idRow(a.sessionId),
   ]
 
@@ -1826,6 +1947,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const shortOf = (id: string): string => shortIds.get(id) ?? id
   const byAgent = new Map<string, Entry>()
   const spawnerFileOf = new Map<Entry, string | null>()
+  /** O3 (§0a.11): the spawning agent a sidecar names — the link where no launch names a spawner file. */
+  const parentIdOf = new Map<Entry, string | null>()
   /** Who launched a node, by name: an agent of this session, the session itself, or '–'. */
   const spawnedBy = (file: string | null): string => {
     if (file === null) return '–'
@@ -1833,6 +1956,13 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     if (id !== null) return byAgent.get(id)?.fullLabel ?? '–'
     const place = sessionOfPath(file)
     return place !== null && place.main && place.sessionId === a.sessionId ? root.fullLabel : '–'
+  }
+  /** Who launched an agent: the transcript its launch or its record names, else the agent its sidecar names. */
+  const spawnedByOf = (e: Entry): string => {
+    const file = spawnerFileOf.get(e) ?? null
+    if (file !== null) return spawnedBy(file)
+    const parent = parentIdOf.get(e) ?? null
+    return parent !== null ? byAgent.get(parent)?.fullLabel ?? '–' : '–'
   }
   // D4: the agents of each run whose record counted no reply — its transcript nothing but requests
   // the API rejected — by run: members of their run's collector, not nodes of their own.
@@ -1910,7 +2040,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     // agent stands in its run, the context it ended with and its pace, then who it is, when it ran,
     // what it counted, why it ended, where it came from and Claude Code's own report.
     e.rows = () => {
-      const by = spawnedBy(spawnerFileOf.get(e) ?? null)
+      const by = spawnedByOf(e)
       return [
         ...mixRows(c),
         ...rankRows(e, wf !== null ? workflows.get(wf) ?? null : null),
@@ -1925,6 +2055,10 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         ...timeRows(e.startTs, e.lastTs, now, tcfg, false, counted),
         ...recordedRows(st.resumed, now, tcfg),
         ...countRows(c),
+        // O3: what of it went wrong or was redone — its tool errors, its cache misses, its compactions.
+        ...toolErrorRows(r, c),
+        ...cacheMissRows(r),
+        ...compactionRows(r, now, tcfg),
         ...rejectedRows(rejected, now, tcfg),
         // A workflow agent no launch names was started by its run, which the next row names: 1.5's
         // "Spawned by –" on every one of them said nothing.
@@ -1935,11 +2069,14 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         ...(attempts >= 2 && journal !== null && Number.isInteger(journal.attempt) && journal.attempt >= 1
           ? [{ label: t('Attempt'), value: t('{0} of {1} of this step', full(journal.attempt), full(attempts)) }]
           : []),
+        // O3: the Claude Code that wrote its transcript, and the permission mode, where it names one.
+        ...writerRows(r),
         ...reportRows(launch),
       ]
     }
     byAgent.set(r.agentId, e)
     spawnerFileOf.set(e, text(r.spawnerFile) ?? text(launch?.file))
+    parentIdOf.set(e, parentAgentIdOf(r))
   }
 
   // Each agent under the agent that spawned it, when that agent is in this session's tree. A
@@ -1947,7 +2084,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   const up = new Map<Entry, Entry | null>()
   for (const e of byAgent.values()) {
     const file = spawnerFileOf.get(e) ?? null
-    const id = file !== null ? agentIdOf(file) : null
+    // O3 (§0a.11): no transcript named as the spawner — the agent the sidecar names, when it has one.
+    const id = file !== null ? agentIdOf(file) : parentIdOf.get(e) ?? null
     let p = id !== null ? byAgent.get(id) ?? null : null
     if (p === e) p = null
     if (p !== null && e.workflowId !== null && p.workflowId !== e.workflowId) p = null
@@ -2699,7 +2837,6 @@ export function agentRecordViews(input: AgentTreeInput, now: number): AgentRecor
     const attempt = step > 0 && journal !== null && Number.isInteger(journal.attempt) && journal.attempt >= 1 ? journal.attempt : null
     const recorded = recordedOutcome(r, launch)
     const c = countersOf(r)
-    const errors: unknown = (r as { toolErrors?: unknown }).toolErrors
     out.push({
       agentId: id,
       sessionId: r.sessionId,
@@ -2717,7 +2854,7 @@ export function agentRecordViews(input: AgentTreeInput, now: number): AgentRecor
       lastTs: activityOf(r, rejectionOf(r)),
       ...c,
       usage: billable(bucketOf(c, true)),
-      toolErrors: typeof errors === 'number' && Number.isInteger(errors) && errors >= 0 ? errors : null,
+      toolErrors: wholeCount(r.toolErrors),
       spawnedBy: spawnerOf(r, launch, forest.records),
       report: reportOf(launch),
     })
@@ -2728,10 +2865,15 @@ export function agentRecordViews(input: AgentTreeInput, now: number): AgentRecor
 /**
  * Who launched an agent, as its details' "Spawned by" row names it: an agent of the same session by
  * its id, or the session's own transcript; null when the launching transcript is neither — or unknown.
+ * No launching transcript known: the agent the sidecar names as its parent (O3, §0a.11), when it is
+ * one of the same session.
  */
 function spawnerOf(r: AgentRec, launch: AgentLaunch | null, records: ReadonlyMap<string, AgentRec>): string | null {
   const file = text(r.spawnerFile) ?? text(launch?.file)
-  if (file === null) return null
+  if (file === null) {
+    const parent = parentAgentIdOf(r)
+    return parent !== null && records.get(parent)?.sessionId === r.sessionId ? parent : null
+  }
   const id = agentIdOf(file)
   if (id !== null) return id !== r.agentId && records.get(id)?.sessionId === r.sessionId ? id : null
   const place = sessionOfPath(file)

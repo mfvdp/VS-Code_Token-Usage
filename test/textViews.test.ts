@@ -928,13 +928,13 @@ function agentVm(select = false, over: Record<string, unknown> = {}): { vm: View
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   const agent: AgentRec = {
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
-    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01', parentAgentId: null }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 20 * 60_000, lastTs: NOW - 60_000, models: ['claude-opus-4-6'],
-    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null, lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
+    ...counts, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null, lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null, toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   const pending: AgentLaunch = {
     toolUseId: 'toolu_02', file: sessionFile, ts: NOW - 2 * 60_000, agentId: null, typeHint: 'Plan',
@@ -1045,15 +1045,15 @@ test('an agent that ended on a rejected request: its sentence and its Last reque
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   const agent: AgentRec = {
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
-    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01' }, metaTries: 1,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_01', parentAgentId: null }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 40 * 60_000, lastTs: NOW - 30 * 60_000, models: ['claude-opus-4-6'],
     ...counts, outcome: null, outcomeTs: null, outcomeStatus: null,
     rejected: { at: NOW - 29 * 60_000, status: 429, error: 'rate_limit', limit: 'five_hour' },
-    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null, toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   agg.mains = () => [main]
   agg.agents = () => [agent]
@@ -1144,6 +1144,7 @@ test('an agent of a session the tree does not list is on its running line alone,
     source: 'claude', sessionId: `${String(i).padStart(8, '0')}-s`, firstTs: NOW - 3_600_000,
     lastTs: NOW - (i + 1) * 60_000, models: ['claude-opus-4-6'], input: 10, cacheWrite: 0, cacheWrite1h: 0,
     cacheRead: 0, output: 5, reasoning: 0, requests: 1, outputFinal: 1, toolCalls: 0,
+    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }))
   const oldest = mains[MAX_ROOTS].sessionId
   const agent: AgentRec = {
@@ -1151,7 +1152,7 @@ test('an agent of a session the tree does not list is on its running line alone,
     workflowId: null, meta: null, metaTries: 3, spawnerFile: null, firstTs: NOW - 10 * 60_000, lastTs: NOW - 30_000,
     models: ['claude-opus-4-6'], input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700,
     reasoning: 0, requests: 5, outputFinal: 4, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
-    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null, toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   agg.mains = () => mains
   agg.agents = () => [agent]
@@ -1232,14 +1233,14 @@ test('the markdown prints every node of its tree, fifty children a node, and say
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }
   const agents: AgentRec[] = Array.from({ length: 1234 }, (_, i) => ({
     source: 'claude', agentId: `a${i.toString(16).padStart(16, '0')}`, sessionId: 'sess-alpha', sessionFile, workflowId: null,
-    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: null }, metaTries: 1,
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: null, parentAgentId: null }, metaTries: 1,
     spawnerFile: sessionFile, firstTs: NOW - 2 * 3_600_000 + i * 1000, lastTs: NOW - 3_600_000, models: ['claude-opus-4-6'],
     ...counts, outcome: 'completed', outcomeTs: NOW - 3_600_000, outcomeStatus: 'completed', rejected: null,
-    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
+    lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null, toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
   }))
   agg.mains = () => [main]
   agg.agents = () => agents

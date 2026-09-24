@@ -127,7 +127,8 @@ test('the read contract holds for the shipped sources: every reader names exactl
   assert.deepEqual(contract.checkReadContract(fromRepo), [])
   // 1.5's readers, moved into the table unchanged (1.6 P2a) — the journal's since changed by P2b.
   const byWhat = new Map(contract.READ_CONTRACT.map((row) => [row.what, row]))
-  assert.deepEqual(byWhat.get('the identity sidecar')?.fields, ['agentType', 'model', 'spawnDepth', 'toolUseId'])
+  // 1.6 P13a (§0a.11, pinned and changed): the sidecar's fifth field, the spawning agent's id.
+  assert.deepEqual(byWhat.get('the identity sidecar')?.fields, ['agentType', 'model', 'spawnDepth', 'toolUseId', 'parentAgentId'])
   // 1.6 P2b (§0a.1): the journal's head is read on the raw line, its `key` compared within the
   // journal; the fallback parses a short line without the head for the same three fields.
   assert.deepEqual(byWhat.get('the workflow journal')?.fields, ['type', 'key', 'agentId'])
@@ -143,6 +144,16 @@ test('the read contract holds for the shipped sources: every reader names exactl
   assert.deepEqual(byWhat.get('the launch blocks')?.fields, ['type', 'name', 'id', 'input'])
   assert.deepEqual(byWhat.get('the workflow result')?.fields, ['runId', 'status'])
   assert.equal(byWhat.get('the workflow result')?.body, 'private runResult(')
+  // 1.6 P13a (§0a.6–0a.10): the two raw-line gates are regex rows — their lines are never parsed —,
+  // the diagnostics a row per level, the compaction's line and its metadata one each.
+  assert.deepEqual([byWhat.get('tool errors')?.kind, byWhat.get('tool errors')?.fields], ['regex', ['is_error']])
+  assert.deepEqual([byWhat.get('the permission mode')?.kind, byWhat.get('the permission mode')?.fields], ['regex', ['permissionMode']])
+  assert.deepEqual(byWhat.get('a cache miss')?.fields, ['diagnostics'])
+  assert.deepEqual(byWhat.get('a cache miss\'s diagnostics')?.fields, ['cache_miss_reason'])
+  assert.deepEqual(byWhat.get('a cache miss\'s reason')?.fields, ['type', 'cache_missed_input_tokens'])
+  assert.deepEqual(byWhat.get('the writer\'s version')?.fields, ['version'])
+  assert.deepEqual(byWhat.get('a compaction')?.fields, ['type', 'subtype', 'compactMetadata'])
+  assert.deepEqual(byWhat.get('a compaction\'s metadata')?.fields, ['trigger', 'preTokens', 'postTokens'])
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, 'src/agg.ts', row.what)
 })
 

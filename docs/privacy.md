@@ -17,9 +17,10 @@ and whether something shadows it) and — only in `quotaSource: poll`, only afte
 `https://api.anthropic.com/api/oauth/usage` and nowhere else.
 
 Inside `~/.claude/projects/` two small files beside the agent transcripts are read for the
-[Agents](agents.md) section: the `agent-<id>.meta.json` next to each agent transcript, for four
-fields — `agentType`, `model`, `spawnDepth` and `toolUseId`, never its `description` or its
-`prompt`, and only from a regular file of at most 64 KB — and a workflow run's `journal.jsonl`,
+[Agents](agents.md) section: the `agent-<id>.meta.json` next to each agent transcript, for five
+fields — `agentType`, `model`, `spawnDepth`, `toolUseId` and `parentAgentId` (the id of the agent
+that spawned it), never its `description`, its `prompt`, its `workflowPhase` or its
+`worktreePath`, and only from a regular file of at most 64 KB — and a workflow run's `journal.jsonl`,
 for the `type`, the `key` and the `agentId` at the head of each line, never its `result`, its
 `label` or its `phase`. The `key` of a journal line is compared with the other lines of the same
 journal, to tell a step that was started again from a new one, and is never kept, shown or
@@ -69,7 +70,20 @@ identifiers and counts, never content:
   kinds, four limits), and the agent's record keeps the last one with its time. Never the line's
   `message`, which holds the error's text, never its `errorDetails`, its `apiError` or its
   `requestId`, and nothing else of `quotaLimits` — not its reset time, its overage state or its
-  upgrade offers. A main session's error lines are not read for it at all.
+  upgrade offers. A main session's error lines are not read for it at all;
+* for the agent tree too, metadata that is no content. In an agent's transcript: the number of
+  tool results marked `is_error`, counted on the raw line — the line is not parsed for it, and the
+  result itself is never read —, and of a reply's `diagnostics` the `cache_miss_reason`: its
+  `type`, one of six reasons, and the `cache_missed_input_tokens` it states, nothing else of the
+  diagnostics. In an agent's and a session's transcript: the top-level `version` of a reply (the
+  Claude Code version that wrote it, three numbers), the `permissionMode` a prompt line names,
+  matched on the raw line — the prompt line is never parsed for it —, and of a compaction's line (a
+  `system` line whose `subtype` is `compact_boundary`) its `compactMetadata`'s `trigger` (`manual`
+  or `auto`), `preTokens` and `postTokens`. Never the `isCompactSummary` line that holds the
+  compaction's summary — it is not parsed at all —, never the compaction's `preservedSegment`, its
+  `preservedMessages` or its `preCompactDiscoveredTools`. Each value is held to the values Claude
+  Code writes, and the records keep counts, the last version and mode, and the last compaction
+  with its time; the exports carry of them only the count of an agent's tool errors.
 
 Nothing is written except the extension's own state in its `globalStorage`, with exactly two
 opt-in exceptions, each behind its own consent dialog and each with a backup or a

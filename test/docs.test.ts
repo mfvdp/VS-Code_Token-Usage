@@ -18,7 +18,7 @@ import {
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
   PER_MINUTE_FROM_MS, SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
-import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX } from '../src/agg'
+import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX, PENDING_MODE_MAX } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
@@ -369,7 +369,11 @@ test('the privacy and agents pages name every field the agent tables read, and t
     // 1.6 §0a.2 (P5a): an agent's rejected request, and the limit that refused it.
     'a rejected request', 'a rejected request\'s limit',
     // 1.6 §0a.5 (P6): the tool calls of a reply; §0a.4 (P9): the effort of a response.
-    'the tool calls of a reply', 'the effort of a response']) {
+    'the tool calls of a reply', 'the effort of a response',
+    // 1.6 §0a.6–0a.10 (P13a): the tool errors and the permission mode on the raw line, a cache miss
+    // level by level, the writer's version, a compaction and its metadata.
+    'tool errors', 'a cache miss', 'a cache miss\'s diagnostics', 'a cache miss\'s reason', 'the writer\'s version',
+    'the permission mode', 'a compaction', 'a compaction\'s metadata']) {
     assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
   }
   for (const row of READ_CONTRACT) {
@@ -386,7 +390,10 @@ test('the privacy and agents pages name every field the agent tables read, and t
   for (const never of ['description', 'prompt', 'summary', 'output-file', 'content', 'result', 'label', 'phase',
     'script', 'scriptPath', 'transcriptDir', 'errorDetails',
     // 1.6 §0a.4 (P9): an error line's effort of its own, which the effort's reader never names.
-    'perTurnEffort']) {
+    'perTurnEffort',
+    // 1.6 §0a.10, §0a.11 (P13a): the line holding a compaction's summary and what the compaction
+    // preserved; a sidecar's workflow phase and its worktree's path.
+    'isCompactSummary', 'preservedSegment', 'workflowPhase', 'worktreePath']) {
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
@@ -486,6 +493,28 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
   assert.deepEqual(written.filter((s) => !covered(s)), [], 'a state sentence the agents page does not quote')
 })
 
+test('docs/agents.md names the O3 rows of the details as the tree builder writes them, and the words for what it never reads', () => {
+  // 1.6 O3 (P13a): tool errors, cache misses, compactions, the version and the permission mode — the
+  // messages the builder writes and the examples the page quotes of them.
+  const src = readDoc('src/agentTreeBuild.ts')
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const written of ['Tool errors', '{0} of {1} tool calls', 'Cache misses', '{0} tokens not read from the cache', 'model changed',
+    'cache unavailable', 'Compactions', '{0} · last at {1} ({2}, {3} → {4})', 'Claude Code version', 'Permission mode']) {
+    assert.ok(src.includes(`t('${written}'`), `src/agentTreeBuild.ts no longer writes: ${written}`)
+  }
+  for (const example of ['`1 of 3 tool calls`', '`model changed 2 · cache unavailable 1`', '`48.2K tokens not read from the cache`',
+    '`1 · last at 14:20 (auto, 167.2K → 12.4K)`', '**Claude Code version**', '**permission mode**', '`bypassPermissions`',
+    'no `Tool errors` row rather than a zero nobody counted', 'only the stated ones are summed']) {
+    assert.ok(flat.includes(example), `docs/agents.md does not say: ${example}`)
+  }
+  // The raw-line gates, as both pages promise them.
+  for (const page of [doc.agents, doc.privacy]) {
+    const text = page.replace(/\s+/g, ' ')
+    assert.ok(text.includes('counted on the raw line'), 'a page no longer says the tool errors are counted on the raw line')
+    assert.ok(/`permissionMode`[^.]*matched on the raw line/.test(text), 'a page no longer says the permission mode is matched on the raw line')
+  }
+})
+
 test('docs/agents.md names a run\'s collector as the tree builder writes it: both labels, the sentence of its details, its running count', () => {
   // 1.6 D4 (P5b): the agents of a run without a counted reply are one node — the page says how it
   // is labelled, why it has no figures, and how the running list and its heading count it.
@@ -557,6 +586,8 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`a model id from a response at most ${AGENT_MODEL_MAX_CHARS}`, 'the model id cap'],
     [`id at most ${AGENT_ID_MAX_CHARS} characters of \`${id[1]}\``, 'the id cap'],
     [`a whole number from 1 to ${depth[1]}`, 'the spawn depth range'],
+    // 1.6 O3 (P13a, §0a.9): the permission modes waiting for a record.
+    [`for at most **${PENDING_MODE_MAX}** transcripts, the oldest dropped first`, 'the permission modes kept before a record'],
   ]
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const [claim, what] of claims) {

@@ -250,6 +250,30 @@ export type RateLimitKind = 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seve
  * allow-list — the five levels Claude Code writes there. Any other value is no effort (null).
  */
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+/**
+ * Why the cache missed on an agent's request (1.6 O3, §0a.7): the `type` of a response's
+ * `message.diagnostics.cache_miss_reason`, through its allow-list — the six reasons Claude Code
+ * writes there. Any other value is no reason (not counted).
+ */
+export type CacheMissKind =
+  | 'previous_message_not_found' | 'unavailable' | 'messages_changed' | 'model_changed' | 'tools_changed' | 'system_changed'
+/**
+ * The permission mode a transcript's prompt line was written under (1.6 O3, §0a.9) — the five modes
+ * Claude Code names in a user line's top-level `permissionMode`, matched on the raw line.
+ */
+export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'auto'
+
+/**
+ * The last compaction of a transcript (1.6 O3, §0a.10): the time of its `compact_boundary` line,
+ * whether it was asked for (`manual`) or Claude Code's own (`auto`), and the context before and
+ * after it — each through its allow-list, null when absent. Never the summary it left behind.
+ */
+export interface CompactionRec {
+  at: number
+  trigger: 'manual' | 'auto' | null
+  preTokens: number | null
+  postTokens: number | null
+}
 
 /**
  * The last rejected request of an agent's transcript (1.6 N3, §0a.2): the time of its error line
@@ -265,7 +289,7 @@ export interface RejectedRequest {
   limit: RateLimitKind | null
 }
 
-/** Identity of a subagent transcript, from `agent-<id>.meta.json`. Four fields; nothing else is read. */
+/** Identity of a subagent transcript, from `agent-<id>.meta.json`. Five fields; nothing else is read. */
 export interface AgentMeta {
   /** ≤ 40 chars, alphabet [A-Za-z0-9_.:@/-]. */
   agentType: string | null
@@ -275,6 +299,11 @@ export interface AgentMeta {
   spawnDepth: number | null
   /** ≤ 64 chars, alphabet [A-Za-z0-9_-]. */
   toolUseId: string | null
+  /**
+   * 1.6 O3 (§0a.11): the id of the agent that spawned this one, as an agent id (≤ 64 chars of
+   * [A-Za-z0-9_-]) — the spawner link when `toolUseId` names no launch.
+   */
+  parentAgentId: string | null
 }
 
 /** One subagent transcript, keyed by its path. Kept for AGENT_RETENTION_DAYS after its last line. */
@@ -339,6 +368,27 @@ export interface AgentRec {
    * details call "Context at the end"; null until a counted reply came.
    */
   lastContext: number | null
+  /**
+   * 1.6 O3 (§0a.6): the tool results of the transcript marked `is_error` — counted on the raw line,
+   * by the literal `"is_error":true`, which only Claude Code's own key of a `tool_result` block can
+   * be (inside a string its quotes are escaped); the result itself is never read. Null for a record
+   * that does not count them: one restored from a snapshot written before 1.6 O3 that the replay
+   * could not read again (its transcript gone) — a zero there would be one nobody counted.
+   */
+  toolErrors: number | null
+  /**
+   * 1.6 O3 (§0a.7): the requests whose cache missed, by the reason the response's diagnostics give —
+   * once per message, on its first line — and the input tokens those reasons state were not read
+   * from the cache (Claude Code gives the figure for a changed message, model, tool set or system
+   * prompt, not for an unavailable cache). Never part of a usage total.
+   */
+  cacheMisses: Partial<Record<CacheMissKind, number>>
+  cacheMissedTokens: number
+  /** 1.6 O3 (§0a.8, §0a.9, §0a.10): as `MainRec`'s. */
+  ccVersion: string | null
+  permissionMode: PermissionMode | null
+  compactions: number
+  lastCompaction: CompactionRec | null
 }
 
 /** A launch the parent transcript recorded; the bridge from tool_use id to agent. */
@@ -372,6 +422,19 @@ export interface MainRec {
   models: string[]
   input: number; cacheWrite: number; cacheWrite1h: number; cacheRead: number
   output: number; reasoning: number; requests: number; outputFinal: number; toolCalls: number
+  /**
+   * 1.6 O3 (§0a.8): the Claude Code version that wrote the transcript's newest counted reply — its
+   * top-level `version`, `1.2.3`-shaped (at most 3, 3 and 4 digits), else none.
+   */
+  ccVersion: string | null
+  /**
+   * 1.6 O3 (§0a.9): the last permission mode a prompt line of the transcript named — matched on the
+   * raw line, which is never parsed for it; the line that holds the prompt is never read otherwise.
+   */
+  permissionMode: PermissionMode | null
+  /** 1.6 O3 (§0a.10): how many times the transcript was compacted, and the last compaction. */
+  compactions: number
+  lastCompaction: CompactionRec | null
 }
 
 /**

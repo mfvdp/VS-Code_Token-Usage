@@ -23,7 +23,7 @@ import {
   RESUMED_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
 import {
-  AgentTreeInput, agentDetails, buildAgentTree, byNewestFirst, medianOf, mostAtOnce, shortIdsOf, spanText,
+  AgentTreeInput, agentDetails, agentRecordViews, buildAgentTree, byNewestFirst, medianOf, mostAtOnce, shortIdsOf, spanText,
 } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
 import { compact } from '../src/render'
@@ -58,6 +58,7 @@ function main(over: Partial<MainRec> = {}): MainRec {
     source: 'claude', sessionId: S1, firstTs: NOW - 2 * HOUR, lastTs: NOW - 2 * MIN, models: ['claude-opus-5'],
     input: 1000, cacheWrite: 500, cacheWrite1h: 100, cacheRead: 90_000, output: 2000, reasoning: 300,
     requests: 12, outputFinal: 12, toolCalls: 9,
+    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
     ...over,
   }
 }
@@ -67,12 +68,13 @@ function rec(id: string, over: Partial<AgentRec> = {}): AgentRec {
   const session = over.sessionId ?? S1
   return {
     source: 'claude', agentId: id, sessionId: session, sessionFile: sessionFile(session), workflowId: null,
-    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: `toolu_${id}` },
+    meta: { agentType: 'Explore', model: 'opus', spawnDepth: 1, toolUseId: `toolu_${id}`, parentAgentId: null },
     metaTries: 1, spawnerFile: sessionFile(session),
     firstTs: NOW - 30 * MIN, lastTs: NOW - 1 * MIN, models: ['claude-opus-5'],
     input: 300, cacheWrite: 200, cacheWrite1h: 0, cacheRead: 5000, output: 700, reasoning: 50,
     requests: 5, outputFinal: 5, toolCalls: 3, outcome: null, outcomeTs: null, outcomeStatus: null, rejected: null,
     lastTool: null, lastToolTs: null, effort: null, efforts: [], lastContext: null,
+    toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
     ...over,
   }
 }
@@ -81,7 +83,7 @@ function rec(id: string, over: Partial<AgentRec> = {}): AgentRec {
 function wfRec(id: string, over: Partial<AgentRec> = {}): AgentRec {
   return rec(id, {
     workflowId: WF, spawnerFile: null,
-    meta: { agentType: 'workflow-subagent', model: null, spawnDepth: 1, toolUseId: null },
+    meta: { agentType: 'workflow-subagent', model: null, spawnDepth: 1, toolUseId: null, parentAgentId: null },
     ...over,
   })
 }
@@ -996,7 +998,7 @@ test('a nested agent sits under the agent that spawned it, found by its spawner 
   const vm = build({
     agents: [
       rec('aaaa0001', { firstTs: NOW - 30 * MIN }),
-      rec('aaaa0003', { spawnerFile: null, firstTs: NOW - 10 * MIN, meta: { agentType: 'Plan', model: null, spawnDepth: 2, toolUseId: 'toolu_x3' } }),
+      rec('aaaa0003', { spawnerFile: null, firstTs: NOW - 10 * MIN, meta: { agentType: 'Plan', model: null, spawnDepth: 2, toolUseId: 'toolu_x3', parentAgentId: null } }),
       rec('aaaa0002', { spawnerFile: agentFile('aaaa0001'), firstTs: NOW - 20 * MIN }),
     ],
     launches: [launch('x3', { agentId: null, file: agentFile('aaaa0001') })],
@@ -1391,7 +1393,8 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
   const over: Partial<AgentTreeInput> = {
     agents: [
       // 1.6 P9: the context of its newest request, and the two efforts its replies were written at.
-      rec('aaaa0001', { outputFinal: 4, lastContext: 5_480, effort: 'xhigh', efforts: ['high', 'xhigh'] }),
+      // 1.6 P13a (O3): one of its three tool calls came back as an error; the version that wrote it.
+      rec('aaaa0001', { outputFinal: 4, lastContext: 5_480, effort: 'xhigh', efforts: ['high', 'xhigh'], toolErrors: 1, ccVersion: '2.1.281' }),
       rec('aaaa0002', { meta: null, spawnerFile: null, requests: 0, outputFinal: 0 }),
     ],
     launches: [launch('aaaa0001', { totals: { tokens: 123_456, durationMs: 65_000, toolUses: 7 } })],
@@ -1441,9 +1444,14 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
     { label: 'Output', value: '700', note: '⚠ lower bound — 1 of 5 replies unfinished' },
     { label: 'Reasoning', value: '50' },
     { label: 'Tool calls', value: '3' },
+    // 1.6 P13a (O3, pinned and changed): how many of its tool calls failed, beside them.
+    { label: 'Tool errors', value: '1 of 3 tool calls' },
     // 1.6 N6: the session by the name its row carries.
     { label: 'Spawned by', value: 'Session Tue 10:00 · 9d0eb37a' },
     { label: 'Workflow run', value: '–' },
+    // 1.6 P13a (O3, pinned and changed): the Claude Code that wrote its transcript; no permission
+    // mode, as an agent's transcript names none.
+    { label: 'Claude Code version', value: '2.1.281' },
     // D9: Claude Code's own figures, named for what they are — the context of the last request
     // with its reply — and a sentence, which takes the whole width.
     { label: 'Report from Claude Code',
@@ -1455,8 +1463,11 @@ test("an agent's details: every row pre-formatted, dashes for absence, Claude Co
   const bare = agentDetails(input(over), NOW, agentKey('aaaa0002'))
   assert.ok(bare)
   const value = (label: string): string | undefined => bare.rows.find((r) => r.label === label)?.value
-  assert.deepEqual(['Type', 'Depth', 'Requests', 'Usage', 'Output', 'Tool calls', 'Spawned by', 'Effort', 'Context at the end'].map(value),
-    ['–', '–', '–', '–', '–', '–', '–', '–', '–'])
+  assert.deepEqual(['Type', 'Depth', 'Requests', 'Usage', 'Output', 'Tool calls', 'Spawned by', 'Effort', 'Context at the end',
+    'Claude Code version'].map(value),
+  ['–', '–', '–', '–', '–', '–', '–', '–', '–', '–'])
+  // 1.6 P13a (O3): nothing counted, no tool errors — neither a zero nor a dash of a count nobody made.
+  assert.equal(bare.rows.some((r) => r.label === 'Tool errors'), false)
   // 1.6 P9: nothing counted, no mix, no pace, no line under the state.
   assert.deepEqual(bare.rows.filter((r) => ['Token mix', 'Per minute', 'Rank in run'].includes(r.label)), [])
   assert.equal(bare.overview, null)
@@ -1485,9 +1496,12 @@ test('a session and a run have details of their own', () => {
   // D5: its own figure and its agents' first, a first line and a span in place of a start and a
   // duration; the ID row last. 1.6 P9 (L2, pinned and changed): "Turns" is "Requests", the Usage
   // row that said the own figure a second time is gone, and its agents by effort follow their count.
+  // 1.6 P13a (O3, pinned and changed): the Claude Code version that wrote its transcript before its ID —
+  // a dash here, as the record names none; no permission mode and no compaction, as it has neither.
   assert.deepEqual(s.rows.map((r) => r.label), [
     'Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Last activity', 'Requests',
-    'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents', 'Agents by effort', 'ID',
+    'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents', 'Agents by effort',
+    'Claude Code version', 'ID',
   ])
   const sv = (label: string): string | undefined => s.rows.find((r) => r.label === label)?.value
   // The session's own transcript only: 1 000 + 500 + 2 000; its agents are nodes of their own,
@@ -1801,12 +1815,14 @@ test('the tree speaks German with the bundle the extension ships', () => {
   assert.equal(vm.selected?.stateText,
     'Läuft — abgeleitet: Das Transkript hat sich vor 1 min geändert, und es wurde noch kein Ergebnis aufgezeichnet.')
   // 1.6 P9 (L2, pinned and changed): the mix, the context, the pace and the effort, „Anfragen" for "Turns".
+  // 1.6 P13a (O3, pinned and changed): „Tool-Fehler" beside the tool calls, the version at the end.
   assert.deepEqual(vm.selected?.rows.map((r) => r.label), [
     'Token-Mischung', 'Kontext am Ende', 'Pro Minute', 'Typ', 'Modelle', 'Effort', 'ID', 'Tiefe', 'Beginn', 'Dauer',
     'Letzte Aktivität', 'Anfragen', 'Verbrauch', 'Frische Eingabe',
-    'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte', 'Tool-Aufrufe',
-    'Gestartet von', 'Workflow-Lauf',
+    'Cache-Schreiben 5m', 'Cache-Schreiben 1h', 'Cache-Lesen', 'Ausgabe', 'Denkschritte', 'Tool-Aufrufe', 'Tool-Fehler',
+    'Gestartet von', 'Workflow-Lauf', 'Claude-Code-Version',
   ])
+  assert.equal(vm.selected?.rows.find((r) => r.label === 'Tool-Fehler')?.value, '0 von 3 Tool-Aufrufen')
   const de = (label: string): DetailRow | undefined => vm.selected?.rows.find((r) => r.label === label)
   assert.equal(vm.selected?.overview, '1,2K in 29 min 00 s · 5 Anfragen · 3 Tool-Aufrufe')
   assert.equal(de('Token-Mischung')?.value, 'frisch 5 % · Cache-Schreiben 3 % · Cache-Lesen 81 % · Ausgabe 11 %')
@@ -2400,9 +2416,11 @@ test('an agent that ended on a rejected request says why — unknown with the re
   assert.deepEqual(vm.selected?.rows.find((r) => r.label === 'Last request'),
     { label: 'Last request', value: 'rejected at 11:31 — 5-hour limit (HTTP 429)', kind: 'sentence' })
   assert.deepEqual(vm.selected?.rows.find((r) => r.label === 'Last activity')?.value, '11:31')
-  // After Tool calls, before Spawned by (1.6 L2's place for it).
+  // After Tool calls, before Spawned by (1.6 L2's place for it). 1.6 P13a (O3, pinned and changed): the
+  // counts of what went wrong — here its tool errors — stand between the tool calls and it.
   const labels = vm.selected?.rows.map((r) => r.label) ?? []
-  assert.equal(labels.indexOf('Last request'), labels.indexOf('Tool calls') + 1, labels.join(', '))
+  assert.equal(labels.indexOf('Tool errors'), labels.indexOf('Tool calls') + 1, labels.join(', '))
+  assert.equal(labels.indexOf('Last request'), labels.indexOf('Tool errors') + 1, labels.join(', '))
   assert.equal(labels.indexOf('Spawned by'), labels.indexOf('Last request') + 1, labels.join(', '))
 
   // Within its ten minutes — measured from the rejection, a line of the transcript like any other —
@@ -2901,7 +2919,7 @@ test('a running agent by its own transcript may say how long it has been silent;
       rec('aaaa0001', { lastTs: NOW - 4 * MIN }),
       // Waits on the agent it launched: it runs by what is below it, and says so.
       rec('aaaa0002', { lastTs: NOW - 30 * MIN, firstTs: NOW - 40 * MIN }),
-      rec('aaaa0003', { lastTs: NOW - MIN, spawnerFile: agentFile('aaaa0002'), meta: { agentType: 'Plan', model: 'opus', spawnDepth: 2, toolUseId: null } }),
+      rec('aaaa0003', { lastTs: NOW - MIN, spawnerFile: agentFile('aaaa0002'), meta: { agentType: 'Plan', model: 'opus', spawnDepth: 2, toolUseId: null, parentAgentId: null } }),
       // Silent for half an hour: unknown, nothing to count.
       rec('aaaa0004', { lastTs: NOW - 30 * MIN }),
       // Wrote on after its recorded end (D6): running again by its own lines.
@@ -3079,10 +3097,11 @@ test('an agent\'s details open with its mix, its rank, its context and its pace,
   }
   const labels = agentDetails(input(over), NOW, agentKey(J1))?.rows.map((r) => r.label)
   // A workflow agent that no launch names has no "Spawned by": its run started it, the next row says which.
+  // 1.6 P13a (O3, pinned and changed): its tool errors after its tool calls, the version that wrote it last.
   assert.deepEqual(labels, [
     'Token mix', 'Rank in run', 'Context at the end', 'Per minute', 'Type', 'Models', 'Effort', 'ID', 'Depth', 'Started', 'Duration',
     'Last activity', 'Requests', 'Usage', 'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning',
-    'Tool calls', 'Workflow run',
+    'Tool calls', 'Tool errors', 'Workflow run', 'Claude Code version',
   ])
   assert.equal(agentDetails(input(over), NOW, agentKey(J1))?.overview, '1.2K in 29 min 00 s · 5 requests · 3 tool calls')
 })
@@ -3254,7 +3273,7 @@ function weekWorld(): { over: Partial<AgentTreeInput>; ids: Record<string, strin
   }
   const out = (n: number): Partial<AgentRec> => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, reasoning: 0, output: n })
   const typed = (type: string, model: string | null = null): Partial<AgentRec> =>
-    ({ meta: { agentType: type, model, spawnDepth: 1, toolUseId: null }, spawnerFile: null })
+    ({ meta: { agentType: type, model, spawnDepth: 1, toolUseId: null, parentAgentId: null }, spawnerFile: null })
   const agents = [
     rec(ids.e1, { ...out(400_000), firstTs: NOW - 50 * MIN }),
     rec(ids.e2, { ...out(100_000), firstTs: NOW - 40 * MIN }),
@@ -3344,7 +3363,7 @@ test('the 7-day block\'s costs only with pricing: ~ for an estimate, – for no 
 
 test('the 7-day block: at most WEEK_ROWS rows, the rest in one line — one other combination, or {0} — in English and in German', () => {
   const many = (n: number): AgentRec[] => Array.from({ length: n }, (_, i) =>
-    rec(wkId('9' + i.toString(16)), { meta: { agentType: `type-${String(i).padStart(2, '0')}`, model: null, spawnDepth: 1, toolUseId: null },
+    rec(wkId('9' + i.toString(16)), { meta: { agentType: `type-${String(i).padStart(2, '0')}`, model: null, spawnDepth: 1, toolUseId: null, parentAgentId: null },
       input: 0, cacheWrite: 0, cacheRead: 0, output: 1000 * (n - i) }))
   assert.equal(WEEK_ROWS, 10)
   const twelve = build({ agents: many(12), weekOpen: true }).week
@@ -3425,7 +3444,7 @@ test('the 7-day block\'s rows count against MAX_PAGE_NODES: the tree has that ma
   const wfOf = (i: number): string => `wf_${String(i).padStart(8, '0')}-000`
   const types = ['workflow-subagent', 'Explore', 'Plan', 'general-purpose']
   const agents = Array.from({ length: runs * 50 }, (_, n) => wfRec(hexId(n), {
-    workflowId: wfOf(Math.floor(n / 50)), meta: { agentType: types[n % 4], model: null, spawnDepth: 1, toolUseId: null },
+    workflowId: wfOf(Math.floor(n / 50)), meta: { agentType: types[n % 4], model: null, spawnDepth: 1, toolUseId: null, parentAgentId: null },
     firstTs: NOW - 5 * HOUR + n * 1000, lastTs: NOW - 2 * HOUR, outcome: 'completed', outcomeTs: NOW - 2 * HOUR,
   }))
   const expanded = [rootKey, ...Array.from({ length: runs }, (_, i) => `w:${S1}|${wfOf(i)}`)]
@@ -3444,3 +3463,149 @@ test('the 7-day block\'s rows count against MAX_PAGE_NODES: the tree has that ma
   assert.ok(all(both.roots).length + 9 <= MAX_PAGE_NODES)
 })
 
+
+// ---------------------------------------------------------------------------
+// 1.6 O3 · further metadata without content (§0a.6–0a.11)
+// ---------------------------------------------------------------------------
+
+test('an agent\'s details say its tool errors, its cache misses, its compactions, its version and its mode — each only as far as it was counted (1.6 O3)', () => {
+  const o3: Partial<AgentRec> = {
+    toolCalls: 41, toolErrors: 3,
+    cacheMisses: { unavailable: 1, model_changed: 2 }, cacheMissedTokens: 48_210,
+    compactions: 2, lastCompaction: { at: NOW - 30 * MIN, trigger: 'auto', preTokens: 167_200, postTokens: 12_400 },
+    ccVersion: '2.1.281', permissionMode: 'plan',
+  }
+  const rows = rowsOf({ agents: [rec('aaaa0001', o3)] }, agentKey('aaaa0001'))
+  assert.deepEqual(rows.get('Tool errors'), { label: 'Tool errors', value: '3 of 41 tool calls' })
+  // The most frequent reason first; the tokens the misses stated, as the row's note.
+  assert.deepEqual(rows.get('Cache misses'), {
+    label: 'Cache misses', value: 'model changed 2 · cache unavailable 1', note: '48.2K tokens not read from the cache', kind: 'sentence',
+  })
+  assert.deepEqual(rows.get('Compactions'), {
+    label: 'Compactions', value: '2 · last at 11:30 (auto, 167.2K → 12.4K)', kind: 'sentence',
+  })
+  assert.deepEqual(rows.get('Claude Code version'), { label: 'Claude Code version', value: '2.1.281' })
+  // The word as Claude Code writes it.
+  assert.deepEqual(rows.get('Permission mode'), { label: 'Permission mode', value: 'plan' })
+  // In the order L2 gives the counts and the identity: what went wrong beside the tool calls, the
+  // version and the mode after its run, before Claude Code's report.
+  const labels = agentDetails(input({ agents: [rec('aaaa0001', o3)], launches: [launch('aaaa0001', { totals: { tokens: 1, durationMs: 1, toolUses: 1 } })] }),
+    NOW, agentKey('aaaa0001'))?.rows.map((r) => r.label) ?? []
+  const at = (label: string): number => labels.indexOf(label)
+  assert.deepEqual(['Tool calls', 'Tool errors', 'Cache misses', 'Compactions', 'Spawned by', 'Workflow run', 'Claude Code version',
+    'Permission mode', 'Report from Claude Code'].map(at), [...Array(9).keys()].map((i) => at('Tool calls') + i), labels.join(', '))
+
+  // Every reason in its words, by frequency, ties in the order Claude Code's reasons are listed.
+  const every = rowsOf({ agents: [rec('aaaa0001', { cacheMisses: {
+    system_changed: 1, tools_changed: 1, model_changed: 1, messages_changed: 1, unavailable: 1, previous_message_not_found: 1,
+  } })] }, agentKey('aaaa0001')).get('Cache misses')
+  assert.equal(every?.value, 'previous message not found 1 · cache unavailable 1 · messages changed 1 · model changed 1 · tools changed 1 · system prompt changed 1')
+  // No figure stated — an unavailable cache states none —: no note, never "0 tokens".
+  assert.equal(rowsOf({ agents: [rec('aaaa0001', { cacheMisses: { unavailable: 4 }, cacheMissedTokens: 0 })] }, agentKey('aaaa0001'))
+    .get('Cache misses')?.note, undefined)
+  // A compaction whose line gave no trigger and no figures: dashes in their places; one without a time: the count alone.
+  assert.equal(rowsOf({ agents: [rec('aaaa0001', { compactions: 1, lastCompaction: { at: NOW - 30 * MIN, trigger: null, preTokens: null, postTokens: null } })] },
+    agentKey('aaaa0001')).get('Compactions')?.value, '1 · last at 11:30 (–, – → –)')
+  assert.equal(rowsOf({ agents: [rec('aaaa0001', { compactions: 1, lastCompaction: null })] }, agentKey('aaaa0001')).get('Compactions')?.value, '1')
+  assert.equal(rowsOf({ agents: [rec('aaaa0001', { compactions: 1, lastCompaction: { at: NOW - 30 * MIN, trigger: 'manual', preTokens: 90_000, postTokens: 8000 } })] },
+    agentKey('aaaa0001')).get('Compactions')?.value, '1 · last at 11:30 (manual, 90K → 8K)')
+
+  // Nothing of it recorded: no tool errors row without a tool call, no misses, no compactions, no
+  // mode; the version a dash. A record that does not count its tool errors (restored from before
+  // O3, never read again) has no row either — a zero there would be one nobody counted.
+  const none = rowsOf({ agents: [rec('aaaa0001', { toolCalls: 0 })] }, agentKey('aaaa0001'))
+  assert.deepEqual(['Tool errors', 'Cache misses', 'Compactions', 'Permission mode'].map((l) => none.has(l)), [false, false, false, false])
+  assert.equal(none.get('Claude Code version')?.value, '–')
+  assert.equal(rowsOf({ agents: [rec('aaaa0001')] }, agentKey('aaaa0001')).get('Tool errors')?.value, '0 of 3 tool calls', 'a measured zero')
+  assert.equal(rowsOf({ agents: [rec('aaaa0001', { toolErrors: null })] }, agentKey('aaaa0001')).has('Tool errors'), false)
+  // A snapshot of another build's making: every value checked again.
+  const hostile = rowsOf({ agents: [rec('aaaa0001', {
+    toolErrors: -2, cacheMisses: { weather_changed: 3, model_changed: 1.5, unavailable: -1 } as AgentRec['cacheMisses'], cacheMissedTokens: Number.NaN,
+    compactions: 2.5, ccVersion: '2.1.281<script>', permissionMode: 'turbo' as AgentRec['permissionMode'],
+  })] }, agentKey('aaaa0001'))
+  assert.deepEqual(['Tool errors', 'Cache misses', 'Compactions', 'Permission mode'].map((l) => hostile.has(l)), [false, false, false, false])
+  assert.equal(hostile.get('Claude Code version')?.value, '–')
+  for (const version of ['synthetic', '1.2', '1.2.3.4', '1234.1.1', 7]) {
+    assert.equal(rowsOf({ agents: [rec('aaaa0001', { ccVersion: version as string })] }, agentKey('aaaa0001')).get('Claude Code version')?.value, '–', String(version))
+  }
+})
+
+test('a session\'s details say how often its own transcript was compacted, which Claude Code wrote it and in which permission mode (1.6 O3)', () => {
+  const over: Partial<AgentTreeInput> = {
+    mains: [main({ ccVersion: '2.1.281', permissionMode: 'bypassPermissions', compactions: 1,
+      lastCompaction: { at: NOW - 90 * MIN, trigger: 'manual', preTokens: 180_000, postTokens: 21_000 } })],
+    agents: [rec('aaaa0001')],
+  }
+  const s = agentDetails(input(over), NOW, rootKey)
+  assert.ok(s)
+  const labels = s.rows.map((r) => r.label)
+  assert.deepEqual(labels, [
+    'Own transcript', 'Agents, last 7 days', 'Models', 'Since first line', 'Span', 'Last activity', 'Requests',
+    'Fresh input', 'Cache write 5m', 'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Compactions', 'Agents',
+    'Agents by effort', 'Claude Code version', 'Permission mode', 'ID',
+  ])
+  const v = (label: string): DetailRow | undefined => s.rows.find((r) => r.label === label)
+  assert.equal(v('Compactions')?.value, '1 · last at 10:30 (manual, 180K → 21K)')
+  assert.deepEqual([v('Claude Code version')?.value, v('Permission mode')?.value], ['2.1.281', 'bypassPermissions'])
+  // A session's record counts neither tool errors nor cache misses (an agent's do): no such rows.
+  assert.equal(labels.includes('Tool errors') || labels.includes('Cache misses'), false)
+  // A session without its own record: the version a dash, nothing else of O3.
+  const bare = agentDetails(input({ ...over, mains: [] }), NOW, rootKey)?.rows.map((r) => [r.label, r.value]) ?? []
+  assert.deepEqual(bare.filter(([l]) => ['Compactions', 'Claude Code version', 'Permission mode'].includes(l)), [['Claude Code version', '–']])
+})
+
+test('the O3 rows speak German with the bundle the extension ships (1.6 O3)', () => {
+  const over: Partial<AgentTreeInput> = {
+    agents: [rec('aaaa0001', {
+      toolCalls: 41, toolErrors: 3, cacheMisses: { previous_message_not_found: 2, system_changed: 1, tools_changed: 1, messages_changed: 1 },
+      cacheMissedTokens: 1_250, compactions: 2,
+      lastCompaction: { at: NOW - 30 * MIN, trigger: 'auto', preTokens: 167_200, postTokens: 12_400 }, ccVersion: '2.1.281',
+    })],
+    mains: [main({ compactions: 1, lastCompaction: { at: NOW - 90 * MIN, trigger: 'manual', preTokens: 180_000, postTokens: 21_000 }, permissionMode: 'plan' })],
+  }
+  const de = german(() => rowsOf(over, agentKey('aaaa0001')))
+  assert.equal(de.get('Tool-Fehler')?.value, '3 von 41 Tool-Aufrufen')
+  assert.deepEqual([de.get('Cache-Fehltreffer')?.value, de.get('Cache-Fehltreffer')?.note],
+    ['vorherige Nachricht nicht gefunden 2 · Nachrichten geändert 1 · Tools geändert 1 · Systemprompt geändert 1',
+      '1,3K Token nicht aus dem Cache gelesen'])
+  assert.equal(de.get('Kompaktierungen')?.value, '2 · zuletzt um 11:30 (automatisch, 167,2K → 12,4K)')
+  assert.equal(de.get('Claude-Code-Version')?.value, '2.1.281')
+  const models = german(() => rowsOf({ agents: [rec('aaaa0001', { cacheMisses: { model_changed: 1, unavailable: 1 } })] }, agentKey('aaaa0001')))
+  assert.equal(models.get('Cache-Fehltreffer')?.value, 'Cache nicht verfügbar 1 · Modell gewechselt 1')
+  const session = german(() => new Map((agentDetails(input(over), NOW, rootKey)?.rows ?? []).map((r) => [r.label, r.value])))
+  assert.equal(session.get('Kompaktierungen'), '1 · zuletzt um 10:30 (manuell, 180K → 21K)')
+  // The mode is Claude Code's own word, in either language.
+  assert.equal(session.get('Berechtigungsmodus'), 'plan')
+})
+
+test('an agent whose sidecar names its parent hangs under it when no launch names a spawner — never outside its run (1.6 O3, §0a.11)', () => {
+  const parent = 'aaaa0001'
+  const child = 'aaaa0002'
+  const withParent = (id: string, over: Partial<AgentRec> = {}): AgentRec => rec(id, {
+    spawnerFile: null, firstTs: NOW - 20 * MIN,
+    meta: { agentType: 'Plan', model: 'opus', spawnDepth: 2, toolUseId: null, parentAgentId: parent }, ...over,
+  })
+  const over: Partial<AgentTreeInput> = { agents: [rec(parent), withParent(child)], expanded: [rootKey, agentKey(parent)], mode: 'page' }
+  const vm = build(over)
+  assert.deepEqual(node(vm, agentKey(parent)).children.map((c) => c.key), [agentKey(child)])
+  assert.equal(rowsOf(over, agentKey(child)).get('Spawned by')?.value, node(vm, agentKey(parent)).fullLabel)
+  // The export names it as its spawner too, by id.
+  assert.equal(agentRecordViews(input(over), NOW).find((r) => r.agentId === child)?.spawnedBy, parent)
+  // A launch that names a spawner wins over the sidecar's parent.
+  const launched = { ...over, agents: [rec(parent), withParent(child, { spawnerFile: sessionFile() })] }
+  assert.equal(node(build(launched), agentKey(child)).key, agentKey(child))
+  assert.deepEqual(build(launched).roots[0].children.map((c) => c.key).sort(), [agentKey(parent), agentKey(child)].sort())
+  assert.equal(rowsOf(launched, agentKey(child)).get('Spawned by')?.value, 'Session Tue 10:00 · 9d0eb37a')
+  // A parent the session does not hold, or the agent itself: no link — the session holds it, and nobody spawned it that the tree knows.
+  for (const id of ['ffff9999', child]) {
+    const orphan = { ...over, agents: [rec(parent), withParent(child, { meta: { agentType: 'Plan', model: 'opus', spawnDepth: 2, toolUseId: null, parentAgentId: id } })] }
+    assert.ok(build(orphan).roots[0].children.some((c) => c.key === agentKey(child)), id)
+    assert.equal(rowsOf(orphan, agentKey(child)).get('Spawned by')?.value, '–', id)
+    assert.equal(agentRecordViews(input(orphan), NOW).find((r) => r.agentId === child)?.spawnedBy, null, id)
+  }
+  // An agent of a workflow run whose parent is outside the run stays in the run; the row still names who spawned it.
+  const inRun = { ...over, agents: [rec(parent), wfRec(child, { meta: { agentType: 'workflow-subagent', model: null, spawnDepth: 2, toolUseId: null, parentAgentId: parent } })],
+    expanded: [rootKey, wfKey] }
+  assert.deepEqual(node(build(inRun), wfKey).children.map((c) => c.key), [agentKey(child)])
+  assert.equal(rowsOf(inRun, agentKey(child)).get('Spawned by')?.value, node(build(inRun), agentKey(parent)).fullLabel)
+})

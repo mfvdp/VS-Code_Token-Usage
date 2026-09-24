@@ -122,6 +122,13 @@ export interface ClaudeLineOpts {
    * every reply line); null leaves the key out.
    */
   effort?: unknown
+  /**
+   * 1.6 O3 (§0a.7): the message's `diagnostics` — Claude Code writes `cache_miss_reason` there when
+   * the cache missed; absent unless given.
+   */
+  diagnostics?: unknown
+  /** 1.6 O3 (§0a.8): the line's top-level `version`; `9.9.9` unless given, left out when null. */
+  version?: unknown
 }
 
 /** One assistant line as Claude Code writes it, one content block per line. */
@@ -165,6 +172,7 @@ export function claudeLine(o: ClaudeLineOpts): string {
       stop_sequence: null,
       stop_details: null,
       usage,
+      ...(o.diagnostics === undefined ? {} : { diagnostics: o.diagnostics }),
     },
     requestId: `req_${o.id}`,
     type: o.type ?? 'assistant',
@@ -173,7 +181,7 @@ export function claudeLine(o: ClaudeLineOpts): string {
     ...(o.effort === null ? {} : { effort: o.effort === undefined ? 'high' : o.effort }),
     userType: 'external',
     entrypoint: 'cli',
-    version: '9.9.9',
+    ...(o.version === null ? {} : { version: o.version === undefined ? '9.9.9' : o.version }),
     gitBranch: 'main',
   })
   if (o.cwd !== null) line.cwd = o.cwd ?? '/home/tester/proj-alpha'
@@ -499,6 +507,164 @@ export function apiErrorLine(o: ApiErrorOpts): string {
   return JSON.stringify(line)
 }
 
+// ---------------------------------------------------------------------------
+// 1.6 O3 (§0a.6–0a.10): the lines the further metadata is read from — key names and order as
+// counted on the measuring machine (2026-09-24, key names only). Every text is fixture text a record
+// must never hold.
+// ---------------------------------------------------------------------------
+
+export interface ToolResultOpts {
+  ts: number
+  /** A line of this agent's own transcript. */
+  agentId?: string
+  /** The line's `tool_result` blocks: which call each answers, whether it is marked `is_error`, its output. */
+  results: Array<{ toolUseId: string; isError?: boolean; text?: string }>
+  /** The line's top-level `toolUseResult`: for a failed tool, Claude Code writes the error's text here. */
+  toolUseResult?: unknown
+}
+
+/**
+ * The user line that returns tool results: `tool_result` blocks keyed `type`, `content`, `is_error`,
+ * `tool_use_id` (1360 of 1360 marked blocks) and, for a failed tool, a `toolUseResult` that is the
+ * error's text, a string.
+ */
+export function toolResultLine(o: ToolResultOpts): string {
+  const line: Record<string, unknown> = { parentUuid: 'uuid-parent-0000', isSidechain: o.agentId !== undefined, promptId: 'prompt-0000' }
+  if (o.agentId !== undefined) line.agentId = o.agentId
+  const failed = o.results.find((r) => r.isError === true)
+  Object.assign(line, {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: o.results.map((r) => {
+        const block: Record<string, unknown> = { type: 'tool_result', content: r.text ?? 'synthetic tool output' }
+        if (r.isError !== undefined) block.is_error = r.isError
+        block.tool_use_id = r.toolUseId
+        return block
+      }),
+    },
+    uuid: `uuid-results-${o.results.map((r) => r.toolUseId).join('-')}`,
+    timestamp: iso(o.ts),
+    toolUseResult: o.toolUseResult !== undefined ? o.toolUseResult
+      : failed ? `Error: ${failed.text ?? 'synthetic tool error'}` : { stdout: 'synthetic stdout', stderr: '', interrupted: false },
+    sourceToolAssistantUUID: 'uuid-assistant-0000',
+    userType: 'external',
+    entrypoint: 'cli',
+    cwd: '/home/tester/proj-alpha',
+    sessionId: 'sess-0001',
+    version: '9.9.9',
+    gitBranch: 'main',
+    slug: 'synthetic-slug',
+  })
+  return JSON.stringify(line)
+}
+
+export interface PromptLineOpts {
+  ts: number
+  agentId?: string
+  /** The prompt — content. */
+  text?: string
+  /** The line's top-level `permissionMode`; `default` unless given, left out when null. */
+  permissionMode?: unknown
+  version?: string
+}
+
+/**
+ * A prompt: the user line that opens a turn, its top-level `permissionMode` after its `timestamp`
+ * (1124 of 1124 such lines, all in main transcripts). The prompt is content.
+ */
+export function promptLine(o: PromptLineOpts): string {
+  const line: Record<string, unknown> = { parentUuid: null, isSidechain: o.agentId !== undefined, promptId: 'prompt-0001' }
+  if (o.agentId !== undefined) line.agentId = o.agentId
+  Object.assign(line, {
+    type: 'user',
+    message: { role: 'user', content: o.text ?? 'synthetic prompt text' },
+    uuid: `uuid-prompt-${Math.floor(o.ts / 1000)}`,
+    timestamp: iso(o.ts),
+  })
+  if (o.permissionMode !== null) line.permissionMode = o.permissionMode === undefined ? 'default' : o.permissionMode
+  Object.assign(line, {
+    userType: 'external',
+    entrypoint: 'cli',
+    cwd: '/home/tester/proj-alpha',
+    sessionId: 'sess-0001',
+    version: o.version ?? '9.9.9',
+    gitBranch: 'main',
+    slug: 'synthetic-slug',
+  })
+  return JSON.stringify(line)
+}
+
+export interface CompactBoundaryOpts {
+  ts: number
+  agentId?: string
+  /** `manual` unless given; null leaves it out. */
+  trigger?: unknown
+  preTokens?: unknown
+  postTokens?: unknown
+  /** The whole `compactMetadata` instead of the built block; null leaves the key out. */
+  metadata?: unknown
+  /** What the compaction preserved — content. */
+  preserved?: string
+}
+
+/**
+ * The line Claude Code writes where it compacted a transcript: `type: system`, `subtype:
+ * compact_boundary`, and a `compactMetadata` block keyed `trigger`, `preTokens`, `durationMs`,
+ * `preCompactDiscoveredTools`, `preservedSegment`, `preservedMessages`, `postTokens`,
+ * `cumulativeDroppedTokens` (42 of 44). Of it only the trigger and the two token figures may be read.
+ */
+export function compactBoundaryLine(o: CompactBoundaryOpts): string {
+  const preserved = o.preserved ?? 'synthetic preserved segment'
+  const meta: Record<string, unknown> = {}
+  if (o.trigger !== null) meta.trigger = o.trigger === undefined ? 'manual' : o.trigger
+  meta.preTokens = o.preTokens === undefined ? 167_200 : o.preTokens
+  Object.assign(meta, {
+    durationMs: 41_000,
+    preCompactDiscoveredTools: [`mcp__synthetic__${preserved.replace(/[^A-Za-z0-9]/g, '_')}`],
+    preservedSegment: { headUuid: 'uuid-head-0000', tailUuid: 'uuid-tail-0000', text: preserved },
+    preservedMessages: [{ role: 'user', content: preserved }],
+  })
+  meta.postTokens = o.postTokens === undefined ? 12_400 : o.postTokens
+  meta.cumulativeDroppedTokens = 154_800
+  const line: Record<string, unknown> = {
+    parentUuid: null, logicalParentUuid: 'uuid-logical-0000', isSidechain: o.agentId !== undefined,
+  }
+  if (o.agentId !== undefined) line.agentId = o.agentId
+  Object.assign(line, {
+    type: 'system',
+    subtype: 'compact_boundary',
+    content: 'Conversation compacted',
+    isMeta: false,
+    timestamp: iso(o.ts),
+    uuid: `uuid-compact-${Math.floor(o.ts / 1000)}`,
+    level: 'info',
+  })
+  if (o.metadata !== null) line.compactMetadata = o.metadata === undefined ? meta : o.metadata
+  Object.assign(line, {
+    userType: 'external', entrypoint: 'cli', cwd: '/home/tester/proj-alpha', sessionId: 'sess-0001', version: '9.9.9',
+    gitBranch: 'main', slug: 'synthetic-slug',
+  })
+  return JSON.stringify(line)
+}
+
+/** The user line a compaction leaves its summary on (`isCompactSummary`): the summary is content. */
+export function compactSummaryLine(o: { ts: number; summary?: string; agentId?: string }): string {
+  const line: Record<string, unknown> = { parentUuid: 'uuid-compact-0000', isSidechain: o.agentId !== undefined, promptId: 'prompt-0002' }
+  if (o.agentId !== undefined) line.agentId = o.agentId
+  Object.assign(line, {
+    type: 'user',
+    message: { role: 'user', content: o.summary ?? 'synthetic compaction summary' },
+    isVisibleInTranscriptOnly: true,
+    isCompactSummary: true,
+    uuid: `uuid-summary-${Math.floor(o.ts / 1000)}`,
+    timestamp: iso(o.ts),
+    userType: 'external', entrypoint: 'cli', cwd: '/home/tester/proj-alpha', sessionId: 'sess-0001', version: '9.9.9',
+    gitBranch: 'main', slug: 'synthetic-slug',
+  })
+  return JSON.stringify(line)
+}
+
 /**
  * A journal key in the shape Claude Code writes — `v2:` and 64 hex digits (5643 of 5643 keys on
  * the measuring machine) — made from a step name: the sha256 of `synthetic-journal-step-<step>`.
@@ -555,7 +721,7 @@ export interface MetaOpts {
   extra?: Record<string, unknown>
 }
 
-/** An `agent-<id>.meta.json` sidecar. Its description and prompt are content; only four fields may be read. */
+/** An `agent-<id>.meta.json` sidecar. Its description and prompt are content; only five fields may be read (1.6 O3). */
 export function metaJson(o: MetaOpts = {}): string {
   const meta: Record<string, unknown> = {}
   if (o.agentType !== null) meta.agentType = o.agentType ?? 'general-purpose'

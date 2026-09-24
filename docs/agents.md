@@ -599,21 +599,37 @@ xhigh` where it changed —, its ID, depth, started, duration, last activity (wi
 beside it) and — for an agent that wrote on after its outcome — what was recorded, then its
 requests (the requests to the API; 1.5 called them turns), usage, fresh input, cache write 5 m
 and 1 h, cache read, output — with its lower bound, where it is one, in numbers — reasoning and
-tool calls, then — when the API rejected its last request — the `Last request` row, then who
+tool calls, then what of it went wrong or was done again: its **tool errors** — `1 of 3 tool
+calls`, the tool results marked as an error, where it called a tool —, its **cache misses** —
+`model changed 2 · cache unavailable 1`, why the cache missed on its requests, the most frequent
+reason first, with the input tokens those misses state were not read from the cache (`48.2K tokens
+not read from the cache`; Claude Code gives that figure for a changed message, model, tool set or
+system prompt, not for an unavailable cache or a previous message it could not find, so only the
+stated ones are summed), only where there was one — and its **compactions** — `1 · last at 14:20
+(auto, 167.2K → 12.4K)`: how often its transcript was compacted, when last, whether it was asked
+for (`manual`) or Claude Code's own (`auto`), and the context before and after it, only where it
+was —; then — when the API rejected its last request — the `Last request` row, then who
 spawned it — left out for an agent of a workflow run that no launch names: its run started it,
-and the next row names the run —, its workflow run and — where the run's journal started its
-step more than once — which attempt it was, and last Claude Code's report, where there is one. An
-agent nothing of which was counted has no summary line, no mix, no rank and no pace, and dashes
-for its figures.
+and the next row names the run; where no launch names a spawner, the agent its sidecar names as
+its parent —, its workflow run and — where the run's journal started its
+step more than once — which attempt it was, the **Claude Code version** that wrote its transcript
+— `2.1.281`, `–` where its lines named none — and its **permission mode**, where its transcript
+names one (as Claude Code writes the word, `bypassPermissions`; on the measuring machine no
+agent's transcript names one), and last Claude Code's report, where there is one. An
+agent nothing of which was counted has no summary line, no mix, no rank, no pace and no tool
+errors, and dashes for its figures.
 
 A session opens with its two figures — `Own transcript`, and
 `Agents, last 7 days` with what it is not: *not added to the own figure — the two cover different
 spans* — then its project (only while attribution allows one), its models, `Since first line`
 and `Span` in place of a start and a duration, the last activity, the counts of its own
-transcript — its usage is the `Own transcript` row already —, how many agents it has, how many of
+transcript — its usage is the `Own transcript` row already —, its compactions where it was
+compacted, how many agents it has, how many of
 them ended on a rejected request, by reason, its **agents by effort** — `xhigh 412 · max 12 · – 3`,
 the most frequent first, `–` counting the ones with none recorded: a launch nobody has read a line
-of, an agent its journal started without a transcript, one whose replies carried none — and its
+of, an agent its journal started without a transcript, one whose replies carried none —, the
+Claude Code version that wrote its transcript, the permission mode its prompt last named — the
+word Claude Code writes, `plan` — and its
 ID; a collector its tally in words (`266 started, 255 done, 3 failed, about 8 unknown`), a
 `Usage` of `–` with why — *These agents were started, but none of them wrote a reply that could be
 counted — their transcripts hold no response, or only rejected requests.* — and how many of them
@@ -667,8 +683,9 @@ Everything comes from the directory Token Pace already reads for the token count
 
 | File | Taken from it | Never read |
 |---|---|---|
-| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); of a reply's line its top-level `effort` — one of `low`, `medium`, `high`, `xhigh` and `max`, any other value none; a nested agent lies flat beside the one that spawned it | any text, a tool call's `input` — and an `effort` inside it —, and an error line's `perTurnEffort` |
-| `agent-<id>.meta.json` beside each agent transcript | `agentType`, `model`, `spawnDepth`, `toolUseId` — from a file of at most 64 KB, never through a link | `description`, `prompt`, and every other field |
+| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); of a reply's line its top-level `effort` — one of `low`, `medium`, `high`, `xhigh` and `max`, any other value none; the tool results marked `is_error`, counted on the raw line by the literal `"is_error":true` — the line is not parsed for it; of a reply's message its `diagnostics`' `cache_miss_reason` — the reason's `type` (one of `previous_message_not_found`, `unavailable`, `messages_changed`, `model_changed`, `tools_changed` and `system_changed`; any other is not counted) and the `cache_missed_input_tokens` it states —, once per message, on its first line; a nested agent lies flat beside the one that spawned it | any text, a tool call's `input` — and an `effort` inside it —, an error line's `perTurnEffort`, the tool result itself, and anything else of the `diagnostics` |
+| `agent-<id>.meta.json` beside each agent transcript | `agentType`, `model`, `spawnDepth`, `toolUseId` and `parentAgentId` — the id of the agent that spawned it, the link where no launch names a spawner — from a file of at most 64 KB, never through a link | `description`, `prompt`, `requestShape`, `requestNonInteractive`, `workflowPhase`, `worktreePath` (a path), `worktreeBranch`, `spawnedWithWorktree`, `stoppedByUser`, and every other field |
+| every Claude Code transcript — a session's and an agent's | of a counted reply — and of an agent's API error line — the top-level `version`: three numbers, `2.1.281`, any other value none; of a user line — the prompt — the top-level `permissionMode`, matched on the raw line, one of `default`, `acceptEdits`, `bypassPermissions`, `plan` and `auto` — the line is never parsed for it; of a compaction's line — a `system` line whose `subtype` is `compact_boundary`, recognised on the raw line and then parsed — its `compactMetadata`: the `trigger` (`manual` or `auto`), `preTokens` and `postTokens`, and the line's time | the prompt and everything else of a user line; of a compaction its `preservedSegment`, `preservedMessages`, `preCompactDiscoveredTools`, `cumulativeDroppedTokens` and how long it took, and the `isCompactSummary` line after it, which holds the summary — that line is never parsed at all |
 | `<session>/subagents/workflows/<run>/journal.jsonl` | `type`, `key` and `agentId` at the head of each line, matched on the raw line — a line of at most 16 KB without that head is parsed for the same three, a longer one skipped and counted; the `key` is compared within the journal, never kept: with the keys of the same journal's other lines, to tell a step that was started again from a new one, and it is never stored, shown, exported or logged | the `result`, `label` and `phase` a line carries |
 | the transcript that launched an agent — the session's, or another agent's | an `Agent` (or `Task`) tool call: its `id` and three fields of its input, `subagent_type`, `model` and `run_in_background` | the input's `description` and `prompt` |
 | the same | the tool result that answers it: `agentId`, `status`, `totalTokens`, `totalDurationMs` and `totalToolUseCount`, and the `tool_use_id` it answers | its content — the prompt and the answer it also carries |
@@ -683,10 +700,14 @@ carries one — a journal line carries none, so a run's last activity is its jou
 modification time. For the agent tables nothing
 else is read: never a `description`, a `prompt`, a `summary`, an `output-file`, a `content`, a
 `result`, a `label` or a `phase`, never a workflow's `script`, `scriptPath` or `transcriptDir`,
-never an API error's text or its `errorDetails`, never a working directory, never any text. Every string that is kept is an identifier and is checked on the way in: a type or a
+never an API error's text or its `errorDetails`, never a tool result, never a compaction's summary,
+never a sidecar's `workflowPhase` or `worktreePath`, never a working directory, never any text. A
+permission mode named before a transcript's first counted reply — where the prompt line that names
+it sits — waits in memory for the record that reply makes, for at most **4000** transcripts, the
+oldest dropped first, and is not stored before it. Every string that is kept is an identifier and is checked on the way in: a type or a
 model alias is at most 40 characters of `[A-Za-z0-9_.:@/-]`, a model id from a response at most
 64 of the same, an id at most 64 characters of `[A-Za-z0-9_-]`, a depth a whole number from 1 to
-99. A value that does not fit is dropped whole rather than trimmed into a string nobody wrote,
+99, a Claude Code version three numbers of at most 3, 3 and 4 digits (`2.1.281`). A value that does not fit is dropped whole rather than trimmed into a string nobody wrote,
 and the tree shows the gap as `–`, as it does for older Claude Code builds that write no sidecar
 at all; only a session id, which no record can do without, is cut down to the id alphabet
 instead. The log gets counts, never a value.
@@ -699,7 +720,11 @@ word for it (one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancel
 kind and its limit, each one of the values listed above — an agent whose transcript holds nothing
 but rejected requests has a record from the first of them, its counts all zero —, the name of
 its last tool call with that line's time, the effort of its newest reply and every other one its
-replies carried (at most the five levels), and the context of its newest request — a count; per launch its tool-call id, the type and model it asked for, whether it runs in the
+replies carried (at most the five levels), and the context of its newest request — a count —, its
+tool errors, its cache misses by reason with the tokens they state, and for an agent and a session
+alike the Claude Code version that wrote its newest reply, the permission mode its prompt last
+named, how often it was compacted and its last compaction — the time, `manual` or `auto`, and the
+context before and after it; per launch its tool-call id, the type and model it asked for, whether it runs in the
 background, its result with that word and the parent's three totals; per `Workflow` call its
 tool-call id, the run id its result named, when it was made, and the run's end with the parent's
 word for it; per workflow run the agents
@@ -709,7 +734,8 @@ changed — never a key. The records are keyed by the transcript's path, as ever
 position always was. The CSV and JSON exports carry of each agent record what the tree shows of
 it — its ids, its type, model and effort, its state, counts and times, who launched it and Claude
 Code's report — in the agents file beside the CSV and the `agents[]` of the JSON (see
-[Export and diagnostics](export.md)); never a path, a journal key, a rejected request or its last tool call. The
+[Export and diagnostics](export.md)); never a path, a journal key, a rejected request, its last tool call, its version, its
+permission mode, its cache misses or its compactions — of the metadata only the count of its tool errors. The
 clipboard summary and the diagnostics report carry none of it. The tables do not depend on `tokenPace.attribution` — see
 [Sessions and projects](sessions.md).
 
@@ -726,7 +752,11 @@ before 1.6 no workflow runs. On the first start after the update they are rebuil
 Claude transcripts and journals that changed in the last seven days — each read only as far as its
 tokens were already counted, so no token is counted twice and no total moves. The snapshot states
 which revision of the agent tables it holds; an update that adds something only such a rebuild can
-fill in raises the revision, and the rebuild runs once more. *Re-read Token History* rebuilds them
+fill in raises the revision, and the rebuild runs once more. The rebuild also reads an agent's
+sidecar again when the identity it kept names no spawning agent — the fifth field, `parentAgentId`,
+came with 1.6 — and keeps that identity when the file is gone; an agent whose transcript the rebuild
+could not read again counts no tool errors, and its details have no `Tool errors` row rather than a
+zero nobody counted. *Re-read Token History* rebuilds them
 with everything else. A first start with no stored state, a re-read and a switch of
 `tokenPace.attribution` read every line from its first byte and fill the agent tables as they go,
 so no rebuild follows them — the tree does not stand half built for a moment after they end. The

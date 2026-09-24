@@ -27,8 +27,8 @@ import { AgentLaunch, AgentRec, Snapshot, STATE_VERSION, TOOL_NAME_MAX_CHARS } f
 import { markdownDocument } from '../src/textViews'
 import { agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
-  CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, codexTokenCount, ctxFor, iso, journalLine,
-  metaJson, queueOperationLine, tmpDir, workflowResultLine,
+  CLAUDE_ROOT, CLAUDE_SLUG, agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, codexTokenCount, compactBoundaryLine, ctxFor, iso,
+  journalLine, metaJson, promptLine, queueOperationLine, tmpDir, workflowResultLine,
 } from './fixtures/helpers'
 import { NOW as VNOW, makeConfig, makeInput } from './fixtures/viewFixtures'
 
@@ -167,6 +167,16 @@ test('an agent transcript gets its record on the first counted line, with the de
     effort: 'high',
     efforts: ['high'],
     lastContext: 7,
+    // 1.6 P13a (O3, pinned and changed: the record's shape): no tool result marked as an error, no
+    // cache miss, the version every fixture line is written by, no permission mode (its prompt line
+    // names none), no compaction.
+    toolErrors: 0,
+    cacheMisses: {},
+    cacheMissedTokens: 0,
+    ccVersion: '9.9.9',
+    permissionMode: null,
+    compactions: 0,
+    lastCompaction: null,
   })
   // The buckets hold the same figures: the record follows them, it does not count on its own.
   const sub = agg.all().filter((b) => b.isSub)
@@ -236,6 +246,9 @@ test('a main transcript keeps a session record for the tree, whatever attributio
     models: ['claude-opus-4-6', 'claude-sonnet-4-6'],
     input: 14, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 90,
     output: 27, reasoning: 0, requests: 2, outputFinal: 1, toolCalls: 1,
+    // 1.6 P13a (O3, pinned and changed: the record's shape): the version that wrote its lines; no
+    // permission mode, no compaction. None of an agent's own fields.
+    ccVersion: '9.9.9', permissionMode: null, compactions: 0, lastCompaction: null,
   }]])
   assert.equal(agg.agents().length, 0)
   // The open message knows which record holds it — by name, not by path.
@@ -573,9 +586,9 @@ test('the sidecar links an agent to its launch, in either order', () => {
   assert.equal(agentOf(agg, AGENT).spawnerFile, null)
   assert.equal(agentOf(agg, AGENT).outcome, null)
   assert.equal(agg.needsAgentMeta(AGENT), true)
-  agg.setAgentMeta(AGENT, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_bg' })
+  agg.setAgentMeta(AGENT, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_bg', parentAgentId: null })
   const rec = agentOf(agg, AGENT)
-  assert.deepEqual(rec.meta, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_bg' })
+  assert.deepEqual(rec.meta, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_bg', parentAgentId: null })
   assert.equal(rec.metaTries, 1)
   assert.equal(rec.spawnerFile, MAIN)
   assert.equal(launchOf(agg, 'toolu_bg').agentId, 'abc123')
@@ -587,7 +600,7 @@ test('the sidecar links an agent to its launch, in either order', () => {
   // A nested agent: its sidecar is read before the launch in its parent agent's transcript.
   const nested = new Aggregator()
   nested.addClaudeLine(claudeLine({ id: 'n1', ts: T0 + 200, agentId: '0ff1ce', usage: { input: 1 } }), NESTED_CTX)
-  nested.setAgentMeta(NESTED, { agentType: 'Plan', model: null, spawnDepth: 2, toolUseId: 'toolu_nested' })
+  nested.setAgentMeta(NESTED, { agentType: 'Plan', model: null, spawnDepth: 2, toolUseId: 'toolu_nested', parentAgentId: null })
   assert.equal(agentOf(nested, NESTED).spawnerFile, null)
   nested.addClaudeLine(agentToolUseLine({ id: 'p1', ts: T0 + 150, toolUseId: 'toolu_nested', agentId: 'abc123', subagentType: 'Plan' }), AGENT_CTX)
   assert.equal(agentOf(nested, NESTED).spawnerFile, AGENT)
@@ -599,7 +612,7 @@ test('a sidecar is asked for three times at most; what it holds is sanitised aga
   const agg = new Aggregator()
   // No record, no sidecar.
   assert.equal(agg.needsAgentMeta(AGENT), false)
-  agg.setAgentMeta(AGENT, { agentType: 'Explore', model: null, spawnDepth: 1, toolUseId: null })
+  agg.setAgentMeta(AGENT, { agentType: 'Explore', model: null, spawnDepth: 1, toolUseId: null, parentAgentId: null })
   assert.equal(agg.agents().length, 0)
 
   agg.addClaudeLine(claudeLine({ id: 's1', ts: T0, agentId: 'abc123', usage: { input: 1 } }), AGENT_CTX)
@@ -613,12 +626,12 @@ test('a sidecar is asked for three times at most; what it holds is sanitised aga
 
   const dirty = new Aggregator()
   dirty.addClaudeLine(claudeLine({ id: 's1', ts: T0, agentId: 'abc123', usage: { input: 1 } }), AGENT_CTX)
-  dirty.setAgentMeta(AGENT, { agentType: 'T'.repeat(41), model: 'opus', spawnDepth: 0, toolUseId: 'toolu bad' })
-  assert.deepEqual(agentOf(dirty, AGENT).meta, { agentType: null, model: 'opus', spawnDepth: null, toolUseId: null })
+  dirty.setAgentMeta(AGENT, { agentType: 'T'.repeat(41), model: 'opus', spawnDepth: 0, toolUseId: 'toolu bad', parentAgentId: null })
+  assert.deepEqual(agentOf(dirty, AGENT).meta, { agentType: null, model: 'opus', spawnDepth: null, toolUseId: null, parentAgentId: null })
   // Nothing usable at all is a try, not an identity.
   const empty = new Aggregator()
   empty.addClaudeLine(claudeLine({ id: 's1', ts: T0, agentId: 'abc123', usage: { input: 1 } }), AGENT_CTX)
-  empty.setAgentMeta(AGENT, { agentType: '<x>', model: '', spawnDepth: 1.5, toolUseId: '' })
+  empty.setAgentMeta(AGENT, { agentType: '<x>', model: '', spawnDepth: 1.5, toolUseId: '', parentAgentId: null })
   assert.equal(agentOf(empty, AGENT).meta, null)
   assert.equal(agentOf(empty, AGENT).metaTries, 1)
 })
@@ -646,17 +659,32 @@ test('the sanitisers hold every free string to its alphabet and cap, and drop th
   for (const bad of ['x'.repeat(AGENT_ID_MAX_CHARS + 1), 'a.b', 'a:b', 'a/b', 'a@b']) assert.equal(cleanAgentId(bad), null, bad)
 })
 
-test('parseAgentMeta reads four fields of a sidecar and nothing else', () => {
+// 1.6 P13a (§0a.11, pinned and changed): four fields became five — the spawning agent's
+// `parentAgentId` joins them; every other key of the sidecar stays unread, the ones §0a.11 names
+// (its workflow phase, its worktree's path and branch, how it was asked, who stopped it) included.
+test('parseAgentMeta reads five fields of a sidecar and nothing else', () => {
   const text = metaJson({
     agentType: 'Explore', model: 'opus', spawnDepth: 2, toolUseId: 'toolu_x', parentAgentId: 'abc123',
-    description: 'SIDECAR-DESCRIPTION', prompt: 'SIDECAR-PROMPT', extra: { requestShape: 'SIDECAR-SHAPE', requestNonInteractive: true },
+    description: 'SIDECAR-DESCRIPTION', prompt: 'SIDECAR-PROMPT', extra: {
+      requestShape: 'SIDECAR-SHAPE', requestNonInteractive: true, workflowPhase: 'SIDECAR-PHASE',
+      worktreePath: '/home/tester/SIDECAR-WORKTREE', worktreeBranch: 'SIDECAR-BRANCH', spawnedWithWorktree: true, stoppedByUser: true,
+    },
   })
   const meta = parseAgentMeta(text)
-  assert.deepEqual(meta, { agentType: 'Explore', model: 'opus', spawnDepth: 2, toolUseId: 'toolu_x' })
+  assert.deepEqual(meta, { agentType: 'Explore', model: 'opus', spawnDepth: 2, toolUseId: 'toolu_x', parentAgentId: 'abc123' })
   assert.equal(JSON.stringify(meta).includes('SIDECAR'), false)
   // An older or partial sidecar: what is there, the rest absent.
   assert.deepEqual(parseAgentMeta(metaJson({ agentType: 'Plan', model: null, toolUseId: null })), {
-    agentType: 'Plan', model: null, spawnDepth: 1, toolUseId: null,
+    agentType: 'Plan', model: null, spawnDepth: 1, toolUseId: null, parentAgentId: null,
+  })
+  // The parent's id through the id alphabet: anything else is none — and a sidecar naming nothing
+  // but a parent still has an identity.
+  for (const bad of ['a b', '../agent', 'a'.repeat(AGENT_ID_MAX_CHARS + 1), '']) {
+    assert.equal(parseAgentMeta(metaJson({ parentAgentId: bad }))?.parentAgentId, null, bad)
+  }
+  assert.equal(parseAgentMeta(JSON.stringify({ parentAgentId: 7 })), null)
+  assert.deepEqual(parseAgentMeta(JSON.stringify({ parentAgentId: 'a0ff1ce0000000001' })), {
+    agentType: null, model: null, spawnDepth: null, toolUseId: null, parentAgentId: 'a0ff1ce0000000001',
   })
   for (const depth of [0, -1, 1.5, 100, '2']) {
     assert.equal(parseAgentMeta(metaJson({ spawnDepth: depth as number }))?.spawnDepth, null, String(depth))
@@ -674,7 +702,7 @@ test('no agent or launch record holds a string longer than its cap', () => {
   const deepCtx = ctxFor({ file: deep, isSub: true })
   agg.addClaudeLine(claudeLine({ id: 'h1', ts: T0, agentId: 'abcabc', model: `claude-${'m'.repeat(100)}`, usage: { input: 1 } }), deepCtx)
   agg.addClaudeLine(claudeLine({ id: 'h2', ts: T0 + 1, agentId: 'abcabc', usage: { input: 1 } }), deepCtx)
-  agg.setAgentMeta(deep, { agentType: 'T'.repeat(41), model: 'M'.repeat(41), spawnDepth: 1, toolUseId: 'u'.repeat(65) })
+  agg.setAgentMeta(deep, { agentType: 'T'.repeat(41), model: 'M'.repeat(41), spawnDepth: 1, toolUseId: 'u'.repeat(65), parentAgentId: null })
   agg.addClaudeLine(agentToolUseLine({ id: 'h3', ts: T0 + 2, toolUseId: 't'.repeat(64), subagentType: 'S'.repeat(41) }), MAIN_CTX)
   agg.addClaudeLine(agentToolUseLine({ id: 'h4', ts: T0 + 3, toolUseId: 't'.repeat(65) }), MAIN_CTX)
   agg.addClaudeLine(agentResultLine({ ts: T0 + 4, toolUseId: 't'.repeat(64), agentId: 'a'.repeat(65) }), MAIN_CTX)
@@ -689,17 +717,22 @@ test('no agent or launch record holds a string longer than its cap', () => {
   assert.equal(rec.sessionId, 'f'.repeat(AGENT_ID_MAX_CHARS))
   assert.equal(rec.workflowId, null)
   assert.deepEqual(rec.models, ['claude-opus-4-6'])
-  assert.deepEqual(rec.meta, { agentType: null, model: null, spawnDepth: 1, toolUseId: null })
+  assert.deepEqual(rec.meta, { agentType: null, model: null, spawnDepth: 1, toolUseId: null, parentAgentId: null })
   assert.deepEqual(agg.launches().map((l) => [l.toolUseId.length, l.typeHint, l.agentId]), [[64, null, null]])
 
   const capOf: Record<string, number> = {
     agentId: AGENT_ID_MAX_CHARS, sessionId: AGENT_ID_MAX_CHARS, workflowId: AGENT_ID_MAX_CHARS,
     toolUseId: AGENT_ID_MAX_CHARS, typeHint: AGENT_NAME_MAX_CHARS, modelHint: AGENT_NAME_MAX_CHARS,
     agentType: AGENT_NAME_MAX_CHARS, model: AGENT_NAME_MAX_CHARS,
+    // 1.6 P13a (O3, pinned and changed): the sidecar's parent is an id; a version three numbers of at
+    // most 3, 3 and 4 digits.
+    parentAgentId: AGENT_ID_MAX_CHARS, ccVersion: 12,
   }
-  // Fixed vocabularies, not free strings. 1.6 N8: an effort is one of five levels.
+  // Fixed vocabularies, not free strings. 1.6 N8: an effort is one of five levels. 1.6 P13a (O3): a
+  // permission mode one of five, a compaction's trigger one of two.
   const enums: Record<string, string[]> = {
     source: ['claude'], outcome: ['launched', 'completed', 'failed'], effort: ['low', 'medium', 'high', 'xhigh', 'max'],
+    permissionMode: ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'], trigger: ['manual', 'auto'],
   }
   // Paths are keys, not free strings: the transcript's own path is what every cursor holds too.
   const paths = new Set(['sessionFile', 'spawnerFile', 'file'])
@@ -732,7 +765,7 @@ test('no agent or launch record holds a string longer than its cap', () => {
 // 1.6 P4 (N4): pinned that nothing but a response, an agent's result or a notification changes the
 // agent tables. The result that answers a `Workflow` call — a `runId` and no `agentId` — is one
 // more line that does (asserted at the end); one that only mentions a run changes nothing.
-test('a line that is no response, agent or run result, or notification changes nothing', () => {
+test('a line that is no response, agent or run result, notification, gated prompt or compaction changes nothing', () => {
   const agg = new Aggregator()
   const lines = [
     // A shell's output mentions a run id — inside a string, where the quotes are escaped.
@@ -769,6 +802,15 @@ test('a line that is no response, agent or run result, or notification changes n
   const before = JSON.stringify(agg.toSnapshot())
   for (const line of lines) assert.equal(agg.addClaudeLine(line, MAIN_CTX), false, line.slice(0, 60))
   assert.equal(JSON.stringify(agg.toSnapshot()), before)
+  // 1.6 P13a (O3, pinned and changed): a user line the permission-mode gate opens and a compaction's
+  // line change the session's record now — neither is parsed for anything else.
+  const gated = new Aggregator()
+  gated.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0 - 1, toolUseId: 'toolu_bg', background: true }), MAIN_CTX)
+  const plain = JSON.stringify(gated.toSnapshot())
+  assert.equal(gated.addClaudeLine(promptLine({ ts: T0, permissionMode: 'plan' }), MAIN_CTX), true)
+  assert.equal(gated.addClaudeLine(compactBoundaryLine({ ts: T0 + 1 }), MAIN_CTX), true)
+  assert.notEqual(JSON.stringify(gated.toSnapshot()), plain)
+  assert.deepEqual([gated.mains()[0].permissionMode, gated.mains()[0].compactions], ['plan', 1])
   // The result that answers a `Workflow` call names its run: that changes the run launches.
   assert.equal(agg.addClaudeLine(workflowResultLine({ ts: T0, toolUseId: 'toolu_wf', runId: WF }), MAIN_CTX), true)
   assert.notEqual(JSON.stringify(agg.toSnapshot()), before)
@@ -892,7 +934,7 @@ test('a scan builds the whole tree\'s records from a session on disk', async () 
   await scan(agg)
 
   const bg = agentOf(agg, w.agent)
-  assert.deepEqual(bg.meta, { agentType: 'general-purpose', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_bg' })
+  assert.deepEqual(bg.meta, { agentType: 'general-purpose', model: 'opus', spawnDepth: 1, toolUseId: 'toolu_bg', parentAgentId: null })
   assert.equal(bg.spawnerFile, w.main)
   assert.equal(bg.sessionFile, w.main)
   assert.equal(bg.outcome, 'completed')
@@ -921,7 +963,7 @@ test('a scan builds the whole tree\'s records from a session on disk', async () 
   assert.deepEqual(journalOf(agg), [{ agentId: 'def456', outcome: 'completed' }])
   const run = agg.runs()[0]
   assert.equal(run.lastTs, fs.statSync(w.journal).mtimeMs, 'the journal\'s mtime, handed over after the read')
-  assert.deepEqual(wf.meta, { agentType: 'workflow-subagent', model: 'fable', spawnDepth: 1, toolUseId: null })
+  assert.deepEqual(wf.meta, { agentType: 'workflow-subagent', model: 'fable', spawnDepth: 1, toolUseId: null, parentAgentId: null })
 
   assert.deepEqual(agg.mainEntries().map(([f, m]) => [f, m.requests]), [[w.main, 3]])
   assert.equal(agg.agents().length, 4)
@@ -988,7 +1030,7 @@ test('scan reads an agent\'s sidecar after its lines: at most 64 KB, never throu
   const agg = new Aggregator()
   // Five counted lines and one sidecar that gave its record an identity.
   assert.equal(await scan(agg), 6)
-  assert.deepEqual(agentOf(agg, file('a0')).meta, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_a0' })
+  assert.deepEqual(agentOf(agg, file('a0')).meta, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_a0', parentAgentId: null })
   assert.equal(agentOf(agg, file('b16')).meta, null, 'a sidecar beyond 64 KB is absent')
   if (linked) assert.equal(agentOf(agg, file('c11')).meta, null, 'a sidecar behind a link is absent')
   assert.equal(agentOf(agg, file('d0')).metaTries, 1)
@@ -1136,7 +1178,7 @@ function sampleAgg(): Aggregator {
   agg.addClaudeLine(agentToolUseLine({ id: 'm2', ts: T0 + 1000, toolUseId: 'toolu_bg', background: true, subagentType: 'Explore' }), MAIN_CTX)
   agg.addClaudeLine(agentResultLine({ ts: T0 + 1100, toolUseId: 'toolu_bg', agentId: 'abc123', status: 'async_launched' }), MAIN_CTX)
   agg.addClaudeLine(claudeLine({ id: 'a1', ts: T0 + 2000, agentId: 'abc123', usage: { input: 50, output: 10 }, tools: [{ name: 'Read', id: 'toolu_r' }] }), AGENT_CTX)
-  agg.setAgentMeta(AGENT, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_bg' })
+  agg.setAgentMeta(AGENT, { agentType: 'Explore', model: 'haiku', spawnDepth: 1, toolUseId: 'toolu_bg', parentAgentId: null })
   agg.addClaudeLine(claudeLine({ id: 'w1', ts: T0 + 3000, agentId: 'def456', usage: { input: 3 } }), WF_CTX)
   agg.addWorkflowJournalLine(journalLine({ type: 'started', agentId: 'def456', step: 'one' }), JOURNAL_CTX)
   agg.addWorkflowJournalLine(journalLine({ type: 'result', agentId: 'c0ffee' }), JOURNAL_CTX)
@@ -1743,8 +1785,9 @@ test('an agent keeps the context of its newest request — input, cache write an
 
 test('the efforts and the context survive a snapshot round trip, checked again; a snapshot of revision 5 asks for the replay that fills them', async () => {
   // 6: the efforts (1.6 N8) and the newest request's context (L2) are what only a replay can fill
-  // for the transcripts already read.
-  assert.equal(AGENT_TABLES_REVISION, 6)
+  // for the transcripts already read. 1.6 P13a (pinned and changed): 7, for the O3 metadata — a
+  // revision-5 snapshot still asks for the replay, as every one below the current does.
+  assert.equal(AGENT_TABLES_REVISION, 7)
   const agg = new Aggregator()
   agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, agentId: 'abc123', usage: { input: 5, cacheRead: 100 }, effort: 'high' }), AGENT_CTX)
   agg.addClaudeLine(claudeLine({ id: 'm2', ts: T0 + 1000, agentId: 'abc123', usage: { input: 7, cacheWrite: 20 }, effort: 'max' }), AGENT_CTX)

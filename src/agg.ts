@@ -9,10 +9,10 @@ import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, MainRec, CodexRateLimitsSnapshot, Cursor, Effort, JournalAgent,
-  LaunchStatus, PendingMessage, RateLimitKind, RecordedOutcome, RejectedRequest, Resolution, RunLaunch, RunRec, SessionRec,
-  Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS, STATE_VERSION,
-  TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
+  AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, CacheMissKind, MainRec, CodexRateLimitsSnapshot, CompactionRec,
+  Cursor, Effort, JournalAgent, LaunchStatus, PendingMessage, PermissionMode, RateLimitKind, RecordedOutcome, RejectedRequest,
+  Resolution, RunLaunch, RunRec, SessionRec, Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS,
+  STATE_VERSION, TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
 
 /** Per-file context the scanner hands to every ingest call. */
@@ -276,7 +276,10 @@ function clipId(v: string): string {
   return v.replace(/[^A-Za-z0-9_-]/g, '').slice(0, AGENT_ID_MAX_CHARS)
 }
 
-/** The four identity fields, each through its sanitiser; null when none of them is usable. */
+/**
+ * The five identity fields, each through its sanitiser; null when none of them is usable. 1.6 O3
+ * (§0a.11): the fifth, `parentAgentId`, is the spawning agent's id, through the id alphabet.
+ */
 function cleanMeta(v: unknown): AgentMeta | null {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null
   const o = v as Record<string, unknown>
@@ -285,18 +288,28 @@ function cleanMeta(v: unknown): AgentMeta | null {
     model: cleanAgentName(o.model),
     spawnDepth: cleanDepth(o.spawnDepth),
     toolUseId: cleanAgentId(o.toolUseId),
+    parentAgentId: cleanAgentId(o.parentAgentId),
   }
   return meta.agentType === null && meta.model === null && meta.spawnDepth === null && meta.toolUseId === null
+    && meta.parentAgentId === null
     ? null
     : meta
 }
 
+/** Whether two identities say the same, field by field. */
+function sameMeta(a: AgentMeta | null, b: AgentMeta | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.agentType === b.agentType && a.model === b.model && a.spawnDepth === b.spawnDepth
+    && a.toolUseId === b.toolUseId && a.parentAgentId === b.parentAgentId
+}
+
 /**
  * The identity an `agent-<id>.meta.json` gives its transcript: `agentType`, `model`,
- * `spawnDepth` and `toolUseId`, each through its sanitiser, and nothing else. The sidecar also
- * holds the agent's description and its whole prompt; those are content, and the parsed
- * object that holds them does not outlive this call. Null when the text is no JSON object or
- * none of the four fields is usable.
+ * `spawnDepth`, `toolUseId` and — since 1.6 O3 (§0a.11) — `parentAgentId`, each through its
+ * sanitiser, and nothing else. The sidecar also holds the agent's description and its whole
+ * prompt, and beside them how it was asked (`requestShape`), its workflow phase and its worktree's
+ * path and branch; those are content or paths, and the parsed object that holds them does not
+ * outlive this call. Null when the text is no JSON object or none of the five fields is usable.
  */
 export function parseAgentMeta(text: string): AgentMeta | null {
   let parsed: unknown
@@ -386,9 +399,12 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * 1 = 1.6's runs from the workflow journals; 2 = the `Workflow` launches and their ends (N4); 3 = the
  * rejected requests of the agents (N3); 4 = the records of the agents whose transcript holds
  * nothing but rejected requests (D4); 5 = the last tool call of an agent and its time (N5); 6 = the
- * effort of an agent's replies (N8) and the context of its newest request (L2).
+ * effort of an agent's replies (N8) and the context of its newest request (L2); 7 = the metadata of O3 —
+ * an agent's tool errors and cache misses, the Claude Code version, the permission mode and the
+ * compactions of an agent's and a main session's transcript — and the sidecar's `parentAgentId`,
+ * which the replay reads the sidecar of an agent again for.
  */
-export const AGENT_TABLES_REVISION = 6
+export const AGENT_TABLES_REVISION = 7
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -624,6 +640,191 @@ function restoreEfforts(v: unknown): Effort[] {
   return out
 }
 
+// ---------------------------------------------------------------------------
+// 1.6 O3: further metadata without content (§0a.6–0a.10)
+// ---------------------------------------------------------------------------
+
+/** A plain JSON object — not null, not an array. */
+function plainObject(v: unknown): v is Record<string, any> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
+/** A token figure a line states: a finite number of at least 0, else none. */
+function tokenFigure(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null
+}
+
+/**
+ * 1.6 O3 (§0a.6): the mark of a tool result whose tool failed — Claude Code's own key of a
+ * `tool_result` block, `is_error`, set true — counted on the raw line. Inside a JSON string (a
+ * tool's output that mentions it, a prompt that quotes it) its quotes are escaped
+ * (`\"is_error\":true`), so the unescaped literal can only be the key itself: the line is not
+ * parsed for it, and the tool's output is never looked at.
+ */
+export const TOOL_ERROR_LITERAL = '"is_error":true'
+
+/** How many tool results a raw line marks `is_error` (§0a.6): the count of the literal, nothing parsed. */
+export function toolErrorsOf(raw: string): number {
+  let n = 0
+  for (let at = raw.indexOf(TOOL_ERROR_LITERAL); at >= 0; at = raw.indexOf(TOOL_ERROR_LITERAL, at + TOOL_ERROR_LITERAL.length)) n++
+  return n
+}
+
+/**
+ * 1.6 O3 (§0a.9): the permission mode a user line names at its top level — the key and one of the
+ * five modes Claude Code writes, unescaped, matched on the raw line. The line holds the user's
+ * prompt or a tool's output and is never parsed for it; a prompt that spells the key out has its
+ * quotes escaped and does not match.
+ */
+export const PERMISSION_MODE_RE = /"permissionMode":"(default|acceptEdits|bypassPermissions|plan|auto)"/
+
+/** The permission mode a raw line names (§0a.9), or null. */
+export function permissionModeOf(raw: string): PermissionMode | null {
+  const m = PERMISSION_MODE_RE.exec(raw)
+  return m === null ? null : m[1] as PermissionMode
+}
+
+const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto']
+
+function permissionModeValue(v: unknown): PermissionMode | null {
+  return typeof v === 'string' && (PERMISSION_MODES as readonly string[]).includes(v) ? v as PermissionMode : null
+}
+
+/**
+ * The permission modes remembered for transcripts that have no record yet (§0a.9): the prompt
+ * line that names one comes before the transcript's first counted reply, which makes the record.
+ * Oldest dropped first; not persisted.
+ */
+export const PENDING_MODE_MAX = 4000
+
+/**
+ * 1.6 O3 (§0a.10): the line Claude Code writes where it compacted a transcript — a `system` line
+ * of the subtype `compact_boundary` —, recognised on the raw line by the key and its value,
+ * unescaped, before it is parsed. A tool's input or output that merely names the word does not
+ * pass: inside a string the quotes around it are escaped.
+ */
+const COMPACT_BOUNDARY_LITERAL = '"subtype":"compact_boundary"'
+/**
+ * The user line a compaction leaves its summary on (`isCompactSummary`): the summary is content,
+ * and the line is never parsed — whatever it happens to mention (§0a.10).
+ */
+const COMPACT_SUMMARY_LITERAL = '"isCompactSummary":true'
+
+function compactTrigger(v: unknown): CompactionRec['trigger'] {
+  return v === 'manual' || v === 'auto' ? v : null
+}
+
+/**
+ * A compaction (1.6 O3, §0a.10): of a `system` line of the `subtype` `compact_boundary`, its
+ * `compactMetadata` block's `trigger` — `manual` or `auto` — and the context before and after it,
+ * `preTokens` and `postTokens`, each through its allow-list, null when absent; with the line's
+ * time. Never the segment it preserved, the messages it kept, the tools it had found, the tokens it
+ * dropped or how long it took. Null for any other line.
+ */
+export function compactionOf(d: any, at: number): CompactionRec | null {
+  if (d.type !== 'system' || d.subtype !== 'compact_boundary') return null
+  const c = d.compactMetadata
+  const plain = plainObject(c)
+  return {
+    at,
+    trigger: plain ? compactTrigger(c.trigger) : null,
+    preTokens: plain ? tokenFigure(c.preTokens) : null,
+    postTokens: plain ? tokenFigure(c.postTokens) : null,
+  }
+}
+
+/** A compaction as a snapshot carries it, every value checked as at ingest; null when its time is not one. */
+function restoreCompaction(v: unknown): CompactionRec | null {
+  if (!plainObject(v)) return null
+  const at = finiteOrNull(v.at)
+  if (at === null || at <= 0) return null
+  return { at, trigger: compactTrigger(v.trigger), preTokens: tokenFigure(v.preTokens), postTokens: tokenFigure(v.postTokens) }
+}
+
+/** A Claude Code version as its lines write it: three dot-separated numbers of 1–3, 1–3 and 1–4 digits. */
+const VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,4}$/
+
+function versionValue(v: unknown): string | null {
+  return typeof v === 'string' && VERSION_RE.test(v) ? v : null
+}
+
+/**
+ * 1.6 O3 (§0a.8): the Claude Code version that wrote a transcript line — its top-level `version`,
+ * `1.2.3`-shaped, else none. Nothing else of the line is read for it.
+ */
+export function versionOf(d: any): string | null {
+  return versionValue(d.version)
+}
+
+/** The reasons a response's diagnostics may give for a cache miss (1.6 §0a.7) — every one Claude Code writes. */
+const CACHE_MISS_KINDS: readonly CacheMissKind[] = [
+  'previous_message_not_found', 'unavailable', 'messages_changed', 'model_changed', 'tools_changed', 'system_changed',
+]
+
+function cacheMissKind(v: unknown): CacheMissKind | null {
+  return typeof v === 'string' && (CACHE_MISS_KINDS as readonly string[]).includes(v) ? v as CacheMissKind : null
+}
+
+/** Why a request's cache missed, and the input tokens the response says were not read from it. */
+export interface CacheMiss {
+  kind: CacheMissKind
+  tokens: number | null
+}
+
+/**
+ * 1.6 O3 (§0a.7): why the cache missed on a response of an agent's transcript — of the message's
+ * `diagnostics`, its `cache_miss_reason`: the reason's `type`, one of six, and the
+ * `cache_missed_input_tokens` it states (Claude Code gives the figure for a changed message, model,
+ * tool set or system prompt). Nothing else of the diagnostics is read. Null for a response without
+ * one, or with a reason outside the six.
+ */
+export function cacheMissOf(m: any): CacheMiss | null {
+  const g = m.diagnostics
+  if (!plainObject(g)) return null
+  const x = g.cache_miss_reason
+  if (!plainObject(x)) return null
+  const kind = cacheMissKind(x.type)
+  return kind === null ? null : { kind, tokens: tokenFigure(x.cache_missed_input_tokens) }
+}
+
+/** An agent's cache misses by reason as a snapshot carries them: known reasons with a whole count of at least 1. */
+function restoreCacheMisses(v: unknown): Partial<Record<CacheMissKind, number>> {
+  const out: Partial<Record<CacheMissKind, number>> = {}
+  if (!plainObject(v)) return out
+  for (const kind of CACHE_MISS_KINDS) {
+    const n = v[kind]
+    if (typeof n === 'number' && Number.isInteger(n) && n >= 1) out[kind] = n
+  }
+  return out
+}
+
+/**
+ * What a line says beside its token figures, for the record that holds it: the effort it was
+ * written at (N8, agents only), the Claude Code version that wrote it (O3) and — on a message's
+ * first line, in an agent's transcript — why the cache missed (O3).
+ */
+interface LineNotes {
+  effort: Effort | null
+  version: string | null
+  miss: CacheMiss | null
+}
+
+/**
+ * 1.6 O3 (§0a.8): the version that wrote a record's newest line — the line is no older than the
+ * record's last one; a late line of an older reply changes nothing, and a line without a version
+ * keeps the one before.
+ */
+function noteVersion(rec: AgentRec | MainRec, at: number, version: string | null): void {
+  if (version !== null && at >= rec.lastTs) rec.ccVersion = version
+}
+
+/** 1.6 O3 (§0a.7): a message's cache miss onto an agent's record — counted by reason, its stated tokens summed. */
+function noteCacheMiss(rec: AgentRec | MainRec, miss: CacheMiss | null): void {
+  if (miss === null || !('cacheMisses' in rec)) return
+  rec.cacheMisses[miss.kind] = (rec.cacheMisses[miss.kind] ?? 0) + 1
+  if (miss.tokens !== null) rec.cacheMissedTokens += miss.tokens
+}
+
 /** The tool call a tool result answers: the `tool_use_id` of its first `tool_result` block. */
 function toolResultId(message: unknown): string | null {
   const content = message && typeof message === 'object' ? (message as { content?: unknown }).content : undefined
@@ -799,6 +1000,23 @@ function restoreAgent(v: unknown): AgentRec | null {
     effort: effortLevel(r.effort),
     efforts: restoreEfforts(r.efforts),
     lastContext: typeof r.lastContext === 'number' && Number.isFinite(r.lastContext) && r.lastContext >= 0 ? r.lastContext : null,
+    // 1.6 O3: counts as counts, the reasons of a cache miss through their six, the version and the
+    // mode through their patterns, the last compaction as at ingest — anything else is none. A
+    // snapshot from before 1.6 O3 has none of them, and the replay fills them in.
+    toolErrors: typeof r.toolErrors === 'number' && Number.isInteger(r.toolErrors) && r.toolErrors >= 0 ? r.toolErrors : null,
+    cacheMisses: restoreCacheMisses(r.cacheMisses),
+    cacheMissedTokens: tokenFigure(r.cacheMissedTokens) ?? 0,
+    ...restoreWriterFields(r),
+  }
+}
+
+/** The O3 fields an agent's and a main session's record share, as a snapshot carries them. */
+function restoreWriterFields(r: Record<string, unknown>): Pick<MainRec, 'ccVersion' | 'permissionMode' | 'compactions' | 'lastCompaction'> {
+  return {
+    ccVersion: versionValue(r.ccVersion),
+    permissionMode: permissionModeValue(r.permissionMode),
+    compactions: count(r.compactions),
+    lastCompaction: restoreCompaction(r.lastCompaction),
   }
 }
 
@@ -869,6 +1087,7 @@ function restoreMain(v: unknown): MainRec | null {
     input: num(r.input), cacheWrite: num(r.cacheWrite), cacheWrite1h: num(r.cacheWrite1h),
     cacheRead: num(r.cacheRead), output: num(r.output), reasoning: num(r.reasoning),
     requests: num(r.requests), outputFinal: num(r.outputFinal), toolCalls: num(r.toolCalls),
+    ...restoreWriterFields(r),
   }
 }
 
@@ -971,6 +1190,14 @@ export class Aggregator {
   private journalSteps = new Map<string, Map<string, { step: number; lastAgent: string }>>()
   /** Journal lines skipped as too long to parse without a head — a count, never a line. */
   journalSkipped = 0
+  /**
+   * 1.6 O3 (§0a.9): the permission mode a transcript's prompt line named before the transcript had
+   * a record — its first counted reply makes one and takes the mode from here (`agentFor`,
+   * `mainFor`). By path, at most PENDING_MODE_MAX, oldest dropped; not persisted: a restart between
+   * the prompt line and the first reply reads on past the line, and the record goes without the mode
+   * until the transcript's next prompt names one — or a replay reads the line again.
+   */
+  private pendingMode = new Map<string, PermissionMode>()
   /**
    * Lookups between the agent tables, derived from them and rebuilt on restore: an agent's
    * file by its id and by the tool_use id its sidecar names; a launch by the agent the
@@ -1247,19 +1474,98 @@ export class Aggregator {
    * response, or an agent's record — a launch, a result, a notification.
    */
   addClaudeLine(raw: string, ctx: IngestContext): boolean {
-    if (!worthParsing(raw)) return false
-    let d: any
-    try { d = JSON.parse(raw) } catch { return false }
-    if (!d || typeof d !== 'object') return false
-    const changed = d.type === 'assistant' ? this.claudeResponse(d, ctx)
-      : d.type === 'user' ? this.agentResult(d, ctx)
-        : d.type === 'queue-operation' ? this.agentNotification(d)
-          : false
+    // 1.6 O3: what is counted on the raw line, before — and for most lines instead of — a parse: the
+    // tool results marked as errors (§0a.6) and a prompt line's permission mode (§0a.9).
+    let changed = this.rawGates(raw, ctx)
+    // A compaction's line is recognised on the raw line too, and then parsed (§0a.10); the line
+    // holding a compaction's summary never is, whatever it mentions.
+    const compaction = raw.indexOf(COMPACT_BOUNDARY_LITERAL) >= 0
+    if (raw.indexOf(COMPACT_SUMMARY_LITERAL) < 0 && (compaction || worthParsing(raw))) {
+      let d: any
+      try { d = JSON.parse(raw) } catch { d = null }
+      if (d && typeof d === 'object') {
+        const noted = d.type === 'assistant' ? this.claudeResponse(d, ctx)
+          : d.type === 'user' ? this.agentResult(d, ctx)
+            : d.type === 'queue-operation' ? this.agentNotification(d)
+              : d.type === 'system' && compaction ? this.noteCompaction(d, ctx)
+                : false
+        changed = noted || changed
+      }
+    }
     // 1.6 L5: a Claude line that changed anything reached an agent table — the record of the
     // transcript it is in (an agent's, or the main session's the tree roots on), a launch, a run's
     // launch or an outcome. Its buckets, where it has any, mark themselves (`bucketFor`).
     if (changed) this.changes.agents = true
     return changed
+  }
+
+  /**
+   * 1.6 O3: the two raw-line gates. In an agent's transcript, every `"is_error":true` is a tool
+   * result marked as an error (§0a.6), added to the agent's record — a tool result answers a call of
+   * a reply that came before it, so the record is there; one before the transcript's first counted
+   * reply is not counted. In any Claude transcript, a permission mode (§0a.9) goes to the record, or
+   * waits for it in `pendingMode`. Neither line is parsed for it. True when a record changed.
+   */
+  private rawGates(raw: string, ctx: IngestContext): boolean {
+    let changed = false
+    if (ctx.isSub) {
+      const errors = toolErrorsOf(raw)
+      const rec = errors > 0 ? this.agentMap.get(ctx.file) : undefined
+      // A record that does not count them (restored from before O3) is left as it is.
+      if (rec && rec.toolErrors !== null) {
+        rec.toolErrors += errors
+        changed = true
+      }
+    }
+    const mode = permissionModeOf(raw)
+    if (mode !== null) changed = this.notePermissionMode(ctx, mode) || changed
+    return changed
+  }
+
+  /**
+   * A permission mode onto the transcript's record — a later one overwrites — or, before the record
+   * exists, into `pendingMode` for it: the prompt line that names the mode comes before the first
+   * counted reply. Below `subagents` only an agent transcript is remembered.
+   */
+  private notePermissionMode(ctx: IngestContext, mode: PermissionMode): boolean {
+    const rec = ctx.isSub ? this.agentMap.get(ctx.file) : this.mainMap.get(ctx.file)
+    if (rec) {
+      if (rec.permissionMode === mode) return false
+      rec.permissionMode = mode
+      return true
+    }
+    if (ctx.isSub && !AGENT_FILE_RE.test(path.basename(ctx.file))) return false
+    this.pendingMode.delete(ctx.file)
+    this.pendingMode.set(ctx.file, mode)
+    if (this.pendingMode.size > PENDING_MODE_MAX) {
+      const oldest = this.pendingMode.keys().next()
+      if (!oldest.done) this.pendingMode.delete(oldest.value)
+    }
+    return false
+  }
+
+  /** The permission mode waiting for a record that is being made now, taken out of `pendingMode`. */
+  private takePendingMode(file: string): PermissionMode | null {
+    const mode = this.pendingMode.get(file)
+    if (mode === undefined) return null
+    this.pendingMode.delete(file)
+    return mode
+  }
+
+  /**
+   * A compaction line (§0a.10) onto its transcript's record: counted, and kept when it is the latest.
+   * A transcript compacts after replies it counted, so the record is there; a compaction before the
+   * first counted reply (not observed) is not counted.
+   */
+  private noteCompaction(d: any, ctx: IngestContext): boolean {
+    const at = lineTime(d)
+    const c = at === null ? null : compactionOf(d, at)
+    if (c === null) return false
+    const rec = ctx.isSub ? this.agentMap.get(ctx.file) : this.mainMap.get(ctx.file)
+    if (!rec) return false
+    rec.compactions += 1
+    if (rec.lastCompaction === null || c.at >= rec.lastCompaction.at) rec.lastCompaction = c
+    return true
   }
 
   /** One assistant line: its tokens onto buckets, session and agent tables, and its launches. */
@@ -1275,7 +1581,8 @@ export class Aggregator {
     // agent's record keeps what `rejectedOf` reads of it, and nothing is counted. A main
     // transcript's error lines stay skipped.
     if (d.isApiErrorMessage) {
-      return d.isApiErrorMessage === true && ctx.isSub && at !== null ? this.noteRejected(ctx.file, at, rejectedOf(d)) : false
+      return d.isApiErrorMessage === true && ctx.isSub && at !== null
+        ? this.noteRejected(ctx.file, at, rejectedOf(d), versionOf(d)) : false
     }
     if (m.model === '<synthetic>') return false
     const launched = at !== null && this.noteLaunches(m.content, at, ctx)
@@ -1291,7 +1598,8 @@ export class Aggregator {
     const final = m.stop_reason != null
     const isSub = ctx.isSub
     // 1.6 N8 (§0a.4): an agent's transcript only — no main session's record carries an effort.
-    const effort = isSub ? effortOf(d) : null
+    // 1.6 O3 (§0a.8): the Claude Code version that wrote the line, for either kind of record.
+    const notes: LineNotes = { effort: isSub ? effortOf(d) : null, version: versionOf(d), miss: null }
     // A replay rebuilds the agent tables and nothing else. It keeps open messages of its own,
     // so the counting side's are neither read nor written, and nothing that counts is touched.
     const replay = ctx.agentsOnly === true
@@ -1359,7 +1667,9 @@ export class Aggregator {
         p.session = ctx.file
       }
 
-      if (at !== null) this.creditMessage(p, cand, final, tools, at, m.model, effort, ctx)
+      // 1.6 O3 (§0a.7): why the cache missed, on a message's first line only — its later lines repeat it.
+      if (isSub) notes.miss = cacheMissOf(m)
+      if (at !== null) this.creditMessage(p, cand, final, tools, at, m.model, notes, ctx)
       pending.set(id, p)
       this.trimPending(pending)
       return true
@@ -1421,7 +1731,7 @@ export class Aggregator {
       this.noteSessionHour(s, prev.hour, delta.input + delta.cacheWrite + delta.output)
     }
 
-    this.creditGrowth(prev, delta, newlyFinal, tools, at, m.model, next.input + next.cacheWrite + next.cacheRead, effort, ctx)
+    this.creditGrowth(prev, delta, newlyFinal, tools, at, m.model, next.input + next.cacheWrite + next.cacheRead, notes, ctx)
 
     prev.input = next.input
     prev.cacheWrite = next.cacheWrite
@@ -1456,11 +1766,13 @@ export class Aggregator {
    */
   private creditMessage(
     p: PendingMessage, v: TokenFigures, final: boolean, tools: ToolCalls, at: number, model: unknown,
-    effort: Effort | null, ctx: IngestContext,
+    notes: LineNotes, ctx: IngestContext,
   ): void {
     const rec = ctx.isSub ? this.agentFor(ctx.file, at) : this.mainFor(ctx.file, at)
     if (!rec) return
-    noteNewest(rec, at, v.input + v.cacheWrite + v.cacheRead, effort)
+    noteNewest(rec, at, v.input + v.cacheWrite + v.cacheRead, notes.effort)
+    noteVersion(rec, at, notes.version)
+    noteCacheMiss(rec, notes.miss)
     creditTokens(rec, v)
     rec.requests += 1
     if (final) rec.outputFinal += 1
@@ -1482,7 +1794,7 @@ export class Aggregator {
    */
   private creditGrowth(
     p: PendingMessage, v: TokenFigures, newlyFinal: boolean, tools: ToolCalls, at: number | null,
-    model: unknown, context: number, effort: Effort | null, ctx: IngestContext,
+    model: unknown, context: number, notes: LineNotes, ctx: IngestContext,
   ): void {
     const key = ownerKey(ctx.file)
     const owner = ctx.isSub ? p.agent : p.main
@@ -1500,7 +1812,10 @@ export class Aggregator {
       if (ctx.isSub) p.agent = key
       else p.main = key
     }
-    if (at !== null) noteNewest(rec, at, context, effort)
+    if (at !== null) {
+      noteNewest(rec, at, context, notes.effort)
+      noteVersion(rec, at, notes.version)
+    }
     creditTokens(rec, v)
     if (newlyFinal) rec.outputFinal += 1
     rec.toolCalls += tools.added
@@ -1519,7 +1834,7 @@ export class Aggregator {
    * reply counted, its first and last time that line's — the agent was started, and the tree
    * counts it among its run's agents without a counted reply. True when the record changed.
    */
-  private noteRejected(file: string, at: number, r: Omit<RejectedRequest, 'at'>): boolean {
+  private noteRejected(file: string, at: number, r: Omit<RejectedRequest, 'at'>, version: string | null): boolean {
     const rec = this.agentFor(file, at)
     if (!rec || at < rec.lastTs) return false
     const prev = rec.rejected
@@ -1528,6 +1843,8 @@ export class Aggregator {
       if (prev.at === at && prev.status === r.status && prev.error === r.error && prev.limit === r.limit) return false
     }
     rec.rejected = { at, status: r.status, error: r.error, limit: r.limit }
+    // 1.6 O3 (§0a.8): the error line is the transcript's newest, and Claude Code wrote it too.
+    if (version !== null) rec.ccVersion = version
     return true
   }
 
@@ -1574,6 +1891,15 @@ export class Aggregator {
       effort: null,
       efforts: [],
       lastContext: null,
+      // 1.6 O3: counted from the transcript's own lines, as a replay reads them again; the permission
+      // mode its prompt line named before this first counted reply, when there was one.
+      toolErrors: 0,
+      cacheMisses: {},
+      cacheMissedTokens: 0,
+      ccVersion: null,
+      permissionMode: this.takePendingMode(file),
+      compactions: 0,
+      lastCompaction: null,
     }
     this.agentMap.set(file, rec)
     this.agentFileById.set(rec.agentId, file)
@@ -1621,6 +1947,11 @@ export class Aggregator {
         models: [],
         input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
         output: 0, reasoning: 0, requests: 0, outputFinal: 0, toolCalls: 0,
+        // 1.6 O3: the permission mode the session's prompt line named before its first counted reply.
+        ccVersion: null,
+        permissionMode: this.takePendingMode(file),
+        compactions: 0,
+        lastCompaction: null,
       }
       this.mainMap.set(file, rec)
     }
@@ -1982,7 +2313,7 @@ export class Aggregator {
   }
 
   /**
-   * The sidecar's four fields, or null for "tried, nothing usable". Every call is a try; a
+   * The sidecar's five fields, or null for "tried, nothing usable". Every call is a try; a
    * sidecar that names a tool_use id links the agent to its launch. The fields are sanitised
    * again here, so a caller cannot put anything into the table the reader would not have.
    */
@@ -1995,6 +2326,32 @@ export class Aggregator {
     rec.meta = clean
     this.linkMeta(file, rec)
     this.changes.agents = true
+  }
+
+  /**
+   * 1.6 O3 (§0a.11): whether a replay reads the agent's sidecar again — its identity was read, but
+   * names no `parentAgentId`: by a build before the fifth field, or from a sidecar that has none.
+   */
+  needsAgentMetaRefresh(file: string): boolean {
+    const rec = this.agentMap.get(file)
+    return rec !== undefined && rec.meta !== null && rec.meta.parentAgentId === null
+  }
+
+  /**
+   * A sidecar read again by a replay (§0a.11): its five fields, sanitised as at the first read,
+   * replace the identity the record kept — a sidecar gone, or with nothing usable, keeps it. No try
+   * is counted. True when the identity changed.
+   */
+  refreshAgentMeta(file: string, meta: AgentMeta | null): boolean {
+    const rec = this.agentMap.get(file)
+    const clean = cleanMeta(meta)
+    if (!rec || !clean || sameMeta(rec.meta, clean)) return false
+    const was = rec.meta?.toolUseId
+    if (was && was !== clean.toolUseId && this.agentFileByToolUse.get(was) === file) this.agentFileByToolUse.delete(was)
+    rec.meta = clean
+    this.linkMeta(file, rec)
+    this.changes.agents = true
+    return true
   }
 
   /** Subagent transcripts, in the order they were first counted. */
@@ -2049,6 +2406,8 @@ export class Aggregator {
     this.changes.agents = true
     const set = new Set(files)
     for (const file of set) {
+      // A mode waiting for a record: the replay reads the prompt line that named it again.
+      this.pendingMode.delete(file)
       if (isWorkflowJournal(file)) {
         this.resetJournal(file)
         continue

@@ -102,9 +102,10 @@ const NO_FOLLOW = fs.constants.O_NOFOLLOW ?? 0
  * The identity sidecar of an agent transcript: `agent-<id>.meta.json` beside
  * `agent-<id>.jsonl`. At most 64 KB — a larger one is treated as absent — and never through a
  * link: the walk never follows one out of the transcript directory, and a sidecar may not
- * either. Four fields go through their sanitisers (`parseAgentMeta`); nothing else of the
- * file is kept — it also holds the agent's description and prompt — and no value is logged.
- * Null when there is no such file or nothing usable in it.
+ * either. Five fields go through their sanitisers (`parseAgentMeta`) — since 1.6 O3 (§0a.11) the
+ * spawning agent's `parentAgentId` beside the four of 1.5; nothing else of the file is kept — it
+ * also holds the agent's description and prompt, its workflow phase and its worktree's path — and
+ * no value is logged. Null when there is no such file or nothing usable in it.
  */
 export async function readAgentMeta(file: string): Promise<AgentMeta | null> {
   if (!file.endsWith('.jsonl')) return null
@@ -157,12 +158,21 @@ export async function rebuildJournal(
   return lines
 }
 
-/** Reads the sidecar an agent's record still waits for; 1 when it gave the record an identity. */
+/**
+ * Reads the sidecar an agent's record still waits for; 1 when it gave the record an identity. A
+ * replay (`agentsOnly`) also reads again the sidecar of a record whose identity names no
+ * `parentAgentId` (1.6 O3, §0a.11) — read by a build before the fifth field —, and keeps the identity
+ * it had when the file is gone.
+ */
 async function readSidecar(agg: Aggregator, file: string, ctx: IngestContext): Promise<number> {
-  if (!ctx.isSub || !agg.needsAgentMeta(file)) return 0
-  const meta = await readAgentMeta(file)
-  agg.setAgentMeta(file, meta)
-  return meta ? 1 : 0
+  if (!ctx.isSub) return 0
+  if (agg.needsAgentMeta(file)) {
+    const meta = await readAgentMeta(file)
+    agg.setAgentMeta(file, meta)
+    return meta ? 1 : 0
+  }
+  if (ctx.agentsOnly !== true || !agg.needsAgentMetaRefresh(file)) return 0
+  return agg.refreshAgentMeta(file, await readAgentMeta(file)) ? 1 : 0
 }
 
 /**

@@ -3,129 +3,194 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## 1.5.1 — 2026-09-23
+## 1.6.0 — 2026-09-24
+
+**Your Claude Code agents, in the dashboard.** A new Agents section shows the sessions of the last
+seven days as a tree of their workflow runs and agents, with the agents running right now listed
+first. Every session and run says what its agents came to — started, done, failed, retried,
+stopped, still running — and every state says whether somebody recorded it or it was inferred.
+Failures, stops, replaced attempts and requests the API rejected are told apart; a large run stays
+readable, fifty agents at a time; the tree works with the keyboard and a screen reader. A 7-day
+block shows where the agent tokens went, the quota cards say how much of each Claude window came
+from subagents, the chart can split every day by main session and subagent, and the Quick Pick,
+the markdown report and the exports carry the agents too. Two opt-ins join: the running agents in
+the status bar, and an agent hook you install into Claude Code yourself that marks an agent waiting
+for your approval. Everything the section reads is named field by field; nothing of a prompt, a
+description or a result is read.
+
+1.5.0 and 1.5.1 were committed but never published; their changes ship here.
 
 ### Added
 
-* **Running now — the agents at work, first thing in the Agents section.** A list above the tree
-  names every agent and every launch that is running at this moment, so you no longer have to
-  look for them in the tree: the longest-running first, each with the running glyph, its name, a
-  live `running for …` clock, its usage and where it sits — the session, the workflow run, and
-  the project while `tokenPace.attribution` names one. An agent that runs only because an agent
-  it launched is still running says so: `waits for a child agent`. The list is taken from every
-  session of the last seven days, the ones the tree does not list and the nodes it had to cut
-  included; it holds at most 20 agents and counts the rest (`and 3 more`). A click on a row
-  opens the same details as the tree row — for an agent of a session the tree does not list, as
-  long as the list names it; with nothing running the list is one line, `No agent is running.`
-  A running agent is nearly always mid-reply, so its output is nearly always a lower bound: the
-  line under the tree that points to the `⚠` in the details counts the list's rows too. The
-  markdown view prints the list as well, before the tree, each line marked `[~Running]` as the
-  tree marks an inferred state, with `⚠` behind a usage that is a lower bound.
+* **Agents — the Claude Code sessions of the last seven days as a tree.** A new dashboard section,
+  `agents`, directly below the quota cards and on by default, shows every session, the workflow
+  runs inside it, the agents it spawned and the agents those spawned in turn, the most recent
+  session first — at most 20 sessions, the rest counted under the tree. Each node has its state,
+  its usage (the tables' definition, and a part of their totals rather than an addition to them)
+  and its duration. The tree starts closed: only the sessions show until you open one, and what
+  you open stays open across pushes, reloads and restarts. Claude Code only — Codex writes no agent
+  identity, and the section says nothing about it.
+* **Running now, first thing in the section.** A list names every agent and every launch that is
+  running at this moment, the longest-running first — with a live `running for …` clock, its
+  usage and where it sits — so none has to be looked for in the tree. At most 20 rows, the rest
+  counted (`and 3 more`); a parent that runs only because its child does says `waits for a child
+  agent`, and an agent that has written nothing for three minutes or more says so —
+  `silent for 4 min`.
+* **A tally on every session and run.** `427 started · 390 ✓ · 15 ✕ · 10 ↻ · ~11 ● · ~1 ?` —
+  every agent below counted once, in exactly one part: done, failed, retried (every attempt a
+  workflow journal started again), stopped, and the inferred running and unknown, marked `~`. A
+  closed session already tells a run that went well from one that did not.
+* **States that say what they rest on.** Done, failed and stopped are what somebody recorded: the
+  parent's tool result or task notification, the workflow run's journal, the task notification of
+  the `Workflow` call that launched a run, or Claude Code's own record of the run. Running and
+  unknown — and a session's active and idle — are inferred from when a transcript last changed,
+  and say so. A stop Claude Code records (`killed`, `cancelled`, `stopped`) is its own state, `■`,
+  not a failure; an attempt the journal started again is dimmed and counted as retried; a run is
+  decided by its members, so one failure among completed agents does not fail it. Every state
+  opens its details with the sentence it was derived from, word for word.
+* **Why an agent ended.** When the API rejected an agent's last request, its details say so with
+  the limit or the error and the HTTP status — `rejected at 14:20 — 5-hour limit (HTTP 429)` — and
+  a run and a session count their agents that ended so, by reason. The agents of a run that never
+  wrote a reply that could be counted are one row, `263 agent(s) without a counted reply`, with
+  `–` for its figures, rather than hundreds of empty ones.
+* **Details under the row you clicked.** A click, or `Enter`, opens a node's details right under
+  its row: a one-line summary, the token mix as a bar and in words, its rank in its run, the
+  context at the end, what it used per minute, the effort its replies were written at, its ID with
+  a *Copy ID* button (and the command *Token Pace: Copy Agent ID*), its tool errors, why the cache
+  missed, its compactions, the Claude Code version and the permission mode, and Claude Code's own
+  report of a synchronous agent — never added to a total. A run adds how many of its agents ran at
+  once, how often it was resumed and the seven fields of Claude Code's run record; a session shows
+  its own transcript's usage beside its agents' of the last seven days, never added, and its span
+  in days and hours.
+* **Large runs readable.** Every row is two lines — the name, then the figures — and a session or
+  a run is named by when it started (`Workflow run Tue 00:19 · cfe7718d`). Children come in time
+  order, the newest first; an opened node shows fifty of them at a time, with a line for the next
+  fifty (`50 more · 377 not shown`), up to ten steps. Only what is open is sent to the page: a
+  session with a run of 427 agents weighs 1.8 KB closed. Where a sidebar is narrow, the model gives
+  way before the agent's type, and a run never loses the time it is named by. A usage that is a
+  lower bound carries `⚠` on the row, its reason in the title — `⚠ lower bound — 2 of 41 replies
+  unfinished`.
+* **A tree to the keyboard and a screen reader.** One stop of the `Tab` key, the arrow keys,
+  `Home`, `End`, `Enter`, `Space` and `Escape` as in any tree; every row named in words — its state
+  as recorded or derived, its tally — and clocks that stand still for a screen reader. Targets of at
+  least 24 × 24 px, and the system's colours in a forced-colours theme.
+* **Where the agent tokens went.** The running list's `Last 7 days` button opens a block of the
+  agent tokens of the seven days by type and model — how many agents, their usage, its share, the
+  median per agent and, with costs on, an estimated `~Cost` — and the five largest agents, whose
+  rows open their details.
+* **The subagents' share of each Claude window.** Under each Claude window's bar a dim line says
+  how much of what this machine counted over that window came from subagents —
+  `Subagents 4.7M of 5.5M counted here (86 %)` —, a share of tokens and never of the quota; a model
+  window counts only its models. The data-quality section sets the agent records against the
+  subagent hour buckets of the same seven days.
+* **Running agents in the status bar, opt-in.** `agents` in `tokenPace.statusBar.show` shows
+  `~3 running` while agents run and nothing while none does — no colour, no alarm, no word when an
+  agent finishes; its tooltip names five of them.
+* **The agents in the Quick Pick, the exports and the chart.** The Quick Pick has an `Agents` group
+  after the quota: the first five running agents and the sessions' tallies added up. The JSON
+  export gains `agents[]` (`schema_version` 3) and the CSV export a third file, `….agents.csv`:
+  ids, type, model, effort, state, counts and times of each agent, never a path; both save dialogs
+  say so before anything is written. The chart's `subagents` chip splits every column into each
+  provider's main sessions and its subagents.
+* **The agent hook, opt-in.** *Token Pace: Set Up the Agent Hook…* copies a small script into the
+  extension's storage and shows the snippet for `~/.claude/settings.json` — installed by you,
+  removed by you; Token Pace never writes into `~/.claude`. With the hook installed, an agent
+  waiting for your approval or input says so on its row: `waiting for approval`. It needs Node.js
+  on the PATH, and in Claude Code's auto mode no permission dialog is shown, so no wait is
+  reported. The keys it reads were checked against Claude Code 2.1.281.
+* **The markdown report prints the agents too:** the running list, the 7-day block while it is
+  open, and the tree with every node open — fifty children a node, at most 2000 nodes, a line for
+  the rest — and the open node's details as a table.
 
 ### Changed
 
-* **The agent tree starts closed.** Only the sessions show until you open one, and a closed node
-  says how many agents are below it (`4 agent(s)`) — also a node whose agents the tree had to
-  cut all away, which has nothing to open. The nodes you open are remembered with the
-  dashboard's view state, as node keys and nothing else, and stay open across pushes, reloads
-  and restarts — at most 200 of them: opening one more forgets the one opened longest ago, so a
-  node can always be opened. Selecting a node — in the tree or in the running list — opens
-  nothing by itself, and its details show under the tree whether its row is on screen or inside
-  a closed branch; a selection the page has no row for says so under the tree instead. What
-  1.5.0 kept as folded nodes is not carried over.
+* **The default section order gains `agents` after `quota`.** A `tokenPace.dashboard.sections`
+  you have set yourself is left exactly as it is, so there the section appears once you add
+  `agents` to it. The range, provider and model chips do not apply to it — it is always the last
+  seven days — so the filter bar stays below it.
+* **Live while agents run, and cheap.** The Agents section is pushed at most every two seconds and
+  its clocks tick in the page; an unchanged tree is not sent again. The agent directories of the
+  active sessions are listed every five seconds while an agent runs or a session is active, so a
+  new workflow run is found within seconds on every platform. A read that changed only the agents
+  rebuilds only the Agents section and the status bar; while agents write, the other sections
+  follow at most every five seconds, and the state is saved every ten seconds instead of five.
+* **The snapshot is schema version 8** (`STATE_VERSION` 8), and the agent tables are at revision 8
+  (`AGENT_TABLES_REVISION` 8). Versions 5, 6 and 7 are read forward, so the update forces no cold
+  re-read: the first start after the upgrade replays the agent tables once from the Claude
+  transcripts and workflow journals of the last seven days, each read only as far as its tokens
+  were already counted — no token is counted twice and no total moves.
+* **Clear Stored Data…** lists the agent hook's mirror, `agent-hook.jsonl`, among what it can
+  delete; the hook's script stays while the hook is installed and goes with the extension's
+  storage on uninstall.
+* **German:** „Tool-Aufrufe" replaces „Werkzeugaufrufe", and the settings say „Token" as the
+  interface does; the German setting descriptions no longer quote English interface texts.
+* For contributors: the extension test probes the timers directly at shutdown, and the wait for
+  the rebuilt tree after an upgrade is capped by the rebuild interval rather than a literal.
 
 ### Fixed
 
 * **The token history no longer multiplies when the disk comes up under another number.** A
   file's identity was its device and inode number. The device number names the block device,
   not the file system, and a disk that enumerates as `sda3` on one boot and `sdb3` on the next
-  gives every file a new one: every transcript was then read again from the start into the
-  buckets that already held it, and all figures of the days before grew with every such boot —
-  on the machine where it was found by a factor of two to six. A file is now the same file as
-  long as its inode is and it has not shrunk. The history that is already stored is not
-  repaired by itself: if older days look too high, run **Re-read Token History** once.
-* **Nothing is drawn or saved after the extension has shut down.** The one-time rebuild of the
-  agent tables after the first start saved and then redrew the status bar even when the window
-  had closed in the meantime, and its save shared a temporary file with the save on exit — in
-  the worst case the stored state held the start of one snapshot and the end of the other.
-  This also made the test suite fail now and then, which is what stopped the 1.5.0 release.
-
-## 1.5.0 — 2026-09-23
-
-Tagged but not published: the release run stopped at a failing test. 1.5.1 is the first release that ships these changes.
-
-### Added
-
-* **Agents — the Claude Code sessions of the last seven days as a tree.** A new dashboard
-  section (`agents`, on by default, directly below the quota cards) shows every session, the
-  workflow runs inside it, the agents it spawned and the agents those spawned in turn, the most
-  recent session first. Every node carries its state, its usage — the same definition as the
-  tables, and a part of their totals rather than an addition to them — and its duration; the
-  markdown view prints the same tree as an indented list. At most 20 sessions and 300 nodes are
-  shown, and what is left out is stated under the tree. Claude Code only: Codex writes no agent
-  identity, and the section says nothing about it.
-* **States that say what they rest on.** Done and failed are what somebody recorded — the
-  parent's tool result, a task notification, or a workflow run's journal. Running and unknown,
-  and a session's active and idle, are inferred from when a transcript last recorded a response
-  — an agent waiting on a running agent it launched runs too, and a session with a running agent
-  is active — and are marked as inferred: `~` in the glyph's title, `[~Running]` in the markdown. Claude Code
-  writes no end marker into an agent's transcript, so an agent that has been silent for ten
-  minutes without a result is unknown, never done.
-* **Details on a click.** Clicking a node, or pressing Enter on it, opens a panel under the tree:
-  type, models, depth, start, duration, last activity, the state with the sentence it was derived
-  with, turns, the token kinds of the totals table, tool calls, who spawned it and its workflow
-  run. Output that is a lower bound says so there, with `⚠` — almost every finished agent's is,
-  because its file ends on a line Claude Code never marked as finished — so the tree rows carry
-  no mark, and one line under the tree says where to find it. For a synchronous agent the parent's own
-  report of its totals is shown beside ours and never added to any sum. What you fold and which
-  node is open are kept with the dashboard's view state, as node keys and nothing else.
-* **Live while agents run.** A changed transcript is read as soon as the token counts read it;
-  the section is pushed at most every two seconds, so the tree does not redraw under the pointer
-  twice a second, while a fold or a click is answered at once; the running clocks tick every
-  second in the page itself. Because the recursive file watcher can miss the files of a
-  directory created after it started — on Linux it does — the agent directories of the active
-  sessions are also listed every five seconds while an agent runs, on every platform.
-* **Everything the tree reads, field by field.** From `agent-<id>.meta.json` only `agentType`,
-  `model`, `spawnDepth` and `toolUseId`; from a workflow run's `journal.jsonl` only `type` and
-  `agentId`; from an `Agent` or `Task` tool call only its id, `subagent_type`, `model` and
-  `run_in_background`; from its tool result only `agentId`, `status` and the three totals; from
-  a task notification only the `<tool-use-id>` and `<status>` tags. Never a description, a
-  prompt, a summary, an output path or a result. Every string among them is an identifier, held
-  to a small alphabet and length on the way in, and the tables are kept for seven days. The
-  documentation has a page of its own for the section, and the privacy page names every field.
-
-### Changed
-
-* **The default section order gains `agents` after `quota`.** A `tokenPace.dashboard.sections`
-  you have set yourself is left exactly as it is, so the tree appears there only once you add
-  `agents` to the list.
-* **The filter bar sits below the agent tree too.** The range, provider and model chips do not
-  apply to it — it is always the last seven days — so, like the quota cards and the Tokens
-  section, it stays above the bar when it leads the list.
-* **The snapshot is schema version 7.** Versions 6 and 5 are read forward rather than thrown
-  away, so the update forces no cold re-read. On the first start the agent tables are rebuilt
-  once from the Claude transcripts of the last seven days, each read only as far as its tokens
-  were already counted, so no token is counted twice and no total moves. On the machine this was
-  built on, a week with 879 agents took the snapshot from 2.4 to 3.2 MB and a cold scan of 1.7 GB
-  of transcripts from 3.2 to 3.7 seconds.
-
-### Fixed
-
+  gave every file a new one: every transcript was then read again from the start into the
+  buckets that already held it, and the figures of the days before grew with every such boot. A
+  file is now the same file as long as its inode is and it has not shrunk. The history that is
+  already stored is not repaired by itself: if older days look too high, run **Re-read Token
+  History** once.
 * **The agents of a workflow run were filed one level off.** A transcript under
   `subagents/workflows/<run>/` was read as if the run's directory were the session: with
   attribution on, its record named `workflows` as its parent session — the `parent` of
   `sessions[]` in the JSON export — and, for a line without a working directory, `subagents` as
-  its project. The placement now walks up to the nearest `subagents` directory, so an agent
-  belongs to its real session and project at every depth. Records made before the update keep
-  their old placement until *Re-read Token History*.
-* **The Records card overflowed a 260 px sidebar** (since 1.4.0). The rule that keeps a
-  provider's name in a quota card from breaking applied to every card row, so the Records
-  card's peak-day name could not wrap and pushed the card past the sidebar. It now applies to
-  the quota cards only.
-* **A live update no longer re-renders the whole page when a section that is not on it
-  changes.** A fragment for a section missing from `tokenPace.dashboard.sections` made the page
-  rewrite itself, and every scroll position went with it; the host now pushes only the sections
-  on the page, and the page ignores a fragment it has no place for.
+  its project. The placement now walks up to the nearest `subagents` directory. Records made
+  before the update keep their old placement until *Re-read Token History*.
+* **A duration no longer reads `19 min 60 s`.** It is rounded to the unit it prints and only then
+  split — the models table's turn lengths and the sessions table included.
+* **The Records card no longer overflows a 260 px sidebar.** The rule that keeps a provider's name
+  in a quota card from breaking applied to every card row; it now applies to the quota cards only.
+* **A live update no longer re-renders the whole page when a section that is not on it changes**,
+  so scroll positions stay where they were.
+* **A pressed chip looks pressed in a forced-colours theme** (Windows High Contrast): every pressed
+  chip of the page — a range, a provider, a model, the custom dates, the cache switch, the cost
+  line, the heatmap's metric, the hours' zone — wears the highlight colours.
+* **Nothing acts after the window has closed.** A dialog answered after its window went away is
+  recorded but acts on nothing; a quota fetch that returns after shutdown writes nothing; the
+  cold-scan worker is stopped at shutdown; nothing is drawn or saved after it.
+* In the Agents section as the unpublished 1.5 builds had it: a failed workflow agent no longer
+  shows as running for ten minutes; a stop is no longer a failure and a replaced agent no longer an
+  unknown `?`; a run is no longer failed by one failure among completed agents; the agents a run's
+  journal started without a transcript are counted (a run of 427 no longer reads 164); an agent
+  that writes on after its recorded end is running again; a session's own usage is no longer shown
+  as if it were its agents'; the lower bound names its real cause — a reply cut off at a tool call,
+  a third of the agents, not almost all — and sits on the rows; short ids no longer collide; the
+  page no longer receives the whole tree (78 KB for one large run); a new workflow run is found in
+  seconds, not a minute; "Parent's report" is *Report from Claude Code* and says which figure it is.
+
+### Privacy
+
+* **Every field the Agents section reads is named** in the documentation's privacy and agents
+  pages, and `npm run check:privacy` holds every reader to a read contract: a reader that takes a
+  field the contract does not list, or no longer takes one it lists, fails the build.
+* Read: an agent's type, model, depth and ids from its identity sidecar; the start, the result and
+  the step of each workflow journal line (the step's key is only compared, never kept); a launch's
+  type, model alias and background flag; the result's agent or run id, status and Claude Code's
+  three totals; a notification's id and status; an agent's effort, its last tool's name, its tool
+  errors (counted on the raw line), its cache-miss reasons, the Claude Code version, the permission
+  mode (matched on the raw line), its compactions; a rejected request's HTTP status, error kind and
+  limit; seven top-level fields of a run record, picked from its bytes without decoding the rest.
+  Never a prompt, a description, a summary, a result, a script, an error's text or a path.
+* **The agent hook** reads four keys of a hook call and writes six fields per line into the
+  extension's own storage; its bundle may load Node's `fs` and `path` and nothing else, which
+  `npm run check:privacy` enforces. Nothing of it enters the snapshot, an export, the diagnostics
+  or the log.
+* **The exports carry the agents' ids, names and counts** — announced in both save dialogs — and
+  never a path, a journal key, a rejected request, a last tool's name or a compaction. The
+  diagnostics report carries none of the agent tables.
+* **Leak tests.** For every field read, a test puts synthetic text under the keys beside it and
+  checks that none of it reaches the outputs that field could reach — the snapshot, the
+  dashboard's view, the markdown report, the exports, the log, the diagnostics report. Before the
+  release a synthetic world with prompts, descriptions, results, summaries, scripts, error texts
+  and account ids under every neighbouring key was run through as well, and reached none of the
+  outputs.
 
 ## 1.4.0 — 2026-09-07
 

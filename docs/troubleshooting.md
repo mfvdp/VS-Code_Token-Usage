@@ -49,3 +49,32 @@ share of an invented denominator would be our number wearing the provider’s cl
 `≈` when part of those five hours is older than the hour buckets still kept. The moment a real
 window arrives the line is gone, and the status bar is unchanged either way — a problem state
 stays a problem state.
+
+## The agent hook
+
+The [agent hook](agents.md#the-agent-hook) is optional, and nothing in the status bar depends on
+it. When it does not do what you expect:
+
+* **No `waiting for approval` ever appears.** The marker needs Claude Code to raise a permission
+  dialog; in Claude Code's auto mode no permission dialog is shown, so no wait is reported, and
+  neither in `bypassPermissions`. The hook also needs **Node.js on the PATH** Claude Code runs its
+  hooks with: the command starts with `node`, and without it the hook fails on every event and
+  `agent-hook.jsonl` is never written. A line older than 30 minutes no longer counts either.
+* **The marker stays after you answered.** A wait is seen answered when the agent writes its next
+  line or stops; a long tool call you approved keeps the marker until then.
+* **Set Up the Agent Hook… shows a warning instead of the document.** The script could not be
+  copied into the extension's storage, and no snippet is shown that would point at a missing file;
+  the warning names the kind of error.
+* **Claude Code reports a failing hook command after Token Pace was uninstalled.** Uninstalling
+  removes the extension's storage and the script with it, but the entries you added to `hooks` in
+  `~/.claude/settings.json` stay until you delete them — Token Pace never edits that file. Delete the
+  four entries (`SubagentStart`, `SubagentStop`, `Notification`, `PermissionRequest`) and the error
+  is gone.
+
+## A question answered after the window closed
+
+A dialog — the offer to fetch quota on the first start, the consent to write the shared quota
+cache — stays open until you click, even when the window that asked is closed or reloaded in the
+meantime. An answer given then is kept, but that window acts on nothing any more: after **Allow**
+on the first-start offer, `tokenPace.quotaSource` stays on `auto`, so set it to `poll` yourself in
+the settings to have the quota fetched.

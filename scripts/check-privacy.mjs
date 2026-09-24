@@ -124,96 +124,108 @@ export function filesToScan() {
  *    reader that matches keys on the raw line instead of parsing it;
  *  - `tags`: group 1 of every match of `pattern` over the whole file — the tag names the
  *    matching constants look for.
- * `what` names the reader as both documentation pages describe it. Every package of 1.6 that
- * reads a new field adds its row here, and the pages name the field in backticks.
+ * `what` names the reader as both documentation pages describe it; `source` the file it reads, as
+ * docs/privacy.md names it (a Claude Code transcript under `~/.claude/projects/`, an agent's
+ * identity sidecar `agent-<id>.meta.json`, a workflow run's `journal.jsonl`, Claude Code's run record
+ * `<session>/workflows/wf_<id>.json`, a hook call's input on the hook script's `stdin`, the hook's
+ * mirror `agent-hook.jsonl` in the extension's storage). Every package of 1.6 that reads a new field
+ * adds its row here, and the pages name the field in backticks — and the file.
  *
- * @typedef {{ what: string, file: string, kind: 'fields', body: string, variable: string, fields: string[] }
- *   | { what: string, file: string, kind: 'regex', regex: string, fields: string[] }
- *   | { what: string, file: string, kind: 'tags', pattern: RegExp, fields: string[] }} ReadContractRow
+ * The fields by the 1.6 spec's §0a entries: 0a.0 the values of `type`, `status` and `<status>` (no
+ * new field); 0a.1 the journal's `key`; 0a.2 `apiErrorStatus`, `error`, `quotaLimits.rateLimitType`;
+ * 0a.3 a `Workflow` block's `id` and its result's `runId`; 0a.4 `effort`; 0a.5 a tool call's `name`;
+ * 0a.6 `is_error` (raw line); 0a.7 `diagnostics.cache_miss_reason` (`type`,
+ * `cache_missed_input_tokens`); 0a.8 `version`; 0a.9 `permissionMode` (raw line); 0a.10
+ * `compactMetadata` (`trigger`, `preTokens`, `postTokens`); 0a.11 the sidecar's `parentAgentId`;
+ * 0a.12 the run record's seven; 0a.13 the hook's four input keys and its mirror's six fields.
+ *
+ * @typedef {{ what: string, source: string, file: string, kind: 'fields', body: string, variable: string, fields: string[] }
+ *   | { what: string, source: string, file: string, kind: 'regex', regex: string, fields: string[] }
+ *   | { what: string, source: string, file: string, kind: 'tags', pattern: RegExp, fields: string[] }} ReadContractRow
  */
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
   // 1.6 §0a.11 (P13a): the sidecar's fifth field, the spawning agent's id — the spawner link when
   // no launch names one.
-  { what: 'the identity sidecar', file: 'src/agg.ts', kind: 'fields', body: 'function cleanMeta(', variable: 'o',
+  { what: 'the identity sidecar', source: 'agent-<id>.meta.json', file: 'src/agg.ts', kind: 'fields', body: 'function cleanMeta(', variable: 'o',
     fields: ['agentType', 'model', 'spawnDepth', 'toolUseId', 'parentAgentId'] },
   // 1.6 §0a.1 (P2b): the journal's head is matched on the raw line, and the `key` joins `type` and
   // `agentId` — compared within the journal, never kept. The fallback parses a short line without
   // the head and picks the same three.
-  { what: 'the workflow journal', file: 'src/agg.ts', kind: 'regex', regex: 'JOURNAL_HEAD_RE',
+  { what: 'the workflow journal', source: 'journal.jsonl', file: 'src/agg.ts', kind: 'regex', regex: 'JOURNAL_HEAD_RE',
     fields: ['type', 'key', 'agentId'] },
-  { what: 'the workflow journal (fallback)', file: 'src/agg.ts', kind: 'fields', body: 'function journalFallback(', variable: 'd',
+  { what: 'the workflow journal (fallback)', source: 'journal.jsonl', file: 'src/agg.ts', kind: 'fields', body: 'function journalFallback(', variable: 'd',
     fields: ['type', 'key', 'agentId'] },
   // 1.6 §0a.3 (P4): the blocks of a reply the launches are read from — an `Agent`/`Task` block's
   // `input` for the three fields above; of a `Workflow` block only its `id`, its input never.
-  { what: 'the launch blocks', file: 'src/agg.ts', kind: 'fields', body: 'private noteLaunches(', variable: 'block',
+  { what: 'the launch blocks', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'private noteLaunches(', variable: 'block',
     fields: ['type', 'name', 'id', 'input'] },
-  { what: 'an agent launch', file: 'src/agg.ts', kind: 'fields', body: 'private noteLaunches(', variable: 'input',
+  { what: 'an agent launch', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'private noteLaunches(', variable: 'input',
     fields: ['subagent_type', 'model', 'run_in_background'] },
-  { what: 'the tool result', file: 'src/agg.ts', kind: 'fields', body: 'private agentResult(', variable: 'r',
+  { what: 'the tool result', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'private agentResult(', variable: 'r',
     fields: ['agentId', 'status'] },
   // 1.6 §0a.3 (P4): the result that answers a `Workflow` call — the run it launched and its status.
-  { what: 'the workflow result', file: 'src/agg.ts', kind: 'fields', body: 'private runResult(', variable: 'r',
+  { what: 'the workflow result', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'private runResult(', variable: 'r',
     fields: ['runId', 'status'] },
-  { what: 'the reported totals', file: 'src/agg.ts', kind: 'fields', body: 'function reportedTotals(', variable: 'r',
+  { what: 'the reported totals', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function reportedTotals(', variable: 'r',
     fields: ['totalTokens', 'totalDurationMs', 'totalToolUseCount'] },
-  { what: 'the task notification', file: 'src/agg.ts', kind: 'tags', pattern: /const NOTE_\w+_RE = \/<([a-z-]+)>/g,
+  { what: 'the task notification', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'tags', pattern: /const NOTE_\w+_RE = \/<([a-z-]+)>/g,
     fields: ['tool-use-id', 'status'] },
   // 1.6 §0a.2 (P5a): an API error line of an agent's transcript — the request it rejected: its HTTP
   // status, its error kind and, of its `quotaLimits` block (a plain object), the limit that refused
   // it. Never its message, which holds the error's text, nor anything else of the block.
-  { what: 'a rejected request', file: 'src/agg.ts', kind: 'fields', body: 'function rejectedOf(', variable: 'd',
+  { what: 'a rejected request', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function rejectedOf(', variable: 'd',
     fields: ['apiErrorStatus', 'error', 'quotaLimits'] },
-  { what: 'a rejected request\'s limit', file: 'src/agg.ts', kind: 'fields', body: 'function rejectedOf(', variable: 'q',
+  { what: 'a rejected request\'s limit', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function rejectedOf(', variable: 'q',
     fields: ['rateLimitType'] },
   // 1.6 §0a.5 (P6): the tool calls of a reply — counted for the tools table since 1.3, and since
   // 1.6 N5 the name of the last one kept on an agent's record with its line's time. Of a block
   // only its `type`, `name` and `id`; its `input` is never looked at.
-  { what: 'the tool calls of a reply', file: 'src/agg.ts', kind: 'fields', body: 'private countClaudeTools(', variable: 'b',
+  { what: 'the tool calls of a reply', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'private countClaudeTools(', variable: 'b',
     fields: ['type', 'name', 'id'] },
   // 1.6 §0a.4 (P9): the effort a reply of an agent's transcript was written at — the line's
   // top-level `effort`, one of five levels. Never a nested one, never an error line's `perTurnEffort`.
-  { what: 'the effort of a response', file: 'src/agg.ts', kind: 'fields', body: 'function effortOf(', variable: 'd',
+  { what: 'the effort of a response', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function effortOf(', variable: 'd',
     fields: ['effort'] },
   // 1.6 §0a.6 (P13a): the tool results marked as errors, counted on the raw line by the literal
   // `"is_error":true` — the line is not parsed for it, and the result is never read.
-  { what: 'tool errors', file: 'src/agg.ts', kind: 'regex', regex: 'TOOL_ERROR_LITERAL',
+  { what: 'tool errors', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'regex', regex: 'TOOL_ERROR_LITERAL',
     fields: ['is_error'] },
   // 1.6 §0a.7 (P13a): why the cache missed on an agent's response — of the message's diagnostics,
   // the reason's type and the input tokens it states. Nothing else of the diagnostics.
-  { what: 'a cache miss', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'm',
+  { what: 'a cache miss', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'm',
     fields: ['diagnostics'] },
-  { what: 'a cache miss\'s diagnostics', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'g',
+  { what: 'a cache miss\'s diagnostics', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'g',
     fields: ['cache_miss_reason'] },
-  { what: 'a cache miss\'s reason', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'x',
+  { what: 'a cache miss\'s reason', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function cacheMissOf(', variable: 'x',
     fields: ['type', 'cache_missed_input_tokens'] },
   // 1.6 §0a.8 (P13a): the Claude Code version that wrote a line.
-  { what: 'the writer\'s version', file: 'src/agg.ts', kind: 'fields', body: 'function versionOf(', variable: 'd',
+  { what: 'the writer\'s version', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function versionOf(', variable: 'd',
     fields: ['version'] },
   // 1.6 §0a.9 (P13a): a prompt line's permission mode, matched on the raw line — never parsed.
-  { what: 'the permission mode', file: 'src/agg.ts', kind: 'regex', regex: 'PERMISSION_MODE_RE',
+  { what: 'the permission mode', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'regex', regex: 'PERMISSION_MODE_RE',
     fields: ['permissionMode'] },
   // 1.6 §0a.10 (P13a): a compaction's line — its type and subtype, and of its metadata the trigger
   // and the context before and after. Never the segment it preserved, nor the summary line.
-  { what: 'a compaction', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'd',
+  { what: 'a compaction', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'd',
     fields: ['type', 'subtype', 'compactMetadata'] },
-  { what: 'a compaction\'s metadata', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'c',
+  { what: 'a compaction\'s metadata', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'c',
     fields: ['trigger', 'preTokens', 'postTokens'] },
   // 1.6 §0a.12 (P13b): Claude Code's run record of a workflow run — seven top-level fields, picked
   // from the file's bytes by a streaming key-picker that decodes the value of no other key (the
   // run's script, its logs, its result), and each of the seven checked against its allow-list.
-  { what: 'the run record', file: 'src/runRecord.ts', kind: 'regex', regex: 'RUN_RECORD_KEYS',
+  { what: 'the run record', source: '<session>/workflows/wf_<id>.json', file: 'src/runRecord.ts', kind: 'regex', regex: 'RUN_RECORD_KEYS',
     fields: ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel'] },
-  { what: 'the run record\'s values', file: 'src/runRecord.ts', kind: 'fields', body: 'export function cleanRunRecord(', variable: 'o',
+  { what: 'the run record\'s values', source: '<session>/workflows/wf_<id>.json', file: 'src/runRecord.ts', kind: 'fields', body: 'export function cleanRunRecord(', variable: 'o',
     fields: ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel'] },
   // 1.6 §0a.13 (P14b): the opt-in agent hook. Its script, run by Claude Code, reads four keys of a
   // hook call's input — the event, the session, the agent, the notification's type —, never its
   // `message`, `tool_input`, `tool_response`, `prompt`, `transcript_path` or `cwd`; the extension's
   // reader takes the six fields of each line the script wrote, and checks each again.
-  { what: 'the agent hook\'s input', file: 'src/agentHookScript.ts', kind: 'fields', body: 'export function hookLineOf(', variable: 'j',
+  { what: 'the agent hook\'s input', source: 'stdin', file: 'src/agentHookScript.ts', kind: 'fields', body: 'export function hookLineOf(', variable: 'j',
     fields: ['hook_event_name', 'session_id', 'agent_id', 'notification_type'] },
-  { what: 'the agent hook\'s mirror', file: 'src/agentHook.ts', kind: 'fields', body: 'export function cleanHookLine(', variable: 'o',
+  { what: 'the agent hook\'s mirror', source: 'agent-hook.jsonl', file: 'src/agentHook.ts', kind: 'fields', body: 'export function cleanHookLine(', variable: 'o',
     fields: ['v', 'ts', 'event', 'sessionId', 'agentId', 'wait'] },
 ]
 

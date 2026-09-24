@@ -48,12 +48,13 @@ holds only `%key%` placeholders, the words live in `package.nls.json` (English) 
 `package.nls.de.json` (German), and VS Code picks the file matching its display language
 (*Configure Display Language*), falling back to English for any key a translation lacks. Setting
 ids, enum values, paths and the JSON examples in the descriptions are identical in both
-languages, because they are what you copy. What the extension *renders* is English everywhere —
-status bar, tooltip, dashboard, text views, exports. That split is deliberate: those sentences
-are assembled from fragments, de-duplicated against one another and asserted verbatim by the
-tests, so translating them takes a vocabulary seam, not a search-and-replace. A further language
-is one file, `package.nls.<locale>.json` with the keys of `package.nls.json`; `test/nls.test.ts`
-fails if a key is missing, unused, or if a translation drops a setting link or an example.
+languages, because they are what you copy. What the extension *renders* — the status bar and its
+tooltip, the dashboard, the Quick Pick, the markdown report, the dialogs and the agent hook's setup
+document — follows the display language as well, through the bundles in `l10n/`, German or
+English (see [Dashboard](dashboard.md), *Language*); the debug log, the diagnostics report and the
+CSV and JSON exports stay English on purpose. A further manifest language is one file,
+`package.nls.<locale>.json` with the keys of `package.nls.json`; `test/nls.test.ts` fails if a key
+is missing, unused, or if a translation drops a setting link or an example.
 
 **Walkthrough.** *Help → Get Started* lists **Get started with Token Pace**: what the bar and
 its colours mean, where the quota figures come from and what “poll” means, and the dashboard.

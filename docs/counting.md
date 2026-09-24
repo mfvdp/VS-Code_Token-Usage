@@ -60,12 +60,15 @@ at every depth. A run's `journal.jsonl` sits beside its agents with the same suf
 the run's own record, not a transcript: it is never counted, only `type`, `key` and `agentId`
 at the head of its lines are read — the key only compared within the journal, never kept — and
 its lines say which agents the run started, which completed, which failed and which step was
-started again. An agent's tokens have always been
+started again. Claude Code's own record of a run, `<session>/workflows/wf_<id>.json`, is no
+transcript either: it is never counted, and of it only seven top-level fields are read — its
+`status`, `startTime`, `durationMs`, `agentCount`, `totalTokens`, `totalToolCalls` and
+`defaultModel` —, shown as Claude Code's own figures and never added to a total. An agent's tokens have always been
 part of the totals; the
 [Agents](agents.md) section adds a view of them, not a count. Beside the buckets every agent
 transcript and every session transcript of the last seven days gets a small record of its own,
 filled by the same message-id dedupe, so a streamed reply counts once there as well; a launch,
-its result or a journal line only ever sets a state. The records are dropped seven days after
+its result, a task notification, a journal line or a run record only ever sets a state. The records are dropped seven days after
 their last line, whatever `tokenPace.retentionDays` says.
 
 **Claude Code's report of a sync agent.** The tool result that returns a sync agent to its parent
@@ -87,7 +90,9 @@ many (`⚠ lower bound — 2 of 41 replies unfinished`). Measured on this machin
 third of the agents have such a reply — nearly always one cut off at the tool call it made, not
 the agent's last: only 22 of 925 agent transcripts end on an unfinished reply.
 
-**Upgrading.** The persisted snapshot is schema version 8; version 5, 6 and 7 are still read.
+**Upgrading.** The persisted snapshot is schema version 8; version 5, 6 and 7 are still read. It
+also states the revision of the agent tables it holds — 8 in 1.6.0 —, and a snapshot with an older
+one, or none, has the agent tables rebuilt once on the first start after the update.
 Version 7 — everything before the workflow runs of the agent tables —, version 6 — everything
 before the agent tables — and version 5 — everything before the tool table — are read forward
 rather than thrown away, so no upgrade forces a cold re-read: a table the older version did not

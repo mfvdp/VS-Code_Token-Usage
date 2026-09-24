@@ -14,13 +14,15 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
 import { HOOK_LINE_MAX_BYTES, HOOK_TAIL_BYTES, hookSetupDocument } from '../src/agentHook'
-import { HOOK_EVENTS, HOOK_KEEP_LINES, HOOK_ROTATE_BYTES, HOOK_STDIN_MAX_BYTES } from '../src/agentHookScript'
+import { HOOK_EVENTS, HOOK_KEEP_LINES, HOOK_ROTATE_BYTES, HOOK_STDIN_MAX_BYTES, NOTIFICATION_WAITS } from '../src/agentHookScript'
 import {
   AGENT_RETENTION_DAYS, HOOK_MAX_AGE_MS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
   PER_MINUTE_FROM_MS, SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
-import { AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, JOURNAL_PARSE_MAX, PENDING_MODE_MAX } from '../src/agg'
+import {
+  AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, AGENT_TABLES_REVISION, JOURNAL_PARSE_MAX, outcomeOfStatus, PENDING_MODE_MAX,
+} from '../src/agg'
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
@@ -30,10 +32,11 @@ import { priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
 import { RUN_RECORD_CHUNK_BYTES, RUN_RECORD_MAX_BYTES, RUN_RECORD_SCALAR_MAX } from '../src/runRecord'
 import { AGENT_META_MAX_BYTES } from '../src/scan'
+import { durationText } from '../src/stats'
 import { buildItems, selectWindows, viewOf, windowValue } from '../src/statusText'
 import { labelOf, StoredKey } from '../src/storage'
 import { formatReset, TimeConfig } from '../src/time'
-import { QuotaState, QuotaWindow } from '../src/types'
+import { QuotaState, QuotaWindow, STATE_VERSION } from '../src/types'
 import { MAX_AGENT_EXPANDED } from '../src/viewModel'
 import { readManifest } from './helpers/nls'
 
@@ -315,7 +318,9 @@ test('the Privacy list names every file the extension opens', () => {
     'journal.jsonl',                  // a workflow run's journal of started agents and results
     'workflows/wf_',                  // 1.6 L4 (§0a.12): Claude Code's run record, <session>/workflows/wf_<id>.json
     'subagents/',                     // the agent directories the running tree is polled from
-    'agent-hook.jsonl',               // 1.6 O4 (§0a.13): the agent hook's mirror in globalStorage, only while installed
+    'agent-hook.jsonl',               // 1.6 O4 (§0a.13): the agent hook's mirror in globalStorage, read whenever it exists
+    '`agent-hook.js`',                // 1.6 O4: the hook script's copy in globalStorage, which the setup command writes
+    'workflows/wf_<id>.json',         // 1.6 L4: the run record's whole name, as the pages give it
   ]) {
     assert.ok(privacy.includes(needed), `the Privacy section does not mention ${needed}`)
   }
@@ -342,6 +347,8 @@ test('the promise about transcript contents matches what the tool table stores',
 /** One row of the read contract (scripts/check-privacy.mjs): a reader and the fields it may name. */
 interface ReadContractRow {
   what: string
+  /** The file the reader takes its fields from, as docs/privacy.md names it. */
+  source: string
   file: string
   kind: 'fields' | 'regex' | 'tags'
   fields: string[]
@@ -388,6 +395,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
   }
   for (const row of READ_CONTRACT) {
     assert.ok(row.fields.length > 0, `the read contract's row for ${row.what} lists no field`)
+    // 1.6 P15: every row names the file it reads, and the privacy page names that file too.
+    assert.ok(typeof row.source === 'string' && row.source.length > 0, `the read contract's row for ${row.what} names no file`)
+    assert.ok(doc.privacy.includes(row.source), `docs/privacy.md does not name ${row.source}, the file ${row.what} is read from`)
     for (const field of row.fields) {
       const span = row.kind === 'tags' ? `\`<${field}>\`` : `\`${field}\``
       assert.ok(doc.privacy.includes(span), `docs/privacy.md does not name ${span} of ${row.what}`)
@@ -520,8 +530,10 @@ test('docs/agents.md names the O3 rows of the details as the tree builder writes
     'cache unavailable', 'Compactions', '{0} · last at {1} ({2}, {3} → {4})', 'Claude Code version', 'Permission mode']) {
     assert.ok(src.includes(`t('${written}'`), `src/agentTreeBuild.ts no longer writes: ${written}`)
   }
-  for (const example of ['`1 of 3 tool calls`', '`model changed 2 · cache unavailable 1`', '`48.2K tokens not read from the cache`',
-    '`1 · last at 14:20 (auto, 167.2K → 12.4K)`', '**Claude Code version**', '**permission mode**', '`bypassPermissions`',
+  // 1.6 P15: the examples are the harness's (research/webview-check, the rejected workflow agent's
+  // details) — the join of several reasons is the builder's own unit example.
+  for (const example of ['`1 of 2 tool calls`', '`tools changed 1`', '`model changed 2 · cache unavailable 1`', '`10.4K tokens not read from the cache`',
+    '`1 · last at 11:48 (auto, 13.5K → 3.1K)`', '**Claude Code version**', '**permission mode**', '`bypassPermissions`',
     'no `Tool errors` row rather than a zero nobody counted', 'only the stated ones are summed']) {
     assert.ok(flat.includes(example), `docs/agents.md does not say: ${example}`)
   }
@@ -1538,4 +1550,203 @@ test('the settings page says that a plan name is cleaned before it is printed', 
 test('the developer page keeps the command that runs the smoke test in a real window', () => {
   assert.match(doc.development, /npm run test:e2e/)
   assert.match(readDoc('package.json'), /"test:e2e":/)
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P15: the documentation of 1.6.0, complete — every limit, sentence and command it relies on
+// ---------------------------------------------------------------------------
+
+test('docs/agents.md states the node cap for the markdown report too, what does not count against it, and the measured payload', () => {
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  for (const claim of [
+    // Review 1 #3: MAX_PAGE_NODES applies in text mode as well — the report prints the line for a node that no longer fits.
+    `at most **${MAX_PAGE_NODES}** nodes in the whole report, filled in the same order`,
+    `at most 50 children each and at most ${MAX_PAGE_NODES} nodes in all`,
+    `every node of the ${MAX_ROOTS} sessions the tree lists`,
+    // §7c Wave C: the running list's items do not count against the cap, the 7-day block's rows do.
+    `The running list's rows are not among the ${MAX_PAGE_NODES} — the list is sent whole, at most ${MAX_RUNNING_LIST} rows.`,
+    'its rows — the table\'s and its largest agents\' — are rows of the push too',
+    // The harness's 427-agent world, re-measured for 1.6.0 (research/webview-check, agentsbig.host.json).
+    'synthetic session of one workflow run of **427** agents', '**1.8 KB** with the tree closed', '**33.8 KB** with the session and the run open',
+    '**101.2 KB** with every one of the 164 agents shown',
+  ]) assert.ok(flat.includes(claim), `docs/agents.md does not say: ${claim}`)
+  for (const gone of ['77.8 KB', 'well under 1 KB', '1.5 called them turns', 'A snapshot written before 1.5']) {
+    assert.equal(flat.includes(gone), false, `docs/agents.md still says: ${gone}`)
+  }
+  assert.ok(readDoc('src/agentTreeBuild.ts').includes('const cap = MAX_PAGE_NODES - (week !== null ? week.rows.length + week.top.length : 0)'),
+    'the payload cap is computed otherwise now: say it in docs/agents.md')
+})
+
+test('the agent hook\'s pages name the twelve notification types and the wait each one reports', () => {
+  const types = Object.keys(NOTIFICATION_WAITS)
+  assert.equal(types.length, 12, 'the hook knows another number of notification types: say it on the pages')
+  const agents = doc.agents.replace(/\s+/g, ' ')
+  for (const type of types) assert.ok(agents.includes(`\`${type}\``), `docs/agents.md does not name the notification type ${type}`)
+  assert.ok(agents.includes('twelve types in all'), 'docs/agents.md does not count the notification types')
+  const listed = (kind: string): string[] => types.filter((x) => NOTIFICATION_WAITS[x] === kind)
+  assert.deepEqual(listed('permission'), ['permission_prompt'])
+  assert.ok(agents.includes(`\`input\` for an ${listed('input').map((x) => `\`${x}\``).join(', ').replace(/, ([^,]+)$/, ' or $1')} notification`),
+    'docs/agents.md lists other notification types as a wait for input than the script does')
+  assert.ok(doc.privacy.replace(/\s+/g, ' ').includes('one of the twelve types Claude Code\'s hooks reference lists; any other drops the call'),
+    'docs/privacy.md does not say which notification types the script takes')
+})
+
+test('the pages say the hook was verified, the auto mode reports no wait, and how long a mirror line counts', () => {
+  const verified = 'with Claude Code 2.1.281 (four probe sessions, key names only)'
+  const auto = 'In Claude Code\'s auto mode no permission dialog is shown, so no wait is reported.'
+  for (const [page, text] of [['agents', doc.agents], ['privacy', doc.privacy]] as const) {
+    const flat = text.replace(/\s+/g, ' ')
+    assert.ok(flat.includes(verified), `docs/${page}.md does not say the hook was verified ${verified}`)
+    assert.ok(flat.includes(auto), `docs/${page}.md does not say the auto mode reports no wait`)
+  }
+  const privacy = doc.privacy.replace(/\s+/g, ' ')
+  assert.ok(privacy.includes(`a line older than ${HOOK_MAX_AGE_MS / 60_000} minutes no longer counts`), 'docs/privacy.md does not say how long a mirror line counts')
+  // Review 4: the mirror is read whenever it exists, not only while the hook is installed; the copy of the script is a write.
+  assert.ok(privacy.includes('`agent-hook.jsonl` beside it — whenever that file exists'), 'docs/privacy.md does not say when the mirror is read')
+  assert.equal(privacy.includes('only while you have installed the agent hook'), false, 'docs/privacy.md still ties the read to an installed hook')
+  assert.ok(privacy.includes('the copy of the agent hook\'s script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there'),
+    'docs/privacy.md does not name the copy of the hook script among the writes')
+})
+
+test('both pages word the raw-line gates as they work: wherever the key appears, only the closed enum\'s value', () => {
+  // Review 4 on §0a.6/§0a.9, the lead's words: the gates match the key wherever it stands unescaped.
+  for (const [page, text] of [['agents', doc.agents], ['privacy', doc.privacy]] as const) {
+    const flat = text.replace(/\s+/g, ' ')
+    assert.ok(/`permissionMode`, matched on the raw line wherever the key appears in a Claude line; only the value of the closed enum is taken/.test(flat),
+      `docs/${page}.md does not word the permission mode's gate as it works`)
+    assert.ok(/`"is_error":true`[^.]*wherever the key appears in a Claude line/.test(flat), `docs/${page}.md does not word the tool errors' gate as it works`)
+    assert.equal(flat.includes('the `permissionMode` a prompt line names'), false, `docs/${page}.md still ties the permission mode to a prompt line`)
+  }
+  const agg = readDoc('src/agg.ts')
+  assert.ok(agg.includes('const mode = permissionModeOf(raw)') && agg.includes('const errors = toolErrorsOf(raw)'), 'the gates moved: say it on the pages')
+})
+
+test('the status and journal words both pages list are the ones the aggregator knows', () => {
+  const words = ['completed', 'failed', 'error', 'timeout', 'killed', 'cancelled', 'stopped']
+  for (const w of words) assert.notEqual(outcomeOfStatus(w), null, `${w} is no end any more`)
+  assert.equal(outcomeOfStatus('async_launched'), null)
+  const listed = `${words.slice(0, -1).map((w) => `\`${w}\``).join(', ')}, \`stopped\` and \`async_launched\``
+  for (const [page, text] of [['agents', doc.agents], ['privacy', doc.privacy]] as const) {
+    assert.ok(text.replace(/\s+/g, ' ').includes(listed), `docs/${page}.md does not list the status words: ${listed}`)
+  }
+  assert.ok(readDoc('src/agg.ts').includes('"type":"(started|result|failed|launched)"'), 'the journal head knows other types now')
+  assert.ok(doc.agents.includes('`type` (one of `started`, `result`, `failed` and `launched`; a `launched` line is ignored)'), 'docs/agents.md does not list the journal types')
+  assert.ok(doc.privacy.replace(/\s+/g, ' ').includes('the `type` (`started`, `result`, `failed` or `launched`)'), 'docs/privacy.md does not list the journal types')
+})
+
+test('docs/privacy.md quotes the scope of the leak tests, and the hook bundle\'s rule', () => {
+  const flat = doc.privacy.replace(/\s+/g, ' ')
+  for (const claim of ['**Leak tests.**',
+    'a synthetic world with prompts, descriptions, results, summaries, scripts, error texts and account ids under every neighbouring key reaches none of the outputs',
+    'the snapshot, the view model, the markdown report, the CSV and JSON exports, the log, the diagnostics report, the hook\'s mirror line',
+    'fails the build']) {
+    assert.ok(flat.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  const { HOOK_FORBIDDEN_MODULES } = require('../scripts/check-privacy.mjs') as { HOOK_FORBIDDEN_MODULES: string[] }
+  for (const mod of HOOK_FORBIDDEN_MODULES) assert.ok(flat.includes(`\`${mod}\``), `docs/privacy.md does not name the forbidden module ${mod}`)
+})
+
+test('every command the Command Palette offers has a row on the commands page', () => {
+  const raw = JSON.parse(readDoc('package.json')) as { contributes: { menus?: { commandPalette?: Array<{ command: string; when?: string }> } } }
+  const hidden = new Set((raw.contributes.menus?.commandPalette ?? []).filter((m) => m.when === 'false').map((m) => m.command))
+  for (const c of manifest.contributes.commands) {
+    if (hidden.has(c.command)) continue
+    assert.ok(doc.commands.includes(`| \`Token Pace: ${c.title}\` |`), `docs/commands.md has no row for ${c.command} (${c.title})`)
+  }
+  // The rendered interface follows the display language (since 1.3); the page no longer says it is English everywhere.
+  assert.equal(doc.commands.includes('is English everywhere'), false, 'docs/commands.md still says the interface is English everywhere')
+})
+
+test('docs/development.md names every bundle the build ships, and what check:privacy checks', () => {
+  const outs = [...readDoc('build.mjs').matchAll(/\{ in: '[^']+', out: '(dist\/[^']+)' \}/g)].map((m) => m[1])
+  assert.equal(outs.length, 4, `build.mjs ships ${outs.length} bundles`)
+  const line = doc.development.split('\n').find((l) => l.startsWith('npm run build ')) ?? ''
+  for (const out of outs) assert.ok(line.includes(out), `docs/development.md's build line does not name ${out}`)
+  const privacy = doc.development.split('\n').find((l) => l.startsWith('npm run check:privacy')) ?? ''
+  assert.ok(privacy.includes('the read contract') && privacy.includes('fs/path-only rule'), privacy)
+})
+
+test('docs/agents.md quotes durations as durationText writes them, rounded to the unit before the split', () => {
+  const examples: Array<[number, string]> = [[999.4, '999 ms'], [59_949, '59.9 s'], [59_950, '1 min 00 s'], [3_599_499, '59 min 59 s'], [3_599_500, '1 h 00 min']]
+  for (const [ms, text] of examples) assert.equal(durationText(ms), text)
+  assert.notEqual(durationText(1_199_600), '19 min 60 s')
+  const flat = doc.agents.replace(/\s+/g, ' ')
+  assert.ok(flat.includes(`— ${examples.map(([, x]) => `\`${x}\``).join(', ')} —, so it never reads \`19 min 60 s\``),
+    'docs/agents.md does not quote the durations as durationText writes them')
+})
+
+test('the snapshot version and the agent tables\' revision are stated on the pages and in the release notes', () => {
+  assert.ok(doc.agents.replace(/\s+/g, ' ').includes(`which revision of the agent tables it holds — revision **${AGENT_TABLES_REVISION}** in`),
+    'docs/agents.md does not state the agent tables\' revision')
+  assert.ok(doc.counting.replace(/\s+/g, ' ').includes(`the revision of the agent tables it holds — ${AGENT_TABLES_REVISION} in`),
+    'docs/counting.md does not state the agent tables\' revision')
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  assert.match(entry, /^\n## 1\.6\.0 — \d{4}-\d{2}-\d{2}\n/, 'the newest CHANGELOG entry is not 1.6.0')
+  const flat = entry.replace(/\s+/g, ' ')
+  for (const claim of ['1.5.0 and 1.5.1 were committed but never published; their changes ship here.',
+    `(\`STATE_VERSION\` ${STATE_VERSION})`, `(\`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION})`,
+    'the first start after the upgrade replays the agent tables once', `\`agents[]\` (\`schema_version\` ${EXPORT_SCHEMA_VERSION})`,
+    '### Added', '### Changed', '### Fixed', '### Privacy']) {
+    assert.ok(flat.includes(claim), `the 1.6.0 entry does not say: ${claim}`)
+  }
+  for (const heading of ['## 1.5.0', '## 1.5.1']) assert.equal(log.includes(`\n${heading} `), false, `the CHANGELOG still has the heading ${heading}`)
+  // A store page: no path of the machine it was built on, no internal file, no secret.
+  for (const never of [/\/home\//, /plan-1\.\d/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//]) {
+    assert.equal(never.test(entry), false, `the 1.6.0 entry mentions ${never}`)
+  }
+})
+
+test('the README names the agents\' features, and what check:privacy holds a build to', () => {
+  const flat = README.replace(/\s+/g, ' ')
+  for (const claim of ['**Your Claude Code agents as a tree**', '**Where the agent tokens went**', '`agents` in `statusBar.show` shows `~3 running`',
+    '**agent hook**', 'split every day by main session and subagent', 'The tree is a tree to the keyboard and a screen reader too',
+    'the agents included in all of them', 'read contract', 'Node\'s `fs` and `path`', '(docs/agents.md#the-agent-hook)']) {
+    assert.ok(flat.includes(claim), `README.md does not say: ${claim}`)
+  }
+  assert.equal(flat.includes('reads an agent\'s type, model, ids and outcome — never'), false, 'README.md still lists 1.5\'s fields only')
+  // The picture of the dashboard shows the Agents section, and its caption says so.
+  assert.match(README, /!\[The Token Pace dashboard in the secondary sidebar:[^\]]*the Agents section[^\]]*\]\(media\/screenshot-dashboard\.png\)/)
+})
+
+test('the walkthrough\'s pages name the Agents section, the chart split and the tolerance the manifest ships', () => {
+  const panel = readDoc('media/walkthrough/dashboard.md')
+  assert.ok(panel.split('\n').some((l) => l.startsWith('| agents |')), 'media/walkthrough/dashboard.md has no agents row')
+  assert.ok(panel.includes('with the `subagents` chip, by main session and subagent'), 'media/walkthrough/dashboard.md does not name the chart split')
+  const bar = readDoc('media/walkthrough/status-bar.md')
+  assert.ok(bar.includes(`(\`pace.tolerancePoints\`, ${String(properties['tokenPace.pace.tolerancePoints'].default)} by default)`),
+    'media/walkthrough/status-bar.md states another tolerance default than the manifest ships')
+  assert.ok(bar.includes('`~3 running`'), 'media/walkthrough/status-bar.md does not name the agents entry')
+})
+
+test('the German manifest says Token and Tool-Aufrufe, as the interface does', () => {
+  const de = JSON.parse(readDoc('package.nls.de.json')) as Record<string, string>
+  for (const [key, value] of Object.entries(de)) {
+    assert.equal(/\bTokens\b/.test(value), false, `package.nls.de.json:${key} says „Tokens"; the interface says „Token"`)
+    assert.equal(/Werkzeugaufruf|Werkzeugargument|Werkzeugergebnis/.test(value), false, `package.nls.de.json:${key} still says „Werkzeug…" for a tool call`)
+  }
+  assert.ok(de['config.dashboard.sections.enum.tools'].startsWith('Tool-Aufrufe'), de['config.dashboard.sections.enum.tools'])
+  assert.ok(de['config.dashboard.sections.enum.agents'].includes('Detailbereich') && de['config.dashboard.sections.enum.chart'].includes('Subagenten'),
+    'the German section descriptions lost the words the interface uses')
+})
+
+test('the troubleshooting, sessions, counting and numbers pages carry what 1.6 changed', () => {
+  const trouble = doc.troubleshooting.replace(/\s+/g, ' ')
+  assert.ok(trouble.includes('## The agent hook') && trouble.includes('**Node.js on the PATH**'), 'docs/troubleshooting.md has no agent hook section')
+  for (const event of HOOK_EVENTS) assert.ok(trouble.includes(`\`${event}\``), `docs/troubleshooting.md does not name ${event}`)
+  assert.ok(trouble.includes('`tokenPace.quotaSource` stays on `auto`'), 'docs/troubleshooting.md does not say what a late Allow leaves')
+  const sessions = doc.sessions.replace(/\s+/g, ' ')
+  for (const claim of ['the effort of its replies', 'its last rejected request', 'the seven fields of Claude Code\'s run record', '`Session Tue 14:20 · 9d0eb37a`']) {
+    assert.ok(sessions.includes(claim), `docs/sessions.md does not say: ${claim}`)
+  }
+  const counting = doc.counting.replace(/\s+/g, ' ')
+  assert.ok(counting.includes('`<session>/workflows/wf_<id>.json`, is no transcript either: it is never counted'), 'docs/counting.md does not name the run record')
+  assert.ok(counting.includes('a journal line or a run record only ever sets a state'), 'docs/counting.md does not say the run record only sets a state')
+  const numbers = doc.numbers.replace(/\s+/g, ' ')
+  assert.equal(numbers.includes('the tree rows carry no mark'), false, 'docs/numbers.md still says the rows carry no ⚠')
+  for (const row of ['| A workflow run\'s end |', '| Claude Code\'s run record of a workflow run', '| Why an agent ended on a rejected request']) {
+    assert.ok(numbers.includes(row), `docs/numbers.md has no row: ${row}`)
+  }
 })

@@ -10,8 +10,9 @@ Part of the [Token Pace documentation](../README.md#documentation).
 Only these are read: `~/.claude/projects/` (plus `~/.config/claude/projects/`, where some Claude
 Code builds keep it), `~/.codex/sessions/` and `~/.codex/archived_sessions/`, the two quota cache
 files, the `cachedUsageUtilization` object in `~/.claude.json`, the extension's own status-line
-mirror file inside its `globalStorage` and — only while you have installed the agent hook — the
-hook's `agent-hook.jsonl` beside it, Claude Code's `settings.json`, its `settings.local.json`
+mirror file inside its `globalStorage` and the agent hook's mirror `agent-hook.jsonl` beside it —
+whenever that file exists: only the hook script you install writes it, and a line older than 30
+minutes no longer counts —, Claude Code's `settings.json`, its `settings.local.json`
 and the platform's managed-settings file (to report whether the status-line bridge is installed
 and whether something shadows it) and — only in `quotaSource: poll`, only after consent —
 `~/.claude/.credentials.json`, for the access token that the poll sends to
@@ -22,8 +23,8 @@ Inside `~/.claude/projects/` three files beside the agent transcripts are read f
 fields — `agentType`, `model`, `spawnDepth`, `toolUseId` and `parentAgentId` (the id of the agent
 that spawned it), never its `description`, its `prompt`, its `workflowPhase` or its
 `worktreePath`, and only from a regular file of at most 64 KB — and a workflow run's `journal.jsonl`,
-for the `type`, the `key` and the `agentId` at the head of each line, never its `result`, its
-`label` or its `phase`. The `key` of a journal line is compared with the other lines of the same
+for the `type` (`started`, `result`, `failed` or `launched`), the `key` and the `agentId` at the
+head of each line, never its `result`, its `label` or its `phase`. The `key` of a journal line is compared with the other lines of the same
 journal, to tell a step that was started again from a new one, and is never kept, shown or
 exported: it lives in memory only, and what the tree keeps of it is the step's ordinal. The third
 is Claude Code's own record of a workflow run, `<session>/workflows/wf_<id>.json` beside the
@@ -53,11 +54,12 @@ identifiers and counts, never content:
 * for the agent tree, of the `tool_use` blocks of a reply the `type`, the `name` and the `id`:
   from an `Agent` (or `Task`) tool call its `id` and three fields of its `input` —
   `subagent_type`, `model` and `run_in_background`: the agent's type, its model alias and
-  whether it runs in the background; from the tool result that answers it `agentId`, `status`,
-  `totalTokens`, `totalDurationMs` and `totalToolUseCount`; from a `Workflow` tool call its `id`,
+  whether it runs in the background; from the tool result that answers it `agentId`, `status` —
+  one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`, `stopped` and
+  `async_launched`, any other ignored —, `totalTokens`, `totalDurationMs` and `totalToolUseCount`; from a `Workflow` tool call its `id`,
   and from the result that answers it the `runId` and the `status` — the call's input, which
   holds the workflow's `script`, is never read; from a queued task notification the
-  `<tool-use-id>` and `<status>` tags. Never the `description`, the `prompt`, the `summary`, the
+  `<tool-use-id>` and `<status>` tags, the status one of the same seven words of an end. Never the `description`, the `prompt`, the `summary`, the
   `output-file`, the `content` or the `result`, never a workflow's `script`, `scriptPath` or
   `transcriptDir`, and never a working directory. Of an agent's transcript the `name` of its last
   tool call is kept too, with the time of its line — what the tree names when the agent went
@@ -82,12 +84,15 @@ identifiers and counts, never content:
   `requestId`, and nothing else of `quotaLimits` — not its reset time, its overage state or its
   upgrade offers. A main session's error lines are not read for it at all;
 * for the agent tree too, metadata that is no content. In an agent's transcript: the number of
-  tool results marked `is_error`, counted on the raw line — the line is not parsed for it, and the
-  result itself is never read —, and of a reply's `diagnostics` the `cache_miss_reason`: its
+  tool results marked `is_error`, counted on the raw line by the unescaped literal
+  `"is_error":true` — wherever the key appears in a Claude line; the line is not parsed for it,
+  only the count is taken, and the result itself is never read —, and of a reply's `diagnostics` the `cache_miss_reason`: its
   `type`, one of six reasons, and the `cache_missed_input_tokens` it states, nothing else of the
   diagnostics. In an agent's and a session's transcript: the top-level `version` of a reply (the
-  Claude Code version that wrote it, three numbers), the `permissionMode` a prompt line names,
-  matched on the raw line — the prompt line is never parsed for it —, and of a compaction's line (a
+  Claude Code version that wrote it, three numbers), the `permissionMode`, matched on the raw line
+  wherever the key appears in a Claude line; only the value of the closed enum is taken
+  (`default`, `acceptEdits`, `bypassPermissions`, `plan` or `auto`) — Claude Code writes it on the
+  line that holds a prompt, and that line is never parsed for it —, and of a compaction's line (a
   `system` line whose `subtype` is `compact_boundary`) its `compactMetadata`'s `trigger` (`manual`
   or `auto`), `preTokens` and `postTokens`. Never the `isCompactSummary` line that holds the
   compaction's summary — it is not parsed at all —, never the compaction's `preservedSegment`, its
@@ -99,20 +104,25 @@ identifiers and counts, never content:
 you**. *Set Up the Agent Hook…* copies its script, `agent-hook.js`, into the extension's
 `globalStorage` and shows the snippet you add to `~/.claude/settings.json` yourself; Token Pace
 never writes into `~/.claude` and never runs the script. Claude Code runs it for four hook events,
-and of each call's input it reads four keys — `hook_event_name`, `session_id`, `agent_id` and
-`notification_type` —, never the call's `message`, `tool_input`, `tool_response`, `prompt`,
+and of each call's input, which Claude Code hands it on `stdin`, it reads four keys — `hook_event_name`, `session_id`, `agent_id` and
+`notification_type` (one of the twelve types Claude Code's hooks reference lists; any other drops
+the call) —, never the call's `message`, `tool_input`, `tool_response`, `prompt`,
 `transcript_path`, `cwd` or `last_assistant_message`. It appends one line to `agent-hook.jsonl`
 beside itself with six fields — `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`: two ids, an
 event name, a time and one of three words — and writes nowhere else. It loads Node's `fs` and
 `path` and nothing else (`npm run check:privacy` fails the build otherwise), opens no network
 connection, prints nothing, and keeps the file to its newest 1000 lines. The extension reads the
 six fields back, checks each again, and shows the latest wait as a marker in the Agents section;
-nothing of it enters the snapshot, an export, the diagnostics or the log. *Clear Stored Data…*
+nothing of it enters the snapshot, an export, the diagnostics or the log. The keys were verified
+with Claude Code 2.1.281 (four probe sessions, key names only). In Claude Code's auto mode no
+permission dialog is shown, so no wait is reported. *Clear Stored Data…*
 deletes `agent-hook.jsonl` ([Export and diagnostics](export.md)); the script stays while the hook
 is installed and goes with the extension's storage on uninstall.
 
-Nothing is written except the extension's own state in its `globalStorage` — and, while you have
-installed it, the agent hook's line in the same storage —, with exactly two
+Nothing is written except the extension's own state in its `globalStorage` — among it the copy of
+the agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that
+activation replaces with the shipped one while a copy is there, and the lines the hook script
+appends to `agent-hook.jsonl` while you have it installed —, with exactly two
 opt-in exceptions, each behind its own consent dialog and each with a backup or a
 never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
 status-line bridge. Both are off by default and both are disabled in Restricted Mode.
@@ -132,7 +142,18 @@ status page or a CDN font would otherwise be a two-line change nobody notices in
 The same command checks the **read contract**: a table in `scripts/check-privacy.mjs` names, for
 every reader of a Claude Code file, the fields it may take — the ones this page lists above — and
 the check fails when a reader takes a field the table does not list, or no longer takes one it
-does. The documentation tests hold this page and the agents page to the same table.
+does. The documentation tests hold this page and the agents page to the same table. It also holds
+the agent hook's bundle, `dist/agent-hook.js`, to Node's `fs` and `path`: a network module
+(`http`, `https`, `net`, `tls`, `dgram`), `child_process`, `worker_threads` or a `fetch(` in it
+fails the build.
+
+**Leak tests.** Each field the agent tables and the agent hook read has a leak test whose fixture
+puts synthetic text under the keys beside it — the prompt, the description, the result, the
+summary, the script, the error's text — and asserts that none of it reaches the outputs that field
+could reach: the snapshot, the view model, the markdown report, the CSV and JSON exports, the log,
+the diagnostics report, the hook's mirror line. Before the 1.6.0 release a review ran one more:
+a synthetic world with prompts, descriptions, results, summaries, scripts, error texts and account
+ids under every neighbouring key reaches none of the outputs.
 
 The webview loads no external resource at all, no telemetry of any kind is collected, and there
 is no endpoint setting to point somewhere else.

@@ -22,8 +22,8 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m
 | | |
 |---|---|
 | 🟢 green | at or below the elapsed share — on pace, or spare left over |
-| 🟡 yellow ▲ | ahead of pace beyond the tolerance (5 % by default) |
-| 🟠 amber ▲▲ | more than three times the tolerance ahead — only with `pace.levels: graded` |
+| 🟡 yellow ▲ | ahead of pace, from the first whole percent — beyond the tolerance band, if you set one (`pace.tolerancePoints`, 0 by default) |
+| 🟠 amber ▲▲ | 15 % or more ahead — three times the band, at least 15 — only with `pace.levels: graded` |
 | 🔴 red | the window is spent (≥ 99.5 %); the entry also gets an alarm background |
 
 The `┃` marker sits where the window's own clock stands, so the verdict is readable
@@ -32,3 +32,6 @@ without colour. The tooltip says it in words: `12 % ahead of pace` or
 its Pace cell is a dash until the phase ends.
 
 Absence is a dash. A missing figure is never drawn as `0 %` or `$0.00`.
+
+`agents` in `tokenPace.statusBar.show` — off by default — adds `~3 running` while Claude Code
+agents run: inferred from their transcripts, so marked `~`, with no colour and no alarm.

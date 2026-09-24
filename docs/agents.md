@@ -17,9 +17,9 @@ the tree itself starts closed, with only the sessions showing. It is on by defau
 `tokenPace.dashboard.sections`; a list you have set yourself is kept as it is, so there the
 section appears once you add `agents` to it. The range, provider and model chips do not apply:
 the section is always the last seven days, so the filter bar stays below it. *Show Usage as
-Text* prints the running list, the 7-day block while you have it open, and then the whole tree as indented lists — every node open, at
-most 50 children each (see [Opening and selection](#opening-and-selection)) — with the open
-node's details as a table. *Show Usage (Quick Pick)* has a group `Agents` after the quota: the
+Text* prints the running list, the 7-day block while you have it open, and then the tree of the
+sessions it lists as indented lists — every node open, at most 50 children each and at most 2000
+nodes in all (see [The tally](#the-tally)) — with the open node's details as a table. *Show Usage (Quick Pick)* has a group `Agents` after the quota: the
 first five entries of the running list, one row for the rest, and the sessions' tallies added
 together — `Last 7 days: 14 started · 5 ✓ · 2 ✕ · …`, in words beside it —, every row opening the
 dashboard; past the 20 sessions the tree lists, that row names the sessions it counts and how
@@ -102,7 +102,11 @@ the figure its tree row shows (fresh input + cache write + output). An agent wit
 request is not in it, nor a launch whose transcript was never read. A record is a whole agent: one
 that started eight days ago and wrote on into the seven is counted whole, where the hour buckets of
 the tables split the same tokens by the hour of each reply — so the block's figures and the tables'
-subagent figures are two different cuts of the same tokens, and are not added to each other.
+subagent figures are two different cuts of the same tokens, and are not added to each other. The
+dashboard's data-quality section sets the two side by side for the same seven days, and under each
+Claude window's bar on the quota cards a dim line gives the subagents' part of what was counted over
+that window — `Subagents 4.7M of 5.5M counted here (86 %)`, a share of tokens, never of the quota
+(see [Dashboard](dashboard.md)).
 
 **The table.** One row per **type and model**, as the agents' names say them — `Explore ·
 opus-5`, the model's whole id in the row's title and in the markdown report; a record that names no
@@ -195,14 +199,18 @@ the collector, then the running children.
 
 **Only what is open goes to the page.** A closed node's children are not sent to it at all: only
 whether it has any, how many, and what the agents below it came to. A large run closed is one
-row: a run of 427 agents made a section of 77.8 KB while every node went to the page, and its
-session closed is well under 1 KB. The fifty an opened node shows first are its newest fifty. One push of the section holds at most **2000** nodes, a
-safety cap that only many opened nodes
-of fifty children each reach: it is filled with the path to the node whose details are open and
-the running agents first, then in the order the page draws the tree, and an opened node whose
-children no longer fit shows none of them and says how many it has (`377 not shown`). While the
-[7-day block](#last-7-days) is open, its rows — the table's and its largest agents' — are rows of
-the push too, and the tree has that many fewer places.
+row. Measured with the test harness's synthetic session of one workflow run of **427** agents —
+164 with a transcript, 263 counted by the run's collector —, the section's push weighs **1.8 KB**
+with the tree closed, as it starts, **33.8 KB** with the session and the run open (the run's
+first fifty children, its collector among them, and one agent's details) and **101.2 KB** with
+every one of the 164 agents shown as well. The fifty an opened node shows first are its newest fifty. One push of the section holds
+at most **2000** nodes, a safety cap that only many opened nodes of fifty children each reach:
+it is filled with the path to the node whose details are open and the running agents first, then
+in the order the page draws the tree, and an opened node whose children no longer fit shows none
+of them and says how many it has (`377 not shown`). The running list's rows are not among the
+2000 — the list is sent whole, at most 20 rows. While the [7-day block](#last-7-days) is open,
+its rows — the table's and its largest agents' — are rows of the push too, and the tree has that
+many fewer places.
 
 **Each row is two lines.** The first is the state glyph and the name — the short id at its end in
 the figures' dim tone, and a session's project after it. The second, under the name, in the dim
@@ -210,7 +218,9 @@ tone, is the figures: the usage — fresh input + cache write + output, the defi
 use —, the duration from the first line to the last, and for a session, a run and a closed agent
 with agents below it, the [tally](#the-tally). A session's and a run's second line is the usage,
 then the tally, then the span or the duration — `88.2K · 6 started · 2 ✓ · 1 ✕ · 19 min 50 s`: what
-the agents below came to is what such a row is there to say. A run's
+the agents below came to is what such a row is there to say. A duration is rounded to the unit it
+prints and only then split — `999 ms`, `59.9 s`, `1 min 00 s`, `59 min 59 s`, `1 h 00 min` —, so it
+never reads `19 min 60 s`. A run's
 [collector](#agents-without-a-counted-reply) follows the same order — `– · 263 started · 250 ✓ ·
 3 ✕ · ~10 ● · –`. An agent's is the usage, then the duration or the clock, then its silence and its
 tally.
@@ -351,8 +361,10 @@ none, a launch — has no tally, rather than a `0 started`. The markdown report 
 tally after its name in brackets, on every node that has one:
 `[~Running] Workflow run Tue 11:50 · cfe7718d (8 started · 3 ✓ · 1 ✕ · 2 ↻ · ~2 ●) · 1.2M · 4 min 10 s` — the
 names the tree's, the id plain and the model whole. It prints
-every node, open on the dashboard or not, at most 50 children each, and one line at their depth
-for the rest: `… 377 more`.
+every node of the 20 sessions the tree lists, open on the dashboard or not, at most 50 children
+each, and one line at their depth for the rest: `… 377 more`. It keeps to the page's cap as well
+— at most **2000** nodes in the whole report, filled in the same order —, so a node whose fifty
+no longer fit prints none of them, only the line for all of its children.
 
 ### Agents without a counted reply
 
@@ -576,9 +588,9 @@ the word quoted as Claude Code wrote it — *Completed — Claude Code's run rec
 undocumented file is believed only where nothing that says more is there. The record states when
 the run started and how long it took, so its end has a time, and it is outlived as the parent's is:
 when an agent of the run writes more than 60 seconds after that end, the run is its members' again.
-All seven of its fields are the run's details' row `Claude Code's run record` — `completed ·
-started 11:00 · 3 agents · 48.2K tokens · 17 tool calls · 21 min 05 s · default model
-claude-fable-5-1[1m]`: its status, its start, how many agents it counts, its tokens, its tool calls,
+All seven of its fields are the run's details' row `Claude Code's run record` — `running ·
+started 11:40 · 6 agents · 142.3K tokens · 11 tool calls · 15 min 40 s · default model
+claude-opus-4-6[1m]` (the test harness's run): its status, its start, how many agents it counts, its tokens, its tool calls,
 how long it took and its default model, a dash for each part the record does not state and for the
 whole row without a record (none yet, one larger than 4 MB, one that ends before its object does)
 —, *Claude Code's own figures, never added to a total*: they are what Claude Code counts, and the
@@ -637,16 +649,16 @@ started from (Claude Code's report below counts the reply's output on top of it)
 **effort** its replies were written at — the word Claude Code writes, `xhigh`, or `high, then
 xhigh` where it changed —, its ID, depth, started, duration, last activity (with a live `… ago`
 beside it) and — for an agent that wrote on after its outcome — what was recorded, then its
-requests (the requests to the API; 1.5 called them turns), usage, fresh input, cache write 5 m
+requests (the requests to the API), usage, fresh input, cache write 5 m
 and 1 h, cache read, output — with its lower bound, where it is one, in numbers — reasoning and
-tool calls, then what of it went wrong or was done again: its **tool errors** — `1 of 3 tool
+tool calls, then what of it went wrong or was done again: its **tool errors** — `1 of 2 tool
 calls`, the tool results marked as an error, where it called a tool —, its **cache misses** —
-`model changed 2 · cache unavailable 1`, why the cache missed on its requests, the most frequent
-reason first, with the input tokens those misses state were not read from the cache (`48.2K tokens
-not read from the cache`; Claude Code gives that figure for a changed message, model, tool set or
+`tools changed 1`, why the cache missed on its requests, several reasons joined with the most
+frequent first (`model changed 2 · cache unavailable 1`), with the input tokens those misses state
+were not read from the cache (`10.4K tokens not read from the cache`; Claude Code gives that figure for a changed message, model, tool set or
 system prompt, not for an unavailable cache or a previous message it could not find, so only the
-stated ones are summed), only where there was one — and its **compactions** — `1 · last at 14:20
-(auto, 167.2K → 12.4K)`: how often its transcript was compacted, when last, whether it was asked
+stated ones are summed), only where there was one — and its **compactions** — `1 · last at 11:48
+(auto, 13.5K → 3.1K)`: how often its transcript was compacted, when last, whether it was asked
 for (`manual`) or Claude Code's own (`auto`), and the context before and after it, only where it
 was —; then — when the API rejected its last request — the `Last request` row, then who
 spawned it — left out for an agent of a workflow run that no launch names: its run started it,
@@ -732,13 +744,13 @@ Everything comes from the directory Token Pace already reads for the token count
 
 | File | Taken from it | Never read |
 |---|---|---|
-| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); of a reply's line its top-level `effort` — one of `low`, `medium`, `high`, `xhigh` and `max`, any other value none; the tool results marked `is_error`, counted on the raw line by the literal `"is_error":true` — the line is not parsed for it; of a reply's message its `diagnostics`' `cache_miss_reason` — the reason's `type` (one of `previous_message_not_found`, `unavailable`, `messages_changed`, `model_changed`, `tools_changed` and `system_changed`; any other is not counted) and the `cache_missed_input_tokens` it states —, once per message, on its first line; a nested agent lies flat beside the one that spawned it | any text, a tool call's `input` — and an `effort` inside it —, an error line's `perTurnEffort`, the tool result itself, and anything else of the `diagnostics` |
+| `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); of a reply's line its top-level `effort` — one of `low`, `medium`, `high`, `xhigh` and `max`, any other value none; the tool results marked `is_error`, counted on the raw line by the unescaped literal `"is_error":true` — wherever the key appears in a Claude line of the agent's transcript; the line is not parsed for it, and only the count is taken; of a reply's message its `diagnostics`' `cache_miss_reason` — the reason's `type` (one of `previous_message_not_found`, `unavailable`, `messages_changed`, `model_changed`, `tools_changed` and `system_changed`; any other is not counted) and the `cache_missed_input_tokens` it states —, once per message, on its first line; a nested agent lies flat beside the one that spawned it | any text, a tool call's `input` — and an `effort` inside it —, an error line's `perTurnEffort`, the tool result itself, and anything else of the `diagnostics` |
 | `agent-<id>.meta.json` beside each agent transcript | `agentType`, `model`, `spawnDepth`, `toolUseId` and `parentAgentId` — the id of the agent that spawned it, the link where no launch names a spawner — from a file of at most 64 KB, never through a link | `description`, `prompt`, `requestShape`, `requestNonInteractive`, `workflowPhase`, `worktreePath` (a path), `worktreeBranch`, `spawnedWithWorktree`, `stoppedByUser`, and every other field |
-| every Claude Code transcript — a session's and an agent's | of a counted reply — and of an agent's API error line — the top-level `version`: three numbers, `2.1.281`, any other value none; of a user line — the prompt — the top-level `permissionMode`, matched on the raw line, one of `default`, `acceptEdits`, `bypassPermissions`, `plan` and `auto` — the line is never parsed for it; of a compaction's line — a `system` line whose `subtype` is `compact_boundary`, recognised on the raw line and then parsed — its `compactMetadata`: the `trigger` (`manual` or `auto`), `preTokens` and `postTokens`, and the line's time | the prompt and everything else of a user line; of a compaction its `preservedSegment`, `preservedMessages`, `preCompactDiscoveredTools`, `cumulativeDroppedTokens` and how long it took, and the `isCompactSummary` line after it, which holds the summary — that line is never parsed at all |
-| `<session>/subagents/workflows/<run>/journal.jsonl` | `type`, `key` and `agentId` at the head of each line, matched on the raw line — a line of at most 16 KB without that head is parsed for the same three, a longer one skipped and counted; the `key` is compared within the journal, never kept: with the keys of the same journal's other lines, to tell a step that was started again from a new one, and it is never stored, shown, exported or logged | the `result`, `label` and `phase` a line carries |
+| every Claude Code transcript — a session's and an agent's | of a counted reply — and of an agent's API error line — the top-level `version`: three numbers, `2.1.281`, any other value none; the `permissionMode`, matched on the raw line wherever the key appears in a Claude line; only the value of the closed enum is taken, one of `default`, `acceptEdits`, `bypassPermissions`, `plan` and `auto` — Claude Code writes it on the user line that holds the prompt, and the line is never parsed for it; of a compaction's line — a `system` line whose `subtype` is `compact_boundary`, recognised on the raw line and then parsed — its `compactMetadata`: the `trigger` (`manual` or `auto`), `preTokens` and `postTokens`, and the line's time | the prompt and everything else of a user line; of a compaction its `preservedSegment`, `preservedMessages`, `preCompactDiscoveredTools`, `cumulativeDroppedTokens` and how long it took, and the `isCompactSummary` line after it, which holds the summary — that line is never parsed at all |
+| `<session>/subagents/workflows/<run>/journal.jsonl` | `type` (one of `started`, `result`, `failed` and `launched`; a `launched` line is ignored), `key` and `agentId` at the head of each line, matched on the raw line — a line of at most 16 KB without that head is parsed for the same three, a longer one skipped and counted; the `key` is compared within the journal, never kept: with the keys of the same journal's other lines, to tell a step that was started again from a new one, and it is never stored, shown, exported or logged | the `result`, `label` and `phase` a line carries |
 | the transcript that launched an agent — the session's, or another agent's | an `Agent` (or `Task`) tool call: its `id` and three fields of its input, `subagent_type`, `model` and `run_in_background` | the input's `description` and `prompt` |
-| the same | the tool result that answers it: `agentId`, `status`, `totalTokens`, `totalDurationMs` and `totalToolUseCount`, and the `tool_use_id` it answers | its content — the prompt and the answer it also carries |
-| the same | a queued task notification, the way a background agent's end arrives: the `<tool-use-id>` and `<status>` tags inside it | its `<summary>` and its `<output-file>` |
+| the same | the tool result that answers it: `agentId`, `status` — one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`, `stopped` and `async_launched` (a background start), any other ignored —, `totalTokens`, `totalDurationMs` and `totalToolUseCount`, and the `tool_use_id` it answers | its content — the prompt and the answer it also carries |
+| the same | a queued task notification, the way a background agent's end arrives: the `<tool-use-id>` and `<status>` tags inside it, the status one of the seven words of an end above | its `<summary>` and its `<output-file>` |
 | `<session>/subagents/…/agent-<id>.jsonl`, an API error line (`isApiErrorMessage`) — a request the API rejected | `apiErrorStatus` (an HTTP status, 100 to 599), `error` (one of `rate_limit`, `server_error`, `invalid_request`, `authentication_failed`, `max_output_tokens`, `overloaded`) and, of its `quotaLimits` block, the `rateLimitType` (one of `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`); any other value is none; a main session's error lines are skipped | its `message` — the error's text —, `errorDetails`, `apiError`, `perTurnEffort`, `requestId`, and everything else of `quotaLimits`: its `status`, `resetsAt`, `overageStatus`, `overageDisabledReason`, `isUsingOverage`, `upgradePaths` and `unifiedRateLimitFallbackAvailable` |
 | `<session>/workflows/<run>.json` — Claude Code's run record, beside the session's `subagents/` directory, named by the run's id | seven top-level fields — `status` (one of `completed`, `failed`, `killed`, `stopped`, `cancelled` and `running`), `startTime`, `durationMs`, `agentCount`, `totalTokens`, `totalToolCalls` and `defaultModel` (a model id of `[A-Za-z0-9_.:@/-]`, with a bracketed suffix such as `[1m]`) —, taken by a key-picker that walks the file's bytes in 64 KB chunks and decodes a top-level key of at most 64 bytes and, of the seven, a value of at most 64 bytes, nothing else; only from a regular file of at most 4 MB, never through a link; a value of another shape is none | everything else, never decoded: its `script`, `scriptPath`, `args`, `logs`, `phases`, `workflowProgress`, `result`, `summary`, `error`, `workflowName`, `taskId`, `timestamp` and `runId` |
 | a hook call's input — only with the [agent hook](#the-agent-hook) installed, read by its script on stdin, never by the extension | four keys: `hook_event_name`, `session_id`, `agent_id` and `notification_type` | everything else: its `message`, `tool_input`, `tool_response`, `prompt`, `transcript_path`, `cwd`, `last_assistant_message` and every other key |
@@ -801,12 +813,12 @@ an older one. There is no setting for
 it: the tree has nothing to show for older agents, and the snapshot would carry them along on
 every save.
 
-**The one-time rebuild.** A snapshot written before 1.5 has no agent tables, and one written
-before 1.6 no workflow runs. On the first start after the update they are rebuilt once from the
+**The one-time rebuild.** A snapshot written by 1.4 or earlier has no agent tables, and one of the
+1.5 builds — committed, never published — no workflow runs. On the first start after the update they are rebuilt once from the
 Claude transcripts and journals that changed in the last seven days — each read only as far as its
 tokens were already counted, so no token is counted twice and no total moves. The snapshot states
-which revision of the agent tables it holds; an update that adds something only such a rebuild can
-fill in raises the revision, and the rebuild runs once more. The rebuild also reads an agent's
+which revision of the agent tables it holds — revision **8** in 1.6.0 —; an update that adds
+something only such a rebuild can fill in raises the revision, and the rebuild runs once more. The rebuild also reads an agent's
 sidecar again when the identity it kept names no spawning agent — the fifth field, `parentAgentId`,
 came with 1.6 — and keeps that identity when the file is gone; an agent whose transcript the rebuild
 could not read again counts no tool errors, and its details have no `Tool errors` row rather than a
@@ -892,7 +904,10 @@ other. It appends one line of six fields to `agent-hook.jsonl` beside the script
 of at most 64 characters of `[A-Za-z0-9_-]`; no agent for a call of the session itself) and `wait`:
 `permission` for a permission request and a `permission_prompt` notification, `input` for an
 `idle_prompt`, `agent_needs_input`, `elicitation_dialog` or `elicitation_url_dialog` notification,
-`none` for a start, a stop and every other notification type Claude Code documents. Any other
+`none` for a start, a stop and the seven other notification types Claude Code's hooks reference
+lists — `auth_success`, `elicitation_complete`, `elicitation_response`, `agent_completed`,
+`quota_auto_resume_fired`, `quota_auto_resume_stale` and `quota_auto_resume_disabled`: twelve
+types in all. Any other
 event, any other notification type or a value outside its allow-list drops the call: nothing is
 written. The script reads at most **1 MB** of input, writes only a file named `agent-hook.jsonl`
 given by an absolute path without a `..` part — it creates no directory and follows no link —,
@@ -921,10 +936,12 @@ logged. The markdown report prints the marker on the node's line, the Quick Pick
 running item.
 
 In Claude Code's auto mode no permission dialog is shown, so no wait is reported. The marker is
-shown when Claude Code reports it: the keys of a hook call were checked against Claude Code
-2.1.281 — a permission request inside a subagent names it by its `agent_id` —, and a wait is seen
-answered when the agent writes its next line, so a long tool call you approved keeps the marker
-until the agent writes again.
+shown when Claude Code reports it. The hook was verified with Claude Code 2.1.281 (four probe
+sessions, key names only): the four keys the script reads are the ones those events carry, and a
+permission request inside a subagent names it by its `agent_id`; a `permission_prompt`
+notification did not occur in them, so the permission request itself is what reports the wait. A
+wait is seen answered when the agent writes its next line, so a long tool call you approved keeps
+the marker until the agent writes again.
 
 ## Opening and selection
 

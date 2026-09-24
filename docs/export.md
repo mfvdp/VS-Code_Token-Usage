@@ -109,7 +109,7 @@ It contains **no** token, **no** transcript content and **no** object dumps. Pat
 to `~`, and any key that even looks like a secret is redacted as a matter of defence in depth
 (there is no key or endpoint setting to begin with).
 
-**Clear Stored Data…** lists everything the extension has put on disk with its size, and deletes
+**Clear Stored Data…** lists what the extension has stored, each with its size, and deletes
 what you pick: the token snapshot (`state.json`), the quota cache (`quota.json`), the quota
 history (`quotaHistory.json`), the status-line mirror (`statusline-mirror.json`), the
 [agent hook](agents.md#the-agent-hook)'s mirror (`agent-hook.jsonl`) — once you granted

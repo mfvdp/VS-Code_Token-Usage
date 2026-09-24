@@ -17,7 +17,7 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![Token Pace in the VS Code status bar: one entry per quota window, each with a pace-coloured bar, an elapsed marker, the percentage and the countdown to its reset](media/screenshot-status-bar.png)
 
-![The Token Pace dashboard in the secondary sidebar: quota cards with pace verdict, forecast and a seven-day sparkline coloured by pace, the Tokens section folded, the filter block, the summary, the key figures and the daily chart by model with the cost line](media/screenshot-dashboard.png)
+![The Token Pace dashboard in the secondary sidebar: quota cards with pace verdict, forecast, the subagents' share of each Claude window and a seven-day sparkline coloured by pace; the Agents section with the agents running now over the tree of sessions, workflow runs and agents, each row with its state, usage, duration and tally; the Tokens section folded, the filter block and the summary](media/screenshot-dashboard.png)
 
 ![The Tokens section of the dashboard: the two running windows against the quota cards over the fixed periods, the cache switch over the composition bars, and the cache economy](media/screenshot-tokens.png)
 
@@ -49,12 +49,24 @@ output is read.
   fixed-period token totals. → [Dashboard](docs/dashboard.md)
 * **Your Claude Code agents as a tree**: the agents running now listed on top, then the
   sessions of the last seven days with their workflow runs and agents — closed until you open
-  them — each with its state, usage and duration, live while it runs; a click opens the details.
-  A state that is only inferred says so, and nothing of a prompt or a result is read.
-  → [Agents](docs/agents.md)
+  them, fifty children at a time — each with its state, usage, duration and a tally of what
+  the agents below came to (`427 started · 390 ✓ · 15 ✕ · 10 ↻ · ~11 ● · ~1 ?`), live while
+  it runs. Failed, stopped, retried and replaced agents are told apart, a run's own recorded end
+  and a rejected request are named, and a click opens the details under the row — effort, token
+  mix, tool errors, cache misses, compactions, Claude Code's own run record. A state that is only
+  inferred says so, and nothing of a prompt or a result is read. The tree is a tree to the
+  keyboard and a screen reader too. → [Agents](docs/agents.md)
+* **Where the agent tokens went**: a 7-day block by agent type and model with the five largest
+  agents, and under each Claude window's bar the subagents' share of what was counted over it —
+  a share of tokens, never of the quota. The chart can split every day by main session and
+  subagent. → [Dashboard](docs/dashboard.md)
+* **Running agents in the status bar, opt-in**: `agents` in `statusBar.show` shows `~3 running`
+  while any runs, with no colour and no alarm. And, opt-in as well, an **agent hook** you install
+  into Claude Code yourself marks an agent that waits for your approval.
+  → [Status bar](docs/status-bar.md), [the agent hook](docs/agents.md#the-agent-hook)
 * **The same figures without a webview**: a markdown report, a searchable Quick Pick, a CSV
-  and a JSON export, and a diagnostics report that is safe to paste into an issue.
-  → [Export and diagnostics](docs/export.md)
+  and a JSON export — the agents included in all of them — and a diagnostics report that is safe
+  to paste into an issue. → [Export and diagnostics](docs/export.md)
 * **Quota without the network.** Percentages come from the provider and cover every client;
   out of the box they are read from local sources somebody else wrote. Fetching them
   ourselves is a separate decision, asked once. → [Quota sources](docs/quota-sources.md)
@@ -96,11 +108,17 @@ exactly what is sent where; the access token is read only then, only from
 
 Transcript contents — prompts, responses, tool arguments and tool results — are never stored,
 logged, exported or displayed, and nothing is written outside the extension's own storage
-except the two opt-ins, each behind its own consent dialog. The agent tree reads an agent's
-type, model, ids and outcome — never its prompt, its description or its result.
+except the two opt-ins, each behind its own consent dialog. The agent tree reads identifiers,
+names, counts and allow-listed words only — an agent's type, model, ids and outcome, its effort,
+a rejected request's status, error kind and limit, its last tool's name, its tool errors, cache
+misses, Claude Code version, permission mode and compactions, the seven fields of a run record,
+and, with the opt-in hook, four keys of a hook call — each field named in
+[Privacy](docs/privacy.md); never a prompt, a description, a result or a path.
 
 No telemetry of any kind is collected, the webview loads no external resource, and
-`npm run check:privacy` fails the build on any `http(s)` literal outside a small allow-list.
+`npm run check:privacy` fails the build on any `http(s)` literal outside a small allow-list, on
+any reader of a Claude Code file that takes a field its read contract does not list, and on an
+agent hook bundle that loads anything but Node's `fs` and `path`.
 The full account is in [Privacy](docs/privacy.md).
 
 ## Documentation
@@ -111,7 +129,7 @@ The full account is in [Privacy](docs/privacy.md).
 | [Status bar](docs/status-bar.md) | What an entry is made of, the special states, the click, the tooltip, the colours, the preview |
 | [Status bar states](docs/status-bar-states.md) | Every text the bar can show, which state wins when several apply, and the one thing to check |
 | [Dashboard](docs/dashboard.md) | The sections of the panel, the filter bar, the chart, the tables and the heatmap |
-| [Agents](docs/agents.md) | The session → workflow → agent tree: what is read, how every state is derived, what is kept and for how long |
+| [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
 | [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch, the status-line bridge, extra usage |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
 | [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |
@@ -120,7 +138,7 @@ The full account is in [Privacy](docs/privacy.md).
 | [Budgets and alerts](docs/budgets-alerts.md) | Limits you state, the thresholds that can fire, and why a budget is not a bill |
 | [Sessions and projects](docs/sessions.md) | What `attribution` stores, and the salted hash that keeps a screen share safe |
 | [Export and diagnostics](docs/export.md) | The CSV and JSON schemas, the clipboard summary, the diagnostics report |
-| [If the bar says …](docs/troubleshooting.md) | Every problem state with its cause and the repair its click performs |
+| [If the bar says …](docs/troubleshooting.md) | Every problem state with its cause and the repair its click performs, and the agent hook's |
 | [Privacy](docs/privacy.md) | Every file read, everything never touched, and the one outbound call |
 | [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, restricted and virtual workspaces |
 | [Settings](docs/settings.md) | Every `tokenPace.*` key with its default and what it does |

@@ -11,19 +11,23 @@ No runtime dependencies; the bundles are built with esbuild.
 
 ```bash
 npm install
-npm run build          # dist/extension.js, dist/scanWorker.js, dist/statusline-bridge.js
+npm run build          # dist/extension.js, dist/scanWorker.js, dist/statusline-bridge.js, dist/agent-hook.js
 npm run watch          # the same, rebuilt on change
 npm run typecheck      # tsc --noEmit
 npm test               # builds the tests, then node --test "out-test/*.test.js"
 npm run test:e2e       # the extension-host smoke test in a real window (needs a display)
-npm run check:privacy  # http(s) literals in dist/ against the allow-list, and the read contract
+npm run check:privacy  # http(s) literals in dist/ against the allow-list, the read contract, and the hook bundle's fs/path-only rule
 npm run package        # build + privacy check + vsce package
 ```
 
 The tests are plain `node:test` with `node:assert/strict` over synthetic fixtures — never a real
 transcript. Every module that has to stay testable (and loadable in the scan worker) is free of
 any `vscode` import: the parsers, the aggregator, the pace and price logic, the statistics, the
-forecast, the view model, the status bar texts, the serialisers and the bridge script.
+forecast, the view model, the status bar texts, the serialisers, the bridge script and the agent
+hook's script. The four bundles are the extension itself, the scan worker, the status-line bridge
+script and the agent hook's script (`dist/agent-hook.js`, which the *Set Up the Agent Hook…*
+command copies into the extension's storage and Claude Code runs; built on Node's `fs` and `path`
+alone, which `check:privacy` enforces).
 
 A handful of questions a fake host cannot answer run in a real editor: `npm run test:e2e`
 downloads VS Code stable into `.vscode-test/`, starts it with this extension in development

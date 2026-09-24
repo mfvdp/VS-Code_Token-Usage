@@ -62,12 +62,12 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `dashboard.sections` | `quota, agents, tokens, summary, kpis, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions`. A list you have set yourself is kept as it is, so `agents` (new in 1.5) appears there only once you add it |
+| `dashboard.sections` | `quota, agents, tokens, summary, kpis, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions`. A list you have set yourself is kept as it is, so `agents` (new in 1.6) appears there only once you add it |
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |
 | `dashboard.mode` | `webview` | What *Open Dashboard* and a status bar click open: `webview`, `quickPick`, `markdown` |
-| `chart.modelStyle` | `pattern` | How the bands of one provider are told apart in the daily chart: `pattern` (solid, stripes, cross-hatch, lines, dots in the provider hue), `shade` (lightness steps of the hue) or `both` |
+| `chart.modelStyle` | `pattern` | How the bands of one provider are told apart in the daily chart: `pattern` (solid, stripes, cross-hatch, lines, dots in the provider hue), `shade` (lightness steps of the hue) or `both`. With the chart's `subagents` chip pressed, a provider's main sessions take the style's first rank and its subagents the second |
 | `startOfWeek` | `monday` | First day of the week for the heatmap, the weekday grid and `thisWeek` |
 | `planPriceUsd` | `{}` | What you pay per month, per tool, e.g. `{"claude": 100}`. Used only for the plan-factor line |
 | `calibration.show` | `false` | Show local tokens per quota percentage point, derived from your own history |

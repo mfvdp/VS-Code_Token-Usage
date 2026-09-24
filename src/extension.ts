@@ -647,8 +647,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   /**
    * The hot-directory poll: while the tree shows an agent at work, the agent directories of
    * every active session are listed every AGENT_POLL_MS and each new or changed file goes to
-   * the ingest like a watcher event. It follows the view model (`updateAgentPoll` after every
-   * rebuild), so it stops by itself once nothing runs; a follower never polls.
+   * the ingest like a watcher event — and so does the run record (1.6 L4) of each of those
+   * sessions' runs whose size or time changed; the one-minute sweep's scan of every file reads the
+   * records of the other runs that have not stated an end, and the replay every run's once. It
+   * follows the view model (`updateAgentPoll` after every rebuild), so it stops by itself once
+   * nothing runs; a follower never polls.
    */
   const agentPoll = new AgentPoll(pollAgentFiles)
 
@@ -671,10 +674,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     if (scanning || replayRun !== null || !readsTranscripts()) return
     try {
       const found = await agentPollFiles(agg, Date.now())
-      if (!readsTranscripts() || found.changed.length === 0) return
-      for (const file of found.changed) scheduleIngest(file)
+      if (!readsTranscripts() || (found.changed.length === 0 && found.records.length === 0)) return
+      // 1.6 L4: a run record of an active session that changed goes to the ingest too, which reads it
+      // with the key-picker for its run — never tailed as a transcript (scan.ts).
+      for (const file of [...found.changed, ...found.records]) scheduleIngest(file)
       log.debug(`Agent poll: ${found.changed.length} of ${found.listed} agent file(s) changed`
-        + ` in ${found.sessions} active session(s)`)
+        + ` in ${found.sessions} active session(s)`
+        + (found.records.length > 0 ? `, ${found.records.length} run record(s)` : ''))
     } catch (err) {
       // Best effort by design — the sweep finds within the minute whatever a pass missed.
       log.debug(`Agent poll: a pass failed (${errorKind(err)})`)

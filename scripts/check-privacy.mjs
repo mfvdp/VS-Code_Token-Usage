@@ -196,6 +196,13 @@ export const READ_CONTRACT = [
     fields: ['type', 'subtype', 'compactMetadata'] },
   { what: 'a compaction\'s metadata', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'c',
     fields: ['trigger', 'preTokens', 'postTokens'] },
+  // 1.6 §0a.12 (P13b): Claude Code's run record of a workflow run — seven top-level fields, picked
+  // from the file's bytes by a streaming key-picker that decodes the value of no other key (the
+  // run's script, its logs, its result), and each of the seven checked against its allow-list.
+  { what: 'the run record', file: 'src/runRecord.ts', kind: 'regex', regex: 'RUN_RECORD_KEYS',
+    fields: ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel'] },
+  { what: 'the run record\'s values', file: 'src/runRecord.ts', kind: 'fields', body: 'export function cleanRunRecord(', variable: 'o',
+    fields: ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel'] },
 ]
 
 /**

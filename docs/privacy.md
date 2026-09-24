@@ -16,7 +16,7 @@ and whether something shadows it) and — only in `quotaSource: poll`, only afte
 `~/.claude/.credentials.json`, for the access token that the poll sends to
 `https://api.anthropic.com/api/oauth/usage` and nowhere else.
 
-Inside `~/.claude/projects/` two small files beside the agent transcripts are read for the
+Inside `~/.claude/projects/` three files beside the agent transcripts are read for the
 [Agents](agents.md) section: the `agent-<id>.meta.json` next to each agent transcript, for five
 fields — `agentType`, `model`, `spawnDepth`, `toolUseId` and `parentAgentId` (the id of the agent
 that spawned it), never its `description`, its `prompt`, its `workflowPhase` or its
@@ -24,7 +24,16 @@ that spawned it), never its `description`, its `prompt`, its `workflowPhase` or 
 for the `type`, the `key` and the `agentId` at the head of each line, never its `result`, its
 `label` or its `phase`. The `key` of a journal line is compared with the other lines of the same
 journal, to tell a step that was started again from a new one, and is never kept, shown or
-exported: it lives in memory only, and what the tree keeps of it is the step's ordinal. To catch agent files the recursive file watcher can miss (on Linux
+exported: it lives in memory only, and what the tree keeps of it is the step's ordinal. The third
+is Claude Code's own record of a workflow run, `<session>/workflows/wf_<id>.json` beside the
+session's `subagents/` directory, for seven top-level fields — `status`, `startTime`,
+`durationMs`, `agentCount`, `totalTokens`, `totalToolCalls` and `defaultModel` —, taken by a
+key-picker that walks the file's bytes and decodes nothing else of it: never the run's `script`,
+its `args`, its `logs`, its `phases`, its `workflowProgress`, its `result` or its `summary`, which
+never become a string at all; only from a regular file of at most 4 MB, never through a link, and
+again only when its size or modification time changed. The seven are shown in the run's details as
+Claude Code's own figures, never added to a total, and kept with the run for seven days; the exports
+carry none of them. To catch agent files the recursive file watcher can miss (on Linux
 it does), the `subagents/` directories of the active sessions and the workflow directories
 inside them are also listed every five seconds while an agent runs or a Claude Code session is
 active, on every platform; the listing follows no link.

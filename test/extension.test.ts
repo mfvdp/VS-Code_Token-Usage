@@ -26,7 +26,7 @@ import * as os from 'os'
 import * as path from 'path'
 import {
   agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
-  journalKey, journalLine, metaJson, queueOperationLine, snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine,
+  journalKey, journalLine, metaJson, queueOperationLine, runRecordJson, snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine,
 } from './fixtures/helpers'
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
@@ -1397,7 +1397,9 @@ test('a poll pass lists the agent files of active sessions only and hands on the
 
   // By the records alone: the session's own last line, or one of its agents'.
   assert.deepEqual(scan.activeAgentSessions(a, now), [active, lively].sort())
-  assert.deepEqual(await scan.agentPollFiles(a, now), { sessions: 2, listed: 2, changed: [] })
+  // 1.6 P13b (L4, pinned and changed): a pass also names the run records of the active sessions'
+  // runs that changed — none here, as no run has a journal yet.
+  assert.deepEqual(await scan.agentPollFiles(a, now), { sessions: 2, listed: 2, changed: [], records: [] })
 
   // A line more, a workflow run in a directory made after the scan, a file touched without
   // growing — and a line in the idle session, which no pass lists.
@@ -1409,7 +1411,7 @@ test('a poll pass lists the agent files of active sessions only and hands on the
   const later = new Date(now + 5000)
   fs.utimesSync(z1, later, later)
   appendLine(y1, line('y2', now - HOUR, 'f1'))
-  assert.deepEqual(await scan.agentPollFiles(a, now), { sessions: 2, listed: 4, changed: [x1, x2, journal, z1] })
+  assert.deepEqual(await scan.agentPollFiles(a, now), { sessions: 2, listed: 4, changed: [x1, x2, journal, z1], records: [] })
 
   // The comparison itself: size or mtime against the cursor, no cursor is new, a file gone is
   // nothing to read.
@@ -1961,6 +1963,47 @@ test('a Workflow call\'s script and its result\'s summary, paths and names reach
       assert.equal(text.includes(fixture), false, `the ${what} holds the fixture's ${fixture}`)
     }
   }
+})
+
+test('a run record\'s script, logs, prompts and results reach neither the log, the diagnostics, the markdown nor the state — only its seven figures do (1.6 §0a.12)', async () => {
+  // The host's half of the §0a.12 leak test (test/runRecord.test.ts has the reader's): the cold
+  // start in the worker reads the run's record beside the session's subagents directory for its
+  // seven fields — the run's record says it is still running, so the one-minute sweep would ask
+  // again —, and the rest goes where the host sends it.
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const secret = 'RUNRECORD-HOST-CONTENT-2b6f'
+  const record = path.join(w.project, ACTIVE, 'workflows', `${RUN}.json`)
+  fs.mkdirSync(path.dirname(record), { recursive: true })
+  fs.writeFileSync(record, runRecordJson({
+    runId: RUN, secret, pad: 200_000, status: 'running', extra: { accountUuid: `${secret}-account`, prompt: `${secret} prompt` },
+  }))
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const { agg } = lazy()
+  await waitFor('the tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  await state.execute('tokenPace.copyDiagnostics')
+  const report = state.clipboard[state.clipboard.length - 1]
+  assert.ok(report && report.length > 0, 'no diagnostics were copied')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const saved = fs.readFileSync(fx.stateFile, 'utf8')
+  // It went through: the run keeps the record's seven fields, and the file's size and time.
+  const run = (JSON.parse(saved) as Snapshot).runs?.[`${ACTIVE}|${RUN}`]
+  assert.deepEqual(run?.record, {
+    status: 'running', startTime: Date.UTC(2026, 8, 3, 11, 0, 0), durationMs: 1_265_000, agentCount: 3, totalTokens: 48_210,
+    totalToolCalls: 17, defaultModel: 'claude-fable-5-1[1m]',
+  })
+  assert.equal(run?.recordStat?.size, fs.statSync(record).size)
+  for (const [what, text] of [['log', state.logText()], ['diagnostics', report], ['markdown', markdown], ['state', saved]]) {
+    assert.equal(text.includes(secret), false, `the ${what} holds the record's script, logs, prompt, result or account`)
+    for (const fixture of ['synthetic run record', '/tmp/synthetic/']) {
+      assert.equal(text.includes(fixture), false, `the ${what} holds the fixture's ${fixture}`)
+    }
+  }
+  assert.equal(/"(script|scriptPath|logs|phases|workflowProgress|args|accountUuid|prompt|taskId|workflowName)"/.test(saved), false,
+    'the state holds a key of the record\'s content')
 })
 
 test('a rejected request\'s text, its details and its quota block reach neither the log, the diagnostics, the markdown nor the state (1.6 §0a.2)', async () => {

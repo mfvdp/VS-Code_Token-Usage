@@ -3931,6 +3931,36 @@ test('details for a node with no row on the page are drawn nowhere, and say noth
   }
 })
 
+test('a sentence row of the details breaks between its words, never between a figure and its unit (1.6 P13b)', () => {
+  // Claude Code's run record (L4): seven figures in one sentence, a narrow panel wraps it — "40" is
+  // never left at the end of a line with its "s" on the next. Each figure with its unit gets a span
+  // that does not break; the words stay the view model's, character for character. A row laid out
+  // as a figure, and a name that only has digits in it, are left as they were.
+  const a = agentCtx()
+  const value = 'running · started 11:40 · 6 agents · 142.3K tokens · 11 tool calls · 15 min 40 s · default model claude-opus-4-6[1m]'
+  const h = agentsHtml(a, {
+    agents: agentTree({
+      selected: detailsOf({
+        rows: [
+          { label: "Claude Code's run record", value, note: "Claude Code's own figures, never added to a total", kind: 'sentence' },
+          { label: 'Duration', value: '15 min 40 s' },
+          { label: 'Share', value: '76 % · 1 h 05 min', kind: 'sentence' },
+        ],
+      }),
+    }),
+    ui: agentUi({ agentSelected: AK.a1 }),
+  })
+  const panel = panelOf(h)
+  assert.ok(panel.indexOf('<dt class="ag-wide">Claude Code&#39;s run record</dt><dd class="ag-wide">running · started 11:40 · 6 agents · '
+    + '<span class="nobr">142.3K</span> tokens · 11 tool calls · <span class="nobr">15 min</span> <span class="nobr">40 s</span> · '
+    + 'default model claude-opus-4-6[1m] · <span class="meta">Claude Code&#39;s own figures, never added to a total</span></dd>') >= 0, panel)
+  assert.ok(panel.indexOf('<dt>Duration</dt><dd>15 min 40 s</dd>') >= 0, panel)
+  assert.ok(panel.indexOf('<dd class="ag-wide"><span class="nobr">76 %</span> · <span class="nobr">1 h</span> <span class="nobr">05 min</span></dd>') >= 0, panel)
+  // The words, without the tags, are the row's.
+  const dd = panel.slice(panel.indexOf('run record</dt><dd class="ag-wide">') + 'run record</dt><dd class="ag-wide">'.length)
+  assert.equal(dd.slice(0, dd.indexOf(' · <span class="meta">')).replace(/<[^>]+>/g, ''), value)
+})
+
 test('the details print the view model\'s rows, a dash for each absence, and a live last activity', () => {
   const a = agentCtx()
   const h = agentsHtml(a, { agents: agentTree({ selected: detailsOf() }), ui: agentUi({ agentSelected: AK.a1 }) })
@@ -3958,9 +3988,10 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.equal(panel.indexOf('<span class="meta">5 s ago</span>'), -1, panel)
   // Claude Code's report is a sentence, not a figure, because the row says so (kind): it takes
   // the whole width under its label, its note set off by the separator the page uses between
-  // clauses.
-  assert.ok(panel.indexOf('<dt class="ag-wide">Report from Claude Code</dt><dd class="ag-wide">context at the end 12K '
-    + '(incl. cache reads and the reply) · 40.0 s from the start · 3 tool calls · '
+  // clauses. 1.6 P13b (pinned and changed): a sentence breaks between its words, never between a
+  // figure and its unit — each figure with its unit in a span of its own, the words unchanged.
+  assert.ok(panel.indexOf('<dt class="ag-wide">Report from Claude Code</dt><dd class="ag-wide">context at the end '
+    + '<span class="nobr">12K</span> (incl. cache reads and the reply) · <span class="nobr">40.0 s</span> from the start · 3 tool calls · '
     + '<span class="meta">Claude Code&#39;s own figure for this agent, never added to a total</span></dd>') >= 0, panel)
   // D11: the ID row, the whole id, and beside it the one button that asks the host to copy it.
   assert.ok(panel.indexOf('<dt>ID</dt><dd><span class="ag-id">a94f3c2e10b7d5e19</span> '
@@ -3997,7 +4028,7 @@ test('the details print the view model\'s rows, a dash for each absence, and a l
   assert.ok(saidPanel.indexOf('yet.</dd><dt>Last activity</dt><dd><span class="nobr"><span data-live="since"') >= 0, saidPanel)
   assert.ok(saidPanel.indexOf('<dt>Last activity</dt><dd>11:59:55 <span class="meta">5 s ago</span></dd>') >= 0, saidPanel)
   assert.ok(saidPanel.indexOf('<dt>Report</dt><dd>12K <span class="meta">a clause of its own</span></dd>') >= 0, saidPanel)
-  assert.ok(saidPanel.indexOf('<dt class="ag-wide">Output</dt><dd class="ag-wide">1.2K · <span class="meta">⚠ lower bound</span></dd>') >= 0, saidPanel)
+  assert.ok(saidPanel.indexOf('<dt class="ag-wide">Output</dt><dd class="ag-wide"><span class="nobr">1.2K</span> · <span class="meta">⚠ lower bound</span></dd>') >= 0, saidPanel)
   assert.equal(saidPanel.split('data-id="tokenPace.copyAgentId"').length - 1, 1, saidPanel)
   assert.ok(saidPanel.indexOf('<dt>ID</dt><dd>a2</dd>') >= 0, saidPanel)
   // A kind this build does not know is laid out as a figure.

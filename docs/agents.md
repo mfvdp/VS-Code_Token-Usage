@@ -482,7 +482,8 @@ notification for that call says how — `completed`, `failed`, or a stop in the 
 of this run at 14:20.* A resumed run has a launch for every resume; while the latest one is still
 under way, what the earlier ones recorded is history, and its details count the launches —
 `Launches`: `3 — resumed 2 time(s)`. Without a recorded end the run is its members', as above:
-closed, once every member is; else inferred from them. A recorded end does not close a member that
+closed, once every member is; else what [Claude Code's run record](#claude-codes-run-record) says;
+else inferred from them. A recorded end does not close a member that
 has no outcome of its own — it keeps its own state and is counted so — so a done run can show
 `~1 ●` beside it for up to ten minutes, and that agent's details say why. The end is outlived as an
 agent's is: when an agent of the run writes more than **60 seconds** after it, the run's state is
@@ -545,6 +546,9 @@ time. The other nodes:
 | Workflow run | Running — inferred: an agent of this run wrote on after the parent recorded its end at 14:20. |
 | Workflow run | Running — inferred: the parent launched this run 2 min ago and no agent has written yet. |
 | Workflow run | Unknown — inferred: the parent launched this run at 14:20, but no agent of it was ever seen. |
+| Workflow run | Completed — Claude Code's run record says ‘completed’. |
+| Workflow run | Failed — Claude Code's run record says ‘failed’. |
+| Workflow run | Stopped — Claude Code's run record says ‘killed’. |
 | Collector | Running — inferred: at least one of these agents is running. |
 | Collector | Unknown — inferred: not every one of these agents has a recorded outcome, and none is running. |
 | Collector | Done — every one of these agents has a recorded outcome, and at least one completed. |
@@ -561,6 +565,42 @@ run's journal recorded each failure — so does the sentence; when every one of 
 their own ends decide, since the tally counts them all as retried.
 
 A time of today is printed as `14:20`, one of another day as `2026-09-21 14:20`.
+
+### Claude Code's run record
+
+Claude Code keeps a record of every workflow run of its own — `<session>/workflows/<run>.json`,
+beside the session's `subagents/` directory — and its `status` is the third word on a run's end:
+`completed` makes the run done, `failed` failed, and `killed`, `stopped` and `cancelled` stopped,
+the word quoted as Claude Code wrote it — *Completed — Claude Code's run record says ‘completed’.*;
+`running` says nothing. It comes after the parent's end and after the members' own: an
+undocumented file is believed only where nothing that says more is there. The record states when
+the run started and how long it took, so its end has a time, and it is outlived as the parent's is:
+when an agent of the run writes more than 60 seconds after that end, the run is its members' again.
+All seven of its fields are the run's details' row `Claude Code's run record` — `completed ·
+started 11:00 · 3 agents · 48.2K tokens · 17 tool calls · 21 min 05 s · default model
+claude-fable-5-1[1m]`: its status, its start, how many agents it counts, its tokens, its tool calls,
+how long it took and its default model, a dash for each part the record does not state and for the
+whole row without a record (none yet, one larger than 4 MB, one that ends before its object does)
+—, *Claude Code's own figures, never added to a total*: they are what Claude Code counts, and the
+tree's usage is its own.
+
+Which of the four decides, for every combination (the precedence of a run's end; a test holds the
+tree builder to this table):
+
+| The parent recorded an end | Every member closed | The run record ended it | The run's state comes from |
+|---|---|---|---|
+| no | no | no | the members' clocks |
+| yes | no | no | the parent |
+| no | yes | no | the members' ends |
+| no | no | yes | the run record |
+| yes | yes | no | the parent |
+| yes | no | yes | the parent |
+| no | yes | yes | the members' ends |
+| yes | yes | yes | the parent |
+
+A recorded end with a time — the parent's, or the record's — is set aside when an agent of the run
+wrote on more than 60 seconds after it, and the next source down decides; the members' ends carry
+no time and are never set aside.
 
 ## Details
 
@@ -640,11 +680,14 @@ agents it did not list, its **parallelism** — `up to 7 at once`, the most of i
 from their first line to their last activity overlapped, both ends included —, its times, the end
 its parent recorded when an agent wrote on after it, the counts summed over its agents, how many
 of them ended on a rejected request, by reason, its agents by effort, how often it was launched
-when it was resumed, and its ID; a launch
+when it was resumed, [Claude Code's own record](#claude-codes-run-record) of it — a dash without
+one — and its ID; a launch
 the type and model it asked for,
 its ID, when it was made and who made it. Anything absent is `–`, and a record without a single
 request shows dashes, never zeros. Every row says itself how it is laid out — a figure beside its
-label, or a sentence under it across the whole width — and which row the live clock ticks in;
+label, or a sentence under it across the whole width, which a narrow panel breaks between its words
+and never between a figure and its unit (`15 min 40 s` may wrap after `min`, never inside `40 s`)
+— and which row the live clock ticks in;
 the page does not guess either from a row's words.
 
 **ID and Copy ID.** The `ID` row holds the whole identifier the node stands for — the agent's id,
@@ -691,6 +734,7 @@ Everything comes from the directory Token Pace already reads for the token count
 | the same | the tool result that answers it: `agentId`, `status`, `totalTokens`, `totalDurationMs` and `totalToolUseCount`, and the `tool_use_id` it answers | its content — the prompt and the answer it also carries |
 | the same | a queued task notification, the way a background agent's end arrives: the `<tool-use-id>` and `<status>` tags inside it | its `<summary>` and its `<output-file>` |
 | `<session>/subagents/…/agent-<id>.jsonl`, an API error line (`isApiErrorMessage`) — a request the API rejected | `apiErrorStatus` (an HTTP status, 100 to 599), `error` (one of `rate_limit`, `server_error`, `invalid_request`, `authentication_failed`, `max_output_tokens`, `overloaded`) and, of its `quotaLimits` block, the `rateLimitType` (one of `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`); any other value is none; a main session's error lines are skipped | its `message` — the error's text —, `errorDetails`, `apiError`, `perTurnEffort`, `requestId`, and everything else of `quotaLimits`: its `status`, `resetsAt`, `overageStatus`, `overageDisabledReason`, `isUsingOverage`, `upgradePaths` and `unifiedRateLimitFallbackAvailable` |
+| `<session>/workflows/<run>.json` — Claude Code's run record, beside the session's `subagents/` directory, named by the run's id | seven top-level fields — `status` (one of `completed`, `failed`, `killed`, `stopped`, `cancelled` and `running`), `startTime`, `durationMs`, `agentCount`, `totalTokens`, `totalToolCalls` and `defaultModel` (a model id of `[A-Za-z0-9_.:@/-]`, with a bracketed suffix such as `[1m]`) —, taken by a key-picker that walks the file's bytes in 64 KB chunks and decodes a top-level key of at most 64 bytes and, of the seven, a value of at most 64 bytes, nothing else; only from a regular file of at most 4 MB, never through a link; a value of another shape is none | everything else, never decoded: its `script`, `scriptPath`, `args`, `logs`, `phases`, `workflowProgress`, `result`, `summary`, `error`, `workflowName`, `taskId`, `timestamp` and `runId` |
 | the transcript that launched a workflow run | a `Workflow` tool call: its `id` alone — of a reply's `tool_use` blocks the `type`, the `name` and the `id` are read, and the `input` only of an `Agent` or `Task` call; from the tool result that answers it the `runId` (`wf_` and at most 61 characters of `[A-Za-z0-9_-]`) and the `status`, and the `tool_use_id` it answers; the run's end arrives as a task notification, read as above | the call's whole input — its `script`, `scriptPath`, `args` and `description` — and the result's `summary`, `scriptPath`, `transcriptDir` (a path), `workflowName`, `taskId` and `taskType` |
 
 So from a `Workflow` tool call its `id`, and from the result that answers it the `runId` and the
@@ -701,7 +745,8 @@ modification time. For the agent tables nothing
 else is read: never a `description`, a `prompt`, a `summary`, an `output-file`, a `content`, a
 `result`, a `label` or a `phase`, never a workflow's `script`, `scriptPath` or `transcriptDir`,
 never an API error's text or its `errorDetails`, never a tool result, never a compaction's summary,
-never a sidecar's `workflowPhase` or `worktreePath`, never a working directory, never any text. A
+never a sidecar's `workflowPhase` or `worktreePath`, never a run record's `logs`, `phases` or
+`workflowProgress`, never a working directory, never any text. A
 permission mode named before a transcript's first counted reply — where the prompt line that names
 it sits — waits in memory for the record that reply makes, for at most **4000** transcripts, the
 oldest dropped first, and is not stored before it. Every string that is kept is an identifier and is checked on the way in: a type or a
@@ -730,7 +775,8 @@ tool-call id, the run id its result named, when it was made, and the run's end w
 word for it; per workflow run the agents
 its journal started, each with the ordinal of its step, its attempt, the journal's outcome and the
 attempt that superseded it, how many further ones it did not list, and when the journal last
-changed — never a key. The records are keyed by the transcript's path, as every transcript's read
+changed — never a key —, and the seven fields of its run record with the record file's size and
+modification time, by which a record that did not change is not read again. The records are keyed by the transcript's path, as every transcript's read
 position always was. The CSV and JSON exports carry of each agent record what the tree shows of
 it — its ids, its type, model and effort, its state, counts and times, who launched it and Claude
 Code's report — in the agents file beside the CSV and the `agents[]` of the JSON (see
@@ -756,7 +802,8 @@ fill in raises the revision, and the rebuild runs once more. The rebuild also re
 sidecar again when the identity it kept names no spawning agent — the fifth field, `parentAgentId`,
 came with 1.6 — and keeps that identity when the file is gone; an agent whose transcript the rebuild
 could not read again counts no tool errors, and its details have no `Tool errors` row rather than a
-zero nobody counted. *Re-read Token History* rebuilds them
+zero nobody counted. It reads each run's [record](#claude-codes-run-record) once, too — one that
+did not change since it was last read is not opened again. *Re-read Token History* rebuilds them
 with everything else. A first start with no stored state, a re-read and a switch of
 `tokenPace.attribution` read every line from its first byte and fill the agent tables as they go,
 so no rebuild follows them — the tree does not stand half built for a moment after they end. The
@@ -791,6 +838,10 @@ anew, and its run's agents with it.
   session's transcript records, so the first file of a new run is found within five seconds rather
   than a minute. A pass costs a few milliseconds.
   With every session idle and nothing running, the listing stops.
+* A run's [record](#claude-codes-run-record) is read by the same pass for the runs of the active
+  sessions, and by the one-minute sweep for every other run whose record has not stated an end —
+  each only when the file's size or modification time changed since it was last read: one `lstat`
+  otherwise, and a record that says its run ended is left alone by the sweep.
 * The tree carries no time of its own, so a tree that did not change is not sent to the page
   again.
 * **Only what changed is rebuilt.** A read that changed the agent tables alone — a journal line,

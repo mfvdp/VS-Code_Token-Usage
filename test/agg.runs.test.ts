@@ -10,9 +10,10 @@
  * Code writes (checked 2026-09-23): every other key carries fixture text.
  *
  * The precedence of a run's end: the parent's end for its latest launch, then — every member
- * closed — what the members came to, then Claude Code's run record (1.6 L4, not read yet: it
- * says nothing), then what the members' clocks say. A recorded end never closes a member, and is
- * outlived like an agent's when a member writes on more than a minute after it.
+ * closed — what the members came to, then Claude Code's run record (1.6 L4, test/runRecord.test.ts
+ * has its reader), then what the members' clocks say — every combination as docs/agents.md
+ * tabulates it. A recorded end never closes a member, and is outlived like an agent's when a member
+ * writes on more than a minute after it.
  */
 
 import { strict as assert } from 'node:assert'
@@ -25,12 +26,13 @@ import { configureRoots } from '../src/discover'
 import { agentRows, agentsCsv, toCsv, toJson, toolsCsv } from '../src/exporter'
 import { setBundle, setLocale } from '../src/i18n'
 import { agentReplayFiles, replayAgents, scan } from '../src/scan'
+import { pickRunRecord } from '../src/runRecord'
 import { markdownDocument } from '../src/textViews'
 import { TimeConfig } from '../src/time'
 import { RunLaunch, Snapshot } from '../src/types'
 import { agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
 import {
-  CLAUDE_ROOT, CLAUDE_SLUG, claudeLine, ctxFor, journalLine, queueOperationLine, tmpDir, workflowResultLine,
+  CLAUDE_ROOT, CLAUDE_SLUG, claudeLine, ctxFor, journalLine, queueOperationLine, runRecordJson, tmpDir, workflowResultLine,
   workflowToolUseLine,
 } from './fixtures/helpers'
 import { everyParent } from './fixtures/agentWorld'
@@ -317,8 +319,72 @@ test('the precedence of a run\'s end: the parent\'s, then its members\' closed e
     ['done', 'Done — every agent of this run has a recorded outcome, and at least one completed.'])
   const launchedOpen = build({ launched: true, members: ['open'] })
   assert.deepEqual([launchedOpen.state, launchedOpen.text], ['running', 'Running — inferred: at least one agent of this run is running.'])
-  // Claude Code's run record (1.6 L4) is not read yet: no run here has one, and none of the
-  // answers above came from it.
+  // Claude Code's run record (1.6 L4): no run above has one, and none of the answers came from it —
+  // the next test takes every combination with it.
+})
+
+/**
+ * docs/agents.md's table of which source decides a run's end: one row per combination of the
+ * parent's end, the members' closed ends and Claude Code's run record, and the source the run's
+ * state comes from. Parsed from the page, so the page and the tree builder cannot drift apart.
+ */
+function precedenceTable(): Array<{ parent: boolean; closed: boolean; record: boolean; from: string }> {
+  const doc = fs.readFileSync(path.join(ROOT, 'docs', 'agents.md'), 'utf8').replace(/\r\n/g, '\n')
+  const head = '| The parent recorded an end | Every member closed | The run record ended it | The run\'s state comes from |'
+  const at = doc.indexOf(head)
+  assert.ok(at >= 0, 'docs/agents.md has no precedence table')
+  const lines = doc.slice(at).split('\n').slice(2)
+  const rows = lines.slice(0, lines.findIndex((l) => !l.startsWith('|')))
+  const yes = (v: string): boolean => {
+    assert.ok(v === 'yes' || v === 'no', v)
+    return v === 'yes'
+  }
+  return rows.map((l) => {
+    const cells = l.split('|').slice(1, -1).map((c) => c.trim())
+    assert.equal(cells.length, 4, l)
+    return { parent: yes(cells[0]), closed: yes(cells[1]), record: yes(cells[2]), from: cells[3] }
+  })
+}
+
+test('the precedence of a run\'s end, every combination with Claude Code\'s run record, as docs/agents.md tabulates it (Review 2 #5)', () => {
+  const table = precedenceTable()
+  // Every combination once: each source alone, each pair, all three, none.
+  assert.equal(table.length, 8)
+  assert.equal(new Set(table.map((r) => `${r.parent}${r.closed}${r.record}`)).size, 8)
+  // Each source says something the others do not, so the state tells which one decided: the parent
+  // a stop in its word, the members a completion (one done, one failed), the record a failure, and
+  // the clocks — one member writing a minute ago — running, inferred.
+  const expected: Record<string, [string, boolean, string]> = {
+    'the parent': ['stopped', false, `Stopped — the parent recorded ‘killed’ for this run at ${clock(NOW - 1 * MIN)}.`],
+    'the members\' ends': ['done', false, 'Done — every agent of this run has a recorded outcome, and at least one completed.'],
+    'the run record': ['failed', false, "Failed — Claude Code's run record says ‘failed’."],
+    'the members\' clocks': ['running', true, 'Running — inferred: at least one agent of this run is running.'],
+  }
+  for (const row of table) {
+    const want = expected[row.from]
+    assert.ok(want, `the table names a source the test does not know: ${row.from}`)
+    const agg = new Aggregator()
+    launchRun(agg, 'toolu_wf1', NOW - 40 * MIN)
+    agentLine(agg, A1, 1, NOW - 38 * MIN)
+    journal(agg, 'started', A1, NOW - 38 * MIN)
+    journal(agg, 'result', A1, NOW - 37 * MIN)
+    // The second member: closed by the journal's failure, or open — its last line two minutes ago,
+    // before every recorded end below, so none of them is outlived.
+    agentLine(agg, A2, 1, row.closed ? NOW - 36 * MIN : NOW - 2 * MIN)
+    journal(agg, 'started', A2, NOW - 38 * MIN)
+    if (row.closed) journal(agg, 'failed', A2, NOW - 36 * MIN)
+    if (row.parent) notify(agg, 'toolu_wf1', NOW - 1 * MIN, 'killed')
+    if (row.record) {
+      // The record through its own reader: started 40 minutes ago, ended a minute ago.
+      const fields = pickRunRecord(Buffer.from(runRecordJson({ runId: RUN, status: 'failed', startTime: NOW - 40 * MIN, durationMs: 39 * MIN })))
+      assert.equal(agg.setRunRecord(SESSION, RUN, { fields, stat: { size: 1, mtimeMs: NOW } }), true)
+    }
+    const { node, details } = runOf(agg)
+    const label = `parent ${row.parent}, closed ${row.closed}, record ${row.record} → ${row.from}`
+    assert.deepEqual([node.state, node.derived, details.stateText], want, label)
+    // The record's row is there whenever there is a record, whichever source decided.
+    assert.equal(details.rows.some((r) => r.label === "Claude Code's run record" && r.value !== '–'), row.record, label)
+  }
 })
 
 test('a recorded end does not close a member: it keeps running beside a done run, and is counted so', () => {

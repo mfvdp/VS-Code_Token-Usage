@@ -262,6 +262,11 @@ export type CacheMissKind =
  * Claude Code names in a user line's top-level `permissionMode`, matched on the raw line.
  */
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'auto'
+/**
+ * The `status` of Claude Code's run record (1.6 L4, §0a.12), through its allow-list — the words
+ * Claude Code writes there for a workflow run. Any other value is no status (null).
+ */
+export type RunRecordStatus = 'completed' | 'failed' | 'killed' | 'stopped' | 'cancelled' | 'running'
 
 /**
  * The last compaction of a transcript (1.6 O3, §0a.10): the time of its `compact_boundary` line,
@@ -485,6 +490,34 @@ export interface JournalAgent {
 }
 
 /**
+ * The seven fields of Claude Code's run record (1.6 L4, §0a.12) — `<session>/workflows/<runId>.json`,
+ * read by the streaming key-picker of `runRecord.ts`, which decodes nothing else of the file (its
+ * script, its logs, its result). Each is null when absent or of the wrong shape: the format is
+ * undocumented. Claude Code's own figures — shown, never added to a count of this extension's.
+ */
+export interface RunRecordFields {
+  status: RunRecordStatus | null
+  /** Ms since the epoch, > 0. */
+  startTime: number | null
+  /** ≥ 0. */
+  durationMs: number | null
+  /** A whole number ≥ 0. */
+  agentCount: number | null
+  /** ≥ 0. */
+  totalTokens: number | null
+  /** A whole number ≥ 0. */
+  totalToolCalls: number | null
+  /** A model id of `[A-Za-z0-9_.:@/-]`, with an optional `[…]` suffix (`claude-fable-5-1[1m]`). */
+  defaultModel: string | null
+}
+
+/** A run record file's size and modification time at its last read — a read is repeated only when they change. */
+export interface RunRecordStat {
+  size: number
+  mtimeMs: number
+}
+
+/**
  * A workflow run as its journal records it, keyed `${sessionId}|${workflowId}`. Kept for
  * AGENT_RETENTION_DAYS after the journal last changed, like the agent records.
  */
@@ -503,6 +536,14 @@ export interface RunRec {
   steps: number
   /** The journal file's mtime at the last read — journal lines carry no time (observed: none). 0 until read. */
   lastTs: number
+  /**
+   * 1.6 L4 (§0a.12): Claude Code's own record of the run, once read; null while there is none — no
+   * file, one larger than RUN_RECORD_MAX_BYTES, one that ends before its object does, or nothing
+   * usable in it.
+   */
+  record: RunRecordFields | null
+  /** The record file's size and mtime at the last read; null while no file was found. */
+  recordStat: RunRecordStat | null
 }
 
 export interface Snapshot {

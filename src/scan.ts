@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as fs from 'fs'
+import * as path from 'path'
 import { ADAPTERS, adapterFor } from './adapters'
 import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
-import { Aggregator, IngestContext, isWorkflowJournal, parseAgentMeta } from './agg'
+import { Aggregator, IngestContext, cleanRunId, isWorkflowJournal, parseAgentMeta } from './agg'
 import { agentTranscriptsOf, findTranscripts, rootOf, rootsFor } from './discover'
+import { readRunRecord, runRecordEnded } from './runRecord'
 import { newCursor, readNewLines, sameFile } from './tail'
-import { AgentMeta, Attribution, Cursor, Source } from './types'
+import { AgentMeta, Attribution, Cursor, RunRec, Source } from './types'
 
 export interface ScanProgress { done: number; total: number; file: string }
 
@@ -33,16 +35,25 @@ const NO_ATTRIBUTION: ScanContext = { attribution: 'none', projectSalt: '', hash
  * as well as for incremental updates — so the logic exists only once, and a provider
  * contributes its roots, its file names and its line parser through its adapter.
  *
+ * A workflow run's record (1.6 L4) is no transcript and has no cursor: a run record among `files` —
+ * one the agent poll found changed (`agentPollFiles`) — is read by the key-picker for its run, and a
+ * scan of every file (the cold start, the one-minute sweep) reads, after the transcripts, the record
+ * of every run whose record has not stated an end yet — each only when its size or time changed.
+ *
  * Returns how many lines changed the state — counted tokens or an agent's record — plus
- * the agent sidecars that gave a record its identity.
+ * the agent sidecars that gave a record its identity and the run records that changed.
  */
 export async function scan(agg: Aggregator, opts: ScanOptions = {}): Promise<number> {
   const scanCtx = opts.ctx ?? NO_ATTRIBUTION
   const all: Array<{ file: string; source: Source }> = []
+  const records: string[] = []
   if (opts.files) {
     for (const file of opts.files) {
       const r = rootOf(file)
-      if (r) all.push({ file, source: r.source })
+      if (!r) continue
+      // A run record is read whole by its own reader, never tailed as a transcript.
+      if (r.source === 'claude' && isRunRecordName(file)) records.push(file)
+      else all.push({ file, source: r.source })
     }
   } else {
     for (const a of ADAPTERS) {
@@ -89,6 +100,8 @@ export async function scan(agg: Aggregator, opts: ScanOptions = {}): Promise<num
     counted += await readSidecar(agg, file, ctx)
     opts.onProgress?.({ done: ++done, total: all.length, file })
   }
+  // After the journals: a run exists from its journal's first line on, and only a run has a record.
+  counted += await readRunRecords(agg, opts.files ? runsOfRecordFiles(agg, records) : runsWithoutRecordedEnd(agg))
   return counted
 }
 
@@ -223,6 +236,10 @@ export async function replayAgents(
   } finally {
     agg.endAgentReplay()
   }
+  // 1.6 L4: once in the replay, the record of every run the tables keep — the runs a snapshot of an
+  // earlier revision brought have none yet. A record whose size and time are the ones read last is
+  // not opened again.
+  changed += await readRunRecords(agg, agg.runs())
   return changed
 }
 
@@ -298,6 +315,11 @@ export interface AgentPollResult {
   listed: number
   /** The ones the cursors have not seen in their present state. */
   changed: string[]
+  /**
+   * 1.6 L4: the run records of the active sessions' runs whose size or modification time differ
+   * from what their last read found — the ones that appeared, changed or went away.
+   */
+  records: string[]
 }
 
 /**
@@ -311,5 +333,106 @@ export async function agentPollFiles(agg: Aggregator, now: number): Promise<Agen
   const sessions = activeAgentSessions(agg, now)
   const listed: string[] = []
   for (const session of sessions) listed.push(...await agentTranscriptsOf(session))
-  return { sessions: sessions.length, listed: listed.length, changed: await changedSinceCursor(listed, agg.cursors) }
+  return {
+    sessions: sessions.length,
+    listed: listed.length,
+    changed: await changedSinceCursor(listed, agg.cursors),
+    records: await changedRunRecords(runsOfSessions(agg, sessions)),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code's run records (1.6 L4, §0a.12)
+// ---------------------------------------------------------------------------
+
+/** A run record's file name: the run's id — `wf_` and at most 61 of `[A-Za-z0-9_-]` — and `.json`. */
+const RUN_RECORD_NAME_RE = /^wf_[A-Za-z0-9_-]{1,61}\.json$/
+
+/** Whether a path names a run record: `…/workflows/wf_<id>.json`, directly below a `workflows` directory. */
+function isRunRecordName(file: string): boolean {
+  return RUN_RECORD_NAME_RE.test(path.basename(file)) && path.basename(path.dirname(file)) === 'workflows'
+}
+
+/**
+ * Where Claude Code keeps a run's record: `<session>/workflows/<runId>.json`, beside the session's
+ * `subagents/` directory in which the run's journal lies at `subagents/workflows/<runId>/journal.jsonl`.
+ * Built from the run's directory name alone, which must be a run id (`wf_` and at most 61 of
+ * `[A-Za-z0-9_-]` — no separator, no `..`), and from a journal path of exactly that shape; the file
+ * must lie below a configured Claude root, like every file this module reads. Null otherwise.
+ */
+export function runRecordFile(run: RunRec): string | null {
+  const wf = cleanRunId(run.workflowId)
+  const journal = run.journalFile
+  if (wf === null || typeof journal !== 'string' || path.normalize(journal) !== journal) return null
+  const runDir = path.dirname(journal)
+  const workflows = path.dirname(runDir)
+  const subagents = path.dirname(workflows)
+  if (path.basename(journal) !== 'journal.jsonl' || path.basename(runDir) !== wf
+    || path.basename(workflows) !== 'workflows' || path.basename(subagents) !== 'subagents') return null
+  const file = path.join(path.dirname(subagents), 'workflows', `${wf}.json`)
+  return rootOf(file)?.source === 'claude' && rootOf(journal)?.source === 'claude' ? file : null
+}
+
+/** The runs whose record the sweep reads: every run the tables keep whose record has not stated an end. */
+export function runsWithoutRecordedEnd(agg: Aggregator): RunRec[] {
+  return agg.runs().filter((run) => !runRecordEnded(run.record))
+}
+
+/** The runs of the given sessions (main transcript paths, as `activeAgentSessions` names them). */
+export function runsOfSessions(agg: Aggregator, sessions: readonly string[]): RunRec[] {
+  const dirs = sessions.filter((f) => f.endsWith('.jsonl')).map((f) => f.slice(0, -'.jsonl'.length) + path.sep)
+  return agg.runs().filter((run) => typeof run.journalFile === 'string' && dirs.some((d) => run.journalFile!.startsWith(d)))
+}
+
+/** The runs whose record is one of `files`. */
+function runsOfRecordFiles(agg: Aggregator, files: readonly string[]): RunRec[] {
+  if (files.length === 0) return []
+  const wanted = new Set(files)
+  return agg.runs().filter((run) => {
+    const file = runRecordFile(run)
+    return file !== null && wanted.has(file)
+  })
+}
+
+/**
+ * The record files of `runs` that a read would find changed: one `lstat` each, against the size and
+ * time the last read kept — a record that appeared, grew, was rewritten, or went away. Reads nothing.
+ */
+export async function changedRunRecords(runs: readonly RunRec[]): Promise<string[]> {
+  const out: string[] = []
+  for (const run of runs) {
+    const file = runRecordFile(run)
+    if (file === null) continue
+    const known = run.recordStat
+    let st: fs.Stats
+    try {
+      st = await fs.promises.lstat(file)
+    } catch {
+      if (known !== null || run.record !== null) out.push(file)
+      continue
+    }
+    if (!st.isFile()) {
+      if (known !== null || run.record !== null) out.push(file)
+    } else if (known === null || st.size !== known.size || st.mtimeMs !== known.mtimeMs) {
+      out.push(file)
+    }
+  }
+  return out
+}
+
+/**
+ * Reads the run record of each of `runs` (`readRunRecord`) — opened only when its size or time
+ * differ from what the last read kept — and hands what it found to the run (`setRunRecord`), a
+ * record gone as none. Returns how many runs changed: a count, never a value.
+ */
+export async function readRunRecords(agg: Aggregator, runs: readonly RunRec[]): Promise<number> {
+  let changed = 0
+  for (const run of runs) {
+    const file = runRecordFile(run)
+    if (file === null) continue
+    const got = await readRunRecord(file, run.recordStat)
+    if (got === 'unchanged') continue
+    if (agg.setRunRecord(run.sessionId, run.workflowId, got)) changed++
+  }
+  return changed
 }

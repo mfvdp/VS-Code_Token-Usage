@@ -18,8 +18,9 @@
  *  - anything else is unknown, never done: Claude Code writes no end marker into an agent's
  *    transcript, so a silent file is not a finished one.
  * A workflow run's end is what its parent recorded for its latest `Workflow` launch, then — once
- * every member is closed — what its members came to, and failing both what their clocks say; a
- * run nothing but its launch shows yet runs by the launch's clock (1.6 N4, §3.0 c).
+ * every member is closed — what its members came to, then what Claude Code's own run record says
+ * (1.6 L4), and failing all three what their clocks say; a run nothing but its launch shows yet runs
+ * by the launch's clock (1.6 N4, §3.0 c).
  *
  * A node is keyed by the identifiers its records carry — `s:<sessionId>`,
  * `w:<sessionId>|<workflowId>` (a run belongs to its session), `a:<agentId>`,
@@ -41,11 +42,12 @@ import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
 import { PricingOptions, costOfBucket, normalizeModel } from './prices'
 import { compact, full } from './render'
+import { cleanRunRecord } from './runRecord'
 import { costText, durationText, freshInput, tokens } from './stats'
 import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, dayOf, formatTime, weekdayWords } from './time'
 import {
   AgentLaunch, AgentRec, Attribution, Bucket, CompactionRec, Effort, JournalAgent, LaunchStatus, MainRec, RecordedOutcome,
-  RejectedRequest, RunLaunch, RunRec, SessionRec, emptyBucket,
+  RejectedRequest, RunLaunch, RunRec, RunRecordFields, SessionRec, emptyBucket,
 } from './types'
 
 /** Everything the tree is built from. The view model fills it from the aggregator. */
@@ -989,23 +991,38 @@ function runOutcomeState(o: Outcome, now: number, tcfg: TimeConfig): StateOf {
   }
 }
 
+/** Claude Code's run record of a run (1.6 L4), each of its seven fields checked again: a snapshot may carry anything. */
+function recordOf(run: RunRec | null): RunRecordFields | null {
+  return run === null ? null : cleanRunRecord(run.record)
+}
+
 /**
- * The third source of a run's end (§3.0 c): Claude Code's own run record (1.6 L4), which this
- * build does not read yet — so it says nothing, and the run's state is its members'.
+ * The third source of a run's end (§3.0 c): Claude Code's own run record (1.6 L4) — its `status`,
+ * quoted as it was written: `completed` makes the run done, `failed` failed, and `killed`,
+ * `stopped` and `cancelled` stopped; `running`, or no status, is no end. The record states its
+ * run's start and length, so its end has a time, and it is outlived as the parent's is: a member
+ * whose last line came more than RESUMED_AFTER_MS after it makes the run's state its members' again.
+ * A record without both figures has no time and is never outlived, as the journal's ends are not.
  */
-function recordRunEnd(run: RunRec | null): StateOf | null {
-  void run
-  return null
+function recordRunEnd(record: RunRecordFields | null, lastActivity: number | null): StateOf | null {
+  const word = record?.status ?? null
+  if (record === null || word === null || word === 'running') return null
+  const end = record.startTime !== null && record.durationMs !== null ? record.startTime + record.durationMs : null
+  if (end !== null && lastActivity !== null && lastActivity > end + RESUMED_AFTER_MS) return null
+  if (word === 'completed') return { state: 'done', stateText: t("Completed — Claude Code's run record says ‘{0}’.", word) }
+  if (word === 'failed') return { state: 'failed', stateText: t("Failed — Claude Code's run record says ‘{0}’.", word) }
+  return { state: 'stopped', stateText: t("Stopped — Claude Code's run record says ‘{0}’.", word) }
 }
 
 /**
  * A workflow run's state (§3.0 c): the end its parent recorded for its latest launch, then — once
  * every member is closed — what they came to (the journal's view, `workflowState`), then Claude
- * Code's run record, then what its members' clocks say. A recorded end does not close a member:
- * one without an outcome of its own keeps its own state and counts so in the tally, so a done run
- * may show an agent still running beside it for up to ten minutes. The parent's end is outlived
- * like an agent's (D6): a member whose last line came more than RESUMED_AFTER_MS after it makes
- * the run's state an inference again, the recorded end kept for the details (`resumed`). A run no
+ * Code's run record (`recordRunEnd`), then what its members' clocks say. A recorded end does not
+ * close a member: one without an outcome of its own keeps its own state and counts so in the
+ * tally, so a done run may show an agent still running beside it for up to ten minutes. The
+ * parent's end is outlived like an agent's (D6): a member whose last line came more than
+ * RESUMED_AFTER_MS after it makes the run's state an inference again, the recorded end kept for
+ * the details (`resumed`); the record's is outlived the same way, its row saying what it said. A run no
  * agent has written to yet — nothing but its launch — is running for ten minutes after the
  * launch, then unknown.
  */
@@ -1016,7 +1033,7 @@ function runState(
   const outlived = parent !== null && parent.at !== null && lastActivity !== null && lastActivity > parent.at + RESUMED_AFTER_MS
   if (parent !== null && !outlived) return runOutcomeState(parent, now, tcfg)
   if (tally.started > 0 && tally.running === 0 && tally.unknown === 0) return workflowState(tally)
-  const record = recordRunEnd(run)
+  const record = recordRunEnd(recordOf(run), lastActivity)
   if (record !== null) return record
   if (tally.started === 0 && latest !== null) {
     if (now - latest.ts <= RUNNING_WINDOW_MS) {
@@ -1079,6 +1096,32 @@ function timeRows(
       ? { label: t('Last activity'), value: '–' }
       : { label: t('Last activity'), value: stamp(last, now, tcfg), note: ago(last, now), live: 'ago' },
   ]
+}
+
+/**
+ * 1.6 L4: Claude Code's run record, in one sentence of all seven fields — its status word as written,
+ * when the run started, how many agents it counts, its tokens and its tool calls, how long it took,
+ * and its default model —, each part a dash when the record does not state it, and the whole row a
+ * dash when there is no record. Claude Code's own figures: they are shown beside the tree's, never
+ * added to them.
+ */
+function recordRow(record: RunRecordFields | null, now: number, tcfg: TimeConfig): DetailRow {
+  const label = t("Claude Code's run record")
+  if (record === null) return { label, value: '–' }
+  const or = <T>(v: T | null, f: (x: T) => string): string => (v === null ? '–' : f(v))
+  return {
+    label,
+    value: t('{0} · started {1} · {2} agents · {3} tokens · {4} tool calls · {5} · default model {6}',
+      record.status ?? '–',
+      or(record.startTime, (x) => stamp(x, now, tcfg)),
+      or(record.agentCount, full),
+      or(record.totalTokens, compact),
+      or(record.totalToolCalls, full),
+      or(record.durationMs, durationText),
+      record.defaultModel ?? '–'),
+    note: t("Claude Code's own figures, never added to a total"),
+    kind: 'sentence',
+  }
 }
 
 /** The row the Copy ID button copies: the whole identifier, which a name only starts. */
@@ -2254,7 +2297,9 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       ? [{ label: t('Launches'), value: t('{0} — resumed {1} time(s)', full(launches.length), full(launches.length - 1)) }]
       : []
     // L2: the tally, how many of its agents worked at once, its times, its counts, how its agents
-    // ended and at what effort, how often it was launched, and its ID.
+    // ended and at what effort, how often it was launched, Claude Code's own record of it (L4), and
+    // its ID.
+    const record = recordOf(run)
     w.rows = () => [
       agentsRow,
       ...parallelismRows(w),
@@ -2264,6 +2309,7 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       ...endedRejectedRows(w),
       ...effortCountRows(w),
       ...launchesRow,
+      recordRow(record, now, tcfg),
       idRow(wf),
     ]
   }

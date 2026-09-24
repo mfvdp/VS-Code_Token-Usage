@@ -26,6 +26,7 @@ import { AGENTS_CSV_COLUMNS, EXPORT_SCHEMA_VERSION } from '../src/exporter'
 import { PaceConfig, paceVerdict } from '../src/pace'
 import { priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
+import { RUN_RECORD_CHUNK_BYTES, RUN_RECORD_MAX_BYTES, RUN_RECORD_SCALAR_MAX } from '../src/runRecord'
 import { AGENT_META_MAX_BYTES } from '../src/scan'
 import { buildItems, selectWindows, viewOf, windowValue } from '../src/statusText'
 import { formatReset, TimeConfig } from '../src/time'
@@ -309,6 +310,7 @@ test('the Privacy list names every file the extension opens', () => {
     '.credentials.json',              // poll mode, after consent
     'meta.json',                      // an agent transcript's identity sidecar
     'journal.jsonl',                  // a workflow run's journal of started agents and results
+    'workflows/wf_',                  // 1.6 L4 (§0a.12): Claude Code's run record, <session>/workflows/wf_<id>.json
     'subagents/',                     // the agent directories the running tree is polled from
   ]) {
     assert.ok(privacy.includes(needed), `the Privacy section does not mention ${needed}`)
@@ -373,7 +375,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
     // 1.6 §0a.6–0a.10 (P13a): the tool errors and the permission mode on the raw line, a cache miss
     // level by level, the writer's version, a compaction and its metadata.
     'tool errors', 'a cache miss', 'a cache miss\'s diagnostics', 'a cache miss\'s reason', 'the writer\'s version',
-    'the permission mode', 'a compaction', 'a compaction\'s metadata']) {
+    'the permission mode', 'a compaction', 'a compaction\'s metadata',
+    // 1.6 §0a.12 (P13b): Claude Code's run record — the key-picker's seven keys, and each value's check.
+    'the run record', 'the run record\'s values']) {
     assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
   }
   for (const row of READ_CONTRACT) {
@@ -393,7 +397,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
     'perTurnEffort',
     // 1.6 §0a.10, §0a.11 (P13a): the line holding a compaction's summary and what the compaction
     // preserved; a sidecar's workflow phase and its worktree's path.
-    'isCompactSummary', 'preservedSegment', 'workflowPhase', 'worktreePath']) {
+    'isCompactSummary', 'preservedSegment', 'workflowPhase', 'worktreePath',
+    // 1.6 §0a.12 (P13b): the parts of a run record the key-picker never decodes, beside its script and result.
+    'logs', 'phases', 'workflowProgress']) {
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
@@ -460,6 +466,10 @@ test('docs/agents.md quotes the state sentences the tree builder writes, word fo
     'Stopped — every one of these agents has a recorded outcome, and none completed: the last attempt of each step was stopped.',
     // 1.6 N5 (P6): an agent that went quiet on a tool call names the call.
     'Unknown — inferred: no result was recorded and the transcript has been silent since {0}, after a {1} call; the agent may have been stopped.',
+    // 1.6 L4 (P13b): a run's end as Claude Code's own run record states it, its word quoted.
+    "Completed — Claude Code's run record says ‘{0}’.",
+    "Failed — Claude Code's run record says ‘{0}’.",
+    "Stopped — Claude Code's run record says ‘{0}’.",
   ]
   // The run sentences 1.6 replaced are written nowhere any more.
   for (const gone of ['Failed — at least one agent of this run has a recorded failure.',
@@ -588,6 +598,10 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`a whole number from 1 to ${depth[1]}`, 'the spawn depth range'],
     // 1.6 O3 (P13a, §0a.9): the permission modes waiting for a record.
     [`for at most **${PENDING_MODE_MAX}** transcripts, the oldest dropped first`, 'the permission modes kept before a record'],
+    // 1.6 L4 (P13b, §0a.12): how much of a run record is read, in what steps, and how much of it is decoded.
+    [`only from a regular file of at most ${RUN_RECORD_MAX_BYTES / (1024 * 1024)} MB, never through a link`, 'the run record cap'],
+    [`walks the file's bytes in ${RUN_RECORD_CHUNK_BYTES / 1024} KB chunks`, 'the run record\'s chunk'],
+    [`decodes a top-level key of at most ${RUN_RECORD_SCALAR_MAX} bytes and, of the seven, a value of at most ${RUN_RECORD_SCALAR_MAX} bytes`, 'what the key-picker decodes'],
   ]
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const [claim, what] of claims) {

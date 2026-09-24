@@ -154,7 +154,15 @@ test('the read contract holds for the shipped sources: every reader names exactl
   assert.deepEqual(byWhat.get('the writer\'s version')?.fields, ['version'])
   assert.deepEqual(byWhat.get('a compaction')?.fields, ['type', 'subtype', 'compactMetadata'])
   assert.deepEqual(byWhat.get('a compaction\'s metadata')?.fields, ['trigger', 'preTokens', 'postTokens'])
-  for (const row of contract.READ_CONTRACT) assert.equal(row.file, 'src/agg.ts', row.what)
+  // 1.6 P13b (§0a.12): Claude Code's run record — the key-picker's seven keys, a regex row over its
+  // key list, and the check of each value. 1.6 P13b (pinned and changed): the two rows read
+  // src/runRecord.ts; every other reader is the aggregator's.
+  const seven = ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel']
+  assert.deepEqual([byWhat.get('the run record')?.kind, byWhat.get('the run record')?.fields], ['regex', seven])
+  assert.deepEqual([byWhat.get('the run record\'s values')?.kind, byWhat.get('the run record\'s values')?.fields], ['fields', seven])
+  for (const row of contract.READ_CONTRACT) {
+    assert.equal(row.file, row.what.startsWith('the run record') ? 'src/runRecord.ts' : 'src/agg.ts', row.what)
+  }
 })
 
 test('a reader that names one more field, or no longer reads a listed one, breaks the contract', () => {
@@ -226,6 +234,9 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
       return { status: r.status, out: `${r.stdout}${r.stderr}` }
     }
     writeFileSync(join(dir, 'src', 'agg.ts'), agg)
+    // 1.6 P13b (pinned and changed): the run record's reader has a file of its own.
+    const runRecord = fromRepo('src/runRecord.ts')
+    writeFileSync(join(dir, 'src', 'runRecord.ts'), runRecord)
     const kept = run()
     assert.equal(kept.status, 0, kept.out)
     assert.match(kept.out, /read contract: \d+ reader\(s\)/)
@@ -238,6 +249,15 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     assert.equal(broken.status, 1, broken.out)
     assert.match(broken.out, /DIFF {2}the identity sidecar/)
     assert.match(broken.out, /read but not listed: description/)
+    // 1.6 P13b (§0a.12): the key-picker starts to take the run's script as well — the gate stops it.
+    writeFileSync(join(dir, 'src', 'agg.ts'), agg)
+    const keys = "export const RUN_RECORD_KEYS = ['status',"
+    assert.ok(runRecord.includes(keys))
+    writeFileSync(join(dir, 'src', 'runRecord.ts'), runRecord.replace(keys, "export const RUN_RECORD_KEYS = ['script', 'status',"))
+    const picked = run()
+    assert.equal(picked.status, 1, picked.out)
+    assert.match(picked.out, /DIFF {2}the run record: /)
+    assert.match(picked.out, /read but not listed: script/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

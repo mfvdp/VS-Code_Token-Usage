@@ -2377,8 +2377,11 @@ function agentDetails(d: Payload, node: Payload, depth: number | null, reach = t
         + tr('Copy ID') + '</button>' : '';
     if (copy) copied = true;
     // An id has no space to break at, and a launch's tool_use id is wider than the value column
-    // of a narrow sidebar: it may break anywhere rather than run out of the panel.
-    const value = copy ? '<span class="ag-id">' + orDash(r.value) + '</span>' : bar ? agentMix(r) : orDash(r.value);
+    // of a narrow sidebar: it may break anywhere rather than run out of the panel. A sentence breaks
+    // between its words, never between a figure and its unit (1.6 P13b: Claude Code's run record,
+    // "… · 15 min 40 s · …").
+    const value = copy ? '<span class="ag-id">' + orDash(r.value) + '</span>' : bar ? agentMix(r)
+      : r.kind === 'sentence' ? keepFigures(orDash(r.value)) : orDash(r.value);
     rows += '<dt' + wide + '>' + orDash(r.label) + '</dt><dd' + wide + '>' + value
       + (live ? ' · ' + agoBeside : note ? (wide ? ' · ' : ' ') + note : '')
       + copy + '</dd>';
@@ -2400,6 +2403,15 @@ function agentDetails(d: Payload, node: Payload, depth: number | null, reach = t
  * between a figure and its unit ("60 %", "29 min"). The words stay the view model's, character for
  * character.
  */
+/**
+ * 1.6 P13b: every figure of an escaped text kept on one line with its unit — "40 s", "15 min",
+ * "13.5K", "76 %" — the text itself unchanged. A sentence row of the details breaks between its
+ * words, and a narrow panel would otherwise tear a duration's "40" from its "s".
+ */
+function keepFigures(html: string): string {
+  return html.replace(/\d[\d.,]*(?:\u00a0|\u202f| )?(?:K|M|G|ms|min|s|h|d|%)(?![A-Za-z])/g, (f) => '<span class="nobr">' + f + '</span>');
+}
+
 function agentClauses(text: Payload): string {
   return String(text).split(' · ').map((c: string) => '<span class="nobr">' + esc(c) + '</span>').join(' · ');
 }

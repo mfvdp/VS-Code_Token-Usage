@@ -592,7 +592,10 @@ test('§0a.10 leak test: a compaction reaches the record and the details as a co
   assert.equal(detailsOf(agg, `s:${SESSION}`).get('Compactions'), '1 · last at 11:20 (manual, 167.2K → 12.4K)')
   assert.equal(detailsOf(agg, 'a:abc123').get('Compactions'), '1 · last at 11:19 (auto, 90K → 8K)')
   const outputs = outputsOf(agg, live)
-  assert.ok(outputs.find(([k]) => k === 'page 2')?.[1].includes('1 · last at 11:20 (manual, 167.2K → 12.4K)'), 'the page does not show the compaction')
+  // 1.6 P13b (pinned and changed): a sentence row keeps each figure with its unit in a span of its
+  // own, so the page's words are read without its tags.
+  assert.ok(outputs.find(([k]) => k === 'page 2')?.[1].replace(/<[^>]+>/g, '').includes('1 · last at 11:20 (manual, 167.2K → 12.4K)'),
+    'the page does not show the compaction')
   assertNowhere(outputs, new RegExp(`${secret}-(preserved|agent-preserved|summary)|preservedSegment|preservedMessages|preCompactDiscoveredTools|isCompactSummary|mcp__synthetic`),
     'what a compaction preserved or its summary')
 })

@@ -708,6 +708,70 @@ export function journalLine(o: JournalLineOpts): string {
   return JSON.stringify(line)
 }
 
+export interface RunRecordOpts {
+  runId?: string
+  /** The seven fields 1.6 L4 reads; `undefined` gives a default, null leaves the key out. */
+  status?: unknown
+  startTime?: unknown
+  durationMs?: unknown
+  agentCount?: unknown
+  totalTokens?: unknown
+  totalToolCalls?: unknown
+  defaultModel?: unknown
+  /** The text every content field carries — script, logs, result, summary, args, … */
+  secret?: string
+  /** Bytes of synthetic script and log text written before the seven fields (a real record's are 60 KB at the median). */
+  pad?: number
+  /** Further top-level keys, after everything else (a duplicate key, an account id, …). */
+  extra?: Record<string, unknown>
+}
+
+/**
+ * Claude Code's run record of a workflow run, `<session>/workflows/<runId>.json` (1.6 L4, §0a.12), in
+ * the shape counted on the measuring machine (key names only): one line, no indentation, the run's
+ * content — its `script`, `args`, `phases`, `logs`, `workflowProgress`, `result`, `summary` — before
+ * the seven figures a reader may take. Every content field carries fixture text with escaped quotes,
+ * braces and a nested object that has keys named like the seven, which a reader must never take.
+ */
+export function runRecordJson(o: RunRecordOpts = {}): string {
+  const secret = o.secret ?? 'synthetic run record'
+  const pad = o.pad ?? 0
+  const logLine = `${secret} log: said "{\"status\":\"failed\",\"totalTokens\":1}" and {brace} [bracket] \\ `
+  const logs: string[] = []
+  for (let n = 0, size = 0; size < pad; n++) {
+    const entry = `${n} ${logLine}`
+    logs.push(entry)
+    size += entry.length
+  }
+  const rec: Record<string, unknown> = {
+    runId: o.runId ?? 'wf_5eed1234-abc',
+    taskId: `${secret}-task`,
+    workflowName: `${secret}-workflow-name`,
+    scriptPath: `/tmp/synthetic/workflows/${secret}.js`,
+    script: `// ${secret} script\nexport default async function run() { return { status: "failed", "totalTokens": 7 } }`,
+    args: { prompt: `${secret} prompt`, files: ['src/a.ts'] },
+    timestamp: '2026-09-03T11:00:00.000Z',
+    phases: [{ name: `${secret} phase`, status: 'failed', totalTokens: 1, agentCount: 99 }],
+    logs,
+    workflowProgress: { status: 'failed', durationMs: 5, defaultModel: `${secret}-model`, steps: [{ status: 'killed' }] },
+    result: { text: `${secret} result`, status: 'failed', totalToolCalls: 3 },
+    summary: `${secret} summary`,
+    error: null,
+  }
+  const put = (key: string, v: unknown, fallback: unknown): void => {
+    if (v === null) return
+    rec[key] = v === undefined ? fallback : v
+  }
+  put('status', o.status, 'completed')
+  put('startTime', o.startTime, Date.UTC(2026, 8, 3, 11, 0, 0))
+  put('agentCount', o.agentCount, 3)
+  put('totalTokens', o.totalTokens, 48_210)
+  put('totalToolCalls', o.totalToolCalls, 17)
+  put('durationMs', o.durationMs, 1_265_000)
+  put('defaultModel', o.defaultModel, 'claude-fable-5-1[1m]')
+  return JSON.stringify({ ...rec, ...(o.extra ?? {}) })
+}
+
 export interface MetaOpts {
   /** Null leaves a field out, as older or other sidecars do. */
   agentType?: string | null

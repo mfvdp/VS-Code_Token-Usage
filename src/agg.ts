@@ -7,11 +7,12 @@ import * as path from 'path'
 import { isKnownSource } from './adapters'
 import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
+import { cleanRunRecord, cleanRunRecordStat } from './runRecord'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
   AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, CacheMissKind, MainRec, CodexRateLimitsSnapshot, CompactionRec,
   Cursor, Effort, JournalAgent, LaunchStatus, PendingMessage, PermissionMode, RateLimitKind, RecordedOutcome, RejectedRequest,
-  Resolution, RunLaunch, RunRec, SessionRec, Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS,
+  Resolution, RunLaunch, RunRec, RunRecordStat, SessionRec, Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS,
   STATE_VERSION, TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
 
@@ -296,6 +297,12 @@ function cleanMeta(v: unknown): AgentMeta | null {
     : meta
 }
 
+/** Whether two run record stats say the same size and time. */
+function sameStat(a: RunRecordStat | null, b: RunRecordStat | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.size === b.size && a.mtimeMs === b.mtimeMs
+}
+
 /** Whether two identities say the same, field by field. */
 function sameMeta(a: AgentMeta | null, b: AgentMeta | null): boolean {
   if (a === null || b === null) return a === b
@@ -402,9 +409,10 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * effort of an agent's replies (N8) and the context of its newest request (L2); 7 = the metadata of O3 —
  * an agent's tool errors and cache misses, the Claude Code version, the permission mode and the
  * compactions of an agent's and a main session's transcript — and the sidecar's `parentAgentId`,
- * which the replay reads the sidecar of an agent again for.
+ * which the replay reads the sidecar of an agent again for; 8 = Claude Code's run record of each
+ * workflow run (L4), which the replay reads once for every run it keeps.
  */
-export const AGENT_TABLES_REVISION = 7
+export const AGENT_TABLES_REVISION = 8
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -1138,6 +1146,9 @@ function restoreRun(v: unknown): RunRec | null {
     agentsDropped: count(r.agentsDropped),
     steps: count(r.steps),
     lastTs: lastTs !== null && lastTs > 0 ? lastTs : 0,
+    // 1.6 L4: the run record's seven fields and the file's size and time, each checked as at the read.
+    record: cleanRunRecord(r.record),
+    recordStat: cleanRunRecordStat(r.recordStat),
   }
 }
 
@@ -1160,8 +1171,9 @@ function restoreRun(v: unknown): RunRec | null {
  * Beside the counting, Claude lines feed five agent tables for the Agents section: one
  * record per agent transcript and per main session (the same dedupe as the buckets), the
  * launches of agents and of workflow runs a parent recorded, and the workflow runs as their
- * journals record them. They hold identifiers, times and counts — never a description, a
- * prompt, a script, a result, a journal's key or an API error's text.
+ * journals record them, with the seven fields of Claude Code's own record of each (1.6 L4). They
+ * hold identifiers, times and counts — never a description, a prompt, a script, a result, a
+ * journal's key or an API error's text.
  */
 export class Aggregator {
   private buckets = new Map<string, Bucket>()
@@ -2181,7 +2193,10 @@ export class Aggregator {
     const runKey = `${sessionId}|${workflowId}`
     let run = this.runMap.get(runKey)
     if (!run) {
-      run = { source: 'claude', sessionId, workflowId, journalFile: ctx.file, agents: [], agentsDropped: 0, steps: 0, lastTs: 0 }
+      run = {
+        source: 'claude', sessionId, workflowId, journalFile: ctx.file, agents: [], agentsDropped: 0, steps: 0, lastTs: 0,
+        record: null, recordStat: null,
+      }
       this.runMap.set(runKey, run)
       this.changes.agents = true
     }
@@ -2286,6 +2301,26 @@ export class Aggregator {
   /** Whether a journal's step map is in memory — made by its first line, a rebuild or a reset. */
   journalInMemory(file: string): boolean {
     return this.journalSteps.has(file)
+  }
+
+  /**
+   * 1.6 L4 (§0a.12): what Claude Code's run record gave a run the tables keep — its seven fields,
+   * checked again here, so a caller cannot put into the table what the reader would not have, and the
+   * file's size and modification time, by which the next pass decides whether to read it again —, or
+   * `null` for no record file. A run the tables do not keep (no journal line made it, or the roll-up
+   * dropped it) takes nothing. True when the run changed; the tree is told only when the fields did.
+   */
+  setRunRecord(sessionId: string, workflowId: string, read: { fields: unknown; stat: unknown } | null): boolean {
+    const run = this.runMap.get(`${clipId(sessionId)}|${workflowId}`)
+    if (!run) return false
+    const record = read === null ? null : cleanRunRecord(read.fields)
+    const stat = read === null ? null : cleanRunRecordStat(read.stat)
+    const fieldsChanged = JSON.stringify(run.record) !== JSON.stringify(record)
+    if (!fieldsChanged && sameStat(run.recordStat, stat)) return false
+    run.record = record
+    run.recordStat = stat
+    if (fieldsChanged) this.changes.agents = true
+    return true
   }
 
   /**

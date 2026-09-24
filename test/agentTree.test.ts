@@ -99,6 +99,7 @@ function run(agents: JournalAgent[], over: Partial<RunRec> = {}): RunRec {
     source: 'claude', sessionId: S1, workflowId: WF,
     journalFile: path.join(PROJ, S1, 'subagents', 'workflows', WF, 'journal.jsonl'),
     agents, agentsDropped: 0, steps: new Set(agents.map((a) => a.step).filter((n) => n > 0)).size, lastTs: NOW - 30 * MIN,
+    record: null, recordStat: null,
     ...over,
   }
 }
@@ -1520,12 +1521,14 @@ test('a session and a run have details of their own', () => {
   const w = agentDetails(input(over), NOW, wfKey)
   assert.ok(w)
   // 1.6 P9 (L2, pinned and changed): the tally, how many ran at once, its times and counts, its
-  // agents by effort, its ID.
+  // agents by effort, its ID. 1.6 P13b (L4, pinned and changed): Claude Code's run record before
+  // the ID — a dash here, as no journal of this run made a record to read.
   assert.equal(w.overview, null)
   assert.deepEqual(w.rows.map((r) => r.label), [
     'Agents', 'Parallelism', 'Started', 'Duration', 'Last activity', 'Requests', 'Usage', 'Fresh input', 'Cache write 5m',
-    'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents by effort', 'ID',
+    'Cache write 1h', 'Cache read', 'Output', 'Reasoning', 'Tool calls', 'Agents by effort', "Claude Code's run record", 'ID',
   ])
+  assert.deepEqual(w.rows.find((r) => r.label === "Claude Code's run record"), { label: "Claude Code's run record", value: '–' })
   // A run's id is its directory's name, which the launch's result names too.
   assert.equal(w.id, WF)
   assert.deepEqual(w.rows[w.rows.length - 1], { label: 'ID', value: WF, copy: true })

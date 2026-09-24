@@ -71,3 +71,25 @@ name different models, and the history tells which part came from which.
 
 The recipe itself — what to run in which order, the two secrets it needs and the publisher
 verification — is in [Releasing](release.md).
+
+## Performance
+
+The dashboard is a webview: everything it draws reaches it as a message, which the editor serialises
+and the page takes in. The host therefore sends the page what it draws, and nothing else:
+
+* **One section at a time.** After the first whole page, a push carries the fields of one section — of
+  a section whose fields changed and that the page shows (`SECTION_FIELDS`, `shownSections` in
+  `src/dashboard.ts`); the Agents section at most every two seconds (`SECTION_MIN_INTERVAL_MS`), a
+  reader's own click on it at once.
+* **Nothing for a section the page has taken out.** While the provider switch shows Codex, the page
+  leaves the Agents and Context sections out, and the host still builds them whole — the agent poll and
+  the status bar's `agents` entry read the tree. The fragment that takes each section off the page goes;
+  after it no fragment of either is pushed until the switch shows Claude Code again — alone or under
+  All —, and then each comes back whole, with the newest data. On the harness's large run (one session
+  with a workflow run of 427 agents, both opened), a minute of a running agent under Codex pushed twelve
+  Agents fragments of about 37 KB each — 441 KB the page dropped unread; now it pushes none.
+* **No second copy of the budgets.** The view model keeps every budget whatever the switch shows
+  (`allBudgets`), for the status bar's `budget` entry and the budget alerts; the page draws the rows of
+  its view (`budgets`) and never reads the other list, so the whole-page push leaves it out
+  (`pagePayload`, `HOST_ONLY_FIELDS`). Under All the two are the same rows: with three budgets
+  configured, a whole-page push is 1.6 KB smaller.

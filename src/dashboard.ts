@@ -80,6 +80,33 @@ export const SECTION_FIELDS: Readonly<Record<string, SectionField[]>> = {
 }
 
 /**
+ * 1.8 L-1: the sections whose body the page leaves out while the view excludes Claude — the page's
+ * `CLAUDE_ONLY_SECTIONS` (1.7 F1, §7a Q7). Under such a view their fields are still built whole —
+ * the host reads the tree for the agent poll and the status bar — but the page drops every fragment
+ * of them after the one that took the section out (`placeSection`), unread.
+ */
+const CLAUDE_ONLY_KEYS: readonly string[] = ['agents', 'context']
+
+/** 1.8 L-1: what of such a section decides whether the page has it — the view and the reason it is left out. */
+const CLAUDE_ONLY_VIEW: SectionField[] = ['provider', 'claudeOnly']
+
+/**
+ * 1.8 L-3: the view-model fields no push carries — the host's own. `allBudgets` (1.7 F1) is every
+ * budget whatever the switch shows, for the status bar's budget item and the budget alerts
+ * (extension.ts); no view prints it, the page never reads it, and under All it is the `budgets` rows
+ * a second time. No section is built from one of them (`SECTION_FIELDS`), so a fragment never
+ * carries one either. Exported for the tests that hold every push to it.
+ */
+export const HOST_ONLY_FIELDS = ['allBudgets'] as const satisfies readonly (keyof ViewModel)[]
+
+/** 1.8 L-3: the view model as the page gets it — every field but HOST_ONLY_FIELDS. */
+export function pagePayload(vm: ViewModel): Omit<ViewModel, typeof HOST_ONLY_FIELDS[number]> {
+  const o: Record<string, unknown> = { ...vm }
+  for (const f of HOST_ONLY_FIELDS) delete o[f]
+  return o as Omit<ViewModel, typeof HOST_ONLY_FIELDS[number]>
+}
+
+/**
  * The page's language, for the browser and for a screen reader: the primary subtag of the
  * editor's language, so an English build stays `lang="en"` whether the host says 'en' or
  * 'en-US', and a German one says `lang="de"`. A page whose words are German but whose markup
@@ -172,6 +199,13 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
    * says: the interval bounds how often live data redraws a section, not how fast it answers.
    */
   private sentUi = new Map<string, string>()
+  /**
+   * 1.8 L-1: the view part (`CLAUDE_ONLY_VIEW`) of each Claude Code–only section as it was last
+   * pushed — by a fragment or by the whole page. While the view leaves the section out and this
+   * part is the one the page already has, the page has taken the section out, and a fragment of it
+   * would be dropped unread.
+   */
+  private sentView = new Map<string, string>()
   /** The one timer a held-back section waits on, and when it fires; null while nothing waits. */
   private deferred: { handle: unknown; at: number } | null = null
 
@@ -275,7 +309,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
       }
       // The whole page is on its way: nothing is left for a held-back section to wait for.
       this.cancelDeferred()
-      void view.webview.postMessage({ type: 'data', payload: vm })
+      // 1.8 L-3: without the host's own fields — the page never reads them.
+      void view.webview.postMessage({ type: 'data', payload: pagePayload(vm) })
       return
     }
     // Only what the page shows. A section that is not on it has no body to write into, and a
@@ -288,6 +323,13 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
       if (!shown.has(key)) continue
       const next = serialise(vm, fields)
       if (this.sent.get(key) === next) continue
+      // 1.8 L-1: a section the page has already taken out is not pushed while the view leaves it
+      // out — under Codex a running agent changed the tree every build, and the page dropped each
+      // of those fragments (33.8–101 KB each, 1.7 Review 2) unread. Not pushed and not noted:
+      // `sent` keeps what the page has, so the switch back pushes the section whole, with the
+      // newest tree. The fragment that takes it out still goes — its view part differs from the
+      // one last pushed.
+      if (this.alreadyLeftOut(key, vm)) continue
       // Held back, not dropped: `sent` still holds what the page has, so the flush the timer
       // makes compares against it again and pushes whatever the latest view model says.
       const hold = this.holdFor(key, vm, fields, now)
@@ -316,8 +358,25 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
     return serialise(vm, uiFieldsOf(fields)) === this.sentUi.get(key) ? left : 0
   }
 
-  /** Notes a push of a section with an interval: when it went, and the view state it carried. */
+  /**
+   * 1.8 L-1: whether the page has already taken this Claude Code–only section out — the view leaves
+   * it out (the page's own `leftOut` rule: `claudeOnly` a non-empty string) and the last push of the
+   * section carried this very view. A section the page shows, or one whose view has just changed, is
+   * compared as every other section is.
+   */
+  private alreadyLeftOut(key: string, vm: ViewModel): boolean {
+    if (!CLAUDE_ONLY_KEYS.includes(key)) return false
+    const reason: unknown = vm.claudeOnly
+    if (typeof reason !== 'string' || reason === '') return false
+    return this.sentView.get(key) === serialise(vm, CLAUDE_ONLY_VIEW)
+  }
+
+  /**
+   * Notes a push of a section: for one with an interval, when it went and the view state it carried;
+   * for a Claude Code–only one (1.8 L-1), the view it carried.
+   */
   private notePushed(key: string, vm: ViewModel, fields: SectionField[], now: number): void {
+    if (CLAUDE_ONLY_KEYS.includes(key)) this.sentView.set(key, serialise(vm, CLAUDE_ONLY_VIEW))
     if (minIntervalOf(key) === 0) return
     this.pushedAt.set(key, now)
     this.sentUi.set(key, serialise(vm, uiFieldsOf(fields)))

@@ -1082,9 +1082,10 @@ test('the provider switch reaches neither the agent poll, the status bar\'s agen
     assert.equal(first.payload.claudeOnly, 'Claude Code only — not shown while Codex is selected.')
     // The tree the page does not draw is the whole tree the host reads.
     assert.equal(first.payload.agents.running, 1)
-    // The page shows no Claude budget; the host holds it for the bar and the alerts.
+    // The page shows no Claude budget; the host holds it for the bar and the alerts — since 1.8 L-3
+    // in its own view model only, no longer as a second copy in the page's payload.
     assert.deepEqual(first.payload.budgets, [])
-    assert.deepEqual(first.payload.allBudgets.map((b) => b.scope), ['claude'])
+    assert.equal('allBudgets' in first.payload, false)
     // A Claude budget over its percentage speaks under the Codex view.
     // (The alert minute is fired until the evaluation meets a finished scan.)
     assert.ok(intervals.fire(60_000) > 0, 'no alert interval is armed')
@@ -1103,6 +1104,54 @@ test('the provider switch reaches neither the agent poll, the status bar\'s agen
     assert.deepEqual(disposeAll(LIVE.pop()!), [])
   } finally {
     seeAgain()
+    intervals.restore()
+  }
+})
+
+test('the page gets no copy of the host\'s budgets: under Codex no push carries allBudgets, while the bar\'s budget item and the budget alerts still read every budget (1.8 L-3)', async () => {
+  // §3.0 (j): the status bar and the budget alerts read `latestVm.allBudgets` in the host; only the
+  // page's payload loses the field. A Claude budget, a stored Codex view: the page shows no budget
+  // row and gets none of the host's, the bar still shows the Claude budget and its alert speaks.
+  const kept = new Map<string, unknown>([['tokenPace.ui', { range: '30d', providers: ['codex'] }]])
+  const intervals = holdIntervals()
+  try {
+    await activateHost(makeFixture(), REPO, {
+      globalState: kept,
+      settings: {
+        'tokenPace.statusBar.show': ['budget', 'tokens'],
+        'tokenPace.dashboard.sections': ['budget', 'summary'],
+        'tokenPace.budgets': [{ scope: 'claude', period: 'month', unit: 'tokens', limit: 500 }],
+        'tokenPace.alerts.budgetPercent': 50,
+      },
+    })
+    await waitOwnColdStart(state, 'the cold scan')
+    await waitFor('the budget entry', () => state.textOf(BUDGET_ITEM) !== undefined)
+    assert.match(String(state.textOf(BUDGET_ITEM)), /^budget \d+ %/, String(state.textOf(BUDGET_ITEM)))
+    const page = openDashboard()
+    await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+    const first = page.sent.find((m) => (m as { type?: unknown }).type === 'data') as { payload: ViewModel }
+    assert.equal(first.payload.provider, 'codex')
+    assert.deepEqual(first.payload.budgets, [])
+    assert.equal('allBudgets' in first.payload, false, 'the whole page carries the host\'s budgets')
+    // The Claude budget over its percentage speaks under the Codex view: the alerts read the host's rows.
+    assert.ok(intervals.fire(60_000) > 0, 'no alert interval is armed')
+    await waitFor('the budget alert', () => {
+      if (/Alert \(budget\b/.test(state.logText())) return true
+      intervals.fire(60_000)
+      return false
+    })
+    assert.match(state.logText(), /Alert \(budget[^\n]*Claude Code/)
+    // To All and back: the pushes that answer carry the budget rows the view shows, never the host's.
+    page.post({ type: 'setProvider', provider: 'all' })
+    await waitFor('the All view', () => page.sent.some((m) => (m as { type?: unknown; key?: unknown }).type === 'section'
+      && (m as { key?: unknown }).key === 'budget' && ((m as { payload: { budgets: unknown[] } }).payload.budgets.length === 1)))
+    page.post({ type: 'setProvider', provider: 'codex' })
+    await sleep(300)
+    assert.equal(JSON.stringify(page.sent).includes('"allBudgets"'), false, 'a push carried the host\'s budgets')
+    // The bar kept its budget item through both switches.
+    assert.match(String(state.textOf(BUDGET_ITEM)), /^budget \d+ %/)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
     intervals.restore()
   }
 })

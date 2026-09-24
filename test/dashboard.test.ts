@@ -6939,6 +6939,215 @@ test('a fragment for a section with no body on the page updates the model and re
   assert.equal(nodeVm.runInContext('vm.records.marker', a.c), 7, 'the payload was dropped')
 })
 
+// ---------------------------------------------------------------------------
+// 1.8 L-1, L-3: push hygiene — no fragment the page drops unread, no second copy of the budgets
+// ---------------------------------------------------------------------------
+
+/**
+ * 1.8 L-1: the rig's view model under a provider view — All, or Codex with the reason the page leaves
+ * the Agents and Context sections out — the tree, the context reading and the quota cards all at
+ * build `n`, so every build changes all three.
+ */
+function viewVm(view: 'all' | 'codex', n: number, over: Record<string, unknown> = {}): any {
+  return flushVm({
+    sections: ['quota', 'agents', 'context', 'summary'],
+    provider: view,
+    claudeOnly: view === 'all' ? null : CLAUDE_ONLY,
+    agents: flushTree(n),
+    context: { used: 1_000 + n },
+    quotas: [{ build: n }],
+    ...over,
+  })
+}
+
+/** How many fragments of `key` the rig was sent, and the last one. */
+function fragments(r: Rig, key: string): { count: number; last: any } {
+  const of = r.posted.filter((m) => m.type === 'section' && m.key === key)
+  return { count: of.length, last: of[of.length - 1] }
+}
+
+test('under Codex the Agents and Context sections are pushed once — the fragments that take them out — and not again while their data changes; back to All each comes whole with the newest data (1.8 L-1)', () => {
+  const r = throttleRig()
+  let t = AG_NOW
+  r.p.update(viewVm('all', 0))
+  r.p.resolveWebviewView(r.view)
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  // The switch to Codex ten seconds on: one fragment of each, carrying the view the page takes the
+  // section out for (1.7 F1's `placeSection`), nothing held.
+  r.posted.length = 0
+  t += 10_000
+  r.advance(t)
+  r.p.update(viewVm('codex', 0))
+  assert.equal(fragments(r, 'agents').count, 1, r.sections().join())
+  assert.equal(fragments(r, 'context').count, 1, r.sections().join())
+  assert.deepEqual([fragments(r, 'agents').last.payload.provider, fragments(r, 'agents').last.payload.claudeOnly], ['codex', CLAUDE_ONLY])
+  assert.deepEqual([fragments(r, 'context').last.payload.provider, fragments(r, 'context').last.payload.claudeOnly], ['codex', CLAUDE_ONLY])
+  assert.deepEqual(r.live(), [])
+  // Ten builds five seconds apart while an agent runs — the view model's rebuild interval: the tree,
+  // the context reading and the quota cards change with each. The page would drop every fragment of
+  // the two sections unread; none goes, and no timer waits for one. The quota cards go as before.
+  r.posted.length = 0
+  for (let i = 1; i <= 10; i++) {
+    t += 5_000
+    r.advance(t)
+    r.p.update(viewVm('codex', i))
+  }
+  assert.equal(fragments(r, 'agents').count, 0, 'an Agents fragment went while the page leaves the section out')
+  assert.equal(fragments(r, 'context').count, 0, 'a Context fragment went while the page leaves the section out')
+  assert.equal(fragments(r, 'quota').count, 10, r.sections().join())
+  assert.deepEqual(r.live(), [], 'a timer was armed for a section the page drops')
+  // Back to All, 300 ms after the last build: the reader's own click, answered at once — each section
+  // once, whole, with the tenth build's data, the view that puts it back.
+  r.posted.length = 0
+  t += 300
+  r.advance(t)
+  r.p.update(viewVm('all', 10))
+  assert.equal(fragments(r, 'agents').count, 1, r.sections().join())
+  assert.equal(fragments(r, 'context').count, 1, r.sections().join())
+  const back = fragments(r, 'agents').last.payload
+  assert.deepEqual(back.agents, flushTree(10), 'the tree that came back is not the newest one')
+  assert.deepEqual([back.provider, back.claudeOnly], ['all', null])
+  assert.deepEqual(back.ui, agentUi(), 'the section came back without the view state it is drawn from')
+  assert.deepEqual(fragments(r, 'context').last.payload, { context: { used: 1_010 }, provider: 'all', claudeOnly: null })
+  assert.deepEqual(r.live(), [])
+  // Under All the section is live again: its next change goes, after its interval as ever.
+  r.posted.length = 0
+  t += 5_000
+  r.advance(t)
+  r.p.update(viewVm('all', 11))
+  assert.deepEqual(fragments(r, 'agents').last.payload.agents, flushTree(11))
+  // And the next switch to Codex takes both out again, one fragment each, then quiet again.
+  r.posted.length = 0
+  t += 5_000
+  r.advance(t)
+  r.p.update(viewVm('codex', 12))
+  t += 5_000
+  r.advance(t)
+  r.p.update(viewVm('codex', 13))
+  assert.equal(fragments(r, 'agents').count, 1, r.sections().join())
+  assert.equal(fragments(r, 'context').count, 1, r.sections().join())
+  assert.deepEqual(fragments(r, 'agents').last.payload.agents, flushTree(12))
+})
+
+test('a page opened under Codex has the two sections out from its first push, a whole push under Codex changes nothing of that, and a tree held back before a switch is not pushed after it (1.8 L-1)', () => {
+  const r = throttleRig()
+  let t = AG_NOW
+  r.p.update(viewVm('codex', 0))
+  r.p.resolveWebviewView(r.view)
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  // The whole page carried the view: nothing of the two sections follows it while the view stays.
+  r.posted.length = 0
+  for (let i = 1; i <= 5; i++) {
+    t += 5_000
+    r.advance(t)
+    r.p.update(viewVm('codex', i))
+  }
+  assert.deepEqual([fragments(r, 'agents').count, fragments(r, 'context').count, fragments(r, 'quota').count], [0, 0, 5], r.sections().join())
+  // A layout change is a whole page, as before — and after it the two sections stay quiet.
+  const layout = ['quota', 'summary', 'agents', 'context']
+  r.posted.length = 0
+  t += 5_000
+  r.advance(t)
+  r.p.update(viewVm('codex', 6, { sections: layout }))
+  assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+  assert.deepEqual(r.posted[0].payload.agents, flushTree(6))
+  r.posted.length = 0
+  for (let i = 7; i <= 9; i++) {
+    t += 5_000
+    r.advance(t)
+    r.p.update(viewVm('codex', i, { sections: layout }))
+  }
+  assert.deepEqual([fragments(r, 'agents').count, fragments(r, 'context').count], [0, 0], r.sections().join())
+  // Back to All: each section once, with the newest data.
+  r.posted.length = 0
+  t += 5_000
+  r.advance(t)
+  r.p.update(viewVm('all', 9, { sections: layout }))
+  assert.deepEqual([fragments(r, 'agents').count, fragments(r, 'context').count], [1, 1], r.sections().join())
+  assert.deepEqual(fragments(r, 'agents').last.payload.agents, flushTree(9))
+  // Under All a tree changes 500 ms after that push: held back for its interval, on its timer. The
+  // switch to Codex 100 ms later goes at once — the fragment that takes the section out, with the
+  // newest tree —; a tree newer still, 100 ms after that, arms nothing, and when the first timer
+  // fires, its flush pushes nothing of the section either.
+  r.posted.length = 0
+  t += 500
+  r.advance(t)
+  r.p.update(viewVm('all', 10, { sections: layout }))
+  assert.equal(fragments(r, 'agents').count, 0)
+  const held = r.live()
+  assert.equal(held.length, 1)
+  t += 100
+  r.advance(t)
+  r.p.update(viewVm('codex', 11, { sections: layout }))
+  assert.equal(fragments(r, 'agents').count, 1, r.sections().join())
+  assert.deepEqual(fragments(r, 'agents').last.payload.agents, flushTree(11))
+  r.posted.length = 0
+  t += 100
+  r.advance(t)
+  r.p.update(viewVm('codex', 12, { sections: layout }))
+  assert.deepEqual(r.live(), held, 'a second timer was armed for a section the page drops')
+  r.advance(t + 5_000)
+  assert.equal(fragments(r, 'agents').count, 0, 'the held tree went after the page took its section out')
+  assert.deepEqual(r.live(), [])
+})
+
+test('the whole page goes without the host\'s own fields: under every view no push carries allBudgets, and the view model keeps every budget for the host (1.8 L-3)', () => {
+  const { HOST_ONLY_FIELDS, SECTION_FIELDS, pagePayload } = loadDashboard()
+  const { DASHBOARD_SECTION_KEYS } = require('../src/viewModel') as typeof import('../src/viewModel')
+  assert.deepEqual([...HOST_ONLY_FIELDS], ['allBudgets'])
+  // No section is built from a host-only field, so no fragment can carry one.
+  for (const [key, fields] of Object.entries(SECTION_FIELDS)) {
+    for (const f of fields) assert.equal((HOST_ONLY_FIELDS as readonly string[]).includes(f), false, `${key} is built from ${f}`)
+  }
+  const cfg = makeConfig({
+    'tokenPace.dashboard.sections': [...DASHBOARD_SECTION_KEYS],
+    'tokenPace.budgets': [
+      { scope: 'total', period: 'month', unit: 'usd', limit: 20 },
+      { scope: 'claude', period: 'day', unit: 'tokens', limit: 5_000_000 },
+      { scope: 'codex', period: 'week', unit: 'tokens', limit: 9_000_000 },
+    ],
+  })
+  const built = (providers: ('claude' | 'codex')[]): any => buildViewModel(makeInput({ cfg, ui: { providers } }))
+  const views: ('claude' | 'codex')[][] = [['claude', 'codex'], ['claude'], ['codex']]
+  for (const providers of views) {
+    const vm = built(providers)
+    // The host keeps every budget whatever the view — the status bar's budget item and the alerts read them.
+    assert.deepEqual(vm.allBudgets.map((b: any) => b.scope), ['total', 'claude', 'codex'], providers.join())
+    const r = throttleRig()
+    r.p.update(vm)
+    r.p.resolveWebviewView(r.view)
+    assert.deepEqual(r.posted.map((m) => m.type), ['data'])
+    const payload = r.posted[0].payload
+    assert.equal('allBudgets' in payload, false, `${providers.join()}: the whole page carries the host's budgets`)
+    // Every other field goes as it is, the view model's own value.
+    assert.deepEqual(Object.keys(payload).sort(), Object.keys(vm).filter((k) => k !== 'allBudgets').sort())
+    for (const k of Object.keys(payload)) assert.equal(payload[k], vm[k], k)
+    assert.deepEqual(payload.budgets, vm.budgets)
+    // The view model the host holds keeps the field: the payload is a copy without it.
+    assert.equal('allBudgets' in vm, true)
+    assert.deepEqual(pagePayload(vm), payload)
+    // A switch to each other view is fragments, none of them with the field either.
+    let t = AG_NOW
+    for (const other of views) {
+      t += 10_000
+      r.advance(t)
+      r.p.update(built(other))
+    }
+    assert.ok(r.sections().length > 0)
+    assert.equal(JSON.stringify(r.posted).includes('"allBudgets"'), false, providers.join())
+  }
+  // What the page lost is exactly the second copy: under All it was the `budgets` rows again.
+  const all = built(['claude', 'codex'])
+  assert.equal(JSON.stringify(all).length - JSON.stringify(pagePayload(all)).length,
+    JSON.stringify({ allBudgets: all.allBudgets }).length - 1)
+})
+
+test('the page never reads the host\'s budgets: the webview source and the shipped script do not name allBudgets (1.8 L-3)', () => {
+  assert.equal(/allBudgets/.test(SOURCE), false, 'src/webview/main.ts names allBudgets')
+  assert.equal(/allBudgets/.test(SCRIPT), false, 'the shipped script names allBudgets')
+})
+
+
 // 1.6 N6 (pinned and changed): 1.5 let a name wrap between its parts; a row is two lines now, so the
 // name is one — no part of it wraps. 1.6 P7b (pinned and changed, the lead's call: P7 let the first
 // part — an agent's type, a session's or a run's start — give way first): what gives way is what

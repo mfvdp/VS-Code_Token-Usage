@@ -415,6 +415,13 @@ export interface StatsCtx {
    * summed once and shared — see `HourSums`. Left out, every hour span is summed on its own.
    */
   hours?: HourSums
+  /**
+   * 1.7 P-A: the build's one copy of the buckets (`agg.all()`), shared by every table of the build —
+   * `bucketsIn`, the hour-span cost, the first used hour — so one build copies the bucket array once
+   * instead of once per table. Read only: nothing changes the array or a bucket in it. Left out,
+   * each walk takes its own copy, as every caller outside a view-model build does.
+   */
+  buckets?: readonly Bucket[]
 }
 
 /**
@@ -431,7 +438,11 @@ export class HourSums {
   private readonly memo = new Map<string, { bucket: Bucket; complete: boolean }>()
   private readonly modelMemo = new Map<Source, string[]>()
 
-  constructor(private readonly agg: Aggregator) {}
+  /**
+   * `buckets` (1.7 P-A): the build's one copy of `agg.all()`, which `modelsOf` walks; left out, it
+   * takes a copy of its own on its first question.
+   */
+  constructor(private readonly agg: Aggregator, private readonly buckets?: readonly Bucket[]) {}
 
   /** Sums every query not answered yet, together in one pass over the buckets. */
   prefetch(queries: readonly HourQuery[]): void {
@@ -462,7 +473,7 @@ export class HourSums {
     let models = this.modelMemo.get(source)
     if (!models) {
       const seen = new Set<string>()
-      for (const b of this.agg.all()) if (b.source === source) seen.add(b.model)
+      for (const b of this.buckets ?? this.agg.all()) if (b.source === source) seen.add(b.model)
       models = [...seen].sort()
       this.modelMemo.set(source, models)
     }
@@ -576,12 +587,13 @@ function monthLast(month: string): string {
 /**
  * Buckets of a range, with the same placement rules as `Aggregator.sum`: hour buckets by the
  * configured zone, day buckets as stored, and a month bucket only when the whole month lies
- * inside — its days cannot be told apart any more, and splitting it would invent them.
+ * inside — its days cannot be told apart any more, and splitting it would invent them. Walks the
+ * build's shared copy when the context has one (1.7 P-A).
  */
 export function bucketsIn(ctx: StatsCtx, from: string, to: string, source?: Source): Bucket[] {
   const out: Bucket[] = []
   const models = ctx.models.length > 0 ? new Set(ctx.models) : null
-  for (const b of ctx.agg.all()) {
+  for (const b of ctx.buckets ?? ctx.agg.all()) {
     if (source ? b.source !== source : !ctx.sources.includes(b.source)) continue
     if (models && !models.has(b.model)) continue
     if (b.res === 'm') {
@@ -2295,7 +2307,7 @@ function hourSpanCost(
   let usd = 0
   let listUsd = 0
   let partial = false
-  for (const one of ctx.agg.all()) {
+  for (const one of ctx.buckets ?? ctx.agg.all()) {
     if (one.res !== 'h' || one.hour === null || one.source !== source) continue
     if (one.hour < fromHour || one.hour >= toHour) continue
     if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue
@@ -2317,7 +2329,7 @@ function costOfHourSpan(ctx: StatsCtx, source: Source, fromHour: number, toHour:
 /** The earliest hour bucket with billable tokens in a half-open hour range, or null. */
 function firstUsedHour(ctx: StatsCtx, source: Source, fromHour: number, toHour: number): number | null {
   let first: number | null = null
-  for (const one of ctx.agg.all()) {
+  for (const one of ctx.buckets ?? ctx.agg.all()) {
     if (one.res !== 'h' || one.hour === null || one.source !== source) continue
     if (one.hour < fromHour || one.hour >= toHour) continue
     if (ctx.models.length > 0 && !ctx.models.includes(one.model)) continue

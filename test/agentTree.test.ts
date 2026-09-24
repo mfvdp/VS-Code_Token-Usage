@@ -1850,6 +1850,38 @@ test('the tree speaks German with the bundle the extension ships', () => {
   assert.equal(german(() => build({ mains: [] })).note, 'Keine Claude-Code-Sitzung in den letzten 7 Tagen.')
 })
 
+test('the Compactions row writes its trigger inside one whole sentence per trigger, in English and German as 1.6 did (1.7 V-A)', () => {
+  // 1.7 V-A: three templates — manual, auto, none recorded — instead of a bare `auto` / `manual`
+  // spliced into one; the words on the page are 1.6's, character for character, in both languages.
+  const at = NOW - 40 * MIN
+  const compaction = (trigger: unknown, over: { preTokens?: number | null; postTokens?: number | null; at?: number } = {}) => ({
+    at: over.at ?? at, trigger: trigger as 'manual' | 'auto' | null,
+    preTokens: over.preTokens === undefined ? 167_200 : over.preTokens, postTokens: over.postTokens === undefined ? 12_400 : over.postTokens,
+  })
+  const sessionRow = (trigger: unknown): string | undefined =>
+    agentDetails(input({ mains: [main({ compactions: 2, lastCompaction: compaction(trigger) })] }), NOW, rootKey)
+      ?.rows.find((r) => r.label === 'Compactions' || r.label === 'Kompaktierungen')?.value
+  const agentRow = (): string | undefined =>
+    agentDetails(input({ agents: [rec('aaaa0001', {
+      compactions: 1, lastCompaction: compaction('auto', { preTokens: 90_000, postTokens: null, at: NOW - 2 * DAY - 40 * MIN }),
+    })] }), NOW, agentKey('aaaa0001'))?.rows.find((r) => r.label === 'Compactions' || r.label === 'Kompaktierungen')?.value
+  assert.deepEqual(['manual', 'auto', null, 'forced'].map(sessionRow), [
+    '2 · last at 11:20 (manual, 167.2K → 12.4K)',
+    '2 · last at 11:20 (auto, 167.2K → 12.4K)',
+    '2 · last at 11:20 (–, 167.2K → 12.4K)',
+    // A trigger no line of Claude Code writes — a snapshot written by hand — is none recorded.
+    '2 · last at 11:20 (–, 167.2K → 12.4K)',
+  ])
+  assert.equal(agentRow(), '1 · last at 2026-09-20 11:20 (auto, 90K → –)')
+  assert.deepEqual(german(() => ['manual', 'auto', null, 'forced'].map(sessionRow)), [
+    '2 · zuletzt um 11:20 (manuell, 167,2K → 12,4K)',
+    '2 · zuletzt um 11:20 (automatisch, 167,2K → 12,4K)',
+    '2 · zuletzt um 11:20 (–, 167,2K → 12,4K)',
+    '2 · zuletzt um 11:20 (–, 167,2K → 12,4K)',
+  ])
+  assert.equal(german(agentRow), '1 · zuletzt um 2026-09-20 11:20 (automatisch, 90K → –)')
+})
+
 test('every message of the tree and of its markdown has a German entry, and the sentences are not English', () => {
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'l10n-extract.mjs'), '--json'],
     { cwd: ROOT, encoding: 'utf8' })

@@ -2087,3 +2087,71 @@ test('the retrospective counts complete cycles, and one cycle is not "1 cycles"'
     .find((r) => r.windowId === 'session:300')
   assert.equal(second?.text, 'not enough data yet · 2 complete cycles on file')
 })
+
+// ---------------------------------------------------------------------------
+// 1.7 P-A · one bucket copy per build
+// ---------------------------------------------------------------------------
+
+/** Counts `agg.all()` while `run` builds, and hands back every array it gave out. */
+function countingAll<T>(agg: Aggregator, run: () => T): { value: T; calls: number; copies: Array<readonly unknown[]> } {
+  const own = Object.prototype.hasOwnProperty.call(agg, 'all')
+  const real = agg.all
+  const copies: Array<readonly unknown[]> = []
+  agg.all = function (this: Aggregator) {
+    const copy = real.call(this)
+    copies.push(copy)
+    return copy
+  }
+  try {
+    return { value: run(), calls: copies.length, copies }
+  } finally {
+    if (own) agg.all = real
+    else delete (agg as unknown as { all?: unknown }).all
+  }
+}
+
+/**
+ * The worlds whose tables walk the buckets: the default one, and ones reaching each other walk —
+ * each with what proves it reached it.
+ */
+function sharedCopyWorlds(): Array<[string, () => ReturnType<typeof makeInput>, (vm: ReturnType<typeof buildViewModel>) => boolean]> {
+  return [
+    ['the default world', () => makeInput(), (vm) => vm.models.rows.length > 0 && vm.totals.every((t) => t.rows.length === 8)],
+    // Attribution on (the project and session tables), a model chip, one provider, a drilled day,
+    // budgets of both units — every context the build spreads from its own.
+    ['attribution, chips, a drill and budgets', () => makeInput({
+      agg: buildAgg('session'),
+      cfg: makeConfig({ 'tokenPace.attribution': 'session', 'tokenPace.budgets': BUDGETS }),
+      ui: { providers: ['claude'], models: ['claude-opus-4-6'], drillDay: TODAY },
+    }), (vm) => vm.sessions.rows.length > 0 && vm.projects.rows.length > 0 && vm.drill !== null && vm.budgets.length === 2
+      && vm.models.rows.every((m) => m.model === 'claude-opus-4-6')],
+    // No quota reading: the local 5-hour block sums its cost and its first used hour from the buckets.
+    ['no quota reading', () => makeInput({
+      quotas: [state('claude', { ok: false, problem: 'no OAuth token found', problemKind: 'noToken', windows: [] }), state('codex')],
+    }), (vm) => vm.quotas[0].localBlock !== null && vm.quotas[0].localBlock.firstAt !== null],
+    // A model window (1.6 P10c): its share takes its family's model ids from the hour sums' copy.
+    ['a model window', () => {
+      const week = win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 62, resetsAt: NOW + 3 * 86_400_000, windowMinutes: 10080 })
+      const opus = win({ ...week, id: 'weekly_scoped:10080:opus', label: '7 d · Opus', model: 'Opus' })
+      return makeInput({ agg: familyAgg(), quotas: [state('claude', { windows: [week, opus] }), state('codex')] })
+    }, (vm) => vm.quotas[0].windows[1].agentShare === 'Subagents 1.5K of 5.5K counted here (27 %)'],
+  ]
+}
+
+test('a view-model build copies the buckets exactly once, and every table reads that one copy (1.7 P-A)', () => {
+  for (const [what, make, reached] of sharedCopyWorlds()) {
+    const input = make()
+    const shared = countingAll(input.agg, () => buildViewModel(input))
+    assert.equal(shared.calls, 1, `${what}: agg.all() was called ${shared.calls} times in one build`)
+    assert.ok(reached(shared.value), `${what}: the world no longer reaches the tables it is here for`)
+    // Read only: the one copy still holds every bucket, in the aggregator's order.
+    const [copy] = shared.copies
+    const now = input.agg.all()
+    assert.equal(copy.length, now.length, `${what}: the shared copy changed length`)
+    assert.ok(copy.every((b, i) => b === now[i]), `${what}: the shared copy was reordered or changed`)
+    // The path of 1.6 — every table its own copy — gives the very same view model.
+    const unshared = countingAll(input.agg, () => buildViewModel(input, { shareBuckets: false }))
+    assert.ok(unshared.calls > 1, `${what}: the unshared build made ${unshared.calls} copies; the comparison compares nothing`)
+    assert.deepEqual(shared.value, unshared.value, `${what}: the shared copy changed a figure`)
+  }
+})

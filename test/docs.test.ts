@@ -526,8 +526,10 @@ test('docs/agents.md names the O3 rows of the details as the tree builder writes
   // messages the builder writes and the examples the page quotes of them.
   const src = readDoc('src/agentTreeBuild.ts')
   const flat = doc.agents.replace(/\s+/g, ' ')
+  // 1.7 V-A: the Compactions row is one of three whole sentences, one per trigger.
   for (const written of ['Tool errors', '{0} of {1} tool calls', 'Cache misses', '{0} tokens not read from the cache', 'model changed',
-    'cache unavailable', 'Compactions', '{0} · last at {1} ({2}, {3} → {4})', 'Claude Code version', 'Permission mode']) {
+    'cache unavailable', 'Compactions', '{0} · last at {1} (manual, {2} → {3})', '{0} · last at {1} (auto, {2} → {3})',
+    '{0} · last at {1} (–, {2} → {3})', 'Claude Code version', 'Permission mode']) {
     assert.ok(src.includes(`t('${written}'`), `src/agentTreeBuild.ts no longer writes: ${written}`)
   }
   // 1.6 P15: the examples are the harness's (research/webview-check, the rejected workflow agent's

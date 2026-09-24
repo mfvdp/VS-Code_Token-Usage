@@ -307,7 +307,7 @@ test('every German entry keeps the placeholders of its key, is German, and ends 
   }
 })
 
-test('the words 1.6 retired are in no bundle and no source any more', () => {
+test('the words 1.6 and 1.7 retired are in no bundle and no source any more', () => {
   // D9: the agent report is Claude Code's, not the parent's, and it is the context of the last
   // request — "Parent's report" and its "tokens" figure said otherwise. R4: the German manifest
   // says „Tool-Aufrufe", as the runtime bundle always did. N1: a node's tally replaces the bare
@@ -330,7 +330,9 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
     // P16 (§7c Wave D): the Quick Pick's summary names its span first, "Last 7 days: {0}" — the tail
     // ran into the tally's separators —, and the hook's removal paragraph names `agent-hook.jsonl`.
     '{0} · last 7 days',
-    'Delete the four entries from `hooks` in `~/.claude/settings.json`. The file then stops growing, and its lines stop counting after {0} minutes.']
+    'Delete the four entries from `hooks` in `~/.claude/settings.json`. The file then stops growing, and its lines stop counting after {0} minutes.',
+    // 1.7 V-A: the Compactions row is one whole sentence per trigger; the trigger was spliced in.
+    '{0} · last at {1} ({2}, {3} → {4})']
   const bundle = readJson(BUNDLE) as Record<string, string>
   const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts', 'src/agentHook.ts']
     .map((f) => readFileSync(join(ROOT, f), 'utf8'))
@@ -347,5 +349,40 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
   for (const f of readdirSync(parts).filter((x) => x.endsWith('.json'))) {
     const b = JSON.parse(readFileSync(join(parts, f), 'utf8')) as Record<string, string>
     assert.equal(Object.entries(b).some(([k, v]) => k.includes('Tree cut') || v.includes('Baum bei')), false, f)
+  }
+})
+
+/** Every `.ts` file under src/, recursively — the same files the extract script reads. */
+function sourceFiles(dir = join(ROOT, 'src')): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sourceFiles(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : [])
+}
+
+test('the bare compaction triggers are retired keys: no part, no bundle and no t() call has `auto` or `manual` (1.7 V-A)', () => {
+  // 1.7 V-A: the words of a compaction's trigger live inside its three whole sentences. A bare key
+  // `auto` would translate every later t('auto') with them — a permission mode is `auto` too —,
+  // so the two words stay values of the source (`c.trigger === 'auto'`) and are no key anywhere.
+  const retiredKeys = ['auto', 'manual']
+  const bundle = readJson(BUNDLE) as Record<string, string>
+  const parts = join(ROOT, 'l10n', 'parts')
+  for (const key of retiredKeys) {
+    assert.equal(key in bundle, false, `the bundle still translates the bare ${JSON.stringify(key)}`)
+    for (const f of readdirSync(parts).filter((x) => x.endsWith('.json'))) {
+      const b = JSON.parse(readFileSync(join(parts, f), 'utf8')) as Record<string, string>
+      assert.equal(key in b, false, `${f} still has the bare key ${JSON.stringify(key)}`)
+    }
+  }
+  const files = sourceFiles()
+  assert.ok(files.some((f) => f.endsWith(join('src', 'agentTreeBuild.ts'))) && files.some((f) => f.endsWith(join('webview', 'main.ts'))),
+    'the scan misses src/ files')
+  const call = new RegExp(`\\bt\\(\\s*(['"\`])(${retiredKeys.join('|')})\\1`)
+  const callers = files.filter((f) => call.test(readFileSync(f, 'utf8')))
+  assert.deepEqual(callers, [], `a source calls t() with a bare compaction trigger: ${callers.join(', ')}`)
+  const keys = extractedKeys()
+  assert.deepEqual(retiredKeys.filter((k) => k in keys), [], 'the extract still finds a bare compaction trigger')
+  // The three sentences that replace them, each with its German.
+  for (const key of ['{0} · last at {1} (manual, {2} → {3})', '{0} · last at {1} (auto, {2} → {3})', '{0} · last at {1} (–, {2} → {3})']) {
+    assert.ok(key in keys, `src/ no longer writes ${JSON.stringify(key)}`)
+    assert.equal(typeof bundle[key], 'string', `no German for ${JSON.stringify(key)}`)
   }
 })

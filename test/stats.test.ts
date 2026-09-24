@@ -7,8 +7,8 @@ import { Aggregator, billable } from '../src/agg'
 import { setLocale } from '../src/i18n'
 import { usd } from '../src/render'
 import {
-  CHART_MODEL_SERIES_PER_PROVIDER, MIN_P90_SAMPLES, StatsCtx, cacheEconomy, cacheHitParts,
-  cacheStateOf, calendar, chart, dayOfBucket, drill, heatmap, hours, kpis, modelTable,
+  CHART_MODEL_SERIES_PER_PROVIDER, HourSums, MIN_P90_SAMPLES, StatsCtx, bucketsIn, cacheEconomy, cacheHitParts,
+  cacheStateOf, calendar, chart, dayOfBucket, drill, heatmap, hours, kpis, localBlock, modelTable,
   niceCeil, planFactors, projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
   durationText,
 } from '../src/stats'
@@ -1196,4 +1196,36 @@ test('a duration under a minute is written in the German digits on a German page
   } finally {
     setLocale(undefined)
   }
+})
+
+test('the bucket walks read the context\'s one copy when it carries one, and a copy of their own otherwise (1.7 P-A)', () => {
+  // A copy that disagrees with the aggregator — Claude's buckets only — shows which of the two a
+  // walk read. A view-model build hands every walk the same copy of `agg.all()`; any other caller
+  // leaves `buckets` out and each walk copies for itself, as before 1.7.
+  const agg = buildAgg()
+  const real = agg.all.bind(agg)
+  let calls = 0
+  agg.all = () => { calls++; return real() }
+  const claudeOnly: readonly Bucket[] = real().filter((b) => b.source === 'claude')
+  const r = range('30d')
+  const own = bucketsIn(ctxOf(agg), r.from, r.to)
+  assert.equal(calls, 1)
+  assert.deepEqual([...new Set(own.map((b) => b.source))].sort(), ['claude', 'codex'])
+  const shared = bucketsIn(ctxOf(agg, { buckets: claudeOnly }), r.from, r.to)
+  assert.equal(calls, 1, 'a walk with the shared copy took one of its own')
+  assert.deepEqual([...new Set(shared.map((b) => b.source))], ['claude'])
+  assert.deepEqual(shared, own.filter((b) => b.source === 'claude'))
+  // The hour sums' model lists: from the constructor's copy, or a copy of their own on the first question.
+  assert.deepEqual(new HourSums(agg, claudeOnly).modelsOf('codex'), [])
+  assert.equal(calls, 1)
+  assert.deepEqual(new HourSums(agg).modelsOf('codex'), ['gpt-5.3-codex'])
+  assert.equal(calls, 2)
+  // The local block's cost and first hour walk the buckets too (its token sum is the aggregator's own).
+  const none = localBlock(ctxOf(agg, { buckets: [] }), 'claude')
+  assert.equal(calls, 2)
+  const whole = localBlock(ctxOf(agg), 'claude')
+  assert.equal(calls, 4, 'the cost and the first used hour copy the buckets once each without a shared copy')
+  assert.deepEqual([none?.usage, none?.firstAt, none?.cost], [whole?.usage, null, '–'])
+  assert.equal(whole?.firstAt, '09:00')
+  assert.match(whole?.cost ?? '', /^~\$\d/)
 })

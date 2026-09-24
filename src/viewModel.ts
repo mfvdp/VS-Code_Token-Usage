@@ -52,7 +52,7 @@ import {
   formatTime, rangeFor, isDay, previousRange, relativeShort,
 } from './time'
 import {
-  AgentRec, Attribution, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
+  AgentRec, Attribution, Bucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
   QuotaState, QuotaWindow, Source, TOOL_NAME_CAP, emptyBucket,
 } from './types'
 
@@ -1616,21 +1616,34 @@ export function pricingOf(cfg: Config): PricingOptions {
   }
 }
 
-export function buildViewModel(input: VmInput): ViewModel {
+/**
+ * The dashboard's whole view model, from the aggregator, the quota states and the view state.
+ *
+ * 1.7 P-A: the buckets are copied once per build (`agg.all()`) and the one copy is shared by every
+ * table of it. `shareBuckets: false` leaves the copy out of the context — each table takes its own,
+ * the path of 1.6 — and exists for the test that holds both builds equal; no caller of the
+ * extension passes it.
+ */
+export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } = {}): ViewModel {
   const { agg, cfg, history, now, quotas, ui } = input
   const tcfg = readTimeConfig(cfg)
   const paceCfg = readPaceConfig(cfg)
   const pricing: PricingOptions = pricingOf(cfg)
   const sources: Source[] = ui.providers.length > 0 ? [...ui.providers] : [...SOURCES]
+  // 1.7 P-A: the buckets copied once for the whole build — every table walks this one array
+  // (`StatsCtx.buckets`; the Tokens and budget contexts are spreads of `ctx` and carry it, the drill
+  // takes `ctx` itself), and so do the hour sums' model lists. Read only.
+  const buckets: readonly Bucket[] | undefined = opts.shareBuckets === false ? undefined : agg.all()
   // 1.6 L5 (Review 3): every hour span of this build summed once, and shared by the tables that
   // sum the same one — see `HourSums` and the prefetch below.
-  const hourSums = new HourSums(agg)
+  const hourSums = new HourSums(agg, buckets)
   const ctx: StatsCtx = {
     agg, tcfg, pricing, now, sources, models: ui.models, showCost: cfg.showCost,
     // Stated rather than inferred: with attribution off the session table is empty, and the
     // records must say "switched off" instead of "nothing worth showing".
     attribution: cfg.attribution,
     hours: hourSums,
+    buckets,
   }
   const range = input.range
   const previous = previousRange(range)

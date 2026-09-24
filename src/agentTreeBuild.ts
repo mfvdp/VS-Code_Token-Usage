@@ -1313,6 +1313,10 @@ function cacheMissRows(r: AgentRec): DetailRow[] {
  * O3 (§0a.10): how often a transcript was compacted, and the last time — "2 · last at 14:20 (manual,
  * 167.2K → 12.4K)": when, whether it was asked for, the context before and after it. No compaction,
  * no row; a part the line did not give is `–`.
+ *
+ * 1.7 V-A: one whole sentence per trigger — manual, auto, none recorded — so the trigger's word is
+ * translated inside its sentence and never as a bare `auto` or `manual`, a word other values share
+ * (a permission mode is `auto` too).
  */
 function compactionRows(r: AgentRec | MainRec | null, now: number, tcfg: TimeConfig): DetailRow[] {
   const n = r === null ? null : wholeCount(r.compactions)
@@ -1321,16 +1325,18 @@ function compactionRows(r: AgentRec | MainRec | null, now: number, tcfg: TimeCon
   const c = last && typeof last === 'object' ? last as Partial<Record<keyof CompactionRec, unknown>> : null
   const at = c !== null ? stampOf(c.at) : null
   if (c === null || at === null) return [{ label: t('Compactions'), value: full(n) }]
-  const trigger = c.trigger === 'manual' ? t('manual') : c.trigger === 'auto' ? t('auto') : '–'
   const figure = (v: unknown): string => {
     const x = tokenFigure(v)
     return x === null ? '–' : compact(x)
   }
-  return [{
-    label: t('Compactions'),
-    value: t('{0} · last at {1} ({2}, {3} → {4})', full(n), stamp(at, now, tcfg), trigger, figure(c.preTokens), figure(c.postTokens)),
-    kind: 'sentence',
-  }]
+  const count = full(n)
+  const when = stamp(at, now, tcfg)
+  const pre = figure(c.preTokens)
+  const post = figure(c.postTokens)
+  const value = c.trigger === 'manual' ? t('{0} · last at {1} (manual, {2} → {3})', count, when, pre, post)
+    : c.trigger === 'auto' ? t('{0} · last at {1} (auto, {2} → {3})', count, when, pre, post)
+      : t('{0} · last at {1} (–, {2} → {3})', count, when, pre, post)
+  return [{ label: t('Compactions'), value, kind: 'sentence' }]
 }
 
 /** A Claude Code version as its lines write it — three numbers — else none. */

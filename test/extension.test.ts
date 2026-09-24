@@ -271,16 +271,83 @@ function releaseAll(): void {
   }
 }
 
+/**
+ * The timer functions as the process had them when this file was loaded, before any test wrapped
+ * one. The two helpers below wait with these, so a probe that wraps the globals (1.6 R1,
+ * `probeTimers`) counts the extension's timers and not the test's own waiting.
+ */
+const REAL_TIMERS = {
+  setTimeout: globalThis.setTimeout.bind(globalThis),
+  clearTimeout: globalThis.clearTimeout.bind(globalThis),
+  setInterval: globalThis.setInterval.bind(globalThis),
+  clearInterval: globalThis.clearInterval.bind(globalThis),
+}
+
 async function waitFor(what: string, ok: () => boolean, ms = 20_000): Promise<void> {
   const deadline = Date.now() + ms
   for (;;) {
     if (ok()) return
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 20))
+    await new Promise((r) => REAL_TIMERS.setTimeout(r, 20))
   }
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise((r) => REAL_TIMERS.setTimeout(r, ms))
+
+/** One timer the probe saw armed. */
+interface ProbedTimer {
+  kind: 'timeout' | 'interval'
+  ms: number
+  /** Armed after the probe was told the window had gone. */
+  late: boolean
+  cleared: boolean
+  fired: boolean
+}
+
+/**
+ * 1.6 R1: wraps `setTimeout`, `setInterval`, `clearTimeout` and `clearInterval` from here on, and
+ * records every timer armed through them — the extension's, as the helpers above wait with the
+ * real ones. `disposed()` marks the moment the window went. `restore` puts the globals back and
+ * clears whatever is still armed, so a failing assertion cannot leave a live interval that keeps
+ * the run from ending. `render()` stays silent after dispose, so a tick left running shows on no
+ * status bar item: only the timers themselves can say that one is.
+ */
+function probeTimers(): { disposed(): void; timers(): ProbedTimer[]; restore(): void } {
+  const g = globalThis as unknown as Record<'setTimeout' | 'setInterval' | 'clearTimeout' | 'clearInterval', unknown>
+  const saved = { setTimeout: g.setTimeout, setInterval: g.setInterval, clearTimeout: g.clearTimeout, clearInterval: g.clearInterval }
+  const seen: Array<{ timer: ProbedTimer; handle: unknown }> = []
+  const byHandle = new Map<unknown, ProbedTimer>()
+  let late = false
+  const arm = (kind: ProbedTimer['kind']) => (fn: unknown, ms?: number, ...args: unknown[]): unknown => {
+    const timer: ProbedTimer = { kind, ms: ms ?? 0, late, cleared: false, fired: false }
+    const run = typeof fn === 'function'
+      ? (...a: unknown[]): unknown => { timer.fired = true; return (fn as (...b: unknown[]) => unknown)(...a) }
+      : fn
+    const real = kind === 'timeout' ? REAL_TIMERS.setTimeout : REAL_TIMERS.setInterval
+    const handle = (real as (f: unknown, m?: number, ...r: unknown[]) => unknown)(run, ms, ...args)
+    seen.push({ timer, handle })
+    byHandle.set(handle, timer)
+    return handle
+  }
+  // Node clears either kind with either function; so does the probe.
+  const clear = (handle: unknown): void => {
+    const timer = byHandle.get(handle)
+    if (timer) timer.cleared = true
+    REAL_TIMERS.clearTimeout(handle as ReturnType<typeof setTimeout>)
+  }
+  g.setTimeout = arm('timeout')
+  g.setInterval = arm('interval')
+  g.clearTimeout = clear
+  g.clearInterval = clear
+  return {
+    disposed: () => { late = true },
+    timers: () => seen.map((s) => s.timer),
+    restore: () => {
+      Object.assign(g, saved)
+      for (const s of seen) if (!s.timer.cleared) REAL_TIMERS.clearTimeout(s.handle as ReturnType<typeof setTimeout>)
+    },
+  }
+}
 
 /** The text of the most recently opened read-only usage document. */
 function lastMarkdown(): string {
@@ -385,7 +452,11 @@ after(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-test('activation reads the synthetic transcripts, fills the status bar and releases everything', async () => {
+test('activation reads the synthetic transcripts, fills the status bar and releases everything', async (t) => {
+  // 1.6 R1: every timer this activation arms goes through the probe, from before `activate` to the
+  // end of the test.
+  const probe = probeTimers()
+  t.after(() => probe.restore())
   const host = await activateHost(fixture, REPO)
   const { ctx } = host
 
@@ -521,7 +592,11 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
   assert.equal(state.live('tokenPace.preview.').length, 0, 'the preview did not clear itself')
 
   // --- teardown -------------------------------------------------------------
+  const armed = probe.timers()
+  // The probe sees the extension's timers at all: the tick, the save, the sweep … are intervals.
+  assert.ok(armed.filter((x) => x.kind === 'interval').length >= 7, `the probe saw ${armed.length} timer(s)`)
   const failures = disposeAll(LIVE.pop()!)
+  probe.disposed()
   assert.deepEqual(failures, [], 'a dispose() threw')
   host.ext.deactivate()
   assert.equal(state.live().length, 0, 'a status bar item survived disposal')
@@ -530,6 +605,17 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
   const created = state.items.length
   await sleep(1500)
   assert.equal(state.items.length, created, 'a timer was still running after disposal')
+  // 1.6 R1 — the timers themselves, since `render()` draws nothing after dispose: no interval is
+  // left armed, nothing arms a timeout once the window has gone, and every timeout armed before
+  // was cleared or has fired within the 1.5 s since.
+  const timers = probe.timers()
+  const describe = (list: ProbedTimer[]): string => list.map((x) => `${x.kind} ${x.ms} ms`).join(', ')
+  const liveIntervals = timers.filter((x) => x.kind === 'interval' && !x.cleared)
+  assert.deepEqual(liveIntervals, [], `interval(s) still armed after dispose: ${describe(liveIntervals)}`)
+  const late = timers.filter((x) => x.late)
+  assert.deepEqual(late, [], `timer(s) armed after dispose: ${describe(late)}`)
+  const pending = timers.filter((x) => x.kind === 'timeout' && !x.late && !x.cleared && !x.fired)
+  assert.deepEqual(pending, [], `timeout(s) armed before dispose, neither cleared nor fired: ${describe(pending)}`)
 })
 
 test('without dist/scanWorker.js the main-thread fallback produces the same counts', async () => {
@@ -1749,10 +1835,19 @@ test('while the agent poll is on the state is saved every 10 s, while it is off 
         assert.doesNotMatch(state.logText(), /Agent poll: on/)
       }
       const timed: number[] = []
+      const rollups = (): number => state.logText().split('Roll-up:').length
       for (let tick = 1; tick <= 4; tick++) {
         offset += 5000
-        // The roll-up leaves the state to be saved, as an ingest would.
+        // The roll-up leaves the state to be saved, as an ingest would. The ingest a leader's start
+        // schedules (400 ms after it) may still be reading when the ticks begin, after a fast cold
+        // scan, and the roll-up never runs while data moves: a roll-up that met it is fired again
+        // until it runs. Until P14a a skipped one left the state clean and the tick without a save
+        // (2 in 25 runs of this file).
+        const rolled = rollups()
         assert.ok(intervals.fire(ROLLUP_MS) > 0)
+        if (rollups() === rolled) {
+          await waitFor('a roll-up past the ingest it met', () => { intervals.fire(ROLLUP_MS); return rollups() > rolled })
+        }
         const before = saved()
         assert.ok(intervals.fire(5000) > 0, 'no save interval is armed')
         await waitFor('the save to end', ended)
@@ -2092,7 +2187,28 @@ test('a session that has just called the Workflow tool, with no agent file yet, 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
-test('Copy Agent ID copies the id of the node whose details are open, and nothing without one', async () => {
+test('the id a stored selection names is read off its key: agent, session, run, launch — and none for a collector or a key out of shape', () => {
+  // 1.6 §7c (P3a #2): the forms agentTreeBuild.ts makes its keys in, every id through the id
+  // alphabet again.
+  const { ext } = lazy()
+  const cases: Array<[unknown, string | null]> = [
+    ['a:c3c3c3', 'c3c3c3'], [`s:${ACTIVE}`, ACTIVE], [`w:${ACTIVE}|${RUN}`, RUN], ['l:toolu_sync01', 'toolu_sync01'],
+    // A run's collector has no id of its own, nor has an unknown prefix.
+    [`n:${ACTIVE}|${RUN}`, null], ['x:c3c3c3', null], ['c3c3c3', null],
+    // A run key needs both halves, each an id.
+    [`w:${ACTIVE}`, null], [`w:|${RUN}`, null], [`w:${ACTIVE}|`, null], [`w:${ACTIVE}|wf 1`, null],
+    // A key cut to its cap, one with a character outside the alphabet, one over the id's length.
+    ['a:…c3c3c3', null], ['a:c3 c3', null], ['s:../x', null], [`a:${'a'.repeat(65)}`, null], [`a:${'a'.repeat(64)}`, 'a'.repeat(64)],
+    ['a:', null], ['', null], [null, null], [undefined, null], [42, null],
+  ]
+  for (const [key, want] of cases) assert.equal(ext.idOfAgentKey(key), want, JSON.stringify(key))
+})
+
+// 1.6 P14a (§7c, P3a #2) changed what this test pinned: the id is read off the stored selection,
+// not off the details of the last view model, so a selection inside a closed branch — which the
+// page carries no details for since D3 — copies its id too; the "select first" line is said only
+// when nothing is selected. The first two steps are the ones of P1, unchanged.
+test('Copy Agent ID copies the id of the selected node — its details open or inside a closed branch — and nothing without one', async () => {
   // 1.6 D11: the details' Copy ID button and the palette command are one command, and what it
   // copies is the whole id the ID row shows — here the sync agent's — never a label or a figure.
   const fx = makeFixture()
@@ -2122,6 +2238,41 @@ test('Copy Agent ID copies the id of the node whose details are open, and nothin
   await waitFor('the id on the clipboard', () => state.clipboard.length > before)
   assert.deepEqual(state.clipboard.slice(before), ['c3c3c3'])
   assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: ID copied to the clipboard.')
+
+  // The session closed again: the agent's row is inside a closed branch, and the page carries no
+  // details for it — the palette command still copies the id the selection names.
+  const agentPushes = (): Array<{ payload: { agents: AgentTreeVm } }> => page.sent.filter((m) => {
+    const x = m as { type?: unknown; key?: unknown }
+    return x.type === 'section' && x.key === 'agents'
+  }) as Array<{ payload: { agents: AgentTreeVm } }>
+  const pushed = agentPushes().length
+  page.post({ type: 'agentToggle', key: `s:${ACTIVE}` })
+  await waitFor('the closed session on the page', () => agentPushes().length > pushed)
+  const closed = agentPushes()[agentPushes().length - 1].payload.agents
+  assert.equal(closed.selected, null, 'the page still carries the details of a node inside a closed branch')
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentSelected, 'a:c3c3c3')
+  const copies = (key: string): Promise<string[]> => {
+    page.post({ type: 'agentSelect', key })
+    const from = state.clipboard.length
+    return Promise.resolve(state.execute('tokenPace.copyAgentId')).then(() => state.clipboard.slice(from))
+  }
+  assert.deepEqual(await copies('a:c3c3c3'), ['c3c3c3'])
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: ID copied to the clipboard.')
+  // A session, a run and a launch: each key names its id, row or no row.
+  assert.deepEqual(await copies(`s:${ACTIVE}`), [ACTIVE])
+  assert.deepEqual(await copies(`w:${ACTIVE}|${RUN}`), [RUN])
+  assert.deepEqual(await copies('l:toolu_sync01'), ['toolu_sync01'])
+  // A run's collector has no ID row: nothing is copied, and nothing claims that nothing is selected.
+  const said = state.messages.length
+  assert.deepEqual(await copies(`n:${ACTIVE}|${RUN}`), [])
+  assert.equal(state.messages.length, said, 'a selection without an id of its own said something')
+  // Nothing selected — the page clears a selection with a null key — is what the line is for.
+  page.post({ type: 'agentSelect', key: null })
+  assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentSelected, null)
+  const from = state.clipboard.length
+  await state.execute('tokenPace.copyAgentId')
+  assert.equal(state.clipboard.length, from, 'something was copied with nothing selected')
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Select a node in the Agents section first.')
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
@@ -2255,10 +2406,18 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
   // sessions and the run.
   for (const key of [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, `s:${IDLE}`]) page.post({ type: 'agentToggle', key })
   const wanted = [`s:${ACTIVE}`, `w:${ACTIVE}|${RUN}`, 'a:a1a1a1', 'a:c3c3c3', `s:${IDLE}`, 'a:b1b1b1']
+  // 1.6 R2: the wait is capped by the host's own rebuild interval, not by the generous default.
+  // A section the throttle holds back goes out within its interval, and that one is shorter: a
+  // tree that is not on the page by then is late for a reason of its own.
+  const { VM_MIN_INTERVAL_MS } = lazy().ext
+  const { SECTION_MIN_INTERVAL_MS } = require('../src/dashboard') as typeof import('../src/dashboard')
+  const agentsInterval = SECTION_MIN_INTERVAL_MS.agents
+  assert.ok(typeof agentsInterval === 'number' && VM_MIN_INTERVAL_MS > agentsInterval,
+    `the rebuild interval (${VM_MIN_INTERVAL_MS} ms) is no longer than the agents section's (${String(agentsInterval)} ms)`)
   await waitFor('the replayed tree on the page', () => {
     const tree = pageTree()
     return !!tree && wanted.every((k) => treeKeys(tree.roots).includes(k))
-  })
+  }, VM_MIN_INTERVAL_MS)
   const keys = treeKeys(pageTree()!.roots)
   for (const key of wanted) {
     assert.ok(keys.includes(key), `${key} is not among ${keys.join(', ')}`)
@@ -2400,4 +2559,201 @@ test('a follower shows the agents of the leader\'s state and neither polls nor r
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
   assert.equal(fs.readFileSync(fx.stateFile, 'utf8'), written, 'a follower wrote the shared state')
+})
+
+// ---------------------------------------------------------------------------
+// After dispose (1.6 R3): a question answered late, a fetch, the cold scan's worker
+// ---------------------------------------------------------------------------
+
+/** A dialog answer the test hands out later — queued as an answer, it keeps the dialog open. */
+function deferred<T>(): { promise: Promise<T>; resolve(v: T): void } {
+  let resolve: (v: T) => void = () => undefined
+  const promise = new Promise<T>((r) => { resolve = r })
+  return { promise, resolve }
+}
+
+/**
+ * Records what the extension asks of its quota manager once `mark` is called: the calls that set
+ * something in motion — new options, a fetch, a tick, a role, a forgotten reading. The bundle and
+ * this file share the module, so the class's prototype is the manager's.
+ */
+function spyQuotaManager(): { mark(): void; calls(): string[]; restore(): void } {
+  const { QuotaManager } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  const proto = QuotaManager.prototype as unknown as Record<string, (...args: unknown[]) => unknown>
+  const names = ['setOptions', 'forcePoll', 'tick', 'setLeader', 'setFocused', 'clearPolled']
+  const saved = new Map(names.map((n) => [n, proto[n]]))
+  const calls: string[] = []
+  let marked = false
+  for (const name of names) {
+    const real = saved.get(name)!
+    proto[name] = function (this: unknown, ...args: unknown[]): unknown {
+      if (marked) calls.push(name)
+      return real.apply(this, args)
+    }
+  }
+  return {
+    mark: () => { marked = true },
+    calls: () => [...calls],
+    restore: () => { for (const [name, real] of saved) proto[name] = real },
+  }
+}
+
+/** A few turns of the event loop, for whatever an answer set going to finish. */
+const settle = (): Promise<void> => sleep(100)
+
+test('a question answered after the window has gone acts on nothing: the fetch offer and its consent (1.6 R3)', async () => {
+  // Nothing to show anywhere — no quota file, no transcript — so the one-time offer is made.
+  const settings = { 'tokenPace.claudeQuotaFile': path.join(tmpDir('tp-no-cache'), 'claude-usage.json') }
+  const spy = spyQuotaManager()
+  try {
+    // The offer itself answered late: no consent dialog follows it.
+    const offer = deferred<unknown>()
+    await activateHost(makeEmptyFixture(), REPO, { globalState: new Map(), settings, answers: [offer.promise] })
+    await waitFor('the offer', () => state.messages.some((m) => m.text.startsWith('No quota data found.')))
+    const shown = state.messages.length
+    spy.mark()
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    offer.resolve('Show what is sent')
+    await settle()
+    assert.equal(state.messages.length, shown, `a question was asked after dispose: ${state.messages.slice(shown).map((m) => m.text).join(' | ')}`)
+    assert.deepEqual(spy.calls(), [], 'the quota manager was asked for something after dispose')
+    assert.equal(state.settings.get('tokenPace.quotaSource'), undefined)
+
+    // The consent answered late: the user's answer is the consent's to keep, but the source is not
+    // switched, no watcher is started and nothing is fetched.
+    const allow = deferred<unknown>()
+    const second = spyQuotaManager()
+    try {
+      await activateHost(makeEmptyFixture(), REPO, { globalState: new Map(), settings, answers: ['Show what is sent', allow.promise] })
+      await waitFor('the consent dialog', () => state.messages.some((m) => m.text === 'Allow Token Pace to fetch quota figures?'))
+      const asked = state.messages.length
+      second.mark()
+      assert.deepEqual(disposeAll(LIVE.pop()!), [])
+      allow.resolve('Allow')
+      await settle()
+      assert.equal(state.settings.get('tokenPace.quotaSource'), undefined, 'the quota source was switched after dispose')
+      assert.deepEqual(second.calls(), [], 'the quota manager was asked for something after dispose')
+      assert.equal(state.messages.length, asked)
+      assert.doesNotMatch(state.logText(), /quota fetched/)
+    } finally {
+      second.restore()
+    }
+  } finally {
+    spy.restore()
+  }
+})
+
+test('a question answered after the window has gone acts on nothing: the remote hint and its reload (1.6 R3)', async () => {
+  const kind = { 'some.other-extension': ['workspace'] }
+  const settings = { 'tokenPace.quotaSource': 'cache', 'remote.extensionKind': kind }
+  // The hint answered late: remote.extensionKind stays as it was, and no reload is offered.
+  const hint = deferred<unknown>()
+  await activateHost(makeEmptyFixture(), REPO, { remoteName: 'wsl', globalState: new Map(), settings, answers: [hint.promise] })
+  await waitFor('the remote hint', () => state.messages.some((m) => m.text.includes('remote "wsl"')))
+  const shown = state.messages.length
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  hint.resolve('Run Token Pace locally')
+  await settle()
+  assert.deepEqual(state.settings.get('remote.extensionKind'), kind, 'remote.extensionKind was written after dispose')
+  assert.equal(state.messages.length, shown, 'the reload was offered after dispose')
+
+  // The reload answered late: the setting was the answer before dispose, the reload is not done.
+  const reload = deferred<unknown>()
+  await activateHost(makeEmptyFixture(), REPO, {
+    remoteName: 'wsl', globalState: new Map(), settings, answers: ['Run Token Pace locally', reload.promise],
+  })
+  await waitFor('the reload prompt', () => state.messages.some((m) => m.text === 'Token Pace will run on the local machine after a window reload.'))
+  assert.deepEqual(state.settings.get('remote.extensionKind'), { ...kind, 'frederik.token-pace': ['ui'] })
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  reload.resolve('Reload Window')
+  await settle()
+  assert.equal(state.executed.includes('workbench.action.reloadWindow'), false, 'the window was reloaded after dispose')
+})
+
+test('a question answered after the window has gone acts on nothing: the write consent and a fetch asked for by hand (1.6 R3)', async () => {
+  const spy = spyQuotaManager()
+  try {
+    // tokenPace.writeQuotaCache asks for its own consent at the start; answered late, the manager
+    // is not given the write.
+    const write = deferred<unknown>()
+    await activateHost(makeFixture(), REPO, { settings: { 'tokenPace.writeQuotaCache': true }, answers: [write.promise] })
+    await waitFor('the write consent', () => state.messages.some((m) => m.text === 'Allow Token Pace to write the shared quota cache file?'))
+    spy.mark()
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    write.resolve('Allow')
+    await settle()
+    assert.deepEqual(spy.calls(), [], 'the quota manager was given new options after dispose')
+  } finally {
+    spy.restore()
+  }
+
+  // "Refresh Quota" asks for the network consent first; answered late, nothing is fetched and no
+  // lease is taken over.
+  const again = spyQuotaManager()
+  try {
+    await activateHost(makeFixture(), REPO, { settings: { 'tokenPace.quotaSource': 'poll' } })
+    await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+    const allow = deferred<unknown>()
+    state.answers.push(allow.promise)
+    const run = state.execute('tokenPace.refreshQuota')
+    await waitFor('the consent dialog', () => state.messages.some((m) => m.text === 'Allow Token Pace to fetch quota figures?'))
+    const asked = state.messages.length
+    again.mark()
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    allow.resolve('Allow')
+    await run
+    await settle()
+    assert.deepEqual(again.calls(), [], 'a fetch was started after dispose')
+    assert.equal(state.messages.length, asked)
+    assert.doesNotMatch(state.logText(), /Lease taken over|fetching once anyway/)
+  } finally {
+    again.restore()
+  }
+})
+
+test('a window closed while the cold scan reads terminates its worker, and nothing reads the transcripts on this thread instead (1.6 R3)', async () => {
+  // A worker that never answers: the cold scan is still reading whenever the window goes. The
+  // extension's other files are not needed for that — the bundle is this test's.
+  const fx = makeFixture()
+  const slow = tmpDir('tp-slow-worker')
+  fs.mkdirSync(path.join(slow, 'dist'), { recursive: true })
+  fs.writeFileSync(path.join(slow, 'dist', 'scanWorker.js'), 'setInterval(() => undefined, 60_000)\n')
+  // The module object itself, as in `blindRecursiveWatchers`: the bundle reads `Worker` from it at
+  // every construction.
+  type Threads = typeof import('worker_threads')
+  const threads = require('worker_threads') as Threads
+  const RealWorker = threads.Worker
+  const made: Array<{ worker: InstanceType<Threads['Worker']>; terminated: number; exit: Promise<number> }> = []
+  class SpyWorker extends RealWorker {
+    constructor(file: string | URL, options?: import('worker_threads').WorkerOptions) {
+      super(file, options)
+      made.push({ worker: this, terminated: 0, exit: new Promise<number>((r) => this.once('exit', r)) })
+    }
+
+    override terminate(): Promise<number> {
+      const entry = made.find((m) => m.worker === this)
+      if (entry) entry.terminated++
+      return super.terminate()
+    }
+  }
+  (threads as { Worker: unknown }).Worker = SpyWorker
+  try {
+    await activateHost(fx, slow)
+    assert.equal(made.length, 1, 'the cold scan started no worker')
+    await new Promise<void>((r) => made[0].worker.once('online', () => r()))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    assert.equal(made[0].terminated, 1, 'the worker was not terminated at dispose')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const code = await Promise.race([made[0].exit, new Promise<string>((r) => { timer = REAL_TIMERS.setTimeout(() => r('still running'), 5000) })])
+    REAL_TIMERS.clearTimeout(timer)
+    assert.notEqual(code, 'still running', 'the worker outlived the window')
+    await settle()
+    // Its end is a failed scan to `coldScan`, which falls back to nothing once the window has gone.
+    assert.doesNotMatch(state.logText(), /falling back to the main thread|Cold start in the worker failed|Cold start done/)
+    assert.equal(state.live().length, 0, 'a status bar item was drawn after dispose')
+  } finally {
+    (threads as { Worker: unknown }).Worker = RealWorker
+    // A worker a failing assertion left running would keep the run from ending.
+    for (const m of made) void m.worker.terminate()
+  }
 })

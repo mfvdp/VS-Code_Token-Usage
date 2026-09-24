@@ -611,3 +611,92 @@ test('a mirror without a prompt-cache block yields no reading — never one from
   h.mgr.current(BASE)
   assert.equal(h.mgr.promptCacheReading(), null)
 })
+
+test('a poll that answers after dispose writes no quota.json and no cache file, samples nothing and reports nothing (1.6 R3)', async () => {
+  // Every request held until the test answers it; the answer is the one a live window keeps.
+  const answer: PollResult = { state: claudeState(BASE / 1000), retryAfterSeconds: null, raw: { limits: [] } }
+  const held = (): { deps: Partial<QuotaDeps>; pending: Array<() => void> } => {
+    const pending: Array<() => void> = []
+    return { pending, deps: { poll: () => new Promise<PollResult>((r) => { pending.push(() => r(answer)) }) } }
+  }
+
+  // The premise, without dispose: the same answer is kept, written, sampled and reported.
+  const live = held()
+  const kept = harness({ writeQuotaCache: true }, live.deps)
+  let liveUpdates = 0
+  kept.mgr.forcePoll(() => { liveUpdates++ })
+  await flush()
+  assert.equal(live.pending.length, 2, 'both requests are out')
+  for (const r of live.pending) r()
+  await flush()
+  assert.equal(fs.existsSync(kept.files.stateFile), true)
+  assert.equal(fs.existsSync(kept.files.claudeCacheFile!), true)
+  assert.ok(kept.added.length > 0)
+  assert.equal(liveUpdates, 2)
+
+  // Disposed while both requests are out: nothing of their answers is kept.
+  const late = held()
+  const h = harness({ writeQuotaCache: true }, late.deps)
+  let updates = 0
+  h.mgr.forcePoll(() => { updates++ })
+  await flush()
+  assert.equal(late.pending.length, 2)
+  h.mgr.dispose()
+  for (const r of late.pending) r()
+  await flush()
+  assert.equal(fs.existsSync(h.files.stateFile), false, 'quota.json was written after dispose')
+  assert.equal(fs.existsSync(h.files.claudeCacheFile!), false, 'the shared cache file was written after dispose')
+  assert.deepEqual(h.added, [], 'a history sample was taken after dispose')
+  assert.equal(updates, 0, 'the window that went was told of the answer')
+  assert.equal(h.logs.some((l) => l.includes('quota fetched')), false)
+  // The answer is not the reading either: the manager reports what it had before.
+  assert.equal(h.mgr.current(BASE)[0].origin === 'poll', false)
+
+  // A failed request answered after dispose moves no backoff and says nothing either.
+  const failing = harness({}, { poll: () => Promise.reject(new Error('synthetic')) })
+  let failedUpdates = 0
+  failing.mgr.forcePoll(() => { failedUpdates++ })
+  failing.mgr.dispose()
+  await flush()
+  assert.equal(failedUpdates, 0)
+  assert.equal(failing.logs.some((l) => l.includes('while fetching')), false)
+})
+
+test('after dispose tick, forcePoll, a refocus and a reset trigger start nothing and report nothing (1.6 R3)', async () => {
+  const h = harness()
+  const resetMs = BASE + 10 * MIN
+  h.writeClaudeCache((BASE - 20 * MIN) / 1000, 80, new Date(resetMs).toISOString())
+  h.mgr.current(BASE)
+  assert.equal(h.scheduled.length, 1, 'the reset trigger is armed')
+  h.mgr.dispose()
+  let updates = 0
+  h.mgr.tick(() => { updates++ })
+  h.mgr.forcePoll(() => { updates++ })
+  h.mgr.setFocused(false)
+  h.setNow(BASE + 11 * MIN)
+  h.mgr.setFocused(true, () => { updates++ })
+  // A scheduler that fires a cancelled trigger anyway, and a reading of a new cycle: no fetch, and
+  // no timer armed for it.
+  h.setNow(resetMs + 6_000)
+  h.scheduled[0].fn()
+  h.writeClaudeCache((BASE - 19 * MIN) / 1000, 5, new Date(resetMs + 5 * 3_600_000).toISOString())
+  h.mgr.invalidate()
+  h.mgr.current(resetMs + 7_000)
+  await flush()
+  assert.deepEqual(h.polls, [], 'a request was made after dispose')
+  assert.equal(updates, 0, 'a disposed manager reported to its caller')
+  assert.equal(h.scheduled.length, 1, 'a reset trigger was armed after dispose')
+
+  // A request whose first step — the local Claude Code version — is still under way at dispose is
+  // not sent once it is answered.
+  let version: (v: string | null) => void = () => undefined
+  const v = harness({}, { detectClaudeVersion: () => new Promise<string | null>((r) => { version = r }) })
+  v.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  // Codex needs no version: its request went out at once.
+  assert.deepEqual(v.polls.map((p) => p.source), ['codex'])
+  v.mgr.dispose()
+  version('9.9.9')
+  await flush()
+  assert.deepEqual(v.polls.map((p) => p.source), ['codex'], 'the Claude request was sent after dispose')
+})

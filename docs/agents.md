@@ -693,7 +693,10 @@ the page does not guess either from a row's words.
 **ID and Copy ID.** The `ID` row holds the whole identifier the node stands for — the agent's id,
 a launch's tool-call id, a run's id, a session's id — and the `Copy ID` button beside it puts that
 id on the clipboard, and nothing else. *Token Pace: Copy Agent ID* in the Command Palette does
-the same for the node whose details are open, and says so when none is.
+the same for the selected node — it reads the id off the stored selection itself, so it copies it
+also while the node's row is hidden inside a closed branch — and says so when no node is selected.
+A run's [collector](#agents-without-a-counted-reply) has no `ID` row, and the command copies
+nothing for it.
 
 **Report from Claude Code.** When an agent runs synchronously, the tool result that returns it
 to its parent carries Claude Code's own figures for it — `context at the end 18.9K (incl. cache

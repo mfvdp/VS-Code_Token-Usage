@@ -25,7 +25,7 @@ import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
 import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
 import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
-import { AGENT_TABLES_REVISION, Aggregator, IngestChanges } from './agg'
+import { AGENT_TABLES_REVISION, Aggregator, cleanAgentId, IngestChanges } from './agg'
 import { Alerts } from './alerts'
 import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
 import {
@@ -250,6 +250,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   let disposed = false
   let writeConsentAsked = false
   const pendingFiles = new Set<string>()
+  /**
+   * The cold scan's worker while it reads (1.6 R3): `dispose` terminates it, so a window closed
+   * during its first minute leaves no thread behind that goes on reading every transcript.
+   */
+  let scanWorker: Worker | null = null
 
   // --------------------------------------------------------------- config helpers
   /**
@@ -547,13 +552,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
           codexDirs: cfg.codexDir,
         },
       })
+      // Kept until it is done, whichever way that happens: `dispose` terminates what is still here.
+      scanWorker = worker
+      const release = (): void => { if (scanWorker === worker) scanWorker = null }
       worker.on('message', (msg: { type?: string; done?: number; total?: number; snapshot?: Snapshot; message?: string }) => {
         if (msg?.type === 'progress') onProgress(msg.done ?? 0, msg.total ?? 0)
-        else if (msg?.type === 'done') { resolve(msg.snapshot as Snapshot); void worker.terminate() }
-        else if (msg?.type === 'error') { reject(new Error(msg.message ?? 'worker error')); void worker.terminate() }
+        else if (msg?.type === 'done') { release(); resolve(msg.snapshot as Snapshot); void worker.terminate() }
+        else if (msg?.type === 'error') { release(); reject(new Error(msg.message ?? 'worker error')); void worker.terminate() }
       })
-      worker.on('error', reject)
-      worker.on('exit', (code) => { if (code !== 0) reject(new Error(`Worker exited with code ${code}`)) })
+      worker.on('error', (err) => { release(); reject(err) })
+      worker.on('exit', (code) => { release(); if (code !== 0) reject(new Error(`Worker exited with code ${code}`)) })
     })
   }
 
@@ -572,6 +580,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       if (fromNothing) agg.agentsRevision = AGENT_TABLES_REVISION
       log.info(`Cold start done: ${snapshot.buckets.length} bucket(s), ${Object.keys(snapshot.cursors).length} file(s)`)
     } catch (err) {
+      // 1.6 R3: disposed while the worker read — `dispose` terminated it. The exit save has
+      // stored what there was, and a scan of every transcript on this thread now would read them
+      // all for a window that is gone.
+      if (disposed) return
       log.error(`Cold start in the worker failed, falling back to the main thread: ${err}`)
       const target = agg
       const done = await scan(target, { ctx: scanContext() }).then(() => true, (e) => {
@@ -987,10 +999,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       .catch((err) => log.warn(`Alert evaluation failed: ${err}`))
   }
 
+  /**
+   * Every question below may be answered after the window has gone: a dialog stays open until the
+   * reader clicks, `dispose` does not close it, and nothing awaited is cancelled by it. So each of
+   * them checks `disposed` after every wait and then acts on nothing (1.6 R3): no setting written,
+   * no watcher or fetch started, no further question, no reload.
+   */
   async function ensureWriteConsent(): Promise<void> {
-    if (!cfg.writeQuotaCache || writeConsent.granted() || writeConsentAsked) return
+    if (disposed || !cfg.writeQuotaCache || writeConsent.granted() || writeConsentAsked) return
     writeConsentAsked = true
-    if (await writeConsent.request()) quotaMgr.setOptions(quotaOptions(cfg))
+    const allowed = await writeConsent.request()
+    if (disposed) return
+    if (allowed) quotaMgr.setOptions(quotaOptions(cfg))
   }
 
   /**
@@ -999,20 +1019,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
    * from an external poller is never asked at all.
    */
   async function offerFetchOnce(): Promise<void> {
-    if (cfg.quotaSource !== 'auto') return
+    if (disposed || cfg.quotaSource !== 'auto') return
     if (consent.state() !== 'unasked' || consent.offered()) return
     if (quotas.some((q) => q.ok)) return
     await consent.markOffered()
+    if (disposed) return
     const showWhatIsSent = t('Show what is sent')
     const pick = await vscode.window.showInformationMessage(
       t('No quota data found. Token Pace can fetch it from the provider — that needs your Claude Code access token.'),
       showWhatIsSent,
       t('Not now'),
     )
-    if (pick !== showWhatIsSent) return
-    if (!(await consent.request())) return
+    if (disposed || pick !== showWhatIsSent) return
+    const allowed = await consent.request()
+    // The answer is the consent's to keep; switching the source and fetching is this window's,
+    // and it is gone.
+    if (disposed || !allowed) return
     await vscode.workspace.getConfiguration('tokenPace')
       .update('quotaSource', 'poll', vscode.ConfigurationTarget.Global)
+    if (disposed) return
     cfg = readConfig()
     quotaMgr.setOptions(quotaOptions(cfg))
     ensureCredentialsWatcher()
@@ -1024,11 +1049,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     quotaMgr.setOptions(quotaOptions(cfg))
     // Asking here rather than in the manager keeps the fetch path free of UI: the command is
     // the one place where the user is present and waiting.
-    if (quotaMgr.blocked() === 'consent' && !(await consent.request())) {
-      void vscode.window.showInformationMessage(
-        t('Quota is not fetched. Run "Token Pace: Reset Network Access Decision" to be asked again.'),
-      )
-      return
+    if (quotaMgr.blocked() === 'consent') {
+      const allowed = await consent.request()
+      // Answered after the window went (1.6 R3, as every other question): no lease is taken over,
+      // no watcher started, no fetch and no further line.
+      if (disposed) return
+      if (!allowed) {
+        void vscode.window.showInformationMessage(
+          t('Quota is not fetched. Run "Token Pace: Reset Network Access Decision" to be asked again.'),
+        )
+        return
+      }
     }
     if (lease && role === 'follower') {
       if (lease.tryAcquire()) {
@@ -1054,13 +1085,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
    * effect only after a reload, which is why the reload comes with it.
    */
   async function remoteHint(): Promise<void> {
-    if (agg.stats().files !== 0) return
+    if (disposed || agg.stats().files !== 0) return
     const remote = vscode.env.remoteName
     if (!remote) return
     if (context.globalState.get<boolean>(REMOTE_HINT_KEY, false)) return
     // Remembered before the dialog is shown: a question closed unanswered was still asked,
     // and "Not now" must be as final as any other answer.
     await context.globalState.update(REMOTE_HINT_KEY, true)
+    if (disposed) return
     // The one-click fix, and the buttons it is compared with — the same values, once.
     const moveHere = t('Run Token Pace locally')
     const openSettings = t('Open Settings')
@@ -1073,6 +1105,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       openSettings,
       t('Not now'),
     )
+    if (disposed) return
     if (pick === openSettings) {
       void vscode.commands.executeCommand('tokenPace.openSettings')
       return
@@ -1102,12 +1135,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       return
     }
     log.info(`remote.extensionKind set: "${EXTENSION_ID}": ["ui"].`)
+    // The setting was the answer to the question before; the reload is a question of its own,
+    // and a window that has gone neither asks it nor reloads on its answer (1.6 R3).
+    if (disposed) return
     const reloadWindow = t('Reload Window')
     const reload = await vscode.window.showInformationMessage(
       t('Token Pace will run on the local machine after a window reload.'),
       reloadWindow,
       t('Later'),
     )
+    if (disposed) return
     if (reload === reloadWindow) void vscode.commands.executeCommand('workbench.action.reloadWindow')
   }
 
@@ -1200,16 +1237,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   }
 
   /**
-   * D11: the whole id of the node whose details are open — an agent id, a launch's tool_use id,
-   * a run's id or a session's id, as the ID row shows it — onto the clipboard, and nothing else.
-   * The details the page shows are the ones of the last view model, so the id copied is the one
-   * on screen. Nothing selected: one line that says where to select, and the clipboard is left
-   * as it was.
+   * D11: the whole id of the selected node — an agent id, a launch's tool_use id, a run's id or a
+   * session's id, as the ID row shows it — onto the clipboard, and nothing else. 1.6 (§7c, P3a #2):
+   * read off the stored selection's key itself (`idOfAgentKey`), not off the details of the last
+   * view model, which the page no longer carries for a node inside a closed branch — so the
+   * command works whether or not the node has a row on the page. Nothing selected: one line that
+   * says where to select, and the clipboard is left as it was. A selection whose key names no id —
+   * a run's collector of agents without a first reply, which has no ID row — copies nothing.
    */
   async function copyAgentId(): Promise<void> {
-    const id = latestVm?.agents?.selected?.id ?? null
-    if (typeof id !== 'string' || id === '') {
+    const key = ui.agentSelected
+    if (key === null) {
       void vscode.window.showInformationMessage(t('Select a node in the Agents section first.'))
+      return
+    }
+    const id = idOfAgentKey(key)
+    if (id === null) {
+      log.debug('Copy Agent ID: the selected node has no id of its own — nothing copied')
       return
     }
     await vscode.env.clipboard.writeText(id)
@@ -1474,6 +1518,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       credentialsWatcher = null
       try { lease?.release() } catch { /* the record expires on its own */ }
       quotaMgr.dispose()
+      // 1.6 R3: a cold scan still reading stops here; `coldScan` sees `disposed` and falls back
+      // to nothing.
+      if (scanWorker) {
+        const worker = scanWorker
+        scanWorker = null
+        void worker.terminate().catch(() => undefined)
+      }
       try {
         history.prune(Date.now())
         history.save()
@@ -1563,6 +1614,32 @@ export function deactivate(): void {
 export function agentPollWanted(tree: AgentTreeVm | undefined): boolean {
   if (!tree) return false
   return tree.running > 0 || tree.roots.some((r) => r.kind === 'session' && r.state === 'active')
+}
+
+/**
+ * The id a stored agent-tree selection names (1.6 §7c, P3a #2), read off the key itself — the
+ * forms `agentTreeBuild.ts` makes them in: `a:<agentId>` → the agent's id, `s:<sessionId>` → the
+ * session's, `w:<sessionId>|<runId>` → the run's, `l:<toolUseId>` → the launch's tool_use id.
+ * Every id goes through the id alphabet again (`cleanAgentId`), so a key cut to fit its cap, or
+ * one from another build, names nothing rather than a wrong id. A run's collector (`n:`) names no
+ * id of its own, nor does anything else: null.
+ */
+export function idOfAgentKey(key: unknown): string | null {
+  if (typeof key !== 'string') return null
+  const body = key.slice(2)
+  switch (key.slice(0, 2)) {
+    case 'a:':
+    case 's:':
+    case 'l:':
+      return cleanAgentId(body)
+    case 'w:': {
+      const bar = body.indexOf('|')
+      if (bar < 0 || cleanAgentId(body.slice(0, bar)) === null) return null
+      return cleanAgentId(body.slice(bar + 1))
+    }
+    default:
+      return null
+  }
 }
 
 /** The two timer calls the poll makes: the real ones, unless a test hands in its own. */

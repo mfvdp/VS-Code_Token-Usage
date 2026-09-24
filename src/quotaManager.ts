@@ -161,6 +161,11 @@ export class QuotaManager {
   private pushSub: { dispose(): void } | null = null
   private claudeVersion: string | null = null
   private versionAsked = false
+  /**
+   * Set by `dispose`, for good (1.6 R3). A fetch still under way then has nowhere to go: its
+   * answer is neither kept, written, sampled nor reported, and nothing starts another one.
+   */
+  private disposed = false
 
   constructor(
     private opts: QuotaOptions,
@@ -331,6 +336,8 @@ export class QuotaManager {
 
   /** Kicks off due fetches. Runs in the background; the result lands in `current()`. */
   tick(onUpdate: () => void = this.onUpdate): void {
+    // After `dispose` there is no window to read for, and a fetch started now would outlive it.
+    if (this.disposed) return
     this.onUpdate = onUpdate
     const now = this.deps.now()
     // Re-reading the file sources is all a follower does — it renders whatever the
@@ -344,6 +351,8 @@ export class QuotaManager {
 
   /** Immediate fetch, regardless of the interval. Mode and consent still apply. */
   forcePoll(onUpdate: () => void): void {
+    // After `dispose`: no fetch, and no report either — the caller's window is gone (1.6 R3).
+    if (this.disposed) return
     const why = this.blocked()
     if (why === 'mode' || why === 'consent') {
       this.log(why === 'mode'
@@ -384,6 +393,7 @@ export class QuotaManager {
   }
 
   dispose(): void {
+    this.disposed = true
     this.stopAppServer()
     for (const t of this.resetTimers) t.cancel()
     this.resetTimers.clear()
@@ -492,6 +502,8 @@ export class QuotaManager {
       if (src === 'claude' && !this.versionAsked) {
         this.versionAsked = true
         this.claudeVersion = await this.deps.detectClaudeVersion()
+        // Disposed while the version was asked: the request is not sent any more.
+        if (this.disposed) return
       }
       const opts: PollOptions = {
         claudeDir: this.opts.claudeDir,
@@ -502,6 +514,11 @@ export class QuotaManager {
         claudeVersion: this.claudeVersion,
       }
       const r = await this.deps.poll(src, this.failCount[src], opts)
+      // 1.6 R3: disposed while the request was under way. The exit has written what there was,
+      // and a window that leads next may already fetch for itself: this answer is not kept, not
+      // written to `quota.json` or the shared cache file, not sampled into the history and not
+      // reported — the one request it cost was already made.
+      if (this.disposed) return
       const now = this.deps.now()
       if (r.state) {
         this.polled[src] = r.state
@@ -526,15 +543,19 @@ export class QuotaManager {
         this.log(`${src}: ${r.problem ?? 'Fetch failed'} — next attempt in ${Math.round(wait / 60)} min`)
       }
     } catch (e) {
+      if (this.disposed) return
       this.problem[src] = { text: t('Unexpected error while fetching'), kind: 'unknown' }
       this.failCount[src] += 1
       this.nextPollAt[src] = this.deps.now() + this.intervalMs()
       this.log(`${src}: ${(e as Error)?.name ?? 'error'} while fetching`)
     } finally {
       this.inFlight[src] = false
-      // The result — a state, a problem or a moved backoff — changes the answer.
-      this.invalidate()
-      this.onUpdate()
+      // The result — a state, a problem or a moved backoff — changes the answer; after `dispose`
+      // there is nobody left to tell.
+      if (!this.disposed) {
+        this.invalidate()
+        this.onUpdate()
+      }
     }
   }
 
@@ -600,7 +621,8 @@ export class QuotaManager {
    * older than the reset — a jumping `resets_at` must not become a poll loop.
    */
   private scheduleResetRepolls(state: QuotaState, now: number): void {
-    if (this.blocked()) return
+    // No timer is armed after `dispose`: it would start a fetch for a window that is gone.
+    if (this.disposed || this.blocked()) return
     const fetchedMs = typeof state.fetchedAt === 'number' ? state.fetchedAt * 1000 : null
     for (const w of state.windows) {
       const r = w.resetsAt
@@ -623,6 +645,8 @@ export class QuotaManager {
   }
 
   private onResetDue(src: Source, windowId: string, resetsAt: number): void {
+    // `dispose` cancels the timers; a scheduler that fires one anyway starts nothing.
+    if (this.disposed) return
     const now = this.deps.now()
     const at = this.lastStates[src]?.fetchedAt
     const fetchedMs = typeof at === 'number' ? at * 1000 : null

@@ -719,8 +719,33 @@ test('docs/dashboard.md says a forced-colours theme paints the pressed chips in 
     'the rule moved: say it in the docs')
   assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('every pressed chip of the page (a range, a provider, a model, the custom dates, the cache switch, the chart\'s `subagents` and cost line, the heatmap\'s metric, the hours\' zone) in the highlight colours'),
     'docs/dashboard.md does not say how a pressed chip looks in a forced-colours theme')
-  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('A pressed chip is the one element the page takes out of the theme\'s adjustment, and it wears nothing but the theme\'s own system colours'),
-    'docs/dashboard.md does not say why the pressed chip is taken out of the theme\'s adjustment')
+  // 1.7 D-B (pinned and changed: "A pressed chip is the one element the page takes out of the theme's
+  // adjustment, …"): the chart's bands by model are taken out too.
+  assert.ok(readDoc('src/dashboard.ts').includes('  .band:not(.sp-main, .sp-sub) { forced-color-adjust: none;'),
+    'the bands by model are no longer taken out of the adjustment: say it in the docs')
+  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('A pressed chip and a band of the chart by model are the two things the page takes out of the theme\'s adjustment, and they wear nothing but the theme\'s own system colours'),
+    'docs/dashboard.md does not say what the page takes out of the theme\'s adjustment')
+  assert.equal(doc.dashboard.replace(/\s+/g, ' ').includes('one element the page takes out of the theme\'s adjustment'), false,
+    'docs/dashboard.md still says the pressed chip is the one element taken out')
+})
+
+test('docs/dashboard.md says a forced-colours theme draws the chart\'s bands by model as patterns in its two colours, as the page\'s rules do (1.7 D-B)', () => {
+  const style = readDoc('src/dashboard.ts')
+  for (const rule of ['.band.r0:not(.sp-main, .sp-sub) { background: CanvasText; }',
+    '.band.r1:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px); }',
+    '.band.r2:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px); }',
+    '.band.r4:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(0deg, CanvasText 0 2px, Canvas 2px 4px); }',
+    '.band.rother:not(.sp-main, .sp-sub) { background: radial-gradient(CanvasText 1px, Canvas 1.2px);',
+    'outline: 1px solid Canvas; outline-offset: -1px;']) {
+    assert.ok(style.includes(rule), 'the forced-colours rule of the bands moved: say it in the docs — ' + rule)
+  }
+  const dash = doc.dashboard.replace(/\s+/g, ' ')
+  for (const claim of ['the bands are drawn as patterns in the theme\'s two colours, the text colour and the page colour, whatever the style',
+    'the largest model of a provider solid in the text colour, then 45° stripes, 135° stripes, cross-hatch, horizontal lines, and dots for `other`',
+    'each band ringed by the page colour so two bands side by side stay two',
+    'the provider is told by the legend\'s headings, the band\'s tooltip and the order of the bands in a column']) {
+    assert.ok(dash.includes(claim), 'docs/dashboard.md does not say: ' + claim)
+  }
 })
 
 test('the status bar pages, the settings page and the setting itself name the agents entry as the status bar writes it (1.6 O1)', () => {

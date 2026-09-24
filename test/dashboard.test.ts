@@ -88,11 +88,18 @@ function between(s: string, open: RegExp, close: string): string {
 
 const STYLE = between(PAGE, /<style nonce="[A-Za-z0-9]+">/, '</style>')
 
-/** The selectors of every rule the page takes out of a forced-colours theme's adjustment (1.6 P16). */
+/**
+ * The selectors of every rule the page takes out of a forced-colours theme's adjustment (1.6 P16).
+ * 1.7 D-B: read from the stylesheet without its comments — a comment right in front of a rule is no
+ * part of its selector.
+ */
 function adjustedOut(): string[] {
-  return [...STYLE.matchAll(/([^{}\n][^{}]*?)\s*\{[^{}]*forced-color-adjust:\s*none[^{}]*\}/g)].map((m) => m[1].trim())
-    .concat(STYLE.split('forced-color-adjust').length - 1 > [...STYLE.matchAll(/forced-color-adjust:\s*none/g)].length ? ['(another forced-color-adjust)'] : [])
+  const css = STYLE.replace(/\/\*[\s\S]*?\*\//g, '')
+  return [...css.matchAll(/([^{}\n][^{}]*?)\s*\{[^{}]*forced-color-adjust:\s*none[^{}]*\}/g)].map((m) => m[1].trim())
+    .concat(css.split('forced-color-adjust').length - 1 > [...css.matchAll(/forced-color-adjust:\s*none/g)].length ? ['(another forced-color-adjust)'] : [])
 }
+/** 1.7 D-B: what the page takes out of a forced-colours theme's adjustment — a pressed chip (1.6 P16) and a band of the chart by model. */
+const ADJUSTED_OUT = ['button[aria-pressed="true"]:not(.ag-row)', '.band:not(.sp-main, .sp-sub)']
 const SCRIPT = between(PAGE, /<script nonce="[A-Za-z0-9]+">/, '</script>')
 
 /**
@@ -1444,13 +1451,61 @@ test('a forced-colours theme keeps the two parts of a split column apart, in its
   assert.equal(STYLE.split('@media (forced-colors: active) {').length - 1, 1, 'a second forced-colours block')
   assert.match(block, /\n {2}\.band\.sp-main \{ background: CanvasText; \}\n/)
   assert.match(block, /\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n/)
-  // No gradient there — the theme would take it — and the theme's own adjustment left on: the one
-  // element taken out of it is a pressed chip (1.6 P16), never a band.
-  assert.equal(/gradient/.test(block), false, block)
-  assert.deepEqual(adjustedOut(), ['button[aria-pressed="true"]:not(.ag-row)'])
+  // No gradient in the split's two rules — the theme would take it — and the theme's own adjustment
+  // left on for them. 1.7 D-B (pinned and changed: 1.6 drew no gradient in the block at all and took
+  // nothing but a pressed chip out of the adjustment): the bands by model are taken out and drawn as
+  // patterns of the theme's two colours (the D-B test below), and `:not(.sp-main, .sp-sub)` keeps
+  // every one of those rules off the split's two parts, which carry a rank class too.
+  const split = block.split('\n').filter((l) => /\.sp-(main|sub)/.test(l) && !/:not\(/.test(l))
+  assert.deepEqual(split.map((l) => l.trim().slice(0, l.trim().indexOf(' {'))), ['.band.sp-main', '.band.sp-sub'], block)
+  assert.equal(split.some((l) => /gradient|forced-color-adjust/.test(l)), false, split.join('\n'))
+  assert.ok(block.split('\n').filter((l) => /^ {2}\.band/.test(l)).every((l) => /\.sp-(main|sub) \{/.test(l) || /:not\(\.sp-main, \.sp-sub\) \{/.test(l)), block)
+  assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
   // The block stands after every band rule, so at the same specificity it is the one that wins.
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.band.r0 { background: var(--hue); }'))
+})
+
+// 1.7 D-B: split by model, a forced-colours theme painted all eight distinct band paints as the page
+// colour (1.6 P12b's note): it removes every gradient and gives every other background the page's own.
+test('a forced-colours theme draws the chart\'s bands by model as patterns of its own two colours, ringed by the page colour, and leaves the split\'s two parts their rules (1.7 D-B)', () => {
+  const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active) {'))
+  const block = forced.slice(0, forced.indexOf('\n}') + 2)
+  assert.equal(STYLE.split('@media (forced-colors: active) {').length - 1, 1, 'a second forced-colours block')
+  // The seven rules, in the one forced-colours block, in this order: the band taken out of the
+  // theme's adjustment and ringed 1 px inside by the page colour, then its paint by rank — the rank
+  // as the pattern style draws it, in the text colour on the page colour.
+  const not = ':not(.sp-main, .sp-sub)'
+  const want = [
+    '.band' + not + ' { forced-color-adjust: none; outline: 1px solid Canvas; outline-offset: -1px; background: Canvas; }',
+    '.band.r0' + not + ' { background: CanvasText; }',
+    '.band.r1' + not + ' { background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px); }',
+    '.band.r2' + not + ' { background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px); }',
+    '.band.r3' + not + ' { background: repeating-linear-gradient(45deg, CanvasText 0 1px, transparent 1px 4px), '
+      + 'repeating-linear-gradient(135deg, CanvasText 0 1px, Canvas 1px 4px); }',
+    '.band.r4' + not + ' { background: repeating-linear-gradient(0deg, CanvasText 0 2px, Canvas 2px 4px); }',
+    '.band.rother' + not + ' { background: radial-gradient(CanvasText 1px, Canvas 1.2px); background-size: 4px 4px; }',
+  ]
+  const got = [...block.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\n {2}(\.band[^{]*:not\(\.sp-main, \.sp-sub\) \{[^}]*\})/g)]
+    .map((m) => m[1].replace(/\s+/g, ' '))
+  assert.deepEqual(got, want, block)
+  // System colours only — the text's and the page's, and nothing between the lines of the cross-hatch —
+  // never a theme variable, a literal or a mix: the theme's two colours are all a forced palette has.
+  const words = new Set(got.join(' ').replace(/^[^{]*\{|\}[^{]*\{/g, ' ').match(/[A-Za-z][A-Za-z-]*/g) ?? [])
+  const colours = [...words].filter((x) => !['forced-color-adjust', 'none', 'outline', 'solid', 'outline-offset', 'background', 'background-size',
+    'repeating-linear-gradient', 'radial-gradient', 'px', 'deg'].includes(x)).sort()
+  assert.deepEqual(colours, ['Canvas', 'CanvasText', 'transparent'], [...words].join(' '))
+  assert.equal(/var\(|#[0-9a-f]{3}|rgb|hsl|color-mix/i.test(got.join('\n')), false, got.join('\n'))
+  // Every rank the page hands out has its rule, the plain rank the solid one — the classes bandStyle
+  // writes for a band and for its legend swatch alike.
+  const src = readFileSync(join(__dirname, '..', 'src', 'webview', 'main.ts'), 'utf8')
+  assert.ok(src.includes("return 'band s-' + s + '-' + r + ' hue-' + s + ' r' + r + ' st-' + st"), 'the band classes moved')
+  // Specificity: each rank's rule outranks the plain band's and every rule outside the mode.
+  assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
+  // The split's two rules follow them unchanged, without the :not, in the adjustment.
+  assert.match(block, /\.band\.rother:not\(\.sp-main, \.sp-sub\) \{[^}]*\}\n {2}\.band\.sp-main \{ background: CanvasText; \}\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n\}/)
+  // Taken out of the adjustment beside the pressed chip, and nothing else is.
+  assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
 })
 
 test('a forced-colours theme paints every pressed chip in the highlight colours, its words readable, and leaves the pressed agent rows their outline (1.6 P16)', () => {
@@ -1467,12 +1522,13 @@ test('a forced-colours theme paints every pressed chip in the highlight colours,
   // Taken out of the theme's adjustment — with it on, Chrome paints a backplate of the page colour
   // behind the words, and the highlight text on it cannot be read (the harness's pictures and pixel
   // counts) — and so wearing nothing but the theme's own system colours: every value of the rule is
-  // one of them, and it is the only element of the page taken out.
+  // one of them. 1.7 D-B (pinned and changed: the chip was the only element of the page taken out):
+  // beside it only the chart's bands by model are.
   const values = rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}')).split(';').map((d) => d.trim()).filter(Boolean)
     .map((d) => d.split(':').map((x) => x.trim()) as [string, string])
   assert.deepEqual(values.map(([k]) => k), ['forced-color-adjust', 'background', 'color', 'border-color', 'outline-color'])
   assert.ok(values.slice(1).every(([, v]) => ['Highlight', 'HighlightText', 'CanvasText'].includes(v)), JSON.stringify(values))
-  assert.deepEqual(adjustedOut(), ['button[aria-pressed="true"]:not(.ag-row)'])
+  assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
   // It stands after the page's own pressed colours, which it outranks inside the mode.
   assert.ok(STYLE.indexOf(rule) > STYLE.indexOf('button[aria-pressed="true"] {\n  background: var(--vscode-button-background'))
   // Every button the page gives aria-pressed, by the markup of src/webview/main.ts: the chips — the
@@ -3341,6 +3397,13 @@ const SEP = '<span aria-hidden="true"> · </span>'
 /** One figure of a row, unbreakable. */
 const fig = (v: string): string => '<span class="nobr">' + v + '</span>'
 /**
+ * 1.7 D-A: the page's mark of a lower bound behind a figure, as the page writes it — the ⚠ hidden
+ * from a screen reader, titled with why for the mouse, then the words, text of the line at no size
+ * (`.ag-lbw`), which a screen reader reads where they stand.
+ */
+const lbMark = (title: string, words = 'lower bound'): string =>
+  ' <span class="ag-lb" aria-hidden="true" title="' + title + '">⚠</span><span class="ag-lbw">' + words + '</span>'
+/**
  * A row's second line: its parts, each an `ag-fp` with the separator in front of it but the first,
  * and anything the page writes between them (a silence) where `between` puts it.
  */
@@ -3707,8 +3770,9 @@ test('a row is two lines: its name, then the usage and duration it was given —
   assert.ok(h.endsWith('</ul></div>'), h.slice(-120))
   const rootMark = agentTree({ roots: [treeNode(AK.s2, 'idle', { kind: 'session', label: 'Session Mon 09:00 · 1234abcd', lowerBound: true,
     lowerBoundText: '⚠ lower bound — 1 of 9 replies unfinished', usage: '12K' })] })
-  assert.ok(agentsHtml(a, { agents: rootMark }).indexOf(fig('own 12K <span class="ag-lb" role="img" aria-label="lower bound" '
-    + 'title="⚠ lower bound — 1 of 9 replies unfinished">⚠</span>')) >= 0)
+  // 1.7 D-A (pinned and changed: 1.6 D10 wrote the ⚠ as an image named "lower bound"): the ⚠ hidden
+  // from a screen reader, the words in the line after it.
+  assert.ok(agentsHtml(a, { agents: rootMark }).indexOf(fig('own 12K' + lbMark('⚠ lower bound — 1 of 9 replies unfinished'))) >= 0)
   // Absence is a dash, never a zero: the quiet session, and a launch nobody has counted yet —
   // here it is not running, so not even a clock, and its second line is dashes.
   assert.ok(h.indexOf(albl('Explore · – · launched', 'Explore', '–', 'launched', true) + figsOf(AK.l1, fig('–'), fig('–')) + '</span></span>') >= 0, h)
@@ -4261,7 +4325,8 @@ test('no line under the tree speaks of the lower bound, and the running list\'s 
   const bound = agentsHtml(a, { agents: agentTree({ runningNow: [runningItem({ lowerBound: true, lowerBoundText: why })] }) })
   assert.equal(treePart(bound).indexOf('data-key="' + AK.a1 + '"'), -1, 'the running agent\'s tree row is on screen')
   assert.equal(bound.split('⚠').length - 1, 2, bound)
-  assert.ok(bound.indexOf(fig('12.3K <span class="ag-lb" role="img" aria-label="lower bound" title="' + why + '">⚠</span>')) >= 0, bound)
+  // 1.7 D-A (pinned and changed): the ⚠ hidden from a screen reader, "lower bound" in the line.
+  assert.ok(bound.indexOf(fig('12.3K' + lbMark(why))) >= 0, bound)
   assert.equal(/marked ⚠|lower bounds\./.test(bound), false, bound)
   assert.ok(bound.endsWith('</ul></div>'), bound.slice(-120))
   // The word is out of the page's dictionary, and out of the script.
@@ -4286,8 +4351,9 @@ function unmarkedScript(): string {
 test('a lower bound carries one ⚠ inside its usage figure, titled with its reason — as shipped — and none with the mark off', () => {
   const a = agentCtx()
   const why = '⚠ lower bound — 2 of 41 replies unfinished'
-  const mark = (title: string): string =>
-    ' <span class="ag-lb" role="img" aria-label="lower bound" title="' + title + '">⚠</span>'
+  // 1.7 D-A (pinned and changed: 1.6 D10 wrote an image named "lower bound"): the ⚠ hidden from a
+  // screen reader, its words in the line after it.
+  const mark = (title: string): string => lbMark(title)
   const tree = agentTree({
     roots: [
       treeNode(AK.s1, 'active', {
@@ -4324,6 +4390,59 @@ test('a lower bound carries one ⚠ inside its usage figure, titled with its rea
   assert.ok(odd.indexOf('title="&quot;&gt;&lt;b&gt;x"') >= 0, odd)
   // The alternative, the page's one line turned off: the same tree marks nothing.
   assert.equal(agentsHtml(agentCtx([], unmarkedScript()), { agents: tree, ui: agentUi({ agentsExpanded: [AK.s1] }) }).indexOf('⚠'), -1)
+})
+
+// 1.7 D-A: 1.6 D10 wrote the ⚠ as an image named "lower bound" by its aria-label, and Chrome sets a
+// name taken from an attribute apart with a space of its own — "12.3K lower bound , since 11:59" (1.6
+// P10c). The ⚠ is hidden now, and the words are text of the line, at no size, read where they stand.
+test('every ⚠ of a lower bound is hidden from a screen reader and followed by its words in the line, at no size — in English and in German (1.7 D-A)', () => {
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const cost = 'not every agent has a price: the sum is a lower bound'
+  assert.equal(bundle['lower bound'], 'Untergrenze')
+  assert.equal(typeof bundle[cost], 'string')
+  assert.equal(DICT['lower bound'], 'lower bound')
+  const why = '⚠ lower bound — 2 of 41 replies unfinished'
+  // Every place the page marks a lower bound: a session's own figure and an agent's usage on the
+  // tree, the running list's row, the 7-day block's cost of all agents.
+  const tree = agentTree({
+    roots: [
+      treeNode(AK.s1, 'active', {
+        kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', ...T_S1,
+        lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 30 replies unfinished',
+        children: [treeNode(AK.a1, 'running', { lowerBound: true, lowerBoundText: why }), treeNode(AK.a2, 'done', { label: 'Plan · opus-5 · b1c2' })],
+      }),
+    ],
+    runningNow: [runningItem({ lowerBound: true, lowerBoundText: why })],
+    week: weekOf(),
+  })
+  const ui = agentUi({ agentsExpanded: [AK.s1], agentsWeekOpen: true })
+  const german = between(germanPage({ 'lower bound': bundle['lower bound'], [cost]: bundle[cost] }), /<script nonce="[A-Za-z0-9]+">/, '</script>')
+  for (const [script, words] of [[SCRIPT, 'lower bound'], [german, 'Untergrenze']] as const) {
+    const h = agentsHtml(agentCtx([], script), { agents: tree, ui })
+    const marks = [...h.matchAll(/<span class="ag-lb"([^>]*)>⚠<\/span>/g)]
+    assert.equal(marks.length, 4, h)
+    assert.equal(h.split('class="ag-lb"').length - 1, marks.length, h)
+    // No image any more: nothing names the ⚠ — the words do, where they stand.
+    assert.equal(/<[^>]*class="ag-lb"[^>]*role=/.test(h), false, h)
+    assert.equal(/aria-label="(lower bound|Untergrenze)"/.test(h), false, h)
+    for (const m of marks) {
+      assert.match(m[1], /^ aria-hidden="true" title="[^"<>]+"$/, m[0])
+      const after = h.slice((m.index as number) + m[0].length)
+      assert.ok(after.startsWith('<span class="ag-lbw">' + words + '</span>'), after.slice(0, 80))
+    }
+    assert.equal(h.split('class="ag-lbw"').length - 1, marks.length, h)
+    // The title keeps the reason for the mouse, in the page's language for the cost.
+    assert.ok(h.indexOf('aria-hidden="true" title="' + (script === SCRIPT ? cost : bundle[cost]) + '">⚠</span>') >= 0, h)
+    assert.ok(h.indexOf('aria-hidden="true" title="' + why + '">⚠</span>') >= 0, h)
+  }
+  // At no size wherever it stands — a figures' line, a cell of the 7-day block — the technique of a
+  // part taken off a figures' line (1.6 P10c); the ⚠ keeps its forced-colours rule.
+  assert.match(STYLE, /\n\.ag-fig \.ag-lbw, \.ag-week \.ag-lbw \{ font-size: 0; \}\n/)
+  assert.match(STYLE, /\n\.ag-fig \.ag-gone \{ font-size: 0; \}\n/)
+  assert.match(STYLE, /\n {2}\.ag-st::before, \.ag-lb \{ color: CanvasText; \}\n/)
+  // The words are written in two places only: this mark, and the quota card's partial line — the quota
+  // and Tokens sections' own ⚠ marks, which D-A leaves as they were.
+  assert.equal(SOURCE.split("tr('lower bound')").length - 1, 2, 'the words of a lower bound are written in one more place')
 })
 
 test('a running agent that is not waiting says how long it has been silent, from three minutes on, by the page clock', () => {
@@ -5402,7 +5521,10 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     assert.ok(row.indexOf('<span class="ag-fig" id="agf-' + n.key + '"><span class="ag-fp"><span class="nobr">' + (n.kind === 'session' ? 'own ' : '') + n.usage) >= 0, row)
     const marked = n.lowerBound && n.lowerBoundText !== null
     assert.equal(row.split('class="ag-lb"').length - 1, marked ? 1 : 0, row)
-    if (marked) assert.ok(row.indexOf('<span class="ag-lb" role="img" aria-label="lower bound" title="' + n.lowerBoundText + '">⚠</span>') >= 0, row)
+    // 1.7 D-A (pinned and changed): the ⚠ hidden from a screen reader, "lower bound" in the line
+    // after it, the whole mark the end of the usage figure.
+    if (marked) assert.ok(row.indexOf(lbMark(n.lowerBoundText as string) + '</span>') >= 0, row)
+    assert.equal(row.split('class="ag-lbw"').length - 1, marked ? 1 : 0, row)
     // 1.6 N1: every node opened, so a session's and a run's tally stand, an agent's does not —
     // its children show their own glyphs — and a node without agents below has none.
     const shows = n.tallyText !== null && n.kind !== 'agent'
@@ -5537,8 +5659,12 @@ test('the running list the view model builds reaches the page first, the tree cl
     // Its usage — a dash for the launch and the collector, marked where it is a lower bound — then
     // the live clock from its start, with the words for a screen reader; a collector has no start
     // of its own (1.6, the lead's note on P5b) and says how many of its agents run instead.
+    // 1.7 D-A (pinned and changed: the row's mark was checked only up to its class): the whole mark —
+    // the ⚠ hidden from a screen reader, titled with the item's reason, "lower bound" in the line —
+    // the end of the usage figure.
     assert.ok(row.indexOf('<span class="ag-fig"><span class="ag-fp"><span class="nobr">' + r.usage
-      + (r.lowerBound ? ' <span class="ag-lb"' : '</span>')) >= 0, row)
+      + (r.lowerBound ? lbMark(r.lowerBoundText as string) : '') + '</span>') >= 0, row)
+    assert.equal(row.split('class="ag-lbw"').length - 1, r.lowerBound ? 1 : 0, row)
     if (r.kind === 'noreply') {
       assert.equal(row.indexOf('data-live="since"'), -1, row)
       assert.ok(row.indexOf(fig('~1 of them running')) >= 0, row)
@@ -5823,7 +5949,9 @@ test('the running block\'s first line carries the 7-day block\'s disclosure; ope
   const w = weekPart(h)
   const heads = ['Type · model', 'Agents', 'Usage', 'Share', 'Median per agent', '~Cost']
   const td = (i: number, v: string): string => '<td data-h="' + heads[i] + '">' + v + '</td>'
-  const lb = '<span class="ag-lb" role="img" aria-label="lower bound" title="not every agent has a price: the sum is a lower bound">⚠</span>'
+  // 1.7 D-A (pinned and changed: 1.6 L3 wrote an image named "lower bound"): the ⚠ hidden from a
+  // screen reader, its words in the cell after it.
+  const lb = lbMark('not every agent has a price: the sum is a lower bound')
   assert.equal(w, '<div class="ag-week" id="ag-week" role="region" aria-labelledby="ag-week-h">'
     + '<div class="name" id="ag-week-h" role="heading" aria-level="3">Last 7 days · where the agent tokens went</div>'
     + '<div class="scroll"><table class="ag-wkt"><thead><tr>' + heads.map((x) => '<th>' + x + '</th>').join('') + '</tr></thead><tbody>'
@@ -5836,7 +5964,7 @@ test('the running block\'s first line carries the 7-day block\'s disclosure; ope
     + td(3, '21 %') + td(4, '120K') + td(5, '–') + '</tr>'
     // Every agent together: no share of the whole and no median, their cells empty; a cost that
     // holds only some of the agents is a lower bound, marked as the page marks one.
-    + '<tr class="ag-wkall"><td>All agents</td>' + td(1, '18') + td(2, '1.9M') + '<td></td><td></td>' + td(5, '~$12.80 ' + lb) + '</tr>'
+    + '<tr class="ag-wkall"><td>All agents</td>' + td(1, '18') + td(2, '1.9M') + '<td></td><td></td>' + td(5, '~$12.80' + lb) + '</tr>'
     + '</tbody></table></div>'
     + '<p class="meta">3 other combinations</p>'
     + '<div class="name ag-wktop" role="heading" aria-level="4">The 2 largest agents</div><ul>'
@@ -5975,7 +6103,8 @@ test('the 7-day block speaks German on a German page (1.6 L3)', () => {
     'aria-level="3">Letzte 7 Tage · wohin die Agent-Token gingen</div>',
     '<th>Typ · Modell</th><th>Agenten</th><th>Verbrauch</th><th>Anteil</th><th>Median je Agent</th><th>~Kosten</th>',
     '<td data-h="Median je Agent">80K</td>', '<td>Alle Agenten</td>', 'aria-level="4">Die 2 größten Agenten</div>',
-    'aria-label="Untergrenze" title="nicht jeder Agent hat einen Preis: Die Summe ist eine Untergrenze"']) {
+    // 1.7 D-A (pinned and changed: the mark was an image named „Untergrenze"): the words in the cell.
+    lbMark('nicht jeder Agent hat einen Preis: Die Summe ist eine Untergrenze', 'Untergrenze')]) {
     assert.ok(h.indexOf(phrase) >= 0, phrase + '\n' + h)
   }
   const empty = section({ agents: agentTree({ week: weekOf({ rows: [], top: [] }) }), ui: agentUi({ agentsWeekOpen: true }) })
@@ -6622,9 +6751,10 @@ test('the fold and the row are targets of 24 × 24 px at least, and a forced-col
   assert.match(block, /\.ag-row\[aria-pressed="true"\], \.agtree \.ag-row\[data-pressed="true"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/)
   // 1.6 L1: the item the keyboard is on, a ring of the text colour round its line.
   assert.match(block, /\.agtree li\[role="treeitem"\]:focus-visible > \.ag-line \{ outline: 2px solid CanvasText; \}/)
-  // The theme's own adjustment stays on for the tree: the one element taken out of it is a pressed
-  // chip (1.6 P16), never a row.
-  assert.deepEqual(adjustedOut(), ['button[aria-pressed="true"]:not(.ag-row)'])
+  // The theme's own adjustment stays on for the tree: never a row is taken out of it — 1.7 D-B
+  // (pinned and changed: a pressed chip was the one element taken out) a pressed chip (1.6 P16) and
+  // a band of the chart by model are.
+  assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
 })
 
 test('the quota name keeps its nowrap alone, and the running dot never fades below 0.7', () => {

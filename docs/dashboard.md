@@ -65,7 +65,13 @@ lines), as a shade of the hue, or as both (`tokenPace.chart.modelStyle`); the re
 provider's models is folded into one `other` band — dotted under `pattern` and `both`, the
 faintest shade under `shade` — so the column total is the same however many models there are. The legend is grouped by provider and its swatches carry the
 band's own fill; a band's tooltip names the model, the provider, the value, its share of the
-column and the provider's column total. The cost line, when switched on, runs through the
+column and the provider's column total. In a forced-colours theme (Windows High Contrast), which
+removes every pattern and every hue, the bands are drawn as patterns in the theme's two colours,
+the text colour and the page colour, whatever the style: the largest model of a provider solid in
+the text colour, then 45° stripes, 135° stripes, cross-hatch, horizontal lines, and dots for
+`other`, each band ringed by the page colour so two bands side by side stay two. Two colours
+cannot carry the providers' hues, so there the provider is told by the legend's headings, the
+band's tooltip and the order of the bands in a column. The cost line, when switched on, runs through the
 column centres over a halo in the page background, with a dot per column, on its own axis.
 The heatmap switches between `usage` and `cost`; the hour profile between local time and UTC.
 
@@ -189,10 +195,12 @@ stand still (`since 14:20`); the toggle and the row are targets of at least 24 �
 forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours — and every
 pressed chip of the page (a range, a provider, a model, the custom dates, the cache switch, the
 chart's `subagents` and cost line, the heatmap's metric, the hours' zone) in the highlight colours,
-where the theme would otherwise give pressed and released chips the same face. A pressed chip is the
-one element the page takes out of the theme's adjustment, and it wears nothing but the theme's own
-system colours: left in, it would get a backplate of the page colour behind its words, on which the
-highlight text cannot be read. The focus
+where the theme would otherwise give pressed and released chips the same face. A pressed chip and a
+band of the chart by model are the two things the page takes out of the theme's adjustment, and they
+wear nothing but the theme's own system colours: left in, a chip would get a backplate of the page
+colour behind its words, on which the highlight text cannot be read, and the bands would all be
+painted in the page colour, the theme having removed their patterns and their hues — taken out, they
+are drawn as patterns in the theme's two colours (see the chart above). The focus
 stays on its row — the running list's button, or the tree's item — when the section is pushed
 again. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are

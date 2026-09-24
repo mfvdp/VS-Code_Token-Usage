@@ -935,7 +935,8 @@ function sTokens(): string {
  * bands and the legend swatches call it alike, so a swatch shows exactly the fill of its band.
  * 1.6 O2: split by main session and subagent, a band also names its part — `sp-main` for rank 0,
  * `sp-sub` for rank 1, the two ranks the split hands out — which is what a forced-colours theme
- * paints it by (see the style), the hue and the pattern being the theme's to remove there.
+ * paints it by (see the style), the hue and the pattern being the theme's to remove there. 1.7 D-B:
+ * by model, such a theme paints the band by its rank alone, a pattern of its two colours.
  */
 function bandStyle(source: string, rank: number | string, style: string, split?: boolean): string {
   const st = style === 'shade' || style === 'both' ? style : 'pattern';
@@ -1686,15 +1687,28 @@ function hookParts(n: Payload): string[] {
 }
 
 /**
+ * 1.7 D-A: the page's mark of a lower bound behind a figure — the ⚠ for the eye, titled with why
+ * (`title`, already escaped) for the mouse and hidden from a screen reader, then the words
+ * "lower bound" as text of the line at no size (`.ag-lbw`), read where they stand. 1.6 wrote the ⚠
+ * as an image named by its aria-label, and Chrome sets a name taken from an attribute apart with a
+ * space of its own: the item's description read "12.3K lower bound , since 11:59". Words in the
+ * line — the technique 1.6 P10c chose for a part taken off a figures' line — read "12.3K lower
+ * bound, since 11:59".
+ */
+function lbMark(title: string): string {
+  return ' <span class="ag-lb" aria-hidden="true" title="' + title + '">⚠</span><span class="ag-lbw">' + tr('lower bound') + '</span>';
+}
+
+/**
  * 1.6 D10: the ⚠ of an output that is a lower bound, for the end of the row's usage figure — only
  * while ROW_LOWER_BOUND_MARK is on, and only with the view model's reason, which is its title: a
- * mark nobody can ask about says less than none. For a screen reader it is "lower bound".
+ * mark nobody can ask about says less than none. For a screen reader it is "lower bound" (lbMark).
  */
 function lowerMark(n: Payload): string {
   if (!ROW_LOWER_BOUND_MARK || !n || n.lowerBound !== true) return '';
   const why = typeof n.lowerBoundText === 'string' && n.lowerBoundText !== '' ? n.lowerBoundText : '';
   if (!why) return '';
-  return ' <span class="ag-lb" role="img" aria-label="' + tr('lower bound') + '" title="' + esc(why) + '">⚠</span>';
+  return lbMark(esc(why));
 }
 
 /**
@@ -1761,7 +1775,7 @@ function sessionSpan(n: Payload): string {
  * collector no clock at all (1.6, lead note).
  *
  * 1.6 L1: the line carries an `id` in the tree — its item's description (`aria-describedby`), so a
- * screen reader on the item gets its figures after its name: "12.3K lower bound since 14:20".
+ * screen reader on the item gets its figures after its name: "12.3K lower bound, since 14:20".
  */
 function agentFigLine(n: Payload, kind: string, state: string, tally: string[], id = ''): string {
   const start = kind === 'noreply' ? null : agentTs(n.startTs);
@@ -2231,13 +2245,12 @@ function agentWeekItems(a: Payload): Payload[] {
 /**
  * 1.6 L3: a cost of the 7-day block as the view model wrote it — `~$4.20`, or `–` — with the
  * ` ⚠` behind a sum that holds only some of its agents turned into the page's mark of a lower
- * bound: titled with why, "lower bound" to a screen reader.
+ * bound: titled with why, "lower bound" to a screen reader (1.7 D-A: lbMark).
  */
 function weekCost(v: Payload): string {
   if (typeof v !== 'string' || v === '') return '–';
   if (!/ ⚠$/.test(v)) return esc(v);
-  return esc(v.slice(0, -2)) + ' <span class="ag-lb" role="img" aria-label="' + tr('lower bound') + '" title="'
-    + tr('not every agent has a price: the sum is a lower bound') + '">⚠</span>';
+  return esc(v.slice(0, -2)) + lbMark(tr('not every agent has a price: the sum is a lower bound'));
 }
 
 /**

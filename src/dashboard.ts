@@ -932,6 +932,11 @@ ul { margin: 6px 0; padding-left: 18px; }
    ROW_LOWER_BOUND_MARK is on, as it ships. The glyph comes from a fallback font whose line box is
    a pixel taller than the figures' own; held to its font size, it never makes a row taller. */
 .ag-lb { line-height: 1; }
+/* 1.7 D-A: the ⚠ is hidden from a screen reader, and the words "lower bound" stand behind it as
+   text of the line at no size — out of sight, read where they stand (the technique of .ag-gone),
+   so the item's description reads "12.3K lower bound, since 11:59", no space of Chrome's own
+   before the comma, as it put one after a name taken from an image's attribute. */
+.ag-fig .ag-lbw, .ag-week .ag-lbw { font-size: 0; }
 /* One glyph per state, drawn from the class and coloured with the page's own tokens only:
    green and red for what the parent recorded, the provider's blue for what still runs, the
    foreground for a session in use, and the dim tone for what the tree can only call quiet — and
@@ -1073,14 +1078,23 @@ ul { margin: 6px 0; padding-left: 18px; }
    custom dates, the cache switch, the chart's split and cost line, the heatmap's metric, the hours'
    zone — in the highlight colours: the theme gives every button the same face and takes the button
    colours a pressed chip wears, so pressed and released would look alike and the state would be
-   heard but not seen. The chip is the one element taken out of the theme's adjustment: with it on,
+   heard but not seen. The chip is taken out of the theme's adjustment: with it on,
    Chrome paints a backplate of the page colour behind every word, and the highlight text is made to
    stand on the highlight, not on the page colour — in the usual themes it is the page colour itself,
    so the chip's words would vanish (1.6 P16's harness pictures). Taken out, it wears the theme's
    system colours alone: the highlight as its face and edge, the highlight text for its words, the
    text colour for its focus ring. Not the pressed rows of the running list and the 7-day block,
    which are buttons as well: they stay in the adjustment and keep the open row's 2 px outline,
-   quieter than a chip, as the tree's rows do. The theme's own adjustment is left on everywhere else. */
+   quieter than a chip, as the tree's rows do. 1.7 D-B: the chart's bands by model — every band but
+   the split's two parts, a legend swatch too — are the other thing taken out: the theme removes every
+   gradient and gives every other background the page colour, so all of them were the page colour.
+   Taken out, they wear the theme's two colours alone, the text's and the page's, as patterns by rank
+   whatever the style (the shade style has no pattern of its own to fall back on) — the largest model
+   solid in the text colour, then 45° and 135° stripes, the cross-hatch, the horizontal lines and the
+   dots of the other models —, each ringed 1 px inside by the page colour; the hue that told the
+   providers apart cannot survive two colours, so the legend's headings, the band's tooltip and the
+   column order do. The split keeps its own two rules below, in the adjustment. The theme's own
+   adjustment is left on everywhere else. */
 @media (forced-colors: active) {
   button[aria-pressed="true"]:not(.ag-row) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; outline-color: CanvasText; }
   .ag-st::before, .ag-lb { color: CanvasText; }
@@ -1088,6 +1102,17 @@ ul { margin: 6px 0; padding-left: 18px; }
   .ag-mix > i { border: 1px solid CanvasText; box-sizing: border-box; }
   .ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
   .agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 2px solid CanvasText; }
+  /* 1.7 D-B: the bands by model — the theme would paint them all away. Two system colours, the rank as
+     the pattern style draws it, each band ringed 1 px inside by the page colour so two solid bands side
+     by side stay two. Taken out of the theme's adjustment: a gradient is otherwise removed. */
+  .band:not(.sp-main, .sp-sub) { forced-color-adjust: none; outline: 1px solid Canvas; outline-offset: -1px; background: Canvas; }
+  .band.r0:not(.sp-main, .sp-sub) { background: CanvasText; }
+  .band.r1:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px); }
+  .band.r2:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px); }
+  .band.r3:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(45deg, CanvasText 0 1px, transparent 1px 4px),
+                                               repeating-linear-gradient(135deg, CanvasText 0 1px, Canvas 1px 4px); }
+  .band.r4:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(0deg, CanvasText 0 2px, Canvas 2px 4px); }
+  .band.rother:not(.sp-main, .sp-sub) { background: radial-gradient(CanvasText 1px, Canvas 1.2px); background-size: 4px 4px; }
   .band.sp-main { background: CanvasText; }
   .band.sp-sub { background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; }
 }

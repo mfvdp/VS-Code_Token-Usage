@@ -592,8 +592,13 @@ export class QuotaManager {
    * `userAgentFor` sends as `CLAUDE_VERSION_FALLBACK`. Nothing else of a transcript reaches a
    * request. The log names the source once, and again only when the version or its source changes —
    * never under `tokenPace.userAgent: honest`, which sends none of it.
+   *
+   * 1.7 Review 1: under `honest` the transcripts are not asked at all — §0a.1 allows their version
+   * only for the `claude-code/<version>` header, and the honest one carries no Claude Code version.
+   * The CLI's answer stays in the options as in 1.6; `userAgentFor` ignores it there.
    */
   private userAgentVersion(): string | null {
+    if (this.opts.userAgent !== 'claudeCode') return this.claudeVersion
     let from: keyof typeof VERSION_FROM = 'cli'
     let version = this.claudeVersion
     if (version === null) {

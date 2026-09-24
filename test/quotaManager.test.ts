@@ -1086,6 +1086,15 @@ test('honest sends none of it and logs no version (1.7 W3, spec §3.0 (i))', asy
   await pollOnce(h)
   assert.equal(userAgentFor(h.claudePolls()[0]), 'token-pace/1.0.0')
   assert.deepEqual(h.versionLines(), [])
+  // 1.7 Review 1 (§0a.1: only when tokenPace.userAgent is claudeCode): the transcripts are not even
+  // asked, and no transcript version sits in the request's options.
+  assert.equal(h.asked.transcript, 0, 'honest asked the transcripts for a version it never sends')
+  assert.equal(h.claudePolls()[0].claudeVersion, null)
+  // Back on claudeCode, the next poll asks them again.
+  h.mgr.setOptions({ ...OPTIONS, userAgent: 'claudeCode' })
+  await pollOnce(h)
+  assert.equal(h.asked.transcript, 1)
+  assert.equal(userAgentFor(h.claudePolls()[1]), 'claude-code/2.1.281')
 })
 
 test('the version reaches the user agent from a main session, never from an agent, never from a hand-written snapshot (1.7 W3, §0a.1)', async () => {

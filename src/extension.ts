@@ -238,7 +238,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     () => consent.granted(),
     () => agg.codexRateLimits(),
     history,
-    { extVersion: __EXT_VERSION__ },
+    {
+      extVersion: __EXT_VERSION__,
+      // 1.7 W3 (§0a.1): a closure over the variable, not over today's aggregator — the cold scan
+      // and *Clear Stored Data* put a new one in its place.
+      transcriptVersion: () => agg.latestClaudeVersion(),
+    },
   )
 
   const statusBar = new StatusBar()

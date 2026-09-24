@@ -74,11 +74,28 @@ Decision** puts the question back.
   `PATH`, and finally inside the binary bundled with the official IDE extension.
 
 **User agent.** `tokenPace.userAgent: claudeCode` (default) sends the same string Claude Code
-itself sends, with the version read once per session from `claude --version` (a constant if that
-fails). `honest` sends `token-pace/<version>` instead. **Warning:** the honest agent lands in an
-aggressively rate-limited bucket and can expect `429 Too Many Requests` within a few fetches,
-after which Token Pace backs off for up to two hours and shows nothing new. The endpoint is
-undocumented; this is an observation from the field, not a documented rule.
+itself sends, `claude-code/<version>`. The version comes from three sources, in this order:
+
+1. what `claude --version` prints, asked once per session;
+2. where that gives none — on Windows with only the npm `claude.cmd` on the `PATH` — the version
+   the newest Claude Code session on this machine wrote into its transcript (`version`, three
+   numbers, of the main session with the latest reply; an agent's transcript is not asked). It is
+   asked again at every fetch, because the first fetch can come before the transcripts are read;
+3. where neither is known, a fixed version.
+
+On Windows, `claude --version` is started only from a `claude.exe` found in a directory of the
+`PATH`: each absolute directory among its first 64 entries is checked for that one file's
+existence — nothing is read from it — and the file is started by its full path, without a shell.
+The npm shim `claude.cmd`, a `.bat` and a `.ps1` are never started, and neither the current
+directory nor a relative `PATH` entry is searched. The log names the source once, and again only
+when it changes: `claude: user agent version 2.1.281 (from claude --version)`,
+`(from the newest transcript)` or `(fallback)`. Nothing else of any transcript reaches the
+request.
+
+`honest` sends `token-pace/<version>` instead, and none of the above. **Warning:** the honest
+agent lands in an aggressively rate-limited bucket and can expect `429 Too Many Requests` within a
+few fetches, after which Token Pace backs off for up to two hours and shows nothing new. The
+endpoint is undocumented; this is an observation from the field, not a documented rule.
 
 **Credentials.** In order: `CLAUDE_CODE_OAUTH_TOKEN`, then
 `~/.claude/.credentials.json` (`CLAUDE_SECURESTORAGE_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` are

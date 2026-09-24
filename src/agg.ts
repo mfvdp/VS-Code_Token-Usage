@@ -2409,6 +2409,22 @@ export class Aggregator {
   mainEntries(): Array<[file: string, rec: MainRec]> { return [...this.mainMap] }
 
   /**
+   * 1.7 W3 (§0a.1): the Claude Code version this machine runs, as its transcripts say it — the
+   * `ccVersion` of the main session with the latest `lastTs` whose version has the shape
+   * (`VERSION_RE`), or null for none. Only main sessions are asked, never an agent's record. The
+   * shape is checked again here: a snapshot another build wrote may carry anything, and the answer
+   * goes into a request header (the user agent of the quota fetch, and nowhere else).
+   */
+  latestClaudeVersion(): string | null {
+    let best: MainRec | null = null
+    for (const rec of this.mainMap.values()) {
+      if (versionValue(rec.ccVersion) === null) continue
+      if (best === null || rec.lastTs > best.lastTs) best = rec
+    }
+    return best === null ? null : best.ccVersion
+  }
+
+  /**
    * Which revision of the agent tables the one-time replay last built: 0 for a snapshot this
    * build never replayed (every version before 8, and a version 8 written before its replay).
    * The host replays while it differs from AGENT_TABLES_REVISION and sets it once the replay ran.

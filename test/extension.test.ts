@@ -943,6 +943,31 @@ test('a settings change is applied live: no reload between the edit and the stat
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
+test('the quota fetch asks the aggregator the cold scan made for the transcripts\' version, not the one it replaced (1.7 W3, §0a.1)', async () => {
+  // The manager is caught by its own `current()`, which the status bar asks at once; nothing is
+  // fetched (the default mode is `auto`), the edge is asked directly.
+  const { QuotaManager } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  const proto = QuotaManager.prototype as unknown as { current: (...args: unknown[]) => unknown }
+  const real = proto.current
+  const seen: unknown[] = []
+  proto.current = function (this: unknown, ...args: unknown[]): unknown {
+    if (!seen.includes(this)) seen.push(this)
+    return real.apply(this, args)
+  }
+  try {
+    await activateHost(makeFixture(), REPO)
+    await waitOwnColdStart(state, 'the cold scan')
+    assert.ok(seen.length >= 1, 'no quota manager answered current()')
+    const mgr = seen[seen.length - 1] as { deps: { transcriptVersion(): string | null } }
+    // The fixture's session lines carry the helpers' version; the aggregator the extension started
+    // with (an empty snapshot) knows none — a closure over it would answer null here.
+    assert.equal(mgr.deps.transcriptVersion(), '9.9.9')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    proto.current = real
+  }
+})
+
 test('a stored chart stack from an older build is ignored, and the rest of the state restores', async () => {
   // The persisted UI state is user data from an older build: every field goes through the
   // restore validation, and what fails it falls back to the default instead of reaching the

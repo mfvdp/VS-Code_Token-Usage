@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { Aggregator, billable, localDay } from '../src/agg'
 import { freshInput } from '../src/stats'
 import { hourIndex, TimeConfig } from '../src/time'
-import { Bucket, Snapshot, Source, ToolStat, bucketKey, STATE_VERSION } from '../src/types'
+import { Bucket, MainRec, Snapshot, Source, ToolStat, bucketKey, STATE_VERSION } from '../src/types'
 import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, ctxFor } from './fixtures/helpers'
 
 const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
@@ -336,4 +336,61 @@ test('a restored bucket from a provider this build does not know is dropped', ()
   // so a throw here would blank the dashboard instead of stating an absence.
   assert.equal(freshInput(alien), alien.input)
   assert.equal(billable(alien), alien.input + alien.cacheWrite + alien.output)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 W3 (§0a.1): the Claude Code version for the user agent, from the main sessions only
+// ---------------------------------------------------------------------------
+
+const MAIN_B = CLAUDE_MAIN.replace('sess-0001.jsonl', 'sess-0002.jsonl')
+const MAIN_B_CTX = ctxFor({ file: MAIN_B })
+const SUB_CTX = ctxFor({ file: CLAUDE_SUB, isSub: true })
+
+function mainRecOf(agg: Aggregator, file: string): MainRec {
+  const rec = new Map(agg.mainEntries()).get(file)
+  assert.ok(rec, `no main record for ${file}`)
+  return rec
+}
+
+test('latestClaudeVersion: the main session with the latest last line names it; agents are never asked (1.7 W3, §0a.1)', () => {
+  const agg = new Aggregator()
+  assert.equal(agg.latestClaudeVersion(), null, 'no session, no version')
+  // The newer session is read first, so the answer is not simply the last one read.
+  agg.addClaudeLine(claudeLine({ id: 'b1', ts: T0 + 3_600_000, usage: { input: 3 }, version: '2.1.281' }), MAIN_B_CTX)
+  agg.addClaudeLine(claudeLine({ id: 'a1', ts: T0, usage: { input: 3 }, version: '2.1.280' }), CTX)
+  assert.equal(agg.latestClaudeVersion(), '2.1.281')
+  // An agent's transcript written later, by a newer build, is not a main session: not used.
+  agg.addClaudeLine(claudeLine({ id: 's1', ts: T0 + 7_200_000, agentId: 'a1', usage: { input: 3 }, version: '2.1.300' }), SUB_CTX)
+  assert.equal(agg.agents().length, 1)
+  assert.equal(agg.agents()[0].ccVersion, '2.1.300')
+  assert.equal(agg.latestClaudeVersion(), '2.1.281')
+  // The older session goes on and becomes the newest: its version now.
+  agg.addClaudeLine(claudeLine({ id: 'a2', ts: T0 + 5_400_000, usage: { input: 3 }, version: '2.1.279' }), CTX)
+  assert.equal(agg.latestClaudeVersion(), '2.1.279')
+})
+
+test('latestClaudeVersion: a version without the shape is skipped for the next main session, or none (1.7 W3, §0a.1)', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'b1', ts: T0 + 3_600_000, usage: { input: 3 }, version: 'synthetic' }), MAIN_B_CTX)
+  agg.addClaudeLine(claudeLine({ id: 'a1', ts: T0, usage: { input: 3 }, version: '2.1.280' }), CTX)
+  // The newest session wrote no version the pattern takes: the next one answers.
+  assert.equal(mainRecOf(agg, MAIN_B).ccVersion, null)
+  assert.equal(agg.latestClaudeVersion(), '2.1.280')
+
+  // A snapshot written by hand: whatever it carries, restore and the reader hold it to the shape.
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  const mains = snap.mains as unknown as Record<string, Record<string, unknown>>
+  mains[MAIN_B].ccVersion = '2.1.281; rm'
+  mains[CLAUDE_MAIN].ccVersion = 'synthetic'
+  const back = Aggregator.fromSnapshot(snap)
+  assert.equal(back.latestClaudeVersion(), null)
+
+  // And a record that carries one anyway (another build's restore, a bug) is checked again here.
+  const live = new Aggregator()
+  live.addClaudeLine(claudeLine({ id: 'b1', ts: T0 + 3_600_000, usage: { input: 3 }, version: '2.1.281' }), MAIN_B_CTX)
+  live.addClaudeLine(claudeLine({ id: 'a1', ts: T0, usage: { input: 3 }, version: '2.1.280' }), CTX)
+  mainRecOf(live, MAIN_B).ccVersion = '2.1.281; rm'
+  assert.equal(live.latestClaudeVersion(), '2.1.280')
+  mainRecOf(live, CLAUDE_MAIN).ccVersion = '<b>2.1.280</b>'
+  assert.equal(live.latestClaudeVersion(), null)
 })

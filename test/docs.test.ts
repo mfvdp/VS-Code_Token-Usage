@@ -1752,3 +1752,41 @@ test('the troubleshooting, sessions, counting and numbers pages carry what 1.6 c
     assert.ok(numbers.includes(row), `docs/numbers.md has no row: ${row}`)
   }
 })
+
+test('the user agent\'s version: its three sources, the Windows lookup and the log line, where a reader looks (1.7 W3, §0a.1, §0a.2)', () => {
+  const { CLAUDE_VERSION_FALLBACK } = require('../src/poller') as typeof import('../src/poller')
+  // §0a.1: the privacy page's sentence, as the spec words it.
+  const privacy = doc.privacy.replace(/\s+/g, ' ')
+  for (const claim of [
+    'The version in the `User-Agent` header is the one `claude --version` prints; where that gives none — on Windows with only the npm `claude.cmd` on the PATH — it is the version the newest Claude Code session on this machine wrote into its transcript (`version`, three numbers), and where neither is known a fixed version.',
+    'never from an agent\'s, and nothing else of any transcript reaches a request',
+    'with `tokenPace.userAgent: honest` no Claude Code version is sent at all',
+    // §0a.2: existence only, no shell, no script.
+    'only from a `claude.exe` found in a directory of the `PATH`', 'nothing is read from it', 'without a shell',
+    'the npm shim `claude.cmd`, a `.bat` and a `.ps1` are never started',
+  ]) {
+    assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  // The quota sources page: the order, the Windows rule and the three log forms.
+  const quota = doc.quotaSources.replace(/\s+/g, ' ')
+  for (const claim of [
+    'The version comes from three sources, in this order', 'what `claude --version` prints, asked once per session',
+    'the version the newest Claude Code session on this machine wrote into its transcript', 'an agent\'s transcript is not asked',
+    'asked again at every fetch', 'where neither is known, a fixed version',
+    'each absolute directory among its first 64 entries is checked for that one file\'s existence — nothing is read from it — and the file is started by its full path, without a shell',
+    'The npm shim `claude.cmd`, a `.bat` and a `.ps1` are never started',
+    '`claude: user agent version 2.1.281 (from claude --version)`', '`(from the newest transcript)`', '`(fallback)`',
+    '`honest` sends `token-pace/<version>` instead, and none of the above',
+  ]) {
+    assert.ok(quota.includes(claim), `docs/quota-sources.md does not say: ${claim}`)
+  }
+  assert.equal(quota.includes('(a constant if that fails)'), false, 'docs/quota-sources.md still names the CLI as the only source')
+  assert.match(CLAUDE_VERSION_FALLBACK, /^\d{1,3}\.\d{1,3}\.\d{1,4}$/)
+  // The Windows page: one paragraph, the shim never started, the log line.
+  const windows = doc.windows.replace(/\s+/g, ' ')
+  for (const claim of ['**The Claude Code version on Windows.**', 'only from a `claude.exe` it finds in a directory of the `PATH`',
+    'that shim is never started', 'the version then comes from the newest Claude Code session\'s transcript',
+    '`claude: user agent version 2.1.281 (from the newest transcript)`']) {
+    assert.ok(windows.includes(claim), `docs/windows-wsl-remote.md does not say: ${claim}`)
+  }
+})

@@ -147,6 +147,17 @@ the agent hook's bundle, `dist/agent-hook.js`, to Node's `fs` and `path`: a netw
 (`http`, `https`, `net`, `tls`, `dgram`), `child_process`, `worker_threads` or a `fetch(` in it
 fails the build.
 
+**The user agent of the quota fetch.** The version in the `User-Agent` header is the one
+`claude --version` prints; where that gives none — on Windows with only the npm `claude.cmd` on the
+PATH — it is the version the newest Claude Code session on this machine wrote into its transcript
+(`version`, three numbers), and where neither is known a fixed version. It is the same fact the
+command gives — the version of the Claude Code this machine runs —, taken from a main session's
+record only, never from an agent's, and nothing else of any transcript reaches a request; with
+`tokenPace.userAgent: honest` no Claude Code version is sent at all. On Windows the command is
+started only from a `claude.exe` found in a directory of the `PATH` — each directory is checked for
+that one file's existence, nothing is read from it — and without a shell: the npm shim
+`claude.cmd`, a `.bat` and a `.ps1` are never started. See [Quota sources](quota-sources.md).
+
 **Leak tests.** Each field the agent tables and the agent hook read has a leak test whose fixture
 puts synthetic text under the keys beside it — the prompt, the description, the result, the
 summary, the script, the error's text — and asserts that none of it reaches the outputs that field

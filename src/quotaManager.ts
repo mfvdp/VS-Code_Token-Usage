@@ -16,7 +16,9 @@ import * as fs from 'fs'
 import { SOURCES } from './adapters'
 import { PersistentAppServer, findCodexBinary as realFindCodexBinary } from './appServer'
 import { t } from './i18n'
-import { detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, poll as realPoll } from './poller'
+import {
+  CLAUDE_VERSION_FALLBACK, detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, poll as realPoll,
+} from './poller'
 import { codexStateFromBody, quotaFileFor, writeQuotaCacheFile } from './quota'
 import { fingerprintFor } from './quotaHistory'
 import {
@@ -72,6 +74,12 @@ export interface QuotaDeps {
   random?: () => number
   schedule?: (fn: () => void, delayMs: number) => Scheduled
   detectClaudeVersion?: () => Promise<string | null>
+  /**
+   * 1.7 W3 (§0a.1): the version the newest main session wrote into its transcript, or null. Asked at
+   * every poll of Claude — the cold scan may finish after the first one — and only when the CLI gave
+   * none.
+   */
+  transcriptVersion?: () => string | null
   extVersion?: string
   writeCache?: (file: string, source: Source, body: unknown, fetchedAtSec: number, writer: string) => boolean
   findCodexBinary?: (override?: string) => string | null
@@ -117,6 +125,19 @@ const PROBLEM_KINDS: Record<ProblemKind, true> = {
   modeCache: true, retry: true, offline: true, forbidden: true, unauthorized: true, noBinary: true,
   quotaOff: true, follower: true, unknown: true,
 }
+
+/**
+ * 1.7 W3 (§0a.1): the shape a transcript's version must have to reach the user agent — the aggregator's
+ * own pattern, asked again here, since whatever answers `transcriptVersion` is not this file's to trust.
+ */
+const TRANSCRIPT_VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,4}$/
+
+/** 1.7 W3: where the user agent's version came from, in the words of the log line. */
+const VERSION_FROM = {
+  cli: 'from claude --version',
+  transcript: 'from the newest transcript',
+  fallback: 'fallback',
+} as const
 
 /** Our own last failed attempt of a source: the poller's words, their kind, and when (ms). */
 interface OwnFailure {
@@ -199,6 +220,8 @@ export class QuotaManager {
   private pushSub: { dispose(): void } | null = null
   private claudeVersion: string | null = null
   private versionAsked = false
+  /** 1.7 W3: the last user-agent version line logged — a line again only when the version or its source changes. */
+  private versionLogged: string | null = null
   /**
    * Set by `dispose`, for good (1.6 R3). A fetch still under way then has nowhere to go: its
    * answer is neither kept, written, sampled nor reported, and nothing starts another one.
@@ -224,6 +247,7 @@ export class QuotaManager {
       random: deps.random ?? Math.random,
       schedule: deps.schedule ?? defaultSchedule,
       detectClaudeVersion: deps.detectClaudeVersion ?? realDetectClaudeVersion,
+      transcriptVersion: deps.transcriptVersion ?? (() => null),
       extVersion: deps.extVersion ?? (typeof __EXT_VERSION__ === 'string' ? __EXT_VERSION__ : '0.0.0'),
       writeCache: deps.writeCache ?? writeQuotaCacheFile,
       findCodexBinary: deps.findCodexBinary ?? realFindCodexBinary,
@@ -561,6 +585,38 @@ export class QuotaManager {
     }
   }
 
+  /**
+   * 1.7 W3 (§0a.1, spec §3.0 (i)): the version the Claude request's user agent carries — the CLI's
+   * (`claude --version`, asked once per session), else the one the newest main session wrote into its
+   * transcript (asked at every poll: the cold scan may finish after the first), else null, which
+   * `userAgentFor` sends as `CLAUDE_VERSION_FALLBACK`. Nothing else of a transcript reaches a
+   * request. The log names the source once, and again only when the version or its source changes —
+   * never under `tokenPace.userAgent: honest`, which sends none of it.
+   */
+  private userAgentVersion(): string | null {
+    let from: keyof typeof VERSION_FROM = 'cli'
+    let version = this.claudeVersion
+    if (version === null) {
+      let seen: string | null = null
+      try {
+        seen = this.deps.transcriptVersion()
+      } catch {
+        // A version is a nicety of the header; its lookup failing must not fail the fetch.
+        seen = null
+      }
+      version = typeof seen === 'string' && TRANSCRIPT_VERSION_RE.test(seen) ? seen : null
+      from = version === null ? 'fallback' : 'transcript'
+    }
+    if (this.opts.userAgent === 'claudeCode') {
+      const line = `claude: user agent version ${version ?? CLAUDE_VERSION_FALLBACK} (${VERSION_FROM[from]})`
+      if (line !== this.versionLogged) {
+        this.versionLogged = line
+        this.log(line)
+      }
+    }
+    return version
+  }
+
   private ageMs(state: QuotaState | undefined, now: number): number {
     const at = state?.fetchedAt
     return typeof at === 'number' && Number.isFinite(at) ? now - at * 1000 : Infinity
@@ -583,7 +639,7 @@ export class QuotaManager {
         keychain: this.opts.keychain,
         userAgent: this.opts.userAgent,
         extVersion: this.deps.extVersion,
-        claudeVersion: this.claudeVersion,
+        claudeVersion: src === 'claude' ? this.userAgentVersion() : this.claudeVersion,
       }
       const r = await this.deps.poll(src, this.failCount[src], opts)
       // 1.6 R3: disposed while the request was under way. The exit has written what there was,

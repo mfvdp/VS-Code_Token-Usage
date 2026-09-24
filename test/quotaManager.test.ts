@@ -7,13 +7,14 @@ import { createRequire } from 'node:module'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import { sanitize } from '../src/config'
-import { PollOptions, PollResult } from '../src/poller'
+import { Aggregator } from '../src/agg'
+import { CLAUDE_VERSION_FALLBACK, PollOptions, PollResult, userAgentFor } from '../src/poller'
 import {
   HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
 } from '../src/quotaManager'
 import { makeContext, quotaTooltip, UsageSource } from '../src/statusText'
-import { emptyBucket, QuotaState, Source } from '../src/types'
-import { scratchDir } from './fixtures/helpers'
+import { emptyBucket, QuotaState, Snapshot, Source } from '../src/types'
+import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, ctxFor, scratchDir } from './fixtures/helpers'
 
 const BASE = 1_700_000_000_000
 const MIN = 60_000
@@ -981,4 +982,135 @@ test('a focused window, or one without the focus setting, never holds an attempt
   ungated.mgr.setFocused(false)
   assert.equal(ungated.mgr.current(BASE + 90 * MIN)[0].attemptHeld, null)
   assert.equal(ungated.logs.some((l) => l.includes('waits for this window')), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 W3 (§0a.1): the user agent's version — the CLI, else the newest main transcript, else the fallback
+// ---------------------------------------------------------------------------
+
+const UA_SHAPE = /^claude-code\/\d{1,3}\.\d{1,3}\.\d{1,4}$/
+
+/**
+ * A harness whose CLI probe and transcript version the test sets; the user agent is Claude Code's,
+ * as by default. Counts how often each was asked, and hands back the Claude requests' options.
+ */
+function versioned(cli: string | null, transcript: () => string | null, optOver: Partial<QuotaOptions> = {}) {
+  const asked = { cli: 0, transcript: 0 }
+  const h = harness({ userAgent: 'claudeCode', ...optOver }, {
+    detectClaudeVersion: async () => { asked.cli += 1; return cli },
+    transcriptVersion: () => { asked.transcript += 1; return transcript() },
+  })
+  const claudePolls = (): PollOptions[] => h.polls.filter((p) => p.source === 'claude').map((p) => p.opts)
+  const versionLines = (): string[] => h.logs.filter((l) => l.startsWith('claude: user agent version'))
+  return { ...h, asked, claudePolls, versionLines }
+}
+
+async function pollOnce(h: { mgr: QuotaManager }): Promise<void> {
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+}
+
+test('the CLI gives no version: the newest transcript\'s goes into the user agent, asked at every poll (1.7 W3 test 5, §0a.1)', async () => {
+  const h = versioned(null, () => '2.1.281')
+  await pollOnce(h)
+  const [opts] = h.claudePolls()
+  assert.equal(opts.claudeVersion, '2.1.281')
+  assert.equal(userAgentFor(opts), 'claude-code/2.1.281')
+  assert.match(userAgentFor(opts), UA_SHAPE)
+  assert.deepEqual(h.versionLines(), ['claude: user agent version 2.1.281 (from the newest transcript)'])
+  // Codex's request carries no transcript version: only Claude's user agent names one.
+  assert.equal(h.polls.find((p) => p.source === 'codex')!.opts.claudeVersion, null)
+
+  // A second poll asks the transcripts again (the CLI stays asked once) and logs nothing new.
+  await pollOnce(h)
+  assert.deepEqual(h.asked, { cli: 1, transcript: 2 })
+  assert.equal(h.claudePolls()[1].claudeVersion, '2.1.281')
+  assert.equal(h.versionLines().length, 1, h.logs.join('\n'))
+})
+
+test('transcripts not read yet at the first poll: the fallback, then the transcript\'s version at the next (1.7 W3 test 5)', async () => {
+  let scanned: string | null = null
+  const h = versioned(null, () => scanned)
+  await pollOnce(h)
+  assert.equal(h.claudePolls()[0].claudeVersion, null)
+  assert.equal(userAgentFor(h.claudePolls()[0]), `claude-code/${CLAUDE_VERSION_FALLBACK}`)
+  assert.equal(userAgentFor(h.claudePolls()[0]), 'claude-code/2.1.257')
+  // The cold scan finishes between the two polls.
+  scanned = '2.1.281'
+  await pollOnce(h)
+  assert.equal(h.claudePolls()[1].claudeVersion, '2.1.281')
+  assert.match(userAgentFor(h.claudePolls()[1]), UA_SHAPE)
+  // One line per source the version came from, in order.
+  assert.deepEqual(h.versionLines(), [
+    'claude: user agent version 2.1.257 (fallback)',
+    'claude: user agent version 2.1.281 (from the newest transcript)',
+  ])
+})
+
+test('the CLI\'s version beats the transcripts\'; neither known sends the fallback (1.7 W3 test 5, spec §3.0 (i))', async () => {
+  const cli = versioned('2.1.290', () => '2.1.281')
+  await pollOnce(cli)
+  await pollOnce(cli)
+  assert.deepEqual(cli.claudePolls().map((o) => o.claudeVersion), ['2.1.290', '2.1.290'])
+  assert.equal(userAgentFor(cli.claudePolls()[0]), 'claude-code/2.1.290')
+  assert.deepEqual(cli.versionLines(), ['claude: user agent version 2.1.290 (from claude --version)'])
+  assert.equal(cli.asked.cli, 1, 'the CLI is asked once per session')
+
+  const neither = versioned(null, () => null)
+  await pollOnce(neither)
+  assert.equal(neither.claudePolls()[0].claudeVersion, null)
+  assert.equal(userAgentFor(neither.claudePolls()[0]), 'claude-code/2.1.257')
+  assert.deepEqual(neither.versionLines(), ['claude: user agent version 2.1.257 (fallback)'])
+  // Every source gives a header of the one shape.
+  for (const opts of [...cli.claudePolls(), ...neither.claudePolls()]) assert.match(userAgentFor(opts), UA_SHAPE)
+})
+
+test('a transcript version without the shape, or a lookup that throws, never reaches the header (1.7 W3, §0a.1)', async () => {
+  for (const bad of ['2.1.281; rm', 'synthetic', '2.1.281\r\nX-Injected: 1', '1234.1.1', ''] as const) {
+    const h = versioned(null, () => bad)
+    await pollOnce(h)
+    assert.equal(h.claudePolls()[0].claudeVersion, null, JSON.stringify(bad))
+    assert.equal(userAgentFor(h.claudePolls()[0]), 'claude-code/2.1.257')
+  }
+  const throwing = versioned(null, () => { throw new Error('synthetic lookup failure') })
+  await pollOnce(throwing)
+  // The fetch still went out, with the fallback, and nothing says it failed.
+  assert.equal(throwing.claudePolls().length, 1)
+  assert.equal(throwing.claudePolls()[0].claudeVersion, null)
+  assert.equal(throwing.logs.some((l) => /Unexpected|synthetic lookup failure/.test(l)), false, throwing.logs.join('\n'))
+  assert.equal(throwing.mgr.current(BASE)[0].ok, true)
+})
+
+test('honest sends none of it and logs no version (1.7 W3, spec §3.0 (i))', async () => {
+  const h = versioned(null, () => '2.1.281', { userAgent: 'honest' })
+  await pollOnce(h)
+  assert.equal(userAgentFor(h.claudePolls()[0]), 'token-pace/1.0.0')
+  assert.deepEqual(h.versionLines(), [])
+})
+
+test('the version reaches the user agent from a main session, never from an agent, never from a hand-written snapshot (1.7 W3, §0a.1)', async () => {
+  const MAIN_B = CLAUDE_MAIN.replace('sess-0001.jsonl', 'sess-0002.jsonl')
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: BASE - 3_600_000, usage: { input: 3 }, version: '2.1.281' }), ctxFor())
+  // A later agent of a newer build — not asked.
+  agg.addClaudeLine(claudeLine({ id: 's1', ts: BASE - 60_000, agentId: 'a1', usage: { input: 3 }, version: '2.1.300' }),
+    ctxFor({ file: CLAUDE_SUB, isSub: true }))
+  const live = versioned(null, () => agg.latestClaudeVersion())
+  await pollOnce(live)
+  assert.equal(live.claudePolls()[0].claudeVersion, '2.1.281')
+  assert.equal(userAgentFor(live.claudePolls()[0]), 'claude-code/2.1.281')
+
+  // A snapshot written by hand, its newest session's version `2.1.281; rm`, the other `synthetic`.
+  agg.addClaudeLine(claudeLine({ id: 'm2', ts: BASE - 1_800_000, usage: { input: 3 }, version: '2.1.282' }), ctxFor({ file: MAIN_B }))
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  const mains = snap.mains as unknown as Record<string, Record<string, unknown>>
+  mains[MAIN_B].ccVersion = '2.1.281; rm'
+  mains[CLAUDE_MAIN].ccVersion = 'synthetic'
+  const edited = Aggregator.fromSnapshot(snap)
+  const h = versioned(null, () => edited.latestClaudeVersion())
+  await pollOnce(h)
+  assert.equal(h.claudePolls()[0].claudeVersion, null)
+  assert.equal(userAgentFor(h.claudePolls()[0]), 'claude-code/2.1.257')
+  // Nothing else of any transcript is in the request's options.
+  assert.equal(/synthetic|rm|2\.1\.300/.test(JSON.stringify([...live.claudePolls(), ...h.claudePolls()])), false)
 })

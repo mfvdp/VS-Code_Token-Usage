@@ -14,7 +14,9 @@
  *    HTTP status code — never the exception message of a failed request.
  */
 
-import { execFile } from 'child_process'
+import { execFile as nodeExecFile } from 'child_process'
+import * as fs from 'fs'
+import * as path from 'path'
 import { findCodexBinary, readRateLimitsOnce } from './appServer'
 import { isCredentialsError, loadCredentials } from './credentials'
 import { t } from './i18n'
@@ -25,7 +27,8 @@ const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 /**
  * Without a claude-code user agent the call lands in an aggressively
  * rate-limited bucket and gets a permanent 429. The version is detected from the
- * installed CLI; this constant is only the fallback when that fails.
+ * installed CLI, else (1.7 W3, §0a.1) taken from the newest main-session transcript;
+ * this constant is only the fallback when neither knows one.
  */
 export const CLAUDE_VERSION_FALLBACK = '2.1.257'
 const HTTP_TIMEOUT_MS = 20_000
@@ -53,7 +56,10 @@ export interface PollOptions {
   userAgent: 'claudeCode' | 'honest'
   /** Version of this extension, for the honest user agent. */
   extVersion: string
-  /** Version of the installed Claude CLI, or null when it could not be detected. */
+  /**
+   * The Claude Code version for the user agent: the installed CLI's, else (1.7 W3, §0a.1) the one the
+   * newest main session wrote into its transcript; null when neither is known (the fallback is sent).
+   */
   claudeVersion: string | null
 }
 
@@ -74,18 +80,109 @@ export function userAgentFor(opts: PollOptions): string {
 let versionProbe: Promise<string | null> | null = null
 
 /**
+ * 1.7 W3: the edges of the version probe — the platform, the `PATH`, the one existence check and
+ * the one process start — injectable, so no test starts a process or reads a real `PATH`.
+ */
+export interface VersionProbeDeps {
+  platform: NodeJS.Platform
+  pathEnv: string | undefined
+  isFile: (p: string) => boolean
+  execFile: (file: string, args: string[], opts: { timeout: number; windowsHide: boolean; shell: false },
+    cb: (err: Error | null, stdout: string) => void) => void
+}
+
+/**
+ * 1.7 W3 (§0a.2): the only file name looked for on Windows. An npm install puts a `claude.cmd` shim
+ * (beside a `claude` shell script and a `claude.ps1`) on the `PATH`; a `.cmd` or `.bat` only runs
+ * through `cmd.exe` and a `.ps1` only through PowerShell, and neither is ever started from here.
+ */
+const WINDOWS_CANDIDATES: readonly string[] = ['claude.exe']
+/** 1.7 W3 (§0a.2): at most this many `PATH` entries are looked at, … */
+const PATH_MAX_ENTRIES = 64
+/** … and an entry longer than this is skipped, not cut. */
+const PATH_ENTRY_MAX_CHARS = 1024
+
+/**
+ * 1.7 W3 (§0a.2): an absolute Windows directory of a `PATH` entry, or null. Quotes are stripped
+ * (Windows ignores them there too), and only a directory that names its drive (`C:\…`) or a share
+ * (`\\server\share\…`) counts: a relative entry — `.`, `.\bin`, `bin` — would make the current
+ * directory choose what runs, and a rooted one without a drive (`\bin`) the current drive.
+ */
+function windowsPathDir(entry: string): string | null {
+  if (entry.length > PATH_ENTRY_MAX_CHARS) return null
+  const dir = entry.replace(/"/g, '').trim()
+  if (dir === '' || !path.win32.isAbsolute(dir)) return null
+  return /^[A-Za-z]:[\\/]/.test(dir) || /^[\\/]{2}[^\\/]/.test(dir) ? dir : null
+}
+
+/**
+ * 1.7 W3 (§0a.2): the first `claude.exe` in a directory of `PATH` — existence only, through
+ * `isFile`; nothing is read from any file. Null when there is none. Never a `.cmd`, `.bat` or
+ * `.ps1`. `path.win32` throughout, so the lookup is the same on every test runner.
+ */
+export function findWindowsClaudeExe(pathEnv: string | undefined, isFile: (p: string) => boolean): string | null {
+  if (typeof pathEnv !== 'string' || pathEnv === '') return null
+  for (const entry of pathEnv.split(';', PATH_MAX_ENTRIES)) {
+    const dir = windowsPathDir(entry)
+    if (dir === null) continue
+    for (const name of WINDOWS_CANDIDATES) {
+      const file = path.win32.join(dir, name)
+      let found = false
+      try {
+        found = isFile(file)
+      } catch {
+        found = false
+      }
+      if (found) return file
+    }
+  }
+  return null
+}
+
+/** The existence check of the lookup: a regular file (a link is followed), nothing read from it. */
+export function isRegularFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile()
+  } catch {
+    return false
+  }
+}
+
+/** The one process start of the probe, never through a shell. */
+function runFile(file: string, args: string[], opts: { timeout: number; windowsHide: boolean; shell: false },
+  cb: (err: Error | null, stdout: string) => void): void {
+  nodeExecFile(file, args, opts, (err, stdout) => cb(err, String(stdout)))
+}
+
+/**
  * Reads the installed Claude CLI's version once per session.
  *
  * A frozen constant in the source is how the user agent drifted to a version
  * that had not existed for months. `claude --version` prints something like
  * "2.1.257 (Claude Code)"; anything else, or no CLI at all, leaves the fallback
  * in place. Never through a shell.
+ *
+ * 1.7 W3: on Windows only a `claude.exe` found in a `PATH` directory is started, by its absolute
+ * path (`findWindowsClaudeExe`) — without one, nothing is started and the answer is null. Without
+ * a shell Node resolves a bare `claude` there to a `.com` or `.exe` only (the current directory
+ * first), and it refuses a `.cmd` or `.bat` named outright (CVE-2024-27980): for an npm install,
+ * whose `PATH` holds only the shim `claude.cmd`, the bare name never answered. Elsewhere `claude`
+ * as before, `shell: false` said explicitly.
  */
-export function detectClaudeVersion(): Promise<string | null> {
+export function detectClaudeVersion(deps: Partial<VersionProbeDeps> = {}): Promise<string | null> {
   if (versionProbe) return versionProbe
+  const platform = deps.platform ?? process.platform
+  const pathEnv = 'pathEnv' in deps ? deps.pathEnv : (process.env.PATH ?? process.env.Path)
+  const isFile = deps.isFile ?? isRegularFile
+  const run = deps.execFile ?? runFile
   versionProbe = new Promise<string | null>((resolve) => {
     try {
-      execFile('claude', ['--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true },
+      const file = platform === 'win32' ? findWindowsClaudeExe(pathEnv, isFile) : 'claude'
+      if (file === null) {
+        resolve(null)
+        return
+      }
+      run(file, ['--version'], { timeout: VERSION_TIMEOUT_MS, windowsHide: true, shell: false },
         (err, stdout) => {
           if (err) {
             resolve(null)

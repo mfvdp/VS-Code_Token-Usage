@@ -51,6 +51,15 @@ set when **VS Code started**, not when they merely live in a shell profile. Both
 machine-scoped, so a synced setting cannot carry a Linux path onto a Windows machine, and both
 take effect after **Reload Window**.
 
+**The Claude Code version on Windows.** In `quotaSource: poll` the fetch names the Claude Code
+version in its user agent ([Quota sources](quota-sources.md#what-the-fetch-does)). On Windows,
+Token Pace runs `claude --version` only from a `claude.exe` it finds in a directory of the `PATH`
+— checked for existence, nothing read from it, started by its full path without a shell. An npm
+install puts only the shim `claude.cmd` there (beside `claude` and `claude.ps1`), and that shim is
+never started: the version then comes from the newest Claude Code session's transcript, and a fixed
+one is sent only when there is none. The Token Pace log says which, once:
+`claude: user agent version 2.1.281 (from the newest transcript)`.
+
 The extension supports untrusted workspaces and virtual workspaces: it never reads, executes or
 evaluates workspace content at all. In Restricted Mode the two opt-in writes are disabled. On a
 machine with no transcripts it reports that it found none instead of showing zeros — and on a

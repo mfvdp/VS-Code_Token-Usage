@@ -935,3 +935,70 @@ export function codexItemCompleted(o: { ts: number; itemType: string; callId?: s
     },
   })
 }
+
+// ---------------------------------------------------------------------------
+// 1.8 §0a.1: a status-line payload with synthetic text under every neighbouring key
+// ---------------------------------------------------------------------------
+
+/** The session id of `leakyStatusPayload`: nothing but its first eight characters may ever be shown. */
+export const LEAK_SESSION_ID = '9d0eb37a-0000-4000-8000-000000000001'
+
+/**
+ * Every synthetic string `leakyStatusPayload` carries under a key no reader of the status line
+ * takes — the session's name, its working directory, its transcript's path, the workspace, the
+ * pull request, the worktree, the agent, the prompt id, the miss causes, the version and free text
+ * inside the blocks that are read. None of them may reach an output, the mirror included (§7a Q11).
+ */
+export const LEAK_STATUS_SECRETS = [
+  'SL-SESSION-NAME-7c1f', 'SL-PROMPT-ID-7c1f', 'SL-TRANSCRIPT-7c1f', 'SL-CWD-7c1f', 'SL-WORKSPACE-7c1f',
+  'SL-PR-URL-7c1f', 'SL-WORKTREE-7c1f', 'SL-AGENT-7c1f', 'SL-MISS-CAUSE-7c1f', 'SL-VERSION-7c1f', 'SL-FREE-TEXT-7c1f',
+] as const
+
+/**
+ * A status-line payload in the shape Claude Code pipes into its `statusLine.command` (the fields
+ * its status-line page documents), with the reader's fields filled — a 1 h prompt cache warm for
+ * another 50 minutes that would re-cache 152 300 tokens — and synthetic text everywhere else.
+ * Invented throughout; never a payload seen on a machine.
+ */
+export function leakyStatusPayload(nowMs: number): Record<string, unknown> {
+  const sec = Math.floor(nowMs / 1000)
+  return {
+    session_id: LEAK_SESSION_ID,
+    session_name: 'SL-SESSION-NAME-7c1f refactor the login page',
+    prompt_id: 'SL-PROMPT-ID-7c1f',
+    transcript_path: '/home/tester/.claude/projects/-home-tester-SL-TRANSCRIPT-7c1f/session.jsonl',
+    cwd: '/home/tester/SL-CWD-7c1f',
+    workspace: { current_dir: '/home/tester/SL-WORKSPACE-7c1f', project_dir: '/home/tester/SL-WORKSPACE-7c1f/app' },
+    pr: { url: 'example.invalid/pull/SL-PR-URL-7c1f', number: 7 },
+    worktree: { path: '/home/tester/SL-WORKTREE-7c1f', name: 'SL-WORKTREE-7c1f' },
+    agent: { name: 'SL-AGENT-7c1f' },
+    version: 'SL-VERSION-7c1f',
+    output_style: { name: 'SL-FREE-TEXT-7c1f style' },
+    effort: 'high',
+    fast_mode: false,
+    exceeds_200k_tokens: false,
+    model: { id: 'claude-opus-5-5', display_name: 'Opus 5.5', note: 'SL-FREE-TEXT-7c1f in the model' },
+    rate_limits: {
+      five_hour: { used_percentage: 44, resets_at: sec + 3_600, label: 'SL-FREE-TEXT-7c1f in a window' },
+      seven_day: { used_percentage: 12, resets_at: sec + 3 * 86_400 },
+    },
+    context_window: {
+      total_input_tokens: 120_000, total_output_tokens: 8_000, context_window_size: 200_000, used_percentage: 64,
+      remaining_percentage: 36,
+    },
+    cost: { total_cost_usd: 1.25, total_duration_ms: 90_000, total_lines_added: 3, total_lines_removed: 1 },
+    prompt_cache: {
+      warm: true, ttl: '1h', expires_at: sec + 50 * 60, hit_ratio: 0.82, recache_tokens_if_cold: 152_300,
+      caching_observed: true, requests: 12, misses: 1, expected_rebuilds: 0, cache_write_tokens: 4_000,
+      miss_recache_tokens: 3_000, last_miss_at: sec - 600,
+      last_miss_cause: { kind: 'tools_changed', causes: ['SL-MISS-CAUSE-7c1f the tool list changed'] },
+      miss_causes: { tools_changed: 1, note: 'SL-MISS-CAUSE-7c1f' },
+    },
+  }
+}
+
+/** A mirror as a 1.3–1.7 bridge wrote it: `leakyStatusPayload` whole, not narrowed. */
+export function writeLeakyMirror(file: string, writtenAtMs: number, nowMs: number = writtenAtMs): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify({ schema_version: 1, written_at: writtenAtMs, payload: leakyStatusPayload(nowMs) }))
+}

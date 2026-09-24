@@ -60,6 +60,15 @@ never started: the version then comes from the newest Claude Code session's tran
 one is sent only when there is none. The Token Pace log says which, once, and again only when the
 version or its source changes: `claude: user agent version 2.1.281 (from the newest transcript)`.
 
+**The status-line bridge's script** lives in the extension's storage since 1.8 —
+`<globalStorage>/statusline-bridge.js`, inside the editor's user-data directory on the side Token
+Pace runs on —, and the command in
+Claude Code's `settings.json` names that path. Claude Code and Token Pace therefore have to run on
+the same side of a remote for the bridge to work (`remote.extensionKind`, above). Before 1.8 the
+command named the script inside the versioned extension folder, which an update removes; 1.8 moves
+such a command to the copy once ([Quota sources](quota-sources.md#claude-status-line-bridge-opt-in)).
+On Windows the command holds its paths with backslashes, as the installer has always written them.
+
 The extension supports untrusted workspaces and virtual workspaces: it never reads, executes or
 evaluates workspace content at all. In Restricted Mode the two opt-in writes are disabled. On a
 machine with no transcripts it reports that it found none instead of showing zeros — and on a

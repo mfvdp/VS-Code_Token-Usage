@@ -8,12 +8,12 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import {
   claudeStateFromBody, claudeStateFromStatusline, codexStateFromBody, codexStateFromTranscript,
-  readClaudeJsonUtilization, readClaudeQuota, readCodexQuota, readStatuslineMirror,
-  writeQuotaCacheFile,
+  readClaudeJsonUtilization, readClaudeQuota, readCodexQuota, readStatuslineMirror, RECACHE_MAX,
+  STATUSLINE_SESSION_RE, writeQuotaCacheFile,
 } from '../src/quota'
 import { credentialsPath, isCredentialsError, keychainService, loadCredentials } from '../src/credentials'
 import { CodexRateLimitsSnapshot } from '../src/types'
-import { scratchDir } from './fixtures/helpers'
+import { LEAK_SESSION_ID, LEAK_STATUS_SECRETS, leakyStatusPayload, scratchDir, writeLeakyMirror } from './fixtures/helpers'
 
 const BASE = 1_700_000_000_000
 const DAY = 86_400_000
@@ -370,6 +370,9 @@ test('the status line mirror yields windows, context, cost and prompt cache', ()
   assert.equal(r.promptCache?.warm, true)
   assert.equal(r.promptCache?.ttl, '5m')
   assert.equal(r.model?.displayName, 'Fable')
+  // 1.8 §0a.1: a payload of a Claude Code build without the two fields names no session and no size.
+  assert.equal(r.sessionId, null)
+  assert.equal(r.promptCache?.recacheIfCold, null)
 })
 
 test('a status line without rate limits reports no windows instead of zeroes', () => {
@@ -414,6 +417,69 @@ test('a mirror file of an unknown schema is refused', () => {
   const file = path.join(dir, 'mirror.json')
   fs.writeFileSync(file, JSON.stringify({ schema_version: 7, written_at: BASE, payload: {} }))
   assert.equal(readStatuslineMirror(file).state.problemKind, 'unknown')
+  // 1.8 §0a.1: a refused mirror names no session either.
+  assert.equal(readStatuslineMirror(file).sessionId, null)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 §0a.1: the session id and the re-cache size, each through its allow-list
+// ---------------------------------------------------------------------------
+
+test('the status line\'s session id is kept only in the id alphabet and cap (1.8 §0a.1)', () => {
+  const at = 1_700_000_000
+  const of = (v: unknown): string | null => claudeStateFromStatusline({ session_id: v }, at).sessionId
+  assert.equal(of(LEAK_SESSION_ID), LEAK_SESSION_ID)
+  assert.equal(of('a'.repeat(64)), 'a'.repeat(64))
+  assert.equal(of('Session_2-ok'), 'Session_2-ok')
+  // A path, a 65-character value, a sentence, a number, an empty string, an object: no id.
+  for (const bad of ['../../etc', 'a'.repeat(65), 'two words', 'x/y', 'a.b', '', 42, { id: 'x' }, null, undefined]) {
+    assert.equal(of(bad), null, JSON.stringify(bad))
+  }
+  // camelCase, as every field of the payload is read.
+  assert.equal(claudeStateFromStatusline({ sessionId: 'abc-123' }, at).sessionId, 'abc-123')
+  assert.equal(claudeStateFromStatusline({}, at).sessionId, null)
+  assert.equal(STATUSLINE_SESSION_RE.source, '^[A-Za-z0-9_-]{1,64}$')
+})
+
+test('recache_tokens_if_cold is a whole count from 0 to RECACHE_MAX, or nothing (1.8 §0a.1)', () => {
+  const at = 1_700_000_000
+  const of = (v: unknown, key = 'recache_tokens_if_cold'): number | null =>
+    claudeStateFromStatusline({ prompt_cache: { warm: true, ttl: '1h', [key]: v } }, at).promptCache?.recacheIfCold ?? null
+  assert.equal(of(152_300), 152_300)
+  assert.equal(of(0), 0)
+  assert.equal(of(RECACHE_MAX), RECACHE_MAX)
+  assert.equal(of(152_300, 'recacheTokensIfCold'), 152_300)
+  // Claude Code writes null after a compaction; a negative, a fraction, a size past any context
+  // window, a string of digits and NaN are no count.
+  for (const bad of [null, -1, 1.5, 1e8, RECACHE_MAX + 1, '152300', Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(of(bad), null, String(bad))
+  }
+  assert.equal(RECACHE_MAX, 10_000_000)
+  // The 1.3 fields are read as before, and a payload without the block has no prompt cache.
+  const r = claudeStateFromStatusline({ prompt_cache: { warm: true, ttl: '1h', expires_at: at + 60, hit_ratio: 0.5 } }, at)
+  assert.deepEqual(r.promptCache, { warm: true, ttl: '1h', expiresAt: (at + 60) * 1000, hitRatio: 0.5, recacheIfCold: null })
+})
+
+test('a mirror with text under every key beside the read ones yields none of it (1.8 §0a.1 leak test, the reader)', () => {
+  const dir = scratchDir('quota-mirror')
+  const file = path.join(dir, 'statusline-mirror.json')
+  // A mirror as 1.3–1.7 wrote it: the whole payload, the session's name and paths among it.
+  writeLeakyMirror(file, BASE - 60_000, BASE)
+  const r = readStatuslineMirror(file)
+  assert.equal(r.state.ok, true)
+  assert.equal(r.sessionId, LEAK_SESSION_ID)
+  assert.equal(r.promptCache?.recacheIfCold, 152_300)
+  assert.equal(r.model?.id, 'claude-opus-5-5')
+  const text = JSON.stringify(r)
+  for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the reading holds ${secret}`)
+  // What the reader takes is the same whether or not the neighbouring keys are there.
+  const payload = leakyStatusPayload(BASE)
+  const bare = {
+    session_id: payload.session_id, model: { id: 'claude-opus-5-5', display_name: 'Opus 5.5' },
+    rate_limits: payload.rate_limits, context_window: payload.context_window, cost: { total_cost_usd: 1.25 },
+    prompt_cache: payload.prompt_cache,
+  }
+  assert.deepEqual(claudeStateFromStatusline(bare, r.state.fetchedAt), r)
 })
 
 // ---------------------------------------------------------------------------

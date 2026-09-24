@@ -10,14 +10,16 @@ import { sanitize } from '../src/config'
 import { Aggregator } from '../src/agg'
 import { CLAUDE_VERSION_FALLBACK, PollOptions, PollResult, userAgentFor } from '../src/poller'
 import {
-  HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
+  CACHE_READING_KEEP_MS, CACHE_READINGS_MAX, HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
 } from '../src/quotaManager'
 import { buildItems, makeContext, quotaTooltip, StatusTextInput, UsageSource } from '../src/statusText'
 import { attemptWhen } from '../src/time'
 import {
   CodexRateLimitsSnapshot, emptyBucket, FAILURE_TRANSIENT, ProblemKind, QuotaState, Snapshot, Source,
 } from '../src/types'
-import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, ctxFor, scratchDir } from './fixtures/helpers'
+import {
+  CLAUDE_MAIN, CLAUDE_SUB, claudeLine, ctxFor, LEAK_SESSION_ID, LEAK_STATUS_SECRETS, scratchDir, writeLeakyMirror,
+} from './fixtures/helpers'
 
 const BASE = 1_700_000_000_000
 const MIN = 60_000
@@ -602,11 +604,126 @@ test('the prompt cache is the status line\'s, stamped with the mirror\'s time, c
   assert.equal(h.mgr.promptCacheReading(), null)
   const claude = h.mgr.current(BASE).find((s) => s.source === 'claude')!
   assert.equal(claude.origin, 'cache')
+  // 1.8 A1 (pinned and changed): the reading names its session, its re-cache size and its model —
+  // none of them in this payload.
   assert.deepEqual(h.mgr.promptCacheReading(), {
     warm: true, ttl: '5m', expiresAt: BASE + 3 * MIN, hitRatio: 0.82, readAt: (BASE - 8 * MIN) / 1000,
+    recacheIfCold: null, sessionId: null, model: null,
   })
   h.mgr.clearPolled()
   assert.equal(h.mgr.promptCacheReading(), null)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 A1: the prompt cache of every session the status line named, one reading each
+// ---------------------------------------------------------------------------
+
+/** The mirror as the bridge writes it for one session: a 1 h cache, read `writtenAt`. */
+function writeSessionMirror(h: Harness, sessionId: string | null, writtenAt: number | null, warm = true): void {
+  fs.writeFileSync(h.files.mirrorFile, JSON.stringify({
+    schema_version: 1,
+    ...(writtenAt === null ? {} : { written_at: writtenAt }),
+    payload: {
+      ...(sessionId === null ? {} : { session_id: sessionId }),
+      rate_limits: { five_hour: { used_percentage: 55, resets_at: null } },
+      prompt_cache: { warm, ttl: '1h', expires_at: ((writtenAt ?? BASE) + 55 * MIN) / 1000, recache_tokens_if_cold: 1_000 },
+    },
+  }))
+  // What the file watcher does when the bridge writes: the next `current()` reads the file again.
+  h.mgr.invalidate()
+}
+
+test('two sessions writing the mirror in turn are both kept, newest first (1.8 A1)', () => {
+  const h = harness()
+  assert.deepEqual(h.mgr.promptCacheReadings(BASE), [], 'nothing has been read yet')
+  writeSessionMirror(h, 'sess-a', BASE - 3 * MIN)
+  h.mgr.current(BASE)
+  writeSessionMirror(h, 'sess-b', BASE - MIN)
+  h.mgr.current(BASE + 1_000)
+  const kept = h.mgr.promptCacheReadings(BASE + 1_000)
+  assert.deepEqual(kept.map((r) => [r.sessionId, r.readAt]), [['sess-b', (BASE - MIN) / 1000], ['sess-a', (BASE - 3 * MIN) / 1000]])
+  assert.equal(kept[1].recacheIfCold, 1_000)
+  // The 1.3 accessor still answers the latest mirror alone.
+  assert.equal(h.mgr.promptCacheReading()?.sessionId, 'sess-b')
+  // A newer reading of the first session replaces its own and goes to the front.
+  writeSessionMirror(h, 'sess-a', BASE + 5_000)
+  h.mgr.current(BASE + 6_000)
+  assert.deepEqual(h.mgr.promptCacheReadings(BASE + 6_000).map((r) => [r.sessionId, r.readAt]),
+    [['sess-a', (BASE + 5_000) / 1000], ['sess-b', (BASE - MIN) / 1000]])
+})
+
+test('an older reading never replaces a newer one of its session; one without a session id or a time is not kept (1.8 A1)', () => {
+  const h = harness()
+  writeSessionMirror(h, 'sess-a', BASE - MIN)
+  h.mgr.current(BASE)
+  // The same session's mirror read back older — a late write of another window.
+  writeSessionMirror(h, 'sess-a', BASE - 5 * MIN, false)
+  h.mgr.current(BASE + 1_000)
+  const a = h.mgr.promptCacheReadings(BASE + 1_000)
+  assert.deepEqual(a.map((r) => [r.sessionId, r.readAt, r.warm]), [['sess-a', (BASE - MIN) / 1000, true]])
+  // The same time again is not older: it replaces (a second read of one mirror).
+  writeSessionMirror(h, 'sess-a', BASE - MIN, false)
+  h.mgr.current(BASE + 2_000)
+  assert.equal(h.mgr.promptCacheReadings(BASE + 2_000)[0].warm, false)
+  // No session id, an id out of its alphabet, no time: the latest-mirror accessor has the
+  // reading, the per-session list does not.
+  for (const [id, at] of [[null, BASE], ['../../etc', BASE], ['sess-c', null]] as Array<[string | null, number | null]>) {
+    writeSessionMirror(h, id, at)
+    h.mgr.current(BASE + 3_000)
+    assert.ok(h.mgr.promptCacheReading() !== null, String(id))
+    assert.deepEqual(h.mgr.promptCacheReadings(BASE + 3_000).map((r) => r.sessionId), ['sess-a'], String(id))
+  }
+})
+
+test('at most CACHE_READINGS_MAX sessions are kept — the oldest reading goes —, and none older than CACHE_READING_KEEP_MS (1.8 A1)', () => {
+  assert.equal(CACHE_READINGS_MAX, 16)
+  assert.equal(CACHE_READING_KEEP_MS, 2 * 3_600_000)
+  const h = harness()
+  for (let i = 0; i < 17; i++) {
+    writeSessionMirror(h, `sess-${String(i).padStart(2, '0')}`, BASE - (17 - i) * 1_000)
+    h.mgr.current(BASE)
+  }
+  const kept = h.mgr.promptCacheReadings(BASE)
+  assert.equal(kept.length, 16)
+  assert.equal(kept.some((r) => r.sessionId === 'sess-00'), false, 'the oldest reading stayed')
+  assert.equal(kept[0].sessionId, 'sess-16')
+  assert.equal(kept[15].sessionId, 'sess-01')
+  // A reading of exactly two hours ago is kept, one of 2 h + 1 ms is not — at a read and in the list.
+  const old = harness()
+  writeSessionMirror(old, 'sess-old', BASE)
+  old.mgr.current(BASE)
+  assert.equal(old.mgr.promptCacheReadings(BASE + CACHE_READING_KEEP_MS).length, 1)
+  assert.equal(old.mgr.promptCacheReadings(BASE + CACHE_READING_KEEP_MS + 1).length, 0)
+  const late = harness()
+  writeSessionMirror(late, 'sess-late', BASE - CACHE_READING_KEEP_MS - 1_000)
+  late.mgr.current(BASE)
+  assert.deepEqual(late.mgr.promptCacheReadings(BASE), [])
+  assert.ok(late.mgr.promptCacheReading() !== null, 'the latest mirror still answers the 1.3 line')
+})
+
+test('clearPolled and clearCacheReadings empty the per-session readings (1.8 A1)', () => {
+  const h = harness()
+  writeSessionMirror(h, 'sess-a', BASE - MIN)
+  h.mgr.current(BASE)
+  assert.equal(h.mgr.promptCacheReadings(BASE).length, 1)
+  h.mgr.clearPolled()
+  assert.deepEqual(h.mgr.promptCacheReadings(BASE), [])
+  // *Clear Stored Data…* of the mirror alone: the readings of it go with it.
+  h.mgr.current(BASE + 1_000)
+  assert.equal(h.mgr.promptCacheReadings(BASE + 1_000).length, 1)
+  h.mgr.clearCacheReadings()
+  assert.deepEqual(h.mgr.promptCacheReadings(BASE + 1_000), [])
+})
+
+test('a mirror with text under every neighbouring key keeps none of it in the readings (1.8 §0a.1 leak test, the manager)', () => {
+  const h = harness()
+  writeLeakyMirror(h.files.mirrorFile, BASE - MIN, BASE)
+  h.mgr.invalidate()
+  h.mgr.current(BASE)
+  const kept = h.mgr.promptCacheReadings(BASE)
+  assert.deepEqual(kept.map((r) => [r.sessionId, r.recacheIfCold, r.model, r.ttl]), [[LEAK_SESSION_ID, 152_300, 'claude-opus-5-5', '1h']])
+  const text = JSON.stringify([kept, h.mgr.promptCacheReading(), h.mgr.contextReading(), h.mgr.current(BASE), h.logs])
+  for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the manager holds ${secret}`)
 })
 
 test('a mirror without a prompt-cache block yields no reading — never one from the buckets', () => {

@@ -197,11 +197,25 @@ file, an existing file with a newer `fetched_at` is never overwritten, and the w
 
 ## Claude status-line bridge (opt-in)
 
-**Token Pace: Connect Claude Status Line…** registers a small bundled script as Claude Code's
-`statusLine.command`. Claude Code then pipes its status JSON — rate limits, context window,
-prompt cache, running cost — into that script on every refresh; the script mirrors the JSON to
+**Token Pace: Connect Claude Status Line…** copies a small script into the extension's storage,
+`<globalStorage>/statusline-bridge.js`, and registers it as Claude Code's `statusLine.command`.
+Claude Code then pipes its status JSON — rate limits, context window, prompt cache, running cost —
+into that script on every refresh; the script writes the fields Token Pace reads of it to
 `<globalStorage>/statusline-mirror.json` and prints a status line. That mirror is the only
-official, network-free source for the Claude quota percentages.
+official, network-free source for the Claude quota percentages. Which fields those are — among
+them, since 1.8, `session_id`, which tells one session's prompt cache from another's, and the
+prompt cache's `recache_tokens_if_cold` — is listed in [Prompt cache](prompt-cache.md#what-is-read)
+and [Privacy](privacy.md); everything else of the JSON never reaches the file (1.3 to 1.7 mirrored
+it whole, and 1.8 narrows such a mirror on its first activation).
+
+**Where the script lives.** The command names the copy in the extension's storage, not the script
+inside the extension's own folder: that folder carries the version in its name, and every update
+replaces it — a command naming it would run a script that is gone. An install of 1.3 to 1.7 named
+that folder. On its first activation in a trusted window 1.8 moves such a command to the copy:
+only the `statusLine.command` string changes — the same node, the same mirror, the same chained
+command, and the rest of `settings.json` as it was —, a backup of the original bytes is written first, and only while the slot still holds the
+command Token Pace recorded; the Token Pace log says so. Every activation replaces the copy with the
+shipped script when the two differ, so an update reaches a status line connected before it.
 
 This is the second and last write outside the extension's storage, and the riskiest thing the
 extension can do, because it edits a file that belongs to another program. The rules are narrow:
@@ -223,7 +237,8 @@ extension can do, because it edits a file that belongs to another program. The r
 * The script never sends anything anywhere, never logs the piped JSON, and every failure path
   still passes stdin through and exits 0 — it must never break somebody's status line.
 * It is **not** removed when the extension is uninstalled. Disconnect first if you plan to
-  remove Token Pace.
+  remove Token Pace: uninstalling deletes the extension's storage, the script's copy with it, and
+  a status line still connected would then start a script that is gone.
 * Both writes are disabled in Restricted Mode.
 
 > The field names of the piped payload (`rate_limits.five_hour.used_percentage`,

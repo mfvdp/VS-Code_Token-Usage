@@ -20,7 +20,7 @@ const STALE = 20
 function reading(over: Partial<PromptCacheReading> = {}): PromptCacheReading {
   return {
     warm: true, ttl: '5m', expiresAt: NOW + 220_000, hitRatio: 0.82,
-    readAt: Math.round(NOW / 1000) - 60, ...over,
+    readAt: Math.round(NOW / 1000) - 60, sessionId: null, recacheIfCold: null, model: null, ...over,
   }
 }
 

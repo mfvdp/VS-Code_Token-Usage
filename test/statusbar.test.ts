@@ -8,6 +8,8 @@ import { test } from 'node:test'
 import { setBundle, setLocale } from '../src/i18n'
 import { relativeShort } from '../src/time'
 import { ROOT } from './helpers/nls'
+import { readStatuslineMirror } from '../src/quota'
+import { LEAK_SESSION_ID, LEAK_STATUS_SECRETS, scratchDir, writeLeakyMirror } from './fixtures/helpers'
 import type { BudgetRow } from '../src/budget'
 import { Config, sanitize } from '../src/config'
 import { RUNNING_WINDOW_MS, RunningItem } from '../src/agentTree'
@@ -1045,10 +1047,23 @@ test('the preview shows a budget under and over its limit, and colours neither',
 
 const CACHE = {
   warm: true, ttl: '5m' as const, expiresAt: NOW + 220_000, hitRatio: 0.82,
-  readAt: Math.floor(NOW / 1000) - 60,
+  readAt: Math.floor(NOW / 1000) - 60, sessionId: null, recacheIfCold: null, model: null,
 }
 const CACHE_ROW = '$(database) prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'
   + ' · updated 1 min ago'
+
+test('a mirror with text under every neighbouring key reaches no item and no tooltip of the bar (1.8 §0a.1 leak test)', () => {
+  const file = join(scratchDir('sb-leak'), 'statusline-mirror.json')
+  writeLeakyMirror(file, NOW - 60_000, NOW)
+  const r = readStatuslineMirror(file)
+  assert.ok(r.promptCache !== null && r.context !== null)
+  const promptCache = { ...r.promptCache, readAt: r.state.fetchedAt, sessionId: r.sessionId, model: r.model?.id ?? null }
+  const items = buildItems(input({ promptCache }))
+  assert.ok(items[0].tooltipMarkdown.includes('prompt cache warm'), items[0].tooltipMarkdown)
+  const text = JSON.stringify(items)
+  for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the bar holds ${secret}`)
+  assert.equal(text.includes(LEAK_SESSION_ID.slice(8)), false, 'the bar holds the session id')
+})
 
 test('the prompt-cache row is in the Claude tooltip only while the bridge delivers a reading', () => {
   const tip = buildItems(input({ promptCache: CACHE }))[0].tooltipMarkdown

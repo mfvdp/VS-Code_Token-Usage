@@ -17,6 +17,16 @@
  *  • It must never break someone's status line. Every failure path still passes
  *    stdin through and exits 0.
  *  • It must never log the payload. The mirror file is written, nothing else.
+ *
+ * 1.8 (§7a Q11): the mirror holds only what the extension reads of the payload —
+ * `MIRROR_KEEP`, the fields of `quota.ts`'s status-line reader and nothing else. The
+ * session's name, its working directory, its transcript's path, the workspace and
+ * everything else Claude Code pipes in never reach the file. 1.3 to 1.7 mirrored the
+ * payload whole; the next write of this script replaces such a file.
+ *
+ * 1.8 (§7a Q16): Claude Code runs the copy of this script in the extension's storage,
+ * `<globalStorage>/statusline-bridge.js` (`BRIDGE_SCRIPT_NAME`), not the file inside
+ * the versioned extension folder — an update removes that folder (bridge.ts).
  */
 
 import { spawn as nodeSpawn } from 'child_process'
@@ -25,6 +35,90 @@ import * as path from 'path'
 
 /** Schema of the mirror file; `quota.ts` refuses anything else. */
 export const MIRROR_SCHEMA_VERSION = 1
+
+/**
+ * 1.8 §7a Q16: the file name of the script — of the bundle (`dist/statusline-bridge.js`) and of
+ * its copy in globalStorage, which the installed `statusLine.command` names.
+ */
+export const BRIDGE_SCRIPT_NAME = 'statusline-bridge.js'
+
+/**
+ * What one key of the payload may hold in the mirror: `'value'` a string, a finite number, a
+ * boolean or null — never an object or an array —; a map an object, narrowed to its keys the
+ * same way; a list the first of its alternatives that the value fits.
+ */
+export type MirrorKeep = 'value' | { readonly [key: string]: MirrorKeep } | readonly MirrorKeep[]
+
+const V = 'value' as const
+/** `statuslineWindow` (quota.ts): a rate-limit window's share and its reset. */
+const KEEP_WINDOW = { used_percentage: V, usedPercentage: V, utilization: V, resets_at: V, resetsAt: V }
+/** The spend limit's share. */
+const KEEP_SPEND = { used_percentage: V, usedPercentage: V }
+const KEEP_RATE_LIMITS = {
+  five_hour: KEEP_WINDOW, fiveHour: KEEP_WINDOW, seven_day: KEEP_WINDOW, sevenDay: KEEP_WINDOW,
+  spend_limit: KEEP_SPEND, spendLimit: KEEP_SPEND,
+}
+const KEEP_CONTEXT = {
+  total_input_tokens: V, totalInputTokens: V, total_output_tokens: V, totalOutputTokens: V,
+  context_window_size: V, contextWindowSize: V, used_percentage: V, usedPercentage: V,
+}
+/** `promptCacheOf` (quota.ts), with 1.8's `recache_tokens_if_cold`. */
+const KEEP_PROMPT_CACHE = {
+  warm: V, ttl: V, expires_at: V, expiresAt: V, hit_ratio: V, hitRatio: V,
+  recache_tokens_if_cold: V, recacheTokensIfCold: V,
+}
+/** `planLabel` (quota.ts): a plan is a name, or an object holding one. */
+const KEEP_PLAN: readonly MirrorKeep[] = [V, { name: V, display_name: V, displayName: V, type: V }]
+
+/**
+ * 1.8 §7a Q11: every key the mirror keeps, in both spellings the reader takes — exactly the
+ * fields `quota.ts` reads of the payload (`claudeStateFromStatusline` and the helpers it calls),
+ * which the read contract of scripts/check-privacy.mjs lists and test/privacy.test.ts ties to
+ * this table. Anything else of the payload is dropped before the file is written.
+ */
+export const MIRROR_KEEP: { readonly [key: string]: MirrorKeep } = {
+  session_id: V, sessionId: V,
+  model: { id: V, display_name: V, displayName: V },
+  plan: KEEP_PLAN, subscription: KEEP_PLAN,
+  rate_limits: KEEP_RATE_LIMITS, rateLimits: KEEP_RATE_LIMITS,
+  context_window: KEEP_CONTEXT, contextWindow: KEEP_CONTEXT,
+  cost: { total_cost_usd: V, totalCostUsd: V },
+  prompt_cache: KEEP_PROMPT_CACHE, promptCache: KEEP_PROMPT_CACHE,
+}
+
+function isLeaf(v: unknown): boolean {
+  return v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))
+}
+
+/** One value as `keep` allows it, or undefined when it may not be kept at all. */
+function narrowValue(v: unknown, keep: MirrorKeep): unknown {
+  if (keep === 'value') return isLeaf(v) ? v : undefined
+  if (Array.isArray(keep)) {
+    for (const alt of keep) {
+      const r = narrowValue(v, alt)
+      if (r !== undefined) return r
+    }
+    return undefined
+  }
+  const o = obj(v)
+  if (o === null) return undefined
+  const out: Record<string, unknown> = {}
+  for (const [k, sub] of Object.entries(keep as { readonly [key: string]: MirrorKeep })) {
+    if (!Object.prototype.hasOwnProperty.call(o, k)) continue
+    const r = narrowValue(o[k], sub)
+    if (r !== undefined) out[k] = r
+  }
+  return out
+}
+
+/**
+ * 1.8 §7a Q11: the payload as the mirror keeps it — the keys of `MIRROR_KEEP`, each narrowed to
+ * what the reader takes of it; every other key, and every value of the wrong shape, left out. A
+ * payload that is not an object yields an empty object. Pure.
+ */
+export function narrowPayload(payload: unknown): Record<string, unknown> {
+  return (narrowValue(payload, MIRROR_KEEP) as Record<string, unknown> | undefined) ?? {}
+}
 
 export interface SpawnResult {
   code: number
@@ -135,7 +229,8 @@ export async function bridgeMain(argv: string[], stdin: Buffer, io: BridgeIo): P
 
   if (mirrorFile !== null && obj(payload) !== null) {
     try {
-      writeMirror(mirrorFile, payload, Date.now())
+      // 1.8 §7a Q11: only the fields the extension reads — never the whole payload.
+      writeMirror(mirrorFile, narrowPayload(payload), Date.now())
     } catch {
       // A read-only or full disk is not a reason to break the status line.
     }
@@ -210,9 +305,11 @@ const processIo: BridgeIo = {
  * ends.
  */
 function isCliInvocation(): boolean {
-  if (require.main !== module) return false
+  if (typeof require === 'undefined' || typeof module === 'undefined' || require.main !== module) return false
   if (typeof process.env.NODE_TEST_CONTEXT === 'string') return false
-  return !/\.test\.[cm]?js$/.test(String(process.argv[1] ?? ''))
+  // 1.8: the extension's own bundle imports this module too (bridge.ts); only a file named as
+  // the script — the bundle or its copy in globalStorage — is ever run as the script.
+  return path.basename(String(process.argv[1] ?? '')) === BRIDGE_SCRIPT_NAME
 }
 
 if (isCliInvocation()) {

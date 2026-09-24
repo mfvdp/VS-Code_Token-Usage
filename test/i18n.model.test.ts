@@ -100,7 +100,10 @@ test('the forecast row, the prompt cache and the repair button speak German', ()
   fillHistory(history)
   const vm = german(() => buildViewModel({
     ...makeInput({ history }),
-    promptCache: { warm: true, ttl: '1h', expiresAt: NOW + 220_000, hitRatio: 0.87, readAt: Math.round(NOW / 1000) },
+    promptCache: {
+      warm: true, ttl: '1h', expiresAt: NOW + 220_000, hitRatio: 0.87, readAt: Math.round(NOW / 1000),
+      sessionId: null, recacheIfCold: null, model: null,
+    },
   }))
   const claude = vm.quotas.find((q) => q.source === 'claude')
   assert.ok(claude)

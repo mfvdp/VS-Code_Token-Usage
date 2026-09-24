@@ -774,14 +774,39 @@ export function readClaudeJsonUtilization(file: string, now = Date.now()): Claud
 
 // ---------------------------------------------------------- status line JSON
 
+/** 1.8 §0a.1: a status-line session id — the agent tables' `cleanAgentId` alphabet and cap. */
+export const STATUSLINE_SESSION_RE = /^[A-Za-z0-9_-]{1,64}$/
+/** 1.8 §0a.1: the largest `recache_tokens_if_cold` taken; above it the value is not a context size. */
+export const RECACHE_MAX = 10_000_000
+
 export interface StatuslineReading {
   state: QuotaState
   identityHint: string | null
   /** `size` null means no denominator was named — then `usedPct` is null too. */
   context: { used: number; size: number | null; usedPct: number | null } | null
   cost: { totalUsd: number } | null
-  promptCache: { warm: boolean | null; ttl: '5m' | '1h' | null; expiresAt: number | null; hitRatio: number | null } | null
+  promptCache: {
+    warm: boolean | null; ttl: '5m' | '1h' | null; expiresAt: number | null; hitRatio: number | null
+    /** 1.8 §0a.1: `recache_tokens_if_cold` — an integer 0…RECACHE_MAX, else null. */
+    recacheIfCold: number | null
+  } | null
   model: { id: string | null; displayName: string | null } | null
+  /** 1.8 §0a.1: the payload's top-level `session_id` through STATUSLINE_SESSION_RE, else null. */
+  sessionId: string | null
+}
+
+/**
+ * 1.8 §0a.1: whose status line this is. Claude Code names the session by the id its transcript
+ * file carries; a value outside the id alphabet or its cap — a path, a sentence — is no id and is
+ * not kept, not trimmed.
+ */
+function sessionIdOf(v: unknown): string | null {
+  return typeof v === 'string' && STATUSLINE_SESSION_RE.test(v) ? v : null
+}
+
+/** 1.8 §0a.1: the tokens a cold next request re-caches — a whole count, never a fraction or a string. */
+function recacheOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= RECACHE_MAX ? v : null
 }
 
 function statuslineWindow(v: any, kindRaw: string, minutes: number, label: string): QuotaWindow | null {
@@ -810,6 +835,7 @@ function promptCacheOf(v: any): StatuslineReading['promptCache'] {
     ttl,
     expiresAt: resetMs(pick(v, 'expires_at', 'expiresAt')),
     hitRatio: num(pick(v, 'hit_ratio', 'hitRatio')),
+    recacheIfCold: recacheOf(pick(v, 'recache_tokens_if_cold', 'recacheTokensIfCold')),
   }
 }
 
@@ -857,7 +883,9 @@ export function claudeStateFromStatusline(payload: any, fetchedAt: number | null
   const size = sizeRaw !== null && sizeRaw > 0 ? sizeRaw : null
   const used = inTok === null && outTok === null ? null : (inTok ?? 0) + (outTok ?? 0)
   const reported = num(pick(cw, 'used_percentage', 'usedPercentage'))
-  const totalUsd = num(pick(pick(payload, 'cost') as any, 'total_cost_usd', 'totalCostUsd'))
+  // A variable of its own, so the read contract sees which keys of `cost` are taken (1.8 §0a.1).
+  const cost = pick(payload, 'cost') as any
+  const totalUsd = num(pick(cost, 'total_cost_usd', 'totalCostUsd'))
   const model = pick(payload, 'model') as any
   return {
     state,
@@ -881,6 +909,7 @@ export function claudeStateFromStatusline(payload: any, fetchedAt: number | null
     model: model && typeof model === 'object'
       ? { id: str(model.id), displayName: str(pick(model, 'display_name', 'displayName')) }
       : null,
+    sessionId: sessionIdOf(pick(payload, 'session_id', 'sessionId')),
   }
 }
 
@@ -890,7 +919,7 @@ export const MIRROR_SCHEMA_VERSION = 1
 /** Reads the mirror file the status-line bridge writes into globalStorage. */
 export function readStatuslineMirror(file: string): StatuslineReading {
   const empty = (s: QuotaState): StatuslineReading =>
-    ({ state: s, identityHint: null, context: null, cost: null, promptCache: null, model: null })
+    ({ state: s, identityHint: null, context: null, cost: null, promptCache: null, model: null, sessionId: null })
   let txt: string
   try { txt = fs.readFileSync(file, 'utf8') } catch {
     return empty(problemState('claude', 'noFile', t('No status line mirror at {0}', file)))

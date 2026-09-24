@@ -22,6 +22,13 @@
  *    rather than overwrite a third party's configuration.
  *  • `settings.local.json` and managed settings can shadow the whole thing —
  *    that is reported as a state, not silently ignored.
+ *  • 1.8 (§7a Q16): the installed command names the script's copy in the
+ *    extension's storage, `<globalStorage>/statusline-bridge.js`, never the file
+ *    inside the versioned extension folder an update removes. A command a 1.3–1.7
+ *    install wrote is moved to the copy once, on activation — the same consented
+ *    write, with the same backup, and only while the slot still holds it.
+ *  • 1.8 (§7a Q11): the mirror keeps only the fields the reader takes; a wider one
+ *    an older script wrote is narrowed on activation (`narrowMirrorFile`).
  */
 
 import { execFile } from 'child_process'
@@ -29,7 +36,10 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { WriteConsent } from './consent'
 import { t } from './i18n'
-import { MementoLike } from './storage'
+import { BRIDGE_SCRIPT_NAME, MIRROR_SCHEMA_VERSION, narrowPayload, writeMirror } from './statuslineBridge'
+import { isTempSiblingOf, MementoLike } from './storage'
+
+export { BRIDGE_SCRIPT_NAME }
 
 /** Memento key of the install record. Never deleted by "Clear Stored Data": it is the undo. */
 export const BRIDGE_KEY = 'tokenPace.bridge'
@@ -56,8 +66,16 @@ export interface BridgePaths {
   settingsFile: string
   /** Directory that file lives in — where settings.local.json would shadow it. */
   claudeDir: string
-  /** Absolute path of dist/statusline-bridge.js. */
+  /**
+   * 1.8 §7a Q16: the script the installed command names — its copy in globalStorage,
+   * `<globalStorage>/statusline-bridge.js`, which outlives an update of the extension.
+   */
   script: string
+  /**
+   * 1.8 §7a Q16: the script as the extension ships it, `dist/statusline-bridge.js` inside the
+   * versioned extension folder — the source of the copy, never named by a command.
+   */
+  bundle: string
   /** Absolute path of the mirror file inside globalStorage. */
   mirror: string
 }
@@ -149,6 +167,40 @@ export function statusLineCommandOf(value: unknown): string | null {
   const v = value as Record<string, unknown>
   if (v.type !== 'command') return null
   return typeof v.command === 'string' ? v.command : null
+}
+
+/** The four parts of a command `bridgeCommand` wrote; `rest` is `''` or ` -- <quoted previous>`, verbatim. */
+export interface BridgeCommandParts {
+  node: string
+  script: string
+  mirror: string
+  rest: string
+}
+
+/**
+ * 1.8 §7a Q16: a command in the shape `bridgeCommand` writes, taken apart — or null for any other
+ * command. Only the three quoted paths are looked at; the chained previous command stays one
+ * opaque string.
+ */
+export function parseBridgeCommand(command: string): BridgeCommandParts | null {
+  const m = /^"([^"]+)" "([^"]+)" "([^"]+)"((?: -- [\s\S]*)?)$/.exec(command)
+  return m === null ? null : { node: m[1], script: m[2], mirror: m[3], rest: m[4] }
+}
+
+/** The file name of a path on either platform's separator. */
+function baseName(p: string): string {
+  return p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1)
+}
+
+/**
+ * 1.8 §7a Q16: the command a 1.3–1.7 install wrote, moved to the script's copy — the same node,
+ * the same mirror, the same chained previous command, byte for byte; only the script's path
+ * changes. Null when `command` is not a bridge command, or already names `script`.
+ */
+export function migratedCommand(command: string, script: string): string | null {
+  const parts = parseBridgeCommand(command)
+  if (parts === null || parts.script === script || baseName(parts.script) !== BRIDGE_SCRIPT_NAME) return null
+  return `"${parts.node}" "${script}" "${parts.mirror}"${parts.rest}`
 }
 
 /**
@@ -363,6 +415,32 @@ export async function install(
     }
   }
 
+  // 1.8 §7a Q16: the slot still holds the command an older version of Token Pace wrote. It is
+  // moved to the script's copy — never chained as somebody else's "previous" command, which would
+  // run a second bridge from a folder an update removes.
+  const record = opts.memento.get<BridgeRecord | undefined>(BRIDGE_KEY, undefined)
+  const current = statusLineCommandOf(settings.statusLine)
+  if (read.kind === 'ok' && record !== undefined && typeof record.installedCommand === 'string'
+    && current !== null && current === record.installedCommand) {
+    const next = migratedCommand(current, paths.script)
+    if (next !== null) {
+      const moved = await writeMigration(paths, opts.memento, read, record, next, now, log)
+      if (moved.kind === 'failed') return { ok: false, reason: 'writeFailed', message: moved.message }
+      return {
+        ok: true, status: 'already', command: next,
+        backup: moved.kind === 'migrated' ? moved.backup : null, shadowed: detectShadowing(paths.claudeDir),
+      }
+    }
+  }
+
+  // 1.8 §7a Q16: the copy the command names exists before the command does — Claude Code may run
+  // it the moment settings.json changes.
+  try {
+    installBridgeScript(paths.bundle, paths.script)
+  } catch (e) {
+    return { ok: false, reason: 'writeFailed', message: t('Could not write {0}: {1}', paths.script, (e as Error).message) }
+  }
+
   const plan = planInstall(settings, { node, script: paths.script, mirror: paths.mirror, mode: opts.mode })
   const shadowed = detectShadowing(paths.claudeDir)
   if (plan.noop) {
@@ -468,8 +546,12 @@ export function state(paths: BridgePaths, memento: MementoLike, now: number = Da
   const record = memento.get<BridgeRecord | undefined>(BRIDGE_KEY, undefined)
   const read = readSettings(paths.settingsFile)
   const current = read.kind === 'ok' ? statusLineCommandOf(read.settings.statusLine) : null
+  // 1.8 §7a Q16: a command whose script is gone — the extension folder an update removed — runs
+  // nothing; the command string alone is not the state. A command of another shape is judged by
+  // the string, as before.
+  const parts = current === null ? null : parseBridgeCommand(current)
   const installed = record !== undefined && typeof record.installedCommand === 'string'
-    && current === record.installedCommand
+    && current === record.installedCommand && (parts === null || isFile(parts.script))
 
   let mirrorAgeMs: number | null = null
   try {
@@ -479,6 +561,293 @@ export function state(paths: BridgePaths, memento: MementoLike, now: number = Da
   }
 
   return { installed, shadowed: detectShadowing(paths.claudeDir) === 'configuration-shadowed', mirrorAgeMs }
+}
+
+function isFile(file: string): boolean {
+  try {
+    return fs.statSync(file).isFile()
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1.8 §7a Q16: the script's copy in globalStorage, and the move of an older command to it
+// ---------------------------------------------------------------------------
+
+/** The file operations of the copy, injected so a test can see or break every one. */
+export interface ScriptFs {
+  statSync(file: string): { size: number; isFile(): boolean }
+  readFileSync(file: string): Buffer
+  copyFileSync(from: string, to: string): void
+  renameSync(from: string, to: string): void
+  unlinkSync(file: string): void
+}
+
+/**
+ * Copies the shipped script to `script` — `<globalStorage>/statusline-bridge.js` — through a
+ * temporary file beside it and a rename, so Claude Code never starts half a script (agentHook.ts's
+ * `installHookScript`, for the bridge). The only write is inside the extension's storage. Throws when
+ * the bundle is missing or the copy failed.
+ */
+export function installBridgeScript(bundle: string, script: string, io: ScriptFs = fs): void {
+  if (!io.statSync(bundle).isFile()) throw new Error('the status line script is not a file')
+  const tmp = `${script}.${process.pid}.tmp`
+  try {
+    io.copyFileSync(bundle, tmp)
+    io.renameSync(tmp, script)
+  } catch (err) {
+    try { io.unlinkSync(tmp) } catch { /* never written */ }
+    throw err
+  }
+}
+
+/**
+ * At activation: an existing copy is replaced by the shipped script when the two differ — in size
+ * or in a byte —, so an update of the extension reaches the status line the user connected before
+ * it. Nothing is written when there is no copy; the install and the move below make one. True when
+ * it copied.
+ */
+export function refreshBridgeScript(bundle: string, script: string, io: ScriptFs = fs): boolean {
+  let have: { size: number; isFile(): boolean }
+  let ship: { size: number; isFile(): boolean }
+  try {
+    have = io.statSync(script)
+    ship = io.statSync(bundle)
+  } catch {
+    return false
+  }
+  if (!have.isFile() || !ship.isFile()) return false
+  if (have.size === ship.size && io.readFileSync(script).equals(io.readFileSync(bundle))) return false
+  installBridgeScript(bundle, script, io)
+  return true
+}
+
+export type MigrateResult =
+  /** Nothing of ours to move: no record, no settings, or the slot holds somebody else's command. */
+  | { kind: 'none' }
+  /** The command names the copy already (a copy that had gone missing is put back). */
+  | { kind: 'current'; copied: boolean }
+  /** Another window moved the command; this window's record follows the file. */
+  | { kind: 'recorded' }
+  /** Moved: settings.json's `statusLine.command` names the copy now, the record says so too. */
+  | { kind: 'migrated'; from: string; backup: string | null }
+  /** Restricted Mode: the write waits for a trusted window. */
+  | { kind: 'restricted' }
+  | { kind: 'failed'; message: string; cause: string }
+
+function causeOf(e: unknown): string {
+  const code = (e as NodeJS.ErrnoException | null)?.code
+  return typeof code === 'string' && /^[A-Z0-9_]{1,24}$/.test(code) ? code : 'error'
+}
+
+/**
+ * settings.json with the one string replaced in its text: the JSON literal of `current` swapped for
+ * the literal of `next`, every other byte — the user's indentation, key order and line breaks — as
+ * it was. Null unless the literal stands exactly once and the result parses to `expected`; the
+ * caller then writes the parsed value instead, as the install does.
+ */
+function replaceCommandText(raw: string, current: string, next: string, expected: unknown): string | null {
+  const from = JSON.stringify(current)
+  const at = raw.indexOf(from)
+  if (at < 0 || raw.indexOf(from, at + from.length) >= 0) return null
+  const text = `${raw.slice(0, at)}${JSON.stringify(next)}${raw.slice(at + from.length)}`
+  try {
+    return sameJson(JSON.parse(text), expected) ? text : null
+  } catch {
+    return null
+  }
+}
+
+/** tmp + rename of a text, on the resolved path — `writeJsonAtomic` for bytes already made. */
+function writeTextAtomic(file: string, text: string): void {
+  const tmp = `${file}.token-pace.tmp`
+  fs.writeFileSync(tmp, text, 'utf8')
+  fs.renameSync(tmp, file)
+}
+
+/**
+ * The move itself, for the activation and for a reconnect: the copy first, then the backup of the
+ * original bytes, then settings.json with only `statusLine.command` changed — in the file's own text
+ * where the old command stands once, else re-serialised as the install writes it; either way every
+ * other key of the file and of the entry as it was —, then the record; a record that cannot be
+ * written puts the file back from the backup, as `install` does.
+ */
+async function writeMigration(
+  paths: BridgePaths,
+  memento: MementoLike,
+  read: Extract<SettingsRead, { kind: 'ok' }>,
+  record: BridgeRecord,
+  next: string,
+  now: number,
+  log: (msg: string) => void,
+  io: ScriptFs = fs,
+): Promise<MigrateResult> {
+  const from = parseBridgeCommand(record.installedCommand)?.script ?? ''
+  const target = resolveWriteTarget(paths.settingsFile)
+  if (!target.ok) return { kind: 'failed', message: target.message, cause: 'link' }
+  try {
+    installBridgeScript(paths.bundle, paths.script, io)
+  } catch (e) {
+    return { kind: 'failed', message: t('Could not write {0}: {1}', paths.script, (e as Error).message), cause: causeOf(e) }
+  }
+  const entry = read.settings.statusLine as Record<string, unknown>
+  const expected = { ...read.settings, statusLine: { ...entry, command: next } }
+  const backup = backupNameFor(target.file, now)
+  try {
+    fs.writeFileSync(backup, read.raw, 'utf8')
+    const text = replaceCommandText(read.raw, record.installedCommand, next, expected)
+    if (text !== null) writeTextAtomic(target.file, text)
+    else writeJsonAtomic(target.file, expected)
+  } catch (e) {
+    return { kind: 'failed', message: t('Could not write {0}: {1}', paths.settingsFile, (e as Error).message), cause: causeOf(e) }
+  }
+  try {
+    await memento.update(BRIDGE_KEY, { ...record, installedCommand: next })
+  } catch (e) {
+    try { fs.copyFileSync(backup, target.file) } catch { /* the backup itself is the fallback the message names */ }
+    return {
+      kind: 'failed',
+      message: t('The install could not be recorded ({0}); settings.json was restored from {1}.', (e as Error).message, backup),
+      cause: causeOf(e),
+    }
+  }
+  log(`Status line bridge: the installed command now runs ${paths.script} instead of ${from}; backup: ${backup}.`)
+  return { kind: 'migrated', from, backup }
+}
+
+/**
+ * 1.8 §7a Q16, at activation: an install of 1.3–1.7 named `dist/statusline-bridge.js` inside the
+ * versioned extension folder, which an update removes — the status line would then run a script that
+ * is gone. When the slot still holds exactly the command Token Pace recorded, that command is moved
+ * to the copy in globalStorage — the write the user consented to at install time, with the same backup
+ * rule — once: afterwards the record names the copy. Nothing is written without a record, while the
+ * slot holds anything else, into a settings.json that does not parse, or in Restricted Mode.
+ */
+export async function migrateBridge(
+  paths: BridgePaths,
+  memento: MementoLike,
+  opts: { restricted: boolean; now?: number; log?: (msg: string) => void; io?: ScriptFs },
+): Promise<MigrateResult> {
+  const log = opts.log ?? (() => {})
+  const io = opts.io ?? fs
+  const record = memento.get<BridgeRecord | undefined>(BRIDGE_KEY, undefined)
+  if (!record || typeof record.installedCommand !== 'string') return { kind: 'none' }
+  const read = readSettings(paths.settingsFile)
+  if (read.kind !== 'ok') return { kind: 'none' }
+  const current = statusLineCommandOf(read.settings.statusLine)
+  if (current === null) return { kind: 'none' }
+  if (current !== record.installedCommand) {
+    // Another window of this machine moved it a moment ago: the file names the copy, the record of
+    // this window still the old folder. Only the record changes.
+    if (migratedCommand(record.installedCommand, paths.script) === current) {
+      try {
+        await memento.update(BRIDGE_KEY, { ...record, installedCommand: current })
+      } catch {
+        return { kind: 'none' }
+      }
+      log('Status line bridge: another window moved the installed command to the extension storage; the record follows it.')
+      return { kind: 'recorded' }
+    }
+    return { kind: 'none' }
+  }
+  const parts = parseBridgeCommand(current)
+  if (parts === null) return { kind: 'none' }
+  if (parts.script === paths.script) {
+    // Ours and current. A copy that went missing is put back: the command names it, and the copy is
+    // the extension's own file.
+    if (isFile(paths.script)) return { kind: 'current', copied: false }
+    try {
+      installBridgeScript(paths.bundle, paths.script, io)
+    } catch (e) {
+      return { kind: 'failed', message: t('Could not write {0}: {1}', paths.script, (e as Error).message), cause: causeOf(e) }
+    }
+    log('Status line bridge: the script in the extension storage was missing and was copied again.')
+    return { kind: 'current', copied: true }
+  }
+  const next = migratedCommand(current, paths.script)
+  if (next === null) return { kind: 'none' }
+  if (opts.restricted) return { kind: 'restricted' }
+  return writeMigration(paths, memento, read, record, next, opts.now ?? Date.now(), log, io)
+}
+
+// ---------------------------------------------------------------------------
+// 1.8 §7a Q11: a mirror an older script wrote whole, narrowed
+// ---------------------------------------------------------------------------
+
+/** How long a temp sibling of the mirror may be a write in flight; an older one is a leftover. */
+export const MIRROR_TEMP_STALE_MS = 60_000
+
+export type NarrowResult = 'absent' | 'unchanged' | 'narrowed' | 'deleted'
+
+function plainObject(v: unknown): Record<string, unknown> | null {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}
+
+/** Deep equality of two JSON values, key order aside. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  const x = plainObject(a)
+  const y = plainObject(b)
+  if (x === null || y === null) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => sameJson(v, b[i]))
+  }
+  const kx = Object.keys(x)
+  if (kx.length !== Object.keys(y).length) return false
+  return kx.every((k) => Object.prototype.hasOwnProperty.call(y, k) && sameJson(x[k], y[k]))
+}
+
+/**
+ * 1.8 §7a Q11, at activation: 1.3–1.7 mirrored the status-line payload whole — the session's name,
+ * its working directory, its transcript's path among it. A mirror that holds more than the reader
+ * takes is written again with only that (`narrowPayload`), its `written_at` and its modification time
+ * kept, so its age still says when Claude Code last reported; one that cannot be parsed, of another
+ * schema or without a time is deleted — the bridge's next run writes a new one. Temp siblings older
+ * than MIRROR_TEMP_STALE_MS, which an interrupted write left with a whole payload in them, go too.
+ */
+export function narrowMirrorFile(file: string, now: number = Date.now()): NarrowResult {
+  const dir = path.dirname(file)
+  const base = path.basename(file)
+  let names: string[] = []
+  try { names = fs.readdirSync(dir) } catch { /* no directory, no temp files */ }
+  for (const name of names) {
+    if (!isTempSiblingOf(name, base)) continue
+    const temp = path.join(dir, name)
+    try {
+      if (now - fs.statSync(temp).mtimeMs > MIRROR_TEMP_STALE_MS) fs.unlinkSync(temp)
+    } catch { /* gone already, or not ours to remove */ }
+  }
+
+  let raw: string
+  let before: fs.Stats
+  try {
+    before = fs.statSync(file)
+    raw = fs.readFileSync(file, 'utf8')
+  } catch {
+    return 'absent'
+  }
+  const drop = (): NarrowResult => {
+    try { fs.unlinkSync(file) } catch { return 'unchanged' }
+    return 'deleted'
+  }
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { return drop() }
+  const doc = plainObject(parsed)
+  const payload = doc === null ? null : plainObject(doc.payload)
+  const writtenAt = doc === null ? null : doc.written_at
+  if (doc === null || doc.schema_version !== MIRROR_SCHEMA_VERSION || payload === null
+    || typeof writtenAt !== 'number' || !Number.isFinite(writtenAt)) return drop()
+  const narrowed = narrowPayload(payload)
+  if (sameJson(narrowed, payload) && Object.keys(doc).length === 3) return 'unchanged'
+  try {
+    // A write of the bridge since the read above is newer than anything written here.
+    if (fs.statSync(file).mtimeMs !== before.mtimeMs) return 'unchanged'
+    writeMirror(file, narrowed, writtenAt)
+    fs.utimesSync(file, before.atime, before.mtime)
+  } catch {
+    return 'unchanged'
+  }
+  return 'narrowed'
 }
 
 // ---------------------------------------------------------------------------

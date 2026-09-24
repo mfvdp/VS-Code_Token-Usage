@@ -130,6 +130,8 @@ const doc = {
   commands: readDoc('docs/commands.md'),
   development: readDoc('docs/development.md'),
   release: readDoc('docs/release.md'),
+  // 1.8 §0a.1 (P4): the prompt cache's page, created with its "What is read" section.
+  promptCache: readDoc('docs/prompt-cache.md'),
 } as const
 const DOCS = [README, STATES, ...Object.values(doc)].join('\n')
 
@@ -322,6 +324,8 @@ test('the Privacy list names every file the extension opens', () => {
     'agent-hook.jsonl',               // 1.6 O4 (§0a.13): the agent hook's mirror in globalStorage, read whenever it exists
     '`agent-hook.js`',                // 1.6 O4: the hook script's copy in globalStorage, which the setup command writes
     'workflows/wf_<id>.json',         // 1.6 L4: the run record's whole name, as the pages give it
+    'statusline-mirror.json',         // 1.8 §0a.1: the status-line mirror by its name, the file its contract rows read
+    '`statusline-bridge.js`',         // 1.8 §7a Q16: the bridge script's copy in globalStorage, which the command names
   ]) {
     assert.ok(privacy.includes(needed), `the Privacy section does not mention ${needed}`)
   }
@@ -351,8 +355,10 @@ interface ReadContractRow {
   /** The file the reader takes its fields from, as docs/privacy.md names it. */
   source: string
   file: string
-  kind: 'fields' | 'regex' | 'tags'
+  kind: 'fields' | 'regex' | 'tags' | 'picks'
   fields: string[]
+  /** 1.8 §0a.1: the pages (keys of `doc`) that must name the fields; absent means privacy and agents. */
+  pages?: Array<keyof typeof doc>
 }
 
 // The contract is a plain .mjs so `npm run check:privacy` needs no build step; required here
@@ -399,10 +405,15 @@ test('the privacy and agents pages name every field the agent tables read, and t
     // 1.6 P15: every row names the file it reads, and the privacy page names that file too.
     assert.ok(typeof row.source === 'string' && row.source.length > 0, `the read contract's row for ${row.what} names no file`)
     assert.ok(doc.privacy.includes(row.source), `docs/privacy.md does not name ${row.source}, the file ${row.what} is read from`)
+    // 1.8 §0a.1 (pinned and changed): a row names the pages it is held to; the default is 1.6's pair.
+    const pages = row.pages ?? ['privacy', 'agents']
+    assert.ok(pages.includes('privacy'), `the read contract's row for ${row.what} is not held to docs/privacy.md`)
     for (const field of row.fields) {
       const span = row.kind === 'tags' ? `\`<${field}>\`` : `\`${field}\``
-      assert.ok(doc.privacy.includes(span), `docs/privacy.md does not name ${span} of ${row.what}`)
-      assert.ok(doc.agents.includes(span), `docs/agents.md does not name ${span} of ${row.what}`)
+      for (const page of pages) {
+        assert.ok(page in doc, `the read contract's row for ${row.what} names a page the docs tests do not read: ${page}`)
+        assert.ok(doc[page].includes(span), `the ${page} page does not name ${span} of ${row.what}`)
+      }
     }
   }
   // And what stays out, in the words both pages promise it in. 1.6 §0a.1 (P2b): a journal line's
@@ -422,6 +433,55 @@ test('the privacy and agents pages name every field the agent tables read, and t
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
+})
+
+/**
+ * 1.8 §0a.1, §7a Q11 (P4): the status-line mirror's reader is a row set of the contract, held to the
+ * privacy page and the prompt-cache page; both say what is never read of the payload, that 1.3 to
+ * 1.7 kept it whole and 1.8 stops it, and the bridge's own pages say where its script lives now.
+ */
+test('the privacy and prompt-cache pages name the mirror\'s fields, what is never read of the payload, and that 1.8 narrows the mirror', () => {
+  const mirrorRows = READ_CONTRACT.filter((row) => row.source === 'statusline-mirror.json')
+  assert.ok(mirrorRows.length >= 10, 'the status-line mirror has lost its contract rows')
+  for (const row of mirrorRows) assert.deepEqual(row.pages, ['privacy', 'promptCache'], row.what)
+  // 1.8's two new fields, on both pages, and in the quota-sources section that points at them.
+  for (const field of ['session_id', 'recache_tokens_if_cold']) {
+    assert.ok(mirrorRows.some((row) => row.fields.includes(field)), `no contract row reads ${field}`)
+    assert.ok(doc.quotaSources.includes(`\`${field}\``), `docs/quota-sources.md does not name ${field}`)
+  }
+  assert.ok(doc.quotaSources.includes('[Prompt cache](prompt-cache.md#what-is-read)'), 'docs/quota-sources.md does not point at the page')
+  for (const never of ['session_name', 'prompt_id', 'transcript_path', 'cwd', 'workspace', 'pr', 'worktree', 'agent', 'version',
+    'output_style', 'vim', 'effort', 'thinking', 'fast_mode', 'exceeds_200k_tokens', 'caching_observed', 'requests', 'misses',
+    'expected_rebuilds', 'cache_write_tokens', 'miss_recache_tokens', 'last_miss_at', 'last_miss_cause', 'miss_causes']) {
+    assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md does not say ${never} is never read`)
+    assert.ok(doc.promptCache.includes(`\`${never}\``), `docs/prompt-cache.md does not say ${never} is never read`)
+  }
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  for (const claim of ['Never read, and since 1.8 never in the mirror:', 'the rest of `cost`']) {
+    assert.ok(flat(doc.privacy).includes(claim), `docs/privacy.md does not say: ${claim}`)
+    assert.ok(flat(doc.promptCache).includes(claim), `docs/prompt-cache.md does not say: ${claim}`)
+  }
+  // §7a Q11: what 1.3 to 1.7 kept, and that 1.8 stops it.
+  for (const claim of ['**1.3 to 1.7 stored the payload as Claude Code piped it**', '1.8 stops that: on its first activation it rewrites such a mirror',
+    'the script\'s next write replaces the file anyway']) {
+    assert.ok(flat(doc.privacy).includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  // The allow-lists as the reader has them, and the per-session memory as the manager keeps it.
+  const { RECACHE_MAX, STATUSLINE_SESSION_RE } = require('../src/quota') as typeof import('../src/quota')
+  const { CACHE_READINGS_MAX, CACHE_READING_KEEP_MS } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  assert.equal(STATUSLINE_SESSION_RE.source, '^[A-Za-z0-9_-]{1,64}$')
+  assert.ok(flat(doc.promptCache).includes('Only an id of letters, digits, `_` and `-`, at most 64 characters, is taken'))
+  assert.ok(flat(doc.promptCache).includes(`a whole count from 0 to ${RECACHE_MAX.toLocaleString('en-US').replace(/,/g, ' ')}`))
+  assert.ok(flat(doc.promptCache).includes(`at most ${CACHE_READINGS_MAX} sessions`))
+  assert.equal(CACHE_READING_KEEP_MS, 2 * 3_600_000)
+  assert.ok(flat(doc.promptCache).includes('none whose reading is older than two hours'))
+  assert.ok(flat(doc.privacy).includes('one per session for at most two hours'))
+  // §7a Q16: where the script lives, on the two pages a reader looks it up in, and the check of its bundle.
+  for (const [name, text] of [['quota-sources', doc.quotaSources], ['windows-wsl-remote', doc.windows]] as const) {
+    assert.ok(text.includes('`<globalStorage>/statusline-bridge.js`'), `docs/${name}.md does not say where the bridge's script lives`)
+  }
+  assert.ok(flat(doc.quotaSources).includes('only the `statusLine.command` string changes'), 'docs/quota-sources.md does not say what the move changes')
+  assert.ok(flat(doc.privacy).includes('The status-line bridge\'s bundle, `dist/statusline-bridge.js`'), 'docs/privacy.md does not name the bridge bundle\'s rule')
 })
 
 /**

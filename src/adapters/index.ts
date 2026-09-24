@@ -136,7 +136,10 @@ function readClaude(id: ClaudeSourceId, inputs: SourceInputs, now: number): Read
       const extras: SourceExtras = {
         context: r.context === null ? null : { ...r.context, fetchedAt: r.state.fetchedAt },
         cost: r.cost,
-        promptCache: r.promptCache === null ? null : { ...r.promptCache, readAt: r.state.fetchedAt },
+        // 1.8 A1: whose cache it is and whose prices a cold start would pay, beside the reading.
+        promptCache: r.promptCache === null
+          ? null
+          : { ...r.promptCache, readAt: r.state.fetchedAt, sessionId: r.sessionId, model: r.model?.id ?? null },
         model: r.model,
       }
       return { id, state: r.state, identityHint: r.identityHint, extras }

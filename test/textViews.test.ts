@@ -24,6 +24,8 @@ import {
   CLAUDE_FILE, FINGERPRINT, NOW, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
 } from './fixtures/viewFixtures'
 import { deltaBadge } from '../src/render'
+import { bestState } from '../src/quotaSources'
+import { LEAK_SESSION_ID, LEAK_STATUS_SECRETS, scratchDir, writeLeakyMirror } from './fixtures/helpers'
 import { ROOT } from './helpers/nls'
 import { agentWorld } from './fixtures/agentWorld'
 import { toolAgg } from './helpers/toolAgg'
@@ -984,10 +986,30 @@ test('a window without a clock is explained without a pace in both views', () =>
   assert.ok(quotaPart(markdownDocument(vm)).includes('- **5 h** — Why green: Used 40 % of the window. This window reports no reset time'))
 })
 
+test('a mirror with text under every neighbouring key reaches neither the view model, the markdown nor the Quick Pick (1.8 §0a.1 leak test)', () => {
+  const dir = scratchDir('tv-leak')
+  const mirrorFile = path.join(dir, 'statusline-mirror.json')
+  writeLeakyMirror(mirrorFile, NOW - 60_000, NOW)
+  // The reading as the manager gets it: the adapter over the real reader, the mirror its only source.
+  const extras = bestState('claude', {
+    claudeOrder: ['statusline'], codexOrder: [], polled: {}, transcript: () => [], mirrorFile,
+    claudeJsonFile: path.join(dir, 'none.json'), mode: 'cache',
+  }, NOW).extras
+  const promptCache = extras?.promptCache ?? null
+  assert.equal(promptCache?.sessionId, LEAK_SESSION_ID)
+  const vm = buildViewModel({ ...makeInput(), promptCache, context: extras?.context ?? null })
+  assert.ok(vm.quotas[0].promptCache !== null, 'the prompt-cache line is missing')
+  for (const [what, text] of [['view model', JSON.stringify(vm)], ['markdown', markdownDocument(vm)],
+    ['quick pick', JSON.stringify(quickPickItems(vm))]] as const) {
+    for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+    assert.equal(text.includes(LEAK_SESSION_ID.slice(8)), false, `the ${what} holds the session id`)
+  }
+})
+
 test('the prompt-cache line is in both text views only while the bridge delivers it', () => {
   const cache = {
     warm: true, ttl: '5m' as const, expiresAt: NOW + 220_000, hitRatio: 0.82,
-    readAt: Math.round((NOW - 60_000) / 1000),
+    readAt: Math.round((NOW - 60_000) / 1000), sessionId: null, recacheIfCold: null, model: null,
   }
   const vm = buildViewModel({ ...makeInput(), promptCache: cache })
   const text = 'prompt cache warm · expires in 3 m 40 s (5 min TTL) · hit ratio 82 %'

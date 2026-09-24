@@ -2112,7 +2112,7 @@ test('a measuring window is explained by the phase it is in, with the clock time
 
 const CACHE = {
   warm: true, ttl: '5m' as const, expiresAt: NOW + 220_000, hitRatio: 0.82,
-  readAt: Math.round((NOW - 60_000) / 1000),
+  readAt: Math.round((NOW - 60_000) / 1000), sessionId: null, recacheIfCold: null, model: null,
 }
 
 test('the prompt-cache line is the Claude card\'s, from the bridge and from nothing else', () => {
@@ -2139,7 +2139,9 @@ test('the countdown is as of the model\'s own clock, and past the expiry the lin
   assert.equal(gone?.expired, true)
   // Every part the payload left out is a dash; none is inferred from the others.
   const bare = buildViewModel({
-    ...makeInput(), promptCache: { warm: null, ttl: null, expiresAt: null, hitRatio: null, readAt: null },
+    ...makeInput(), promptCache: {
+      warm: null, ttl: null, expiresAt: null, hitRatio: null, readAt: null, sessionId: null, recacheIfCold: null, model: null,
+    },
   }).quotas[0].promptCache
   assert.equal(bare?.text, 'prompt cache – · expires in – (– TTL) · hit ratio –')
   assert.equal(bare?.expired, false)

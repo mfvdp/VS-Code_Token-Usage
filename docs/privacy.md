@@ -10,7 +10,8 @@ Part of the [Token Pace documentation](../README.md#documentation).
 Only these are read: `~/.claude/projects/` (plus `~/.config/claude/projects/`, where some Claude
 Code builds keep it), `~/.codex/sessions/` and `~/.codex/archived_sessions/`, the two quota cache
 files, the `cachedUsageUtilization` object in `~/.claude.json`, the extension's own status-line
-mirror file inside its `globalStorage` and the agent hook's mirror `agent-hook.jsonl` beside it —
+mirror `statusline-mirror.json` inside its `globalStorage` (below) and the agent hook's mirror
+`agent-hook.jsonl` beside it —
 whenever that file exists: only the hook script you install writes it, and a line older than 30
 minutes no longer counts —, Claude Code's `settings.json`, its `settings.local.json`
 and the platform's managed-settings file (to report whether the status-line bridge is installed
@@ -100,6 +101,36 @@ identifiers and counts, never content:
   Code writes, and the records keep counts, the last version and mode, and the last compaction
   with its time; the exports carry of them only the count of an agent's tool errors.
 
+**The status-line mirror** ([Quota sources](quota-sources.md#claude-status-line-bridge-opt-in),
+[Prompt cache](prompt-cache.md#what-is-read)) is written only while you have the opt-in
+status-line bridge connected. Claude Code pipes its whole status JSON into the bridge's script — the session's
+AI-generated name, its working directory, its transcript's path, the workspace and the Claude Code
+version among it. Since 1.8 the script keeps of it only the fields Token Pace reads and drops the
+rest before it writes `statusline-mirror.json`, and Token Pace reads of that file only: the envelope
+the script writes, `schema_version`, `written_at` and `payload`; of the payload `session_id`, to tell
+one session's prompt cache from another's (1.8; an id of letters, digits, `_` and `-`, at most 64
+characters, or nothing — never shown whole); `model` (its `id` and `display_name`); `plan` or
+`subscription` (a name, or the `name`, `display_name` or `type` of an object); `rate_limits` (of
+`five_hour`, `seven_day` and `spend_limit` the `used_percentage` or `utilization` and the
+`resets_at`); `context_window` (`total_input_tokens`, `total_output_tokens`, `context_window_size`,
+`used_percentage`); of `cost` only `total_cost_usd`; and `prompt_cache` (`warm`, `ttl`, `expires_at`,
+`hit_ratio` and, 1.8, `recache_tokens_if_cold`, the size a cold start would re-write — a whole count
+or nothing). Each is taken in camelCase too: `sessionId`, `rateLimits`, `fiveHour`, `sevenDay`,
+`spendLimit`, `usedPercentage`, `resetsAt`, `contextWindow`, `totalInputTokens`,
+`totalOutputTokens`, `contextWindowSize`, `totalCostUsd`, `displayName`, `promptCache`, `expiresAt`,
+`hitRatio`, `recacheTokensIfCold`. Never read, and since 1.8 never in the mirror: `session_name`,
+`prompt_id`, `transcript_path`, `cwd`, `workspace`, `pr`, `worktree`, `agent`, `version`,
+`output_style`, `vim`, `effort`, `thinking`, `fast_mode`, `exceeds_200k_tokens`, the rest of `cost`,
+and of `prompt_cache` its `caching_observed`, `requests`, `misses`, `expected_rebuilds`,
+`cache_write_tokens`, `miss_recache_tokens`, `last_miss_at`, `last_miss_cause` and `miss_causes`.
+**1.3 to 1.7 stored the payload as Claude Code piped it**, the session's name, its working directory
+and its transcript's path in it. 1.8 stops that: on its first activation it rewrites such a mirror
+with only the fields above — its time kept — or deletes one it cannot read, and removes the temp
+files an interrupted write left behind; the script's next write replaces the file anyway. The
+readings are kept in memory only, one per session for at most two hours; nothing of the mirror is
+logged, exported or kept anywhere else. The read contract below lists these fields, and a test ties
+the script's list of kept keys to it.
+
 **The agent hook** ([Agents](agents.md#the-agent-hook)) is opt-in — **installed by you, removed by
 you**. *Set Up the Agent Hook…* copies its script, `agent-hook.js`, into the extension's
 `globalStorage` and shows the snippet you add to `~/.claude/settings.json` yourself; Token Pace
@@ -121,7 +152,9 @@ is installed and goes with the extension's storage on uninstall.
 
 Nothing is written except the extension's own state in its `globalStorage` — among it the copy of
 the agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that
-activation replaces with the shipped one while a copy is there, and the lines the hook script
+activation replaces with the shipped one while a copy is there, the copy of the status-line bridge's
+script, `statusline-bridge.js`, that *Connect Claude Status Line…* puts there and that activation
+replaces with the shipped one when the two differ, and the lines the hook script
 appends to `agent-hook.jsonl` while you have it installed, and `quota.json`, which holds the
 readings of the quota fetch and, per provider, its last failed attempt: when it was, its kind and
 the fetch's own words — a fixed phrase with at most an HTTP status, or the Codex app-server's error
@@ -130,7 +163,12 @@ fetch, with *Clear Stored Data…* and with the file, and it is what lets a rest
 still say why the figure is old ([Quota sources](quota-sources.md#what-the-fetch-does)) —, with
 exactly two opt-in exceptions, each behind its own consent dialog and each with a backup or a
 never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
-status-line bridge. Both are off by default and both are disabled in Restricted Mode.
+status-line bridge. Both are off by default and both are disabled in Restricted Mode. The bridge's
+command names the script's copy in `globalStorage` since 1.8 — never the versioned extension folder,
+which an update removes. A command an install of 1.3 to 1.7 wrote into `settings.json` is moved to the
+copy once, on the first activation of 1.8 in a trusted window: the write you consented to at install
+time, with a backup of the original bytes first, changing only the `statusLine` entry's `command`
+string and only while the entry still holds the command Token Pace recorded; the log says so.
 
 One further write exists and is not an opt-in setting: the *Run Token Pace locally* button of
 the remote hint puts `remote.extensionKind` into your user `settings.json` — see
@@ -147,10 +185,14 @@ status page or a CDN font would otherwise be a two-line change nobody notices in
 The same command checks the **read contract**: a table in `scripts/check-privacy.mjs` names, for
 every reader of a Claude Code file, the fields it may take — the ones this page lists above — and
 the check fails when a reader takes a field the table does not list, or no longer takes one it
-does. The documentation tests hold this page and the agents page to the same table. It also holds
+does. The documentation tests hold this page and the agents page to the same table — this page and
+the prompt-cache page for the status-line mirror's rows. It also holds
 the agent hook's bundle, `dist/agent-hook.js`, to Node's `fs` and `path`: a network module
 (`http`, `https`, `net`, `tls`, `dgram`), `child_process`, `worker_threads` or a `fetch(` in it
-fails the build.
+fails the build. The status-line bridge's bundle, `dist/statusline-bridge.js` — the file its copy
+is made from —, is held to `child_process` (it starts the status-line command that was there before
+it), `fs` and `path` the same way: a network module, `worker_threads` or a `fetch(` in it fails the
+build.
 
 **The user agent of the quota fetch.** The version in the `User-Agent` header is the one
 `claude --version` prints; where that gives none — on Windows with only the npm `claude.cmd` on the
@@ -171,7 +213,12 @@ that one file's existence, nothing is read from it — and without a shell: the 
 puts synthetic text under the keys beside it — the prompt, the description, the result, the
 summary, the script, the error's text — and asserts that none of it reaches the outputs that field
 could reach: the snapshot, the view model, the markdown report, the CSV and JSON exports, the log,
-the diagnostics report, the hook's mirror line. Before the 1.6.0 release a review ran one more:
+the diagnostics report, the hook's mirror line. The status-line mirror has one too (1.8): a payload
+with synthetic text under `session_name`, `cwd`, `transcript_path`, `workspace`, `pr`, `worktree`,
+`agent`, `prompt_id`, `version` and the miss causes reaches neither the mirror, the view model, the
+page, the markdown report, the Quick Pick, a status-bar tooltip, the log, the diagnostics report nor
+an export, and of its session id at most the first eight characters. Before the 1.6.0 release a
+review ran one more:
 a synthetic world with prompts, descriptions, results, summaries, scripts, error texts and account
 ids under every neighbouring key reaches none of the outputs.
 

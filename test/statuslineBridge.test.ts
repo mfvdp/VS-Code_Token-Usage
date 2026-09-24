@@ -11,8 +11,11 @@ import { strict as assert } from 'node:assert'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
-import { BridgeIo, bridgeMain, minimalLine, shellFor, SpawnResult, writeMirror } from '../src/statuslineBridge'
-import { scratchDir } from './fixtures/helpers'
+import { claudeStateFromStatusline, readStatuslineMirror } from '../src/quota'
+import {
+  BRIDGE_SCRIPT_NAME, BridgeIo, bridgeMain, MIRROR_KEEP, minimalLine, narrowPayload, shellFor, SpawnResult, writeMirror,
+} from '../src/statuslineBridge'
+import { LEAK_SESSION_ID, LEAK_STATUS_SECRETS, leakyStatusPayload, scratchDir, writeLeakyMirror } from './fixtures/helpers'
 
 
 const PAYLOAD = {
@@ -198,4 +201,80 @@ test('writeMirror replaces an existing file in one step', () => {
   writeMirror(file, { a: 2 }, 2_000)
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { schema_version: 1, written_at: 2_000, payload: { a: 2 } })
   assert.deepEqual(fs.readdirSync(dir), ['m.json'])
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 §7a Q11: the mirror keeps only what the reader takes
+// ---------------------------------------------------------------------------
+
+test('the mirror keeps only what the extension reads: no session name, path, workspace, version or free text (1.8 Q11)', async () => {
+  const dir = scratchDir('bridgescript')
+  const mirror = path.join(dir, 'statusline-mirror.json')
+  const now = Date.now()
+  const payload = leakyStatusPayload(now)
+  const stdin = Buffer.from(JSON.stringify(payload))
+  const io = recorder({ code: 0, stdout: Buffer.from('previous line\n'), stderr: Buffer.alloc(0) })
+
+  assert.equal(await bridgeMain(['node', BRIDGE_SCRIPT_NAME, mirror, '--', 'ccstatus'], stdin, io), 0)
+  const text = fs.readFileSync(mirror, 'utf8')
+  for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the mirror holds ${secret}`)
+  for (const key of ['session_name', 'cwd', 'transcript_path', 'workspace', 'version', 'prompt_id', 'pr', 'worktree', 'agent',
+    'output_style', 'effort', 'fast_mode', 'last_miss_cause', 'miss_causes', 'caching_observed', 'total_duration_ms',
+    'remaining_percentage', 'note', 'label']) {
+    assert.equal(text.includes(`"${key}"`), false, `the mirror keeps the key ${key}`)
+  }
+  // Exactly the reader's fields, and of each block exactly the ones it takes.
+  assert.deepEqual(JSON.parse(text).payload, {
+    session_id: LEAK_SESSION_ID,
+    model: { id: 'claude-opus-5-5', display_name: 'Opus 5.5' },
+    rate_limits: {
+      five_hour: { used_percentage: 44, resets_at: (payload.rate_limits as { five_hour: { resets_at: number } }).five_hour.resets_at },
+      seven_day: (payload.rate_limits as { seven_day: unknown }).seven_day,
+    },
+    context_window: { total_input_tokens: 120_000, total_output_tokens: 8_000, context_window_size: 200_000, used_percentage: 64 },
+    cost: { total_cost_usd: 1.25 },
+    prompt_cache: {
+      warm: true, ttl: '1h', expires_at: (payload.prompt_cache as { expires_at: number }).expires_at, hit_ratio: 0.82,
+      recache_tokens_if_cold: 152_300,
+    },
+  })
+  // The reader sees in the narrowed mirror exactly what it saw in the whole payload.
+  const read = readStatuslineMirror(mirror)
+  assert.deepEqual(read, claudeStateFromStatusline(payload, read.state.fetchedAt))
+  // And the previous command still gets every byte Claude Code sent, the free text included.
+  assert.equal(io.spawned[0].stdin.equals(stdin), true)
+})
+
+test('a wider mirror an older bridge wrote is replaced by the next write (1.8 Q11)', async () => {
+  const dir = scratchDir('bridgescript')
+  const mirror = path.join(dir, 'statusline-mirror.json')
+  writeLeakyMirror(mirror, Date.now() - 60_000)
+  assert.ok(fs.readFileSync(mirror, 'utf8').includes('SL-CWD-7c1f'), 'the fixture is not a whole payload')
+  await bridgeMain(['node', BRIDGE_SCRIPT_NAME, mirror], Buffer.from(JSON.stringify(leakyStatusPayload(Date.now()))), recorder())
+  const text = fs.readFileSync(mirror, 'utf8')
+  for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the mirror still holds ${secret}`)
+  assert.deepEqual(fs.readdirSync(dir), ['statusline-mirror.json'])
+})
+
+test('narrowing keeps a value of the shape the reader takes and nothing else (1.8 Q11)', () => {
+  // A leaf holds a string, a finite number, a boolean or null — never an object or an array.
+  assert.deepEqual(narrowPayload({ session_id: { text: 'x' }, model: { id: ['a'], display_name: 'Opus' } }),
+    { model: { display_name: 'Opus' } })
+  // A block that is not an object is left out whole; so is a key the table does not name.
+  assert.deepEqual(narrowPayload({ rate_limits: 'x', context_window: [1], cwd: '/x', prompt_cache: { warm: true, extra: 1 } }),
+    { prompt_cache: { warm: true } })
+  // A plan is a name or an object holding one (quota.ts `planLabel`).
+  assert.deepEqual(narrowPayload({ plan: 'Max', subscription: { display_name: 'Team', seats: 3 } }),
+    { plan: 'Max', subscription: { display_name: 'Team' } })
+  // camelCase, as the reader takes it.
+  assert.deepEqual(narrowPayload({ sessionId: 'a', rateLimits: { fiveHour: { usedPercentage: 1, junk: 2 } } }),
+    { sessionId: 'a', rateLimits: { fiveHour: { usedPercentage: 1 } } })
+  // A number the JSON could not carry is no value; a payload that is not an object keeps nothing.
+  assert.deepEqual(narrowPayload({ cost: { total_cost_usd: Number.NaN } }), { cost: {} })
+  assert.deepEqual(narrowPayload('text'), {})
+  assert.deepEqual(narrowPayload([{ session_id: 'a' }]), {})
+  assert.deepEqual(narrowPayload(null), {})
+  // Every top-level key of the table is a key the reader picks.
+  assert.deepEqual(Object.keys(MIRROR_KEEP).sort(), ['contextWindow', 'context_window', 'cost', 'model', 'plan', 'promptCache',
+    'prompt_cache', 'rateLimits', 'rate_limits', 'sessionId', 'session_id', 'subscription'])
 })

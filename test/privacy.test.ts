@@ -102,12 +102,14 @@ test('a host planted in a translated string is reported', () => {
 interface ContractRow {
   what: string
   file: string
-  kind: 'fields' | 'regex' | 'tags'
+  source?: string
+  kind: 'fields' | 'regex' | 'tags' | 'picks'
   body?: string
   variable?: string
   regex?: string
   pattern?: RegExp
   fields: string[]
+  pages?: string[]
 }
 interface ContractOffender { what: string; file: string; unlisted: string[]; unread: string[]; error: string | null }
 
@@ -118,10 +120,15 @@ const contract = require('../scripts/check-privacy.mjs') as {
   fieldsRead: (body: string, variable: string) => string[]
   constantOf: (src: string, name: string) => string | null
   quotedKeys: (definition: string) => string[]
-  scanHookBundle: (text: string) => { modules: string[]; offenders: string[] }
+  picksRead: (body: string, variable: string) => string[]
+  scanHookBundle: (text: string, allowed?: string[], forbidden?: string[]) => { modules: string[]; offenders: string[] }
+  scanBridgeBundle: (text: string) => { modules: string[]; offenders: string[] }
   HOOK_BUNDLE: string
   HOOK_ALLOWED_MODULES: string[]
   HOOK_FORBIDDEN_MODULES: string[]
+  BRIDGE_BUNDLE: string
+  BRIDGE_ALLOWED_MODULES: string[]
+  BRIDGE_FORBIDDEN_MODULES: string[]
 }
 
 const REPO = join(__dirname, '..')
@@ -168,11 +175,119 @@ test('the read contract holds for the shipped sources: every reader names exactl
   // reader's six fields of a mirror line.
   assert.deepEqual(byWhat.get('the agent hook\'s input')?.fields, ['hook_event_name', 'session_id', 'agent_id', 'notification_type'])
   assert.deepEqual(byWhat.get('the agent hook\'s mirror')?.fields, ['v', 'ts', 'event', 'sessionId', 'agentId', 'wait'])
-  // 1.6 P13b (pinned and changed by P14b): the two run-record rows read src/runRecord.ts, the two
-  // agent-hook rows the hook's own two files; every other reader is the aggregator's.
+  // 1.6 P13b (pinned and changed by P14b and 1.8 P4): the two run-record rows read src/runRecord.ts,
+  // the two agent-hook rows the hook's own two files, the status-line mirror's rows (1.8 §0a.1)
+  // src/quota.ts; every other reader is the aggregator's.
+  const mirrorRow = (what: string): boolean => what === 'the status-line mirror' || what.startsWith('the status line\'s ')
   const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
-    : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts' : 'src/agg.ts'
+    : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts'
+      : mirrorRow(what) ? 'src/quota.ts' : 'src/agg.ts'
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, fileOf(row.what), row.what)
+  // 1.8 §0a.1 (P4): the mirror's reader, level by level — the envelope, the payload's top-level
+  // fields with 1.8's `session_id`, and of each block what is taken, the prompt cache's
+  // `recache_tokens_if_cold` among it. Held to the privacy page and the prompt-cache page; every
+  // other row keeps the default pages.
+  const rows = contract.READ_CONTRACT.filter((row) => mirrorRow(row.what))
+  assert.deepEqual(rows.map((row) => [row.what, row.kind, row.fields]), [
+    ['the status-line mirror', 'fields', ['schema_version', 'written_at', 'payload']],
+    ['the status line\'s session', 'picks', ['rate_limits', 'rateLimits', 'plan', 'subscription', 'context_window', 'contextWindow',
+      'cost', 'model', 'prompt_cache', 'promptCache', 'session_id', 'sessionId']],
+    ['the status line\'s rate limits', 'picks', ['five_hour', 'fiveHour', 'seven_day', 'sevenDay', 'spend_limit', 'spendLimit']],
+    ['the status line\'s rate-limit window', 'picks', ['used_percentage', 'usedPercentage', 'utilization', 'resets_at', 'resetsAt']],
+    ['the status line\'s spend limit', 'picks', ['used_percentage', 'usedPercentage']],
+    ['the status line\'s plan', 'picks', ['name', 'display_name', 'displayName', 'type']],
+    ['the status line\'s context window', 'picks', ['total_input_tokens', 'totalInputTokens', 'total_output_tokens', 'totalOutputTokens',
+      'context_window_size', 'contextWindowSize', 'used_percentage', 'usedPercentage']],
+    ['the status line\'s cost', 'picks', ['total_cost_usd', 'totalCostUsd']],
+    ['the status line\'s model', 'picks', ['display_name', 'displayName']],
+    ['the status line\'s model id', 'fields', ['id']],
+    ['the status line\'s prompt cache', 'picks', ['ttl', 'expires_at', 'expiresAt', 'hit_ratio', 'hitRatio', 'recache_tokens_if_cold',
+      'recacheTokensIfCold']],
+    ['the status line\'s prompt cache (direct)', 'fields', ['warm']],
+  ])
+  for (const row of contract.READ_CONTRACT) {
+    assert.deepEqual(row.pages, mirrorRow(row.what) ? ['privacy', 'promptCache'] : undefined, row.what)
+    if (mirrorRow(row.what)) assert.equal(row.source, 'statusline-mirror.json', row.what)
+  }
+})
+
+test('the bridge keeps in the mirror exactly the keys the read contract lists for it (1.8 §7a Q11)', () => {
+  const { MIRROR_KEEP } = require('../src/statuslineBridge') as typeof import('../src/statuslineBridge')
+  const kept = new Set<string>()
+  const walk = (keep: unknown): void => {
+    if (Array.isArray(keep)) { for (const alt of keep) walk(alt); return }
+    if (typeof keep !== 'object' || keep === null) return
+    for (const [k, sub] of Object.entries(keep)) { kept.add(k); walk(sub) }
+  }
+  walk(MIRROR_KEEP)
+  const read = new Set(contract.READ_CONTRACT
+    .filter((row) => row.what.startsWith('the status line\'s '))
+    .flatMap((row) => row.fields))
+  assert.deepEqual([...kept].sort(), [...read].sort(),
+    'the bridge keeps a key the reader does not take, or drops one it does — statuslineBridge.ts MIRROR_KEEP and READ_CONTRACT disagree')
+})
+
+test('a picks row reads the quoted keys of every pick of its variable, a cast included, and nothing else (1.8 §0a.1)', () => {
+  const body = [
+    'export function reader(payload, v) {',
+    "  const a = pick(payload, 'rate_limits', 'rateLimits')",
+    "  const b = pick(pick(payload, 'cost') as any, 'total_cost_usd')",
+    "  const c = pick(v as any, 'name', \"display_name\")",
+    "  const d = pick(other, 'cwd')",
+    "  const e = pick(payloadX, 'transcript_path')",
+    '  return payload.model',
+    '}',
+  ].join('\n')
+  assert.deepEqual(contract.picksRead(body, 'payload'), ['rate_limits', 'rateLimits', 'cost'])
+  assert.deepEqual(contract.picksRead(body, 'v'), ['name', 'display_name'])
+  assert.deepEqual(contract.picksRead(body, 'nothing'), [])
+  const rows: ContractRow[] = [
+    { what: 'payload', file: 'x.ts', kind: 'picks', body: 'export function reader(', variable: 'payload', fields: ['rate_limits', 'rateLimits', 'cost'] },
+  ]
+  const read = (text: string) => (): string => text
+  assert.deepEqual(contract.checkReadContract(read(body), rows), [])
+  // One more key picked: reported as unlisted; a listed one gone: as unread.
+  const more = body.replace("'rate_limits', 'rateLimits'", "'rate_limits', 'rateLimits', 'session_name'")
+  assert.deepEqual(contract.checkReadContract(read(more), rows),
+    [{ what: 'payload', file: 'x.ts', unlisted: ['session_name'], unread: [], error: null }])
+  const less = body.replace("pick(pick(payload, 'cost') as any, 'total_cost_usd')", '0')
+  assert.deepEqual(contract.checkReadContract(read(less), rows),
+    [{ what: 'payload', file: 'x.ts', unlisted: [], unread: ['cost'], error: null }])
+  // The shipped reader: `session_name`, `cwd` or `transcript_path` picked of the payload breaks it.
+  const quota = fromRepo('src/quota.ts')
+  const at = quota.indexOf("const rl = pick(payload, 'rate_limits', 'rateLimits') as any")
+  assert.ok(at >= 0)
+  for (const key of ['session_name', 'cwd', 'transcript_path']) {
+    const src = `${quota.slice(0, at)}void pick(payload, '${key}')\n  ${quota.slice(at)}`
+    const broken = contract.checkReadContract((f) => (f === 'src/quota.ts' ? src : fromRepo(f)))
+    assert.deepEqual(broken.map((o) => [o.what, o.unlisted]), [['the status line\'s session', [key]]], key)
+  }
+})
+
+test('the status-line bridge\'s bundle may load child_process, fs and path, and never a network module, a thread or fetch( (1.8 §7a Q16)', () => {
+  assert.equal(contract.BRIDGE_BUNDLE.replace(/\\/g, '/'), 'dist/statusline-bridge.js')
+  assert.deepEqual(contract.BRIDGE_ALLOWED_MODULES, ['child_process', 'fs', 'path'])
+  assert.deepEqual(contract.BRIDGE_FORBIDDEN_MODULES, ['http', 'https', 'net', 'tls', 'dgram', 'worker_threads'])
+  const clean = 'var import_child_process = require("child_process");\nvar fs = __toESM(require("fs"));\nvar path = __toESM(require("path"));\n'
+  assert.deepEqual(contract.scanBridgeBundle(clean), { modules: ['child_process', 'fs', 'path'], offenders: [] })
+  // The agent hook's rule is unchanged: the same text breaks it.
+  assert.deepEqual(contract.scanHookBundle(clean).offenders, ['loads child_process', 'names child_process'])
+  const cases: Array<[string, string]> = [
+    ['require("https")', 'loads https'], ["require('node:net')", 'loads net'], ['import("tls")', 'loads tls'],
+    ['import { Worker } from "worker_threads"', 'loads worker_threads'], ['require("os")', 'loads os'],
+    ['const m = "http"; require(m)', 'names http'], ['fetch(url)', 'calls fetch('],
+  ]
+  for (const [text, finding] of cases) {
+    assert.ok(contract.scanBridgeBundle(clean + text).offenders.includes(finding), `${text}: ${JSON.stringify(contract.scanBridgeBundle(clean + text))}`)
+  }
+  // The shipped bundle, when it is built: those three and nothing else, and no URL.
+  try {
+    const text = readFileSync(join(REPO, contract.BRIDGE_BUNDLE), 'utf8')
+    assert.deepEqual(contract.scanBridgeBundle(text), { modules: ['child_process', 'fs', 'path'], offenders: [] })
+    assert.deepEqual(scanBundle(text).urls, [])
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'ENOENT') throw err
+  }
 })
 
 test('the agent hook\'s bundle may load fs and path, and never a network module, a process, a thread or fetch( (§0a.13)', () => {
@@ -270,6 +385,12 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     writeFileSync(join(dir, 'dist', 'agent-hook.js'), hookBundle)
     writeFileSync(join(dir, 'src', 'agentHook.ts'), fromRepo('src/agentHook.ts'))
     writeFileSync(join(dir, 'src', 'agentHookScript.ts'), fromRepo('src/agentHookScript.ts'))
+    // 1.8 P4 (pinned and changed): the CLI checks the status-line bridge's bundle too, and the
+    // mirror's reader is a row of the contract.
+    const bridgeBundle = 'var cp = require("child_process");\nvar fs = require("fs");\nvar path = require("path");\n'
+    writeFileSync(join(dir, 'dist', 'statusline-bridge.js'), bridgeBundle)
+    const quota = fromRepo('src/quota.ts')
+    writeFileSync(join(dir, 'src', 'quota.ts'), quota)
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })
@@ -322,6 +443,27 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     assert.equal(prompt.status, 1, prompt.out)
     assert.match(prompt.out, /DIFF {2}the agent hook's input/)
     assert.match(prompt.out, /read but not listed: prompt/)
+    writeFileSync(join(dir, 'src', 'agentHookScript.ts'), script)
+    assert.equal(run().status, 0)
+    // 1.8 §7a Q16: the bridge's bundle reaching for the network, or missing — the gate stops both.
+    writeFileSync(join(dir, 'dist', 'statusline-bridge.js'), `${bridgeBundle}var net = require("net");\n`)
+    const bridgeNet = run()
+    assert.equal(bridgeNet.status, 1, bridgeNet.out)
+    assert.match(bridgeNet.out, /DENY {2}loads net/)
+    assert.match(bridgeNet.out, /the status-line bridge's bundle breaks its rule/)
+    rmSync(join(dir, 'dist', 'statusline-bridge.js'))
+    const bridgeMissing = run()
+    assert.equal(bridgeMissing.status, 1, bridgeMissing.out)
+    assert.match(bridgeMissing.out, /statusline-bridge\.js is missing/)
+    writeFileSync(join(dir, 'dist', 'statusline-bridge.js'), bridgeBundle)
+    // 1.8 §0a.1: the mirror's reader starts to take the session's working directory — the contract stops it.
+    const at3 = quota.indexOf("const rl = pick(payload, 'rate_limits', 'rateLimits') as any")
+    assert.ok(at3 >= 0)
+    writeFileSync(join(dir, 'src', 'quota.ts'), `${quota.slice(0, at3)}void pick(payload, 'cwd')\n  ${quota.slice(at3)}`)
+    const cwd = run()
+    assert.equal(cwd.status, 1, cwd.out)
+    assert.match(cwd.out, /DIFF {2}the status line's session/)
+    assert.match(cwd.out, /read but not listed: cwd/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

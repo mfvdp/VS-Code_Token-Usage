@@ -131,8 +131,9 @@ and, with the opt-in hook, four keys of a hook call — each field named in
 
 No telemetry of any kind is collected, the webview loads no external resource, and
 `npm run check:privacy` fails the build on any `http(s)` literal outside a small allow-list, on
-any reader of a Claude Code file that takes a field its read contract does not list, and on an
-agent hook bundle that loads anything but Node's `fs` and `path`.
+any reader of a Claude Code file that takes a field its read contract does not list, on an
+agent hook bundle that loads anything but Node's `fs` and `path`, and on a status-line bridge
+bundle that loads more than `child_process`, `fs` and `path`.
 The full account is in [Privacy](docs/privacy.md).
 
 ## Documentation
@@ -145,6 +146,7 @@ The full account is in [Privacy](docs/privacy.md).
 | [Dashboard](docs/dashboard.md) | The provider switch, the sections of the panel, the filter bar, the chart, the tables and the heatmap |
 | [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree with its earlier sessions, state colours and guide lines: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
 | [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch — its user agent and a failed attempt beside an old figure —, the status-line bridge, extra usage |
+| [Prompt cache](docs/prompt-cache.md) | What the status line reports about the prompt cache, one reading per session, and exactly which of its fields are read |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
 | [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |
 | [Counting](docs/counting.md) | How the transcripts are read, what a lower bound is, retention and the snapshot |

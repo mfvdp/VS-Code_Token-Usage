@@ -64,10 +64,11 @@ export interface ContextReading {
 /**
  * The prompt cache of ONE Claude Code session, as the status line reported it.
  *
- * The same rules as `ContextReading`: it is the bridge's reading and nothing else —
- * the transcripts know what was read from a cache, not whether one is still warm —
+ * The same rules as `ContextReading`: it is the bridge's reading and nothing else,
  * and it carries the payload's own time, because "expires in 3 m" is only a fact
- * relative to when the status line said so.
+ * relative to when the status line said so. Since 1.8 it also names whose cache it
+ * is (`sessionId`), so the manager can keep one reading per session
+ * (`QuotaManager.promptCacheReadings`) instead of only the latest mirror's.
  */
 export interface PromptCacheReading {
   warm: boolean | null
@@ -78,6 +79,12 @@ export interface PromptCacheReading {
   hitRatio: number | null
   /** Epoch SECONDS of the status-line payload, like `ContextReading.fetchedAt`. */
   readAt: number | null
+  /** 1.8 A1: whose cache this is — the payload's `session_id`; null for a payload without one (before 2.1.x, or refused). */
+  sessionId: string | null
+  /** 1.8 A4: the tokens a cold next request re-caches, as Claude Code reports them; null when absent. */
+  recacheIfCold: number | null
+  /** 1.8 A4: the payload's `model.id` (read since 1.3 as `StatuslineReading.model.id`) — whose prices the cost line uses. */
+  model: string | null
 }
 
 /**

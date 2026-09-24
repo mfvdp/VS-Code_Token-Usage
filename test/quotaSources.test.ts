@@ -259,12 +259,35 @@ test('the prompt cache rides along with the extras, stamped with the mirror\'s o
   // The cache file is fresher and decides the quota; the prompt cache is the mirror's, with
   // the mirror's time — eleven minutes older than the winner's.
   assert.equal(r.state.origin, 'cache')
+  // 1.8 A1 (pinned and changed): the reading also says whose cache it is and whose prices a cold
+  // start pays — null here, where the payload names neither a session nor a model.
   assert.deepEqual(r.extras?.promptCache, {
     warm: true, ttl: '1h', expiresAt: BASE + 30 * MIN, hitRatio: 0.9, readAt: (BASE - 12 * MIN) / 1000,
+    recacheIfCold: null, sessionId: null, model: null,
   })
   assert.notEqual(r.extras?.promptCache?.readAt, r.state.fetchedAt)
   // Nothing of it is spliced into the state, and a mirror without the block is an absence.
   assert.equal(JSON.stringify(r.state).includes('prompt'), false)
   writeMirror(dir, BASE - MIN, 55)
   assert.equal(bestState('claude', inputs(dir), BASE).extras?.promptCache, null)
+})
+
+test('the prompt cache names its session, its re-cache size and its model (1.8 A1, A4)', () => {
+  const dir = scratchDir('qsrc')
+  writeMirror(dir, BASE - 2 * MIN, 55, {
+    session_id: '9d0eb37a-0000-4000-8000-000000000001',
+    model: { id: 'claude-opus-5-5', display_name: 'Opus 5.5' },
+    prompt_cache: { warm: true, ttl: '1h', expires_at: (BASE + 40 * MIN) / 1000, recache_tokens_if_cold: 152_300 },
+  })
+  assert.deepEqual(bestState('claude', inputs(dir), BASE).extras?.promptCache, {
+    warm: true, ttl: '1h', expiresAt: BASE + 40 * MIN, hitRatio: null, readAt: (BASE - 2 * MIN) / 1000,
+    recacheIfCold: 152_300, sessionId: '9d0eb37a-0000-4000-8000-000000000001', model: 'claude-opus-5-5',
+  })
+  // A session id out of its alphabet is no id, and a model without an id names no model.
+  writeMirror(dir, BASE - 2 * MIN, 55, {
+    session_id: '../../etc', model: { display_name: 'Opus' }, prompt_cache: { warm: true, ttl: '1h' },
+  })
+  const pc = bestState('claude', inputs(dir), BASE).extras?.promptCache
+  assert.equal(pc?.sessionId, null)
+  assert.equal(pc?.model, null)
 })

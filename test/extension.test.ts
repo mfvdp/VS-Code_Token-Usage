@@ -26,7 +26,8 @@ import * as os from 'os'
 import * as path from 'path'
 import {
   agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
-  journalKey, journalLine, metaJson, queueOperationLine, runRecordJson, snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine,
+  journalKey, journalLine, LEAK_SESSION_ID, LEAK_STATUS_SECRETS, leakyStatusPayload, metaJson, queueOperationLine, runRecordJson,
+  snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine, writeLeakyMirror,
 } from './fixtures/helpers'
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
@@ -888,6 +889,115 @@ test('the status line mirror reaches the context entry and the text view', async
   // The prompt cache from the same mirror, under the Claude windows, with its parts.
   assert.match(md, /\nprompt cache warm · expires in \d+ (h|m) \d+ (m|s) \(1 h TTL\) · hit ratio 82 % — current session, via the status line · updated [^\n]+\n/)
 
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a status-line payload\'s session name, paths, workspace and free text reach no output, and of its session id nothing (1.8 §0a.1 leak test, the host)', async () => {
+  const fx = makeFixture()
+  fs.mkdirSync(fx.storage, { recursive: true })
+  const mirror = path.join(fx.storage, 'statusline-mirror.json')
+  // A mirror a 1.3–1.7 bridge wrote whole: activation narrows it before anything reads it (§7a Q11).
+  writeLeakyMirror(mirror, Date.now() - 60_000, Date.now())
+  await activateHost(fx, REPO, {
+    settings: { 'tokenPace.statusBar.show': ['claudeQuota', 'context', 'tokens'] },
+  })
+  const narrowed = fs.readFileSync(mirror, 'utf8')
+  for (const secret of LEAK_STATUS_SECRETS) assert.equal(narrowed.includes(secret), false, `activation left ${secret} in the mirror`)
+  assert.match(state.logText(), /Status line bridge: the mirror was narrowed to the fields Token Pace reads\./)
+  await waitOwnColdStart(state, 'the cold scan')
+  await waitFor('the context entry', () => state.textOf(CONTEXT_ITEM) === 'ctx 64%')
+
+  // An older bridge that still runs writes the whole payload again: the reader takes its fields
+  // and nothing else. Its context share tells this reading from the one before.
+  const payload = leakyStatusPayload(Date.now())
+  fs.writeFileSync(mirror, JSON.stringify({
+    schema_version: 1, written_at: Date.now() - 1_000,
+    payload: { ...payload, context_window: { ...(payload.context_window as Record<string, unknown>), used_percentage: 71 } },
+  }))
+  await waitFor('the whole payload to be read', () => state.textOf(CONTEXT_ITEM) === 'ctx 71%')
+  assert.ok(fs.readFileSync(mirror, 'utf8').includes('SL-CWD-7c1f'), 'the fixture lost its payload')
+
+  // Every output there is: the page's payload, the markdown document, the Quick Pick, every item of
+  // the bar and its tooltip, Copy Summary, Copy Diagnostics, both exports and the log.
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  assert.match(markdown, /prompt cache warm/, 'the prompt-cache line is not in the markdown — the reading was not read')
+  await state.execute('tokenPace.showUsageQuickPick')
+  await state.execute('tokenPace.copySummary')
+  await state.execute('tokenPace.copyDiagnostics')
+  const uri = (HOST.api as { Uri: { file(p: string): unknown } }).Uri.file
+  state.answers.push(uri(path.join(fx.data, 'out', 'usage.csv')), undefined)
+  await state.execute('tokenPace.exportCsv')
+  state.answers.push(uri(path.join(fx.data, 'out', 'usage.json')), undefined)
+  await state.execute('tokenPace.exportJson')
+  assert.ok(state.writes.length >= 2, 'the exports wrote nothing')
+  const outputs: Array<[string, string]> = [
+    ['page', JSON.stringify(page.sent)],
+    ['markdown', markdown],
+    ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+    ['status bar', JSON.stringify(state.items.map((i) => [i.text, i.tooltip]))],
+    ['clipboard', state.clipboard.join('\n')],
+    ['exports', JSON.stringify(state.writes)],
+    ['log', state.logText()],
+  ]
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  outputs.push(['state', fs.readFileSync(fx.stateFile, 'utf8')])
+  const tail = LEAK_SESSION_ID.slice(8)
+  for (const [what, text] of outputs) {
+    for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+    // At this tip no view names a session of the status line yet; none holds a part of the id.
+    assert.equal(text.includes(LEAK_SESSION_ID), false, `the ${what} holds the session id`)
+    assert.equal(text.includes(tail), false, `the ${what} holds the tail of the session id`)
+  }
+})
+
+test('an install of 1.3–1.7 is moved to the script\'s copy in the storage on activation, once, and the copy is refreshed (1.8 §7a Q16)', async () => {
+  const fx = makeFixture()
+  fs.mkdirSync(fx.storage, { recursive: true })
+  const { bridgeCommand } = require('../src/bridge') as typeof import('../src/bridge')
+  const settingsFile = path.join(fx.claudeDir, 'settings.json')
+  const mirror = path.join(fx.storage, 'statusline-mirror.json')
+  // The command a 1.7.0 install wrote: the script inside its versioned folder, which the update removed.
+  const oldScript = path.join(fx.data, 'extensions', 'frederik.token-pace-1.7.0', 'dist', 'statusline-bridge.js')
+  const old = bridgeCommand('/usr/bin/node', oldScript, mirror, 'ccstatus --style "compact box"', 'linux')
+  const raw = `${JSON.stringify({ model: 'opus', env: { A: '1' }, statusLine: { type: 'command', command: old, padding: 1 } }, null, 4)}\n`
+  fs.writeFileSync(settingsFile, raw)
+  const previous = { type: 'command', command: 'ccstatus --style "compact box"' }
+  const shared = new Map<string, unknown>([['tokenPace.bridge', { previous, installedCommand: old, at: T - 86_400_000 }]])
+
+  await activateHost(fx, REPO, { globalState: shared })
+  const copy = path.join(fx.storage, 'statusline-bridge.js')
+  const bundle = fs.readFileSync(path.join(REPO, 'dist', 'statusline-bridge.js'), 'utf8')
+  const moved = bridgeCommand('/usr/bin/node', copy, mirror, 'ccstatus --style "compact box"', 'linux')
+  // Only the command string changed; the chained command, the entry's padding and every other key stay.
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile, 'utf8')),
+    { model: 'opus', env: { A: '1' }, statusLine: { type: 'command', command: moved, padding: 1 } })
+  assert.equal(fs.readFileSync(settingsFile, 'utf8'), raw.replace(JSON.stringify(old), JSON.stringify(moved)),
+    'a byte of settings.json beside the command changed')
+  assert.equal(fs.readFileSync(copy, 'utf8'), bundle, 'the command names a copy that is not the shipped script')
+  const backups = (): string[] => fs.readdirSync(fx.claudeDir).filter((f) => f.startsWith('settings.json.token-pace-backup-'))
+  assert.equal(backups().length, 1)
+  assert.equal(fs.readFileSync(path.join(fx.claudeDir, backups()[0]), 'utf8'), raw, 'the backup is not the original bytes')
+  assert.deepEqual(shared.get('tokenPace.bridge'), { previous, installedCommand: moved, at: T - 86_400_000 })
+  assert.match(state.logText(), new RegExp(`Status line bridge: the installed command now runs ${escapeRe(copy)} instead of ${escapeRe(oldScript)}`))
+  await waitOwnColdStart(state, 'the cold scan')
+  // The state the views and the report read is the true one.
+  await state.execute('tokenPace.copyDiagnostics')
+  assert.match(state.clipboard[state.clipboard.length - 1] ?? '', /## Status line bridge\n+installed · /)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // Once: the next activation moves nothing, and replaces an older copy with the shipped script.
+  const bytes = fs.readFileSync(settingsFile, 'utf8')
+  fs.writeFileSync(copy, '// an older build of the bridge\n')
+  await activateHost(fx, REPO, { globalState: shared })
+  assert.equal(fs.readFileSync(settingsFile, 'utf8'), bytes)
+  assert.equal(backups().length, 1, 'a second activation wrote a second backup')
+  assert.equal(fs.readFileSync(copy, 'utf8'), bundle, 'activation left an older copy of the bridge in place')
+  assert.match(state.logText(), /Status line bridge: the script in the extension storage was updated\./)
+  assert.equal(/the installed command now runs/.test(state.logText()), false)
+  await waitOwnColdStart(state, 'the second cold scan')
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 

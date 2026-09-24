@@ -32,7 +32,10 @@ import {
 import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { AGENT_TABLES_REVISION, Aggregator, cleanAgentId, IngestChanges } from './agg'
 import { Alerts } from './alerts'
-import { BridgePaths, registerBridgeCommands, state as bridgeState } from './bridge'
+import {
+  BRIDGE_SCRIPT_NAME, BridgePaths, migrateBridge, narrowMirrorFile, refreshBridgeScript, registerBridgeCommands,
+  state as bridgeState,
+} from './bridge'
 import {
   affects, Config, CONFIG_KEYS, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
 } from './config'
@@ -194,6 +197,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     log.warn(`Agent hook: the script in the extension storage could not be updated (${errorKind(err)}).`)
   }
   hookMirror.refresh(Date.now())
+  // 1.8 §7a Q11: a status-line mirror an older bridge wrote whole keeps only what the reader
+  // takes from now on — before the first read of it.
+  try {
+    const narrowed = narrowMirrorFile(paths.mirror)
+    if (narrowed === 'narrowed') log.info('Status line bridge: the mirror was narrowed to the fields Token Pace reads.')
+    if (narrowed === 'deleted') log.info('Status line bridge: a mirror that could not be read was deleted; the next status-line run writes a new one.')
+  } catch (err) {
+    log.warn(`Status line bridge: the mirror could not be narrowed (${errorKind(err)}).`)
+  }
   // `~/.claude.json` lives in the home directory even when CLAUDE_CONFIG_DIR moves the rest
   // of Claude Code's state; deriving it from the config dir would read the wrong file.
   const claudeJsonFile = path.join(os.homedir(), '.claude.json')
@@ -566,8 +578,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   const bridgePaths: BridgePaths = {
     settingsFile: path.join(claudeDir, 'settings.json'),
     claudeDir,
-    script: context.asAbsolutePath(path.join('dist', 'statusline-bridge.js')),
+    // 1.8 §7a Q16: the command names the copy in globalStorage, which an update of the extension
+    // leaves in place; the bundle in the versioned extension folder is only what it is copied from.
+    script: path.join(storage, BRIDGE_SCRIPT_NAME),
+    bundle: context.asAbsolutePath(path.join('dist', BRIDGE_SCRIPT_NAME)),
     mirror: paths.mirror,
+  }
+  try {
+    // An update reaches a status line connected before it; nothing is copied without a copy there.
+    if (refreshBridgeScript(bridgePaths.bundle, bridgePaths.script)) {
+      log.info('Status line bridge: the script in the extension storage was updated.')
+    }
+  } catch (err) {
+    log.warn(`Status line bridge: the script in the extension storage could not be updated (${errorKind(err)}).`)
+  }
+  try {
+    // 1.8 §7a Q16: a command an install of 1.3–1.7 wrote names the versioned extension folder; it is
+    // moved to the copy once — the consented write of the install, with its backup, never in
+    // Restricted Mode — and the state below reports what the status line really runs.
+    const moved = await migrateBridge(bridgePaths, context.globalState, {
+      restricted: !vscode.workspace.isTrusted,
+      log: say,
+    })
+    if (moved.kind === 'restricted') {
+      log.info('Status line bridge: the installed command names the extension folder of an older version; it is moved to the extension storage in a trusted window.')
+    }
+    if (moved.kind === 'failed') log.warn(`Status line bridge: the installed command could not be moved to the extension storage (${moved.cause}).`)
+  } catch (err) {
+    log.warn(`Status line bridge: the installed command could not be checked (${errorKind(err)}).`)
   }
   registerBridgeCommands(context, {
     memento: context.globalState,
@@ -1426,6 +1464,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     if (result.deleted.includes('hookMirror')) hookMirror.refresh(Date.now())
     if (result.deleted.includes('history')) history.clear()
     if (result.deleted.includes('quota')) quotaMgr.clearPolled()
+    // 1.8 A1: the per-session prompt-cache readings were read from the mirror; they go with it.
+    if (result.deleted.includes('mirror')) quotaMgr.clearCacheReadings()
     if (result.deleted.includes('ui')) ui = defaultUiState(cfg)
     if (result.failed.length > 0) {
       void vscode.window.showWarningMessage(t('Token Pace: could not delete {0}.', result.failed.join(', ')))

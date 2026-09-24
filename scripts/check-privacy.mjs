@@ -22,7 +22,10 @@
  *
  * And the agent hook's bundle (1.6 O4, `dist/agent-hook.js`, which Claude Code runs on every hook
  * event the user installs it for): it may load `fs` and `path` and nothing else — never a network
- * module, a child process, a worker thread, never `fetch(` (`scanHookBundle`, below).
+ * module, a child process, a worker thread, never `fetch(` (`scanHookBundle`, below). 1.8 §7a Q16:
+ * the status-line bridge's bundle (`dist/statusline-bridge.js`, which the connected status line runs
+ * from its copy in globalStorage) is held to the same rule, with `child_process` allowed — it starts
+ * the status-line command that was there before it — and nothing else added.
  *
  * Run: node scripts/check-privacy.mjs   (also `npm run check:privacy`)
  */
@@ -117,13 +120,18 @@ export function filesToScan() {
 // ---------------------------------------------------------------------------
 
 /**
- * One reader of a Claude Code file and the only fields it may name. Three kinds of row:
+ * One reader of a Claude Code file and the only fields it may name. Four kinds of row:
  *  - `fields`: every `<variable>.<field>` / `<variable>?.<field>` the body names — the body runs
  *    from the line holding `body` to the closing brace at that line's indentation;
  *  - `regex`: the quoted key names (`"name":`) inside the named constant's definition, for a
  *    reader that matches keys on the raw line instead of parsing it;
  *  - `tags`: group 1 of every match of `pattern` over the whole file — the tag names the
- *    matching constants look for.
+ *    matching constants look for;
+ *  - `picks` (1.8 §0a.1): the quoted key names of every `pick(<variable>, '<key>', …)` call inside
+ *    the body — the status-line reader (src/quota.ts) names the payload's fields through `pick`,
+ *    in both spellings, which the `fields` regex does not see.
+ * `pages` (1.8 §0a.1, optional) names the documentation pages that must name the row's fields —
+ * the keys of `doc` in test/docs.test.ts; without it `['privacy', 'agents']`, the rule since 1.6.
  * `what` names the reader as both documentation pages describe it; `source` the file it reads, as
  * docs/privacy.md names it (a Claude Code transcript under `~/.claude/projects/`, an agent's
  * identity sidecar `agent-<id>.meta.json`, a workflow run's `journal.jsonl`, Claude Code's run record
@@ -139,10 +147,20 @@ export function filesToScan() {
  * `compactMetadata` (`trigger`, `preTokens`, `postTokens`); 0a.11 the sidecar's `parentAgentId`;
  * 0a.12 the run record's seven; 0a.13 the hook's four input keys and its mirror's six fields.
  *
- * @typedef {{ what: string, source: string, file: string, kind: 'fields', body: string, variable: string, fields: string[] }
- *   | { what: string, source: string, file: string, kind: 'regex', regex: string, fields: string[] }
- *   | { what: string, source: string, file: string, kind: 'tags', pattern: RegExp, fields: string[] }} ReadContractRow
+ * 1.8 §0a.1 adds the reader of the status-line mirror, `<globalStorage>/statusline-mirror.json` — the
+ * first row for a file that is not a transcript-side file of `~/.claude/projects/`: the payload's
+ * top-level fields (with 1.8's `session_id`), and level by level what is taken of each (with 1.8's
+ * `recache_tokens_if_cold`). The bridge keeps nothing else in the mirror (statuslineBridge.ts
+ * `MIRROR_KEEP`, tied to these rows by test/privacy.test.ts).
+ *
+ * @typedef {{ what: string, source: string, file: string, kind: 'fields', body: string, variable: string, fields: string[], pages?: string[] }
+ *   | { what: string, source: string, file: string, kind: 'regex', regex: string, fields: string[], pages?: string[] }
+ *   | { what: string, source: string, file: string, kind: 'tags', pattern: RegExp, fields: string[], pages?: string[] }
+ *   | { what: string, source: string, file: string, kind: 'picks', body: string, variable: string, fields: string[], pages?: string[] }} ReadContractRow
  */
+
+/** 1.8 §0a.1: the pages a row of the status-line mirror is held to. */
+const MIRROR_PAGES = ['privacy', 'promptCache']
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
@@ -227,6 +245,36 @@ export const READ_CONTRACT = [
     fields: ['hook_event_name', 'session_id', 'agent_id', 'notification_type'] },
   { what: 'the agent hook\'s mirror', source: 'agent-hook.jsonl', file: 'src/agentHook.ts', kind: 'fields', body: 'export function cleanHookLine(', variable: 'o',
     fields: ['v', 'ts', 'event', 'sessionId', 'agentId', 'wait'] },
+  // 1.8 §0a.1 (P4): the status-line mirror in the extension's storage — the envelope the bridge
+  // writes around the payload, and of the payload what the status-line reader picks, level by
+  // level, in both spellings. 1.8 adds the top-level `session_id` and the prompt cache's
+  // `recache_tokens_if_cold`; the rest has been read since 1.3.
+  { what: 'the status-line mirror', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'fields', body: 'export function readStatuslineMirror(', variable: 'parsed',
+    fields: ['schema_version', 'written_at', 'payload'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s session', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'export function claudeStateFromStatusline(', variable: 'payload',
+    fields: ['rate_limits', 'rateLimits', 'plan', 'subscription', 'context_window', 'contextWindow', 'cost', 'model',
+      'prompt_cache', 'promptCache', 'session_id', 'sessionId'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s rate limits', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'export function claudeStateFromStatusline(', variable: 'rl',
+    fields: ['five_hour', 'fiveHour', 'seven_day', 'sevenDay', 'spend_limit', 'spendLimit'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s rate-limit window', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'function statuslineWindow(', variable: 'v',
+    fields: ['used_percentage', 'usedPercentage', 'utilization', 'resets_at', 'resetsAt'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s spend limit', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'export function claudeStateFromStatusline(', variable: 'spend',
+    fields: ['used_percentage', 'usedPercentage'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s plan', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'function planLabel(', variable: 'v',
+    fields: ['name', 'display_name', 'displayName', 'type'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s context window', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'export function claudeStateFromStatusline(', variable: 'cw',
+    fields: ['total_input_tokens', 'totalInputTokens', 'total_output_tokens', 'totalOutputTokens', 'context_window_size',
+      'contextWindowSize', 'used_percentage', 'usedPercentage'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s cost', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'export function claudeStateFromStatusline(', variable: 'cost',
+    fields: ['total_cost_usd', 'totalCostUsd'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s model', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'export function claudeStateFromStatusline(', variable: 'model',
+    fields: ['display_name', 'displayName'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s model id', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'fields', body: 'export function claudeStateFromStatusline(', variable: 'model',
+    fields: ['id'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s prompt cache', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'function promptCacheOf(', variable: 'v',
+    fields: ['ttl', 'expires_at', 'expiresAt', 'hit_ratio', 'hitRatio', 'recache_tokens_if_cold', 'recacheTokensIfCold'], pages: MIRROR_PAGES },
+  { what: 'the status line\'s prompt cache (direct)', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'fields', body: 'function promptCacheOf(', variable: 'v',
+    fields: ['warm'], pages: MIRROR_PAGES },
 ]
 
 /**
@@ -247,6 +295,18 @@ export function bodyOf(src, signature) {
 /** The distinct `<variable>.<field>` names a body reads, in order of first appearance. */
 export function fieldsRead(body, variable) {
   return [...new Set([...body.matchAll(new RegExp(`\\b${variable}\\??\\.([A-Za-z_]+)`, 'g'))].map((m) => m[1]))]
+}
+
+/**
+ * 1.8 §0a.1: the distinct keys a body picks of `variable` — the quoted names of every
+ * `pick(<variable>, '<key>', …)` call, a cast of the variable (`pick(v as any, …)`) included, in
+ * order of first appearance. A call whose first argument is anything else is not the variable's.
+ */
+export function picksRead(body, variable) {
+  const calls = body.matchAll(new RegExp(`\\bpick\\(\\s*${variable}(?:\\s+as\\s+[A-Za-z_]+)?\\s*,([^)]*)\\)`, 'g'))
+  const keys = []
+  for (const call of calls) for (const k of call[1].matchAll(/(['"`])([^'"`]+)\1/g)) keys.push(k[2])
+  return [...new Set(keys)]
 }
 
 /**
@@ -304,6 +364,10 @@ function readOf(row, src) {
   if (row.kind === 'tags') {
     return { read: [...new Set([...src.matchAll(row.pattern)].map((m) => m[1]))] }
   }
+  if (row.kind === 'picks') {
+    const body = bodyOf(src, row.body)
+    return body === null ? { error: `${row.file} no longer contains ${row.body}` } : { read: picksRead(body, row.variable) }
+  }
   return { error: `unknown kind ${String(row.kind)}` }
 }
 
@@ -356,15 +420,25 @@ export const HOOK_ALLOWED_MODULES = ['fs', 'path']
  */
 export const HOOK_FORBIDDEN_MODULES = ['http', 'https', 'net', 'tls', 'dgram', 'child_process', 'worker_threads']
 
+/** 1.8 §7a Q16: the status-line bridge's bundle — the file its copy in globalStorage is made from. */
+export const BRIDGE_BUNDLE = join('dist', 'statusline-bridge.js')
+/** The modules it may load: `fs` and `path` for the mirror, `child_process` for the previous command. */
+export const BRIDGE_ALLOWED_MODULES = ['child_process', 'fs', 'path']
+/** The modules it may never name: the network and a thread of its own. */
+export const BRIDGE_FORBIDDEN_MODULES = ['http', 'https', 'net', 'tls', 'dgram', 'worker_threads']
+
 /**
- * What the agent hook's bundle loads, and what of it breaks the rules: every module a `require`,
- * an `import(…)` or an `import … from` names (a `node:` prefix taken off); every string literal
- * that is exactly a forbidden module's name; a `fetch(`. Pure, for the tests.
+ * What a bundle Claude Code runs loads, and what of it breaks its rules: every module a `require`,
+ * an `import(…)` or an `import … from` names (a `node:` prefix taken off) that `allowed` does not
+ * list; every string literal that is exactly a `forbidden` module's name; a `fetch(`. Pure, for the
+ * tests. The defaults are the agent hook's rule (1.6 O4); the bridge passes its own (1.8 Q16).
  *
  * @param {string} text
+ * @param {string[]} [allowed]
+ * @param {string[]} [forbidden]
  * @returns {{ modules: string[], offenders: string[] }}
  */
-export function scanHookBundle(text) {
+export function scanHookBundle(text, allowed = HOOK_ALLOWED_MODULES, forbidden = HOOK_FORBIDDEN_MODULES) {
   const modules = new Set()
   const offenders = new Set()
   const bare = (m) => m.replace(/^node:/, '')
@@ -372,13 +446,18 @@ export function scanHookBundle(text) {
   for (const m of text.matchAll(/\bimport\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g)) modules.add(bare(m[2]))
   for (const m of text.matchAll(/\bfrom\s*(['"`])([^'"`]+)\1/g)) modules.add(bare(m[2]))
   for (const mod of modules) {
-    if (!HOOK_ALLOWED_MODULES.includes(mod)) offenders.add(`loads ${mod}`)
+    if (!allowed.includes(mod)) offenders.add(`loads ${mod}`)
   }
   for (const m of text.matchAll(/(['"`])(?:node:)?([a-z_]+)\1/g)) {
-    if (HOOK_FORBIDDEN_MODULES.includes(m[2])) offenders.add(`names ${m[2]}`)
+    if (forbidden.includes(m[2])) offenders.add(`names ${m[2]}`)
   }
   if (/\bfetch\s*\(/.test(text)) offenders.add('calls fetch(')
   return { modules: [...modules].sort(), offenders: [...offenders].sort() }
+}
+
+/** 1.8 §7a Q16: the bridge's bundle against its own rule. */
+export function scanBridgeBundle(text) {
+  return scanHookBundle(text, BRIDGE_ALLOWED_MODULES, BRIDGE_FORBIDDEN_MODULES)
 }
 
 function main() {
@@ -426,7 +505,24 @@ function main() {
     if (hook.offenders.length > 0) hookBad = hook.offenders
   }
 
+  // 1.8 §7a Q16: the status-line bridge's bundle loads `child_process`, `fs` and `path`, nothing else.
+  let bridgeBad = null
+  if (!existsSync(BRIDGE_BUNDLE)) {
+    console.log(`\nstatus-line bridge: ${BRIDGE_BUNDLE} is missing`)
+    bridgeBad = [`${BRIDGE_BUNDLE} is missing — run \`npm run build\` first`]
+  } else {
+    const bridge = scanBridgeBundle(readFileSync(BRIDGE_BUNDLE, 'utf8'))
+    console.log(`status-line bridge: ${BRIDGE_BUNDLE} loads ${bridge.modules.join(', ') || 'nothing'}`)
+    for (const o of bridge.offenders) console.log(`  DENY  ${o}`)
+    if (bridge.offenders.length > 0) bridgeBad = bridge.offenders
+  }
+
   let failed = false
+  if (bridgeBad !== null) {
+    console.error(`\ncheck-privacy: the status-line bridge's bundle breaks its rule: ${bridgeBad.join('; ')}.`)
+    console.error('It may load child_process, fs and path only — never a network module, a worker, never fetch(.')
+    failed = true
+  }
   if (hookBad !== null) {
     console.error(`\ncheck-privacy: the agent hook's bundle breaks its rule: ${hookBad.join('; ')}.`)
     console.error('It may load fs and path only — never a network module, a child process, a worker, never fetch(.')
@@ -439,7 +535,7 @@ function main() {
   }
   if (broken.length > 0) {
     console.error(`\ncheck-privacy: ${broken.length} reader(s) differ from the read contract.`)
-    console.error('A new field needs its row in READ_CONTRACT and its name in docs/privacy.md and docs/agents.md.')
+    console.error('A new field needs its row in READ_CONTRACT and its name on the row\'s pages — docs/privacy.md and docs/agents.md, or the ones its `pages` names.')
     failed = true
   }
   if (failed) process.exit(1)

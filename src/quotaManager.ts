@@ -177,6 +177,25 @@ function defaultSchedule(fn: () => void, delayMs: number): Scheduled {
   return { cancel: () => clearTimeout(t) }
 }
 
+/** 1.8 A1: at most this many sessions' readings are kept; the oldest reading goes first. */
+export const CACHE_READINGS_MAX = 16
+/** 1.8 A1: a reading older than this (by its readAt) is dropped — a 1 h TTL plus the hour a cold line is shown. */
+export const CACHE_READING_KEEP_MS = 2 * 3_600_000
+
+/** 1.8 A1: whether a kept reading is still young enough to keep — its `readAt` (seconds) against now (ms). */
+function readingFresh(r: PromptCacheReading, now: number): boolean {
+  return r.readAt !== null && now - r.readAt * 1000 <= CACHE_READING_KEEP_MS
+}
+
+/** 1.8 A1: newest `readAt` first; a tie by the session id, so the order never depends on the map's. */
+function byReadAtDesc(a: PromptCacheReading, b: PromptCacheReading): number {
+  const d = (b.readAt ?? 0) - (a.readAt ?? 0)
+  if (d !== 0) return d
+  const x = a.sessionId ?? ''
+  const y = b.sessionId ?? ''
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
 const NO_HISTORY: HistorySink = {
   // Callers that do not pass a history get none; nothing is silently invented.
   add: () => 0,
@@ -202,6 +221,12 @@ export class QuotaManager {
   private lastCandidates: Record<Source, Candidate[]> = { claude: [], codex: [] }
   /** What the status line knew beyond the windows; only Claude ever has one. */
   private lastExtras: Partial<Record<Source, SourceExtras | null>> = {}
+  /**
+   * 1.8 A1: the newest bridge reading of every session the mirror named since activation, by session id — memory
+   * only, never persisted. Filled in `current()` from each read of the mirror; a reading replaces the stored one of its
+   * session only when its `readAt` is not older. Cleared by `clearPolled()` (and `clearCacheReadings()`).
+   */
+  private cacheReadings = new Map<string, PromptCacheReading>()
   /** The last `current()` answer, replayed for MEMO_MS. Null means "read the files". */
   private memo: { at: number; states: QuotaState[] } | null = null
   private identityHint: Partial<Record<Source, string | null>> = {}
@@ -329,6 +354,9 @@ export class QuotaManager {
       const state = this.enrich(src, r.state, now)
       this.lastCandidates[src] = r.candidates
       this.lastExtras[src] = r.extras
+      // 1.8 A1: the mirror holds one session — the one whose status line ran last —, so each read
+      // adds that session's reading to the ones read before.
+      if (src === 'claude') this.noteCacheReading(r.extras?.promptCache ?? null, now)
       this.lastStates[src] = state
       if (r.identityHint) this.identityHint[src] = r.identityHint
       // Followers read the same files; only the leader writes the shared history.
@@ -378,6 +406,41 @@ export class QuotaManager {
    */
   promptCacheReading(): PromptCacheReading | null {
     return this.lastExtras.claude?.promptCache ?? null
+  }
+
+  /**
+   * 1.8 A1: every kept reading, newest `readAt` first — one per session the status line named since
+   * activation, none older than CACHE_READING_KEEP_MS at `now`, at most CACHE_READINGS_MAX. A reading
+   * without a session id is never among them (`promptCacheReading()` above still has it).
+   */
+  promptCacheReadings(now = this.deps.now()): PromptCacheReading[] {
+    return [...this.cacheReadings.values()].filter((r) => readingFresh(r, now)).sort(byReadAtDesc)
+  }
+
+  /**
+   * 1.8 A1: forgets every kept reading — with `clearPolled()`, and when *Clear Stored Data…* deleted the
+   * mirror they were read from.
+   */
+  clearCacheReadings(): void {
+    this.cacheReadings.clear()
+  }
+
+  /**
+   * 1.8 A1: keeps one reading under its session id. An older reading of the session does not replace a
+   * newer one (two windows, or a mirror read back after a newer one); a reading without an id or a time,
+   * or older than CACHE_READING_KEEP_MS, is not kept; past CACHE_READINGS_MAX the oldest goes.
+   */
+  private noteCacheReading(r: PromptCacheReading | null, now: number): void {
+    for (const [id, kept] of this.cacheReadings) if (!readingFresh(kept, now)) this.cacheReadings.delete(id)
+    if (r === null || r.sessionId === null || !readingFresh(r, now)) return
+    const kept = this.cacheReadings.get(r.sessionId)
+    if (kept !== undefined && (kept.readAt ?? 0) > (r.readAt ?? 0)) return
+    this.cacheReadings.set(r.sessionId, r)
+    while (this.cacheReadings.size > CACHE_READINGS_MAX) {
+      const oldest = [...this.cacheReadings.values()].sort(byReadAtDesc).pop()
+      if (oldest?.sessionId == null) break
+      this.cacheReadings.delete(oldest.sessionId)
+    }
   }
 
   driftReport(): Record<Source, string[]> {
@@ -457,6 +520,8 @@ export class QuotaManager {
     this.lastStates = {}
     this.lastCandidates = { claude: [], codex: [] }
     this.lastExtras = {}
+    // 1.8 A1: the per-session readings go with the rest.
+    this.cacheReadings.clear()
     this.identityHint = {}
     this.historyAt.clear()
     this.resetTriggered.clear()

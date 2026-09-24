@@ -1667,9 +1667,13 @@ export function toolRows(ctx: StatsCtx, range: DayRange, limit: number): ToolsDa
  * and the model chips: the tree is the Claude Code sessions of the last days, whatever the tables
  * filter — the host's agent poll and the status bar read it too (1.7 F1: under another provider
  * the views leave the section out, `ViewModel.claudeOnly`, and the tree is still built whole).
+ *
+ * 1.8 L-2: `pricing` is the build's own `pricingOf(cfg)` — one options object per build, so the
+ * tree's costs share the price lookups the tables made (`priceOf` keeps them per object); without
+ * it the tree takes its own.
  */
 export function agentTreeFor(
-  input: Pick<VmInput, 'agg' | 'cfg' | 'ui' | 'now' | 'hook'>, mode: 'page' | 'text',
+  input: Pick<VmInput, 'agg' | 'cfg' | 'ui' | 'now' | 'hook'>, mode: 'page' | 'text', pricing?: PricingOptions,
 ): AgentTreeVm {
   const { agg, cfg, ui } = input
   // 1.6 L3: the 7-day block — while it is open — with its costs only while costs are shown at all.
@@ -1686,7 +1690,7 @@ export function agentTreeFor(
     more: ui.agentsMore ?? [],
     mode,
     weekOpen: ui.agentsWeekOpen === true,
-    pricing: cfg.showCost ? pricingOf(cfg) : null,
+    pricing: cfg.showCost ? pricing ?? pricingOf(cfg) : null,
     // 1.6 O4: the agent hook's latest calls, when the host has read any.
     hook: input.hook,
     tcfg: readTimeConfig(cfg),
@@ -1714,6 +1718,8 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   const { agg, cfg, history, now, quotas, ui } = input
   const tcfg = readTimeConfig(cfg)
   const paceCfg = readPaceConfig(cfg)
+  // 1.8 L-2: one options object for the whole build — the tables, the cards and the Agents tree —
+  // so each model's price is looked up once per day of it (`priceOf` keeps the lookups per object).
   const pricing: PricingOptions = pricingOf(cfg)
   // 1.7 F1: the provider switch. One view, and the sources it shows in registry order — whatever
   // order the stored list has — for every section that follows it: the statistics as before, and
@@ -1821,7 +1827,7 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     claudeOnly: claudeShown || view === 'all' ? null : claudeOnlyText(view),
     quotas: cards,
     // Only what the reader opened goes to the page (1.6 D3); see agentTreeFor.
-    agents: agentTreeFor(input, 'page'),
+    agents: agentTreeFor(input, 'page', pricing),
     context: contextCard(input.context, cfg, now),
     digest: [],
     kpis: kpiRow,

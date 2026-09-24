@@ -93,3 +93,24 @@ and the page takes in. The host therefore sends the page what it draws, and noth
   its view (`budgets`) and never reads the other list, so the whole-page push leaves it out
   (`pagePayload`, `HOST_ONLY_FIELDS`). Under All the two are the same rows: with three budgets
   configured, a whole-page push is 1.6 KB smaller.
+
+Building the view model — at most every five seconds (`VM_MIN_INTERVAL_MS`), from every bucket the
+store holds, table after table — asks the same few questions thousands of times: the local day and
+hour of an hour bucket, a model's name without its date and context suffix, a model's price on a day.
+Since 1.8 each answer is looked up once and kept:
+
+* **The calendar parts of an instant** per time zone and minute (`partsOf` in `src/time.ts`), at most
+  20 000 (`PARTS_MEMO_MAX`). An answer carries nothing below the minute, and from 1973 on every zone's
+  offset is a whole number of minutes; before that (`PARTS_MEMO_FROM_MS` — Liberia's −0:44:30 lasted
+  until 1972) two instants of one minute could fall on two days, so those are worked out every time.
+* **A model's normal name** (`normalizeModel` in `src/prices.ts`), at most 1024 names
+  (`MODEL_MEMO_MAX`), and **its price on a day** per pricing-options object (`priceOf`), at most
+  20 000 per object (`PRICE_MEMO_MAX`). A build makes one options object and hands it to every table,
+  the cards and the Agents tree, so each model is priced once per day of its usage; a kept price is
+  frozen, and no caller writes into one.
+
+A full memo is emptied whole — there is no bookkeeping in the hot path. The figures are the same:
+the tests hold every answer, and five whole view models, against the path without the memos
+(`resetTimeMemos(false)`, `resetPriceMemos(false)`). On a synthetic store of 8 700 hour buckets a
+build took a median 36 ms instead of 53 in UTC (55 instead of 73 in Europe/Berlin), on the harness's
+large agent run 15 ms instead of 17 — measured on the developer's machine, not a promise.

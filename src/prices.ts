@@ -162,11 +162,60 @@ export const PRICES: Record<string, PriceRule[]> = {
 }
 
 /**
+ * 1.8 L-2: a view-model build prices every bucket, and the buckets name a handful of models on a
+ * few hundred days — so each model name is normalised once, and each price looked up once per
+ * model and day (per options object; `priceOf`). At most `MODEL_MEMO_MAX` names and
+ * `PRICE_MEMO_MAX` lookups per memo are kept; a full memo is cleared whole — no bookkeeping in
+ * the hot path. A kept lookup is frozen: every caller reads it, none writes into it.
+ */
+export const MODEL_MEMO_MAX = 1024
+export const PRICE_MEMO_MAX = 20_000
+const modelMemo = new Map<string, string>()
+/**
+ * The lookups of one memo, by normalised model and then by day (`dayKey`) — the pair is the key;
+ * two maps rather than one joined string, so that a hit builds no string. `size` counts them all.
+ */
+interface LookupMemo { byModel: Map<string, Map<string, PriceLookup | null>>; size: number }
+function lookupMemoOf(): LookupMemo { return { byModel: new Map(), size: 0 } }
+/** The lookups of one options object — it lives as long as the object (in the extension: one build). */
+let lookupMemo = new WeakMap<PricingOptions, LookupMemo>()
+/** The lookups made without options (the list price, strict about unknown models). */
+const plainMemo = lookupMemoOf()
+let priceMemoOn = true
+
+/**
+ * For tests: empties the name and price memos and hands back how many entries the two module-level
+ * ones held (the per-options memos go with their objects). With `memoise: false` the memos also
+ * stay off until the next call — every name normalised and every price looked up anew, the path
+ * before 1.8 that the tests hold the memos to.
+ */
+export function resetPriceMemos(memoise = true): { models: number; lookups: number } {
+  const held = { models: modelMemo.size, lookups: plainMemo.size }
+  modelMemo.clear()
+  plainMemo.byModel.clear()
+  plainMemo.size = 0
+  lookupMemo = new WeakMap()
+  priceMemoOn = memoise
+  return held
+}
+
+/**
  * "claude-haiku-4-5-20251001" -> "claude-haiku-4-5", "claude-opus-5[1m]" -> "claude-opus-5",
  * "anthropic/Claude-Opus-5" -> "claude-opus-5". Gateways and routers prefix the vendor and
  * vary the case; the table is keyed on the bare lower-case name.
  */
 export function normalizeModel(model: string): string {
+  if (!priceMemoOn || typeof model !== 'string') return normalizeName(model)
+  let name = modelMemo.get(model)
+  if (name === undefined) {
+    name = normalizeName(model)
+    if (modelMemo.size >= MODEL_MEMO_MAX) modelMemo.clear()
+    modelMemo.set(model, name)
+  }
+  return name
+}
+
+function normalizeName(model: string): string {
   let s = String(model ?? '').trim().toLowerCase()
   // Strip vendor routing prefixes ("anthropic/", "openai/", "openrouter/anthropic/").
   const slash = s.lastIndexOf('/')
@@ -183,7 +232,8 @@ export function normalizeModel(model: string): string {
  * which under-, never overstates a rise.
  */
 function dayKey(day: string): string {
-  return /^\d{4}-\d{2}$/.test(day) ? `${day}-01` : day
+  // The length first: a day ("YYYY-MM-DD") is never a month, and the test runs once per bucket.
+  return typeof day === 'string' && day.length === 7 && /^\d{4}-\d{2}$/.test(day) ? `${day}-01` : day
 }
 
 /**
@@ -382,10 +432,55 @@ function listPriceOf(key: string, day: string, unknown: 'strict' | 'family'): Pr
  * The rate for `model` on `day`. `day` selects the dated rule; overrides merge field-wise
  * over the list price and turn the answer 'custom'; an unknown model answers null unless
  * the family fallback is opted in, and then says so via `confidence` and `family`.
+ *
+ * 1.8 L-2: the answer is kept per options object, model and day, and handed out frozen. An options
+ * object is read as it stands at its first lookup — a caller that changed its `overrides` in place
+ * afterwards would read the old answers; none does: the extension builds a new one for every view-
+ * model build, status-bar render and export (`pricingOf`, `makeContext`), and one build shares its one.
  */
 export function priceOf(model: string, day: string, opts?: PricingOptions): PriceLookup | null {
   const key = normalizeModel(model)
   if (!key) return null
+  if (!priceMemoOn) return lookUp(key, day, opts)
+  let memo = plainMemo
+  if (opts) {
+    const own = lookupMemo.get(opts)
+    if (own) memo = own
+    else lookupMemo.set(opts, memo = lookupMemoOf())
+  }
+  const d = dayKey(day)
+  let days = memo.byModel.get(key)
+  if (days) {
+    const hit = days.get(d)
+    if (hit !== undefined) return hit
+  }
+  const found = frozen(lookUp(key, day, opts))
+  if (memo.size >= PRICE_MEMO_MAX) {
+    memo.byModel.clear()
+    memo.size = 0
+    days = undefined
+  }
+  if (!days) memo.byModel.set(key, days = new Map())
+  days.set(d, found)
+  memo.size++
+  return found
+}
+
+/** A kept lookup is shared by every caller that asks again: none may change it. */
+function frozen(l: PriceLookup | null): PriceLookup | null {
+  if (!l) return l
+  if (l.price.fast) Object.freeze(l.price.fast)
+  Object.freeze(l.price)
+  return Object.freeze(l)
+}
+
+/**
+ * The options of the list price under the family rule — no overrides, no multiplier: what
+ * `costOfBucket` holds a custom price against. Its strict twin is a lookup without options.
+ */
+const FAMILY_LIST: PricingOptions = Object.freeze({ unknownModel: 'family' })
+
+function lookUp(key: string, day: string, opts?: PricingOptions): PriceLookup | null {
   const list = listPriceOf(key, day, opts?.unknownModel ?? 'strict')
   const override = findOverride(key, opts?.overrides)
   if (!override) return list
@@ -511,7 +606,9 @@ export function costOfBucket(b: Bucket, opts?: PricingOptions): CostBreakdown | 
   // claiming a discount against a price that was never published would be an invention.
   let listUsd = usd
   if (opts?.overrides) {
-    const listLookup = priceOf(b.model, b.day, { unknownModel: opts.unknownModel })
+    // Without overrides only the rule for unknown models matters, and a lookup without options
+    // is the strict one — so the two constant cases share their memos across the buckets.
+    const listLookup = priceOf(b.model, b.day, opts.unknownModel === 'family' ? FAMILY_LIST : undefined)
     if (listLookup && (!isFast(b) || listLookup.price.fast)) {
       const listBase = listLookup.rule ? listLookup.rule.input : listLookup.price.input
       listUsd = costWith(b, listLookup.price, 1, listBase)

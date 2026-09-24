@@ -27,7 +27,10 @@ import {
 import { claudeLine, ctxFor } from './fixtures/helpers'
 import { markdownDocument } from '../src/textViews'
 import { toolAgg } from './helpers/toolAgg'
-import { rawManifest } from './helpers/nls'
+import { ROOT, rawManifest } from './helpers/nls'
+import { readFileSync } from 'node:fs'
+import { resetTimeMemos } from '../src/time'
+import { resetPriceMemos } from '../src/prices'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -2243,6 +2246,83 @@ test('a view-model build copies the buckets exactly once, and every table reads 
     assert.ok(unshared.calls > 1, `${what}: the unshared build made ${unshared.calls} copies; the comparison compares nothing`)
     assert.deepEqual(shared.value, unshared.value, `${what}: the shared copy changed a figure`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 L-2 · the calendar parts and the prices looked up once per key
+// ---------------------------------------------------------------------------
+
+/**
+ * The four worlds of 1.7 P-A, and one that reaches the memos' other doors: a named zone with a day
+ * boundary, configured prices beside the list prices, the family rule, and the Agents tree's 7-day block
+ * with its costs.
+ */
+function memoWorlds(): Array<[string, () => ReturnType<typeof makeInput>]> {
+  const { agg } = withAgents()
+  return [
+    ...sharedCopyWorlds().map(([what, make]): [string, () => ReturnType<typeof makeInput>] => [what, make]),
+    ['Berlin, a day boundary, configured prices, the family rule and the 7-day block', () => makeInput({
+      agg,
+      cfg: makeConfig({
+        'tokenPace.timezone': 'Europe/Berlin', 'tokenPace.dayBoundaryHour': 5, 'tokenPace.attribution': 'project',
+        'tokenPace.customPrices': { 'claude-sonnet-4-6': { input: 2, output: 9 } }, 'tokenPace.unknownModelPricing': 'family',
+        'tokenPace.pricing.multiplier': 0.9, 'tokenPace.pricing.showListPrice': true, 'tokenPace.budgets': BUDGETS,
+      }),
+      ui: { agentsWeekOpen: true },
+    })],
+  ]
+}
+
+test('a view-model build with the memos equals the build without them, cold and warm, in five worlds (1.8 L-2)', () => {
+  try {
+    for (const [what, make] of memoWorlds()) {
+      const input = make()
+      resetTimeMemos(false)
+      resetPriceMemos(false)
+      const plain = buildViewModel(input)
+      resetTimeMemos()
+      resetPriceMemos()
+      const cold = buildViewModel(input)
+      const warm = buildViewModel(input)
+      assert.deepEqual(cold, plain, `${what}: the memos changed the view model`)
+      assert.deepEqual(warm, plain, `${what}: a warm memo changed the view model`)
+      // The memoised builds did keep answers: the comparison compares the two paths, not one with itself.
+      assert.ok(resetTimeMemos() > 0, `${what}: no calendar part was kept`)
+      assert.ok(resetPriceMemos().models > 0, `${what}: no model name was kept`)
+    }
+    // The fifth world reaches what it is there for: its costs in the tree, at the configured rates.
+    const input = memoWorlds()[4][1]()
+    assert.deepEqual([input.cfg.timezone, input.cfg.dayBoundaryHour, input.cfg.pricing.multiplier, input.cfg.pricing.showListPrice,
+      input.cfg.unknownModelPricing, Object.keys(input.cfg.customPrices)], ['Europe/Berlin', 5, 0.9, true, 'family', ['claude-sonnet-4-6']])
+    const vm = buildViewModel(input)
+    assert.match(vm.agents.week?.totalCost ?? '', /^~\$\d/)
+    assert.equal(vm.pricing.custom, true)
+    assert.ok(vm.models.rows.some((r) => r.priced === 'custom'), 'the fifth world prices no model at configured rates')
+  } finally {
+    resetTimeMemos()
+    resetPriceMemos()
+  }
+})
+
+test('one pricing options object per build: the Agents tree takes the build\'s own (1.8 L-2)', () => {
+  // agentTreeFor prices with the object it is handed …
+  const { agg } = withAgents()
+  const input = makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project' }), ui: { agentsWeekOpen: true } })
+  const own = agentTreeFor(input, 'page').week
+  const listed = agentTreeFor(input, 'page', pricingOf(input.cfg)).week
+  const halved = agentTreeFor(input, 'page', { ...pricingOf(input.cfg), multiplier: 0.5 }).week
+  assert.ok(own && listed && halved)
+  assert.deepEqual(listed, own, 'the build\'s own object prices the tree as its own did')
+  assert.notEqual(halved.totalCost, own.totalCost, 'the object handed in is not the one the tree priced with')
+  // … and with costs off with none at all.
+  const off = makeInput({ agg, cfg: makeConfig({ 'tokenPace.attribution': 'project', 'tokenPace.showCost': false }), ui: { agentsWeekOpen: true } })
+  assert.equal(agentTreeFor(off, 'page', pricingOf(off.cfg)).week?.totalCost, null)
+  // buildViewModel builds exactly one options object and hands that one to the tree.
+  const src = readFileSync(path.join(ROOT, 'src', 'viewModel.ts'), 'utf8')
+  const start = src.indexOf('export function buildViewModel(')
+  const body = src.slice(start, src.indexOf('\n}\n', start))
+  assert.equal(body.match(/pricingOf\(/g)?.length, 1, 'buildViewModel builds more than one pricing options object')
+  assert.ok(body.includes("agentTreeFor(input, 'page', pricing)"), 'buildViewModel no longer hands its pricing to the Agents tree')
 })
 
 // ---------------------------------------------------------------------------

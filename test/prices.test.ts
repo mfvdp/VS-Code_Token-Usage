@@ -5,8 +5,10 @@ import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
 
 import {
+  MODEL_MEMO_MAX,
   PRICES,
   PRICES_AS_OF,
+  PRICE_MEMO_MAX,
   PRICE_SOURCES,
   US_INFERENCE_MULTIPLIER,
   WEB_SEARCH_USD_PER_1K,
@@ -17,8 +19,10 @@ import {
   normalizeModel,
   priceOf,
   priceTableSummary,
+  resetPriceMemos,
   ruleForDay,
 } from '../src/prices'
+import { addDays } from '../src/time'
 import { Bucket, Source, Tier, emptyBucket } from '../src/types'
 
 const M = 1_000_000
@@ -426,5 +430,126 @@ test('every rule is dated, sourced and newest first', () => {
         assert.ok(Number.isFinite(rate) && rate >= 0, `${model} has an impossible rate`)
       }
     }
+  }
+})
+
+// ---------------------------------------------------------------- 1.8 L-2: one lookup per model and day
+
+/** Every option set a caller hands in: none, the extension's default, the family rule, overrides, a discount. */
+function memoOptionSets(): Array<[string, PricingOptions | undefined]> {
+  return [
+    ['no options', undefined],
+    ['the default settings', { overrides: {}, multiplier: 1, unknownModel: 'strict' }],
+    ['the family rule', { overrides: {}, multiplier: 1, unknownModel: 'family' }],
+    ['overrides', { overrides: { 'Claude-Opus-4-6[1m]': { input: 1, output: 4 }, 'claude-mystery-9': { input: 2, output: 8 }, 'gpt-local': { input: 1, output: 2 } } }],
+    ['overrides, the family rule and a discount', {
+      overrides: { 'claude-opus-5': { cacheRead: 0.1, fast: { input: 20, output: 80 } } }, multiplier: 0.8, unknownModel: 'family',
+    }],
+  ]
+}
+
+/** The models of the table, their spellings in transcripts, and names the table does not know. */
+const MEMO_MODELS = [
+  ...Object.keys(PRICES), 'claude-opus-4-6[1m]', 'anthropic/Claude-Opus-5', 'claude-haiku-4-5-20251001', 'claude-mystery-9',
+  'claude-opus-4-9', 'gpt-5.7-mini', 'gpt-local', 'llama-4-maverick', '', '  ',
+]
+const MEMO_DAYS = [PRICES_AS_OF, '2026-01-15', '2026-08-20', '2026-09', '2026-10', '2027-03-01']
+
+/** What every lookup and every bucket's cost comes to — the same world asked twice gives the same list. */
+function pricedWorld(): unknown[] {
+  const out: unknown[] = []
+  for (const [what, opts] of memoOptionSets()) {
+    for (const model of MEMO_MODELS) {
+      for (const day of MEMO_DAYS) {
+        out.push([what, model, day, normalizeModel(model), priceOf(model, day, opts)])
+        for (const tier of ['standard', 'fast', 'us', 'fast-us'] as Tier[]) {
+          for (const source of ['claude', 'codex'] as Source[]) {
+            const b = bucket({ model, source, tier, day, input: 1000, cacheWrite: 400, cacheWrite1h: 100, cacheRead: 9000, output: 700, webSearch: 2 })
+            out.push([what, model, day, tier, source, costOfBucket(b, opts)])
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
+test('the memoised prices equal the unmemoised ones: every model of the table and its spellings, six days, five option sets, every tier (1.8 L-2)', () => {
+  try {
+    resetPriceMemos(false)
+    const plain = pricedWorld()
+    resetPriceMemos()
+    const cold = pricedWorld()
+    const warm = pricedWorld()
+    assert.deepEqual(cold, plain, 'a memo filled by this very walk changed a price or a cost')
+    assert.deepEqual(warm, plain, 'a warm memo changed a price or a cost')
+    const held = resetPriceMemos()
+    assert.ok(held.models > 0 && held.lookups > 0, 'the walk kept nothing — it compared the unmemoised path with itself')
+  } finally {
+    resetPriceMemos()
+  }
+})
+
+test('two options objects with different overrides for one model and day are two lookups; a repeated one is the same kept answer (1.8 L-2)', () => {
+  resetPriceMemos()
+  const one: PricingOptions = { overrides: { 'claude-opus-4-6': { input: 1 } } }
+  const two: PricingOptions = { overrides: { 'claude-opus-4-6': { input: 2 } } }
+  const a = priceOf('claude-opus-4-6', PRICES_AS_OF, one)
+  const b = priceOf('claude-opus-4-6', PRICES_AS_OF, two)
+  assert.ok(a && b)
+  close(a.price.input, 1, 'the first object\'s override')
+  close(b.price.input, 2, 'the second object\'s override — not the first one\'s kept answer')
+  close(priceOf('claude-opus-4-6', PRICES_AS_OF)!.price.input, 5, 'without options: the list price')
+  close(priceOf('claude-opus-4-6', PRICES_AS_OF, one)!.price.input, 1)
+  // The same object, model and day: the kept answer itself. A month and its first day are one day.
+  assert.equal(priceOf('claude-opus-4-6', PRICES_AS_OF, one), a)
+  assert.equal(priceOf('Claude-Opus-4-6[1m]', PRICES_AS_OF, one), a, 'two spellings of one model share the answer')
+  assert.equal(priceOf('claude-opus-4-6', '2026-10', one), priceOf('claude-opus-4-6', '2026-10-01', one))
+  assert.notEqual(priceOf('claude-opus-4-6', '2026-10-02', one), priceOf('claude-opus-4-6', '2026-10-01', one))
+  // A cost follows its own object's override, whichever object asked before.
+  const cost = (opts: PricingOptions): number => costOfBucket(bucket({ model: 'claude-opus-4-6', input: M }), opts)!.usd
+  close(cost(two), 2)
+  close(cost(one), 1)
+  resetPriceMemos()
+})
+
+test('a kept lookup is frozen: no caller can change what the next one reads (1.8 L-2)', () => {
+  resetPriceMemos()
+  const l = priceOf('claude-opus-5', PRICES_AS_OF, { overrides: {} })
+  assert.ok(l && l.price.fast)
+  assert.ok(Object.isFrozen(l) && Object.isFrozen(l.price) && Object.isFrozen(l.price.fast))
+  assert.equal(Reflect.set(l.price, 'input', 99), false)
+  assert.equal(Reflect.set(l.price.fast, 'output', 99), false)
+  assert.equal(Reflect.set(l, 'approximate', true), false)
+  const again = priceOf('claude-opus-5', PRICES_AS_OF)
+  assert.ok(again && Object.isFrozen(again.price))
+  close(again.price.input, 5)
+  close(again.price.fast!.output, 50)
+  resetPriceMemos()
+})
+
+test('the name memo holds at most MODEL_MEMO_MAX names and the price memo PRICE_MEMO_MAX lookups, each cleared whole when full (1.8 L-2)', () => {
+  resetPriceMemos()
+  for (let i = 0; i < MODEL_MEMO_MAX; i++) assert.equal(normalizeModel(`Claude-Opus-${i}-20260101[1m]`), `claude-opus-${i}`)
+  normalizeModel('Claude-Opus-0-20260101[1m]')
+  assert.equal(resetPriceMemos().models, MODEL_MEMO_MAX)
+  for (let i = 0; i <= MODEL_MEMO_MAX; i++) normalizeModel(`m-${i}`)
+  assert.equal(resetPriceMemos().models, 1, 'one name past the cap clears the memo and keeps the new one')
+  let day = '1990-01-01'
+  for (let i = 0; i < PRICE_MEMO_MAX; i++, day = addDays(day, 1)) priceOf('claude-opus-5', day)
+  priceOf('claude-opus-5', '1990-01-01')
+  assert.equal(resetPriceMemos().lookups, PRICE_MEMO_MAX)
+  day = '1990-01-01'
+  for (let i = 0; i <= PRICE_MEMO_MAX; i++, day = addDays(day, 1)) priceOf('claude-opus-5', day)
+  assert.equal(resetPriceMemos().lookups, 1, 'one lookup past the cap clears the memo and keeps the new one')
+  // Off, nothing is kept and nothing is frozen; the answers are the same.
+  try {
+    resetPriceMemos(false)
+    const plain = priceOf('claude-opus-5', PRICES_AS_OF)
+    assert.ok(plain && !Object.isFrozen(plain))
+    close(plain.price.input, 5)
+    assert.deepEqual(resetPriceMemos(), { models: 0, lookups: 0 })
+  } finally {
+    resetPriceMemos()
   }
 })

@@ -8,8 +8,9 @@ import { test } from 'node:test'
 import { setBundle, setLocale } from '../src/i18n'
 import {
   addDays, ageText, attemptWhen, calendarDayOf, calendarWeekdayOf, clockStamp, dayCount, dayOf, dayOfHour, daysBetween, formatReset,
-  formatTime, hourIndex, lastDays, lastFailureText, localHourOfDay, monthOf, nextAttemptWords, previousRange, rangeFor, refreshWords,
-  relativeShort, relativeTime, resolveZone, retryWords, TimeConfig, weekdayOf, weekdayWords,
+  formatTime, hourIndex, lastDays, lastFailureText, localHourOfDay, monthOf, nextAttemptWords, PARTS_MEMO_FROM_MS, PARTS_MEMO_MAX,
+  previousRange, rangeFor, refreshWords, relativeShort, relativeTime, resetTimeMemos, resolveZone, retryWords, TimeConfig, weekdayOf,
+  weekdayWords,
 } from '../src/time'
 import { QuotaState } from '../src/types'
 import { ROOT } from './helpers/nls'
@@ -364,4 +365,176 @@ test('lastFailureText: when, the poller\'s words verbatim, then the next attempt
   assert.equal(de, 'Letzter Versuch um 11:40 fehlgeschlagen: HTTP 429 — Wartezeit vor dem nächsten Versuch · nächster Versuch in 1h12m')
   assert.equal(german(() => lastFailureText(failedState({ nextAttemptAt: NOW - 1, attemptHeld: 'focus' }), NOW, utc)),
     'Letzter Versuch um 11:40 fehlgeschlagen: HTTP 429 — backing off before the next attempt · nächster Versuch wartet auf Fokus')
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 L-2: the calendar parts of an instant, memoised per zone and minute
+// ---------------------------------------------------------------------------
+
+/** The ten zones of §3 L-2: the system zone (UTC in the runner), and offsets of every kind — ±30 and ±45 minutes, a half-hour DST. */
+const MEMO_ZONES = [
+  'system', 'UTC', 'Europe/Berlin', 'America/New_York', 'Asia/Kathmandu', 'Australia/Lord_Howe', 'America/St_Johns',
+  'Pacific/Chatham', 'Asia/Kolkata', 'America/Sao_Paulo',
+] as const
+
+/** The test's own path to the parts, without the module's memo: a formatter of its own, seconds included. */
+const refFormatters = new Map<string, Intl.DateTimeFormat>()
+function refParts(ms: number, zone: string): { day: string; hour: number; offsetMs: number } {
+  let f = refFormatters.get(zone)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone === 'system' ? undefined : zone,
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    })
+    refFormatters.set(zone, f)
+  }
+  const p: Record<string, number> = {}
+  for (const part of f.formatToParts(ms)) if (part.type !== 'literal') p[part.type] = Number(part.value)
+  const second = Math.floor(ms / 1000) * 1000
+  const offsetMs = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - second
+  const pad = (n: number, w = 2): string => String(n).padStart(w, '0')
+  return { day: `${pad(p.year, 4)}-${pad(p.month)}-${pad(p.day)}`, hour: p.hour, offsetMs }
+}
+
+/** A small seeded generator (mulberry32), so every run draws the same instants. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let x = Math.imul(a ^ (a >>> 15), 1 | a)
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x
+    return ((x ^ (x >>> 14)) >>> 0) / 4_294_967_296
+  }
+}
+
+/** The instants of 2026 at which `zone`'s offset changes — found hourly, then narrowed to the millisecond. */
+function transitions2026(zone: string): number[] {
+  const off = (ms: number): number => refParts(ms, zone).offsetMs
+  const out: number[] = []
+  const end = Date.UTC(2027, 0, 1)
+  let before = off(Date.UTC(2026, 0, 1))
+  for (let t = Date.UTC(2026, 0, 1); t < end; t += 3_600_000) {
+    const after = off(t + 3_600_000)
+    const same = after === before
+    before = after
+    if (same) continue
+    let lo = t
+    let hi = t + 3_600_000
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2)
+      if (off(mid) === off(lo)) lo = mid
+      else hi = mid
+    }
+    out.push(hi)
+  }
+  return out
+}
+
+/** Every answer the memo gives for `ms` in `zone`, held against the test's own path — the day boundary 0 and 6. */
+function checkInstant(ms: number, zone: string, what: string): void {
+  const cfg: TimeConfig = { ...utc, zone }
+  const late: TimeConfig = { ...cfg, dayBoundaryHour: 6 }
+  const ref = refParts(ms, zone)
+  // The memo's premise: the parts of one minute are one — the offset at the instant is a whole number of minutes.
+  assert.ok(ref.offsetMs % 60_000 === 0, `${what}: ${zone} has an offset of ${ref.offsetMs} ms`)
+  assert.equal(calendarDayOf(ms, cfg), ref.day, `${what}: calendarDayOf in ${zone}`)
+  assert.equal(dayOf(ms, cfg), ref.day, `${what}: dayOf in ${zone}`)
+  assert.equal(dayOf(ms, late), refParts(ms - 6 * 3_600_000, zone).day, `${what}: dayOf with the boundary at 6 in ${zone}`)
+  const h = hourIndex(ms)
+  const atHour = refParts(h * 3_600_000, zone)
+  assert.equal(localHourOfDay(h, cfg), atHour.hour, `${what}: localHourOfDay in ${zone}`)
+  assert.equal(dayOfHour(h, cfg), atHour.day, `${what}: dayOfHour in ${zone}`)
+}
+
+test('the memoised calendar parts equal the unmemoised ones: 5000 instants of 2000–2099 in ten zones, and every 2026 transition ± 1 minute (1.8 L-2)', () => {
+  resetTimeMemos()
+  const draw = seeded(0x1802)
+  const from = Date.UTC(2000, 0, 1)
+  const span = Date.UTC(2100, 0, 1) - from
+  for (let i = 0; i < 5000; i++) {
+    const ms = from + Math.floor(draw() * span)
+    // Every zone at the same instant, one after the other: Berlin right before New York, so a memo that
+    // forgot the zone would answer New York with Berlin's parts.
+    for (const zone of MEMO_ZONES) checkInstant(ms, zone, `instant ${i} (${new Date(ms).toISOString()})`)
+  }
+  // Each zone's own changes of 2026 — the instant, a minute, a second and a millisecond either side — found
+  // by the test, and counted, so a zone whose rules the runner lacks cannot pass by having none.
+  const expected: Record<string, number> = {
+    UTC: 0, 'Europe/Berlin': 2, 'America/New_York': 2, 'Asia/Kathmandu': 0, 'Australia/Lord_Howe': 2, 'America/St_Johns': 2,
+    'Pacific/Chatham': 2, 'Asia/Kolkata': 0, 'America/Sao_Paulo': 0,
+  }
+  for (const zone of MEMO_ZONES) {
+    const found = transitions2026(zone)
+    if (zone !== 'system') assert.equal(found.length, expected[zone], `${zone}: ${found.length} transitions in 2026`)
+    for (const at of found) {
+      for (const d of [-60_000, -1000, -1, 0, 1, 1000, 60_000]) {
+        for (const other of MEMO_ZONES) checkInstant(at + d, other, `${zone}'s transition ${new Date(at).toISOString()} ${d >= 0 ? '+' : ''}${d} ms`)
+      }
+    }
+  }
+  // The same answers once more from a warm memo, and from the module's own path without it.
+  try {
+    for (const memoise of [true, false]) {
+      resetTimeMemos(memoise)
+      const again = seeded(0x1802)
+      for (let i = 0; i < 500; i++) {
+        const ms = from + Math.floor(again() * span)
+        for (const zone of MEMO_ZONES) checkInstant(ms, zone, `${memoise ? 'warm' : 'unmemoised'} instant ${i}`)
+      }
+    }
+  } finally {
+    resetTimeMemos()
+  }
+})
+
+test('one instant in two zones: the memo keeps Berlin and New York apart (1.8 L-2)', () => {
+  resetTimeMemos()
+  const ms = Date.UTC(2026, 9, 25, 3, 30)
+  assert.equal(calendarDayOf(ms, berlin), '2026-10-25')
+  assert.equal(calendarDayOf(ms, ny), '2026-10-24')
+  assert.equal(localHourOfDay(hourIndex(ms), berlin), 4)
+  assert.equal(localHourOfDay(hourIndex(ms), ny), 23)
+  assert.equal(dayOf(ms, berlin), '2026-10-25')
+  assert.equal(dayOf(ms, ny), '2026-10-24')
+  resetTimeMemos()
+})
+
+test('the calendar-parts memo holds one answer per zone and minute, at most PARTS_MEMO_MAX, and is cleared whole when full (1.8 L-2)', () => {
+  resetTimeMemos()
+  const base = Date.UTC(2026, 8, 3, 12, 0)
+  // Two instants of one minute share an answer; the next minute and another zone have their own.
+  calendarDayOf(base, utc)
+  calendarDayOf(base + 59_999, utc)
+  assert.equal(resetTimeMemos(), 1)
+  calendarDayOf(base, utc)
+  calendarDayOf(base + 60_000, utc)
+  calendarDayOf(base, berlin)
+  assert.equal(resetTimeMemos(), 3)
+  for (let i = 0; i < PARTS_MEMO_MAX; i++) calendarDayOf(base + i * 60_000, utc)
+  assert.equal(resetTimeMemos(), PARTS_MEMO_MAX, 'a full memo holds exactly PARTS_MEMO_MAX answers')
+  for (let i = 0; i <= PARTS_MEMO_MAX; i++) calendarDayOf(base + i * 60_000, utc)
+  assert.equal(resetTimeMemos(), 1, 'one answer past the cap clears the memo and keeps the new one')
+  // Off, nothing is kept; the answers are the same.
+  try {
+    resetTimeMemos(false)
+    assert.equal(calendarDayOf(base, berlin), '2026-09-03')
+    assert.equal(resetTimeMemos(), 0)
+  } finally {
+    resetTimeMemos()
+  }
+})
+
+test('before 1973 the parts are formatted every time: Liberia\'s −0:44:30 puts two instants of one minute on two days (1.8 L-2)', () => {
+  resetTimeMemos()
+  const monrovia: TimeConfig = { ...utc, zone: 'Africa/Monrovia' }
+  // 00:44:15 and 00:44:45 UTC on 1 January 1971: 23:59:45 on New Year's Eve and 00:00:15 on New Year's Day there.
+  const a = Date.UTC(1971, 0, 1, 0, 44, 15)
+  const b = Date.UTC(1971, 0, 1, 0, 44, 45)
+  assert.equal(refParts(a, 'Africa/Monrovia').offsetMs, -(44 * 60 + 30) * 1000, 'the runner lacks the zone\'s history')
+  assert.ok(b < PARTS_MEMO_FROM_MS)
+  assert.equal(calendarDayOf(a, monrovia), '1970-12-31')
+  assert.equal(calendarDayOf(b, monrovia), '1971-01-01')
+  assert.equal(resetTimeMemos(), 0, 'an instant before PARTS_MEMO_FROM_MS is kept')
+  // From 1973 on every zone's offset is whole minutes; the zone lost its seconds on 1972-01-07.
+  assert.ok(refParts(PARTS_MEMO_FROM_MS, 'Africa/Monrovia').offsetMs % 60_000 === 0)
 })

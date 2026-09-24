@@ -75,7 +75,61 @@ function formatter(key: string, make: () => Intl.DateTimeFormat): Intl.DateTimeF
 
 interface ZoneParts { year: number; month: number; day: number; hour: number; minute: number }
 
-function partsOf(ms: number, zone: string | undefined): ZoneParts {
+/**
+ * 1.8 L-2: the calendar parts of an instant are asked for again and again within one view-model
+ * build — the day of every hour bucket, by every table that walks the buckets — and each answer
+ * is an `Intl.DateTimeFormat.formatToParts` call, one of the heaviest of a build before 1.8 (1.8
+ * L-2's profile). So the answers are kept, keyed by the zone and the instant's minute: the parts
+ * carry nothing below the minute, and from 1973 on every zone's offset is a whole number of
+ * minutes (`PARTS_MEMO_FROM_MS`), so two instants of one minute have the same parts. The pair is
+ * the key — a map per zone of maps per minute, so that a hit builds no string. At most
+ * `PARTS_MEMO_MAX` answers are kept; a full memo is cleared whole — no bookkeeping in the hot path.
+ */
+export const PARTS_MEMO_MAX = 20_000
+/**
+ * The first instant the memo keeps: before it a zone's offset could carry seconds — Liberia's
+ * −0:44:30 until 1972-01-07, the last one in the zone data — and two instants of one minute could
+ * then lie on two days. Earlier instants are formatted every time, as before 1.8.
+ */
+export const PARTS_MEMO_FROM_MS = Date.UTC(1973, 0, 1)
+/** By zone (`resolveZone`'s name, '' for the system zone), then by the instant's minute. */
+const partsMemo = new Map<string, Map<number, Readonly<ZoneParts>>>()
+let partsMemoSize = 0
+let partsMemoOn = true
+
+/**
+ * For tests: empties the calendar-parts memo and hands back how many answers it held. With
+ * `memoise: false` the memo also stays off until the next call — every answer is formatted anew,
+ * the path before 1.8 that the tests hold the memo to.
+ */
+export function resetTimeMemos(memoise = true): number {
+  const held = partsMemoSize
+  partsMemo.clear()
+  partsMemoSize = 0
+  partsMemoOn = memoise
+  return held
+}
+
+function partsOf(ms: number, zone: string | undefined): Readonly<ZoneParts> {
+  if (!partsMemoOn || !(ms >= PARTS_MEMO_FROM_MS)) return formatParts(ms, zone)
+  const z = zone ?? ''
+  const minute = Math.floor(ms / 60_000)
+  let minutes = partsMemo.get(z)
+  const hit = minutes?.get(minute)
+  if (hit !== undefined) return hit
+  const p = Object.freeze(formatParts(ms, zone))
+  if (partsMemoSize >= PARTS_MEMO_MAX) {
+    partsMemo.clear()
+    partsMemoSize = 0
+    minutes = undefined
+  }
+  if (!minutes) partsMemo.set(z, minutes = new Map())
+  minutes.set(minute, p)
+  partsMemoSize++
+  return p
+}
+
+function formatParts(ms: number, zone: string | undefined): ZoneParts {
   const f = formatter(`p|${zone ?? ''}`, () => new Intl.DateTimeFormat('en-US', {
     timeZone: zone,
     year: 'numeric', month: '2-digit', day: '2-digit',

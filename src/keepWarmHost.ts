@@ -14,7 +14,12 @@
  *    (`terminal.state.shell`, `claude` while Claude Code runs — probe P-1) confirms a match where VS
  *    Code reports one and blocks where it names another program; it never stands in for the event.
  *    A terminal's **name is never read** — Claude Code sets it to a summary of the conversation (§7c) —,
- *    nor its output, nor its environment.
+ *    nor its output, nor its environment. Of the start event the host also notes when it came, on its
+ *    own clock — the time G13 compares the session's first reply with (1.8 P12).
+ *  • The session behind the terminal (G13, 1.8 P12). A terminal runs a folder's `claude`, not a named
+ *    session: the other main records of the folder the session's transcript lies in go to the decision
+ *    as its siblings — their first and newest reply, the newest reply's stop and whether the user's line
+ *    is newest, and whether an agent of theirs runs.
  *  • Focus (G8). When a terminal was the active terminal of the focused window, from
  *    `onDidChangeActiveTerminal` and `onDidChangeWindowState` with this host's clock; a window that
  *    started watching after a session's newest reply cannot say, and says so (`unknown`).
@@ -31,7 +36,8 @@
  *
  * Inert while it may not act: with the setting off, without consent or in Restricted Mode no terminal
  * event is subscribed to and nothing of a terminal is looked at. The tick is driven by the host's
- * one-second frame (`tick`), and every time comes in as a parameter or from the injected clock.
+ * one-second frame (`tick`), and every time comes in as a parameter or from the injected clock; with
+ * the setting off and nothing left to finish (`atRest`), the host skips gathering the frame at all.
  */
 
 import * as fs from 'fs'
@@ -42,8 +48,8 @@ import type { AgentTreeVm, HookEntry } from './agentTree'
 import type { CacheWatchEntry } from './cacheWatch'
 import { t } from './i18n'
 import {
-  KEEP_WARM_LINE, KEEPWARM_COUNTDOWN_MS, KEEPWARM_VERIFY_MS, KeepWarmBlock, KeepWarmFacts, ShellExecutionFacts,
-  claudeExecutionMatches, keepWarmDecision,
+  KEEP_WARM_LINE, KEEPWARM_COUNTDOWN_MS, KEEPWARM_VERIFY_MS, KeepWarmBlock, KeepWarmFacts, KeepWarmSibling,
+  ShellExecutionFacts, claudeExecutionMatches, keepWarmDecision,
 } from './keepWarm'
 import type { PromptCacheReading } from './quotaSources'
 import { TimeConfig, clockStamp, dayOf } from './time'
@@ -267,6 +273,34 @@ export function claudeQuotaMax(quotas: readonly QuotaState[]): { percent: number
   return { percent, reached: reached || percent >= 100 }
 }
 
+/** The name of the directory that holds a transcript — the folder G7 compares a terminal's with. */
+function projectDirOf(file: string): string {
+  return path.basename(path.dirname(file))
+}
+
+/**
+ * G13's siblings (1.8 P12): every main record of another session whose transcript lies in the project
+ * directory `projectDir` — under any root, whatever its age —, with what the decision tests of it. A
+ * record without a request of the cache gives null for the two facts of that request: not idle.
+ */
+export function siblingsOf(sessionId: string, projectDir: string, mains: KeepWarmFrame['mains'], tree: AgentTreeVm | null): KeepWarmSibling[] {
+  const out: KeepWarmSibling[] = []
+  if (projectDir === '') return out
+  for (const pair of mains) {
+    const rec = pair?.[1]
+    if (!rec || rec.sessionId === sessionId || typeof pair[0] !== 'string' || projectDirOf(pair[0]) !== projectDir) continue
+    const last = rec.lastRequest
+    out.push({
+      firstAt: rec.firstTs,
+      lastTs: rec.lastTs,
+      stop: last ? last.stop : null,
+      replyPending: last ? last.replyPending : null,
+      running: sessionRunning(tree, rec.sessionId),
+    })
+  }
+  return out
+}
+
 /** The newest main record of a session and its transcript, as the watch picks it (cacheWatch.ts `newerMain`). */
 function mainOf(sessionId: string, mains: KeepWarmFrame['mains']): { rec: MainRec; file: string } | null {
   let best: { rec: MainRec; file: string } | null = null
@@ -294,8 +328,11 @@ export class KeepWarmHost {
   /** When tracking began: a session's newest reply before it is one this window cannot judge G8 for. */
   private since = 0
   private subs: vscode.Disposable[] = []
-  /** The open shell executions of each terminal (started, not ended) — references, never their values. */
-  private open = new Map<vscode.Terminal, Set<vscode.TerminalShellExecution>>()
+  /**
+   * The open shell executions of each terminal (started, not ended) — references, never their values —,
+   * each with when its start event came on this host's clock (G13).
+   */
+  private open = new Map<vscode.Terminal, Map<vscode.TerminalShellExecution, number>>()
   private active: vscode.Terminal | undefined = undefined
   private focused = false
   /** Per terminal, when it last stopped being the focused window's active terminal. */
@@ -323,6 +360,18 @@ export class KeepWarmHost {
   /** Whether the terminal events are subscribed to (for the tests: inert while it may not act). */
   isTracking(): boolean {
     return this.tracking
+  }
+
+  /**
+   * Nothing for a frame to do while the setting is off: no terminal listened to, no countdown or "sent"
+   * item on screen, no line waiting for its answer. The host then skips the frame (Review 3's early
+   * return, 1.8 P12); a line typed before the switch-off keeps the frames coming until it is answered or
+   * called unanswered.
+   */
+  atRest(): boolean {
+    if (this.tracking || this.countdown !== null || this.sentUntil !== null || this.item !== null) return false
+    for (const p of this.phases.values()) if (p.awaiting !== null) return false
+    return true
   }
 
   /**
@@ -422,17 +471,18 @@ export class KeepWarmHost {
     this.subs.push(
       this.window.onDidStartTerminalShellExecution((e) => {
         if (!e || !e.terminal || !e.execution) return
-        const set = this.open.get(e.terminal) ?? new Set<vscode.TerminalShellExecution>()
-        if (set.size >= EXECUTIONS_PER_TERMINAL_MAX) set.delete(set.values().next().value as vscode.TerminalShellExecution)
-        set.add(e.execution)
-        this.open.set(e.terminal, set)
+        const executions = this.open.get(e.terminal) ?? new Map<vscode.TerminalShellExecution, number>()
+        if (executions.size >= EXECUTIONS_PER_TERMINAL_MAX) executions.delete(executions.keys().next().value as vscode.TerminalShellExecution)
+        // When it started, on this host's clock: G13 compares the session's first reply with it.
+        executions.set(e.execution, this.clock())
+        this.open.set(e.terminal, executions)
       }),
       this.window.onDidEndTerminalShellExecution((e) => {
         if (!e || !e.terminal) return
-        const set = this.open.get(e.terminal)
-        if (!set) return
-        set.delete(e.execution)
-        if (set.size === 0) this.open.delete(e.terminal)
+        const executions = this.open.get(e.terminal)
+        if (!executions) return
+        executions.delete(e.execution)
+        if (executions.size === 0) this.open.delete(e.terminal)
       }),
       this.window.onDidCloseTerminal((terminal) => {
         this.open.delete(terminal)
@@ -479,22 +529,22 @@ export class KeepWarmHost {
 
   /**
    * G7: the terminals of this window with an open execution of Claude Code in the folder whose
-   * project-directory name is `projectDir`, and whose shell — where VS Code reports one — is Claude Code.
+   * project-directory name is `projectDir`, and whose shell — where VS Code reports one — is Claude Code;
+   * each with when its matching execution started (G13 — of several, the newest: the one that runs now).
    */
-  private claudeTerminals(projectDir: string): vscode.Terminal[] {
-    const out: vscode.Terminal[] = []
+  private claudeTerminals(projectDir: string): Array<{ terminal: vscode.Terminal; startedAt: number }> {
+    const out: Array<{ terminal: vscode.Terminal; startedAt: number }> = []
     if (projectDir === '') return out
     const present = this.window.terminals
     for (const [terminal, executions] of this.open) {
       if (!present.includes(terminal)) continue
       const shell = shellOf(terminal)
       if (shell !== undefined && shell !== CLAUDE_SHELL) continue
-      for (const execution of executions) {
-        if (claudeExecutionMatches(executionFacts(execution), projectDir)) {
-          out.push(terminal)
-          break
-        }
+      let startedAt: number | null = null
+      for (const [execution, at] of executions) {
+        if (claudeExecutionMatches(executionFacts(execution), projectDir) && (startedAt === null || at > startedAt)) startedAt = at
       }
+      if (startedAt !== null) out.push({ terminal, startedAt })
     }
     return out
   }
@@ -521,9 +571,10 @@ export class KeepWarmHost {
     const rec = main?.rec ?? null
     // The name of the directory that holds the session's transcript — what the terminal's folder is
     // compared with (G7). A session no transcript here belongs to has none, and no terminal matches.
-    const projectDir = main ? path.basename(path.dirname(main.file)) : ''
+    const projectDir = main ? projectDirOf(main.file) : ''
     const found = this.claudeTerminals(projectDir)
-    const terminal = found.length === 1 ? found[0] : null
+    const only = found.length === 1 ? found[0] : null
+    const terminal = only?.terminal ?? null
     const phase = this.phaseOf(e.sessionId, rec)
     const facts: KeepWarmFacts = {
       enabled: f.enabled,
@@ -539,6 +590,8 @@ export class KeepWarmHost {
       lastUnanswered: phase.unanswered,
       cancelled: phase.cancelled,
       quotaMax: claudeQuotaMax(f.quotas),
+      executionStartedAt: only?.startedAt ?? null,
+      siblings: siblingsOf(e.sessionId, projectDir, f.mains, f.tree),
     }
     return { facts, terminal, rec }
   }
@@ -549,7 +602,7 @@ export class KeepWarmHost {
     for (const e of f.entries) {
       if (e.source !== 'bridge' || e.phase !== 'cooling') continue
       const main = mainOf(e.sessionId, f.mains)
-      const projectDir = main ? path.basename(path.dirname(main.file)) : ''
+      const projectDir = main ? projectDirOf(main.file) : ''
       if (this.claudeTerminals(projectDir).length === 0) next.add(e.sessionId)
     }
     this.noTerminal = next

@@ -2513,7 +2513,11 @@ test('the pages describe the keep-warm line as the host builds it: the countdown
   for (const claim of [
     item, '`$(watch) keep-warm line sent` for 10 seconds', 'whatever `tokenPace.statusBar.show` lists',
     '**A click cancels** the line and keep-warm for the rest of the session\'s idle phase', '*Token Pace: Cancel the Keep-Warm Line*',
-    'At zero every check runs again', 'only the window whose terminal runs the session starts one',
+    'At zero every check runs again', 'a window starts one only for the session its own Claude terminal began (checks 7 and 13)',
+    'one whose `claude` started after the session\'s first reply never does',
+    'a terminal is known by its folder, not by the session in it', 'one resumed there with `claude --resume` — never gets a line',
+    'That session gets the line only while it is idle by check 13\'s measure',
+    'what time cannot tell apart is a terminal whose `claude` started before the session\'s first reply',
     'Keep-warm line for this session in 42 s — cancel it in the status bar.',
     'Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.',
     'Keep-warm stopped for this session: the last line got no answer within two minutes.',

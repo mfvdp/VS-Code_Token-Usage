@@ -253,6 +253,13 @@ one-minute countdown starts in the status bar, and all of them again when the co
     keep-warm stops for the rest of the idle phase.
 12. **Not cancelled** — a click on the countdown cancels the line and keep-warm for the rest of the
     idle phase.
+13. **The terminal's own session** — a terminal is known by its folder, not by the session in it, so
+    the session has to be the one that terminal's `claude` began: its first reply came after VS Code
+    reported the start of that `claude`, and no other session of the same folder began later. A
+    session begun before — one resumed there with `claude --resume` — never gets a line. And every
+    other session of the folder has to be idle as checks 4 and 5 measure it — its newest reply at
+    least a minute old and finished, nothing of the user's after it, no agent of it running —, so that
+    a line that reached another session could not land in a reply under way or in an open dialog.
 
 **What no check can see.** Token Pace cannot read Claude Code's input line: **text you typed there
 and did not send is sent together with the line** — type nothing into the Claude terminal while the
@@ -260,9 +267,13 @@ countdown runs. This was seen, not inferred: a half-typed draft and the line wen
 No interface of VS Code reads a terminal's input, so no check can find a draft; the countdown and its
 cancel are the only protection, and the focus check (8) keeps the line from any terminal you were in
 since the reply. It cannot see a dialog the transcript does not show either. The terminal is
-recognised by its folder, not by its session: another Claude Code session of the same folder, in a
-terminal of this window, would get the line instead — check 11 then stops keep-warm after that one
-line. A session in the Claude Code extension's own panel gets the cooling warning and never a line.
+recognised by its folder and the session in it by time (check 13); what time cannot tell apart is a
+terminal whose `claude` started before the session's first reply but which now runs another, older
+session of the same folder — one picked there with `/resume`, or one begun in it before the session
+was started elsewhere, in another window or in the panel. That session gets the line only while it
+is idle by check 13's measure; its answer is not the watched session's, so check 11 then stops
+keep-warm after that one line. A session in the Claude Code extension's own panel gets the cooling
+warning and never a line.
 
 **The countdown.** When the checks hold, a status-bar item of its own appears, whatever
 `tokenPace.statusBar.show` lists — a line is never typed without it on screen: `$(watch) keep warm
@@ -275,8 +286,10 @@ session's idle phase, and so does *Token Pace: Cancel the Keep-Warm Line*. At ze
 again with the facts of that moment; only if all still hold does the line go, into the terminal the
 countdown was started for, and the item reads `$(watch) keep-warm line sent` for 10 seconds. Every
 line is logged — `keep-warm: line sent to the terminal of session 9d0eb37a; the cache expires at
-14:57` —, and so is its answer or the lack of one. One countdown at a time per window; only the
-window whose terminal runs the session starts one.
+14:57` —, and so is its answer or the lack of one. One countdown at a time per window, and a window
+starts one only for the session its own Claude terminal began (checks 7 and 13): of two windows with
+a Claude terminal in the same folder, one whose `claude` started after the session's first reply
+never does.
 
 **On the Claude card**, under the session's lines: `Keep-warm line for this session in 42 s — cancel
 it in the status bar.` while a countdown runs; `Keep-warm cannot reach this session: it does not run

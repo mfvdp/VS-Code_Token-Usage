@@ -140,6 +140,13 @@ started —, in these words:
   *Keep-warm stopped for this session: the last line got no answer within two minutes.* Your next
   request starts a new idle phase.
 * **`cancelled`** — you cancelled a countdown in this idle phase.
+* **`otherSession`** — a terminal is known by its folder, not by its session, and this one may run
+  another session of the folder: the session began before the terminal's `claude` started (it was
+  resumed there, with `claude --resume`), or another session of the folder began after it — either
+  way the session gets no line —; or another session of the folder is not idle: its newest reply is
+  less than a minute old, stopped for a tool or was cut off, a line of yours came after it (a
+  question or a permission dialog may be open there), or an agent of it runs. The last holds until
+  that session has finished its turn.
 
 ## A question answered after the window closed
 

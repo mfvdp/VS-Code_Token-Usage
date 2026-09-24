@@ -6,7 +6,8 @@
  * guard passing is `go`, each guard failing alone is its block, every block is reached —, the timing
  * of Q19 (due at 3 minutes left, the line at about 2, never inside the last minute), G2's "never an
  * estimate", G4 with the probe P-6 shape, the terminal match (the command line, its confidence, the
- * working directory's project-directory name), G8, G9–G11, G10 and Restricted Mode. The host that
+ * working directory's project-directory name), G8, G9–G11, G10, Restricted Mode and G13 — the session
+ * behind the terminal and the other sessions of its folder (1.8 P12). The host that
  * gathers the facts — terminals, focus, the countdown, `sendText` — is P10's (keepWarmHost.test.ts).
  * Synthetic records, readings and command lines throughout; no terminal, no transcript, no mirror.
  */
@@ -21,7 +22,7 @@ import { CACHE_COOLING_LEAD_MS, CacheWatchEntry, TTL_MS, watchCaches } from '../
 import {
   CLAUDE_COMMAND_RE, COMMAND_CONFIDENCE_MEDIUM, COMMAND_LINE_TESTED_CHARS, KEEPWARM_COUNTDOWN_MS, KEEPWARM_GUARD_OF,
   KEEPWARM_IDLE_MIN_MS, KEEPWARM_LEAD_MS, KEEPWARM_MAX_PER_IDLE, KEEPWARM_QUOTA_STOP_PERCENT, KEEPWARM_SEND_MARGIN_MS,
-  KEEPWARM_VERIFY_MS, KEEP_WARM_LINE, KeepWarmBlock, KeepWarmFacts, KeepWarmStage, ShellExecutionFacts,
+  KEEPWARM_VERIFY_MS, KEEP_WARM_LINE, KeepWarmBlock, KeepWarmFacts, KeepWarmSibling, KeepWarmStage, ShellExecutionFacts,
   claudeExecutionMatches, keepWarmDecision, projectDirName,
 } from '../src/keepWarm'
 import type { PromptCacheReading } from '../src/quotaSources'
@@ -71,6 +72,11 @@ function main(over: Partial<MainRec> = {}): MainRec {
   }
 }
 
+/** The session's first counted reply (`main().firstTs`): two days before the expiry. */
+const FIRST = Date.UTC(2026, 8, 22, 14, 20)
+/** G13: the terminal's `claude` started half a minute before the session's first reply. */
+const EXEC_START = FIRST - 30 * SEC
+
 /** Facts under which every guard holds. */
 function facts(over: Partial<KeepWarmFacts> = {}): KeepWarmFacts {
   return {
@@ -80,8 +86,14 @@ function facts(over: Partial<KeepWarmFacts> = {}): KeepWarmFacts {
     terminals: { matching: 1, touchedSince: 'no' },
     sentThisPhase: 0, lastUnanswered: false, cancelled: false,
     quotaMax: { percent: 42, reached: false },
+    executionStartedAt: EXEC_START, siblings: [],
     ...over,
   }
+}
+
+/** G13: another session of the folder, idle and older — begun the day before the session, quiet for half an hour. */
+function sibling(over: Partial<KeepWarmSibling> = {}): KeepWarmSibling {
+  return { firstAt: FIRST - 86_400_000, lastTs: NOW - 30 * MIN, stop: 'end_turn', replyPending: false, running: false, ...over }
 }
 
 function hook(over: Partial<HookEntry> = {}): HookEntry {
@@ -189,6 +201,13 @@ const CASES: readonly Case[] = [
   { what: 'a window reached', f: { quotaMax: { percent: 12, reached: true } }, block: 'quota' },
   { what: 'the last line unanswered', f: { lastUnanswered: true }, block: 'unanswered' },
   { what: 'cancelled in this phase', f: { cancelled: true }, block: 'cancelled' },
+  { what: 'claude --resume of an older session (its first reply before the execution started)', f: { executionStartedAt: FIRST + MIN }, block: 'otherSession' },
+  { what: 'no execution start known', f: { executionStartedAt: null }, block: 'otherSession' },
+  { what: 'another session of the folder started later', f: { siblings: [sibling({ firstAt: FIRST + HOUR })] }, block: 'otherSession' },
+  { what: 'another session of the folder with the user\'s line newest', f: { siblings: [sibling({ replyPending: true })] }, block: 'otherSession' },
+  { what: 'another session of the folder at a tool call', f: { siblings: [sibling({ stop: 'tool_use' })] }, block: 'otherSession' },
+  { what: 'another session of the folder with an agent running', f: { siblings: [sibling({ running: true })] }, block: 'otherSession' },
+  { what: 'another session of the folder answering right now', f: { siblings: [sibling({ lastTs: NOW - 30 * SEC })] }, block: 'otherSession' },
 ]
 
 test('the decision table: every guard passing is go at both stages; each guard failing alone is its block; every block is reached', () => {
@@ -201,9 +220,9 @@ test('the decision table: every guard passing is go at both stages; each guard f
     reached.add(c.block)
   }
   assert.deepEqual([...reached].sort(), (Object.keys(KEEPWARM_GUARD_OF) as KeepWarmBlock[]).sort(), 'a block no case reaches')
-  // The twelve guards, each with its blocks, in the table's order.
+  // The thirteen guards, each with its blocks, in the table's order (1.8 P12 added G13).
   assert.deepEqual([...new Set(Object.values(KEEPWARM_GUARD_OF))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))),
-    ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10', 'G11', 'G12'])
+    ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10', 'G11', 'G12', 'G13'])
 })
 
 test('the first failing guard in the table\'s order decides; with every guard failing it is G1', () => {
@@ -214,6 +233,9 @@ test('the first failing guard in the table\'s order decides; with every guard fa
   // Two failing guards: the lower one names the block.
   assert.equal(verdict(facts({ running: true, cancelled: true })), 'agentRunning')
   assert.equal(verdict(facts({ sentThisPhase: 3, terminals: { matching: 0, touchedSince: 'yes' } })), 'noTerminal')
+  // G13 comes last: it asks about the one terminal G7 found.
+  assert.equal(verdict(facts({ cancelled: true, siblings: [sibling({ replyPending: true })], executionStartedAt: null })), 'cancelled')
+  assert.equal(verdict(facts({ terminals: { matching: 0, touchedSince: 'no' }, executionStartedAt: null })), 'noTerminal')
 })
 
 test('a fact that is not exactly the passing value blocks: a wrong fact may only keep the line back', () => {
@@ -231,6 +253,15 @@ test('a fact that is not exactly the passing value blocks: a wrong fact may only
   assert.equal(verdict(facts({ main: main({ lastRequest: { ...lastRequest(), replyPending: undefined } as unknown as LastRequest }) })), 'openTool')
   assert.equal(verdict(facts({ reading: reading({ expiresAt: Number.NaN }) })), 'noBridge')
   assert.equal(verdict(facts(), Number.NaN), 'notDue')
+  // G13's facts, taken as strictly.
+  for (const t of [Number.NaN, Infinity, undefined]) assert.equal(verdict(odd({ executionStartedAt: t })), 'otherSession', String(t))
+  assert.equal(verdict(facts({ main: main({ firstTs: Number.NaN }) })), 'otherSession')
+  for (const list of [undefined, null, {}, 'x']) assert.equal(verdict(odd({ siblings: list })), 'otherSession', String(list))
+  assert.equal(verdict(odd({ siblings: [null] })), 'otherSession')
+  assert.equal(verdict(facts({ siblings: [sibling({ firstAt: Number.NaN })] })), 'otherSession')
+  assert.equal(verdict(facts({ siblings: [sibling({ lastTs: Number.NaN })] })), 'otherSession')
+  assert.equal(verdict(odd({ siblings: [{ ...sibling(), running: undefined }] })), 'otherSession')
+  assert.equal(verdict(odd({ siblings: [{ ...sibling(), replyPending: 0 }] })), 'otherSession')
 })
 
 // ---------------------------------------------------------------------------
@@ -482,6 +513,55 @@ test('G10: a Claude window at 90 % or reached → quota; below it → go; no rea
   assert.equal(verdict(facts({ quotaMax: { percent: 3, reached: true } })), 'quota')
   assert.equal(verdict(facts({ quotaMax: { percent: 89.9, reached: false } })), 'go')
   assert.equal(verdict(facts({ quotaMax: null })), 'go', 'no reading')
+})
+
+// ---------------------------------------------------------------------------
+// G13 · the session behind the terminal, and the other sessions of its folder (1.8 P12, §7c)
+// ---------------------------------------------------------------------------
+
+test('G13 (a): the terminal\'s own session is the newest one started after its claude started — claude --resume of an older session → otherSession', () => {
+  // Mutation check (§7c P12): dropping rule (a) sends into the terminal of a resumed older session.
+  for (const stage of STAGES) {
+    assert.equal(verdict(facts({ executionStartedAt: FIRST + MIN }), NOW, stage), 'otherSession', `--resume (${stage})`)
+    assert.equal(verdict(facts({ executionStartedAt: FIRST + MIN, siblings: [sibling()] }), NOW, stage), 'otherSession', `--resume beside an idle one (${stage})`)
+  }
+  // Strictly after: a first reply at the very moment the execution started is not one it gave.
+  assert.equal(verdict(facts({ executionStartedAt: FIRST })), 'otherSession')
+  assert.equal(verdict(facts({ executionStartedAt: FIRST - 1 })), 'go')
+  // Started in this terminal and still its newest: go, beside any number of older, idle sessions.
+  assert.equal(verdict(facts({ siblings: [sibling(), sibling({ firstAt: FIRST - 2 * 86_400_000 }), sibling({ firstAt: EXEC_START + 1 })] })), 'go')
+})
+
+test('G13 (a): another session of the folder started later — or at the same moment — is the one the terminal would run → otherSession', () => {
+  // Mutation check (§7c P12): dropping rule (a) lets these through — the later session is idle, so (b)
+  // alone does not stop them.
+  for (const stage of STAGES) {
+    assert.equal(verdict(facts({ siblings: [sibling({ firstAt: FIRST + HOUR })] }), NOW, stage), 'otherSession', stage)
+    assert.equal(verdict(facts({ siblings: [sibling(), sibling({ firstAt: FIRST + 1 })] }), NOW, stage), 'otherSession', `one of two (${stage})`)
+  }
+  // The same first moment: neither is the newest.
+  assert.equal(verdict(facts({ siblings: [sibling({ firstAt: FIRST })] })), 'otherSession')
+  assert.equal(verdict(facts({ siblings: [sibling({ firstAt: FIRST - 1 })] })), 'go')
+})
+
+test('G13 (b): every other session of the folder idle by G4\'s test, no agent of it running — a sibling with the user\'s line newest → otherSession', () => {
+  // Mutation check (§7c P12): dropping rule (b) sends while an older session of the folder waits in a
+  // dialog — which is the session a fooled (a) would type into.
+  for (const stage of STAGES) {
+    assert.equal(verdict(facts({ siblings: [sibling({ replyPending: true })] }), NOW, stage), 'otherSession', stage)
+  }
+  for (const [what, s] of [
+    ['a reply that called a tool', sibling({ stop: 'tool_use' })], ['a cut-off reply', sibling({ stop: 'max_tokens' })],
+    ['a paused turn', sibling({ stop: 'pause_turn' })], ['no stop kept', sibling({ stop: null })],
+    ['no request of the cache on its record', sibling({ stop: null, replyPending: null })],
+    ['an agent running', sibling({ running: true })], ['its newest reply 30 s old', sibling({ lastTs: NOW - 30 * SEC })],
+    ['its newest reply a minute old but one ms', sibling({ lastTs: NOW - KEEPWARM_IDLE_MIN_MS + 1 })],
+  ] as const) {
+    assert.equal(verdict(facts({ siblings: [sibling(), s] })), 'otherSession', what)
+  }
+  // Idle by exactly G4's measure: a minute old, its turn ended, nothing of the user's after it.
+  assert.equal(verdict(facts({ siblings: [sibling({ lastTs: NOW - KEEPWARM_IDLE_MIN_MS })] })), 'go')
+  assert.equal(verdict(facts({ siblings: [sibling(), sibling({ firstAt: FIRST - 6 * 86_400_000, lastTs: NOW - 5 * 86_400_000 })] })), 'go')
 })
 
 // ---------------------------------------------------------------------------

@@ -527,8 +527,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
    * 1.8 B2 (§3 B2): one frame of the keep-warm host, on the facts of this second — the watched sessions
    * the bar has just drawn, every session's bridge reading, the main records, the newest Agents tree,
    * the agent hook's entries and the quota readings. A failure costs keep-warm this frame, never the bar.
+   * With the setting off and nothing left to finish — no terminal listened to, no item on screen, no line
+   * waiting for its answer (`atRest`) — no frame is gathered at all (1.8 Review 3, P12).
    */
   function keepWarmTick(now: number, watched: CacheWatchEntry[]): boolean {
+    if (!cfg.cacheKeepWarm && keepWarm.atRest()) return false
     try {
       return keepWarm.tick({
         now,

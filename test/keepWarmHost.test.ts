@@ -4,8 +4,9 @@
 /**
  * 1.8 B2 part 2 (spec §3 B2 tests 7, 8, 11, 12, 14, §0a.6 leak test; §7a Q19; §7c): the keep-warm host
  * against fake terminals — the countdown and its cancel, the second check at zero, the `sendText` spy,
- * the answers and the idle phase, `keepwarm.json`, the consent's words, two windows, and that nothing of
- * a terminal's command line or folder reaches an output.
+ * the answers and the idle phase, `keepwarm.json`, the consent's words, two windows, the session behind
+ * the terminal and the other sessions of its folder (G13, 1.8 P12), the frame skipped while the setting
+ * is off, and that nothing of a terminal's command line or folder reaches an output.
  *
  * Every terminal, execution and window is a fake of test/helpers/fakeVscode.ts; every transcript line is
  * a synthetic fixture fed into a real aggregator; every time is a fixed instant. No terminal is started,
@@ -44,8 +45,15 @@ const HOUR = 60 * MIN
 const EXPIRY = Date.UTC(2026, 8, 24, 14, 57, 0)
 /** The session's newest reply: the request that set the expiry, its line five seconds after it began. */
 const LAST = EXPIRY - HOUR + 5 * SEC
-/** This window started watching ten minutes before that reply. */
-const T0 = LAST - 10 * MIN
+/** The session's first reply, two days before its newest (the world below). */
+const FIRST = LAST - 2 * 86_400_000
+/**
+ * This window started watching ten minutes before the session's first prompt; Claude Code starts in its
+ * terminal five seconds later (the rig) — so the session is the one that `claude` began (G13, 1.8 P12).
+ * Until P12 this was ten minutes before the newest reply, `claude` started two days into the session:
+ * the shape of a `claude --resume`, which G13 now keeps back.
+ */
+const T0 = FIRST - 10 * MIN
 /** 2 m 50 s before the expiry: due (3 min or less), and a countdown started now ends 1 m 50 s before it. */
 const NOW = EXPIRY - 170 * SEC
 const SID = '9d0eb37a-6f3e-4c2b-9a1d-2e4f6a8c0b13'
@@ -85,8 +93,8 @@ function world(o: { expiry?: number; quotaPercent?: number } = {}): World {
     }))
   }
   // The session started two days ago; its newest reply wrote the one-hour cache.
-  line(promptLine({ ts: LAST - 2 * 86_400_000 - 5 * SEC }))
-  reply(LAST - 2 * 86_400_000)
+  line(promptLine({ ts: FIRST - 5 * SEC }))
+  reply(FIRST)
   line(promptLine({ ts: LAST - 30 * SEC }))
   reply(LAST, { write: 2000, output: 200 })
   const expiry = o.expiry ?? EXPIRY
@@ -116,8 +124,15 @@ interface Rig {
   item(): (FakeStatusBarItem & { accessibilityInformation?: { label?: string } }) | undefined
 }
 
-/** A fake window and a host over it, the world's session running `claude` in a terminal of it. */
-function rig(o: { w?: World; dir?: string; terminal?: boolean; commandLine?: string; cwd?: string; shell?: string | undefined } = {}): Rig {
+/**
+ * A fake window and a host over it, the world's session running `claude` in a terminal of it. `execAt`:
+ * when Claude Code starts there (default five seconds after the window, before the session's first
+ * prompt); `setup`: more of the window's past, run while the clock stands at that start.
+ */
+function rig(o: {
+  w?: World; dir?: string; terminal?: boolean; commandLine?: string; cwd?: string; shell?: string | undefined; execAt?: number
+  setup?: (r: Rig) => void
+} = {}): Rig {
   const { api, state } = createFakeVscode()
   const window = (api as { window: KeepWarmWindow }).window
   const clock = { now: T0 }
@@ -149,8 +164,9 @@ function rig(o: { w?: World; dir?: string; terminal?: boolean; commandLine?: str
   if (o.terminal !== false) {
     const terminal = state.openTerminal({ shell: 'shell' in o ? o.shell : 'claude', name: 'Summary of a conversation' })
     state.setActiveTerminal(terminal)
-    clock.now = T0 + 5 * SEC
+    clock.now = o.execAt ?? T0 + 5 * SEC
     state.startExecution(terminal, { commandLine: o.commandLine ?? SECRET_LINE, confidence: 2, cwd: o.cwd ?? SECRET_CWD })
+    o.setup?.(r)
     clock.now = LAST - 20 * SEC
     state.fireWindowState(false)
   }
@@ -159,6 +175,33 @@ function rig(o: { w?: World; dir?: string; terminal?: boolean; commandLine?: str
 
 function terminalOf(r: Rig): FakeTerminal {
   return r.state.terminals[0]
+}
+
+/** G13 (1.8 P12): another session of the world's folder — its transcript beside the session's. */
+const SID2 = '5f1c2d3e-8a7b-4c6d-9e0f-1a2b3c4d5e6f'
+const FILE2 = path.join('/virtual', 'claude', 'projects', PROJECT_DIR, `${SID2}.jsonl`)
+
+/**
+ * Another session of the same folder in the world's aggregator: a prompt and its reply at `first`, a
+ * reply at `last` (with `stop`), then — at `pending` — a prompt with nothing after it (a question or a
+ * dialog may stand open there, probe P-6). Returns the transcript's line appender.
+ */
+function siblingSession(w: World, o: { first: number; last?: number; stop?: string; pending?: number }): (raw: string) => void {
+  if (!w.agg.cursors.has(FILE2)) w.agg.cursors.set(FILE2, { offset: 0, size: 0, ino: 901, dev: 1 })
+  const c = ctxFor({ file: FILE2 })
+  const line = (raw: string): void => { w.agg.addClaudeLine(raw, c) }
+  const reply = (at: number, stop?: string): void => line(claudeLine({
+    id: `msg_kw_${++ids}`, ts: at, model: 'claude-opus-5-5', final: true, stopReason: stop, sessionId: SID2, cwd: SECRET_CWD,
+    usage: { input: 200, cacheWrite: 1000, cacheWrite1h: 1000, cacheRead: 80_000, output: 30 },
+  }))
+  line(promptLine({ ts: o.first - 5 * SEC }))
+  reply(o.first)
+  if (o.last !== undefined) {
+    line(promptLine({ ts: o.last - 5 * SEC }))
+    reply(o.last, o.stop)
+  }
+  if (o.pending !== undefined) line(promptLine({ ts: o.pending }))
+  return line
 }
 
 /** Runs the host every second from `from` to `to`, both included. */
@@ -643,6 +686,125 @@ test('two windows share the mirror and the snapshot; only the one whose terminal
 })
 
 // ---------------------------------------------------------------------------
+// G13 · the session behind the terminal, the other sessions of its folder (1.8 P12, §7c)
+// ---------------------------------------------------------------------------
+
+test('Review 3\'s reproduction: two windows with a Claude terminal each in one folder — only the window whose claude began the session arms; the other logs otherSession (G13)', () => {
+  const w = world()
+  // The second window's terminal resumed an older session of the folder an hour before the watched
+  // session's newest reply — long after that session's first — and it has been idle since.
+  siblingSession(w, { first: FIRST - 86_400_000, last: LAST - 50 * MIN })
+  const dir = scratchDir('kw-p12-two')
+  const own = rig({ w, dir })
+  const other = rig({ w, dir, execAt: LAST - HOUR, commandLine: 'claude --resume' })
+  for (let now = NOW - 10 * SEC; now <= NOW + KEEPWARM_COUNTDOWN_MS; now += SEC) {
+    own.tick(now)
+    other.tick(now)
+  }
+  // Mutation check (§7c P12): dropping rule (a) arms the second window too, and its line goes into the
+  // resumed session's terminal — as it did before P12.
+  assert.deepEqual(own.state.sent.map((x) => [x.terminal === terminalOf(own), x.text]), [[true, KEEP_WARM_LINE]])
+  assert.deepEqual(other.state.sent, [])
+  assert.equal(other.state.live().some((i) => i.id === KEEPWARM_ITEM_ID), false)
+  assert.match(other.logs.join('\n'), /debug keep-warm: session 9d0eb37a not armed \(otherSession\)/)
+  // Its terminal runs Claude Code in the folder: no "cannot reach" note, only the log says why.
+  assert.deepEqual(other.host.view(NOW, tcfg).noTerminal, [])
+  assert.equal(other.state.nameReads + own.state.nameReads, 0)
+})
+
+test('claude --resume of an older session in the terminal: the session began before that claude did — never a line (G13 a)', () => {
+  // Mutation check (§7c P12): dropping rule (a) sends here.
+  const r = rig({ execAt: FIRST + HOUR, commandLine: 'claude --resume' })
+  run(r, NOW - 10 * SEC, EXPIRY)
+  assert.deepEqual(r.state.sent, [])
+  assert.equal(r.item(), undefined)
+  assert.match(r.logs.join('\n'), /debug keep-warm: session 9d0eb37a not armed \(otherSession\)/)
+  // The same terminal, its claude started before the session's first prompt: the line goes.
+  const own = rig()
+  run(own, NOW, NOW + KEEPWARM_COUNTDOWN_MS)
+  assert.equal(own.state.sent.length, 1)
+})
+
+test('another session of the folder that started later is the one the terminal would run — never a line (G13 a)', () => {
+  // A second session of the folder began the day after the watched one (a /clear in that terminal, or
+  // another window) and has been idle for 50 minutes. Mutation check (§7c P12): dropping rule (a) sends.
+  const w = world()
+  siblingSession(w, { first: FIRST + 86_400_000, last: LAST - 50 * MIN })
+  const r = rig({ w })
+  run(r, NOW - 10 * SEC, EXPIRY)
+  assert.deepEqual(r.state.sent, [])
+  assert.match(r.logs.join('\n'), /not armed \(otherSession\)/)
+})
+
+test('another session of the folder with the user\'s line newest keeps the line back; once its turn has ended a minute ago, it goes (G13 b)', () => {
+  // An older session of the folder: its user asked something ten minutes ago and nothing of the reply is
+  // on disk — a question or a permission dialog may stand open there (probe P-6). Mutation check (§7c
+  // P12): dropping rule (b) sends here.
+  const w = world()
+  siblingSession(w, { first: FIRST - 86_400_000, last: LAST - 50 * MIN, pending: NOW - 10 * MIN })
+  const r = rig({ w })
+  run(r, NOW - 10 * SEC, EXPIRY)
+  assert.deepEqual(r.state.sent, [])
+  assert.match(r.logs.join('\n'), /debug keep-warm: session 9d0eb37a not armed \(otherSession\)/)
+  // A reply that stopped for a tool, and an agent of it running, hold it back too.
+  const tool = world()
+  siblingSession(tool, { first: FIRST - 86_400_000, last: LAST - 50 * MIN, stop: 'tool_use' })
+  const t = rig({ w: tool })
+  t.tick(NOW)
+  assert.equal(t.item(), undefined)
+  const busy = rig()
+  siblingSession(busy.w, { first: FIRST - 86_400_000, last: LAST - 50 * MIN })
+  const tree = { ...emptyAgentTree(), running: 1, roots: [{ key: `s:${SID2}`, tally: { running: 1 } }] } as unknown as KeepWarmFrame['tree']
+  busy.tick(NOW, { tree })
+  assert.equal(busy.item(), undefined)
+  assert.match(busy.logs.join('\n'), /not armed \(otherSession\)/)
+  // The same session answered five minutes ago and ended its turn: nothing of the folder is busy.
+  const done = world()
+  const answer = siblingSession(done, { first: FIRST - 86_400_000, last: LAST - 50 * MIN, pending: NOW - 10 * MIN })
+  answer(claudeLine({ id: 'msg_kw_p12_answer', ts: NOW - 5 * MIN, model: 'claude-opus-5-5', final: true, sessionId: SID2, cwd: SECRET_CWD,
+    usage: { input: 20, cacheRead: 81_000, output: 12 } }))
+  const d = rig({ w: done })
+  run(d, NOW, NOW + KEEPWARM_COUNTDOWN_MS)
+  assert.equal(d.state.sent.length, 1)
+})
+
+// ---------------------------------------------------------------------------
+// The frame skipped while the setting is off (Review 3, 1.8 P12)
+// ---------------------------------------------------------------------------
+
+test('with the setting off and nothing left to finish the host is at rest, and the extension gathers no frame for it; a line sent before the switch-off is still answered', () => {
+  const { api } = createFakeVscode()
+  const fresh = new KeepWarmHost({ window: (api as { window: KeepWarmWindow }).window, file: path.join(scratchDir('kw-rest'), KEEPWARM_FILE_NAME), log: { info: () => {}, debug: () => {}, warn: () => {} } })
+  assert.equal(fresh.atRest(), true, 'a new host')
+  const r = rig()
+  assert.equal(r.host.atRest(), false, 'listening to the terminals')
+  // A line goes; the setting is switched off before its answer: the frames go on until it comes.
+  run(r, NOW, NOW + KEEPWARM_COUNTDOWN_MS)
+  assert.equal(r.state.sent.length, 1)
+  const sentAt = NOW + KEEPWARM_COUNTDOWN_MS
+  r.tick(sentAt + SEC, { enabled: false })
+  assert.equal(r.host.isTracking(), false)
+  assert.equal(r.item(), undefined)
+  assert.equal(r.host.atRest(), false, 'a line waits for its answer')
+  r.w.line(promptLine({ ts: sentAt + 400 }))
+  r.w.reply(sentAt + 3 * SEC, { input: 20, read: 152_000, output: 12 })
+  run(r, sentAt + 2 * SEC, sentAt + 10 * SEC, { enabled: false })
+  assert.deepEqual(JSON.parse(fs.readFileSync(r.file, 'utf8')).days, { '2026-09-24': { requests: 1, tokens: 32 } })
+  assert.equal(r.host.atRest(), true, 'answered: nothing left to finish')
+  // Unanswered: at rest once the wait has run out.
+  const u = rig()
+  run(u, NOW, NOW + KEEPWARM_COUNTDOWN_MS)
+  u.tick(sentAt + SEC, { enabled: false })
+  assert.equal(u.host.atRest(), false)
+  run(u, sentAt + 2 * SEC, sentAt + KEEPWARM_VERIFY_MS + KEEPWARM_VERIFY_GRACE_MS + SEC, { enabled: false })
+  assert.equal(u.host.atRest(), true)
+  // The extension's one-second frame returns before it gathers anything while the setting is off and
+  // the host is at rest.
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'extension.ts'), 'utf8')
+  assert.match(src, /function keepWarmTick\(now: number, watched: CacheWatchEntry\[\]\): boolean \{\n\s*if \(!cfg\.cacheKeepWarm && keepWarm\.atRest\(\)\) return false\n/)
+})
+
+// ---------------------------------------------------------------------------
 // The quota stop, the running agents (G5, G10 as the host reads them)
 // ---------------------------------------------------------------------------
 
@@ -707,7 +869,7 @@ test('keepWarmHost.ts reads nothing of a terminal but its executions, its shell 
 // ---------------------------------------------------------------------------
 
 test('the send stage, block by block: what changed during the countdown keeps the line back at zero, with its block in the log (§3 B2 "all again", review 3)', () => {
-  type Case = [what: string, block: string, during: (r: Rig) => Partial<KeepWarmFrame> | void]
+  type Case = [what: string, block: string, during: (r: Rig) => Partial<KeepWarmFrame> | void, setup?: (r: Rig) => void]
   const cases: Case[] = [
     // The user typed a prompt: the newest message line is the user's, no reply yet (§0a.5, probe P-6).
     ['a user line newest', 'openTool', (r) => { r.w.line(promptLine({ ts: NOW + 20 * SEC })) }],
@@ -721,11 +883,22 @@ test('the send stage, block by block: what changed during the countdown keeps th
       r.state.startExecution(second, { commandLine: 'claude --resume', cwd: SECRET_CWD })
     }],
     // The armed terminal closed, and another one runs Claude Code in the folder now: the line goes into
-    // the terminal the countdown was started for, or nowhere.
-    ['another terminal in the armed one\'s place', 'noTerminal', (r) => {
+    // the terminal the countdown was started for, or nowhere. 1.8 P12: a `claude` started during the
+    // countdown began after the session's first reply — G13 keeps it back first (otherSession) …
+    ['a claude started in the armed one\'s place', 'otherSession', (r) => {
       r.state.closeTerminal(terminalOf(r))
       const next = r.state.openTerminal({ shell: 'claude' })
       r.state.startExecution(next, { commandLine: 'claude', cwd: SECRET_CWD })
+    }],
+    // … so the "armed terminal only" check is pinned with one that passes every guard at zero: its
+    // `claude` started with the first, before the session's first prompt, and VS Code named another
+    // program in it when the countdown started (so it did not count then) and `claude` at its end.
+    ['another terminal in the armed one\'s place', 'noTerminal', (r) => {
+      r.state.closeTerminal(terminalOf(r))
+      r.state.terminals[0].setShell('claude')
+    }, (r) => {
+      const other = r.state.openTerminal({ shell: 'bash' })
+      r.state.startExecution(other, { commandLine: 'claude', cwd: SECRET_CWD })
     }],
     // The user came back to the window, the Claude terminal active.
     ['the terminal focused since the reply', 'typedSince', (r) => {
@@ -738,12 +911,17 @@ test('the send stage, block by block: what changed during the countdown keeps th
     }],
     // The bridge's reading went (Clear Stored Data…): only the transcript's estimate describes the cache.
     ['a transcript-sourced entry', 'noBridge', (r) => { r.w.readings.length = 0 }],
+    // 1.8 P12: another session of the folder — an older one, read in only now — asked something, and
+    // nothing of its reply is on disk (G13 b).
+    ['another session of the folder waiting for its reply', 'otherSession', (r) => {
+      siblingSession(r.w, { first: FIRST - 86_400_000, last: LAST - 50 * MIN, pending: NOW + 20 * SEC })
+    }],
     // Consent withdrawn, and the workspace no longer trusted: G1 ends the countdown at once.
     ['consent withdrawn', 'consent', () => ({ consent: 'unasked' })],
     ['Restricted Mode', 'restricted', () => ({ trusted: false })],
   ]
-  for (const [what, block, during] of cases) {
-    const r = rig()
+  for (const [what, block, during, setup] of cases) {
+    const r = rig({ setup })
     r.tick(NOW)
     assert.ok(r.item(), `${what}: no countdown`)
     run(r, NOW + SEC, NOW + 19 * SEC)

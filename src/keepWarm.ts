@@ -22,6 +22,12 @@
  * together with the line (confirmed); no API reads a terminal's input, so no guard here can see it —
  * the countdown and its cancel are the only protection, and the consent says so.
  *
+ * A terminal is linked to a folder, not to a session (1.8 P12, §7c): another Claude Code session of the
+ * same project directory — in the Claude Code panel, in another window, or the one the terminal runs
+ * instead — could take the line. G13 therefore asks which session the terminal runs: the one whose
+ * first counted reply came after its `claude` started and that is the newest of the folder's; and it
+ * keeps the line back while any other session of the folder is not idle by G4's and G5's tests.
+ *
  * Pure: no clock, no I/O, no `vscode`. The facts come in as values — the host (keepWarmHost.ts,
  * 1.8 P10) gathers them from the watch, the aggregator's record, the running list, the agent hook,
  * the window's terminals and its own idle-phase bookkeeping —, and the decision is a function of
@@ -34,7 +40,7 @@
 import type { HookEntry } from './agentTree'
 import type { CacheWatchEntry } from './cacheWatch'
 import type { PromptCacheReading } from './quotaSources'
-import type { MainRec } from './types'
+import type { MainRec, StopReason } from './types'
 
 /**
  * The line Token Pace types (§0a.8) — Frederik's words (§7a Q8), a text for the model, never
@@ -85,7 +91,7 @@ export const COMMAND_CONFIDENCE_MEDIUM = 1
 export type KeepWarmBlock =
   | 'off' | 'consent' | 'restricted' | 'noBridge' | 'notDue' | 'tooLate' | 'notIdle' | 'openTool' | 'agentRunning'
   | 'hookWait' | 'noTerminal' | 'ambiguousTerminal' | 'typedSince' | 'unknownFocus' | 'cap' | 'quota' | 'cancelled'
-  | 'unanswered'
+  | 'unanswered' | 'otherSession'
 
 /** The guard of §3 B2's table each block belongs to — compiler-complete: a new block needs its guard. */
 export const KEEPWARM_GUARD_OF: Readonly<Record<KeepWarmBlock, `G${number}`>> = Object.freeze({
@@ -101,7 +107,26 @@ export const KEEPWARM_GUARD_OF: Readonly<Record<KeepWarmBlock, `G${number}`>> = 
   quota: 'G10',
   unanswered: 'G11',
   cancelled: 'G12',
+  otherSession: 'G13',
 })
+
+/**
+ * G13 (1.8 P12): another main session of the watched session's project directory — what the aggregator
+ * keeps of it already (`MainRec`, §0a.2, §0a.5) and whether an agent of it runs (the Agents tree). Times,
+ * a stop reason and flags; never a text of the session.
+ */
+export interface KeepWarmSibling {
+  /** `MainRec.firstTs`: the time of the session's first counted reply. */
+  firstAt: number
+  /** `MainRec.lastTs`: the time of its newest counted reply. */
+  lastTs: number
+  /** `MainRec.lastRequest.stop`, or null without a request of the cache on the record. */
+  stop: StopReason | null
+  /** `MainRec.lastRequest.replyPending`, or null without a request of the cache on the record. */
+  replyPending: boolean | null
+  /** An agent of the session is in the running list (as G5 asks it). */
+  running: boolean
+}
 
 export type KeepWarmStage = 'arm' | 'send'
 export type KeepWarmVerdict = { go: true } | { go: false; block: KeepWarmBlock }
@@ -141,6 +166,16 @@ export interface KeepWarmFacts {
   cancelled: boolean
   /** G10: the highest window of the current Claude quota reading, or null without a reading (not blocked). */
   quotaMax: { percent: number; reached: boolean } | null
+  /**
+   * G13 (a): when the shell execution G7 found started — the time of its start event on the host's
+   * clock (of several matching executions of that terminal, the newest) —, or null without one.
+   */
+  executionStartedAt: number | null
+  /**
+   * G13: every other main session of the project directory that holds the watched session's transcript
+   * (every root's `projects/` alike) — each once per transcript, whatever its age.
+   */
+  siblings: readonly KeepWarmSibling[]
 }
 
 function finite(v: unknown): v is number {
@@ -149,6 +184,15 @@ function finite(v: unknown): v is number {
 
 function block(b: KeepWarmBlock): KeepWarmVerdict {
   return { go: false, block: b }
+}
+
+/**
+ * G13 (b): another session of the folder is idle by G4's test — its newest counted reply at least
+ * KEEPWARM_IDLE_MIN_MS old, the newest message line not the user's, the reply ended its turn — and has
+ * no agent running (G5). Strict like every fact here: anything else is not idle.
+ */
+function siblingIdle(s: KeepWarmSibling, now: number): boolean {
+  return finite(s.lastTs) && s.lastTs <= now - KEEPWARM_IDLE_MIN_MS && s.replyPending === false && s.stop === 'end_turn' && s.running === false
 }
 
 /**
@@ -200,6 +244,10 @@ function sendWindowOpen(t: number, expiresAt: number): boolean {
  *                                                                          quota
  *  G11 the previous line of this idle phase was answered                 unanswered
  *  G12 no cancel in this idle phase                                      cancelled
+ *  G13 the terminal runs this session, not another of its folder: the session's first reply came
+ *      after the terminal's `claude` started, no other session of the folder started later, and every
+ *      other session of the folder is idle (G4's test) with no agent running (G5's)
+ *                                                                          otherSession
  *
  * Every fact is taken strictly — a flag that is not exactly the passing value blocks —, because a
  * wrong fact may only ever keep the line back, never send it.
@@ -264,6 +312,24 @@ export function keepWarmDecision(f: KeepWarmFacts, now: number, stage: KeepWarmS
 
   // G12 · the one-click cancel holds for the rest of the idle phase.
   if (f.cancelled !== false) return block('cancelled')
+
+  // G13 · G7 links the terminal to a folder, not to a session: another Claude Code session of the same
+  // folder — in the panel, in another window, or the one this terminal runs instead — could take the
+  // line, and none of that session's dialogs is checked above.
+  // (a) Identity: the terminal's own session is the newest one started after its `claude` started —
+  // the session's first counted reply came after the execution's start, and no other session of the
+  // folder started later (or at the same moment: then none is the newest). `claude --resume` of an
+  // older session therefore blocks — the safe side.
+  const siblings = Array.isArray(f.siblings) ? f.siblings : null
+  if (siblings === null) return block('otherSession')
+  const started = f.executionStartedAt
+  if (!finite(started) || !finite(main.firstTs) || !(main.firstTs > started)) return block('otherSession')
+  for (const s of siblings) if (!s || !finite(s.firstAt) || !(s.firstAt < main.firstTs)) return block('otherSession')
+  // (b) Defence in depth where (a) is fooled — a terminal whose `claude` started before the session and
+  // that runs an older one of the folder, resumed or begun before it: every other session of the folder
+  // idle by G4's test, no agent of it running, so a line that reaches the wrong session never lands in
+  // a reply under way or an open dialog.
+  for (const s of siblings) if (!s || !siblingIdle(s, now)) return block('otherSession')
 
   return { go: true }
 }

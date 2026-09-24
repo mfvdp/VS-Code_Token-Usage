@@ -46,7 +46,8 @@ output is read.
   line and a provenance line that names what was measured and what was estimated.
 * **A dashboard in the secondary sidebar**: quota cards that explain their own colour, a
   seven-day sparkline, the key figures, the daily chart by model with the cost line, and the
-  fixed-period token totals. → [Dashboard](docs/dashboard.md)
+  fixed-period token totals — under a provider switch at the very top, `Claude Code · Codex ·
+  All`, that shows the whole page for one provider or for both. → [Dashboard](docs/dashboard.md)
 * **Your Claude Code agents as a tree**: the agents running now listed on top, then the
   sessions of the last seven days with their workflow runs and agents — closed until you open
   them, fifty children at a time — each with its state, usage, duration and a tally of what

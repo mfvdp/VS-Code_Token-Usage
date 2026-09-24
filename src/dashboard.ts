@@ -414,7 +414,7 @@ function uiFieldsOf(fields: SectionField[]): SectionField[] {
 /**
  * What a section's fragment carries. A `ui.<field>` dependency ships the whole `ui` object:
  * the webview assigns a payload's fields onto its view model, so half a `ui` there would
- * throw the provider chips and the model filter away.
+ * throw the stored provider list and the model filter away.
  */
 function payloadOf(vm: ViewModel, fields: SectionField[]): Record<string, unknown> {
   const o: Record<string, unknown> = {}
@@ -559,6 +559,12 @@ input[type=date] { cursor: text; }
 .bar .span2 { grid-column: 2 / 4; }
 /* The date fields are a line of their own, directly under the range they belong to. */
 .bar .full { grid-column: 1 / 4; }
+/* 1.7 F1: the provider switch, the page's first block — the page's own chips (the pressed one in
+   the pressed-chip colours, and in a forced-colours theme in the highlight colours, by the rules
+   every chip follows), on one line: the registry's titles and All fit the narrowest sidebar,
+   260 px, with room to spare. Each button at least 24 px square (WCAG 2.5.8). */
+.pv { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; }
+.pv button { min-height: 24px; min-width: 24px; white-space: nowrap; }
 /* The caption ends the range row; a little air keeps it apart from the last chip. */
 .bar .cap { margin-left: 2px; }
 .icon { display: inline-flex; align-items: center; justify-content: center; line-height: 0;
@@ -1160,7 +1166,7 @@ function scriptText(): string {
   return `
 /** The provider titles, interpolated from the registry so the webview cannot drift from it. */
 const SRC_TITLE = ${inline(SOURCE_TITLE)};
-/** The provider ids in registry order — the order of the filter bar's provider chips. */
+/** The provider ids in registry order — the order of the provider switch's buttons (1.7 F1). */
 const SRC_IDS = ${inline(SOURCES)};
 /** Every string the module below shows, keyed by its English text — see webviewWords(). */
 const L10N = ${webviewDictionary()};
@@ -1217,6 +1223,7 @@ function webviewWords(): Record<string, string> {
     'Activity': t('Activity'),
     'Agent records, last 7 days': t('Agent records, last 7 days'),
     'Agents': t('Agents'),
+    'All': t('All'),
     'All agents': t('All agents'),
     'Avg turn {0}': t('Avg turn {0}'),
     'Avg turn {0} · P90 {1}': t('Avg turn {0} · P90 {1}'),

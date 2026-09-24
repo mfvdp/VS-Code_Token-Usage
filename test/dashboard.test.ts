@@ -689,9 +689,14 @@ test('a German bundle reaches the page, the script inside it and the language of
     models: { rows: [{ model: 'claude-opus-4-6' }], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
   }))
   const bar = String(nodeVm.runInContext('vm = fixture; controls()', de))
-  for (const word of ['Zeitraum', 'Anbieter', 'Modelle', 'Aktualisieren', 'heute', 'benutzerdefiniert…']) {
+  for (const word of ['Zeitraum', 'Modelle', 'Aktualisieren', 'heute', 'benutzerdefiniert…']) {
     assert.ok(bar.indexOf(word) >= 0, `${word} is missing from ${bar}`)
   }
+  // 1.7 F1 (pinned and changed: the bar's providers' row said „Anbieter"): the bar has no such row
+  // any more; the word names the provider switch's group at the top of the page.
+  assert.equal(bar.indexOf('Anbieter'), -1, bar)
+  const sw = String(nodeVm.runInContext('vm = fixture; sProvider()', de))
+  assert.ok(sw.startsWith('<div class="pv" role="group" aria-label="Anbieter">'), sw)
   // A section renderer, and with it the tables: the heading and the stacked-layout prefix are
   // the same word, so both have to be the German one.
   const tokens = String(nodeVm.runInContext('vm = fixture; sTokens()', de))
@@ -1292,10 +1297,15 @@ test('every window that stands on its own says whose window it is', () => {
 })
 
 test('the provider is named, not keyed, wherever the reader sees it', () => {
-  const chips = render('controls()')
+  // 1.7 F1 (pinned and changed: the filter bar's provider chips named them): the names moved to the
+  // provider switch at the top of the page, and the bar names no provider at all.
+  const chips = render('sProvider()')
   assert.ok(chips.indexOf('data-src="claude"') >= 0, chips)
   assert.ok(chips.indexOf('>Claude Code</button>') >= 0, chips)
   assert.ok(chips.indexOf('>Codex</button>') >= 0, chips)
+  assert.equal(/>(claude|codex)</.test(chips), false, chips)
+  const bar = render('controls()')
+  assert.equal(/data-src=|Claude Code|Codex/.test(bar), false, bar)
   const chart = render('sChart()', {
     chart: {
       days: ['2026-09-01', '2026-09-02', '2026-09-03'],
@@ -1531,16 +1541,17 @@ test('a forced-colours theme paints every pressed chip in the highlight colours,
   assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
   // It stands after the page's own pressed colours, which it outranks inside the mode.
   assert.ok(STYLE.indexOf(rule) > STYLE.indexOf('button[aria-pressed="true"] {\n  background: var(--vscode-button-background'))
-  // Every button the page gives aria-pressed, by the markup of src/webview/main.ts: the chips — the
-  // range, the custom dates, a provider, a model, the cache switch, the chart's split and cost line,
-  // the heatmap's metric, the hours' zone — have no class, so the rule reaches each of them; the
-  // only others are the agent rows of the running list and the 7-day block, which it leaves out.
+  // Every button the page gives aria-pressed, by the markup of src/webview/main.ts: the chips — a
+  // button of the provider switch (1.7 F1, pinned and changed: a provider chip of the filter bar),
+  // the range, a model, the custom dates, the cache switch, the chart's split and cost line, the
+  // heatmap's metric, the hours' zone — have no class, so the rule reaches each of them; the only
+  // others are the agent rows of the running list and the 7-day block, which it leaves out.
   const main = readFileSync(join(__dirname, '..', 'src', 'webview', 'main.ts'), 'utf8')
   const pressable = [...main.matchAll(/aria-pressed="'/g)].map((m) => {
     const head = main.slice(main.lastIndexOf('<button ', m.index), m.index)
     return { act: /data-act="([A-Za-z]+)"/.exec(head)?.[1] ?? '?', cls: /class="([^"]*)"/.exec(head)?.[1] ?? null }
   })
-  const acts = ['range', 'provider', 'model', 'customDates', 'compositionCache', 'chartSplit', 'costLine', 'heatmapMetric', 'hourZone']
+  const acts = ['providerView', 'range', 'model', 'customDates', 'compositionCache', 'chartSplit', 'costLine', 'heatmapMetric', 'hourZone']
   assert.deepEqual(pressable.filter((b) => b.cls === null).map((b) => b.act), acts, JSON.stringify(pressable))
   assert.deepEqual(pressable.filter((b) => b.cls !== null), [{ act: 'agentSelect', cls: 'ag-row' }, { act: 'agentSelect', cls: 'ag-row' }])
   // Those keep the open row's 2 px outline in the highlight colour, as the tree's rows do.
@@ -2306,36 +2317,44 @@ test('every section is a fold the keyboard can reach, open unless the reader clo
   assert.ok(folded.indexOf('<details open><summary data-act="section" data-key="history"') >= 0, folded)
 })
 
+/** The page's blocks in document order, by their `data-sec`. */
+function orderOf(html: string): string[] {
+  const out: string[] = []
+  const re = /data-sec="([a-zA-Z]+)"/g
+  for (let m = re.exec(html); m; m = re.exec(html)) out.push(m[1])
+  return out
+}
+
 test('the filter bar sits below the quota cards and above the first section it filters', () => {
-  const order = (html: string): string[] => {
-    const out: string[] = []
-    const re = /data-sec="([a-zA-Z]+)"/g
-    for (let m = re.exec(html); m; m = re.exec(html)) out.push(m[1])
-    return out
-  }
+  const order = orderOf
+  // 1.7 F1 (pinned and changed: the notices led the page): the provider switch stands above
+  // everything — it governs every section — and the bar keeps its own rule below it.
   // The default order: quota first, then the statistics — the chips go between them.
   assert.deepEqual(order(renderPage({ sections: ['quota', 'summary', 'kpis'] })),
-    ['notices', 'quota', 'controls', 'summary', 'kpis', 'drill', 'footer'])
+    ['provider', 'notices', 'quota', 'controls', 'summary', 'kpis', 'drill', 'footer'])
   // A context card leads the same way; the bar waits for the first section it applies to.
   assert.deepEqual(order(renderPage({ sections: ['quota', 'context', 'kpis'] })),
-    ['notices', 'quota', 'context', 'controls', 'kpis', 'drill', 'footer'])
-  // The Tokens section is fixed periods of everything and follows no chip, so it leads the
-  // same way — and where it is listed after a filtered section it stays below the bar: the
-  // order is the reader's, the bar only marks where the chips start to apply.
+    ['provider', 'notices', 'quota', 'context', 'controls', 'kpis', 'drill', 'footer'])
+  // The Tokens section is fixed periods and follows no chip, so it leads the same way — and
+  // where it is listed after a filtered section it stays below the bar: the order is the
+  // reader's, the bar only marks where the chips start to apply.
   assert.deepEqual(order(renderPage({ ...tokensVm(), sections: ['quota', 'tokens', 'summary', 'kpis'] })),
-    ['notices', 'quota', 'tokens', 'controls', 'summary', 'kpis', 'drill', 'footer'])
+    ['provider', 'notices', 'quota', 'tokens', 'controls', 'summary', 'kpis', 'drill', 'footer'])
   assert.deepEqual(order(renderPage({ ...tokensVm(), sections: ['quota', 'summary', 'tokens'] })),
-    ['notices', 'quota', 'controls', 'summary', 'tokens', 'drill', 'footer'])
-  // A reader who puts the statistics first gets the chips at the top, as before.
+    ['provider', 'notices', 'quota', 'controls', 'summary', 'tokens', 'drill', 'footer'])
+  // A reader who puts the statistics first gets the chips at the top, as before — under the switch.
   assert.deepEqual(order(renderPage({ sections: ['summary', 'quota'] })),
-    ['notices', 'controls', 'summary', 'quota', 'drill', 'footer'])
+    ['provider', 'notices', 'controls', 'summary', 'quota', 'drill', 'footer'])
   // Nothing to filter: the bar is still in the page (the range label and the refresh button
   // live there), after the cards.
   assert.deepEqual(order(renderPage({ sections: ['quota'] })),
-    ['notices', 'quota', 'controls', 'drill', 'footer'])
-  // A preview banner qualifies every figure, so it stands above the quota cards.
+    ['provider', 'notices', 'quota', 'controls', 'drill', 'footer'])
+  // A preview banner qualifies every figure, so it stands above the quota cards — directly under
+  // the switch, which is the page's first element.
   const preview = renderPage({ sections: ['quota', 'kpis'], preview: true })
   assert.ok(preview.indexOf('Preview data') < preview.indexOf('data-sec="quota"'), preview)
+  assert.ok(preview.startsWith('<div data-sec="provider" data-body="provider"><div class="pv" role="group"'), preview)
+  assert.ok(preview.indexOf('</div></div><div data-sec="notices" data-body="notices"><div class="box" role="status">Preview data') > 0, preview)
   // Wherever it lands, the bar is one block of its own rather than loose rows of buttons.
   assert.ok(preview.indexOf('<div data-sec="controls" data-body="controls"><div class="bar">') >= 0, preview)
 })
@@ -2835,18 +2854,20 @@ test('a clipped table is announced once the browser has measured it', () => {
 })
 
 test('the filter bar is a labelled grid: one row per thing it filters', () => {
-  const h = render('controls()', {
-    models: { rows: [modelRow()], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
-  })
-  // One block, not a run of button rows: the labels share a column, so the chips of all
-  // three rows start at the same x.
+  const models = { rows: [modelRow()], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } }
+  const h = render('controls()', { models })
+  // One block, not a run of button rows: the labels share a column, so the chips of both rows
+  // start at the same x. 1.7 F1 (pinned and changed: three rows, the providers' one of them): the
+  // providers left the bar for the switch at the top of the page, and the bar filters the range
+  // and the models.
   assert.ok(h.startsWith('<div class="bar">'), h)
-  for (const label of ['Range', 'Providers', 'Models']) {
+  for (const label of ['Range', 'Models']) {
     assert.equal(h.split('<span class="meta">' + label + '</span>').length - 1, 1, label + ': ' + h)
   }
+  assert.equal(h.indexOf('Providers'), -1, h)
+  assert.equal(h.indexOf('data-act="provider'), -1, h)
+  assert.equal(h.split('<span class="meta">').length - 1, 2, h)
   // Every row's label is followed by the cell that carries its chips.
-  assert.ok(h.indexOf('<span class="meta">Providers</span><div class="wrap span2">'
-    + '<button data-act="provider"') >= 0, h)
   assert.ok(h.indexOf('<span class="meta">Models</span><div class="wrap span2">'
     + '<button data-act="model"') >= 0, h)
   // The range in words ends the range row instead of taking a line of its own …
@@ -2859,10 +2880,11 @@ test('the filter bar is a labelled grid: one row per thing it filters', () => {
   assert.ok(h.indexOf('stroke="currentColor"') >= 0, h)
   // The date fields are a line of their own, directly under the range they belong to.
   const dates = render('controls()', {
+    models,
     range: { from: '2026-08-05', to: '2026-09-03', label: 'Custom', preset: 'custom', presets: ['7d', '30d'] },
   })
   assert.ok(dates.indexOf('</button><div class="wrap full"><label class="meta" for="tp-from">') >= 0, dates)
-  assert.ok(dates.indexOf('data-act="customRange">apply</button></div><span class="meta">Providers</span>') >= 0, dates)
+  assert.ok(dates.indexOf('data-act="customRange">apply</button></div><span class="meta">Models</span>') >= 0, dates)
 
   // The grid itself: a first column wide enough for the longest label, a tinted block with a
   // hairline around it, and the row gap the three rows breathe by.
@@ -2968,11 +2990,19 @@ test('no renderer invents a number or leaks an undefined', () => {
 })
 
 test('the message hooks the extension parses are all still in the page', () => {
-  for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'provider',
+  // 1.7 F1 (pinned and changed: the filter bar's `provider` chips posted `setFilter`): the provider
+  // switch's buttons are `providerView`, and they post `setProvider`, which the host parses.
+  for (const act of ['range', 'customRange', 'customDates', 'refresh', 'cmd', 'sort', 'providerView',
     'model', 'clearModels', 'moreModels', 'moreRanges', 'section', 'sectionSettings',
     'heatmapMetric', 'hourZone', 'drill', 'costLine', 'metric', 'compositionCache',
     'agentToggle', 'agentSelect', 'agentMore']) {
     assert.ok(SOURCE.indexOf('data-act="' + act + '"') >= 0, act)
+  }
+  assert.equal(SOURCE.indexOf('data-act="provider"'), -1)
+  assert.equal(/a === 'provider'\)/.test(SOURCE), false)
+  assert.ok(SOURCE.indexOf("post({ type: 'setProvider', provider: s });") >= 0)
+  for (const provider of ['all', 'claude', 'codex']) {
+    assert.deepEqual(parseWebviewMessage({ type: 'setProvider', provider }), { type: 'setProvider', provider })
   }
   // 1.5.0's fold is gone from the page as it is from the host's allow-list.
   assert.equal(SOURCE.indexOf('agentFold'), -1)
@@ -6468,6 +6498,287 @@ test('a provider switch pushes the switch and exactly the sections whose fields 
   assert.equal(push('agents').payload.claudeOnly, null)
   assert.deepEqual(r.live(), [], 'a section of the switch was held back')
   assert.deepEqual([...r.sections()].sort(), changed(codex, all))
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 F1: the provider switch, the page side
+// ---------------------------------------------------------------------------
+
+const CLAUDE_ONLY = 'Claude Code only — not shown while Codex is selected.'
+
+/** The switch's markup for the view `shown`: one button per provider of the registry, then All. */
+function switchHtml(shown: string, words: { label: string; all: string } = { label: 'Providers', all: 'All' }): string {
+  const b = (src: string, name: string): string =>
+    '<button data-act="providerView" data-src="' + src + '" aria-pressed="' + (src === shown) + '">' + name + '</button>'
+  return '<div class="pv" role="group" aria-label="' + words.label + '">'
+    + b('claude', 'Claude Code') + b('codex', 'Codex') + b('all', words.all) + '</div>'
+}
+
+/** A real view model of the agent world with a context reading, every section listed, under `providers`. */
+function switchVm(providers?: ('claude' | 'codex')[]): Record<string, unknown> {
+  const { DASHBOARD_SECTION_KEYS } = require('../src/viewModel') as typeof import('../src/viewModel')
+  const { agg } = agentWorld()
+  const input = {
+    ...makeInput({
+      agg,
+      cfg: makeConfig({ 'tokenPace.dashboard.sections': [...DASHBOARD_SECTION_KEYS] }),
+      ...(providers ? { ui: { providers } } : {}),
+    }),
+    context: { used: 128_000, size: 200_000, usedPct: 64, fetchedAt: Math.round((NOW - 120_000) / 1000) },
+  }
+  return JSON.parse(JSON.stringify(buildViewModel(input))) as Record<string, unknown>
+}
+
+/** A page context drawn from a whole view model (not the renderers' defaults), and what it wrote. */
+function pageOf(vm: Record<string, unknown>, script = SCRIPT): string {
+  const root = { innerHTML: '', dataset: {}, style: {} }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: { addEventListener: () => undefined, getElementById: () => root, querySelector: () => null, querySelectorAll: () => [] },
+    window: { addEventListener: () => undefined },
+    console,
+  })
+  nodeVm.runInContext(script, c)
+  ;(c as Record<string, unknown>).fixture = vm
+  nodeVm.runInContext('vm = fixture; renderAll();', c)
+  return String(root.innerHTML)
+}
+
+test('the provider switch is the page\'s first element: a labelled group of the registry\'s providers and All, the shown one pressed (1.7 F1)', () => {
+  // First, above the notices and the quota cards — whatever the section order says.
+  for (const sections of [['quota', 'summary'], ['summary', 'quota'], ['kpis']]) {
+    const h = renderPage({ sections, provider: 'all' })
+    assert.deepEqual(orderOf(h).slice(0, 2), ['provider', 'notices'], h)
+    assert.ok(h.startsWith('<div data-sec="provider" data-body="provider">' + switchHtml('all') + '</div><div data-sec="notices"'), h)
+  }
+  // One button per provider of the registry, in its order and by its title, then All; exactly one
+  // pressed — the one the view model shows.
+  for (const shown of ['all', 'claude', 'codex']) {
+    const h = render('sProvider()', { provider: shown })
+    assert.equal(h, switchHtml(shown))
+    assert.equal(h.split('aria-pressed="true"').length - 1, 1, h)
+    assert.equal(h.split('role="group"').length - 1, 1, h)
+  }
+  // A payload without the field (a build before the switch), or with a view this page does not
+  // know, shows every provider — and names nothing it was sent.
+  assert.equal(render('sProvider()'), switchHtml('all'))
+  const odd = render('sProvider()', { provider: '<b>gemini</b>' })
+  assert.equal(odd, switchHtml('all'))
+  // The filter bar has no providers' row any more.
+  assert.equal(render('controls()').indexOf('data-act="provider'), -1)
+  // The block is drawn by the same renderer a fragment for it uses.
+  assert.equal(nodeVm.runInContext('renderer("provider") === sProvider', ctx), true)
+  // The page's chips on one line, each button at least 24 px square (WCAG 2.5.8); no colour of its
+  // own — the pressed one wears the page's pressed-chip colours, and in a forced-colours theme the
+  // highlight (the one rule for every pressed chip, which the buttons meet: they carry no class).
+  assert.match(STYLE, /\n\.pv \{ display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; \}\n/)
+  assert.match(STYLE, /\n\.pv button \{ min-height: 24px; min-width: 24px; white-space: nowrap; \}\n/)
+  assert.equal(/\.pv[^{]*\{[^}]*(color|background)/.test(STYLE), false)
+})
+
+test('the provider switch speaks German with the shipped bundle: „Anbieter", „Alle" (1.7 F1)', () => {
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle.All, 'Alle')
+  assert.equal(bundle.Providers, 'Anbieter')
+  assert.ok(Object.prototype.hasOwnProperty.call(DICT, 'All'), 'All is not a word of the page')
+  const c = makeContext()
+  nodeVm.runInContext(between(germanPage({ All: bundle.All }), /<script nonce="[A-Za-z0-9]+">/, '</script>'), c)
+  ;(c as Record<string, unknown>).fixture = model({ provider: 'codex' })
+  const h = String(nodeVm.runInContext('vm = fixture; sProvider()', c))
+  // The product names are never translated.
+  assert.equal(h, switchHtml('codex', { label: 'Anbieter', all: 'Alle' }))
+})
+
+test('under Codex the Agents and Context sections are left out — no heading, fold, gear or tree, the reason nowhere — the order of the rest unchanged (1.7 F1, §7a Q7)', () => {
+  const all = switchVm()
+  const codex = switchVm(['codex'])
+  const claude = switchVm(['claude'])
+  assert.equal(codex.claudeOnly, CLAUDE_ONLY)
+  const hAll = pageOf(all), hCodex = pageOf(codex), hClaude = pageOf(claude)
+  // Under All and under Claude Code both sections are on the page, the tree and the context card in them.
+  for (const h of [hAll, hClaude]) {
+    for (const key of ['agents', 'context']) {
+      assert.ok(h.indexOf('<section data-sec="' + key + '"><details open><summary data-act="section" data-key="' + key + '">') >= 0, key)
+    }
+    assert.ok(h.indexOf('role="tree"') >= 0)
+    assert.equal(h.indexOf(CLAUDE_ONLY), -1)
+  }
+  // Under Codex neither: no section, no body, no heading, no gear, no tree, and not the sentence
+  // that says why — the view model's reason is no placeholder on the page.
+  for (const key of ['agents', 'context']) {
+    assert.equal(hCodex.indexOf('data-sec="' + key + '"'), -1, key)
+    assert.equal(hCodex.indexOf('data-body="' + key + '"'), -1, key)
+    assert.equal(hCodex.indexOf('data-key="' + key + '"'), -1, key)
+  }
+  assert.equal(hCodex.indexOf('<h2>Agents</h2>'), -1)
+  assert.equal(hCodex.indexOf('<h2>Context window</h2>'), -1)
+  assert.equal(hCodex.indexOf('role="tree"'), -1)
+  assert.equal(hCodex.indexOf(CLAUDE_ONLY), -1)
+  assert.equal(hCodex.indexOf('Claude Code only'), -1)
+  // Every other block where it stood: the order is the All page's without the two.
+  assert.deepEqual(orderOf(hCodex), orderOf(hAll).filter((k) => k !== 'agents' && k !== 'context'))
+  assert.deepEqual(orderOf(hClaude), orderOf(hAll))
+  // The switch says which view it is, and under one provider the footer carries its footnote.
+  assert.ok(hCodex.startsWith('<div data-sec="provider" data-body="provider">' + switchHtml('codex')), hCodex.slice(0, 400))
+  assert.ok(hClaude.startsWith('<div data-sec="provider" data-body="provider">' + switchHtml('claude')), hClaude.slice(0, 400))
+  const note = 'Showing Codex only — the provider switch at the top of the dashboard; ‘All’ shows every provider.'
+  assert.ok(hCodex.indexOf('<li>' + note + '</li>') > hCodex.indexOf('data-sec="footer"'), 'the footnote is not in the footer')
+  assert.equal(hAll.indexOf('Showing '), -1)
+  // The quota section holds the shown provider's card only.
+  const quota = (h: string): string => h.slice(h.indexOf('<section data-sec="quota">'), h.indexOf('</section>', h.indexOf('<section data-sec="quota">')))
+  assert.ok(quota(hCodex).indexOf('<span class="name">Codex</span>') >= 0 && quota(hCodex).indexOf('<span class="name">Claude Code</span>') < 0)
+  assert.ok(quota(hClaude).indexOf('<span class="name">Claude Code</span>') >= 0 && quota(hClaude).indexOf('<span class="name">Codex</span>') < 0)
+})
+
+/**
+ * A page whose blocks are fakes that record what the page does to them: `present` the keys whose
+ * body is on the page, in their order; a body's section can be taken out (its parent's removeChild)
+ * or have a section inserted after it (insertAdjacentHTML), and so can the notices block.
+ */
+function placeCtx(present: string[]): { c: nodeVm.Context; present: string[]; log: string[]; bodies: Record<string, { innerHTML: string }> } {
+  const log: string[] = []
+  const bodies: Record<string, { innerHTML: string }> = {}
+  const root = { removeChild: (sec: { key: string }) => { log.push('out ' + sec.key); present.splice(present.indexOf(sec.key), 1) } }
+  const after = (key: string) => (where: string, html: string): void => {
+    const m = /^<section data-sec="([a-zA-Z]+)">/.exec(html)
+    log.push('in ' + (m ? m[1] : '?') + ' after ' + key + ' ' + where)
+    if (m) present.splice(key === 'notices' ? 0 : present.indexOf(key) + 1, 0, m[1])
+    if (m) bodyOf(m[1]).innerHTML = html
+  }
+  const bodyOf = (key: string): { innerHTML: string } => (bodies[key] ??= Object.assign({ innerHTML: 'drawn before' }, {
+    dataset: {}, style: {}, contains: () => false,
+    closest: (sel: string) => (sel === 'section' ? { key, parentNode: root, contains: () => false, insertAdjacentHTML: after(key) } : null),
+  }))
+  const doc = {
+    addEventListener: () => undefined, getElementById: () => null, querySelectorAll: () => [], activeElement: null,
+    querySelector: (sel: string) => {
+      const m = /^\[data-body="([a-zA-Z]+)"\]$/.exec(sel)
+      if (m) return present.includes(m[1]) ? bodyOf(m[1]) : null
+      return sel === '[data-sec="notices"]' ? { insertAdjacentHTML: after('notices') } : null
+    },
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc,
+    window: { addEventListener: () => undefined }, console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  return { c, present, log, bodies }
+}
+
+test('a switch to Codex takes the Agents and Context sections out as fragments, and the switch back puts them at their place — nothing else rewritten (1.7 F1, §7a Q7)', () => {
+  const p = placeCtx(['quota', 'agents', 'context', 'summary'])
+  ;(p.c as Record<string, unknown>).fixture = model({ sections: ['quota', 'agents', 'context', 'summary'], agents: agentTree(), ui: agentUi(), provider: 'all', claudeOnly: null })
+  nodeVm.runInContext('vm = fixture;', p.c)
+  const push = (key: string, payload: Record<string, unknown>): void => {
+    ;(p.c as Record<string, unknown>).payload = payload
+    nodeVm.runInContext('Object.assign(vm, payload); renderSection(' + JSON.stringify(key) + ');', p.c)
+  }
+  // The host's fragments for a switch to Codex, in its order: the two sections go, whole.
+  push('agents', { agents: agentTree(), ui: agentUi(), provider: 'codex', claudeOnly: CLAUDE_ONLY })
+  push('context', { context: null, provider: 'codex', claudeOnly: CLAUDE_ONLY })
+  assert.deepEqual(p.log, ['out agents', 'out context'])
+  assert.deepEqual(p.present, ['quota', 'summary'])
+  // A later push for a section that is left out finds nothing to take out and draws nothing.
+  push('agents', { agents: agentTree(), ui: agentUi(), provider: 'codex', claudeOnly: CLAUDE_ONLY })
+  assert.deepEqual(p.log, ['out agents', 'out context'])
+  // The switch back: each is drawn after the nearest listed section on the page — the Agents
+  // section under the quota cards, the context under the Agents section — as renderAll would.
+  push('agents', { agents: agentTree(), ui: agentUi(), provider: 'all', claudeOnly: null })
+  push('context', { context: null, provider: 'all', claudeOnly: null })
+  assert.deepEqual(p.log.slice(2), ['in agents after quota afterend', 'in context after agents afterend'])
+  assert.deepEqual(p.present, ['quota', 'agents', 'context', 'summary'])
+  // Drawn whole, heading, fold and gear, the tree in it.
+  const agents = p.bodies.agents.innerHTML
+  assert.ok(agents.startsWith('<section data-sec="agents"><details open><summary data-act="section" data-key="agents"><h2>Agents</h2>'
+    + '<button class="gear" data-act="sectionSettings" data-key="agents"'), agents)
+  assert.ok(agents.indexOf('</summary><div data-body="agents">') >= 0, agents)
+  assert.ok(agents.indexOf('role="tree"') >= 0, agents)
+  // Nothing else was rewritten, and a fragment of a section on the page is a fragment as before.
+  assert.equal(p.bodies.quota.innerHTML, 'drawn before')
+  assert.equal(p.bodies.summary, undefined)
+  push('agents', { agents: agentTree(), ui: agentUi(), provider: 'all', claudeOnly: null })
+  assert.equal(p.log.length, 4)
+  assert.equal(p.bodies.agents.innerHTML.startsWith('<section'), false, p.bodies.agents.innerHTML.slice(0, 80))
+  assert.ok(p.bodies.agents.innerHTML.indexOf('role="tree"') >= 0)
+  // Listed first, a section comes back directly under the notices; not listed, it comes back nowhere
+  // — which sections exist is the layout's, a whole-page push.
+  const q = placeCtx(['summary'])
+  ;(q.c as Record<string, unknown>).fixture = model({ sections: ['agents', 'summary'], agents: agentTree(), ui: agentUi(), provider: 'all', claudeOnly: null })
+  nodeVm.runInContext('vm = fixture; renderSection("agents"); renderSection("context");', q.c)
+  assert.deepEqual(q.log, ['in agents after notices afterend'])
+  assert.deepEqual(q.present, ['agents', 'summary'])
+})
+
+test('the pressed button of the switch keeps the focus across the push that answers it (1.7 F1)', () => {
+  const focused: string[] = []
+  const inside = new Set<unknown>()
+  let drawn: Array<Record<string, unknown>> = []
+  const button = (src: string, name: string): Record<string, unknown> =>
+    ({ dataset: { act: 'providerView', src }, focus: () => { focused.push(name) } })
+  const body = {
+    innerHTML: '', dataset: {}, style: {},
+    contains: (el: unknown) => inside.has(el),
+    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined, getElementById: () => null, querySelectorAll: () => [], activeElement: null,
+    querySelector: (s: string) => (s === '[data-body="provider"]' || s === '[data-body="quota"]' ? body : null),
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc,
+    window: { addEventListener: () => undefined }, console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  ;(c as Record<string, unknown>).fixture = model({ provider: 'codex' })
+  nodeVm.runInContext('vm = fixture;', c)
+  const push = (active: Record<string, unknown> | null, key = 'provider'): string[] => {
+    focused.length = 0
+    inside.clear()
+    if (active) inside.add(active)
+    doc.activeElement = active
+    drawn = [button('claude', 'claude-new'), button('codex', 'codex-new'), button('all', 'all-new')]
+    nodeVm.runInContext('renderSection(' + JSON.stringify(key) + ');', c)
+    return [...focused]
+  }
+  // The reader pressed Codex; the host's answer rewrites the switch, and the focus is on Codex again.
+  assert.deepEqual(push(button('codex', 'codex-old')), ['codex-new'])
+  assert.equal(body.innerHTML, switchHtml('codex'))
+  assert.deepEqual(push(button('all', 'all-old')), ['all-new'])
+  // The switch rewritten while the focus was elsewhere takes it nowhere; another block keeps no focus of the switch's.
+  assert.deepEqual(push(null), [])
+  assert.deepEqual(push(button('codex', 'codex-old'), 'quota'), [])
+})
+
+test('a switch button asks for its view; the pressed one, an unknown one and one without a name ask for nothing (1.7 F1)', () => {
+  const a = agentCtx()
+  const pageWith = (provider: string): void => a.fire('window:message', {
+    origin: '', data: { type: 'data', payload: model({ sections: ['quota'], provider }) },
+  })
+  const click = (src?: string): void => a.fire('document:click', {
+    target: { closest: () => ({ tagName: 'BUTTON', dataset: { act: 'providerView', ...(src === undefined ? {} : { src }) } }) },
+    stopPropagation: () => undefined, preventDefault: () => undefined,
+  })
+  pageWith('all')
+  a.posted.length = 0
+  const drawn = a.root.innerHTML
+  click('claude')
+  click('codex')
+  click('all')
+  click('gemini')
+  click('')
+  click()
+  assert.deepEqual(a.posted, [{ type: 'setProvider', provider: 'claude' }, { type: 'setProvider', provider: 'codex' }])
+  // Nothing is drawn before the host answers: a click only asks.
+  assert.equal(a.root.innerHTML, drawn)
+  pageWith('codex')
+  a.posted.length = 0
+  click('codex')
+  click('all')
+  assert.deepEqual(a.posted, [{ type: 'setProvider', provider: 'all' }])
+  // Every message a button posts is one the host's parser takes as it is.
+  for (const m of [{ type: 'setProvider', provider: 'claude' }, { type: 'setProvider', provider: 'codex' }, { type: 'setProvider', provider: 'all' }]) {
+    assert.deepEqual(parseWebviewMessage(m), m)
+  }
 })
 
 test('a fragment for a section with no body on the page updates the model and rewrites nothing', () => {

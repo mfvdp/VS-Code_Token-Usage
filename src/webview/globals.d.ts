@@ -21,7 +21,7 @@ declare function acquireVsCodeApi(): { postMessage(message: unknown): void }
 /** The provider titles as the reader knows them — "Claude Code", not "claude". */
 declare const SRC_TITLE: Record<string, string>
 
-/** The provider ids, in registry order; that order is the order of the filter chips. */
+/** The provider ids, in registry order; that order is the order of the provider switch's buttons. */
 declare const SRC_IDS: readonly string[]
 
 /**

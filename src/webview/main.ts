@@ -381,9 +381,40 @@ function presetLabel(preset: Payload): string {
 }
 
 /**
- * The filter bar: a labelled grid of three rows — range, providers, models — with the labels
- * in a column of their own, so the chips line up under each other instead of running on as
- * one paragraph of buttons. Everything it decides is view state; nothing here is a setting.
+ * 1.7 F1: which provider the switch shows — the view model's `provider`, `all` or a provider of the
+ * registry. A payload without it (a build before the switch) or with a value this page does not
+ * know shows every provider, the page as it was.
+ */
+function providerShown(): string {
+  const p = vm && typeof vm.provider === 'string' ? vm.provider : 'all';
+  return p === 'all' || SRC_IDS.indexOf(p) >= 0 ? p : 'all';
+}
+
+/**
+ * 1.7 F1: the provider switch — the page's first block, above the notices and the quota cards,
+ * because it governs every section below it (§7a Q2). One toggle button per provider of the
+ * registry, in its order and by its title — the page's one name for a provider (§7a Q1) —, then
+ * All; exactly one pressed, the one the view model shows. A labelled group whose buttons are stops
+ * of the Tab key like every chip of the page; a click on the pressed one asks for nothing (act). A
+ * third provider in the registry is a fourth button without a line of this changing. View state:
+ * the host keeps the choice (`ui.providers`) and pushes the page below the switch again.
+ */
+function sProvider(): string {
+  const shown = providerShown();
+  const views: string[] = SRC_IDS.slice();
+  views.push('all');
+  return '<div class="pv" role="group" aria-label="' + tr('Providers') + '">'
+    + views.map((s) => '<button data-act="providerView" data-src="' + esc(s) + '" aria-pressed="' + (shown === s) + '">'
+      + (s === 'all' ? tr('All') : esc(srcName(s))) + '</button>').join('')
+    + '</div>';
+}
+
+/**
+ * The filter bar: a labelled grid of two rows — range, models — with the labels in a column of
+ * their own, so the chips line up under each other instead of running on as one paragraph of
+ * buttons. Everything it decides is view state; nothing here is a setting. 1.7 F1: the providers'
+ * row is gone — the provider switch at the top of the page (sProvider) stands above every section,
+ * the filtered ones included.
  */
 function controls(): string {
   const r = vm.range;
@@ -393,9 +424,6 @@ function controls(): string {
   const restRanges = r.presets.length - presets.length;
   const chips = presets.map((p: Payload) => '<button data-act="range" data-preset="' + esc(p) + '" aria-pressed="'
     + (r.preset === p) + '">' + presetLabel(p) + '</button>').join('');
-  const providers = SRC_IDS.map(s => '<button data-act="provider" data-src="' + s
-    + '" aria-pressed="' + (vm.ui.providers.indexOf(s) >= 0) + '">' + esc(srcName(s))
-    + '</button>').join('');
   // The table splits main and sub-agent rows per model; the filter does not, so the same
   // name would otherwise appear twice as two chips that toggle the same thing.
   const names = [];
@@ -443,7 +471,6 @@ function controls(): string {
     + '<button class="icon" data-act="refresh" aria-label="' + tr('Refresh') + '"'
     + ' title="' + tr('Rebuild from the transcripts and fetch the quota') + '">' + ICON_REFRESH + '</button>'
     + dates
-    + '<span class="meta">' + tr('Providers') + '</span><div class="wrap span2">' + providers + '</div>'
     + (names.length ? '<span class="meta">' + tr('Models') + '</span><div class="wrap span2">' + models
        + '</div>' : '')
     + '</div>';
@@ -2602,7 +2629,7 @@ function startLive(): void {
 }
 
 const RENDER = new Map<string, () => string>([
-  ['notices', sNotices], ['controls', sControls], ['footer', sFooter], ['drill', sDrill],
+  ['provider', sProvider], ['notices', sNotices], ['controls', sControls], ['footer', sFooter], ['drill', sDrill],
   ['summary', sSummary], ['quota', sQuota], ['agents', sAgents], ['context', sContext], ['kpis', sKpis], ['tokens', sTokens],
   ['chart', sChart], ['models', sModels], ['heatmap', sHeatmap], ['hours', sHours], ['records', sRecords],
   ['tools', sTools], ['budget', sBudget],
@@ -2615,6 +2642,7 @@ const RENDER = new Map<string, () => string>([
  */
 function renderer(key: string): (() => string) | null {
   switch (key) {
+    case 'provider': return sProvider;
     case 'notices': return sNotices;
     case 'controls': return sControls;
     case 'footer': return sFooter;
@@ -2671,12 +2699,26 @@ function sControls(): string {
   return controls();
 }
 
-// Sections the range, provider and model chips do not filter: a provider's window is what
-// it is whichever week is selected, the agent tree is the sessions of the last seven days,
-// the context reading belongs to one live session, and the Tokens section is fixed periods
-// of everything — the running windows, today, the last 7 and 30 days, this week and month —
-// for every provider and model.
+// Sections the range and model chips do not filter: a provider's window is what it is
+// whichever week is selected, the agent tree is the sessions of the last seven days, the
+// context reading belongs to one live session, and the Tokens section is fixed periods — the
+// running windows, today, the last 7 and 30 days, this week and month — of every model. 1.7 F1:
+// the provider switch above the page reaches every one of them, these four included.
 const RANGE_FREE = ['quota', 'agents', 'context', 'tokens'];
+
+/** 1.7 F1: the sections that are Claude Code's alone — the agent tree and the context window. */
+const CLAUDE_ONLY_SECTIONS = ['agents', 'context'];
+
+/**
+ * 1.7 F1 (§7a Q7): whether a section is left out of the page — the Agents and Context sections
+ * while the switch shows a provider without them, which the view model says with its reason
+ * (`claudeOnly`, "Claude Code only — not shown while Codex is selected."). The page draws neither
+ * the section nor the reason: no heading, no fold, no gear — the reader asked for less, not for a
+ * placeholder. Its place in the order stays its own, so the switch back puts it where it was.
+ */
+function leftOut(key: string): boolean {
+  return CLAUDE_ONLY_SECTIONS.indexOf(key) >= 0 && !!vm && typeof vm.claudeOnly === 'string' && vm.claudeOnly !== '';
+}
 
 function sFooter(): string {
   // The footnotes already carry the pricing sentence (and the one about configured rates);
@@ -2697,8 +2739,23 @@ function collapsed(key: string): boolean {
   return list.indexOf(key) >= 0;
 }
 
+/**
+ * One section as the page draws it. A native <details>: the fold is the browser's, so it is
+ * keyboard reachable and announced as expandable, and the body stays in the document either way
+ * — a section update writes into it whether the reader has it open or not.
+ */
+function sectionHtml(key: string, render: () => string): string {
+  return '<section data-sec="' + esc(key) + '"><details' + (collapsed(key) ? '' : ' open') + '>'
+    + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(titleOf(key))
+    + '</h2>' + gear(key) + '</summary>'
+    + '<div data-body="' + esc(key) + '">' + render() + '</div></details></section>';
+}
+
 function renderAll(): void {
-  let h = '<div data-sec="notices" data-body="notices">' + sNotices() + '</div>';
+  // 1.7 F1: the provider switch first — above the notices and the quota cards, because it governs
+  // every figure below it; a preview banner or the first-run box follows directly under it.
+  let h = '<div data-sec="provider" data-body="provider">' + sProvider() + '</div>';
+  h += '<div data-sec="notices" data-body="notices">' + sNotices() + '</div>';
   // The filter bar sits where its effect starts: below the leading sections it does not
   // apply to, above the first one it does. With the default order that puts the quota cards
   // on top and the chips between them and the statistics.
@@ -2708,13 +2765,8 @@ function renderAll(): void {
     const render = renderer(key);
     if (!render) continue;
     if (!controlsPlaced && RANGE_FREE.indexOf(key) < 0) { h += controlsBlock; controlsPlaced = true; }
-    // A native <details>: the fold is the browser's, so it is keyboard reachable and
-    // announced as expandable, and the body stays in the document either way — a section
-    // update writes into it whether the reader has it open or not.
-    h += '<section data-sec="' + esc(key) + '"><details' + (collapsed(key) ? '' : ' open') + '>'
-      + '<summary data-act="section" data-key="' + esc(key) + '"><h2>' + esc(titleOf(key))
-      + '</h2>' + gear(key) + '</summary>'
-      + '<div data-body="' + esc(key) + '">' + render() + '</div></details></section>';
+    if (leftOut(key)) continue;
+    h += sectionHtml(key, render);
   }
   if (!controlsPlaced) h += controlsBlock;
   h += '<div data-sec="drill" data-body="drill">' + sDrill() + '</div>';
@@ -2736,9 +2788,13 @@ function renderAll(): void {
 function renderSection(key: string): void {
   const body = document.querySelector('[data-body="' + key + '"]');
   const render = renderer(key);
+  // 1.7 F1: the Agents and Context sections go and come back with the provider switch, and the
+  // host pushes both as the fragments they are (SECTION_FIELDS: `provider`, `claudeOnly`) — the
+  // section is taken out of the page, or put back at its place, and nothing else is touched.
+  if (render && CLAUDE_ONLY_SECTIONS.indexOf(key) >= 0 && placeSection(key, body, render)) return;
   // A section that is not on the page has no body to write into. Its fields are already in
   // `vm` (the message handler assigned them), so the next render draws it current; a change
-  // of which sections are shown arrives as a whole-page push, never as a fragment. Rewriting
+  // of which sections are listed arrives as a whole-page push, never as a fragment. Rewriting
   // the whole page here instead reset every scroll position with each such push.
   if (!body || !render) return;
   // An explanation open inside this body, and the focus on its block, live in the nodes
@@ -2750,8 +2806,9 @@ function renderSection(key: string): void {
   if (sparkMark && body.contains && body.contains(sparkMark.svg)) sparkMark = null;
   // The agents section is rewritten every few seconds while agents run. A keyboard user on a
   // row of the running list, or on an item of the tree, stays there; dropping the focus would
-  // send them back to the top of the page with every push.
-  const focus = key === 'agents' ? keepFocus(body) : null;
+  // send them back to the top of the page with every push. 1.7 F1: the provider switch likewise —
+  // the button just pressed keeps the focus across the push that answers it.
+  const focus = key === 'agents' || key === 'provider' ? keepFocus(body) : null;
   agentFocusInTree = !!(focus && focus.tree);
   try {
     body.innerHTML = render();
@@ -2774,6 +2831,45 @@ function renderSection(key: string): void {
 }
 
 /**
+ * 1.7 F1 (§7a Q7): puts a Claude Code–only section where the switch wants it, for a fragment of
+ * it — true when that is all there was to do. While the view leaves it out, a section on the page
+ * is taken out (its body with it) and one that is not stays away; while the view shows it, a
+ * section the page has not drawn is drawn at its place — after the nearest section listed before
+ * it that is on the page, else directly under the notices, which is where renderAll would have put
+ * it —; one already on the page is a fragment like any other (false). A section `dashboard.sections`
+ * does not list is never drawn here: that is a change of the layout, a whole-page push.
+ */
+function placeSection(key: string, body: Element | null, render: () => string): boolean {
+  if (leftOut(key)) {
+    const sec = body && typeof body.closest === 'function' ? body.closest('section') : null;
+    if (sec && sec.parentNode) {
+      // What the page keeps about the section's inside goes with it.
+      if (openPop && typeof sec.contains === 'function' && sec.contains(openPop)) hidePop();
+      if (key === 'agents') agentPanelAt = null;
+      sec.parentNode.removeChild(sec);
+    }
+    return true;
+  }
+  if (body) return false;
+  const list: unknown[] = vm && Array.isArray(vm.sections) ? vm.sections : [];
+  const at = list.indexOf(key);
+  if (at < 0) return true;
+  let after: Element | null = null;
+  for (let i = at - 1; i >= 0 && after === null; i--) {
+    const k = list[i];
+    // Only a key the page draws is looked for, and only by the body it writes.
+    if (typeof k !== 'string' || renderer(k) === null) continue;
+    const b = document.querySelector('[data-body="' + k + '"]');
+    after = b && typeof b.closest === 'function' ? b.closest('section') : null;
+  }
+  if (after === null) after = document.querySelector('[data-sec="notices"]');
+  if (after === null || typeof after.insertAdjacentHTML !== 'function') return true;
+  after.insertAdjacentHTML('afterend', sectionHtml(key, render));
+  applyStyles();
+  return true;
+}
+
+/**
  * Where the focus is inside `body`, to put it back after the body is rewritten; null when it is
  * elsewhere. On an item of the agent tree (1.6 L1) — or on the Copy ID button of its details,
  * which belong to it — `tree`: the item is found again by the path agentFocusPath keeps, taken
@@ -2791,13 +2887,14 @@ function keepFocus(body: Element): AgentFocus | null {
     return { act: '', key: '', list: '', tree: true, copy: li !== el };
   }
   if (!el.dataset) return null;
-  // 1.6 L3: the 7-day block's disclosure names no node; it is found again by what it does.
-  const act = el.dataset.act, key = el.dataset.key || '';
-  return act && (key || act === 'agentsWeek') ? { act: act, key: key, list: el.dataset.list || '' } : null;
+  // 1.6 L3: the 7-day block's disclosure names no node; it is found again by what it does. 1.7 F1:
+  // a button of the provider switch names the provider it shows.
+  const act = el.dataset.act, key = el.dataset.key || '', src = el.dataset.src || '';
+  return act && (key || src || act === 'agentsWeek') ? { act: act, key: key, list: el.dataset.list || '', src: src } : null;
 }
 
 /** What keepFocus found: a control by what it does and whom it names, or an item of the tree. */
-interface AgentFocus { act: string; key: string; list: string; tree?: boolean; copy?: boolean }
+interface AgentFocus { act: string; key: string; list: string; src?: string; tree?: boolean; copy?: boolean }
 
 /**
  * Puts the focus back on the control that does the same thing to the same node, in the same
@@ -2812,7 +2909,8 @@ function restoreFocus(body: Element, f: AgentFocus): void {
   const all = body.querySelectorAll<HTMLElement>('[data-act]');
   for (let i = 0; i < all.length; i++) {
     const el = all[i];
-    if (el.dataset.act === f.act && (el.dataset.key || '') === f.key && (el.dataset.list || '') === f.list) { el.focus(); return; }
+    if (el.dataset.act === f.act && (el.dataset.key || '') === f.key && (el.dataset.list || '') === f.list
+      && (el.dataset.src || '') === (f.src || '')) { el.focus(); return; }
   }
 }
 
@@ -3130,12 +3228,12 @@ function act(el: HTMLElement): void {
     const key = el.dataset.key;
     const dir = vm.models.sort.key === key && vm.models.sort.dir === 'desc' ? 'asc' : 'desc';
     post({ type: 'setSort', key: key, dir: dir });
-  } else if (a === 'provider') {
+  } else if (a === 'providerView') {
+    // 1.7 F1: one provider, or every one. The pressed button asks for nothing; another asks the
+    // host, which keeps the choice, clears the model chips and pushes the page below the switch.
     const s = el.dataset.src;
-    const list = vm.ui.providers.slice();
-    const i = list.indexOf(s);
-    if (i >= 0) list.splice(i, 1); else list.push(s);
-    post({ type: 'setFilter', providers: list, models: vm.ui.models });
+    if (!s || s === providerShown() || (s !== 'all' && SRC_IDS.indexOf(s) < 0)) return;
+    post({ type: 'setProvider', provider: s });
   } else if (a === 'model') {
     const m = el.dataset.model;
     const list = vm.ui.models.slice();

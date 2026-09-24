@@ -717,7 +717,9 @@ test('the pages quote the Quick Pick\'s agent summary as the view writes it — 
 test('docs/dashboard.md says a forced-colours theme paints the pressed chips in the highlight colours, as the page\'s rule does (1.6 P16)', () => {
   assert.ok(readDoc('src/dashboard.ts').includes('  button[aria-pressed="true"]:not(.ag-row) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; outline-color: CanvasText; }'),
     'the rule moved: say it in the docs')
-  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('every pressed chip of the page (a range, a provider, a model, the custom dates, the cache switch, the chart\'s `subagents` and cost line, the heatmap\'s metric, the hours\' zone) in the highlight colours'),
+  // 1.7 F1 (pinned and changed: "a range, a provider, a model, …"): the providers are no chips of the
+  // filter bar any more; the provider switch's buttons are chips like the others.
+  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('every pressed chip of the page (a button of the provider switch, a range, a model, the custom dates, the cache switch, the chart\'s `subagents` and cost line, the heatmap\'s metric, the hours\' zone) in the highlight colours'),
     'docs/dashboard.md does not say how a pressed chip looks in a forced-colours theme')
   // 1.7 D-B (pinned and changed: "A pressed chip is the one element the page takes out of the theme's
   // adjustment, …"): the chart's bands by model are taken out too.

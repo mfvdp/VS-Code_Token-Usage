@@ -15,8 +15,10 @@ right now, so you do not have to look for them in the tree; its first line opens
 block of where the agent tokens of the last seven days went (see [Last 7 days](#last-7-days));
 the tree itself starts closed, with only the sessions showing. It is on by default, directly after `quota` in
 `tokenPace.dashboard.sections`; a list you have set yourself is kept as it is, so there the
-section appears once you add `agents` to it. The range, provider and model chips do not apply:
-the section is always the last seven days, so the filter bar stays below it. *Show Usage as
+section appears once you add `agents` to it. The range and model chips do not apply:
+the section is always the last seven days, so the filter bar stays below it. The provider switch at
+the top of the dashboard does: while it shows Codex the section is left out, and it comes back in
+its place under `Claude Code` or `All`. *Show Usage as
 Text* prints the running list, the 7-day block while you have it open, and then the tree of the
 sessions it lists as indented lists — every node open, at most 50 children each and at most 2000
 nodes in all (see [The tally](#the-tally)) — with the open node's details as a table. *Show Usage (Quick Pick)* has a group `Agents` after the quota: the

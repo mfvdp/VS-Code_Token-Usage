@@ -36,11 +36,23 @@ Defaults omit `context`, `records`, `tools`, `budget`, `history`, `projects` and
 empty until attribution is switched on and say so instead of showing an empty table, and
 `context` says how a reading could be had instead of inventing one.
 
-**The filter bar.** One labelled block with a row each for **Range**, **Providers** and
-**Models**: the labels share a column, so the chips of all three rows start at the same place
-instead of running on as one paragraph of buttons. The range in words (`Last 30 days ·
-2026-08-06 → 2026-09-05`) ends the range row, and the refresh button sits at its right end as
-an icon.
+**The provider switch.** Three buttons at the very top of the page, above everything else —
+`Claude Code`, `Codex`, `All` (German `Alle`) — one pressed: the provider the page shows, or every
+one. It is the page's first element, above a preview banner or the first-run box, because it
+governs every section below it; `All` is the page as it always was. Under `Codex` the `agents` and
+`context` sections are not drawn at all — no heading, no fold, no gear — and they come back at
+their place when the switch shows `Claude Code` or `All` again. A change of provider clears the model chips
+(a model of the other provider would empty every filtered section) and is remembered with the rest
+of the view state; the button just pressed keeps the keyboard focus while the page below it is
+redrawn. The buttons are a labelled group (*Providers*) of toggle buttons with `aria-pressed`, each
+a stop of the `Tab` key and at least 24 × 24 px, and they stay on one line down to the narrowest
+sidebar. A third provider in the registry would be a fourth button.
+
+**The filter bar.** One labelled block with a row each for **Range** and **Models**: the labels
+share a column, so the chips of both rows start at the same place instead of running on as one
+paragraph of buttons. The range in words (`Last 30 days · 2026-08-06 → 2026-09-05`) ends the range
+row, and the refresh button sits at its right end as an icon. The providers are not chips of the
+bar: the provider switch above the page picks them.
 
 **Ranges.** Chips for `today`, `7d` and `30d` are on the bar; `yesterday`, `90d`, `thisWeek`,
 `thisMonth`, `lastMonth`, `year` and `all` are one `more ▾` chip away (`fewer ▴` puts them
@@ -51,9 +63,9 @@ range actually is a custom one, so the common case is chips only. `dashboard.def
 the starting point; the range you pick is remembered for the session. `all` starts at the
 first day actually ingested, never earlier.
 
-**Filters and sorting.** Provider toggles, up to twelve model chips — above four the row is
-one `models (N) ▾` chip until you open it, because a long chip row pushes the figures off the
-panel, and a model you are filtering on stays on the bar either way — and a
+**Filters and sorting.** Up to twelve model chips — above four the row is one `models (N) ▾`
+chip until you open it, because a long chip row pushes the figures off the panel, and a model you
+are filtering on stays on the bar either way — and a
 model table sortable by every column it shows (`model`, `usage`, `freshInput`, `cacheWrite5m`,
 `cacheWrite1h`, `cacheRead`, `output`, `reasoning`, `requests`, `cacheHit`, `perRequest`, `cost`,
 `share`, ascending or descending).
@@ -82,7 +94,7 @@ style — the same for Codex, whose subagents are its forked threads. The split 
 buckets' own subagent dimension — a reply written in a transcript under `subagents/` for Claude
 Code, a forked thread for Codex — so the two bands of a provider sum exactly to its column split
 by model, day by day and in every metric; nothing is estimated. A part that counted nothing in the
-range has no band, and the model and provider filters narrow the split as they narrow the models.
+range has no band, and the model chips and the provider switch narrow the split as they narrow the models.
 The legend has no provider headings then — each label names its provider — and a band's tooltip
 reads `Claude Code · subagents · 12,345 · 58.8 % of the day · Claude Code total 21,000`. Pressed
 (`aria-pressed`), the chip draws the split; pressed again, the models. The choice is kept with the
@@ -92,7 +104,7 @@ subagents as a band of the page colour ringed by the text colour, so the two par
 apart.
 
 **Collapsing.** Every section header is a toggle. What you collapse is remembered with the rest
-of the view state (range, sort, filters, the chart's split), so a panel you have trimmed to two sections opens that
+of the view state (range, sort, filters, the provider switch, the chart's split), so a panel you have trimmed to two sections opens that
 way again. The nodes you open in the agent tree — it starts closed — the one whose details are
 open, and how many more children you asked an opened node to show, are kept the same way. `tokenPace.dashboard.sections` decides what exists at all; collapsing decides what
 you look at today.
@@ -193,8 +205,8 @@ glyph has a spoken label that says in words whether the state was recorded or de
 a clock that ticks every second is hidden from a screen reader and stands beside it as words that
 stand still (`since 14:20`); the toggle and the row are targets of at least 24 × 24 px, and a
 forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours — and every
-pressed chip of the page (a range, a provider, a model, the custom dates, the cache switch, the
-chart's `subagents` and cost line, the heatmap's metric, the hours' zone) in the highlight colours,
+pressed chip of the page (a button of the provider switch, a range, a model, the custom dates, the
+cache switch, the chart's `subagents` and cost line, the heatmap's metric, the hours' zone) in the highlight colours,
 where the theme would otherwise give pressed and released chips the same face. A pressed chip and a
 band of the chart by model are the two things the page takes out of the theme's adjustment, and they
 wear nothing but the theme's own system colours: left in, a chip would get a backplate of the page
@@ -202,10 +214,10 @@ colour behind its words, on which the highlight text cannot be read, and the ban
 painted in the page colour, the theme having removed their patterns and their hues — taken out, they
 are drawn as patterns in the theme's two colours (see the chart above). The focus
 stays on its row — the running list's button, or the tree's item — when the section is pushed
-again. The webview loads no external resource of any kind — its CSP
+again, and on the provider switch's button you pressed when the switch is. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
-range, a sort, a filter, a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
+range, a sort, a filter, a provider for the switch (`all` or one the registry knows), a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
 open, close, select or show more children of — at most 200 characters, and only ever matched against the nodes the tree
 was built with — or one of a fixed list of named commands; never a path and never a setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
 carry the same figures.

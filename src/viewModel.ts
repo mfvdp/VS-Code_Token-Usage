@@ -557,7 +557,8 @@ export interface QuotaCard {
    * 1.7 W1: our own last fetch failed after the reading this card shows — the sentence of
    * `lastFailureText` ("Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt ·
    * next attempt in 1h12m"), or null. Only on a card with a reading: a card without one says the
-   * failure as its `problem`.
+   * failure as its `problem`. 1.7 P4b: only a transient failure (`FAILURE_TRANSIENT`: a backoff, no
+   * connection, an unclassified error); a permanent cause beside a reading is not said, as in 1.6.
    */
   lastFailure: string | null
   ageText: string | null

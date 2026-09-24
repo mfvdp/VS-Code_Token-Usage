@@ -14,6 +14,7 @@ import { AGENT_WORLD, agentNode, agentWorld, treeNodes } from './fixtures/agentW
 import {
   FINGERPRINT, NOW, TODAY, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
+import { markdownDocument } from '../src/textViews'
 import { toolAgg } from './helpers/toolAgg'
 
 const cfg = makeConfig()
@@ -179,6 +180,32 @@ test('the clipboard summary prints no measuring sentence and describes the gaps 
   assert.ok(vm.quotas.some((q) => q.windows.some((w) => w.gaps > 0)), 'the fixture has a gap')
   assert.match(md, /gap\(s\) in the last 24 h; a hole with no reset inside it is bridged by a dashed line, a hole across a reset stays open\./)
   assert.equal(md.includes('drawn broken'), false)
+})
+
+test('the clipboard summary says the failed attempt under the provider\'s heading, as the markdown document does (1.7 P4b)', () => {
+  const failed = state('claude', {
+    fetchedAt: Math.round((NOW - 2 * 3_600_000) / 1000), nextAttemptAt: NOW + 72 * 60_000,
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' },
+  })
+  const vm = buildViewModel(makeInput({ quotas: [failed, state('codex')] }))
+  const sentence = 'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m'
+  assert.equal(vm.quotas[0].lastFailure, sentence)
+  const lines = toMarkdownSummary(vm).split('\n')
+  const head = lines.findIndex((l) => l.startsWith('## Claude Code'))
+  assert.ok(head >= 0, lines.join('\n'))
+  assert.deepEqual(lines.slice(head + 1, head + 4), ['', `_${sentence}_`, ''])
+  assert.equal(lines.filter((l) => l.includes('Last attempt at')).length, 1)
+  // The line the markdown document prints, word for word.
+  assert.ok(markdownDocument(vm).split('\n').includes(`_${sentence}_`))
+  // A pipe or a backslash in a borrowed reason cannot break out of the line.
+  const odd = buildViewModel(makeInput({ quotas: [state('claude', { ...failed, lastFailure: { ...failed.lastFailure!, problem: 'a|b\\c' } })] }))
+  assert.ok(toMarkdownSummary(odd).includes('_Last attempt at 11:40 failed: a\\|b\\\\c · next attempt in 1h12m_'), toMarkdownSummary(odd))
+  // Without a failure, or with a permanent cause beside the reading, not a word of one.
+  assert.equal(toMarkdownSummary(buildViewModel(makeInput())).includes('Last attempt'), false)
+  const permanent = buildViewModel(makeInput({ quotas: [state('claude', { ...failed,
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'credentials rejected — sign in to Claude Code again', kind: 'unauthorized' } })] }))
+  assert.equal(toMarkdownSummary(permanent).includes('Last attempt'), false)
+  assert.equal(toMarkdownSummary(permanent).includes('credentials rejected'), false)
 })
 
 test('the clipboard summary keeps a configured plan name marked as configured', () => {

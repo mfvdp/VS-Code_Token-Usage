@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { AgentTreeVm, MAX_GROUP_CHILDREN, MAX_ROOTS, RunningItem, TreeNode, emptyAgentTree } from '../src/agentTree'
 import { setBundle, setLocale } from '../src/i18n'
-import { PICK_RUNNING_ITEMS, PickItem, markdownDocument, quickPickItems } from '../src/textViews'
+import { PICK_RUNNING_ITEMS, PickItem, markdownDocument, noIcons, quickPickItems } from '../src/textViews'
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
 import { SOURCE_TITLE, ViewModel, agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
@@ -104,6 +104,56 @@ test('the failed attempt beside a reading reaches the markdown under the heading
     lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' },
   })] }))
   assert.equal(quickPickItems(broken).find((i) => i.label === 'Claude Code')?.detail, '⚠ HTTP 429 — backing off before the next attempt')
+})
+
+/**
+ * VS Code's own reading of a Quick Pick line (`renderLabelWithIcons`): `$(name)` or `$(name~modifier)`
+ * becomes an icon, a backslash in front makes it the literal text. Mirrored here, so the test asks what
+ * the list would draw rather than how the string is spelt.
+ */
+function drawnIcons(s: string): { icons: string[]; text: string } {
+  const icons: string[] = []
+  const text = s.replace(/(\\)?\$\(([A-Za-z0-9-]+(?:~[A-Za-z]+)?)\)/g, (_m, escaped: string | undefined, name: string) => {
+    if (escaped) return `$(${name})`
+    icons.push(name)
+    return ''
+  })
+  return { icons, text }
+}
+
+test('the Quick Pick prints Codex\'s own error string as text: no "$(" becomes an icon (1.7 P4b)', () => {
+  // A hostile app-server error: icon syntax, a modified icon, one already escaped, and a "$(" that is no icon.
+  const reason = 'rate limited $(alert) $(sync~spin) \\$(x) $( 5 ) $(bad name)'
+  const failed = state('codex', {
+    fetchedAt: Math.round((NOW - 2 * 3_600_000) / 1000), nextAttemptAt: NOW + 72 * 60_000,
+    lastFailure: { at: NOW - 20 * 60_000, problem: reason, kind: 'retry' },
+  })
+  const vm = buildViewModel(makeInput({ quotas: [state('claude'), failed] }))
+  assert.equal(vm.quotas[1].lastFailure, `Last attempt at 11:40 failed: ${reason} · next attempt in 1h12m`)
+  const detail = quickPickItems(vm).find((i) => i.label === 'Codex')?.detail as string
+  const drawn = drawnIcons(detail)
+  assert.deepEqual(drawn.icons, [], detail)
+  // What the list shows is the sentence exactly as the card prints it.
+  assert.equal(drawn.text, vm.quotas[1].lastFailure)
+  // The same string as the problem of a card without a reading.
+  const broken = buildViewModel(makeInput({ quotas: [state('codex', { ok: false, problem: reason, problemKind: 'retry', windows: [] })] }))
+  const problem = quickPickItems(broken).find((i) => i.label === 'Codex')?.detail as string
+  assert.deepEqual(drawnIcons(problem).icons, [], problem)
+  assert.equal(drawnIcons(problem).text, `⚠ ${reason}`)
+  // Our own words are untouched: a reason without icon syntax is the sentence to the byte.
+  assert.equal(noIcons('HTTP 429 — backing off before the next attempt'), 'HTTP 429 — backing off before the next attempt')
+  // The icons the item's own label draws are not ours to escape: the label is the provider's title.
+  assert.equal(quickPickItems(vm).find((i) => i.label === 'Codex')?.label, 'Codex')
+})
+
+test('a permanent cause beside a reading reaches neither the markdown nor the Quick Pick (1.7 P4b, Review 1 #2)', () => {
+  const permanent = buildViewModel(makeInput({ quotas: [state('claude'), state('codex', {
+    origin: 'transcript', fetchedAt: Math.round((NOW - 45 * 60_000) / 1000),
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'codex executable not found', kind: 'noBinary' },
+  })] }))
+  assert.equal(permanent.quotas[1].lastFailure, null)
+  assert.equal(markdownDocument(permanent).includes('codex executable not found'), false)
+  assert.equal(quickPickItems(permanent).find((i) => i.label === 'Codex')?.detail, undefined)
 })
 
 test('the markdown\'s freshness row says a passed attempt is due, and a held one waits for focus (1.7 W2)', () => {

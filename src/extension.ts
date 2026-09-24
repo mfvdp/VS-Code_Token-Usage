@@ -1265,6 +1265,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     const tcfg = readTimeConfig(cfg)
     const candidates = quotaMgr.candidates()
     const drift = quotaMgr.driftReport()
+    // 1.7 P4b: the kind and time of our own last failed attempt per source — never its words.
+    const failures = quotaMgr.lastFailures()
     const net = cfg.diagnostics.includeNetworkSetup
     const quota: QuotaDiag[] = SOURCES.map((source) => ({
       source,
@@ -1272,6 +1274,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         id: c.id, ok: c.ok, ageSec: c.ageSec, problem: c.problem ?? null,
       })),
       backoffEndsAt: quotas.find((q) => q.source === source)?.nextAttemptAt ?? null,
+      lastFailure: failures[source] ?? null,
       drift: [...(drift[source] ?? [])],
     }))
 

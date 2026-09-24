@@ -122,21 +122,31 @@ names its own repair step in the status bar and the tooltip. Backoff grows with 
 to 30 min on network errors. A permanent cause — missing credentials, no `codex` executable — is
 not retried every minute. **Token Pace: Fetch Quota Now** forces an immediate attempt.
 
-A failed attempt does not wipe the reading in hand: the older figure stays, and the failure is said
-beside it — `Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next
-attempt in 1h12m` under the dashboard card's header, in the tooltip, the markdown view and the Quick
-Pick, and as ` · $(clock) retry 1h12m` after the age of a stale status-bar entry. It is said only
-while Token Pace may fetch itself (`quotaSource: poll`, consent given, this window holding the lease),
-and only while the failure is newer than the reading shown — a newer reading from another source
-answers the question the failure left open. A next attempt whose time has passed reads `due`, never
-`reset due`. The time and the reason of the last failed attempt are kept in the extension's own
-`quota.json`, so a restart during a backoff still says why the figure is old. That entry holds the
-time, the kind of failure and the fetch's own words (a fixed phrase with at most an HTTP status, or
-the Codex app-server's error string) — never a token, a header or an exception's text — and it goes
-with the next successful fetch and with *Clear Stored Data…*.
+A failed attempt does not wipe the reading in hand: the older figure stays, and a transient failure
+of our own fetch is said beside it — `Last attempt at 14:20 failed: HTTP 429 — backing off before the
+next attempt · next attempt in 1h12m` under the dashboard card's header, in the tooltip, the markdown
+view, the Quick Pick and *Copy Usage Summary*, and as ` · $(clock) retry 1h12m` after the age of a
+stale status-bar entry. Transient means the cause passes by itself and another attempt is scheduled
+after a backoff: a `429` or a server error, a network error (timeout, DNS, TLS, proxy), an unclassified
+status or error. A permanent cause — missing, expired or rejected credentials, a refused endpoint
+(`403`), no `codex` executable, an answer without windows — is not said beside a reading: nothing
+changes until you act, the reading stands, and the cause shows where no reading exists (the status
+bar's `$(key) CC no token`, `$(circle-slash) CDX no codex` and the rest of
+[status-bar-states.md](status-bar-states.md)). The sentence is said only while Token Pace may fetch
+itself (`quotaSource: poll`, consent given, this window holding the lease), and only while the failure
+is newer than the reading shown — a newer reading from another source answers the question the failure
+left open. A next attempt whose time has passed reads `due`, never `reset due`. The time and the reason
+of the last failed attempt are kept in the extension's own `quota.json`, so a restart during a backoff
+still says why the figure is old. That entry holds the time, the kind of failure and the fetch's own
+words (a fixed phrase with at most an HTTP status, or the Codex app-server's error string) — never a
+token, a header or an exception's text —; it is kept for a permanent cause too (only the display leaves
+that out), and it goes with the next successful fetch and with *Clear Stored Data…*. *Copy Diagnostics*
+names its kind and its time per provider, never its words.
 
 Even where fetching is enabled it is skipped while another source has a reading younger than the
-interval — a fresh number from somebody else answers the same question for free.
+interval — a fresh number from somebody else answers the same question for free. Nothing is then
+called due or waiting for focus: the next attempt is not before that reading turns older than the
+interval, and that is the time the views give for it.
 
 ## Reset re-poll
 
@@ -164,6 +174,8 @@ manual fetch always runs. A scheduled attempt that falls due meanwhile says so i
 in silence: the retry state reads `retry waiting for focus`, the tooltip `$(clock) next attempt
 waiting for focus`, the markdown's freshness row `next refresh waiting for focus`, and the log says
 once per hold `claude: a due fetch waits for this window to be focused (tokenPace.pollOnlyWhenFocused)`.
+That is said only of an attempt that would be made — a fresh reading from the status line or a cache
+file answers the fetch, and a background window showing one holds nothing back.
 
 **Persistent app-server.** `tokenPace.codexAppServer.mode: persistent` keeps one
 `codex app-server` child alive per editor instead of spawning one per poll, and then receives

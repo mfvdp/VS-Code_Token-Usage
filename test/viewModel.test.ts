@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
-import { AgentLaunch, AgentRec, MainRec, QuotaSample, QuotaState, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
+import { AgentLaunch, AgentRec, MainRec, ProblemKind, QuotaSample, QuotaState, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
@@ -124,6 +124,28 @@ test('a card whose reading outlived a failed fetch of ours carries the sentence;
   const held = state('claude', { lastFailure: FAILED_429, nextAttemptAt: NOW - 60_000, attemptHeld: 'focus' })
   assert.equal(buildViewModel(makeInput({ quotas: [held] })).quotas[0].lastFailure,
     'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt waiting for focus')
+})
+
+test('a permanent cause beside a reading gives no card a sentence; a transient one does (1.7 P4b, Review 1 #2)', () => {
+  const at = { fetchedAt: Math.round((NOW - 2 * 3_600_000) / 1000), nextAttemptAt: NOW + 72 * 60_000 }
+  const sentence = (kind: ProblemKind): string | null => buildViewModel(makeInput({ quotas: [
+    state('claude', { ...at, lastFailure: { ...FAILED_429, kind } }), state('codex'),
+  ] })).quotas[0].lastFailure
+  for (const kind of ['retry', 'offline', 'unknown'] as const) {
+    assert.equal(sentence(kind), 'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m', kind)
+  }
+  for (const kind of ['noToken', 'tokenExpired', 'unauthorized', 'forbidden', 'noBinary', 'empty', 'paused', 'noFile',
+    'consentPending', 'modeCache', 'quotaOff', 'follower'] as const) {
+    assert.equal(sentence(kind), null, kind)
+  }
+  // A kind no build knows — a state from anywhere else — is no transient one either.
+  assert.equal(sentence('teapot' as ProblemKind), null)
+  // The Codex case of Review 1: no binary beside its transcript reading — the card is the card without it.
+  const plain = buildViewModel(makeInput({ quotas: [state('claude'), state('codex', { origin: 'transcript' })] }))
+  const noBinary = buildViewModel(makeInput({ quotas: [state('claude'), state('codex', { origin: 'transcript',
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'codex executable not found', kind: 'noBinary' } })] }))
+  assert.deepEqual(noBinary.quotas, plain.quotas)
+  assert.equal(markdownDocument(noBinary).includes('Last attempt'), false)
 })
 
 test('the freshness block\'s next refresh is an attempt: a countdown, due, waiting for focus — never "reset due" (1.7 W2)', () => {

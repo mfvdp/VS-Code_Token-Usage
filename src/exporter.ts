@@ -496,6 +496,9 @@ export function toMarkdownSummary(vm: ViewModel): string {
       q.stale ? `⚠ ${t('stale')}` : null,
     ].filter(Boolean).join(' · ')
     L.push(`## ${q.title}${meta ? ` — ${meta}` : ''}`, '')
+    // 1.7 P4b: our own fetch failed after this reading — the card's sentence, under the heading and in
+    // italics, as the markdown document prints it (textViews.ts), so the clipboard says why it is old.
+    if (q.lastFailure) L.push(`_${cell(q.lastFailure)}_`, '')
     if (q.problem) L.push(`> ⚠ ${q.problem}`, '')
     if (q.windows.length > 0) {
       L.push(t('| Window | Used | Elapsed | Pace | Resets |'))

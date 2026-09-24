@@ -25,7 +25,7 @@ import {
   bestState, Candidate, ClaudeSourceId, CodexSourceId, ContextReading, PromptCacheReading, QuotaMode, SourceExtras,
   SourceInputs,
 } from './quotaSources'
-import { CodexRateLimitsSnapshot, ProblemKind, QuotaState, Source } from './types'
+import { CodexRateLimitsSnapshot, isTransientFailure, ProblemKind, QuotaState, Source } from './types'
 
 export type QuotaSource = QuotaMode
 
@@ -463,6 +463,19 @@ export class QuotaManager {
     this.invalidate()
   }
 
+  /**
+   * 1.7 P4b: our own last failed attempt per source — its kind and its time (ms), never its words —
+   * for *Copy Diagnostics*. Every failure, the permanent ones included, whatever the views say beside
+   * a reading; null where the last attempt succeeded or none was made.
+   */
+  lastFailures(): Record<Source, { kind: ProblemKind; at: number } | null> {
+    const of = (src: Source): { kind: ProblemKind; at: number } | null => {
+      const f = this.problem[src]
+      return f ? { kind: f.kind, at: f.at } : null
+    }
+    return { claude: of('claude'), codex: of('codex') }
+  }
+
   dispose(): void {
     this.disposed = true
     this.stopAppServer()
@@ -494,21 +507,33 @@ export class QuotaManager {
    * Adds the fields the display layer needs but the parsers cannot know: why there is no
    * figure, when the next attempt is due, whether a due attempt waits for focus (1.7 W2), and —
    * beside a reading we still show — that our own fetch after it failed (1.7 W1).
+   *
+   * 1.7 P4b (Review 1 #1): an attempt is due, or held for focus, only while a fetch is actually
+   * wanted — the condition `runPolls` decides by (`answeredBy`). While a fresh reading answers the
+   * fetch, the next attempt is not before that reading turns older than the interval, and nothing
+   * is said to be due or waiting: a window in the background with a fresh bridge or cache reading
+   * is not holding anything back.
    */
   private enrich(src: Source, state: QuotaState, now: number): QuotaState {
     const permitted = this.blocked() === null
     // Zero means "never scheduled"; reporting it as a date would be an invented one.
     const next = this.nextPollAt[src]
-    const nextAttemptAt = permitted && next > 0 ? next : null
+    const answered = permitted && next > 0 ? this.answeredBy(src, state, now) : null
+    const nextAttemptAt = permitted && next > 0 ? Math.max(next, answered?.until ?? 0) : null
     // 1.7 W2: a scheduled attempt that is due while `tick` skips for focus — said, not left silent.
-    const attemptHeld: 'focus' | null = permitted && this.focusSkips(now) && next > 0 && next <= now ? 'focus' : null
+    const attemptHeld: 'focus' | null = nextAttemptAt !== null && nextAttemptAt <= now && this.focusSkips(now)
+      ? 'focus'
+      : null
     const own = this.problem[src]
     if (state.ok) {
       // 1.7 W1: the old figure stays on screen after a failed fetch; the failure goes beside it —
       // only while we may fetch at all, and only when it is newer than the reading shown (a foreign
       // reading taken after our failure answers the question the failure left open).
       const fetchedMs = (typeof state.fetchedAt === 'number' && Number.isFinite(state.fetchedAt) ? state.fetchedAt : 0) * 1000
-      const lastFailure = permitted && own && own.at > fetchedMs
+      // 1.7 P4b (Review 1 #2): a transient failure only (`FAILURE_TRANSIENT`) — a permanent cause
+      // (no credentials, no binary, a refused endpoint …) stays where no reading exists, as in 1.6.
+      // `problem` and `quota.json` keep every failure; only what is said beside a reading filters.
+      const lastFailure = permitted && own && isTransientFailure(own.kind) && own.at > fetchedMs
         ? { at: own.at, problem: own.text, kind: own.kind }
         : null
       return { ...state, nextAttemptAt, lastFailure, attemptHeld }
@@ -552,14 +577,35 @@ export class QuotaManager {
       && now - this.unfocusedSince > UNFOCUSED_GRACE_MS
   }
 
-  /** 1.7 W2: one English log line per hold and source, when a due attempt waits for focus. */
+  /**
+   * 1.7 W2: one English log line per hold and source, when a due attempt waits for focus — 1.7 P4b:
+   * only when that attempt is wanted, by the rule `runPolls` would apply (`answeredBy`); a fresh
+   * reading from somebody else holds nothing back.
+   */
   private logHeld(now: number): void {
     for (const src of SOURCES) {
       const next = this.nextPollAt[src]
       if (this.heldLogged[src] || !(next > 0 && next <= now)) continue
+      if (this.answeredBy(src, this.lastStates[src], now) !== null) continue
       this.heldLogged[src] = true
       this.log(`${src}: a due fetch waits for this window to be focused (tokenPace.pollOnlyWhenFocused)`)
     }
+  }
+
+  /**
+   * 1.7 P4b: whether a fresh reading answers a scheduled fetch of `src`, and until when — somebody
+   * else's reading younger than the interval (`best`, the state `current()` picked), else our own; null
+   * when none does and a due fetch is wanted. The one condition `runPolls` skips a due fetch by, which
+   * `enrich` and `logHeld` ask as well, so no view calls an attempt due or held that would not be made.
+   */
+  private answeredBy(src: Source, best: QuotaState | undefined, now: number): { by: 'foreign' | 'own'; until: number } | null {
+    const interval = this.intervalMs()
+    // A fresh reading from somebody else answers the same question for free.
+    const foreign = best?.ok && best.origin !== 'poll' && best.origin !== 'push'
+    if (foreign && this.ageMs(best, now) < interval) return { by: 'foreign', until: (best.fetchedAt as number) * 1000 + interval }
+    const own = this.polled[src]
+    if (own?.ok && this.ageMs(own, now) < interval) return { by: 'own', until: (own.fetchedAt ?? 0) * 1000 + interval }
+    return null
   }
 
   private runPolls(now: number): void {
@@ -568,16 +614,11 @@ export class QuotaManager {
       const forced = this.forced.delete(src)
       if (!forced) {
         if (now < this.nextPollAt[src]) continue
-        // A fresh reading from somebody else answers the same question for free.
-        const best = this.lastStates[src]
-        const foreign = best?.ok && best.origin !== 'poll' && best.origin !== 'push'
-        if (foreign && this.ageMs(best, now) < this.intervalMs()) {
-          this.nextPollAt[src] = now + MINUTE_MS
-          continue
-        }
-        const own = this.polled[src]
-        if (own?.ok && this.ageMs(own, now) < this.intervalMs()) {
-          this.nextPollAt[src] = (own.fetchedAt ?? 0) * 1000 + this.intervalMs()
+        const answered = this.answeredBy(src, this.lastStates[src], now)
+        if (answered !== null) {
+          // Somebody else's reading is asked again in a minute — it may be gone by then; our own
+          // reading is good until the interval has passed.
+          this.nextPollAt[src] = answered.by === 'foreign' ? now + MINUTE_MS : answered.until
           continue
         }
       }

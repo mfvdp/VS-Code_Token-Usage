@@ -57,6 +57,18 @@ function cell(s: string | null | undefined): string {
 }
 
 /**
+ * 1.7 P4b: a borrowed string made safe for a Quick Pick line, whose label, description and detail
+ * render `$(name)` as a codicon. Codex's app-server error reaches the provider item's detail verbatim
+ * (as its `problem`, or inside the failed attempt's sentence), and a `$(alert)` in it must print, not
+ * draw an icon: every icon reference gets VS Code's own escape, a backslash in front, which the list
+ * renders as the literal text. The pattern is the renderer's (`$(` + a name + an optional `~modifier`
+ * + `)`), so a `$(` that would not become an icon keeps its text exactly.
+ */
+export function noIcons(s: string): string {
+  return s.replace(/\$\([A-Za-z0-9-]+(?:~[A-Za-z]+)?\)/g, (m) => `\\${m}`)
+}
+
+/**
  * "5 h" alone is ambiguous the moment both providers report a window of that length, and a
  * flat list has no card around a row to say which account it belongs to. The dashboard
  * prefixes the provider for exactly this reason; the fallback views do the same.
@@ -203,7 +215,8 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
       label: q.title,
       description: meta,
       // 1.7 W1: a card with a reading whose last fetch of ours failed says so, in the card's words.
-      detail: q.problem ? `⚠ ${q.problem}` : (q.lastFailure ?? undefined),
+      // 1.7 P4b: either may carry Codex's own error string — its icon syntax prints as text.
+      detail: q.problem ? noIcons(`⚠ ${q.problem}`) : (q.lastFailure ? noIcons(q.lastFailure) : undefined),
       command: q.problemAction?.command,
     })
     for (const w of q.windows) {

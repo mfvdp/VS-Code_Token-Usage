@@ -1359,3 +1359,45 @@ test('the failed attempt\'s words stay inside a code span of the tooltip (1.7 W1
   assert.ok(tip.includes('failed: `**bold**|<img src=x onerror=alert(1)>` · next attempt'), tip)
   assert.equal(tip.includes('``'), false, tip)
 })
+
+// ---------------------------------------------------------------------------
+// 1.7 P4b (Review 1 #2): only a transient failure is said beside a reading
+// ---------------------------------------------------------------------------
+
+test('a permanent cause beside a reading adds no suffix and no tooltip line; a transient one does (1.7 P4b)', () => {
+  // Every kind, written out: the record in types.ts must give each its verdict, and only these three are transient.
+  const every: ProblemKind[] = [
+    'noFile', 'paused', 'empty', 'noToken', 'tokenExpired', 'consentPending', 'modeCache',
+    'retry', 'offline', 'forbidden', 'unauthorized', 'noBinary', 'quotaOff', 'follower', 'unknown',
+  ]
+  const transient: ProblemKind[] = ['retry', 'offline', 'unknown']
+  for (const kind of every) {
+    const q = failedReading({ lastFailure: { at: NOW - 20 * 60_000, problem: `synthetic ${kind} words`, kind } })
+    const m = buildItems(input({ quotas: [q] }))[0]
+    const tip = quotaTooltip(q, makeContext(input({ quotas: [q] })))
+    if (transient.includes(kind)) {
+      assert.ok(m.text.endsWith(' $(history) 2h · $(clock) retry 1h12m'), `${kind}: ${m.text}`)
+      assert.ok(tip.includes(`$(clock) Last attempt at 11:40 failed: \`synthetic ${kind} words\` · next attempt in 1h12m`), `${kind}: ${tip}`)
+    } else {
+      // The stale reading as 1.6 showed it: its age, and nothing of the permanent cause.
+      assert.equal(m.text, 'CC 5h ██┃▁▁▁▁▁ 25% · resets 3h30m $(history) 2h', kind)
+      assert.equal(tip.includes('Last attempt'), false, `${kind}: ${tip}`)
+      assert.equal(tip.includes(`synthetic ${kind} words`), false, `${kind}: ${tip}`)
+      // The compact item and the collective item's tooltip neither.
+      const compactItem = buildItems(input({ quotas: [q], cfg: cfg({ 'tokenPace.density': 'compact' }) }))[0]
+      assert.equal(compactItem.text.includes('retry'), false, `${kind}: ${compactItem.text}`)
+      assert.equal(summaryTooltip(['claude'], makeContext(input({ quotas: [q] }))).includes('Last attempt'), false, kind)
+    }
+    assert.equal(m.colorId, 'tokenPace.stale', kind)
+    assert.equal(m.alarm, false, kind)
+  }
+  // A permanent cause and a due attempt held for focus: the failure is not said, so the focus line is.
+  const held = failedReading({ lastFailure: { at: NOW - 20 * 60_000, problem: 'codex executable not found', kind: 'noBinary' },
+    nextAttemptAt: NOW - 60_000, attemptHeld: 'focus' })
+  const tip = quotaTooltip(held, makeContext(input({ quotas: [held] })))
+  assert.ok(tip.split('\n').includes('$(clock) next attempt waiting for focus'), tip)
+  assert.equal(tip.includes('codex executable not found'), false, tip)
+  // German: nothing of it either.
+  assert.equal(german(() => buildItems(input({ quotas: [failedReading({
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'Anmeldedaten abgelehnt', kind: 'unauthorized' } })] }))[0].text).includes('neuer Versuch'), false)
+})

@@ -94,13 +94,17 @@ names every file written, the companions included.
 
 **Copy Usage Summary** puts a markdown version on the clipboard: quota windows, token tables,
 cache economy, the digest and the footnotes. The `~` and the lower-bound marks travel with the
-numbers.
+numbers, and so does the sentence of a transient failure of our own fetch after the reading shown —
+`_Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next attempt in
+1h12m_` under the provider's heading, as the markdown view prints it.
 
 **Copy Diagnostics** builds a report from a field **allow-list**, not by dumping and redacting.
 An unknown field makes the builder throw, so a leak cannot be introduced silently. It contains:
 extension, VS Code, platform, arch, Node, remote name, extension kind, role, consent state,
 attribution mode; roots and file counts; snapshot size, bucket counts, coverage days, retention
-and quota-history size; every quota source with its age or failure and the drift list; the
+and quota-history size; every quota source with its age or failure and the drift list, and per
+provider the kind and the time of our own last failed attempt (`last failed attempt
+2026-09-24T11:40:00.000Z [retry]`, or `none`) — never its words, whatever the kind; the
 status-line bridge state; the `http.proxy` settings with their origin and the six proxy
 environment variables (`tokenPace.diagnostics.includeNetworkSetup`, credentials inside proxy URLs
 replaced by `***`); and the current value of every `tokenPace.*` setting.

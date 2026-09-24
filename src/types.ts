@@ -662,6 +662,46 @@ export type ProblemKind =
   | 'noFile' | 'paused' | 'empty' | 'noToken' | 'tokenExpired' | 'consentPending' | 'modeCache'
   | 'retry' | 'offline' | 'forbidden' | 'unauthorized' | 'noBinary' | 'quotaOff' | 'follower' | 'unknown'
 
+/**
+ * 1.7 P4b (Review 1 #2): which failures of our own fetch are said beside a reading that is still
+ * shown — as a record, so the compiler insists on a verdict for every kind.
+ *
+ * Transient (true): the cause passes by itself and the poller has scheduled another attempt after a
+ * backoff — a rate limit or a server error (`retry`, HTTP 429/5xx, Codex's app-server error), no
+ * connection (`offline`: timeout, DNS, TLS, proxy), an unclassified HTTP status or an unexpected
+ * error (`unknown`). The reading beside it is old *because* of it, so the card, the tooltip, the
+ * text views and a stale status-bar item say so.
+ *
+ * Permanent (false): nothing changes until the user does something — no credentials, an expired or
+ * rejected token, a refused endpoint, no `codex` executable, an answer without windows — or the kind
+ * never comes from a fetch of ours at all (the file sources' and the gates' kinds). As in 1.6 such a
+ * cause is not said beside a reading: the reading stands, and the problem shows where no reading
+ * exists. `quota.json` keeps every failure either way (§0a.3); only the display filters.
+ */
+export const FAILURE_TRANSIENT: Readonly<Record<ProblemKind, boolean>> = {
+  retry: true,
+  offline: true,
+  unknown: true,
+  noToken: false,
+  tokenExpired: false,
+  unauthorized: false,
+  forbidden: false,
+  noBinary: false,
+  empty: false,
+  paused: false,
+  noFile: false,
+  consentPending: false,
+  modeCache: false,
+  quotaOff: false,
+  follower: false,
+}
+
+/** 1.7 P4b: true for a transient kind (`FAILURE_TRANSIENT`); false for every other value, a stranger included. */
+export function isTransientFailure(kind: unknown): boolean {
+  return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(FAILURE_TRANSIENT, kind)
+    && FAILURE_TRANSIENT[kind as ProblemKind]
+}
+
 /** 1.7 W1: an attempt of our own that failed — when, in the poller's own words, and of what kind. */
 export interface QuotaFailure {
   /** Unix ms of the attempt. */
@@ -684,7 +724,11 @@ export interface QuotaState {
   /** Reason, when ok === false. */
   problem?: string
   problemKind?: ProblemKind
-  /** Unix ms of the next scheduled attempt (backoff end), when known. */
+  /**
+   * Unix ms of the next scheduled attempt (backoff end), when known. 1.7 P4b: while a fresh reading
+   * answers the fetch (`runPolls` then skips it), not before that reading turns older than the
+   * interval — the earliest moment a fetch of ours is wanted again.
+   */
   nextAttemptAt?: number | null
   /** Numeric fields of the provider response that this build does not render. */
   drift?: string[]
@@ -695,12 +739,15 @@ export interface QuotaState {
    * `QuotaManager.enrich` on an ok state only (a state that is not ok carries the failure as its
    * `problem`, as in 1.6); null or absent when the last attempt succeeded, when none was made, when the
    * reading is newer than the failure, and whenever `blocked()` is not null (mode, consent, follower).
+   * 1.7 P4b: and for a permanent kind (`FAILURE_TRANSIENT`) — only a transient failure is said
+   * beside a reading; the renderers ask `isTransientFailure` again for a state built elsewhere.
    */
   lastFailure?: QuotaFailure | null
   /**
    * 1.7 W2: a scheduled attempt that is due but held back — 'focus' while `tokenPace.pollOnlyWhenFocused`
    * keeps a window that has been in the background for more than ten minutes from fetching
-   * (`QuotaManager.focusSkips`). Null or absent otherwise.
+   * (`QuotaManager.focusSkips`). Null or absent otherwise — 1.7 P4b: also while a fresh reading
+   * answers the fetch (the condition `runPolls` decides by), since then no fetch is wanted at all.
    */
   attemptHeld?: 'focus' | null
 }

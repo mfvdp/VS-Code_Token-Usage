@@ -42,21 +42,28 @@ divide by and no pace to compute. The full matrix is in
 With `quotaSource: poll`, a fetch of Token Pace's own can fail while an older reading is still on
 screen — most often a `429`, after which the fetch backs off for about 10 minutes, doubling with
 every further failure up to 2 hours (a `Retry-After` header wins). The old figure stays, because a
-slightly older value beats an empty display, and the failure is said beside it in one sentence:
+slightly older value beats an empty display, and a transient failure of our own fetch — a `429` or a
+server error, a network error, an unclassified one — is said beside it in one sentence:
 
 > Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m
 
 It stands directly under the header of the dashboard's quota card, in the entry's tooltip after the
-freshness line, under the provider's heading in the markdown view and as the provider's line in the
-Quick Pick. Once the reading is older than `staleAfterMinutes`, the status-bar entry adds the next
-attempt after its age: `CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m` — in
-the grey of a stale reading, never as an alarm. `retry due` means the attempt is due now; `retry
-waiting for focus` means this window has been in the background for more than ten minutes, and with
-`tokenPace.pollOnlyWhenFocused` on the attempt waits until it is focused. **Token Pace: Fetch Quota
-Now** tries again at once. The sentence disappears with the next successful fetch, or when another
-source delivers a reading newer than the failure. The reason is the fetch's own wording — a fixed
-phrase with at most an HTTP status —, never the text of an exception, and it survives a restart
-during the backoff (see [quota-sources.md](quota-sources.md#what-the-fetch-does)).
+freshness line, under the provider's heading in the markdown view and in *Copy Usage Summary*, and
+as the provider's line in the Quick Pick. Once the reading is older than `staleAfterMinutes`, the
+status-bar entry adds the next attempt after its age:
+`CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m` — in the grey of a stale
+reading, never as an alarm. `retry due` means the attempt is due now; `retry waiting for focus`
+means this window has been in the background for more than ten minutes, and with
+`tokenPace.pollOnlyWhenFocused` on the attempt waits until it is focused — said only of an attempt
+that would be made: while a fresh reading from the status line or a cache file answers the fetch,
+nothing is due and nothing waits. **Token Pace: Fetch Quota Now** tries again at once. The sentence
+disappears with the next successful fetch, or when another source delivers a reading newer than the
+failure. The reason is the fetch's own wording — a fixed phrase with at most an HTTP status —, never
+the text of an exception, and it survives a restart during the backoff (see
+[quota-sources.md](quota-sources.md#what-the-fetch-does)). A permanent cause — no or rejected
+credentials, a `403`, no `codex` executable — is not said beside a reading: the figure stands as it
+would without it, and the cause is the entry's own state (the table above) once no reading is left.
+*Copy Diagnostics* names the kind and the time of the last failed attempt, whichever it was.
 
 **When a provider reports no window at all**, the dashboard card, the Quick Pick and the
 markdown document each carry one extra line, the same line word for word:

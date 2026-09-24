@@ -2232,6 +2232,32 @@ test('a tool call\'s input reaches neither the log, the diagnostics, the markdow
   }
 })
 
+test('Copy Diagnostics carries the quota manager\'s last failed attempt per source — its kind and its time (1.7 P4b)', async () => {
+  // The manager's own record, stood in for: a real failed fetch would need the network. What it hands
+  // over has no words to leak (quotaManager.test.ts: `lastFailures` holds the kind and the time only).
+  const { QuotaManager } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  const proto = QuotaManager.prototype as unknown as { lastFailures: () => unknown }
+  const real = proto.lastFailures
+  const at = Date.UTC(2026, 8, 24, 11, 40, 0)
+  let asked = 0
+  proto.lastFailures = function (): unknown {
+    asked++
+    return { claude: { kind: 'retry', at }, codex: null }
+  }
+  try {
+    await activateHost(makeFixture(), REPO)
+    await waitOwnColdStart(state)
+    await state.execute('tokenPace.copyDiagnostics')
+    const report = state.clipboard[state.clipboard.length - 1]
+    assert.ok(asked >= 1, 'the report did not ask the manager')
+    assert.match(report, /^claude — backoff until \S+ · last failed attempt 2026-09-24T11:40:00\.000Z \[retry\]$/m)
+    assert.match(report, /^codex — backoff until \S+ · last failed attempt none$/m)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    proto.lastFailures = real
+  }
+})
+
 test('a session that has just called the Workflow tool, with no agent file yet, starts the poll', async () => {
   // 1.6 D8. A workflow run's first agent writes into a directory made after the watcher started
   // — the one a recursive watcher on Linux can miss — and a `Workflow` call is no agent launch,

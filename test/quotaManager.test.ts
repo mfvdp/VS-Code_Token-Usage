@@ -12,8 +12,11 @@ import { CLAUDE_VERSION_FALLBACK, PollOptions, PollResult, userAgentFor } from '
 import {
   HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
 } from '../src/quotaManager'
-import { makeContext, quotaTooltip, UsageSource } from '../src/statusText'
-import { emptyBucket, QuotaState, Snapshot, Source } from '../src/types'
+import { buildItems, makeContext, quotaTooltip, StatusTextInput, UsageSource } from '../src/statusText'
+import { attemptWhen } from '../src/time'
+import {
+  CodexRateLimitsSnapshot, emptyBucket, FAILURE_TRANSIENT, ProblemKind, QuotaState, Snapshot, Source,
+} from '../src/types'
 import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, ctxFor, scratchDir } from './fixtures/helpers'
 
 const BASE = 1_700_000_000_000
@@ -66,6 +69,7 @@ function harness(
     (source === 'claude'
       ? { state: claudeState(BASE / 1000), retryAfterSeconds: null, raw: { limits: [] } }
       : { state: null, retryAfterSeconds: null, problem: 'no binary', problemKind: 'noBinary' }),
+  transcript: () => CodexRateLimitsSnapshot[] = () => [],
 ): Harness {
   const dir = scratchDir('qmgr')
   let current = BASE
@@ -105,7 +109,7 @@ function harness(
     ...depOver,
   }
   const mgr = new QuotaManager(
-    { ...OPTIONS, ...optOver }, files, (m) => logs.push(m), consented, () => [], history, deps,
+    { ...OPTIONS, ...optOver }, files, (m) => logs.push(m), consented, transcript, history, deps,
   )
   return {
     mgr, dir, files, polls, scheduled, added, logs,
@@ -982,6 +986,195 @@ test('a focused window, or one without the focus setting, never holds an attempt
   ungated.mgr.setFocused(false)
   assert.equal(ungated.mgr.current(BASE + 90 * MIN)[0].attemptHeld, null)
   assert.equal(ungated.logs.some((l) => l.includes('waits for this window')), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 P4b (Review 1): an attempt is due or held only while a fetch is wanted; only a transient
+// failure is said beside a reading; Copy Diagnostics gets the kind and the time, never the words
+// ---------------------------------------------------------------------------
+
+/** The status bar's input for one state, as the extension hands it over. */
+function statusInput(s: QuotaState, now: number): StatusTextInput {
+  const agg: UsageSource = {
+    sum: () => emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, '2026-09-03'),
+    cost: () => ({ usd: 0, listUsd: 0, unpricedTokens: 0, unpricedModels: [], fastUnpricedTokens: 0, familyPriced: [], custom: false }),
+  }
+  return {
+    quotas: [s], agg, cfg: sanitize({ 'tokenPace.timezone': 'utc' }), now, forecasts: new Map(),
+    role: 'single', scanning: false, consent: 'granted',
+  }
+}
+
+/** The status-bar tooltip of a state, as the extension renders it. */
+function tooltipOf(s: QuotaState, now: number): string {
+  return quotaTooltip(s, makeContext(statusInput(s, now)))
+}
+
+const HELD_LINE = 'claude: a due fetch waits for this window to be focused (tokenPace.pollOnlyWhenFocused)'
+
+test('a fresh foreign reading in a background window holds nothing: no "due", no "waiting for focus", no log line (1.7 P4b, Review 1 #1)', async () => {
+  // Review 1's reproduction: a cache file (the bridge would do the same) keeps the Claude reading
+  // fresh, the window has been in the background for more than ten minutes, and `runPolls` would not
+  // fetch — so nothing may say that an attempt is due or waits for focus.
+  const h = harness()
+  h.writeClaudeCache((BASE - 2 * MIN) / 1000, 42, null)
+  h.mgr.tick(() => { /* nothing */ })
+  await flush()
+  assert.equal(h.polls.filter((p) => p.source === 'claude').length, 0, 'the premise: the fresh reading spares the fetch')
+  h.mgr.setFocused(false)
+  for (let m = 1; m <= 24; m++) {
+    const now = BASE + m * MIN
+    h.setNow(now)
+    // The reading is renewed every ten minutes, as a live source renews it.
+    if (m % 10 === 0) h.writeClaudeCache((now - MIN) / 1000, 42 + m, null)
+    h.mgr.invalidate()
+    h.mgr.tick(() => { /* nothing */ })
+    await flush()
+    const s = h.mgr.current(now)[0]
+    assert.equal(s.origin, 'cache', `${m} min`)
+    assert.equal(s.attemptHeld, null, `${m} min: held`)
+    const w = attemptWhen(s.nextAttemptAt, s.attemptHeld, now)
+    assert.equal(w?.kind, 'in', `${m} min: ${JSON.stringify(w)}`)
+    // Not before the reading shown turns older than the interval — when a fetch is wanted again.
+    assert.equal(s.nextAttemptAt, (s.fetchedAt as number) * 1000 + 30 * MIN, `${m} min`)
+    const tip = tooltipOf(s, now)
+    assert.equal(/waiting for focus|next attempt due|retry due/.test(tip), false, `${m} min: ${tip}`)
+  }
+  assert.equal(h.logs.includes(HELD_LINE), false, h.logs.join('\n'))
+  assert.equal(h.polls.filter((p) => p.source === 'claude').length, 0)
+
+  // The reading goes stale (no renewal after minute 20): a fetch is wanted now, and the background
+  // window holds it — the words and one log line come back.
+  h.setNow(BASE + 52 * MIN)
+  h.mgr.invalidate()
+  for (let i = 0; i < 3; i++) {
+    h.mgr.tick(() => { /* nothing */ })
+    await flush()
+  }
+  const stale = h.mgr.current(BASE + 52 * MIN)[0]
+  assert.equal(stale.ok, true)
+  assert.equal(stale.attemptHeld, 'focus')
+  assert.equal(attemptWhen(stale.nextAttemptAt, stale.attemptHeld, BASE + 52 * MIN)?.kind, 'focus')
+  assert.ok(tooltipOf(stale, BASE + 52 * MIN).split('\n').includes('$(clock) next attempt waiting for focus'))
+  assert.equal(h.logs.filter((l) => l === HELD_LINE).length, 1, h.logs.join('\n'))
+  assert.equal(h.polls.filter((p) => p.source === 'claude').length, 0, 'held, not made')
+})
+
+test('while a fresh reading answers the fetch, a focused window says the same next attempt and makes it once the reading is old (1.7 P4b)', async () => {
+  const h = harness()
+  h.writeClaudeCache((BASE - 2 * MIN) / 1000, 42, null)
+  // Every thirty seconds, as the extension ticks.
+  for (let k = 0; k <= 62; k++) {
+    const now = BASE + k * 30_000
+    h.setNow(now)
+    h.mgr.invalidate()
+    h.mgr.tick(() => { /* nothing */ })
+    await flush()
+    const s = h.mgr.current(now)[0]
+    assert.equal(s.attemptHeld, null, `${k / 2} min`)
+    if (s.origin === 'cache' && now - (s.fetchedAt as number) * 1000 < 30 * MIN) {
+      // Never due while the reading answers — not "1m" either: the one-minute re-check is no attempt.
+      assert.equal(s.nextAttemptAt, BASE + 28 * MIN, `${k / 2} min`)
+      assert.equal(h.polls.filter((p) => p.source === 'claude').length, 0, `${k / 2} min`)
+    }
+  }
+  // Past BASE + 28 min the reading no longer answers, and the fetch was made.
+  assert.equal(h.polls.filter((p) => p.source === 'claude').length, 1)
+  assert.equal(h.mgr.current(BASE + 62 * 30_000)[0].origin, 'poll')
+})
+
+/** Every ProblemKind, written out here — the record in types.ts has to name each one. */
+const EVERY_KIND: ProblemKind[] = [
+  'noFile', 'paused', 'empty', 'noToken', 'tokenExpired', 'consentPending', 'modeCache',
+  'retry', 'offline', 'forbidden', 'unauthorized', 'noBinary', 'quotaOff', 'follower', 'unknown',
+]
+/** The transient ones (Review 1 #2): a rate limit or server error, no connection, an unclassified failure. */
+const TRANSIENT_KINDS: ProblemKind[] = ['retry', 'offline', 'unknown']
+
+test('only a transient failure is said beside a reading; quota.json keeps every one (1.7 P4b, Review 1 #2)', async () => {
+  assert.deepEqual(Object.keys(FAILURE_TRANSIENT).sort(), [...EVERY_KIND].sort())
+  for (const kind of EVERY_KIND) {
+    const transient = TRANSIENT_KINDS.includes(kind)
+    assert.equal(FAILURE_TRANSIENT[kind], transient, kind)
+    const h = failing()
+    h.mgr.forcePoll(() => { /* nothing */ })
+    await flush()
+    h.setNow(BASE + 30 * MIN)
+    const words = `synthetic ${kind} words`
+    h.answer.claude = { state: null, retryAfterSeconds: transient ? 600 : null, problem: words, problemKind: kind }
+    h.mgr.forcePoll(() => { /* nothing */ })
+    await flush()
+    const s = h.mgr.current(BASE + 30 * MIN)[0]
+    // The T0 reading stays on screen either way.
+    assert.equal(s.ok, true, kind)
+    assert.equal(s.fetchedAt, BASE / 1000, kind)
+    if (transient) assert.deepEqual(s.lastFailure, { at: BASE + 30 * MIN, problem: words, kind }, kind)
+    else assert.equal(s.lastFailure, null, kind)
+    // The tooltip and a stale item follow; the reading is 30 min old, so stale by the 20-minute default.
+    const tip = tooltipOf(s, BASE + 30 * MIN)
+    assert.equal(tip.includes(words), transient, `${kind}: ${tip}`)
+    const item = buildItems(statusInput(s, BASE + 30 * MIN))[0]
+    assert.equal(item.text.includes('$(clock) retry'), transient, `${kind}: ${item.text}`)
+    // quota.json keeps every failure (§0a.3 unchanged), and so does the manager for the diagnostics.
+    const file = JSON.parse(fs.readFileSync(h.files.stateFile, 'utf8'))
+    assert.deepEqual(file.failed.claude, { at: BASE + 30 * MIN, kind, text: words }, kind)
+    assert.deepEqual(h.mgr.lastFailures().claude, { kind, at: BASE + 30 * MIN }, kind)
+  }
+})
+
+test('Codex without its binary beside a transcript reading says nothing of it; a restart does not either (1.7 P4b, Review 1 #2)', async () => {
+  // The case Review 1 found: the Codex reading comes from a transcript, our own attempt finds no
+  // `codex` executable — a permanent cause, which 1.6 showed only where no reading exists.
+  const snaps: CodexRateLimitsSnapshot[] = [{
+    t: BASE - 45 * MIN, limitId: 'codex', limitName: null, planType: 'plus',
+    primary: { usedPercent: 42, windowMinutes: 300, resetsAt: null }, secondary: null, credits: null, limitReached: false,
+  }]
+  const h = harness({}, {}, () => true, undefined, () => snaps)
+  h.mgr.tick(() => { /* nothing */ })
+  await flush()
+  assert.ok(h.polls.some((p) => p.source === 'codex'), 'the premise: the old transcript reading asked for a fetch')
+  const codex = h.mgr.current(BASE + MIN)[1]
+  assert.equal(codex.ok, true)
+  assert.equal(codex.origin, 'transcript')
+  assert.equal(codex.lastFailure, null)
+  assert.equal(/Last attempt|no binary/.test(tooltipOf(codex, BASE + MIN)), false, tooltipOf(codex, BASE + MIN))
+  // Kept all the same — in quota.json and for the diagnostics.
+  assert.equal(JSON.parse(fs.readFileSync(h.files.stateFile, 'utf8')).failed.codex.kind, 'noBinary')
+  assert.deepEqual(h.mgr.lastFailures().codex, { kind: 'noBinary', at: BASE })
+  // A restart restores it, and still says nothing of it beside the reading.
+  const again = new QuotaManager(OPTIONS, h.files, () => { /* silent */ }, () => true, () => snaps, undefined, {
+    now: () => BASE + 2 * MIN, findCodexBinary: () => null, poll: async () => ({ state: null, retryAfterSeconds: null }),
+  })
+  const restored = again.current(BASE + 2 * MIN)[1]
+  assert.equal(restored.ok, true)
+  assert.equal(restored.lastFailure, null)
+  assert.deepEqual(again.lastFailures().codex, { kind: 'noBinary', at: BASE })
+  // Without the transcript reading the problem is the card's, as in 1.6.
+  const bare = new QuotaManager(OPTIONS, h.files, () => { /* silent */ }, () => true, () => [], undefined, {
+    now: () => BASE + 2 * MIN, findCodexBinary: () => null, poll: async () => ({ state: null, retryAfterSeconds: null }),
+  }).current(BASE + 2 * MIN)[1]
+  assert.equal(bare.ok, false)
+  assert.equal(bare.problemKind, 'noBinary')
+})
+
+test('lastFailures hands Copy Diagnostics the kind and the time of each source\'s last failed attempt, never its words (1.7 P4b)', async () => {
+  const h = failing()
+  assert.deepEqual(h.mgr.lastFailures(), { claude: null, codex: null })
+  await okThen429(h)
+  const f = h.mgr.lastFailures()
+  assert.deepEqual(f.claude, { kind: 'retry', at: BASE + 30 * MIN })
+  assert.deepEqual(Object.keys(f.claude ?? {}).sort(), ['at', 'kind'])
+  assert.equal(JSON.stringify(f).includes('HTTP 429'), false)
+  assert.equal(JSON.stringify(f).includes('no binary'), false)
+  // A successful poll clears the source's entry, Clear Stored Data every entry.
+  h.setNow(BASE + 45 * MIN)
+  h.answer.claude = { state: claudeState((BASE + 45 * MIN) / 1000), retryAfterSeconds: null, raw: { limits: [] } }
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  assert.equal(h.mgr.lastFailures().claude, null)
+  assert.equal(h.mgr.lastFailures().codex?.kind, 'noBinary')
+  h.mgr.clearPolled()
+  assert.deepEqual(h.mgr.lastFailures(), { claude: null, codex: null })
 })
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,9 @@
  */
 
 import { locale, t } from './i18n'
-// Type only: the attempt sentence reads two fields of a state, and this module stays free of any reader.
+// The attempt sentence reads two fields of a state and asks the one classification record of its kind
+// (1.7 P4b); types.ts holds no reader, so this module stays free of any.
+import { isTransientFailure } from './types'
 import type { QuotaState } from './types'
 
 /** IANA zone name, or the two aliases. An unusable name falls back to the system zone. */
@@ -520,6 +522,9 @@ export function refreshWords(w: AttemptWhen): string {
  * another day —, the reason the poller's words verbatim (a fixed string, at most an HTTP status, or
  * Codex's app-server error, never an exception's text), and the tail is left off when no next attempt
  * is known. `wrap` puts the reason into a code span where the sentence lands in markup (the tooltip).
+ *
+ * 1.7 P4b: null for a permanent kind (`FAILURE_TRANSIENT`) — the manager hands on transient failures
+ * only, and this, the one sentence every view prints, asks again for a state built anywhere else.
  */
 export function lastFailureText(
   q: QuotaState,
@@ -529,7 +534,7 @@ export function lastFailureText(
 ): string | null {
   const f = q.lastFailure
   if (!f || typeof f.at !== 'number' || !Number.isFinite(f.at)
-    || typeof f.problem !== 'string' || f.problem === '') return null
+    || typeof f.problem !== 'string' || f.problem === '' || !isTransientFailure(f.kind)) return null
   const head = t('Last attempt at {0} failed: {1}', clockStamp(f.at, now, tcfg), wrap(f.problem))
   const w = attemptWhen(q.nextAttemptAt, q.attemptHeld, now)
   return w === null ? head : `${head} · ${nextAttemptWords(w)}`

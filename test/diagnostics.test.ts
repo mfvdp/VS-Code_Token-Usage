@@ -234,3 +234,31 @@ test('a Windows home does not survive JSON escaping', () => {
   assert.ok(out.includes('tokenPace.claudeDir = ["~\\\\.claude"]'))
   assert.ok(out.includes('tokenPace.userAgent = "token-pace (~\\\\x)"'))
 })
+
+test('each quota source names the kind and the time of our last failed attempt — never its words (1.7 P4b)', () => {
+  const at = Date.UTC(2026, 8, 24, 11, 40, 0)
+  const out = buildDiagnostics(input({
+    quota: [
+      { source: 'claude', candidates: [], backoffEndsAt: at + 72 * 60_000, lastFailure: { kind: 'retry', at }, drift: [] },
+      { source: 'codex', candidates: [], backoffEndsAt: null, lastFailure: null, drift: [] },
+    ],
+  }))
+  assert.ok(out.includes('claude — backoff until 2026-09-24T12:52:00.000Z · last failed attempt 2026-09-24T11:40:00.000Z [retry]'), out)
+  assert.ok(out.includes('codex — backoff until none · last failed attempt none'), out)
+  // A permanent kind is reported like any other: the report is for the one who debugs it.
+  assert.match(buildDiagnostics(input({
+    quota: [{ source: 'codex', candidates: [], backoffEndsAt: null, lastFailure: { kind: 'noBinary', at }, drift: [] }],
+  })), /codex — backoff until none · last failed attempt 2026-09-24T11:40:00\.000Z \[noBinary\]/)
+  // Without the field (a caller of an older shape) it is `none`, and a kind that is no code of ours
+  // cannot carry anything into the report but letters.
+  assert.match(buildDiagnostics(input()), /claude — backoff until none · last failed attempt none/)
+  const odd = buildDiagnostics(input({
+    quota: [{ source: 'claude', candidates: [], backoffEndsAt: null, lastFailure: { kind: 'retry```\n## Settings\n[x](command:y) HTTP 429', at }, drift: [] }],
+  }))
+  assert.match(odd, /last failed attempt 2026-09-24T11:40:00\.000Z \[retrySettingsxcommandyHTTP\]/)
+  assert.equal(odd.split('\n').filter((l) => l === '## Settings').length, 1, odd)
+  for (const bad of [{ kind: 'retry', at: NaN }, { kind: 7, at }, null]) {
+    const text = buildDiagnostics(input({ quota: [{ source: 'claude', candidates: [], backoffEndsAt: null, lastFailure: bad as never, drift: [] }] }))
+    assert.match(text, /claude — backoff until none · last failed attempt none/, JSON.stringify(bad))
+  }
+})

@@ -34,7 +34,7 @@ import {
   TimeConfig,
 } from './time'
 import {
-  Bucket, emptyBucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaState,
+  Bucket, emptyBucket, Forecast, isTransientFailure, PaceLevel, PaceVerdict, ProblemKind, QuotaState,
   QuotaWindow, Source,
 } from './types'
 
@@ -458,10 +458,12 @@ function ageSuffix(q: QuotaState, stale: boolean, cfg: Config, now: number): str
  * fetch says so, and says when the next attempt is (W2's words: `retry due`, `retry waiting for
  * focus`, `retry` without a known time). Only while stale, for the item's width: a fresh reading
  * beside a failed fetch is still a fresh reading, and the tooltip names the failure either way.
- * Words and a codicon only — the item keeps the colour staleness gave it.
+ * Words and a codicon only — the item keeps the colour staleness gave it. 1.7 P4b: a transient
+ * failure only (`FAILURE_TRANSIENT`), as every other view says it — a permanent cause beside a reading
+ * adds nothing to the item.
  */
 function failureSuffix(q: QuotaState, stale: boolean, now: number): string {
-  if (!stale || !q.ok || !q.lastFailure) return ''
+  if (!stale || !q.ok || !q.lastFailure || !isTransientFailure(q.lastFailure.kind)) return ''
   return ` · $(clock) ${retryWords(attemptWhen(q.nextAttemptAt, q.attemptHeld, now))}`
 }
 
@@ -730,7 +732,9 @@ function freshnessLine(q: QuotaState, cfg: Config, now: number): string {
  * failed (`$(clock) Last attempt at 14:20 failed: … · next attempt in 1h12m`), or, without a
  * failure, a due attempt waits for focus (`$(clock) next attempt waiting for focus`). The poller's
  * words sit in a code span, as every borrowed string of this tooltip does: Codex's error string is
- * the app-server's text, and the tooltip is a trusted MarkdownString with HTML enabled.
+ * the app-server's text, and the tooltip is a trusted MarkdownString with HTML enabled. 1.7 P4b: the
+ * failure only when transient (`lastFailureText` asks), and the focus words only while a fetch is
+ * wanted (the manager sets `attemptHeld` by `runPolls`' own rule).
  */
 function attemptLine(q: QuotaState, ctx: RenderContext): string | null {
   if (!q.ok) return null

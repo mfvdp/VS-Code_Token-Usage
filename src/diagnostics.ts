@@ -38,6 +38,11 @@ export interface QuotaDiag {
   candidates: CandidateDiag[]
   /** Unix ms when the next attempt is due (backoff end), or null. */
   backoffEndsAt: number | null
+  /**
+   * 1.7 P4b: our own last failed attempt — its kind and its time (Unix ms), never its words; null or
+   * absent where the last attempt succeeded or none was made. Every kind, the permanent ones too.
+   */
+  lastFailure?: { kind: string; at: number } | null
   drift: string[]
 }
 
@@ -340,7 +345,13 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     const backoff = q.backoffEndsAt === null || !Number.isFinite(q.backoffEndsAt)
       ? 'none'
       : new Date(q.backoffEndsAt).toISOString()
-    lines.push(`${safe(q.source)} — backoff until ${backoff}`)
+    // 1.7 P4b: the kind and the time of our own last failed attempt — the kind is one of our codes,
+    // held to their alphabet anyway; the reason's words are never handed to this module.
+    const f = q.lastFailure
+    const failed = f && typeof f.at === 'number' && Number.isFinite(f.at) && typeof f.kind === 'string'
+      ? `${new Date(f.at).toISOString()} [${f.kind.replace(/[^A-Za-z]/g, '').slice(0, 32) || '?'}]`
+      : 'none'
+    lines.push(`${safe(q.source)} — backoff until ${backoff} · last failed attempt ${failed}`)
     if (q.candidates.length === 0) lines.push('  (no candidates)')
     for (const c of q.candidates) {
       const kind = c.problemKind ? ` [${safe(c.problemKind)}]` : ''

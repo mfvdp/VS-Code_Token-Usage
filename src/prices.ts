@@ -27,6 +27,14 @@ export const PRICES_AS_OF = '2026-09-06'
  */
 const LEGACY_CHECKED = '2026-08-13'
 
+/**
+ * 1.8: the day the Claude Opus 5.5 row was read from Anthropic's pricing table,
+ * platform.claude.com/docs/en/about-claude/pricing (read 2026-09-24) — the other rows keep
+ * PRICES_AS_OF. Its `from` is this check date: usage of the days before it is priced from the row and
+ * marked `approximate`, as every day before a rule's check is.
+ */
+export const OPUS_5_5_CHECKED = '2026-09-24'
+
 /** Human-readable provenance, shown in the dashboard footer and the cost tooltip. */
 export const PRICE_SOURCES = [
   `Anthropic model and pricing table — docs.claude.com (checked ${PRICES_AS_OF}, legacy rows ${LEGACY_CHECKED})`,
@@ -103,6 +111,11 @@ function openaiRule(from: string, price: ModelPrice): PriceRule {
  */
 export const PRICES: Record<string, PriceRule[]> = {
   // ---- Anthropic, current table ----
+  // Claude Opus 5.5, as platform.claude.com/docs/en/about-claude/pricing states it on 2026-09-24
+  // (OPUS_5_5_CHECKED): $4 input, $5 5-minute write, $8 1-hour write, $0.20 cache hit ("Cache hits and
+  // refreshes on Claude Opus 5.5 are priced at 0.05x the base input price"), $20 output; fast mode
+  // $8 / $40 — twice the standard rate, as for Opus 5 and 4.8.
+  'claude-opus-5-5': [anthropicRule(OPUS_5_5_CHECKED, { ...anthropic(4, 20, 0.2), fast: { input: 8, output: 40 } })],
   'claude-fable-5-1': [anthropicRule(PRICES_AS_OF, anthropic(10, 50, 0.25))],
   // Same tier and per-token price as Fable 5.1, including the 0.025x cache read the pricing
   // page states for both (confirmed 2026-09-06).
@@ -621,6 +634,28 @@ export function costOfBucket(b: Bucket, opts?: PricingOptions): CostBreakdown | 
   if (lookup.family) out.family = lookup.family
   if (lookup.approximate) out.approximate = true
   return out
+}
+
+/**
+ * 1.8 A4: the rates (USD per 1M tokens) the prompt-cache cost comparison multiplies by — the list rule
+ * of `day`, the user's overrides merged, the contract multiplier applied, standard speed (the status
+ * line's `fast_mode` is not read, and a transcript's request says nothing of the next one's speed) and
+ * no US-inference surcharge. The same `priceOf` answer every cost of the page is computed from, so
+ * `confidence` says whether the rates are the table's (`exact`), a borrowed model's (`family`) or the
+ * user's (`custom`), and `approximate` whether no rule covers `day`. Null when `priceOf` answers null,
+ * and for a rate that is not a finite number.
+ */
+export function cacheRatesOf(
+  model: string, day: string, opts?: PricingOptions,
+): { input: number; write1h: number; read: number; confidence: 'exact' | 'family' | 'custom'; approximate: boolean } | null {
+  const lookup = priceOf(model, day, opts)
+  if (!lookup) return null
+  const m = effectiveMultiplier(opts)
+  const input = lookup.price.input * m
+  const write1h = lookup.price.cacheWrite1h * m
+  const read = lookup.price.cacheRead * m
+  if (!Number.isFinite(input) || !Number.isFinite(write1h) || !Number.isFinite(read)) return null
+  return { input, write1h, read, confidence: lookup.confidence, approximate: lookup.approximate }
 }
 
 /** Size and provenance of the table, for the data-quality section. */

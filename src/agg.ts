@@ -10,9 +10,9 @@ import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { cleanRunRecord, cleanRunRecordStat } from './runRecord'
 import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
-  AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, CacheMissKind, MainRec, CodexRateLimitsSnapshot, CompactionRec,
-  Cursor, Effort, JournalAgent, LaunchStatus, PendingMessage, PermissionMode, RateLimitKind, RecordedOutcome, RejectedRequest,
-  Resolution, RunLaunch, RunRec, RunRecordStat, SessionRec, Snapshot, Source, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS,
+  AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, CacheMissKind, MainRec, CodexRateLimitsSnapshot, CodexTurn, CompactionRec,
+  Cursor, Effort, JournalAgent, LastRequest, LaunchStatus, PendingMessage, PermissionMode, RateLimitKind, RecordedOutcome, RejectedRequest,
+  Resolution, RunLaunch, RunRec, RunRecordStat, SessionRec, Snapshot, Source, StopReason, Tier, ToolStat, bucketKey, emptyBucket, READABLE_STATE_VERSIONS,
   STATE_VERSION, TOOL_IDS_PER_MESSAGE, TOOL_NAME_CAP, TOOL_NAME_MAX_CHARS, toolDayKey, toolKey,
 } from './types'
 
@@ -410,9 +410,14 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * an agent's tool errors and cache misses, the Claude Code version, the permission mode and the
  * compactions of an agent's and a main session's transcript — and the sidecar's `parentAgentId`,
  * which the replay reads the sidecar of an agent again for; 8 = Claude Code's run record of each
- * workflow run (L4), which the replay reads once for every run it keeps.
+ * workflow run (L4), which the replay reads once for every run it keeps; 9 = the newest request of a
+ * main session that read or wrote the prompt cache (1.8 A1, §0a.2) — its first line's time, the TTL
+ * class of its cache write, its size and its model, with the reply's stop reason and whether the
+ * transcript's newest message line is the user's (§0a.5) —, which the replay fills for the transcripts
+ * already read: without it a session idle at the update would get its estimate only with its next
+ * reply, and that is exactly the session the estimate is for.
  */
-export const AGENT_TABLES_REVISION = 8
+export const AGENT_TABLES_REVISION = 9
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -718,6 +723,40 @@ const COMPACT_BOUNDARY_LITERAL = '"subtype":"compact_boundary"'
  */
 const COMPACT_SUMMARY_LITERAL = '"isCompactSummary":true'
 
+/**
+ * 1.8 §0a.5 (probe P-6): a `user` line of a Claude transcript — a prompt or a tool result —, recognised
+ * on the raw line by its top-level `type`, unescaped. The line holds the user's prompt or a tool's
+ * output and is never parsed for it (only the lines the aggregator parses for other reasons are, and
+ * for them the parsed `type` decides). Inside a string the quotes are escaped, so a prompt that
+ * spells the literal out does not match; an object nested in another kind of line that carried the
+ * literal (none is known) would count it as a user line — the direction that keeps the keep-warm
+ * guard shut, never one that opens it.
+ */
+export const USER_LINE_LITERAL = '"type":"user"'
+
+/** 1.8 §0a.5: the values of a reply's `stop_reason` kept on `LastRequest.stop` — the Messages API's documented ones. */
+export const STOP_REASONS: readonly StopReason[] = ['end_turn', 'tool_use', 'max_tokens', 'stop_sequence', 'pause_turn', 'refusal']
+
+/** A `stop_reason` through its allow-list (§0a.5); any other value, `null` included, is null. */
+export function stopReasonOf(v: unknown): StopReason | null {
+  return typeof v === 'string' && (STOP_REASONS as readonly string[]).includes(v) ? v as StopReason : null
+}
+
+/**
+ * The kind of a Claude line for `LastRequest.replyPending` (§0a.5): `user` or `assistant` — a line of
+ * a message —, or null for every other line (`attachment`, `system`, `file-history-snapshot`,
+ * `last-prompt`, `ai-title`, `mode`, `permission-mode`, `progress`, `queue-operation`, …). A parsed
+ * line says it by its `type`; a line the aggregator does not parse is a user line only by the raw
+ * literal, and is never an assistant line — a reply is always parsed (it carries `usage`).
+ */
+function messageKindOf(raw: string, d: unknown): 'user' | 'assistant' | null {
+  if (d !== undefined) {
+    const type = d && typeof d === 'object' ? (d as { type?: unknown }).type : undefined
+    return type === 'user' || type === 'assistant' ? type : null
+  }
+  return raw.indexOf(USER_LINE_LITERAL) >= 0 ? 'user' : null
+}
+
 function compactTrigger(v: unknown): CompactionRec['trigger'] {
   return v === 'manual' || v === 'auto' ? v : null
 }
@@ -808,13 +847,46 @@ function restoreCacheMisses(v: unknown): Partial<Record<CacheMissKind, number>> 
 
 /**
  * What a line says beside its token figures, for the record that holds it: the effort it was
- * written at (N8, agents only), the Claude Code version that wrote it (O3) and — on a message's
- * first line, in an agent's transcript — why the cache missed (O3).
+ * written at (N8, agents only), the Claude Code version that wrote it (O3), — on a message's
+ * first line, in an agent's transcript — why the cache missed (O3), and the line's `stop_reason`
+ * as it stands (1.8 §0a.5; a main session's `lastRequest` takes it through its allow-list).
  */
 interface LineNotes {
   effort: Effort | null
   version: string | null
   miss: CacheMiss | null
+  stop?: unknown
+}
+
+/**
+ * 1.8 §0a.2 (A1 rule 2): a line of a main message onto its record's `lastRequest`. `firstAt` is the
+ * message's first line's time (`PendingMessage.firstAt`), `v` its figures so far — each the running
+ * maximum over its lines. A message is the record's newest request once any of its lines shows cache
+ * tokens (`cacheWrite > 0 || cacheRead > 0`) and its first line is no older than the request kept: its
+ * `at` is that first line's time, its TTL class `1h` when it wrote the 1-hour kind, `5m` when it wrote
+ * the 5-minute kind only, and otherwise — a message that only read — the class of the write before it
+ * (a read refreshes the entry it read); its size input + cache write + cache read + output, its model
+ * through `cleanAgentName`, its stop reason the newest one a line of it states (§0a.5). A late line of
+ * an older message changes nothing, and so does a message whose first line's time is not known — one
+ * a 1.7 snapshot left open. The line is an assistant line: nothing of the reply is pending any more.
+ */
+function noteLastRequest(rec: MainRec, firstAt: unknown, v: TokenFigures, model: unknown, stop: unknown): void {
+  if (!(v.cacheWrite > 0 || v.cacheRead > 0)) return
+  if (typeof firstAt !== 'number' || !Number.isFinite(firstAt) || firstAt <= 0) return
+  const prev = rec.lastRequest
+  if (prev !== null && firstAt < prev.at) return
+  const same = prev !== null && prev.at === firstAt
+  const context = v.input + v.cacheWrite + v.cacheRead + v.output
+  rec.lastRequest = {
+    at: firstAt,
+    ttl: v.cacheWrite1h > 0 ? '1h' : v.cacheWrite > 0 ? '5m' : prev?.ttl ?? null,
+    context: same ? Math.max(prev.context, context) : context,
+    model: cleanAgentName(model, AGENT_MODEL_MAX_CHARS) ?? (same ? prev.model : null),
+    // A line that states no stop reason yet (a streamed block) keeps the one an earlier line of the
+    // same message stated.
+    stop: stop == null && same ? prev.stop : stopReasonOf(stop),
+    replyPending: false,
+  }
 }
 
 /**
@@ -1096,7 +1168,44 @@ function restoreMain(v: unknown): MainRec | null {
     cacheRead: num(r.cacheRead), output: num(r.output), reasoning: num(r.reasoning),
     requests: num(r.requests), outputFinal: num(r.outputFinal), toolCalls: num(r.toolCalls),
     ...restoreWriterFields(r),
+    lastRequest: restoreLastRequest(r.lastRequest),
   }
+}
+
+/**
+ * 1.8 §0a.2: a main session's newest cache-touching request, restored by shape — `at` finite and above
+ * 0, `ttl` one of '5m', '1h' or null, `context` a finite count of at least 0, `replyPending` a boolean;
+ * anything else restores no request at all (a 1.7 snapshot has none either). The model and the stop
+ * reason go through the rules they are taken by at ingest: a model outside `cleanAgentName` and a
+ * `stop_reason` outside its allow-list are null.
+ */
+function restoreLastRequest(v: unknown): LastRequest | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const at = r.at
+  if (typeof at !== 'number' || !Number.isFinite(at) || at <= 0) return null
+  const ttl = r.ttl
+  if (ttl !== '5m' && ttl !== '1h' && ttl !== null) return null
+  const context = r.context
+  if (typeof context !== 'number' || !Number.isFinite(context) || context < 0) return null
+  if (typeof r.replyPending !== 'boolean') return null
+  return {
+    at,
+    ttl,
+    context,
+    model: cleanAgentName(r.model, AGENT_MODEL_MAX_CHARS),
+    stop: stopReasonOf(r.stop),
+    replyPending: r.replyPending,
+  }
+}
+
+/** 1.8 §0a.3: the newest Codex turn, restored by shape — `at` finite and above 0, a model of the §0 alphabet — or none. */
+function restoreCodexTurn(v: unknown): CodexTurn | null {
+  if (!v || typeof v !== 'object') return null
+  const r = v as Record<string, unknown>
+  const at = r.at
+  const model = cleanAgentName(r.model, AGENT_MODEL_MAX_CHARS)
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 && model !== null ? { at, model } : null
 }
 
 function count(v: unknown): number {
@@ -1241,6 +1350,8 @@ export class Aggregator {
   private rollupState = { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }
   /** Which revision of the agent tables the replay last built (AGENT_TABLES_REVISION); persisted. */
   private agentsRevisionValue = 0
+  /** 1.8 §0a.3: the newest counted turn of a non-forked Codex rollout; persisted (`Snapshot.codexLast`). */
+  private codexLastValue: CodexTurn | null = null
   /** 1.6 L5: what was written since `takeChanges` was last asked. Not persisted. */
   private changes: IngestChanges = { buckets: false, agents: false }
   /** dayOfHour goes through Intl and is hit for every bucket on every query — memoised. */
@@ -1492,8 +1603,9 @@ export class Aggregator {
     // A compaction's line is recognised on the raw line too, and then parsed (§0a.10); the line
     // holding a compaction's summary never is, whatever it mentions.
     const compaction = raw.indexOf(COMPACT_BOUNDARY_LITERAL) >= 0
+    // `undefined` while the line is not parsed; null for one that does not parse.
+    let d: any
     if (raw.indexOf(COMPACT_SUMMARY_LITERAL) < 0 && (compaction || worthParsing(raw))) {
-      let d: any
       try { d = JSON.parse(raw) } catch { d = null }
       if (d && typeof d === 'object') {
         const noted = d.type === 'assistant' ? this.claudeResponse(d, ctx)
@@ -1504,11 +1616,30 @@ export class Aggregator {
         changed = noted || changed
       }
     }
+    // 1.8 §0a.5: whether the main transcript's newest message line is the user's.
+    if (!ctx.isSub) changed = this.noteMessageKind(ctx.file, messageKindOf(raw, d)) || changed
     // 1.6 L5: a Claude line that changed anything reached an agent table — the record of the
     // transcript it is in (an agent's, or the main session's the tree roots on), a launch, a run's
     // launch or an outcome. Its buckets, where it has any, mark themselves (`bucketFor`).
     if (changed) this.changes.agents = true
     return changed
+  }
+
+  /**
+   * 1.8 §0a.5 (probe P-6): the kind of a main transcript's newest message line onto its record's
+   * `lastRequest` — a user line (a prompt or a tool result) sets `replyPending`, an assistant line (any
+   * reply, an error line and a placeholder included) clears it; every other line leaves it. Lines are
+   * taken in the order the file holds them, so the flag is the newest line's. A record without a
+   * request that touched the cache has no flag to set. True when the flag changed.
+   */
+  private noteMessageKind(file: string, kind: 'user' | 'assistant' | null): boolean {
+    if (kind === null) return false
+    const last = this.mainMap.get(file)?.lastRequest
+    if (!last) return false
+    const pending = kind === 'user'
+    if (last.replyPending === pending) return false
+    last.replyPending = pending
+    return true
   }
 
   /**
@@ -1681,6 +1812,9 @@ export class Aggregator {
 
       // 1.6 O3 (§0a.7): why the cache missed, on a message's first line only — its later lines repeat it.
       if (isSub) notes.miss = cacheMissOf(m)
+      // 1.8 §0a.2: a main message remembers when its first line came — the request's time.
+      else if (at !== null) p.firstAt = at
+      notes.stop = m.stop_reason
       if (at !== null) this.creditMessage(p, cand, final, tools, at, m.model, notes, ctx)
       pending.set(id, p)
       this.trimPending(pending)
@@ -1743,7 +1877,8 @@ export class Aggregator {
       this.noteSessionHour(s, prev.hour, delta.input + delta.cacheWrite + delta.output)
     }
 
-    this.creditGrowth(prev, delta, newlyFinal, tools, at, m.model, next.input + next.cacheWrite + next.cacheRead, notes, ctx)
+    notes.stop = m.stop_reason
+    this.creditGrowth(prev, delta, next, newlyFinal, tools, at, m.model, notes, ctx)
 
     prev.input = next.input
     prev.cacheWrite = next.cacheWrite
@@ -1793,20 +1928,24 @@ export class Aggregator {
     clearRejected(rec, at)
     noteLastTool(rec, tools.last, at)
     if (ctx.isSub) p.agent = ownerKey(ctx.file)
-    else p.main = ownerKey(ctx.file)
+    else {
+      p.main = ownerKey(ctx.file)
+      noteLastRequest(rec as MainRec, p.firstAt, v, model, notes.stop)
+    }
   }
 
   /**
    * A later line of a known message: its growth onto the record that holds the message. An
    * open message from before the agent tables (a version 6 snapshot) names no record; its next
    * line links it to this file and credits the growth from there on — the part before is the
-   * replay's to rebuild, and crediting it here as well would count it twice. `context` is the
-   * message's context with this line (1.6 L2): input, cache write and cache read, each the running
-   * maximum over its lines.
+   * replay's to rebuild, and crediting it here as well would count it twice. `totals` are the
+   * message's figures with this line, each the running maximum over its lines: its input, cache
+   * write and cache read are the context an agent's record keeps (1.6 L2), and all of them with its
+   * output the size a main session's `lastRequest` keeps (1.8 §0a.2).
    */
   private creditGrowth(
-    p: PendingMessage, v: TokenFigures, newlyFinal: boolean, tools: ToolCalls, at: number | null,
-    model: unknown, context: number, notes: LineNotes, ctx: IngestContext,
+    p: PendingMessage, v: TokenFigures, totals: TokenFigures, newlyFinal: boolean, tools: ToolCalls, at: number | null,
+    model: unknown, notes: LineNotes, ctx: IngestContext,
   ): void {
     const key = ownerKey(ctx.file)
     const owner = ctx.isSub ? p.agent : p.main
@@ -1825,7 +1964,7 @@ export class Aggregator {
       else p.main = key
     }
     if (at !== null) {
-      noteNewest(rec, at, context, notes.effort)
+      noteNewest(rec, at, totals.input + totals.cacheWrite + totals.cacheRead, notes.effort)
       noteVersion(rec, at, notes.version)
     }
     creditTokens(rec, v)
@@ -1836,6 +1975,7 @@ export class Aggregator {
       clearRejected(rec, at)
       noteLastTool(rec, tools.last, at)
     }
+    if (!ctx.isSub) noteLastRequest(rec as MainRec, p.firstAt, totals, model, notes.stop)
   }
 
   /**
@@ -1964,6 +2104,8 @@ export class Aggregator {
         permissionMode: this.takePendingMode(file),
         compactions: 0,
         lastCompaction: null,
+        // 1.8 §0a.2: set by the first line that touches the cache — this one or a later one.
+        lastRequest: null,
       }
       this.mainMap.set(file, rec)
     }
@@ -2667,6 +2809,8 @@ export class Aggregator {
     b.outputFinal += 1 // Codex reports final values, not a streaming snapshot
     cur.lastTs = at
     this.noteIngest(at)
+    // 1.8 §0a.3: a turn of the rollout's own — never one of a fork or a subagent's thread.
+    if (!isSub) this.noteCodexTurn(ts, cur.model)
 
     if (ctx.attribution !== 'none') {
       const s = this.sessionFor(ctx.file, ctx, () => this.newSession(
@@ -2705,6 +2849,25 @@ export class Aggregator {
     this.addTool('codex', localDay(at), cur.model || 'unknown', name, 1)
   }
 
+  /**
+   * 1.8 §0a.3: a counted turn of a non-forked rollout onto `codexLast` — the event's own time (a
+   * line without one is not the newest of anything) and the model `turn_context` named, held to the §0
+   * alphabet, at most 64 characters: a turn without a model that fits keeps nothing. The newest turn
+   * wins, whichever rollout is read first.
+   */
+  private noteCodexTurn(at: number, model: unknown): void {
+    if (!Number.isFinite(at) || at <= 0) return
+    const id = cleanAgentName(model, AGENT_MODEL_MAX_CHARS)
+    if (id === null) return
+    if (this.codexLastValue !== null && at < this.codexLastValue.at) return
+    this.codexLastValue = { at, model: id }
+  }
+
+  /** 1.8 A6 (§0a.3): the newest counted Codex turn of a non-forked rollout — its time and model — or null. */
+  codexLastTurn(): CodexTurn | null {
+    return this.codexLastValue === null ? null : { ...this.codexLastValue }
+  }
+
   /** Newest rate-limit reading per limit id across every rollout — the network-free Codex quota. */
   codexRateLimits(): CodexRateLimitsSnapshot[] {
     const best = new Map<string, CodexRateLimitsSnapshot>()
@@ -2737,6 +2900,7 @@ export class Aggregator {
       runs: Object.fromEntries(this.runMap),
       runLaunches: Object.fromEntries(this.runLaunchMap),
       agentsRevision: this.agentsRevisionValue,
+      codexLast: this.codexLastValue,
     }
   }
 
@@ -2803,6 +2967,8 @@ export class Aggregator {
       }
     }
     a.firstIngest = typeof s.firstIngest === 'number' && Number.isFinite(s.firstIngest) ? s.firstIngest : null
+    // 1.8 §0a.3: absent before 1.8, and restored by shape.
+    a.codexLastValue = restoreCodexTurn(s.codexLast)
     // The agent tables came with version 7, the runs with 8. They do not depend on
     // `attribution`: the tree's roots are kept whatever the session table is set to.
     if (s.version >= 7) {

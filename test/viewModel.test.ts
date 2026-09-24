@@ -956,7 +956,7 @@ function withAgents(attribution: 'none' | 'project' = 'project'): { agg: Aggrega
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null,
   }
   const agent: AgentRec = {
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
@@ -1127,7 +1127,7 @@ test('a session without agents is keyed by its id, never by the transcript path 
   agg.mains = () => [{
     source: 'claude', sessionId: 's1', firstTs: NOW - 3_600_000, lastTs: NOW - 30 * 60_000, models: [],
     input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 0,
-    outputFinal: 0, toolCalls: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+    outputFinal: 0, toolCalls: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null,
   }]
   // 1.7 F2 (pinned and changed): half an hour quiet, the session is an earlier one — inside the
   // group of earlier sessions, which the reader opens to see it.

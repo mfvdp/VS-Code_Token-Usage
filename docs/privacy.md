@@ -99,7 +99,27 @@ identifiers and counts, never content:
   compaction's summary — it is not parsed at all —, never the compaction's `preservedSegment`, its
   `preservedMessages` or its `preCompactDiscoveredTools`. Each value is held to the values Claude
   Code writes, and the records keep counts, the last version and mode, and the last compaction
-  with its time; the exports carry of them only the count of an agent's tool errors.
+  with its time; the exports carry of them only the count of an agent's tool errors;
+* for the [prompt-cache estimate](prompt-cache.md#how-the-estimate-is-made) (1.8), of a main
+  session's newest reply that used the prompt cache its time, the kind of cache it wrote (5 minutes
+  or 1 hour), its size in tokens and its model — from what the token count reads of every reply
+  anyway: `usage.input_tokens`, `usage.cache_creation_input_tokens`,
+  `usage.cache_creation.ephemeral_1h_input_tokens`, `usage.cache_read_input_tokens`,
+  `usage.output_tokens`, `message.model` (held to the alphabet the agent tables use, at most 64
+  characters) and the line's `timestamp` —, and with it that reply's `stop_reason`, kept only as one
+  of `end_turn`, `tool_use`, `max_tokens`, `stop_sequence`, `pause_turn` and `refusal` (any other
+  value as none), and whether the transcript's newest message line is a `user` line — a prompt or a
+  tool result, told by the line's top-level `type`: on a line the count does not parse, by the
+  unescaped literal `"type":"user"` on the raw line, which is never parsed for it; never the prompt,
+  the tool result or anything else of the line, and bookkeeping lines (attachments, system lines,
+  file-history snapshots, titles, modes) do not count. Nothing of an agent's transcript is kept for it.
+  The main session's record keeps these seven days in the token snapshot; none of the exports, the
+  diagnostics report or the log carries them;
+* for the Codex prompt-cache line (1.8), of the Codex rollouts one value for the machine: the time and
+  model of the newest turn — the `timestamp` of the newest counted `token_count` event of a rollout
+  that is not a fork, and the `model` its `turn_context` named, held to letters, digits and `_.:@/-`,
+  at most 64 characters. Both were read before for the token count; the value is kept in the token
+  snapshot and never exported.
 
 **The status-line mirror** ([Quota sources](quota-sources.md#claude-status-line-bridge-opt-in),
 [Prompt cache](prompt-cache.md#what-is-read)) is written only while you have the opt-in
@@ -217,7 +237,10 @@ the diagnostics report, the hook's mirror line. The status-line mirror has one t
 with synthetic text under `session_name`, `cwd`, `transcript_path`, `workspace`, `pr`, `worktree`,
 `agent`, `prompt_id`, `version` and the miss causes reaches neither the mirror, the view model, the
 page, the markdown report, the Quick Pick, a status-bar tooltip, the log, the diagnostics report nor
-an export, and of its session id at most the first eight characters. Before the 1.6.0 release a
+an export, and of its session id at most the first eight characters. So does the prompt-cache
+request (1.8): a main transcript whose prompt, reply, tool input and tool result carry synthetic
+text, with a model id of 300 characters, leaves none of that text and no such model in the session's
+record or the snapshot. Before the 1.6.0 release a
 review ran one more:
 a synthetic world with prompts, descriptions, results, summaries, scripts, error texts and account
 ids under every neighbouring key reaches none of the outputs.

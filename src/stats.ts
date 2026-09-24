@@ -1538,7 +1538,9 @@ function priceTextFor(model: string, day: string, ctx: StatsCtx): { priced: Mode
   if (p.confidence === 'family') {
     return { priced: 'family', text: t('{0}, borrowed from {1}', rates, p.family ?? t('a related model')) }
   }
-  return { priced: 'exact', text: t('{0}, list as of {1}', rates, PRICES_AS_OF) }
+  // 1.8 P5: a row read after the table's check (Claude Opus 5.5, OPUS_5_5_CHECKED) names its own day.
+  const asOf = p.rule && p.rule.from > PRICES_AS_OF ? p.rule.from : PRICES_AS_OF
+  return { priced: 'exact', text: t('{0}, list as of {1}', rates, asOf) }
 }
 
 /**

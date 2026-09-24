@@ -13,26 +13,36 @@ because the rates differ by a factor of 50.
 **On a subscription you do not pay these amounts.** The figure has no billing relationship;
 it only answers “what would this have been through the API”. Every such number carries a `~`.
 
-**Prices as of 2 September 2026**, sourced from [docs.claude.com](https://docs.claude.com) and
+**Prices as of 6 September 2026**, sourced from [docs.claude.com](https://docs.claude.com) and
 [developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing); the
 legacy Anthropic rows (Claude 4.x and 3.x) come from an earlier check of the same table on
-13 August 2026. Every rule carries the day it was read, so a rate never applies retroactively
+13 August 2026, and the **Claude Opus 5.5** row from a check of Anthropic's pricing page on
+**24 September 2026**. Every rule carries the day it was read, so a rate never applies retroactively
 without saying so: a bucket from a day no rule covers is priced from the nearest known rule and
 marked `approximate`.
 
+**Claude Opus 5.5** (1.8): $4 per million input tokens, $5 for a 5-minute cache write, $8 for a
+1-hour cache write, $0.20 for a cache hit and $20 for output; fast mode $8 in and $40 out. Until 1.8
+the table had no row for it, so its usage was reported as unpriced — left out of the total, the model
+named. Since 1.8 it is priced everywhere the page shows a cost, and its usage from the days before
+24 September 2026 is priced from this row and marked `approximate`. It also changes the
+family fallback (*Unknown models*, below): an Opus model the table does not know now borrows
+Opus 5.5's rates, the newest priced Opus.
+
 * **Anthropic cache rates** are fixed multiples of the input rate — 5-minute write 1.25×,
   1-hour write 2×, read 0.1× — and the two write TTLs are counted separately. The read multiple
-  is overridden where it is not universal: Fable 5.1 reads cache at a flat $0.25/MTok, and
-  deriving it from the multiple would overstate cache-heavy usage fourfold. Mythos 5.1's
-  cache-read rate was not confirmed at launch and uses the standard multiple until it is.
+  is overridden where it is not universal: Fable 5.1 and Mythos 5.1 read cache at a flat
+  $0.25/MTok (0.025×), and deriving it from the multiple would overstate cache-heavy usage
+  fourfold; Opus 5.5 reads it at $0.20/MTok (0.05×).
 * **OpenAI**: the cached-read rate is stated separately, cache writes are not charged, and
   `input_tokens` already includes the cached tokens — counting both would pay for them twice.
 * **Fast mode** is priced only where the table actually publishes fast rates. Today that is
-  Claude **Opus 4.6** alone (6× the standard rate; its cache rates are scaled by the same
-  factor, which is stated rather than applied silently). Fast-mode usage of any other model is
-  reported as **unpriced** with the reason *fast rate unknown* and left out of the total — the
-  tokens are known, only their price is not. Billing it at the standard rate would understate
-  fast turns by a factor of two to six.
+  Claude **Opus 5.5** ($8 / $40), **Opus 5** and **Opus 4.8** ($10 / $50) — twice their standard
+  rates; their cache rates are scaled by the same factor, which is stated rather than applied
+  silently — and GPT-6 Astra; Opus 4.6 accepts fast requests but runs and bills them at its
+  standard rates. Fast-mode usage of any other model is reported as **unpriced** with the reason
+  *fast rate unknown* and left out of the total — the tokens are known, only their price is not.
+  Billing it at the standard rate would understate fast turns by a factor of two or more.
 * **US-only inference** (`usage.inference_geo === "us"`) carries a **1.1×** surcharge, applied to
   the token cost of those buckets.
 * **Web search** is billed per call, not per token: **$10 per 1,000 searches** (Anthropic). Web
@@ -48,7 +58,7 @@ column, in the manner of the `amount` / `list_amount` pair of the provider analy
 
 **Unknown models.** `tokenPace.unknownModelPricing: strict` (default) reports a lower bound and
 names the models rather than inventing a number. `family` opts in to borrowing the newest priced
-model of the same family (`claude-opus-4-9` → `claude-opus-5`, `gpt-5.7-mini` → `gpt-5.4-mini`),
+model of the same family (`claude-opus-4-9` → `claude-opus-5-5`, `gpt-5.7-mini` → `gpt-5.4-mini`),
 and every figure so derived is marked as a family fallback in the tooltip, the dashboard
 footnotes, the markdown summary and the export.
 

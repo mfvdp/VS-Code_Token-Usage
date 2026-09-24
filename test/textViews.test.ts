@@ -1068,7 +1068,7 @@ function agentVm(select = false, over: Record<string, unknown> = {}): { vm: View
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null,
   }
   const agent: AgentRec = {
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
@@ -1185,7 +1185,7 @@ test('an agent that ended on a rejected request: its sentence and its Last reque
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null,
   }
   const agent: AgentRec = {
     source: 'claude', agentId: 'a94f0001', sessionId: 'sess-alpha', sessionFile, workflowId: null,
@@ -1289,7 +1289,7 @@ test('an agent of a session the tree does not list is on its running line alone,
     source: 'claude', sessionId: `${String(i).padStart(8, '0')}-s`, firstTs: NOW - 3_600_000,
     lastTs: NOW - (i + 1) * 10_000, models: ['claude-opus-4-6'], input: 10, cacheWrite: 0, cacheWrite1h: 0,
     cacheRead: 0, output: 5, reasoning: 0, requests: 1, outputFinal: 1, toolCalls: 0,
-    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null,
   }))
   const oldest = mains[MAX_ROOTS].sessionId
   const agent: AgentRec = {
@@ -1378,7 +1378,7 @@ test('the markdown prints every node of its tree, fifty children a node, and say
   }
   const main: MainRec = {
     source: 'claude', sessionId: 'sess-alpha', firstTs: NOW - 3 * 3_600_000, lastTs: NOW - 45 * 60_000,
-    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+    models: ['claude-opus-4-6'], ...counts, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null,
   }
   const agents: AgentRec[] = Array.from({ length: 1234 }, (_, i) => ({
     source: 'claude', agentId: `a${i.toString(16).padStart(16, '0')}`, sessionId: 'sess-alpha', sessionFile, workflowId: null,
@@ -2010,7 +2010,7 @@ function earlierAgg(active: number, idle: number): Aggregator {
     const sessionId = `${i < active ? 'act' : 'idl'}${String(i).padStart(5, '0')}-s`
     const lastTs = i < active ? NOW - (i + 1) * 60_000 : NOW - (60 + 30 * (i - active)) * 60_000
     mains.push({ source: 'claude', sessionId, firstTs: lastTs - 3_600_000, lastTs, models: ['claude-opus-4-6'], ...counts,
-      ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null })
+      ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null })
     const id = `${String(i).padStart(4, '0')}aaaa`
     agents.push(i < active ? agentOf(id, sessionId, NOW - 30_000)
       : agentOf(id, sessionId, lastTs - 5 * 60_000, { outcome: 'completed', outcomeTs: lastTs - 5 * 60_000, outcomeStatus: 'completed' }))

@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import * as path from 'path'
 import { Aggregator, parseCodexRateLimits } from '../src/agg'
 import { hourIndex } from '../src/time'
-import { Cursor } from '../src/types'
+import { Cursor, Snapshot } from '../src/types'
 import {
   CODEX_FILE, CODEX_ROOT, camelRateLimits, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, ctxFor,
   snakeRateLimits,
@@ -318,4 +318,111 @@ test('malformed and irrelevant lines return false without touching the cursor st
   assert.equal(agg.addCodexLine('{"type":"response_item","payload":{"type":"message"}}', cur, CTX), false)
   assert.equal(cur.lastTotal, undefined)
   assert.equal(agg.all().length, 0)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 §0a.3 (A6): the newest counted turn of a non-forked rollout, for the Codex prompt-cache line
+// ---------------------------------------------------------------------------
+
+const CODEX_B = path.join(path.dirname(CODEX_FILE), 'rollout-2026-03-10T10-00-00-thread-0009.jsonl')
+
+test('codexLastTurn: the newest counted turn of a rollout of its own — its event\'s time and the turn\'s model (1.8 §0a.3)', () => {
+  const agg = new Aggregator()
+  assert.equal(agg.codexLastTurn(), null, 'no turn, no value')
+  feed(agg, cursor(), [
+    codexMeta({ ts: T0 }),
+    codexTurnContext(T0, 'gpt-5.6-sol'),
+    codexTaskStarted(T0 + 10),
+    codexTokenCount({ ts: T0 + 60_000, total: { input: 800, cached: 600, output: 40, total: 840 } }),
+  ])
+  assert.deepEqual(agg.codexLastTurn(), { at: T0 + 60_000, model: 'gpt-5.6-sol' })
+  // A later turn moves it; a repeated total is no counted turn, and moves nothing.
+  const cur = cursor()
+  feed(agg, cur, [
+    codexMeta({ ts: T0, id: 'thread-0001' }),
+    codexTurnContext(T0, 'gpt-5.6-sol'),
+    codexTokenCount({ ts: T0 + 70_000, total: { input: 800, output: 40, total: 840 } }),
+    codexTokenCount({ ts: T0 + 90_000, total: { input: 800, output: 40, total: 840 } }),
+  ])
+  assert.deepEqual(agg.codexLastTurn(), { at: T0 + 70_000, model: 'gpt-5.6-sol' }, 'the duplicate at +90 s counted as a turn')
+  // The newest turn wins, whichever rollout is read first; a model change is the turn's own.
+  const older = cursor()
+  feed(agg, older, [
+    codexMeta({ ts: T0 - 3_600_000, id: 'thread-0009' }),
+    codexTurnContext(T0 - 3_600_000, 'gpt-6-astra'),
+    codexTokenCount({ ts: T0 - 3_000_000, total: { input: 10, output: 1, total: 11 } }),
+  ], ctxFor({ file: CODEX_B }))
+  assert.deepEqual(agg.codexLastTurn(), { at: T0 + 70_000, model: 'gpt-5.6-sol' }, 'an older rollout read later replaced the newest turn')
+  feed(agg, older, [codexTurnContext(T0 + 100_000, 'gpt-6-astra'), codexTokenCount({ ts: T0 + 120_000, total: { input: 20, output: 2, total: 22 } })], ctxFor({ file: CODEX_B }))
+  assert.deepEqual(agg.codexLastTurn(), { at: T0 + 120_000, model: 'gpt-6-astra' })
+  // What it hands out is a copy.
+  agg.codexLastTurn()!.model = 'changed'
+  assert.equal(agg.codexLastTurn()?.model, 'gpt-6-astra')
+})
+
+test('codexLastTurn: a forked rollout\'s turns, its replayed prefix and a subagent\'s thread never move it (1.8 §0a.3)', () => {
+  const agg = new Aggregator()
+  feed(agg, cursor(), [
+    codexMeta({ ts: T0 }), codexTurnContext(T0, 'gpt-5.6-luna'), codexTaskStarted(T0 + 1),
+    codexTokenCount({ ts: T0 + 1000, total: { input: 50, output: 5, total: 55 } }),
+  ])
+  const own = agg.codexLastTurn()
+  assert.deepEqual(own, { at: T0 + 1000, model: 'gpt-5.6-luna' })
+  // A fork: its copied history (the prefix, re-stamped at the fork) and its own turns after the marker.
+  const n = feed(agg, cursor(), [
+    codexMeta({ ts: T0 + 600_000, id: 'thread-0002', forkedFrom: 'thread-0001' }),
+    codexTurnContext(T0 + 600_000, 'gpt-5.6-sol'),
+    codexTokenCount({ ts: T0 + 600_100, total: { input: 3000, output: 1000, total: 4000 } }),
+    codexTaskStarted(T0 + 600_800),
+    codexTokenCount({ ts: T0 + 690_000, total: { input: 3200, output: 1100, total: 4300 }, last: { input: 200, output: 100, total: 300 } }),
+  ], ctxFor({ file: CODEX_B }))
+  assert.equal(n, 1, 'the fork\'s own turn is counted')
+  assert.deepEqual(agg.codexLastTurn(), own, 'a forked rollout moved the newest turn')
+  // A subagent's thread is a fork as well.
+  feed(agg, cursor(), [
+    codexMeta({ ts: T0 + 700_000, id: 'thread-0003', threadSource: 'subagent' }), codexTurnContext(T0 + 700_000, 'gpt-5.6-sol'),
+    codexTaskStarted(T0 + 700_050), codexTokenCount({ ts: T0 + 700_900, total: { input: 120, output: 30, total: 150 } }),
+  ], ctxFor({ file: CODEX_B.replace('0009', '0010') }))
+  assert.deepEqual(agg.codexLastTurn(), own, 'a subagent\'s thread moved the newest turn')
+})
+
+test('codexLastTurn: a turn without its own time or without a model of the alphabet keeps nothing; the value survives a snapshot, checked again (1.8 §0a.3)', () => {
+  const agg = new Aggregator()
+  // No turn_context yet: the bucket says 'unknown', the newest turn keeps nothing.
+  feed(agg, cursor(), [codexMeta({ ts: T0 }), codexTokenCount({ ts: T0 + 1000, total: { input: 5, output: 1, total: 6 } })])
+  assert.equal(agg.all()[0].model, 'unknown')
+  assert.equal(agg.codexLastTurn(), null)
+  for (const model of ['gpt 5.6', 'g'.repeat(65), 'gpt-5.6<b>']) {
+    const a = new Aggregator()
+    feed(a, cursor(), [codexMeta({ ts: T0 }), codexTurnContext(T0, model), codexTokenCount({ ts: T0 + 1000, total: { input: 5, output: 1, total: 6 } })])
+    assert.equal(a.all()[0].requests, 1, 'the turn is counted')
+    assert.equal(a.codexLastTurn(), null, `a model ${JSON.stringify(model)} was kept`)
+  }
+  // A token_count without a timestamp is counted (at the time it is read, as always) but is the newest of nothing.
+  const timeless = new Aggregator()
+  const raw = JSON.parse(codexTokenCount({ ts: T0 + 1000, total: { input: 5, output: 1, total: 6 } })) as Record<string, unknown>
+  delete raw.timestamp
+  feed(timeless, cursor(), [codexMeta({ ts: T0 }), codexTurnContext(T0, 'gpt-5.6-sol'), JSON.stringify(raw)])
+  assert.equal(timeless.all()[0].requests, 1)
+  assert.equal(timeless.codexLastTurn(), null)
+
+  const live = new Aggregator()
+  feed(live, cursor(), [codexMeta({ ts: T0 }), codexTurnContext(T0, 'gpt-5.6-sol'), codexTokenCount({ ts: T0 + 1000, total: { input: 5, output: 1, total: 6 } })])
+  const snap = JSON.parse(JSON.stringify(live.toSnapshot())) as Snapshot
+  assert.deepEqual(snap.codexLast, { at: T0 + 1000, model: 'gpt-5.6-sol' })
+  assert.deepEqual(Aggregator.fromSnapshot(snap).codexLastTurn(), { at: T0 + 1000, model: 'gpt-5.6-sol' })
+  // A snapshot is a file anyone can edit: restored by shape, or not at all.
+  for (const bad of [
+    { at: T0, model: 'gpt 5.6' }, { at: T0, model: 'g'.repeat(65) }, { at: T0, model: 42 }, { at: 0, model: 'gpt-5.6-sol' },
+    { at: String(T0), model: 'gpt-5.6-sol' }, { model: 'gpt-5.6-sol' }, 'gpt-5.6-sol', null,
+  ]) {
+    assert.equal(Aggregator.fromSnapshot({ ...snap, codexLast: bad as Snapshot['codexLast'] }).codexLastTurn(), null, JSON.stringify(bad))
+  }
+  // A snapshot written before 1.8 has none.
+  const old = { ...snap }
+  delete old.codexLast
+  assert.equal(Aggregator.fromSnapshot(old).codexLastTurn(), null)
+  // A 64-character model is still one.
+  const long = 'g'.repeat(64)
+  assert.equal(Aggregator.fromSnapshot({ ...snap, codexLast: { at: T0, model: long } }).codexLastTurn()?.model, long)
 })

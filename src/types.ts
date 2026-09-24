@@ -103,6 +103,13 @@ export interface PendingMessage {
    * of a line stays a no-op. Ids only — a block's input is never read.
    */
   toolIds?: string[]
+  /**
+   * 1.8 §0a.2: the time (ms) of the message's first line — so that a later line of the newest
+   * message grows its `lastRequest.context`, and a late line of an older message changes nothing.
+   * Set for a main transcript's messages only. Absent in a 1.7 snapshot: such a message never grows
+   * a `lastRequest`.
+   */
+  firstAt?: number
 }
 
 /** At most this many `toolIds` per message; beyond it the plain max-per-name rule decides. */
@@ -418,6 +425,45 @@ export interface AgentLaunch {
   totals: { tokens: number; durationMs: number; toolUses: number } | null
 }
 
+/**
+ * 1.8 §0a.5: the values of a reply's `stop_reason` that are kept — the Messages API's documented
+ * ones. Any other value is kept as null, which the keep-warm guard reads as "not idle".
+ */
+export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'pause_turn' | 'refusal'
+
+/**
+ * 1.8 §0a.2: the newest counted request of a main conversation that read or wrote the prompt cache
+ * — kept per main session from fields `claudeResponse` already reads (the usage counts, the model,
+ * the line's time), for the prompt-cache estimate. Never a field of content.
+ */
+export interface LastRequest {
+  /** The time (ms) of the first line of that message — the earliest moment the transcript knows of the request. */
+  at: number
+  /**
+   * The TTL class of the newest cache write: '1h' when that message wrote `ephemeral_1h_input_tokens`, '5m' when it wrote
+   * cache tokens of the 5-minute kind only; a message that only read keeps the class of the write before it. Null before a write.
+   */
+  ttl: '5m' | '1h' | null
+  /** input + cacheWrite + cacheRead + output of that message, the running maximum over its lines (≈ the next request's prefix). */
+  context: number
+  /** Its model id through `cleanAgentName`, or null. */
+  model: string | null
+  /**
+   * 1.8 §0a.5 (for the keep-warm guards): that reply's `stop_reason` through its allow-list — the value of
+   * the message's newest line that states one; null while none does, and for a value outside the list.
+   */
+  stop: StopReason | null
+  /**
+   * 1.8 §0a.5, second fact (probe P-6): true when the transcript's newest message line — the newest line
+   * whose `type` is `user` or `assistant`; every other line (`attachment`, `system`, `file-history-snapshot`,
+   * `last-prompt`, `ai-title`, `mode`, `permission-mode`, …) does not count — is a `user` line: a prompt or a
+   * tool result. Claude Code writes a reply that calls a tool only when the tool completes, so while a
+   * permission dialog or a question stands open the newest line is the user's. Only the line's top-level
+   * `type` decides — a user line is recognised on the raw line and never parsed for it.
+   */
+  replyPending: boolean
+}
+
 /** A main Claude session kept for the tree root regardless of `tokenPace.attribution`. Keyed by path. */
 export interface MainRec {
   source: 'claude'
@@ -440,6 +486,17 @@ export interface MainRec {
   /** 1.6 O3 (§0a.10): how many times the transcript was compacted, and the last compaction. */
   compactions: number
   lastCompaction: CompactionRec | null
+  /**
+   * 1.8 §0a.2: the newest request that touched the prompt cache; null until one did (and after a restore
+   * that fails its allow-lists).
+   */
+  lastRequest: LastRequest | null
+}
+
+/** 1.8 §0a.3: the newest counted turn of a non-forked Codex rollout — its time and its model. */
+export interface CodexTurn {
+  at: number
+  model: string
 }
 
 /**
@@ -589,6 +646,11 @@ export interface Snapshot {
    * are no longer written; a version 7 snapshot is read forward without them.
    */
   agentsRevision?: number
+  /**
+   * 1.8 §0a.3: the newest counted turn of a non-forked Codex rollout, for the Codex prompt-cache line.
+   * Absent before 1.8 (and read as none); additive, so `STATE_VERSION` stays 8.
+   */
+  codexLast?: CodexTurn | null
 }
 
 export const STATE_VERSION = 8

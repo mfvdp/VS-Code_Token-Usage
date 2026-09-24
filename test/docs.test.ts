@@ -22,13 +22,14 @@ import {
 } from '../src/agentTree'
 import {
   AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, AGENT_TABLES_REVISION, JOURNAL_PARSE_MAX, outcomeOfStatus, PENDING_MODE_MAX,
+  STOP_REASONS, USER_LINE_LITERAL,
 } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
 import { AGENTS_CSV_COLUMNS, EXPORT_SCHEMA_VERSION } from '../src/exporter'
 import { PaceConfig, paceVerdict } from '../src/pace'
-import { priceOf } from '../src/prices'
+import { OPUS_5_5_CHECKED, PRICES, PRICES_AS_OF, priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
 import { RUN_RECORD_CHUNK_BYTES, RUN_RECORD_MAX_BYTES, RUN_RECORD_SCALAR_MAX } from '../src/runRecord'
 import { AGENT_META_MAX_BYTES } from '../src/scan'
@@ -1872,8 +1873,10 @@ test('the snapshot version and the agent tables\' revision are stated on the pag
   const entry = log.slice(first, second)
   assert.match(entry, /^\n## 1\.6\.0 — \d{4}-\d{2}-\d{2}\n/, 'the 1.6.0 heading lost its date')
   const flat = entry.replace(/\s+/g, ' ')
+  // 1.8 P5 (pinned and changed): the 1.6.0 entry names the revision 1.6.0 wrote — 8 —, which is history
+  // now that the code's is 9.
   for (const claim of ['1.5.0 and 1.5.1 were committed but never published; their changes ship here.',
-    `(\`STATE_VERSION\` ${STATE_VERSION})`, `(\`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION})`,
+    `(\`STATE_VERSION\` ${STATE_VERSION})`, '(`AGENT_TABLES_REVISION` 8)',
     'the first start after the upgrade replays the agent tables once', `\`agents[]\` (\`schema_version\` ${EXPORT_SCHEMA_VERSION})`,
     '### Added', '### Changed', '### Fixed', '### Privacy']) {
     assert.ok(flat.includes(claim), `the 1.6.0 entry does not say: ${claim}`)
@@ -2181,14 +2184,18 @@ test('the smaller 1.7 changes are on the pages: the compaction without a trigger
   assert.ok(readDoc('src/agentTreeBuild.ts').includes("t('{0} · last at {1} (–, {2} → {3})'"), 'a compaction without a trigger is written otherwise')
   assert.ok(flatText(doc.agents).includes('whether it was asked for (`manual`) or Claude Code\'s own (`auto`) — `–` where the line recorded no trigger —'),
     'docs/agents.md does not say what a compaction without a trigger reads')
-  assert.ok(flatText(doc.agents).includes(`revision **${AGENT_TABLES_REVISION}** in 1.6.0 and 1.7.0`), 'docs/agents.md does not say 1.7.0 keeps the revision')
-  assert.ok(flatText(doc.counting).includes(`— ${AGENT_TABLES_REVISION} in 1.6.0 and 1.7.0 —`), 'docs/counting.md does not say 1.7.0 keeps the revision')
+  // 1.8 P5 (pinned and changed): 1.6.0 and 1.7.0 kept revision 8 — history beside 1.8.0's 9.
+  assert.ok(flatText(doc.agents).includes('revision **8** in 1.6.0 and 1.7.0'), 'docs/agents.md does not say 1.7.0 kept the revision')
+  assert.ok(flatText(doc.counting).includes('8 in 1.6.0 and 1.7.0 —'), 'docs/counting.md does not say 1.7.0 kept the revision')
   const dev = flatText(doc.development)
   assert.ok(dev.includes('one copy instead of 25; the figures are the same'), 'docs/development.md does not name the one bucket copy')
   assert.ok(dev.includes('`test/poller.test.ts`') && dev.includes('no test starts a process or reads the real `PATH`'), 'docs/development.md does not name the injected probe')
   assert.ok(existsSync(join(ROOT, 'test/poller.test.ts')), 'the page names a test file that is not there')
   assert.ok(readDoc('src/viewModel.ts').includes('shareBuckets'), 'the unshared path the page compares with is gone')
 })
+
+/** 1.8 P5: what 1.7.0 shipped where 1.8 moved on — the agent tables' revision (1.8.0 raises it to 9). */
+const RELEASED_1_7 = { AGENT_TABLES_REVISION: 8 } as const
 
 test('the 1.7.0 release notes: the newest entry, in the order a store page reads, the versions unchanged, no speed claim, no path or secret', () => {
   const log = readDoc('CHANGELOG.md')
@@ -2207,14 +2214,16 @@ test('the 1.7.0 release notes: the newest entry, in the order a store page reads
     '**The Agents and Context sections are left out while the switch shows Codex**',
     'The status bar, its tooltips, the `budget` and `agents` entries, the alerts, the CSV and JSON exports and *Copy Diagnostics* follow no view',
     '**`retry reset due`.**', 'it now reads `retry due`', '`12.3K lower bound, since 11:59`', 'one copy instead of 25, the same figures',
-    `\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are the values 1.6.0 wrote, unchanged`,
+    `\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${RELEASED_1_7.AGENT_TABLES_REVISION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are the values 1.6.0 wrote, unchanged`,
     'the update replays nothing and re-reads nothing',
     'Nothing new is read from any Claude Code or Codex file, and the read contract is unchanged.',
     'never a credential, a header or an exception\'s text',
   ]) assert.ok(flat.includes(claim), `the 1.7.0 entry does not say: ${claim}`)
-  // Every version the entry names is the one the code has: no bump is claimed.
+  // Every version the entry names is the one 1.7.0 shipped: no bump is claimed. 1.8 P5 (pinned and
+  // changed): the code's revision is 9 since, so the entry is held to 1.7.0's values, the two
+  // unchanged ones still read from the code.
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    const actual = { STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION }[m[1] as 'STATE_VERSION']
+    const actual = { STATE_VERSION, AGENT_TABLES_REVISION: RELEASED_1_7.AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION }[m[1] as 'STATE_VERSION']
     assert.equal(Number(m[2]), actual, `the 1.7.0 entry says ${m[1]} ${m[2]}`)
   }
   // P-A is one copy, not a speed-up (the lead's rule: nothing measured one).
@@ -2239,4 +2248,53 @@ test('docs/dashboard.md says the chart\'s labels are thinned to the width a colu
   const src = readDoc('src/webview/main.ts')
   assert.ok(src.includes("document.addEventListener('toggle', () => { if (vm) applyFits(); }, true);"), 'opening a section no longer runs every fit: say it in the docs')
   assert.ok(src.includes("window.addEventListener('resize', () => { if (vm) applyFits(); });"), 'a resize no longer runs every fit: say it in the docs')
+})
+
+test('the pages say what 1.8 P5 keeps: the newest cache request of a main session, the Codex turn, revision 9, the Opus 5.5 row (§0a.2, §0a.3, §0a.5)', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  // docs/counting.md and docs/agents.md: the revision 1.8.0 raised, and why.
+  const counting = flat(doc.counting)
+  assert.ok(counting.includes(`— ${AGENT_TABLES_REVISION} in 1.8.0, 8 in 1.6.0 and 1.7.0 —`), 'docs/counting.md does not state 1.8.0\'s revision')
+  assert.ok(counting.includes('1.8.0 raised it to 9 for the [prompt-cache estimate](prompt-cache.md#how-the-estimate-is-made)'),
+    'docs/counting.md does not say why the revision rose')
+  assert.ok(flat(doc.agents).includes(`revision **${AGENT_TABLES_REVISION}** in 1.8.0`), 'docs/agents.md does not state 1.8.0\'s revision')
+  // docs/prompt-cache.md: the section, the fields it keeps, the six stop reasons, the literal, why it errs.
+  const pc = flat(doc.promptCache)
+  assert.ok(doc.promptCache.includes('\n## How the estimate is made\n'), 'docs/prompt-cache.md has no "How the estimate is made"')
+  for (const field of ['timestamp', 'ephemeral_1h_input_tokens', 'usage.cache_creation', 'input_tokens', 'cache_creation_input_tokens',
+    'cache_read_input_tokens', 'output_tokens', 'message.model', 'stop_reason', 'type', 'token_count', 'turn_context', 'model']) {
+    assert.ok(doc.promptCache.includes(`\`${field}\``), `docs/prompt-cache.md does not name \`${field}\``)
+  }
+  assert.ok(pc.includes(STOP_REASONS.map((v) => `\`${v}\``).slice(0, -1).join(', ') + ` and \`${STOP_REASONS[STOP_REASONS.length - 1]}\``),
+    'docs/prompt-cache.md does not list the stop reasons as the code keeps them')
+  for (const claim of ['never an agent\'s transcript', 'every figure of that estimate carries `~`', 'which is why it carries `~`',
+    'runs late by the time the model took to start its reply', 'would make it early', 'the time and the model of the newest counted turn of a rollout that is not a fork',
+    'not rebuilt after the update']) {
+    assert.ok(pc.includes(claim), `docs/prompt-cache.md does not say: ${claim}`)
+  }
+  // docs/privacy.md: the same fields, the literal the raw line is matched on, the Codex value, the leak test.
+  const privacy = flat(doc.privacy)
+  assert.ok(privacy.includes(`the unescaped literal \`${USER_LINE_LITERAL}\` on the raw line`), 'docs/privacy.md does not name the user-line literal')
+  assert.ok(privacy.includes(STOP_REASONS.map((v) => `\`${v}\``).slice(0, -1).join(', ') + ` and \`${STOP_REASONS[STOP_REASONS.length - 1]}\``),
+    'docs/privacy.md does not list the stop reasons as the code keeps them')
+  for (const claim of ['of a main session\'s newest reply that used the prompt cache its time, the kind of cache it wrote (5 minutes or 1 hour), its size in tokens and its model',
+    '`usage.cache_creation.ephemeral_1h_input_tokens`', 'the time and model of the newest turn', 'So does the prompt-cache request (1.8)']) {
+    assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  // docs/cost.md: the Opus 5.5 row as the table holds it, its own check day, and what it changes.
+  const row = PRICES['claude-opus-5-5'][0]
+  assert.equal(row.from, OPUS_5_5_CHECKED)
+  const cost = flat(doc.cost)
+  const usd = (n: number): string => `$${Number.isInteger(n) ? n : n.toFixed(2)}`
+  for (const claim of [`${usd(row.input)} per million input tokens, ${usd(row.cacheWrite5m)} for a 5-minute cache write, ${usd(row.cacheWrite1h)} for a 1-hour cache write, ${usd(row.cacheRead)} for a cache hit and ${usd(row.output)} for output; fast mode ${usd(row.fast!.input)} in and ${usd(row.fast!.output)} out`,
+    'the **Claude Opus 5.5** row from a check of Anthropic\'s pricing page on **24 September 2026**', 'priced from this row and marked `approximate`',
+    'Opus 5.5 reads it at $0.20/MTok (0.05×)', '**Prices as of 6 September 2026**']) {
+    assert.ok(cost.includes(claim), `docs/cost.md does not say: ${claim}`)
+  }
+  assert.equal(PRICES_AS_OF, '2026-09-06', 'the page\'s "Prices as of" date is the table\'s')
+  assert.equal(OPUS_5_5_CHECKED, '2026-09-24', 'the page\'s Opus 5.5 check day is the row\'s')
+  assert.ok(Math.abs(row.cacheRead / row.input - 0.05) < 1e-12, 'the page\'s 0.05× is the row\'s multiple')
+  // The stale claims the row made wrong are gone.
+  assert.equal(cost.includes('Opus 4.6** alone'), false, 'docs/cost.md still gives fast mode to Opus 4.6 alone')
+  assert.equal(cost.includes('2 September 2026'), false, 'docs/cost.md still dates the table 2 September')
 })

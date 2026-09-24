@@ -224,6 +224,11 @@ export const READ_CONTRACT = [
   // 1.6 §0a.9 (P13a): a prompt line's permission mode, matched on the raw line — never parsed.
   { what: 'the permission mode', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'regex', regex: 'PERMISSION_MODE_RE',
     fields: ['permissionMode'] },
+  // 1.8 §0a.5 (P5): a user line — a prompt or a tool result — recognised on the raw line by its
+  // top-level `type`, for whether a main transcript's newest message line is the user's. Never parsed
+  // for it; nothing of the line is kept but that one bit.
+  { what: 'a user line', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'regex', regex: 'USER_LINE_LITERAL',
+    fields: ['type'] },
   // 1.6 §0a.10 (P13a): a compaction's line — its type and subtype, and of its metadata the trigger
   // and the context before and after. Never the segment it preserved, nor the summary line.
   { what: 'a compaction', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'd',

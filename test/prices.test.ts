@@ -6,6 +6,7 @@ import * as assert from 'node:assert/strict'
 
 import {
   MODEL_MEMO_MAX,
+  OPUS_5_5_CHECKED,
   PRICES,
   PRICES_AS_OF,
   PRICE_MEMO_MAX,
@@ -14,6 +15,7 @@ import {
   WEB_SEARCH_USD_PER_1K,
   PriceRule,
   PricingOptions,
+  cacheRatesOf,
   costOfBucket,
   isCustomPricing,
   normalizeModel,
@@ -154,9 +156,11 @@ test('legacy Anthropic rows are priced with their own check date', () => {
 
 // ---------------------------------------------------------------- fast mode
 
-test('the models with published fast rates are Opus 5, Opus 4.8, Opus 4.6 and GPT-6 Astra', () => {
-  // Opus 5 and 4.8: twice the standard rate. Opus 4.6: fast requests run at standard speed
-  // and are billed at standard rates, so its fast rates are its standard rates.
+test('the models with published fast rates are Opus 5.5, Opus 5, Opus 4.8, Opus 4.6 and GPT-6 Astra', () => {
+  // Opus 5.5, 5 and 4.8: twice the standard rate. Opus 4.6: fast requests run at standard speed
+  // and are billed at standard rates, so its fast rates are its standard rates. 1.8 P5 (pinned and
+  // changed: the list): Opus 5.5 joins it with its row.
+  assert.deepEqual(priceOf('claude-opus-5-5', OPUS_5_5_CHECKED)?.price.fast, { input: 8, output: 40 })
   assert.deepEqual(priceOf('claude-opus-5', PRICES_AS_OF)?.price.fast, { input: 10, output: 50 })
   assert.deepEqual(priceOf('claude-opus-4-8', PRICES_AS_OF)?.price.fast, { input: 10, output: 50 })
   assert.deepEqual(priceOf('claude-opus-4-6', PRICES_AS_OF)?.price.fast, { input: 5, output: 25 })
@@ -165,7 +169,7 @@ test('the models with published fast rates are Opus 5, Opus 4.8, Opus 4.6 and GP
     .filter(([, rules]) => rules.some((r) => r.fast))
     .map(([model]) => model)
     .sort()
-  assert.deepEqual(withFast, ['claude-opus-4-6', 'claude-opus-4-8', 'claude-opus-5', 'gpt-6-astra'])
+  assert.deepEqual(withFast, ['claude-opus-4-6', 'claude-opus-4-8', 'claude-opus-5', 'claude-opus-5-5', 'gpt-6-astra'])
 })
 
 test('GPT-6 Astra is priced from the OpenAI page: 10 / 1 cached / 50, fast exactly double', () => {
@@ -258,8 +262,12 @@ test('family fallback is opt-in, named and marked', () => {
   const fam = priceOf('claude-opus-4-9', PRICES_AS_OF, { unknownModel: 'family' })
   assert.ok(fam)
   assert.equal(fam.confidence, 'family')
-  assert.equal(fam.family, 'claude-opus-5')
-  close(fam.price.input, 5)
+  // 1.8 P5 (pinned and changed: the donor): the newest priced Opus is Opus 5.5 since its row came
+  // (5.5 is newer than 5); its rule was read after PRICES_AS_OF, so that day is priced approximate.
+  assert.equal(fam.family, 'claude-opus-5-5')
+  close(fam.price.input, 4)
+  assert.equal(fam.approximate, true)
+  assert.equal(priceOf('claude-opus-4-9', OPUS_5_5_CHECKED, { unknownModel: 'family' })?.approximate, false)
 
   assert.equal(priceOf('claude-sonnet-4-9', PRICES_AS_OF, { unknownModel: 'family' })?.family, 'claude-sonnet-5')
   assert.equal(priceOf('gpt-5.7', PRICES_AS_OF, { unknownModel: 'family' })?.family, 'gpt-5.5')
@@ -274,8 +282,9 @@ test('a family-priced bucket carries the marker into the cost breakdown', () => 
   const c = costOfBucket(bucket({ model: 'claude-opus-4-9', input: M }), { unknownModel: 'family' })
   assert.ok(c)
   assert.equal(c.confidence, 'family')
-  assert.equal(c.family, 'claude-opus-5')
-  close(c.usd, 5)
+  // 1.8 P5 (pinned and changed: the donor): Opus 5.5, $4 per 1M input.
+  assert.equal(c.family, 'claude-opus-5-5')
+  close(c.usd, 4)
   assert.equal(costOfBucket(bucket({ model: 'claude-opus-4-9', input: M })), null, 'strict stays unpriced')
 })
 
@@ -385,6 +394,79 @@ test('Claude cache writes split by TTL', () => {
   close(c.usd, (600_000 * 6.25 + 400_000 * 10) / M)
 })
 
+// ---------------------------------------------------------------- 1.8: Claude Opus 5.5, and the rates of the cache comparison
+
+test('Claude Opus 5.5 is priced as the pricing page states it on its check day: 4 / 5 / 8 / 0.20 / 20, fast 8 / 40 (1.8 §0b.7)', () => {
+  assert.equal(OPUS_5_5_CHECKED, '2026-09-24')
+  const p = priceOf('claude-opus-5-5', OPUS_5_5_CHECKED)
+  assert.ok(p && p.rule)
+  assert.equal(p.confidence, 'exact')
+  assert.equal(p.approximate, false)
+  assert.equal(p.rule.from, OPUS_5_5_CHECKED)
+  assert.equal(PRICES['claude-opus-5-5'].length, 1, 'one rule: the page publishes today\'s rate, not a history')
+  close(p.price.input, 4, 'input'); close(p.price.cacheWrite5m, 5, '5m write'); close(p.price.cacheWrite1h, 8, '1h write')
+  close(p.price.cacheRead, 0.2, 'cache hit'); close(p.price.output, 20, 'output')
+  // "Cache hits and refreshes on Claude Opus 5.5 are priced at 0.05x the base input price."
+  close(p.price.cacheRead / p.price.input, 0.05, 'the read multiple')
+  close(p.price.cacheWrite1h / p.price.input, 2, 'the 1 h write multiple')
+  assert.deepEqual(p.price.fast, { input: 8, output: 40 })
+  // The model id as transcripts and the status line write it.
+  assert.equal(priceOf('claude-opus-5-5[1m]', OPUS_5_5_CHECKED)?.rule?.from, OPUS_5_5_CHECKED)
+  // A day before the check is priced from the row and marked, as every such day is.
+  const before = priceOf('claude-opus-5-5', '2026-09-20')
+  assert.equal(before?.confidence, 'exact')
+  assert.equal(before?.approximate, true)
+  // A million of each: 4 + 0.25 × 5 + 0.75 × 8 + 0.20 + 20; the fast bucket doubles input and output
+  // and scales the cache rates by the same factor (8 / 4).
+  const b = bucket({ model: 'claude-opus-5-5', day: OPUS_5_5_CHECKED, input: M, cacheWrite: M, cacheWrite1h: 0.75 * M, cacheRead: M, output: M })
+  close(costOf(b).usd, 4 + 0.25 * 5 + 0.75 * 8 + 0.2 + 20)
+  close(costOf({ ...b, tier: 'fast' }).usd, 8 + 2 * (0.25 * 5 + 0.75 * 8 + 0.2) + 40)
+  // The other Anthropic rows keep the table's check date.
+  for (const [model, rules] of Object.entries(PRICES)) {
+    if (model === 'claude-opus-5-5' || !model.startsWith('claude-')) continue
+    for (const r of rules) assert.ok(r.from === PRICES_AS_OF || r.from === '2026-08-13', `${model} moved: ${r.from}`)
+  }
+})
+
+test('cacheRatesOf: the rule of the day, the overrides and the multiplier, standard speed — the same answer priceOf gives (1.8 A4)', () => {
+  // The factors are the table's own quotients, never a literal: Opus 5.5 reads at 0.05×, Fable 5.1 at 0.025×.
+  const opus = cacheRatesOf('claude-opus-5-5', OPUS_5_5_CHECKED)
+  assert.deepEqual(opus, { input: 4, write1h: 8, read: 0.2, confidence: 'exact', approximate: false })
+  const fable = cacheRatesOf('claude-fable-5-1', PRICES_AS_OF)
+  assert.ok(fable)
+  close(fable.read / fable.input, 0.025); close(fable.write1h / fable.input, 2)
+  const sonnet = cacheRatesOf('claude-sonnet-5', PRICES_AS_OF)
+  assert.ok(sonnet)
+  close(sonnet.read / sonnet.input, 0.1)
+  // A day no rule covers is marked; the rates are the nearest rule's.
+  assert.equal(cacheRatesOf('claude-opus-5-5', '2026-09-01')?.approximate, true)
+  // The contract multiplier scales every rate and no factor.
+  const disc = cacheRatesOf('claude-opus-5-5', OPUS_5_5_CHECKED, { multiplier: 0.5 })
+  assert.ok(disc)
+  close(disc.input, 2); close(disc.write1h, 4); close(disc.read, 0.1)
+  assert.equal(disc.confidence, 'exact')
+  // The user's own rates merge field-wise and say so.
+  const custom = cacheRatesOf('claude-opus-5-5', OPUS_5_5_CHECKED, { overrides: { 'claude-opus-5-5': { cacheRead: 0.4 } } })
+  assert.ok(custom)
+  assert.equal(custom.confidence, 'custom')
+  close(custom.read, 0.4); close(custom.input, 4)
+  // A borrowed rate says it is borrowed; an unpriced model has none.
+  assert.equal(cacheRatesOf('claude-opus-9', OPUS_5_5_CHECKED, { unknownModel: 'family' })?.confidence, 'family')
+  assert.equal(cacheRatesOf('claude-opus-9', OPUS_5_5_CHECKED), null)
+  assert.equal(cacheRatesOf('', OPUS_5_5_CHECKED), null)
+  // Standard speed: the fast rates never enter.
+  assert.equal(cacheRatesOf('claude-opus-5', PRICES_AS_OF)?.input, 5)
+  // Every priced Claude row: the rates are the lookup's, times the multiplier.
+  for (const model of Object.keys(PRICES).filter((m) => m.startsWith('claude-'))) {
+    const day = PRICES[model][0].from
+    const p = priceOf(model, day, { multiplier: 0.8 })!
+    const r = cacheRatesOf(model, day, { multiplier: 0.8 })!
+    close(r.input, p.price.input * 0.8, `${model} input`)
+    close(r.write1h, p.price.cacheWrite1h * 0.8, `${model} 1 h write`)
+    close(r.read, p.price.cacheRead * 0.8, `${model} read`)
+  }
+})
+
 // ---------------------------------------------------------------- Codex
 
 test('Codex input already contains the cached tokens', () => {
@@ -423,7 +505,9 @@ test('every rule is dated, sourced and newest first', () => {
     }
     for (const r of rules) {
       assert.match(r.from, /^\d{4}-\d{2}-\d{2}$/, `${model} has no check date`)
-      assert.ok(r.from <= PRICES_AS_OF, `${model} is dated after the table check`)
+      // 1.8 P5 (pinned and changed): one row was read after the table's check, with a date of its own.
+      if (model === 'claude-opus-5-5') assert.equal(r.from, OPUS_5_5_CHECKED, 'the Opus 5.5 row is dated by its own check')
+      else assert.ok(r.from <= PRICES_AS_OF, `${model} is dated after the table check`)
       assert.ok(r.source.length > 0, `${model} names no source`)
       assert.ok(!r.source.includes('://'), 'sources stay free of URLs (privacy scan)')
       for (const rate of [r.input, r.output, r.cacheRead, r.cacheWrite5m, r.cacheWrite1h]) {

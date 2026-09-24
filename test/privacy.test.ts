@@ -159,6 +159,8 @@ test('the read contract holds for the shipped sources: every reader names exactl
   // the diagnostics a row per level, the compaction's line and its metadata one each.
   assert.deepEqual([byWhat.get('tool errors')?.kind, byWhat.get('tool errors')?.fields], ['regex', ['is_error']])
   assert.deepEqual([byWhat.get('the permission mode')?.kind, byWhat.get('the permission mode')?.fields], ['regex', ['permissionMode']])
+  // 1.8 P5 (§0a.5): a user line's top-level `type`, on the raw line as well — the line is never parsed for it.
+  assert.deepEqual([byWhat.get('a user line')?.kind, byWhat.get('a user line')?.fields], ['regex', ['type']])
   assert.deepEqual(byWhat.get('a cache miss')?.fields, ['diagnostics'])
   assert.deepEqual(byWhat.get('a cache miss\'s diagnostics')?.fields, ['cache_miss_reason'])
   assert.deepEqual(byWhat.get('a cache miss\'s reason')?.fields, ['type', 'cache_missed_input_tokens'])

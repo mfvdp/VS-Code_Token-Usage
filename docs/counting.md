@@ -91,8 +91,12 @@ third of the agents have such a reply — nearly always one cut off at the tool 
 the agent's last: only 22 of 925 agent transcripts end on an unfinished reply.
 
 **Upgrading.** The persisted snapshot is schema version 8; version 5, 6 and 7 are still read. It
-also states the revision of the agent tables it holds — 8 in 1.6.0 and 1.7.0 —, and a snapshot with an older
-one, or none, has the agent tables rebuilt once on the first start after the update.
+also states the revision of the agent tables it holds — 9 in 1.8.0, 8 in 1.6.0 and 1.7.0 —, and a snapshot with an older
+one, or none, has the agent tables rebuilt once on the first start after the update. 1.8.0 raised it
+to 9 for the [prompt-cache estimate](prompt-cache.md#how-the-estimate-is-made): the rebuild gives every
+main session read in the last seven days its newest request that used the prompt cache — its time,
+the kind of cache it wrote, its size and its model —, so that a session that is quiet at the update has
+its estimate at once and not only with its next reply; it counts nothing, and the schema version stays 8.
 Version 7 — everything before the workflow runs of the agent tables —, version 6 — everything
 before the agent tables — and version 5 — everything before the tool table — are read forward
 rather than thrown away, so no upgrade forces a cold re-read: a table the older version did not

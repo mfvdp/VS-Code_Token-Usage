@@ -26,7 +26,7 @@ import * as os from 'os'
 import * as path from 'path'
 import {
   agentResultLine, agentToolUseLine, apiErrorLine, claudeLine, codexMeta, codexTaskStarted, codexTokenCount, codexTurnContext, iso,
-  journalKey, journalLine, LEAK_SESSION_ID, LEAK_STATUS_SECRETS, leakyStatusPayload, metaJson, queueOperationLine, runRecordJson,
+  journalKey, journalLine, LEAK_SESSION_ID, LEAK_STATUS_SECRETS, leakyStatusPayload, metaJson, promptLine, queueOperationLine, runRecordJson,
   snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine, writeLeakyMirror,
 } from './fixtures/helpers'
 import {
@@ -39,7 +39,7 @@ import { AgentTreeVm, EARLIER_KEY, emptyAgentTree, TreeNode } from '../src/agent
 import type { TokenPaceApi } from '../src/extension'
 import type { ViewModel } from '../src/viewModel'
 import { bridgeBlocksDelete, hookMirrorNote } from '../src/storage'
-import { Snapshot, STATE_VERSION } from '../src/types'
+import { MainRec, Snapshot, STATE_VERSION } from '../src/types'
 
 /** Never a real key: the string is asserted *absent* from every output this test reads. */
 const FAKE_TOKEN = 'sk-ant-oat01-SYNTHETIC-TEST-TOKEN-0000000000000000'
@@ -1931,6 +1931,7 @@ test('1.7 F2: the poll reads the active sessions, which are all roots — the gr
   const main = (sessionId: string, lastTs: number) => ({
     source: 'claude' as const, sessionId, firstTs: lastTs - 3_600_000, lastTs, models: [], input: 1, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
     output: 1, reasoning: 0, requests: 1, outputFinal: 1, toolCalls: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+    lastRequest: null,
   })
   const tcfg = { zone: 'utc' as const, dayBoundaryHour: 0, startOfWeek: 'monday' as const, hourCycle: 'h23' as const }
   const built = (mains: ReturnType<typeof main>[]): AgentTreeVm => buildAgentTree({ agents: [], launches: [], mains, sessions: [], attribution: 'none', selected: null, tcfg }, now)
@@ -3055,6 +3056,59 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
   assert.equal(reread.launches?.toolu_sync01?.agentId, 'c3c3c3')
   assert.deepEqual(Object.keys(reread.mains ?? {}).sort(), [fixtureMain, w.activeMain, w.idleMain].sort())
   assert.deepEqual(fingerprintOf(reread), fingerprintOf(v6))
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a 1.7 state (revision 8) is replayed once: every main session gets the newest cache request a fresh read gives it, the counting unmoved (1.8 §0a.2, §7a Q17)', async () => {
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const fixtureMain = path.join(w.project, '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl')
+  // The active session's newest reply wrote the 1-hour cache, and the user has asked again since
+  // (probe P-6's shape: the prompt is the newest message line).
+  appendLine(w.activeMain, claudeLine({
+    id: 'msg_act_cache', ts: T + 1000, usage: { input: 3, cacheWrite: 4000, cacheWrite1h: 4000, cacheRead: 20_000, output: 60 }, final: true,
+  }))
+  appendLine(w.activeMain, promptLine({ ts: T + 2000 }))
+  // What this build's own cold read gives every main session.
+  const fresh = await seedSnapshot(fx, 8)
+  assert.deepEqual(fresh.mains?.[w.activeMain]?.lastRequest,
+    { at: T + 1000, ttl: '1h', context: 3 + 4000 + 20_000 + 60, model: 'claude-opus-4-6', stop: 'end_turn', replyPending: true })
+  assert.equal(fresh.mains?.[fixtureMain]?.lastRequest?.ttl, '5m')
+  assert.equal(fresh.mains?.[w.idleMain]?.lastRequest, null, 'a session that never touched the cache has none')
+  // What a 1.7 build leaves: the same tables without the request, the open messages without their
+  // first line's time, no Codex turn, revision 8.
+  const v17 = JSON.parse(JSON.stringify(fresh)) as Snapshot
+  for (const m of Object.values(v17.mains ?? {})) delete (m as Partial<MainRec>).lastRequest
+  for (const p of Object.values(v17.pending)) delete p.firstAt
+  delete v17.codexLast
+  v17.agentsRevision = 8
+  fs.writeFileSync(fx.stateFile, JSON.stringify(v17))
+  const { agg } = lazy()
+  assert.equal(agg.AGENT_TABLES_REVISION, 9)
+  const restored = agg.Aggregator.fromSnapshot(JSON.parse(JSON.stringify(v17)) as Snapshot)
+  assert.equal(restored.agentsRevision, 8, 'the host is asked to replay')
+  assert.deepEqual(restored.mainEntries().map(([, m]) => m.lastRequest), [null, null, null])
+
+  await activateHost(fx, REPO)
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  assert.match(state.logText(), /Agent replay \(cold start\): \d+ file\(s\) read again/)
+  const after = readState(fx)!
+  for (const file of [w.activeMain, fixtureMain, w.idleMain]) {
+    assert.deepEqual(after.mains?.[file]?.lastRequest, fresh.mains?.[file]?.lastRequest, `the replayed request of ${file}`)
+  }
+  // The counting is what it was: the replay moves no bucket and no cursor — and replays no Codex turn
+  // (the line speaks of the last 30 minutes, which the next turn fills).
+  assert.deepEqual(fingerprintOf(after), fingerprintOf(v17))
+  assert.deepEqual(offsetsOf(after), offsetsOf(v17))
+  assert.equal(after.codexLast ?? null, null)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // The next start finds revision 9 and replays nothing.
+  await activateHost(fx, REPO)
+  await waitOwnColdStart(state, 'the second cold start')
+  await sleep(300)
+  assert.doesNotMatch(state.logText(), /Agent replay/)
+  assert.deepEqual(readState(fx)?.mains?.[w.activeMain]?.lastRequest, fresh.mains?.[w.activeMain]?.lastRequest)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 

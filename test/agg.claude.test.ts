@@ -7,7 +7,7 @@ import { Aggregator, billable, localDay } from '../src/agg'
 import { freshInput } from '../src/stats'
 import { hourIndex, TimeConfig } from '../src/time'
 import { Bucket, MainRec, Snapshot, Source, ToolStat, bucketKey, STATE_VERSION } from '../src/types'
-import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, ctxFor } from './fixtures/helpers'
+import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, compactSummaryLine, ctxFor, iso, promptLine, toolResultLine } from './fixtures/helpers'
 
 const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
 const T0 = Date.UTC(2026, 2, 10, 9, 15, 0)
@@ -393,4 +393,251 @@ test('latestClaudeVersion: a version without the shape is skipped for the next m
   assert.equal(live.latestClaudeVersion(), '2.1.280')
   mainRecOf(live, CLAUDE_MAIN).ccVersion = '<b>2.1.280</b>'
   assert.equal(live.latestClaudeVersion(), null)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 §0a.2 / A1 rule 2: a main session's newest request that read or wrote the prompt cache;
+// §0a.5: its stop reason and whether the newest message line is the user's
+// ---------------------------------------------------------------------------
+
+function lastRequestOf(agg: Aggregator, file = CLAUDE_MAIN): MainRec['lastRequest'] {
+  return mainRecOf(agg, file).lastRequest
+}
+
+test('lastRequest: a first line with a 1 h write makes it; a later line of the message grows its size and keeps its time (1.8 §0a.2)', () => {
+  const agg = new Aggregator()
+  const T1 = T0
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T1, usage: { input: 4, cacheWrite: 5000, cacheWrite1h: 5000, cacheRead: 20_000, output: 10 } }), CTX)
+  assert.deepEqual(lastRequestOf(agg), { at: T1, ttl: '1h', context: 4 + 5000 + 20_000 + 10, model: 'claude-opus-4-6', stop: null, replyPending: false })
+  // The reply streams on: the running maximum grows, the time stays the first line's — the request's.
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T1 + 4000, usage: { input: 4, cacheWrite: 5000, cacheWrite1h: 5000, cacheRead: 20_000, output: 900 }, final: true }), CTX)
+  assert.deepEqual(lastRequestOf(agg), { at: T1, ttl: '1h', context: 4 + 5000 + 20_000 + 900, model: 'claude-opus-4-6', stop: 'end_turn', replyPending: false })
+  // A read-only request after it: the newest, its own time, and the class of the write before it.
+  const T2 = T1 + 60_000
+  agg.addClaudeLine(claudeLine({ id: 'm2', ts: T2, model: 'claude-sonnet-4-6', usage: { input: 3, cacheRead: 25_900, output: 40 }, final: true, stopReason: 'tool_use' }), CTX)
+  assert.deepEqual(lastRequestOf(agg), { at: T2, ttl: '1h', context: 3 + 25_900 + 40, model: 'claude-sonnet-4-6', stop: 'tool_use', replyPending: false })
+  // A 5-minute write only: that class.
+  agg.addClaudeLine(claudeLine({ id: 'm3', ts: T2 + 60_000, usage: { input: 2, cacheWrite: 300, cacheRead: 25_900, output: 5 }, final: true }), CTX)
+  assert.equal(lastRequestOf(agg)?.ttl, '5m')
+  assert.equal(lastRequestOf(agg)?.at, T2 + 60_000)
+  const kept = lastRequestOf(agg)
+  // A request that touched no cache is no newer request of the cache.
+  agg.addClaudeLine(claudeLine({ id: 'm4', ts: T2 + 120_000, usage: { input: 50, output: 5 }, final: true }), CTX)
+  assert.deepEqual(lastRequestOf(agg), kept)
+  // A late line of an older message changes nothing — not its size, not its time.
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T2 + 130_000, usage: { input: 4, cacheWrite: 5000, cacheWrite1h: 5000, cacheRead: 20_000, output: 5000 } }), CTX)
+  assert.deepEqual(lastRequestOf(agg), kept)
+  // Nor does an error line or a placeholder reply, whatever usage they carry.
+  agg.addClaudeLine(claudeLine({ id: 'e1', ts: T2 + 140_000, error: true, usage: { cacheWrite1h: 9000, cacheWrite: 9000, cacheRead: 1 } }), CTX)
+  agg.addClaudeLine(claudeLine({ id: 's1', ts: T2 + 150_000, synthetic: true, usage: { cacheRead: 9 } }), CTX)
+  assert.deepEqual(lastRequestOf(agg), kept)
+  // A write of both kinds is the 1-hour class.
+  agg.addClaudeLine(claudeLine({ id: 'm5', ts: T2 + 200_000, usage: { cacheWrite: 800, cacheWrite1h: 100, cacheRead: 26_000, output: 1 } }), CTX)
+  assert.equal(lastRequestOf(agg)?.ttl, '1h')
+})
+
+test('lastRequest: a message whose cache tokens show on a later line becomes the request then, with its first line\'s time; none before a write has a class', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'r1', ts: T0, usage: { input: 5 } }), CTX)
+  assert.equal(lastRequestOf(agg), null, 'no cache tokens yet')
+  agg.addClaudeLine(claudeLine({ id: 'r1', ts: T0 + 900, usage: { input: 5, cacheRead: 700, output: 3 } }), CTX)
+  // Only read: no write before it, so no class — a null TTL, which nothing watches.
+  assert.deepEqual(lastRequestOf(agg), { at: T0, ttl: null, context: 708, model: 'claude-opus-4-6', stop: null, replyPending: false })
+})
+
+test('lastRequest: an agent\'s transcript gives no record one; the replay builds it as a fresh read does (1.8 §0a.2)', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'a1', ts: T0, agentId: 'a1', usage: { cacheWrite: 4000, cacheWrite1h: 4000, cacheRead: 100 } }), SUB_CTX)
+  assert.equal(agg.mainEntries().length, 0)
+  assert.equal(agg.agents().length, 1)
+  assert.equal('lastRequest' in agg.agents()[0], false, 'an agent record keeps none')
+  assert.equal(JSON.stringify(agg.toSnapshot().pending).includes('firstAt'), false, 'an agent\'s message keeps no first time')
+
+  const lines = [
+    claudeLine({ id: 'm1', ts: T0, usage: { input: 1, cacheWrite: 2000, cacheWrite1h: 2000, output: 1 } }),
+    claudeLine({ id: 'm1', ts: T0 + 500, usage: { input: 1, cacheWrite: 2000, cacheWrite1h: 2000, output: 80 }, final: true }),
+    claudeLine({ id: 'm2', ts: T0 + 60_000, usage: { input: 1, cacheRead: 2081, output: 9 }, final: true, stopReason: 'max_tokens' }),
+  ]
+  const live = new Aggregator()
+  for (const l of lines) live.addClaudeLine(l, CTX)
+  const replayed = new Aggregator()
+  replayed.beginAgentReplay([CLAUDE_MAIN])
+  for (const l of lines) replayed.addClaudeLine(l, { ...CTX, agentsOnly: true })
+  replayed.endAgentReplay()
+  assert.deepEqual(lastRequestOf(replayed), lastRequestOf(live))
+  assert.deepEqual(lastRequestOf(live), { at: T0 + 60_000, ttl: '1h', context: 1 + 2081 + 9, model: 'claude-opus-4-6', stop: 'max_tokens', replyPending: false })
+  assert.equal(replayed.all().length, 0, 'the replay counts nothing')
+})
+
+test('lastRequest.stop: the six documented stop reasons are kept, any other value is none (1.8 §0a.5)', () => {
+  // Counted on synthetic lines only: one reply per value, each the newest when it is read.
+  const values: unknown[] = ['end_turn', 'tool_use', 'max_tokens', 'stop_sequence', 'pause_turn', 'refusal', 'synthetic', 'END_TURN', 42, '']
+  const kept = new Map<string, number>()
+  const agg = new Aggregator()
+  values.forEach((v, i) => {
+    const raw = JSON.parse(claudeLine({ id: `st${i}`, ts: T0 + i * 1000, usage: { cacheRead: 100 + i }, final: true })) as { message: Record<string, unknown> }
+    raw.message.stop_reason = v
+    agg.addClaudeLine(JSON.stringify(raw), CTX)
+    const stop = String(lastRequestOf(agg)?.stop)
+    kept.set(stop, (kept.get(stop) ?? 0) + 1)
+  })
+  assert.deepEqual(Object.fromEntries(kept), {
+    end_turn: 1, tool_use: 1, max_tokens: 1, stop_sequence: 1, pause_turn: 1, refusal: 1, null: 4,
+  })
+  // A later line that states none keeps the one an earlier line of the reply stated; one that states
+  // another replaces it.
+  agg.addClaudeLine(claudeLine({ id: 'sx', ts: T0 + 20_000, usage: { cacheRead: 5 }, final: true, stopReason: 'tool_use' }), CTX)
+  agg.addClaudeLine(claudeLine({ id: 'sx', ts: T0 + 20_100, usage: { cacheRead: 5 } }), CTX)
+  assert.equal(lastRequestOf(agg)?.stop, 'tool_use')
+  agg.addClaudeLine(claudeLine({ id: 'sx', ts: T0 + 20_200, usage: { cacheRead: 5 }, final: true, stopReason: 'end_turn' }), CTX)
+  assert.equal(lastRequestOf(agg)?.stop, 'end_turn')
+})
+
+/** Bookkeeping lines as Claude Code writes them after a reply (probe P-6: key names only) — synthetic values. */
+function bookkeepingLines(ts: number): string[] {
+  const at = iso(ts)
+  return [
+    JSON.stringify({ type: 'attachment', attachment: { type: 'hook_success', content: 'synthetic "type":"user" hook output' }, timestamp: at, sessionId: 'sess-0001' }),
+    JSON.stringify({ type: 'system', subtype: 'turn_duration', durationMs: 1234, timestamp: at, sessionId: 'sess-0001' }),
+    JSON.stringify({ type: 'file-history-snapshot', messageId: 'uuid-x', snapshot: { trackedFileBackups: {}, timestamp: at } }),
+    JSON.stringify({ type: 'last-prompt', lastPrompt: 'synthetic prompt text', sessionId: 'sess-0001' }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'synthetic title', sessionId: 'sess-0001' }),
+    JSON.stringify({ type: 'mode', mode: 'normal', sessionId: 'sess-0001' }),
+    JSON.stringify({ type: 'permission-mode', permissionMode: 'default', sessionId: 'sess-0001' }),
+  ]
+}
+
+test('lastRequest.replyPending: the probe P-6 shape — an end_turn reply, then a prompt and nothing after it — is pending; a tool result newest too; a reply newest is not (1.8 §0a.5)', () => {
+  const agg = new Aggregator()
+  const feed = (lines: string[]): void => { for (const l of lines) agg.addClaudeLine(l, CTX) }
+  feed([
+    promptLine({ ts: T0 }),
+    claudeLine({ id: 'm1', ts: T0 + 3000, usage: { input: 3, cacheWrite: 6000, cacheWrite1h: 6000, output: 50 }, final: true }),
+  ])
+  assert.equal(lastRequestOf(agg)?.replyPending, false, 'an end_turn reply is the newest message line')
+  // What follows an end_turn reply is bookkeeping: none of it is a message line.
+  feed(bookkeepingLines(T0 + 3500))
+  assert.equal(lastRequestOf(agg)?.replyPending, false, 'a bookkeeping line counted as a message line')
+  assert.equal(lastRequestOf(agg)?.stop, 'end_turn')
+  // P-6: the user asks; the reply that calls AskUserQuestion is written only when the tool completes,
+  // so while the question stands the newest message line is the prompt.
+  feed([promptLine({ ts: T0 + 5 * 60_000, text: 'synthetic prompt "type":"assistant" quoted' })])
+  assert.equal(lastRequestOf(agg)?.replyPending, true, 'the P-6 shape: the prompt is the newest message line')
+  assert.equal(lastRequestOf(agg)?.stop, 'end_turn', 'the reply before it still says end_turn — which is why the flag is needed')
+  feed(bookkeepingLines(T0 + 5 * 60_000 + 10))
+  assert.equal(lastRequestOf(agg)?.replyPending, true, 'bookkeeping after the prompt changes nothing')
+  // The reply comes, calling a tool: not pending; its tool result: pending again; the answer: not.
+  feed([claudeLine({ id: 'm2', ts: T0 + 9 * 60_000, usage: { input: 2, cacheRead: 6050, output: 20 }, final: true, stopReason: 'tool_use', tools: [{ name: 'Bash', id: 'toolu_p6' }] })])
+  assert.deepEqual([lastRequestOf(agg)?.replyPending, lastRequestOf(agg)?.stop], [false, 'tool_use'])
+  feed([toolResultLine({ ts: T0 + 9 * 60_000 + 1, results: [{ toolUseId: 'toolu_p6', text: 'synthetic output "type":"assistant"' }] })])
+  assert.equal(lastRequestOf(agg)?.replyPending, true, 'a tool result is the newest message line')
+  feed([claudeLine({ id: 'm3', ts: T0 + 9 * 60_000 + 3000, usage: { input: 2, cacheRead: 6100, output: 30 }, final: true })])
+  assert.deepEqual([lastRequestOf(agg)?.replyPending, lastRequestOf(agg)?.stop], [false, 'end_turn'])
+  // A reply of any kind is a message line: an error line and a placeholder end what the user started,
+  // and neither is a counted request.
+  feed([promptLine({ ts: T0 + 20 * 60_000 })])
+  feed([claudeLine({ id: 'e1', ts: T0 + 20 * 60_000 + 500, error: true })])
+  assert.equal(lastRequestOf(agg)?.replyPending, false)
+  assert.equal(lastRequestOf(agg)?.at, T0 + 9 * 60_000 + 3000, 'the error line is no request')
+  // A compaction's summary line is a user line too — recognised on the raw line, never parsed.
+  feed([compactSummaryLine({ ts: T0 + 30 * 60_000, summary: 'synthetic summary "type":"assistant"' })])
+  assert.equal(lastRequestOf(agg)?.replyPending, true)
+})
+
+test('lastRequest.replyPending: in the order the file holds the lines; a session without a cache request has no flag; an agent\'s lines never set it (1.8 §0a.5)', () => {
+  const agg = new Aggregator()
+  // A prompt before the session's first counted reply: no record yet, nothing to set.
+  agg.addClaudeLine(promptLine({ ts: T0 }), CTX)
+  assert.equal(agg.mainEntries().length, 0)
+  // A reply without cache tokens makes the record but no request of the cache: no flag either.
+  agg.addClaudeLine(claudeLine({ id: 'n1', ts: T0 + 1000, usage: { input: 9 }, final: true }), CTX)
+  agg.addClaudeLine(promptLine({ ts: T0 + 2000 }), CTX)
+  assert.equal(lastRequestOf(agg), null)
+  // The first cache request clears it by being the newest line.
+  agg.addClaudeLine(claudeLine({ id: 'n2', ts: T0 + 3000, usage: { cacheRead: 9 }, final: true }), CTX)
+  assert.equal(lastRequestOf(agg)?.replyPending, false)
+  // An agent's prompt and tool results belong to the agent's transcript: the session's flag stays.
+  agg.addClaudeLine(promptLine({ ts: T0 + 4000, agentId: 'a1' }), SUB_CTX)
+  agg.addClaudeLine(toolResultLine({ ts: T0 + 4001, agentId: 'a1', results: [{ toolUseId: 'toolu_a1' }] }), SUB_CTX)
+  assert.equal(lastRequestOf(agg)?.replyPending, false)
+  // Another session's prompt is that session's.
+  agg.addClaudeLine(promptLine({ ts: T0 + 5000 }), MAIN_B_CTX)
+  assert.equal(lastRequestOf(agg)?.replyPending, false)
+  // A line that says it changed something only when the flag moved.
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 6000, permissionMode: null }), CTX), true)
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 7000, permissionMode: null }), CTX), false)
+})
+
+test('lastRequest survives a snapshot round trip and restores by shape; a 1.7 snapshot restores none, and its open message grows none (1.8 §0a.2)', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, usage: { input: 4, cacheWrite: 5000, cacheWrite1h: 5000, output: 10 } }), CTX)
+  agg.addClaudeLine(promptLine({ ts: T0 + 60_000 }), CTX)
+  const want = lastRequestOf(agg)
+  assert.deepEqual(want, { at: T0, ttl: '1h', context: 5014, model: 'claude-opus-4-6', stop: null, replyPending: true })
+  const snap = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  assert.equal(snap.pending.m1.firstAt, T0, 'the open message keeps its first line\'s time')
+  const back = Aggregator.fromSnapshot(snap)
+  assert.deepEqual(lastRequestOf(back), want, 'restoreMain keeps every field, the flag included')
+  // The restored open message grows the restored request.
+  back.addClaudeLine(claudeLine({ id: 'm1', ts: T0 + 70_000, usage: { input: 4, cacheWrite: 5000, cacheWrite1h: 5000, output: 400 }, final: true }), CTX)
+  assert.deepEqual(lastRequestOf(back), { ...want!, context: 5404, stop: 'end_turn', replyPending: false })
+
+  // A snapshot is a file anyone can edit: every value is checked as at ingest.
+  const edited = (over: Record<string, unknown> | null, direct = false): MainRec['lastRequest'] => {
+    // `direct` keeps what JSON cannot carry (NaN, Infinity) — a copy all the same: the snapshot holds the live records.
+    const s = direct ? structuredClone(agg.toSnapshot()) : JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+    const m = (s.mains as unknown as Record<string, Record<string, unknown>>)[CLAUDE_MAIN]
+    m.lastRequest = over === null ? null : { ...(m.lastRequest as Record<string, unknown>), ...over }
+    return lastRequestOf(Aggregator.fromSnapshot(s))
+  }
+  assert.equal(edited({ ttl: 'x' }), null, 'a TTL class outside the list')
+  assert.equal(edited({ ttl: undefined }), null, 'no TTL key')
+  assert.equal(edited({ context: Number.NaN }, true), null, 'a size that is no number')
+  assert.equal(edited({ context: -1 }), null, 'a negative size')
+  assert.equal(edited({ context: '5014' }), null, 'a size as a string')
+  assert.equal(edited({ at: 0 }), null, 'no time')
+  assert.equal(edited({ at: Number.POSITIVE_INFINITY }, true), null, 'an endless time')
+  assert.equal(edited({ replyPending: 'yes' }), null, 'a flag that is no boolean')
+  assert.equal(edited({ replyPending: undefined }), null, 'no flag')
+  assert.equal(edited({ model: 'x'.repeat(300) })?.model, null, 'a 300-character model is no model')
+  assert.equal(edited({ model: 'claude opus' })?.model, null, 'a model with a space')
+  assert.equal(edited({ stop: 'synthetic' })?.stop, null, 'a stop reason outside the list')
+  assert.equal(edited({ stop: 'refusal' })?.stop, 'refusal')
+  assert.equal(edited(null), null)
+  assert.equal(edited({ ttl: '5m' })?.ttl, '5m')
+
+  // What a 1.7 build leaves: no request on the record, no first time on the open message.
+  const old = JSON.parse(JSON.stringify(agg.toSnapshot())) as Snapshot
+  delete (old.mains as unknown as Record<string, Record<string, unknown>>)[CLAUDE_MAIN].lastRequest
+  for (const p of Object.values(old.pending)) delete p.firstAt
+  old.agentsRevision = 8
+  const v17 = Aggregator.fromSnapshot(old)
+  assert.equal(lastRequestOf(v17), null)
+  assert.equal(v17.agentsRevision, 8)
+  // Its open message's later line grows no request: its first line's time is not known.
+  v17.addClaudeLine(claudeLine({ id: 'm1', ts: T0 + 70_000, usage: { input: 4, cacheWrite: 5000, cacheWrite1h: 5000, output: 400 } }), CTX)
+  assert.equal(lastRequestOf(v17), null)
+  // A new message does.
+  v17.addClaudeLine(claudeLine({ id: 'm9', ts: T0 + 80_000, usage: { cacheRead: 5400, output: 3 } }), CTX)
+  assert.equal(lastRequestOf(v17)?.at, T0 + 80_000)
+  assert.equal(lastRequestOf(v17)?.ttl, null, 'the class of the write before it is not known either')
+})
+
+test('lastRequest keeps no content: synthetic text under content and a 300-character model reach no snapshot (1.8 §0a.2 leak test)', () => {
+  const secret = 'LASTREQUEST-CONTENT-5e1d'
+  const agg = new Aggregator()
+  agg.addClaudeLine(promptLine({ ts: T0, text: `${secret}-prompt` }), CTX)
+  agg.addClaudeLine(claudeLine({
+    id: 'm1', ts: T0 + 1000, model: `claude-${'x'.repeat(293)}`, usage: { input: 3, cacheWrite: 900, cacheWrite1h: 900, output: 4 },
+    content: [{ type: 'text', text: `${secret}-reply` }, { type: 'tool_use', id: 'toolu_leak', name: 'Bash', input: { command: `${secret}-input` } }],
+    final: true, stopReason: 'tool_use',
+  }), CTX)
+  agg.addClaudeLine(toolResultLine({ ts: T0 + 2000, results: [{ toolUseId: 'toolu_leak', text: `${secret}-result` }] }), CTX)
+  const rec = lastRequestOf(agg)
+  assert.deepEqual(rec, { at: T0 + 1000, ttl: '1h', context: 907, model: null, stop: 'tool_use', replyPending: true })
+  const snap = agg.toSnapshot()
+  const saved = JSON.stringify(snap)
+  assert.equal(saved.includes(secret), false, 'the snapshot holds a prompt, a reply, a tool input or a tool result')
+  // The main session's record keeps no model that does not fit (the buckets name the line's model, as always).
+  assert.equal(JSON.stringify(snap.mains).includes('x'.repeat(65)), false, 'the record holds the overlong model')
 })

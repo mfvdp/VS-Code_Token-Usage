@@ -249,6 +249,9 @@ test('a main transcript keeps a session record for the tree, whatever attributio
     // 1.6 P13a (O3, pinned and changed: the record's shape): the version that wrote its lines; no
     // permission mode, no compaction. None of an agent's own fields.
     ccVersion: '9.9.9', permissionMode: null, compactions: 0, lastCompaction: null,
+    // 1.8 P5 (§0a.2, pinned and changed: the record's shape): m1 read the cache — its first line's time,
+    // no write before it (no TTL class), its size over both lines, its stop reason; m2 touched no cache.
+    lastRequest: { at: T0, ttl: null, context: 10 + 90 + 25, model: 'claude-opus-4-6', stop: 'end_turn', replyPending: false },
   }]])
   assert.equal(agg.agents().length, 0)
   // The open message knows which record holds it — by name, not by path.
@@ -1788,8 +1791,9 @@ test('the efforts and the context survive a snapshot round trip, checked again; 
   // 6: the efforts (1.6 N8) and the newest request's context (L2) are what only a replay can fill
   // for the transcripts already read. 1.6 P13a (pinned and changed): 7, for the O3 metadata; 1.6
   // P13b (pinned and changed): 8, for the run records (L4) — a revision-5 snapshot still asks for
-  // the replay, as every one below the current does.
-  assert.equal(AGENT_TABLES_REVISION, 8)
+  // the replay, as every one below the current does. 1.8 P5 (pinned and changed): 9, for a main
+  // session's newest cache-touching request (§0a.2).
+  assert.equal(AGENT_TABLES_REVISION, 9)
   const agg = new Aggregator()
   agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, agentId: 'abc123', usage: { input: 5, cacheRead: 100 }, effort: 'high' }), AGENT_CTX)
   agg.addClaudeLine(claudeLine({ id: 'm2', ts: T0 + 1000, agentId: 'abc123', usage: { input: 7, cacheWrite: 20 }, effort: 'max' }), AGENT_CTX)

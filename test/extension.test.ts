@@ -36,6 +36,7 @@ import { AgentTreeVm, emptyAgentTree, TreeNode } from '../src/agentTree'
 // Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`, and
 // `lazy` for the modules below it.
 import type { TokenPaceApi } from '../src/extension'
+import type { ViewModel } from '../src/viewModel'
 import { bridgeBlocksDelete, hookMirrorNote } from '../src/storage'
 import { Snapshot, STATE_VERSION } from '../src/types'
 
@@ -1051,6 +1052,59 @@ test('the provider switch governs the text views, never the status bar: a Claude
   assert.equal(md.includes('## Budgets'), false, md)
   assert.ok(md.split('\n')[2].endsWith(' · Codex only*'), md.split('\n')[2])
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('the provider switch reaches neither the agent poll, the status bar\'s agents entry nor the budget alerts: under Codex each still reads every Claude fact (1.7 F1, §3.0 a)', async () => {
+  // §3.0 (a): the switch is the dashboard's view state. The host decides the agent poll and the
+  // status bar's agents entry from `latestVm.agents`, built whole under every view, and a budget
+  // alert from every budget (`allBudgets`) — so a Codex view, stored or clicked, changes none of them
+  // while the page leaves the Claude Code–only sections out.
+  const fx = makeFixture()
+  writeAgentWorld(fx)
+  const kept = new Map<string, unknown>([['tokenPace.ui', { range: '30d', providers: ['codex'] }]])
+  const intervals = holdIntervals()
+  const seeAgain = blindRecursiveWatchers()
+  try {
+    await activateHost(fx, REPO, {
+      globalState: kept,
+      settings: {
+        'tokenPace.statusBar.show': ['claudeQuota', 'agents', 'tokens'],
+        'tokenPace.budgets': [{ scope: 'claude', period: 'month', unit: 'tokens', limit: 500 }],
+        'tokenPace.alerts.budgetPercent': 50,
+      },
+    })
+    await waitFor('the agents entry', () => state.textOf('tokenPace.agents') === '~1 running')
+    await waitFor('the poll to start', () => state.logText().includes('Agent poll: on'))
+    const page = openDashboard()
+    await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+    const first = page.sent.find((m) => (m as { type?: unknown }).type === 'data') as { payload: ViewModel }
+    assert.equal(first.payload.provider, 'codex')
+    assert.equal(first.payload.claudeOnly, 'Claude Code only — not shown while Codex is selected.')
+    // The tree the page does not draw is the whole tree the host reads.
+    assert.equal(first.payload.agents.running, 1)
+    // The page shows no Claude budget; the host holds it for the bar and the alerts.
+    assert.deepEqual(first.payload.budgets, [])
+    assert.deepEqual(first.payload.allBudgets.map((b) => b.scope), ['claude'])
+    // A Claude budget over its percentage speaks under the Codex view.
+    // (The alert minute is fired until the evaluation meets a finished scan.)
+    assert.ok(intervals.fire(60_000) > 0, 'no alert interval is armed')
+    await waitFor('the budget alert', () => {
+      if (/Alert \(budget\b/.test(state.logText())) return true
+      intervals.fire(60_000)
+      return false
+    })
+    assert.match(state.logText(), /Alert \(budget[^\n]*Claude Code/)
+    // Clicked back and forth, the switch leaves the poll and the entry as they were.
+    page.post({ type: 'setProvider', provider: 'all' })
+    page.post({ type: 'setProvider', provider: 'codex' })
+    await sleep(300)
+    assert.equal(state.textOf('tokenPace.agents'), '~1 running')
+    assert.doesNotMatch(state.logText(), /Agent poll: off/)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    seeAgain()
+    intervals.restore()
+  }
 })
 
 test('stored opened agent nodes and the selection restore by shape; over-long keys are dropped', async () => {

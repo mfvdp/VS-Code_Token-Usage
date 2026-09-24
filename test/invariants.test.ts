@@ -733,6 +733,9 @@ const TREE_FIELDS = new Set([
   // `share` are the tree's own field names), the line for the rest, its largest agents (a running
   // item's `key`, `label`, `fullLabel`, `context`, `usage`; a node's `state`, `derived`), its total.
   'week', 'type', 'model', 'agents', 'median', 'cost', 'other', 'top', 'total', 'totalCost',
+  // 1.6 P14b (O4): the agent hook's marker on a node and on a running item — the view model's words,
+  // "waiting for approval", or null.
+  'hookWait',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {

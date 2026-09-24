@@ -78,6 +78,45 @@ export const PER_MINUTE_FROM_MS = 60_000
 export const WEEK_ROWS = 10
 /** L3: the largest agents of the 7 days the block names below its table — rows that select like the tree's. */
 export const TOP_AGENTS = 5
+/**
+ * O4 (1.6): how long a line of the agent hook's mirror file counts. A wait the hook reported is
+ * shown only while it is younger than this, and only while nothing newer happened on the node —
+ * a later line of its transcript, a later hook call for it (a stop clears it) — so a wait whose
+ * answer the hook never saw does not stand for good.
+ */
+export const HOOK_MAX_AGE_MS = 30 * 60_000
+
+/**
+ * O4 (§0a.13): the hook events the setup document installs, and the mirror file's `event` field —
+ * exactly these four. `PostToolUse` is not among them (every tool call would start the script).
+ */
+export type HookEvent = 'SubagentStart' | 'SubagentStop' | 'Notification' | 'PermissionRequest'
+/** O4: what a hook call says an agent or a session waits for — `none` clears a wait. */
+export type HookWait = 'none' | 'permission' | 'input'
+
+/**
+ * O4 (§0a.13): one line of the agent hook's mirror file, as the reader keeps it — the six fields
+ * the script writes, the literal `v` aside, each checked again on the way in. Never stored in the
+ * snapshot: the file is read again whenever it changes.
+ */
+export interface HookEntry {
+  /** When the hook ran, ms since the epoch — the script's clock, the same machine's. */
+  ts: number
+  event: HookEvent
+  /** The Claude Code session the call came from. */
+  sessionId: string
+  /** The agent it came from; null for a call of the session itself — or one Claude Code sent without it. */
+  agentId: string | null
+  wait: HookWait
+}
+
+/**
+ * The key of a hook entry: its session and its agent — the latest call per pair counts. `|` is in
+ * neither id's alphabet, so no two pairs share a key.
+ */
+export function hookKey(sessionId: string, agentId: string | null): string {
+  return `${sessionId}|${agentId ?? ''}`
+}
 
 /**
  * `stopped` (1.6 D7): the parent recorded a stop — `killed`, `cancelled` or `stopped` — which is
@@ -193,6 +232,14 @@ export interface TreeNode {
    */
   silence: boolean
   /**
+   * O4 (1.6): the agent hook's marker — "waiting for approval", "waiting for input" — on an agent
+   * whose own state is inferred, or on a session, while the hook's latest call for it reported a
+   * wait that is younger than HOOK_MAX_AGE_MS and newer than the node's last activity (a session's
+   * wait for input only while it is active). A marker, never a state: the node's state stays the
+   * one its lines give it. Null for every other node, and while the hook is not installed.
+   */
+  hookWait: string | null
+  /**
    * Agents and pending launches anywhere below this node, counted on the whole tree — open or
    * closed, shown or not — the `started` of its tally, where it has one. 0 for a node with none
    * below it. A run's collector (1.6 D4) counts its members, and so does every node above it: the
@@ -284,6 +331,8 @@ export interface RunningItem {
   waiting: boolean
   /** N5, as the node: the page may say how long the agent has been silent, from `lastTs` on. */
   silence: boolean
+  /** O4, as the node: the agent hook's marker ("waiting for approval"), or null. */
+  hookWait: string | null
   /**
    * The running agents the entry stands for: 1 for an agent or a launch, a collector's members that
    * run (D4). What `AgentTreeVm.running` sums over every entry, listed or not.

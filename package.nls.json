@@ -26,6 +26,7 @@
   "command.copySummary.title": "Copy Usage Summary",
   "command.copyDiagnostics.title": "Copy Diagnostics",
   "command.copyAgentId.title": "Copy Agent ID",
+  "command.showAgentHookSetup.title": "Set Up the Agent Hook…",
   "command.clearStoredData.title": "Clear Stored Data…",
   "command.previewStatusBar.title": "Preview Status Bar States",
   "command.connectStatusLine.title": "Connect Claude Status Line…",

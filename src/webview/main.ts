@@ -1512,6 +1512,13 @@ const AGENT_MAX_DEPTH = 24;
  */
 const AGENT_MODEL_ROOM_EM = 1.9;
 /**
+ * 1.6 O4: the least room, in the figures' font size, the agent hook's marker keeps on a figures'
+ * line too narrow for all of it — its first word and the line's ellipsis, "waiting …". With that
+ * much it gives way on the ellipsis, after every part behind it is off the line; with less it is
+ * taken off whole, as any part (fitAgentFigures). The usage in front of it always stays.
+ */
+const AGENT_HOOK_ROOM_EM = 4;
+/**
  * 1.6 D10: whether a row of the tree — and of the running list — marks an output that is a lower
  * bound with ⚠, inside its usage figure, titled with the view model's reason ("⚠ lower bound — 2
  * of 41 replies unfinished"). Off, the rows carry no mark and the details' Output note alone says
@@ -1664,6 +1671,18 @@ function liveSilent(ts: number | null, clock: string | null): string {
 }
 
 /**
+ * 1.6 O4: the agent hook's marker of a row — "waiting for approval", "waiting for input", in the view
+ * model's words — as a part of the row's figures' line, or nothing. No colour and no glyph of its
+ * own: a marker beside the state, in the figures' tone, never an alarm. It stands right after the
+ * usage, so the fit takes the clock and the tally off the line before it (fitAgentFigures), and a
+ * screen reader hears it with the figures (the item's description).
+ */
+function hookParts(n: Payload): string[] {
+  const w = n && typeof n.hookWait === 'string' && n.hookWait !== '' ? n.hookWait : '';
+  return w ? ['<span class="nobr ag-hook">' + esc(w) + '</span>'] : [];
+}
+
+/**
  * 1.6 D10: the ⚠ of an output that is a lower bound, for the end of the row's usage figure — only
  * while ROW_LOWER_BOUND_MARK is on, and only with the view model's reason, which is its title: a
  * mark nobody can ask about says less than none. For a screen reader it is "lower bound".
@@ -1723,7 +1742,8 @@ function sessionSpan(n: Payload): string {
 
 /**
  * 1.6 N6: the second line of a row — its figures, in the dim tone, under its name: what it used
- * (a session: its own transcript's and, apart, its agents'), then its duration or — while it runs —
+ * (a session: its own transcript's and, apart, its agents'), then — 1.6 O4 — the agent hook's
+ * marker where the view model sends one (hookParts), then its duration or — while it runs —
  * the live clock since its start in the duration's place, then how long a running agent has been
  * silent (N5), then the tally of the agents below it (N1), where the row shows one. A session's and
  * a run's line puts its tally before its duration (1.6 P7b, the lead's call): what the agents
@@ -1744,7 +1764,8 @@ function agentFigLine(n: Payload, kind: string, state: string, tally: string[], 
   const start = kind === 'noreply' ? null : agentTs(n.startTs);
   const clock = state === 'running' && start !== null;
   const nobr = (f: string): string => '<span class="nobr">' + f + '</span>';
-  const head = (kind === 'session' ? sessionFigures(n) : [orDash(n.usage) + lowerMark(n)]).map(nobr);
+  // 1.6 O4: the agent hook's marker right after the usage (hookParts).
+  const head = (kind === 'session' ? sessionFigures(n) : [orDash(n.usage) + lowerMark(n)]).map(nobr).concat(hookParts(n));
   // In the duration's place, while it runs, the time since the start, ticking: the running glyph
   // beside the name says what it counts, and the line has no room to spare for "running for" at 260 px.
   const since = agentClock(n.startClock);
@@ -2119,7 +2140,8 @@ function agentNowRow(it: Payload, panel: AgentPanel | null): string {
   const kind = it.kind === 'pending' || it.kind === 'noreply' ? String(it.kind) : 'agent';
   const start = kind === 'noreply' ? null : agentTs(it.startTs);
   // 1.6 D10: marked as the tree's row is, while the page marks rows at all.
-  const head = ['<span class="nobr">' + orDash(it.usage) + lowerMark(it) + '</span>'];
+  // 1.6 O4: the agent hook's marker right after the usage, as on the tree row.
+  const head = ['<span class="nobr">' + orDash(it.usage) + lowerMark(it) + '</span>'].concat(hookParts(it));
   if (start !== null) {
     const eye = '<span class="nobr">' + tr('running for {0}', liveSince(start)) + '</span>';
     const since = agentClock(it.startClock);
@@ -2957,7 +2979,9 @@ function fitAgentNames(): void {
  * a screen reader (`ag-gone` hides it from the eye alone — its text at no size, still in the line:
  * 1.6 P10c, so a screen reader hears it with no space of its own before the next comma), so the row
  * still says everything to the ear, and the details panel says everything to the eye. The first part — the usage, with its ⚠ —
- * always stays. Measured first for every line and written after, so a page of rows is laid out twice
+ * always stays. 1.6 O4: the agent hook's marker right after it comes off last, and only when it has
+ * less room than AGENT_HOOK_ROOM_EM: with more, the parts behind it come off and its words are cut
+ * where the line's ellipsis begins (`ag-hook-cut`, its width set through the CSSOM). Measured first for every line and written after, so a page of rows is laid out twice
  * at most; run after every render, on a resize, when a closed section opens, and when the clock
  * grows a line (tickLive). A page without such a line costs one query.
  */
@@ -2968,8 +2992,9 @@ function fitAgentFigures(): void {
     if (!el.classList) return;
     el.classList.remove('ag-cut');
     el.querySelectorAll<HTMLElement>('.ag-gone').forEach(p => p.classList.remove('ag-gone'));
+    el.querySelectorAll<HTMLElement>('.ag-hook-cut').forEach(h => { h.classList.remove('ag-hook-cut'); h.style.maxWidth = ''; });
   });
-  const plan: Array<{ el: HTMLElement; gone: HTMLElement[] }> = [];
+  const plan: Array<{ el: HTMLElement; gone: HTMLElement[]; hook: { el: HTMLElement; w: number } | null }> = [];
   lines.forEach(el => {
     if (typeof el.getBoundingClientRect !== 'function' || !(el.scrollWidth > el.clientWidth + 0.5)) return;
     const parts = Array.from(el.children).filter(p => p.classList && p.classList.contains('ag-fp')
@@ -2977,13 +3002,28 @@ function fitAgentFigures(): void {
     // The room the ellipsis needs at the end of the line: a no-break space and the ellipsis.
     const size = (typeof getComputedStyle === 'function' ? parseFloat(getComputedStyle(el).fontSize) : NaN) || 11;
     const room = el.getBoundingClientRect().left + el.clientWidth - size * 1.4;
+    // 1.6 O4: the agent hook's marker, where the line has one — right after the usage.
+    const hookAt = parts.findIndex(p => typeof p.querySelector === 'function' && !!p.querySelector('.ag-hook'));
+    const hookEl = hookAt >= 0 ? parts[hookAt].querySelector<HTMLElement>('.ag-hook') : null;
     let keep = parts.length;
-    while (keep > 1 && parts[keep - 1].getBoundingClientRect().right > room) keep--;
-    plan.push({ el: el, gone: parts.slice(keep) });
+    while (keep > 1 && parts[keep - 1].getBoundingClientRect().right > room) {
+      // The marker is what the row is there to say while an agent waits: with the parts behind it
+      // off the line, it gives way on the ellipsis while it has AGENT_HOOK_ROOM_EM left.
+      if (hookEl && keep - 1 === hookAt && room - hookEl.getBoundingClientRect().left >= size * AGENT_HOOK_ROOM_EM) break;
+      keep--;
+    }
+    const shrink = hookEl && keep - 1 === hookAt && parts[hookAt].getBoundingClientRect().right > room
+      ? { el: hookEl, w: Math.max(0, Math.floor(room - hookEl.getBoundingClientRect().left)) } : null;
+    plan.push({ el: el, gone: parts.slice(keep), hook: shrink });
   });
   plan.forEach(x => {
     x.el.classList.add('ag-cut');
     x.gone.forEach(p => p.classList.add('ag-gone'));
+    // Its words cut at the room left, the line's own ellipsis after them: "waiting for appr…".
+    if (x.hook) {
+      x.hook.el.classList.add('ag-hook-cut');
+      x.hook.el.style.maxWidth = x.hook.w + 'px';
+    }
   });
 }
 

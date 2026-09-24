@@ -2180,10 +2180,12 @@ test('the running list carries no field the page does not need, and keys it can 
     // 1.6 P5b (D4): `running`, the running agents an entry stands for — 1 here, a collector's many.
     // 1.6 P6: `lowerBoundText` (D10), the node's reason, and `silence` (N5), as the node's.
     // 1.6 P7: `fullLabel` (N6), the name with the whole model id, and the clock times of its start
-    // and last activity for the static screen-reader words (N9).
+    // and last activity for the static screen-reader words (N9). 1.6 P14b: `hookWait` (O4), the
+    // agent hook's marker, as the node's — null here, no hook.
     assert.deepEqual(Object.keys(r).sort(),
-      ['context', 'fullLabel', 'key', 'kind', 'label', 'lastClock', 'lastTs', 'lowerBound', 'lowerBoundText', 'running', 'silence',
+      ['context', 'fullLabel', 'hookWait', 'key', 'kind', 'label', 'lastClock', 'lastTs', 'lowerBound', 'lowerBoundText', 'running', 'silence',
         'startClock', 'startTs', 'usage', 'waiting'])
+    assert.equal(r.hookWait, null)
     assert.ok(r.key.length > 0 && r.key.length <= MAX_AGENT_KEY_CHARS, r.key)
     assert.equal(/[\\/]/.test(r.key + r.context), false, `${r.key} ${r.context}`)
     assert.ok(r.kind === 'agent' || r.kind === 'pending')
@@ -2798,7 +2800,7 @@ test('running counts a collector\'s running members, and the running list carrie
     key: collectorKey, kind: 'noreply', label: '3 agent(s) without a counted reply', fullLabel: '3 agent(s) without a counted reply',
     context: 'Session 9d0eb37a · Workflow run cfe7718d',
     usage: '–', lowerBound: false, lowerBoundText: null, startTs: null, lastTs: NOW - 3 * MIN, startClock: null, lastClock: '11:57',
-    waiting: false, silence: false, running: 3,
+    waiting: false, silence: false, hookWait: null, running: 3,
   })
   // Its row opens its details from the list, the tree closed.
   const picked = page({ ...over, selected: collectorKey })

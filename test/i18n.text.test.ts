@@ -206,7 +206,7 @@ test('the running agents in the status bar speak German, and every word is the b
   const item = (n: number): RunningItem => ({
     key: `a:a${n}`, kind: 'agent', label: `Explore · opus-5 · 10${n}`, fullLabel: `Explore · claude-opus-5 · 10${n}`,
     context: 'Sitzung 9d0eb37a', usage: '1K', lowerBound: false, lowerBoundText: null, startTs: NOW - 60_000,
-    lastTs: NOW, startClock: null, lastClock: null, waiting: false, silence: false, running: 1,
+    lastTs: NOW, startClock: null, lastClock: null, waiting: false, silence: false, hookWait: null, running: 1,
   })
   const on = makeConfig({ 'tokenPace.statusBar.show': ['agents'] })
   const of = (n: number, more = 0): ReturnType<typeof buildItems>[number] => german(() => buildItems({

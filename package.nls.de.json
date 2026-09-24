@@ -26,6 +26,7 @@
   "command.copySummary.title": "Verbrauchsübersicht kopieren",
   "command.copyDiagnostics.title": "Diagnose kopieren",
   "command.copyAgentId.title": "Agenten-ID kopieren",
+  "command.showAgentHookSetup.title": "Agent-Hook einrichten…",
   "command.clearStoredData.title": "Gespeicherte Daten löschen…",
   "command.previewStatusBar.title": "Statusleisten-Zustände in der Vorschau zeigen",
   "command.connectStatusLine.title": "Claude-Statuszeile verbinden…",

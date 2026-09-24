@@ -410,7 +410,8 @@ function agentPickLines(vm: ViewModel): PickItem[] {
     out.push({
       label,
       description: `${r.usage}${r.lowerBound === true ? ' ⚠' : ''}`,
-      detail: [r.context, r.waiting ? t('waits for a child agent') : null, r.lowerBoundText].filter(Boolean).join(' · ') || undefined,
+      // 1.6 O4: the agent hook's marker, as the dashboard's row carries it.
+      detail: [r.context, r.waiting ? t('waits for a child agent') : null, hookOf(r), r.lowerBoundText].filter(Boolean).join(' · ') || undefined,
       command: 'tokenPace.showDashboard',
     })
   }
@@ -599,6 +600,14 @@ function agentStateWord(state: NodeState): string {
 }
 
 /**
+ * 1.6 O4: the agent hook's marker of a node or a running item — "waiting for approval" — or null:
+ * the view model's words, printed where the dashboard's row carries them.
+ */
+function hookOf(n: { hookWait?: string | null }): string | null {
+  return typeof n.hookWait === 'string' && n.hookWait !== '' ? n.hookWait : null
+}
+
+/**
  * The name a markdown line gives a node (1.6 N6): its `fullLabel`, the whole model id — the page's
  * row shortens it ("opus-5"), a document keeps it — or its label, from a view model without one.
  */
@@ -617,7 +626,9 @@ function fullName(n: { label: string; fullLabel?: string }): string {
  * with agents below it — a session, a run, an agent that launched others — carries their tally
  * after its name, in brackets so its counts do not run into the figures (1.6 N1):
  * "[~Running] Workflow run Tue 11:50 · cfe7718d (6 started · 2 ✓ · 1 ✕ · 2 ↻ · ~1 ●) · 1.2M · 4 min 10 s".
- * The names are the tree's (N6), the id plain where the page dims it.
+ * The names are the tree's (N6), the id plain where the page dims it. The agent hook's marker
+ * (1.6 O4) follows the usage where the view model sends one: "… · 12.3K · waiting for approval ·
+ * 4 min 05 s".
  * The document prints every node, so an agent's tally stands beside its children's lines, as
  * a session's and a run's do.
  */
@@ -627,13 +638,16 @@ function agentNodeLine(n: TreeNode): string {
   const tally = typeof n.tallyText === 'string' && n.tallyText !== '' ? ` (${cell(n.tallyText)})` : ''
   const name = (n.sub ? `${cell(fullName(n))} — ${cell(n.sub)}` : cell(fullName(n))) + tally
   const mark = n.lowerBound ? ' ⚠' : ''
+  // 1.6 O4: the agent hook's marker after the usage, where the dashboard's row has it.
+  const hook = hookOf(n)
+  const wait = hook !== null ? ` · ${cell(hook)}` : ''
   if (n.kind === 'session') {
     const agents = typeof n.usageAgents === 'string' && n.usageAgents !== ''
       ? ` · ${t('agents {0}', cell(n.usageAgents))}` : ''
-    return `[${state}] ${name} · ${t('own {0}', cell(n.usage))}${mark}${agents} · ${cell(n.duration)}`
+    return `[${state}] ${name} · ${t('own {0}', cell(n.usage))}${mark}${agents}${wait} · ${cell(n.duration)}`
   }
   const superseded = n.superseded === true ? ` (${t('superseded by a later attempt')})` : ''
-  return `[${state}] ${name} · ${cell(n.usage)}${mark} · ${cell(n.duration)}${superseded}`
+  return `[${state}] ${name} · ${cell(n.usage)}${mark}${wait} · ${cell(n.duration)}${superseded}`
 }
 
 /**
@@ -644,12 +658,14 @@ function agentNodeLine(n: TreeNode): string {
  * list, this line is all the document says of it. A run's collector (1.6 D4) is one line for
  * all of its agents without a counted reply, and says how many of them run:
  * "[~Running] 263 agent(s) without a counted reply · Session 0133faf9 · Workflow run 7e21c0de · – (~10 of them running)".
+ * The agent hook's marker (1.6 O4) closes the line of an agent it says waits: "… · 12.3K · waiting for approval".
  */
 function runningLine(r: RunningItem): string {
   const members = r.kind === 'noreply' && typeof r.running === 'number' && Number.isInteger(r.running) && r.running >= 1
     ? ` (${r.running === 1 ? t('~1 of them running') : t('~{0} of them running', full(r.running))})` : ''
+  const hook = hookOf(r)
   return `- [${estimate(t('Running'))}] ${cell(fullName(r))} · ${cell(r.context)} · ${cell(r.usage)}`
-    + `${r.lowerBound === true ? ' ⚠' : ''}${r.waiting ? ` ${t('(waiting)')}` : ''}${members}`
+    + `${r.lowerBound === true ? ' ⚠' : ''}${r.waiting ? ` ${t('(waiting)')}` : ''}${hook !== null ? ` · ${cell(hook)}` : ''}${members}`
 }
 
 /**

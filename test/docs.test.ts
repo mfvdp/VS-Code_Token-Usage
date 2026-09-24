@@ -13,8 +13,10 @@ import { strict as assert } from 'node:assert'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { test } from 'node:test'
+import { HOOK_LINE_MAX_BYTES, HOOK_TAIL_BYTES, hookSetupDocument } from '../src/agentHook'
+import { HOOK_EVENTS, HOOK_KEEP_LINES, HOOK_ROTATE_BYTES, HOOK_STDIN_MAX_BYTES } from '../src/agentHookScript'
 import {
-  AGENT_RETENTION_DAYS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
+  AGENT_RETENTION_DAYS, HOOK_MAX_AGE_MS, MAX_AGENT_MORE, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUN_AGENTS,
   MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, SESSION_ACTIVE_MS,
   PER_MINUTE_FROM_MS, SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
@@ -312,6 +314,7 @@ test('the Privacy list names every file the extension opens', () => {
     'journal.jsonl',                  // a workflow run's journal of started agents and results
     'workflows/wf_',                  // 1.6 L4 (§0a.12): Claude Code's run record, <session>/workflows/wf_<id>.json
     'subagents/',                     // the agent directories the running tree is polled from
+    'agent-hook.jsonl',               // 1.6 O4 (§0a.13): the agent hook's mirror in globalStorage, only while installed
   ]) {
     assert.ok(privacy.includes(needed), `the Privacy section does not mention ${needed}`)
   }
@@ -377,7 +380,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
     'tool errors', 'a cache miss', 'a cache miss\'s diagnostics', 'a cache miss\'s reason', 'the writer\'s version',
     'the permission mode', 'a compaction', 'a compaction\'s metadata',
     // 1.6 §0a.12 (P13b): Claude Code's run record — the key-picker's seven keys, and each value's check.
-    'the run record', 'the run record\'s values']) {
+    'the run record', 'the run record\'s values',
+    // 1.6 §0a.13 (P14b): the agent hook — its script's four keys of a call, its reader's six fields of a line.
+    'the agent hook\'s input', 'the agent hook\'s mirror']) {
     assert.ok(readers.includes(what), `the read contract no longer has a row for ${what}`)
   }
   for (const row of READ_CONTRACT) {
@@ -399,7 +404,9 @@ test('the privacy and agents pages name every field the agent tables read, and t
     // preserved; a sidecar's workflow phase and its worktree's path.
     'isCompactSummary', 'preservedSegment', 'workflowPhase', 'worktreePath',
     // 1.6 §0a.12 (P13b): the parts of a run record the key-picker never decodes, beside its script and result.
-    'logs', 'phases', 'workflowProgress']) {
+    'logs', 'phases', 'workflowProgress',
+    // 1.6 §0a.13 (P14b): the keys of a hook call the agent hook's script never reads.
+    'tool_input', 'tool_response', 'transcript_path', 'cwd', 'last_assistant_message']) {
     assert.ok(doc.privacy.includes(`\`${never}\``), `docs/privacy.md no longer says ${never} is never read`)
     assert.ok(doc.agents.includes(`\`${never}\``), `docs/agents.md no longer says ${never} is never read`)
   }
@@ -602,10 +609,55 @@ test('docs/agents.md states the limits the tree, the push and the sanitisers wor
     [`only from a regular file of at most ${RUN_RECORD_MAX_BYTES / (1024 * 1024)} MB, never through a link`, 'the run record cap'],
     [`walks the file's bytes in ${RUN_RECORD_CHUNK_BYTES / 1024} KB chunks`, 'the run record\'s chunk'],
     [`decodes a top-level key of at most ${RUN_RECORD_SCALAR_MAX} bytes and, of the seven, a value of at most ${RUN_RECORD_SCALAR_MAX} bytes`, 'what the key-picker decodes'],
+    // 1.6 O4 (P14b, §0a.13): the agent hook — how long a call counts, what the reader takes, what the
+    // script reads and how far the file grows.
+    [`while it is younger than **${HOOK_MAX_AGE_MS / 60_000} minutes**`, 'how long an agent hook call counts'],
+    [`at most its last **${HOOK_TAIL_BYTES / 1024} KB**, lines of at most **${HOOK_LINE_MAX_BYTES / 1024} KB**`, 'what the hook reader takes'],
+    [`reads at most **${HOOK_STDIN_MAX_BYTES / (1024 * 1024)} MB** of input`, 'the hook script\'s input cap'],
+    [`Over **${HOOK_ROTATE_BYTES / 1024} KB** the file is cut to its newest **${HOOK_KEEP_LINES}** lines`, 'the hook mirror\'s cut'],
   ]
   const flat = doc.agents.replace(/\s+/g, ' ')
   for (const [claim, what] of claims) {
     assert.ok(flat.includes(claim), `docs/agents.md does not state ${what}: ${claim}`)
+  }
+})
+
+test('the agent hook is documented as it works: installed by you, removed by you, Node.js required, the tree\'s words (1.6 O4)', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  const agents = flat(doc.agents)
+  const privacy = flat(doc.privacy)
+  // The command, as the palette shows it, on the commands page and on the agents page.
+  const command = manifest.contributes.commands.find((c) => c.command === 'tokenPace.showAgentHookSetup')
+  assert.ok(command, 'the manifest has no tokenPace.showAgentHookSetup')
+  assert.equal(command.title, 'Set Up the Agent Hook…')
+  assert.ok(doc.commands.includes('| `Token Pace: Set Up the Agent Hook…` |'), 'docs/commands.md has no row for the command')
+  assert.ok(agents.includes('*Token Pace: Set Up the Agent Hook…*'), 'docs/agents.md does not name the command')
+  // Installed by you, removed by you; nothing written into ~/.claude; Node.js on the PATH.
+  for (const [page, text] of [['agents', agents], ['privacy', privacy]] as const) {
+    assert.ok(/\*\*installed by you, removed by you\*\*/i.test(text), `docs/${page}.md does not say it is installed and removed by you`)
+    assert.ok(text.includes('never writes into `~/.claude`'), `docs/${page}.md does not say nothing is written into ~/.claude`)
+  }
+  for (const claim of ['**Node.js on the PATH** Claude Code runs its hooks with', 'there is no fallback without it',
+    '`node "<globalStorage>/agent-hook.js" "<globalStorage>/agent-hook.jsonl"`',
+    'In Claude Code\'s auto mode no permission dialog is shown, so no wait is reported.',
+    'The marker is shown when Claude Code reports it', '`waiting for approval`', '`waiting for input`',
+    '`The agent hook reported at 14:21: waiting for approval.`', 'the row `Agent hook` — `waiting for approval at 14:21`',
+    'a marker, never a state', '`fetch(`']) {
+    assert.ok(agents.toLowerCase().includes(claim.toLowerCase()), `docs/agents.md does not say: ${claim}`)
+  }
+  // The four events the snippet installs are the ones the page names, and PostToolUse is not among them.
+  for (const event of HOOK_EVENTS) assert.ok(agents.includes(`\`${event}\``), `docs/agents.md does not name ${event}`)
+  assert.equal(/PostToolUse/.test(doc.agents + doc.privacy), false, 'a page names PostToolUse, which the hook does not install')
+  // The sentences and the row quoted on the page are the ones the tree builder writes.
+  const src = readDoc('src/agentTreeBuild.ts')
+  for (const key of ["t('The agent hook reported at {0}: waiting for approval.'", "t('waiting for approval')", "t('waiting for input')",
+    "t('Agent hook')"]) {
+    assert.ok(src.includes(key), `src/agentTreeBuild.ts no longer writes ${key}`)
+  }
+  // The setup document says what the page says it says.
+  const setup = flat(hookSetupDocument('/x/globalStorage/frederik.token-pace', 'linux'))
+  for (const claim of ['Token Pace writes nothing into `~/.claude`', 'Node.js on the PATH', 'no fallback', 'Delete the four entries']) {
+    assert.ok(setup.includes(claim), `the setup document does not say: ${claim}`)
   }
 })
 
@@ -1209,11 +1261,12 @@ test('every picture the README embeds exists and is packaged', () => {
 })
 
 test('.vscodeignore still keeps the things that must not ship', () => {
-  for (const path of ['src/extension.ts', 'test/docs.test.ts', 'dist/extension.js.map', 'media/logo.svg']) {
+  for (const path of ['src/extension.ts', 'test/docs.test.ts', 'dist/extension.js.map', 'media/logo.svg', 'dist/agent-hook.js.map']) {
     assert.equal(shipped(path), false, `${path} would be packaged`)
   }
+  // 1.6 O4: the agent hook's script ships, for the setup command to copy.
   for (const path of ['package.json', 'package.nls.json', 'package.nls.de.json', 'README.md',
-    'dist/extension.js', 'media/logo.png', 'docs/status-bar-states.md']) {
+    'dist/extension.js', 'dist/agent-hook.js', 'media/logo.png', 'docs/status-bar-states.md']) {
     assert.equal(shipped(path), true, `${path} would not be packaged`)
   }
 })

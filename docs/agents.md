@@ -655,7 +655,9 @@ its parent —, its workflow run and — where the run's journal started its
 step more than once — which attempt it was, the **Claude Code version** that wrote its transcript
 — `2.1.281`, `–` where its lines named none — and its **permission mode**, where its transcript
 names one (as Claude Code writes the word, `bypassPermissions`; on the measuring machine no
-agent's transcript names one), and last Claude Code's report, where there is one. An
+agent's transcript names one), then Claude Code's report, where there is one, and last — with the
+[agent hook](#the-agent-hook) installed, while it reports a wait — the `Agent hook` row, `waiting
+for approval at 14:21`. An
 agent nothing of which was counted has no summary line, no mix, no rank, no pace and no tool
 errors, and dashes for its figures.
 
@@ -669,7 +671,8 @@ them ended on a rejected request, by reason, its **agents by effort** — `xhigh
 the most frequent first, `–` counting the ones with none recorded: a launch nobody has read a line
 of, an agent its journal started without a transcript, one whose replies carried none —, the
 Claude Code version that wrote its transcript, the permission mode its prompt last named — the
-word Claude Code writes, `plan` — and its
+word Claude Code writes, `plan` —, the `Agent hook` row while the [agent hook](#the-agent-hook)
+reports a wait of the session itself, and its
 ID; a collector its tally in words (`266 started, 255 done, 3 failed, about 8 unknown`), a
 `Usage` of `–` with why — *These agents were started, but none of them wrote a reply that could be
 counted — their transcripts hold no response, or only rejected requests.* — and how many of them
@@ -738,6 +741,8 @@ Everything comes from the directory Token Pace already reads for the token count
 | the same | a queued task notification, the way a background agent's end arrives: the `<tool-use-id>` and `<status>` tags inside it | its `<summary>` and its `<output-file>` |
 | `<session>/subagents/…/agent-<id>.jsonl`, an API error line (`isApiErrorMessage`) — a request the API rejected | `apiErrorStatus` (an HTTP status, 100 to 599), `error` (one of `rate_limit`, `server_error`, `invalid_request`, `authentication_failed`, `max_output_tokens`, `overloaded`) and, of its `quotaLimits` block, the `rateLimitType` (one of `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`); any other value is none; a main session's error lines are skipped | its `message` — the error's text —, `errorDetails`, `apiError`, `perTurnEffort`, `requestId`, and everything else of `quotaLimits`: its `status`, `resetsAt`, `overageStatus`, `overageDisabledReason`, `isUsingOverage`, `upgradePaths` and `unifiedRateLimitFallbackAvailable` |
 | `<session>/workflows/<run>.json` — Claude Code's run record, beside the session's `subagents/` directory, named by the run's id | seven top-level fields — `status` (one of `completed`, `failed`, `killed`, `stopped`, `cancelled` and `running`), `startTime`, `durationMs`, `agentCount`, `totalTokens`, `totalToolCalls` and `defaultModel` (a model id of `[A-Za-z0-9_.:@/-]`, with a bracketed suffix such as `[1m]`) —, taken by a key-picker that walks the file's bytes in 64 KB chunks and decodes a top-level key of at most 64 bytes and, of the seven, a value of at most 64 bytes, nothing else; only from a regular file of at most 4 MB, never through a link; a value of another shape is none | everything else, never decoded: its `script`, `scriptPath`, `args`, `logs`, `phases`, `workflowProgress`, `result`, `summary`, `error`, `workflowName`, `taskId`, `timestamp` and `runId` |
+| a hook call's input — only with the [agent hook](#the-agent-hook) installed, read by its script on stdin, never by the extension | four keys: `hook_event_name`, `session_id`, `agent_id` and `notification_type` | everything else: its `message`, `tool_input`, `tool_response`, `prompt`, `transcript_path`, `cwd`, `last_assistant_message` and every other key |
+| `agent-hook.jsonl` in the extension's own storage — the agent hook's mirror, written by its script | the six fields of each line, each checked again: `v`, `ts`, `event`, `sessionId`, `agentId` and `wait` | a line with any other key, or with a value outside its allow-list |
 | the transcript that launched a workflow run | a `Workflow` tool call: its `id` alone — of a reply's `tool_use` blocks the `type`, the `name` and the `id` are read, and the `input` only of an `Agent` or `Task` call; from the tool result that answers it the `runId` (`wf_` and at most 61 characters of `[A-Za-z0-9_-]`) and the `status`, and the `tool_use_id` it answers; the run's end arrives as a task notification, read as above | the call's whole input — its `script`, `scriptPath`, `args` and `description` — and the result's `summary`, `scriptPath`, `transcriptDir` (a path), `workflowName`, `taskId` and `taskType` |
 
 So from a `Workflow` tool call its `id`, and from the result that answers it the `runId` and the
@@ -860,6 +865,63 @@ anew, and its run's agents with it.
   takes over the lead reads on from the last save: the cursors and the counts are saved together,
   so nothing is lost and nothing counted twice.
 
+## The agent hook
+
+A transcript does not say that an agent waits for your approval — a permission dialog Claude Code
+shows for one of its tool calls — or for your input; Claude Code's hooks do. *Token Pace: Set Up
+the Agent Hook…* gives you one, opt-in: it copies Token Pace's hook script into the extension's own
+storage (`agent-hook.js` in its `globalStorage`, which the shipped one replaces at activation when it
+is older) and opens a read-only document with the snippet for `~/.claude/settings.json` — the command
+`node "<globalStorage>/agent-hook.js" "<globalStorage>/agent-hook.jsonl"` for the four events
+`SubagentStart`, `SubagentStop`, `Notification` and `PermissionRequest`, with this machine's two
+paths —, what it reads and how to remove it. **Installed by you, removed by you**: Token Pace never
+writes into `~/.claude`, never edits Claude Code's settings and never runs the script. It needs
+**Node.js on the PATH** Claude Code runs its hooks with — the command starts with `node`, and there
+is no fallback without it. To take it out, delete the four entries from `hooks` again — before
+uninstalling Token Pace, whose storage goes with it, the script included.
+
+**What the script reads and writes.** Of a hook call's input the script reads four keys —
+`hook_event_name`, `session_id`, `agent_id` and `notification_type` — and never its `message`,
+`tool_input`, `tool_response`, `prompt`, `transcript_path`, `cwd`, `last_assistant_message` or any
+other. It appends one line of six fields to `agent-hook.jsonl` beside the script: `v` (the literal
+1), `ts` (when the hook ran, in ms), `event` (one of the four), `sessionId` and `agentId` (each an id
+of at most 64 characters of `[A-Za-z0-9_-]`; no agent for a call of the session itself) and `wait`:
+`permission` for a permission request and a `permission_prompt` notification, `input` for an
+`idle_prompt`, `agent_needs_input`, `elicitation_dialog` or `elicitation_url_dialog` notification,
+`none` for a start, a stop and every other notification type Claude Code documents. Any other
+event, any other notification type or a value outside its allow-list drops the call: nothing is
+written. The script reads at most **1 MB** of input, writes only a file named `agent-hook.jsonl`
+given by an absolute path without a `..` part — it creates no directory and follows no link —,
+prints nothing and exits with 0 whatever happens, so it never answers a permission request for you
+and never stops Claude Code. Over **256 KB** the file is cut to its newest **1000** lines. It is
+built on Node's `fs` and `path` alone: `npm run check:privacy` fails the build when the bundle names
+a network module, a child process, a worker thread or `fetch(`.
+
+**What the tree shows.** The extension reads the file whenever it changes — a watcher on its
+storage, and the five-second pass while agents run —, at most its last **256 KB**, lines of at most
+**1 KB**, each of the six fields checked again. The latest call per session and agent counts while
+it is younger than **30 minutes**: a wait newer than the agent's last line puts `waiting for
+approval` (or `waiting for input`) on the agent's row, in its figures' line right after the usage,
+and on its row of the running list — where a narrow sidebar has no room for all of that line, the
+parts behind the marker come off it first, then its words are cut where the line's `…` begins, and
+only where less than its first word would be left is it taken off too; the usage stays, and a
+screen reader hears the whole marker with the figures —; its state line gains `The agent hook reported at 14:21: waiting
+for approval.`, and its details end with the row `Agent hook` — `waiting for approval at 14:21`. A
+call without an agent — a permission request of the session itself — marks the session's row the
+same way, a wait for input only while the session is active: every finished session waits for
+input. The marker goes with the agent's next line, with a later call that reports no wait (its
+stop), with an end its parent recorded, and after 30 minutes. It is a marker, never a state: the
+row keeps the state its transcript gives it — derived, as ever —, and a waiting agent's row says
+why it is quiet in place of `silent for …`. Nothing of it is kept in the snapshot, exported or
+logged. The markdown report prints the marker on the node's line, the Quick Pick beside its
+running item.
+
+In Claude Code's auto mode no permission dialog is shown, so no wait is reported. The marker is
+shown when Claude Code reports it: the keys of a hook call were checked against Claude Code
+2.1.281 — a permission request inside a subagent names it by its `agent_id` —, and a wait is seen
+answered when the agent writes its next line, so a long tool call you approved keeps the marker
+until the agent writes again.
+
 ## Opening and selection
 
 A node with children has a toggle (▸ closed, ▾ open) in front of its row — a click on it, or `→` and
@@ -901,8 +963,9 @@ Data…* removes them with the rest of the dashboard view state.
 * **Waiting can look like silence.** The states are read from replies. An agent waiting on an
   agent it launched reads `running` while that agent runs, and a session reads `active` while
   one of its agents runs — both say they were inferred from below. An agent that waits longer
-  than ten minutes on anything else — one long tool call — reads `unknown` until its next
-  reply.
+  than ten minutes on anything else — one long tool call, a permission dialog nobody answered —
+  reads `unknown` until its next reply; with the [agent hook](#the-agent-hook) installed, its row
+  says `waiting for approval` while Claude Code shows it a permission dialog.
 
 ## Settings
 

@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Three bundles and a test build, no bundler config file:
-//   node build.mjs           dist/extension.js, dist/scanWorker.js, dist/statusline-bridge.js
+// Four bundles and a test build, no bundler config file:
+//   node build.mjs           dist/extension.js, dist/scanWorker.js, dist/statusline-bridge.js,
+//                            dist/agent-hook.js
 //   node build.mjs --watch   the same, rebuilt on change
 //   node build.mjs --tests   every test/**/*.test.ts to out-test/, for `node --test out-test/`
 //
@@ -91,11 +92,16 @@ const common = {
   define: { __EXT_VERSION__: JSON.stringify(pkg.version) },
 }
 
-/** The three shipped bundles. The status-line bridge is a plain Node script, no vscode. */
+/**
+ * The four shipped bundles. The status-line bridge and the agent hook (1.6 O4) are plain Node
+ * scripts, no vscode, run by Claude Code; the hook's is built on `fs` and `path` alone, which
+ * scripts/check-privacy.mjs holds it to.
+ */
 const entries = [
   { in: 'src/extension.ts', out: 'dist/extension.js' },
   { in: 'src/scanWorker.ts', out: 'dist/scanWorker.js' },
   { in: 'src/statuslineBridge.ts', out: 'dist/statusline-bridge.js' },
+  { in: 'src/agentHookScript.ts', out: 'dist/agent-hook.js' },
 ]
 
 /** All test files, recursively, so a future test/<area>/ subdirectory is picked up too. */

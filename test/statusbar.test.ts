@@ -1100,7 +1100,7 @@ function running(n: number, over: Partial<RunningItem> = {}): RunningItem {
     label: `Explore · opus-5 · ${1000 + n}`, fullLabel: `Explore · claude-opus-5 · ${1000 + n}`,
     context: 'Session 9d0eb37a · Workflow run cfe7718d', usage: '12K', lowerBound: false, lowerBoundText: null,
     startTs: NOW - (n + 1) * 60_000, lastTs: NOW - 20_000, startClock: '11:5' + n, lastClock: '11:59',
-    waiting: false, silence: false, running: 1, ...over,
+    waiting: false, silence: false, hookWait: null, running: 1, ...over,
   }
 }
 

@@ -20,6 +20,10 @@
  * test/docs.test.ts. The CLI fails when a reader names a field the table does not list, or a
  * listed field is no longer read.
  *
+ * And the agent hook's bundle (1.6 O4, `dist/agent-hook.js`, which Claude Code runs on every hook
+ * event the user installs it for): it may load `fs` and `path` and nothing else — never a network
+ * module, a child process, a worker thread, never `fetch(` (`scanHookBundle`, below).
+ *
  * Run: node scripts/check-privacy.mjs   (also `npm run check:privacy`)
  */
 
@@ -203,6 +207,14 @@ export const READ_CONTRACT = [
     fields: ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel'] },
   { what: 'the run record\'s values', file: 'src/runRecord.ts', kind: 'fields', body: 'export function cleanRunRecord(', variable: 'o',
     fields: ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel'] },
+  // 1.6 §0a.13 (P14b): the opt-in agent hook. Its script, run by Claude Code, reads four keys of a
+  // hook call's input — the event, the session, the agent, the notification's type —, never its
+  // `message`, `tool_input`, `tool_response`, `prompt`, `transcript_path` or `cwd`; the extension's
+  // reader takes the six fields of each line the script wrote, and checks each again.
+  { what: 'the agent hook\'s input', file: 'src/agentHookScript.ts', kind: 'fields', body: 'export function hookLineOf(', variable: 'j',
+    fields: ['hook_event_name', 'session_id', 'agent_id', 'notification_type'] },
+  { what: 'the agent hook\'s mirror', file: 'src/agentHook.ts', kind: 'fields', body: 'export function cleanHookLine(', variable: 'o',
+    fields: ['v', 'ts', 'event', 'sessionId', 'agentId', 'wait'] },
 ]
 
 /**
@@ -317,6 +329,46 @@ export function checkReadContract(read = (f) => readFileSync(f, 'utf8'), contrac
   return offenders
 }
 
+// ---------------------------------------------------------------------------
+// The agent hook's bundle
+// ---------------------------------------------------------------------------
+
+/** 1.6 O4: the bundle Claude Code runs as the agent hook. */
+export const HOOK_BUNDLE = join('dist', 'agent-hook.js')
+/** The modules it may load: Node's `fs` and `path`, nothing else. */
+export const HOOK_ALLOWED_MODULES = ['fs', 'path']
+/**
+ * The modules it may never name (§0a.13): the network, a process or a thread of its own. Named
+ * twice over on purpose — beside the allow-list above, a string literal of one of these names is a
+ * finding wherever it stands, so a module reached through a variable is caught as well.
+ */
+export const HOOK_FORBIDDEN_MODULES = ['http', 'https', 'net', 'tls', 'dgram', 'child_process', 'worker_threads']
+
+/**
+ * What the agent hook's bundle loads, and what of it breaks the rules: every module a `require`,
+ * an `import(…)` or an `import … from` names (a `node:` prefix taken off); every string literal
+ * that is exactly a forbidden module's name; a `fetch(`. Pure, for the tests.
+ *
+ * @param {string} text
+ * @returns {{ modules: string[], offenders: string[] }}
+ */
+export function scanHookBundle(text) {
+  const modules = new Set()
+  const offenders = new Set()
+  const bare = (m) => m.replace(/^node:/, '')
+  for (const m of text.matchAll(/\brequire\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g)) modules.add(bare(m[2]))
+  for (const m of text.matchAll(/\bimport\s*\(\s*(['"`])([^'"`]+)\1\s*\)/g)) modules.add(bare(m[2]))
+  for (const m of text.matchAll(/\bfrom\s*(['"`])([^'"`]+)\1/g)) modules.add(bare(m[2]))
+  for (const mod of modules) {
+    if (!HOOK_ALLOWED_MODULES.includes(mod)) offenders.add(`loads ${mod}`)
+  }
+  for (const m of text.matchAll(/(['"`])(?:node:)?([a-z_]+)\1/g)) {
+    if (HOOK_FORBIDDEN_MODULES.includes(m[2])) offenders.add(`names ${m[2]}`)
+  }
+  if (/\bfetch\s*\(/.test(text)) offenders.add('calls fetch(')
+  return { modules: [...modules].sort(), offenders: [...offenders].sort() }
+}
+
 function main() {
   if (!existsSync('dist')) {
     console.error('check-privacy: no dist/ — run `npm run build` first')
@@ -350,7 +402,24 @@ function main() {
     if (bad?.unread.length) console.log(`        listed but not read: ${bad.unread.join(', ')}`)
   }
 
+  // 1.6 O4: the agent hook's bundle loads `fs` and `path`, nothing else.
+  let hookBad = null
+  if (!existsSync(HOOK_BUNDLE)) {
+    console.log(`\nagent hook: ${HOOK_BUNDLE} is missing`)
+    hookBad = [`${HOOK_BUNDLE} is missing — run \`npm run build\` first`]
+  } else {
+    const hook = scanHookBundle(readFileSync(HOOK_BUNDLE, 'utf8'))
+    console.log(`\nagent hook: ${HOOK_BUNDLE} loads ${hook.modules.join(', ') || 'nothing'}`)
+    for (const o of hook.offenders) console.log(`  DENY  ${o}`)
+    if (hook.offenders.length > 0) hookBad = hook.offenders
+  }
+
   let failed = false
+  if (hookBad !== null) {
+    console.error(`\ncheck-privacy: the agent hook's bundle breaks its rule: ${hookBad.join('; ')}.`)
+    console.error('It may load fs and path only — never a network module, a child process, a worker, never fetch(.')
+    failed = true
+  }
   if (offenders > 0) {
     console.error(`\ncheck-privacy: ${offenders} literal(s) outside the allow-list.`)
     console.error('Add a host only with a reason; "no network access by default" is a promise, not a default.')

@@ -33,10 +33,10 @@
  */
 
 import {
-  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, AgentWeek, AgentWeekRow, AgentWeekTop, DetailRow, MAX_GROUP_CHILDREN,
-  MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, MixPart, NodeDetails, NodeState,
-  PER_MINUTE_FROM_MS, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS, SPAN_IN_DAYS_FROM_MS,
-  TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
+  AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, AgentWeek, AgentWeekRow, AgentWeekTop, DetailRow, HOOK_MAX_AGE_MS, HookEntry,
+  HookWait, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, MixPart,
+  NodeDetails, NodeState, PER_MINUTE_FROM_MS, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS,
+  SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS, hookKey,
 } from './agentTree'
 import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
@@ -97,6 +97,12 @@ export interface AgentTreeInput {
    * absent, the block names no cost at all.
    */
   pricing?: PricingOptions | null
+  /**
+   * O4 (1.6): the agent hook's mirror as the host last read it — the latest call per (session,
+   * agent), by `hookKey` (src/agentHook.ts). Absent or empty while the hook is not installed:
+   * then no node carries a marker.
+   */
+  hook?: ReadonlyMap<string, HookEntry>
   tcfg: TimeConfig
 }
 
@@ -1129,6 +1135,55 @@ function idRow(id: string): DetailRow {
   return { label: t('ID'), value: id, copy: true }
 }
 
+/** O4: no hook installed — no entry, and no node carries a marker. */
+const NO_HOOK: ReadonlyMap<string, HookEntry> = new Map()
+
+/** O4: the marker a wait puts on a row — "waiting for approval", "waiting for input" —, none for `none`. */
+function hookWaitText(w: HookWait): string | null {
+  return w === 'permission' ? t('waiting for approval') : w === 'input' ? t('waiting for input') : null
+}
+
+/** O4: the sentence the state line gains — who said so, when, and what. */
+function hookSentence(w: HookWait, at: string): string {
+  return w === 'permission'
+    ? t('The agent hook reported at {0}: waiting for approval.', at)
+    : t('The agent hook reported at {0}: waiting for input.', at)
+}
+
+/**
+ * O4 (spec §3 O4 step 3, §7c "Probe complete" and "Hooks reference"): the wait the agent hook
+ * reports for a node, or null. The hook's latest call for the node counts — for an agent the call
+ * inside it (its `agent_id`), for a session a call without an agent: a permission request of the
+ * session itself, or one Claude Code sent without naming the agent — and only while it
+ * reported a wait (a stop, a start or a notification that asks nothing clears it), is younger than
+ * HOOK_MAX_AGE_MS and newer than the node's last activity, which answered it. An agent whose end
+ * was recorded waits for nothing; a session's wait for input counts only while the session is
+ * active — an idle prompt is every finished session's state. A marker, never a state: whatever
+ * the hook said, the node keeps the state its lines give it.
+ */
+function hookOf(e: Entry, sessionId: string, env: RootEnv): HookEntry | null {
+  let h: HookEntry | undefined
+  if (e.kind === 'agent') {
+    if (e.id === null || !derivedOf(e.state)) return null
+    h = env.hook.get(hookKey(sessionId, e.id))
+  } else if (e.kind === 'session') {
+    h = env.hook.get(hookKey(sessionId, null))
+  } else {
+    return null
+  }
+  if (!h || (h.wait !== 'permission' && h.wait !== 'input')) return null
+  if (typeof h.ts !== 'number' || !Number.isFinite(h.ts) || env.now - h.ts > HOOK_MAX_AGE_MS) return null
+  if (e.lastTs !== null && h.ts <= e.lastTs) return null
+  if (e.kind === 'session' && h.wait === 'input' && e.state !== 'active') return null
+  return h
+}
+
+/** O4: the details' row "Agent hook" — the marker and the time of the call, as D6's "done at 14:20" reads. */
+function hookRows(e: Entry, now: number, tcfg: TimeConfig): DetailRow[] {
+  if (e.hookWait === null || e.hookAt === null) return []
+  return [{ label: t('Agent hook'), value: t('{0} at {1}', e.hookWait, stamp(e.hookAt, now, tcfg)) }]
+}
+
 /**
  * D6: the outcome the parent recorded for an agent that wrote on after it — the state word and
  * when, "done at 14:20". Only while the state is inferred again; a recorded state says it itself.
@@ -1544,6 +1599,12 @@ interface Entry {
    * time of its last counted reply, whose day its price is taken for. Null for every other node.
    */
   week: WeekOf | null
+  /**
+   * O4: the agent hook's marker — "waiting for approval" — and the time of the call that reported
+   * the wait; both null for a node without one (see hookOf).
+   */
+  hookWait: string | null
+  hookAt: number | null
   /** Built on demand: only the selected node's rows are ever needed. */
   rows: () => DetailRow[]
 }
@@ -1782,6 +1843,7 @@ function buildForest(input: AgentTreeInput, now: number): Forest {
     if (!recent && a.agents.length === 0 && a.pendings.length === 0 && !journalled && a.runLaunches.size === 0) continue
     const root = buildRoot(a, {
       now, tcfg, attribution: input.attribution, project: projects.get(a.sessionId) ?? null, launchOf,
+      hook: input.hook instanceof Map ? input.hook : NO_HOOK,
     })
     for (const e of preorder(root)) if (!byKey.has(e.key)) byKey.set(e.key, e)
     roots.push(root)
@@ -1839,6 +1901,8 @@ function collectorEntry(sessionId: string, wf: string, members: Member[]): Entry
     effort: null,
     overview: null,
     week: null,
+    hookWait: null,
+    hookAt: null,
     rows: () => [],
   }
   e.rows = () => {
@@ -1861,6 +1925,8 @@ interface RootEnv {
   attribution: Attribution
   project: string | null
   launchOf: (r: AgentRec) => AgentLaunch | null
+  /** O4: the agent hook's latest call per (session, agent); empty without the hook. */
+  hook: ReadonlyMap<string, HookEntry>
 }
 
 function buildRoot(a: RootAcc, env: RootEnv): Entry {
@@ -1904,6 +1970,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     effort: null,
     overview: null,
     week: null,
+    hookWait: null,
+    hookAt: null,
     rows: () => [],
   }
   // L2: the session's two figures first (D5) — its own transcript's usage is the first of them,
@@ -1928,6 +1996,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
     ...effortCountRows(root),
     // O3: the Claude Code that wrote its transcript, and the permission mode it ran in.
     ...writerRows(main),
+    // O4: what the agent hook reported the session waits for, while it waits.
+    ...hookRows(root, now, tcfg),
     idRow(a.sessionId),
   ]
 
@@ -1966,6 +2036,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         effort: null,
         overview: null,
         week: null,
+        hookWait: null,
+        hookAt: null,
         rows: () => [],
       }
       attach(w, root)
@@ -2077,6 +2149,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       overview: counted ? overviewOf(c, durationText(activity - first)) : null,
       // L3: grouped by the type and the model its name says, priced for the day of its last reply.
       week: counted ? { type: type ?? t('Agent'), model, models, last: r.lastTs } : null,
+      hookWait: null,
+      hookAt: null,
       rows: () => [],
     }
     // L2 (1.6): the details in the order a reader asks — what the tokens were (the mix), how the
@@ -2115,6 +2189,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
         // O3: the Claude Code that wrote its transcript, and the permission mode, where it names one.
         ...writerRows(r),
         ...reportRows(launch),
+        // O4 (L2's last row): what the agent hook reported it waits for, while it waits.
+        ...hookRows(e, now, tcfg),
       ]
     }
     byAgent.set(r.agentId, e)
@@ -2174,6 +2250,8 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
       effort: null,
       overview: null,
       week: null,
+      hookWait: null,
+      hookAt: null,
       rows: () => [
         { label: t('Type'), value: text(l.typeHint) ?? '–' },
         { label: t('Models'), value: text(l.modelHint) ?? '–' },
@@ -2317,6 +2395,16 @@ function buildRoot(a: RootAcc, env: RootEnv): Entry {
   if (anyRunning && root.state !== 'active') {
     root.state = 'active'
     root.stateText = t('Active — inferred: an agent of this session is running.')
+  }
+
+  // O4: the agent hook's word, once every state above is settled — a marker beside the state and a
+  // sentence after its own, never a state of its own (see hookOf).
+  for (const e of preorder(root)) {
+    const h = hookOf(e, a.sessionId, env)
+    if (h === null) continue
+    e.hookWait = hookWaitText(h.wait)
+    e.hookAt = h.ts
+    e.stateText = `${e.stateText} ${hookSentence(h.wait, stamp(h.ts, now, tcfg))}`
   }
 
   // N1: what the agents below each session, run, collector and agent came to, every state final
@@ -2514,11 +2602,14 @@ function runningOf(roots: Entry[]): Entry[] {
 /**
  * N5 (1.6): whether the page may say how long a node has been silent — an agent running by its
  * own transcript: not one that runs only because an agent below it runs (it waits, and says so),
+ * not one the agent hook says waits for approval or input (O4: its marker says why it is quiet),
  * not a launch nobody has read a line of, not a collector. Its revival after an outcome (D6) and
  * its rejected last request (N3) included: both run by their own lines.
  */
 function silenceOf(e: Entry): boolean {
-  return e.kind === 'agent' && e.state === 'running' && !e.waiting
+  // O4: an agent the hook says waits for approval or input is quiet for that reason, and its
+  // row says so instead.
+  return e.kind === 'agent' && e.state === 'running' && !e.waiting && e.hookWait === null
 }
 
 function runningItem(e: Entry, now: number, tcfg: TimeConfig): RunningItem {
@@ -2544,6 +2635,7 @@ function runningItem(e: Entry, now: number, tcfg: TimeConfig): RunningItem {
     lastClock: clockOf(e.lastTs, now, tcfg),
     waiting: e.waiting,
     silence: silenceOf(e),
+    hookWait: e.hookWait,
     running: runningMembers(e),
   }
 }
@@ -2744,6 +2836,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
       startClock: clockOf(e.startTs, now, input.tcfg),
       lastClock: clockOf(e.lastTs, now, input.tcfg),
       silence: silenceOf(e),
+      hookWait: e.hookWait,
       agentCount: counts.get(e) ?? 0,
       hasChildren: e.children.length > 0,
       childrenTotal: e.children.length,

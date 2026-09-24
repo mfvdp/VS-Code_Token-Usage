@@ -23,6 +23,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `Token Pace: Copy Usage Summary` | | The summary as markdown, on the clipboard |
 | `Token Pace: Copy Diagnostics` | | An allow-listed report, safe to paste into an issue |
 | `Token Pace: Copy Agent ID` | | The whole id of the node selected in the Agents section — agent, launch, run or session, also while its row is inside a closed branch — on the clipboard; the details' *Copy ID* button does the same |
+| `Token Pace: Set Up the Agent Hook…` | | Copies the agent hook's script into the extension's storage and opens a read-only document with the snippet you add to `~/.claude/settings.json` yourself, what it reads and how to remove it — Token Pace writes nothing into `~/.claude` (see [Agents](agents.md#the-agent-hook)) |
 | `Token Pace: Connect Claude Status Line…` | | Installs the status-line bridge (opt-in, with consent and a backup) |
 | `Token Pace: Disconnect Claude Status Line` | | Restores the previous status line, if it is still ours to restore |
 | `Token Pace: Clear Stored Data…` | | Lists and deletes what the extension has stored |

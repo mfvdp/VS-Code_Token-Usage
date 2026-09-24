@@ -1550,7 +1550,7 @@ test('the poll is wanted while an agent runs or a session is active, and never f
   const { ext } = lazy()
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', fullLabel: 'Agent', startClock: null, lastClock: null, sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
-    lowerBound: false, lowerBoundText: null, duration: '–', startTs: null, lastTs: null, silence: false, agentCount: 0, hasChildren: false, childrenTotal: 0,
+    lowerBound: false, lowerBoundText: null, duration: '–', startTs: null, lastTs: null, silence: false, hookWait: null, agentCount: 0, hasChildren: false, childrenTotal: 0,
     childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
@@ -2273,6 +2273,147 @@ test('Copy Agent ID copies the id of the selected node — its details open or i
   await state.execute('tokenPace.copyAgentId')
   assert.equal(state.clipboard.length, from, 'something was copied with nothing selected')
   assert.equal(state.messages[state.messages.length - 1]?.text, 'Select a node in the Agents section first.')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+/** Every file below a directory with its size and time — what "nothing was written there" is checked against. */
+function treeState(dir: string): string[] {
+  const out: string[] = []
+  const walk = (d: string): void => {
+    let names: string[]
+    try { names = fs.readdirSync(d) } catch { return }
+    for (const name of names.sort()) {
+      const full = path.join(d, name)
+      const st = fs.lstatSync(full)
+      out.push(`${path.relative(dir, full)} ${st.size} ${st.mtimeMs}`)
+      if (st.isDirectory()) walk(full)
+    }
+  }
+  walk(dir)
+  return out
+}
+
+test('the agent hook: its mirror in storage marks the running agent until a stop clears it, and its setup writes into storage alone (1.6 O4)', async () => {
+  const fx = makeFixture()
+  writeAgentWorld(fx)
+  // A copy of the script an older build set up: activation replaces it with the shipped one.
+  fs.mkdirSync(fx.storage, { recursive: true })
+  const older = path.join(fx.storage, 'agent-hook.js')
+  fs.writeFileSync(older, '// an older build of the hook script\n')
+  const past = new Date(Date.now() - 3_600_000)
+  fs.utimesSync(older, past, past)
+  const host = await activateHost(fx, REPO)
+  assert.equal(fs.readFileSync(older, 'utf8'), fs.readFileSync(path.join(REPO, 'dist', 'agent-hook.js'), 'utf8'),
+    'activation left an older copy of the hook script in place')
+  assert.match(state.logText(), /Agent hook: the script in the extension storage was updated\./)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const { agg } = lazy()
+  await waitFor('the whole tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  const page = openDashboard()
+  await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
+  // The running workflow agent as the page last received it: in the running list and in the tree.
+  const latestTree = (): AgentTreeVm | null => {
+    for (let i = page.sent.length - 1; i >= 0; i--) {
+      const m = page.sent[i] as { type?: unknown; key?: unknown; payload?: { agents?: AgentTreeVm } }
+      if ((m.type === 'data' || (m.type === 'section' && m.key === 'agents')) && m.payload?.agents) return m.payload.agents
+    }
+    return null
+  }
+  const runningItem = (): { hookWait?: string | null; silence?: boolean } | undefined =>
+    latestTree()?.runningNow.find((r) => r.key === 'a:a1a1a1')
+  assert.ok(runningItem(), 'the running agent is not in the running list')
+  assert.equal(runningItem()?.hookWait, null)
+
+  // Claude Code's hook — the script's own lines, through the script itself — reports a permission
+  // request inside the agent: the page marks it, as the watcher on the storage reads the file.
+  const script = require('../src/agentHookScript') as typeof import('../src/agentHookScript')
+  const mirror = path.join(fx.storage, script.HOOK_MIRROR_NAME)
+  const call = (event: string): Buffer => Buffer.from(JSON.stringify({
+    hook_event_name: event, session_id: ACTIVE, agent_id: 'a1a1a1', cwd: '/synthetic/cwd', tool_input: { command: 'synthetic' },
+  }))
+  assert.equal(script.hookMain(['node', 'agent-hook.js', mirror], call('PermissionRequest'), Date.now()), 0)
+  await waitFor('the marker on the page', () => runningItem()?.hookWait === 'waiting for approval')
+  assert.equal(runningItem()?.silence, false)
+  const pushed = JSON.stringify(latestTree())
+  assert.equal(/synthetic/.test(pushed), false, 'the hook call\'s input reached the page')
+  // Its stop — the latest call — clears it.
+  assert.equal(script.hookMain(['node', 'agent-hook.js', mirror], call('SubagentStop'), Date.now() + 1), 0)
+  await waitFor('the marker gone', () => runningItem()?.hookWait === null)
+  // Nothing of the mirror is stored with the state.
+  const saved = JSON.stringify(readState(fx))
+  assert.equal(saved.includes('PermissionRequest') || saved.includes('agent-hook') || saved.includes('hookWait'), false)
+
+  // The setup: the script's copy in storage, the document with this machine's paths — and every
+  // write of those moments inside the storage directory; nothing in the Claude configuration.
+  const nodeFs = require('node:fs') as Record<string, unknown> & { promises: Record<string, unknown> }
+  const writes: string[] = []
+  const saved2: Array<[Record<string, unknown>, string, unknown]> = []
+  const wrap = (obj: Record<string, unknown>, name: string, paths: (args: unknown[]) => unknown[], writes0 = true): void => {
+    const real = obj[name] as (...a: unknown[]) => unknown
+    saved2.push([obj, name, real])
+    obj[name] = (...args: unknown[]): unknown => {
+      if (writes0) for (const p of paths(args)) writes.push(String(p))
+      return real.apply(obj, args)
+    }
+  }
+  const first = (a: unknown[]): unknown[] => [a[0]]
+  const both = (a: unknown[]): unknown[] => [a[0], a[1]]
+  const second = (a: unknown[]): unknown[] => [a[1]]
+  wrap(nodeFs, 'writeFileSync', first)
+  wrap(nodeFs, 'appendFileSync', first)
+  wrap(nodeFs, 'copyFileSync', second)
+  wrap(nodeFs, 'renameSync', both)
+  wrap(nodeFs, 'mkdirSync', first)
+  wrap(nodeFs, 'rmSync', first)
+  wrap(nodeFs, 'unlinkSync', first)
+  wrap(nodeFs, 'symlinkSync', second)
+  wrap(nodeFs.promises, 'writeFile', first)
+  wrap(nodeFs.promises, 'rename', both)
+  const openSync = nodeFs.openSync as (f: unknown, flags?: unknown, mode?: unknown) => unknown
+  saved2.push([nodeFs, 'openSync', openSync])
+  nodeFs.openSync = (f: unknown, flags?: unknown, mode?: unknown): unknown => {
+    const w = typeof flags === 'string' ? /[wa+]/.test(flags) : typeof flags === 'number' && (flags & (fs.constants.O_WRONLY | fs.constants.O_RDWR)) !== 0
+    if (w) writes.push(String(f))
+    return openSync.call(nodeFs, f, flags, mode)
+  }
+  const claudeBefore = treeState(fx.claudeDir)
+  const homeBefore = treeState(fx.home)
+  try {
+    await state.execute('tokenPace.showAgentHookSetup')
+  } finally {
+    for (const [obj, name, real] of saved2.reverse()) obj[name] = real
+  }
+  const copy = path.join(fx.storage, script.HOOK_SCRIPT_NAME)
+  assert.equal(fs.readFileSync(copy, 'utf8'), fs.readFileSync(path.join(REPO, 'dist', script.HOOK_SCRIPT_NAME), 'utf8'))
+  assert.ok(writes.some((w) => w === copy), `the copy was not written: ${writes.join(', ')}`)
+  for (const w of writes) assert.ok(w.startsWith(fx.storage + path.sep), `a write outside globalStorage: ${w}`)
+  assert.deepEqual(treeState(fx.claudeDir), claudeBefore, 'the setup changed the Claude configuration')
+  assert.deepEqual(treeState(fx.home), homeBefore, 'the setup changed the home directory')
+  assert.equal(fs.existsSync(path.join(fx.claudeDir, 'settings.json')), false)
+  const opened = state.documents[state.documents.length - 1]
+  assert.equal(opened?.uri, 'tokenpace-hook:/agent-hook-setup.md')
+  const block = /```json\n([\s\S]*?)\n```/.exec(opened?.text ?? '')
+  assert.ok(block, opened?.text)
+  const snippet = JSON.parse(block[1]) as { hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>> }
+  assert.deepEqual(Object.keys(snippet.hooks), ['SubagentStart', 'SubagentStop', 'Notification', 'PermissionRequest'])
+  const command = snippet.hooks.PermissionRequest[0].hooks[0].command
+  const quoted = (p: string): string => (process.platform === 'win32' ? `"${p.replace(/\\/g, '/')}"` : `"${p}"`)
+  assert.equal(command, `node ${quoted(copy)} ${quoted(mirror)}`)
+  assert.ok(opened?.text.includes('Token Pace writes nothing into `~/.claude`'))
+  // A missing bundle: said so, and no document points at a script that is not there.
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  void host
+  const bare = tmpDir('tp-nohook')
+  const other = makeFixture()
+  await activateHost(other, bare)
+  // No copy in storage: activation makes none — only the setup command does.
+  assert.equal(fs.existsSync(path.join(other.storage, 'agent-hook.js')), false)
+  const docs = state.documents.length
+  await state.execute('tokenPace.showAgentHookSetup')
+  assert.equal(state.documents.length, docs, 'a setup document was opened without the script')
+  assert.equal(fs.existsSync(path.join(other.storage, script.HOOK_SCRIPT_NAME)), false)
+  assert.ok(state.messages.some((m) => m.text === "Token Pace: the agent hook script could not be copied into the extension's storage (ENOENT)."),
+    JSON.stringify(state.messages.map((m) => m.text)))
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 

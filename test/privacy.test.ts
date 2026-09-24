@@ -118,6 +118,10 @@ const contract = require('../scripts/check-privacy.mjs') as {
   fieldsRead: (body: string, variable: string) => string[]
   constantOf: (src: string, name: string) => string | null
   quotedKeys: (definition: string) => string[]
+  scanHookBundle: (text: string) => { modules: string[]; offenders: string[] }
+  HOOK_BUNDLE: string
+  HOOK_ALLOWED_MODULES: string[]
+  HOOK_FORBIDDEN_MODULES: string[]
 }
 
 const REPO = join(__dirname, '..')
@@ -160,8 +164,40 @@ test('the read contract holds for the shipped sources: every reader names exactl
   const seven = ['status', 'startTime', 'durationMs', 'agentCount', 'totalTokens', 'totalToolCalls', 'defaultModel']
   assert.deepEqual([byWhat.get('the run record')?.kind, byWhat.get('the run record')?.fields], ['regex', seven])
   assert.deepEqual([byWhat.get('the run record\'s values')?.kind, byWhat.get('the run record\'s values')?.fields], ['fields', seven])
-  for (const row of contract.READ_CONTRACT) {
-    assert.equal(row.file, row.what.startsWith('the run record') ? 'src/runRecord.ts' : 'src/agg.ts', row.what)
+  // 1.6 P14b (§0a.13): the agent hook — the script's four keys of a hook call's input, and the
+  // reader's six fields of a mirror line.
+  assert.deepEqual(byWhat.get('the agent hook\'s input')?.fields, ['hook_event_name', 'session_id', 'agent_id', 'notification_type'])
+  assert.deepEqual(byWhat.get('the agent hook\'s mirror')?.fields, ['v', 'ts', 'event', 'sessionId', 'agentId', 'wait'])
+  // 1.6 P13b (pinned and changed by P14b): the two run-record rows read src/runRecord.ts, the two
+  // agent-hook rows the hook's own two files; every other reader is the aggregator's.
+  const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
+    : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts' : 'src/agg.ts'
+  for (const row of contract.READ_CONTRACT) assert.equal(row.file, fileOf(row.what), row.what)
+})
+
+test('the agent hook\'s bundle may load fs and path, and never a network module, a process, a thread or fetch( (§0a.13)', () => {
+  assert.deepEqual(contract.HOOK_ALLOWED_MODULES, ['fs', 'path'])
+  assert.deepEqual(contract.HOOK_FORBIDDEN_MODULES, ['http', 'https', 'net', 'tls', 'dgram', 'child_process', 'worker_threads'])
+  const clean = 'var fs = __toESM(require("fs"));\nvar path = __toESM(require("path"));\nfs.openSync(path.join(a, "agent-hook.jsonl"))\n'
+  assert.deepEqual(contract.scanHookBundle(clean), { modules: ['fs', 'path'], offenders: [] })
+  const cases: Array<[string, string]> = [
+    ['require("https")', 'loads https'], ["require('node:net')", 'loads net'], ['require("child_process")', 'loads child_process'],
+    ['import("tls")', 'loads tls'], ['import { Worker } from "worker_threads"', 'loads worker_threads'], ['require("dgram")', 'loads dgram'],
+    ['require("os")', 'loads os'], ['const m = "http"; require(m)', 'names http'], ['globalThis.fetch ("x")', 'calls fetch('],
+    ['fetch(url)', 'calls fetch('],
+  ]
+  for (const [text, finding] of cases) {
+    assert.ok(contract.scanHookBundle(clean + text).offenders.includes(finding), `${text}: ${JSON.stringify(contract.scanHookBundle(clean + text))}`)
+  }
+  // The shipped bundle, when it is built: fs and path, nothing else.
+  const built = join(REPO, contract.HOOK_BUNDLE)
+  try {
+    const text = readFileSync(built, 'utf8')
+    assert.deepEqual(contract.scanHookBundle(text), { modules: ['fs', 'path'], offenders: [] })
+    assert.deepEqual(scanBundle(text).urls, [])
+  } catch (err) {
+    // A bare `node --test` after a checkout has no dist/; the CLI below and test/agentHook.test.ts build it.
+    if ((err as { code?: string }).code !== 'ENOENT') throw err
   }
 })
 
@@ -228,6 +264,12 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     mkdirSync(join(dir, 'dist'))
     mkdirSync(join(dir, 'src'))
     writeFileSync(join(dir, 'dist', 'extension.js'), 'const ENDPOINT = "https://api.anthropic.com/api/oauth/usage"\n')
+    // 1.6 P14b (pinned and changed): the CLI checks the agent hook's bundle as well, and its two
+    // readers are rows of the contract.
+    const hookBundle = 'var fs = require("fs");\nvar path = require("path");\n'
+    writeFileSync(join(dir, 'dist', 'agent-hook.js'), hookBundle)
+    writeFileSync(join(dir, 'src', 'agentHook.ts'), fromRepo('src/agentHook.ts'))
+    writeFileSync(join(dir, 'src', 'agentHookScript.ts'), fromRepo('src/agentHookScript.ts'))
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })
@@ -258,6 +300,28 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     assert.equal(picked.status, 1, picked.out)
     assert.match(picked.out, /DIFF {2}the run record: /)
     assert.match(picked.out, /read but not listed: script/)
+    writeFileSync(join(dir, 'src', 'runRecord.ts'), runRecord)
+    assert.equal(run().status, 0)
+    // 1.6 P14b (§0a.13): the hook's bundle reaching for the network, or missing — the gate stops both.
+    writeFileSync(join(dir, 'dist', 'agent-hook.js'), `${hookBundle}var https = require("https");\n`)
+    const net = run()
+    assert.equal(net.status, 1, net.out)
+    assert.match(net.out, /DENY {2}loads https/)
+    assert.match(net.out, /the agent hook's bundle breaks its rule/)
+    rmSync(join(dir, 'dist', 'agent-hook.js'))
+    const missing = run()
+    assert.equal(missing.status, 1, missing.out)
+    assert.match(missing.out, /agent-hook\.js is missing/)
+    // The hook script starts to read the prompt of a hook call: the contract stops it.
+    writeFileSync(join(dir, 'dist', 'agent-hook.js'), hookBundle)
+    const script = fromRepo('src/agentHookScript.ts')
+    const at2 = script.indexOf('const sessionId = hookId(j.session_id)')
+    assert.ok(at2 >= 0)
+    writeFileSync(join(dir, 'src', 'agentHookScript.ts'), `${script.slice(0, at2)}void j.prompt\n  ${script.slice(at2)}`)
+    const prompt = run()
+    assert.equal(prompt.status, 1, prompt.out)
+    assert.match(prompt.out, /DIFF {2}the agent hook's input/)
+    assert.match(prompt.out, /read but not listed: prompt/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

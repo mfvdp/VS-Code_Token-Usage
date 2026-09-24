@@ -14,7 +14,9 @@
  *  • The status bar ticks every second, the view model at most every five. Rebuilding the
  *    dashboard model is the expensive half, and a countdown does not need it.
  *  • Nothing is written outside `globalStorage` from here. The two opt-in exceptions have
- *    their own consent objects and live in quotaManager.ts and bridge.ts.
+ *    their own consent objects and live in quotaManager.ts and bridge.ts. The agent hook (1.6 O4)
+ *    is none: its setup command copies the script into `globalStorage` and shows the snippet the
+ *    user pastes into Claude Code's settings himself; the extension never writes those.
  */
 
 import * as crypto from 'crypto'
@@ -24,6 +26,9 @@ import * as path from 'path'
 import { Worker } from 'worker_threads'
 import * as vscode from 'vscode'
 import { ADAPTERS, isKnownSource, SOURCES } from './adapters'
+import {
+  HOOK_MIRROR_NAME, HOOK_SCRIPT_NAME, HookMirror, hookSetupDocument, installHookScript, refreshHookScript,
+} from './agentHook'
 import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { AGENT_TABLES_REVISION, Aggregator, cleanAgentId, IngestChanges } from './agg'
 import { Alerts } from './alerts'
@@ -90,6 +95,11 @@ const ROLLUP_MS = 6 * 60 * 60_000
 /** A file event storm (a save, a rename, a truncation) is one reload. */
 const FOLLOWER_DEBOUNCE_MS = 1000
 const QUOTA_FILE_DEBOUNCE_MS = 300
+/** 1.6 O4: a burst of hook calls — a stop fires several times — is one read of the mirror. */
+const HOOK_FILE_DEBOUNCE_MS = 300
+/** 1.6 O4: the read-only setup document of the agent hook, on a scheme of its own. */
+export const HOOK_SETUP_SCHEME = 'tokenpace-hook'
+export const HOOK_SETUP_URI = `${HOOK_SETUP_SCHEME}:/agent-hook-setup.md`
 /**
  * While an agent runs, the agent directories of its session are listed this often: the file
  * watcher reports a change within about a second, but not the files of a directory it has
@@ -172,6 +182,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     leader: path.join(storage, 'leader.json'),
     mirror: path.join(storage, 'statusline-mirror.json'),
   }
+  // 1.6 O4: the agent hook's script as the extension ships it, and the mirror file the copy in
+  // globalStorage writes when Claude Code runs it — read whenever it changes, never stored.
+  const hookBundle = context.asAbsolutePath(path.join('dist', HOOK_SCRIPT_NAME))
+  const hookMirror = new HookMirror(path.join(storage, HOOK_MIRROR_NAME))
+  try {
+    // An update reaches a hook the user installed before it; nothing is copied without one.
+    if (refreshHookScript(hookBundle, storage)) log.info('Agent hook: the script in the extension storage was updated.')
+  } catch (err) {
+    log.warn(`Agent hook: the script in the extension storage could not be updated (${errorKind(err)}).`)
+  }
+  hookMirror.refresh(Date.now())
   // `~/.claude.json` lives in the home directory even when CLAUDE_CONFIG_DIR moves the rest
   // of Claude Code's state; deriving it from the config dir would read the wrong file.
   const claudeJsonFile = path.join(os.homedir(), '.claude.json')
@@ -333,6 +354,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       context: quotaMgr.contextReading(),
       promptCache: quotaMgr.promptCacheReading(),
       preview: statusBar.previewActive(),
+      hook: hookMirror.entries(),
     })
   }
 
@@ -366,7 +388,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     const vm = latestVm
     if (vm === undefined) return
     try {
-      latestVm = { ...vm, agents: agentTreeFor({ agg, cfg, ui, now }, 'page') }
+      latestVm = { ...vm, agents: agentTreeFor({ agg, cfg, ui, now, hook: hookMirror.entries() }, 'page') }
       updateAgentPoll()
       dashboard.update(latestVm)
       views.refreshMarkdown()
@@ -517,10 +539,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     getVm: () => latestVm ?? buildVm(Date.now()),
     // The markdown document prints every node of the tree (1.6 D3), which the dashboard's
     // payload no longer carries: it is built on demand, for the moment the view model is of.
-    getAgentTextTree: () => agentTreeFor({ agg, cfg, ui, now: latestVm?.now ?? Date.now() }, 'text'),
+    getAgentTextTree: () => agentTreeFor({ agg, cfg, ui, now: latestVm?.now ?? Date.now(), hook: hookMirror.entries() }, 'text'),
     run: (command, ...args) => vscode.commands.executeCommand(command, ...args),
     getExportInput: () => ({ agg, range: currentRange(Date.now()), cfg }),
   })
+
+  // 1.6 O4: the agent hook's setup document — read-only, built from this machine's storage path
+  // whenever it is opened (see `showAgentHookSetup`).
+  const hookDocChanged = new vscode.EventEmitter<vscode.Uri>()
+  const hookDocs = { refresh: (): void => hookDocChanged.fire(vscode.Uri.parse(HOOK_SETUP_URI)) }
+  context.subscriptions.push(
+    hookDocChanged,
+    vscode.workspace.registerTextDocumentContentProvider(HOOK_SETUP_SCHEME, {
+      onDidChange: hookDocChanged.event,
+      provideTextDocumentContent: () => hookSetupDocument(storage),
+    }),
+  )
 
   const bridgePaths: BridgePaths = {
     settingsFile: path.join(claudeDir, 'settings.json'),
@@ -682,6 +716,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   }
 
   async function pollAgentFiles(): Promise<void> {
+    // 1.6 O4: the agent hook's mirror, in case its watcher missed a change — one `lstat` when it did not.
+    refreshHook()
     // Not while a scan or the replay moves the records the pass reads its sessions from.
     if (scanning || replayRun !== null || !readsTranscripts()) return
     try {
@@ -794,6 +830,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   const transcriptWatchers: fs.FSWatcher[] = []
   const followerWatchers: fs.FSWatcher[] = []
   let quotaWatchers: fs.FSWatcher[] = []
+  let hookWatchers: fs.FSWatcher[] = []
+  let hookFileTimer: ReturnType<typeof setTimeout> | undefined
   let credentialsWatcher: { dispose(): void } | null = null
   let sweepTimer: ReturnType<typeof setInterval> | undefined
   let followerTimer: ReturnType<typeof setTimeout> | undefined
@@ -872,6 +910,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         }, QUOTA_FILE_DEBOUNCE_MS)
       },
     )
+  }
+
+  /**
+   * 1.6 O4: the agent hook's mirror file, read again when it changed — its entries are the tree's
+   * markers, so a change rebuilds the Agents section alone. In every role: the file is in this
+   * window's own storage, not a transcript, and a follower draws its markers too.
+   */
+  function refreshHook(): void {
+    if (disposed) return
+    let changed = false
+    try {
+      changed = hookMirror.refresh(Date.now())
+    } catch (err) {
+      log.debug(`Agent hook: the mirror could not be read (${errorKind(err)})`)
+    }
+    if (changed) rebuildAgents(Date.now())
+  }
+
+  function watchHookFile(): void {
+    closeAll(hookWatchers)
+    hookWatchers = watchFiles([hookMirror.file], () => {
+      if (hookFileTimer || disposed) return
+      hookFileTimer = setTimeout(() => {
+        hookFileTimer = undefined
+        refreshHook()
+      }, HOOK_FILE_DEBOUNCE_MS)
+    })
   }
 
   function ensureCredentialsWatcher(): void {
@@ -1260,6 +1325,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     void vscode.window.showInformationMessage(t('Token Pace: ID copied to the clipboard.'))
   }
 
+  /**
+   * 1.6 O4 (§3 O4 step 3): copies the agent hook's script into globalStorage and opens the read-only
+   * document with the snippet for Claude Code's settings — the paths of this machine, what the hook
+   * reads and writes, what it needs, how to take it out. Nothing is written anywhere else: the user
+   * adds the snippet himself. A script that cannot be copied is said so, and no snippet is shown
+   * that would point at a file that is not there.
+   */
+  async function showAgentHookSetup(): Promise<void> {
+    try {
+      installHookScript(hookBundle, storage)
+    } catch (err) {
+      log.warn(`Agent hook: the script could not be copied into the extension storage (${errorKind(err)}).`)
+      void vscode.window.showWarningMessage(
+        t('Token Pace: the agent hook script could not be copied into the extension\'s storage ({0}).', errorKind(err)),
+      )
+      return
+    }
+    log.info('Agent hook: the script is in the extension storage; the setup document is open.')
+    hookDocs.refresh()
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(HOOK_SETUP_URI))
+    await vscode.languages.setTextDocumentLanguage(doc, 'markdown')
+    await vscode.window.showTextDocument(doc, { preview: false })
+  }
+
   function bridgeDiag(): DiagnosticsInput['bridge'] {
     const b = bridgeInfo()
     return b === null ? null : { installed: b.installed, shadowed: b.shadowed, mirrorAgeMs: b.mirrorAge }
@@ -1387,6 +1476,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     vscode.commands.registerCommand('tokenPace.cycleWindowSelect', cycleWindowSelect),
     vscode.commands.registerCommand('tokenPace.copyDiagnostics', copyDiagnostics),
     vscode.commands.registerCommand('tokenPace.copyAgentId', copyAgentId),
+    vscode.commands.registerCommand('tokenPace.showAgentHookSetup', showAgentHookSetup),
     vscode.commands.registerCommand('tokenPace.clearStoredData', clearStoredData),
     vscode.commands.registerCommand('tokenPace.previewStatusBar', () => {
       statusBar.preview(readConfig())
@@ -1511,6 +1601,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       agentPoll.dispose()
       if (ingestTimer) clearTimeout(ingestTimer)
       if (quotaFileTimer) clearTimeout(quotaFileTimer)
+      if (hookFileTimer) { clearTimeout(hookFileTimer); hookFileTimer = undefined }
+      closeAll(hookWatchers)
       stopTranscriptWatchers()
       stopSharedFileWatchers()
       closeAll(quotaWatchers)
@@ -1535,6 +1627,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   // --------------------------------------------------------------- start
   watchQuotaFiles()
+  watchHookFile()
   updateRole()
   // Set before the first frame so the first-run card says "reading history" rather than "empty";
   // `bootstrap` clears it again for a follower, which never scans.

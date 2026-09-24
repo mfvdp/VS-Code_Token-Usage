@@ -1087,7 +1087,7 @@ function runningItem(over: Partial<RunningItem> = {}): RunningItem {
     fullLabel: over.fullLabel ?? over.label ?? 'Explore · claude-opus-5 · a94f',
     context: 'Session 12345678 · Workflow run cfe7718d',
     usage: '12.3K', lowerBound: false, lowerBoundText: null, startTs: NOW - 300_000, lastTs: NOW - 5_000, startClock: '11:55', lastClock: '11:59',
-    waiting: false, silence: true, running: 1, ...over,
+    waiting: false, silence: true, hookWait: null, running: 1, ...over,
   }
 }
 
@@ -1194,7 +1194,7 @@ test('the notes under the tree state the sessions left out, the lower bound and 
   const tree: AgentTreeVm = {
     roots: [{
       key: 's:/p/s.jsonl', kind: 'session', label: 'Session 12345678', fullLabel: 'Session 12345678', sub: null, state: 'done', derived: false,
-      usage: '12K', usageAgents: null, lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 3 replies unfinished', silence: false, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+      usage: '12K', usageAgents: null, lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 3 replies unfinished', silence: false, hookWait: null, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
       startClock: null, lastClock: null,
       agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
       tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
@@ -1342,7 +1342,7 @@ test('a stop the parent recorded is printed [Stopped] — a recorded state, no e
   const node = (key: string, state: TreeNode['state'], derived: boolean): TreeNode => ({
     key, kind: 'agent', label: `Explore · opus-4-6 · ${key.slice(2, 6)}`, fullLabel: `Explore · claude-opus-4-6 · ${key.slice(2, 6)}`,
     startClock: null, lastClock: null, sub: null, state, derived,
-    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait: null, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
   })
@@ -1366,13 +1366,40 @@ test('a stop the parent recorded is printed [Stopped] — a recorded state, no e
   assert.ok(sectionOf(md, '## Agenten').includes('  - [Gestoppt] Explore · claude-opus-4-6 · beef · 3.4K · 2 min 10 s'), md)
 })
 
+test('the agent hook\'s marker is printed after the usage on the node\'s line, its running line and its Quick Pick row (1.6 O4)', () => {
+  const { vm } = agentVm()
+  const node = (key: string, kind: TreeNode['kind'], hookWait: string | null): TreeNode => ({
+    key, kind, label: `Explore · opus-4-6 · ${key.slice(2, 6)}`, fullLabel: `Explore · claude-opus-4-6 · ${key.slice(2, 6)}`,
+    startClock: null, lastClock: null, sub: null, state: kind === 'session' ? 'active' : 'running', derived: true,
+    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait, duration: '2 min 10 s',
+    startTs: NOW - 300_000, lastTs: NOW - 60_000, agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
+    tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
+  })
+  const tree: AgentTreeVm = {
+    roots: [{ ...node('s:sess', 'session', 'waiting for input'), label: 'Session 12345678', fullLabel: 'Session 12345678', agentCount: 2,
+      hasChildren: true, childrenTotal: 2, children: [node('a:beef0001', 'agent', 'waiting for approval'), node('a:beef0002', 'agent', null)] }],
+    selected: null, running: 2,
+    runningNow: [runningItem({ key: 'a:beef0001', hookWait: 'waiting for approval', silence: false }), runningItem({ key: 'a:beef0002' })],
+    runningMore: 0, omittedRoots: 0, note: null, week: null,
+  }
+  const lines = sectionOf(markdownDocument({ ...vm, agents: tree }), '## Agents')
+  assert.ok(lines.includes('- [~Active] Session 12345678 · own 3.4K · waiting for input · 2 min 10 s'), lines.join('\n'))
+  assert.ok(lines.includes('  - [~Running] Explore · claude-opus-4-6 · beef · 3.4K · waiting for approval · 2 min 10 s'), lines.join('\n'))
+  assert.ok(lines.includes('  - [~Running] Explore · claude-opus-4-6 · beef · 3.4K · 2 min 10 s'), lines.join('\n'))
+  assert.ok(lines.includes('- [~Running] Explore · claude-opus-5 · a94f · Session 12345678 · Workflow run cfe7718d · 12.3K · waiting for approval'),
+    lines.join('\n'))
+  assert.ok(lines.includes('- [~Running] Explore · claude-opus-5 · a94f · Session 12345678 · Workflow run cfe7718d · 12.3K'), lines.join('\n'))
+  const pick = quickPickItems({ ...vm, agents: tree }).filter((i) => i.command === 'tokenPace.showDashboard' && /Explore/.test(i.label))
+  assert.deepEqual(pick.map((i) => i.detail), ['Session 12345678 · Workflow run cfe7718d · waiting for approval', 'Session 12345678 · Workflow run cfe7718d'])
+})
+
 test('an attempt the workflow journal superseded says so at the end of its line, in either language', () => {
   // 1.6 D7 (P2b): the dashboard dims the row; the markdown has no dim, so the line says it.
   const { vm } = agentVm()
   const node = (key: string, state: TreeNode['state'], superseded: boolean): TreeNode => ({
     key, kind: 'agent', label: `workflow-subagent · opus-4-6 · ${key.slice(2, 6)}`, fullLabel: `workflow-subagent · claude-opus-4-6 · ${key.slice(2, 6)}`,
     startClock: null, lastClock: null, sub: null, state, derived: false,
-    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait: null, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded, children: [],
   })
@@ -1409,7 +1436,7 @@ test('the markdown prints a node\'s tally after its name, in brackets, and no ta
   })
   const node = (key: string, kind: TreeNode['kind'], label: string, state: TreeNode['state'], over: Partial<TreeNode> = {}): TreeNode => ({
     key, kind, label, fullLabel: label, startClock: null, lastClock: null, sub: null, state, derived: state !== 'done' && state !== 'failed' && state !== 'stopped',
-    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
+    usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait: null, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: (over.children ?? []).length > 0, childrenTotal: (over.children ?? []).length, childrenMore: 0,
     tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
   })

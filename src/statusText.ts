@@ -1666,6 +1666,7 @@ function previewAgents(now: number, types: string[]): AgentsReading {
     lastClock: null,
     waiting: false,
     silence: false,
+    hookWait: null,
     running: 1,
   }))
   return { running: items.length, now: items, more: 0 }

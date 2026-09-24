@@ -10,6 +10,8 @@
 !README.md
 !CHANGELOG.md
 !LICENSE
+# The four bundles — dist/agent-hook.js among them (1.6 O4): the agent hook's script, which
+# *Set Up the Agent Hook…* copies into globalStorage for Claude Code to run.
 !dist/*.js
 !media/logo.png
 !media/icon.svg

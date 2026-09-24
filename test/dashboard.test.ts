@@ -4293,6 +4293,93 @@ test('a running agent that is not waiting says how long it has been silent, from
   assert.equal(DICT['silent since {0}'], 'silent since {0}')
 })
 
+test('the agent hook\'s marker stands right after the usage on the row and in the running list, in the figures\' tone, escaped (1.6 O4)', () => {
+  const a = agentCtx()
+  const mark = (w: string): string => '<span class="nobr ag-hook">' + w + '</span>'
+  const tree = (wait: unknown, sWait: unknown = null) => agentTree({
+    roots: [treeNode(AK.s1, 'active', {
+      kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', usage: '1.2M', usageAgents: '434.6K', duration: '1 h 05 min', startClock: '10:55',
+      hookWait: sWait, ...T_S1,
+      children: [treeNode(AK.a1, 'running', { hookWait: wait, silence: false })],
+    })],
+    runningNow: [runningItem({ hookWait: wait, silence: false })],
+  })
+  const open = agentUi({ agentsExpanded: [AK.s1] })
+  const h = agentsHtml(a, { agents: tree('waiting for approval'), ui: open })
+  // The tree's row: the usage, the marker, then the clock.
+  const row = '<span class="ag-fp"><span class="nobr">12.3K</span></span><span class="ag-fp">' + SEP + mark('waiting for approval')
+    + '</span><span class="ag-fp">' + SEP + clockFig(AG_NOW - 42_000, '42 s', '11:59') + '</span>'
+  assert.ok(treePart(h).indexOf(row) >= 0, treePart(h))
+  // The running list's row: the usage, the marker, then "running for".
+  const list = h.slice(0, h.indexOf('<div class="agtree"'))
+  assert.ok(list.indexOf(figs(fig('12.3K'), mark('waiting for approval'), runFig(AG_NOW - 42_000, '42 s', '11:59'))) >= 0, list)
+  // A session's own wait: after its two figures, before its tally and its span.
+  const s = agentsHtml(a, { agents: tree(null, 'waiting for input'), ui: open })
+  assert.ok(treePart(s).indexOf('<span class="ag-fp">' + SEP + fig('agents 434.6K') + '</span><span class="ag-fp">' + SEP + mark('waiting for input')
+    + '</span>' + tallyThen(T_S1, S1_SPAN)) >= 0, treePart(s))
+  // Nothing without one — null, empty, not a string —, and the view model's words escaped.
+  for (const wait of [null, undefined, '', 1, true]) {
+    assert.equal(agentsHtml(a, { agents: tree(wait), ui: open }).indexOf('ag-hook'), -1, String(wait))
+  }
+  const odd = agentsHtml(a, { agents: tree('"><b>x'), ui: open })
+  assert.ok(odd.indexOf(mark('&quot;&gt;&lt;b&gt;x')) >= 0, odd)
+  assert.equal(odd.indexOf('<b>x'), -1)
+  // No colour and no rule of its own: a marker, not an alarm — only the rule that cuts its words
+  // where a line has no room for all of them (fitAgentFigures), which sets no colour either.
+  assert.equal(/\.ag-hook\s*[{,]/.test(STYLE), false)
+  const cutRule = STYLE.slice(STYLE.indexOf('.ag-fig .ag-hook-cut {'), STYLE.indexOf('}', STYLE.indexOf('.ag-fig .ag-hook-cut {')))
+  assert.match(cutRule, /display: inline-block; overflow: hidden; vertical-align: top;/)
+  assert.equal(/color|background|font-weight|font-style/.test(cutRule), false, cutRule)
+})
+
+test('a figures line too narrow for the agent hook\'s marker takes the parts behind it off first, then cuts its words — or takes it off with too little room (1.6 O4)', () => {
+  const a = agentCtx()
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  // A part holding the marker: its words start at `left` (after the dot), the part ends at `right`.
+  const hookPart = (left: number, right: number) => {
+    const part = fakePart(right)
+    const cls = new Set<string>(['nobr', 'ag-hook'])
+    const el = {
+      style: { maxWidth: '' }, getBoundingClientRect: () => ({ left, right }),
+      classList: { contains: (c: string) => cls.has(c), add: (c: string) => { cls.add(c) }, remove: (c: string) => { cls.delete(c) } }, cls,
+    }
+    return Object.assign(part, { querySelector: (q: string) => (q === '.ag-hook' ? el : null), hook: el })
+  }
+  const lineOf = (parts: Array<ReturnType<typeof fakePart>>, clientWidth: number, scrollWidth: number) => {
+    const cls = new Set<string>()
+    const hooks = parts.map((p) => (p as { hook?: { cls: Set<string> } }).hook).filter(Boolean) as Array<{ cls: Set<string> }>
+    return {
+      parts, clientWidth, scrollWidth, children: parts, cls,
+      getBoundingClientRect: () => ({ left: 0, right: clientWidth }),
+      classList: { contains: (c: string) => cls.has(c), add: (c: string) => { cls.add(c) }, remove: (c: string) => { cls.delete(c) } },
+      querySelectorAll: (q: string) => (q === '.ag-gone' ? parts.filter((p) => p.classList.has.has('ag-gone'))
+        : q === '.ag-hook-cut' ? hooks.filter((h) => h.cls.has('ag-hook-cut')) : []),
+    }
+  }
+  // 120 px: room for the ellipsis leaves 104.6 px; the marker's words start at 58 px — 46.6 px of
+  // room, more than AGENT_HOOK_ROOM_EM (4 × 11 px): the clock goes, the marker stays, cut at 46 px.
+  const wide = hookPart(58, 160)
+  const cut = lineOf([fakePart(50), wide, fakePart(220)], 120, 220)
+  // 100 px: 26.6 px of room is less than that — the marker goes whole, the usage stays.
+  const tight = hookPart(58, 160)
+  const off = lineOf([fakePart(50), tight, fakePart(220)], 100, 220)
+  // Room for the whole marker, not for the clock behind it: the marker is whole, not cut.
+  const whole = hookPart(58, 100)
+  const fitsHook = lineOf([fakePart(50), whole, fakePart(220)], 130, 220)
+  doc.querySelectorAll = (q: string) => (q === '.ag-fig' ? [cut, off, fitsHook] : [])
+  nodeVm.runInContext('fitAgentFigures()', a.c)
+  const gone = (l: { parts: Array<ReturnType<typeof fakePart>> }): boolean[] => l.parts.map((p) => p.classList.has.has('ag-gone'))
+  assert.equal(nodeVm.runInContext('AGENT_HOOK_ROOM_EM', a.c), 4)
+  assert.deepEqual([gone(cut), cut.cls.has('ag-cut'), wide.hook.cls.has('ag-hook-cut'), wide.hook.style.maxWidth], [[false, false, true], true, true, '46px'])
+  assert.deepEqual([gone(off), off.cls.has('ag-cut'), tight.hook.cls.has('ag-hook-cut'), tight.hook.style.maxWidth], [[false, true, true], true, false, ''])
+  assert.deepEqual([gone(fitsHook), whole.hook.cls.has('ag-hook-cut')], [[false, false, true], false])
+  // Fitted again with room for everything, the cut is undone.
+  cut.clientWidth = 300
+  cut.scrollWidth = 220
+  nodeVm.runInContext('fitAgentFigures()', a.c)
+  assert.deepEqual([gone(cut), cut.cls.has('ag-cut'), wide.hook.cls.has('ag-hook-cut'), wide.hook.style.maxWidth], [[false, false, false], false, false, ''])
+})
+
 test('the page clock shows a silence the second it reaches three minutes, and counts it in minutes', () => {
   const last = AG_NOW - 170_000
   const min = { textContent: '' }

@@ -14,7 +14,7 @@
  */
 
 import { SOURCES, USAGE_PAGE } from './adapters'
-import { AGENT_RETENTION_DAYS, AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
+import { AGENT_RETENTION_DAYS, AgentTreeVm, HookEntry, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { buildAgentTree } from './agentTreeBuild'
 import { Aggregator, HourQuery, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
@@ -699,6 +699,12 @@ export interface VmInput {
    * second source.
    */
   promptCache?: PromptCacheReading | null
+  /**
+   * 1.6 O4: the agent hook's mirror as the host last read it (src/agentHook.ts) — the latest hook
+   * call per (session, agent). Absent or empty while the hook is not installed: no node of the
+   * Agents section carries a marker then. Read from the file, never from the snapshot.
+   */
+  hook?: ReadonlyMap<string, HookEntry>
 }
 
 export interface ViewModel {
@@ -1577,7 +1583,7 @@ export function toolRows(ctx: StatsCtx, range: DayRange, limit: number): ToolsDa
  * model chips: the tree is the Claude Code sessions of the last days, whatever the tables filter.
  */
 export function agentTreeFor(
-  input: Pick<VmInput, 'agg' | 'cfg' | 'ui' | 'now'>, mode: 'page' | 'text',
+  input: Pick<VmInput, 'agg' | 'cfg' | 'ui' | 'now' | 'hook'>, mode: 'page' | 'text',
 ): AgentTreeVm {
   const { agg, cfg, ui } = input
   // 1.6 L3: the 7-day block — while it is open — with its costs only while costs are shown at all.
@@ -1595,6 +1601,8 @@ export function agentTreeFor(
     mode,
     weekOpen: ui.agentsWeekOpen === true,
     pricing: cfg.showCost ? pricingOf(cfg) : null,
+    // 1.6 O4: the agent hook's latest calls, when the host has read any.
+    hook: input.hook,
     tcfg: readTimeConfig(cfg),
   }, input.now)
 }

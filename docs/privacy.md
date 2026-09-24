@@ -10,7 +10,8 @@ Part of the [Token Pace documentation](../README.md#documentation).
 Only these are read: `~/.claude/projects/` (plus `~/.config/claude/projects/`, where some Claude
 Code builds keep it), `~/.codex/sessions/` and `~/.codex/archived_sessions/`, the two quota cache
 files, the `cachedUsageUtilization` object in `~/.claude.json`, the extension's own status-line
-mirror file inside its `globalStorage`, Claude Code's `settings.json`, its `settings.local.json`
+mirror file inside its `globalStorage` and — only while you have installed the agent hook — the
+hook's `agent-hook.jsonl` beside it, Claude Code's `settings.json`, its `settings.local.json`
 and the platform's managed-settings file (to report whether the status-line bridge is installed
 and whether something shadows it) and — only in `quotaSource: poll`, only after consent —
 `~/.claude/.credentials.json`, for the access token that the poll sends to
@@ -94,7 +95,22 @@ identifiers and counts, never content:
   Code writes, and the records keep counts, the last version and mode, and the last compaction
   with its time; the exports carry of them only the count of an agent's tool errors.
 
-Nothing is written except the extension's own state in its `globalStorage`, with exactly two
+**The agent hook** ([Agents](agents.md#the-agent-hook)) is opt-in — **installed by you, removed by
+you**. *Set Up the Agent Hook…* copies its script, `agent-hook.js`, into the extension's
+`globalStorage` and shows the snippet you add to `~/.claude/settings.json` yourself; Token Pace
+never writes into `~/.claude` and never runs the script. Claude Code runs it for four hook events,
+and of each call's input it reads four keys — `hook_event_name`, `session_id`, `agent_id` and
+`notification_type` —, never the call's `message`, `tool_input`, `tool_response`, `prompt`,
+`transcript_path`, `cwd` or `last_assistant_message`. It appends one line to `agent-hook.jsonl`
+beside itself with six fields — `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`: two ids, an
+event name, a time and one of three words — and writes nowhere else. It loads Node's `fs` and
+`path` and nothing else (`npm run check:privacy` fails the build otherwise), opens no network
+connection, prints nothing, and keeps the file to its newest 1000 lines. The extension reads the
+six fields back, checks each again, and shows the latest wait as a marker in the Agents section;
+nothing of it enters the snapshot, an export, the diagnostics or the log.
+
+Nothing is written except the extension's own state in its `globalStorage` — and, while you have
+installed it, the agent hook's line in the same storage —, with exactly two
 opt-in exceptions, each behind its own consent dialog and each with a backup or a
 never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
 status-line bridge. Both are off by default and both are disabled in Restricted Mode.

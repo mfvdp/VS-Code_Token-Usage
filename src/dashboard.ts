@@ -924,6 +924,10 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-fig.ag-cut::after { content: "\\00a0…" / ""; }
 .ag-fig > .ag-fp + .ag-fp:not(:has(> .ag-t))::before { content: "" / ", "; }
 .ag-fig .ag-gone { font-size: 0; }
+/* 1.6 O4: the agent hook's marker — "waiting for approval" — in the figures' tone, no colour of its
+   own: a marker, not an alarm. Where the line has no room for all of it, it is cut where the line's
+   ellipsis begins (fitAgentFigures sets its width), its words still whole for a screen reader. */
+.ag-fig .ag-hook-cut { display: inline-block; overflow: hidden; vertical-align: top; }
 /* 1.6 D10: the ⚠ of an output that is a lower bound, inside the usage figure — while the script's
    ROW_LOWER_BOUND_MARK is on, as it ships. The glyph comes from a fallback font whose line box is
    a pixel taller than the figures' own; held to its font size, it never makes a row taller. */

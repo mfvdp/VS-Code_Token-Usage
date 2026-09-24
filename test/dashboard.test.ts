@@ -4145,7 +4145,10 @@ test('the details open inside the entry of the row that was clicked, after its l
   // The level the panel steps out of comes from the page's own stylesheet, through the CSSOM
   // (the page's CSP allows no style attribute): one indent of the tree per level.
   assert.match(STYLE, /\.ag-details \{ margin: 4px 0 6px calc\(var\(--ag-ind, 0\) \* -16px\);/)
-  assert.match(STYLE, /\.agtree ul ul \{ padding-left: 16px; \}/)
+  // 1.7 F6 (pinned and changed: the step was the literal `padding-left: 16px`): the indent is the tree's
+  // --ag-step, 16 px, which the guide lines measure their places by.
+  assert.match(STYLE, /\.agtree ul ul \{ padding-left: var\(--ag-step\); \}/)
+  assert.match(STYLE, /\.agtree \{ --ag-step: 16px;/)
   assert.match(SCRIPT, /querySelectorAll\("\[data-ind\]"\)\.forEach\(\(el\) => \{\s*el\.style\.setProperty\("--ag-ind", el\.dataset\.ind\);/)
   // In the running list the panel is an item's second line, the whole width of the list.
   assert.match(STYLE, /\.ag-now li \{ display: flex; flex-wrap: wrap; \}/)
@@ -7597,4 +7600,179 @@ test('1.7 F4: a hostile tally part renders inert — a tone the page does not kn
   const strange = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, EVIL, { kind: EVIL })] }) }))
   assert.equal(/ag-c-(?!unknown)/.test(strange), false, strange)
   assert.ok(strange.indexOf('<span class="ag-row ag-c-unknown" data-act="agentSelect"') >= 0, strange)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 F6 · guide lines
+// ---------------------------------------------------------------------------
+
+/** 1.7 F6: the stylesheet without its comments, its white space collapsed — and where the forced-colours block stands in it. */
+function flatStyle(): { css: string; forcedAt: number; forcedEnd: number } {
+  const raw = STYLE.replace(/\/\*[\s\S]*?\*\//g, '')
+  const at = raw.indexOf('@media (forced-colors: active) {')
+  const end = raw.indexOf('\n}', at)
+  const flat = (s: string): string => s.replace(/\s+/g, ' ')
+  const before = flat(raw.slice(0, at))
+  const block = flat(raw.slice(at, end))
+  return { css: before + block + flat(raw.slice(end)), forcedAt: before.length, forcedEnd: before.length + block.length }
+}
+
+/** 1.7 F6: the guide lines' rules as §3 F6 gives them, and the package's three (the item's flow-root, the "more" line's two heights). */
+const GUIDE_RULES = [
+  '.agtree { --ag-step: 16px; --ag-fold-w: 24px; --ag-guide-y: 9px; --ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule)); }',
+  '.agtree ul ul { padding-left: var(--ag-step); }',
+  '.agtree ul[role="group"] > li { position: relative; display: flow-root; }',
+  '.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { content: ""; position: absolute; pointer-events: none; left: calc(var(--ag-fold-w) / 2 - var(--ag-step)); }',
+  '.agtree ul[role="group"] > li::before { top: 0; bottom: 0; border-left: 1px solid var(--ag-guide); }',
+  '.agtree ul[role="group"] > li:last-child::before { bottom: auto; height: var(--ag-guide-y); }',
+  '.agtree ul[role="group"] > li::after { top: var(--ag-guide-y); border-top: 1px solid var(--ag-guide); width: calc(var(--ag-step) - var(--ag-fold-w) / 2 + var(--ag-fold-w) - 2px); }',
+  '.agtree ul[role="group"] > li:has(> .ag-line > .ag-fold)::after { width: calc(var(--ag-step) - var(--ag-fold-w) / 2 + 7px); }',
+  '.agtree ul[role="group"] > li.ag-k-more { --ag-guide-y: 11px; }',
+  '.agtree ul[role="group"] > li.ag-k-more:has(> .ag-line > .ag-more:not([data-act])) { --ag-guide-y: 6px; }',
+  '.ag-details { position: relative; z-index: 1; background: var(--bg); }',
+]
+const GUIDE_FORCED = '.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { border-color: CanvasText; }'
+
+test('1.7 F6: the stylesheet draws the guide lines behind the rows — two pseudo-elements of every item of a group, in the tree\'s indent-guide token, the panel over them, CanvasText in forced colours', () => {
+  const { css, forcedAt, forcedEnd } = flatStyle()
+  // Exactly these rules, each once, outside the forced-colours block; the forced one once inside it.
+  for (const rule of GUIDE_RULES) {
+    const at = css.indexOf(rule)
+    assert.ok(at >= 0 && at < forcedAt, 'missing: ' + rule)
+    assert.equal(css.split(rule).length, 2, 'twice: ' + rule)
+  }
+  const f = css.indexOf(GUIDE_FORCED)
+  assert.ok(f > forcedAt && f < forcedEnd, 'the forced rule is not in the forced-colours block')
+  assert.equal(css.split(GUIDE_FORCED).length, 2)
+  // The indent step is no longer a number of its own.
+  assert.equal(css.indexOf('.agtree ul ul { padding-left: 16px; }'), -1)
+  // The token: the workbench's own colour for tree indent guides, the page's hairline where a build has none.
+  assert.equal((css.match(/--ag-guide:/g) ?? []).length, 1)
+  assert.ok(css.indexOf('--ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule));') > 0)
+  // Every rule that draws a ::before or an ::after on an item draws a guide line of a group's item — none
+  // on a root (`ul[role="none"]`), in the running list or in the 7-day block — and every one is decorative:
+  // empty generated content, nothing to read, nothing to copy, no pointer.
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2].trim() }))
+  const onItems = rules.filter((r) => /\bli\b[^,{]*::(before|after)/.test(r.sel))
+  assert.ok(onItems.length >= 6, String(onItems.length))
+  for (const r of onItems) {
+    for (const s of r.sel.split(',').map((x) => x.trim())) assert.match(s, /^\.agtree ul\[role="group"\] > li(:last-child|:has\(> \.ag-line > \.ag-fold\))?::(before|after)$/, r.sel)
+    assert.equal(/content:\s*"[^"]/.test(r.body), false, r.sel)
+  }
+  assert.equal(/\.ag-(now|week)[^{,]*li[^{,]*::(before|after)|role="none"\][^{,]*::(before|after)/.test(css), false)
+  // The panel keeps its level variable; the lines' names are their own.
+  assert.ok(css.indexOf('.ag-details { margin: 4px 0 6px calc(var(--ag-ind, 0) * -16px);') >= 0)
+  for (const r of rules.filter((x) => /--ag-(step|fold-w|guide)/.test(x.body))) assert.equal(r.body.indexOf('--ag-ind'), -1, r.sel)
+  // The tokens agree with the boxes they stand for: the indent step is the panel's step back out of a
+  // level, the fold width the toggle's and the leaf slot's.
+  const num = (re: RegExp): number => { const m = re.exec(css); assert.ok(m, String(re)); return Number((m as RegExpExecArray)[1]) }
+  const step = num(/--ag-step: (\d+)px;/), fold = num(/--ag-fold-w: (\d+)px;/)
+  assert.equal(step, num(/\.ag-details \{ margin: 4px 0 6px calc\(var\(--ag-ind, 0\) \* -(\d+)px\);/))
+  assert.equal(fold, num(/\.ag-fold, \.ag-pad \{ flex: none; width: (\d+)px; min-height: 24px; \}/))
+  const twisty = num(/\.ag-fold::before \{ content: "▾"; font-size: (\d+)px; \}/)
+  // The geometry the rules give (§3 F6), in the frame of the child's item: the vertical at the parent's
+  // fold centre, one step back — left of the child's own toggle, inside its parent's column —; a leaf's
+  // stub ending 2 px before its row box, which starts where the slot ends; a parent's before its twisty,
+  // centred in the fold, as long as the twisty is no wider than its font size, with half a pixel to spare.
+  const x = fold / 2 - step
+  assert.ok(x < 0 && x > -step, String(x))
+  assert.equal(x + (step - fold / 2 + fold - 2), fold - 2)
+  assert.ok(x + (step - fold / 2 + 7) <= (fold - twisty) / 2 - 0.5)
+  // No line is taken out of the forced-colours adjustment; the panel's background is a token.
+  assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
+  assert.match(css, /--bg: var\(--vscode-sideBar-background, var\(--vscode-editor-background, transparent\)\);/)
+  assert.deepEqual(colourLiterals(' CanvasText'), [])
+})
+
+/** 1.7 F6: a small parser for the markup the renderers write — elements with their tag, attributes and children. */
+interface El { tag: string; attrs: Record<string, string>; kids: El[]; text: string }
+function parseMarkup(html: string): El {
+  const root: El = { tag: '#root', attrs: {}, kids: [], text: '' }
+  const stack: El[] = [root]
+  const VOID = new Set(['br', 'img', 'input', 'hr', 'wbr', 'meta', 'link'])
+  const re = /<(\/?)([a-z][a-z0-9]*)((?:\s[a-z][a-z0-9-]*(?:="[^"]*")?)*)\s*\/?>|([^<]+)/g
+  for (const m of html.matchAll(re)) {
+    const top = stack[stack.length - 1]
+    if (m[4] !== undefined) { top.text += m[4]; continue }
+    if (m[1] === '/') {
+      assert.equal(top.tag, m[2], 'unbalanced </' + m[2] + '>')
+      stack.pop()
+      continue
+    }
+    const attrs: Record<string, string> = {}
+    for (const a of m[3].matchAll(/\s([a-z][a-z0-9-]*)(?:="([^"]*)")?/g)) attrs[a[1]] = a[2] ?? ''
+    const el: El = { tag: m[2], attrs, kids: [], text: '' }
+    top.kids.push(el)
+    if (!VOID.has(m[2])) stack.push(el)
+  }
+  assert.equal(stack.length, 1, 'unclosed ' + stack.map((e) => e.tag).join(' > '))
+  return root
+}
+const hasClass = (e: El, c: string): boolean => (e.attrs.class ?? '').split(' ').includes(c)
+function walkEls(e: El, fn: (x: El, parent: El | null) => void, parent: El | null = null): void {
+  fn(e, parent)
+  for (const k of e.kids) walkEls(k, fn, e)
+}
+
+test('1.7 F6: the tree\'s markup is the one it was — the lines are the stylesheet\'s alone: every item of a group an li whose line starts with its toggle or its slot, nothing added to draw with', () => {
+  // The Agents world end to end, every parent open, the 7-day block open, the Explore agent's details
+  // open under its row (a panel between an item's line and its group); and a run with a "more" line.
+  const { agg } = agentWorld()
+  const cfg = makeConfig()
+  const opened = everyParent(agg, cfg, NOW)
+  const whole = agentTreeFor(makeInput({ agg, cfg, ui: {} }), 'text')
+  const explore = agentNodeOf(whole.roots, AGENT_WORLD.explore)
+  const ui = { agentsExpanded: opened, agentsWeekOpen: true, agentSelected: explore.key, agentSelectedIn: 'tree' as const }
+  const vm = buildViewModel(makeInput({ agg, cfg, ui }))
+  const a = agentCtx()
+  const world = agentsHtml(a, { agents: vm.agents, ui: agentUi(ui) })
+  const kids = Array.from({ length: 3 }, (_, i) => treeNode(`a:kid${i}`, 'done', { label: `Explore · opus-5 · k${i}` }))
+  const big = agentsHtml(a, {
+    agents: agentTree({ roots: [treeNode(AK.wf, 'done', { kind: 'workflow', label: 'Workflow run Tue 11:40 · cfe7718d', hasChildren: true, childrenTotal: 380, childrenMore: 377, children: kids })] }),
+    ui: agentUi({ agentsExpanded: [AK.wf] }),
+  })
+  let groups = 0, items = 0, mores = 0, panels = 0
+  for (const h of [world, big]) {
+    const doc = parseMarkup(h)
+    const trees: El[] = []
+    walkEls(doc, (e) => { if (hasClass(e, 'agtree')) trees.push(e) })
+    assert.equal(trees.length, 1)
+    const tree = trees[0]
+    assert.deepEqual([tree.tag, tree.attrs.role, tree.kids.length, tree.kids[0].tag, tree.kids[0].attrs.role], ['div', 'tree', 1, 'ul', 'none'])
+    // The details panel draws its token mix with empty bars of its own (1.6 L2): not the tree's lines.
+    const inPanel = new Set<El>()
+    walkEls(tree, (e) => { if (hasClass(e, 'ag-details')) walkEls(e, (x) => { if (x !== e) inPanel.add(x) }) })
+    walkEls(tree, (e, parent) => {
+      // A list is the roots' (role none, straight under the tree) or a group (role group, straight under an item).
+      if (e.tag === 'ul') {
+        assert.ok(e.attrs.role === 'none' ? parent === tree : e.attrs.role === 'group' && parent !== null && parent.tag === 'li' && parent.attrs.role === 'treeitem', JSON.stringify(e.attrs))
+        if (e.attrs.role === 'group') groups++
+        for (const li of e.kids) assert.deepEqual([li.tag, li.attrs.role], ['li', 'treeitem'])
+      }
+      if (e.tag === 'li') {
+        assert.ok(parent !== null && parent.tag === 'ul', 'an item outside a list')
+        if (parent?.attrs.role === 'group') items++
+        // Its children: its line, then its details (if any), then its group (if any) — nothing else.
+        const shape = e.kids.map((k) => (k.tag === 'div' && hasClass(k, 'ag-line') ? 'line' : k.tag === 'div' && hasClass(k, 'ag-details') ? 'details'
+          : k.tag === 'ul' && k.attrs.role === 'group' ? 'group' : k.tag + '.' + (k.attrs.class ?? '')))
+        assert.match(shape.join(' '), /^line( details)?( group)?$/, e.attrs['data-key'] ?? e.attrs['data-more'])
+        if (shape.includes('details')) panels++
+        // The line starts with the toggle (a node with children), or the empty slot of a leaf and a "more" line.
+        const first = e.kids[0].kids[0]
+        const more = hasClass(e, 'ag-k-more')
+        if (more) mores++
+        assert.ok(first.tag === 'span' && (hasClass(first, 'ag-fold') ? 'aria-expanded' in e.attrs && !more : hasClass(first, 'ag-pad') && !('aria-expanded' in e.attrs)),
+          JSON.stringify([e.attrs, first.attrs]))
+        assert.equal(e.kids[0].kids[1]?.attrs.class?.split(' ')[0], more ? 'ag-more' : 'ag-row')
+      }
+      // Nothing drawn with: every empty element of the tree is one of the 1.6 ones — the toggle, the leaf's
+      // slot, a state glyph (their marks are generated content) — none a line.
+      if (e.kids.length === 0 && e.text === '' && e.tag !== 'br' && !inPanel.has(e)) {
+        assert.ok(['ag-fold', 'ag-pad', 'ag-st'].some((c) => hasClass(e, c)), e.tag + ' ' + JSON.stringify(e.attrs))
+      }
+      assert.equal(/guide|ag-ln\b|ag-vl\b/.test(e.attrs.class ?? ''), false, e.attrs.class)
+    })
+  }
+  // The world held every case: groups at several levels, a panel inside one, a "more" line.
+  assert.ok(groups >= 5 && items >= 12 && panels === 1 && mores === 1, JSON.stringify({ groups, items, panels, mores }))
 })

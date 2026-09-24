@@ -888,7 +888,46 @@ ul { margin: 6px 0; padding-left: 18px; }
    tree's keyboard, see the script) — so they take a button's box, colour and pointer here, and
    the running list's rows, which stay buttons, keep theirs. */
 .agtree ul { list-style: none; margin: 0; padding: 0; }
-.agtree ul ul { padding-left: 16px; }
+/* 1.7 F6: guide lines — a vertical line down each open group under its parent's toggle, a stub into every
+   child, the last child's line ending at its stub (└); an open child's own group draws its lines one step
+   further in, so the verticals of several levels stand side by side. Drawn behind the rows, never over a
+   word: the vertical stands in the column of the parent's twisty, left of the child's own toggle, and the
+   stub ends 2 px before the first thing the child's line draws. Decorative, so a pseudo-element with no
+   content — nothing to read, nothing to copy; the tree's structure is its indentation and its items'
+   level, place and size (1.6 L1). The colour is the workbench's own for the same purpose, the explorer's
+   indent guides (§7a Q14: at its contrast, 2.50:1 on Dark Modern, 2.21:1 on Light Modern), the page's
+   hairline where a build has none. Only the items of a group have lines — the roots (the sessions, the
+   group of earlier sessions) none, and the running list and the 7-day block, flat lists, none. No line
+   changes a row's height or width: the pseudo-elements are absolute. --ag-guide-y is the vertical centre
+   of a row's first line — the glyph's and the twisty's (measured by the harness, ± 1 px). The item is a
+   block formatting context of its own (flow-root): the bottom margin of a details panel that ends it
+   stays inside it rather than falling between it and its next sibling, so its vertical runs on under the
+   panel to that sibling without a gap. --ag-ind stays the panel's level; these names do not reuse it. */
+.agtree { --ag-step: 16px; --ag-fold-w: 24px; --ag-guide-y: 9px;
+          --ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule)); }
+.agtree ul ul { padding-left: var(--ag-step); }
+.agtree ul[role="group"] > li { position: relative; display: flow-root; }
+.agtree ul[role="group"] > li::before,
+.agtree ul[role="group"] > li::after { content: ""; position: absolute; pointer-events: none;
+                                       left: calc(var(--ag-fold-w) / 2 - var(--ag-step)); }
+.agtree ul[role="group"] > li::before { top: 0; bottom: 0; border-left: 1px solid var(--ag-guide); }
+.agtree ul[role="group"] > li:last-child::before { bottom: auto; height: var(--ag-guide-y); }
+/* The stub ends 2 px before the first thing the child's line draws: its toggle's arrow, or — a leaf, the
+   "more" line — its row's box, which holds the glyph and the open row's 2 px edge. The arrow, a 9 px
+   glyph centred in the 24 px fold, begins about 9.7 px in (measured): a stub to 7 px leaves it 2.7 px,
+   and room for the wider arrow of another font. */
+.agtree ul[role="group"] > li::after { top: var(--ag-guide-y); border-top: 1px solid var(--ag-guide);
+                                       width: calc(var(--ag-step) - var(--ag-fold-w) / 2 + var(--ag-fold-w) - 2px); }
+.agtree ul[role="group"] > li:has(> .ag-line > .ag-fold)::after { width: calc(var(--ag-step) - var(--ag-fold-w) / 2 + 7px); }
+/* A "more" line has no glyph: its stub goes to the middle of its words — centred in its 24 px while they
+   are the button for the next fifty, at its top once only a count is left. */
+.agtree ul[role="group"] > li.ag-k-more { --ag-guide-y: 11px; }
+.agtree ul[role="group"] > li.ag-k-more:has(> .ag-line > .ag-more:not([data-act])) { --ag-guide-y: 6px; }
+/* The details panel spans the tree's width, and every line passes behind it: opaque in the page's own
+   colour, and stacked above the lines — positioned, which already paints it after every line before it
+   in the tree's order, and a z-index of its own, so no line can come over it whatever order the tree's
+   markup takes. */
+.ag-details { position: relative; z-index: 1; background: var(--bg); }
 .ag-line { display: flex; align-items: flex-start; }
 .ag-fold, .ag-pad { flex: none; width: 24px; min-height: 24px; }
 /* The arrow stands at the top, on the name's line — a button would centre it in its 24 px — and
@@ -1163,6 +1202,8 @@ ul { margin: 6px 0; padding-left: 18px; }
   .ag-mix > i { border: 1px solid CanvasText; box-sizing: border-box; }
   .ag-row[aria-pressed="true"], .agtree .ag-row[data-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
   .agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 2px solid CanvasText; }
+  /* 1.7 F6: the guide lines in the text colour — the theme would give a border its own anyway; said here. */
+  .agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { border-color: CanvasText; }
   /* 1.7 D-B: the bands by model — the theme would paint them all away. Two system colours, the rank as
      the pattern style draws it, each band ringed 1 px inside by the page colour so two solid bands side
      by side stay two. Taken out of the theme's adjustment: a gradient is otherwise removed. 1.7 P7b: a

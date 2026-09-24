@@ -207,10 +207,12 @@ glyph has a spoken label that says in words whether the state was recorded or de
 and an agent's name and its tally's parts are in the colour of their state as well — green done, yellow
 unknown, red failed, blue running, each mixed with the text colour to at least 4.5:1 —, the third
 carrier beside the glyph and the words, never the only one (in the Agents section a colour means an
-outcome, on the quota cards a pace);
+outcome, on the quota cards a pace); the tree's guide lines, which connect every child to its parent
+in the theme's indent-guide colour, are decoration only — nothing to read, nothing to copy; the tree's
+structure is in each item's level, place and size;
 a clock that ticks every second is hidden from a screen reader and stands beside it as words that
 stand still (`since 14:20`); the toggle and the row are targets of at least 24 × 24 px, and a
-forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours — the names
+forced-colours theme draws the glyphs, the `⚠`, the open row and the guide lines in the system's colours — the names
 and the tallies in its text colour, the state colours giving way — and every
 pressed chip of the page (a button of the provider switch, a range, a model, the custom dates, the
 cache switch, the chart's `subagents` and cost line, the heatmap's metric, the hours' zone) in the highlight colours,

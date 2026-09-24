@@ -686,6 +686,30 @@ test('the pages say what a colour means in the Agents section — an outcome, no
   for (const state of ['done', 'unknown', 'failed', 'running']) assert.ok(new RegExp(`--ag-c-${state}: color-mix\\(in srgb, [^;]+ 60%, var\\(--vscode-foreground\\)\\);`).test(css), state)
 })
 
+test('the pages say what the tree\'s guide lines are — the explorer\'s indent-guide colour, decoration, behind the rows and the panel, the text colour in forced colours (1.7 F6)', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  const agents = flat(doc.agents)
+  for (const claim of [
+    '**Guide lines.** Lines connect every child to its parent',
+    'the last child\'s line ends at its stub (`└`)',
+    'The roots — the sessions and the group of earlier sessions — have none, and neither have the running list and the 7-day block',
+    'in the colour the theme gives the explorer\'s indent guides (`tree.indentGuidesStroke`',
+    '2.50:1 against the sidebar on Dark Modern, 2.21:1 on Light Modern',
+    'they never cross a word, a glyph, a toggle or the open row\'s edge, change no row\'s height or width, and pass behind an open details panel',
+    'They are decoration only — nothing to read, nothing to copy',
+    'In a forced-colours theme they are in the text colour.',
+    'the guide lines the text colour',
+  ]) assert.ok(agents.includes(claim), `docs/agents.md does not say: ${claim}`)
+  const dashboard = flat(doc.dashboard)
+  assert.ok(dashboard.includes('the tree\'s guide lines, which connect every child to its parent in the theme\'s indent-guide colour, are decoration only'),
+    'docs/dashboard.md does not name the guide lines')
+  assert.ok(dashboard.includes('the open row and the guide lines in the system\'s colours'), 'docs/dashboard.md does not say how forced colours draw them')
+  // The token the pages name is the stylesheet's, and so is the forced colour.
+  const css = readDoc('src/dashboard.ts')
+  assert.ok(css.includes('--ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule));'), 'the lines no longer take the indent-guide token')
+  assert.ok(css.includes('.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { border-color: CanvasText; }'))
+})
+
 test('the agent hook is documented as it works: installed by you, removed by you, Node.js required, the tree\'s words (1.6 O4)', () => {
   const flat = (text: string): string => text.replace(/\s+/g, ' ')
   const agents = flat(doc.agents)

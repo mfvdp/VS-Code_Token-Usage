@@ -211,6 +211,19 @@ counted reply are one node, the run's last child: its
 No agent sits more than **6** levels below its session: one that would sit deeper moves up, it
 is never dropped.
 
+**Guide lines.** Lines connect every child to its parent, as in the explorer: a vertical line runs
+down from under an opened node's toggle past its children, a short stub leads into each child, and
+the last child's line ends at its stub (`└`); an opened child's own lines stand one level further in,
+so the lines of several levels run side by side. A run's collector and the `50 more` line are
+children like any other. The roots — the sessions and the group of earlier sessions — have none, and
+neither have the running list and the 7-day block, which are flat lists. The lines are in the colour
+the theme gives the explorer's indent guides (`tree.indentGuidesStroke`; the page's own hairline
+where a theme has none) and at its contrast — 2.50:1 against the sidebar on Dark Modern, 2.21:1 on
+Light Modern —, drawn behind the rows: they never cross a word, a glyph, a toggle or the open row's
+edge, change no row's height or width, and pass behind an open details panel. They are decoration
+only — nothing to read, nothing to copy; a screen reader gets the tree's structure from each item's
+level, place and size (below). In a forced-colours theme they are in the text colour.
+
 **Fifty at a time.** An opened node shows at most **50** of its children at a time, in the
 order above. When it has more, a line after the last one says so — `50 more · 377 not shown`,
 or `12 more` when the next fifty are the rest — and a click on it, or `Enter` or `Space` on it,
@@ -336,7 +349,7 @@ the item says whether it is open. The toggle is 24 px wide and high and a row at
 so neither is a target smaller than 24 × 24 px (WCAG 2.5.8). In a forced-colours theme —
 Windows High Contrast — the glyphs and the `⚠` take the text colour, the toggle's arrow the
 button's, the open row, whose tint the theme removes, a 2 px outline in the highlight colour, and
-the item the keyboard is on a 2 px ring in the text colour; the theme's own colours are left on
+the item the keyboard is on a 2 px ring in the text colour, the guide lines the text colour; the theme's own colours are left on
 everywhere else, so the names and the tallies are in its text colour too: the state colours give way
 to it, and the glyphs and the words still say every state.
 

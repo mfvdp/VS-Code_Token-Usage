@@ -49,7 +49,7 @@ server error, a network error, an unclassified one — is said beside it in one 
 
 It stands directly under the header of the dashboard's quota card, in the entry's tooltip after the
 freshness line, under the provider's heading in the markdown view and in *Copy Usage Summary*, and
-as the provider's line in the Quick Pick. Once the reading is older than `staleAfterMinutes`, the
+as the detail line under the provider's item in the Quick Pick. Once the reading is older than `staleAfterMinutes`, the
 status-bar entry adds the next attempt after its age:
 `CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m` — in the grey of a stale
 reading, never as an alarm. `retry due` means the attempt is due now; `retry waiting for focus`

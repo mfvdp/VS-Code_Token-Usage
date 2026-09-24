@@ -38,6 +38,13 @@ tokens entry on the fake status bar, which only a live activation draws — and 
 written; the extension, for its part, drops a cold scan's answer that arrives after the window has
 gone.
 
+The version probe behind the quota fetch's user agent (`test/poller.test.ts`) has every edge
+injected — the platform, the `PATH`, the file check and the start of the process —, so its Windows
+cases run the same on every runner, and no test starts a process or reads the real `PATH`. A
+view-model build copies the buckets once and hands that one copy to every table (one copy instead
+of 25; the figures are the same, which a test compares with the copy-per-table path); a statistic
+called without that copy, as a test may call one, still takes its own.
+
 A handful of questions a fake host cannot answer run in a real editor: `npm run test:e2e`
 downloads VS Code stable into `.vscode-test/`, starts it with this extension in development
 mode, every other extension disabled, a user-data directory of its own and a fresh `HOME` — so

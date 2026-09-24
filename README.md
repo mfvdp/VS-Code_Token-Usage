@@ -17,7 +17,7 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![Token Pace in the VS Code status bar: one entry per quota window, each with a pace-coloured bar, an elapsed marker, the percentage and the countdown to its reset](media/screenshot-status-bar.png)
 
-![The Token Pace dashboard in the secondary sidebar: quota cards with pace verdict, forecast, the subagents' share of each Claude window and a seven-day sparkline coloured by pace; the Agents section with the agents running now over the tree of sessions, workflow runs and agents, each row with its state, usage, duration and tally; the Tokens section folded, the filter block and the summary](media/screenshot-dashboard.png)
+![The Token Pace dashboard in the secondary sidebar: the provider switch Claude Code · Codex · All at the top; quota cards with pace verdict, forecast, the subagents' share of each Claude window and a seven-day sparkline coloured by pace; the Agents section with the agents running now over the tree of the active session, its workflow run and agents — each row with its state, usage, duration and tally, the names in the colour of their state, guide lines from every child to its parent — and the closed row of earlier sessions; the Tokens section folded, the filter block and the summary](media/screenshot-dashboard.png)
 
 ![The Tokens section of the dashboard: the two running windows against the quota cards over the fixed periods, the cache switch over the composition bars, and the cache economy](media/screenshot-tokens.png)
 
@@ -43,18 +43,24 @@ output is read.
   [every state it can show](docs/status-bar-states.md)
 * **A tooltip with the whole picture**: the window table with used, elapsed, pace and reset,
   a forecast line per window, the token tables for today / 7 days / 30 days, the freshness
-  line and a provenance line that names what was measured and what was estimated.
-* **A dashboard in the secondary sidebar**: quota cards that explain their own colour, a
-  seven-day sparkline, the key figures, the daily chart by model with the cost line, and the
-  fixed-period token totals — under a provider switch at the very top, `Claude Code · Codex ·
-  All`, that shows the whole page for one provider or for both. → [Dashboard](docs/dashboard.md)
-* **Your Claude Code agents as a tree**: the agents running now listed on top, then the
-  sessions of the last seven days with their workflow runs and agents — closed until you open
-  them, fifty children at a time — each with its state, usage, duration and a tally of what
-  the agents below came to (`427 started · 390 ✓ · 15 ✕ · 10 ↻ · ~11 ● · ~1 ?`), live while
-  it runs. Failed, stopped, retried and replaced agents are told apart, a run's own recorded end
-  and a rejected request are named, and a click opens the details under the row — effort, token
-  mix, tool errors, cache misses, compactions, Claude Code's own run record. A state that is only
+  line and a provenance line that names what was measured and what was estimated. When a fetch of
+  Token Pace's own fails — a `429` and its backoff — the old figure stays and says so: *Last attempt
+  at 14:20 failed: HTTP 429 … · next attempt in 1h12m* in the tooltip and on the card, and
+  `· $(clock) retry 1h12m` after the age of a stale entry. → [Quota sources](docs/quota-sources.md)
+* **A dashboard in the secondary sidebar**, a provider switch at the very top — `Claude Code ·
+  Codex · All` — that shows the whole page for one provider or for both: quota cards that explain
+  their own colour, a seven-day sparkline, the key figures, the daily chart by model with the cost
+  line, and the fixed-period token totals. → [Dashboard](docs/dashboard.md)
+* **Your Claude Code agents as a tree**: the agents running now listed on top, then the active
+  sessions with their workflow runs and agents, and every other session of the last seven days in
+  one closed row, `Earlier sessions (12)` — closed until you open them, fifty children at a time —
+  each with its state, usage, duration and a tally of what the agents below came to
+  (`427 started · 390 ✓ · 15 ✕ · 10 ↻ · ~11 ● · ~1 ?`), live while it runs. A name says its state
+  in colour as well — green done, yellow unknown, red failed, blue running —, never as the only
+  sign, and guide lines connect every child to its parent. Failed, stopped, retried and replaced
+  agents are told apart, a run's own recorded end and a rejected request are named, and a click
+  opens the details under the row — effort, token mix, tool errors, cache misses, compactions,
+  Claude Code's own run record. A state that is only
   inferred says so, and nothing of a prompt or a result is read. The tree is a tree to the
   keyboard and a screen reader too. → [Agents](docs/agents.md)
 * **Where the agent tokens went**: a 7-day block by agent type and model with the five largest
@@ -70,7 +76,9 @@ output is read.
   to paste into an issue. → [Export and diagnostics](docs/export.md)
 * **Quota without the network.** Percentages come from the provider and cover every client;
   out of the box they are read from local sources somebody else wrote. Fetching them
-  ourselves is a separate decision, asked once. → [Quota sources](docs/quota-sources.md)
+  ourselves is a separate decision, asked once; on Windows its user agent names the Claude Code
+  version this machine runs, without starting the npm `.cmd` shim.
+  → [Quota sources](docs/quota-sources.md), [Windows](docs/windows-wsl-remote.md)
 * **Nothing invented.** A missing figure is `–`, never `0 %`; a window without a stated length
   gets no pace rather than an invented denominator; estimates carry `~` and lower bounds `⚠`.
   → [Numbers, words and pace](docs/numbers.md)
@@ -103,6 +111,11 @@ file, Claude Code's own status line, `~/.claude.json`, the Codex transcripts.
 Fetching quota ourselves is a separate decision, asked for once, in a dialog that states
 exactly what is sent where; the access token is read only then, only from
 `~/.claude/.credentials.json`, and only ever sent to `https://api.anthropic.com/api/oauth/usage`.
+By default the request names the Claude Code version this machine runs — from `claude --version`,
+on Windows only from a `claude.exe` on the `PATH`, never through the `.cmd` shim or a shell, else the
+version the newest Claude Code session wrote into its transcript —, and the extension's own
+`quota.json` keeps the last failed attempt: its time, its kind and the fetch's own words, never a
+token, a header or an exception's text.
 
 `~/.claude/ide/*.lock`, `~/.claude/sessions/*.key` and the `oauthAccount` block of
 `~/.claude.json` are **never** touched, and symlinks are not followed while scanning.
@@ -129,9 +142,9 @@ The full account is in [Privacy](docs/privacy.md).
 | [Numbers, words and pace](docs/numbers.md) | Where every figure comes from, the nine terms used throughout, and the pace rule the colours follow |
 | [Status bar](docs/status-bar.md) | What an entry is made of, the special states, the click, the tooltip, the colours, the preview |
 | [Status bar states](docs/status-bar-states.md) | Every text the bar can show, which state wins when several apply, and the one thing to check |
-| [Dashboard](docs/dashboard.md) | The sections of the panel, the filter bar, the chart, the tables and the heatmap |
-| [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
-| [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch, the status-line bridge, extra usage |
+| [Dashboard](docs/dashboard.md) | The provider switch, the sections of the panel, the filter bar, the chart, the tables and the heatmap |
+| [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree with its earlier sessions, state colours and guide lines: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
+| [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch — its user agent and a failed attempt beside an old figure —, the status-line bridge, extra usage |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
 | [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |
 | [Counting](docs/counting.md) | How the transcripts are read, what a lower bound is, retention and the snapshot |
@@ -141,7 +154,7 @@ The full account is in [Privacy](docs/privacy.md).
 | [Export and diagnostics](docs/export.md) | The CSV and JSON schemas, the clipboard summary, the diagnostics report |
 | [If the bar says …](docs/troubleshooting.md) | Every problem state with its cause and the repair its click performs, and the agent hook's |
 | [Privacy](docs/privacy.md) | Every file read, everything never touched, and the one outbound call |
-| [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, restricted and virtual workspaces |
+| [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, the Claude Code version on Windows, restricted and virtual workspaces |
 | [Settings](docs/settings.md) | Every `tokenPace.*` key with its default and what it does |
 | [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language, the walkthrough |
 | [Building and testing](docs/development.md) | Build, tests, the smoke test in a real window, and what CI runs |

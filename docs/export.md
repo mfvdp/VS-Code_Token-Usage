@@ -119,7 +119,8 @@ to `~`, and any key that even looks like a secret is redacted as a matter of def
 (there is no key or endpoint setting to begin with).
 
 **Clear Stored Data…** lists what the extension has stored, each with its size, and deletes
-what you pick: the token snapshot (`state.json`), the quota cache (`quota.json`), the quota
+what you pick: the token snapshot (`state.json`), the quota cache (`quota.json` — the readings of
+Token Pace's own fetch, the time of its next attempt and, per provider, its last failed attempt), the quota
 history (`quotaHistory.json`), the status-line mirror (`statusline-mirror.json`), the
 [agent hook](agents.md#the-agent-hook)'s mirror (`agent-hook.jsonl`) — once you granted
 `tokenPace.writeQuotaCache`, the shared quota cache files outside the extension's storage —, the

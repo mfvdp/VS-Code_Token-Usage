@@ -43,7 +43,11 @@ quota window or a price list. Each entry names a scope (`total`, `claude`, `code
   dropped **whole** rather than repaired — a defaulted limit would be a number Token Pace
   invented. At most 20 budgets, one per scope × period × unit.
 * The `budget` dashboard section is off by default; the same rows appear in the Quick Pick
-  list, in the markdown document and in *Copy usage summary*.
+  list, in the markdown document and in *Copy Usage Summary*. While the dashboard's provider switch
+  shows one provider, those four show the `total` budgets and that provider's own, each with the
+  figures `All` shows — the switch hides a row, it never moves a figure —, and not the other
+  provider's; the status bar's `budget` entry and the budget alerts keep every budget, whatever the
+  switch shows.
 
 `tokenPace.alerts.budgetPercent` (default `0` = off) notifies **once per period** when a budget
 passes that percentage of its own limit — upwards only, and never while the first read of the

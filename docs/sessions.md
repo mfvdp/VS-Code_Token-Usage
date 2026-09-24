@@ -19,6 +19,10 @@ the grouping while making the panel safe to show in a screen share.
 Changing `attribution` triggers a full re-scan, because the information is not in the existing
 snapshot. Switching back to `none` deletes the collected per-session records.
 
+The dashboard's `projects` and `sessions` sections follow the range, the model chips and the
+provider switch at the top of the page: under `Codex` they list the Codex usage of the range alone,
+under `All` every provider's ([Dashboard](dashboard.md)).
+
 **The agent tree is not attribution.** Whatever `attribution` says, the [Agents](agents.md)
 section keeps small tables of its own for **7 days**: per session transcript and per agent
 transcript the session id, the agent id and the workflow run it belongs to, the agent's type and

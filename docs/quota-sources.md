@@ -94,8 +94,10 @@ request.
 
 `honest` sends `token-pace/<version>` instead, and none of the above. **Warning:** the honest
 agent lands in an aggressively rate-limited bucket and can expect `429 Too Many Requests` within a
-few fetches, after which Token Pace backs off for up to two hours and shows nothing new. The
-endpoint is undocumented; this is an observation from the field, not a documented rule.
+few fetches, after which Token Pace backs off for up to two hours and no new figure arrives: the
+older reading stays, and beside it the card, the tooltip and — once it is stale — the entry say that
+the last attempt failed and when the next one is (below). The endpoint is undocumented; this is an
+observation from the field, not a documented rule.
 
 **Credentials.** In order: `CLAUDE_CODE_OAUTH_TOKEN`, then
 `~/.claude/.credentials.json` (`CLAUDE_SECURESTORAGE_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` are

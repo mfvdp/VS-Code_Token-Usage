@@ -28,7 +28,9 @@ together — the earlier sessions' too, whose group is closed on the dashboard �
 (`Last 7 days: 14 started · 5 ✓ · 2 ✕ · …`, in words beside it), every row opening the
 dashboard; past the sessions the tree lists — at most 20 active ones and 20 earlier ones — that
 row names how many sessions it counts and how many older ones it leaves out
-(`14 started · … · the 23 most recent sessions of the last 7 days`). The CSV and JSON exports carry the agents too (see [Export and diagnostics](export.md)).
+(`14 started · … · the 23 most recent sessions of the last 7 days`). While the switch shows Codex,
+neither of the two prints an Agents part, as the page leaves the section out. The CSV and JSON
+exports carry the agents too, whatever the switch shows (see [Export and diagnostics](export.md)).
 
 Claude Code only. Codex writes no agent identity into its transcripts, and the section states
 nothing about Codex.
@@ -263,7 +265,9 @@ the [group of earlier sessions](#the-tree)'. The row that is open — its detail
 text colour too: its details say the state in words. Each colour is the theme's own — its green, its
 list's warning and error colours, the provider's blue — mixed 60 : 40 with the text colour, so that
 it reads as text on a light theme as on a dark one: at least 4.5:1 against the sidebar and against a
-row's hover background on Dark Modern, Light Modern, 2026 Dark and 2026 Light. The second, under the name, in the dim
+row's hover background on Dark Modern, Light Modern, 2026 Dark and 2026 Light. The four hues are the
+theme's own, so on some themes two of them lie close together — on 2026 Light the green of done and
+the olive yellow of unknown — and there the glyph and the word tell them apart, as they always do. The second, under the name, in the dim
 tone, is the figures: the usage — fresh input + cache write + output, the definition the tables
 use —, the duration from the first line to the last, and for a session, a run and a closed agent
 with agents below it, the [tally](#the-tally). A session's and a run's second line is the usage,
@@ -339,12 +343,15 @@ as words that stand still — `since 14:20` for the time a node has been running
 no time of its own. Each row is an item of a tree (`treeitem`) and says so: its **name** is the
 node's whole name, a session's project after it, its state and — where the row shows one — its
 tally, in words: `Workflow run Tue 11:40 · cfe7718d, running, derived, 8 started, 3 done, about 2
-running`; its **figures** follow as its description, `412.3K lower bound, since 11:40` — every
+running`; its **figures** follow as its description, `412.3K lower bound, since 11:40` (the `⚠` itself is
+hidden from it; the words `lower bound` stand in the line beside it, at no size, and are read in its
+place) — every
 figure, the ones a narrow sidebar took off the line included, read as if they stood on it: `own
 32K, agents 166K, 49 min 00 s`. With it a
 screen reader hears the item's level, its place among its siblings and how many they are — every
 child the node has, the ones past the fifty shown included: `3 of 165` —, whether it is open, and
-whether it is the selected one. The toggle is the mouse's alone and hidden from a screen reader:
+whether it is the selected one (the group of earlier sessions, which cannot be selected, says nothing
+of that). The toggle is the mouse's alone and hidden from a screen reader:
 the item says whether it is open. The toggle is 24 px wide and high and a row at least 24 px high,
 so neither is a target smaller than 24 × 24 px (WCAG 2.5.8). In a forced-colours theme —
 Windows High Contrast — the glyphs and the `⚠` take the text colour, the toggle's arrow the
@@ -358,7 +365,8 @@ to it, and the glyphs and the words still say every state.
 The tree is a tree to the keyboard too, as WAI-ARIA's tree pattern describes one. It is **one stop
 of the `Tab` key**: `Tab` from the last stop before it — the running list's last row, or the last
 of the open 7-day block's largest agents — lands on one item of the tree — the one
-you were last on, else the selected node while its row is shown, else the first session — and the
+you were last on, else the selected node while its row is shown, else the first item: the first
+active session, or the group of earlier sessions when no session is active — and the
 next `Tab` leaves the tree; while that item's details are open, the next `Tab` first reaches their
 *Copy ID* button, and `Shift+Tab` goes back to the item. Inside the tree the keys move from item to
 item:
@@ -369,7 +377,7 @@ item:
 | `Home` / `End` | the first / the last item shown |
 | `→` | on a closed node, opens it; on an open one, moves to its first child |
 | `←` | on an open node, closes it; elsewhere, moves to the node above |
-| `Enter` / `Space` | opens the node's details under its row, or closes them again; on a `50 more` line, shows the next fifty |
+| `Enter` / `Space` | opens the node's details under its row, or closes them again; on a `50 more` line, shows the next fifty; on the group of earlier sessions, which has no details, opens or closes the group |
 | `Escape` | closes the details (see [Details](#details)) |
 
 **Moving selects nothing**: the arrows only move the focus, the details open with `Enter` or
@@ -378,7 +386,8 @@ focus is on has a ring round its line in the theme's focus colour; a click on a 
 item as well, without the ring. When the section is pushed again while the focus is in the tree,
 it stays on the item with the same node, else on the nearest item above it that is still shown —
 the node a `50 more` line belonged to, once it shows every child; the run, when newer agents push
-the one you were on out of its first fifty —, else on the first session.
+the one you were on out of its first fifty —, else on the first item: the first active session, or
+the group of earlier sessions when no session is active.
 
 ### The tally
 
@@ -678,7 +687,8 @@ no time and are never set aside.
 Clicking a row — of the tree, of the running list or of the [7-day block](#last-7-days)'s largest
 agents —, or `Enter` or `Space` on it (see
 [The keyboard](#the-keyboard)), opens the node's details right under that row; the same click or
-key again closes them. In the tree the panel stands inside the node's entry, between its row and its
+key again closes them. The one row without details is the group of earlier sessions: the same click
+or key opens or closes the group. In the tree the panel stands inside the node's entry, between its row and its
 children, across the tree's whole width however deep the node sits; under a row of the running
 list or of the 7-day block it is that row's second line. A running agent has a row in both the tree
 and the running list, and one of the largest agents a row in the block as well: the details open
@@ -718,8 +728,8 @@ were not read from the cache (`10.4K tokens not read from the cache`; Claude Cod
 system prompt, not for an unavailable cache or a previous message it could not find, so only the
 stated ones are summed), only where there was one — and its **compactions** — `1 · last at 11:48
 (auto, 13.5K → 3.1K)`: how often its transcript was compacted, when last, whether it was asked
-for (`manual`) or Claude Code's own (`auto`), and the context before and after it, only where it
-was —; then — when the API rejected its last request — the `Last request` row, then who
+for (`manual`) or Claude Code's own (`auto`) — `–` where the line recorded no trigger —, and the
+context before and after it, only where it was —; then — when the API rejected its last request — the `Last request` row, then who
 spawned it — left out for an agent of a workflow run that no launch names: its run started it,
 and the next row names the run; where no launch names a spawner, the agent its sidecar names as
 its parent —, its workflow run and — where the run's journal started its
@@ -805,7 +815,7 @@ Everything comes from the directory Token Pace already reads for the token count
 |---|---|---|
 | `<session>/subagents/agent-<id>.jsonl`, and `<session>/subagents/workflows/<run>/agent-<id>.jsonl` for an agent of a workflow run | what every transcript is read for — the token counts, the model, the time, the names of tool calls ([Counting](counting.md)): of a reply's `tool_use` blocks the `type`, the `name` and the `id`, and the `name` of the last one is kept for the agent with its line's time (at most 100 characters of `[A-Za-z0-9_.:@/-]`, else none); of a reply's line its top-level `effort` — one of `low`, `medium`, `high`, `xhigh` and `max`, any other value none; the tool results marked `is_error`, counted on the raw line by the unescaped literal `"is_error":true` — wherever the key appears in a Claude line of the agent's transcript; the line is not parsed for it, and only the count is taken; of a reply's message its `diagnostics`' `cache_miss_reason` — the reason's `type` (one of `previous_message_not_found`, `unavailable`, `messages_changed`, `model_changed`, `tools_changed` and `system_changed`; any other is not counted) and the `cache_missed_input_tokens` it states —, once per message, on its first line; a nested agent lies flat beside the one that spawned it | any text, a tool call's `input` — and an `effort` inside it —, an error line's `perTurnEffort`, the tool result itself, and anything else of the `diagnostics` |
 | `agent-<id>.meta.json` beside each agent transcript | `agentType`, `model`, `spawnDepth`, `toolUseId` and `parentAgentId` — the id of the agent that spawned it, the link where no launch names a spawner — from a file of at most 64 KB, never through a link | `description`, `prompt`, `requestShape`, `requestNonInteractive`, `workflowPhase`, `worktreePath` (a path), `worktreeBranch`, `spawnedWithWorktree`, `stoppedByUser`, and every other field |
-| every Claude Code transcript — a session's and an agent's | of a counted reply — and of an agent's API error line — the top-level `version`: three numbers, `2.1.281`, any other value none; the `permissionMode`, matched on the raw line wherever the key appears in a Claude line; only the value of the closed enum is taken, one of `default`, `acceptEdits`, `bypassPermissions`, `plan` and `auto` — Claude Code writes it on the user line that holds the prompt, and the line is never parsed for it; of a compaction's line — a `system` line whose `subtype` is `compact_boundary`, recognised on the raw line and then parsed — its `compactMetadata`: the `trigger` (`manual` or `auto`), `preTokens` and `postTokens`, and the line's time | the prompt and everything else of a user line; of a compaction its `preservedSegment`, `preservedMessages`, `preCompactDiscoveredTools`, `cumulativeDroppedTokens` and how long it took, and the `isCompactSummary` line after it, which holds the summary — that line is never parsed at all |
+| every Claude Code transcript — a session's and an agent's | of a counted reply — and of an agent's API error line — the top-level `version`: three numbers, `2.1.281`, any other value none — the newest main session's is also the version the quota fetch's user agent names where `claude --version` gives none ([Quota sources](quota-sources.md#what-the-fetch-does)), an agent's never; the `permissionMode`, matched on the raw line wherever the key appears in a Claude line; only the value of the closed enum is taken, one of `default`, `acceptEdits`, `bypassPermissions`, `plan` and `auto` — Claude Code writes it on the user line that holds the prompt, and the line is never parsed for it; of a compaction's line — a `system` line whose `subtype` is `compact_boundary`, recognised on the raw line and then parsed — its `compactMetadata`: the `trigger` (`manual` or `auto`), `preTokens` and `postTokens`, and the line's time | the prompt and everything else of a user line; of a compaction its `preservedSegment`, `preservedMessages`, `preCompactDiscoveredTools`, `cumulativeDroppedTokens` and how long it took, and the `isCompactSummary` line after it, which holds the summary — that line is never parsed at all |
 | `<session>/subagents/workflows/<run>/journal.jsonl` | `type` (one of `started`, `result`, `failed` and `launched`; a `launched` line is ignored), `key` and `agentId` at the head of each line, matched on the raw line — a line of at most 16 KB without that head is parsed for the same three, a longer one skipped and counted; the `key` is compared within the journal, never kept: with the keys of the same journal's other lines, to tell a step that was started again from a new one, and it is never stored, shown, exported or logged | the `result`, `label` and `phase` a line carries |
 | the transcript that launched an agent — the session's, or another agent's | an `Agent` (or `Task`) tool call: its `id` and three fields of its input, `subagent_type`, `model` and `run_in_background` | the input's `description` and `prompt` |
 | the same | the tool result that answers it: `agentId`, `status` — one of `completed`, `failed`, `error`, `timeout`, `killed`, `cancelled`, `stopped` and `async_launched` (a background start), any other ignored —, `totalTokens`, `totalDurationMs` and `totalToolUseCount`, and the `tool_use_id` it answers | its content — the prompt and the answer it also carries |
@@ -876,7 +886,7 @@ every save.
 1.5 builds — committed, never published — no workflow runs. On the first start after the update they are rebuilt once from the
 Claude transcripts and journals that changed in the last seven days — each read only as far as its
 tokens were already counted, so no token is counted twice and no total moves. The snapshot states
-which revision of the agent tables it holds — revision **8** in 1.6.0 —; an update that adds
+which revision of the agent tables it holds — revision **8** in 1.6.0 and 1.7.0 —; an update that adds
 something only such a rebuild can fill in raises the revision, and the rebuild runs once more. The rebuild also reads an agent's
 sidecar again when the identity it kept names no spawning agent — the fifth field, `parentAgentId`,
 came with 1.6 — and keeps that identity when the file is gone; an agent whose transcript the rebuild

@@ -27,6 +27,11 @@ Part of the [Token Pace documentation](../README.md#documentation).
   It has no colour, no alarm and no word for a finished agent. Its tooltip says what running
   means, names the first five entries of the running list — the agent's name with the model's
   whole id, and where it sits — and counts the rest (`and 2 more`).
+* **The dashboard's provider switch does not reach the bar.** Whatever the switch at the top of the
+  dashboard shows — `Claude Code`, `Codex` or `All` —, the entries, their tooltips, the `budget`
+  entry (every budget), the `agents` entry and the alerts stay as the settings above make them: the
+  switch is a view of the dashboard, the markdown view, the Quick Pick and *Copy Usage Summary*, and
+  a view of the panel does not hide a quota window from the bar ([Dashboard](dashboard.md)).
 * **Density.** `full` (default) gives every window its own entry, `compact` folds a provider's
   windows into one item (`CC 25%·2h14m | 69%·6d`), `minimal` folds every provider into a
   single `TP 69% ▲`. Problem states are never folded — a named cause is the point.

@@ -10,17 +10,17 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | Command | Keybinding | Purpose |
 |---|---|---|
 | `Token Pace: Open Dashboard` | `ctrl+alt+shift+t` / `cmd+alt+shift+t` | The dashboard in the secondary sidebar |
-| `Token Pace: Show Usage (Quick Pick)` | | The whole view model as a searchable flat list |
-| `Token Pace: Show Usage as Text` | | A read-only markdown document with the same figures |
+| `Token Pace: Show Usage (Quick Pick)` | | The whole view model as a searchable flat list — following the dashboard's provider switch, its first line naming the provider while the switch shows one |
+| `Token Pace: Show Usage as Text` | | A read-only markdown document with the same figures — following the dashboard's provider switch, its range line ending `· Codex only` while the switch shows Codex |
 | `Token Pace: Show Actions Menu` | | The QuickPick behind a status bar click |
 | `Token Pace: Fetch Quota Now` | | Immediate fetch, asking for consent if needed. Disabled in `quotaSource: cache` |
 | `Token Pace: Re-read Token History` | | Full re-scan of all transcripts |
 | `Token Pace: Cycle Status Bar Windows` | | Steps `windowSelect` through its values |
 | `Token Pace: Preview Status Bar States` | | Synthetic renderings of every state, for 60 seconds |
 | `Token Pace: Open Official Usage Page` | | Opens the provider's own usage page in your browser |
-| `Token Pace: Export CSV…` | | One row per bucket, plus a `TOTAL` row — the tool table in a second file beside it, the agents in a third |
-| `Token Pace: Export JSON…` | | Buckets, tool calls, agents, totals, range, timezone and pricing provenance |
-| `Token Pace: Copy Usage Summary` | | The summary as markdown, on the clipboard |
+| `Token Pace: Export CSV…` | | One row per bucket, plus a `TOTAL` row — the tool table in a second file beside it, the agents in a third; every provider, whatever the switch shows |
+| `Token Pace: Export JSON…` | | Buckets, tool calls, agents, totals, range, timezone and pricing provenance; every provider, whatever the switch shows |
+| `Token Pace: Copy Usage Summary` | | The summary as markdown, on the clipboard — following the dashboard's provider switch as the markdown document does |
 | `Token Pace: Copy Diagnostics` | | An allow-listed report, safe to paste into an issue |
 | `Token Pace: Copy Agent ID` | | The whole id of the node selected in the Agents section — agent, launch, run or session, also while its row is inside a closed branch — on the clipboard; the details' *Copy ID* button does the same |
 | `Token Pace: Set Up the Agent Hook…` | | Copies the agent hook's script into the extension's storage and opens a read-only document with the snippet you add to `~/.claude/settings.json` yourself, what it reads and how to remove it — Token Pace writes nothing into `~/.claude` (see [Agents](agents.md#the-agent-hook)) |

@@ -91,7 +91,7 @@ third of the agents have such a reply — nearly always one cut off at the tool 
 the agent's last: only 22 of 925 agent transcripts end on an unfinished reply.
 
 **Upgrading.** The persisted snapshot is schema version 8; version 5, 6 and 7 are still read. It
-also states the revision of the agent tables it holds — 8 in 1.6.0 —, and a snapshot with an older
+also states the revision of the agent tables it holds — 8 in 1.6.0 and 1.7.0 —, and a snapshot with an older
 one, or none, has the agent tables rebuilt once on the first start after the update.
 Version 7 — everything before the workflow runs of the agent tables —, version 6 — everything
 before the agent tables — and version 5 — everything before the tool table — are read forward

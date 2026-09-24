@@ -3,6 +3,132 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.7.0 — 2026-09-24
+
+**One provider at a time, a quieter agent tree, and three fixes from a Windows machine.** A switch
+at the very top of the dashboard — `Claude Code · Codex · All` — shows the whole page for one
+provider: its quota card, its tokens, its chart, its models, its budgets; `All` is the page as it
+was. The Agents section lists the sessions that are active now and puts every other one into a
+single closed row, `Earlier sessions (12)`; an agent's name says its state in colour as well —
+green done, yellow unknown, red failed, blue running —, and guide lines connect every child to its
+parent. When Token Pace's own quota fetch fails — a `429` and its backoff — the old figure no longer
+stands there without a word: the card, the tooltip and a stale status-bar entry say when the last
+attempt failed, why, and when the next one is. On Windows the quota fetch now names the Claude Code
+version in use, an npm install included.
+
+### Added
+
+* **The provider switch.** Three buttons at the very top of the dashboard, above everything else —
+  `Claude Code`, `Codex`, `All` (German „Alle") —, one of them pressed. Under one provider the page
+  shows only that provider's quota card, token totals, chart, models, tools, projects, sessions,
+  reset history and data quality, and of the budgets the `total` ones and that provider's own, each
+  with the figures `All` shows; a footnote says so. `All` is the page as it always was. A change of
+  provider clears the model chips. The choice is remembered with the rest of the view state, the
+  button you pressed keeps the keyboard focus, and the switch is a labelled group of toggle buttons,
+  each at least 24 × 24 px, on one line down to the narrowest sidebar.
+* **Earlier sessions in one closed row.** The roots of the Agents tree are the sessions active now —
+  their own transcript wrote within the last ten minutes, or one of their agents runs —, the most
+  recent first; every other session of the last seven days sits in one row after them,
+  `Earlier sessions (12)`, closed until you open it, its second line the tallies of the sessions it
+  holds added up. It has no state, no glyph and no details: a click, `Enter` or `Space` opens and
+  closes it, and it stays as you left it. A session moves out as soon as it is active again and back
+  in once it is idle, so a running agent is never inside it and the running list is the same as
+  before. At most 20 active and 20 earlier sessions are listed, the rest counted under the tree. The
+  markdown report prints the group as one list item with its sessions one level in, and the Quick
+  Pick's summary counts them too.
+* **State colours on the rows.** The name of an agent, a launch, a run and a run's collector is in
+  the colour of its state — green done, yellow unknown, red failed, blue running —, and so are those
+  parts of every tally (`3 ✓` green, `1 ✕` red). Each colour is the theme's own, mixed with the text
+  colour so that it reads as text: at least 4.5:1 on Dark Modern, Light Modern, 2026 Dark and 2026
+  Light. The colour is the third sign beside the glyph and the words, never the only one; a stopped
+  or superseded agent, a session, the row of earlier sessions and the row whose details are open keep
+  the text colour, and a forced-colours theme puts its own text colour on all of them.
+* **Guide lines in the tree.** A line runs down from every opened node past its children, with a stub
+  into each one, the last one ending at its stub — in the colour of the explorer's indent guides,
+  behind the rows and behind an open details panel, decoration only; in a forced-colours theme in the
+  text colour.
+* **The failed attempt beside a stale reading.** When a fetch of Token Pace's own fails after the
+  reading on screen and the cause passes by itself — a `429` and its backoff, a server error, a
+  network error —, the older figure stays and one sentence says what happened:
+  `Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m`.
+  It stands directly under the header of the dashboard's quota card, in the tooltip, in the markdown
+  view, the Quick Pick and *Copy Usage Summary*; once the reading is stale, the status-bar entry adds
+  ` · $(clock) retry 1h12m` after its age, in the grey of a stale reading and never as an alarm. A
+  next attempt whose time has passed reads `due`, and `waiting for focus` while
+  `tokenPace.pollOnlyWhenFocused` holds it back in a window that has been in the background for more
+  than ten minutes (the log says so once per hold). A permanent cause — missing or rejected
+  credentials, a `403`, no `codex` executable — is not said beside a reading; it shows, as before,
+  where no reading is left. The sentence survives a restart during the backoff.
+
+### Changed
+
+* **The provider chips became the switch.** The filter bar keeps its `Range` and `Models` rows; the
+  providers are picked above the page. Unlike the chips, the switch also reaches the quota cards, the
+  Tokens section, the budgets, the reset history and the data quality.
+* **The Agents and Context sections are left out while the switch shows Codex** — no heading, no
+  fold, no gear — and come back in their place under `Claude Code` or `All`.
+* **The markdown view, the Quick Pick and *Copy Usage Summary* follow the switch**: the markdown's
+  range line and the summary's heading end `· Codex only`, the Quick Pick's first line starts with
+  the provider, and none of them prints an Agents or Context part under Codex. The status bar, its
+  tooltips, the `budget` and `agents` entries, the alerts, the CSV and JSON exports and *Copy
+  Diagnostics* follow no view: they show every provider their settings name.
+* **Copy Diagnostics** says `next attempt` where it said `backoff until` — it prints the next attempt
+  our own fetch wants, the end of a backoff included — and names the kind and the time of the last
+  failed attempt per provider, never its words.
+* **Where the user agent's version comes from on Windows.** `claude --version` is started only from a
+  `claude.exe` in a directory of the `PATH`, by its full path and without a shell. Where there is
+  none — an npm install puts only the shim `claude.cmd` there, which is never started — the version
+  is the one the newest Claude Code session on the machine wrote into its transcript, and only where
+  neither is known a fixed one. The log names the source once, and again when it changes;
+  `tokenPace.userAgent: honest` sends none of it.
+* **The descriptions** of `tokenPace.userAgent`, `tokenPace.pollOnlyWhenFocused`,
+  `tokenPace.staleAfterMinutes` and of the `agents` and `context` sections, and the walkthrough, say
+  all of this, in English and German.
+* **Snapshot and export stay as they were.** `STATE_VERSION` 8, `AGENT_TABLES_REVISION` 8 and the
+  export's `schema_version` 3 (`EXPORT_SCHEMA_VERSION` 3) are the values 1.6.0 wrote, unchanged: the
+  update replays nothing and re-reads nothing.
+* For contributors: a view-model build copies the token buckets once and hands that one copy to every
+  table — one copy instead of 25, the same figures; the compaction row's words are three whole
+  templates instead of the bare words `auto` and `manual`, so no other `auto` can take their
+  translation; the extension test's fake host unsubscribes a disposed activation, each test waits for
+  its own activation's cold start, and the extension drops a cold scan's answer that arrives after its
+  window has gone; the Windows version probe has its edges injected, so its tests run on every
+  platform.
+
+### Fixed
+
+* **`retry reset due`.** A retry whose time had passed read `retry reset due` (German „neuer Versuch
+  in Reset fällig"); it now reads `retry due`, and `reset due` is a reset's word only.
+* **The Claude Code version on Windows with an npm install.** Without a shell the npm shim
+  `claude.cmd` cannot be started, so the quota fetch named a fixed Claude Code version rather than
+  the one installed; it now names the one in use (above).
+* **A stray space for screen readers.** The `⚠` of a lower bound on an agent's row was an image with a
+  name of its own, and Chrome read the figures as `12.3K lower bound , since 11:59`; the mark is now
+  hidden from screen readers and its words stand in the line: `12.3K lower bound, since 11:59`.
+* **The chart's bands by model in a forced-colours theme** (Windows High Contrast) were all painted in
+  the page colour. They are drawn as patterns in the theme's two colours — the largest model of a
+  provider solid, then stripes, cross-hatch and lines, dots for `other` —, each ringed by the page
+  colour; a band drawn under 4 px tall keeps its pattern without the ring, which would cover it whole,
+  the dots of `other` in its middle.
+* **A next attempt nothing waits for is no longer called due.** While a fresh reading from the status
+  line or a cache file answers the fetch, the markdown view's `next refresh` said `reset due`; it now
+  names when that reading turns older than the interval, and a background window showing such a
+  reading says neither `due` nor `waiting for focus`.
+* **A `$(…)` inside a Codex error or plan name** could print as an icon in the Quick Pick; it prints as
+  text.
+
+### Privacy
+
+* Nothing new is read from any Claude Code or Codex file, and the read contract is unchanged. Three
+  uses are new. The `version` the agent tree already read of a counted reply — the newest main
+  session's, never an agent's — becomes the second source of the `claude-code/<version>` user agent,
+  and only for the one consent-gated quota fetch in `quotaSource: poll` with `tokenPace.userAgent:
+  claudeCode`. On Windows each `PATH` directory is checked for a `claude.exe` by its existence alone —
+  nothing is read from it — and that file is started without a shell; a `.cmd`, `.bat` or `.ps1` never
+  is. And the extension's own `quota.json` keeps the last failed attempt per provider — its time, its
+  kind and the fetch's own words, never a credential, a header or an exception's text —, cleared by the
+  next successful fetch, by *Clear Stored Data…* and with the file.
+
 ## 1.6.0 — 2026-09-24
 
 **Your Claude Code agents, in the dashboard.** A new Agents section shows the sessions of the last

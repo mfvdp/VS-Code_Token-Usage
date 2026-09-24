@@ -33,5 +33,10 @@ its Pace cell is a dash until the phase ends.
 
 Absence is a dash. A missing figure is never drawn as `0 %` or `$0.00`.
 
+A reading that is stale because a fetch of Token Pace's own failed says when the next attempt
+is — `CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m`, then `retry due` —
+in the grey of a stale reading, never as an alarm. The dashboard's provider switch changes nothing
+on the bar.
+
 `agents` in `tokenPace.statusBar.show` — off by default — adds `~3 running` while Claude Code
 agents run: inferred from their transcripts, so marked `~`, with no colour and no alarm.

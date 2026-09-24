@@ -35,8 +35,9 @@ import { AGENT_META_MAX_BYTES } from '../src/scan'
 import { durationText } from '../src/stats'
 import { buildItems, selectWindows, viewOf, windowValue } from '../src/statusText'
 import { labelOf, StoredKey } from '../src/storage'
-import { formatReset, TimeConfig } from '../src/time'
-import { QuotaState, QuotaWindow, STATE_VERSION } from '../src/types'
+import { formatReset, lastFailureText, nextAttemptWords, refreshWords, retryWords, TimeConfig } from '../src/time'
+import { FAILURE_TRANSIENT, QuotaState, QuotaWindow, STATE_VERSION } from '../src/types'
+import { SOURCES, SOURCE_TITLE } from '../src/adapters'
 import { MAX_AGENT_EXPANDED } from '../src/viewModel'
 import { readManifest } from './helpers/nls'
 
@@ -1789,10 +1790,13 @@ test('the snapshot version and the agent tables\' revision are stated on the pag
   assert.ok(doc.counting.replace(/\s+/g, ' ').includes(`the revision of the agent tables it holds — ${AGENT_TABLES_REVISION} in`),
     'docs/counting.md does not state the agent tables\' revision')
   const log = readDoc('CHANGELOG.md')
-  const first = log.indexOf('\n## ')
+  // 1.7 P11 (pinned and changed: "the newest CHANGELOG entry is 1.6.0"): 1.7.0 stands above it now,
+  // so the 1.6.0 entry is found by its heading; the 1.7.0 entry has a test of its own below.
+  const first = log.indexOf('\n## 1.6.0 ')
+  assert.ok(first >= 0, 'the CHANGELOG has no 1.6.0 entry')
   const second = log.indexOf('\n## ', first + 4)
   const entry = log.slice(first, second)
-  assert.match(entry, /^\n## 1\.6\.0 — \d{4}-\d{2}-\d{2}\n/, 'the newest CHANGELOG entry is not 1.6.0')
+  assert.match(entry, /^\n## 1\.6\.0 — \d{4}-\d{2}-\d{2}\n/, 'the 1.6.0 heading lost its date')
   const flat = entry.replace(/\s+/g, ' ')
   for (const claim of ['1.5.0 and 1.5.1 were committed but never published; their changes ship here.',
     `(\`STATE_VERSION\` ${STATE_VERSION})`, `(\`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION})`,
@@ -1894,5 +1898,256 @@ test('the user agent\'s version: its three sources, the Windows lookup and the l
     'that shim is never started', 'the version then comes from the newest Claude Code session\'s transcript',
     '`claude: user agent version 2.1.281 (from the newest transcript)`']) {
     assert.ok(windows.includes(claim), `docs/windows-wsl-remote.md does not say: ${claim}`)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 P11: what 1.7.0 shipped, where a reader looks for it
+// ---------------------------------------------------------------------------
+
+/** The German runtime bundle, for the words the German page and the German manifest share. */
+const GERMAN = JSON.parse(readDoc('l10n/bundle.l10n.de.json')) as Record<string, string>
+const flatText = (text: string): string => text.replace(/\s+/g, ' ')
+const nlsEn = JSON.parse(readDoc('package.nls.json')) as Record<string, string>
+const nlsDe = JSON.parse(readDoc('package.nls.de.json')) as Record<string, string>
+
+test('the provider switch is named where a reader looks: its three buttons, „Alle", and what it does not reach (1.7 F1)', () => {
+  // The buttons are the registry's titles in its order, then All — the page's words, not the docs'.
+  const titles = SOURCES.map((s) => SOURCE_TITLE[s])
+  assert.deepEqual(titles, ['Claude Code', 'Codex'], 'the registry changed: name the new buttons on the pages')
+  assert.ok(readDoc('src/dashboard.ts').includes("'All': t('All'),"), 'the page no longer carries the All button\'s word')
+  assert.equal(GERMAN['All'], 'Alle')
+  assert.equal(GERMAN['Providers'], 'Anbieter')
+  const dash = flatText(doc.dashboard)
+  assert.ok(dash.includes(`${titles.map((t) => `\`${t}\``).join(', ')}, \`All\` (German \`${GERMAN['All']}\`)`),
+    'docs/dashboard.md does not name the switch\'s buttons as the page writes them')
+  assert.ok(flatText(README).includes(`\`${titles.join(' · ')} · All\``), 'README.md does not name the switch')
+  assert.ok(readDoc('media/walkthrough/dashboard.md').includes(`${titles.map((t) => `\`${t}\``).join(', ')}, \`All\``),
+    'the walkthrough does not name the switch')
+  assert.ok(nlsEn['walkthrough.getStarted.openDashboard.description'].includes(`${titles.join(' · ')} · All`), 'the walkthrough step does not name the switch')
+  assert.ok(nlsDe['walkthrough.getStarted.openDashboard.description'].includes(`${titles.join(' · ')} · ${GERMAN['All']}`)
+    && nlsDe['walkthrough.getStarted.openDashboard.description'].includes('Anbieterschalter'), 'the German walkthrough step does not name the switch (§6: Anbieterschalter)')
+  // Under Codex the two Claude-only sections are left out — the manifest says so of both.
+  assert.ok(nlsEn['config.dashboard.sections.enum.agents'].includes('left out while the provider switch shows Codex'))
+  assert.ok(nlsEn['config.dashboard.sections.enum.context'].includes('left out while the provider switch shows Codex'))
+  for (const key of ['config.dashboard.sections.enum.agents', 'config.dashboard.sections.enum.context']) {
+    assert.ok(nlsDe[key].includes('ausgeblendet, solange der Anbieterschalter Codex zeigt'), `${key} does not say it in German`)
+  }
+  // The text views follow it — and say which provider they show, in the words the code writes.
+  assert.ok(readDoc('src/textViews.ts').includes("t('{0} only', shown)"), 'the markdown range line no longer names the provider')
+  const commands = flatText(doc.commands)
+  for (const row of ['Show Usage (Quick Pick)', 'Show Usage as Text', 'Copy Usage Summary']) {
+    const line = doc.commands.split('\n').find((l) => l.startsWith(`| \`Token Pace: ${row}\``))
+    assert.ok(line && line.includes('following the dashboard\'s provider switch'), `docs/commands.md: ${row} does not say it follows the switch`)
+  }
+  assert.ok(commands.includes('every provider, whatever the switch shows'), 'docs/commands.md does not say the exports follow no switch')
+  assert.ok(flatText(doc.agents).includes('While the switch shows Codex, neither of the two prints an Agents part'), 'docs/agents.md does not say the text views leave the Agents part out')
+  assert.ok(flatText(doc.export).includes('The CSV and JSON exports and *Copy Diagnostics* follow neither the switch nor the chips'))
+  // What it does not reach: the bar, the budget item, the agents entry, the alerts — where a reader looks.
+  const bar = flatText(doc.statusBar)
+  assert.ok(bar.includes('**The dashboard\'s provider switch does not reach the bar.**')
+    && bar.includes('the entries, their tooltips, the `budget` entry (every budget), the `agents` entry and the alerts stay as the settings above make them'),
+    'docs/status-bar.md does not say the switch governs nothing on the bar')
+  assert.ok(flatText(doc.budgetsAlerts).includes('the switch hides a row, it never moves a figure')
+    && flatText(doc.budgetsAlerts).includes('the status bar\'s `budget` entry and the budget alerts keep every budget, whatever the switch shows'),
+    'docs/budgets-alerts.md does not say what the switch does to the budgets')
+  assert.ok(flatText(readDoc('media/walkthrough/status-bar.md')).includes('The dashboard\'s provider switch changes nothing on the bar.'), 'the status-bar walkthrough does not say it')
+  // The host reads every budget for the bar and the alerts, which is what the pages promise.
+  assert.equal((readDoc('src/extension.ts').match(/latestVm\?\.allBudgets \?\? \[\]/g) ?? []).length, 2, 'the bar or the alerts read another budget list')
+})
+
+test('the group of earlier sessions is named where a reader looks, with its words, its cap and its keys (1.7 F2)', () => {
+  assert.ok(readDoc('src/agentTreeBuild.ts').includes("t('Earlier sessions ({0})'"), 'the group is no longer named so')
+  assert.equal(GERMAN['Earlier sessions ({0})'], 'Frühere Sitzungen ({0})')
+  assert.ok(flatText(README).includes('one closed row, `Earlier sessions (12)`'), 'README.md does not name the group')
+  assert.ok(readDoc('media/walkthrough/dashboard.md').includes('in one closed row, `Earlier sessions (12)`'), 'the walkthrough does not name the group')
+  assert.ok(nlsEn['walkthrough.getStarted.openDashboard.description'].includes('“Earlier sessions (12)”'), 'the walkthrough step does not name the group')
+  assert.ok(nlsDe['walkthrough.getStarted.openDashboard.description'].includes('„Frühere Sitzungen (12)“'), 'the German walkthrough step does not name the group (§6)')
+  const agents = flatText(doc.agents)
+  for (const claim of [
+    // The keyboard: Enter and Space toggle the group, and Tab's and a push's fallback is the first item.
+    '| `Enter` / `Space` | opens the node\'s details under its row, or closes them again; on a `50 more` line, shows the next fifty; on the group of earlier sessions, which has no details, opens or closes the group |',
+    'else the first item: the first active session, or the group of earlier sessions when no session is active — and the',
+    '—, else on the first item: the first active session, or the group of earlier sessions when no session is active.',
+    'The one row without details is the group of earlier sessions: the same click or key opens or closes the group.',
+    'the group of earlier sessions, which cannot be selected, says nothing of that',
+    // The Quick Pick counts what the tree lists: the active roots and the group's — both capped.
+    `at most ${MAX_ROOTS} active ones and ${MAX_ROOTS} earlier ones`,
+  ]) assert.ok(agents.includes(claim), `docs/agents.md does not say: ${claim}`)
+  const dash = flatText(doc.dashboard)
+  for (const claim of [
+    'all but the row of earlier sessions, a container with no state and no figures of its own',
+    'a click on the row of earlier sessions opens or closes that row instead, since it has no details',
+    'the group of earlier sessions, which has no state, no figures and no details, is named by its words and its tally alone and carries no `aria-selected`',
+    'the earlier sessions\' too, whose group is closed on the page',
+    '`… · the 23 most recent sessions of the last 7 days`',
+    'the group of earlier sessions a list item without a state or a figure and its sessions one level in',
+  ]) assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
+  // The page's keys do what the pages say: the group's row toggles, and Enter/Space act on the row.
+  const page = readDoc('src/webview/main.ts')
+  assert.ok(page.includes("data-act=\"' + (group ? 'agentToggle' : 'agentSelect')"), 'the group\'s row no longer toggles it')
+  assert.ok(page.includes("(group ? '' : ' aria-selected=\"' + on + '\"')"), 'the group carries aria-selected again')
+})
+
+test('the state colours are named where a reader looks, as the stylesheet\'s four tokens mix them (1.7 F4)', () => {
+  const css = readDoc('src/dashboard.ts')
+  // The four hues the pages name are the four the stylesheet mixes, each from the token of its state.
+  const sources: Record<string, string> = {
+    done: 'var(--ok)',
+    unknown: 'var(--vscode-list-warningForeground, var(--warn))',
+    failed: 'var(--vscode-list-errorForeground, var(--error))',
+    running: 'var(--claude)',
+  }
+  for (const [state, from] of Object.entries(sources)) {
+    assert.ok(css.includes(`--ag-c-${state}: color-mix(in srgb, ${from} 60%, var(--vscode-foreground));`), `--ag-c-${state} is no longer mixed from ${from}`)
+  }
+  for (const [token, hue] of [['--ok', 'green'], ['--warn', 'yellow'], ['--error', 'red'], ['--claude', 'blue']]) {
+    assert.ok(css.includes(`${token}: var(--vscode-charts-${hue});`), `${token} is no longer the theme's ${hue}`)
+  }
+  const words = 'green done, yellow unknown, red failed, blue running'
+  for (const [name, text] of [['README.md', README], ['docs/agents.md', doc.agents], ['docs/dashboard.md', doc.dashboard],
+    ['docs/numbers.md', doc.numbers], ['media/walkthrough/dashboard.md', readDoc('media/walkthrough/dashboard.md')]] as const) {
+    assert.ok(flatText(text).includes(words), `${name} does not name the four state colours`)
+  }
+  assert.ok(flatText(README).includes('never as the only sign, and guide lines connect every child to its parent'), 'README.md does not say the colour is never alone, nor name the guide lines')
+  // Review 3 #2 (accepted): the hues are the theme's own and may lie close on a theme.
+  assert.ok(flatText(doc.agents).includes('The four hues are the theme\'s own, so on some themes two of them lie close together'),
+    'docs/agents.md does not say the hues may lie close together')
+})
+
+test('a band of the chart under BAND_THIN_PX keeps its pattern without the ring, where the pages say it (1.7 P7b)', () => {
+  const m = /const BAND_THIN_PX = (\d+);/.exec(readDoc('src/webview/main.ts'))
+  assert.ok(m, 'src/webview/main.ts no longer states the height of a thin band')
+  const px = Number(m[1])
+  assert.ok(flatText(doc.dashboard).includes(`all but a band drawn under ${px} px tall, which the ring would cover whole`), 'docs/dashboard.md states another height')
+  assert.ok(flatText(readDoc('CHANGELOG.md')).includes(`a band drawn under ${px} px tall keeps its pattern without the ring`), 'the 1.7.0 notes state another height')
+})
+
+test('a transient failure of our own fetch: the sentence the views print, the kinds the pages call transient, the attempt words (1.7 W1, W2, P4b)', () => {
+  // The kinds FAILURE_TRANSIENT calls transient are the ones the pages list — any change is a docs change.
+  const transient = Object.entries(FAILURE_TRANSIENT).filter(([, v]) => v).map(([k]) => k).sort()
+  assert.deepEqual(transient, ['offline', 'retry', 'unknown'], 'the transient kinds changed: say which on docs/quota-sources.md')
+  const quota = flatText(doc.quotaSources)
+  assert.ok(quota.includes('Transient means the cause passes by itself and another attempt is scheduled after a backoff: a `429` or a server error, a network error (timeout, DNS, TLS, proxy), an unclassified status or error.'),
+    'docs/quota-sources.md does not say which failures are transient')
+  assert.ok(quota.includes('A permanent cause — missing, expired or rejected credentials, a refused endpoint (`403`), no `codex` executable, an answer without windows — is not said beside a reading'))
+  // The sentence as lastFailureText writes it, word for word on every page that quotes it.
+  const tcfg: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+  const now = Date.UTC(2026, 8, 24, 14, 40)
+  assert.ok(readDoc('src/poller.ts').includes("'HTTP {0} — backing off before the next attempt'"), 'the poller words a 429 otherwise')
+  const q: QuotaState = {
+    source: 'claude', ok: true, origin: 'poll', fetchedAt: Math.floor((now - 2 * HOUR) / 1000), planType: null, windows: [],
+    lastFailure: { at: Date.UTC(2026, 8, 24, 14, 20), problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' },
+    nextAttemptAt: now + 72 * 60_000, attemptHeld: null,
+  }
+  const sentence = lastFailureText(q, now, tcfg)
+  assert.equal(sentence, 'Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m')
+  for (const [name, text] of [['docs/quota-sources.md', doc.quotaSources], ['docs/status-bar.md', doc.statusBar], ['docs/status-bar-states.md', STATES],
+    ['docs/troubleshooting.md', doc.troubleshooting], ['docs/dashboard.md', doc.dashboard], ['docs/export.md', doc.export],
+    ['CHANGELOG.md', readDoc('CHANGELOG.md')]] as const) {
+    assert.ok(flatText(text).includes(sentence as string), `${name} does not quote the sentence as the views print it`)
+  }
+  assert.equal(lastFailureText({ ...q, lastFailure: { ...q.lastFailure!, kind: 'noToken' } }, now, tcfg), null, 'a permanent cause is said beside a reading')
+  // The attempt's words: the countdown, due, held for focus — never a reset's "reset due".
+  assert.equal(retryWords({ kind: 'in', text: '1h12m' }), 'retry 1h12m')
+  assert.equal(retryWords({ kind: 'due' }), 'retry due')
+  assert.equal(retryWords({ kind: 'focus' }), 'retry waiting for focus')
+  assert.equal(nextAttemptWords({ kind: 'focus' }), 'next attempt waiting for focus')
+  assert.equal(refreshWords({ kind: 'focus' }), 'waiting for focus')
+  assert.ok(flatText(doc.dashboard).includes('`next attempt due` once that time has passed, `next attempt waiting for focus` while a background window holds it back; a permanent cause adds no line'),
+    'docs/dashboard.md\'s quota row does not name the card\'s failure line')
+  assert.ok(flatText(doc.troubleshooting).includes('as the detail line under the provider\'s item in the Quick Pick'), 'docs/troubleshooting.md does not say where the Quick Pick puts it')
+  assert.ok(flatText(doc.quotaSources).includes('backs off for up to two hours and no new figure arrives'), 'docs/quota-sources.md still says nothing new is shown')
+  assert.equal(flatText(doc.quotaSources).includes('shows nothing new'), false, 'docs/quota-sources.md still says nothing new is shown')
+  assert.ok(readDoc('media/walkthrough/status-bar.md').includes('`CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m`'), 'the status-bar walkthrough does not show the suffix')
+  // The manifest in both languages, in the words each build shows.
+  const focus = refreshWords({ kind: 'focus' })
+  assert.ok(nlsEn['config.pollOnlyWhenFocused.description'].includes(`“${focus}”`), 'pollOnlyWhenFocused does not quote the attempt\'s words')
+  assert.ok(nlsDe['config.pollOnlyWhenFocused.description'].includes(`„${GERMAN[focus]}“`), 'the German pollOnlyWhenFocused does not quote the German words')
+  assert.ok(nlsEn['config.staleAfterMinutes.description'].includes(`(“${retryWords({ kind: 'in', text: '1h12m' })}”)`), 'staleAfterMinutes does not name the suffix')
+  assert.ok(nlsDe['config.staleAfterMinutes.description'].includes(`(„${GERMAN['retry {0}'].replace('{0}', '1h12m')}“)`), 'the German staleAfterMinutes does not name the suffix')
+})
+
+test('the user agent\'s manifest words, the privacy page\'s conditions and quota.json\'s last failed attempt (1.7 §0a.1–0a.3)', () => {
+  const en = nlsEn['config.userAgent.description']
+  const de = nlsDe['config.userAgent.description']
+  for (const claim of ['what `claude --version` prints', 'on Windows only from a `claude.exe` on the PATH, never the npm shim `claude.cmd`',
+    'else the version the newest Claude Code session wrote into its transcript, else a fixed version', 'no new figure arrives']) {
+    assert.ok(en.includes(claim), `config.userAgent.description does not say: ${claim}`)
+  }
+  for (const claim of ['was `claude --version` ausgibt', 'nie über das npm-Startskript `claude.cmd`', 'die neueste Claude-Code-Sitzung in ihr Transkript geschrieben hat', 'es kommt keine neue Zahl']) {
+    assert.ok(de.includes(claim), `config.userAgent.description (German) does not say: ${claim}`)
+  }
+  for (const stale of ['a constant if it cannot be detected', 'shows nothing new', 'eine Konstante', 'zeigt nichts Neues']) {
+    assert.equal(en.includes(stale) || de.includes(stale), false, `config.userAgent.description still says: ${stale}`)
+  }
+  assert.ok(nlsEn['config.userAgent.enum.claudeCode'].startsWith('claude-code/<the Claude Code version: from the CLI, else the newest transcript, else fixed>'))
+  assert.ok(nlsDe['config.userAgent.enum.claudeCode'].startsWith('claude-code/<die Claude-Code-Version: von der CLI, sonst aus dem neuesten Transkript, sonst fest>'))
+  // §0a.1: the privacy page names the conditions, and claims no new field.
+  const privacy = flatText(doc.privacy)
+  for (const claim of ['The header goes only with the one consent-gated fetch — in `quotaSource: poll`, after you allowed it, to `https://api.anthropic.com/api/oauth/usage` — and only under `tokenPace.userAgent: claudeCode`.',
+    'No field is read for it that was not read before', 'and the read contract is unchanged',
+    // §0a.3: what quota.json keeps of a failed attempt, what never, and when it goes.
+    'and `quota.json`, which holds the readings of the quota fetch and, per provider, its last failed attempt: when it was, its kind and the fetch\'s own words',
+    'never a token, a header or an exception\'s text; the entry goes with the next successful fetch, with *Clear Stored Data…* and with the file']) {
+    assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  // The file holds what the pages say: the time, the kind and the words, nothing else.
+  const manager = readDoc('src/quotaManager.ts')
+  assert.ok(manager.includes('if (f) failed[src] = { at: f.at, kind: f.kind, text: f.text }'), 'quota.json keeps more of a failed attempt than the pages say')
+  assert.ok(/clearPolled\(\): void \{[\s\S]*?this\.problem = \{\}/.test(manager), 'Clear Stored Data no longer forgets the failed attempts')
+  assert.ok(flatText(doc.export).includes('the quota cache (`quota.json` — the readings of Token Pace\'s own fetch, the time of its next attempt and, per provider, its last failed attempt)'),
+    'docs/export.md does not say what quota.json holds')
+  assert.ok(flatText(doc.windows).includes('The Token Pace log says which, once, and again only when the version or its source changes'), 'docs/windows-wsl-remote.md says the log names it only once')
+  assert.ok(flatText(README).includes('`quota.json` keeps the last failed attempt: its time, its kind and the fetch\'s own words, never a token, a header or an exception\'s text'),
+    'README.md\'s privacy paragraph does not name quota.json\'s failed attempt')
+})
+
+test('the smaller 1.7 changes are on the pages: the compaction without a trigger, the revisions, one bucket copy, the injected probe (1.7 V-A, P-A, D-C)', () => {
+  assert.ok(readDoc('src/agentTreeBuild.ts').includes("t('{0} · last at {1} (–, {2} → {3})'"), 'a compaction without a trigger is written otherwise')
+  assert.ok(flatText(doc.agents).includes('whether it was asked for (`manual`) or Claude Code\'s own (`auto`) — `–` where the line recorded no trigger —'),
+    'docs/agents.md does not say what a compaction without a trigger reads')
+  assert.ok(flatText(doc.agents).includes(`revision **${AGENT_TABLES_REVISION}** in 1.6.0 and 1.7.0`), 'docs/agents.md does not say 1.7.0 keeps the revision')
+  assert.ok(flatText(doc.counting).includes(`— ${AGENT_TABLES_REVISION} in 1.6.0 and 1.7.0 —`), 'docs/counting.md does not say 1.7.0 keeps the revision')
+  const dev = flatText(doc.development)
+  assert.ok(dev.includes('one copy instead of 25; the figures are the same'), 'docs/development.md does not name the one bucket copy')
+  assert.ok(dev.includes('`test/poller.test.ts`') && dev.includes('no test starts a process or reads the real `PATH`'), 'docs/development.md does not name the injected probe')
+  assert.ok(existsSync(join(ROOT, 'test/poller.test.ts')), 'the page names a test file that is not there')
+  assert.ok(readDoc('src/viewModel.ts').includes('shareBuckets'), 'the unshared path the page compares with is gone')
+})
+
+test('the 1.7.0 release notes: the newest entry, in the order a store page reads, the versions unchanged, no speed claim, no path or secret', () => {
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  assert.match(entry, /^\n## 1\.7\.0 — \d{4}-\d{2}-\d{2}\n\n\*\*/, 'the newest CHANGELOG entry is not 1.7.0, or does not open with its summary')
+  const flat = flatText(entry)
+  const order = ['### Added', '### Changed', '### Fixed', '### Privacy'].map((h) => flat.indexOf(h))
+  assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.7.0 entry\'s sections are missing or out of order')
+  for (const claim of [
+    '**The provider switch.**', '**Earlier sessions in one closed row.**', '**State colours on the rows.**', '**Guide lines in the tree.**',
+    '**The failed attempt beside a stale reading.**', `(German „${GERMAN['All']}")`, '`Earlier sessions (12)`',
+    `At most ${MAX_ROOTS} active and ${MAX_ROOTS} earlier sessions are listed`,
+    'green done, yellow unknown, red failed, blue running', '**Copy Diagnostics** says `next attempt` where it said `backoff until`',
+    '**The Agents and Context sections are left out while the switch shows Codex**',
+    'The status bar, its tooltips, the `budget` and `agents` entries, the alerts, the CSV and JSON exports and *Copy Diagnostics* follow no view',
+    '**`retry reset due`.**', 'it now reads `retry due`', '`12.3K lower bound, since 11:59`', 'one copy instead of 25, the same figures',
+    `\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are the values 1.6.0 wrote, unchanged`,
+    'the update replays nothing and re-reads nothing',
+    'Nothing new is read from any Claude Code or Codex file, and the read contract is unchanged.',
+    'never a credential, a header or an exception\'s text',
+  ]) assert.ok(flat.includes(claim), `the 1.7.0 entry does not say: ${claim}`)
+  // Every version the entry names is the one the code has: no bump is claimed.
+  for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
+    const actual = { STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION }[m[1] as 'STATE_VERSION']
+    assert.equal(Number(m[2]), actual, `the 1.7.0 entry says ${m[1]} ${m[2]}`)
+  }
+  // P-A is one copy, not a speed-up (the lead's rule: nothing measured one).
+  assert.equal(/faster|speed-?up|speeds? up|quicker|performance/i.test(entry), false, 'the 1.7.0 entry claims a speed-up')
+  assert.equal(entry.includes('package.json'), false, 'the 1.7.0 entry talks about the manifest\'s version')
+  // A store page: no path of the machine it was built on, no internal file, no secret.
+  for (const never of [/\/home\//, /plan-1\.\d/, /p11-input/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//]) {
+    assert.equal(never.test(entry), false, `the 1.7.0 entry mentions ${never}`)
   }
 })

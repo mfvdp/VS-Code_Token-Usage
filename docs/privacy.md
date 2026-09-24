@@ -122,8 +122,13 @@ is installed and goes with the extension's storage on uninstall.
 Nothing is written except the extension's own state in its `globalStorage` — among it the copy of
 the agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that
 activation replaces with the shipped one while a copy is there, and the lines the hook script
-appends to `agent-hook.jsonl` while you have it installed —, with exactly two
-opt-in exceptions, each behind its own consent dialog and each with a backup or a
+appends to `agent-hook.jsonl` while you have it installed, and `quota.json`, which holds the
+readings of the quota fetch and, per provider, its last failed attempt: when it was, its kind and
+the fetch's own words — a fixed phrase with at most an HTTP status, or the Codex app-server's error
+string —, never a token, a header or an exception's text; the entry goes with the next successful
+fetch, with *Clear Stored Data…* and with the file, and it is what lets a restart during a backoff
+still say why the figure is old ([Quota sources](quota-sources.md#what-the-fetch-does)) —, with
+exactly two opt-in exceptions, each behind its own consent dialog and each with a backup or a
 never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
 status-line bridge. Both are off by default and both are disabled in Restricted Mode.
 
@@ -153,7 +158,11 @@ PATH — it is the version the newest Claude Code session on this machine wrote 
 (`version`, three numbers), and where neither is known a fixed version. It is the same fact the
 command gives — the version of the Claude Code this machine runs —, taken from a main session's
 record only, never from an agent's, and nothing else of any transcript reaches a request; with
-`tokenPace.userAgent: honest` no Claude Code version is sent at all. On Windows the command is
+`tokenPace.userAgent: honest` no Claude Code version is sent at all. The header goes only with the
+one consent-gated fetch — in `quotaSource: poll`, after you allowed it, to
+`https://api.anthropic.com/api/oauth/usage` — and only under `tokenPace.userAgent: claudeCode`. No
+field is read for it that was not read before: the version is the top-level `version` the agent
+tree already takes of a counted reply (above), and the read contract is unchanged. On Windows the command is
 started only from a `claude.exe` found in a directory of the `PATH` — each directory is checked for
 that one file's existence, nothing is read from it — and without a shell: the npm shim
 `claude.cmd`, a `.bat` and a `.ps1` are never started. See [Quota sources](quota-sources.md).

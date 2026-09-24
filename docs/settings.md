@@ -20,7 +20,7 @@ power-user settings sit at the end of their group.
 | `clickAction` | `dashboard` | What a click does: `dashboard`, `menu`, `refresh`, `openWebsite`. A problem state always performs its repair instead |
 | `usagePageLinks` | `true` | Make the tooltip title a link to the provider's official usage page and offer it in the menu. The extension never contacts those pages itself |
 | `alignment` | `left` | `left` or `right`. Right-aligned entries are hidden without notice when the window is narrow |
-| `staleAfterMinutes` | `20` | Age (1–1440) from which a reading counts as stale: greyed out, marked, and barred from raising alerts |
+| `staleAfterMinutes` | `20` | Age (1–1440) from which a reading counts as stale: greyed out, marked, and barred from raising alerts. A stale entry whose reading a transient failure of our own fetch followed adds the next attempt, `· $(clock) retry 1h12m` |
 | `timezone` | `system` | `system`, `utc`, or an IANA name. Governs the status bar summary as well as the dashboard. Display only — nothing is re-counted; an unusable value falls back |
 | `dayBoundaryHour` | `0` | The hour a “day” starts (0–23), for the status bar summary as well as the dashboard. `4` books work after midnight onto the previous day |
 | `planName` | `{}` | Plan name shown beside the provider title, e.g. `{"claude": "Max 20x"}` (40 characters max). Display only — never a limit; a name a provider states itself wins, and yours prints as `plan Max 20x (as configured)`. Backticks, control characters and line breaks are stripped and runs of spaces collapse before the 40-character cut, so a plan name cannot end the code span it sits in or forge a row of the tooltip |
@@ -62,7 +62,7 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `dashboard.sections` | `quota, agents, tokens, summary, kpis, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions`. A list you have set yourself is kept as it is, so `agents` (new in 1.6) appears there only once you add it |
+| `dashboard.sections` | `quota, agents, tokens, summary, kpis, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions`. A list you have set yourself is kept as it is, so `agents` (new in 1.6) appears there only once you add it. While the dashboard's provider switch shows Codex, `agents` and `context` are left out |
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |
@@ -95,7 +95,7 @@ power-user settings sit at the end of their group.
 | `codexQuotaFile` | `""` | The same for Codex; empty = `~/.cache/codex-usage/state.json` |
 | `writeQuotaCache` | `false` | Write our own fetches back to the cache file. **Opt-in, with its own consent dialog**; machine-scoped |
 | `codexBinary` | `""` | Path to `codex`; empty = `CODEX_CLI_PATH`, then `PATH`, then the bundled IDE binary. Machine-scoped on purpose |
-| `userAgent` | `claudeCode` | `claudeCode` or `honest`. **`honest` gets rate-limited into a permanent 429.** Machine-scoped |
+| `userAgent` | `claudeCode` | `claudeCode` (`claude-code/<version>`: what `claude --version` prints — on Windows only from a `claude.exe` on the `PATH` —, else the version the newest Claude Code session wrote into its transcript, else a fixed one) or `honest`. **`honest` gets rate-limited into a permanent 429.** Machine-scoped |
 | `codexAppServer.mode` | `oneShot` | `oneShot` (spawn per poll) or `persistent` (one long-lived child, with pushes) |
 | `credentials.keychain` | `true` | Also look in the OS keychain when the credentials file has no token. Machine-scoped |
 | `pollOnlyWhenFocused` | `true` | Skip scheduled fetches after ten minutes in the background — the attempt then reads `waiting for focus`. A manual fetch always runs |

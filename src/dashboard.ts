@@ -982,11 +982,16 @@ ul { margin: 6px 0; padding-left: 18px; }
    are the button for the next fifty, at its top once only a count is left. */
 .agtree ul[role="group"] > li.ag-k-more { --ag-guide-y: 11px; }
 .agtree ul[role="group"] > li.ag-k-more:has(> .ag-line > .ag-more:not([data-act])) { --ag-guide-y: 6px; }
-/* The details panel spans the tree's width, and every line passes behind it: opaque in the page's own
-   colour, and stacked above the lines — positioned, which already paints it after every line before it
-   in the tree's order, and a z-index of its own, so no line can come over it whatever order the tree's
-   markup takes. */
-.ag-details { position: relative; z-index: 1; background: var(--bg); }
+/* 1.8 L-4: the details panel spans the tree's width and paints no colour of its own — the view may stand
+   in the side bar or be dragged into the panel, whose colours differ, and a webview is not told where it
+   stands, so a box in the side bar's colour would show as a box of another colour there. The lines give
+   way to it instead: every item whose vertical crosses the tree's open details panel wears ag-gap, with
+   the panel's top and bottom relative to the item's own top, 1 px clear of the panel each way (the
+   script's fitGuides, after every render, resize and toggle), and its vertical is drawn above and below
+   the panel and not across it; a stub stands on its item's first line, never inside a panel below it.
+   The clip is no colour: a forced-colours theme keeps it, and its CanvasText rule below. */
+.agtree ul[role="group"] > li.ag-gap::before { clip-path: polygon(0 0, 100% 0, 100% var(--ag-gap-t), 0 var(--ag-gap-t),
+                                                             0 var(--ag-gap-b), 100% var(--ag-gap-b), 100% 100%, 0 100%); }
 .ag-line { display: flex; align-items: flex-start; }
 .ag-fold, .ag-pad { flex: none; width: 24px; min-height: 24px; }
 /* The arrow stands at the top, on the name's line — a button would centre it in its 24 px — and
@@ -1253,7 +1258,11 @@ ul { margin: 6px 0; padding-left: 18px; }
    dots of the other models —, each ringed 1 px inside by the page colour but a band under 4 px tall,
    which the ring would cover whole (1.7 P7b); the hue that told the providers apart cannot survive
    two colours, so the legend's headings, the band's tooltip and the column order do. The split keeps
-   its own two rules below, in the adjustment. The theme's own adjustment is left on everywhere else. */
+   its own two rules below, in the adjustment — but a subagents' band drawn under 4 px tall (1.8 L-5),
+   which its 1 px ring of the text colour, at its top and at its bottom, would fill whole, so that it
+   read as a main sessions' band: it is striped instead, one pixel of the text colour in three, across
+   its width, taken out of the adjustment for that one rule (the theme would remove the gradient). The
+   theme's own adjustment is left on everywhere else. */
 @media (forced-colors: active) {
   button[aria-pressed="true"]:not(.ag-row) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; outline-color: CanvasText; }
   .ag-st::before, .ag-lb { color: CanvasText; }
@@ -1283,6 +1292,9 @@ ul { margin: 6px 0; padding-left: 18px; }
   .band.band-thin.rother:not(.sp-main, .sp-sub) { background-position: 0 50%; }
   .band.sp-main { background: CanvasText; }
   .band.sp-sub { background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; }
+  /* 1.8 L-5: a thin subagents' band (band-thin, the script's fitBands) — vertical stripes, readable at any
+     height, where the ring would make it solid like a main sessions' band. */
+  .band.sp-sub.band-thin { forced-color-adjust: none; outline: none; background: repeating-linear-gradient(90deg, CanvasText 0 1px, Canvas 1px 3px); }
 }
 `
 

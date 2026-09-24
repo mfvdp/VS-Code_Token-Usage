@@ -222,9 +222,12 @@ neither have the running list and the 7-day block, which are flat lists. The lin
 the theme gives the explorer's indent guides (`tree.indentGuidesStroke`; the page's own hairline
 where a theme has none) and at its contrast — 2.50:1 against the sidebar on Dark Modern, 2.21:1 on
 Light Modern —, drawn behind the rows: they never cross a word, a glyph, a toggle or the open row's
-edge, change no row's height or width, and pass behind an open details panel. They are decoration
-only — nothing to read, nothing to copy; a screen reader gets the tree's structure from each item's
-level, place and size (below). In a forced-colours theme they are in the text colour.
+edge, and change no row's height or width. At an open details panel they stop: a line that runs past
+the panel ends a pixel above its border and goes on a pixel below it, so no line crosses the panel,
+and the panel paints no colour of its own — it shows the page's own background wherever the view
+stands, in the side bar or dragged into the panel area, whose colours differ in many themes. They are
+decoration only — nothing to read, nothing to copy; a screen reader gets the tree's structure from
+each item's level, place and size (below). In a forced-colours theme they are in the text colour.
 
 **Fifty at a time.** An opened node shows at most **50** of its children at a time, in the
 order above. When it has more, a line after the last one says so — `50 more · 377 not shown`,

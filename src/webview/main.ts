@@ -2697,7 +2697,9 @@ function tickLive(): void {
       min.textContent = next;
     }
   });
-  if (grown) fitAgentFigures();
+  // 1.8 L-4: a clock in the open details panel that grows a unit may give the panel a line more;
+  // the guide lines' gap follows its new bottom.
+  if (grown) { fitAgentFigures(); fitGuides(); }
 }
 
 let liveTimer: number | null = null;
@@ -3133,7 +3135,11 @@ function applyStyles(): void {
 /**
  * The decisions that need a measured page rather than a view model: which labels fit, which of
  * the chart's bands are thin (1.7 P7b), which tables are cut off, where the heat map should start,
- * and how much of an agent row's name and figures the row has room for.
+ * how much of an agent row's name and figures the row has room for, and where the tree's guide
+ * lines give way to its open details panel (1.8 L-4). Run after every render, on a resize and when
+ * a folded section opens (1.8 L-6: all of them — an engine that lays out nothing of a closed section
+ * gives a chart drawn there no width to thin its labels by); each one undoes what it set before it
+ * measures, so running it again changes nothing that is already right.
  */
 function applyFits(): void {
   fitChart();
@@ -3142,6 +3148,54 @@ function applyFits(): void {
   scrollHeat();
   fitAgentNames();
   fitAgentFigures();
+  fitGuides();
+}
+
+/**
+ * 1.8 L-4: the tree's details panel paints no colour of its own (the view may stand in the side bar
+ * or in the panel, and a webview is not told which), so the guide lines give way to it: every item of
+ * a group whose vertical — its `::before`, from the item's top down to its bottom, the last item's down
+ * to its stub — crosses the open panel's border box wears `ag-gap`, with `--ag-gap-t` and `--ag-gap-b`
+ * the panel's top and bottom relative to the item's own top, 1 px clear of it each way; the stylesheet
+ * clips the vertical there. Every other item loses the class and both values. Only the tree's panel:
+ * the running list's and the 7-day block's stand outside `.agtree` and have no lines. All measured
+ * first, then all written; the clip moves no box. A panel with no height — its section closed — has
+ * nothing to give way to, and is fitted again when the section opens.
+ */
+function fitGuides(): void {
+  const items = document.querySelectorAll<HTMLElement>('.agtree ul[role="group"] > li');
+  if (!items.length) return;
+  const panel = document.querySelector<HTMLElement>('.agtree .ag-details');
+  const box = panel && typeof panel.getBoundingClientRect === 'function' ? panel.getBoundingClientRect() : null;
+  const open = !!box && box.bottom - box.top > 0;
+  const plan: Array<{ li: HTMLElement; gap: { t: number; b: number } | null }> = [];
+  items.forEach(li => {
+    let gap: { t: number; b: number } | null = null;
+    if (open && box && typeof li.getBoundingClientRect === 'function') {
+      const b = li.getBoundingClientRect();
+      const v = typeof getComputedStyle === 'function' ? getComputedStyle(li, '::before') : null;
+      const top = b.top + ((v && parseFloat(v.top)) || 0);
+      const h = v ? parseFloat(v.height) : NaN;
+      const bottom = Number.isFinite(h) ? top + h : b.bottom;
+      if (top < box.bottom && bottom > box.top) {
+        const r2 = (n: number): number => Math.round(n * 100) / 100;
+        gap = { t: r2(box.top - top - 1), b: r2(box.bottom - top + 1) };
+      }
+    }
+    plan.push({ li: li, gap: gap });
+  });
+  plan.forEach(x => {
+    if (!x.li.classList || !x.li.style) return;
+    if (x.gap) {
+      x.li.classList.add('ag-gap');
+      x.li.style.setProperty('--ag-gap-t', x.gap.t + 'px');
+      x.li.style.setProperty('--ag-gap-b', x.gap.b + 'px');
+    } else {
+      x.li.classList.remove('ag-gap');
+      x.li.style.removeProperty('--ag-gap-t');
+      x.li.style.removeProperty('--ag-gap-b');
+    }
+  });
 }
 
 /**
@@ -3692,11 +3746,13 @@ document.addEventListener('focusin', (ev) => {
 
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.
 window.addEventListener('resize', () => { if (vm) applyFits(); });
-// 1.6 N6: a section opened after its render was laid out with no width at all; its agent rows'
-// figures are fitted to the width it has now. The toggle event does not bubble.
-document.addEventListener('toggle', () => { if (vm) { fitAgentNames(); fitAgentFigures(); } }, true);
-// 1.7 P7b: and a chart opened after its render had no height to measure its bands by.
-document.addEventListener('toggle', () => { if (vm) fitBands(); }, true);
+// 1.8 L-6: a section opened after its render may have been laid out with no width and no height at
+// all — an engine that lays out nothing of a closed <details> (Chromium before 131; later ones measure
+// its content when asked, the harness's chartclosed pages) — the chart's labels, its bands (1.7 P7b),
+// a table's scroll hint, the agent rows' names and figures (1.6 N6), the guide lines' gap at a details
+// panel: so everything measured is fitted again to the room it has now — one listener, every fit. The
+// toggle event does not bubble: the capture phase.
+document.addEventListener('toggle', () => { if (vm) applyFits(); }, true);
 
 window.addEventListener('message', (ev) => {
   // Only the host drives the page. Measured in a real window: VS Code delivers the host's

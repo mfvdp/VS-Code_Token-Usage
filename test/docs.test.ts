@@ -687,7 +687,7 @@ test('the pages say what a colour means in the Agents section — an outcome, no
   for (const state of ['done', 'unknown', 'failed', 'running']) assert.ok(new RegExp(`--ag-c-${state}: color-mix\\(in srgb, [^;]+ 60%, var\\(--vscode-foreground\\)\\);`).test(css), state)
 })
 
-test('the pages say what the tree\'s guide lines are — the explorer\'s indent-guide colour, decoration, behind the rows and the panel, the text colour in forced colours (1.7 F6)', () => {
+test('the pages say what the tree\'s guide lines are — the explorer\'s indent-guide colour, decoration, behind the rows, stopping at an open panel (1.8 L-4), the text colour in forced colours (1.7 F6)', () => {
   const flat = (text: string): string => text.replace(/\s+/g, ' ')
   const agents = flat(doc.agents)
   for (const claim of [
@@ -696,7 +696,11 @@ test('the pages say what the tree\'s guide lines are — the explorer\'s indent-
     'The roots — the sessions and the group of earlier sessions — have none, and neither have the running list and the 7-day block',
     'in the colour the theme gives the explorer\'s indent guides (`tree.indentGuidesStroke`',
     '2.50:1 against the sidebar on Dark Modern, 2.21:1 on Light Modern',
-    'they never cross a word, a glyph, a toggle or the open row\'s edge, change no row\'s height or width, and pass behind an open details panel',
+    // 1.8 L-4 (pinned and changed: "… and pass behind an open details panel"): the lines stop at the panel,
+    // which paints no colour of its own.
+    'they never cross a word, a glyph, a toggle or the open row\'s edge, and change no row\'s height or width',
+    'At an open details panel they stop: a line that runs past the panel ends a pixel above its border and goes on a pixel below it',
+    'the panel paints no colour of its own — it shows the page\'s own background wherever the view stands, in the side bar or dragged into the panel area',
     'They are decoration only — nothing to read, nothing to copy',
     'In a forced-colours theme they are in the text colour.',
     'the guide lines the text colour',
@@ -709,6 +713,9 @@ test('the pages say what the tree\'s guide lines are — the explorer\'s indent-
   const css = readDoc('src/dashboard.ts')
   assert.ok(css.includes('--ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule));'), 'the lines no longer take the indent-guide token')
   assert.ok(css.includes('.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { border-color: CanvasText; }'))
+  // 1.8 L-4: the gap is the stylesheet's, and the panel has no background of its own.
+  assert.ok(css.includes('.agtree ul[role="group"] > li.ag-gap::before { clip-path: polygon('), 'the lines no longer stop at the panel: say it in the docs')
+  assert.equal(agents.includes('pass behind an open details panel'), false, 'docs/agents.md still says the lines pass behind the panel')
 })
 
 test('the agent hook is documented as it works: installed by you, removed by you, Node.js required, the tree\'s words (1.6 O4)', () => {
@@ -796,11 +803,18 @@ test('docs/dashboard.md says a forced-colours theme paints the pressed chips in 
   assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('every pressed chip of the page (a button of the provider switch, a range, a model, the custom dates, the cache switch, the chart\'s `subagents` and cost line, the heatmap\'s metric, the hours\' zone) in the highlight colours'),
     'docs/dashboard.md does not say how a pressed chip looks in a forced-colours theme')
   // 1.7 D-B (pinned and changed: "A pressed chip is the one element the page takes out of the theme's
-  // adjustment, …"): the chart's bands by model are taken out too.
+  // adjustment, …"): the chart's bands by model are taken out too. 1.8 L-5 (pinned and changed: "… are
+  // the two things …"): and a thin subagents' band of the split.
   assert.ok(readDoc('src/dashboard.ts').includes('  .band:not(.sp-main, .sp-sub) { forced-color-adjust: none;'),
     'the bands by model are no longer taken out of the adjustment: say it in the docs')
-  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('A pressed chip and a band of the chart by model are the two things the page takes out of the theme\'s adjustment, and they wear nothing but the theme\'s own system colours'),
+  assert.ok(readDoc('src/dashboard.ts').includes('  .band.sp-sub.band-thin { forced-color-adjust: none; outline: none; background: repeating-linear-gradient(90deg, CanvasText 0 1px, Canvas 1px 3px); }'),
+    'a thin subagents\' band is no longer striped: say it in the docs')
+  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('A pressed chip, a band of the chart by model and a thin subagents\' band of the split are the three things the page takes out of the theme\'s adjustment, and they wear nothing but the theme\'s own system colours'),
     'docs/dashboard.md does not say what the page takes out of the theme\'s adjustment')
+  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('a subagents\' band drawn under 4 px tall, which its ring would fill whole, as vertical stripes instead, one pixel of the text colour in three'),
+    'docs/dashboard.md does not say how a thin subagents\' band is drawn in a forced-colours theme')
+  assert.equal(doc.dashboard.replace(/\s+/g, ' ').includes('are the two things the page takes out'), false,
+    'docs/dashboard.md still names two things taken out of the adjustment')
   assert.equal(doc.dashboard.replace(/\s+/g, ' ').includes('one element the page takes out of the theme\'s adjustment'), false,
     'docs/dashboard.md still says the pressed chip is the one element taken out')
 })
@@ -2150,4 +2164,15 @@ test('the 1.7.0 release notes: the newest entry, in the order a store page reads
   for (const never of [/\/home\//, /plan-1\.\d/, /p11-input/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//]) {
     assert.equal(never.test(entry), false, `the 1.7.0 entry mentions ${never}`)
   }
+})
+
+test('docs/dashboard.md says the chart\'s labels are thinned to the width a column has, also when a folded section is opened, as the page\'s one toggle listener does (1.8 L-6)', () => {
+  const dash = doc.dashboard.replace(/\s+/g, ' ')
+  for (const claim of ['The value labels over the columns and the dates under them are thinned to the width a column actually has',
+    'each column\'s total still in its tooltip', 'fitted again when the sidebar is resized and when a folded chart section is opened']) {
+    assert.ok(dash.includes(claim), 'docs/dashboard.md does not say: ' + claim)
+  }
+  const src = readDoc('src/webview/main.ts')
+  assert.ok(src.includes("document.addEventListener('toggle', () => { if (vm) applyFits(); }, true);"), 'opening a section no longer runs every fit: say it in the docs')
+  assert.ok(src.includes("window.addEventListener('resize', () => { if (vm) applyFits(); });"), 'a resize no longer runs every fit: say it in the docs')
 })

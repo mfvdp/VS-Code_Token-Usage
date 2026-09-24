@@ -99,8 +99,11 @@ function adjustedOut(): string[] {
   return [...css.matchAll(/([^{}\n][^{}]*?)\s*\{[^{}]*forced-color-adjust:\s*none[^{}]*\}/g)].map((m) => m[1].trim())
     .concat(css.split('forced-color-adjust').length - 1 > [...css.matchAll(/forced-color-adjust:\s*none/g)].length ? ['(another forced-color-adjust)'] : [])
 }
-/** 1.7 D-B: what the page takes out of a forced-colours theme's adjustment — a pressed chip (1.6 P16) and a band of the chart by model. */
-const ADJUSTED_OUT = ['button[aria-pressed="true"]:not(.ag-row)', '.band:not(.sp-main, .sp-sub)']
+/**
+ * 1.7 D-B: what the page takes out of a forced-colours theme's adjustment — a pressed chip (1.6 P16) and a band of the chart by model.
+ * 1.8 L-5 (pinned and changed: those two): and a subagents' band of the split drawn under 4 px tall, striped.
+ */
+const ADJUSTED_OUT = ['button[aria-pressed="true"]:not(.ag-row)', '.band:not(.sp-main, .sp-sub)', '.band.sp-sub.band-thin']
 const SCRIPT = between(PAGE, /<script nonce="[A-Za-z0-9]+">/, '</script>')
 
 /**
@@ -1467,11 +1470,13 @@ test('a forced-colours theme keeps the two parts of a split column apart, in its
   // nothing but a pressed chip out of the adjustment): the bands by model are taken out and drawn as
   // patterns of the theme's two colours (the D-B test below), and `:not(.sp-main, .sp-sub)` keeps
   // every one of those rules off the split's two parts, which carry a rank class too.
+  // 1.8 L-5 (pinned and changed: the split had two rules, both in the adjustment): a subagents' band drawn
+  // under 4 px tall has a third, striped and taken out of the adjustment for it (the test below).
   const split = block.split('\n').filter((l) => /\.sp-(main|sub)/.test(l) && !/:not\(/.test(l))
-  assert.deepEqual(split.map((l) => l.trim().slice(0, l.trim().indexOf(' {'))), ['.band.sp-main', '.band.sp-sub'], block)
-  assert.equal(split.some((l) => /gradient|forced-color-adjust/.test(l)), false, split.join('\n'))
+  assert.deepEqual(split.map((l) => l.trim().slice(0, l.trim().indexOf(' {'))), ['.band.sp-main', '.band.sp-sub', '.band.sp-sub.band-thin'], block)
+  assert.equal(split.slice(0, 2).some((l) => /gradient|forced-color-adjust/.test(l)), false, split.join('\n'))
   // 1.7 P7b (pinned and changed: one `:not`): the ring is a rule of its own, kept off a thin band too.
-  assert.ok(block.split('\n').filter((l) => /^ {2}\.band/.test(l)).every((l) => /\.sp-(main|sub) \{/.test(l) || /:not\(\.sp-main, \.sp-sub(?:, \.band-thin)?\) \{/.test(l)), block)
+  assert.ok(block.split('\n').filter((l) => /^ {2}\.band/.test(l)).every((l) => /\.sp-(main|sub)(\.band-thin)? \{/.test(l) || /:not\(\.sp-main, \.sp-sub(?:, \.band-thin)?\) \{/.test(l)), block)
   assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
   // The block stands after every band rule, so at the same specificity it is the one that wins.
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
@@ -1520,9 +1525,10 @@ test('a forced-colours theme draws the chart\'s bands by model as patterns of it
   // Specificity: each rank's rule outranks the plain band's and every rule outside the mode.
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
   // The split's two rules follow them unchanged, without the :not, in the adjustment. 1.7 P7b (pinned and
-  // changed: they followed the `other` rule directly): after the thin band's `other` rule.
-  assert.match(block.replace(/\n {2}\/\*[\s\S]*?\*\//g, ''), /\.band\.rother:not\(\.sp-main, \.sp-sub\) \{[^}]*\}\n {2}\.band\.band-thin\.rother:not\(\.sp-main, \.sp-sub\) \{ background-position: 0 50%; \}\n {2}\.band\.sp-main \{ background: CanvasText; \}\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n\}/)
-  // Taken out of the adjustment beside the pressed chip, and nothing else is.
+  // changed: they followed the `other` rule directly): after the thin band's `other` rule. 1.8 L-5 (pinned
+  // and changed: the block ended on them): then the thin subagents' band's stripes (the L-5 test).
+  assert.match(block.replace(/\n {2}\/\*[\s\S]*?\*\//g, ''), /\.band\.rother:not\(\.sp-main, \.sp-sub\) \{[^}]*\}\n {2}\.band\.band-thin\.rother:not\(\.sp-main, \.sp-sub\) \{ background-position: 0 50%; \}\n {2}\.band\.sp-main \{ background: CanvasText; \}\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n {2}\.band\.sp-sub\.band-thin \{[^}]*\}\n\}/)
+  // Taken out of the adjustment beside the pressed chip — and, 1.8 L-5, a thin subagents' band — and nothing else is.
   assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
 })
 
@@ -1543,7 +1549,9 @@ test('a band of the chart drawn under 4 px tall wears band-thin, measured as dra
   }
   // Under 4 px — however little under —, exactly 4 and more; one that wore the class and has grown.
   const bands = [band(0), band(1.008), band(2), band(3.99), band(4), band(4.01), band(16, ['band-thin']), band(3)]
-  const chart = { clientHeight: 240, querySelectorAll: (q: string) => (q === '.seg' ? bands : []) }
+  // 1.8 L-6: an empty list of columns and no width, so the chart's label fit — which the toggle runs as
+  // well now — has nothing to thin.
+  const chart = { clientHeight: 240, clientWidth: 0, children: [], querySelectorAll: (q: string) => (q === '.seg' ? bands : []) }
   doc.querySelector = (q: string) => (q === '.chart' ? chart : null)
   const thin = (): boolean[] => bands.map((b) => b.cls.has('band-thin'))
   nodeVm.runInContext('fitBands()', a.c)
@@ -1558,7 +1566,8 @@ test('a band of the chart drawn under 4 px tall wears band-thin, measured as dra
   for (const b of bands) b.height = 0
   nodeVm.runInContext('fitBands()', a.c)
   assert.deepEqual(thin(), [true, false, true, true, true, false, false, true])
-  // … and is fitted when a section opens (the toggle event, which does not bubble: the capture phase).
+  // … and is fitted when a section opens (the toggle event, which does not bubble: the capture phase;
+  // 1.8 L-6: the one listener, which runs every fit).
   chart.clientHeight = 240
   for (const b of bands) b.height = 16
   nodeVm.runInContext('vm = { sections: [] }', a.c)
@@ -1568,10 +1577,10 @@ test('a band of the chart drawn under 4 px tall wears band-thin, measured as dra
   doc.querySelector = () => null
   nodeVm.runInContext('fitBands()', a.c)
   // The page's constant and its wiring: with the page's other fits — after every render and resize —
-  // and when a closed section opens.
+  // and when a closed section opens (1.8 L-6, pinned and changed: a toggle listener of its own).
   assert.match(SOURCE, /const BAND_THIN_PX = 4;/)
   assert.match(SOURCE, /function applyFits\(\): void \{\s*fitChart\(\);\s*fitBands\(\);/)
-  assert.match(SOURCE, /document\.addEventListener\('toggle', \(\) => \{ if \(vm\) fitBands\(\); \}, true\);/)
+  assert.match(SOURCE, /document\.addEventListener\('toggle', \(\) => \{ if \(vm\) applyFits\(\); \}, true\);/)
   // The class is the fit's alone: the renderer's markup carries none, the bands' own classes as before.
   const chartHtml = render('sChart()', {
     chart: {
@@ -1591,7 +1600,9 @@ test('a band of the chart drawn under 4 px tall wears band-thin, measured as dra
   const css = STYLE.replace(/\/\*[\s\S]*?\*\//g, '')
   const forced = css.slice(css.indexOf('@media (forced-colors: active) {'))
   const block = forced.slice(0, forced.indexOf('\n}') + 2)
-  assert.equal(css.split('band-thin').length - 1, 2, 'band-thin in another rule')
+  // 1.8 L-5 (pinned and changed: two rules): and the thin subagents' band's stripes.
+  assert.equal(css.split('band-thin').length - 1, 3, 'band-thin in another rule')
+  assert.ok(block.includes('\n  .band.sp-sub.band-thin { forced-color-adjust: none; outline: none; background: repeating-linear-gradient(90deg, CanvasText 0 1px, Canvas 1px 3px); }\n'), block)
   assert.ok(block.includes('\n  .band:not(.sp-main, .sp-sub, .band-thin) { outline: 1px solid Canvas; outline-offset: -1px; }\n'), block)
   // On a thin band the dots of `other` stand in its middle: at the top of their 4 px tile, 2 px down,
   // they would miss a band under 2 px, which would be the page colour alone — the gap again.
@@ -3713,6 +3724,8 @@ interface AgentCtx {
   intervals: Array<{ fn: () => void; ms: number }>
   clock: { t: number }
   fire: (type: string, ev: Record<string, unknown>) => void
+  /** 1.8 L-6: every listener the script registered, by scope and type (`document:toggle:capture`). */
+  listeners: Record<string, Array<(ev: unknown) => void>>
 }
 
 /**
@@ -3753,7 +3766,7 @@ function agentCtx(spans: Array<Record<string, unknown>> = [], script = SCRIPT, s
   const fire = (type: string, ev: Record<string, unknown>): void => {
     for (const fn of [...(listeners[type + ':capture'] ?? []), ...(listeners[type] ?? [])]) fn(ev)
   }
-  return { c, posted, root, intervals, clock, fire }
+  return { c, posted, root, intervals, clock, fire, listeners }
 }
 
 /** The section as sAgents writes it, from the tree above plus `over`. */
@@ -7236,10 +7249,11 @@ test('a model with no room for its dot and an ellipsis is taken off the name who
   sliver.clientWidth = 40
   nodeVm.runInContext('fitAgentNames()', a.c)
   assert.equal(sliver.cls.has('ag-gone'), false)
-  // The page's constant and its rules: with the page's other fits, and when a closed section opens.
+  // The page's constant and its rules: with the page's other fits, and when a closed section opens
+  // (1.8 L-6, pinned and changed: a toggle listener of their own — now the one that runs every fit).
   assert.match(SOURCE, /const AGENT_MODEL_ROOM_EM = 1\.9;/)
   assert.match(SOURCE, /function applyFits\(\): void \{[^}]*fitAgentNames\(\);\s*fitAgentFigures\(\);/)
-  assert.match(SOURCE, /document\.addEventListener\('toggle', \(\) => \{ if \(vm\) \{ fitAgentNames\(\); fitAgentFigures\(\); \} \}, true\);/)
+  assert.match(SOURCE, /document\.addEventListener\('toggle', \(\) => \{ if \(vm\) applyFits\(\); \}, true\);/)
 })
 
 // ---------------------------------------------------------------------------
@@ -7826,7 +7840,11 @@ function flatStyle(): { css: string; forcedAt: number; forcedEnd: number } {
   return { css: before + block + flat(raw.slice(end)), forcedAt: before.length, forcedEnd: before.length + block.length }
 }
 
-/** 1.7 F6: the guide lines' rules as §3 F6 gives them, and the package's three (the item's flow-root, the "more" line's two heights). */
+/**
+ * 1.7 F6: the guide lines' rules as §3 F6 gives them, and the package's three (the item's flow-root, the "more" line's two heights).
+ * 1.8 L-4 (pinned and changed: the last rule was the details panel's, opaque and stacked over the lines): the vertical's gap
+ * at an open details panel.
+ */
 const GUIDE_RULES = [
   '.agtree { --ag-step: 16px; --ag-fold-w: 24px; --ag-guide-y: 9px; --ag-guide: var(--vscode-tree-indentGuidesStroke, var(--rule)); }',
   '.agtree ul ul { padding-left: var(--ag-step); }',
@@ -7838,11 +7856,12 @@ const GUIDE_RULES = [
   '.agtree ul[role="group"] > li:has(> .ag-line > .ag-fold)::after { width: calc(var(--ag-step) - var(--ag-fold-w) / 2 + 7px); }',
   '.agtree ul[role="group"] > li.ag-k-more { --ag-guide-y: 11px; }',
   '.agtree ul[role="group"] > li.ag-k-more:has(> .ag-line > .ag-more:not([data-act])) { --ag-guide-y: 6px; }',
-  '.ag-details { position: relative; z-index: 1; background: var(--bg); }',
+  '.agtree ul[role="group"] > li.ag-gap::before { clip-path: polygon(0 0, 100% 0, 100% var(--ag-gap-t), 0 var(--ag-gap-t), 0 var(--ag-gap-b), 100% var(--ag-gap-b), 100% 100%, 0 100%); }',
 ]
 const GUIDE_FORCED = '.agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { border-color: CanvasText; }'
 
-test('1.7 F6: the stylesheet draws the guide lines behind the rows — two pseudo-elements of every item of a group, in the tree\'s indent-guide token, the panel over them, CanvasText in forced colours', () => {
+// 1.8 L-4 (pinned and changed: "the panel over them"): the lines stop at an open panel's edge (the L-4 tests below).
+test('1.7 F6: the stylesheet draws the guide lines behind the rows — two pseudo-elements of every item of a group, in the tree\'s indent-guide token, a gap at an open panel, CanvasText in forced colours', () => {
   const { css, forcedAt, forcedEnd } = flatStyle()
   // Exactly these rules, each once, outside the forced-colours block; the forced one once inside it.
   for (const rule of GUIDE_RULES) {
@@ -7865,7 +7884,8 @@ test('1.7 F6: the stylesheet draws the guide lines behind the rows — two pseud
   const onItems = rules.filter((r) => /\bli\b[^,{]*::(before|after)/.test(r.sel))
   assert.ok(onItems.length >= 6, String(onItems.length))
   for (const r of onItems) {
-    for (const s of r.sel.split(',').map((x) => x.trim())) assert.match(s, /^\.agtree ul\[role="group"\] > li(:last-child|:has\(> \.ag-line > \.ag-fold\))?::(before|after)$/, r.sel)
+    // 1.8 L-4 (pinned and changed: no class on the item): an item whose vertical gives way to a details panel.
+    for (const s of r.sel.split(',').map((x) => x.trim())) assert.match(s, /^\.agtree ul\[role="group"\] > li(:last-child|:has\(> \.ag-line > \.ag-fold\)|\.ag-gap)?::(before|after)$/, r.sel)
     assert.equal(/content:\s*"[^"]/.test(r.body), false, r.sel)
   }
   assert.equal(/\.ag-(now|week)[^{,]*li[^{,]*::(before|after)|role="none"\][^{,]*::(before|after)/.test(css), false)
@@ -7984,4 +8004,190 @@ test('1.7 F6: the tree\'s markup is the one it was — the lines are the stylesh
   }
   // The world held every case: groups at several levels, a panel inside one, a "more" line.
   assert.ok(groups >= 5 && items >= 12 && panels === 1 && mores === 1, JSON.stringify({ groups, items, panels, mores }))
+  // 1.8 L-4: the gap at the panel is the fit's alone (fitGuides, on the measured page) — the renderer's
+  // markup carries no class and no value of it.
+  for (const h of [world, big]) assert.equal(/ag-gap/.test(h), false, h.slice(0, 200))
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 L-4 · the details panel's gap · L-5 · a thin split band in forced colours · L-6 · fits on open
+// ---------------------------------------------------------------------------
+
+/** 1.8 L-4: the rule that clips a vertical at the open details panel, as the stylesheet writes it (white space collapsed). */
+const GAP_RULE = '.agtree ul[role="group"] > li.ag-gap::before { clip-path: polygon(0 0, 100% 0, 100% var(--ag-gap-t), 0 var(--ag-gap-t), '
+  + '0 var(--ag-gap-b), 100% var(--ag-gap-b), 100% 100%, 0 100%); }'
+
+test('1.8 L-4: the details panel paints no colour of its own and is not stacked over the lines — the verticals give way at its edge, a clip of the stylesheet, CanvasText kept in forced colours', () => {
+  const { css, forcedAt, forcedEnd } = flatStyle()
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2].trim() }))
+  // Every rule that reaches the panel itself — the tree's, the running list's, the 7-day block's —: no
+  // background, no z-index, no position. Its box, border and padding as before.
+  const panel = rules.filter((r) => r.sel.split(',').some((x) => /\.ag-details$/.test(x.trim())))
+  assert.ok(panel.length >= 3, panel.map((r) => r.sel).join(' | '))
+  for (const r of panel) assert.equal(/(^|;)\s*(background(-color|-image)?|z-index|position)\s*:/.test(r.body), false, r.sel + ' { ' + r.body + ' }')
+  assert.ok(css.indexOf('.ag-details { margin: 4px 0 6px calc(var(--ag-ind, 0) * -16px); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }') >= 0)
+  assert.equal(css.indexOf('z-index: 1; background: var(--bg)'), -1)
+  // The gap: one rule, outside the forced-colours block — the vertical drawn above --ag-gap-t and below
+  // --ag-gap-b, and not between — on an item that wears ag-gap; the class and the two values are the
+  // script's (fitGuides), no other rule names them.
+  const at = css.indexOf(GAP_RULE)
+  assert.ok(at >= 0 && at < forcedAt, 'missing: ' + GAP_RULE)
+  assert.equal(css.split(GAP_RULE).length, 2)
+  assert.equal(css.split('ag-gap').length - 1, 1 + 4)
+  assert.equal(css.split('var(--ag-gap-t)').length - 1, 2)
+  assert.equal(css.split('var(--ag-gap-b)').length - 1, 2)
+  // A clip is no colour: nothing of it in the forced-colours block, the lines' CanvasText rule stays, and
+  // nothing of the tree is taken out of the theme's adjustment.
+  const forced = css.slice(forcedAt, forcedEnd)
+  assert.equal(forced.includes('clip-path'), false)
+  assert.ok(forced.includes(GUIDE_FORCED))
+  assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
+  // The fit runs with the page's others: after every render and resize, and when a section opens.
+  assert.match(SOURCE, /function applyFits\(\): void \{\s*fitChart\(\);\s*fitBands\(\);\s*fitScroll\(\);\s*scrollHeat\(\);\s*fitAgentNames\(\);\s*fitAgentFigures\(\);\s*fitGuides\(\);\s*\}/)
+  // And when a clock in the open panel grows a unit, which may give the panel a line more.
+  assert.match(SOURCE, /if \(grown\) \{ fitAgentFigures\(\); fitGuides\(\); \}/)
+})
+
+/** 1.8 L-4: an item of a group as fitGuides reads it — its box, its vertical's computed top and height — and what it writes. */
+interface GapItem {
+  top: number; bottom: number; vh: number | null; cls: Set<string>; props: Map<string, string>
+  getBoundingClientRect: () => { top: number; bottom: number }
+  classList: { add: (c: string) => void; remove: (c: string) => void; contains: (c: string) => boolean }
+  style: { setProperty: (k: string, v: string) => void; removeProperty: (k: string) => void }
+}
+
+test('1.8 L-4: fitGuides gives every item whose vertical crosses the open details panel the gap — the panel\'s top and bottom from the item\'s top, 1 px clear each way — and takes it off every other, all measured first', () => {
+  const a = agentCtx()
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  const log: string[] = []
+  const item = (name: string, top: number, bottom: number, vh: number | null, was: string[] = []): GapItem => {
+    const cls = new Set<string>(was)
+    const props = new Map<string, string>(was.includes('ag-gap') ? [['--ag-gap-t', '1px'], ['--ag-gap-b', '2px']] : [])
+    const it: GapItem = {
+      top, bottom, vh, cls, props,
+      getBoundingClientRect: () => { log.push('read ' + name); return { top: it.top, bottom: it.bottom } },
+      classList: { add: (c) => { log.push('write ' + name); cls.add(c) }, remove: (c) => { log.push('write ' + name); cls.delete(c) }, contains: (c) => cls.has(c) },
+      style: { setProperty: (k, v) => { log.push('write ' + name); props.set(k, v) }, removeProperty: (k) => { log.push('write ' + name); props.delete(k) } },
+    }
+    return it
+  }
+  // A group's items as the page stacks them: one above the panel's owner, the owner's parent (not last:
+  // its vertical runs its whole height, past the panel), the owner (not last either), the owner's last
+  // child (its vertical down to its stub only), a sibling below, and an item that is the last of its
+  // group and holds the panel in its box — its vertical ends at its stub, above the panel.
+  const above = item('above', 76, 100, 24)
+  const parent = item('parent', 100, 400, 300)
+  const owner = item('owner', 124, 380, 256)
+  const lastKid = item('lastKid', 380, 400, 9)
+  const below = item('below', 400, 424, 24, ['ag-gap'])
+  const lastOwner = item('lastOwner', 124, 380, 9)
+  const items = [above, parent, owner, lastKid, below, lastOwner]
+  let panel: { getBoundingClientRect: () => { top: number; bottom: number } } | null = { getBoundingClientRect: () => ({ top: 150.4, bottom: 250.2 }) }
+  doc.querySelectorAll = (q: string) => (q === '.agtree ul[role="group"] > li' ? items : [])
+  doc.querySelector = (q: string) => (q === '.agtree .ag-details' ? panel : null)
+  ;(a.c as Record<string, unknown>).getComputedStyle = (el: GapItem, pseudo: string) => {
+    assert.equal(pseudo, '::before')
+    log.push('read ' + items.indexOf(el))
+    return { top: '0px', height: el.vh === null ? '' : el.vh + 'px' }
+  }
+  const gapOf = (x: GapItem): unknown => (x.cls.has('ag-gap') ? [x.props.get('--ag-gap-t'), x.props.get('--ag-gap-b')] : x.props.size ? 'stray' : null)
+  nodeVm.runInContext('fitGuides()', a.c)
+  assert.deepEqual(items.map(gapOf), [null, ['49.4px', '151.2px'], ['25.4px', '127.2px'], null, null, null])
+  // Every read before the first write.
+  const firstWrite = log.findIndex((l) => l.startsWith('write'))
+  assert.ok(firstWrite > 0 && log.slice(firstWrite).every((l) => l.startsWith('write')), log.join(', '))
+  // A vertical whose height the browser does not say runs the item's whole box.
+  lastOwner.vh = null
+  nodeVm.runInContext('fitGuides()', a.c)
+  assert.deepEqual(gapOf(lastOwner), ['25.4px', '127.2px'])
+  lastOwner.vh = 9
+  // Run again unchanged: the same (the fit is idempotent).
+  nodeVm.runInContext('fitGuides()', a.c)
+  assert.deepEqual(items.map(gapOf), [null, ['49.4px', '151.2px'], ['25.4px', '127.2px'], null, null, null])
+  // The panel closed (its section folded: no height) or gone: every gap comes off, class and values.
+  panel = { getBoundingClientRect: () => ({ top: 0, bottom: 0 }) }
+  nodeVm.runInContext('fitGuides()', a.c)
+  assert.deepEqual(items.map(gapOf), items.map(() => null))
+  panel = { getBoundingClientRect: () => ({ top: 150.4, bottom: 250.2 }) }
+  nodeVm.runInContext('fitGuides()', a.c)
+  panel = null
+  nodeVm.runInContext('fitGuides()', a.c)
+  assert.deepEqual(items.map(gapOf), items.map(() => null))
+  // A page without a group: one query, nothing thrown.
+  doc.querySelectorAll = () => []
+  nodeVm.runInContext('fitGuides()', a.c)
+})
+
+test('1.8 L-5: a forced-colours theme stripes a subagents\' band drawn under 4 px tall — one pixel of the text colour in three across its width, no ring, out of the adjustment for that one rule; a main sessions\' band stays solid', () => {
+  const css = STYLE.replace(/\n {2}\/\*[\s\S]*?\*\//g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+  const at = css.indexOf('@media (forced-colors: active) {')
+  const block = css.slice(at, css.indexOf('\n}', at) + 2)
+  const rule = '.band.sp-sub.band-thin { forced-color-adjust: none; outline: none; background: repeating-linear-gradient(90deg, CanvasText 0 1px, Canvas 1px 3px); }'
+  // Once, in the one forced-colours block, right after the subagents' own rule — which it outranks by its
+  // third class, so its stripes and its missing ring win on a thin band and nowhere else.
+  assert.ok(block.includes('\n  .band.sp-sub { background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; }\n  ' + rule + '\n'), block)
+  assert.equal(css.split('.sp-sub.band-thin').length - 1, 1)
+  // The main sessions' band keeps its solid paint at every height: no rule of its own for a thin one.
+  assert.equal(/\.sp-main\.band-thin|\.band-thin\.sp-main/.test(css), false)
+  // The theme's two colours alone — no variable, no literal —, the stripes vertical, a period of 3 px.
+  const body = rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}'))
+  assert.deepEqual(colourLiterals(body.slice(body.indexOf('background:') + 'background:'.length)), [])
+  assert.equal(/var\(|#[0-9a-f]{3}|rgb|hsl|color-mix/i.test(body), false)
+  // The only thing of the split taken out of the adjustment (the list the other tests hold the page to).
+  assert.deepEqual(adjustedOut().filter((x) => /sp-(main|sub)\b(?!,)/.test(x) && !/:not/.test(x)), ['.band.sp-sub.band-thin'])
+  // A split band is a `.seg` like every band of the chart, so fitBands gives it `band-thin` under 4 px.
+  const h = render('sChart()', {
+    chart: {
+      days: ['2026-09-01'], labels: ['09-01'], split: 'agents',
+      series: [
+        { key: 'claude:main', label: 'Claude Code · main sessions', source: 'claude', rank: 0, values: [1000] },
+        { key: 'claude:sub', label: 'Claude Code · subagents', source: 'claude', rank: 1, values: [5] },
+      ],
+      metric: 'usage', modelStyle: 'pattern', max: 1005, ticks: [250, 500, 750, 1000], weekly: false, costLine: null,
+    },
+  })
+  assert.ok(h.includes('<div class="seg band s-claude-1 hue-claude r1 st-pattern sp-sub" data-bh="0.50"'), h)
+})
+
+test('1.8 L-6: opening a folded section runs every fit — the script registers one toggle listener, and it calls applyFits: a chart drawn closed has its labels thinned once it opens', () => {
+  const a = agentCtx()
+  // One listener for the toggle event, in the capture phase (the event does not bubble), none other.
+  assert.deepEqual(Object.keys(a.listeners).filter((k) => /toggle/.test(k)), ['document:toggle:capture'])
+  assert.equal(a.listeners['document:toggle:capture'].length, 1)
+  assert.equal(SOURCE.split("addEventListener('toggle'").length - 1, 1)
+  assert.match(SOURCE, /document\.addEventListener\('toggle', \(\) => \{ if \(vm\) applyFits\(\); \}, true\);/)
+  // It calls applyFits, once per event, while the page has a view model.
+  const c = a.c as Record<string, unknown>
+  const real = c.applyFits
+  let calls = 0
+  c.applyFits = () => { calls++ }
+  nodeVm.runInContext('vm = null', a.c)
+  a.fire('document:toggle', {})
+  assert.equal(calls, 0)
+  nodeVm.runInContext('vm = { sections: [] }', a.c)
+  a.fire('document:toggle', {})
+  assert.equal(calls, 1)
+  c.applyFits = real
+  // A chart drawn inside a closed section: thirty columns, every value label and every date. Closed, it
+  // has no width, and the fit leaves every label; opened, the toggle thins them to the width it has.
+  const doc = c.document as Record<string, unknown>
+  const values = Array.from({ length: 30 }, (_, i) => ({ dataset: { i: String(i) }, hidden: false }))
+  const dates = Array.from({ length: 30 }, (_, i) => {
+    const inner = { textContent: '09-' + String(i + 1).padStart(2, '0') }
+    return { dataset: { i: String(i), l: inner.textContent }, firstElementChild: inner }
+  })
+  const chart = { children: { length: 30 }, clientWidth: 0, clientHeight: 0,
+    querySelectorAll: (q: string) => (q === '.vlabel' ? values : []) }
+  const axis = { querySelectorAll: (q: string) => (q === 'span' ? dates : []) }
+  doc.querySelector = (q: string) => (q === '.chart' ? chart : q === '.plot + .axis' ? axis : null)
+  doc.querySelectorAll = () => []
+  nodeVm.runInContext('applyFits()', a.c)
+  assert.equal(values.filter((v) => v.hidden).length, 0)
+  assert.equal(dates.filter((d) => d.firstElementChild.textContent === '').length, 0)
+  // Opened: 236 px across thirty columns, 5.93 px a column — every sixth value and every sixth date stay.
+  chart.clientWidth = 236
+  chart.clientHeight = 240
+  a.fire('document:toggle', {})
+  assert.deepEqual(values.map((v, i) => [i, v.hidden]).filter(([, hid]) => !hid).map(([i]) => i), [0, 6, 12, 18, 24])
+  assert.deepEqual(dates.map((d) => d.firstElementChild.textContent).filter(Boolean), ['09-01', '09-07', '09-13', '09-19', '09-25'])
 })

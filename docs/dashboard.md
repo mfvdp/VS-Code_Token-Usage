@@ -85,7 +85,10 @@ the text colour, then 45° stripes, 135° stripes, cross-hatch, horizontal lines
 drawn under 4 px tall, which the ring would cover whole: it keeps its pattern or its solid fill
 alone, the dots of `other` in its middle. Two colours cannot carry the providers' hues, so there
 the provider is told by the legend's headings, the band's tooltip and the order of the bands in a
-column. The cost line, when switched on, runs through the column centres over a halo in the page
+column. The value labels over the columns and the dates under them are thinned to the width a
+column actually has — every second, third or sixth one where they would crowd, each column's total
+still in its tooltip — and fitted again when the sidebar is resized and when a folded chart section is
+opened. The cost line, when switched on, runs through the column centres over a halo in the page
 background, with a dot per column, on its own axis.
 The heatmap switches between `usage` and `cost`; the hour profile between local time and UTC.
 
@@ -103,7 +106,8 @@ reads `Claude Code · subagents · 12,345 · 58.8 % of the day · Claude Code to
 rest of the view state. In a forced-colours theme (Windows High Contrast), which removes every
 pattern and every hue, the main sessions are drawn as a solid band in the text colour and the
 subagents as a band of the page colour ringed by the text colour, so the two parts of a column stay
-apart.
+apart — a subagents' band drawn under 4 px tall, which its ring would fill whole, as vertical stripes
+instead, one pixel of the text colour in three, so that it never reads as a band of main sessions.
 
 **Collapsing.** Every section header is a toggle. What you collapse is remembered with the rest
 of the view state (range, sort, filters, the provider switch, the chart's split), so a panel you have trimmed to two sections opens that
@@ -222,12 +226,14 @@ forced-colours theme draws the glyphs, the `⚠`, the open row and the guide lin
 and the tallies in its text colour, the state colours giving way — and every
 pressed chip of the page (a button of the provider switch, a range, a model, the custom dates, the
 cache switch, the chart's `subagents` and cost line, the heatmap's metric, the hours' zone) in the highlight colours,
-where the theme would otherwise give pressed and released chips the same face. A pressed chip and a
-band of the chart by model are the two things the page takes out of the theme's adjustment, and they
-wear nothing but the theme's own system colours: left in, a chip would get a backplate of the page
-colour behind its words, on which the highlight text cannot be read, and the bands would all be
-painted in the page colour, the theme having removed their patterns and their hues — taken out, they
-are drawn as patterns in the theme's two colours (see the chart above). The focus
+where the theme would otherwise give pressed and released chips the same face. A pressed chip, a
+band of the chart by model and a thin subagents' band of the split are the three things the page takes
+out of the theme's adjustment, and they wear nothing but the theme's own system colours: left in, a
+chip would get a backplate of the page colour behind its words, on which the highlight text cannot be
+read, and the bands would all be painted in the page colour, the theme having removed their patterns
+and their hues — taken out, they are drawn as patterns in the theme's two colours (see the chart
+above), and a subagents' band under 4 px tall is striped, where its ring would otherwise fill it and
+make it look like the main sessions' solid band. The focus
 stays on its row — the running list's button, or the tree's item — when the section is pushed
 again, and on the provider switch's button you pressed when the switch is. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are

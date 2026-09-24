@@ -1069,8 +1069,20 @@ ul { margin: 6px 0; padding-left: 18px; }
    the page's own colour, so the plain hue of the main sessions and the stripes of the subagents
    would both be painted away: the main sessions a solid band in the text colour, the subagents a
    band of the page colour ringed 1 px inside by the text colour (a legend swatch wears its band's
-   classes, so it shows the same). The theme's own adjustment is left on everywhere else. */
+   classes, so it shows the same). 1.6 P16: every pressed chip — a range, a provider, a model, the
+   custom dates, the cache switch, the chart's split and cost line, the heatmap's metric, the hours'
+   zone — in the highlight colours: the theme gives every button the same face and takes the button
+   colours a pressed chip wears, so pressed and released would look alike and the state would be
+   heard but not seen. The chip is the one element taken out of the theme's adjustment: with it on,
+   Chrome paints a backplate of the page colour behind every word, and the highlight text is made to
+   stand on the highlight, not on the page colour — in the usual themes it is the page colour itself,
+   so the chip's words would vanish (1.6 P16's harness pictures). Taken out, it wears the theme's
+   system colours alone: the highlight as its face and edge, the highlight text for its words, the
+   text colour for its focus ring. Not the pressed rows of the running list and the 7-day block,
+   which are buttons as well: they stay in the adjustment and keep the open row's 2 px outline,
+   quieter than a chip, as the tree's rows do. The theme's own adjustment is left on everywhere else. */
 @media (forced-colors: active) {
+  button[aria-pressed="true"]:not(.ag-row) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; outline-color: CanvasText; }
   .ag-st::before, .ag-lb { color: CanvasText; }
   .ag-fold::before { color: ButtonText; }
   .ag-mix > i { border: 1px solid CanvasText; box-sizing: border-box; }

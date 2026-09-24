@@ -12,7 +12,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  bridgeBlocksDelete, deleteItems, deleteWarningExternal, formatBytes, inventory, MementoLike,
+  bridgeBlocksDelete, deleteItems, deleteWarningExternal, formatBytes, hookMirrorNote, inventory, MementoLike,
   StoredPaths, storedFile, storedFiles,
 } from '../src/storage'
 import { scratchDir } from './fixtures/helpers'
@@ -39,6 +39,7 @@ function pathsIn(dir: string): StoredPaths {
     history: path.join(dir, 'quotaHistory.json'),
     leader: path.join(dir, 'leader.json'),
     mirror: path.join(dir, 'statusline-mirror.json'),
+    hookMirror: path.join(dir, 'agent-hook.jsonl'),
   }
 }
 
@@ -54,7 +55,7 @@ test('the inventory names size and presence of every item', () => {
   const items = inventory(paths, memento, { state: 'oldest day 2026-05-01' })
   const byKey = new Map(items.map((i) => [i.key, i]))
 
-  assert.deepEqual(items.map((i) => i.key), ['state', 'quota', 'history', 'mirror', 'consent', 'alerts', 'ui'])
+  assert.deepEqual(items.map((i) => i.key), ['state', 'quota', 'history', 'mirror', 'hookMirror', 'consent', 'alerts', 'ui'])
   assert.equal(byKey.get('state')!.present, true)
   assert.equal(byKey.get('state')!.bytes, 13)
   assert.equal(byKey.get('state')!.detail, 'oldest day 2026-05-01')
@@ -152,7 +153,56 @@ test('storedFile maps only the file-backed keys', () => {
   const paths = pathsIn('/nowhere')
   assert.equal(storedFile('state', paths), paths.state)
   assert.equal(storedFile('mirror', paths), paths.mirror)
+  assert.equal(storedFile('hookMirror', paths), paths.hookMirror)
   assert.equal(storedFile('consent', paths), null)
+})
+
+// ---------------------------------------------------------------------------
+// 1.6 P16: the agent hook's mirror
+// ---------------------------------------------------------------------------
+
+test('the agent hook\'s mirror is in the list, with the note that its script stays, and deleting it deletes it alone (1.6 P16)', async () => {
+  const dir = scratchDir('storage')
+  const paths = pathsIn(dir)
+  // What a machine with the hook set up has in the storage: the script's copy, its mirror with a
+  // rotation's temp file beside it, and the extension's own files.
+  const script = path.join(dir, 'agent-hook.js')
+  const scriptTemp = `${script}.4821.tmp`
+  const line = '{"v":1,"ts":1790000000000,"event":"SubagentStart","sessionId":"s1","agentId":"a1","wait":"none"}\n'
+  fs.writeFileSync(paths.hookMirror, line)
+  fs.writeFileSync(`${paths.hookMirror}.4821.tmp`, line)
+  fs.writeFileSync(script, '// the hook script\n')
+  fs.writeFileSync(scriptTemp, '// half a copy\n')
+  fs.writeFileSync(paths.mirror, '{"payload":{}}')
+  fs.writeFileSync(paths.state, '{"version":8}')
+
+  // Listed after the status-line mirror, by its file name, its size and the note the caller hands in.
+  const items = inventory(paths, new FakeMemento(), { hookMirror: hookMirrorNote() })
+  const item = items.find((i) => i.key === 'hookMirror')
+  assert.ok(item, 'the hook mirror is missing from the list')
+  assert.equal(item.label, 'Agent hook mirror (agent-hook.jsonl)')
+  assert.equal(item.present, true)
+  assert.equal(item.bytes, Buffer.byteLength(line))
+  assert.equal(item.detail, 'The hook writes it again on its next call. Its script, agent-hook.js, stays while the hook is installed and goes with the extension\'s storage when Token Pace is uninstalled.')
+  // The script is no item of its own: no label, no key names it.
+  assert.equal(items.filter((i) => /agent-hook\.js(?!onl)/.test(i.label)).length, 0, items.map((i) => i.label).join(' | '))
+  assert.deepEqual(storedFiles('hookMirror', paths), [paths.hookMirror])
+
+  // Deleting it takes the mirror and its temp sibling, and nothing else — the script, the script's
+  // own temp file, the status-line mirror and the snapshot stay.
+  const log: string[] = []
+  const result = await deleteItems(['hookMirror'], paths, new FakeMemento(), (m) => log.push(m))
+  assert.deepEqual(result, { deleted: ['hookMirror'], failed: [] })
+  assert.equal(fs.existsSync(paths.hookMirror), false)
+  assert.equal(fs.existsSync(`${paths.hookMirror}.4821.tmp`), false)
+  for (const kept of [script, scriptTemp, paths.mirror, paths.state]) {
+    assert.equal(fs.existsSync(kept), true, `${path.basename(kept)} went with the hook mirror`)
+  }
+  assert.deepEqual(log, ['Stored data removed: Agent hook mirror (agent-hook.jsonl)'])
+  // Not there at all, it is still an item — of no bytes — and deleting it again is no failure.
+  const again = inventory(paths, new FakeMemento()).find((i) => i.key === 'hookMirror')
+  assert.deepEqual([again?.present, again?.bytes], [false, 0])
+  assert.deepEqual(await deleteItems(['hookMirror'], paths, new FakeMemento()), { deleted: ['hookMirror'], failed: [] })
 })
 
 test('sizes are readable', () => {
@@ -188,7 +238,7 @@ test('the shared quota cache is listed only when its paths are supplied', () => 
   // It comes after the extension's own files and before the memento items.
   assert.deepEqual(
     items.map((i) => i.key),
-    ['state', 'quota', 'history', 'mirror', 'externalQuota', 'consent', 'alerts', 'ui'],
+    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'externalQuota', 'consent', 'alerts', 'ui'],
   )
 })
 

@@ -21,9 +21,9 @@ Text* prints the running list, the 7-day block while you have it open, and then 
 most 50 children each (see [Opening and selection](#opening-and-selection)) — with the open
 node's details as a table. *Show Usage (Quick Pick)* has a group `Agents` after the quota: the
 first five entries of the running list, one row for the rest, and the sessions' tallies added
-together — `14 started · 5 ✓ · 2 ✕ · … · last 7 days`, in words beside it —, every row opening the
+together — `Last 7 days: 14 started · 5 ✓ · 2 ✕ · …`, in words beside it —, every row opening the
 dashboard; past the 20 sessions the tree lists, that row names the sessions it counts and how
-many older ones it leaves out. The CSV and JSON exports carry the agents too (see [Export and diagnostics](export.md)).
+many older ones it leaves out (`14 started · … · the 20 most recent sessions of the last 7 days`). The CSV and JSON exports carry the agents too (see [Export and diagnostics](export.md)).
 
 Claude Code only. Codex writes no agent identity into its transcripts, and the section states
 nothing about Codex.
@@ -877,8 +877,12 @@ is older) and opens a read-only document with the snippet for `~/.claude/setting
 paths —, what it reads and how to remove it. **Installed by you, removed by you**: Token Pace never
 writes into `~/.claude`, never edits Claude Code's settings and never runs the script. It needs
 **Node.js on the PATH** Claude Code runs its hooks with — the command starts with `node`, and there
-is no fallback without it. To take it out, delete the four entries from `hooks` again — before
-uninstalling Token Pace, whose storage goes with it, the script included.
+is no fallback without it. To take it out, delete the four entries from `hooks` again —
+`agent-hook.jsonl` then stops growing, and its lines stop counting after 30 minutes —, before
+uninstalling Token Pace, whose storage goes with it, the script included. *Clear Stored Data…* lists
+`agent-hook.jsonl` among what it can delete — safe, the script writes it again on the next hook
+call, and the markers go with it —, and never the script: `agent-hook.js` stays while the hook is
+installed and goes with the storage on uninstall (see [Export and diagnostics](export.md)).
 
 **What the script reads and writes.** Of a hook call's input the script reads four keys —
 `hook_event_name`, `session_id`, `agent_id` and `notification_type` — and never its `message`,

@@ -13,7 +13,7 @@
   "Could not write {0}: {1}": "{0} konnte nicht geschrieben werden: {1}",
   "Cycle Status Bar Windows": "Statusleisten-Fenster durchschalten",
   "Delete": "Löschen",
-  "Delete the four entries from `hooks` in `~/.claude/settings.json`. The file then stops growing, and its lines stop counting after {0} minutes.": "Löschen Sie die vier Einträge aus `hooks` in `~/.claude/settings.json`. Die Datei wächst dann nicht mehr, und ihre Zeilen zählen nach {0} Minuten nicht mehr.",
+  "Delete the four entries from `hooks` in `~/.claude/settings.json`. `agent-hook.jsonl` then stops growing, and its lines stop counting after {0} minutes.": "Löschen Sie die vier Einträge aus `hooks` in `~/.claude/settings.json`. Die Datei `agent-hook.jsonl` wächst dann nicht mehr, und ihre Zeilen zählen nach {0} Minuten nicht mehr.",
   "Delete {0} stored item(s)? This cannot be undone.": "{0} gespeicherte(s) Element(e) löschen? Das lässt sich nicht rückgängig machen.",
   "Export CSV…": "CSV exportieren…",
   "Fetch Quota Now": "Kontingent jetzt abrufen",

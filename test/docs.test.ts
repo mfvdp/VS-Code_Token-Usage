@@ -31,6 +31,7 @@ import { BarGlyphs, BarStyle, renderBar } from '../src/render'
 import { RUN_RECORD_CHUNK_BYTES, RUN_RECORD_MAX_BYTES, RUN_RECORD_SCALAR_MAX } from '../src/runRecord'
 import { AGENT_META_MAX_BYTES } from '../src/scan'
 import { buildItems, selectWindows, viewOf, windowValue } from '../src/statusText'
+import { labelOf, StoredKey } from '../src/storage'
 import { formatReset, TimeConfig } from '../src/time'
 import { QuotaState, QuotaWindow } from '../src/types'
 import { MAX_AGENT_EXPANDED } from '../src/viewModel'
@@ -656,9 +657,56 @@ test('the agent hook is documented as it works: installed by you, removed by you
   }
   // The setup document says what the page says it says.
   const setup = flat(hookSetupDocument('/x/globalStorage/frederik.token-pace', 'linux'))
-  for (const claim of ['Token Pace writes nothing into `~/.claude`', 'Node.js on the PATH', 'no fallback', 'Delete the four entries']) {
+  for (const claim of ['Token Pace writes nothing into `~/.claude`', 'Node.js on the PATH', 'no fallback', 'Delete the four entries',
+    '`agent-hook.jsonl` then stops growing, and its lines stop counting after 30 minutes.']) {
     assert.ok(setup.includes(claim), `the setup document does not say: ${claim}`)
   }
+})
+
+test('the pages list what Clear Stored Data offers — the agent hook\'s mirror among it — and say its script stays (1.6 P16)', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  const exp = flat(doc.export)
+  const para = exp.slice(exp.indexOf('**Clear Stored Data…**'), exp.indexOf('**Uninstalling**'))
+  assert.ok(para.length > 100, 'docs/export.md has no Clear Stored Data paragraph')
+  // Every file the list names by its file name is named on the page, in backticks.
+  const keys: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror']
+  for (const key of keys) {
+    const file = /\(([^)]+)\)$/.exec(labelOf(key))?.[1]
+    assert.ok(file, `the list's label of ${key} names no file`)
+    assert.ok(para.includes(`\`${file}\``), `docs/export.md does not list ${file}`)
+  }
+  for (const claim of ['the [agent hook](agents.md#the-agent-hook)\'s mirror (`agent-hook.jsonl`)',
+    'Deleting the agent hook\'s mirror is safe — its script writes the file again on the next hook call',
+    'The script itself, `agent-hook.js`, is not in the list, and the note under the mirror says so: it stays while the hook is installed',
+    'and goes with the extension\'s storage when Token Pace is uninstalled', '`tokenPace.writeQuotaCache`']) {
+    assert.ok(para.includes(claim), `docs/export.md does not say: ${claim}`)
+  }
+  const row = doc.commands.split('\n').find((l) => l.startsWith('| `Token Pace: Clear Stored Data…` |')) ?? ''
+  assert.ok(row.includes('the agent hook\'s mirror `agent-hook.jsonl`') && row.includes('`agent-hook.js` stays while the hook is installed and goes with the storage on uninstall'), row)
+  const agents = flat(doc.agents)
+  for (const claim of ['*Clear Stored Data…* lists `agent-hook.jsonl` among what it can delete', '`agent-hook.js` stays while the hook is installed and goes with the storage on uninstall',
+    '`agent-hook.jsonl` then stops growing, and its lines stop counting after 30 minutes']) {
+    assert.ok(agents.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+})
+
+test('the pages quote the Quick Pick\'s agent summary as the view writes it — "Last 7 days: " first (1.6 P16)', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  assert.ok(readDoc('src/textViews.ts').includes("t('Last 7 days: {0}', tallyText(tally))"), 'the view no longer writes the label: say it in the docs')
+  assert.ok(flat(doc.agents).includes('`Last 7 days: 14 started · 5 ✓ · 2 ✕ · …`'), 'docs/agents.md does not quote the summary')
+  assert.ok(flat(doc.dashboard).includes('*Last 7 days: 14 started · 5 ✓ · 2 ✕ · …*'), 'docs/dashboard.md does not quote the summary')
+  for (const [page, text] of [['agents', doc.agents], ['dashboard', doc.dashboard]] as const) {
+    assert.equal(/· … · last 7 days[`*]/.test(flat(text)), false, `docs/${page}.md still quotes the ' · last 7 days' tail`)
+  }
+})
+
+test('docs/dashboard.md says a forced-colours theme paints the pressed chips in the highlight colours, as the page\'s rule does (1.6 P16)', () => {
+  assert.ok(readDoc('src/dashboard.ts').includes('  button[aria-pressed="true"]:not(.ag-row) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; outline-color: CanvasText; }'),
+    'the rule moved: say it in the docs')
+  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('every pressed chip of the page (a range, a provider, a model, the custom dates, the cache switch, the chart\'s `subagents` and cost line, the heatmap\'s metric, the hours\' zone) in the highlight colours'),
+    'docs/dashboard.md does not say how a pressed chip looks in a forced-colours theme')
+  assert.ok(doc.dashboard.replace(/\s+/g, ' ').includes('A pressed chip is the one element the page takes out of the theme\'s adjustment, and it wears nothing but the theme\'s own system colours'),
+    'docs/dashboard.md does not say why the pressed chip is taken out of the theme\'s adjustment')
 })
 
 test('the status bar pages, the settings page and the setting itself name the agents entry as the status bar writes it (1.6 O1)', () => {

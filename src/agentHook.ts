@@ -302,7 +302,7 @@ export function hookSetupDocument(storage: string, platform: NodeJS.Platform = p
     '',
     `## ${t('Removing it')}`,
     '',
-    t('Delete the four entries from `hooks` in `~/.claude/settings.json`. The file then stops growing, and its lines stop counting after {0} minutes.', minutes),
+    t('Delete the four entries from `hooks` in `~/.claude/settings.json`. `agent-hook.jsonl` then stops growing, and its lines stop counting after {0} minutes.', minutes),
     '',
     t('Remove the entries before you uninstall Token Pace: uninstalling deletes its storage, the script with it, and Claude Code would then report a failing hook command on every event.'),
     '',

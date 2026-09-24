@@ -326,9 +326,13 @@ test('the words 1.6 retired are in no bundle and no source any more', () => {
     'Expand {0}', 'Collapse {0}',
     // L2 (P9): an agent's requests are called requests, as the overview line under its state counts them.
     'Turns',
-    '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.']
+    '⚠ marks a lower bound: for a reply the transcript never marked as finished, only the output reported up to then is counted.',
+    // P16 (§7c Wave D): the Quick Pick's summary names its span first, "Last 7 days: {0}" — the tail
+    // ran into the tally's separators —, and the hook's removal paragraph names `agent-hook.jsonl`.
+    '{0} · last 7 days',
+    'Delete the four entries from `hooks` in `~/.claude/settings.json`. The file then stops growing, and its lines stop counting after {0} minutes.']
   const bundle = readJson(BUNDLE) as Record<string, string>
-  const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts']
+  const sources = ['src/agentTreeBuild.ts', 'src/dashboard.ts', 'src/webview/main.ts', 'src/textViews.ts', 'src/agentHook.ts']
     .map((f) => readFileSync(join(ROOT, f), 'utf8'))
   for (const word of retired) {
     assert.equal(word in bundle, false, `the bundle still translates ${JSON.stringify(word)}`)

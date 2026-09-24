@@ -158,8 +158,8 @@ list; **Show Usage as Text** opens a read-only markdown document. All three read
 model, so the numbers cannot drift apart, and a test counts the rows of one against the other.
 Of the agents section the Quick Pick has a group of its own after the quota — the first five
 entries of the running list (the name marked `~`, running being inferred; where it sits under
-it), one row for the rest, and what the sessions' agents came to: their tallies added, *14
-started · 5 ✓ · 2 ✕ · … · last 7 days*, in words under it — every row opening the dashboard. The
+it), one row for the rest, and what the sessions' agents came to: their tallies added, *Last 7
+days: 14 started · 5 ✓ · 2 ✕ · …*, in words under it — every row opening the dashboard. The
 markdown document prints its
 running list, the 7-day block while the dashboard has it open, and the whole tree as indented lists — every node open, fifty children a node and a
 line for the rest — with the open node's details as a table.
@@ -186,7 +186,13 @@ see [Agents](agents.md#the-keyboard)); its toggle and its row are the mouse's ta
 glyph has a spoken label that says in words whether the state was recorded or derived (`running, derived`);
 a clock that ticks every second is hidden from a screen reader and stands beside it as words that
 stand still (`since 14:20`); the toggle and the row are targets of at least 24 × 24 px, and a
-forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours. The focus
+forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours — and every
+pressed chip of the page (a range, a provider, a model, the custom dates, the cache switch, the
+chart's `subagents` and cost line, the heatmap's metric, the hours' zone) in the highlight colours,
+where the theme would otherwise give pressed and released chips the same face. A pressed chip is the
+one element the page takes out of the theme's adjustment, and it wears nothing but the theme's own
+system colours: left in, it would get a backplate of the page colour behind its words, on which the
+highlight text cannot be read. The focus
 stays on its row — the running list's button, or the tree's item — when the section is pushed
 again. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are

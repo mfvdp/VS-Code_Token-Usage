@@ -111,12 +111,18 @@ to `~`, and any key that even looks like a secret is redacted as a matter of def
 
 **Clear Stored Data…** lists everything the extension has put on disk with its size, and deletes
 what you pick: the token snapshot (`state.json`), the quota cache (`quota.json`), the quota
-history (`quotaHistory.json`), the status-line mirror, the consent decisions, the alert state and
-the dashboard view state. The confirmation says the part that matters: the snapshot is rebuilt
-from the transcripts that are still on disk, and Claude Code deletes those after 30 days, so
-older history is gone for good. The leader lease is never offered for deletion — it is live
-coordination between open windows, not stored data. The bridge's install record is kept too: it
-is the undo.
+history (`quotaHistory.json`), the status-line mirror (`statusline-mirror.json`), the
+[agent hook](agents.md#the-agent-hook)'s mirror (`agent-hook.jsonl`) — once you granted
+`tokenPace.writeQuotaCache`, the shared quota cache files outside the extension's storage —, the
+consent decisions, the alert state and the dashboard view state. The confirmation says the part
+that matters: the snapshot is rebuilt from the transcripts that are still on disk, and Claude Code
+deletes those after 30 days, so older history is gone for good. Deleting the agent hook's mirror
+is safe — its script writes the file again on the next hook call, and the markers it reported go
+with it. The script itself, `agent-hook.js`, is not in the list, and the note under the mirror
+says so: it stays while the hook is installed — the entries in Claude Code's settings run it —
+and goes with the extension's storage when Token Pace is uninstalled. The leader lease is never
+offered for deletion — it is live coordination between open windows, not stored data. The
+bridge's install record is kept too: it is the undo.
 
 **Uninstalling** through the Extensions view runs a `vscode:uninstall` hook that removes the
 extension's `globalStorage` directory, best effort, and only when the path ends in exactly

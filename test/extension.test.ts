@@ -36,7 +36,7 @@ import { AgentTreeVm, emptyAgentTree, TreeNode } from '../src/agentTree'
 // Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`, and
 // `lazy` for the modules below it.
 import type { TokenPaceApi } from '../src/extension'
-import { bridgeBlocksDelete } from '../src/storage'
+import { bridgeBlocksDelete, hookMirrorNote } from '../src/storage'
 import { Snapshot, STATE_VERSION } from '../src/types'
 
 /** Never a real key: the string is asserted *absent* from every output this test reads. */
@@ -2414,6 +2414,74 @@ test('the agent hook: its mirror in storage marks the running agent until a stop
   assert.equal(fs.existsSync(path.join(other.storage, script.HOOK_SCRIPT_NAME)), false)
   assert.ok(state.messages.some((m) => m.text === "Token Pace: the agent hook script could not be copied into the extension's storage (ENOENT)."),
     JSON.stringify(state.messages.map((m) => m.text)))
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('clear stored data lists the agent hook\'s mirror with its note; deleting it takes the marker off and leaves the script (1.6 P16)', async () => {
+  const fx = makeFixture()
+  writeAgentWorld(fx)
+  await activateHost(fx, REPO)
+  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  const page = openDashboard()
+  const latestTree = (): AgentTreeVm | null => {
+    for (let i = page.sent.length - 1; i >= 0; i--) {
+      const m = page.sent[i] as { type?: unknown; key?: unknown; payload?: { agents?: AgentTreeVm } }
+      if ((m.type === 'data' || (m.type === 'section' && m.key === 'agents')) && m.payload?.agents) return m.payload.agents
+    }
+    return null
+  }
+  const marker = (): string | null | undefined => latestTree()?.runningNow.find((r) => r.key === 'a:a1a1a1')?.hookWait
+  await waitFor('the running agent on the page', () => marker() === null)
+  // The hook set up — its script copied by the command — and a permission request in its mirror.
+  await state.execute('tokenPace.showAgentHookSetup')
+  const script = require('../src/agentHookScript') as typeof import('../src/agentHookScript')
+  const copy = path.join(fx.storage, script.HOOK_SCRIPT_NAME)
+  const mirror = path.join(fx.storage, script.HOOK_MIRROR_NAME)
+  assert.equal(fs.existsSync(copy), true, 'the setup made no copy of the script')
+  const call = Buffer.from(JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: ACTIVE, agent_id: 'a1a1a1' }))
+  assert.equal(script.hookMain(['node', 'agent-hook.js', mirror], call, Date.now()), 0)
+  await waitFor('the marker on the page', () => marker() === 'waiting for approval')
+  // The view model carries it too — the Quick Pick's running item says it, beside where it sits.
+  const pickSays = async (): Promise<boolean> => {
+    const n = state.quickPickControls.length
+    await state.execute('tokenPace.showUsageQuickPick')
+    assert.equal(state.quickPickControls.length, n + 1, 'no QuickPick was created')
+    const pick = state.quickPickControls[n]
+    return pick.items.some((i) => String(i.detail ?? '').includes('waiting for approval'))
+  }
+  assert.equal(await pickSays(), true, 'the Quick Pick does not carry the marker')
+
+  // --- the list: the mirror by its file name and size, the note under it, no item for the script ---
+  await state.execute('tokenPace.clearStoredData')
+  const offered = state.quickPicks[state.quickPicks.length - 1]
+  assert.ok(offered, 'no pick list was shown')
+  const item = offered.items.find((i) => i.key === 'hookMirror')
+  assert.ok(item, `the hook mirror is missing: ${offered.items.map((i) => i.label).join(' | ')}`)
+  assert.equal(item.label, 'Agent hook mirror (agent-hook.jsonl)')
+  assert.equal(item.description, `${fs.statSync(mirror).size} B`)
+  assert.equal(item.detail, hookMirrorNote())
+  assert.match(String(item.detail), /agent-hook\.js, stays while the hook is installed and goes with the extension's storage when Token Pace is uninstalled/)
+  assert.equal(offered.items.filter((i) => /agent-hook\.js(?!onl)/.test(String(i.label))).length, 0, 'the script was offered for deletion')
+  const keys = offered.items.map((i) => i.key)
+  assert.equal(keys.indexOf('hookMirror'), keys.indexOf('mirror') + 1, 'not right after the status-line mirror')
+
+  // --- picked and confirmed: the mirror goes, and nothing else ---------------------------------
+  await waitFor('the snapshot saved', () => fs.existsSync(fx.stateFile))
+  const kept = [copy, fx.stateFile]
+  state.answers.push([item], 'Delete')
+  await state.execute('tokenPace.clearStoredData')
+  assert.match(state.messages[state.messages.length - 1].text, /Delete 1 stored item/)
+  assert.equal(fs.existsSync(mirror), false, 'the hook mirror survived')
+  for (const f of kept) assert.equal(fs.existsSync(f), true, `${path.basename(f)} went with the hook mirror`)
+  assert.equal(fs.readFileSync(copy, 'utf8'), fs.readFileSync(path.join(REPO, 'dist', script.HOOK_SCRIPT_NAME), 'utf8'))
+  assert.match(state.logText(), /Stored data removed: Agent hook mirror \(agent-hook\.jsonl\)/)
+  // The markers were the file's: they go with it — in the view model the command itself built, not
+  // only once the watcher on the storage has seen the file go —, and so on the page.
+  assert.equal(await pickSays(), false, 'the view model after the delete still carries the marker')
+  await waitFor('the marker gone', () => marker() === null)
+  // And the script, still in the storage, writes the file again on the hook's next call.
+  assert.equal(script.hookMain(['node', 'agent-hook.js', mirror], call, Date.now() + 1), 0)
+  await waitFor('the marker back', () => marker() === 'waiting for approval')
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 

@@ -87,6 +87,12 @@ function between(s: string, open: RegExp, close: string): string {
 }
 
 const STYLE = between(PAGE, /<style nonce="[A-Za-z0-9]+">/, '</style>')
+
+/** The selectors of every rule the page takes out of a forced-colours theme's adjustment (1.6 P16). */
+function adjustedOut(): string[] {
+  return [...STYLE.matchAll(/([^{}\n][^{}]*?)\s*\{[^{}]*forced-color-adjust:\s*none[^{}]*\}/g)].map((m) => m[1].trim())
+    .concat(STYLE.split('forced-color-adjust').length - 1 > [...STYLE.matchAll(/forced-color-adjust:\s*none/g)].length ? ['(another forced-color-adjust)'] : [])
+}
 const SCRIPT = between(PAGE, /<script nonce="[A-Za-z0-9]+">/, '</script>')
 
 /**
@@ -1408,12 +1414,51 @@ test('a forced-colours theme keeps the two parts of a split column apart, in its
   assert.equal(STYLE.split('@media (forced-colors: active) {').length - 1, 1, 'a second forced-colours block')
   assert.match(block, /\n {2}\.band\.sp-main \{ background: CanvasText; \}\n/)
   assert.match(block, /\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n/)
-  // No gradient there — the theme would take it — and the theme's own adjustment left on.
+  // No gradient there — the theme would take it — and the theme's own adjustment left on: the one
+  // element taken out of it is a pressed chip (1.6 P16), never a band.
   assert.equal(/gradient/.test(block), false, block)
-  assert.equal(/forced-color-adjust/.test(STYLE), false)
+  assert.deepEqual(adjustedOut(), ['button[aria-pressed="true"]:not(.ag-row)'])
   // The block stands after every band rule, so at the same specificity it is the one that wins.
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.band.r0 { background: var(--hue); }'))
+})
+
+test('a forced-colours theme paints every pressed chip in the highlight colours, its words readable, and leaves the pressed agent rows their outline (1.6 P16)', () => {
+  // The theme gives every button the same face and takes the button colours a pressed chip wears
+  // (`button[aria-pressed="true"]` above), so without a rule of its own a pressed chip looked
+  // exactly like a released one there. One rule, in the page's one forced-colours block.
+  const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active) {'))
+  const block = forced.slice(0, forced.indexOf('\n}') + 2)
+  assert.equal(STYLE.split('@media (forced-colors: active) {').length - 1, 1, 'a second forced-colours block')
+  const rule = 'button[aria-pressed="true"]:not(.ag-row) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; outline-color: CanvasText; }'
+  assert.ok(block.includes('\n  ' + rule + '\n'), block)
+  assert.equal(block.split('aria-pressed="true"]:not').length - 1, 1, 'more than one rule for the pressed chips')
+  assert.equal(STYLE.indexOf(rule), STYLE.lastIndexOf(rule), 'the rule outside the forced-colours block too')
+  // Taken out of the theme's adjustment — with it on, Chrome paints a backplate of the page colour
+  // behind the words, and the highlight text on it cannot be read (the harness's pictures and pixel
+  // counts) — and so wearing nothing but the theme's own system colours: every value of the rule is
+  // one of them, and it is the only element of the page taken out.
+  const values = rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}')).split(';').map((d) => d.trim()).filter(Boolean)
+    .map((d) => d.split(':').map((x) => x.trim()) as [string, string])
+  assert.deepEqual(values.map(([k]) => k), ['forced-color-adjust', 'background', 'color', 'border-color', 'outline-color'])
+  assert.ok(values.slice(1).every(([, v]) => ['Highlight', 'HighlightText', 'CanvasText'].includes(v)), JSON.stringify(values))
+  assert.deepEqual(adjustedOut(), ['button[aria-pressed="true"]:not(.ag-row)'])
+  // It stands after the page's own pressed colours, which it outranks inside the mode.
+  assert.ok(STYLE.indexOf(rule) > STYLE.indexOf('button[aria-pressed="true"] {\n  background: var(--vscode-button-background'))
+  // Every button the page gives aria-pressed, by the markup of src/webview/main.ts: the chips — the
+  // range, the custom dates, a provider, a model, the cache switch, the chart's split and cost line,
+  // the heatmap's metric, the hours' zone — have no class, so the rule reaches each of them; the
+  // only others are the agent rows of the running list and the 7-day block, which it leaves out.
+  const main = readFileSync(join(__dirname, '..', 'src', 'webview', 'main.ts'), 'utf8')
+  const pressable = [...main.matchAll(/aria-pressed="'/g)].map((m) => {
+    const head = main.slice(main.lastIndexOf('<button ', m.index), m.index)
+    return { act: /data-act="([A-Za-z]+)"/.exec(head)?.[1] ?? '?', cls: /class="([^"]*)"/.exec(head)?.[1] ?? null }
+  })
+  const acts = ['range', 'provider', 'model', 'customDates', 'compositionCache', 'chartSplit', 'costLine', 'heatmapMetric', 'hourZone']
+  assert.deepEqual(pressable.filter((b) => b.cls === null).map((b) => b.act), acts, JSON.stringify(pressable))
+  assert.deepEqual(pressable.filter((b) => b.cls !== null), [{ act: 'agentSelect', cls: 'ag-row' }, { act: 'agentSelect', cls: 'ag-row' }])
+  // Those keep the open row's 2 px outline in the highlight colour, as the tree's rows do.
+  assert.match(block, /\n {2}\.ag-row\[aria-pressed="true"\], \.agtree \.ag-row\[data-pressed="true"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}\n/)
 })
 
 test('the chart\'s chip and the split\'s tooltips speak German on a German page (1.6 O2)', () => {
@@ -6547,7 +6592,9 @@ test('the fold and the row are targets of 24 × 24 px at least, and a forced-col
   assert.match(block, /\.ag-row\[aria-pressed="true"\], \.agtree \.ag-row\[data-pressed="true"\] \{ outline: 2px solid Highlight; outline-offset: -2px; \}/)
   // 1.6 L1: the item the keyboard is on, a ring of the text colour round its line.
   assert.match(block, /\.agtree li\[role="treeitem"\]:focus-visible > \.ag-line \{ outline: 2px solid CanvasText; \}/)
-  assert.equal(/forced-color-adjust/.test(STYLE), false)
+  // The theme's own adjustment stays on for the tree: the one element taken out of it is a pressed
+  // chip (1.6 P16), never a row.
+  assert.deepEqual(adjustedOut(), ['button[aria-pressed="true"]:not(.ag-row)'])
 })
 
 test('the quota name keeps its nowrap alone, and the running dot never fades below 0.7', () => {

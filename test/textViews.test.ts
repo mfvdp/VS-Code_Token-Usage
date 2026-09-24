@@ -1599,7 +1599,7 @@ test('the Quick Pick names the running agents right after the quota, then what t
   assert.deepEqual(tallies.map((x) => x?.started), [13, 1])
   const last = rows[rows.length - 1]
   assert.equal(rows.length, now.length + 1)
-  assert.equal(last.label, '14 started · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ? · last 7 days')
+  assert.equal(last.label, 'Last 7 days: 14 started · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ?')
   assert.equal(last.detail, '14 started, 5 done, 2 failed, 2 retried, 1 stopped, about 3 running, about 1 unknown')
   assert.equal(last.description, undefined)
   assert.equal(last.command, 'tokenPace.showDashboard')
@@ -1626,12 +1626,12 @@ test('past five running entries the Quick Pick names five and counts the rest in
   assert.deepEqual(rows.slice(0, 3).map((i) => i.detail), [one.context, `${one.context} · waits for a child agent`, one.context])
   // The two listed entries not named here and the three the running list itself left out.
   assert.deepEqual(rows[5], { label: 'and 5 more', command: 'tokenPace.showDashboard' })
-  assert.match(rows[6].label, / · last 7 days$/)
+  assert.match(rows[6].label, /^Last 7 days: 14 started · /)
   assert.equal(rows.length, 7)
   // Nothing running: no row of the list, no "and 0 more" — the tally alone.
   const quiet = agentGroup(quickPickItems({ ...vm, agents: { ...vm.agents, runningNow: [], runningMore: 0 } }))
   assert.equal(quiet.length, 1)
-  assert.match(quiet[0].label, /^14 started · .* · last 7 days$/)
+  assert.match(quiet[0].label, /^Last 7 days: 14 started · .* · ~1 \?$/)
 })
 
 test('without a session the Quick Pick says what the tree says; sessions without agents, or no tree, leave no group behind', () => {
@@ -1663,6 +1663,38 @@ test('past the sessions the tree lists, the Quick Pick\'s tally says whose agent
   assert.ok(MAX_ROOTS > 2)
 })
 
+test('the Quick Pick\'s summary names its span first — "Last 7 days: " and then the tally, never as one more part of it (1.6 P16)', () => {
+  const { agg } = agentWorld()
+  const vm = buildViewModel(makeInput({ agg, cfg: makeConfig() }))
+  const tally = agentGroup(quickPickItems(vm)).at(-1)
+  assert.ok(tally)
+  // The tally's parts are joined by ' · '; the span stands in front of them, set off by a colon, so
+  // no part of the label reads as a count that is not one.
+  const text = '14 started · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ?'
+  assert.equal(tally.label, `Last 7 days: ${text}`)
+  assert.equal(tally.label.split(' · ').some((p) => /last 7 days/i.test(p) && !p.startsWith('Last 7 days: ')), false, tally.label)
+  assert.equal(/ · last 7 days$/.test(tally.label), false)
+  // The words beside it are the tally's own, unchanged.
+  assert.equal(tally.detail, '14 started, 5 done, 2 failed, 2 retried, 1 stopped, about 3 running, about 1 unknown')
+  // Past MAX_ROOTS the row keeps its wording: which sessions it counts is the span there.
+  const omitted = agentGroup(quickPickItems({ ...vm, agents: { ...vm.agents, omittedRoots: 1 } })).at(-1)
+  assert.equal(omitted?.label, `${text} · the 2 most recent sessions of the last 7 days`)
+  // In German through the shipped bundle: „Letzte 7 Tage: {0}", the tally's words German too.
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['Last 7 days: {0}'], 'Letzte 7 Tage: {0}')
+  assert.equal('{0} · last 7 days' in bundle, false, 'the retired tail is still translated')
+  let de: PickItem | undefined
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    de = agentGroup(quickPickItems(buildViewModel(makeInput({ agg, cfg: makeConfig() }))), 'Agenten').at(-1)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  assert.equal(de?.label, 'Letzte 7 Tage: 14 gestartet · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ?')
+})
+
 test('the Quick Pick\'s agents speak German with the shipped bundle (1.6 O2)', () => {
   const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   const { agg } = agentWorld()
@@ -1682,7 +1714,7 @@ test('the Quick Pick\'s agents speak German with the shipped bundle (1.6 O2)', (
   assert.equal(rows[0].detail, 'Sitzung 3f9a2c1d · Workflow-Lauf cfe7718d · ⚠ Untergrenze — 1 von 2 Antworten unvollständig')
   assert.equal(rows[2].label, '2 Agent(en) ohne gezählte Antwort (~1 davon läuft)')
   const last = rows[rows.length - 1]
-  assert.equal(last.label, '14 gestartet · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ? · letzte 7 Tage')
+  assert.equal(last.label, 'Letzte 7 Tage: 14 gestartet · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ?')
   assert.equal(last.detail, '14 gestartet, 5 fertig, 2 fehlgeschlagen, 2 wiederholt, 1 gestoppt, etwa 3 laufend, etwa 1 unbekannt')
   const tail = omitted[omitted.length - 1]
   assert.equal(tail.label, '14 gestartet · 5 ✓ · 2 ✕ · 2 ↻ · 1 ■ · ~3 ● · ~1 ? · die 2 jüngsten Sitzungen der letzten 7 Tage')

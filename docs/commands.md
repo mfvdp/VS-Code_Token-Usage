@@ -26,7 +26,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `Token Pace: Set Up the Agent Hook…` | | Copies the agent hook's script into the extension's storage and opens a read-only document with the snippet you add to `~/.claude/settings.json` yourself, what it reads and how to remove it — Token Pace writes nothing into `~/.claude` (see [Agents](agents.md#the-agent-hook)) |
 | `Token Pace: Connect Claude Status Line…` | | Installs the status-line bridge (opt-in, with consent and a backup) |
 | `Token Pace: Disconnect Claude Status Line` | | Restores the previous status line, if it is still ours to restore |
-| `Token Pace: Clear Stored Data…` | | Lists and deletes what the extension has stored |
+| `Token Pace: Clear Stored Data…` | | Lists and deletes what the extension has stored — the snapshot, the quota cache and history, the status-line mirror, the agent hook's mirror `agent-hook.jsonl`, the decisions and the view state; the hook's script `agent-hook.js` stays while the hook is installed and goes with the storage on uninstall (see [Export and diagnostics](export.md)) |
 | `Token Pace: Reset Network Access Decision` | | Puts the consent question back |
 | `Token Pace: Open Settings` | | The extension's settings |
 | `Token Pace: Show Log` | | The output channel |

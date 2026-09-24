@@ -26,7 +26,7 @@ import {
   buildItems, previewItems, problemView, quotaTooltip, StatusTextInput, makeContext, summaryTooltip,
   tokenTooltip,
 } from '../src/statusText'
-import { bridgeBlocksDelete, deleteWarning, inventory, labelOf, MementoLike } from '../src/storage'
+import { bridgeBlocksDelete, deleteWarning, hookMirrorNote, inventory, labelOf, MementoLike } from '../src/storage'
 import { markdownDocument, quickPickItems } from '../src/textViews'
 import { QuotaState } from '../src/types'
 import { buildViewModel, ViewModel } from '../src/viewModel'
@@ -92,6 +92,10 @@ const DE: Record<string, string> = {
     'Agenten, die gerade laufen — abgeleitet aus ihren Transkripten (in den letzten 10 Minuten geändert, kein Ergebnis aufgezeichnet).',
   'and {0} more': 'und {0} weitere',
   'Token Pace — running agents': 'Token Pace — laufende Agenten',
+  // 1.6 P16: the agent hook's mirror in the delete list, and its note.
+  'Agent hook mirror (agent-hook.jsonl)': 'Agent-Hook-Spiegeldatei (agent-hook.jsonl)',
+  'The hook writes it again on its next call. Its script, agent-hook.js, stays while the hook is installed and goes with the extension\'s storage when Token Pace is uninstalled.':
+    'Der Hook schreibt sie beim nächsten Aufruf neu. Sein Skript, agent-hook.js, bleibt, solange der Hook eingerichtet ist, und wird mit dem Erweiterungsspeicher gelöscht, wenn Token Pace deinstalliert wird.',
 }
 
 /** The seam is module state; every test that changes it puts it back. */
@@ -289,11 +293,16 @@ test('the write disclosure and the stored-data labels follow the bundle', () => 
   // The inventory takes its labels from the same function, so a pick list is never half English.
   const paths = {
     state: '/nowhere/state.json', quota: '/nowhere/quota.json', history: '/nowhere/h.json',
-    leader: '/nowhere/leader.json', mirror: '/nowhere/m.json',
+    leader: '/nowhere/leader.json', mirror: '/nowhere/m.json', hookMirror: '/nowhere/agent-hook.jsonl',
   }
   const empty: MementoLike = { get: <T>(_k: string, d: T): T => d, update: () => Promise.resolve() }
-  const items = german(() => inventory(paths, empty))
+  const items = german(() => inventory(paths, empty, { hookMirror: hookMirrorNote() }))
   assert.equal(items[0].label, 'Token-Snapshot (state.json)')
+  // 1.6 P16: the agent hook's mirror and its note — the file name stays as it is on disk.
+  const hook = items.find((i) => i.key === 'hookMirror')
+  assert.equal(hook?.label, 'Agent-Hook-Spiegeldatei (agent-hook.jsonl)')
+  assert.equal(hook?.detail, 'Der Hook schreibt sie beim nächsten Aufruf neu. Sein Skript, agent-hook.js, bleibt, solange der Hook eingerichtet ist, und wird mit dem Erweiterungsspeicher gelöscht, wenn Token Pace deinstalliert wird.')
+  assert.equal(labelOf('hookMirror'), 'Agent hook mirror (agent-hook.jsonl)')
 
   const warnings = german(() => [deleteWarning(), bridgeBlocksDelete()])
   assert.match(warnings[0], /^Der Token-Snapshot wird aus den Transkriptdateien/)

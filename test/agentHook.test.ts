@@ -496,6 +496,10 @@ test('the setup document: the snippet with this machine\'s two paths, what it re
     '## Removing it']) {
     assert.ok(doc.includes(claim), `the document does not say: ${claim}`)
   }
+  // 1.6 P16: the removal paragraph names the file that stops growing, not "the file".
+  const removal = doc.slice(doc.indexOf('## Removing it'))
+  assert.ok(removal.includes('Delete the four entries from `hooks` in `~/.claude/settings.json`. `agent-hook.jsonl` then stops growing, and its lines stop counting after 30 minutes.'), removal)
+  assert.equal(removal.includes('The file then stops growing'), false)
   // A path with a space or a shell character is quoted for the shell Claude Code runs the command in.
   assert.equal(hookCommand('/Users/t/Library/Application Support/Code/User/globalStorage/x', 'darwin'),
     'node "/Users/t/Library/Application Support/Code/User/globalStorage/x/agent-hook.js" "/Users/t/Library/Application Support/Code/User/globalStorage/x/agent-hook.jsonl"')
@@ -519,6 +523,9 @@ test('the setup document in German, through the bundle', () => {
       'Über 256 KB wird die Datei auf ihre neuesten 1000 Zeilen gekürzt.']) {
       assert.ok(doc.includes(claim), `the German document does not say: ${claim}`)
     }
+    // 1.6 P16: the removal paragraph names `agent-hook.jsonl` in German too.
+    const removal = doc.slice(doc.indexOf('## Entfernen'))
+    assert.ok(removal.includes('Löschen Sie die vier Einträge aus `hooks` in `~/.claude/settings.json`. Die Datei `agent-hook.jsonl` wächst dann nicht mehr, und ihre Zeilen zählen nach 30 Minuten nicht mehr.'), removal)
     // The snippet is the same in either language: it is what the user copies.
     assert.ok(doc.includes(hookSnippet('/x/globalStorage/frederik.token-pace', 'linux')))
     assert.equal(/\b(What it does|Removing it|The snippet)\b/.test(doc), false, doc)

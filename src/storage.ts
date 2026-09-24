@@ -32,7 +32,7 @@ export interface MementoLike {
 }
 
 export type StoredKey =
-  'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'ui' | 'mirror' | 'externalQuota'
+  'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'ui' | 'mirror' | 'hookMirror' | 'externalQuota'
 
 /** Absolute paths of the extension's files in `globalStorage`. */
 export interface StoredPaths {
@@ -41,6 +41,13 @@ export interface StoredPaths {
   history: string
   leader: string
   mirror: string
+  /**
+   * 1.6 O4: the agent hook's mirror, `agent-hook.jsonl` — written by the hook's script, not by the
+   * extension, and written again on the script's next call, so deleting it is safe. The script
+   * itself (`agent-hook.js`, beside it) is never offered: the hook in Claude Code's settings runs
+   * it while it is installed, and it goes with the storage on uninstall.
+   */
+  hookMirror: string
   /**
    * The shared quota cache files outside `globalStorage`, one per provider.
    *
@@ -73,13 +80,14 @@ export const STORED_MEMENTO_KEYS: Readonly<Record<'consent' | 'alerts' | 'ui', r
  *
  * Deliberately not the translated one: a log line is pasted into an issue, and a maintainer
  * has to be able to read it whatever language the editor runs in. `labelOf` carries the same
- * eight names for the pick list, translated at call time.
+ * nine names for the pick list, translated at call time.
  */
 const LOG_LABELS: Record<StoredKey, string> = {
   state: 'Token snapshot (state.json)',
   quota: 'Quota cache (quota.json)',
   history: 'Quota history (quotaHistory.json)',
   mirror: 'Status line mirror (statusline-mirror.json)',
+  hookMirror: 'Agent hook mirror (agent-hook.jsonl)',
   externalQuota: 'Shared quota cache (outside the extension storage)',
   consent: 'Consent decisions',
   alerts: 'Alert state',
@@ -96,6 +104,7 @@ export function labelOf(key: StoredKey): string {
     case 'quota': return t('Quota cache (quota.json)')
     case 'history': return t('Quota history (quotaHistory.json)')
     case 'mirror': return t('Status line mirror (statusline-mirror.json)')
+    case 'hookMirror': return t('Agent hook mirror (agent-hook.jsonl)')
     case 'externalQuota': return t('Shared quota cache (outside the extension storage)')
     case 'consent': return t('Consent decisions')
     case 'alerts': return t('Alert state')
@@ -115,6 +124,7 @@ export function storedFiles(key: StoredKey, paths: StoredPaths): string[] | null
     case 'quota': return [paths.quota]
     case 'history': return [paths.history]
     case 'mirror': return [paths.mirror]
+    case 'hookMirror': return [paths.hookMirror]
     case 'externalQuota': {
       const files = (paths.externalQuota ?? []).filter((f) => typeof f === 'string' && f !== '')
       return files.length > 0 ? files : null
@@ -174,7 +184,7 @@ export function inventory(
   memento: MementoLike,
   details: Partial<Record<StoredKey, string>> = {},
 ): StoredItem[] {
-  const order: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'externalQuota', 'consent', 'alerts', 'ui']
+  const order: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror', 'externalQuota', 'consent', 'alerts', 'ui']
   const out: StoredItem[] = []
   for (const key of order) {
     const files = storedFiles(key, paths)
@@ -299,6 +309,14 @@ export function deleteWarningExternal(): string {
  */
 export function bridgeBlocksDelete(): string {
   return t('Run "Token Pace: Disconnect Claude Status Line" first — clearing files here does not restore Claude Code\'s settings.json.')
+}
+
+/**
+ * The note under the agent hook's mirror in the delete list (1.6 P16): why deleting it is safe, and
+ * why its script is not in the list — so nobody deletes the file and believes the hook gone with it.
+ */
+export function hookMirrorNote(): string {
+  return t('The hook writes it again on its next call. Its script, agent-hook.js, stays while the hook is installed and goes with the extension\'s storage when Token Pace is uninstalled.')
 }
 
 /** "12.3 kB" / "482 B" — for the pick list, where an exact byte count helps nobody. */

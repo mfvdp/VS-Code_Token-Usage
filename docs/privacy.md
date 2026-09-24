@@ -107,7 +107,9 @@ event name, a time and one of three words — and writes nowhere else. It loads 
 `path` and nothing else (`npm run check:privacy` fails the build otherwise), opens no network
 connection, prints nothing, and keeps the file to its newest 1000 lines. The extension reads the
 six fields back, checks each again, and shows the latest wait as a marker in the Agents section;
-nothing of it enters the snapshot, an export, the diagnostics or the log.
+nothing of it enters the snapshot, an export, the diagnostics or the log. *Clear Stored Data…*
+deletes `agent-hook.jsonl` ([Export and diagnostics](export.md)); the script stays while the hook
+is installed and goes with the extension's storage on uninstall.
 
 Nothing is written except the extension's own state in its `globalStorage` — and, while you have
 installed it, the agent hook's line in the same storage —, with exactly two

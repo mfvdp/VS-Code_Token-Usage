@@ -421,11 +421,13 @@ function agentPickLines(vm: ViewModel): PickItem[] {
   const tally = combinedTally(a.roots)
   if (tally) {
     // Every session the tree has, or — past MAX_ROOTS — the ones it lists, and the row says so:
-    // the older sessions' agents are in no tally the view model carries.
+    // the older sessions' agents are in no tally the view model carries. The span leads the row
+    // (1.6 P16, §7c Wave D): as a ' · last 7 days' tail it read as one more part of the tally,
+    // whose parts the same separator joins.
     const omitted = typeof a.omittedRoots === 'number' && a.omittedRoots > 0 ? a.omittedRoots : 0
     out.push({
       label: omitted === 0
-        ? t('{0} · last 7 days', tallyText(tally))
+        ? t('Last 7 days: {0}', tallyText(tally))
         : t('{0} · the {1} most recent sessions of the last 7 days', tallyText(tally), full(a.roots.length)),
       description: omitted > 0 ? t('{0} older session(s) not counted.', full(omitted)) : undefined,
       detail: tallySpoken(tally),

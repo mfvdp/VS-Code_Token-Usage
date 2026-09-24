@@ -57,7 +57,7 @@ import { sectionSettingsQuery } from './sectionSettings'
 import { Role, showMenu, StatusBar, StatusInput } from './statusbar'
 import { buildItems, USAGE_PAGE } from './statusText'
 import {
-  bridgeBlocksDelete, deleteItems, deleteWarning, deleteWarningExternal, formatBytes, inventory,
+  bridgeBlocksDelete, deleteItems, deleteWarning, deleteWarningExternal, formatBytes, hookMirrorNote, inventory,
   StoredKey, StoredPaths,
 } from './storage'
 import { DayRange, dayOf, RangePreset, rangeFor } from './time'
@@ -181,11 +181,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     history: path.join(storage, 'quotaHistory.json'),
     leader: path.join(storage, 'leader.json'),
     mirror: path.join(storage, 'statusline-mirror.json'),
+    hookMirror: path.join(storage, HOOK_MIRROR_NAME),
   }
   // 1.6 O4: the agent hook's script as the extension ships it, and the mirror file the copy in
   // globalStorage writes when Claude Code runs it — read whenever it changes, never stored.
   const hookBundle = context.asAbsolutePath(path.join('dist', HOOK_SCRIPT_NAME))
-  const hookMirror = new HookMirror(path.join(storage, HOOK_MIRROR_NAME))
+  const hookMirror = new HookMirror(paths.hookMirror)
   try {
     // An update reaches a hook the user installed before it; nothing is copied without one.
     if (refreshHookScript(hookBundle, storage)) log.info('Agent hook: the script in the extension storage was updated.')
@@ -1367,6 +1368,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       externalQuota: external.map((f) => tildify(f, home)).join(' · '),
       ui: t('range, sort and filters of the dashboard'),
       consent: t('network and write decisions'),
+      // 1.6 P16: deleting the hook's mirror is safe, and its script is not in the list.
+      hookMirror: hookMirrorNote(),
     })
     const picks: Array<vscode.QuickPickItem & { key?: StoredKey }> = items.map((i) => ({
       label: i.label,
@@ -1404,6 +1407,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     if (confirm !== deleteLabel) return
 
     const result = await deleteItems(keys, { ...paths, externalQuota: external }, context.globalState, say)
+    // The markers of a deleted hook mirror go with it; the render below draws the tree without them.
+    if (result.deleted.includes('hookMirror')) hookMirror.refresh(Date.now())
     if (result.deleted.includes('history')) history.clear()
     if (result.deleted.includes('quota')) quotaMgr.clearPolled()
     if (result.deleted.includes('ui')) ui = defaultUiState(cfg)

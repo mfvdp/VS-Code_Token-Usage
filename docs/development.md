@@ -29,6 +29,15 @@ script and the agent hook's script (`dist/agent-hook.js`, which the *Set Up the 
 command copies into the extension's storage and Claude Code runs; built on Node's `fs` and `path`
 alone, which `check:privacy` enforces).
 
+The wiring test (`test/extension.test.ts`) runs the real `activate()` against a fake extension
+host (`test/helpers/fakeVscode.ts`) that behaves like VS Code where the order of events matters:
+once an activation's subscriptions are disposed, a settings change or a change of the window's
+focus no longer reaches it. Each test waits for its own activation's cold start — the `Σ` of the
+tokens entry on the fake status bar, which only a live activation draws — and never for a
+`Cold start done` line in the shared log, which an activation disposed a moment before could have
+written; the extension, for its part, drops a cold scan's answer that arrives after the window has
+gone.
+
 A handful of questions a fake host cannot answer run in a real editor: `npm run test:e2e`
 downloads VS Code stable into `.vscode-test/`, starts it with this extension in development
 mode, every other extension disabled, a user-data directory of its own and a fresh `HOME` — so

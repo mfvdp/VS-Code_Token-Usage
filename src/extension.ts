@@ -610,6 +610,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     const fromNothing = agg.cursors.size === 0
     try {
       const snapshot = await runWorker(agg.toSnapshot(), onProgress)
+      // 1.7 D-C: the worker's answer can arrive after `dispose` — Node still delivers a message
+      // posted just before `terminate`. The exit save has stored what there was; an aggregator
+      // swapped in now serves no window, and its "Cold start done" line would land in whatever
+      // log comes next.
+      if (disposed) return
       agg = Aggregator.fromSnapshot(snapshot, cfg.attribution)
       agg.timeConfig = readTimeConfig(cfg)
       if (fromNothing) agg.agentsRevision = AGENT_TABLES_REVISION

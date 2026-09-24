@@ -203,6 +203,11 @@ interface Host {
   /** What `activate()` resolved with — the extension-host smoke test reads the bar through it. */
   api: TokenPaceApi
   elapsedMs: number
+  /**
+   * 1.7 D-C: how many "Cold start done" lines the log held when this activation began — what
+   * `waitColdStartLine` counts from.
+   */
+  coldLinesAtStart: number
 }
 
 /**
@@ -246,6 +251,10 @@ async function activateHost(
   extensionPath: string,
   opts: ActivateOptions = {},
 ): Promise<Host> {
+  // 1.7 D-C: an activation a failed test left armed goes before the next one begins — its scan,
+  // its timers and its listeners would write into this test's recording. A passing test disposes
+  // its own and says so (`disposeAll(LIVE.pop()!)`), so this finds nothing then.
+  releaseAll()
   state.reset({ ...settingsOf(fx), ...(opts.settings ?? {}) })
   // After the reset: it clears the remote name and the answer queue along with every
   // other recording.
@@ -255,12 +264,16 @@ async function activateHost(
   const ext = require('../src/extension') as Extension
   const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState })
   LIVE.push(ctx)
+  const coldLinesAtStart = coldStartLines(state)
   const started = Date.now()
   const api = await ext.activate(ctx)
-  return { ctx, state, ext, api, elapsedMs: Date.now() - started }
+  return { ctx, state, ext, api, elapsedMs: Date.now() - started, coldLinesAtStart }
 }
 
-/** Disposal is asserted per test; this only stops a *failing* test from hanging the run. */
+/**
+ * Disposal is asserted per test; this only stops a *failing* test from hanging the run — and
+ * (1.7 D-C, `activateHost`) from writing into the next test's recording.
+ */
 function releaseAll(): void {
   for (const ctx of LIVE.splice(0)) {
     try {
@@ -293,6 +306,35 @@ async function waitFor(what: string, ok: () => boolean, ms = 20_000): Promise<vo
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => REAL_TIMERS.setTimeout(r, ms))
+
+/** How many "Cold start done" lines the shared log holds now. */
+function coldStartLines(s: FakeVscodeState): number {
+  return s.log.filter((l) => l.message.startsWith('Cold start done')).length
+}
+
+/**
+ * 1.7 D-C: waits for this activation's own cold start — the Σ of the live tokens item.
+ *
+ * The fake host's log outlives an activation, so a "Cold start done" line proves nothing about
+ * whose scan it was: until 1.7's guard in `coldScan`, the scan of an activation disposed a moment
+ * before could write its line late, into the next test's recording. `textOf` reads only items
+ * that are not disposed, a disposed activation draws no frame (`render` returns after `dispose`),
+ * and the tokens item says "reading history …" until its own scan has ended — so only this
+ * activation's scan can answer.
+ */
+async function waitOwnColdStart(s: FakeVscodeState, what = 'the cold start'): Promise<void> {
+  await waitFor(what, () => (s.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+}
+
+/**
+ * 1.7 D-C: the same wait for an activation whose settings hide the tokens item — a "Cold start
+ * done" line beyond the ones the log held when it began (`Host.coldLinesAtStart`). Sound because a
+ * disposed activation writes none after `dispose` (the guard in `coldScan`, proven by the test
+ * "a cold scan whose worker answers after the window has gone …" below).
+ */
+async function waitColdStartLine(s: FakeVscodeState, since: number, what = 'the cold start'): Promise<void> {
+  await waitFor(what, () => coldStartLines(s) > since)
+}
 
 /** One timer the probe saw armed. */
 interface ProbedTimer {
@@ -466,7 +508,7 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
   assert.equal(state.textOf(TOKENS_ITEM), '$(sync~spin) reading history …')
   assert.equal(fs.existsSync(fixture.stateFile), false)
 
-  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitOwnColdStart(state, 'the cold scan')
 
   // The scan drops the quota memo, so the Codex window — which can only come from the
   // rollout that was just read — is on screen in the very frame that ends the scan.
@@ -623,7 +665,7 @@ test('without dist/scanWorker.js the main-thread fallback produces the same coun
   const bare = tmpDir('tp-noext')
   await activateHost(fx, bare)
 
-  await waitFor('the fallback scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitOwnColdStart(state, 'the fallback scan')
 
   // The fallback leaves through the same `finally`, so it drops the memo just as well.
   assert.match(state.textOf(CODEX_ITEM) ?? '', /\b21%/)
@@ -712,7 +754,7 @@ test('on a remote host with no transcripts the hint writes remote.extensionKind 
     globalState: shared,
     settings: { 'tokenPace.quotaSource': 'cache' },
   })
-  await waitFor('the second bootstrap', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state, 'the second bootstrap')
   await sleep(200)
   assert.equal(
     state.messages.some((m) => m.text.includes('remote "wsl"')),
@@ -737,7 +779,7 @@ test('clear stored data lists the shared cache and says the bridge has to go fir
   ])
 
   await activateHost(fx, REPO, { globalState: shared })
-  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitOwnColdStart(state, 'the cold scan')
 
   // --- the list itself ------------------------------------------------------
   await state.execute('tokenPace.clearStoredData')
@@ -833,7 +875,7 @@ test('the status line mirror reaches the context entry and the text view', async
   })
   await waitFor('the context entry', () => state.textOf(CONTEXT_ITEM) !== undefined)
   // The cold scan is awaited so this test leaves nothing running behind it.
-  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitOwnColdStart(state, 'the cold scan')
 
   assert.equal(state.textOf(CONTEXT_ITEM), 'ctx 64%')
   // One session's window, said once, and the same figure in the text view — not a second
@@ -859,7 +901,7 @@ test('a configured budget reaches the status bar and the markdown view from one 
       'tokenPace.budgets': [{ scope: 'total', period: 'month', unit: 'tokens', limit: 1000 }],
     },
   })
-  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitOwnColdStart(state, 'the cold scan')
   await waitFor('the budget entry', () => state.textOf(BUDGET_ITEM) !== undefined)
 
   const text = String(state.textOf(BUDGET_ITEM))
@@ -883,7 +925,7 @@ test('a settings change is applied live: no reload between the edit and the stat
   await activateHost(fx, REPO, {
     settings: { 'tokenPace.statusBar.show': ['tokens'], 'tokenPace.summary.period': 'today' },
   })
-  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitOwnColdStart(state, 'the cold scan')
   assert.ok(String(state.textOf(TOKENS_ITEM)).endsWith('· today'), state.textOf(TOKENS_ITEM))
 
   // The workbench answers `affectsConfiguration` per section prefix; the host asks for the
@@ -1001,7 +1043,7 @@ test('stored "more" steps restore by shape — a key, a whole number of steps fr
   ]
   const kept = new Map<string, unknown>([['tokenPace.ui', { agentsExpanded: ['w:s1|wf_1'], agentsMore: more }]])
   const host = await activateHost(makeFixture(), REPO, { globalState: kept })
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   await state.execute('tokenPace.setRange', '7d')
   const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
   const restored = ui?.agentsMore as Array<{ key: string; pages: number }>
@@ -1033,9 +1075,9 @@ test('stored "more" steps restore by shape — a key, a whole number of steps fr
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
   const junk = new Map<string, unknown>([['tokenPace.ui', { agentsMore: 'not-a-list' }]])
   const second = await activateHost(makeFixture(), REPO, { globalState: junk })
-  // Its cold start done before it goes: one still running past the dispose writes its log line
-  // into the next test's recording.
-  await waitFor('the second cold start', () => state.logText().includes('Cold start done'))
+  // Its own cold start done before it goes, so the next test starts with no scan of this one
+  // still reading.
+  await waitOwnColdStart(state, 'the second cold start')
   await state.execute('tokenPace.setRange', '7d')
   assert.deepEqual(second.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentsMore, [])
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
@@ -1060,7 +1102,7 @@ test('the row the details open under restores by shape, beside a selection only,
   for (const [stored, want] of cases) {
     const kept = new Map<string, unknown>([['tokenPace.ui', stored]])
     const host = await activateHost(makeFixture(), REPO, { globalState: kept })
-    await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+    await waitOwnColdStart(state)
     await state.execute('tokenPace.setRange', '7d')
     const ui = host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')
     assert.equal(ui?.agentSelectedIn, want, JSON.stringify(stored))
@@ -1070,7 +1112,7 @@ test('the row the details open under restores by shape, beside a selection only,
   // What the page posts from a row of the running list is stored with its place, and the section
   // is pushed at once, carrying it; a selection from the same node's tree row moves it back.
   const host = await activateHost(makeFixture(), REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const page = openDashboard()
   await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
   const pushesSince = (from: number): Array<{ payload: { ui: { agentSelected: unknown; agentSelectedIn: unknown } } }> =>
@@ -1113,14 +1155,14 @@ test('the 7-day block\'s disclosure is stored and pushed at once; a stored state
   for (const [stored, want] of cases) {
     const kept = new Map<string, unknown>([['tokenPace.ui', { agentsWeekOpen: stored }]])
     const host = await activateHost(makeFixture(), REPO, { globalState: kept })
-    await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+    await waitOwnColdStart(state)
     await state.execute('tokenPace.setRange', '7d')
     assert.equal(host.ctx.globalState.get<Record<string, unknown>>('tokenPace.ui')?.agentsWeekOpen, want, JSON.stringify(stored))
     assert.deepEqual(disposeAll(LIVE.pop()!), [])
   }
   // The page's disclosure: stored, and the section pushed at once with the block in it; again, closed.
   const host = await activateHost(makeFixture(), REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const page = openDashboard()
   await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
   const agentPushes = (from: number): Array<{ payload: { ui: { agentsWeekOpen: unknown }; agents: { week: unknown } } }> =>
@@ -1145,10 +1187,9 @@ test('the 7-day block\'s disclosure is stored and pushed at once; a stored state
 })
 
 test('the chart\'s split is stored and the chart pushed with it; a stored split restores as one of its two words (1.6 O2)', async () => {
-  // Each host's own cold scan is waited for by its own status bar item — the Σ of the tokens item —
-  // not by the log line, which the scan of an activation disposed a moment before can write into
-  // this recording too.
-  const scanned = (): Promise<void> => waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  // Each host's own cold scan is waited for by its own status bar item — the Σ of the tokens item
+  // (1.7 D-C: `waitOwnColdStart`, which every wait for a cold start in this file uses now).
+  const scanned = (): Promise<void> => waitOwnColdStart(state, 'the cold scan')
   // Restored as one of the two words, and only as one: anything else is the split by model.
   const cases: Array<[unknown, string]> = [['agents', 'agents'], ['model', 'model'], ['Agents', 'model'], ['provider', 'model'],
     [true, 'model'], [null, 'model'], [undefined, 'model']]
@@ -1203,7 +1244,7 @@ test('a reader with 200 stored opened nodes, all long gone, can still open one: 
   const stale = Array.from({ length: MAX_AGENT_EXPANDED }, (_, i) => `s:gone-${i}`)
   const kept = new Map<string, unknown>([['tokenPace.ui', { agentsExpanded: stale }]])
   const host = await activateHost(makeFixture(), REPO, { globalState: kept })
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const page = openDashboard()
   await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
   const before = page.sent.length
@@ -1235,7 +1276,7 @@ test('activate() returns the API the extension-host smoke test reads the bar thr
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as { version: string }
   assert.equal(host.api.version, manifest.version)
 
-  await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+  await waitOwnColdStart(state, 'the cold scan')
   // Every id on the bar, with the bar's own text. The comparison goes by id rather than by
   // position: `state.live()` records items in creation order, the API in bar order. Each id
   // once, too — the two tests before this one dispose their activations while the cold scan
@@ -1989,7 +2030,7 @@ test('a journal\'s keys, labels, phases and results reach neither the log, the d
   const seeAgain = blindRecursiveWatchers()
   try {
     await activateHost(fx, REPO)
-    await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+    await waitOwnColdStart(state)
     await waitFor('the poll to start', () => state.logText().includes('Agent poll: on'))
     // A result and a third start of the step, read by a pass of the poll on the main thread.
     appendLine(w.journal, journalLine({ type: 'result', agentId: 'a1a1a2', step: 'a1a1a1', result: { summary: `${secret}-result` } }))
@@ -2036,7 +2077,7 @@ test('a Workflow call\'s script and its result\'s summary, paths and names reach
   appendLine(w.activeMain, workflowResultLine({ ts: T, toolUseId: 'toolu_wfhost01', runId: RUN, summary: `${secret}-summary` }))
   appendLine(w.activeMain, queueOperationLine({ ts: T, toolUseId: 'toolu_wfhost01', status: 'completed', summary: `${secret}-note` }))
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const { agg } = lazy()
   await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   await state.execute('tokenPace.showUsageMarkdown')
@@ -2074,7 +2115,7 @@ test('a run record\'s script, logs, prompts and results reach neither the log, t
     runId: RUN, secret, pad: 200_000, status: 'running', extra: { accountUuid: `${secret}-account`, prompt: `${secret} prompt` },
   }))
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const { agg } = lazy()
   await waitFor('the tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   await state.execute('tokenPace.showUsageMarkdown')
@@ -2114,7 +2155,7 @@ test('a rejected request\'s text, its details and its quota block reach neither 
   }))
   appendLine(w.activeMain, apiErrorLine({ id: 'msg_act_err', ts: T, text: `${secret}-main`, errorDetails: `${secret}-main-details` }))
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const { agg } = lazy()
   await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   await state.execute('tokenPace.showUsageMarkdown')
@@ -2148,7 +2189,7 @@ test('a tool call\'s input reaches neither the log, the diagnostics, the markdow
     content: [{ type: 'tool_use', id: 'toolu_host_leak', name: 'Bash', input: { command: `${secret}-command`, description: `${secret}-description` } }],
   }))
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const { agg } = lazy()
   await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   await state.execute('tokenPace.showUsageMarkdown')
@@ -2180,7 +2221,7 @@ test('a session that has just called the Workflow tool, with no agent file yet, 
     claudeLine({ id: 'msg_wf_1', ts: T, usage: { input: 7, output: 1 }, tools: [{ name: 'Workflow', id: 'toolu_wf_0001' }] }),
   ])
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   await waitFor('the poll to start', () => state.logText().includes('Agent poll: on'))
   // On for the session, not for an agent: nothing runs yet.
   assert.match(state.logText(), /Agent poll: on, every 5 s — 0 running agent\(s\)/)
@@ -2214,7 +2255,7 @@ test('Copy Agent ID copies the id of the selected node — its details open or i
   const fx = makeFixture()
   writeAgentWorld(fx)
   const host = await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   // The tables are whole once the cold start has saved them, marked of this build's revision
   // (1.6 L5: a first start reads every line itself and replays nothing). Read off this fixture's
   // saved state — a log line may be an earlier test's, still running when that test disposed its
@@ -2306,7 +2347,7 @@ test('the agent hook: its mirror in storage marks the running agent until a stop
   assert.equal(fs.readFileSync(older, 'utf8'), fs.readFileSync(path.join(REPO, 'dist', 'agent-hook.js'), 'utf8'),
     'activation left an older copy of the hook script in place')
   assert.match(state.logText(), /Agent hook: the script in the extension storage was updated\./)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const { agg } = lazy()
   await waitFor('the whole tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   const page = openDashboard()
@@ -2421,7 +2462,7 @@ test('clear stored data lists the agent hook\'s mirror with its note; deleting i
   const fx = makeFixture()
   writeAgentWorld(fx)
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const page = openDashboard()
   const latestTree = (): AgentTreeVm | null => {
     for (let i = page.sent.length - 1; i >= 0; i--) {
@@ -2489,7 +2530,7 @@ test('the exports say the agents are about to leave before anything is written, 
   const fx = makeFixture()
   writeAgentWorld(fx)
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   const { agg } = lazy()
   await waitFor('the whole tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
   const { AGENTS_CSV_COLUMNS } = require('../src/exporter') as typeof import('../src/exporter')
@@ -2539,7 +2580,7 @@ test('the usage document prints every node of the agent tree, though the dashboa
   const fx = makeFixture()
   writeAgentWorld(fx)
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   // The tables are whole once the cold start has saved them, marked of this build's revision
   // (1.6 L5) — read off this fixture's saved state, as a log line may be an earlier test's. The
   // page's first payload may be a view model built before that — before the cold start's own
@@ -2639,7 +2680,7 @@ test('the agent tables of an upgraded snapshot are replayed once after the cold 
 
   // --- the next start finds the tables replayed ---------------------------------
   await activateHost(fx, REPO)
-  await waitFor('the second cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state, 'the second cold start')
   await sleep(300)
   assert.doesNotMatch(state.logText(), /Agent replay/)
 
@@ -2669,7 +2710,7 @@ test('a first start with no stored state reads the agent tables whole and replay
   const w = writeAgentWorld(fx)
   const { agg } = lazy()
   await activateHost(fx, REPO)
-  await waitFor('the cold start', () => state.logText().includes('Cold start done'))
+  await waitOwnColdStart(state)
   await waitFor('the state to be saved', () => readState(fx) !== null)
   const first = readState(fx)!
   assert.equal(first.agentsRevision, agg.AGENT_TABLES_REVISION, 'the cold scan did not mark its tables of this revision')
@@ -2901,7 +2942,7 @@ test('a question answered after the window has gone acts on nothing: the write c
   const again = spyQuotaManager()
   try {
     await activateHost(makeFixture(), REPO, { settings: { 'tokenPace.quotaSource': 'poll' } })
-    await waitFor('the cold scan', () => (state.textOf(TOKENS_ITEM) ?? '').startsWith('Σ'))
+    await waitOwnColdStart(state, 'the cold scan')
     const allow = deferred<unknown>()
     state.answers.push(allow.promise)
     const run = state.execute('tokenPace.refreshQuota')
@@ -2964,5 +3005,140 @@ test('a window closed while the cold scan reads terminates its worker, and nothi
     (threads as { Worker: unknown }).Worker = RealWorker
     // A worker a failing assertion left running would keep the run from ending.
     for (const m of made) void m.worker.terminate()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Each test its own activation (1.7 D-C, D-D): the waits, the scan's late answer, the events
+// ---------------------------------------------------------------------------
+
+test('a wait for the cold start is answered by this activation\'s own scan, never by a line a disposed one wrote late (1.7 D-C)', async () => {
+  // The first activation goes while its scan still reads. The line its worker's late answer wrote
+  // into the next recording until 1.7 — `coldScan` has a guard against it now — is written here by
+  // hand, after the second activation began: the wait has to look past it to the second
+  // activation's own Σ.
+  await activateHost(makeFixture(), REPO)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  const second = await activateHost(makeFixture(), REPO)
+  // Only microtasks have run since the second `bootstrap()` began, so its scan cannot be done.
+  assert.equal(state.textOf(TOKENS_ITEM), '$(sync~spin) reading history …')
+  state.log.push({ level: 'info', message: 'Cold start done: 3 bucket(s), 2 file(s)' })
+  await waitOwnColdStart(state, 'the second activation\'s cold start')
+  assert.equal(state.textOf(TOKENS_ITEM), `Σ ${EXPECTED_BILLABLE} · 7d`,
+    'the wait returned before the second activation\'s own scan had ended')
+  assert.equal(coldStartLines(state), second.coldLinesAtStart + 2, 'the second activation\'s own line is not beside the late one')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // Settings that hide the tokens item leave the line: one beyond those the log held when the
+  // activation began — the guard below makes sure no disposed activation adds one.
+  const hidden = await activateHost(makeFixture(), REPO, { settings: { 'tokenPace.statusBar.show': ['claudeQuota'] } })
+  assert.equal(state.textOf(TOKENS_ITEM), undefined)
+  await waitColdStartLine(state, hidden.coldLinesAtStart, 'the third activation\'s cold start')
+  assert.equal(coldStartLines(state), hidden.coldLinesAtStart + 1)
+  assert.equal(state.textOf(TOKENS_ITEM), undefined, 'the settings did not hide the tokens item')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a cold scan whose worker answers after the window has gone swaps in nothing and logs no line (1.7 D-C)', async () => {
+  // The answer held until after dispose, deterministically: the worker posts it once the test says
+  // so, and this thread runs nothing until it has — so the message waits in the port while the
+  // window goes, and Node delivers it after `terminate` (a message posted before the end is not
+  // dropped). The extension's other files are not needed for that; the bundle is this test's.
+  const fx = makeFixture()
+  const late = tmpDir('tp-late-worker')
+  const dist = path.join(late, 'dist')
+  fs.mkdirSync(dist, { recursive: true })
+  const go = path.join(dist, 'go')
+  const posted = path.join(dist, 'posted')
+  fs.writeFileSync(path.join(dist, 'scanWorker.js'), [
+    "const { parentPort, workerData } = require('worker_threads')",
+    "const fs = require('fs')",
+    'const wait = setInterval(() => {',
+    `  if (!fs.existsSync(${JSON.stringify(go)})) return`,
+    '  clearInterval(wait)',
+    "  parentPort.postMessage({ type: 'done', snapshot: workerData.snapshot })",
+    `  fs.writeFileSync(${JSON.stringify(posted)}, '')`,
+    '  setInterval(() => undefined, 60_000)',
+    '}, 5)',
+    '',
+  ].join('\n'))
+  // The module object itself, as in the test before: the bundle reads `Worker` from it at every
+  // construction.
+  type Threads = typeof import('worker_threads')
+  const threads = require('worker_threads') as Threads
+  const RealWorker = threads.Worker
+  let gone = false
+  const answers: string[] = []
+  const made: Array<{ worker: InstanceType<Threads['Worker']>; exit: Promise<number> }> = []
+  class SpyWorker extends RealWorker {
+    constructor(file: string | URL, options?: import('worker_threads').WorkerOptions) {
+      super(file, options)
+      // Registered before the extension's own listener, so it sees every answer the extension does.
+      this.on('message', (m: { type?: unknown }) => { if (m?.type === 'done') answers.push(gone ? 'after dispose' : 'before dispose') })
+      made.push({ worker: this, exit: new Promise<number>((r) => this.once('exit', r)) })
+    }
+  }
+  (threads as { Worker: unknown }).Worker = SpyWorker
+  try {
+    await activateHost(fx, late)
+    assert.equal(made.length, 1, 'the cold scan started no worker')
+    await new Promise<void>((r) => made[0].worker.once('online', () => r()))
+    const mark = state.log.length
+    fs.writeFileSync(go, '')
+    const until = Date.now() + 10_000
+    while (!fs.existsSync(posted)) {
+      if (Date.now() > until) throw new Error('the worker did not post its answer')
+    }
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    gone = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const code = await Promise.race([made[0].exit, new Promise<string>((r) => { timer = REAL_TIMERS.setTimeout(() => r('still running'), 5000) })])
+    REAL_TIMERS.clearTimeout(timer)
+    assert.notEqual(code, 'still running', 'the worker outlived the window')
+    await settle()
+    // The seam held: the answer reached the extension, and only after the window had gone.
+    assert.deepEqual(answers, ['after dispose'], 'the worker\'s answer did not arrive after dispose — this test would prove nothing')
+    const after = state.log.slice(mark).map((l) => l.message)
+    assert.equal(after.find((m) => m.startsWith('Cold start done')), undefined, 'a disposed activation logged its cold start')
+    assert.equal(after.find((m) => /falling back to the main thread|Cold start in the worker failed/.test(m)), undefined)
+    assert.equal(state.live().length, 0, 'a status bar item was drawn after dispose')
+  } finally {
+    (threads as { Worker: unknown }).Worker = RealWorker
+    // A worker a failing assertion left running would keep the run from ending.
+    for (const m of made) void m.worker.terminate()
+  }
+})
+
+test('a disposed activation hears no settings change and no change of the window\'s focus (1.7 D-D)', async () => {
+  // The fake host unsubscribes a listener whose subscription was disposed, as VS Code does:
+  // `activate` pushes both subscriptions into `context.subscriptions`.
+  const scratch = tmpDir('tp-quota-files')
+  const first = path.join(scratch, 'first-claude-usage.json')
+  const second = path.join(scratch, 'second-claude-usage.json')
+  const listened = (): string[] => state.log.map((l) => l.message).filter((m) => /^Quota files: \S/.test(m))
+  const spy = spyQuotaManager()
+  try {
+    await activateHost(makeFixture(), REPO)
+    await waitOwnColdStart(state)
+    // Live: the settings listener writes its own line, and the focus reaches the quota manager.
+    state.set('tokenPace.claudeQuotaFile', first)
+    state.fireConfigChange(['tokenPace.claudeQuotaFile'])
+    assert.equal(listened().length, 1, 'the live activation did not hear the settings change')
+    assert.ok(listened()[0].includes(first), listened()[0])
+    spy.mark()
+    state.fireWindowState(false)
+    const focused = (): number => spy.calls().filter((c) => c === 'setFocused').length
+    assert.equal(focused(), 1, 'the live activation did not hear the window lose its focus')
+
+    // Gone: neither event reaches it, and firing them throws nothing.
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    state.set('tokenPace.claudeQuotaFile', second)
+    assert.doesNotThrow(() => state.fireConfigChange(['tokenPace.claudeQuotaFile']))
+    assert.equal(listened().length, 1, 'a disposed activation heard the settings change')
+    assert.equal(state.logText().includes(second), false, 'a disposed activation took up the new quota file')
+    assert.doesNotThrow(() => state.fireWindowState(false))
+    assert.equal(focused(), 1, 'a disposed activation heard the window\'s focus change')
+  } finally {
+    spy.restore()
   }
 })

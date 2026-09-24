@@ -246,6 +246,20 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const disposable = (dispose: () => void = () => { /* nothing to release */ }): { dispose(): void } =>
     ({ dispose })
 
+  /**
+   * 1.7 D-D: a subscription to one of the host's events, released as VS Code releases it — the
+   * listener leaves its list, so an activation that has disposed its subscriptions hears no
+   * further event. Until 1.7 both events below returned the no-op above, and a disposed
+   * activation kept receiving every `fireConfigChange` and `fireWindowState` of the test.
+   */
+  function subscribe<T>(list: Array<(e: T) => void>, listener: (e: T) => void): { dispose(): void } {
+    list.push(listener)
+    return disposable(() => {
+      const at = list.indexOf(listener)
+      if (at >= 0) list.splice(at, 1)
+    })
+  }
+
   function nextAnswer(): unknown {
     return answers.length > 0 ? answers.shift() : undefined
   }
@@ -400,8 +414,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
         return disposable(() => webviewProviders.delete(viewType))
       },
       onDidChangeWindowState(listener: (e: { focused: boolean; active: boolean }) => void): { dispose(): void } {
-        windowStateListeners.push(listener)
-        return disposable()
+        return subscribe(windowStateListeners, listener)
       },
       showInformationMessage: (text: string, ...rest: unknown[]): Promise<unknown> =>
         record('info', text, rest),
@@ -435,8 +448,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       onDidChangeConfiguration(
         listener: (e: { affectsConfiguration(section: string): boolean }) => void,
       ): { dispose(): void } {
-        configListeners.push(listener)
-        return disposable()
+        return subscribe(configListeners, listener)
       },
       registerTextDocumentContentProvider(
         scheme: string,

@@ -19,6 +19,10 @@ import { buildAgentTree } from './agentTreeBuild'
 import { Aggregator, HourQuery, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
 import {
+  CACHE_TEXT_MAX, CACHE_WATCH_MAX, CacheSource, CacheWatchEntry, CachePhase, cacheCostText, cacheLineText, cacheMoreText,
+  codexCacheText, watchCaches,
+} from './cacheWatch'
+import {
   Config, contextNote, DashboardSection, PlanSource, planNameOf, planText, readPaceConfig,
   readTimeConfig,
 } from './config'
@@ -634,12 +638,59 @@ export interface QuotaCard {
    */
   localBlock: LocalBlockRow | null
   /**
-   * The prompt cache of the Claude Code session the status line last wrote about, or null:
-   * for the Codex card always, for the Claude card whenever the bridge delivered no reading.
-   * Like the context card it has no second source — nothing here is ever estimated from the
-   * transcripts, which count cache reads but cannot know whether a cache is still warm.
+   * The 1.3 prompt-cache line: the reading of the Claude Code session the status line last wrote
+   * about, any TTL, with its hit ratio — the bridge's words, measured, never estimated. Null for the
+   * Codex card, for the Claude card whenever the bridge delivered no reading, and (1.8 §3.0 b)
+   * whenever that session is one of `cacheWatch.lines`: never two lines about one session. The
+   * transcript's estimate of a session's cache is not this line — it is `cacheWatch`, marked `~`.
    */
   promptCache: PromptCacheCard | null
+  /**
+   * 1.8 A5: the Claude card's prompt-cache block — the sessions whose 1 h cache cools or went cold,
+   * from the bridge (measured) or from the transcript (estimated, `~`); null on the Codex card and
+   * while no session's 1 h cache is watched at all.
+   */
+  cacheWatch: CacheWatchCard | null
+  /** 1.8 A6: the Codex card's one line ("… ~until 14:52, perhaps longer."); null on the Claude card and otherwise. */
+  codexCache: string | null
+}
+
+/** 1.8 A5: one watched session as the views print it — its state line and its cost line. */
+export interface CacheLineVm {
+  /**
+   * The session id's first eight characters — the part its name prints ("Session Tue 14:20 · 9d0eb37a")
+   * and no more (§0a.1: of a status-line session id only that part reaches a view). For the harness
+   * and the one-line-per-session invariant.
+   */
+  shortId: string
+  phase: CachePhase
+  source: CacheSource
+  /** The state line of §3 A3 ("Session Tue 14:20 · 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)"). */
+  text: string
+  /** The cost line of §3 A4, or null when the size a cold start re-writes is unknown. */
+  cost: string | null
+}
+
+/** 1.8 A5: the Claude card's prompt-cache block. */
+export interface CacheWatchCard {
+  /** Cooling and cold entries, most urgent first, at most CACHE_WATCH_MAX — what the card, the Quick Pick and a tooltip print. */
+  lines: CacheLineVm[]
+  /** Cooling and cold entries beyond the cap. */
+  more: number
+  /** `more` in words ("2 more sessions with a cooling or cold prompt cache"), or null when it is 0. */
+  moreText: string | null
+  /** Every watched entry (warm too), at most CACHE_TEXT_MAX — for the markdown document. */
+  all: CacheLineVm[]
+  /**
+   * Cooling and cold entries beyond the ones `all` holds — what the markdown document says after its
+   * list, in the words of `moreText`; null when `all` holds every one.
+   */
+  allMoreText: string | null
+  /**
+   * The keep-warm note of the block. B1's copy hint is struck (§7a Q1), so nothing fills it in 1.8 P6;
+   * B2's card notes come with P10.
+   */
+  keepWarm: null
 }
 
 export interface PromptCacheCard {
@@ -657,6 +708,11 @@ export interface PromptCacheCard {
   fresh: boolean
   /** The stated expiry has passed: the line reports the last reading, not a live state. */
   expired: boolean
+  /**
+   * 1.8 §3.0 (b): its session is one of `cacheWatch.all` — a warm 1 h cache the markdown document
+   * lists with the other watched sessions; the markdown prints that entry, the other views this line.
+   */
+  watched: boolean
   /**
    * The one line every view prints: "prompt cache warm · expires in 3 m 40 s (1 h TTL) · hit
    * ratio 87 %", "prompt cache cold", or "prompt cache · expired at 14:20 (last reading)" —
@@ -748,11 +804,18 @@ export interface VmInput {
    */
   context?: ContextReading | null
   /**
-   * The status line's prompt-cache reading, straight from `quotaManager.promptCacheReading()`.
-   * Absent or null renders no line at all — like the context window, this figure has no
-   * second source.
+   * The status line's latest prompt-cache reading, straight from `quotaManager.promptCacheReading()`:
+   * the 1.3 line, the bridge's words. Absent or null renders no such line. Since 1.8 it is not the
+   * only description of a session's cache: `QuotaCard.cacheWatch` takes the bridge's reading of every
+   * session from `promptCaches` below and, where none describes a session, estimates its cache from the
+   * aggregator's main records — marked `~`.
    */
   promptCache?: PromptCacheReading | null
+  /**
+   * 1.8 A1: `quotaMgr.promptCacheReadings(now)` — the newest bridge reading of every session the
+   * mirror named, by session id. Absent → no bridge entry is watched (the transcript's still are).
+   */
+  promptCaches?: readonly PromptCacheReading[]
   /**
    * 1.6 O4: the agent hook's mirror as the host last read it (src/agentHook.ts) — the latest hook
    * call per (session, agent). Absent or empty while the hook is not installed: no node of the
@@ -1332,6 +1395,7 @@ function quotaCard(
   lastEvent: number | null,
   newestDay: string | null,
   agentsSeen: boolean,
+  watched: readonly CacheWatchEntry[],
 ): QuotaCard {
   const { now, cfg, history } = input
   const fetchedMs = q.fetchedAt !== null && Number.isFinite(q.fetchedAt) ? q.fetchedAt * 1000 : null
@@ -1445,9 +1509,53 @@ function quotaCard(
     // window would be read as a second opinion about that window — and it is not one: it
     // counts what this machine ingested, the window counts what the account spent.
     localBlock: !q.ok || q.windows.length === 0 ? localBlock(ctx, q.source, now) : null,
-    // Only the Claude card, and only from the bridge: Codex has no status line, and no
-    // reading of it is invented for either provider.
-    promptCache: q.source === 'claude' ? promptCacheCard(input.promptCache, now, tcfg, cfg) : null,
+    ...cacheParts(q, input, ctx, tcfg, watched),
+  }
+}
+
+/**
+ * 1.8 A5, A6: the Claude card's prompt-cache block and its 1.3 line, or the Codex card's one line.
+ *
+ * The 1.3 line is only ever the bridge's (Codex has no status line, and no reading of it is invented
+ * for either provider); it gives way to the block for a session the block lists (§3.0 b). The block is
+ * built from `watched` — `watchCaches` over every session, once per build — and cut to its caps here.
+ */
+function cacheParts(
+  q: QuotaState, input: VmInput, ctx: StatsCtx, tcfg: TimeConfig, watched: readonly CacheWatchEntry[],
+): Pick<QuotaCard, 'promptCache' | 'cacheWatch' | 'codexCache'> {
+  const { now } = input
+  if (q.source === 'codex') {
+    return { promptCache: null, cacheWatch: null, codexCache: codexCacheText(input.agg.codexLastTurn(), now, tcfg) }
+  }
+  if (q.source !== 'claude') return { promptCache: null, cacheWatch: null, codexCache: null }
+  const lineOf = (e: CacheWatchEntry): CacheLineVm => ({
+    shortId: e.sessionId.slice(0, 8),
+    phase: e.phase,
+    source: e.source,
+    text: cacheLineText(e, now, tcfg),
+    cost: cacheCostText(e, now, tcfg, ctx.pricing, input.cfg.showCost),
+  })
+  const urgent = watched.filter((e) => e.phase !== 'warm')
+  const listed = urgent.slice(0, CACHE_WATCH_MAX)
+  const all = watched.slice(0, CACHE_TEXT_MAX)
+  const allUrgent = all.filter((e) => e.phase !== 'warm').length
+  const latest = input.promptCache ?? null
+  const latestId = latest?.sessionId ?? null
+  const inLines = latestId !== null && listed.some((e) => e.sessionId === latestId)
+  const inAll = latestId !== null && all.some((e) => e.sessionId === latestId)
+  return {
+    promptCache: inLines ? null : promptCacheCard(latest, now, tcfg, input.cfg, inAll),
+    cacheWatch: all.length === 0
+      ? null
+      : {
+        lines: listed.map(lineOf),
+        more: urgent.length - listed.length,
+        moreText: cacheMoreText(urgent.length - listed.length),
+        all: all.map(lineOf),
+        allMoreText: cacheMoreText(urgent.length - allUrgent),
+        keepWarm: null,
+      },
+    codexCache: null,
   }
 }
 
@@ -1469,6 +1577,7 @@ function promptCacheCard(
   now: number,
   tcfg: TimeConfig,
   cfg: Config,
+  watched = false,
 ): PromptCacheCard | null {
   if (!reading) return null
   const line = promptCacheText(reading, now, (ms) => formatTime(ms, tcfg), cfg.staleAfterMinutes)
@@ -1481,6 +1590,7 @@ function promptCacheCard(
     ageText: line.ageText,
     fresh: line.fresh,
     expired: line.expired,
+    watched,
     text: line.text,
     note: contextNote(),
   }
@@ -1784,9 +1894,14 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
   // prints them, and a quota card's share line is not drawn where they are none (P10c). Claude
   // Code's alone: while the view excludes Claude neither the line nor a Claude card is shown.
   const agentTokens = claudeShown ? agentTokensOf(agg, now, hourSums) : null
+  // 1.8 A1, A2: every session whose 1 h prompt cache is watched, once for the build and uncapped — the
+  // Claude card cuts it to its caps and counts the rest. Only while the view shows the Claude card.
+  const watched = shownQuotas.some((q) => q.source === 'claude')
+    ? watchCaches({ readings: input.promptCaches ?? [], mains: agg.mainEntries(), tcfg }, now, Infinity)
+    : []
   // 1.7 F1: the cards of the providers the view shows; a Claude card keeps its prompt-cache line
   // and its subagent shares.
-  const cards = shownQuotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null))
+  const cards = shownQuotas.map((q) => quotaCard(q, input, ctx, tcfg, paceCfg, forecasts, lastEvent, stats.newestDay, agentTokens !== null, watched))
   const month = rangeFor('30d', now, tcfg)
   const totals = whole.sources.map((source) => ({
     source,

@@ -258,3 +258,31 @@ export function agentShareAgg(o: { asMain?: boolean } = {}): Aggregator {
   }), codexCur, x)
   return agg
 }
+
+/**
+ * 1.8 A: one main Claude Code session of `sessionId` in `agg` — its first line `firstAt` (the start
+ * the Agents tree names it by, an hour before `at` unless given) and its newest reply at `at`, which
+ * wrote `write` tokens of the prompt cache's 1-hour kind (`ttl: '1h'`, the default) or of the 5-minute
+ * kind (`ttl: '5m'`) and read `read` — so `MainRec.lastRequest` is { at, ttl, context: input + write +
+ * read + output, model }. Invented figures; the session id names the transcript file, as Claude Code's do.
+ */
+export function addCacheSession(agg: Aggregator, o: {
+  sessionId: string; at: number; model?: string; ttl?: '1h' | '5m'; write?: number; read?: number;
+  input?: number; output?: number; firstAt?: number
+}): void {
+  const file = path.join('/virtual', 'claude', 'projects', '-home-t-alpha', `${o.sessionId}.jsonl`)
+  if (!agg.cursors.has(file)) agg.cursors.set(file, { offset: 0, size: 0, ino: 100 + agg.cursors.size, dev: 1 })
+  const model = o.model ?? 'claude-opus-5-5'
+  const first = o.firstAt ?? o.at - 3_600_000
+  const c = ctx(file)
+  const reply = (id: string, ts: number, usage: Record<string, number>): void => {
+    agg.addClaudeLine(claudeLine({ id, ts, model, final: true, cwd: '/home/t/alpha', sessionId: o.sessionId, usage }), c)
+  }
+  // The first reply only read the cache (no class of its own); the newest one decides the class.
+  if (first < o.at) reply(`${o.sessionId}-first`, first, { input: 10, cacheRead: 1000, output: 10 })
+  const write = o.write ?? 2000
+  reply(`${o.sessionId}-last`, o.at, {
+    input: o.input ?? 300, cacheWrite: write, cacheWrite1h: (o.ttl ?? '1h') === '1h' ? write : 0,
+    cacheRead: o.read ?? 150_000, output: o.output ?? 0,
+  })
+}

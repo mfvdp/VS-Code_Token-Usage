@@ -21,10 +21,11 @@ import {
   forecastsFor, SparkVm, parseWebviewMessage, pricingOf, providerViewOf, sparkOf, viewSources,
 } from '../src/viewModel'
 import {
-  CLAUDE_FILE, FINGERPRINT, NOW, SHARE_AGENTS, TODAY, agentShareAgg, buildAgg, daysAgo, fillHistory, makeConfig, makeHistory,
-  makeInput, state, timeConfig, win,
+  CLAUDE_FILE, FINGERPRINT, NOW, SHARE_AGENTS, TODAY, addCacheSession, agentShareAgg, buildAgg, daysAgo, fillHistory, makeConfig,
+  makeHistory, makeInput, state, timeConfig, win,
 } from './fixtures/viewFixtures'
-import { claudeLine, ctxFor } from './fixtures/helpers'
+import { claudeLine, codexMeta, codexTokenCount, codexTurnContext, ctxFor } from './fixtures/helpers'
+import type { PromptCacheReading } from '../src/quotaSources'
 import { markdownDocument } from '../src/textViews'
 import { toolAgg } from './helpers/toolAgg'
 import { ROOT, rawManifest } from './helpers/nls'
@@ -2506,4 +2507,163 @@ test('the switch message names one of its states; a new view shows its sources a
   }
   assert.deepEqual(applyMessage(ui, { type: 'setFilter', providers: ['codex'], models: ['m'] }).models, ['m'],
     'the model chips\' own message cleared the models')
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 A: the Claude card's prompt-cache block, the 1.3 line beside it, the Codex line
+// ---------------------------------------------------------------------------
+
+const PC1 = '9d0eb37a-0000-4000-8000-000000000001'
+const PC2 = '5f1c2d3e-0000-4000-8000-000000000002'
+const PC3 = '7a7a7a7a-0000-4000-8000-000000000003'
+const TX1 = 'aaaa1111-0000-4000-8000-000000000004'
+const TX2 = 'bbbb2222-0000-4000-8000-000000000005'
+
+/** A bridge reading of `sessionId`: a warm 1 h cache expiring at `expiresAt`, read a minute ago, 152 300 tokens on Opus 5.5. */
+function pcReading(sessionId: string, expiresAt: number, over: Partial<PromptCacheReading> = {}): PromptCacheReading {
+  return {
+    warm: true, ttl: '1h', expiresAt, hitRatio: 0.9, readAt: Math.floor((NOW - MIN) / 1000),
+    sessionId, recacheIfCold: 152_300, model: 'claude-opus-5-5', ...over,
+  }
+}
+
+/**
+ * The fixture's world plus four watched sessions: a transcript session cooling (its newest request
+ * 56 minutes ago), a bridge session cooling with 4 m 10 s left, a bridge session cold for 20 minutes
+ * and a transcript session warm with 30 minutes left.
+ */
+function cacheInput(over: Partial<ReturnType<typeof makeInput>> = {}, cfgOver: Record<string, unknown> = {}): ReturnType<typeof makeInput> {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: TX1, at: NOW - 56 * MIN })
+  addCacheSession(agg, { sessionId: TX2, at: NOW - 30 * MIN, model: 'claude-fable-5-1' })
+  const promptCaches = [pcReading(PC1, NOW + 4 * MIN + 10_000), pcReading(PC2, NOW - 20 * MIN)]
+  return { ...makeInput({ agg, cfg: makeConfig(cfgOver) }), promptCaches, promptCache: promptCaches[0], ...over }
+}
+
+test('the Claude card lists its cooling and cold sessions with a cost line each, most urgent first; warm ones only for the markdown (1.8 A5)', () => {
+  const vm = buildViewModel(cacheInput())
+  const claude = vm.quotas.find((q) => q.source === 'claude')
+  const block = claude?.cacheWatch
+  assert.ok(block, 'no prompt-cache block')
+  assert.deepEqual(block.lines.map((l) => [l.shortId, l.phase, l.source]), [
+    ['aaaa1111', 'cooling', 'transcript'], ['9d0eb37a', 'cooling', 'bridge'], ['5f1c2d3e', 'cold', 'bridge'],
+  ])
+  assert.deepEqual(block.lines.map((l) => l.text), [
+    'Session Thu 10:04 · aaaa1111 · prompt cache cools in ~4 m 0 s (1 h TTL, estimated from the transcript)',
+    'Session 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)',
+    'Session 5f1c2d3e · prompt cache cold since 11:40 (1 h TTL)',
+  ])
+  assert.deepEqual(block.lines.map((l) => l.cost), [
+    'A cold start after ~12:04 re-writes ~152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).',
+    'A cold start after 12:04 re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).',
+    'The next request re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).',
+  ])
+  assert.equal(block.more, 0)
+  assert.equal(block.moreText, null)
+  // The warm transcript session is watched, and only the markdown's list names it.
+  assert.deepEqual(block.all.map((l) => l.shortId), ['aaaa1111', '9d0eb37a', '5f1c2d3e', 'bbbb2222'])
+  assert.equal(block.all[3].text, 'Session Thu 10:30 · bbbb2222 · prompt cache warm · cools in ~30 m 0 s (1 h TTL, estimated from the transcript)')
+  assert.equal(block.all[3].cost,
+    'A cold start after ~12:30 re-writes ~152.3K tokens at the 1 h write rate (2× input, ~$3.05) instead of reading them from the cache (0.025× input, ~$0.04).')
+  assert.equal(block.allMoreText, null)
+  assert.equal(block.keepWarm, null, 'B1 is struck; nothing fills the keep-warm note before P10')
+  // The latest mirror's session is listed: its 1.3 line gives way (§3.0 b).
+  assert.equal(claude?.promptCache, null)
+  assert.equal(claude?.codexCache, null)
+  // Costs off: the rates variant, no money anywhere in the block.
+  const plain = buildViewModel(cacheInput({}, { 'tokenPace.showCost': false })).quotas[0].cacheWatch
+  assert.equal(plain?.lines[1].cost, 'A cold start after 12:04 re-writes 152.3K tokens at the 1 h write rate (2× input) instead of reading them from the cache (0.05× input).')
+  assert.equal(JSON.stringify(plain).includes('$'), false)
+  // The Codex card has no block and no 1.3 line.
+  const codex = vm.quotas.find((q) => q.source === 'codex')
+  assert.equal(codex?.cacheWatch, null)
+  assert.equal(codex?.promptCache, null)
+})
+
+test('the 1.3 line stays for a session the block does not list: a warm 1 h cache, a 5 m cache, a reading without a session id (1.8 §3.0 b)', () => {
+  const warm = pcReading(PC3, NOW + 30 * MIN)
+  const withWarm = buildViewModel(cacheInput({ promptCaches: [warm], promptCache: warm })).quotas[0]
+  assert.ok(withWarm.promptCache, 'the 1.3 line of a warm 1 h cache is gone')
+  assert.equal(withWarm.promptCache.watched, true, 'the markdown would print the session twice')
+  assert.ok(withWarm.cacheWatch?.all.some((l) => l.shortId === '7a7a7a7a'))
+  assert.equal(withWarm.cacheWatch?.lines.some((l) => l.shortId === '7a7a7a7a'), false)
+  for (const latest of [pcReading(PC3, NOW + 3 * MIN, { ttl: '5m' }), pcReading(PC3, NOW + 3 * MIN, { sessionId: null })]) {
+    const card = buildViewModel(cacheInput({ promptCaches: [latest], promptCache: latest })).quotas[0]
+    assert.ok(card.promptCache, JSON.stringify(latest))
+    assert.equal(card.promptCache.watched, false)
+  }
+  // Nothing watched at all: no block, and the card is the 1.7 card.
+  const none = buildViewModel(makeInput()).quotas[0]
+  assert.equal(none.cacheWatch, null)
+  assert.equal(none.promptCache, null)
+  // Without `promptCaches` no bridge entry is watched; the transcript's still are.
+  const noBridge = buildViewModel(cacheInput({ promptCaches: undefined })).quotas[0].cacheWatch
+  assert.deepEqual(noBridge?.all.map((l) => [l.shortId, l.source]), [['aaaa1111', 'transcript'], ['bbbb2222', 'transcript']])
+})
+
+test('the caps: three cooling or cold lines on the card and a count of the rest, ten entries for the markdown and a count of what it leaves out (1.8 A2)', () => {
+  const id = (n: number): string => `c${String(n).padStart(7, '0')}-0000`
+  const readings = [
+    ...[1, 2, 3, 4, 5].map((n) => pcReading(id(n), NOW + n * MIN)),
+    ...[6, 7, 8].map((n) => pcReading(id(n), NOW - n * MIN)),
+    ...[9, 10, 11, 12].map((n) => pcReading(id(n), NOW + n * 5 * MIN)),
+  ]
+  const block = buildViewModel({ ...makeInput(), promptCaches: readings }).quotas[0].cacheWatch
+  assert.ok(block)
+  assert.deepEqual(block.lines.map((l) => [l.shortId, l.phase]), [['c0000001', 'cooling'], ['c0000002', 'cooling'], ['c0000003', 'cooling']])
+  assert.equal(block.more, 5)
+  assert.equal(block.moreText, '5 more sessions with a cooling or cold prompt cache')
+  assert.deepEqual(block.all.map((l) => l.shortId), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => id(n).slice(0, 8)))
+  assert.equal(block.allMoreText, null)
+  // Twelve cooling sessions: the markdown's ten are all cooling, and it says two more are.
+  const many = Array.from({ length: 12 }, (_, i) => pcReading(id(i + 1), NOW + 60_000 + i * 1000))
+  const full = buildViewModel({ ...makeInput(), promptCaches: many }).quotas[0].cacheWatch
+  assert.equal(full?.more, 9)
+  assert.equal(full?.all.length, 10)
+  assert.equal(full?.allMoreText, '2 more sessions with a cooling or cold prompt cache')
+  assert.equal(buildViewModel({ ...makeInput(), promptCaches: many.slice(0, 4) }).quotas[0].cacheWatch?.moreText,
+    '1 more session with a cooling or cold prompt cache')
+})
+
+/** An aggregator with one Codex rollout whose newest counted turn was `ago` ms before NOW, on `model`. */
+function codexAgg(ago: number, model: string, forked = false): Aggregator {
+  const agg = buildAgg()
+  const file = path.join('/virtual', 'codex', 'sessions', `rollout-${forked ? 'fork' : 'own'}.jsonl`)
+  const cur = { offset: 0, size: 0, ino: 77, dev: 1 }
+  agg.cursors.set(file, cur)
+  const ctx = ctxFor({ file })
+  const at = NOW - ago
+  agg.addCodexLine(codexMeta({ ts: at - MIN, id: 'thread-0077', ...(forked ? { forkedFrom: 'thread-0001' } : {}) }), cur, ctx)
+  agg.addCodexLine(codexTurnContext(at - MIN, model), cur, ctx)
+  agg.addCodexLine(codexTokenCount({ ts: at, total: { input: 900, cached: 600, output: 40, total: 940 } }), cur, ctx)
+  return agg
+}
+
+test('the Codex card says until when OpenAI keeps the prefix at least, for a GPT-5.6 turn of the last 30 minutes only (1.8 A6)', () => {
+  const vm = buildViewModel(makeInput({ agg: codexAgg(10 * MIN, 'gpt-5.6-sol') }))
+  const codex = vm.quotas.find((q) => q.source === 'codex')
+  assert.equal(codex?.codexCache,
+    'Codex prompt cache · last request at 11:50 · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until 12:20, perhaps longer.')
+  assert.equal(vm.quotas.find((q) => q.source === 'claude')?.codexCache, null)
+  assert.equal(buildViewModel(makeInput({ agg: codexAgg(31 * MIN, 'gpt-5.6-sol') })).quotas[1].codexCache, null)
+  assert.equal(buildViewModel(makeInput({ agg: codexAgg(10 * MIN, 'gpt-5.5') })).quotas[1].codexCache, null)
+  // A forked rollout's turn is the parent's history, not a request of its own.
+  assert.equal(buildViewModel(makeInput({ agg: codexAgg(10 * MIN, 'gpt-5.6-sol', true) })).quotas[1].codexCache, null)
+})
+
+test('the provider switch: under Codex no Claude card and so no block, under Claude Code no Codex card and so no Codex line (1.8 A8 test 14)', () => {
+  const agg = codexAgg(10 * MIN, 'gpt-5.6-sol')
+  addCacheSession(agg, { sessionId: TX1, at: NOW - 56 * MIN })
+  const input = { ...makeInput({ agg }), promptCaches: [pcReading(PC1, NOW + 4 * MIN)] }
+  const all = buildViewModel(input)
+  assert.ok(all.quotas[0].cacheWatch && all.quotas[0].cacheWatch.lines.length === 2)
+  assert.ok(all.quotas[1].codexCache)
+  const codex = buildViewModel({ ...input, ui: { ...input.ui, providers: ['codex'] } })
+  assert.deepEqual(codex.quotas.map((q) => q.source), ['codex'])
+  assert.equal(codex.quotas[0].codexCache, all.quotas[1].codexCache)
+  assert.equal(JSON.stringify(codex.quotas).includes('prompt cache cools'), false)
+  const claude = buildViewModel({ ...input, ui: { ...input.ui, providers: ['claude'] } })
+  assert.deepEqual(claude.quotas.map((q) => q.source), ['claude'])
+  assert.deepEqual(claude.quotas[0].cacheWatch, all.quotas[0].cacheWatch)
+  assert.equal(JSON.stringify(claude.quotas).includes('Codex prompt cache'), false)
 })

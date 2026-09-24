@@ -371,6 +371,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // it, so the card and the status-bar item describe the same mirror.
       context: quotaMgr.contextReading(),
       promptCache: quotaMgr.promptCacheReading(),
+      // 1.8 A1: the newest bridge reading of every session the mirror named, filled by the same
+      // `current()` — the Claude card's prompt-cache block watches each by its session id.
+      promptCaches: quotaMgr.promptCacheReadings(now),
       preview: statusBar.previewActive(),
       hook: hookMirror.entries(),
     })

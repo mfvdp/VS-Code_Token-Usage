@@ -259,8 +259,17 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
         ].filter(Boolean).join(' · ') || undefined,
       })
     }
+    // 1.8 A5: the Claude card's prompt-cache block, line for line as the card prints it — per cooling
+    // or cold session its state (the label) and its cost (the description), then how many more there
+    // are. Session names carry only an id's prefix and a time, and the words are ours; the icon escape
+    // is there all the same, as for every line of a card.
+    if (q.cacheWatch) {
+      for (const l of q.cacheWatch.lines) add({ label: noIcons(l.text), description: l.cost ? noIcons(l.cost) : undefined })
+      if (q.cacheWatch.moreText) add({ label: noIcons(q.cacheWatch.moreText) })
+    }
     // The bridge's prompt-cache line, word for word as the card prints it. Only ever present
-    // on the Claude card, and only while the status line delivered one.
+    // on the Claude card, only while the status line delivered one, and not for a session the
+    // block above lists (1.8 §3.0 b).
     if (q.promptCache) {
       add({
         label: q.promptCache.text,
@@ -269,6 +278,8 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
           q.promptCache.fresh ? null : t('stale')].filter(Boolean).join(' · '),
       })
     }
+    // 1.8 A6: the Codex card's one line, after its windows.
+    if (q.codexCache) add({ label: noIcons(q.codexCache) })
     if (q.extra) {
       add({
         label: t('Extra usage: {0}', q.extra.text),
@@ -917,9 +928,23 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
       }
       if (q.windows.some((w) => explainLines(w).length > 0)) L.push('')
     }
+    // 1.8 A5: every watched session of the Claude card — warm ones too, the document has the room —
+    // one list item each: the state line, and its cost line under it; then how many cooling or cold
+    // ones the list leaves out.
+    if (q.cacheWatch && q.cacheWatch.all.length > 0) {
+      for (const l of q.cacheWatch.all) {
+        L.push(`- ${cell(l.text)}`)
+        if (l.cost) L.push(`  ${cell(l.cost)}`)
+      }
+      if (q.cacheWatch.allMoreText) L.push(`- ${cell(q.cacheWatch.allMoreText)}`)
+      L.push('')
+    }
+    // 1.8 A6: the Codex card's one line, where the Claude card has its prompt-cache lines.
+    if (q.codexCache) L.push(cell(q.codexCache), '')
     // The bridge's prompt-cache line, under the windows it was read beside — the same words
-    // as the card, qualified once as the session's rather than the account's.
-    if (q.promptCache) {
+    // as the card, qualified once as the session's rather than the account's. Not for a session
+    // the list above already holds (1.8 §3.0 b): one line per session.
+    if (q.promptCache && q.promptCache.watched !== true) {
       const seen = [q.promptCache.ageText ? t('updated {0}', q.promptCache.ageText) : null,
         q.promptCache.fresh ? null : `⚠ ${t('stale')}`].filter(Boolean).join(' · ')
       L.push(`${cell(q.promptCache.text)} — ${q.promptCache.note}${seen ? ` · ${cell(seen)}` : ''}`, '')

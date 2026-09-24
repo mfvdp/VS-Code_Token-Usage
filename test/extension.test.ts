@@ -947,10 +947,15 @@ test('a status-line payload\'s session name, paths, workspace and free text reac
   const tail = LEAK_SESSION_ID.slice(8)
   for (const [what, text] of outputs) {
     for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
-    // At this tip no view names a session of the status line yet; none holds a part of the id.
+    // 1.8 P6: the Claude card's prompt-cache block names the mirror's session — by the id's first
+    // eight characters inside its name, and never by more of it.
     assert.equal(text.includes(LEAK_SESSION_ID), false, `the ${what} holds the session id`)
     assert.equal(text.includes(tail), false, `the ${what} holds the tail of the session id`)
   }
+  // The mirror's 1 h cache is warm for another 50 minutes: watched, so the page and the markdown
+  // name the session (the block's `all`); the bar and the tooltips do not show it before P7.
+  assert.ok(outputs[0][1].includes('Session 9d0eb37a · prompt cache warm · cools in'), 'the page does not name the watched session')
+  assert.ok(markdown.includes('- Session 9d0eb37a · prompt cache warm · cools in'), 'the markdown does not list the watched session')
 })
 
 test('an install of 1.3–1.7 is moved to the script\'s copy in the storage on activation, once, and the copy is refreshed (1.8 §7a Q16)', async () => {

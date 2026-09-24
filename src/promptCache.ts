@@ -2,15 +2,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The prompt-cache line of the Claude card.
+ * The status line's prompt-cache line of the Claude card (1.3) — the measured one.
  *
  * Claude Code's status line reports whether the running session's prompt cache is warm,
  * which TTL it has, when it expires and how much of the input it served. This module turns
  * that reading into the one line every view prints — the card, the markdown report, the
- * Quick Pick and the status-bar tooltip — and nothing here is derived: a part the payload
- * did not carry prints a dash, an expired cache is reported as what the last reading said,
- * and no view ever estimates any of it from the transcripts. The token buckets know what
- * was read from the cache, not whether the cache is still alive.
+ * Quick Pick and the status-bar tooltip — and nothing in THIS line is derived: a part the
+ * payload did not carry prints a dash, and an expired cache is reported as what the last
+ * reading said.
+ *
+ * It is not the only thing said about a session's cache any more. 1.8 reversed 1.3's promise
+ * that the cache is never estimated (§7a Q6): where the status line does not describe a
+ * session, `cacheWatch.ts` estimates its 1 h cache from the session's transcript — the time
+ * of its newest cache request plus the TTL — and every figure of that estimate carries `~`
+ * and the words "estimated from the transcript". For a session the watch lists as cooling or
+ * cold, the watch's line replaces this one (never two lines for one session); `countdownText`
+ * below is shared by both, so the two count down in the same form.
  *
  * Pure: `now` and the time formatter come in as parameters, so the countdown is whatever
  * the caller's render clock says and a test can pin it.

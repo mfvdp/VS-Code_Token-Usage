@@ -2298,3 +2298,75 @@ test('the pages say what 1.8 P5 keeps: the newest cache request of a main sessio
   assert.equal(cost.includes('Opus 4.6** alone'), false, 'docs/cost.md still gives fast mode to Opus 4.6 alone')
   assert.equal(cost.includes('2 September 2026'), false, 'docs/cost.md still dates the table 2 September')
 })
+
+/**
+ * 1.8 P6 (§3 A8 test 17): the prompt-cache page states the watch as the code has it — its constants,
+ * the six state lines, the cost comparison with the table's own factors, the Codex line —, the
+ * dashboard page and the numbers page point at it, and none of the places 1.3 promised "never an
+ * estimate" in still says so (status-bar.md's tooltip sentence is P7's, with the tooltip rows).
+ */
+test('the prompt-cache page states the watch as the code has it, and 1.3\'s "never an estimate" is gone from the places it stood (1.8 P6)', () => {
+  const cw = require('../src/cacheWatch') as typeof import('../src/cacheWatch')
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  const pc = flat(doc.promptCache)
+  const minutes = (ms: number): string => `${ms / 60_000} minutes`
+  for (const [name, value] of [
+    ['CACHE_COOLING_LEAD_MS', minutes(cw.CACHE_COOLING_LEAD_MS)], ['CACHE_COLD_SHOWN_MS', minutes(cw.CACHE_COLD_SHOWN_MS)],
+    ['CACHE_WATCH_MAX', String(cw.CACHE_WATCH_MAX)], ['CACHE_TEXT_MAX', String(cw.CACHE_TEXT_MAX)],
+    ['BRIDGE_SKEW_MS', `${cw.BRIDGE_SKEW_MS / 1000} seconds`], ['CODEX_RETENTION_MS', minutes(cw.CODEX_RETENTION_MS)],
+  ] as const) {
+    assert.ok(doc.promptCache.includes(`| \`${name}\` | ${value} |`), `docs/prompt-cache.md does not state ${name} = ${value}`)
+  }
+  // The six state lines, as the table has them.
+  for (const line of ['{0} · prompt cache warm · cools in {1} (1 h TTL)', '{0} · prompt cache cools in {1} (1 h TTL)',
+    '{0} · prompt cache cold since {1} (1 h TTL)', '{0} · prompt cache warm · cools in ~{1} (1 h TTL, estimated from the transcript)',
+    '{0} · prompt cache cools in ~{1} (1 h TTL, estimated from the transcript)', '{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)']) {
+    assert.ok(doc.promptCache.includes(`\`${line}\``), `docs/prompt-cache.md does not show ${line}`)
+  }
+  // The examples, as the real functions render them: Opus 5.5 on the page's day, 4 m 10 s before 14:52.
+  const tz: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+  const expiry = Date.UTC(2026, 8, 24, 14, 52)
+  const e = {
+    sessionId: '9d0eb37a-0000', name: 'Session Tue 14:20 · 9d0eb37a', source: 'bridge' as const, ttl: '1h' as const,
+    expiresAt: expiry, phase: 'cooling' as const, recache: 152_300, model: 'claude-opus-5-5',
+  }
+  const now = expiry - 250_000
+  const examples = [
+    cw.cacheLineText(e, now, tz), cw.cacheCostText(e, now, tz, {}, true),
+    cw.cacheLineText({ ...e, phase: 'cold' }, expiry + 60_000, tz), cw.cacheCostText({ ...e, phase: 'cold' }, expiry + 60_000, tz, {}, true),
+    cw.cacheCostText({ ...e, model: 'claude-experimental-x' }, now, tz, {}, true), cw.cacheMoreText(2),
+    cw.codexCacheText({ at: expiry - cw.CODEX_RETENTION_MS, model: 'gpt-5.6-sol' }, expiry - 20 * 60_000, tz),
+  ]
+  for (const x of examples) assert.ok(x !== null && pc.includes(x), `docs/prompt-cache.md does not show: ${x}`)
+  // The factors the table gives today, in the page's words.
+  const factor = (m: string, k: 'cacheWrite1h' | 'cacheRead'): string => cw.factorText(PRICES[m][0][k] / PRICES[m][0].input)
+  assert.ok(pc.includes(`${factor('claude-opus-5-5', 'cacheWrite1h')}× and ${factor('claude-opus-5-5', 'cacheRead')}× for Claude Opus 5.5`))
+  assert.ok(pc.includes(`${factor('claude-fable-5-1', 'cacheWrite1h')}× and ${factor('claude-fable-5-1', 'cacheRead')}× for Claude Fable 5.1 and Mythos 5.1`))
+  assert.ok(pc.includes(`${factor('claude-sonnet-5', 'cacheWrite1h')}× and ${factor('claude-sonnet-5', 'cacheRead')}× for every other Claude model`))
+  for (const claim of ['every figure of that estimate carries `~`', 'estimated from the transcript', 'no factor is written into the code',
+    'at a weight Anthropic does not publish', '`tokenPace.unknownModelPricing: family`', 'the status line\'s `fast_mode` is not read',
+    'a closed session\'s cache cools as well', '`promptCacheTtl`', '`subagentPromptCacheTtl`', '`CLAUDE_CODE_PROMPT_CACHE_TTL`',
+    '`ENABLE_PROMPT_CACHING_1H=1`', '`FORCE_PROMPT_CACHING_5M=1`', '`claude -p "hello" --output-format json`',
+    'the transcript does not overrule it', 'a cooling cache is a moment, not a record', 'It is measured, never estimated.',
+    'It is a minimum, not an expiry']) {
+    assert.ok(pc.includes(claim), `docs/prompt-cache.md does not say: ${claim}`)
+  }
+  // The dashboard's quota row and the numbers table point at the page and name the estimate.
+  const quotaRow = doc.dashboard.split('\n').find((l) => l.startsWith('| `quota` |')) ?? ''
+  for (const claim of ['[Prompt cache](prompt-cache.md)', 'estimated from its transcript where it does not', 'carries `~` on every figure',
+    'the bridge\'s words, measured', examples[0], examples[1]]) {
+    assert.ok(quotaRow.includes(claim as string), `docs/dashboard.md's quota row does not say: ${claim}`)
+  }
+  assert.ok(doc.numbers.split('\n').some((l) => l.startsWith('| Prompt cache of a Claude Code session') && l.includes('**estimate** from the transcript')),
+    'docs/numbers.md has no row for the prompt-cache estimate')
+  // 1.3's promise, gone from the places it stood (spec fact 3).
+  assert.equal(quotaRow.includes('never an estimate of any of it'), false, 'docs/dashboard.md still promises no estimate')
+  // A doc comment read as its sentences: the leading `*` of each line taken off.
+  const prose = (file: string): string => flat(readDoc(file).replace(/\n\s*\*(?!\/)\s?/g, ' '))
+  const promptCacheSrc = prose('src/promptCache.ts')
+  assert.equal(promptCacheSrc.includes('no view ever estimates any of it'), false, 'src/promptCache.ts still promises no estimate')
+  assert.ok(promptCacheSrc.includes('1.8 reversed 1.3\'s promise that the cache is never estimated'))
+  const vmSrc = prose('src/viewModel.ts')
+  assert.equal(vmSrc.includes('nothing here is ever estimated from the transcripts'), false, 'QuotaCard.promptCache still promises no estimate')
+  assert.equal(vmSrc.includes('like the context window, this figure has no second source'), false, 'VmInput.promptCache still promises no estimate')
+})

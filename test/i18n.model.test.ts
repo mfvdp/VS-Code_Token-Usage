@@ -214,3 +214,42 @@ test('split by main session and subagent, the chart names its two bands in Germa
     ])
   })
 })
+
+/** 1.8 P6: the whole sentences of the prompt-cache watch (§3 A3, A4, A6), exactly as src/cacheWatch.ts writes them. */
+const CACHE_WATCH_KEYS = [
+  '{0} · prompt cache warm · cools in {1} (1 h TTL)',
+  '{0} · prompt cache cools in {1} (1 h TTL)',
+  '{0} · prompt cache cold since {1} (1 h TTL)',
+  '{0} · prompt cache warm · cools in ~{1} (1 h TTL, estimated from the transcript)',
+  '{0} · prompt cache cools in ~{1} (1 h TTL, estimated from the transcript)',
+  '{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)',
+  'A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input, {3}) instead of reading them from the cache ({4}× input, {5}).',
+  'A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input) instead of reading them from the cache ({3}× input).',
+  'A cold start after {0} re-writes {1} tokens instead of reading them from the cache.',
+  'The next request re-writes {0} tokens at the 1 h write rate ({1}× input, {2}) instead of reading them from the cache ({3}× input, {4}).',
+  'The next request re-writes {0} tokens at the 1 h write rate ({1}× input) instead of reading them from the cache ({2}× input).',
+  'The next request re-writes {0} tokens instead of reading them from the cache.',
+  '1 more session with a cooling or cold prompt cache',
+  '{0} more sessions with a cooling or cold prompt cache',
+  'Codex prompt cache · last request at {0} · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until {1}, perhaps longer.',
+]
+
+test('the prompt-cache watch speaks in whole sentences, each with its German, and the German counts in „Token" (1.8 A3, A4, A6)', () => {
+  // Every t() of the module is one of the whole sentences above — no fragment a translator would see
+  // without the rest of its sentence, and nothing spliced around a translated part.
+  const source = readFileSync(join(ROOT, 'src', 'cacheWatch.ts'), 'utf8')
+  const keys = [...source.matchAll(/\bt\(\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1])
+  assert.deepEqual([...keys].sort(), [...CACHE_WATCH_KEYS].sort())
+  for (const key of CACHE_WATCH_KEYS) {
+    const de = GERMAN[key]
+    assert.equal(typeof de, 'string', `no German for ${JSON.stringify(key)}`)
+    assert.doesNotMatch(de, /\bTokens\b/, de)
+    // The glossary's words (§6): Prompt-Cache, kühlt … ab, kalt seit, Kaltstart, 1-h-Schreibpreis, Eingabe, geschätzt aus dem Transkript.
+    if (key.includes('tokens')) assert.match(de, /\bToken\b/, de)
+    if (key.includes('estimated from the transcript')) assert.ok(de.includes('geschätzt aus dem Transkript'), de)
+    if (key.includes('cools in')) assert.match(de, /kühlt in ~?\{1\} ab/, de)
+    if (key.includes('1 h write rate')) assert.ok(de.includes('1-h-Schreibpreis') && de.includes('× Eingabe'), de)
+    // TTL and the countdown form are the same in both languages.
+    if (key.includes('(1 h TTL')) assert.ok(de.includes('(1 h TTL'), de)
+  }
+})

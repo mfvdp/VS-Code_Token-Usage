@@ -21,11 +21,14 @@ import { PICK_RUNNING_ITEMS, PickItem, markdownDocument, noIcons, quickPickItems
 import { AgentLaunch, AgentRec, MainRec } from '../src/types'
 import { SOURCE_TITLE, ViewModel, agentTreeFor, buildViewModel } from '../src/viewModel'
 import {
-  CLAUDE_FILE, FINGERPRINT, NOW, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
+  CLAUDE_FILE, FINGERPRINT, NOW, addCacheSession, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state, win,
 } from './fixtures/viewFixtures'
 import { deltaBadge } from '../src/render'
 import { bestState } from '../src/quotaSources'
-import { LEAK_SESSION_ID, LEAK_STATUS_SECRETS, scratchDir, writeLeakyMirror } from './fixtures/helpers'
+import {
+  LEAK_SESSION_ID, LEAK_STATUS_SECRETS, codexMeta, codexTokenCount, codexTurnContext, ctxFor, scratchDir, writeLeakyMirror,
+} from './fixtures/helpers'
+import type { PromptCacheReading } from '../src/quotaSources'
 import { ROOT } from './helpers/nls'
 import { agentWorld } from './fixtures/agentWorld'
 import { toolAgg } from './helpers/toolAgg'
@@ -999,11 +1002,21 @@ test('a mirror with text under every neighbouring key reaches neither the view m
   assert.equal(promptCache?.sessionId, LEAK_SESSION_ID)
   const vm = buildViewModel({ ...makeInput(), promptCache, context: extras?.context ?? null })
   assert.ok(vm.quotas[0].promptCache !== null, 'the prompt-cache line is missing')
-  for (const [what, text] of [['view model', JSON.stringify(vm)], ['markdown', markdownDocument(vm)],
-    ['quick pick', JSON.stringify(quickPickItems(vm))]] as const) {
-    for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
-    assert.equal(text.includes(LEAK_SESSION_ID.slice(8)), false, `the ${what} holds the session id`)
+  // 1.8 P6: the same reading watched per session — the mirror's 1 h cache, warm for 50 more minutes,
+  // then cooling, then cold: the session is named, by the id's first eight characters and nothing more.
+  const watched = [NOW, NOW + 46 * 60_000, NOW + 70 * 60_000].map((now) => buildViewModel({
+    ...makeInput(), now, promptCache, promptCaches: promptCache ? [promptCache] : [], context: extras?.context ?? null,
+  }))
+  assert.deepEqual(watched.map((v) => v.quotas[0].cacheWatch?.all[0]?.phase), ['warm', 'cooling', 'cold'])
+  for (const v of [vm, ...watched]) {
+    for (const [what, text] of [['view model', JSON.stringify(v)], ['markdown', markdownDocument(v)],
+      ['quick pick', JSON.stringify(quickPickItems(v))]] as const) {
+      for (const secret of LEAK_STATUS_SECRETS) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+      assert.equal(text.includes(LEAK_SESSION_ID.slice(8)), false, `the ${what} holds the session id`)
+    }
   }
+  for (const v of watched) assert.ok(markdownDocument(v).includes('Session 9d0eb37a · prompt cache'), 'the watched session is not named')
+  assert.ok(quickPickItems(watched[1]).some((i) => i.label.startsWith('Session 9d0eb37a · prompt cache cools in')))
 })
 
 test('the prompt-cache line is in both text views only while the bridge delivers it', () => {
@@ -2098,4 +2111,117 @@ test('1.7 F2: the Quick Pick counts the closed group\'s sessions with its own ta
   assert.match(row?.label ?? '', /^24 started · 21 ✓ · ~3 ● · /)
   // The group's own key never reaches a Quick Pick item.
   assert.equal(quickPickItems(many).some((i) => JSON.stringify(i).includes(EARLIER_KEY)), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 A5, A6: the prompt-cache block and the Codex line in both text views
+// ---------------------------------------------------------------------------
+
+const PC_MIN = 60_000
+
+function pcReading(sessionId: string, expiresAt: number, over: Partial<PromptCacheReading> = {}): PromptCacheReading {
+  return {
+    warm: true, ttl: '1h', expiresAt, hitRatio: 0.9, readAt: Math.floor((NOW - PC_MIN) / 1000),
+    sessionId, recacheIfCold: 152_300, model: 'claude-opus-5-5', ...over,
+  }
+}
+
+/**
+ * A transcript session cooling, a bridge session cooling and one cold, a transcript session warm, the
+ * latest mirror a warm 1 h cache of a fifth session — and a GPT-5.6 Codex turn ten minutes ago.
+ */
+function cacheVm(): ViewModel {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: 'aaaa1111-0000', at: NOW - 56 * PC_MIN })
+  addCacheSession(agg, { sessionId: 'bbbb2222-0000', at: NOW - 30 * PC_MIN, model: 'claude-fable-5-1' })
+  const file = path.join('/virtual', 'codex', 'sessions', 'rollout-77.jsonl')
+  const cur = { offset: 0, size: 0, ino: 77, dev: 1 }
+  agg.cursors.set(file, cur)
+  const ctx = ctxFor({ file })
+  agg.addCodexLine(codexMeta({ ts: NOW - 11 * PC_MIN, id: 'thread-0077' }), cur, ctx)
+  agg.addCodexLine(codexTurnContext(NOW - 11 * PC_MIN, 'gpt-5.6-sol'), cur, ctx)
+  agg.addCodexLine(codexTokenCount({ ts: NOW - 10 * PC_MIN, total: { input: 900, cached: 600, output: 40, total: 940 } }), cur, ctx)
+  const latest = pcReading('7a7a7a7a-0000', NOW + 40 * PC_MIN)
+  return buildViewModel({
+    ...makeInput({ agg }), promptCache: latest,
+    promptCaches: [pcReading('9d0eb37a-0000', NOW + 4 * PC_MIN + 10_000), pcReading('5f1c2d3e-0000', NOW - 20 * PC_MIN), latest],
+  })
+}
+
+test('the markdown lists every watched session under the Claude card, warm ones too, each with its cost line under it (1.8 A5)', () => {
+  const vm = cacheVm()
+  const block = vm.quotas[0].cacheWatch
+  assert.ok(block)
+  const quota = quotaPart(markdownDocument(vm))
+  const claude = quota.slice(quota.indexOf('### Claude Code'), quota.indexOf('### Codex'))
+  const expected = block.all.flatMap((l) => [`- ${l.text}`, ...(l.cost ? [`  ${l.cost}`] : [])]).join('\n')
+  assert.ok(claude.includes(`\n${expected}\n\n`), claude)
+  assert.equal(block.all.length, 5)
+  assert.ok(claude.includes('- Session Thu 10:30 · bbbb2222 · prompt cache warm · cools in ~30 m 0 s (1 h TTL, estimated from the transcript)\n'
+    + '  A cold start after ~12:30 re-writes ~152.3K tokens at the 1 h write rate (2× input, ~$3.05) instead of reading them from the cache (0.025× input, ~$0.04).'), claude)
+  // The latest mirror's session is in the list, so its 1.3 line is not printed a second time.
+  assert.ok(vm.quotas[0].promptCache?.watched)
+  assert.equal(claude.includes('prompt cache warm · expires in'), false, claude)
+  assert.equal(claude.split('7a7a7a7a').length - 1, 1, claude)
+  // After the windows and their explanations, before the freshness row.
+  assert.ok(claude.indexOf(expected) > claude.lastIndexOf('- **7 d**'), claude)
+  assert.ok(claude.indexOf(expected) < claude.indexOf('Freshness —'), claude)
+  // The Codex card's one line, under the Codex card and nowhere else.
+  const codex = quota.slice(quota.indexOf('### Codex'))
+  const line = vm.quotas[1].codexCache
+  assert.ok(line)
+  assert.ok(codex.includes(`\n${line}\n`), codex)
+  assert.equal(claude.includes('Codex prompt cache'), false)
+})
+
+test('the Quick Pick carries the card\'s lines — state as the label, cost as the description — then the rest\'s count, then the 1.3 line (1.8 A5)', () => {
+  const vm = cacheVm()
+  const items = quickPickItems(vm)
+  const block = vm.quotas[0].cacheWatch
+  assert.ok(block && block.lines.length === 3)
+  const at = (label: string): number => items.findIndex((i) => i.label === label)
+  const lastClaudeWindow = Math.max(...vm.quotas[0].windows.map((w) => items.findIndex((i) => i.label.startsWith(`${w.label} `))))
+  const firstCodex = at('Codex')
+  for (const [n, l] of block.lines.entries()) {
+    const i = at(l.text)
+    assert.ok(i > lastClaudeWindow && i < firstCodex, l.text)
+    assert.equal(items[i].description, l.cost ?? undefined)
+    assert.equal(items[i].command, undefined)
+    if (n > 0) assert.ok(i > at(block.lines[n - 1].text))
+  }
+  // The warm sessions are not on the card, so not in the list; the latest mirror's warm 1 h cache
+  // keeps its 1.3 line there.
+  assert.equal(items.some((i) => i.label.includes('bbbb2222')), false)
+  const oldLine = items.findIndex((i) => i.label.startsWith('prompt cache warm · expires in'))
+  assert.ok(oldLine > at(block.lines[2].text) && oldLine < firstCodex)
+  // The Codex line after the Codex windows.
+  const codex = items.findIndex((i) => i.label === vm.quotas[1].codexCache)
+  assert.ok(codex > firstCodex, 'the Codex line is not in the Codex group')
+  // The count of the rest, when there is a rest.
+  const many = buildViewModel({
+    ...makeInput(),
+    promptCaches: [1, 2, 3, 4, 5].map((n) => pcReading(`c000000${n}-0000`, NOW + n * PC_MIN)),
+  })
+  const list = quickPickItems(many)
+  const more = list.findIndex((i) => i.label === '2 more sessions with a cooling or cold prompt cache')
+  assert.ok(more > list.findIndex((i) => i.label.startsWith('Session c0000003 ·')), 'the count is not after the lines')
+})
+
+test('a line of the block goes through cell() in the markdown and through noIcons in the Quick Pick (1.8 A5)', () => {
+  const vm = cacheVm()
+  const block = vm.quotas[0].cacheWatch
+  assert.ok(block)
+  const hostile = 'x | y\n## z $(alert) `w`'
+  block.lines[0] = { ...block.lines[0], text: hostile, cost: hostile }
+  block.all[0] = { ...block.all[0], text: hostile, cost: hostile }
+  block.moreText = hostile
+  const md = markdownDocument(vm)
+  assert.ok(md.includes('- x \\| y ## z $(alert) `w`\n  x \\| y ## z $(alert) `w`\n'), md)
+  assert.equal(md.includes('\n## z'), false)
+  const items = quickPickItems(vm)
+  const item = items.find((i) => i.label.startsWith('x | y'))
+  assert.ok(item)
+  assert.equal(item.label.includes('\\$(alert)'), true, item.label)
+  assert.equal(item.description?.includes('\\$(alert)'), true)
+  assert.ok(items.some((i) => i.label === noIcons(hostile) && i.description === undefined), 'the count line is not escaped')
 })

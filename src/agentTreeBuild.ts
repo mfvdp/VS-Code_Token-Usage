@@ -425,13 +425,20 @@ function startName(ms: number, now: number, tcfg: TimeConfig): string {
     : `${calendarDayOf(ms, tcfg)} ${time}`
 }
 
-/** A session by its id alone — "Session 9d0eb37a": where an agent sits, and the name without a start. */
-function sessionIdName(sessionId: string): string {
+/**
+ * A session by its id alone — "Session 9d0eb37a": where an agent sits, and the name without a start.
+ * 1.8 A1: exported for the prompt-cache watch (cacheWatch.ts), which names a status-line session no
+ * transcript here knows by it.
+ */
+export function sessionIdName(sessionId: string): string {
   return t('Session {0}', sessionId.slice(0, 8))
 }
 
-/** N6: "Session Tue 14:20 · 9d0eb37a" — by its first line, then its id; the id alone without a first line. */
-function sessionName(sessionId: string, start: number | null, now: number, tcfg: TimeConfig): string {
+/**
+ * N6: "Session Tue 14:20 · 9d0eb37a" — by its first line, then its id; the id alone without a first line.
+ * 1.8 A3: exported, so that the Claude card's prompt-cache lines name a session with the tree's own name.
+ */
+export function sessionName(sessionId: string, start: number | null, now: number, tcfg: TimeConfig): string {
   return start === null ? sessionIdName(sessionId) : t('Session {0} · {1}', startName(start, now, tcfg), sessionId.slice(0, 8))
 }
 

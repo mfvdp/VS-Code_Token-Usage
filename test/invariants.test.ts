@@ -25,9 +25,10 @@ import {
   AGENT_CONTENT, AGENT_WORLD, agentNode, agentWorld, agentWorldFile, everyParent, treeNodes,
 } from './fixtures/agentWorld'
 import {
-  FINGERPRINT, NOW, TODAY, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
+  FINGERPRINT, NOW, TODAY, addCacheSession, agentShareAgg, buildAgg, fillHistory, makeConfig, makeHistory, makeInput, state,
   timeConfig, win,
 } from './fixtures/viewFixtures'
+import type { PromptCacheReading } from '../src/quotaSources'
 import { CLAUDE_ROOT } from './fixtures/helpers'
 import { ROOT } from './helpers/nls'
 import { toolAgg } from './helpers/toolAgg'
@@ -1075,4 +1076,76 @@ test('an export names an agent by its ids and words, never by a path, and carrie
     assert.equal(keys.has(k), false, k)
   }
   assert.equal(/sessionFile|spawnerFile|description|prompt/.test(files[3][1].split('\n')[0]), false)
+})
+
+test('one line per session: no card, no markdown and no Quick Pick holds two lines about one session\'s prompt cache, at any minute (1.8 §3.0 b)', () => {
+  // Session 9d0eb37a is described twice over: its transcript's newest cache request, and a bridge
+  // reading written a minute later — which is also the latest mirror, the 1.3 line. Session aaaa1111
+  // has its transcript only. Over 140 minutes around the expiry each is said once per view, and the
+  // 1.3 line is gone exactly while its session is one of the card's lines.
+  const S1 = '9d0eb37a-0000-4000-8000-000000000001'
+  const S2 = 'aaaa1111-0000-4000-8000-000000000002'
+  const T = NOW - 30 * 60_000
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: S1, at: T })
+  addCacheSession(agg, { sessionId: S2, at: T + 7 * 60_000 })
+  const reading: PromptCacheReading = {
+    warm: true, ttl: '1h', expiresAt: T + 3_600_000 + 30_000, hitRatio: 0.9, readAt: Math.floor((T + 60_000) / 1000),
+    sessionId: S1, recacheIfCold: 152_300, model: 'claude-opus-5-5',
+  }
+  const base = makeInput({ agg })
+  const count = (texts: string[], id: string): number => texts.filter((x) => x.includes(`· ${id.slice(0, 8)} ·`) || x.includes(`Session ${id.slice(0, 8)} ·`)).length
+  let listedMinutes = 0
+  let warmMinutes = 0
+  for (let now = reading.expiresAt! - 70 * 60_000; now <= reading.expiresAt! + 70 * 60_000; now += 60_000) {
+    const vm = buildViewModel({ ...base, now, promptCache: reading, promptCaches: [reading] })
+    const card = vm.quotas.find((q) => q.source === 'claude')!
+    const lines = card.cacheWatch?.lines ?? []
+    const all = card.cacheWatch?.all ?? []
+    assert.equal(new Set(lines.map((l) => l.shortId)).size, lines.length, `two card lines of one session at ${now}`)
+    assert.equal(new Set(all.map((l) => l.shortId)).size, all.length, `two markdown entries of one session at ${now}`)
+    const listed = lines.some((l) => l.shortId === S1.slice(0, 8))
+    // Mutation check (§3 A8 test 11): printing the 1.3 line always fails here.
+    assert.equal(card.promptCache === null, listed, `the 1.3 line at ${now}: listed ${listed}`)
+    if (listed) listedMinutes++
+    if (!listed && all.some((l) => l.shortId === S1.slice(0, 8))) warmMinutes++
+    // The Quick Pick: the block's lines of a session and the 1.3 line (the latest mirror's, S1's) together once at most.
+    // (The quota parts only: the Agents parts name the sessions as the tree does, which is no cache line.)
+    const items = quickPickItems(vm)
+    const from = items.findIndex((i) => i.separator === true && i.label === 'Quota')
+    const to = items.findIndex((i, n) => n > from && i.separator === true)
+    const labels = items.slice(from + 1, to < 0 ? undefined : to).map((i) => i.label)
+    const oldLine = labels.filter((l) => l.startsWith('prompt cache ')).length
+    assert.ok(count(labels, S1) + oldLine <= 1, `the Quick Pick names 9d0eb37a twice at ${now}`)
+    assert.ok(count(labels, S2) <= 1, `the Quick Pick names aaaa1111 twice at ${now}`)
+    // The markdown: every watched entry once, and the 1.3 line only for a session it does not list.
+    const doc = markdownDocument(vm)
+    const quota = doc.slice(doc.indexOf('## Quota'), doc.indexOf('\n## ', doc.indexOf('## Quota') + 1))
+    const md = quota.split('\n').filter((l) => l.startsWith('- ') || l.startsWith('prompt cache '))
+    const mdOld = md.filter((l) => l.startsWith('prompt cache ')).length
+    assert.ok(count(md, S1) + mdOld <= 1, `the markdown names 9d0eb37a twice at ${now}`)
+    assert.ok(count(md, S2) <= 1, `the markdown names aaaa1111 twice at ${now}`)
+    // …and whatever the block says of S1, S1 is said somewhere while the bridge's reading is fresh.
+    assert.ok(count(md, S1) + mdOld >= 1, `the markdown says nothing of 9d0eb37a at ${now}`)
+  }
+  // The sweep went through every state: listed (cooling, cold), warm (the markdown only), and neither.
+  assert.equal(listedMinutes, 65)
+  assert.ok(warmMinutes > 0)
+})
+
+test('a cooling cache is a moment, not a record: Copy Usage Summary carries nothing of the prompt-cache block or the Codex line (1.8 A5)', () => {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: '9d0eb37a-0000', at: NOW - 57 * 60_000 })
+  const vm = buildViewModel({
+    ...makeInput({ agg }),
+    promptCaches: [{
+      warm: true, ttl: '1h', expiresAt: NOW + 2 * 60_000, hitRatio: 0.9, readAt: Math.floor((NOW - 60_000) / 1000),
+      sessionId: '5f1c2d3e-0000', recacheIfCold: 152_300, model: 'claude-opus-5-5',
+    }],
+  })
+  assert.equal(vm.quotas[0].cacheWatch?.lines.length, 2)
+  const summary = toMarkdownSummary(vm)
+  for (const word of ['prompt cache', 'cold start', 're-writes', '9d0eb37a', '5f1c2d3e']) {
+    assert.equal(summary.includes(word), false, `Copy Usage Summary says ${word}`)
+  }
 })

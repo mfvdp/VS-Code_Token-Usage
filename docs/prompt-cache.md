@@ -14,13 +14,184 @@ session it runs for: warm or cold, the time-to-live (5 minutes or 1 hour), when 
 expires, how much of the input the cache served and — from Claude Code 2.1.251 on — how many tokens
 the next request re-caches if the cache has gone cold by then.
 
-Token Pace learns all of this as Claude Code states it only through the opt-in
-[status-line bridge](quota-sources.md#claude-status-line-bridge-opt-in). With the bridge connected
-the Claude quota card ends with a prompt-cache line built from that report — on the
-[Dashboard](dashboard.md), in the [status bar](status-bar.md)'s tooltip and in the text views.
-Where the bridge does not describe a session, Token Pace estimates the session's cache from its
-transcript instead, and every figure of that estimate carries `~` — see
-[How the estimate is made](#how-the-estimate-is-made).
+Token Pace watches that cache for every Claude Code session on this machine whose cache has the
+one-hour lifetime, and says on the Claude quota card when one is about to go cold — five minutes
+before — and what a cold start would cost against a cache read. Two sources describe a session, and
+every line says which of them it rests on:
+
+* **measured** — the opt-in [status-line bridge](quota-sources.md#claude-status-line-bridge-opt-in):
+  the lifetime, the expiry and the size a cold start re-writes, exactly as Claude Code reports them.
+  These figures carry no `~` — only the API amounts do, as every API amount on the page;
+* **estimated** — the session's transcript, wherever the status line has not described the session's
+  newest request: the time of that request plus one hour, and its size; every figure of that estimate
+  carries `~`, and the line says *estimated from the transcript* in words — see
+  [How the estimate is made](#how-the-estimate-is-made).
+
+Until 1.7 Token Pace promised that the prompt cache is never estimated; 1.8 gives that promise up for
+the watch below. The status line's own prompt-cache line keeps it: that line is the bridge's words and
+nothing else ([The status line's own line](#the-status-lines-own-line)).
+
+## On the Claude card
+
+While no watched session's cache is cooling or cold, the card is the card it was — a warm cache is not
+news. From five minutes before a session's one-hour cache expires, the card lists the session after its
+windows, in the dim tone, in two lines — its state, and what a cold start would cost:
+
+```
+Session Tue 14:20 · 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)
+A cold start after 14:52 re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).
+```
+
+Once the expiry has passed the lines read `Session Tue 14:20 · 9d0eb37a · prompt cache cold since 14:52
+(1 h TTL)` and `The next request re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22)
+instead of reading them from the cache (0.05× input, ~$0.03).` — for another hour; after that the
+session is no longer listed. A session is named as the [Agents](agents.md) section names it — the time
+it started and the first eight characters of its id —, so it can be found in the tree; a session the
+status line reports and no transcript on this machine belongs to (a remote host, a Claude directory
+elsewhere) is named by its id alone, `Session 9d0eb37a`. The Agents section's rows carry no mark of
+their own: a session quiet for more than ten minutes sits in the closed group of earlier sessions
+exactly when its cache cools.
+
+The state line, word for word, in its six forms — `{0}` the session's name, `{1}` the countdown or,
+once cold, the expiry's clock time:
+
+| Phase | Measured (the status line) | Estimated (the transcript) |
+|---|---|---|
+| warm | `{0} · prompt cache warm · cools in {1} (1 h TTL)` | `{0} · prompt cache warm · cools in ~{1} (1 h TTL, estimated from the transcript)` |
+| cooling | `{0} · prompt cache cools in {1} (1 h TTL)` | `{0} · prompt cache cools in ~{1} (1 h TTL, estimated from the transcript)` |
+| cold | `{0} · prompt cache cold since {1} (1 h TTL)` | `{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)` |
+
+The card lists at most three sessions, the most urgent first — the cooling ones by their expiry, then
+the cold ones with the most recent first —, and says how many more there are:
+`2 more sessions with a cooling or cold prompt cache`. The phase is said in words, never by a colour,
+and nothing on the card blinks or calls for attention: the section is rewritten every few seconds
+while a line counts down, and it is not announced to a screen reader each time.
+
+## Which sessions are watched
+
+**Only a one-hour cache.** A five-minute cache would be "cooling" a few seconds after every reply; it
+keeps the status line's own line. The watch takes a session's one-hour cache from the status line when
+it reports `ttl` `1h`, and from the transcript when the newest request that read or wrote the cache
+followed a write of the one-hour kind. A session whose kind of cache is not known is not watched —
+no lifetime is assumed —, and nothing is inferred from the hit ratio.
+
+**The phases.** With the expiry the status line states, or the transcript's estimate of it, a watched
+cache is *warm* until five minutes before the expiry, *cooling* from then until the expiry, and *cold*
+for an hour after it; then the session is no longer listed. An expiry more than an hour away — a
+transcript dated in the future, a clock ahead of this one — describes no cache now, and is not
+watched. The limits are constants of the code, not settings:
+
+| Constant | Value | What it is |
+|---|---|---|
+| `CACHE_COOLING_LEAD_MS` | 5 minutes | how long before the expiry a one-hour cache counts as cooling |
+| `CACHE_COLD_SHOWN_MS` | 60 minutes | how long a cold one-hour cache stays listed after its expiry |
+| `CACHE_WATCH_MAX` | 3 | cooling or cold sessions on the card, in the Quick Pick and in a tooltip |
+| `CACHE_TEXT_MAX` | 10 | watched sessions in the markdown view, warm ones included |
+| `BRIDGE_SKEW_MS` | 10 seconds | how much older than the transcript's newest request a status-line reading may be and still describe it |
+| `CODEX_RETENTION_MS` | 30 minutes | how long after a Codex turn the Codex card has its line |
+
+**Which source describes a session.** The status line's reading, while the transcript has counted no
+cache request of the session or the status line ran after the newest one (with ten seconds of slack);
+otherwise the status line has not run since that request, its reading describes an older turn, and
+the transcript's estimate describes the session instead. Nothing is merged: each figure of a line is
+the one source's. A reading that calls the cache not warm — the last response reported no cache
+tokens — before its stated expiry is not watched, and the transcript does not overrule it: the status
+line knows the newest request. One session is never described by another session's reading.
+
+**Open or closed.** Token Pace cannot tell whether a session is still open — it never reads Claude
+Code's session keys — so a closed session's cache cools as well, and is listed. The line is true
+either way: a cold start after 14:52 is what resuming the session would cost.
+
+**Which kind of cache Claude Code asks for.** Claude Code requests the one-hour lifetime for the main
+conversation only on a Claude subscription within the plan's included usage; usage credits, an API key,
+Bedrock, Vertex and Foundry get five minutes, and so do subagents, "even on a subscription". Since
+Claude Code 2.1.242 the setting `promptCacheTtl` (`"5m"` or `"1h"`) chooses it for the main
+conversation and `subagentPromptCacheTtl` for subagents, workflows, compaction, titles and background
+work; the environment variables `CLAUDE_CODE_PROMPT_CACHE_TTL` and
+`CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` do the same, `ENABLE_PROMPT_CACHING_1H=1` asks for one hour
+in both, and `FORCE_PROMPT_CACHING_5M=1` overrides everything. Which one a session gets shows in
+`claude -p "hello" --output-format json`: a one-hour write puts its tokens in
+`usage.cache_creation.ephemeral_1h_input_tokens`.
+
+**Claude Code's own clock.** Claude Code shows a prompt-cache clock in the prompt box of its VS Code
+panel, counting down from the cache's lifetime, and `/usage` has a line for the main conversation's
+cache (Claude Code 2.1.251 and later). Token Pace adds what those cannot: the warning while Claude
+Code's panel is closed, several sessions at once, and the cost of a cold start.
+
+**Several windows.** Each VS Code window keeps its own readings of the status line, and a window that
+is not the one reading the transcripts has the sessions' estimates from the shared snapshot — up to
+about ten seconds behind the window that is.
+
+## What a cold start would cost
+
+**The tokens** are the status line's `recache_tokens_if_cold` — what the next request re-caches if the
+cache has gone cold by then, printed as it is (`152.3K`) — or, estimated, the size of the transcript's
+newest request (`~152.3K`): the next request sends that prefix, the last reply and whatever comes
+next, so the estimate is too small by construction. A status line that does not report the figure
+(before Claude Code 2.1.251) gives no cost line.
+
+**The factors** are the price table's own: the model's 1-hour cache-write rate and its cache-read rate,
+each divided by its input rate, for the day — with your `tokenPace.customPrices` merged and
+`tokenPace.pricing.multiplier` applied, the same rates every cost of the dashboard is computed with.
+From today's table that is 2× and 0.05× for Claude Opus 5.5, 2× and 0.025× for Claude Fable 5.1 and
+Mythos 5.1, and 2× and 0.1× for every other Claude model; a changed rate changes the line, because
+no factor is written into the code. The model is the one the status line names (`model.id`) or the
+one of the transcript's newest request, at its standard rates — the status line's `fast_mode` is not
+read.
+
+**The money**, with `tokenPace.showCost` on, is the dashboard's hypothetical API amount: the tokens at
+the 1-hour write rate for the cold start, at the read rate for the cache read, each with `~` as every
+API amount on the page. It is not a bill. On a subscription both come out of the plan's usage — cache
+reads "still draw usage", at a weight Anthropic does not publish — and the line claims nothing about a
+quota window. With costs off the line keeps the factors and drops the money.
+
+**No borrowed price.** A model without a price of its own — one the table does not know, or one
+priced only through the opt-in family fallback (`tokenPace.unknownModelPricing: family`) — keeps the
+words and loses factors and money: `A cold start after 14:52 re-writes 152.3K tokens instead of
+reading them from the cache.` Your own prices in `tokenPace.customPrices` are shown, as the dashboard
+shows them.
+
+## Where it shows
+
+* **Dashboard** — the Claude quota card, after its windows: each listed session's two lines, then how
+  many more there are, then the status line's own line when its session is not listed. Only while the
+  provider switch shows the Claude card — `Claude Code` or `All`.
+* **Markdown view** (*Show Usage as Text*) — under the Claude card, every watched session, warm
+  ones too, at most ten: the state as a list item, the cost line under it; then how many cooling or
+  cold ones the list leaves out. It follows the provider switch, as the Quick Pick does.
+* **Quick Pick** (*Show Usage (Quick Pick)*) — in the quota group after the Claude windows: one item
+  per line of the card, the state as its label and the cost as its description, then the count of the
+  rest.
+* *Copy Usage Summary*, the exports, *Copy Diagnostics* and the data-quality section say nothing of
+  it: a cooling cache is a moment, not a record.
+
+## The status line's own line
+
+With the bridge connected the Claude card also keeps the line it has had since 1.3, for the session
+the status line last wrote about — warm or cold, the expiry countdown with the lifetime, the hit ratio,
+a `–` for every part the report did not carry: `prompt cache warm · expires in 3 m 40 s (1 h TTL) · hit
+ratio 87 %`. It is measured, never estimated. For a session the card lists as cooling or cold the
+listed lines replace it — one line per session, on the card, in a tooltip and in the Quick Pick; the
+markdown view, which lists warm sessions too, prints it only for a session it does not list. A
+five-minute cache, a reading without a session id and a warm one-hour cache keep it.
+
+## Codex
+
+The Codex card ends, for 30 minutes after the newest Codex turn and only for GPT-5.6 and later and
+GPT-6, with one line:
+
+```
+Codex prompt cache · last request at 14:22 · OpenAI keeps a cached prompt prefix at least 30 minutes after its last use for GPT-5.6 and later — ~until 14:52, perhaps longer.
+```
+
+OpenAI documents that minimum for its API — "A cached prefix remains eligible for reuse for 30 minutes
+after its most recent write or reuse, though OpenAI may retain it longer" —; whether it holds for Codex
+on a ChatGPT plan is not documented, hence the `~`. It is a minimum, not an expiry: the line has no
+countdown, no cooling and no cold, and no cost — a cold Codex prompt costs the plain input rate, and
+OpenAI charges no cache write. Earlier models (GPT-5.5 and before) state no such minimum and get no
+line; a forked rollout's turns are its parent's history and move nothing. Nothing is said per Codex
+session, nothing appears in the status bar, and the markdown view and the Quick Pick carry the same
+line under the Codex card.
 
 ## One reading per session
 

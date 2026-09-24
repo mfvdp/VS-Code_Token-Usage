@@ -141,6 +141,15 @@ test('an agent\'s tool errors are counted on the raw line, never parsed; before 
   assert.equal(agentOf(agg, AGENT).toolErrors, 1)
   assert.equal(JSON.stringify(agg.toSnapshot()).includes('SYNTHETIC-TOOL'), false)
 
+  // Two results marked on one line — two tool calls answered in one message — count two, not one
+  // per line (review 4: `+= 1` in place of the count passed every test).
+  const pair = new Aggregator()
+  pair.addClaudeLine(reply('p1', T0, { tools: [{ name: 'Bash', id: 'toolu_p1' }, { name: 'Read', id: 'toolu_p2' }] }), AGENT_CTX)
+  assert.equal(pair.addClaudeLine(toolResultLine({ ts: T0 + 10, agentId: 'abc123', results: [
+    { toolUseId: 'toolu_p1', isError: true }, { toolUseId: 'toolu_p2', isError: true },
+  ] }), AGENT_CTX), true)
+  assert.equal(agentOf(pair, AGENT).toolErrors, 2)
+
   // A main session's tool errors: its record keeps none.
   agg.addClaudeLine(claudeLine({ id: 'x1', ts: T0, usage: { input: 3 }, final: true }), MAIN_CTX)
   assert.equal(agg.addClaudeLine(toolResultLine({ ts: T0 + 5, results: [{ toolUseId: 'toolu_x', isError: true }] }), MAIN_CTX), false)

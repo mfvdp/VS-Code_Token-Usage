@@ -3050,11 +3050,13 @@ function applyStyles(): void {
 }
 
 /**
- * The three decisions that need a measured page rather than a view model: which labels fit,
- * which tables are cut off, and where the heat map should start.
+ * The decisions that need a measured page rather than a view model: which labels fit, which of
+ * the chart's bands are thin (1.7 P7b), which tables are cut off, where the heat map should start,
+ * and how much of an agent row's name and figures the row has room for.
  */
 function applyFits(): void {
   fitChart();
+  fitBands();
   fitScroll();
   scrollHeat();
   fitAgentNames();
@@ -3165,6 +3167,34 @@ function fitChart(): void {
     // itself would throw that element away on the first resize.
     const inner = el.firstElementChild || el;
     inner.textContent = (Number(el.dataset.i) % aEvery) === 0 ? (el.dataset.l || '') : '';
+  });
+}
+
+/**
+ * 1.7 P7b: the height below which a band of the chart is thin (CSS px) — where a forced-colours
+ * theme's 1 px ring of the page colour, drawn inside the band at the top and at the bottom, would
+ * cover it whole or leave it a line and read as a gap in the column.
+ */
+const BAND_THIN_PX = 4;
+
+/**
+ * 1.7 P7b: every band of the chart drawn under BAND_THIN_PX tall wears `band-thin`, and every other
+ * band does not. The stylesheet's forced-colours block leaves such a band its pattern or its solid
+ * paint and no ring (the rule of the chart's bands by model, 1.7 D-B); outside that mode the class
+ * changes nothing. Measured, not computed from the band's share of the plot: the height is what the
+ * browser drew — the plot's height, the column's value label above the bands — and a class the
+ * browser does not lay out by cannot move it (an outline takes no room). All read first, then all
+ * written. A chart with no height — its section closed — keeps what it has and is fitted when the
+ * section opens.
+ */
+function fitBands(): void {
+  const chart = document.querySelector<HTMLElement>('.chart');
+  if (!chart || !(chart.clientHeight > 0)) return;
+  const bands = Array.from(chart.querySelectorAll<HTMLElement>('.seg'));
+  const thin = bands.map(b => typeof b.getBoundingClientRect === 'function' && b.getBoundingClientRect().height < BAND_THIN_PX);
+  bands.forEach((b, i) => {
+    if (thin[i]) b.classList.add('band-thin');
+    else b.classList.remove('band-thin');
   });
 }
 
@@ -3584,6 +3614,8 @@ window.addEventListener('resize', () => { if (vm) applyFits(); });
 // 1.6 N6: a section opened after its render was laid out with no width at all; its agent rows'
 // figures are fitted to the width it has now. The toggle event does not bubble.
 document.addEventListener('toggle', () => { if (vm) { fitAgentNames(); fitAgentFigures(); } }, true);
+// 1.7 P7b: and a chart opened after its render had no height to measure its bands by.
+document.addEventListener('toggle', () => { if (vm) fitBands(); }, true);
 
 window.addEventListener('message', (ev) => {
   // Only the host drives the page. Measured in a real window: VS Code delivers the host's

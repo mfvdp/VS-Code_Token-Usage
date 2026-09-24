@@ -738,13 +738,18 @@ test('docs/dashboard.md says a forced-colours theme draws the chart\'s bands by 
     '.band.r2:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px); }',
     '.band.r4:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(0deg, CanvasText 0 2px, Canvas 2px 4px); }',
     '.band.rother:not(.sp-main, .sp-sub) { background: radial-gradient(CanvasText 1px, Canvas 1.2px);',
-    'outline: 1px solid Canvas; outline-offset: -1px;']) {
+    'outline: 1px solid Canvas; outline-offset: -1px;',
+    // 1.7 P7b: the ring is kept off a band drawn under 4 px tall, which the script marks `band-thin`.
+    '.band:not(.sp-main, .sp-sub, .band-thin) { outline: 1px solid Canvas; outline-offset: -1px; }',
+    '.band.band-thin.rother:not(.sp-main, .sp-sub) { background-position: 0 50%; }']) {
     assert.ok(style.includes(rule), 'the forced-colours rule of the bands moved: say it in the docs — ' + rule)
   }
+  assert.ok(readDoc('src/webview/main.ts').includes('const BAND_THIN_PX = 4;'), 'the height of a thin band moved: say it in the docs')
   const dash = doc.dashboard.replace(/\s+/g, ' ')
   for (const claim of ['the bands are drawn as patterns in the theme\'s two colours, the text colour and the page colour, whatever the style',
     'the largest model of a provider solid in the text colour, then 45° stripes, 135° stripes, cross-hatch, horizontal lines, and dots for `other`',
     'each band ringed by the page colour so two bands side by side stay two',
+    'all but a band drawn under 4 px tall, which the ring would cover whole: it keeps its pattern or its solid fill alone, the dots of `other` in its middle',
     'the provider is told by the legend\'s headings, the band\'s tooltip and the order of the bands in a column']) {
     assert.ok(dash.includes(claim), 'docs/dashboard.md does not say: ' + claim)
   }

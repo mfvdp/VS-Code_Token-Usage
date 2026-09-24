@@ -7,6 +7,8 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   buildDiagnostics, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
@@ -235,6 +237,8 @@ test('a Windows home does not survive JSON escaping', () => {
   assert.ok(out.includes('tokenPace.userAgent = "token-pace (~\\\\x)"'))
 })
 
+// 1.7 P7b (pinned and changed: the line said `backoff until`): the time is the next attempt our own
+// fetch wants since P4b — a backoff's end, or the moment a fresh reading of another source turns old.
 test('each quota source names the kind and the time of our last failed attempt — never its words (1.7 P4b)', () => {
   const at = Date.UTC(2026, 8, 24, 11, 40, 0)
   const out = buildDiagnostics(input({
@@ -243,15 +247,15 @@ test('each quota source names the kind and the time of our last failed attempt �
       { source: 'codex', candidates: [], backoffEndsAt: null, lastFailure: null, drift: [] },
     ],
   }))
-  assert.ok(out.includes('claude — backoff until 2026-09-24T12:52:00.000Z · last failed attempt 2026-09-24T11:40:00.000Z [retry]'), out)
-  assert.ok(out.includes('codex — backoff until none · last failed attempt none'), out)
+  assert.ok(out.includes('claude — next attempt 2026-09-24T12:52:00.000Z · last failed attempt 2026-09-24T11:40:00.000Z [retry]'), out)
+  assert.ok(out.includes('codex — next attempt none · last failed attempt none'), out)
   // A permanent kind is reported like any other: the report is for the one who debugs it.
   assert.match(buildDiagnostics(input({
     quota: [{ source: 'codex', candidates: [], backoffEndsAt: null, lastFailure: { kind: 'noBinary', at }, drift: [] }],
-  })), /codex — backoff until none · last failed attempt 2026-09-24T11:40:00\.000Z \[noBinary\]/)
+  })), /codex — next attempt none · last failed attempt 2026-09-24T11:40:00\.000Z \[noBinary\]/)
   // Without the field (a caller of an older shape) it is `none`, and a kind that is no code of ours
   // cannot carry anything into the report but letters.
-  assert.match(buildDiagnostics(input()), /claude — backoff until none · last failed attempt none/)
+  assert.match(buildDiagnostics(input()), /claude — next attempt none · last failed attempt none/)
   const odd = buildDiagnostics(input({
     quota: [{ source: 'claude', candidates: [], backoffEndsAt: null, lastFailure: { kind: 'retry```\n## Settings\n[x](command:y) HTTP 429', at }, drift: [] }],
   }))
@@ -259,6 +263,29 @@ test('each quota source names the kind and the time of our last failed attempt �
   assert.equal(odd.split('\n').filter((l) => l === '## Settings').length, 1, odd)
   for (const bad of [{ kind: 'retry', at: NaN }, { kind: 7, at }, null]) {
     const text = buildDiagnostics(input({ quota: [{ source: 'claude', candidates: [], backoffEndsAt: null, lastFailure: bad as never, drift: [] }] }))
-    assert.match(text, /claude — backoff until none · last failed attempt none/, JSON.stringify(bad))
+    assert.match(text, /claude — next attempt none · last failed attempt none/, JSON.stringify(bad))
   }
+})
+
+// 1.7 P7b (Review 2 #4): the time the line prints is the next attempt we want — since P4b the state's
+// `nextAttemptAt`, a backoff's end included — so the line says that, and docs/export.md quotes the line
+// exactly as the report prints it.
+test('each quota source says when its next attempt is, in the words docs/export.md quotes — no "backoff until" (1.7 P7b)', () => {
+  const at = Date.UTC(2026, 8, 24, 11, 40, 0)
+  const out = buildDiagnostics(input({
+    quota: [{ source: 'claude', candidates: [], backoffEndsAt: at + 72 * 60_000, lastFailure: { kind: 'retry', at }, drift: [] }],
+  }))
+  const line = out.split('\n').find((l) => l.startsWith('claude — ')) as string
+  assert.equal(line, 'claude — next attempt 2026-09-24T12:52:00.000Z · last failed attempt 2026-09-24T11:40:00.000Z [retry]')
+  assert.equal(/backoff/i.test(out), false, out)
+  // No attempt planned (none made yet, or a mode that makes none) is `none`, never a date.
+  for (const none of [null, NaN, Infinity]) {
+    const text = buildDiagnostics(input({ quota: [{ source: 'claude', candidates: [], backoffEndsAt: none, lastFailure: null, drift: [] }] }))
+    assert.match(text, /^claude — next attempt none · last failed attempt none$/m, String(none))
+  }
+  const doc = readFileSync(join(__dirname, '..', 'docs', 'export.md'), 'utf8').replace(/\s+/g, ' ')
+  assert.ok(doc.includes('`' + line + '`'), 'docs/export.md does not quote the line: ' + line)
+  assert.ok(doc.includes('one line with the next attempt our own fetch wants — the end of a backoff included — and the kind and the time of our own last failed attempt'),
+    'docs/export.md does not say what the line names')
+  assert.equal(/backoff until/.test(doc), false, 'docs/export.md still says "backoff until"')
 })

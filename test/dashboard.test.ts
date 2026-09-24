@@ -1469,7 +1469,8 @@ test('a forced-colours theme keeps the two parts of a split column apart, in its
   const split = block.split('\n').filter((l) => /\.sp-(main|sub)/.test(l) && !/:not\(/.test(l))
   assert.deepEqual(split.map((l) => l.trim().slice(0, l.trim().indexOf(' {'))), ['.band.sp-main', '.band.sp-sub'], block)
   assert.equal(split.some((l) => /gradient|forced-color-adjust/.test(l)), false, split.join('\n'))
-  assert.ok(block.split('\n').filter((l) => /^ {2}\.band/.test(l)).every((l) => /\.sp-(main|sub) \{/.test(l) || /:not\(\.sp-main, \.sp-sub\) \{/.test(l)), block)
+  // 1.7 P7b (pinned and changed: one `:not`): the ring is a rule of its own, kept off a thin band too.
+  assert.ok(block.split('\n').filter((l) => /^ {2}\.band/.test(l)).every((l) => /\.sp-(main|sub) \{/.test(l) || /:not\(\.sp-main, \.sp-sub(?:, \.band-thin)?\) \{/.test(l)), block)
   assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
   // The block stands after every band rule, so at the same specificity it is the one that wins.
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
@@ -1482,12 +1483,16 @@ test('a forced-colours theme draws the chart\'s bands by model as patterns of it
   const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active) {'))
   const block = forced.slice(0, forced.indexOf('\n}') + 2)
   assert.equal(STYLE.split('@media (forced-colors: active) {').length - 1, 1, 'a second forced-colours block')
-  // The seven rules, in the one forced-colours block, in this order: the band taken out of the
-  // theme's adjustment and ringed 1 px inside by the page colour, then its paint by rank — the rank
-  // as the pattern style draws it, in the text colour on the page colour.
+  // The nine rules, in the one forced-colours block, in this order: the band taken out of the
+  // theme's adjustment, then ringed 1 px inside by the page colour, then its paint by rank — the rank
+  // as the pattern style draws it, in the text colour on the page colour. 1.7 P7b (pinned and changed:
+  // the ring stood in the first rule, seven rules): the ring is a rule of its own, kept off a band
+  // drawn under 4 px tall (`band-thin`), which it would cover whole; and on such a band the dots of
+  // `other` stand in its middle, where a band under 2 px still has them.
   const not = ':not(.sp-main, .sp-sub)'
   const want = [
-    '.band' + not + ' { forced-color-adjust: none; outline: 1px solid Canvas; outline-offset: -1px; background: Canvas; }',
+    '.band' + not + ' { forced-color-adjust: none; background: Canvas; }',
+    '.band:not(.sp-main, .sp-sub, .band-thin) { outline: 1px solid Canvas; outline-offset: -1px; }',
     '.band.r0' + not + ' { background: CanvasText; }',
     '.band.r1' + not + ' { background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px); }',
     '.band.r2' + not + ' { background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px); }',
@@ -1495,15 +1500,16 @@ test('a forced-colours theme draws the chart\'s bands by model as patterns of it
       + 'repeating-linear-gradient(135deg, CanvasText 0 1px, Canvas 1px 4px); }',
     '.band.r4' + not + ' { background: repeating-linear-gradient(0deg, CanvasText 0 2px, Canvas 2px 4px); }',
     '.band.rother' + not + ' { background: radial-gradient(CanvasText 1px, Canvas 1.2px); background-size: 4px 4px; }',
+    '.band.band-thin.rother' + not + ' { background-position: 0 50%; }',
   ]
-  const got = [...block.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\n {2}(\.band[^{]*:not\(\.sp-main, \.sp-sub\) \{[^}]*\})/g)]
+  const got = [...block.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\n {2}(\.band[^{]*:not\(\.sp-main, \.sp-sub(?:, \.band-thin)?\) \{[^}]*\})/g)]
     .map((m) => m[1].replace(/\s+/g, ' '))
   assert.deepEqual(got, want, block)
   // System colours only — the text's and the page's, and nothing between the lines of the cross-hatch —
   // never a theme variable, a literal or a mix: the theme's two colours are all a forced palette has.
   const words = new Set(got.join(' ').replace(/^[^{]*\{|\}[^{]*\{/g, ' ').match(/[A-Za-z][A-Za-z-]*/g) ?? [])
   const colours = [...words].filter((x) => !['forced-color-adjust', 'none', 'outline', 'solid', 'outline-offset', 'background', 'background-size',
-    'repeating-linear-gradient', 'radial-gradient', 'px', 'deg'].includes(x)).sort()
+    'background-position', 'repeating-linear-gradient', 'radial-gradient', 'px', 'deg'].includes(x)).sort()
   assert.deepEqual(colours, ['Canvas', 'CanvasText', 'transparent'], [...words].join(' '))
   assert.equal(/var\(|#[0-9a-f]{3}|rgb|hsl|color-mix/i.test(got.join('\n')), false, got.join('\n'))
   // Every rank the page hands out has its rule, the plain rank the solid one — the classes bandStyle
@@ -1512,10 +1518,89 @@ test('a forced-colours theme draws the chart\'s bands by model as patterns of it
   assert.ok(src.includes("return 'band s-' + s + '-' + r + ' hue-' + s + ' r' + r + ' st-' + st"), 'the band classes moved')
   // Specificity: each rank's rule outranks the plain band's and every rule outside the mode.
   assert.ok(STYLE.indexOf('@media (forced-colors: active) {') > STYLE.indexOf('.st-pattern.rother, .st-both.rother'))
-  // The split's two rules follow them unchanged, without the :not, in the adjustment.
-  assert.match(block, /\.band\.rother:not\(\.sp-main, \.sp-sub\) \{[^}]*\}\n {2}\.band\.sp-main \{ background: CanvasText; \}\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n\}/)
+  // The split's two rules follow them unchanged, without the :not, in the adjustment. 1.7 P7b (pinned and
+  // changed: they followed the `other` rule directly): after the thin band's `other` rule.
+  assert.match(block.replace(/\n {2}\/\*[\s\S]*?\*\//g, ''), /\.band\.rother:not\(\.sp-main, \.sp-sub\) \{[^}]*\}\n {2}\.band\.band-thin\.rother:not\(\.sp-main, \.sp-sub\) \{ background-position: 0 50%; \}\n {2}\.band\.sp-main \{ background: CanvasText; \}\n {2}\.band\.sp-sub \{ background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; \}\n\}/)
   // Taken out of the adjustment beside the pressed chip, and nothing else is.
   assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
+})
+
+// 1.7 P7b (the lead's decision on P5's D-B question): the 1 px ring of the page colour, drawn inside a
+// band at its top and at its bottom, covers a band under 4 px tall whole — a gap in the column where a
+// band is. So the page measures every band of the chart as the browser drew it and hands such a band
+// `band-thin`, and the forced-colours block keeps the ring off it: its pattern or its solid paint alone.
+test('a band of the chart drawn under 4 px tall wears band-thin, measured as drawn, and a forced-colours theme draws it without the ring (1.7 P7b)', () => {
+  const a = agentCtx()
+  const doc = (a.c as Record<string, unknown>).document as Record<string, unknown>
+  const band = (height: number, was: string[] = []) => {
+    const cls = new Set<string>(['seg', 'band', ...was])
+    const b = {
+      height, cls, getBoundingClientRect: () => ({ height: b.height }),
+      classList: { contains: (c: string) => cls.has(c), add: (c: string) => { cls.add(c) }, remove: (c: string) => { cls.delete(c) } },
+    }
+    return b
+  }
+  // Under 4 px — however little under —, exactly 4 and more; one that wore the class and has grown.
+  const bands = [band(0), band(1.008), band(2), band(3.99), band(4), band(4.01), band(16, ['band-thin']), band(3)]
+  const chart = { clientHeight: 240, querySelectorAll: (q: string) => (q === '.seg' ? bands : []) }
+  doc.querySelector = (q: string) => (q === '.chart' ? chart : null)
+  const thin = (): boolean[] => bands.map((b) => b.cls.has('band-thin'))
+  nodeVm.runInContext('fitBands()', a.c)
+  assert.deepEqual(thin(), [true, true, true, true, false, false, false, true])
+  // Drawn again with other heights — a push with other values —, the class follows the height.
+  bands[1].height = 8
+  bands[4].height = 3.5
+  nodeVm.runInContext('fitBands()', a.c)
+  assert.deepEqual(thin(), [true, false, true, true, true, false, false, true])
+  // A chart with no height — in a closed section every band measures 0 — keeps what it has …
+  chart.clientHeight = 0
+  for (const b of bands) b.height = 0
+  nodeVm.runInContext('fitBands()', a.c)
+  assert.deepEqual(thin(), [true, false, true, true, true, false, false, true])
+  // … and is fitted when a section opens (the toggle event, which does not bubble: the capture phase).
+  chart.clientHeight = 240
+  for (const b of bands) b.height = 16
+  nodeVm.runInContext('vm = { sections: [] }', a.c)
+  a.fire('document:toggle', {})
+  assert.deepEqual(thin(), bands.map(() => false))
+  // No chart on the page: nothing to do, and nothing thrown.
+  doc.querySelector = () => null
+  nodeVm.runInContext('fitBands()', a.c)
+  // The page's constant and its wiring: with the page's other fits — after every render and resize —
+  // and when a closed section opens.
+  assert.match(SOURCE, /const BAND_THIN_PX = 4;/)
+  assert.match(SOURCE, /function applyFits\(\): void \{\s*fitChart\(\);\s*fitBands\(\);/)
+  assert.match(SOURCE, /document\.addEventListener\('toggle', \(\) => \{ if \(vm\) fitBands\(\); \}, true\);/)
+  // The class is the fit's alone: the renderer's markup carries none, the bands' own classes as before.
+  const chartHtml = render('sChart()', {
+    chart: {
+      days: ['2026-09-01'], labels: ['09-01'],
+      series: [
+        { key: 'claude:a', label: 'claude-opus-4-6', source: 'claude', rank: 0, values: [1000] },
+        { key: 'claude:b', label: 'claude-haiku-4-5', source: 'claude', rank: 1, values: [1] },
+      ],
+      metric: 'usage', modelStyle: 'pattern', max: 1001, ticks: [250, 500, 750, 1000], weekly: false, costLine: null,
+    },
+  })
+  assert.ok(chartHtml.includes('<div class="seg band s-claude-1 hue-claude r1 st-pattern" data-bh="0.10"'), chartHtml)
+  assert.equal(chartHtml.includes('band-thin'), false, chartHtml)
+  // In the forced-colours block, and nowhere else: outside the mode the class changes nothing. The
+  // ring is a rule of its own, kept off the split's two parts and off a thin band; the rule that takes
+  // the band out of the adjustment and gives it the page colour keeps every band, a thin one too.
+  const css = STYLE.replace(/\/\*[\s\S]*?\*\//g, '')
+  const forced = css.slice(css.indexOf('@media (forced-colors: active) {'))
+  const block = forced.slice(0, forced.indexOf('\n}') + 2)
+  assert.equal(css.split('band-thin').length - 1, 2, 'band-thin in another rule')
+  assert.ok(block.includes('\n  .band:not(.sp-main, .sp-sub, .band-thin) { outline: 1px solid Canvas; outline-offset: -1px; }\n'), block)
+  // On a thin band the dots of `other` stand in its middle: at the top of their 4 px tile, 2 px down,
+  // they would miss a band under 2 px, which would be the page colour alone — the gap again.
+  assert.ok(block.includes('\n  .band.band-thin.rother:not(.sp-main, .sp-sub) { background-position: 0 50%; }\n'), block)
+  assert.ok(block.includes('\n  .band:not(.sp-main, .sp-sub) { forced-color-adjust: none; background: Canvas; }\n'), block)
+  assert.equal(block.split('outline: 1px solid Canvas;').length - 1, 1, 'a second ring of the page colour')
+  // No rank's rule draws a ring of its own that would come back on a thin band.
+  const ranks = block.split('\n').filter((l) => /^ {2}\.band\.r(?:[0-4]|other):not\(/.test(l))
+  assert.equal(ranks.length, 6, block)
+  assert.equal(ranks.some((l) => /outline/.test(l)), false, ranks.join('\n'))
 })
 
 test('a forced-colours theme paints every pressed chip in the highlight colours, its words readable, and leaves the pressed agent rows their outline (1.6 P16)', () => {

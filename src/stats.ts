@@ -1739,7 +1739,8 @@ export const CHART_MODEL_SERIES_PER_PROVIDER = MODEL_RANKS.length
  * the same range and the same filter — so a provider's bands are a split of that provider's
  * own series rather than a second measurement of it. Providers come in registry order, Claude
  * before Codex, each with its largest model first and its fold last: the legend reads in the
- * order the ranks were handed out, and toggling a provider chip off and on cannot reorder it.
+ * order the ranks were handed out, and the provider switch — one provider, then All again —
+ * cannot reorder it.
  */
 function modelSeries(ctx: StatsCtx, days: string[], metric: Metric): ChartSeries[] {
   if (days.length === 0) return []

@@ -836,7 +836,7 @@ test('beyond five models a provider folds the rest into its own other band, neve
   assert.deepEqual(only.series.map((x) => [x.key, x.rank]), [['codex:x0', 0], ['codex:x1', 1]])
 })
 
-test('the bands come in registry order, however the provider chips were toggled', () => {
+test('the bands come in registry order, whatever order the provider switch lists the providers in', () => {
   const c = chart(ctxOf(buildAgg(), { sources: ['codex', 'claude'] }), range('30d'), 'usage')
   assert.equal(c.series[0].source, 'claude')
   assert.equal(c.series[c.series.length - 1].source, 'codex')
@@ -950,7 +950,7 @@ test('the split draws no band for a part that counted nothing, and follows the p
   const noReasoning = splitWorld().map((b) => (b.isSub ? { ...b, reasoning: 0 } : b))
   assert.deepEqual(chart(ctxOf(fromBuckets(noReasoning)), r, 'reasoning', 'pattern', 'agents').series.map((s) => s.key),
     ['claude:main', 'codex:main'])
-  // The provider chips and the model filter narrow the split as they narrow the models.
+  // The provider switch and the model filter narrow the split as they narrow the models.
   const codex = chart(ctxOf(fromBuckets(splitWorld()), { sources: ['codex'] }), r, 'usage', 'pattern', 'agents')
   assert.deepEqual(codex.series.map((s) => s.key), ['codex:main', 'codex:sub'])
   const opus = chart(ctxOf(fromBuckets(splitWorld()), { models: ['claude-opus-4-6'] }), r, 'usage', 'pattern', 'agents')

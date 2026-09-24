@@ -36,7 +36,10 @@ export interface CandidateDiag {
 export interface QuotaDiag {
   source: string
   candidates: CandidateDiag[]
-  /** Unix ms when the next attempt is due (backoff end), or null. */
+  /**
+   * Unix ms of the next attempt our own fetch wants — a backoff's end included (1.7 P4b: the
+   * state's `nextAttemptAt`) — or null. Printed as `next attempt` (1.7 P7b; before, `backoff until`).
+   */
   backoffEndsAt: number | null
   /**
    * 1.7 P4b: our own last failed attempt — its kind and its time (Unix ms), never its words; null or
@@ -342,7 +345,9 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
   lines.push('## Quota sources')
   if (quota.length === 0) lines.push('none')
   for (const q of quota) {
-    const backoff = q.backoffEndsAt === null || !Number.isFinite(q.backoffEndsAt)
+    // 1.7 P7b: the next attempt we want, whatever holds it back until then — a backoff after a
+    // failure, or a fresh reading of another source that answers the fetch until it turns old.
+    const next = q.backoffEndsAt === null || !Number.isFinite(q.backoffEndsAt)
       ? 'none'
       : new Date(q.backoffEndsAt).toISOString()
     // 1.7 P4b: the kind and the time of our own last failed attempt — the kind is one of our codes,
@@ -351,7 +356,7 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     const failed = f && typeof f.at === 'number' && Number.isFinite(f.at) && typeof f.kind === 'string'
       ? `${new Date(f.at).toISOString()} [${f.kind.replace(/[^A-Za-z]/g, '').slice(0, 32) || '?'}]`
       : 'none'
-    lines.push(`${safe(q.source)} — backoff until ${backoff} · last failed attempt ${failed}`)
+    lines.push(`${safe(q.source)} — next attempt ${next} · last failed attempt ${failed}`)
     if (q.candidates.length === 0) lines.push('  (no candidates)')
     for (const c of q.candidates) {
       const kind = c.problemKind ? ` [${safe(c.problemKind)}]` : ''

@@ -1962,9 +1962,9 @@ test('a budget is measured against the number the user typed and nothing else', 
 // 1.7 F1 (pinned and extended): the chips never moved a budget's figures, and the switch does not
 // either — it picks the rows: scope `total` and the shown provider's own.
 test('the panel filters cannot move a budget; the provider switch only picks its rows (1.7 F1)', () => {
-  // A budget is a standing limit. A provider chip is a question about the table below it,
-  // and a limit that shrank because a chip was clicked would be a different question under
-  // the same label.
+  // A budget is a standing limit. The provider switch and a model chip are a question about the
+  // tables below them, and a limit that shrank because one was clicked would be a different
+  // question under the same label.
   const cfgWith = makeConfig({ 'tokenPace.budgets': [...BUDGETS, { scope: 'codex', period: 'month', unit: 'tokens', limit: 1_000_000 }] })
   const all = buildViewModel(makeInput({ agg: buildAgg(), cfg: cfgWith }))
   assert.deepEqual(all.budgets.map((b) => b.scope), ['total', 'claude', 'codex'])

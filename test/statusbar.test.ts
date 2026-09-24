@@ -801,7 +801,8 @@ test('a sort or a fold does not replace the tokens body under the reader', () =>
   p.update(vm({ ui: ui({ sort: { key: 'cost', dir: 'asc' }, collapsed: ['chart'] }) }))
   assert.equal(keys().includes('tokens'), false, JSON.stringify(keys()))
   // The switch itself still reaches it — and the fragment carries the whole UI state, or the
-  // page would lose its provider chips and its model filter with the assignment.
+  // page would lose the providers the provider switch stored and its model filter with the
+  // assignment.
   posted.length = 0
   p.update(vm({ ui: ui({ compositionCache: 'noCache' }) }))
   // The filter bar follows the whole UI state and redraws with it; the tokens body follows

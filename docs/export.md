@@ -106,9 +106,11 @@ An unknown field makes the builder throw, so a leak cannot be introduced silentl
 extension, VS Code, platform, arch, Node, remote name, extension kind, role, consent state,
 attribution mode; roots and file counts; snapshot size, bucket counts, coverage days, retention
 and quota-history size; every quota source with its age or failure and the drift list, and per
-provider the kind and the time of our own last failed attempt (`last failed attempt
-2026-09-24T11:40:00.000Z [retry]`, or `none`) — never its words, whatever the kind; the
-status-line bridge state; the `http.proxy` settings with their origin and the six proxy
+provider one line with the next attempt our own fetch wants — the end of a backoff included — and
+the kind and the time of our own last failed attempt,
+`claude — next attempt 2026-09-24T12:52:00.000Z · last failed attempt 2026-09-24T11:40:00.000Z [retry]`,
+each `none` where there is none — never the failure's words, whatever the kind; the status-line
+bridge state; the `http.proxy` settings with their origin and the six proxy
 environment variables (`tokenPace.diagnostics.includeNetworkSetup`, credentials inside proxy URLs
 replaced by `***`); and the current value of every `tokenPace.*` setting.
 

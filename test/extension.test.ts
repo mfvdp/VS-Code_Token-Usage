@@ -2355,8 +2355,9 @@ test('Copy Diagnostics carries the quota manager\'s last failed attempt per sour
     await state.execute('tokenPace.copyDiagnostics')
     const report = state.clipboard[state.clipboard.length - 1]
     assert.ok(asked >= 1, 'the report did not ask the manager')
-    assert.match(report, /^claude — backoff until \S+ · last failed attempt 2026-09-24T11:40:00\.000Z \[retry\]$/m)
-    assert.match(report, /^codex — backoff until \S+ · last failed attempt none$/m)
+    // 1.7 P7b (pinned and changed: the line said `backoff until`): the next attempt we want.
+    assert.match(report, /^claude — next attempt \S+ · last failed attempt 2026-09-24T11:40:00\.000Z \[retry\]$/m)
+    assert.match(report, /^codex — next attempt \S+ · last failed attempt none$/m)
     assert.deepEqual(disposeAll(LIVE.pop()!), [])
   } finally {
     proto.lastFailures = real

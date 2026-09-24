@@ -81,10 +81,12 @@ column and the provider's column total. In a forced-colours theme (Windows High 
 removes every pattern and every hue, the bands are drawn as patterns in the theme's two colours,
 the text colour and the page colour, whatever the style: the largest model of a provider solid in
 the text colour, then 45° stripes, 135° stripes, cross-hatch, horizontal lines, and dots for
-`other`, each band ringed by the page colour so two bands side by side stay two. Two colours
-cannot carry the providers' hues, so there the provider is told by the legend's headings, the
-band's tooltip and the order of the bands in a column. The cost line, when switched on, runs through the
-column centres over a halo in the page background, with a dot per column, on its own axis.
+`other`, each band ringed by the page colour so two bands side by side stay two — all but a band
+drawn under 4 px tall, which the ring would cover whole: it keeps its pattern or its solid fill
+alone, the dots of `other` in its middle. Two colours cannot carry the providers' hues, so there
+the provider is told by the legend's headings, the band's tooltip and the order of the bands in a
+column. The cost line, when switched on, runs through the column centres over a halo in the page
+background, with a dot per column, on its own axis.
 The heatmap switches between `usage` and `cost`; the hour profile between local time and UTC.
 
 **Main sessions and subagents.** The `subagents` chip beside the metric selector splits every

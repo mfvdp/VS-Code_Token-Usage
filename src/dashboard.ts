@@ -1117,10 +1117,10 @@ ul { margin: 6px 0; padding-left: 18px; }
    Taken out, they wear the theme's two colours alone, the text's and the page's, as patterns by rank
    whatever the style (the shade style has no pattern of its own to fall back on) — the largest model
    solid in the text colour, then 45° and 135° stripes, the cross-hatch, the horizontal lines and the
-   dots of the other models —, each ringed 1 px inside by the page colour; the hue that told the
-   providers apart cannot survive two colours, so the legend's headings, the band's tooltip and the
-   column order do. The split keeps its own two rules below, in the adjustment. The theme's own
-   adjustment is left on everywhere else. */
+   dots of the other models —, each ringed 1 px inside by the page colour but a band under 4 px tall,
+   which the ring would cover whole (1.7 P7b); the hue that told the providers apart cannot survive
+   two colours, so the legend's headings, the band's tooltip and the column order do. The split keeps
+   its own two rules below, in the adjustment. The theme's own adjustment is left on everywhere else. */
 @media (forced-colors: active) {
   button[aria-pressed="true"]:not(.ag-row) { forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight; outline-color: CanvasText; }
   .ag-st::before, .ag-lb { color: CanvasText; }
@@ -1130,8 +1130,12 @@ ul { margin: 6px 0; padding-left: 18px; }
   .agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 2px solid CanvasText; }
   /* 1.7 D-B: the bands by model — the theme would paint them all away. Two system colours, the rank as
      the pattern style draws it, each band ringed 1 px inside by the page colour so two solid bands side
-     by side stay two. Taken out of the theme's adjustment: a gradient is otherwise removed. */
-  .band:not(.sp-main, .sp-sub) { forced-color-adjust: none; outline: 1px solid Canvas; outline-offset: -1px; background: Canvas; }
+     by side stay two. Taken out of the theme's adjustment: a gradient is otherwise removed. 1.7 P7b: a
+     band drawn under 4 px tall (band-thin, which the script's fitBands hands out) has no ring — at the
+     top and at the bottom it would cover such a band whole, a gap in the column — and keeps its pattern
+     or its solid paint alone (the dots of other in its middle, below). */
+  .band:not(.sp-main, .sp-sub) { forced-color-adjust: none; background: Canvas; }
+  .band:not(.sp-main, .sp-sub, .band-thin) { outline: 1px solid Canvas; outline-offset: -1px; }
   .band.r0:not(.sp-main, .sp-sub) { background: CanvasText; }
   .band.r1:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px); }
   .band.r2:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px); }
@@ -1139,6 +1143,9 @@ ul { margin: 6px 0; padding-left: 18px; }
                                                repeating-linear-gradient(135deg, CanvasText 0 1px, Canvas 1px 4px); }
   .band.r4:not(.sp-main, .sp-sub) { background: repeating-linear-gradient(0deg, CanvasText 0 2px, Canvas 2px 4px); }
   .band.rother:not(.sp-main, .sp-sub) { background: radial-gradient(CanvasText 1px, Canvas 1.2px); background-size: 4px 4px; }
+  /* 1.7 P7b: on a thin band the dots of other stand in its middle — at the top of their 4 px tile, 2 px
+     down, they miss a band under 2 px tall, which would be the page colour alone: the gap again. */
+  .band.band-thin.rother:not(.sp-main, .sp-sub) { background-position: 0 50%; }
   .band.sp-main { background: CanvasText; }
   .band.sp-sub { background: Canvas; outline: 1px solid CanvasText; outline-offset: -1px; }
 }

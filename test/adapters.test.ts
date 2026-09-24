@@ -200,9 +200,10 @@ test('no module outside the registry spells a provider name out again', () => {
 test('the provider pair is the registry list, never an array literal', () => {
   // Eight sites used to write the pair out by hand: the default provider filter, the two
   // per-provider settings maps, two diagnostics tables, the summary scope and the webview's
-  // provider chips. Each was a chance for the order to drift from the registry's — and each
-  // would have to be found again by hand the day a third provider is added. `SOURCES` is the
-  // list; the ids may only be spelled out where the registry itself defines them.
+  // provider switch (its provider chips before 1.7). Each was a chance for the order to drift from
+  // the registry's — and each would have to be found again by hand the day a third provider is
+  // added. `SOURCES` is the list; the ids may only be spelled out where the registry itself
+  // defines them.
   const ids = ADAPTERS.map((a) => a.id)
   const quoted = '[\'"`](?:' + ids.join('|') + ')[\'"`]'
   // An array literal of two or more provider ids, in any order, whatever the quotes.

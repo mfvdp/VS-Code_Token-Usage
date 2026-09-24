@@ -146,6 +146,32 @@ test('the Quick Pick prints Codex\'s own error string as text: no "$(" becomes a
   assert.equal(quickPickItems(vm).find((i) => i.label === 'Codex')?.label, 'Codex')
 })
 
+// 1.7 P7b (the lead's note on P4b): the provider item's description carries the plan name — the
+// provider's own word, for Codex a string of its app-server's — so it goes through noIcons like the detail.
+test('the Quick Pick prints a borrowed plan name as text: no "$(" in the provider item\'s description becomes an icon (1.7 P7b)', () => {
+  const plan = 'pro $(alert) $(sync~spin) \\$(x) $( 5 ) $(bad name)'
+  const vm = buildViewModel(makeInput({ quotas: [state('claude'), state('codex', { planType: plan })] }))
+  const card = vm.quotas.find((q) => q.source === 'codex')
+  assert.equal(card?.planText, `plan ${plan}`)
+  const item = quickPickItems(vm).find((i) => i.label === 'Codex') as PickItem
+  const drawn = drawnIcons(item.description as string)
+  assert.deepEqual(drawn.icons, [], item.description)
+  // What the list shows is the card's own line of words, to the character.
+  assert.ok(drawn.text.startsWith(`plan ${plan}`), drawn.text)
+  // The configured name is a string of the reader's, and passes the same way.
+  const configured = buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.planName': { claude: 'Max $(flame)', codex: '' } }),
+    quotas: [state('claude', { planType: null }), state('codex')],
+  }))
+  const own = quickPickItems(configured).find((i) => i.label === 'Claude Code') as PickItem
+  assert.deepEqual(drawnIcons(own.description as string).icons, [], own.description)
+  assert.ok(drawnIcons(own.description as string).text.startsWith('plan Max $(flame) (as configured)'), own.description)
+  // A description of our own words is untouched.
+  const plain = quickPickItems(buildViewModel(makeInput())).find((i) => i.label === 'Claude Code') as PickItem
+  assert.equal(plain.description, noIcons(plain.description as string))
+  assert.equal(/\\\$\(/.test(plain.description as string), false, plain.description)
+})
+
 test('a permanent cause beside a reading reaches neither the markdown nor the Quick Pick (1.7 P4b, Review 1 #2)', () => {
   const permanent = buildViewModel(makeInput({ quotas: [state('claude'), state('codex', {
     origin: 'transcript', fetchedAt: Math.round((NOW - 45 * 60_000) / 1000),

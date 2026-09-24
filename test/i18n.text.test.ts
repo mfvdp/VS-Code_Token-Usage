@@ -294,6 +294,7 @@ test('the write disclosure and the stored-data labels follow the bundle', () => 
   const paths = {
     state: '/nowhere/state.json', quota: '/nowhere/quota.json', history: '/nowhere/h.json',
     leader: '/nowhere/leader.json', mirror: '/nowhere/m.json', hookMirror: '/nowhere/agent-hook.jsonl',
+    keepWarm: '/nowhere/keepwarm.json',
   }
   const empty: MementoLike = { get: <T>(_k: string, d: T): T => d, update: () => Promise.resolve() }
   const items = german(() => inventory(paths, empty, { hookMirror: hookMirrorNote() }))

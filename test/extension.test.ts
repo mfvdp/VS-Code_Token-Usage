@@ -952,9 +952,12 @@ test('a status-line payload\'s session name, paths, workspace and free text reac
     assert.equal(text.includes(LEAK_SESSION_ID), false, `the ${what} holds the session id`)
     assert.equal(text.includes(tail), false, `the ${what} holds the tail of the session id`)
   }
-  // The mirror's 1 h cache is warm for another 50 minutes: watched, so the page and the markdown
-  // name the session (the block's `all`); the bar and the tooltips do not show it before P7.
-  assert.ok(outputs[0][1].includes('Session 9d0eb37a · prompt cache warm · cools in'), 'the page does not name the watched session')
+  // The mirror's 1 h cache is warm for another 50 minutes: watched, so the markdown names the session
+  // (the block's `all`). 1.8 P10 (pinned and changed, §7c wave 2 fact 10): the page draws only the
+  // block's `lines`, and since P10 no push carries `all` — the page's payload no longer names a warm
+  // session at all; the markdown, built in the host, still does.
+  assert.equal(outputs[0][1].includes('Session 9d0eb37a · prompt cache warm'), false, 'the page\'s payload carries the block\'s `all`')
+  assert.equal(outputs[0][1].includes('"allMoreText"'), false, 'the page\'s payload carries the block\'s `allMoreText`')
   assert.ok(markdown.includes('- Session 9d0eb37a · prompt cache warm · cools in'), 'the markdown does not list the watched session')
 })
 
@@ -3597,4 +3600,176 @@ test('a disposed activation hears no settings change and no change of the window
   } finally {
     spy.restore()
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 B2 (P10): the keep-warm line — the wiring, the consent, the command, the leak test
+// ---------------------------------------------------------------------------
+
+/** The keep-warm consent's question, as the fake host recorded it. */
+function keepWarmAsked(): typeof state.messages {
+  return state.messages.filter((m) => m.kind === 'warning' && m.text === 'Let Token Pace type a keep-warm line into Claude Code\'s terminal?')
+}
+
+test('the keep-warm consent: asked when the setting is switched on, a refusal kept at the next start, asked again after off and on, withdrawn by off; the terminals listened to only while allowed (1.8 §3 B2 "Consent")', async () => {
+  const fx = makeFixture()
+  const kept = new Map<string, unknown>()
+  const KEY = 'tokenPace.keepWarmConsent'
+  await activateHost(fx, REPO, { globalState: kept })
+  await waitOwnColdStart(state)
+  assert.equal(keepWarmAsked().length, 0, 'asked with the setting off')
+  assert.equal(state.terminalListeners(), 0, 'the terminals are listened to with the setting off')
+  // Switched on: the question, a modal warning with its one button — refused.
+  state.answers.push(undefined)
+  state.set('tokenPace.cacheKeepWarm', true)
+  state.fireConfigChange(['tokenPace.cacheKeepWarm'])
+  await waitFor('the question', () => keepWarmAsked().length === 1)
+  assert.deepEqual(keepWarmAsked()[0].actions, ['Allow keep-warm'])
+  await waitFor('the refusal kept', () => kept.get(KEY) === 'denied')
+  await sleep(1_200)
+  assert.equal(state.terminalListeners(), 0, 'refused, and still listening to the terminals')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // The next start with the setting on: a refusal is not asked about again.
+  await activateHost(fx, REPO, { globalState: kept, settings: { 'tokenPace.cacheKeepWarm': true } })
+  await waitOwnColdStart(state)
+  await sleep(300)
+  assert.equal(keepWarmAsked().length, 0, 'a refusal was asked about again at the next start')
+  // Off withdraws the decision; on asks again — allowed now, and the host listens.
+  state.set('tokenPace.cacheKeepWarm', false)
+  state.fireConfigChange(['tokenPace.cacheKeepWarm'])
+  await waitFor('the decision withdrawn', () => !kept.has(KEY))
+  state.answers.push('Allow keep-warm')
+  state.set('tokenPace.cacheKeepWarm', true)
+  state.fireConfigChange(['tokenPace.cacheKeepWarm'])
+  await waitFor('the second question', () => keepWarmAsked().length === 1)
+  await waitFor('the consent', () => kept.get(KEY) === 'granted')
+  await waitFor('the host listening to the terminals', () => state.terminalListeners() === 4)
+  assert.match(state.logText(), /Keep-warm allowed by the user\./)
+  // Off again: withdrawn, and the host stops listening.
+  state.set('tokenPace.cacheKeepWarm', false)
+  state.fireConfigChange(['tokenPace.cacheKeepWarm'])
+  await waitFor('withdrawn and deaf', () => !kept.has(KEY) && state.terminalListeners() === 0)
+  assert.match(state.logText(), /Keep-warm consent withdrawn: tokenPace\.cacheKeepWarm was switched off\./)
+  // Switched on in a window in the background: that window asks when it is focused, once.
+  state.fireWindowState(false)
+  state.set('tokenPace.cacheKeepWarm', true)
+  state.fireConfigChange(['tokenPace.cacheKeepWarm'])
+  await sleep(300)
+  assert.equal(keepWarmAsked().length, 1, 'a window in the background put the question')
+  state.answers.push(undefined)
+  state.fireWindowState(true)
+  await waitFor('the question on focus', () => keepWarmAsked().length === 2)
+  await waitFor('the refusal', () => kept.get(KEY) === 'denied')
+  state.fireWindowState(false)
+  state.fireWindowState(true)
+  await sleep(300)
+  assert.equal(keepWarmAsked().length, 2, 'asked again after a refusal without the setting going off')
+  assert.deepEqual(state.sent, [])
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('the cancel command is registered with its manifest title; without a countdown it cancels nothing and types nothing (1.8 §0b.3)', async () => {
+  await activateHost(makeFixture(), REPO)
+  assert.equal(state.registered.get('tokenPace.cancelKeepWarm'), 1)
+  const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as { contributes: { commands: Array<Record<string, string>> } }
+  assert.deepEqual(manifest.contributes.commands.find((c) => c.command === 'tokenPace.cancelKeepWarm'),
+    { command: 'tokenPace.cancelKeepWarm', title: '%command.cancelKeepWarm.title%', category: '%command.category%' })
+  // Arguments are ignored: nothing a link could hand it chooses anything.
+  await state.execute('tokenPace.cancelKeepWarm', 'x', { session: 'y' })
+  assert.match(state.logText(), /keep-warm: no countdown to cancel/)
+  assert.deepEqual(state.sent, [])
+  assert.equal(state.live().some((i) => i.id === 'tokenPace.keepWarm'), false)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('keep-warm in the host: the card\'s note for a session no terminal of this window runs; a terminal whose command line holds a secret matches, and nothing of it reaches the page, the markdown, the bar, the log or Copy Diagnostics (1.8 B2, §0a.6 leak test)', async () => {
+  const fx = makeFixture()
+  const now = Date.now()
+  const reply = now - 57 * 60_000
+  const cwd = '/home/u/synthetic-project'
+  const commandLine = 'claude --api-key synthetic-secret-123'
+  const project = path.join(fx.claudeRoot, '-home-u-synthetic-project')
+  fs.mkdirSync(project, { recursive: true })
+  fs.writeFileSync(path.join(project, `${LEAK_SESSION_ID}.jsonl`), [
+    promptLine({ ts: reply - 30_000 }),
+    claudeLine({ id: 'msg_kw_host_a', ts: reply, model: 'claude-opus-5-5', final: true, sessionId: LEAK_SESSION_ID, cwd,
+      usage: { input: 300, cacheWrite: 2000, cacheWrite1h: 2000, cacheRead: 150_000, output: 40 } }),
+  ].join('\n') + '\n')
+  // The status line ran right after that reply: a one-hour cache with 2 m 55 s of warmth left.
+  fs.mkdirSync(fx.storage, { recursive: true })
+  const payload = leakyStatusPayload(now)
+  fs.writeFileSync(path.join(fx.storage, 'statusline-mirror.json'), JSON.stringify({
+    schema_version: 1, written_at: reply + 1_000,
+    payload: { ...payload, prompt_cache: { ...(payload.prompt_cache as Record<string, unknown>), expires_at: Math.floor((now + 175_000) / 1000) } },
+  }))
+  await activateHost(fx, REPO, {
+    settings: { 'tokenPace.cacheKeepWarm': true, 'tokenPace.statusBar.show': ['claudeQuota', 'tokens'] },
+    globalState: new Map<string, unknown>([['tokenPace.keepWarmConsent', 'granted']]),
+  })
+  const page = openDashboard()
+  await waitOwnColdStart(state)
+  const notes = (): string[] => {
+    const last = [...page.sent].reverse().find((m) => Array.isArray((m as { payload?: { quotas?: unknown } }).payload?.quotas)) as
+      { payload: { quotas: Array<{ source: string; cacheWatch?: { keepWarm?: { notes?: Array<{ text: string }> } | null } | null }> } } | undefined
+    return last?.payload.quotas.find((q) => q.source === 'claude')?.cacheWatch?.keepWarm?.notes?.map((n) => n.text) ?? []
+  }
+  // No terminal of this window runs the session: the card says so, under the session's entry.
+  await waitFor('the note', () => notes().includes('Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.'))
+  // Claude Code starts in a terminal of this window, in the session's folder: the terminal matches (G7
+  // holds — the first check that blocks is G8: this window started watching after the session's reply).
+  const terminal = state.openTerminal({ shell: 'claude', name: 'SYNTHETIC-CONVERSATION-SUMMARY' })
+  state.startExecution(terminal, { commandLine, confidence: 2, cwd })
+  await waitFor('the match', () => /keep-warm: session 9d0eb37a not armed \(unknownFocus\)/.test(state.logText()))
+  await waitFor('the note gone', () => notes().length === 0)
+  assert.deepEqual(state.sent, [], 'a line went although this window cannot know the terminal was not touched')
+  assert.equal(state.nameReads, 0, 'a terminal\'s name was read')
+  // Every output there is.
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  await state.execute('tokenPace.showUsageQuickPick')
+  await state.execute('tokenPace.copyDiagnostics')
+  const outputs: Array<[string, string]> = [
+    ['page', JSON.stringify(page.sent)],
+    ['markdown', markdown],
+    ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+    ['status bar', JSON.stringify(state.items.map((i) => ({ ...i })))],
+    ['diagnostics', state.clipboard.join('\n')],
+    ['log', state.logText()],
+  ]
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  outputs.push(['state', fs.readFileSync(fx.stateFile, 'utf8')])
+  assert.equal(fs.existsSync(path.join(fx.storage, 'keepwarm.json')), false, 'keepwarm.json without an answered line')
+  assert.ok(state.clipboard.join('\n').includes('tokenPace.cacheKeepWarm'), 'the diagnostics report does not list the setting')
+  for (const [what, text] of outputs) {
+    for (const secret of [commandLine, 'synthetic-secret-123', '--api-key', cwd, 'SYNTHETIC-CONVERSATION-SUMMARY']) {
+      assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+    }
+  }
+})
+
+test('Clear Stored Data lists keepwarm.json and deletes it alone (1.8 §0a.7)', async () => {
+  const fx = makeFixture()
+  fs.mkdirSync(fx.storage, { recursive: true })
+  const file = path.join(fx.storage, 'keepwarm.json')
+  fs.writeFileSync(file, JSON.stringify({ v: 1, days: { '2026-09-24': { requests: 1, tokens: 32 } } }))
+  await activateHost(fx, REPO)
+  await waitOwnColdStart(state)
+  await state.execute('tokenPace.clearStoredData')
+  const offered = state.quickPicks[state.quickPicks.length - 1]
+  const item = offered.items.find((i) => i.key === 'keepWarm')
+  assert.ok(item, `keepwarm.json is not listed: ${offered.items.map((i) => i.label).join(' | ')}`)
+  assert.equal(item.label, 'Keep-warm requests (keepwarm.json)')
+  assert.equal(item.description, `${fs.statSync(file).size} B`)
+  const keys = offered.items.map((i) => i.key)
+  assert.equal(keys.indexOf('keepWarm'), keys.indexOf('hookMirror') + 1, 'not right after the agent hook\'s mirror')
+  const consent = offered.items.find((i) => i.key === 'consent')
+  assert.equal(consent?.detail, 'network, write and keep-warm decisions')
+  await waitFor('the snapshot saved', () => fs.existsSync(fx.stateFile))
+  state.answers.push([item], 'Delete')
+  await state.execute('tokenPace.clearStoredData')
+  assert.equal(fs.existsSync(file), false, 'keepwarm.json survived')
+  assert.equal(fs.existsSync(fx.stateFile), true, 'an item that was not picked was deleted')
+  assert.match(state.logText(), /Stored data removed: Keep-warm requests \(keepwarm\.json\)/)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })

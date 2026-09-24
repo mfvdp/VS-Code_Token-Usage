@@ -57,6 +57,8 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.dayBoundaryHour',
   'tokenPace.keybindings',
   'tokenPace.planName',
+  // 1.8 B2 (§0b.3, §0c): the opt-in keep-warm line — scope `application`, so that no workspace can switch it on.
+  'tokenPace.cacheKeepWarm',
   // Pace
   'tokenPace.pace.sensitivity',
   'tokenPace.pace.tolerancePoints',
@@ -288,6 +290,13 @@ export interface Config {
   keybindings: boolean
   /** Display-only plan names, per provider. Never a limit and never a denominator. */
   planName: { claude?: string; codex?: string }
+  /**
+   * 1.8 B2 (§0b.3, §0c): the opt-in keep-warm line — Token Pace types one fixed line into the VS Code
+   * terminal that runs a Claude Code session, after a countdown, when every guard of keepWarm.ts holds.
+   * Off by default; `"scope": "application"` in the manifest, so a workspace's settings cannot switch it
+   * on; acts only with its own consent (`KeepWarmConsent`).
+   */
+  cacheKeepWarm: boolean
 
   pace: {
     sensitivity: Sensitivity
@@ -596,6 +605,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
     staleAfterMinutes: num(get('tokenPace.staleAfterMinutes'), 20, 1, 1440),
     keybindings: bool(get('tokenPace.keybindings'), true),
     planName: planNames(get('tokenPace.planName')),
+    cacheKeepWarm: bool(get('tokenPace.cacheKeepWarm'), false),
 
     pace: {
       sensitivity: pick(get('tokenPace.pace.sensitivity'), SENSITIVITIES, 'normal'),

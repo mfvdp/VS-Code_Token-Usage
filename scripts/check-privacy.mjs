@@ -161,6 +161,8 @@ export function filesToScan() {
 
 /** 1.8 §0a.1: the pages a row of the status-line mirror is held to. */
 const MIRROR_PAGES = ['privacy', 'promptCache']
+/** 1.8 §0a.6–§0a.8: the pages a row of the keep-warm host is held to. */
+const KEEPWARM_PAGES = ['privacy', 'promptCache']
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
@@ -285,6 +287,33 @@ export const READ_CONTRACT = [
     fields: ['ttl', 'expires_at', 'expiresAt', 'hit_ratio', 'hitRatio', 'recache_tokens_if_cold', 'recacheTokensIfCold'], pages: MIRROR_PAGES },
   { what: 'the status line\'s prompt cache (direct)', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'fields', body: 'function promptCacheOf(', variable: 'v',
     fields: ['warm'], pages: MIRROR_PAGES },
+  // 1.8 §0a.6 (P10): the opt-in keep-warm line's terminals — not a file but VS Code's shell integration.
+  // Of its two events the terminal and the execution; of an open execution its command line (the text
+  // and VS Code's confidence in it) and the working directory the shell reported — tested for G7 when
+  // the guard asks, kept by no one, never logged, shown or exported; of a terminal VS Code's word for
+  // what runs in it. Never a terminal's name, its output or its environment.
+  { what: 'keep-warm: the shell execution events', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'private startTracking(', variable: 'e',
+    fields: ['terminal', 'execution'], pages: KEEPWARM_PAGES },
+  { what: 'keep-warm: an open shell execution', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function executionFacts(', variable: 'execution',
+    fields: ['commandLine', 'cwd'], pages: KEEPWARM_PAGES },
+  { what: 'keep-warm: its command line', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function executionFacts(', variable: 'line',
+    fields: ['value', 'confidence'], pages: KEEPWARM_PAGES },
+  { what: 'keep-warm: its working directory', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function executionFacts(', variable: 'dir',
+    fields: ['fsPath'], pages: KEEPWARM_PAGES },
+  { what: 'keep-warm: a terminal\'s shell', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function shellOf(', variable: 'terminal',
+    fields: ['state'], pages: KEEPWARM_PAGES },
+  { what: 'keep-warm: the shell VS Code reports', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function shellOf(', variable: 's',
+    fields: ['shell'], pages: KEEPWARM_PAGES },
+  // 1.8 §0a.8 (P10): the one write into another program's input — of the terminal only `sendText`, with
+  // the fixed line; nothing is read back.
+  { what: 'keep-warm: the line typed', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function typeLine(', variable: 'terminal',
+    fields: ['sendText'], pages: KEEPWARM_PAGES },
+  // 1.8 §0a.7 (P10): the keep-warm accounting in the extension's storage, read back by its shape — the
+  // version and the days, of a day its two counts; any other key reads the file as empty.
+  { what: 'keep-warm: the accounting file', source: 'keepwarm.json', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'export function cleanKeepWarmFile(', variable: 'o',
+    fields: ['v', 'days'], pages: KEEPWARM_PAGES },
+  { what: 'keep-warm: a day of the accounting', source: 'keepwarm.json', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'export function cleanKeepWarmFile(', variable: 'd',
+    fields: ['requests', 'tokens'], pages: KEEPWARM_PAGES },
 ]
 
 /**

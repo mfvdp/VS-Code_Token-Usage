@@ -2566,7 +2566,7 @@ test('the Claude card lists its cooling and cold sessions with a cost line each,
   assert.equal(block.all[3].cost,
     'A cold start after ~12:30 re-writes ~152.3K tokens at the 1 h write rate (2× input, ~$3.05) instead of reading them from the cache (0.025× input, ~$0.04).')
   assert.equal(block.allMoreText, null)
-  assert.equal(block.keepWarm, null, 'B1 is struck; nothing fills the keep-warm note before P10')
+  assert.equal(block.keepWarm, null, 'without the keep-warm host\'s view the block has no keep-warm part (B1 is struck; B2\'s notes come from VmInput.keepWarm)')
   // The latest mirror's session is listed: its 1.3 line gives way (§3.0 b).
   assert.equal(claude?.promptCache, null)
   assert.equal(claude?.codexCache, null)
@@ -2666,4 +2666,84 @@ test('the provider switch: under Codex no Claude card and so no block, under Cla
   assert.deepEqual(claude.quotas.map((q) => q.source), ['claude'])
   assert.deepEqual(claude.quotas[0].cacheWatch, all.quotas[0].cacheWatch)
   assert.equal(JSON.stringify(claude.quotas).includes('Codex prompt cache'), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 B2 (P10): the keep-warm part of the Claude card's block
+// ---------------------------------------------------------------------------
+
+test('the keep-warm part of the block: one note per listed entry — the countdown, an unanswered line, no terminal for a cooling measured entry —, today\'s accounting; null without either (1.8 §3 B2 "Card notes", "Accounting")', () => {
+  const { setBundle, setLocale } = require('../src/i18n') as typeof import('../src/i18n')
+  const kw = (over: Record<string, unknown> = {}): NonNullable<ReturnType<typeof makeInput>['keepWarm']> =>
+    ({ armed: null, noTerminal: [], unanswered: [], today: null, ...over }) as NonNullable<ReturnType<typeof makeInput>['keepWarm']>
+  const blockOf = (input: ReturnType<typeof makeInput>) => buildViewModel(input).quotas.find((q) => q.source === 'claude')?.cacheWatch
+  // Without the host's view, or with nothing in it: no keep-warm part (the setting off, nothing today).
+  assert.equal(blockOf(cacheInput())?.keepWarm, null)
+  assert.equal(blockOf(cacheInput({ keepWarm: kw() }))?.keepWarm, null)
+  // The lines are TX1 (cooling, estimated), PC1 (cooling, measured), PC2 (cold, measured).
+  const all = blockOf(cacheInput({
+    keepWarm: kw({ armed: { sessionId: PC1, endsAt: NOW + 42_000 }, noTerminal: [TX1, PC1, PC2, 'ffff0000-other'], unanswered: [PC2], today: { requests: 2, tokens: 1_900 } }),
+  }))
+  assert.deepEqual(all?.lines.map((l) => l.shortId), ['aaaa1111', '9d0eb37a', '5f1c2d3e'])
+  assert.deepEqual(all?.keepWarm, {
+    notes: [
+      { line: 1, shortId: '9d0eb37a', kind: 'armed', text: 'Keep-warm line for this session in 42 s — cancel it in the status bar.' },
+      { line: 2, shortId: '5f1c2d3e', kind: 'unanswered', text: 'Keep-warm stopped for this session: the last line got no answer within two minutes.' },
+    ],
+    today: 'Keep-warm requests today: 2 · 1.9K tokens',
+  })
+  // No terminal: only a cooling entry the status line measures — never an estimate, never a cold one.
+  const reach = blockOf(cacheInput({ keepWarm: kw({ noTerminal: [TX1, PC1, PC2] }) }))
+  assert.deepEqual(reach?.keepWarm?.notes.map((n) => [n.line, n.kind, n.text]),
+    [[1, 'noTerminal', 'Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.']])
+  // A countdown only for a cooling entry; one ending in the past says 0 s.
+  assert.equal(blockOf(cacheInput({ keepWarm: kw({ armed: { sessionId: PC2, endsAt: NOW + 5_000 } }) }))?.keepWarm, null)
+  assert.equal(blockOf(cacheInput({ keepWarm: kw({ armed: { sessionId: PC1, endsAt: NOW - 5_000 } }) }))?.keepWarm?.notes[0].text,
+    'Keep-warm line for this session in 0 s — cancel it in the status bar.')
+  // A day without an answered line has no accounting line; a broken count none either.
+  for (const today of [{ requests: 0, tokens: 0 }, { requests: 1.5, tokens: 3 }, { requests: 2, tokens: -1 }, null]) {
+    assert.equal(blockOf(cacheInput({ keepWarm: kw({ today }) }))?.keepWarm, null, JSON.stringify(today))
+  }
+  // The accounting line alone keeps the block on the card, with nothing watched.
+  assert.deepEqual(blockOf({ ...makeInput(), keepWarm: kw({ today: { requests: 1, tokens: 32 } }) }), {
+    lines: [], more: 0, moreText: null, all: [], allMoreText: null, keepWarm: { notes: [], today: 'Keep-warm requests today: 1 · 32 tokens' },
+  })
+  // The Codex card has none of it.
+  assert.equal(buildViewModel(cacheInput({ keepWarm: kw({ today: { requests: 1, tokens: 32 } }) })).quotas.find((q) => q.source === 'codex')?.cacheWatch, null)
+  // German, „Token" in the count.
+  setLocale('de')
+  setBundle(JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>)
+  try {
+    const de = blockOf(cacheInput({ keepWarm: kw({ armed: { sessionId: PC1, endsAt: NOW + 42_000 }, unanswered: [PC2], today: { requests: 2, tokens: 1_900 } }) }))?.keepWarm
+    assert.deepEqual(de, {
+      notes: [
+        { line: 1, shortId: '9d0eb37a', kind: 'armed', text: 'Warmhalte-Zeile für diese Sitzung in 42 s — in der Statusleiste abbrechen.' },
+        { line: 2, shortId: '5f1c2d3e', kind: 'unanswered', text: 'Warmhalten für diese Sitzung beendet: Die letzte Zeile blieb zwei Minuten ohne Antwort.' },
+      ],
+      today: 'Warmhalte-Anfragen heute: 2 · 1,9K Token',
+    })
+    const none = blockOf(cacheInput({ keepWarm: kw({ noTerminal: [PC1] }) }))?.keepWarm?.notes[0].text
+    assert.equal(none, 'Warmhalten erreicht diese Sitzung nicht: Sie läuft in keinem VS-Code-Terminal dieses Fensters.')
+  } finally {
+    setLocale('en')
+    setBundle({})
+  }
+  // The notes' words name the constants they stand for.
+  const kwc = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  assert.equal(kwc.KEEPWARM_VERIFY_MS, 2 * MIN, '"within two minutes"')
+})
+
+test('the markdown document prints today\'s keep-warm accounting under the block, and none of the card\'s keep-warm notes (1.8 §3 B2 "Accounting")', () => {
+  const vm = buildViewModel(cacheInput({
+    keepWarm: { armed: { sessionId: PC1, endsAt: NOW + 42_000 }, noTerminal: [], unanswered: [PC2], today: { requests: 2, tokens: 64 } },
+  }))
+  const md = markdownDocument(vm)
+  assert.ok(md.includes('\nKeep-warm requests today: 2 · 64 tokens\n'), md)
+  assert.ok(md.indexOf('Keep-warm requests today') > md.indexOf('- Session Thu 10:30 · bbbb2222'), 'not under the block')
+  assert.equal(md.includes('Keep-warm line for this session'), false)
+  assert.equal(md.includes('Keep-warm stopped for this session'), false)
+  assert.equal(markdownDocument(buildViewModel(cacheInput())).includes('Keep-warm'), false)
+  // Nowhere else: the Quick Pick carries neither the notes nor the accounting.
+  const { quickPickItems } = require('../src/textViews') as typeof import('../src/textViews')
+  assert.equal(JSON.stringify(quickPickItems(vm)).includes('Keep-warm'), false)
 })

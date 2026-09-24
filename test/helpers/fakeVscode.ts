@@ -58,6 +58,31 @@ export interface RecordedQuickPick {
   options: Record<string, unknown>
 }
 
+/**
+ * 1.8 B2 (P10): a terminal of the fake window. Its `name` records every read — Claude Code sets a
+ * terminal's name to a summary of the conversation, and Token Pace never reads it (§7c) — and so does
+ * the output of an execution (`read()`); `sendText` records every call in `FakeVscodeState.sent`.
+ */
+export interface FakeTerminal {
+  readonly name: string
+  readonly state: { isInteractedWith: boolean; shell: string | undefined }
+  readonly shellIntegration: { cwd: unknown } | undefined
+  readonly exitStatus: undefined
+  sendText(text: string, shouldExecute?: boolean): void
+  show(): void
+  hide(): void
+  dispose(): void
+  /** The fake's own handle on the state above, for a test to set what VS Code would report. */
+  setShell(shell: string | undefined): void
+}
+
+/** 1.8 B2 (P10): one shell execution of a fake terminal, as `onDidStartTerminalShellExecution` hands it out. */
+export interface FakeExecution {
+  readonly commandLine: { value: string; confidence: number; isTrusted: boolean }
+  readonly cwd: { fsPath: string; scheme: string; path: string } | undefined
+  read(): AsyncIterable<string>
+}
+
 /** A `createQuickPick()` control, kept so a test can read the items it was filled with. */
 export interface FakeQuickPick {
   title: string
@@ -123,7 +148,27 @@ export interface FakeVscodeState {
   reset(settings?: Record<string, unknown>): void
   /** Fires `onDidChangeConfiguration` for the given full keys. */
   fireConfigChange(keys: string[]): void
+  /** Fires `onDidChangeWindowState` — and sets `window.state` to it, as VS Code does. */
   fireWindowState(focused: boolean): void
+  /** 1.8 B2: every terminal of the window (`window.terminals`), in the order they opened. */
+  terminals: FakeTerminal[]
+  /** 1.8 B2: every `sendText` call, in order — the spy of §3 B2 test 8. */
+  sent: Array<{ terminal: FakeTerminal; text: string; execute: boolean | undefined }>
+  /** 1.8 B2: how often a terminal's `name` was read (must stay 0), and an execution's output (`read()`). */
+  nameReads: number
+  outputReads: number
+  /** 1.8 B2: opens a terminal (fires `onDidOpenTerminal`-free: VS Code's list simply holds it). */
+  openTerminal(o?: { shell?: string; name?: string }): FakeTerminal
+  /** 1.8 B2: fires `onDidStartTerminalShellExecution` for a command in a terminal; the execution stays open. */
+  startExecution(terminal: FakeTerminal, o: { commandLine: string; confidence?: number; cwd?: string | null }): FakeExecution
+  /** 1.8 B2: fires `onDidEndTerminalShellExecution`. */
+  endExecution(terminal: FakeTerminal, execution: FakeExecution): void
+  /** 1.8 B2: closes a terminal — it leaves `window.terminals`, and `onDidCloseTerminal` fires. */
+  closeTerminal(terminal: FakeTerminal): void
+  /** 1.8 B2: makes a terminal the active one (`window.activeTerminal`) and fires `onDidChangeActiveTerminal`. */
+  setActiveTerminal(terminal: FakeTerminal | undefined): void
+  /** 1.8 B2: how many listeners each terminal event has — a host that may not act subscribes to none. */
+  terminalListeners(): number
 }
 
 class FakeEventEmitter<T> {
@@ -240,6 +285,16 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const contentProviders = new Map<string, { provideTextDocumentContent(uri: unknown): string }>()
   const configListeners: Array<(e: { affectsConfiguration(section: string): boolean }) => void> = []
   const windowStateListeners: Array<(e: { focused: boolean; active: boolean }) => void> = []
+  // 1.8 B2 (P10): the window's terminals, its active terminal, its focus and the four terminal events.
+  const terminals: FakeTerminal[] = []
+  const sent: Array<{ terminal: FakeTerminal; text: string; execute: boolean | undefined }> = []
+  const startListeners: Array<(e: { terminal: FakeTerminal; execution: FakeExecution; shellIntegration: unknown }) => void> = []
+  const endListeners: Array<(e: { terminal: FakeTerminal; execution: FakeExecution; shellIntegration: unknown; exitCode: number | undefined }) => void> = []
+  const closeListeners: Array<(t: FakeTerminal) => void> = []
+  const activeListeners: Array<(t: FakeTerminal | undefined) => void> = []
+  let activeTerminal: FakeTerminal | undefined
+  const windowState = { focused: true, active: true }
+  const reads = { name: 0, output: 0 }
   let language = 'en'
   let l10nBundle: Record<string, string> | undefined
 
@@ -346,6 +401,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     ExtensionKind: { UI: 1, Workspace: 2 },
     QuickPickItemKind: { Separator: -1, Default: 0 },
+    // 1.8 B2 (P10): the values of `@types/vscode` 1.106.1.
+    TerminalShellExecutionCommandLineConfidence: { Low: 0, Medium: 1, High: 2 },
 
     extensions: {
       getExtension: (): { id: string; extensionKind: number } =>
@@ -415,6 +472,22 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       },
       onDidChangeWindowState(listener: (e: { focused: boolean; active: boolean }) => void): { dispose(): void } {
         return subscribe(windowStateListeners, listener)
+      },
+      // 1.8 B2 (P10): the terminal side of the window — the list, the active one, the focus, four events.
+      get terminals(): readonly FakeTerminal[] { return [...terminals] },
+      get activeTerminal(): FakeTerminal | undefined { return activeTerminal },
+      get state(): { focused: boolean; active: boolean } { return { ...windowState } },
+      onDidStartTerminalShellExecution(listener: (e: { terminal: FakeTerminal; execution: FakeExecution; shellIntegration: unknown }) => void): { dispose(): void } {
+        return subscribe(startListeners, listener)
+      },
+      onDidEndTerminalShellExecution(listener: (e: { terminal: FakeTerminal; execution: FakeExecution; shellIntegration: unknown; exitCode: number | undefined }) => void): { dispose(): void } {
+        return subscribe(endListeners, listener)
+      },
+      onDidCloseTerminal(listener: (t: FakeTerminal) => void): { dispose(): void } {
+        return subscribe(closeListeners, listener)
+      },
+      onDidChangeActiveTerminal(listener: (t: FakeTerminal | undefined) => void): { dispose(): void } {
+        return subscribe(activeListeners, listener)
       },
       showInformationMessage: (text: string, ...rest: unknown[]): Promise<unknown> =>
         record('info', text, rest),
@@ -549,6 +622,18 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       contentProviders.clear()
       configListeners.length = 0
       windowStateListeners.length = 0
+      // 1.8 B2: no terminal, nothing sent, the window focused, as a fresh window.
+      terminals.length = 0
+      sent.length = 0
+      startListeners.length = 0
+      endListeners.length = 0
+      closeListeners.length = 0
+      activeListeners.length = 0
+      activeTerminal = undefined
+      windowState.focused = true
+      windowState.active = true
+      reads.name = 0
+      reads.output = 0
       if (settings) {
         values.clear()
         for (const [k, v] of Object.entries(settings)) values.set(k, v)
@@ -562,7 +647,66 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       for (const l of [...configListeners]) l(event)
     },
     fireWindowState(focused: boolean): void {
+      windowState.focused = focused
+      windowState.active = focused
       for (const l of [...windowStateListeners]) l({ focused, active: focused })
+    },
+    terminals,
+    sent,
+    get nameReads(): number { return reads.name },
+    get outputReads(): number { return reads.output },
+    openTerminal(o: { shell?: string; name?: string } = {}): FakeTerminal {
+      const shellState = { isInteractedWith: false, shell: o.shell as string | undefined }
+      const title = o.name ?? 'bash'
+      const terminal: FakeTerminal = {
+        get name(): string { reads.name++; return title },
+        get state(): { isInteractedWith: boolean; shell: string | undefined } { return { ...shellState } },
+        shellIntegration: { cwd: undefined },
+        exitStatus: undefined,
+        sendText(text: string, shouldExecute?: boolean): void {
+          shellState.isInteractedWith = true
+          sent.push({ terminal, text, execute: shouldExecute })
+        },
+        show(): void { /* nothing to reveal */ },
+        hide(): void { /* nothing to hide */ },
+        dispose(): void { state.closeTerminal(terminal) },
+        setShell(shell: string | undefined): void { shellState.shell = shell },
+      }
+      terminals.push(terminal)
+      return terminal
+    },
+    startExecution(terminal: FakeTerminal, o: { commandLine: string; confidence?: number; cwd?: string | null }): FakeExecution {
+      const cwd = o.cwd === null || o.cwd === undefined ? undefined : { fsPath: o.cwd, scheme: 'file', path: o.cwd }
+      const execution: FakeExecution = {
+        commandLine: { value: o.commandLine, confidence: o.confidence ?? 2, isTrusted: true },
+        cwd,
+        read(): AsyncIterable<string> {
+          reads.output++
+          return { [Symbol.asyncIterator]: () => ({ next: () => Promise.resolve({ done: true, value: '' }) }) }
+        },
+      }
+      for (const l of [...startListeners]) l({ terminal, execution, shellIntegration: terminal.shellIntegration })
+      return execution
+    },
+    endExecution(terminal: FakeTerminal, execution: FakeExecution): void {
+      for (const l of [...endListeners]) l({ terminal, execution, shellIntegration: terminal.shellIntegration, exitCode: 0 })
+    },
+    closeTerminal(terminal: FakeTerminal): void {
+      const at = terminals.indexOf(terminal)
+      if (at < 0) return
+      terminals.splice(at, 1)
+      if (activeTerminal === terminal) {
+        activeTerminal = undefined
+        for (const l of [...activeListeners]) l(undefined)
+      }
+      for (const l of [...closeListeners]) l(terminal)
+    },
+    setActiveTerminal(terminal: FakeTerminal | undefined): void {
+      activeTerminal = terminal
+      for (const l of [...activeListeners]) l(terminal)
+    },
+    terminalListeners(): number {
+      return startListeners.length + endListeners.length + closeListeners.length + activeListeners.length
     },
   }
 

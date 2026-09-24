@@ -17,6 +17,9 @@
  *    their own consent objects and live in quotaManager.ts and bridge.ts. The agent hook (1.6 O4)
  *    is none: its setup command copies the script into `globalStorage` and shows the snippet the
  *    user pastes into Claude Code's settings himself; the extension never writes those.
+ *  • 1.8 B2 (§0c): the one auto-action — the opt-in keep-warm line typed into Claude Code's terminal —
+ *    lives in keepWarmHost.ts behind its own setting and consent (`KeepWarmConsent`); this file only
+ *    hands it each frame's facts and asks the question.
  */
 
 import * as crypto from 'crypto'
@@ -40,7 +43,7 @@ import { CacheWatchEntry, watchCaches } from './cacheWatch'
 import {
   affects, Config, CONFIG_KEYS, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
 } from './config'
-import { NetworkConsent, WriteConsent } from './consent'
+import { KeepWarmConsent, NetworkConsent, WriteConsent } from './consent'
 import { watchCredentials } from './credentials'
 import { DashboardProvider } from './dashboard'
 import {
@@ -50,6 +53,8 @@ import {
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
 import { DEFAULT_FORECAST_CONFIG, ForecastConfig } from './forecast'
 import { setBundle, setLocale, t } from './i18n'
+import { KEEP_WARM_LINE } from './keepWarm'
+import { KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
 import { Lease } from './lease'
 import { NativeViews, registerNativeViews } from './nativeViews'
 import { effectivePace, paceVerdict, windowElapsed } from './pace'
@@ -186,6 +191,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     leader: path.join(storage, 'leader.json'),
     mirror: path.join(storage, 'statusline-mirror.json'),
     hookMirror: path.join(storage, HOOK_MIRROR_NAME),
+    // 1.8 §0a.7: the keep-warm accounting, written by the window that sent a line.
+    keepWarm: path.join(storage, KEEPWARM_FILE_NAME),
   }
   // 1.6 O4: the agent hook's script as the extension ships it, and the mirror file the copy in
   // globalStorage writes when Claude Code runs it — read whenever it changes, never stored.
@@ -243,6 +250,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   const writeConsent = new WriteConsent(context.globalState, 'writeQuotaCache', say, {
     paths: () => ({ quotaCacheFiles: externalQuotaFiles() }),
   })
+  // 1.8 B2 (§0c): the keep-warm line's own consent — asked when tokenPace.cacheKeepWarm is switched on,
+  // withdrawn when it is switched off.
+  const keepWarmConsent = new KeepWarmConsent(context.globalState, say, { line: KEEP_WARM_LINE })
 
   const quotaMgr = new QuotaManager(
     quotaOptions(cfg),
@@ -261,6 +271,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   const statusBar = new StatusBar()
   context.subscriptions.push(statusBar)
+
+  // 1.8 B2 (§0a.6–§0a.8, §0c): the opt-in keep-warm line — inert while the setting is off, without its
+  // consent and in Restricted Mode; its countdown item is its own, shown whatever statusBar.show lists.
+  const keepWarm = new KeepWarmHost({
+    window: vscode.window,
+    file: paths.keepWarm,
+    log: { info: (m) => log.info(m), debug: (m) => log.debug(m), warn: (m) => log.warn(m) },
+  })
+  context.subscriptions.push({ dispose: () => keepWarm.dispose() })
+  /** A keep-warm consent the activation could not ask for yet: this window was not focused. */
+  let keepWarmAskPending = false
 
   const alerts = new Alerts(context.globalState, readAlertConfig(cfg), say, undefined, {
     staleAfterMs: cfg.staleAfterMinutes * 60_000,
@@ -377,6 +398,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       promptCaches: quotaMgr.promptCacheReadings(now),
       preview: statusBar.previewActive(),
       hook: hookMirror.entries(),
+      // 1.8 B2: the countdown, the two card notes and today's keep-warm accounting.
+      keepWarm: keepWarm.view(now, readTimeConfig(cfg)),
     })
   }
 
@@ -450,7 +473,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     }
   }
 
-  function drawStatusBar(now: number): void {
+  function drawStatusBar(now: number, watched: CacheWatchEntry[] = cacheWatchFor(now)): void {
     try {
       const tree = latestVm?.agents
       const input: StatusInput = {
@@ -465,7 +488,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         // 1.8 A5: every session's one-hour prompt cache, this frame — the `cache` entry counts down
         // each second, and the Claude quota tooltip lists what cools. Like the rest of the bar it
         // follows no view of the dashboard (§3.0 a).
-        cacheWatch: cacheWatchFor(now),
+        cacheWatch: watched,
       }
       statusBar.update(input)
       // Kept for the extension API (see `TokenPaceApi`): `buildItems` is pure, so re-running
@@ -492,7 +515,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     // broken view still cannot take the bar down with it.
     if (force) cadence.event(now)
     else cadence.tick(now)
-    if (readingsOk) drawStatusBar(now)
+    if (!readingsOk) return
+    const watched = cacheWatchFor(now)
+    drawStatusBar(now, watched)
+    // 1.8 B2: the keep-warm frame — its countdown ticks here, every second; a countdown that starts or
+    // ends, a line that goes or is answered, rebuilds the page at once, for the card's note.
+    if (keepWarmTick(now, watched)) cadence.event(now)
+  }
+
+  /**
+   * 1.8 B2 (§3 B2): one frame of the keep-warm host, on the facts of this second — the watched sessions
+   * the bar has just drawn, every session's bridge reading, the main records, the newest Agents tree,
+   * the agent hook's entries and the quota readings. A failure costs keep-warm this frame, never the bar.
+   */
+  function keepWarmTick(now: number, watched: CacheWatchEntry[]): boolean {
+    try {
+      return keepWarm.tick({
+        now,
+        enabled: cfg.cacheKeepWarm,
+        consent: keepWarmConsent.state(),
+        trusted: vscode.workspace.isTrusted,
+        entries: watched,
+        readings: quotaMgr.promptCacheReadings(now),
+        mains: agg.mainEntries(),
+        tree: latestVm?.agents ?? null,
+        hook: hookMirror.entries(),
+        quotas,
+        tcfg: readTimeConfig(cfg),
+        alignment: cfg.alignment === 'right' ? vscode.StatusBarAlignment.Right : vscode.StatusBarAlignment.Left,
+      })
+    } catch (err) {
+      log.error(`Keep-warm failed: ${err}`)
+      return false
+    }
   }
 
   /**
@@ -1153,6 +1208,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   }
 
   /**
+   * 1.8 B2 (§3 B2 "Consent"): the keep-warm dialog — when the setting is switched on (`setting`), and at
+   * activation while it is on and the question was never answered (`activation`); a refusal is not asked
+   * about again until the setting goes off (which withdraws the consent) and on. Asked by a focused
+   * window only: a switch in the settings reaches every open window, and one dialog is enough — a window
+   * in the background asks when it is focused, if the question is still open then.
+   */
+  async function askKeepWarm(why: 'setting' | 'activation'): Promise<void> {
+    if (disposed || !cfg.cacheKeepWarm || keepWarmConsent.granted()) return
+    if (why === 'activation' && keepWarmConsent.state() !== 'unasked') return
+    if (vscode.window.state?.focused !== true) {
+      keepWarmAskPending = true
+      return
+    }
+    keepWarmAskPending = false
+    await keepWarmConsent.request()
+    if (disposed) return
+    render(true)
+  }
+
+  /**
    * Offered at most once per machine, and only when there is genuinely nothing to show:
    * no quota anywhere, mode `auto`, question never put. Anyone who already gets numbers
    * from an external poller is never asked at all.
@@ -1443,7 +1518,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       history: t('{0} quota sample(s)', hist.samples),
       externalQuota: external.map((f) => tildify(f, home)).join(' · '),
       ui: t('range, sort and filters of the dashboard'),
-      consent: t('network and write decisions'),
+      // 1.8 B2: the keep-warm consent is one of them (STORED_MEMENTO_KEYS).
+      consent: t('network, write and keep-warm decisions'),
       // 1.6 P16: deleting the hook's mirror is safe, and its script is not in the list.
       hookMirror: hookMirrorNote(),
     })
@@ -1489,6 +1565,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     if (result.deleted.includes('quota')) quotaMgr.clearPolled()
     // 1.8 A1: the per-session prompt-cache readings were read from the mirror; they go with it.
     if (result.deleted.includes('mirror')) quotaMgr.clearCacheReadings()
+    // 1.8 §0a.7: the keep-warm accounting goes with its file.
+    if (result.deleted.includes('keepWarm')) keepWarm.forgetFile()
     if (result.deleted.includes('ui')) ui = defaultUiState(cfg)
     if (result.failed.length > 0) {
       void vscode.window.showWarningMessage(t('Token Pace: could not delete {0}.', result.failed.join(', ')))
@@ -1566,11 +1644,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       render(true)
     }),
     vscode.commands.registerCommand('tokenPace.setRange', setRange),
+    // 1.8 B2 (§0b.3): the countdown's one-click cancel — and the palette's. Arguments are ignored.
+    vscode.commands.registerCommand(KEEPWARM_CANCEL_COMMAND, () => {
+      if (keepWarm.cancel()) render(true)
+    }),
   )
 
   // --------------------------------------------------------------- events
   context.subscriptions.push(
-    vscode.window.onDidChangeWindowState((state) => quotaMgr.setFocused(state.focused, onQuotaUpdate)),
+    vscode.window.onDidChangeWindowState((state) => {
+      quotaMgr.setFocused(state.focused, onQuotaUpdate)
+      // 1.8 B2: the keep-warm question this window held back while it was in the background.
+      if (state.focused && keepWarmAskPending) void askKeepWarm('activation')
+    }),
 
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!affects(e, ['tokenPace'])) return
@@ -1633,6 +1719,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       }
 
       if (cfg.writeQuotaCache && !before.writeQuotaCache) void ensureWriteConsent()
+      // 1.8 B2 (§0c): switched on, the keep-warm consent is asked; switched off, it is withdrawn — and the
+      // frame below ends a countdown under way without its line.
+      if (cfg.cacheKeepWarm && !before.cacheKeepWarm) void askKeepWarm('setting')
+      if (!cfg.cacheKeepWarm && before.cacheKeepWarm) {
+        keepWarmAskPending = false
+        void keepWarmConsent.reset()
+      }
       render(true)
     }),
   )
@@ -1763,6 +1856,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     quotaMgr.tick(onQuotaUpdate)
     logQuotaSources()
     void ensureWriteConsent()
+    void askKeepWarm('activation')
     await offerFetchOnce()
     if (disposed) return
     await remoteHint()

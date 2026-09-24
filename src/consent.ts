@@ -7,7 +7,9 @@
  * Everything this tool does by default is local and read-only. The three
  * exceptions — one network call and two writes outside `globalStorage` — each
  * have their own dialog, their own memento key and their own revocation, so a
- * yes to one is never a yes to another.
+ * yes to one is never a yes to another. 1.8 B2 adds a fourth of the same kind:
+ * the opt-in keep-warm line, the one thing the extension does on its own (§0c),
+ * with a dialog that names its cost, its risk and the terms it falls under.
  *
  * The dialogs state what happens in concrete terms (which address, which file,
  * which interval), because a consent dialog whose text is vaguer than the
@@ -346,5 +348,126 @@ export class WriteConsent {
   async reset(): Promise<void> {
     await this.memento.update(this.key, undefined)
     this.log(`Write access decision reset: ${this.kind}.`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1.8 B2 (§0c, §3 B2 "Consent"): the keep-warm line
+// ---------------------------------------------------------------------------
+
+/** 1.8 §0b.3: the keep-warm consent's memento key — a key of its own, as the other two decisions have. */
+export const KEEP_WARM_CONSENT_KEY = 'tokenPace.keepWarmConsent'
+
+/**
+ * The passage of Anthropic's Consumer Terms (section 3, "Use of our Services", effective October 8, 2025)
+ * the keep-warm line falls under — quoted word for word, in English in every language: a quote of an
+ * English legal text is not re-worded. The dialog names no address (the check of the shipped strings
+ * allows none for it); docs/prompt-cache.md links the terms.
+ */
+export const KEEP_WARM_TERMS_PASSAGE = 'Except when you are accessing our Services via an Anthropic API Key or where we otherwise explicitly permit it, to access the Services through automated or non-human means, whether through a bot, script, or otherwise.'
+
+/** The one `vscode.window` method the keep-warm dialog needs: a modal warning. */
+export interface KeepWarmConsentUi {
+  showWarningMessage(
+    message: string,
+    options: { modal: boolean; detail?: string },
+    ...items: string[]
+  ): PromiseLike<string | undefined>
+}
+
+/**
+ * The keep-warm dialog's text (§3 B2 "Consent", §7a Q19, §7c probe P-4): what is typed, where and when
+ * — the countdown at three minutes of warmth left, the line at about two —, what it costs, what cannot be
+ * made safe (a draft in Claude Code's input line is sent with it; the extension's own panel is out of
+ * reach; a dialog the transcript does not show is not seen), the terms passage word for word, and how to
+ * withdraw. One key per paragraph; the line and the passage go in as arguments, never translated.
+ */
+export function keepWarmDisclosure(line: string): string {
+  return [
+    t('When the status line reports that the one-hour prompt cache of a Claude Code session running in a VS Code terminal of this window has three minutes or less left, Token Pace starts a one-minute countdown in the status bar that you can cancel. When it ends, Token Pace types “{0}” into that terminal and presses Enter — about two minutes before the cache expires, at most three times in a row, and never while a Claude quota window stands at 90 % or more.', line),
+    '',
+    t('Cost: every line is a real request. Claude re-reads the whole conversation at the cache rate and writes a short reply; on a subscription this counts against your usage limits.'),
+    '',
+    t('Risk: Token Pace cannot see Claude Code\'s input line. Anything you typed there and did not send is sent with it — type nothing into the Claude terminal while the countdown runs. Nor can Token Pace see a dialog the transcript does not show. A session in the Claude Code extension\'s own panel is out of reach and gets no line.'),
+    '',
+    t('Terms: section 3 of Anthropic\'s Consumer Terms lists among what is not allowed: “{0}” Typing this line is automated access of that kind, and Anthropic has not explicitly permitted it.', KEEP_WARM_TERMS_PASSAGE),
+    '',
+    t('Switch it off at any time with the setting tokenPace.cacheKeepWarm; switching it off withdraws this consent.'),
+  ].join('\n')
+}
+
+function warningUi(): KeepWarmConsentUi {
+  const vscode = require('vscode') as typeof import('vscode')
+  return vscode.window
+}
+
+/**
+ * The consent for the keep-warm line — a small class of the shape of `NetworkConsent` and `WriteConsent`
+ * (state, granted, request, reset, its memento key), its own key and its own dialog: a yes to a fetch or
+ * a write is never a yes to typing into Claude Code. Only "Allow keep-warm" grants; any other end of the
+ * dialog — the modal's Cancel, Escape — is a refusal, recorded, so the question is not put again at the
+ * next start; the host asks again only when the setting goes off and on (switching it off withdraws the
+ * consent, `reset`).
+ */
+export class KeepWarmConsent {
+  private asking: Promise<boolean> | null = null
+
+  constructor(
+    private memento: MementoLike,
+    private log: (msg: string) => void,
+    private opts: { ui?: KeepWarmConsentUi; line?: string } = {},
+  ) {}
+
+  /** The memento key this instance owns — the delete command lists it. */
+  mementoKey(): string {
+    return KEEP_WARM_CONSENT_KEY
+  }
+
+  state(): ConsentState {
+    const v = this.memento.get<unknown>(KEEP_WARM_CONSENT_KEY, 'unasked')
+    return v === 'granted' || v === 'denied' ? v : 'unasked'
+  }
+
+  granted(): boolean {
+    return this.state() === 'granted'
+  }
+
+  /** The dialog's detail as it is shown. */
+  disclosure(): string {
+    return keepWarmDisclosure(this.opts.line ?? '')
+  }
+
+  /** Asks and records the answer; concurrent callers share the one dialog. */
+  request(): Promise<boolean> {
+    if (this.granted()) return Promise.resolve(true)
+    if (this.asking) return this.asking
+    this.asking = this.ask().finally(() => { this.asking = null })
+    return this.asking
+  }
+
+  private async ask(): Promise<boolean> {
+    const ui = this.opts.ui ?? warningUi()
+    // One value, shown and compared — as in the other two dialogs.
+    const allow = t('Allow keep-warm')
+    const choice = await ui.showWarningMessage(
+      t('Let Token Pace type a keep-warm line into Claude Code\'s terminal?'),
+      { modal: true, detail: this.disclosure() },
+      allow,
+    )
+    if (choice === allow) {
+      await this.memento.update(KEEP_WARM_CONSENT_KEY, 'granted')
+      this.log('Keep-warm allowed by the user.')
+      return true
+    }
+    await this.memento.update(KEEP_WARM_CONSENT_KEY, 'denied')
+    this.log('Keep-warm declined by the user; it is asked again when tokenPace.cacheKeepWarm is switched off and on.')
+    return false
+  }
+
+  /** Switching the setting off withdraws the consent: the next switch on asks again. */
+  async reset(): Promise<void> {
+    if (this.memento.get<unknown>(KEEP_WARM_CONSENT_KEY, undefined) === undefined) return
+    await this.memento.update(KEEP_WARM_CONSENT_KEY, undefined)
+    this.log('Keep-warm consent withdrawn: tokenPace.cacheKeepWarm was switched off.')
   }
 }

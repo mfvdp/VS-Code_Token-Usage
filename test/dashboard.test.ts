@@ -7134,9 +7134,11 @@ test('the whole page goes without the host\'s own fields: under every view no pu
     assert.deepEqual(r.posted.map((m) => m.type), ['data'])
     const payload = r.posted[0].payload
     assert.equal('allBudgets' in payload, false, `${providers.join()}: the whole page carries the host's budgets`)
-    // Every other field goes as it is, the view model's own value.
+    // Every other field goes as it is, the view model's own value — 1.8 P10 (pinned and changed): but the
+    // quota cards, a copy whose prompt-cache blocks lose the host's parts (none in this world).
     assert.deepEqual(Object.keys(payload).sort(), Object.keys(vm).filter((k) => k !== 'allBudgets').sort())
-    for (const k of Object.keys(payload)) assert.equal(payload[k], vm[k], k)
+    for (const k of Object.keys(payload)) if (k !== 'quotas') assert.equal(payload[k], vm[k], k)
+    assert.deepEqual(payload.quotas, vm.quotas)
     assert.deepEqual(payload.budgets, vm.budgets)
     // The view model the host holds keeps the field: the payload is a copy without it.
     assert.equal('allBudgets' in vm, true)
@@ -8270,7 +8272,9 @@ test('the Codex card ends with its one prompt-cache line, dim, the view model\'s
 })
 
 test('the prompt-cache lines are dim text with no colour of their own, and the forced-colours block leaves them to the theme (1.8 A7)', () => {
-  assert.match(STYLE, /\.pc-line, \.pc-more, \.pc-codex \{ margin-top: 4px; \}/)
+  // 1.8 P10 (pinned and changed): today's keep-warm accounting closes the block with the count's air; a
+  // keep-warm note sits right under its entry, as a cost line does.
+  assert.match(STYLE, /\.pc-line, \.pc-more, \.pc-codex, \.pc-today \{ margin-top: 4px; \}/)
   const rules = STYLE.replace(/\/\*[\s\S]*?\*\//g, '').split('}').filter((r) => /\.pc-/.test(r))
   assert.equal(rules.length, 1, rules.join('}'))
   assert.equal(/color|background|forced-color-adjust/.test(rules[0]), false, rules[0])
@@ -8393,4 +8397,114 @@ test('one line per session on the page, at any minute: the Claude card names a s
     assert.equal(claude.split('pc-line').length, claude.split('pc-cost').length, `at ${now}`)
   }
   assert.equal(listedMinutes, 65)
+})
+
+// ---------------------------------------------------------------------------
+// 1.8 B2 (P10): the keep-warm notes and accounting on the page; §7c wave 2 fact 10: `all` stays in the host
+// ---------------------------------------------------------------------------
+
+const KW_ARMED = 'Keep-warm line for this session in 42 s — cancel it in the status bar.'
+const KW_NONE = 'Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.'
+const KW_TODAY = 'Keep-warm requests today: 2 · 64 tokens'
+
+test('a keep-warm note stands right under the entry it concerns, today\'s accounting under the block, both dim and escaped (1.8 §3 B2 "Card notes", "Accounting")', () => {
+  const h = render('sQuota()', {
+    quotas: [card({
+      cacheWatch: cacheBlock({
+        more: 1, moreText: '1 more session with a cooling or cold prompt cache',
+        keepWarm: {
+          notes: [{ line: 0, shortId: '9d0eb37a', kind: 'armed', text: KW_ARMED }, { line: 1, shortId: 'aaaa1111', kind: 'noTerminal', text: KW_NONE }],
+          today: KW_TODAY,
+        },
+      }),
+    })],
+  })
+  const block = '<div class="meta pc-line">' + PC_STATE + '</div><div class="meta pc-cost">' + PC_COST + '</div>'
+    + '<div class="meta pc-note">' + KW_ARMED + '</div>'
+    + '<div class="meta pc-line">' + PC_COLD + '</div><div class="meta pc-cost">' + PC_COLD_COST + '</div>'
+    + '<div class="meta pc-note">' + KW_NONE + '</div>'
+    + '<div class="meta pc-more">1 more session with a cooling or cold prompt cache</div>'
+    + '<div class="meta pc-today">' + KW_TODAY + '</div>'
+  assert.ok(h.indexOf(block) >= 0, h)
+  // No button, no link, no live region: the countdown is cancelled in the status bar.
+  assert.equal(/<button|<a |role=|aria-live|tabindex/.test(h.slice(h.indexOf(block), h.indexOf(block) + block.length)), false)
+  // A note for no listed entry, a broken note, a missing part: nothing drawn of it; the rest as before.
+  for (const keepWarm of [null, undefined, 7, { notes: 'x', today: 5 }, { notes: [{ line: 5, text: 'x' }, { line: 0 }, null], today: '' }]) {
+    const none = render('sQuota()', { quotas: [card({ cacheWatch: cacheBlock({ keepWarm }) })] })
+    assert.equal(/pc-note|pc-today/.test(none), false, JSON.stringify(keepWarm) + ': ' + none)
+    assert.equal(none.split('pc-line').length - 1, 2)
+  }
+  // The accounting line alone, on a block with no line: a day with answered lines keeps it on the card.
+  const alone = render('sQuota()', { quotas: [card({ cacheWatch: cacheBlock({ lines: [], all: [], keepWarm: { notes: [], today: KW_TODAY } }) })] })
+  assert.ok(alone.includes('<div class="meta pc-today">' + KW_TODAY + '</div></div>'), alone)
+  const odd = render('sQuota()', { quotas: [card({ cacheWatch: cacheBlock({ keepWarm: { notes: [{ line: 0, text: '<b>x</b>' }], today: '"&' } }) })] })
+  assert.ok(odd.includes('<div class="meta pc-note">&lt;b&gt;x&lt;/b&gt;</div>') && odd.includes('<div class="meta pc-today">&quot;&amp;</div>'), odd)
+  // Both are .meta lines: the card's dim tone; the accounting line has the count's air above it.
+  assert.match(SOURCE, /'<div class="meta pc-note">'/)
+  assert.match(SOURCE, /'<div class="meta pc-today">'/)
+})
+
+test('from a real view model with the keep-warm host\'s view: the note under its session\'s lines, the accounting line last in the block (1.8 B2)', () => {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: PC_T1, at: NOW - 56 * 60_000 })
+  const promptCaches = [pcReading(PC_S1, NOW + 2 * 60_000 + 42_000)]
+  const input = {
+    ...makeInput({ agg, cfg: makeConfig({ 'tokenPace.dashboard.sections': ['quota'] }) }),
+    promptCaches, promptCache: promptCaches[0],
+    keepWarm: { armed: { sessionId: PC_S1, endsAt: NOW + 42_000 }, noTerminal: [], unanswered: [], today: { requests: 2, tokens: 64 } },
+  }
+  const vm = JSON.parse(JSON.stringify(buildViewModel(input))) as Record<string, unknown>
+  const [claude] = cardsOf(pageOf(vm))
+  const lines = [...claude.html.matchAll(/<div class="meta (pc-[a-z]+)">([^<]*)<\/div>/g)].map((m) => [m[1], m[2].slice(0, 40)])
+  assert.deepEqual(lines.map((l) => l[0]), ['pc-line', 'pc-cost', 'pc-note', 'pc-line', 'pc-cost', 'pc-today'])
+  assert.ok(claude.html.includes('<div class="meta pc-note">' + KW_ARMED + '</div>'), claude.html)
+  assert.ok(claude.html.includes('<div class="meta pc-today">' + KW_TODAY + '</div>'), claude.html)
+  // The note is the bridge session's, under its entry — listed first, its expiry the sooner of the two.
+  const block = (vm.quotas as Array<{ cacheWatch: { lines: Array<{ shortId: string }>; keepWarm: { notes: Array<{ line: number; shortId: string }> } } }>)[0].cacheWatch
+  assert.equal(block.lines[block.keepWarm.notes[0].line].shortId, '9d0eb37a')
+})
+
+test('no push carries a prompt-cache block\'s `all` or `allMoreText` — the whole page or the quota fragment —, the host\'s view model keeps both, and a change of `all` alone pushes nothing (1.8 P10, §7c wave 2 fact 10)', () => {
+  const { HOST_ONLY_CACHE_FIELDS, pagePayload, pageQuotas } = loadDashboard()
+  assert.deepEqual([...HOST_ONLY_CACHE_FIELDS], ['all', 'allMoreText'])
+  const vm = cacheWorld()
+  const claude = (vm.quotas as Array<{ cacheWatch: Record<string, unknown> | null }>)[0]
+  assert.ok(Array.isArray(claude.cacheWatch?.all) && (claude.cacheWatch?.all as unknown[]).length === 4, 'the world watches four sessions')
+  const page = pagePayload(vm as never) as unknown as { quotas: Array<{ cacheWatch: Record<string, unknown> | null }> }
+  assert.equal('all' in (page.quotas[0].cacheWatch ?? {}), false)
+  assert.equal('allMoreText' in (page.quotas[0].cacheWatch ?? {}), false)
+  // Everything else of the block, and of the card, goes as it is; the host's model is not touched.
+  const { all, allMoreText, ...rest } = claude.cacheWatch as Record<string, unknown>
+  void allMoreText
+  assert.deepEqual(page.quotas[0].cacheWatch, rest)
+  assert.ok(Array.isArray(all) && (claude.cacheWatch as Record<string, unknown>).all === all)
+  assert.deepEqual(pageQuotas([]), [])
+  // Through the provider: the whole page and every quota fragment after it.
+  const r = throttleRig()
+  r.p.update(vm as never)
+  r.p.resolveWebviewView(r.view)
+  const later = JSON.parse(JSON.stringify(vm)) as typeof vm
+  const block = (later.quotas as Array<{ cacheWatch: { lines: Array<{ text: string }> } }>)[0].cacheWatch
+  block.lines[0].text += ' ·'
+  r.advance(AG_NOW + 10_000)
+  r.p.update(later as never)
+  assert.deepEqual(r.posted.map((m) => m.type), ['data', 'section'])
+  const text = JSON.stringify(r.posted)
+  assert.equal(/"all(MoreText)?":/.test(text), false, 'a push carries the block\'s `all`')
+  assert.equal(text.includes('bbbb2222'), false, 'a push names the warm session the page never draws')
+  // A change of `all` alone — the warm session's countdown — is nothing the page would see: no fragment.
+  const warmOnly = JSON.parse(JSON.stringify(later)) as typeof vm
+  const wb = (warmOnly.quotas as Array<{ cacheWatch: { all: Array<{ text: string }> } }>)[0].cacheWatch
+  wb.all[3].text = wb.all[3].text.replace('30 m 0 s', '29 m 55 s')
+  r.posted.length = 0
+  r.advance(AG_NOW + 20_000)
+  r.p.update(warmOnly as never)
+  assert.deepEqual(r.posted, [])
+})
+
+test('the page never reads a prompt-cache block\'s `all` or `allMoreText` (1.8 P10, static)', () => {
+  const code = SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  assert.equal(/allMoreText/.test(code), false)
+  assert.equal(/\b(cw|cacheWatch)\s*(\?\.|\.)\s*all\b/.test(code), false)
+  assert.equal(/\[\s*['"]all['"]\s*\]/.test(code), false)
 })

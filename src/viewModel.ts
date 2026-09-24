@@ -687,10 +687,46 @@ export interface CacheWatchCard {
    */
   allMoreText: string | null
   /**
-   * The keep-warm note of the block. B1's copy hint is struck (§7a Q1), so nothing fills it in 1.8 P6;
-   * B2's card notes come with P10.
+   * 1.8 B2 (P10, §3 B2 "Card notes", "Accounting"): the keep-warm part of the block — the notes under the
+   * entries they concern (a countdown under way, a session no terminal of this window runs, a line that
+   * got no answer) and today's accounting line under the block; null while there is neither (the setting
+   * off and no line answered today). B1's copy hint is struck (§7a Q1).
    */
-  keepWarm: null
+  keepWarm: KeepWarmCardVm | null
+}
+
+/** 1.8 B2: one keep-warm note — under the entry of `lines` at index `line`. */
+export interface KeepWarmNoteVm {
+  /** The index in `CacheWatchCard.lines` of the entry the note is under. */
+  line: number
+  /** That entry's `shortId` — for the harness; never more of the id. */
+  shortId: string
+  kind: 'armed' | 'noTerminal' | 'unanswered'
+  /** "Keep-warm line for this session in 42 s — cancel it in the status bar." */
+  text: string
+}
+
+/** 1.8 B2: the keep-warm part of the Claude card's prompt-cache block. */
+export interface KeepWarmCardVm {
+  /** At most one note per listed entry, in the order of `lines`. */
+  notes: KeepWarmNoteVm[]
+  /** "Keep-warm requests today: 2 · 1.9K tokens", or null when today has none. */
+  today: string | null
+}
+
+/**
+ * 1.8 B2: what the host's keep-warm part knows (keepWarmHost.ts `view`) — ids and counts, never a text of
+ * a session, a path or a command line.
+ */
+export interface KeepWarmVmInput {
+  /** The one countdown of this window: its session, and when it ends. */
+  armed: { sessionId: string; endsAt: number } | null
+  /** Sessions with a cooling bridge entry no terminal of this window runs (G7) — the setting on. */
+  noTerminal: readonly string[]
+  /** Sessions whose last line of this idle phase got no answer (G11). */
+  unanswered: readonly string[]
+  /** Today's answered lines and their tokens (`keepwarm.json`), or null when today has none. */
+  today: { requests: number; tokens: number } | null
 }
 
 export interface PromptCacheCard {
@@ -816,6 +852,11 @@ export interface VmInput {
    * mirror named, by session id. Absent → no bridge entry is watched (the transcript's still are).
    */
   promptCaches?: readonly PromptCacheReading[]
+  /**
+   * 1.8 B2 (P10): the keep-warm host's state — `KeepWarmHost.view(now)`. Absent → no note and no
+   * accounting line (the block is as 1.8 P6 builds it).
+   */
+  keepWarm?: KeepWarmVmInput | null
   /**
    * 1.6 O4: the agent hook's mirror as the host last read it (src/agentHook.ts) — the latest hook
    * call per (session, agent). Absent or empty while the hook is not installed: no node of the
@@ -1543,9 +1584,12 @@ function cacheParts(
   const latestId = latest?.sessionId ?? null
   const inLines = latestId !== null && listed.some((e) => e.sessionId === latestId)
   const inAll = latestId !== null && all.some((e) => e.sessionId === latestId)
+  const keepWarm = keepWarmCard(input.keepWarm ?? null, listed, now)
   return {
     promptCache: inLines ? null : promptCacheCard(latest, now, tcfg, input.cfg, inAll),
-    cacheWatch: all.length === 0
+    // 1.8 B2: a day with an answered keep-warm line keeps its accounting line on the card, watched
+    // session or not.
+    cacheWatch: all.length === 0 && keepWarm === null
       ? null
       : {
         lines: listed.map(lineOf),
@@ -1553,10 +1597,45 @@ function cacheParts(
         moreText: cacheMoreText(urgent.length - listed.length),
         all: all.map(lineOf),
         allMoreText: cacheMoreText(urgent.length - allUrgent),
-        keepWarm: null,
+        keepWarm,
       },
     codexCache: null,
   }
+}
+
+/**
+ * 1.8 B2 (§3 B2 "Card notes", "Accounting"): the keep-warm notes under the listed entries they concern —
+ * one per entry: the countdown under way, else a line of this idle phase that got no answer, else (a
+ * cooling entry the status line measures) no terminal of this window runs the session; every other
+ * block is a line of the log only — and today's accounting line. The host names sessions by id; the
+ * card by the entry's place and its short id.
+ */
+function keepWarmCard(kw: KeepWarmVmInput | null, listed: readonly CacheWatchEntry[], now: number): KeepWarmCardVm | null {
+  if (kw === null || typeof kw !== 'object') return null
+  const ids = (v: unknown): readonly string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  const noTerminal = ids(kw.noTerminal)
+  const unanswered = ids(kw.unanswered)
+  const armed = kw.armed && typeof kw.armed.sessionId === 'string' && Number.isFinite(kw.armed.endsAt) ? kw.armed : null
+  const notes: KeepWarmNoteVm[] = []
+  listed.forEach((e, line) => {
+    const cooling = e.phase === 'cooling'
+    const kind: KeepWarmNoteVm['kind'] | null = armed !== null && armed.sessionId === e.sessionId && cooling ? 'armed'
+      : unanswered.includes(e.sessionId) ? 'unanswered'
+        : noTerminal.includes(e.sessionId) && cooling && e.source === 'bridge' ? 'noTerminal'
+          : null
+    if (kind === null) return
+    const text = kind === 'armed'
+      ? t('Keep-warm line for this session in {0} s — cancel it in the status bar.', Math.max(0, Math.ceil(((armed as { endsAt: number }).endsAt - now) / 1000)))
+      : kind === 'unanswered'
+        ? t('Keep-warm stopped for this session: the last line got no answer within two minutes.')
+        : t('Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.')
+    notes.push({ line, shortId: e.sessionId.slice(0, 8), kind, text })
+  })
+  const day = kw.today
+  const today = day && Number.isSafeInteger(day.requests) && day.requests > 0 && Number.isFinite(day.tokens) && day.tokens >= 0
+    ? t('Keep-warm requests today: {0} · {1} tokens', day.requests, compact(day.tokens))
+    : null
+  return notes.length > 0 || today !== null ? { notes, today } : null
 }
 
 /** 1.7 W2: the freshness column's next attempt — "1h12m" · "due" · "waiting for focus" — or null. */

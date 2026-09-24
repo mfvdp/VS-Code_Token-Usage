@@ -183,9 +183,11 @@ test('the read contract holds for the shipped sources: every reader names exactl
   // every other reader is the aggregator's.
   const NARROWED = 'the status-line mirror, narrowed at activation'
   const mirrorRow = (what: string): boolean => what === 'the status-line mirror' || what === NARROWED || what.startsWith('the status line\'s ')
+  // 1.8 P10 (§0a.6–§0a.8, pinned and changed): the keep-warm host's rows read src/keepWarmHost.ts.
+  const keepWarmRow = (what: string): boolean => what.startsWith('keep-warm: ')
   const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
     : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts'
-      : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : 'src/agg.ts'
+      : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : keepWarmRow(what) ? 'src/keepWarmHost.ts' : 'src/agg.ts'
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, fileOf(row.what), row.what)
   // 1.8 §0a.1 (P4): the mirror's reader, level by level — the envelope, the payload's top-level
   // fields with 1.8's `session_id`, and of each block what is taken, the prompt cache's
@@ -211,9 +213,25 @@ test('the read contract holds for the shipped sources: every reader names exactl
     ['the status line\'s prompt cache (direct)', 'fields', ['warm']],
   ])
   for (const row of contract.READ_CONTRACT) {
-    assert.deepEqual(row.pages, mirrorRow(row.what) ? ['privacy', 'promptCache'] : undefined, row.what)
+    assert.deepEqual(row.pages, mirrorRow(row.what) || keepWarmRow(row.what) ? ['privacy', 'promptCache'] : undefined, row.what)
     if (mirrorRow(row.what)) assert.equal(row.source, 'statusline-mirror.json', row.what)
   }
+  // 1.8 P10 (§0a.6–§0a.8): the keep-warm host, reader by reader — the two shell-execution events, an
+  // open execution's command line with its confidence and its working directory (tested, never kept),
+  // VS Code's word for what runs in a terminal, the one line typed (`sendText` and nothing else of the
+  // terminal — never its name), and keepwarm.json read back by its shape.
+  const shell = 'VS Code\'s shell integration'
+  assert.deepEqual(contract.READ_CONTRACT.filter((row) => keepWarmRow(row.what)).map((row) => [row.what, row.source, row.kind, row.fields]), [
+    ['keep-warm: the shell execution events', shell, 'fields', ['terminal', 'execution']],
+    ['keep-warm: an open shell execution', shell, 'fields', ['commandLine', 'cwd']],
+    ['keep-warm: its command line', shell, 'fields', ['value', 'confidence']],
+    ['keep-warm: its working directory', shell, 'fields', ['fsPath']],
+    ['keep-warm: a terminal\'s shell', shell, 'fields', ['state']],
+    ['keep-warm: the shell VS Code reports', shell, 'fields', ['shell']],
+    ['keep-warm: the line typed', shell, 'fields', ['sendText']],
+    ['keep-warm: the accounting file', 'keepwarm.json', 'fields', ['v', 'days']],
+    ['keep-warm: a day of the accounting', 'keepwarm.json', 'fields', ['requests', 'tokens']],
+  ])
 })
 
 test('the bridge keeps in the mirror exactly the keys the read contract lists for it (1.8 §7a Q11)', () => {
@@ -398,6 +416,8 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     writeFileSync(join(dir, 'src', 'quota.ts'), quota)
     // 1.8 review 2: the narrowing of an older mirror at activation is the mirror's second reader.
     writeFileSync(join(dir, 'src', 'bridge.ts'), fromRepo('src/bridge.ts'))
+    // 1.8 P10 (pinned and changed): the keep-warm host's readers are rows of the contract too.
+    writeFileSync(join(dir, 'src', 'keepWarmHost.ts'), fromRepo('src/keepWarmHost.ts'))
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })

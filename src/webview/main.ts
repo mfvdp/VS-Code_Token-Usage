@@ -588,15 +588,25 @@ function quotaCard(q: Payload): string {
   // then how many more there are. Every word is the view model's (the `~` of an estimate and "estimated
   // from the transcript" included), in the dim tone of the card's other lines, and no live region: the
   // section is rewritten every few seconds while a line counts down. Nothing while none cools — a warm
-  // cache is not news. No button: the keep-warm prompt is not built (1.8 §7a Q1).
+  // cache is not news. No button: the keep-warm prompt is not built (1.8 §7a Q1). 1.8 B2: a keep-warm
+  // note under the entry it concerns (a countdown under way, no terminal of this window runs the
+  // session, the last line got no answer) and today's keep-warm accounting under the block — the same
+  // dim tone, the view model's words; the countdown is cancelled in the status bar, not here. The page
+  // reads `lines` and `moreText` and never `all`, which the host keeps for the markdown document.
   const cw = q.cacheWatch && Array.isArray(q.cacheWatch.lines) ? q.cacheWatch : null;
   if (cw) {
-    for (const l of cw.lines) {
-      if (!l || typeof l.text !== 'string' || !l.text) continue;
+    const kw = cw.keepWarm && typeof cw.keepWarm === 'object' ? cw.keepWarm : null;
+    const notes = kw && Array.isArray(kw.notes) ? kw.notes : [];
+    cw.lines.forEach(function (l: Payload, i: number) {
+      if (!l || typeof l.text !== 'string' || !l.text) return;
       h += '<div class="meta pc-line">' + esc(l.text) + '</div>';
       if (typeof l.cost === 'string' && l.cost) h += '<div class="meta pc-cost">' + esc(l.cost) + '</div>';
-    }
+      for (const n of notes) {
+        if (n && n.line === i && typeof n.text === 'string' && n.text) h += '<div class="meta pc-note">' + esc(n.text) + '</div>';
+      }
+    });
     if (typeof cw.moreText === 'string' && cw.moreText) h += '<div class="meta pc-more">' + esc(cw.moreText) + '</div>';
+    if (kw && typeof kw.today === 'string' && kw.today) h += '<div class="meta pc-today">' + esc(kw.today) + '</div>';
   }
   // 1.8 A6: the Codex card's one line — until when OpenAI keeps the prompt prefix at least — last on
   // that card, the view model's words.

@@ -201,3 +201,42 @@ test('a German setting description never quotes a string the runtime shows in Ge
   }
   assert.ok(quoted >= 10, `only ${quoted} quoted phrase(s) in package.nls.de.json`)
 })
+
+test('the keep-warm setting: a boolean, off by default, of application scope, in General after the plan names; its words follow §7a Q19 in both languages (1.8 §0b.3, §3 B2)', () => {
+  const manifest = rawManifest as {
+    contributes: {
+      configuration: Array<{ id: string; properties: Record<string, Record<string, unknown>> }>
+      commands: Array<{ command: string; title: string; category?: string }>
+    }
+  }
+  const general = manifest.contributes.configuration.find((g) => g.id === 'tokenPace.general')
+  assert.ok(general)
+  const keys = Object.keys(general.properties)
+  assert.equal(keys.indexOf('tokenPace.cacheKeepWarm'), keys.indexOf('tokenPace.planName') + 1)
+  // A workspace's `.vscode/settings.json`, which a cloned repository brings along, cannot switch it on.
+  assert.deepEqual(general.properties['tokenPace.cacheKeepWarm'], {
+    type: 'boolean', order: 12, default: false, markdownDescription: '%config.cacheKeepWarm.description%', scope: 'application',
+  })
+  const en = englishNls['config.cacheKeepWarm.description']
+  const de = germanNls['config.cacheKeepWarm.description']
+  for (const claim of ['three minutes or less left', 'a one-minute countdown you can cancel', 'about two minutes before the cache expires',
+    'Off by default; asks for consent first', 'switching it off withdraws the consent', 'a real request that counts against your usage',
+    'text you typed but did not send is sent with it', 'automation that Anthropic\'s terms do not explicitly permit',
+    'Claude Code extension\'s own panel are out of reach', 'Prompt cache page']) {
+    assert.ok(en.includes(claim), `the setting's description does not say: ${claim}`)
+  }
+  for (const claim of ['drei Minuten Restzeit oder weniger', 'einminütiger Countdown, den Sie abbrechen können', 'etwa zwei Minuten vor dem Ablauf',
+    'Standardmäßig aus; fragt zuerst nach Ihrer Zustimmung', 'das Abschalten zieht sie zurück', 'echte Anfrage', 'mitgesendet',
+    'nicht ausdrücklich gestatten', 'außer Reichweite', 'Prompt-Cache']) {
+    assert.ok(de.includes(claim), `the German description does not say: ${claim}`)
+  }
+  // §7a Q19 replaced the spec's four minutes and fifty-five; neither is said in either language.
+  for (const stale of ['four minutes', '4 minutes', '55 minutes', 'vier Minuten', '55 Minuten']) {
+    assert.equal(en.includes(stale) || de.includes(stale), false, stale)
+  }
+  // The cancel command, in the palette under the extension's category.
+  const cancel = manifest.contributes.commands.find((c) => c.command === 'tokenPace.cancelKeepWarm')
+  assert.deepEqual(cancel, { command: 'tokenPace.cancelKeepWarm', title: '%command.cancelKeepWarm.title%', category: '%command.category%' })
+  assert.equal(englishNls['command.cancelKeepWarm.title'], 'Cancel the Keep-Warm Line')
+  assert.equal(germanNls['command.cancelKeepWarm.title'], 'Warmhalte-Zeile abbrechen')
+})

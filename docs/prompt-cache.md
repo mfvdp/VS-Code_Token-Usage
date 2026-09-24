@@ -205,8 +205,8 @@ and the Quick Pick carry the same line under the Codex card.
 
 ## Keep-warm in a terminal (opt-in)
 
-<!-- 1.8 P9 draft: the checks, as src/keepWarm.ts makes them. P10 adds the setting, the countdown,
-the consent and the accounting; P11 finishes this section (the terms passage and its link). -->
+<!-- 1.8 P9 wrote the checks, P10 the setting, the countdown, the consent, the notes, the accounting
+and the terms; P11 reviews the section with the rest of the page. -->
 
 Off by default. With `tokenPace.cacheKeepWarm` switched on and your consent given, Token Pace keeps
 a Claude Code session's one-hour prompt cache warm by typing one fixed line into the VS Code terminal
@@ -256,9 +256,70 @@ one-minute countdown starts in the status bar, and all of them again when the co
 
 **What no check can see.** Token Pace cannot read Claude Code's input line: **text you typed there
 and did not send is sent together with the line** — type nothing into the Claude terminal while the
-countdown runs. And it cannot see a dialog the transcript does not show. The terminal is recognised
-by its folder, not by its session: another Claude Code session of the same folder, in a terminal of
-this window, would get the line instead — check 11 then stops keep-warm after that one line.
+countdown runs. This was seen, not inferred: a half-typed draft and the line went out as one message.
+No interface of VS Code reads a terminal's input, so no check can find a draft; the countdown and its
+cancel are the only protection, and the focus check (8) keeps the line from any terminal you were in
+since the reply. It cannot see a dialog the transcript does not show either. The terminal is
+recognised by its folder, not by its session: another Claude Code session of the same folder, in a
+terminal of this window, would get the line instead — check 11 then stops keep-warm after that one
+line. A session in the Claude Code extension's own panel gets the cooling warning and never a line.
+
+**The countdown.** When the checks hold, a status-bar item of its own appears, whatever
+`tokenPace.statusBar.show` lists — a line is never typed without it on screen: `$(watch) keep warm
+in 42 s · cancel`, counting down each second from 60, with no colour and no alarm. Its tooltip says
+what will be typed where — `Token Pace will type “Ignore this message. No action. No response.” into
+the terminal that runs Session Tue 14:20 · 9d0eb37a and press Enter, so that its prompt cache stays
+warm. Click to cancel.` —, and a screen reader hears `Keep-warm line for Session Tue 14:20 · 9d0eb37a
+in 42 seconds, activate to cancel`. **A click cancels** the line and keep-warm for the rest of the
+session's idle phase, and so does *Token Pace: Cancel the Keep-Warm Line*. At zero every check runs
+again with the facts of that moment; only if all still hold does the line go, into the terminal the
+countdown was started for, and the item reads `$(watch) keep-warm line sent` for 10 seconds. One
+countdown at a time per window; only the window whose terminal runs the session starts one.
+
+**On the Claude card**, under the session's lines: `Keep-warm line for this session in 42 s — cancel
+it in the status bar.` while a countdown runs; `Keep-warm cannot reach this session: it does not run
+in a VS Code terminal of this window.` for a cooling session the status line measures and no terminal
+of this window runs — the panel's sessions among them —; `Keep-warm stopped for this session: the
+last line got no answer within two minutes.` after check 11 stopped it. Every other reason is a line
+of the log only (with `tokenPace.debug` on) — [Troubleshooting](troubleshooting.md#no-keep-warm-line-was-sent)
+names each in words.
+
+**Counted apart.** A line answered by a request of the session — its first line within two minutes
+of the line — counts one request, and the billable tokens of that answer (fresh input, cache write
+and output, the dashboard's usage), towards today in `keepwarm.json`, in the extension's storage:
+per local day the number of answered lines and their tokens, 31 days at most, never a session, a
+path, a time of day or a terminal. The Claude card shows today's under its prompt-cache block,
+`Keep-warm requests today: 2 · 64 tokens`, and so does the markdown view; nothing else does. A
+line that is not answered is not counted. *Clear Stored Data…* deletes the file.
+
+**Switching it on and off.** `tokenPace.cacheKeepWarm` is a setting of the application scope: a
+workspace's `.vscode/settings.json`, which a cloned repository brings along, cannot switch it on.
+Switching it on asks for consent — a modal warning that names what is typed, when, what it costs,
+the draft that is sent with it, the panel out of reach and the terms passage below; only *Allow
+keep-warm* allows it. A refusal is kept: the question comes again only when you switch the setting
+off and on. Switching it off withdraws the consent, ends a countdown under way without its line, and
+stops Token Pace listening to the terminals at all. A window in the background asks when it is
+focused. A Claude Code session started before the setting was on — or before the window opened — is
+not seen until Claude Code is started again in its terminal: the shell integration reports a command
+when it starts.
+
+**The terms.** Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms), section
+3, list among what may not be done: “Except when you are accessing our Services via an Anthropic API
+Key or where we otherwise explicitly permit it, to access the Services through automated or
+non-human means, whether through a bot, script, or otherwise.” A timer in Token Pace that types into
+Claude Code's terminal is automated access of that kind, and Anthropic has not explicitly permitted
+it; the consent dialog says so, and quotes the passage in English in every language. This page gives
+no legal advice: it is a grey zone, and only Anthropic can say otherwise. Every line is also a real
+request — on a subscription it counts against your usage limits.
+
+**What is read and typed.** While the setting is on and allowed, and never otherwise, Token Pace
+takes of VS Code's shell integration: of its events `onDidStartTerminalShellExecution` and
+`onDidEndTerminalShellExecution` the `terminal` and the `execution`; of an execution that has not
+ended its `commandLine` — `value` and `confidence` — and its `cwd` (`fsPath`), tested when a check
+runs and kept by no one; of a terminal its `state`, VS Code's `shell` for it. It writes one thing into
+a terminal: `sendText` with the fixed line and Enter. It reads back `keepwarm.json` by its shape — `v`,
+`days`, and per day `requests` and `tokens`. [Privacy](privacy.md) lists the same, and the read
+contract of `npm run check:privacy` holds both pages to it.
 
 The limits are constants of the code, not settings:
 
@@ -271,6 +332,9 @@ The limits are constants of the code, not settings:
 | `KEEPWARM_VERIFY_MS` | 2 minutes | how soon a request of the session must answer a line |
 | `KEEPWARM_MAX_PER_IDLE` | 3 | lines per idle phase of a session |
 | `KEEPWARM_QUOTA_STOP_PERCENT` | 90 % | the quota window share from which no line goes |
+| `KEEPWARM_SENT_SHOWN_MS` | 10 seconds | how long the item says the line was sent |
+| `KEEPWARM_VERIFY_GRACE_MS` | 15 seconds | how much longer a window waits for an answer to be counted before it calls the line unanswered |
+| `KEEPWARM_DAYS_KEPT` | 31 | days of `keepwarm.json` |
 
 ## One reading per session
 

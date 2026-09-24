@@ -173,12 +173,37 @@ permission dialog is shown, so no wait is reported. *Clear Stored Data…*
 deletes `agent-hook.jsonl` ([Export and diagnostics](export.md)); the script stays while the hook
 is installed and goes with the extension's storage on uninstall.
 
+**The keep-warm line** ([Prompt cache](prompt-cache.md#keep-warm-in-a-terminal-opt-in), 1.8) is
+opt-in — `tokenPace.cacheKeepWarm`, off by default, with a consent dialog of its own, never in
+Restricted Mode — and it is the one thing Token Pace ever does on its own: it types one fixed line,
+`Ignore this message. No action. No response.`, into the VS Code terminal that runs a Claude Code
+session and presses Enter (`sendText`, once per line), after a one-minute countdown you can cancel,
+so that Claude Code itself sends a request with its own login; Token Pace reads no credential for
+it and sends nothing over the network. Nothing is ever read back from the terminal — not its output,
+not what Claude Code shows. To find that terminal it reads, while the setting is on and allowed and
+from nothing else, what VS Code's shell integration reports: of its two events,
+`onDidStartTerminalShellExecution` and `onDidEndTerminalShellExecution`, the `terminal` and the
+`execution`; of an execution that has not ended its `commandLine` — the `value` and VS Code's
+`confidence` in it — and its `cwd` (the `fsPath`), tested when the check runs (does it run `claude`,
+in the folder the session's transcript belongs to?) and kept by no one: never logged, shown, stored
+or exported; and of a terminal VS Code's `state`, its `shell` (`claude` while Claude Code runs).
+Never a terminal's name — Claude Code sets it to a summary of the conversation —, its output or its
+environment. Which terminal was active in a focused window, and when, is kept in memory only. With
+the setting off, without the consent or in Restricted Mode none of these events is listened to. The
+line's answers are counted in `keepwarm.json` in the extension's storage (below): `v` and `days`,
+and per local day `requests` and `tokens` — how many lines were answered and the billable tokens of
+their answers —, at most 31 days, written whole (a temp file, then a rename) by the window that sent
+the line; never a session id, a path, a time of day, a terminal or a command line. A file of any
+other shape is read as empty. The consent is kept under `tokenPace.keepWarmConsent` in the
+extension's state; switching the setting off withdraws it.
+
 Nothing is written except the extension's own state in its `globalStorage` — among it the copy of
 the agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that
 activation replaces with the shipped one while a copy is there, the copy of the status-line bridge's
 script, `statusline-bridge.js`, that *Connect Claude Status Line…* puts there and that activation
 replaces with the shipped one when the two differ, and the lines the hook script
-appends to `agent-hook.jsonl` while you have it installed, and `quota.json`, which holds the
+appends to `agent-hook.jsonl` while you have it installed, the keep-warm accounting `keepwarm.json`
+(above) once a keep-warm line was answered, and `quota.json`, which holds the
 readings of the quota fetch and, per provider, its last failed attempt: when it was, its kind and
 the fetch's own words — a fixed phrase with at most an HTTP status, or the Codex app-server's error
 string —, never a token, a header or an exception's text; the entry goes with the next successful
@@ -192,6 +217,9 @@ which an update removes. A command an install of 1.3 to 1.7 wrote into `settings
 copy once, on the first activation of 1.8 in a trusted window: the write you consented to at install
 time, with a backup of the original bytes first, changing only the `statusLine` entry's `command`
 string and only while the entry still holds the command Token Pace recorded; the log says so.
+
+Beside them stands the one write that is no file: the opt-in keep-warm line, typed into Claude
+Code's terminal (above).
 
 One further write exists and is not an opt-in setting: the *Run Token Pace locally* button of
 the remote hint puts `remote.extensionKind` into your user `settings.json` — see
@@ -209,7 +237,8 @@ The same command checks the **read contract**: a table in `scripts/check-privacy
 every reader of a Claude Code file, the fields it may take — the ones this page lists above — and
 the check fails when a reader takes a field the table does not list, or no longer takes one it
 does. The documentation tests hold this page and the agents page to the same table — this page and
-the prompt-cache page for the status-line mirror's rows. It also holds
+the prompt-cache page for the status-line mirror's rows, and (1.8) for the keep-warm host's: what it
+takes of VS Code's shell integration, the one line it types, and `keepwarm.json` read back. It also holds
 the agent hook's bundle, `dist/agent-hook.js`, to Node's `fs` and `path`: a network module
 (`http`, `https`, `net`, `tls`, `dgram`), `child_process`, `worker_threads` or a `fetch(` in it
 fails the build. The status-line bridge's bundle, `dist/statusline-bridge.js` — the file its copy
@@ -243,7 +272,11 @@ page, the markdown report, the Quick Pick, a status-bar tooltip, the log, the di
 an export, and of its session id at most the first eight characters. So does the prompt-cache
 request (1.8): a main transcript whose prompt, reply, tool input and tool result carry synthetic
 text, with a model id of 300 characters, leaves none of that text and no such model in the session's
-record or the snapshot. Before the 1.6.0 release a
+record or the snapshot. So does the keep-warm line (1.8): a terminal running
+`claude --api-key synthetic-secret-123` in `/home/u/synthetic-project` is matched — the line goes
+there — and neither string reaches the log, the view model, the page, the markdown report,
+`keepwarm.json`, the diagnostics report or a status-bar item, and a terminal's name is never read.
+Before the 1.6.0 release a
 review ran one more:
 a synthetic world with prompts, descriptions, results, summaries, scripts, error texts and account
 ids under every neighbouring key reaches none of the outputs.

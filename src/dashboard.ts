@@ -28,7 +28,7 @@ import { SOURCES, SOURCE_TITLE } from './adapters'
 import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from './agentTree'
 import { locale, t } from './i18n'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
-import type { ViewModel } from './viewModel'
+import type { CacheWatchCard, QuotaCard, ViewModel } from './viewModel'
 
 /**
  * What a section is rebuilt from. A field of the UI state may be named as `ui.<field>`: the
@@ -99,11 +99,47 @@ const CLAUDE_ONLY_VIEW: SectionField[] = ['provider', 'claudeOnly']
  */
 export const HOST_ONLY_FIELDS = ['allBudgets'] as const satisfies readonly (keyof ViewModel)[]
 
-/** 1.8 L-3: the view model as the page gets it — every field but HOST_ONLY_FIELDS. */
-export function pagePayload(vm: ViewModel): Omit<ViewModel, typeof HOST_ONLY_FIELDS[number]> {
+/**
+ * 1.8 P10 (§7c wave 2 fact 10): the parts of a quota card's prompt-cache block no push carries —
+ * `all` (every watched session, warm ones too, at most ten) and `allMoreText` are the markdown
+ * document's, which the host builds from its own view model; the page draws `lines` and `moreText`
+ * only. The bar and the text views keep reading them in the host. Exported for the tests.
+ */
+export const HOST_ONLY_CACHE_FIELDS = ['all', 'allMoreText'] as const satisfies readonly (keyof CacheWatchCard)[]
+
+/** A quota card's prompt-cache block as the page gets it. */
+export type PageCacheWatch = Omit<CacheWatchCard, typeof HOST_ONLY_CACHE_FIELDS[number]>
+/** A quota card as the page gets it — its block without the host's parts. */
+export type PageQuotaCard = Omit<QuotaCard, 'cacheWatch'> & { cacheWatch: PageCacheWatch | null }
+/** The view model as the page gets it. */
+export type PageViewModel = Omit<ViewModel, typeof HOST_ONLY_FIELDS[number] | 'quotas'> & { quotas: PageQuotaCard[] }
+
+/** 1.8 P10: the quota cards as the page gets them — each block without HOST_ONLY_CACHE_FIELDS. */
+export function pageQuotas(quotas: readonly QuotaCard[]): PageQuotaCard[] {
+  if (!Array.isArray(quotas)) return quotas as unknown as PageQuotaCard[]
+  return quotas.map((q) => {
+    const cw = q && q.cacheWatch
+    if (!cw || typeof cw !== 'object') return q as PageQuotaCard
+    const block: Record<string, unknown> = { ...cw }
+    for (const f of HOST_ONLY_CACHE_FIELDS) delete block[f]
+    return { ...q, cacheWatch: block as unknown as PageCacheWatch }
+  })
+}
+
+/**
+ * 1.8 L-3: the view model as the page gets it — every field but HOST_ONLY_FIELDS; 1.8 P10: and every
+ * quota card's block without HOST_ONLY_CACHE_FIELDS.
+ */
+export function pagePayload(vm: ViewModel): PageViewModel {
   const o: Record<string, unknown> = { ...vm }
   for (const f of HOST_ONLY_FIELDS) delete o[f]
-  return o as Omit<ViewModel, typeof HOST_ONLY_FIELDS[number]>
+  o.quotas = pageQuotas(vm.quotas)
+  return o as PageViewModel
+}
+
+/** A field of the view model as a push carries it: the quota cards without the host's parts (1.8 P10). */
+function pageField(vm: ViewModel, f: keyof ViewModel): unknown {
+  return f === 'quotas' ? pageQuotas(vm.quotas) : vm[f]
 }
 
 /**
@@ -479,12 +515,16 @@ function payloadOf(vm: ViewModel, fields: SectionField[]): Record<string, unknow
   const o: Record<string, unknown> = {}
   for (const f of fields) {
     if (f.startsWith(UI_FIELD)) o.ui = vm.ui
-    else o[f] = vm[f as keyof ViewModel]
+    else o[f] = pageField(vm, f as keyof ViewModel)
   }
   return o
 }
 
-/** What a section is compared by: a `ui.<field>` dependency compares that one field. */
+/**
+ * What a section is compared by: a `ui.<field>` dependency compares that one field. The page's form of
+ * a field (1.8 P10: the quota cards without the host's parts), so that a change the page would not see
+ * pushes nothing.
+ */
 function serialise(vm: ViewModel, fields: SectionField[]): string {
   const o: Record<string, unknown> = {}
   for (const f of fields) {
@@ -492,7 +532,7 @@ function serialise(vm: ViewModel, fields: SectionField[]): string {
       // A payload from a build that had no UI state is a view like any other here: the
       // provider states an absence, it does not throw the panel away over one field.
       ? (vm.ui as unknown as Record<string, unknown> | undefined)?.[uiField(f)]
-      : vm[f as keyof ViewModel]
+      : pageField(vm, f as keyof ViewModel)
   }
   return JSON.stringify(o)
 }
@@ -572,8 +612,10 @@ p { margin: 6px 0; }
 /* 1.8 A5, A6: the quota cards' prompt-cache lines — a session's state line (pc-line) with its cost line
    right under it (pc-cost), the count of the rest (pc-more), the Codex card's line (pc-codex). The dim tone
    of .meta and no colour of their own: the phase is said in words. A little air above each state line, so
-   that two sessions read as two, and above the lines that close a card. */
-.pc-line, .pc-more, .pc-codex { margin-top: 4px; }
+   that two sessions read as two, and above the lines that close a card. 1.8 B2: a keep-warm note (pc-note)
+   sits right under the entry it concerns, as its cost line does; today's keep-warm accounting (pc-today)
+   closes the block with the same air as the count. */
+.pc-line, .pc-more, .pc-codex, .pc-today { margin-top: 4px; }
 .card { margin-bottom: 14px; }
 /* The two provider cards ran into one another; a hairline says where one ends. Scoped to the
    quota body, because a "card" elsewhere on the page is a row of a list that needs no rule. */

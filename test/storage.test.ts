@@ -40,6 +40,7 @@ function pathsIn(dir: string): StoredPaths {
     leader: path.join(dir, 'leader.json'),
     mirror: path.join(dir, 'statusline-mirror.json'),
     hookMirror: path.join(dir, 'agent-hook.jsonl'),
+    keepWarm: path.join(dir, 'keepwarm.json'),
   }
 }
 
@@ -55,7 +56,8 @@ test('the inventory names size and presence of every item', () => {
   const items = inventory(paths, memento, { state: 'oldest day 2026-05-01' })
   const byKey = new Map(items.map((i) => [i.key, i]))
 
-  assert.deepEqual(items.map((i) => i.key), ['state', 'quota', 'history', 'mirror', 'hookMirror', 'consent', 'alerts', 'ui'])
+  // 1.8 P10 (§0a.7, pinned and changed): the keep-warm accounting, after the agent hook's mirror.
+  assert.deepEqual(items.map((i) => i.key), ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'consent', 'alerts', 'ui'])
   assert.equal(byKey.get('state')!.present, true)
   assert.equal(byKey.get('state')!.bytes, 13)
   assert.equal(byKey.get('state')!.detail, 'oldest day 2026-05-01')
@@ -123,6 +125,7 @@ test('deleting the consent item clears every consent key, including the write co
   memento.store.set('networkConsentOffered', true)
   memento.store.set('writeConsent.writeQuotaCache', 'granted')
   memento.store.set('writeConsent.statusLine', 'denied')
+  memento.store.set('tokenPace.keepWarmConsent', 'granted')
   memento.store.set('tokenPace.alerts', { entries: {} })
   memento.store.set('tokenPace.ui', { range: '7d' })
   memento.store.set('tokenPace.bridge', { installedCommand: 'x' })
@@ -133,6 +136,8 @@ test('deleting the consent item clears every consent key, including the write co
   assert.equal(memento.store.has('networkConsentOffered'), false)
   assert.equal(memento.store.has('writeConsent.writeQuotaCache'), false)
   assert.equal(memento.store.has('writeConsent.statusLine'), false)
+  // 1.8 §0b.3: the keep-warm consent is a decision like the others, and goes with them.
+  assert.equal(memento.store.has('tokenPace.keepWarmConsent'), false)
   assert.equal(memento.store.has('tokenPace.alerts'), false)
   assert.equal(memento.store.has('tokenPace.ui'), false)
   // The install record is the only way back from an edited settings.json.
@@ -238,7 +243,7 @@ test('the shared quota cache is listed only when its paths are supplied', () => 
   // It comes after the extension's own files and before the memento items.
   assert.deepEqual(
     items.map((i) => i.key),
-    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'externalQuota', 'consent', 'alerts', 'ui'],
+    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'externalQuota', 'consent', 'alerts', 'ui'],
   )
 })
 
@@ -283,4 +288,29 @@ test('the two extra warnings say what deleting cannot undo', () => {
   assert.match(deleteWarningExternal(), /other tools/)
   assert.match(bridgeBlocksDelete(), /Disconnect Claude Status Line/)
   assert.match(bridgeBlocksDelete(), /settings\.json/)
+})
+
+test('the keep-warm accounting is in the list by its file name, and deleting it deletes it and its temp sibling alone (1.8 §0a.7)', async () => {
+  const dir = scratchDir('storage')
+  const paths = pathsIn(dir)
+  const text = JSON.stringify({ v: 1, days: { '2026-09-24': { requests: 2, tokens: 64 } } })
+  fs.writeFileSync(paths.keepWarm, text)
+  fs.writeFileSync(`${paths.keepWarm}.tmp-4821`, text)
+  fs.writeFileSync(paths.state, '{}')
+  const item = inventory(paths, new FakeMemento()).find((i) => i.key === 'keepWarm')
+  assert.ok(item)
+  assert.equal(item.label, 'Keep-warm requests (keepwarm.json)')
+  assert.equal(item.present, true)
+  assert.equal(item.bytes, text.length)
+  assert.deepEqual(storedFiles('keepWarm', paths), [paths.keepWarm])
+  assert.equal(storedFile('keepWarm', paths), paths.keepWarm)
+  const log: string[] = []
+  assert.deepEqual(await deleteItems(['keepWarm'], paths, new FakeMemento(), (m) => log.push(m)), { deleted: ['keepWarm'], failed: [] })
+  assert.equal(fs.existsSync(paths.keepWarm), false)
+  assert.equal(fs.existsSync(`${paths.keepWarm}.tmp-4821`), false, 'the interrupted write of the file survived')
+  assert.equal(fs.existsSync(paths.state), true)
+  assert.deepEqual(log, ['Stored data removed: Keep-warm requests (keepwarm.json)'])
+  // Gone: listed as absent, and deleting it again is no failure.
+  assert.equal(inventory(paths, new FakeMemento()).find((i) => i.key === 'keepWarm')?.present, false)
+  assert.deepEqual(await deleteItems(['keepWarm'], paths, new FakeMemento()), { deleted: ['keepWarm'], failed: [] })
 })

@@ -825,7 +825,8 @@ test('the pages list what Clear Stored Data offers — the agent hook\'s mirror 
   const para = exp.slice(exp.indexOf('**Clear Stored Data…**'), exp.indexOf('**Uninstalling**'))
   assert.ok(para.length > 100, 'docs/export.md has no Clear Stored Data paragraph')
   // Every file the list names by its file name is named on the page, in backticks.
-  const keys: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror']
+  // 1.8 P10 (§0a.7, pinned and changed): the keep-warm accounting joins the list.
+  const keys: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm']
   for (const key of keys) {
     const file = /\(([^)]+)\)$/.exec(labelOf(key))?.[1]
     assert.ok(file, `the list's label of ${key} names no file`)
@@ -2488,4 +2489,74 @@ test('the status bar pages, the settings page and the setting name the cache ent
   assert.equal(flat(doc.statusBar).includes('absent rather than estimated'), false, 'docs/status-bar.md still promises no estimate')
   assert.ok(flat(doc.statusBar).includes('estimated from the session\'s transcript, carry `~` and say *estimated from the transcript*'))
   assert.ok(flat(doc.statusBar).includes('unless its session is one of the rows above: one row per session'))
+})
+
+/**
+ * 1.8 P10 (§3 B2 "Docs", §0a.6–§0a.8, §7a Q19, §7c): the keep-warm line on the pages a reader looks it up
+ * on — the prompt-cache page's section grown with the countdown, the notes, the accounting, the switch
+ * and the terms passage word for word with its link; the troubleshooting section naming every reason
+ * a line was held back; the status-bar states and the settings and commands rows in the host's words;
+ * the privacy page's readers.
+ */
+test('the pages describe the keep-warm line as the host builds it: the countdown, the notes, the accounting, the consent, the terms, every block (1.8 P10)', () => {
+  const kw = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  const host = require('../src/keepWarmHost') as typeof import('../src/keepWarmHost')
+  const { KEEP_WARM_TERMS_PASSAGE } = require('../src/consent') as typeof import('../src/consent')
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  const page = doc.promptCache
+  const from = page.indexOf('\n## Keep-warm in a terminal (opt-in)\n')
+  const section = flat(page.slice(from, page.indexOf('\n## ', from + 10)))
+  const hostSrc = readDoc('src/keepWarmHost.ts')
+  // The item's words, as keepWarmHost.ts writes them (its t() keys), with the page's example figures.
+  assert.ok(hostSrc.includes("t('keep warm in {0} s · cancel', secs)") && hostSrc.includes("t('keep-warm line sent')"))
+  const item = '`$(watch) keep warm in 42 s · cancel`'
+  for (const claim of [
+    item, '`$(watch) keep-warm line sent` for 10 seconds', 'whatever `tokenPace.statusBar.show` lists',
+    '**A click cancels** the line and keep-warm for the rest of the session\'s idle phase', '*Token Pace: Cancel the Keep-Warm Line*',
+    'At zero every check runs again', 'only the window whose terminal runs the session starts one',
+    'Keep-warm line for this session in 42 s — cancel it in the status bar.',
+    'Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.',
+    'Keep-warm stopped for this session: the last line got no answer within two minutes.',
+    'Keep-warm requests today: 2 · 64 tokens', '`keepwarm.json`', '31 days at most',
+    'A session in the Claude Code extension\'s own panel gets the cooling warning and never a line.',
+    'a half-typed draft and the line went out as one message', 'type nothing into the Claude terminal while the countdown runs',
+    'a setting of the application scope', 'only *Allow keep-warm* allows it', 'the question comes again only when you switch the setting off and on',
+    'Switching it off withdraws the consent', `“${KEEP_WARM_TERMS_PASSAGE}”`,
+    '[Consumer Terms](https://www.anthropic.com/legal/consumer-terms)', 'This page gives no legal advice',
+    '`sendText`', '`onDidStartTerminalShellExecution`', '`onDidEndTerminalShellExecution`',
+  ]) assert.ok(section.includes(claim), `the keep-warm section does not say: ${claim}`)
+  for (const [name, value] of [['KEEPWARM_SENT_SHOWN_MS', `${host.KEEPWARM_SENT_SHOWN_MS / 1000} seconds`],
+    ['KEEPWARM_VERIFY_GRACE_MS', `${host.KEEPWARM_VERIFY_GRACE_MS / 1000} seconds`], ['KEEPWARM_DAYS_KEPT', String(host.KEEPWARM_DAYS_KEPT)]]) {
+    assert.ok(section.includes(`| \`${name}\` | ${value} |`), `the keep-warm section does not state ${name} = ${value}`)
+  }
+  assert.equal(host.KEEPWARM_SENT_SHOWN_MS, 10_000)
+  assert.equal(host.KEEPWARM_DAYS_KEPT, 31)
+  assert.equal(kw.KEEPWARM_VERIFY_MS, 2 * 60_000, '"within two minutes" on the card and the pages')
+  // Troubleshooting names every block the decision can give, in backticks, under its own heading.
+  const trouble = doc.troubleshooting
+  const at = trouble.indexOf('\n## No keep-warm line was sent\n')
+  assert.ok(at >= 0, 'docs/troubleshooting.md has no keep-warm section')
+  const why = trouble.slice(at, trouble.indexOf('\n## ', at + 10))
+  for (const block of Object.keys(kw.KEEPWARM_GUARD_OF)) assert.ok(why.includes(`\`${block}\``), `troubleshooting.md does not explain ${block}`)
+  assert.ok(flat(why).includes('`keep-warm: session 9d0eb37a not armed (typedSince)`') && flat(why).includes('`keep-warm: not sent (notIdle)`'))
+  // The status-bar states and the id; the settings row; the commands row.
+  for (const text of [item, '`$(watch) keep-warm line sent`', '`tokenPace.keepWarm`']) assert.ok(STATES.includes(text), `status-bar-states.md does not name ${text}`)
+  assert.ok(flat(STATES).includes('Keep-warm line for Session Tue 14:20 · 9d0eb37a in 42 seconds, activate to cancel'))
+  const row = SETTINGS.split('\n').find((l) => l.startsWith('| `cacheKeepWarm` | `false` |')) ?? ''
+  for (const claim of ['three minutes or less left', 'about two minutes before the cache expires', 'withdraws it', 'Application scope',
+    'text you typed but did not send is sent with it', 'not explicitly permit', 'own panel are out of reach']) {
+    assert.ok(row.includes(claim), `the settings row does not say: ${claim}`)
+  }
+  assert.ok(doc.commands.includes('| `Token Pace: Cancel the Keep-Warm Line` | |'))
+  // Q19's numbers everywhere the pages speak of the nudge; the spec's older ones nowhere.
+  for (const text of [section, flat(why), row]) {
+    for (const stale of ['four minutes before', '4 minutes before', 'about 55 minutes', 'quiet for 55']) assert.equal(text.includes(stale), false, stale)
+  }
+  // Privacy: the readers by their names, the one line typed, the file, the leak test.
+  const privacy = flat(doc.privacy)
+  for (const claim of ['VS Code\'s shell integration', '`sendText`', 'Nothing is ever read back from the terminal',
+    'Never a terminal\'s name — Claude Code sets it to a summary of the conversation —', '`tokenPace.keepWarmConsent`',
+    'never a session id, a path, a time of day, a terminal or a command line', '`claude --api-key synthetic-secret-123` in `/home/u/synthetic-project`']) {
+    assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
 })

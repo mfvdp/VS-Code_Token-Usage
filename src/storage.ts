@@ -32,7 +32,7 @@ export interface MementoLike {
 }
 
 export type StoredKey =
-  'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'ui' | 'mirror' | 'hookMirror' | 'externalQuota'
+  'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'ui' | 'mirror' | 'hookMirror' | 'keepWarm' | 'externalQuota'
 
 /** Absolute paths of the extension's files in `globalStorage`. */
 export interface StoredPaths {
@@ -48,6 +48,12 @@ export interface StoredPaths {
    * it while it is installed, and it goes with the storage on uninstall.
    */
   hookMirror: string
+  /**
+   * 1.8 §0a.7: the keep-warm accounting, `keepwarm.json` — per day how many keep-warm lines were answered
+   * and the tokens their answers used, written by the window that sent a line. Deleting it deletes the
+   * accounting and nothing else: no line depends on it.
+   */
+  keepWarm: string
   /**
    * The shared quota cache files outside `globalStorage`, one per provider.
    *
@@ -70,7 +76,8 @@ export interface StoredItem {
 
 /** Memento keys per item. Everything the user can delete is listed here, once. */
 export const STORED_MEMENTO_KEYS: Readonly<Record<'consent' | 'alerts' | 'ui', readonly string[]>> = {
-  consent: ['networkConsent', 'networkConsentOffered', 'writeConsent.writeQuotaCache', 'writeConsent.statusLine'],
+  // 1.8 §0b.3: the keep-warm consent is a decision like the other three, and goes with them.
+  consent: ['networkConsent', 'networkConsentOffered', 'writeConsent.writeQuotaCache', 'writeConsent.statusLine', 'tokenPace.keepWarmConsent'],
   alerts: ['tokenPace.alerts'],
   ui: ['tokenPace.ui'],
 }
@@ -80,7 +87,7 @@ export const STORED_MEMENTO_KEYS: Readonly<Record<'consent' | 'alerts' | 'ui', r
  *
  * Deliberately not the translated one: a log line is pasted into an issue, and a maintainer
  * has to be able to read it whatever language the editor runs in. `labelOf` carries the same
- * nine names for the pick list, translated at call time.
+ * ten names for the pick list, translated at call time.
  */
 const LOG_LABELS: Record<StoredKey, string> = {
   state: 'Token snapshot (state.json)',
@@ -88,6 +95,7 @@ const LOG_LABELS: Record<StoredKey, string> = {
   history: 'Quota history (quotaHistory.json)',
   mirror: 'Status line mirror (statusline-mirror.json)',
   hookMirror: 'Agent hook mirror (agent-hook.jsonl)',
+  keepWarm: 'Keep-warm requests (keepwarm.json)',
   externalQuota: 'Shared quota cache (outside the extension storage)',
   consent: 'Consent decisions',
   alerts: 'Alert state',
@@ -105,6 +113,7 @@ export function labelOf(key: StoredKey): string {
     case 'history': return t('Quota history (quotaHistory.json)')
     case 'mirror': return t('Status line mirror (statusline-mirror.json)')
     case 'hookMirror': return t('Agent hook mirror (agent-hook.jsonl)')
+    case 'keepWarm': return t('Keep-warm requests (keepwarm.json)')
     case 'externalQuota': return t('Shared quota cache (outside the extension storage)')
     case 'consent': return t('Consent decisions')
     case 'alerts': return t('Alert state')
@@ -125,6 +134,7 @@ export function storedFiles(key: StoredKey, paths: StoredPaths): string[] | null
     case 'history': return [paths.history]
     case 'mirror': return [paths.mirror]
     case 'hookMirror': return [paths.hookMirror]
+    case 'keepWarm': return [paths.keepWarm]
     case 'externalQuota': {
       const files = (paths.externalQuota ?? []).filter((f) => typeof f === 'string' && f !== '')
       return files.length > 0 ? files : null
@@ -184,7 +194,7 @@ export function inventory(
   memento: MementoLike,
   details: Partial<Record<StoredKey, string>> = {},
 ): StoredItem[] {
-  const order: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror', 'externalQuota', 'consent', 'alerts', 'ui']
+  const order: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'externalQuota', 'consent', 'alerts', 'ui']
   const out: StoredItem[] = []
   for (const key of order) {
     const files = storedFiles(key, paths)

@@ -242,6 +242,11 @@
         "command": "tokenPace.setRange",
         "title": "%command.setRange.title%",
         "category": "%command.category%"
+      },
+      {
+        "command": "tokenPace.cancelKeepWarm",
+        "title": "%command.cancelKeepWarm.title%",
+        "category": "%command.category%"
       }
     ],
     "menus": {
@@ -447,6 +452,13 @@
             },
             "additionalProperties": false,
             "markdownDescription": "%config.planName.description%"
+          },
+          "tokenPace.cacheKeepWarm": {
+            "type": "boolean",
+            "order": 12,
+            "default": false,
+            "markdownDescription": "%config.cacheKeepWarm.description%",
+            "scope": "application"
           },
           "tokenPace.keybindings": {
             "type": "boolean",

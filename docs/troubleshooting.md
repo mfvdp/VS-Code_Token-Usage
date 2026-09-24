@@ -99,6 +99,47 @@ it. When it does not do what you expect:
   four entries (`SubagentStart`, `SubagentStop`, `Notification`, `PermissionRequest`) and the error
   is gone.
 
+## No keep-warm line was sent
+
+The opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) goes only when every one
+of its checks holds, twice: when the countdown would start, and when it ends. With `tokenPace.debug`
+on, the log names the check that held it back — `keep-warm: session 9d0eb37a not armed (typedSince)`
+before a countdown, `keep-warm: not sent (notIdle)` at its end —, in these words:
+
+* **`off`, `consent`, `restricted`** — `tokenPace.cacheKeepWarm` is off; its consent was refused or
+  never given (a refusal is not asked about again until you switch the setting off and on); or the
+  workspace is in Restricted Mode.
+* **`noBridge`** — no status-line reading describes the session's newest request: the
+  [bridge](quota-sources.md#claude-status-line-bridge-opt-in) is not connected, ran for another
+  session last, or has not run since the session's newest reply. The transcript's estimate (`~`)
+  never starts a countdown.
+* **`notDue`, `tooLate`** — more than three minutes of warmth are left; or too little: the line has
+  to start more than a minute before the expiry, so a window that slept past the moment sends
+  nothing late, and a countdown that could not end in time does not start.
+* **`notIdle`, `openTool`** — the session's newest reply is less than a minute old, was cut off or
+  paused; or it called a tool, or the newest line is yours — Claude Code is still at the reply, or
+  a permission dialog or a question may be open.
+* **`agentRunning`** — an agent of the session is running.
+* **`hookWait`** — the [agent hook](agents.md#the-agent-hook) reported a permission request after
+  the session's newest reply.
+* **`noTerminal`, `ambiguousTerminal`** — no terminal of this window runs `claude` in the session's
+  folder as VS Code's shell integration reports it — the Claude card then says *Keep-warm cannot reach
+  this session: it does not run in a VS Code terminal of this window.* —, or two do. A session in the
+  Claude Code extension's own panel is never reached; neither is a terminal without shell
+  integration, nor one where Claude Code was started before the window began to watch (start it again
+  after switching the setting on). A terminal VS Code reports another program in than `claude` does
+  not count either.
+* **`typedSince`, `unknownFocus`** — the Claude terminal was the active terminal of the focused
+  window since the session's newest reply: you may have typed a draft, which the line would send
+  along. Or this window began watching after that reply and cannot tell. Either holds until the
+  session's next reply; leave the window, or switch to another terminal, while Claude works.
+* **`cap`** — three lines went in this idle phase; your next request starts a new one.
+* **`quota`** — a Claude quota window stands at 90 % or more, or is reached.
+* **`unanswered`** — the last line got no answer within two minutes; the Claude card says
+  *Keep-warm stopped for this session: the last line got no answer within two minutes.* Your next
+  request starts a new idle phase.
+* **`cancelled`** — you cancelled a countdown in this idle phase.
+
 ## A question answered after the window closed
 
 A dialog — the offer to fetch quota on the first start, the consent to write the shared quota

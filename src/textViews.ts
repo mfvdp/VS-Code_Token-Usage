@@ -930,7 +930,8 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
     }
     // 1.8 A5: every watched session of the Claude card — warm ones too, the document has the room —
     // one list item each: the state line, and its cost line under it; then how many cooling or cold
-    // ones the list leaves out.
+    // ones the list leaves out. 1.8 B2: today's keep-warm accounting under the list, as on the card;
+    // the card's keep-warm notes stay the card's — a moment of this window, not a line of a document.
     if (q.cacheWatch && q.cacheWatch.all.length > 0) {
       for (const l of q.cacheWatch.all) {
         L.push(`- ${cell(l.text)}`)
@@ -939,6 +940,7 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
       if (q.cacheWatch.allMoreText) L.push(`- ${cell(q.cacheWatch.allMoreText)}`)
       L.push('')
     }
+    if (q.cacheWatch && q.cacheWatch.keepWarm && q.cacheWatch.keepWarm.today) L.push(cell(q.cacheWatch.keepWarm.today), '')
     // 1.8 A6: the Codex card's one line, where the Claude card has its prompt-cache lines.
     if (q.codexCache) L.push(cell(q.codexCache), '')
     // The bridge's prompt-cache line, under the windows it was read beside — the same words

@@ -791,6 +791,10 @@ const TREE_FIELDS = new Set([
   // 1.6 P14b (O4): the agent hook's marker on a node and on a running item — the view model's words,
   // "waiting for approval", or null.
   'hookWait',
+  // 1.7 P9 (F4): a node's tally part by part — each part's words (§2.7's `text`, named `label`, the
+  // tree's own field name, since `text` is where a reply's content lives) and the state it counts.
+  // The 7-day block's largest agents carry `superseded` (a node's own field name, listed above).
+  'tallyParts', 'tone',
 ])
 
 test('the running list claims nothing the tree does not: running nodes only, a launch as a dash, never a 0', () => {

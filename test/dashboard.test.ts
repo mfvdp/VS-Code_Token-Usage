@@ -21,7 +21,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
-import { EARLIER_KEY, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from '../src/agentTree'
+import { EARLIER_KEY, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS, TreeNode } from '../src/agentTree'
 import { tallySpoken, tallyText } from '../src/agentTreeBuild'
 import { setBundle, setLocale, t } from '../src/i18n'
 import { agentTreeFor, buildViewModel, parseWebviewMessage } from '../src/viewModel'
@@ -1635,7 +1635,9 @@ test('a forced-colours theme paints every pressed chip in the highlight colours,
   const main = readFileSync(join(__dirname, '..', 'src', 'webview', 'main.ts'), 'utf8')
   const pressable = [...main.matchAll(/aria-pressed="'/g)].map((m) => {
     const head = main.slice(main.lastIndexOf('<button ', m.index), m.index)
-    return { act: /data-act="([A-Za-z]+)"/.exec(head)?.[1] ?? '?', cls: /class="([^"]*)"/.exec(head)?.[1] ?? null }
+    // 1.7 F4 (pinned and changed: the class was the literal `ag-row`): an agent row's class starts with
+    // `ag-row`, and the script adds the colour of its state behind it — the first class is what the rule reads.
+    return { act: /data-act="([A-Za-z]+)"/.exec(head)?.[1] ?? '?', cls: /class="([^"' ]*)/.exec(head)?.[1] ?? null }
   })
   const acts = ['providerView', 'range', 'model', 'customDates', 'compositionCache', 'chartSplit', 'costLine', 'heatmapMetric', 'hourZone']
   assert.deepEqual(pressable.filter((b) => b.cls === null).map((b) => b.act), acts, JSON.stringify(pressable))
@@ -3461,11 +3463,15 @@ function tallyOf(n: { done?: number; failed?: number; retried?: number; stopped?
     [c.running, `~${c.running} ●`, `about ${c.running} running`], [c.unknown, `~${c.unknown} ?`, `about ${c.unknown} unknown`],
   ]
   const on = glyphs.filter(([k]) => k > 0)
+  // 1.7 F4: the parts as the builder sends them beside the text, each with the state it counts.
+  const tones = ['done', 'failed', 'retried', 'stopped', 'running', 'unknown']
   return {
     agentCount: started,
     tally: { started, ...c },
     tallyText: [`${started} started`, ...on.map((g) => g[1])].join(' · '),
     tallySpoken: [`${started} started`, ...on.map((g) => g[2])].join(', '),
+    tallyParts: [{ label: `${started} started`, tone: 'started' },
+      ...glyphs.map((g, i) => ({ label: g[1], tone: tones[i], n: g[0] })).filter((g) => g.n > 0).map(({ label, tone }) => ({ label, tone }))],
   }
 }
 
@@ -3543,6 +3549,12 @@ function runFig(ts: number, text: string, since: string | null): string {
  * would be read twice, once in the name and once in the figures its item describes itself by.
  */
 function tallyFigs(t: Record<string, unknown>): string[] {
+  // 1.7 F4: each part wears the state it counts (`ag-tt-<tone>`), where the node sends its parts;
+  // a node that sends none (a payload of another build) has its text split, in the figures' tone.
+  if (Array.isArray(t.tallyParts)) {
+    return (t.tallyParts as Array<{ label: string; tone: string }>)
+      .map((p) => '<span class="ag-t ag-tt-' + p.tone + '" aria-hidden="true">' + p.label + '</span>')
+  }
   return String(t.tallyText).split(' · ').map((p) => '<span class="ag-t" aria-hidden="true">' + p + '</span>')
 }
 /** The end of a figures' line that ends on a tally, after other parts: the tally's parts and the line's end. */
@@ -3639,9 +3651,13 @@ function itemTag(key: string, o: { kind?: string; sup?: boolean; tab?: boolean; 
 }
 /** 1.6 L1: a node's toggle — the mouse's target, hidden from a screen reader, which hears the item open or closed. */
 const foldOf = (key: string): string => '<span class="ag-fold" data-act="agentToggle" data-key="' + key + '" aria-hidden="true"></span>'
-/** 1.6 L1: a tree row — the mouse's target that selects — and whether the details stand under it. */
-const rowOf = (key: string, pressed = false): string =>
-  '<span class="ag-row" data-act="agentSelect" data-key="' + key + '" data-pressed="' + pressed + '">'
+/**
+ * 1.6 L1: a tree row — the mouse's target that selects — and whether the details stand under it.
+ * 1.7 F4: the state whose colour its name wears (`ag-c-<state>`), for an agent's, a launch's, a
+ * run's and a collector's row in state done, unknown, failed or running that nothing superseded.
+ */
+const rowOf = (key: string, pressed = false, colour = ''): string =>
+  '<span class="ag-row' + (colour ? ' ag-c-' + colour : '') + '" data-act="agentSelect" data-key="' + key + '" data-pressed="' + pressed + '">'
 /** A tree row's second line (1.6 N6), carrying the id its item's description names (1.6 L1). */
 function figsOf(key: string, ...parts: string[]): string {
   return figs(...parts).replace('<span class="ag-fig">', '<span class="ag-fig" id="agf-' + key + '">')
@@ -3863,7 +3879,8 @@ test('a row is two lines: its name, then the usage and duration it was given —
   // dimmed, the whole name its title — and under it the figures, each part whole.
   // 1.6 L1 (pinned and changed: P7 wrote the row as a button): the row is the mouse's target inside
   // its tree item, which is what takes the focus; its figures' line is that item's description.
-  assert.ok(h.indexOf(rowOf(AK.a1)
+  // 1.7 F4 (pinned and changed): the running agent's name wears the running colour.
+  assert.ok(h.indexOf(rowOf(AK.a1, false, 'running')
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
     + '<span class="ag-text">' + albl('Explore · claude-opus-5 · a94f', 'Explore', 'opus-5', 'a94f')
     + figsOf(AK.a1, fig('12.3K'), clockFig(AG_NOW - 42_000, '42 s', '11:59')) + '</span></span>') >= 0, h)
@@ -3944,16 +3961,17 @@ test('by default the tree is closed: only the sessions, each parent collapsed an
   assert.ok(h.indexOf(slbl('Session Tue 10:55 · 9d0eb37a · repo', 'Session', 'Tue 10:55', '9d0eb37a', 'repo')
     + '<span class="ag-fig" id="agf-' + AK.s1 + '"><span class="ag-fp"><span class="nobr">own 1.2M</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="nobr">agents 434.6K</span></span>'
-    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">4 started</span></span>'
-    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✓</span></span>'
-    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">1 ✕</span></span>'
-    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ●</span></span>'
-    + '<span class="ag-fp">' + SEP + '<span class="ag-t" aria-hidden="true">~1 ?</span></span>'
+    // 1.7 F4 (pinned and changed: the parts had no class of their own): each part wears the state it counts.
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t ag-tt-started" aria-hidden="true">4 started</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t ag-tt-done" aria-hidden="true">1 ✓</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t ag-tt-failed" aria-hidden="true">1 ✕</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t ag-tt-running" aria-hidden="true">~1 ●</span></span>'
+    + '<span class="ag-fp">' + SEP + '<span class="ag-t ag-tt-unknown" aria-hidden="true">~1 ?</span></span>'
     + '<span class="ag-fp">' + SEP + '<span class="nobr"><span title="span from the first to the last line">1 h 05 min</span></span></span></span>') >= 0, h)
   assert.ok(h.indexOf(itemTag(AK.s2, { kind: 'session', size: 2, pos: 2, label: 'Session Mon 09:00 · 1234abcd, idle session, derived' })
     + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.s2)) >= 0, h)
   assert.equal(h.indexOf('<span class="sr">4 started'), -1, h)
-  assert.equal(h.split('class="ag-t"').length - 1, 5, h)
+  assert.equal(h.split(/class="ag-t[" ]/).length - 1, 5, h)
   assert.equal(/started|agent\(s\)/.test(h.slice(h.indexOf('data-key="' + AK.s2 + '"'))), false, h)
   assert.equal(h.indexOf('aria-expanded="true"'), -1, h)
   // The screen reader's words are out of sight and still read: the page's visually hidden rule.
@@ -3989,7 +4007,7 @@ test('an opened node shows its children closed in turn, each with its tally; a s
     + '<div class="ag-line">' + foldOf(AK.wf)) >= 0, open)
   // A leaf has no toggle and keeps its place in the column with an empty slot.
   assert.ok(open.indexOf(itemTag(AK.a1, { level: 3, size: 2, pos: 1, label: 'Explore · claude-opus-5 · a94f, running, derived' })
-    + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.a1)) >= 0, open)
+    + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.a1, false, 'running')) >= 0, open)
   assert.equal(open.split('aria-expanded="true"').length - 1, 3, open)
   assert.equal(open.indexOf('aria-expanded="false"'), -1, open)
   assert.equal(open.split('<ul role="group">').length - 1, 3, open)
@@ -3999,7 +4017,7 @@ test('an opened node shows its children closed in turn, each with its tally; a s
   // Its item's name drops the tally with the row: open, its children say it with their own glyphs.
   assert.ok(open.indexOf(itemTag(AK.a3, { level: 2, size: 2, pos: 2, expanded: true,
     label: 'general-purpose · sonnet-5 · c3d4, failed, recorded' })) >= 0, open)
-  assert.equal(open.split('class="ag-t"').length - 1, 5 + 3, open)
+  assert.equal(open.split(/class="ag-t[" ]/).length - 1, 5 + 3, open)
   assert.equal(open.indexOf('agent(s)'), -1, open)
 
   // Opening a node below a closed one shows nothing of it: the session decides first.
@@ -4012,7 +4030,7 @@ test('an opened node shows its children closed in turn, each with its tally; a s
       kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', agentCount: 4, tallyText, tallySpoken: '4 started', children: [treeNode(AK.a1, 'running')],
     })] })
     const oh = treePart(agentsHtml(a, { agents: odd }))
-    assert.equal(oh.indexOf('ag-t"'), -1, String(tallyText))
+    assert.equal(/class="ag-t[" ]/.test(oh), false, String(tallyText))
     assert.equal(/started|agent\(s\)|>0</.test(oh), false, oh)
   }
   const mute = agentTree({ roots: [treeNode(AK.s1, 'active', {
@@ -4743,7 +4761,7 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
     const leaf = treePart(agentsHtml(a, { agents: run, ui }))
     assert.equal(leaf.indexOf('ag-fold'), -1, leaf)
     assert.equal(leaf.indexOf('aria-expanded'), -1, leaf)
-    assert.ok(leaf.indexOf('<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.wf)) >= 0, leaf)
+    assert.ok(leaf.indexOf('<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.wf, false, 'unknown')) >= 0, leaf)
     assert.ok(leaf.indexOf(tallyThen(three, fig('40.0 s'))) >= 0, leaf)
   }
   // An agent's tally stands while its children are not on screen: closed, or opened with none
@@ -4754,7 +4772,7 @@ test('a closed node the payload carries no child of keeps its toggle and its tal
   assert.ok(treePart(agentsHtml(a, { agents: agent([]) })).indexOf(tallyEnd(T_A3)) >= 0)
   assert.ok(treePart(agentsHtml(a, { agents: agent([], 1), ui: agentUi({ agentsExpanded: [AK.a3] }) })).indexOf(tallyEnd(T_A3)) >= 0)
   const drawn = treePart(agentsHtml(a, { agents: agent([treeNode(AK.l1, 'unknown', { kind: 'pending' })]), ui: agentUi({ agentsExpanded: [AK.a3] }) }))
-  assert.equal(drawn.indexOf('ag-t"'), -1, drawn)
+  assert.equal(/class="ag-t[" ]/.test(drawn), false, drawn)
 })
 
 test('an open node with more children than it shows says how many, and offers the next fifty while it can', () => {
@@ -4889,7 +4907,8 @@ test('a hostile tree renders inert: no element and no handler the renderer did n
   assert.equal(treeKeys.includes(EVIL + AK.l1), false)
   // An unknown state and kind reach no class, in the tree or in the running list.
   assert.equal(/class="[^"]*(?:script|alert)/.test(h), false, h)
-  assert.ok(h.indexOf('<li class="ag-k-agent"><button class="ag-row" data-act="agentSelect"') >= 0, h)
+  // 1.7 F4 (pinned and changed): an unknown kind is an agent's row, and the running list's row wears the running colour.
+  assert.ok(h.indexOf('<li class="ag-k-agent"><button class="ag-row ag-c-running" data-act="agentSelect"') >= 0, h)
 })
 
 test('one timer, started with the first payload, keeps the live spans current without a render', () => {
@@ -5612,9 +5631,13 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   assert.deepEqual(nodes.filter((n) => n.hasChildren).map((n) => n.key).sort(), [...opened].sort())
   const h = treePart(agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi({ agentsExpanded: opened }) }))
   // 1.6 L1: the row is the mouse's target inside its item, up to the end of the item's line.
-  const rowIn = (key: string): string => {
-    const at = h.indexOf(rowOf(key))
-    assert.ok(at >= 0, 'no row for ' + key)
+  // 1.7 F4 (pinned and changed: every row was the bare `ag-row`): an agent's, a launch's, a run's and a
+  // collector's row wears the colour of a done, unknown, failed or running state nothing superseded.
+  const colourOf = (n: TreeNode): string => (['agent', 'pending', 'workflow', 'noreply'].includes(n.kind)
+    && ['done', 'unknown', 'failed', 'running'].includes(n.state) && !n.superseded ? n.state : '')
+  const rowIn = (n: TreeNode): string => {
+    const at = h.indexOf(rowOf(n.key, false, colourOf(n)))
+    assert.ok(at >= 0, 'no row for ' + n.key)
     return h.slice(at, h.indexOf('</div>', at))
   }
   const words: Record<string, string> = {
@@ -5625,7 +5648,7 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     // 1.7 F2: the group of earlier sessions (the quiet session's) is a container with no state — its
     // row is checked on its own below.
     if (n.kind === 'group') continue
-    const row = rowIn(n.key)
+    const row = rowIn(n)
     // The state the builder decided, and whether it inferred it or found it recorded.
     // 1.6 D7: an attempt the journal superseded says why its row is dimmed.
     const title = (n.derived ? '~' + words[n.state] + ' · derived' : words[n.state] + ' · recorded')
@@ -5648,7 +5671,7 @@ test('the tree the view model builds reaches the page with its dashes, its marks
     // 1.6 N1: every node opened, so a session's and a run's tally stand, an agent's does not —
     // its children show their own glyphs — and a node without agents below has none.
     const shows = n.tallyText !== null && n.kind !== 'agent'
-    assert.equal(row.indexOf('class="ag-t"') >= 0, shows, row)
+    assert.equal(/class="ag-t[" ]/.test(row), shows, row)
     const group = n.kind === 'session' || n.kind === 'workflow'
     // 1.6 P10c (pinned by P7b and changed, the lead's call): a run's collector puts its tally where
     // a run does, before its duration.
@@ -5726,7 +5749,7 @@ test('the tree the view model builds reaches the page with its dashes, its marks
   // A launch nothing was counted of: a dash for its usage on its second line, no mark, and no zero.
   const pending = nodes.filter((n) => n.kind === 'pending')
   assert.equal(pending.length, 1)
-  const p = rowIn(pending[0].key)
+  const p = rowIn(pending[0])
   assert.ok(p.indexOf('<span class="ag-fig" id="agf-' + pending[0].key + '"><span class="ag-fp"><span class="nobr">–</span></span>') >= 0, p)
   assert.equal(/>0[ <]|> 0</.test(p), false, p)
 })
@@ -5872,7 +5895,8 @@ function nowRow(o: { key: string; kind?: string; title?: string; names: string[]
   // short id (a launch's last word) — and a name of one part as one.
   const name = o.id ? albl(title, o.names[0], o.names[1], o.id)
     : o.names.length === 3 ? albl(title, o.names[0], o.names[1], o.names[2], true) : olbl(title, o.names.join(' · '))
-  return '<li class="ag-k-' + (o.kind ?? 'agent') + '"><button class="ag-row" data-act="agentSelect" data-key="' + o.key
+  // 1.7 F4: every entry of the running list runs, and its name wears the running colour.
+  return '<li class="ag-k-' + (o.kind ?? 'agent') + '"><button class="ag-row ag-c-running" data-act="agentSelect" data-key="' + o.key
     + '" data-list="now" aria-pressed="' + (o.pressed === true) + '">'
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
     + '<span class="ag-text">' + (title === '' ? name.replace(' title=""', '') : name)
@@ -5968,7 +5992,7 @@ test('a run\'s collector is one row in the tree and one in the running list, whi
   // 1.6 L1: an item of its run's group like its siblings, the last place of two, its name in words.
   assert.equal(li, itemTag(AK.n1, { kind: 'noreply', level: 2, size: 2, pos: 2,
     label: '263 agent(s) without a counted reply, running, derived, 263 started, 250 done, 3 failed, about 10 running' })
-    + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.n1)
+    + '<div class="ag-line"><span class="ag-pad"></span>' + rowOf(AK.n1, false, 'running')
     + '<span class="ag-st ag-running" role="img" aria-label="running, derived" title="~running · derived"></span>'
     + '<span class="ag-text">' + olbl('263 agent(s) without a counted reply', '263 agent(s) without a counted reply')
     + figsOf(AK.n1, fig('–'), ...tallyFigs(T_N1), fig('–')) + '</span></span></div></li>', li)
@@ -6069,7 +6093,9 @@ function weekRow(o: { key: string; state: string; derived: boolean; title: strin
   where: string[]; pressed?: boolean; panel?: string }): string {
   const spoken = (o.state === 'running' ? 'running' : o.state) + (o.derived ? ', derived' : ', recorded')
   const title = (o.derived ? '~' : '') + (o.state === 'running' ? 'running' : o.state) + (o.derived ? ' · derived' : ' · recorded')
-  return '<li class="ag-k-agent"><button class="ag-row" data-act="agentSelect" data-key="' + o.key
+  // 1.7 F4: the name in the colour of its state, as its tree row's.
+  const colour = ['done', 'unknown', 'failed', 'running'].includes(o.state) ? ' ag-c-' + o.state : ''
+  return '<li class="ag-k-agent"><button class="ag-row' + colour + '" data-act="agentSelect" data-key="' + o.key
     + '" data-list="week" aria-pressed="' + (o.pressed === true) + '">'
     + '<span class="ag-st ag-' + o.state + '" role="img" aria-label="' + spoken + '" title="' + title + '"></span>'
     + '<span class="ag-text">' + albl(o.title, o.names[0], o.names[1], o.id) + figs(...o.figs.map(fig))
@@ -7134,7 +7160,8 @@ function spokenLine(line: string, style: string): string {
       for (let j = i; j < tokens.length; j++) {
         if (tokens[j].startsWith('</')) { if (--depth === 0) break } else if (tokens[j].startsWith('<span')) {
           depth++
-          if (/class="ag-t"/.test(tokens[j])) tally = true
+          // 1.7 F4: a tally's part is `ag-t` and the tone of what it counts (`ag-tt-<tone>`).
+          if (/class="ag-t[" ]/.test(tokens[j])) tally = true
         }
       }
       if (part > 0 && !tally) out += ', '
@@ -7352,4 +7379,222 @@ test('1.7 F2: the group\'s words on a German page are the view model\'s — „F
   assert.deepEqual([label, spoken], ['Frühere Sitzungen (5)', '23 gestartet, 20 fertig, 3 fehlgeschlagen'])
   const h = treePart(agentsHtml(agentCtx(), { agents: agentTree({ roots: [earlierNode({ label, fullLabel: label, tallyText: shown, tallySpoken: spoken })] }) }))
   assert.ok(h.indexOf('aria-label="Frühere Sitzungen (5), 23 gestartet, 20 fertig, 3 fehlgeschlagen"') >= 0, h)
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 F4 · state colours on the row text
+// ---------------------------------------------------------------------------
+
+/** 1.7 F4: the classes of every `.ag-row` of a rendered section, by key and list ('tree', 'now', 'week'). */
+function rowClasses(h: string): Array<{ key: string; list: string; cls: string[]; pressed: boolean }> {
+  return [...h.matchAll(/<(?:span|button) class="(ag-row[^"]*)" data-act="agent(?:Select|Toggle)" data-key="([^"]*)"( data-list="(now|week)")?[^>]*?(?:data-pressed|aria-pressed)="(true|false)"/g)]
+    .map((m) => ({ key: unescapeHtml(m[2]), list: m[4] ?? 'tree', cls: m[1].split(' '), pressed: m[5] === 'true' }))
+}
+
+test('1.7 F4: an agent\'s, a launch\'s, a run\'s and a collector\'s row wears the colour of a done, unknown, failed or running state — a stop, a superseded attempt, a session and the group none', () => {
+  // The Agents world end to end, every parent open, the 7-day block open, a done agent selected — its
+  // row the open one.
+  const { agg } = agentWorld()
+  const cfg = makeConfig()
+  const opened = everyParent(agg, cfg, NOW)
+  const whole = agentTreeFor(makeInput({ agg, cfg, ui: {} }), 'text')
+  const explore = agentNodeOf(whole.roots, AGENT_WORLD.explore)
+  const ui = { agentsExpanded: opened, agentsWeekOpen: true, agentSelected: explore.key, agentSelectedIn: 'tree' as const }
+  const vm = buildViewModel(makeInput({ agg, cfg, ui }))
+  const h = agentsHtml(agentCtx(), { agents: vm.agents, ui: agentUi(ui) })
+  const rows = rowClasses(h)
+  const nodes = treeNodes(vm.agents.roots)
+  assert.equal(rows.filter((r) => r.list === 'tree').length, nodes.length, 'a node without its row')
+  const colourOf = (kind: string, state: string, superseded: boolean): string | null =>
+    (['agent', 'pending', 'workflow', 'noreply'].includes(kind) && ['done', 'unknown', 'failed', 'running'].includes(state) && !superseded ? state : null)
+  for (const n of nodes) {
+    const r = rows.find((x) => x.list === 'tree' && x.key === n.key)
+    assert.ok(r, n.key)
+    const colours = r.cls.filter((c) => c.startsWith('ag-c-'))
+    const want = colourOf(n.kind, n.state, n.superseded)
+    assert.deepEqual(colours, want === null ? [] : ['ag-c-' + want], `${n.kind} ${n.state}${n.superseded ? ' superseded' : ''} ${n.label}`)
+    assert.deepEqual(r.cls.filter((c) => c !== 'ag-row' && !c.startsWith('ag-c-')), [], n.key)
+  }
+  // The world has each case: a coloured row of each of the four states and of each kind, and the
+  // rows that wear none — a stop, a superseded attempt (a failure retried, a stop replaced), the
+  // sessions and the group.
+  const coloured = nodes.filter((n) => colourOf(n.kind, n.state, n.superseded) !== null)
+  assert.deepEqual([...new Set(coloured.map((n) => n.state))].sort(), ['done', 'failed', 'running', 'unknown'])
+  assert.deepEqual([...new Set(coloured.map((n) => n.kind))].sort(), ['agent', 'noreply', 'pending', 'workflow'])
+  const bare = (id: string): string[] => rows.find((r) => r.list === 'tree' && r.key === agentNodeOf(whole.roots, id).key)?.cls ?? ['missing']
+  assert.deepEqual(bare(AGENT_WORLD.stopped), ['ag-row'], 'a stop wears a colour')
+  assert.deepEqual(bare(AGENT_WORLD.wfRetryFail), ['ag-row'], 'a superseded failure wears a colour')
+  assert.deepEqual(bare(AGENT_WORLD.wfReplaced), ['ag-row'], 'a superseded stop wears a colour')
+  assert.ok(nodes.filter((n) => n.kind === 'session' || n.kind === 'group').length >= 3)
+  for (const n of nodes.filter((x) => x.kind === 'session' || x.kind === 'group')) {
+    assert.deepEqual(rows.find((r) => r.list === 'tree' && r.key === n.key)?.cls, ['ag-row'], n.label)
+  }
+  // The open row wears its colour as well — the stylesheet neutralises it (below) — and it is pressed.
+  const open = rows.find((r) => r.list === 'tree' && r.key === explore.key)
+  assert.deepEqual([open?.pressed, open?.cls], [true, ['ag-row', 'ag-c-done']])
+  // The running list: every entry runs, and says so in the colour of its name.
+  const now = rows.filter((r) => r.list === 'now')
+  assert.equal(now.length, vm.agents.runningNow.length)
+  assert.ok(now.length >= 2)
+  for (const r of now) assert.deepEqual(r.cls, ['ag-row', 'ag-c-running'], r.key)
+  // The 7-day block's largest agents, as their tree rows: by state, none for a superseded attempt.
+  const week = rows.filter((r) => r.list === 'week')
+  const top = vm.agents.week?.top ?? []
+  assert.equal(week.length, top.length)
+  assert.ok(top.length > 0)
+  for (const it of top) {
+    const want = colourOf('agent', it.state, it.superseded)
+    assert.deepEqual(week.find((r) => r.key === it.key)?.cls, want === null ? ['ag-row'] : ['ag-row', 'ag-c-' + want], it.label)
+    assert.equal(it.superseded, agentNodeOf(whole.roots, it.key.slice(2)).superseded, it.key)
+  }
+  // Every coloured row keeps its glyph and its words: the colour is never alone (§3.0 e).
+  for (const n of coloured) {
+    const at = h.indexOf('data-key="' + n.key + '" data-pressed=')
+    assert.ok(at >= 0, n.key)
+    const row = h.slice(at, h.indexOf('</div>', at))
+    assert.ok(row.indexOf('<span class="ag-st ag-' + n.state + '" role="img" aria-label="' + ({ done: 'done', failed: 'failed', running: 'running', unknown: 'unknown' } as Record<string, string>)[n.state]) >= 0, row)
+  }
+  // Each part of a tally wears the state it counts, in the row's order.
+  for (const n of nodes.filter((x) => x.tallyParts !== null && x.kind !== 'agent')) {
+    // The group's line carries no id (it describes nothing): the first line after its row.
+    const at = n.kind === 'group' ? h.indexOf('<span class="ag-fig">', h.indexOf('data-key="' + EARLIER_KEY + '"'))
+      : h.indexOf('<span class="ag-fig" id="agf-' + n.key + '">')
+    assert.ok(at >= 0, n.key)
+    const line = spanAt(h, at)
+    const drawn = [...line.matchAll(/<span class="ag-t ag-tt-([a-z]+)" aria-hidden="true">([^<]*)<\/span>/g)].map((m) => ({ tone: m[1], label: m[2] }))
+    assert.deepEqual(drawn, (n.tallyParts ?? []).map((p) => ({ tone: p.tone, label: p.label })), n.key)
+  }
+  // The stylesheet: the open row's name in the foreground and its tally parts in the figures' tone.
+  assert.ok(STYLE.includes('\n.ag-row[aria-pressed="true"] :is(.ag-np, .ag-t), .agtree .ag-row[data-pressed="true"] :is(.ag-np, .ag-t) { color: inherit; }\n'),
+    'the open row keeps a state colour')
+  // … after the rules it outranks where their weight is the same.
+  assert.ok(STYLE.indexOf(':is(.ag-np, .ag-t) { color: inherit; }') > STYLE.lastIndexOf('.ag-label > .ag-np { color: var(--ag-c-'))
+  assert.ok(STYLE.indexOf(':is(.ag-np, .ag-t) { color: inherit; }') > STYLE.lastIndexOf('.ag-t.ag-tt-'))
+})
+
+test('1.7 F4: the stylesheet colours the name\'s own parts and the tally\'s by state, with four tokens mixed from the theme — the ? glyph too — and nothing in forced colours', () => {
+  const root = between(STYLE, /\n:root \{\n/, '\n}')
+  // The four tokens: the semantic token mixed 60 : 40 with the foreground, the list's text colours first.
+  const tokens: Record<string, string> = {
+    done: 'var(--ok)', unknown: 'var(--vscode-list-warningForeground, var(--warn))',
+    failed: 'var(--vscode-list-errorForeground, var(--error))', running: 'var(--claude)',
+  }
+  for (const [state, token] of Object.entries(tokens)) {
+    assert.ok(root.includes(`\n  --ag-c-${state}: color-mix(in srgb, ${token} 60%, var(--vscode-foreground));`), state)
+    // The name's parts and the tally's in that token, nothing else of the row.
+    assert.ok(STYLE.includes(`\n.ag-c-${state} .ag-label > .ag-np { color: var(--ag-c-${state}); }\n`), state)
+    assert.ok(STYLE.includes(`\n.ag-t.ag-tt-${state} { color: var(--ag-c-${state}); }\n`), state)
+  }
+  assert.match(root, /--ok: var\(--vscode-charts-green\);/)
+  assert.match(root, /--claude: var\(--vscode-charts-blue\);/)
+  // No colour for a stop, and none for the tally's started, retried and stopped parts.
+  assert.equal(/ag-c-stopped|ag-c-(active|idle)|ag-tt-(started|retried|stopped)/.test(STYLE), false)
+  // Only the name's parts: the short id and the project keep the dim tone.
+  assert.match(STYLE, /\n\.ag-label > \.ag-sid \{ color: var\(--dim\); \}/)
+  assert.match(STYLE, /\n\.ag-label > \.ag-proj \{[^}]*color: var\(--dim\); \}/)
+  assert.equal(/ag-c-[a-z]+[^{]*\.ag-(sid|proj|fig|st)/.test(STYLE), false, 'a state colour reaches beyond the name')
+  // The ? takes the yellow its name wears (§7a Q12); every other glyph keeps its 1.6 colour.
+  assert.match(STYLE, /\n\.ag-unknown::before \{ content: "\?"; color: var\(--ag-c-unknown\); \}/)
+  for (const [s, c] of [['running', 'claude'], ['done', 'ok'], ['failed', 'error'], ['stopped', 'dim'], ['idle', 'dim']]) {
+    assert.match(STYLE, new RegExp('\\n\\.ag-' + s + '::before \\{ content: "[^"]+"; color: var\\(--' + c + '\\); \\}'), s)
+  }
+  // Forced colours: the theme gives every word its own colour — no rule of the mode names a state
+  // colour, and none takes a name or a tally out of the adjustment; the glyphs keep CanvasText.
+  const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active) {'))
+  const block = forced.slice(0, forced.indexOf('\n}') + 2)
+  assert.equal(/ag-c-|ag-tt-|\.ag-np|\.ag-t\b/.test(block), false, block)
+  assert.match(block, /\.ag-st::before, \.ag-lb \{ color: CanvasText; \}/)
+  assert.deepEqual(adjustedOut(), ADJUSTED_OUT)
+})
+
+/** 1.7 F4: the system colours a forced-colours rule may name (CSS Color 4). */
+const SYSTEM_COLOURS = ['AccentColor', 'AccentColorText', 'ActiveText', 'ButtonBorder', 'ButtonFace', 'ButtonText', 'Canvas', 'CanvasText',
+  'Field', 'FieldText', 'GrayText', 'Highlight', 'HighlightText', 'LinkText', 'Mark', 'MarkText', 'SelectedItem', 'SelectedItemText', 'VisitedText']
+
+/**
+ * 1.7 F4 test 3: what a colour value holds once every `var(--…)` in it is taken out — the words and
+ * functions left: none but `transparent`, a system colour, a `color-mix` of vars and the words of a
+ * gradient, a border or an outline. A hex, `rgb()`, `hsl()` or a colour's name is a literal.
+ */
+function colourLiterals(value: string): string[] {
+  let v = value
+  // Innermost first, so a var's fallback that is a var goes with it.
+  for (let i = 0; i < 20 && /var\(--[A-Za-z0-9-]+(?:,[^()]*)?\)/.test(v); i++) v = v.replace(/var\(--[A-Za-z0-9-]+(?:,[^()]*)?\)/g, ' ')
+  const allowed = new Set(['transparent', 'inherit', 'currentcolor', 'none', 'solid', 'color-mix', 'in', 'srgb',
+    'repeating-linear-gradient', 'linear-gradient', 'radial-gradient', 'deg', 'px', ...SYSTEM_COLOURS.map((c) => c.toLowerCase())])
+  const bad: string[] = []
+  bad.push(...(v.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []))
+  for (const w of v.replace(/#[0-9a-fA-F]{3,8}\b/g, ' ').match(/[A-Za-z][A-Za-z-]*/g) ?? []) if (!allowed.has(w.toLowerCase())) bad.push(w)
+  return bad
+}
+
+test('1.7 F4: every rule of a state colour, a tally tone, the guide lines or a band in forced colours paints with tokens, color-mix of tokens, transparent or system colours — no literal', () => {
+  const css = STYLE.replace(/\/\*[\s\S]*?\*\//g, '')
+  const forcedAt = css.indexOf('@media (forced-colors: active) {')
+  const forcedEnd = css.indexOf('\n}', forcedAt)
+  // Every rule, with where it stands: in the forced-colours block or not.
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1].trim(), body: m[2], at: m.index ?? 0 }))
+  const inForced = (r: { at: number }): boolean => r.at > forcedAt && r.at < forcedEnd
+  const named = rules.filter((r) => /ag-c-|ag-tt-|--ag-guide/.test(r.sel + r.body) || (inForced(r) && /\.band\b/.test(r.sel)))
+  const colourProps = /^(color|background|background-color|background-image|border|border-[a-z-]*color|border-(top|right|bottom|left)|outline|outline-color|box-shadow|fill|stroke|--ag-c-[a-z]+|--ag-guide)$/
+  let checked = 0
+  for (const r of named) {
+    for (const decl of r.body.split(';').map((d) => d.trim()).filter(Boolean)) {
+      const i = decl.indexOf(':')
+      const prop = decl.slice(0, i).trim()
+      // On :root only the declarations of these tokens; the other rules whole.
+      if (r.sel === ':root' && !/^--ag-(c-|guide)/.test(prop)) continue
+      if (!colourProps.test(prop)) continue
+      checked++
+      assert.deepEqual(colourLiterals(decl.slice(i + 1)), [], `${r.sel} { ${decl} }`)
+    }
+  }
+  // The four tokens, the four name rules, the four tally rules, the ? glyph, the open row, the bands.
+  assert.ok(named.filter((r) => inForced(r)).length >= 9, String(named.length))
+  assert.ok(checked >= 4 + 4 + 4 + 1 + 1 + 9, String(checked))
+  // The check itself: it finds a literal of each kind.
+  assert.deepEqual(colourLiterals(' #89d185'), ['#89d185'])
+  assert.deepEqual(colourLiterals(' rgb(1, 2, 3)'), ['rgb'])
+  assert.deepEqual(colourLiterals(' hsl(1 2% 3%)'), ['hsl'])
+  assert.deepEqual(colourLiterals(' green'), ['green'])
+  assert.deepEqual(colourLiterals(' color-mix(in srgb, var(--ok) 60%, white)'), ['white'])
+  assert.deepEqual(colourLiterals(' var(--vscode-list-warningForeground, #cca700)'), [])
+  assert.deepEqual(colourLiterals(' color-mix(in srgb, var(--vscode-list-errorForeground, var(--error)) 60%, var(--vscode-foreground))'), [])
+  assert.deepEqual(colourLiterals(' repeating-linear-gradient(45deg, CanvasText 0 2px, Canvas 2px 4px)'), [])
+})
+
+test('1.7 F4: a hostile tally part renders inert — a tone the page does not know reaches no class, and parts that do not spell the text are not drawn', () => {
+  const a = agentCtx()
+  const EVIL = '"><img src=x onerror=alert(1)>'
+  const session = (over: Record<string, unknown>): Record<string, unknown> => agentTree({ roots: [treeNode(AK.s1, 'active', {
+    kind: 'session', label: 'Session Tue 10:55 · 9d0eb37a', startClock: '10:55', ...T_S1, children: [treeNode(AK.a1, 'running')], ...over,
+  })] })
+  // A tone it does not know: the part is drawn, in the figures' tone, its words escaped.
+  const odd = treePart(agentsHtml(a, { agents: session({ tallyText: '<b>4</b> started · 1 ✓', tallyParts: [{ label: '<b>4</b> started', tone: EVIL }, { label: '1 ✓', tone: 'done' }] }) }))
+  assert.ok(odd.indexOf('<span class="ag-t" aria-hidden="true">&lt;b&gt;4&lt;/b&gt; started</span>') >= 0, odd)
+  assert.ok(odd.indexOf('<span class="ag-t ag-tt-done" aria-hidden="true">1 ✓</span>') >= 0, odd)
+  assert.equal(/<img|onerror=|class="[^"]*(img|alert)/.test(odd), false, odd)
+  // Parts that say something else than the text — or are no list of words — are not drawn: the text is, in the figures' tone.
+  for (const tallyParts of [[{ label: '9 started', tone: 'started' }], 'x', [null], [{ tone: 'done' }], [{ label: '', tone: 'done' }], {}]) {
+    const h = treePart(agentsHtml(a, { agents: session({ tallyParts }) }))
+    assert.ok(h.indexOf(tallyThen({ tallyText: T_S1.tallyText }, fig('<span title="span from the first to the last line">40.0 s</span>'))) >= 0,
+      JSON.stringify(tallyParts))
+    assert.equal(h.indexOf('9 started'), -1, h)
+    assert.equal(h.indexOf('ag-tt-'), -1, JSON.stringify(tallyParts))
+  }
+  // Every kind in every state: the four kinds of a thing with an outcome in the four states wear its
+  // colour; a stop, a superseded attempt, a session in any state — an unknown one too — and the group none.
+  for (const kind of ['agent', 'pending', 'workflow', 'noreply', 'session', 'group']) {
+    for (const state of ['running', 'done', 'failed', 'stopped', 'unknown', 'active', 'idle']) {
+      for (const superseded of [false, true]) {
+        const h = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, state, { kind, superseded, label: 'x · y · z', fullLabel: 'x · y · z' })] }) }))
+        const want = ['agent', 'pending', 'workflow', 'noreply'].includes(kind) && ['running', 'done', 'failed', 'unknown'].includes(state) && !superseded
+        assert.deepEqual(h.match(/ag-c-[a-z]+/g) ?? [], want ? ['ag-c-' + state] : [], `${kind} ${state} ${superseded}`)
+      }
+    }
+  }
+  // A state or kind the page does not know reaches no colour class either.
+  const strange = treePart(agentsHtml(a, { agents: agentTree({ roots: [treeNode(AK.a1, EVIL, { kind: EVIL })] }) }))
+  assert.equal(/ag-c-(?!unknown)/.test(strange), false, strange)
+  assert.ok(strange.indexOf('<span class="ag-row ag-c-unknown" data-act="agentSelect"') >= 0, strange)
 })

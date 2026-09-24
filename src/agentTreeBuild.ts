@@ -36,7 +36,7 @@ import {
   AGENT_RETENTION_DAYS, AgentTally, AgentTreeVm, AgentWeek, AgentWeekRow, AgentWeekTop, DetailRow, EARLIER_KEY, HOOK_MAX_AGE_MS, HookEntry,
   HookWait, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, MAX_PAGE_NODES, MAX_ROOTS, MAX_RUNNING_LIST, MAX_TREE_DEPTH, MIN_SHORT_ID, MixPart,
   NodeDetails, NodeState, PER_MINUTE_FROM_MS, RESUMED_AFTER_MS, ROOT_WINDOW_MS, RUNNING_WINDOW_MS, RunningItem, SESSION_ACTIVE_MS,
-  SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS, hookKey,
+  SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, TallyPart, TreeNode, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS, hookKey,
 } from './agentTree'
 import { billable, outcomeOfStatus } from './agg'
 import { t } from './i18n'
@@ -847,19 +847,30 @@ function tallyBelow(e: Entry): AgentTally {
 }
 
 /**
- * "427 started · 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — the started agents, then each state at least one
- * of them is in, with the glyph its rows carry: done, failed, retried, stopped, running,
- * unknown. The two inferred states carry the tilde every estimate on the page carries. The Quick
- * Pick writes its sessions' tallies together in the same words (1.6 O2).
+ * 1.7 F4: the tally as its row draws it, part by part, each with the state it counts — "427
+ * started", then each state at least one of the agents is in, with the glyph its rows carry, in
+ * the order done, failed, retried, stopped, running, unknown: "112 ✓", "12 ✕", "295 ↻", "~8 ?". The
+ * two inferred states carry the tilde every estimate on the page carries. The one maker of a
+ * tally's words: `tallyText` joins these, so the page's coloured parts and the text the markdown
+ * and the Quick Pick write cannot differ.
+ */
+export function tallyParts(n: AgentTally): TallyPart[] {
+  const parts: TallyPart[] = [{ label: t('{0} started', full(n.started)), tone: 'started' }]
+  const glyphs: TallyPart[] = [
+    { label: `${full(n.done)} ✓`, tone: 'done' }, { label: `${full(n.failed)} ✕`, tone: 'failed' },
+    { label: `${full(n.retried)} ↻`, tone: 'retried' }, { label: `${full(n.stopped)} ■`, tone: 'stopped' },
+    { label: `~${full(n.running)} ●`, tone: 'running' }, { label: `~${full(n.unknown)} ?`, tone: 'unknown' },
+  ]
+  for (const part of glyphs) if (n[part.tone] > 0) parts.push(part)
+  return parts
+}
+
+/**
+ * "427 started · 112 ✓ · 12 ✕ · 295 ↻ · ~8 ?" — the parts of `tallyParts`, joined. The Quick Pick
+ * writes its sessions' tallies together in the same words (1.6 O2).
  */
 export function tallyText(n: AgentTally): string {
-  const parts = [t('{0} started', full(n.started))]
-  const glyphs: Array<[number, string]> = [
-    [n.done, `${full(n.done)} ✓`], [n.failed, `${full(n.failed)} ✕`], [n.retried, `${full(n.retried)} ↻`],
-    [n.stopped, `${full(n.stopped)} ■`], [n.running, `~${full(n.running)} ●`], [n.unknown, `~${full(n.unknown)} ?`],
-  ]
-  for (const [count, part] of glyphs) if (count > 0) parts.push(part)
-  return parts.join(' · ')
+  return tallyParts(n).map((p) => p.label).join(' · ')
 }
 
 /** The tally in words, in the same order — what a screen reader says in place of the glyphs. */
@@ -2759,6 +2770,7 @@ function weekOf(roots: readonly Entry[], pricing: PricingOptions | null, tcfg: T
       context: contextOf(x.e),
       state: x.e.state,
       derived: derivedOf(x.e.state),
+      superseded: x.e.superseded,
       usage: x.e.usage,
       share: shareOf(x.usage),
       cost: pricing === null ? null : x.cost === null ? '–' : costText(x.cost),
@@ -2938,6 +2950,7 @@ export function buildAgentTree(input: AgentTreeInput, now: number): AgentTreeVm 
       tally: e.tally === null ? null : { ...e.tally },
       tallyText: e.tally === null ? null : tallyText(e.tally),
       tallySpoken: e.tally === null ? null : tallySpoken(e.tally),
+      tallyParts: e.tally === null ? null : tallyParts(e.tally),
       superseded: e.superseded,
       children: kids.map(toNode),
     }

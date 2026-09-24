@@ -1533,6 +1533,19 @@ const AGENT_STATES = ['running', 'done', 'failed', 'stopped', 'unknown', 'active
  */
 const AGENT_KINDS = ['session', 'workflow', 'agent', 'pending', 'noreply', 'group'];
 /**
+ * 1.7 F4: the states whose colour a row's name wears — green done, yellow unknown, red failed, blue
+ * running (the stylesheet's `--ag-c-<state>`) — and the kinds of row that wear one: an agent, a
+ * launch, a run and a collector, each a thing with an outcome. A stop, a superseded attempt, a
+ * session and the group of earlier sessions wear none (agentColour).
+ */
+const AGENT_COLOUR_STATES = ['done', 'unknown', 'failed', 'running'];
+const AGENT_COLOUR_KINDS = ['agent', 'pending', 'workflow', 'noreply'];
+/**
+ * 1.7 F4: what a part of a tally counts (`TallyTone` in src/agentTree.ts) — only these ever reach a
+ * class name (`ag-tt-<tone>`); the stylesheet colours done, failed, running and unknown.
+ */
+const TALLY_TONES = ['started', 'done', 'failed', 'retried', 'stopped', 'running', 'unknown'];
+/**
  * Far deeper than the tree builder ever nests (MAX_TREE_DEPTH in src/agentTree.ts, with the
  * session and the workflow run above it), so the guard only ever stops a payload that is not a
  * tree the builder made.
@@ -1597,6 +1610,16 @@ function agentStateTitle(state: string, derived: Payload): string {
 function agentStateSpoken(state: string, derived: Payload): string {
   const w = agentStateWord(state);
   return derived === false ? tr('{0}, recorded', w) : tr('{0}, derived', w);
+}
+
+/**
+ * 1.7 F4: the class that gives a row's name the colour of its state — ` ag-c-done`, ` ag-c-failed`,
+ * ` ag-c-running`, ` ag-c-unknown` — on the row of an agent, a launch, a run or a collector in one
+ * of those four states that no later attempt superseded; nothing for any other row. The colour is
+ * never alone: the glyph beside the name, its label and the state's word say the same.
+ */
+function agentColour(kind: string, state: string, superseded: boolean): string {
+  return !superseded && AGENT_COLOUR_KINDS.indexOf(kind) >= 0 && AGENT_COLOUR_STATES.indexOf(state) >= 0 ? ' ag-c-' + state : '';
 }
 
 /**
@@ -1747,11 +1770,22 @@ function lowerMark(n: Payload): string {
  * reader, which would read the glyphs as shapes. The same in words — `tallySpoken` — is the end of
  * the tree item's name (1.6 L1, see agentSpoken), which a screen reader announces on the item.
  * Nothing for a node without a tally: no count is not a count of none.
+ *
+ * 1.7 F4: each part wears the state it counts (`ag-tt-<tone>`), which the stylesheet colours as the
+ * names are — done, failed, running, unknown; started, retried and stopped keep the figures' tone.
+ * The parts are the view model's `tallyParts`, the words of `tallyText` part by part; parts that do
+ * not spell `tallyText` exactly — a payload of another build — are not drawn, and the text is, in
+ * the figures' tone: the page never draws a count the text does not say.
  */
 function agentTally(n: Payload): string[] {
   const shown = typeof n.tallyText === 'string' && n.tallyText !== '' ? n.tallyText : '';
   if (!shown) return [];
-  return shown.split(' · ').map((p: string) => '<span class="ag-t" aria-hidden="true">' + esc(p) + '</span>');
+  const parts = Array.isArray(n.tallyParts)
+    && n.tallyParts.every((p: Payload) => !!p && typeof p === 'object' && typeof p.label === 'string' && p.label !== '')
+    && n.tallyParts.map((p: Payload) => p.label).join(' · ') === shown ? n.tallyParts : null;
+  if (parts === null) return shown.split(' · ').map((p: string) => '<span class="ag-t" aria-hidden="true">' + esc(p) + '</span>');
+  return parts.map((p: Payload) => '<span class="ag-t' + (TALLY_TONES.indexOf(p.tone) >= 0 ? ' ag-tt-' + p.tone : '')
+    + '" aria-hidden="true">' + esc(p.label) + '</span>');
 }
 
 /**
@@ -1968,8 +2002,10 @@ function agentNode(n: Payload, expanded: string[], selected: string | null, pane
   // 1.7 F2: the group's row opens and closes it, as its toggle does — it has nothing to select —,
   // and its glyph column is kept with nothing in it (`ag-none`), so its name starts where the
   // sessions' names start.
-  const row = '<span class="ag-row" data-act="' + (group ? 'agentToggle' : 'agentSelect') + '" data-key="' + esc(key)
-    + '" data-pressed="' + here + '">'
+  // 1.7 F4: the name in the colour of its state — an agent, a launch, a run, a collector; never a
+  // session, the group, a stop or a superseded attempt (agentColour).
+  const row = '<span class="ag-row' + agentColour(kind, state, superseded) + '" data-act="' + (group ? 'agentToggle' : 'agentSelect')
+    + '" data-key="' + esc(key) + '" data-pressed="' + here + '">'
     + (group ? '<span class="ag-st ag-none" aria-hidden="true"></span>' : agentGlyph(state, n.derived, superseded))
     + '<span class="ag-text">' + agentLabel(n, kind) + agentFigLine(n, kind, state, tally, fid) + '</span></span>';
   // The panel after the row's line and before the children, so the node's own details stand
@@ -2239,7 +2275,8 @@ function agentNowRow(it: Payload, panel: AgentPanel | null): string {
   const where: string[] = typeof it.context === 'string' && it.context !== ''
     ? it.context.split(' · ').map((p: string) => orDash(p)) : [];
   if (it.waiting === true) where.push(tr('waits for a child agent'));
-  return '<li class="ag-k-' + kind + '"><button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
+  // 1.7 F4: every entry runs, and its name says so in the running colour as its tree row's does.
+  return '<li class="ag-k-' + kind + '"><button class="ag-row' + agentColour(kind, 'running', false) + '" data-act="agentSelect" data-key="' + esc(key)
     + '" data-list="now" aria-pressed="' + on + '">' + agentGlyph('running', true)
     + '<span class="ag-text">' + agentLabel({ label: it.label, fullLabel: it.fullLabel, sub: null }, kind)
     + '<span class="ag-fig">' + figParts(head, 0) + silent + '</span>'
@@ -2331,8 +2368,11 @@ function agentWeekRow(it: Payload, panel: AgentPanel | null): string {
   const figs = [orDash(it.usage), orDash(it.share)].concat(typeof it.cost === 'string' ? [weekCost(it.cost)] : []).map(nobr);
   const where: string[] = typeof it.context === 'string' && it.context !== ''
     ? it.context.split(' · ').map((p: string) => orDash(p)) : [];
-  return '<li class="ag-k-agent"><button class="ag-row" data-act="agentSelect" data-key="' + esc(key)
-    + '" data-list="week" aria-pressed="' + on + '">' + agentGlyph(agentState(it.state), it.derived)
+  // 1.7 F4: the name in the colour of its state, as its tree row's — and, as there, none for an
+  // attempt a later one superseded.
+  const state = agentState(it.state);
+  return '<li class="ag-k-agent"><button class="ag-row' + agentColour('agent', state, it.superseded === true) + '" data-act="agentSelect" data-key="' + esc(key)
+    + '" data-list="week" aria-pressed="' + on + '">' + agentGlyph(state, it.derived)
     + '<span class="ag-text">' + agentLabel({ label: it.label, fullLabel: it.fullLabel, sub: null }, 'agent')
     + '<span class="ag-fig">' + figParts(figs, 0) + '</span>'
     + (where.length ? '<span class="meta ag-ctx">' + where.map(w => '<span>' + w + '</span>').join(' · ') + '</span>' : '')

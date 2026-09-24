@@ -1320,7 +1320,7 @@ test('the notes under the tree state the sessions left out, the lower bound and 
       usage: '12K', usageAgents: null, lowerBound: true, lowerBoundText: '⚠ lower bound — 1 of 3 replies unfinished', silence: false, hookWait: null, duration: '4 min 05 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
       startClock: null, lastClock: null,
       agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
-      tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
+      tally: null, tallyText: null, tallySpoken: null, tallyParts: null, superseded: false, children: [],
     }],
     selected: null,
     running: 0,
@@ -1472,7 +1472,7 @@ test('a stop the parent recorded is printed [Stopped] — a recorded state, no e
     startClock: null, lastClock: null, sub: null, state, derived,
     usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait: null, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
-    tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
+    tally: null, tallyText: null, tallySpoken: null, tallyParts: null, superseded: false, children: [],
   })
   const tree: AgentTreeVm = {
     roots: [{ ...node('s:sess', 'idle', true), kind: 'session', label: 'Session 12345678', agentCount: 1,
@@ -1501,7 +1501,7 @@ test('the agent hook\'s marker is printed after the usage on the node\'s line, i
     startClock: null, lastClock: null, sub: null, state: kind === 'session' ? 'active' : 'running', derived: true,
     usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait, duration: '2 min 10 s',
     startTs: NOW - 300_000, lastTs: NOW - 60_000, agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
-    tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [],
+    tally: null, tallyText: null, tallySpoken: null, tallyParts: null, superseded: false, children: [],
   })
   const tree: AgentTreeVm = {
     roots: [{ ...node('s:sess', 'session', 'waiting for input'), label: 'Session 12345678', fullLabel: 'Session 12345678', agentCount: 2,
@@ -1529,7 +1529,7 @@ test('an attempt the workflow journal superseded says so at the end of its line,
     startClock: null, lastClock: null, sub: null, state, derived: false,
     usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait: null, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: false, childrenTotal: 0, childrenMore: 0,
-    tally: null, tallyText: null, tallySpoken: null, superseded, children: [],
+    tally: null, tallyText: null, tallySpoken: null, tallyParts: null, superseded, children: [],
   })
   const tree: AgentTreeVm = {
     roots: [{ ...node('s:sess', 'idle', false), kind: 'session', label: 'Session 12345678', derived: true, agentCount: 2,
@@ -1560,13 +1560,13 @@ test('the markdown prints a node\'s tally after its name, in brackets, and no ta
   // counts do not run into the figures that follow.
   const { vm } = agentVm()
   const tallied = (text: string, spoken: string, t: Partial<Record<string, number>>) => ({
-    tally: { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0, ...t }, tallyText: text, tallySpoken: spoken,
+    tally: { started: 0, done: 0, failed: 0, retried: 0, stopped: 0, running: 0, unknown: 0, ...t }, tallyText: text, tallySpoken: spoken, tallyParts: null,
   })
   const node = (key: string, kind: TreeNode['kind'], label: string, state: TreeNode['state'], over: Partial<TreeNode> = {}): TreeNode => ({
     key, kind, label, fullLabel: label, startClock: null, lastClock: null, sub: null, state, derived: state !== 'done' && state !== 'failed' && state !== 'stopped',
     usage: '3.4K', usageAgents: null, lowerBound: false, lowerBoundText: null, silence: false, hookWait: null, duration: '2 min 10 s', startTs: NOW - 300_000, lastTs: NOW - 60_000,
     agentCount: 0, hasChildren: (over.children ?? []).length > 0, childrenTotal: (over.children ?? []).length, childrenMore: 0,
-    tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
+    tally: null, tallyText: null, tallySpoken: null, tallyParts: null, superseded: false, children: [], ...over,
   })
   const tree: AgentTreeVm = {
     roots: [node('s:sess', 'session', 'Session 12345678', 'active', {
@@ -1768,7 +1768,7 @@ test('without a session the Quick Pick says what the tree says; sessions without
   assert.deepEqual(agentGroup(quickPickItems(empty)), [{ label: 'No Claude Code session in the last 7 days.' }])
   // A session with no agent and nothing running has no tally — never "0 started" — and so no group.
   const { vm } = agentVm()
-  const bare = vm.agents.roots.map((r) => ({ ...r, tally: null, tallyText: null, tallySpoken: null }))
+  const bare = vm.agents.roots.map((r) => ({ ...r, tally: null, tallyText: null, tallySpoken: null, tallyParts: null }))
   const none = quickPickItems({ ...vm, agents: { ...vm.agents, roots: bare, runningNow: [], runningMore: 0 } })
   assert.equal(none.some((i) => i.separator === true && i.label === 'Agents'), false)
   assert.equal(none.some((i) => / started/.test(i.label)), false)

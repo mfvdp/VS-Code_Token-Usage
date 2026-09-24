@@ -663,6 +663,29 @@ test('docs/agents.md says what the group of earlier sessions is, as the tree bui
     'docs/dashboard.md\'s agents row does not name the group')
 })
 
+test('the pages say what a colour means in the Agents section — an outcome, not a pace — and that it is never the only carrier (1.7 F4)', () => {
+  const flat = (text: string): string => text.replace(/\s+/g, ' ')
+  const sentence = 'In the Agents section a colour means an outcome — green done, yellow unknown, red failed, blue running —, not a pace: on the quota cards yellow and red say how fast a window fills.'
+  assert.ok(flat(doc.agents).includes(sentence), 'docs/agents.md does not say what a colour means there')
+  assert.ok(flat(doc.numbers).includes(sentence), 'docs/numbers.md does not say what a colour means in the Agents section')
+  for (const claim of [
+    'mixed 60 : 40 with the text colour',
+    'at least 4.5:1 against the sidebar and against a row\'s hover background on Dark Modern, Light Modern, 2026 Dark and 2026 Light',
+    'a stop\'s name (`■`, dim) and a superseded attempt\'s (faded) stay in the text colour',
+    'The row that is open — its details under it — is in the text colour too',
+    'the colour is the third carrier, never the only one',
+    'the state colours give way to it',
+    '`started`, `↻` and `■` stay in the figures\' dim tone',
+    'the unknown `?` in the yellow an unknown agent\'s name wears',
+  ]) assert.ok(flat(doc.agents).includes(claim), `docs/agents.md does not say: ${claim}`)
+  const dashboard = flat(doc.dashboard)
+  assert.ok(dashboard.includes('the third carrier beside the glyph and the words, never the only one'), 'docs/dashboard.md does not name the colours')
+  assert.ok(dashboard.includes('the names and the tallies in its text colour, the state colours giving way'), 'docs/dashboard.md does not say forced colours win')
+  // The mix the pages quote is the stylesheet's.
+  const css = readDoc('src/dashboard.ts')
+  for (const state of ['done', 'unknown', 'failed', 'running']) assert.ok(new RegExp(`--ag-c-${state}: color-mix\\(in srgb, [^;]+ 60%, var\\(--vscode-foreground\\)\\);`).test(css), state)
+})
+
 test('the agent hook is documented as it works: installed by you, removed by you, Node.js required, the tree\'s words (1.6 O4)', () => {
   const flat = (text: string): string => text.replace(/\s+/g, ' ')
   const agents = flat(doc.agents)

@@ -122,6 +122,10 @@ Two guards keep the verdict honest:
 | 🟡 amber (▲▲) | 15 % or more ahead — three times the band, at least 15 — only with `pace.levels: graded` |
 | 🔴 red | the window is spent (≥ 99.5 %); the status bar entry also gets an alarm background |
 
+In the Agents section a colour means an outcome — green done, yellow unknown, red failed, blue
+running —, not a pace: on the quota cards yellow and red say how fast a window fills. The
+[Agents](agents.md#the-tree) page says which rows wear one.
+
 Exhaustion outranks everything: a full window is a fact, not a tendency. The verdict text is
 one of `on pace`, `5 % ahead of pace`, `36 % of the window still spare`,
 `no clock for this window`, `exhausted` — or nothing, while the window is still measuring.

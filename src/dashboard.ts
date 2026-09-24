@@ -459,6 +459,14 @@ const CSS = `
   --line: var(--vscode-panel-border, rgba(127,127,127,.3));
   --dim: var(--vscode-descriptionForeground);
   --bg: var(--vscode-sideBar-background, var(--vscode-editor-background, transparent));
+  /* 1.7 F4: an agent's state in the colour of its name — the semantic token, mixed with the foreground
+     so that it reads as text (at least 4.5:1) on light and dark themes alike: the plain tokens do not on
+     a light theme (charts.yellow on Light Modern is 2.93:1). The list's own warning and error text
+     colours where the workbench has them; the chart tokens where it has not. */
+  --ag-c-done: color-mix(in srgb, var(--ok) 60%, var(--vscode-foreground));
+  --ag-c-unknown: color-mix(in srgb, var(--vscode-list-warningForeground, var(--warn)) 60%, var(--vscode-foreground));
+  --ag-c-failed: color-mix(in srgb, var(--vscode-list-errorForeground, var(--error)) 60%, var(--vscode-foreground));
+  --ag-c-running: color-mix(in srgb, var(--claude) 60%, var(--vscode-foreground));
 }
 body {
   font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
@@ -966,13 +974,14 @@ ul { margin: 6px 0; padding-left: 18px; }
 /* One glyph per state, drawn from the class and coloured with the page's own tokens only:
    green and red for what the parent recorded, the provider's blue for what still runs, the
    foreground for a session in use, and the dim tone for what the tree can only call quiet — and
-   for a stop the parent recorded, which is an end but neither a success nor a failure. */
+   for a stop the parent recorded, which is an end but neither a success nor a failure. 1.7 F4
+   (§7a Q12): an unknown outcome's ? in the yellow its name wears, so glyph and name agree. */
 .ag-st { flex: none; display: inline-block; width: 12px; text-align: center; font-size: 10px; }
 .ag-running::before { content: "●"; color: var(--claude); }
 .ag-done::before { content: "✓"; color: var(--ok); }
 .ag-failed::before { content: "✕"; color: var(--error); }
 .ag-stopped::before { content: "■"; color: var(--dim); }
-.ag-unknown::before { content: "?"; color: var(--dim); }
+.ag-unknown::before { content: "?"; color: var(--ag-c-unknown); }
 .ag-active::before { content: "●"; color: var(--vscode-foreground); }
 .ag-idle::before { content: "○"; color: var(--dim); }
 /* 1.7 F2: the group of earlier sessions has no state and so no glyph — its column is kept, so its
@@ -992,6 +1001,28 @@ ul { margin: 6px 0; padding-left: 18px; }
    the dim tone already and stay so: faded as well, they would fall below 3:1 on the light theme,
    and every word of the row keeps 3:1 in both. */
 .ag-sup > .ag-line > .ag-row .ag-np { opacity: .65; }
+/* 1.7 F4: an outcome in the colour of the name as well — green done, yellow unknown, red failed,
+   blue running (the tokens on :root) — on the rows of an agent, a launch, a run and a collector, in the
+   tree, the running list and the 7-day block, whose state is one of the four and that no later attempt
+   superseded: the script puts ag-c-<state> on the row. Only the name's own parts (.ag-np); the short id
+   and the project keep the dim tone, the dots between the parts the foreground. No colour on a stop (its
+   name in the foreground, its ■ dim), on a superseded attempt (its fade and a colour together would fall
+   below 4.5:1), on a session or on the group of earlier sessions. Never the only carrier: the glyph and its
+   label, the state's word in the details and in the item's name, and the tally's words stay as they were.
+   A forced-colours theme gives every word its own text colour: no rule of the mode for them. */
+.ag-c-done .ag-label > .ag-np { color: var(--ag-c-done); }
+.ag-c-unknown .ag-label > .ag-np { color: var(--ag-c-unknown); }
+.ag-c-failed .ag-label > .ag-np { color: var(--ag-c-failed); }
+.ag-c-running .ag-label > .ag-np { color: var(--ag-c-running); }
+/* A tally's parts in the colour of the state they count — a session's, a run's, a collector's and the
+   group's too, whose names wear none; started, retried and stopped keep the figures' tone. */
+.ag-t.ag-tt-done { color: var(--ag-c-done); }
+.ag-t.ag-tt-unknown { color: var(--ag-c-unknown); }
+.ag-t.ag-tt-failed { color: var(--ag-c-failed); }
+.ag-t.ag-tt-running { color: var(--ag-c-running); }
+/* The open row wears no state colour: its name in the foreground, its tally in the figures' tone. On its
+   tint a colour would come close to 4.5:1, and the details under it say the state in words. */
+.ag-row[aria-pressed="true"] :is(.ag-np, .ag-t), .agtree .ag-row[data-pressed="true"] :is(.ag-np, .ag-t) { color: inherit; }
 /* A breath, not a blink: at its faintest the dot keeps most of its colour, so it never reads
    as switched off. */
 @keyframes ag-pulse { 50% { opacity: .7; } }

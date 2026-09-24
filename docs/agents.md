@@ -56,7 +56,8 @@ holds at most **20** running agents; the rest are counted under it (`and 3 more`
 one row of them however many of its agents run; it has no start of its own, so it comes last.
 
 **Each row** is two lines, as a tree row is (see [The tree](#the-tree)): the running glyph and the
-agent's name as the tree writes it — `Explore · opus-5 · 94f3` —, then its usage — `–` for a launch
+agent's name as the tree writes it — `Explore · opus-5 · 94f3`, in the running blue a tree row's name
+wears —, then its usage — `–` for a launch
 and a collector, since nothing of them was counted, `⚠` inside it where it is a lower bound —, a
 live `running for 12 min 05 s` counted from its first line (from the launch, for a launch) and
 `silent for 4 min` once the agent has not written for a while; and under them, a line of its own,
@@ -238,7 +239,18 @@ its rows — the table's and its largest agents' — are rows of the push too, a
 many fewer places.
 
 **Each row is two lines.** The first is the state glyph and the name — the short id at its end in
-the figures' dim tone, and a session's project after it. The second, under the name, in the dim
+the figures' dim tone, and a session's project after it. The name of an agent, a launch, a run and a
+run's collector is in the **colour of its state** as well: green done, yellow unknown, red failed,
+blue running. In the Agents section a colour means an outcome — green done, yellow unknown, red
+failed, blue running —, not a pace: on the quota cards yellow and red say how fast a window fills.
+Only the name's own words take it — the short id and the project stay dim —, and only where the state
+is one of those four and no later attempt [superseded](#states) the row: a stop's name
+(`■`, dim) and a superseded attempt's (faded) stay in the text colour, and so do the sessions' and
+the [group of earlier sessions](#the-tree)'. The row that is open — its details under it — is in the
+text colour too: its details say the state in words. Each colour is the theme's own — its green, its
+list's warning and error colours, the provider's blue — mixed 60 : 40 with the text colour, so that
+it reads as text on a light theme as on a dark one: at least 4.5:1 against the sidebar and against a
+row's hover background on Dark Modern, Light Modern, 2026 Dark and 2026 Light. The second, under the name, in the dim
 tone, is the figures: the usage — fresh input + cache write + output, the definition the tables
 use —, the duration from the first line to the last, and for a session, a run and a closed agent
 with agents below it, the [tally](#the-tally). A session's and a run's second line is the usage,
@@ -304,7 +316,9 @@ agents of a session share them, both names carry as many as it takes — measure
 machine, 917 of 925 agents needed four and 8 needed five. The whole id is in the details. An
 agent's usage is part of the figures the totals already contain: the tree adds nothing to any sum.
 
-**Without the colours, the glyphs and the mouse.** A screen reader gets words where the eye gets
+**Without the colours, the glyphs and the mouse.** A colour is never the only thing that says a
+state: the glyph beside the name says it, and its label, the state's word in the details and in the
+item's name, and the tally's words — the colour is the third carrier, never the only one. A screen reader gets words where the eye gets
 marks: a glyph is `running, derived` or `done, recorded` (its title keeps `~running · derived`), a
 tally is read in words, and a clock that ticks every second is hidden from it and stands beside it
 as words that stand still — `since 14:20` for the time a node has been running, `silent since
@@ -323,7 +337,8 @@ so neither is a target smaller than 24 × 24 px (WCAG 2.5.8). In a forced-colour
 Windows High Contrast — the glyphs and the `⚠` take the text colour, the toggle's arrow the
 button's, the open row, whose tint the theme removes, a 2 px outline in the highlight colour, and
 the item the keyboard is on a 2 px ring in the text colour; the theme's own colours are left on
-everywhere else.
+everywhere else, so the names and the tallies are in its text colour too: the state colours give way
+to it, and the glyphs and the words still say every state.
 
 ### The keyboard
 
@@ -376,7 +391,9 @@ part with no agent in it is left out. Running and unknown are inferred, so their
 `~` every estimate on the page carries; done, failed, retried and stopped are what was recorded.
 There is no "x of y": `started` is the one total. A screen reader gets the same in words —
 *12 started, 3 done, 1 failed, 2 retried, 1 stopped, about 4 running, about 1 unknown* — in place
-of the glyphs.
+of the glyphs. Each part is in the colour of the state it counts, as a name is — `3 ✓` green, `1 ✕`
+red, `~4 ●` blue, `~1 ?` yellow —; `started`, `↻` and `■` stay in the figures' dim tone. A session's,
+a run's, a collector's and the group's tally are coloured so, though their names are not.
 
 A session's and a run's tally stand on the second line of the row, after the usage and before the
 span or the duration, whether the node is open or closed: what failed, was retried or is still
@@ -436,7 +453,8 @@ after that. Its details keep what was recorded in a row of their own, `Recorded`
 workflow journal's result carries no time, so it is never outlived.
 
 **Stopped is not failed.** A stop the parent recorded — Claude Code writes `killed`, `cancelled`
-or `stopped` for an agent that was halted — is an end of its own: `■`, in the dim tone, and its
+or `stopped` for an agent that was halted — is an end of its own: `■`, in the dim tone, its name in
+the text colour — neither a success nor a failure, so in neither's colour —, and its
 sentence quotes the parent's word as it was written, `‘killed’`. Only `failed`, `error` and
 `timeout` make an agent failed.
 
@@ -535,7 +553,9 @@ Only done, failed and stopped are facts: somebody recorded them. Everything else
 when a file last changed, and says so — the glyph's title reads `~running · derived` where a
 recorded state reads `done · recorded` or `stopped · recorded`, and the markdown list prints
 `[~Running]` against `[Done]` and `[Stopped]`. The running glyph pulses unless the system asks for
-reduced motion, and every colour is one the rest of the page already uses.
+reduced motion, and every colour is one the rest of the page already uses — the unknown `?` in the
+yellow an unknown agent's name wears, so glyph and name agree (see [The tree](#the-tree): the
+name's colour, each mixed with the text colour).
 
 **The sentences.** The details panel opens with the state and the sentence it was derived with,
 word for word. For an agent:

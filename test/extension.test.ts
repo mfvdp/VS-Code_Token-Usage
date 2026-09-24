@@ -1722,7 +1722,7 @@ test('the poll is wanted while an agent runs or a session is active, and never f
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', fullLabel: 'Agent', startClock: null, lastClock: null, sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
     lowerBound: false, lowerBoundText: null, duration: '–', startTs: null, lastTs: null, silence: false, hookWait: null, agentCount: 0, hasChildren: false, childrenTotal: 0,
-    childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
+    childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, tallyParts: null, superseded: false, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
   const waiting = node({ key: 'l:toolu_x', kind: 'pending', state: 'unknown', derived: true })
@@ -1752,7 +1752,7 @@ test('1.7 F2: the poll reads the active sessions, which are all roots — the gr
   const node = (over: Partial<TreeNode>): TreeNode => ({
     key: 'a:0', kind: 'agent', label: 'Agent', fullLabel: 'Agent', startClock: null, lastClock: null, sub: null, state: 'done', derived: false, usage: '–', usageAgents: null,
     lowerBound: false, lowerBoundText: null, duration: '–', startTs: null, lastTs: null, silence: false, hookWait: null, agentCount: 0, hasChildren: false, childrenTotal: 0,
-    childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, superseded: false, children: [], ...over,
+    childrenMore: 0, tally: null, tallyText: null, tallySpoken: null, tallyParts: null, superseded: false, children: [], ...over,
   })
   const tree = (roots: TreeNode[], running = 0): AgentTreeVm => ({ ...emptyAgentTree(), roots, running })
   const idle = node({ key: 's:1', kind: 'session', state: 'idle', derived: true, hasChildren: true, childrenTotal: 1, children: [node({})] })

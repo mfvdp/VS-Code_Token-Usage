@@ -1004,6 +1004,116 @@ test('a tally is taken on the whole tree — a window shows rows, not agents —
   assert.equal(german(() => node(build(big), wfKey).tallyText), '1.200 gestartet · 1.200 ✓')
 })
 
+// ---------------------------------------------------------------------------
+// 1.7 F4 · the tally part by part, each part with the state it counts
+// ---------------------------------------------------------------------------
+
+/** The tones of a tally's parts in the order the row writes them (§2.7 of the 1.7 spec). */
+const TONE_ORDER = ['started', 'done', 'failed', 'retried', 'stopped', 'running', 'unknown'] as const
+
+/**
+ * 1.7 F4 test 1: a node's `tallyParts` are its `tallyText` part by part — the same words, joined by
+ * " · " — each with the state it counts: started first, then only the states with an agent, in the
+ * row's order, `~` on running and unknown and on nothing else, each part's number that field of the
+ * tally; null with the tally.
+ */
+function partsHold(n: TreeNode, lang: 'en' | 'de' = 'en'): void {
+  if (n.tally === null) {
+    assert.deepEqual([n.tallyText, n.tallyParts], [null, null], n.key)
+    return
+  }
+  const parts = n.tallyParts
+  assert.ok(Array.isArray(parts) && parts.length > 0, n.key)
+  assert.equal(parts.map((p) => p.label).join(' · '), n.tallyText, n.key)
+  // Every part is words and a tone of the seven, nothing else.
+  for (const p of parts) assert.deepEqual(Object.keys(p).sort(), ['label', 'tone'], n.key)
+  // Started first, then the tones with a count, in the row's order, none with zero.
+  const tally = n.tally
+  assert.deepEqual(parts.map((p) => p.tone), TONE_ORDER.filter((k) => k === 'started' || tally[k] > 0), n.key)
+  for (const p of parts) {
+    // Only the two inferred states carry the estimate mark — the part as the row draws it.
+    assert.equal(p.label.startsWith('~'), p.tone === 'running' || p.tone === 'unknown', `${n.key}: ${p.label}`)
+    // Its number is that field of the tally, in the reader's digits.
+    const digits = Number(p.label.replace(/^~/, '').split(' ')[0].replace(/[.,]/g, ''))
+    assert.equal(digits, tally[p.tone], `${n.key}: ${p.label}`)
+    const glyph = { started: lang === 'de' ? 'gestartet' : 'started', done: '✓', failed: '✕', retried: '↻', stopped: '■', running: '●', unknown: '?' }[p.tone]
+    assert.ok(p.label.endsWith(' ' + glyph), `${n.key}: ${p.label}`)
+  }
+}
+
+test('1.7 F4: a tally\'s parts are its text part by part, each with the state it counts — started, then the states it has, ~ on the inferred ones', () => {
+  const vm = build(tallyWorld())
+  const root = node(vm, rootKey)
+  // Every state once at the root: the seven tones, in the row's order.
+  assert.deepEqual(root.tallyParts, [
+    { label: '12 started', tone: 'started' }, { label: '3 ✓', tone: 'done' }, { label: '1 ✕', tone: 'failed' },
+    { label: '2 ↻', tone: 'retried' }, { label: '1 ■', tone: 'stopped' }, { label: '~4 ●', tone: 'running' },
+    { label: '~1 ?', tone: 'unknown' },
+  ])
+  assert.deepEqual(node(vm, wfKey).tallyParts?.map((p) => p.tone), ['started', 'done', 'failed', 'retried', 'running'])
+  for (const n of all(vm.roots)) partsHold(n)
+  // Closed, as the page starts: the same parts on the node that ships no child.
+  const shut = page(tallyWorld()).roots[0]
+  assert.deepEqual([shut.children, shut.tallyParts], [[], root.tallyParts])
+  // The runs of every make-up (the generator of the run-state test, a seed of its own): every node's parts hold.
+  let seed = 11
+  const rand = (): number => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648
+    return seed / 2_147_483_648
+  }
+  for (let i = 0; i < 120; i++) {
+    const size = 1 + Math.floor(rand() * 6)
+    const ids = Array.from({ length: size }, (_, k) => `a${String(i).padStart(4, '0')}${String(k).padStart(12, '0')}`)
+    const journal: JournalAgent[] = ids.map((id, k) => jagent(id, {
+      step: k + 1, outcome: ([null, 'completed', 'failed', 'stopped'] as const)[Math.floor(rand() * 4)],
+      supersededBy: k + 1 < size && rand() < 0.3 ? ids[k + 1] : null,
+    }))
+    const agents = ids.filter(() => rand() < 0.6).map((id) => wfRec(id, rand() < 0.5 ? { lastTs: NOW - MIN } : { firstTs: NOW - 40 * MIN, lastTs: NOW - 30 * MIN }))
+    for (const n of all(build({ agents, runs: [run(journal)] }).roots)) partsHold(n)
+  }
+  // Twelve hundred of them: the reader's digits in the part as in the text.
+  const big: Partial<AgentTreeInput> = {
+    runs: [run(Array.from({ length: 1200 }, (_, i) => jagent(`a${String(i).padStart(16, '0')}`, { step: i + 1, outcome: 'completed' })))],
+  }
+  assert.deepEqual(node(build(big), wfKey).tallyParts, [{ label: '1,200 started', tone: 'started' }, { label: '1,200 ✓', tone: 'done' }])
+  // German: the words the text has, the tones the same.
+  const de = german(() => build(tallyWorld()))
+  for (const n of all(de.roots)) partsHold(n, 'de')
+  assert.deepEqual(node(de, rootKey).tallyParts?.map((p) => p.label),
+    ['12 gestartet', '3 ✓', '1 ✕', '2 ↻', '1 ■', '~4 ●', '~1 ?'])
+  assert.deepEqual(german(() => node(build(big), wfKey).tallyParts), [{ label: '1.200 gestartet', tone: 'started' }, { label: '1.200 ✓', tone: 'done' }])
+  // A session without agents: no parts, as no tally and no text.
+  assert.deepEqual([build().roots[0].tally, build().roots[0].tallyText, build().roots[0].tallyParts], [null, null, null])
+})
+
+test('1.7 F4: the group of earlier sessions carries the parts of its summed tally — closed as open — and a dash\'s null without one', () => {
+  const E1 = 'eeee0001-0000-4000-8000-000000000000'
+  const E2 = 'eeee0002-0000-4000-8000-000000000000'
+  const quiet = (sessionId: string, h: number): MainRec => main({ sessionId, lastTs: NOW - h * HOUR, firstTs: NOW - (h + 1) * HOUR })
+  const past = (id: string, sessionId: string, over: Partial<AgentRec> = {}): AgentRec =>
+    rec(id, { sessionId, firstTs: NOW - 3 * HOUR, lastTs: NOW - 2 * HOUR - 30 * MIN, ...over })
+  const over: Partial<AgentTreeInput> = {
+    mains: [main(), quiet(E1, 1), quiet(E2, 2)],
+    agents: [
+      rec('aaaa0001'),
+      past('bbbb0001', E1, { outcome: 'completed', outcomeTs: NOW - 2 * HOUR - 30 * MIN }),
+      past('bbbb0002', E1, { outcome: 'failed', outcomeTs: NOW - 2 * HOUR - 30 * MIN }),
+      past('cccc0001', E2),
+    ],
+  }
+  const g = build(over).roots.find((r) => r.kind === 'group')
+  assert.ok(g)
+  assert.deepEqual(g.tallyParts, [{ label: '3 started', tone: 'started' }, { label: '1 ✓', tone: 'done' },
+    { label: '1 ✕', tone: 'failed' }, { label: '~1 ?', tone: 'unknown' }])
+  partsHold(g)
+  const shut = page(over).roots.find((r) => r.kind === 'group')
+  assert.deepEqual([shut?.children, shut?.tallyParts], [[], g.tallyParts])
+  const none = build({ mains: [main(), quiet(E2, 2)] }).roots[1]
+  assert.deepEqual([none.kind, none.tallyParts], ['group', null])
+  // Every node of the earlier-sessions world, opened.
+  for (const n of all(page({ ...earlierWorld().over, expanded: [EARLIER_KEY] }).roots)) partsHold(n)
+})
+
 test('the tally speaks German, and its glyphs are the same in every language', () => {
   const vm = german(() => build(tallyWorld()))
   const root = node(vm, rootKey)

@@ -203,10 +203,15 @@ running list's. The agent tree is a `tree` of `treeitem`s with `aria-level`, `ar
 state, its tally — and described by its figures; it is one stop of the `Tab` key, and the arrow
 keys, `Home`, `End`, `Enter`, `Space` and `Escape` work in it as in any tree (roving `tabindex`,
 see [Agents](agents.md#the-keyboard)); its toggle and its row are the mouse's targets. Every state
-glyph has a spoken label that says in words whether the state was recorded or derived (`running, derived`);
+glyph has a spoken label that says in words whether the state was recorded or derived (`running, derived`),
+and an agent's name and its tally's parts are in the colour of their state as well — green done, yellow
+unknown, red failed, blue running, each mixed with the text colour to at least 4.5:1 —, the third
+carrier beside the glyph and the words, never the only one (in the Agents section a colour means an
+outcome, on the quota cards a pace);
 a clock that ticks every second is hidden from a screen reader and stands beside it as words that
 stand still (`since 14:20`); the toggle and the row are targets of at least 24 × 24 px, and a
-forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours — and every
+forced-colours theme draws the glyphs, the `⚠` and the open row in the system's colours — the names
+and the tallies in its text colour, the state colours giving way — and every
 pressed chip of the page (a button of the provider switch, a range, a model, the custom dates, the
 cache switch, the chart's `subagents` and cost line, the heatmap's metric, the hours' zone) in the highlight colours,
 where the theme would otherwise give pressed and released chips the same face. A pressed chip and a

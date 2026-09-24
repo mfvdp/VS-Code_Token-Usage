@@ -161,6 +161,24 @@ export interface AgentTally {
   unknown: number
 }
 
+/**
+ * 1.7 F4: the state a part of a tally counts (N1's fields, `started` first) — what its colour on the
+ * page follows: `done`, `failed`, `running` and `unknown` in their state colours, `started`,
+ * `retried` and `stopped` in the figures' tone.
+ */
+export type TallyTone = 'started' | 'done' | 'failed' | 'retried' | 'stopped' | 'running' | 'unknown'
+
+/**
+ * 1.7 F4: one part of a tally as the row draws it. `label` is exactly that part of `tallyText` —
+ * "427 started", "112 ✓", "~8 ?" (the spec's `text`: named `label`, the tree's own field name for
+ * words, since `text` is where a reply's content lives and the tree's payload carries no key of
+ * that name — as 1.6 P9 named a token-mix part's words).
+ */
+export interface TallyPart {
+  label: string
+  tone: TallyTone
+}
+
 export interface TreeNode {
   /**
    * Stable, never a path: `s:<sessionId>` | `w:<sessionId>|<wfId>` | `a:<agentId>` | `l:<toolUseId>`
@@ -291,6 +309,13 @@ export interface TreeNode {
    * retried, about 8 unknown". Null with `tally`.
    */
   tallySpoken: string | null
+  /**
+   * 1.7 F4: the tally as the row draws it, part by part — "427 started", "112 ✓", "~8 ?" — each with
+   * the state it counts, whose colour the page gives it: `tallyText` is these parts' words joined by
+   * " · ", made by the same function (`tallyParts` in agentTreeBuild.ts), so the two cannot differ.
+   * Null with `tally`.
+   */
+  tallyParts: TallyPart[] | null
   /**
    * D7: an attempt the workflow journal started its step again after — a failure retried, a
    * run replaced before it recorded anything, or a completed step re-run. It keeps its own state
@@ -458,6 +483,11 @@ export interface AgentWeekTop {
   /** As the node's state and whether it was inferred — the row's glyph. */
   state: NodeState
   derived: boolean
+  /**
+   * 1.7 F4: as the node — an attempt the workflow journal superseded (1.6 D7), whose name the page
+   * gives no state colour, as its tree row's.
+   */
+  superseded: boolean
   usage: string
   /** Of the block's total usage. */
   share: string

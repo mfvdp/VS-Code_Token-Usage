@@ -2,13 +2,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
+import { setBundle, setLocale } from '../src/i18n'
+import { relativeShort } from '../src/time'
+import { ROOT } from './helpers/nls'
 import type { BudgetRow } from '../src/budget'
 import { Config, sanitize } from '../src/config'
 import { RUNNING_WINDOW_MS, RunningItem } from '../src/agentTree'
 import {
   AGENTS_TOOLTIP_ITEMS, AgentsReading, autoExplain, buildItems, footerLine, itemModel, makeContext, previewItems, problemText,
-  problemTooltip, quotaTooltip, selectWindows, StatusTextInput, tokenTooltip, UsageSource,
+  problemTooltip, problemView, quotaTooltip, selectWindows, StatusTextInput, summaryTooltip, tokenTooltip, UsageSource,
 } from '../src/statusText'
 import { emptyBucket, Forecast, ProblemKind, QuotaState, QuotaWindow } from '../src/types'
 import type { ViewModel } from '../src/viewModel'
@@ -1205,4 +1210,152 @@ test('the preview shows the running agents as many and as one, and colours neith
     assert.ok(m.tooltipMarkdown.includes('Agents running now'), m.tooltipMarkdown)
     assert.doesNotMatch(m.tooltipMarkdown, /NaN|undefined/)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 W1: the failed attempt beside a stale reading; W2: due and waiting for focus
+// ---------------------------------------------------------------------------
+
+/** The bundle the extension ships, installed for the length of `run`. */
+function german<T>(run: () => T): T {
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    return run()
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+}
+
+const RETRY_WORDS = 'HTTP 429 — backing off before the next attempt'
+
+/** The Claude reading two hours old, our own fetch failed twenty minutes ago, the next attempt in 1 h 12 min. */
+function failedReading(p: Partial<QuotaState> = {}): QuotaState {
+  return state({
+    fetchedAt: Math.floor(NOW / 1000) - 2 * 3600,
+    lastFailure: { at: NOW - 20 * 60_000, problem: RETRY_WORDS, kind: 'retry' },
+    nextAttemptAt: NOW + 72 * 60_000,
+    ...p,
+  })
+}
+
+test('the retry state never says "reset due" of an attempt: a sweep from −2 h to +2 h, English and German (1.7 W2)', () => {
+  const sweep = (): Array<[number, string]> => {
+    const out: Array<[number, string]> = []
+    for (let m = -120; m <= 120; m++) {
+      const q = state({ ok: false, problemKind: 'retry', windows: [], nextAttemptAt: NOW + m * 60_000 })
+      out.push([m, problemText(q, cfg(), NOW)])
+    }
+    return out
+  }
+  for (const [m, text] of sweep()) {
+    assert.doesNotMatch(text, /reset due/, `${m} min: ${text}`)
+    if (m <= 0) assert.equal(text, '$(clock) CC retry due', `${m} min`)
+    else assert.equal(text, `$(clock) CC retry ${relativeShort(NOW + m * 60_000, NOW)}`, `${m} min`)
+  }
+  for (const [m, text] of german(sweep)) {
+    assert.doesNotMatch(text, /Reset fällig|reset due/, `${m} min: ${text}`)
+    if (m <= 0) assert.equal(text, '$(clock) CC neuer Versuch fällig', `${m} min`)
+    else assert.match(text, /^\$\(clock\) CC neuer Versuch in (<1m|\d+h\d*m?|\d+m)$/, `${m} min: ${text}`)
+  }
+})
+
+test('a due retry held for focus says so, and its tooltip says why (1.7 W2)', () => {
+  const q = state({ ok: false, problemKind: 'retry', windows: [], nextAttemptAt: NOW - 60_000, attemptHeld: 'focus' })
+  assert.equal(problemText(q, cfg(), NOW), '$(clock) CC retry waiting for focus')
+  const p = problemView(q, cfg(), NOW)
+  assert.equal(p.explain, 'The last attempt failed; the next one is scheduled after a backoff. This window has been in the background for more than ten minutes; with tokenPace.pollOnlyWhenFocused on, the attempt waits until it is focused.')
+  assert.ok(problemTooltip(q, makeContext(input({ quotas: [q] }))).includes('with tokenPace.pollOnlyWhenFocused on, the attempt waits until it is focused.'))
+  // Not held: the explanation is the 1.6 one, word for word.
+  const due = problemView(state({ ok: false, problemKind: 'retry', windows: [], nextAttemptAt: NOW - 60_000 }), cfg(), NOW)
+  assert.equal(due.message, 'retry due')
+  assert.equal(due.explain, 'The last attempt failed; the next one is scheduled after a backoff.')
+  assert.equal(german(() => problemText(q, cfg(), NOW)), '$(clock) CC neuer Versuch wartet auf Fokus')
+  assert.ok(german(() => problemView(q, cfg(), NOW).explain).endsWith(
+    'Dieses Fenster ist seit mehr als zehn Minuten im Hintergrund; mit tokenPace.pollOnlyWhenFocused wartet der Versuch, bis es den Fokus hat.'))
+})
+
+test('a stale reading whose own fetch failed says the next attempt after its age — words, no colour of its own (1.7 W1)', () => {
+  const q = failedReading()
+  const m = buildItems(input({ quotas: [q] }))[0]
+  assert.equal(m.text, 'CC 5h ██┃▁▁▁▁▁ 25% · resets 3h30m $(history) 2h · $(clock) retry 1h12m')
+  assert.equal(m.colorId, 'tokenPace.stale')
+  assert.equal(m.alarm, false)
+  // The other forms of the next attempt.
+  assert.ok(textsOf({ quotas: [failedReading({ nextAttemptAt: NOW - 1 })] })[0].endsWith(' $(history) 2h · $(clock) retry due'))
+  assert.ok(textsOf({ quotas: [failedReading({ nextAttemptAt: NOW - 1, attemptHeld: 'focus' })] })[0]
+    .endsWith(' $(history) 2h · $(clock) retry waiting for focus'))
+  assert.ok(textsOf({ quotas: [failedReading({ nextAttemptAt: null })] })[0].endsWith(' $(history) 2h · $(clock) retry'))
+  // German: the existing "retry {0}" and W2's words.
+  assert.ok(german(() => textsOf({ quotas: [q] })[0]).endsWith(' · $(clock) neuer Versuch in 1h12m'))
+  assert.ok(german(() => textsOf({ quotas: [failedReading({ nextAttemptAt: NOW - 1 })] })[0]).endsWith(' · $(clock) neuer Versuch fällig'))
+  assert.ok(german(() => textsOf({ quotas: [failedReading({ nextAttemptAt: NOW - 1, attemptHeld: 'focus' })] })[0])
+    .endsWith(' · $(clock) neuer Versuch wartet auf Fokus'))
+  // The compact item carries it where its age stands, too.
+  const compactItem = buildItems(input({ quotas: [q], cfg: cfg({ 'tokenPace.density': 'compact' }) }))[0]
+  assert.ok(compactItem.text.endsWith(' $(history) 2h · $(clock) retry 1h12m'), compactItem.text)
+  assert.equal(compactItem.colorId, 'tokenPace.stale')
+  // An exhausted window read two hours ago: stale takes the alarm, the failure adds none.
+  const full = buildItems(input({ quotas: [failedReading({ windows: [win({ percent: 100 })] })] }))[0]
+  assert.equal(full.alarm, false)
+  assert.equal(full.colorId, 'tokenPace.stale')
+  // With the age switched off the suffix still says why the figure is old.
+  assert.ok(textsOf({ quotas: [q], cfg: cfg({ 'tokenPace.showAgeInItem': 'never' }) })[0].endsWith('resets 3h30m · $(clock) retry 1h12m'))
+})
+
+test('a fresh reading beside a failed fetch keeps its text; the tooltip names the failure either way (1.7 W1)', () => {
+  const fresh = failedReading({ fetchedAt: Math.floor(NOW / 1000) - 60, lastFailure: { at: NOW - 30_000, problem: RETRY_WORDS, kind: 'retry' } })
+  const m = buildItems(input({ quotas: [fresh] }))[0]
+  assert.equal(m.text, 'CC 5h ██┃▁▁▁▁▁ 25% · resets 3h30m')
+  assert.equal(m.colorId, 'tokenPace.paceOk')
+  assert.ok(m.tooltipMarkdown.includes(
+    '$(clock) Last attempt at 11:59 failed: `HTTP 429 — backing off before the next attempt` · next attempt in 1h12m'), m.tooltipMarkdown)
+  // The line stands after the freshness line, as a paragraph of its own.
+  const lines = m.tooltipMarkdown.split('\n')
+  const at = lines.findIndex((l) => l.startsWith('$(clock) Last attempt'))
+  assert.ok(lines[at - 2].startsWith('Updated '), lines.slice(at - 3, at + 1).join('\n'))
+  assert.equal(lines[at - 1], '')
+  // Stale without a failure: no suffix and no line.
+  const stale = state({ fetchedAt: Math.floor(NOW / 1000) - 2 * 3600 })
+  const plain = buildItems(input({ quotas: [stale] }))[0]
+  assert.equal(plain.text, 'CC 5h ██┃▁▁▁▁▁ 25% · resets 3h30m $(history) 2h')
+  assert.equal(plain.tooltipMarkdown.includes('$(clock)'), false)
+  // The stale item's tooltip, the compact tooltip and the collective item's tooltip carry the sentence.
+  const q = failedReading()
+  const sentence = '$(clock) Last attempt at 11:40 failed: `HTTP 429 — backing off before the next attempt` · next attempt in 1h12m'
+  assert.ok(quotaTooltip(q, makeContext(input({ quotas: [q] }))).includes(sentence))
+  assert.ok(quotaTooltip(q, makeContext(input({ quotas: [q], cfg: cfg({ 'tokenPace.tooltip': 'compact' }) }))).includes(sentence))
+  assert.ok(summaryTooltip(['claude'], makeContext(input({ quotas: [q] }))).includes(sentence))
+  // German, the poller's words as the poller wrote them.
+  const de = german(() => quotaTooltip(failedReading({
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — Wartezeit vor dem nächsten Versuch', kind: 'retry' },
+  }), makeContext(input())))
+  assert.ok(de.includes('$(clock) Letzter Versuch um 11:40 fehlgeschlagen: `HTTP 429 — Wartezeit vor dem nächsten Versuch` · nächster Versuch in 1h12m'), de)
+})
+
+test('a due attempt held for focus is a tooltip line of its own when nothing failed (1.7 W2)', () => {
+  const held = state({ nextAttemptAt: NOW - 60_000, attemptHeld: 'focus' })
+  const tip = quotaTooltip(held, makeContext(input({ quotas: [held] })))
+  assert.ok(tip.split('\n').includes('$(clock) next attempt waiting for focus'), tip)
+  assert.ok(german(() => quotaTooltip(held, makeContext(input({ quotas: [held] })))).split('\n')
+    .includes('$(clock) nächster Versuch wartet auf Fokus'))
+  // Due but not held, or held nowhere: no line — the item says nothing new either.
+  for (const q of [state({ nextAttemptAt: NOW - 60_000 }), state({ nextAttemptAt: NOW + 60_000, attemptHeld: 'focus' })]) {
+    assert.equal(quotaTooltip(q, makeContext(input({ quotas: [q] }))).includes('$(clock)'), false)
+  }
+  // With a failure the sentence already ends so; the line is not said twice.
+  const both = failedReading({ nextAttemptAt: NOW - 60_000, attemptHeld: 'focus' })
+  const tip2 = quotaTooltip(both, makeContext(input({ quotas: [both] })))
+  assert.equal(tip2.split('\n').filter((l) => l.includes('waiting for focus')).length, 1, tip2)
+  assert.ok(tip2.includes('· next attempt waiting for focus'))
+})
+
+test('the failed attempt\'s words stay inside a code span of the tooltip (1.7 W1)', () => {
+  const evil = '**bold**|<img src=x onerror=alert(1)>`'
+  const q = failedReading({ lastFailure: { at: NOW - 20 * 60_000, problem: evil, kind: 'retry' } })
+  const tip = quotaTooltip(q, makeContext(input({ quotas: [q] })))
+  assert.ok(tip.includes('failed: `**bold**|<img src=x onerror=alert(1)>` · next attempt'), tip)
+  assert.equal(tip.includes('``'), false, tip)
 })

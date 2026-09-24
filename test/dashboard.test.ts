@@ -1095,6 +1095,36 @@ test('the card keeps its short age but neither the freshness row nor the officia
   assert.ok(h.indexOf('2 min ago') >= 0, h)
 })
 
+// 1.7 W1: our own fetch failed after the reading the card shows — one dim line directly under the
+// card's header row, no glyph, in the view model's words; none without one.
+test('a card whose reading outlived a failed fetch says so in one dim line directly under its header (1.7 W1)', () => {
+  const sentence = 'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m'
+  const h = render('sQuota()', { quotas: [card({ stale: true, ageText: '2 h ago', lastFailure: sentence }), card({ source: 'codex', title: 'Codex' })] })
+  const line = '<div class="meta lastfail">' + sentence + '</div>'
+  assert.equal(h.split('class="meta lastfail"').length - 1, 1, h)
+  // Directly after the header row, before every window of the card.
+  const head = h.indexOf('⚠ stale</span></div>')
+  assert.ok(head > 0, h)
+  assert.equal(h.indexOf(line), head + '⚠ stale</span></div>'.length, h)
+  assert.ok(h.indexOf(line) < h.indexOf('role="progressbar"'), h)
+  // No glyph of its own: the header's "⚠ stale" is the one warning.
+  assert.equal(/lastfail">[⚠$]/.test(h), false, h)
+  // Escaped like every word the model hands over; absent, empty or not a string: no line.
+  const odd = render('sQuota()', { quotas: [card({ lastFailure: 'failed: <img src=x onerror=alert(1)>' })] })
+  assert.ok(odd.indexOf('<div class="meta lastfail">failed: &lt;img src=x onerror=alert(1)&gt;</div>') >= 0, odd)
+  for (const lastFailure of [null, undefined, '', 42, { text: 'x' }]) {
+    const none = render('sQuota()', { quotas: [card({ lastFailure })] })
+    assert.equal(none.indexOf('lastfail'), -1, JSON.stringify(lastFailure) + ': ' + none)
+  }
+  // The line from a real view model: the failed reading's card carries it, the other card none.
+  const vmHtml = render('sQuota()', buildViewModel(makeInput({ quotas: [
+    { source: 'claude', ok: true, origin: 'poll', fetchedAt: Math.round((NOW - 2 * 3_600_000) / 1000), planType: 'max20',
+      windows: [], nextAttemptAt: NOW + 72 * 60_000,
+      lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' } },
+  ] })) as unknown as Record<string, unknown>)
+  assert.ok(vmHtml.indexOf(line) >= 0, vmHtml)
+})
+
 // 1.6 N7: the subagent share of what this machine counted over a window — a dim line under the
 // bar (after the forecast, before the sparkline), in the view model's words; no line without one.
 test('a window carries its subagent share as a dim line under the bar, and none without one', () => {

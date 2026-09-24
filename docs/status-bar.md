@@ -63,6 +63,17 @@ Part of the [Token Pace documentation](../README.md#documentation).
   every redraw, so it never freezes at the value it had when it was fetched. A reading older
   than `staleAfterMinutes` (default 20) is greyed with `tokenPace.stale`, marked in the
   tooltip, loses its alarm background, and may not raise an alert.
+* **A failed fetch of our own.** When a reading is stale because Token Pace's own fetch failed
+  after it was taken (a `429` and its backoff, say), the item says so after the age:
+  `$(history) 2h · $(clock) retry 1h12m` — the countdown is the next attempt. Once that time has
+  passed it reads `retry due`, and `retry waiting for focus` while this window has been in the
+  background for more than ten minutes (`tokenPace.pollOnlyWhenFocused`); with no known time it is
+  plain `retry`. The suffix appears only while the reading is stale — a fresh reading beside a failed
+  fetch keeps its text — and it is words and a codicon only: the item keeps the grey
+  `tokenPace.stale` gives it, with no alarm. The tooltip names the failure whenever the last attempt
+  failed, stale or not, in a line after the freshness line: `$(clock) Last attempt at 14:20 failed:
+  HTTP 429 — backing off before the next attempt · next attempt in 1h12m`. The same sentence stands
+  under the header of the dashboard's quota card, in the markdown view and in the Quick Pick.
 * **Labels.** `tokenPace.labels` overrides the provider prefix (`claude`, `codex`, and
   `summary` for the collective item) or a single window by its id — `session:300`,
   `weekly_all:10080`, `weekly_scoped:10080:fable`, `codex:300`, `codex:10080`. Values are cut
@@ -78,6 +89,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `CC 5h ████████ 111%` | above 100.5 %: usage billed beyond the plan. `overflowDisplay: clamp` shows `100%` instead — the figure is real, not a rounding error |
 | `CC 7d ∞ · resets 3d 5h` | a window or credit pot without a limit: no bar and no pace, because there is no denominator |
 | `CC 5h ▁▁▁▁▁▁▁▁ reset due` | the reset has passed and no reading newer than it has arrived. The gauge is never set to 0 by us; a re-poll is scheduled instead |
+| `CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m` | the reading is stale because our own fetch failed; the countdown is the next attempt (`retry due` once it has passed, `retry waiting for focus` while a background window holds it back). Grey, never an alarm |
 | `CC extra $12.00 of $50.00 · 24 %` | extra usage, in its own blue |
 | `CC $(graph) 5h ~empty in 40m` | the forecast entry — an estimate, and it carries `~` |
 | `Σ 4.6M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope`; the period is always named |

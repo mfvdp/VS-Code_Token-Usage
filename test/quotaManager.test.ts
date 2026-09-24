@@ -6,11 +6,13 @@ import * as fs from 'node:fs'
 import { createRequire } from 'node:module'
 import * as path from 'node:path'
 import { test } from 'node:test'
+import { sanitize } from '../src/config'
 import { PollOptions, PollResult } from '../src/poller'
 import {
   HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
 } from '../src/quotaManager'
-import { QuotaState, Source } from '../src/types'
+import { makeContext, quotaTooltip, UsageSource } from '../src/statusText'
+import { emptyBucket, QuotaState, Source } from '../src/types'
 import { scratchDir } from './fixtures/helpers'
 
 const BASE = 1_700_000_000_000
@@ -699,4 +701,284 @@ test('after dispose tick, forcePoll, a refocus and a reset trigger start nothing
   version('9.9.9')
   await flush()
   assert.deepEqual(v.polls.map((p) => p.source), ['codex'], 'the Claude request was sent after dispose')
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 W1: the last failed attempt beside a stale reading; W2: an attempt held for focus
+// ---------------------------------------------------------------------------
+
+const RETRY_429: PollResult = {
+  state: null, retryAfterSeconds: 600, problem: 'HTTP 429 — backing off before the next attempt', problemKind: 'retry',
+}
+
+/**
+ * A harness whose Claude answer the test sets per request (`answer.claude`); Codex answers with a
+ * missing binary, as in every other test here. `consent` is a holder so a test can take it back.
+ */
+function failing(optOver: Partial<QuotaOptions> = {}) {
+  const answer: { claude: PollResult } = {
+    claude: { state: claudeState(BASE / 1000), retryAfterSeconds: null, raw: { limits: [] } },
+  }
+  const consent = { ok: true }
+  const h = harness(optOver, {}, () => consent.ok, (source) => (source === 'claude'
+    ? answer.claude
+    : { state: null, retryAfterSeconds: null, problem: 'no binary', problemKind: 'noBinary' }))
+  return { ...h, answer, consent }
+}
+
+/** A poll at T0 that succeeds, then one at T0 + 30 min that answers 429 with a ten-minute wait. */
+async function okThen429(h: ReturnType<typeof failing>): Promise<void> {
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  h.setNow(BASE + 30 * MIN)
+  h.answer.claude = RETRY_429
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+}
+
+test('a failed fetch after a reading keeps the reading and says when and why it failed (1.7 W1)', async () => {
+  const h = failing()
+  await okThen429(h)
+  const s = h.mgr.current(BASE + 30 * MIN)[0]
+  // The T0 reading stays on screen …
+  assert.equal(s.ok, true)
+  assert.equal(s.fetchedAt, BASE / 1000)
+  assert.equal(s.origin, 'poll')
+  // … with the failure of our own beside it, and the backoff's end as the next attempt.
+  assert.deepEqual(s.lastFailure, { at: BASE + 30 * MIN, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' })
+  assert.equal(s.nextAttemptAt, BASE + 40 * MIN)
+  assert.equal(s.attemptHeld, null)
+  // A state without a reading says the failure as its problem, as in 1.6 — no lastFailure on it.
+  const codex = h.mgr.current(BASE + 30 * MIN)[1]
+  assert.equal(codex.ok, false)
+  assert.equal(codex.problemKind, 'noBinary')
+  assert.equal(codex.lastFailure, undefined)
+})
+
+test('the next successful poll clears the failure (1.7 W1)', async () => {
+  const h = failing()
+  await okThen429(h)
+  h.setNow(BASE + 45 * MIN)
+  h.answer.claude = { state: claudeState((BASE + 45 * MIN) / 1000, 55), retryAfterSeconds: null, raw: { limits: [] } }
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  const s = h.mgr.current(BASE + 45 * MIN)[0]
+  assert.equal(s.ok, true)
+  assert.equal(s.windows[0].percent, 55)
+  assert.equal(s.lastFailure, null)
+})
+
+test('a foreign reading newer than the failure answers it; an older one does not (1.7 W1)', async () => {
+  const h = failing()
+  await okThen429(h)
+  // A cache file written after our failure: the freshest source wins, and the failure is moot.
+  h.writeClaudeCache((BASE + 35 * MIN) / 1000, 61, null)
+  h.mgr.invalidate()
+  const newer = h.mgr.current(BASE + 36 * MIN)[0]
+  assert.equal(newer.origin, 'cache')
+  assert.equal(newer.windows[0].percent, 61)
+  assert.equal(newer.lastFailure, null)
+  // One taken before it — newer than our own T0 reading, so it is the one shown — still stands
+  // beside the failure that came after it.
+  h.writeClaudeCache((BASE + 20 * MIN) / 1000, 58, null)
+  h.mgr.invalidate()
+  const older = h.mgr.current(BASE + 36 * MIN)[0]
+  assert.equal(older.origin, 'cache')
+  assert.equal(older.windows[0].percent, 58)
+  assert.deepEqual(older.lastFailure, { at: BASE + 30 * MIN, problem: RETRY_429.problem, kind: 'retry' })
+})
+
+test('no failure is reported while we may not fetch: follower, consent withdrawn, mode auto or cache (1.7 W1)', async () => {
+  const h = failing()
+  await okThen429(h)
+  // A reading from before the failure keeps an ok state in every mode below.
+  h.writeClaudeCache((BASE + 10 * MIN) / 1000, 44, null)
+  h.mgr.invalidate()
+  const at = BASE + 31 * MIN
+  assert.ok(h.mgr.current(at)[0].lastFailure, 'the premise: a leader in poll mode with consent reports it')
+
+  h.mgr.setLeader(false)
+  const follower = h.mgr.current(at)[0]
+  assert.equal(follower.ok, true)
+  assert.equal(follower.lastFailure, null)
+  assert.equal(follower.nextAttemptAt, null)
+  h.mgr.setLeader(true)
+
+  h.consent.ok = false
+  h.mgr.invalidate()
+  const unasked = h.mgr.current(at)[0]
+  assert.equal(unasked.ok, true)
+  assert.equal(unasked.lastFailure, null)
+  h.consent.ok = true
+
+  for (const mode of ['auto', 'cache'] as const) {
+    h.mgr.setOptions({ ...OPTIONS, mode })
+    const s = h.mgr.current(at)[0]
+    assert.equal(s.ok, true, mode)
+    assert.equal(s.lastFailure, null, mode)
+  }
+  h.mgr.setOptions(OPTIONS)
+  assert.ok(h.mgr.current(at)[0].lastFailure, 'back in poll mode the failure is said again')
+})
+
+test('quota.json keeps the last failed attempt by shape, and forgets it with Clear Stored Data (1.7 W1, §0a.3)', async () => {
+  const h = failing()
+  await okThen429(h)
+  const file = JSON.parse(fs.readFileSync(h.files.stateFile, 'utf8'))
+  assert.equal(file.version, 1)
+  assert.deepEqual(file.failed.claude, { at: BASE + 30 * MIN, kind: 'retry', text: 'HTTP 429 — backing off before the next attempt' })
+  assert.deepEqual(Object.keys(file.failed.claude).sort(), ['at', 'kind', 'text'])
+
+  // A restart during the backoff still says why the figure is old.
+  const reopen = (at: number): QuotaState => new QuotaManager(OPTIONS, h.files, () => { /* silent */ }, () => true, () => [], undefined, {
+    now: () => at, findCodexBinary: () => null, poll: async () => ({ state: null, retryAfterSeconds: null }),
+  }).current(at)[0]
+  const again = reopen(BASE + 31 * MIN)
+  assert.equal(again.ok, true)
+  assert.deepEqual(again.lastFailure, h.mgr.current(BASE + 31 * MIN)[0].lastFailure)
+  assert.equal(again.nextAttemptAt, BASE + 40 * MIN)
+
+  // Anything that is not a failed attempt of the right shape is dropped whole.
+  const good = { at: BASE + 30 * MIN, kind: 'retry', text: 'HTTP 429 — backing off before the next attempt' }
+  const cases: Array<[string, unknown, boolean]> = [
+    ['as written', good, true],
+    ['300 characters', { ...good, text: 'x'.repeat(300) }, true],
+    ['a time in the future', { ...good, at: BASE + 32 * MIN }, false],
+    ['no finite time', { ...good, at: null }, false],
+    ['an unknown kind', { ...good, kind: 'teapot' }, false],
+    ['a kind that is no string', { ...good, kind: 7 }, false],
+    ['301 characters', { ...good, text: 'x'.repeat(301) }, false],
+    ['an empty text', { ...good, text: '' }, false],
+    ['a text that is no string', { ...good, text: { token: 'synthetic' } }, false],
+    ['no object', 'HTTP 429', false],
+  ]
+  for (const [name, failed, kept] of cases) {
+    fs.writeFileSync(h.files.stateFile, JSON.stringify({ ...file, failed: { claude: failed } }))
+    const s = reopen(BASE + 31 * MIN)
+    assert.equal(s.ok, true, name)
+    if (kept) assert.equal(s.lastFailure?.at, BASE + 30 * MIN, name)
+    else assert.equal(s.lastFailure, null, name)
+  }
+
+  // Clear Stored Data: the manager forgets it at once, and the next write carries none for Claude.
+  fs.writeFileSync(h.files.stateFile, JSON.stringify(file))
+  h.writeClaudeCache((BASE + 10 * MIN) / 1000, 44, null)
+  h.mgr.clearPolled()
+  const cleared = h.mgr.current(BASE + 31 * MIN)[0]
+  assert.equal(cleared.ok, true)
+  assert.equal(cleared.lastFailure, null)
+  // A fresh foreign reading spares Claude's fetch; Codex's attempt (no binary) is the next write.
+  h.writeClaudeCache((BASE + 31 * MIN) / 1000, 44, null)
+  h.mgr.invalidate()
+  h.mgr.tick(() => { /* nothing */ })
+  await flush()
+  const after = JSON.parse(fs.readFileSync(h.files.stateFile, 'utf8'))
+  assert.equal('claude' in (after.failed ?? {}), false, JSON.stringify(after.failed))
+  assert.equal(after.failed?.codex?.kind, 'noBinary')
+  // And a successful Claude poll writes no Claude entry — only Codex's missing binary is kept.
+  const clean = harness()
+  clean.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  const cleanFile = JSON.parse(fs.readFileSync(clean.files.stateFile, 'utf8'))
+  assert.deepEqual(Object.keys(cleanFile.failed ?? {}), ['codex'])
+})
+
+test('a rejected poll whose error carries a token leaves none of it anywhere (1.7 W1, §0a.3 leak test)', async () => {
+  const SECRET = 'synthetic-bearer-token'
+  let reject = false
+  const h = harness({}, {
+    poll: async (source) => {
+      if (source === 'claude' && reject) {
+        const e = new Error(`request failed: Authorization: Bearer ${SECRET}`)
+        ;(e as Error & { headers?: unknown }).headers = { Authorization: `Bearer ${SECRET}` }
+        throw e
+      }
+      // Codex's second request stays out, so the only write of that round is the catch's own.
+      if (source === 'codex' && reject) return new Promise<PollResult>(() => { /* never answered */ })
+      return source === 'claude'
+        ? { state: claudeState(BASE / 1000), retryAfterSeconds: null, raw: { limits: [] } }
+        : { state: null, retryAfterSeconds: null, problem: 'no binary', problemKind: 'noBinary' }
+    },
+  })
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  h.setNow(BASE + 30 * MIN)
+  reject = true
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+
+  const s = h.mgr.current(BASE + 30 * MIN)[0]
+  // The manager's own words stand for the failure, and they were written through the catch.
+  assert.deepEqual(s.lastFailure, { at: BASE + 30 * MIN, problem: 'Unexpected error while fetching', kind: 'unknown' })
+  const file = fs.readFileSync(h.files.stateFile, 'utf8')
+  assert.deepEqual(JSON.parse(file).failed.claude, { at: BASE + 30 * MIN, kind: 'unknown', text: 'Unexpected error while fetching' })
+  const agg: UsageSource = {
+    sum: () => emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, '2026-09-03'),
+    cost: () => ({ usd: 0, listUsd: 0, unpricedTokens: 0, unpricedModels: [], fastUnpricedTokens: 0, familyPriced: [], custom: false }),
+  }
+  const tip = quotaTooltip(s, makeContext({
+    quotas: [s], agg, cfg: sanitize({ 'tokenPace.timezone': 'utc' }), now: BASE + 30 * MIN, forecasts: new Map(),
+    role: 'single', scanning: false, consent: 'granted',
+  }))
+  assert.ok(tip.includes('Unexpected error while fetching'), tip)
+  for (const [where, text] of [['quota.json', file], ['the state', JSON.stringify(s)], ['the tooltip', tip], ['the log', h.logs.join('\n')]]) {
+    assert.equal(text.includes(SECRET), false, `${where} carries the token`)
+    assert.equal(/Bearer|Authorization|request failed/.test(text), false, `${where} carries the exception's text`)
+  }
+  assert.ok(h.logs.includes('claude: Error while fetching'), h.logs.join('\n'))
+})
+
+test('a due attempt held for focus says so, logs it once per hold, and runs on focus (1.7 W2)', async () => {
+  const h = harness()
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  const pollsBefore = h.polls.length
+  // Background at T0 + 25 min; the scheduled attempt was due at T0 + 30 min.
+  h.setNow(BASE + 25 * MIN)
+  h.mgr.setFocused(false)
+  assert.equal(h.mgr.current(BASE + 25 * MIN)[0].attemptHeld, null, 'not due yet, not held')
+  h.setNow(BASE + 36 * MIN)
+  for (let i = 0; i < 5; i++) {
+    h.setNow(BASE + (36 + i) * MIN)
+    h.mgr.tick(() => { /* nothing */ })
+    await flush()
+  }
+  assert.equal(h.polls.length, pollsBefore, 'the held attempt made no request')
+  const held = h.mgr.current(BASE + 40 * MIN)[0]
+  assert.equal(held.ok, true)
+  assert.equal(held.attemptHeld, 'focus')
+  assert.equal(held.nextAttemptAt, BASE + 30 * MIN)
+  const lines = h.logs.filter((l) => l === 'claude: a due fetch waits for this window to be focused (tokenPace.pollOnlyWhenFocused)')
+  assert.equal(lines.length, 1, h.logs.join('\n'))
+
+  // Focus back after more than ten minutes: the freshness check runs, and nothing is held any more.
+  h.mgr.setFocused(true, () => { /* nothing */ })
+  await flush()
+  assert.ok(h.polls.length > pollsBefore, 'regaining focus ran the attempt')
+  assert.equal(h.mgr.current(BASE + 40 * MIN)[0].attemptHeld, null)
+
+  // The next hold is a new one and is logged again.
+  h.setNow(BASE + 45 * MIN)
+  h.mgr.setFocused(false)
+  h.setNow(BASE + 80 * MIN)
+  h.mgr.tick(() => { /* nothing */ })
+  await flush()
+  assert.equal(h.logs.filter((l) => l.startsWith('claude: a due fetch waits')).length, 2)
+})
+
+test('a focused window, or one without the focus setting, never holds an attempt (1.7 W2)', async () => {
+  const focused = harness()
+  focused.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  // Long past the scheduled attempt, but focused: due, not held.
+  assert.equal(focused.mgr.current(BASE + 90 * MIN)[0].attemptHeld, null)
+  assert.equal(focused.mgr.current(BASE + 90 * MIN)[0].nextAttemptAt, BASE + 30 * MIN)
+
+  const ungated = harness({ pollOnlyWhenFocused: false })
+  ungated.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  ungated.setNow(BASE + 10 * MIN)
+  ungated.mgr.setFocused(false)
+  assert.equal(ungated.mgr.current(BASE + 90 * MIN)[0].attemptHeld, null)
+  assert.equal(ungated.logs.some((l) => l.includes('waits for this window')), false)
 })

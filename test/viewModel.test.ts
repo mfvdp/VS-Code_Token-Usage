@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
 import { DEFAULT_FORECAST_CONFIG } from '../src/forecast'
 import { rangeFor } from '../src/time'
-import { AgentLaunch, AgentRec, MainRec, QuotaSample, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
+import { AgentLaunch, AgentRec, MainRec, QuotaSample, QuotaState, QuotaWindow, TOOL_NAME_CAP } from '../src/types'
 import { paceVerdict, windowElapsed } from '../src/pace'
 import { QuotaHistory, THIN_RECENT_DAYS, THIN_RECENT_SLOT_MS } from '../src/quotaHistory'
 import { RESET_JITTER_MS } from '../src/resetRule'
@@ -98,6 +98,44 @@ test('an unreadable quota names its cause and offers exactly one repair step', (
   assert.equal(card.problemAction?.command, 'tokenPace.showOutput')
   assert.ok(WEBVIEW_COMMANDS.includes(card.problemAction?.command as never))
   assert.equal(card.freshness.nextRefresh, '12m')
+})
+
+// 1.7 W1: our own fetch failed after the reading a card shows — one sentence on the card.
+const FAILED_429 = { at: NOW - 20 * 60_000, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' as const }
+
+test('a card whose reading outlived a failed fetch of ours carries the sentence; no other card does (1.7 W1)', () => {
+  const failed = state('claude', { fetchedAt: Math.round((NOW - 2 * 3_600_000) / 1000), lastFailure: FAILED_429, nextAttemptAt: NOW + 72 * 60_000 })
+  const vm = buildViewModel(makeInput({ quotas: [failed, state('codex')] }))
+  assert.equal(vm.quotas[0].lastFailure,
+    'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m')
+  assert.equal(vm.quotas[0].stale, true)
+  assert.equal(vm.quotas[0].problem, null)
+  assert.equal(vm.quotas[0].freshness.nextRefresh, '1h12m')
+  assert.equal(vm.quotas[1].lastFailure, null)
+  // The same world without the failure: the card is the 1.6 card, the new field null.
+  const plain = buildViewModel(makeInput())
+  assert.equal(plain.quotas[0].lastFailure, null)
+  // A card without a reading says the failure as its problem, never twice.
+  const broken = state('claude', { ok: false, problem: 'HTTP 429 — backing off before the next attempt', problemKind: 'retry', windows: [], lastFailure: FAILED_429 })
+  const card = buildViewModel(makeInput({ quotas: [broken] })).quotas[0]
+  assert.equal(card.lastFailure, null)
+  assert.equal(card.problem, 'HTTP 429 — backing off before the next attempt')
+  // Held for focus: the sentence ends so.
+  const held = state('claude', { lastFailure: FAILED_429, nextAttemptAt: NOW - 60_000, attemptHeld: 'focus' })
+  assert.equal(buildViewModel(makeInput({ quotas: [held] })).quotas[0].lastFailure,
+    'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt waiting for focus')
+})
+
+test('the freshness block\'s next refresh is an attempt: a countdown, due, waiting for focus — never "reset due" (1.7 W2)', () => {
+  const next = (over: Partial<QuotaState>): string | null =>
+    buildViewModel(makeInput({ quotas: [state('claude', over)] })).quotas[0].freshness.nextRefresh
+  assert.equal(next({ nextAttemptAt: NOW + 72 * 60_000 }), '1h12m')
+  assert.equal(next({ nextAttemptAt: NOW - 1 }), 'due')
+  assert.equal(next({ nextAttemptAt: NOW }), 'due')
+  assert.equal(next({ nextAttemptAt: NOW - 1, attemptHeld: 'focus' }), 'waiting for focus')
+  assert.equal(next({ nextAttemptAt: null }), null)
+  assert.equal(next({ nextAttemptAt: NaN }), null)
+  for (let m = -120; m <= 120; m += 7) assert.notEqual(next({ nextAttemptAt: NOW + m * 60_000 }), 'reset due', `${m} min`)
 })
 
 test('the freshness block reports five different clocks', () => {

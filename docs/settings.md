@@ -98,7 +98,7 @@ power-user settings sit at the end of their group.
 | `userAgent` | `claudeCode` | `claudeCode` or `honest`. **`honest` gets rate-limited into a permanent 429.** Machine-scoped |
 | `codexAppServer.mode` | `oneShot` | `oneShot` (spawn per poll) or `persistent` (one long-lived child, with pushes) |
 | `credentials.keychain` | `true` | Also look in the OS keychain when the credentials file has no token. Machine-scoped |
-| `pollOnlyWhenFocused` | `true` | Skip scheduled fetches after ten minutes in the background. A manual fetch always runs |
+| `pollOnlyWhenFocused` | `true` | Skip scheduled fetches after ten minutes in the background — the attempt then reads `waiting for focus`. A manual fetch always runs |
 | `leaderElection` | `true` | With several windows open, let one do the fetching and have the others follow its files |
 
 ## Paths

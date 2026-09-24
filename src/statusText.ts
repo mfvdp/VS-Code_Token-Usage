@@ -29,7 +29,10 @@ import {
   ageMinutes, BarOptions, compact, estimate, extraUsageText, full, originName, percentOf,
   percentText, renderBar, usd,
 } from './render'
-import { ageText, formatReset, formatTime, lastDays, relativeShort, TimeConfig } from './time'
+import {
+  ageText, attemptWhen, formatReset, formatTime, lastDays, lastFailureText, nextAttemptWords, relativeShort, retryWords,
+  TimeConfig,
+} from './time'
 import {
   Bucket, emptyBucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaState,
   QuotaWindow, Source,
@@ -450,6 +453,18 @@ function ageSuffix(q: QuotaState, stale: boolean, cfg: Config, now: number): str
   return a === null ? '' : ` $(history) ${a}`
 }
 
+/**
+ * 1.7 W1: ` · $(clock) retry 1h12m` after the age — a stale reading whose age is our own failed
+ * fetch says so, and says when the next attempt is (W2's words: `retry due`, `retry waiting for
+ * focus`, `retry` without a known time). Only while stale, for the item's width: a fresh reading
+ * beside a failed fetch is still a fresh reading, and the tooltip names the failure either way.
+ * Words and a codicon only — the item keeps the colour staleness gave it.
+ */
+function failureSuffix(q: QuotaState, stale: boolean, now: number): string {
+  if (!stale || !q.ok || !q.lastFailure) return ''
+  return ` · $(clock) ${retryWords(attemptWhen(q.nextAttemptAt, q.attemptHeld, now))}`
+}
+
 /** `CC 5h ██┃▁▁▁▁▁ 25% · 2h14m` */
 export function windowText(q: QuotaState, view: WindowView, ctx: RenderContext): string {
   const { cfg, now, tcfg } = ctx
@@ -461,6 +476,7 @@ export function windowText(q: QuotaState, view: WindowView, ctx: RenderContext):
     + indicatorGlyph(view, cfg)
     + resetSuffix(view, cfg, now, tcfg)
     + ageSuffix(q, stale, cfg, now)
+    + failureSuffix(q, stale, now)
 }
 
 function colorFor(view: WindowView, stale: boolean, cfg: Config): { colorId: string | null; alarm: boolean } {
@@ -519,11 +535,14 @@ export function problemView(q: QuotaState, cfg: Config, now: number): ProblemVie
         check: t('Check: click here — the fetch asks for consent once and remembers the answer.'),
       }
     case 'retry': {
-      const at = finite(q.nextAttemptAt) ? relativeShort(q.nextAttemptAt as number, now) : null
+      // 1.7 W2: an attempt time is not a reset — a passed one is `due`, or `waiting for focus` while
+      // the window is held back; `relativeShort` would say "reset due" of it.
+      const when = attemptWhen(q.nextAttemptAt, q.attemptHeld, now)
+      const explain = t('The last attempt failed; the next one is scheduled after a backoff.')
       return {
-        kind, icon: '$(clock)', message: at ? t('retry {0}', at) : t('retry'),
+        kind, icon: '$(clock)', message: retryWords(when),
         command: 'tokenPace.refreshQuota',
-        explain: t('The last attempt failed; the next one is scheduled after a backoff.'),
+        explain: when?.kind === 'focus' ? `${explain} ${heldExplain()}` : explain,
         check: t('Check: the log holds the reason. Clicking here retries immediately.'),
       }
     }
@@ -599,6 +618,11 @@ export function problemView(q: QuotaState, cfg: Config, now: number): ProblemVie
         check: t('Check: the log holds the raw reason. Clicking here tries again.'),
       }
   }
+}
+
+/** 1.7 W2: why a due attempt has not been made — the focus gate, in one sentence. */
+function heldExplain(): string {
+  return t('This window has been in the background for more than ten minutes; with tokenPace.pollOnlyWhenFocused on, the attempt waits until it is focused.')
 }
 
 /** `$(key) CC no token` — the label always stays visible, at every density. */
@@ -699,6 +723,21 @@ function freshnessLine(q: QuotaState, cfg: Config, now: number): string {
   if (age === null) return origin ? t('No reading yet · {0}', origin) : t('No reading yet')
   const suffix = isStale(q, cfg, now) ? ` · $(warning) **${t('stale')}**` : ''
   return `${origin ? t('Updated {0} · {1}', age, origin) : t('Updated {0}', age)}${suffix}`
+}
+
+/**
+ * 1.7 W1/W2: the line after the freshness line of a reading we still show — our own last fetch
+ * failed (`$(clock) Last attempt at 14:20 failed: … · next attempt in 1h12m`), or, without a
+ * failure, a due attempt waits for focus (`$(clock) next attempt waiting for focus`). The poller's
+ * words sit in a code span, as every borrowed string of this tooltip does: Codex's error string is
+ * the app-server's text, and the tooltip is a trusted MarkdownString with HTML enabled.
+ */
+function attemptLine(q: QuotaState, ctx: RenderContext): string | null {
+  if (!q.ok) return null
+  const failed = lastFailureText(q, ctx.now, ctx.tcfg, span)
+  if (failed !== null) return `$(clock) ${failed}`
+  const when = attemptWhen(q.nextAttemptAt, q.attemptHeld, ctx.now)
+  return when?.kind === 'focus' ? `$(clock) ${nextAttemptWords(when)}` : null
 }
 
 /** Icons outside, sentence inside — the glyph is the same in every language. */
@@ -935,6 +974,11 @@ export function quotaTooltip(q: QuotaState, ctx: RenderContext): string {
   const out = quotaBlock(q, ctx, compactMode)
   out.push('')
   out.push(freshnessLine(q, cfg, ctx.now))
+  const attempt = attemptLine(q, ctx)
+  if (attempt !== null) {
+    out.push('')
+    out.push(attempt)
+  }
   if (compactMode) {
     out.push('')
     out.push(footerLine(ctx))
@@ -971,6 +1015,11 @@ export function summaryTooltip(sources: Source[], ctx: RenderContext): string {
       out.push(...quotaBlock(q, ctx, compactMode))
       out.push('')
       out.push(freshnessLine(q, cfg, ctx.now))
+      const attempt = attemptLine(q, ctx)
+      if (attempt !== null) {
+        out.push('')
+        out.push(attempt)
+      }
     } else {
       const p = problemView(q, cfg, ctx.now)
       out.push(`**${t('{0} — quota unavailable', TITLE[q.source])}**`)
@@ -1316,7 +1365,8 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       return {
         id: `tokenPace.compact.${spec.q.source}`,
         text: `${prefix}${providerLabel(spec.q.source, cfg)} ${body}`
-          + ageSuffix(spec.q, stale, cfg, now),
+          + ageSuffix(spec.q, stale, cfg, now)
+          + failureSuffix(spec.q, stale, now),
         colorId: paint.colorId,
         alarm: paint.alarm,
         tooltipMarkdown: quotaTooltip(spec.q, ctx),

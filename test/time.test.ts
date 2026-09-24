@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
+import { setBundle, setLocale } from '../src/i18n'
 import {
-  addDays, ageText, calendarDayOf, calendarWeekdayOf, dayCount, dayOf, dayOfHour, daysBetween, formatReset, formatTime, hourIndex,
-  lastDays, localHourOfDay, monthOf, previousRange, rangeFor, relativeShort, relativeTime,
-  resolveZone, TimeConfig, weekdayOf, weekdayWords,
+  addDays, ageText, attemptWhen, calendarDayOf, calendarWeekdayOf, clockStamp, dayCount, dayOf, dayOfHour, daysBetween, formatReset,
+  formatTime, hourIndex, lastDays, lastFailureText, localHourOfDay, monthOf, nextAttemptWords, previousRange, rangeFor, refreshWords,
+  relativeShort, relativeTime, resolveZone, retryWords, TimeConfig, weekdayOf, weekdayWords,
 } from '../src/time'
+import { QuotaState } from '../src/types'
+import { ROOT } from './helpers/nls'
 
 const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
 const berlin: TimeConfig = { ...utc, zone: 'Europe/Berlin' }
@@ -243,4 +248,120 @@ test('the calendar day and weekday of an instant follow the zone and leave the d
   assert.equal(calendarDayOf(ms, late), '2026-09-03')
   assert.equal(calendarWeekdayOf(ms, late), 4)
   assert.deepEqual(weekdayWords(), ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
+})
+
+// ---------------------------------------------------------------------------
+// 1.7 W1, W2: the next attempt and the failed one
+// ---------------------------------------------------------------------------
+
+/** The bundle the extension ships, installed for the length of `run`. */
+function german<T>(run: () => T): T {
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    return run()
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+}
+
+test('attemptWhen: a countdown ahead, due once passed, waiting for focus while held — never a reset (1.7 W2)', () => {
+  assert.deepEqual(attemptWhen(NOW + 72 * 60_000, null, NOW), { kind: 'in', text: '1h12m' })
+  assert.deepEqual(attemptWhen(NOW - 1, null, NOW), { kind: 'due' })
+  assert.deepEqual(attemptWhen(NOW, undefined, NOW), { kind: 'due' })
+  assert.deepEqual(attemptWhen(NOW - 1, 'focus', NOW), { kind: 'focus' })
+  // A hold says nothing about a time still ahead: the countdown stands.
+  assert.deepEqual(attemptWhen(NOW + 60_000, 'focus', NOW), { kind: 'in', text: '1m' })
+  assert.equal(attemptWhen(null, null, NOW), null)
+  assert.equal(attemptWhen(undefined, 'focus', NOW), null)
+  assert.equal(attemptWhen(NaN, null, NOW), null)
+  assert.equal(attemptWhen(Infinity, null, NOW), null)
+  assert.equal(attemptWhen(NOW + 60_000, null, NaN), null)
+  // Every time ahead is a duration, whatever relativeShort says of a time that has passed.
+  for (let ms = 1; ms <= 3 * 3_600_000; ms += 59_999) {
+    const w = attemptWhen(NOW + ms, null, NOW)
+    assert.equal(w?.kind, 'in')
+    assert.notEqual((w as { text: string }).text, 'reset due')
+  }
+})
+
+test('the attempt words in English and German — one set for the status bar, the sentence and the freshness column (1.7 W2)', () => {
+  const ahead = attemptWhen(NOW + 72 * 60_000, null, NOW)
+  const due = attemptWhen(NOW - 1, null, NOW)
+  const held = attemptWhen(NOW - 1, 'focus', NOW)
+  const en = [ahead, due, held].map((w) => [retryWords(w), nextAttemptWords(w!), refreshWords(w!)])
+  assert.deepEqual(en, [
+    ['retry 1h12m', 'next attempt in 1h12m', '1h12m'],
+    ['retry due', 'next attempt due', 'due'],
+    ['retry waiting for focus', 'next attempt waiting for focus', 'waiting for focus'],
+  ])
+  assert.equal(retryWords(null), 'retry')
+  const de = german(() => [ahead, due, held].map((w) => [retryWords(w), nextAttemptWords(w!), refreshWords(w!)]))
+  assert.deepEqual(de, [
+    ['neuer Versuch in 1h12m', 'nächster Versuch in 1h12m', '1h12m'],
+    ['neuer Versuch fällig', 'nächster Versuch fällig', 'fällig'],
+    ['neuer Versuch wartet auf Fokus', 'nächster Versuch wartet auf Fokus', 'wartet auf Fokus'],
+  ])
+  assert.equal(german(() => retryWords(null)), 'neuer Versuch')
+  // None of them is ever a reset's word.
+  for (const words of [...en.flat(), ...de.flat()]) assert.doesNotMatch(words, /reset due|Reset fällig/)
+})
+
+test('clockStamp: the clock time today, the day in front on any other day — the day boundary as dayOf has it (1.7 W1)', () => {
+  assert.equal(clockStamp(NOW - 20 * 60_000, NOW, utc), '11:40')
+  assert.equal(clockStamp(Date.UTC(2026, 8, 2, 14, 20), NOW, utc), '2026-09-02 14:20')
+  assert.equal(clockStamp(Date.UTC(2026, 8, 3, 14, 20), NOW, berlin), '16:20')
+  // 02:30 with a boundary at 06:00 belongs to the day before, as the agent tree has always said it.
+  const late = { ...utc, dayBoundaryHour: 6 }
+  const small = Date.UTC(2026, 8, 3, 2, 30)
+  assert.equal(clockStamp(small, NOW, late), '2026-09-02 02:30')
+  assert.equal(clockStamp(small, Date.UTC(2026, 8, 3, 5, 0), late), '02:30')
+  for (const ms of [small, NOW - 1, NOW - 26 * 3_600_000, NOW + 90 * 60_000]) {
+    for (const cfg of [utc, berlin, ny, late]) {
+      const time = formatTime(ms, cfg)
+      assert.equal(clockStamp(ms, NOW, cfg), dayOf(ms, cfg) === dayOf(NOW, cfg) ? time : `${dayOf(ms, cfg)} ${time}`)
+    }
+  }
+})
+
+function failedState(over: Partial<QuotaState> = {}): QuotaState {
+  return {
+    source: 'claude', ok: true, origin: 'poll', fetchedAt: Math.floor((NOW - 2 * 3_600_000) / 1000), planType: null,
+    windows: [], nextAttemptAt: NOW + 72 * 60_000, attemptHeld: null,
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' },
+    ...over,
+  }
+}
+
+test('lastFailureText: when, the poller\'s words verbatim, then the next attempt — EN and DE (1.7 W1)', () => {
+  assert.equal(lastFailureText(failedState(), NOW, utc),
+    'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m')
+  assert.equal(lastFailureText(failedState({ nextAttemptAt: NOW - 1 }), NOW, utc),
+    'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt due')
+  assert.equal(lastFailureText(failedState({ nextAttemptAt: NOW - 1, attemptHeld: 'focus' }), NOW, utc),
+    'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt waiting for focus')
+  // No known next attempt: the sentence ends with the failure, no invented time.
+  assert.equal(lastFailureText(failedState({ nextAttemptAt: null }), NOW, utc),
+    'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt')
+  // Another day: the day in front.
+  assert.equal(lastFailureText(failedState({
+    lastFailure: { at: Date.UTC(2026, 8, 2, 14, 20), problem: 'timeout while fetching', kind: 'offline' },
+  }), NOW, utc), 'Last attempt at 2026-09-02 14:20 failed: timeout while fetching · next attempt in 1h12m')
+  // The markup variant wraps the reason and nothing else.
+  assert.equal(lastFailureText(failedState(), NOW, utc, (p) => `\`${p}\``),
+    'Last attempt at 11:40 failed: `HTTP 429 — backing off before the next attempt` · next attempt in 1h12m')
+  // Nothing without a failure, or with one that is no failure.
+  assert.equal(lastFailureText(failedState({ lastFailure: null }), NOW, utc), null)
+  assert.equal(lastFailureText(failedState({ lastFailure: undefined }), NOW, utc), null)
+  assert.equal(lastFailureText(failedState({ lastFailure: { at: NaN, problem: 'x', kind: 'retry' } }), NOW, utc), null)
+  assert.equal(lastFailureText(failedState({ lastFailure: { at: NOW, problem: '', kind: 'retry' } }), NOW, utc), null)
+  // German: the sentence of the bundle, the poller's (German) words verbatim.
+  const de = german(() => lastFailureText(failedState({
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — Wartezeit vor dem nächsten Versuch', kind: 'retry' },
+  }), NOW, utc))
+  assert.equal(de, 'Letzter Versuch um 11:40 fehlgeschlagen: HTTP 429 — Wartezeit vor dem nächsten Versuch · nächster Versuch in 1h12m')
+  assert.equal(german(() => lastFailureText(failedState({ nextAttemptAt: NOW - 1, attemptHeld: 'focus' }), NOW, utc)),
+    'Letzter Versuch um 11:40 fehlgeschlagen: HTTP 429 — backing off before the next attempt · nächster Versuch wartet auf Fokus')
 })

@@ -77,6 +77,47 @@ test('every quota window appears once in both renderings', () => {
   for (const w of windows) assert.ok(md.includes(`| ${w.label} |`), w.label)
 })
 
+// 1.7 W1: the failed attempt beside a stale reading, in both text views; W2: the freshness row's words.
+test('the failed attempt beside a reading reaches the markdown under the heading and the Quick Pick as the item\'s detail (1.7 W1)', () => {
+  const failed = state('claude', {
+    fetchedAt: Math.round((NOW - 2 * 3_600_000) / 1000), nextAttemptAt: NOW + 72 * 60_000,
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' },
+  })
+  const vm = buildViewModel(makeInput({ quotas: [failed, state('codex')] }))
+  const sentence = 'Last attempt at 11:40 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m'
+  assert.equal(vm.quotas[0].lastFailure, sentence)
+  const lines = markdownDocument(vm).split('\n')
+  const head = lines.findIndex((l) => l.startsWith('### Claude Code'))
+  assert.deepEqual(lines.slice(head + 1, head + 4), ['', `_${sentence}_`, ''])
+  assert.equal(lines.filter((l) => l.includes('Last attempt at')).length, 1)
+  const items = quickPickItems(vm)
+  const claude = items.find((i) => i.label === 'Claude Code')
+  assert.equal(claude?.detail, sentence)
+  assert.equal(items.find((i) => i.label === 'Codex')?.detail, undefined)
+  // No failure: neither view says a word of one.
+  const plain = buildViewModel(makeInput())
+  assert.equal(markdownDocument(plain).includes('Last attempt'), false)
+  assert.equal(quickPickItems(plain).find((i) => i.label === 'Claude Code')?.detail, undefined)
+  // A card without a reading keeps its problem as the detail.
+  const broken = buildViewModel(makeInput({ quotas: [state('claude', {
+    ok: false, problem: 'HTTP 429 — backing off before the next attempt', problemKind: 'retry', windows: [],
+    lastFailure: { at: NOW - 20 * 60_000, problem: 'HTTP 429 — backing off before the next attempt', kind: 'retry' },
+  })] }))
+  assert.equal(quickPickItems(broken).find((i) => i.label === 'Claude Code')?.detail, '⚠ HTTP 429 — backing off before the next attempt')
+})
+
+test('the markdown\'s freshness row says a passed attempt is due, and a held one waits for focus (1.7 W2)', () => {
+  const row = (over: Parameters<typeof state>[1]): string => {
+    const md = markdownDocument(buildViewModel(makeInput({ quotas: [state('claude', over)] })))
+    return md.split('\n').find((l) => l.startsWith('Freshness —')) as string
+  }
+  assert.match(row({ nextAttemptAt: NOW - 60_000 }), / · next refresh due · /)
+  assert.match(row({ nextAttemptAt: NOW - 60_000, attemptHeld: 'focus' }), / · next refresh waiting for focus · /)
+  assert.match(row({ nextAttemptAt: NOW + 72 * 60_000 }), / · next refresh 1h12m · /)
+  assert.match(row({ nextAttemptAt: null }), / · next refresh – · /)
+  assert.doesNotMatch(row({ nextAttemptAt: NOW - 60_000 }), /reset due/)
+})
+
 test('every totals row appears once in both renderings', () => {
   const vm = fullVm()
   const items = quickPickItems(vm)

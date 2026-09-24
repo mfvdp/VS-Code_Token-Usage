@@ -48,8 +48,8 @@ import {
   projectRows, records as recordsOf, sessionRows, totalsFor, totalsWindowSpans,
 } from './stats'
 import {
-  DayRange, RangePreset, TimeConfig, addDays, ageText, dayCount, dayOf, formatDay, formatReset,
-  formatTime, rangeFor, isDay, previousRange, relativeShort,
+  DayRange, RangePreset, TimeConfig, addDays, ageText, attemptWhen, dayCount, dayOf, formatDay, formatReset,
+  formatTime, lastFailureText, rangeFor, isDay, previousRange, refreshWords,
 } from './time'
 import {
   AgentRec, Attribution, Bucket, Forecast, PaceLevel, PaceVerdict, ProblemKind, QuotaSample,
@@ -553,6 +553,13 @@ export interface QuotaCard {
   problem: string | null
   problemKind: ProblemKind | null
   problemAction: { label: string; command: string } | null
+  /**
+   * 1.7 W1: our own last fetch failed after the reading this card shows — the sentence of
+   * `lastFailureText` ("Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt ·
+   * next attempt in 1h12m"), or null. Only on a card with a reading: a card without one says the
+   * failure as its `problem`.
+   */
+  lastFailure: string | null
   ageText: string | null
   stale: boolean
   /** Where the reading came from, in words ("cache file", "polled") — never the raw id. */
@@ -1338,6 +1345,7 @@ function quotaCard(
     problem: q.ok ? null : (q.problem ?? t('unavailable')),
     problemKind: q.ok ? null : (q.problemKind ?? 'unknown'),
     problemAction: q.ok ? null : (problemActions()[q.problemKind ?? 'unknown'] ?? null),
+    lastFailure: q.ok ? lastFailureText(q, now, tcfg) : null,
     ageText: ageText(q.fetchedAt, now),
     stale: age !== null && age > cfg.staleAfterMinutes,
     // The word for it, not the id: 'statusline' between two German fragments is the card
@@ -1347,9 +1355,9 @@ function quotaCard(
       lastCheck: ageText(q.fetchedAt, now),
       lastData: newestSampleText(history, q.source, q.windows.map((w) => w.id), fp, now),
       lastEvent: lastEvent === null ? null : ageText(Math.round(lastEvent / 1000), now),
-      nextRefresh: typeof q.nextAttemptAt === 'number' && Number.isFinite(q.nextAttemptAt)
-        ? relativeShort(q.nextAttemptAt, now)
-        : null,
+      // 1.7 W2: the next attempt in W2's words — "1h12m", "due", "waiting for focus" — never
+      // `relativeShort`'s "reset due", which is a reset's word; null without a known time.
+      nextRefresh: nextRefreshOf(q, now),
       snapshotAge: newestDay,
     },
     windows,
@@ -1371,6 +1379,12 @@ function quotaCard(
     // reading of it is invented for either provider.
     promptCache: q.source === 'claude' ? promptCacheCard(input.promptCache, now, tcfg, cfg) : null,
   }
+}
+
+/** 1.7 W2: the freshness column's next attempt — "1h12m" · "due" · "waiting for focus" — or null. */
+function nextRefreshOf(q: QuotaState, now: number): string | null {
+  const when = attemptWhen(q.nextAttemptAt, q.attemptHeld, now)
+  return when === null ? null : refreshWords(when)
 }
 
 /**

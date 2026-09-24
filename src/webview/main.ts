@@ -464,6 +464,9 @@ function quotaCard(q: Payload): string {
     + [q.planText ? esc(q.planText) : '', q.origin ? esc(q.origin) : '',
        q.ageText ? esc(q.ageText) : ''].filter(Boolean).join(' · ')
     + (q.stale ? ' ⚠ ' + tr('stale') : '') + '</span></div>';
+  // 1.7 W1: our own last fetch failed after the reading below — said directly under the header, in
+  // the dim tone and without a glyph: a fact about our fetch, not an alarm about the quota.
+  if (typeof q.lastFailure === 'string' && q.lastFailure) h += '<div class="meta lastfail">' + esc(q.lastFailure) + '</div>';
   if (q.problem) {
     h += '<div class="box" role="status">' + esc(q.problem)
       + (q.problemKind ? ' <span class="meta">(' + esc(q.problemKind) + ')</span>' : '')

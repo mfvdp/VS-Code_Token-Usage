@@ -202,7 +202,8 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     add({
       label: q.title,
       description: meta,
-      detail: q.problem ? `⚠ ${q.problem}` : undefined,
+      // 1.7 W1: a card with a reading whose last fetch of ours failed says so, in the card's words.
+      detail: q.problem ? `⚠ ${q.problem}` : (q.lastFailure ?? undefined),
       command: q.problemAction?.command,
     })
     for (const w of q.windows) {
@@ -812,6 +813,8 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
     ].filter(Boolean).join(' · ')
     L.push(`### ${q.title}${meta ? ` — ${meta}` : ''}`)
     L.push('')
+    // 1.7 W1: under the heading, as the card has it under its header — the sentence, in italics.
+    if (q.lastFailure) L.push(`_${cell(q.lastFailure)}_`, '')
     if (q.problem) {
       L.push(`> ⚠ ${q.problem}${q.problemAction ? ` — ${q.problemAction.label}` : ''}`)
       L.push('')

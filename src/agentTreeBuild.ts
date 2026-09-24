@@ -44,7 +44,7 @@ import { PricingOptions, costOfBucket, normalizeModel } from './prices'
 import { compact, full } from './render'
 import { cleanRunRecord } from './runRecord'
 import { costText, durationText, freshInput, tokens } from './stats'
-import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, dayOf, formatTime, weekdayWords } from './time'
+import { TimeConfig, ageText, calendarDayOf, calendarWeekdayOf, clockStamp, dayOf, formatTime, weekdayWords } from './time'
 import {
   AgentLaunch, AgentRec, Attribution, Bucket, CompactionRec, Effort, JournalAgent, LaunchStatus, MainRec, RecordedOutcome,
   RejectedRequest, RunLaunch, RunRec, RunRecordFields, SessionRec, emptyBucket,
@@ -308,11 +308,12 @@ function derivedOf(state: NodeState): boolean {
   return state !== 'done' && state !== 'failed' && state !== 'stopped'
 }
 
-/** "14:20" today, "2026-09-01 14:20" on any other day — the Sessions table's own form. */
+/**
+ * "14:20" today, "2026-09-01 14:20" on any other day — the Sessions table's own form. Since 1.7 W1
+ * the form lives in time.ts (`clockStamp`), where the failed quota attempt's sentence takes it too.
+ */
 function stamp(ms: number, now: number, tcfg: TimeConfig): string {
-  const time = formatTime(ms, tcfg)
-  const day = dayOf(ms, tcfg)
-  return day === dayOf(now, tcfg) ? time : `${day} ${time}`
+  return clockStamp(ms, now, tcfg)
 }
 
 /** "3 min ago" / "just now". */

@@ -101,7 +101,42 @@ const UNFOCUSED_GRACE_MS = 10 * MINUTE_MS
  * ever hides a change nobody told us about — and that for at most five seconds.
  */
 const MEMO_MS = 5_000
+/**
+ * 1.7 W1 (§0a.3): `quota.json` gained the key `failed` — additive, so the version stays 1 and a 1.6
+ * build that reads the file ignores it.
+ */
 const STATE_FILE_VERSION = 1
+/** 1.7 W1: the longest reason `quota.json` keeps for a failed attempt; a longer one is not restored. */
+const FAILED_TEXT_MAX = 300
+/**
+ * Every ProblemKind, as a record so the compiler insists on the whole list: a kind read back from
+ * `quota.json` is restored only when it is one of these.
+ */
+const PROBLEM_KINDS: Record<ProblemKind, true> = {
+  noFile: true, paused: true, empty: true, noToken: true, tokenExpired: true, consentPending: true,
+  modeCache: true, retry: true, offline: true, forbidden: true, unauthorized: true, noBinary: true,
+  quotaOff: true, follower: true, unknown: true,
+}
+
+/** Our own last failed attempt of a source: the poller's words, their kind, and when (ms). */
+interface OwnFailure {
+  text: string
+  kind: ProblemKind
+  at: number
+}
+
+/**
+ * 1.7 W1 (§0a.3): the shape a failed attempt has to have to be kept or read back — a finite time not
+ * in the future, a known kind, a reason of 1 to 300 characters. Anything else is dropped whole.
+ */
+function failureOf(v: unknown, now: number): OwnFailure | null {
+  if (typeof v !== 'object' || v === null) return null
+  const f = v as { at?: unknown; kind?: unknown; text?: unknown }
+  if (typeof f.at !== 'number' || !Number.isFinite(f.at) || f.at > now) return null
+  if (typeof f.kind !== 'string' || !Object.prototype.hasOwnProperty.call(PROBLEM_KINDS, f.kind)) return null
+  if (typeof f.text !== 'string' || f.text.length < 1 || f.text.length > FAILED_TEXT_MAX) return null
+  return { at: f.at, kind: f.kind as ProblemKind, text: f.text }
+}
 
 /**
  * Whether the mode permits a fetch of our own.
@@ -132,7 +167,10 @@ export class QuotaManager {
   private deps: Required<Omit<QuotaDeps, 'createAppServer'>> & { createAppServer: NonNullable<QuotaDeps['createAppServer']> }
 
   private polled: Partial<Record<Source, QuotaState>> = {}
-  private problem: Partial<Record<Source, { text: string; kind: ProblemKind }>> = {}
+  /** 1.7 W1: the time of the attempt joins its words, so the display can say when it failed. */
+  private problem: Partial<Record<Source, OwnFailure>> = {}
+  /** 1.7 W2: whether the focus hold of a due attempt was logged — one line per hold and source. */
+  private heldLogged: Partial<Record<Source, boolean>> = {}
   private failCount: Record<Source, number> = { claude: 0, codex: 0 }
   private nextPollAt: Record<Source, number> = { claude: 0, codex: 0 }
   private inFlight: Partial<Record<Source, boolean>> = {}
@@ -234,6 +272,8 @@ export class QuotaManager {
   setFocused(f: boolean, onUpdate?: () => void): void {
     if (f === this.focused) return
     this.focused = f
+    // 1.7 W2: whether a due attempt is held for focus is part of the answer.
+    this.invalidate()
     if (!f) {
       this.unfocusedSince = this.deps.now()
       return
@@ -241,6 +281,8 @@ export class QuotaManager {
     const wasLong = this.unfocusedSince !== null
       && this.deps.now() - this.unfocusedSince > UNFOCUSED_GRACE_MS
     this.unfocusedSince = null
+    // A new hold, after the next absence, gets its own log line.
+    this.heldLogged = {}
     if (wasLong) this.tick(onUpdate ?? this.onUpdate)
   }
 
@@ -260,7 +302,7 @@ export class QuotaManager {
     const out: QuotaState[] = []
     for (const src of SOURCES) {
       const r = bestState(src, this.inputs(), now)
-      const state = this.enrich(src, r.state)
+      const state = this.enrich(src, r.state, now)
       this.lastCandidates[src] = r.candidates
       this.lastExtras[src] = r.extras
       this.lastStates[src] = state
@@ -345,7 +387,10 @@ export class QuotaManager {
     this.current(now)
     if (this.blocked()) return
     this.ensureAppServer()
-    if (this.focusSkips(now)) return
+    if (this.focusSkips(now)) {
+      this.logHeld(now)
+      return
+    }
     this.runPolls(now)
   }
 
@@ -380,7 +425,9 @@ export class QuotaManager {
    */
   clearPolled(): void {
     this.polled = {}
+    // 1.7 W1: the failed attempts go with the readings — the next persist writes no `failed`.
     this.problem = {}
+    this.heldLogged = {}
     this.failCount = { claude: 0, codex: 0 }
     this.nextPollAt = { claude: 0, codex: 0 }
     this.lastStates = {}
@@ -420,15 +467,28 @@ export class QuotaManager {
   }
 
   /**
-   * Adds the two fields the display layer needs but the parsers cannot know: why
-   * there is no figure, and when the next attempt is due.
+   * Adds the fields the display layer needs but the parsers cannot know: why there is no
+   * figure, when the next attempt is due, whether a due attempt waits for focus (1.7 W2), and —
+   * beside a reading we still show — that our own fetch after it failed (1.7 W1).
    */
-  private enrich(src: Source, state: QuotaState): QuotaState {
+  private enrich(src: Source, state: QuotaState, now: number): QuotaState {
     const permitted = this.blocked() === null
     // Zero means "never scheduled"; reporting it as a date would be an invented one.
-    const nextAttemptAt = permitted && this.nextPollAt[src] > 0 ? this.nextPollAt[src] : null
-    if (state.ok) return { ...state, nextAttemptAt }
+    const next = this.nextPollAt[src]
+    const nextAttemptAt = permitted && next > 0 ? next : null
+    // 1.7 W2: a scheduled attempt that is due while `tick` skips for focus — said, not left silent.
+    const attemptHeld: 'focus' | null = permitted && this.focusSkips(now) && next > 0 && next <= now ? 'focus' : null
     const own = this.problem[src]
+    if (state.ok) {
+      // 1.7 W1: the old figure stays on screen after a failed fetch; the failure goes beside it —
+      // only while we may fetch at all, and only when it is newer than the reading shown (a foreign
+      // reading taken after our failure answers the question the failure left open).
+      const fetchedMs = (typeof state.fetchedAt === 'number' && Number.isFinite(state.fetchedAt) ? state.fetchedAt : 0) * 1000
+      const lastFailure = permitted && own && own.at > fetchedMs
+        ? { at: own.at, problem: own.text, kind: own.kind }
+        : null
+      return { ...state, nextAttemptAt, lastFailure, attemptHeld }
+    }
     let kind: ProblemKind
     let text: string
     if (permitted && own) {
@@ -458,7 +518,7 @@ export class QuotaManager {
         text = state.problem ?? t('No quota reading')
       }
     }
-    return { ...state, problem: text, problemKind: kind, nextAttemptAt }
+    return { ...state, problem: text, problemKind: kind, nextAttemptAt, attemptHeld }
   }
 
   private focusSkips(now: number): boolean {
@@ -466,6 +526,16 @@ export class QuotaManager {
       && !this.focused
       && this.unfocusedSince !== null
       && now - this.unfocusedSince > UNFOCUSED_GRACE_MS
+  }
+
+  /** 1.7 W2: one English log line per hold and source, when a due attempt waits for focus. */
+  private logHeld(now: number): void {
+    for (const src of SOURCES) {
+      const next = this.nextPollAt[src]
+      if (this.heldLogged[src] || !(next > 0 && next <= now)) continue
+      this.heldLogged[src] = true
+      this.log(`${src}: a due fetch waits for this window to be focused (tokenPace.pollOnlyWhenFocused)`)
+    }
   }
 
   private runPolls(now: number): void {
@@ -498,6 +568,8 @@ export class QuotaManager {
 
   private async startPoll(src: Source): Promise<void> {
     this.inFlight[src] = true
+    // The attempt is no longer held: a later hold in the same absence is a new one (1.7 W2).
+    this.heldLogged[src] = false
     try {
       if (src === 'claude' && !this.versionAsked) {
         this.versionAsked = true
@@ -533,7 +605,7 @@ export class QuotaManager {
       } else {
         // The poller's own words are what the display shows; only our fallback is translated,
         // and the log keeps the English so an issue report reads the same on every machine.
-        this.problem[src] = { text: r.problem ?? t('Fetch failed'), kind: r.problemKind ?? 'unknown' }
+        this.problem[src] = { text: r.problem ?? t('Fetch failed'), kind: r.problemKind ?? 'unknown', at: now }
         this.failCount[src] += 1
         // No retry hint means a permanent cause (missing credentials, no binary) —
         // do not keep asking every minute in that case.
@@ -544,9 +616,13 @@ export class QuotaManager {
       }
     } catch (e) {
       if (this.disposed) return
-      this.problem[src] = { text: t('Unexpected error while fetching'), kind: 'unknown' }
+      const now = this.deps.now()
+      // Our own words, never the exception's: its message may carry anything, a header included.
+      this.problem[src] = { text: t('Unexpected error while fetching'), kind: 'unknown', at: now }
       this.failCount[src] += 1
-      this.nextPollAt[src] = this.deps.now() + this.intervalMs()
+      this.nextPollAt[src] = now + this.intervalMs()
+      // 1.7 W1: persisted like the other failure path, so a restart still says why the figure is old.
+      this.persist()
       this.log(`${src}: ${(e as Error)?.name ?? 'error'} while fetching`)
     } finally {
       this.inFlight[src] = false
@@ -720,11 +796,20 @@ export class QuotaManager {
 
   private persist(): void {
     if (!this.files.stateFile) return
+    // 1.7 W1 (§0a.3): the last failed attempt per source — its time, its kind and the poller's words,
+    // nothing else; only what `restore` would read back, and no key at all without one.
+    const now = this.deps.now()
+    const failed: Partial<Record<Source, { at: number; kind: ProblemKind; text: string }>> = {}
+    for (const src of SOURCES) {
+      const f = failureOf(this.problem[src], now)
+      if (f) failed[src] = { at: f.at, kind: f.kind, text: f.text }
+    }
     try {
       fs.writeFileSync(this.files.stateFile, JSON.stringify({
         version: STATE_FILE_VERSION,
         polled: this.polled,
         nextPollAt: this.nextPollAt,
+        ...(Object.keys(failed).length > 0 ? { failed } : {}),
       }))
     } catch {
       /* Losing this is survivable — the next interval fetches again. */
@@ -752,6 +837,9 @@ export class QuotaManager {
       if (typeof saved === 'number' && Number.isFinite(saved)) {
         this.nextPollAt[src] = Math.max(this.nextPollAt[src], saved)
       }
+      // 1.7 W1 (§0a.3): the last failed attempt, by shape only — anything else is dropped whole.
+      const failed = failureOf(d?.failed?.[src], this.deps.now())
+      if (failed) this.problem[src] = failed
     }
   }
 }

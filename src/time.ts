@@ -12,6 +12,8 @@
  */
 
 import { locale, t } from './i18n'
+// Type only: the attempt sentence reads two fields of a state, and this module stays free of any reader.
+import type { QuotaState } from './types'
 
 /** IANA zone name, or the two aliases. An unusable name falls back to the system zone. */
 export type Zone = 'system' | 'utc' | string
@@ -450,4 +452,85 @@ export function ageText(fetchedAtSec: number | null, now: number): string | null
   const h = min / 60
   if (h < 48) return t('{0} h ago', Math.round(h))
   return t('{0} d ago', Math.round(h / 24))
+}
+
+/**
+ * "14:20" today, "2026-09-01 14:20" on any other day — the Sessions table's own form, for a clock
+ * time that may lie on another day: an agent's end (agentTreeBuild's `stamp`), a failed attempt.
+ * The day is `dayOf`'s, the configured day boundary included, as the tree has always printed it.
+ */
+export function clockStamp(ms: number, now: number, tcfg: TimeConfig): string {
+  const time = formatTime(ms, tcfg)
+  const day = dayOf(ms, tcfg)
+  return day === dayOf(now, tcfg) ? time : `${day} ${time}`
+}
+
+/**
+ * 1.7 W2: when our next quota attempt is — a countdown, due, or held for focus. Never a reset:
+ * `relativeShort` says "reset due" for a time that has passed, and an attempt is no reset.
+ */
+export type AttemptWhen = { kind: 'in'; text: string } | { kind: 'due' } | { kind: 'focus' }
+
+/**
+ * Null without a known `nextAttemptAt`; 'in' only for a time still ahead (`relativeShort` of it,
+ * which for a time ahead is always a duration); a time that has passed is 'due', or 'focus' while
+ * the manager holds it back for a window in the background (`QuotaState.attemptHeld`).
+ */
+export function attemptWhen(
+  nextAttemptAt: number | null | undefined,
+  held: 'focus' | null | undefined,
+  now: number,
+): AttemptWhen | null {
+  if (typeof nextAttemptAt !== 'number' || !Number.isFinite(nextAttemptAt) || !Number.isFinite(now)) return null
+  if (nextAttemptAt <= now) return held === 'focus' ? { kind: 'focus' } : { kind: 'due' }
+  return { kind: 'in', text: relativeShort(nextAttemptAt, now) }
+}
+
+/** The status bar's words: "retry 1h12m" · "retry due" · "retry waiting for focus" · "retry" (null). */
+export function retryWords(w: AttemptWhen | null): string {
+  if (w === null) return t('retry')
+  switch (w.kind) {
+    case 'in': return t('retry {0}', w.text)
+    case 'due': return t('retry due')
+    default: return t('retry waiting for focus')
+  }
+}
+
+/** The sentence's tail: "next attempt in 1h12m" · "next attempt due" · "next attempt waiting for focus". */
+export function nextAttemptWords(w: AttemptWhen): string {
+  switch (w.kind) {
+    case 'in': return t('next attempt in {0}', w.text)
+    case 'due': return t('next attempt due')
+    default: return t('next attempt waiting for focus')
+  }
+}
+
+/** The markdown freshness column ("next refresh {3}"): "1h12m" · "due" · "waiting for focus". */
+export function refreshWords(w: AttemptWhen): string {
+  switch (w.kind) {
+    case 'in': return w.text
+    case 'due': return t('due')
+    default: return t('waiting for focus')
+  }
+}
+
+/**
+ * 1.7 W1: "Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next
+ * attempt in 1h12m", or null without a failure. The time is `clockStamp`'s — the day in front on
+ * another day —, the reason the poller's words verbatim (a fixed string, at most an HTTP status, or
+ * Codex's app-server error, never an exception's text), and the tail is left off when no next attempt
+ * is known. `wrap` puts the reason into a code span where the sentence lands in markup (the tooltip).
+ */
+export function lastFailureText(
+  q: QuotaState,
+  now: number,
+  tcfg: TimeConfig,
+  wrap: (problem: string) => string = (p) => p,
+): string | null {
+  const f = q.lastFailure
+  if (!f || typeof f.at !== 'number' || !Number.isFinite(f.at)
+    || typeof f.problem !== 'string' || f.problem === '') return null
+  const head = t('Last attempt at {0} failed: {1}', clockStamp(f.at, now, tcfg), wrap(f.problem))
+  const w = attemptWhen(q.nextAttemptAt, q.attemptHeld, now)
+  return w === null ? head : `${head} · ${nextAttemptWords(w)}`
 }

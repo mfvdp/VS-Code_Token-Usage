@@ -662,6 +662,15 @@ export type ProblemKind =
   | 'noFile' | 'paused' | 'empty' | 'noToken' | 'tokenExpired' | 'consentPending' | 'modeCache'
   | 'retry' | 'offline' | 'forbidden' | 'unauthorized' | 'noBinary' | 'quotaOff' | 'follower' | 'unknown'
 
+/** 1.7 W1: an attempt of our own that failed — when, in the poller's own words, and of what kind. */
+export interface QuotaFailure {
+  /** Unix ms of the attempt. */
+  at: number
+  /** The poller's words: a fixed string plus at most an HTTP status (poller.ts), never an exception's text. */
+  problem: string
+  kind: ProblemKind
+}
+
 export interface QuotaState {
   source: Source
   ok: boolean
@@ -681,6 +690,19 @@ export interface QuotaState {
   drift?: string[]
   /** Only part of the sources answered (e.g. windows without extra). */
   partial?: boolean
+  /**
+   * 1.7 W1: our own last fetch of this source failed after this reading was taken. Set by
+   * `QuotaManager.enrich` on an ok state only (a state that is not ok carries the failure as its
+   * `problem`, as in 1.6); null or absent when the last attempt succeeded, when none was made, when the
+   * reading is newer than the failure, and whenever `blocked()` is not null (mode, consent, follower).
+   */
+  lastFailure?: QuotaFailure | null
+  /**
+   * 1.7 W2: a scheduled attempt that is due but held back — 'focus' while `tokenPace.pollOnlyWhenFocused`
+   * keeps a window that has been in the background for more than ten minutes from fetching
+   * (`QuotaManager.focusSkips`). Null or absent otherwise.
+   */
+  attemptHeld?: 'focus' | null
 }
 
 /** One point of the quota time series. Short keys: the file holds thousands. */

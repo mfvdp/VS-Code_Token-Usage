@@ -27,7 +27,7 @@ import {
 } from '../src/agentTreeBuild'
 import { setBundle, setLocale } from '../src/i18n'
 import { compact } from '../src/render'
-import { TimeConfig } from '../src/time'
+import { TimeConfig, clockStamp } from '../src/time'
 import { AgentLaunch, AgentRec, JournalAgent, MainRec, RunLaunch, RunRec, SessionRec } from '../src/types'
 import { durationText } from '../src/stats'
 import { MAX_AGENT_KEY_CHARS } from '../src/viewModel'
@@ -208,6 +208,36 @@ test('an agent the parent recorded is done or failed, and the sentence names who
   assert.equal(stateText(over, done.key), 'Completed — the parent recorded the result at 11:55.')
   // Another day carries its date: "since 10:00" alone would name a time that has not come yet today.
   assert.equal(stateText(over, failed.key), 'Failed — the parent recorded the failure at 2026-09-21 10:00.')
+})
+
+// 1.7 W1: the tree's time stamps come from time.ts's `clockStamp` now — the failed quota attempt's
+// sentence takes the same form. No output of the tree changes: the day boundary included, as `dayOf`
+// has always counted it.
+test('the tree\'s stamps are clockStamp\'s, and print exactly what they printed before (1.7 W1)', () => {
+  const over = (cfg: TimeConfig): Partial<AgentTreeInput> => ({
+    tcfg: cfg,
+    agents: [
+      rec('aaaa0001', { outcome: 'completed', outcomeTs: NOW - 5 * MIN, lastTs: NOW - 5 * MIN }),
+      rec('aaaa0002', { outcome: 'failed', outcomeTs: NOW - 26 * HOUR, firstTs: NOW - 27 * HOUR, lastTs: NOW - 26 * HOUR }),
+      // 02:30 today: with a boundary at 06:00 the day before, as dayOf counts it.
+      rec('aaaa0003', { outcome: 'failed', outcomeTs: Date.UTC(2026, 8, 22, 2, 30), firstTs: NOW - 11 * HOUR, lastTs: Date.UTC(2026, 8, 22, 2, 30) }),
+    ],
+    launches: [
+      launch('aaaa0001', { outcome: 'completed', outcomeTs: NOW - 5 * MIN }),
+      launch('aaaa0002', { outcome: 'failed', outcomeTs: NOW - 26 * HOUR, ts: NOW - 27 * HOUR }),
+      launch('aaaa0003', { outcome: 'failed', outcomeTs: Date.UTC(2026, 8, 22, 2, 30), ts: NOW - 11 * HOUR }),
+    ],
+  })
+  const text = (cfg: TimeConfig, id: string): string | undefined => agentDetails(input(over(cfg)), NOW, agentKey(id))?.stateText
+  assert.equal(text(tcfg, 'aaaa0001'), 'Completed — the parent recorded the result at 11:55.')
+  assert.equal(text(tcfg, 'aaaa0002'), 'Failed — the parent recorded the failure at 2026-09-21 10:00.')
+  assert.equal(text(tcfg, 'aaaa0003'), 'Failed — the parent recorded the failure at 02:30.')
+  const late: TimeConfig = { ...tcfg, dayBoundaryHour: 6 }
+  assert.equal(text(late, 'aaaa0003'), 'Failed — the parent recorded the failure at 2026-09-21 02:30.')
+  assert.equal(text(late, 'aaaa0003'), `Failed — the parent recorded the failure at ${clockStamp(Date.UTC(2026, 8, 22, 2, 30), NOW, late)}.`)
+  const berlin: TimeConfig = { ...tcfg, zone: 'Europe/Berlin' }
+  assert.equal(text(berlin, 'aaaa0001'), `Completed — the parent recorded the result at ${clockStamp(NOW - 5 * MIN, NOW, berlin)}.`)
+  assert.equal(text(berlin, 'aaaa0001'), 'Completed — the parent recorded the result at 13:55.')
 })
 
 // 1.6 P2b (§3 D2): pinned 1.5's journal, whose result came on the agent's own record — with a

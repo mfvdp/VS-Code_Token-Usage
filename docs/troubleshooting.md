@@ -19,7 +19,7 @@ this table.
 | `$(warning) CC token expired` | `tokenExpired` | The stored credentials are past their expiry. Token Pace never refreshes a token | **Show log**. Sign in again in the CLI; the next poll picks the new token up |
 | `$(shield) CC consent` | `consentPending` | Network access has not been granted yet, so no request was made | **Fetch quota now**, which asks first. One dialog, one answer, remembered |
 | `$(circle-slash) CC quota off` | `modeCache` | `quotaSource: cache`: local files only, the network is never used | **Open settings**. Point `claudeQuotaFile` / `codexQuotaFile` at a cache file, or switch back to `auto` |
-| `$(clock) CC retry 12m` | `retry` | The last attempt failed; the countdown is the scheduled next one | **Fetch quota now** to retry immediately. The log holds the reason |
+| `$(clock) CC retry 12m` | `retry` | The last attempt failed; the countdown is the scheduled next one. Once it has passed the bar says `$(clock) CC retry due`; in a window that has been in the background for more than ten minutes, `$(clock) CC retry waiting for focus` — the attempt runs when the window is focused again | **Fetch quota now** to retry immediately. The log holds the reason |
 | `$(cloud-offline) CC offline` | `offline` | The request did not reach the provider — timeout, DNS or proxy | **Fetch quota now**. Check connectivity and `http.proxy`; *Copy Diagnostics* lists the proxy settings in effect |
 | `$(lock) CC 403` | `forbidden` | The provider refused the usage endpoint. Often a Team or Enterprise account without one | **Show log**. Token counts keep working, and the menu still offers the official usage page |
 | `$(key) CC sign in` | `unauthorized` | The provider rejected the credentials (HTTP 401) | **Show log**. Sign in again in the CLI |
@@ -36,6 +36,27 @@ passed and no reading newer than it has arrived — the gauge is never zeroed by
 scheduled instead — and `CC 7d ∞` means the window has no limit, so there is no denominator to
 divide by and no pace to compute. The full matrix is in
 [status-bar-states.md](status-bar-states.md).
+
+## An old figure and a failed fetch
+
+With `quotaSource: poll`, a fetch of Token Pace's own can fail while an older reading is still on
+screen — most often a `429`, after which the fetch backs off for about 10 minutes, doubling with
+every further failure up to 2 hours (a `Retry-After` header wins). The old figure stays, because a
+slightly older value beats an empty display, and the failure is said beside it in one sentence:
+
+> Last attempt at 14:20 failed: HTTP 429 — backing off before the next attempt · next attempt in 1h12m
+
+It stands directly under the header of the dashboard's quota card, in the entry's tooltip after the
+freshness line, under the provider's heading in the markdown view and as the provider's line in the
+Quick Pick. Once the reading is older than `staleAfterMinutes`, the status-bar entry adds the next
+attempt after its age: `CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m` — in
+the grey of a stale reading, never as an alarm. `retry due` means the attempt is due now; `retry
+waiting for focus` means this window has been in the background for more than ten minutes, and with
+`tokenPace.pollOnlyWhenFocused` on the attempt waits until it is focused. **Token Pace: Fetch Quota
+Now** tries again at once. The sentence disappears with the next successful fetch, or when another
+source delivers a reading newer than the failure. The reason is the fetch's own wording — a fixed
+phrase with at most an HTTP status —, never the text of an exception, and it survives a restart
+during the backoff (see [quota-sources.md](quota-sources.md#what-the-fetch-does)).
 
 **When a provider reports no window at all**, the dashboard card, the Quick Pick and the
 markdown document each carry one extra line, the same line word for word:

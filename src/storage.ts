@@ -224,9 +224,9 @@ export function isTempSiblingOf(name: string, base: string): boolean {
 
 /**
  * Removes the file and every temp sibling of it. A temp file of the status line
- * mirror holds the complete Claude Code status payload, so leaving one behind
- * after "Clear Stored Data" would keep exactly the data the user asked us to
- * drop.
+ * mirror holds what the bridge mirrors of Claude Code's status payload — the whole
+ * payload where a 1.3–1.7 bridge wrote it —, so leaving one behind after "Clear
+ * Stored Data" would keep exactly the data the user asked us to drop.
  */
 function unlinkWithTemps(file: string): void {
   unlinkIfPresent(file)

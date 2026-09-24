@@ -177,13 +177,15 @@ test('the read contract holds for the shipped sources: every reader names exactl
   // reader's six fields of a mirror line.
   assert.deepEqual(byWhat.get('the agent hook\'s input')?.fields, ['hook_event_name', 'session_id', 'agent_id', 'notification_type'])
   assert.deepEqual(byWhat.get('the agent hook\'s mirror')?.fields, ['v', 'ts', 'event', 'sessionId', 'agentId', 'wait'])
-  // 1.6 P13b (pinned and changed by P14b and 1.8 P4): the two run-record rows read src/runRecord.ts,
-  // the two agent-hook rows the hook's own two files, the status-line mirror's rows (1.8 §0a.1)
-  // src/quota.ts; every other reader is the aggregator's.
-  const mirrorRow = (what: string): boolean => what === 'the status-line mirror' || what.startsWith('the status line\'s ')
+  // 1.6 P13b (pinned and changed by P14b, 1.8 P4 and 1.8 review 2): the two run-record rows read
+  // src/runRecord.ts, the two agent-hook rows the hook's own two files, the status-line mirror's rows
+  // (1.8 §0a.1) src/quota.ts — but the narrowing at activation (§7a Q11), which src/bridge.ts does;
+  // every other reader is the aggregator's.
+  const NARROWED = 'the status-line mirror, narrowed at activation'
+  const mirrorRow = (what: string): boolean => what === 'the status-line mirror' || what === NARROWED || what.startsWith('the status line\'s ')
   const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
     : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts'
-      : mirrorRow(what) ? 'src/quota.ts' : 'src/agg.ts'
+      : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : 'src/agg.ts'
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, fileOf(row.what), row.what)
   // 1.8 §0a.1 (P4): the mirror's reader, level by level — the envelope, the payload's top-level
   // fields with 1.8's `session_id`, and of each block what is taken, the prompt cache's
@@ -192,6 +194,7 @@ test('the read contract holds for the shipped sources: every reader names exactl
   const rows = contract.READ_CONTRACT.filter((row) => mirrorRow(row.what))
   assert.deepEqual(rows.map((row) => [row.what, row.kind, row.fields]), [
     ['the status-line mirror', 'fields', ['schema_version', 'written_at', 'payload']],
+    [NARROWED, 'fields', ['schema_version', 'written_at', 'payload']],
     ['the status line\'s session', 'picks', ['rate_limits', 'rateLimits', 'plan', 'subscription', 'context_window', 'contextWindow',
       'cost', 'model', 'prompt_cache', 'promptCache', 'session_id', 'sessionId']],
     ['the status line\'s rate limits', 'picks', ['five_hour', 'fiveHour', 'seven_day', 'sevenDay', 'spend_limit', 'spendLimit']],
@@ -393,6 +396,8 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     writeFileSync(join(dir, 'dist', 'statusline-bridge.js'), bridgeBundle)
     const quota = fromRepo('src/quota.ts')
     writeFileSync(join(dir, 'src', 'quota.ts'), quota)
+    // 1.8 review 2: the narrowing of an older mirror at activation is the mirror's second reader.
+    writeFileSync(join(dir, 'src', 'bridge.ts'), fromRepo('src/bridge.ts'))
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })

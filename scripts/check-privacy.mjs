@@ -256,6 +256,11 @@ export const READ_CONTRACT = [
   // `recache_tokens_if_cold`; the rest has been read since 1.3.
   { what: 'the status-line mirror', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'fields', body: 'export function readStatuslineMirror(', variable: 'parsed',
     fields: ['schema_version', 'written_at', 'payload'], pages: MIRROR_PAGES },
+  // 1.8 §7a Q11 (review 2): the mirror's second reader — activation narrows a mirror a 1.3–1.7 bridge
+  // wrote whole. Of the envelope it takes the same three fields; of the payload it keeps exactly what
+  // the bridge keeps (statuslineBridge.ts `MIRROR_KEEP`, tied to the rows below by test/privacy.test.ts).
+  { what: 'the status-line mirror, narrowed at activation', source: 'statusline-mirror.json', file: 'src/bridge.ts', kind: 'fields', body: 'export function narrowMirrorFile(', variable: 'doc',
+    fields: ['schema_version', 'written_at', 'payload'], pages: MIRROR_PAGES },
   { what: 'the status line\'s session', source: 'statusline-mirror.json', file: 'src/quota.ts', kind: 'picks', body: 'export function claudeStateFromStatusline(', variable: 'payload',
     fields: ['rate_limits', 'rateLimits', 'plan', 'subscription', 'context_window', 'contextWindow', 'cost', 'model',
       'prompt_cache', 'promptCache', 'session_id', 'sessionId'], pages: MIRROR_PAGES },

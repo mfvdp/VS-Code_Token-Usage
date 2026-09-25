@@ -2782,3 +2782,112 @@ test('the markdown document prints today\'s keep-warm accounting under the block
   const { quickPickItems } = require('../src/textViews') as typeof import('../src/textViews')
   assert.equal(JSON.stringify(quickPickItems(vm)).includes('Keep-warm'), false)
 })
+
+// ---------------------------------------------------------------------------
+// 1.9 A3: the language picker's part of the view model (A7 tests 1–2, §0a.3)
+// ---------------------------------------------------------------------------
+
+test('the picker offers Automatic, then every available language in the registry\'s order, one checked — each by its own name, its lang and flag, and its name in the reader\'s language (1.9 A7 test 1)', () => {
+  const { resolveLanguage, LANGUAGE_IDS } = require('../src/languages') as typeof import('../src/languages')
+  const { setBundle } = require('../src/i18n') as typeof import('../src/i18n')
+  const pick = (setting: import('../src/languages').LanguageSetting, available: import('../src/languages').LanguageId[], vscode = 'en') =>
+    buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(setting, vscode, available), available, vscode } }).language
+
+  // Without the input: English, auto, only English offered.
+  const none = buildViewModel(makeInput()).language
+  assert.equal(none.setting, 'auto')
+  assert.equal(none.shown, 'en')
+  assert.equal(none.flag, 'us')
+  assert.equal(none.buttonLabel, 'Language: English (automatic)')
+  assert.deepEqual(none.options, [
+    { id: 'auto', native: 'Automatic — as VS Code (English)', name: null, lang: null, flag: 'auto', checked: true },
+    { id: 'en', native: 'English', name: null, lang: 'en', flag: 'us', checked: false },
+  ])
+
+  // English, explicitly, with the German bundle on disk too: the US flag, "English" — never "United States".
+  const en = pick('en', ['en', 'de'])
+  assert.equal(en.buttonLabel, 'Language: English')
+  assert.equal(en.menuLabel, 'Language')
+  assert.equal(en.note, "Token Pace's own texts switch at once. The settings, the command titles and the walkthrough follow VS Code's display language (Configure Display Language).")
+  assert.equal(en.quality, 'The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.')
+  assert.deepEqual(en.options, [
+    { id: 'auto', native: 'Automatic — as VS Code (English)', name: null, lang: null, flag: 'auto', checked: false },
+    { id: 'en', native: 'English', name: null, lang: 'en', flag: 'us', checked: true },
+    { id: 'de', native: 'Deutsch', name: 'German', lang: 'de', flag: 'de', checked: false },
+  ])
+
+  // In German: the reader's names, the native ones unchanged; German's own name is no second name.
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    const de = pick('de', ['en', 'de'], 'de')
+    assert.equal(de.shown, 'de')
+    assert.equal(de.flag, 'de')
+    assert.equal(de.buttonLabel, 'Sprache: Deutsch')
+    assert.deepEqual(de.options.map((o) => [o.id, o.native, o.name, o.lang, o.flag, o.checked]), [
+      ['auto', 'Automatisch — wie VS Code (Deutsch)', null, null, 'auto', false],
+      ['en', 'English', 'Englisch', 'en', 'us', false],
+      ['de', 'Deutsch', null, 'de', 'de', true],
+    ])
+    // A synthetic French bundle, French offered: its own name once — "français" is the same word.
+    setBundle({ 'French': 'français', 'German': 'allemand', 'English': 'anglais', 'Language: {0}': 'Langue : {0}' })
+    const fr = pick('fr', ['en', 'de', 'fr'])
+    assert.equal(fr.buttonLabel, 'Langue : Français')
+    assert.deepEqual(fr.options.map((o) => [o.id, o.native, o.name, o.lang, o.flag, o.checked]), [
+      ['auto', 'Automatic — as VS Code (English)', null, null, 'auto', false],
+      ['en', 'English', 'anglais', 'en', 'us', false],
+      ['de', 'Deutsch', 'allemand', 'de', 'de', false],
+      ['fr', 'Français', null, 'fr', 'fr', true],
+    ])
+  } finally {
+    setBundle(undefined)
+  }
+
+  // Every language on disk: fifteen options in the registry's order, exactly one checked — the setting's.
+  const all = pick('ja', [...LANGUAGE_IDS])
+  assert.deepEqual(all.options.map((o) => o.id), ['auto', ...LANGUAGE_IDS])
+  assert.deepEqual(all.options.filter((o) => o.checked).map((o) => o.id), ['ja'])
+  assert.deepEqual(all.options.find((o) => o.id === 'zh-tw'), { id: 'zh-tw', native: '繁體中文', name: 'Chinese (Traditional)', lang: 'zh-TW', flag: 'tw', checked: false })
+  assert.deepEqual(all.options.find((o) => o.id === 'pt-br'), { id: 'pt-br', native: 'Português (Brasil)', name: 'Portuguese (Brazil)', lang: 'pt-BR', flag: 'br', checked: false })
+  // An id the reader's host has no file for is not offered, whatever `available` was written as.
+  assert.deepEqual(pick('auto', ['de', 'en']).options.map((o) => o.id), ['auto', 'en', 'de'])
+})
+
+test('the Automatic line says what auto shows — VS Code\'s language by its own name, or that it has no translation here — and a language without a file checks English (1.9 A3.3)', () => {
+  const { resolveLanguage } = require('../src/languages') as typeof import('../src/languages')
+  const pick = (setting: import('../src/languages').LanguageSetting, vscode: string, available: import('../src/languages').LanguageId[] = ['en', 'de']) =>
+    buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(setting, vscode, available), available, vscode } }).language
+  const autoLine = (l: ReturnType<typeof pick>): string => l.options[0].native
+  assert.equal(autoLine(pick('auto', 'de-ch')), 'Automatic — as VS Code (Deutsch)')
+  assert.equal(pick('auto', 'de-ch').buttonLabel, 'Language: Deutsch (automatic)')
+  assert.equal(autoLine(pick('auto', 'hu')), "Automatic — VS Code's language (hu) has no translation here, so English")
+  assert.equal(pick('auto', 'hu').buttonLabel, 'Language: English (automatic)')
+  // An explicit choice still names what auto would show, from VS Code's language as reported.
+  assert.equal(autoLine(pick('en', 'de')), 'Automatic — as VS Code (Deutsch)')
+  assert.equal(autoLine(pick('de', 'pt-PT')), "Automatic — VS Code's language (pt-pt) has no translation here, so English")
+  // VS Code's tag is held to a tag's alphabet before it is printed.
+  assert.equal(autoLine(pick('auto', 'x"><img src=1>')), 'Automatic — as VS Code (English)')
+  // An explicit language this build has no file for is English on screen, and English is the checked one.
+  const fr = pick('fr', 'en')
+  assert.equal(fr.setting, 'fr')
+  assert.equal(fr.shown, 'en')
+  assert.equal(fr.buttonLabel, 'Language: English')
+  assert.deepEqual(fr.options.filter((o) => o.checked).map((o) => o.id), ['en'])
+  assert.equal(fr.options.some((o) => o.id === 'fr'), false)
+})
+
+test('parseWebviewMessage takes a language choice only as auto or a registry id, exactly as spelled; the choice is no view state (1.9 A7 test 2, §0a.3)', () => {
+  const { LANGUAGE_IDS } = require('../src/languages') as typeof import('../src/languages')
+  for (const id of ['auto', ...LANGUAGE_IDS]) {
+    assert.deepEqual(parseWebviewMessage({ type: 'setLanguage', id }), { type: 'setLanguage', id }, id)
+  }
+  for (const bad of ['FR', 'Auto', 'pt-BR', 'zh_TW', '../x', 'fr/../../x', '', 'xx', 1, null, true, ['fr'], { id: 'fr' }]) {
+    assert.equal(parseWebviewMessage({ type: 'setLanguage', id: bad }), null, JSON.stringify(bad))
+  }
+  assert.equal(parseWebviewMessage({ type: 'setLanguage' }), null)
+  // Only the id travels: another field is not carried on.
+  assert.deepEqual(parseWebviewMessage({ type: 'setLanguage', id: 'de', path: '/etc' }), { type: 'setLanguage', id: 'de' })
+  // It changes no UI state: the reducer hands the very same object back (nothing to persist).
+  const ui = defaultUiState(makeConfig())
+  assert.equal(applyMessage(ui, { type: 'setLanguage', id: 'de' }), ui)
+})

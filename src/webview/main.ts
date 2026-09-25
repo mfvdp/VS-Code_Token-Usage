@@ -15,7 +15,9 @@
  * Two names it does not declare itself. `SRC_TITLE` and `SRC_IDS` belong to the provider
  * registry, and the registry is Node code (fs, os, path) that cannot be part of a browser
  * bundle; src/dashboard.ts writes them as two consts at the top of the same <script>, and
- * globals.d.ts beside this file declares them for the compiler.
+ * globals.d.ts beside this file declares them for the compiler — as it declares the page's
+ * words (`L10N`, `LOCALE`), the language picker's flags (`FLAGS`, 1.9 A3b) and the agent tree's
+ * limits, written there the same way.
  *
  * The view model arrives as JSON over postMessage. Its typed shape lives in src/viewModel.ts,
  * which this bundle cannot import for the same reason, and writing those three hundred fields
@@ -44,6 +46,10 @@ let allRanges = false;
 let showDates = false;
 /** The day the drill panel was last scrolled to, so a refresh of the same day stays put. */
 let shownDrill: string | null = null;
+/** 1.9 A3: the language list is open — page-local; a provider fragment keeps it, a whole render closes it. */
+let langOpen = false;
+/** 1.9 A3.4: a language was chosen — the next whole render puts the focus back on the picker's button. */
+let focusLanguageAfterRender = false;
 const esc = (s: unknown): string => String(s === null || s === undefined ? '' : s)
   .replace(/[&<>"']/g, c => (({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'} as Record<string, string>)[c]));
 const post = (m: unknown): void => vscode.postMessage(m);
@@ -403,10 +409,167 @@ function sProvider(): string {
   const shown = providerShown();
   const views: string[] = SRC_IDS.slice();
   views.push('all');
-  return '<div class="pv" role="group" aria-label="' + tr('Providers') + '">'
+  // 1.9 A3.1: one top row — the switch's group as it was, and the language picker at the row's end,
+  // outside the group: the group keeps exactly the switch's buttons.
+  return '<div class="top"><div class="pv" role="group" aria-label="' + tr('Providers') + '">'
     + views.map((s) => '<button data-act="providerView" data-src="' + esc(s) + '" aria-pressed="' + (shown === s) + '">'
       + (s === 'all' ? tr('All') : esc(srcName(s))) + '</button>').join('')
-    + '</div>';
+    + '</div>' + sLanguage() + '</div>';
+}
+
+// -- 1.9 A3: the language picker ----------------------------------------------
+
+/**
+ * The picker's part of the view model (`ViewModel.language`), or null for a payload from a build before
+ * it — the page then draws no picker rather than one that could say something wrong.
+ */
+function languageModel(): Payload | null {
+  const l = vm ? vm.language : null;
+  return l && typeof l === 'object' && Array.isArray(l.options) ? l : null;
+}
+
+/**
+ * A flag's markup — src/flags.ts's drawings, written in front of this module (`FLAGS`); '' for an id
+ * it has none for, so a stray id never becomes markup. The globe of Automatic carries a class of its
+ * own: it is drawn in the text colour and needs no hairline round its box.
+ */
+function flagSvg(id: Payload): string {
+  const svg = word(FLAGS, String(id));
+  return id === 'auto' ? svg.replace('<svg class="flag"', '<svg class="flag flag-auto"') : svg;
+}
+
+/**
+ * 1.9 A3.2: the picker — a menu button (WAI-ARIA APG *Menu Button*) showing the shown language's flag,
+ * with a caret; its name says what it is ("Language: English", `buttonLabel`), its tooltip what follows
+ * it and what does not (`note`, §3 A4). The flag is decoration (`aria-hidden`): English is *English*,
+ * not "United States". While `langOpen`, the list under it.
+ */
+function sLanguage(): string {
+  const l = languageModel();
+  if (!l) return '';
+  return '<div class="lng"><button class="lng-btn" data-act="langOpen" aria-haspopup="menu" aria-expanded="' + langOpen
+    + '" aria-controls="lng-menu" aria-label="' + esc(l.buttonLabel) + '" title="' + esc(l.note) + '">'
+    + flagSvg(l.flag) + '<span class="lng-caret" aria-hidden="true">▾</span></button>'
+    + (langOpen ? languagePop(l) : '') + '</div>';
+}
+
+/**
+ * 1.9 A3.3: the open list — a menu of radio items, *Automatic* first, then every available language:
+ * its flag, its own name in its own `lang` (a screen reader reads it in the right voice, a browser picks
+ * the right Han glyphs for ja, zh-CN and zh-TW), and where it differs its name in the reader's language,
+ * dim, a comma between the two for a screen reader alone — text of the line at no size (`.lng-sep`, the
+ * technique of the ⚠'s words, 1.7 D-A): a visually hidden box of its own (`.sr`) is read by Chrome as a
+ * block apart, "Deutsch , German". The checked one carries a ✓ (text, not colour). Under the list the
+ * note and the quality line (§3 A4, §7a Q8), always.
+ */
+function languagePop(l: Payload): string {
+  const items = (l.options as Payload[]).filter((o) => !!o && typeof o === 'object').map((o) => {
+    const checked = o.checked === true;
+    const own = '<span' + (typeof o.lang === 'string' && o.lang ? ' lang="' + esc(o.lang) + '"' : '') + '>' + esc(o.native) + '</span>';
+    const theirs = typeof o.name === 'string' && o.name ? '<span class="lng-sep">,</span> <span class="meta">' + esc(o.name) + '</span>' : '';
+    return '<li role="menuitemradio" aria-checked="' + checked + '" tabindex="-1" data-act="lang" data-id="' + esc(o.id) + '">'
+      + flagSvg(o.flag) + '<span class="lng-text">' + own + theirs + '</span>'
+      + (checked ? '<span class="lng-check" aria-hidden="true">✓</span>' : '') + '</li>';
+  }).join('');
+  return '<div class="lng-pop"><ul id="lng-menu" role="menu" aria-label="' + esc(l.menuLabel) + '">' + items + '</ul>'
+    + '<p class="meta lng-note">' + esc(l.note) + '</p><p class="meta lng-note">' + esc(l.quality) + '</p></div>';
+}
+
+/** The picker on the page, or null. */
+function pickerBox(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-sec="provider"] .lng');
+}
+
+/** The list's items, in their order; none while it is closed. */
+function languageItems(box: Payload): HTMLElement[] {
+  return box && typeof box.querySelectorAll === 'function' ? Array.from(box.querySelectorAll('[role="menuitemradio"]')) : [];
+}
+
+/**
+ * Opens or closes the list in place: the button stays the element it is — so the focus on it survives —,
+ * its `aria-expanded` follows, and the list is added or taken out. `focus`: 'checked' puts the focus on the
+ * checked item (the first when none is), 'button' on the button — before the list goes, so a Tab pressed
+ * in the list moves on from the button —, null nowhere.
+ */
+function setLanguageOpen(open: boolean, focus: 'checked' | 'button' | null): void {
+  const l = languageModel();
+  langOpen = open && l !== null;
+  const box = pickerBox();
+  if (!box) return;
+  const btn = box.querySelector<HTMLElement>('.lng-btn');
+  if (btn) btn.setAttribute('aria-expanded', String(langOpen));
+  if (focus === 'button' && btn) btn.focus();
+  const pop = box.querySelector('.lng-pop');
+  if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+  if (langOpen && l) box.insertAdjacentHTML('beforeend', languagePop(l));
+  if (focus === 'checked') {
+    const items = languageItems(box);
+    const at = items.find((x) => x.getAttribute('aria-checked') === 'true') || items[0];
+    if (at) at.focus();
+  }
+}
+
+/**
+ * 1.9 A6: what a key does on item `i` of the `n` items of the open list (the APG menu pattern, radio
+ * items): the item the focus moves to — ↓ / ↑ the next / the previous, wrapping round, Home / End the first
+ * / the last —; `choose` for Enter and Space; `close` 'button' for Escape (the focus back on the button),
+ * 'tab' for Tab (no choice; the focus moves on as Tab does). Moving chooses nothing. Null: not the list's key.
+ */
+function langKeyMove(n: number, i: number, key: string): { focus?: number; choose?: true; close?: 'button' | 'tab' } | null {
+  if (key === 'Escape') return { close: 'button' };
+  if (key === 'Tab') return { close: 'tab' };
+  if (n <= 0) return null;
+  const at = i >= 0 && i < n ? i : 0;
+  switch (key) {
+    case 'ArrowDown': return { focus: (at + 1) % n };
+    case 'ArrowUp': return { focus: (at - 1 + n) % n };
+    case 'Home': return { focus: 0 };
+    case 'End': return { focus: n - 1 };
+    case 'Enter':
+    case ' ':
+      return { choose: true };
+    default:
+      return null;
+  }
+}
+
+/**
+ * 1.9 A3.4: a choice. The checked item only closes the list; any other posts its id once — the host writes
+ * the setting, and the whole push that answers brings the page's words (applyWords) —, closes the list and
+ * asks that render to put the focus back on the button, where it is meanwhile.
+ */
+function chooseLanguage(el: HTMLElement): void {
+  const l = languageModel();
+  const id = el.dataset ? el.dataset.id : undefined;
+  const opt = l ? (l.options as Payload[]).find((o) => !!o && typeof o.id === 'string' && o.id === id) : null;
+  setLanguageOpen(false, 'button');
+  if (!opt || opt.checked === true) return;
+  focusLanguageAfterRender = true;
+  post({ type: 'setLanguage', id: opt.id });
+}
+
+/** A tag the page's `lang` and its formats may take — the host's `setLang` rule. */
+const WORDS_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+
+/**
+ * 1.9 A3.4: the words of a whole push after a language switch — checked before anything of them is used:
+ * `lang` and `locale` a language tag each, `dict` a plain object whose string values replace the whole
+ * dictionary (other values dropped). Anything else and the page keeps the words it has (false). The host
+ * escaped every value already, as it does for the dictionary written into a new page.
+ */
+function applyWords(w: unknown): boolean {
+  if (!w || typeof w !== 'object' || Array.isArray(w)) return false;
+  const x = w as Payload;
+  if (typeof x.lang !== 'string' || !WORDS_TAG.test(x.lang) || typeof x.locale !== 'string' || !WORDS_TAG.test(x.locale)) return false;
+  const dict = x.dict;
+  if (!dict || typeof dict !== 'object' || Array.isArray(dict)) return false;
+  const next: Record<string, string> = {};
+  for (const k of Object.keys(dict)) if (typeof dict[k] === 'string') next[k] = dict[k];
+  for (const k of Object.keys(L10N)) delete L10N[k];
+  for (const k of Object.keys(next)) L10N[k] = next[k];
+  if (document.documentElement) document.documentElement.lang = x.lang;
+  LOCALE = x.locale;
+  return true;
 }
 
 /**
@@ -3003,13 +3166,16 @@ function keepFocus(body: Element): AgentFocus | null {
   }
   if (!el.dataset) return null;
   // 1.6 L3: the 7-day block's disclosure names no node; it is found again by what it does. 1.7 F1:
-  // a button of the provider switch names the provider it shows.
+  // a button of the provider switch names the provider it shows. 1.9 A3: the language picker's button
+  // by what it does, an item of its open list by the language it names.
   const act = el.dataset.act, key = el.dataset.key || '', src = el.dataset.src || '';
-  return act && (key || src || act === 'agentsWeek') ? { act: act, key: key, list: el.dataset.list || '', src: src } : null;
+  const id = act === 'lang' ? el.dataset.id || '' : '';
+  return act && (key || src || id || act === 'agentsWeek' || act === 'langOpen')
+    ? { act: act, key: key, list: el.dataset.list || '', src: src, id: id } : null;
 }
 
 /** What keepFocus found: a control by what it does and whom it names, or an item of the tree. */
-interface AgentFocus { act: string; key: string; list: string; src?: string; tree?: boolean; copy?: boolean }
+interface AgentFocus { act: string; key: string; list: string; src?: string; id?: string; tree?: boolean; copy?: boolean }
 
 /**
  * Puts the focus back on the control that does the same thing to the same node, in the same
@@ -3026,7 +3192,7 @@ function restoreFocus(body: Element, f: AgentFocus): void {
   for (let i = 0; i < all.length; i++) {
     const el = all[i];
     if (el.dataset.act === f.act && (el.dataset.key || '') === f.key && (el.dataset.list || '') === f.list
-      && (el.dataset.src || '') === (f.src || '')) { el.focus(); return; }
+      && (el.dataset.src || '') === (f.src || '') && (f.act !== 'lang' || (el.dataset.id || '') === (f.id || ''))) { el.focus(); return; }
   }
 }
 
@@ -3433,6 +3599,11 @@ function act(el: HTMLElement): void {
     const s = el.dataset.src;
     if (!s || s === providerShown() || (s !== 'all' && SRC_IDS.indexOf(s) < 0)) return;
     post({ type: 'setProvider', provider: s });
+  } else if (a === 'langOpen') {
+    // 1.9 A3: the picker's button opens the list — the focus on its checked item — or closes it again.
+    setLanguageOpen(!langOpen, langOpen ? 'button' : 'checked');
+  } else if (a === 'lang') {
+    chooseLanguage(el);
   } else if (a === 'model') {
     const m = el.dataset.model;
     const list = vm.ui.models.slice();
@@ -3515,6 +3686,46 @@ document.addEventListener('keydown', (ev) => {
 document.addEventListener('change', (ev) => {
   const el = target<HTMLSelectElement>(ev, '[data-act="metric"]');
   if (el && vm) post({ type: 'setMetric', metric: el.value });
+});
+
+// -- 1.9 A6: the language picker's keys, its outside click, its focus -----------------
+//
+// On the button ↓ and ↑ open the list too (Enter and Space are the button's own click, act). In the
+// open list the keys of langKeyMove; Enter and Space on an item are the page's handler above (act →
+// chooseLanguage), so an item asks for nothing a click would not. Tab closes the list without a choice
+// and is not prevented: the focus is put on the button first, and Tab moves on from there.
+document.addEventListener('keydown', (ev) => {
+  if (!vm || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  const t = ev.target as Payload;
+  if (!t || typeof t.closest !== 'function') return;
+  if (t.classList && t.classList.contains('lng-btn')) {
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); setLanguageOpen(true, 'checked'); }
+    else if (ev.key === 'Escape' && langOpen) { ev.preventDefault(); setLanguageOpen(false, 'button'); }
+    return;
+  }
+  if (!langOpen || typeof t.getAttribute !== 'function' || t.getAttribute('role') !== 'menuitemradio' || !t.closest('.lng-pop')) return;
+  const items = languageItems(pickerBox());
+  const move = langKeyMove(items.length, items.indexOf(t), ev.key);
+  if (move === null || move.choose) return;
+  if (move.close === 'tab') { setLanguageOpen(false, 'button'); return; }
+  ev.preventDefault();
+  if (move.close === 'button') { setLanguageOpen(false, 'button'); return; }
+  const to = typeof move.focus === 'number' ? items[move.focus] : null;
+  if (to) to.focus();
+});
+// A pointer pressed anywhere outside the picker closes the list; where the focus goes is the click's.
+document.addEventListener('pointerdown', (ev) => {
+  if (!langOpen) return;
+  const t = ev.target as Payload;
+  if (t && typeof t.closest === 'function' && t.closest('.lng')) return;
+  setLanguageOpen(false, null);
+}, true);
+// A reader who moves on before the host has answered a choice keeps the focus where they put it: the
+// render that brings the words no longer takes it back to the button.
+document.addEventListener('focusin', (ev) => {
+  if (!focusLanguageAfterRender) return;
+  const t = ev.target as Payload;
+  if (!(t && t.classList && t.classList.contains('lng-btn'))) focusLanguageAfterRender = false;
 });
 
 // -- explanations: any block that carries data-explain and a .pop of its own ------------
@@ -3799,8 +4010,18 @@ window.addEventListener('message', (ev) => {
   const msg = ev.data;
   if (!msg) return;
   if (msg.type === 'data') {
+    // 1.9 A3.4: the words of a language switch, checked, before the page is drawn in them; a push
+    // without them (every other one) changes nothing of the page's words.
+    if (msg.words !== undefined) applyWords(msg.words);
     vm = msg.payload;
+    // 1.9 A3.6: a whole render closes the language list.
+    langOpen = false;
     renderAll();
+    if (focusLanguageAfterRender) {
+      focusLanguageAfterRender = false;
+      const btn = document.querySelector<HTMLElement>('[data-sec="provider"] .lng-btn');
+      if (btn) btn.focus();
+    }
     // The acknowledgement the smoke test waits for: the page was built from a payload that
     // arrived, so the whole channel — host, frame, origin rule, renderer — is proven live.
     post({ type: 'rendered', sections: vm && Array.isArray(vm.sections) ? vm.sections.length : 0 });

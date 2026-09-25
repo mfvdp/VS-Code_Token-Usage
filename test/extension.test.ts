@@ -1003,6 +1003,127 @@ test('a language the build has no file for, a file that does not parse and a set
   }
 })
 
+/**
+ * 1.9 §0a.3: every `update` of `tokenPace.language` on the fake configuration — key, value and target —
+ * and, while `fail` holds an error, the write VS Code would refuse. Every other write goes through as before.
+ */
+function recordLanguageWrites(): { writes: Array<[string, unknown, unknown]>; fail(err: Error | null): void; restore(): void } {
+  const api = HOST.api as unknown as { workspace: { getConfiguration: (section?: string) => Record<string, unknown> } }
+  const real = api.workspace.getConfiguration
+  const writes: Array<[string, unknown, unknown]> = []
+  let failing: Error | null = null
+  api.workspace.getConfiguration = (section?: string) => {
+    const conf = real(section) as { update: (key: string, value: unknown, target?: unknown) => Promise<void> }
+    return {
+      ...conf,
+      update: (key: string, value: unknown, target?: unknown): Promise<void> => {
+        const full = section ? `${section}.${key}` : key
+        if (full !== 'tokenPace.language') return conf.update(key, value, target)
+        writes.push([key, value, target])
+        return failing ? Promise.reject(failing) : conf.update(key, value, target)
+      },
+    }
+  }
+  return { writes, fail: (err) => { failing = err }, restore: () => { api.workspace.getConfiguration = real } }
+}
+
+test('the picker writes tokenPace.language once into the user settings — the id, or the key removed for auto —; the language already set writes nothing, an id outside the registry nothing, a refused write one warning (1.9 §0a.3)', async () => {
+  const rec = recordLanguageWrites()
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const GLOBAL = (HOST.api as unknown as { ConfigurationTarget: { Global: number } }).ConfigurationTarget.Global
+  try {
+    await activateHost(makeEmptyFixture(), REPO)
+    const post = dashboardPost()
+    // French: exactly one write, the id, into the user settings.
+    post({ type: 'setLanguage', id: 'fr' })
+    await waitFor('the French write', () => rec.writes.length === 1)
+    assert.deepEqual(rec.writes, [['language', 'fr', GLOBAL]])
+    await waitFor('the setting applied', () => /Language: fr → en/.test(state.logText()))
+    // The same id again: nothing.
+    post({ type: 'setLanguage', id: 'fr' })
+    await sleep(50)
+    assert.equal(rec.writes.length, 1)
+    // Automatic: the key removed, so auto leaves no trace in settings.json.
+    post({ type: 'setLanguage', id: 'auto' })
+    await waitFor('the auto write', () => rec.writes.length === 2)
+    assert.deepEqual(rec.writes[1], ['language', undefined, GLOBAL])
+    // An id outside the registry — another case, a path, a number — is dropped before it reaches the host.
+    for (const id of ['FR', 'fr/../../x', '../../etc/passwd', 42, '']) post({ type: 'setLanguage', id })
+    await sleep(50)
+    assert.equal(rec.writes.length, 2)
+    // A write VS Code refuses: the log says so in English, one warning, and nothing changes.
+    const warningsBefore = state.messages.filter((m) => m.kind === 'warning').length
+    rec.fail(Object.assign(new Error('settings.json is read-only: /home/someone/.config'), { code: 'EACCES' }))
+    post({ type: 'setLanguage', id: 'de' })
+    await waitFor('the refused write', () => rec.writes.length === 3)
+    await waitFor('the warning', () => state.messages.filter((m) => m.kind === 'warning').length === warningsBefore + 1)
+    const warning = state.messages.filter((m) => m.kind === 'warning').pop()!
+    assert.equal(warning.text, 'Token Pace: the language could not be written to your user settings.')
+    assert.match(state.logText(), /Language: the setting could not be written \(EACCES\)\./)
+    assert.equal(state.logText().includes('/home/someone'), false, 'the log repeats the error\'s message')
+    assert.equal(i18n.lang(), 'en')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    rec.restore()
+    i18n.setBundle(undefined)
+    i18n.setLocale(undefined)
+    i18n.setLang(undefined)
+  }
+})
+
+test('a language switch reaches the open dashboard as one whole push with the page\'s words — German\'s, escaped — and the document is not written again (1.9 A2 test 4, A3.4)', async () => {
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  try {
+    await activateHost(makeEmptyFixture(), REPO)
+    await waitOwnColdStart(state)
+    const provider = state.webviewProviders.get('tokenPace.dashboard') as { resolveWebviewView(view: unknown): void }
+    const sent: Array<Record<string, any>> = []
+    let htmlSets = 0
+    let html = ''
+    provider.resolveWebviewView({
+      visible: true,
+      webview: {
+        options: {},
+        set html(v: string) { htmlSets++; html = v },
+        get html(): string { return html },
+        onDidReceiveMessage: () => ({ dispose: () => undefined }),
+        postMessage: (m: Record<string, any>) => { sent.push(m); return Promise.resolve(true) },
+        cspSource: '',
+      },
+      onDidChangeVisibility: () => ({ dispose: () => undefined }),
+      onDidDispose: () => ({ dispose: () => undefined }),
+      show: () => undefined,
+    })
+    await waitFor('the first page', () => sent.some((m) => m.type === 'data'))
+    assert.equal(sent.some((m) => 'words' in m), false, 'a page of the words it already has carried them')
+    assert.match(html, /<html lang="en">/)
+    sent.length = 0
+    state.set('tokenPace.language', 'de')
+    state.fireConfigChange(['tokenPace.language'])
+    await waitFor('the German push', () => sent.some((m) => m.type === 'data'))
+    const whole = sent.filter((m) => m.type === 'data')
+    assert.equal(whole.length, 1)
+    assert.equal(whole[0].words.lang, 'de')
+    assert.equal(whole[0].words.locale, 'de')
+    assert.equal(whole[0].words.dict.Refresh, 'Aktualisieren')
+    assert.equal(whole[0].payload.language.buttonLabel, 'Sprache: Deutsch')
+    assert.equal('allBudgets' in whole[0].payload, false)
+    assert.equal(htmlSets, 1, 'the switch wrote the document again')
+    // Back to auto (VS Code in English): the words once more, English.
+    sent.length = 0
+    state.set('tokenPace.language', 'auto')
+    state.fireConfigChange(['tokenPace.language'])
+    await waitFor('the English push', () => sent.some((m) => m.type === 'data'))
+    assert.equal(sent.filter((m) => m.type === 'data')[0].words.dict.Refresh, 'Refresh')
+    assert.equal(htmlSets, 1)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    i18n.setBundle(undefined)
+    i18n.setLocale(undefined)
+    i18n.setLang(undefined)
+  }
+})
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

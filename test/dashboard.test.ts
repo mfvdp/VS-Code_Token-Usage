@@ -104,8 +104,9 @@ function adjustedOut(): string[] {
 /**
  * 1.7 D-B: what the page takes out of a forced-colours theme's adjustment — a pressed chip (1.6 P16) and a band of the chart by model.
  * 1.8 L-5 (pinned and changed: those two): and a subagents' band of the split drawn under 4 px tall, striped.
+ * 1.9 A6 (pinned and changed: those three): and a flag of the language picker — a picture, not a colour code.
  */
-const ADJUSTED_OUT = ['button[aria-pressed="true"]:not(.ag-row)', '.band:not(.sp-main, .sp-sub)', '.band.sp-sub.band-thin']
+const ADJUSTED_OUT = ['button[aria-pressed="true"]:not(.ag-row)', '.flag:not(.flag-auto)', '.band:not(.sp-main, .sp-sub)', '.band.sp-sub.band-thin']
 const SCRIPT = between(PAGE, /<script nonce="[A-Za-z0-9]+">/, '</script>')
 
 /**
@@ -724,10 +725,11 @@ test('a German bundle reaches the page, the script inside it and the language of
     assert.ok(bar.indexOf(word) >= 0, `${word} is missing from ${bar}`)
   }
   // 1.7 F1 (pinned and changed: the bar's providers' row said „Anbieter"): the bar has no such row
-  // any more; the word names the provider switch's group at the top of the page.
+  // any more; the word names the provider switch's group at the top of the page. 1.9 A3.1 (pinned and
+  // changed: the group was the block's whole markup): the group stands in the page's top row.
   assert.equal(bar.indexOf('Anbieter'), -1, bar)
   const sw = String(nodeVm.runInContext('vm = fixture; sProvider()', de))
-  assert.ok(sw.startsWith('<div class="pv" role="group" aria-label="Anbieter">'), sw)
+  assert.ok(sw.startsWith('<div class="top"><div class="pv" role="group" aria-label="Anbieter">'), sw)
   // A section renderer, and with it the tables: the heading and the stacked-layout prefix are
   // the same word, so both have to be the German one.
   const tokens = String(nodeVm.runInContext('vm = fixture; sTokens()', de))
@@ -743,7 +745,8 @@ test('a German bundle reaches the page, the script inside it and the language of
 
   // The page's own numbers are counted in the page's own language. A chart axis in "2.8M"
   // beside a table in "2,8M" is not two styles, it is two values.
-  assert.match(html, /\nconst LOCALE = "de";\n/)
+  // 1.9 A3.4 (pinned and changed: a const): a `let`, which the whole push after a language switch sets anew.
+  assert.match(html, /\nlet LOCALE = "de";\n/)
   ;(de as Record<string, unknown>).fixture = model({
     chart: {
       days: ['2026-09-05'], labels: ['09-05'],
@@ -2490,8 +2493,10 @@ test('the filter bar sits below the quota cards and above the first section it f
   // the switch, which is the page's first element.
   const preview = renderPage({ sections: ['quota', 'kpis'], preview: true })
   assert.ok(preview.indexOf('Preview data') < preview.indexOf('data-sec="quota"'), preview)
-  assert.ok(preview.startsWith('<div data-sec="provider" data-body="provider"><div class="pv" role="group"'), preview)
-  assert.ok(preview.indexOf('</div></div><div data-sec="notices" data-body="notices"><div class="box" role="status">Preview data') > 0, preview)
+  // 1.9 A3.1 (pinned and changed: the switch's group was the block's first and only child): the block is
+  // the page's top row, the group first in it.
+  assert.ok(preview.startsWith('<div data-sec="provider" data-body="provider"><div class="top"><div class="pv" role="group"'), preview)
+  assert.ok(preview.indexOf('</div></div></div><div data-sec="notices" data-body="notices"><div class="box" role="status">Preview data') > 0, preview)
   // Wherever it lands, the bar is one block of its own rather than loose rows of buttons.
   assert.ok(preview.indexOf('<div data-sec="controls" data-body="controls"><div class="bar">') >= 0, preview)
 })
@@ -6680,9 +6685,10 @@ test('a provider switch pushes the switch and exactly the sections whose fields 
   }
   // Chrome the switch does not change stays where it is.
   for (const key of ['notices', 'drill']) assert.equal(r.sections().includes(key), false, `${key} was pushed`)
-  // The fragments carry what the page draws the switch and the two sections from.
+  // The fragments carry what the page draws the switch and the two sections from. 1.9 A3.1 (pinned and
+  // changed: the switch alone): the block is the top row, the language picker beside the switch.
   const push = (key: string): any => r.posted.find((m) => m.type === 'section' && m.key === key)
-  assert.deepEqual(push('provider').payload, { provider: 'codex' })
+  assert.deepEqual(push('provider').payload, { provider: 'codex', language: codex.language })
   assert.equal(push('agents').payload.claudeOnly, 'Claude Code only — not shown while Codex is selected.')
   assert.equal(push('context').payload.provider, 'codex')
   // Back to All 300 ms later: the Agents section is the reader's own click, answered at once —
@@ -6703,12 +6709,24 @@ test('a provider switch pushes the switch and exactly the sections whose fields 
 
 const CLAUDE_ONLY = 'Claude Code only — not shown while Codex is selected.'
 
-/** The switch's markup for the view `shown`: one button per provider of the registry, then All. */
-function switchHtml(shown: string, words: { label: string; all: string } = { label: 'Providers', all: 'All' }): string {
+/**
+ * The switch's markup for the view `shown`: one button per provider of the registry, then All. 1.9 A3.1
+ * (pinned and changed: the group was the block's whole markup): the group stands in the page's top row,
+ * and `picker` — the language picker's markup, none for a payload without `language` — at its end.
+ */
+function switchHtml(shown: string, words: { label: string; all: string } = { label: 'Providers', all: 'All' }, picker = ''): string {
   const b = (src: string, name: string): string =>
     '<button data-act="providerView" data-src="' + src + '" aria-pressed="' + (src === shown) + '">' + name + '</button>'
-  return '<div class="pv" role="group" aria-label="' + words.label + '">'
-    + b('claude', 'Claude Code') + b('codex', 'Codex') + b('all', words.all) + '</div>'
+  return '<div class="top"><div class="pv" role="group" aria-label="' + words.label + '">'
+    + b('claude', 'Claude Code') + b('codex', 'Codex') + b('all', words.all) + '</div>' + picker + '</div>'
+}
+
+/** 1.9 A3.2: the language picker as the page draws it for a whole view model (closed). */
+function pickerHtml(vm: Record<string, unknown>): string {
+  ;(ctx as Record<string, unknown>).fixture = vm
+  const h = String(nodeVm.runInContext('vm = fixture; langOpen = false; sLanguage()', ctx))
+  assert.ok(h.startsWith('<div class="lng"><button class="lng-btn"'), h)
+  return h
 }
 
 /** A real view model of the agent world with a context reading, every section listed, under `providers`. */
@@ -6816,8 +6834,9 @@ test('under Codex the Agents and Context sections are left out — no heading, f
   assert.deepEqual(orderOf(hCodex), orderOf(hAll).filter((k) => k !== 'agents' && k !== 'context'))
   assert.deepEqual(orderOf(hClaude), orderOf(hAll))
   // The switch says which view it is, and under one provider the footer carries its footnote.
-  assert.ok(hCodex.startsWith('<div data-sec="provider" data-body="provider">' + switchHtml('codex')), hCodex.slice(0, 400))
-  assert.ok(hClaude.startsWith('<div data-sec="provider" data-body="provider">' + switchHtml('claude')), hClaude.slice(0, 400))
+  // 1.9 A3.1: a real view model carries the language picker, drawn at the end of the top row.
+  assert.ok(hCodex.startsWith('<div data-sec="provider" data-body="provider">' + switchHtml('codex', undefined, pickerHtml(codex))), hCodex.slice(0, 400))
+  assert.ok(hClaude.startsWith('<div data-sec="provider" data-body="provider">' + switchHtml('claude', undefined, pickerHtml(claude))), hClaude.slice(0, 400))
   const note = 'Showing Codex only — the provider switch at the top of the dashboard; ‘All’ shows every provider.'
   assert.ok(hCodex.indexOf('<li>' + note + '</li>') > hCodex.indexOf('data-sec="footer"'), 'the footnote is not in the footer')
   assert.equal(hAll.indexOf('Showing '), -1)
@@ -8543,4 +8562,456 @@ test('the page never reads a prompt-cache block\'s `all` or `allMoreText` (1.8 P
   assert.equal(/allMoreText/.test(code), false)
   assert.equal(/\b(cw|cacheWatch)\s*(\?\.|\.)\s*all\b/.test(code), false)
   assert.equal(/\[\s*['"]all['"]\s*\]/.test(code), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.9 A3, A4, A6: the language picker on the page, and the words push (A7 tests 3–4)
+// ---------------------------------------------------------------------------
+
+/** The picker's part of a view model: English shown, German on disk too — `setting` checked. */
+function languageVmOf(setting: 'auto' | 'en' | 'de' = 'en', over: Record<string, unknown> = {}): Record<string, unknown> {
+  const { resolveLanguage } = require('../src/languages') as typeof import('../src/languages')
+  const vm = buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(setting, 'en', ['en', 'de']), available: ['en', 'de'], vscode: 'en' } })
+  return { ...(JSON.parse(JSON.stringify(vm.language)) as Record<string, unknown>), ...over }
+}
+
+const LANG_NOTE = "Token Pace's own texts switch at once. The settings, the command titles and the walkthrough follow VS Code's display language (Configure Display Language)."
+const LANG_QUALITY = 'The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.'
+
+test('the top row holds the provider switch as it was and the language picker at its end: a menu button with the shown language\'s flag, its name and the note (1.9 A3.1, A3.2, A7 test 3)', () => {
+  const { FLAG_SVG } = require('../src/flags') as typeof import('../src/flags')
+  // The page carries the flags as they are drawn in src/flags.ts, and nothing else.
+  assert.deepEqual(JSON.parse(JSON.stringify(nodeVm.runInContext('FLAGS', ctx))), JSON.parse(JSON.stringify(FLAG_SVG)))
+  assert.match(SCRIPT, /\nconst FLAGS = \{"us":"\\u003csvg class=\\"flag\\" viewBox=\\"0 0 30 20\\"/)
+  const h = render('langOpen = false; sProvider()', { provider: 'all', language: languageVmOf('en') })
+  const button = '<button class="lng-btn" data-act="langOpen" aria-haspopup="menu" aria-expanded="false" aria-controls="lng-menu"'
+    + ' aria-label="Language: English" title="' + LANG_NOTE.replace(/'/g, '&#39;') + '">' + FLAG_SVG.us
+    + '<span class="lng-caret" aria-hidden="true">▾</span></button>'
+  // The group is unchanged — exactly the switch's buttons —, the picker outside it, at the row's end.
+  assert.equal(h, switchHtml('all', undefined, '<div class="lng">' + button + '</div>'))
+  assert.equal(h.split('role="group"').length - 1, 1)
+  assert.ok(h.indexOf('<div class="lng">') > h.indexOf('</div>'), 'the picker is inside the group')
+  // The flag is decoration: hidden, not focusable; the name says what the button is.
+  assert.match(FLAG_SVG.us, /^<svg class="flag" viewBox="0 0 30 20" aria-hidden="true" focusable="false">/)
+  // Under auto the name says so; the German flag for German; no picker for a payload without it.
+  assert.ok(render('langOpen = false; sLanguage()', { language: languageVmOf('auto') }).includes('aria-label="Language: English (automatic)"'))
+  const de = render('langOpen = false; sLanguage()', { language: languageVmOf('de', { buttonLabel: 'Sprache: Deutsch' }) })
+  assert.ok(de.includes('aria-label="Sprache: Deutsch"') && de.includes(FLAG_SVG.de), de)
+  assert.equal(render('sLanguage()', {}), '')
+  assert.equal(render('sLanguage()', { language: { options: 'x' } }), '')
+  // A flag the page has no drawing for draws nothing, and the words the view model carries are escaped.
+  const odd = render('langOpen = false; sLanguage()', { language: languageVmOf('en', { flag: 'constructor', buttonLabel: '<b>"x"</b>' }) })
+  assert.ok(odd.includes('aria-label="&lt;b&gt;&quot;x&quot;&lt;/b&gt;"') && !odd.includes('<svg'), odd)
+  // The row's rules: wrapping when it must, the picker at the end, the switch's buttons never wrapping.
+  assert.match(STYLE, /\n\.top \{ display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; \}\n/)
+  assert.match(STYLE, /\n\.lng \{ position: relative; margin-inline-start: auto; \}\n/)
+  assert.match(STYLE, /\n\.pv \{ display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; \}\n/)
+  assert.match(STYLE, /\n\.lng-btn \{ display: flex; align-items: center; gap: 4px; min-width: 24px; min-height: 24px;/)
+})
+
+test('the open list: Automatic first, then every language — its flag, its own name in its own lang, the reader\'s name after a hidden comma, one ✓ — and the note and the quality line under it (1.9 A3.3, A4, §7a Q8/Q9)', () => {
+  const { FLAG_SVG } = require('../src/flags') as typeof import('../src/flags')
+  const h = render('langOpen = true; var __h = sLanguage(); langOpen = false; __h', { language: languageVmOf('en') })
+  assert.ok(h.includes('aria-expanded="true"'), h)
+  const pop = h.slice(h.indexOf('<div class="lng-pop">'))
+  const globe = FLAG_SVG.auto.replace('<svg class="flag"', '<svg class="flag flag-auto"')
+  assert.equal(pop, '<div class="lng-pop"><ul id="lng-menu" role="menu" aria-label="Language">'
+    + '<li role="menuitemradio" aria-checked="false" tabindex="-1" data-act="lang" data-id="auto">' + globe
+    + '<span class="lng-text"><span>Automatic — as VS Code (English)</span></span></li>'
+    + '<li role="menuitemradio" aria-checked="true" tabindex="-1" data-act="lang" data-id="en">' + FLAG_SVG.us
+    + '<span class="lng-text"><span lang="en">English</span></span><span class="lng-check" aria-hidden="true">✓</span></li>'
+    + '<li role="menuitemradio" aria-checked="false" tabindex="-1" data-act="lang" data-id="de">' + FLAG_SVG.de
+    + '<span class="lng-text"><span lang="de">Deutsch</span><span class="lng-sep">,</span> <span class="meta">German</span></span></li>'
+    + '</ul><p class="meta lng-note">' + LANG_NOTE.replace(/'/g, '&#39;') + '</p><p class="meta lng-note">' + LANG_QUALITY + '</p></div></div>')
+  // Every language of the registry, each in its own lang — the Han glyphs of ja, zh-CN and zh-TW are the browser's to pick by it.
+  const { resolveLanguage, LANGUAGE_IDS, LANGUAGES } = require('../src/languages') as typeof import('../src/languages')
+  const every = buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage('auto', 'en', [...LANGUAGE_IDS]), available: [...LANGUAGE_IDS] } }).language
+  const all = render('langOpen = true; var __h = sLanguage(); langOpen = false; __h', { language: JSON.parse(JSON.stringify(every)) })
+  assert.equal(all.split('role="menuitemradio"').length - 1, 15)
+  assert.equal(all.split('aria-checked="true"').length - 1, 1)
+  assert.equal(all.split('lng-check').length - 1, 1)
+  for (const e of LANGUAGES) assert.ok(all.includes('data-id="' + e.id + '">' + FLAG_SVG[e.flag] + '<span class="lng-text"><span lang="' + e.locale + '">' + e.native + '</span>'), e.id)
+  // The list's rules: never wider than the view, at most min(70vh, 440px) tall and scrolling inside, items
+  // of 24 px at least, the menu's own colours with the page's tokens behind them.
+  assert.match(STYLE, /\.lng-pop \{[^}]*width: min\(320px, calc\(100vw - 16px\)\); max-height: min\(70vh, 440px\);/)
+  assert.match(STYLE, /\.lng-pop \{[^}]*right: 0;[^}]*background: var\(--vscode-menu-background, /)
+  assert.match(STYLE, /\.lng-pop \{[^}]*color: var\(--vscode-menu-foreground, var\(--vscode-foreground\)\);/)
+  assert.match(STYLE, /\.lng-pop \{[^}]*border: 1px solid var\(--vscode-menu-border, /)
+  assert.match(STYLE, /\n\.lng-pop ul \{ list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; \}\n/)
+  assert.match(STYLE, /\n\.lng-pop li \{ display: flex; align-items: center; gap: 8px; min-height: 24px;/)
+  assert.match(STYLE, /\.lng-pop li:focus \{ outline: none;\s*background: var\(--vscode-menu-selectionBackground, /)
+  // Forced colours (A6): the flags keep their colours and an outline in the text colour — the globe, drawn in
+  // currentColor, stays in the adjustment and follows the mode —; the focused item is outlined in the highlight
+  // colour; nothing else of the picker is taken out of the adjustment.
+  const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active) {'))
+  const block = forced.slice(0, forced.indexOf('\n}') + 2)
+  assert.ok(block.includes('\n  .flag:not(.flag-auto) { forced-color-adjust: none; outline: 1px solid CanvasText; }\n'), block)
+  assert.ok(block.includes('\n  .lng-pop li:focus { outline: 2px solid Highlight; outline-offset: -2px; }\n'), block)
+  assert.equal(/\.lng[^{]*\{[^}]*forced-color-adjust/.test(block), false)
+  // The page's hairline round a flag outside the mode; none round the globe, which is drawn in the text colour.
+  assert.match(STYLE, /\n\.flag \{ display: block; flex: none; width: 21px; height: 14px;\s*outline: 1px solid color-mix/)
+  assert.match(STYLE, /\n\.flag\.flag-auto \{ outline: none; \}\n/)
+  // The comma for a screen reader is text of the line at no size, as the ⚠'s words are (1.7 D-A).
+  assert.match(STYLE, /\n\.lng-sep \{ font-size: 0; \}\n/)
+})
+
+/** A fake element of the picker: what the script reads of it, and a record of every focus it takes. */
+interface PickerEl {
+  tagName: string
+  dataset: Record<string, string>
+  attrs: Record<string, string>
+  classList: { contains(c: string): boolean }
+  getAttribute(k: string): string | null
+  setAttribute(k: string, v: string): void
+  focus(): void
+  closest(sel: string): unknown
+}
+
+/**
+ * A page whose provider block is a fake picker: the button, and the list the script inserts — its items
+ * made from the markup `languagePop` writes. `focused` is every focus in order (the button, an item's id),
+ * `posted` what the page sent the host. The page is drawn from `over` through a real `data` message.
+ */
+function pickerCtx(over: Record<string, unknown> = {}): {
+  c: nodeVm.Context; posted: unknown[]; focused: string[]; active: () => PickerEl | null; btn: PickerEl; items: () => PickerEl[]
+  open: () => boolean; fire: (type: string, ev: Record<string, unknown>) => void; key: (key: string, target?: PickerEl | null) => { prevented: boolean }
+} {
+  const posted: unknown[] = []
+  const focused: string[] = []
+  const listeners: Record<string, Array<(ev: unknown) => void>> = {}
+  let active: PickerEl | null = null
+  let items: PickerEl[] = []
+  let pop: Record<string, unknown> | null = null
+  const on = (scope: string) => (type: string, fn: (ev: unknown) => void, capture?: unknown): void => {
+    (listeners[scope + type + (capture === true ? ':capture' : '')] ??= []).push(fn)
+  }
+  const box: Record<string, unknown> = {}
+  const el = (tagName: string, dataset: Record<string, string>, attrs: Record<string, string>, cls: string[], name: string): PickerEl => {
+    const e: PickerEl = {
+      tagName, dataset, attrs,
+      classList: { contains: (c: string) => cls.includes(c) },
+      getAttribute: (k: string) => (k in attrs ? attrs[k] : null),
+      setAttribute: (k: string, v: string) => { attrs[k] = v },
+      focus: () => { active = e; focused.push(name) },
+      closest: (sel: string) => (sel === '[data-act]' ? e : sel === '.lng' ? box : sel === '.lng-pop' ? (tagName === 'LI' ? pop : null) : null),
+    }
+    return e
+  }
+  const btn = el('BUTTON', { act: 'langOpen' }, { 'aria-expanded': 'false' }, ['lng-btn'], 'button')
+  Object.assign(box, {
+    querySelector: (sel: string) => (sel === '.lng-btn' ? btn : sel === '.lng-pop' ? pop : null),
+    querySelectorAll: (sel: string) => (sel === '[role="menuitemradio"]' ? items : []),
+    insertAdjacentHTML: (where: string, html: string) => {
+      assert.equal(where, 'beforeend')
+      pop = { html, parentNode: { removeChild: () => { if (items.includes(active as PickerEl)) active = null; pop = null; items = [] } } }
+      items = [...html.matchAll(/<li role="menuitemradio" aria-checked="(true|false)" tabindex="-1" data-act="lang" data-id="([^"]*)">/g)]
+        .map((m) => el('LI', { act: 'lang', id: m[2] }, { role: 'menuitemradio', 'aria-checked': m[1], tabindex: '-1' }, [], m[2]))
+    },
+  })
+  const root = { innerHTML: '', dataset: {}, style: {} }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: (m: unknown) => { posted.push(JSON.parse(JSON.stringify(m))) } }),
+    document: {
+      addEventListener: on('document:'),
+      getElementById: () => root,
+      querySelector: (sel: string) => (sel === '[data-sec="provider"] .lng' ? box : sel === '[data-sec="provider"] .lng-btn' ? btn : null),
+      querySelectorAll: () => [],
+      get activeElement() { return active },
+      documentElement: { lang: 'en' },
+    },
+    window: { addEventListener: on('window:'), setInterval: () => 1 },
+    console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  const fire = (type: string, ev: Record<string, unknown>): void => {
+    for (const fn of [...(listeners[type + ':capture'] ?? []), ...(listeners[type] ?? [])]) fn(ev)
+  }
+  fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['quota'], provider: 'all', language: languageVmOf('en'), ...over }) } })
+  posted.length = 0
+  const key = (k: string, target: PickerEl | null = active): { prevented: boolean } => {
+    const r = { prevented: false }
+    fire('document:keydown', { key: k, target, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false,
+      preventDefault: () => { r.prevented = true }, stopPropagation: () => undefined })
+    return r
+  }
+  return { c, posted, focused, active: () => active, btn, items: () => items, open: () => pop !== null, fire, key }
+}
+
+test('the picker\'s keys: the button opens the list on the checked item; ↓ ↑ wrap, Home and End; Escape and Tab close it without a choice; Enter on the checked item only closes (1.9 A6, A7 test 3)', () => {
+  const p = pickerCtx()
+  const ids = (): string[] => p.items().map((i) => i.dataset.id)
+  // Enter on the button is its click: the list opens, the focus on the checked item (English).
+  p.fire('document:click', { target: p.btn, stopPropagation: () => undefined, preventDefault: () => undefined })
+  assert.equal(p.open(), true)
+  assert.equal(p.btn.attrs['aria-expanded'], 'true')
+  assert.deepEqual(ids(), ['auto', 'en', 'de'])
+  assert.equal(p.active()?.dataset.id, 'en')
+  assert.equal(nodeVm.runInContext('langOpen', p.c), true)
+  // Moving chooses nothing, and every key it handles is kept from scrolling the page.
+  const moves: Array<[string, string]> = [['ArrowDown', 'de'], ['ArrowDown', 'auto'], ['ArrowUp', 'de'], ['Home', 'auto'], ['End', 'de'], ['ArrowUp', 'en']]
+  for (const [k, want] of moves) {
+    assert.equal(p.key(k).prevented, true, k)
+    assert.equal(p.active()?.dataset.id, want, k)
+  }
+  assert.deepEqual(p.posted, [])
+  // Enter on the checked item posts nothing and closes, the focus back on the button.
+  p.key('Enter')
+  assert.equal(p.open(), false)
+  assert.equal(p.btn.attrs['aria-expanded'], 'false')
+  assert.equal(p.active(), p.btn)
+  assert.deepEqual(p.posted, [])
+  // ↓ on the button opens it too; Escape closes it, nothing posted, the focus on the button.
+  assert.equal(p.key('ArrowDown', p.btn).prevented, true)
+  assert.equal(p.open(), true)
+  assert.equal(p.active()?.dataset.id, 'en')
+  p.key('ArrowDown')
+  assert.equal(p.key('Escape').prevented, true)
+  assert.equal(p.open(), false)
+  assert.equal(p.active(), p.btn)
+  assert.deepEqual(p.posted, [])
+  // ↑ opens it as well; Tab closes it without a choice and is not prevented: the focus moves on from the button.
+  p.key('ArrowUp', p.btn)
+  assert.equal(p.open(), true)
+  p.key('ArrowDown')
+  const tab = p.key('Tab')
+  assert.equal(tab.prevented, false)
+  assert.equal(p.open(), false)
+  assert.equal(p.active(), p.btn)
+  assert.deepEqual(p.posted, [])
+  // A click on the button while the list is open closes it.
+  p.fire('document:click', { target: p.btn, stopPropagation: () => undefined, preventDefault: () => undefined })
+  assert.equal(p.open(), true)
+  p.fire('document:click', { target: p.btn, stopPropagation: () => undefined, preventDefault: () => undefined })
+  assert.equal(p.open(), false)
+  // A pointer pressed outside the picker closes it; one inside it does not.
+  p.key('ArrowDown', p.btn)
+  p.fire('document:pointerdown', { target: p.items()[0] })
+  assert.equal(p.open(), true)
+  p.fire('document:pointerdown', { target: { closest: () => null } })
+  assert.equal(p.open(), false)
+  assert.deepEqual(p.posted, [])
+  // A key the list does not know, a key with a modifier, a key on something else: nothing.
+  p.key('ArrowDown', p.btn)
+  const at = p.active()
+  assert.equal(p.key('a').prevented, false)
+  assert.equal(p.active(), at)
+  // The pure rule, for the record: moving wraps, Home/End, Enter and Space choose, Escape and Tab close.
+  assert.deepEqual(JSON.parse(String(nodeVm.runInContext('JSON.stringify([langKeyMove(3, 2, "ArrowDown"), langKeyMove(3, 0, "ArrowUp"), langKeyMove(3, 1, "Home"), langKeyMove(3, 1, "End"), langKeyMove(3, 1, " "), langKeyMove(3, 1, "Enter"), langKeyMove(3, 1, "Escape"), langKeyMove(3, 1, "Tab"), langKeyMove(3, 1, "x"), langKeyMove(0, 0, "ArrowDown")])', p.c))),
+    [{ focus: 0 }, { focus: 2 }, { focus: 0 }, { focus: 2 }, { choose: true }, { choose: true }, { close: 'button' }, { close: 'tab' }, null, null])
+})
+
+test('a choice posts setLanguage once and closes the list; the whole push that answers brings the words, closes nothing more and puts the focus back on the button (1.9 A3.4, A7 tests 3–4)', () => {
+  const p = pickerCtx()
+  // Enter on German: one message, the host's parser takes it as it is.
+  p.key('ArrowDown', p.btn)
+  p.key('ArrowDown')
+  assert.equal(p.active()?.dataset.id, 'de')
+  p.key('Enter')
+  assert.deepEqual(p.posted, [{ type: 'setLanguage', id: 'de' }])
+  assert.deepEqual(parseWebviewMessage(p.posted[0]), p.posted[0])
+  assert.equal(p.open(), false)
+  assert.equal(p.active(), p.btn)
+  // A click on Automatic: the same, once.
+  p.posted.length = 0
+  p.fire('document:click', { target: p.btn, stopPropagation: () => undefined, preventDefault: () => undefined })
+  p.fire('document:click', { target: p.items()[0], stopPropagation: () => undefined, preventDefault: () => undefined })
+  assert.deepEqual(p.posted, [{ type: 'setLanguage', id: 'auto' }])
+  // The host's answer: a whole push with the words — the dictionary replaced, the page's lang and LOCALE moved,
+  // the list closed, the focus on the button again.
+  p.posted.length = 0
+  p.fire('document:click', { target: p.btn, stopPropagation: () => undefined, preventDefault: () => undefined })
+  assert.equal(nodeVm.runInContext('langOpen', p.c), true)
+  const focusBefore = p.focused.length
+  p.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['quota'], language: languageVmOf('de') }),
+    words: { lang: 'de', locale: 'de', dict: { Refresh: 'Aktualisieren', Range: 'Zeitraum', broken: 7 } } } })
+  assert.equal(nodeVm.runInContext('langOpen', p.c), false)
+  assert.deepEqual(p.focused.slice(focusBefore), ['button'])
+  assert.deepEqual(JSON.parse(JSON.stringify(nodeVm.runInContext('L10N', p.c))), { Refresh: 'Aktualisieren', Range: 'Zeitraum' })
+  assert.equal(nodeVm.runInContext('LOCALE', p.c), 'de')
+  assert.equal(nodeVm.runInContext('document.documentElement.lang', p.c), 'de')
+  assert.ok(String(nodeVm.runInContext('controls()', p.c)).includes('aria-label="Aktualisieren"'))
+  // A push without words (every other one) changes nothing of them, and takes no focus.
+  const again = p.focused.length
+  p.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['quota'], language: languageVmOf('de') }) } })
+  assert.equal(nodeVm.runInContext('L10N.Refresh', p.c), 'Aktualisieren')
+  assert.equal(p.focused.length, again)
+  // The reader who moved on before the answer keeps the focus where they put it.
+  p.posted.length = 0
+  p.key('ArrowDown', p.btn)
+  assert.equal(p.active()?.dataset.id, 'de')
+  p.key('Home')
+  p.key('Enter')
+  assert.deepEqual(p.posted, [{ type: 'setLanguage', id: 'auto' }])
+  p.fire('document:focusin', { target: { classList: { contains: () => false } } })
+  const moved = p.focused.length
+  p.fire('window:message', { origin: '', data: { type: 'data', payload: model({ sections: ['quota'], language: languageVmOf('auto') }),
+    words: { lang: 'en', locale: 'en-US', dict: {} } } })
+  assert.equal(p.focused.length, moved)
+})
+
+test('the page takes words only in their shape: a tag for lang and locale, a plain object of strings for the dictionary (1.9 A3.4, A7 test 4)', () => {
+  const c = makeContext()
+  nodeVm.runInContext(SCRIPT, c)
+  const state = (): unknown => JSON.parse(String(nodeVm.runInContext('JSON.stringify({ l: L10N, loc: LOCALE })', c)))
+  const before = state() as { l: Record<string, string>; loc: string }
+  assert.equal(before.loc, 'en-US')
+  const apply = (w: unknown): boolean => {
+    ;(c as Record<string, unknown>).words = w
+    return nodeVm.runInContext('applyWords(words)', c) as boolean
+  }
+  for (const bad of [null, 'de', [1], { lang: 'x y', locale: 'de', dict: {} }, { lang: 'de', locale: 'de"><', dict: {} },
+    { lang: 'de', locale: 'de', dict: 'Refresh' }, { lang: 'de', locale: 'de', dict: ['Aktualisieren'] }, { lang: 'de', locale: 'de', dict: null },
+    { lang: 'de', dict: {} }, { lang: 7, locale: 'de', dict: {} }]) {
+    assert.equal(apply(bad), false, JSON.stringify(bad))
+    assert.deepEqual(state(), before, JSON.stringify(bad))
+  }
+  // A valid one replaces the whole dictionary — a key the new one lacks goes, a value that is no string is dropped.
+  assert.equal(apply({ lang: 'pt-BR', locale: 'pt-BR', dict: { Refresh: 'Atualizar', Range: 3, __proto__x: 'y' } }), true)
+  assert.deepEqual(state(), { l: { Refresh: 'Atualizar', __proto__x: 'y' }, loc: 'pt-BR' })
+  assert.equal(nodeVm.runInContext("tr('Range')", c), 'Range')
+  assert.equal(nodeVm.runInContext("tr('Refresh')", c), 'Atualizar')
+  // A key named like the prototype cannot reach it.
+  ;(c as Record<string, unknown>).words = JSON.parse('{"lang":"de","locale":"de","dict":{"__proto__":"x","Refresh":"Aktualisieren"}}')
+  assert.equal(nodeVm.runInContext('applyWords(words)', c), true)
+  assert.equal(nodeVm.runInContext("Object.getPrototypeOf(L10N) === Object.prototype && tr('Refresh')", c), 'Aktualisieren')
+})
+
+test('a provider fragment redraws the picker and keeps it open, the focus on the item it was on (1.9 §3.0 a)', () => {
+  const focused: string[] = []
+  const inside = new Set<unknown>()
+  let drawn: Array<Record<string, unknown>> = []
+  const item = (id: string, name: string): Record<string, unknown> => ({ dataset: { act: 'lang', id }, focus: () => { focused.push(name) } })
+  const body = {
+    innerHTML: '', dataset: {}, style: {},
+    contains: (el: unknown) => inside.has(el),
+    querySelectorAll: (sel: string) => (sel === '[data-act]' ? drawn : []),
+  }
+  const doc: Record<string, unknown> = {
+    addEventListener: () => undefined, getElementById: () => null, querySelectorAll: () => [], activeElement: null,
+    querySelector: (s: string) => (s === '[data-body="provider"]' ? body : null),
+  }
+  const c = nodeVm.createContext({ acquireVsCodeApi: () => ({ postMessage: () => undefined }), document: doc, window: { addEventListener: () => undefined }, console })
+  nodeVm.runInContext(SCRIPT, c)
+  ;(c as Record<string, unknown>).fixture = model({ provider: 'codex', language: languageVmOf('en') })
+  nodeVm.runInContext('vm = fixture; langOpen = true;', c)
+  const was = item('de', 'de-old')
+  inside.add(was)
+  doc.activeElement = was
+  drawn = [{ dataset: { act: 'langOpen' }, focus: () => { focused.push('button-new') } }, item('auto', 'auto-new'), item('en', 'en-new'), item('de', 'de-new')]
+  nodeVm.runInContext('renderSection("provider");', c)
+  assert.deepEqual(focused, ['de-new'])
+  assert.ok(body.innerHTML.includes('<div class="lng-pop">'), 'the list closed with the fragment')
+  assert.ok(body.innerHTML.includes('aria-expanded="true"'))
+  // The button keeps the focus the same way.
+  focused.length = 0
+  const onButton = { dataset: { act: 'langOpen' }, focus: () => undefined }
+  inside.clear()
+  inside.add(onButton)
+  doc.activeElement = onButton
+  nodeVm.runInContext('langOpen = false; renderSection("provider");', c)
+  assert.deepEqual(focused, ['button-new'])
+})
+
+/** 1.9 A3.4: a provider on a view whose visibility a test can change, and every `html` it was given. */
+function wordsRig(): { p: any; view: any; posted: any[]; htmlSets: () => number; setVisible: (v: boolean) => void } {
+  const { DashboardProvider } = loadDashboard()
+  const posted: any[] = []
+  const vis: Array<() => void> = []
+  let htmlSets = 0
+  let visible = true
+  const view = {
+    get visible() { return visible },
+    webview: {
+      options: {},
+      set html(_v: string) { htmlSets++ },
+      get html(): string { return '' },
+      onDidReceiveMessage: () => ({ dispose: () => undefined }),
+      postMessage: (m: unknown) => { if (visible) posted.push(m); return Promise.resolve(visible) },
+    },
+    onDidChangeVisibility: (fn: () => void) => { vis.push(fn); return { dispose: () => undefined } },
+    onDidDispose: () => ({ dispose: () => undefined }),
+    show: () => undefined,
+  }
+  const p = new DashboardProvider(() => undefined)
+  return { p, view, posted, htmlSets: () => htmlSets, setVisible: (v: boolean) => { visible = v; for (const fn of vis) fn() } }
+}
+
+test('after a switch the next whole push carries the words — German\'s dictionary, escaped, its lang and locale — once, a hidden view gets them when it shows, and the document is never reloaded (1.9 A3.4, A7 test 4)', () => {
+  const { pagePayload } = loadDashboard()
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const r = wordsRig()
+  try {
+    const en = buildViewModel(makeInput())
+    r.p.update(en)
+    r.p.resolveWebviewView(r.view)
+    assert.deepEqual(r.posted.map((m) => [m.type, 'words' in m]), [['data', false]])
+    // The switch, as extension.ts applies it: the bundle, the locale, the words' tag — then the dashboard is told.
+    setBundle(bundle)
+    setLocale('de')
+    setLang('de')
+    r.p.languageChanged()
+    const de = buildViewModel(makeInput())
+    r.posted.length = 0
+    r.p.update(de)
+    assert.equal(r.posted.length, 1)
+    const m = r.posted[0]
+    assert.equal(m.type, 'data')
+    assert.deepEqual(m.payload, JSON.parse(JSON.stringify(pagePayload(de))))
+    assert.equal(m.words.lang, 'de')
+    assert.equal(m.words.locale, 'de')
+    assert.equal(m.words.dict.Refresh, 'Aktualisieren')
+    assert.equal(m.words.dict.All, 'Alle')
+    // Exactly the dictionary a new page would be written with.
+    const germanScript = between(page(), /<script nonce="[A-Za-z0-9]+">/, '</script>')
+    const dc = makeContext()
+    nodeVm.runInContext(germanScript, dc)
+    assert.deepEqual(m.words.dict, JSON.parse(JSON.stringify(nodeVm.runInContext('L10N', dc))))
+    // The same view model again: nothing; a change: a fragment — never the words.
+    r.posted.length = 0
+    r.p.update(de)
+    assert.equal(r.posted.length, 0, JSON.stringify(r.posted))
+    r.p.update({ ...de, generatedAt: 'later' })
+    assert.deepEqual(r.posted.map((x) => [x.type, 'words' in x]), [['section', false]])
+    // A whole push for another reason — the view shown again — carries none either.
+    r.posted.length = 0
+    r.setVisible(false)
+    r.setVisible(true)
+    assert.deepEqual(r.posted.map((x) => [x.type, 'words' in x]), [['data', false]])
+    // Back to English while the view is hidden: nothing is posted; the flush that shows it again brings the words.
+    r.setVisible(false)
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+    r.p.languageChanged()
+    r.posted.length = 0
+    r.p.update(en)
+    assert.equal(r.posted.length, 0, JSON.stringify(r.posted))
+    r.setVisible(true)
+    assert.deepEqual(r.posted.map((x) => [x.type, x.words && x.words.lang, x.words && x.words.locale]), [['data', 'en', 'en-US']])
+    assert.equal(r.posted[0].words.dict.Refresh, 'Refresh')
+    // The markup rule holds on the push path too: a bundle's page word with markup arrives escaped.
+    setBundle({ Refresh: '<img src=x>', All: 'a "b" & c' })
+    setLang('fr')
+    r.p.languageChanged()
+    r.posted.length = 0
+    r.p.update(en)
+    assert.equal(r.posted[0].words.dict.Refresh, '&lt;img src=x&gt;')
+    assert.equal(r.posted[0].words.dict.All, 'a &quot;b&quot; &amp; c')
+    // A switch that keeps the words' language but moves the formats reaches the page too.
+    setBundle(undefined)
+    setLang(undefined)
+    r.p.languageChanged()
+    r.p.update(en)
+    setLocale('hu')
+    r.p.languageChanged()
+    r.posted.length = 0
+    r.p.update(en)
+    assert.deepEqual(r.posted.map((x) => [x.type, x.words && x.words.lang, x.words && x.words.locale]), [['data', 'en', 'hu']])
+    // Through all of it the document was written once: no switch reloads it.
+    assert.equal(r.htmlSets(), 1)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+  }
 })

@@ -445,6 +445,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       hook: hookMirror.entries(),
       // 1.8 B2: the countdown, the two card notes and today's keep-warm accounting.
       keepWarm: keepWarm.view(now, readTimeConfig(cfg)),
+      // 1.9 A3: the dashboard's language picker — what is set and shown, what it may offer (the files on
+      // disk, read once at activation) and VS Code's language for its Automatic line.
+      language: { resolved: language, available: shippedLanguages, vscode: vscode.env.language },
     })
   }
 
@@ -650,6 +653,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   function onMessage(m: WebviewMessage): void {
     if (m.type === 'refresh') {
       render(true)
+      return
+    }
+    // 1.9 A3 (§0a.3): the picker's choice is a setting, not view state — written once into the user
+    // settings; the change event applies it (A2 rule 4) and the dashboard's next push brings the words.
+    if (m.type === 'setLanguage') {
+      void writeLanguage(m.id)
       return
     }
     if (m.type === 'command') {
@@ -1640,6 +1649,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       source = pick.value
     }
     await vscode.env.openExternal(vscode.Uri.parse(USAGE_PAGE[source]))
+  }
+
+  /**
+   * 1.9 §0a.3: the one write the language picker makes — `tokenPace.language` in the user settings
+   * (`ConfigurationTarget.Global`; the setting's scope, `application`, allows no other), `auto` as the key
+   * removed, so it leaves no trace in settings.json. Only a registry id or `auto` reaches it (the page's
+   * message is parsed first); the language already set writes nothing. A write VS Code refuses is said in
+   * the log (English) and in one warning, and nothing changes: the page shows what it showed.
+   */
+  async function writeLanguage(id: LanguageSetting): Promise<void> {
+    if (id === cfg.language) return
+    try {
+      await vscode.workspace.getConfiguration('tokenPace')
+        .update('language', id === 'auto' ? undefined : id, vscode.ConfigurationTarget.Global)
+    } catch (err) {
+      log.warn(`Language: the setting could not be written (${errorKind(err)}).`)
+      void vscode.window.showWarningMessage(t('Token Pace: the language could not be written to your user settings.'))
+    }
   }
 
   async function cycleWindowSelect(): Promise<void> {

@@ -90,6 +90,7 @@
   "Token Pace: status bar windows — {0}.": "Token Pace: Statusleisten-Fenster — {0}.",
   "Token Pace: status line connected. Backup: {0}.": "Token Pace: Statuszeile verbunden. Sicherung: {0}.",
   "Token Pace: the agent hook script could not be copied into the extension's storage ({0}).": "Token Pace: Das Agent-Hook-Skript konnte nicht in den Erweiterungsspeicher kopiert werden ({0}).",
+  "Token Pace: the language could not be written to your user settings.": "Token Pace: Die Sprache konnte nicht in Ihre Benutzereinstellungen geschrieben werden.",
   "Token Pace: the previous status line was restored.": "Token Pace: Die vorherige Statuszeile wurde wiederhergestellt.",
   "Token Pace: the status line bridge is disabled in Restricted Mode.": "Token Pace: Die Statuszeilen-Bridge ist im eingeschränkten Modus deaktiviert.",
   "Token Pace: the status line entry was removed.": "Token Pace: Der Statuszeilen-Eintrag wurde entfernt.",

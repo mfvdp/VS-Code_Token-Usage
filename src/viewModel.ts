@@ -29,6 +29,9 @@ import {
 import { digest } from './digest'
 import { t } from './i18n'
 import {
+  FlagId, LANGUAGES, LanguageId, LanguageSetting, ResolvedLanguage, isLanguageId, languageEntry, languageName, resolveLanguage,
+} from './languages'
+import {
   Calibration, ForecastConfig, calibration, forecast, retrospective, Retro,
 } from './forecast'
 import {
@@ -219,6 +222,11 @@ export type WebviewMessage =
   | { type: 'refresh' }
   | { type: 'rendered'; sections: number }
   | { type: 'command'; id: WebviewCommandId }
+  /**
+   * 1.9 A3 (§0a.3): the language picker's choice — `auto` or a registry id, never anything else. The host
+   * writes it into the user settings (`tokenPace.language`); it is no view state and changes no `UiState`.
+   */
+  | { type: 'setLanguage'; id: LanguageSetting }
 
 /**
  * The sections that can be folded. Exactly the keys `dashboard.sections` knows: a fold is a
@@ -379,6 +387,11 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
       return typeof m.id === 'string' && (WEBVIEW_COMMANDS as readonly string[]).includes(m.id)
         ? { type: 'command', id: m.id as WebviewCommandId }
         : null
+    // 1.9 A3 (§0a.3): the picker names `auto` or a registry id, exactly as the registry spells it — another
+    // case (`FR`), a path, a number or a missing id drops the message. It is the page's one message that
+    // leads to a settings write, so it carries nothing but the id.
+    case 'setLanguage':
+      return m.id === 'auto' || isLanguageId(m.id) ? { type: 'setLanguage', id: m.id } : null
     default:
       return null
   }
@@ -863,6 +876,46 @@ export interface VmInput {
    * Agents section carries a marker then. Read from the file, never from the snapshot.
    */
   hook?: ReadonlyMap<string, HookEntry>
+  /**
+   * 1.9 A: the resolved language and the ids the picker may offer (`availableLanguages`, read once at
+   * activation). Absent → English, `auto`, only English offered. `vscode` is VS Code's display language as
+   * reported (`vscode.env.language`) — what the picker's *Automatic* line names while the setting is an
+   * explicit language, whose `resolved.auto` is null; absent → the resolved `auto`'s, else English.
+   */
+  language?: { resolved: ResolvedLanguage; available: readonly LanguageId[]; vscode?: string }
+}
+
+/** 1.9 A3.3: one entry of the language picker's list. */
+export interface LanguageOptionVm {
+  /** What the option posts: 'auto' or a registry id. */
+  id: LanguageSetting
+  /** The language's own name; for 'auto' the whole line ("Automatic — as VS Code (Deutsch)"). */
+  native: string
+  /** Its name in the reader's language where that differs from `native` ("German"), else null. */
+  name: string | null
+  /** The `lang` of `native` (the entry's `locale`); null for 'auto', which is in the reader's language. */
+  lang: string | null
+  flag: FlagId | 'auto'
+  checked: boolean
+}
+
+/** 1.9 A3: the language picker at the top of the dashboard — its state and every text it shows. */
+export interface LanguageVm {
+  setting: LanguageSetting
+  /** The language the texts are in now. */
+  shown: LanguageId
+  /** The button's flag — the shown language's. */
+  flag: FlagId
+  /** The button's accessible name: "Language: Deutsch" / "Language: Deutsch (automatic)". */
+  buttonLabel: string
+  /** The list's accessible name: "Language". */
+  menuLabel: string
+  /** The button's tooltip and the first line under the open list (§3 A4): what follows the picker and what does not. */
+  note: string
+  /** The line under the open list (§3 A4 — who translated the twelve languages); always shown, in the reader's language. */
+  quality: string
+  /** 'auto' first, then every available language in registry order; exactly one checked. */
+  options: LanguageOptionVm[]
 }
 
 export interface ViewModel {
@@ -940,6 +993,8 @@ export interface ViewModel {
   firstRun: { scanning: boolean; text: string } | null
   footnotes: string[]
   preview: boolean
+  /** 1.9 A3: the language picker beside the provider switch. */
+  language: LanguageVm
 }
 
 // ---------------------------------------------------------------------------
@@ -2071,6 +2126,7 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
       : null,
     footnotes: [],
     preview: input.preview === true,
+    language: languageVm(input.language),
   }
 
   vm.digest = digest(vm)
@@ -2228,6 +2284,53 @@ function calibrationText(c: Calibration | null): string {
   if (!c) return t('not enough data')
   return estimate(t('server counts {0} % of the window per 1M local tokens (band {1}–{2}, {3} h of basis)',
     c.factor.toFixed(1), c.low.toFixed(1), c.high.toFixed(1), c.basisHours.toFixed(1)))
+}
+
+/**
+ * 1.9 A3, A4: the language picker — built here like every other text of the page (dashboard.ts: "no number is
+ * computed here"), in the reader's language. The options are *Automatic* first, then every available language
+ * in the registry's order, each by its own name in its own `lang` and — where it differs, case aside — by its
+ * name in the reader's language (§7a Q9). Exactly one is checked: the setting's, or — for an explicit language
+ * this build has no file for, which is shown in English — English's, the language the reader sees. The
+ * *Automatic* line says what `auto` would show: VS Code's language by its own name, or that Token Pace has no
+ * translation for it (its tag, held to `[a-z0-9-]{1,20}`), so English.
+ */
+function languageVm(input: VmInput['language']): LanguageVm {
+  const resolved: ResolvedLanguage = input?.resolved ?? resolveLanguage('auto', 'en', ['en'])
+  const listed = input?.available ?? ['en']
+  const available: LanguageId[] = LANGUAGES.map((e) => e.id).filter((id) => id === 'en' || listed.includes(id))
+  // What `auto` shows: the resolved language itself under `auto` (a bundle that failed to load is English
+  // there too), else the rule applied to VS Code's language as reported.
+  const viaAuto = resolved.setting === 'auto' ? resolved : resolveLanguage('auto', input?.vscode ?? '', available)
+  const auto = viaAuto.auto ?? { vscode: '', shipped: true }
+  const autoLine = auto.shipped
+    ? t('Automatic — as VS Code ({0})', languageEntry(viaAuto.id).native)
+    : t("Automatic — VS Code's language ({0}) has no translation here, so English", auto.vscode)
+  const offered = new Set<LanguageSetting>(['auto', ...available])
+  const checked: LanguageSetting = offered.has(resolved.setting) ? resolved.setting : resolved.id
+  const shown = languageEntry(resolved.id)
+  const options: LanguageOptionVm[] = [
+    { id: 'auto', native: autoLine, name: null, lang: null, flag: 'auto', checked: checked === 'auto' },
+    ...available.map((id): LanguageOptionVm => {
+      const e = languageEntry(id)
+      // The same word in another case is no second name — "Français" beside "français" in a French list.
+      const name = languageName(id)
+      const same = name.toLowerCase() === e.native.toLowerCase()
+      return { id, native: e.native, name: same ? null : name, lang: e.locale, flag: e.flag, checked: checked === id }
+    }),
+  ]
+  return {
+    setting: resolved.setting,
+    shown: resolved.id,
+    flag: shown.flag,
+    buttonLabel: resolved.setting === 'auto'
+      ? t('Language: {0} (automatic)', shown.native)
+      : t('Language: {0}', shown.native),
+    menuLabel: t('Language'),
+    note: t("Token Pace's own texts switch at once. The settings, the command titles and the walkthrough follow VS Code's display language (Configure Display Language)."),
+    quality: t('The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.'),
+    options,
+  }
 }
 
 /**

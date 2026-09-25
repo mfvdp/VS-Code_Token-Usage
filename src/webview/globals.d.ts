@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The seven names main.ts uses but does not declare.
+ * The eight names main.ts uses but does not declare.
  *
  * `acquireVsCodeApi` is the webview host's own function, injected by VS Code before the page
  * runs. `SRC_TITLE` and `SRC_IDS` are the provider registry's two facts, `L10N` is the page's
- * translated words, `LOCALE` the language they are counted in, `AGENT_PAGING` the agent
- * tree's paging steps and `AGENT_SILENT_MS` when a running agent's silence is stated; all six
- * are written in front of this module by src/dashboard.ts, because the registry, the
- * localisation seam and the tree's limits are Node code and cannot be part of a browser bundle.
- * All seven are declared, never defined:
+ * translated words, `LOCALE` the language they are counted in, `FLAGS` the language picker's
+ * drawings (1.9 A3b), `AGENT_PAGING` the agent tree's paging steps and `AGENT_SILENT_MS` when a
+ * running agent's silence is stated; all seven are written in front of this module by
+ * src/dashboard.ts, because the registry, the localisation seam, the flags and the tree's limits are
+ * Node code and cannot be part of a browser bundle. `L10N` and `LOCALE` are the two a language
+ * switch sets anew without a reload (1.9 A3.4, `applyWords`): `L10N`'s entries are replaced in place,
+ * `LOCALE` is assigned. All eight are declared, never defined:
  * nothing here reaches the built script, so a wrong shape is a compile error and never a
  * second copy of the truth.
  */
@@ -31,8 +33,14 @@ declare const SRC_IDS: readonly string[]
  */
 declare const L10N: Record<string, string>
 
-/** The BCP 47 tag src/i18n.ts hands the host's Intl formatters — the page formats with it too. */
-declare const LOCALE: string
+/**
+ * The BCP 47 tag src/i18n.ts hands the host's Intl formatters — the page formats with it too. A `let`
+ * since 1.9: the whole push after a language switch carries the new one (`applyWords`).
+ */
+declare let LOCALE: string
+
+/** src/flags.ts FLAG_SVG: the flags' markup, by FlagId and 'auto' (1.9 A3b). */
+declare const FLAGS: Record<string, string>
 
 /**
  * src/agentTree.ts's MAX_GROUP_CHILDREN and MAX_MORE_PAGES (1.6 D3): how many children an open

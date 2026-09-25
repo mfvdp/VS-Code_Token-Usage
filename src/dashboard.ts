@@ -26,6 +26,7 @@ import { randomBytes } from 'node:crypto'
 import script from 'webview:script'
 import { SOURCES, SOURCE_TITLE } from './adapters'
 import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from './agentTree'
+import { FLAG_SVG } from './flags'
 import { lang, locale, t } from './i18n'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { CacheWatchCard, QuotaCard, ViewModel } from './viewModel'
@@ -72,8 +73,9 @@ export const SECTION_FIELDS: Readonly<Record<string, SectionField[]>> = {
   drill: ['drill'],
   // Chrome that is always present. `footer` carries the generated-at line, which changes on
   // every tick — keeping it in its own node is what stops a full re-render every minute.
-  // 1.7 F1: the provider switch, the page's first block.
-  provider: ['provider'],
+  // 1.7 F1: the provider switch, the page's first block. 1.9 A3: the block is the page's top row — the
+  // switch and the language picker beside it —, so it is drawn from both.
+  provider: ['provider', 'language'],
   notices: ['firstRun', 'preview'],
   controls: ['range', 'ui', 'models'],
   footer: ['footnotes', 'pricing', 'generatedAt'],
@@ -135,6 +137,22 @@ export function pagePayload(vm: ViewModel): PageViewModel {
   for (const f of HOST_ONLY_FIELDS) delete o[f]
   o.quotas = pageQuotas(vm.quotas)
   return o as PageViewModel
+}
+
+/**
+ * 1.9 A3.4: the page's words as a whole push carries them after a switch — the words' language (the
+ * page's `lang`), the Intl tag its own numbers use, and exactly the dictionary `webviewDictionary()`
+ * writes into a new page, every value HTML-escaped (the markup rule holds on the push path too).
+ */
+export interface PageWords {
+  lang: string
+  locale: string
+  dict: Record<string, string>
+}
+
+/** 1.9 A3.4: the words of now, for a whole push. */
+export function pageWords(): PageWords {
+  return { lang: lang(), locale: locale(), dict: webviewDictionaryObject() }
 }
 
 /** A field of the view model as a push carries it: the quota cards without the host's parts (1.8 P10). */
@@ -243,6 +261,14 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
   private sentView = new Map<string, string>()
   /** The one timer a held-back section waits on, and when it fires; null while nothing waits. */
   private deferred: { handle: unknown; at: number } | null = null
+  /**
+   * 1.9 A3.4: the language (`lang()`) whose words the page's document holds — set by html() and by every
+   * push that carries words. With `wordsLocale`, the tag its own numbers are formatted with (`LOCALE`):
+   * a switch that keeps the words' language but moves the formats (`auto` under VS Code's `hu` → `en`)
+   * has to reach the page too. Undefined while no document was written.
+   */
+  private wordsLang: string | undefined
+  private wordsLocale: string | undefined
 
   constructor(
     private readonly onMessage: (m: WebviewMessage) => void,
@@ -290,12 +316,16 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
   }
 
   /**
-   * 1.9 A2 rule 4: the host switched the language (`tokenPace.language`). A stub until 1.9 P2, which
-   * makes the next flush a whole push that carries the page's words (§3 A3.4); the host calls it
-   * already, so the switch's order of steps is fixed from P1 on.
+   * 1.9 A2 rule 4, A3.4: the host switched the language (`tokenPace.language`). The next flush is a
+   * whole push, and it carries the page's words (`words`, beside the payload): the page's dictionary
+   * and locale are constants of its script, and a switch must not reload the document — re-setting
+   * `webview.html` would lose the scroll position, the open explanations and the keyboard focus. Only
+   * `sent` is cleared: the host's `render(true)` that follows hands over the view model built in the
+   * new language, and a hidden view gets the words with the flush that shows it again, because
+   * `wordsLang` still differs then.
    */
   languageChanged(): void {
-    // 1.9 P2: the words push.
+    this.sent.clear()
   }
 
   /** How long the page of the last resolved view is; 0 while no view has resolved. */
@@ -353,8 +383,24 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
       }
       // The whole page is on its way: nothing is left for a held-back section to wait for.
       this.cancelDeferred()
-      // 1.8 L-3: without the host's own fields — the page never reads them.
-      void view.webview.postMessage({ type: 'data', payload: pagePayload(vm) })
+      // 1.8 L-3: without the host's own fields — the page never reads them. 1.9 A3.4: and with the
+      // page's words when its document holds another language's (a switch), never otherwise.
+      const message: { type: 'data'; payload: PageViewModel; words?: PageWords } = { type: 'data', payload: pagePayload(vm) }
+      const wordsDue = this.wordsLang !== lang() || this.wordsLocale !== locale()
+      if (wordsDue) {
+        message.words = pageWords()
+        this.wordsLang = lang()
+        this.wordsLocale = locale()
+      }
+      const delivered: unknown = view.webview.postMessage(message)
+      // A post VS Code reports as not delivered leaves the document in its old words: the next whole
+      // push carries them again.
+      if (wordsDue && delivered && typeof (delivered as PromiseLike<boolean>).then === 'function') {
+        const words = message.words as PageWords
+        ;(delivered as PromiseLike<boolean>).then((ok) => {
+          if (ok === false && this.wordsLang === words.lang && this.wordsLocale === words.locale) this.wordsLang = undefined
+        }, () => { this.wordsLang = undefined })
+      }
       return
     }
     // Only what the page shows. A section that is not on it has no body to write into, and a
@@ -452,6 +498,9 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
 
   private html(): string {
     const nonce = nonceOf()
+    // 1.9 A3.4: the document is written in the words of now — a push carries words only after a switch.
+    this.wordsLang = lang()
+    this.wordsLocale = locale()
     return `<!DOCTYPE html>
 <html lang="${htmlLang().replace(/[^A-Za-z0-9-]/g, '')}">
 <head>
@@ -687,6 +736,50 @@ input[type=date] { cursor: text; }
    260 px, with room to spare. Each button at least 24 px square (WCAG 2.5.8). */
 .pv { display: flex; flex-wrap: nowrap; gap: 4px; align-items: center; }
 .pv button { min-height: 24px; min-width: 24px; white-space: nowrap; }
+/* 1.9 A3: the page's top row — the provider switch, and the language picker at the row's end. The row wraps
+   when it has to (a long "All" at 260 px may push the picker onto a line of its own, still at the end); the
+   switch's buttons never wrap inside their group. */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.lng { position: relative; margin-inline-start: auto; }
+/* The button: the shown language's flag and a caret that says a list opens here — at least 24 × 24 px
+   (WCAG 2.5.8), a stop of the Tab key with the page's focus ring. */
+.lng-btn { display: flex; align-items: center; gap: 4px; min-width: 24px; min-height: 24px; padding: 2px 5px;
+           box-sizing: border-box; }
+.lng-caret { font-size: 9px; line-height: 1; opacity: .7; }
+/* A flag is a picture in one 3:2 box, decoration beside a name (aria-hidden): a hairline keeps the edge of a
+   white field on a white menu. The globe of Automatic is drawn in the text colour and needs none. */
+.flag { display: block; flex: none; width: 21px; height: 14px;
+        outline: 1px solid color-mix(in srgb, var(--vscode-foreground) 22%, transparent); }
+.flag.flag-auto { outline: none; }
+/* The open list, under the button and aligned to its end: the menu's own colours, the page's tokens where a
+   theme has none; never wider than the view (no sideways page scroll at 260 px), at most min(70vh, 440px)
+   tall — the list scrolls inside, the two lines under it stay. */
+.lng-pop { position: absolute; top: 100%; right: 0; z-index: 20; margin-top: 4px; box-sizing: border-box;
+           width: min(320px, calc(100vw - 16px)); max-height: min(70vh, 440px);
+           display: flex; flex-direction: column; padding: 4px 0 6px; border-radius: 4px;
+           background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+           color: var(--vscode-menu-foreground, var(--vscode-foreground));
+           border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border, var(--line)));
+           box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
+.lng-pop ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
+/* An item: at least 24 px tall, its words wrapping between words; the focused one in the menu's selection
+   colours. The ✓ of the checked one is text, not colour. */
+.lng-pop li { display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 3px 10px;
+              box-sizing: border-box; cursor: pointer; }
+.lng-pop li:hover { background: var(--vscode-toolbar-hoverBackground, var(--track)); }
+.lng-pop li:focus { outline: none;
+                    background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground, var(--track)));
+                    color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, inherit)); }
+.lng-pop li:focus .meta { color: inherit; }
+.lng-pop li:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.lng-text { flex: 1 1 auto; min-width: 0; }
+/* The comma between a language's own name and the reader's name is for a screen reader alone: text of the line
+   at no size, read where it stands ("Deutsch, German") — the technique of the ⚠'s words (1.7 D-A); a box placed
+   apart (.sr) is read by Chrome as a block of its own, "Deutsch , German". The space after it is the eye's — one
+   inside it would collapse with it and take the gap to no size too. */
+.lng-sep { font-size: 0; }
+.lng-check { flex: none; }
+.lng-note { margin: 6px 10px 0; flex: none; }
 /* The caption ends the range row; a little air keeps it apart from the last chip. */
 .bar .cap { margin-left: 2px; }
 .icon { display: inline-flex; align-items: center; justify-content: center; line-height: 0;
@@ -1327,6 +1420,15 @@ ul { margin: 6px 0; padding-left: 18px; }
   .agtree li[role="treeitem"]:focus-visible > .ag-line { outline: 2px solid CanvasText; }
   /* 1.7 F6: the guide lines in the text colour — the theme would give a border its own anyway; said here. */
   .agtree ul[role="group"] > li::before, .agtree ul[role="group"] > li::after { border-color: CanvasText; }
+  /* 1.9 A6: a flag is a picture, not a colour code — it keeps its colours (the name beside it carries the
+     meaning), and a 1 px outline in the text colour keeps its edge on any background. The globe of Automatic
+     stays in the adjustment: drawn in currentColor, it follows the mode (taken out, it would keep the theme's
+     menu foreground, which the mode's own palette does not know). The open list is the theme's Canvas and
+     CanvasText with a 1 px border in the text colour (the mode gives it that); the focused item, whose
+     selection colours the mode removes, is outlined in the highlight colour. */
+  .flag:not(.flag-auto) { forced-color-adjust: none; outline: 1px solid CanvasText; }
+  .lng-pop { border-color: CanvasText; }
+  .lng-pop li:focus { outline: 2px solid Highlight; outline-offset: -2px; }
   /* 1.7 D-B: the bands by model — the theme would paint them all away. Two system colours, the rank as
      the pattern style draws it, each band ringed 1 px inside by the page colour so two solid bands side
      by side stay two. Taken out of the theme's adjustment: a gradient is otherwise removed. 1.7 P7b: a
@@ -1362,10 +1464,12 @@ ul { margin: 6px 0; padding-left: 18px; }
  * through the virtual module `webview:script` — so the compiler sees every line of it, which
  * it never did while this was a template string.
  *
- * The six consts in front of it are what a browser bundle cannot reach: the provider
+ * The seven names in front of it are what a browser bundle cannot reach: the provider
  * registry is Node code (fs, os, path), and so is the localisation seam; the agent tree's paging
  * steps and the silence after which a running agent's row says so (1.6 N5) are
- * src/agentTree.ts's, written here so the page cannot count them differently. They are written at
+ * src/agentTree.ts's, written here so the page cannot count them differently; the language
+ * picker's flags (1.9 A3b) are src/flags.ts's. `L10N` and `LOCALE` are the two a language switch
+ * sets anew without a reload (1.9 A3.4): the whole push after it carries them (`words`). They are written at
  * the top of the very same <script>, where the module below reads them out of its own scope;
  * src/webview/globals.d.ts declares them for the compiler. A function rather than a const,
  * because `t()` may only run once the host has set the bundle — at render time, not at load.
@@ -1377,10 +1481,12 @@ function scriptText(): string {
 const SRC_TITLE = ${inline(SOURCE_TITLE)};
 /** The provider ids in registry order — the order of the provider switch's buttons (1.7 F1). */
 const SRC_IDS = ${inline(SOURCES)};
-/** Every string the module below shows, keyed by its English text — see webviewWords(). */
+/** Every string the module below shows, keyed by its English text — see webviewWords(). A language switch replaces its entries (applyWords). */
 const L10N = ${webviewDictionary()};
-/** The tag the host's Intl formatters use, so the page's own numbers read like the model's. */
-const LOCALE = ${inline(locale())};
+/** The tag the host's Intl formatters use, so the page's own numbers read like the model's. A switch sets it anew (applyWords). */
+let LOCALE = ${inline(locale())};
+/** The language picker's flags (src/flags.ts FLAG_SVG): inline SVG by FlagId and 'auto' — no font, no file. */
+const FLAGS = ${inline(FLAG_SVG)};
 /** How many children an open agent-tree node shows per "more" step, and at most how many steps. */
 const AGENT_PAGING = ${inline({ groupChildren: MAX_GROUP_CHILDREN, morePages: MAX_MORE_PAGES })};
 /** After how long without a line a running agent's row says "silent for …" (SILENT_AFTER_MS). */
@@ -1401,10 +1507,15 @@ ${script}`
  * could end the <script> element early.
  */
 function webviewDictionary(): string {
+  return inline(webviewDictionaryObject())
+}
+
+/** The dictionary before it is written into the script: `webviewWords()` through `t()`, every value HTML-escaped. */
+function webviewDictionaryObject(): Record<string, string> {
   const words = webviewWords()
   const safe: Record<string, string> = {}
   for (const key of Object.keys(words)) safe[key] = escHtml(words[key])
-  return inline(safe)
+  return safe
 }
 
 /**

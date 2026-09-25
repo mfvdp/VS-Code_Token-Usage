@@ -253,3 +253,36 @@ test('the prompt-cache watch speaks in whole sentences, each with its German, an
     if (key.includes('(1 h TTL')) assert.ok(de.includes('(1 h TTL'), de)
   }
 })
+
+test('the language picker speaks German — the button\'s two names, the menu\'s name, both Automatic lines, the note, the quality line — and the refused write\'s warning is German too (1.9 A3, A4, §0a.3)', () => {
+  const { resolveLanguage } = require('../src/languages') as typeof import('../src/languages')
+  const { setLang } = require('../src/i18n') as typeof import('../src/i18n')
+  const pick = (setting: 'auto' | 'de', vscode: string) => german(() => {
+    setLang('de')
+    try {
+      return buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(setting, vscode, ['en', 'de']), available: ['en', 'de'], vscode } }).language
+    } finally {
+      setLang(undefined)
+    }
+  })
+  const de = pick('de', 'hu')
+  assert.equal(de.buttonLabel, 'Sprache: Deutsch')
+  assert.equal(de.menuLabel, 'Sprache')
+  assert.equal(de.options[0].native, 'Automatisch — für die Sprache von VS Code (hu) gibt es hier keine Übersetzung, daher Englisch')
+  assert.equal(de.note, 'Die eigenen Texte von Token Pace wechseln sofort. Die Einstellungen, die Befehlstitel und die Einführung folgen der Anzeigesprache von VS Code (Anzeigesprache konfigurieren).')
+  assert.equal(de.quality, 'Die Sprachen über Englisch und Deutsch hinaus haben KI-Agenten übersetzt und Tests geprüft, keine Muttersprachler.')
+  // The native names are never translated; the reader's name stands beside another language's.
+  assert.deepEqual(de.options.map((o) => [o.native, o.name]), [
+    ['Automatisch — für die Sprache von VS Code (hu) gibt es hier keine Übersetzung, daher Englisch', null],
+    ['English', 'Englisch'], ['Deutsch', null],
+  ])
+  const auto = pick('auto', 'de-ch')
+  assert.equal(auto.buttonLabel, 'Sprache: Deutsch (automatisch)')
+  assert.equal(auto.options[0].native, 'Automatisch — wie VS Code (Deutsch)')
+  assert.equal(GERMAN['Token Pace: the language could not be written to your user settings.'],
+    'Token Pace: Die Sprache konnte nicht in Ihre Benutzereinstellungen geschrieben werden.')
+  // The formal register and the page's markup rule hold for every one of them.
+  for (const v of [de.buttonLabel, auto.buttonLabel, de.menuLabel, de.options[0].native, auto.options[0].native, de.note, de.quality]) {
+    assert.doesNotMatch(v, /[<>"&!]|\b(du|dich|dir|dein)\b/i, v)
+  }
+})

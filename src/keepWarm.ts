@@ -214,9 +214,11 @@ function siblingIdle(s: KeepWarmSibling, now: number): boolean {
  * 1.9 D: the time of another session's newest message line, or null when it cannot be known. With the
  * user's line newest (`replyPending` true) it is that line's — `lastUserAt`, which must then be known —
  * or the newest counted reply's, whichever is later; otherwise the later of the newest counted reply and
- * the newest user line, if one is known. Strict: a flag or a time of another shape is unknown.
+ * the newest user line, if one is known. Strict: a flag or a time of another shape is unknown — the
+ * reply time first of all (`Math.max(null, -Infinity)` would read as 0, the dawn of time).
  */
 function siblingNewestAt(s: KeepWarmSibling): number | null {
+  if (!finite(s.lastTs)) return null
   const user = s.lastUserAt
   if (user !== null && !finite(user)) return null
   if (s.replyPending === true) return user === null ? null : knownMax(user, s.lastTs)

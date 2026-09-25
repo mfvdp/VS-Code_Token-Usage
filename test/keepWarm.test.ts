@@ -646,7 +646,12 @@ test('1.9 D: a sibling\'s facts are taken strictly — a time or a flag of anoth
     assert.equal(verdict(recent({ siblings: [odd({ replyPending: false, stop: 'tool_use', lastTs: NOW - 3 * HOUR, lastUserAt: v })] })), 'otherSession', `at a tool call, lastUserAt ${String(v)}`)
   }
   for (const v of [0, 1, 'true', undefined]) assert.equal(verdict(recent({ siblings: [odd({ replyPending: v })] })), 'otherSession', `replyPending ${String(v)}`)
-  assert.equal(verdict(recent({ siblings: [odd({ lastTs: Number.NaN })] })), 'otherSession', 'no reply time')
+  for (const v of [Number.NaN, null, undefined, Infinity, -Infinity, '2026-09-24']) {
+    assert.equal(verdict(recent({ siblings: [odd({ lastTs: v })] })), 'otherSession', `no reply time (${String(v)})`)
+    // 1.9 Review 2 F4: a null reply time read as 0 through Math.max — the dawn of time, "left behind".
+    assert.equal(verdict(recent({ siblings: [odd({ replyPending: false, stop: 'tool_use', lastTs: v })] })), 'otherSession', `at a tool call, lastTs ${String(v)}`)
+    assert.equal(verdict(recent({ siblings: [odd({ replyPending: true, lastTs: v, lastUserAt: NOW - 3 * HOUR })] })), 'otherSession', `user line newest, lastTs ${String(v)}`)
+  }
   for (const v of [undefined, null, 0, 'false']) assert.equal(verdict(recent({ siblings: [odd({ running: v })] })), 'otherSession', `running ${String(v)}`)
   assert.equal(verdict(recent({ siblings: [abandoned()] }), Number.NaN), 'notDue')
 })

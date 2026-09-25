@@ -1532,7 +1532,7 @@ test('the cache entry says in words what its short text means, for a screen read
   assert.equal(german(() => cacheItem([watched({ left: COOL, source: 'transcript', name: 'Sitzung Do 11:05 · 9d0eb37a' })])?.ariaLabel),
     'Prompt-Cache von Sitzung Do 11:05 · 9d0eb37a kühlt in etwa 4 m 10 s ab (geschätzt)')
   assert.equal(german(() => cacheItem([watched({ left: COOL, name: 'Sitzung Do 11:05 · 9d0eb37a' }), watched({ id: S_TX, left: 4.5 * 60_000 })])?.ariaLabel),
-    'Prompt-Cache von Sitzung Do 11:05 · 9d0eb37a kühlt in 4 m 10 s ab und 1 weitere')
+    'Prompt-Cache von Sitzung Do 11:05 · 9d0eb37a kühlt in 4 m 10 s ab, dazu 1 weitere')
   // Every other entry is read by its text.
   const all = buildItems(input({
     cfg: cfg({ 'tokenPace.statusBar.show': ['claudeQuota', 'context', 'tokens', 'cost', 'cache'] }),

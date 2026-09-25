@@ -2,7 +2,7 @@
   "A budget is your own number. USD is the hypothetical API equivalent, not a bill, and no budget is ever added to another.": "預算是自訂的數字。USD 是假設性的 API 等值金額，並非帳單；預算之間也從不相加。",
   "API cost": "API 費用",
   "API cost (second axis)": "API 費用（第二軸）",
-  "Active": "活躍天數",
+  "Active": "活躍",
   "Activity": "活動",
   "Agent records, last 7 days": "代理程式紀錄，最近 7 天",
   "Agents": "代理程式",

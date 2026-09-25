@@ -662,7 +662,7 @@ test('the countdown item speaks German with a German bundle', () => {
   assert.equal(item?.text, '$(watch) Warmhalten in 60 s · abbrechen')
   assert.equal(item?.name, 'Token Pace — Warmhalte-Countdown')
   assert.equal(item?.tooltip, `Token Pace tippt „${KEEP_WARM_LINE}“ in das Terminal, in dem Sitzung Di 13:57 · 9d0eb37a läuft, und drückt die Eingabetaste, damit der Prompt-Cache warm bleibt. Zum Abbrechen klicken.`)
-  assert.equal(item?.accessibilityInformation?.label, 'Warmhalte-Zeile für Sitzung Di 13:57 · 9d0eb37a in 60 Sekunden, aktivieren zum Abbrechen')
+  assert.equal(item?.accessibilityInformation?.label, 'Warmhalte-Zeile für Sitzung Di 13:57 · 9d0eb37a in 60 Sekunden, zum Abbrechen aktivieren')
   run(r, NOW + SEC, NOW + KEEPWARM_COUNTDOWN_MS - SEC)
   inGerman(() => r.tick(NOW + KEEPWARM_COUNTDOWN_MS))
   assert.equal(r.item()?.text, '$(watch) Warmhalte-Zeile gesendet')

@@ -20,7 +20,7 @@
   "Fetch failed": "Abruf fehlgeschlagen",
   "For the four hook events below, Claude Code starts Token Pace's script with `node` and hands it the event as JSON. The script reads four fields of it — `hook_event_name`, `session_id`, `agent_id` and `notification_type` — and appends one line to `agent-hook.jsonl` in Token Pace's storage, with six fields: `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`. Nothing else of the event is read: no message, no prompt, no tool input or result, no path.": "Bei den vier Hook-Ereignissen unten startet Claude Code das Skript von Token Pace mit `node` und übergibt ihm das Ereignis als JSON. Das Skript liest davon vier Felder — `hook_event_name`, `session_id`, `agent_id` und `notification_type` — und hängt eine Zeile an `agent-hook.jsonl` im Erweiterungsspeicher von Token Pace an, mit sechs Feldern: `v`, `ts`, `event`, `sessionId`, `agentId` und `wait`. Sonst wird nichts vom Ereignis gelesen: keine Nachricht, kein Prompt, keine Tool-Eingabe und kein Tool-Ergebnis, kein Pfad.",
   "Keep it and chain Token Pace": "Beibehalten und Token Pace anhängen",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "Warmhalte-Zeile für {0} in {1} Sekunden, aktivieren zum Abbrechen",
+  "Keep-warm line for {0} in {1} seconds, activate to cancel": "Warmhalte-Zeile für {0} in {1} Sekunden, zum Abbrechen aktivieren",
   "Last month": "Letzter Monat",
   "Last {0} days": "Letzte {0} Tage",
   "Later": "Später",

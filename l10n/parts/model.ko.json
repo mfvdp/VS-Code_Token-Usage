@@ -169,7 +169,7 @@
   "Stopped — the parent recorded ‘{0}’ for this run.": "중지됨 — 상위 에이전트가 이 실행에 대해 ‘{0}’을(를) 기록했습니다.",
   "Stopped — the parent recorded ‘{0}’.": "중지됨 — 상위 에이전트가 ‘{0}’을(를) 기록했습니다.",
   "Stopped, replaced — the workflow journal started the same step again (agent {0}) before this agent recorded a result.": "중지됨, 대체됨 — 이 에이전트가 결과를 기록하기 전에 워크플로 저널이 같은 단계를 다시 시작했습니다(에이전트 {0}).",
-  "Subagents {0} of {1} counted here ({2})": "하위 에이전트 {1}개 중 {0}개를 여기서 집계({2})",
+  "Subagents {0} of {1} counted here ({2})": "여기서 집계된 {1} 토큰 중 하위 에이전트 {0}({2})",
   "Sun": "일",
   "TLS error — possibly a proxy intercepting TLS": "TLS 오류 — TLS를 가로채는 프록시가 원인일 수 있습니다",
   "The agent hook reported at {0}: waiting for approval.": "에이전트 훅이 {0}에 보고함: 승인 대기 중.",

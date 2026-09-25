@@ -190,7 +190,7 @@
   "config.dashboard.defaultRange.enum.lastMonth": "Poprzedni miesiąc kalendarzowy",
   "config.dashboard.defaultRange.enum.year": "Bieżący rok kalendarzowy",
   "config.dashboard.defaultRange.enum.all": "Wszystko, co zapisano",
-  "config.dashboard.modelRows.description": "Ile wierszy pokazuje tabela modeli, zanim reszta zostanie zwinięta do jednego wiersza „kolejne wiersze modeli: n”. `0` pokazuje każdy model.",
+  "config.dashboard.modelRows.description": "Ile wierszy pokazuje tabela modeli, zanim reszta zostanie zwinięta do jednego wiersza „Kolejne wiersze modeli: n”. `0` pokazuje każdy model.",
   "config.dashboard.topN.description": "Ile wierszy pokazuje każda tabela sekcji `records` i `tools` z `#tokenPace.dashboard.sections#` — czołowe modele, projekty, sesje i narzędzia.\n\nOgraniczenie tego, co jest *wymieniane*, nigdy tego, co jest liczone: udziały obok wierszy są udziałami we wszystkim w zakresie.",
   "config.dashboard.mode.description": "Co otwiera *Otwórz pulpit* i kliknięcie paska stanu. Wszystkie trzy odczytują ten sam model widoku, więc liczby nie mogą się rozjechać.",
   "config.dashboard.mode.enum.webview": "Pełny panel na dodatkowym pasku bocznym — wykresy, mapa cieplna, szczegóły dnia",

@@ -134,7 +134,7 @@
   "config.resetFormat.enum.none": "Nessun conto alla rovescia — «CC 5h 25%»",
   "config.resetFormat.enum.relative": "Tempo rimanente — «CC 5h 25% · 2h14m»",
   "config.resetFormat.enum.absolute": "Ora del giorno, con il giorno della settimana oltre le 24 h — «CC 5h 25% · 06:00», «· lun 06:00»",
-  "config.resetFormat.enum.both": "Entrambi — «CC 5h 25% · 06:00 (in 2h14m)»",
+  "config.resetFormat.enum.both": "Entrambi — «CC 5h 25% · 06:00 (tra 2h14m)»",
   "config.showAgeInItem.description": "Mostra dentro la voce della barra di stato quanto è vecchia la rilevazione della quota. L'età viene ricalcolata rispetto all'orologio a ogni ridisegno, quindi non si blocca mai sul valore che aveva al momento del recupero.",
   "config.showAgeInItem.enum.never": "Mai — il tooltip indica comunque l'età",
   "config.showAgeInItem.enum.whenStale": "Solo oltre tokenPace.staleAfterMinutes — «CC 5h 25% $(history) 24m»",

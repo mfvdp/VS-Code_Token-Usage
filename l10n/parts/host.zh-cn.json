@@ -103,7 +103,7 @@
   "What it needs": "所需条件",
   "Yesterday": "昨天",
   "disabled: another VS Code window holds the lease and polls": "已禁用：另一个 VS Code 窗口持有租约并负责轮询",
-  "disabled: network consent was declined (Token Pace: Reset Network Access Decision asks again)": "已禁用：网络访问已被拒绝（“Token Pace: 重置网络访问决定”会再次询问）",
+  "disabled: network consent was declined (Token Pace: Reset Network Access Decision asks again)": "已禁用：未同意网络访问（“Token Pace: 重置网络访问决定”会再次询问）",
   "disabled: tokenPace.quotaSource is “cache” — nothing is fetched over the network": "已禁用：tokenPace.quotaSource 为“cache”——不会通过网络获取任何内容",
   "imminently": "即将",
   "in {0}": "{0} 后",

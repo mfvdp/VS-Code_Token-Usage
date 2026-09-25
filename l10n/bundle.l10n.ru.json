@@ -29,7 +29,7 @@
   "API requests the transcripts recorded": "Запросы к API, записанные в транскриптах",
   "Access token expired — use Claude Code once and the credentials renew themselves": "Срок действия токена доступа истёк — воспользуйтесь Claude Code один раз, и учётные данные обновятся сами",
   "Actions": "Действия",
-  "Active": "Активные дни",
+  "Active": "Активно",
   "Active days": "Активные дни",
   "Active — inferred: an agent of this session is running.": "Активен — выведено: агент этого сеанса работает.",
   "Active — inferred: the session transcript changed {0}.": "Активен — выведено: транскрипт сеанса изменился {0}.",

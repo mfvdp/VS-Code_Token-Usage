@@ -221,7 +221,7 @@
   "Keep-warm line for this session in {0} s — cancel it in the status bar.": "Wiersz podtrzymujący dla tej sesji za {0} s — można go anulować na pasku stanu.",
   "Keep-warm line for {0} in {1} seconds, activate to cancel": "Wiersz podtrzymujący dla {0} za {1} s, aktywacja anuluje",
   "Keep-warm requests (keepwarm.json)": "Żądania podtrzymujące (keepwarm.json)",
-  "Keep-warm requests today: {0} · {1} tokens": "Żądania podtrzymujące dziś: {0} · {1} tokenów",
+  "Keep-warm requests today: {0} · {1} tokens": "Żądania podtrzymujące dziś: {0} · tokeny: {1}",
   "Keep-warm stopped for this session: the last line got no answer within two minutes.": "Podtrzymywanie tej sesji zatrzymane: ostatni wiersz nie dostał odpowiedzi w ciągu dwóch minut.",
   "Key figures": "Kluczowe wskaźniki",
   "Key figures explained": "Objaśnienie kluczowych wskaźników",

@@ -32,7 +32,7 @@
   "No quota reading": "할당량 측정값 없음",
   "Node.js on the PATH Claude Code runs its hooks with: the command starts with `node`. Without Node.js the hook does not run, and there is no fallback.": "Claude Code가 훅을 실행하는 PATH에 Node.js가 있어야 합니다. 명령이 `node`로 시작하기 때문입니다. Node.js가 없으면 훅이 실행되지 않으며 대체 수단도 없습니다.",
   "Not now": "지금은 안 함",
-  "Not today": "오늘은 그만",
+  "Not today": "오늘은 표시 안 함",
   "Open Dashboard": "대시보드 열기",
   "Open Official Usage Page — {0}": "공식 사용량 페이지 열기 — {0}",
   "Open Settings": "설정 열기",

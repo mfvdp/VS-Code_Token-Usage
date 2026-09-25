@@ -14,8 +14,11 @@
  *     example — those are the parts of a description that *do* something, and losing one turns
  *     a working link into plain text in that language only.
  *
- * The German file is checked against the English one for exactly that structure, not for
- * wording. No file outside the repository is touched.
+ * Every translation — `package.nls.<id>.json`, German and, from 1.9 on, each language a translation
+ * package adds (`nlsFiles()`) — is checked against the English one for exactly that structure, not
+ * for wording. The rules that are German's own (the quoted runtime words, the keep-warm setting's
+ * German claims) stay German's; test/l10n.languages.test.ts holds every language to the rest of the
+ * 1.9 frame. No file outside the repository is touched.
  */
 
 import { strict as assert } from 'node:assert'
@@ -23,16 +26,24 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { LANGUAGES } from '../src/languages'
-import { englishNls, germanNls, manifestKeys, NLS_KEY, rawManifest, readManifest, ROOT } from './helpers/nls'
+import { englishNls, germanNls, manifestKeys, NLS_KEY, nlsFiles, rawManifest, readManifest, ROOT } from './helpers/nls'
 
+/** 1.9 B3: every translation of the manifest on disk, German among them. */
+const TRANSLATIONS = nlsFiles()
 const BUNDLES: Array<[string, Record<string, string>]> = [
   ['package.nls.json', englishNls],
-  ['package.nls.de.json', germanNls],
+  ...TRANSLATIONS.map((f): [string, Record<string, string>] => [f.file, f.nls]),
 ]
+
+test('the translations of the manifest are read from disk, German among them (1.9 B3)', () => {
+  // A guard against a loop over nothing: every rule below runs over this list.
+  assert.deepEqual(TRANSLATIONS.find((f) => f.id === 'de')?.nls, germanNls, 'package.nls.de.json was not found')
+  assert.equal(TRANSLATIONS.some((f) => f.file === 'package.nls.json'), false, 'the English file is no translation')
+})
 
 const used = manifestKeys()
 
-test('the manifest actually uses placeholders, and every one of them resolves in both bundles', () => {
+test('the manifest actually uses placeholders, and every one of them resolves in every bundle (1.9 B3: every language on disk)', () => {
   // A guard against the opposite failure: an edit that puts English prose back into the
   // manifest would leave the bundles complete and consistent while shipping untranslatable text.
   assert.ok(used.length >= 200, `only ${used.length} %key% placeholders left in package.json`)
@@ -44,7 +55,7 @@ test('the manifest actually uses placeholders, and every one of them resolves in
   }
 })
 
-test('neither bundle carries a key the manifest does not use', () => {
+test('no bundle carries a key the manifest does not use (1.9 B3: every language on disk)', () => {
   const inUse = new Set(used)
   for (const [name, bundle] of BUNDLES) {
     for (const key of Object.keys(bundle)) {
@@ -53,39 +64,47 @@ test('neither bundle carries a key the manifest does not use', () => {
   }
 })
 
-test('the German bundle has every key of the English one, and no other', () => {
-  assert.deepEqual(Object.keys(germanNls), Object.keys(englishNls))
-})
-
-test('German is German — no entry is a forgotten copy of the English prose', () => {
-  // Short labels legitimately match (“Token Pace”, “Codex”, “Dashboard”); a whole paragraph
-  // that matches is an untranslated string, not a coincidence.
-  for (const [key, english] of Object.entries(englishNls)) {
-    if (english.length < 40) continue
-    assert.notEqual(germanNls[key], english, `${key} is still the English text`)
+test('every translation has every key of the English one, in its order, and no other (1.9 B3 T1; German since 1.2)', () => {
+  for (const { file, nls } of TRANSLATIONS) {
+    assert.deepEqual(Object.keys(nls), Object.keys(englishNls), `${file}: its keys are not package.nls.json's, in its order`)
   }
 })
 
-test('every translation keeps the links and examples that do something', () => {
+test('every translation is its own language — no entry is a forgotten copy of the English prose (1.9 B3 T9; German since 1.2)', () => {
+  // Short labels legitimately match (“Token Pace”, “Codex”, “Dashboard”); a whole paragraph
+  // that matches is an untranslated string, not a coincidence.
+  for (const { file, nls } of TRANSLATIONS) {
+    for (const [key, english] of Object.entries(englishNls)) {
+      if (english.length < 40) continue
+      assert.notEqual(nls[key], english, `${file}: ${key} is still the English text`)
+    }
+  }
+})
+
+test('every translation keeps the links and examples that do something (1.9 B3 T5: every language on disk)', () => {
   const settingLinks = (s: string): string[] => [...s.matchAll(/#(tokenPace\.[\w.]+)#/g)].map((m) => m[1]).sort()
   const commandLinks = (s: string): string[] => [...s.matchAll(/\(command:([\w.]+)\)/g)].map((m) => m[1]).sort()
   const fences = (s: string): number => (s.match(/```/g) ?? []).length
-  for (const [key, english] of Object.entries(englishNls)) {
-    const german = germanNls[key]
-    assert.deepEqual(settingLinks(german), settingLinks(english), `${key} lost or invented a setting link`)
-    assert.deepEqual(commandLinks(german), commandLinks(english), `${key} lost or invented a command link`)
-    assert.equal(fences(german), fences(english), `${key} lost a fenced example`)
-    // The paragraph structure is what the settings UI lays out; a merged paragraph reads as
-    // one wall of text in that language only.
-    assert.equal(german.split('\n\n').length, english.split('\n\n').length, `${key} changed its paragraphs`)
+  for (const { file, nls } of TRANSLATIONS) {
+    for (const [key, english] of Object.entries(englishNls)) {
+      const translated = nls[key]
+      assert.deepEqual(settingLinks(translated), settingLinks(english), `${file}: ${key} lost or invented a setting link`)
+      assert.deepEqual(commandLinks(translated), commandLinks(english), `${file}: ${key} lost or invented a command link`)
+      assert.equal(fences(translated), fences(english), `${file}: ${key} lost a fenced example`)
+      // The paragraph structure is what the settings UI lays out; a merged paragraph reads as
+      // one wall of text in that language only.
+      assert.equal(translated.split('\n\n').length, english.split('\n\n').length, `${file}: ${key} changed its paragraphs`)
+    }
   }
 })
 
-test('the JSON examples inside a translation keep their setting keys and values', () => {
+test('the JSON examples inside a translation keep their setting keys and values (1.9 B3 T5: every language on disk)', () => {
   // A translated `"claude"` or a translated number would be a broken example: users paste it.
   const blocks = (s: string): string[] => [...s.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1])
-  for (const [key, english] of Object.entries(englishNls)) {
-    assert.deepEqual(blocks(germanNls[key]), blocks(english), `${key} translated a JSON example`)
+  for (const { file, nls } of TRANSLATIONS) {
+    for (const [key, english] of Object.entries(englishNls)) {
+      assert.deepEqual(blocks(nls[key]), blocks(english), `${file}: ${key} translated a JSON example`)
+    }
   }
 })
 

@@ -41,6 +41,12 @@ import { FAILURE_TRANSIENT, QuotaState, QuotaWindow, STATE_VERSION } from '../sr
 import { SOURCES, SOURCE_TITLE } from '../src/adapters'
 import { MAX_AGENT_EXPANDED } from '../src/viewModel'
 import { readManifest } from './helpers/nls'
+import { createHash } from 'node:crypto'
+import { setBundle, setLocale } from '../src/i18n'
+import { autoLanguage, LANGUAGE_IDS, LANGUAGES, languageName, resolveLanguage } from '../src/languages'
+import { countdownText } from '../src/promptCache'
+import { compact, full, usd } from '../src/render'
+import { dayOf, relativeShort, relativeTime } from '../src/time'
 
 const ROOT = join(__dirname, '..')
 /**
@@ -133,6 +139,8 @@ const doc = {
   release: readDoc('docs/release.md'),
   // 1.8 §0a.1 (P4): the prompt cache's page, created with its "What is read" section.
   promptCache: readDoc('docs/prompt-cache.md'),
+  // 1.9 P3 (§3 A7): the languages page — the picker, `auto`, what switches, the table, the notation, the statement.
+  languages: readDoc('docs/languages.md'),
 } as const
 const DOCS = [README, STATES, ...Object.values(doc)].join('\n')
 
@@ -2706,4 +2714,175 @@ test('the pages say what 1.8 P11 checked against the code: the keep-warm focus r
   const bar = flatText(readDoc('media/walkthrough/status-bar.md'))
   assert.ok(bar.includes('`cache` — off by default as well — adds `$(watch) cache 4m`') && bar.includes('`$(watch) keep warm in 42 s · cancel`'))
   assert.ok(flatText(readDoc('media/walkthrough/quota.md')).includes('which keeps only the fields Token Pace reads'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.9 P3 (§3 A7, B4): docs/languages.md and the Translating section of docs/development.md
+// ---------------------------------------------------------------------------
+
+/** The country each flag of the registry is — the table's fourth column names it beside the flag's id. */
+const FLAG_COUNTRY: Record<string, string> = {
+  us: 'United States', de: 'Germany', fr: 'France', es: 'Spain', br: 'Brazil', it: 'Italy', jp: 'Japan', kr: 'South Korea',
+  cn: 'China', tw: 'Taiwan', ru: 'Russia', tr: 'Türkiye', pl: 'Poland', cz: 'Czechia',
+}
+
+/** The seam is module state: a test that installs a locale or a bundle puts it back. */
+function underLocale<T>(tag: string | undefined, run: () => T): T {
+  try {
+    setBundle(undefined)
+    setLocale(tag)
+    return run()
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+}
+
+test('docs/languages.md: one row per registry entry — its id, its native name, its name in English, its flag — in the registry\'s order (1.9 A7)', () => {
+  const rows = doc.languages.split('\n').filter((l) => /^\| `[a-z-]+` \|/.test(l))
+  const want = underLocale(undefined, () => LANGUAGES.map((e) => `| \`${e.id}\` | ${e.native} | ${languageName(e.id)} | ${FLAG_COUNTRY[e.flag]} (\`${e.flag}\`) |`))
+  assert.equal(rows.length, 14)
+  assert.deepEqual(rows, want)
+  assert.ok(doc.languages.includes('| Id | Language | In English | Flag |'))
+  // The flags the page explains are the registry's.
+  const flag = (id: string): string => LANGUAGES.find((e) => e.id === id)?.flag ?? '?'
+  assert.deepEqual(['en', 'es', 'pt-br', 'zh-cn', 'zh-tw'].map(flag), ['us', 'es', 'br', 'cn', 'tw'])
+  const page = flatText(doc.languages)
+  for (const claim of ['**A flag is not a language.**', 'English carries the US flag because the author chose it',
+    'so the list calls it *English*, not *English (US)*', 'Spanish carries Spain\'s, Brazilian Portuguese Brazil\'s, and the two Chinese entries carry China\'s and Taiwan\'s',
+    'Windows\' emoji font draws no flags', 'in a High Contrast theme they keep their colours and get an outline',
+    'The picker offers the languages whose translation file the installed build carries.']) {
+    assert.ok(page.includes(claim), `docs/languages.md does not say: ${claim}`)
+  }
+})
+
+test('docs/languages.md: the picker, the setting and `auto` as the code has them — the rule stated by its own examples (1.9 A1–A3)', () => {
+  const page = flatText(doc.languages)
+  for (const claim of [
+    'at its end, a button with the flag of the language the texts are in now: the US flag for English',
+    '*Automatic* first, then every language this build ships a translation for, in the order of the table below',
+    'where the two differ — its name in the language you read now (*Deutsch* · German)',
+    '*Automatic — as VS Code (English)*', '*Automatic — VS Code\'s language (hu) has no translation here, so English*',
+    'In the list ↓ and ↑ move (from the last line to the first and back), Home and End go to the first and the last, Enter or Space chooses, Escape closes it and puts the focus back on the flag, Tab closes it without a choice. Nothing is chosen by moving.',
+    'a menu button named "Language: English (automatic)" — "Language: English" once you chose English —',
+    'A choice writes `tokenPace.language` into your user settings', 'the setting has application scope',
+    '*Automatic* removes the key again; the line that is already chosen writes nothing',
+    'any other value (another case, a path) counts as `auto`, and the log says so',
+    '`de-ch` becomes `de`', '`pt-pt` therefore gets English: Token Pace has Brazilian Portuguese, `pt-br`, but no `pt`',
+    'a Swiss German window keeps Swiss number formats with German words, a Hungarian window Hungarian digits with English words',
+  ]) assert.ok(page.includes(claim), `docs/languages.md does not say: ${claim}`)
+  // The examples are the rule's own answers.
+  assert.equal(autoLanguage('de-ch', LANGUAGE_IDS), 'de')
+  assert.equal(autoLanguage('pt-pt', LANGUAGE_IDS), 'en')
+  const hu = resolveLanguage('auto', 'hu', LANGUAGE_IDS)
+  assert.deepEqual([hu.id, hu.intl, hu.auto?.shipped], ['en', 'hu', false])
+  assert.equal(resolveLanguage('auto', 'de-ch', LANGUAGE_IDS).intl, 'de-ch')
+  // The words the page quotes are the view model's keys.
+  const vm = readDoc('src/viewModel.ts')
+  for (const key of ["'Automatic — as VS Code ({0})'", "\"Automatic — VS Code's language ({0}) has no translation here, so English\"",
+    "'Language: {0} (automatic)'", "'Language: {0}'"]) {
+    assert.ok(vm.includes(`t(${key}`), `src/viewModel.ts no longer writes ${key}`)
+  }
+  // The setting the page names, as the manifest declares it.
+  assert.equal(properties['tokenPace.language'].default, 'auto')
+  assert.deepEqual(properties['tokenPace.language'].enum, ['auto', ...LANGUAGE_IDS])
+})
+
+test('docs/languages.md: what switches at once and what cannot — the manifest sentence, what is open, the failed attempt\'s words, what stays English (1.9 A2 rule 5, A4, §3.0 d–f)', () => {
+  const page = flatText(doc.languages)
+  for (const claim of [
+    '**At once, without a reload**: the dashboard — every section, the provider switch, the picker, the page\'s own words, its numbers and dates — keeping its scroll position',
+    'the status bar\'s texts, tooltips and accessible names, the keep-warm countdown among them',
+    'the markdown document and the agent hook\'s setup document while they are open',
+    'and from then on every Quick Pick, notification, dialog and consent text',
+    'The settings UI, the command titles in the Command Palette, the view\'s and its container\'s names, the walkthrough\'s titles and the Extensions view\'s name and description follow VS Code\'s display language',
+    'VS Code reads them from `package.nls.<language>.json` when it starts and offers an extension no way to have them read again',
+    'So with VS Code in German and the picker on Français, the settings are German and everything Token Pace draws is French.',
+    '*Configure Display Language* — which restarts VS Code — changes them',
+    'The walkthrough\'s three step pages are English in every language.',
+    'A Quick Pick, a modal dialog or a notification keeps the language it was opened in until it closes',
+    'it stays in that language until the next attempt', 'Every reading that can be made again is made again at the switch.',
+    'the debug log, the diagnostics report and the CSV and JSON exports',
+    'the keep-warm line and the terms passage the keep-warm consent quotes',
+  ]) assert.ok(page.includes(claim), `docs/languages.md does not say: ${claim}`)
+  // Three step pages, and no translated copy of one.
+  const steps = readdirSync(join(ROOT, 'media/walkthrough')).filter((f) => f.endsWith('.md'))
+  assert.equal(steps.length, 3)
+  assert.equal(steps.some((f) => /\.[a-z]{2}(-[a-z]+)?\.md$/.test(f)), false)
+})
+
+test('docs/languages.md: the notation that stays the same in every language is what the functions print, and German, Japanese and French format as the page says (1.9 A5)', () => {
+  const T0 = Date.UTC(2026, 8, 1, 12, 0, 0)
+  const MIN = 60_000
+  const page = flatText(doc.languages)
+  const forms = underLocale(undefined, () => ({
+    m45: relativeShort(T0 + 45 * MIN, T0), h2m14: relativeShort(T0 + 134 * MIN, T0), d3h5: relativeShort(T0 + 77 * 60 * MIN, T0),
+    lt1: relativeShort(T0 + 30_000, T0), cd: countdownText(250_000),
+    in214: relativeTime(T0 + 134 * MIN, T0), in3d5h: relativeTime(T0 + 77 * 60 * MIN, T0), ago3: relativeTime(T0 - 3 * MIN, T0), in12: relativeTime(T0 + 12 * MIN, T0),
+    cent: usd(0.004), dollars: usd(12.5), k: compact(12_500), m: compact(2_800_000), g: compact(3_200_000_000),
+    day: dayOf(T0, { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }),
+  }))
+  assert.deepEqual([forms.m45, forms.h2m14, forms.d3h5, forms.lt1, forms.cd], ['45m', '2h14m', '3d 5h', '<1m', '4 m 10 s'])
+  assert.deepEqual([forms.in214, forms.in3d5h, forms.ago3, forms.in12], ['in 2 h 14 min', 'in 3 d 5 h', '3 min ago', 'in 12 min'])
+  assert.deepEqual([forms.cent, forms.dollars.startsWith('$'), forms.k, forms.m, forms.g], ['<$0.01', true, '12.5K', '2.8M', '3.2G'])
+  assert.equal(forms.day, '2026-09-01')
+  assert.ok(page.includes('the countdowns `45m`, `2h14m`, `3d 5h`, `<1m` and `4 m 10 s`; the units inside `2 h 14 min`, `3 d 5 h` and `12 min` (the words around them are translated: *3 min ago*, *in 2 h 14 min*); the suffixes `K`, `M` and `G`; the `$` in front of an amount and `<$0.01`; the `%` in the bar; the bar\'s glyphs (`█┃▁`, `▲`, `Σ`) and the codicons; the ISO day `2026-09-01`; `1 h TTL`; and the marks `~` (an estimate), `⚠` and `≈` (a lower bound) and `–` (nothing known)'),
+    'docs/languages.md does not list the fixed notation as the code has it')
+  // `1 h TTL` is kept by the German too, where the watch writes it.
+  assert.ok(GERMAN['{0} · prompt cache cools in {1} (1 h TTL)'].includes('1 h TTL'))
+  // The formats the page names.
+  assert.deepEqual(underLocale('de', () => [compact(2_800_000), full(1_234_567)]), ['2,8M', '1.234.567'])
+  for (const tag of ['ja', 'zh-CN', 'zh-TW']) assert.deepEqual(underLocale(tag, () => [compact(2_800_000), full(1_234_567)]), ['2.8M', '1,234,567'], tag)
+  const fr = underLocale('fr', () => [compact(2_800_000), full(1_234_567)])
+  assert.equal(fr[0], '2,8M')
+  assert.match(fr[1], /^1[   ]234[   ]567$/, 'French groups thousands with a space')
+  assert.ok(page.includes('German writes `2,8M` and `1.234.567`, French groups thousands with a narrow space and writes a decimal comma, Japanese and Chinese write `2.8M` and `1,234,567` as English does'))
+})
+
+test('docs/languages.md: the translation statement says who translated, from what, what was checked and that no native speaker reviewed it — and claims nothing more (1.9 B4)', () => {
+  const page = flatText(doc.languages)
+  for (const claim of [
+    'The twelve languages beyond English and German were translated by AI agents (Claude Opus 5.5) from the English text, with the German as a second reference',
+    'checked by tests for completeness, placeholders and the marks `~`, `⚠`, `≈` and `–` — they were **not reviewed by native speakers**',
+    'they cannot tell a good word from a clumsy one',
+    'A wrong or clumsy word is a bug — please report it on the [issue tracker](https://github.com/mfvdp/VS-Code_Token-Usage/issues), with the language, the text you saw and where you saw it',
+  ]) assert.ok(page.includes(claim), `docs/languages.md does not say: ${claim}`)
+  // The address is the manifest's own.
+  assert.equal((JSON.parse(readDoc('package.json')) as { bugs: { url: string } }).bugs.url, 'https://github.com/mfvdp/VS-Code_Token-Usage/issues')
+  // No claim beyond the tests: not professional, not reviewed, not native, and nothing new about German.
+  const rest = page.replace(/not reviewed by native speakers/g, '')
+  for (const never of [/review/i, /professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i, /lektor/i]) {
+    assert.equal(never.test(rest), false, `docs/languages.md says ${never}`)
+  }
+  // The setting's description says the same, in both languages (P1's words).
+  assert.ok(nlsEn['config.language.description'].includes('not by native speakers'))
+  assert.ok(nlsDe['config.language.description'].includes('Muttersprachler haben sie nicht geprüft'))
+})
+
+test('docs/development.md says how a language is made and checked: the registry, the parts, the two scripts, the record, the thirteen rules, the freeze (1.9 P3)', () => {
+  const dev = flatText(doc.development)
+  for (const claim of [
+    '## Translating', '`src/languages.ts` (`LANGUAGES`: the id, the `Intl` locale, the native name and the flag, in the picker\'s order)',
+    '`l10n/parts/<part>.<id>.json` — the runtime translations in four parts, `dashboard`, `host`, `model` and `text`, each with exactly the keys of the German part of the same name',
+    '`l10n/bundle.l10n.<id>.json` — what the extension reads, generated from the parts by `node scripts/merge-l10n.mjs`',
+    '`package.nls.<id>.json` — the manifest\'s words: every key of `package.nls.json`, in its order',
+    '`l10n/nls-sources/<id>.json` — the freshness record: for every manifest key, the first 16 hex digits of the SHA-256 of the English it was translated from, written by `node scripts/nls-sources.mjs <id>`',
+    '`node scripts/nls-sources.mjs --check` names every language and key whose English changed since',
+    '`test/l10n.languages.test.ts` holds every language on disk to the same thirteen rules, T1–T13',
+    'the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason',
+    'the German under another id, and the English with every word turned into 語',
+    'The brief a translation works from is `l10n/TRANSLATING.md`',
+    '`.vscodeignore` keeps `l10n/parts/`, `l10n/nls-sources/` and the brief out of the package',
+    'While translations are being made, the English is frozen',
+    'the dashboard harness (a `main-<id>` page in both themes at 260 and 420 px)',
+  ]) assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
+  // The record is what the page says it is: the first 16 hex digits of the English's SHA-256.
+  const record = JSON.parse(readDoc('l10n/nls-sources/de.json')) as Record<string, string>
+  assert.equal(record.displayName, createHash('sha256').update(nlsEn.displayName, 'utf8').digest('hex').slice(0, 16))
+  // What ships and what does not.
+  for (const path of ['l10n/TRANSLATING.md', 'l10n/nls-sources/de.json', 'l10n/parts/host.de.json']) assert.equal(shipped(path), false, `${path} would be packaged`)
+  for (const path of ['l10n/bundle.l10n.de.json', 'package.nls.de.json', 'docs/languages.md']) assert.equal(shipped(path), true, `${path} would not be packaged`)
+  // The README's index row, in the order the pages are read.
+  assert.ok(README.includes('| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the fourteen languages and their flags, the notation that stays the same, and how the translations were made |'))
+  assert.ok(doc.languages.includes('see [Building and testing](development.md#translating)'))
 })

@@ -13,7 +13,7 @@
  * inside a description from being mistaken for a translation key.
  */
 
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // Every test is bundled into a single file in `out-test/`, so `__dirname` is that directory
@@ -27,6 +27,19 @@ export const readJson = (name: string): unknown => JSON.parse(readFileSync(join(
 
 export const englishNls = readJson('package.nls.json') as Record<string, string>
 export const germanNls = readJson('package.nls.de.json') as Record<string, string>
+
+/**
+ * 1.9 B3: every translation of the manifest on disk — `package.nls.<id>.json`, German among them —
+ * with its id and its table, in file-name order. `root` is the repository unless a test names a
+ * temporary directory holding a synthetic language.
+ */
+export function nlsFiles(root: string = ROOT): Array<{ id: string; file: string; nls: Record<string, string> }> {
+  return readdirSync(root)
+    .map((file) => ({ file, m: /^package\.nls\.(.+)\.json$/.exec(file) }))
+    .filter((x): x is { file: string; m: RegExpExecArray } => x.m !== null)
+    .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+    .map(({ file, m }) => ({ id: m[1], file, nls: JSON.parse(readFileSync(join(root, file), 'utf8')) as Record<string, string> }))
+}
 
 /** The raw manifest, placeholders and all — for the tests that check the placeholders. */
 export const rawManifest = readJson('package.json') as Record<string, unknown>

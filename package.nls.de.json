@@ -150,7 +150,7 @@
   "config.summary.scope.enum.codex": "Nur Codex",
   "config.tooltip.description": "Wie viel der Tooltip der Statusleiste zeigt.",
   "config.tooltip.enum.full": "Tabelle, Erklärungen, Prognose, Herkunftszeile und Aktionslinks",
-  "config.tooltip.enum.compact": "Nur Tabelle und Aktionslinks, höchstens 12 Zeilen — “Window | Used | Elapsed | Pace | Resets”",
+  "config.tooltip.enum.compact": "Nur Tabelle und Aktionslinks, höchstens 12 Zeilen — “Fenster | Verbraucht | Verstrichen | Tempo | Reset”",
   "config.tooltip.enum.off": "Kein Tooltip",
   "config.tooltipExplanations.description": "Die erklärenden Absätze im Tooltip zeigen (was Tempo bedeutet, was die Kostenzahl ist und was nicht). **Standardmäßig aus** — sie lohnen sich einmal zu lesen, nicht bei jedem Überfahren.\n\nUnsicherheitsmarker (`~`, `⚠`) und die Herkunftszeile werden von dieser Einstellung nie verborgen.",
   "config.overflowDisplay.description": "Was zu tun ist, wenn ein Anbieter mehr als 100 % meldet (Zusatzverbrauch oder zugekaufte Guthaben über den Tarif hinaus).",

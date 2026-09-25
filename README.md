@@ -147,8 +147,7 @@ No telemetry of any kind is collected, the webview loads no external resource, a
 `npm run check:privacy` fails the build on any `http(s)` literal outside a small allow-list, on
 any reader of a Claude Code file that takes a field its read contract does not list, on an
 agent hook bundle that loads anything but Node's `fs` and `path`, and on a status-line bridge
-bundle that loads more than `child_process`, `fs` and `path`.
-The full account is in [Privacy](docs/privacy.md).
+bundle that loads more than `child_process`, `fs` and `path`. The full account is in [Privacy](docs/privacy.md).
 
 ## Documentation
 
@@ -173,6 +172,7 @@ The full account is in [Privacy](docs/privacy.md).
 | [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, the Claude Code version on Windows, where the status-line bridge's script lives, restricted and virtual workspaces |
 | [Settings](docs/settings.md) | Every `tokenPace.*` key with its default and what it does |
 | [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language, the walkthrough |
+| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the fourteen languages and their flags, the notation that stays the same, and how the translations were made |
 | [Building and testing](docs/development.md) | Build, tests, the smoke test in a real window, and what CI runs |
 | [Releasing](docs/release.md) | The tag-push recipe, the two store secrets, publisher verification |
 

@@ -72,6 +72,48 @@ name different models, and the history tells which part came from which.
 The recipe itself — what to run in which order, the two secrets it needs and the publisher
 verification — is in [Releasing](release.md).
 
+## Translating
+
+Every text Token Pace shows goes through one seam, `t()` in `src/i18n.ts`, and the English message is
+the key. The languages are listed once, in `src/languages.ts` (`LANGUAGES`: the id, the `Intl` locale,
+the native name and the flag, in the picker's order), and every file of a language is named after its
+id:
+
+* `l10n/parts/<part>.<id>.json` — the runtime translations in four parts, `dashboard`, `host`, `model`
+  and `text`, each with exactly the keys of the German part of the same name. The parts follow the
+  areas of the code, so two changes that add strings to different areas never touch one file; a key
+  that stands in two parts has the same translation in both.
+* `l10n/bundle.l10n.<id>.json` — what the extension reads, generated from the parts by
+  `node scripts/merge-l10n.mjs` (keys sorted, two different translations of one key refused);
+  `--check` fails while a bundle differs from its parts.
+* `package.nls.<id>.json` — the manifest's words: every key of `package.nls.json`, in its order. VS Code
+  reads it when it starts, for its own display language.
+* `l10n/nls-sources/<id>.json` — the freshness record: for every manifest key, the first 16 hex digits
+  of the SHA-256 of the English it was translated from, written by `node scripts/nls-sources.mjs <id>`
+  once the translation is done. `node scripts/nls-sources.mjs --check` names every language and key
+  whose English changed since. A runtime string needs no record: its key is its English, so a changed
+  sentence is a new key that every language lacks.
+
+`test/l10n.languages.test.ts` holds every language on disk to the same thirteen rules, T1–T13: the
+keys, the parts, the placeholders, the marks (`~`, `⚠`, `≈`, `–`, `%`, `×`, `→`, `·`), the code
+(backtick spans, setting ids, codicons, command targets, links, fences, JSON examples), the page's words
+(no markup character), the tone (no exclamation mark), the tables, no English left (proper names and
+code excepted — the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason), the registry,
+the English quotes (the keep-warm consent's terms passage and line stay word for word), the freshness
+and the heat map's weekday words. Every rule also runs once against a synthetic language in a temporary
+directory — the German under another id, and the English with every word turned into 語 — broken in
+the one way the rule exists to catch. `test/nls.test.ts` holds every manifest translation to the
+manifest's structure. The brief a translation works from is `l10n/TRANSLATING.md`. Nothing of this
+ships but the bundles and the `package.nls*.json` files: `.vscodeignore` keeps `l10n/parts/`,
+`l10n/nls-sources/` and the brief out of the package.
+
+While translations are being made, the English is frozen: a changed runtime text changes its key and
+fails every language's T1 at once, and a changed manifest sentence, which keeps its key, is what the
+freshness record catches. A new language is a registry entry and its files; the tests, the picker
+(which offers every language whose bundle is on disk) and the dashboard harness (a `main-<id>` page in
+both themes at 260 and 420 px) pick it up by themselves. What the reader sees of all this is in
+[Languages](languages.md).
+
 ## Performance
 
 The dashboard is a webview: everything it draws reaches it as a message, which the editor serialises

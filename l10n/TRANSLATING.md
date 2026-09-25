@@ -149,7 +149,8 @@ each failure names the language, the file and the key:
 * **T8 · Tables** — a key that starts with `| ` keeps its pipes.
 * **T9 · No English left** — once placeholders, code, paths, model ids and the words of
   `SAME_IN_EVERY_LANGUAGE` (the names above, the abbreviations `API`, `USD`, `CSV`, `JSON`, `TTL`,
-  `ID`, `HTTP`, `TLS`, `OAuth`, `CLI`, `P90`, `CV`, `ctx`, the units and `Quick Pick`) are taken out:
+  `ID`, `HTTP`, `TLS`, `OAuth`, `CLI`, `P90`, `CV`, `ctx`, the units, `Quick Pick`, the literal command
+  `codex app-server` and the colour ids `paceWarn` and `paceAhead`) are taken out:
   in a Latin-script language a key of three words or more is never its own translation and no four
   words of the key stand in a row in the value; in Japanese, Korean, Chinese and Russian no value
   keeps three Latin words in a row. No manifest entry of 40 characters or more is the English.

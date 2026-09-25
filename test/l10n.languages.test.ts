@@ -62,6 +62,11 @@ import { ROOT } from './helpers/nls'
 export const SAME_IN_EVERY_LANGUAGE: ReadonlyArray<readonly [string, string]> = [
   // The product names of the brief (TRANSLATING.md, "Never translated").
   ['Token Pace', 'the product\'s name'],
+  // Added at the join of group L (the lead, 2026-09-25): the literal command and two contributed colour ids
+  // that T9 read as three Latin words in a row in Japanese (and would in Korean, Chinese and Russian).
+  ['codex app-server', 'the literal command Token Pace starts'],
+  ['paceWarn', 'a contributed theme colour id'],
+  ['paceAhead', 'a contributed theme colour id'],
   ['Claude Code', 'a product\'s name'],
   ['Claude', 'a product\'s name'],
   ['Codex', 'a product\'s name'],

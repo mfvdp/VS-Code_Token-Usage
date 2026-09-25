@@ -27,9 +27,11 @@ import {
 } from '../src/keepWarm'
 import {
   KEEPWARM_CANCEL_COMMAND, KEEPWARM_DAYS_KEPT, KEEPWARM_FILE_NAME, KEEPWARM_ITEM_ID, KEEPWARM_SENT_SHOWN_MS,
-  KEEPWARM_VERIFY_GRACE_MS, KeepWarmFrame, KeepWarmHost, KeepWarmWindow, claudeQuotaMax, cleanKeepWarmFile, sessionRunning, siblingsOf,
+  KEEPWARM_VERIFY_GRACE_MS, KeepWarmFrame, KeepWarmHost, KeepWarmWindow, claudeQuotaMax, cleanKeepWarmFile, folderSessions, sessionRunning,
+  siblingsOf,
 } from '../src/keepWarmHost'
 import type { PromptCacheReading } from '../src/quotaSources'
+import { TerminalWatch } from '../src/terminalWatch'
 import { TimeConfig } from '../src/time'
 import { QuotaState } from '../src/types'
 import { buildViewModel } from '../src/viewModel'
@@ -149,8 +151,9 @@ function rig(o: {
     host, state, window, clock, logs, file, w,
     tick(now: number, over: Partial<KeepWarmFrame> = {}): boolean {
       clock.now = now
+      // 1.10 B7 (pinned and changed): G14's fact, settled — no scan and no replay under way.
       const f: KeepWarmFrame = {
-        now, enabled: true, consent: 'granted', trusted: true,
+        now, enabled: true, consent: 'granted', trusted: true, settled: true,
         entries: watchCaches({ readings: w.readings, mains: w.agg.mainEntries(), tcfg }, now, Infinity),
         readings: w.readings, mains: w.agg.mainEntries(), tree: emptyAgentTree(), hook: new Map(), quotas: w.quotas, tcfg,
         alignment: LEFT, ...over,
@@ -388,7 +391,7 @@ test('focus: a terminal the focused window had active since the newest reply, or
   const fresh = new KeepWarmHost({ window: late.window, file: late.file, clock: () => late.clock.now, log: { info: () => {}, debug: (m) => late.logs.push(m), warn: () => {} } })
   late.clock.now = LAST + MIN
   const frame = (now: number): KeepWarmFrame => ({
-    now, enabled: true, consent: 'granted', trusted: true,
+    now, enabled: true, consent: 'granted', trusted: true, settled: true,
     entries: watchCaches({ readings: late.w.readings, mains: late.w.agg.mainEntries(), tcfg }, now, Infinity),
     readings: late.w.readings, mains: late.w.agg.mainEntries(), tree: emptyAgentTree(), hook: new Map(), quotas: late.w.quotas, tcfg, alignment: LEFT,
   })
@@ -568,7 +571,7 @@ test('without the setting, the consent or a trusted workspace the host listens t
     const host = new KeepWarmHost({ window, file: path.join(scratchDir('kw-inert'), KEEPWARM_FILE_NAME), clock: () => T0, log: { info: () => {}, debug: () => {}, warn: () => {} } })
     const w = world()
     const frame = (now: number): KeepWarmFrame => ({
-      now, enabled: true, consent: 'granted', trusted: true,
+      now, enabled: true, consent: 'granted', trusted: true, settled: true,
       entries: watchCaches({ readings: w.readings, mains: w.agg.mainEntries(), tcfg }, now, Infinity),
       readings: w.readings, mains: w.agg.mainEntries(), tree: emptyAgentTree(), hook: new Map(), quotas: w.quotas, tcfg, alignment: LEFT, ...over,
     })
@@ -949,16 +952,27 @@ test('a command line with a secret on it, in a named folder, matches — and nei
   assert.equal(r.state.nameReads, 0)
 })
 
-test('keepWarmHost.ts reads nothing of a terminal but its executions, its shell and sendText — never `.name` (§0a.6, §7c)', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'src', 'keepWarmHost.ts'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
-  // Every `.name` the file reads is the status-bar item's (written), a watched entry's or a countdown's
-  // session name — or an error's; never a terminal's.
-  const owners = new Set([...src.matchAll(/([\w)\]]+)\??\.name\b/g)].map((m) => m[1]))
+// 1.10 P2 (pinned and changed): the tracking moved to src/terminalWatch.ts (§3 A3 rule 1), so the scan reads
+// both files — the host and the watch it asks —, and the watch reads no `.name` at all.
+test('keepWarmHost.ts and terminalWatch.ts read nothing of a terminal but its executions, its shell, the folder the shell integration reports and sendText — never `.name` (§0a.6, §7c; 1.10 §0a.3)', () => {
+  const code = (file: string): string => fs.readFileSync(path.join(ROOT, 'src', file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  const host = code('keepWarmHost.ts')
+  const watch = code('terminalWatch.ts')
+  // Every `.name` the host reads is the status-bar item's (written), a watched entry's or a countdown's
+  // session name — or an error's; never a terminal's. The watch reads none.
+  const owners = new Set([...host.matchAll(/([\w)\]]+)\??\.name\b/g)].map((m) => m[1]))
   assert.deepEqual([...owners].sort(), [')', 'c', 'e', 'item'], 'a `.name` of something else is read')
-  assert.equal(/\bterminal\??\.name\b/.test(src), false, 'a terminal\'s name is read')
-  assert.equal(/\.read\s*\(/.test(src), false, 'an execution\'s output is read')
-  assert.equal(/creationOptions|\.env\b|processId/.test(src), false, 'a terminal\'s environment or process is read')
-  assert.equal((src.match(/\.sendText\(/g) ?? []).length, 1, 'more than one place types into a terminal')
+  assert.deepEqual([...watch.matchAll(/([\w)\]]+)\??\.name\b/g)].map((m) => m[1]), [], 'the watch reads a `.name`')
+  for (const [file, src] of [['keepWarmHost.ts', host], ['terminalWatch.ts', watch]] as const) {
+    assert.equal(/\bterminal\??\.name\b/.test(src), false, `${file}: a terminal's name is read`)
+    assert.equal(/\.read\s*\(/.test(src), false, `${file}: an execution's output is read`)
+    assert.equal(/creationOptions|\.env\b|processId/.test(src), false, `${file}: a terminal's environment or process is read`)
+  }
+  assert.equal((host.match(/\.sendText\(/g) ?? []).length, 1, 'more than one place types into a terminal')
+  assert.equal((watch.match(/\.sendText\(/g) ?? []).length, 0, 'the watch types into a terminal')
+  // The watch is the one reader of the terminal events: the host subscribes to none of them itself.
+  assert.equal(/onDid(Start|End)TerminalShellExecution\(|onDidCloseTerminal\(|onDidChangeActiveTerminal\(|onDidChangeWindowState\(/.test(host), false,
+    'the host listens to a terminal event of its own')
 })
 
 // ---------------------------------------------------------------------------
@@ -1028,4 +1042,149 @@ test('the send stage, block by block: what changed during the countdown keeps th
     assert.ok(r.logs.includes(`info keep-warm: not sent (${block})`), `${what}: ${r.logs.filter((l) => l.includes('not ')).join(' | ')}`)
     assert.equal(r.item(), undefined, `${what}: the item stayed`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 B7 · G14: no countdown starts, and none ends with a line, while the transcripts are read
+// ---------------------------------------------------------------------------
+
+test('G14: while a cold scan or the agent replay runs no countdown starts; once settled it does (1.10 B7)', () => {
+  const r = rig()
+  r.tick(NOW, { settled: false })
+  assert.equal(r.item(), undefined, 'a countdown started while the transcripts were read')
+  assert.match(r.logs.join('\n'), /debug keep-warm: session 9d0eb37a not armed \(reading\)/)
+  // A log-only block: keep-warm keeps listening, and no card note says anything of it.
+  assert.equal(r.host.isTracking(), true)
+  assert.deepEqual(r.host.view(NOW, tcfg), { armed: null, noTerminal: [], unanswered: [], today: null })
+  // Settled a second later: every other guard holds, and the countdown starts.
+  r.tick(NOW + SEC)
+  assert.ok(r.item(), 'no countdown once the reading ended')
+  // Mutation check (§3 B7): dropping G14 arms in the first frame.
+})
+
+test('G14 at the send stage: a countdown armed, then a scan or a replay begins — at zero the line is not sent, `reading` (1.10 B7)', () => {
+  const r = rig()
+  r.tick(NOW)
+  assert.ok(r.item())
+  run(r, NOW + SEC, NOW + 30 * SEC)
+  // The agent replay starts half-way through the countdown and is still running at zero.
+  run(r, NOW + 31 * SEC, NOW + KEEPWARM_COUNTDOWN_MS + 5 * SEC, { settled: false })
+  assert.deepEqual(r.state.sent, [], 'a line went while the transcripts were read')
+  assert.ok(r.logs.includes('info keep-warm: not sent (reading)'), r.logs.filter((l) => l.includes('not ')).join(' | '))
+  assert.equal(r.item(), undefined)
+  // A fact of another shape is not settled.
+  const odd = rig()
+  odd.tick(NOW, { settled: 'yes' as unknown as boolean })
+  assert.equal(odd.item(), undefined)
+  assert.match(odd.logs.join('\n'), /not armed \(reading\)/)
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 A3 rule 8 · keep-warm yields to a prompt typed into its terminal
+// ---------------------------------------------------------------------------
+
+test('yieldTo: a countdown armed for that very terminal ends without its line, its item gone, the log says so; another terminal\'s countdown stays (1.10 §3 A3 rule 8)', () => {
+  const r = rig()
+  assert.equal(r.host.yieldTo(terminalOf(r) as never), false, 'nothing to yield without a countdown')
+  r.tick(NOW)
+  assert.ok(r.item())
+  // A prompt goes into another terminal: the countdown is not touched.
+  const other = r.state.openTerminal({ shell: 'claude' })
+  assert.equal(r.host.yieldTo(other as never), false)
+  assert.ok(r.item(), 'a countdown for another terminal ended')
+  // A prompt goes into the countdown's terminal.
+  assert.equal(r.host.yieldTo(terminalOf(r) as never), true)
+  assert.equal(r.item(), undefined, 'the countdown item stayed')
+  assert.equal(r.host.view(NOW + SEC, tcfg).armed, null)
+  assert.ok(r.logs.includes('info keep-warm: not sent (a prompt was typed into its terminal)'), r.logs.join(' | '))
+  assert.equal(r.host.yieldTo(terminalOf(r) as never), false, 'yielded twice')
+  // The prompt's request lands in the transcript (the user's line newest): no line at the old zero.
+  r.w.line(promptLine({ ts: NOW + 2 * SEC }))
+  run(r, NOW + 2 * SEC, NOW + KEEPWARM_COUNTDOWN_MS + 5 * SEC)
+  assert.deepEqual(r.state.sent, [], 'the keep-warm line went on top of the prompt')
+  // The phase is not marked cancelled (§3.0 b): the log never names `cancelled`.
+  assert.doesNotMatch(r.logs.join('\n'), /\(cancelled\)|cancelled for session/)
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 A4 · the sessions of a folder, for the prompt tool
+// ---------------------------------------------------------------------------
+
+test('folderSessions: every main session of the folder — the one siblingsOf leaves out among them —, with its id; another folder\'s never; a drive letter in either case (1.10 §2.3)', () => {
+  const w = world()
+  siblingSession(w, { first: FIRST - 86_400_000, last: NOW - 3 * HOUR - 5 * MIN, pending: NOW - 3 * HOUR })
+  // A session of another folder.
+  const elsewhere = path.join('/virtual', 'claude', 'projects', '-home-u-other-project', 'aaaaaaaa-0000-4000-8000-000000000001.jsonl')
+  w.agg.cursors.set(elsewhere, { offset: 0, size: 0, ino: 902, dev: 1 })
+  const c = ctxFor({ file: elsewhere })
+  w.agg.addClaudeLine(promptLine({ ts: NOW - HOUR }), c)
+  w.agg.addClaudeLine(claudeLine({ id: 'msg_kw_elsewhere', ts: NOW - HOUR + 5 * SEC, model: 'claude-opus-5-5', final: true,
+    sessionId: 'aaaaaaaa-0000-4000-8000-000000000001', cwd: '/home/u/other-project', usage: { input: 10, output: 5 } }), c)
+  const got = folderSessions(PROJECT_DIR, w.agg.mainEntries(), emptyAgentTree())
+  assert.deepEqual(got.map((x) => x.sessionId).sort(), [SID, SID2].sort())
+  // The same facts siblingsOf gives, plus the id: for the other session exactly its sibling entry.
+  const sibling = siblingsOf(SID, PROJECT_DIR, w.agg.mainEntries(), emptyAgentTree())
+  const { sessionId: _id, ...rest } = got.find((x) => x.sessionId === SID2)!
+  void _id
+  assert.deepEqual(rest, sibling[0])
+  const own = got.find((x) => x.sessionId === SID)!
+  assert.deepEqual([own.firstAt, own.lastTs, own.stop, own.replyPending, own.running], [FIRST, LAST, 'end_turn', false, false])
+  assert.deepEqual(folderSessions('', w.agg.mainEntries(), emptyAgentTree()), [])
+  assert.deepEqual(folderSessions('-home-u-nothing-here', w.agg.mainEntries(), emptyAgentTree()), [])
+  // No tree yet: every session counts as running (G5's rule).
+  assert.ok(folderSessions(PROJECT_DIR, w.agg.mainEntries(), null).every((x) => x.running === true))
+  // A Windows folder: VS Code's `fsPath` lower-cases the drive letter, the transcript's folder need not.
+  const win = world()
+  const winFile = path.join('/virtual', 'claude', 'projects', 'C--Users-u-proj', `${SID2}.jsonl`)
+  win.agg.cursors.set(winFile, { offset: 0, size: 0, ino: 903, dev: 1 })
+  const cw = ctxFor({ file: winFile })
+  win.agg.addClaudeLine(promptLine({ ts: NOW - HOUR }), cw)
+  win.agg.addClaudeLine(claudeLine({ id: 'msg_kw_win', ts: NOW - HOUR + 5 * SEC, model: 'claude-opus-5-5', final: true, sessionId: SID2,
+    cwd: 'C:\\Users\\u\\proj', usage: { input: 10, output: 5 } }), cw)
+  assert.deepEqual(folderSessions('c--Users-u-proj', win.agg.mainEntries(), emptyAgentTree()).map((x) => x.sessionId), [SID2])
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 A3 rule 1 · one watch for the window, shared
+// ---------------------------------------------------------------------------
+
+test('a host given the window\'s watch shares it: the prompt tool keeps it listening while keep-warm is off, keep-warm forgets only its own state, and the host leaves the watch to its owner (1.10 §3 A3 rule 1)', () => {
+  const { api, state } = createFakeVscode()
+  const window = (api as { window: KeepWarmWindow }).window
+  const clock = { now: T0 }
+  const watch = new TerminalWatch(window, () => clock.now)
+  const host = new KeepWarmHost({ window, file: path.join(scratchDir('kw-shared'), KEEPWARM_FILE_NAME), clock: () => clock.now, watch,
+    log: { info: () => {}, debug: () => {}, warn: () => {} } })
+  const w = world()
+  const frame = (now: number, over: Partial<KeepWarmFrame> = {}): KeepWarmFrame => ({
+    now, enabled: true, consent: 'granted', trusted: true, settled: true,
+    entries: watchCaches({ readings: w.readings, mains: w.agg.mainEntries(), tcfg }, now, Infinity),
+    readings: w.readings, mains: w.agg.mainEntries(), tree: emptyAgentTree(), hook: new Map(), quotas: w.quotas, tcfg, alignment: LEFT, ...over,
+  })
+  // The prompt tool wants the watch first; keep-warm joins it and leaves it.
+  watch.want('prompts', true, T0)
+  assert.equal(state.terminalListeners(), 4)
+  host.tick(frame(T0))
+  assert.equal(host.isTracking(), true)
+  assert.equal(state.terminalListeners(), 4, 'a second user subscribed a second time')
+  host.tick(frame(T0 + SEC, { enabled: false }))
+  assert.equal(host.isTracking(), false, 'keep-warm still wants the terminals')
+  assert.equal(watch.isTracking(), true, 'keep-warm switched off deafened the prompt tool\'s watch')
+  assert.equal(state.terminalListeners(), 4)
+  // A claude started while keep-warm was off is seen by the shared watch.
+  const t = state.openTerminal({ shell: 'claude' })
+  clock.now = T0 + 5 * SEC
+  state.startExecution(t, { commandLine: 'claude', cwd: SECRET_CWD })
+  assert.equal(watch.claudeTerminals(PROJECT_DIR).length, 1)
+  // Disposing the host leaves the watch to its owner; the owner's release deafens it.
+  host.dispose()
+  assert.equal(watch.isTracking(), true)
+  watch.want('prompts', false, T0 + 6 * SEC)
+  assert.equal(state.terminalListeners(), 0)
+  assert.deepEqual(watch.claudeTerminals(PROJECT_DIR), [], 'the watch holds an execution while no one wants it')
+  // A host that made its own watch disposes it with itself.
+  const own = rig()
+  assert.ok(own.state.terminalListeners() > 0)
+  own.host.dispose()
+  assert.equal(own.state.terminalListeners(), 0)
 })

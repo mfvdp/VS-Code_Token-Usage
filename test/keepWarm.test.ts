@@ -80,7 +80,8 @@ const EXEC_START = FIRST - 30 * SEC
 /** Facts under which every guard holds. */
 function facts(over: Partial<KeepWarmFacts> = {}): KeepWarmFacts {
   return {
-    enabled: true, consent: 'granted', trusted: true,
+    // 1.10 B7 (pinned and changed): G14's fact, settled — no scan and no replay under way.
+    enabled: true, consent: 'granted', trusted: true, settled: true,
     entry: entry(), reading: reading(), main: main(),
     running: false, hook: null,
     terminals: { matching: 1, touchedSince: 'no' },
@@ -208,6 +209,8 @@ const CASES: readonly Case[] = [
   { what: 'another session of the folder at a tool call', f: { siblings: [sibling({ stop: 'tool_use' })] }, block: 'otherSession' },
   { what: 'another session of the folder with an agent running', f: { siblings: [sibling({ running: true })] }, block: 'otherSession' },
   { what: 'another session of the folder answering right now', f: { siblings: [sibling({ lastTs: NOW - 30 * SEC })] }, block: 'otherSession' },
+  // 1.10 B7 (pinned and changed): the decision-table row of G14.
+  { what: 'the transcripts being read (a cold scan or the agent replay)', f: { settled: false }, block: 'reading' },
 ]
 
 test('the decision table: every guard passing is go at both stages; each guard failing alone is its block; every block is reached', () => {
@@ -220,16 +223,20 @@ test('the decision table: every guard passing is go at both stages; each guard f
     reached.add(c.block)
   }
   assert.deepEqual([...reached].sort(), (Object.keys(KEEPWARM_GUARD_OF) as KeepWarmBlock[]).sort(), 'a block no case reaches')
-  // The thirteen guards, each with its blocks, in the table's order (1.8 P12 added G13).
+  // The fourteen guards, each with its blocks, in the table's order (1.8 P12 added G13; 1.10 B7, pinned and
+  // changed, G14).
   assert.deepEqual([...new Set(Object.values(KEEPWARM_GUARD_OF))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))),
-    ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10', 'G11', 'G12', 'G13'])
+    ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9', 'G10', 'G11', 'G12', 'G13', 'G14'])
 })
 
 test('the first failing guard in the table\'s order decides; with every guard failing it is G1', () => {
   const all: Partial<KeepWarmFacts> = {}
   for (const c of CASES.filter((x) => x.now === undefined)) Object.assign(all, c.f)
   assert.equal(verdict(facts(all)), 'off')
-  assert.equal(verdict(facts({ ...all, enabled: true, consent: 'granted', trusted: true })), 'noBridge')
+  // 1.10 B7 (pinned and changed): G14 is checked right after G1, so with G1 passing it names the block;
+  // settled, G2 does, as before.
+  assert.equal(verdict(facts({ ...all, enabled: true, consent: 'granted', trusted: true })), 'reading')
+  assert.equal(verdict(facts({ ...all, enabled: true, consent: 'granted', trusted: true, settled: true })), 'noBridge')
   // Two failing guards: the lower one names the block.
   assert.equal(verdict(facts({ running: true, cancelled: true })), 'agentRunning')
   assert.equal(verdict(facts({ sentThisPhase: 3, terminals: { matching: 0, touchedSince: 'yes' } })), 'noTerminal')

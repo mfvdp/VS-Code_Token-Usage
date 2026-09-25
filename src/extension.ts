@@ -19,7 +19,8 @@
  *    user pastes into Claude Code's settings himself; the extension never writes those.
  *  • 1.8 B2 (§0c): the one auto-action — the opt-in keep-warm line typed into Claude Code's terminal —
  *    lives in keepWarmHost.ts behind its own setting and consent (`KeepWarmConsent`); this file only
- *    hands it each frame's facts and asks the question.
+ *    hands it each frame's facts and asks the question. 1.10: the window's terminals are watched by one
+ *    TerminalWatch (terminalWatch.ts) made here, which the keep-warm host and the prompt tool share.
  */
 
 import * as crypto from 'crypto'
@@ -67,6 +68,7 @@ import { agentPollFiles, agentReplayFiles, replayAgents, scan, ScanContext } fro
 import { sectionSettingsQuery } from './sectionSettings'
 import { Role, showMenu, StatusBar, StatusInput } from './statusbar'
 import { buildItems, USAGE_PAGE } from './statusText'
+import { TerminalWatch } from './terminalWatch'
 import {
   bridgeBlocksDelete, deleteItems, deleteWarning, deleteWarningExternal, formatBytes, hookMirrorNote, inventory,
   StoredKey, StoredPaths,
@@ -317,12 +319,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   const statusBar = new StatusBar()
   context.subscriptions.push(statusBar)
 
+  // 1.10 A3 rule 1 (§0a.3): the window's one terminal watch — it listens only while a user wants it (the
+  // keep-warm line while it may act; the prompt tool while its section is listed and the workspace is
+  // trusted), and holds nothing otherwise.
+  const terminalWatch = new TerminalWatch(vscode.window)
+  context.subscriptions.push({ dispose: () => terminalWatch.dispose() })
   // 1.8 B2 (§0a.6–§0a.8, §0c): the opt-in keep-warm line — inert while the setting is off, without its
   // consent and in Restricted Mode; its countdown item is its own, shown whatever statusBar.show lists.
   const keepWarm = new KeepWarmHost({
     window: vscode.window,
     file: paths.keepWarm,
     log: { info: (m) => log.info(m), debug: (m) => log.debug(m), warn: (m) => log.warn(m) },
+    watch: terminalWatch,
   })
   context.subscriptions.push({ dispose: () => keepWarm.dispose() })
   /** A keep-warm consent the activation could not ask for yet: this window was not focused. */
@@ -576,7 +584,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
    * the bar has just drawn, every session's bridge reading, the main records, the newest Agents tree,
    * the agent hook's entries and the quota readings. A failure costs keep-warm this frame, never the bar.
    * With the setting off and nothing left to finish — no terminal listened to, no item on screen, no line
-   * waiting for its answer (`atRest`) — no frame is gathered at all (1.8 Review 3, P12).
+   * waiting for its answer (`atRest`) — no frame is gathered at all (1.8 Review 3, P12). 1.10 B7 (G14):
+   * `settled` — no cold scan and no replay of the agent tables under way; while either runs the records
+   * the guards read are being rebuilt, and no countdown starts or ends with a line.
    */
   function keepWarmTick(now: number, watched: CacheWatchEntry[]): boolean {
     if (!cfg.cacheKeepWarm && keepWarm.atRest()) return false
@@ -586,6 +596,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         enabled: cfg.cacheKeepWarm,
         consent: keepWarmConsent.state(),
         trusted: vscode.workspace.isTrusted,
+        settled: !(scanning || replayRun !== null),
         entries: watched,
         readings: quotaMgr.promptCacheReadings(now),
         mains: agg.mainEntries(),

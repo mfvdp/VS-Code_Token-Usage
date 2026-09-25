@@ -290,6 +290,13 @@ one-minute countdown starts in the status bar, and all of them again when the co
     you interrupted there before `/clear` or before starting another session in it — is never left
     behind: it holds the line back until it has finished its turn or that terminal's `claude` is
     started again.
+14. **Not while the transcripts are read** (1.10) — while Token Pace reads the transcripts from the
+    start (the first scan after the window opened, or a re-read) or reads them once more for the
+    Agents tables (the replay after an update), no countdown starts and none ends with its line. The
+    other checks read the sessions' records, and those are being rebuilt then: a session that is read
+    again is missing until its file has been read, so check 13 could pass a folder whose other session
+    is at work. This check runs right after check 1, at both moments; it stands last only because it
+    came last. It lasts as long as the reading does, and only the log names it (`reading`).
 
 **What no check can see.** Token Pace cannot read Claude Code's input line: **text you typed there
 and did not send is sent together with the line** — type nothing into the Claude terminal while the

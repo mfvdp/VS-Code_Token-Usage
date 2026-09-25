@@ -62,11 +62,15 @@ export interface RecordedQuickPick {
  * 1.8 B2 (P10): a terminal of the fake window. Its `name` records every read — Claude Code sets a
  * terminal's name to a summary of the conversation, and Token Pace never reads it (§7c) — and so does
  * the output of an execution (`read()`); `sendText` records every call in `FakeVscodeState.sent`.
+ * 1.10 P2 (§0a.3): the folder the shell integration reports (`shellIntegration.cwd`, set by `openTerminal`'s
+ * `cwd`), and a count of every read of `creationOptions` and `processId`, which Token Pace never reads.
  */
 export interface FakeTerminal {
   readonly name: string
   readonly state: { isInteractedWith: boolean; shell: string | undefined }
-  readonly shellIntegration: { cwd: unknown } | undefined
+  readonly shellIntegration: { cwd: { fsPath: string; scheme: string; path: string } | undefined } | undefined
+  readonly creationOptions: Record<string, unknown>
+  readonly processId: Promise<number | undefined>
   readonly exitStatus: undefined
   sendText(text: string, shouldExecute?: boolean): void
   show(): void
@@ -157,8 +161,14 @@ export interface FakeVscodeState {
   /** 1.8 B2: how often a terminal's `name` was read (must stay 0), and an execution's output (`read()`). */
   nameReads: number
   outputReads: number
-  /** 1.8 B2: opens a terminal (fires `onDidOpenTerminal`-free: VS Code's list simply holds it). */
-  openTerminal(o?: { shell?: string; name?: string }): FakeTerminal
+  /** 1.10 P2: how often a terminal's `creationOptions` or `processId` was read (must stay 0). */
+  creationReads: number
+  /**
+   * 1.8 B2: opens a terminal (fires `onDidOpenTerminal`-free: VS Code's list simply holds it). 1.10 P2:
+   * `cwd` — the folder the shell integration reports for it; `integration: false` — a terminal without
+   * shell integration (`shellIntegration` undefined).
+   */
+  openTerminal(o?: { shell?: string; name?: string; cwd?: string | null; integration?: boolean }): FakeTerminal
   /** 1.8 B2: fires `onDidStartTerminalShellExecution` for a command in a terminal; the execution stays open. */
   startExecution(terminal: FakeTerminal, o: { commandLine: string; confidence?: number; cwd?: string | null }): FakeExecution
   /** 1.8 B2: fires `onDidEndTerminalShellExecution`. */
@@ -294,7 +304,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const activeListeners: Array<(t: FakeTerminal | undefined) => void> = []
   let activeTerminal: FakeTerminal | undefined
   const windowState = { focused: true, active: true }
-  const reads = { name: 0, output: 0 }
+  const reads = { name: 0, output: 0, creation: 0 }
   let language = 'en'
   let l10nBundle: Record<string, string> | undefined
 
@@ -634,6 +644,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       windowState.active = true
       reads.name = 0
       reads.output = 0
+      reads.creation = 0
       if (settings) {
         values.clear()
         for (const [k, v] of Object.entries(settings)) values.set(k, v)
@@ -655,13 +666,17 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     sent,
     get nameReads(): number { return reads.name },
     get outputReads(): number { return reads.output },
-    openTerminal(o: { shell?: string; name?: string } = {}): FakeTerminal {
+    get creationReads(): number { return reads.creation },
+    openTerminal(o: { shell?: string; name?: string; cwd?: string | null; integration?: boolean } = {}): FakeTerminal {
       const shellState = { isInteractedWith: false, shell: o.shell as string | undefined }
       const title = o.name ?? 'bash'
+      const cwd = o.cwd === null || o.cwd === undefined ? undefined : { fsPath: o.cwd, scheme: 'file', path: o.cwd }
       const terminal: FakeTerminal = {
         get name(): string { reads.name++; return title },
         get state(): { isInteractedWith: boolean; shell: string | undefined } { return { ...shellState } },
-        shellIntegration: { cwd: undefined },
+        shellIntegration: o.integration === false ? undefined : { cwd },
+        get creationOptions(): Record<string, unknown> { reads.creation++; return { name: title } },
+        get processId(): Promise<number | undefined> { reads.creation++; return Promise.resolve(4242) },
         exitStatus: undefined,
         sendText(text: string, shouldExecute?: boolean): void {
           shellState.isInteractedWith = true

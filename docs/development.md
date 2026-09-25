@@ -156,3 +156,13 @@ the tests hold every answer, and five whole view models, against the path withou
 (`resetTimeMemos(false)`, `resetPriceMemos(false)`). On a synthetic store of 8 700 hour buckets a
 build took a median 36 ms instead of 53 in UTC (55 instead of 73 in Europe/Berlin), on the harness's
 large agent run 15 ms instead of 17 — measured on the developer's machine, not a promise.
+
+* **The day an hour bucket falls on** per time zone and day boundary (`dayOfHourMemo` in `src/agg.ts`,
+  `dayOfBucket` in `src/stats.ts`). Since 1.9 each memo keeps the zone and the boundary hour as two
+  fields and compares them, where it built a key string of both for every bucket it was asked about —
+  44 % of a build's CPU time in Europe/Berlin, 8 % in UTC; now 6 % in either. The tests hold both
+  against `dayOfHour` without a memo, over 5000 hours in ten zones at the boundary hours 0, 4 and 23.
+  On the same store a build now takes a median 26 ms instead of 49 in Europe/Berlin and 26 instead of
+  31 in UTC, before and after measured on one day (the machine's figures move from day to day). And a
+  cost series asked for without pricing options is priced through one frozen empty options object
+  (`NO_PRICING`), not a new one per bucket, so `priceOf` keeps one memo for it.

@@ -3337,9 +3337,12 @@ function applyStyles(): void {
  * the chart's bands are thin (1.7 P7b), which tables are cut off, where the heat map should start,
  * how much of an agent row's name and figures the row has room for, and where the tree's guide
  * lines give way to its open details panel (1.8 L-4). Run after every render, on a resize and when
- * a folded section opens (1.8 L-6: all of them — an engine that lays out nothing of a closed section
- * gives a chart drawn there no width to thin its labels by); each one undoes what it set before it
- * measures, so running it again changes nothing that is already right.
+ * a folded section opens (1.8 L-6: all of them). VS Code 1.138 (Chromium 148) lays out a closed
+ * section's content when a script measures it, so a render fits a folded section as it fits an open
+ * one; the run on opening is a robustness rule, for an engine that lays out nothing of a closed
+ * section (Chromium before 131; the harness's `chartclosedlegacy` pages emulate one) and would give a
+ * chart drawn there no width to thin its labels by. Each one undoes what it set before it measures,
+ * so running it again changes nothing that is already right.
  */
 function applyFits(): void {
   fitChart();
@@ -3359,8 +3362,10 @@ function applyFits(): void {
  * the panel's top and bottom relative to the item's own top, 1 px clear of it each way; the stylesheet
  * clips the vertical there. Every other item loses the class and both values. Only the tree's panel:
  * the running list's and the 7-day block's stand outside `.agtree` and have no lines. All measured
- * first, then all written; the clip moves no box. A panel with no height — its section closed — has
- * nothing to give way to, and is fitted again when the section opens.
+ * first, then all written; the clip moves no box. A panel inside a folded section is measured where
+ * it stands, since VS Code 1.138 (Chromium 148) lays a closed section out when a script measures it;
+ * in an engine that lays out nothing of a closed section it has no height and nothing to give way
+ * to, and is fitted again when the section opens (applyFits).
  */
 function fitGuides(): void {
   const items = document.querySelectorAll<HTMLElement>('.agtree ul[role="group"] > li');
@@ -3519,8 +3524,10 @@ const BAND_THIN_PX = 4;
  * changes nothing. Measured, not computed from the band's share of the plot: the height is what the
  * browser drew — the plot's height, the column's value label above the bands — and a class the
  * browser does not lay out by cannot move it (an outline takes no room). All read first, then all
- * written. A chart with no height — its section closed — keeps what it has and is fitted when the
- * section opens.
+ * written. A chart inside a folded section has its height — VS Code 1.138 (Chromium 148) lays a
+ * closed section out when a script measures it — and is fitted as any other; in an engine that lays
+ * out nothing of a closed section it has none, keeps what it has, and is fitted when the section
+ * opens (applyFits).
  */
 function fitBands(): void {
   const chart = document.querySelector<HTMLElement>('.chart');
@@ -3991,12 +3998,14 @@ document.addEventListener('focusin', (ev) => {
 
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.
 window.addEventListener('resize', () => { if (vm) applyFits(); });
-// 1.8 L-6: a section opened after its render may have been laid out with no width and no height at
-// all — an engine that lays out nothing of a closed <details> (Chromium before 131; later ones measure
-// its content when asked, the harness's chartclosed pages) — the chart's labels, its bands (1.7 P7b),
-// a table's scroll hint, the agent rows' names and figures (1.6 N6), the guide lines' gap at a details
-// panel: so everything measured is fitted again to the room it has now — one listener, every fit. The
-// toggle event does not bubble: the capture phase.
+// 1.8 L-6: opening a section runs every fit again — the chart's labels, its bands (1.7 P7b), a table's
+// scroll hint, the agent rows' names and figures (1.6 N6), the guide lines' gap at a details panel —
+// to the room it has now: one listener, every fit. VS Code 1.138 (Chromium 148) lays out a closed
+// <details> when a script measures it, so a render has already fitted a folded section to its width
+// (the harness's chartclosed pages); the listener is a robustness rule, for an engine that lays out
+// nothing of a closed <details> (Chromium before 131; the chartclosedlegacy pages emulate one), where
+// a section opened after its render would keep what was fitted with no width and no height at all.
+// The toggle event does not bubble: the capture phase.
 document.addEventListener('toggle', () => { if (vm) applyFits(); }, true);
 
 window.addEventListener('message', (ev) => {

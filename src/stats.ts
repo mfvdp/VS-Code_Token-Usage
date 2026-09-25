@@ -23,7 +23,7 @@ import type { ChartModelStyle } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, priceOf } from './prices'
 import { Provenance, compact, deltaBadge, estimate, percentOf, usd } from './render'
 import {
-  DayRange, TimeConfig, addDays, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
+  DayRange, TimeConfig, Zone, addDays, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
   localHourOfDay, weekdayOf,
 } from './time'
 import { Attribution, Bucket, SessionRec, Source, Tier } from './types'
@@ -549,19 +549,21 @@ export function filterFor(ctx: StatsCtx, source?: Source): BucketFilter {
  * The hour a bucket belongs to costs an `Intl` format to place in a zone, and one view-model
  * rebuild asks that of every hour bucket several times over — once to range-check it, once
  * per table that groups it. The answer depends on nothing but the hour and the two fields of
- * the time config that decide where a day begins, so it is remembered on those; the
+ * the time config that decide where a day begins, so it is remembered on those — the two kept
+ * as they are and compared field by field, no key string built per bucket (1.9 L-7); the
  * aggregator keeps a memo of its own for the same reason. The cap is a bound on the memory,
  * not on the correctness: a cleared memo is refilled from the same inputs.
  */
-let dayMemoKey = ''
+let dayMemoZone: Zone | null = null
+let dayMemoBoundary: number | null = null
 const dayMemo = new Map<number, string>()
 
 /** The day a bucket belongs to in the configured zone — the same mapping the aggregator uses. */
 export function dayOfBucket(b: Bucket, tcfg: TimeConfig): string {
   if (b.res === 'h') {
-    const key = `${tcfg.zone}|${tcfg.dayBoundaryHour}`
-    if (key !== dayMemoKey) {
-      dayMemoKey = key
+    if (tcfg.zone !== dayMemoZone || tcfg.dayBoundaryHour !== dayMemoBoundary) {
+      dayMemoZone = tcfg.zone
+      dayMemoBoundary = tcfg.dayBoundaryHour
       dayMemo.clear()
     }
     const hour = b.hour ?? 0

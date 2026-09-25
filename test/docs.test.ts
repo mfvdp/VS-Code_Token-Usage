@@ -2886,3 +2886,28 @@ test('docs/development.md says how a language is made and checked: the registry,
   assert.ok(README.includes('| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the fourteen languages and their flags, the notation that stays the same, and how the translations were made |'))
   assert.ok(doc.languages.includes('see [Building and testing](development.md#translating)'))
 })
+
+// ---------------------------------------------------------------------------
+// 1.9 P16 (§3 C1, C2): the Performance bullet of the day memo and of the one empty options object
+// ---------------------------------------------------------------------------
+
+test('docs/development.md says how the day of an hour bucket is kept since 1.9, with the measured figures, and names what the code has (1.9 P16)', () => {
+  const dev = flatText(doc.development)
+  const perf = dev.slice(dev.indexOf('## Performance'))
+  for (const claim of [
+    '**The day an hour bucket falls on** per time zone and day boundary (`dayOfHourMemo` in `src/agg.ts`, `dayOfBucket` in `src/stats.ts`)',
+    'Since 1.9 each memo keeps the zone and the boundary hour as two fields and compares them',
+    '44 % of a build\'s CPU time in Europe/Berlin, 8 % in UTC; now 6 % in either',
+    'over 5000 hours in ten zones at the boundary hours 0, 4 and 23',
+    'a build now takes a median 26 ms instead of 49 in Europe/Berlin and 26 instead of 31 in UTC',
+    'priced through one frozen empty options object (`NO_PRICING`), not a new one per bucket',
+  ]) assert.ok(perf.includes(claim), `docs/development.md's Performance section does not say: ${claim}`)
+  // What the bullet names is in the code, and the key string it says is gone is gone from both memos.
+  const agg = readDoc('src/agg.ts')
+  const stats = readDoc('src/stats.ts')
+  assert.ok(agg.includes('private dayOfHourMemo(') && stats.includes('export function dayOfBucket('))
+  assert.ok(agg.includes('const NO_PRICING: PricingOptions = Object.freeze({})') && agg.includes('pricing ?? NO_PRICING'))
+  assert.equal(/\$\{t?cfg\.zone\}\|\$\{t?cfg\.dayBoundaryHour\}/.test(agg + stats), false, 'a key string of the zone and the boundary is built again')
+  // 1.8's figures stay as 1.8 measured them.
+  assert.ok(dev.includes('a build took a median 36 ms instead of 53 in UTC (55 instead of 73 in Europe/Berlin)'))
+})

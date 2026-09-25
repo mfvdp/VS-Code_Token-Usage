@@ -8,7 +8,7 @@ import { isKnownSource } from './adapters'
 import { AGENT_RETENTION_DAYS, MAX_RUN_AGENTS } from './agentTree'
 import { PricingOptions, costOfBucket, isCustomPricing } from './prices'
 import { cleanRunRecord, cleanRunRecordStat } from './runRecord'
-import { SYSTEM_TIME_CONFIG, TimeConfig, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
+import { SYSTEM_TIME_CONFIG, TimeConfig, Zone, addDays, dayOf, dayOfHour, hourIndex, monthOf } from './time'
 import {
   AgentLaunch, AgentMeta, AgentRec, ApiErrorKind, Attribution, Bucket, CacheMissKind, MainRec, CodexRateLimitsSnapshot, CodexTurn, CompactionRec,
   Cursor, Effort, JournalAgent, LastRequest, LaunchStatus, PendingMessage, PermissionMode, RateLimitKind, RecordedOutcome, RejectedRequest,
@@ -143,9 +143,12 @@ function tierOf(speed: unknown, geo: unknown): Tier {
   return 'standard'
 }
 
-function timeKey(cfg: TimeConfig): string {
-  return `${cfg.zone}|${cfg.dayBoundaryHour}`
-}
+/**
+ * 1.9 L-8: the options a cost series without pricing is priced with — the empty options, one object
+ * for the process, so `priceOf` keeps one memo for them (it keeps one per options object) rather than
+ * a new one, a miss and garbage for every bucket. Frozen: every such series shares it, none may write.
+ */
+const NO_PRICING: PricingOptions = Object.freeze({})
 
 /** First and last calendar day of a YYYY-MM month, so a month bucket can be range-checked. */
 function monthBounds(month: string): { first: string; last: string } {
@@ -1354,16 +1357,23 @@ export class Aggregator {
   private codexLastValue: CodexTurn | null = null
   /** 1.6 L5: what was written since `takeChanges` was last asked. Not persisted. */
   private changes: IngestChanges = { buckets: false, agents: false }
-  /** dayOfHour goes through Intl and is hit for every bucket on every query — memoised. */
-  private dayMemoKey = ''
+  /**
+   * dayOfHour goes through Intl and is hit for every bucket on every query — memoised. The answer
+   * depends on the hour and on the two fields of the time config that decide where a day begins, so
+   * the memo holds the answers of one zone and one boundary hour, and the two are kept as they are
+   * and compared field by field (1.9 L-7: with a key string built for every bucket asked about, this
+   * function took 28 % of a view-model build's time in Europe/Berlin; 3 % without).
+   */
+  private dayMemoZone: Zone | null = null
+  private dayMemoBoundary: number | null = null
   private dayMemo = new Map<number, string>()
 
   // ---------------------------------------------------------------- Buckets
 
   private dayOfHourMemo(hour: number, cfg: TimeConfig): string {
-    const key = timeKey(cfg)
-    if (key !== this.dayMemoKey) {
-      this.dayMemoKey = key
+    if (cfg.zone !== this.dayMemoZone || cfg.dayBoundaryHour !== this.dayMemoBoundary) {
+      this.dayMemoZone = cfg.zone
+      this.dayMemoBoundary = cfg.dayBoundaryHour
       this.dayMemo.clear()
     }
     let d = this.dayMemo.get(hour)
@@ -3287,7 +3297,7 @@ export class Aggregator {
       case 'requests': return b.requests
       case 'reasoning': return b.reasoning
       case 'cost': {
-        const c = this.costOfBucket(b, tcfg, pricing ?? {})
+        const c = this.costOfBucket(b, tcfg, pricing ?? NO_PRICING)
         return c && !c.unpriced ? c.usd : 0
       }
       default: return billable(b)

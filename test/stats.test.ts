@@ -12,7 +12,7 @@ import {
   niceCeil, planFactors, projectPeriod, projectRows, sessionRows, totalRow, totalsFor,
   durationText,
 } from '../src/stats'
-import { DayRange, addDays, dayOf, daysBetween, previousRange, rangeFor } from '../src/time'
+import { DayRange, TimeConfig, addDays, dayOf, dayOfHour, daysBetween, previousRange, rangeFor, resetTimeMemos } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
 import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
 
@@ -769,6 +769,68 @@ test('an hour bucket lands on the day its own zone puts it on, however often it 
   // A day bucket carries its day, and a month bucket is placed on its first day.
   assert.equal(dayOfBucket({ ...b, res: 'd', hour: null, day: '2026-08-01' }, tcfg), '2026-08-01')
   assert.equal(dayOfBucket({ ...b, res: 'm', hour: null, day: '2026-08' }, tcfg), '2026-08-01')
+})
+
+test('the day of an hour bucket is dayOfHour\'s: 5000 hours × ten zones × boundary hours 0, 4, 23, asked a setting at a time and with the zone and the boundary changed between calls (1.9 L-7)', () => {
+  // The memo keeps the answers of one zone and one boundary hour and compares the two fields as they
+  // are (no key string per bucket): a change of either empties it. Held to dayOfHour with the
+  // calendar-parts memo off as well, so no memo stands behind the answers it is held to.
+  const zones = [
+    'system', 'UTC', 'Europe/Berlin', 'America/New_York', 'Asia/Kathmandu', 'Australia/Lord_Howe', 'America/St_Johns',
+    'Pacific/Chatham', 'Asia/Kolkata', 'America/Sao_Paulo',
+  ]
+  const boundaries = [0, 4, 23]
+  const cfgs: TimeConfig[][] = zones.map((zone) => boundaries.map((dayBoundaryHour) => ({ ...tcfg, zone, dayBoundaryHour })))
+  // 5000 distinct hours of 2000–2099, drawn by a seeded generator (mulberry32), so every run asks the same.
+  let seed = 0x1907 >>> 0
+  const draw = (): number => {
+    seed = (seed + 0x6d2b79f5) >>> 0
+    let x = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x
+    return ((x ^ (x >>> 14)) >>> 0) / 4_294_967_296
+  }
+  const from = Date.UTC(2000, 0, 1) / 3_600_000
+  const span = Date.UTC(2100, 0, 1) / 3_600_000 - from
+  const hours = new Set<number>()
+  while (hours.size < 5000) hours.add(from + Math.floor(draw() * span))
+  const buckets = [...hours].map((h) => ({ ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'h', h, '2000-01-01') }))
+  const want: string[][][] = []
+  try {
+    resetTimeMemos(false)
+    for (const row of cfgs) want.push(row.map((c) => buckets.map((b) => dayOfHour(b.hour!, c))))
+  } finally {
+    resetTimeMemos()
+  }
+  // A setting at a time — every hour, then every hour again from the memo — zone by zone, the boundary
+  // changing alone inside a zone.
+  cfgs.forEach((row, z) => row.forEach((c, k) => {
+    for (const pass of ['cold', 'warm']) {
+      buckets.forEach((b, i) => assert.equal(dayOfBucket(b, c), want[z][k][i], `${pass} ${c.zone}, boundary ${c.dayBoundaryHour}: hour ${b.hour}`))
+    }
+  }))
+  // Then the setting changed between two calls: one hour after another, every setting in turn and each
+  // asked twice (the second from the memo) — zone by zone for one hour, boundary by boundary for the next,
+  // so a call right after the boundary changed alone, the zone alone and both is each asked many times.
+  let boundaryAlone = 0
+  let zoneAlone = 0
+  let last: TimeConfig | null = null
+  buckets.forEach((b, i) => {
+    const steps: Array<[number, number]> = []
+    if (i % 2 === 0) zones.forEach((_, z) => boundaries.forEach((_, k) => steps.push([z, k])))
+    else boundaries.forEach((_, k) => zones.forEach((_, z) => steps.push([z, k])))
+    for (const [z, k] of steps) {
+      const c = cfgs[z][k]
+      if (last && last.zone === c.zone && last.dayBoundaryHour !== c.dayBoundaryHour) boundaryAlone++
+      if (last && last.zone !== c.zone && last.dayBoundaryHour === c.dayBoundaryHour) zoneAlone++
+      last = c
+      assert.equal(dayOfBucket(b, c), want[z][k][i], `${c.zone}, boundary ${c.dayBoundaryHour}: hour ${b.hour}, right after a change`)
+      assert.equal(dayOfBucket(b, c), want[z][k][i], `${c.zone}, boundary ${c.dayBoundaryHour}: hour ${b.hour}, asked again`)
+    }
+  })
+  assert.ok(boundaryAlone > 10_000 && zoneAlone > 10_000, `${boundaryAlone} boundary-only and ${zoneAlone} zone-only changes`)
+  // The hours do fall on other days under other settings — the test can tell a stale answer from a right one.
+  const differ = buckets.filter((_, i) => want[2][0][i] !== want[2][1][i]).length
+  assert.ok(differ > 500, `only ${differ} hours move between Berlin's boundary 0 and 4`)
 })
 
 test('a band is the same figure however it was summed, in every metric', () => {

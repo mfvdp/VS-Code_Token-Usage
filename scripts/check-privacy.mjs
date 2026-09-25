@@ -297,18 +297,20 @@ export const READ_CONTRACT = [
   // Of its two events the terminal and the execution; of an open execution its command line (the text
   // and VS Code's confidence in it) and the working directory the shell reported — tested for G7 when
   // the guard asks, kept by no one, never logged, shown or exported; of a terminal VS Code's word for
-  // what runs in it. Never a terminal's name, its output or its environment.
-  { what: 'keep-warm: the shell execution events', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'private startTracking(', variable: 'e',
+  // what runs in it. Never a terminal's name, its output or its environment. 1.10 §0a.3 (P2): the six
+  // rows read src/terminalWatch.ts — the watch moved out of the keep-warm host, unchanged in what it
+  // takes —, and the prompt tool reads the same facts (whether a terminal runs Claude Code or Codex).
+  { what: 'keep-warm: the shell execution events', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'private startTracking(', variable: 'e',
     fields: ['terminal', 'execution'], pages: KEEPWARM_PAGES },
-  { what: 'keep-warm: an open shell execution', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function executionFacts(', variable: 'execution',
+  { what: 'keep-warm: an open shell execution', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function executionFacts(', variable: 'execution',
     fields: ['commandLine', 'cwd'], pages: KEEPWARM_PAGES },
-  { what: 'keep-warm: its command line', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function executionFacts(', variable: 'line',
+  { what: 'keep-warm: its command line', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function executionFacts(', variable: 'line',
     fields: ['value', 'confidence'], pages: KEEPWARM_PAGES },
-  { what: 'keep-warm: its working directory', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function executionFacts(', variable: 'dir',
+  { what: 'keep-warm: its working directory', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function executionFacts(', variable: 'dir',
     fields: ['fsPath'], pages: KEEPWARM_PAGES },
-  { what: 'keep-warm: a terminal\'s shell', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function shellOf(', variable: 'terminal',
+  { what: 'keep-warm: a terminal\'s shell', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function shellOf(', variable: 'terminal',
     fields: ['state'], pages: KEEPWARM_PAGES },
-  { what: 'keep-warm: the shell VS Code reports', source: 'VS Code\'s shell integration', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'function shellOf(', variable: 's',
+  { what: 'keep-warm: the shell VS Code reports', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function shellOf(', variable: 's',
     fields: ['shell'], pages: KEEPWARM_PAGES },
   // 1.8 §0a.8 (P10): the one write into another program's input — of the terminal only `sendText`, with
   // the fixed line; nothing is read back.
@@ -320,6 +322,18 @@ export const READ_CONTRACT = [
     fields: ['v', 'days'], pages: KEEPWARM_PAGES },
   { what: 'keep-warm: a day of the accounting', source: 'keepwarm.json', file: 'src/keepWarmHost.ts', kind: 'fields', body: 'export function cleanKeepWarmFile(', variable: 'd',
     fields: ['requests', 'tokens'], pages: KEEPWARM_PAGES },
+  // 1.10 §0a.3 (P2): the one new field of VS Code's terminal API — the folder the shell integration reports
+  // for a terminal whose shell is `claude` or `codex` and in which the watch saw no execution start (a
+  // window reload), read at a send or a build of the Prompts section only, to compare its
+  // project-directory name with the transcripts' folders; never kept, logged, shown or exported. Of the
+  // terminal its `shellIntegration`, of that its `cwd`, of that the `fsPath`. Held to the privacy page
+  // until P3 widens the rows to the prompts page as well (PROMPTS_PAGES).
+  { what: 'prompts: a terminal\'s shell integration', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function reportedCwd(', variable: 'terminal',
+    fields: ['shellIntegration'], pages: ['privacy'] },
+  { what: 'prompts: the folder VS Code reports for a terminal', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function reportedCwd(', variable: 'si',
+    fields: ['cwd'], pages: ['privacy'] },
+  { what: 'prompts: that folder\'s path', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function reportedCwd(', variable: 'dir',
+    fields: ['fsPath'], pages: ['privacy'] },
 ]
 
 /**

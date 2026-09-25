@@ -200,13 +200,33 @@ in the folder the session's transcript belongs to?) and kept by no one: never lo
 or exported; and of a terminal VS Code's `state`, its `shell` (`claude` while Claude Code runs).
 Never a terminal's name — Claude Code sets it to a summary of the conversation —, its output or its
 environment. Which terminal was active in a focused window, and when, is kept in memory only. With
-the setting off, without the consent or in Restricted Mode none of these events is listened to. The
+the setting off, without the consent or in Restricted Mode none of these events is listened to. While
+the transcripts are being read — the first scan after the window opened, a re-read, the replay for the
+Agents tables — no countdown starts and none ends with its line (1.10). The
 line's answers are counted in `keepwarm.json` in the extension's storage (below): `v` and `days`,
 and per local day `requests` and `tokens` — how many lines were answered and the billable tokens of
 their answers —, at most 31 days, written whole (a temp file, then a rename) by the window that sent
 the line; never a session id, a path, a time of day, a terminal or a command line. A file of any
 other shape is read as empty. The consent is kept under `tokenPace.keepWarmConsent` in the
 extension's state; switching the setting off withdraws it.
+
+**The terminals, since 1.10.** One watch of the window's terminals holds these facts for the
+keep-warm line and for the dashboard's Prompts section (1.10) alike — the keep-warm line's use is the
+one above, unchanged. For the Prompts section the same facts say which terminal of this window runs
+Claude Code or Codex, and in which folder, so that a prompt you double-click goes into such a terminal
+and nowhere else: an open execution whose `commandLine` starts with `claude` or `codex` (a path ending
+in it, `claude.exe` or `codex.exe`), reported with medium or high `confidence`, with its `cwd`; or,
+where the watch saw no such start, VS Code's `shell` for the terminal, `claude` or `codex`. For such a
+terminal — Claude Code or Codex started before Token Pace began to listen, for example before a
+window reload — one more field of VS Code's shell integration is read: the terminal's
+`shellIntegration`, of it the `cwd`, of that the `fsPath` — the folder the shell reports for the
+terminal. It is read only for a terminal whose `shell` is `claude` or `codex` and in which the watch
+saw no start of that program, only when a prompt is sent or the Prompts section is built, and only to
+compare the name Claude Code gives that folder's transcripts with the folders of the sessions; it is
+kept by no one, never logged, shown, stored or exported. That the shell's folder is the one the
+program started in is an inference: a shell cannot change its folder while a program runs in its
+foreground. A terminal is named on the page and in a pick list by its place in the window's list of
+terminals (“terminal 2 of 3”), never by its name; nothing of Codex's own state is read.
 
 Nothing is written except the extension's own state in its `globalStorage` — among it the copy of
 the agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that
@@ -259,7 +279,9 @@ every reader of a Claude Code file, the fields it may take — the ones this pag
 the check fails when a reader takes a field the table does not list, or no longer takes one it
 does. The documentation tests hold this page and the agents page to the same table — this page and
 the prompt-cache page for the status-line mirror's rows, and (1.8) for the keep-warm host's: what it
-takes of VS Code's shell integration, the one line it types, and `keepwarm.json` read back. It also holds
+takes of VS Code's shell integration, the one line it types, and `keepwarm.json` read back — since
+1.10 read by the terminal watch the keep-warm host and the Prompts section share, with the folder the
+shell integration reports held to this page. It also holds
 the agent hook's bundle, `dist/agent-hook.js`, to Node's `fs` and `path`: a network module
 (`http`, `https`, `net`, `tls`, `dgram`), `child_process`, `worker_threads` or a `fetch(` in it
 fails the build. The status-line bridge's bundle, `dist/statusline-bridge.js` — the file its copy
@@ -297,6 +319,10 @@ record or the snapshot. So does the keep-warm line (1.8): a terminal running
 `claude --api-key synthetic-secret-123` in `/home/u/synthetic-project` is matched — the line goes
 there — and neither string reaches the log, the view model, the page, the markdown report,
 `keepwarm.json`, the diagnostics report or a status-bar item, and a terminal's name is never read.
+So does the terminal watch (1.10): a Codex terminal running `codex --api-key synthetic-secret-123`,
+whose shell integration reports `/home/u/synthetic-project-789`, is found as one — and neither string
+reaches the console, the log, the page, the markdown report, the diagnostics report, a message or a
+status-bar item; a terminal's name, its output, its creation options and its process are never read.
 Before the 1.6.0 release a
 review ran one more:
 a synthetic world with prompts, descriptions, results, summaries, scripts, error texts and account

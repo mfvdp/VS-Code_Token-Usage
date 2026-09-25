@@ -35,13 +35,21 @@
  * (Claude Code documents no such rule). In 1.8 such a session held the folder back for as long as its
  * transcript was kept, seven days; the bound only ever lets the line go where 1.8 kept it back.
  *
+ * 1.10 B7 (G14): while the transcripts are read — the cold scan, the agent tables' replay — the
+ * aggregator's records are being rebuilt (a replay deletes the records of the files it reads again), so
+ * every guard after G1 would read half a picture: no countdown starts and none ends with a line then.
+ *
+ * 1.10 A4: the prompt tool's send decision (promptSend.ts) reuses the predicates below — `turnClosed`
+ * (G4 without its age), `siblingLeftBehind` (1.9 D), `hookPermissionOpen` (G6), `sameProjectDir` (G7) —
+ * exported for it, never copied.
+ *
  * Pure: no clock, no I/O, no `vscode`. The facts come in as values — the host (keepWarmHost.ts,
- * 1.8 P10) gathers them from the watch, the aggregator's record, the running list, the agent hook,
- * the window's terminals and its own idle-phase bookkeeping —, and the decision is a function of
- * them and `now`. What the host may take of a terminal is what `claudeExecutionMatches` takes: a
- * shell execution's command line, its confidence and its working directory, tested and never kept
- * (§0a.6); never a terminal's name (Claude Code sets it to a summary of the conversation), its output
- * or its environment.
+ * 1.8 P10) gathers them from the watch (terminalWatch.ts, 1.10), the aggregator's record, the running
+ * list, the agent hook, the window's terminals and its own idle-phase bookkeeping —, and the decision
+ * is a function of them and `now`. What the host may take of a terminal is what
+ * `claudeExecutionMatches` takes: a shell execution's command line, its confidence and its working
+ * directory, tested and never kept (§0a.6); never a terminal's name (Claude Code sets it to a summary
+ * of the conversation), its output or its environment.
  */
 
 import type { HookEntry } from './agentTree'
@@ -105,6 +113,8 @@ export type KeepWarmBlock =
   | 'off' | 'consent' | 'restricted' | 'noBridge' | 'notDue' | 'tooLate' | 'notIdle' | 'openTool' | 'agentRunning'
   | 'hookWait' | 'noTerminal' | 'ambiguousTerminal' | 'typedSince' | 'unknownFocus' | 'cap' | 'quota' | 'cancelled'
   | 'unanswered' | 'otherSession'
+  // 1.10 B7: the transcripts are being read (G14) — a block of the log only.
+  | 'reading'
 
 /** The guard of §3 B2's table each block belongs to — compiler-complete: a new block needs its guard. */
 export const KEEPWARM_GUARD_OF: Readonly<Record<KeepWarmBlock, `G${number}`>> = Object.freeze({
@@ -121,6 +131,7 @@ export const KEEPWARM_GUARD_OF: Readonly<Record<KeepWarmBlock, `G${number}`>> = 
   unanswered: 'G11',
   cancelled: 'G12',
   otherSession: 'G13',
+  reading: 'G14',
 })
 
 /**
@@ -157,6 +168,11 @@ export interface KeepWarmFacts {
   consent: 'granted' | 'denied' | 'unasked'
   /** G1: the workspace is trusted — never in Restricted Mode. */
   trusted: boolean
+  /**
+   * G14 (1.10 B7): no cold scan and no replay of the agent tables is under way — the records every later
+   * guard reads are whole (the host: `!(scanning || replayRun !== null)`).
+   */
+  settled: boolean
   /** A's entry of the session (`watchCaches`). */
   entry: CacheWatchEntry
   /** G2, G3: the session's bridge reading — the one the entry rests on —, or null. */
@@ -202,12 +218,36 @@ function block(b: KeepWarmBlock): KeepWarmVerdict {
 }
 
 /**
+ * G4 without its age (1.10 A4 exports it): whether a session's turn is closed — the newest message line is
+ * not the user's (`replyPending` exactly false: probe P-6, a question or a permission dialog may stand
+ * open while the user's line is newest) and the newest reply ended its turn (`end_turn`). `openTool` when
+ * the user's line is newest or the reply called a tool; `notIdle` for any other stop (cut off, paused,
+ * none kept) and without a request of the cache on the record. Strict: a flag of another shape is not
+ * closed.
+ */
+export function turnClosed(last: { stop: StopReason | null; replyPending: boolean | null } | null | undefined): 'closed' | 'openTool' | 'notIdle' {
+  if (!last) return 'notIdle'
+  if (last.replyPending !== false) return 'openTool'
+  if (last.stop !== 'end_turn') return last.stop === 'tool_use' ? 'openTool' : 'notIdle'
+  return 'closed'
+}
+
+/**
+ * G6 (1.10 A4 exports it): the agent hook, when installed, holds a permission request newer than the
+ * session's newest counted reply (`lastTs`) — a dialog that may be open. A wait for input is not one;
+ * a request whose time is not known, or a reply time that is not known, counts as open.
+ */
+export function hookPermissionOpen(hook: HookEntry | null | undefined, lastTs: number): boolean {
+  return !!hook && hook.wait === 'permission' && !(finite(hook.ts) && hook.ts <= lastTs)
+}
+
+/**
  * G13 (b): another session of the folder is idle by G4's test — its newest counted reply at least
  * KEEPWARM_IDLE_MIN_MS old, the newest message line not the user's, the reply ended its turn — and has
  * no agent running (G5). Strict like every fact here: anything else is not idle.
  */
 function siblingIdle(s: KeepWarmSibling, now: number): boolean {
-  return finite(s.lastTs) && s.lastTs <= now - KEEPWARM_IDLE_MIN_MS && s.replyPending === false && s.stop === 'end_turn' && s.running === false
+  return finite(s.lastTs) && s.lastTs <= now - KEEPWARM_IDLE_MIN_MS && turnClosed(s) === 'closed' && s.running === false
 }
 
 /**
@@ -237,9 +277,10 @@ function knownMax(a: number, b: number): number | null {
  * its newest message line known, written before the terminal's `claude` started (`started`, finite: G13
  * (a) holds) and at least KEEPWARM_SIBLING_LEFT_MS before `now`. A reply under way or a dialog open lives
  * in the process that wrote that line, and this terminal's process began after it; the two hours are the
- * backstop for that inference.
+ * backstop for that inference. Exported for the prompt tool (1.10 A4 rule 6, 11), which applies the same
+ * bound.
  */
-function siblingLeftBehind(s: KeepWarmSibling, started: number, now: number): boolean {
+export function siblingLeftBehind(s: KeepWarmSibling, started: number, now: number): boolean {
   if (s.running !== false) return false
   const newest = siblingNewestAt(s)
   return newest !== null && newest < started && newest <= now - KEEPWARM_SIBLING_LEFT_MS
@@ -299,6 +340,8 @@ function sendWindowOpen(t: number, expiresAt: number): boolean {
  *      other session of the folder is idle (G4's test) with no agent running (G5's) — or left behind
  *      (1.9 D): no agent running, its newest message line older than the terminal's `claude` and at
  *      least KEEPWARM_SIBLING_LEFT_MS old                                  otherSession
+ *  G14 no cold scan and no replay of the agent tables under way (1.10 B7) — checked right after G1,
+ *      listed last because it came last                                    reading
  *
  * Every fact is taken strictly — a flag that is not exactly the passing value blocks —, because a
  * wrong fact may only ever keep the line back, never send it.
@@ -308,6 +351,10 @@ export function keepWarmDecision(f: KeepWarmFacts, now: number, stage: KeepWarmS
   if (f.enabled !== true) return block('off')
   if (f.consent !== 'granted') return block('consent')
   if (f.trusted !== true) return block('restricted')
+
+  // G14 · 1.10 B7: checked right after G1 — every later guard reads facts a cold scan or the agent
+  // tables' replay is rebuilding (a replayed file's main record is gone until it is read again).
+  if (f.settled !== true) return block('reading')
 
   // G2 · a line is typed on a fact, not on a `~`.
   const expiresAt = measuredExpiry(f)
@@ -324,11 +371,11 @@ export function keepWarmDecision(f: KeepWarmFacts, now: number, stage: KeepWarmS
   if (!main || !last || !finite(main.lastTs) || !(main.lastTs <= now - KEEPWARM_IDLE_MIN_MS)) return block('notIdle')
   // Probe P-6: while a question or a permission dialog stands open, nothing of the reply is on disk
   // and the newest message line is the user's — the previous reply's `end_turn` says nothing then.
-  if (last.replyPending !== false) return block('openTool')
   // A reply that called a tool: a tool, a permission dialog or a question may be open — Enter may
   // confirm the highlighted option. Any other stop than `end_turn` (a cut-off reply, a paused turn,
   // none kept) is no idle turn either.
-  if (last.stop !== 'end_turn') return block(last.stop === 'tool_use' ? 'openTool' : 'notIdle')
+  const turn = turnClosed(last)
+  if (turn !== 'closed') return block(turn)
 
   // G5 · a subagent's end can wake the conversation at any moment.
   if (f.running !== false) return block('agentRunning')
@@ -336,8 +383,7 @@ export function keepWarmDecision(f: KeepWarmFacts, now: number, stage: KeepWarmS
   // G6 · the agent hook, when installed: a permission request after the newest reply is a dialog
   // that may be open. A wait for input passes — after an `end_turn` reply the one documented
   // `input` notification is the idle prompt; the others come during a tool call, which G4 excludes.
-  const hook = f.hook
-  if (hook && hook.wait === 'permission' && !(finite(hook.ts) && hook.ts <= main.lastTs)) return block('hookWait')
+  if (hookPermissionOpen(f.hook, main.lastTs)) return block('hookWait')
 
   // G7 · the extension's own panel is out of reach, a terminal without shell integration says
   // nothing, and two candidates are one too many.
@@ -407,9 +453,10 @@ export function projectDirName(cwd: string): string {
 /**
  * Two project-directory names of one directory. Equal — or, for a Windows path (a drive letter and
  * `--`, which no POSIX path gives: those start with `-`), equal but for the drive letter's case: VS
- * Code's `Uri.fsPath` lower-cases it, a process's working directory need not.
+ * Code's `Uri.fsPath` lower-cases it, a process's working directory need not. Exported for the prompt
+ * tool (1.10 A4), which compares a terminal's folder with the transcripts' the same way.
  */
-function sameProjectDir(a: string, b: string): boolean {
+export function sameProjectDir(a: string, b: string): boolean {
   if (a === b) return true
   const drive = /^[A-Za-z]--/
   return drive.test(a) && drive.test(b) && a.slice(1) === b.slice(1) && a[0].toLowerCase() === b[0].toLowerCase()

@@ -110,6 +110,10 @@ started —, in these words:
 * **`off`, `consent`, `restricted`** — `tokenPace.cacheKeepWarm` is off; its consent was refused or
   never given (a refusal is not asked about again until you switch the setting off and on); or the
   workspace is in Restricted Mode.
+* **`reading`** (1.10) — Token Pace was reading the transcripts: the first scan after the window
+  opened (the status bar says *Reading token history …*), a re-read, or the one-time replay for the
+  Agents tables after an update. The records the other checks read are rebuilt then, so no countdown
+  starts and none ends with its line until the reading is done; nothing to do but wait for it.
 * **`noBridge`** — no status-line reading describes the session's newest request: the
   [bridge](quota-sources.md#claude-status-line-bridge-opt-in) is not connected, ran for another
   session last, or has not run since the session's newest reply. The transcript's estimate (`~`)

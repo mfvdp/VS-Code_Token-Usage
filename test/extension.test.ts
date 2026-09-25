@@ -4238,3 +4238,63 @@ test('1.8 review 3: keep-warm end to end in a fake HOME — switched on and allo
     Date.now = realNow
   }
 })
+
+// ---------------------------------------------------------------------------
+// 1.10 P2 (§3 A3 rule 1, §0a.3, §3 B7): the window's one terminal watch
+// ---------------------------------------------------------------------------
+
+test('1.10 P2: one terminal watch for the window, the keep-warm host\'s; a Codex terminal with a secret on its command line and in the folder its shell integration reports is held and reaches no output; G14 reads the scan and the replay (§0a.3 leak test, host side)', async () => {
+  const fx = makeFixture()
+  await activateHost(fx, REPO, {
+    settings: { 'tokenPace.cacheKeepWarm': true, 'tokenPace.statusBar.show': ['claudeQuota', 'tokens'] },
+    globalState: new Map<string, unknown>([['tokenPace.keepWarmConsent', 'granted']]),
+  })
+  const page = openDashboard()
+  await waitOwnColdStart(state)
+  // One watch, subscribed once: the four terminal events the fake counts.
+  await waitFor('the watch listening', () => state.terminalListeners() === 4)
+  const cwd = '/home/u/synthetic-project-789'
+  const commandLine = 'codex --api-key synthetic-secret-123'
+  // A Codex terminal whose start the watch saw, and one VS Code reports as Codex with a folder of its shell
+  // integration; the second one active.
+  const seen = state.openTerminal({ name: 'SYNTHETIC-CONVERSATION-SUMMARY', cwd })
+  state.startExecution(seen, { commandLine, confidence: 2, cwd })
+  const reported = state.openTerminal({ shell: 'codex', name: 'SYNTHETIC-CONVERSATION-SUMMARY', cwd })
+  state.setActiveTerminal(reported)
+  await sleep(2_200)
+  assert.equal(state.terminalListeners(), 4, 'a second watch subscribed')
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  await state.execute('tokenPace.showUsageQuickPick')
+  await state.execute('tokenPace.copyDiagnostics')
+  const outputs: Array<[string, string]> = [
+    ['page', JSON.stringify(page.sent)],
+    ['markdown', markdown],
+    ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+    ['status bar', JSON.stringify(state.items.map((i) => ({ ...i })))],
+    ['diagnostics', state.clipboard.join('\n')],
+    ['messages', JSON.stringify(state.messages)],
+    ['log', state.logText()],
+  ]
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  assert.equal(state.terminalListeners(), 0, 'the watch outlived the window')
+  outputs.push(['state', fs.readFileSync(fx.stateFile, 'utf8')])
+  for (const f of fs.readdirSync(fx.storage)) {
+    const p = path.join(fx.storage, f)
+    if (fs.statSync(p).isFile()) outputs.push([`storage ${f}`, fs.readFileSync(p, 'utf8')])
+  }
+  for (const [what, text] of outputs) {
+    for (const secret of [commandLine, 'synthetic-secret-123', '--api-key', cwd, 'synthetic-project-789', 'SYNTHETIC-CONVERSATION-SUMMARY']) {
+      assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+    }
+  }
+  assert.deepEqual(state.sent, [], 'something was typed into a terminal')
+  assert.equal(state.nameReads, 0, 'a terminal\'s name was read')
+  assert.equal(state.outputReads, 0, 'a terminal\'s output was read')
+  assert.equal(state.creationReads, 0, 'a terminal\'s creation options or process were read')
+  // The wiring: one watch made here and handed to the keep-warm host; G14's fact is the scan and the replay.
+  const src = fs.readFileSync(path.join(REPO, 'src', 'extension.ts'), 'utf8')
+  assert.equal((src.match(/new TerminalWatch\(/g) ?? []).length, 1)
+  assert.match(src, /const keepWarm = new KeepWarmHost\(\{\n(?:\s+\w+: [^\n]*\n){3}\s+watch: terminalWatch,\n\s*\}\)/)
+  assert.match(src, /settled: !\(scanning \|\| replayRun !== null\),/)
+})

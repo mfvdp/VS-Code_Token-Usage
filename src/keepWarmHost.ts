@@ -7,22 +7,23 @@
  * on, shows the countdown, types the line, and counts what came of it.
  *
  *  • Terminals (§0a.6). Which terminal of this window runs Claude Code is learnt from VS Code's shell
- *    integration only: `onDidStartTerminalShellExecution` / `onDidEndTerminalShellExecution` hold the
- *    executions that are open, and at the moment G7 asks, each one's command line, its confidence and
- *    its working directory are tested (`claudeExecutionMatches`) — read at the test, kept by no one,
- *    never logged, shown or exported. VS Code's own word for what runs in the terminal
- *    (`terminal.state.shell`, `claude` while Claude Code runs — probe P-1) confirms a match where VS
- *    Code reports one and blocks where it names another program; it never stands in for the event.
- *    A terminal's **name is never read** — Claude Code sets it to a summary of the conversation (§7c) —,
- *    nor its output, nor its environment. Of the start event the host also notes when it came, on its
- *    own clock — the time G13 compares the session's first reply with (1.8 P12).
+ *    integration only, through the window's one TerminalWatch (terminalWatch.ts — since 1.10 the watch
+ *    this host held itself, shared with the prompt tool): `onDidStartTerminalShellExecution` /
+ *    `onDidEndTerminalShellExecution` hold the executions that are open, and at the moment G7 asks, each
+ *    one's command line, its confidence and its working directory are tested (`claudeExecutionMatches`)
+ *    — read at the test, kept by no one, never logged, shown or exported. VS Code's own word for what
+ *    runs in the terminal (`terminal.state.shell`, `claude` while Claude Code runs — probe P-1) confirms a
+ *    match where VS Code reports one and blocks where it names another program; it never stands in for
+ *    the event. A terminal's **name is never read** — Claude Code sets it to a summary of the
+ *    conversation (§7c) —, nor its output, nor its environment. Of the start event the watch also notes
+ *    when it came, on its own clock — the time G13 compares the session's first reply with (1.8 P12).
  *  • The session behind the terminal (G13, 1.8 P12). A terminal runs a folder's `claude`, not a named
  *    session: the other main records of the folder the session's transcript lies in go to the decision
  *    as its siblings — their first and newest reply, the newest reply's stop and whether the user's line
  *    is newest, the time of their newest user line (1.9 §0a.1, for the bound of 1.9 D), and whether an
  *    agent of theirs runs. None of their times is ever logged.
  *  • Focus (G8). When a terminal was the active terminal of the focused window, from
- *    `onDidChangeActiveTerminal` and `onDidChangeWindowState` with this host's clock; a window that
+ *    `onDidChangeActiveTerminal` and `onDidChangeWindowState` with the watch's clock; a window that
  *    started watching after a session's newest reply cannot say, and says so (`unknown`).
  *  • The countdown (§0c). One status-bar item of its own, `tokenPace.keepWarm`, shown whatever
  *    `tokenPace.statusBar.show` lists — a line is never typed without it —: 60 seconds counting down,
@@ -35,8 +36,13 @@
  *    `keepwarm.json`. No answer: the card says so and no further line goes in the idle phase. A request
  *    that answers no line is the user's, and starts a new idle phase.
  *
- * Inert while it may not act: with the setting off, without consent or in Restricted Mode no terminal
- * event is subscribed to and nothing of a terminal is looked at. The tick is driven by the host's
+ * 1.10: while the transcripts are read — the cold scan, the agent tables' replay — no countdown starts
+ * and none ends with a line (G14, `KeepWarmFrame.settled`); a prompt the reader types into the terminal
+ * a countdown is armed for ends that countdown without its line (`yieldTo`, A3 rule 8).
+ *
+ * Inert while it may not act: with the setting off, without consent or in Restricted Mode keep-warm
+ * wants no terminal event (the watch listens only while another user — the prompt tool — wants it) and
+ * nothing of a terminal is looked at for keep-warm. The tick is driven by the host's
  * one-second frame (`tick`), and every time comes in as a parameter or from the injected clock; with
  * the setting off and nothing left to finish (`atRest`), the host skips gathering the frame at all.
  */
@@ -49,10 +55,11 @@ import type { AgentTreeVm, HookEntry } from './agentTree'
 import type { CacheWatchEntry } from './cacheWatch'
 import { t } from './i18n'
 import {
-  KEEP_WARM_LINE, KEEPWARM_COUNTDOWN_MS, KEEPWARM_VERIFY_MS, KeepWarmBlock, KeepWarmFacts, KeepWarmSibling,
-  ShellExecutionFacts, claudeExecutionMatches, keepWarmDecision,
+  KEEP_WARM_LINE, KEEPWARM_COUNTDOWN_MS, KEEPWARM_VERIFY_MS, KeepWarmBlock, KeepWarmFacts, KeepWarmSibling, keepWarmDecision,
+  sameProjectDir,
 } from './keepWarm'
 import type { PromptCacheReading } from './quotaSources'
+import { TerminalWatch, TerminalWindow } from './terminalWatch'
 import { TimeConfig, clockStamp, dayOf } from './time'
 import type { MainRec, QuotaState } from './types'
 import type { KeepWarmVmInput } from './viewModel'
@@ -77,21 +84,12 @@ export const KEEPWARM_VERIFY_GRACE_MS = 15_000
 const ANSWER_SLACK_MS = 1_000
 /** The item stands before every other Token Pace item (theirs count down from 1000). */
 export const KEEPWARM_ITEM_PRIORITY = 1001
-/** At most this many open executions are held per terminal — a shell that never reports an end cannot grow it. */
-const EXECUTIONS_PER_TERMINAL_MAX = 8
-/** The shell VS Code reports for a terminal while Claude Code runs in it (probe P-1). */
-const CLAUDE_SHELL = 'claude'
 
-/** The slice of `vscode.window` the host uses — the real one in the extension, a fake in the tests. */
-export interface KeepWarmWindow {
-  readonly terminals: readonly vscode.Terminal[]
-  readonly activeTerminal: vscode.Terminal | undefined
-  readonly state: vscode.WindowState
-  onDidStartTerminalShellExecution: vscode.Event<vscode.TerminalShellExecutionStartEvent>
-  onDidEndTerminalShellExecution: vscode.Event<vscode.TerminalShellExecutionEndEvent>
-  onDidChangeActiveTerminal: vscode.Event<vscode.Terminal | undefined>
-  onDidChangeWindowState: vscode.Event<vscode.WindowState>
-  onDidCloseTerminal: vscode.Event<vscode.Terminal>
+/**
+ * The slice of `vscode.window` the host uses — the real one in the extension, a fake in the tests: the
+ * watch's terminal members (1.10: TerminalWindow, moved) and the countdown's item.
+ */
+export interface KeepWarmWindow extends TerminalWindow {
   createStatusBarItem(id: string, alignment?: vscode.StatusBarAlignment, priority?: number): vscode.StatusBarItem
 }
 
@@ -108,6 +106,11 @@ export interface KeepWarmHostOptions {
   log: KeepWarmLog
   /** The host's clock, for the times of the terminal and focus events. */
   clock?: () => number
+  /**
+   * 1.10 A3 rule 1: the window's one terminal watch, shared with the prompt tool (the extension makes it).
+   * Absent: the host makes its own on `window` and `clock`, and disposes it with itself (the tests).
+   */
+  watch?: TerminalWatch
 }
 
 /** Everything one frame knows — fresh each second, from the host's own readers. */
@@ -119,6 +122,8 @@ export interface KeepWarmFrame {
   consent: 'granted' | 'denied' | 'unasked'
   /** `vscode.workspace.isTrusted`. */
   trusted: boolean
+  /** G14 (1.10 B7): no cold scan and no agent replay under way — extension.ts `!(scanning || replayRun !== null)`. */
+  settled: boolean
   /** Every watched session, most urgent first (`watchCaches`, uncapped). */
   entries: readonly CacheWatchEntry[]
   /** Every session's newest bridge reading (`QuotaManager.promptCacheReadings`). */
@@ -178,31 +183,6 @@ function shortId(sessionId: string): string {
 function billableOf(rec: MainRec): number {
   const n = (v: unknown): number => (finite(v) && v > 0 ? v : 0)
   return n(rec.input) + n(rec.cacheWrite) + n(rec.output)
-}
-
-/**
- * §0a.6: of an open shell execution, what G7 tests — its command line with the confidence VS Code gives
- * it, and the working directory the shell reported. Read at the test and handed to
- * `claudeExecutionMatches`, which keeps nothing; this is the only place an execution is read.
- */
-function executionFacts(execution: vscode.TerminalShellExecution): ShellExecutionFacts {
-  const line = execution.commandLine
-  const dir = execution.cwd
-  return {
-    commandLine: typeof line?.value === 'string' ? line.value : '',
-    confidence: typeof line?.confidence === 'number' ? line.confidence : -1,
-    cwd: typeof dir?.fsPath === 'string' ? dir.fsPath : null,
-  }
-}
-
-/**
- * §7c (probe P-1): VS Code's word for what runs in a terminal — `claude` while Claude Code runs —, or
- * undefined where it has none. The only thing read of a terminal besides its executions; its name,
- * which Claude Code sets to a summary of the conversation, never is.
- */
-function shellOf(terminal: vscode.Terminal): string | undefined {
-  const s = terminal.state as { shell?: unknown } | undefined
-  return typeof s?.shell === 'string' ? s.shell : undefined
 }
 
 /** §0a.8: the one write into another program's input — the fixed line, and Enter. */
@@ -292,15 +272,38 @@ export function siblingsOf(sessionId: string, projectDir: string, mains: KeepWar
   for (const pair of mains) {
     const rec = pair?.[1]
     if (!rec || rec.sessionId === sessionId || typeof pair[0] !== 'string' || projectDirOf(pair[0]) !== projectDir) continue
-    const last = rec.lastRequest
-    out.push({
-      firstAt: rec.firstTs,
-      lastTs: rec.lastTs,
-      stop: last ? last.stop : null,
-      replyPending: last ? last.replyPending : null,
-      running: sessionRunning(tree, rec.sessionId),
-      lastUserAt: rec.lastUserAt,
-    })
+    out.push(sessionFacts(rec, tree))
+  }
+  return out
+}
+
+/** What G13 — and the prompt tool's decision (1.10 A4) — takes of one main record: times, a stop reason, flags. */
+function sessionFacts(rec: MainRec, tree: AgentTreeVm | null): KeepWarmSibling {
+  const last = rec.lastRequest
+  return {
+    firstAt: rec.firstTs,
+    lastTs: rec.lastTs,
+    stop: last ? last.stop : null,
+    replyPending: last ? last.replyPending : null,
+    running: sessionRunning(tree, rec.sessionId),
+    lastUserAt: rec.lastUserAt,
+  }
+}
+
+/**
+ * 1.10 A4 (§0a.5): every main session of a folder — `siblingsOf`'s body without the exclusion —, with its
+ * id, for the prompt tool's decision. `projectDir` is the name a terminal's working directory gives
+ * (`projectDirName`), compared with each transcript's folder as G7 compares them (`sameProjectDir`: a
+ * Windows drive letter in either case). Every root's `projects/<folder>` alike; each once per transcript,
+ * whatever its age. Times, a stop reason and flags — never a text of the session, and none of it logged.
+ */
+export function folderSessions(projectDir: string, mains: KeepWarmFrame['mains'], tree: AgentTreeVm | null): Array<KeepWarmSibling & { sessionId: string }> {
+  const out: Array<KeepWarmSibling & { sessionId: string }> = []
+  if (typeof projectDir !== 'string' || projectDir === '') return out
+  for (const pair of mains) {
+    const rec = pair?.[1]
+    if (!rec || typeof rec.sessionId !== 'string' || typeof pair[0] !== 'string' || !sameProjectDir(projectDirOf(pair[0]), projectDir)) continue
+    out.push({ sessionId: rec.sessionId, ...sessionFacts(rec, tree) })
   }
   return out
 }
@@ -326,21 +329,13 @@ export class KeepWarmHost {
   private readonly file: string
   private readonly log: KeepWarmLog
   private readonly clock: () => number
+  /** The window's terminal watch (1.10 A3 rule 1) — the extension's, or this host's own. */
+  private readonly watch: TerminalWatch
+  /** Whether this host made the watch, and so disposes it. */
+  private readonly ownWatch: boolean
 
-  /** Whether the terminal and focus events are subscribed to — only while keep-warm may act. */
+  /** Whether keep-warm wants the terminal and focus events — only while it may act. */
   private tracking = false
-  /** When tracking began: a session's newest reply before it is one this window cannot judge G8 for. */
-  private since = 0
-  private subs: vscode.Disposable[] = []
-  /**
-   * The open shell executions of each terminal (started, not ended) — references, never their values —,
-   * each with when its start event came on this host's clock (G13).
-   */
-  private open = new Map<vscode.Terminal, Map<vscode.TerminalShellExecution, number>>()
-  private active: vscode.Terminal | undefined = undefined
-  private focused = false
-  /** Per terminal, when it last stopped being the focused window's active terminal. */
-  private touchedAt = new Map<vscode.Terminal, number>()
 
   private phases = new Map<string, Phase>()
   private countdown: Countdown | null = null
@@ -359,9 +354,11 @@ export class KeepWarmHost {
     this.file = opts.file
     this.log = opts.log
     this.clock = opts.clock ?? Date.now
+    this.ownWatch = opts.watch === undefined
+    this.watch = opts.watch ?? new TerminalWatch(this.window, this.clock)
   }
 
-  /** Whether the terminal events are subscribed to (for the tests: inert while it may not act). */
+  /** Whether keep-warm wants the terminal events (for the tests: inert while it may not act). */
   isTracking(): boolean {
     return this.tracking
   }
@@ -455,6 +452,21 @@ export class KeepWarmHost {
     this.fileCache = null
   }
 
+  /**
+   * 1.10 A3 rule 8 (§3.0 b): a prompt of the reader's is being typed into `terminal` — a countdown armed
+   * for that very terminal ends without its line (a line on top of the prompt would be a second request
+   * into a busy composer), its item goes, and the log says so; true when one did. A countdown for another
+   * terminal is not touched. The idle phase is not marked cancelled: the prompt's request starts a new one.
+   */
+  yieldTo(terminal: vscode.Terminal): boolean {
+    const c = this.countdown
+    if (c === null || c.terminal !== terminal) return false
+    this.countdown = null
+    this.hideItem()
+    this.log.info('keep-warm: not sent (a prompt was typed into its terminal)')
+    return true
+  }
+
   dispose(): void {
     this.stopTracking()
     this.countdown = null
@@ -463,94 +475,34 @@ export class KeepWarmHost {
       this.item.dispose()
       this.item = null
     }
+    if (this.ownWatch) this.watch.dispose()
   }
 
   // ------------------------------------------------------------------ tracking
 
+  /** Keep-warm may act: the watch listens for it too (1.10: it may already listen for the prompt tool). */
   private startTracking(now: number): void {
     this.tracking = true
-    this.since = now
-    this.active = this.window.activeTerminal
-    this.focused = this.window.state?.focused === true
-    this.subs.push(
-      this.window.onDidStartTerminalShellExecution((e) => {
-        if (!e || !e.terminal || !e.execution) return
-        const executions = this.open.get(e.terminal) ?? new Map<vscode.TerminalShellExecution, number>()
-        if (executions.size >= EXECUTIONS_PER_TERMINAL_MAX) executions.delete(executions.keys().next().value as vscode.TerminalShellExecution)
-        // When it started, on this host's clock: G13 compares the session's first reply with it.
-        executions.set(e.execution, this.clock())
-        this.open.set(e.terminal, executions)
-      }),
-      this.window.onDidEndTerminalShellExecution((e) => {
-        if (!e || !e.terminal) return
-        const executions = this.open.get(e.terminal)
-        if (!executions) return
-        executions.delete(e.execution)
-        if (executions.size === 0) this.open.delete(e.terminal)
-      }),
-      this.window.onDidCloseTerminal((terminal) => {
-        this.open.delete(terminal)
-        this.touchedAt.delete(terminal)
-        if (this.active === terminal) this.active = undefined
-      }),
-      this.window.onDidChangeActiveTerminal((terminal) => {
-        this.closeTouch(this.clock())
-        this.active = terminal
-      }),
-      this.window.onDidChangeWindowState((s) => {
-        this.closeTouch(this.clock())
-        this.focused = s?.focused === true
-      }),
-    )
+    this.watch.want('keepWarm', true, now)
   }
 
+  /** Keep-warm may not act: the watch no longer listens for it, and keep-warm forgets what it held. */
   private stopTracking(): void {
     this.tracking = false
-    for (const d of this.subs.splice(0)) {
-      try { d.dispose() } catch { /* a listener that is gone is gone */ }
-    }
-    this.open.clear()
-    this.touchedAt.clear()
-    this.active = undefined
-    this.focused = false
+    this.watch.want('keepWarm', false, this.clock())
     this.countdown = null
     this.noTerminal.clear()
     this.blockLogged.clear()
   }
 
-  /** The focused window's active terminal stops being so now (a change of either is coming). */
-  private closeTouch(now: number): void {
-    if (this.focused && this.active !== undefined) this.touchedAt.set(this.active, now)
-  }
-
-  /** G8 for one terminal since `lastTs`: touched, not touched, or not known to this window. */
+  /** G8 for one terminal since `lastTs` — the watch's (1.10, moved). */
   private touchedSince(terminal: vscode.Terminal, lastTs: number | undefined): 'no' | 'yes' | 'unknown' {
-    if (!finite(lastTs) || this.since > lastTs) return 'unknown'
-    if (this.focused && this.active === terminal) return 'yes'
-    const at = this.touchedAt.get(terminal)
-    return at !== undefined && at >= lastTs ? 'yes' : 'no'
+    return this.watch.touchedSince(terminal, lastTs)
   }
 
-  /**
-   * G7: the terminals of this window with an open execution of Claude Code in the folder whose
-   * project-directory name is `projectDir`, and whose shell — where VS Code reports one — is Claude Code;
-   * each with when its matching execution started (G13 — of several, the newest: the one that runs now).
-   */
+  /** G7 — the watch's (1.10, moved verbatim from here). */
   private claudeTerminals(projectDir: string): Array<{ terminal: vscode.Terminal; startedAt: number }> {
-    const out: Array<{ terminal: vscode.Terminal; startedAt: number }> = []
-    if (projectDir === '') return out
-    const present = this.window.terminals
-    for (const [terminal, executions] of this.open) {
-      if (!present.includes(terminal)) continue
-      const shell = shellOf(terminal)
-      if (shell !== undefined && shell !== CLAUDE_SHELL) continue
-      let startedAt: number | null = null
-      for (const [execution, at] of executions) {
-        if (claudeExecutionMatches(executionFacts(execution), projectDir) && (startedAt === null || at > startedAt)) startedAt = at
-      }
-      if (startedAt !== null) out.push({ terminal, startedAt })
-    }
-    return out
+    return this.watch.claudeTerminals(projectDir)
   }
 
   // ------------------------------------------------------------------ the guards' facts
@@ -584,6 +536,7 @@ export class KeepWarmHost {
       enabled: f.enabled,
       consent: f.consent,
       trusted: f.trusted,
+      settled: f.settled,
       entry: e,
       reading,
       main: rec,

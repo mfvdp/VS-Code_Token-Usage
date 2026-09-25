@@ -632,6 +632,14 @@ body {
      of one such token in the data-quality list. Only tokens that would overflow are affected. */
   overflow-wrap: anywhere;
 }
+/* 1.9 P19: Korean writes a space between its words, and a line ends there — as Korean is set, and as VS Code's own
+   Korean interface breaks. Chrome's default ends a line between any two Hangul syllables ("적습" | "니다"); keep-all
+   keeps a Korean word whole, and a word too long for its box still breaks (overflow-wrap, above). Japanese and
+   Chinese keep the default, a break between any two characters; an element in another language inside a Korean page
+   (the picker’s native names) takes it back. A page in any other language draws as before: normal is the initial
+   value, and nothing else on the page sets word-break. */
+:lang(ko) { word-break: keep-all; }
+[lang]:not(:lang(ko)) { word-break: normal; }
 h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
      margin: 20px 0 8px; font-weight: 600; }
 h2:first-child { margin-top: 0; }

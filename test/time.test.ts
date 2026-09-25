@@ -233,9 +233,9 @@ function digitMonth(locale: string): boolean {
   return !/\p{L}/u.test(parts.find((p) => p.type === 'month')?.value ?? '')
 }
 
-test('the weekday in front of a clock time tells the seven days apart in every shipped locale and never ends with a dot (1.9 A5 fix 1)', () => {
+test('the weekday in front of a clock time is the language\'s own short name, seven apart in every shipped locale; English and German keep their two letters (1.9 A5 fix 1, P19 §7c item 9)', () => {
   try {
-    for (const { locale } of LANGUAGES) {
+    for (const { id, locale } of LANGUAGES) {
       setLocale(locale)
       const labels = WEEK.map((ms) => {
         const out = formatTime(ms, utc, true)
@@ -243,24 +243,32 @@ test('the weekday in front of a clock time tells the seven days apart in every s
         return out.slice(0, -' 14:20'.length)
       })
       assert.equal(new Set(labels).size, 7, `${locale}: ${labels.join(' ')}`)
-      for (const l of labels) {
-        assert.ok(l.length > 0 && !l.endsWith('.'), `${locale}: "${l}"`)
-        // The label is the locale's own short name, or its first two characters.
-        const names = WEEK.map((ms) => new Intl.DateTimeFormat(locale, { timeZone: 'UTC', weekday: 'short' }).format(ms))
-        assert.ok(names.some((n) => n === l || n.replace(/\.$/, '') === l || n.slice(0, 2) === l), `${locale}: "${l}" is not a weekday name`)
-      }
+      // What the label must be, decided from this machine's Intl — never from a list of names.
+      const names = WEEK.map((ms) => new Intl.DateTimeFormat(locale, { timeZone: 'UTC', weekday: 'short' }).format(ms))
+      const twoLetters = id === 'en' || id === 'de'
+      const want = !twoLetters && new Set(names).size === 7
+        ? names
+        : new Set(names.map((n) => n.slice(0, 2))).size === 7 ? names.map((n) => n.slice(0, 2)) : names.map((n) => n.replace(/\.$/, ''))
+      assert.deepEqual(labels, want, `${locale}: ${labels.join(' ')}`)
+      for (const l of labels) assert.ok(l.length > 0 && l === l.trim(), `${locale}: "${l}"`)
     }
-    // pt-BR is the one of the fourteen whose two-letter prefixes collide (seg./sex., qua./qui.) on
-    // this ICU: the whole short name then, without its dot. Decided from Intl, like the test above.
+    // Polish: the usual forms, not the two letters that made "po" ("after") of Monday (Review of round 2, §7c item 9).
+    setLocale('pl')
+    assert.deepEqual(WEEK.map((ms) => formatTime(ms, utc, true).slice(0, -' 14:20'.length)), ['pon.', 'wt.', 'śr.', 'czw.', 'pt.', 'sob.', 'niedz.'])
+    // Turkish writes Monday "Pzt", not "Pz"; Japanese and Chinese keep their one- and two-character names.
+    setLocale('tr')
+    assert.equal(formatTime(WEEK[0], utc, true), `${new Intl.DateTimeFormat('tr', { timeZone: 'UTC', weekday: 'short' }).format(WEEK[0])} 14:20`)
+    // English and German keep 1.8's two letters — the manifests quote “· Mo 06:00” — and so does a regional tag of them.
+    for (const tag of ['en', 'de', 'en-GB', 'de-CH']) {
+      setLocale(tag)
+      assert.equal(formatTime(WEEK[5], utc, true), 'Sa 14:20', tag)
+      assert.equal(formatTime(WEEK[0], utc, true), 'Mo 14:20', tag)
+    }
+    // A language whose short names would collide falls back to the prefix rule of 1.9 A5 (pt-BR's two letters
+    // collide — seg./sex., qua./qui. — so where its short names collided too, the names without their dot).
     setLocale('pt-BR')
-    const f = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', weekday: 'short' })
-    const prefixes = new Set(WEEK.map((ms) => f.format(ms).slice(0, 2)))
-    if (prefixes.size < 7) assert.equal(formatTime(WEEK[4], utc, true), `${f.format(WEEK[4]).replace(/\.$/, '')} 14:20`)
-    // English and German keep 1.8's two letters.
-    setLocale('en')
-    assert.equal(formatTime(WEEK[5], utc, true), 'Sa 14:20')
-    setLocale('de')
-    assert.equal(formatTime(WEEK[5], utc, true), 'Sa 14:20')
+    const pt = WEEK.map((ms) => new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', weekday: 'short' }).format(ms))
+    if (new Set(pt).size === 7) assert.equal(formatTime(WEEK[4], utc, true), `${pt[4]} 14:20`)
   } finally {
     setLocale(undefined)
   }

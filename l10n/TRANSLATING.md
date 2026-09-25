@@ -39,10 +39,12 @@ how the translations were made is in [Languages](../docs/languages.md).
   `command:…`), **codicons** (`$(watch)`), **file names and paths** (`quota.json`,
   `~/.claude/…`), and **everything in backticks** — with one exception in the manifest: a span that
   spells a formula in words (`ratio = (used ÷ limit) ÷ (elapsed ÷ window)`) or quotes a label the page
-  shows translated (`subagents`) is translated as the German does. There are five, and the test
+  shows translated (`subagents`) is translated as the German does. There are seven, and the test
   names them (`NLS_SPANS_READ_AS_WORDS`): `ratio = (used ÷ limit) ÷ (elapsed ÷ window)`,
-  `used % − elapsed %`, `ratio 1.12`, `elapsed ≈ 0` and `subagents`. A description keeps as many
-  backtick spans as the English — these five in your words, still in backticks, every other one as
+  `used % − elapsed %`, `ratio 1.12`, `elapsed ≈ 0`, `subagents`, and — added when the first twelve
+  languages were joined — `plan Max 20x (as configured)` (the tooltip's `plan {0} (as configured)`) and
+  `other` (the chart's band). Quote a label as your bundle translates it. A description keeps as many
+  backtick spans as the English — these seven in your words, still in backticks, every other one as
   it is.
 * **The JSON examples** of the manifest, byte for byte.
 * **The keep-warm line** `Ignore this message. No action. No response.` — a text for Claude, not for

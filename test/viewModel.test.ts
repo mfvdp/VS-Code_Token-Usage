@@ -18,7 +18,7 @@ import { EARLIER_KEY, MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
 import {
   AGENT_SELECTED_IN, DASHBOARD_SECTION_KEYS, isAgentSelectedIn, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
   SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentShareOf, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
-  forecastsFor, SparkVm, parseWebviewMessage, pricingOf, providerViewOf, sparkOf, viewSources,
+  forecastsFor, SparkVm, parseWebviewMessage, pricingOf, providerViewOf, resetLineOf, sparkOf, viewSources,
 } from '../src/viewModel'
 import {
   CLAUDE_FILE, FINGERPRINT, NOW, SHARE_AGENTS, TODAY, addCacheSession, agentShareAgg, buildAgg, daysAgo, fillHistory, makeConfig,
@@ -214,6 +214,38 @@ test('the calibration factor appears only when it was switched on', () => {
   assert.ok(vm.dataQuality.calibration.length > 0)
   for (const c of vm.dataQuality.calibration) {
     assert.ok(c.text === 'not enough data' || c.text.startsWith('~'))
+  }
+})
+
+test('the calibration factor, its band and its basis are written in the page\'s own digits — Intl for the locale, never toFixed (1.9 P19, §7c item 8)', () => {
+  const { setLocale } = require('../src/i18n') as typeof import('../src/i18n')
+  const history = makeHistory()
+  fillHistory(history)
+  const texts = (tag: string | undefined): string[] => {
+    try {
+      setLocale(tag)
+      resetTimeMemos()
+      return buildViewModel(makeInput({ history, cfg: makeConfig({ 'tokenPace.calibration.show': true }) })).dataQuality.calibration.map((c) => c.text)
+    } finally {
+      setLocale(undefined)
+      resetTimeMemos()
+    }
+  }
+  const english = texts(undefined)
+  const measured = english.filter((x) => x !== 'not enough data')
+  assert.ok(measured.length > 0, `no window has a calibration to write: ${JSON.stringify(english)}`)
+  // English keeps its digits: one decimal, a point.
+  for (const x of measured) assert.match(x, /^~server counts \d+\.\d % of the window per 1M local tokens \(band \d+\.\d–\d+\.\d, \d+\.\d h of basis\)$/, x)
+  for (const tag of ['de', 'fr', 'pl', 'ja', 'pt-BR', 'cs']) {
+    const shown = texts(tag)
+    assert.equal(shown.length, english.length, tag)
+    english.forEach((en, i) => {
+      // The English text with each of its four figures in the locale's own digits: Intl decides, not a list of marks.
+      const want = en.replace(/\d+\.\d/g, (n) => Number(n).toLocaleString(tag, { minimumFractionDigits: 1, maximumFractionDigits: 1, useGrouping: false }))
+      assert.equal(shown[i], want, `${tag}: ${shown[i]}`)
+    })
+    // A decimal comma where the language writes one — the '.' of toFixed is gone.
+    if (tag !== 'ja') assert.ok(shown.filter((x) => x !== 'not enough data').every((x) => !/\d\.\d/.test(x) && /\d,\d/.test(x)), `${tag}: ${JSON.stringify(shown)}`)
   }
 })
 
@@ -1592,6 +1624,42 @@ test('a stated reset is given its verb exactly once, and "reset due" keeps none'
   assert.equal(windowOf({ resetsAt: null, windowMinutes: null }).resetLine, '')
 })
 
+test('a clock time takes "resets at", a countdown "resets" — the two messages the status bar and the page pick from, in every language (1.9 P19, §7c item 2)', () => {
+  const { setBundle } = require('../src/i18n') as typeof import('../src/i18n')
+  const { formatReset } = require('../src/time') as typeof import('../src/time')
+  // A countdown, as every view hands it in today: the relative message.
+  assert.equal(resetLineOf('normal', '2h14m'), 'resets 2h14m')
+  assert.equal(resetLineOf('normal', '3d 5h'), 'resets 3d 5h')
+  assert.equal(resetLineOf('normal', '<1m'), 'resets <1m')
+  // A clock time — 24 h, 12 h, with the weekday a reset beyond a day carries, the absolute form beside its
+  // countdown — takes the message for a time of day, as statusText.ts resetSuffix and the page's fbResetLine do.
+  assert.equal(resetLineOf('normal', '06:00'), 'resets at 06:00')
+  assert.equal(resetLineOf('normal', '06:00 AM'), 'resets at 06:00 AM')
+  assert.equal(resetLineOf('normal', 'Mo 06:00'), 'resets at Mo 06:00')
+  const both = formatReset(AHEAD, NOW, 'both', tcfg)
+  assert.ok(/\d:\d\d \(in 2h\)$/.test(both), both)
+  assert.equal(resetLineOf('normal', both), `resets at ${both}`)
+  // "reset due" keeps no verb, whichever form it came in; no reset, no line.
+  assert.equal(resetLineOf('resetDue', '06:00'), 'reset due')
+  assert.equal(resetLineOf('normal', 'reset due'), 'reset due')
+  assert.equal(resetLineOf('normal', '06:00 (reset due)'), '06:00 (reset due)')
+  assert.equal(resetLineOf('normal', ''), '')
+  // In German the two prepositions differ — „Reset in 2h14m", „Reset um 06:00" —, never „Reset in 06:00".
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    assert.equal(resetLineOf('normal', '2h14m'), `${bundle['resets {0}'].replace('{0}', '2h14m')}`)
+    assert.equal(resetLineOf('normal', '06:00'), `${bundle['resets at {0}'].replace('{0}', '06:00')}`)
+    assert.equal(resetLineOf('normal', '06:00'), 'Reset um 06:00')
+    assert.equal(resetLineOf('normal', 'Mo 06:00'), 'Reset um Mo 06:00')
+    assert.equal(resetLineOf('resetDue', '06:00'), 'Reset fällig')
+  } finally {
+    setBundle(undefined)
+  }
+  // The card still gets the countdown's line: the rule changes nothing the views hand in today.
+  assert.equal(windowOf({ resetsAt: AHEAD }).resetLine, 'resets 2h')
+})
+
 test('every window state reaches the views as words, over all three reset situations', () => {
   const states: Array<{ over: Partial<QuotaWindow>; display: string; word: string; verdict?: string }> = [
     { over: { percent: 40 }, display: 'normal', word: '' },
@@ -2855,7 +2923,7 @@ test('the picker offers Automatic, then every available language in the registry
   assert.deepEqual(pick('auto', ['de', 'en']).options.map((o) => o.id), ['auto', 'en', 'de'])
 })
 
-test('the Automatic line says what auto shows — VS Code\'s language by its own name, or that it has no translation here — and a language without a file checks English (1.9 A3.3)', () => {
+test('the Automatic line says what auto shows — VS Code\'s language by its own name, or that it has no translation here — and a language without a file checks nothing (1.9 A3.3, P19 §7c decision c)', () => {
   const { resolveLanguage } = require('../src/languages') as typeof import('../src/languages')
   const pick = (setting: import('../src/languages').LanguageSetting, vscode: string, available: import('../src/languages').LanguageId[] = ['en', 'de']) =>
     buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(setting, vscode, available), available, vscode } }).language
@@ -2869,13 +2937,20 @@ test('the Automatic line says what auto shows — VS Code\'s language by its own
   assert.equal(autoLine(pick('de', 'pt-PT')), "Automatic — VS Code's language (pt-pt) has no translation here, so English")
   // VS Code's tag is held to a tag's alphabet before it is printed.
   assert.equal(autoLine(pick('auto', 'x"><img src=1>')), 'Automatic — as VS Code (English)')
-  // An explicit language this build has no file for is English on screen, and English is the checked one.
+  // An explicit language this build has no file for is English on screen — and the list checks nothing: it offers
+  // no such item, and English is not what the setting says (P19, §7c decision c). A click on English then writes it.
   const fr = pick('fr', 'en')
   assert.equal(fr.setting, 'fr')
   assert.equal(fr.shown, 'en')
+  assert.equal(fr.flag, 'us')
   assert.equal(fr.buttonLabel, 'Language: English')
-  assert.deepEqual(fr.options.filter((o) => o.checked).map((o) => o.id), ['en'])
+  assert.deepEqual(fr.options.map((o) => o.id), ['auto', 'en', 'de'])
+  assert.deepEqual(fr.options.filter((o) => o.checked).map((o) => o.id), [])
   assert.equal(fr.options.some((o) => o.id === 'fr'), false)
+  // Every other setting still checks exactly its own item.
+  for (const setting of ['auto', 'en', 'de'] as const) {
+    assert.deepEqual(pick(setting, 'en').options.filter((o) => o.checked).map((o) => o.id), [setting], setting)
+  }
 })
 
 test('parseWebviewMessage takes a language choice only as auto or a registry id, exactly as spelled; the choice is no view state (1.9 A7 test 2, §0a.3)', () => {

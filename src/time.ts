@@ -416,38 +416,51 @@ export function formatTime(ms: number, cfg: TimeConfig, withWeekday = false): st
 }
 
 /**
- * Per locale tag: whether the seven short weekday names give seven different two-character
- * prefixes. Decided once per tag, from `Intl` itself — the names are ICU's, and two machines
- * with two ICU builds may disagree.
+ * Per locale tag: how the weekday in front of a clock time is written — `short`, the locale's own short name as Intl
+ * gives it; `two`, its first two characters; `bare`, the short name without a trailing '.'. Decided once per tag, from
+ * `Intl` itself — the names are ICU's, and two machines with two ICU builds may disagree.
  */
-const twoLetterWeekdays = new Map<string, boolean>()
+const weekdayForms = new Map<string, 'short' | 'two' | 'bare'>()
 
-function weekdaysDistinctInTwo(lang: string): boolean {
-  let known = twoLetterWeekdays.get(lang)
+/**
+ * 1.9 P19 (§7c item 9): the languages whose bar keeps 1.8's two letters — English and German, the two languages 1.8
+ * shipped: their manifests quote “· Mo 06:00” (the English is frozen, §0b.8), and 1.8's tests pin “Sa 14:20”. Decided
+ * by the locale's primary subtag, so a regional English or German (`en-gb`, `de-ch` under `auto`) keeps them too.
+ */
+const TWO_LETTER_WEEKDAYS: ReadonlySet<string> = new Set(['en', 'de'])
+
+function weekdayForm(lang: string): 'short' | 'two' | 'bare' {
+  let known = weekdayForms.get(lang)
   if (known === undefined) {
     const f = new Intl.DateTimeFormat(lang, { timeZone: 'UTC', weekday: 'short' })
     // 2026-09-06 is a Sunday; seven days from there are the seven names, in any order.
-    const prefixes = new Set<string>()
-    for (let d = 0; d < 7; d++) prefixes.add(f.format(Date.UTC(2026, 8, 6 + d, 12)).slice(0, 2))
-    known = prefixes.size === 7
-    twoLetterWeekdays.set(lang, known)
+    const names: string[] = []
+    for (let d = 0; d < 7; d++) names.push(f.format(Date.UTC(2026, 8, 6 + d, 12)))
+    const distinct = (xs: string[]): boolean => new Set(xs).size === 7 && xs.every((x) => x.length > 0)
+    const primary = (f.resolvedOptions().locale.split('-')[0] ?? '').toLowerCase()
+    const two = distinct(names.map((n) => n.slice(0, 2)))
+    if (!TWO_LETTER_WEEKDAYS.has(primary) && distinct(names)) known = 'short'
+    else known = two ? 'two' : 'bare'
+    weekdayForms.set(lang, known)
   }
   return known
 }
 
 /**
- * 1.9 A5: the weekday in front of a clock time — its first two characters when the locale's seven short weekday names
- * give seven different two-character prefixes (en "Sa", de "Sa", ru "сб"), else the whole short name without a trailing
- * '.' (pt-BR: seg./sex. and qua./qui. share "se" and "qu"). Decided per locale once, memoised by the locale tag.
+ * 1.9 A5, revised by P19 (§7c item 9): the weekday in front of a clock time — the language's own short name, as Intl's
+ * `weekday: 'short'` writes it (pl "pon.", tr "Pzt", fr "lun.", ja "月", zh-CN "周一"), where its seven are distinct.
+ * The two-character prefix of 1.8 turned Polish "pon." into "po" — a word ("after") — and Turkish "Pzt" into "Pz". Where
+ * the seven short names collide, the prefix rule of 1.9 A5: their first two characters when those give seven different
+ * labels, else the whole short name without a trailing '.'. English and German keep 1.8's two letters ("Mo", "Sa"):
+ * TWO_LETTER_WEEKDAYS. Decided per locale once, memoised by the locale tag.
  */
 function weekdayLabel(ms: number, zone: string | undefined, lang: string): string {
   const w = formatter(`w|${lang}|${zone ?? ''}`, () => new Intl.DateTimeFormat(lang, {
     timeZone: zone, weekday: 'short',
   }))
-  const name = w.format(ms)
-  // Two letters where they tell the seven days apart: the bar is narrow and "Mo" is unambiguous
-  // next to a clock time. Where they do not, the short name itself, which always does.
-  return weekdaysDistinctInTwo(lang) ? name.slice(0, 2) : name.replace(/\.$/, '')
+  const name = plainSpaces(w.format(ms))
+  const form = weekdayForm(lang)
+  return form === 'short' ? name : form === 'two' ? name.slice(0, 2) : name.replace(/\.$/, '')
 }
 
 /**

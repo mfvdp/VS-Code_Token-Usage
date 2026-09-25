@@ -54,19 +54,29 @@ import { ROOT } from './helpers/nls'
 // ---------------------------------------------------------------------------
 
 /**
+ * T9's false positives the translation packages reported, added at the join of group L (1.9 B5: the lead's 23860f6
+ * after the ja merge, confirmed by P19 over all twelve reports) — each named in the brief (TRANSLATING.md, T9), which
+ * the brief's test holds. The reports were these three words, all from the languages of another script, where three
+ * Latin words in a row fail T9 (ja, ko, zh-cn, zh-tw, ru); fr, es, pt-br, tr, pl and cs reported none. Italian reported
+ * one in `config.budgets.description` — "uno per scope × period × unit", 'per' being Italian too — and rephrased it: no
+ * entry for it, since 'scope', 'period', 'unit' and 'per' are English words T9 has to go on catching, and no narrower
+ * rule tells the Italian 'per' from the English one.
+ */
+export const ADDED_AT_THE_JOIN: ReadonlyArray<readonly [string, string]> = [
+  ['codex app-server', 'the literal command Token Pace starts — the bundle key "• Codex — the local …codex app-server… is started …", config.codexQuotaSources.enum.poll, config.codexAppServer.mode.enum.oneShot and .persistent (ja, ko, zh-cn, zh-tw, ru)'],
+  ['paceWarn', 'a contributed theme colour id — config.colorMode.enum.theme lists `tokenPace.paceOk / paceWarn / paceAhead / stale` (ja, ko, zh-cn, zh-tw, ru)'],
+  ['paceAhead', 'a contributed theme colour id — config.colorMode.enum.theme, as paceWarn'],
+]
+
+/**
  * T9's exceptions, each with its reason: a word of this list is taken out of the key and the value
  * before they are compared, so keeping it in English is no "English left". Owned by 1.9 P3; the lead
  * extends it at the join (P19) for a false positive a translation package reports — never a package
- * itself (§0b.7). Case matters: `Windows` is the operating system, `windows` the quota's.
+ * itself (§0b.7): ADDED_AT_THE_JOIN. Case matters: `Windows` is the operating system, `windows` the quota's.
  */
 export const SAME_IN_EVERY_LANGUAGE: ReadonlyArray<readonly [string, string]> = [
   // The product names of the brief (TRANSLATING.md, "Never translated").
   ['Token Pace', 'the product\'s name'],
-  // Added at the join of group L (the lead, 2026-09-25): the literal command and two contributed colour ids
-  // that T9 read as three Latin words in a row in Japanese (and would in Korean, Chinese and Russian).
-  ['codex app-server', 'the literal command Token Pace starts'],
-  ['paceWarn', 'a contributed theme colour id'],
-  ['paceAhead', 'a contributed theme colour id'],
   ['Claude Code', 'a product\'s name'],
   ['Claude', 'a product\'s name'],
   ['Codex', 'a product\'s name'],
@@ -112,6 +122,8 @@ export const SAME_IN_EVERY_LANGUAGE: ReadonlyArray<readonly [string, string]> = 
   ['Max', 'a plan\'s name as the providers write it (config.planName\'s examples)'],
   ['Team', 'a plan\'s name as the providers write it (config.planName\'s examples)'],
   ['Plus', 'a plan\'s name as the providers write it (config.planName\'s examples)'],
+  // 1.9 B5: the join's false positives (above).
+  ...ADDED_AT_THE_JOIN,
 ]
 
 /**
@@ -131,6 +143,9 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
   ['ratio 1.12', 'a value of the formula, in its words (config.pace.tolerancePoints)'],
   ['elapsed ≈ 0', 'the formula\'s edge case in words (config.pace.minElapsedPercent)'],
   ['subagents', 'the chart chip\'s label as the page shows it (config.chart.modelStyle) — the page translates it'],
+  // 1.9 B5 (P19): two spans every translation package reported — each quotes a text the extension shows translated.
+  ['plan Max 20x (as configured)', 'the configured plan as the tooltip names it — the runtime string \'plan {0} (as configured)\', translated (config.planName) — all twelve packages reported it'],
+  ['other', 'the chart band\'s label as the page shows it — the bundle key \'other\', translated (config.chart.modelStyle) — reported by ko'],
 ]
 
 // ---------------------------------------------------------------------------
@@ -943,4 +958,10 @@ test('the brief names every rule of the frame, the files a package owns, the gat
   // The marks, as the rules count them; the product names, as T9 excepts them.
   for (const m of MARKS) assert.ok(brief.includes(`\`${m}\``), `the brief does not name the mark ${m}`)
   for (const [w] of SAME_IN_EVERY_LANGUAGE.slice(0, 15)) assert.ok(brief.includes(w), `the brief does not name ${w}`)
+  // 1.9 B5 (P19): every word added at the join, and every manifest span that is words, is named in the brief — a
+  // translation of a later language must not meet an exception it cannot read about.
+  for (const [w] of ADDED_AT_THE_JOIN) assert.ok(brief.includes(`\`${w}\``), `the brief does not name the join's ${w}`)
+  for (const [w] of NLS_SPANS_READ_AS_WORDS) assert.ok(brief.includes(`\`${w}\``), `the brief does not name the span ${w}`)
+  assert.ok(brief.replace(/\s+/g, ' ').includes(`There are ${['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'][NLS_SPANS_READ_AS_WORDS.length]}, and the test names them`),
+    'the brief does not count the spans that are words')
 })

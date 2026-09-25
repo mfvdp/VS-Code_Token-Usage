@@ -177,3 +177,72 @@ test('resolveLanguage: every setting under VS Code en, de, de-ch and hu — the 
   // English is always there, whatever the list says.
   assert.equal(resolveLanguage('en', 'de', []).id, 'en')
 })
+
+// ---------------------------------------------------------------------------
+// 1.9 B5 (P19): the join — every language of the registry is in the repository, and the picker offers them all
+// ---------------------------------------------------------------------------
+
+test('the join: every language of the registry but English has its four parts, its bundle, its manifest and its freshness record (1.9 B5, P19)', () => {
+  const { existsSync, readFileSync } = require('node:fs') as typeof import('node:fs')
+  const { join } = require('node:path') as typeof import('node:path')
+  const { ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const english = Object.keys(readJson('package.nls.json') as Record<string, string>)
+  const missing: string[] = []
+  for (const { id } of LANGUAGES) {
+    const files = [
+      ...['dashboard', 'host', 'model', 'text'].map((part) => `l10n/parts/${part}.${id}.json`),
+      `l10n/bundle.l10n.${id}.json`,
+      `package.nls.${id}.json`,
+      `l10n/nls-sources/${id}.json`,
+    ]
+    if (id === 'en') {
+      // English is the source: its words are the keys and package.nls.json; no file is named after it.
+      for (const f of files) assert.equal(existsSync(join(ROOT, f)), false, `${f} exists — English has no file of its own`)
+      continue
+    }
+    for (const f of files) {
+      if (!existsSync(join(ROOT, f))) { missing.push(f); continue }
+      const v = JSON.parse(readFileSync(join(ROOT, f), 'utf8')) as unknown
+      assert.ok(v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length > 0, `${f} is no table`)
+    }
+    // The record covers every key of the English manifest, in its order (T12 checks the hashes).
+    if (existsSync(join(ROOT, `l10n/nls-sources/${id}.json`))) {
+      assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(ROOT, `l10n/nls-sources/${id}.json`), 'utf8')) as object), english, `${id}: the record`)
+    }
+  }
+  assert.deepEqual(missing, [], `missing: ${missing.join(', ')}`)
+})
+
+test('the join: availableLanguages over the repository\'s l10n/ finds all fourteen, and the picker offers fifteen options — Automatic and every language in the registry\'s order (1.9 B5, P19)', () => {
+  const { join } = require('node:path') as typeof import('node:path')
+  const { ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const { availableLanguages } = require('../src/languageLoad') as typeof import('../src/languageLoad')
+  const { buildViewModel } = require('../src/viewModel') as typeof import('../src/viewModel')
+  const { makeInput } = require('./fixtures/viewFixtures') as typeof import('./fixtures/viewFixtures')
+  const available = availableLanguages(join(ROOT, 'l10n'))
+  assert.deepEqual(available, [...LANGUAGE_IDS])
+  // What the extension hands the view model at activation, under auto in an English window.
+  const picker = (setting: LanguageSetting) => buildViewModel({
+    ...makeInput(), language: { resolved: resolveLanguage(setting, 'en', available), available, vscode: 'en' },
+  }).language
+  const auto = picker('auto')
+  assert.equal(auto.options.length, 15)
+  assert.deepEqual(auto.options.map((o) => o.id), ['auto', ...LANGUAGE_IDS])
+  assert.deepEqual(auto.options.filter((o) => o.checked).map((o) => o.id), ['auto'])
+  // Each language by its own name, in its own lang, with its flag; its name in the reader's language beside it.
+  for (const e of LANGUAGES) {
+    const o = auto.options.find((x) => x.id === e.id)
+    assert.ok(o, e.id)
+    assert.equal(o.native, e.native)
+    assert.equal(o.lang, e.locale)
+    assert.equal(o.flag, e.flag)
+    assert.equal(o.name, e.id === 'en' ? null : languageName(e.id))
+  }
+  // Every language can be chosen and is then the one checked, its flag on the button.
+  for (const id of LANGUAGE_IDS) {
+    const l = picker(id)
+    assert.equal(l.shown, id)
+    assert.equal(l.flag, languageEntry(id).flag)
+    assert.deepEqual(l.options.filter((o) => o.checked).map((o) => o.id), [id], id)
+  }
+})

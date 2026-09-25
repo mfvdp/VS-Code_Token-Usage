@@ -8876,6 +8876,153 @@ test('the page takes words only in their shape: a tag for lang and locale, a pla
   assert.equal(nodeVm.runInContext("Object.getPrototypeOf(L10N) === Object.prototype && tr('Refresh')", c), 'Aktualisieren')
 })
 
+test('a Korean page keeps its words whole at a line\'s end, and no other language is touched (1.9 P19, the space rule of Korean)', () => {
+  // Chrome ends a line between any two Hangul syllables unless told otherwise ("적습" | "니다" on the ko page at 260 px).
+  assert.match(STYLE, /\n:lang\(ko\) \{ word-break: keep-all; \}\n\[lang\]:not\(:lang\(ko\)\) \{ word-break: normal; \}\n/)
+  // The only word-break rules of the page: every other language keeps the initial value, Japanese and Chinese included.
+  assert.deepEqual([...STYLE.matchAll(/word-break:\s*([a-z-]+)/g)].map((m) => m[1]), ['keep-all', 'normal'])
+  // A long token still breaks rather than widening the page (body: overflow-wrap: anywhere).
+  assert.match(STYLE, /body \{[^}]*overflow-wrap: anywhere;/)
+})
+
+test('the page takes a canonical locale with a Unicode extension — de-de-u-nu-thai — and draws its figures in it (1.9 P19, §7c decision a)', () => {
+  const c = makeContext()
+  nodeVm.runInContext(SCRIPT, c)
+  const apply = (w: unknown): boolean => {
+    ;(c as Record<string, unknown>).words = w
+    return nodeVm.runInContext('applyWords(words)', c) as boolean
+  }
+  // The host's locale() is a canonical locale and keeps the extension VS Code reported (`de-DE-u-nu-thai`); the tag rule
+  // alone refused it, and the page kept the words it had.
+  for (const locale of ['de-de-u-nu-thai', 'de-DE-u-nu-thai', 'en-US-u-hc-h12', 'ja-JP-u-ca-japanese', 'zh-TW']) {
+    assert.equal(apply({ lang: 'de', locale, dict: { Refresh: 'Aktualisieren' } }), true, locale)
+    assert.equal(nodeVm.runInContext('LOCALE', c), locale)
+  }
+  apply({ lang: 'de', locale: 'de-DE-u-nu-thai', dict: {} })
+  // The figures follow it: Thai digits, the German decimal comma.
+  assert.equal(nodeVm.runInContext('(12.5).toLocaleString(LOCALE)', c), (12.5).toLocaleString('de-DE-u-nu-thai'))
+  assert.match(String(nodeVm.runInContext('(12.5).toLocaleString(LOCALE)', c)), /^[๐-๙]+,[๐-๙]$/)
+  // Still refused: a bare singleton, an extension without a key, an extension in the middle of garbage, markup, a tag
+  // Intl does not take, an overlong one.
+  const before = nodeVm.runInContext('LOCALE', c)
+  for (const locale of ['de-u', 'de-de-u-', 'de-u-nu-thai x', 'de"><img src=x>', 'u-nu-thai', 'de-de-u-nu-thai-', 'de-' + 'a'.repeat(9), 'de-' + 'ab-'.repeat(30) + 'ab']) {
+    assert.equal(apply({ lang: 'de', locale, dict: {} }), false, locale)
+    assert.equal(nodeVm.runInContext('LOCALE', c), before, locale)
+  }
+  // lang follows the same rule; the page's lang is the registry's tag in practice.
+  assert.equal(apply({ lang: 'x y', locale: 'de', dict: {} }), false)
+  assert.equal(apply({ lang: 'pt-BR', locale: 'pt-BR-u-nu-latn', dict: {} }), true)
+})
+
+/**
+ * 1.9 P19 (§7c decision b): a page whose document the test can read — every element the render writes that carries a
+ * `data-act` or an `id` is an object here, rebuilt from the markup on each write, so an element of the old page is gone
+ * after a whole render as it is in a browser; `focus()` moves `document.activeElement`.
+ */
+interface FocusEl { tagName: string; id: string; dataset: Record<string, string>; classList: { contains: (c: string) => boolean }; focus: () => void; closest: () => null; getAttribute: (k: string) => string | null }
+function wordsFocusCtx(): { c: nodeVm.Context; fire: (data: unknown) => void; focus: (pick: (e: FocusEl) => boolean) => FocusEl; active: () => FocusEl | 'body' | null; els: () => FocusEl[]; focused: () => number } {
+  let els: FocusEl[] = []
+  let active: FocusEl | 'body' | null = 'body'
+  let focusCalls = 0
+  const body = { tagName: 'BODY' }
+  const listeners: Array<(ev: unknown) => void> = []
+  const parse = (html: string): FocusEl[] => {
+    const out: FocusEl[] = []
+    for (const m of html.matchAll(/<([a-z]+)\b([^>]*)>/g)) {
+      const attrs: Record<string, string> = {}
+      for (const a of m[2].matchAll(/([\w-]+)="([^"]*)"/g)) attrs[a[1]] = a[2]
+      if (!('data-act' in attrs) && !('id' in attrs)) continue
+      const dataset: Record<string, string> = {}
+      for (const [k, v] of Object.entries(attrs)) if (k.startsWith('data-')) dataset[k.slice(5).replace(/-([a-z])/g, (_x, ch: string) => ch.toUpperCase())] = v
+      const cls = (attrs.class ?? '').split(/\s+/)
+      const e: FocusEl = {
+        tagName: m[1].toUpperCase(), id: attrs.id ?? '', dataset,
+        classList: { contains: (x: string) => cls.includes(x) },
+        focus: () => { active = e; focusCalls++ },
+        closest: () => null,
+        getAttribute: (k: string) => (k in attrs ? attrs[k] : null),
+      }
+      out.push(e)
+    }
+    return out
+  }
+  const root = {
+    set innerHTML(h: string) { els = parse(h); if (active !== 'body' && active !== null && !els.includes(active)) active = 'body' },
+    get innerHTML(): string { return '' },
+    dataset: {}, style: {},
+    contains: (el: unknown) => els.includes(el as FocusEl),
+    querySelectorAll: (sel: string) => (sel === '[data-act]' ? els.filter((e) => 'act' in e.dataset) : []),
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: () => undefined }),
+    document: {
+      addEventListener: () => undefined,
+      getElementById: (id: string) => (id === 'root' ? root : els.find((e) => e.id === id) ?? null),
+      querySelector: (sel: string) => (sel === '[data-sec="provider"] .lng-btn' ? els.find((e) => e.classList.contains('lng-btn')) ?? null : null),
+      querySelectorAll: () => [],
+      get activeElement() { return active === 'body' ? body : active },
+      body,
+      documentElement: { lang: 'en' },
+    },
+    window: { addEventListener: (type: string, fn: (ev: unknown) => void) => { if (type === 'message') listeners.push(fn) }, setInterval: () => 1 },
+    console,
+  })
+  nodeVm.runInContext(SCRIPT, c)
+  const fire = (data: unknown): void => { for (const fn of listeners) fn({ origin: '', data }) }
+  return {
+    c, fire,
+    focus: (pick) => { const e = els.find(pick); assert.ok(e, 'no such element on the page'); e.focus(); return e },
+    active: () => active,
+    els: () => els,
+    focused: () => focusCalls,
+  }
+}
+
+test('after a language switch the focus is back where it was — the element with the same id, the same section\'s summary or control — else on the picker\'s button, never on <body> (1.9 P19, §7c decision b)', () => {
+  const p = wordsFocusCtx()
+  const page = (setting: 'en' | 'de') => model({ sections: ['quota', 'history', 'heatmap'], provider: 'all', language: languageVmOf(setting) })
+  const words = (lang: string) => ({ lang, locale: lang, dict: {} })
+  p.fire({ type: 'data', payload: page('en') })
+  // Nothing on the page had the focus: the switch takes it nowhere.
+  assert.equal(p.active(), 'body')
+  p.fire({ type: 'data', payload: page('de'), words: words('de') })
+  assert.equal(p.active(), 'body')
+  assert.equal(p.focused(), 0)
+  // On a section's summary: the new page's summary of the same section.
+  const was = p.focus((e) => e.dataset.act === 'section' && e.dataset.key === 'history')
+  p.fire({ type: 'data', payload: page('en'), words: words('en') })
+  const now = p.active()
+  assert.ok(now && now !== 'body' && now !== was, 'the focus stayed on the old element or fell to <body>')
+  assert.equal((now as FocusEl).dataset.act, 'section')
+  assert.equal((now as FocusEl).dataset.key, 'history')
+  // On a control that names what it does — a provider button —: the same control of the new page.
+  p.focus((e) => e.dataset.act === 'providerView' && e.dataset.src === 'codex')
+  p.fire({ type: 'data', payload: page('de'), words: words('de') })
+  assert.equal((p.active() as FocusEl).dataset.act, 'providerView')
+  assert.equal((p.active() as FocusEl).dataset.src, 'codex')
+  // On the picker's button itself (a switch made in the settings UI): the button again.
+  p.focus((e) => e.classList.contains('lng-btn'))
+  p.fire({ type: 'data', payload: page('en'), words: words('en') })
+  assert.ok((p.active() as FocusEl).classList.contains('lng-btn'))
+  // On an element with an id — the custom range's first date field, open (page-local state a switch keeps) —: that id again.
+  nodeVm.runInContext('showDates = true', p.c)
+  p.fire({ type: 'data', payload: page('de') })
+  const from = p.focus((e) => e.id === 'tp-from')
+  p.fire({ type: 'data', payload: page('en'), words: words('en') })
+  assert.equal((p.active() as FocusEl).id, 'tp-from')
+  assert.notEqual(p.active(), from, 'the focus stayed on the old element')
+  // On a control the new page cannot find again (a chip that names nothing): the picker's button — not <body>.
+  p.focus((e) => e.dataset.act === 'range' && e.dataset.preset === '7d')
+  p.fire({ type: 'data', payload: page('en'), words: words('en') })
+  assert.ok(p.active() !== 'body' && (p.active() as FocusEl).classList.contains('lng-btn'), JSON.stringify(p.active()))
+  // A whole push without words (the view shown again) moves nothing: that is not a switch.
+  p.focus((e) => e.dataset.act === 'section' && e.dataset.key === 'heatmap')
+  const calls = p.focused()
+  p.fire({ type: 'data', payload: page('en') })
+  assert.equal(p.focused(), calls)
+  assert.equal(p.active(), 'body')
+})
+
 test('a provider fragment redraws the picker and keeps it open, the focus on the item it was on (1.9 §3.0 a)', () => {
   const focused: string[] = []
   const inside = new Set<unknown>()

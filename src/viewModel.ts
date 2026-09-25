@@ -27,7 +27,7 @@ import {
   readTimeConfig,
 } from './config'
 import { digest } from './digest'
-import { t } from './i18n'
+import { locale, t } from './i18n'
 import {
   FlagId, LANGUAGES, LanguageId, LanguageSetting, ResolvedLanguage, isLanguageId, languageEntry, languageName, resolveLanguage,
 } from './languages'
@@ -1265,6 +1265,9 @@ function stateTextOf(display: WindowDisplay, verdictText: string): string {
   return verdictText.toLowerCase().includes(w.toLowerCase()) ? '' : w
 }
 
+/** A clock reading in a reset text — the page's fallback tests the same (webview/main.ts `fbResetLine`). */
+const CLOCK_READING = /\d:\d\d/
+
 /**
  * The reset with its verb attached, once, here.
  *
@@ -1273,20 +1276,24 @@ function stateTextOf(display: WindowDisplay, verdictText: string): string {
  * verb away from it — both for a `resetDue` window and for the minutes after a fresh reading
  * has caught up with a reset that just happened.
  *
- * The `reset` handed in here is always the relative countdown — the card, the Quick Pick and
- * the markdown report carry the clock time in a column of their own — so this line is always
- * "resets <duration>". The status bar, which does follow `tokenPace.resetFormat`, has a
- * second message for the clock-time formats: a countdown and a time of day take different
- * prepositions in most languages, and the seam keys a translation by its English message, so
- * one message can only ever carry one of the two.
+ * A countdown and a time of day take different prepositions in most languages ("in 3h44m"
+ * against "um 15:30"), and the seam keys a translation by its English message, so one message
+ * can only ever carry one of the two: a countdown is "resets <duration>", a clock time "resets
+ * at <time>" — the two messages the status bar picks from by `tokenPace.resetFormat`, and the
+ * rule the page's own fallback (webview/main.ts `fbResetLine`) applies to a payload without
+ * this line: a text with a clock reading in it (`06:00`, `06:00 AM`, `Mo 06:00`) is a time of
+ * day. 1.9 P19 (§7c item 2): until then this line took "resets {0}" for either. The card, the
+ * Quick Pick and the markdown report hand in the relative countdown today and carry the clock
+ * time in a column of their own; the rule holds whatever they hand in.
  */
-function resetLineOf(display: WindowDisplay, reset: string): string {
+export function resetLineOf(display: WindowDisplay, reset: string): string {
   const due = t('reset due')
   if (display === 'resetDue') return due
   if (!reset) return ''
   // `formatReset` writes that same message when the stated time has passed; comparing
   // against it rather than against the English words keeps the rule in every language.
-  return reset.includes(due) ? reset : t('resets {0}', reset)
+  if (reset.includes(due)) return reset
+  return CLOCK_READING.test(reset) ? t('resets at {0}', reset) : t('resets {0}', reset)
 }
 
 /**
@@ -2280,10 +2287,16 @@ function dataQuality(
   }
 }
 
+/**
+ * 1.9 P19 (§7c item 8): the calibration factor, its band and its basis in the page's own digits — the locale's decimal
+ * mark ("1,2" in German, French and Polish), one decimal and no grouping as before (cacheWatch.ts `factorText` groups
+ * none either); it printed `toFixed(1)`, a '.' in every language.
+ */
 function calibrationText(c: Calibration | null): string {
   if (!c) return t('not enough data')
+  const one = (n: number): string => n.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1, useGrouping: false })
   return estimate(t('server counts {0} % of the window per 1M local tokens (band {1}–{2}, {3} h of basis)',
-    c.factor.toFixed(1), c.low.toFixed(1), c.high.toFixed(1), c.basisHours.toFixed(1)))
+    one(c.factor), one(c.low), one(c.high), one(c.basisHours)))
 }
 
 /**
@@ -2307,7 +2320,9 @@ function languageVm(input: VmInput['language']): LanguageVm {
     ? t('Automatic — as VS Code ({0})', languageEntry(viaAuto.id).native)
     : t("Automatic — VS Code's language ({0}) has no translation here, so English", auto.vscode)
   const offered = new Set<LanguageSetting>(['auto', ...available])
-  const checked: LanguageSetting = offered.has(resolved.setting) ? resolved.setting : resolved.id
+  // 1.9 P19 (§7c decision c): a setting that names a language this build ships no file for checks nothing — the list
+  // offers no such item, and English, which is shown instead, is not what the setting says.
+  const checked: LanguageSetting | null = offered.has(resolved.setting) ? resolved.setting : null
   const shown = languageEntry(resolved.id)
   const options: LanguageOptionVm[] = [
     { id: 'auto', native: autoLine, name: null, lang: null, flag: 'auto', checked: checked === 'auto' },

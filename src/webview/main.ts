@@ -550,17 +550,33 @@ function chooseLanguage(el: HTMLElement): void {
 
 /** A tag the page's `lang` and its formats may take — the host's `setLang` rule. */
 const WORDS_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+/** A Unicode extension of a tag (`-u-nu-thai`, `-u-hc-h12`): the singleton `u` and its keys and types. */
+const UNICODE_EXTENSION = /-u(?:-[A-Za-z0-9]{2,8})+$/;
+
+/**
+ * 1.9 P19 (§7c decision a): whether `tag` is a language tag the page may take — the tag rule with a Unicode extension
+ * allowed at its end, because the host's `locale()` is a canonical locale and keeps one (`de-DE-u-nu-thai` under
+ * `auto` for a VS Code that reports it): stripped before the rule, and the whole tag must be one Intl canonicalises.
+ */
+function wordsTag(tag: unknown): boolean {
+  if (typeof tag !== 'string' || tag.length > 64 || !WORDS_TAG.test(tag.replace(UNICODE_EXTENSION, ''))) return false;
+  try {
+    return Intl.getCanonicalLocales(tag).length === 1;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * 1.9 A3.4: the words of a whole push after a language switch — checked before anything of them is used:
- * `lang` and `locale` a language tag each, `dict` a plain object whose string values replace the whole
+ * `lang` and `locale` a language tag each (wordsTag), `dict` a plain object whose string values replace the whole
  * dictionary (other values dropped). Anything else and the page keeps the words it has (false). The host
  * escaped every value already, as it does for the dictionary written into a new page.
  */
 function applyWords(w: unknown): boolean {
   if (!w || typeof w !== 'object' || Array.isArray(w)) return false;
   const x = w as Payload;
-  if (typeof x.lang !== 'string' || !WORDS_TAG.test(x.lang) || typeof x.locale !== 'string' || !WORDS_TAG.test(x.locale)) return false;
+  if (!wordsTag(x.lang) || !wordsTag(x.locale)) return false;
   const dict = x.dict;
   if (!dict || typeof dict !== 'object' || Array.isArray(dict)) return false;
   const next: Record<string, string> = {};
@@ -3185,15 +3201,44 @@ interface AgentFocus { act: string; key: string; list: string; src?: string; id?
  * no session is active, 1.7 F2); and back on the Copy ID button when it was there and
  * its item's details still stand. A control that is gone takes the focus nowhere.
  */
-function restoreFocus(body: Element, f: AgentFocus): void {
-  if (!body.querySelectorAll) return;
-  if (f.tree) { agentFocusBack(body, f.copy === true); return; }
+function restoreFocus(body: Element, f: AgentFocus): boolean {
+  if (!body.querySelectorAll) return false;
+  if (f.tree) return agentFocusBack(body, f.copy === true);
   const all = body.querySelectorAll<HTMLElement>('[data-act]');
   for (let i = 0; i < all.length; i++) {
     const el = all[i];
     if (el.dataset.act === f.act && (el.dataset.key || '') === f.key && (el.dataset.list || '') === f.list
-      && (el.dataset.src || '') === (f.src || '') && (f.act !== 'lang' || (el.dataset.id || '') === (f.id || ''))) { el.focus(); return; }
+      && (el.dataset.src || '') === (f.src || '') && (f.act !== 'lang' || (el.dataset.id || '') === (f.id || ''))) { el.focus(); return true; }
   }
+  return false;
+}
+
+/**
+ * 1.9 P19 (§7c decision b): where the focus is on the page before a language switch rewrites it — the element's id,
+ * and the control it is (keepFocus: a section's summary by its key, a chip or a button by what it does and whom it
+ * names, an item of the agent tree by its path) —, or null when the focus is not on the page at all (on `<body>`, or
+ * in another part of VS Code): then the switch takes it nowhere.
+ */
+interface WordsFocus { id: string; control: AgentFocus | null }
+function focusBeforeWords(): WordsFocus | null {
+  const el = document.activeElement as Payload;
+  const root = document.getElementById('root');
+  if (!el || el === document.body || !root || typeof root.contains !== 'function' || !root.contains(el)) return null;
+  return { id: typeof el.id === 'string' ? el.id : '', control: keepFocus(root) };
+}
+
+/**
+ * After the switch's whole render: the focus back on the element with the same id, else on the same control (the
+ * same section's summary among them), else on the picker's button — the control the switch belongs to —, never on
+ * `<body>`, where a rewritten page leaves it.
+ */
+function focusAfterWords(f: WordsFocus): void {
+  const root = document.getElementById('root');
+  const el = f.id ? document.getElementById(f.id) : null;
+  if (el && root && typeof root.contains === 'function' && root.contains(el) && typeof el.focus === 'function') { el.focus(); return; }
+  if (f.control && root && restoreFocus(root, f.control)) return;
+  const btn = document.querySelector<HTMLElement>('[data-sec="provider"] .lng-btn');
+  if (btn) btn.focus();
 }
 
 /** The item of the tree `el` is — or whose details panel holds it (the Copy ID button); null otherwise. */
@@ -3231,7 +3276,7 @@ function agentItemByKey(body: Element, key: string): HTMLElement | null {
 }
 
 /** Puts the focus back on the tree after a push (restoreFocus): the item, the nearest one above it, the first item. */
-function agentFocusBack(body: Element, copy: boolean): void {
+function agentFocusBack(body: Element, copy: boolean): boolean {
   const items = Array.from(body.querySelectorAll<HTMLElement>('.agtree li[role="treeitem"]'));
   for (let k = 0; k < agentFocusPath.length; k++) {
     const p = agentFocusPath[k];
@@ -3239,9 +3284,10 @@ function agentFocusBack(body: Element, copy: boolean): void {
     if (!li) continue;
     const button = copy && k === 0 && li.querySelector ? li.querySelector<HTMLElement>(':scope > .ag-details .ag-copy') : null;
     (button || li).focus();
-    return;
+    return true;
   }
-  if (items.length) items[0].focus();
+  if (items.length) { items[0].focus(); return true; }
+  return false;
 }
 
 /**
@@ -4021,7 +4067,10 @@ window.addEventListener('message', (ev) => {
   if (msg.type === 'data') {
     // 1.9 A3.4: the words of a language switch, checked, before the page is drawn in them; a push
     // without them (every other one) changes nothing of the page's words.
-    if (msg.words !== undefined) applyWords(msg.words);
+    const switched = msg.words !== undefined;
+    if (switched) applyWords(msg.words);
+    // 1.9 P19 (§7c decision b): where the focus is before the switch rewrites the page — put back after it.
+    const back = switched && !focusLanguageAfterRender ? focusBeforeWords() : null;
     vm = msg.payload;
     // 1.9 A3.6: a whole render closes the language list.
     langOpen = false;
@@ -4030,6 +4079,8 @@ window.addEventListener('message', (ev) => {
       focusLanguageAfterRender = false;
       const btn = document.querySelector<HTMLElement>('[data-sec="provider"] .lng-btn');
       if (btn) btn.focus();
+    } else if (back) {
+      focusAfterWords(back);
     }
     // The acknowledgement the smoke test waits for: the page was built from a payload that
     // arrived, so the whole channel — host, frame, origin rule, renderer — is proven live.

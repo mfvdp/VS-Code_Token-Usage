@@ -81,7 +81,7 @@
   "Freshness — last check {0} · last data {1} · last local event {2} · next refresh {3} · snapshot {4}": "Aktualität — letzte Prüfung {0} · letzte Daten {1} · letztes lokales Ereignis {2} · nächste Auffrischung {3} · Snapshot {4}",
   "Hours ({0}, {1} day(s)): peak {2} · {3}": "Stunden ({0}, {1} Tag(e)): Spitze {2} · {3}",
   "Idle": "Ruht",
-  "If you allow it, then at most every {0} hour (tokenPace.pollIntervalMinutes):": "Wenn Sie es erlauben, dann höchstens {0}-mal pro Stunde (tokenPace.pollIntervalMinutes):",
+  "If you allow it, then at most every {0} hour (tokenPace.pollIntervalMinutes):": "Wenn Sie es erlauben, dann höchstens einmal in {0} Stunde (tokenPace.pollIntervalMinutes):",
   "If you allow it, then at most every {0} hours (tokenPace.pollIntervalMinutes):": "Wenn Sie es erlauben, dann höchstens alle {0} Stunden (tokenPace.pollIntervalMinutes):",
   "If you allow it, then at most every {0} minutes (tokenPace.pollIntervalMinutes):": "Wenn Sie es erlauben, dann höchstens alle {0} Minuten (tokenPace.pollIntervalMinutes):",
   "Includes model names and project labels (directory basenames).": "Enthält Modellnamen und Projektbezeichnungen (Verzeichnisnamen).",

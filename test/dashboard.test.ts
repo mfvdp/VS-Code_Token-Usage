@@ -23,7 +23,7 @@ import * as nodeVm from 'node:vm'
 import { test } from 'node:test'
 import { EARLIER_KEY, MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS, TreeNode } from '../src/agentTree'
 import { tallySpoken, tallyText } from '../src/agentTreeBuild'
-import { setBundle, setLocale, t } from '../src/i18n'
+import { setBundle, setLang, setLocale, t } from '../src/i18n'
 import { agentTreeFor, buildViewModel, parseWebviewMessage } from '../src/viewModel'
 import { AGENT_WORLD, agentNode as agentNodeOf, agentWorld, everyParent, treeNodes } from './fixtures/agentWorld'
 import { NOW, addCacheSession, buildAgg, makeConfig, makeInput } from './fixtures/viewFixtures'
@@ -657,7 +657,10 @@ test('no shipped bundle puts markup into one of the page\'s words', () => {
  */
 function germanPage(extra: Record<string, string> = {}): string {
   try {
+    // 1.9 A3.5: the page's `lang` is the words' language (`setLang`), which the host installs with
+    // the bundle — no longer derived from the formatters' locale.
     setLocale('de')
+    setLang('de')
     setBundle({
       'Loading …': 'Wird geladen …',
       'Range': 'Zeitraum',
@@ -675,8 +678,30 @@ function germanPage(extra: Record<string, string> = {}): string {
   } finally {
     setBundle(undefined)
     setLocale(undefined)
+    setLang(undefined)
   }
 }
+
+test('the page\'s lang is the language its words are in, region kept: pt-BR, zh-TW, en — never the formatters\' tag (1.9 A3.5, A7 test 5)', () => {
+  // The three resolved languages of §3 A2 rule 2, as applyLanguage installs them: the words' tag
+  // (setLang) beside the Intl tag (setLocale). An English page under VS Code's `hu` keeps `en`.
+  const cases: Array<[string, string, string]> = [['pt-BR', 'pt-BR', 'pt-BR'], ['zh-TW', 'zh-TW', 'zh-TW'], ['en', 'hu', 'en'],
+    ['de', 'de-ch', 'de'], ['zh-CN', 'zh-CN', 'zh-CN']]
+  try {
+    for (const [words, intl, expected] of cases) {
+      setLang(words)
+      setLocale(intl)
+      assert.match(page(), new RegExp(`<html lang="${expected}">`), `${words} / ${intl}`)
+    }
+    // A tag that is no tag never reaches the attribute: `setLang` keeps English.
+    setLang('x y"><script>')
+    assert.match(page(), /<html lang="en">/)
+  } finally {
+    setLang(undefined)
+    setLocale(undefined)
+  }
+  assert.match(PAGE, /<html lang="en">/)
+})
 
 test('a German bundle reaches the page, the script inside it and the language of the markup', () => {
   const html = germanPage()

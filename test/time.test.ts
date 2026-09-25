@@ -10,8 +10,9 @@ import {
   addDays, ageText, attemptWhen, calendarDayOf, calendarWeekdayOf, clockStamp, dayCount, dayOf, dayOfHour, daysBetween, formatReset,
   formatTime, hourIndex, lastDays, lastFailureText, localHourOfDay, monthOf, nextAttemptWords, PARTS_MEMO_FROM_MS, PARTS_MEMO_MAX,
   previousRange, rangeFor, refreshWords, relativeShort, relativeTime, resetTimeMemos, resolveZone, retryWords, TimeConfig, weekdayOf,
-  weekdayWords,
+  weekdayWords, formatDay,
 } from '../src/time'
+import { LANGUAGES } from '../src/languages'
 import { QuotaState } from '../src/types'
 import { ROOT } from './helpers/nls'
 
@@ -216,6 +217,89 @@ test('the clock is spelled with ordinary spaces, whatever ICU does this year', (
     }
   }
   assert.equal(formatTime(t, { ...utc, hourCycle: 'h12' }), '06:00 AM')
+})
+
+// ---------------------------------------------------------------------------
+// 1.9 A5: the two format fixes the new locales need — expectations from Intl itself
+// ---------------------------------------------------------------------------
+
+/** The seven days of the week of 2026-09-21 (a Monday), at 14:20 UTC. */
+const WEEK = [0, 1, 2, 3, 4, 5, 6].map((d) => Date.UTC(2026, 8, 21 + d, 14, 20))
+
+/** Whether this locale's month part (day, month short) is digits only — decided by Intl, never by a list. */
+function digitMonth(locale: string): boolean {
+  const parts = new Intl.DateTimeFormat(locale, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' })
+    .formatToParts(WEEK[5])
+  return !/\p{L}/u.test(parts.find((p) => p.type === 'month')?.value ?? '')
+}
+
+test('the weekday in front of a clock time tells the seven days apart in every shipped locale and never ends with a dot (1.9 A5 fix 1)', () => {
+  try {
+    for (const { locale } of LANGUAGES) {
+      setLocale(locale)
+      const labels = WEEK.map((ms) => {
+        const out = formatTime(ms, utc, true)
+        assert.ok(out.endsWith(' 14:20'), `${locale}: ${out}`)
+        return out.slice(0, -' 14:20'.length)
+      })
+      assert.equal(new Set(labels).size, 7, `${locale}: ${labels.join(' ')}`)
+      for (const l of labels) {
+        assert.ok(l.length > 0 && !l.endsWith('.'), `${locale}: "${l}"`)
+        // The label is the locale's own short name, or its first two characters.
+        const names = WEEK.map((ms) => new Intl.DateTimeFormat(locale, { timeZone: 'UTC', weekday: 'short' }).format(ms))
+        assert.ok(names.some((n) => n === l || n.replace(/\.$/, '') === l || n.slice(0, 2) === l), `${locale}: "${l}" is not a weekday name`)
+      }
+    }
+    // pt-BR is the one of the fourteen whose two-letter prefixes collide (seg./sex., qua./qui.) on
+    // this ICU: the whole short name then, without its dot. Decided from Intl, like the test above.
+    setLocale('pt-BR')
+    const f = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', weekday: 'short' })
+    const prefixes = new Set(WEEK.map((ms) => f.format(ms).slice(0, 2)))
+    if (prefixes.size < 7) assert.equal(formatTime(WEEK[4], utc, true), `${f.format(WEEK[4]).replace(/\.$/, '')} 14:20`)
+    // English and German keep 1.8's two letters.
+    setLocale('en')
+    assert.equal(formatTime(WEEK[5], utc, true), 'Sa 14:20')
+    setLocale('de')
+    assert.equal(formatTime(WEEK[5], utc, true), 'Sa 14:20')
+  } finally {
+    setLocale(undefined)
+  }
+})
+
+test('the day label carries its digits in every shipped locale, and a locale whose month is digits gets the formatter\'s own date (1.9 A5 fix 2)', () => {
+  try {
+    let digitLocales = 0
+    for (const { locale } of LANGUAGES) {
+      setLocale(locale)
+      for (const ms of WEEK) {
+        const day = formatDay(ms, utc)
+        const dd = String(new Date(ms).getUTCDate())
+        assert.ok(day.includes(dd), `${locale}: ${day} has not the day ${dd}`)
+        const f = new Intl.DateTimeFormat(locale, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' })
+        if (digitMonth(locale)) {
+          // `土 26 9` is no date: the literals 月 and 日 (or the dots) are what make it one.
+          assert.equal(day, f.format(ms).replace(/[\u00a0\u202f]/g, ' '), `${locale}: ${day}`)
+        } else {
+          const parts = f.formatToParts(ms)
+          const part = (type: string): string => parts.find((p) => p.type === type)?.value ?? ''
+          assert.equal(day, `${part('weekday')} ${part('day')} ${part('month')}`, `${locale}: ${day}`)
+        }
+      }
+      if (digitMonth(locale)) digitLocales++
+    }
+    // On this ICU ja, zh-CN, zh-TW and cs; the count is reported, not pinned — another ICU may differ.
+    assert.ok(digitLocales >= 1, 'no locale with a digit month — the fix is not exercised')
+    // English and German keep 1.8's strings.
+    setLocale('en')
+    assert.equal(formatDay(Date.UTC(2026, 8, 5, 14, 20), utc), 'Sat 5 Sep')
+    setLocale('de')
+    assert.ok(formatDay(Date.UTC(2026, 8, 5, 14, 20), utc).startsWith('Sa. 5 '))
+    // The Japanese label is a date a Japanese reader reads as one — where this ICU gives the digit month.
+    setLocale('ja')
+    if (digitMonth('ja')) assert.equal(formatDay(WEEK[5], utc), new Intl.DateTimeFormat('ja', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(WEEK[5]))
+  } finally {
+    setLocale(undefined)
+  }
 })
 
 test('ageText names absence instead of showing a zero age', () => {

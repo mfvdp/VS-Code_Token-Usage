@@ -227,6 +227,43 @@ check('a settings change reaches the status bar without a reload', async () => {
   )
 })
 
+check('a language change reaches the status bar without a reload', async () => {
+  const tp = extensionApi()
+  // 1.9 A: `tokenPace.language` is read by the host itself (it loads the bundle the setting names),
+  // so the real workbench's change event has to reach it — the fake host cannot prove that. The text
+  // is the tokens item's period, the one word of the bar that shows without any usage data: "today",
+  // German „heute". This fresh profile runs VS Code in English, so `auto` is English.
+  await settings().update('summary.period', 'today', vscode.ConfigurationTarget.Global)
+  try {
+    const english = await waitFor(
+      `${TOKENS_ITEM} to show the "today" period in English`,
+      () => {
+        const text = textOf(tp.statusBar(), TOKENS_ITEM)
+        return text !== undefined && text.endsWith('· today') ? text : undefined
+      },
+      READY_MS,
+    )
+    await settings().update('language', 'de', vscode.ConfigurationTarget.Global)
+    const german = await waitFor(
+      `${TOKENS_ITEM} to turn German when tokenPace.language is de`,
+      () => {
+        const text = textOf(tp.statusBar(), TOKENS_ITEM)
+        return text !== undefined && text.endsWith('· heute') ? text : undefined
+      },
+    )
+    console.log(`     language: "${english}" → "${german}"`)
+    // And back: `auto` follows VS Code's display language again, English in this profile.
+    await settings().update('language', undefined, vscode.ConfigurationTarget.Global)
+    await waitFor(
+      `${TOKENS_ITEM} to return to English under auto`,
+      () => textOf(tp.statusBar(), TOKENS_ITEM) === english,
+    )
+  } finally {
+    await settings().update('language', undefined, vscode.ConfigurationTarget.Global)
+    await settings().update('summary.period', undefined, vscode.ConfigurationTarget.Global)
+  }
+})
+
 check('the dashboard command opens the dashboard', async () => {
   const tp = extensionApi()
 

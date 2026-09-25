@@ -22,6 +22,7 @@ import { strict as assert } from 'node:assert'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { LANGUAGES } from '../src/languages'
 import { englishNls, germanNls, manifestKeys, NLS_KEY, rawManifest, readManifest, ROOT } from './helpers/nls'
 
 const BUNDLES: Array<[string, Record<string, string>]> = [
@@ -242,4 +243,52 @@ test('the keep-warm setting: a boolean, off by default, of application scope, in
   assert.deepEqual(cancel, { command: 'tokenPace.cancelKeepWarm', title: '%command.cancelKeepWarm.title%', category: '%command.category%' })
   assert.equal(englishNls['command.cancelKeepWarm.title'], 'Cancel the Keep-Warm Line')
   assert.equal(germanNls['command.cancelKeepWarm.title'], 'Warmhalte-Zeile abbrechen')
+})
+
+test('the language setting\'s words: what switches, what follows VS Code, what stays English, who translated — in both languages; its values are the native names in every file (1.9 A1 rule 4)', () => {
+  const en = englishNls['config.language.description']
+  const de = germanNls['config.language.description']
+  for (const claim of [
+    'the status bar and its tooltips, the dashboard, the Quick Pick, the markdown document, notifications and dialogs',
+    '`auto` follows VS Code\'s display language (English where Token Pace has no translation for it)',
+    'The flag at the top of the dashboard sets this setting too',
+    'The settings, the command titles and the walkthrough always follow VS Code\'s display language (*Configure Display Language*)',
+    'VS Code reads them when it starts, so they cannot switch while it runs',
+    'The debug log, the diagnostics report and the CSV and JSON exports stay English',
+    'The twelve languages beyond English and German were translated by AI agents from the English text, with the German as a second reference',
+    'checked by tests for completeness, placeholders and the marks ~, ⚠ and –',
+    'not by native speakers',
+  ]) {
+    assert.ok(en.includes(claim), `the setting's description does not say: ${claim}`)
+  }
+  for (const claim of [
+    'die Statusleiste und ihre Tooltips, das Dashboard, der Quick Pick, das Markdown-Dokument, Benachrichtigungen und Dialoge',
+    '`auto` folgt der Anzeigesprache von VS Code (Englisch, wo Token Pace sie nicht übersetzt hat)',
+    'Die Flagge oben im Dashboard stellt diese Einstellung ebenfalls ein',
+    'Die Einstellungen, die Befehlstitel und die Einführung folgen immer der Anzeigesprache von VS Code (*Anzeigesprache konfigurieren*)',
+    'VS Code liest sie beim Start, deshalb können sie nicht umschalten, solange es läuft',
+    'Das Debug-Protokoll, der Diagnosebericht und die CSV- und JSON-Exporte bleiben Englisch',
+    'Die zwölf Sprachen über Englisch und Deutsch hinaus haben KI-Agenten aus dem englischen Text übersetzt, mit dem Deutschen als zweiter Vorlage',
+    'Tests prüfen sie auf Vollständigkeit, Platzhalter und die Zeichen ~, ⚠ und –',
+    'Muttersprachler haben sie nicht geprüft',
+  ]) {
+    assert.ok(de.includes(claim), `the German description does not say: ${claim}`)
+  }
+  // No claim beyond the tests: not professional, not reviewed, not native (§3 B4).
+  for (const stale of ['professional', 'reviewed by', 'native-quality', 'professionell', 'lektoriert']) {
+    assert.equal(en.includes(stale) || de.includes(stale), false, stale)
+  }
+  assert.equal(englishNls['config.language.enum.auto'], 'Follow VS Code\'s display language (English where Token Pace has no translation for it)')
+  assert.equal(germanNls['config.language.enum.auto'], 'Der Anzeigesprache von VS Code folgen (Englisch, wo Token Pace sie nicht übersetzt hat)')
+  // A name is not translated: each value is the language's own name, the same in every file.
+  const natives: Record<string, string> = {
+    en: 'English', de: 'Deutsch', fr: 'Français', es: 'Español', 'pt-br': 'Português (Brasil)', it: 'Italiano', ja: '日本語',
+    ko: '한국어', 'zh-cn': '简体中文', 'zh-tw': '繁體中文', ru: 'Русский', tr: 'Türkçe', pl: 'Polski', cs: 'Čeština',
+  }
+  assert.deepEqual(Object.fromEntries(LANGUAGES.map((e) => [e.id, e.native])), natives)
+  for (const [name, bundle] of BUNDLES) {
+    for (const [id, native] of Object.entries(natives)) {
+      assert.equal(bundle[`config.language.enum.${id}`], native, `${name}: config.language.enum.${id}`)
+    }
+  }
 })

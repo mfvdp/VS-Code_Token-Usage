@@ -12,14 +12,23 @@
  *    English message is the key. A bundle entry replaces it, `{n}` placeholders are filled
  *    from the arguments, and without an entry the English text comes back unchanged — which
  *    is why every test that asserts English keeps passing: the bundle is empty there.
- *  • The bundle is `l10n/bundle.l10n.<lang>.json`. VS Code loads it for `vscode.env.language`
- *    because package.json declares `"l10n": "./l10n"`; extension.ts hands it over at
- *    activation with `setBundle(vscode.l10n.bundle ?? {})` and the language with
- *    `setLocale(vscode.env.language)`. Nothing else ever calls the two setters.
+ *  • The bundle is `l10n/bundle.l10n.<id>.json`, and since 1.9 Token Pace reads it itself
+ *    (languageLoad.ts) for the language `tokenPace.language` names — `auto` is VS Code's display
+ *    language, looked up as VS Code looks up the manifest's strings (languages.ts
+ *    `resolveLanguage`). extension.ts `applyLanguage` hands it over with `setBundle`, the `Intl`
+ *    tag with `setLocale` and the tag of the words' language with `setLang` — at activation,
+ *    before anything can show a string, and again when the setting changes: a switch at run time
+ *    calls the three setters once more, and every text built after it is in the new language.
+ *    Nothing else calls them. (`package.json` still declares `"l10n": "./l10n"`, so VS Code loads
+ *    a bundle for its own language too; Token Pace no longer reads `vscode.l10n.bundle`.)
  *  • `locale()` is what the `Intl` formatters in time.ts use: 'en-US' until the host says
  *    otherwise, so a date reads the same on every machine in the English build and follows
- *    the editor's language once that is known. A tag ICU does not know falls back to
- *    'en-US' rather than to whatever the operating system prefers.
+ *    the chosen language once that is known — under `auto`, VS Code's own tag, so a `de-ch`
+ *    window keeps Swiss formats. A tag ICU does not know falls back to 'en-US' rather than to
+ *    whatever the operating system prefers.
+ *  • `lang()` is the language the words are in — the page's `<html lang>`: 'en' until the host
+ *    says otherwise, and never VS Code's tag when the words are English. It keeps the region
+ *    ('pt-BR', 'zh-TW'): a browser picks Han glyph forms and fonts by it.
  *
  * How to add a string
  *
@@ -29,9 +38,9 @@
  *     Dynamic parts go into `{0}`, `{1}`, … arguments, never into the key; a translator may
  *     reorder them ("{1} von {0}").
  *  2. Call `t()` where the string is *used*, not at module load. The bundle is set at
- *     activation; `const LABEL = t('…')` at the top of a module runs before that and stays
- *     English for good. A button label that is compared with the dialog's answer is computed
- *     once inside the function and compared with that same value.
+ *     activation and again at a switch; `const LABEL = t('…')` at the top of a module runs
+ *     before that and stays English for good. A button label that is compared with the
+ *     dialog's answer is computed once inside the function and compared with that same value.
  *  3. Write the German into your part file, `l10n/parts/<part>.de.json` (host, model,
  *     dashboard, text — one per package), then run `node scripts/merge-l10n.mjs` to
  *     regenerate `l10n/bundle.l10n.de.json` and commit both. test/i18n.test.ts fails until
@@ -44,9 +53,12 @@
 
 /** The locale every formatter uses until the host names another one. */
 export const DEFAULT_LOCALE = 'en-US'
+/** The page's language until the host names another. */
+export const DEFAULT_LANG = 'en'
 
 let bundle = new Map<string, string>()
 let tag = DEFAULT_LOCALE
+let wordsTag = DEFAULT_LANG
 
 /**
  * Installs the translation table. Anything that is not a non-empty string is dropped: the
@@ -73,6 +85,20 @@ export function setLocale(next: string | undefined | null): void {
 /** The BCP 47 tag the formatters use — see `setLocale`. */
 export function locale(): string {
   return tag
+}
+
+/**
+ * 1.9 A: the BCP 47 tag of the language the installed bundle is in — the page's `lang`; malformed → 'en'.
+ * Not canonicalised by ICU: the tag is the registry's (`pt-BR`, `zh-TW`), and a page's `lang` needs
+ * no formatter behind it — only a shape an attribute can carry.
+ */
+export function setLang(next: string | undefined | null): void {
+  wordsTag = typeof next === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(next) ? next : DEFAULT_LANG
+}
+
+/** The language the words are in — see `setLang`. */
+export function lang(): string {
+  return wordsTag
 }
 
 /**

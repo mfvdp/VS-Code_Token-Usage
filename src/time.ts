@@ -412,17 +412,53 @@ export function formatTime(ms: number, cfg: TimeConfig, withWeekday = false): st
   }))
   const time = plainSpaces(f.format(ms))
   if (!withWeekday) return time
+  return `${weekdayLabel(ms, zone, lang)} ${time}`
+}
+
+/**
+ * Per locale tag: whether the seven short weekday names give seven different two-character
+ * prefixes. Decided once per tag, from `Intl` itself — the names are ICU's, and two machines
+ * with two ICU builds may disagree.
+ */
+const twoLetterWeekdays = new Map<string, boolean>()
+
+function weekdaysDistinctInTwo(lang: string): boolean {
+  let known = twoLetterWeekdays.get(lang)
+  if (known === undefined) {
+    const f = new Intl.DateTimeFormat(lang, { timeZone: 'UTC', weekday: 'short' })
+    // 2026-09-06 is a Sunday; seven days from there are the seven names, in any order.
+    const prefixes = new Set<string>()
+    for (let d = 0; d < 7; d++) prefixes.add(f.format(Date.UTC(2026, 8, 6 + d, 12)).slice(0, 2))
+    known = prefixes.size === 7
+    twoLetterWeekdays.set(lang, known)
+  }
+  return known
+}
+
+/**
+ * 1.9 A5: the weekday in front of a clock time — its first two characters when the locale's seven short weekday names
+ * give seven different two-character prefixes (en "Sa", de "Sa", ru "сб"), else the whole short name without a trailing
+ * '.' (pt-BR: seg./sex. and qua./qui. share "se" and "qu"). Decided per locale once, memoised by the locale tag.
+ */
+function weekdayLabel(ms: number, zone: string | undefined, lang: string): string {
   const w = formatter(`w|${lang}|${zone ?? ''}`, () => new Intl.DateTimeFormat(lang, {
     timeZone: zone, weekday: 'short',
   }))
-  // Two letters: the bar is narrow and "Mo" is unambiguous next to a clock time.
-  return `${w.format(ms).slice(0, 2)} ${time}`
+  const name = w.format(ms)
+  // Two letters where they tell the seven days apart: the bar is narrow and "Mo" is unambiguous
+  // next to a clock time. Where they do not, the short name itself, which always does.
+  return weekdaysDistinctInTwo(lang) ? name.slice(0, 2) : name.replace(/\.$/, '')
 }
 
 /**
  * "Sat 6 Sep": the calendar day of an instant in the configured zone, for a sparkline label
  * or a table cell. Weekday, day, month in that order whatever the locale — the label has to
  * stay narrow and read the same next to a clock time — with the locale's own names.
+ *
+ * 1.9 A5: that assembly drops the formatter's literals, which is harmless while the month part is
+ * a word ("Sept.", "сент.", "9월"). Where the month part is digits only — ja, zh-CN, zh-TW, cs on
+ * this ICU — the literals (`月`, `日`, `.`) are what makes the digits a date, and the assembly
+ * printed `土 26 9`; such a locale gets the formatter's own `format()` (`9月26日(土)`, `so 26. 9.`).
  */
 export function formatDay(ms: number, cfg: TimeConfig): string {
   const zone = resolveZone(cfg.zone)
@@ -432,7 +468,9 @@ export function formatDay(ms: number, cfg: TimeConfig): string {
   }))
   const parts = f.formatToParts(ms)
   const part = (type: Intl.DateTimeFormatPart['type']): string => parts.find((p) => p.type === type)?.value ?? ''
-  return `${part('weekday')} ${part('day')} ${part('month')}`
+  const month = part('month')
+  if (!/\p{L}/u.test(month)) return plainSpaces(f.format(ms))
+  return `${part('weekday')} ${part('day')} ${month}`
 }
 
 /**

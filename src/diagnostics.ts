@@ -89,6 +89,12 @@ export interface DiagnosticsInput {
   settings: Record<string, unknown>
   partialData: boolean
   attribution: string
+  /**
+   * 1.9 A: the language line — the setting (`auto` or a registry id), the language whose words are
+   * shown (a registry id) and VS Code's display language, held to `[a-z0-9-]{1,20}` by the caller
+   * (`vscodeLanguageTag`), '' when it is not such a tag. Held to that alphabet again here.
+   */
+  language: { setting: string; shown: string; vscode: string }
   /** Home directory, used to shorten paths in the settings snapshot. Never printed. */
   home: string
 }
@@ -101,7 +107,7 @@ export interface DiagnosticsInput {
 export const DIAGNOSTICS_FIELDS: readonly string[] = [
   'extVersion', 'vscodeVersion', 'platform', 'arch', 'node', 'remoteName', 'extensionKind',
   'roots', 'fileCount', 'snapshot', 'retention', 'historySize', 'quota', 'consent', 'role',
-  'bridge', 'http', 'proxyEnv', 'settings', 'partialData', 'attribution', 'home',
+  'bridge', 'http', 'proxyEnv', 'settings', 'partialData', 'attribution', 'language', 'home',
 ]
 
 /** Setting keys whose values are paths and are therefore shortened. */
@@ -242,6 +248,11 @@ function safe(s: string): string {
   return s.replace(/```/g, "'''")
 }
 
+/** A language tag as the report prints it: `[a-z0-9-]{1,20}`, else `–`. */
+function tagOf(v: unknown): string {
+  return typeof v === 'string' && /^[a-z0-9-]{1,20}$/.test(v) ? v : '–'
+}
+
 function ageLabel(sec: number | null): string {
   if (sec === null || !Number.isFinite(sec)) return '–'
   if (sec < 90) return `${Math.round(sec)} s`
@@ -308,7 +319,7 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
   const {
     extVersion, vscodeVersion, platform, arch, node, remoteName, extensionKind, roots, fileCount,
     snapshot, retention, historySize, quota, consent, role, bridge, http, proxyEnv, settings,
-    partialData, attribution, home,
+    partialData, attribution, language, home,
   } = input
 
   const lines: string[] = []
@@ -325,6 +336,8 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
   lines.push(row('Role', role))
   lines.push(row('Consent', safe(consent)))
   lines.push(row('Attribution', safe(attribution)))
+  // 1.9 A (§2.4): which language the texts are in and why — the report itself stays English.
+  lines.push(row('Language', `setting ${tagOf(language.setting)} · shown ${tagOf(language.shown)} · VS Code ${tagOf(language.vscode)}`))
   lines.push(row('PARTIAL_DATA', partialData ? 'yes — some figures below cover only part of the sources' : 'no'))
   lines.push('')
 

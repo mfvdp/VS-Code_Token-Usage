@@ -817,7 +817,10 @@ test('clear stored data lists the shared cache and says the bridge has to go fir
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 
-test('the bundle VS Code loaded for the language reaches the dialogs: activate() feeds the i18n seam', async () => {
+test('the bundle Token Pace reads for VS Code\'s language reaches the dialogs under `auto` (1.9 A2 test 6; rewritten from 1.8\'s "the bundle VS Code loaded")', async () => {
+  // 1.8 fed the seam `vscode.l10n.bundle`; 1.9 reads `l10n/bundle.l10n.<id>.json` itself, through
+  // `asAbsolutePath` — the fixture's extension path is the repository. The table VS Code would have
+  // loaded is set to a different synthetic one, so a build that still read it would show that.
   const fx = makeEmptyFixture()
   const de = JSON.parse(fs.readFileSync(path.join(REPO, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   const key = Object.keys(de).find((k) => k.startsWith('Token Pace found no Claude Code or Codex transcripts'))
@@ -825,11 +828,13 @@ test('the bundle VS Code loaded for the language reaches the dialogs: activate()
   const buttons = ['Run Token Pace locally', 'Open Settings', 'Not now'].map((k) => de[k])
   assert.ok(buttons.every((b) => typeof b === 'string' && b.length > 0), 'a button of the remote hint has no German entry')
   const expected = de[key].replace('{0}', 'wsl')
+  const synthetic = Object.fromEntries(['Run Token Pace locally', 'Open Settings', 'Not now', 'Reload Window', key]
+    .map((k) => [k, `SYNTHETIC ${k}`]))
 
   await activateHost(fx, REPO, {
     remoteName: 'wsl',
     globalState: new Map<string, unknown>(),
-    language: { tag: 'de', bundle: de },
+    language: { tag: 'de', bundle: synthetic },
     // Answered with the German labels: the code has to compare against what it showed.
     answers: [buttons[0], de['Reload Window']],
     settings: { 'tokenPace.quotaSource': 'cache' },
@@ -842,8 +847,160 @@ test('the bundle VS Code loaded for the language reaches the dialogs: activate()
   const reload = state.messages.find((m) => m.actions.includes(de['Reload Window']))
   assert.ok(reload, 'the reload prompt was not shown with the German button')
   assert.equal(reload.text, de['Token Pace will run on the local machine after a window reload.'])
+  assert.equal(state.messages.some((m) => m.text.includes('SYNTHETIC') || m.actions.some((a) => a.includes('SYNTHETIC'))), false,
+    'a dialog took its words from vscode.l10n.bundle')
+  assert.match(state.logText(), new RegExp(`Language: auto → de \\(${Object.keys(de).length} strings, Intl de\\)`))
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+/**
+ * 1.9 A2: an extension folder of its own for the language tests — `l10n/` with the bundles a test
+ * names (a synthetic French one, the repository's German one), `dist/` the repository's, so the
+ * cold scan runs in its worker as it does from the repository.
+ */
+function languageFolder(bundles: Record<string, string>): string {
+  const dir = tmpDir('tp-ext-l10n')
+  fs.mkdirSync(path.join(dir, 'l10n'), { recursive: true })
+  for (const [id, text] of Object.entries(bundles)) fs.writeFileSync(path.join(dir, 'l10n', `bundle.l10n.${id}.json`), text)
+  fs.symlinkSync(path.join(REPO, 'dist'), path.join(dir, 'dist'), 'dir')
+  return dir
+}
+
+/** Counts the calls of one prototype method from `mark()` on; `restore()` puts the method back. */
+function spyMethod(proto: Record<string, unknown>, name: string): { count(): number; restore(): void } {
+  const real = proto[name] as (...args: unknown[]) => unknown
+  let calls = 0
+  proto[name] = function (this: unknown, ...args: unknown[]): unknown {
+    calls++
+    return real.apply(this, args)
+  }
+  return { count: () => calls, restore: () => { proto[name] = real } }
+}
+
+test('a language switch applies at once: the setting\'s bundle at activation, then German on the next frame, the readings made again, the documents redrawn, and auto back to English (1.9 A2 test 4)', async () => {
+  const fx = makeEmptyFixture()
+  const de = fs.readFileSync(path.join(REPO, 'l10n', 'bundle.l10n.de.json'), 'utf8')
+  const fr = JSON.stringify({ 'Refresh': 'Actualiser', 'today': "aujourd'hui", 'German': 'allemand' })
+  const ext = languageFolder({ fr, de })
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const { QuotaManager } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  const { DashboardProvider } = require('../src/dashboard') as typeof import('../src/dashboard')
+  const invalidate = spyMethod(QuotaManager.prototype as unknown as Record<string, unknown>, 'invalidate')
+  const languageChanged = spyMethod(DashboardProvider.prototype as unknown as Record<string, unknown>, 'languageChanged')
+  try {
+    await activateHost(fx, ext, {
+      settings: { 'tokenPace.language': 'fr', 'tokenPace.statusBar.show': ['tokens'], 'tokenPace.summary.period': 'today' },
+    })
+    // The explicit choice: its bundle, its locale for Intl, its tag for the page.
+    assert.equal(i18n.t('Refresh'), 'Actualiser')
+    assert.equal(i18n.locale(), 'fr')
+    assert.equal(i18n.lang(), 'fr')
+    assert.match(state.logText(), /Language: fr → fr \(3 strings, Intl fr\)/)
+    await waitOwnColdStart(state)
+    await waitFor('the French period', () => String(state.textOf(TOKENS_ITEM)).endsWith("· aujourd'hui"))
+
+    // The switch: the setting changes, the change event fires — nothing else is needed.
+    const md = state.contentProviders.get('tokenpace') as unknown as { onDidChange(fn: () => void): unknown }
+    const hook = state.contentProviders.get('tokenpace-hook') as unknown as { onDidChange(fn: () => void): unknown }
+    let mdFired = 0
+    let hookFired = 0
+    md.onDidChange(() => { mdFired++ })
+    hook.onDidChange(() => { hookFired++ })
+    // Every settings change already drops the manager's memo (`setOptions`); a switch drops it once
+    // more, on purpose (§3.0 e) — measured against a change of another setting.
+    const unrelated = invalidate.count()
+    state.set('tokenPace.staleAfterMinutes', 21)
+    state.fireConfigChange(['tokenPace.staleAfterMinutes'])
+    const perChange = invalidate.count() - unrelated
+    const invalidated = invalidate.count()
+    const changed = languageChanged.count()
+    state.set('tokenPace.language', 'de')
+    state.fireConfigChange(['tokenPace.language'])
+    assert.equal(i18n.t('Refresh'), 'Aktualisieren')
+    assert.equal(i18n.locale(), 'de')
+    assert.equal(i18n.lang(), 'de')
+    assert.equal(invalidate.count() - invalidated, perChange + 1, 'the quota readings were not made again, once')
+    assert.equal(languageChanged.count() - changed, 1, 'the dashboard was not told')
+    assert.ok(mdFired >= 1, 'the markdown document was not redrawn')
+    assert.equal(hookFired, 1, 'the agent hook\'s setup document was not redrawn')
+    await waitFor('the German period', () => String(state.textOf(TOKENS_ITEM)).endsWith('· heute'))
+    assert.match(state.logText(), /Language: de → de \(\d+ strings, Intl de\)/)
+
+    // The same setting again changes nothing: no second apply, no reading beyond any change's.
+    const again = invalidate.count()
+    state.fireConfigChange(['tokenPace.language'])
+    assert.equal(invalidate.count() - again, perChange)
+    assert.equal(hookFired, 1)
+    assert.equal(languageChanged.count() - changed, 1)
+
+    // Back to auto, with VS Code in English — and a table in `vscode.l10n.bundle` that no 1.9
+    // build reads: the bar must not take a word from it.
+    state.setLanguage('en', { 'today': 'SYNTHETIC today', 'Refresh': 'SYNTHETIC Refresh' })
+    state.set('tokenPace.language', 'auto')
+    state.fireConfigChange(['tokenPace.language'])
+    assert.equal(i18n.t('Refresh'), 'Refresh')
+    assert.equal(i18n.locale(), 'en')
+    assert.equal(i18n.lang(), 'en')
+    await waitFor('the English period', () => String(state.textOf(TOKENS_ITEM)).endsWith('· today'))
+    assert.match(state.logText(), /Language: auto → en \(0 strings, Intl en\)/)
+    assert.equal(hookFired, 2)
+
+    // The diagnostics report says which language was set, which is shown and what VS Code reports.
+    await state.execute('tokenPace.copyDiagnostics')
+    assert.match(state.clipboard[state.clipboard.length - 1], /\nLanguage {8}setting auto · shown en · VS Code en\n/)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    invalidate.restore()
+    languageChanged.restore()
+    const { setBundle, setLang, setLocale } = i18n
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+  }
+})
+
+test('a language the build has no file for, a file that does not parse and a setting that is no language are English, and the log says why in English — never the setting\'s text (1.9 A1 rule 3, A2 rules 2–3)', async () => {
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  try {
+    // The repository ships no French bundle (group L adds it): the explicit choice is English.
+    await activateHost(makeEmptyFixture(), REPO, { settings: { 'tokenPace.language': 'fr' } })
+    assert.match(state.logText(), /Language: fr has no translation file in this build; English is shown\./)
+    assert.match(state.logText(), /Language: fr → en \(0 strings, Intl en\)/)
+    assert.equal(i18n.lang(), 'en')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+    // A bundle on disk that is not JSON: English, and the file's name and the kind of failure.
+    await activateHost(makeEmptyFixture(), languageFolder({ fr: '{ not json' }), { settings: { 'tokenPace.language': 'fr' } })
+    assert.match(state.logText(), /Language: bundle\.l10n\.fr\.json could not be read \(not JSON\); English is shown\./)
+    assert.match(state.logText(), /Language: fr → en \(0 strings, Intl en\)/)
+    assert.equal(i18n.t('Refresh'), 'Refresh')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+    // Under auto with VS Code in German and the German file broken: English words, VS Code's formats.
+    await activateHost(makeEmptyFixture(), languageFolder({ de: '[1, 2]' }), { language: { tag: 'de-ch' } })
+    assert.match(state.logText(), /Language: bundle\.l10n\.de\.json could not be read \(not an object\); English is shown\./)
+    assert.match(state.logText(), /Language: auto → en \(0 strings, Intl de-CH\)/)
+    assert.equal(i18n.lang(), 'en')
+    assert.equal(i18n.locale(), 'de-CH')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+    // A value that is no language — another case, a path: auto, said once, without the value.
+    for (const raw of ['FR', '../../etc/passwd']) {
+      await activateHost(makeEmptyFixture(), REPO, { settings: { 'tokenPace.language': raw } })
+      const log = state.logText()
+      assert.match(log, /Language: the setting is not one of the shipped languages; auto is used\./)
+      assert.match(log, /Language: auto → en \(0 strings, Intl en\)/)
+      const languageLines = state.log.filter((l) => l.message.startsWith('Language:')).map((l) => l.message)
+      assert.equal(languageLines.length, 2, languageLines.join('\n'))
+      assert.equal(languageLines.some((l) => l.includes(raw)), false, `a language line repeats the setting's text ${raw}`)
+      assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    }
+  } finally {
+    i18n.setBundle(undefined)
+    i18n.setLocale(undefined)
+    i18n.setLang(undefined)
+  }
 })
 
 function escapeRe(s: string): string {

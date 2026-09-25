@@ -35,16 +35,23 @@
  * all. The two words this file spells out for a reader (the plan fragment and the context
  * note) are shown by four views each; a copy of either one beside a view is a copy that
  * drifts.
+ *
+ * `languages` (1.9 A1) is the registry of shipped languages: `tokenPace.language` is held to its
+ * ids here, and a second list of them would be the drift the manifest test exists to catch. It
+ * imports only the seam.
  */
 import { SOURCES } from './adapters'
 import { BudgetSpec, sanitizeBudgets } from './budget'
 import { t } from './i18n'
+import { isLanguageId, LanguageSetting } from './languages'
 
 export type { BudgetSpec }
 
 /** Every key this module reads, exactly as it appears in `contributes.configuration`. */
 export const CONFIG_KEYS: string[] = [
   // General
+  // 1.9 A1 (§0b.3): the language of Token Pace's own texts — first in General, scope `application`.
+  'tokenPace.language',
   'tokenPace.statusBar.show',
   'tokenPace.windowSelect',
   'tokenPace.windows',
@@ -277,6 +284,12 @@ const PRICE_FIELDS: readonly ('input' | 'output' | 'cacheRead' | 'cacheWrite5m' 
 // ---------------------------------------------------------------------------
 
 export interface Config {
+  /**
+   * 1.9 A1: the language of Token Pace's own texts — `auto` (VS Code's display language) or an exact
+   * registry id. Anything else a settings file holds (another case, a path, a number) is `auto`.
+   * `"scope": "application"` in the manifest: the user's, never a workspace's.
+   */
+  language: LanguageSetting
   statusBar: { show: StatusBarEntry[] }
   windowSelect: WindowSelect
   /** Raw value of the deprecated `tokenPace.windows`; already folded into `windowSelect`. */
@@ -573,6 +586,15 @@ function alertThresholds(raw: unknown): number[] {
   return out.sort((a, b) => a - b)
 }
 
+/**
+ * 1.9 A1 rule 3: `'auto'` or an exact registry id — the case included, since the id is also a file
+ * tag (`'FR'` is not `fr`). Everything else is `'auto'`: the value never reaches a path, and
+ * activation says in the log that it was not used (without repeating it — it is text the user typed).
+ */
+export function languageSetting(raw: unknown): LanguageSetting {
+  return raw === 'auto' || isLanguageId(raw) ? raw : 'auto'
+}
+
 // ---------------------------------------------------------------------------
 // sanitize / readConfig
 // ---------------------------------------------------------------------------
@@ -595,6 +617,7 @@ export function sanitize(raw: Record<string, unknown>): Config {
   if (!selectIsSet && legacyWindows === 'leading') windowSelect = 'leading'
 
   return {
+    language: languageSetting(get('tokenPace.language')),
     statusBar: { show: list(get('tokenPace.statusBar.show'), STATUS_BAR_ENTRIES, DEFAULT_STATUS_BAR) },
     windowSelect,
     windows: legacyWindows,

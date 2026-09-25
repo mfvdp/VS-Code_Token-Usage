@@ -14,6 +14,7 @@ import {
   buildDiagnostics, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
   InspectLike, maskProxyUrl, scrubHome, tildify, VscodeConfigApi,
 } from '../src/diagnostics'
+import { setBundle, setLocale } from '../src/i18n'
 
 const HOME = '/home/tester'
 
@@ -54,6 +55,7 @@ function input(over: Partial<DiagnosticsInput> = {}): DiagnosticsInput {
     settings: {},
     partialData: false,
     attribution: 'none',
+    language: { setting: 'auto', shown: 'en', vscode: 'en' },
     home: HOME,
     ...over,
   }
@@ -288,4 +290,32 @@ test('each quota source says when its next attempt is, in the words docs/export.
   assert.ok(doc.includes('one line with the next attempt our own fetch wants — the end of a backoff included — and the kind and the time of our own last failed attempt'),
     'docs/export.md does not say what the line names')
   assert.equal(/backoff until/.test(doc), false, 'docs/export.md still says "backoff until"')
+})
+
+test('the report names the language setting, the language shown and VS Code\'s tag — in English, whatever the language (1.9 §2.4)', () => {
+  // The line is the report's own words, so a German or Japanese window prints it the same way.
+  const cases: Array<[DiagnosticsInput['language'], string]> = [
+    [{ setting: 'auto', shown: 'en', vscode: 'en' }, 'setting auto · shown en · VS Code en'],
+    [{ setting: 'auto', shown: 'de', vscode: 'de-ch' }, 'setting auto · shown de · VS Code de-ch'],
+    [{ setting: 'fr', shown: 'en', vscode: 'hu' }, 'setting fr · shown en · VS Code hu'],
+    [{ setting: 'pt-br', shown: 'pt-br', vscode: 'de' }, 'setting pt-br · shown pt-br · VS Code de'],
+    // A tag that is not one (the caller passes '' then) is a dash, never text the report repeats.
+    [{ setting: 'auto', shown: 'en', vscode: '' }, 'setting auto · shown en · VS Code –'],
+    [{ setting: 'auto', shown: 'en', vscode: 'x```y' }, 'setting auto · shown en · VS Code –'],
+  ]
+  try {
+    for (const bundle of [undefined, { 'Language': 'Sprache', 'setting': 'Einstellung' }]) {
+      setBundle(bundle)
+      setLocale(bundle ? 'de' : undefined)
+      for (const [language, line] of cases) {
+        const out = buildDiagnostics(input({ language }))
+        const row = out.split('\n').find((l) => l.startsWith('Language '))
+        assert.ok(row, 'the report has no language line')
+        assert.equal(row, `Language        ${line}`)
+      }
+    }
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
 })

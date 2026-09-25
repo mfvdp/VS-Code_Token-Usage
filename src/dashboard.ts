@@ -26,7 +26,7 @@ import { randomBytes } from 'node:crypto'
 import script from 'webview:script'
 import { SOURCES, SOURCE_TITLE } from './adapters'
 import { MAX_GROUP_CHILDREN, MAX_MORE_PAGES, SILENT_AFTER_MS } from './agentTree'
-import { locale, t } from './i18n'
+import { lang, locale, t } from './i18n'
 import { WebviewMessage, parseWebviewMessage } from './viewModel'
 import type { CacheWatchCard, QuotaCard, ViewModel } from './viewModel'
 
@@ -143,16 +143,15 @@ function pageField(vm: ViewModel, f: keyof ViewModel): unknown {
 }
 
 /**
- * The page's language, for the browser and for a screen reader: the primary subtag of the
- * editor's language, so an English build stays `lang="en"` whether the host says 'en' or
- * 'en-US', and a German one says `lang="de"`. A page whose words are German but whose markup
- * claims English is read out in the wrong accent, hyphenated by the wrong rules and quoted
- * with the wrong marks.
+ * The page's language, for the browser and for a screen reader: the language its words are in
+ * (`lang()`, 1.9 A3.5) — `en`, `de`, `pt-BR`, `zh-CN`, `zh-TW`. A page whose words are German but
+ * whose markup claims English is read out in the wrong accent, hyphenated by the wrong rules and
+ * quoted with the wrong marks. Until 1.8 this was the primary subtag of the formatters' locale, so
+ * an English page under VS Code's `hu` claimed Hungarian, and both Chinese pages would have claimed
+ * `zh` — a browser picks Han glyph forms and fonts by `lang`, so the region stays now.
  */
 function htmlLang(): string {
-  const tag = locale()
-  const dash = tag.indexOf('-')
-  return dash > 0 ? tag.slice(0, dash) : tag
+  return lang()
 }
 
 function nonceOf(): string {
@@ -288,6 +287,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
       this.cancelDeferred()
     })
     this.flush()
+  }
+
+  /**
+   * 1.9 A2 rule 4: the host switched the language (`tokenPace.language`). A stub until 1.9 P2, which
+   * makes the next flush a whole push that carries the page's words (§3 A3.4); the host calls it
+   * already, so the switch's order of steps is fixed from P1 on.
+   */
+  languageChanged(): void {
+    // 1.9 P2: the words push.
   }
 
   /** How long the page of the last resolved view is; 0 while no view has resolved. */

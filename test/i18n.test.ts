@@ -22,7 +22,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { DEFAULT_LOCALE, locale, setBundle, setLocale, t } from '../src/i18n'
+import { DEFAULT_LANG, DEFAULT_LOCALE, lang, locale, setBundle, setLang, setLocale, t } from '../src/i18n'
 import { dayOf, formatDay, formatTime, rangeFor, TimeConfig } from '../src/time'
 import { readJson, ROOT } from './helpers/nls'
 
@@ -43,6 +43,7 @@ function run(script: string, args: string[], cwd: string): { status: number | nu
 function pristine(): void {
   setBundle(undefined)
   setLocale(undefined)
+  setLang(undefined)
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,30 @@ test('setLocale canonicalises a tag and falls back to en-US for anything ICU can
       setLocale('de')
       setLocale(bad)
       assert.equal(locale(), 'en-US', `setLocale(${JSON.stringify(bad)}) did not fall back`)
+    }
+  } finally {
+    pristine()
+  }
+})
+
+test('setLang keeps the tag of the words\' language, region and case as given, and falls back to en for anything that is no tag (1.9 A)', () => {
+  try {
+    pristine()
+    assert.equal(DEFAULT_LANG, 'en')
+    assert.equal(lang(), 'en')
+    for (const tag of ['de', 'pt-BR', 'zh-CN', 'zh-TW', 'en', 'cs']) {
+      setLang(tag)
+      assert.equal(lang(), tag)
+    }
+    // The words' language is not the formatters': under VS Code's `hu` the words are English.
+    setLang('en')
+    setLocale('hu')
+    assert.equal(lang(), 'en')
+    assert.equal(locale(), 'hu')
+    for (const bad of ['', ' de', 'x y', 'de_CH', 'd', 'toolong-tag-123456789', 'de-"x"', '<b>', undefined, null]) {
+      setLang('de')
+      setLang(bad)
+      assert.equal(lang(), 'en', `setLang(${JSON.stringify(bad)}) did not fall back`)
     }
   } finally {
     pristine()

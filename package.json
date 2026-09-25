@@ -298,6 +298,47 @@
         "title": "%configuration.general.title%",
         "order": 1,
         "properties": {
+          "tokenPace.language": {
+            "type": "string",
+            "order": 0,
+            "enum": [
+              "auto",
+              "en",
+              "de",
+              "fr",
+              "es",
+              "pt-br",
+              "it",
+              "ja",
+              "ko",
+              "zh-cn",
+              "zh-tw",
+              "ru",
+              "tr",
+              "pl",
+              "cs"
+            ],
+            "enumDescriptions": [
+              "%config.language.enum.auto%",
+              "%config.language.enum.en%",
+              "%config.language.enum.de%",
+              "%config.language.enum.fr%",
+              "%config.language.enum.es%",
+              "%config.language.enum.pt-br%",
+              "%config.language.enum.it%",
+              "%config.language.enum.ja%",
+              "%config.language.enum.ko%",
+              "%config.language.enum.zh-cn%",
+              "%config.language.enum.zh-tw%",
+              "%config.language.enum.ru%",
+              "%config.language.enum.tr%",
+              "%config.language.enum.pl%",
+              "%config.language.enum.cs%"
+            ],
+            "default": "auto",
+            "markdownDescription": "%config.language.description%",
+            "scope": "application"
+          },
           "tokenPace.statusBar.show": {
             "type": "array",
             "order": 1,

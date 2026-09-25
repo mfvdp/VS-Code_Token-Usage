@@ -41,7 +41,7 @@ import {
 } from './bridge'
 import { CacheWatchEntry, watchCaches } from './cacheWatch'
 import {
-  affects, Config, CONFIG_KEYS, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
+  affects, Config, CONFIG_KEYS, languageSetting, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
 } from './config'
 import { KeepWarmConsent, NetworkConsent, WriteConsent } from './consent'
 import { watchCredentials } from './credentials'
@@ -52,9 +52,11 @@ import {
 } from './diagnostics'
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
 import { DEFAULT_FORECAST_CONFIG, ForecastConfig } from './forecast'
-import { setBundle, setLocale, t } from './i18n'
+import { locale, setBundle, setLang, setLocale, t } from './i18n'
 import { KEEP_WARM_LINE } from './keepWarm'
 import { KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
+import { availableLanguages, bundleFileName, readBundle } from './languageLoad'
+import { LanguageId, LanguageSetting, ResolvedLanguage, resolveLanguage, vscodeLanguageTag } from './languages'
 import { Lease } from './lease'
 import { NativeViews, registerNativeViews } from './nativeViews'
 import { effectivePace, paceVerdict, windowElapsed } from './pace'
@@ -162,11 +164,6 @@ export interface TokenPaceApi {
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<TokenPaceApi> {
-  // The seam first: everything below may put a string on screen, and the bundle VS Code
-  // loaded for the editor's language is the only translation there is (see i18n.ts).
-  setLocale(vscode.env.language)
-  setBundle(vscode.l10n.bundle ?? {})
-
   log = new Logger(vscode.window.createOutputChannel('Token Pace', { log: true }))
   context.subscriptions.push(log)
   const say = (m: string): void => log.info(m)
@@ -174,6 +171,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   // --------------------------------------------------------------- settings and paths
   let cfg = readConfig()
   log.configure(cfg.debug, cfg.debugLogFile)
+
+  // 1.9 A2: the seam next — everything below may put a string on screen. Token Pace reads its own
+  // bundle for the language `tokenPace.language` names (i18n.ts, languageLoad.ts); `vscode.l10n.bundle`,
+  // the bundle for VS Code's language, is no longer read. The picker offers what is on disk.
+  const l10nDir = context.asAbsolutePath('l10n')
+  const shippedLanguages: LanguageId[] = availableLanguages(l10nDir)
+  noteLanguageSetting()
+  let language: ResolvedLanguage = applyLanguage(cfg.language)
+
+  /**
+   * 1.9 A2 rule 3: installs the language the setting names — its bundle (English reads none), its
+   * `Intl` tag and the tag its words are in — and says so in one English log line. An explicit
+   * language without a file, or a file that cannot be read, is English, and the log says why.
+   * Nothing else is read: no transcript, no file of Claude Code or Codex, nothing over the network.
+   */
+  function applyLanguage(setting: LanguageSetting): ResolvedLanguage {
+    let pool: readonly LanguageId[] = shippedLanguages
+    let resolved = resolveLanguage(setting, vscode.env.language, pool)
+    if (setting !== 'auto' && resolved.id !== setting) {
+      log.info(`Language: ${setting} has no translation file in this build; English is shown.`)
+    }
+    let bundle: Record<string, string> | null = null
+    // Ends: English reads no file, and every failed id leaves the pool.
+    for (;;) {
+      let failure = 'unreadable'
+      bundle = readBundle(l10nDir, resolved.id, undefined, (kind) => { failure = kind })
+      if (bundle !== null) break
+      log.warn(`Language: ${bundleFileName(resolved.id)} could not be read (${failure}); English is shown.`)
+      const failed = resolved.id
+      pool = pool.filter((id) => id !== failed)
+      resolved = resolveLanguage(setting, vscode.env.language, pool)
+    }
+    setBundle(bundle)
+    setLocale(resolved.intl)
+    setLang(resolved.htmlLang)
+    const strings = Object.values(bundle).filter((v) => typeof v === 'string' && v.length > 0).length
+    log.info(`Language: ${setting} → ${resolved.id} (${strings} strings, Intl ${locale()})`)
+    return resolved
+  }
+
+  /** 1.9 A1 rule 3: a value `sanitize` turned into `auto` is said so — never repeated: it is text the user typed. */
+  function noteLanguageSetting(): void {
+    const raw = vscode.workspace.getConfiguration('tokenPace').get<unknown>('language')
+    if (raw !== undefined && raw !== null && languageSetting(raw) !== raw) {
+      log.info('Language: the setting is not one of the shipped languages; auto is used.')
+    }
+  }
+
   configureRoots(cfg.claudeDir, cfg.codexDir)
   configureQuotaFiles(cfg.claudeQuotaFile, cfg.codexQuotaFile)
 
@@ -1448,6 +1493,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       settings: collectSettings(vscode, CONFIG_KEYS),
       partialData: scanning || quotas.some((q) => q.partial === true),
       attribution: cfg.attribution,
+      // 1.9 A: the language line — setting, shown language, VS Code's tag.
+      language: { setting: language.setting, shown: language.id, vscode: vscodeLanguageTag(vscode.env.language) },
       home,
     }
     await vscode.env.clipboard.writeText(buildDiagnostics(input))
@@ -1728,6 +1775,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       if (!cfg.cacheKeepWarm && before.cacheKeepWarm) {
         keepWarmAskPending = false
         void keepWarmConsent.reset()
+      }
+      // 1.9 A2 rule 4: a language switch — the words, the formats and the page's `lang` at once; every
+      // reading the manager can make again is made again, in the new language (§3.0 e); the page's
+      // words travel with its next whole push (1.9 P2); the hook's setup document is redrawn; the
+      // render below rebuilds the view model (the markdown document with it) and draws the bar.
+      // Compared with the language last applied, not with `before`: whichever read of the settings
+      // came first, a switch is applied exactly once.
+      if (affects(e, ['language'])) noteLanguageSetting()
+      if (cfg.language !== language.setting) {
+        language = applyLanguage(cfg.language)
+        quotaMgr.invalidate()
+        dashboard.languageChanged()
+        hookDocs.refresh()
       }
       render(true)
     }),

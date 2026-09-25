@@ -9,7 +9,7 @@ import {
   readAlertConfig,
 } from '../src/config'
 import type { Config } from '../src/config'
-import { englishNls, germanNls, readManifest } from './helpers/nls'
+import { englishNls, germanNls, readJson, readManifest } from './helpers/nls'
 
 interface Property {
   type?: string | string[]
@@ -478,4 +478,41 @@ test('the budget alert level is off by default and clamped to the range the mani
   assert.equal(sanitize({ 'tokenPace.alerts.budgetPercent': -5 }).alerts.budgetPercent, 0)
   assert.equal(sanitize({ 'tokenPace.alerts.budgetPercent': 'lots' }).alerts.budgetPercent, 0)
   assert.equal(properties['tokenPace.alerts.budgetPercent'].default, 0)
+})
+
+test('tokenPace.language: auto or an exact registry id — another case, a path, a number, an empty string or null is auto (1.9 A1 rule 3)', () => {
+  assert.equal(sanitize({}).language, 'auto')
+  assert.equal(sanitize({ 'tokenPace.language': 'auto' }).language, 'auto')
+  for (const id of ['en', 'de', 'fr', 'es', 'pt-br', 'it', 'ja', 'ko', 'zh-cn', 'zh-tw', 'ru', 'tr', 'pl', 'cs']) {
+    assert.equal(sanitize({ 'tokenPace.language': id }).language, id, id)
+  }
+  // The id is also a file tag: `FR` is not `fr`, and `pt-BR` not `pt-br` — both are auto, not a guess.
+  for (const bad of ['FR', 'pt-BR', 'Zh-TW', '../x', 'fr/../../x', '', ' de', 'pt', 'xx', 42, null, true, ['de'], { de: true }]) {
+    assert.equal(sanitize({ 'tokenPace.language': bad }).language, 'auto', JSON.stringify(bad))
+  }
+})
+
+test('the language setting: a string enum of auto and the fourteen ids, auto by default, of application scope, first in General with order 0 (1.9 A1 rule 2)', () => {
+  const raw = readJson('package.json') as {
+    contributes: { configuration: Array<{ id: string; properties: Record<string, Record<string, unknown>> }> }
+  }
+  const general = raw.contributes.configuration.find((g) => g.id === 'tokenPace.general')
+  assert.ok(general)
+  const keys = Object.keys(general.properties)
+  assert.equal(keys[0], 'tokenPace.language', 'the language is not the first setting of General')
+  const ids = ['en', 'de', 'fr', 'es', 'pt-br', 'it', 'ja', 'ko', 'zh-cn', 'zh-tw', 'ru', 'tr', 'pl', 'cs']
+  assert.deepEqual(general.properties['tokenPace.language'], {
+    type: 'string',
+    order: 0,
+    enum: ['auto', ...ids],
+    enumDescriptions: ['auto', ...ids].map((v) => `%config.language.enum.${v}%`),
+    default: 'auto',
+    markdownDescription: '%config.language.description%',
+    // A cloned repository's `.vscode/settings.json` must not switch a reader's interface language,
+    // and every window of the user shows the same one.
+    scope: 'application',
+  })
+  // Nothing else of General moved: the keep-warm setting still follows the plan names (1.8).
+  assert.equal(keys.indexOf('tokenPace.cacheKeepWarm'), keys.indexOf('tokenPace.planName') + 1)
+  assert.equal(CONFIG_KEYS[0], 'tokenPace.language')
 })

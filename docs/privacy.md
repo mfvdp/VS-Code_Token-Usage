@@ -13,7 +13,11 @@ files, the `cachedUsageUtilization` object in `~/.claude.json`, the extension's 
 mirror `statusline-mirror.json` inside its `globalStorage` (below) and the agent hook's mirror
 `agent-hook.jsonl` beside it —
 whenever that file exists: only the hook script you install writes it, and a line older than 30
-minutes no longer counts —, Claude Code's `settings.json`, its `settings.local.json`
+minutes no longer counts —, its own translation file for the language you chose
+(`l10n/bundle.l10n.<language>.json` inside the extension's folder — a file Token Pace ships, with the
+translations of its own texts and nothing of yours; read at activation and when `tokenPace.language`
+changes, its name built only from the list of shipped languages, never from the setting's text; English
+reads none), Claude Code's `settings.json`, its `settings.local.json`
 and the platform's managed-settings file (to report whether the status-line bridge is installed
 and whether something shadows it) and — only in `quotaSource: poll`, only after consent —
 `~/.claude/.credentials.json`, for the access token that the poll sends to
@@ -226,6 +230,13 @@ One further write exists and is not an opt-in setting: the *Run Token Pace local
 the remote hint puts `remote.extensionKind` into your user `settings.json` — see
 [Windows, WSL and remote development](windows-wsl-remote.md). It happens only on
 that click, only on a remote host with no transcripts, and it merges rather than replaces.
+
+And one setting of Token Pace's own is written for you (1.9): your user settings, when you choose a
+language in the dashboard (`tokenPace.language`) — through VS Code's settings API, the way *Cycle
+Status Bar Windows* writes `tokenPace.windowSelect`; only on that click, only that key, always your
+user settings and never a workspace's (the setting has application scope). Choosing *Automatic*
+removes the key. Switching the language reads nothing else — no transcript, no file of Claude Code or
+Codex, nothing over the network.
 
 The only outbound network access is the consent-gated quota fetch described under
 [Quota sources](quota-sources.md). That promise is checked mechanically:

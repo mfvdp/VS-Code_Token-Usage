@@ -19,7 +19,8 @@
  *  • The session behind the terminal (G13, 1.8 P12). A terminal runs a folder's `claude`, not a named
  *    session: the other main records of the folder the session's transcript lies in go to the decision
  *    as its siblings — their first and newest reply, the newest reply's stop and whether the user's line
- *    is newest, and whether an agent of theirs runs.
+ *    is newest, the time of their newest user line (1.9 §0a.1, for the bound of 1.9 D), and whether an
+ *    agent of theirs runs. None of their times is ever logged.
  *  • Focus (G8). When a terminal was the active terminal of the focused window, from
  *    `onDidChangeActiveTerminal` and `onDidChangeWindowState` with this host's clock; a window that
  *    started watching after a session's newest reply cannot say, and says so (`unknown`).
@@ -281,7 +282,9 @@ function projectDirOf(file: string): string {
 /**
  * G13's siblings (1.8 P12): every main record of another session whose transcript lies in the project
  * directory `projectDir` — under any root, whatever its age —, with what the decision tests of it. A
- * record without a request of the cache gives null for the two facts of that request: not idle.
+ * record without a request of the cache gives null for the two facts of that request: not idle. 1.9 D:
+ * with the time of its newest user line (`MainRec.lastUserAt`), by which the decision tells a session
+ * left behind from one that may still be at work.
  */
 export function siblingsOf(sessionId: string, projectDir: string, mains: KeepWarmFrame['mains'], tree: AgentTreeVm | null): KeepWarmSibling[] {
   const out: KeepWarmSibling[] = []
@@ -296,6 +299,7 @@ export function siblingsOf(sessionId: string, projectDir: string, mains: KeepWar
       stop: last ? last.stop : null,
       replyPending: last ? last.replyPending : null,
       running: sessionRunning(tree, rec.sessionId),
+      lastUserAt: rec.lastUserAt,
     })
   }
   return out

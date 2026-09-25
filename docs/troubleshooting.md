@@ -146,7 +146,10 @@ started —, in these words:
   way the session gets no line —; or another session of the folder is not idle: its newest reply is
   less than a minute old, stopped for a tool or was cut off, a line of yours came after it (a
   question or a permission dialog may be open there), or an agent of it runs. The last holds until
-  that session has finished its turn.
+  that session has finished its turn, or until it has been left behind: no agent of it running, and
+  its newest line at least 2 hours old and older than the moment this terminal's `claude` started — a
+  prompt that never got its reply, an interrupted reply, a window closed mid-turn. In 1.8 such a
+  session held the line back for as long as its transcript was kept, seven days.
 
 ## A question answered after the window closed
 

@@ -161,6 +161,12 @@ test('the read contract holds for the shipped sources: every reader names exactl
   assert.deepEqual([byWhat.get('the permission mode')?.kind, byWhat.get('the permission mode')?.fields], ['regex', ['permissionMode']])
   // 1.8 P5 (§0a.5): a user line's top-level `type`, on the raw line as well — the line is never parsed for it.
   assert.deepEqual([byWhat.get('a user line')?.kind, byWhat.get('a user line')?.fields], ['regex', ['type']])
+  // 1.9 P17 (§0a.1): the time of a main transcript's newest user line — its unescaped `timestamp` key, on
+  // the raw line of a user line, never parsed; held to the privacy page and the prompt-cache page, the
+  // page of its one use (the keep-warm line's G13 bound).
+  const userTime = byWhat.get('the time of a user line')
+  assert.deepEqual([userTime?.kind, userTime?.regex, userTime?.fields, userTime?.source, userTime?.pages],
+    ['regex', 'USER_LINE_TIME_RE', ['timestamp'], '~/.claude/projects/', ['privacy', 'promptCache']])
   assert.deepEqual(byWhat.get('a cache miss')?.fields, ['diagnostics'])
   assert.deepEqual(byWhat.get('a cache miss\'s diagnostics')?.fields, ['cache_miss_reason'])
   assert.deepEqual(byWhat.get('a cache miss\'s reason')?.fields, ['type', 'cache_missed_input_tokens'])
@@ -212,8 +218,10 @@ test('the read contract holds for the shipped sources: every reader names exactl
       'recacheTokensIfCold']],
     ['the status line\'s prompt cache (direct)', 'fields', ['warm']],
   ])
+  // 1.9 P17 (pinned and changed): the time of a user line is held to the same two pages (§0a.1).
+  const promptCacheRow = (what: string): boolean => mirrorRow(what) || keepWarmRow(what) || what === 'the time of a user line'
   for (const row of contract.READ_CONTRACT) {
-    assert.deepEqual(row.pages, mirrorRow(row.what) || keepWarmRow(row.what) ? ['privacy', 'promptCache'] : undefined, row.what)
+    assert.deepEqual(row.pages, promptCacheRow(row.what) ? ['privacy', 'promptCache'] : undefined, row.what)
     if (mirrorRow(row.what)) assert.equal(row.source, 'statusline-mirror.json', row.what)
   }
   // 1.8 P10 (§0a.6–§0a.8): the keep-warm host, reader by reader — the two shell-execution events, an

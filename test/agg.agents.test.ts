@@ -252,6 +252,8 @@ test('a main transcript keeps a session record for the tree, whatever attributio
     // 1.8 P5 (§0a.2, pinned and changed: the record's shape): m1 read the cache — its first line's time,
     // no write before it (no TTL class), its size over both lines, its stop reason; m2 touched no cache.
     lastRequest: { at: T0, ttl: null, context: 10 + 90 + 25, model: 'claude-opus-4-6', stop: 'end_turn', replyPending: false },
+    // 1.9 P17 (§0a.1, pinned and changed: the record's shape): no user line came after its first reply.
+    lastUserAt: null,
   }]])
   assert.equal(agg.agents().length, 0)
   // The open message knows which record holds it — by name, not by path.
@@ -802,6 +804,11 @@ test('a line that is no response, agent or run result, notification, gated promp
     '{"toolUseResult": {"agentId": broken',
   ]
   agg.addClaudeLine(agentToolUseLine({ id: 'm', ts: T0 - 1, toolUseId: 'toolu_bg', background: true }), MAIN_CTX)
+  // 1.9 P17 (§0a.1, pinned and changed): a user line newer than the record's newest raises its
+  // `lastUserAt` — a change of its own, of the line's time only. The record has seen one at the lines'
+  // time already, so what is tested stays what it was: nothing else of them changes anything.
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0, permissionMode: null }), MAIN_CTX), true)
+  assert.equal(agg.mains()[0].lastUserAt, T0)
   const before = JSON.stringify(agg.toSnapshot())
   for (const line of lines) assert.equal(agg.addClaudeLine(line, MAIN_CTX), false, line.slice(0, 60))
   assert.equal(JSON.stringify(agg.toSnapshot()), before)
@@ -1792,8 +1799,9 @@ test('the efforts and the context survive a snapshot round trip, checked again; 
   // for the transcripts already read. 1.6 P13a (pinned and changed): 7, for the O3 metadata; 1.6
   // P13b (pinned and changed): 8, for the run records (L4) — a revision-5 snapshot still asks for
   // the replay, as every one below the current does. 1.8 P5 (pinned and changed): 9, for a main
-  // session's newest cache-touching request (§0a.2).
-  assert.equal(AGENT_TABLES_REVISION, 9)
+  // session's newest cache-touching request (§0a.2). 1.9 P17 (pinned and changed): 10, for the time of a
+  // main session's newest user line (§0a.1).
+  assert.equal(AGENT_TABLES_REVISION, 10)
   const agg = new Aggregator()
   agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, agentId: 'abc123', usage: { input: 5, cacheRead: 100 }, effort: 'high' }), AGENT_CTX)
   agg.addClaudeLine(claudeLine({ id: 'm2', ts: T0 + 1000, agentId: 'abc123', usage: { input: 7, cacheWrite: 20 }, effort: 'max' }), AGENT_CTX)

@@ -3,14 +3,19 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { Aggregator, billable, localDay } from '../src/agg'
+import { AGENT_TABLES_REVISION, Aggregator, USER_LINE_TIME_RE, billable, localDay, userLineTimeOf } from '../src/agg'
 import { freshInput } from '../src/stats'
 import { hourIndex, TimeConfig } from '../src/time'
 import { Bucket, MainRec, Snapshot, Source, ToolStat, bucketKey, STATE_VERSION } from '../src/types'
-import { CLAUDE_MAIN, CLAUDE_SUB, claudeLine, compactSummaryLine, ctxFor, iso, promptLine, toolResultLine } from './fixtures/helpers'
+import { buildViewModel } from '../src/viewModel'
+import {
+  CLAUDE_MAIN, CLAUDE_SUB, agentResultLine, agentToolUseLine, claudeLine, compactSummaryLine, ctxFor, iso, promptLine, toolResultLine,
+} from './fixtures/helpers'
+import { makeInput } from './fixtures/viewFixtures'
 
 const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
 const T0 = Date.UTC(2026, 2, 10, 9, 15, 0)
+const HOUR_MS = 3_600_000
 const CTX = ctxFor()
 
 test('streaming snapshots of one message.id count once, with the per-field maximum', () => {
@@ -563,9 +568,14 @@ test('lastRequest.replyPending: in the order the file holds the lines; a session
   // Another session's prompt is that session's.
   agg.addClaudeLine(promptLine({ ts: T0 + 5000 }), MAIN_B_CTX)
   assert.equal(lastRequestOf(agg)?.replyPending, false)
-  // A line that says it changed something only when the flag moved.
+  // A line that says it changed something only when the flag moved — 1.9 P17 (§0a.1, pinned and
+  // changed): or the time of the newest user line; a user line of that time again, or an older one, moves
+  // neither.
   assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 6000, permissionMode: null }), CTX), true)
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 7000, permissionMode: null }), CTX), true)
   assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 7000, permissionMode: null }), CTX), false)
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 6500, permissionMode: null }), CTX), false)
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, T0 + 7000)
 })
 
 test('lastRequest survives a snapshot round trip and restores by shape; a 1.7 snapshot restores none, and its open message grows none (1.8 §0a.2)', () => {
@@ -640,4 +650,175 @@ test('lastRequest keeps no content: synthetic text under content and a 300-chara
   assert.equal(saved.includes(secret), false, 'the snapshot holds a prompt, a reply, a tool input or a tool result')
   // The main session's record keeps no model that does not fit (the buckets name the line's model, as always).
   assert.equal(JSON.stringify(snap.mains).includes('x'.repeat(65)), false, 'the record holds the overlong model')
+})
+
+// ---------------------------------------------------------------------------
+// 1.9 §0a.1 (P17): the time of a main transcript's newest user line, for the keep-warm G13 bound
+// ---------------------------------------------------------------------------
+
+/** §0a.1's leak fixture: its top-level time, and what else the line carries. */
+const USER_AT = '2026-09-25T10:00:00.000Z'
+const USER_SECRET = 'synthetic-secret-123'
+const PROMPT_SECRET = 'synthetic-prompt-5c2e'
+/**
+ * A user line whose prompt spells out an escaped `"timestamp":"2099-…"`, whose nested `toolUseResult` has a
+ * `timestamp` of its own that is older and comes first, and whose top-level `timestamp` comes last.
+ */
+function leakyUserLine(at = USER_AT): string {
+  return JSON.stringify({
+    parentUuid: 'uuid-parent-0000', isSidechain: false, promptId: 'prompt-0003', type: 'user',
+    message: { role: 'user', content: `${PROMPT_SECRET} "timestamp":"2099-01-01T00:00:00Z" please` },
+    toolUseResult: { timestamp: '2026-09-20T00:00:00Z', stdout: USER_SECRET },
+    uuid: 'uuid-user-leak', timestamp: at, userType: 'external', cwd: '/home/tester/proj-alpha', sessionId: 'sess-0001',
+  })
+}
+
+test('userLineTimeOf: the latest unescaped timestamp key of a line — never one spelled out in a string, never an offset form (1.9 §0a.1, §3 D test 7)', (t) => {
+  // The §0a.1 fixture: the nested 09-20 key comes first, the escaped 2099 one never counts.
+  const raw = leakyUserLine()
+  assert.ok(raw.indexOf('"timestamp":"2026-09-20') < raw.indexOf(`"timestamp":"${USER_AT}"`), 'the nested key comes first')
+  assert.ok(raw.includes('\\"timestamp\\":\\"2099-01-01T00:00:00Z\\"'), 'the prompt holds the key escaped')
+  // Mutation check (§0a.1): taking the first match instead of the latest gives 09-20.
+  assert.equal(userLineTimeOf(raw), Date.parse(USER_AT))
+  // No match, a key in a string, an offset form, a time that is none.
+  for (const none of ['', '{"type":"user"}', '{"type":"user","message":{"content":"\\"timestamp\\":\\"2026-09-25T10:00:00Z\\""}}',
+    '{"type":"user","timestamp":"2026-09-25T12:00:00+02:00"}', '{"type":"user","timestamp":"2026-09-25 10:00:00Z"}',
+    '{"type":"user","timestamp":1790330400000}', '{"type":"user","timestamp":"2026-13-01T00:00:00Z"}',
+    '{"type":"user","timestamp":"1970-01-01T00:00:00Z"}', '{"type":"user","timestamp":"2026-09-25T10:00:00.1234567890Z"}']) {
+    assert.equal(userLineTimeOf(none), null, none)
+  }
+  assert.equal(userLineTimeOf(42 as unknown as string), null)
+  // Two nested keys, one newer than the line's own: the newer — the safe direction.
+  const nested = JSON.stringify({ type: 'user', toolUseResult: { a: { timestamp: '2026-09-25T09:00:00Z' }, b: { timestamp: '2026-09-25T11:30:00.5Z' } }, timestamp: '2026-09-25T10:00:00Z' })
+  assert.equal(userLineTimeOf(nested), Date.parse('2026-09-25T11:30:00.500Z'))
+  // Fractions of one to nine digits; a whole second.
+  assert.equal(userLineTimeOf('"timestamp":"2026-09-25T10:00:00Z"'), Date.parse('2026-09-25T10:00:00Z'))
+  assert.equal(userLineTimeOf('"timestamp":"2026-09-25T10:00:00.123456789Z"'), Date.parse('2026-09-25T10:00:00.123Z'))
+  // The exported pattern is anyone's to use: a `lastIndex` left on it changes nothing here.
+  USER_LINE_TIME_RE.lastIndex = raw.length
+  try {
+    assert.equal(userLineTimeOf(raw), Date.parse(USER_AT))
+  } finally {
+    USER_LINE_TIME_RE.lastIndex = 0
+  }
+  // A 5 MB tool result (reported, not asserted: the spec's "under 50 ms on this machine").
+  const big = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'x'.repeat(5 * 1024 * 1024) }] },
+    toolUseResult: { stdout: 'y "timestamp" z '.repeat(1000) }, timestamp: USER_AT })
+  const started = process.hrtime.bigint()
+  assert.equal(userLineTimeOf(big), Date.parse(USER_AT))
+  const ms = Number(process.hrtime.bigint() - started) / 1e6
+  t.diagnostic(`userLineTimeOf over a ${(big.length / 1024 / 1024).toFixed(1)} MB line: ${ms.toFixed(2)} ms`)
+})
+
+test('lastUserAt on the record: a prompt before the first reply sets nothing, one after it does, an older one never lowers it; an agent\'s lines touch no main record (1.9 §0a.1, §3 D test 8)', () => {
+  const agg = new Aggregator()
+  // No record before the transcript's first counted reply: nothing to set.
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 }), CTX), false)
+  assert.equal(agg.mainEntries().length, 0)
+  agg.addClaudeLine(claudeLine({ id: 'u1', ts: T0 + 1000, usage: { input: 9 }, final: true }), CTX)
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, null, 'the prompt before the record is not remembered')
+  // After it: set — on a record without a request of the cache too (no `lastRequest`, no flag).
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 2000 }), CTX), true)
+  assert.deepEqual([mainRecOf(agg, CLAUDE_MAIN).lastUserAt, mainRecOf(agg, CLAUDE_MAIN).lastRequest], [T0 + 2000, null])
+  // A tool result (never parsed), a parsed agent result and a compaction's summary are user lines too.
+  agg.addClaudeLine(toolResultLine({ ts: T0 + 3000, results: [{ toolUseId: 'toolu_u1' }] }), CTX)
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, T0 + 3000)
+  agg.addClaudeLine(agentToolUseLine({ id: 'u2', ts: T0 + 3500, toolUseId: 'toolu_ag' }), CTX)
+  agg.addClaudeLine(agentResultLine({ ts: T0 + 4000, toolUseId: 'toolu_ag', agentId: 'a1' }), CTX)
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, T0 + 4000)
+  agg.addClaudeLine(compactSummaryLine({ ts: T0 + 5000 }), CTX)
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, T0 + 5000)
+  // An older user line after a newer one does not lower it; an assistant line does not touch it.
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 4500, permissionMode: null }), CTX), false)
+  agg.addClaudeLine(claudeLine({ id: 'u3', ts: T0 + 9000, usage: { input: 9, cacheRead: 50 }, final: true }), CTX)
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, T0 + 5000)
+  // An agent's prompt and tool results are the agent's transcript's: no main record moves, the agent's
+  // record keeps no such field.
+  agg.addClaudeLine(claudeLine({ id: 'ag1', ts: T0 + 6000, agentId: 'a1', usage: { input: 3 } }), SUB_CTX)
+  agg.addClaudeLine(promptLine({ ts: T0 + 60_000, agentId: 'a1' }), SUB_CTX)
+  agg.addClaudeLine(toolResultLine({ ts: T0 + 61_000, agentId: 'a1', results: [{ toolUseId: 'toolu_a1' }] }), SUB_CTX)
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, T0 + 5000)
+  assert.equal('lastUserAt' in agg.agents()[0], false)
+  // Another session's user line is that session's.
+  agg.addClaudeLine(claudeLine({ id: 'b1', ts: T0, usage: { input: 1 } }), MAIN_B_CTX)
+  agg.addClaudeLine(promptLine({ ts: T0 + 70_000 }), MAIN_B_CTX)
+  assert.deepEqual([mainRecOf(agg, CLAUDE_MAIN).lastUserAt, mainRecOf(agg, MAIN_B).lastUserAt], [T0 + 5000, T0 + 70_000])
+  // A user line without a time of the form keeps what the record has.
+  const timeless = JSON.parse(promptLine({ ts: T0 + 80_000 })) as Record<string, unknown>
+  timeless.timestamp = '2026-03-10T10:15:00+01:00'
+  assert.equal(agg.addClaudeLine(JSON.stringify(timeless), MAIN_B_CTX), false)
+  assert.equal(mainRecOf(agg, MAIN_B).lastUserAt, T0 + 70_000)
+})
+
+test('lastUserAt: the replay gives what a fresh read gives; a round trip keeps it; a snapshot restores it by shape, a 1.8 one as none (1.9 §0a.1, §3 D test 9)', () => {
+  const lines = [
+    promptLine({ ts: T0 - 1000 }),
+    claudeLine({ id: 'r1', ts: T0, usage: { input: 3, cacheWrite: 900, cacheWrite1h: 900, output: 4 }, final: true }),
+    promptLine({ ts: T0 + 60_000 }),
+    claudeLine({ id: 'r2', ts: T0 + 65_000, usage: { input: 3, cacheRead: 900, output: 4 }, final: true, stopReason: 'tool_use', tools: [{ name: 'Bash', id: 'toolu_r2' }] }),
+    toolResultLine({ ts: T0 + 70_000, results: [{ toolUseId: 'toolu_r2' }] }),
+  ]
+  const live = new Aggregator()
+  for (const l of lines) live.addClaudeLine(l, CTX)
+  assert.equal(mainRecOf(live, CLAUDE_MAIN).lastUserAt, T0 + 70_000)
+  const replayed = new Aggregator()
+  for (const l of lines.slice(0, 2)) replayed.addClaudeLine(l, CTX)
+  replayed.beginAgentReplay([CLAUDE_MAIN])
+  for (const l of lines) replayed.addClaudeLine(l, { ...CTX, agentsOnly: true })
+  replayed.endAgentReplay()
+  assert.deepEqual(mainRecOf(replayed, CLAUDE_MAIN), mainRecOf(live, CLAUDE_MAIN), 'the replayed record')
+
+  const snap = JSON.parse(JSON.stringify(live.toSnapshot())) as Snapshot
+  assert.equal(snap.version, STATE_VERSION)
+  assert.equal(STATE_VERSION, 8, 'the field is additive: the schema version stays')
+  assert.equal(mainRecOf(Aggregator.fromSnapshot(snap), CLAUDE_MAIN).lastUserAt, T0 + 70_000)
+  const edited = (v: unknown, direct = false): number | null => {
+    const s = direct ? structuredClone(live.toSnapshot()) : JSON.parse(JSON.stringify(live.toSnapshot())) as Snapshot
+    const m = (s.mains as unknown as Record<string, Record<string, unknown>>)[CLAUDE_MAIN]
+    if (v === undefined) delete m.lastUserAt
+    else m.lastUserAt = v
+    return mainRecOf(Aggregator.fromSnapshot(s), CLAUDE_MAIN).lastUserAt
+  }
+  for (const bad of ['x', -1, 0, null, true, '1790330400000', { at: T0 }]) assert.equal(edited(bad), null, JSON.stringify(bad))
+  for (const bad of [Number.NaN, Infinity, -Infinity]) assert.equal(edited(bad, true), null, String(bad))
+  assert.equal(edited(T0 + 1), T0 + 1)
+  // What a 1.8 build leaves: no field, revision 9 — the host is asked to replay.
+  const v18 = JSON.parse(JSON.stringify(live.toSnapshot())) as Snapshot
+  delete (v18.mains as unknown as Record<string, Record<string, unknown>>)[CLAUDE_MAIN].lastUserAt
+  v18.agentsRevision = 9
+  const back = Aggregator.fromSnapshot(v18)
+  assert.equal(mainRecOf(back, CLAUDE_MAIN).lastUserAt, null)
+  assert.equal(AGENT_TABLES_REVISION, 10)
+  assert.notEqual(back.agentsRevision, AGENT_TABLES_REVISION, 'the host replays')
+  // The next user line sets it again.
+  back.addClaudeLine(promptLine({ ts: T0 + 90_000 }), CTX)
+  assert.equal(mainRecOf(back, CLAUDE_MAIN).lastUserAt, T0 + 90_000)
+})
+
+test('the time of a user line keeps nothing else of it: no prompt, no tool output, no escaped 2099 in the snapshot or the view model (1.9 §0a.1 leak test)', () => {
+  const agg = new Aggregator()
+  agg.addClaudeLine(claudeLine({ id: 'lk1', ts: Date.parse(USER_AT) - HOUR_MS, usage: { input: 3, cacheWrite: 900, cacheWrite1h: 900, output: 4 }, final: true }), CTX)
+  const parsedBefore = JSON.parse
+  const seen: string[] = []
+  JSON.parse = function (text: string, reviver?: (this: unknown, key: string, value: unknown) => unknown): unknown {
+    seen.push(String(text))
+    return parsedBefore.call(JSON, text, reviver)
+  } as typeof JSON.parse
+  try {
+    assert.equal(agg.addClaudeLine(leakyUserLine(), CTX), true)
+  } finally {
+    JSON.parse = parsedBefore
+  }
+  assert.deepEqual(seen, [], 'the user line was parsed')
+  // Mutation check (§0a.1): the first match instead of the latest gives the nested 09-20 time here.
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastUserAt, Date.parse(USER_AT))
+  assert.equal(mainRecOf(agg, CLAUDE_MAIN).lastRequest?.replyPending, true)
+  const vm = buildViewModel({ ...makeInput({ agg }), now: Date.parse(USER_AT) + 60_000 })
+  const outputs: Array<[string, string]> = [['snapshot', JSON.stringify(agg.toSnapshot())], ['view model', JSON.stringify(vm)]]
+  for (const [what, text] of outputs) {
+    for (const never of [USER_SECRET, PROMPT_SECRET, '2099-01-01', String(Date.UTC(2099, 0, 1)), '2026-09-20T00:00:00', String(Date.UTC(2026, 8, 20)),
+      'uuid-user-leak', 'prompt-0003']) {
+      assert.equal(text.includes(never), false, `the ${what} holds ${never}`)
+    }
+  }
 })

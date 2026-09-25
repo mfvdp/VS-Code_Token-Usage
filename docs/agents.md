@@ -889,9 +889,11 @@ every save.
 1.5 builds — committed, never published — no workflow runs. On the first start after the update they are rebuilt once from the
 Claude transcripts and journals that changed in the last seven days — each read only as far as its
 tokens were already counted, so no token is counted twice and no total moves. The snapshot states
-which revision of the agent tables it holds — revision **9** in 1.8.0, revision **8** in 1.6.0 and 1.7.0 —; an update that adds
+which revision of the agent tables it holds — revision **10** in 1.9.0, revision **9** in 1.8.0, revision **8** in 1.6.0 and 1.7.0 —; an update that adds
 something only such a rebuild can fill in raises the revision, and the rebuild runs once more (1.8.0 did,
-for the newest prompt-cache request of each main session — see [Prompt cache](prompt-cache.md#how-the-estimate-is-made)). The rebuild also reads an agent's
+for the newest prompt-cache request of each main session — see [Prompt cache](prompt-cache.md#how-the-estimate-is-made);
+1.9.0 did, for the time of each main session's newest `user` line, which the
+[keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) checks). The rebuild also reads an agent's
 sidecar again when the identity it kept names no spawning agent — the fifth field, `parentAgentId`,
 came with 1.6 — and keeps that identity when the file is gone; an agent whose transcript the rebuild
 could not read again counts no tool errors, and its details have no `Tool errors` row rather than a

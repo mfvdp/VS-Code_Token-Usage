@@ -58,7 +58,7 @@ function main(over: Partial<MainRec> = {}): MainRec {
     source: 'claude', sessionId: S1, firstTs: NOW - 2 * HOUR, lastTs: NOW - 2 * MIN, models: ['claude-opus-5'],
     input: 1000, cacheWrite: 500, cacheWrite1h: 100, cacheRead: 90_000, output: 2000, reasoning: 300,
     requests: 12, outputFinal: 12, toolCalls: 9,
-    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null,
+    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null, lastUserAt: null,
     ...over,
   }
 }

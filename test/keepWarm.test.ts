@@ -22,7 +22,7 @@ import { CACHE_COOLING_LEAD_MS, CacheWatchEntry, TTL_MS, watchCaches } from '../
 import {
   CLAUDE_COMMAND_RE, COMMAND_CONFIDENCE_MEDIUM, COMMAND_LINE_TESTED_CHARS, KEEPWARM_COUNTDOWN_MS, KEEPWARM_GUARD_OF,
   KEEPWARM_IDLE_MIN_MS, KEEPWARM_LEAD_MS, KEEPWARM_MAX_PER_IDLE, KEEPWARM_QUOTA_STOP_PERCENT, KEEPWARM_SEND_MARGIN_MS,
-  KEEPWARM_VERIFY_MS, KEEP_WARM_LINE, KeepWarmBlock, KeepWarmFacts, KeepWarmSibling, KeepWarmStage, ShellExecutionFacts,
+  KEEPWARM_SIBLING_LEFT_MS, KEEPWARM_VERIFY_MS, KEEP_WARM_LINE, KeepWarmBlock, KeepWarmFacts, KeepWarmSibling, KeepWarmStage, ShellExecutionFacts,
   claudeExecutionMatches, keepWarmDecision, projectDirName,
 } from '../src/keepWarm'
 import type { PromptCacheReading } from '../src/quotaSources'
@@ -68,7 +68,7 @@ function main(over: Partial<MainRec> = {}): MainRec {
     source: 'claude', sessionId: S1, firstTs: Date.UTC(2026, 8, 22, 14, 20), lastTs: EXPIRY - HOUR + 5 * SEC,
     models: ['claude-opus-5-5'], input: 1000, cacheWrite: 500, cacheWrite1h: 500, cacheRead: 90_000, output: 2000, reasoning: 0,
     requests: 12, outputFinal: 12, toolCalls: 3, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
-    lastRequest: lastRequest(), ...over,
+    lastRequest: lastRequest(), lastUserAt: null, ...over,
   }
 }
 
@@ -93,7 +93,7 @@ function facts(over: Partial<KeepWarmFacts> = {}): KeepWarmFacts {
 
 /** G13: another session of the folder, idle and older — begun the day before the session, quiet for half an hour. */
 function sibling(over: Partial<KeepWarmSibling> = {}): KeepWarmSibling {
-  return { firstAt: FIRST - 86_400_000, lastTs: NOW - 30 * MIN, stop: 'end_turn', replyPending: false, running: false, ...over }
+  return { firstAt: FIRST - 86_400_000, lastTs: NOW - 30 * MIN, stop: 'end_turn', replyPending: false, running: false, lastUserAt: null, ...over }
 }
 
 function hook(over: Partial<HookEntry> = {}): HookEntry {
@@ -562,6 +562,93 @@ test('G13 (b): every other session of the folder idle by G4\'s test, no agent of
   // Idle by exactly G4's measure: a minute old, its turn ended, nothing of the user's after it.
   assert.equal(verdict(facts({ siblings: [sibling({ lastTs: NOW - KEEPWARM_IDLE_MIN_MS })] })), 'go')
   assert.equal(verdict(facts({ siblings: [sibling(), sibling({ firstAt: FIRST - 6 * 86_400_000, lastTs: NOW - 5 * 86_400_000 })] })), 'go')
+})
+
+// ---------------------------------------------------------------------------
+// 1.9 D · the G13 bound: a session of the folder left behind no longer holds the line back
+// ---------------------------------------------------------------------------
+
+/** 1.9 D: the terminal's `claude` started an hour ago, and the session began in it two minutes later. */
+const EXEC_HOUR_AGO = NOW - HOUR
+function recent(over: Partial<KeepWarmFacts> = {}): KeepWarmFacts {
+  return facts({ main: main({ firstTs: NOW - 58 * MIN }), executionStartedAt: EXEC_HOUR_AGO, ...over })
+}
+/** §3 D test 1's sibling: its user asked 3 h ago and got no reply (Claude Code closed or crashed first). */
+function abandoned(over: Partial<KeepWarmSibling> = {}): KeepWarmSibling {
+  return sibling({ replyPending: true, lastUserAt: NOW - 3 * HOUR, lastTs: NOW - 3 * HOUR - 5 * MIN, ...over })
+}
+
+test('1.9 D: the bound is two hours — twice the one-hour cache the line keeps warm (§7a Q12)', () => {
+  assert.equal(KEEPWARM_SIBLING_LEFT_MS, 2 * HOUR)
+})
+
+test('1.9 D tests 1–5: a sibling left behind — its prompt unanswered for 3 h, older than the terminal\'s claude — no longer blocks; the 2 h backstop, the terminal\'s start, an unknown time and a running agent still do', () => {
+  for (const stage of STAGES) {
+    // 1: the abandoned shape. 1.8 blocked it: the user's line is newest, so it is not idle.
+    assert.equal(verdict(recent({ siblings: [abandoned()] }), NOW, stage), 'go', `left behind (${stage})`)
+    assert.equal(verdict(facts({ siblings: [abandoned()] }), NOW, stage), 'otherSession', `the terminal's claude two days old (${stage})`)
+    // 2: the backstop — a line of the last two hours is never waived, whichever process wrote it.
+    // Mutation check (§3 D): dropping the 2 h bound fails here.
+    assert.equal(verdict(recent({ siblings: [abandoned({ lastUserAt: NOW - 90 * MIN, lastTs: NOW - 95 * MIN })] }), NOW, stage), 'otherSession', `1 h 30 min (${stage})`)
+    // 3: the terminal's claude started before the sibling's newest line — the line could be in this
+    // process. Mutation check (§3 D): dropping the `< executionStartedAt` condition fails here.
+    assert.equal(verdict(recent({ executionStartedAt: NOW - 4 * HOUR, siblings: [abandoned()] }), NOW, stage), 'otherSession', `claude 4 h old (${stage})`)
+    // 4: the user's line is newest and its time is not known. Mutation check (§3 D): treating a null
+    // `lastUserAt` as old fails here.
+    assert.equal(verdict(recent({ siblings: [abandoned({ lastUserAt: null })] }), NOW, stage), 'otherSession', `unknown (${stage})`)
+    // 5: an agent of it running, everything else old.
+    assert.equal(verdict(recent({ siblings: [abandoned({ running: true })] }), NOW, stage), 'otherSession', `agent running (${stage})`)
+  }
+})
+
+test('1.9 D test 6: a sibling idle by 1.8\'s rule still passes, and what 1.8 blocked for any other reason than a sibling stays blocked', () => {
+  assert.equal(verdict(recent({ siblings: [sibling()] })), 'go', 'idle half an hour, older than claude or not')
+  assert.equal(verdict(recent({ siblings: [sibling({ lastTs: NOW - 10 * MIN })] })), 'go', 'idle since after claude started')
+  assert.equal(verdict(recent({ siblings: [sibling(), abandoned()] })), 'go', 'one idle, one left behind')
+  assert.equal(verdict(recent({ siblings: [abandoned(), abandoned({ lastUserAt: NOW - 30 * MIN, lastTs: NOW - 40 * MIN })] })), 'otherSession', 'one of two too new')
+  // Rule (a) is unchanged: a left-behind session that began later, or one the terminal resumed.
+  assert.equal(verdict(recent({ siblings: [abandoned({ firstAt: NOW - 50 * MIN })] })), 'otherSession', 'a sibling that began later')
+  assert.equal(verdict(recent({ executionStartedAt: NOW - 50 * MIN, siblings: [abandoned()] })), 'otherSession', 'claude --resume of an older session')
+  // The P12 reproductions give what they gave: a sibling at a tool call or answering now blocks.
+  assert.equal(verdict(recent({ siblings: [sibling({ stop: 'tool_use', lastTs: NOW - 30 * MIN })] })), 'otherSession')
+  assert.equal(verdict(recent({ siblings: [sibling({ lastTs: NOW - 30 * SEC })] })), 'otherSession')
+  // Every other guard still decides first.
+  assert.equal(verdict(recent({ siblings: [abandoned()], cancelled: true })), 'cancelled')
+  assert.equal(verdict(recent({ siblings: [abandoned()], main: main({ firstTs: NOW - 58 * MIN, lastRequest: lastRequest({ replyPending: true }) }) })), 'openTool')
+})
+
+test('1.9 D: the edges — at least two hours, strictly older than claude; the newest line is the later of reply and user line; left behind at any stop', () => {
+  const at = (newest: number): KeepWarmSibling => abandoned({ lastUserAt: newest, lastTs: newest - 5 * MIN })
+  assert.equal(verdict(recent({ siblings: [at(NOW - KEEPWARM_SIBLING_LEFT_MS)] })), 'go', 'exactly two hours')
+  assert.equal(verdict(recent({ siblings: [at(NOW - KEEPWARM_SIBLING_LEFT_MS + 1)] })), 'otherSession', 'two hours but one ms')
+  const started = NOW - 3 * HOUR
+  const facts3 = (s: KeepWarmSibling): KeepWarmFacts => recent({ executionStartedAt: started, main: main({ firstTs: started + MIN }), siblings: [s] })
+  assert.equal(verdict(facts3(at(started - 1))), 'go', 'a millisecond before claude started')
+  assert.equal(verdict(facts3(at(started))), 'otherSession', 'at the moment claude started')
+  // The later of the two: a reply newer than the user line, or a user line newer than the reply.
+  assert.equal(verdict(recent({ siblings: [abandoned({ lastTs: NOW - 30 * MIN })] })), 'otherSession', 'its reply 30 min old')
+  assert.equal(verdict(recent({ siblings: [sibling({ stop: 'tool_use', lastTs: NOW - 3 * HOUR, lastUserAt: NOW - 20 * MIN })] })), 'otherSession', 'a tool result 20 min old')
+  // Left behind whatever the stop: a reply interrupted at a tool call, a cut-off reply, none kept.
+  for (const stop of ['tool_use', 'max_tokens', 'pause_turn', null] as const) {
+    assert.equal(verdict(recent({ siblings: [sibling({ stop, lastTs: NOW - 3 * HOUR })] })), 'go', String(stop))
+    assert.equal(verdict(recent({ siblings: [sibling({ stop, lastTs: NOW - 3 * HOUR, lastUserAt: NOW - 3 * HOUR + MIN })] })), 'go', `${stop}, a user line after it`)
+  }
+  // No request of the cache on its record (no flag): the later of its reply and its user line.
+  assert.equal(verdict(recent({ siblings: [sibling({ stop: null, replyPending: null, lastTs: NOW - 3 * HOUR })] })), 'go')
+  assert.equal(verdict(recent({ siblings: [sibling({ stop: null, replyPending: null, lastTs: NOW - 3 * HOUR, lastUserAt: NOW - 10 * MIN })] })), 'otherSession')
+})
+
+test('1.9 D: a sibling\'s facts are taken strictly — a time or a flag of another shape is not known, and not known is not left behind', () => {
+  const odd = (o: Record<string, unknown>): KeepWarmSibling => ({ ...abandoned(), ...o }) as unknown as KeepWarmSibling
+  for (const v of [Number.NaN, Infinity, -Infinity, undefined, '2026-09-24', {}]) {
+    assert.equal(verdict(recent({ siblings: [odd({ lastUserAt: v })] })), 'otherSession', `lastUserAt ${String(v)}`)
+    // A reply interrupted at a tool call 3 h ago: not idle, and left behind only by a known time.
+    assert.equal(verdict(recent({ siblings: [odd({ replyPending: false, stop: 'tool_use', lastTs: NOW - 3 * HOUR, lastUserAt: v })] })), 'otherSession', `at a tool call, lastUserAt ${String(v)}`)
+  }
+  for (const v of [0, 1, 'true', undefined]) assert.equal(verdict(recent({ siblings: [odd({ replyPending: v })] })), 'otherSession', `replyPending ${String(v)}`)
+  assert.equal(verdict(recent({ siblings: [odd({ lastTs: Number.NaN })] })), 'otherSession', 'no reply time')
+  for (const v of [undefined, null, 0, 'false']) assert.equal(verdict(recent({ siblings: [odd({ running: v })] })), 'otherSession', `running ${String(v)}`)
+  assert.equal(verdict(recent({ siblings: [abandoned()] }), Number.NaN), 'notDue')
 })
 
 // ---------------------------------------------------------------------------

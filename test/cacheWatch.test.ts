@@ -64,7 +64,7 @@ function main(over: Partial<MainRec> = {}): MainRec {
     source: 'claude', sessionId: S1, firstTs: Date.UTC(2026, 8, 22, 14, 20), lastTs: EXPIRY - HOUR, models: ['claude-opus-5-5'],
     input: 1000, cacheWrite: 500, cacheWrite1h: 500, cacheRead: 90_000, output: 2000, reasoning: 0,
     requests: 12, outputFinal: 12, toolCalls: 3, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
-    lastRequest: lastRequest(), ...over,
+    lastRequest: lastRequest(), lastUserAt: null, ...over,
   }
 }
 

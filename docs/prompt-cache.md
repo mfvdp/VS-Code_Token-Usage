@@ -276,6 +276,17 @@ one-minute countdown starts in the status bar, and all of them again when the co
     other session of the folder has to be idle as checks 4 and 5 measure it — its newest reply at
     least a minute old and finished, nothing of the user's after it, no agent of it running —, so that
     a line that reached another session could not land in a reply under way or in an open dialog.
+    Another session of the same folder no longer holds the line back once it has been left behind:
+    no agent of it running, and its newest line at least 2 hours old and older than the moment the
+    terminal's `claude` started — a prompt that never got its reply, an interrupted reply, a window
+    closed mid-turn. In 1.8 such a session held the folder back for as long as its transcript was
+    kept, seven days. A reply under way or an open dialog lives in the Claude Code that wrote the
+    session's newest line, and a line written before this terminal's `claude` started cannot be that
+    one's — so the line cannot land in that session's dialog even where the terminal runs it. That is
+    an inference, not a rule Claude Code documents, and the two hours stand behind it: a session that
+    wrote a line in the last two hours is never passed over, whichever Claude Code wrote it. Its newest
+    line is the later of its newest reply and its newest `user` line; when the user's line is the
+    newest and its time is not known, the session is not passed over.
 
 **What no check can see.** Token Pace cannot read Claude Code's input line: **text you typed there
 and did not send is sent together with the line** — type nothing into the Claude terminal while the
@@ -287,9 +298,9 @@ recognised by its folder and the session in it by time (check 13); what time can
 terminal whose `claude` started before the session's first reply but which now runs another, older
 session of the same folder — one picked there with `/resume`, or one begun in it before the session
 was started elsewhere, in another window or in the panel. That session gets the line only while it
-is idle by check 13's measure, and it costs that session one request; its answer is not the watched
-session's, so check 11 then stops keep-warm after that one line. A session in the Claude Code
-extension's own panel gets the cooling warning and never a line.
+is idle by check 13's measure or left behind by it, and it costs that session one request; its
+answer is not the watched session's, so check 11 then stops keep-warm after that one line. A session
+in the Claude Code extension's own panel gets the cooling warning and never a line.
 
 **The countdown.** When the checks hold, a status-bar item of its own appears, whatever
 `tokenPace.statusBar.show` lists — a line is never typed without it on screen: `$(watch) keep warm
@@ -366,6 +377,7 @@ The limits are constants of the code, not settings:
 | `KEEPWARM_VERIFY_MS` | 2 minutes | how soon a request of the session must answer a line |
 | `KEEPWARM_MAX_PER_IDLE` | 3 | lines per idle phase of a session |
 | `KEEPWARM_QUOTA_STOP_PERCENT` | 90 % | the quota window share from which no line goes |
+| `KEEPWARM_SIBLING_LEFT_MS` | 2 hours | how old another session's newest line must be — and older than the terminal's `claude` — for that session to count as left behind (check 13) |
 | `KEEPWARM_SENT_SHOWN_MS` | 10 seconds | how long the item says the line was sent |
 | `KEEPWARM_VERIFY_GRACE_MS` | 15 seconds | how much longer a window waits for an answer to be counted before it calls the line unanswered |
 | `KEEPWARM_DAYS_KEPT` | 31 | days of `keepwarm.json` |
@@ -451,9 +463,18 @@ stands open the newest line is the user's. Only a line's top-level `type` decide
 recognised on the raw line and never parsed for it —, and lines that are no message (attachments,
 system lines, file-history snapshots, the session's title and mode lines) do not count.
 
-No field is read for any of it that the token count did not read before. It is kept with the
-session's record in the token snapshot for seven days, never logged and never exported, and the
-first start of 1.8 rebuilds the agent tables once so that the sessions already read have it at once
+Since 1.9 one more fact is kept, for the keep-warm line's check of the other sessions of a folder
+(check 13) and nothing else: the time of the transcript's newest `user` line — a prompt or a tool
+result —, its top-level `timestamp`, matched on the raw line, which is never parsed for it. Only an
+unescaped `"timestamp":"…Z"` key matches, so a prompt or a tool's output that spells the key out
+does not; of several on one line (a tool's result nests some) the latest counts, so a nested one can
+only make the session look newer, never older. Nothing else of that line is read — not its text, not
+its ids —, and the time is never shown, logged or exported.
+
+Apart from that one `timestamp`, no field is read for any of it that the token count did not read
+before. It is kept with the session's record in the token snapshot for seven days, never logged and
+never exported, and the first start of 1.8 rebuilds the agent tables once so that the sessions already
+read have it at once — and the first start of 1.9 once more, for the time of the newest `user` line
 ([Counting](counting.md)).
 
 **The estimated expiry** is that time plus one hour, for a 1-hour cache. It errs in both directions,

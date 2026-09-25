@@ -151,10 +151,12 @@ test('an agent\'s tool errors are counted on the raw line, never parsed; before 
   ] }), AGENT_CTX), true)
   assert.equal(agentOf(pair, AGENT).toolErrors, 2)
 
-  // A main session's tool errors: its record keeps none.
+  // A main session's tool errors: its record keeps none. 1.9 P17 (§0a.1, pinned and changed): the line
+  // is a user line, whose time raises the record's `lastUserAt` — that, and nothing of the error.
   agg.addClaudeLine(claudeLine({ id: 'x1', ts: T0, usage: { input: 3 }, final: true }), MAIN_CTX)
-  assert.equal(agg.addClaudeLine(toolResultLine({ ts: T0 + 5, results: [{ toolUseId: 'toolu_x', isError: true }] }), MAIN_CTX), false)
+  assert.equal(agg.addClaudeLine(toolResultLine({ ts: T0 + 5, results: [{ toolUseId: 'toolu_x', isError: true }] }), MAIN_CTX), true)
   assert.equal('toolErrors' in mainOf(agg, MAIN), false)
+  assert.equal(mainOf(agg, MAIN).lastUserAt, T0 + 5)
 
   // The count survives a snapshot round trip; a record from before O3 does not count them — null,
   // and a later error line leaves it so: a count that missed the earlier ones is none.
@@ -185,13 +187,16 @@ test('the permission mode: a prompt line before the first reply waits for the re
   assert.equal(JSON.stringify(agg.toSnapshot()).includes('plan'), false, 'a waiting mode is not persisted')
   agg.addClaudeLine(claudeLine({ id: 'm1', ts: T0, usage: { input: 3 }, final: true }), MAIN_CTX)
   assert.equal(mainOf(agg, MAIN).permissionMode, 'plan')
-  // A later prompt overwrites it; the same mode again changes nothing.
+  // A later prompt overwrites it; the same mode again changes nothing. 1.9 P17 (§0a.1, pinned and
+  // changed): the prompts below come at the moment of the one before — a later one raises the record's
+  // `lastUserAt`, which is a change of its own —, so what they say is the mode's rule alone.
   assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 100, permissionMode: 'bypassPermissions' }), MAIN_CTX), true)
   assert.equal(mainOf(agg, MAIN).permissionMode, 'bypassPermissions')
-  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 200, permissionMode: 'bypassPermissions' }), MAIN_CTX), false)
+  assert.equal(mainOf(agg, MAIN).lastUserAt, T0 + 100)
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 100, permissionMode: 'bypassPermissions' }), MAIN_CTX), false)
   // A prompt that spells the key out, or names a mode Claude Code does not write: nothing.
-  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 300, permissionMode: null, text: '"permissionMode":"plan"' }), MAIN_CTX), false)
-  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 400, permissionMode: 'turbo' }), MAIN_CTX), false)
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 100, permissionMode: null, text: '"permissionMode":"plan"' }), MAIN_CTX), false)
+  assert.equal(agg.addClaudeLine(promptLine({ ts: T0 + 100, permissionMode: 'turbo' }), MAIN_CTX), false)
   assert.equal(mainOf(agg, MAIN).permissionMode, 'bypassPermissions')
   assert.equal(JSON.stringify(agg.toSnapshot()).includes('SYNTHETIC-PROMPT'), false)
 
@@ -320,11 +325,13 @@ test('a compaction is counted and the last one kept with its trigger and figures
     preserved: 'SYNTHETIC-PRESERVED' }), MAIN_CTX), true)
   assert.deepEqual([mainOf(agg, MAIN).compactions, mainOf(agg, MAIN).lastCompaction],
     [1, { at: T0 + 1000, trigger: 'manual', preTokens: 167_200, postTokens: 12_400 }])
-  // Its summary line: never parsed, whatever it mentions.
+  // Its summary line: never parsed, whatever it mentions. 1.9 P17 (§0a.1, pinned and changed): it is a
+  // user line, and its time — matched on the raw line — raises the record's `lastUserAt`; nothing else.
   const summary = compactSummaryLine({ ts: T0 + 1001,
     summary: 'SYNTHETIC-SUMMARY: the <task-notification> and "usage" and "subtype":"compact_boundary" of it' })
-  const parsed = parsedDuring(() => assert.equal(agg.addClaudeLine(summary, MAIN_CTX), false))
+  const parsed = parsedDuring(() => assert.equal(agg.addClaudeLine(summary, MAIN_CTX), true))
   assert.deepEqual(parsed, [], 'the summary line was parsed')
+  assert.deepEqual([mainOf(agg, MAIN).lastUserAt, mainOf(agg, MAIN).compactions], [T0 + 1001, 1])
   // An automatic one with figures that are no counts, and one without a metadata block.
   agg.addClaudeLine(compactBoundaryLine({ ts: T0 + 5000, trigger: 'auto', preTokens: -1, postTokens: '12' }), MAIN_CTX)
   assert.deepEqual([mainOf(agg, MAIN).compactions, mainOf(agg, MAIN).lastCompaction],

@@ -26,7 +26,14 @@
  * same project directory — in the Claude Code panel, in another window, or the one the terminal runs
  * instead — could take the line. G13 therefore asks which session the terminal runs: the one whose
  * first counted reply came after its `claude` started and that is the newest of the folder's; and it
- * keeps the line back while any other session of the folder is not idle by G4's and G5's tests.
+ * keeps the line back while any other session of the folder is not idle by G4's and G5's tests —
+ * unless that session has been left behind (1.9 D): no agent of it running, and its newest message
+ * line — a prompt that never got its reply, an interrupted reply, a window closed mid-turn — written
+ * before the terminal's `claude` started and at least KEEPWARM_SIBLING_LEFT_MS ago. A reply under way or
+ * a dialog open lives in the process that wrote the session's newest line, and a line older than this
+ * terminal's `claude` cannot be that process's; the two hours are the backstop for that inference
+ * (Claude Code documents no such rule). In 1.8 such a session held the folder back for as long as its
+ * transcript was kept, seven days; the bound only ever lets the line go where 1.8 kept it back.
  *
  * Pure: no clock, no I/O, no `vscode`. The facts come in as values — the host (keepWarmHost.ts,
  * 1.8 P10) gathers them from the watch, the aggregator's record, the running list, the agent hook,
@@ -72,6 +79,12 @@ export const KEEPWARM_VERIFY_MS = 120_000
 export const KEEPWARM_MAX_PER_IDLE = 3
 /** No line while a Claude quota window of the current reading stands at or above this share, or is reached (G10). */
 export const KEEPWARM_QUOTA_STOP_PERCENT = 90
+/**
+ * 1.9 D (§7a Q12): a session of the folder whose newest message line is at least this old — and older
+ * than the terminal's `claude` — is left behind, and no longer holds G13 (b) shut. Twice the one-hour
+ * cache the line keeps warm.
+ */
+export const KEEPWARM_SIBLING_LEFT_MS = 2 * 3_600_000
 
 /**
  * A shell execution that runs Claude Code: `claude`, a path ending in it, `claude.exe` — then a
@@ -126,6 +139,8 @@ export interface KeepWarmSibling {
   replyPending: boolean | null
   /** An agent of the session is in the running list (as G5 asks it). */
   running: boolean
+  /** 1.9 §0a.1: `MainRec.lastUserAt` — the time of the session's newest `user` line —, or null. */
+  lastUserAt: number | null
 }
 
 export type KeepWarmStage = 'arm' | 'send'
@@ -196,6 +211,39 @@ function siblingIdle(s: KeepWarmSibling, now: number): boolean {
 }
 
 /**
+ * 1.9 D: the time of another session's newest message line, or null when it cannot be known. With the
+ * user's line newest (`replyPending` true) it is that line's — `lastUserAt`, which must then be known —
+ * or the newest counted reply's, whichever is later; otherwise the later of the newest counted reply and
+ * the newest user line, if one is known. Strict: a flag or a time of another shape is unknown.
+ */
+function siblingNewestAt(s: KeepWarmSibling): number | null {
+  const user = s.lastUserAt
+  if (user !== null && !finite(user)) return null
+  if (s.replyPending === true) return user === null ? null : knownMax(user, s.lastTs)
+  if (s.replyPending !== false && s.replyPending !== null) return null
+  return knownMax(s.lastTs, user ?? -Infinity)
+}
+
+/** The later of two times, or null when that is not a finite time. */
+function knownMax(a: number, b: number): number | null {
+  const t = Math.max(a, b)
+  return finite(t) ? t : null
+}
+
+/**
+ * 1.9 D (§3 D rule 2): another session of the folder has been left behind — no agent of it running, and
+ * its newest message line known, written before the terminal's `claude` started (`started`, finite: G13
+ * (a) holds) and at least KEEPWARM_SIBLING_LEFT_MS before `now`. A reply under way or a dialog open lives
+ * in the process that wrote that line, and this terminal's process began after it; the two hours are the
+ * backstop for that inference.
+ */
+function siblingLeftBehind(s: KeepWarmSibling, started: number, now: number): boolean {
+  if (s.running !== false) return false
+  const newest = siblingNewestAt(s)
+  return newest !== null && newest < started && newest <= now - KEEPWARM_SIBLING_LEFT_MS
+}
+
+/**
  * G2: the entry is the bridge's, and its reading is a measured one-hour cache that is warm and says
  * when it expires — never the transcript's estimate, never another session's reading. The expiry G3
  * reads is this reading's `expiresAt`, as Claude Code stated it.
@@ -246,8 +294,9 @@ function sendWindowOpen(t: number, expiresAt: number): boolean {
  *  G12 no cancel in this idle phase                                      cancelled
  *  G13 the terminal runs this session, not another of its folder: the session's first reply came
  *      after the terminal's `claude` started, no other session of the folder started later, and every
- *      other session of the folder is idle (G4's test) with no agent running (G5's)
- *                                                                          otherSession
+ *      other session of the folder is idle (G4's test) with no agent running (G5's) — or left behind
+ *      (1.9 D): no agent running, its newest message line older than the terminal's `claude` and at
+ *      least KEEPWARM_SIBLING_LEFT_MS old                                  otherSession
  *
  * Every fact is taken strictly — a flag that is not exactly the passing value blocks —, because a
  * wrong fact may only ever keep the line back, never send it.
@@ -328,8 +377,10 @@ export function keepWarmDecision(f: KeepWarmFacts, now: number, stage: KeepWarmS
   // (b) Defence in depth where (a) is fooled — a terminal whose `claude` started before the session and
   // that runs an older one of the folder, resumed or begun before it: every other session of the folder
   // idle by G4's test, no agent of it running, so a line that reaches the wrong session never lands in
-  // a reply under way or an open dialog.
-  for (const s of siblings) if (!s || !siblingIdle(s, now)) return block('otherSession')
+  // a reply under way or an open dialog. 1.9 D: or left behind — its newest line written before this
+  // terminal's `claude` started, so by another process than the one the line goes into, and two hours
+  // old — which only ever passes a session 1.8 kept the line back for.
+  for (const s of siblings) if (!s || !(siblingIdle(s, now) || siblingLeftBehind(s, started, now))) return block('otherSession')
 
   return { go: true }
 }

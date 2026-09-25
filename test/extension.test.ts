@@ -2259,7 +2259,7 @@ test('1.7 F2: the poll reads the active sessions, which are all roots — the gr
   const main = (sessionId: string, lastTs: number) => ({
     source: 'claude' as const, sessionId, firstTs: lastTs - 3_600_000, lastTs, models: [], input: 1, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0,
     output: 1, reasoning: 0, requests: 1, outputFinal: 1, toolCalls: 0, ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
-    lastRequest: null,
+    lastRequest: null, lastUserAt: null,
   })
   const tcfg = { zone: 'utc' as const, dayBoundaryHour: 0, startOfWeek: 'monday' as const, hourCycle: 'h23' as const }
   const built = (mains: ReturnType<typeof main>[]): AgentTreeVm => buildAgentTree({ agents: [], launches: [], mains, sessions: [], attribution: 'none', selected: null, tcfg }, now)
@@ -3412,7 +3412,8 @@ test('a 1.7 state (revision 8) is replayed once: every main session gets the new
   v17.agentsRevision = 8
   fs.writeFileSync(fx.stateFile, JSON.stringify(v17))
   const { agg } = lazy()
-  assert.equal(agg.AGENT_TABLES_REVISION, 9)
+  // 1.9 P17 (pinned and changed): 10 since (§0a.1) — a revision-8 state is replayed as before.
+  assert.equal(agg.AGENT_TABLES_REVISION, 10)
   const restored = agg.Aggregator.fromSnapshot(JSON.parse(JSON.stringify(v17)) as Snapshot)
   assert.equal(restored.agentsRevision, 8, 'the host is asked to replay')
   assert.deepEqual(restored.mainEntries().map(([, m]) => m.lastRequest), [null, null, null])
@@ -3431,12 +3432,63 @@ test('a 1.7 state (revision 8) is replayed once: every main session gets the new
   assert.equal(after.codexLast ?? null, null)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 
-  // The next start finds revision 9 and replays nothing.
+  // The next start finds the current revision and replays nothing.
   await activateHost(fx, REPO)
   await waitOwnColdStart(state, 'the second cold start')
   await sleep(300)
   assert.doesNotMatch(state.logText(), /Agent replay/)
   assert.deepEqual(readState(fx)?.mains?.[w.activeMain]?.lastRequest, fresh.mains?.[w.activeMain]?.lastRequest)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('a 1.8 state (revision 9) is replayed once: every main session gets the time of its newest user line a fresh read gives it, the counting unmoved (1.9 §0a.1, §7a Q13)', async () => {
+  const fx = makeFixture()
+  const w = writeAgentWorld(fx)
+  const fixtureMain = path.join(w.project, '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl')
+  // The active session's user asked again after its newest reply; the idle one was left with a prompt
+  // an hour after its reply and nothing since — the shape the G13 bound is for (1.9 D).
+  appendLine(w.activeMain, claudeLine({
+    id: 'msg_act_cache', ts: T + 1000, usage: { input: 3, cacheWrite: 4000, cacheWrite1h: 4000, cacheRead: 20_000, output: 60 }, final: true,
+  }))
+  appendLine(w.activeMain, promptLine({ ts: T + 2000 }))
+  appendLine(w.idleMain, promptLine({ ts: T - HOUR }))
+  // What this build's own cold read gives every main session.
+  const fresh = await seedSnapshot(fx, 8)
+  assert.equal(fresh.mains?.[w.activeMain]?.lastUserAt, T + 2000)
+  assert.equal(fresh.mains?.[w.idleMain]?.lastUserAt, T - HOUR)
+  assert.equal(fresh.mains?.[w.activeMain]?.lastRequest?.replyPending, true)
+  // What a 1.8 build leaves: the same tables without the time, revision 9.
+  const v18 = JSON.parse(JSON.stringify(fresh)) as Snapshot
+  for (const m of Object.values(v18.mains ?? {})) delete (m as Partial<MainRec>).lastUserAt
+  v18.agentsRevision = 9
+  fs.writeFileSync(fx.stateFile, JSON.stringify(v18))
+  const { agg } = lazy()
+  assert.equal(agg.AGENT_TABLES_REVISION, 10)
+  const restored = agg.Aggregator.fromSnapshot(JSON.parse(JSON.stringify(v18)) as Snapshot)
+  assert.equal(restored.agentsRevision, 9, 'the host is asked to replay')
+  assert.deepEqual(restored.mainEntries().map(([, m]) => m.lastUserAt), [null, null, null])
+
+  await activateHost(fx, REPO)
+  await waitFor('the replayed tables to be saved', () => readState(fx)?.agentsRevision === agg.AGENT_TABLES_REVISION)
+  assert.match(state.logText(), /Agent replay \(cold start\): \d+ file\(s\) read again/)
+  const after = readState(fx)!
+  for (const file of [w.activeMain, fixtureMain, w.idleMain]) {
+    assert.equal(after.mains?.[file]?.lastUserAt, fresh.mains?.[file]?.lastUserAt, `the replayed time of ${file}`)
+    assert.deepEqual(after.mains?.[file]?.lastRequest, fresh.mains?.[file]?.lastRequest, `the replayed request of ${file}`)
+  }
+  // The counting is what it was: the replay moves no bucket and no cursor.
+  assert.deepEqual(fingerprintOf(after), fingerprintOf(v18))
+  assert.deepEqual(offsetsOf(after), offsetsOf(v18))
+  // No time of a user line reaches the log.
+  for (const t of [T + 2000, T - HOUR]) assert.equal(state.logText().includes(String(t)), false, `the log names ${t}`)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+  // The next start finds revision 10 and replays nothing.
+  await activateHost(fx, REPO)
+  await waitOwnColdStart(state, 'the second cold start')
+  await sleep(300)
+  assert.doesNotMatch(state.logText(), /Agent replay/)
+  assert.equal(readState(fx)?.mains?.[w.idleMain]?.lastUserAt, T - HOUR)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
 

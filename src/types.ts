@@ -491,6 +491,13 @@ export interface MainRec {
    * that fails its allow-lists).
    */
   lastRequest: LastRequest | null
+  /**
+   * 1.9 §0a.1: the time (ms) of the transcript's newest `user` line — a prompt or a tool's result —, its top-level
+   * `timestamp` matched on the raw line (the latest match); null before one was seen and after a restore that fails its
+   * shape. A user line before the transcript's first counted reply comes before the record and sets nothing. Kept for
+   * one use only: whether another session of the folder has been left behind (the keep-warm line's G13, 1.9 D).
+   */
+  lastUserAt: number | null
 }
 
 /** 1.8 §0a.3: the newest counted turn of a non-forked Codex rollout — its time and its model. */

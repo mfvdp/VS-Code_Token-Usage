@@ -119,7 +119,12 @@ identifiers and counts, never content:
   file-history snapshots, titles, modes) do not count. Those two facts serve only the checks of the
   opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) (1.8), which types nothing
   unless that reply ended its turn (`end_turn`) and the newest message line is not the user's; the
-  checks compare them and nothing more. Nothing of an agent's transcript is kept for it.
+  checks compare them and nothing more. Since 1.9 the record also keeps the time of the newest line
+  of the transcript that is yours or a tool's (a `user` line) — its `timestamp`, matched on the raw
+  line as the unescaped key `"timestamp":"…Z"`, the latest on the line (a time nested in a tool's
+  result can only make it newer); nothing else of that line is read —, for the keep-warm line's check
+  of other sessions of the same folder, where one that has been left behind no longer holds the line
+  back. Nothing of an agent's transcript is kept for it.
   The main session's record keeps these seven days in the token snapshot; none of the exports, the
   diagnostics report or the log carries them;
 * for the Codex prompt-cache line (1.8), of the Codex rollouts one value for the machine: the time and

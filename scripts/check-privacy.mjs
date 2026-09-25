@@ -231,6 +231,12 @@ export const READ_CONTRACT = [
   // for it; nothing of the line is kept but that one bit.
   { what: 'a user line', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'regex', regex: 'USER_LINE_LITERAL',
     fields: ['type'] },
+  // 1.9 §0a.1 (P17): the time of a main transcript's newest user line — the unescaped `timestamp` key,
+  // matched on the raw line of a user line, the latest of its matches; the line is never parsed for it,
+  // and nothing else of it is kept. Its one use is the keep-warm line's G13 bound, so it is held to the
+  // privacy page and the prompt-cache page.
+  { what: 'the time of a user line', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'regex', regex: 'USER_LINE_TIME_RE',
+    fields: ['timestamp'], pages: ['privacy', 'promptCache'] },
   // 1.6 §0a.10 (P13a): a compaction's line — its type and subtype, and of its metadata the trigger
   // and the context before and after. Never the segment it preserved, nor the summary line.
   { what: 'a compaction', source: '~/.claude/projects/', file: 'src/agg.ts', kind: 'fields', body: 'function compactionOf(', variable: 'd',

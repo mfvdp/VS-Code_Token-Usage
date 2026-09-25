@@ -418,9 +418,12 @@ export const JOURNAL_PARSE_MAX = 16 * 1024
  * class of its cache write, its size and its model, with the reply's stop reason and whether the
  * transcript's newest message line is the user's (§0a.5) —, which the replay fills for the transcripts
  * already read: without it a session idle at the update would get its estimate only with its next
- * reply, and that is exactly the session the estimate is for.
+ * reply, and that is exactly the session the estimate is for; 10 = the time of a main session's newest
+ * user line (1.9 §0a.1, `MainRec.lastUserAt`), which the replay fills for the transcripts already read:
+ * without it a session left behind before the update would keep its folder's keep-warm line back until
+ * its transcript leaves the retention — the case the bound of G13 (1.9 D) is for.
  */
-export const AGENT_TABLES_REVISION = 9
+export const AGENT_TABLES_REVISION = 10
 
 /** Whether a Claude file is a workflow run's journal rather than a transcript. */
 export function isWorkflowJournal(file: string): boolean {
@@ -736,6 +739,38 @@ const COMPACT_SUMMARY_LITERAL = '"isCompactSummary":true'
  * guard shut, never one that opens it.
  */
 export const USER_LINE_LITERAL = '"type":"user"'
+
+/**
+ * 1.9 §0a.1: a `timestamp` key of a Claude line, unescaped, in the `Z` form Claude Code writes — only
+ * ever a key of an object of the line (the line's own, or one Claude Code nests in it, a
+ * `toolUseResult`), never text inside a string: there every quote is escaped, so a prompt or a tool's
+ * output that spells the key out does not match. Matched on the raw line of a `user` line, which is
+ * never parsed for it; an offset form (`+02:00`) is not matched. `g`: every match of a line counts.
+ */
+export const USER_LINE_TIME_RE = /"timestamp":"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z)"/g
+/**
+ * The copy `userLineTimeOf` walks: `matchAll` starts at its pattern's `lastIndex`, and the exported one
+ * is anyone's to call `exec` or `test` on — this one no other code sees, so every walk starts at 0.
+ */
+const USER_LINE_TIME_SCAN = new RegExp(USER_LINE_TIME_RE.source, 'g')
+
+/**
+ * 1.9 §0a.1: the time (ms) a user line gives `MainRec.lastUserAt` — the **latest** of every
+ * USER_LINE_TIME_RE match on the raw line whose `Date.parse` is finite and above 0, or null for none.
+ * The latest, because a nested key older than the line's own must never make a session look older
+ * than it is (the direction that would let the keep-warm line go, 1.9 D); a newer nested key can only
+ * make it look newer, which keeps the line back. Nothing of the line but the matched times is looked
+ * at, and nothing of it outlives the call.
+ */
+export function userLineTimeOf(raw: string): number | null {
+  if (typeof raw !== 'string') return null
+  let best: number | null = null
+  for (const m of raw.matchAll(USER_LINE_TIME_SCAN)) {
+    const t = Date.parse(m[1])
+    if (Number.isFinite(t) && t > 0 && (best === null || t > best)) best = t
+  }
+  return best
+}
 
 /** 1.8 §0a.5: the values of a reply's `stop_reason` kept on `LastRequest.stop` — the Messages API's documented ones. */
 export const STOP_REASONS: readonly StopReason[] = ['end_turn', 'tool_use', 'max_tokens', 'stop_sequence', 'pause_turn', 'refusal']
@@ -1172,6 +1207,9 @@ function restoreMain(v: unknown): MainRec | null {
     requests: num(r.requests), outputFinal: num(r.outputFinal), toolCalls: num(r.toolCalls),
     ...restoreWriterFields(r),
     lastRequest: restoreLastRequest(r.lastRequest),
+    // 1.9 §0a.1: a time finite and above 0, else none — a 1.8 snapshot has none, and the revision 10
+    // replay fills it for the transcripts already read.
+    lastUserAt: typeof r.lastUserAt === 'number' && Number.isFinite(r.lastUserAt) && r.lastUserAt > 0 ? r.lastUserAt : null,
   }
 }
 
@@ -1627,7 +1665,8 @@ export class Aggregator {
       }
     }
     // 1.8 §0a.5: whether the main transcript's newest message line is the user's.
-    if (!ctx.isSub) changed = this.noteMessageKind(ctx.file, messageKindOf(raw, d)) || changed
+    // 1.9 §0a.1: a user line's time, too — matched on the raw line, never parsed for it.
+    if (!ctx.isSub) changed = this.noteMessageKind(ctx.file, messageKindOf(raw, d), raw) || changed
     // 1.6 L5: a Claude line that changed anything reached an agent table — the record of the
     // transcript it is in (an agent's, or the main session's the tree roots on), a launch, a run's
     // launch or an outcome. Its buckets, where it has any, mark themselves (`bucketFor`).
@@ -1640,14 +1679,28 @@ export class Aggregator {
    * `lastRequest` — a user line (a prompt or a tool result) sets `replyPending`, an assistant line (any
    * reply, an error line and a placeholder included) clears it; every other line leaves it. Lines are
    * taken in the order the file holds them, so the flag is the newest line's. A record without a
-   * request that touched the cache has no flag to set. True when the flag changed.
+   * request that touched the cache has no flag to set. 1.9 §0a.1: a user line also raises the record's
+   * `lastUserAt` to the line's time (`userLineTimeOf` on the raw line) — whether or not the record has a
+   * request of the cache; an older time never lowers it, and a line without one leaves it. A user line
+   * before the transcript's first counted reply finds no record and sets nothing. True when the flag or
+   * the time changed.
    */
-  private noteMessageKind(file: string, kind: 'user' | 'assistant' | null): boolean {
+  private noteMessageKind(file: string, kind: 'user' | 'assistant' | null, raw: string): boolean {
     if (kind === null) return false
-    const last = this.mainMap.get(file)?.lastRequest
-    if (!last) return false
+    const rec = this.mainMap.get(file)
+    if (!rec) return false
+    let changed = false
+    if (kind === 'user') {
+      const at = userLineTimeOf(raw)
+      if (at !== null && (rec.lastUserAt === null || !(at <= rec.lastUserAt))) {
+        rec.lastUserAt = at
+        changed = true
+      }
+    }
+    const last = rec.lastRequest
+    if (!last) return changed
     const pending = kind === 'user'
-    if (last.replyPending === pending) return false
+    if (last.replyPending === pending) return changed
     last.replyPending = pending
     return true
   }
@@ -2116,6 +2169,8 @@ export class Aggregator {
         lastCompaction: null,
         // 1.8 §0a.2: set by the first line that touches the cache — this one or a later one.
         lastRequest: null,
+        // 1.9 §0a.1: set by the first user line after this one; a prompt before it found no record.
+        lastUserAt: null,
       }
       this.mainMap.set(file, rec)
     }

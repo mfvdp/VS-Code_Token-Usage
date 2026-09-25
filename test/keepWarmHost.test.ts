@@ -23,11 +23,11 @@ import { watchCaches } from '../src/cacheWatch'
 import { KEEP_WARM_CONSENT_KEY, KEEP_WARM_TERMS_PASSAGE, KeepWarmConsent, keepWarmDisclosure } from '../src/consent'
 import { setBundle, setLocale } from '../src/i18n'
 import {
-  KEEP_WARM_LINE, KEEPWARM_COUNTDOWN_MS, KEEPWARM_LEAD_MS, KEEPWARM_MAX_PER_IDLE, KEEPWARM_VERIFY_MS,
+  KEEP_WARM_LINE, KEEPWARM_COUNTDOWN_MS, KEEPWARM_LEAD_MS, KEEPWARM_MAX_PER_IDLE, KEEPWARM_SIBLING_LEFT_MS, KEEPWARM_VERIFY_MS,
 } from '../src/keepWarm'
 import {
   KEEPWARM_CANCEL_COMMAND, KEEPWARM_DAYS_KEPT, KEEPWARM_FILE_NAME, KEEPWARM_ITEM_ID, KEEPWARM_SENT_SHOWN_MS,
-  KEEPWARM_VERIFY_GRACE_MS, KeepWarmFrame, KeepWarmHost, KeepWarmWindow, claudeQuotaMax, cleanKeepWarmFile, sessionRunning,
+  KEEPWARM_VERIFY_GRACE_MS, KeepWarmFrame, KeepWarmHost, KeepWarmWindow, claudeQuotaMax, cleanKeepWarmFile, sessionRunning, siblingsOf,
 } from '../src/keepWarmHost'
 import type { PromptCacheReading } from '../src/quotaSources'
 import { TimeConfig } from '../src/time'
@@ -81,7 +81,7 @@ interface World {
 
 let ids = 0
 
-function world(o: { expiry?: number; quotaPercent?: number } = {}): World {
+function world(o: { expiry?: number; quotaPercent?: number; first?: number } = {}): World {
   const agg = new Aggregator()
   agg.cursors.set(FILE, { offset: 0, size: 0, ino: 900, dev: 1 })
   const c = ctxFor({ file: FILE })
@@ -92,9 +92,10 @@ function world(o: { expiry?: number; quotaPercent?: number } = {}): World {
       usage: { input: r.input ?? 300, cacheWrite: r.write ?? 0, cacheWrite1h: r.write ?? 0, cacheRead: r.read ?? 150_000, output: r.output ?? 40 },
     }))
   }
-  // The session started two days ago; its newest reply wrote the one-hour cache.
-  line(promptLine({ ts: FIRST - 5 * SEC }))
-  reply(FIRST)
+  // The session started two days ago (1.9 D: or at `first`); its newest reply wrote the one-hour cache.
+  const first = o.first ?? FIRST
+  line(promptLine({ ts: first - 5 * SEC }))
+  reply(first)
   line(promptLine({ ts: LAST - 30 * SEC }))
   reply(LAST, { write: 2000, output: 200 })
   const expiry = o.expiry ?? EXPIRY
@@ -202,6 +203,11 @@ function siblingSession(w: World, o: { first: number; last?: number; stop?: stri
   }
   if (o.pending !== undefined) line(promptLine({ ts: o.pending }))
   return line
+}
+
+/** A time as the log would write it (UTC, 24 h): `HH:MM`. */
+function clockOf(ms: number): string {
+  return new Date(ms).toISOString().slice(11, 16)
 }
 
 /** Runs the host every second from `from` to `to`, both included. */
@@ -771,6 +777,92 @@ test('another session of the folder with the user\'s line newest keeps the line 
   const d = rig({ w: done })
   run(d, NOW, NOW + KEEPWARM_COUNTDOWN_MS)
   assert.equal(d.state.sent.length, 1)
+})
+
+// ---------------------------------------------------------------------------
+// 1.9 D · the G13 bound: a session of the folder left behind no longer holds the line back
+// ---------------------------------------------------------------------------
+
+/** 1.9 D: the terminal's `claude` started an hour ago, and the watched session began in it half a minute later. */
+const EXEC_RECENT = NOW - HOUR
+const FIRST_RECENT = LAST - 2 * MIN
+
+test('siblingsOf passes each sibling\'s newest user line — the aggregator\'s `lastUserAt` — and never the watched session\'s (1.9 §0a.1)', () => {
+  const w = world()
+  siblingSession(w, { first: FIRST - 86_400_000, last: NOW - 3 * HOUR - 5 * MIN, pending: NOW - 3 * HOUR })
+  const got = siblingsOf(SID, PROJECT_DIR, w.agg.mainEntries(), emptyAgentTree())
+  assert.deepEqual(got, [{ firstAt: FIRST - 86_400_000, lastTs: NOW - 3 * HOUR - 5 * MIN, stop: 'end_turn', replyPending: true, running: false, lastUserAt: NOW - 3 * HOUR }])
+  // A sibling whose record has seen no user line since its first reply: none.
+  const quiet = world()
+  siblingSession(quiet, { first: FIRST - 86_400_000 })
+  assert.deepEqual(siblingsOf(SID, PROJECT_DIR, quiet.agg.mainEntries(), emptyAgentTree()).map((x) => x.lastUserAt), [null])
+})
+
+test('1.9 D: a session of the folder abandoned three hours ago with its prompt unanswered no longer blocks the line; one left an hour and a half ago still does (fake terminals)', () => {
+  // 1.8 kept this line back for as long as the abandoned session's transcript was kept (seven days).
+  const w = world({ first: FIRST_RECENT })
+  siblingSession(w, { first: FIRST - 86_400_000, last: NOW - 3 * HOUR - 5 * MIN, pending: NOW - 3 * HOUR })
+  const r = rig({ w, execAt: EXEC_RECENT })
+  run(r, NOW, NOW + KEEPWARM_COUNTDOWN_MS)
+  assert.deepEqual(r.state.sent.map((x) => [x.terminal === terminalOf(r), x.text]), [[true, KEEP_WARM_LINE]])
+  assert.doesNotMatch(r.logs.join('\n'), /otherSession/)
+  // The backstop: a prompt of the last two hours is never waived.
+  const young = world({ first: FIRST_RECENT })
+  siblingSession(young, { first: FIRST - 86_400_000, last: NOW - 95 * MIN, pending: NOW - 90 * MIN })
+  const y = rig({ w: young, execAt: EXEC_RECENT })
+  run(y, NOW - 10 * SEC, EXPIRY)
+  assert.deepEqual(y.state.sent, [])
+  assert.match(y.logs.join('\n'), /debug keep-warm: session 9d0eb37a not armed \(otherSession\)/)
+  // The terminal's claude started before that prompt (four hours ago; the session began after it).
+  const early = world({ first: FIRST_RECENT })
+  siblingSession(early, { first: FIRST - 86_400_000, last: NOW - 3 * HOUR - 5 * MIN, pending: NOW - 3 * HOUR })
+  const e = rig({ w: early, execAt: NOW - 4 * HOUR })
+  run(e, NOW - 10 * SEC, EXPIRY)
+  assert.deepEqual(e.state.sent, [])
+  assert.match(e.logs.join('\n'), /not armed \(otherSession\)/)
+  // At the bound: a prompt exactly KEEPWARM_SIBLING_LEFT_MS old lets the countdown start; one a second
+  // younger does not, in that frame.
+  for (const [late, armed] of [[0, true], [SEC, false]] as const) {
+    const edge = world({ first: FIRST_RECENT })
+    siblingSession(edge, { first: FIRST - 86_400_000, last: NOW - 3 * HOUR, pending: NOW - KEEPWARM_SIBLING_LEFT_MS + late })
+    const g = rig({ w: edge, execAt: EXEC_RECENT })
+    g.tick(NOW)
+    assert.equal(g.item() !== undefined, armed, `the prompt ${late} ms younger than the bound`)
+  }
+})
+
+test('1.9 §0a.1 leak test, host side: an abandoned sibling\'s prompt text, its tool output and every time of it reach neither the log, the view, the view model, keepwarm.json nor the status bar', () => {
+  const w = world({ first: FIRST_RECENT })
+  const line = siblingSession(w, { first: FIRST - 86_400_000, last: NOW - 3 * HOUR - 5 * MIN })
+  const at = NOW - 3 * HOUR
+  line(JSON.stringify({
+    parentUuid: 'uuid-parent-0000', isSidechain: false, promptId: 'prompt-0009', type: 'user',
+    message: { role: 'user', content: 'synthetic-sibling-prompt-81 "timestamp":"2099-01-01T00:00:00Z" please' },
+    toolUseResult: { timestamp: new Date(at - HOUR).toISOString(), stdout: 'synthetic-sibling-output-81' },
+    uuid: 'uuid-sibling-leak', timestamp: new Date(at).toISOString(), sessionId: SID2, cwd: SECRET_CWD,
+  }))
+  assert.equal(w.agg.mainEntries().find(([file]) => file === FILE2)?.[1].lastUserAt, at)
+  const r = rig({ w, execAt: EXEC_RECENT })
+  round(r, NOW)
+  assert.equal(r.state.sent.length, 1, 'the line went: the sibling is left behind')
+  const view = r.host.view(NOW + 2 * MIN, tcfg)
+  const vm = buildViewModel({ ...makeInput({ agg: r.w.agg }), now: NOW + 2 * MIN, promptCaches: r.w.readings, keepWarm: view })
+  const outputs: Array<[string, string]> = [
+    ['log', r.logs.join('\n')],
+    ['view', JSON.stringify(view)],
+    ['view model', JSON.stringify(vm)],
+    ['keepwarm.json', fs.readFileSync(r.file, 'utf8')],
+    ['status bar', JSON.stringify(r.state.items.map((i) => ({ ...i })))],
+  ]
+  for (const [what, text] of outputs) {
+    for (const never of ['synthetic-sibling-prompt-81', 'synthetic-sibling-output-81', '2099-01-01', 'uuid-sibling-leak', 'prompt-0009',
+      new Date(at).toISOString(), String(at), String(at - HOUR), new Date(at - HOUR).toISOString()]) {
+      assert.equal(text.includes(never), false, `the ${what} holds ${never}`)
+    }
+  }
+  // The log names blocks and the watched session, never a time of another session.
+  assert.equal(r.logs.join('\n').includes(clockOf(at)), false, 'the log names the sibling\'s time')
+  assert.equal(r.logs.join('\n').includes('5f1c2d3e'), false, 'the log names the sibling')
 })
 
 // ---------------------------------------------------------------------------

@@ -2211,6 +2211,8 @@ test('the smaller 1.7 changes are on the pages: the compaction without a trigger
 
 /** 1.8 P5: what 1.7.0 shipped where 1.8 moved on — the agent tables' revision (1.8.0 raises it to 9). */
 const RELEASED_1_7 = { AGENT_TABLES_REVISION: 8 } as const
+/** 1.9 P17: the agent tables' revision 1.8.0 shipped, where 1.9 moved on to 10 (§0a.1) — RELEASED_1_8's, defined before its first use. */
+const RELEASED_1_8_REVISION = 9
 
 test('the 1.7.0 release notes: in the order a store page reads, the versions unchanged, no speed claim, no path or secret', () => {
   const log = readDoc('CHANGELOG.md')
@@ -2270,12 +2272,13 @@ test('docs/dashboard.md says the chart\'s labels are thinned to the width a colu
 
 test('the pages say what 1.8 P5 keeps: the newest cache request of a main session, the Codex turn, revision 9, the Opus 5.5 row (§0a.2, §0a.3, §0a.5)', () => {
   const flat = (text: string): string => text.replace(/\s+/g, ' ')
-  // docs/counting.md and docs/agents.md: the revision 1.8.0 raised, and why.
+  // docs/counting.md and docs/agents.md: the revision 1.8.0 raised, and why. 1.9 P17 (pinned and changed):
+  // the code's revision is 10 since (§0a.1), so 1.8.0's 9 is history beside it, as 1.7.0's 8 is.
   const counting = flat(doc.counting)
-  assert.ok(counting.includes(`— ${AGENT_TABLES_REVISION} in 1.8.0, 8 in 1.6.0 and 1.7.0 —`), 'docs/counting.md does not state 1.8.0\'s revision')
+  assert.ok(counting.includes(`, ${RELEASED_1_8_REVISION} in 1.8.0, 8 in 1.6.0 and 1.7.0 —`), 'docs/counting.md does not state 1.8.0\'s revision')
   assert.ok(counting.includes('1.8.0 raised it to 9 for the [prompt-cache estimate](prompt-cache.md#how-the-estimate-is-made)'),
     'docs/counting.md does not say why the revision rose')
-  assert.ok(flat(doc.agents).includes(`revision **${AGENT_TABLES_REVISION}** in 1.8.0`), 'docs/agents.md does not state 1.8.0\'s revision')
+  assert.ok(flat(doc.agents).includes(`revision **${RELEASED_1_8_REVISION}** in 1.8.0`), 'docs/agents.md does not state 1.8.0\'s revision')
   // docs/prompt-cache.md: the section, the fields it keeps, the six stop reasons, the literal, why it errs.
   const pc = flat(doc.promptCache)
   assert.ok(doc.promptCache.includes('\n## How the estimate is made\n'), 'docs/prompt-cache.md has no "How the estimate is made"')
@@ -2577,7 +2580,7 @@ test('the pages describe the keep-warm line as the host builds it: the countdown
 })
 
 /** 1.8 P11: what 1.8.0 ships where later releases may move on — pinned here, read from the code today. */
-const RELEASED_1_8 = { AGENT_TABLES_REVISION: 9 } as const
+const RELEASED_1_8 = { AGENT_TABLES_REVISION: RELEASED_1_8_REVISION } as const
 
 /**
  * 1.8 P11 (§4 P11 (5), §7c, the P11 input's claims to make and to avoid): the 1.8.0 entry is the newest,
@@ -2633,7 +2636,9 @@ test('the 1.8.0 release notes: the newest entry, every section in order, the ver
     'a median 36 ms instead of 53 in UTC and 55 instead of 73 in Europe/Berlin — a measurement, not a promise',
     'Opening a folded section of the dashboard runs every fit again', '(13 rows, the narrowing at activation among them)',
   ]) assert.ok(flat.includes(claim), `the 1.8.0 entry does not say: ${claim}`)
-  assert.equal(AGENT_TABLES_REVISION, RELEASED_1_8.AGENT_TABLES_REVISION, 'the code\'s revision is not the one 1.8.0 states')
+  // 1.9 P17 (pinned and changed): the code's revision is 10 since (§0a.1, one replay after the update), so
+  // the entry is held to 1.8.0's value and the code to the one after it.
+  assert.equal(AGENT_TABLES_REVISION, RELEASED_1_8.AGENT_TABLES_REVISION + 1, 'the code\'s revision is not the one after 1.8.0\'s')
   assert.equal(kw.KEEPWARM_LEAD_MS, 3 * 60_000, '"three minutes or less"')
   assert.equal(kw.KEEPWARM_COUNTDOWN_MS, 60_000, '"counts down 60 seconds"')
   assert.equal(kw.KEEPWARM_MAX_PER_IDLE, 3, '"at most three lines"')
@@ -2910,4 +2915,66 @@ test('docs/development.md says how the day of an hour bucket is kept since 1.9, 
   assert.equal(/\$\{t?cfg\.zone\}\|\$\{t?cfg\.dayBoundaryHour\}/.test(agg + stats), false, 'a key string of the zone and the boundary is built again')
   // 1.8's figures stay as 1.8 measured them.
   assert.ok(dev.includes('a build took a median 36 ms instead of 53 in UTC (55 instead of 73 in Europe/Berlin)'))
+})
+
+/**
+ * 1.9 P17 (§3 D rule 4–5, §0a.1 "Docs"): the G13 bound in reader words where a reader looks for it — the
+ * prompt-cache page's check 13 and its constants table (the number from src/keepWarm.ts), the
+ * troubleshooting entry of `otherSession`, the privacy page's sentence on the one new kept fact and the
+ * estimate section's paragraph on it, and the revision 10 replay on the counting and agents pages.
+ */
+test('the pages state the keep-warm G13 bound as src/keepWarm.ts has it, the time of a user line as the aggregator keeps it, and revision 10 (1.9 P17)', () => {
+  const kw = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  const { USER_LINE_TIME_RE } = require('../src/agg') as typeof import('../src/agg')
+  const page = doc.promptCache
+  const head = '\n## Keep-warm in a terminal (opt-in)\n'
+  const from = page.indexOf(head)
+  assert.ok(from >= 0, 'docs/prompt-cache.md has no keep-warm section')
+  const section = page.slice(from, page.indexOf('\n## ', from + head.length))
+  const hours = kw.KEEPWARM_SIBLING_LEFT_MS / 3_600_000
+  assert.equal(kw.KEEPWARM_SIBLING_LEFT_MS, 2 * 3_600_000, '"the two hours" in words on the page')
+  assert.ok(section.includes(`| \`KEEPWARM_SIBLING_LEFT_MS\` | ${hours} hours |`), 'the keep-warm section does not state KEEPWARM_SIBLING_LEFT_MS')
+  const text = flatText(section)
+  for (const claim of [
+    `no agent of it running, and its newest line at least ${hours} hours old and older than the moment the terminal's \`claude\` started`,
+    'a prompt that never got its reply, an interrupted reply, a window closed mid-turn',
+    'In 1.8 such a session held the folder back for as long as its transcript was kept, seven days.',
+    'That is an inference, not a rule Claude Code documents, and the two hours stand behind it',
+    'a session that wrote a line in the last two hours is never passed over',
+    'Its newest line is the later of its newest reply and its newest `user` line; when the user\'s line is the newest and its time is not known, the session is not passed over.',
+    'is idle by check 13\'s measure or left behind by it',
+  ]) assert.ok(text.includes(claim), `the keep-warm section does not say: ${claim}`)
+  // The estimate section: the one new fact, how it is matched, the latest of a line, never shown.
+  const pc = flatText(page)
+  for (const claim of [
+    'Since 1.9 one more fact is kept, for the keep-warm line\'s check of the other sessions of a folder (check 13) and nothing else',
+    'its top-level `timestamp`, matched on the raw line, which is never parsed for it',
+    'of several on one line (a tool\'s result nests some) the latest counts, so a nested one can only make the session look newer, never older',
+    'and the time is never shown, logged or exported', 'Apart from that one `timestamp`, no field is read for any of it',
+  ]) assert.ok(pc.includes(claim), `docs/prompt-cache.md does not say: ${claim}`)
+  // The key the pages quote is the one the aggregator matches.
+  assert.ok(USER_LINE_TIME_RE.source.startsWith('"timestamp":"') && USER_LINE_TIME_RE.source.endsWith('Z)"'), USER_LINE_TIME_RE.source)
+  for (const [name, text2] of [['docs/prompt-cache.md', pc], ['docs/privacy.md', flatText(doc.privacy)]] as const) {
+    assert.ok(text2.includes('`"timestamp":"…Z"`'), `${name} does not quote the key the raw line is matched on`)
+  }
+  assert.ok(flatText(doc.privacy).includes('Since 1.9 the record also keeps the time of the newest line of the transcript that is yours or a tool\'s (a `user` line) — its `timestamp`, matched on the raw line'),
+    'docs/privacy.md does not name the time of a user line')
+  for (const claim of ['nothing else of that line is read —, for the keep-warm line\'s check of other sessions of the same folder',
+    'Those two facts serve only the checks of the opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)']) {
+    assert.ok(flatText(doc.privacy).includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  // Troubleshooting: the otherSession entry says when a session stops holding the line back.
+  const why = flatText(doc.troubleshooting)
+  for (const claim of [
+    `or until it has been left behind: no agent of it running, and its newest line at least ${hours} hours old and older than the moment this terminal's \`claude\` started`,
+    'In 1.8 such a session held the line back for as long as its transcript was kept, seven days.',
+  ]) assert.ok(why.includes(claim), `docs/troubleshooting.md does not say: ${claim}`)
+  // The revision 10 replay, and why.
+  assert.equal(AGENT_TABLES_REVISION, 10)
+  assert.ok(flatText(doc.counting).includes(`— ${AGENT_TABLES_REVISION} in 1.9.0, 9 in 1.8.0, 8 in 1.6.0 and 1.7.0 —`), 'docs/counting.md does not state 1.9.0\'s revision')
+  assert.ok(flatText(doc.counting).includes(`1.9.0 raised it to ${AGENT_TABLES_REVISION} for the [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)'s check of the other sessions of a folder`),
+    'docs/counting.md does not say why 1.9.0 raised the revision')
+  assert.ok(flatText(doc.counting).includes('so that a session left behind before the update stops holding the line back at once'))
+  assert.ok(flatText(doc.agents).includes(`revision **${AGENT_TABLES_REVISION}** in 1.9.0, revision **9** in 1.8.0`), 'docs/agents.md does not state 1.9.0\'s revision')
+  assert.ok(flatText(doc.agents).includes('1.9.0 did, for the time of each main session\'s newest `user` line'))
 })

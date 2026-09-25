@@ -441,8 +441,9 @@ test('the poll hands on the record of an active session\'s run that changed, and
 
 test('the replay reads every run\'s record once; a snapshot of revision 7 asks for it, and the record survives a round trip, checked again', async () => {
   // 1.8 P5 (pinned and changed): 9, for a main session's newest cache-touching request (§0a.2) — a
-  // revision-7 snapshot still asks for the replay, as every one below the current does.
-  assert.equal(AGENT_TABLES_REVISION, 9)
+  // revision-7 snapshot still asks for the replay, as every one below the current does. 1.9 P17 (pinned
+  // and changed): 10, for the time of a main session's newest user line (§0a.1).
+  assert.equal(AGENT_TABLES_REVISION, 10)
   const h = recordHome('runrecord-replay')
   const live = new Aggregator()
   await scan(live)

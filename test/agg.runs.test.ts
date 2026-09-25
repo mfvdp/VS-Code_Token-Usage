@@ -32,7 +32,7 @@ import { TimeConfig } from '../src/time'
 import { RunLaunch, Snapshot } from '../src/types'
 import { agentTreeFor, buildViewModel, defaultUiState } from '../src/viewModel'
 import {
-  CLAUDE_ROOT, CLAUDE_SLUG, claudeLine, ctxFor, journalLine, queueOperationLine, runRecordJson, tmpDir, workflowResultLine,
+  CLAUDE_ROOT, CLAUDE_SLUG, claudeLine, ctxFor, journalLine, promptLine, queueOperationLine, runRecordJson, tmpDir, workflowResultLine,
   workflowToolUseLine,
 } from './fixtures/helpers'
 import { everyParent } from './fixtures/agentWorld'
@@ -162,6 +162,10 @@ test('a run id is taken only through its allow-list, and a result without a call
   }
   const agg = new Aggregator()
   agg.addClaudeLine(workflowToolUseLine({ id: 'm1', ts: NOW - 10 * MIN, toolUseId: 'toolu_wf1' }), MAIN_CTX)
+  // 1.9 P17 (§0a.1, pinned and changed): a result is a user line, and one newer than the record's newest
+  // raises its `lastUserAt` — a change of the line's time alone. The record has seen a user line at the
+  // results' time already, so what is tested stays the run id's rule.
+  agg.addClaudeLine(promptLine({ ts: NOW - 9 * MIN, permissionMode: null }), MAIN_CTX)
   const before = JSON.stringify(agg.toSnapshot())
   for (const runId of ['../wf_x', 'wf_', 42, 'wf_a b', `wf_${'b'.repeat(62)}`]) {
     assert.equal(agg.addClaudeLine(workflowResultLine({ ts: NOW - 9 * MIN, toolUseId: 'toolu_wf1', runId }), MAIN_CTX), false, String(runId))
@@ -182,6 +186,10 @@ test('a Workflow call is a run launch only while its id fits the ids\' alphabet,
   // notification for that id finds none.
   const agg = new Aggregator()
   const bad = ['toolu wf1', 'toolu_wf/../x', 'toolu_wf1"', 'x'.repeat(65), '']
+  // 1.9 P17 (§0a.1, pinned and changed): the session's record has seen a user line at the results' time,
+  // so none of them raises its `lastUserAt` — what is tested stays the id's rule.
+  agg.addClaudeLine(claudeLine({ id: 'm-open', ts: NOW - 10 * MIN, usage: { input: 1 }, final: true }), MAIN_CTX)
+  agg.addClaudeLine(promptLine({ ts: NOW - 9 * MIN, permissionMode: null }), MAIN_CTX)
   for (const [i, toolUseId] of bad.entries()) {
     agg.addClaudeLine(workflowToolUseLine({ id: `m${i}`, ts: NOW - 10 * MIN, toolUseId }), MAIN_CTX)
     assert.equal(agg.addClaudeLine(workflowResultLine({ ts: NOW - 9 * MIN, toolUseId, runId: RUN }), MAIN_CTX), false, toolUseId)

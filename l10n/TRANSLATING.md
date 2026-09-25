@@ -39,7 +39,11 @@ how the translations were made is in [Languages](../docs/languages.md).
   `command:…`), **codicons** (`$(watch)`), **file names and paths** (`quota.json`,
   `~/.claude/…`), and **everything in backticks** — with one exception in the manifest: a span that
   spells a formula in words (`ratio = (used ÷ limit) ÷ (elapsed ÷ window)`) or quotes a label the page
-  shows translated (`subagents`) is translated as the German does; the test names these few.
+  shows translated (`subagents`) is translated as the German does. There are five, and the test
+  names them (`NLS_SPANS_READ_AS_WORDS`): `ratio = (used ÷ limit) ÷ (elapsed ÷ window)`,
+  `used % − elapsed %`, `ratio 1.12`, `elapsed ≈ 0` and `subagents`. A description keeps as many
+  backtick spans as the English — these five in your words, still in backticks, every other one as
+  it is.
 * **The JSON examples** of the manifest, byte for byte.
 * **The keep-warm line** `Ignore this message. No action. No response.` — a text for Claude, not for
   the reader. It is passed as an argument and never appears in a translation.
@@ -56,6 +60,10 @@ how the translations were made is in [Languages](../docs/languages.md).
 * Every `{n}` placeholder, as often as the key has it. A translation may reorder them.
 * The marks, each as often as in the English: `~` (an estimate — ASCII, never `～`), `⚠` (a lower
   bound), `≈`, `–` (absence), `%`, `×`, `→` and the separator `·` (never `・`).
+* A dash between two parts of a sentence is the em dash `—`, as in the English (or a comma, a colon,
+  brackets) — also where your language's typography sets an en dash there (French, Polish, Czech):
+  the en dash `–` is the absence mark, T4 counts it, and a value holds exactly as many as its key. A
+  range the English writes with one (`{1}–{2}`) keeps it.
 * The fixed forms, which are notation, not words: `45m`, `2h14m`, `3d 5h`, `<1m`, `4 m 10 s`, the
   units inside `2 h 14 min`, `K`/`M`/`G`, the `$` of an amount and `<$0.01`, `1 h TTL`, the ISO day
   `2026-09-01`. The words around them translate ("{0} ago", "in {0}").
@@ -66,6 +74,16 @@ how the translations were made is in [Languages](../docs/languages.md).
   quoted as the language's own `package.nls.<id>.json` translates that title, so the reader finds it
   in the command palette. Quote a VS Code command (*Configure Display Language*) or term
   (*Restricted Mode*) as VS Code's own translation into the language has it, where you know it.
+* The other way round: a text of the status bar or the page that a setting's description quotes as
+  an example (“~22 running”, “budget 63 %”, “retry 1h12m”, the compact tooltip's header
+  “Window | Used | Elapsed | Pace | Resets”) is quoted as your bundle translates it — the reader
+  compares the example with what the bar shows.
+* A `{n}` the English puts between quotation marks (“{0}”, ‘{0}’) stays between quotation marks. For
+  the tests (T11) a quotation mark is one of “ ” " „ « » ‹ › 「 」 『 』 ‘ ’ ' ‚, with a space or a
+  no-break space inside allowed; 《 》 and 【 】 are not.
+* The quality statement — the third paragraph of `config.language.description` and the picker's line
+  "The languages beyond English and German were translated by AI agents …" — says exactly what the
+  English says: no word that claims more ("professional", "reviewed", "native").
 
 ## The page's words
 

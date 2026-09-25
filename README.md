@@ -21,6 +21,8 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![The Tokens section of the dashboard: the two running windows against the quota cards over the fixed periods, the cache switch over the composition bars, and the cache economy](media/screenshot-tokens.png)
 
+![The Claude quota card with its prompt-cache block after the windows: one session measured by the status line, its one-hour cache cooling in 4 m 10 s, and what a cold start would re-write against a cache read; one session cold since ~11:40, estimated from its transcript and marked with ~](media/screenshot-prompt-cache.png)
+
 The pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States*
 and a synthetic snapshot), not from anybody's real usage.
 
@@ -51,6 +53,16 @@ output is read.
   Codex · All` — that shows the whole page for one provider or for both: quota cards that explain
   their own colour, a seven-day sparkline, the key figures, the daily chart by model with the cost
   line, and the fixed-period token totals. → [Dashboard](docs/dashboard.md)
+* **A prompt cache that says when it cools.** Five minutes before a Claude Code session's one-hour
+  cache expires, the Claude card says so — `prompt cache cools in 4 m 10 s (1 h TTL)` — and what a
+  cold start would re-write instead of reading it from the cache, measured by the status line or
+  estimated from the transcript and marked `~`. `cache` in `statusBar.show` adds `$(watch) cache 4m`;
+  the Codex card says `~until 14:52, perhaps longer`. → [Prompt cache](docs/prompt-cache.md)
+* **Keep-warm, opt-in and off by default.** With three minutes or less left of a measured cache and
+  every check holding, a one-minute countdown you can cancel, then one fixed line typed into the
+  session's terminal. A draft left in Claude Code's input line is sent along, the Claude Code
+  extension's panel is out of reach, each line is a real request, and Anthropic's terms do not
+  explicitly permit it. → [Keep-warm in a terminal](docs/prompt-cache.md#keep-warm-in-a-terminal-opt-in)
 * **Your Claude Code agents as a tree**: the agents running now listed on top, then the active
   sessions with their workflow runs and agents, and every other session of the last seven days in
   one closed row, `Earlier sessions (12)` — closed until you open them, fifty children at a time —
@@ -121,8 +133,10 @@ token, a header or an exception's text.
 `~/.claude.json` are **never** touched, and symlinks are not followed while scanning.
 
 Transcript contents — prompts, responses, tool arguments and tool results — are never stored,
-logged, exported or displayed, and nothing is written outside the extension's own storage
-except the two opt-ins, each behind its own consent dialog. The agent tree reads identifiers,
+logged, exported or displayed. Nothing is written outside the extension's own storage except the
+shared quota cache file and the status-line bridge — which keeps only the fields Token Pace reads —,
+and nothing is typed anywhere except the keep-warm line: three opt-ins, each behind its own consent
+dialog, all three off by default and off in Restricted Mode. The agent tree reads identifiers,
 names, counts and allow-listed words only — an agent's type, model, ids and outcome, its effort,
 a rejected request's status, error kind and limit, its last tool's name, its tool errors, cache
 misses, Claude Code version, permission mode and compactions, the seven fields of a run record,
@@ -145,8 +159,8 @@ The full account is in [Privacy](docs/privacy.md).
 | [Status bar states](docs/status-bar-states.md) | Every text the bar can show, which state wins when several apply, and the one thing to check |
 | [Dashboard](docs/dashboard.md) | The provider switch, the sections of the panel, the filter bar, the chart, the tables and the heatmap |
 | [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree with its earlier sessions, state colours and guide lines: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
-| [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch — its user agent and a failed attempt beside an old figure —, the status-line bridge, extra usage |
-| [Prompt cache](docs/prompt-cache.md) | What the status line reports about the prompt cache, one reading per session, and exactly which of its fields are read |
+| [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch — its user agent and a failed attempt beside an old figure —, the status-line bridge and where its script lives, extra usage |
+| [Prompt cache](docs/prompt-cache.md) | The cooling warning and what a cold start would cost, which figure is measured and which estimated, the Codex line, the opt-in keep-warm line with every check it makes and what it cannot see, and exactly which fields are read |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
 | [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |
 | [Counting](docs/counting.md) | How the transcripts are read, what a lower bound is, retention and the snapshot |
@@ -154,9 +168,9 @@ The full account is in [Privacy](docs/privacy.md).
 | [Budgets and alerts](docs/budgets-alerts.md) | Limits you state, the thresholds that can fire, and why a budget is not a bill |
 | [Sessions and projects](docs/sessions.md) | What `attribution` stores, and the salted hash that keeps a screen share safe |
 | [Export and diagnostics](docs/export.md) | The CSV and JSON schemas, the clipboard summary, the diagnostics report |
-| [If the bar says …](docs/troubleshooting.md) | Every problem state with its cause and the repair its click performs, and the agent hook's |
+| [If the bar says …](docs/troubleshooting.md) | Every problem state with its cause and the repair its click performs, the agent hook's, and why no keep-warm line was sent |
 | [Privacy](docs/privacy.md) | Every file read, everything never touched, and the one outbound call |
-| [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, the Claude Code version on Windows, restricted and virtual workspaces |
+| [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, the Claude Code version on Windows, where the status-line bridge's script lives, restricted and virtual workspaces |
 | [Settings](docs/settings.md) | Every `tokenPace.*` key with its default and what it does |
 | [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language, the walkthrough |
 | [Building and testing](docs/development.md) | Build, tests, the smoke test in a real window, and what CI runs |

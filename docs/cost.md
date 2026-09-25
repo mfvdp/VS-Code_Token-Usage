@@ -19,7 +19,9 @@ legacy Anthropic rows (Claude 4.x and 3.x) come from an earlier check of the sam
 13 August 2026, and the **Claude Opus 5.5** row from a check of Anthropic's pricing page on
 **24 September 2026**. Every rule carries the day it was read, so a rate never applies retroactively
 without saying so: a bucket from a day no rule covers is priced from the nearest known rule and
-marked `approximate`.
+marked `approximate`. The dashboard's footnote names both days — `Prices as of 2026-09-06; checked
+later: claude-opus-5-5 (2026-09-24).` —, under the provider switch's Codex view the table's alone, and
+the Models table's `list as of` date is the row's own.
 
 **Claude Opus 5.5** (1.8): $4 per million input tokens, $5 for a 5-minute cache write, $8 for a
 1-hour cache write, $0.20 for a cache hit and $20 for output; fast mode $8 in and $40 out. Until 1.8

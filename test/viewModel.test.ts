@@ -34,7 +34,7 @@ import { toolAgg } from './helpers/toolAgg'
 import { ROOT, rawManifest } from './helpers/nls'
 import { readFileSync } from 'node:fs'
 import { resetTimeMemos } from '../src/time'
-import { resetPriceMemos } from '../src/prices'
+import { PRICES_CHECKED_LATER, resetPriceMemos } from '../src/prices'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -263,7 +263,15 @@ test('the price date is stated once, in the footnote that needs it', () => {
   const dated = vm.footnotes.filter((f) => f.includes('Prices as of'))
   assert.equal(dated.length, 1)
   assert.ok(dated[0].startsWith('API cost is hypothetical'))
-  assert.ok(dated[0].endsWith(`Prices as of ${vm.pricing.asOf}.`))
+  // 1.8 P11 (pinned and changed: the sentence ended on the table's day): a row read after the table's
+  // check — Claude Opus 5.5 — is named with its own day beside it, and the view model carries the words.
+  assert.equal(vm.pricing.later, PRICES_CHECKED_LATER.map((r) => `${r.model} (${r.checked})`).join(', '))
+  // Under the Codex view no Claude row is named (1.7 F1): the sentence ends on the table's day.
+  const codex = buildViewModel(makeInput({ ui: { providers: ['codex'] } }))
+  assert.equal(codex.pricing.later, null)
+  assert.ok(codex.footnotes.some((f) => f.endsWith(`Prices as of ${codex.pricing.asOf}.`)), codex.footnotes.join('\n'))
+  assert.equal(vm.pricing.later, 'claude-opus-5-5 (2026-09-24)')
+  assert.ok(dated[0].endsWith(`Prices as of ${vm.pricing.asOf}; checked later: ${vm.pricing.later}.`), dated[0])
   // Configured rates are a separate statement and stay beside it.
   const custom = buildViewModel(makeInput({
     cfg: makeConfig({ 'tokenPace.customPrices': { 'claude-opus-4-6': { input: 1, output: 2 } } }),

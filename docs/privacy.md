@@ -219,7 +219,8 @@ time, with a backup of the original bytes first, changing only the `statusLine` 
 string and only while the entry still holds the command Token Pace recorded; the log says so.
 
 Beside them stands the one write that is no file: the opt-in keep-warm line, typed into Claude
-Code's terminal (above).
+Code's terminal (above) — off by default as well, and never in Restricted Mode. Those are the three
+opt-ins, each behind a consent dialog of its own.
 
 One further write exists and is not an opt-in setting: the *Run Token Pace locally* button of
 the remote hint puts `remote.extensionKind` into your user `settings.json` — see

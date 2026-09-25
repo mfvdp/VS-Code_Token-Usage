@@ -35,9 +35,9 @@ const LEGACY_CHECKED = '2026-08-13'
  */
 export const OPUS_5_5_CHECKED = '2026-09-24'
 
-/** Human-readable provenance, shown in the dashboard footer and the cost tooltip. */
+/** Human-readable provenance of the table (`priceTableSummary`). */
 export const PRICE_SOURCES = [
-  `Anthropic model and pricing table — docs.claude.com (checked ${PRICES_AS_OF}, legacy rows ${LEGACY_CHECKED})`,
+  `Anthropic model and pricing table — docs.claude.com (checked ${PRICES_AS_OF}, legacy rows ${LEGACY_CHECKED}, Claude Opus 5.5 row ${OPUS_5_5_CHECKED})`,
   `OpenAI API pricing — developers.openai.com/api/docs/pricing (checked ${PRICES_AS_OF})`,
   `Anthropic web search — $10 per 1,000 searches, docs.claude.com (checked ${PRICES_AS_OF})`,
 ]
@@ -173,6 +173,22 @@ export const PRICES: Record<string, PriceRule[]> = {
   'gpt-5-nano': [openaiRule(PRICES_AS_OF, openai(0.05, 0.005, 0.4))],
   'gpt-5-pro': [openaiRule(PRICES_AS_OF, openai(15, 0, 120))],
 }
+
+/**
+ * 1.8 (§7c wave 2 fact 13): the rows read after PRICES_AS_OF — today Claude Opus 5.5's, read on
+ * OPUS_5_5_CHECKED — each with the day of its own check and the provider whose page it came from
+ * (an OpenAI rule names developers.openai.com, every other one Anthropic's table), in the table's
+ * order. The page's footnote names them beside PRICES_AS_OF, so no row's date is hidden behind the
+ * table's — under the provider switch only the rows of the providers it shows.
+ */
+export const PRICES_CHECKED_LATER: ReadonlyArray<{ readonly model: string; readonly checked: string; readonly source: 'claude' | 'codex' }> = Object.freeze(
+  Object.entries(PRICES).flatMap(([model, rules]) => {
+    const newest = rules.reduce((r, x) => (x.from > r.from ? x : r))
+    if (!(newest.from > PRICES_AS_OF)) return []
+    const source: 'claude' | 'codex' = newest.source.startsWith('developers.openai.com') ? 'codex' : 'claude'
+    return [Object.freeze({ model, checked: newest.from, source })]
+  }),
+)
 
 /**
  * 1.8 L-2: a view-model build prices every bucket, and the buckets name a handful of models on a

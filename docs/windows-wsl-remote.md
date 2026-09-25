@@ -70,7 +70,10 @@ such a command to the copy once ([Quota sources](quota-sources.md#claude-status-
 On Windows the command holds its paths with backslashes, as the installer has always written them.
 
 The extension supports untrusted workspaces and virtual workspaces: it never reads, executes or
-evaluates workspace content at all. In Restricted Mode the two opt-in writes are disabled. On a
+evaluates workspace content at all. In Restricted Mode the three opt-ins that act outside the
+extension's storage are disabled — the two writes (the shared quota cache file and the status-line
+bridge) and the [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in), which then listens
+to no terminal and types nothing. On a
 machine with no transcripts it reports that it found none instead of showing zeros — and on a
 remote host it offers, once, to move itself to the local side by writing `remote.extensionKind`
 to your user settings (above).

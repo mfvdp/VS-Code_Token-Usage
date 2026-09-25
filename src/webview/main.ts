@@ -2836,9 +2836,15 @@ function sFooter(): string {
   // the sentence itself is written in whatever language the view model was built in.
   const asOf = vm.pricing && vm.pricing.asOf ? esc(vm.pricing.asOf) : '';
   const priced = !asOf || vm.footnotes.some((f: Payload) => String(f).indexOf(asOf) >= 0);
+  // 1.8: the rows read after the table's check (Claude Opus 5.5) are named with their own day.
+  const later = vm.pricing && vm.pricing.later ? esc(vm.pricing.later) : '';
+  const dated = later
+    ? (vm.pricing.custom ? tr('Prices as of {0}; checked later: {1} · your configured rates.', asOf, later)
+                         : tr('Prices as of {0}; checked later: {1}.', asOf, later))
+    : (vm.pricing.custom ? tr('Prices as of {0} · your configured rates.', asOf)
+                         : tr('Prices as of {0}.', asOf));
   return '<ul>' + vm.footnotes.map((f: Payload) => '<li>' + esc(f) + '</li>').join('')
-    + (priced ? '' : '<li>' + (vm.pricing.custom ? tr('Prices as of {0} · your configured rates.', asOf)
-                                                 : tr('Prices as of {0}.', asOf)) + '</li>')
+    + (priced ? '' : '<li>' + dated + '</li>')
     + '<li>' + tr('Generated {0}.', esc(vm.generatedAt)) + '</li></ul>';
 }
 

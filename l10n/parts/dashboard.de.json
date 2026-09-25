@@ -77,6 +77,8 @@
   "Preview data — not a reading.": "Vorschaudaten — kein Messwert.",
   "Prices as of {0} · your configured rates.": "Preise mit Stand {0} · Ihre konfigurierten Sätze.",
   "Prices as of {0}.": "Preise mit Stand {0}.",
+  "Prices as of {0}; checked later: {1} · your configured rates.": "Preise mit Stand {0}; später geprüft: {1} · Ihre konfigurierten Sätze.",
+  "Prices as of {0}; checked later: {1}.": "Preise mit Stand {0}; später geprüft: {1}.",
   "Project": "Projekt",
   "Project attribution is off (tokenPace.attribution).": "Die Projektzuordnung ist aus (tokenPace.attribution).",
   "Projects": "Projekte",

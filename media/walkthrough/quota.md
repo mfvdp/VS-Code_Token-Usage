@@ -8,7 +8,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | Source | What it is | How fresh |
 |---|---|---|
 | cache file | `~/.cache/claude-usage/state.json`, written by a panel widget or a script | the writer's `fetched_at` |
-| status line | Claude Code's own status line, mirrored by the opt-in bridge | every status-line refresh |
+| status line | Claude Code's own status line, through the opt-in bridge — which keeps only the fields Token Pace reads | every status-line refresh |
 | `~/.claude.json` | Claude Code's `cachedUsageUtilization` | its own cache; discarded above 24 h |
 | Codex transcripts | the `rate_limits` block Codex writes itself | as old as your last Codex turn |
 

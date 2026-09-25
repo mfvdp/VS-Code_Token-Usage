@@ -132,10 +132,16 @@ deletes those after 30 days, so older history is gone for good. Deleting the age
 is safe — its script writes the file again on the next hook call, and the markers it reported go
 with it. The script itself, `agent-hook.js`, is not in the list, and the note under the mirror
 says so: it stays while the hook is installed — the entries in Claude Code's settings run it —
-and goes with the extension's storage when Token Pace is uninstalled. The leader lease is never
+and goes with the extension's storage when Token Pace is uninstalled. The status-line bridge's
+script, `statusline-bridge.js` — the copy Claude Code's `statusLine.command` runs since 1.8 — is not
+in the list either: it stays while the status line is connected, and activation replaces it with the
+shipped one when the two differ. The leader lease is never
 offered for deletion — it is live coordination between open windows, not stored data. The
 bridge's install record is kept too: it is the undo.
 
 **Uninstalling** through the Extensions view runs a `vscode:uninstall` hook that removes the
 extension's `globalStorage` directory, best effort, and only when the path ends in exactly
-`User/globalStorage/frederik.token-pace`.
+`User/globalStorage/frederik.token-pace`. The copies of the two scripts go with it — the agent hook's
+`agent-hook.js` and the status-line bridge's `statusline-bridge.js` —, so a hook still entered in
+Claude Code's settings, or a status line still connected, would then start a script that is gone:
+remove the hook's entries and run *Token Pace: Disconnect Claude Status Line* first.

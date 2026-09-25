@@ -609,6 +609,8 @@ test('the consent: the dialog names the cost, the draft that is sent with the li
     'has three minutes or less left', 'a one-minute countdown in the status bar that you can cancel', `types “${KEEP_WARM_LINE}” into that terminal and presses Enter`,
     'about two minutes before the cache expires', 'at most three times in a row', 'at 90 % or more',
     'Cost: every line is a real request', 'counts against your usage limits',
+    // 1.8 P11 (§0c, §7c wave 3 decision 6): logged, and — answered — counted.
+    'Every line is written to the Token Pace log, and every line Claude Code answers is counted as a keep-warm request on the Claude card.',
     'Anything you typed there and did not send is sent with it', 'type nothing into the Claude terminal while the countdown runs',
     'extension\'s own panel is out of reach',
     `“${KEEP_WARM_TERMS_PASSAGE}”`, 'automated or non-human means', 'Anthropic has not explicitly permitted it',
@@ -632,7 +634,10 @@ test('the consent: the dialog names the cost, the draft that is sent with the li
   for (const claim of ['drei Minuten oder weniger', 'einminütigen Countdown', `tippt Token Pace „${KEEP_WARM_LINE}“`, 'etwa zwei Minuten',
     'höchstens dreimal hintereinander', 'Kosten: Jede Zeile ist eine echte Anfrage', 'Nutzungslimits', 'wird mitgesendet',
     'tippen Sie nichts in das Claude-Terminal, solange der Countdown läuft', 'außer Reichweite', `„${KEEP_WARM_TERMS_PASSAGE}“`,
-    'automated or non-human means', 'nicht ausdrücklich gestattet', 'tokenPace.cacheKeepWarm']) {
+    'automated or non-human means', 'nicht ausdrücklich gestattet', 'tokenPace.cacheKeepWarm',
+    'Jede Zeile wird im Protokoll von Token Pace festgehalten', 'als Warmhalte-Anfrage gezählt',
+    // 1.8 P11 (§7c wave 3 decision 6): the terms sentence's German lead.
+    `Verbraucherbedingungen von Anthropic nennt als nicht erlaubt: „${KEEP_WARM_TERMS_PASSAGE}“`]) {
     assert.ok(de.includes(claim), `the German dialog does not say: ${claim}`)
   }
   const title = inGerman(() => {

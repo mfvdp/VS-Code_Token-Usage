@@ -881,7 +881,7 @@ export interface ExtensionContextLike {
 export function registerBridgeCommands(context: ExtensionContextLike, deps: BridgeDeps): void {
   const vscode = require('vscode') as typeof import('vscode')
   const consent = new WriteConsent(deps.memento, 'statusLine', deps.log, {
-    paths: { settingsFile: deps.paths.settingsFile, mirrorFile: deps.paths.mirror },
+    paths: { settingsFile: deps.paths.settingsFile, mirrorFile: deps.paths.mirror, scriptFile: deps.paths.script },
   })
 
   const connect = vscode.commands.registerCommand('tokenPace.connectStatusLine', async () => {

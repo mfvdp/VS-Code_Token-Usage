@@ -184,7 +184,7 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
     now: 0,
     sections: ['quota', 'history'],
     showCost: true,
-    pricing: { asOf: '2026-09-02', custom: false, showList: false },
+    pricing: { asOf: '2026-09-02', later: null, custom: false, showList: false },
     range: { from: '2026-08-05', to: '2026-09-03', label: 'Last 30 days', preset: '30d', presets: ['7d', '30d'] },
     ui: { providers: ['claude', 'codex'], models: [], metric: 'usage', collapsed: [] },
     quotas: [card()],
@@ -1282,6 +1282,17 @@ test('the footer prints "Prices as of" exactly once, whichever side carries it',
   // A model that has no such footnote still gets the sentence, once.
   const without = render('sFooter()', { footnotes: ['Local numbers are what this machine saw.'] })
   assert.equal(without.split('Prices as of').length - 1, 1, without)
+  // 1.8 P11: a row read after the table's check is named with its own day there too, escaped.
+  const later = render('sFooter()', {
+    footnotes: ['Local numbers are what this machine saw.'],
+    pricing: { asOf: '2026-09-02', later: 'claude-opus-5-5 (2026-09-24)', custom: false, showList: false },
+  })
+  assert.equal(later.split('Prices as of').length - 1, 1, later)
+  assert.ok(later.includes('<li>Prices as of 2026-09-02; checked later: claude-opus-5-5 (2026-09-24).</li>'), later)
+  const laterCustom = render('sFooter()', {
+    footnotes: [], pricing: { asOf: '2026-09-02', later: '<b>x</b> (2026-09-24)', custom: true, showList: false },
+  })
+  assert.ok(laterCustom.includes('Prices as of 2026-09-02; checked later: &lt;b&gt;x&lt;/b&gt; (2026-09-24) · your configured rates.'), laterCustom)
 })
 
 // ---------------------------------------------------------------------------

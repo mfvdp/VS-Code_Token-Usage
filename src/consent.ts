@@ -188,8 +188,13 @@ export interface WriteConsentPaths {
   quotaCacheFiles?: string[]
   /** Claude Code's settings file the bridge would edit. */
   settingsFile?: string
-  /** Where the bridge mirrors the status-line JSON (inside globalStorage). */
+  /** Where the bridge keeps the fields Token Pace reads of the status-line JSON (inside globalStorage). */
   mirrorFile?: string
+  /**
+   * 1.8 §7a Q16: the script's copy the installed command names — `<globalStorage>/statusline-bridge.js`,
+   * inside the extension's storage, which an uninstall deletes.
+   */
+  scriptFile?: string
 }
 
 /** Supplied as a function wherever the paths follow a setting that can change. */
@@ -255,19 +260,22 @@ export function writeConsentDisclosure(kind: WriteConsentKind, paths: WriteConse
   }
   const settings = paths.settingsFile ?? '~/.claude/settings.json'
   const mirror = paths.mirrorFile ?? '<globalStorage>/statusline-mirror.json'
+  const script = paths.scriptFile ?? '<globalStorage>/statusline-bridge.js'
+  // 1.8 (§7a Q11, Q16; §7c wave 2 fact 13): the script keeps only the fields the reader takes — the
+  // dialog says so, and names the copy in the extension's storage that the command runs.
   return [
     t('Token Pace writes only into its own storage \u2014 with this one exception, if you allow it.'),
     '',
-    t('To read quota figures without any network access, it can register a small script as Claude\nCode\'s status line. Claude Code then runs that script on every status-line refresh and pipes\nits status JSON into it; the script mirrors that JSON to a file and prints a status line.'),
+    t('To read quota figures without any network access, it can register a small script as Claude\nCode\'s status line. Claude Code then runs that script on every status-line refresh and pipes\nits status JSON into it; the script keeps of it only the fields Token Pace reads \u2014 the quota\nwindows, the plan, the context window, the cost, the model, the prompt cache and the session\'s\nid \u2014 in a file, and prints a status line. The session\'s name, its working directory, its\ntranscript\'s path and the rest of the JSON never reach the file.'),
     '',
     t('What changes:'),
-    `  \u2022 ${t('{0} \u2014 the "statusLine" entry is set to the script.', settings)}`,
+    `  \u2022 ${t('{0} \u2014 the "statusLine" entry is set to the script\'s copy at {1}, in the extension\'s storage.', settings, script)}`,
     `  \u2022 ${t('A backup is written first, next to it, as settings.json.token-pace-backup-<timestamp>.')}`,
-    `  \u2022 ${t('The mirrored JSON is stored at {0}.', mirror)}`,
+    `  \u2022 ${t('Those fields are stored at {0}.', mirror)}`,
     '',
     t('An existing status-line command is kept: it is called by the script with the same input and\nits output is passed through unchanged. A settings.json that cannot be parsed is never\ntouched. The script never sends anything anywhere and never logs the piped JSON.'),
     '',
-    t('"Token Pace: Disconnect Claude Status Line" restores the previous entry exactly \u2014 as long as\nthe entry is still the one we installed. It is not removed automatically when the extension\nis uninstalled, so disconnect first if you plan to remove Token Pace.'),
+    t('"Token Pace: Disconnect Claude Status Line" restores the previous entry exactly \u2014 as long as\nthe entry is still the one we installed. Uninstalling the extension does not remove the entry\nbut deletes the script\'s copy with the extension\'s storage, and a status line still connected\nwould then start a script that is gone \u2014 so disconnect first if you plan to remove Token Pace.'),
   ].join('\n')
 }
 
@@ -377,7 +385,8 @@ export interface KeepWarmConsentUi {
 
 /**
  * The keep-warm dialog's text (§3 B2 "Consent", §7a Q19, §7c probe P-4): what is typed, where and when
- * — the countdown at three minutes of warmth left, the line at about two —, what it costs, what cannot be
+ * — the countdown at three minutes of warmth left, the line at about two —, what it costs and that every
+ * line is logged and every answered one counted (§0c, §7c wave 3 decision 6), what cannot be
  * made safe (a draft in Claude Code's input line is sent with it; the extension's own panel is out of
  * reach; a dialog the transcript does not show is not seen), the terms passage word for word, and how to
  * withdraw. One key per paragraph; the line and the passage go in as arguments, never translated.
@@ -386,7 +395,7 @@ export function keepWarmDisclosure(line: string): string {
   return [
     t('When the status line reports that the one-hour prompt cache of a Claude Code session running in a VS Code terminal of this window has three minutes or less left, Token Pace starts a one-minute countdown in the status bar that you can cancel. When it ends, Token Pace types “{0}” into that terminal and presses Enter — about two minutes before the cache expires, at most three times in a row, and never while a Claude quota window stands at 90 % or more.', line),
     '',
-    t('Cost: every line is a real request. Claude re-reads the whole conversation at the cache rate and writes a short reply; on a subscription this counts against your usage limits.'),
+    t('Cost: every line is a real request. Claude re-reads the whole conversation at the cache rate and writes a short reply; on a subscription this counts against your usage limits. Every line is written to the Token Pace log, and every line Claude Code answers is counted as a keep-warm request on the Claude card.'),
     '',
     t('Risk: Token Pace cannot see Claude Code\'s input line. Anything you typed there and did not send is sent with it — type nothing into the Claude terminal while the countdown runs. Nor can Token Pace see a dialog the transcript does not show. A session in the Claude Code extension\'s own panel is out of reach and gets no line.'),
     '',

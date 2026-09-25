@@ -2204,12 +2204,15 @@ test('the smaller 1.7 changes are on the pages: the compaction without a trigger
 /** 1.8 P5: what 1.7.0 shipped where 1.8 moved on — the agent tables' revision (1.8.0 raises it to 9). */
 const RELEASED_1_7 = { AGENT_TABLES_REVISION: 8 } as const
 
-test('the 1.7.0 release notes: the newest entry, in the order a store page reads, the versions unchanged, no speed claim, no path or secret', () => {
+test('the 1.7.0 release notes: in the order a store page reads, the versions unchanged, no speed claim, no path or secret', () => {
   const log = readDoc('CHANGELOG.md')
-  const first = log.indexOf('\n## ')
+  // 1.8 P11 (pinned and changed: "the newest CHANGELOG entry is 1.7.0"): 1.8.0 stands above it now,
+  // so the 1.7.0 entry is found by its heading; the 1.8.0 entry has a test of its own below.
+  const first = log.indexOf('\n## 1.7.0 ')
+  assert.ok(first >= 0, 'the CHANGELOG has no 1.7.0 entry')
   const second = log.indexOf('\n## ', first + 4)
   const entry = log.slice(first, second)
-  assert.match(entry, /^\n## 1\.7\.0 — \d{4}-\d{2}-\d{2}\n\n\*\*/, 'the newest CHANGELOG entry is not 1.7.0, or does not open with its summary')
+  assert.match(entry, /^\n## 1\.7\.0 — \d{4}-\d{2}-\d{2}\n\n\*\*/, 'the 1.7.0 entry lost its date, or does not open with its summary')
   const flat = flatText(entry)
   const order = ['### Added', '### Changed', '### Fixed', '### Privacy'].map((h) => flat.indexOf(h))
   assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.7.0 entry\'s sections are missing or out of order')
@@ -2563,4 +2566,144 @@ test('the pages describe the keep-warm line as the host builds it: the countdown
     'never a session id, a path, a time of day, a terminal or a command line', '`claude --api-key synthetic-secret-123` in `/home/u/synthetic-project`']) {
     assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
   }
+})
+
+/** 1.8 P11: what 1.8.0 ships where later releases may move on — pinned here, read from the code today. */
+const RELEASED_1_8 = { AGENT_TABLES_REVISION: 9 } as const
+
+/**
+ * 1.8 P11 (§4 P11 (5), §7c, the P11 input's claims to make and to avoid): the 1.8.0 entry is the newest,
+ * in the order a store page reads, states every version as the code has it, names what was built — the
+ * cooling warning, the `cache` entry, the Codex line, the keep-warm line with Q19's numbers from the
+ * constants, the narrowed mirror, the bridge's copy, the Opus 5.5 row, L-4 and L-5 as fixes, L-6 as a
+ * robustness change — and nothing that was struck, superseded or not measured.
+ */
+test('the 1.8.0 release notes: the newest entry, every section in order, the versions and numbers the code has, nothing struck or unmeasured', () => {
+  const kw = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  const cw = require('../src/cacheWatch') as typeof import('../src/cacheWatch')
+  const { KEEP_WARM_TERMS_PASSAGE } = require('../src/consent') as typeof import('../src/consent')
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  assert.match(entry, /^\n## 1\.8\.0 — 2026-09-25\n\n\*\*/, 'the newest CHANGELOG entry is not 1.8.0 of 2026-09-25, or does not open with its summary')
+  const flat = flatText(entry)
+  const order = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal'].map((h) => flat.indexOf(h))
+  assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.8.0 entry\'s sections are missing or out of order')
+  const cooling = cw.CACHE_COOLING_LEAD_MS / 60_000
+  assert.equal(cooling, 5)
+  for (const claim of [
+    // Added: the cooling warning, the entry, the Codex line, the keep-warm line.
+    '**The cooling warning on the Claude card.**', 'Only a one-hour prompt cache is watched',
+    '`Session Tue 14:20 · 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)`',
+    'A cold start after 14:52 re-writes 152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).',
+    'At most three sessions, the most urgent first', '2× and 0.05× for Claude Opus 5.5', 'a cooling cache is a moment, not a record',
+    '**The `cache` status-bar entry**', '`$(watch) cache 4m`', '`$(watch) cache ~4m`', 'Hidden while none is cooling, a cold cache included; no colour and no alarm',
+    '**The Codex line.**', 'no countdown, no cooling, no cost, no status-bar entry',
+    '**The keep-warm line — opt-in, off by default.**', '`tokenPace.cacheKeepWarm`', `\`${kw.KEEP_WARM_LINE}\``,
+    'three minutes or less left', 'counts down 60 seconds', 'at about two minutes left', 'at most three lines per idle phase',
+    `no Claude quota window at ${kw.KEEPWARM_QUOTA_STOP_PERCENT} % or more, or reached`, 'never the transcript\'s estimate', 'the workspace trusted',
+    'so the line goes only when you left the Claude terminal before its newest reply ended',
+    'cancels the line and keep-warm for the rest of that session\'s idle phase; the setting stays as it is',
+    'whether the cache entry then lives on is Anthropic\'s rule, which Token Pace does not measure',
+    'a draft left in Claude Code\'s input line is sent with the line', 'the Claude Code extension\'s own panel is out of reach',
+    'section 3 of Anthropic\'s Consumer Terms', 'is out of reach until it is started again', '`keepwarm.json`', 'application scope',
+    // Changed: 1.3.0's promise, one line per session, Opus 5.5, the dialog.
+    '1.3.0 said: "Without the bridge there is no line — nothing is estimated."', '*estimated from the transcript* in words',
+    '**One line per session.**', '**Claude Opus 5.5 is priced.**', 'marked `approximate`',
+    '`Prices as of 2026-09-06; checked later: claude-opus-5-5 (2026-09-24).`', 'at Opus 5.5\'s rates, the newest priced Opus',
+    '**The status-line bridge\'s consent dialog**',
+    // Fixed: the bridge's copy, L-4, L-5.
+    '**The status-line bridge after an update.**', '`statusline-bridge.js`', 'a backup of the original `settings.json` first',
+    'the guide lines stop a pixel above it and go on a pixel below it', '**Thin subagents\' bands in a forced-colours theme**',
+    // Privacy: the narrowed mirror, the two fields, nothing new from a transcript, the terminals, three opt-ins.
+    '1.3 to 1.7 stored it so in `statusline-mirror.json`', '`session_id`', '`prompt_cache.recache_tokens_if_cold`',
+    '**Nothing new is read from a transcript.**', 'never a terminal\'s name, its output or its environment', '**Three opt-ins now**',
+    // Internal: the versions, the pushes, the measured build, L-6, the read contract.
+    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are unchanged`,
+    `\`AGENT_TABLES_REVISION\` 8 → ${RELEASED_1_8.AGENT_TABLES_REVISION}`, 'rebuilds the agent tables once',
+    'a median 36 ms instead of 53 in UTC and 55 instead of 73 in Europe/Berlin — a measurement, not a promise',
+    'Opening a folded section of the dashboard runs every fit again', '(13 rows, the narrowing at activation among them)',
+  ]) assert.ok(flat.includes(claim), `the 1.8.0 entry does not say: ${claim}`)
+  assert.equal(AGENT_TABLES_REVISION, RELEASED_1_8.AGENT_TABLES_REVISION, 'the code\'s revision is not the one 1.8.0 states')
+  assert.equal(kw.KEEPWARM_LEAD_MS, 3 * 60_000, '"three minutes or less"')
+  assert.equal(kw.KEEPWARM_COUNTDOWN_MS, 60_000, '"counts down 60 seconds"')
+  assert.equal(kw.KEEPWARM_MAX_PER_IDLE, 3, '"at most three lines"')
+  assert.equal(cw.CACHE_WATCH_MAX, 3, '"At most three sessions"')
+  // The build figures are development.md's, measured there.
+  assert.ok(flatText(doc.development).includes('a build took a median 36 ms instead of 53 in UTC (55 instead of 73 in Europe/Berlin)'))
+  // The Consumer Terms' passage is the dialog's; the entry names it and does not re-word it.
+  assert.equal(flat.includes(KEEP_WARM_TERMS_PASSAGE), false, 'the entry quotes the terms passage — the page and the dialog do')
+  // Every version the entry names is the one 1.8.0 ships.
+  for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : EXPORT_SCHEMA_VERSION, `the 1.8.0 entry says ${m[1]} ${m[2]}`)
+  }
+  // Claims to avoid (the P11 input): B1 was struck; L-6 is no visible fix; no cooling, countdown or cost
+  // for Codex; no "safe"; nothing it cannot see is claimed seen; Q19 superseded the spec's four and 55 minutes.
+  for (const never of [/\/loop/, /copyKeepWarm/i, /keep-warm prompt/i, /Copy keep-warm/i, /\bsafe(ly)?\b/i, /detects? (a )?draft/i,
+    /four minutes|4 minutes|55 minutes/, /never an estimate/i, /chart labels?/i, /keeps? (the )?focus/i, /unanswered lines? (are|is) counted/i]) {
+    assert.equal(never.test(entry), false, `the 1.8.0 entry says ${never}`)
+  }
+  // A store page: no path of the machine it was built on, no internal file, no secret, no package version talk.
+  for (const never of [/\/home\//, /plan-1\.\d/, /p11-input/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//, /package\.json/]) {
+    assert.equal(never.test(entry), false, `the 1.8.0 entry mentions ${never}`)
+  }
+})
+
+/**
+ * 1.8 P11 (§4 P11 (1), (4), (6); §7c wave 3 decisions; the P11 input's wave 3 list): the sentences the
+ * package added where a reader would look — the G8 sentence and the slash-command rule of the keep-warm
+ * checks, the three opt-ins wherever Restricted Mode is named, the countdown item on the status-bar
+ * page, the keep-warm notes in the dashboard's quota row, the bridge's copy beside the hook's in the
+ * stored-data list and on uninstall, the Opus 5.5 check day in the numbers table, the README's features
+ * and its fourth picture, and the walkthrough's `cache` entry.
+ */
+test('the pages say what 1.8 P11 checked against the code: the keep-warm focus rule, three opt-ins, the bridge\'s copy, the price check day, the README features (1.8 P11)', () => {
+  const pc = flatText(doc.promptCache)
+  for (const claim of [
+    'So the line goes only when you left the Claude terminal — another terminal active, or the window unfocused — before its newest reply ended',
+    'A local command such as `/usage` or `/cost` leaves a line of yours newest as well, so after one no line goes until the session\'s next real reply.',
+    'and it costs that session one request', '[prompt caching](https://code.claude.com/docs/en/prompt-caching)',
+    'In Restricted Mode no terminal is listened to and no line goes', 'a record of the day, so also after the setting was switched off',
+  ]) assert.ok(pc.includes(claim), `docs/prompt-cache.md does not say: ${claim}`)
+  assert.equal(doc.promptCache.includes('<!-- 1.8 P9') || doc.promptCache.includes('P11 reviews the section'), false, 'a build note is left in the page')
+  // Three opt-ins wherever Restricted Mode is named for them.
+  assert.ok(flatText(doc.windows).includes('In Restricted Mode the three opt-ins that act outside the extension\'s storage are disabled'))
+  assert.equal(flatText(doc.windows).includes('the two opt-in writes are disabled'), false)
+  assert.ok(flatText(README).includes('three opt-ins, each behind its own consent dialog, all three off by default and off in Restricted Mode'))
+  assert.equal(flatText(README).includes('except the two opt-ins, each behind'), false)
+  assert.ok(nlsEn['capabilities.untrustedWorkspaces'].includes('All three are disabled in Restricted Mode.'))
+  assert.ok(nlsDe['capabilities.untrustedWorkspaces'].includes('Alle drei sind im eingeschränkten Modus abgeschaltet.'))
+  assert.ok(flatText(doc.privacy).includes('Those are the three opt-ins, each behind a consent dialog of its own.'))
+  assert.ok(flatText(doc.quotaSources).includes('and so is the third opt-in, the [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)'))
+  // The countdown item on the status-bar page, the notes in the dashboard's quota row.
+  assert.ok(flatText(doc.statusBar).includes('its own item `tokenPace.keepWarm` stands before every other Token Pace item (priority 1001)'))
+  const { KEEPWARM_ITEM_PRIORITY, KEEPWARM_ITEM_ID } = require('../src/keepWarmHost') as typeof import('../src/keepWarmHost')
+  assert.equal(KEEPWARM_ITEM_PRIORITY, 1001)
+  assert.equal(KEEPWARM_ITEM_ID, 'tokenPace.keepWarm')
+  const quotaRow = doc.dashboard.split('\n').find((l) => l.startsWith('| `quota` |')) ?? ''
+  for (const claim of ['`Keep-warm line for this session in 42 s — cancel it in the status bar.`',
+    '`Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.`',
+    '`Keep-warm stopped for this session: the last line got no answer within two minutes.`', '`Keep-warm requests today: 2 · 64 tokens`']) {
+    assert.ok(quotaRow.includes(claim), `docs/dashboard.md's quota row does not say: ${claim}`)
+  }
+  // The bridge's copy stays beside the hook's in the stored-data list, and goes on uninstall.
+  assert.ok(flatText(doc.export).includes('The status-line bridge\'s script, `statusline-bridge.js` — the copy Claude Code\'s `statusLine.command` runs since 1.8 — is not in the list either'))
+  assert.ok(flatText(doc.export).includes('run *Token Pace: Disconnect Claude Status Line* first'))
+  assert.ok(doc.commands.includes('and so does the status-line bridge\'s script `statusline-bridge.js` while the status line is connected'))
+  assert.ok(flatText(doc.quotaSources).includes('What 1.8 does not move is a Token Pace command it has no record of'))
+  // The Opus 5.5 row's own check day, where the numbers table dates the price table.
+  assert.ok(doc.numbers.split('\n').some((l) => l.startsWith('| API cost |') && l.includes(`table checked ${PRICES_AS_OF}, the Claude Opus 5.5 row ${OPUS_5_5_CHECKED}`)))
+  // The README: the features 1.8 added, the index row, the fourth picture; the walkthrough's entry.
+  const readme = flatText(README)
+  for (const claim of ['**A prompt cache that says when it cools.**', '**Keep-warm, opt-in and off by default.**', '`$(watch) cache 4m`',
+    '`~until 14:52, perhaps longer`', 'A draft left in Claude Code\'s input line is sent along', '(docs/prompt-cache.md#keep-warm-in-a-terminal-opt-in)',
+    'the opt-in keep-warm line with every check it makes and what it cannot see']) {
+    assert.ok(readme.includes(claim), `the README does not say: ${claim}`)
+  }
+  assert.match(README, /!\[The Claude quota card with its prompt-cache block[^\]]*\]\(media\/screenshot-prompt-cache\.png\)/)
+  assert.ok(existsSync(join(ROOT, 'media/screenshot-prompt-cache.png')), 'the README embeds a picture that is not there')
+  const bar = flatText(readDoc('media/walkthrough/status-bar.md'))
+  assert.ok(bar.includes('`cache` — off by default as well — adds `$(watch) cache 4m`') && bar.includes('`$(watch) keep warm in 42 s · cancel`'))
+  assert.ok(flatText(readDoc('media/walkthrough/quota.md')).includes('which keeps only the fields Token Pace reads'))
 })

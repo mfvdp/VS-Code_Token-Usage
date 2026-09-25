@@ -222,12 +222,15 @@ test('the keep-warm setting: a boolean, off by default, of application scope, in
   for (const claim of ['three minutes or less left', 'a one-minute countdown you can cancel', 'about two minutes before the cache expires',
     'Off by default; asks for consent first', 'switching it off withdraws the consent', 'a real request that counts against your usage',
     'text you typed but did not send is sent with it', 'automation that Anthropic\'s terms do not explicitly permit',
-    'Claude Code extension\'s own panel are out of reach', 'Prompt cache page']) {
+    'Claude Code extension\'s own panel are out of reach', 'Prompt cache page',
+    // 1.8 P11: the bounds the consent names, in the description too.
+    'at most three times in a row', 'at 90 % or more', 'never in Restricted Mode']) {
     assert.ok(en.includes(claim), `the setting's description does not say: ${claim}`)
   }
   for (const claim of ['drei Minuten Restzeit oder weniger', 'einminütiger Countdown, den Sie abbrechen können', 'etwa zwei Minuten vor dem Ablauf',
     'Standardmäßig aus; fragt zuerst nach Ihrer Zustimmung', 'das Abschalten zieht sie zurück', 'echte Anfrage', 'mitgesendet',
-    'nicht ausdrücklich gestatten', 'außer Reichweite', 'Prompt-Cache']) {
+    'nicht ausdrücklich gestatten', 'außer Reichweite', 'Prompt-Cache',
+    'höchstens dreimal hintereinander', 'bei 90 % oder mehr', 'nie im eingeschränkten Modus']) {
     assert.ok(de.includes(claim), `the German description does not say: ${claim}`)
   }
   // §7a Q19 replaced the spec's four minutes and fifty-five; neither is said in either language.

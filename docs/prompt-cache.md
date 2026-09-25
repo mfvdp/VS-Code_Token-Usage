@@ -11,7 +11,8 @@ Claude Code keeps the start of a conversation — the system prompt, the tools, 
 — in Anthropic's prompt cache, so that the next request reads that prefix at a fraction of the
 input price instead of writing it again. Its status line reports the state of that cache for the
 session it runs for: warm or cold, the time-to-live (5 minutes or 1 hour), when the cached prefix
-expires, how much of the input the cache served and — from Claude Code 2.1.251 on — how many tokens
+expires, how much of the input the cache served and — from Claude Code 2.1.251 on, as its
+[status-line documentation](https://code.claude.com/docs/en/statusline) states — how many tokens
 the next request re-caches if the cache has gone cold by then.
 
 Token Pace watches that cache for every Claude Code session on this machine whose cache has the
@@ -30,6 +31,11 @@ every line says which of them it rests on:
 Until 1.7 Token Pace promised that the prompt cache is never estimated; 1.8 gives that promise up for
 the watch below. The status line's own prompt-cache line keeps it: that line is the bridge's words and
 nothing else ([The status line's own line](#the-status-lines-own-line)).
+
+Off by default and behind a consent of its own, Token Pace can also keep a measured one-hour cache
+warm: it types one fixed line into the VS Code terminal that runs the session, after a one-minute
+countdown you can cancel — see [Keep-warm in a terminal](#keep-warm-in-a-terminal-opt-in), with
+everything it checks and everything it cannot.
 
 ## On the Claude card
 
@@ -102,21 +108,26 @@ line knows the newest request. One session is never described by another session
 Code's session keys — so a closed session's cache cools as well, and is listed. The line is true
 either way: a cold start after 14:52 is what resuming the session would cost.
 
-**Which kind of cache Claude Code asks for.** Claude Code requests the one-hour lifetime for the main
-conversation only on a Claude subscription within the plan's included usage; usage credits, an API key,
-Bedrock, Vertex and Foundry get five minutes, and so do subagents, "even on a subscription". Since
-Claude Code 2.1.242 the setting `promptCacheTtl` (`"5m"` or `"1h"`) chooses it for the main
-conversation and `subagentPromptCacheTtl` for subagents, workflows, compaction, titles and background
-work; the environment variables `CLAUDE_CODE_PROMPT_CACHE_TTL` and
-`CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` do the same, `ENABLE_PROMPT_CACHING_1H=1` asks for one hour
-in both, and `FORCE_PROMPT_CACHING_5M=1` overrides everything. Which one a session gets shows in
-`claude -p "hello" --output-format json`: a one-hour write puts its tokens in
-`usage.cache_creation.ephemeral_1h_input_tokens`.
+**Which kind of cache Claude Code asks for.** This is Claude Code's behaviour, not Token Pace's, as
+Claude Code's documentation described it in September 2026 ([prompt caching](https://code.claude.com/docs/en/prompt-caching),
+[settings](https://code.claude.com/docs/en/settings-reference#promptcachettl),
+[environment variables](https://code.claude.com/docs/en/env-vars)) — check it there for the version you
+run. Claude Code requests the one-hour lifetime for the main conversation only on a Claude
+subscription within the plan's included usage; usage credits, an API key, Bedrock, Vertex and Foundry
+get five minutes, and so do subagents, "even on a subscription". Since Claude Code 2.1.242 the
+setting `promptCacheTtl` (`"5m"` or `"1h"`) chooses it for the main conversation and
+`subagentPromptCacheTtl` for subagents, workflows, compaction, titles and background work; the
+environment variables `CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` do
+the same, `ENABLE_PROMPT_CACHING_1H=1` asks for one hour in both, and `FORCE_PROMPT_CACHING_5M=1`
+overrides everything. Which one a session gets shows in `claude -p "hello" --output-format json`: a
+one-hour write puts its tokens in `usage.cache_creation.ephemeral_1h_input_tokens` — the field the
+estimate below reads, so the watch follows whatever Claude Code chose.
 
-**Claude Code's own clock.** Claude Code shows a prompt-cache clock in the prompt box of its VS Code
-panel, counting down from the cache's lifetime, and `/usage` has a line for the main conversation's
-cache (Claude Code 2.1.251 and later). Token Pace adds what those cannot: the warning while Claude
-Code's panel is closed, several sessions at once, and the cost of a cold start.
+**Claude Code's own clock.** By its documentation ([VS Code](https://code.claude.com/docs/en/vs-code)),
+Claude Code shows a prompt-cache clock in the prompt box of its VS Code panel, counting down from the
+cache's lifetime, and `/usage` has a line for the main conversation's cache (Claude Code 2.1.251 and
+later). Token Pace adds what those cannot: the warning while Claude Code's panel is closed, several
+sessions at once, and the cost of a cold start.
 
 **Several windows.** Each VS Code window keeps its own readings of the status line, and a window that
 is not the one reading the transcripts has the sessions' estimates from the shared snapshot — up to
@@ -205,14 +216,13 @@ and the Quick Pick carry the same line under the Codex card.
 
 ## Keep-warm in a terminal (opt-in)
 
-<!-- 1.8 P9 wrote the checks, P10 the setting, the countdown, the consent, the notes, the accounting
-and the terms; P11 reviews the section with the rest of the page. -->
-
 Off by default. With `tokenPace.cacheKeepWarm` switched on and your consent given, Token Pace keeps
 a Claude Code session's one-hour prompt cache warm by typing one fixed line into the VS Code terminal
 that runs the session and pressing Enter — `Ignore this message. No action. No response.` — so that
 Claude Code itself sends a request that reads the cache before it expires. Claude Code sends it with
-its own login; Token Pace reads no credential and sends nothing over the network. It is the one thing
+its own login; Token Pace reads no credential and sends nothing over the network. That a request
+which reads the cache gives the entry a new lifetime is Anthropic's rule, not something Token Pace
+measures: the status line's next reading shows the new expiry, and nothing checks it. It is the one thing
 Token Pace ever does on its own, and it does it only while every check below holds — once when a
 one-minute countdown starts in the status bar, and all of them again when the countdown ends:
 
@@ -230,7 +240,9 @@ one-minute countdown starts in the status bar, and all of them again when the co
    message line means Claude Code is still at the reply, or waits in a permission dialog or a
    question: Claude Code writes a reply that calls a tool only once the tool has finished, so while
    such a dialog stands open the transcript's newest line is the user's. A reply that stopped for a
-   tool, was cut off, or paused is no idle turn either.
+   tool, was cut off, or paused is no idle turn either. A local command such as `/usage` or `/cost`
+   leaves a line of yours newest as well, so after one no line goes until the session's next real
+   reply. Of these lines only their kind is read, never what they say.
 5. **No agent running** — no subagent of the session is in the running list; its end could wake the
    conversation at any moment.
 6. **No permission request** — with the [agent hook](agents.md#the-agent-hook) installed, no
@@ -243,10 +255,14 @@ one-minute countdown starts in the status bar, and all of them again when the co
    shell integration says nothing, and two candidates are one too many. The terminal's name, its
    output and its environment are never read.
 8. **Not touched since** — that terminal has not been the active terminal of the focused window since
-   the session's newest reply: keys reach Claude Code's input line only through it. A window opened
-   after that reply cannot know, and sends nothing.
-9. **At most 3 lines in a row** per idle phase of the session — about three more hours warm; a
-   request of your own starts a new phase.
+   the session's newest reply: keys reach Claude Code's input line only through it. So the line goes
+   only when you left the Claude terminal — another terminal active, or the window unfocused — before
+   its newest reply ended: the unattended finish keep-warm is for. A terminal counts as touched while
+   it is the active one of the focused window even when the keyboard is in the editor. A window that
+   began to watch after that reply — opened, or with the setting switched on, since — cannot know, and
+   sends nothing.
+9. **At most 3 lines in a row** per idle phase of the session — at most about three hours more of
+   cache, if each line refreshes it; a request of your own starts a new phase.
 10. **Not near a limit** — no Claude quota window at 90 % or more, or reached. Without a quota reading
     this check does not block.
 11. **The last line was answered** — by a request of the session within 2 minutes; otherwise
@@ -271,9 +287,9 @@ recognised by its folder and the session in it by time (check 13); what time can
 terminal whose `claude` started before the session's first reply but which now runs another, older
 session of the same folder — one picked there with `/resume`, or one begun in it before the session
 was started elsewhere, in another window or in the panel. That session gets the line only while it
-is idle by check 13's measure; its answer is not the watched session's, so check 11 then stops
-keep-warm after that one line. A session in the Claude Code extension's own panel gets the cooling
-warning and never a line.
+is idle by check 13's measure, and it costs that session one request; its answer is not the watched
+session's, so check 11 then stops keep-warm after that one line. A session in the Claude Code
+extension's own panel gets the cooling warning and never a line.
 
 **The countdown.** When the checks hold, a status-bar item of its own appears, whatever
 `tokenPace.statusBar.show` lists — a line is never typed without it on screen: `$(watch) keep warm
@@ -304,8 +320,10 @@ of the line — counts one request, and the billable tokens of that answer (fres
 and output, the dashboard's usage), towards today in `keepwarm.json`, in the extension's storage:
 per local day the number of answered lines and their tokens, 31 days at most, never a session, a
 path, a time of day or a terminal. The Claude card shows today's under its prompt-cache block,
-`Keep-warm requests today: 2 · 64 tokens`, and so does the markdown view; nothing else does. A
-line that is not answered is not counted. *Clear Stored Data…* deletes the file.
+`Keep-warm requests today: 2 · 64 tokens`, and so does the markdown view — a record of the day, so
+also after the setting was switched off; nothing else does. A line that is not answered is not
+counted: it is logged, and it ends keep-warm for the idle phase. *Clear Stored Data…* deletes the
+file.
 
 **Switching it on and off.** `tokenPace.cacheKeepWarm` is a setting of the application scope: a
 workspace's `.vscode/settings.json`, which a cloned repository brings along, cannot switch it on.
@@ -314,9 +332,10 @@ the draft that is sent with it, the panel out of reach and the terms passage bel
 keep-warm* allows it. A refusal is kept: the question comes again only when you switch the setting
 off and on. Switching it off withdraws the consent, ends a countdown under way without its line, and
 stops Token Pace listening to the terminals at all. A window in the background asks when it is
-focused. A Claude Code session started before the setting was on — or before the window opened — is
-not seen until Claude Code is started again in its terminal: the shell integration reports a command
-when it starts.
+focused. A Claude Code session started before the setting was on — or before the window opened or
+was reloaded — is not seen until Claude Code is started again in its terminal: the shell integration
+reports a command when it starts. In Restricted Mode no terminal is listened to and no line goes; the
+consent can still be asked there, and it acts only once the workspace is trusted.
 
 **The terms.** Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms), section
 3, list among what may not be done: “Except when you are accessing our Services via an Anthropic API

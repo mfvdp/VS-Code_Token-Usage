@@ -215,7 +215,12 @@ that folder. On its first activation in a trusted window 1.8 moves such a comman
 only the `statusLine.command` string changes — the same node, the same mirror, the same chained
 command, and the rest of `settings.json` as it was —, a backup of the original bytes is written first, and only while the slot still holds the
 command Token Pace recorded; the Token Pace log says so. Every activation replaces the copy with the
-shipped script when the two differ, so an update reaches a status line connected before it.
+shipped script when the two differ, so an update reaches a status line connected before it. The
+state reads *installed* only while the script the command names exists, and connecting again over
+such an old command moves it instead of chaining it as the previous status line. What 1.8 does not
+move is a Token Pace command it has no record of — one another VS Code profile installed, with its
+own storage: *Connect* in this profile treats it as any other status-line command — kept and chained,
+or replaced, as you choose —, as before; disconnect it in the profile that installed it first.
 
 This is the second and last write outside the extension's storage, and the riskiest thing the
 extension can do, because it edits a file that belongs to another program. The rules are narrow:
@@ -239,7 +244,8 @@ extension can do, because it edits a file that belongs to another program. The r
 * It is **not** removed when the extension is uninstalled. Disconnect first if you plan to
   remove Token Pace: uninstalling deletes the extension's storage, the script's copy with it, and
   a status line still connected would then start a script that is gone.
-* Both writes are disabled in Restricted Mode.
+* Both writes are disabled in Restricted Mode, and so is the third opt-in, the
+  [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in), which writes no file.
 
 > The field names of the piped payload (`rate_limits.five_hour.used_percentage`,
 > `context_window`, `prompt_cache`, `cost.total_cost_usd`, …) are read defensively in both

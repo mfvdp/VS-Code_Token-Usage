@@ -37,6 +37,14 @@ Part of the [Token Pace documentation](../README.md#documentation).
   (`Prompt cache of Session Tue 14:20 · 9d0eb37a cools in 4 m 10 s`, `… cools in about 4 m 10 s
   (estimated)`). Its tooltip names each cooling session — at most three, then `and 1 more` —, what
   a cold start would cost (the compact tooltip leaves the cost lines out), and the action row.
+* **The keep-warm countdown** (1.8, opt-in) is not an entry of `statusBar.show`: while the opt-in
+  [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) is switched on and allowed and a
+  countdown runs, its own item `tokenPace.keepWarm` stands before every other Token Pace item
+  (priority 1001), on the side `alignment` names, whatever `statusBar.show` lists — a line is never
+  typed without it on screen: `$(watch) keep warm in 42 s · cancel`, counting down each second from
+  60, with no colour and no alarm. A click cancels the line, and keep-warm for the rest of that
+  session's idle phase; after the line went it reads `$(watch) keep-warm line sent` for 10 seconds.
+  Every text it shows is in [the states table](status-bar-states.md).
 * **The dashboard's provider switch does not reach the bar.** Whatever the switch at the top of the
   dashboard shows — `Claude Code`, `Codex` or `All` —, the entries, their tooltips, the `budget`
   entry (every budget), the `agents` entry, the `cache` entry and the alerts stay as the settings above make them: the
@@ -117,6 +125,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `~$1.23 · today ⚠` | hypothetical API cost; `⚠` means some tokens have no price and are missing from the sum |
 | `~3 running` / `~1 running` | the `agents` entry: Claude Code agents running right now, inferred from their transcripts (changed within the last 10 minutes, no result recorded) — hidden while none runs |
 | `$(watch) cache 4m` / `$(watch) cache ~4m` | the `cache` entry: a Claude Code session's one-hour prompt cache expires in four minutes — `~` when the expiry is estimated from the transcript; `45s` under a minute, `+1` for each further session cooling. Hidden while none cools |
+| `$(watch) keep warm in 42 s · cancel` | the opt-in keep-warm countdown: in 42 seconds Token Pace types its one line into the Claude terminal if every check still holds then; a click cancels it, and keep-warm for the rest of the session's idle phase. Shown whatever `statusBar.show` lists, never in colour |
 | `$(shield) CC consent`, `$(key) CC no token`, `$(cloud-offline) CC offline`, … | a named cause replaces the figure, and the click performs the repair for *that* cause |
 
 The full matrix — every text, which state wins, which colour, and the one thing to check —

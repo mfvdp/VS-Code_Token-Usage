@@ -40,3 +40,11 @@ on the bar.
 
 `agents` in `tokenPace.statusBar.show` — off by default — adds `~3 running` while Claude Code
 agents run: inferred from their transcripts, so marked `~`, with no colour and no alarm.
+
+`cache` — off by default as well — adds `$(watch) cache 4m` in the last five minutes of a Claude
+Code session's one-hour prompt cache, `~4m` when the expiry is estimated from the session's
+transcript; hidden while no cache is cooling, never in colour.
+
+The opt-in keep-warm line (`tokenPace.cacheKeepWarm`, off by default, with its own consent) has an
+item of its own whatever `statusBar.show` lists: `$(watch) keep warm in 42 s · cancel`. A click
+cancels the line; type nothing into the Claude terminal while it counts down.

@@ -8,6 +8,7 @@
   "A cold start after {0} re-writes {1} tokens at the 1 h write rate ({2}× input, {3}) instead of reading them from the cache ({4}× input, {5}).": "Ein Kaltstart nach {0} schreibt {1} Token zum 1-h-Schreibpreis neu ({2}× Eingabe, {3}), statt sie aus dem Cache zu lesen ({4}× Eingabe, {5}).",
   "A cold start after {0} re-writes {1} tokens instead of reading them from the cache.": "Ein Kaltstart nach {0} schreibt {1} Token neu, statt sie aus dem Cache zu lesen.",
   "API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}.": "Die API-Kosten sind hypothetisch: So viel hätte dieser Verbrauch über die Anbieter-API gekostet. Im Abonnement zahlen Sie sie nicht. Preise mit Stand {0}.",
+  "API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}; checked later: {1}.": "Die API-Kosten sind hypothetisch: So viel hätte dieser Verbrauch über die Anbieter-API gekostet. Im Abonnement zahlen Sie sie nicht. Preise mit Stand {0}; später geprüft: {1}.",
   "API equivalent": "API-Gegenwert",
   "API requests the transcripts recorded": "In den Transkripten aufgezeichnete API-Anfragen",
   "Active days": "Aktive Tage",

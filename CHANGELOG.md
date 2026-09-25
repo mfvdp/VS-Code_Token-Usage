@@ -3,6 +3,190 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.8.0 — 2026-09-25
+
+**A prompt cache that says when it cools, and an opt-in way to keep it warm.** Claude Code keeps
+the start of a conversation in Anthropic's prompt cache; once that cache has gone cold, the next
+request writes the whole prefix again at the 1-hour write rate instead of reading it at a fraction
+of the input price. From five minutes before a Claude Code session's one-hour prompt cache expires,
+the Claude quota card now says so — `Session Tue 14:20 · 9d0eb37a · prompt cache cools in 4 m 10 s
+(1 h TTL)` — and what a cold start would cost against a cache read. The figures are measured where
+the status line describes the session and estimated from its transcript, marked `~`, where it does
+not. An opt-in `cache` status-bar entry shows those last five minutes, and the Codex card says until
+when OpenAI keeps a prompt prefix at least. Off by default and behind a consent of its own, Token
+Pace can also type one fixed line into the VS Code terminal that runs a session, after a one-minute
+countdown you can cancel, so that Claude Code sends a request before the cache expires. The
+status-line bridge now keeps only the fields Token Pace reads, and its script lives in the
+extension's storage, where an update no longer takes it away.
+
+### Added
+
+* **The cooling warning on the Claude card.** Only a one-hour prompt cache is watched — a
+  five-minute one would be "cooling" right after every reply. From five minutes before its expiry
+  the card lists the session after its windows, in the dim tone, in two lines: its state,
+  `Session Tue 14:20 · 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)`, and what a cold start
+  would cost, `A cold start after 14:52 re-writes 152.3K tokens at the 1 h write rate (2× input,
+  ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03).` After the expiry the lines
+  say `cold since 14:52` and `The next request re-writes …` for another hour, then the session is no
+  longer listed. At most three sessions, the most urgent first, then
+  `2 more sessions with a cooling or cold prompt cache`. A session is named as the Agents tree names
+  it. The factors are the price table's own — the model's 1-hour write rate and its cache-read rate,
+  each divided by its input rate, with your `tokenPace.customPrices` and `tokenPace.pricing.multiplier`
+  applied: 2× and 0.05× for Claude Opus 5.5, 2× and 0.025× for Claude Fable 5.1 and Mythos 5.1, 2× and
+  0.1× for every other Claude model. The money appears only with `tokenPace.showCost`, always with
+  `~`, as the dashboard's hypothetical API amount; a model without a price of its own — unknown, or
+  priced only through the family fallback — keeps the words and loses factors and money. Nothing on
+  the card blinks, and the phase is said in words, never by a colour. The markdown view lists every
+  watched session, warm ones too, at most ten; the Quick Pick and the Claude quota item's tooltip
+  carry the card's lines. *Copy Usage Summary*, the exports and *Copy Diagnostics* say nothing of
+  it: a cooling cache is a moment, not a record.
+* **The `cache` status-bar entry**, opt-in through `tokenPace.statusBar.show` and not in the
+  default: `$(watch) cache 4m` while a watched one-hour cache is cooling — its last five minutes —,
+  `$(watch) cache ~4m` when the expiry is estimated from the transcript, `45s` under a minute, `+1`
+  for each further session cooling at the same time. Hidden while none is cooling, a cold cache
+  included; no colour and no alarm; a screen reader hears
+  `Prompt cache of Session Tue 14:20 · 9d0eb37a cools in 4 m 10 s`. Its tooltip names up to three
+  cooling sessions with what a cold start would cost, then `and 1 more`. *Preview Status Bar States*
+  shows two such entries.
+* **The Codex line.** For 30 minutes after a Codex turn of GPT-5.6 or later, the Codex card ends
+  with `Codex prompt cache · last request at 14:22 · OpenAI keeps a cached prompt prefix at least 30
+  minutes after its last use for GPT-5.6 and later — ~until 14:52, perhaps longer.` It is a minimum
+  OpenAI documents for its API, not an expiry: no countdown, no cooling, no cost, no status-bar
+  entry and nothing per session. Earlier models get no line, and neither does a turn dated more than
+  ten seconds ahead of the local clock.
+* **The keep-warm line — opt-in, off by default.** With `tokenPace.cacheKeepWarm` switched on and
+  its own consent given, when the status line reports that a session's one-hour prompt cache has
+  three minutes or less left, a status-bar item of its own counts down 60 seconds —
+  `$(watch) keep warm in 42 s · cancel`, shown whatever `statusBar.show` lists, with no colour and no
+  alarm. When it ends and every check still holds, Token Pace types
+  `Ignore this message. No action. No response.` into the VS Code terminal that runs the session and
+  presses Enter, at about two minutes left, so that Claude Code itself sends a request with its own
+  login; whether the cache entry then lives on is Anthropic's rule, which Token Pace does not
+  measure. A click on the item, or *Token Pace: Cancel the Keep-Warm Line*, cancels the line and
+  keep-warm for the rest of that session's idle phase; the setting stays as it is. The checks, all
+  of them when the countdown starts and all again when it ends: the setting on, the consent given,
+  the workspace trusted; a one-hour cache the status line measures — never the transcript's
+  estimate; the session idle — its newest reply at least a minute old and finished, nothing of yours
+  after it, no agent of it running, no permission request of the agent hook after it; exactly one
+  terminal of this window running `claude` in the session's folder as VS Code's shell integration
+  reports it, and running this session — the newest the folder began after that `claude` started
+  —, while every other session of the folder is idle too; that terminal not the active one of the
+  focused window since the session's newest reply, so the line goes only when you left the Claude
+  terminal before its newest reply ended; at most three lines per idle phase, the last one answered;
+  no Claude quota window at 90 % or more, or reached. The consent dialog names what is typed and
+  when, the cost — every line is a real request that counts against your usage limits —, that a
+  draft left in Claude Code's input line is sent with the line, that the Claude Code extension's own
+  panel is out of reach, and the passage of section 3 of Anthropic's Consumer Terms on automated
+  access, which this falls under. A Claude Code started before the setting was on, or before the
+  window opened or was reloaded, is out of reach until it is started again. Answered lines are
+  counted per local day in `keepwarm.json` in the extension's storage and shown on the Claude card
+  and in the markdown view, `Keep-warm requests today: 2 · 64 tokens`; the card also notes, under
+  the session, a countdown under way, a cooling session no terminal of this window runs, and a line
+  that got no answer within two minutes, after which no further line goes in that idle phase.
+  *Clear Stored Data…* lists `keepwarm.json` and the keep-warm consent. The setting has the
+  application scope, so a workspace's `.vscode/settings.json` cannot switch it on.
+
+### Changed
+
+* **1.3.0's promise about the prompt cache is given up for the watch.** 1.3.0 said: "Without the
+  bridge there is no line — nothing is estimated." Where the status line does not describe a
+  session's newest request — it is not connected, or it last ran for another session —, the session's
+  one-hour cache is now estimated from its transcript: the newest request that read or wrote the
+  cache, plus one hour, and its size. Every figure of such a line carries `~`, and the line says
+  *estimated from the transcript* in words. The status line's own prompt-cache line of 1.3 stays as
+  it was, measured.
+* **One line per session.** For a session the card lists as cooling or cold, its lines replace the
+  status line's own prompt-cache line — on the card, in the tooltip and in the Quick Pick; the
+  markdown view, which lists warm sessions too, prints that line only for a session it does not list.
+* **Claude Opus 5.5 is priced.** $4 per million input tokens, $5 for a 5-minute cache write, $8 for a
+  1-hour cache write, $0.20 for a cache hit and $20 for output, fast mode $8 in and $40 out — from
+  Anthropic's pricing page as checked on 24 September 2026. Until now its usage was reported as
+  unpriced, a lower bound with the model named; it is priced everywhere the page shows a cost, and
+  its usage from the days before 24 September is priced from this row and marked `approximate`. The
+  footnote names the row's own check day beside the table's — `Prices as of 2026-09-06; checked
+  later: claude-opus-5-5 (2026-09-24).` —, and so does the Models table's `list as of` date. The opt-in
+  family fallback now prices an Opus model the table does not know at Opus 5.5's rates, the newest
+  priced Opus.
+* **The status-line bridge's consent dialog** says what the script keeps — the fields Token Pace
+  reads, never the session's name, its working directory or its transcript's path — and that the
+  command runs the script's copy in the extension's storage, which an uninstall deletes: disconnect
+  first.
+* **The descriptions** of `tokenPace.statusBar.show` (the `cache` value) and of the workspace-trust
+  capability (three opt-ins, all off in Restricted Mode), and the walkthrough, say all of this, in
+  English and German.
+
+### Fixed
+
+* **The status-line bridge after an update.** The installed `statusLine.command` named the script
+  inside the extension's versioned folder, which every update removes: the status line then started
+  a script that was gone, and Token Pace still called the bridge installed. The command now names a
+  copy in the extension's storage, `statusline-bridge.js`, which every activation replaces with the
+  shipped script when the two differ. A command an install of 1.3 to 1.7 wrote is moved to the copy
+  once, on the first activation of 1.8 in a trusted window — the write you consented to at install
+  time, a backup of the original `settings.json` first, only the command string changed, and only
+  while the entry still holds the command Token Pace recorded; the log says so. The state reads
+  installed only while the script the command names exists, and connecting again over such a
+  command moves it instead of chaining the old bridge as the previous status line.
+* **The details panel of the Agents tree outside the side bar.** With the view dragged into the
+  panel area, an open details box showed the side bar's colour. It paints no colour of its own now,
+  and the guide lines stop a pixel above it and go on a pixel below it instead of passing behind it.
+* **Thin subagents' bands in a forced-colours theme** (Windows High Contrast). A subagents' band of
+  the chart's split under 4 px tall was filled whole by its ring and read as a main-session band; it
+  is striped now, one pixel in the text colour in three.
+* The status-bar page's table of item ids lacked the running agents' `tokenPace.agents`, missing
+  since 1.6.0.
+
+### Privacy
+
+* **The status-line mirror keeps only what Token Pace reads.** Claude Code pipes its whole status
+  JSON into the bridge's script — the session's AI-generated name, its working directory, its
+  transcript's path, the workspace and the Claude Code version among it —, and 1.3 to 1.7 stored it
+  so in `statusline-mirror.json`. The script now writes of it only the fields Token Pace reads — the
+  rate limits, the plan, the context window, the cost's `total_cost_usd`, the model, the prompt cache
+  and the session's id — and drops the rest before the file is written. The first activation of 1.8
+  rewrites a mirror an older script wrote with only those fields, or deletes one it cannot read.
+* **Two fields more of that mirror**: `session_id`, to tell one session's prompt cache from
+  another's — letters, digits, `_` and `-`, at most 64 characters, shown only as its first eight —,
+  and `prompt_cache.recache_tokens_if_cold`, the size a cold start would re-write. The readings are
+  kept in memory only, one per session, at most 16, none older than two hours.
+* **Nothing new is read from a transcript.** Of a main session's newest reply that used the prompt
+  cache, its time, the kind of cache it wrote, its size and its model are kept — from what the token
+  count reads of every reply anyway —, with its `stop_reason` (six values, any other as none) and
+  whether the newest message line is the user's, told by the line's top-level `type` alone. Of the
+  Codex rollouts, the time and model of the newest turn. All of it stays in the token snapshot, and
+  none of it is exported or logged.
+* **The keep-warm line** reads, only while it is switched on and allowed, what VS Code's shell
+  integration reports of this window's terminals — a running command's command line with VS Code's
+  confidence in it and its working directory, tested and kept by no one, and VS Code's name for the
+  shell — never a terminal's name, its output or its environment, and nothing is read back from a
+  terminal. It writes the one line and `keepwarm.json`: per day the number of answered lines and
+  their tokens, never a session, a path, a time of day or a terminal. With the setting off, without
+  the consent or in Restricted Mode no terminal is listened to.
+* **Three opt-ins now**, each behind its own consent dialog and all three disabled in Restricted
+  Mode: the shared quota cache file, the status-line bridge and the keep-warm line.
+
+### Internal
+
+* **Snapshot and export.** `STATE_VERSION` 8 and the export's `schema_version` 3
+  (`EXPORT_SCHEMA_VERSION` 3) are unchanged; the export gains nothing and its `as_of` stays the
+  table's day. `AGENT_TABLES_REVISION` 8 → 9: the first start after the update rebuilds the agent
+  tables once from the last seven days' transcripts, counting nothing twice, so that a session quiet
+  at the update has its prompt-cache estimate at once and not only with its next reply.
+* **What the page is sent.** While the provider switch shows Codex, no Agents or Context fragment is
+  pushed that the page would drop (on the harness's large run a minute of a running agent sent 441 KB
+  of them; now none); the whole-page push leaves out the second copy of the budgets the status bar
+  and the alerts read (1.6 KB less with three budgets); and the quota push leaves out the watch
+  list's warm entries, which only the markdown view prints.
+* **Lookups kept.** A view-model build looks up the calendar parts of an instant, a model's normal
+  name and its price on a day once per key instead of per bucket: on a synthetic store of 8 700 hour
+  buckets a median 36 ms instead of 53 in UTC and 55 instead of 73 in Europe/Berlin — a measurement,
+  not a promise; the figures are the same.
+* Opening a folded section of the dashboard runs every fit again — one listener instead of two.
+* **The read contract** of `npm run check:privacy` covers the status-line mirror (13 rows, the
+  narrowing at activation among them), a transcript's user line, and the keep-warm host's reads of
+  VS Code's shell integration and of `keepwarm.json`; the bridge's bundle is held to `child_process`,
+  `fs` and `path`, like the agent hook's to `fs` and `path`.
+
 ## 1.7.0 — 2026-09-24
 
 **One provider at a time, a quieter agent tree, and three fixes from a Windows machine.** A switch

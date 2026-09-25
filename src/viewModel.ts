@@ -35,7 +35,7 @@ import {
   PaceConfig, effectivePace, paceVerdict, severityOf, windowDisplay, WindowDisplay, windowElapsed,
 } from './pace'
 import { explainWindow, WindowExplain } from './paceExplain'
-import { PRICES_AS_OF, PricingOptions, isCustomPricing, normalizeModel } from './prices'
+import { PRICES_AS_OF, PRICES_CHECKED_LATER, PricingOptions, isCustomPricing, normalizeModel } from './prices'
 import { promptCacheText } from './promptCache'
 import { ageMinutes, compact, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
@@ -870,7 +870,11 @@ export interface ViewModel {
   now: number
   sections: string[]
   showCost: boolean
-  pricing: { asOf: string; custom: boolean; showList: boolean }
+  /**
+   * `asOf` the table's check day (PRICES_AS_OF); 1.8: `later` the rows read after it, each with its own
+   * check day — `claude-opus-5-5 (2026-09-24)` —, or null when no row was.
+   */
+  pricing: { asOf: string; later: string | null; custom: boolean; showList: boolean }
   range: DayRange & { previous: DayRange | null; presets: RangePreset[] }
   ui: UiState
   /**
@@ -2014,7 +2018,7 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     now,
     sections: [...cfg.dashboard.sections],
     showCost: cfg.showCost,
-    pricing: { asOf: PRICES_AS_OF, custom: isCustomPricing(pricing), showList: cfg.pricing.showListPrice },
+    pricing: { asOf: PRICES_AS_OF, later: laterChecksText(sources), custom: isCustomPricing(pricing), showList: cfg.pricing.showListPrice },
     range: { ...range, previous, presets: RANGE_PRESETS },
     ui,
     provider: view,
@@ -2234,6 +2238,16 @@ function claudeOnlyText(view: Exclude<ProviderView, 'all'>): string {
   return t('Claude Code only — not shown while {0} is selected.', SOURCE_TITLE[view] ?? view)
 }
 
+/**
+ * 1.8 (§7c wave 2 fact 13): the price rows read after PRICES_AS_OF, each with its own check day —
+ * `claude-opus-5-5 (2026-09-24)` —, of the providers the view shows (1.7 F1: under Codex no Claude
+ * model is named), or null when none is.
+ */
+function laterChecksText(sources: readonly Source[]): string | null {
+  const rows = PRICES_CHECKED_LATER.filter((r) => sources.includes(r.source))
+  return rows.length === 0 ? null : rows.map((r) => `${r.model} (${r.checked})`).join(', ')
+}
+
 function footnotesFor(vm: ViewModel, cfg: Config): string[] {
   const out: string[] = []
   // 1.7 F1: first, while the view is one provider — it qualifies every figure on the page, as the
@@ -2245,9 +2259,13 @@ function footnotesFor(vm: ViewModel, cfg: Config): string[] {
   out.push(t('“Usage” = fresh input + cache write + output; cache reads are listed apart because they outnumber the rest by orders of magnitude.'))
   if (vm.showCost) {
     // The only place the price date is stated. Every view prints these footnotes verbatim, so
-    // a second "Prices as of" line anywhere else comes out as the same sentence twice.
-    out.push(t('API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}.',
-      vm.pricing.asOf))
+    // a second "Prices as of" line anywhere else comes out as the same sentence twice. 1.8: a row
+    // read after the table (Claude Opus 5.5) is named with its own check day beside the table's.
+    out.push(vm.pricing.later
+      ? t('API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}; checked later: {1}.',
+        vm.pricing.asOf, vm.pricing.later)
+      : t('API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}.',
+        vm.pricing.asOf))
     if (vm.pricing.custom) out.push(t('Costs use your configured rates, not the published list prices.'))
     if (vm.unpricedModels.length > 0) {
       out.push(t('No price on file for: {0} — every cost total is a lower bound.', vm.unpricedModels.join(', ')))

@@ -82,6 +82,29 @@ test('the status line disclosure names the settings file, the backup and the mir
   assert.match(text, /token-pace-backup-<timestamp>/)
 })
 
+test('the status line disclosure says what the narrowed mirror keeps and where the script\'s copy lives (1.8 P11)', () => {
+  const text = writeConsentDisclosure('statusLine', {
+    settingsFile: '/tmp/token-pace-test/.claude/settings.json',
+    mirrorFile: '/tmp/token-pace-test/storage/statusline-mirror.json',
+    scriptFile: '/tmp/token-pace-test/storage/statusline-bridge.js',
+  })
+  const flat = text.replace(/\s+/g, ' ')
+  // §7a Q11: the script keeps only the fields Token Pace reads — never "mirrors that JSON" any more.
+  for (const claim of ['the script keeps of it only the fields Token Pace reads', 'the prompt cache and the session\'s id',
+    'The session\'s name, its working directory, its transcript\'s path and the rest of the JSON never reach the file.',
+    'Those fields are stored at /tmp/token-pace-test/storage/statusline-mirror.json.',
+    // §7a Q16: the command runs the copy in the extension's storage, which an uninstall deletes.
+    'the "statusLine" entry is set to the script\'s copy at /tmp/token-pace-test/storage/statusline-bridge.js, in the extension\'s storage.',
+    'deletes the script\'s copy with the extension\'s storage', 'so disconnect first if you plan to remove Token Pace.']) {
+    assert.ok(flat.includes(claim), `the dialog does not say: ${claim}`)
+  }
+  for (const stale of ['mirrors that JSON', 'The mirrored JSON', 'set to the script.']) assert.equal(flat.includes(stale), false, stale)
+  // Without the paths it names the storage's own place, never an extension folder.
+  const bare = writeConsentDisclosure('statusLine')
+  assert.ok(bare.includes('<globalStorage>/statusline-bridge.js') && bare.includes('<globalStorage>/statusline-mirror.json'))
+  assert.equal(/dist[\\/]statusline-bridge/.test(bare), false)
+})
+
 test('the paths are read when the dialog is shown, not when the object is built', async () => {
   const memento = new FakeMemento()
   let files = [CLAUDE_FILE, CODEX_FILE]

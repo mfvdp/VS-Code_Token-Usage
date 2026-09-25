@@ -1498,6 +1498,8 @@ function webviewWords(): Record<string, string> {
     'Preview data — not a reading.': t('Preview data — not a reading.'),
     'Prices as of {0} · your configured rates.': t('Prices as of {0} · your configured rates.'),
     'Prices as of {0}.': t('Prices as of {0}.'),
+    'Prices as of {0}; checked later: {1} · your configured rates.': t('Prices as of {0}; checked later: {1} · your configured rates.'),
+    'Prices as of {0}; checked later: {1}.': t('Prices as of {0}; checked later: {1}.'),
     'Project': t('Project'),
     'Project attribution is off (tokenPace.attribution).':
       t('Project attribution is off (tokenPace.attribution).'),

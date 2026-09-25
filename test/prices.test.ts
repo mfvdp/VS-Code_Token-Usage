@@ -9,6 +9,7 @@ import {
   OPUS_5_5_CHECKED,
   PRICES,
   PRICES_AS_OF,
+  PRICES_CHECKED_LATER,
   PRICE_MEMO_MAX,
   PRICE_SOURCES,
   US_INFERENCE_MULTIPLIER,
@@ -495,6 +496,17 @@ test('priceTableSummary reports the table and its sources', () => {
   assert.ok(s.models >= 25, 'current and legacy rows')
   s.sources.push('mutation')
   assert.equal(priceTableSummary().sources.length, PRICE_SOURCES.length, 'summary hands out a copy')
+})
+
+test('the rows read after the table\'s check are named with their own day (1.8 P11)', () => {
+  // Derived from the table: every model whose newest rule is dated after PRICES_AS_OF — today Opus 5.5 alone.
+  const expected = Object.entries(PRICES)
+    .filter(([, rules]) => rules.some((r) => r.from > PRICES_AS_OF))
+    .map(([model, rules]) => ({ model, checked: rules[0].from, source: model.startsWith('gpt-') ? 'codex' : 'claude' }))
+  assert.deepEqual(PRICES_CHECKED_LATER.map((r) => ({ ...r })), expected)
+  assert.deepEqual(PRICES_CHECKED_LATER.map((r) => ({ ...r })), [{ model: 'claude-opus-5-5', checked: OPUS_5_5_CHECKED, source: 'claude' }])
+  assert.ok(Object.isFrozen(PRICES_CHECKED_LATER))
+  assert.ok(PRICE_SOURCES[0].includes(`checked ${PRICES_AS_OF}`) && PRICE_SOURCES[0].includes(`Claude Opus 5.5 row ${OPUS_5_5_CHECKED}`), PRICE_SOURCES[0])
 })
 
 test('every rule is dated, sourced and newest first', () => {

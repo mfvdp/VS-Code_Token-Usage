@@ -185,7 +185,7 @@ test('resolveLanguage: every setting under VS Code en, de, de-ch and hu — the 
 test('the join: every language of the registry but English has its four parts, its bundle, its manifest and its freshness record (1.9 B5, P19)', () => {
   const { existsSync, readFileSync } = require('node:fs') as typeof import('node:fs')
   const { join } = require('node:path') as typeof import('node:path')
-  const { ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const { pendingNlsKeys, ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
   const english = Object.keys(readJson('package.nls.json') as Record<string, string>)
   const missing: string[] = []
   for (const { id } of LANGUAGES) {
@@ -205,9 +205,13 @@ test('the join: every language of the registry but English has its four parts, i
       const v = JSON.parse(readFileSync(join(ROOT, f), 'utf8')) as unknown
       assert.ok(v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length > 0, `${f} is no table`)
     }
-    // The record covers every key of the English manifest, in its order (T12 checks the hashes).
+    // The record covers every key of the English manifest, in its order (T12 checks the hashes). 1.10 B1 (pinned and
+    // changed: every key): a key on the language's pending list that it has not translated yet has no record until it
+    // is; test/l10n.languages.test.ts (T14) allows no list at the join.
     if (existsSync(join(ROOT, `l10n/nls-sources/${id}.json`))) {
-      assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(ROOT, `l10n/nls-sources/${id}.json`), 'utf8')) as object), english, `${id}: the record`)
+      const record = JSON.parse(readFileSync(join(ROOT, `l10n/nls-sources/${id}.json`), 'utf8')) as object
+      const pending = pendingNlsKeys(id)
+      assert.deepEqual(Object.keys(record), english.filter((k) => !pending.has(k) || Object.prototype.hasOwnProperty.call(record, k)), `${id}: the record`)
     }
   }
   assert.deepEqual(missing, [], `missing: ${missing.join(', ')}`)

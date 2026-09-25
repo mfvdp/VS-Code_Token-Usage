@@ -18,7 +18,10 @@
  * package adds (`nlsFiles()`) — is checked against the English one for exactly that structure, not
  * for wording. The rules that are German's own (the quoted runtime words, the keep-warm setting's
  * German claims) stay German's; test/l10n.languages.test.ts holds every language to the rest of the
- * 1.9 frame. No file outside the repository is touched.
+ * 1.9 frame. 1.10 B1: a key on a language's pending list (`l10n/pending/<id>.json`, the English changed and the
+ * language's package has not translated it yet) is out of the rules that compare a value with today's English — the
+ * English prose, the links and paragraphs, the JSON examples — until it is done; the frame's T14 allows no such list at
+ * the join. No file outside the repository is touched.
  */
 
 import { strict as assert } from 'node:assert'
@@ -26,10 +29,15 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { LANGUAGES } from '../src/languages'
-import { englishNls, germanNls, manifestKeys, NLS_KEY, nlsFiles, rawManifest, readManifest, ROOT } from './helpers/nls'
+import { englishNls, germanNls, manifestKeys, NLS_KEY, nlsFiles, pendingNlsKeys, rawManifest, readManifest, ROOT } from './helpers/nls'
 
 /** 1.9 B3: every translation of the manifest on disk, German among them. */
 const TRANSLATIONS = nlsFiles()
+/** 1.10 B1: the English beside a translation, less the keys its pending list names (compared once they are done). */
+const comparable = (id: string): Array<[string, string]> => {
+  const pending = pendingNlsKeys(id)
+  return Object.entries(englishNls).filter(([key]) => !pending.has(key))
+}
 const BUNDLES: Array<[string, Record<string, string>]> = [
   ['package.nls.json', englishNls],
   ...TRANSLATIONS.map((f): [string, Record<string, string>] => [f.file, f.nls]),
@@ -73,8 +81,8 @@ test('every translation has every key of the English one, in its order, and no o
 test('every translation is its own language — no entry is a forgotten copy of the English prose (1.9 B3 T9; German since 1.2)', () => {
   // Short labels legitimately match (“Token Pace”, “Codex”, “Dashboard”); a whole paragraph
   // that matches is an untranslated string, not a coincidence.
-  for (const { file, nls } of TRANSLATIONS) {
-    for (const [key, english] of Object.entries(englishNls)) {
+  for (const { id, file, nls } of TRANSLATIONS) {
+    for (const [key, english] of comparable(id)) {
       if (english.length < 40) continue
       assert.notEqual(nls[key], english, `${file}: ${key} is still the English text`)
     }
@@ -85,8 +93,8 @@ test('every translation keeps the links and examples that do something (1.9 B3 T
   const settingLinks = (s: string): string[] => [...s.matchAll(/#(tokenPace\.[\w.]+)#/g)].map((m) => m[1]).sort()
   const commandLinks = (s: string): string[] => [...s.matchAll(/\(command:([\w.]+)\)/g)].map((m) => m[1]).sort()
   const fences = (s: string): number => (s.match(/```/g) ?? []).length
-  for (const { file, nls } of TRANSLATIONS) {
-    for (const [key, english] of Object.entries(englishNls)) {
+  for (const { id, file, nls } of TRANSLATIONS) {
+    for (const [key, english] of comparable(id)) {
       const translated = nls[key]
       assert.deepEqual(settingLinks(translated), settingLinks(english), `${file}: ${key} lost or invented a setting link`)
       assert.deepEqual(commandLinks(translated), commandLinks(english), `${file}: ${key} lost or invented a command link`)
@@ -101,8 +109,8 @@ test('every translation keeps the links and examples that do something (1.9 B3 T
 test('the JSON examples inside a translation keep their setting keys and values (1.9 B3 T5: every language on disk)', () => {
   // A translated `"claude"` or a translated number would be a broken example: users paste it.
   const blocks = (s: string): string[] => [...s.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1])
-  for (const { file, nls } of TRANSLATIONS) {
-    for (const [key, english] of Object.entries(englishNls)) {
+  for (const { id, file, nls } of TRANSLATIONS) {
+    for (const [key, english] of comparable(id)) {
       assert.deepEqual(blocks(nls[key]), blocks(english), `${file}: ${key} translated a JSON example`)
     }
   }

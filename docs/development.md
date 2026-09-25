@@ -78,7 +78,8 @@ verification — is in [Releasing](release.md).
 Every text Token Pace shows goes through one seam, `t()` in `src/i18n.ts`, and the English message is
 the key. The languages are listed once, in `src/languages.ts` (`LANGUAGES`: the id, the `Intl` locale,
 the native name and the flag, in the picker's order), and every file of a language is named after its
-id — seven files per language, and a translation touches no other:
+id — seven files per language, and a translation touches no other (while the English changes, an
+eighth: its pending list, [below](#changing-the-english-the-re-key-ledger-110)):
 
 * `l10n/parts/<part>.<id>.json` — the runtime translations in four parts, `dashboard`, `host`, `model`
   and `text`, each with exactly the keys of the German part of the same name. The parts follow the
@@ -106,6 +107,7 @@ node build.mjs --tests && CI=true TZ=UTC LANG=en_US.UTF-8 HOME=$(mktemp -d) node
 node scripts/check-privacy.mjs
 node scripts/merge-l10n.mjs --check    # every bundle equals its parts
 node scripts/nls-sources.mjs --check   # every manifest translation matches today's English
+node scripts/l10n-rekey.mjs --check    # every entry of the re-key ledger applied to every language (1.10)
 ```
 
 `test/l10n.languages.test.ts` holds every language on disk to the same thirteen rules, T1–T13: the
@@ -114,12 +116,14 @@ keys, the parts, the placeholders, the marks (`~`, `⚠`, `≈`, `–`, `%`, `×
 (no markup character), the tone (no exclamation mark), the tables, no English left (proper names and
 code excepted — the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason), the registry,
 the English quotes (the keep-warm consent's terms passage and line stay word for word), the freshness
-and the heat map's weekday words. Every rule also runs once against a synthetic language in a temporary
-directory — the German under another id, and the English with every word turned into 語 — broken in
-the one way the rule exists to catch. `test/nls.test.ts` holds every manifest translation to the
+and the heat map's weekday words — and, since 1.10, a fourteenth, T14, for the pending lists
+([below](#changing-the-english-the-re-key-ledger-110)). Every rule also runs once against a synthetic
+language in a temporary directory — the German under another id, and the English with every word turned
+into 語 — broken in the one way the rule exists to catch. `test/nls.test.ts` holds every manifest translation to the
 manifest's structure. The brief a translation works from is `l10n/TRANSLATING.md`. Nothing of this
 ships but the bundles and the `package.nls*.json` files: `.vscodeignore` keeps `l10n/parts/`,
-`l10n/nls-sources/` and the brief out of the package.
+`l10n/nls-sources/` and the brief out of the package — and, since 1.10, `l10n/rekey.json`,
+`l10n/rekey-base.json` and `l10n/pending/`.
 
 While translations are being made, the English is frozen: a changed runtime text changes its key and
 fails every language's T1 at once, and a changed manifest sentence, which keeps its key, is what the
@@ -127,6 +131,73 @@ freshness record catches. A new language is a registry entry and its files; the 
 (which offers every language whose bundle is on disk) and the dashboard harness (a `main-<id>` page in
 both themes at 260 and 420 px) pick it up by themselves. What the reader sees of all this is in
 [Languages](languages.md).
+
+### Changing the English: the re-key ledger (1.10)
+
+A runtime string's key is its English, so a changed sentence is a new key that every language lacks, and
+twelve languages fail T1 and T2 at once. 1.9 therefore froze the English while its languages were
+translated. In 1.10 the English changes while the code is written, and each change is recorded where the
+languages' files can follow it at once:
+
+* `l10n/rekey.json` — the ledger: `{ "v": 1, "base": "<sha>", "entries": [ … ] }`, append-only, one entry
+  per change in the order made, numbered from 1 (`n`), each naming the package that made it (`by`) and
+  why (`why`). One entry per line keeps a diff readable.
+* `l10n/rekey-base.json` — the tree the ledger starts from (1.10's is `e72057a`, the 1.9.0 release: 1123
+  `t()` keys, 295 manifest keys): every `t()` key with the German parts it stands in, and the first 16 hex
+  digits of the SHA-256 of every `package.nls.json` value.
+* `l10n/pending/<id>.json` — per language beyond English and German: how many entries are applied to its
+  files (`applied`) and what is left to do — each bundle key with the parts it is listed for and its
+  state (`translate` while a listed part lacks it, `review` once every listed part holds a value carried
+  over or kept), and each manifest key with its state.
+
+An entry has `n`, `by`, `kind` and `why`, and exactly the fields of its kind:
+
+| Kind | Fields | What `scripts/l10n-rekey.mjs` does in each language |
+|---|---|---|
+| `add` | `part`, `key` | nothing written; the key listed `translate` for that part |
+| `reword` | `part`, `old`, `key`, `carry` | `carry: true` — the old translation still says what the new English says, a grammar fix, say —: the old key's value moved to the new key, listed `review`; `carry: false`: the old key taken out, the new one listed `translate`. A reworded key that was pending stays pending under its new key |
+| `remove` | `part`, `old` | the key taken out of the part and off the list |
+| `copy` | `from`, `part`, `key` | a key a second part now uses too: the language's value copied from `from` (so `merge-l10n.mjs` sees one translation in two parts), and listed for `part` when it is listed for `from` |
+| `review` | `part`, `key` | the English is unchanged but its use narrowed: listed `review`, the value stays |
+| `nls-add` | `key` | put into `package.nls.<id>.json` at the English file's position, with the English value, listed `translate` |
+| `nls-reword` | `key` | the value stays, listed `review` |
+| `nls-remove` | `key` | taken out of the manifest, the freshness record and the list |
+
+German is never in the ledger's hands: the package that changes the English writes the German parts and
+`package.nls.de.json` itself, as every package since 1.2 — then `node scripts/merge-l10n.mjs`, for a
+manifest change `node scripts/nls-sources.mjs de`, appends its entries and runs
+`node scripts/l10n-rekey.mjs`; the edits of the twelve languages' files that follow are part of its commit.
+
+```bash
+node scripts/l10n-rekey.mjs                 # applies every entry after each language's cursor, then merges the bundles
+node scripts/l10n-rekey.mjs --check         # every entry well-formed and applied; no list for German, none for English
+node scripts/l10n-rekey.mjs --print <id>    # a language's work list: key, part, state, English, German, the value it holds, why
+node scripts/l10n-rekey.mjs --start <sha>   # a new ledger at the tree as it is — refused while a language has work pending
+```
+
+A second run changes no byte. A key listed `translate` is absent from the language's parts and bundle, so
+`t()` falls back to the English — on the build branch only —, and a pending manifest key holds the English
+value: nothing is invented. A language without a pending list has done everything the ledger asks:
+`--start` writes a list at cursor 0 for every language, and the language's own package works it through,
+records its manifest and deletes the list. The next version's first change of the English starts a new
+ledger.
+
+While lists exist (`PENDING_ALLOWED` in `test/l10n.languages.test.ts` is true), the frame reads them: T1
+and T2 let a key listed `translate` be absent, a manifest key on a list stays out of the rules that
+compare a value with today's English (T3, T4, T5, T7, T9 and the manifest checks of `test/nls.test.ts`),
+and `node scripts/nls-sources.mjs --check` reports it as pending, not stale. **T14** holds the lists
+themselves: their keys in today's English and in the German parts they name, the ledger applied to its
+end, none for German. The ledger's own test replays the entries on the base and asks for today's German
+parts, `t()` keys and manifest — so an English change without its entry fails, in the package that made
+it. T9, for its part, lets a `×` or `÷` between two Latin words end a run of English (`scope × period ×
+unit` in a Chinese sentence).
+
+1.10's order: the code packages change the English, each change with its German and its entries; the
+English is frozen again after the second review, and the twelve language packages start from that commit
+— each owns its seven files and its list, and runs `node scripts/nls-sources.mjs --check --strict <id>`
+(every manifest key of its own, pending or not) before it is merged. At the join `PENDING_ALLOWED` is
+false: no list may be left (T14), every rule holds every key again, and
+`node scripts/nls-sources.mjs --check --strict` is the gate from then on.
 
 ## Performance
 

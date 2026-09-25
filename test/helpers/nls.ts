@@ -41,6 +41,23 @@ export function nlsFiles(root: string = ROOT): Array<{ id: string; file: string;
     .map(({ file, m }) => ({ id: m[1], file, nls: JSON.parse(readFileSync(join(root, file), 'utf8')) as Record<string, string> }))
 }
 
+/**
+ * 1.10 B1: the manifest keys a language has not translated or reviewed yet — the `nls` map of its pending list,
+ * `l10n/pending/<id>.json`, which scripts/l10n-rekey.mjs writes when the English changes. Such a key holds the English
+ * (added) or a translation of the English before the change (reworded), so a rule that compares a value with today's
+ * English skips it; test/l10n.languages.test.ts (T14) allows no pending list once PENDING_ALLOWED is false (the join).
+ */
+export function pendingNlsKeys(id: string, root: string = ROOT): Set<string> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(join(root, 'l10n', 'pending', `${id}.json`), 'utf8'))
+  } catch {
+    return new Set()
+  }
+  const nls = (parsed as { nls?: unknown } | null)?.nls
+  return typeof nls === 'object' && nls !== null && !Array.isArray(nls) ? new Set(Object.keys(nls)) : new Set()
+}
+
 /** The raw manifest, placeholders and all — for the tests that check the placeholders. */
 export const rawManifest = readJson('package.json') as Record<string, unknown>
 

@@ -26,6 +26,19 @@
  *       quoted {n} stays between quotation marks
  *   T12 the freshness of the manifest's translations (scripts/nls-sources.mjs --check)
  *   T13 the heat map's weekday words fit their column: four characters at most
+ *   T14 the pending list (1.10 B1): its keys in today's English, the ledger applied to its end, none
+ *       for German, none at all once PENDING_ALLOWED is false
+ *
+ * 1.10 B1: the English changes while 1.10's code is written, and each change is an entry of the
+ * re-key ledger (l10n/rekey.json), which scripts/l10n-rekey.mjs applies to every language's files.
+ * What a language has not translated yet is on its pending list (l10n/pending/<id>.json), and while
+ * PENDING_ALLOWED is true the rules read that list: a key listed `translate` may be absent (T1, T2 —
+ * t() shows the English, on the build branch only), a manifest key on the list stays out of the rules
+ * that compare a value with today's English (T3, T4, T5, T7, T9: its value is the English, or a
+ * translation of the English before the change), and nls-sources.mjs --check calls it pending, not
+ * stale (T12). The ledger's own test replays the entries on the tree they start from
+ * (l10n/rekey-base.json) and asks for today's key sets: an English change without its entry fails.
+ * At the join (1.10 P20) PENDING_ALLOWED is false, and every rule holds every key again.
  *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
@@ -37,6 +50,7 @@
 
 import { strict as assert } from 'node:assert'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -148,6 +162,13 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
   ['other', 'the chart band\'s label as the page shows it — the bundle key \'other\', translated (config.chart.modelStyle) — reported by ko'],
 ]
 
+/**
+ * 1.10 B1: whether a language may carry pending keys — the ones l10n/pending/<id>.json lists, which the English
+ * changes of 1.10's code packages left for the language's own package (scripts/l10n-rekey.mjs). True from 1.10 P1
+ * until the join; P20 sets it false, and from then on no pending file may exist (T14) and every rule holds every key.
+ */
+export const PENDING_ALLOWED: boolean = true
+
 // ---------------------------------------------------------------------------
 // What a language is measured against: the English source and the German reference
 // ---------------------------------------------------------------------------
@@ -228,7 +249,43 @@ interface LangFiles {
   nls: Record<string, string> | null
   /** Files that exist but do not parse as a JSON object. */
   unreadable: string[]
+  /** 1.10 B1: l10n/pending/<id>.json as read, or null when the language has none (nothing left to do). */
+  pending: Pending | null
+  /** The number of entries of l10n/rekey.json beside it, or null where there is no ledger. */
+  ledger: number | null
+  /** PENDING_ALLOWED, or what a test asks for: whether the rules read the pending list at all. */
+  pendingAllowed: boolean
 }
+
+/** 1.10 B1: a bundle key on a language's pending list — the parts it is listed for, and what is left to do there. */
+interface PendingKey { parts: string[]; state: 'translate' | 'review'; why: string }
+/** 1.10 B1: l10n/pending/<id>.json, as scripts/l10n-rekey.mjs writes it. */
+interface Pending {
+  v: number
+  /** How many entries of l10n/rekey.json are applied to the language's files. */
+  applied: number
+  bundle: Record<string, PendingKey>
+  nls: Record<string, { state: 'translate' | 'review'; why: string }>
+}
+
+const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k)
+const isTable = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const PENDING_FILE = (id: string): string => `l10n/pending/${id}.json`
+
+/** The pending entry of a bundle key — only while the rules read the list, and only a well-formed one. */
+function pendingKey(l: LangFiles, key: string): PendingKey | null {
+  if (!l.pendingAllowed || !l.pending || !isTable(l.pending.bundle) || !own(l.pending.bundle, key)) return null
+  const e = l.pending.bundle[key]
+  return isTable(e) && Array.isArray(e.parts) ? e : null
+}
+/** A key the language has not translated yet: listed `translate` — for `part`, when one is named. */
+const translatePending = (l: LangFiles, key: string, part?: string): boolean => {
+  const e = pendingKey(l, key)
+  return e !== null && e.state === 'translate' && (part === undefined || e.parts.includes(part))
+}
+/** A manifest key the language has not translated or reviewed yet. */
+const nlsPending = (l: LangFiles, key: string): boolean =>
+  l.pendingAllowed && l.pending !== null && isTable(l.pending.nls) && own(l.pending.nls, key)
 
 /** `host.pt-br.json` → part and id — the rule scripts/merge-l10n.mjs names a part by. */
 const PART_FILE = /^([A-Za-z0-9_-]+)\.([a-z]{2,3}(?:-[A-Za-z0-9]+)*)\.json$/
@@ -243,7 +300,7 @@ function readObject(file: string, unreadable: string[], label: string): Record<s
   return null
 }
 
-function loadLang(root: string, id: string): LangFiles {
+function loadLang(root: string, id: string, pendingAllowed: boolean = PENDING_ALLOWED): LangFiles {
   const unreadable: string[] = []
   const parts: Partial<Record<string, Record<string, string>>> = {}
   const partsDir = join(root, 'l10n', 'parts')
@@ -253,6 +310,15 @@ function loadLang(root: string, id: string): LangFiles {
     const table = readObject(join(partsDir, f), unreadable, `l10n/parts/${f}`)
     if (table) parts[m[1]] = table
   }
+  const pending = readObject(join(root, PENDING_FILE(id)), unreadable, PENDING_FILE(id)) as unknown as Pending | null
+  let ledger: number | null = null
+  const ledgerFile = join(root, 'l10n', 'rekey.json')
+  if (existsSync(ledgerFile)) {
+    try {
+      const entries = (JSON.parse(readFileSync(ledgerFile, 'utf8')) as { entries?: unknown }).entries
+      if (Array.isArray(entries)) ledger = entries.length
+    } catch { /* --check and the ledger's test name it */ }
+  }
   return {
     id,
     root,
@@ -260,6 +326,9 @@ function loadLang(root: string, id: string): LangFiles {
     parts,
     nls: readObject(join(root, `package.nls.${id}.json`), unreadable, `package.nls.${id}.json`),
     unreadable,
+    pending,
+    ledger,
+    pendingAllowed,
   }
 }
 
@@ -274,6 +343,7 @@ function languagesOnDisk(root: string = ROOT): string[] {
   add(root, /^package\.nls\.(.+)\.json$/)
   add(join(root, 'l10n', 'parts'), PART_FILE, 2)
   add(join(root, 'l10n', 'nls-sources'), /^(.+)\.json$/)
+  add(join(root, 'l10n', 'pending'), /^(.+)\.json$/)
   const order = (id: string): number => { const i = (LANGUAGE_IDS as readonly string[]).indexOf(id); return i < 0 ? 999 : i }
   return [...ids].sort((a, b) => order(a) - order(b) || (a < b ? -1 : 1))
 }
@@ -288,10 +358,14 @@ const sorted = (xs: string[]): string[] => [...xs].sort()
 /** The entries of a bundle a rule reads: every key the bundle translates. */
 const entries = (t: Record<string, string> | null): Array<[string, string]> =>
   t ? Object.entries(t).filter((e): e is [string, string] => typeof e[1] === 'string') : []
-/** The manifest's entries beside the English: [key, English, translation]. */
+/**
+ * The manifest's entries beside the English: [key, English, translation]. 1.10 B1: a key on the language's pending list
+ * is left out — its value is the English (added) or a translation of the English before the change (reworded), so the
+ * rules that compare a value with today's English (T3, T4, T5, T7, T9) have nothing to say about it until it is done.
+ */
 function nlsEntries(s: Source, l: LangFiles): Array<[string, string, string]> {
   if (!l.nls) return []
-  return Object.entries(s.english).filter(([k]) => typeof l.nls![k] === 'string').map(([k, en]) => [k, en, l.nls![k]])
+  return Object.entries(s.english).filter(([k]) => typeof l.nls![k] === 'string' && !nlsPending(l, k)).map(([k, en]) => [k, en, l.nls![k]])
 }
 
 const placeholders = (s: string): string[] => sorted([...s.matchAll(/\{(\d+)\}/g)].map((m) => m[0]))
@@ -352,12 +426,18 @@ function latinLeft(key: string, value: string): string | null {
   return null
 }
 
-/** T9, another script: no run of three Latin words of two letters or more. A one-letter token neither counts nor breaks a run. */
+/**
+ * T9, another script: no run of three Latin words of two letters or more. A one-letter token neither counts nor breaks a run.
+ * 1.10 B1 (forLead 3, §7a Q19): a × or ÷ between two Latin words ends the run — `scope × period × unit` names three code
+ * words of a JSON example the way the English does, `scope period unit` is English left; no other mark breaks a run.
+ */
 function nonLatinLeft(value: string): string | null {
-  const tokens = value.replace(PROTECTED, ' ').match(/[\p{L}\p{M}]+/gu) ?? []
+  const tokens = value.replace(PROTECTED, ' ').match(/[\p{L}\p{M}]+|[×÷]/gu) ?? []
   let run: string[] = []
   for (const tok of tokens) {
-    if (LATIN_WORD.test(tok)) {
+    if (tok === '×' || tok === '÷') {
+      run = []
+    } else if (LATIN_WORD.test(tok)) {
       if ([...tok].length < 2) continue
       run.push(tok)
       if (run.length >= 3) return `keeps three Latin words in a row: "${run.join(' ')}"`
@@ -403,8 +483,12 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
       else {
         const have = new Set(Object.keys(l.bundle))
         const want = new Set(s.keys)
-        for (const k of s.keys) if (!have.has(k)) out.push(`${l.id}: ${BUNDLE(l)}: no translation of ${J(k)}`)
+        // 1.10 B1: a key the language has not translated yet is absent while it is listed `translate`; one listed for review is there.
+        for (const k of s.keys) if (!have.has(k) && !translatePending(l, k)) out.push(`${l.id}: ${BUNDLE(l)}: no translation of ${J(k)}`)
         for (const k of Object.keys(l.bundle)) if (!want.has(k)) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} is no key of src/ (any more)`)
+        for (const k of s.keys) {
+          if (!have.has(k) && pendingKey(l, k)?.state === 'review') out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} is listed for review in ${PENDING_FILE(l.id)}, and the bundle has no value for it`)
+        }
       }
       if (!l.nls) out.push(`${l.id}: ${NLS(l)} is missing`)
       else {
@@ -432,7 +516,10 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
         const file = `l10n/parts/${part}.${l.id}.json`
         if (!table) { out.push(`${l.id}: ${file} is missing`); continue }
         const want = new Set(s.germanParts[part])
-        for (const k of s.germanParts[part]) if (!(k in table)) out.push(`${l.id}: ${file}: no translation of ${J(k)} (l10n/parts/${part}.de.json has it)`)
+        // 1.10 B1: minus the part's keys the language has not translated yet (listed `translate` for this part).
+        for (const k of s.germanParts[part]) {
+          if (!(k in table) && !translatePending(l, k, part)) out.push(`${l.id}: ${file}: no translation of ${J(k)} (l10n/parts/${part}.de.json has it)`)
+        }
         for (const k of Object.keys(table)) if (!want.has(k)) out.push(`${l.id}: ${file}: ${J(k)} is not in l10n/parts/${part}.de.json`)
       }
       return out
@@ -575,7 +662,8 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
   },
   T12: {
     title: 'the freshness — every manifest translation was made from today\'s English (scripts/nls-sources.mjs --check)',
-    rule: (_s, l) => freshness(l.root).filter((p) => p.startsWith(`${l.id}: `)),
+    // 1.10 B1: the script calls a key on the pending list pending, not stale; with PENDING_ALLOWED false it runs --strict.
+    rule: (_s, l) => freshness(l.root, !l.pendingAllowed).filter((p) => p.startsWith(`${l.id}: `)),
   },
   T13: {
     title: 'the weekday words — Sun … Sat translated in four characters or fewer (the heat map\'s rows)',
@@ -586,17 +674,63 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
         .map(([en, w]) => `${l.id}: ${BUNDLE(l)}: ${J(en)} is ${J(w)}, ${[...w].length} characters`)
     },
   },
+  T14: {
+    title: 'the pending list — its keys in today\'s English and the German parts, the ledger applied to its end, none for German, none once PENDING_ALLOWED is false (1.10 B1)',
+    rule: (s, l) => {
+      const file = PENDING_FILE(l.id)
+      if (l.unreadable.includes(file)) return [`${l.id}: ${file} is not a JSON object`]
+      const p = l.pending
+      // No list: the language has done everything the ledger asks (its package deletes the list at the end).
+      if (!p) return []
+      const out: string[] = []
+      if (l.id === 'de') out.push(`de: ${file} exists — German is written by the package that changes the English, never pending`)
+      if (!l.pendingAllowed) out.push(`${l.id}: ${file} is left — at the join (PENDING_ALLOWED = false) no language has a pending key`)
+      if (p.v !== 1) out.push(`${l.id}: ${file}: v is ${J(p.v)}, not 1`)
+      if (!Number.isInteger(p.applied) || p.applied < 0) out.push(`${l.id}: ${file}: applied ${J(p.applied)} is no count of entries`)
+      else if (l.ledger !== null && p.applied !== l.ledger) {
+        out.push(`${l.id}: ${file} has ${p.applied} of the ledger's ${l.ledger} entries applied — run node scripts/l10n-rekey.mjs`)
+      }
+      const keys = new Set(s.keys)
+      if (!isTable(p.bundle)) out.push(`${l.id}: ${file}: bundle is not an object`)
+      else {
+        for (const [k, e] of Object.entries(p.bundle)) {
+          if (!keys.has(k)) out.push(`${l.id}: ${file}: ${J(k)} is no key of src/ (any more)`)
+          if (!isTable(e) || !Array.isArray(e.parts) || e.parts.length === 0 || !['translate', 'review'].includes(e.state as string)) {
+            out.push(`${l.id}: ${file}: ${J(k)} is no { parts, state, why } entry`)
+            continue
+          }
+          for (const part of e.parts) {
+            if (!(PARTS as readonly string[]).includes(part) || !s.germanParts[part as Part].includes(k)) {
+              out.push(`${l.id}: ${file}: ${J(k)} is listed for the ${part} part, and l10n/parts/${part}.de.json does not have it`)
+            } else if (e.state === 'review' && !own(l.parts[part] ?? {}, k)) {
+              out.push(`${l.id}: ${file}: ${J(k)} is listed for review, and l10n/parts/${part}.${l.id}.json has no value to review`)
+            }
+          }
+        }
+      }
+      if (!isTable(p.nls)) out.push(`${l.id}: ${file}: nls is not an object`)
+      else {
+        for (const [k, e] of Object.entries(p.nls)) {
+          if (!own(s.english, k)) out.push(`${l.id}: ${file}: ${k} is no key of package.nls.json (any more)`)
+          if (!isTable(e) || !['translate', 'review'].includes(e.state as string)) out.push(`${l.id}: ${file}: ${k} is no { state, why } entry`)
+        }
+      }
+      return out
+    },
+  },
 }
 
-/** T12 runs the script as the gate does, once per directory: its problems, one per line, "<id>: <key> — …". */
+/** T12 runs the script as the gate does, once per directory and mode: its problems, one per line, "<id>: <key> — …". */
 const FRESHNESS = new Map<string, string[]>()
-function freshness(root: string): string[] {
-  const hit = FRESHNESS.get(root)
+function freshness(root: string, strict = false): string[] {
+  const cacheKey = `${strict ? 'strict' : 'check'}:${root}`
+  const hit = FRESHNESS.get(cacheKey)
   if (hit) return hit
-  const r = spawnSync(process.execPath, [join(ROOT, 'scripts', 'nls-sources.mjs'), '--check'], { cwd: root, encoding: 'utf8' })
+  const args = strict ? ['--check', '--strict'] : ['--check']
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts', 'nls-sources.mjs'), ...args], { cwd: root, encoding: 'utf8' })
   const lines = r.stderr.split('\n').filter((x) => x.startsWith('nls-sources: ') && !x.includes('translate the named keys')).map((x) => x.slice('nls-sources: '.length))
-  if (r.status !== 0 && lines.length === 0) lines.push(`?: nls-sources.mjs --check failed: ${r.stderr}`)
-  FRESHNESS.set(root, lines)
+  if (r.status !== 0 && lines.length === 0) lines.push(`?: nls-sources.mjs ${args.join(' ')} failed: ${r.stderr}`)
+  FRESHNESS.set(cacheKey, lines)
   return lines
 }
 
@@ -609,7 +743,8 @@ const ON_DISK = languagesOnDisk()
 test('the frame runs over the languages on disk — German among them — and English has no file of its own (1.9 B3)', () => {
   assert.ok(ON_DISK.includes('de'), `no German files found: ${J(ON_DISK)}`)
   assert.equal(ON_DISK.includes('en'), false)
-  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13'])
+  // 1.10 B1 (pinned and changed: thirteen rules): T14, the pending list, runs over every language too.
+  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14'])
   // The references are what they claim to be.
   const s = src()
   assert.ok(s.keys.length >= 1000, `only ${s.keys.length} t() keys`)
@@ -711,9 +846,9 @@ function edit(dir: string, file: string, change: (t: Record<string, string>) => 
   writeFileSync(path, `${JSON.stringify(t, null, 2)}\n`, 'utf8')
 }
 
-/** Runs one rule over a fixture language; the problems it names. */
-function run(no: string, dir: string, id: string): string[] {
-  return RULES[no].rule(src(), loadLang(dir, id))
+/** Runs one rule over a fixture language; the problems it names. `pendingAllowed` false: as at the join (1.10 B1). */
+function run(no: string, dir: string, id: string, pendingAllowed: boolean = PENDING_ALLOWED): string[] {
+  return RULES[no].rule(src(), loadLang(dir, id, pendingAllowed))
 }
 
 /** A key of the German bundle the mutation can work on: the first one `pick` accepts. */
@@ -737,8 +872,12 @@ function editKey(dir: string, id: string, key: string, change: (value: string) =
 
 /** The mutation fails the rule, and names the language and the key; the unbroken fixture passes it. */
 function caught(no: string, dir: string, id: string, clean: string, ...needles: string[]): void {
-  assert.deepEqual(run(no, clean, id), [], `${no} fails the unbroken ${id} fixture`)
-  const problems = run(no, dir, id)
+  caughtAs(PENDING_ALLOWED, no, dir, id, clean, ...needles)
+}
+/** `caught`, with the rules reading pending lists or not (1.10 B1: the build branch, or the join) whatever PENDING_ALLOWED says. */
+function caughtAs(pendingAllowed: boolean, no: string, dir: string, id: string, clean: string, ...needles: string[]): void {
+  assert.deepEqual(run(no, clean, id, pendingAllowed), [], `${no} fails the unbroken ${id} fixture`)
+  const problems = run(no, dir, id, pendingAllowed)
   assert.ok(problems.length > 0, `${no} did not catch the mutation`)
   for (const needle of [`${id}: `, ...needles]) {
     assert.ok(problems.some((p) => p.includes(needle)), `${no} does not name ${J(needle)}:\n${problems.join('\n')}`)
@@ -964,4 +1103,372 @@ test('the brief names every rule of the frame, the files a package owns, the gat
   for (const [w] of NLS_SPANS_READ_AS_WORDS) assert.ok(brief.includes(`\`${w}\``), `the brief does not name the span ${w}`)
   assert.ok(brief.replace(/\s+/g, ' ').includes(`There are ${['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'][NLS_SPANS_READ_AS_WORDS.length]}, and the test names them`),
     'the brief does not count the spans that are words')
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 B1: the re-key ledger, the pending lists (T14), T9's × and ÷
+// ---------------------------------------------------------------------------
+
+const REKEY = join(ROOT, 'scripts', 'l10n-rekey.mjs')
+
+/** An entry of l10n/rekey.json (scripts/l10n-rekey.mjs ENTRY_FIELDS). */
+interface LedgerEntry { n: number; by: string; kind: string; part?: string; from?: string; old?: string; key?: string; carry?: boolean; why: string }
+/** l10n/rekey-base.json: the tree the ledger starts from. */
+interface RekeyBase { v: number; base: string; keys: Record<string, string[]>; nls: Record<string, string> }
+/** What the ledger's test compares the replay with: the German parts' keys, the t() keys, the English manifest. */
+interface Tree { parts: Record<Part, string[]>; keys: string[]; english: Record<string, string> }
+
+const hash16 = (s: string): string => createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 16)
+
+/**
+ * The ledger's own test: the base's key sets, the entries replayed on them one by one (each where it can apply — a
+ * reworded or removed key in its part, an added one not yet there), and the result against today's tree. So an English
+ * change without its entry fails in the package that made it: a new t() key, a key gone, a key moved between parts, a
+ * manifest key added or gone, a manifest value whose English changed.
+ */
+function ledgerProblems(base: RekeyBase, entries: readonly LedgerEntry[], today: Tree): string[] {
+  const out: string[] = []
+  const parts = {} as Record<Part, Set<string>>
+  for (const p of PARTS) parts[p] = new Set()
+  for (const [k, ps] of Object.entries(base.keys)) for (const p of ps) parts[p as Part]?.add(k)
+  const nls = new Set(Object.keys(base.nls))
+  const changed = new Set<string>()
+  for (const e of entries) {
+    const at = `l10n/rekey.json: entry ${e.n} (${e.kind})`
+    const part = (PARTS as readonly string[]).includes(e.part ?? '') ? parts[e.part as Part] : null
+    if (!e.kind.startsWith('nls-') && part === null) { out.push(`${at}: the part ${J(e.part)} does not exist`); continue }
+    const put = (key: string): void => { if (part!.has(key)) out.push(`${at}: the ${e.part} part has ${J(key)} already`); else part!.add(key) }
+    const take = (key: string): void => { if (!part!.has(key)) out.push(`${at}: the ${e.part} part has no ${J(key)}`); else part!.delete(key) }
+    switch (e.kind) {
+      case 'add': put(e.key!); break
+      case 'reword': take(e.old!); put(e.key!); break
+      case 'remove': take(e.old!); break
+      case 'copy':
+        if (!(PARTS as readonly string[]).includes(e.from ?? '') || !parts[e.from as Part].has(e.key!)) out.push(`${at}: the ${e.from} part has no ${J(e.key)} to copy`)
+        put(e.key!)
+        break
+      case 'review': if (!part!.has(e.key!)) out.push(`${at}: the ${e.part} part has no ${J(e.key)} to review`); break
+      case 'nls-add': if (nls.has(e.key!)) out.push(`${at}: the manifest has ${e.key} already`); else { nls.add(e.key!); changed.add(e.key!) } break
+      case 'nls-reword': if (!nls.has(e.key!)) out.push(`${at}: the manifest has no ${e.key}`); else changed.add(e.key!); break
+      case 'nls-remove': if (!nls.has(e.key!)) out.push(`${at}: the manifest has no ${e.key}`); else { nls.delete(e.key!); changed.delete(e.key!) } break
+      default: out.push(`${at}: no such kind`)
+    }
+  }
+  const union = new Set<string>()
+  for (const p of PARTS) {
+    const want = new Set(today.parts[p])
+    for (const k of today.parts[p]) {
+      if (!parts[p].has(k)) out.push(`l10n/parts/${p}.de.json has ${J(k)}, which neither the base (${base.base}) nor an entry of l10n/rekey.json puts there — append an add, reword or copy entry`)
+    }
+    for (const k of parts[p]) {
+      union.add(k)
+      if (!want.has(k)) out.push(`l10n/parts/${p}.de.json lacks ${J(k)}, which the ledger keeps there — append a remove or reword entry`)
+    }
+  }
+  const keys = new Set(today.keys)
+  for (const k of today.keys) if (!union.has(k)) out.push(`src/ has the t() key ${J(k)}, which no entry of l10n/rekey.json adds`)
+  for (const k of union) if (!keys.has(k)) out.push(`the ledger keeps ${J(k)}, which src/ no longer has — append a remove or reword entry`)
+  for (const [k, en] of Object.entries(today.english)) {
+    if (!nls.has(k)) out.push(`package.nls.json has ${k}, which no nls-add entry of l10n/rekey.json adds`)
+    else if (!changed.has(k) && base.nls[k] !== hash16(en)) out.push(`the English of ${k} changed since ${base.base}, and no nls-reword entry of l10n/rekey.json says so`)
+  }
+  for (const k of nls) if (!own(today.english, k)) out.push(`package.nls.json lacks ${k}, which no nls-remove entry of l10n/rekey.json takes out`)
+  return out
+}
+
+test('the ledger explains every English change since its base: rekey-base.json with the entries of l10n/rekey.json replayed is today\'s German parts, t() keys and manifest (1.10 B1)', () => {
+  const base = JSON.parse(readFileSync(join(ROOT, 'l10n', 'rekey-base.json'), 'utf8')) as RekeyBase
+  const ledger = JSON.parse(readFileSync(join(ROOT, 'l10n', 'rekey.json'), 'utf8')) as { v: number; base: string; entries: LedgerEntry[] }
+  assert.deepEqual(Object.keys(ledger), ['v', 'base', 'entries'])
+  assert.deepEqual([ledger.v, base.v], [1, 1])
+  assert.equal(base.base, ledger.base, 'the base file and the ledger name two commits')
+  assert.match(base.base, /^[0-9a-f]{7,40}$/)
+  // The base is a tree: every t() key with the German parts it stood in, every manifest key with its English's hash.
+  for (const [k, ps] of Object.entries(base.keys)) {
+    assert.ok(ps.length > 0 && ps.every((p) => (PARTS as readonly string[]).includes(p)) && new Set(ps).size === ps.length, `${J(k)}: ${J(ps)}`)
+  }
+  for (const [k, h] of Object.entries(base.nls)) assert.match(h, /^[0-9a-f]{16}$/, k)
+  ledger.entries.forEach((e, i) => assert.equal(e.n, i + 1, `entry ${i + 1} has n ${e.n}`))
+  const s = src()
+  const problems = ledgerProblems(base, ledger.entries, { parts: s.germanParts, keys: s.keys, english: s.english })
+  assert.deepEqual(problems, [], `\n${problems.slice(0, 40).join('\n')}`)
+  // The gate itself: every entry well-formed, and applied to every language.
+  const r = spawnSync(process.execPath, [REKEY, '--check'], { cwd: ROOT, encoding: 'utf8' })
+  assert.equal(r.status, 0, r.stderr)
+})
+
+test('the ledger\'s test fails an English change without its entry — a new t() key, a key reworded, a key leaving one part, a manifest key added, a manifest value changed — and passes it with the entry (1.10 B1)', () => {
+  const base: RekeyBase = {
+    v: 1, base: 'abc1234',
+    keys: { 'Alpha': ['model'], 'Beta {0}': ['dashboard', 'text'], 'Gamma': ['host'] },
+    nls: { a: hash16('Ay'), b: hash16('Bee') },
+  }
+  const tree = (over: Partial<Record<Part, string[]>>, english: Record<string, string> = { a: 'Ay', b: 'Bee' }): Tree => {
+    const parts = { dashboard: ['Beta {0}'], host: ['Gamma'], model: ['Alpha'], text: ['Beta {0}'], ...over } as Record<Part, string[]>
+    return { parts, keys: [...new Set(PARTS.flatMap((p) => parts[p]))], english }
+  }
+  const entry = (n: number, e: Omit<LedgerEntry, 'n' | 'by' | 'why'>): LedgerEntry => ({ n, by: 'P1', why: 'a test', ...e })
+  assert.deepEqual(ledgerProblems(base, [], tree({})), [])
+  // A new t() key: named until an add entry puts it into its part.
+  const added = tree({ model: ['Alpha', 'Delta'] })
+  const noEntry = ledgerProblems(base, [], added)
+  assert.ok(noEntry.some((p) => p.includes('l10n/parts/model.de.json has "Delta"')) && noEntry.some((p) => p.includes('src/ has the t() key "Delta"')), noEntry.join('\n'))
+  assert.deepEqual(ledgerProblems(base, [entry(1, { kind: 'add', part: 'model', key: 'Delta' })], added), [])
+  // A key reworded: the new one unexplained, the old one kept.
+  const reworded = tree({ model: ['Alpha now'] })
+  assert.ok(ledgerProblems(base, [], reworded).some((p) => p.includes('lacks "Alpha"')))
+  assert.deepEqual(ledgerProblems(base, [entry(1, { kind: 'reword', part: 'model', old: 'Alpha', key: 'Alpha now', carry: true })], reworded), [])
+  // A key that leaves one part and stays in another (1.10 D2's shape): src/ still has it, the part does not.
+  const moved = tree({ dashboard: [] })
+  assert.ok(ledgerProblems(base, [], moved).some((p) => p.includes('l10n/parts/dashboard.de.json lacks "Beta {0}"')))
+  assert.deepEqual(ledgerProblems(base, [entry(1, { kind: 'remove', part: 'dashboard', old: 'Beta {0}' })], moved), [])
+  // A copy into a second part, and a review, apply where the key is.
+  const copied = tree({ model: ['Alpha', 'Gamma'] })
+  assert.deepEqual(ledgerProblems(base, [entry(1, { kind: 'copy', from: 'host', part: 'model', key: 'Gamma' }), entry(2, { kind: 'review', part: 'host', key: 'Gamma' })], copied), [])
+  assert.ok(ledgerProblems(base, [entry(1, { kind: 'copy', from: 'text', part: 'model', key: 'Gamma' })], copied).some((p) => p.includes('the text part has no "Gamma" to copy')))
+  // The manifest: a key added, a value changed.
+  const nlsAdded = tree({}, { a: 'Ay', c: 'Sea', b: 'Bee' })
+  assert.ok(ledgerProblems(base, [], nlsAdded).some((p) => p.includes('package.nls.json has c, which no nls-add entry')))
+  assert.deepEqual(ledgerProblems(base, [entry(1, { kind: 'nls-add', key: 'c' })], nlsAdded), [])
+  const nlsChanged = tree({}, { a: 'Ay, now', b: 'Bee' })
+  assert.ok(ledgerProblems(base, [], nlsChanged).some((p) => p.includes('the English of a changed since abc1234')))
+  assert.deepEqual(ledgerProblems(base, [entry(1, { kind: 'nls-reword', key: 'a' })], nlsChanged), [])
+  const nlsGone = tree({}, { b: 'Bee' })
+  assert.ok(ledgerProblems(base, [], nlsGone).some((p) => p.includes('package.nls.json lacks a')))
+  assert.deepEqual(ledgerProblems(base, [entry(1, { kind: 'nls-remove', key: 'a' })], nlsGone), [])
+  // An entry that cannot apply is named itself: a reworded key its part does not have.
+  assert.ok(ledgerProblems(base, [entry(1, { kind: 'reword', part: 'host', old: 'Alpha', key: 'Alpha now', carry: false })], reworded)
+    .some((p) => p.includes('l10n/rekey.json: entry 1 (reword): the host part has no "Alpha"')))
+})
+
+/**
+ * Makes a fixture directory a tree the re-key script runs in, as `--start` leaves one: the registry (package.json's
+ * language enum), the German parts (the script names the parts by them), a ledger with `entries`, its base, and the
+ * language's pending list at cursor 0.
+ */
+function rekeyTree(dir: string, id: string, entries: LedgerEntry[]): void {
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ contributes: { configuration: [{ properties: { 'tokenPace.language': { enum: ['auto', ...LANGUAGE_IDS] } } }] } }))
+  for (const part of PARTS) cpSync(join(ROOT, 'l10n', 'parts', `${part}.de.json`), join(dir, 'l10n', 'parts', `${part}.de.json`))
+  writeFileSync(join(dir, 'l10n', 'rekey.json'), `${JSON.stringify({ v: 1, base: 'abc1234', entries }, null, 2)}\n`)
+  writeFileSync(join(dir, 'l10n', 'rekey-base.json'), `${JSON.stringify({ v: 1, base: 'abc1234', keys: {}, nls: {} }, null, 2)}\n`)
+  mkdirSync(join(dir, 'l10n', 'pending'), { recursive: true })
+  writeFileSync(join(dir, PENDING_FILE(id)), `${JSON.stringify({ v: 1, applied: 0, bundle: {}, nls: {} }, null, 2)}\n`)
+}
+
+/** Every file under a directory, path → bytes: what "a second run changes no byte" compares. */
+function snapshot(dir: string, at = ''): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const e of readdirSync(join(dir, at), { withFileTypes: true })) {
+    const rel = at ? `${at}/${e.name}` : e.name
+    if (e.isDirectory()) Object.assign(out, snapshot(dir, rel))
+    else out[rel] = readFileSync(join(dir, rel), 'utf8')
+  }
+  return out
+}
+
+test('the re-key script over a whole language: a key added, a key reworded with its translation carried, a key removed, a manifest key added and one reworded — pending, T1–T14 green while PENDING_ALLOWED, and at the join each rule names what is pending (1.10 B1)', () => {
+  const s = src()
+  const partsOf = (k: string): Part[] => PARTS.filter((p) => s.germanParts[p].includes(k))
+  const dir = fixture('german', 'fr')
+  const added = 'Refresh'
+  const carried = 'Not enough data for a summary yet.'
+  const old = 'Not enough data for a summary so far.'
+  const removed = 'A key src/ no longer has'
+  const reworded = 'config.dashboard.sections.description'
+  assert.ok(partsOf(added).length > 0 && partsOf(carried).length > 0 && s.english[reworded].split('\n\n').length > 1)
+  // The language as it was before the English changed: the added key not there yet, the carried one under its old
+  // English, a key the English has dropped since; `description` not in the manifest yet, and the reworded value a
+  // translation of the English before its last paragraph.
+  const carriedValue = readTable(join(dir, 'l10n', 'bundle.l10n.fr.json'))[carried]
+  editKey(dir, 'fr', added, () => undefined)
+  editKey(dir, 'fr', carried, () => undefined)
+  for (const p of partsOf(carried)) edit(dir, `l10n/parts/${p}.fr.json`, (t) => { t[old] = carriedValue })
+  edit(dir, 'l10n/parts/model.fr.json', (t) => { t[removed] = 'Une clé que src/ n’a plus' })
+  edit(dir, 'package.nls.fr.json', (t) => { delete t.description; t[reworded] = t[reworded].split('\n\n').slice(0, -1).join('\n\n') })
+  edit(dir, 'l10n/nls-sources/fr.json', (t) => { delete t.description; t[reworded] = '0000000000000000' })
+  const entries = [
+    ...partsOf(added).map((part) => ({ kind: 'add', part, key: added, why: 'a new button' })),
+    ...partsOf(carried).map((part) => ({ kind: 'reword', part, old, key: carried, carry: true, why: 'a clearer word' })),
+    { kind: 'remove', part: 'model', old: removed, why: 'no call site any more' },
+    { kind: 'nls-add', key: 'description', why: 'a new manifest string' },
+    { kind: 'nls-reword', key: reworded, why: 'a paragraph added' },
+  ].map((e, i): LedgerEntry => ({ n: i + 1, by: 'P1', ...e }))
+  rekeyTree(dir, 'fr', entries)
+  const r = spawnSync(process.execPath, [REKEY], { cwd: dir, encoding: 'utf8' })
+  assert.equal(r.status, 0, r.stderr)
+
+  // While PENDING_ALLOWED, every rule holds: the list is what is left to do (a key the script failed to take out, T1
+  // names: "… is no key of src/ (any more)").
+  for (const no of Object.keys(RULES)) {
+    const problems = run(no, dir, 'fr', true)
+    assert.deepEqual(problems, [], `${no} with the pending list:\n${problems.join('\n')}`)
+  }
+  // The list says what is left, the files say what the ledger did.
+  const pending = JSON.parse(readFileSync(join(dir, PENDING_FILE('fr')), 'utf8')) as Pending
+  assert.equal(pending.applied, entries.length)
+  assert.deepEqual(pending.bundle, {
+    [added]: { parts: partsOf(added), state: 'translate', why: 'a new button' },
+    [carried]: { parts: partsOf(carried), state: 'review', why: 'a clearer word' },
+  })
+  assert.deepEqual(pending.nls, { description: { state: 'translate', why: 'a new manifest string' }, [reworded]: { state: 'review', why: 'a paragraph added' } })
+  const fr = loadLang(dir, 'fr')
+  assert.equal(fr.bundle![carried], carriedValue, 'the carried translation did not move to the new key')
+  assert.deepEqual([own(fr.bundle!, old), own(fr.bundle!, added), own(fr.bundle!, removed), own(fr.parts.model!, removed)], [false, false, false, false])
+  assert.deepEqual(Object.keys(fr.nls!), Object.keys(s.english), 'the added manifest key is not at the English file\'s position')
+  assert.equal(fr.nls!.description, s.english.description)
+  assert.equal(own(readTable(join(dir, 'l10n', 'nls-sources', 'fr.json')), 'description'), false, 'the added key was recorded as translated')
+
+  // At the join, each rule names the key it holds.
+  const strict = (no: string, ...needles: string[]): void => {
+    const problems = run(no, dir, 'fr', false)
+    for (const needle of needles) assert.ok(problems.some((p) => p.includes(needle)), `${no} at the join does not name ${J(needle)}:\n${problems.join('\n')}`)
+  }
+  strict('T1', `no translation of ${J(added)}`)
+  strict('T2', `no translation of ${J(added)}`)
+  strict('T5', `${reworded} — the paragraphs differ`)
+  strict('T9', 'package.nls.fr.json: description is still the English text')
+  strict('T12', 'fr: description — no record of the English it was translated from', `fr: ${reworded} — the English changed since its translation`)
+  strict('T14', 'l10n/pending/fr.json is left')
+
+  // Idempotent: a second run changes no byte.
+  const before = snapshot(dir)
+  const again = spawnSync(process.execPath, [REKEY], { cwd: dir, encoding: 'utf8' })
+  assert.equal(again.status, 0, again.stderr)
+  assert.deepEqual(snapshot(dir), before)
+  assert.equal(spawnSync(process.execPath, [REKEY, '--check'], { cwd: dir, encoding: 'utf8' }).status, 0)
+})
+
+test('T14 catches a pending list for German, a cursor behind the ledger, a key src/ does not have, a part the German lacks, a review with nothing to review, a manifest key gone — and at the join any list at all (1.10 B1)', () => {
+  // The build branch's rules (the lists read) whatever PENDING_ALLOWED says now; the join's last.
+  const clean = fixture('german', 'fr')
+  rekeyTree(clean, 'fr', [])
+  assert.deepEqual(run('T14', clean, 'fr', true), [])
+  const list = (dir: string, change: (p: Pending) => void): void => {
+    const file = join(dir, PENDING_FILE('fr'))
+    const p = JSON.parse(readFileSync(file, 'utf8')) as Pending
+    change(p)
+    writeFileSync(file, `${JSON.stringify(p, null, 2)}\n`)
+  }
+  // An entry the script has not applied yet.
+  const behind = fixture('german', 'fr')
+  rekeyTree(behind, 'fr', [{ n: 1, by: 'P1', kind: 'add', part: 'dashboard', key: 'Refresh', why: 'x' }])
+  caughtAs(true, 'T14', behind, 'fr', clean, 'has 0 of the ledger\'s 1 entries applied')
+  // Keys the list may not name.
+  const orphan = fixture('german', 'fr')
+  rekeyTree(orphan, 'fr', [])
+  list(orphan, (p) => {
+    p.bundle['A key no source has'] = { parts: ['model'], state: 'translate', why: 'x' }
+    p.bundle.Refresh = { parts: ['model'], state: 'translate', why: 'x' }
+    p.nls['config.gone'] = { state: 'translate', why: 'x' }
+  })
+  caughtAs(true, 'T14', orphan, 'fr', clean, '"A key no source has" is no key of src/', '"Refresh" is listed for the model part, and l10n/parts/model.de.json does not have it',
+    'config.gone is no key of package.nls.json')
+  // A review with no value to review.
+  const review = fixture('german', 'fr')
+  rekeyTree(review, 'fr', [])
+  editKey(review, 'fr', 'Mon', () => undefined)
+  list(review, (p) => { p.bundle.Mon = { parts: ['model'], state: 'review', why: 'x' } })
+  caughtAs(true, 'T14', review, 'fr', clean, '"Mon" is listed for review, and l10n/parts/model.fr.json has no value to review')
+  // A list that is no JSON object.
+  const broken = fixture('german', 'fr')
+  rekeyTree(broken, 'fr', [])
+  writeFileSync(join(broken, PENDING_FILE('fr')), '[1, 2]')
+  caughtAs(true, 'T14', broken, 'fr', clean, 'l10n/pending/fr.json is not a JSON object')
+  // German: never pending.
+  const german = fixture('german', 'fr')
+  rekeyTree(german, 'fr', [])
+  writeFileSync(join(german, PENDING_FILE('de')), `${JSON.stringify({ v: 1, applied: 0, bundle: {}, nls: {} })}\n`)
+  assert.ok(run('T14', german, 'de', true).some((p) => p.startsWith('de: l10n/pending/de.json exists')))
+  // At the join (P20: PENDING_ALLOWED = false) an empty list is one too many.
+  assert.ok(run('T14', clean, 'fr', false).some((p) => p.includes('fr: l10n/pending/fr.json is left')))
+})
+
+test('T9: a × or ÷ between two Latin words ends the run in a language of another script — zh-tw may write `scope × period × unit`, never `scope period unit` (1.10 B1, forLead 3, §7a Q19)', () => {
+  const key = 'config.budgets.description'
+  assert.ok(src().english[key].includes('one per scope × period × unit'), 'the English no longer names scope × period × unit')
+  const clean = fixture('pseudo', 'zh-tw')
+  const words = (dir: string, text: string): void => edit(dir, 'package.nls.zh-tw.json', (t) => {
+    assert.ok(t[key].includes('語 × 語 × 語'), t[key])
+    t[key] = t[key].replace('語 × 語 × 語', text)
+  })
+  for (const mark of ['×', '÷']) {
+    const dir = fixture('pseudo', 'zh-tw')
+    words(dir, `scope ${mark} period ${mark} unit`)
+    assert.deepEqual(run('T9', dir, 'zh-tw'), [], `T9 fails \`scope ${mark} period ${mark} unit\``)
+  }
+  // No other mark ends a run, and a space least of all.
+  for (const text of ['scope period unit', 'scope, period, unit', 'scope / period / unit', 'scope · period · unit']) {
+    const dir = fixture('pseudo', 'zh-tw')
+    words(dir, text)
+    caught('T9', dir, 'zh-tw', clean, key, 'three Latin words in a row: "scope period unit"')
+  }
+})
+
+test('the brief\'s 1.10 section: the pending list, --print, translate and review, the manifest keys and their record, the file deleted, the gates, and the notes the 1.10 keys need (1.10 B1)', () => {
+  const brief = readFileSync(join(ROOT, 'l10n', 'TRANSLATING.md'), 'utf8')
+  const flat = brief.replace(/\s+/g, ' ')
+  for (const needed of [
+    '## Working through your pending list (1.10)', '`l10n/pending/<id>.json`', 'node scripts/l10n-rekey.mjs --print <id>',
+    '`translate`', '`review`', 'node scripts/nls-sources.mjs <id>', 'node scripts/nls-sources.mjs --check --strict <id>',
+    'node scripts/l10n-rekey.mjs --check', 'test ! -e l10n/pending/<id>.json', 'out-test/prompts.test.js', 'PENDING_ALLOWED',
+    // The notes of §3 B1 "Brief".
+    '`{0} :`', 'U+00A0', '`{0}：`', '`（）`', '`、`', '`25%`', '`{0} ~ends at {1}%`', '*Records*', '*Agent entries*', 'run record',
+    'press to cancel', '`×` between Latin words',
+  ]) assert.ok(flat.includes(needed), `l10n/TRANSLATING.md does not say: ${needed}`)
+  // The pending list is among the files a language package owns, and the brief says the English is frozen for it.
+  assert.ok(flat.includes('| `l10n/pending/<id>.json` |'), 'the files table has no row for the pending list')
+  assert.ok(flat.includes('the English is frozen while the languages are translated'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 B1: the freshness script and the pending lists
+// ---------------------------------------------------------------------------
+
+test('nls-sources --check calls a key on the pending list pending, not stale, and counts it; --strict — for every language or the ones named — counts it as a problem (1.10 B1)', () => {
+  const dir = tempDir()
+  const script = join(ROOT, 'scripts', 'nls-sources.mjs')
+  const cli = (...args: string[]): { status: number | null; stdout: string; stderr: string } => {
+    const r = spawnSync(process.execPath, [script, ...args], { cwd: dir, encoding: 'utf8' })
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr }
+  }
+  writeJson(join(dir, 'package.nls.json'), { b: 'Bee', a: 'Ay', c: 'Sea' })
+  writeJson(join(dir, 'package.nls.fr.json'), { b: 'Abeille', a: 'A', c: 'Mer' })
+  writeJson(join(dir, 'package.nls.ja.json'), { b: '蜂', a: 'エー', c: '海' })
+  assert.equal(cli('fr', 'ja').status, 0)
+  // The English changes — `a` reworded, `d` added. Japanese is translated and recorded again; French has both on its
+  // list, as scripts/l10n-rekey.mjs leaves them (the added key with the English value).
+  writeJson(join(dir, 'package.nls.json'), { b: 'Bee', a: 'Ay, now', d: 'Dee', c: 'Sea' })
+  writeJson(join(dir, 'package.nls.fr.json'), { b: 'Abeille', a: 'A', d: 'Dee', c: 'Mer' })
+  writeJson(join(dir, 'package.nls.ja.json'), { b: '蜂', a: 'エー、今', d: 'ディー', c: '海' })
+  assert.equal(cli('ja').status, 0)
+  mkdirSync(join(dir, 'l10n', 'pending'), { recursive: true })
+  const listed = (nls: Record<string, { state: string; why: string }>): void =>
+    writeFileSync(join(dir, 'l10n', 'pending', 'fr.json'), `${JSON.stringify({ v: 1, applied: 2, bundle: {}, nls }, null, 2)}\n`)
+  listed({ a: { state: 'review', why: 'reworded' }, d: { state: 'translate', why: 'added' } })
+  const tolerant = cli('--check')
+  assert.equal(tolerant.status, 0, tolerant.stderr)
+  assert.match(tolerant.stdout, /nls-sources: fr: 2 key\(s\) pending in l10n\/pending\/fr\.json/)
+  assert.match(tolerant.stdout, /nls-sources: every record is fresh \(2 language\(s\); 2 key\(s\) pending in 1\)/)
+  const strict = cli('--check', '--strict')
+  assert.equal(strict.status, 1)
+  assert.match(strict.stderr, /fr: a — the English changed since its translation \(pending in l10n\/pending\/fr\.json; --strict allows none\)/)
+  assert.match(strict.stderr, /fr: d — no record of the English it was translated from \(pending in l10n\/pending\/fr\.json/)
+  // A language's own gate holds that language to every key, and the others as the build branch allows.
+  assert.equal(cli('--check', '--strict', 'fr').status, 1)
+  assert.equal(cli('--check', '--strict', 'ja').status, 0)
+  assert.equal(cli('--strict', 'ja').status, 0, '--strict is a --check')
+  assert.equal(cli('--check', 'fr').status, 1, 'a language is named only with --strict')
+  assert.match(cli('--check', '--strict', 'xx').stderr, /xx: no package\.nls\.xx\.json/)
+  // A stale key the list does not name is a problem, strict or not.
+  listed({ d: { state: 'translate', why: 'added' } })
+  const unlisted = cli('--check')
+  assert.equal(unlisted.status, 1)
+  assert.match(unlisted.stderr, /^nls-sources: fr: a — the English changed since its translation$/m)
+  // Translated, recorded, the list deleted: fresh, strict or not.
+  writeJson(join(dir, 'package.nls.fr.json'), { b: 'Abeille', a: 'A, maintenant', d: 'Dé', c: 'Mer' })
+  assert.equal(cli('fr').status, 0)
+  rmSync(join(dir, 'l10n', 'pending', 'fr.json'))
+  const done = cli('--check', '--strict')
+  assert.equal(done.status, 0, done.stderr)
+  assert.match(done.stdout, /every record is fresh \(2 language\(s\)\)$/m)
 })

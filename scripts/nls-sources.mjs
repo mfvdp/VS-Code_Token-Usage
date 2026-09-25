@@ -19,11 +19,21 @@
  * Run it only after translating: writing a record says "this language's text is a translation of
  * today's English", and nothing checks that claim but a reader.
  *
+ * 1.10 B1: while a change of the English waits for a language's package (scripts/l10n-rekey.mjs), the
+ * language's pending list (`l10n/pending/<id>.json`, its `nls` map) names the manifest keys it has not
+ * translated or reviewed yet — a key added with the English value, or a value whose English changed.
+ * `--check` reports those as pending, not stale, and counts them; `--strict` counts them as problems,
+ * for every language or for the one named (a language's own gate, and the join's).
+ *
  * Run:  node scripts/nls-sources.mjs <id> [<id> …]   writes l10n/nls-sources/<id>.json from
  *                                                    today's package.nls.json and package.nls.<id>.json
  *       node scripts/nls-sources.mjs --check         writes nothing; exit 1 when a language has no
  *                                                    record, a record has no language, or a key's
- *                                                    English changed since its translation
+ *                                                    English changed since its translation — a key
+ *                                                    the language's pending list names excepted
+ *       node scripts/nls-sources.mjs --check --strict [<id> …]
+ *                                                    the same, with no key excepted — for every
+ *                                                    language, or for the ones named
  *
  * Paths are relative to the working directory (the repository root), as merge-l10n.mjs's are.
  * The records are not shipped (.vscodeignore ships nothing under l10n/ but the bundles).
@@ -34,6 +44,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'path'
 
 export const SOURCES_DIR = join('l10n', 'nls-sources')
+/** 1.10 B1: the languages' pending lists (scripts/l10n-rekey.mjs). */
+const PENDING_DIR = 'l10n/pending'
 const ENGLISH = 'package.nls.json'
 
 /** A language tag as the registry spells one — lower case, `pt-br`; never a path. */
@@ -73,21 +85,39 @@ export function recordOf(english, translated) {
   return out
 }
 
+/** 1.10 B1: the manifest keys a language's pending list names — pending, not stale, until it translates them. */
+export function pendingKeys(root, id) {
+  const file = join(root, PENDING_DIR, `${id}.json`)
+  if (!existsSync(file)) return new Set()
+  const parsed = JSON.parse(readFileSync(file, 'utf8'))
+  if (typeof parsed !== 'object' || parsed === null || typeof parsed.nls !== 'object' || parsed.nls === null || Array.isArray(parsed.nls)) {
+    throw new Error('its nls map is not an object')
+  }
+  return new Set(Object.keys(parsed.nls))
+}
+
 /**
  * Every problem of the records under the working directory, one line each, naming the language and
  * the key: a translation without a record, a record without a translation, a key of the English
  * that was never recorded, a recorded key the English no longer has, and a key whose English
- * changed since its translation.
+ * changed since its translation. A key the language's pending list names is pending, not a
+ * problem — unless `strict` is true, or names the language (a list of ids).
+ *
+ * @param {string} [root]
+ * @param {{ strict?: boolean | string[] }} [opts]
+ * @returns {{ problems: string[], pending: Array<{ id: string, key: string }>, languages: string[] }}
  */
-export function check(root = '.') {
+export function checkAll(root = '.', opts = {}) {
   const problems = []
+  const pending = []
   let english
   try {
     english = readTable(join(root, ENGLISH))
   } catch (err) {
-    return [`${ENGLISH}: ${err.message}`]
+    return { problems: [`${ENGLISH}: ${err.message}`], pending, languages: [] }
   }
   const langs = readdirSync(root).map(nlsId).filter((x) => x !== null).sort()
+  const strictFor = (id) => opts.strict === true || (Array.isArray(opts.strict) && opts.strict.includes(id))
   const dir = join(root, SOURCES_DIR)
   const records = existsSync(dir)
     ? readdirSync(dir).map((f) => /^(.+)\.json$/.exec(f)).filter((m) => m && ID.test(m[1])).map((m) => m[1]).sort()
@@ -108,30 +138,58 @@ export function check(root = '.') {
       problems.push(`${id}: ${join(SOURCES_DIR, id + '.json')}: ${err.message}`)
       continue
     }
+    let listed
+    try {
+      listed = pendingKeys(root, id)
+    } catch (err) {
+      problems.push(`${id}: ${PENDING_DIR}/${id}.json: ${err.message}`)
+      listed = new Set()
+    }
+    const strict = strictFor(id)
     for (const [key, value] of Object.entries(english)) {
-      if (!Object.prototype.hasOwnProperty.call(record, key)) {
-        problems.push(`${id}: ${key} — no record of the English it was translated from`)
-      } else if (record[key] !== sourceHash(value)) {
-        problems.push(`${id}: ${key} — the English changed since its translation`)
-      }
+      let why = null
+      if (!Object.prototype.hasOwnProperty.call(record, key)) why = 'no record of the English it was translated from'
+      else if (record[key] !== sourceHash(value)) why = 'the English changed since its translation'
+      if (why === null) continue
+      if (!listed.has(key)) problems.push(`${id}: ${key} — ${why}`)
+      else if (strict) problems.push(`${id}: ${key} — ${why} (pending in ${PENDING_DIR}/${id}.json; --strict allows none)`)
+      else pending.push({ id, key })
     }
     for (const key of Object.keys(record)) {
       if (!Object.prototype.hasOwnProperty.call(english, key)) problems.push(`${id}: ${key} — recorded, but package.nls.json has no such key any more`)
     }
   }
-  return problems
+  return { problems, pending, languages: langs }
+}
+
+/** The problems alone, pending keys excepted (1.9's `check`). */
+export function check(root = '.') {
+  return checkAll(root).problems
 }
 
 function main(argv) {
-  if (argv.includes('--check')) {
-    const problems = check()
+  const strict = argv.includes('--strict')
+  if (argv.includes('--check') || strict) {
+    const named = argv.filter((a) => !a.startsWith('--'))
+    if (named.length > 0 && !strict) {
+      console.error('nls-sources: --check names no language; --check --strict <id> holds one language to every key')
+      process.exit(1)
+    }
+    const { problems, pending, languages } = checkAll('.', { strict: named.length > 0 ? named : strict })
+    for (const id of named) {
+      if (!languages.includes(id)) problems.push(`${id}: no package.nls.${id}.json — --strict names a language on disk`)
+    }
+    const counts = new Map()
+    for (const { id } of pending) counts.set(id, (counts.get(id) ?? 0) + 1)
+    for (const [id, n] of counts) console.log(`nls-sources: ${id}: ${n} key(s) pending in ${PENDING_DIR}/${id}.json — translate or confirm them, then \`node scripts/nls-sources.mjs ${id}\``)
     if (problems.length > 0) {
       for (const p of problems) console.error(`nls-sources: ${p}`)
       console.error('\nnls-sources: translate the named keys again, then run `node scripts/nls-sources.mjs <id>`.')
       process.exit(1)
     }
-    const n = readdirSync('.').map(nlsId).filter((x) => x !== null).length
-    console.log(`nls-sources: every record is fresh (${n} language(s))`)
+    const n = languages.length
+    const tail = pending.length > 0 ? `; ${pending.length} key(s) pending in ${counts.size}` : ''
+    console.log(`nls-sources: every record is fresh (${n} language(s)${tail})`)
     return
   }
   const ids = argv.filter((a) => !a.startsWith('--'))

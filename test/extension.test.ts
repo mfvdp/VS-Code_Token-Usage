@@ -963,8 +963,8 @@ test('a language switch applies at once: the setting\'s bundle at activation, th
 test('a language the build has no file for, a file that does not parse and a setting that is no language are English, and the log says why in English — never the setting\'s text (1.9 A1 rule 3, A2 rules 2–3)', async () => {
   const i18n = require('../src/i18n') as typeof import('../src/i18n')
   try {
-    // The repository ships no French bundle (group L adds it): the explicit choice is English.
-    await activateHost(makeEmptyFixture(), REPO, { settings: { 'tokenPace.language': 'fr' } })
+    // A build that ships no French bundle (a folder without one; the repository has one since group L): the explicit choice is English.
+    await activateHost(makeEmptyFixture(), languageFolder({}), { settings: { 'tokenPace.language': 'fr' } })
     assert.match(state.logText(), /Language: fr has no translation file in this build; English is shown\./)
     assert.match(state.logText(), /Language: fr → en \(0 strings, Intl en\)/)
     assert.equal(i18n.lang(), 'en')
@@ -1038,7 +1038,8 @@ test('the picker writes tokenPace.language once into the user settings — the i
     post({ type: 'setLanguage', id: 'fr' })
     await waitFor('the French write', () => rec.writes.length === 1)
     assert.deepEqual(rec.writes, [['language', 'fr', GLOBAL]])
-    await waitFor('the setting applied', () => /Language: fr → en/.test(state.logText()))
+    // The resolution itself is not this test's point: a build with the French bundle resolves fr → fr, one without fr → en.
+    await waitFor('the setting applied', () => /Language: fr → (fr|en)/.test(state.logText()))
     // The same id again: nothing.
     post({ type: 'setLanguage', id: 'fr' })
     await sleep(50)

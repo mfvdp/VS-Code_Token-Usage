@@ -3,6 +3,141 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.9.0 — <date set at publish>
+
+**Token Pace in fourteen languages, switched at the top of the dashboard.** A flag beside the
+provider switch opens the list of languages — English, Deutsch and, new in this release, Français,
+Español, Português (Brasil), Italiano, 日本語, 한국어, 简体中文, 繁體中文, Русский, Türkçe, Polski and
+Čeština —, and a choice turns the status bar, the dashboard, the Quick Pick, the markdown document
+and every notification and dialog from then on into that language at once, without a reload. The
+twelve new languages were translated by AI agents from the English text, with the German as a second
+reference, and checked by tests for completeness, placeholders and marks; they were not reviewed by
+native speakers. The settings and the command titles keep following VS Code's display language,
+which VS Code reads when it starts. And the opt-in keep-warm line is no longer held back for up to a
+week by a session of the same folder that was left behind.
+
+### Added
+
+* **The language picker.** At the end of the dashboard's top row, beside `Claude Code · Codex · All`,
+  a button shows the flag of the language the texts are in — the US flag for English. A click, or
+  `Enter`, `Space`, `↓` or `↑` on it, opens the list: `Automatic — as VS Code (English)` first, then
+  every language, each with its flag, its own name and, where the two differ, its name in the
+  language you read now (`Deutsch · German`); the chosen line carries a ✓. In the list `↓` and `↑`
+  move, `Home` and `End` go to the first and the last line, `Enter` or `Space` chooses, `Escape`
+  closes it and `Tab` leaves it without a choice; nothing is chosen by moving. A screen reader hears a
+  menu button, `Language: English (automatic)`, and each language by its name, in its own voice where
+  it has one; the flag is decoration. A choice switches at once, without a reload: the page keeps its
+  scroll position and the focus goes back to the flag, and the status bar with its tooltips, the
+  Quick Pick, the markdown document and the agent hook's setup document follow; notifications, dialogs
+  and consents are in the new language from then on. Two lines under the open list say what cannot
+  follow — `Token Pace's own texts switch at once. The settings, the command titles and the
+  walkthrough follow VS Code's display language (Configure Display Language).` — and who translated.
+  The flags are small drawings shipped inside the extension, the same on every system with no font
+  and no download; in a High Contrast theme they keep their colours and get an outline.
+* **Twelve languages**: Français, Español, Português (Brasil), Italiano, 日本語, 한국어, 简体中文,
+  繁體中文, Русский, Türkçe, Polski and Čeština, beside English and German — every text Token Pace
+  draws, with numbers and dates in that language's formats, and, for a VS Code whose display language
+  is one of them, the settings' descriptions, the command titles and the walkthrough's titles as well.
+  **They were translated by AI agents from the English text, with the German as a second reference,
+  and checked by tests for completeness, placeholders and the marks `~`, `⚠`, `≈` and `–` — they
+  were not reviewed by native speakers.** The tests hold every language to the same rules: every text
+  translated, every placeholder and mark kept, no code, setting or command name translated, no English
+  sentence left behind, no exclamation mark; they cannot tell a good word from a clumsy one. A wrong or
+  clumsy word is a bug — please report it on the
+  [issue tracker](https://github.com/mfvdp/VS-Code_Token-Usage/issues), with the language, the text
+  and where you saw it. The notation of the bar and the page is the same in every language: `45m`,
+  `2h14m`, `4 m 10 s`, `K`, `M` and `G`, the `$` of an amount, `1 h TTL`, the ISO day and the marks.
+  The debug log, the diagnostics report and the CSV and JSON exports stay English.
+* **`tokenPace.language`**, the setting the picker writes: `auto` — the default, VS Code's display
+  language, and English where Token Pace has no translation for it — or one of `en`, `de`, `fr`, `es`,
+  `pt-br`, `it`, `ja`, `ko`, `zh-cn`, `zh-tw`, `ru`, `tr`, `pl`, `cs`, which the settings UI offers
+  by each language's own name. It has the application scope: always your user settings, never a
+  workspace's, so a cloned repository's `.vscode/settings.json` cannot switch your language. A value
+  that is none of these counts as `auto`, and the log says so. VS Code reports its display language
+  only while that language's pack is installed, so `auto` gets English without one; choosing a
+  language in the list needs no language pack.
+
+### Changed
+
+* **The weekday in front of a clock time** — a reset more than a day away, as the status bar shows
+  it with `tokenPace.resetFormat` set to `absolute` or `both` and the markdown view beside a window —
+  is the language's own short name in every language but English and German (`lun.`, `pon.`, `Pzt`, `seg.`, `月`, `周一`). 1.8 cut every
+  language's to its first two letters, which turned Polish `pon.` into the word `po`. English and
+  German keep their two letters, `Mo 06:00`.
+* **Copy Diagnostics** names the language in a line of its own, `setting auto · shown de · VS Code
+  de`: the setting, the language whose words are shown and VS Code's display language. The report
+  itself stays English.
+
+### Fixed
+
+* **A day label under a Japanese, Chinese or Czech display language.** A sparkline point's label
+  printed its day as `土 26 9`, `周六 26 9` or `so 26 9` — its words were English, its formats that
+  language's, and the marks that make the digits a date were dropped. It is the language's own short
+  date now, `9月26日(土)`, `9月26日周六`, `so 26. 9.`.
+* **Two weekdays with one label under Brazilian Portuguese.** The two-letter weekday in front of a
+  clock time read `se` for both Monday and Friday and `qu` for both Wednesday and Thursday; it is
+  `seg.`, `sex.`, `qua.` and `qui.` now.
+* **The page's language under a display language Token Pace did not translate.** With VS Code in
+  such a language — French, say, with VS Code's French language pack, in 1.8 — the dashboard's
+  markup claimed that language (`lang="fr"`) for its English words, and a screen reader could read
+  them in a French voice. The page's `lang` is now the language of its words, region included (`pt-BR`,
+  `zh-CN`, `zh-TW`), and it moves with the picker.
+* **The calibration's figures in German.** With `tokenPace.calibration.show` on, the calibration line
+  wrote its figures with a decimal point in every language (`1.2`); it takes the language's decimal
+  mark now (`1,2` in German).
+* **The keep-warm line and a session left behind.** The keep-warm line is no longer held back by
+  another session of the same folder that was left behind — its newest line at least 2 hours old and
+  older than the moment the terminal's `claude` started (a prompt that never got its reply, an
+  interrupted reply, a window closed mid-turn). In 1.8 such a session held the line back for as long
+  as its transcript was kept, up to seven days.
+
+### Privacy
+
+* **One more field of a Claude Code transcript is read**: the `timestamp` of a `user` line of a main
+  transcript, matched on the raw line as the unescaped key `"timestamp":"…Z"` — the latest on the
+  line; the line is never parsed for it. Kept: the newest such time, one number per main session, in
+  the token snapshot for seven days, used only by the keep-warm line's check of the other sessions of
+  a folder; never shown, logged or exported.
+* **One setting is written for you**: `tokenPace.language`, in your user settings, when you choose a
+  language in the dashboard — through VS Code's settings API, the way *Cycle Status Bar Windows*
+  writes `tokenPace.windowSelect`; only on that click, only that key, never a workspace's settings.
+  *Automatic* removes the key again. If VS Code cannot write your settings, a warning says so and
+  nothing changes.
+* **Token Pace reads its own translation file** for the language shown,
+  `l10n/bundle.l10n.<language>.json` inside the extension's folder — a file it ships, with the
+  translations of its own texts and nothing of yours —, at activation and when the setting changes;
+  its name is built only from the list of shipped languages, never from the setting's text. Until
+  1.8 VS Code read it and handed it over. The language switch reads nothing else: no transcript, no
+  file of Claude Code or Codex, nothing over the network.
+
+### Internal
+
+* **Snapshot and export.** `STATE_VERSION` 8 and the export's `schema_version` 3
+  (`EXPORT_SCHEMA_VERSION` 3) are unchanged; `AGENT_TABLES_REVISION` 9 → 10, for the time of a
+  `user` line (Privacy, above). The first start of 1.9.0 rebuilds the agent tables once (revision
+  10), so sessions already read have that time at once; nothing is counted again and the snapshot
+  schema stays 8.
+* **The day of an hour bucket** is kept per time zone and day boundary by comparing the two directly,
+  where a key string of both was built for every bucket: on a synthetic store of 8 700 hour buckets a
+  view-model build took a median 26 ms instead of 49 in Europe/Berlin and 26 instead of 31 in UTC,
+  measured on the developer's machine — a measurement, not a promise; the figures are the same. A cost
+  series asked for without pricing is priced through one shared empty options object.
+* **The reset line** of the quota card and the Quick Pick takes `resets at` before a clock time, as
+  the status bar does; the card, the Quick Pick and the markdown report hand it a countdown today, so
+  nothing on screen changes.
+* **The translations are held to one frame.** Every language is checked by the same thirteen rules —
+  the keys, the parts, the placeholders, the marks, the code, the page's words, the tone, the tables,
+  no English left, the registry, the English quotes, the freshness and the heat map's weekday words
+  —, and every manifest translation has a freshness record, the first 16 hex digits of the SHA-256 of
+  the English it was translated from, that names every language whose English changed since. Neither
+  the records, the translation parts nor the translators' brief is packaged.
+* **The dashboard harness** the pages are checked with feeds each page what the extension pushes —
+  the view model without its host-only fields —, no longer the whole view model.
+* The comments that described engines before Chromium 131 describe what VS Code 1.138 does; the
+  built extension is the same.
+* **The read contract** of `npm run check:privacy` gains one row, the time of a user line
+  (`USER_LINE_TIME_RE`).
+
 ## 1.8.0 — 2026-09-25
 
 **A prompt cache that says when it cools, and an opt-in way to keep it warm.** Claude Code keeps

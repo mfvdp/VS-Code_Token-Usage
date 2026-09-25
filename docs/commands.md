@@ -43,19 +43,22 @@ command stays available from the Command Palette either way.
 The dashboard's title bar carries *Fetch Quota Now*, *Re-read Token History*, *Show Log*,
 *Open Settings* and *Export CSV…*.
 
-**Interface language.** Everything the *manifest* contributes is localized: the store listing,
-the display name, the command titles, the settings pages and the walkthrough. `package.json`
-holds only `%key%` placeholders, the words live in `package.nls.json` (English) and
-`package.nls.de.json` (German), and VS Code picks the file matching its display language
-(*Configure Display Language*), falling back to English for any key a translation lacks. Setting
-ids, enum values, paths and the JSON examples in the descriptions are identical in both
-languages, because they are what you copy. What the extension *renders* — the status bar and its
-tooltip, the dashboard, the Quick Pick, the markdown report, the dialogs and the agent hook's setup
-document — follows the display language as well, through the bundles in `l10n/`, German or
-English (see [Dashboard](dashboard.md), *Language*); the debug log, the diagnostics report and the
-CSV and JSON exports stay English on purpose. A further manifest language is one file,
-`package.nls.<locale>.json` with the keys of `package.nls.json`; `test/nls.test.ts` fails if a key
-is missing, unused, or if a translation drops a setting link or an example.
+**Interface language.** There is no command for it. The language of Token Pace's own texts is the
+setting `tokenPace.language` — `auto`, the default, or one of fourteen languages —, and the flag at
+the top of the dashboard sets it for you (see [Languages](languages.md)). What the extension
+*renders* — the status bar and its tooltips, the dashboard, the Quick Pick, the markdown report, the
+notifications and dialogs and the agent hook's setup document — follows that setting at once; the
+debug log, the diagnostics report and the CSV and JSON exports stay English on purpose. Everything
+the *manifest* contributes — the command titles, the settings pages, the view's name and the
+walkthrough's titles — follows VS Code's display language (*Configure Display Language*) instead, and
+does not switch with the picker: `package.json` holds only `%key%` placeholders, the words live in
+`package.nls.json` (English) and one `package.nls.<id>.json` per language — German, and since 1.9 the
+twelve languages of [Languages](languages.md) —, and VS Code picks the file matching its display
+language when it starts, falling back to English for any key a translation lacks. Setting ids, enum
+values, paths and the JSON examples in the descriptions are identical in every language, because
+they are what you copy. `test/nls.test.ts` fails if a key is missing, unused, or if a translation
+drops a setting link or an example; how a language is added is in
+[Building and testing](development.md#translating).
 
 **Walkthrough.** *Help → Get Started* lists **Get started with Token Pace**: what the bar and
 its colours mean, where the quota figures come from and what “poll” means, and the dashboard.

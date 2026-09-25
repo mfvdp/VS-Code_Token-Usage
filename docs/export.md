@@ -109,7 +109,9 @@ and quota-history size; every quota source with its age or failure and the drift
 provider one line with the next attempt our own fetch wants — the end of a backoff included — and
 the kind and the time of our own last failed attempt,
 `claude — next attempt 2026-09-24T12:52:00.000Z · last failed attempt 2026-09-24T11:40:00.000Z [retry]`,
-each `none` where there is none — never the failure's words, whatever the kind; the status-line
+each `none` where there is none — never the failure's words, whatever the kind; the language line
+(1.9), `setting auto · shown de · VS Code de` — the setting, the language whose words are shown and
+VS Code's display language, each a tag or `–` —, while the report itself stays English; the status-line
 bridge state; the `http.proxy` settings with their origin and the six proxy
 environment variables (`tokenPace.diagnostics.includeNetworkSetup`, credentials inside proxy URLs
 replaced by `***`); and the current value of every `tokenPace.*` setting.

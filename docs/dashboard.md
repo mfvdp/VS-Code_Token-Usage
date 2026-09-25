@@ -46,7 +46,9 @@ their place when the switch shows `Claude Code` or `All` again. A change of prov
 of the view state; the button just pressed keeps the keyboard focus while the page below it is
 redrawn. The buttons are a labelled group (*Providers*) of toggle buttons with `aria-pressed`, each
 a stop of the `Tab` key and at least 24 × 24 px, and they stay on one line down to the narrowest
-sidebar. A third provider in the registry would be a fourth button.
+sidebar. A third provider in the registry would be a fourth button. The same row ends with the
+language picker's flag (*Language*, below); where the row is too narrow for both, the flag moves onto
+a line of its own under the switch.
 
 **The filter bar.** One labelled block with a row each for **Range** and **Models**: the labels
 share a column, so the chips of both rows start at the same place instead of running on as one
@@ -193,14 +195,26 @@ sessions a list item without a state or a figure and its sessions one level in, 
 node and a line for the rest — with the open node's details as a table. While the switch shows
 Codex, neither view has an agents part or a context line, as the page has neither section.
 
-**Language.** With VS Code's display language set to German — the *German Language Pack*, or
-`--locale=de` — the extension is German: the status bar and its tooltip, the dashboard, the
-Quick Pick, the markdown report, the settings descriptions and every dialog, with dates and
-numbers formatted for that language (`2,8M`, `1.234.567`). English is the source text, so an
-untranslated string falls back to English rather than going blank, and every other display
-language gets English. Three things stay English on purpose, because they are pasted into
-issues and have to be readable by a maintainer: the debug log, the diagnostics report, and the
-CSV and JSON exports.
+**Language.** The flag at the end of the top row is the language picker — the US flag while the
+texts are English. A click on it, or `Enter`, `Space`, `↓` or `↑`, opens a menu: *Automatic — as VS
+Code (English)* first, then the fourteen languages, each with its flag, its own name and its name in
+the language you read now (*Deutsch* · German); the chosen line carries a ✓. In the menu `↓` and `↑`
+move, `Home` and `End` go to the first and the last line, `Enter` or `Space` chooses, `Escape` closes
+it and puts the focus back on the flag, and `Tab` leaves it without a choice. A choice switches Token
+Pace's own texts at once, without a reload — the status bar and its tooltips, this page, the Quick
+Pick, the markdown document, and every notification and dialog from then on, with dates and numbers
+formatted for that language (German `2,8M`, `1.234.567`) —; the page keeps its scroll position, the
+focus goes back to the flag, and the choice is written to `tokenPace.language` in your user settings.
+Under the open menu two lines say what cannot follow — *Token Pace's own texts switch at once. The
+settings, the command titles and the walkthrough follow VS Code's display language (Configure Display
+Language).* — and who translated — *The languages beyond English and German were translated by AI
+agents and checked by tests, not by native speakers.* `auto`, the default, follows VS Code's display
+language where Token Pace has a translation for it, and English where it has none. English is the
+source text, so an untranslated string falls back to English rather than going blank. Three things
+stay English on purpose, because they are pasted into issues and have to be readable by a maintainer:
+the debug log, the diagnostics report, and the CSV and JSON exports. The whole account — `auto` and
+what VS Code reports, what switches at once and what cannot, the fourteen languages and their flags,
+the notation that stays the same in every language — is in [Languages](languages.md).
 
 **Accessibility.** Bars are `role="progressbar"` with `aria-valuenow` and a spoken
 `aria-valuetext`; sortable headers carry `aria-sort`; toggles carry `aria-pressed`; chart
@@ -236,10 +250,10 @@ and their hues — taken out, they are drawn as patterns in the theme's two colo
 above), and a subagents' band under 4 px tall is striped, where its ring would otherwise fill it and
 make it look like the main sessions' solid band. The focus
 stays on its row — the running list's button, or the tree's item — when the section is pushed
-again, and on the provider switch's button you pressed when the switch is. The webview loads no external resource of any kind — its CSP
+again, on the provider switch's button you pressed when the switch is, and on the language picker's flag after a choice. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
-range, a sort, a filter, a provider for the switch (`all` or one the registry knows), a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
+range, a sort, a filter, a provider for the switch (`all` or one the registry knows), a language for the picker (`auto` or one of the fourteen ids — the one setting the page can have written, `tokenPace.language`, in your user settings), a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
 open, close, select or show more children of — at most 200 characters, and only ever matched against the nodes the tree
-was built with — or one of a fixed list of named commands; never a path and never a setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
+was built with — or one of a fixed list of named commands; never a path and never another setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
 carry the same figures.

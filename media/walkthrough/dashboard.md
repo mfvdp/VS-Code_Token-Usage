@@ -20,7 +20,10 @@ The provider switch at the very top — `Claude Code`, `Codex`, `All` — govern
 below it: one provider's figures, or every provider's as before. The range and model chips sit
 below the quota cards, the Agents section and the Tokens section and filter everything beneath
 them; the agent tree is always the last seven days. The status bar, the alerts and the exports
-follow no switch. Every section header carries a gear that opens the settings
+follow no switch. At the other end of that row a flag picks the language of Token Pace's own texts
+— fourteen of them, or *Automatic* for VS Code's display language (`tokenPace.language`); the
+settings and the command titles follow VS Code's display language. Every section header carries a
+gear that opens the settings
 behind that section, and `tokenPace.dashboard.sections` decides which sections appear and in
 which order.
 

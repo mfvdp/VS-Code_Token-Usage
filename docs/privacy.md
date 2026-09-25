@@ -124,7 +124,9 @@ identifiers and counts, never content:
   line as the unescaped key `"timestamp":"…Z"`, the latest on the line (a time nested in a tool's
   result can only make it newer); nothing else of that line is read —, for the keep-warm line's check
   of other sessions of the same folder, where one that has been left behind no longer holds the line
-  back. Nothing of an agent's transcript is kept for it.
+  back. What is kept of it is one number per main session, the newest such time — not the line's
+  text, its id, or the object a nested time came from —, and it is never shown. Nothing of an
+  agent's transcript is kept for it.
   The main session's record keeps these seven days in the token snapshot; none of the exports, the
   diagnostics report or the log carries them;
 * for the Codex prompt-cache line (1.8), of the Codex rollouts one value for the machine: the time and
@@ -240,8 +242,10 @@ And one setting of Token Pace's own is written for you (1.9): your user settings
 language in the dashboard (`tokenPace.language`) — through VS Code's settings API, the way *Cycle
 Status Bar Windows* writes `tokenPace.windowSelect`; only on that click, only that key, always your
 user settings and never a workspace's (the setting has application scope). Choosing *Automatic*
-removes the key. Switching the language reads nothing else — no transcript, no file of Claude Code or
-Codex, nothing over the network.
+removes the key; the language already chosen writes nothing. If VS Code cannot write your settings,
+one warning says so, the log names the kind of error, and nothing changes. Switching the language
+reads Token Pace's own translation file for it (above) and nothing else — no transcript, no file of
+Claude Code or Codex, nothing over the network.
 
 The only outbound network access is the consent-gated quota fetch described under
 [Quota sources](quota-sources.md). That promise is checked mechanically:

@@ -55,6 +55,16 @@ Absence is never drawn as a number: a missing figure is `–`, never `0 %` or `$
 without a stated length gets no pace and no forecast rather than an invented denominator; a
 day with no data has no row in an export rather than a row of zeros.
 
+**In your language** (1.9). A figure is written the way the language you chose — with the flag at the
+top of the dashboard, or `tokenPace.language` — writes it: its digits, decimal mark and grouping
+(German `2,8M` and `1.234.567`, French a decimal comma and a narrow space between thousands), its names
+of weekdays and months, the weekday in front of a clock time in its own short form; under `auto`, the
+way VS Code's display language writes it. The notation is the same in every language, because it is
+the bar's and the page's own and not a word: the countdowns `45m`, `2h14m`, `3d 5h` and `4 m 10 s`,
+the suffixes `K`, `M` and `G`, the `$` in front of an amount, the ISO day `2026-09-01`, `1 h TTL`, and
+the marks `~`, `⚠`, `≈` and `–` this page explains. The whole list is in
+[Languages](languages.md#numbers-dates-and-times).
+
 ## Words used here
 
 Nine terms carry most of the meaning in this extension. Each is used in exactly one sense, in

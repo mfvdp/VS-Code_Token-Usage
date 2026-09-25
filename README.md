@@ -17,11 +17,13 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![Token Pace in the VS Code status bar: one entry per quota window, each with a pace-coloured bar, an elapsed marker, the percentage and the countdown to its reset](media/screenshot-status-bar.png)
 
-![The Token Pace dashboard in the secondary sidebar: the provider switch Claude Code · Codex · All at the top; quota cards with pace verdict, forecast, the subagents' share of each Claude window and a seven-day sparkline coloured by pace; the Agents section with the agents running now over the tree of the active session, its workflow run and agents — each row with its state, usage, duration and tally, the names in the colour of their state, guide lines from every child to its parent — and the closed row of earlier sessions; the Tokens section folded, the filter block and the summary](media/screenshot-dashboard.png)
+![The Token Pace dashboard in the secondary sidebar: the provider switch Claude Code · Codex · All and the flag of the language picker at the top; quota cards with pace verdict, forecast, the subagents' share of each Claude window and a seven-day sparkline coloured by pace; the Agents section with the agents running now over the tree of the active session, its workflow run and agents — each row with its state, usage, duration and tally, the names in the colour of their state, guide lines from every child to its parent — and the closed row of earlier sessions; the Tokens section folded, the filter block and the summary](media/screenshot-dashboard.png)
 
 ![The Tokens section of the dashboard: the two running windows against the quota cards over the fixed periods, the cache switch over the composition bars, and the cache economy](media/screenshot-tokens.png)
 
 ![The Claude quota card with its prompt-cache block after the windows: one session measured by the status line, its one-hour cache cooling in 4 m 10 s, and what a cold start would re-write against a cache read; one session cold since ~11:40, estimated from its transcript and marked with ~](media/screenshot-prompt-cache.png)
+
+![The language picker open at the top of the dashboard: Automatic — as VS Code (English) first, then English checked, Deutsch · German, Français · French and the other languages, each with its flag, its own name and its name in English; under the list the line on what switches at once and the line on who translated the languages](media/screenshot-languages.png)
 
 The pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States*
 and a synthetic snapshot), not from anybody's real usage.
@@ -32,17 +34,15 @@ and a synthetic snapshot), not from anybody's real usage.
 older VS Code base — Cursor and Windsurf currently are — cannot install it until they rebase;
 VSCodium tracks the VS Code releases and gets it from Open VSX.
 
-Not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI. “Claude” and “Codex”
-are the trademarks of their respective owners and are used here only to name the tools whose
-output is read.
+Not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI. “Claude” and “Codex” are the
+trademarks of their respective owners and are used here only to name the tools whose output is read.
 
 ## What you see
 
-* **A status bar entry per quota window**, model-scoped ones included: a pace-coloured bar
-  with the elapsed marker, the percentage and the countdown to the reset. `windowSelect`
-  decides how many appear, `statusBar.show` which kinds exist and in which order, `density`
-  how much text each one gets. → [Status bar](docs/status-bar.md),
-  [every state it can show](docs/status-bar-states.md)
+* **A status bar entry per quota window**, model-scoped ones included: a pace-coloured bar with the
+  elapsed marker, the percentage and the countdown to the reset. `windowSelect` decides how many
+  appear, `statusBar.show` which kinds exist and in which order, `density` how much text each one
+  gets. → [Status bar](docs/status-bar.md), [every state it can show](docs/status-bar-states.md)
 * **A tooltip with the whole picture**: the window table with used, elapsed, pace and reset,
   a forecast line per window, the token tables for today / 7 days / 30 days, the freshness
   line and a provenance line that names what was measured and what was estimated. When a fetch of
@@ -66,15 +66,14 @@ output is read.
 * **Your Claude Code agents as a tree**: the agents running now listed on top, then the active
   sessions with their workflow runs and agents, and every other session of the last seven days in
   one closed row, `Earlier sessions (12)` — closed until you open them, fifty children at a time —
-  each with its state, usage, duration and a tally of what the agents below came to
-  (`427 started · 390 ✓ · 15 ✕ · 10 ↻ · ~11 ● · ~1 ?`), live while it runs. A name says its state
-  in colour as well — green done, yellow unknown, red failed, blue running —, never as the only
-  sign, and guide lines connect every child to its parent. Failed, stopped, retried and replaced
-  agents are told apart, a run's own recorded end and a rejected request are named, and a click
-  opens the details under the row — effort, token mix, tool errors, cache misses, compactions,
-  Claude Code's own run record. A state that is only
-  inferred says so, and nothing of a prompt or a result is read. The tree is a tree to the
-  keyboard and a screen reader too. → [Agents](docs/agents.md)
+  each with its state, usage, duration and a tally of what the agents below came to (`427 started ·
+  390 ✓ · 15 ✕ · 10 ↻ · ~11 ● · ~1 ?`), live while it runs. A name says its state in colour as well
+  — green done, yellow unknown, red failed, blue running —, never as the only sign, and guide lines
+  connect every child to its parent. Failed, stopped, retried and replaced agents are told apart, a
+  run's own recorded end and a rejected request are named, and a click opens the details under the
+  row — effort, token mix, tool errors, cache misses, compactions, Claude Code's own run record. A
+  state that is only inferred says so, and nothing of a prompt or a result is read. The tree is a
+  tree to the keyboard and a screen reader too. → [Agents](docs/agents.md)
 * **Where the agent tokens went**: a 7-day block by agent type and model with the five largest
   agents, and under each Claude window's bar the subagents' share of what was counted over it —
   a share of tokens, never of the quota. The chart can split every day by main session and
@@ -94,9 +93,10 @@ output is read.
 * **Nothing invented.** A missing figure is `–`, never `0 %`; a window without a stated length
   gets no pace rather than an invented denominator; estimates carry `~` and lower bounds `⚠`.
   → [Numbers, words and pace](docs/numbers.md)
-* **English and German.** With VS Code's display language set to German the whole interface is
-  German, numbers and dates included; the debug log, the diagnostics report and the exports
-  stay English so they can be pasted into an issue. → [Language](docs/dashboard.md)
+* **Fourteen languages.** A flag at the top of the dashboard switches the status bar, the dashboard,
+  the Quick Pick, the report and every dialog at once — to English, Deutsch, Français, Español,
+  Português (Brasil), Italiano, 日本語, 한국어, 简体中文, 繁體中文, Русский, Türkçe, Polski or Čeština, or to
+  VS Code's display language. The twelve beyond English and German were translated by AI agents and checked by tests, not by native speakers. → [Languages](docs/languages.md)
 
 ## Install
 
@@ -136,12 +136,13 @@ Transcript contents — prompts, responses, tool arguments and tool results — 
 logged, exported or displayed. Nothing is written outside the extension's own storage except the
 shared quota cache file and the status-line bridge — which keeps only the fields Token Pace reads —,
 and nothing is typed anywhere except the keep-warm line: three opt-ins, each behind its own consent
-dialog, all three off by default and off in Restricted Mode. The agent tree reads identifiers,
-names, counts and allow-listed words only — an agent's type, model, ids and outcome, its effort,
-a rejected request's status, error kind and limit, its last tool's name, its tool errors, cache
-misses, Claude Code version, permission mode and compactions, the seven fields of a run record,
-and, with the opt-in hook, four keys of a hook call — each field named in
-[Privacy](docs/privacy.md); never a prompt, a description, a result or a path.
+dialog, all three off by default and off in Restricted Mode; a language you pick in the dashboard
+goes into your user settings. The agent tree reads identifiers, names, counts and allow-listed words
+only — an agent's type, model, ids and outcome, its effort, a rejected request's status, error kind
+and limit, its last tool's name, its tool errors, cache misses, Claude Code version, permission mode
+and compactions, the seven fields of a run record, and, with the opt-in hook, four keys of a hook
+call — each field named in [Privacy](docs/privacy.md); never a prompt, a description, a result or a
+path.
 
 No telemetry of any kind is collected, the webview loads no external resource, and
 `npm run check:privacy` fails the build on any `http(s)` literal outside a small allow-list, on
@@ -156,7 +157,7 @@ bundle that loads more than `child_process`, `fs` and `path`. The full account i
 | [Numbers, words and pace](docs/numbers.md) | Where every figure comes from, the nine terms used throughout, and the pace rule the colours follow |
 | [Status bar](docs/status-bar.md) | What an entry is made of, the special states, the click, the tooltip, the colours, the preview |
 | [Status bar states](docs/status-bar-states.md) | Every text the bar can show, which state wins when several apply, and the one thing to check |
-| [Dashboard](docs/dashboard.md) | The provider switch, the sections of the panel, the filter bar, the chart, the tables and the heatmap |
+| [Dashboard](docs/dashboard.md) | The provider switch and the language picker, the sections of the panel, the filter bar, the chart, the tables and the heatmap |
 | [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree with its earlier sessions, state colours and guide lines: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
 | [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch — its user agent and a failed attempt beside an old figure —, the status-line bridge and where its script lives, extra usage |
 | [Prompt cache](docs/prompt-cache.md) | The cooling warning and what a cold start would cost, which figure is measured and which estimated, the Codex line, the opt-in keep-warm line with every check it makes and what it cannot see, and exactly which fields are read |
@@ -171,7 +172,7 @@ bundle that loads more than `child_process`, `fs` and `path`. The full account i
 | [Privacy](docs/privacy.md) | Every file read, everything never touched, and the one outbound call |
 | [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, the Claude Code version on Windows, where the status-line bridge's script lives, restricted and virtual workspaces |
 | [Settings](docs/settings.md) | Every `tokenPace.*` key with its default and what it does |
-| [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language, the walkthrough |
+| [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language — a setting and a picker, not a command —, the walkthrough |
 | [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the fourteen languages and their flags, the notation that stays the same, and how the translations were made |
 | [Building and testing](docs/development.md) | Build, tests, the smoke test in a real window, and what CI runs |
 | [Releasing](docs/release.md) | The tag-push recipe, the two store secrets, publisher verification |
@@ -189,11 +190,10 @@ assurance should survive being passed on, by whichever route:
 
 * **Distributed** as another extension, a `.vsix`, or inside a product — the complete source
   of the modified version has to be published under the same licence.
-* **Run as a network service** — section 13 extends the same duty to people who only ever
-  reach the software over a network, so a hosted dashboard built from this code owes its
-  users the source as well. That is the difference between the AGPL and the plain GPL, and
-  it is the reason for this choice: a quota dashboard is exactly the kind of thing that ends
-  up hosted rather than shipped.
+* **Run as a network service** — section 13 extends the same duty to people who only ever reach the
+  software over a network, so a hosted dashboard built from this code owes its users the source as
+  well. That is the difference between the AGPL and the plain GPL, and it is the reason for this
+  choice: a quota dashboard is exactly the kind of thing that ends up hosted rather than shipped.
 
 Using and modifying it for yourself carries no obligation whatsoever. The duty begins at
 distribution or at offering a service, never at use, and forking this repository is neither.

@@ -271,22 +271,25 @@ one-minute countdown starts in the status bar, and all of them again when the co
     idle phase.
 13. **The terminal's own session** — a terminal is known by its folder, not by the session in it, so
     the session has to be the one that terminal's `claude` began: its first reply came after VS Code
-    reported the start of that `claude`, and no other session of the same folder began later. A
-    session begun before — one resumed there with `claude --resume` — never gets a line. And every
-    other session of the folder has to be idle as checks 4 and 5 measure it — its newest reply at
-    least a minute old and finished, nothing of the user's after it, no agent of it running —, so that
-    a line that reached another session could not land in a reply under way or in an open dialog.
-    Another session of the same folder no longer holds the line back once it has been left behind:
-    no agent of it running, and its newest line at least 2 hours old and older than the moment the
-    terminal's `claude` started — a prompt that never got its reply, an interrupted reply, a window
-    closed mid-turn. In 1.8 such a session held the folder back for as long as its transcript was
-    kept, seven days. A reply under way or an open dialog lives in the Claude Code that wrote the
-    session's newest line, and a line written before this terminal's `claude` started cannot be that
-    one's — so the line cannot land in that session's dialog even where the terminal runs it. That is
-    an inference, not a rule Claude Code documents, and the two hours stand behind it: a session that
-    wrote a line in the last two hours is never passed over, whichever Claude Code wrote it. Its newest
-    line is the later of its newest reply and its newest `user` line; when the user's line is the
-    newest and its time is not known, the session is not passed over.
+    reported the start of that `claude`, and no other session of the same folder began later. A session
+    begun before — one resumed there with `claude --resume` — never gets a line. And every other
+    session of the folder has to be idle as checks 4 and 5 measure it — its newest reply at least a
+    minute old and finished, nothing of the user's after it, no agent of it running —, so that a line
+    that reached another session could not land in a reply under way or in an open dialog. Another
+    session of the same folder no longer holds the line back once it has been left behind: no agent of
+    it running, and its newest line at least 2 hours old and older than the moment the terminal's
+    `claude` started — a prompt that never got its reply, an interrupted reply, a window closed
+    mid-turn. In 1.8 such a session held the folder back for as long as its transcript was kept, seven
+    days. A reply under way or an open dialog lives in the Claude Code that wrote the session's newest
+    line, and a line written before this terminal's `claude` started cannot be that one's — so the line
+    cannot land in that session's dialog even where the terminal runs it. That is an inference, not a
+    rule Claude Code documents, and the two hours stand behind it: a session that wrote a line in the
+    last two hours is never passed over, whichever Claude Code wrote it. Its newest line is the later
+    of its newest reply and its newest `user` line; when the user's line is the newest and its time is
+    not known, the session is not passed over. A session this terminal's own `claude` wrote to — a turn
+    you interrupted there before `/clear` or before starting another session in it — is never left
+    behind: it holds the line back until it has finished its turn or that terminal's `claude` is
+    started again.
 
 **What no check can see.** Token Pace cannot read Claude Code's input line: **text you typed there
 and did not send is sent together with the line** — type nothing into the Claude terminal while the
@@ -298,8 +301,10 @@ recognised by its folder and the session in it by time (check 13); what time can
 terminal whose `claude` started before the session's first reply but which now runs another, older
 session of the same folder — one picked there with `/resume`, or one begun in it before the session
 was started elsewhere, in another window or in the panel. That session gets the line only while it
-is idle by check 13's measure or left behind by it, and it costs that session one request; its
-answer is not the watched session's, so check 11 then stops keep-warm after that one line. A session
+is idle by check 13's measure or left behind by it, and it costs that session one request; a menu or
+picker open in that terminal is not seen by any check, and a session left behind there may get the
+line after a prompt it never answered. Its answer is not the watched session's, so check 11 then
+stops keep-warm after that one line. A session
 in the Claude Code extension's own panel gets the cooling warning and never a line.
 
 **The countdown.** When the checks hold, a status-bar item of its own appears, whatever

@@ -142,14 +142,48 @@ started —, in these words:
 * **`cancelled`** — you cancelled a countdown in this idle phase.
 * **`otherSession`** — a terminal is known by its folder, not by its session, and this one may run
   another session of the folder: the session began before the terminal's `claude` started (it was
-  resumed there, with `claude --resume`), or another session of the folder began after it — either
-  way the session gets no line —; or another session of the folder is not idle: its newest reply is
-  less than a minute old, stopped for a tool or was cut off, a line of yours came after it (a
-  question or a permission dialog may be open there), or an agent of it runs. The last holds until
-  that session has finished its turn, or until it has been left behind: no agent of it running, and
-  its newest line at least 2 hours old and older than the moment this terminal's `claude` started — a
-  prompt that never got its reply, an interrupted reply, a window closed mid-turn. In 1.8 such a
-  session held the line back for as long as its transcript was kept, seven days.
+  resumed there, with `claude --resume`), or another session of the folder began after it — either way
+  the session gets no line —; or another session of the folder is not idle: its newest reply is less
+  than a minute old, stopped for a tool or was cut off, a line of yours came after it (a question or a
+  permission dialog may be open there), or an agent of it runs. The last holds until that session has
+  finished its turn, or until it has been left behind: no agent of it running, and its newest line at
+  least 2 hours old and older than the moment this terminal's `claude` started — a prompt that never
+  got its reply, an interrupted reply, a window closed mid-turn. In 1.8 such a session held the line
+  back for as long as its transcript was kept, seven days. A session this terminal's own `claude`
+  wrote to — a turn you interrupted there before `/clear` or before starting another session in it —
+  is never left behind: it holds the line back until it has finished its turn or that terminal's
+  `claude` is started again.
+
+## The language
+
+The language of Token Pace's own texts is the setting `tokenPace.language`, which the flag at the top
+of the dashboard sets (see [Languages](languages.md)). When it does not do what you expect:
+
+* **The dashboard is in another language than VS Code.** The setting names a language — you chose one
+  with the flag, or set it in the settings. Choose *Automatic* at the top of the flag's list, or set
+  `tokenPace.language` back to `auto`, and the texts follow VS Code's display language again.
+* **`auto` shows English, though another display language is set.** VS Code reports its display
+  language only while that language's pack is installed; without the pack it reports English, and the
+  flag's list then says *Automatic — as VS Code (English)*. And a language Token Pace has no
+  translation for is English under `auto` too — the list's first line says so: *Automatic — VS Code's
+  language (hu) has no translation here, so English*. Choosing a language in the list needs no
+  language pack.
+* **The settings and the command titles did not switch.** They cannot: VS Code reads them from the
+  extension's `package.nls.<language>.json` when it starts, for its own display language, and gives
+  an extension no way to have them read again. *Configure Display Language* — which restarts VS Code —
+  changes them. The walkthrough's titles follow VS Code the same way; its three step pages are English
+  in every language.
+* **One text stayed in the old language.** A Quick Pick, a dialog or a notification that was open at
+  the switch keeps its language until it closes. The words of Token Pace's last failed quota fetch
+  stay in the language they were written in until the next attempt. The debug log, the diagnostics
+  report and the CSV and JSON exports are English in every language, on purpose.
+* **A choice did nothing, and a warning said** *Token Pace: the language could not be written to your
+  user settings.* VS Code could not write your user `settings.json` — a file that is read-only, say,
+  or one with an error in it. The log names the kind of error; the page stays in the language it had.
+* **The setting names a language, but the texts are not in it.** The value is not one of the ids of
+  [the table](languages.md#the-fourteen-languages) — another case (`FR`), a path, a typo — and counts
+  as `auto`; or the installed build carries no translation file for it, or the file could not be
+  read, and the texts are English. The log says which.
 
 ## A question answered after the window closed
 

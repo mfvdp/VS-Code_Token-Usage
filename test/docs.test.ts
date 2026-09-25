@@ -2594,10 +2594,13 @@ test('the 1.8.0 release notes: the newest entry, every section in order, the ver
   const cw = require('../src/cacheWatch') as typeof import('../src/cacheWatch')
   const { KEEP_WARM_TERMS_PASSAGE } = require('../src/consent') as typeof import('../src/consent')
   const log = readDoc('CHANGELOG.md')
-  const first = log.indexOf('\n## ')
+  // 1.9 P20 (pinned and changed: "the newest CHANGELOG entry is 1.8.0"): 1.9.0 stands above it now, so the
+  // 1.8.0 entry is found by its heading; the 1.9.0 entry has a test of its own (1.9 P20, below).
+  const first = log.indexOf('\n## 1.8.0 ')
+  assert.ok(first >= 0, 'the CHANGELOG has no 1.8.0 entry')
   const second = log.indexOf('\n## ', first + 4)
   const entry = log.slice(first, second)
-  assert.match(entry, /^\n## 1\.8\.0 — 2026-09-25\n\n\*\*/, 'the newest CHANGELOG entry is not 1.8.0 of 2026-09-25, or does not open with its summary')
+  assert.match(entry, /^\n## 1\.8\.0 — 2026-09-25\n\n\*\*/, 'the 1.8.0 entry is not of 2026-09-25, or does not open with its summary')
   const flat = flatText(entry)
   const order = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal'].map((h) => flat.indexOf(h))
   assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.8.0 entry\'s sections are missing or out of order')
@@ -2774,7 +2777,10 @@ test('docs/languages.md: the picker, the setting and `auto` as the code has them
     '*Automatic* removes the key again; the line that is already chosen writes nothing',
     'any other value (another case, a path) counts as `auto`, and the log says so',
     '`de-ch` becomes `de`', '`pt-pt` therefore gets English: Token Pace has Brazilian Portuguese, `pt-br`, but no `pt`',
-    'a Swiss German window keeps Swiss number formats with German words, a Hungarian window Hungarian digits with English words',
+    // 1.9 P20 (pinned and changed: "a Swiss German window keeps Swiss number formats …"): VS Code 1.138 hands a
+    // regional display language over as its pack's language (§7a probe: --locale=de-ch → env.language de), so no
+    // Swiss German window reaches the formatters as de-ch; the page says what VS Code reports instead.
+    'Under `auto` the numbers and dates follow the tag VS Code reports, as they did before 1.9: a display language Token Pace has no translation for keeps its own number and date formats, with English words.',
   ]) assert.ok(page.includes(claim), `docs/languages.md does not say: ${claim}`)
   // The examples are the rule's own answers.
   assert.equal(autoLanguage('de-ch', LANGUAGE_IDS), 'de')
@@ -2977,4 +2983,279 @@ test('the pages state the keep-warm G13 bound as src/keepWarm.ts has it, the tim
   assert.ok(flatText(doc.counting).includes('so that a session left behind before the update stops holding the line back at once'))
   assert.ok(flatText(doc.agents).includes(`revision **${AGENT_TABLES_REVISION}** in 1.9.0, revision **9** in 1.8.0`), 'docs/agents.md does not state 1.9.0\'s revision')
   assert.ok(flatText(doc.agents).includes('1.9.0 did, for the time of each main session\'s newest `user` line'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.9 P20 (§4 P20, §3 A7, B4, D; Review 2's docs sentences): the documentation of 1.9.0, complete —
+// every item of §1 where a reader looks for it, the release notes, the quality statement in its four
+// places, the old claims gone, and the German counterpart of every interface text the pages quote.
+// ---------------------------------------------------------------------------
+
+/** 2026-09-28 is a Monday; `day` days on, 06:00 UTC. */
+const MONDAY_0600 = (day = 0): number => Date.UTC(2026, 8, 28 + day, 6, 0)
+const UTC_TIME: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+
+/** 1.8's day label — weekday, day and month out of formatToParts, the literals dropped — for the release notes' "before". */
+function dayLabel18(tag: string, ms: number): string {
+  const parts = new Intl.DateTimeFormat(tag, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).formatToParts(ms)
+  const part = (type: string): string => parts.find((p) => p.type === type)?.value ?? ''
+  return `${part('weekday')} ${part('day')} ${part('month')}`
+}
+
+test('the 1.9.0 release notes: the newest entry, its date set at publish, every section in order, the plain statement, the versions and figures the code has, nothing unverified (1.9 P20)', () => {
+  const kw = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  const { formatDay, formatTime } = require('../src/time') as typeof import('../src/time')
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  // The release cadence: the date is set on the release branch at publish, never before.
+  assert.match(entry, /^\n## 1\.9\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.9.0 with its date left for the publish, or does not open with its summary')
+  const flat = flatText(entry)
+  const heads = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal']
+  const order = heads.map((h) => flat.indexOf(h))
+  assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.9.0 entry\'s sections are missing or out of order')
+  const section = (h: string): string => { const at = heads.indexOf(h); return flat.slice(order[at], at + 1 < heads.length ? order[at + 1] : undefined) }
+  // The twelve languages, named in their own names in the registry's order — in the summary and in Added.
+  const twelve = LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native)
+  assert.equal(twelve.length, 12)
+  const named = `${twelve.slice(0, -1).join(', ')} and ${twelve[twelve.length - 1]}`
+  assert.equal(flat.split(named).length - 1, 2, `the 1.9.0 entry does not name the twelve languages twice as the registry has them: ${named}`)
+  const hours = kw.KEEPWARM_SIBLING_LEFT_MS / 3_600_000
+  for (const claim of [
+    // Added: the picker, the twelve languages with the plain statement, the setting.
+    '**The language picker.**', 'beside `Claude Code · Codex · All`', 'the US flag for English', '`Automatic — as VS Code (English)` first',
+    '(`Deutsch · German`); the chosen line carries a ✓', 'nothing is chosen by moving', '`Language: English (automatic)`',
+    'the page keeps its scroll position and the focus goes back to the flag',
+    '`Token Pace\'s own texts switch at once. The settings, the command titles and the walkthrough follow VS Code\'s display language (Configure Display Language).`',
+    'in a High Contrast theme they keep their colours and get an outline',
+    '**They were translated by AI agents from the English text, with the German as a second reference, and checked by tests for completeness, placeholders and the marks `~`, `⚠`, `≈` and `–` — they were not reviewed by native speakers.**',
+    'A wrong or clumsy word is a bug — please report it on the [issue tracker](https://github.com/mfvdp/VS-Code_Token-Usage/issues)',
+    `or one of ${LANGUAGE_IDS.map((id) => `\`${id}\``).join(', ')}, which the settings UI offers by each language's own name`,
+    'It has the application scope: always your user settings, never a workspace\'s',
+    'VS Code reports its display language only while that language\'s pack is installed',
+    // Changed: the weekday, the diagnostics line.
+    '(`lun.`, `pon.`, `Pzt`, `seg.`, `月`, `周一`)', 'which turned Polish `pon.` into the word `po`', 'English and German keep their two letters, `Mo 06:00`',
+    '`setting auto · shown de · VS Code de`',
+    // Fixed: the day label, the Brazilian weekdays, the page's lang, the calibration, Review 2's (c) word for word.
+    '`土 26 9`, `周六 26 9` or `so 26 9`', '`9月26日(土)`, `9月26日周六`, `so 26. 9.`',
+    'read `se` for both Monday and Friday and `qu` for both Wednesday and Thursday', '(`lang="fr"`)', '(`pt-BR`, `zh-CN`, `zh-TW`)',
+    `The keep-warm line is no longer held back by another session of the same folder that was left behind — its newest line at least ${hours} hours old and older than the moment the terminal's \`claude\` started (a prompt that never got its reply, an interrupted reply, a window closed mid-turn). In 1.8 such a session held the line back for as long as its transcript was kept, up to seven days.`,
+    // Privacy: Review 2's (d) word for word, the setting write, the bundle read.
+    'One more field of a Claude Code transcript is read**: the `timestamp` of a `user` line of a main transcript, matched on the raw line as the unescaped key `"timestamp":"…Z"` — the latest on the line; the line is never parsed for it. Kept: the newest such time, one number per main session, in the token snapshot for seven days, used only by the keep-warm line\'s check of the other sessions of a folder; never shown, logged or exported.',
+    '**One setting is written for you**: `tokenPace.language`', '`l10n/bundle.l10n.<language>.json`',
+    // Internal: the versions, Review 2's (e), L-7 with development.md's figures, L-8, the reset line, the frame, H-1, C-1, the contract.
+    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are unchanged; \`AGENT_TABLES_REVISION\` ${RELEASED_1_8_REVISION} → ${AGENT_TABLES_REVISION}`,
+    `The first start of 1.9.0 rebuilds the agent tables once (revision ${AGENT_TABLES_REVISION}), so sessions already read have that time at once; nothing is counted again and the snapshot schema stays ${STATE_VERSION}.`,
+    'a view-model build took a median 26 ms instead of 49 in Europe/Berlin and 26 instead of 31 in UTC, measured on the developer\'s machine — a measurement, not a promise',
+    'A cost series asked for without pricing is priced through one shared empty options object.',
+    'so nothing on screen changes', 'the first 16 hex digits of the SHA-256 of the English it was translated from',
+    'feeds each page what the extension pushes', 'the built extension is the same', '(`USER_LINE_TIME_RE`)',
+  ]) assert.ok(flat.includes(claim), `the 1.9.0 entry does not say: ${claim}`)
+  // The figure is development.md's, measured there — not §7c's profiler run.
+  assert.ok(flatText(doc.development).includes('a build now takes a median 26 ms instead of 49 in Europe/Berlin and 26 instead of 31 in UTC'))
+  assert.equal(/46 ms|22 ms|46 → 22/.test(flat), false, 'the 1.9.0 entry quotes the profiler\'s figure, not development.md\'s')
+  // The versions it names are the code's; the snapshot schema and the export stay.
+  assert.deepEqual([STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
+  for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : EXPORT_SCHEMA_VERSION, `the 1.9.0 entry says ${m[1]} ${m[2]}`)
+  }
+  // The examples are what the code prints: the weekday of each language, the day label 1.9 writes and the one 1.8 wrote.
+  const weekday = (tag: string, day = 0): string => underLocale(tag, () => formatTime(MONDAY_0600(day), UTC_TIME, true).split(' ')[0])
+  assert.deepEqual([['pl', 0], ['tr', 0], ['fr', 0], ['pt-BR', 0], ['ja', 0], ['zh-CN', 0], ['en', 0], ['de', 0]].map(([tag, d]) => weekday(tag as string, d as number)),
+    ['pon.', 'Pzt', 'lun.', 'seg.', '月', '周一', 'Mo', 'Mo'])
+  const sat = Date.UTC(2026, 8, 26, 12)
+  assert.deepEqual(['ja', 'zh-CN', 'cs'].map((tag) => underLocale(tag, () => formatDay(sat, UTC_TIME))), ['9月26日(土)', '9月26日周六', 'so 26. 9.'])
+  assert.deepEqual(['ja', 'zh-CN', 'cs'].map((tag) => dayLabel18(tag, sat)), ['土 26 9', '周六 26 9', 'so 26 9'])
+  const two = (day: number): string => new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', weekday: 'short' }).format(MONDAY_0600(day)).slice(0, 2)
+  assert.deepEqual([two(0), two(4), two(2), two(3)], ['se', 'se', 'qu', 'qu'], '1.8\'s two letters of Brazilian Portuguese')
+  assert.deepEqual([weekday('pt-BR', 0), weekday('pt-BR', 4), weekday('pt-BR', 2), weekday('pt-BR', 3)], ['seg.', 'sex.', 'qua.', 'qui.'])
+  assert.equal(new Intl.DateTimeFormat('pl', { timeZone: 'UTC', weekday: 'short' }).format(MONDAY_0600()).slice(0, 2), 'po')
+  // The diagnostics line is the report's own.
+  assert.ok(readDoc('src/diagnostics.ts').includes("row('Language', `setting ${tagOf(language.setting)} · shown ${tagOf(language.shown)} · VS Code ${tagOf(language.vscode)}`)"))
+  // Claims the package could not verify, or that the notes forbid, are not made: no visible "resets at" fix
+  // (no clock time reaches that line today), no Swiss German change (VS Code 1.138 already reports `de` for
+  // it), never the unqualified "an abandoned session no longer blocks the line".
+  assert.equal(section('### Fixed').includes('resets at'), false, 'the 1.9.0 entry claims a visible "resets at" fix')
+  for (const never of [/Swiss/i, /de-ch/i, /abandoned session no longer blocks/i, /professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i]) {
+    assert.equal(never.test(entry), false, `the 1.9.0 entry says ${never}`)
+  }
+  assert.equal(/review/i.test(flat.replace(/not reviewed by native speakers/g, '')), false, 'the 1.9.0 entry claims a review')
+  // A store page: no path of the machine it was built on, no internal file, no secret, no package version talk.
+  for (const never of [/\/home\//, /plan-1\.\d/, /p1\d-input/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//, /package\.json/]) {
+    assert.equal(never.test(entry), false, `the 1.9.0 entry mentions ${never}`)
+  }
+})
+
+test('the quality statement stands in its four places and in the picker, says who translated from what, what the tests check, that no native speaker reviewed it — and claims nothing more (1.9 B4, P20)', () => {
+  const statement = 'translated by AI agents'
+  const places: Array<[string, string]> = [
+    ['docs/languages.md', flatText(doc.languages)], ['README.md', flatText(README)],
+    ['CHANGELOG.md 1.9.0', flatText(readDoc('CHANGELOG.md').split('\n## 1.8.0 ')[0])],
+    ['package.nls.json config.language.description', nlsEn['config.language.description']],
+  ]
+  for (const [name, text] of places) {
+    assert.ok(text.includes(statement) && /not (reviewed )?by native speakers/.test(text), `${name} does not carry the quality statement`)
+    for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i]) assert.equal(never.test(text), false, `${name} says ${never}`)
+  }
+  assert.ok(flatText(README).includes('The twelve beyond English and German were translated by AI agents and checked by tests, not by native speakers.'))
+  // The picker's line is the view model's, and the German says the same, as §3 A4 has it.
+  const quality = 'The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.'
+  assert.ok(readDoc('src/viewModel.ts').includes(`t('${quality}')`))
+  assert.equal(GERMAN[quality], 'Die Sprachen über Englisch und Deutsch hinaus haben KI-Agenten übersetzt und Tests geprüft, keine Muttersprachler.')
+  for (const [name, text] of [['docs/languages.md', doc.languages], ['docs/dashboard.md', doc.dashboard], ['CHANGELOG.md', readDoc('CHANGELOG.md')]] as const) {
+    assert.ok(flatText(text).includes(quality) || name === 'CHANGELOG.md', `${name} does not quote the picker's line`)
+  }
+})
+
+test('the pages say what 1.9 shipped where a reader looks: the picker, the setting and its one write, `auto` and the language packs, the manifest that cannot follow — and the old claims are gone (1.9 P20, §3 A7)', () => {
+  // The old claims, gone from every page.
+  for (const [name, text] of [['README.md', README], ...Object.entries(doc).map(([k, v]) => [`docs/${k}`, v])] as Array<[string, string]>) {
+    const f = flatText(text)
+    assert.equal(f.includes('every other display language gets English'), false, `${name} still says "every other display language gets English"`)
+    assert.equal(f.includes('German or English'), false, `${name} still says "German or English"`)
+  }
+  assert.equal(/^\* \*\*English and German\.\*\*/m.test(README), false, 'README.md still heads its languages bullet "English and German."')
+  assert.ok(README.includes('* **Fourteen languages.**') && flatText(README).includes('→ [Languages](docs/languages.md)'))
+  assert.ok(README.includes('| [Dashboard](docs/dashboard.md) | The provider switch and the language picker,'))
+  assert.ok(README.includes('| [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language — a setting and a picker, not a command —, the walkthrough |'))
+  // The README's privacy paragraph names the one write outside the storage 1.9 adds.
+  assert.ok(flatText(README).includes('a language you pick in the dashboard goes into your user settings'))
+  // dashboard.md: the picker in the top row, its menu and keys, the note and the quality line, the allow-list.
+  const dash = flatText(doc.dashboard)
+  for (const claim of [
+    '**Language.** The flag at the end of the top row is the language picker — the US flag while the texts are English.',
+    'In the menu `↓` and `↑` move, `Home` and `End` go to the first and the last line, `Enter` or `Space` chooses, `Escape` closes it and puts the focus back on the flag, and `Tab` leaves it without a choice.',
+    'the page keeps its scroll position, the focus goes back to the flag, and the choice is written to `tokenPace.language` in your user settings',
+    'The same row ends with the language picker\'s flag', 'and on the language picker\'s flag after a choice',
+    'a language for the picker (`auto` or one of the fourteen ids — the one setting the page can have written, `tokenPace.language`, in your user settings)',
+    'never a path and never another setting',
+  ]) assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
+  // commands.md: no command; the setting and the picker; the manifest part kept.
+  const cmds = flatText(doc.commands)
+  for (const claim of ['**Interface language.** There is no command for it.', 'the flag at the top of the dashboard sets it for you',
+    'follows VS Code\'s display language (*Configure Display Language*) instead, and does not switch with the picker',
+    'falling back to English for any key a translation lacks']) {
+    assert.ok(cmds.includes(claim), `docs/commands.md does not say: ${claim}`)
+  }
+  assert.equal(manifest.contributes.commands.some((c) => /language/i.test(c.command)), false, 'a language command exists after all')
+  // settings.md: the row — application scope, the fifteen values, the one write and its warning.
+  const row = doc.settings.split('\n').find((l) => l.startsWith('| `language` |')) ?? ''
+  const warning = 'Token Pace: the language could not be written to your user settings.'
+  for (const claim of ['which VS Code reports only while its language pack is installed', 'The settings UI offers the fifteen values as a list, each language by its own name',
+    'that is the one write Token Pace makes to your user settings for it: only on a choice, only this key, *Automatic* removing the key again, the language already chosen writing nothing',
+    `the warning *${warning}* says so and nothing changes`, 'Application scope: always your user settings, never a workspace\'s']) {
+    assert.ok(row.includes(claim), `docs/settings.md's language row does not say: ${claim}`)
+  }
+  assert.equal(properties['tokenPace.language'].enum?.length, 15)
+  assert.deepEqual(properties['tokenPace.language'].enumDescriptions?.slice(1), LANGUAGES.map((e) => e.native))
+  const ext = readDoc('src/extension.ts')
+  assert.ok(ext.includes(`t('${warning}')`) && ext.includes(".update('language', id === 'auto' ? undefined : id, vscode.ConfigurationTarget.Global)"))
+  assert.equal(GERMAN[warning], 'Token Pace: Die Sprache konnte nicht in Ihre Benutzereinstellungen geschrieben werden.')
+  const scope = (readManifest<{ contributes: { configuration: Array<{ properties: Record<string, { scope?: string }> }> } }>()
+    .contributes.configuration.find((c) => c.properties['tokenPace.language'])?.properties['tokenPace.language'].scope)
+  assert.equal(scope, 'application')
+  // privacy.md: the bundle read, the setting write and its warning, what is kept of the user line's time.
+  const priv = flatText(doc.privacy)
+  for (const claim of ['its own translation file for the language you chose (`l10n/bundle.l10n.<language>.json` inside the extension\'s folder',
+    'And one setting of Token Pace\'s own is written for you (1.9): your user settings, when you choose a language in the dashboard (`tokenPace.language`)',
+    'If VS Code cannot write your settings, one warning says so, the log names the kind of error, and nothing changes.',
+    'What is kept of it is one number per main session, the newest such time — not the line\'s text, its id, or the object a nested time came from —, and it is never shown.']) {
+    assert.ok(priv.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  // languages.md: what VS Code reports, the focus, the twelve named as new, the formats.
+  const lang = flatText(doc.languages)
+  for (const claim of [
+    'English and German, and since 1.9.0 twelve more',
+    '**VS Code reports a display language only while its language pack is installed**',
+    'a window started with `--locale=pt-br` and no Portuguese language pack reports `en`',
+    'the picker needs no language pack', 'a window started with `--locale=de-ch` and the German pack reports `de` —, so a Swiss German window shows German',
+    'keeping its scroll position and the keyboard focus',
+    'After a choice the focus is back on the flag, which is then named in the new language; a switch made elsewhere — in the settings UI, or in another window — puts the focus back where it was on the page.',
+    'A setting that names a language the installed build carries no translation file for shows English, and the list then checks no line.',
+    `the other twelve — ${LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native).slice(0, -1).join(', ')} and Čeština — are new in 1.9.0`,
+    'English and German keep their two letters (`Mo 06:00`, `Sa 14:20`)', '(`9月26日(土)`, `9月26日周六`, `so 26. 9.`)',
+    'The calibration\'s figures take the language\'s decimal mark (`1,2` in German and French).',
+    '*Token Pace\'s own texts switch at once. The settings, the command titles and the walkthrough follow VS Code\'s display language (Configure Display Language).*',
+  ]) assert.ok(lang.includes(claim), `docs/languages.md does not say: ${claim}`)
+  // The probe the page rests on is §7a's (VS Code without a pack reports `en`; `de-ch` arrives as `de`), and the
+  // rule the code applies to what arrives: `de` is German, words and formats alike.
+  const de = resolveLanguage('auto', 'de', LANGUAGE_IDS)
+  assert.deepEqual([de.id, de.intl], ['de', 'de'])
+  assert.deepEqual(underLocale('de', () => (1.2).toLocaleString('de', { minimumFractionDigits: 1, maximumFractionDigits: 1, useGrouping: false })), '1,2')
+  assert.ok(readDoc('src/viewModel.ts').includes('n.toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1, useGrouping: false })'))
+  // troubleshooting.md: the language section.
+  const trouble = flatText(doc.troubleshooting)
+  for (const claim of ['## The language', '**The dashboard is in another language than VS Code.**',
+    '**`auto` shows English, though another display language is set.**', '**The settings and the command titles did not switch.**',
+    '**One text stayed in the old language.**', `a warning said** *${warning}*`, '**The setting names a language, but the texts are not in it.**']) {
+    assert.ok(trouble.includes(claim), `docs/troubleshooting.md does not say: ${claim}`)
+  }
+  // The log lines the entry points to are the host's.
+  for (const line of ['Language: the setting is not one of the shipped languages; auto is used.', 'has no translation file in this build; English is shown.',
+    'could not be read (${failure}); English is shown.', 'Language: the setting could not be written (${errorKind(err)}).']) {
+    assert.ok(ext.includes(line), `src/extension.ts no longer logs: ${line}`)
+  }
+  // numbers.md, development.md, export.md.
+  assert.ok(flatText(doc.numbers).includes('**In your language** (1.9). A figure is written the way the language you chose'))
+  assert.ok(flatText(doc.numbers).includes('[Languages](languages.md#numbers-dates-and-times)'))
+  const dev = flatText(doc.development)
+  for (const claim of ['seven files per language, and a translation touches no other', 'node scripts/merge-l10n.mjs --check # every bundle equals its parts',
+    'node scripts/nls-sources.mjs --check # every manifest translation matches today\'s English',
+    'that a change of `tokenPace.language` does too — the status bar turns German and back to English (1.9) —']) {
+    assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
+  }
+  // The gates the page lists are the brief's.
+  assert.ok(flatText(readDoc('l10n/TRANSLATING.md')).includes('node build.mjs --tests && CI=true TZ=UTC LANG=en_US.UTF-8 HOME=$(mktemp -d) node --test \\ out-test/l10n.languages.test.js'))
+  assert.ok(readDoc('test-e2e/suite/index.ts').includes("check('a language change reaches the status bar without a reload'"))
+  assert.ok(flatText(doc.export).includes('the language line (1.9), `setting auto · shown de · VS Code de`'))
+  // The walkthrough's dashboard page names the flag at the other end of the switch's row.
+  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('At the other end of that row a flag picks the language of Token Pace\'s own texts — fourteen of them, or *Automatic* for VS Code\'s display language (`tokenPace.language`)'))
+})
+
+test('Review 2\'s sentences stand where a reader looks: the terminal\'s own session is never left behind, and what no check can see (1.9 P20, Review 2 (a), (b))', () => {
+  const own = 'A session this terminal\'s own `claude` wrote to — a turn you interrupted there before `/clear` or before starting another session in it — is never left behind: it holds the line back until it has finished its turn or that terminal\'s `claude` is started again.'
+  assert.ok(flatText(doc.troubleshooting).includes(own), 'docs/troubleshooting.md\'s otherSession entry does not say Review 2 (a)')
+  const pc = flatText(doc.promptCache)
+  const check13 = pc.slice(pc.indexOf('13. **The terminal\'s own session**'), pc.indexOf('**What no check can see.**'))
+  assert.ok(check13.includes(own), 'docs/prompt-cache.md\'s check 13 does not say Review 2 (a)')
+  assert.ok(pc.includes('and it costs that session one request; a menu or picker open in that terminal is not seen by any check, and a session left behind there may get the line after a prompt it never answered.'),
+    'docs/prompt-cache.md\'s "What no check can see" does not say Review 2 (b)')
+  // (b) says nothing about the old prompt being sent again.
+  assert.equal(/prompt (is|gets) sent again|re-?sends? the (old )?prompt/i.test(pc), false)
+  // The rule the sentence describes: a sibling whose newest line is newer than the terminal's `claude` is never left behind.
+  const kw = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  assert.ok(readDoc('src/keepWarm.ts').includes('return newest !== null && newest < started && newest <= now - KEEPWARM_SIBLING_LEFT_MS'))
+  assert.equal(kw.KEEPWARM_SIBLING_LEFT_MS, 2 * 3_600_000)
+})
+
+test('the picture of the open picker is in the repository, embedded in the README and packaged (1.9 P20, §7 Q17)', () => {
+  const file = 'media/screenshot-languages.png'
+  assert.match(README, /!\[The language picker open at the top of the dashboard: Automatic — as VS Code \(English\) first[^\]]*\]\(media\/screenshot-languages\.png\)/)
+  const png = readFileSync(join(ROOT, file))
+  assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], `${file} is not a PNG`)
+  // 420 px at twice the size: the page's width in the harness, as the other store pictures are.
+  assert.equal(png.readUInt32BE(16), 840, `${file} is not 840 px wide`)
+  assert.equal(shipped(file), true, `${file} would not be packaged`)
+})
+
+test('the German counterpart of every interface text the pages quote for the language switch says the same, in the glossary\'s words (1.9 P20, §6)', () => {
+  const pairs: Array<[string, string]> = [
+    ['Language: {0} (automatic)', 'Sprache: {0} (automatisch)'],
+    ['Language: {0}', 'Sprache: {0}'],
+    ['Automatic — as VS Code ({0})', 'Automatisch — wie VS Code ({0})'],
+    ["Automatic — VS Code's language ({0}) has no translation here, so English", 'Automatisch — für die Sprache von VS Code ({0}) gibt es hier keine Übersetzung, daher Englisch'],
+    ["Token Pace's own texts switch at once. The settings, the command titles and the walkthrough follow VS Code's display language (Configure Display Language).",
+      'Die eigenen Texte von Token Pace wechseln sofort. Die Einstellungen, die Befehlstitel und die Einführung folgen der Anzeigesprache von VS Code (Anzeigesprache konfigurieren).'],
+    ['The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.',
+      'Die Sprachen über Englisch und Deutsch hinaus haben KI-Agenten übersetzt und Tests geprüft, keine Muttersprachler.'],
+    ['Token Pace: the language could not be written to your user settings.', 'Token Pace: Die Sprache konnte nicht in Ihre Benutzereinstellungen geschrieben werden.'],
+  ]
+  for (const [en, de] of pairs) assert.equal(GERMAN[en], de, `the German bundle's words for: ${en}`)
+  // The German words the languages page quotes are the bundle's, filled as the view model fills them.
+  const lang = flatText(doc.languages)
+  assert.ok(lang.includes(`„${GERMAN['Language: {0} (automatic)'].replace('{0}', 'Deutsch')}"`), 'docs/languages.md does not quote the German button name')
+  assert.ok(lang.includes(`*${GERMAN['Automatic — as VS Code ({0})'].replace('{0}', 'Deutsch')}*`), 'docs/languages.md does not quote the German Automatic line')
+  // The German manifest keeps the statement and names the display language as the glossary does.
+  assert.ok(nlsDe['config.language.description'].includes('Anzeigesprache konfigurieren') && nlsDe['config.language.enum.auto'].startsWith('Der Anzeigesprache von VS Code folgen'))
 })

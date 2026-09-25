@@ -50,8 +50,9 @@ downloads VS Code stable into `.vscode-test/`, starts it with this extension in 
 mode, every other extension disabled, a user-data directory of its own and a fresh `HOME` — so
 the smoke test never sees a real transcript — and asserts that the extension activates, that
 every contributed command is registered, that the status-bar preview runs, that a settings
-change reaches the status bar without a window reload, and that the dashboard command opens its
-view. The settings check is why it exists at all: from 1.0 to 1.2 every settings change quietly
+change reaches the status bar without a window reload, that a change of `tokenPace.language` does
+too — the status bar turns German and back to English (1.9) —, and that the dashboard command opens
+its view. The settings check is why it exists at all: from 1.0 to 1.2 every settings change quietly
 waited for a window reload, and ~800 unit tests against a fake host could not see it.
 
 CI runs type check, build, tests and the privacy check on **ubuntu, macOS and windows** — the
@@ -77,7 +78,7 @@ verification — is in [Releasing](release.md).
 Every text Token Pace shows goes through one seam, `t()` in `src/i18n.ts`, and the English message is
 the key. The languages are listed once, in `src/languages.ts` (`LANGUAGES`: the id, the `Intl` locale,
 the native name and the flag, in the picker's order), and every file of a language is named after its
-id:
+id — seven files per language, and a translation touches no other:
 
 * `l10n/parts/<part>.<id>.json` — the runtime translations in four parts, `dashboard`, `host`, `model`
   and `text`, each with exactly the keys of the German part of the same name. The parts follow the
@@ -93,6 +94,19 @@ id:
   once the translation is done. `node scripts/nls-sources.mjs --check` names every language and key
   whose English changed since. A runtime string needs no record: its key is its English, so a changed
   sentence is a new key that every language lacks.
+
+A language's own gates — the ones a translation runs before it is merged; the whole suite runs once
+all of them are in:
+
+```bash
+node build.mjs
+node build.mjs --tests && CI=true TZ=UTC LANG=en_US.UTF-8 HOME=$(mktemp -d) node --test \
+  out-test/l10n.languages.test.js out-test/nls.test.js out-test/languages.test.js out-test/i18n.test.js \
+  out-test/i18n.model.test.js out-test/i18n.text.test.js out-test/dashboard.test.js
+node scripts/check-privacy.mjs
+node scripts/merge-l10n.mjs --check    # every bundle equals its parts
+node scripts/nls-sources.mjs --check   # every manifest translation matches today's English
+```
 
 `test/l10n.languages.test.ts` holds every language on disk to the same thirteen rules, T1–T13: the
 keys, the parts, the placeholders, the marks (`~`, `⚠`, `≈`, `–`, `%`, `×`, `→`, `·`), the code

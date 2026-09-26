@@ -151,6 +151,25 @@ record, not a habit* below three weeks and *based on 4 weeks* from three weeks o
 counted from your usage days, not from the length of the range: four working days inside a month
 are four days of evidence, not four weeks of them.
 
+**Records.** The `records` section — off by default — holds the extremes of the selected range, at most
+`tokenPace.dashboard.topN` rows per table: the peak day, the longest streak, the top models, projects and
+sessions, and four tables since 1.11. *Most expensive days* ranks the range's days by their API cost at your
+configured rates; a ⚠ marks a day whose cost is a lower bound — it holds usage without a price on file, or the
+transcripts on disk begin that day —, a screen reader hears it as “lower bound”, and a note under the table says
+what it means. *Longest sessions* and *Largest sessions* rank the Claude Code sessions of the Agents section's last
+seven days that are no longer active, by the time from their first counted line to their last (pauses included)
+and by their usage (their own and their agents'), each named as the Agents section names it (`Session Tue 14:20 ·
+9d0eb37a`); a session still active is counted in a note and not ranked, since its time and tokens are still
+growing, and under the Codex view the line *Claude Code only* stands in for both. *Hours with the most cache
+written* ranks hours, not requests — the hour buckets by the tokens written to the prompt cache, with the part
+written for one hour, what those writes cost and the models that wrote them; a large write is usually a cold
+start, a new conversation or a compaction, and an hour can hold several, as the note under the table says. Every
+cost column follows `tokenPace.showCost` and is headed *API cost (your rates)* while your own rates apply; an
+absent figure is a dash. While Token Pace is still reading the history — the first scan, a rescan — the section
+says *Reading history…* and shows no record at all, so no record is read from half a history; and nothing of it is
+stored, so a rescan that reads fewer transcripts shows fewer records, never an old one. The Quick Pick and the
+markdown view carry the same rows.
+
 **Forecast states.** Every answer is a named state, never a bare number: `none` (nothing
 measured), `full` (already exhausted), `stale` (the newest reading is too old to extrapolate),
 `measuring` (too few readings, too short a span, or too little of the window elapsed), `idle`

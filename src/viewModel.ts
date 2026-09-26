@@ -38,7 +38,7 @@ import {
   PaceConfig, effectivePace, paceVerdict, severityOf, windowDisplay, WindowDisplay, windowElapsed,
 } from './pace'
 import { explainWindow, WindowExplain } from './paceExplain'
-import { PRICES_AS_OF, PRICES_CHECKED_LATER, PricingOptions, isCustomPricing, normalizeModel } from './prices'
+import { PRICE_SOURCE_PAGES, PRICES_AS_OF, PRICES_CHECKED_LATER, PricingOptions, isCustomPricing, normalizeModel } from './prices'
 import {
   PROMPT_TEXT_MAX_CHARS, PROMPT_TITLE_MAX_CHARS, PROMPTS_MAX, PromptOpFailure, PromptsRead, isPromptId, promptEntries,
 } from './prompts'
@@ -1051,9 +1051,11 @@ export interface ViewModel {
   showCost: boolean
   /**
    * `asOf` the table's check day (PRICES_AS_OF); 1.8: `later` the rows read after it, each with its own
-   * check day — `claude-opus-5-5 (2026-09-24)` —, or null when no row was.
+   * check day — `claude-opus-5-5 (2026-09-24)` —, or null when no row was. 1.11 C2: `sources` the pages the
+   * shown providers' prices were read from, as host names (PRICE_SOURCE_PAGES) joined by ", " — never a URL,
+   * never translated; '' when the view shows no provider with a page.
    */
-  pricing: { asOf: string; later: string | null; custom: boolean; showList: boolean }
+  pricing: { asOf: string; later: string | null; custom: boolean; showList: boolean; sources: string }
   range: DayRange & { previous: DayRange | null; presets: RangePreset[] }
   ui: UiState
   /**
@@ -2208,7 +2210,10 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     now,
     sections: [...cfg.dashboard.sections],
     showCost: cfg.showCost,
-    pricing: { asOf: PRICES_AS_OF, later: laterChecksText(sources), custom: isCustomPricing(pricing), showList: cfg.pricing.showListPrice },
+    pricing: {
+      asOf: PRICES_AS_OF, later: laterChecksText(sources), custom: isCustomPricing(pricing), showList: cfg.pricing.showListPrice,
+      sources: priceSourcesText(sources),
+    },
     range: { ...range, previous, presets: RANGE_PRESETS },
     ui,
     provider: view,
@@ -2579,9 +2584,18 @@ function claudeOnlyText(view: Exclude<ProviderView, 'all'>): string {
  * `claude-opus-5-5 (2026-09-24)` —, of the providers the view shows (1.7 F1: under Codex no Claude
  * model is named), or null when none is.
  */
-function laterChecksText(sources: readonly Source[]): string | null {
+export function laterChecksText(sources: readonly Source[]): string | null {
   const rows = PRICES_CHECKED_LATER.filter((r) => sources.includes(r.source))
   return rows.length === 0 ? null : rows.map((r) => `${r.model} (${r.checked})`).join(', ')
+}
+
+/**
+ * 1.11 C2: the pages the prices of the providers the view shows were read from — PRICE_SOURCE_PAGES' host names in
+ * the registry's order, joined by ", " (host names are no words: never translated, never part of a key). Under
+ * All `docs.claude.com, platform.claude.com, developers.openai.com`; under a provider view its own.
+ */
+export function priceSourcesText(sources: readonly Source[]): string {
+  return SOURCES.filter((s) => sources.includes(s)).flatMap((s) => PRICE_SOURCE_PAGES[s] ?? []).join(', ')
 }
 
 function footnotesFor(vm: ViewModel, cfg: Config): string[] {
@@ -2602,6 +2616,8 @@ function footnotesFor(vm: ViewModel, cfg: Config): string[] {
         vm.pricing.asOf, vm.pricing.later)
       : t('API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}.',
         vm.pricing.asOf))
+    // 1.11 C2: where those prices were read, beside the days they were checked — host names, printed as text.
+    if (vm.pricing.sources !== '') out.push(t('Price sources: {0}.', vm.pricing.sources))
     if (vm.pricing.custom) out.push(t('Costs use your configured rates, not the published list prices.'))
     if (vm.unpricedModels.length > 0) {
       out.push(t('No price on file for: {0} — every cost total is a lower bound.', vm.unpricedModels.join(', ')))

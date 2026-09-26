@@ -24,6 +24,11 @@ so a rate never applies retroactively without saying so: a bucket from a day no 
 priced from the nearest known rule and marked `approximate`. The dashboard's footnote names both
 days — `Prices as of 2026-09-06; checked later: claude-opus-5-5 (2026-09-24).` —, under the provider
 switch's Codex view the table's alone, and the Models table's `list as of` date is the row's own.
+A footnote after it names the pages those prices were read from, by host name and as text, never as a link —
+*Price sources: docs.claude.com, platform.claude.com, developers.openai.com.*, under a provider view that
+provider's own. A status-bar tooltip that prints an *API cost* column says the same under its tables, whether
+or not `tokenPace.tooltipExplanations` is on: the days, *your configured rates* while they apply, and the pages
+of the tooltip's own providers — a Codex quota tooltip names no Claude row.
 
 **Claude Opus 5.5** (1.8): $4 per million input tokens, $5 for a 5-minute cache write, $8 for a
 1-hour cache write, $0.20 for a cache hit and $20 for output; fast mode $8 in and $40 out. Until 1.8
@@ -57,7 +62,7 @@ discount (`0.9` for 10 % off). `tokenPace.customPrices` merges **field-wise** ov
 table, so you can correct a single rate and leave the rest alone; keys are normalised, so
 `claude-opus-5[1m]` and `Anthropic/GPT-5` both find their model. Non-numeric or negative values
 are ignored, not guessed. As soon as either applies, the figures are labelled “at your
-configured rates”, and `tokenPace.pricing.showListPrice` adds the undiscounted figure as a second
+configured rates”, the dashboard's *API cost* columns are headed *API cost (your rates)*, and `tokenPace.pricing.showListPrice` adds the undiscounted figure as a second
 column, in the manner of the `amount` / `list_amount` pair of the provider analytics APIs. The CSV
 and JSON [exports](export.md) carry both amounts for every bucket, whatever `showListPrice` says —
 `costUsd` at your configured rates and `listCostUsd` at the list price — with the day of the rule

@@ -318,6 +318,50 @@ test('the price date is stated once, in the footnote that needs it', () => {
   assert.equal(custom.footnotes.filter((f) => f.includes('configured rates')).length, 1)
 })
 
+test('1.11 C2: a footnote names the price sources right after the price sentence — every host under All, the provider\'s own under a provider view, none with the costs off; host names as text, in every view that prints the footnotes; in German too', () => {
+  const { PRICE_SOURCE_PAGES } = require('../src/prices') as typeof import('../src/prices')
+  const { quickPickItems } = require('../src/textViews') as typeof import('../src/textViews')
+  const { toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
+  const all = buildViewModel(makeInput())
+  // Under All every page of the registry's providers, in the registry's order, as PRICE_SOURCE_PAGES names them.
+  assert.equal(all.pricing.sources, 'docs.claude.com, platform.claude.com, developers.openai.com')
+  assert.equal(all.pricing.sources, SOURCES.flatMap((s) => PRICE_SOURCE_PAGES[s]).join(', '))
+  const at = all.footnotes.findIndex((f) => f.startsWith('API cost is hypothetical'))
+  assert.ok(at >= 0, all.footnotes.join('\n'))
+  assert.equal(all.footnotes[at + 1], 'Price sources: docs.claude.com, platform.claude.com, developers.openai.com.')
+  assert.equal(all.footnotes.filter((f) => f.startsWith('Price sources: ')).length, 1)
+  // A host name, never a URL: nothing a view could turn into a link to a path.
+  assert.equal(all.footnotes.some((f) => f.includes('://')), false)
+  // A provider view names its own pages only.
+  const codex = buildViewModel(makeInput({ ui: { providers: ['codex'] } }))
+  assert.equal(codex.pricing.sources, 'developers.openai.com')
+  assert.ok(codex.footnotes.includes('Price sources: developers.openai.com.'), codex.footnotes.join('\n'))
+  const claude = buildViewModel(makeInput({ ui: { providers: ['claude'] } }))
+  assert.ok(claude.footnotes.includes('Price sources: docs.claude.com, platform.claude.com.'), claude.footnotes.join('\n'))
+  // Custom rates change nothing of it: the sources stay, the rates sentence follows.
+  const custom = buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.pricing.multiplier': 0.9 }) }))
+  const ci = custom.footnotes.indexOf('Price sources: docs.claude.com, platform.claude.com, developers.openai.com.')
+  assert.ok(ci > 0 && custom.footnotes[ci + 1] === 'Costs use your configured rates, not the published list prices.', custom.footnotes.join('\n'))
+  // With the costs off no price is shown, so none is sourced.
+  const off = buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.showCost': false }) }))
+  assert.equal(off.footnotes.some((f) => f.includes('Price sources')), false, off.footnotes.join('\n'))
+  // Every view that prints the footnotes prints it: the markdown document, the Quick Pick, Copy Usage Summary.
+  const line = 'Price sources: docs.claude.com, platform.claude.com, developers.openai.com.'
+  assert.ok(markdownDocument(all).includes(line))
+  assert.ok(quickPickItems(all).some((i) => i.label === line || i.description === line || i.detail === line), 'the Quick Pick')
+  assert.ok(toMarkdownSummary(all).includes(line), 'Copy Usage Summary')
+  // German: the words translated, the host names as they are.
+  const { setBundle } = require('../src/i18n') as typeof import('../src/i18n')
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    const de = buildViewModel(makeInput())
+    assert.ok(de.footnotes.includes('Preisquellen: docs.claude.com, platform.claude.com, developers.openai.com.'), de.footnotes.join('\n'))
+  } finally {
+    setBundle(undefined)
+  }
+})
+
 // 1.7 F1 (pinned and changed): 1.6's provider chips stopped at the Tokens section, which showed every
 // provider whatever they said. The provider switch stands above the whole page, so it reaches the
 // Tokens section too; the model chips still do not.

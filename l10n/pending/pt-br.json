@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 43,
+  "applied": 59,
   "bundle": {
     "Dutch": {
       "parts": [
@@ -197,6 +197,84 @@
       ],
       "state": "translate",
       "why": "the header row of the markdown view's table of the hours with the most cache written — keep the six pipes — 1.11 B6"
+    },
+    "Most expensive days": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the title of the Records section's new table of the range's days by their API cost, the most expensive first — 1.11 B6"
+    },
+    "Longest sessions": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the title of the Records section's new table of the Claude Code sessions by the time from their first line to their last — 1.11 B6"
+    },
+    "Largest sessions": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the title of the Records section's new table of the Claude Code sessions by their tokens — 1.11 B6"
+    },
+    "Hours with the most cache written": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the title of the Records section's new table of the hours in which the most tokens were written to the prompt cache — 1.11 B6"
+    },
+    "Day": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "a column head (and the label of a stacked cell) in the Records section's table of the most expensive days: the day — 1.11 B6"
+    },
+    "Time": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "a column head (and the label of a stacked cell) in the Records section's session tables: the time from a session's first counted line to its last, pauses included — not a clock time — 1.11 B6"
+    },
+    "Hour": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "a column head (and the label of a stacked cell) in the Records section's table of the hours with the most cache written: the hour, a date and a clock time — 1.11 B6"
+    },
+    "Cache written": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "a column head (and the label of a stacked cell) in the Records section's table of the hours: the tokens written to the prompt cache in that hour — 1.11 B6"
+    },
+    "Of it 1 h": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "a column head (and the label of a stacked cell) in the Records section's table of the hours: the part of the tokens written to the cache with the one-hour lifetime — 1.11 B6"
+    },
+    "API cost (your rates)": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the head of every cost column of the dashboard while the reader's own rates apply (a multiplier other than 1 or a custom price) — keep it short, it heads a column — 1.11 C3"
+    },
+    "Price sources: {0}.": {
+      "parts": [
+        "model",
+        "text"
+      ],
+      "state": "translate",
+      "why": "a footnote under every view's figures: the pages the prices were read from ({0} is a list of host names such as docs.claude.com, never translated) — 1.11 C2; the status bar's cost tooltips now name the price sources after the price sentence — the same words as the footnote — 1.11 C2"
     }
   },
   "nls": {

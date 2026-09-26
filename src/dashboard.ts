@@ -1257,8 +1257,9 @@ ul { margin: 6px 0; padding-left: 18px; }
 /* 1.7 D-A: the ⚠ is hidden from a screen reader, and the words "lower bound" stand behind it as
    text of the line at no size — out of sight, read where they stand (the technique of .ag-gone),
    so the item's description reads "12.3K lower bound, since 11:59", no space of Chrome's own
-   before the comma, as it put one after a name taken from an image's attribute. */
-.ag-fig .ag-lbw, .ag-week .ag-lbw { font-size: 0; }
+   before the comma, as it put one after a name taken from an image's attribute. 1.11 B6: the same mark behind a
+   figure of the Records section's tables of 1.11 (.rec-t) — a cell reads "~$12.30 lower bound". */
+.ag-fig .ag-lbw, .ag-week .ag-lbw, .rec-t .ag-lbw { font-size: 0; }
 /* One glyph per state, drawn from the class and coloured with the page's own tokens only:
    green and red for what the parent recorded, the provider's blue for what still runs, the
    foreground for a session in use, and the dim tone for what the tree can only call quiet — and
@@ -1639,6 +1640,8 @@ function webviewWords(): Record<string, string> {
       t('A prompt that starts with an exclamation mark would run a shell command in Claude Code.'),
     'API cost': t('API cost'),
     'API cost (second axis)': t('API cost (second axis)'),
+    // 1.11 C3: the cost column's head while custom rates apply.
+    'API cost (your rates)': t('API cost (your rates)'),
     'Active days': t('Active days'),
     'Activity': t('Activity'),
     'Agent entries, last 7 days': t('Agent entries, last 7 days'),
@@ -1656,6 +1659,8 @@ function webviewWords(): Record<string, string> {
     'CV {0} · {1} spiky day(s)': t('CV {0} · {1} spiky day(s)'),
     'Cache': t('Cache'),
     'Cache read': t('Cache read'),
+    // 1.11 B6, B7: the heads and titles of the Records section's four new tables.
+    'Cache written': t('Cache written'),
     'Cache · last 30 days': t('Cache · last 30 days'),
     'Calibration {0} {1}: {2}': t('Calibration {0} {1}: {2}'),
     'Calls': t('Calls'),
@@ -1669,6 +1674,7 @@ function webviewWords(): Record<string, string> {
     'Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB':
       t('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB'),
     'Data quality': t('Data quality'),
+    'Day': t('Day'),
     'Day {0}': t('Day {0}'),
     'Delete': t('Delete'),
     'Delete “{0}”?': t('Delete “{0}”?'),
@@ -1685,12 +1691,16 @@ function webviewWords(): Record<string, string> {
     'Generated {0}.': t('Generated {0}.'),
     'Hit': t('Hit'),
     'Hit rate': t('Hit rate'),
+    'Hour': t('Hour'),
+    'Hours with the most cache written': t('Hours with the most cache written'),
     'How': t('How'),
     'Keep': t('Keep'),
     'Key figures': t('Key figures'),
+    'Largest sessions': t('Largest sessions'),
     'Last 7 days': t('Last 7 days'),
     'Last 7 days · where the agent tokens went': t('Last 7 days · where the agent tokens went'),
     'Last activity': t('Last activity'),
+    'Longest sessions': t('Longest sessions'),
     'Longest streak {0}': t('Longest streak {0}'),
     'Longest streak {0} day · {1} → {2}': t('Longest streak {0} day · {1} → {2}'),
     'Longest streak {0} days · {1} → {2}': t('Longest streak {0} days · {1} → {2}'),
@@ -1698,6 +1708,7 @@ function webviewWords(): Record<string, string> {
     'Lower bound share {0}': t('Lower bound share {0}'),
     'Model': t('Model'),
     'Models': t('Models'),
+    'Most expensive days': t('Most expensive days'),
     'Move down': t('Move down'),
     'Move up': t('Move up'),
     'New prompt': t('New prompt'),
@@ -1719,6 +1730,7 @@ function webviewWords(): Record<string, string> {
     'No tool call counted in this range.': t('No tool call counted in this range.'),
     'No tool calls counted.': t('No tool calls counted.'),
     'Not enough data for a summary yet.': t('Not enough data for a summary yet.'),
+    'Of it 1 h': t('Of it 1 h'),
     'Open settings': t('Open settings'),
     'Output': t('Output'),
     'Peak day {0}': t('Peak day {0}'),
@@ -1769,6 +1781,7 @@ function webviewWords(): Record<string, string> {
     'Status line: {0}': t('Status line: {0}'),
     'Subagent tokens in the hour buckets, last 7 days': t('Subagent tokens in the hour buckets, last 7 days'),
     'Summary': t('Summary'),
+    'Time': t('Time'),
     'Time of day': t('Time of day'),
     'Text': t('Text'),
     'The text is empty.': t('The text is empty.'),

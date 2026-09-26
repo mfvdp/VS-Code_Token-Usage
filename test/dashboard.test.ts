@@ -3375,6 +3375,178 @@ test('the records section states the buckets it had to leave out', () => {
   assert.ok(h.includes('2 rolled-up month buckets'), h)
 })
 
+// ---------------------------------------------------------------------------
+// 1.11 B6 (page), B8 6, C3: the Records section's four new tables on the page, and the cost head
+// ---------------------------------------------------------------------------
+
+const RECORDS_LEGEND = '⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.'
+
+/** The Records of 1.11 as the view model gives them: every table with a row, a floor in two of them, a hostile model id. */
+function newRecordsData(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return recordsData({
+    costDays: [
+      { day: '2026-09-02', cost: '~$12.30', usage: '1.2M', floor: true },
+      { day: '2026-09-01', cost: '~$4.10', usage: '800K', floor: false },
+    ],
+    longestSessions: [{ sessionId: 'aaaa1111-0000', name: 'Session Tue 14:20 · aaaa1111', start: '2026-09-01 14:20', time: '3 h 12 min', usage: '37K' }],
+    largestSessions: [{ sessionId: 'bbbb2222-0000', name: 'Session Wed 09:05 · bbbb2222', start: '09:05', time: '49 min 00 s', usage: '100K' }],
+    cacheHours: [
+      { hour: '2026-09-03 10:00', written: '1.2M', written1h: '200K', cost: '~$7.50', floor: true, models: '<img src=x onerror=alert(1)>, claude-sonnet-4-6 +1 more' },
+      { hour: '2026-09-02 16:00', written: '400K', written1h: '–', cost: '~$2.50', floor: false, models: 'claude-opus-4-6' },
+    ],
+    reading: null,
+    recordNotes: [RECORDS_LEGEND, 'Claude Code sessions of the last 7 days that are no longer active.', 'A large cache write is usually a cold start.'],
+    ...over,
+  })
+}
+
+/** The markup of one titled card of the section: from its title to the end of its table. */
+function cardOf(h: string, title: string): string {
+  const at = h.indexOf('<div class="name">' + title + '</div>')
+  assert.ok(at >= 0, `no card "${title}" in ${h}`)
+  return h.slice(at, h.indexOf('</table>', at) + 8)
+}
+
+test('1.11 B6, B8 6: the Records page draws the four new tables — heads, stacked labels, ISO days on one line, figures with their units, the ⚠ with its words, a model id as text — and every note', () => {
+  const h = render('sRecords()', { records: newRecordsData() })
+  const lb = (title: string): string => ' <span class="ag-lb" aria-hidden="true" title="' + title + '">⚠</span><span class="ag-lbw">lower bound</span>'
+  // The most expensive days: the day, its cost (a floor marked, titled with the section's legend), its usage.
+  const days = cardOf(h, 'Most expensive days')
+  assert.ok(days.includes('<table class="rec-t"><thead><tr><th>Day</th><th>API cost</th><th>Usage</th></tr></thead>'), days)
+  assert.ok(days.includes('<tr><td data-h="Day" data-hl="Day: "><span class="nobr">2026-09-02</span></td>'
+    + '<td data-h="API cost" data-hl="API cost: ">~$12.30' + lb(RECORDS_LEGEND) + '</td>'
+    + '<td data-h="Usage" data-hl="Usage: ">1.2M</td></tr>'), days)
+  assert.ok(days.includes('<td data-h="API cost" data-hl="API cost: ">~$4.10</td>'), days)
+  // The two session tables: their own column order, the time glued to its units, the start's day kept whole.
+  const longest = cardOf(h, 'Longest sessions')
+  assert.ok(longest.includes('<thead><tr><th>Session</th><th>Time</th><th>Usage</th><th>Started</th></tr></thead>'), longest)
+  assert.ok(longest.includes('<tr><td data-h="Session" data-hl="Session: ">Session Tue 14:20 · aaaa1111</td>'
+    + '<td data-h="Time" data-hl="Time: ">3 h 12 min</td><td data-h="Usage" data-hl="Usage: ">37K</td>'
+    + '<td data-h="Started" data-hl="Started: "><span class="nobr">2026-09-01</span> 14:20</td></tr>'), longest)
+  const largest = cardOf(h, 'Largest sessions')
+  assert.ok(largest.includes('<thead><tr><th>Session</th><th>Usage</th><th>Time</th><th>Started</th></tr></thead>'), largest)
+  assert.ok(largest.includes('<td data-h="Usage" data-hl="Usage: ">100K</td><td data-h="Time" data-hl="Time: ">49 min 00 s</td>'), largest)
+  // The hours: the hour's day whole, the 1-hour part (a dash where none), the cost of the writes (a floor titled
+  // with why), the writers — a model id is text, never markup.
+  const hours = cardOf(h, 'Hours with the most cache written')
+  assert.ok(hours.includes('<thead><tr><th>Hour</th><th>Cache written</th><th>Of it 1 h</th><th>API cost</th><th>Models</th></tr></thead>'), hours)
+  assert.ok(hours.includes('<td data-h="Hour" data-hl="Hour: "><span class="nobr">2026-09-03</span> 10:00</td>'
+    + '<td data-h="Cache written" data-hl="Cache written: ">1.2M</td><td data-h="Of it 1 h" data-hl="Of it 1 h: ">200K</td>'
+    + '<td data-h="API cost" data-hl="API cost: ">~$7.50' + lb('some models have no price on file') + '</td>'
+    + '<td data-h="Models" data-hl="Models: ">&lt;img src=x onerror=alert(1)&gt;, claude-sonnet-4-6 +1 more</td></tr>'), hours)
+  assert.ok(hours.includes('<td data-h="Of it 1 h" data-hl="Of it 1 h: ">–</td>'), hours)
+  assert.equal(/<img/.test(h), false, h)
+  assert.equal(h.split('class="ag-lb"').length - 1, 2, h)
+  // Every cell of the four tables carries its column's name for the stacked layout.
+  for (const t of [days, longest, largest, hours]) {
+    assert.equal(t.split('<td').length - 1, t.split('<td data-h="').length - 1, t)
+  }
+  // Their order: after the three top tables, before the notes; each note an item of the section's list.
+  const at = (s: string): number => h.indexOf(s)
+  assert.ok(at('<div class="name">Session</div>') < at('Most expensive days') && at('Most expensive days') < at('Longest sessions')
+    && at('Longest sessions') < at('Largest sessions') && at('Largest sessions') < at('Hours with the most cache written')
+    && at('Hours with the most cache written') < at('<ul class="meta">'), h)
+  const notes = h.slice(at('<ul class="meta">'))
+  assert.equal(notes, '<ul class="meta"><li>' + RECORDS_LEGEND + '</li><li>Claude Code sessions of the last 7 days that are no longer active.</li>'
+    + '<li>A large cache write is usually a cold start.</li></ul>')
+})
+
+test('1.11 B4, B6: while the history is being read the section is the one sentence and nothing else; a table without rows is not drawn; without costs the hours have no cost column', () => {
+  // B4: the sentence alone — no peak day, no streak, no table, no note — whatever else the payload carries.
+  assert.equal(render('sRecords()', { records: newRecordsData({ reading: 'Reading history…' }) }), '<p class="empty">Reading history…</p>')
+  // A table without a row is not drawn; the line that stands for it is among the notes, as the view model gives it.
+  const none = render('sRecords()', { records: newRecordsData({ costDays: [], cacheHours: [], recordNotes: ['The most expensive days need tokenPace.showCost.', 'No cache write counted in this range.'] }) })
+  assert.equal(none.includes('Most expensive days'), false, none)
+  assert.equal(none.includes('Hours with the most cache written'), false, none)
+  assert.ok(none.includes('<li>The most expensive days need tokenPace.showCost.</li><li>No cache write counted in this range.</li>'), none)
+  assert.ok(none.includes('Longest sessions') && none.includes('Largest sessions'), none)
+  // `tokenPace.showCost` off: the hours table drops its cost column, as every table of the page does.
+  const off = render('sRecords()', { showCost: false, records: newRecordsData() })
+  assert.ok(cardOf(off, 'Hours with the most cache written').includes('<thead><tr><th>Hour</th><th>Cache written</th><th>Of it 1 h</th><th>Models</th></tr></thead>'), off)
+  assert.equal(cardOf(off, 'Hours with the most cache written').includes('~$7.50'), false)
+  // A payload row that is no object draws nothing, and a figure the payload lacks is a dash.
+  const odd = render('sRecords()', { records: newRecordsData({ costDays: [null, 'x', { day: '2026-09-02' }], longestSessions: 'x', largestSessions: [], cacheHours: [] }) })
+  assert.ok(cardOf(odd, 'Most expensive days').includes('<tr><td data-h="Day" data-hl="Day: "><span class="nobr">2026-09-02</span></td><td data-h="API cost" data-hl="API cost: ">–</td><td data-h="Usage" data-hl="Usage: ">–</td></tr></tbody>'), odd)
+  assert.equal(odd.includes('Longest sessions'), false, odd)
+})
+
+test('1.11 B6 parity (page half): every row of the four new tables on the page is a row of the markdown and an item of the Quick Pick, figure for figure, and the other way round', () => {
+  const { markdownDocument, quickPickItems } = require('../src/textViews') as typeof import('../src/textViews')
+  // The text views' world (test/textViews.test.ts recordsVm): a second, idle session, so every table has rows.
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: 'aaaa1111-0000', at: NOW - 56 * 60_000 })
+  const vm = buildViewModel(makeInput({ agg, cfg: makeConfig({ 'tokenPace.dashboard.topN': 3 }) }))
+  const r = vm.records
+  assert.ok(r.costDays.length > 0 && r.longestSessions.length > 0 && r.largestSessions.length > 0 && r.cacheHours.length > 0, JSON.stringify(r))
+  const h = render('sRecords()', { records: JSON.parse(JSON.stringify(r)) })
+  // A page cell as a reader reads it: the ⚠'s words for a screen reader left aside, the tags gone, the no-break
+  // spaces of glue() plain spaces.
+  const text = (cell: string): string => cell.replace(/<span class="ag-lbw">[^<]*<\/span>/g, '').replace(/<[^>]+>/g, '')
+    .replace(/ /g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+  const pageRows = (title: string): string[][] => {
+    const card = cardOf(h, title)
+    return [...card.matchAll(/<tr>(.*?)<\/tr>/g)].slice(1).map((m) => [...m[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((c) => text(c[1])))
+  }
+  const md = markdownDocument(vm).split('\n## Records\n')[1].split('\n## ')[0].split('\n')
+  const mdRows = (header: string): string[][] => {
+    const at = md.indexOf(header)
+    assert.ok(at >= 0, header)
+    const out: string[][] = []
+    for (let i = at + 2; i < md.length && md[i].startsWith('| '); i++) out.push(md[i].slice(2, -2).split(' | '))
+    return out
+  }
+  for (const [title, header] of [
+    ['Most expensive days', '| Most expensive day | API cost | Usage |'],
+    ['Longest sessions', '| Longest session | Time | Usage | Started |'],
+    ['Largest sessions', '| Largest session | Usage | Time | Started |'],
+    ['Hours with the most cache written', '| Hour | Cache written | Of it 1 h | API cost | Models |'],
+  ] as const) {
+    // Both ways at once: the same rows in the same order, cell for cell.
+    assert.deepEqual(pageRows(title), mdRows(header), title)
+  }
+  // The Quick Pick: every figure of a page row stands in its item (the label or the description) — a dash is none.
+  const items = quickPickItems(vm)
+  for (const [title, label] of [['Most expensive days', 'Most expensive day '], ['Longest sessions', 'Longest session '],
+    ['Largest sessions', 'Largest session '], ['Hours with the most cache written', 'Most cache written ']] as const) {
+    const rows = pageRows(title)
+    const its = items.filter((i) => i.label.startsWith(label))
+    assert.equal(its.length, rows.length, title)
+    rows.forEach((cells, i) => {
+      const all = `${its[i].label} ${its[i].description ?? ''}`
+      for (const c of cells) if (c !== '–') assert.ok(all.includes(c.replace(/ ⚠$/, '')), `${c} is not in ${all}`)
+    })
+  }
+})
+
+test('1.11 C3: while custom rates apply every cost column the page heads with its cost word says "API cost (your rates)", its stacked label too — with the list rates "API cost"; in English and in German', () => {
+  const { DASHBOARD_SECTION_KEYS } = require('../src/viewModel') as typeof import('../src/viewModel')
+  const vmOf = (multiplier: number): Record<string, unknown> => JSON.parse(JSON.stringify(buildViewModel(makeInput({
+    cfg: makeConfig({ 'tokenPace.dashboard.sections': [...DASHBOARD_SECTION_KEYS], 'tokenPace.pricing.multiplier': multiplier, 'tokenPace.attribution': 'session' }),
+  })))) as Record<string, unknown>
+  const custom = vmOf(0.9), list = vmOf(1)
+  assert.equal((custom.pricing as Record<string, unknown>).custom, true)
+  assert.equal((list.pricing as Record<string, unknown>).custom, false)
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['API cost (your rates)'], 'API-Kosten (Ihre Sätze)')
+  const german = between(germanPage(bundle), /<script nonce="[A-Za-z0-9]+">/, '</script>')
+  for (const [script, plain, yours, colon] of [[SCRIPT, 'API cost', 'API cost (your rates)', ': '], [german, 'API-Kosten', 'API-Kosten (Ihre Sätze)', ': ']] as const) {
+    const hc = pageOf(custom, script), hl = pageOf(list, script)
+    // The tables that head a cost column with the page's cost word: tokens, models, records, projects, sessions.
+    const heads = (h: string, word: string): number =>
+      (h.match(new RegExp('<th[^>]*>' + word.replace(/[()]/g, '\\$&') + '</th>', 'g')) ?? []).length
+    const cellsOf = (h: string, word: string): number => h.split('data-h="' + word + '" data-hl="' + word + colon + '"').length - 1
+    assert.ok(heads(hc, yours) >= 4, `${heads(hc, yours)} heads of "${yours}"`)
+    assert.ok(cellsOf(hc, yours) > 0)
+    // Not one column is headed with the list's word while custom rates apply …
+    assert.equal(cellsOf(hc, plain), 0, 'a stacked cost label without the rates')
+    assert.equal(heads(hc, plain), 0, 'a cost head without the rates')
+    // … and the list rates never say "your rates" — the same tables, the same count.
+    assert.equal(hl.includes(yours), false)
+    assert.equal(heads(hl, plain), heads(hc, yours))
+    assert.equal(cellsOf(hl, plain), cellsOf(hc, yours))
+  }
+})
+
 function toolsData(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     rows: [
@@ -4730,8 +4902,9 @@ test('every ⚠ of a lower bound is hidden from a screen reader and followed by 
     assert.ok(h.indexOf('aria-hidden="true" title="' + why + '">⚠</span>') >= 0, h)
   }
   // At no size wherever it stands — a figures' line, a cell of the 7-day block — the technique of a
-  // part taken off a figures' line (1.6 P10c); the ⚠ keeps its forced-colours rule.
-  assert.match(STYLE, /\n\.ag-fig \.ag-lbw, \.ag-week \.ag-lbw \{ font-size: 0; \}\n/)
+  // part taken off a figures' line (1.6 P10c); the ⚠ keeps its forced-colours rule. 1.11 P6 (pinned and changed:
+  // the rule's two selectors): and a cell of the Records section's tables of 1.11 (`.rec-t`, §3 B6).
+  assert.match(STYLE, /\n\.ag-fig \.ag-lbw, \.ag-week \.ag-lbw, \.rec-t \.ag-lbw \{ font-size: 0; \}\n/)
   assert.match(STYLE, /\n\.ag-fig \.ag-gone \{ font-size: 0; \}\n/)
   assert.match(STYLE, /\n {2}\.ag-st::before, \.ag-lb \{ color: CanvasText; \}\n/)
   // The words are written in two places only: this mark, and the quota card's partial line — the quota
@@ -6910,7 +7083,7 @@ test('the provider switch speaks German with the shipped bundle: „Anbieter", �
   assert.equal(h, switchHtml('codex', { label: 'Anbieter', all: 'Alle' }))
 })
 
-test('under Codex the Agents and Context sections are left out — no heading, fold, gear or tree, the reason nowhere — the order of the rest unchanged (1.7 F1, §7a Q7)', () => {
+test('under Codex the Agents and Context sections are left out — no heading, fold, gear or tree, the reason nowhere but in the Records — the order of the rest unchanged (1.7 F1, §7a Q7)', () => {
   const all = switchVm()
   const codex = switchVm(['codex'])
   const claude = switchVm(['claude'])
@@ -6934,8 +7107,13 @@ test('under Codex the Agents and Context sections are left out — no heading, f
   assert.equal(hCodex.indexOf('<h2>Agents</h2>'), -1)
   assert.equal(hCodex.indexOf('<h2>Context window</h2>'), -1)
   assert.equal(hCodex.indexOf('role="tree"'), -1)
-  assert.equal(hCodex.indexOf(CLAUDE_ONLY), -1)
-  assert.equal(hCodex.indexOf('Claude Code only'), -1)
+  // 1.11 P6 (pinned and changed: the reason stood nowhere on the page): §3.0 (c) — the Records section's two session
+  // tables are Claude Code's, and under Codex the view model's line stands in their place (`recordNotes`); that is the
+  // one place the sentence is on the page — once, inside the Records section — and never for the two sections left out.
+  const records = hCodex.slice(hCodex.indexOf('<section data-sec="records">'), hCodex.indexOf('</section>', hCodex.indexOf('<section data-sec="records">')))
+  assert.equal(hCodex.split(CLAUDE_ONLY).length - 1, 1, 'the reason is on the page other than once')
+  assert.ok(records.includes('<li>' + CLAUDE_ONLY + '</li>'), records)
+  assert.equal(hCodex.split('Claude Code only').length - 1, 1)
   // Every other block where it stood: the order is the All page's without the two.
   assert.deepEqual(orderOf(hCodex), orderOf(hAll).filter((k) => k !== 'agents' && k !== 'context'))
   assert.deepEqual(orderOf(hClaude), orderOf(hAll))
@@ -8906,13 +9084,68 @@ test('the picker\'s keys: the button opens the list on the checked item; ↓ ↑
   assert.equal(p.open(), false)
   assert.deepEqual(p.posted, [])
   // A key the list does not know, a key with a modifier, a key on something else: nothing.
+  // 1.11 P6 (rewritten: the key was `a`, which type-ahead now takes to Automatic — §3 A1 rule 3): `q`, which no
+  // item's name starts with.
   p.key('ArrowDown', p.btn)
   const at = p.active()
-  assert.equal(p.key('a').prevented, false)
+  assert.equal(p.key('q').prevented, false)
   assert.equal(p.active(), at)
   // The pure rule, for the record: moving wraps, Home/End, Enter and Space choose, Escape and Tab close.
   assert.deepEqual(JSON.parse(String(nodeVm.runInContext('JSON.stringify([langKeyMove(3, 2, "ArrowDown"), langKeyMove(3, 0, "ArrowUp"), langKeyMove(3, 1, "Home"), langKeyMove(3, 1, "End"), langKeyMove(3, 1, " "), langKeyMove(3, 1, "Enter"), langKeyMove(3, 1, "Escape"), langKeyMove(3, 1, "Tab"), langKeyMove(3, 1, "x"), langKeyMove(0, 0, "ArrowDown")])', p.c))),
     [{ focus: 0 }, { focus: 2 }, { focus: 0 }, { focus: 2 }, { choose: true }, { choose: true }, { close: 'button' }, { close: 'tab' }, null, null])
+})
+
+/** 1.11 A1 rule 3: the picker's part of a view model offering every language of the registry, English shown. */
+function languageVmAll(): Record<string, unknown> {
+  const { LANGUAGE_IDS, resolveLanguage } = require('../src/languages') as typeof import('../src/languages')
+  const vm = buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage('en', 'en', LANGUAGE_IDS), available: LANGUAGE_IDS, vscode: 'en' } })
+  return JSON.parse(JSON.stringify(vm.language)) as Record<string, unknown>
+}
+
+test('1.11 A1 rule 3: type-ahead in the open list — a letter moves the focus to the next language whose own name or English name starts with it, wrapping; chooses nothing; a modifier, a key name and no match do nothing', () => {
+  const p = pickerCtx({ language: languageVmAll() })
+  p.fire('document:click', { target: p.btn, stopPropagation: () => undefined, preventDefault: () => undefined })
+  const { LANGUAGE_IDS } = require('../src/languages') as typeof import('../src/languages')
+  assert.deepEqual(p.items().map((i) => i.dataset.id), ['auto', ...LANGUAGE_IDS])
+  assert.equal(p.active()?.dataset.id, 'en')
+  // `h` from English: हिन्दी by its English name Hindi, again: Magyar by Hungarian, again: round to Hindi. Each key is
+  // kept from the page (prevented), and nothing is chosen.
+  for (const want of ['hi', 'hu', 'hi']) {
+    assert.equal(p.key('h').prevented, true, want)
+    assert.equal(p.active()?.dataset.id, want)
+  }
+  // By the own name: `m` from Hindi reaches Magyar; a capital letter is the same letter; a letter of another
+  // script, `ह`, reaches हिन्दी by its own name.
+  p.key('m')
+  assert.equal(p.active()?.dataset.id, 'hu')
+  // After Magyar only Română is left; the search wraps round to the start, where Deutsch is the first `d`.
+  p.key('D')
+  assert.equal(p.active()?.dataset.id, 'de')
+  assert.equal(p.key('ह').prevented, true)
+  assert.equal(p.active()?.dataset.id, 'hi')
+  // No match: nothing moves and the key is not taken.
+  const at = p.active()
+  assert.equal(p.key('ö').prevented, false)
+  assert.equal(p.active(), at)
+  // A key with Ctrl, Alt or ⌘ is not type-ahead: the handler lets it pass before anything else.
+  for (const mod of ['ctrlKey', 'altKey', 'metaKey']) {
+    const r = { prevented: false }
+    p.fire('document:keydown', { key: 'h', target: p.active(), altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, [mod]: true,
+      preventDefault: () => { r.prevented = true }, stopPropagation: () => undefined })
+    assert.equal(r.prevented, false, mod)
+    assert.equal(p.active(), at, mod)
+  }
+  // A key name is no printable key: Shift, a dead key, F2 move nothing.
+  for (const k of ['Shift', 'Dead', 'F2']) {
+    assert.equal(p.key(k).prevented, false, k)
+    assert.equal(p.active(), at, k)
+  }
+  assert.equal(p.open(), true)
+  assert.deepEqual(p.posted, [], 'type-ahead chose a language')
+  // The pure rule: the names of each item, the next after the focused one, wrapping to the item itself last.
+  const names = JSON.stringify([['Alpha'], ['Beta', 'Bravo'], ['Charlie', 'bis']])
+  assert.deepEqual(JSON.parse(String(nodeVm.runInContext(`JSON.stringify([langKeyMove(3, 0, "b", ${names}), langKeyMove(3, 1, "b", ${names}), langKeyMove(3, 2, "b", ${names}), langKeyMove(3, 0, "a", ${names}), langKeyMove(3, 0, "z", ${names}), langKeyMove(3, 0, "b"), langKeyMove(3, 0, "ab", ${names})])`, p.c))),
+    [{ focus: 1 }, { focus: 2 }, { focus: 1 }, { focus: 0 }, null, null, null])
 })
 
 test('a choice posts setLanguage once and closes the list; the whole push that answers brings the words, closes nothing more and puts the focus back on the button (1.9 A3.4, A7 tests 3–4)', () => {

@@ -3778,3 +3778,25 @@ test('1.11 C5: docs/cost.md writes the table\'s three days from the constants, b
   }
   assert.equal(/prices as of/i.test(readme), false, 'README.md dates the prices')
 })
+
+test('1.11 B6, C2, C3: docs/dashboard.md describes the Records section\'s four new tables as the page draws them, and docs/cost.md the price sources, the tooltip\'s price line and the cost head — adding no date', () => {
+  const dash = flatText(doc.dashboard)
+  for (const claim of ['**Records.** The `records` section — off by default —', 'at most `tokenPace.dashboard.topN` rows per table',
+    '*Most expensive days* ranks the range\'s days by their API cost at your configured rates', 'a screen reader hears it as “lower bound”',
+    '*Longest sessions* and *Largest sessions* rank the Claude Code sessions of the Agents section\'s last seven days that are no longer active',
+    'a session still active is counted in a note and not ranked', '*Hours with the most cache written* ranks hours, not requests',
+    'is headed *API cost (your rates)* while your own rates apply', 'says *Reading history…* and shows no record at all',
+    'a rescan that reads fewer transcripts shows fewer records, never an old one', 'The Quick Pick and the markdown view carry the same rows']) {
+    assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
+  }
+  const cost = flatText(doc.cost)
+  const { PRICE_SOURCE_PAGES } = require('../src/prices') as typeof import('../src/prices')
+  const { SOURCES } = require('../src/adapters') as typeof import('../src/adapters')
+  // The footnote as the view model writes it under All (viewModel.ts priceSourcesText): the registry's hosts in order.
+  const sources = SOURCES.flatMap((s) => PRICE_SOURCE_PAGES[s]).join(', ')
+  for (const claim of [`*Price sources: ${sources}.*`, 'by host name and as text, never as a link',
+    'A status-bar tooltip that prints an *API cost* column says the same under its tables, whether or not `tokenPace.tooltipExplanations` is on',
+    'a Codex quota tooltip names no Claude row', 'the dashboard\'s *API cost* columns are headed *API cost (your rates)*']) {
+    assert.ok(cost.includes(claim), `docs/cost.md does not say: ${claim}`)
+  }
+})

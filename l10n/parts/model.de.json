@@ -149,6 +149,7 @@
   "Polish": "Polnisch",
   "Poller paused until {0}": "Poller pausiert bis {0}",
   "Portuguese (Brazil)": "Portugiesisch (Brasilien)",
+  "Price sources: {0}.": "Preisquellen: {0}.",
   "Priced from a related model (family fallback): {0}.": "Preis von einem verwandten Modell übernommen (Familien-Fallback): {0}.",
   "Project and session figures are off (tokenPace.attribution).": "Projekt- und Sitzungszahlen sind ausgeschaltet (tokenPace.attribution).",
   "Quota percentages come from the provider and cover every client of the account; they cannot be derived from the local token counts.": "Die Kontingent-Prozentwerte stammen vom Anbieter und umfassen jeden Client des Kontos; aus den lokalen Token-Zahlen lassen sie sich nicht ableiten.",

@@ -506,6 +506,20 @@ function languageItems(box: Payload): HTMLElement[] {
 }
 
 /**
+ * 1.11 A1 rule 3: the names type-ahead matches, per item of the open list — the option's own name and its name in
+ * the reader's language, as the view model gives them (the item's `data-id` finds its option).
+ */
+function languageNames(items: HTMLElement[]): string[][] {
+  const l = languageModel();
+  const options = l ? (l.options as Payload[]).filter((o) => !!o && typeof o === 'object') : [];
+  return items.map((el) => {
+    const id = el && el.dataset ? el.dataset.id : undefined;
+    const o = options.find((x) => x.id === id);
+    return o ? [o.native, o.name].filter((x: Payload) => typeof x === 'string' && x !== '') : [];
+  });
+}
+
+/**
  * Opens or closes the list in place: the button stays the element it is — so the focus on it survives —,
  * its `aria-expanded` follows, and the list is added or taken out. `focus`: 'checked' puts the focus on the
  * checked item (the first when none is), 'button' on the button — before the list goes, so a Tab pressed
@@ -534,8 +548,11 @@ function setLanguageOpen(open: boolean, focus: 'checked' | 'button' | null): voi
  * items): the item the focus moves to — ↓ / ↑ the next / the previous, wrapping round, Home / End the first
  * / the last —; `choose` for Enter and Space; `close` 'button' for Escape (the focus back on the button),
  * 'tab' for Tab (no choice; the focus moves on as Tab does). Moving chooses nothing. Null: not the list's key.
+ * 1.11 A1 rule 3: with the items' `names` (per item its own name and its name in the reader's language), a
+ * printable key moves the focus by type-ahead (langTypeAhead) — and chooses nothing either.
  */
-function langKeyMove(n: number, i: number, key: string): { focus?: number; choose?: true; close?: 'button' | 'tab' } | null {
+function langKeyMove(n: number, i: number, key: string, names?: ReadonlyArray<ReadonlyArray<string>>):
+  { focus?: number; choose?: true; close?: 'button' | 'tab' } | null {
   if (key === 'Escape') return { close: 'button' };
   if (key === 'Tab') return { close: 'tab' };
   if (n <= 0) return null;
@@ -548,9 +565,44 @@ function langKeyMove(n: number, i: number, key: string): { focus?: number; choos
     case 'Enter':
     case ' ':
       return { choose: true };
-    default:
-      return null;
+    default: {
+      const to = names ? langTypeAhead(names.slice(0, n), at, key) : null;
+      return to === null ? null : { focus: to };
+    }
   }
+}
+
+/**
+ * 1.11 A1 rule 3 (§7a Q13): type-ahead in the open list, the APG menu pattern's — a printable key (one grapheme:
+ * a key name such as "Shift" or "Dead" is none; the keydown handler has already let Ctrl, Alt and ⌘ pass) moves the
+ * focus to the next item after `at` whose own name or name in the reader's language starts with it,
+ * case-insensitive in the page's language, wrapping round to the item itself last. The index, or null: no such
+ * item, or no printable key. "h" on an English page from English reaches हिन्दी (Hindi), then Magyar (Hungarian).
+ */
+function langTypeAhead(names: ReadonlyArray<ReadonlyArray<string>>, at: number, key: string): number | null {
+  if (typeof key !== 'string' || key.trim() === '' || graphemes(key) !== 1) return null;
+  const low = (x: string): string => {
+    try { return x.toLocaleLowerCase(LOCALE); } catch { return x.toLowerCase(); }
+  };
+  const k = low(key);
+  const n = names.length;
+  for (let step = 1; step <= n; step++) {
+    const j = (at + step) % n;
+    const item = names[j] || [];
+    if (item.some((x) => typeof x === 'string' && x !== '' && low(x).startsWith(k))) return j;
+  }
+  return null;
+}
+
+/** How many graphemes a key's text is — what a reader sees as one character (U+0915 U+094D… is one, "Tab" three). */
+function graphemes(s: string): number {
+  const Seg = (Intl as Payload).Segmenter;
+  if (typeof Seg === 'function') {
+    let count = 0;
+    for (const _ of new Seg(undefined, { granularity: 'grapheme' }).segment(s)) { void _; count++; }
+    return count;
+  }
+  return Array.from(s).length;
 }
 
 /**
@@ -1042,13 +1094,18 @@ function dh(name: string): string {
  * The words the totals table and the model table share. One heading per column, translated
  * once: the same word heads the column and prefixes the cell in the stacked layout, where
  * `td[data-h]::before` prints this text in the language's `{0}:` (dh() above).
+ *
+ * 1.11 C3: while custom rates apply (`vm.pricing.custom` — a multiplier other than 1 or a price of the
+ * reader's own), the cost column says whose rates its figures are at — "API cost (your rates)" — in every
+ * table that heads it with this word, and in its stacked label with it.
  */
 function columnWords(): Record<string, string> {
+  const custom = !!vm && !!vm.pricing && vm.pricing.custom === true;
   return {
     period: tr('Period'), usage: tr('Usage'), freshInput: tr('Fresh in'),
     cacheWrite5m: tr('Write 5m'), cacheWrite1h: tr('Write 1h'), cacheRead: tr('Cache read'),
     output: tr('Output'), reasoning: tr('Reasoning'), requests: tr('Req.'), cacheHit: tr('Hit'),
-    perRequest: tr('Per req.'), cost: tr('API cost'), model: tr('Model'), share: tr('Share'),
+    perRequest: tr('Per req.'), cost: custom ? tr('API cost (your rates)') : tr('API cost'), model: tr('Model'), share: tr('Share'),
   };
 }
 
@@ -1514,16 +1571,78 @@ function recordTable(head: string, rows: Payload[]): string {
 }
 
 /**
+ * 1.11 B6: one of the Records' four tables of 1.11 — a card with its title and a table whose every cell
+ * carries its column's name for the stacked layout (dh()). `heads` are page words (markup already), `rows`
+ * the cells as markup, built by the caller from the view model's figures through esc(). No rows, no table:
+ * the line that stands for an empty one is among the section's notes, as the view model gives it.
+ */
+function recordsTable(title: string, heads: string[], rows: string[][]): string {
+  if (!rows.length) return '';
+  return '<div class="card"><div class="name">' + title + '</div>'
+    + '<div class="scroll"><table class="rec-t"><thead><tr>' + heads.map((x) => '<th>' + x + '</th>').join('')
+    + '</tr></thead><tbody>'
+    + rows.map((cells) => '<tr>' + cells.map((c, i) => '<td' + dh(heads[i]) + '>' + c + '</td>').join('') + '</tr>').join('')
+    + '</tbody></table></div></div>';
+}
+
+/**
+ * 1.11 B6: a figure of a Records table as the page prints it — escaped, each ISO day on one line (days()), each
+ * number with its unit (glue()); '–' for a figure the view model does not have.
+ */
+function recordFigure(v: Payload): string {
+  return typeof v === 'string' && v !== '' ? glue(days(esc(v))) : '–';
+}
+
+/** The rows of a Records table of 1.11 that are rows: objects, nothing else of a payload. */
+function recordRows(v: Payload): Payload[] {
+  return Array.isArray(v) ? v.filter((x: Payload) => !!x && typeof x === 'object') : [];
+}
+
+/**
+ * 1.11 B1–B3, B6: the four tables of 1.11 under the three top tables — the most expensive days, the longest and
+ * the largest Claude Code sessions, the hours with the most cache written. A figure that is a lower bound carries
+ * the page's mark of one (lbMark: the ⚠ for the eye, titled with why, "lower bound" in words for a screen reader);
+ * a day's why is the section's ⚠ legend — the first of the notes whenever a day is marked (the view model's order).
+ * The cost column follows `tokenPace.showCost` as in every table of the page, and its head the rates (columnWords).
+ */
+function newRecordTables(r: Payload): string {
+  const w = columnWords();
+  const cost = vm.showCost;
+  const notes = Array.isArray(r.recordNotes) ? r.recordNotes : [];
+  const legend = typeof notes[0] === 'string' ? esc(notes[0]) : '';
+  const day = tr('Day'), time = tr('Time'), hour = tr('Hour'), written = tr('Cache written'), of1h = tr('Of it 1 h');
+  const session = tr('Session'), started = tr('Started'), models = tr('Models');
+  let h = recordsTable(tr('Most expensive days'), [day, w.cost, w.usage],
+    recordRows(r.costDays).map((d) => [recordFigure(d.day), recordFigure(d.cost) + (d.floor === true ? lbMark(legend) : ''),
+      recordFigure(d.usage)]));
+  const sessionRows = (list: Payload, largest: boolean): string[][] => recordRows(list).map((s) => (largest
+    ? [recordFigure(s.name), recordFigure(s.usage), recordFigure(s.time), recordFigure(s.start)]
+    : [recordFigure(s.name), recordFigure(s.time), recordFigure(s.usage), recordFigure(s.start)]));
+  h += recordsTable(tr('Longest sessions'), [session, time, w.usage, started], sessionRows(r.longestSessions, false));
+  h += recordsTable(tr('Largest sessions'), [session, w.usage, time, started], sessionRows(r.largestSessions, true));
+  h += recordsTable(tr('Hours with the most cache written'), [hour, written, of1h].concat(cost ? [w.cost] : []).concat([models]),
+    recordRows(r.cacheHours).map((c) => [recordFigure(c.hour), recordFigure(c.written), recordFigure(c.written1h)]
+      .concat(cost ? [recordFigure(c.cost) + (c.floor === true ? lbMark(tr('some models have no price on file')) : '')] : [])
+      .concat([recordFigure(c.models)])));
+  return h;
+}
+
+/**
  * The extremes of the selected range.
  *
  * Nothing here is compared against a limit, because none of these figures has one: a peak day
  * is the busiest day *on record*, a streak is a run of days with usage inside the range, and
  * the shares are shares of the range. The two lower tables need attribution, and say so rather
  * than standing empty.
+ *
+ * 1.11 B4: while the host is still reading the transcripts the section is the one sentence (`reading`) and
+ * nothing else — no record read from a half-read history. 1.11 B6: the four tables of 1.11 after the three top
+ * tables, then every note of the section.
  */
 function sRecords(): string {
   const r = vm.records;
   if (!r) return '<p class="empty">' + tr('No records yet.') + '</p>';
+  if (typeof r.reading === 'string' && r.reading !== '') return '<p class="empty">' + esc(r.reading) + '</p>';
   let h = '';
   const peak = r.peakDay
     ? tr('Peak day {0} · {1}', days(esc(r.peakDay.day)), esc(r.peakDay.usage))
@@ -1545,7 +1664,9 @@ function sRecords(): string {
   } else {
     h += '<p class="empty">' + tr('Top projects and sessions need tokenPace.attribution.') + '</p>';
   }
-  const notes = [r.note, r.sessionNote].filter(Boolean);
+  h += newRecordTables(r);
+  const notes = [r.note, r.sessionNote].concat(Array.isArray(r.recordNotes) ? r.recordNotes : [])
+    .filter((n: Payload) => typeof n === 'string' && n !== '');
   if (notes.length) {
     h += '<ul class="meta">' + notes.map(n => '<li>' + glue(days(esc(n))) + '</li>').join('') + '</ul>';
   }
@@ -4381,7 +4502,7 @@ document.addEventListener('keydown', (ev) => {
   }
   if (!langOpen || typeof t.getAttribute !== 'function' || t.getAttribute('role') !== 'menuitemradio' || !t.closest('.lng-pop')) return;
   const items = languageItems(pickerBox());
-  const move = langKeyMove(items.length, items.indexOf(t), ev.key);
+  const move = langKeyMove(items.length, items.indexOf(t), ev.key, languageNames(items));
   if (move === null || move.choose) return;
   if (move.close === 'tab') { setLanguageOpen(false, 'button'); return; }
   ev.preventDefault();

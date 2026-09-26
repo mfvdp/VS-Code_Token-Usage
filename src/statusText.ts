@@ -22,10 +22,11 @@ import { Config, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './c
 import { lockoutText } from './forecast'
 import { t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
-import { isCustomPricing, PricingOptions } from './prices'
+import { isCustomPricing, PRICES_AS_OF, PricingOptions } from './prices'
 import { countdownText, promptCacheText } from './promptCache'
 // Type only: this module renders, it never reads a file, and `quotaSources` does.
 import type { ContextReading, PromptCacheReading } from './quotaSources'
+import { laterChecksText, priceSourcesText } from './viewModel'
 import {
   ageMinutes, BarOptions, compact, decimalText, estimate, extraUsageText, full, originName, percentOf,
   percentText, renderBar, usd,
@@ -911,6 +912,26 @@ function provenanceLine(ctx: RenderContext, hasQuota: boolean): string {
   return `_${parts.join(' · ')}_`
 }
 
+/**
+ * 1.11 C2 rule 2: the price line under a tooltip's cost tables — the dashboard's own sentence, the days the prices
+ * were checked and "your configured rates" while they apply (`isCustomPricing`), then where they were read (host
+ * names) — whenever a table above it prints an API cost, `tooltipExplanations` on or off: it is a fact about the
+ * figures above it, not an explanation. The days and the hosts are those of `sources`, the providers whose tables
+ * the tooltip prints: "checked later" only for a row of theirs (a Codex tooltip names no Claude model).
+ */
+function priceLine(ctx: RenderContext, sources: readonly Source[]): string[] {
+  if (!ctx.cfg.showCost) return []
+  const later = laterChecksText(sources)
+  const custom = isCustomPricing(ctx.pricing)
+  const dated = later
+    ? (custom
+      ? t('Prices as of {0}; checked later: {1} · your configured rates.', PRICES_AS_OF, later)
+      : t('Prices as of {0}; checked later: {1}.', PRICES_AS_OF, later))
+    : (custom ? t('Prices as of {0} · your configured rates.', PRICES_AS_OF) : t('Prices as of {0}.', PRICES_AS_OF))
+  const hosts = priceSourcesText(sources)
+  return ['', `_${hosts === '' ? dated : `${dated} ${t('Price sources: {0}.', hosts)}`}_`]
+}
+
 function explanations(ctx: RenderContext, opts: { quota: boolean; codex: boolean }): string[] {
   if (!ctx.cfg.tooltipExplanations) return []
   const out: string[] = []
@@ -1038,6 +1059,7 @@ export function quotaTooltip(q: QuotaState, ctx: RenderContext): string {
   }
   out.push('')
   out.push(...usageTable(q.source, ctx))
+  out.push(...priceLine(ctx, [q.source]))
   out.push('')
   out.push(provenanceLine(ctx, true))
   out.push(...explanations(ctx, { quota: true, codex: q.source === 'codex' }))
@@ -1078,6 +1100,7 @@ export function summaryTooltip(sources: Source[], ctx: RenderContext): string {
   }
   out.push('')
   out.push(...tokenBody(ctx))
+  out.push(...priceLine(ctx, scopeSources(cfg)))
   out.push('')
   out.push(provenanceLine(ctx, states.length > 0))
   out.push(...explanations(ctx, { quota: true, codex: sources.includes('codex') }))
@@ -1121,6 +1144,7 @@ export function tokenTooltip(ctx: RenderContext, what: 'tokens' | 'cost'): strin
   }
   out.push('')
   out.push(...tokenBody(ctx))
+  out.push(...priceLine(ctx, scopeSources(cfg)))
   if (ctx.role === 'follower') {
     out.push('')
     out.push(`_${followerNote()}_`)

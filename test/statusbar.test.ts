@@ -634,6 +634,61 @@ test('custom rates are named in the cost tooltip', () => {
   assert.ok(tip.includes('at your configured rates'), tip)
 })
 
+test('1.11 C2: every tooltip with a cost table says under it when the prices were checked and where they were read — explanations on or off; "your configured rates" iff custom rates apply; the later row and the hosts are the tooltip\'s providers\'; none without a cost table; in German too', () => {
+  const { PRICES_AS_OF, PRICES_CHECKED_LATER, PRICE_SOURCE_PAGES } = require('../src/prices') as typeof import('../src/prices')
+  const later = (sources: string[]): string => PRICES_CHECKED_LATER.filter((r) => sources.includes(r.source)).map((r) => `${r.model} (${r.checked})`).join(', ')
+  const hosts = (sources: Array<'claude' | 'codex'>): string => sources.flatMap((x) => PRICE_SOURCE_PAGES[x]).join(', ')
+  assert.equal(later(['claude']), 'claude-opus-5-5 (2026-09-24)')
+  const line = (sources: Array<'claude' | 'codex'>, custom: boolean): string => {
+    const l = later(sources)
+    const dated = l ? `Prices as of ${PRICES_AS_OF}; checked later: ${l}${custom ? ' · your configured rates' : ''}.`
+      : `Prices as of ${PRICES_AS_OF}${custom ? ' · your configured rates' : ''}.`
+    return `_${dated} Price sources: ${hosts(sources)}._`
+  }
+  const once = (tip: string, want: string): void => {
+    assert.equal(tip.split('\n').filter((l) => l === want).length, 1, `${want}\n---\n${tip}`)
+    assert.equal(tip.split('Prices as of').length - 1, 1, tip)
+    // Under the tables, above the provenance line.
+    assert.ok(tip.indexOf(want) > tip.lastIndexOf('| 30 days |') && tip.indexOf(want) < tip.indexOf('_measured: '), tip)
+  }
+  for (const explain of [false, true]) {
+    const c = cfg({ 'tokenPace.tooltipExplanations': explain })
+    // The quota item: its own provider's days and pages — a Codex card names no Claude row.
+    once(quotaTooltip(state(), makeContext(input({ cfg: c }))), line(['claude'], false))
+    once(quotaTooltip(state({ source: 'codex' }), makeContext(input({ cfg: c }))), line(['codex'], false))
+    assert.equal(quotaTooltip(state({ source: 'codex' }), makeContext(input({ cfg: c }))).includes('checked later'), false)
+    // The tokens and cost items: the providers of summary.scope.
+    once(tokenTooltip(makeContext(input({ cfg: c })), 'cost'), line(['claude', 'codex'], false))
+    once(tokenTooltip(makeContext(input({ cfg: cfg({ 'tokenPace.tooltipExplanations': explain, 'tokenPace.summary.scope': 'codex' }) })), 'tokens'), line(['codex'], false))
+    // The collective item prints the token tables too (tokenBody), so the line stands under them.
+    once(summaryTooltip(['claude', 'codex'], makeContext(input({ cfg: c }))), line(['claude', 'codex'], false))
+    // Custom rates — a multiplier or a price of the reader's own — say so in the same line.
+    const mine = cfg({ 'tokenPace.tooltipExplanations': explain, 'tokenPace.pricing.multiplier': 0.8 })
+    once(tokenTooltip(makeContext(input({ cfg: mine })), 'cost'), line(['claude', 'codex'], true))
+    once(quotaTooltip(state(), makeContext(input({ cfg: cfg({ 'tokenPace.tooltipExplanations': explain,
+      'tokenPace.customPrices': { 'claude-opus-4-6': { input: 1, output: 2 } } }) }))), line(['claude'], true))
+  }
+  // No cost column, no price line: the costs off, and the compact tooltip, which prints no cost table.
+  const noCost = cfg({ 'tokenPace.showCost': false })
+  for (const tip of [quotaTooltip(state(), makeContext(input({ cfg: noCost }))), tokenTooltip(makeContext(input({ cfg: noCost })), 'tokens'),
+    summaryTooltip(['claude', 'codex'], makeContext(input({ cfg: noCost }))),
+    quotaTooltip(state(), makeContext(input({ cfg: cfg({ 'tokenPace.tooltip': 'compact' }) })))]) {
+    assert.equal(tip.includes('Prices as of'), false, tip)
+    assert.equal(tip.includes('Price sources'), false, tip)
+  }
+  // German: the dashboard's words, the host names as they are.
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    const tip = quotaTooltip(state(), makeContext(input()))
+    assert.ok(tip.includes(`_Preise mit Stand ${PRICES_AS_OF}; später geprüft: claude-opus-5-5 (2026-09-24). Preisquellen: docs.claude.com, platform.claude.com._`), tip)
+    const mine = tokenTooltip(makeContext(input({ cfg: cfg({ 'tokenPace.pricing.multiplier': 0.8, 'tokenPace.summary.scope': 'codex' }) })), 'cost')
+    assert.ok(mine.includes(`_Preise mit Stand ${PRICES_AS_OF} · Ihre konfigurierten Sätze. Preisquellen: developers.openai.com._`), mine)
+  } finally {
+    setBundle(undefined)
+  }
+})
+
 test('the tooltip surfaces the fields nothing else shows', () => {
   const tip = tokenTooltip(makeContext(input()), 'tokens')
   assert.ok(tip.includes('cache write 300K (1 h 40K)'), tip)

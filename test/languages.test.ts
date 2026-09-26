@@ -19,7 +19,7 @@ import {
   autoLanguage, isLanguageId, LANGUAGE_IDS, LANGUAGES, LanguageId, languageEntry, languageName, LanguageSetting,
   resolveLanguage, ResolvedLanguage, vscodeLanguageTag,
 } from '../src/languages'
-import { readJson } from './helpers/nls'
+import { LANGUAGE_NAME_AS_ENGLISH, readJson } from './helpers/nls'
 
 /** The lead's list (collect "Vorschlag Sprachliste", tier 1), in the picker's order. */
 const LEADS_LIST: Array<[string, string, string, string]> = [
@@ -93,8 +93,12 @@ test('languageName: each language\'s name in the reader\'s language, one t() lit
     assert.equal(languageName('en'), 'Englisch')
     assert.equal(languageName('zh-tw'), 'Chinesisch (traditionell)')
     assert.equal(languageName('pt-br'), 'Portugiesisch (Brasilien)')
-    // Every name has its German word — none of the fourteen is the English one.
-    for (const id of LANGUAGE_IDS) assert.notEqual(languageName(id), english[id], `${id} has no German name`)
+    // Every name has its German word — none is the English one but where LANGUAGE_NAME_AS_ENGLISH says German writes it
+    // so (1.11 A3 rule 11 b, the frame's T10 list: Hindi).
+    for (const id of LANGUAGE_IDS) {
+      if (LANGUAGE_NAME_AS_ENGLISH.some(([lang, name]) => lang === 'de' && name === english[id])) assert.equal(languageName(id), english[id], id)
+      else assert.notEqual(languageName(id), english[id], `${id} has no German name`)
+    }
   } finally {
     setBundle(undefined)
   }
@@ -255,7 +259,23 @@ test('the join: availableLanguages over the repository\'s l10n/ finds all fourte
 // 1.10 P20: the join — every language has worked through the ledger, and the gates hold without tolerance
 // ---------------------------------------------------------------------------
 
-test('the join: no pending list is left, every ledger entry is applied to every language, and the manifest\'s records are fresh without any tolerance — l10n-rekey --check and nls-sources --check --strict exit 0 (1.10 B1, P20)', () => {
+/**
+ * 1.11 P1 (pinned and changed: the join test of 1.10 P20 held the tree to the join unconditionally). `--start b89ff43`
+ * began 1.11's ledger with a list at cursor 0 for each of the twelve 1.10 languages, and the frame's PENDING_ALLOWED
+ * (test/l10n.languages.test.ts) is true again until 1.11's join (P8). The switch is read from that file's line — a test
+ * file bundled into this one would run its tests twice —, so this test holds the join exactly when the frame does, and
+ * the build branch's gates in between.
+ */
+function pendingAllowed(): boolean {
+  const { readFileSync } = require('node:fs') as typeof import('node:fs')
+  const { join } = require('node:path') as typeof import('node:path')
+  const { ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
+  const m = /^export const PENDING_ALLOWED: boolean = (true|false)$/m.exec(readFileSync(join(ROOT, 'test', 'l10n.languages.test.ts'), 'utf8'))
+  assert.ok(m, 'test/l10n.languages.test.ts no longer declares PENDING_ALLOWED on one line')
+  return m[1] === 'true'
+}
+
+test('the join: no pending list is left, every ledger entry is applied to every language, and the manifest\'s records are fresh without any tolerance — l10n-rekey --check and nls-sources --check --strict exit 0; on the build branch, while PENDING_ALLOWED, every list is at the ledger\'s end and the tolerant gates pass (1.10 B1, P20; 1.11 P1: both states)', () => {
   const { spawnSync } = require('node:child_process') as typeof import('node:child_process')
   const { existsSync, readdirSync, readFileSync } = require('node:fs') as typeof import('node:fs')
   const { join } = require('node:path') as typeof import('node:path')
@@ -263,21 +283,31 @@ test('the join: no pending list is left, every ledger entry is applied to every 
   // The language packages delete their lists at the end; an empty folder may stay behind (git does not keep one).
   const pendingDir = join(ROOT, 'l10n', 'pending')
   const left = existsSync(pendingDir) ? readdirSync(pendingDir).filter((f) => !f.startsWith('.')) : []
-  assert.deepEqual(left, [], `pending lists left at the join: ${left.join(', ')}`)
-  // The ledger exists and has entries (1.10 changed the English), each applied: a language without a list is done.
   const ledger = JSON.parse(readFileSync(join(ROOT, 'l10n', 'rekey.json'), 'utf8')) as { v: number; entries: unknown[] }
   assert.equal(ledger.v, 1)
-  assert.ok(ledger.entries.length > 0, 'the ledger has no entry')
   const run = (script: string, ...args: string[]): { status: number | null; out: string } => {
     const r = spawnSync(process.execPath, [join(ROOT, 'scripts', script), ...args], { cwd: ROOT, encoding: 'utf8' })
     return { status: r.status, out: `${r.stdout}${r.stderr}` }
   }
+  const translations = readdirSync(ROOT).filter((f) => /^package\.nls\.[a-z-]+\.json$/.test(f)).length
   const rekey = run('l10n-rekey.mjs', '--check')
   assert.equal(rekey.status, 0, rekey.out)
-  assert.match(rekey.out, new RegExp(`every entry is applied \\(${ledger.entries.length} entries since \\w+; 0 language\\(s\\) with a pending list\\)`))
-  // --strict counts a pending manifest key as a problem; at the join there is none, in any of the thirteen languages.
+  assert.match(rekey.out, new RegExp(`every entry is applied \\(${ledger.entries.length} entr(?:y|ies) since \\w+; ${left.length} language\\(s\\) with a pending list\\)`))
+  if (pendingAllowed()) {
+    // The build branch: a list for each language that has not worked through the ledger yet, each at its end (T14), and
+    // the freshness gate tolerant of the keys they name.
+    assert.ok(left.length > 0, 'PENDING_ALLOWED is true, and no list is on disk — the join sets it false')
+    const tolerant = run('nls-sources.mjs', '--check')
+    assert.equal(tolerant.status, 0, tolerant.out)
+    assert.match(tolerant.out, new RegExp(`every record is fresh \\(${translations} language\\(s\\)`))
+    return
+  }
+  assert.deepEqual(left, [], `pending lists left at the join: ${left.join(', ')}`)
+  // The ledger has entries (the version changed the English), each applied: a language without a list is done.
+  assert.ok(ledger.entries.length > 0, 'the ledger has no entry')
+  // --strict counts a pending manifest key as a problem; at the join there is none, in any language.
   const strict = run('nls-sources.mjs', '--check', '--strict')
   assert.equal(strict.status, 0, strict.out)
-  assert.match(strict.out, /every record is fresh \(13 language\(s\)\)/)
+  assert.match(strict.out, new RegExp(`every record is fresh \\(${translations} language\\(s\\)\\)`))
   assert.doesNotMatch(strict.out, /pending/)
 })

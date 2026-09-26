@@ -375,15 +375,15 @@ test('the tests\' helper reads a language\'s pending manifest keys, and none whe
   assert.deepEqual([...pendingNlsKeys('ja', dir)], [])
 })
 
-test('the repository\'s ledger: 1.10\'s starts at e72057a — 1123 t() keys, 295 manifest keys, one line each —, a list exists only for the twelve languages beyond English and German, each at the ledger\'s end, and none of these files ships (1.10 P1)', () => {
+test('the repository\'s ledger: 1.10\'s started at e72057a (1123 t() keys, 295 manifest keys), 1.11\'s at b89ff43 (1197, 297), one line each —, a list exists only for the twelve languages beyond English and German, each at the ledger\'s end, and none of these files ships (1.10 P1; 1.11 P1)', () => {
   const base = read<{ v: number; base: string; keys: Record<string, string[]>; nls: Table }>(ROOT, 'l10n/rekey-base.json')
   const ledger = read<{ v: number; base: string; entries: Entry[] }>(ROOT, 'l10n/rekey.json')
   assert.deepEqual([base.v, base.base], [1, ledger.base])
-  // 1.10 P1 wrote the base from the 1.9.0 release commit; a later version's --start writes its own, and this pin with it.
-  if (base.base === 'e72057a') {
-    assert.equal(Object.keys(base.keys).length, 1123)
-    assert.equal(Object.keys(base.nls).length, 295)
-  }
+  // 1.10 P1 wrote the base from the 1.9.0 release commit, 1.11 P1 from the 1.10.0 one (--start b89ff43, which emptied the
+  // ledger: 1.10's 115 entries are in the history at b89ff43). A later version's --start writes its own, and its pin here.
+  const counts: Record<string, [number, number]> = { e72057a: [1123, 295], b89ff43: [1197, 297] }
+  assert.ok(Object.prototype.hasOwnProperty.call(counts, base.base), `the base ${base.base} has no pin here — add its counts`)
+  assert.deepEqual([Object.keys(base.keys).length, Object.keys(base.nls).length], counts[base.base])
   // The base file is what --start writes: one line per key and per manifest key.
   assert.equal(text(ROOT, 'l10n/rekey-base.json').split('\n').length, Object.keys(base.keys).length + Object.keys(base.nls).length + 9)
   // A list for each language that has not finished its work (P1 wrote twelve at cursor 0; a language's package deletes its own).

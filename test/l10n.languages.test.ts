@@ -20,12 +20,14 @@
  *   T7  the tone: no exclamation mark
  *   T8  the tables: a header row keeps its pipes
  *   T9  no English left, proper names and code excepted (SAME_IN_EVERY_LANGUAGE)
- *   T10 the registry: every file names a shipped language; the language names translated, the
- *       native names and the product's name as they are
+ *   T10 the registry: every file names a shipped language; the language names translated (or written
+ *       as the English where LANGUAGE_NAME_AS_ENGLISH says the language writes them so), the native
+ *       names and the product's name as they are
  *   T11 the English quotes: the keep-warm consent quotes the terms and the line verbatim, and a
  *       quoted {n} stays between quotation marks
  *   T12 the freshness of the manifest's translations (scripts/nls-sources.mjs --check)
- *   T13 the heat map's weekday words fit their column: four characters at most
+ *   T13 the heat map's weekday words fit their column: four characters at most — counted as a reader
+ *       sees them, in grapheme clusters (1.11 A3)
  *   T14 the pending list (1.10 B1): its keys in today's English, the ledger applied to its end, none
  *       for German, none at all once PENDING_ALLOWED is false
  *
@@ -40,11 +42,22 @@
  * (l10n/rekey-base.json) and asks for today's key sets: an English change without its entry fails.
  * At the join (1.10 P20) PENDING_ALLOWED is false, and every rule holds every key again.
  *
+ * 1.11 A3: twelve more languages are written from the frozen English — Ukrainian, Greek and Hindi in scripts of their
+ * own, Swedish and Finnish with their own quotation marks, Hindi with weekday words longer in code points than on the
+ * screen. Each rule that would misjudge one of them was taught once, for every language, before a single one was
+ * written: NON_LATIN names every language of another script, T13 counts grapheme clusters, a ” may open and a » close
+ * a quotation, T4 counts the marks of the NFC form (the Greek ano teleia, U+0387, is the separator · there) and names
+ * the ano teleia itself, and T10 lets a language name the ledger has just added be absent while it is pending and a
+ * name equal to the English stand where LANGUAGE_NAME_AS_ENGLISH says the language writes it so. The ledger started
+ * again at 1.10.0's release commit (l10n-rekey.mjs --start b89ff43), and PENDING_ALLOWED is true until 1.11's join.
+ *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
- * temporary directory: a copy of the German under another id (a Latin-script language), and a
+ * temporary directory: a copy of the German under another id (a Latin-script language), a
  * pseudo-translation of the English that turns every word into 語 and keeps everything the rules
- * hold (a language of another script). Both pass every rule before they are broken. No file outside
+ * hold (a language of another script), and — since 1.11 — the same pseudo-translation with every
+ * word शुक्र under `hi` (a script whose weekday words are longer in code points than on the screen).
+ * Each passes every rule before it is broken. No file outside
  * the repository and the test's own temporary directories is touched; nothing is sent anywhere.
  */
 
@@ -64,7 +77,7 @@ import { buildItems, makeContext, UsageSource } from '../src/statusText'
 import type { MementoLike } from '../src/storage'
 import { formatReset, weekdayWords } from '../src/time'
 import { emptyBucket, QuotaState, QuotaWindow } from '../src/types'
-import { ROOT } from './helpers/nls'
+import { LANGUAGE_NAME_AS_ENGLISH, ROOT } from './helpers/nls'
 
 // ---------------------------------------------------------------------------
 // The words that stay the same in every language (T9)
@@ -146,8 +159,11 @@ export const SAME_IN_EVERY_LANGUAGE: ReadonlyArray<readonly [string, string]> = 
 /**
  * The languages written in another script than Latin (T9's second rule): their values may keep no
  * run of three Latin words. Every other language of the registry is written in Latin script.
+ * 1.11 A3 rule 1: Ukrainian (Cyrillic), Greek and Hindi (Devanagari) joined before they were written;
+ * Vietnamese is written in Latin letters (LATIN_LETTERS spans its U+1E00–U+1EFF), so T9's Latin rule
+ * holds it. A test holds this set to the scripts of the registry's native names.
  */
-const NON_LATIN: ReadonlySet<string> = new Set(['ja', 'ko', 'zh-cn', 'zh-tw', 'ru'])
+export const NON_LATIN: ReadonlySet<string> = new Set(['ja', 'ko', 'zh-cn', 'zh-tw', 'ru', 'uk', 'el', 'hi'])
 
 /**
  * T5: a backtick span of the manifest that is words, not code — a formula spelled in words or a
@@ -171,8 +187,19 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
  * until the join; P20 set it false (the twelve language packages merged, every list deleted), and from then on no
  * pending file may exist (T14) and every rule holds every key. The next version's first English change turns it true
  * again together with `l10n-rekey.mjs --start`.
+ * 1.11 P1: true again — `l10n-rekey.mjs --start b89ff43` started 1.11's ledger with a list at cursor 0 for each of the
+ * twelve 1.10 languages; 1.11's join (P8) sets it false. test/languages.test.ts's join test reads this line.
  */
-export const PENDING_ALLOWED: boolean = false
+export const PENDING_ALLOWED: boolean = true
+
+/**
+ * 1.11 A3 rule 11 (b): a language name a language writes as the English does — `[id, English name, reason]`. T10
+ * refuses a translation of a language name equal to its English, except by this list; test/languages.test.ts's German
+ * check takes the same list. Owned by 1.11 P1; the join (P8) extends it for a package's report, each with its reason,
+ * never a package itself. Kept in test/helpers/nls.ts, which both tests import (a test file imported by another would
+ * run its tests twice).
+ */
+export { LANGUAGE_NAME_AS_ENGLISH }
 
 // ---------------------------------------------------------------------------
 // What a language is measured against: the English source and the German reference
@@ -190,7 +217,7 @@ interface Source {
   germanParts: Record<Part, string[]>
   /** The keys of webviewWords(): the page's own words, concatenated into markup. */
   pageWords: string[]
-  /** languageName() of every id with no bundle installed: the fourteen names in English. */
+  /** languageName() of every id with no bundle installed: the registry's names in English. */
   names: Array<{ id: string; english: string }>
   /** weekdayWords() with no bundle installed: 'Sun' … 'Sat'. */
   weekdays: string[]
@@ -453,12 +480,33 @@ function nonLatinLeft(value: string): string | null {
   return null
 }
 
-/** The quotation marks a {n} may stand between (T11), in any of the fourteen languages. */
-const OPEN_QUOTES = '“"„«‹「『‘\'‚»›'
-const CLOSE_QUOTES = '”"“»›」』’\'‘«‹'
-function quoted(s: string, ph: string): boolean {
-  return new RegExp(`[${reEsc(OPEN_QUOTES)}][\\u00a0\\u202f ]?${reEsc(ph)}[\\u00a0\\u202f ]?[${reEsc(CLOSE_QUOTES)}]`).test(s)
+/**
+ * The quotation marks a {n} may stand between (T11), and an example between (T15), in any language of the registry.
+ * 1.11 A3 rule 3: ” opens too — Swedish and Finnish write ”…” (and »…», which 1.10's sets read already: » was an
+ * opening and a closing mark since 1.9, for Danish »…« and the «…» of the others). The examples and the quoted {n} of
+ * the files on disk are the same with 1.10's openers and these (a test).
+ */
+export const OPEN_QUOTES = '“"„«‹「『‘\'‚»›”'
+export const CLOSE_QUOTES = '”"“»›」』’\'‘«‹'
+/** 1.11 A3 rule 3: the opening marks as 1.10 had them — the test that the files on disk read the same compares with them. */
+const OPEN_QUOTES_1_10 = '“"„«‹「『‘\'‚»›'
+function quoted(s: string, ph: string, open: string = OPEN_QUOTES, close: string = CLOSE_QUOTES): boolean {
+  return new RegExp(`[${reEsc(open)}][\\u00a0\\u202f ]?${reEsc(ph)}[\\u00a0\\u202f ]?[${reEsc(close)}]`).test(s)
 }
+
+/**
+ * 1.11 A3 rule 2: what T13 counts — grapheme clusters, the characters a reader sees. Hindi's short weekday शुक्र is two
+ * of them and five code points; for every language of 1.10 the two counts are equal (a test).
+ */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+export const graphemes = (s: string): number => [...GRAPHEMES.segment(s)].length
+
+/**
+ * 1.11 A3 rule 6: the Greek ano teleia. Its canonical decomposition is the middle dot, so NFC — which an editor or a tool
+ * may apply to a file — turns U+0387 into U+00B7, the separator T4 counts. T4 therefore counts the marks of the NFC form
+ * and names the ano teleia itself: Greek writes a comma or a full stop inside a sentence, never the ano teleia.
+ */
+export const ANO_TELEIA = '\u0387'
 
 function installed<T>(bundle: Record<string, string> | null, run: () => T): T {
   try {
@@ -579,10 +627,10 @@ const barSpaces = (s: string): string => s.replace(/[  ]/g, ' ').trim()
  * (aujourd’hui, dell’ora) is a letter of the word, not a closing mark (1.10 P8's finding): it is masked before the
  * scan and put back in the example.
  */
-export function quotedExamples(value: string): string[] {
-  const marks = reEsc(OPEN_QUOTES + CLOSE_QUOTES)
+export function quotedExamples(value: string, open: string = OPEN_QUOTES, close: string = CLOSE_QUOTES): string[] {
+  const marks = reEsc(open + close)
   const masked = value.replace(/(?<=\p{L})’(?=\p{L})/gu, '\uE000').replace(/(?<=\p{L})'(?=\p{L})/gu, '\uE001')
-  return [...masked.matchAll(new RegExp(`[${reEsc(OPEN_QUOTES)}]([^${marks}]+)[${reEsc(CLOSE_QUOTES)}]`, 'g'))]
+  return [...masked.matchAll(new RegExp(`[${reEsc(open)}]([^${marks}]+)[${reEsc(close)}]`, 'g'))]
     .map((m) => barSpaces(m[1].replace(/\uE000/g, '’').replace(/\uE001/g, "'")))
 }
 
@@ -686,16 +734,21 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
     ],
   },
   T4: {
-    title: 'the marks — ~ ⚠ ≈ – % × → · as often as the key (the manifest: ~ ⚠ ≈ –); ASCII ~, never ～',
+    title: 'the marks — ~ ⚠ ≈ – % × → · as often as the key (the manifest: ~ ⚠ ≈ –); ASCII ~, never ～; no Greek ano teleia, which NFC makes a ·',
     rule: (s, l) => {
       const out: string[] = []
+      // 1.11 A3 rule 6: the marks of the NFC form — a Greek ano teleia (U+0387) is the separator · there, and counts so.
+      const nfc = (x: string): string => x.normalize('NFC')
+      const teleia = (file: string, key: string): string => `${l.id}: ${file}: ${key} writes the Greek ano teleia (U+0387), which NFC makes the separator · — write a comma or a full stop`
       for (const [k, v] of entries(l.bundle)) {
-        for (const m of MARKS) if (count(v, m) !== count(k, m)) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} has ${count(v, m)} × ${m}, its key ${count(k, m)}`)
+        for (const m of MARKS) if (count(nfc(v), m) !== count(nfc(k), m)) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} has ${count(nfc(v), m)} × ${m}, its key ${count(nfc(k), m)}`)
         if (v.includes('～') || v.includes('・')) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} writes ～ or ・ for ~ or ·`)
+        if (v.includes(ANO_TELEIA)) out.push(teleia(BUNDLE(l), J(k)))
       }
       for (const [k, en, v] of nlsEntries(s, l)) {
-        for (const m of NLS_MARKS) if (count(v, m) !== count(en, m)) out.push(`${l.id}: ${NLS(l)}: ${k} has ${count(v, m)} × ${m}, the English ${count(en, m)}`)
+        for (const m of NLS_MARKS) if (count(nfc(v), m) !== count(nfc(en), m)) out.push(`${l.id}: ${NLS(l)}: ${k} has ${count(nfc(v), m)} × ${m}, the English ${count(nfc(en), m)}`)
         if (v.includes('～')) out.push(`${l.id}: ${NLS(l)}: ${k} writes ～ for ~`)
+        if (v.includes(ANO_TELEIA)) out.push(teleia(NLS(l), k))
       }
       return out
     },
@@ -773,7 +826,7 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
     },
   },
   T10: {
-    title: 'the registry — the files name a shipped language; its fourteen names translated, the native names and the product\'s name as they are',
+    title: 'the registry — the files name a shipped language; its language names translated, the native names and the product\'s name as they are',
     rule: (s, l) => {
       const out: string[] = []
       if (!isLanguageId(l.id)) out.push(`${l.id}: no language of the registry (src/languages.ts) has this id — a file named after it is never read`)
@@ -781,7 +834,11 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
       if (l.bundle) {
         for (const { english } of s.names) {
           const v = l.bundle[english]
-          if (typeof v !== 'string' || v === '' || v === english) out.push(`${l.id}: ${BUNDLE(l)}: the language name ${J(english)} is not translated`)
+          // 1.11 A3 rule 11 (a): a name the ledger has just added may be absent while the language's list names it `translate`.
+          if (v === undefined && translatePending(l, english)) continue
+          // 1.11 A3 rule 11 (b): a name the language writes as the English does, by LANGUAGE_NAME_AS_ENGLISH only.
+          const asEnglish = LANGUAGE_NAME_AS_ENGLISH.some(([id, name]) => id === l.id && name === english)
+          if (typeof v !== 'string' || v === '' || (v === english && !asEnglish)) out.push(`${l.id}: ${BUNDLE(l)}: the language name ${J(english)} is not translated`)
         }
       }
       if (l.nls) {
@@ -817,12 +874,13 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
     rule: (_s, l) => freshness(l.root, !l.pendingAllowed).filter((p) => p.startsWith(`${l.id}: `)),
   },
   T13: {
-    title: 'the weekday words — Sun … Sat translated in four characters or fewer (the heat map\'s rows)',
+    title: 'the weekday words — Sun … Sat translated in four characters or fewer, as a reader sees them (grapheme clusters; the heat map\'s rows)',
     rule: (s, l) => {
       if (!l.bundle) return []
       const shown = installed(l.bundle, () => weekdayWords())
-      return shown.map((w, i) => [s.weekdays[i], w]).filter(([, w]) => [...w].length > 4 || w.length === 0)
-        .map(([en, w]) => `${l.id}: ${BUNDLE(l)}: ${J(en)} is ${J(w)}, ${[...w].length} characters`)
+      // 1.11 A3 rule 2: grapheme clusters, not code points — the column holds what a reader sees (शुक्र: 2, not 5).
+      return shown.map((w, i) => [s.weekdays[i], w]).filter(([, w]) => graphemes(w) > 4 || w.length === 0)
+        .map(([en, w]) => `${l.id}: ${BUNDLE(l)}: ${J(en)} is ${J(w)}, ${graphemes(w)} characters`)
     },
   },
   T14: {
@@ -907,7 +965,8 @@ test('the frame runs over the languages on disk — German among them — and En
   assert.ok(s.keys.length >= 1000, `only ${s.keys.length} t() keys`)
   assert.ok(s.pageWords.length >= 150 && s.pageWords.every((k) => s.keys.includes(k)), `${s.pageWords.length} page words`)
   assert.deepEqual(s.weekdays, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
-  assert.equal(s.names.length, 14)
+  // 1.11 A3 rule 9 (pinned and changed: the literal 14): one name per language of the registry, whatever its size.
+  assert.equal(s.names.length, LANGUAGES.length)
   assert.deepEqual(PARTS.map((p) => s.germanParts[p].length > 100), [true, true, true, true])
 })
 
@@ -940,20 +999,25 @@ function tempDir(): string {
 }
 
 /**
- * The English turned into a language of another script: every word 語, everything the rules hold
+ * The English turned into a language of another script: every word 語 (or `word`), everything the rules hold
  * kept — the code, the names, the placeholders, the marks, the quotation marks, the paragraphs.
  */
 const PSEUDO_WORD = new RegExp(`[${LATIN_LETTERS}]+(?:['’][${LATIN_LETTERS}]+)*`, 'gu')
-function pseudo(english: string): string {
+function pseudo(english: string, word: string = '語'): string {
   let out = ''
   let at = 0
   for (const m of english.matchAll(PROTECTED)) {
-    out += english.slice(at, m.index).replace(PSEUDO_WORD, '語')
+    out += english.slice(at, m.index).replace(PSEUDO_WORD, word)
     out += m[0]
     at = (m.index ?? 0) + m[0].length
   }
-  return out + english.slice(at).replace(PSEUDO_WORD, '語')
+  return out + english.slice(at).replace(PSEUDO_WORD, word)
 }
+/**
+ * 1.11 A3 rule 10: the word of the `deva` fixture — Hindi's short Friday as ICU writes it, two grapheme clusters and five
+ * code points (श ु क ् र), so every weekday word of the fixture is one a reader sees as two characters.
+ */
+export const DEVA_WORD = 'शुक्र'
 
 function writeJson(file: string, table: Record<string, string>): void {
   mkdirSync(join(file, '..'), { recursive: true })
@@ -965,10 +1029,12 @@ function writeJson(file: string, table: Record<string, string>): void {
  * German's keys), the bundle merged from them, the manifest's translation and its freshness record
  * (made by the script, as a translation package makes it). `german`: the German's words under
  * another id — a Latin-script language that passes every rule; `pseudo`: the English as 語 — a
- * language of another script that passes every rule.
+ * language of another script that passes every rule; `deva` (1.11 A3 rule 10): the English as शुक्र,
+ * meant for the id `hi` — Devanagari, whose words are longer in code points than on the screen.
  */
+type FixtureKind = 'german' | 'pseudo' | 'deva'
 const BASES = new Map<string, string>()
-function fixture(kind: 'german' | 'pseudo', id: string): string {
+function fixture(kind: FixtureKind, id: string): string {
   const cacheKey = `${kind}:${id}`
   let base = BASES.get(cacheKey)
   if (!base) {
@@ -980,7 +1046,7 @@ function fixture(kind: 'german' | 'pseudo', id: string): string {
     const merged: Record<string, string> = {}
     for (const part of PARTS) {
       const table: Record<string, string> = {}
-      for (const k of s.germanParts[part]) table[k] = kind === 'german' ? germanBundle[k] : pseudo(k)
+      for (const k of s.germanParts[part]) table[k] = kind === 'german' ? germanBundle[k] : pseudo(k, kind === 'deva' ? DEVA_WORD : '語')
       writeJson(join(base, 'l10n', 'parts', `${part}.${id}.json`), table)
       Object.assign(merged, table)
     }
@@ -989,7 +1055,7 @@ function fixture(kind: 'german' | 'pseudo', id: string): string {
     writeJson(join(base, 'l10n', `bundle.l10n.${id}.json`), bundle)
     const nls: Record<string, string> = {}
     for (const [k, en] of Object.entries(s.english)) {
-      nls[k] = kind === 'german' ? germanNls[k] : k.startsWith('config.language.enum.') && k !== 'config.language.enum.auto' ? en : pseudo(en)
+      nls[k] = kind === 'german' ? germanNls[k] : k.startsWith('config.language.enum.') && k !== 'config.language.enum.auto' ? en : pseudo(en, kind === 'deva' ? DEVA_WORD : '語')
     }
     writeJson(join(base, `package.nls.${id}.json`), nls)
     const r = spawnSync(process.execPath, [join(ROOT, 'scripts', 'nls-sources.mjs'), id], { cwd: base, encoding: 'utf8' })
@@ -1047,13 +1113,17 @@ function caughtAs(pendingAllowed: boolean, no: string, dir: string, id: string, 
   }
 }
 
-test('the two synthetic languages — the German under fr, the English as 語 under ja — pass every rule', () => {
-  for (const [kind, id] of [['german', 'fr'], ['pseudo', 'ja']] as const) {
+test('the three synthetic languages — the German under fr, the English as 語 under ja, the English as शुक्र under hi — pass every rule (1.11 A3 rule 10: the third)', () => {
+  for (const [kind, id] of [['german', 'fr'], ['pseudo', 'ja'], ['deva', 'hi']] as const) {
     const dir = fixture(kind, id)
     // 1.10 B3: but T15, which reads the bar under the id's own locale — the German's “Mo 06:00” is not what a French bar
     // prints (“lun. 06:00”), nor 語 a Japanese weekday. T15 runs over the real files and its own fixtures (below).
-    for (const no of Object.keys(RULES).filter((x) => x !== 'T15')) assert.deepEqual(run(no, dir, id), [], `${no} fails the unbroken ${kind} fixture ${id}`)
+    // 1.11 P1: and T10 for `hi` until the registry has it (1.11 P2) — T10 names a file after no registry id, by design.
+    const rules = Object.keys(RULES).filter((x) => x !== 'T15' && (x !== 'T10' || isLanguageId(id)))
+    for (const no of rules) assert.deepEqual(run(no, dir, id), [], `${no} fails the unbroken ${kind} fixture ${id}`)
   }
+  assert.ok(isLanguageId('hi') || run('T10', fixture('deva', 'hi'), 'hi').every((p) => p.startsWith('hi: no language of the registry')),
+    'T10 names something of the deva fixture beyond its unregistered id')
 })
 
 test('T1 catches a bundle key gone, a key src/ does not have, and a manifest out of order', () => {
@@ -1720,4 +1790,182 @@ test('nls-sources --check calls a key on the pending list pending, not stale, an
   const done = cli('--check', '--strict')
   assert.equal(done.status, 0, done.stderr)
   assert.match(done.stdout, /every record is fresh \(2 language\(s\)\)$/m)
+})
+
+// ---------------------------------------------------------------------------
+// 1.11 A3: the frame learns the twelve new languages — before a single one is written
+// ---------------------------------------------------------------------------
+
+/** The thirteen languages on disk when 1.11 began (German and the twelve of 1.10): the ones whose verdicts must not change. */
+const LANGUAGES_OF_1_10 = ['de', 'fr', 'es', 'pt-br', 'it', 'ja', 'ko', 'zh-cn', 'zh-tw', 'ru', 'tr', 'pl', 'cs'] as const
+/** 1.11 §2.1: the twelve new languages' native names, in the collect row's order — the script each is written in. */
+const NEW_IN_1_11: ReadonlyArray<readonly [string, string]> = [
+  ['nl', 'Nederlands'], ['uk', 'Українська'], ['sv', 'Svenska'], ['nb', 'Norsk'], ['da', 'Dansk'], ['fi', 'Suomi'],
+  ['hi', 'हिन्दी'], ['id', 'Bahasa Indonesia'], ['vi', 'Tiếng Việt'], ['el', 'Ελληνικά'], ['hu', 'Magyar'], ['ro', 'Română'],
+]
+/** Whether a native name is written in Latin letters: every letter of it one LATIN_WORD matches. */
+const latinName = (native: string): boolean => (native.match(/[\p{L}\p{M}]+/gu) ?? []).every((w) => LATIN_WORD.test(w))
+
+test('T9: NON_LATIN is the languages whose native name is not in Latin letters — the registry\'s and the twelve of 1.11 (Ukrainian, Greek, Hindi join; Vietnamese stays Latin: LATIN_WORD takes both words of "Tiếng Việt") (1.11 A3 rule 1)', () => {
+  assert.deepEqual(['Tiếng', 'Việt'].map((w) => LATIN_WORD.test(w)), [true, true])
+  const all = new Map<string, string>([...LANGUAGES.map((e): [string, string] => [e.id, e.native]), ...NEW_IN_1_11])
+  assert.equal(all.size, LANGUAGES.length + NEW_IN_1_11.filter(([id]) => !isLanguageId(id)).length, 'a new id collides with another')
+  for (const [id, native] of all) {
+    if (id === 'en') continue
+    assert.equal(NON_LATIN.has(id), !latinName(native), `${id} (${native}): ${NON_LATIN.has(id) ? 'in' : 'not in'} NON_LATIN`)
+  }
+  assert.deepEqual([...NON_LATIN].filter((id) => !all.has(id)), [], 'NON_LATIN names a language nobody plans')
+  for (const id of ['uk', 'el', 'hi']) assert.ok(NON_LATIN.has(id), id)
+})
+
+test('T9 catches three Latin words in a row in the Devanagari fixture under hi — and a Hindi value written in Devanagari passes (1.11 A3 rules 1, 10)', () => {
+  const clean = fixture('deva', 'hi')
+  const key = keyWhere((k) => k === 'Not enough data for a summary yet.')
+  const dir = fixture('deva', 'hi')
+  editKey(dir, 'hi', key, () => `${DEVA_WORD}: not enough data yet`)
+  caught('T9', dir, 'hi', clean, J(key), 'three Latin words in a row: "not enough data"')
+  // Two Latin words and a code span are fine, as in every language of another script.
+  const two = fixture('deva', 'hi')
+  editKey(two, 'hi', key, () => `${DEVA_WORD} Claude Code ${DEVA_WORD} \`tokenPace.x\` data yet`)
+  assert.deepEqual(run('T9', two, 'hi'), [])
+})
+
+test('T13 counts grapheme clusters: शुक्र is two, not five — the Devanagari fixture passes, a weekday word of five clusters fails (1.11 A3 rules 2, 10)', () => {
+  assert.deepEqual([graphemes(DEVA_WORD), [...DEVA_WORD].length], [2, 5])
+  assert.deepEqual(['मंगलवार', 'tirs.', 'Thứ 2', 'ti.', 'T2', 'Sze'].map(graphemes), [5, 5, 5, 3, 2, 3])
+  const clean = fixture('deva', 'hi')
+  assert.deepEqual(run('T13', clean, 'hi'), [], 'T13 fails a weekday word of two clusters and five code points')
+  const dir = fixture('deva', 'hi')
+  editKey(dir, 'hi', 'Mon', () => 'मंगलवार')
+  caught('T13', dir, 'hi', clean, '"Mon" is "मंगलवार", 5 characters')
+})
+
+test('T13\'s two counts agree on the thirteen languages of 1.10: every weekday word of their bundles has as many grapheme clusters as code points, so no verdict changed (1.11 A3 rule 2)', () => {
+  for (const id of LANGUAGES_OF_1_10) {
+    const file = join(ROOT, 'l10n', `bundle.l10n.${id}.json`)
+    assert.ok(existsSync(file), `${id}: no bundle`)
+    const words = installed(readTable(file), () => weekdayWords())
+    assert.equal(words.length, 7, id)
+    for (const w of words) assert.equal(graphemes(w), [...w].length, `${id}: ${J(w)}`)
+  }
+})
+
+test('T11/T15: ” opens a quotation — Swedish and Finnish ”…” and »…» quote an example and hold a {n}; the files on disk quote the same examples and hold the same {n} as with 1.10\'s marks (1.11 A3 rule 3)', () => {
+  assert.deepEqual(quotedExamples('”CC 5h 25% · x” och »y»'), ['CC 5h 25% · x', 'y'])
+  // With 1.10's openers the Swedish ”…” was no quotation at all (»…» was one already).
+  assert.deepEqual(quotedExamples('”CC 5h 25% · x” och »y»', OPEN_QUOTES_1_10), ['y'])
+  assert.equal(quoted('Kör ”{0}”', '{0}', OPEN_QUOTES_1_10), false)
+  for (const [text, ph] of [['Kör ”{0}”', '{0}'], ['Kör »{0}»', '{0}'], ['Aja ”{1}”', '{1}'], ['Kør »{0}«', '{0}'], ['Kjør «{0}»', '{0}'], ['Rulați „{0}”', '{0}']] as const) {
+    assert.ok(quoted(text, ph), `${text}: the {n} is not read as quoted`)
+  }
+  assert.equal(quoted('Kör {0}', '{0}'), false)
+  // The files on disk: the English, German and the twelve 1.10 languages quote exactly what they quoted before.
+  const manifests = [{ id: 'en', file: 'package.nls.json' }, ...LANGUAGES_OF_1_10.map((id) => ({ id, file: `package.nls.${id}.json` }))]
+  let examples = 0
+  for (const { file } of manifests) {
+    for (const [k, v] of Object.entries(readTable(join(ROOT, file)))) {
+      const now = quotedExamples(v)
+      assert.deepEqual(now, quotedExamples(v, OPEN_QUOTES_1_10), `${file}: ${k}`)
+      examples += now.length
+    }
+  }
+  assert.ok(examples >= 14 * 12, `only ${examples} examples in the manifests`)
+  let held = 0
+  for (const id of LANGUAGES_OF_1_10) {
+    for (const [k, v] of Object.entries(readTable(join(ROOT, 'l10n', `bundle.l10n.${id}.json`)))) {
+      for (const ph of new Set(placeholders(k))) {
+        assert.equal(quoted(v, ph), quoted(v, ph, OPEN_QUOTES_1_10), `${id}: ${J(k)} ${ph}`)
+        assert.equal(quoted(k, ph), quoted(k, ph, OPEN_QUOTES_1_10), `the English ${J(k)} ${ph}`)
+        if (quoted(k, ph)) held++
+      }
+    }
+  }
+  assert.ok(held > 0, 'no quoted {n} in any key')
+})
+
+test('T4 counts the marks of the NFC form and names the Greek ano teleia — NFC makes U+0387 the separator · (1.11 A3 rule 6)', () => {
+  assert.equal(ANO_TELEIA.normalize('NFC'), '·')
+  const clean = fixture('pseudo', 'el')
+  // An ano teleia where the key has no separator: one · too many once normalised, and the mark named.
+  const extra = fixture('pseudo', 'el')
+  editKey(extra, 'el', 'Refresh', (v) => `${v}${ANO_TELEIA} 語`)
+  caught('T4', extra, 'el', clean, '"Refresh" has 1 × ·, its key 0', '"Refresh" writes the Greek ano teleia (U+0387)')
+  // An ano teleia for the key's own separator: the count holds after NFC, the mark is still named.
+  const key = keyWhere((k) => count(k, '·') === 1)
+  const swapped = fixture('pseudo', 'el')
+  editKey(swapped, 'el', key, (v) => v.replace('·', ANO_TELEIA))
+  const problems = run('T4', swapped, 'el')
+  assert.deepEqual(problems, [`el: l10n/bundle.l10n.el.json: ${J(key)} writes the Greek ano teleia (U+0387), which NFC makes the separator · — write a comma or a full stop`])
+  // In the manifest too, where · is not a counted mark.
+  const nls = fixture('pseudo', 'el')
+  edit(nls, 'package.nls.el.json', (t) => { t.description = `${t.description}${ANO_TELEIA}` })
+  caught('T4', nls, 'el', clean, 'package.nls.el.json: description writes the Greek ano teleia')
+})
+
+test('T10 lets a language name the ledger just added be absent while its list names it `translate` — never at the join, never unlisted (1.11 A3 rule 11 a)', () => {
+  const names = [...src().names, { id: 'nl', english: 'Dutch' }]
+  const t10 = (dir: string, id: string, allowed: boolean): string[] => RULES.T10.rule({ ...src(), names }, loadLang(dir, id, allowed))
+  const dir = fixture('german', 'fr')
+  assert.deepEqual(t10(dir, 'fr', true), ['fr: l10n/bundle.l10n.fr.json: the language name "Dutch" is not translated'], 'an unlisted name passed')
+  mkdirSync(join(dir, 'l10n', 'pending'), { recursive: true })
+  writeFileSync(join(dir, PENDING_FILE('fr')), `${JSON.stringify({ v: 1, applied: 1, bundle: { Dutch: { parts: ['model'], state: 'translate', why: 'a new language' } }, nls: {} }, null, 2)}\n`)
+  assert.deepEqual(t10(dir, 'fr', true), [])
+  assert.deepEqual(t10(dir, 'fr', false), ['fr: l10n/bundle.l10n.fr.json: the language name "Dutch" is not translated'])
+  // Listed for review, the name must be there, translated.
+  writeFileSync(join(dir, PENDING_FILE('fr')), `${JSON.stringify({ v: 1, applied: 1, bundle: { Dutch: { parts: ['model'], state: 'review', why: 'a new language' } }, nls: {} }, null, 2)}\n`)
+  assert.deepEqual(t10(dir, 'fr', true), ['fr: l10n/bundle.l10n.fr.json: the language name "Dutch" is not translated'])
+})
+
+test('T10 takes a name equal to the English only by LANGUAGE_NAME_AS_ENGLISH — German\'s Hindi passes by its entry, a German Dutch or a French Hindi fails (1.11 A3 rule 11 b)', () => {
+  assert.deepEqual(LANGUAGE_NAME_AS_ENGLISH.map(([id, name]) => [id, name]), [['de', 'Hindi']])
+  for (const [id, name, why] of LANGUAGE_NAME_AS_ENGLISH) {
+    assert.ok(isLanguageId(id) && id !== 'en', `${id} is no language that translates`)
+    assert.ok(name.length > 0 && why.trim().length > 0 && !why.includes('; '), `${id} ${name}: no reason`)
+  }
+  const names = [...src().names, { id: 'hi', english: 'Hindi' }, { id: 'nl', english: 'Dutch' }]
+  const t10 = (dir: string, id: string): string[] => RULES.T10.rule({ ...src(), names }, loadLang(dir, id))
+  const de = fixture('german', 'de')
+  edit(de, 'l10n/bundle.l10n.de.json', (t) => { t.Hindi = 'Hindi'; t.Dutch = 'Niederländisch' })
+  assert.deepEqual(t10(de, 'de'), [])
+  edit(de, 'l10n/bundle.l10n.de.json', (t) => { t.Dutch = 'Dutch' })
+  assert.deepEqual(t10(de, 'de'), ['de: l10n/bundle.l10n.de.json: the language name "Dutch" is not translated'])
+  const fr = fixture('german', 'fr')
+  edit(fr, 'l10n/bundle.l10n.fr.json', (t) => { t.Hindi = 'Hindi'; t.Dutch = 'Néerlandais' })
+  assert.deepEqual(t10(fr, 'fr'), ['fr: l10n/bundle.l10n.fr.json: the language name "Hindi" is not translated'])
+})
+
+test('the brief\'s 1.11 sections: a new language, whole — the files, the register per language, Enter, the weekday words in graphemes, the quotation marks, the plurals, the marks, T15\'s message, the gates; and your pending list (1.11 A3, P1)', () => {
+  const brief = readFileSync(join(ROOT, 'l10n', 'TRANSLATING.md'), 'utf8')
+  const flat = brief.replace(/\s+/g, ' ')
+  const whole = flat.indexOf('## 1.11: a new language, whole')
+  const list = flat.indexOf('## 1.11: your pending list')
+  assert.ok(whole > 0 && list > whole, 'the brief lacks its two 1.11 sections, in this order')
+  const a = flat.slice(whole, list)
+  for (const needed of [
+    // The files, whole, and no list.
+    'l10n/parts/<part>.<id>.json', 'package.nls.<id>.json', 'node scripts/merge-l10n.mjs', 'node scripts/nls-sources.mjs <id>',
+    'never a pending list', 'the English at the frozen tip', 'the German as a second reference',
+    // Register (§3 A4 rule 3, §7a Q16).
+    '*ви*', '*आप*', '*Anda*', '*dumneavoastră*', '*Ön*', 'Finnish', 'passive', 'Vietnamese', '*u* or *je*', '**du**',
+    'not verified against a style guide',
+    // Key names (§3 D5, §7a Q19).
+    '`Enter`', '`Ctrl+Enter`', '`⌘+Enter`',
+    // Weekday words in graphemes (rule 2), quotation marks (rule 3), T15 (rule 4).
+    'grapheme clusters', '`शुक्र`', '`tirs.`', '`tors.`', '`Thứ 2`', '`”…”`', '`»…»`', 'copy what T15 prints',
+    // Plurals (rule 5), marks (rule 6), percent (rule 7).
+    'Ukrainian', 'Romanian', 'one/few/many/other', 'one/few/other', 'Indonesian and Vietnamese have no plural',
+    'U+0387', 'the separator `·`', '`।`', '`;`', 'em dash `—`', '`12,34,567`',
+    // The five terms a package names, the report's first line, the gates of A4 rule 6.
+    '"prompt"', '"record"', '"entry"', '"keep-warm"', '"cold start"', 'Not a native speaker: the translations are an AI agent\'s.',
+    'node scripts/nls-sources.mjs --check --strict <id>', 'node scripts/l10n-rekey.mjs --check', 'test ! -e l10n/pending/<id>.json',
+    'systemd-run --user --scope',
+  ]) assert.ok(a.includes(needed), `the brief's "a new language, whole" does not say: ${needed}`)
+  const b = flat.slice(list, flat.indexOf('## The gates', list))
+  assert.ok(flat.indexOf('## The gates', list) > list, 'the gates no longer follow the 1.11 sections')
+  for (const needed of ['node scripts/l10n-rekey.mjs --print <id>', '`translate`', '`review`', 'twelve language names', 'nls-add',
+    'config.language.description', 'node scripts/nls-sources.mjs <id>', 'test ! -e l10n/pending/<id>.json', 'not answered in 1.11']) {
+    assert.ok(b.includes(needed), `the brief's "your pending list" does not say: ${needed}`)
+  }
+  // The ids a package may own: the registry's twenty-six, the twelve new ones among them.
+  for (const [id] of NEW_IN_1_11) assert.ok(flat.includes(`\`${id}\``), `the brief's file table does not name ${id}`)
 })

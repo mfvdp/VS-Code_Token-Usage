@@ -126,8 +126,8 @@ every example a setting of the status bar quotes (`CC 5h 25% · resets 2h14m`, `
 that language's bar prints for the fixture the test and the brief document — its words, its decimals, its
 weekday and its 12-hour clock —, the English's included. Every rule also runs once against a synthetic
 language in a temporary directory — the German under another id, and the English with every word turned
-into 語 — broken in the one way the rule exists to catch (T15, which reads the bar under the id's own
-locale, against the English and a copy of the Czech files instead). `test/nls.test.ts` holds every manifest translation to the
+into 語 (since 1.11 also into शुक्र, under `hi`) — broken in the one way the rule exists to catch (T15,
+which reads the bar under the id's own locale, against the English and a copy of the Czech files instead). `test/nls.test.ts` holds every manifest translation to the
 manifest's structure. The brief a translation works from is `l10n/TRANSLATING.md`. Nothing of this
 ships but the bundles and the `package.nls*.json` files: `.vscodeignore` keeps `l10n/parts/`,
 `l10n/nls-sources/` and the brief out of the package — and, since 1.10, `l10n/rekey.json`,
@@ -151,9 +151,10 @@ languages' files can follow it at once:
   per change in the order made, numbered from 1 (`n`), each naming the package that made it (`by`) and
   why (`why`). One entry per line keeps a diff readable. A `why` never holds `; ` — the script joins the
   reasons of one key with it and splits on it again —, and `--check` refuses one.
-* `l10n/rekey-base.json` — the tree the ledger starts from (1.10's is `e72057a`, the 1.9.0 release: 1123
-  `t()` keys, 295 manifest keys): every `t()` key with the German parts it stands in, and the first 16 hex
-  digits of the SHA-256 of every `package.nls.json` value.
+* `l10n/rekey-base.json` — the tree the ledger starts from (1.10's was `e72057a`, the 1.9.0 release: 1123
+  `t()` keys, 295 manifest keys; 1.11's is `b89ff43`, the 1.10.0 release: 1197 and 297): every `t()` key
+  with the German parts it stands in, and the first 16 hex digits of the SHA-256 of every `package.nls.json`
+  value.
 * `l10n/pending/<id>.json` — per language beyond English and German: how many entries are applied to its
   files (`applied`) and what is left to do — each bundle key with the parts it is listed for and its
   state (`translate` while a listed part lacks it, `review` once every listed part holds a value carried
@@ -189,7 +190,9 @@ A second run changes no byte. A key listed `translate` is absent from the langua
 value: nothing is invented. A language without a pending list has done everything the ledger asks:
 `--start` writes a list at cursor 0 for every language, and the language's own package works it through,
 records its manifest and deletes the list. The next version's first change of the English starts a new
-ledger.
+ledger. `--start` writes the new base and an empty ledger: the entries of the version before are not
+carried over — each is applied, no list of theirs is left, and they stay in the history (1.10's 115 at
+`b89ff43`). 1.11's ledger started at `b89ff43`, before its first English change.
 
 While lists exist (`PENDING_ALLOWED` in `test/l10n.languages.test.ts` is true), the frame reads them: T1
 and T2 let a key listed `translate` be absent, a manifest key on a list stays out of the rules that
@@ -207,6 +210,26 @@ English is frozen again after the second review, and the twelve language package
 (every manifest key of its own, pending or not) before it is merged. At the join `PENDING_ALLOWED` is
 false: no list may be left (T14), every rule holds every key again, and
 `node scripts/nls-sources.mjs --check --strict` is the gate from then on.
+
+### Two kinds of language work, and the frame for twenty-four languages (1.11)
+
+From 1.11 a language is made in one of two ways. A language new to the registry is a **whole
+translation** from the frozen English, the German beside it: its package writes the four parts and the
+manifest translation at once and generates the bundle and the record — never a pending list, since
+`scripts/l10n-rekey.mjs` passes over a language with no file on disk, so the ledger never reaches it. A
+language that exists **works through its pending list** as above. The brief has a section for each
+("1.11: a new language, whole", "1.11: your pending list").
+
+The frame was taught the twelve new languages before any of them was written, each rule once, for every
+language. `NON_LATIN` names every language of another script: Ukrainian, Greek and Hindi joined
+Japanese, Korean, Chinese and Russian, while Vietnamese is written in Latin letters and held by the Latin
+rule. T13 counts grapheme clusters (`Intl.Segmenter`), the characters a reader sees, where it counted
+code points — a Hindi weekday such as `शुक्र` is two on the screen and five code points; for every
+language of 1.10 the two counts are equal. `”` may open a quotation (Swedish and Finnish). T4 counts the
+marks of the NFC form, in which the Greek ano teleia is the separator `·`, and names it. T10 lets a
+language name the ledger has just added be missing while it is pending, and a name equal to the English
+stand only where `LANGUAGE_NAME_AS_ENGLISH` says the language writes it so (German *Hindi*). A third
+synthetic language — the English with every word turned into शुक्र, under `hi` — runs every rule.
 
 ## Performance
 

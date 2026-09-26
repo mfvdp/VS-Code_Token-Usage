@@ -58,6 +58,17 @@ export function pendingNlsKeys(id: string, root: string = ROOT): Set<string> {
   return typeof nls === 'object' && nls !== null && !Array.isArray(nls) ? new Set(Object.keys(nls)) : new Set()
 }
 
+/**
+ * 1.11 A3 rule 11 (b): a language name that a language writes as the English does, `[id, English name, reason]` — T10
+ * (test/l10n.languages.test.ts, which exports it) refuses a name equal to its English except by this list, and
+ * test/languages.test.ts's German check takes the same list. Here, not in the frame, because both tests read it and a
+ * test file bundled into another would run its tests twice. Owned by 1.11 P1; the join (P8) extends it for a
+ * translation package's report, each entry with its reason — never a package itself.
+ */
+export const LANGUAGE_NAME_AS_ENGLISH: ReadonlyArray<readonly [string, string, string]> = [
+  ['de', 'Hindi', 'the German name of the language is Hindi (Duden)'],
+]
+
 /** The raw manifest, placeholders and all — for the tests that check the placeholders. */
 export const rawManifest = readJson('package.json') as Record<string, unknown>
 

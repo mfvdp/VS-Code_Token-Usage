@@ -81,7 +81,9 @@ Part of the [Token Pace documentation](../README.md#documentation).
   `CC 5h 25% · resets 2h14m`), `absolute` (`06:00`, with a weekday prefix beyond a day —
   `CC 5h 25% · resets at 06:00`, `· resets at Mo 06:00`), `both`
   (`CC 5h 25% · resets at 06:00 (in 2h14m)`). `resetHourCycle` picks 12- or 24-hour (`06:00 AM`,
-  `06:00`), `auto` follows the OS locale. The countdown is always introduced by the word
+  `06:00`); `auto` takes the hour cycle of the locale the extension host runs under — what `Intl`
+  resolves without a locale tag, normally the operating system's —, not the language of Token Pace's
+  texts, which decides the rest of the clock time's form. The countdown is always introduced by the word
   `resets` (`resets at` before a clock time) — a bare `· 2h14m` would read like the age suffix,
   and the two move in opposite directions. A window whose provider states no reset time gets
   **no** countdown, ever. The settings quote these examples as the bar prints them, in each

@@ -104,10 +104,10 @@ tree: **Last 7 days · where the agent tokens went**. The block is closed by def
 open is kept with the rest of the view state (see [Opening and selection](#opening-and-selection)),
 and the button says to a screen reader whether it is open. Only while it is open is it built at all.
 
-**What it counts.** Every agent record of the seven days the tree covers that counted at least one
+**What it counts.** Every agent entry of the seven days the tree covers that counted at least one
 request — of every session, the ones the tree does not list included — once, at its **whole usage**,
 the figure its tree row shows (fresh input + cache write + output). An agent without a counted
-request is not in it, nor a launch whose transcript was never read. A record is a whole agent: one
+request is not in it, nor a launch whose transcript was never read. An agent entry is a whole agent: one
 that started eight days ago and wrote on into the seven is counted whole, where the hour buckets of
 the tables split the same tokens by the hour of each reply — so the block's figures and the tables'
 subagent figures are two different cuts of the same tokens, and are not added to each other. The
@@ -125,8 +125,8 @@ leaves out included; `<1 %` for a share that rounds to none), *Median per agent*
 agent in the middle, or halfway between the two in the middle), and — only while
 `tokenPace.showCost` is on — *~Cost*: what their tokens would have cost through the API, marked `~`
 as every cost of the page. An agent is priced at the rates of its model on the day of its last
-counted reply, as the tables price the same tokens, at the model's standard rate (a record keeps no
-speed and no web search). An agent without a price is not in a cost: its model has none on file, or
+counted reply, as the tables price the same tokens, at the model's standard rate (an agent's entry keeps
+no speed and no web search). An agent without a price is not in a cost: its model has none on file, or
 its replies were written with more than one model — a fallback in the middle of a run — whose
 tokens its record cannot split between them. A row none of whose agents has a price shows `–`; a
 sum that holds only some of its agents is a lower bound and carries `⚠`, titled *not every agent

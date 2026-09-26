@@ -40,19 +40,22 @@ The three shipped prompts, in this order:
 
 Until you edit one, a shipped prompt's title and text follow the language of Token Pace's texts
 (`tokenPace.language`) — in German *Zwischenstand als Tabelle*, *Cache warmhalten* and *Nach dieser
-Aufgabe stoppen* —, except the keep-warm prompt's text, which stays English in every language, as the
+Aufgabe stoppen*, and likewise in each of the other twelve languages; the German status prompt keeps
+the author's own wording, the twelve translate the English —, except the keep-warm prompt's text, which
+stays English in every language, as the
 [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) does. A prompt you edited keeps your
 words whatever the language; saving a shipped prompt with exactly its shipped words in the current
 language makes it follow the language again.
 
-Every prompt has a title of 1 to 80 characters and a text of 1 to 2000 characters, and the list holds at
-most 50 prompts. A prompt is one line: when it is saved, a line break or a tab becomes a space, every
-other control character is removed and the ends are trimmed — VS Code types the text into the terminal
-as keys, and a line break inside it would make Claude Code send the first line on its own. A text that
-starts with an exclamation mark is refused (*A prompt that starts with an exclamation mark would run a
+Every prompt has a title of 1 to 80 characters and a text of 1 to 2000 characters, and the list
+holds at most 50 prompts, the characters counted as the field counts them (an emoji counts two). A
+prompt is one line: when it is saved, a line break or a tab becomes a space, every other control
+character is removed and the ends are trimmed — VS Code types the text into the terminal as keys,
+and a line break inside it would make Claude Code send the first line on its own. A text that starts
+with an exclamation mark is refused (*A prompt that starts with an exclamation mark would run a
 shell command in Claude Code.*): `!` is Claude Code's shell escape. A text that starts with `/` is a
-slash command and is shown in the editor font; one that starts with `#`, `@` or `?` is allowed as well
-— Claude Code reads those as a memory note, a mention and a request for help.
+slash command and is shown in the editor font; one that starts with `#`, `@` or `?` is allowed as
+well — Claude Code reads those as a memory note, a mention and a request for help.
 
 *Token Pace: Restore Default Prompts* — in the Command Palette, and the section's button while a shipped
 prompt is missing — adds every shipped prompt missing from the list at its end, in their order, and
@@ -175,7 +178,37 @@ request, as after a click on the countdown — your prompt is already on its way
 A prompt that starts with `/` is a slash command for Claude Code. Typed into an idle Claude Code in a test,
 `/loop 30m Ignore this message. No action. No response.` became one scheduled task that sends the line
 every 30 minutes for as long as that Claude Code session runs; Claude Code's `/exit` then asks whether to
-stop it. Every such line is a real request on your usage.
+stop it. Every such line is a real request on your usage — [The `/loop` variant](#the-loop-variant) says
+what it costs and how to stop it.
+
+## The `/loop` variant
+
+The *Keep the cache warm* prompt sends the [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)
+once, on your double-click. Edit its text to `/loop 30m Ignore this message. No action. No response.` and
+Claude Code repeats it by itself: `/loop` is Claude Code's own scheduler, and this line — typed into an
+idle Claude Code in a test — became one scheduled task that sends the line every 30 minutes, between your
+turns, for as long as that session runs. Every run is a request of the main conversation: it reads the
+conversation so far from the prompt cache at the cache-read rate and writes the new tail and a short
+reply — which is the point, since a request within the hour keeps the one-hour cache warm, where a cold
+start re-writes the whole conversation at the 1-hour write rate. For the session of the
+[prompt-cache page's](prompt-cache.md#on-the-claude-card) example, 152.3K tokens on Claude Opus 5.5, a
+cache read is ~$0.03 of API equivalent against ~$1.22 for one cold rewrite: two reads an hour keep it warm
+for ~$0.06. On a subscription these requests draw on your quota at a weight Anthropic does not publish.
+
+Why 30 minutes: Claude Code rounds an interval to a clean step of its clock and may fire a task up to half
+its interval late, so a 30-minute loop leaves at most 45 minutes between two requests — under the hour.
+20 minutes would do the same at three requests an hour; 60 could reach 90 minutes and let the cache go
+cold. A task fires only while Claude Code is running and idle — one that comes due mid-turn waits for the
+turn to end — and, like everything typed into that terminal, its line goes with whatever you typed there
+and did not send.
+
+To stop it, ask Claude in that session to list its scheduled tasks and cancel the keep-warm one; a fresh
+conversation drops the session's tasks, and `/exit` asks whether to stop them (a resumed session restores
+them, Claude Code's documentation says). `CLAUDE_CODE_DISABLE_CRON=1` in Claude Code's environment
+switches the scheduler off altogether. A loop nobody stops runs seven days at most, as Claude Code
+documents for recurring tasks — 336 requests. Token Pace neither counts these requests apart nor sees
+that a loop runs: they are requests of the session like any other, and `keepwarm.json` counts only the
+lines the keep-warm countdown typed.
 
 ## Which terminal
 
@@ -200,9 +233,10 @@ or `codex` (a path ending in either, `claude.exe`, `codex.exe`), reported with m
 and VS Code's own word for what runs in the terminal, `claude` or `codex`; a terminal VS Code reports
 another program in (`bash`, `pwsh` …) never counts, whatever ran there before. It listens to those facts
 while the Prompts section is listed and the workspace is trusted (or while the keep-warm line may act),
-and to nothing otherwise. A terminal without shell integration is never offered. For a terminal whose
-Claude Code or Codex started before Token Pace began to listen — before a window reload, or before you
-added the section — there is no start to go by; VS Code still says what runs there, and for the folder
+and to nothing otherwise. A terminal without shell integration is never offered. For a terminal in which
+Token Pace holds no running `claude` or `codex` command — one started before Token Pace began to listen,
+before a window reload or before you added the section, or one whose command it saw end while VS Code
+still names the shell so — there is no start to go by; VS Code still says what runs there, and for the folder
 Token Pace reads the one the shell reports: of the terminal its `shellIntegration`, of that the `cwd`, of
 that the `fsPath`, compared with the folders of the sessions and kept by no one. Such a terminal asks
 first, because Token Pace did not see Claude Code start there: restart Claude Code in it after a reload

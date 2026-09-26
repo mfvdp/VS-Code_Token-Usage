@@ -2899,7 +2899,7 @@ test('docs/languages.md: the translation statement says who translated, from wha
   assert.ok(nlsDe['config.language.description'].includes('Muttersprachler haben sie nicht geprüft'))
 })
 
-test('docs/development.md says how a language is made and checked: the registry, the parts, the two scripts, the record, the thirteen rules, the freeze (1.9 P3)', () => {
+test('docs/development.md says how a language is made and checked: the registry, the parts, the two scripts, the record, the fifteen rules, the freeze (1.9 P3; 1.10 P21: fifteen)', () => {
   const dev = flatText(doc.development)
   for (const claim of [
     '## Translating', '`src/languages.ts` (`LANGUAGES`: the id, the `Intl` locale, the native name and the flag, in the picker\'s order)',
@@ -2908,7 +2908,8 @@ test('docs/development.md says how a language is made and checked: the registry,
     '`package.nls.<id>.json` — the manifest\'s words: every key of `package.nls.json`, in its order',
     '`l10n/nls-sources/<id>.json` — the freshness record: for every manifest key, the first 16 hex digits of the SHA-256 of the English it was translated from, written by `node scripts/nls-sources.mjs <id>`',
     '`node scripts/nls-sources.mjs --check` names every language and key whose English changed since',
-    '`test/l10n.languages.test.ts` holds every language on disk to the same thirteen rules, T1–T13',
+    // 1.10 P21 (pinned and changed: "thirteen rules, T1–T13"): T14 (the pending lists) and T15 (the bar's examples) joined in 1.10.
+    '`test/l10n.languages.test.ts` holds every language on disk to the same fifteen rules, T1–T15',
     'the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason',
     'the German under another id, and the English with every word turned into 語',
     'The brief a translation works from is `l10n/TRANSLATING.md`',
@@ -3033,15 +3034,18 @@ function dayLabel18(tag: string, ms: number): string {
   return `${part('weekday')} ${part('day')} ${part('month')}`
 }
 
-test('the 1.9.0 release notes: the newest entry, its date set at publish, every section in order, the plain statement, the versions and figures the code has, nothing unverified (1.9 P20)', () => {
+test('the 1.9.0 release notes: its date set at publish, every section in order, the plain statement, the versions and figures the code has, nothing unverified (1.9 P20)', () => {
   const kw = require('../src/keepWarm') as typeof import('../src/keepWarm')
   const { formatDay, formatTime } = require('../src/time') as typeof import('../src/time')
   const log = readDoc('CHANGELOG.md')
-  const first = log.indexOf('\n## ')
+  // 1.10 P21 (pinned and changed: "the newest CHANGELOG entry is 1.9.0"): 1.10.0 stands above it now, so the
+  // entry is found by its heading; its date is still the publish's.
+  const first = log.indexOf('\n## 1.9.0 ')
+  assert.ok(first >= 0, 'the CHANGELOG has no 1.9.0 entry')
   const second = log.indexOf('\n## ', first + 4)
   const entry = log.slice(first, second)
   // The release cadence: the date is set on the release branch at publish, never before.
-  assert.match(entry, /^\n## 1\.9\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.9.0 with its date left for the publish, or does not open with its summary')
+  assert.match(entry, /^\n## 1\.9\.0 — <date set at publish>\n\n\*\*/, 'the 1.9.0 CHANGELOG entry does not keep its date for the publish, or does not open with its summary')
   const flat = flatText(entry)
   const heads = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal']
   const order = heads.map((h) => flat.indexOf(h))
@@ -3231,7 +3235,8 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   for (const claim of [
     'Since 1.10 so does every other decimal the dashboard, the tooltips and the text views print — a key figure\'s change (`▼ -0,7%`), the plan factor (`×0,4`), a span under ten hours (`2,5 h`); the exports and the diagnostics report keep the `.`.',
     '**The percent follows the number in every language** — `25 %` in a sentence, `25%` in the status bar —, Turkish included, although Turkish typography and the Turkish number format put the sign first (`%25`): the Turkish translation keeps the English order in every string, for one style across the page, the bar and the texts. A known limit, not an oversight.',
-    '**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s` stay together in every language —, an ISO day never breaks at its hyphen, and a window\'s percentage never stands alone on a line: it wraps together with the verdict beside it.',
+    // 1.10 P21 (pinned and changed): the models' turn line joined the glued figures at the join.
+    '**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s` stay together in every language, and so do a model\'s average turn time and its P90 (`~12 h 05 min · P90 ~18 h 46 min`) —, an ISO day never breaks at its hyphen, and a window\'s percentage never stands alone on a line: it wraps together with the verdict beside it.',
   ]) assert.ok(lang.includes(claim), `docs/languages.md does not say: ${claim}`)
   assert.ok(flatText(doc.numbers).includes('**Decimals** follow the language too (1.10), wherever the dashboard, the tooltips and the text views print one: a key figure\'s change against the period before (`▼ -0,7%` in German — the sign and the `%` are the badge\'s own and stay attached to the figure)'))
   assert.ok(flatText(doc.numbers).includes('The CSV and JSON exports and the diagnostics report keep the `.` in every language: they are read by programs, not by you.'))
@@ -3467,4 +3472,204 @@ test('the prompts page says how a prompt is edited and how the section reads wit
   assert.ok(dash.includes('[Prompts](prompts.md#editing)') && dash.includes('[Sending](prompts.md#sending)'))
   assert.ok(dash.includes('and not your prompt list — so the filter bar sits below every'))
   assert.ok(dash.includes('the id of a prompt to send, delete or move, a prompt\'s title and text to save'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 P21 — documentation, release notes, pictures (plan-1.10-build.md §4 P21).
+
+/**
+ * 1.10 P21: the 1.10.0 release notes — the newest entry with its date left for the publish, every section in
+ * order, the three shipped prompts and the limits as the code has them, the checks the code knows, the words the
+ * page and the bar say, the versions unchanged, the plain statement on the twelve languages, and nothing the
+ * notes must not claim.
+ */
+test('the 1.10.0 release notes: the newest entry, its date set at publish, every section in order, the prompts, limits, checks and words the code has, the versions, the plain statement, nothing unverified (1.10 P21)', () => {
+  const { PROMPTS_MAX, PROMPT_TITLE_MAX_CHARS, PROMPT_TEXT_MAX_CHARS, SHIPPED_PROMPTS, shippedPromptText, shippedPromptTitle } = require('../src/prompts') as typeof import('../src/prompts')
+  const { PROMPT_ENTER_DELAY_MS, PROMPT_FLASH_MS, PROMPT_SEND_MIN_GAP_MS } = require('../src/promptsHost') as typeof import('../src/promptsHost')
+  const { PROMPT_SOFT_BLOCKS } = require('../src/promptSend') as typeof import('../src/promptSend')
+  const { AGENT_TABLES_REVISION } = require('../src/agg') as typeof import('../src/agg')
+  const { KEEP_WARM_LINE, KEEPWARM_GUARD_OF } = require('../src/keepWarm') as typeof import('../src/keepWarm')
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  // The release cadence: the date is set on the release branch at publish, never before.
+  assert.match(entry, /^\n## 1\.10\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.10.0 with its date left for the publish, or does not open with its summary')
+  assert.ok(log.includes('\n## 1.9.0 — <date set at publish>\n'), 'the 1.9.0 entry is gone or dated')
+  const flat = flatText(entry)
+  const heads = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal']
+  const order = heads.map((h) => flat.indexOf(h))
+  assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.10.0 entry\'s sections are missing or out of order')
+  const section = (h: string): string => { const at = heads.indexOf(h); return flat.slice(order[at], at + 1 < heads.length ? order[at + 1] : undefined) }
+  // The three shipped prompts, word for word, in Added — the status text with its pipes as the code has them.
+  assert.deepEqual(SHIPPED_PROMPTS, ['status', 'keepWarm', 'stop'])
+  for (const id of SHIPPED_PROMPTS) {
+    assert.ok(section('### Added').includes(`*${shippedPromptTitle(id)}*`), `the 1.10.0 entry does not name the shipped prompt ${id}`)
+    assert.ok(section('### Added').includes(`\`${shippedPromptText(id)}\``), `the 1.10.0 entry does not quote the shipped text of ${id}`)
+  }
+  assert.equal(shippedPromptText('keepWarm'), KEEP_WARM_LINE)
+  // The limits and timings as the code has them.
+  assert.deepEqual([PROMPTS_MAX, PROMPT_TITLE_MAX_CHARS, PROMPT_TEXT_MAX_CHARS, PROMPT_SEND_MIN_GAP_MS, PROMPT_ENTER_DELAY_MS, PROMPT_FLASH_MS], [50, 80, 2000, 1000, 200, 10_000])
+  const delay = /\nconst PROMPT_CLICK_DELAY_MS = (\d+);/.exec(readDoc('src/webview/main.ts'))?.[1]
+  assert.equal(delay, '300')
+  for (const claim of [`A title has ${PROMPT_TITLE_MAX_CHARS} characters`.replace('A title has ', 'A title has 1 to '), `a text 1 to ${PROMPT_TEXT_MAX_CHARS} on one line`,
+    `the list holds at most ${PROMPTS_MAX} prompts`, `(after ${delay} milliseconds, so that a double-click sends instead)`,
+    `The text and the Enter are two writes, ${PROMPT_ENTER_DELAY_MS} milliseconds apart`, 'at most one per second', 'for ten seconds']) {
+    assert.ok(flat.includes(claim), `the 1.10.0 entry does not say: ${claim}`)
+  }
+  // The checks: the hard ones named as never sending, the soft ones as asking first — as the code flags them.
+  assert.deepEqual([...PROMPT_SOFT_BLOCKS].sort(), ['agentRunning', 'codex', 'notIdle', 'openTool', 'otherSession', 'unknownFolder', 'unknownStart'])
+  for (const claim of ['in Restricted Mode; while it reads the transcripts; with no such terminal; while the agent hook reports a permission request open',
+    'has not written a line since it started', 'an open tool call, a reply that did not end its turn, an agent of the session running, another session of the same folder busy, a Claude Code whose start Token Pace did not see',
+    'a terminal whose folder VS Code does not report, and Codex, of whose state Token Pace reads nothing', '*Send “Status table” anyway?*', 'Nothing of your answer is kept']) {
+    assert.ok(flat.includes(claim), `the 1.10.0 entry does not say: ${claim}`)
+  }
+  // The words the page, the bar and the settings say, as the code and the manifest have them.
+  for (const [en] of [['Sent to {0} in terminal {1} of {2}.'], ['Keep-warm line for {0} in {1} seconds, press to cancel'], ['Avg turn time {0}'], ['Agent entries, last 7 days'],
+    ['Share of complete cycles that hit the limit: {0} · Avg unused at the reset: {1}'], ['Active days'], ['Enter edits it, Ctrl+Enter sends it.'], ['Send anyway'], ['Restore Default Prompts']]) {
+    assert.ok(en === 'Restore Default Prompts' ? nlsEn['command.restoreDefaultPrompts.title'] === en : typeof GERMAN[en] === 'string', `${en} is not a text of the code`)
+  }
+  assert.ok(flat.includes('*Sent to Claude Code in terminal 2 of 3.*') && flat.includes('`Keep-warm line for {0} in {1} seconds, press to cancel`') && flat.includes('*Avg turn time*')
+    && flat.includes('*Agent entries, last 7 days*') && flat.includes('*Share of complete cycles that hit the limit: {0} · Avg unused at the reset: {1}*') && flat.includes('*Active days*')
+    && flat.includes('*Enter edits it, Ctrl+Enter sends it.*') && flat.includes('*Send anyway*') && flat.includes('`Token Pace: Restore Default Prompts`'))
+  assert.ok(flat.includes("This is the current session's context, as the status line reports it — not an account figure, and not comparable to a quota window."))
+  assert.ok(typeof GERMAN["This is the current session's context, as the status line reports it — not an account figure, and not comparable to a quota window."] === 'string')
+  for (const key of ['config.resetFormat.enum.relative', 'config.resetFormat.enum.both', 'config.summary.period.enum.today']) {
+    assert.ok(flat.includes(`\`${nlsEn[key]}\``), `the 1.10.0 entry does not quote the manifest's ${key}`)
+  }
+  assert.ok(nlsDe['config.resetFormat.enum.relative'].includes('· Reset in 2h14m') && nlsDe['config.summary.period.enum.today'].includes('Σ 3,1M · heute'))
+  assert.ok(section('### Changed').includes('`· Reset in 2h14m`, `Σ 3,1M · heute`'))
+  // The keep-warm line's fourteenth check, as the code numbers it.
+  assert.equal(KEEPWARM_GUARD_OF.reading, 'G14')
+  assert.ok(section('### Fixed').includes('(`reading`, check 14 of the keep-warm line)'))
+  // The versions it names are the code's; the snapshot schema and the export stay.
+  assert.deepEqual([STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
+  assert.ok(section('### Internal').includes(`\`STATE_VERSION\` ${STATE_VERSION}, the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
+  for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION|AGENT_TABLES_REVISION)` (\d+)/g)) {
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : m[1] === 'EXPORT_SCHEMA_VERSION' ? EXPORT_SCHEMA_VERSION : AGENT_TABLES_REVISION, `the 1.10.0 entry says ${m[1]} ${m[2]}`)
+  }
+  // The ledger's count and the contract's rows are what the files hold.
+  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { entries: unknown[] }
+  assert.ok(section('### Internal').includes(`\`l10n/rekey.json\` (${ledger.entries.length} entries for this release)`), `the ledger holds ${ledger.entries.length} entries`)
+  const rows = (readDoc('scripts/check-privacy.mjs').match(/what: 'prompts: /g) ?? []).length
+  assert.ok(section('### Internal').includes(`gains ${['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'][rows]} rows`), `the read contract has ${rows} prompts rows`)
+  // The twelve languages, named in their own names in the registry's order, and the plain statement.
+  const twelve = LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native)
+  assert.ok(flat.includes(`${twelve.slice(0, -1).join(', ')} and ${twelve[twelve.length - 1]}`), 'the 1.10.0 entry does not name the twelve languages as the registry has them')
+  assert.ok(flat.includes('**This work was again done by AI agents from the English text, with the German as a second reference, and checked by tests — not reviewed by native speakers.**'))
+  assert.ok(flat.includes('translated by AI agents, as in 1.9, and not reviewed by native speakers'))
+  // Claims the notes must not make: nothing beyond an AI agent's reading; no Codex send tried; no path, file or secret of the machine.
+  for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i, /tried with Codex/i, /tested with Codex/i]) {
+    assert.equal(never.test(entry), false, `the 1.10.0 entry says ${never}`)
+  }
+  assert.equal(/review/i.test(flat.replace(/not reviewed by native speakers/g, '')), false, 'the 1.10.0 entry claims a review')
+  for (const never of [/\/home\//, /plan-1\.\d+/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//, /package\.json/, /worktree/i, /Review [12L]\b/]) {
+    assert.equal(never.test(entry), false, `the 1.10.0 entry mentions ${never}`)
+  }
+  // The old words are not claimed anywhere: the manifest's examples carry the bar's word, the countdown's old verb and the
+  // 7-day block's old head are gone from the pages, and nothing says the keep-warm line is the one thing typed.
+  for (const key of ['config.resetFormat.enum.relative', 'config.resetFormat.enum.absolute', 'config.resetFormat.enum.both', 'config.density.enum.full']) {
+    assert.ok(nlsEn[key].includes('resets'), `${key} lacks the bar's word`)
+  }
+  assert.ok(nlsEn['config.summary.period.enum.today'].includes('· today'))
+  for (const [name, text] of [['CHANGELOG.md 1.10.0', entry], ['docs/agents.md', doc.agents], ['docs/dashboard.md', doc.dashboard], ['docs/prompt-cache.md', doc.promptCache],
+    ['docs/privacy.md', doc.privacy], ['docs/status-bar-states.md', STATES], ['docs/troubleshooting.md', doc.troubleshooting], ['docs/export.md', doc.export], ['README.md', README]] as const) {
+    for (const stale of ['activate to cancel', 'Agent records', 'a record keeps no speed', 'the one thing it ever types', 'nothing is typed anywhere except the keep-warm line:', 'Avg turn ~']) {
+      assert.equal(flatText(text).includes(stale), false, `${name} still says: ${stale}`)
+    }
+  }
+  assert.equal(nlsEn['capabilities.untrustedWorkspaces'].includes('the one thing it ever types'), false)
+  assert.ok(nlsEn['capabilities.untrustedWorkspaces'].includes('It types into a terminal in two cases only'))
+})
+
+/**
+ * 1.10 P21 (§7 Q26): the picture of the Prompts section — 420 px at twice the size, dark, English, with the target
+ * line — is in the repository, embedded in the README and packaged, as the other store pictures are.
+ */
+test('the picture of the Prompts section is in the repository, embedded in the README and packaged (1.10 P21, §7 Q26)', () => {
+  const file = 'media/screenshot-prompts.png'
+  assert.match(README, /!\[The Prompts section of the dashboard: the line on how it works and that unsent text goes with a prompt, the line naming where a prompt would go — Sends to Claude Code in terminal 2 of 3 — ready —[^\]]*\]\(media\/screenshot-prompts\.png\)/)
+  const png = readFileSync(join(ROOT, file))
+  assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], `${file} is not a PNG`)
+  assert.equal(png.readUInt32BE(16), 840, `${file} is not 840 px wide`)
+  assert.equal(shipped(file), true, `${file} would not be packaged`)
+  // The four other pictures of the dashboard are 840 px wide as well — the same page width at twice the size.
+  for (const other of ['media/screenshot-dashboard.png', 'media/screenshot-prompt-cache.png', 'media/screenshot-languages.png', 'media/screenshot-tokens.png']) {
+    assert.equal(readFileSync(join(ROOT, other)).readUInt32BE(16), 840, `${other} is not 840 px wide`)
+  }
+})
+
+/**
+ * 1.10 P21: the sentences the last package added where a reader looks — the prompts page (the twelve languages, the
+ * field's count, the `/loop` variant), the languages page (the ledger, the terms, the stacked label's colon, the turn
+ * line), development.md (the `; ` rule, the test seam), status-bar.md (`auto`), agents.md (an agent entry), the
+ * README (the site, the bullet, the privacy sentence) and the walkthrough — each held to the code where the code
+ * decides it.
+ */
+test('the pages carry the sentences of the documentation package, held to the code (1.10 P21)', () => {
+  const prompts = flatText(doc.prompts)
+  for (const claim of ['and likewise in each of the other twelve languages; the German status prompt keeps the author\'s own wording, the twelve translate the English',
+    'the characters counted as the field counts them (an emoji counts two)', 'one whose command it saw end while VS Code still names the shell so']) {
+    assert.ok(prompts.includes(claim), `docs/prompts.md does not say: ${claim}`)
+  }
+  // The `/loop` section: its place, the interval and the bound it rests on, the cost from the prompt-cache page's own example, the ways to stop it, the seven days.
+  assert.ok(doc.prompts.includes('\n## The `/loop` variant\n'))
+  const at = doc.prompts.indexOf('\n## Sending\n'), loop = doc.prompts.indexOf('\n## The `/loop` variant\n'), which = doc.prompts.indexOf('\n## Which terminal\n')
+  assert.ok(at < loop && loop < which, 'the /loop section is not between Sending and Which terminal')
+  const loopText = flatText(doc.prompts.slice(loop, which))
+  for (const claim of ['`/loop 30m Ignore this message. No action. No response.`', 'every 30 minutes', 'at most 45 minutes between two requests — under the hour',
+    'a cache read is ~$0.03 of API equivalent against ~$1.22 for one cold rewrite', 'ask Claude in that session to list its scheduled tasks and cancel the keep-warm one',
+    '`CLAUDE_CODE_DISABLE_CRON=1`', 'runs seven days at most', '`keepwarm.json` counts only the lines the keep-warm countdown typed', 'at a weight Anthropic does not publish']) {
+    assert.ok(loopText.includes(claim), `the /loop section does not say: ${claim}`)
+  }
+  assert.ok(flatText(doc.promptCache).includes('152.3K tokens at the 1 h write rate (2× input, ~$1.22) instead of reading them from the cache (0.05× input, ~$0.03)'),
+    'the prompt-cache page no longer carries the example the /loop section quotes')
+  assert.ok(doc.promptCache.includes('([Prompts](prompts.md#the-loop-variant))'))
+  assert.ok(prompts.includes('[The `/loop` variant](#the-loop-variant)'))
+  // The languages page: the ledger in reader words, the terms as the files have them, the colon per language, the turn line.
+  const languages = flatText(doc.languages)
+  for (const claim of ['every change went into a ledger of English changes (the build\'s `l10n/rekey.json`) which each of the twelve languages worked through',
+    'no pending list may exist at the join, and every settings translation must be fresh', 'was again done by AI agents (Claude Opus 5.5, with a wording pass by Claude Fable 5.1), not by native speakers',
+    'is said in the language\'s own word in Turkish (*istem*) and in the two Chinese variants (提示词 in Simplified, 提示 in Traditional Chinese); the other nine keep the loanword',
+    'not a key label of VS Code\'s', '*Période :* with a no-break space in French, *范围：* and *範圍：* with the full-width colon in Simplified and Traditional Chinese, the plain `:` everywhere else, Japanese included',
+    'a wider gap before the value than the plain one — a known limit of 1.10', 'a model\'s average turn time and its P90 (`~12 h 05 min · P90 ~18 h 46 min`)', 'are new in 1.9.0']) {
+    assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
+  }
+  const bundle = (id: string): Record<string, string> => JSON.parse(readDoc(`l10n/bundle.l10n.${id}.json`)) as Record<string, string>
+  assert.equal(bundle('fr')['{0}:'], '{0} :')
+  assert.equal(bundle('fr').Period, 'Période')
+  assert.deepEqual([bundle('zh-cn')['{0}:'], bundle('zh-cn').Range, bundle('zh-tw')['{0}:'], bundle('zh-tw').Range, bundle('ja')['{0}:'], bundle('de')['{0}:']], ['{0}：', '范围', '{0}：', '範圍', '{0}:', '{0}:'])
+  for (const id of ['es', 'pt-br', 'it', 'ko', 'ru', 'pl', 'cs']) assert.equal(bundle(id)['{0}:'], '{0}:', `${id} writes another colon`)
+  assert.equal(bundle('tr').Prompts, 'İstemler')
+  assert.equal(bundle('zh-cn').Prompts, '提示词')
+  assert.equal(bundle('zh-tw').Prompts, '提示')
+  for (const id of ['fr', 'es', 'pt-br', 'it', 'pl', 'cs']) assert.match(bundle(id).Prompts, /^Prompt/, `${id} does not keep the loanword`)
+  assert.deepEqual([bundle('ja').Prompts, bundle('ko').Prompts, bundle('ru').Prompts], ['プロンプト', '프롬프트', 'Промпты'])
+  assert.equal(existsSync(join(ROOT, 'l10n/pending')) && readdirSync(join(ROOT, 'l10n/pending')).length > 0, false, 'a pending list is left')
+  // development.md: the ledger's `; ` rule as the script has it, the test seam as the code gates it.
+  const dev = flatText(doc.development)
+  assert.ok(dev.includes('A `why` never holds `; ` — the script joins the reasons of one key with it and splits on it again —, and `--check` refuses one.'))
+  assert.ok(readDoc('scripts/l10n-rekey.mjs').includes("'; '"), 'the script no longer joins reasons with "; ": say so in the docs')
+  assert.ok(dev.includes('asks the extension\'s exported API, `promptSendCheck(id)`, what a send would decide with no Claude Code or Codex terminal open — `noTerminal`, nothing typed'))
+  assert.ok(dev.includes('only while the extension host runs in test mode; in a normal window it answers `notListed` before reading anything'))
+  assert.ok(readDoc('src/extension.ts').includes("promptSendCheck: (id: string) => (context.extensionMode !== vscode.ExtensionMode.Test"), 'the seam is no longer gated on the test mode: say so in the docs')
+  assert.ok(readDoc('test-e2e/suite/index.ts').includes("'noTerminal'"), 'the e2e check no longer expects noTerminal')
+  // status-bar.md: `auto` is what the code reads — Intl without a locale tag.
+  assert.ok(flatText(doc.statusBar).includes('`auto` takes the hour cycle of the locale the extension host runs under — what `Intl` resolves without a locale tag, normally the operating system\'s —, not the language of Token Pace\'s texts'))
+  assert.equal(flatText(doc.statusBar).includes('`auto` follows the OS locale'), false)
+  assert.ok(readDoc('src/time.ts').includes("new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle"), 'the hour cycle of `auto` is read another way: say so in the docs')
+  // agents.md: the 7-day block's word is the view's (1.10 B2 D6).
+  const agents = flatText(doc.agents)
+  for (const claim of ['Every agent entry of the seven days the tree covers', 'An agent entry is a whole agent', '(an agent\'s entry keeps no speed and no web search)']) {
+    assert.ok(agents.includes(claim), `docs/agents.md does not say: ${claim}`)
+  }
+  assert.ok(readDoc('src/textViews.ts').includes("t('Agent entries, last 7 days')"))
+  // README: the site in the top lines, the bullet, the privacy sentence, the index row; the walkthrough's row.
+  const readme = flatText(README)
+  assert.ok(README.split('\n').slice(0, 8).join('\n').includes('[token-pace.com](https://token-pace.com)'), 'the README does not link the site in its top lines')
+  assert.ok(README.includes('* **Your own prompts, typed into Claude Code\'s terminal on a double-click.**') && readme.includes('→ [Prompts](docs/prompts.md)'))
+  assert.ok(readme.includes('and a prompt of the dashboard\'s Prompts section, typed only when you double-click it and never in Restricted Mode'))
+  assert.ok(readme.includes('three opt-ins, each behind its own consent dialog, all three off by default and off in Restricted Mode'))
+  assert.ok(README.includes('| [Prompts](docs/prompts.md) | The dashboard\'s Prompts section: your own prompts for Claude Code\'s and Codex\'s terminals, the three shipped ones, editing, how a prompt is sent and into which terminal, when Token Pace asks first or does not send, the `/loop` variant, and where the list is kept |'))
+  assert.ok(readDoc('media/walkthrough/dashboard.md').split('\n').some((l) => l.startsWith('| prompts | Your own prompts for Claude Code and Codex — not in the default')), 'media/walkthrough/dashboard.md has no prompts row')
 })

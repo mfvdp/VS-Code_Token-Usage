@@ -15,6 +15,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | chart · models | Daily bars by model in the provider's hue — or, with the `subagents` chip, by main session and subagent — with a cost line; the per-model breakdown with price provenance |
 | heatmap · hours | 53 weeks of activity, hour-of-day profile, weekday grid |
 | history · data quality | The reset retrospective; every source with its age or its failure, coverage, retention, consent, role |
+| prompts | Your own prompts for Claude Code and Codex — not in the default: a double-click on one types it into the terminal that runs Claude Code or Codex and presses Enter, always on your click; a click opens it to edit |
 
 The provider switch at the very top — `Claude Code`, `Codex`, `All` — governs every section
 below it: one provider's figures, or every provider's as before. The range and model chips sit

@@ -157,8 +157,15 @@ and `≈` (a lower bound) and `–` (nothing known).
 page, the bar and the texts. A known limit, not an oversight.
 
 **At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s`
-stay together in every language —, an ISO day never breaks at its hyphen, and a window's percentage
-never stands alone on a line: it wraps together with the verdict beside it.
+stay together in every language, and so do a model's average turn time and its P90 (`~12 h 05 min · P90
+~18 h 46 min`) —, an ISO day never breaks at its hyphen, and a window's percentage never stands alone on a
+line: it wraps together with the verdict beside it.
+
+**A stacked table's label** (1.10). Where the side bar is too narrow for a table's columns and its rows
+stack, each cell prints its column's name in front of its value, with the colon the language writes:
+*Période :* with a no-break space in French, *范围：* and *範圍：* with the full-width colon in Simplified
+and Traditional Chinese, the plain `:` everywhere else, Japanese included. The full-width colon leaves a
+wider gap before the value than the plain one — a known limit of 1.10.
 
 ## How the translations were made
 
@@ -169,6 +176,20 @@ for completeness, placeholders and the marks `~`, `⚠`, `≈` and `–` — the
 native speakers**. The tests hold every language to the same rules: every text translated, every
 placeholder and mark kept, no code, setting or command name translated, no English sentence left
 behind, no exclamation mark; they cannot tell a good word from a clumsy one.
+
+In 1.10 the English changed while the code was written — the Prompts section's texts, the models',
+sessions' and agents' lines, the settings' bar examples —, and every change went into a ledger of English
+changes (the build's `l10n/rekey.json`) which each of the twelve languages worked through: every new text
+translated, every reworded one read again, every changed settings sentence recorded afresh. The tests hold
+that no text and no settings sentence was skipped — no pending list may exist at the join, and every
+settings translation must be fresh. That work, and the decisions on the open questions the 1.9
+translations had left per language, was again done by AI agents (Claude Opus 5.5, with a wording pass by
+Claude Fable 5.1), not by native speakers.
+
+**Terms.** "Prompt", the Prompts section's word, is said in the language's own word in Turkish (*istem*)
+and in the two Chinese variants (提示词 in Simplified, 提示 in Traditional Chinese); the other nine keep the
+loanword. A key's name in a sentence — Enter, Ctrl+Enter — is the language's prose word (*Entrée*, *Intro*,
+*Invio*, *Eingabe*), not a key label of VS Code's.
 
 A wrong or clumsy word is a bug — please report it on the
 [issue tracker](https://github.com/mfvdp/VS-Code_Token-Usage/issues), with the language, the text you

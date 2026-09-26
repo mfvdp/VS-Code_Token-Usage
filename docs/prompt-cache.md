@@ -339,7 +339,7 @@ dialog or never became a request is not followed by a fresh countdown. The log s
 idle phase. A countdown for another terminal goes on. The Prompts section's *Keep the cache warm* prompt
 types this very line by hand, as your own request: it is not counted in `keepwarm.json`. The `/loop`
 variant — the line with `/loop 30m` in front, which Claude Code repeats every 30 minutes by itself — is
-a prompt you can make of it there ([Prompts](prompts.md#sending)).
+a prompt you can make of it there ([Prompts](prompts.md#the-loop-variant)).
 
 **On the Claude card**, under the session's lines: `Keep-warm line for this session in 42 s — cancel
 it in the status bar.` while a countdown runs; `Keep-warm cannot reach this session: it does not run

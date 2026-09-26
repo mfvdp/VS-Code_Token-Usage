@@ -3,6 +3,185 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.10.0 — <date set at publish>
+
+**A prompt list that types into Claude Code's and Codex's terminals, and the 1.9 leftovers in every
+language.** A new dashboard section, *Prompts* — off by default, added with `prompts` in
+`tokenPace.dashboard.sections` — holds your own prompts, starting with three Token Pace ships: *Status
+table*, *Keep the cache warm* and *Stop after this task*. A double-click on one, its send button or
+Ctrl+Enter types its text into the VS Code terminal of this window that runs Claude Code or Codex and
+presses Enter — always on your click, never on its own —, and where Token Pace cannot tell a Claude Code
+at work from one waiting for your answer in a dialog, it asks first. A click opens a prompt's title and
+text to edit; the list lives in one file of the extension's storage and nowhere else. Beside it, what 1.9
+left for the twelve languages: the settings' examples say what the status bar prints in each language,
+decimals follow the language everywhere on the page, a figure stays with its unit and a percentage with
+its verdict at the narrowest width, and every text 1.10 added or changed reached the twelve languages —
+translated by AI agents, as in 1.9, and not reviewed by native speakers.
+
+### Added
+
+* **The Prompts section.** `prompts` in `tokenPace.dashboard.sections` — not in the default; add it
+  where you want it, first for the quickest reach — shows your own list of prompts. It starts with three
+  Token Pace ships, each a title and a one-line text: *Status table* (`Show the current progress in a
+  clear table. Columns: step/status | description | model | duration | expected to finish.`), *Keep the
+  cache warm* (the keep-warm line, `Ignore this message. No action. No response.`) and *Stop after this
+  task* (`Stop after the current task and do not start any new work.`). Until you edit one, a shipped
+  prompt's words follow the language of Token Pace's texts — the keep-warm line stays English in every
+  language. A click on a prompt opens its title and text in place (after 300 milliseconds, so that a
+  double-click sends instead); Enter or leaving the fields saves, Escape leaves the prompt as it was,
+  *Delete* asks in the page first, *Move up* and *Move down* reorder, *New prompt* adds one. A title has
+  1 to 80 characters, a text 1 to 2000 on one line — a line break becomes a space, since a typed line
+  break would send the first line on its own —, the list holds at most 50 prompts, and a text that starts
+  with `!` is refused: it would run a shell command in Claude Code. A text that starts with `/` is a slash
+  command and is shown in the editor font. The section stays on the page whatever the provider switch
+  shows and no chip filters it; the Quick Pick and markdown modes of the dashboard have no prompts.
+* **Sending.** A double-click on a prompt, its send button or Ctrl+Enter (⌘+Enter on a Mac) types the
+  prompt's text into the terminal of this window that runs Claude Code or Codex and presses Enter: the
+  active terminal when it is one, else a pick of exactly those terminals, each named by its place in the
+  window's list — *Claude Code — terminal 2 of 3* — with *ready*, *sending asks first* or *not now*
+  beside it; never another terminal, never a terminal of another window, never the Claude Code
+  extension's own panel, which no extension can type into. The text and the Enter are two writes, 200
+  milliseconds apart — typed in one piece with its Enter, a longer text sits in Claude Code's input box as
+  pasted text, unsent. **Anything you typed in that terminal and did not send goes with the prompt**; the
+  section's first line says so, always. After the send the terminal is shown, the keyboard stays on the
+  dashboard, and the section says *Sent to Claude Code in terminal 2 of 3.* for ten seconds. Sending was
+  tried with Claude Code (2.1.282 and 2.1.283) only; Codex is recognised by the same shell-integration
+  rule and was not tried.
+* **When Token Pace asks first, and when it does not send.** Before anything is typed, the terminal and
+  — for Claude Code — every session of its folder are checked from facts Token Pace keeps anyway. Where a
+  send is known to be unsafe it does not send and says why: in Restricted Mode; while it reads the
+  transcripts; with no such terminal; while the agent hook reports a permission request open in a session
+  of that folder (the text and Enter would answer it); and while the Claude Code in that terminal has not
+  written a line since it started — a fresh `claude` showed three dialogs of its own before its prompt was
+  empty, the folder-trust question with *No, exit* highlighted among them, and a text typed into a dialog
+  answers it and is lost. Where the transcript cannot tell Claude Code at work from Claude Code waiting in
+  a dialog — an open tool call, a reply that did not end its turn, an agent of the session running,
+  another session of the same folder busy, a Claude Code whose start Token Pace did not see (after a
+  window reload, say), a terminal whose folder VS Code does not report, and Codex, of whose state Token
+  Pace reads nothing — it asks first: *Send “Status table” anyway?* with the reason and what an Enter would
+  do to an open dialog; *Send anyway* sends, after every check has run once more. Nothing of your answer
+  is kept. A prompt that comes while Claude Code works is queued by Claude Code and taken after the turn —
+  what *Status table* and *Stop after this task* are for.
+* **`Token Pace: Restore Default Prompts`** — in the Command Palette, and the section's button while a
+  shipped prompt is missing — adds every shipped prompt missing from the list, at its end, in their
+  order; a shipped prompt you edited stays as you wrote it. *Clear Stored Data…* lists the prompt list
+  and, deleted, returns it to the three shipped prompts.
+* **The `/loop` variant.** Edit the keep-warm prompt's text to `/loop 30m Ignore this message. No
+  action. No response.` and Claude Code, its own scheduler, repeats the line every 30 minutes for as
+  long as the session runs — in a test it became one scheduled task. The documentation says why 30
+  minutes, what every run costs, and how to stop it.
+* **Keyboard and screen readers.** Every prompt is two Tab stops, the prompt and its send button: Enter
+  or Space opens the fields, Ctrl+Enter sends; a key held down acts once. A screen reader hears the list
+  as *Prompts*, a prompt by its title, described by its text and *Enter edits it, Ctrl+Enter sends it.*,
+  and the outcome of a send once, politely; where a prompt would go, and whether it goes, asks first or
+  not now, stands in words, never in a colour alone.
+
+### Changed
+
+* **The settings' examples of the status bar say what the bar prints.** `Time left — “CC 5h 25% ·
+  resets 2h14m”`, `Both — “CC 5h 25% · resets at 06:00 (in 2h14m)”`, `Today — “Σ 3.1M · today”` — with
+  the word `resets`, the period the bar adds, in every language's own words (a German bar says `· Reset
+  in 2h14m`, `Σ 3,1M · heute`), and a test holds each language's examples to what its bar builds for the
+  same fixture. A settings description said the period is named in the summary entry's text only outside
+  `today`; the bar always names it.
+* **Decimals follow the language on the page.** A key figure's change (`▼ -0,7%` in German), the plan
+  factor (`×0,4`), the heat map's variability (`CV 0,35`), a band's share in the chart's tooltip, a span
+  under ten hours (`2,5 h`) and the file sizes *Clear Stored Data…* lists (`12,3 kB`) take the language's
+  decimal mark; the CSV and JSON exports and the diagnostics report keep the `.`.
+* **A window's percentage stays with its verdict.** At the narrowest side bar a window row's figure no
+  longer stands alone on a line: verdict and figure wrap together, at the row's right, in every language.
+* **The keep-warm countdown's screen-reader label** says *press to cancel* — `Keep-warm line for {0} in
+  {1} seconds, press to cancel` —, and each language uses its own verb for pressing a control.
+* **Whole sentences where pieces were joined, and clearer words.** The alerts' *runs out* sentences are
+  one sentence each in every language (1.9 slotted `in ~2h14m` or `imminently` into them); the summary's
+  cache sentence likewise; the context tooltip says *This is the current session's context, as the status
+  line reports it — not an account figure, and not comparable to a quota window.*; the Models table says
+  *Avg turn time*; the 7-day block's data-quality line says *Agent entries, last 7 days* — an agent entry,
+  not a record, which is the Records section's word —; the retrospective's line reads *Share of complete
+  cycles that hit the limit: {0} · Avg unused at the reset: {1}*; and the calendar table's column is
+  *Active days*, so that *Active* is only ever a session's state.
+* **The twelve languages** — Français, Español, Português (Brasil), Italiano, 日本語, 한국어, 简体中文,
+  繁體中文, Русский, Türkçe, Polski and Čeština — carry every text 1.10 added or changed, the Prompts
+  section's among them: each change went into a ledger of English changes that every language worked
+  through, and tests hold that no text and no settings sentence was skipped. The open questions the 1.9
+  translations had left per language were decided as well. **This work was again done by AI agents from
+  the English text, with the German as a second reference, and checked by tests — not reviewed by native
+  speakers.** Turkish keeps the percent after the number (`25 %`), although Turkish typography puts it
+  first: a documented limit.
+* **The trust statement** in the Extensions view names the two things Token Pace types into a terminal —
+  the opt-in keep-warm line, and a prompt of the Prompts section when you send it yourself — and that
+  both are disabled in Restricted Mode.
+
+### Fixed
+
+* **The rolled-up bucket sentence** in the data-quality section is singular where it counts one:
+  `1 rolled-up bucket in this range has no hour left and is not in the profile`.
+* **A figure torn from its unit** at the narrowest side bar — a Korean or Chinese *2 min ago*, a Polish
+  unit, the summary's `54 %` — stays with it; an ISO day no longer breaks at its hyphen; and a
+  sparkline no longer touches the descenders of the line above it.
+* **The stacked tables' colon** is the language's own: `Période :` with a no-break space in French, the
+  full-width `：` in Simplified and Traditional Chinese, the plain `:` elsewhere — 1.9 wrote `: ` for
+  every language.
+* **The summary's cache sentence** in Japanese and Chinese takes the language's own punctuation: it is a
+  whole sentence per language now, where 1.9 joined its parts with `, ` and ASCII parentheses.
+* **The keep-warm line waits while the transcripts are read.** During the first scan after the window
+  opened, a re-read or the replay for the Agents tables the sessions' records are rebuilt, and a check
+  could pass a folder whose busy session was still being read: no countdown starts and none ends with
+  its line until the reading is done (`reading`, check 14 of the keep-warm line).
+
+### Privacy
+
+* **One file of your own is written**: `prompts.json` in the extension's storage — your prompt titles
+  and texts, nothing else: no time, no session, no terminal, no path, no count of sends — only when you
+  change the list, whole, a temp file and then a rename. Your titles and texts are shown on the dashboard
+  and typed into the terminal you send one to, and reach nothing else: not the log, not the diagnostics
+  report (not even a count), not an export, the summary, the usage document or Quick Pick, the status bar
+  or a notification's text. The file is not synced, has no export and no import, and *Clear Stored Data…*
+  lists and deletes it.
+* **The terminals are watched for the Prompts section** as they are for the keep-warm line — by one
+  watch that listens while the keep-warm line may act or while the dashboard lists the Prompts section
+  in a trusted workspace, and to nothing otherwise. It reads what VS Code's shell integration reports: an
+  open command's line, confidence and folder, VS Code's word for what runs in a terminal (`claude` or
+  `codex`), and — new — the folder the shell reports for a terminal whose Claude Code or Codex started
+  before Token Pace listened, `shellIntegration.cwd`, read only for such a terminal, only when a prompt is
+  sent or the section is built, only to compare it with the sessions' folders, and kept by no one. Never a
+  terminal's name, its output, its environment or its process; a terminal is named by its place in the
+  window's list. Of a Codex session's own state nothing is read.
+* **The second thing Token Pace ever types into another program's input** is your prompt — only on
+  your own click, never by a timer, a command, a link or a notification, at most one per second, never
+  in Restricted Mode, with nothing read back from the terminal. Whether it goes at once, asks first or
+  does not go is decided from facts Token Pace keeps anyway — a session's first and newest reply, how the
+  newest ended, whether a line of yours came after it, whether an agent of it runs, and with the agent
+  hook a permission request — compared at the send and never shown as figures, logged beyond a check's
+  code, stored or exported.
+* **The extension's exported API** answers the Prompts section's send check (`promptSendCheck`, a seam
+  for the extension-host test) only while the host runs in test mode; in a normal window it answers
+  `notListed` before reading anything, so no other extension can learn a session's state through it.
+
+### Internal
+
+* **Snapshot and export.** `STATE_VERSION` 8, the export's `schema_version` 3 (`EXPORT_SCHEMA_VERSION`
+  3) and `AGENT_TABLES_REVISION` 10 are unchanged: nothing of the snapshot or of an export changes, and
+  the first start of 1.10.0 rebuilds nothing.
+* **One watch of the window's terminals** (`src/terminalWatch.ts`) serves the keep-warm line and the
+  Prompts section; the keep-warm checks it reuses are exported from `src/keepWarm.ts`, not copied, and
+  the send decision is a pure function of its own (`src/promptSend.ts`). The keep-warm line gains a
+  fourteenth check, `reading`, run right after the first.
+* **The re-key ledger.** An English text is its own key, so a changed sentence used to turn twelve
+  languages red at once; 1.10 records every English change in `l10n/rekey.json` (115 entries for this
+  release) and `scripts/l10n-rekey.mjs` carries each into the twelve languages' files as a pending
+  item, which the language's own package works through. Two rules join the frame: T14 (the pending
+  lists — none may be left at the join) and T15 (the settings' bar examples are what the bar prints).
+  `node scripts/nls-sources.mjs --check --strict` is the gate from the join on. None of it ships.
+* **`decimalText`** writes every decimal of the page through `Intl` after rounding as before, so the
+  English output is byte for byte what 1.9 printed; CSS geometry and machine output keep the `.`.
+* **The read contract** of `npm run check:privacy` gains six rows: `prompts.json` (`v`, `prompts`; an
+  entry's `id`, `title`, `text`), a terminal's `shellIntegration`, its `cwd` and its `fsPath`, and the
+  one `sendText` of a prompt.
+* **The dashboard harness** checks the Prompts section in every language on disk at the narrowest
+  width, the layout rules of this release on every language page, and no longer builds a check on an
+  empty prefix of a translated message.
+
 ## 1.9.0 — <date set at publish>
 
 **Token Pace in fourteen languages, switched at the top of the dashboard.** A flag beside the

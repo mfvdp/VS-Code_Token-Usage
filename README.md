@@ -2,7 +2,8 @@
 
 Quota, tokens and API cost for **Claude Code** and **Codex**, permanently in the VS Code
 status bar, with a detailed tooltip, a dashboard in the secondary sidebar, and text-only
-views for the places a webview cannot go.
+views for the places a webview cannot go. The project's site, in English and German:
+[token-pace.com](https://token-pace.com).
 
 The bars are coloured by **pace**, not by level: green while consumption stays at or below
 the share of the window that has already elapsed, yellow once it runs ahead of pace,
@@ -25,13 +26,14 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![The language picker open at the top of the dashboard: Automatic — as VS Code (English) first, then English checked, Deutsch · German, Français · French and the other languages, each with its flag, its own name and its name in English; under the list the line on what switches at once and the line on who translated the languages](media/screenshot-languages.png)
 
+![The Prompts section of the dashboard: the line on how it works and that unsent text goes with a prompt, the line naming where a prompt would go — Sends to Claude Code in terminal 2 of 3 — ready —, then the prompts, Status table, a keep-warm loop, Stop after this task and one of the reader's own, each with its send button, and New prompt](media/screenshot-prompts.png)
+
 The pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States* and a synthetic snapshot), not from anybody's real usage.
 
-**Requires VS Code 1.106 or newer.** The dashboard lives in the secondary sidebar, and
-`contributes.viewsContainers.secondarySidebar` only became a stable contribution point in
-1.106 (in 1.104 it was behind the `contribSecondarySideBar` proposed API). Editors built on an
-older VS Code base — Cursor and Windsurf currently are — cannot install it until they rebase;
-VSCodium tracks the VS Code releases and gets it from Open VSX.
+**Requires VS Code 1.106 or newer.** The dashboard lives in the secondary sidebar, whose
+`contributes.viewsContainers.secondarySidebar` became a stable contribution point in 1.106. Editors on
+an older VS Code base — Cursor and Windsurf currently — cannot install it until they rebase; VSCodium
+tracks the VS Code releases and gets it from Open VSX.
 
 Not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI. “Claude” and “Codex” are the
 trademarks of their respective owners and are used here only to name the tools whose output is read.
@@ -62,6 +64,11 @@ trademarks of their respective owners and are used here only to name the tools w
   session's terminal. A draft left in Claude Code's input line is sent along, the Claude Code
   extension's panel is out of reach, each line is a real request, and Anthropic's terms do not
   explicitly permit it. → [Keep-warm in a terminal](docs/prompt-cache.md#keep-warm-in-a-terminal-opt-in)
+* **Your own prompts, typed into Claude Code's terminal on a double-click.** A `prompts` section, off by
+  default, lists your prompts — *Status table*, *Keep the cache warm* and *Stop after this task* to begin
+  with. A double-click, the send button or Ctrl+Enter types one into the terminal of this window that runs
+  Claude Code or Codex and presses Enter, always on your click; where the transcript cannot tell Claude Code
+  at work from Claude Code waiting for your answer in a dialog, it asks first. → [Prompts](docs/prompts.md)
 * **Your Claude Code agents as a tree**: the agents running now listed on top, then the active
   sessions with their workflow runs and agents, and every other session of the last seven days in
   one closed row, `Earlier sessions (12)` — closed until you open them, fifty children at a time —
@@ -79,16 +86,14 @@ trademarks of their respective owners and are used here only to name the tools w
   subagent. → [Dashboard](docs/dashboard.md)
 * **Running agents in the status bar, opt-in**: `agents` in `statusBar.show` shows `~3 running`
   while any runs, with no colour and no alarm. And, opt-in as well, an **agent hook** you install
-  into Claude Code yourself marks an agent that waits for your approval.
-  → [Status bar](docs/status-bar.md), [the agent hook](docs/agents.md#the-agent-hook)
+  into Claude Code yourself marks an agent that waits for your approval. → [Status bar](docs/status-bar.md),
+  [the agent hook](docs/agents.md#the-agent-hook)
 * **The same figures without a webview**: a markdown report, a searchable Quick Pick, a CSV
   and a JSON export — the agents included in all of them — and a diagnostics report that is safe
   to paste into an issue. → [Export and diagnostics](docs/export.md)
-* **Quota without the network.** Percentages come from the provider and cover every client;
-  out of the box they are read from local sources somebody else wrote. Fetching them
-  ourselves is a separate decision, asked once; on Windows its user agent names the Claude Code
-  version this machine runs, without starting the npm `.cmd` shim.
-  → [Quota sources](docs/quota-sources.md), [Windows](docs/windows-wsl-remote.md)
+* **Quota without the network.** Percentages come from the provider and cover every client; out of the
+  box they are read from local sources somebody else wrote. Fetching them ourselves is a separate decision,
+  asked once. → [Quota sources](docs/quota-sources.md), [Windows](docs/windows-wsl-remote.md)
 * **Nothing invented.** A missing figure is `–`, never `0 %`; a window without a stated length
   gets no pace rather than an invented denominator; estimates carry `~` and lower bounds `⚠`.
   → [Numbers, words and pace](docs/numbers.md)
@@ -102,13 +107,11 @@ trademarks of their respective owners and are used here only to name the tools w
 * **Visual Studio Marketplace** — search for *Token Pace* in the Extensions view, or
   `code --install-extension frederik.token-pace`
   ([store page](https://marketplace.visualstudio.com/items?itemName=frederik.token-pace)).
-* **Open VSX** — the same extension for VSCodium and everything else that uses that registry:
-  `codium --install-extension frederik.token-pace`
-  ([store page](https://open-vsx.org/extension/frederik/token-pace)).
-* **`.vsix`** — download it from the
-  [GitHub releases](https://github.com/mfvdp/VS-Code_Token-Usage/releases) and install with
-  `code --install-extension token-pace-<version>.vsix`, or *Extensions → … → Install from
-  VSIX…*. The package is platform-independent; there is no native code.
+* **Open VSX** — for VSCodium and everything else on that registry: `codium --install-extension
+  frederik.token-pace` ([store page](https://open-vsx.org/extension/frederik/token-pace)).
+* **`.vsix`** — from the [GitHub releases](https://github.com/mfvdp/VS-Code_Token-Usage/releases):
+  `code --install-extension token-pace-<version>.vsix`, or *Extensions → … → Install from VSIX…*. The
+  package is platform-independent; there is no native code.
 
 Nothing has to be configured. If Claude Code or Codex runs on the other side of a remote —
 WSL, SSH, a container — see [Windows, WSL and remote development](docs/windows-wsl-remote.md).
@@ -134,9 +137,10 @@ token, a header or an exception's text.
 Transcript contents — prompts, responses, tool arguments and tool results — are never stored,
 logged, exported or displayed. Nothing is written outside the extension's own storage except the
 shared quota cache file and the status-line bridge — which keeps only the fields Token Pace reads —,
-and nothing is typed anywhere except the keep-warm line: three opt-ins, each behind its own consent
-dialog, all three off by default and off in Restricted Mode; a language you pick in the dashboard
-goes into your user settings. The agent tree reads identifiers, names, counts and allow-listed words
+and nothing is typed anywhere except the keep-warm line — three opt-ins, each behind its own consent
+dialog, all three off by default and off in Restricted Mode — and a prompt of the dashboard's Prompts
+section, typed only when you double-click it and never in Restricted Mode; a language you pick in the
+dashboard goes into your user settings. The agent tree reads identifiers, names, counts and allow-listed words
 only — an agent's type, model, ids and outcome, its effort, a rejected request's status, error kind
 and limit, its last tool's name, its tool errors, cache misses, Claude Code version, permission mode
 and compactions, the seven fields of a run record, and, with the opt-in hook, four keys of a hook
@@ -159,7 +163,7 @@ bundle that loads more than `child_process`, `fs` and `path`. The full account i
 | [Dashboard](docs/dashboard.md) | The provider switch and the language picker, the sections of the panel, the filter bar, the chart, the tables and the heatmap |
 | [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree with its earlier sessions, state colours and guide lines: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
 | [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch — its user agent and a failed attempt beside an old figure —, the status-line bridge and where its script lives, extra usage |
-| [Prompts](docs/prompts.md) | The dashboard's Prompts section: your own prompts for Claude Code's and Codex's terminals, the three shipped ones, and where the list is kept |
+| [Prompts](docs/prompts.md) | The dashboard's Prompts section: your own prompts for Claude Code's and Codex's terminals, the three shipped ones, editing, how a prompt is sent and into which terminal, when Token Pace asks first or does not send, the `/loop` variant, and where the list is kept |
 | [Prompt cache](docs/prompt-cache.md) | The cooling warning and what a cold start would cost, which figure is measured and which estimated, the Codex line, the opt-in keep-warm line with every check it makes and what it cannot see, and exactly which fields are read |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
 | [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |
@@ -184,16 +188,12 @@ Changes per version are in [CHANGELOG.md](CHANGELOG.md).
 **AGPL-3.0-or-later.** Copyright © 2026 Frederik Marx. The full text is in [LICENSE](LICENSE);
 every source file carries an [SPDX](https://spdx.dev) identifier.
 
-Copyleft was chosen deliberately. This extension reads an access token, and the only
-meaningful assurance about what it does with it is that you can read the code. That
-assurance should survive being passed on, by whichever route:
-
-* **Distributed** as another extension, a `.vsix`, or inside a product — the complete source
-  of the modified version has to be published under the same licence.
-* **Run as a network service** — section 13 extends the same duty to people who only ever reach the
-  software over a network, so a hosted dashboard built from this code owes its users the source as
-  well. That is the difference between the AGPL and the plain GPL, and it is the reason for this
-  choice: a quota dashboard is exactly the kind of thing that ends up hosted rather than shipped.
-
-Using and modifying it for yourself carries no obligation whatsoever. The duty begins at
-distribution or at offering a service, never at use, and forking this repository is neither.
+Copyleft was chosen deliberately. This extension reads an access token, and the only meaningful
+assurance about what it does with it is that you can read the code. That assurance should survive being
+passed on, by whichever route: **distributed** as another extension, a `.vsix` or inside a product, the
+complete source of the modified version has to be published under the same licence; **run as a network
+service**, section 13 extends the same duty to people who only ever reach the software over a network —
+the difference between the AGPL and the plain GPL, and the reason for this choice: a quota dashboard is
+exactly the kind of thing that ends up hosted rather than shipped. Using and modifying it for yourself
+carries no obligation whatsoever. The duty begins at distribution or at offering a service, never at use,
+and forking this repository is neither.

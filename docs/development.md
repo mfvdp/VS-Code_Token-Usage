@@ -45,14 +45,18 @@ view-model build copies the buckets once and hands that one copy to every table 
 of 25; the figures are the same, which a test compares with the copy-per-table path); a statistic
 called without that copy, as a test may call one, still takes its own.
 
-A handful of questions a fake host cannot answer run in a real editor: `npm run test:e2e`
-downloads VS Code stable into `.vscode-test/`, starts it with this extension in development
-mode, every other extension disabled, a user-data directory of its own and a fresh `HOME` — so
-the smoke test never sees a real transcript — and asserts that the extension activates, that
-every contributed command is registered, that the status-bar preview runs, that a settings
-change reaches the status bar without a window reload, that a change of `tokenPace.language` does
-too — the status bar turns German and back to English (1.9) —, and that the dashboard command opens
-its view. The settings check is why it exists at all: from 1.0 to 1.2 every settings change quietly
+A handful of questions a fake host cannot answer run in a real editor: `npm run test:e2e` downloads
+VS Code stable into `.vscode-test/`, starts it with this extension in development mode, every other
+extension disabled, a user-data directory of its own and a fresh `HOME` — so the smoke test never
+sees a real transcript — and asserts that the extension activates, that every contributed command is
+registered, that the status-bar preview runs, that a settings change reaches the status bar without
+a window reload, that a change of `tokenPace.language` does too — the status bar turns German and
+back to English (1.9) —, and that the dashboard command opens its view. Since 1.10 it also lists
+`prompts` among the sections through the configuration API, sees the Prompts section drawn, and asks
+the extension's exported API, `promptSendCheck(id)`, what a send would decide with no Claude Code or
+Codex terminal open — `noTerminal`, nothing typed. That seam answers a code, never a text, and only
+while the extension host runs in test mode; in a normal window it answers `notListed` before reading
+anything. The settings check is why it exists at all: from 1.0 to 1.2 every settings change quietly
 waited for a window reload, and ~800 unit tests against a fake host could not see it.
 
 CI runs type check, build, tests and the privacy check on **ubuntu, macOS and windows** — the
@@ -110,14 +114,14 @@ node scripts/nls-sources.mjs --check   # every manifest translation matches toda
 node scripts/l10n-rekey.mjs --check    # every entry of the re-key ledger applied to every language (1.10)
 ```
 
-`test/l10n.languages.test.ts` holds every language on disk to the same thirteen rules, T1–T13: the
+`test/l10n.languages.test.ts` holds every language on disk to the same fifteen rules, T1–T15: the
 keys, the parts, the placeholders, the marks (`~`, `⚠`, `≈`, `–`, `%`, `×`, `→`, `·`), the code
 (backtick spans, setting ids, codicons, command targets, links, fences, JSON examples), the page's words
 (no markup character), the tone (no exclamation mark), the tables, no English left (proper names and
 code excepted — the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason), the registry,
 the English quotes (the keep-warm consent's terms passage and line stay word for word), the freshness
-and the heat map's weekday words — and, since 1.10, a fourteenth, T14, for the pending lists
-([below](#changing-the-english-the-re-key-ledger-110)), and a fifteenth, T15, for the bar's own examples:
+and the heat map's weekday words — the thirteen of 1.9 — and, since 1.10, T14 for the pending lists
+([below](#changing-the-english-the-re-key-ledger-110)) and T15 for the bar's own examples:
 every example a setting of the status bar quotes (`CC 5h 25% · resets 2h14m`, `Σ 3.1M · today`) is what
 that language's bar prints for the fixture the test and the brief document — its words, its decimals, its
 weekday and its 12-hour clock —, the English's included. Every rule also runs once against a synthetic
@@ -145,7 +149,8 @@ languages' files can follow it at once:
 
 * `l10n/rekey.json` — the ledger: `{ "v": 1, "base": "<sha>", "entries": [ … ] }`, append-only, one entry
   per change in the order made, numbered from 1 (`n`), each naming the package that made it (`by`) and
-  why (`why`). One entry per line keeps a diff readable.
+  why (`why`). One entry per line keeps a diff readable. A `why` never holds `; ` — the script joins the
+  reasons of one key with it and splits on it again —, and `--check` refuses one.
 * `l10n/rekey-base.json` — the tree the ledger starts from (1.10's is `e72057a`, the 1.9.0 release: 1123
   `t()` keys, 295 manifest keys): every `t()` key with the German parts it stands in, and the first 16 hex
   digits of the SHA-256 of every `package.nls.json` value.

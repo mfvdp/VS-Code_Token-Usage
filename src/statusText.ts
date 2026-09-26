@@ -32,8 +32,8 @@ import {
   percentText, renderBar, usd,
 } from './render'
 import {
-  ageText, attemptWhen, formatReset, formatTime, lastDays, lastFailureText, nextAttemptWords, relativeShort, retryWords,
-  TimeConfig,
+  ageText, attemptWhen, formatReset, formatTime, lastDays, lastFailureText, nextAttemptWords, relativeShort, resetClock,
+  retryWords, TimeConfig,
 } from './time'
 import {
   Bucket, emptyBucket, Forecast, isTransientFailure, PaceLevel, PaceVerdict, ProblemKind, QuotaState,
@@ -462,6 +462,13 @@ function resetSuffix(view: WindowView, cfg: Config, now: number, tcfg: TimeConfi
   // Two messages, not one with a slot: a countdown and a time of day take different
   // prepositions in most languages ("in 3h44m" against "um 15:30"), and the seam keys a
   // translation by its English message, so one message can only carry one of them.
+  //
+  // 1.11 D12: `both` is a third, whole message with both figures in it — never `resets at {0}`
+  // around `formatReset`'s "06:00 (in 2h14m)": that put the brackets and the order of the
+  // countdown in the code, so a language could neither write its own brackets nor put its verb
+  // after the clock and before the countdown (zh-tw: "06:00 重設（2h14m 後）").
+  const at = view.w.resetsAt as number
+  if (cfg.resetFormat === 'both') return ` · ${t('resets at {0} (in {1})', resetClock(at, now, tcfg), relativeShort(at, now))}`
   return cfg.resetFormat === 'relative'
     ? ` · ${t('resets {0}', text)}`
     : ` · ${t('resets at {0}', text)}`

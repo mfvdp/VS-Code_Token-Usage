@@ -170,7 +170,7 @@
   "config.overflowDisplay.enum.clamp": "Cap at the limit — “100%”",
   "config.overflowDisplay.enum.actual": "Show the real value including paid overflow — “111%”",
   "config.resetHourCycle.description": "Clock format for absolute reset times.",
-  "config.resetHourCycle.enum.auto": "Follow the display locale",
+  "config.resetHourCycle.enum.auto": "Follow the operating system's clock format (the locale the extension host runs under), not the language of Token Pace's texts",
   "config.resetHourCycle.enum.h12": "12-hour clock — “06:00 AM”",
   "config.resetHourCycle.enum.h23": "24-hour clock — “06:00”",
   "config.labelMaxChars.description": "Truncate generated window labels to this many characters. `0` means no truncation.",

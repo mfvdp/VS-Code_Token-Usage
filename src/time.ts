@@ -534,6 +534,10 @@ export function relativeTime(target: number, now = Date.now()): string {
  * else. The verb is attached in exactly one place, `WindowVm.resetLine`, which
  * also knows to leave "reset due" alone; a "resets" in here would come out of
  * that as "resets reset due".
+ *
+ * 1.11 D12: `both` is one whole message — "06:00 (in 2h14m)", "06:00 (reset due)" —
+ * never brackets written here around a translated piece: a language places its own
+ * brackets (CJK writes `（…）`) and its own word order around the two figures.
  */
 export function formatReset(
   resetsAt: number | null,
@@ -544,10 +548,19 @@ export function formatReset(
   if (resetsAt === null || !Number.isFinite(resetsAt) || fmt === 'none') return ''
   const rel = relativeShort(resetsAt, now)
   if (fmt === 'relative') return rel
-  const far = resetsAt - now >= MS_DAY
-  const abs = formatTime(resetsAt, cfg, far)
+  const abs = resetClock(resetsAt, now, cfg)
   if (fmt === 'absolute') return abs
-  return resetsAt <= now ? `${abs} (${t('reset due')})` : `${abs} (${t('in {0}', rel)})`
+  return resetsAt <= now ? t('{0} (reset due)', abs) : t('{0} (in {1})', abs, rel)
+}
+
+/**
+ * The clock time of a reset as `formatReset`'s `absolute` and `both` forms write it — the
+ * weekday in front once the reset is a day or more away. 1.11 D12: exported for the status
+ * bar's `both` item, which puts it into its own whole message (`resets at {0} (in {1})`)
+ * beside `relativeShort`'s countdown instead of wrapping `formatReset`'s text.
+ */
+export function resetClock(resetsAt: number, now: number, cfg: TimeConfig): string {
+  return formatTime(resetsAt, cfg, resetsAt - now >= MS_DAY)
 }
 
 /** Age of a reading; null when nothing was ever read (absence is not "0 min old"). */

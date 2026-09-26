@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 59,
+  "applied": 64,
   "bundle": {
     "Dutch": {
       "parts": [
@@ -275,6 +275,27 @@
       ],
       "state": "translate",
       "why": "a footnote under every view's figures: the pages the prices were read from ({0} is a list of host names such as docs.claude.com, never translated) — 1.11 C2; the status bar's cost tooltips now name the price sources after the price sentence — the same words as the footnote — 1.11 C2"
+    },
+    "{0} (in {1})": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a reset shown with both its clock time ({0}) and its countdown ({1}) — the Resets column of the status bar tooltips and the compact item, 06:00 (in 2h14m) — is one whole message now: it replaces your in {0} inside brackets the code wrote, so build it from your own in {0} with the brackets and the order your language uses — 1.11 D12"
+    },
+    "{0} (reset due)": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the same both form for a reset whose time has passed ({0} the clock time), 03:45 (reset due) — one whole message now: it replaces your reset due inside brackets the code wrote, so build it from your own reset due with the brackets your language uses — 1.11 D12"
+    },
+    "resets at {0} (in {1})": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the status bar item with resetFormat both, CC 5h 25% · resets at 06:00 (in 2h14m), is one whole message now ({0} the clock time, {1} the countdown): it replaces your resets at {0} wrapped around the code's brackets and your in {0}, so the verb, the brackets and the order are yours (zh-tw can write 06:00 重設（2h14m 後）) — your manifest example of config.resetFormat.enum.both quotes what this prints — 1.11 D12"
     }
   },
   "nls": {
@@ -337,6 +358,14 @@
     "config.dashboard.topN.description": {
       "state": "review",
       "why": "the first paragraph now also names the Records section's four new tables, which follow the same number of rows (the second paragraph is unchanged) — 1.11 B5"
+    },
+    "config.resetHourCycle.enum.auto": {
+      "state": "review",
+      "why": "the auto value now says what it follows: the operating system's clock format (the locale the extension host runs under), not the language of Token Pace's texts (was: follow the display locale) — 1.11 D9"
+    },
+    "config.resetFormat.enum.both": {
+      "state": "review",
+      "why": "the English value is unchanged, but the status bar now prints this example from the new whole key resets at {0} (in {1}) (entry 62) — once you have translated that key, your example quotes exactly what the bar prints with it, brackets and order included (T15) — 1.11 D12"
     }
   }
 }

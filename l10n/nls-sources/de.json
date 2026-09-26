@@ -170,7 +170,7 @@
   "config.overflowDisplay.enum.clamp": "0ab0db03a12381f3",
   "config.overflowDisplay.enum.actual": "3bb7afd72c43d7bc",
   "config.resetHourCycle.description": "671328db435979de",
-  "config.resetHourCycle.enum.auto": "af3a92a128ba1a17",
+  "config.resetHourCycle.enum.auto": "7ef26ba9cad019e9",
   "config.resetHourCycle.enum.h12": "ee87c521b82be768",
   "config.resetHourCycle.enum.h23": "fa5d5d39de590587",
   "config.labelMaxChars.description": "f5430b8d295b3233",

@@ -132,6 +132,8 @@
   "this month": "diesen Monat",
   "this week": "diese Woche",
   "today": "heute",
+  "{0} (in {1})": "{0} (in {1})",
+  "{0} (reset due)": "{0} (Reset fällig)",
   "{0} ago": "vor {0}",
   "{0} at {1} (threshold {2})": "{0} bei {1} (Schwelle {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "{0} konnte nicht aufgelöst werden ({1}). Es sieht nach einem Link aus, dessen Ziel fehlt; daher wurde er nicht angetastet — reparieren Sie den Link und versuchen Sie es erneut.",

@@ -360,3 +360,16 @@ test('the Records rows of the manifest name the four tables of 1.11 — the reco
   assert.equal(en2, 'A cap on what is *listed*, never on what is counted: the shares beside the rows are shares of everything in the range.')
   assert.equal(de2, 'Eine Grenze für das, was *aufgelistet* wird, nie für das, was gezählt wird: die Anteile neben den Zeilen sind Anteile an allem im Zeitraum.')
 })
+
+test('the auto hour cycle says what the code reads — the operating system\'s clock format, the locale the extension host runs under, not the language of the texts — in both languages (1.11 D9)', () => {
+  assert.equal(englishNls['config.resetHourCycle.enum.auto'],
+    'Follow the operating system\'s clock format (the locale the extension host runs under), not the language of Token Pace\'s texts')
+  assert.equal(germanNls['config.resetHourCycle.enum.auto'],
+    'Dem Uhrzeitformat des Betriebssystems folgen (dem Gebietsschema, unter dem der Erweiterungshost läuft), nicht der Sprache der Texte von Token Pace')
+  // 1.10's words named the display language, which `auto` never read.
+  assert.equal(englishNls['config.resetHourCycle.enum.auto'].includes('display'), false)
+  assert.equal(germanNls['config.resetHourCycle.enum.auto'].includes('Anzeigesprache'), false)
+  // What the value claims: time.ts asks Intl without a locale tag — the host's default locale, not the words' language.
+  assert.ok(readFileSync(join(ROOT, 'src', 'time.ts'), 'utf8').includes("new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle"),
+    'the hour cycle of auto is read another way: say so in config.resetHourCycle.enum.auto')
+})

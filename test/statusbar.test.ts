@@ -322,6 +322,80 @@ test('the reset suffix follows resetFormat', () => {
   }
 })
 
+/** 1.11 D12: T15's moment — the 5 h window resets at 06:00, 2 h 14 min ahead; one reset beyond a day, two a minute past. */
+const D12_NOW = Date.UTC(2026, 8, 28, 3, 46)
+const D12_WINDOWS: Array<Partial<QuotaWindow>> = [
+  { resetsAt: Date.UTC(2026, 8, 28, 6, 0) },
+  { resetsAt: Date.UTC(2026, 9, 2, 6, 0) },
+  { percent: 100, limitReached: true, resetsAt: D12_NOW - 60_000 },
+  { percent: 100, resetsAt: D12_NOW - 60_000 },
+]
+function d12Items(over: Record<string, unknown>, w: Partial<QuotaWindow>): ItemModel[] {
+  const q = state({ fetchedAt: Math.floor(D12_NOW / 1000) - 60, windows: [win(w)] })
+  return buildItems(input({ quotas: [q], now: D12_NOW, cfg: cfg(over) }))
+}
+function d12Row(fmt: string, w: Partial<QuotaWindow>): string {
+  const tip = d12Items({ 'tokenPace.resetFormat': fmt }, w)[0].tooltipMarkdown ?? ''
+  return tip.split('\n').find((l) => l.startsWith('| `5 h` |')) ?? ''
+}
+
+test('the "both" reset is whole keys — the bar, the compact item and the tooltip print English and German byte for byte as 1.10 (b89ff43) did, every format, due and not; a language places its own verb and brackets (1.11 D12)', () => {
+  // What b89ff43 printed (resetSuffix wrapped formatReset's "06:00 (in 2h14m)" in `resets at {0}`), for the four windows.
+  const b89ff43: Record<'en' | 'de', Record<string, string[]>> = {
+    en: {
+      'bar relative': ['CC 5h 25% · resets 2h14m', 'CC 5h 25% ▲ · resets 4d 2h', '⛔ CC 5h 100% limit reached · reset due', '$(warning) CC 5h 100% exhausted · reset due'],
+      'bar absolute': ['CC 5h 25% · resets at 06:00', 'CC 5h 25% ▲ · resets at Fr 06:00', '⛔ CC 5h 100% limit reached · resets at 03:45', '$(warning) CC 5h 100% exhausted · resets at 03:45'],
+      'bar both': ['CC 5h 25% · resets at 06:00 (in 2h14m)', 'CC 5h 25% ▲ · resets at Fr 06:00 (in 4d 2h)', '⛔ CC 5h 100% limit reached · 03:45 (reset due)', '$(warning) CC 5h 100% exhausted · 03:45 (reset due)'],
+      'bar both h12': ['CC 5h 25% · resets at 06:00 AM (in 2h14m)', 'CC 5h 25% ▲ · resets at Fr 06:00 AM (in 4d 2h)', '⛔ CC 5h 100% limit reached · 03:45 AM (reset due)', '$(warning) CC 5h 100% exhausted · 03:45 AM (reset due)'],
+      'compact both': ['CC 25%·06:00 (in 2h14m)', 'CC 25%·Fr 06:00 (in 4d 2h)', '⛔ CC 100% limit reached·03:45 (reset due)', '$(warning) CC 100% exhausted·03:45 (reset due)'],
+    },
+    de: {
+      'bar relative': ['CC 5h 25% · Reset in 2h14m', 'CC 5h 25% ▲ · Reset in 4d 2h', '⛔ CC 5h 100% Limit erreicht · Reset fällig', '$(warning) CC 5h 100% erschöpft · Reset fällig'],
+      'bar absolute': ['CC 5h 25% · Reset um 06:00', 'CC 5h 25% ▲ · Reset um Fr 06:00', '⛔ CC 5h 100% Limit erreicht · Reset um 03:45', '$(warning) CC 5h 100% erschöpft · Reset um 03:45'],
+      'bar both': ['CC 5h 25% · Reset um 06:00 (in 2h14m)', 'CC 5h 25% ▲ · Reset um Fr 06:00 (in 4d 2h)', '⛔ CC 5h 100% Limit erreicht · 03:45 (Reset fällig)', '$(warning) CC 5h 100% erschöpft · 03:45 (Reset fällig)'],
+      'bar both h12': ['CC 5h 25% · Reset um 06:00 AM (in 2h14m)', 'CC 5h 25% ▲ · Reset um Fr 06:00 AM (in 4d 2h)', '⛔ CC 5h 100% Limit erreicht · 03:45 AM (Reset fällig)', '$(warning) CC 5h 100% erschöpft · 03:45 AM (Reset fällig)'],
+      'compact both': ['CC 25%·06:00 (in 2h14m)', 'CC 25%·Fr 06:00 (in 4d 2h)', '⛔ CC 100% Limit erreicht·03:45 (Reset fällig)', '$(warning) CC 100% erschöpft·03:45 (Reset fällig)'],
+    },
+  }
+  const settings: Record<string, Record<string, unknown>> = {
+    'bar relative': { 'tokenPace.resetFormat': 'relative', 'tokenPace.barWidth': 0 },
+    'bar absolute': { 'tokenPace.resetFormat': 'absolute', 'tokenPace.barWidth': 0 },
+    'bar both': { 'tokenPace.resetFormat': 'both', 'tokenPace.barWidth': 0 },
+    'bar both h12': { 'tokenPace.resetFormat': 'both', 'tokenPace.barWidth': 0, 'tokenPace.resetHourCycle': 'h12' },
+    'compact both': { 'tokenPace.resetFormat': 'both', 'tokenPace.density': 'compact' },
+  }
+  const de = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(de['resets at {0} (in {1})'], 'Reset um {0} (in {1})')
+  try {
+    for (const lang of ['en', 'de'] as const) {
+      setBundle(lang === 'de' ? de : undefined)
+      setLocale(lang === 'de' ? 'de' : undefined)
+      for (const [name, want] of Object.entries(b89ff43[lang])) {
+        assert.deepEqual(D12_WINDOWS.map((w) => d12Items(settings[name], w)[0].text), want, `${lang}: ${name}`)
+      }
+      // The tooltip's Resets column spells the reset out with both figures — also while the bar shows none.
+      const [ahead, due] = lang === 'de' ? ['| 06:00 (in 2h14m) |', '| 03:45 (Reset fällig) |'] : ['| 06:00 (in 2h14m) |', '| 03:45 (reset due) |']
+      for (const fmt of ['both', 'none']) {
+        assert.ok(d12Row(fmt, D12_WINDOWS[0]).endsWith(ahead), d12Row(fmt, D12_WINDOWS[0]))
+        assert.ok(d12Row(fmt, D12_WINDOWS[2]).endsWith(due), d12Row(fmt, D12_WINDOWS[2]))
+      }
+    }
+    // A synthetic Traditional Chinese bundle of the three whole keys: the verb between the clock and the countdown, the
+    // brackets full-width. The 1.10 code wrapped formatReset's text in `resets at {0}`, which could only ever print
+    // "06:00 (2h14m 後) 重設".
+    setBundle({ 'resets at {0} (in {1})': '{0} 重設（{1} 後）', '{0} (in {1})': '{0}（{1} 後）', '{0} (reset due)': '{0}（應已重設）' })
+    setLocale('zh-TW')
+    const both = { 'tokenPace.resetFormat': 'both', 'tokenPace.barWidth': 0 }
+    assert.equal(d12Items(both, D12_WINDOWS[0])[0].text, 'CC 5h 25% · 06:00 重設（2h14m 後）')
+    assert.equal(d12Items(both, D12_WINDOWS[2])[0].text, '⛔ CC 5h 100% limit reached · 03:45（應已重設）')
+    assert.equal(d12Items({ 'tokenPace.resetFormat': 'both', 'tokenPace.density': 'compact' }, D12_WINDOWS[0])[0].text, 'CC 25%·06:00（2h14m 後）')
+    assert.ok(d12Row('both', D12_WINDOWS[0]).endsWith('| 06:00（2h14m 後） |'), d12Row('both', D12_WINDOWS[0]))
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+})
+
 test('a window without a stated reset gets no countdown at all', () => {
   const q = state({ windows: [win({ resetsAt: null })] })
   assert.equal(textsOf({ quotas: [q] })[0], 'CC 5h ██▁▁▁▁▁▁ 25%')

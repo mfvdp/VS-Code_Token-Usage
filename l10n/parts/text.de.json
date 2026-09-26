@@ -299,6 +299,7 @@
   "reading history … the token figures below are still growing": "Verlauf wird gelesen … die Token-Zahlen darunter wachsen noch",
   "reset at {0}": "Reset um {0}",
   "resets at {0}": "Reset um {0}",
+  "resets at {0} (in {1})": "Reset um {0} (in {1})",
   "resets first": "Reset zuerst",
   "resets {0}": "Reset in {0}",
   "retry": "neuer Versuch",

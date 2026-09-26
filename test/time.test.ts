@@ -9,8 +9,8 @@ import { setBundle, setLocale } from '../src/i18n'
 import {
   addDays, ageText, attemptWhen, calendarDayOf, calendarWeekdayOf, clockStamp, dayCount, dayOf, dayOfHour, daysBetween, formatReset,
   formatTime, hourIndex, lastDays, lastFailureText, localHourOfDay, monthOf, nextAttemptWords, PARTS_MEMO_FROM_MS, PARTS_MEMO_MAX,
-  previousRange, rangeFor, refreshWords, relativeShort, relativeTime, resetTimeMemos, resolveZone, retryWords, TimeConfig, weekdayOf,
-  weekdayWords, formatDay,
+  previousRange, rangeFor, refreshWords, relativeShort, relativeTime, resetClock, resetTimeMemos, resolveZone, retryWords, TimeConfig,
+  weekdayOf, weekdayWords, formatDay,
 } from '../src/time'
 import { LANGUAGES } from '../src/languages'
 import { QuotaState } from '../src/types'
@@ -191,6 +191,54 @@ test('a reset string never carries the verb the views put in front of it', () =>
       assert.doesNotMatch(formatReset(at, now, fmt, utc), /resets/)
     }
   }
+})
+
+/**
+ * 1.11 D12: the moment of the settings' examples (T15's fixture) — a reset at 06:00, 2 h 14 min ahead —, one more than a
+ * day ahead (the weekday in front) and one a minute past, each in every format.
+ */
+const D12_NOW = Date.UTC(2026, 8, 28, 3, 46)
+const D12_AT = { soon: Date.UTC(2026, 8, 28, 6, 0), far: Date.UTC(2026, 9, 2, 6, 0), past: D12_NOW - 60_000 } as const
+function d12Resets(cfg: TimeConfig): string[] {
+  return (['soon', 'far', 'past'] as const).flatMap((at) =>
+    (['relative', 'absolute', 'both'] as const).map((fmt) => formatReset(D12_AT[at], D12_NOW, fmt, cfg)))
+}
+
+test('formatReset\'s both form is one whole message — English and German byte-identical to 1.10 (b89ff43) in every format, due and not, both hour cycles; a language writes its own brackets (1.11 D12)', () => {
+  const h12: TimeConfig = { ...utc, hourCycle: 'h12' }
+  // What b89ff43 printed, with `${abs} (${t('in {0}', rel)})` and `${abs} (${t('reset due')})` in the code: soon, far,
+  // past — each relative, absolute, both.
+  const english = {
+    h23: ['2h14m', '06:00', '06:00 (in 2h14m)', '4d 2h', 'Fr 06:00', 'Fr 06:00 (in 4d 2h)', 'reset due', '03:45', '03:45 (reset due)'],
+    h12: ['2h14m', '06:00 AM', '06:00 AM (in 2h14m)', '4d 2h', 'Fr 06:00 AM', 'Fr 06:00 AM (in 4d 2h)', 'reset due', '03:45 AM', '03:45 AM (reset due)'],
+  }
+  const german = ['2h14m', '06:00', '06:00 (in 2h14m)', '4d 2h', 'Fr 06:00', 'Fr 06:00 (in 4d 2h)', 'Reset fällig', '03:45', '03:45 (Reset fällig)']
+  const de = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.deepEqual([de['{0} (in {1})'], de['{0} (reset due)']], ['{0} (in {1})', '{0} (Reset fällig)'])
+  try {
+    assert.deepEqual(d12Resets(utc), english.h23)
+    assert.deepEqual(d12Resets(h12), english.h12)
+    setBundle(de)
+    setLocale('de')
+    assert.deepEqual(d12Resets(utc), german)
+    // The clock time on its own is what the absolute form prints — the part the bar's both message takes.
+    for (const at of Object.values(D12_AT)) assert.equal(resetClock(at, D12_NOW, utc), formatReset(at, D12_NOW, 'absolute', utc))
+    // A language places its own brackets and order: a synthetic Traditional Chinese pair of the two whole keys. The
+    // 1.10 code put ASCII brackets around the translated `in {0}` — "06:00 (2h14m 後)" at best, and the English here.
+    setBundle({ '{0} (in {1})': '{0}（{1} 後）', '{0} (reset due)': '{0}（應已重設）' })
+    setLocale('zh-TW')
+    assert.equal(formatReset(D12_AT.soon, D12_NOW, 'both', utc), '06:00（2h14m 後）')
+    assert.equal(formatReset(D12_AT.past, D12_NOW, 'both', utc), '03:45（應已重設）')
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  // No bracket of the both form is left in the code: time.ts and statusText.ts hand both figures to one message.
+  for (const file of ['src/time.ts', 'src/statusText.ts']) {
+    const code = readFileSync(join(ROOT, file), 'utf8')
+    assert.equal(/\(\$\{t\(/.test(code), false, `${file} writes a bracket around a translated piece again`)
+  }
+  assert.ok(readFileSync(join(ROOT, 'src/time.ts'), 'utf8').includes("t('{0} (in {1})', abs, rel)"))
 })
 
 test("hourCycle 'auto' follows the machine, and stays one of the two forms", () => {

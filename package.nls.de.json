@@ -170,7 +170,7 @@
   "config.overflowDisplay.enum.clamp": "Beim Limit deckeln — “100%”",
   "config.overflowDisplay.enum.actual": "Den echten Wert samt bezahltem Überlauf zeigen — “111%”",
   "config.resetHourCycle.description": "Uhrzeitformat für absolute Reset-Zeiten.",
-  "config.resetHourCycle.enum.auto": "Der Anzeigesprache folgen",
+  "config.resetHourCycle.enum.auto": "Dem Uhrzeitformat des Betriebssystems folgen (dem Gebietsschema, unter dem der Erweiterungshost läuft), nicht der Sprache der Texte von Token Pace",
   "config.resetHourCycle.enum.h12": "12-Stunden-Uhr — “06:00 AM”",
   "config.resetHourCycle.enum.h23": "24-Stunden-Uhr — “06:00”",
   "config.labelMaxChars.description": "Erzeugte Fensterbezeichnungen auf so viele Zeichen kürzen. `0` bedeutet keine Kürzung.",

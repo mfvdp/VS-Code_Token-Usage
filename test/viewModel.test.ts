@@ -2953,14 +2953,55 @@ test('the picker offers Automatic, then every available language in the registry
     setBundle(undefined)
   }
 
-  // Every language on disk: fifteen options in the registry's order, exactly one checked — the setting's.
+  // Every language of the registry on disk (1.11: twenty-six): twenty-seven options in the registry's order, exactly one
+  // checked — the setting's.
   const all = pick('ja', [...LANGUAGE_IDS])
+  assert.equal(all.options.length, 27)
   assert.deepEqual(all.options.map((o) => o.id), ['auto', ...LANGUAGE_IDS])
   assert.deepEqual(all.options.filter((o) => o.checked).map((o) => o.id), ['ja'])
   assert.deepEqual(all.options.find((o) => o.id === 'zh-tw'), { id: 'zh-tw', native: '繁體中文', name: 'Chinese (Traditional)', lang: 'zh-TW', flag: 'tw', checked: false })
   assert.deepEqual(all.options.find((o) => o.id === 'pt-br'), { id: 'pt-br', native: 'Português (Brasil)', name: 'Portuguese (Brazil)', lang: 'pt-BR', flag: 'br', checked: false })
   // An id the reader's host has no file for is not offered, whatever `available` was written as.
   assert.deepEqual(pick('auto', ['de', 'en']).options.map((o) => o.id), ['auto', 'en', 'de'])
+})
+
+test('the picker follows the registry, not the order the bundles came in: the fourteen bundles of the repository before 1.11\'s join offer fifteen options, and a language of 1.11 joins after cs in the registry\'s place — its own name, its lang, its flag, its English name (1.11 A1, P2)', () => {
+  const { resolveLanguage, LANGUAGE_IDS, LANGUAGES } = require('../src/languages') as typeof import('../src/languages')
+  const { availableLanguages } = require('../src/languageLoad') as typeof import('../src/languageLoad')
+  const { existsSync } = require('node:fs') as typeof import('node:fs')
+  const pick = (setting: import('../src/languages').LanguageSetting, available: import('../src/languages').LanguageId[]) =>
+    buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage(setting, 'en', available), available, vscode: 'en' } }).language
+  // The repository's l10n/: what the extension offers at activation — Automatic and every language whose bundle it ships.
+  const shipped = availableLanguages(path.join(ROOT, 'l10n'))
+  const repo = pick('auto', shipped)
+  assert.deepEqual(repo.options.map((o) => o.id), ['auto', ...LANGUAGE_IDS.filter((id) => id === 'en' || existsSync(path.join(ROOT, 'l10n', `bundle.l10n.${id}.json`)))])
+  if (!existsSync(path.join(ROOT, 'l10n', 'bundle.l10n.nl.json'))) {
+    // Before group N's first language is merged: the fourteen of 1.10 — fifteen options, the same as 1.10 offered.
+    assert.equal(repo.options.length, 15)
+    assert.equal(repo.options[repo.options.length - 1].id, 'cs')
+  }
+  // A language of 1.11 offered with the fourteen: after Čeština, in the registry's place, however the list was handed over.
+  const fourteen = LANGUAGE_IDS.slice(0, 14)
+  const withNew = pick('hi', ['hi', ...fourteen.slice().reverse(), 'nl'])
+  assert.deepEqual(withNew.options.map((o) => o.id), ['auto', ...fourteen, 'nl', 'hi'])
+  assert.deepEqual(withNew.options.filter((o) => o.checked).map((o) => o.id), ['hi'])
+  assert.equal(withNew.shown, 'hi')
+  assert.equal(withNew.flag, 'in')
+  assert.deepEqual(withNew.options.find((o) => o.id === 'hi'), { id: 'hi', native: 'हिन्दी', name: 'Hindi', lang: 'hi', flag: 'in', checked: true })
+  assert.deepEqual(withNew.options.find((o) => o.id === 'nl'), { id: 'nl', native: 'Nederlands', name: 'Dutch', lang: 'nl', flag: 'nl', checked: false })
+  // Every language of 1.11, each by its own name — never translated — beside its English name.
+  const every = pick('auto', [...LANGUAGE_IDS])
+  for (const e of LANGUAGES.slice(14)) {
+    const o = every.options.find((x) => x.id === e.id)
+    assert.ok(o, e.id)
+    assert.deepEqual([o.native, o.lang, o.flag], [e.native, e.locale, e.flag], e.id)
+    assert.notEqual(o.name, null, `${e.id} has no English name beside its own`)
+  }
+  // A 1.11 id the host has no bundle for is not offered; chosen in the settings, it shows English and checks nothing.
+  const noBundle = pick('uk', [...fourteen])
+  assert.equal(noBundle.shown, 'en')
+  assert.equal(noBundle.options.some((o) => o.id === 'uk'), false)
+  assert.deepEqual(noBundle.options.filter((o) => o.checked), [])
 })
 
 test('the Automatic line says what auto shows — VS Code\'s language by its own name, or that it has no translation here — and a language without a file checks nothing (1.9 A3.3, P19 §7c decision c)', () => {

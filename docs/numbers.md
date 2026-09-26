@@ -69,8 +69,9 @@ the marks `~`, `⚠`, `≈` and `–` this page explains. The whole list is in
 print one: a key figure's change against the period before (`▼ -0,7%` in German — the sign and the `%`
 are the badge's own and stay attached to the figure), the plan factor (`×0,4`), the variability of the
 heat map (`CV 0,35`), a band's share of the day in the chart's tooltip, a threshold with a decimal in a
-window's explanation and a span under ten hours (`2,5 h`). The CSV and JSON exports and the diagnostics
-report keep the `.` in every language: they are read by programs, not by you.
+window's explanation, a span under ten hours (`2,5 h`) and the file sizes *Clear Stored Data…* lists
+(`12,3 kB`). The CSV and JSON exports and the diagnostics report keep the `.` in every language: they are
+read by programs, not by you.
 
 ## Words used here
 

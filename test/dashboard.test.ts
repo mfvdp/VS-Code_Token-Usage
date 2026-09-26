@@ -9990,6 +9990,66 @@ test('Enter saves once with the cleaned words; the fields close when a push show
   assert.equal(p.saves().length, 2)
 })
 
+test('a save the host refuses again for the same reason is posted again by every Enter, Save or leaving the fields, and the fields stay open; while a save is on its way with no flash yet, the same words are not posted twice (1.10 §3 A2 rule 5, Review 2 F2)', () => {
+  const p = promptPage()
+  const field = (): FEl => p.field('prText') as FEl
+  const save = { type: 'promptSave', id: 'u-3k9x0a2b', title: 'Review', text: 'Something else' }
+  p.press(p.entry('u-3k9x0a2b'), 'Enter')
+  p.type(field(), 'Something else')
+  p.key(field(), 'Enter')
+  assert.equal(p.saves().length, 1)
+  // On its way, no flash yet: Enter again, the Save button and leaving the fields post nothing more ("Posted
+  // already, and nothing changed since").
+  p.key(field(), 'Enter')
+  p.press(p.q('[data-act="promptSave"]') as FEl, 'Enter')
+  field().focus()
+  p.leave(p.entry('s-stop'))
+  assert.equal(p.saves().length, 1)
+  assert.ok(p.q('.pr-edit'), 'the fields closed while the save was on its way')
+  // Refused (notWritten, EACCES): the host pushes the flash once. Refused again for the same reason, its fragment is
+  // the one it pushed already, and the host pushes nothing (dashboard.ts flush) — so no push answers the next saves.
+  const flash = { text: 'Not saved: prompts.json could not be written (EACCES)', ok: false }
+  p.push(promptsVm({ flash }))
+  assert.equal(p.q('.pr-flash')?.textContent, flash.text)
+  field().focus()
+  for (let n = 2; n <= 4; n++) {
+    p.key(field(), 'Enter')
+    assert.equal(p.saves().length, n, `Enter ${n}`)
+    assert.ok(p.q('.pr-edit'), `the fields closed after Enter ${n}`)
+  }
+  // The Save button and leaving the fields post them again as well.
+  p.press(p.q('[data-act="promptSave"]') as FEl, 'Enter')
+  assert.equal(p.saves().length, 5)
+  field().focus()
+  p.leave(p.entry('s-stop'))
+  assert.equal(p.saves().length, 6)
+  assert.ok(p.q('.pr-edit'), 'the fields closed on leaving')
+  // The flash ends (the host's push after PROMPT_FLASH_MS carries none): a save posted now waits for its answer
+  // again — a second Enter posts nothing —, and a push that leaves the fields open ends the wait, whatever it
+  // carries (here only the target line moved).
+  p.push(promptsVm())
+  assert.ok(p.q('.pr-edit'), 'the fields closed when the flash ended')
+  field().focus()
+  p.key(field(), 'Enter')
+  p.key(field(), 'Enter')
+  assert.equal(p.saves().length, 7)
+  p.push(promptsVm({ target: { text: 'No terminal of this window runs Claude Code or Codex.', level: 'no' } }))
+  field().focus()
+  p.key(field(), 'Enter')
+  assert.equal(p.saves().length, 8)
+  // Every post the same save, the words as typed.
+  assert.deepEqual(p.saves().filter((m) => JSON.stringify(m) !== JSON.stringify(save)), [])
+  assert.equal(field().value, 'Something else')
+  // The answer that saves them still closes the fields — the words are kept while the wait is over —, the focus on
+  // the entry.
+  const saved = promptsVm()
+  ;(saved.items as Array<Record<string, unknown>>)[3] = { id: 'u-3k9x0a2b', title: 'Review', text: 'Something else', shipped: false, edited: false, command: false }
+  field().focus()
+  p.push(saved)
+  assert.ok(p.q('.pr-edit') === null, 'the saved words did not close the fields')
+  assert.ok(p.doc.active === p.entry('u-3k9x0a2b'), 'the focus is not on the entry')
+})
+
 test('leaving the fields: to a control of their own saves nothing; outside, changed, one save; unchanged, they close; the page\'s check failing keeps them open with its reason (1.10 §3 A2 rule 5)', () => {
   const p = promptPage()
   p.press(p.entry('s-status'), 'Enter')

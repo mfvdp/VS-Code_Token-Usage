@@ -157,7 +157,8 @@ let log: Logger
  * a token, a path or an account — the item text is the same string the user can read off the
  * bar. Preview items (`tokenPace.preview.*`) live in their own id space and are not reported.
  * 1.10 P5: nor a prompt's title or text — `promptSendCheck` answers a code, and nothing here can
- * make Token Pace type into a terminal (any extension can call these).
+ * make Token Pace type into a terminal (any extension can call these). Review 2 F1: nor the session facts
+ * a refusal reads (§0a.5) — `promptSendCheck` answers its verdict only in the extension host's test mode.
  */
 export interface TokenPaceApi {
   /** The version of the manifest this bundle was built from. */
@@ -186,6 +187,10 @@ export interface TokenPaceApi {
    * `pick`, `send`, `notFound`, or `notListed` while the Prompts section is not in `tokenPace.dashboard.sections` —
    * computed as the page's send computes it before its first question (`PromptsHost.check`). It types nothing, asks
    * nothing, shows nothing and returns no word of a prompt: sending stays the reader's click on the page.
+   * Review 2 F1: only for the smoke test — the verdict is read off the §0a.5 facts (a permission dialog open, Claude
+   * Code at work, an agent running), which no other extension is to learn from Token Pace. So it answers only while
+   * the extension host runs tests (`vscode.ExtensionMode.Test`, as `npm run test:e2e` starts it); in every other
+   * mode it answers `notListed` and reads nothing — neither prompts.json nor a terminal nor a session.
    */
   promptSendCheck(id: string): string
 }
@@ -2062,7 +2067,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     dashboardHtmlLength: () => dashboard.renderedHtmlLength(),
     dashboardRendered: () => dashboard.renderedCount(),
     dashboardDrawn: () => dashboard.renderedSections(),
-    promptSendCheck: (id: string) => (!cfg.dashboard.sections.includes('prompts') ? 'notListed'
+    // Review 2 F1: the verdict for the smoke test alone — outside the test mode nothing is read.
+    promptSendCheck: (id: string) => (context.extensionMode !== vscode.ExtensionMode.Test
+      || !cfg.dashboard.sections.includes('prompts') ? 'notListed'
       : typeof id === 'string' ? prompts.check(id, promptFacts()) : 'notFound'),
   }
 

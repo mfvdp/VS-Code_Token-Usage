@@ -2985,9 +2985,12 @@ type PromptField = 'prTitle' | 'prText';
  * §3 A2 rules 5–9: the open fields — the entry (`id`, null for a new one), both values as the reader left
  * them, the words they opened with, the field the focus was in and its selection, when and how they opened
  * (the grace rule reads both), and the delete question. `saved`: a save was posted with these words (and the
- * list's ids then, for a new entry); the fields close when a push shows the entry with them. `deleting`: a
- * delete was posted, so the push without the entry closes them without a word. `error`: the page's own
- * check's reason, in the error line.
+ * list's ids then, for a new entry); the fields close when a push shows the entry with them. `waiting`: the
+ * push that answers it is still to come, so the same words are not posted twice (Review 2 F2) — false once a
+ * push has reached the fields and left them open, and from the start when a refusal is on the flash line: a
+ * save refused again with the same reason changes nothing the host pushes (it never pushes a fragment it
+ * pushed already), so no push would ever end the wait. `deleting`: a delete was posted, so the push without
+ * the entry closes them without a word. `error`: the page's own check's reason, in the error line.
  */
 interface PromptDraft {
   id: string | null;
@@ -3000,7 +3003,7 @@ interface PromptDraft {
   openedAt: number;
   openedBy: 'click' | 'key' | 'new';
   confirming: boolean;
-  saved: { title: string; text: string; known: string[]; flash: string } | null;
+  saved: { title: string; text: string; known: string[]; waiting: boolean } | null;
   deleting: boolean;
   error: string;
 }
@@ -3376,13 +3379,14 @@ function promptCommit(how: 'enter' | 'leave' | 'button'): void {
     : title === promptClean(d.from.title) && text === promptClean(d.from.text);
   if (same) { promptClose(how !== 'leave', how === 'leave'); return; }
   // Posted already, and nothing changed since: the push that answers it is on its way.
-  if (d.saved && d.saved.title === title && d.saved.text === text) return;
+  if (d.saved && d.saved.waiting && d.saved.title === title && d.saved.text === text) return;
   const problem = promptProblem(title, text);
   d.error = problem;
   const err = document.querySelector('[data-body="prompts"] .pr-err');
   if (err) err.textContent = problem;
   if (problem) { d.saved = null; return; }
-  d.saved = { title: title, text: text, known: promptItems().map((x: Payload) => String(x.id)), flash: promptFlashText() };
+  const shown = vm && vm.prompts ? vm.prompts.flash : null;
+  d.saved = { title: title, text: text, known: promptItems().map((x: Payload) => String(x.id)), waiting: !(shown && shown.ok === false) };
   post({ type: 'promptSave', id: d.id, title: title, text: text });
 }
 
@@ -3480,8 +3484,11 @@ function promptPush(): void {
     const it = items.find((x: Payload) => s.known.indexOf(String(x.id)) < 0 && x.title === s.title && x.text === s.text);
     if (it && promptClean(d.title) === s.title && promptClean(d.text) === s.text) { done(String(it.id)); return; }
   }
-  // The host refused the save: its reason is the flash; the fields stay open for the reader to change them.
-  if (d.saved && p.flash && p.flash.ok === false && String(p.flash.text) !== d.saved.flash) d.saved = null;
+  // Review 2 F2: a push that reached the fields and left them open — the host refused the save (its reason is the
+  // flash, the same reason as before included), or it answered something else: the wait is over, and Enter, Save
+  // or leaving the fields posts these words again. The words stay, so a push that shows them saved still closes
+  // the fields.
+  if (d.saved) d.saved.waiting = false;
 }
 
 /** The pointer came up: a draw that waited, and the fields a slow double-click's first click would have opened. */

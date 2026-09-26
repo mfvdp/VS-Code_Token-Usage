@@ -248,6 +248,8 @@ interface ActivateOptions {
   language?: { tag: string; bundle?: Record<string, string> }
   /** 1.10 P4: `vscode.workspace.isTrusted` for this activation (the reset trusts it). */
   trusted?: boolean
+  /** 1.10 Review 2 F1: `context.extensionMode` (the fake context's default is Development, 2). */
+  extensionMode?: number
 }
 
 async function activateHost(
@@ -268,6 +270,7 @@ async function activateHost(
   state.answers.push(...(opts.answers ?? []))
   const ext = require('../src/extension') as Extension
   const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState })
+  if (opts.extensionMode !== undefined) ctx.extensionMode = opts.extensionMode
   LIVE.push(ctx)
   const coldLinesAtStart = coldStartLines(state)
   const started = Date.now()
@@ -4721,5 +4724,64 @@ test('1.10 P4: a prompt sent through the terminal pick into the terminal a keep-
     assert.deepEqual(disposeAll(LIVE.pop()!), [])
   } finally {
     Date.now = realNow
+  }
+})
+
+test('1.10 Review 2 F1: the exported promptSendCheck answers its verdict only while the extension host runs tests — installed (Production) or from a development path it answers notListed, though the section is listed and a Claude Code terminal is active, and reads neither prompts.json nor the window\'s terminals', async () => {
+  const MODE = (HOST.api as unknown as { ExtensionMode: { Production: number; Development: number; Test: number } }).ExtensionMode
+  const win = (HOST.api as unknown as { window: object }).window
+  const nodeFs = require('fs') as { statSync: (...a: unknown[]) => unknown; readFileSync: (...a: unknown[]) => unknown }
+  const realStat = nodeFs.statSync
+  const realRead = nodeFs.readFileSync
+  const getters = ['terminals', 'activeTerminal'].map((k) => {
+    const d = Object.getOwnPropertyDescriptor(win, k)
+    assert.ok(d && typeof d.get === 'function', `the fake window has no getter ${k}`)
+    return [k, d] as const
+  })
+  for (const [mode, name] of [[MODE.Production, 'Production'], [MODE.Development, 'Development'], [MODE.Test, 'Test']] as const) {
+    const fx = makeFixture()
+    const file = writePrompts(fx, { v: 1, prompts: [{ id: 's-status' }] })
+    const host = await activateHost(fx, REPO, { settings: { 'tokenPace.dashboard.sections': ['prompts', 'quota'] }, extensionMode: mode })
+    await waitOwnColdStart(state)
+    await waitFor('the watch listening', () => state.terminalListeners() === 4)
+    const terminal = state.openTerminal({ shell: 'claude', cwd: '/home/u/proj' })
+    state.setActiveTerminal(terminal)
+    // One call, synchronous: what it reads is counted while it runs and nothing else runs.
+    let files = 0
+    let terminals = 0
+    const check = (id: string): string => {
+      files = 0
+      terminals = 0
+      nodeFs.statSync = (...a: unknown[]) => { if (a[0] === file) files++; return realStat(...a) }
+      nodeFs.readFileSync = (...a: unknown[]) => { if (a[0] === file) files++; return realRead(...a) }
+      for (const [k, d] of getters) {
+        Object.defineProperty(win, k, { ...d, get(): unknown { terminals++; return (d.get as () => unknown).call(win) } })
+      }
+      try {
+        return host.api.promptSendCheck(id)
+      } finally {
+        nodeFs.statSync = realStat
+        nodeFs.readFileSync = realRead
+        for (const [k, d] of getters) Object.defineProperty(win, k, d)
+      }
+    }
+    if (mode === MODE.Test) {
+      // The smoke test's mode: the verdict of now — a Claude Code terminal whose start this window did not see
+      // asks first — read off the list and the terminals (the counters bite).
+      await waitFor('the transcripts read', () => check('s-status') !== 'reading')
+      assert.equal(check('s-status'), 'unknownStart', name)
+      assert.ok(files > 0, 'prompts.json was not read in the test mode')
+      assert.ok(terminals > 0, 'the terminals were not read in the test mode')
+      assert.equal(check('u-00000000'), 'notFound', name)
+    } else {
+      for (const id of ['s-status', 'u-00000000']) {
+        assert.equal(check(id), 'notListed', `${name}: ${id}`)
+        assert.deepEqual({ files, terminals }, { files: 0, terminals: 0 }, `${name}: ${id}`)
+      }
+    }
+    // Never a send, a question or a message.
+    assert.deepEqual(state.sent, [])
+    assert.deepEqual(state.messages, [])
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
   }
 })

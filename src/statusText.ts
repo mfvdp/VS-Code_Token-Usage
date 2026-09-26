@@ -233,8 +233,9 @@ function spanText(ms: number): string {
   const min = Math.round(ms / 60000)
   if (min < 90) return `${min} min`
   const h = ms / 3_600_000
-  // 1.10 B4: the tooltip's span as forecast.ts words it — a tenth in the reader's decimal mark.
-  if (h < 48) return `${h < 10 ? decimalText(h, 1, 0) : Math.round(h)} h`
+  // 1.10 B4: the tooltip's span as forecast.ts words it — a tenth in the reader's decimal mark, rounded half up
+  // first as before 1.10 (Review 2 F3: 99 min is "1.7 h").
+  if (h < 48) return `${h < 10 ? decimalText(Math.round(h * 10) / 10, 1, 0) : Math.round(h)} h`
   return `${Math.round(h / 24)} d`
 }
 

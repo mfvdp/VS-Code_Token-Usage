@@ -469,6 +469,20 @@ test('the tooltip\'s basis span is written to a tenth of an hour in the reader\'
   }
 })
 
+test('the tooltip\'s basis span at a tie of tenths rounds half up, as before 1.10: 99 min is 1.7 h, never 1.6 h (Review 2 F3)', () => {
+  // spanText wrote `Math.round(h * 10) / 10` before 1.10 — 1.65 h became "1.7 h"; toFixed alone writes "1.6".
+  const tip = (): string => quotaTooltip(state(), makeContext(input({
+    forecasts: new Map([['claude:session:300', { ...FORECAST, basis: { samples: 7, spanMs: 99 * 60_000 } }]]),
+  })))
+  assert.ok(tip().includes('based on 7 readings over 1.7 h'), tip())
+  setLocale('de')
+  try {
+    assert.ok(tip().includes('based on 7 readings over 1,7 h'), tip())
+  } finally {
+    setLocale(undefined)
+  }
+})
+
 test('the tooltip prints no measuring sentence: a dash in the pace column, no forecast line', () => {
   const measuring: Forecast = {
     state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: 20,

@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 114,
+  "applied": 115,
   "bundle": {
     "{0} rolled-up bucket in this range has no hour left and is not in the profile": {
       "parts": [
@@ -659,7 +659,7 @@
     },
     "capabilities.untrustedWorkspaces": {
       "state": "review",
-      "why": "the last two sentences rewritten: Token Pace types into a terminal in two cases (the keep-warm line, a prompt you double-click), and Restricted Mode disables all of these — the sentence before them loses its clause about the one thing it types — 1.10 A"
+      "why": "the last two sentences rewritten: Token Pace types into a terminal in two cases (the keep-warm line, a prompt you double-click), and Restricted Mode disables all of these — the sentence before them loses its clause about the one thing it types — 1.10 A; the trust statement names all three ways a prompt is sent (Review 2 F4)"
     },
     "config.summary.period.description": {
       "state": "review",

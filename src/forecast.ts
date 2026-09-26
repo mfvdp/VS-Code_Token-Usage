@@ -92,7 +92,8 @@ function duration(ms: number): string {
   if (min < 90) return `${min} min`
   const hours = ms / HOUR_MS
   // 1.10 B4: under ten hours to a tenth, in the reader's decimal mark ("1,5 h" in German); "2 h", not "2.0 h".
-  if (hours < 48) return `${hours < 10 ? decimalText(hours, 1, 0) : Math.round(hours)} h`
+  // Review 2 F3: rounded half up first, as before 1.10 (99 min is "1.7 h"; toFixed alone would write "1.6 h").
+  if (hours < 48) return `${hours < 10 ? decimalText(Math.round(hours * 10) / 10, 1, 0) : Math.round(hours)} h`
   return `${Math.round(hours / 24)} d`
 }
 

@@ -2713,9 +2713,10 @@ test('the pages say what 1.8 P11 checked against the code: the keep-warm focus r
   assert.ok(flatText(README).includes('three opt-ins, each behind its own consent dialog, all three off by default and off in Restricted Mode'))
   assert.equal(flatText(README).includes('except the two opt-ins, each behind'), false)
   // 1.10 P3 (§3 A6, pinned and changed): the manifest's statement names the two things Token Pace types —
-  // the keep-warm line and a prompt you double-click — and that Restricted Mode disables all of them.
-  assert.ok(nlsEn['capabilities.untrustedWorkspaces'].includes('It types into a terminal in two cases only: the opt-in keep-warm line into Claude Code\'s terminal, and a prompt of the dashboard\'s Prompts section when you double-click it. All of these are disabled in Restricted Mode.'))
-  assert.ok(nlsDe['capabilities.untrustedWorkspaces'].includes('In ein Terminal tippt es nur in zwei Fällen: die optionale Warmhalte-Zeile in das Terminal von Claude Code und einen Prompt aus dem Abschnitt Prompts des Dashboards, wenn Sie ihn doppelt anklicken. All das ist im eingeschränkten Modus abgeschaltet.'))
+  // the keep-warm line and a prompt you send (Review 2 F4: by a double-click, its send button or Ctrl+Enter) —
+  // and that Restricted Mode disables all of them.
+  assert.ok(nlsEn['capabilities.untrustedWorkspaces'].includes('It types into a terminal in two cases only: the opt-in keep-warm line into Claude Code\'s terminal, and a prompt of the dashboard\'s Prompts section when you send it yourself — a double-click, its send button or Ctrl+Enter. All of these are disabled in Restricted Mode.'))
+  assert.ok(nlsDe['capabilities.untrustedWorkspaces'].includes('In ein Terminal tippt es nur in zwei Fällen: die optionale Warmhalte-Zeile in das Terminal von Claude Code und einen Prompt aus dem Abschnitt Prompts des Dashboards, wenn Sie ihn selbst senden — per Doppelklick, mit seiner Sende-Schaltfläche oder mit Strg+Eingabe. All das ist im eingeschränkten Modus abgeschaltet.'))
   assert.equal(nlsEn['capabilities.untrustedWorkspaces'].includes('the one thing it ever types'), false)
   assert.equal(nlsDe['capabilities.untrustedWorkspaces'].includes('das Einzige, was es je tippt'), false)
   assert.ok(flatText(doc.privacy).includes('Those are the three opt-ins, each behind a consent dialog of its own.'))
@@ -3234,6 +3235,8 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   ]) assert.ok(lang.includes(claim), `docs/languages.md does not say: ${claim}`)
   assert.ok(flatText(doc.numbers).includes('**Decimals** follow the language too (1.10), wherever the dashboard, the tooltips and the text views print one: a key figure\'s change against the period before (`▼ -0,7%` in German — the sign and the `%` are the badge\'s own and stay attached to the figure)'))
   assert.ok(flatText(doc.numbers).includes('The CSV and JSON exports and the diagnostics report keep the `.` in every language: they are read by programs, not by you.'))
+  // Review 2 (forDocs 1): the sizes Clear Stored Data… lists are among them (storage.ts formatBytes, P7).
+  assert.ok(flatText(doc.numbers).includes('a span under ten hours (`2,5 h`) and the file sizes *Clear Stored Data…* lists (`12,3 kB`).'))
   // The Turkish percent really is Intl's `%25`, and the Turkish bundle writes the number first: the limit the page states.
   assert.equal(new Intl.NumberFormat('tr', { style: 'percent' }).format(0.25), '%25')
   const tr = JSON.parse(readDoc('l10n/bundle.l10n.tr.json')) as Record<string, string>

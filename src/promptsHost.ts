@@ -378,8 +378,10 @@ export class PromptsHost {
   /**
    * 1.10 P5 (§3 A7's smoke test): the decisions `send` takes before its first question to the reader, on the facts
    * of now — Restricted Mode or a reading under way, no terminal, the terminal pick, the active terminal's verdict —
-   * and nothing else: nothing is typed, nothing is asked, shown or logged, no flash is set and the gap rule is not
-   * touched. A code, never a word of the entry. The one send there is stays the reader's click on the page.
+   * and nothing else: nothing is typed, asked or shown, no flash is set and the gap rule is not touched. It logs no
+   * title and no text; the store's once-per-state line (`Prompts: prompts.json could not be read (…); nothing is
+   * written.`) may appear when prompts.json cannot be read and nothing has logged that state yet (Review 2 F7). A
+   * code, never a word of the entry. The one send there is stays the reader's click on the page.
    */
   check(id: string, f: PromptHostFacts): PromptSendCheck {
     if (promptTextOf(this.store.read(), id) === null) return 'notFound'

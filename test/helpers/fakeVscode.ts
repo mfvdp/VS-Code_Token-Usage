@@ -428,6 +428,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
     ExtensionKind: { UI: 1, Workspace: 2 },
+    // 1.10 Review 2 F1: the values of `@types/vscode`; the fake context runs in Development (2).
+    ExtensionMode: { Production: 1, Development: 2, Test: 3 },
     QuickPickItemKind: { Separator: -1, Default: 0 },
     // 1.8 B2 (P10): the values of `@types/vscode` 1.106.1.
     TerminalShellExecutionCommandLineConfidence: { Low: 0, Medium: 1, High: 2 },

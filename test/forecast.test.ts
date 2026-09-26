@@ -324,3 +324,16 @@ test('hours under ten are written to a tenth in the reader\'s decimal mark, a wh
     }
   }
 })
+
+test('a span at a tie of tenths rounds half up, as before 1.10: 99 min is 1.7 h, never 1.6 h (Review 2 F3)', () => {
+  // 99 min = 1.65 h: Math.round(16.5) / 10 is 1.7, which the English text printed at e72057a; (1.65).toFixed(1) is
+  // '1.6' — the binary value under 1.65 lies below it. So the tenth is rounded half up first, then written.
+  const text = (stepMs: number): string => forecast(series(3, stepMs, 10, 1), win(12, NOW + 4 * H), NOW, CFG, 50).text
+  assert.equal(text(49.5 * MIN), 'measuring · 3 readings over 1.7 h')
+  setLocale('de')
+  try {
+    assert.equal(text(49.5 * MIN), 'measuring · 3 readings over 1,7 h')
+  } finally {
+    setLocale(undefined)
+  }
+})

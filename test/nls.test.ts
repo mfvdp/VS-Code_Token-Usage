@@ -333,9 +333,9 @@ test('the Prompts section\'s four manifest rows: its enum value with its words, 
   // The sections setting's last paragraph, added.
   assert.ok(englishNls['config.dashboard.sections.description'].endsWith('\n\n`prompts` — your own prompts for Claude Code\'s and Codex\'s terminals — is not in the default: add it where you want it, first for the quickest reach.'))
   assert.ok(germanNls['config.dashboard.sections.description'].endsWith('\n\n`prompts` — Ihre eigenen Prompts für die Terminals von Claude Code und Codex — ist nicht in der Voreinstellung: Fügen Sie ihn dort ein, wo Sie ihn haben möchten, zuoberst für den schnellsten Zugriff.'))
-  // What Restricted Mode stops: both things Token Pace types.
-  assert.ok(englishNls['capabilities.untrustedWorkspaces'].endsWith('each behind its own consent dialog. It types into a terminal in two cases only: the opt-in keep-warm line into Claude Code\'s terminal, and a prompt of the dashboard\'s Prompts section when you double-click it. All of these are disabled in Restricted Mode.'))
-  assert.ok(germanNls['capabilities.untrustedWorkspaces'].endsWith('jede hinter einem eigenen Zustimmungsdialog. In ein Terminal tippt es nur in zwei Fällen: die optionale Warmhalte-Zeile in das Terminal von Claude Code und einen Prompt aus dem Abschnitt Prompts des Dashboards, wenn Sie ihn doppelt anklicken. All das ist im eingeschränkten Modus abgeschaltet.'))
+  // What Restricted Mode stops: both things Token Pace types — a prompt by each of the three ways it is sent (Review 2 F4).
+  assert.ok(englishNls['capabilities.untrustedWorkspaces'].endsWith('each behind its own consent dialog. It types into a terminal in two cases only: the opt-in keep-warm line into Claude Code\'s terminal, and a prompt of the dashboard\'s Prompts section when you send it yourself — a double-click, its send button or Ctrl+Enter. All of these are disabled in Restricted Mode.'))
+  assert.ok(germanNls['capabilities.untrustedWorkspaces'].endsWith('jede hinter einem eigenen Zustimmungsdialog. In ein Terminal tippt es nur in zwei Fällen: die optionale Warmhalte-Zeile in das Terminal von Claude Code und einen Prompt aus dem Abschnitt Prompts des Dashboards, wenn Sie ihn selbst senden — per Doppelklick, mit seiner Sende-Schaltfläche oder mit Strg+Eingabe. All das ist im eingeschränkten Modus abgeschaltet.'))
   // The German key names follow VS Code's (§6): Eingabetaste, never „Enter-Taste".
   assert.equal(germanNls['config.dashboard.sections.enum.prompts'].includes('Enter'), false)
 })

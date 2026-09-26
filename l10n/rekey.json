@@ -115,6 +115,7 @@
     {"n":111,"by":"P5","kind":"copy","from":"model","part":"dashboard","key":"The title is empty.","why":"the page says it before it saves, as the host says it after Not saved — 1.10 A2 rule 5"},
     {"n":112,"by":"P5","kind":"copy","from":"model","part":"dashboard","key":"The text is empty.","why":"the page says it before it saves, as the host says it after Not saved — 1.10 A2 rule 5"},
     {"n":113,"by":"P5","kind":"copy","from":"model","part":"dashboard","key":"A prompt that starts with an exclamation mark would run a shell command in Claude Code.","why":"the page says it before it saves, as the host says it after Not saved — 1.10 A2 rule 5"},
-    {"n":114,"by":"P7","kind":"add","part":"dashboard","key":"{0}:","why":"the label a table cell prints in front of its value when a narrow sidebar stacks the table, {0} the column's name (Period, Usage …) — the language's own punctuation around it: a no-break space before the colon in French, a full-width colon in Chinese and Japanese — 1.10 B2 D10"}
+    {"n":114,"by":"P7","kind":"add","part":"dashboard","key":"{0}:","why":"the label a table cell prints in front of its value when a narrow sidebar stacks the table, {0} the column's name (Period, Usage …) — the language's own punctuation around it: a no-break space before the colon in French, a full-width colon in Chinese and Japanese — 1.10 B2 D10"},
+    {"n":115,"by":"lead","kind":"nls-reword","key":"capabilities.untrustedWorkspaces","why":"the trust statement names all three ways a prompt is sent (Review 2 F4)"}
   ]
 }

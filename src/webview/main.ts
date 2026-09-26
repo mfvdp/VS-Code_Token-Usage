@@ -1026,11 +1026,16 @@ function approxNote(): string {
  * 1.10 D10 (§3 B5 rule 4): a table cell's column name, and the label the stacked layout prints in front of its
  * value — `{0}:` in the reader's language, whose punctuation is the language's own (a no-break space before the
  * colon in French, a full-width colon in Chinese and Japanese). `data-h` stays the plain name; the narrow width's
- * `td[data-h]::before` prints `data-hl` and a space. The name comes as markup already: a page word (no <, >, " or &
+ * `td[data-h]::before` prints `data-hl` as it is. The name comes as markup already: a page word (no <, >, " or &
  * in a translation — test/l10n.languages.test.ts) or esc()'d by the caller.
+ * 1.11 D1: the label carries its one gap before the value — a space after it, none when it ends in a full-width
+ * character (FULL_WIDTH_END: `：` U+FF1A among them), whose glyph holds its own blank. The stylesheet added the space
+ * to every label until 1.11, and a full-width colon and that space made a double gap.
  */
+const FULL_WIDTH_END = /[\u3000-\u303F\uFF00-\uFFEF]$/;
 function dh(name: string): string {
-  return ' data-h="' + name + '" data-hl="' + tr('{0}:', name) + '"';
+  const label = tr('{0}:', name);
+  return ' data-h="' + name + '" data-hl="' + label + (FULL_WIDTH_END.test(label) ? '' : ' ') + '"';
 }
 
 /**

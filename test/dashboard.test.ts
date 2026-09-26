@@ -248,8 +248,10 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 test('the stacked layout prefixes only the cells that carry a header', () => {
   // 1.10 D10 (rewritten: it pinned `attr(data-h) ": "`): the label is data-hl — the column name in the language's
-  // own "{0}:" — and a space; data-h stays the plain name (the harness and the tests read it).
-  assert.match(STYLE, /td\[data-h\]::before \{ content: attr\(data-hl\) " "; color: var\(--dim\); \}/)
+  // own "{0}:"; data-h stays the plain name (the harness and the tests read it). 1.11 D1 (rewritten: it pinned
+  // `attr(data-hl) " "`): the label carries its one gap itself (dh()), so the rule adds no space of its own.
+  assert.match(STYLE, /td\[data-h\]::before \{ content: attr\(data-hl\); color: var\(--dim\); \}/)
+  assert.equal(/attr\(data-hl\) "/.test(STYLE), false, STYLE)
   assert.equal(/attr\(data-h\) ": "/.test(STYLE), false, STYLE)
   // A bare `td::before` would put ": " in front of every sub-row and drill line.
   assert.equal(/[^\]]td::before/.test(STYLE), false, STYLE)
@@ -514,9 +516,9 @@ test('the two window rows carry their span as the tooltip of the label', () => {
   const h = render('sTokens()', tokensVm({
     totals: [{ source: 'claude', title: 'Claude Code', rows: [row({}), row({ label: 'Today', spanText: '2026-09-03', approx: false })] }],
   }))
-  // 1.10 D10 (rewritten: the cell carries data-hl beside data-h now).
-  assert.ok(h.indexOf('<td data-h="Period" data-hl="Period:" title="09:00 → now">Current 5 h window</td>') >= 0, h)
-  assert.ok(h.indexOf('<td data-h="Period" data-hl="Period:" title="2026-09-03">Today</td>') >= 0, h)
+  // 1.10 D10 (rewritten: the cell carries data-hl beside data-h now). 1.11 D1 (rewritten: data-hl ends in its gap).
+  assert.ok(h.indexOf('<td data-h="Period" data-hl="Period: " title="09:00 → now">Current 5 h window</td>') >= 0, h)
+  assert.ok(h.indexOf('<td data-h="Period" data-hl="Period: " title="2026-09-03">Today</td>') >= 0, h)
   // Nothing is approximate, so the caveat is not printed.
   assert.equal(h.indexOf('rolled up into day totals'), -1, h)
 
@@ -1284,7 +1286,8 @@ test('the calendar table\'s column counts days and says so — Active days, Akti
   assert.ok(heads.includes('Active days'), heads.join(' | '))
   assert.equal(heads.includes('Active'), false, heads.join(' | '))
   // The stacked cell names the same head (the ≤320 px layout prints it before the value).
-  assert.ok(h.indexOf('<td data-h="Active days" data-hl="Active days:">1</td>') >= 0, h)
+  // 1.11 D1 (rewritten: data-hl ends in its gap).
+  assert.ok(h.indexOf('<td data-h="Active days" data-hl="Active days: ">1</td>') >= 0, h)
   assert.equal(Object.prototype.hasOwnProperty.call(DICT, 'Active days'), true)
   assert.equal(Object.prototype.hasOwnProperty.call(DICT, 'Active'), false, 'Active is a session\'s state, the text views\' word — not the page\'s')
   // German: the model part's "Aktive Tage", copied into the page's words — one translation in both parts.
@@ -2045,8 +2048,9 @@ test('the models table carries every column of the totals table, in its order', 
   // Every cell names its own header, so the ≤320 px layout can stack them.
   for (const [head, value] of [['Fresh in', '4.0K'], ['Write 5m', '1.5K'], ['Write 1h', '500'],
     ['Cache read', '90.0K'], ['Reasoning', '900'], ['Per req.', '2.3K']] as const) {
-    // 1.10 D10 (rewritten: a cell carries its stacked label, data-hl, beside its column name).
-    assert.ok(h.indexOf('<td data-h="' + head + '" data-hl="' + head + ':">' + value + '</td>') >= 0, head + ': ' + h)
+    // 1.10 D10 (rewritten: a cell carries its stacked label, data-hl, beside its column name). 1.11 D1 (rewritten:
+    // data-hl ends in its gap).
+    assert.ok(h.indexOf('<td data-h="' + head + '" data-hl="' + head + ': ">' + value + '</td>') >= 0, head + ': ' + h)
   }
   // Every numeric column is sortable through the one mechanism the extension parses.
   for (const key of ['usage', 'freshInput', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output',
@@ -3385,10 +3389,10 @@ function toolsData(over: Record<string, unknown> = {}): Record<string, unknown> 
 
 test('the tools section lists the calls, the share and the models, and no limit', () => {
   const h = render('sTools()', { tools: toolsData() })
-  // 1.10 D10 (rewritten: data-hl beside data-h).
-  assert.ok(h.includes('data-h="Tool" data-hl="Tool:">Read <span class="meta">Claude Code</span>'), h)
-  assert.ok(h.includes('data-h="Calls" data-hl="Calls:">3<'), h)
-  assert.ok(h.includes('data-h="Share" data-hl="Share:">43 %<'), h)
+  // 1.10 D10 (rewritten: data-hl beside data-h). 1.11 D1 (rewritten: data-hl ends in its gap).
+  assert.ok(h.includes('data-h="Tool" data-hl="Tool: ">Read <span class="meta">Claude Code</span>'), h)
+  assert.ok(h.includes('data-h="Calls" data-hl="Calls: ">3<'), h)
+  assert.ok(h.includes('data-h="Share" data-hl="Share: ">43 %<'), h)
   assert.ok(h.includes('claude-opus-4-6'), h)
   assert.ok(h.includes('7 call(s) · 4 distinct tool(s) · 2 more not listed'), h)
   // 1.10 B5 rule 2 (rewritten: the day stood bare).
@@ -6279,8 +6283,8 @@ test('the running block\'s first line carries the 7-day block\'s disclosure; ope
   assert.ok(h.indexOf('</ul></div>') < at && at < h.indexOf('<div class="agtree"'), h)
   const w = weekPart(h)
   const heads = ['Type · model', 'Agents', 'Usage', 'Share', 'Median per agent', '~Cost']
-  // 1.10 D10 (rewritten: data-hl beside data-h).
-  const td = (i: number, v: string): string => '<td data-h="' + heads[i] + '" data-hl="' + heads[i] + ':">' + v + '</td>'
+  // 1.10 D10 (rewritten: data-hl beside data-h). 1.11 D1 (rewritten: data-hl ends in its gap).
+  const td = (i: number, v: string): string => '<td data-h="' + heads[i] + '" data-hl="' + heads[i] + ': ">' + v + '</td>'
   // 1.7 D-A (pinned and changed: 1.6 L3 wrote an image named "lower bound"): the ⚠ hidden from a
   // screen reader, its words in the cell after it.
   const lb = lbMark('not every agent has a price: the sum is a lower bound')
@@ -6435,7 +6439,8 @@ test('the 7-day block speaks German on a German page (1.6 L3)', () => {
     'aria-level="3">Letzte 7 Tage · wohin die Agent-Token gingen</div>',
     '<th>Typ · Modell</th><th>Agenten</th><th>Verbrauch</th><th>Anteil</th><th>Median je Agent</th><th>~Kosten</th>',
     // 1.10 D10 (rewritten: data-hl beside data-h — "{0}:" is German's "{0}:" too, and not in this page's words).
-    '<td data-h="Median je Agent" data-hl="Median je Agent:">80K</td>', '<td>Alle Agenten</td>', 'aria-level="4">Die 2 größten Agenten</div>',
+    // 1.11 D1 (rewritten: data-hl ends in its gap).
+    '<td data-h="Median je Agent" data-hl="Median je Agent: ">80K</td>', '<td>Alle Agenten</td>', 'aria-level="4">Die 2 größten Agenten</div>',
     // 1.7 D-A (pinned and changed: the mark was an image named „Untergrenze"): the words in the cell.
     lbMark('nicht jeder Agent hat einen Preis: Die Summe ist eine Untergrenze', 'Untergrenze')]) {
     assert.ok(h.indexOf(phrase) >= 0, phrase + '\n' + h)
@@ -10429,13 +10434,14 @@ const DRILL = {
 }
 
 test('a stacked table cell carries its column\'s name and its label in the language\'s own "{0}:" (1.10 D10, §3 B5 rule 4)', () => {
+  // 1.11 D1 (rewritten: data-hl ends in its one gap — a space, none after a full-width colon).
   const h = render('sDrill()', { drill: DRILL })
-  assert.ok(h.includes('<td data-h="Model" data-hl="Model:">claude-opus-4-6</td>'), h)
-  assert.ok(h.includes('<td data-h="Usage" data-hl="Usage:">1.2K</td>'), h)
+  assert.ok(h.includes('<td data-h="Model" data-hl="Model: ">claude-opus-4-6</td>'), h)
+  assert.ok(h.includes('<td data-h="Usage" data-hl="Usage: ">1.2K</td>'), h)
   // The label is the language's pattern, whatever punctuation it puts around the name: a no-break space before the
   // colon (French), a full-width colon (Chinese, Japanese) — and data-h stays the plain name the harness reads.
   const fr = renderIn(wordsPage({ '{0}:': '{0} :', 'Model': 'Modèle' }), 'sDrill()', { drill: DRILL })
-  assert.ok(fr.includes('<td data-h="Modèle" data-hl="Modèle :">claude-opus-4-6</td>'), fr)
+  assert.ok(fr.includes('<td data-h="Modèle" data-hl="Modèle : ">claude-opus-4-6</td>'), fr)
   const zh = renderIn(wordsPage({ '{0}:': '{0}：', 'Model': '模型' }), 'sDrill()', { drill: DRILL })
   assert.ok(zh.includes('<td data-h="模型" data-hl="模型：">claude-opus-4-6</td>'), zh)
   // German: „{0}:" (§6), from the shipped bundle.
@@ -10445,12 +10451,49 @@ test('a stacked table cell carries its column\'s name and its label in the langu
   // Every cell of the page that carries a column name goes through dh(): no header cell without its label.
   assert.equal(/<td data-h="/.test(SOURCE), false, 'a td writes data-h without dh()')
   assert.ok((SOURCE.match(/<td' \+ dh\(/g) ?? []).length >= 40)
-  // Every stacked cell of a real page: data-hl is data-h in the pattern.
+  // Every stacked cell of a real page: data-hl is data-h in the pattern, and its gap (1.11 D1, rewritten).
   const all = pageOf(buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.attribution': 'project' }) })) as unknown as Record<string, unknown>)
   const cells = [...all.matchAll(/<td data-h="([^"]*)" data-hl="([^"]*)"/g)]
   assert.ok(cells.length >= 20, String(cells.length))
-  for (const m of cells) assert.equal(m[2], m[1] + ':', m[0])
+  for (const m of cells) assert.equal(m[2], m[1] + ': ', m[0])
   assert.equal(all.split('<td data-h=').length - 1, cells.length, 'a cell with data-h and no data-hl')
+})
+
+test('a stacked cell\'s label carries its one gap before the value — a space after it, none after a full-width colon — in the shipped bundles (1.11 D1)', () => {
+  // The stylesheet printed data-hl and a space until 1.11; after Chinese's full-width colon, whose glyph holds its own
+  // blank, that made two gaps. The label carries the gap now (dh()), and the rule prints it as it is (the style test).
+  const shipped = (id: string): Record<string, string> =>
+    JSON.parse(readFileSync(join(__dirname, '..', 'l10n', `bundle.l10n.${id}.json`), 'utf8')) as Record<string, string>
+  const row = {
+    label: 'Today', usage: '1.5K', freshInput: '1K', cacheWrite5m: '–', cacheWrite1h: '–', cacheRead: '–', output: '500',
+    reasoning: '–', requests: '1', cacheHit: '–', perRequest: '1.5K', cost: '~$0.01', costPartial: false, incomplete: false,
+    approx: false, spanText: '2026-09-03',
+  }
+  const vm = tokensVm({ totals: [{ source: 'claude', title: 'Claude Code', rows: [row] }] })
+  const period = (h: string): string | undefined => /<td data-h="[^"]*" data-hl="([^"]*)" title="2026-09-03">Today<\/td>/.exec(h)?.[1]
+  // English: the colon and one space.
+  assert.equal(period(render('sTokens()', vm)), 'Period: ')
+  // Chinese: the full-width colon and nothing after it.
+  for (const [id, want] of [['zh-cn', '期间：'], ['zh-tw', '期間：']]) {
+    const b = shipped(id)
+    assert.equal(b['{0}:'], '{0}：', id)
+    assert.equal(period(renderIn(wordsPage(b), 'sTokens()', vm)), want, id)
+  }
+  // French: a no-break space before the colon, one space after it.
+  assert.equal(period(renderIn(wordsPage(shipped('fr')), 'sTokens()', vm)), 'Période\u00a0: ')
+  // German and Japanese write the ASCII colon (Japanese since 1.10 P20): one space after it.
+  assert.equal(period(renderIn(wordsPage(shipped('de')), 'sTokens()', vm)), 'Zeitraum: ')
+  assert.equal(period(renderIn(wordsPage(shipped('ja')), 'sTokens()', vm)), '期間: ')
+  // The rule is the label's last character: no space after a full-width one (U+3000–U+303F, U+FF00–U+FFEF — 。 」 ： ）
+  // among them), one space after anything else — the small colon U+FE55 and an ASCII bracket among them. Never two.
+  const cases: Array<[string, string]> = [
+    ['{0}：', 'X：'], ['{0}。', 'X。'], ['{0}」', 'X」'], ['（{0}）', '（X）'], ['{0}\u3000', 'X\u3000'],
+    ['{0}:', 'X: '], ['{0}\ufe55', 'X\ufe55 '], ['[{0}]', '[X] '], ['{0}\u00a0:', 'X\u00a0: '],
+  ]
+  for (const [pattern, want] of cases) {
+    assert.equal(period(renderIn(wordsPage({ '{0}:': pattern, 'Period': 'X' }), 'sTokens()', vm)), want, pattern)
+  }
+  assert.ok(SOURCE.includes('const FULL_WIDTH_END = /[\\u3000-\\u303F\\uFF00-\\uFFEF]$/;'), 'the full-width range changed')
 })
 
 test('a number stays with its unit: the page\'s glue() keeps a figure and a following %, min, h, d, s, m, K, M or G on one line (1.10 B5 rule 3)', () => {
@@ -10499,9 +10542,10 @@ test('an ISO day never breaks at its hyphen: every day the page prints stands in
   const sessions = render('sSessions()', { sessions: { enabled: true, cacheStates: [], rows: [
     { session: 'abc', project: 'token-pace', started: '2026-09-03 12:00', duration: '1 h 2 min', usage: '1.2K', requests: 3, cacheState: null, isSub: false },
   ] } })
-  assert.ok(sessions.includes('data-hl="Started:">' + nb('2026-09-03') + ' 12:00</td>'), sessions)
+  // 1.11 D1 (rewritten: data-hl ends in its gap).
+  assert.ok(sessions.includes('data-hl="Started: ">' + nb('2026-09-03') + ' 12:00</td>'), sessions)
   // Its duration glued (1.10 B5 rule 3): a stacked cell wraps.
-  assert.ok(sessions.includes('data-hl="Duration:">1\u00a0h 2\u00a0min</td>'), sessions)
+  assert.ok(sessions.includes('data-hl="Duration: ">1\u00a0h 2\u00a0min</td>'), sessions)
   const dq = render('sDataQuality()', { dataQuality: dataQualityOf() })
   assert.ok(dq.includes('Coverage ' + nb('2026-08-01') + ' → ' + nb('2026-09-03')), dq)
   // A day inside a sentence of the summary as well; nothing else of the text is wrapped.

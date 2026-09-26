@@ -167,7 +167,9 @@ The notes the 1.10 keys need:
   prints before its value) and the summary's cache sentences (`Cache hit rate — {0} {1} ({2}).`) are
   patterns: write the colon, the brackets and the list's comma as your language sets them — `{0} :`
   with a no-break space (U+00A0) before the colon in French, `{0}：` in Chinese and Japanese, `（）`
-  around a figure in Chinese and Japanese, `、` between two items in Japanese and Chinese.
+  around a figure in Chinese and Japanese, `、` between two items in Japanese and Chinese. Write no
+  space after the colon of `{0}:`: the page adds the space after an ASCII colon, and none after a
+  full-width one, whose glyph carries its own blank (since 1.11).
 * **The status bar writes `25%` without a space**, in every language — its texts are notation, as the
   fixed forms above. `{0} ~ends at {1}%` is such a text: the `%` stays attached, whatever your
   language writes in a sentence.

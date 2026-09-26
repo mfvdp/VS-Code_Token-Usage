@@ -1445,8 +1445,9 @@ ul { margin: 6px 0; padding-left: 18px; }
   td { text-align: left; padding: 1px 0; white-space: normal; }
   /* Only cells that carry a header: the sub-rows and the drill lines span the whole table
      and would otherwise be prefixed with a bare ": ". 1.10 D10: the label as the language writes it —
-     data-hl is the column name in the words' "{0}:" ("Période :" with a no-break space, "期間：") —, then a space. */
-  td[data-h]::before { content: attr(data-hl) " "; color: var(--dim); }
+     data-hl is the column name in the words' "{0}:" ("Période :" with a no-break space, "期間："). 1.11 D1: with
+     its one gap before the value in it — a space, none after a full-width colon (dh() in the page script). */
+  td[data-h]::before { content: attr(data-hl); color: var(--dim); }
 }
 /* 1.6 L3: at a narrow width the 7-day table stacks tighter than the page's other tables — a row's
    type and model on a line of their own, then its figures, each with its column's name, as many

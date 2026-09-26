@@ -497,6 +497,11 @@ export class Alerts {
       // A window that resets before it would run out needs no warning: the
       // limit is never reached, so saying it would be would be an invention.
       if (c.window.resetsAt !== null && f.etaMs >= c.window.resetsAt) continue
+      // 1.11 D4: nor does a window whose reset has come — the reading describes a window that is over, stale
+      // until the next reading brings the new one, and nothing is said from a stale reading. Without this, an
+      // `etaMs` before a reset already past passed the rule above and read "… runs out imminently, before it
+      // resets (reset due)".
+      if (c.window.resetsAt !== null && c.window.resetsAt <= now) continue
       const entry = entryOf(state, c.identity)
       if (entry.forecastWarned) continue
       entry.forecastWarned = true

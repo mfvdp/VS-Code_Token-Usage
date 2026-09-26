@@ -412,6 +412,28 @@ test('a forecast is one whole sentence of four — in ~time or imminently, with 
   }
 })
 
+test('no forecast warning for a window whose reset is already due — never "before it resets (reset due)" (1.11 D4)', async () => {
+  // The reading describes a window whose reset has come: it is stale until the next reading brings the new window.
+  // Its forecast ran out before that reset (etaMs < resetsAt), so the reset-first rule let it through, and
+  // `relativeShort` of a past reset is "reset due".
+  const key = 'claude:session:300'
+  for (const resetsAt of [NOW - 30_000, NOW]) {
+    const h = harness(cfg({ forecastLeadMinutes: 60 }))
+    const out = await h.alerts.evaluate([quota([win({ percent: 70, resetsAt })])], noVerdicts,
+      new Map([[key, forecast({ etaMs: NOW - 60_000 })]]), NOW)
+    assert.deepEqual(out, [], String(resetsAt - NOW))
+    assert.deepEqual(h.messages, [])
+    assert.deepEqual(h.order, [], 'nothing was recorded as warned')
+  }
+  // A reset still ahead: the sentence as it was.
+  const h = harness(cfg({ forecastLeadMinutes: 60 }))
+  const out = await h.alerts.evaluate([quota([win({ percent: 70, resetsAt: NOW + 2 * HOUR })])], noVerdicts,
+    new Map([[key, forecast({ etaMs: NOW + 10 * 60_000 })]]), NOW)
+  assert.equal(out.length, 1)
+  assert.equal(out[0].kind, 'forecast')
+  assert.deepEqual(h.messages, ['Claude — on this pace: 5 h runs out in ~10m, before it resets (2h)'])
+})
+
 test('two barely used weekly windows become one friendly notice', async () => {
   const h = harness(cfg({ useItLoseIt: true }))
   const a = win({ id: 'weekly_all:10080', kind: 'weekly', label: '7 d', percent: 30, resetsAt: NOW + 30 * HOUR })

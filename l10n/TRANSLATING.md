@@ -232,7 +232,8 @@ each failure names the language, the file and the key:
   has no list; and once `PENDING_ALLOWED` is false (the join) no list is left.
 * **T15 · The bar's examples** (1.10) — every example quoted in `config.resetFormat.enum.*`,
   `config.density.enum.*`, `config.summary.period.enum.*` and `config.resetHourCycle.enum.*` (the
-  text between two of T11's quotation marks; a no-break space reads as a space) is a text your
+  text between two of T11's quotation marks; a no-break space reads as a space, and an apostrophe
+  between two letters — aujourd’hui, dell’ora — is a letter of the word, not a mark) is a text your
   language's status bar prints — your bundle's words, your locale's decimals, weekday and 12-hour
   clock — for this fixture: Monday 2026-09-28, 03:46 UTC; Claude Code's 5 h window at 25 % with its
   reset 2 h 14 min away (06:00), its 7 d window at 69 % with 6 days left; 3.1M tokens today, 12.3M

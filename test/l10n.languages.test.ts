@@ -572,10 +572,16 @@ function barTexts(v: BarVariant): string[] {
 
 /** U+00A0 and U+202F read as a space (1.10 B3): Intl writes them, a manifest may write a plain space. */
 const barSpaces = (s: string): string => s.replace(/[  ]/g, ' ').trim()
-/** The examples a value quotes: the text between two of T11's quotation marks. */
-function quotedExamples(value: string): string[] {
+/**
+ * The examples a value quotes: the text between two of T11's quotation marks. An apostrophe between two letters
+ * (aujourd’hui, dell’ora) is a letter of the word, not a closing mark (1.10 P8's finding): it is masked before the
+ * scan and put back in the example.
+ */
+export function quotedExamples(value: string): string[] {
   const marks = reEsc(OPEN_QUOTES + CLOSE_QUOTES)
-  return [...value.matchAll(new RegExp(`[${reEsc(OPEN_QUOTES)}]([^${marks}]+)[${reEsc(CLOSE_QUOTES)}]`, 'g'))].map((m) => barSpaces(m[1]))
+  const masked = value.replace(/(?<=\p{L})’(?=\p{L})/gu, '\uE000').replace(/(?<=\p{L})'(?=\p{L})/gu, '\uE001')
+  return [...masked.matchAll(new RegExp(`[${reEsc(OPEN_QUOTES)}]([^${marks}]+)[${reEsc(CLOSE_QUOTES)}]`, 'g'))]
+    .map((m) => barSpaces(m[1].replace(/\uE000/g, '’').replace(/\uE001/g, "'")))
 }
 
 /**
@@ -1289,6 +1295,13 @@ function settle(dir: string, id: string, key: string, value: string): void {
     writeFileSync(pending, `${JSON.stringify(p, null, 2)}\n`, 'utf8')
   }
 }
+
+test('T15: an apostrophe between two letters is part of the word, not a closing mark — “aujourd’hui” stays one example; a real closing mark still ends one', () => {
+  assert.deepEqual(quotedExamples('Aujourd’hui — « Σ 3,1M · aujourd’hui »'), ['Σ 3,1M · aujourd’hui'])
+  assert.deepEqual(quotedExamples("Oggi — “Σ 3,1M · dell'ora”"), ["Σ 3,1M · dell'ora"])
+  assert.deepEqual(quotedExamples('‘Σ 3.1M · today’ and ‘x’'), ['Σ 3.1M · today', 'x'])
+  assert.deepEqual(quotedExamples('“a” « b »'), ['a', 'b'])
+})
 
 test('T15: the fixture builds the English examples of package.nls.json word for word — the bar\'s reset word, the weekday beyond a day, the pace glyph, the period (1.10 B3)', () => {
   const english = src().english

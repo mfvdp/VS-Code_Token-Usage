@@ -3250,7 +3250,8 @@ test('the exports say the agents are about to leave before anything is written, 
   assert.ok(jsonTitle.includes('Tool names are included as tools[].') && jsonTitle.includes('Agents are included as agents[].'), jsonTitle)
   assert.equal(state.writes.length, 4)
   const written = JSON.parse(state.writes[3].text) as { schema_version: number; agents: Array<{ agentId: string; type: string | null }> }
-  assert.equal(written.schema_version, 3)
+  // 1.11 P5 (pinned and changed: schema 3 → 4, §3 C4 — the price fields; agents[] is as schema 3 wrote it).
+  assert.equal(written.schema_version, 4)
   assert.deepEqual(written.agents.map((a) => [a.agentId, a.type]).sort(),
     [['a1a1a1', 'workflow-subagent'], ['b1b1b1', null], ['c3c3c3', 'Explore']])
   assert.equal(state.messages[state.messages.length - 1]?.text, `Token Pace: exported to ${json}`)

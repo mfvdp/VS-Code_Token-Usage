@@ -38,9 +38,9 @@
   "bugs": {
     "url": "https://github.com/mfvdp/VS-Code_Token-Usage/issues"
   },
-  "homepage": "https://github.com/mfvdp/VS-Code_Token-Usage#readme",
+  "homepage": "https://token-pace.com",
   "qna": "https://github.com/mfvdp/VS-Code_Token-Usage/issues",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "publisher": "frederik",
   "license": "AGPL-3.0-or-later",
   "engines": {

@@ -1899,6 +1899,59 @@ test('the records of the range are on the view model, capped by dashboard.topN',
   assert.match(first.share, /%$/)
 })
 
+test('1.11 B4 (§0a.4): VmInput.settled false — the Records say "Reading history…" and hold no record; absent or true, the records are there; the other sections are not touched', () => {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: 'aaaa1111-0000', at: NOW - 56 * 60_000 })
+  const input = makeInput({ agg })
+  const settled = buildViewModel(input)
+  const stated = buildViewModel({ ...input, settled: true })
+  const reading = buildViewModel({ ...input, settled: false })
+  assert.equal(settled.records.reading, null)
+  assert.deepEqual(stated.records, settled.records)
+  assert.ok(settled.records.peakDay && settled.records.costDays.length > 0 && settled.records.longestSessions.length > 0
+    && settled.records.cacheHours.length > 0)
+  assert.equal(reading.records.reading, 'Reading history…')
+  const r = reading.records
+  assert.deepEqual([r.peakDay, r.streak, r.topModels, r.costDays, r.longestSessions, r.largestSessions, r.cacheHours, r.recordNotes],
+    [null, null, [], [], [], [], [], []])
+  // Only the Records wait: the rest of the page is the settled one's.
+  assert.deepEqual(reading.models, settled.models)
+  assert.deepEqual(reading.kpis, settled.kpis)
+  assert.deepEqual(reading.agents, settled.agents)
+  assert.equal(reading.firstRun, settled.firstRun)
+})
+
+test('1.11 B2: the Records name a session exactly as the Agents tree does, and follow dashboard.topN and hourRetentionDays', () => {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: 'aaaa1111-0000', at: NOW - 56 * 60_000 })
+  addCacheSession(agg, { sessionId: 'bbbb2222-0000', at: NOW - 3 * 3_600_000, firstAt: NOW - 9 * 3_600_000 })
+  const input = makeInput({ agg, cfg: makeConfig({ 'tokenPace.hourRetentionDays': 10 }) })
+  const vm = buildViewModel(input)
+  // Every node of the text tree is open: the sessions are among the earlier ones.
+  const labels = new Map<string, string>()
+  const walk = (nodes: readonly { key: string; label: string; children?: readonly unknown[] }[]): void => {
+    for (const n of nodes) {
+      labels.set(n.key, n.label)
+      walk((n.children ?? []) as { key: string; label: string; children?: readonly unknown[] }[])
+    }
+  }
+  walk(agentTreeFor(input, 'text').roots as unknown as { key: string; label: string }[])
+  const longest = vm.records.longestSessions
+  // The fixture's own session (its first line in July), then the two added ones.
+  assert.deepEqual(longest.map((s) => s.sessionId), ['s1', 'bbbb2222-0000', 'aaaa1111-0000'])
+  for (const s of [...longest, ...vm.records.largestSessions]) assert.equal(s.name, labels.get(`s:${s.sessionId}`), s.sessionId)
+  assert.equal(longest[1].name, 'Session Thu 03:00 · bbbb2222')
+  // The 30-day range reaches past ten days of hour buckets.
+  assert.ok(vm.records.recordNotes.includes('Hour buckets are kept for 10 days (tokenPace.hourRetentionDays); earlier hours are not ranked.'),
+    vm.records.recordNotes.join('\n'))
+  // dashboard.topN caps every new table (B5).
+  const one = buildViewModel(makeInput({ agg, cfg: makeConfig({ 'tokenPace.dashboard.topN': 1 }) }))
+  for (const table of [one.records.costDays, one.records.longestSessions, one.records.largestSessions, one.records.cacheHours]) {
+    assert.equal(table.length, 1)
+  }
+  assert.equal(one.records.longestSessions[0].sessionId, 's1')
+})
+
 test('without attribution the two lower record tables are empty by consent, not by chance', () => {
   const vm = buildViewModel(makeInput())
   assert.equal(vm.records.attributionOn, false)

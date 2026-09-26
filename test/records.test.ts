@@ -12,10 +12,15 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
-import { LOCAL_BLOCK_HOURS, StatsCtx, localBlock, records } from '../src/stats'
+import { sessionName, spanText } from '../src/agentTreeBuild'
+import { toCsv, toJson, toMarkdownSummary } from '../src/exporter'
+import { costOfBucket } from '../src/prices'
+import { LOCAL_BLOCK_HOURS, RecordsWords, StatsCtx, localBlock, records } from '../src/stats'
+import { markdownDocument, quickPickItems } from '../src/textViews'
 import { DayRange, rangeFor } from '../src/time'
-import { Bucket, SessionRec, Snapshot, emptyBucket } from '../src/types'
-import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
+import { AgentRec, Bucket, MainRec, SessionRec, Snapshot, emptyBucket } from '../src/types'
+import { buildViewModel } from '../src/viewModel'
+import { NOW, TODAY, buildAgg, makeConfig, makeInput, timeConfig } from './fixtures/viewFixtures'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -312,4 +317,297 @@ test('each provider gets its own block, and a source without hours gets none', (
   assert.equal(localBlock(ctx, 'codex', NOW)?.firstAt, '10:00')
   const claudeOnly = fromBuckets([hour(1, 4000)])
   assert.equal(localBlock(ctxOf(claudeOnly), 'codex', NOW), null)
+})
+
+// ---------------------------------------------------------------------------
+// 1.11 B: the most expensive days, the longest and largest sessions, the hours with the most cache
+// written, and no record while the history is being read (§3 B8 1–5, §0a.2's leak test)
+// ---------------------------------------------------------------------------
+
+/** What the view model hands `records()`: the Agents tree's own words, and the hour buckets' horizon. */
+const WORDS: RecordsWords = { sessionName, spanText, hourRetentionDays: 45 }
+const MS_MIN = 60_000
+
+/** One day bucket of `input` tokens and nothing else — its cost is `input` at the model's input rate. */
+function priced(d: string, input: number, model = 'claude-opus-4-6'): Bucket {
+  return day(d, input, model)
+}
+
+test('1.11 B1: the most expensive days — the priced days by cost, an unpriced-only day none; ties by the newer day; topN caps them', () => {
+  const agg = fromBuckets([
+    // Sonnet is the cheaper model: 3M of it cost less than 2M of Opus, so usage and cost disagree on the order.
+    priced('2026-09-01', 3_000_000, 'claude-sonnet-4-6'),
+    priced('2026-09-02', 2_000_000),
+    priced('2026-08-30', 1_000_000),
+    // The most usage of all, and no price on file: no record.
+    priced('2026-08-31', 9_000_000, 'claude-experimental-x'),
+  ])
+  const r = records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 5, '2026-08-01', true, WORDS)
+  assert.deepEqual(r.costDays.map((d) => [d.day, d.cost, d.usage, d.floor]), [
+    ['2026-09-02', '~$10.00', '2M', false],
+    ['2026-09-01', '~$9.00', '3M', false],
+    ['2026-08-30', '~$5.00', '1M', false],
+  ])
+  assert.equal(r.recordNotes.some((n) => n.startsWith('⚠ = a lower bound')), false, 'no row is marked, so no legend')
+  // Equal costs: the newer day first.
+  const tie = records(ctxOf(fromBuckets([priced('2026-09-01', 1_000_000), priced('2026-09-02', 1_000_000)]), { sources: ['claude'] }),
+    range('30d'), 5, '2026-08-01', true, WORDS)
+  assert.deepEqual(tie.costDays.map((d) => d.day), ['2026-09-02', '2026-09-01'])
+  // N = 2: two rows.
+  assert.deepEqual(records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 2, '2026-08-01', true, WORDS).costDays.map((d) => d.day),
+    ['2026-09-02', '2026-09-01'])
+})
+
+test('1.11 B1: ⚠ on a day with an unpriced bucket and on the first day of coverage, with its legend; a day before coverage and a month bucket are no row', () => {
+  const month: Bucket = {
+    ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'm', null, '2026-07'), input: 50_000_000, requests: 9, outputFinal: 9,
+  }
+  const agg = fromBuckets([
+    month,
+    // Before coverage: the costliest day of all, and not watched.
+    priced('2026-08-10', 8_000_000),
+    // The first day of coverage: the transcripts on disk begin that day.
+    priced('2026-08-20', 1_000_000),
+    // A priced and an unpriced bucket on one day: the cost is a floor.
+    priced('2026-09-02', 2_000_000), priced('2026-09-02', 500_000, 'claude-experimental-x'),
+    priced('2026-09-03', 3_000_000),
+  ])
+  const r = records(ctxOf(agg, { sources: ['claude'] }), custom('2026-07-01', TODAY), 5, '2026-08-20', true, WORDS)
+  assert.deepEqual(r.costDays.map((d) => [d.day, d.floor]), [['2026-09-03', false], ['2026-09-02', true], ['2026-08-20', true]])
+  // The floor day's usage counts the unpriced bucket too; its cost only the priced one.
+  assert.deepEqual([r.costDays[1].cost, r.costDays[1].usage], ['~$10.00', '2.5M'])
+  assert.equal(r.recordNotes[0], '⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.')
+  assert.equal(r.note, '1 rolled-up month bucket in this range has no day left and is not in these records')
+})
+
+test('1.11 B1: with the costs switched off there is no expensive day, and one line says why', () => {
+  const agg = fromBuckets([priced('2026-09-02', 2_000_000)])
+  const r = records(ctxOf(agg, { sources: ['claude'], showCost: false }), range('30d'), 5, '2026-08-01', true, WORDS)
+  assert.deepEqual(r.costDays, [])
+  assert.ok(r.recordNotes.includes('The most expensive days need tokenPace.showCost.'), r.recordNotes.join('\n'))
+  const on = records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 5, '2026-08-01', true, WORDS)
+  assert.equal(on.recordNotes.includes('The most expensive days need tokenPace.showCost.'), false)
+})
+
+/** A main session record, its own usage `input` + `output` — invented figures. */
+function mainRec(sessionId: string, firstTs: number, lastTs: number, input: number, over: Partial<MainRec> = {}): MainRec {
+  return {
+    source: 'claude', sessionId, firstTs, lastTs, models: ['claude-opus-4-6'],
+    input, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 3, outputFinal: 3, toolCalls: 0,
+    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null, lastRequest: null, lastUserAt: null, ...over,
+  }
+}
+
+/** An agent record of `sessionId` whose transcript sits at `sessionFile`'s folder. */
+function agentRec(agentId: string, sessionId: string, lastTs: number, input: number, sessionFile = `/virtual/claude/projects/-home-t-alpha/${sessionId}.jsonl`): AgentRec {
+  return {
+    source: 'claude', agentId, sessionId, sessionFile, workflowId: null, meta: null, metaTries: 3, spawnerFile: null,
+    firstTs: lastTs - 10 * MS_MIN, lastTs, models: ['claude-opus-4-6'],
+    input, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0, requests: 2, outputFinal: 2, toolCalls: 0,
+    outcome: 'completed', outcomeTs: lastTs, outcomeStatus: 'completed', rejected: null, lastTool: null, lastToolTs: null,
+    effort: null, efforts: [], lastContext: null, toolErrors: 0, cacheMisses: {}, cacheMissedTokens: 0,
+    ccVersion: null, permissionMode: null, compactions: 0, lastCompaction: null,
+  } as AgentRec
+}
+
+/** An aggregator whose main and agent records are handed in verbatim. */
+function withRecords(mains: MainRec[], agents: AgentRec[] = [], base: Aggregator = new Aggregator()): Aggregator {
+  const out = Object.create(base) as Aggregator
+  out.mains = () => mains
+  out.agents = () => agents
+  return out
+}
+
+const H = 3_600_000
+/** The session world of B8 2: three idle sessions, an active one, a twin record, one broken, one out of range. */
+function sessionWorld(): Aggregator {
+  return withRecords([
+    // 3 h 12 min, 12K of its own and 25K of its two agents'.
+    mainRec('aaaa1111-0000', NOW - 4 * H, NOW - 4 * H + 3 * H + 12 * MS_MIN, 12_000),
+    // 49 min, 100K of its own: the largest.
+    mainRec('bbbb2222-0000', NOW - 2 * 24 * H, NOW - 2 * 24 * H + 49 * MS_MIN, 100_000),
+    // Active: its last line five minutes ago — its time and tokens are still growing.
+    mainRec('cccc3333-0000', NOW - 2 * H, NOW - 5 * MS_MIN, 500_000),
+    // One session under two paths: the newer record (1 h) is the session, not the older (10 h).
+    mainRec('dddd4444-0000', NOW - 3 * 24 * H - 10 * H, NOW - 3 * 24 * H, 1_000),
+    mainRec('dddd4444-0000', NOW - 3 * H, NOW - 2 * H, 2_000),
+    // No first line: no span, no session (anti-fake).
+    mainRec('eeee5555-0000', Number.NaN, NOW - H, 900_000),
+    // Six days back: in the index, outside a range of the last three days.
+    mainRec('ffff6666-0000', NOW - 6 * 24 * H - 5 * H, NOW - 6 * 24 * H, 50_000),
+  ], [
+    agentRec('a0000000000000001', 'aaaa1111-0000', NOW - 2 * H, 20_000),
+    agentRec('a0000000000000002', 'aaaa1111-0000', NOW - H, 5_000),
+  ])
+}
+
+test('1.11 B2: the longest and the largest sessions — only ended ones, named as the Agents tree names them, own usage plus the agents\', one row per id', () => {
+  const r = records(ctxOf(sessionWorld(), { sources: ['claude'] }), custom('2026-08-31', TODAY), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual(r.longestSessions.map((s) => [s.name, s.time, s.usage, s.start]), [
+    ['Session Thu 08:00 · aaaa1111', '3 h 12 min', '37K', '08:00'],
+    ['Session Thu 09:00 · dddd4444', '1 h 00 min', '2K', '09:00'],
+    ['Session Tue 12:00 · bbbb2222', '49 min 00 s', '100K', '2026-09-01 12:00'],
+  ])
+  assert.deepEqual(r.largestSessions.map((s) => [s.sessionId, s.usage, s.time]), [
+    ['bbbb2222-0000', '100K', '49 min 00 s'], ['aaaa1111-0000', '37K', '3 h 12 min'], ['dddd4444-0000', '2K', '1 h 00 min'],
+  ])
+  // The name and the time are the tree's own (agentTreeBuild.ts), not a second form of them.
+  const a = r.longestSessions[0]
+  assert.equal(a.name, sessionName('aaaa1111-0000', NOW - 4 * H, NOW, tcfg))
+  assert.equal(a.time, spanText(3 * H + 12 * MS_MIN))
+  // The active one is not ranked, and the note counts it; the basis note stands with the rows.
+  assert.equal([...r.longestSessions, ...r.largestSessions].some((s) => s.sessionId.startsWith('cccc')), false)
+  assert.ok(r.recordNotes.includes('1 active session(s) not ranked yet: their time and tokens are still growing.'), r.recordNotes.join('\n'))
+  assert.ok(r.recordNotes.includes('Claude Code sessions of the last 7 days that are no longer active — the Agents section keeps a '
+    + 'session for 7 days after its last line. Time runs from its first counted line to its last, pauses included; usage is its own and '
+    + 'its agents\'.'), r.recordNotes.join('\n'))
+  // The broken record and the one before the range are absent; the whole index holds seven records.
+  assert.equal([...r.longestSessions, ...r.largestSessions].some((s) => /^(eeee|ffff)/.test(s.sessionId)), false)
+  // A range of every day takes the six-day-old one in.
+  const all = records(ctxOf(sessionWorld(), { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.ok(all.longestSessions.some((s) => s.sessionId === 'ffff6666-0000'))
+  // N = 1.
+  const one = records(ctxOf(sessionWorld(), { sources: ['claude'] }), range('30d'), 1, '2026-07-01', true, WORDS)
+  assert.deepEqual([one.longestSessions.length, one.largestSessions.length], [1, 1])
+})
+
+test('1.11 B2: a session whose agent wrote a minute ago is still active; the model chips keep a session by its models; beyond the retention none', () => {
+  const agg = withRecords([mainRec('aaaa1111-0000', NOW - 4 * H, NOW - 2 * H, 12_000)], [agentRec('a0000000000000001', 'aaaa1111-0000', NOW - MS_MIN, 20_000)])
+  const r = records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual([r.longestSessions, r.largestSessions], [[], []])
+  assert.ok(r.recordNotes.includes('1 active session(s) not ranked yet: their time and tokens are still growing.'))
+  const chips = records(ctxOf(sessionWorld(), { sources: ['claude'], models: ['claude-sonnet-4-6'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual([chips.longestSessions, chips.largestSessions], [[], []])
+  // Eight days after its last line the Agents section has let it go, and so have the Records.
+  const old = withRecords([mainRec('aaaa1111-0000', NOW - 9 * 24 * H, NOW - 8 * 24 * H, 12_000)])
+  assert.deepEqual(records(ctxOf(old, { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS).longestSessions, [])
+})
+
+test('1.11 B2 (§3.0 c): under Codex the session tables are empty and the section says they are Claude Code\'s', () => {
+  const r = records(ctxOf(sessionWorld(), { sources: ['codex'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual([r.longestSessions, r.largestSessions], [[], []])
+  assert.equal(r.recordNotes.at(-1), 'Claude Code only — not shown while Codex is selected.')
+  assert.equal(r.recordNotes.some((n) => n.startsWith('Claude Code sessions of the last') || n.includes('active session(s)')), false)
+  // Under both providers the line is not there.
+  const both = records(ctxOf(sessionWorld()), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.equal(both.recordNotes.some((n) => n.startsWith('Claude Code only')), false)
+})
+
+/** One hour bucket `n` hours before NOW that wrote `write` tokens to the cache, `write1h` of them for an hour. */
+function written(n: number, write: number, write1h = 0, model = 'claude-opus-4-6'): Bucket {
+  const h = Math.floor((NOW - n * MS_HOUR) / MS_HOUR)
+  return {
+    ...emptyBucket('claude', model, false, 'standard', 'h', h, TODAY),
+    input: 1000, output: 500, cacheRead: 40_000, cacheWrite: write, cacheWrite1h: write1h, requests: 1, outputFinal: 1,
+  }
+}
+
+test('1.11 B3: the hours with the most cache written — by tokens, the 1-hour part, the writers, the cost of the writes alone', () => {
+  const opus = written(3, 1_000_000)
+  const agg = fromBuckets([
+    opus, written(3, 400_000, 400_000, 'claude-sonnet-4-6'),
+    written(5, 2_000_000),
+    // Three writers: two named, the third counted.
+    written(1, 300_000, 0, 'claude-sonnet-4-6'), written(1, 200_000), written(1, 100_000, 0, 'claude-haiku-4-5'),
+    // A day bucket's writes have no hour: no row.
+    { ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, '2026-09-02'), cacheWrite: 9_000_000, requests: 1, outputFinal: 1 },
+  ])
+  const r = records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual(r.cacheHours.map((h) => [h.hour, h.written, h.written1h, h.models, h.floor]), [
+    ['2026-09-03 07:00', '2M', '–', 'claude-opus-4-6', false],
+    ['2026-09-03 09:00', '1.4M', '400K', 'claude-opus-4-6, claude-sonnet-4-6', false],
+    ['2026-09-03 11:00', '600K', '–', 'claude-sonnet-4-6, claude-opus-4-6 +1 more', false],
+  ])
+  // 1M five-minute writes of claude-opus-4-6 at $6.25/M, by hand — and the same as costOfBucket on the write-only copy.
+  const alone = records(ctxOf(fromBuckets([opus]), { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.equal(alone.cacheHours[0].cost, '~$6.25')
+  const copy = costOfBucket({ ...opus, input: 0, cacheRead: 0, output: 0, reasoning: 0, webSearch: 0, webFetch: 0 }, { overrides: {}, multiplier: 1, unknownModel: 'strict' })
+  assert.equal(copy?.usd, 6.25)
+  // Sonnet's 400K one-hour writes at $6/M beside it: $2.40 more.
+  assert.equal(r.cacheHours[1].cost, '~$8.65')
+  assert.ok(r.recordNotes.includes('A large cache write is usually a cold start — a conversation\'s prefix written to the cache again after it '
+    + 'expired —, a new conversation or a compaction; one hour can hold several.'), r.recordNotes.join('\n'))
+  // N = 2.
+  assert.equal(records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 2, '2026-07-01', true, WORDS).cacheHours.length, 2)
+})
+
+test('1.11 B3: an hour with an unpriced write is a floor while its cost is shown; the costs off, a dash; a Codex range, the empty line; the horizon named where the range reaches past it', () => {
+  const agg = fromBuckets([written(2, 100_000), written(2, 50_000, 0, 'claude-experimental-x')])
+  const r = records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual([r.cacheHours[0].cost, r.cacheHours[0].floor], ['~$0.63', true])
+  const off = records(ctxOf(agg, { sources: ['claude'], showCost: false }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual([off.cacheHours[0].cost, off.cacheHours[0].floor, off.cacheHours[0].written], ['–', false, '150K'])
+  // Codex writes no billed cache: no hour, the line in place of the table.
+  const codex = records(ctxOf(buildAgg(), { sources: ['codex'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual(codex.cacheHours, [])
+  assert.ok(codex.recordNotes.includes('No cache write counted in this range.'))
+  // The horizon: a 30-day range lies inside 45 kept days, a range from July does not.
+  assert.equal(r.recordNotes.some((n) => n.startsWith('Hour buckets are kept')), false)
+  const july = records(ctxOf(agg, { sources: ['claude'] }), custom('2026-07-01', TODAY), 5, '2026-07-01', true, WORDS)
+  assert.ok(july.recordNotes.includes('Hour buckets are kept for 45 days (tokenPace.hourRetentionDays); earlier hours are not ranked.'))
+})
+
+test('1.11 B4: while the history is being read there is no record at all — the one sentence instead', () => {
+  const agg = sessionWorld()
+  const ctx = ctxOf(buildAgg('project'), { attribution: 'project' })
+  const settledOne = records(ctx, range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.ok(settledOne.peakDay && settledOne.streak && settledOne.topModels.length > 0 && settledOne.topSessions.length > 0)
+  const r = records(ctx, range('30d'), 5, '2026-07-01', false, WORDS)
+  assert.equal(r.reading, 'Reading history…')
+  assert.deepEqual(
+    [r.peakDay, r.streak, r.topModels, r.topProjects, r.topSessions, r.costDays, r.longestSessions, r.largestSessions, r.cacheHours, r.recordNotes, r.note, r.sessionNote],
+    [null, null, [], [], [], [], [], [], [], [], null, null],
+  )
+  assert.equal(r.attributionOn, true, 'the setting is a fact, not a record')
+  assert.equal(records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 5, '2026-07-01', false, WORDS).longestSessions.length, 0)
+  // Settled (the default) has no sentence.
+  assert.equal(records(ctx, range('30d'), 5, '2026-07-01').reading, null)
+})
+
+/** A version-8 snapshot with one long, large session and one costly day, its session keyed by a path under `project`. */
+function recordSnapshot(project: string): Snapshot {
+  const file = `/home/u/${project}/9d0eb37a-1111-4222-8333-944445555666.jsonl`
+  const main = mainRec('9d0eb37a-1111-4222-8333-944445555666', NOW - 5 * H, NOW - H, 400_000)
+  const agent = agentRec('a0000000000000009', main.sessionId, NOW - 2 * H, 30_000, file)
+  return {
+    version: 8, buckets: [priced('2026-09-02', 4_000_000), written(3, 1_000_000)], cursors: {}, pending: {}, sessions: {}, attribution: 'none',
+    rollup: { lastRun: 0, hourRetentionDays: 0, retentionDays: 0 }, firstIngest: NOW - 30 * 24 * H,
+    agents: { [`/home/u/${project}/9d0eb37a-1111-4222-8333-944445555666/subagents/agent-a0000000000000009.jsonl`]: agent },
+    mains: { [file]: main },
+  } as unknown as Snapshot
+}
+
+test('1.11 B8 5: nothing is invented across a rescan — the records are built from what the aggregator holds, and it holds none of them', () => {
+  const before = Aggregator.fromSnapshot(recordSnapshot('synthetic-project-123'), 'none')
+  const r = records(ctxOf(before, { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.equal(r.costDays[0]?.day, '2026-09-02')
+  assert.equal(r.longestSessions[0]?.sessionId, '9d0eb37a-1111-4222-8333-944445555666')
+  assert.equal(r.largestSessions[0]?.usage, '430K')
+  assert.equal(r.cacheHours[0]?.written, '1M')
+  // The snapshot the aggregator writes carries no record of the Records.
+  const snap = before.toSnapshot() as unknown as Record<string, unknown>
+  assert.equal(Object.keys(snap).some((k) => /record|costDay|longest|largest|cacheHour/i.test(k)), false, Object.keys(snap).join(', '))
+  // A rescan that reads less: its aggregator, from a snapshot without the session and the day, shows neither.
+  const after = Aggregator.fromSnapshot({ ...before.toSnapshot(), buckets: [], mains: {}, agents: {} } as Snapshot, 'none')
+  const again = records(ctxOf(after, { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.deepEqual([again.costDays, again.longestSessions, again.largestSessions, again.cacheHours], [[], [], [], []])
+})
+
+test('1.11 §0a.2 leak test: the session is ranked by its name, and its path — the project folder — reaches no record, no flat view and no export', () => {
+  const SECRET = 'synthetic-project-123'
+  const agg = Aggregator.fromSnapshot(recordSnapshot(SECRET), 'none')
+  // The path is in the aggregator — the index is keyed by it — and the fixture is live.
+  assert.ok(agg.mainEntries().some(([file]) => file.includes(SECRET)))
+  assert.ok(agg.agents().some((a) => a.sessionFile.includes(SECRET)))
+  const cfg = makeConfig({ 'tokenPace.dashboard.sections': ['quota', 'records'] })
+  const vm = buildViewModel(makeInput({ agg, cfg }))
+  assert.deepEqual(vm.records.longestSessions.map((s) => s.name), ['Session Thu 07:00 · 9d0eb37a'])
+  assert.equal(JSON.stringify(vm.records).includes(SECRET), false, 'vm.records')
+  assert.equal(JSON.stringify(quickPickItems(vm)).includes(SECRET), false, 'the Quick Pick')
+  assert.ok(quickPickItems(vm).some((i) => i.label.startsWith('Longest session Session Thu 07:00 · 9d0eb37a')))
+  assert.equal(markdownDocument(vm).includes(SECRET), false, 'the markdown document')
+  assert.equal(toMarkdownSummary(vm).includes(SECRET), false, 'Copy Usage Summary')
+  const exportRange = { from: '2026-08-01', to: TODAY }
+  assert.equal(toCsv(agg, exportRange, cfg, tcfg).includes(SECRET), false, 'the CSV')
+  assert.equal(toJson(agg, exportRange, cfg, tcfg, NOW).includes(SECRET), false, 'the JSON')
 })

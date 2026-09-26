@@ -511,10 +511,15 @@ function agentPickLines(vm: ViewModel): PickItem[] {
  * The two day records are always stated, with a dash where there is none: "no peak day" is a
  * fact about the range, and leaving the row out would look like a rendering that forgot it.
  * The three tables are as long as `dashboard.topN` allows and no longer.
+ *
+ * 1.11 B6: then the four tables of 1.11 — one item per row, a whole key naming the table, the row and
+ * its main figure, the other figures in the description (`⚠ lower bound` where one is a floor) — and
+ * every note as an item of its own. While the history is being read (B4) the one sentence is all.
  */
 function recordLines(vm: ViewModel): PickItem[] {
   const r = vm.records
   const out: PickItem[] = []
+  if (r.reading) return [{ label: r.reading }]
   out.push({
     label: t('Record peak day: {0}', r.peakDay ? `${r.peakDay.day} — ${r.peakDay.usage}` : '–'),
     description: r.peakDay && r.peakDay.cost !== '–'
@@ -542,7 +547,27 @@ function recordLines(vm: ViewModel): PickItem[] {
   if (!r.attributionOn) {
     out.push({ label: t('Top projects and sessions need tokenPace.attribution'), command: 'tokenPace.openSettings' })
   }
-  for (const n of [r.note, r.sessionNote]) if (n) out.push({ label: n })
+  // The other figures of a row — a dash is no figure, and a line of dashes says nothing —, then the mark
+  // of a floor in words: a flat list has no legend beside it.
+  const rest = (figures: Array<string | null>, floor: boolean): string =>
+    [...figures.filter((f) => f !== '–'), floor ? `⚠ ${t('lower bound')}` : null].filter(Boolean).join(' · ')
+  for (const d of r.costDays) {
+    out.push({ label: t('Most expensive day {0}: {1}', d.day, d.cost), description: rest([d.usage], d.floor) })
+  }
+  for (const s of r.longestSessions) {
+    out.push({ label: t('Longest session {0}: {1}', s.name, s.time), description: rest([s.usage, s.start], false) })
+  }
+  for (const s of r.largestSessions) {
+    out.push({ label: t('Largest session {0}: {1}', s.name, s.usage), description: rest([s.time, s.start], false) })
+  }
+  for (const h of r.cacheHours) {
+    out.push({
+      label: t('Most cache written {0}: {1}', h.hour, h.written),
+      // The 1-hour part says what it is: a bare second token figure beside the first would read as a total.
+      description: rest([h.written1h === '–' ? null : t('of it 1 h: {0}', h.written1h), h.cost, h.models], h.floor),
+    })
+  }
+  for (const n of [r.note, r.sessionNote, ...r.recordNotes]) if (n) out.push({ label: n })
   return out
 }
 
@@ -857,6 +882,53 @@ function agentLines(vm: ViewModel, textTree?: AgentTreeVm | null): string[] {
 }
 
 /**
+ * The Records section of the markdown document: the two day records, the three top tables, then (1.11 B6)
+ * the four tables of 1.11 — each under one whole header key, a figure that is a floor marked ⚠ as the peak
+ * day's is — and every note in italics. A table without a row is left out; its line is among the notes.
+ */
+function markdownRecords(L: string[], rec: ViewModel['records']): void {
+  L.push(t('Peak day: {0}', rec.peakDay ? `${rec.peakDay.day} — ${rec.peakDay.usage}` : '–')
+    + (rec.peakDay && rec.peakDay.cost !== '–'
+      ? ` · ${rec.peakDay.cost}${rec.peakDay.costPartial ? ' ⚠' : ''}` : ''))
+  L.push('')
+  L.push(t('Longest streak: {0}',
+    rec.streak ? `${dayCount(rec.streak.days)} · ${rec.streak.from} → ${rec.streak.to}` : '–'))
+  L.push('')
+  // One key per header row: "Top model" and "Top project" are not the same word with a noun
+  // swapped in every language, and a row assembled from parts could not be reordered.
+  for (const [header, rows] of [
+    [t('| Top model | Detail | Usage | Share | API cost |'), rec.topModels],
+    [t('| Top project | Detail | Usage | Share | API cost |'), rec.topProjects],
+    [t('| Top session | Detail | Usage | Share | API cost |'), rec.topSessions],
+  ] as const) {
+    if (rows.length === 0) continue
+    L.push(header)
+    L.push('|---|---|---|---|---|')
+    for (const e of rows) {
+      L.push(`| ${cell(e.label)} | ${cell(e.detail)} | ${cell(e.usage)} | ${cell(e.share)} | ${cell(e.cost)} |`)
+    }
+    L.push('')
+  }
+  if (!rec.attributionOn) L.push(`_${t('Top projects and sessions need `tokenPace.attribution`.')}_`, '')
+  const marked = (figure: string, floor: boolean): string => (floor ? `${figure} ⚠` : figure)
+  const table = (header: string, separator: string, rows: string[][]): void => {
+    if (rows.length === 0) return
+    L.push(header, separator)
+    for (const r of rows) L.push(`| ${r.map(cell).join(' | ')} |`)
+    L.push('')
+  }
+  table(t('| Most expensive day | API cost | Usage |'), '|---|---|---|',
+    rec.costDays.map((d) => [d.day, marked(d.cost, d.floor), d.usage]))
+  table(t('| Longest session | Time | Usage | Started |'), '|---|---|---|---|',
+    rec.longestSessions.map((s) => [s.name, s.time, s.usage, s.start]))
+  table(t('| Largest session | Usage | Time | Started |'), '|---|---|---|---|',
+    rec.largestSessions.map((s) => [s.name, s.usage, s.time, s.start]))
+  table(t('| Hour | Cache written | Of it 1 h | API cost | Models |'), '|---|---|---|---|---|',
+    rec.cacheHours.map((h) => [h.hour, h.written, h.written1h, marked(h.cost, h.floor), h.models]))
+  for (const n of [rec.note, rec.sessionNote, ...rec.recordNotes]) if (n) L.push(`_${n}_`, '')
+}
+
+/**
  * The read-only `tokenpace:/usage.md` document — the same figures as tables. `textTree` is the
  * agent tree with every node open (1.6 D3), built for the document; without it the Agents
  * section prints the view model's, which holds what the dashboard has open.
@@ -1111,30 +1183,9 @@ export function markdownDocument(vm: ViewModel, textTree?: AgentTreeVm | null): 
 
   L.push(`## ${t('Records')}`, '')
   const rec = vm.records
-  L.push(t('Peak day: {0}', rec.peakDay ? `${rec.peakDay.day} — ${rec.peakDay.usage}` : '–')
-    + (rec.peakDay && rec.peakDay.cost !== '–'
-      ? ` · ${rec.peakDay.cost}${rec.peakDay.costPartial ? ' ⚠' : ''}` : ''))
-  L.push('')
-  L.push(t('Longest streak: {0}',
-    rec.streak ? `${dayCount(rec.streak.days)} · ${rec.streak.from} → ${rec.streak.to}` : '–'))
-  L.push('')
-  // One key per header row: "Top model" and "Top project" are not the same word with a noun
-  // swapped in every language, and a row assembled from parts could not be reordered.
-  for (const [header, rows] of [
-    [t('| Top model | Detail | Usage | Share | API cost |'), rec.topModels],
-    [t('| Top project | Detail | Usage | Share | API cost |'), rec.topProjects],
-    [t('| Top session | Detail | Usage | Share | API cost |'), rec.topSessions],
-  ] as const) {
-    if (rows.length === 0) continue
-    L.push(header)
-    L.push('|---|---|---|---|---|')
-    for (const e of rows) {
-      L.push(`| ${cell(e.label)} | ${cell(e.detail)} | ${cell(e.usage)} | ${cell(e.share)} | ${cell(e.cost)} |`)
-    }
-    L.push('')
-  }
-  if (!rec.attributionOn) L.push(`_${t('Top projects and sessions need `tokenPace.attribution`.')}_`, '')
-  for (const n of [rec.note, rec.sessionNote]) if (n) L.push(`_${n}_`, '')
+  // 1.11 B4: while the history is being read, the one sentence and no record.
+  if (rec.reading) L.push(rec.reading, '')
+  else markdownRecords(L, rec)
 
   L.push(`## ${t('Tools')}`, '')
   const tools = vm.tools

@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 25,
+  "applied": 43,
   "bundle": {
     "Dutch": {
       "parts": [
@@ -85,6 +85,118 @@
       ],
       "state": "translate",
       "why": "a new language of the picker, named in your language beside its own name Română (as German stands beside Deutsch) — 1.11 A1"
+    },
+    "⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the note under the Records section's new table of the most expensive days: what its ⚠ mark means — 1.11 B1"
+    },
+    "Claude Code sessions of the last {0} days that are no longer active — the Agents section keeps a session for {0} days after its last line. Time runs from its first counted line to its last, pauses included; usage is its own and its agents'.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the note under the Records section's new tables of the longest and the largest sessions: which sessions they rank and how time and usage are counted ({0} is the number of days, 7) — 1.11 B2"
+    },
+    "{0} active session(s) not ranked yet: their time and tokens are still growing.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a note of the Records section: how many sessions still running are left out of the longest and largest sessions — 1.11 B2"
+    },
+    "A large cache write is usually a cold start — a conversation's prefix written to the cache again after it expired —, a new conversation or a compaction; one hour can hold several.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the note under the Records section's new table of the hours with the most cache written: what a large write usually is — 1.11 B3"
+    },
+    "No cache write counted in this range.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the Records section's line in place of the table of the hours with the most cache written when no hour of the range wrote any — 1.11 B3"
+    },
+    "Hour buckets are kept for {0} days (tokenPace.hourRetentionDays); earlier hours are not ranked.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a note of the Records section: the hours with the most cache written reach back only as far as the hour buckets are kept ({0} is the setting's number of days) — 1.11 B3"
+    },
+    "The most expensive days need tokenPace.showCost.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the Records section's line in place of the table of the most expensive days while costs are switched off — 1.11 B1"
+    },
+    "Most expensive day {0}: {1}": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "a Quick Pick line of the Records: a day ({0}) and its cost ({1}) — 1.11 B6"
+    },
+    "Longest session {0}: {1}": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "a Quick Pick line of the Records: a session's name ({0}, e.g. Session Tue 14:20 · 9d0eb37a) and its time from first to last line ({1}) — 1.11 B6"
+    },
+    "Largest session {0}: {1}": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "a Quick Pick line of the Records: a session's name ({0}) and its tokens ({1}) — 1.11 B6"
+    },
+    "Most cache written {0}: {1}": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "a Quick Pick line of the Records: an hour ({0}, a date and a clock time) and the tokens written to the prompt cache in it ({1}) — 1.11 B6"
+    },
+    "of it 1 h: {0}": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "in a Quick Pick line of the hours with the most cache written: the part of the tokens written to the cache with the one-hour lifetime — 1.11 B6"
+    },
+    "| Most expensive day | API cost | Usage |": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the header row of the markdown view's table of the most expensive days — keep the four pipes — 1.11 B6"
+    },
+    "| Longest session | Time | Usage | Started |": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the header row of the markdown view's table of the longest sessions — keep the five pipes — 1.11 B6"
+    },
+    "| Largest session | Usage | Time | Started |": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the header row of the markdown view's table of the largest sessions — keep the five pipes — 1.11 B6"
+    },
+    "| Hour | Cache written | Of it 1 h | API cost | Models |": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the header row of the markdown view's table of the hours with the most cache written — keep the six pipes — 1.11 B6"
     }
   },
   "nls": {
@@ -139,6 +251,14 @@
     "config.language.description": {
       "state": "review",
       "why": "the third paragraph counts the languages beyond English and German as twenty-four (was twelve), the rest is unchanged — 1.11 A2"
+    },
+    "config.dashboard.sections.enum.records": {
+      "state": "review",
+      "why": "the records value of the sections setting now also names the section's four new tables — the most expensive days, the longest and largest Claude Code sessions and the hours with the most cache written — 1.11 B7"
+    },
+    "config.dashboard.topN.description": {
+      "state": "review",
+      "why": "the first paragraph now also names the Records section's four new tables, which follow the same number of rows (the second paragraph is unchanged) — 1.11 B5"
     }
   }
 }

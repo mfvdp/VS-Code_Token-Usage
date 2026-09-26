@@ -1954,8 +1954,13 @@ test('under Codex the markdown, the Quick Pick and Copy Summary follow the switc
   const md = markdownDocument(codex.vm, codex.text)
   assert.equal(md.includes('## Agents'), false, 'the Agents section is in the Codex markdown')
   assert.equal(md.includes('## Context window'), false, 'the Context window section is in the Codex markdown')
-  assert.equal(md.includes(CLAUDE_ONLY_LINE), false)
-  assert.equal(md.includes('Claude Code'), false, md.split('\n').filter((l) => l.includes('Claude Code')).join('\n'))
+  // 1.11 §3.0 (c) (rewritten, was: the reason and "Claude Code" nowhere in the text): the Records section is no
+  // Claude Code–only section, and in place of its two session tables it says why they are not there — that one
+  // line, once, in ## Records, is the only one naming Claude Code.
+  const claudeLines = md.split('\n').filter((l) => l.includes('Claude Code') || l.includes(CLAUDE_ONLY_LINE))
+  assert.deepEqual(claudeLines, [`_${CLAUDE_ONLY_LINE}_`], claudeLines.join('\n'))
+  const records = md.split('## Records')[1].split('\n## ')[0]
+  assert.ok(records.includes(`_${CLAUDE_ONLY_LINE}_`), records)
   assert.equal(/claude-/.test(md), false, md.split('\n').filter((l) => /claude-/.test(l)).join('\n'))
   assert.ok(md.includes('## Tokens — Codex'))
   assert.ok(md.includes('- Showing Codex only — the provider switch at the top of the dashboard; ‘All’ shows every provider.'))
@@ -1971,7 +1976,13 @@ test('under Codex the markdown, the Quick Pick and Copy Summary follow the switc
   assert.equal(heads.includes('Context window'), false, heads.join(', '))
   assert.ok(quickPickItems(all.vm).some((i) => i.separator === true && i.label === 'Agents'))
   const said = items.map((i) => [i.label, i.description ?? '', i.detail ?? ''].join(' | '))
-  assert.deepEqual(said.filter((l) => l.includes('Claude Code') || /claude-/.test(l) || l.includes(CLAUDE_ONLY_LINE)), [])
+  // 1.11 §3.0 (c) (rewritten, was: none at all): the Records group's one line in place of its session tables.
+  assert.deepEqual(said.filter((l) => l.includes('Claude Code') || /claude-/.test(l) || l.includes(CLAUDE_ONLY_LINE)),
+    [`${CLAUDE_ONLY_LINE} |  | `])
+  const recordsAt = items.findIndex((i) => i.separator === true && i.label === 'Records')
+  const toolsAt = items.findIndex((i) => i.separator === true && i.label === 'Tools')
+  const lineAt = items.findIndex((i) => i.label === CLAUDE_ONLY_LINE)
+  assert.ok(recordsAt < lineAt && lineAt < toolsAt, 'the line is not in the Records group')
   // Copy Summary: the same view model, its heading naming the provider.
   const summary = toMarkdownSummary(codex.vm)
   assert.ok(summary.split('\n')[0].endsWith(' · Codex only'), summary.split('\n')[0])
@@ -2211,8 +2222,10 @@ test('the Quick Pick carries the card\'s lines — state as the label, cost as t
     if (n > 0) assert.ok(i > at(block.lines[n - 1].text))
   }
   // The warm sessions are not on the card, so not in the list; the latest mirror's warm 1 h cache
-  // keeps its 1.3 line there.
-  assert.equal(items.some((i) => i.label.includes('bbbb2222')), false)
+  // keeps its 1.3 line there. 1.11 B2 (rewritten, was: in no item at all): the Records group ranks the
+  // sessions of the Agents section's index that are no longer active — this one among them, by its name.
+  assert.deepEqual(items.filter((i) => i.label.includes('bbbb2222')).map((i) => i.label.replace(/: .*$/, '')),
+    ['Longest session Session Thu 10:30 · bbbb2222', 'Largest session Session Thu 10:30 · bbbb2222'])
   const oldLine = items.findIndex((i) => i.label.startsWith('prompt cache warm · expires in'))
   assert.ok(oldLine > at(block.lines[2].text) && oldLine < firstCodex)
   // The Codex line after the Codex windows.
@@ -2245,4 +2258,140 @@ test('a line of the block goes through cell() in the markdown and through noIcon
   assert.equal(item.label.includes('\\$(alert)'), true, item.label)
   assert.equal(item.description?.includes('\\$(alert)'), true)
   assert.ok(items.some((i) => i.label === noIcons(hostile) && i.description === undefined), 'the count line is not escaped')
+})
+
+// ---------------------------------------------------------------------------
+// 1.11 B6: the four new Records tables in the Quick Pick and the markdown (§3 B8 4 and 6's flat half)
+// ---------------------------------------------------------------------------
+
+/** The fixture's world with a second, idle session: every one of the four new tables has rows. */
+function recordsVm(over: Partial<import('../src/viewModel').VmInput> = {}): ViewModel {
+  const agg = buildAgg()
+  addCacheSession(agg, { sessionId: 'aaaa1111-0000', at: NOW - 56 * 60_000 })
+  return buildViewModel({ ...makeInput({ agg, cfg: makeConfig({ 'tokenPace.dashboard.topN': 3 }) }), ...over })
+}
+
+/** The lines of the markdown's `## Records` section. */
+function recordsPart(md: string): string[] {
+  return md.split('\n## Records\n')[1].split('\n## ')[0].split('\n')
+}
+
+/** The table rows under one header row of a part, up to the blank line after them. */
+function rowsUnder(part: string[], header: string): string[] {
+  const at = part.indexOf(header)
+  if (at < 0) return []
+  const out: string[] = []
+  for (let i = at + 2; i < part.length && part[i].startsWith('| '); i++) out.push(part[i])
+  return out
+}
+
+test('1.11 B6: every row of the four new Records tables reaches the Quick Pick and the markdown once, with every figure, and every note both — and no more rows than the view model holds', () => {
+  const vm = recordsVm()
+  const r = vm.records
+  assert.ok(r.costDays.length > 0 && r.longestSessions.length > 0 && r.largestSessions.length > 0 && r.cacheHours.length > 0,
+    JSON.stringify(r))
+  assert.ok(r.costDays.some((d) => d.floor), 'the fixture\'s day with an unpriced model is a floor')
+  const items = quickPickItems(vm)
+  const part = recordsPart(markdownDocument(vm))
+  const item = (label: string): PickItem => {
+    const found = items.filter((i) => i.label === label)
+    assert.equal(found.length, 1, `${found.length} items: ${label}`)
+    return found[0]
+  }
+  const row = (cells: string[]): void => {
+    const line = `| ${cells.join(' | ')} |`
+    assert.equal(part.filter((l) => l === line).length, 1, `${line}\n${part.join('\n')}`)
+  }
+  for (const d of r.costDays) {
+    assert.equal(item(`Most expensive day ${d.day}: ${d.cost}`).description, d.floor ? `${d.usage} · ⚠ lower bound` : d.usage)
+    row([d.day, d.floor ? `${d.cost} ⚠` : d.cost, d.usage])
+  }
+  for (const s of r.longestSessions) {
+    assert.equal(item(`Longest session ${s.name}: ${s.time}`).description, `${s.usage} · ${s.start}`)
+    row([s.name, s.time, s.usage, s.start])
+  }
+  for (const s of r.largestSessions) {
+    assert.equal(item(`Largest session ${s.name}: ${s.usage}`).description, `${s.time} · ${s.start}`)
+    row([s.name, s.usage, s.time, s.start])
+  }
+  for (const h of r.cacheHours) {
+    const figures = [h.written1h === '–' ? null : `of it 1 h: ${h.written1h}`, h.cost === '–' ? null : h.cost, h.models, h.floor ? '⚠ lower bound' : null]
+    assert.equal(item(`Most cache written ${h.hour}: ${h.written}`).description, figures.filter(Boolean).join(' · '))
+    row([h.hour, h.written, h.written1h, h.floor ? `${h.cost} ⚠` : h.cost, h.models])
+  }
+  // The other way round: no item and no row the view model does not hold.
+  for (const [label, header, rows] of [
+    ['Most expensive day ', '| Most expensive day | API cost | Usage |', r.costDays],
+    ['Longest session ', '| Longest session | Time | Usage | Started |', r.longestSessions],
+    ['Largest session ', '| Largest session | Usage | Time | Started |', r.largestSessions],
+    ['Most cache written ', '| Hour | Cache written | Of it 1 h | API cost | Models |', r.cacheHours],
+  ] as const) {
+    assert.equal(items.filter((i) => i.label.startsWith(label)).length, rows.length, label)
+    assert.equal(rowsUnder(part, header).length, rows.length, header)
+  }
+  // The notes: each an item and an italic line, once.
+  assert.ok(r.recordNotes.length >= 3, r.recordNotes.join('\n'))
+  for (const n of r.recordNotes) {
+    item(n)
+    assert.equal(part.filter((l) => l === `_${n}_`).length, 1, n)
+  }
+  // The order of the section: the three top tables' part, then the four new tables, then the notes.
+  const at = (label: string): number => items.findIndex((i) => i.label.startsWith(label))
+  assert.ok(at('Top model ') < at('Most expensive day ') && at('Most expensive day ') < at('Longest session ')
+    && at('Longest session ') < at('Largest session ') && at('Largest session ') < at('Most cache written ')
+    && at('Most cache written ') < at(r.recordNotes[0]), items.map((i) => i.label).join('\n'))
+})
+
+test('1.11 B4: while the history is being read the Records are one line in the Quick Pick and in the markdown, and nothing else', () => {
+  const vm = recordsVm({ settled: false })
+  assert.equal(vm.records.reading, 'Reading history…')
+  const items = quickPickItems(vm)
+  const from = items.findIndex((i) => i.separator === true && i.label === 'Records')
+  const to = items.findIndex((i) => i.separator === true && i.label === 'Tools')
+  assert.ok(from >= 0 && to > from)
+  assert.deepEqual(items.slice(from + 1, to).map((i) => i.label), ['Reading history…'])
+  assert.deepEqual(recordsPart(markdownDocument(vm)).filter(Boolean), ['Reading history…'])
+  // Settled — stated, or absent as in every build before 1.11 — the section is as it was.
+  for (const settled of [true, undefined]) {
+    const back = recordsVm(settled === undefined ? {} : { settled })
+    assert.equal(back.records.reading, null)
+    assert.ok(quickPickItems(back).some((i) => i.label.startsWith('Record peak day: ')))
+  }
+})
+
+test('1.11 B6: a cell of the new tables goes through cell() in the markdown — a pipe and a line break stay inside it', () => {
+  const vm = recordsVm()
+  vm.records.cacheHours[0] = { ...vm.records.cacheHours[0], models: 'x | y\n## z' }
+  vm.records.longestSessions[0] = { ...vm.records.longestSessions[0], name: 'a|b' }
+  const part = recordsPart(markdownDocument(vm))
+  assert.ok(part.some((l) => l.endsWith(' | x \\| y ## z |')), part.join('\n'))
+  assert.ok(part.some((l) => l.startsWith('| a\\|b | ')), part.join('\n'))
+  assert.equal(part.some((l) => l.startsWith('## z')), false)
+})
+
+test('1.11 B7: in German the four tables\' lines, header rows and notes are German', () => {
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  let items: PickItem[] = []
+  let part: string[] = []
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    const vm = recordsVm()
+    items = quickPickItems(vm)
+    part = recordsPart(markdownDocument(vm).replace('\n## Rekorde\n', '\n## Records\n'))
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+  for (const label of ['Teuerster Tag ', 'Längste Sitzung Sitzung ', 'Größte Sitzung Sitzung ', 'Meistes Cache-Schreiben ']) {
+    assert.ok(items.some((i) => i.label.startsWith(label)), label)
+  }
+  assert.ok(items.some((i) => (i.description ?? '').endsWith('⚠ Untergrenze')), 'the floor day in German')
+  for (const header of ['| Teuerster Tag | API-Kosten | Verbrauch |', '| Längste Sitzung | Zeit | Verbrauch | Beginn |',
+    '| Größte Sitzung | Verbrauch | Zeit | Beginn |', '| Stunde | Cache geschrieben | davon 1 h | API-Kosten | Modelle |']) {
+    assert.ok(part.includes(header), `${header}\n${part.join('\n')}`)
+  }
+  assert.ok(part.includes('_⚠ = Untergrenze: Der Tag enthält Verbrauch ohne hinterlegten Preis, oder an ihm beginnen die Transkripte auf dem Datenträger._'))
+  assert.ok(part.some((l) => l.startsWith('_Claude-Code-Sitzungen der letzten 7 Tage, die nicht mehr aktiv sind')), part.join('\n'))
+  assert.ok(part.some((l) => l.startsWith('_Ein großes Cache-Schreiben ist meist ein Kaltstart')), part.join('\n'))
 })

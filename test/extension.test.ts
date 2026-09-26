@@ -4785,3 +4785,56 @@ test('1.10 Review 2 F1: the exported promptSendCheck answers its verdict only wh
     assert.deepEqual(disposeAll(LIVE.pop()!), [])
   }
 })
+
+// ---------------------------------------------------------------------------
+// 1.11 B4 (§0a.4): the host hands `settled` to the view model — no record while the history is read
+// ---------------------------------------------------------------------------
+
+test('1.11 B4: while the cold scan reads, the page\'s Records say "Reading history…" and hold no record; after it, the records are there', async () => {
+  const settings = { 'tokenPace.dashboard.sections': ['quota', 'records'] }
+  type Payload = { records: { reading: string | null; peakDay: unknown; topModels: unknown[]; costDays: unknown[]; cacheHours: unknown[] } }
+  const lastRecords = (sent: unknown[]): Payload['records'] | undefined => {
+    const carrying = sent.filter((m) => {
+      const { type, key } = m as { type?: unknown; key?: unknown }
+      return type === 'data' || (type === 'section' && key === 'records')
+    }) as Array<{ payload: Payload }>
+    return carrying[carrying.length - 1]?.payload.records
+  }
+  // A worker that never answers: the scan is still reading whenever the page looks (as the 1.6 R3 test's).
+  const slow = tmpDir('tp-slow-worker')
+  fs.mkdirSync(path.join(slow, 'dist'), { recursive: true })
+  fs.writeFileSync(path.join(slow, 'dist', 'scanWorker.js'), 'setInterval(() => undefined, 60_000)\n')
+  type Threads = typeof import('worker_threads')
+  const threads = require('worker_threads') as Threads
+  const RealWorker = threads.Worker
+  const made: Array<InstanceType<Threads['Worker']>> = []
+  class SpyWorker extends RealWorker {
+    constructor(file: string | URL, options?: import('worker_threads').WorkerOptions) {
+      super(file, options)
+      made.push(this)
+    }
+  }
+  (threads as { Worker: unknown }).Worker = SpyWorker
+  try {
+    await activateHost(makeFixture(), slow, { settings })
+    assert.equal(made.length, 1, 'the cold scan started no worker')
+    const page = openDashboard()
+    await waitFor('the records on the page', () => lastRecords(page.sent) !== undefined)
+    const reading = lastRecords(page.sent)!
+    assert.equal(reading.reading, 'Reading history…')
+    assert.deepEqual([reading.peakDay, reading.topModels, reading.costDays, reading.cacheHours], [null, [], [], []])
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    (threads as { Worker: unknown }).Worker = RealWorker
+    for (const w of made) void w.terminate()
+  }
+
+  // The same fixture read to its end: settled, and the records are the transcripts'.
+  await activateHost(makeFixture(), REPO, { settings })
+  await waitOwnColdStart(state)
+  const page = openDashboard()
+  await waitFor('the settled records on the page', () => lastRecords(page.sent)?.reading === null)
+  const records = lastRecords(page.sent)!
+  assert.ok(records.topModels.length > 0, JSON.stringify(records))
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})

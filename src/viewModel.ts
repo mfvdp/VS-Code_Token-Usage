@@ -15,7 +15,7 @@
 
 import { SOURCES, USAGE_PAGE } from './adapters'
 import { AGENT_RETENTION_DAYS, AgentTreeVm, HookEntry, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
-import { buildAgentTree } from './agentTreeBuild'
+import { buildAgentTree, sessionName, spanText } from './agentTreeBuild'
 import { Aggregator, HourQuery, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
 import {
@@ -51,10 +51,10 @@ import { turnedOver } from './resetRule'
 import type { ContextReading, PromptCacheReading } from './quotaSources'
 import type { AgentKind } from './terminalWatch'
 import {
-  CHART_SPLITS, CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartSplit,
-  CompositionEntry, DrillData, HeatmapData, HourSums, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
+  CHART_SPLITS, CacheEconomyRow, CacheHourRecord, CalendarRows, ChartData, ChartSeries, ChartSplit,
+  CompositionEntry, CostDayRecord, DrillData, HeatmapData, HourSums, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
   ModelSort, ModelSortKey, MODEL_SORT_KEYS, PeriodRow, PlanFactorRow, ProjectRow, RecordEntry, RecordsData,
-  SOURCE_TITLE, SessionRow, StatsCtx, TotalRow, TotalsWindow,
+  SOURCE_TITLE, SessionRecord, SessionRow, StatsCtx, TotalRow, TotalsWindow,
   cacheEconomy, cacheStates, calendar, chart, composition,
   drill as drillStats, filterFor, heatmap, hours, kpis, localBlock, modelTable, planFactors,
   projectRows, records as recordsOf, sessionRows, totalsFor, totalsWindowSpans,
@@ -69,9 +69,9 @@ import {
 } from './types'
 
 export type {
-  CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartSplit, CompositionEntry, DrillData,
-  HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow,
-  PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRow, TotalRow,
+  CacheEconomyRow, CacheHourRecord, CalendarRows, ChartData, ChartSeries, ChartSplit, CompositionEntry, CostDayRecord,
+  DrillData, HeatmapData, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow, ModelSort, ModelSortKey, PeriodRow,
+  PlanFactorRow, ProjectRow, RecordEntry, RecordsData, SessionRecord, SessionRow, TotalRow,
 }
 
 /** Re-exported so a view names a budget row from the model that produced it. */
@@ -894,6 +894,13 @@ export interface VmInput {
   forecastCfg: ForecastConfig
   /** A cold scan is still running — the first-run card says "reading history" instead of "empty". */
   scanning?: boolean
+  /**
+   * 1.11 B4 (§0a.4): no cold scan and no replay of the agent tables is under way — extension.ts's
+   * `!(scanning || replayRun !== null)`, the fact the keep-warm frame and a prompt's send decision read
+   * (1.10 B7). While it is false the Records section says "Reading history…" and shows no record: the
+   * day sums and the session index are still being filled. Absent means true.
+   */
+  settled?: boolean
   /**
    * The status line's context reading, straight from `quotaManager.contextReading()`. Absent
    * or null renders no card at all — this figure has no second source.
@@ -2223,7 +2230,10 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     hours: hours(ctx, range, ui.hourZone),
     // The same coverage day the heatmap gets: a day before the first ingest is unwatched in
     // both, and a streak that disagreed with the calendar beside it would be a second answer.
-    records: recordsOf(ctx, range, cfg.dashboard.topN, firstDay),
+    // 1.11 B: the Agents tree's own words for a session (agentTreeBuild.ts, see `RecordsWords`), and no
+    // record at all while the history is still being read (B4).
+    records: recordsOf(ctx, range, cfg.dashboard.topN, firstDay, input.settled !== false,
+      { sessionName, spanText, hourRetentionDays: cfg.hourRetentionDays }),
     // The same cap the records tables use: two "top n" tables on one page that disagree
     // about n would look like two different measurements.
     tools: toolRows(ctx, range, cfg.dashboard.topN),

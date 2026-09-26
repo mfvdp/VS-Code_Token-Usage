@@ -8654,7 +8654,11 @@ test('no push carries a prompt-cache block\'s `all` or `allMoreText` — the who
   r.advance(AG_NOW + 10_000)
   r.p.update(later as never)
   assert.deepEqual(r.posted.map((m) => m.type), ['data', 'section'])
-  const text = JSON.stringify(r.posted)
+  // 1.11 B2 (rewritten, was: the whole push stringified): the Records section ranks every session of the Agents
+  // section's index that is no longer active, this one too, by its name (`records`, drawn when the section is
+  // listed) — every other part of every push still never names it.
+  const text = JSON.stringify(r.posted, (k, v: unknown) => (k === 'records' ? undefined : v))
+  assert.ok(JSON.stringify(r.posted).includes('bbbb2222'), 'the fixture no longer ranks the warm session among the records')
   assert.equal(/"all(MoreText)?":/.test(text), false, 'a push carries the block\'s `all`')
   assert.equal(text.includes('bbbb2222'), false, 'a push names the warm session the page never draws')
   // A change of `all` alone — the warm session's countdown — is nothing the page would see: no fragment.

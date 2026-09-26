@@ -490,6 +490,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       fingerprints: quotaMgr.fingerprints(),
       forecastCfg: forecastConfig(),
       scanning,
+      // 1.11 B4 (§0a.4): the Records show none while a cold scan or the agent tables' replay is under way.
+      settled: !(scanning || replayRun !== null),
       // The accessor, not a second read: `current()` above (and in `render`) is what filled
       // it, so the card and the status-bar item describe the same mirror.
       context: quotaMgr.contextReading(),

@@ -346,3 +346,17 @@ test('the Prompts section\'s four manifest rows: its enum value with its words, 
   // The German key names follow VS Code's (§6): Eingabetaste, never „Enter-Taste".
   assert.equal(germanNls['config.dashboard.sections.enum.prompts'].includes('Enter'), false)
 })
+
+test('the Records rows of the manifest name the four tables of 1.11 — the records value of the sections setting and topN\'s first paragraph, its second unchanged — in both languages (1.11 B5, B7)', () => {
+  assert.equal(englishNls['config.dashboard.sections.enum.records'],
+    'Records of the selected range: peak day, longest streak with usage, the top models, projects and sessions, the most expensive days, the longest and largest Claude Code sessions, and the hours with the most cache written')
+  assert.equal(germanNls['config.dashboard.sections.enum.records'],
+    'Rekorde des gewählten Zeitraums: Spitzentag, längste Strecke mit Verbrauch, die stärksten Modelle, Projekte und Sitzungen, die teuersten Tage, die längsten und größten Claude-Code-Sitzungen sowie die Stunden mit dem meisten Cache-Schreiben')
+  const [en, en2, ...enRest] = englishNls['config.dashboard.topN.description'].split('\n\n')
+  const [de, de2, ...deRest] = germanNls['config.dashboard.topN.description'].split('\n\n')
+  assert.deepEqual([enRest, deRest], [[], []])
+  assert.equal(en, 'How many rows each table of the `records` and `tools` sections of `#tokenPace.dashboard.sections#` shows — top models, projects, sessions and tools, the most expensive days, the longest and largest sessions and the hours with the most cache written.')
+  assert.equal(de, 'Wie viele Zeilen jede Tabelle der Abschnitte `records` und `tools` von `#tokenPace.dashboard.sections#` zeigt — die stärksten Modelle, Projekte, Sitzungen und Tools, die teuersten Tage, die längsten und größten Sitzungen und die Stunden mit dem meisten Cache-Schreiben.')
+  assert.equal(en2, 'A cap on what is *listed*, never on what is counted: the shares beside the rows are shares of everything in the range.')
+  assert.equal(de2, 'Eine Grenze für das, was *aufgelistet* wird, nie für das, was gezählt wird: die Anteile neben den Zeilen sind Anteile an allem im Zeitraum.')
+})

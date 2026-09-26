@@ -16,17 +16,18 @@
  */
 
 import { SOURCES, SOURCE_TITLE, maybeAdapterFor } from './adapters'
+import { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } from './agentTree'
 import { Aggregator, BucketFilter, HourQuery, Metric, billable } from './agg'
 import { locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, priceOf } from './prices'
-import { Provenance, compact, decimalText, deltaBadge, estimate, percentOf, usd } from './render'
+import { Provenance, compact, decimalText, deltaBadge, estimate, full, percentOf, usd } from './render'
 import {
-  DayRange, TimeConfig, Zone, addDays, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
+  DayRange, TimeConfig, Zone, addDays, calendarDayOf, clockStamp, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
   localHourOfDay, weekdayOf,
 } from './time'
-import { Attribution, Bucket, SessionRec, Source, Tier } from './types'
+import { AgentRec, Attribution, Bucket, MainRec, SessionRec, Source, Tier, emptyBucket } from './types'
 
 // ---------------------------------------------------------------------------
 // Shapes the view model hands on unchanged (it re-exports these types).
@@ -302,6 +303,86 @@ export interface RecordsData {
   note: string | null
   /** Why a project or session row can carry tokens from outside the range. */
   sessionNote: string | null
+  /**
+   * 1.11 B1: the range's days by their priced cost, highest first — at most `topN`. Empty with `showCost`
+   * off (a line of `recordNotes` says why) and while `reading`.
+   */
+  costDays: CostDayRecord[]
+  /**
+   * 1.11 B2: the Claude Code sessions of the Agents section's index that are no longer active, by the time
+   * from their first counted line to their last and by their usage — at most `topN` each. Claude Code only:
+   * empty under a provider view without it (a line of `recordNotes` says so).
+   */
+  longestSessions: SessionRecord[]
+  largestSessions: SessionRecord[]
+  /** 1.11 B3: the hours with the most cache written, from the hour buckets — at most `topN`. */
+  cacheHours: CacheHourRecord[]
+  /**
+   * 1.11 B4: "Reading history…" while the host is still reading the transcripts (`VmInput.settled` false) —
+   * then every record above is empty: the peak day and the streak null, every table empty, no note.
+   */
+  reading: string | null
+  /**
+   * 1.11: the new tables' notes, in this order — the ⚠ legend, the sessions' basis, the active sessions not
+   * ranked, the cache sentence (or the empty cache table's line), the hour horizon, `showCost` off, Claude
+   * Code only. Each only where it applies.
+   */
+  recordNotes: string[]
+}
+
+/** 1.11 B1: one of the most expensive days of a range. */
+export interface CostDayRecord {
+  /** The ISO day in the configured zone (`dayOfBucket`). */
+  day: string
+  /** `costText` of the day's priced part, at the configured rates. */
+  cost: string
+  /** `tokens` of the day's billable usage, priced or not. */
+  usage: string
+  /** ⚠: a lower bound — the day holds usage without a price on file, or it is the first day of coverage. */
+  floor: boolean
+}
+
+/** 1.11 B2: one Claude Code session of the Agents section's index, as the Records rank it. */
+export interface SessionRecord {
+  /** Never shown whole: `name` carries its first eight characters. */
+  sessionId: string
+  /** The Agents tree's name of the session — "Session Tue 14:20 · 9d0eb37a" (agentTreeBuild.ts `sessionName`). */
+  name: string
+  /** When its first counted line was written — `clockStamp`, the Sessions table's form. */
+  start: string
+  /** From its first counted line to its last, pauses included — the tree's span (agentTreeBuild.ts `spanText`). */
+  time: string
+  /** `tokens` of its own billable usage and its agents'. */
+  usage: string
+}
+
+/** 1.11 B3: one hour of the hour buckets, by the cache it wrote. */
+export interface CacheHourRecord {
+  /** The hour's start as a clock reading in the configured zone — "2026-09-25 14:00". */
+  hour: string
+  /** `tokens` of the cache writes of the hour — every provider, model and tier of the range's filter. */
+  written: string
+  /** `tokens` of the part of them with the 1-hour lifetime; '–' when none. */
+  written1h: string
+  /** `costText` of those writes at the configured rates; '–' without a priced write or with `showCost` off. */
+  cost: string
+  /** ⚠: a lower bound — a write of the hour has no price on file (only while a cost is shown). */
+  floor: boolean
+  /** The models that wrote, the largest writer first, at most two, then how many more. */
+  models: string
+}
+
+/**
+ * 1.11 B2, B3: what `records()` needs besides the context for the session tables and the hour horizon. The
+ * session's name and span are the Agents tree's own words (agentTreeBuild.ts `sessionName`, `spanText`) and
+ * come in from the caller: agentTreeBuild.ts imports this module, and an import the other way would be the
+ * first cycle between the modules. Without them the two session tables stay empty and the horizon is unsaid.
+ */
+export interface RecordsWords {
+  sessionName: (sessionId: string, start: number | null, now: number, tcfg: TimeConfig) => string
+  spanText: (ms: number) => string
+  /** `tokenPace.hourRetentionDays`: how long the hour buckets the cache table ranks are kept. */
+  hourRetentionDays: number
 }
 
 /** A band's place among its provider's bands: 0 is the largest model, 'other' the fold. */
@@ -2033,13 +2114,34 @@ function topOf(
  * watched a day is not the same as having watched an idle one. That is the heatmap's rule,
  * and it shapes the two day records only — the top tables count every bucket in the range,
  * because a bucket is evidence of usage wherever it lies.
+ *
+ * 1.11 B: four more tables — the most expensive days (B1), the longest and the largest Claude Code
+ * sessions (B2), the hours with the most cache written (B3) — each at most `topN` rows (B5). All of
+ * it is computed here, at each build, from what the aggregator holds, and nothing of it is stored: a
+ * rescan that reads fewer transcripts shows fewer records, never an old one. While the host is still
+ * reading the transcripts (`settled` false, B4) no record is shown at all — a peak day read from a
+ * half-read history is as false as a longest session read from a half-replayed index. `words` carries
+ * the Agents tree's own names for a session (see `RecordsWords`).
  */
 export function records(
   ctx: StatsCtx,
   range: DayRange,
   topN: number,
   firstDay?: string | null,
+  settled = true,
+  words?: RecordsWords,
 ): RecordsData {
+  if (!settled) {
+    return {
+      peakDay: null, streak: null, topModels: [], topProjects: [], topSessions: [],
+      // A fact about the setting, not a record: the page still knows why the two tables would be empty.
+      attributionOn: attributionOn(ctx),
+      note: null, sessionNote: null,
+      costDays: [], longestSessions: [], largestSessions: [], cacheHours: [],
+      reading: t('Reading history…'),
+      recordNotes: [],
+    }
+  }
   const today = dayOf(ctx.now, ctx.tcfg)
   // Stated coverage wins; otherwise the first ingest is the only start we know. Null means
   // "no coverage known", and then every day up to today counts as watched — claiming a day
@@ -2053,12 +2155,18 @@ export function records(
   /** Days holding at least one bucket of a model with no price: their cost is a floor. */
   const unpricedDay = new Set<string>()
   const models = new Map<string, { label: string; detail: string | null; usage: number; cost: number; unpriced: boolean }>()
+  /** 1.11 B3: the range's hour buckets that wrote to the cache, by their UTC hour. */
+  const cacheHourAcc = new Map<number, CacheHourAcc>()
   let totalUsage = 0
   let excluded = 0
   for (const b of bucketsIn(ctx, range.from, range.to)) {
     if (b.res === 'm') {
       excluded++
       continue
+    }
+    // Only an hour bucket has an hour: a day bucket's writes take no part in the hours (B3 rule 1).
+    if (b.res === 'h' && b.cacheWrite > 0 && typeof b.hour === 'number' && Number.isFinite(b.hour)) {
+      addCacheHour(cacheHourAcc, b, ctx)
     }
     const day = dayOfBucket(b, ctx.tcfg)
     const use = billable(b)
@@ -2179,7 +2287,227 @@ export function records(
     sessionNote: sessions.length > 0
       ? t('projects and sessions count each session’s whole lifetime, which can reach outside this range')
       : null,
+    ...newRecords(ctx, range, cap, words, {
+      watched: (day) => !(day > today || (coverage !== null && day < coverage)),
+      coverage, today, usageByDay, costByDay, unpricedDay, cacheHourAcc,
+    }),
   }
+}
+
+const MS_DAY = 86_400_000
+/** 1.11 B3: the models a cache hour names before "+n more" — the tools table's two (TOOL_MODELS_SHOWN). */
+const CACHE_HOUR_MODELS = 2
+
+/** 1.11 B3: one UTC hour's cache writes as they are summed. */
+interface CacheHourAcc {
+  written: number
+  written1h: number
+  /** The priced part of the writes' cost. */
+  usd: number
+  /** A write of the hour has no price on file (none, or a fast rate unknown). */
+  unpriced: boolean
+  /** Tokens written per model. */
+  models: Map<string, number>
+}
+
+/**
+ * 1.11 B3 rule 3: the cost of an hour bucket's cache writes — the bucket with every other count taken
+ * out, priced as every cost is (`costOfBucketOn`: the day's dated rule, the 5-minute and the 1-hour write
+ * rates apart, the tier's surcharges, the multiplier). No rate of its own.
+ */
+function addCacheHour(acc: Map<number, CacheHourAcc>, b: Bucket, ctx: StatsCtx): void {
+  const hour = b.hour as number
+  let h = acc.get(hour)
+  if (!h) {
+    h = { written: 0, written1h: 0, usd: 0, unpriced: false, models: new Map() }
+    acc.set(hour, h)
+  }
+  h.written += b.cacheWrite
+  if (b.cacheWrite1h > 0) h.written1h += b.cacheWrite1h
+  h.models.set(b.model, (h.models.get(b.model) ?? 0) + b.cacheWrite)
+  const c = costOfBucketOn({ ...b, input: 0, cacheRead: 0, output: 0, reasoning: 0, webSearch: 0, webFetch: 0 }, ctx)
+  if (c && !c.unpriced) h.usd += c.usd
+  else h.unpriced = true
+}
+
+/** A time stamp: a finite number of milliseconds after the epoch. */
+function isStamp(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0
+}
+
+/** Plain code-unit order: the same on every machine, whatever its locale. */
+function byCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
+ * The billable usage of a main or an agent record — its counters in bucket shape, each finite and positive
+ * or nothing (as the Agents tree reads them), through `billable`: the tree's definition, not a second one.
+ */
+function recordUsage(r: MainRec | AgentRec): number {
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
+  return billable({
+    ...emptyBucket('claude', '*', false, 'standard', 'd', null, ''),
+    input: n(r.input), cacheWrite: n(r.cacheWrite), cacheWrite1h: n(r.cacheWrite1h), cacheRead: n(r.cacheRead),
+    output: n(r.output), reasoning: n(r.reasoning), requests: n(r.requests), outputFinal: n(r.outputFinal),
+  })
+}
+
+/** 1.11 B2: a session the Records may rank — its record, its span and its usage with its agents'. */
+interface EndedSession {
+  rec: MainRec
+  span: number
+  usage: number
+}
+
+/**
+ * 1.11 B2 (§0a.2): the Claude Code sessions of the Agents section's index (`agg.mains()`, the records the
+ * tree reads — never their paths) whose last counted line, and their agents' (the tree calls a session
+ * active through them), is older than SESSION_ACTIVE_MS; and how many were left out for being active.
+ * One record per session id, the newer by `lastTs` (as the tree takes one), within AGENT_RETENTION_DAYS
+ * of its last line (as the tree keeps one); a record without a first and a last line, or whose first
+ * comes after its last, is no session. It counts when its span touches the range's days (the
+ * top-sessions rule) and, under the model chips, when one of its models is chosen. Its usage is its own
+ * and its agents' — every agent of the session within the retention, one record per agent id, the newer
+ * (as the tree counts them) — which the tree shows apart and the note says is a sum.
+ */
+function endedSessions(ctx: StatsCtx, range: DayRange): { ended: EndedSession[]; active: number } {
+  const since = ctx.now - AGENT_RETENTION_DAYS * MS_DAY
+  const byId = new Map<string, MainRec>()
+  for (const m of ctx.agg.mains()) {
+    if (!m || typeof m.sessionId !== 'string' || m.sessionId === '' || !isStamp(m.lastTs)) continue
+    const have = byId.get(m.sessionId)
+    if (!have || m.lastTs > have.lastTs) byId.set(m.sessionId, m)
+  }
+  const agentById = new Map<string, AgentRec>()
+  for (const a of ctx.agg.agents()) {
+    if (!a || typeof a.agentId !== 'string' || a.agentId === '' || typeof a.sessionId !== 'string') continue
+    if (!isStamp(a.lastTs) || a.lastTs < since) continue
+    const have = agentById.get(a.agentId)
+    if (!have || a.lastTs > have.lastTs) agentById.set(a.agentId, a)
+  }
+  const agentUsage = new Map<string, number>()
+  const agentLast = new Map<string, number>()
+  for (const a of agentById.values()) {
+    agentUsage.set(a.sessionId, (agentUsage.get(a.sessionId) ?? 0) + recordUsage(a))
+    agentLast.set(a.sessionId, Math.max(agentLast.get(a.sessionId) ?? 0, a.lastTs))
+  }
+
+  const filter = ctx.models.length > 0 ? new Set(ctx.models) : null
+  const ended: EndedSession[] = []
+  let active = 0
+  for (const m of byId.values()) {
+    if (m.lastTs < since || !isStamp(m.firstTs) || m.firstTs > m.lastTs) continue
+    if (dayOf(m.lastTs, ctx.tcfg) < range.from || dayOf(m.firstTs, ctx.tcfg) > range.to) continue
+    if (filter && !(Array.isArray(m.models) && m.models.some((x) => filter.has(x)))) continue
+    // Its time and its tokens are still growing: ranked once it is idle (B2 rule 2) — its own transcript
+    // and its agents' too, whose usage the row adds to its own.
+    if (ctx.now - Math.max(m.lastTs, agentLast.get(m.sessionId) ?? 0) <= SESSION_ACTIVE_MS) {
+      active++
+      continue
+    }
+    ended.push({ rec: m, span: m.lastTs - m.firstTs, usage: recordUsage(m) + (agentUsage.get(m.sessionId) ?? 0) })
+  }
+  return { ended, active }
+}
+
+/**
+ * 1.11 B1–B3 and their notes, from the day and hour sums `records()` has made. `watched` is the day
+ * records' coverage rule: a day before coverage or after today is not a day anybody watched.
+ */
+function newRecords(
+  ctx: StatsCtx,
+  range: DayRange,
+  cap: (all: number) => number,
+  words: RecordsWords | undefined,
+  sums: {
+    watched: (day: string) => boolean
+    coverage: string | null
+    today: string
+    usageByDay: Map<string, number>
+    costByDay: Map<string, number>
+    unpricedDay: Set<string>
+    cacheHourAcc: Map<number, CacheHourAcc>
+  },
+): Pick<RecordsData, 'costDays' | 'longestSessions' | 'largestSessions' | 'cacheHours' | 'reading' | 'recordNotes'> {
+  // B1: a day with no priced bucket is no record; with the costs switched off there is none.
+  const days = ctx.showCost ? [...sums.costByDay.entries()].filter(([day, v]) => v > 0 && sums.watched(day)) : []
+  const costDays: CostDayRecord[] = days
+    .sort((a, b) => b[1] - a[1] || byCodeUnits(b[0], a[0]))
+    .slice(0, cap(days.length))
+    .map(([day, v]) => ({
+      day,
+      cost: costText(v),
+      usage: tokens(sums.usageByDay.get(day) ?? 0),
+      // The transcripts on disk begin that day: earlier sessions of it may be gone (B1 rule 3).
+      floor: sums.unpricedDay.has(day) || day === sums.coverage,
+    }))
+
+  // B2: Claude Code's sessions, while the view shows Claude Code — each table by its own figure, a
+  // session without one (no span, no usage) left out of that table; equal ones by the session id.
+  const claude = ctx.sources.includes('claude')
+  const { ended, active } = claude && words ? endedSessions(ctx, range) : { ended: [], active: 0 }
+  const ranked = (by: (s: EndedSession) => number): SessionRecord[] => {
+    if (words === undefined) return []
+    const list = ended.filter((s) => by(s) > 0)
+    return list
+      .sort((a, b) => by(b) - by(a) || byCodeUnits(a.rec.sessionId, b.rec.sessionId))
+      .slice(0, cap(list.length))
+      .map((s) => ({
+        sessionId: s.rec.sessionId,
+        name: words.sessionName(s.rec.sessionId, s.rec.firstTs, ctx.now, ctx.tcfg),
+        start: clockStamp(s.rec.firstTs, ctx.now, ctx.tcfg),
+        time: words.spanText(s.span),
+        usage: tokens(s.usage),
+      }))
+  }
+  const longestSessions = ranked((s) => s.span)
+  const largestSessions = ranked((s) => s.usage)
+
+  // B3: the hours by the tokens written, equal ones the newer first.
+  const hours = [...sums.cacheHourAcc.entries()]
+  const cacheHours: CacheHourRecord[] = hours
+    .sort((a, b) => b[1].written - a[1].written || b[0] - a[0])
+    .slice(0, cap(hours.length))
+    .map(([hour, h]) => {
+      const at = hour * MS_HOUR
+      const shown = ctx.showCost && h.usd > 0
+      const writers = [...h.models.entries()].sort((x, y) => y[1] - x[1] || byCodeUnits(x[0], y[0])).map(([m]) => m)
+      const rest = writers.length - CACHE_HOUR_MODELS
+      return {
+        // A clock reading names the hour: its calendar day, the day boundary left aside (calendarDayOf).
+        hour: `${calendarDayOf(at, ctx.tcfg)} ${formatTime(at, ctx.tcfg)}`,
+        written: tokens(h.written),
+        written1h: tokens(h.written1h),
+        cost: shown ? costText(h.usd) : '–',
+        // A dash already says "no cost known"; the mark only qualifies a figure that is shown.
+        floor: shown && h.unpriced,
+        models: writers.slice(0, CACHE_HOUR_MODELS).join(', ') + (rest > 0 ? ` ${t('+{0} more', full(rest))}` : ''),
+      }
+    })
+
+  const notes: string[] = []
+  if (costDays.some((d) => d.floor)) {
+    notes.push(t('⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.'))
+  }
+  if (longestSessions.length > 0 || largestSessions.length > 0) {
+    notes.push(t("Claude Code sessions of the last {0} days that are no longer active — the Agents section keeps a session for {0} days after its last line. Time runs from its first counted line to its last, pauses included; usage is its own and its agents'.",
+      full(AGENT_RETENTION_DAYS)))
+  }
+  if (active > 0) notes.push(t('{0} active session(s) not ranked yet: their time and tokens are still growing.', full(active)))
+  notes.push(cacheHours.length > 0
+    ? t("A large cache write is usually a cold start — a conversation's prefix written to the cache again after it expired —, a new conversation or a compaction; one hour can hold several.")
+    : t('No cache write counted in this range.'))
+  // Only where the range reaches back to the hours that are kept no longer (B3 rule 1).
+  const kept = words ? Math.floor(words.hourRetentionDays) : NaN
+  if (Number.isFinite(kept) && kept >= 0 && range.from <= addDays(sums.today, -kept)) {
+    notes.push(t('Hour buckets are kept for {0} days (tokenPace.hourRetentionDays); earlier hours are not ranked.', full(kept)))
+  }
+  if (!ctx.showCost) notes.push(t('The most expensive days need tokenPace.showCost.'))
+  if (!claude && ctx.sources.length > 0) {
+    notes.push(t('Claude Code only — not shown while {0} is selected.', ctx.sources.map((s) => SOURCE_TITLE[s] ?? s).join(', ')))
+  }
+  return { costDays, longestSessions, largestSessions, cacheHours, reading: null, recordNotes: notes }
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ import type { RunningItem } from './agentTree'
 import { billable, BucketFilter, CostSummary } from './agg'
 import { BudgetRow, worstBudget } from './budget'
 import { CACHE_WATCH_MAX, CachePhase, CacheWatchEntry, cacheCostText, cacheLineText, cacheMoreText } from './cacheWatch'
-import { Config, contextNote, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './config'
+import { Config, oneLine, planNameOf, readPaceConfig, readTimeConfig } from './config'
 import { lockoutText } from './forecast'
 import { t } from './i18n'
 import { paceVerdict, windowDisplay, WindowDisplay, windowElapsed } from './pace'
@@ -1168,7 +1168,9 @@ export function contextTooltip(c: ContextReading, ctx: RenderContext): string {
   out.push('')
   // The whole reason this item is safe to show: it is one conversation, not the account, and
   // it is a mirrored reading rather than something we counted.
-  out.push(`_${t('This is the {0} — not an account figure, and not comparable to a quota window.', contextNote())}_`)
+  // 1.10 B2 D4: one whole sentence — contextNote()'s phrase slotted into "This is the {0}" formed
+  // no sentence in a language that declines or has no article.
+  out.push(`_${t("This is the current session's context, as the status line reports it — not an account figure, and not comparable to a quota window.")}_`)
   const age = ageText(c.fetchedAt, ctx.now)
   if (age !== null) {
     out.push('')

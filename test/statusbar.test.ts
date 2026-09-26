@@ -924,9 +924,21 @@ test('the context tooltip says whose window it is and never calls it a quota', (
   const tip = buildItems(input({ cfg: on, context: CONTEXT }))[0].tooltipMarkdown
   assert.ok(tip.includes('**Context window**'), tip)
   assert.ok(tip.includes('128,000 of 200,000 tokens · 64 %'), tip)
-  assert.ok(tip.includes('current session, via the status line'), tip)
-  assert.ok(tip.includes('not an account figure'), tip)
+  // 1.10 B2 D4 (pinned and changed: "This is the {0} — …" with {0} = "current session, via the status line"): one
+  // whole sentence, in English and in German — the phrase slotted into "This is the {0}" formed a sentence in no language.
+  assert.ok(tip.includes("_This is the current session's context, as the status line reports it — not an account figure, and not comparable to a quota window._"), tip)
   assert.ok(tip.includes('Status line updated 2 min ago'), tip)
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    const de = buildItems(input({ cfg: on, context: CONTEXT }))[0].tooltipMarkdown
+    assert.ok(de.includes('_Dies ist der Kontext der aktuellen Sitzung, wie die Statuszeile ihn meldet — keine Kontoangabe und nicht mit einem Kontingentfenster vergleichbar._'), de)
+    assert.equal(/This is|current session|Status line/.test(de), false, de)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
 })
 
 test('a configured plan name reaches the tooltip title, marked as configured', () => {

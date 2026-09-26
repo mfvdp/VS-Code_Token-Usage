@@ -81,10 +81,10 @@ const DE: Record<string, string> = {
   // 1.6 N7: the subagent share under the window table, and the data-quality line with its note.
   'Subagents {0} of {1} counted here ({2})': 'Subagenten {0} von {1} hier gezählt ({2})',
   '{0}: subagents {1} of {2} counted here ({3})': '{0}: Subagenten {1} von {2} hier gezählt ({3})',
-  'Agent records, last 7 days': 'Agent-Datensätze, letzte 7 Tage',
+  'Agent entries, last 7 days': 'Agent-Einträge, letzte 7 Tage',
   'Subagent tokens in the hour buckets, last 7 days': 'Subagent-Token in den Stunden-Buckets, letzte 7 Tage',
-  'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.':
-    'Die beiden unterscheiden sich systembedingt: Ein Datensatz umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.',
+  'The two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply.':
+    'Die beiden unterscheiden sich systembedingt: Ein Agent-Eintrag umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.',
   // 1.6 O1: the running agents in the status bar.
   '~{0} running': '~{0} laufen',
   '~1 running': '~1 läuft',
@@ -156,9 +156,10 @@ test('the subagent share under the window table and the data-quality line follow
   const md = german(() => markdownDocument(buildViewModel(makeInput({ agg: agentShareAgg() }))))
   assert.ok(md.includes('- 5 h: Subagenten 5,5K von 7K hier gezählt (79 %)'), md)
   assert.ok(md.includes('- 7 d: Subagenten 5,5K von 11K hier gezählt (50 %)'), md)
-  assert.ok(md.includes('- Agent-Datensätze, letzte 7 Tage: 7,5K · Subagent-Token in den Stunden-Buckets, letzte 7 Tage: 5,5K'), md)
-  assert.ok(md.includes('- Die beiden unterscheiden sich systembedingt: Ein Datensatz umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.'), md)
-  assert.equal(/subagents|counted here|Agent records/.test(md), false, md)
+  // 1.10 B2 D6 (pinned and changed: „Agent-Datensätze", „Ein Datensatz"): an agent entry, „Agent-Eintrag".
+  assert.ok(md.includes('- Agent-Einträge, letzte 7 Tage: 7,5K · Subagent-Token in den Stunden-Buckets, letzte 7 Tage: 5,5K'), md)
+  assert.ok(md.includes('- Die beiden unterscheiden sich systembedingt: Ein Agent-Eintrag umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.'), md)
+  assert.equal(/subagents|counted here|Agent entries|Agent records|Datensatz|Datensätze/.test(md), false, md)
 })
 
 test('the clipboard summary follows the bundle too', () => {

@@ -406,11 +406,13 @@ test('the markdown prints each window\'s subagent share under the window table, 
   assert.equal(bare.includes('counted here'), false)
 })
 
+// 1.10 B2 D6 (pinned and changed: "Agent records, last 7 days", "a record keeps a whole agent"): an agent's data is an
+// entry; a record is a personal best (the Records section).
 test('the data-quality line of the subagent tokens and its note reach both renderings (1.6 N7)', () => {
   const vm = buildViewModel(makeInput({ agg: agentShareAgg() }))
   const md = markdownDocument(vm)
-  const line = 'Agent records, last 7 days: 7.5K · Subagent tokens in the hour buckets, last 7 days: 5.5K'
-  const note = 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.'
+  const line = 'Agent entries, last 7 days: 7.5K · Subagent tokens in the hour buckets, last 7 days: 5.5K'
+  const note = 'The two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply.'
   const dq = md.slice(md.indexOf('## Data quality'))
   const bullets = dq.split('\n').filter((l) => l.startsWith('- '))
   // After the lower-bound line, as the dashboard lists it, the note right under it.
@@ -423,7 +425,23 @@ test('the data-quality line of the subagent tokens and its note reach both rende
   assert.ok(labels.includes(note))
   // Nothing to compare, no line.
   const none = markdownDocument(buildViewModel(makeInput()))
-  assert.equal(none.includes('Agent records, last 7 days'), false)
+  assert.equal(none.includes('Agent entries, last 7 days'), false)
+  assert.equal(md.includes('Agent records'), false)
+})
+
+test('a model\'s Quick Pick detail names its turn figure a time — Avg turn time, Ø Turn-Dauer (1.10 B2 D5)', () => {
+  const vm = fullVm()
+  assert.ok(vm.models.rows.length > 0)
+  vm.models.rows = [{ ...vm.models.rows[0], turnAvg: '~42 s', turnP90: '~1 min 10 s' }]
+  const detail = (): string | undefined => quickPickItems(vm).find((i) => i.label.startsWith(`${vm.models.rows[0].model}`))?.detail
+  assert.ok(detail()?.endsWith(' · Avg turn time ~42 s · P90 ~1 min 10 s'), detail())
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    assert.ok(detail()?.endsWith(' · Ø Turn-Dauer ~42 s · P90 ~1 min 10 s'), detail())
+  } finally {
+    setBundle(undefined)
+  }
 })
 
 test('projects and sessions reach both renderings when attribution is on', () => {

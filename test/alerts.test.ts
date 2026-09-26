@@ -7,14 +7,18 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   ACTION_DASHBOARD, ACTION_SNOOZE, AlertCfg, Alerts, DASHBOARD_COMMAND, nextLocalMidnight,
   usedThresholds,
 } from '../src/alerts'
 import { BudgetRow, BudgetSpec, identityOfBudget } from '../src/budget'
+import { setBundle } from '../src/i18n'
 import { MementoLike } from '../src/storage'
 import { Forecast, PaceLevel, PaceVerdict, QuotaState, QuotaWindow } from '../src/types'
+import { ROOT } from './helpers/nls'
 
 const NOW = 1_700_000_000_000
 const HOUR = 3_600_000
@@ -374,6 +378,38 @@ test('several forecasts become one message per provider', async () => {
   assert.match(h.messages[0], /^Claude — on this pace: /)
   assert.match(h.messages[0], /5 h runs out/)
   assert.match(h.messages[0], /7 d runs out/)
+})
+
+test('a forecast is one whole sentence of four — in ~time or imminently, with the reset or without — in English and in German (1.10 B2 D3)', async () => {
+  // 1.10 B2 D3: "in ~{0}" and "imminently" slotted into "{0} runs out {1}" took the English word order into every
+  // language; each case is a sentence of its own now.
+  const cases: Array<[Partial<QuotaWindow>, Partial<Forecast>, string, string]> = [
+    [{}, {}, '5 h runs out in ~30m, before it resets (3h)', '5 h ist in ~30m erschöpft, noch vor dem Reset (3h)'],
+    [{}, { etaMs: NOW - 60_000 }, '5 h runs out imminently, before it resets (3h)', '5 h ist in Kürze erschöpft, noch vor dem Reset (3h)'],
+    [{ resetsAt: null }, {}, '5 h runs out in ~30m', '5 h ist in ~30m erschöpft'],
+    [{ resetsAt: null }, { etaMs: NOW - 60_000 }, '5 h runs out imminently', '5 h ist in Kürze erschöpft'],
+  ]
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  for (const k of ['in ~{0}', 'imminently', '{0} runs out {1}', '{0} runs out {1}, before it resets ({2})']) {
+    assert.equal(bundle[k], undefined, `the German still has ${k}`)
+  }
+  for (const [w, f, english, german] of cases) {
+    const say = async (): Promise<string> => {
+      const h = harness(cfg({ forecastLeadMinutes: 60 }))
+      await h.alerts.evaluate([quota([win({ percent: 70, ...w })])], noVerdicts, new Map([['claude:session:300', forecast(f)]]), NOW)
+      assert.equal(h.messages.length, 1)
+      return h.messages[0]
+    }
+    assert.equal(await say(), `Claude — on this pace: ${english}`)
+    try {
+      setBundle(bundle)
+      const de = await say()
+      assert.ok(de.endsWith(`: ${german}`), de)
+      assert.equal(/runs out|imminently|before it resets/.test(de), false, de)
+    } finally {
+      setBundle(undefined)
+    }
+  }
 })
 
 test('two barely used weekly windows become one friendly notice', async () => {

@@ -1488,7 +1488,7 @@ function agentTokensOf(agg: Aggregator, now: number, hourSums: HourSums = new Ho
   return {
     records: compact(records),
     buckets: hours.complete ? compact(buckets) : `≈${compact(buckets)}`,
-    note: t('The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.'),
+    note: t('The two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply.'),
   }
 }
 
@@ -2192,7 +2192,8 @@ function retroList(
   return out
 }
 
-function retroText(r: Retro): string {
+/** The reset history's line of one window — exported for its test (1.10 B2 D7: a figure it does not have is `–`). */
+export function retroText(r: Retro): string {
   if (!r.enough) {
     const n = r.cycles.filter((c) => c.complete).length
     return n === 1
@@ -2201,7 +2202,9 @@ function retroText(r: Retro): string {
   }
   const capped = r.cappedShare === null ? '–' : `${Math.round(r.cappedShare * 100)} %`
   const unused = r.avgUnused === null ? '–' : `${Math.round(r.avgUnused)} %`
-  return t('{0} of the complete cycles hit the limit · Avg {1} unused at the reset', capped, unused)
+  // 1.10 B2 D7: each figure after its own label — the old sentence put a percent in its subject's
+  // slot ("50 % of the complete cycles hit the limit"), which a translation had to bend around.
+  return t('Share of complete cycles that hit the limit: {0} · Avg unused at the reset: {1}', capped, unused)
 }
 
 function dataQuality(

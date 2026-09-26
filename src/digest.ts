@@ -86,13 +86,22 @@ function topModel(d: DigestInput): string | null {
     byUsage.model, compact(byUsage.usage), byUsage.share)
 }
 
+/**
+ * 1.10 B2 D9: whole sentences, one per count of providers — the code joins nothing. A list joined
+ * with `, ` and ASCII parentheses around the word kept the English punctuation in every language
+ * (and no list format of ICU serves this sentence: `Intl.ListFormat` joins with nothing in ja and
+ * zh-CN). A row is one provider, and there are two (`SOURCES`).
+ */
 function cacheSentence(d: DigestInput): string | null {
   const rows = d.cacheEconomy.filter((r) => r.hitValue !== null)
   if (rows.length === 0) return null
-  const parts = rows.map(
-    (r) => `${SOURCE_TITLE[r.source]} ${r.hitRate} (${classify(r.hitValue as number)})`,
-  )
-  return t('Cache hit rate — {0}.', parts.join(', '))
+  const [a, b] = rows
+  if (b === undefined) {
+    return t('Cache hit rate — {0} {1} ({2}).', SOURCE_TITLE[a.source], a.hitRate, classify(a.hitValue as number))
+  }
+  return t('Cache hit rate — {0} {1} ({2}), {3} {4} ({5}).',
+    SOURCE_TITLE[a.source], a.hitRate, classify(a.hitValue as number),
+    SOURCE_TITLE[b.source], b.hitRate, classify(b.hitValue as number))
 }
 
 function unpricedSentence(d: DigestInput): string | null {

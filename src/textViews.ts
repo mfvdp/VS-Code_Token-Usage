@@ -357,7 +357,7 @@ export function quickPickItems(vm: ViewModel): PickItem[] {
     add({
       label: `${m.model}${m.isSub ? ` ${t('(sub)')}` : ''}: ${m.usageText}`,
       description: t('{0} · {1} of usage · hit {2}', m.costText, m.share, m.cacheHit),
-      detail: `${m.price}${m.turnAvg ? ` · ${t('Avg turn {0}', m.turnAvg)}` : ''}`
+      detail: `${m.price}${m.turnAvg ? ` · ${t('Avg turn time {0}', m.turnAvg)}` : ''}`
         + `${m.turnP90 ? ` · ${t('P90 {0}', m.turnP90)}` : ''}`,
     })
   }
@@ -633,7 +633,7 @@ function dataQualityLines(vm: ViewModel): string[] {
   // line, where the dashboard's list has them — and the note on why the two differ, a line of its own.
   if (d.agents) {
     out.splice(3, 0,
-      `${t('Agent records, last 7 days')}: ${d.agents.records} · ${t('Subagent tokens in the hour buckets, last 7 days')}: ${d.agents.buckets}`,
+      `${t('Agent entries, last 7 days')}: ${d.agents.records} · ${t('Subagent tokens in the hour buckets, last 7 days')}: ${d.agents.buckets}`,
       d.agents.note)
   }
   for (const q of d.quota) {

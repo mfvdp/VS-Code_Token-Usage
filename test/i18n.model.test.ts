@@ -194,7 +194,8 @@ test('the subagent share of a window and the data-quality line speak German, wit
     assert.deepEqual(vm.dataQuality.agents, {
       records: '7,5K',
       buckets: '5,5K',
-      note: 'Die beiden unterscheiden sich systembedingt: Ein Datensatz umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.',
+      // 1.10 B2 D6 (pinned and changed: „Ein Datensatz umfasst"): an agent entry, „Agent-Eintrag".
+      note: 'Die beiden unterscheiden sich systembedingt: Ein Agent-Eintrag umfasst einen ganzen Agenten, ein Bucket die Stunde jeder Antwort.',
     })
     const rolled = agentShareAgg()
     rolled.rollup(NOW, 2, 400, timeConfig(makeConfig()))

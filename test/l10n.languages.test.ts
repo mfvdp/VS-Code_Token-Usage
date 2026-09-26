@@ -55,12 +55,15 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
+import { sanitize } from '../src/config'
 import { KEEP_WARM_TERMS_PASSAGE, KeepWarmConsent } from '../src/consent'
 import { setBundle, setLang, setLocale } from '../src/i18n'
 import { KEEP_WARM_LINE } from '../src/keepWarm'
 import { isLanguageId, LANGUAGE_IDS, languageEntry, languageName, LANGUAGES } from '../src/languages'
+import { buildItems, makeContext, UsageSource } from '../src/statusText'
 import type { MementoLike } from '../src/storage'
-import { weekdayWords } from '../src/time'
+import { formatReset, weekdayWords } from '../src/time'
+import { emptyBucket, QuotaState, QuotaWindow } from '../src/types'
 import { ROOT } from './helpers/nls'
 
 // ---------------------------------------------------------------------------
@@ -467,6 +470,143 @@ function installed<T>(bundle: Record<string, string> | null, run: () => T): T {
 const noMemento: MementoLike = { get: <T>(_key: string, fallback: T): T => fallback, update: () => Promise.resolve() }
 
 // ---------------------------------------------------------------------------
+// T15 (1.10 B3): the bar's own examples — the documented fixture every example in the settings is built from
+// ---------------------------------------------------------------------------
+
+/**
+ * The fixture (also in l10n/TRANSLATING.md, T15): Monday 2026-09-28, 03:46 UTC, the time zone UTC. Claude Code's 5 h
+ * window is at 25 % with its reset 2 h 14 min away (06:00), its 7 d window at 69 % with exactly 6 days left; 3.1M
+ * tokens today, 12.3M in the last 7 days, 48.9M in the last 30 (fresh input, Claude Code only). The settings each
+ * example shows: the reset formats and the hour cycles without a bar (`barWidth` 0), the `full` density with a bar of
+ * width 8 and no time marker (`timeProgressStyle` none), the `compact` density over both windows (`windowSelect` all);
+ * the weekday example is the same reset read two days before it (Saturday 06:00), and the `minimal` example the 5 h
+ * window alone (`windowSelect` session) read at 01:30 — a tenth of its clock gone, so 25 % runs ahead of the pace (▲).
+ */
+export const BAR_FIXTURE = {
+  now: Date.UTC(2026, 8, 28, 3, 46),
+  reset: Date.UTC(2026, 8, 28, 6, 0),
+  weekdayAt: Date.UTC(2026, 8, 26, 6, 0),
+  paceAt: Date.UTC(2026, 8, 28, 1, 30),
+  tokens: { today: 3_100_000, '7d': 12_300_000, '30d': 48_900_000 },
+} as const
+const DAY_MS = 86_400_000
+
+/** One way the bar is set up for an example: its settings, and the moment it is read. */
+interface BarVariant { settings: Record<string, unknown>; at?: number }
+const NO_BAR = { 'tokenPace.barWidth': 0 }
+/**
+ * The manifest keys whose values quote the bar (1.10 B3): each with the settings its examples show. Every example
+ * quoted in a value must be a text the bar builds under one of them (BAR_EXEMPT names none).
+ */
+export const BAR_EXAMPLE_KEYS: Readonly<Record<string, readonly BarVariant[]>> = {
+  'config.resetFormat.enum.relative': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'relative' } }],
+  'config.resetFormat.enum.absolute': [
+    { settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute' } },
+    { settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute' }, at: BAR_FIXTURE.weekdayAt },
+  ],
+  'config.resetFormat.enum.both': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'both' } }],
+  'config.density.enum.full': [{ settings: { 'tokenPace.density': 'full', 'tokenPace.barWidth': 8, 'tokenPace.timeProgressStyle': 'none' } }],
+  'config.density.enum.compact': [{ settings: { 'tokenPace.density': 'compact' } }],
+  'config.density.enum.minimal': [{ settings: { 'tokenPace.density': 'minimal', 'tokenPace.windowSelect': 'session' }, at: BAR_FIXTURE.paceAt }],
+  'config.summary.period.enum.today': [{ settings: { 'tokenPace.summary.period': 'today' } }],
+  'config.summary.period.enum.7d': [{ settings: { 'tokenPace.summary.period': '7d' } }],
+  'config.summary.period.enum.30d': [{ settings: { 'tokenPace.summary.period': '30d' } }],
+  'config.resetHourCycle.enum.h12': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h12' } }],
+  'config.resetHourCycle.enum.h23': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h23' } }],
+}
+/** An example no fixture can produce, `<id>: <key>: <example>` with its reason — expected: none. */
+export const BAR_EXEMPT: ReadonlyArray<readonly [string, string]> = []
+
+/** The Claude Code reading of the fixture, fetched a minute before the moment the bar is read. */
+function barQuotas(now: number): QuotaState[] {
+  const win = (p: Partial<QuotaWindow>): QuotaWindow => ({
+    id: 'session:300', kind: 'session', label: '5 h', shortLabel: '5h', model: null, percent: 25,
+    resetsAt: BAR_FIXTURE.reset, windowMinutes: 300, limitReached: false, unlimited: false, ...p,
+  })
+  return [{
+    source: 'claude', ok: true, origin: 'poll', fetchedAt: Math.floor(now / 1000) - 60, planType: 'max20',
+    windows: [win({}), win({
+      id: 'weekly:10080', kind: 'weekly', label: '7 d', shortLabel: '7d', percent: 69,
+      resetsAt: BAR_FIXTURE.now + 6 * DAY_MS, windowMinutes: 10080,
+    })],
+  }]
+}
+
+/** The hour buckets of the fixture: the period's tokens as fresh input, told apart by the days the bar asks for. */
+function barUsage(): UsageSource {
+  const bucket = (tokens: number): ReturnType<typeof emptyBucket> => {
+    const b = emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, '2026-09-28')
+    b.input = tokens
+    return b
+  }
+  return {
+    sum: (from: string, to: string, _tcfg: unknown, filter?: { source?: string }) => {
+      if (filter?.source !== 'claude') return bucket(0)
+      const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1
+      return bucket(days === 1 ? BAR_FIXTURE.tokens.today : days === 7 ? BAR_FIXTURE.tokens['7d'] : days === 30 ? BAR_FIXTURE.tokens['30d'] : 0)
+    },
+    cost: () => ({ usd: 0, listUsd: 0, unpricedTokens: 0, unpricedModels: [], fastUnpricedTokens: 0, familyPriced: [], custom: false }),
+  } as UsageSource
+}
+
+/**
+ * The texts the bar builds for one variant: every item's text, the tail of each from a `· ` on (an example that
+ * quotes the reset part alone, “· resets at Mo 06:00”), and the 5 h window's reset as the item prints it (“06:00 AM”).
+ */
+function barTexts(v: BarVariant): string[] {
+  const now = v.at ?? BAR_FIXTURE.now
+  const cfg = sanitize({ 'tokenPace.timezone': 'utc', 'tokenPace.resetHourCycle': 'h23', 'tokenPace.windowSelect': 'all',
+    'tokenPace.statusBar.show': ['claudeQuota', 'tokens'], ...v.settings })
+  const input = { quotas: barQuotas(now), agg: barUsage(), cfg, now, forecasts: new Map(), role: 'single' as const, scanning: false, consent: 'granted' as const }
+  const out: string[] = []
+  for (const item of buildItems(input)) {
+    out.push(item.text)
+    for (let at = item.text.indexOf('· '); at > 0; at = item.text.indexOf('· ', at + 1)) out.push(item.text.slice(at))
+  }
+  out.push(formatReset(BAR_FIXTURE.reset, now, cfg.resetFormat, makeContext(input).tcfg))
+  return out
+}
+
+/** U+00A0 and U+202F read as a space (1.10 B3): Intl writes them, a manifest may write a plain space. */
+const barSpaces = (s: string): string => s.replace(/[  ]/g, ' ').trim()
+/** The examples a value quotes: the text between two of T11's quotation marks. */
+function quotedExamples(value: string): string[] {
+  const marks = reEsc(OPEN_QUOTES + CLOSE_QUOTES)
+  return [...value.matchAll(new RegExp(`[${reEsc(OPEN_QUOTES)}]([^${marks}]+)[${reEsc(CLOSE_QUOTES)}]`, 'g'))].map((m) => barSpaces(m[1]))
+}
+
+/**
+ * T15 over one language's manifest: every example of the keys BAR_EXAMPLE_KEYS names equals a text the bar builds
+ * for the fixture under the language's bundle and locale, and a value quotes as many examples as the English. `skip`:
+ * a key on the language's pending list (the ledger changed its English; the language's package writes it again).
+ */
+export function barExampleProblems(id: string, file: string, nls: Record<string, string>, bundle: Record<string, string> | null,
+  skip: (key: string) => boolean = () => false): string[] {
+  const out: string[] = []
+  const english = src().english
+  const locale = isLanguageId(id) ? languageEntry(id).locale : id
+  try {
+    setBundle(bundle ?? {})
+    setLocale(locale)
+    setLang(id)
+    for (const [key, variants] of Object.entries(BAR_EXAMPLE_KEYS)) {
+      if (skip(key) || typeof nls[key] !== 'string') continue
+      const examples = quotedExamples(nls[key])
+      const want = quotedExamples(english[key] ?? '').length
+      if (examples.length !== want) out.push(`${id}: ${file}: ${key} quotes ${examples.length} example(s), the English ${want}: ${J(nls[key])}`)
+      const texts = new Set(variants.flatMap((v) => barTexts(v)).map(barSpaces))
+      for (const ex of examples) {
+        if (texts.has(ex) || BAR_EXEMPT.some(([at]) => at === `${id}: ${key}: ${ex}`)) continue
+        out.push(`${id}: ${file}: ${key} quotes ${J(ex)}, and the bar prints ${J([...texts][0])} (fixture: l10n/TRANSLATING.md, T15)`)
+      }
+    }
+  } finally {
+    pristine()
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // The rules — each returns the problems it found, every one naming the language, the file and the key
 // ---------------------------------------------------------------------------
 
@@ -718,6 +858,11 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
       return out
     },
   },
+  T15: {
+    title: 'the bar\'s examples — every example a setting quotes (the reset formats, the densities, the summary periods, the hour cycles) is what the status bar prints for the documented fixture, in the language\'s words and formats (1.10 B3)',
+    // A pending manifest key is exempt: the ledger changed its English, and the language's package writes it again.
+    rule: (_s, l) => (l.nls ? barExampleProblems(l.id, NLS(l), l.nls, l.bundle, (k) => nlsPending(l, k)) : []),
+  },
 }
 
 /** T12 runs the script as the gate does, once per directory and mode: its problems, one per line, "<id>: <key> — …". */
@@ -744,7 +889,8 @@ test('the frame runs over the languages on disk — German among them — and En
   assert.ok(ON_DISK.includes('de'), `no German files found: ${J(ON_DISK)}`)
   assert.equal(ON_DISK.includes('en'), false)
   // 1.10 B1 (pinned and changed: thirteen rules): T14, the pending list, runs over every language too.
-  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14'])
+  // 1.10 B3 (pinned and changed: fourteen rules): T15, the bar's examples, too — and over the English (below).
+  assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15'])
   // The references are what they claim to be.
   const s = src()
   assert.ok(s.keys.length >= 1000, `only ${s.keys.length} t() keys`)
@@ -763,6 +909,12 @@ for (const id of ON_DISK) {
     })
   }
 }
+
+// 1.10 B3: T15 holds the English too — package.nls.json's examples are what the English bar prints.
+test(`T15 · English (en): ${RULES.T15.title}`, () => {
+  const problems = barExampleProblems('en', 'package.nls.json', src().english, null)
+  assert.deepEqual(problems, [], `\n${problems.join('\n')}`)
+})
 
 // ---------------------------------------------------------------------------
 // Synthetic languages in a temporary directory — each rule once with the mutation it exists to catch
@@ -887,7 +1039,9 @@ function caughtAs(pendingAllowed: boolean, no: string, dir: string, id: string, 
 test('the two synthetic languages — the German under fr, the English as 語 under ja — pass every rule', () => {
   for (const [kind, id] of [['german', 'fr'], ['pseudo', 'ja']] as const) {
     const dir = fixture(kind, id)
-    for (const no of Object.keys(RULES)) assert.deepEqual(run(no, dir, id), [], `${no} fails the unbroken ${kind} fixture ${id}`)
+    // 1.10 B3: but T15, which reads the bar under the id's own locale — the German's “Mo 06:00” is not what a French bar
+    // prints (“lun. 06:00”), nor 語 a Japanese weekday. T15 runs over the real files and its own fixtures (below).
+    for (const no of Object.keys(RULES).filter((x) => x !== 'T15')) assert.deepEqual(run(no, dir, id), [], `${no} fails the unbroken ${kind} fixture ${id}`)
   }
 })
 
@@ -1106,6 +1260,80 @@ test('the brief names every rule of the frame, the files a package owns, the gat
 })
 
 // ---------------------------------------------------------------------------
+// 1.10 B3: T15, the bar's examples
+// ---------------------------------------------------------------------------
+
+/** A language's own files from the repository, in a temporary directory of their own (T15's mutations). */
+function realFiles(id: string): string {
+  const dir = tempDir()
+  const copy = (file: string): void => {
+    if (!existsSync(join(ROOT, file))) return
+    mkdirSync(join(dir, file, '..'), { recursive: true })
+    cpSync(join(ROOT, file), join(dir, file))
+  }
+  for (const f of ['package.nls.json', `package.nls.${id}.json`, `l10n/bundle.l10n.${id}.json`, PENDING_FILE(id), 'l10n/rekey.json',
+    ...PARTS.map((p) => `l10n/parts/${p}.${id}.json`)]) copy(f)
+  return dir
+}
+
+/** Sets one manifest value of a copied language, and takes the key off its pending list (as its package would). */
+function settle(dir: string, id: string, key: string, value: string): void {
+  edit(dir, `package.nls.${id}.json`, (t) => { t[key] = value })
+  const pending = join(dir, PENDING_FILE(id))
+  if (existsSync(pending)) {
+    const p = JSON.parse(readFileSync(pending, 'utf8')) as Pending
+    delete p.nls[key]
+    writeFileSync(pending, `${JSON.stringify(p, null, 2)}\n`, 'utf8')
+  }
+}
+
+test('T15: the fixture builds the English examples of package.nls.json word for word — the bar\'s reset word, the weekday beyond a day, the pace glyph, the period (1.10 B3)', () => {
+  const english = src().english
+  const all = Object.keys(BAR_EXAMPLE_KEYS).flatMap((k) => quotedExamples(english[k]))
+  assert.deepEqual(all, [
+    'CC 5h 25% · resets 2h14m', 'CC 5h 25% · resets at 06:00', '· resets at Mo 06:00', 'CC 5h 25% · resets at 06:00 (in 2h14m)',
+    'CC 5h ██▁▁▁▁▁▁ 25% · resets 2h14m', 'CC 25%·2h14m | 69%·6d', 'TP 25% ▲',
+    'Σ 3.1M · today', 'Σ 12.3M · 7d', 'Σ 48.9M · 30d', '06:00 AM', '06:00',
+  ])
+  assert.deepEqual(BAR_EXEMPT, [])
+  // The German bar's words (§3 B3): „Reset in 2h14m", „Reset um 06:00", „heute" — T15 over the German files holds them.
+  const de = readTable(join(ROOT, 'package.nls.de.json'))
+  assert.deepEqual(Object.keys(BAR_EXAMPLE_KEYS).flatMap((k) => quotedExamples(de[k])), [
+    'CC 5h 25% · Reset in 2h14m', 'CC 5h 25% · Reset um 06:00', '· Reset um Mo 06:00', 'CC 5h 25% · Reset um 06:00 (in 2h14m)',
+    'CC 5h ██▁▁▁▁▁▁ 25% · Reset in 2h14m', 'CC 25%·2h14m | 69%·6d', 'TP 25% ▲',
+    'Σ 3,1M · heute', 'Σ 12,3M · 7d', 'Σ 48,9M · 30d', '06:00 AM', '06:00',
+  ])
+  assert.deepEqual(barExampleProblems('de', 'package.nls.de.json', de, readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))), [])
+})
+
+test('T15 catches an example the bar does not print — the English relative example without its "resets", cs\'s "Σ 3.1M" where the Czech bar prints 3,1M, an example dropped — and exempts a key on the pending list until the join (1.10 B3)', () => {
+  // The English (§3 B3's mutation): the example as 1.9 wrote it, without the word the bar adds.
+  const english = { ...src().english, 'config.resetFormat.enum.relative': 'Time left — “CC 5h 25% · 2h14m”' }
+  assert.ok(barExampleProblems('en', 'package.nls.json', english, null)
+    .some((p) => p.startsWith('en: package.nls.json: config.resetFormat.enum.relative quotes "CC 5h 25% · 2h14m", and the bar prints')))
+  const dropped = { ...src().english, 'config.resetFormat.enum.absolute': 'Clock time, with the weekday beyond 24 h — “CC 5h 25% · resets at 06:00”' }
+  assert.ok(barExampleProblems('en', 'package.nls.json', dropped, null)
+    .some((p) => p.includes('config.resetFormat.enum.absolute quotes 1 example(s), the English 2')))
+  // Czech (§3 B3's mutation): the English decimal point where the Czech bar writes a comma.
+  const today = readTable(join(ROOT, 'l10n', 'bundle.l10n.cs.json'))['today'] ?? 'today'
+  const key = 'config.summary.period.enum.today'
+  const clean = realFiles('cs')
+  settle(clean, 'cs', key, `Dnes — „Σ 3,1M · ${today}“`)
+  const dir = realFiles('cs')
+  settle(dir, 'cs', key, `Dnes — „Σ 3.1M · ${today}“`)
+  caught('T15', dir, 'cs', clean, `${key} quotes "Σ 3.1M · ${today}"`)
+  // A key on the pending list is exempt while PENDING_ALLOWED is true; at the join it is held like every other.
+  const listed = realFiles('cs')
+  settle(listed, 'cs', key, 'Dnes — „Σ 3,1M“')
+  const pending = join(listed, PENDING_FILE('cs'))
+  const p: Pending = existsSync(pending) ? JSON.parse(readFileSync(pending, 'utf8')) as Pending : { v: 1, applied: 0, bundle: {}, nls: {} }
+  p.nls[key] = { state: 'review', why: 'the example now names the period' }
+  writeFileSync(pending, `${JSON.stringify(p, null, 2)}\n`, 'utf8')
+  assert.equal(run('T15', listed, 'cs', true).some((x) => x.includes(key)), false)
+  assert.ok(run('T15', listed, 'cs', false).some((x) => x.includes(`${key} quotes "Σ 3,1M"`)))
+})
+
+// ---------------------------------------------------------------------------
 // 1.10 B1: the re-key ledger, the pending lists (T14), T9's × and ÷
 // ---------------------------------------------------------------------------
 
@@ -1298,8 +1526,9 @@ test('the re-key script over a whole language: a key added, a key reworded with 
   assert.equal(r.status, 0, r.stderr)
 
   // While PENDING_ALLOWED, every rule holds: the list is what is left to do (a key the script failed to take out, T1
-  // names: "… is no key of src/ (any more)").
-  for (const no of Object.keys(RULES)) {
+  // names: "… is no key of src/ (any more)"). 1.10 B3: T15 aside — it reads the bar under the id's own locale, and the
+  // German under fr quotes “Mo 06:00” where a French bar prints “lun. 06:00” (the synthetic languages' test says so).
+  for (const no of Object.keys(RULES).filter((x) => x !== 'T15')) {
     const problems = run(no, dir, 'fr', true)
     assert.deepEqual(problems, [], `${no} with the pending list:\n${problems.join('\n')}`)
   }

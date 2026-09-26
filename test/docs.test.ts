@@ -946,29 +946,44 @@ test('the status bar pages, the settings page and the setting itself name the ag
     de['config.statusBar.show.enum.agents'])
 })
 
-test('docs/dashboard.md and docs/numbers.md name the subagent share of a window and the records against the buckets, as the views write them', () => {
+test('docs/status-bar.md quotes the settings\' own examples of the bar, word for word — the reset word, the weekday, the period (1.10 B3)', () => {
+  // 1.10 B3: the manifest's examples are what the bar prints (T15 holds them in every language); the page quotes the
+  // English ones, so a reader who compares the two finds the same text.
+  const english = JSON.parse(readDoc('package.nls.json')) as Record<string, string>
+  const flat = doc.statusBar.replace(/\s+/g, ' ')
+  for (const key of ['config.resetFormat.enum.relative', 'config.resetFormat.enum.absolute', 'config.resetFormat.enum.both',
+    'config.density.enum.full', 'config.density.enum.compact', 'config.summary.period.enum.today']) {
+    const examples = [...english[key].matchAll(/“([^”]+)”/g)].map((m) => m[1])
+    assert.ok(examples.length > 0, key)
+    for (const ex of examples) assert.ok(flat.includes(`\`${ex}\``), `docs/status-bar.md does not quote ${key}'s ${ex}`)
+  }
+  assert.ok(flat.includes('a German bar says `· Reset in 2h14m`, `· Reset um 06:00`'))
+})
+
+test('docs/dashboard.md and docs/numbers.md name the subagent share of a window and the agent entries against the buckets, as the views write them', () => {
   // 1.6 N7 (P10b): the words the view model, the markdown and the page write, taken from the sources that write them.
+  // 1.10 B2 D6 (pinned and changed: "Agent records, last 7 days", "a record keeps a whole agent"): an agent entry.
   const model = readDoc('src/viewModel.ts')
   const text = readDoc('src/textViews.ts')
   const page = readDoc('src/webview/main.ts')
   for (const [src, written] of [
     [model, 'Subagents {0} of {1} counted here ({2})'],
-    [model, 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.'],
+    [model, 'The two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply.'],
     [text, '{0}: subagents {1} of {2} counted here ({3})'],
-    [page, 'Agent records, last 7 days'], [page, 'Subagent tokens in the hour buckets, last 7 days'],
+    [page, 'Agent entries, last 7 days'], [page, 'Subagent tokens in the hour buckets, last 7 days'],
   ] as Array<[string, string]>) assert.ok(src.includes(`'${written}'`), `a source no longer writes: ${written}`)
   const dash = readDoc('docs/dashboard.md').replace(/\s+/g, ' ')
   for (const claim of ['`Subagents 4.7M of 5.5M counted here (86 %)`', '`5 h: subagents 4.7M of 5.5M counted here (86 %)`',
     'a share of **tokens**, never of the quota', 'never moves the window\'s percentage', 'both figures carry `≈`',
     'every Codex window have no such line', '`Current 5 h window` and `Current 7 d window`', '`<1 %` or `>99 %`',
-    '`Agent records, last 7 days`', '`Subagent tokens in the hour buckets, last 7 days`',
-    '*the two differ by construction: a record keeps a whole agent, a bucket the hour of each reply*']) {
+    '`Agent entries, last 7 days`', '`Subagent tokens in the hour buckets, last 7 days`',
+    '*the two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply*']) {
     assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
   }
   const numbers = doc.numbers.replace(/\s+/g, ' ')
   for (const claim of ['| Subagent share of a Claude window (`Subagents 4.7M of 5.5M counted here (86 %)`) |',
     'A share of tokens, **never of the quota**', '`≈` on both figures', 'Claude only',
-    '| Agent records against subagent hour buckets (data quality) |', 'a record keeps a whole agent, a bucket the hour of each reply',
+    '| Agent entries against subagent hour buckets (data quality) |', 'an agent entry keeps a whole agent, a bucket the hour of each reply',
     // Review 3: the buckets' figure is marked as the view model marks it (dataQuality.agents.buckets).
     'the buckets\' figure `≈` once those seven days reach below the hour buckets\' roll-up']) {
     assert.ok(numbers.includes(claim), `docs/numbers.md does not say: ${claim}`)

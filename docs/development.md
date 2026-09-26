@@ -117,9 +117,13 @@ keys, the parts, the placeholders, the marks (`~`, `⚠`, `≈`, `–`, `%`, `×
 code excepted — the list `SAME_IN_EVERY_LANGUAGE` in the test, each word with its reason), the registry,
 the English quotes (the keep-warm consent's terms passage and line stay word for word), the freshness
 and the heat map's weekday words — and, since 1.10, a fourteenth, T14, for the pending lists
-([below](#changing-the-english-the-re-key-ledger-110)). Every rule also runs once against a synthetic
+([below](#changing-the-english-the-re-key-ledger-110)), and a fifteenth, T15, for the bar's own examples:
+every example a setting of the status bar quotes (`CC 5h 25% · resets 2h14m`, `Σ 3.1M · today`) is what
+that language's bar prints for the fixture the test and the brief document — its words, its decimals, its
+weekday and its 12-hour clock —, the English's included. Every rule also runs once against a synthetic
 language in a temporary directory — the German under another id, and the English with every word turned
-into 語 — broken in the one way the rule exists to catch. `test/nls.test.ts` holds every manifest translation to the
+into 語 — broken in the one way the rule exists to catch (T15, which reads the bar under the id's own
+locale, against the English and a copy of the Czech files instead). `test/nls.test.ts` holds every manifest translation to the
 manifest's structure. The brief a translation works from is `l10n/TRANSLATING.md`. Nothing of this
 ships but the bundles and the `package.nls*.json` files: `.vscodeignore` keeps `l10n/parts/`,
 `l10n/nls-sources/` and the brief out of the package — and, since 1.10, `l10n/rekey.json`,

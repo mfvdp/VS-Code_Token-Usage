@@ -503,10 +503,18 @@ export class Alerts {
       entry.at = now
       state.entries[c.identity] = entry
       announced.add(c.identity)
-      const when = f.etaMs > now ? t('in ~{0}', relativeShort(f.etaMs, now)) : t('imminently')
-      collect(bySource, c, c.window.resetsAt !== null
-        ? t('{0} runs out {1}, before it resets ({2})', c.window.label, when, relativeShort(c.window.resetsAt, now))
-        : t('{0} runs out {1}', c.window.label, when))
+      // 1.10 B2 D3: four whole sentences — "in ~2h" or "imminently" slotted into "{0} runs out {1}"
+      // kept the English's word order in every language.
+      const label = c.window.label
+      const soon = !(f.etaMs > now)
+      const resets = c.window.resetsAt
+      collect(bySource, c, resets !== null
+        ? (soon
+          ? t('{0} runs out imminently, before it resets ({1})', label, relativeShort(resets, now))
+          : t('{0} runs out in ~{1}, before it resets ({2})', label, relativeShort(f.etaMs, now), relativeShort(resets, now)))
+        : (soon
+          ? t('{0} runs out imminently', label)
+          : t('{0} runs out in ~{1}', label, relativeShort(f.etaMs, now))))
     }
     for (const [source, g] of bySource) {
       out.push({

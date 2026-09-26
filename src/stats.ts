@@ -2285,7 +2285,7 @@ export function hours(ctx: StatsCtx, range: DayRange, zone: 'local' | 'utc'): Ho
     days: seenDays.size,
     note: excluded > 0
       ? (excluded === 1
-        ? t('{0} rolled-up bucket in this range have no hour left and are not in the profile', excluded)
+        ? t('{0} rolled-up bucket in this range has no hour left and is not in the profile', excluded)
         : t('{0} rolled-up buckets in this range have no hour left and are not in the profile', excluded))
       : null,
   }

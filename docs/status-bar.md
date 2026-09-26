@@ -50,9 +50,9 @@ Part of the [Token Pace documentation](../README.md#documentation).
   entry (every budget), the `agents` entry, the `cache` entry and the alerts stay as the settings above make them: the
   switch is a view of the dashboard, the markdown view, the Quick Pick and *Copy Usage Summary*, and
   a view of the panel does not hide a quota window from the bar ([Dashboard](dashboard.md)).
-* **Density.** `full` (default) gives every window its own entry, `compact` folds a provider's
-  windows into one item (`CC 25%·2h14m | 69%·6d`), `minimal` folds every provider into a
-  single `TP 69% ▲`. Problem states are never folded — a named cause is the point.
+* **Density.** `full` (default) gives every window its own entry (`CC 5h ██▁▁▁▁▁▁ 25% · resets 2h14m`,
+  the time marker off), `compact` folds a provider's windows into one item (`CC 25%·2h14m | 69%·6d`), `minimal` folds every
+  provider into a single `TP 69% ▲`. Problem states are never folded — a named cause is the point.
 * **Window selection.** `tokenPace.windowSelect`: `worstPace` (the worst pace verdict, and within
   one verdict the most-utilised of those windows — the default, so each tool contributes exactly
   one entry), `all` (every window, up to nine entries), `leading` (the most-utilised window per
@@ -77,11 +77,15 @@ Part of the [Token Pace documentation](../README.md#documentation).
   the bar; the choice is carried through item, bar direction, tooltip header and legend.
   `used` is rounded, `remaining` is floored, so neither mode ever claims headroom that is not
   there.
-* **Countdown.** `resetFormat`: `none`, `relative` (`45m`, `2h14m`, `3d 5h`), `absolute`
-  (`06:00`, with a weekday prefix beyond a day), `both`. `resetHourCycle` picks 12- or
-  24-hour, `auto` follows the OS locale. The countdown is always introduced by the word
-  `resets` — a bare `· 2h14m` would read like the age suffix, and the two move in opposite
-  directions. A window whose provider states no reset time gets **no** countdown, ever.
+* **Countdown.** `resetFormat`: `none`, `relative` (`45m`, `2h14m`, `3d 5h` —
+  `CC 5h 25% · resets 2h14m`), `absolute` (`06:00`, with a weekday prefix beyond a day —
+  `CC 5h 25% · resets at 06:00`, `· resets at Mo 06:00`), `both`
+  (`CC 5h 25% · resets at 06:00 (in 2h14m)`). `resetHourCycle` picks 12- or 24-hour (`06:00 AM`,
+  `06:00`), `auto` follows the OS locale. The countdown is always introduced by the word
+  `resets` (`resets at` before a clock time) — a bare `· 2h14m` would read like the age suffix,
+  and the two move in opposite directions. A window whose provider states no reset time gets
+  **no** countdown, ever. The settings quote these examples as the bar prints them, in each
+  language's own words (a German bar says `· Reset in 2h14m`, `· Reset um 06:00`).
 * **Age.** `showAgeInItem`: `never`, `whenStale` (default), `always`. The age is recomputed at
   every redraw, so it never freezes at the value it had when it was fetched. A reading older
   than `staleAfterMinutes` (default 20) is greyed with `tokenPace.stale`, marked in the
@@ -121,7 +125,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `CC 5h ██┃▁▁▁▁▁ 25% · resets 2h14m $(history) 2h · $(clock) retry 1h12m` | the reading is stale because of a transient failure of our own fetch (a `429`, a server or network error); the countdown is the next attempt (`retry due` once it has passed, `retry waiting for focus` while a background window holds it back). Grey, never an alarm |
 | `CC extra $12.00 of $50.00 · 24 %` | extra usage, in its own blue |
 | `CC $(graph) 5h ~empty in 40m` | the forecast entry — an estimate, and it carries `~` |
-| `Σ 4.6M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope`; the period is always named |
+| `Σ 3.1M · today` / `Σ 12.3M · 7d` | tokens for `summary.period` and `summary.scope`; the period is always named |
 | `~$1.23 · today ⚠` | hypothetical API cost; `⚠` means some tokens have no price and are missing from the sum |
 | `~3 running` / `~1 running` | the `agents` entry: Claude Code agents running right now, inferred from their transcripts (changed within the last 10 minutes, no result recorded) — hidden while none runs |
 | `$(watch) cache 4m` / `$(watch) cache ~4m` | the `cache` entry: a Claude Code session's one-hour prompt cache expires in four minutes — `~` when the expiry is estimated from the transcript; `45s` under a minute, `+1` for each further session cooling. Hidden while none cools |

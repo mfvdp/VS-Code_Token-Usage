@@ -4,7 +4,9 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator, billable } from '../src/agg'
-import { setLocale } from '../src/i18n'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { setBundle, setLocale } from '../src/i18n'
 import { usd } from '../src/render'
 import {
   CHART_MODEL_SERIES_PER_PROVIDER, HourSums, MIN_P90_SAMPLES, StatsCtx, bucketsIn, cacheEconomy, cacheHitParts,
@@ -15,6 +17,7 @@ import {
 import { DayRange, TimeConfig, addDays, dayOf, dayOfHour, daysBetween, previousRange, rangeFor, resetTimeMemos } from '../src/time'
 import { Bucket, SessionRec, Snapshot, Source, emptyBucket } from '../src/types'
 import { NOW, TODAY, buildAgg, makeConfig, timeConfig } from './fixtures/viewFixtures'
+import { ROOT } from './helpers/nls'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -283,6 +286,16 @@ test('rolled-up buckets are named as missing from the hour profile', () => {
   const agg = single({ input: 1000, output: 100, requests: 1 })
   const h = hours(ctxOf(agg), range('today'), 'local')
   assert.match(String(h.note), /rolled-up/)
+  // 1.10 B2 D1: one bucket takes the singular's verbs — "has … is", never "have … are" — and German keeps its sentence.
+  assert.equal(h.note, '1 rolled-up bucket in this range has no hour left and is not in the profile')
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    assert.equal(hours(ctxOf(agg), range('today'), 'local').note,
+      '1 zusammengefasster Bucket in diesem Zeitraum hat keine Stunde mehr und ist nicht im Profil enthalten')
+  } finally {
+    setBundle(undefined)
+  }
 })
 
 test('turn P90 needs enough samples, the average does not', () => {

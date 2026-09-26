@@ -1140,7 +1140,8 @@ function sTokens(): string {
       + '<div class="meta">' + esc(vm.cacheEconomy[0].note) + '</div>';
   }
   const cal = vm.calendar;
-  const active = tr('Active'), perDay = tr('Avg/day');
+  // 1.10 B2 D2: the column counts days — 'Active' alone is a session's state (the Agents tree).
+  const active = tr('Active days'), perDay = tr('Avg/day');
   h += '<div class="scroll"><table><thead><tr><th>' + w.period + '</th><th>' + w.usage + '</th>'
     + (vm.showCost ? '<th>' + w.cost + '</th>' : '') + '<th>' + w.requests + '</th><th>' + active
     + '</th><th>' + perDay + '</th>'
@@ -1367,8 +1368,8 @@ function sModels(): string {
     + '<td data-h="' + w.share + '">' + esc(r.share) + '</td>'
     + '</tr>' + (r.turnAvg
       ? '<tr><td colspan="99" class="meta">'
-        + (r.turnP90 ? tr('Avg turn {0} · P90 {1}', esc(r.turnAvg), esc(r.turnP90))
-                     : tr('Avg turn {0}', esc(r.turnAvg)))
+        + (r.turnP90 ? tr('Avg turn time {0} · P90 {1}', esc(r.turnAvg), esc(r.turnP90))
+                     : tr('Avg turn time {0}', esc(r.turnAvg)))
         + '</td></tr>' : '')).join('');
   const more = m.hidden > 0
     ? '<tr class="more"><td colspan="99">'
@@ -1660,7 +1661,7 @@ function sDataQuality(): string {
   // The figures and the note are the view model's; only the two labels are the page's.
   const ag = d.agents;
   if (ag && typeof ag.records === 'string' && typeof ag.buckets === 'string') {
-    li.push(tr('Agent records, last 7 days') + ': ' + esc(ag.records) + ' · '
+    li.push(tr('Agent entries, last 7 days') + ': ' + esc(ag.records) + ' · '
       + tr('Subagent tokens in the hour buckets, last 7 days') + ': ' + esc(ag.buckets)
       + (typeof ag.note === 'string' && ag.note ? '<div class="meta agnote">' + esc(ag.note) + '</div>' : ''));
   }

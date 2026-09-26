@@ -18,7 +18,7 @@ import { EARLIER_KEY, MAX_AGENT_MORE, MAX_MORE_PAGES } from '../src/agentTree'
 import {
   AGENT_SELECTED_IN, DASHBOARD_SECTION_KEYS, isAgentSelectedIn, MAX_AGENT_EXPANDED, MAX_AGENT_KEY_CHARS, problemActions, SOURCE_TITLE, SPARK_DAYS,
   SPARK_SLOTS, SPARK_SLOT_MS, WEBVIEW_COMMANDS, WindowVm, agentShareOf, agentTreeFor, applyMessage, buildViewModel, defaultUiState,
-  forecastsFor, SparkVm, parseWebviewMessage, pricingOf, providerViewOf, resetLineOf, sparkOf, viewSources,
+  forecastsFor, SparkVm, parseWebviewMessage, pricingOf, providerViewOf, resetLineOf, retroText, sparkOf, viewSources,
 } from '../src/viewModel'
 import {
   CLAUDE_FILE, FINGERPRINT, NOW, SHARE_AGENTS, TODAY, addCacheSession, agentShareAgg, buildAgg, daysAgo, fillHistory, makeConfig,
@@ -1475,7 +1475,8 @@ test('the data-quality line holds the agent records against the subagent hour bu
   assert.deepEqual(d.agents, {
     records: '7.5K',
     buckets: '5.5K',
-    note: 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.',
+    // 1.10 B2 D6 (pinned and changed: "a record keeps a whole agent"): an agent entry — a record is a personal best.
+    note: 'The two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply.',
   })
   // The records are the ones the 7-day block sums, by the same rule.
   const open = buildViewModel(makeInput({ agg, ui: { agentsWeekOpen: true } }))
@@ -2262,6 +2263,26 @@ test('the retrospective counts complete cycles, and one cycle is not "1 cycles"'
   const second = buildViewModel(makeInput({ history: two })).retro
     .find((r) => r.windowId === 'session:300')
   assert.equal(second?.text, 'not enough data yet · 2 complete cycles on file')
+})
+
+test('with enough cycles the reset history line puts each figure after its own label, a dash where it has none — in English and German (1.10 B2 D7)', () => {
+  const history = makeHistory()
+  fillCompleteCycles(history, 3)
+  const line = (): string | undefined => buildViewModel(makeInput({ history })).retro.find((r) => r.windowId === 'session:300')?.text
+  // Three complete cycles, each ending at 80 %: none hit the limit, a fifth unused at each reset.
+  assert.equal(line(), 'Share of complete cycles that hit the limit: 0 % · Avg unused at the reset: 20 %')
+  const retro = { windowId: 'session:300', cycles: [], enough: true }
+  assert.equal(retroText({ ...retro, cappedShare: null, avgUnused: 12.4 }), 'Share of complete cycles that hit the limit: – · Avg unused at the reset: 12 %')
+  assert.equal(retroText({ ...retro, cappedShare: 0.5, avgUnused: null }), 'Share of complete cycles that hit the limit: 50 % · Avg unused at the reset: –')
+  const { setBundle } = require('../src/i18n') as typeof import('../src/i18n')
+  const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    assert.equal(line(), 'Anteil der vollständigen Zyklen am Limit: 0 % · Ø ungenutzt beim Reset: 20 %')
+    assert.equal(retroText({ ...retro, cappedShare: null, avgUnused: 12.4 }), 'Anteil der vollständigen Zyklen am Limit: – · Ø ungenutzt beim Reset: 12 %')
+  } finally {
+    setBundle(undefined)
+  }
 })
 
 // ---------------------------------------------------------------------------

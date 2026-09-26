@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { DigestInput, digest } from '../src/digest'
+import { setBundle } from '../src/i18n'
+import { ROOT } from './helpers/nls'
 import { buildViewModel } from '../src/viewModel'
 import { NOW, fillHistory, makeHistory, makeInput, state, win } from './fixtures/viewFixtures'
 
@@ -71,6 +75,31 @@ test('the cache rate is classified by the documented thresholds', () => {
 test('a provider without a denominator is left out of the cache sentence', () => {
   const s = digest(input({ cacheEconomy: [{ source: 'claude', hitRate: '–', hitValue: null, savedUsd: '–' }] }))
   assert.equal(s.find((x) => x.startsWith('Cache hit rate')), undefined)
+  // 1.10 B2 D9: the other provider alone takes the one-provider sentence.
+  const codexOnly = digest(input({ cacheEconomy: [
+    { source: 'claude', hitRate: '–', hitValue: null, savedUsd: '–' },
+    { source: 'codex', hitRate: '62 %', hitValue: 62, savedUsd: '–' },
+  ] })).find((x) => x.startsWith('Cache hit rate'))
+  assert.equal(codexOnly, 'Cache hit rate — Codex 62 % (good).')
+})
+
+test('the cache sentence is whole, for one provider and for two — the code joins nothing, the German writes its own (1.10 B2 D9)', () => {
+  const two = [
+    { source: 'claude' as const, hitRate: '91 %', hitValue: 91, savedUsd: '~$4.20' },
+    { source: 'codex' as const, hitRate: '42 %', hitValue: 42, savedUsd: '–' },
+  ]
+  const cache = (over: Partial<DigestInput>): string | undefined => digest(input(over)).find((x) => /^Cache/.test(x))
+  assert.equal(cache({}), 'Cache hit rate — Claude Code 91 % (excellent).')
+  assert.equal(cache({ cacheEconomy: two }), 'Cache hit rate — Claude Code 91 % (excellent), Codex 42 % (low).')
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['Cache hit rate — {0}.'], undefined, 'the joined sentence is gone from the German')
+  try {
+    setBundle(bundle)
+    assert.equal(cache({}), `Cache-Trefferquote — Claude Code 91 % (${bundle['excellent']}).`)
+    assert.equal(cache({ cacheEconomy: two }), `Cache-Trefferquote — Claude Code 91 % (${bundle['excellent']}), Codex 42 % (${bundle['low']}).`)
+  } finally {
+    setBundle(undefined)
+  }
 })
 
 test('unpriced models are named as the reason the cost is a lower bound', () => {

@@ -1218,10 +1218,12 @@ function dataQualityOf(over: Record<string, unknown> = {}): Record<string, unkno
   }
 }
 
-test('the data-quality list holds the agent records against the subagent hour buckets, with its note (1.6 N7)', () => {
-  const agents = { records: '7.5K', buckets: '≈5.5K', note: 'The two differ by construction: a record keeps a whole agent, a bucket the hour of each reply.' }
+// 1.10 B2 D6 (pinned and changed: "Agent records, last 7 days" and "a record keeps a whole agent"): an agent's data is
+// an entry — "record" is a personal best of the Records section.
+test('the data-quality list holds the agent entries against the subagent hour buckets, with its note (1.6 N7)', () => {
+  const agents = { records: '7.5K', buckets: '≈5.5K', note: 'The two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply.' }
   const h = render('sDataQuality()', { dataQuality: dataQualityOf({ agents }) })
-  const item = '<li>Agent records, last 7 days: 7.5K · Subagent tokens in the hour buckets, last 7 days: ≈5.5K'
+  const item = '<li>Agent entries, last 7 days: 7.5K · Subagent tokens in the hour buckets, last 7 days: ≈5.5K'
     + '<div class="meta agnote">' + agents.note + '</div></li>'
   assert.ok(h.indexOf(item) >= 0, h)
   // After the lower-bound line, before the retention, as the markdown lists it.
@@ -1229,19 +1231,63 @@ test('the data-quality list holds the agent records against the subagent hour bu
   assert.ok(h.indexOf(item) < h.indexOf('Retention 45 d hourly'), h)
   // The view model's words and figures, escaped; only the two labels are the page's.
   const odd = render('sDataQuality()', { dataQuality: dataQualityOf({ agents: { records: '<b>', buckets: '&', note: '<i>n</i>' } }) })
-  assert.ok(odd.indexOf('Agent records, last 7 days: &lt;b&gt; · Subagent tokens in the hour buckets, last 7 days: &amp;'
+  assert.ok(odd.indexOf('Agent entries, last 7 days: &lt;b&gt; · Subagent tokens in the hour buckets, last 7 days: &amp;'
     + '<div class="meta agnote">&lt;i&gt;n&lt;/i&gt;</div>') >= 0, odd)
   for (const x of [null, undefined, { records: 1, buckets: '2', note: 'n' }, 'agents']) {
     const none = render('sDataQuality()', { dataQuality: dataQualityOf({ agents: x }) })
-    assert.equal(none.indexOf('Agent records'), -1, JSON.stringify(x) + ': ' + none)
+    assert.equal(none.indexOf('Agent entries'), -1, JSON.stringify(x) + ': ' + none)
   }
-  // The labels are the page's words, German on a German page.
-  for (const k of ['Agent records, last 7 days', 'Subagent tokens in the hour buckets, last 7 days']) {
+  // The labels are the page's words, German on a German page; the old label is none of them.
+  for (const k of ['Agent entries, last 7 days', 'Subagent tokens in the hour buckets, last 7 days']) {
     assert.ok(Object.prototype.hasOwnProperty.call(DICT, k), k)
   }
+  assert.equal(Object.prototype.hasOwnProperty.call(DICT, 'Agent records, last 7 days'), false)
   const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
-  assert.equal(bundle['Agent records, last 7 days'], 'Agent-Datensätze, letzte 7 Tage')
+  assert.equal(bundle['Agent entries, last 7 days'], 'Agent-Einträge, letzte 7 Tage')
   assert.equal(bundle['Subagent tokens in the hour buckets, last 7 days'], 'Subagent-Token in den Stunden-Buckets, letzte 7 Tage')
+  const de = makeContext()
+  nodeVm.runInContext(between(germanPage({ 'Agent entries, last 7 days': bundle['Agent entries, last 7 days'] }), /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
+  ;(de as Record<string, unknown>).fixture = model({ dataQuality: dataQualityOf({ agents }) })
+  assert.ok(String(nodeVm.runInContext('vm = fixture; sDataQuality()', de)).indexOf('<li>Agent-Einträge, letzte 7 Tage: 7.5K · ') >= 0)
+})
+
+test('the calendar table\'s column counts days and says so — Active days, Aktive Tage — and Active is no word of the page any more: a session\'s state (1.10 B2 D2)', () => {
+  const h = render('sTokens()', tokensVm())
+  const heads = [...h.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1])
+  assert.ok(heads.includes('Active days'), heads.join(' | '))
+  assert.equal(heads.includes('Active'), false, heads.join(' | '))
+  // The stacked cell names the same head (the ≤320 px layout prints it before the value).
+  assert.ok(h.indexOf('<td data-h="Active days">1</td>') >= 0, h)
+  assert.equal(Object.prototype.hasOwnProperty.call(DICT, 'Active days'), true)
+  assert.equal(Object.prototype.hasOwnProperty.call(DICT, 'Active'), false, 'Active is a session\'s state, the text views\' word — not the page\'s')
+  // German: the model part's "Aktive Tage", copied into the page's words — one translation in both parts.
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['Active days'], 'Aktive Tage')
+  assert.equal(bundle['Active'], 'Aktiv')
+  const de = makeContext()
+  nodeVm.runInContext(between(germanPage({ 'Active days': bundle['Active days'] }), /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
+  ;(de as Record<string, unknown>).fixture = model(tokensVm())
+  const deHtml = String(nodeVm.runInContext('vm = fixture; sTokens()', de))
+  assert.ok(deHtml.indexOf('<th>Aktive Tage</th>') >= 0, deHtml)
+  assert.equal(deHtml.indexOf('<th>Aktiv</th>'), -1, deHtml)
+})
+
+test('a model\'s turn line names what its figures are — Avg turn time, Ø Turn-Dauer — with and without the P90 (1.10 B2 D5)', () => {
+  const rows = (turnP90: string | null): Record<string, unknown> => ({
+    models: { rows: [modelRow({ turnAvg: '42 s', turnP90 })], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  assert.ok(render('sModels()', rows('1 min 10 s')).indexOf('<td colspan="99" class="meta">Avg turn time 42 s · P90 1 min 10 s</td>') >= 0)
+  assert.ok(render('sModels()', rows(null)).indexOf('<td colspan="99" class="meta">Avg turn time 42 s</td>') >= 0)
+  assert.equal(Object.keys(DICT).some((k) => k.startsWith('Avg turn {')), false)
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['Avg turn time {0}'], 'Ø Turn-Dauer {0}')
+  assert.equal(bundle['Avg turn time {0} · P90 {1}'], 'Ø Turn-Dauer {0} · P90 {1}')
+  const de = makeContext()
+  nodeVm.runInContext(between(germanPage({
+    'Avg turn time {0}': bundle['Avg turn time {0}'], 'Avg turn time {0} · P90 {1}': bundle['Avg turn time {0} · P90 {1}'],
+  }), /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
+  ;(de as Record<string, unknown>).fixture = model(rows('1 min 10 s'))
+  assert.ok(String(nodeVm.runInContext('vm = fixture; sModels()', de)).indexOf('>Ø Turn-Dauer 42 s · P90 1 min 10 s</td>') >= 0)
 })
 
 test('the state is dropped when the verdict already says the same word', () => {

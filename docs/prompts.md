@@ -23,8 +23,8 @@ list, first for the quickest reach:
 ```
 
 It has no setting of its own: the list is yours and lives in a file of the extension's storage
-([below](#where-the-prompts-are-kept)). While `prompts` is not listed, Token Pace does not even look at
-that file. The section serves Claude Code and Codex alike, so it stays on the page whatever the
+([below](#where-the-prompts-are-kept)). While `prompts` is not listed, the dashboard does not look at that file; only *Clear Stored
+Data…* (to count its prompts) and *Token Pace: Restore Default Prompts* read it then. The section serves Claude Code and Codex alike, so it stays on the page whatever the
 provider switch shows, and neither the range nor a model chip filters it. It is the dashboard
 panel's only: the Quick Pick and markdown modes of `tokenPace.dashboard.mode` have no prompts.
 

@@ -256,8 +256,8 @@ opt-ins, each behind a consent dialog of its own.
 
 **Your prompts** ([Prompts](prompts.md), 1.10) are kept in `prompts.json` in the extension's storage,
 written only when you change the list (save, delete, move, *Restore Default Prompts*) — whole, a temp
-file and then a rename — and read while the dashboard lists the Prompts section and before every
-change. Token Pace reads it back by its shape only: `v` and `prompts`, and of each entry its `id` and,
+file and then a rename — and read while the dashboard lists the Prompts section, before every change and when *Clear Stored
+Data…* counts its prompts. Token Pace reads it back by its shape only: `v` and `prompts`, and of each entry its `id` and,
 where you wrote them, its `title` and `text`; a file of any other shape is shown as unreadable and never
 written over. The titles and texts are your data: they are shown on the dashboard and typed into the
 terminal you send one to, and they never reach the log, the diagnostics report, an export, the summary,

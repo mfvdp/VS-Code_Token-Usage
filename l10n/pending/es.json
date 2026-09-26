@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 51,
+  "applied": 52,
   "bundle": {
     "{0} rolled-up bucket in this range has no hour left and is not in the profile": {
       "parts": [
@@ -262,7 +262,7 @@
     },
     "config.dashboard.sections.description": {
       "state": "review",
-      "why": "a paragraph added at the end: prompts, the reader's own prompts for Claude Code's and Codex's terminals, not in the default either — 1.10 A"
+      "why": "a paragraph added at the end: prompts, the reader's own prompts for Claude Code's and Codex's terminals, not in the default either — 1.10 A; the prompts paragraph loses its either (ebenfalls): nothing before it names a section outside the default — Review 1b F4"
     },
     "capabilities.untrustedWorkspaces": {
       "state": "review",

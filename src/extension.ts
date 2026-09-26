@@ -22,7 +22,7 @@
  *    hands it each frame's facts and asks the question. 1.10: the window's terminals are watched by one
  *    TerminalWatch (terminalWatch.ts) made here, which the keep-warm host and the prompt tool share.
  *  • 1.10 A (P3): the reader's prompt list lives in `prompts.json` in `globalStorage` (promptsHost.ts); this
- *    file reads it only while the Prompts section is listed, applies the page's save / delete / move and the
+ *    file reads it while the Prompts section is listed, for an operation and for the two commands that need it, applies the page's save / delete / move and the
  *    *Restore Default Prompts* command, and lists the file in *Clear Stored Data…*. A title or a text is
  *    never logged, exported or reported — the page shows it, and a send (P4) types it.
  */

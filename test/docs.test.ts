@@ -3318,7 +3318,7 @@ test('the prompts page quotes the shipped prompts, the limits and the file as th
   for (const claim of ['never in the log, the diagnostics report (not even a count), the CSV or JSON export, *Copy Usage Summary*, the usage document, the usage Quick Pick or the status bar',
     'no time, no session, no terminal, no path, no count of sends', '`prompts.json` is not part of VS Code\'s Settings Sync, and the list has no export and no import',
     'It is written only when you change the list', 'until your first change there is no file', 'a temporary file, then a rename',
-    'When two windows save the same prompt, the later save wins', 'While `prompts` is not listed, Token Pace does not even look at that file']) {
+    'When two windows save the same prompt, the later save wins', 'While `prompts` is not listed, the dashboard does not look at that file; only *Clear Stored Data…* (to count its prompts) and *Token Pace: Restore Default Prompts* read it then']) {
     assert.ok(flat.includes(claim), `docs/prompts.md does not say: ${claim}`)
   }
   // The pages around it: the section's row and the default's omissions, the settings row, the command, the privacy page's writes.

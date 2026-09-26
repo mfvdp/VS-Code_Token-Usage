@@ -16,6 +16,7 @@ import {
   StoredPaths, storedFile, storedFiles,
 } from '../src/storage'
 import { scratchDir } from './fixtures/helpers'
+import { setLocale } from '../src/i18n'
 
 
 class FakeMemento implements MementoLike {
@@ -217,6 +218,13 @@ test('sizes are readable', () => {
   assert.equal(formatBytes(12_300), '12.3 kB')
   assert.equal(formatBytes(1_500_000), '1.5 MB')
   assert.equal(formatBytes(Number.NaN), '–')
+  // 1.10 B4: the pick list's decimal mark is the reader's; the English above is what 1.9 printed.
+  setLocale('de')
+  try {
+    assert.deepEqual([formatBytes(482), formatBytes(12_300), formatBytes(1_500_000)], ['482 B', '12,3 kB', '1,5 MB'])
+  } finally {
+    setLocale(undefined)
+  }
 })
 
 // ---------------------------------------------------------------------------

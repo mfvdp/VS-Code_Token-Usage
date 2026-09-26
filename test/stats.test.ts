@@ -7,6 +7,7 @@ import { Aggregator, billable } from '../src/agg'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setBundle, setLocale } from '../src/i18n'
+import { LANGUAGES } from '../src/languages'
 import { usd } from '../src/render'
 import {
   CHART_MODEL_SERIES_PER_PROVIDER, HourSums, MIN_P90_SAMPLES, StatsCtx, bucketsIn, cacheEconomy, cacheHitParts,
@@ -1303,4 +1304,32 @@ test('the bucket walks read the context\'s one copy when it carries one, and a c
   assert.deepEqual([none?.usage, none?.firstAt, none?.cost], [whole?.usage, null, '–'])
   assert.equal(whole?.firstAt, '09:00')
   assert.match(whole?.cost ?? '', /^~\$\d/)
+})
+
+test('the plan factor, its bound and the heat map\'s variability are written in the reader\'s decimal mark (1.10 B4)', () => {
+  // toFixed wrote "×0.4" and "CV 0.35" in every language; the page prints them in sentences of the reader's words.
+  const ctx = ctxOf(single({ input: 1_000_000, requests: 1, outputFinal: 1 }), { sources: ['claude'] })
+  const factor = (plan: number): string => String(planFactors(ctx, { claude: plan })[0].text.split('= ')[1])
+  // Ten active days of uneven usage up to TODAY: enough for the variability (MIN_VARIABILITY_DAYS).
+  const buckets: Bucket[] = []
+  for (let i = 0; i < 10; i++) {
+    buckets.push({
+      ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, addDays(TODAY, -i)),
+      input: 100_000 * (1 + (i % 3) * 2), output: 1_000, requests: 2, outputFinal: 2,
+    })
+  }
+  const cv = (): string => String(heatmap(ctxOf(fromBuckets(buckets)), 'usage', '2026-07-01').variability?.cv)
+  const en = cv()
+  assert.match(en, /^\d\.\d\d$/)
+  assert.deepEqual([factor(5000), factor(200), factor(4)], ['<×0.01', '×0.03', '×1.3'])
+  for (const { id, locale } of LANGUAGES) {
+    const m = new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === 'decimal')?.value ?? '?'
+    setLocale(locale)
+    try {
+      assert.deepEqual([factor(5000), factor(200), factor(4)], [`<×0${m}01`, `×0${m}03`, `×1${m}3`], id)
+      assert.equal(cv(), en.replace('.', m), id)
+    } finally {
+      setLocale(undefined)
+    }
+  }
 })

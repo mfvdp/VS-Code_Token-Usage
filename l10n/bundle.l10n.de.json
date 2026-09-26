@@ -1146,6 +1146,7 @@
   "{0}, recorded": "{0}, aufgezeichnet",
   "{0}, then {1}": "{0}, dann {1}",
   "{0}, your configured rates": "{0}, Ihre konfigurierten Sätze",
+  "{0}:": "{0}:",
   "{0}: no usage": "{0}: kein Verbrauch",
   "{0}: subagents {1} of {2} counted here ({3})": "{0}: Subagenten {1} von {2} hier gezählt ({3})",
   "{0}: {1} of {2}": "{0}: {1} von {2}",

@@ -3,8 +3,10 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
+import { setLocale } from '../src/i18n'
+import { LANGUAGES } from '../src/languages'
 import {
-  ageMinutes, BarOptions, compact, DEFAULT_BAR, deltaBadge, estimate, extraUsageText, full,
+  ageMinutes, BarOptions, compact, decimalText, DEFAULT_BAR, deltaBadge, estimate, extraUsageText, full,
   lastDays, money, percentOf, percentText, provenanceBadge, ratioText, renderBar, severity, usd,
   windowElapsed,
 } from '../src/render'
@@ -175,4 +177,64 @@ test('compatibility shims still serve the wave-2 callers', () => {
   const days = lastDays(3, now)
   assert.equal(days.length, 3)
   assert.match(days[2], /^\d{4}-\d{2}-\d{2}$/)
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 B4: decimals through Intl
+// ---------------------------------------------------------------------------
+
+/** The decimal mark a locale writes, taken from Intl at test time — the test states no mark of its own. */
+function markOf(locale: string): string {
+  return new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === 'decimal')?.value ?? '?'
+}
+
+/** Runs `fn` with the formatters in `locale`, and back to the default after it whatever happens. */
+function inLocale<T>(locale: string | undefined, fn: () => T): T {
+  setLocale(locale)
+  try { return fn() } finally { setLocale(undefined) }
+}
+
+test('decimalText: the language\'s decimal mark in every registry locale, never grouped, a dash for what is no number (1.10 B4)', () => {
+  const marks = new Set<string>()
+  for (const { id, locale } of LANGUAGES) {
+    const m = markOf(locale)
+    marks.add(m)
+    inLocale(locale, () => {
+      assert.equal(decimalText(0.7, 1), `0${m}7`, id)
+      assert.equal(decimalText(1234.5, 1), `1234${m}5`, id + ': no grouping — the figure read "1234.5" before 1.10')
+      assert.equal(decimalText(0.05, 2), `0${m}05`, id)
+      // At least minDigits, at most maxDigits: a tenth where there is one, a whole number plain.
+      assert.equal(decimalText(1.5, 1, 0), `1${m}5`, id)
+      assert.equal(decimalText(2, 1, 0), '2', id)
+      assert.equal(decimalText(9.96, 1, 0), '10', id)
+      assert.equal(decimalText(-0, 1), `0${m}0`, id + ': -0 prints as toFixed printed it')
+      for (const n of [NaN, Infinity, -Infinity]) assert.equal(decimalText(n, 1), '–', id + ' ' + String(n))
+      // The sign and the '%' of the delta badge are its own notation; the figure is the language's.
+      assert.deepEqual(deltaBadge(99.3, 100), { glyph: '▼', text: `-0${m}7%` }, id)
+      assert.deepEqual(deltaBadge(105, 100), { glyph: '▲', text: `+5${m}0%` }, id)
+      assert.deepEqual(deltaBadge(110, 100), { glyph: '▲', text: '+10%' }, id)
+      assert.equal(ratioText(3, 2), `1${m}5`, id)
+    })
+  }
+  // The registry writes both marks: a test that saw only one would prove nothing about the other.
+  assert.deepEqual([...marks].sort(), [',', '.'])
+  // German by name: the spec's own example (§1 "What the user gets": `▼ -0,7%`).
+  inLocale('de', () => assert.deepEqual(deltaBadge(99.3, 100), { glyph: '▼', text: '-0,7%' }))
+})
+
+test('decimalText: English prints the digits toFixed printed, byte for byte (1.10 B4)', () => {
+  // A sweep over the values the badge, the plan factor and the durations see: the English output of every changed
+  // site is what 1.9 wrote — the ties included (36.55 is 36.549999… in binary: toFixed wrote "36.5", and so does
+  // decimalText, where Intl alone would round the printed decimal up to "36.6").
+  assert.equal(decimalText(36.55, 1), '36.5')
+  assert.equal(decimalText(1.005, 2), '1.00')
+  assert.equal(decimalText(-0.04, 1), (-0.04).toFixed(1))
+  inLocale('de', () => assert.equal(decimalText(36.55, 1), '36,5'))
+  for (let i = 0; i <= 20_000; i++) {
+    const n = (i * 7.31) / 97
+    for (const d of [0, 1, 2]) assert.equal(decimalText(n, d), n.toFixed(d), `${n} ${d}`)
+    assert.equal(ratioText(n, 1), n.toFixed(1))
+  }
+  assert.deepEqual(deltaBadge(105, 100), { glyph: '▲', text: '+5.0%' })
+  assert.deepEqual(deltaBadge(100.2, 100), { glyph: '•', text: '+0.2%' })
 })

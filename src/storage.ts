@@ -18,6 +18,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { t } from './i18n'
+import { decimalText } from './render'
 
 /**
  * The slice of `vscode.Memento` this code needs.
@@ -337,10 +338,13 @@ export function hookMirrorNote(): string {
   return t('The hook writes it again on its next call. Its script, agent-hook.js, stays while the hook is installed and goes with the extension\'s storage when Token Pace is uninstalled.')
 }
 
-/** "12.3 kB" / "482 B" — for the pick list, where an exact byte count helps nobody. */
+/**
+ * "12.3 kB" / "482 B" — for the pick list, where an exact byte count helps nobody. 1.10 B4: the pick list is the
+ * reader's, so is the decimal mark ("12,3 kB" in German); the diagnostics report keeps its own '.' (diagnostics.ts).
+ */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '–'
   if (bytes < 1000) return `${Math.round(bytes)} B`
-  if (bytes < 1000 * 1000) return `${(bytes / 1000).toFixed(1)} kB`
-  return `${(bytes / 1000 / 1000).toFixed(1)} MB`
+  if (bytes < 1000 * 1000) return `${decimalText(bytes / 1000, 1)} kB`
+  return `${decimalText(bytes / 1000 / 1000, 1)} MB`
 }

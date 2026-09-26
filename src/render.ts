@@ -198,7 +198,8 @@ export function ratioText(num: number, den: number, digits = 1): string {
   if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) return '–'
   const v = num / den
   if (!Number.isFinite(v)) return '–'
-  return v.toFixed(digits)
+  // 1.10 B4: the language's decimal mark, as every other decimal of the views.
+  return decimalText(v, digits)
 }
 
 /** "91 %" — or '–', because a missing denominator is not "0 %". */
@@ -227,7 +228,9 @@ export function deltaBadge(
   const pct = ((cur - prev) / Math.abs(prev)) * 100
   const abs = Math.abs(pct)
   const digits = abs < 10 ? 1 : 0
-  const text = `${pct >= 0 ? '+' : '-'}${abs.toFixed(digits)}%`
+  // 1.10 B4: the figure in the language's decimal mark ("-0,7%" in German); the sign and the '%' are the badge's own
+  // notation and stay attached, in every language.
+  const text = `${pct >= 0 ? '+' : '-'}${decimalText(abs, digits)}%`
   if (abs < 0.5) return { glyph: '•', text }
   return { glyph: pct > 0 ? '▲' : '▼', text }
 }
@@ -252,6 +255,40 @@ function formats(): { one: Intl.NumberFormat; whole: Intl.NumberFormat } {
     numberFormats.set(lang, f)
   }
   return f
+}
+
+/**
+ * 1.10 B4: the decimals formatters, per locale and number of digits — built on demand for the reason
+ * `formats()` gives, and kept per key for the same one.
+ */
+const decimalFormats = new Map<string, Intl.NumberFormat>()
+
+/**
+ * A decimal in the reader's language — "0.7" in English, "0,7" in German, French or Polish — with at
+ * least `minDigits` and at most `maxDigits` after the mark, and never grouped: every caller wrote
+ * `toFixed(maxDigits)` (or a number rounded to tenths) before 1.10, and a figure that used to read
+ * "1234.5" must not become "1,234.5". A value that is not a finite number is a dash, never "NaN".
+ *
+ * The rounding is `toFixed`'s, the writing Intl's: Intl rounds the decimal a number prints as (36.55 →
+ * "36.6") where `toFixed` rounds the binary value under it (36.549999… → "36.5"), so the value is rounded
+ * first and Intl then only writes it — the English page keeps every digit it printed before 1.10.
+ *
+ * View text only: a figure a machine reads — a CSS geometry value, an export's column — keeps its '.'.
+ */
+export function decimalText(n: number, maxDigits: number, minDigits: number = maxDigits): string {
+  if (!Number.isFinite(n)) return '–'
+  const lang = locale()
+  const key = `${lang}|${minDigits}|${maxDigits}`
+  let f = decimalFormats.get(key)
+  if (!f) {
+    f = new Intl.NumberFormat(lang, {
+      minimumFractionDigits: minDigits, maximumFractionDigits: maxDigits, useGrouping: false,
+    })
+    decimalFormats.set(key, f)
+  }
+  // Rounded as toFixed rounds; its text read back is exact at these digits, so Intl rounds nothing again.
+  // (-0 comes back as "0", as toFixed wrote it; a negative that rounds to zero keeps its "-", as toFixed's did.)
+  return f.format(Number(n.toFixed(maxDigits)))
 }
 
 /** Compact token count: 987 · 12.3K · 1.2M · 3.4G */

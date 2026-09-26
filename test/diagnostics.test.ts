@@ -14,7 +14,7 @@ import {
   buildDiagnostics, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
   InspectLike, maskProxyUrl, scrubHome, tildify, VscodeConfigApi,
 } from '../src/diagnostics'
-import { setBundle, setLocale } from '../src/i18n'
+import { setBundle, setLang, setLocale } from '../src/i18n'
 
 const HOME = '/home/tester'
 
@@ -317,5 +317,24 @@ test('the report names the language setting, the language shown and VS Code\'s t
   } finally {
     setBundle(undefined)
     setLocale(undefined)
+  }
+})
+
+test('the report is byte for byte the same under a German page: its figures keep the machine\'s \'.\' (1.10 B4, §3.0 h)', () => {
+  // The decimals of the views follow the language since 1.10; the report is pasted into an issue and stays one text
+  // in every language — its sizes ("1.2 MB", "210.0 kB") are toFixed's, not the reader's.
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const cases = [input(), input({ historySize: { samples: 12, bytes: 999_949, oldest: '2026-08-04' }, partialData: true })]
+  const en = cases.map((c) => buildDiagnostics(c))
+  assert.ok(en[0].includes('1.2 MB') && en[1].includes('999.9 kB'), en.join('\n'))
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    setLang('de')
+    assert.deepEqual(cases.map((c) => buildDiagnostics(c)), en)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
   }
 })

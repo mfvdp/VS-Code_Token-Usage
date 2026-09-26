@@ -455,6 +455,20 @@ test('the tooltip carries the forecast, the lockout time and the basis, but no s
   assert.ok(tip.includes('~empty'))
 })
 
+test('the tooltip\'s basis span is written to a tenth of an hour in the reader\'s decimal mark (1.10 B4)', () => {
+  // spanText wrote `Math.round(h * 10) / 10` as a string — "2.5 h" in a German tooltip.
+  const tip = (): string => quotaTooltip(state(), makeContext(input({
+    forecasts: new Map([['claude:session:300', { ...FORECAST, basis: { samples: 7, spanMs: 2.5 * HOUR } }]]),
+  })))
+  assert.ok(tip().includes('based on 7 readings over 2.5 h'), tip())
+  setLocale('de')
+  try {
+    assert.ok(tip().includes('based on 7 readings over 2,5 h'), tip())
+  } finally {
+    setLocale(undefined)
+  }
+})
+
 test('the tooltip prints no measuring sentence: a dash in the pace column, no forecast line', () => {
   const measuring: Forecast = {
     state: 'measuring', ratePerHour: null, etaMs: null, endPercent: null, sustainablePerHour: 20,

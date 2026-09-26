@@ -16,6 +16,9 @@ import {
 } from './fixtures/viewFixtures'
 import { markdownDocument } from '../src/textViews'
 import { toolAgg } from './helpers/toolAgg'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { setBundle, setLang, setLocale } from '../src/i18n'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -482,4 +485,33 @@ test('a companion file is the chosen name with its extension replaced — the to
   assert.equal(companionPath('/home/t/v1.2/export', AGENTS_FILE_SUFFIX), '/home/t/v1.2/export.agents.csv')
   assert.equal(companionPath('C:\\Users\\t\\v1.2\\export.csv', AGENTS_FILE_SUFFIX), 'C:\\Users\\t\\v1.2\\export.agents.csv')
   assert.notEqual(companionPath(chosen, TOOLS_FILE_SUFFIX), companionPath(chosen, AGENTS_FILE_SUFFIX))
+})
+
+test('the CSV and JSON exports are byte for byte the same under a German page (1.10 B4, §3.0 h)', () => {
+  // The views' decimals follow the language since 1.10; an export is read by a machine and keeps its '.' and its
+  // English in every language — the buckets, the tools and the agents file, the JSON with its notes.
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const { agg: agents } = agentWorld()
+  const tools = toolAgg(NOW)
+  const all = (): string[] => [
+    toCsv(buildAgg(), range, cfg, tcfg),
+    toJson(buildAgg(), range, cfg, tcfg, NOW),
+    toolsCsv(tools.agg, tools.range),
+    agentsCsv(agents, WORLD_DAY, cfg, tcfg, NOW),
+    toJson(agents, WORLD_DAY, cfg, tcfg, NOW),
+  ].map((text) => text.replace(/"generated_at": "[^"]*"/, '"generated_at": "<now>"'))
+  const en = all()
+  // Decimals are there to compare: the cost columns are written with six decimals and a '.'.
+  assert.match(en[0], /,\d+\.\d{6}(,|\n|$)/)
+  try {
+    setBundle(bundle)
+    setLocale('de')
+    setLang('de')
+    const de = all()
+    for (let i = 0; i < en.length; i++) assert.equal(de[i], en[i], `export ${i} changed under de`)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+  }
 })

@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 113,
+  "applied": 114,
   "bundle": {
     "{0} rolled-up bucket in this range has no hour left and is not in the profile": {
       "parts": [
@@ -615,6 +615,13 @@
       ],
       "state": "translate",
       "why": "said in the section when the prompt whose fields are open was deleted in another VS Code window meanwhile — 1.10 A2 rule 9"
+    },
+    "{0}:": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the label a table cell prints in front of its value when a narrow sidebar stacks the table, {0} the column's name (Period, Usage …) — the language's own punctuation around it: a no-break space before the colon in French, a full-width colon in Chinese and Japanese — 1.10 B2 D10"
     }
   },
   "nls": {

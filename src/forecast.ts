@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { locale, t } from './i18n'
+import { decimalText } from './render'
 import { turnedOver } from './resetRule'
 import { Forecast, ForecastState, QuotaSample, QuotaWindow } from './types'
 
@@ -90,7 +91,8 @@ function duration(ms: number): string {
   const min = Math.round(Math.max(0, ms) / 60_000)
   if (min < 90) return `${min} min`
   const hours = ms / HOUR_MS
-  if (hours < 48) return `${hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours)} h`
+  // 1.10 B4: under ten hours to a tenth, in the reader's decimal mark ("1,5 h" in German); "2 h", not "2.0 h".
+  if (hours < 48) return `${hours < 10 ? decimalText(hours, 1, 0) : Math.round(hours)} h`
   return `${Math.round(hours / 24)} d`
 }
 

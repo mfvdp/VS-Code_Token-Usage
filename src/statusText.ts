@@ -27,7 +27,7 @@ import { countdownText, promptCacheText } from './promptCache'
 // Type only: this module renders, it never reads a file, and `quotaSources` does.
 import type { ContextReading, PromptCacheReading } from './quotaSources'
 import {
-  ageMinutes, BarOptions, compact, estimate, extraUsageText, full, originName, percentOf,
+  ageMinutes, BarOptions, compact, decimalText, estimate, extraUsageText, full, originName, percentOf,
   percentText, renderBar, usd,
 } from './render'
 import {
@@ -233,7 +233,8 @@ function spanText(ms: number): string {
   const min = Math.round(ms / 60000)
   if (min < 90) return `${min} min`
   const h = ms / 3_600_000
-  if (h < 48) return `${h < 10 ? Math.round(h * 10) / 10 : Math.round(h)} h`
+  // 1.10 B4: the tooltip's span as forecast.ts words it — a tenth in the reader's decimal mark.
+  if (h < 48) return `${h < 10 ? decimalText(h, 1, 0) : Math.round(h)} h`
   return `${Math.round(h / 24)} d`
 }
 

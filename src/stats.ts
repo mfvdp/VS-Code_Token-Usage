@@ -21,7 +21,7 @@ import { locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
 import { PRICES_AS_OF, PricingOptions, costOfBucket, priceOf } from './prices'
-import { Provenance, compact, deltaBadge, estimate, percentOf, usd } from './render'
+import { Provenance, compact, decimalText, deltaBadge, estimate, percentOf, usd } from './render'
 import {
   DayRange, TimeConfig, Zone, addDays, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
   localHourOfDay, weekdayOf,
@@ -1440,8 +1440,9 @@ function planUsd(n: number): string {
  */
 function factorText(f: number): string {
   if (!Number.isFinite(f) || f <= 0) return '×0'
-  if (f < 0.01) return '<×0.01'
-  return `×${f.toFixed(f < 0.1 ? 2 : 1)}`
+  // 1.10 B4: the factor and its bound in the reader's decimal mark ("×0,4", "<×0,01" in German).
+  if (f < 0.01) return `<×${decimalText(0.01, 2)}`
+  return `×${decimalText(f, f < 0.1 ? 2 : 1)}`
 }
 
 /**
@@ -1967,7 +1968,8 @@ export function heatmap(
     const varSum = activeValues.reduce((a, b) => a + (b - mean) * (b - mean), 0) / activeValues.length
     const sd = Math.sqrt(varSum)
     variability = {
-      cv: mean > 0 ? (sd / mean).toFixed(2) : '–',
+      // 1.10 B4: two decimals in the reader's decimal mark — a sentence of the view, not a machine figure.
+      cv: mean > 0 ? decimalText(sd / mean, 2) : '–',
       spikyDays: activeValues.filter((v) => v > mean + 2 * sd).length,
     }
   }

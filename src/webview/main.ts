@@ -55,6 +55,26 @@ const esc = (s: unknown): string => String(s === null || s === undefined ? '' : 
 const post = (m: unknown): void => vscode.postMessage(m);
 
 /**
+ * 1.10 B5 rule 3 (forLead 5 e/f): a number stays with its unit. The space between a digit and a following `%`,
+ * `min`, `h`, `d`, `s`, `m`, `K`, `M` or `G` — the unit ending where no letter follows — becomes a no-break space,
+ * so a line never ends with the figure and starts with its unit (ko „2 min 전", zh-tw „54 %。", pl „96 % (…)"). For
+ * the view model's sentences the page prints as text, after esc() — whose entities end in ';', never in a digit —
+ * and never in a data-* value.
+ */
+const GLUE_RE = /(\d) (%|min|h|d|s|m|K|M|G)(?!\p{L})/gu;
+function glue(html: string): string {
+  return html.replace(GLUE_RE, '$1\u00a0$2');
+}
+
+/**
+ * 1.10 B5 rule 2 (forLead 5 b): an ISO day never breaks at its hyphen — every `2026-08-05` of an escaped text in a
+ * `.nobr` span of its own (the class exists: a window label is one word to the reader, and so is a day).
+ */
+function days(html: string): string {
+  return html.replace(/\d{4}-\d{2}-\d{2}/g, '<span class="nobr">$&</span>');
+}
+
+/**
  * The page's own words, in the reader's language.
  *
  * Everywhere else in this repository a string goes through `t()` from src/i18n.ts. That
@@ -645,7 +665,7 @@ function controls(): string {
     + (allRanges && r.presets.length > RANGE_CHIPS.length
        ? '<button data-act="moreRanges">' + tr('fewer ▴') + '</button>' : '')
     // The range in words ends the row it belongs to rather than taking a line of its own.
-    + '<span class="meta cap">' + esc(r.label) + ' · ' + esc(r.from) + ' → ' + esc(r.to)
+    + '<span class="meta cap">' + esc(r.label) + ' · ' + days(esc(r.from)) + ' → ' + days(esc(r.to))
     + '</span></div>'
     + '<button class="icon" data-act="refresh" aria-label="' + tr('Refresh') + '"'
     + ' title="' + tr('Rebuild from the transcripts and fetch the quota') + '">' + ICON_REFRESH + '</button>'
@@ -659,7 +679,8 @@ function controls(): string {
 
 function sSummary(): string {
   if (!vm.digest.length) return '<p class="empty">' + tr('Not enough data for a summary yet.') + '</p>';
-  return '<ul>' + vm.digest.map((s: Payload) => '<li>' + esc(s) + '</li>').join('') + '</ul>';
+  // 1.10 B5 rule 3: the view model's sentences, each number kept with its unit.
+  return '<ul>' + vm.digest.map((s: Payload) => '<li>' + glue(days(esc(s))) + '</li>').join('') + '</ul>';
 }
 
 function quotaCard(q: Payload): string {
@@ -667,12 +688,12 @@ function quotaCard(q: Payload): string {
     + '<span class="meta' + (q.stale ? ' warn' : '') + '">'
     // planText already carries the word "plan" and, for a name out of the settings, the
     // "(as configured)" that keeps it apart from something a provider said.
-    + [q.planText ? esc(q.planText) : '', q.origin ? esc(q.origin) : '',
-       q.ageText ? esc(q.ageText) : ''].filter(Boolean).join(' · ')
+    + glue([q.planText ? esc(q.planText) : '', q.origin ? esc(q.origin) : '',
+       q.ageText ? esc(q.ageText) : ''].filter(Boolean).join(' · '))
     + (q.stale ? ' ⚠ ' + tr('stale') : '') + '</span></div>';
   // 1.7 W1: our own last fetch failed after the reading below — said directly under the header, in
   // the dim tone and without a glyph: a fact about our fetch, not an alarm about the quota.
-  if (typeof q.lastFailure === 'string' && q.lastFailure) h += '<div class="meta lastfail">' + esc(q.lastFailure) + '</div>';
+  if (typeof q.lastFailure === 'string' && q.lastFailure) h += '<div class="meta lastfail">' + glue(esc(q.lastFailure)) + '</div>';
   if (q.problem) {
     h += '<div class="box" role="status">' + esc(q.problem)
       + (q.problemKind ? ' <span class="meta">(' + esc(q.problemKind) + ')</span>' : '')
@@ -709,12 +730,16 @@ function quotaCard(q: Payload): string {
     // The verdict goes into the header row, between the label and the figure, so the card
     // spends no line of its own on it; the elapsed marker and the darker fill beyond it say
     // the same thing in the bar underneath.
+    // 1.10 B5 rule 1 (row 13): the verdict and the figure are one box (`.vf`) that wraps as a whole — a narrow
+    // sidebar puts both on the next line, never the figure alone. Without a verdict the row does not wrap at all
+    // (`solo`): the label wraps inside itself and the figure keeps to its last line.
     h += '<div class="win"' + (ex ? ' tabindex="0" data-explain aria-describedby="' + esc(popId) + '"' : '')
-      + '><div class="win-top"><span>' + esc(w.label)
+      + '><div class="win-top' + (verdict ? '' : ' solo') + '"><span>' + esc(w.label)
       + (reset ? ' · ' + esc(reset) : '') + '</span>'
+      + '<span class="vf">'
       + (verdict ? '<span class="verdict' + (judged ? ' ' + esc(chipLevel) : '') + '">'
-         + verdict + '</span>' : '')
-      + '<b>' + esc(w.percentText) + '</b></div>'
+         + glue(verdict) + '</span>' : '')
+      + '<b>' + esc(w.percentText) + '</b></span></div>'
       // A limit the provider itself reports as reached is red wherever it is drawn — the
       // status bar paints the alarm for it whatever the percentage says — so the bar here
       // says the same rather than letting the pace decide a colour it did not decide.
@@ -731,7 +756,7 @@ function quotaCard(q: Payload): string {
     // that merely contains a word said above it is still a sentence of its own.
     const printed = [said.toLowerCase(), state.toLowerCase(), reset.toLowerCase()];
     if (f && f.text && trusted && printed.indexOf(f.text.toLowerCase()) < 0) {
-      h += '<div class="meta">' + esc(f.text) + '</div>';
+      h += '<div class="meta">' + glue(esc(f.text)) + '</div>';
     }
     // 1.6 N7: how much of what this machine counted over the window came from Claude Code's
     // subagents — the view model's words, a share of tokens and never of the quota, dim like every
@@ -778,18 +803,18 @@ function quotaCard(q: Payload): string {
     const notes = kw && Array.isArray(kw.notes) ? kw.notes : [];
     cw.lines.forEach(function (l: Payload, i: number) {
       if (!l || typeof l.text !== 'string' || !l.text) return;
-      h += '<div class="meta pc-line">' + esc(l.text) + '</div>';
-      if (typeof l.cost === 'string' && l.cost) h += '<div class="meta pc-cost">' + esc(l.cost) + '</div>';
+      h += '<div class="meta pc-line">' + glue(esc(l.text)) + '</div>';
+      if (typeof l.cost === 'string' && l.cost) h += '<div class="meta pc-cost">' + glue(esc(l.cost)) + '</div>';
       for (const n of notes) {
-        if (n && n.line === i && typeof n.text === 'string' && n.text) h += '<div class="meta pc-note">' + esc(n.text) + '</div>';
+        if (n && n.line === i && typeof n.text === 'string' && n.text) h += '<div class="meta pc-note">' + glue(esc(n.text)) + '</div>';
       }
     });
-    if (typeof cw.moreText === 'string' && cw.moreText) h += '<div class="meta pc-more">' + esc(cw.moreText) + '</div>';
-    if (kw && typeof kw.today === 'string' && kw.today) h += '<div class="meta pc-today">' + esc(kw.today) + '</div>';
+    if (typeof cw.moreText === 'string' && cw.moreText) h += '<div class="meta pc-more">' + glue(esc(cw.moreText)) + '</div>';
+    if (kw && typeof kw.today === 'string' && kw.today) h += '<div class="meta pc-today">' + glue(esc(kw.today)) + '</div>';
   }
   // 1.8 A6: the Codex card's one line — until when OpenAI keeps the prompt prefix at least — last on
   // that card, the view model's words.
-  if (typeof q.codexCache === 'string' && q.codexCache) h += '<div class="meta pc-codex">' + esc(q.codexCache) + '</div>';
+  if (typeof q.codexCache === 'string' && q.codexCache) h += '<div class="meta pc-codex">' + glue(days(esc(q.codexCache))) + '</div>';
   // The bridge's prompt-cache line, last, and only when the status line delivered one: the
   // words are the view model's, dashes included, and the countdown in them is as of the
   // model's own clock — nothing here ticks on its own.
@@ -801,8 +826,8 @@ function quotaCard(q: Payload): string {
     const seen = [q.promptCache.ageText ? tr('updated {0}', esc(q.promptCache.ageText)) : '',
       aged ? '⚠ ' + tr('stale') : ''].filter(Boolean).join(' · ');
     h += '<div class="meta' + (aged ? ' warn' : '') + '" title="'
-      + esc(q.promptCache.note) + '">' + esc(q.promptCache.text)
-      + (seen ? ' · ' + seen : '') + '</div>';
+      + esc(q.promptCache.note) + '">' + glue(esc(q.promptCache.text)
+      + (seen ? ' · ' + seen : '')) + '</div>';
   }
   // The full freshness row and the official page stay in the markdown view, where there is
   // room for them, and the tooltip links the official page from the provider name.
@@ -938,7 +963,8 @@ function deltaClass(k: Payload): string {
  */
 function popLine(label: string, text: Payload): string {
   const t = text === null || text === undefined ? '' : String(text);
-  return t ? '<div><b>' + esc(label) + '</b> ' + esc(t) + '</div>' : '';
+  // 1.10 B5 rules 2 and 3: an explanation's days kept whole, its numbers with their units.
+  return t ? '<div><b>' + esc(label) + '</b> ' + glue(days(esc(t))) + '</div>' : '';
 }
 
 /**
@@ -997,9 +1023,20 @@ function approxNote(): string {
 }
 
 /**
+ * 1.10 D10 (§3 B5 rule 4): a table cell's column name, and the label the stacked layout prints in front of its
+ * value — `{0}:` in the reader's language, whose punctuation is the language's own (a no-break space before the
+ * colon in French, a full-width colon in Chinese and Japanese). `data-h` stays the plain name; the narrow width's
+ * `td[data-h]::before` prints `data-hl` and a space. The name comes as markup already: a page word (no <, >, " or &
+ * in a translation — test/l10n.languages.test.ts) or esc()'d by the caller.
+ */
+function dh(name: string): string {
+  return ' data-h="' + name + '" data-hl="' + tr('{0}:', name) + '"';
+}
+
+/**
  * The words the totals table and the model table share. One heading per column, translated
  * once: the same word heads the column and prefixes the cell in the stacked layout, where
- * `td[data-h]::before` prints exactly this text.
+ * `td[data-h]::before` prints this text in the language's `{0}:` (dh() above).
  */
 function columnWords(): Record<string, string> {
   return {
@@ -1018,21 +1055,21 @@ function totalsTable(t: Payload): string {
   const rows = t.rows.map((r: Payload) => '<tr>'
     // The span is the tooltip of the label, not a column: the two window rows are the only
     // ones whose bounds are not already spelled out by their name.
-    + '<td data-h="' + w.period + '" title="' + esc(r.spanText || '') + '">' + esc(r.label) + '</td>'
-    + '<td data-h="' + w.usage + '">' + esc(r.usage) + '</td>'
-    + '<td data-h="' + w.freshInput + '">' + esc(r.freshInput) + '</td>'
-    + '<td data-h="' + w.cacheWrite5m + '">' + esc(r.cacheWrite5m) + '</td>'
-    + '<td data-h="' + w.cacheWrite1h + '">' + esc(r.cacheWrite1h) + '</td>'
-    + '<td data-h="' + w.cacheRead + '">' + esc(r.cacheRead) + '</td>'
-    + '<td data-h="' + w.output + '">' + esc(r.output) + (r.incomplete
+    + '<td' + dh(w.period) + ' title="' + esc(r.spanText || '') + '">' + esc(r.label) + '</td>'
+    + '<td' + dh(w.usage) + '>' + esc(r.usage) + '</td>'
+    + '<td' + dh(w.freshInput) + '>' + esc(r.freshInput) + '</td>'
+    + '<td' + dh(w.cacheWrite5m) + '>' + esc(r.cacheWrite5m) + '</td>'
+    + '<td' + dh(w.cacheWrite1h) + '>' + esc(r.cacheWrite1h) + '</td>'
+    + '<td' + dh(w.cacheRead) + '>' + esc(r.cacheRead) + '</td>'
+    + '<td' + dh(w.output) + '>' + esc(r.output) + (r.incomplete
         ? ' <span title="' + tr('output is a lower bound: some requests had no terminal line')
           + '">⚠</span>' : '')
     + '</td>'
-    + '<td data-h="' + w.reasoning + '">' + esc(r.reasoning) + '</td>'
-    + '<td data-h="' + w.requests + '">' + esc(r.requests) + '</td>'
-    + '<td data-h="' + w.cacheHit + '">' + esc(r.cacheHit) + '</td>'
-    + '<td data-h="' + w.perRequest + '">' + esc(r.perRequest) + '</td>'
-    + (cost ? '<td data-h="' + w.cost + '">' + esc(r.cost) + (r.costPartial
+    + '<td' + dh(w.reasoning) + '>' + esc(r.reasoning) + '</td>'
+    + '<td' + dh(w.requests) + '>' + esc(r.requests) + '</td>'
+    + '<td' + dh(w.cacheHit) + '>' + esc(r.cacheHit) + '</td>'
+    + '<td' + dh(w.perRequest) + '>' + esc(r.perRequest) + '</td>'
+    + (cost ? '<td' + dh(w.cost) + '>' + esc(r.cost) + (r.costPartial
         ? ' <span title="' + tr('some models have no price on file') + '">⚠</span>' : '')
       + '</td>' : '')
     + '</tr>').join('');
@@ -1130,11 +1167,10 @@ function sTokens(): string {
     h += '<div class="scroll"><table><thead><tr><th>' + tr('Cache · last 30 days') + '</th><th>'
       + tr('Hit rate') + '</th>'
       + '<th>' + tr('Realised') + '</th><th>' + tr('Blended $/1M') + '</th></tr></thead><tbody>'
-      + vm.cacheEconomy.map((c: Payload) => '<tr><td data-h="' + tr('Cache') + '">'
+      + vm.cacheEconomy.map((c: Payload) => '<tr><td' + dh(tr('Cache')) + '>'
         + esc(srcName(c.source)) + '</td>'
-        + '<td data-h="' + tr('Hit rate') + '">' + esc(c.hitRate) + '</td><td data-h="'
-        + tr('Realised') + '">'
-        + esc(c.savedUsd) + (c.partial ? ' ⚠' : '') + '</td><td data-h="' + tr('Blended') + '">'
+        + '<td' + dh(tr('Hit rate')) + '>' + esc(c.hitRate) + '</td><td' + dh(tr('Realised')) + '>'
+        + esc(c.savedUsd) + (c.partial ? ' ⚠' : '') + '</td><td' + dh(tr('Blended')) + '>'
         + esc(c.blendedPerM) + '</td></tr>').join('')
       + '</tbody></table></div>'
       + '<div class="meta">' + esc(vm.cacheEconomy[0].note) + '</div>';
@@ -1147,12 +1183,12 @@ function sTokens(): string {
     + '</th><th>' + perDay + '</th>'
     + '</tr></thead><tbody>'
     + [cal.thisWeek, cal.thisMonth, cal.lastMonth, cal.year].map(p => '<tr>'
-      + '<td data-h="' + w.period + '">' + esc(p.label) + '</td><td data-h="' + w.usage + '">'
+      + '<td' + dh(w.period) + '>' + esc(p.label) + '</td><td' + dh(w.usage) + '>'
       + esc(p.usage) + '</td>'
-      + (vm.showCost ? '<td data-h="' + w.cost + '">' + esc(p.cost) + '</td>' : '')
-      + '<td data-h="' + w.requests + '">' + esc(p.requests) + '</td><td data-h="' + active + '">'
+      + (vm.showCost ? '<td' + dh(w.cost) + '>' + esc(p.cost) + '</td>' : '')
+      + '<td' + dh(w.requests) + '>' + esc(p.requests) + '</td><td' + dh(active) + '>'
       + esc(p.activeDays)
-      + '</td><td data-h="' + perDay + '">' + esc(p.avgPerDay) + '</td></tr>').join('')
+      + '</td><td' + dh(perDay) + '>' + esc(p.avgPerDay) + '</td></tr>').join('')
     + '</tbody></table></div>';
   if (cal.thisMonth.projection) {
     h += '<div class="meta">' + tr('month projection {0} · {1}',
@@ -1228,7 +1264,8 @@ function sChart(): string {
       // The tooltip names the band the way the legend does — model and provider — and reads
       // its share and its provider's total off the very values the bands are drawn from:
       // nothing is measured a second time here, only divided.
-      const share = Math.round((v / totals[i]) * 1000) / 10;
+      // 1.10 B4: to a tenth, in the page's own decimal mark ("12,5 % of the day" in German), never grouped (≤ 100).
+      const share = (Math.round((v / totals[i]) * 1000) / 10).toLocaleString(LOCALE, { maximumFractionDigits: 1 });
       // A sentence per unit rather than the word "day" slotted into one: the provider is
       // named twice in the same line, which only a whole key can order.
       const name = esc(srcName(s.source));
@@ -1348,24 +1385,24 @@ function sModels(): string {
     + (m.sort.key === c[0] ? ' aria-sort="' + (m.sort.dir === 'asc' ? 'ascending' : 'descending') + '"' : '')
     + '>' + esc(c[1]) + '</th>').join('');
   const rows = m.rows.map((r: Payload) => '<tr>'
-    + '<td data-h="' + w.model + '">' + esc(r.model)
+    + '<td' + dh(w.model) + '>' + esc(r.model)
     + (r.isSub ? ' <span class="meta">' + tr('sub') + '</span>' : '')
     + (r.tier !== 'standard' ? ' <span class="meta">' + esc(r.tier) + '</span>' : '') + '</td>'
-    + '<td data-h="' + w.usage + '">' + esc(r.usageText) + '</td>'
-    + '<td data-h="' + w.freshInput + '">' + esc(r.freshInput) + '</td>'
-    + '<td data-h="' + w.cacheWrite5m + '">' + esc(r.cacheWrite5m) + '</td>'
-    + '<td data-h="' + w.cacheWrite1h + '">' + esc(r.cacheWrite1h) + '</td>'
-    + '<td data-h="' + w.cacheRead + '">' + esc(r.cacheRead) + '</td>'
-    + '<td data-h="' + w.output + '">' + esc(r.output) + '</td>'
-    + '<td data-h="' + w.reasoning + '">' + esc(r.reasoning) + '</td>'
-    + '<td data-h="' + w.requests + '">' + esc(r.requests) + '</td>'
-    + '<td data-h="' + w.cacheHit + '">' + esc(r.cacheHit) + '</td>'
-    + '<td data-h="' + w.perRequest + '">' + esc(r.perRequest) + '</td>'
-    + (vm.showCost ? '<td data-h="' + w.cost + '" title="' + esc(r.price) + '">' + esc(r.costText)
+    + '<td' + dh(w.usage) + '>' + esc(r.usageText) + '</td>'
+    + '<td' + dh(w.freshInput) + '>' + esc(r.freshInput) + '</td>'
+    + '<td' + dh(w.cacheWrite5m) + '>' + esc(r.cacheWrite5m) + '</td>'
+    + '<td' + dh(w.cacheWrite1h) + '>' + esc(r.cacheWrite1h) + '</td>'
+    + '<td' + dh(w.cacheRead) + '>' + esc(r.cacheRead) + '</td>'
+    + '<td' + dh(w.output) + '>' + esc(r.output) + '</td>'
+    + '<td' + dh(w.reasoning) + '>' + esc(r.reasoning) + '</td>'
+    + '<td' + dh(w.requests) + '>' + esc(r.requests) + '</td>'
+    + '<td' + dh(w.cacheHit) + '>' + esc(r.cacheHit) + '</td>'
+    + '<td' + dh(w.perRequest) + '>' + esc(r.perRequest) + '</td>'
+    + (vm.showCost ? '<td' + dh(w.cost) + ' title="' + esc(r.price) + '">' + esc(r.costText)
         + (r.priced === 'family'
           ? ' <span title="' + tr('priced from a related model (family fallback)') + '">⚠</span>' : '')
       + '</td>' : '')
-    + '<td data-h="' + w.share + '">' + esc(r.share) + '</td>'
+    + '<td' + dh(w.share) + '>' + esc(r.share) + '</td>'
     + '</tr>' + (r.turnAvg
       ? '<tr><td colspan="99" class="meta">'
         + (r.turnP90 ? tr('Avg turn time {0} · P90 {1}', esc(r.turnAvg), esc(r.turnP90))
@@ -1384,7 +1421,7 @@ function sHeatmap(): string {
     + (d.level === null ? 'out' : 'l' + esc(d.level)) + '" title="' + esc(d.text) + '"></i>').join('')).join('');
   return '<div class="row"><span class="meta">'
     + tr('streak {0} · longest {1} · active {2}', esc(h.streak), esc(h.longestStreak), esc(h.activeDays))
-    + (h.peakDay ? ' · ' + tr('peak {0} ({1})', esc(h.peakDay.day), esc(h.peakDay.text)) : '')
+    + (h.peakDay ? ' · ' + tr('peak {0} ({1})', days(esc(h.peakDay.day)), esc(h.peakDay.text)) : '')
     + (h.variability
        ? ' · ' + tr('CV {0} · {1} spiky day(s)', esc(h.variability.cv), esc(h.variability.spikyDays))
        : '')
@@ -1396,7 +1433,7 @@ function sHeatmap(): string {
     + '<div class="legend"><span>' + tr('less') + '</span><span><i class="dot l1"></i>'
     + '<i class="dot l2"></i><i class="dot l3"></i>'
     + '<i class="dot l4"></i></span><span>' + tr('more') + '</span>'
-    + '<span>' + (h.firstDay ? tr('dotted = outside coverage (before {0})', esc(h.firstDay))
+    + '<span>' + (h.firstDay ? tr('dotted = outside coverage (before {0})', days(esc(h.firstDay)))
                              : tr('dotted = outside coverage'))
     + '</span></div>';
 }
@@ -1461,11 +1498,11 @@ function recordTable(head: string, rows: Payload[]): string {
     + '<div class="scroll"><table><thead><tr><th>' + esc(head) + '</th><th>' + w.usage + '</th>'
     + '<th>' + w.share + '</th>' + (cost ? '<th>' + w.cost + '</th>' : '') + '</tr></thead><tbody>'
     + rows.map(function (r) {
-      return '<tr><td data-h="' + esc(head) + '">' + esc(r.label)
+      return '<tr><td' + dh(esc(head)) + '>' + esc(r.label)
         + (r.detail ? ' <span class="meta">' + esc(r.detail) + '</span>' : '')
-        + '</td><td data-h="' + w.usage + '">' + esc(r.usage) + '</td><td data-h="' + w.share + '">'
+        + '</td><td' + dh(w.usage) + '>' + esc(r.usage) + '</td><td' + dh(w.share) + '>'
         + esc(r.share)
-        + '</td>' + (cost ? '<td data-h="' + w.cost + '">' + esc(r.cost) + '</td>' : '') + '</tr>';
+        + '</td>' + (cost ? '<td' + dh(w.cost) + '>' + esc(r.cost) + '</td>' : '') + '</tr>';
     }).join('') + '</tbody></table></div></div>';
 }
 
@@ -1482,15 +1519,15 @@ function sRecords(): string {
   if (!r) return '<p class="empty">' + tr('No records yet.') + '</p>';
   let h = '';
   const peak = r.peakDay
-    ? tr('Peak day {0} · {1}', esc(r.peakDay.day), esc(r.peakDay.usage))
+    ? tr('Peak day {0} · {1}', days(esc(r.peakDay.day)), esc(r.peakDay.usage))
       + (vm.showCost && r.peakDay.cost !== '–'
          ? ' · ' + esc(r.peakDay.cost) + (r.peakDay.costPartial ? ' ⚠' : '') : '')
     : tr('Peak day {0}', '–');
   // Singular and plural are two sentences, not a letter added to one.
   const streak = r.streak
     ? (r.streak.days === 1
-       ? tr('Longest streak {0} day · {1} → {2}', r.streak.days, esc(r.streak.from), esc(r.streak.to))
-       : tr('Longest streak {0} days · {1} → {2}', r.streak.days, esc(r.streak.from), esc(r.streak.to)))
+       ? tr('Longest streak {0} day · {1} → {2}', r.streak.days, days(esc(r.streak.from)), days(esc(r.streak.to)))
+       : tr('Longest streak {0} days · {1} → {2}', r.streak.days, days(esc(r.streak.from)), days(esc(r.streak.to))))
     : tr('Longest streak {0}', '–');
   h += '<div class="card"><div class="row"><span class="name">' + peak + '</span>'
     + '<span class="meta">' + streak + '</span></div></div>';
@@ -1503,7 +1540,7 @@ function sRecords(): string {
   }
   const notes = [r.note, r.sessionNote].filter(Boolean);
   if (notes.length) {
-    h += '<ul class="meta">' + notes.map(n => '<li>' + esc(n) + '</li>').join('') + '</ul>';
+    h += '<ul class="meta">' + notes.map(n => '<li>' + glue(days(esc(n))) + '</li>').join('') + '</ul>';
   }
   return h;
 }
@@ -1527,11 +1564,11 @@ function sTools(): string {
       + w.share + '</th>'
       + '<th>' + models + '</th></tr></thead><tbody>'
       + t.rows.map(function (r: Payload) {
-        return '<tr><td data-h="' + tool + '">' + esc(r.name)
+        return '<tr><td' + dh(tool) + '>' + esc(r.name)
           + (r.sources ? ' <span class="meta">' + esc(r.sources) + '</span>' : '')
-          + '</td><td data-h="' + calls + '">' + esc(r.callsText) + '</td>'
-          + '<td data-h="' + w.share + '">' + esc(r.share) + '</td>'
-          + '<td data-h="' + models + '">' + esc(r.models) + '</td></tr>';
+          + '</td><td' + dh(calls) + '>' + esc(r.callsText) + '</td>'
+          + '<td' + dh(w.share) + '>' + esc(r.share) + '</td>'
+          + '<td' + dh(models) + '>' + esc(r.models) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     h += '<div class="meta">' + tr('{0} call(s) · {1} distinct tool(s)', esc(t.totalText), t.distinct)
       + (t.hidden ? ' · ' + tr('{0} more not listed', t.hidden) : '') + '</div>';
@@ -1539,7 +1576,7 @@ function sTools(): string {
     h += '<p class="empty">' + tr('No tool call counted in this range.') + '</p>';
   }
   if (t.notes.length) {
-    h += '<ul class="meta">' + t.notes.map((n: Payload) => '<li>' + esc(n) + '</li>').join('') + '</ul>';
+    h += '<ul class="meta">' + t.notes.map((n: Payload) => '<li>' + glue(days(esc(n))) + '</li>').join('') + '</ul>';
   }
   return h;
 }
@@ -1601,8 +1638,9 @@ function sBudget(): string {
 
 function sHistory(): string {
   if (!vm.retro.length) return '<p class="empty">' + tr('No cycles on file yet.') + '</p>';
+  // 1.10 B5 rule 3: the view model's retrospective, each number kept with its unit.
   return '<ul>' + vm.retro.map((r: Payload) => '<li><b>' + srcLabel(r.source, r.label) + '</b>: '
-    + esc(r.text) + '</li>').join('') + '</ul>';
+    + glue(esc(r.text)) + '</li>').join('') + '</ul>';
 }
 
 function sProjects(): string {
@@ -1615,11 +1653,11 @@ function sProjects(): string {
   return '<div class="scroll"><table><thead><tr><th>' + project + '</th><th>' + w.usage + '</th><th>'
     + w.requests + '</th>'
     + '<th>' + w.cacheHit + '</th><th>' + w.share + '</th><th>' + sessions + '</th></tr></thead><tbody>'
-    + vm.projects.rows.map((p: Payload) => '<tr><td data-h="' + project + '">' + esc(p.project) + '</td>'
-      + '<td data-h="' + w.usage + '">' + esc(p.usage) + '</td><td data-h="' + w.requests + '">'
+    + vm.projects.rows.map((p: Payload) => '<tr><td' + dh(project) + '>' + esc(p.project) + '</td>'
+      + '<td' + dh(w.usage) + '>' + esc(p.usage) + '</td><td' + dh(w.requests) + '>'
       + esc(p.requests) + '</td>'
-      + '<td data-h="' + w.cacheHit + '">' + esc(p.cacheHit) + '</td><td data-h="' + w.share + '">'
-      + esc(p.share) + '</td><td data-h="' + sessions + '">' + esc(p.sessions) + '</td></tr>').join('')
+      + '<td' + dh(w.cacheHit) + '>' + esc(p.cacheHit) + '</td><td' + dh(w.share) + '>'
+      + esc(p.share) + '</td><td' + dh(sessions) + '>' + esc(p.sessions) + '</td></tr>').join('')
     + '</tbody></table></div>';
 }
 
@@ -1635,14 +1673,15 @@ function sSessions(): string {
     + started + '</th>'
     + '<th>' + duration + '</th><th>' + w.usage + '</th><th>' + w.requests + '</th><th>' + cache
     + '</th></tr></thead><tbody>'
-    + vm.sessions.rows.map((s: Payload) => '<tr><td data-h="' + session + '">' + esc(s.session)
+    + vm.sessions.rows.map((s: Payload) => '<tr><td' + dh(session) + '>' + esc(s.session)
       + (s.isSub ? ' <span class="meta">' + tr('sub') + '</span>' : '') + '</td>'
-      + '<td data-h="' + project + '">' + esc(s.project) + '</td><td data-h="' + started + '">'
-      + esc(s.started)
-      + '</td><td data-h="' + duration + '">' + esc(s.duration) + '</td><td data-h="' + w.usage + '">'
+      + '<td' + dh(project) + '>' + esc(s.project) + '</td><td' + dh(started) + '>'
+      + days(esc(s.started))
+      // 1.10 B5 rule 3: a stacked cell wraps; its duration and cache state keep each number with its unit.
+      + '</td><td' + dh(duration) + '>' + glue(esc(s.duration)) + '</td><td' + dh(w.usage) + '>'
       + esc(s.usage)
-      + '</td><td data-h="' + w.requests + '">' + esc(s.requests) + '</td><td data-h="' + cache + '">'
-      + esc(s.cacheState || '–') + '</td></tr>').join('')
+      + '</td><td' + dh(w.requests) + '>' + esc(s.requests) + '</td><td' + dh(cache) + '>'
+      + glue(esc(s.cacheState || '–')) + '</td></tr>').join('')
     + '</tbody></table></div>';
 }
 
@@ -1652,7 +1691,7 @@ function sDataQuality(): string {
   li.push(tr('Roots: {0} · {1} file(s)',
     d.roots.length ? d.roots.map(esc).join(', ') : tr('none'), d.files));
   li.push(tr('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB',
-    esc(d.oldestDay || '–'), esc(d.newestDay || '–'),
+    days(esc(d.oldestDay || '–')), days(esc(d.newestDay || '–')),
     d.buckets.hour, d.buckets.day, d.buckets.month, Math.round(d.snapshotBytes / 1024)));
   li.push(tr('Lower bound share {0}', esc(d.lowerBoundShare))
     + (d.unpricedModels.length ? ' · ' + tr('unpriced: {0}', d.unpricedModels.map(esc).join(', ')) : '')
@@ -1668,7 +1707,7 @@ function sDataQuality(): string {
   li.push(tr('Retention {0} d hourly · {1} d daily · {2} d quota history',
     d.retention.hourDays, d.retention.days, d.retention.historyDays));
   li.push(tr('Quota history {0} samples · {1} KB · oldest {2}',
-    d.history.samples, Math.round(d.history.bytes / 1024), esc(d.history.oldest || '–')));
+    d.history.samples, Math.round(d.history.bytes / 1024), days(esc(d.history.oldest || '–'))));
   for (const q of d.quota) {
     li.push(tr('Sources {0}: {1}', esc(q.source), q.candidates.length
       ? q.candidates.map((c: Payload) => esc(c.id) + ' ' + (c.ok
@@ -1686,7 +1725,8 @@ function sDataQuality(): string {
   if (d.bridge) li.push(tr('Status line: {0}', esc(d.bridge)));
   li.push(tr('Consent: {0} · {1} · attribution {2} · v{3}',
     esc(d.consent), esc(d.leader), esc(d.attribution), esc(d.version)));
-  return '<ul>' + li.map(x => '<li>' + x + '</li>').join('') + '</ul>'
+  // 1.10 B5 rule 3: every line's numbers kept with their units ("45 d", "2 min", "3 %").
+  return '<ul>' + li.map(x => '<li>' + glue(x) + '</li>').join('') + '</ul>'
     + '<div class="wrap">'
     + '<button data-act="cmd" data-id="tokenPace.copyDiagnostics">' + tr('copy diagnostics') + '</button>'
     + '<button data-act="cmd" data-id="tokenPace.exportCsv">' + tr('export CSV') + '</button>'
@@ -1699,14 +1739,14 @@ function sDataQuality(): string {
 function sDrill(): string {
   if (!vm.drill) return '';
   const w = columnWords();
-  return '<h2>' + tr('Day {0}', esc(vm.drill.day)) + '</h2>'
+  return '<h2>' + tr('Day {0}', days(esc(vm.drill.day))) + '</h2>'
     + '<div class="scroll"><table><thead><tr><th>' + w.model + '</th><th>' + w.usage + '</th><th>'
     + w.requests + '</th>'
     + (vm.showCost ? '<th>' + w.cost + '</th>' : '') + '</tr></thead><tbody>'
-    + vm.drill.models.map((m: Payload) => '<tr><td data-h="' + w.model + '">' + esc(m.model) + '</td>'
-      + '<td data-h="' + w.usage + '">' + esc(m.usageText) + '</td><td data-h="' + w.requests + '">'
+    + vm.drill.models.map((m: Payload) => '<tr><td' + dh(w.model) + '>' + esc(m.model) + '</td>'
+      + '<td' + dh(w.usage) + '>' + esc(m.usageText) + '</td><td' + dh(w.requests) + '>'
       + esc(m.requests)
-      + '</td>' + (vm.showCost ? '<td data-h="' + w.cost + '">' + esc(m.costText) + '</td>' : '')
+      + '</td>' + (vm.showCost ? '<td' + dh(w.cost) + '>' + esc(m.costText) + '</td>' : '')
       + '</tr>').join('')
     + (vm.drill.sessions.length
        ? vm.drill.sessions.map((s: Payload) => '<tr><td colspan="99" class="meta">' + esc(s.session) + ' · '
@@ -2626,7 +2666,7 @@ function agentsWeek(a: Payload, panel: AgentPanel | null): string {
   const cost = typeof wk.totalCost === 'string';
   const head = [tr('Type · model'), tr('Agents'), tr('Usage'), tr('Share'), tr('Median per agent')].concat(cost ? [tr('~Cost')] : []);
   const count = (v: Payload): string => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? esc(fullNum(v)) : '–');
-  const cell = (i: number, html: string): string => '<td data-h="' + head[i] + '">' + html + '</td>';
+  const cell = (i: number, html: string): string => '<td' + dh(head[i]) + '>' + html + '</td>';
   h += '<div class="scroll"><table class="ag-wkt"><thead><tr>' + head.map((x) => '<th>' + x + '</th>').join('')
     + '</tr></thead><tbody>'
     + rows.map((r: Payload) => '<tr>'
@@ -3568,13 +3608,14 @@ function sFooter(): string {
   // 1.8: the rows read after the table's check (Claude Opus 5.5) are named with their own day.
   const later = vm.pricing && vm.pricing.later ? esc(vm.pricing.later) : '';
   const dated = later
-    ? (vm.pricing.custom ? tr('Prices as of {0}; checked later: {1} · your configured rates.', asOf, later)
-                         : tr('Prices as of {0}; checked later: {1}.', asOf, later))
-    : (vm.pricing.custom ? tr('Prices as of {0} · your configured rates.', asOf)
-                         : tr('Prices as of {0}.', asOf));
-  return '<ul>' + vm.footnotes.map((f: Payload) => '<li>' + esc(f) + '</li>').join('')
+    ? (vm.pricing.custom ? tr('Prices as of {0}; checked later: {1} · your configured rates.', days(asOf), days(later))
+                         : tr('Prices as of {0}; checked later: {1}.', days(asOf), days(later)))
+    : (vm.pricing.custom ? tr('Prices as of {0} · your configured rates.', days(asOf))
+                         : tr('Prices as of {0}.', days(asOf)));
+  // 1.10 B5 rules 2 and 3: the notes' days kept whole, their numbers with their units.
+  return '<ul>' + vm.footnotes.map((f: Payload) => '<li>' + glue(days(esc(f))) + '</li>').join('')
     + (priced ? '' : '<li>' + dated + '</li>')
-    + '<li>' + tr('Generated {0}.', esc(vm.generatedAt)) + '</li></ul>';
+    + '<li>' + tr('Generated {0}.', days(esc(vm.generatedAt))) + '</li></ul>';
 }
 
 /** Folded away by the reader, as the view model remembers it. */

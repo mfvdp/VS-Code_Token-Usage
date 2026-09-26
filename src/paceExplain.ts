@@ -22,6 +22,7 @@
  */
 
 import { t } from './i18n'
+import { decimalText } from './render'
 import { PaceConfig, paceVerdict, WindowDisplay } from './pace'
 import { PaceLevel, PaceVerdict } from './types'
 
@@ -133,9 +134,12 @@ function colourTitle(level: PaceLevel): string {
   }
 }
 
-/** A threshold as the settings show it: whole numbers plain, anything else to one decimal. */
+/**
+ * A threshold as the settings show it: whole numbers plain, anything else to one decimal — 1.10 B4: in the
+ * reader's decimal mark ("7,5" in German).
+ */
 function figure(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(1)
+  return Number.isInteger(n) ? String(n) : decimalText(n, 1)
 }
 
 /**
@@ -216,7 +220,8 @@ function measuringLine(i: ExplainInput, th: PaceThresholds): string {
 export function explainWindow(i: ExplainInput): WindowExplain {
   const staleLine = i.ageMinutes !== null && Number.isFinite(i.ageMinutes) && i.ageMinutes > i.staleAfterMinutes
     ? t('The reading is {0} old (stale after {1} min); the colour may lag.',
-      ageWords(i.ageMinutes), i.staleAfterMinutes)
+      // 1.10 B4: the setting as the reader wrote it — a decimal in their decimal mark, a whole number plain.
+      ageWords(i.ageMinutes), figure(i.staleAfterMinutes))
     : null
   const time = (ms: number | null): string | null =>
     (ms !== null && Number.isFinite(ms) ? i.formatTime(ms) : null)

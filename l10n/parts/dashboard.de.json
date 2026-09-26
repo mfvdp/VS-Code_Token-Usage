@@ -264,6 +264,7 @@
   "{0} · {1} · {2} · {3} % of the week · {1} total {4}": "{0} · {1} · {2} · {3} % der Woche · {1} gesamt {4}",
   "{0}, derived": "{0}, abgeleitet",
   "{0}, recorded": "{0}, aufgezeichnet",
+  "{0}:": "{0}:",
   "{0}: {1} of {2}": "{0}: {1} von {2}",
   "~1 of them running": "~1 davon läuft",
   "~Cost": "~Kosten",

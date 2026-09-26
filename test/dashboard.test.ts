@@ -147,6 +147,13 @@ function heading(...parts: string[]): string {
   return parts.map(p => '<span class="nobr">' + p + '</span>').join(' \u00b7 ')
 }
 
+/**
+ * 1.10 B5 rule 3: a text as the page prints it on the quota card — each number kept with its unit by a no-break space.
+ * The page's glue() restated for the pins of the prompt-cache block and the keep-warm notes below (rewritten for it:
+ * they pinned the bare spaces); the rule itself is tested on the page's own function ("a number stays with its unit").
+ */
+const glued = (s: string): string => s.replace(/(\d) (%|min|h|d|s|m|K|M|G)(?!\p{L})/gu, '$1\u00a0$2')
+
 /** Calls one renderer against a view model built from the defaults plus `over`. */
 function render(call: string, over: Record<string, unknown> = {}): string {
   ;(ctx as Record<string, unknown>).fixture = model(over)
@@ -240,7 +247,10 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 test('the stacked layout prefixes only the cells that carry a header', () => {
-  assert.match(STYLE, /td\[data-h\]::before \{ content: attr\(data-h\)/)
+  // 1.10 D10 (rewritten: it pinned `attr(data-h) ": "`): the label is data-hl — the column name in the language's
+  // own "{0}:" — and a space; data-h stays the plain name (the harness and the tests read it).
+  assert.match(STYLE, /td\[data-h\]::before \{ content: attr\(data-hl\) " "; color: var\(--dim\); \}/)
+  assert.equal(/attr\(data-h\) ": "/.test(STYLE), false, STYLE)
   // A bare `td::before` would put ": " in front of every sub-row and drill line.
   assert.equal(/[^\]]td::before/.test(STYLE), false, STYLE)
 })
@@ -504,8 +514,9 @@ test('the two window rows carry their span as the tooltip of the label', () => {
   const h = render('sTokens()', tokensVm({
     totals: [{ source: 'claude', title: 'Claude Code', rows: [row({}), row({ label: 'Today', spanText: '2026-09-03', approx: false })] }],
   }))
-  assert.ok(h.indexOf('<td data-h="Period" title="09:00 → now">Current 5 h window</td>') >= 0, h)
-  assert.ok(h.indexOf('<td data-h="Period" title="2026-09-03">Today</td>') >= 0, h)
+  // 1.10 D10 (rewritten: the cell carries data-hl beside data-h now).
+  assert.ok(h.indexOf('<td data-h="Period" data-hl="Period:" title="09:00 → now">Current 5 h window</td>') >= 0, h)
+  assert.ok(h.indexOf('<td data-h="Period" data-hl="Period:" title="2026-09-03">Today</td>') >= 0, h)
   // Nothing is approximate, so the caveat is not printed.
   assert.equal(h.indexOf('rolled up into day totals'), -1, h)
 
@@ -978,10 +989,11 @@ test('the verdict stands in the header row between the label and the figure', ()
   })
   const from = h.indexOf('<div class="win-top">')
   const top = h.slice(from, h.indexOf('</div>', from))
-  assert.ok(top.indexOf('<span>5 h · resets 3h20m</span>') >= 0, top)
-  const verdict = top.indexOf('<span class="verdict warn">▲ 9 % ahead of pace</span>')
-  const figure = top.indexOf('<b>70 %</b>')
-  assert.ok(verdict > 0 && figure > verdict, top)
+  // 1.10 B5 rule 1 (rewritten: the verdict and the figure were two children of the row): the label, then one box
+  // (`.vf`) holding the verdict and then the figure — the two wrap together, so a narrow sidebar never leaves the
+  // figure alone on a line; the verdict's number kept with its unit (glue).
+  assert.equal(top, '<div class="win-top"><span>5 h · resets 3h20m</span><span class="vf">'
+    + '<span class="verdict warn">▲ 9\u00a0% ahead of pace</span><b>70 %</b></span>', top)
   // Once, and above the bar — nothing below it repeats the verdict.
   assert.equal(h.split('class="verdict').length - 1, 1, h)
   assert.ok(h.indexOf('class="verdict') < h.indexOf('class="track"'), h)
@@ -992,13 +1004,23 @@ test('the verdict stands in the header row between the label and the figure', ()
       verdict: { text: 'exhausted', level: 'error' },
     })] })],
   })
-  assert.ok(state.indexOf('<span class="verdict error">▲ exhausted · limit reached</span>') >= 0, state)
+  assert.ok(state.indexOf('<span class="vf"><span class="verdict error">▲ exhausted · limit reached</span><b>61 %</b></span>') >= 0, state)
   // The row wraps in a narrow sidebar; it never clips or ellipsises.
   const row = STYLE.match(/\.win-top \{[^}]*\}/)
   assert.ok(row, 'the header row rule is missing')
   assert.ok(row[0].includes('flex-wrap: wrap'), row[0])
   assert.equal(/nowrap|text-overflow|overflow: hidden/.test(row[0]), false, row[0])
   assert.match(STYLE, /\.verdict \{[^}]*overflow-wrap: anywhere/)
+  // 1.10 B5 rule 1: the label takes the room and wraps inside itself; the verdict and the figure are one box that is
+  // never shrunk and never wraps inside between them — at most the row wide, the figure on the verdict's last line.
+  assert.match(STYLE, /\n\.win-top > span:first-child \{ flex: 1 1 auto; \}/)
+  const vf = STYLE.match(/\n\.vf \{[^}]*\}/)
+  assert.ok(vf, 'the .vf rule is missing')
+  for (const decl of ['display: inline-flex', 'flex: none', 'flex-wrap: nowrap', 'align-items: last baseline', 'margin-left: auto',
+    'min-width: 0', 'max-width: 100%']) assert.ok(vf[0].includes(decl), decl + ' — ' + vf[0])
+  assert.match(STYLE, /\n\.vf \.verdict \{ min-width: 0; \}/)
+  assert.match(STYLE, /\n\.vf b \{ flex: none; \}/)
+  assert.match(STYLE, /\n\.win-top\.solo \{ flex-wrap: nowrap; align-items: last baseline; \}/)
 })
 
 test('a window whose reset has passed is not judged in colour either', () => {
@@ -1040,7 +1062,7 @@ test('the chip over that bar is red as well, and only a judged window wears the 
     })] })],
   })
   assert.ok(reached.indexOf(
-    '<span class="verdict error">▲ 20 % of the window still spare · limit reached</span>') >= 0, reached)
+    '<span class="verdict error">▲ 20\u00a0% of the window still spare · limit reached</span>') >= 0, reached)
   // The same reading at the same pace level, which no provider has called reached, keeps the
   // pace colour and stays arrow-less: the red is the provider's word about the limit, not a
   // rule the card has invented for 40 %.
@@ -1050,7 +1072,8 @@ test('the chip over that bar is red as well, and only a judged window wears the 
       verdict: { text: '20 % of the window still spare', level: 'ok' },
     })] })],
   })
-  assert.ok(spare.indexOf('<span class="verdict ok">20 % of the window still spare</span>') >= 0, spare)
+  // 1.10 B5 rule 3 (rewritten: the verdict's "20 %" is glued now).
+  assert.ok(spare.indexOf('<span class="verdict ok">20\u00a0% of the window still spare</span>') >= 0, spare)
   assert.equal(spare.indexOf('▲'), -1, spare)
   // And a window whose stated reset has passed is judged by nothing at all — the reading
   // belongs to the window before it — so its chip wears no level and no arrow even at 'error'.
@@ -1079,7 +1102,9 @@ test('a measuring window prints neither its verdict nor its forecast, and no sus
   assert.equal(/measuring/i.test(h), false, h)
   assert.equal(/keeps it to the reset|%\/h/.test(h), false, h)
   assert.equal(h.indexOf('class="verdict'), -1, h)
-  assert.ok(h.indexOf('<span>5 h · resets 3h20m</span><b>3 %</b>') >= 0, h)
+  // 1.10 B5 rule 1 (rewritten: the figure followed the label directly): without a verdict the row is `solo` — it
+  // does not wrap, the label wraps inside itself and the figure, alone in its box, keeps to the label's last line.
+  assert.ok(h.indexOf('<div class="win-top solo"><span>5 h · resets 3h20m</span><span class="vf"><b>3 %</b></span></div>') >= 0, h)
   // A measuring forecast is skipped even when the verdict has a pace to report.
   const paced = render('sQuota()', { quotas: [card({ windows: [win({ forecast: measuring })] })] })
   assert.equal(/measuring/.test(paced), false, paced)
@@ -1138,7 +1163,8 @@ test('the card keeps its short age but neither the freshness row nor the officia
   assert.equal(h.indexOf('official page'), -1, h)
   assert.equal(h.indexOf('https://'), -1, h)
   assert.equal(/last check|last data|last local event|next refresh|snapshot/.test(h), false, h)
-  assert.ok(h.indexOf('2 min ago') >= 0, h)
+  // 1.10 B5 rule 3 (rewritten: the header's meta line is glued — "2 min" never broken between the figure and its unit).
+  assert.ok(h.indexOf('<span class="meta">plan max20 · poll · 2\u00a0min ago</span>') >= 0, h)
 })
 
 // 1.7 W1: our own fetch failed after the reading the card shows — one dim line directly under the
@@ -1227,8 +1253,9 @@ test('the data-quality list holds the agent entries against the subagent hour bu
     + '<div class="meta agnote">' + agents.note + '</div></li>'
   assert.ok(h.indexOf(item) >= 0, h)
   // After the lower-bound line, before the retention, as the markdown lists it.
-  assert.ok(h.indexOf('Lower bound share 3 %') < h.indexOf(item), h)
-  assert.ok(h.indexOf(item) < h.indexOf('Retention 45 d hourly'), h)
+  // 1.10 B5 rule 3 (rewritten: the list's lines are glued — "3 %", "45 d" kept with their units).
+  assert.ok(h.indexOf('Lower bound share 3\u00a0%') < h.indexOf(item), h)
+  assert.ok(h.indexOf(item) < h.indexOf('Retention 45\u00a0d hourly'), h)
   // The view model's words and figures, escaped; only the two labels are the page's.
   const odd = render('sDataQuality()', { dataQuality: dataQualityOf({ agents: { records: '<b>', buckets: '&', note: '<i>n</i>' } }) })
   assert.ok(odd.indexOf('Agent entries, last 7 days: &lt;b&gt; · Subagent tokens in the hour buckets, last 7 days: &amp;'
@@ -1257,7 +1284,7 @@ test('the calendar table\'s column counts days and says so — Active days, Akti
   assert.ok(heads.includes('Active days'), heads.join(' | '))
   assert.equal(heads.includes('Active'), false, heads.join(' | '))
   // The stacked cell names the same head (the ≤320 px layout prints it before the value).
-  assert.ok(h.indexOf('<td data-h="Active days">1</td>') >= 0, h)
+  assert.ok(h.indexOf('<td data-h="Active days" data-hl="Active days:">1</td>') >= 0, h)
   assert.equal(Object.prototype.hasOwnProperty.call(DICT, 'Active days'), true)
   assert.equal(Object.prototype.hasOwnProperty.call(DICT, 'Active'), false, 'Active is a session\'s state, the text views\' word — not the page\'s')
   // German: the model part's "Aktive Tage", copied into the page's words — one translation in both parts.
@@ -1346,13 +1373,15 @@ test('a window whose reset has passed is not told it is full', () => {
       })],
     })],
   })
-  assert.ok(full.indexOf('full until the reset in 3 h') >= 0, full)
+  // 1.10 B5 rule 3 (rewritten: the forecast line is glued).
+  assert.ok(full.indexOf('<div class="meta">full until the reset in 3\u00a0h</div>') >= 0, full)
 })
 
 test('the footer prints "Prices as of" exactly once, whichever side carries it', () => {
   const withNote = render('sFooter()')
   assert.equal(withNote.split('Prices as of').length - 1, 1, withNote)
-  assert.ok(withNote.indexOf('Generated 2026-09-03 12:00') >= 0, withNote)
+  // 1.10 B5 rule 2 (rewritten: the day stood bare): the day in a .nobr span.
+  assert.ok(withNote.indexOf('Generated <span class="nobr">2026-09-03</span> 12:00') >= 0, withNote)
   // A model that has no such footnote still gets the sentence, once.
   const without = render('sFooter()', { footnotes: ['Local numbers are what this machine saw.'] })
   assert.equal(without.split('Prices as of').length - 1, 1, without)
@@ -1362,11 +1391,12 @@ test('the footer prints "Prices as of" exactly once, whichever side carries it',
     pricing: { asOf: '2026-09-02', later: 'claude-opus-5-5 (2026-09-24)', custom: false, showList: false },
   })
   assert.equal(later.split('Prices as of').length - 1, 1, later)
-  assert.ok(later.includes('<li>Prices as of 2026-09-02; checked later: claude-opus-5-5 (2026-09-24).</li>'), later)
+  // 1.10 B5 rule 2 (rewritten: the days stood bare): each day in a .nobr span.
+  assert.ok(later.includes('<li>Prices as of <span class="nobr">2026-09-02</span>; checked later: claude-opus-5-5 (<span class="nobr">2026-09-24</span>).</li>'), later)
   const laterCustom = render('sFooter()', {
     footnotes: [], pricing: { asOf: '2026-09-02', later: '<b>x</b> (2026-09-24)', custom: true, showList: false },
   })
-  assert.ok(laterCustom.includes('Prices as of 2026-09-02; checked later: &lt;b&gt;x&lt;/b&gt; (2026-09-24) · your configured rates.'), laterCustom)
+  assert.ok(laterCustom.includes('Prices as of <span class="nobr">2026-09-02</span>; checked later: &lt;b&gt;x&lt;/b&gt; (<span class="nobr">2026-09-24</span>) · your configured rates.'), laterCustom)
 })
 
 // ---------------------------------------------------------------------------
@@ -2005,7 +2035,8 @@ test('the models table carries every column of the totals table, in its order', 
   // Every cell names its own header, so the ≤320 px layout can stack them.
   for (const [head, value] of [['Fresh in', '4.0K'], ['Write 5m', '1.5K'], ['Write 1h', '500'],
     ['Cache read', '90.0K'], ['Reasoning', '900'], ['Per req.', '2.3K']] as const) {
-    assert.ok(h.indexOf('<td data-h="' + head + '">' + value + '</td>') >= 0, head + ': ' + h)
+    // 1.10 D10 (rewritten: a cell carries its stacked label, data-hl, beside its column name).
+    assert.ok(h.indexOf('<td data-h="' + head + '" data-hl="' + head + ':">' + value + '</td>') >= 0, head + ': ' + h)
   }
   // Every numeric column is sortable through the one mechanism the extension parses.
   for (const key of ['usage', 'freshInput', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output',
@@ -2264,7 +2295,8 @@ test('the quota sparkline can be hovered and reached by keyboard; the KPI sparks
   // The hovered reading reuses the explanation's box and its hover-widget colours: one rule
   // for the box, a modifier for the spark's one-line label.
   assert.equal(STYLE.split('--vscode-editorHoverWidget-background').length - 1, 1)
-  assert.match(STYLE, /\.sparkbox \{ position: relative; \}/)
+  // 1.10 B5 rule 5 (rewritten: the box had no margin): 3 px between the sparkline and the line above it.
+  assert.match(STYLE, /\.sparkbox \{ position: relative; margin-top: 3px; \}/)
   assert.match(STYLE, /\.sparkbox \.pop \{ min-width: 0; white-space: nowrap; \}/)
   assert.match(STYLE, /\.spark rect\.ov \{ fill: transparent; pointer-events: all; \}/)
   assert.match(STYLE, /\.spark path\.hov \{[^}]*vector-effect: non-scaling-stroke;[^}]*pointer-events: none; \}/)
@@ -2616,8 +2648,9 @@ test('a key figure explains itself in a popover instead of a native tooltip', ()
   for (const line of [
     '<b>What</b> All tokens the selected range processed',
     '<b>How</b> fresh input + cache write + output',
-    '<b>Period</b> last 30 days · 2026-08-05 → 2026-09-03',
-    '<b>Compared with</b> previous 30 days · 2026-07-06 → 2026-08-04 · 900K',
+    // 1.10 B5 rule 2 (rewritten: the days stood bare): each day of an explanation in a .nobr span.
+    '<b>Period</b> last 30 days · <span class="nobr">2026-08-05</span> → <span class="nobr">2026-09-03</span>',
+    '<b>Compared with</b> previous 30 days · <span class="nobr">2026-07-06</span> → <span class="nobr">2026-08-04</span> · 900K',
     '<b>Basis</b> measured',
     '<b>Spark</b> last 14 days · one point per day',
   ]) {
@@ -2875,7 +2908,8 @@ test('the prompt-cache line is the last line of the Claude card, and only with a
   const h = render('sQuota()', {
     quotas: [card({ promptCache: { text: line, note: 'current session, via the status line', expired: false } })],
   })
-  assert.ok(h.indexOf('<div class="meta" title="current session, via the status line">' + line + '</div></div>') >= 0, h)
+  // 1.10 B5 rule 3 (rewritten: the line is glued on the page — "3 m 40 s", "5 min", "82 %" kept with their units).
+  assert.ok(h.indexOf('<div class="meta" title="current session, via the status line">' + glued(line) + '</div></div>') >= 0, h)
   // Last: after the sparkline caption, the extra usage and any local block.
   const withExtra = render('sQuota()', {
     quotas: [card({
@@ -2883,8 +2917,8 @@ test('the prompt-cache line is the last line of the Claude card, and only with a
       extra: { text: '$12 of $50', utilization: 24, enabled: true, billed: true },
     })],
   })
-  assert.ok(withExtra.indexOf(line) > withExtra.indexOf('Extra usage'), withExtra)
-  assert.ok(withExtra.indexOf(line) > withExtra.indexOf('class="track"'), withExtra)
+  assert.ok(withExtra.indexOf(glued(line)) > withExtra.indexOf('Extra usage'), withExtra)
+  assert.ok(withExtra.indexOf(glued(line)) > withExtra.indexOf('class="track"'), withExtra)
   // Without a reading nothing is drawn — not a dash line, not an estimate.
   const none = render('sQuota()', { quotas: [card({ promptCache: null })] })
   assert.equal(none.indexOf('prompt cache'), -1, none)
@@ -2912,16 +2946,17 @@ test('the prompt-cache line carries its own age, and an old reading is marked as
   const old = render('sQuota()', {
     quotas: [card({ promptCache: { text: line, note: 'n', expired: false, ageText: '3 d ago', fresh: false } })],
   })
-  assert.ok(old.indexOf('<div class="meta warn" title="n">' + line + ' · updated 3 d ago · ⚠ stale</div>') >= 0, old)
+  // 1.10 B5 rule 3 (rewritten: the line and its age glued).
+  assert.ok(old.indexOf('<div class="meta warn" title="n">' + glued(line + ' · updated 3 d ago') + ' · ⚠ stale</div>') >= 0, old)
   const fresh = render('sQuota()', {
     quotas: [card({ promptCache: { text: line, note: 'n', expired: false, ageText: '1 min ago', fresh: true } })],
   })
-  assert.ok(fresh.indexOf('<div class="meta" title="n">' + line + ' · updated 1 min ago</div>') >= 0, fresh)
+  assert.ok(fresh.indexOf('<div class="meta" title="n">' + glued(line + ' · updated 1 min ago') + '</div>') >= 0, fresh)
   // A payload from a build without the fields is marked neither fresh nor stale.
   const older = render('sQuota()', {
     quotas: [card({ promptCache: { text: line, note: 'n', expired: false } })],
   })
-  assert.ok(older.indexOf('<div class="meta" title="n">' + line + '</div>') >= 0, older)
+  assert.ok(older.indexOf('<div class="meta" title="n">' + glued(line) + '</div>') >= 0, older)
   assert.equal(older.indexOf('stale'), -1, older)
 })
 
@@ -3061,7 +3096,8 @@ test('the filter bar is a labelled grid: one row per thing it filters', () => {
   assert.ok(h.indexOf('<span class="meta">Models</span><div class="wrap span2">'
     + '<button data-act="model"') >= 0, h)
   // The range in words ends the range row instead of taking a line of its own …
-  assert.ok(h.indexOf('<span class="meta cap">Last 30 days · 2026-08-05 → 2026-09-03</span></div>') >= 0, h)
+  // 1.10 B5 rule 2 (rewritten: the two days stood bare): each ISO day whole, never broken at its hyphen.
+  assert.ok(h.indexOf('<span class="meta cap">Last 30 days · <span class="nobr">2026-08-05</span> → <span class="nobr">2026-09-03</span></span></div>') >= 0, h)
   // … and the refresh button is the last thing in that row, an icon with a name of its own.
   assert.ok(h.indexOf('</span></div><button class="icon" data-act="refresh" aria-label="Refresh"'
     + ' title="Rebuild from the transcripts and fetch the quota"><svg') >= 0, h)
@@ -3293,8 +3329,9 @@ function recordsData(over: Record<string, unknown> = {}): Record<string, unknown
 
 test('the records section prints the peak day, the streak and the three tables', () => {
   const h = render('sRecords()', { records: recordsData() })
-  assert.ok(h.includes('Peak day 2026-09-03 · 412k'), h)
-  assert.ok(h.includes('Longest streak 3 days · 2026-09-01 → 2026-09-03'), h)
+  // 1.10 B5 rule 2 (rewritten: the days stood bare): each ISO day in a .nobr span of its own.
+  assert.ok(h.includes('Peak day <span class="nobr">2026-09-03</span> · 412k'), h)
+  assert.ok(h.includes('Longest streak 3 days · <span class="nobr">2026-09-01</span> → <span class="nobr">2026-09-03</span>'), h)
   for (const label of ['claude-opus-4-6', 'token-pace', 'sess-alpha']) {
     assert.ok(h.includes(label), `${label} is missing from ${h}`)
   }
@@ -3338,12 +3375,14 @@ function toolsData(over: Record<string, unknown> = {}): Record<string, unknown> 
 
 test('the tools section lists the calls, the share and the models, and no limit', () => {
   const h = render('sTools()', { tools: toolsData() })
-  assert.ok(h.includes('data-h="Tool">Read <span class="meta">Claude Code</span>'), h)
-  assert.ok(h.includes('data-h="Calls">3<'), h)
-  assert.ok(h.includes('data-h="Share">43 %<'), h)
+  // 1.10 D10 (rewritten: data-hl beside data-h).
+  assert.ok(h.includes('data-h="Tool" data-hl="Tool:">Read <span class="meta">Claude Code</span>'), h)
+  assert.ok(h.includes('data-h="Calls" data-hl="Calls:">3<'), h)
+  assert.ok(h.includes('data-h="Share" data-hl="Share:">43 %<'), h)
   assert.ok(h.includes('claude-opus-4-6'), h)
   assert.ok(h.includes('7 call(s) · 4 distinct tool(s) · 2 more not listed'), h)
-  assert.ok(h.includes('Tool calls counted since 2026-09-02.'), h)
+  // 1.10 B5 rule 2 (rewritten: the day stood bare).
+  assert.ok(h.includes('Tool calls counted since <span class="nobr">2026-09-02</span>.'), h)
   // A tool call has no limit, so nothing here may look like one.
   assert.equal(h.includes('<div class="track"'), false, h)
   assert.equal(/verdict|forecast|limit/i.test(h), false, h)
@@ -6230,7 +6269,8 @@ test('the running block\'s first line carries the 7-day block\'s disclosure; ope
   assert.ok(h.indexOf('</ul></div>') < at && at < h.indexOf('<div class="agtree"'), h)
   const w = weekPart(h)
   const heads = ['Type · model', 'Agents', 'Usage', 'Share', 'Median per agent', '~Cost']
-  const td = (i: number, v: string): string => '<td data-h="' + heads[i] + '">' + v + '</td>'
+  // 1.10 D10 (rewritten: data-hl beside data-h).
+  const td = (i: number, v: string): string => '<td data-h="' + heads[i] + '" data-hl="' + heads[i] + ':">' + v + '</td>'
   // 1.7 D-A (pinned and changed: 1.6 L3 wrote an image named "lower bound"): the ⚠ hidden from a
   // screen reader, its words in the cell after it.
   const lb = lbMark('not every agent has a price: the sum is a lower bound')
@@ -6384,7 +6424,8 @@ test('the 7-day block speaks German on a German page (1.6 L3)', () => {
   for (const phrase of ['aria-expanded="true" aria-controls="ag-week">Letzte 7 Tage</button>',
     'aria-level="3">Letzte 7 Tage · wohin die Agent-Token gingen</div>',
     '<th>Typ · Modell</th><th>Agenten</th><th>Verbrauch</th><th>Anteil</th><th>Median je Agent</th><th>~Kosten</th>',
-    '<td data-h="Median je Agent">80K</td>', '<td>Alle Agenten</td>', 'aria-level="4">Die 2 größten Agenten</div>',
+    // 1.10 D10 (rewritten: data-hl beside data-h — "{0}:" is German's "{0}:" too, and not in this page's words).
+    '<td data-h="Median je Agent" data-hl="Median je Agent:">80K</td>', '<td>Alle Agenten</td>', 'aria-level="4">Die 2 größten Agenten</div>',
     // 1.7 D-A (pinned and changed: the mark was an image named „Untergrenze"): the words in the cell.
     lbMark('nicht jeder Agent hat einen Preis: Die Summe ist eine Untergrenze', 'Untergrenze')]) {
     assert.ok(h.indexOf(phrase) >= 0, phrase + '\n' + h)
@@ -8342,10 +8383,11 @@ test('the Claude card lists each cooling or cold session after its windows: the 
       extra: { text: '$12 of $50', utilization: 24, enabled: true, billed: true },
     })],
   })
-  const block = '<div class="meta pc-line">' + PC_STATE + '</div><div class="meta pc-cost">' + PC_COST + '</div>'
-    + '<div class="meta pc-line">' + PC_COLD + '</div><div class="meta pc-cost">' + PC_COLD_COST + '</div>'
+  // 1.10 B5 rule 3 (rewritten): every line of the block and the 1.3 line glued.
+  const block = '<div class="meta pc-line">' + glued(PC_STATE) + '</div><div class="meta pc-cost">' + glued(PC_COST) + '</div>'
+    + '<div class="meta pc-line">' + glued(PC_COLD) + '</div><div class="meta pc-cost">' + glued(PC_COLD_COST) + '</div>'
     + '<div class="meta pc-more">2 more sessions with a cooling or cold prompt cache</div>'
-  assert.ok(h.indexOf(block + '<div class="meta" title="n">' + line13 + '</div></div>') >= 0, h)
+  assert.ok(h.indexOf(block + '<div class="meta" title="n">' + glued(line13) + '</div></div>') >= 0, h)
   // After the windows and the extra usage: where the 1.3 line has stood since 1.3.
   assert.ok(h.indexOf(block) > h.lastIndexOf('class="win"'), h)
   assert.ok(h.indexOf(block) > h.indexOf('Extra usage'), h)
@@ -8354,7 +8396,7 @@ test('the Claude card lists each cooling or cold session after its windows: the 
   assert.equal(/<button|role=|aria-live|tabindex/.test(only), false, only)
   // A line without a cost line has none; nothing to list is no block; a warm-only block draws nothing.
   const bare = render('sQuota()', { quotas: [card({ cacheWatch: cacheBlock({ lines: [{ shortId: '9d0eb37a', phase: 'cooling', source: 'bridge', text: PC_STATE, cost: null }] }) })] })
-  assert.ok(bare.indexOf('<div class="meta pc-line">' + PC_STATE + '</div></div>') >= 0, bare)
+  assert.ok(bare.indexOf('<div class="meta pc-line">' + glued(PC_STATE) + '</div></div>') >= 0, bare)
   assert.equal(bare.indexOf('pc-cost'), -1, bare)
   for (const cacheWatch of [null, undefined, cacheBlock({ lines: [], all: [{ text: 'x · prompt cache warm · cools in 30 m 0 s (1 h TTL)' }] }), { lines: 'x' }, 42]) {
     const none = render('sQuota()', { quotas: [card({ cacheWatch })] })
@@ -8436,11 +8478,12 @@ test('from a real view model: three lines and their costs on the Claude card, no
   assert.equal(claude.title, 'Claude Code')
   const states = [...claude.html.matchAll(/<div class="meta pc-line">([^<]*)<\/div>/g)].map((m) => m[1])
   const costs = [...claude.html.matchAll(/<div class="meta pc-cost">([^<]*)<\/div>/g)].map((m) => m[1])
+  // 1.10 B5 rule 3 (rewritten: the lines are glued on the page).
   assert.deepEqual(states, [
     'Session Thu 10:04 · aaaa1111 · prompt cache cools in ~4 m 0 s (1 h TTL, estimated from the transcript)',
     'Session 9d0eb37a · prompt cache cools in 4 m 10 s (1 h TTL)',
     'Session 5f1c2d3e · prompt cache cold since 11:40 (1 h TTL)',
-  ])
+  ].map(glued))
   assert.equal(costs.length, 3)
   assert.ok(costs.every((c) => c.includes('~$')), costs.join('\n'))
   // The warm session is the markdown's; the card says nothing of it. The latest mirror's session is listed, so no 1.3 line.
@@ -8524,9 +8567,10 @@ test('a keep-warm note stands right under the entry it concerns, today\'s accoun
       }),
     })],
   })
-  const block = '<div class="meta pc-line">' + PC_STATE + '</div><div class="meta pc-cost">' + PC_COST + '</div>'
-    + '<div class="meta pc-note">' + KW_ARMED + '</div>'
-    + '<div class="meta pc-line">' + PC_COLD + '</div><div class="meta pc-cost">' + PC_COLD_COST + '</div>'
+  // 1.10 B5 rule 3 (rewritten): the lines and the notes glued.
+  const block = '<div class="meta pc-line">' + glued(PC_STATE) + '</div><div class="meta pc-cost">' + glued(PC_COST) + '</div>'
+    + '<div class="meta pc-note">' + glued(KW_ARMED) + '</div>'
+    + '<div class="meta pc-line">' + glued(PC_COLD) + '</div><div class="meta pc-cost">' + glued(PC_COLD_COST) + '</div>'
     + '<div class="meta pc-note">' + KW_NONE + '</div>'
     + '<div class="meta pc-more">1 more session with a cooling or cold prompt cache</div>'
     + '<div class="meta pc-today">' + KW_TODAY + '</div>'
@@ -8562,7 +8606,8 @@ test('from a real view model with the keep-warm host\'s view: the note under its
   const [claude] = cardsOf(pageOf(vm))
   const lines = [...claude.html.matchAll(/<div class="meta (pc-[a-z]+)">([^<]*)<\/div>/g)].map((m) => [m[1], m[2].slice(0, 40)])
   assert.deepEqual(lines.map((l) => l[0]), ['pc-line', 'pc-cost', 'pc-note', 'pc-line', 'pc-cost', 'pc-today'])
-  assert.ok(claude.html.includes('<div class="meta pc-note">' + KW_ARMED + '</div>'), claude.html)
+  // 1.10 B5 rule 3 (rewritten: the note is glued).
+  assert.ok(claude.html.includes('<div class="meta pc-note">' + glued(KW_ARMED) + '</div>'), claude.html)
   assert.ok(claude.html.includes('<div class="meta pc-today">' + KW_TODAY + '</div>'), claude.html)
   // The note is the bridge session's, under its entry — listed first, its expiry the sooner of the two.
   const block = (vm.quotas as Array<{ cacheWatch: { lines: Array<{ shortId: string }>; keepWarm: { notes: Array<{ line: number; shortId: string }> } } }>)[0].cacheWatch
@@ -10292,4 +10337,129 @@ test('the section\'s styles: two lines of text at most, a slash command in the e
   assert.match(forced, /\.pr button\[aria-disabled="true"\], \.pr-foot button\[aria-disabled="true"\] \{ color: GrayText;/)
   assert.match(forced, /\.pr-edit input:focus-visible, \.pr-edit textarea:focus-visible \{ outline: 2px solid Highlight; outline-offset: 1px; \}/)
   assert.equal(adjustedOut().some((s) => s.includes('.pr')), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 P7: decimals through Intl on the page, layout for every language, the stacked colon (§3 B4, B5, D10)
+// ---------------------------------------------------------------------------
+
+/** A page in another language: `words` over the German test bundle, its formatters in `locale`. */
+function wordsPage(words: Record<string, string>): nodeVm.Context {
+  const c = makeContext()
+  nodeVm.runInContext(between(germanPage(words), /<script nonce="[A-Za-z0-9]+">/, '</script>'), c)
+  return c
+}
+function renderIn(c: nodeVm.Context, call: string, over: Record<string, unknown> = {}): string {
+  ;(c as Record<string, unknown>).fixture = model(over)
+  return String(nodeVm.runInContext('vm = fixture; ' + call, c))
+}
+const DRILL = {
+  day: '2026-09-03', models: [{ model: 'claude-opus-4-6', usageText: '1.2K', requests: 3, costText: '~$0.10' }],
+  sessions: [{ session: 'abc', project: 'token-pace', usage: '1.2K' }],
+}
+
+test('a stacked table cell carries its column\'s name and its label in the language\'s own "{0}:" (1.10 D10, §3 B5 rule 4)', () => {
+  const h = render('sDrill()', { drill: DRILL })
+  assert.ok(h.includes('<td data-h="Model" data-hl="Model:">claude-opus-4-6</td>'), h)
+  assert.ok(h.includes('<td data-h="Usage" data-hl="Usage:">1.2K</td>'), h)
+  // The label is the language's pattern, whatever punctuation it puts around the name: a no-break space before the
+  // colon (French), a full-width colon (Chinese, Japanese) — and data-h stays the plain name the harness reads.
+  const fr = renderIn(wordsPage({ '{0}:': '{0} :', 'Model': 'Modèle' }), 'sDrill()', { drill: DRILL })
+  assert.ok(fr.includes('<td data-h="Modèle" data-hl="Modèle :">claude-opus-4-6</td>'), fr)
+  const zh = renderIn(wordsPage({ '{0}:': '{0}：', 'Model': '模型' }), 'sDrill()', { drill: DRILL })
+  assert.ok(zh.includes('<td data-h="模型" data-hl="模型：">claude-opus-4-6</td>'), zh)
+  // German: „{0}:" (§6), from the shipped bundle.
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.equal(bundle['{0}:'], '{0}:')
+  assert.equal(DICT['{0}:'], '{0}:')
+  // Every cell of the page that carries a column name goes through dh(): no header cell without its label.
+  assert.equal(/<td data-h="/.test(SOURCE), false, 'a td writes data-h without dh()')
+  assert.ok((SOURCE.match(/<td' \+ dh\(/g) ?? []).length >= 40)
+  // Every stacked cell of a real page: data-hl is data-h in the pattern.
+  const all = pageOf(buildViewModel(makeInput({ cfg: makeConfig({ 'tokenPace.attribution': 'project' }) })) as unknown as Record<string, unknown>)
+  const cells = [...all.matchAll(/<td data-h="([^"]*)" data-hl="([^"]*)"/g)]
+  assert.ok(cells.length >= 20, String(cells.length))
+  for (const m of cells) assert.equal(m[2], m[1] + ':', m[0])
+  assert.equal(all.split('<td data-h=').length - 1, cells.length, 'a cell with data-h and no data-hl')
+})
+
+test('a number stays with its unit: the page\'s glue() keeps a figure and a following %, min, h, d, s, m, K, M or G on one line (1.10 B5 rule 3)', () => {
+  const g = (s: string): string => String(nodeVm.runInContext('glue(' + JSON.stringify(s) + ')', ctx))
+  const cases: Array<[string, string]> = [
+    ['2 min 전', '2 min 전'], // ko
+    ['2 min 前', '2 min 前'], // zh-cn
+    ['占 API 等值的 54 %。', '占 API 等值的 54 %。'], // zh-tw's summary: `{2} %`
+    ['Claude Code 96 % (doskonała)', 'Claude Code 96 % (doskonała)'], // pl
+    ['cools in 4 m 10 s (1 h TTL)', 'cools in 4 m 10 s (1 h TTL)'],
+    ['~empty in 3 h · 7 d · 12 K · 1.5 M · 2 G', '~empty in 3 h · 7 d · 12 K · 1.5 M · 2 G'],
+    // A word that merely starts with a unit's letter is no unit: the unit ends where no letter follows.
+    ['in 2 days, 3 hours, 5 models, 4 Mio., 3 GPT', 'in 2 days, 3 hours, 5 models, 4 Mio., 3 GPT'],
+    ['2 минуты', '2 минуты'],
+    // Escaped text: an entity ends in ';', never in a digit.
+    ['it&#39;s 5 h', 'it&#39;s 5 h'],
+    ['', ''],
+  ]
+  for (const [raw, want] of cases) assert.equal(g(raw), want, raw)
+  // Where it is used: the summary, the quota card's meta line, its verdict, its forecast and its prompt-cache lines.
+  const sum = render('sSummary()', { digest: ['占 API 等值的 54 %。', 'Today 11 % below the 7-day average.'] })
+  assert.ok(sum.includes('<li>占 API 等值的 54 %。</li><li>Today 11 % below the 7-day average.</li>'), sum)
+  const q = render('sQuota()', {
+    quotas: [card({ ageText: '2 min 전', windows: [win({ verdict: { text: '구간의 37 % 아직 여유', level: 'ok' },
+      forecast: { state: 'eta', text: '~39 min 후 소진' } })] })],
+  })
+  assert.ok(q.includes('<span class="meta">plan max20 · poll · 2 min 전</span>'), q)
+  assert.ok(q.includes('<span class="verdict ok">구간의 37 % 아직 여유</span>'), q)
+  assert.ok(q.includes('<div class="meta">~39 min 후 소진</div>'), q)
+  // Never in an attribute: the figure's own markup and every data-* value keep their plain text.
+  assert.ok(q.includes('aria-valuetext="61 %"'), q)
+  for (const line of SOURCE.split('\n').filter((l) => /\bglue\(/.test(l) && !/function glue|GLUE_RE/.test(l))) {
+    assert.equal(/data-[a-z]+="' \+ glue\(|="' \+ glue\(/.test(line), false, line)
+  }
+})
+
+test('an ISO day never breaks at its hyphen: every day the page prints stands in a .nobr span (1.10 B5 rule 2)', () => {
+  const nb = (d: string): string => '<span class="nobr">' + d + '</span>'
+  // The range line and the records are pinned above; the drill, the heat map, the sessions and the data quality here.
+  assert.ok(render('sDrill()', { drill: DRILL }).startsWith('<h2>Day ' + nb('2026-09-03') + '</h2>'))
+  const heat = render('sHeatmap()', {
+    heatmap: { ...(model().heatmap as Record<string, unknown>), peakDay: { day: '2026-09-02', text: '1.2K' }, firstDay: '2026-07-21' },
+  })
+  assert.ok(heat.includes('peak ' + nb('2026-09-02') + ' (1.2K)'), heat)
+  assert.ok(heat.includes('(before ' + nb('2026-07-21') + ')'), heat)
+  const sessions = render('sSessions()', { sessions: { enabled: true, cacheStates: [], rows: [
+    { session: 'abc', project: 'token-pace', started: '2026-09-03 12:00', duration: '1 h 2 min', usage: '1.2K', requests: 3, cacheState: null, isSub: false },
+  ] } })
+  assert.ok(sessions.includes('data-hl="Started:">' + nb('2026-09-03') + ' 12:00</td>'), sessions)
+  // Its duration glued (1.10 B5 rule 3): a stacked cell wraps.
+  assert.ok(sessions.includes('data-hl="Duration:">1\u00a0h 2\u00a0min</td>'), sessions)
+  const dq = render('sDataQuality()', { dataQuality: dataQualityOf() })
+  assert.ok(dq.includes('Coverage ' + nb('2026-08-01') + ' → ' + nb('2026-09-03')), dq)
+  // A day inside a sentence of the summary as well; nothing else of the text is wrapped.
+  const sum = render('sSummary()', { digest: ['Peak day 2026-09-02 · 12 % more than 2026-09-01.'] })
+  assert.ok(sum.includes('<li>Peak day ' + nb('2026-09-02') + ' · 12 % more than ' + nb('2026-09-01') + '.</li>'), sum)
+  // The class keeps its line whole.
+  assert.match(STYLE, /\n\.nobr \{ white-space: nowrap; \}/)
+})
+
+test('a band\'s share of the day is written to a tenth in the page\'s decimal mark; the chart\'s geometry keeps its \'.\' (1.10 B4)', () => {
+  const chart = {
+    days: ['2026-09-01', '2026-09-02', '2026-09-03'], labels: ['09-01', '09-02', '09-03'],
+    series: [{ key: 'claude:claude-opus-4-6', label: 'claude-opus-4-6', source: 'claude', rank: 0, values: [10, 20, 30] },
+      { key: 'codex:gpt-5.3-codex', label: 'gpt-5.3-codex', source: 'codex', rank: 0, values: [1, 2, 3] }],
+    metric: 'usage', modelStyle: 'pattern', max: 33, ticks: [10, 20, 30, 40], weekly: false, costLine: null,
+  }
+  const en = render('sChart()', { chart })
+  assert.ok(en.includes(' · 90.9 % of the day · '), en)
+  assert.ok(en.includes(' · 9.1 % of the day · '), en)
+  const de = renderIn(wordsPage({}), 'sChart()', { chart })
+  assert.ok(de.includes(' · 90,9 % of the day · '), de)
+  assert.ok(de.includes(' · 9,1 % of the day · '), de)
+  // A whole share has no decimals in either language.
+  const whole = { ...chart, series: [chart.series[0], { ...chart.series[1], values: [10, 20, 30] }] }
+  assert.ok(renderIn(wordsPage({}), 'sChart()', { chart: whole }).includes(' · 50 % of the day · '))
+  // Geometry is a CSS value, not a text: a band's height and a bar's width keep their '.' on a German page.
+  assert.match(de, /data-bh="30\.30"/)
+  const bar = renderIn(wordsPage({}), 'sQuota()', { quotas: [card({ windows: [win({ percent: 61.25 })] })] })
+  assert.match(bar, /<div class="fill ok" data-w="61\.25"><\/div>/)
+  assert.equal(/data-(w|x|bh)="[^"]*,/.test(de + bar), false)
 })

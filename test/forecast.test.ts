@@ -5,6 +5,8 @@ import * as assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Cycle, ForecastConfig, calibration, forecast, lockoutText, resetForecast, retrospective } from '../src/forecast'
 import { QuotaSample, QuotaWindow } from '../src/types'
+import { setLocale } from '../src/i18n'
+import { LANGUAGES } from '../src/languages'
 
 const NOW = 1_700_000_000_000
 const H = 3_600_000
@@ -303,4 +305,22 @@ test('calibration takes the newest qualifying spans as a band', () => {
   assert.ok(band.low < band.high)
   assert.ok(band.factor >= band.low && band.factor <= band.high)
   assert.ok(band.basisHours >= 3)
+})
+
+test('hours under ten are written to a tenth in the reader\'s decimal mark, a whole hour plain (1.10 B4)', () => {
+  // The span of a measuring forecast: 90 min to 10 h in tenths of an hour — the number, not a string of it.
+  const text = (stepMs: number): string => forecast(series(3, stepMs, 10, 1), win(12, NOW + 4 * H), NOW, CFG, 50).text
+  assert.equal(text(75 * MIN), 'measuring · 3 readings over 2.5 h')
+  assert.equal(text(60 * MIN), 'measuring · 3 readings over 2 h')
+  assert.equal(text(6 * H), 'measuring · 3 readings over 12 h')
+  for (const { id, locale } of LANGUAGES) {
+    const m = new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === 'decimal')?.value
+    setLocale(locale)
+    try {
+      assert.equal(text(75 * MIN), `measuring · 3 readings over 2${m}5 h`, id)
+      assert.equal(text(60 * MIN), 'measuring · 3 readings over 2 h', id)
+    } finally {
+      setLocale(undefined)
+    }
+  }
 })

@@ -850,6 +850,18 @@ input[type=date] { cursor: text; }
 .win-top b { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; flex: none;
              margin-left: auto; }
 .verdict { color: var(--dim); overflow-wrap: anywhere; }
+/* 1.10 B5 rule 1 (row 13): a window's figure never stands alone on a line, in any language. The label takes the
+   room the row has and wraps inside itself; the verdict and the figure are one box that wraps as a whole — on a
+   narrow sidebar both go to the next line, at its right end, the figure on the verdict's last line. A row without a
+   verdict (.solo) does not wrap at all: the label wraps inside itself and the figure keeps to its last line. */
+.win-top > span:first-child { flex: 1 1 auto; }
+/* Never shrunk by the row (flex: none) — its width is its content's, at most the row's (max-width), so a verdict longer
+   than the row wraps inside the box and the figure stays whole beside its last line. */
+.vf { display: inline-flex; flex: none; flex-wrap: nowrap; align-items: last baseline; gap: 0 8px; margin-left: auto;
+      min-width: 0; max-width: 100%; }
+.vf .verdict { min-width: 0; }
+.vf b { flex: none; }
+.win-top.solo { flex-wrap: nowrap; align-items: last baseline; }
 .verdict.warn, .verdict.warn2 { color: var(--warn); }
 .verdict.error { color: var(--error); }
 .scroll { overflow-x: auto; }
@@ -932,7 +944,10 @@ tr.more td { color: var(--dim); font-style: italic; text-align: left; }
    explanation uses. Sized to its one line, and its anchor slides from the left edge to the
    right one with the reading — a box hung from the reading's x alone would leave the card
    on the right half of the axis. */
-.sparkbox { position: relative; }
+/* 1.10 B5 rule 5 (forLead 5 g): the sparkline's top edge stands clear of the line above it — a stretch at the window's
+   top is drawn at the svg's edge, and with no gap it touched the descenders of the share line in Polish, Czech and
+   Russian. */
+.sparkbox { position: relative; margin-top: 3px; }
 .sparkbox .pop { min-width: 0; white-space: nowrap; }
 /* The plot keeps a gutter on its right for the tick labels. Inside the plot they either hide
    behind the newest bars or, opaque, cut them into pieces that read as gaps in the data —
@@ -1429,8 +1444,9 @@ ul { margin: 6px 0; padding-left: 18px; }
      exactly what the stacked layout exists to avoid. */
   td { text-align: left; padding: 1px 0; white-space: normal; }
   /* Only cells that carry a header: the sub-rows and the drill lines span the whole table
-     and would otherwise be prefixed with a bare ": ". */
-  td[data-h]::before { content: attr(data-h) ": "; color: var(--dim); }
+     and would otherwise be prefixed with a bare ": ". 1.10 D10: the label as the language writes it —
+     data-hl is the column name in the words' "{0}:" ("Période :" with a no-break space, "期間：") —, then a space. */
+  td[data-h]::before { content: attr(data-hl) " "; color: var(--dim); }
 }
 /* 1.6 L3: at a narrow width the 7-day table stacks tighter than the page's other tables — a row's
    type and model on a line of their own, then its figures, each with its column's name, as many
@@ -1900,6 +1916,8 @@ function webviewWords(): Record<string, string> {
     '{0} · {1} · {2} % of the day · {3} total {4}': t('{0} · {1} · {2} % of the day · {3} total {4}'),
     '{0} · {1} · {2} % of the week · {3} total {4}': t('{0} · {1} · {2} % of the week · {3} total {4}'),
     '{0}: {1} of {2}': t('{0}: {1} of {2}'),
+    // 1.10 D10: the label a stacked table cell prints in front of its value, the column's name in {0}.
+    '{0}:': t('{0}:'),
     '~1 of them running': t('~1 of them running'),
     '~Cost': t('~Cost'),
     '~{0} of them running': t('~{0} of them running'),

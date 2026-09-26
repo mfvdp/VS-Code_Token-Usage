@@ -140,7 +140,9 @@ system says. The weekday in front of a clock time is the language's own short na
 the settings' own examples quote. The day of a sparkline's hover label is weekday, day and month
 (`Sat 26 Sep`, `sam. 26 sept.`), and where a language writes the month as a number — Japanese, Chinese,
 Czech — it is that language's own short date (`9月26日(土)`, `9月26日周六`, `so 26. 9.`). The calibration's
-figures take the language's decimal mark (`1,2` in German and French).
+figures take the language's decimal mark (`1,2` in German and French). Since 1.10 so does every other
+decimal the dashboard, the tooltips and the text views print — a key figure's change (`▼ -0,7%`), the plan
+factor (`×0,4`), a span under ten hours (`2,5 h`); the exports and the diagnostics report keep the `.`.
 
 **The same in every language** — these are the bar's and the page's own notation, not words: the
 countdowns `45m`, `2h14m`, `3d 5h`, `<1m` and `4 m 10 s`; the units inside `2 h 14 min`, `3 d 5 h` and
@@ -148,6 +150,15 @@ countdowns `45m`, `2h14m`, `3d 5h`, `<1m` and `4 m 10 s`; the units inside `2 h 
 and `G`; the `$` in front of an amount and `<$0.01`; the `%` in the bar; the bar's glyphs (`█┃▁`,
 `▲`, `Σ`) and the codicons; the ISO day `2026-09-01`; `1 h TTL`; and the marks `~` (an estimate), `⚠`
 and `≈` (a lower bound) and `–` (nothing known).
+
+**The percent follows the number in every language** — `25 %` in a sentence, `25%` in the status bar
+—, Turkish included, although Turkish typography and the Turkish number format put the sign first
+(`%25`): the Turkish translation keeps the English order in every string, for one style across the
+page, the bar and the texts. A known limit, not an oversight.
+
+**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s`
+stay together in every language —, an ISO day never breaks at its hyphen, and a window's percentage
+never stands alone on a line: it wraps together with the verdict beside it.
 
 ## How the translations were made
 

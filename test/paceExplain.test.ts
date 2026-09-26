@@ -10,6 +10,8 @@
 
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
+import { setLocale } from '../src/i18n'
+import { LANGUAGES } from '../src/languages'
 import { PaceConfig, paceVerdict, WindowDisplay, windowElapsed } from '../src/pace'
 import { EffectivePace, ExplainInput, explainWindow, paceThresholds } from '../src/paceExplain'
 
@@ -244,6 +246,30 @@ test('the words never say "points" and never leak an identifier', () => {
     for (const l of [e.title, ...e.lines]) {
       assert.doesNotMatch(l, /\bpoints\b/i, l)
       assert.doesNotMatch(l, /\b(resetDue|limitReached|normal|warn2|undefined|NaN)\b/, l)
+    }
+  }
+})
+
+test('a threshold with a decimal is written in the reader\'s decimal mark; a whole one plain (1.10 B4)', () => {
+  // `figure()` wrote toFixed(1) — "2.5" in every language. The setting's value is the reader's number: the mark is theirs.
+  const pace: EffectivePace = { ...NO_BAND, minElapsedPercent: 2.5 }
+  const line = (): string | undefined => explain(1, 4.95, pace, { resetsAt: null, windowMinutes: null }).lines
+    .find((l) => l.startsWith('Measuring until'))
+  assert.equal(line(), 'Measuring until 2.5 % of the window has passed; no verdict before that unless usage exceeds 10 %.')
+  for (const { id, locale } of LANGUAGES) {
+    const mark = new Intl.NumberFormat(locale).formatToParts(1.5).find((p) => p.type === 'decimal')?.value
+    setLocale(locale)
+    try {
+      assert.ok(line()?.startsWith(`Measuring until 2${mark}5 % `), id + ': ' + line())
+      // A whole number stays plain in every language.
+      assert.ok(explain(1, 4.95, NO_BAND, { resetsAt: null, windowMinutes: null }).lines.some((l) => l.startsWith('Measuring until 3 % ')), id)
+      // The stale threshold is a setting too (tokenPace.staleAfterMinutes takes a decimal).
+      assert.ok(explain(37, THIRD, NO_BAND, { ageMinutes: 30, staleAfterMinutes: 2.5 }).lines
+        .includes(`The reading is 30 min old (stale after 2${mark}5 min); the colour may lag.`), id)
+      assert.ok(explain(37, THIRD, NO_BAND, { ageMinutes: 30, staleAfterMinutes: 20 }).lines
+        .includes('The reading is 30 min old (stale after 20 min); the colour may lag.'), id)
+    } finally {
+      setLocale(undefined)
     }
   }
 })

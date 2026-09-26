@@ -3226,6 +3226,20 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     'could not be read (${failure}); English is shown.', 'Language: the setting could not be written (${errorKind(err)}).']) {
     assert.ok(ext.includes(line), `src/extension.ts no longer logs: ${line}`)
   }
+  // 1.10 B4, B5, B8 (P7): the decimals, the narrow width and the Turkish percent — a documented limit (§7a 14).
+  for (const claim of [
+    'Since 1.10 so does every other decimal the dashboard, the tooltips and the text views print — a key figure\'s change (`▼ -0,7%`), the plan factor (`×0,4`), a span under ten hours (`2,5 h`); the exports and the diagnostics report keep the `.`.',
+    '**The percent follows the number in every language** — `25 %` in a sentence, `25%` in the status bar —, Turkish included, although Turkish typography and the Turkish number format put the sign first (`%25`): the Turkish translation keeps the English order in every string, for one style across the page, the bar and the texts. A known limit, not an oversight.',
+    '**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s` stay together in every language —, an ISO day never breaks at its hyphen, and a window\'s percentage never stands alone on a line: it wraps together with the verdict beside it.',
+  ]) assert.ok(lang.includes(claim), `docs/languages.md does not say: ${claim}`)
+  assert.ok(flatText(doc.numbers).includes('**Decimals** follow the language too (1.10), wherever the dashboard, the tooltips and the text views print one: a key figure\'s change against the period before (`▼ -0,7%` in German — the sign and the `%` are the badge\'s own and stay attached to the figure)'))
+  assert.ok(flatText(doc.numbers).includes('The CSV and JSON exports and the diagnostics report keep the `.` in every language: they are read by programs, not by you.'))
+  // The Turkish percent really is Intl's `%25`, and the Turkish bundle writes the number first: the limit the page states.
+  assert.equal(new Intl.NumberFormat('tr', { style: 'percent' }).format(0.25), '%25')
+  const tr = JSON.parse(readDoc('l10n/bundle.l10n.tr.json')) as Record<string, string>
+  const percentKeys = Object.keys(tr).filter((k) => /\{\d\} %/.test(k))
+  assert.ok(percentKeys.length >= 20, String(percentKeys.length))
+  assert.deepEqual(percentKeys.filter((k) => /%\s?\{\d\}/.test(tr[k])), [], 'a Turkish string writes the percent first')
   // numbers.md, development.md, export.md.
   assert.ok(flatText(doc.numbers).includes('**In your language** (1.9). A figure is written the way the language you chose'))
   assert.ok(flatText(doc.numbers).includes('[Languages](languages.md#numbers-dates-and-times)'))

@@ -21,6 +21,10 @@
  *    lives in keepWarmHost.ts behind its own setting and consent (`KeepWarmConsent`); this file only
  *    hands it each frame's facts and asks the question. 1.10: the window's terminals are watched by one
  *    TerminalWatch (terminalWatch.ts) made here, which the keep-warm host and the prompt tool share.
+ *  • 1.10 A (P3): the reader's prompt list lives in `prompts.json` in `globalStorage` (promptsHost.ts); this
+ *    file reads it only while the Prompts section is listed, applies the page's save / delete / move and the
+ *    *Restore Default Prompts* command, and lists the file in *Clear Stored Data…*. A title or a text is
+ *    never logged, exported or reported — the page shows it, and a send (P4) types it.
  */
 
 import * as crypto from 'crypto'
@@ -61,6 +65,8 @@ import { LanguageId, LanguageSetting, ResolvedLanguage, resolveLanguage, vscodeL
 import { Lease } from './lease'
 import { NativeViews, registerNativeViews } from './nativeViews'
 import { effectivePace, paceVerdict, windowElapsed } from './pace'
+import { PROMPTS_MAX, PromptOp } from './prompts'
+import { PROMPTS_FILE_NAME, PromptsHost, PromptStore } from './promptsHost'
 import { CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE, configureQuotaFiles } from './quota'
 import { QuotaHistory } from './quotaHistory'
 import { QuotaManager, QuotaOptions } from './quotaManager'
@@ -240,6 +246,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     hookMirror: path.join(storage, HOOK_MIRROR_NAME),
     // 1.8 §0a.7: the keep-warm accounting, written by the window that sent a line.
     keepWarm: path.join(storage, KEEPWARM_FILE_NAME),
+    // 1.10 §0a.1: the reader's prompt list, written only when the reader changes it.
+    prompts: path.join(storage, PROMPTS_FILE_NAME),
   }
   // 1.6 O4: the agent hook's script as the extension ships it, and the mirror file the copy in
   // globalStorage writes when Claude Code runs it — read whenever it changes, never stored.
@@ -335,6 +343,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   context.subscriptions.push({ dispose: () => keepWarm.dispose() })
   /** A keep-warm consent the activation could not ask for yet: this window was not focused. */
   let keepWarmAskPending = false
+  // 1.10 A (§0a.1): the reader's prompt list — read while the Prompts section is listed and before every
+  // operation, written only by one; nothing of it is read at activation.
+  const promptStore = new PromptStore(paths.prompts, { info: (m) => log.info(m), debug: (m) => log.debug(m), warn: (m) => log.warn(m) })
+  const prompts = new PromptsHost({ store: promptStore })
 
   const alerts = new Alerts(context.globalState, readAlertConfig(cfg), say, undefined, {
     staleAfterMs: cfg.staleAfterMinutes * 60_000,
@@ -456,6 +468,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // 1.9 A3: the dashboard's language picker — what is set and shown, what it may offer (the files on
       // disk, read once at activation) and VS Code's language for its Automatic line.
       language: { resolved: language, available: shippedLanguages, vscode: vscode.env.language },
+      // 1.10 A: the Prompts section — prompts.json is not even looked at while the section is not listed.
+      prompts: cfg.dashboard.sections.includes('prompts') ? prompts.vmInput(now) : undefined,
     })
   }
 
@@ -674,6 +688,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     }
     if (m.type === 'command') {
       void vscode.commands.executeCommand(m.id)
+      return
+    }
+    // 1.10 §0a.2: the Prompts section's operations — applied to prompts.json, answered by the next push (the
+    // list as it is now, or the flash that says why nothing was saved). No view state changes.
+    if (m.type === 'promptSave' || m.type === 'promptDelete' || m.type === 'promptMove') {
+      const op: PromptOp = m.type === 'promptSave' ? { op: 'save', id: m.id, title: m.title, text: m.text }
+        : m.type === 'promptDelete' ? { op: 'delete', id: m.id }
+          : { op: 'move', id: m.id, dir: m.dir }
+      prompts.apply(op)
+      render(true)
+      return
+    }
+    // The send path comes with P4 (§3 A3): until then a send the page asks for is dropped, and the log says
+    // so — without the entry's words.
+    if (m.type === 'promptSend') {
+      log.info('Prompts: a send was dropped (this build does not send yet).')
       return
     }
     // The gear of a section header: the settings editor, filtered to the settings that
@@ -1592,6 +1622,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       consent: t('network, write and keep-warm decisions'),
       // 1.6 P16: deleting the hook's mirror is safe, and its script is not in the list.
       hookMirror: hookMirrorNote(),
+      // 1.10 §0a.1: how many prompts the file holds — only a count, and only of a file this build can read.
+      ...promptsDetail(),
     })
     const picks: Array<vscode.QuickPickItem & { key?: StoredKey }> = items.map((i) => ({
       label: i.label,
@@ -1637,6 +1669,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     if (result.deleted.includes('mirror')) quotaMgr.clearCacheReadings()
     // 1.8 §0a.7: the keep-warm accounting goes with its file.
     if (result.deleted.includes('keepWarm')) keepWarm.forgetFile()
+    // 1.10 §0a.1: the list is the three shipped prompts again.
+    if (result.deleted.includes('prompts')) prompts.forget()
     if (result.deleted.includes('ui')) ui = defaultUiState(cfg)
     if (result.failed.length > 0) {
       void vscode.window.showWarningMessage(t('Token Pace: could not delete {0}.', result.failed.join(', ')))
@@ -1647,6 +1681,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     } else {
       render(true)
     }
+  }
+
+  /** 1.10 §0a.1: *Clear Stored Data…*'s line under `prompts.json` — `{0} prompt(s)`, or nothing for a file it cannot read. */
+  function promptsDetail(): { prompts?: string } {
+    const read = promptStore.read()
+    if (read.state === 'ok') return { prompts: t('{0} prompt(s)', read.file.prompts.length) }
+    return read.state === 'absent' ? { prompts: t('{0} prompt(s)', 0) } : {}
+  }
+
+  /**
+   * 1.10 A1 rule 8: *Restore Default Prompts* — the palette's and the Prompts section's button — appends the
+   * shipped prompts missing from the list; an edited one is not missing and stays as the reader wrote it. The
+   * answer is an information message, the reply to the reader's command.
+   */
+  function restoreDefaultPrompts(): void {
+    const r = prompts.apply({ op: 'restore' })
+    if (r.result === 'restored') {
+      void vscode.window.showInformationMessage(t('Token Pace: {0} default prompt(s) restored.', r.restored))
+    } else if (r.result === 'unchanged') {
+      void vscode.window.showInformationMessage(t('Token Pace: every default prompt is there already.'))
+    } else if (r.result === 'readOnly') {
+      void vscode.window.showInformationMessage(t('Token Pace: prompts.json cannot be read; nothing was restored.'))
+    } else if (r.result === 'full') {
+      void vscode.window.showWarningMessage(t('Token Pace: {0}', t('the list is full (at most {0} prompts)', PROMPTS_MAX)))
+    } else {
+      void vscode.window.showWarningMessage(t('Token Pace: {0}', t('prompts.json could not be written ({0})', r.error ?? 'error')))
+    }
+    render(true)
   }
 
   async function openUsagePage(arg?: unknown): Promise<void> {
@@ -1732,6 +1794,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       render(true)
     }),
     vscode.commands.registerCommand('tokenPace.setRange', setRange),
+    // 1.10 A1 rule 8 (§0b.3): the palette's and the Prompts section's restore. Arguments are ignored.
+    vscode.commands.registerCommand('tokenPace.restoreDefaultPrompts', restoreDefaultPrompts),
     // 1.8 B2 (§0b.3): the countdown's one-click cancel — and the palette's. Arguments are ignored.
     vscode.commands.registerCommand(KEEPWARM_CANCEL_COMMAND, () => {
       if (keepWarm.cancel()) render(true)

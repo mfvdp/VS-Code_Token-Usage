@@ -21,7 +21,7 @@ import { test } from 'node:test'
 import type { RunningItem } from '../src/agentTree'
 import { ConsentUi, disclosure, NetworkConsent, writeConsentDisclosure } from '../src/consent'
 import { toMarkdownSummary } from '../src/exporter'
-import { setBundle, setLocale } from '../src/i18n'
+import { setBundle, setLocale, t } from '../src/i18n'
 import {
   buildItems, previewItems, problemView, quotaTooltip, StatusTextInput, makeContext, summaryTooltip,
   tokenTooltip,
@@ -96,6 +96,9 @@ const DE: Record<string, string> = {
   'Agent hook mirror (agent-hook.jsonl)': 'Agent-Hook-Spiegeldatei (agent-hook.jsonl)',
   'The hook writes it again on its next call. Its script, agent-hook.js, stays while the hook is installed and goes with the extension\'s storage when Token Pace is uninstalled.':
     'Der Hook schreibt sie beim nächsten Aufruf neu. Sein Skript, agent-hook.js, bleibt, solange der Hook eingerichtet ist, und wird mit dem Erweiterungsspeicher gelöscht, wenn Token Pace deinstalliert wird.',
+  // 1.10 §0a.1: the prompt list in the delete list — its label, and the count under it.
+  'Prompts (prompts.json)': 'Prompts (prompts.json)',
+  '{0} prompt(s)': '{0} Prompt(s)',
 }
 
 /** The seam is module state; every test that changes it puts it back. */
@@ -295,7 +298,7 @@ test('the write disclosure and the stored-data labels follow the bundle', () => 
   const paths = {
     state: '/nowhere/state.json', quota: '/nowhere/quota.json', history: '/nowhere/h.json',
     leader: '/nowhere/leader.json', mirror: '/nowhere/m.json', hookMirror: '/nowhere/agent-hook.jsonl',
-    keepWarm: '/nowhere/keepwarm.json',
+    keepWarm: '/nowhere/keepwarm.json', prompts: '/nowhere/prompts.json',
   }
   const empty: MementoLike = { get: <T>(_k: string, d: T): T => d, update: () => Promise.resolve() }
   const items = german(() => inventory(paths, empty, { hookMirror: hookMirrorNote() }))
@@ -305,6 +308,9 @@ test('the write disclosure and the stored-data labels follow the bundle', () => 
   assert.equal(hook?.label, 'Agent-Hook-Spiegeldatei (agent-hook.jsonl)')
   assert.equal(hook?.detail, 'Der Hook schreibt sie beim nächsten Aufruf neu. Sein Skript, agent-hook.js, bleibt, solange der Hook eingerichtet ist, und wird mit dem Erweiterungsspeicher gelöscht, wenn Token Pace deinstalliert wird.')
   assert.equal(labelOf('hookMirror'), 'Agent hook mirror (agent-hook.jsonl)')
+  // 1.10 §0a.1: the prompt list — its file name stays as it is on disk, and „Prompts" is the German word too.
+  assert.equal(items.find((i) => i.key === 'prompts')?.label, 'Prompts (prompts.json)')
+  assert.equal(german(() => t('{0} prompt(s)', 3)), '3 Prompt(s)')
 
   const warnings = german(() => [deleteWarning(), bridgeBlocksDelete()])
   assert.match(warnings[0], /^Der Token-Snapshot wird aus den Transkriptdateien/)

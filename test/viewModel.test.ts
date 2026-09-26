@@ -35,6 +35,7 @@ import { ROOT, rawManifest } from './helpers/nls'
 import { readFileSync } from 'node:fs'
 import { resetTimeMemos } from '../src/time'
 import { PRICES_CHECKED_LATER, resetPriceMemos } from '../src/prices'
+import type { PromptsRead } from '../src/prompts'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -707,13 +708,17 @@ test('parseWebviewMessage drops everything else', () => {
   for (const raw of bad) assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw) ?? 'undefined')
 })
 
-test('parseWebviewMessage keeps the command allow-list to twelve harmless commands', () => {
+test('parseWebviewMessage keeps the command allow-list to thirteen harmless commands', () => {
   // Eleven, not nine: the empty quota state offers the two ways to get a reading, and both
   // of those commands ask before they act — connecting the status line goes through its own
   // write consent and writes its own backup. Twelve since 1.6 (D11): the details' Copy ID
   // copies the id the panel already shows and takes no argument the page could choose.
-  assert.equal(WEBVIEW_COMMANDS.length, 12)
+  // Thirteen since 1.10 (P3, §0a.2, pinned and changed): the Prompts section's restore button — it brings
+  // back only the shipped prompts missing from the reader's list, writes nothing when none is, and takes no
+  // argument.
+  assert.equal(WEBVIEW_COMMANDS.length, 13)
   assert.equal(WEBVIEW_COMMANDS.includes('tokenPace.copyAgentId'), true)
+  assert.equal(WEBVIEW_COMMANDS.includes('tokenPace.restoreDefaultPrompts'), true)
   for (const id of WEBVIEW_COMMANDS) {
     assert.deepEqual(parseWebviewMessage({ type: 'command', id }), { type: 'command', id })
     assert.match(id, /^tokenPace\./)
@@ -2988,4 +2993,183 @@ test('parseWebviewMessage takes a language choice only as auto or a registry id,
   // It changes no UI state: the reducer hands the very same object back (nothing to persist).
   const ui = defaultUiState(makeConfig())
   assert.equal(applyMessage(ui, { type: 'setLanguage', id: 'de' }), ui)
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 A (P3): the Prompts section's plumbing, its four messages and its view model
+// ---------------------------------------------------------------------------
+
+test('the four prompt messages pass by their shapes; an id, a title, a text or a direction out of shape drops the message; a send never carries a text (1.10 §0a.2)', () => {
+  const ok: Array<[unknown, unknown]> = [
+    [{ type: 'promptSend', id: 's-status' }, { type: 'promptSend', id: 's-status' }],
+    [{ type: 'promptSend', id: 'u-3k9x0a2b' }, { type: 'promptSend', id: 'u-3k9x0a2b' }],
+    [{ type: 'promptSave', id: null, title: 'Review', text: 'Review the last diff.' }, { type: 'promptSave', id: null, title: 'Review', text: 'Review the last diff.' }],
+    [{ type: 'promptSave', id: 's-stop', title: '', text: '' }, { type: 'promptSave', id: 's-stop', title: '', text: '' }],
+    [{ type: 'promptSave', id: 'u-3k9x0a2b', title: 'a'.repeat(80), text: 'b'.repeat(2000) }, { type: 'promptSave', id: 'u-3k9x0a2b', title: 'a'.repeat(80), text: 'b'.repeat(2000) }],
+    [{ type: 'promptDelete', id: 's-keepwarm' }, { type: 'promptDelete', id: 's-keepwarm' }],
+    [{ type: 'promptMove', id: 's-stop', dir: 'up' }, { type: 'promptMove', id: 's-stop', dir: 'up' }],
+    [{ type: 'promptMove', id: 'u-3k9x0a2b', dir: 'down' }, { type: 'promptMove', id: 'u-3k9x0a2b', dir: 'down' }],
+  ]
+  for (const [raw, want] of ok) assert.deepEqual(parseWebviewMessage(raw), want, JSON.stringify(raw))
+  const bad: unknown[] = [
+    { type: 'promptSend' }, { type: 'promptSend', id: 's-other' }, { type: 'promptSend', id: 'u-ABCDEFGH' }, { type: 'promptSend', id: '../x' },
+    { type: 'promptSend', id: 7 }, { type: 'promptSend', id: null },
+    { type: 'promptSave', title: 't', text: 'x' }, { type: 'promptSave', id: 's-other', title: 't', text: 'x' },
+    { type: 'promptSave', id: null, title: 'a'.repeat(81), text: 'x' }, { type: 'promptSave', id: null, title: 't', text: 'a'.repeat(2001) },
+    { type: 'promptSave', id: null, title: 7, text: 'x' }, { type: 'promptSave', id: null, title: 't' },
+    { type: 'promptDelete', id: 'u-abc' }, { type: 'promptDelete' },
+    { type: 'promptMove', id: 's-stop', dir: 'left' }, { type: 'promptMove', id: 's-stop' }, { type: 'promptMove', id: 'x', dir: 'up' },
+  ]
+  for (const raw of bad) assert.equal(parseWebviewMessage(raw), null, JSON.stringify(raw))
+  // The one that matters: a page that posts a text with a send cannot make it typed — the parsed message has
+  // no text (a parser that spread the raw message would keep it).
+  assert.deepEqual(parseWebviewMessage({ type: 'promptSend', id: 's-status', text: 'rm -rf ~', title: 'x', extra: 1 }), { type: 'promptSend', id: 's-status' })
+  assert.deepEqual(parseWebviewMessage({ type: 'promptMove', id: 's-status', dir: 'down', text: 'x' }), { type: 'promptMove', id: 's-status', dir: 'down' })
+  assert.deepEqual(parseWebviewMessage({ type: 'promptSave', id: null, title: 't', text: 'x', id2: 'u-3k9x0a2b' }), { type: 'promptSave', id: null, title: 't', text: 'x' })
+  // No prompt message changes the view state: nothing to persist.
+  const ui = defaultUiState(cfg)
+  for (const [, m] of ok) assert.equal(applyMessage(ui, m as never), ui)
+})
+
+test('the Prompts section\'s plumbing: a section of the config, the fold list, the fragments, the gear and the manifest — never in the default, never Claude-only (1.10 §3 A7 test 1)', () => {
+  // dashboard.ts loads vscode: its table is read from the source here (test/dashboard.test.ts loads it with a stub).
+  const { SECTION_SETTINGS } = require('../src/sectionSettings') as typeof import('../src/sectionSettings')
+  assert.equal(DASHBOARD_SECTION_KEYS[DASHBOARD_SECTION_KEYS.length - 1], 'prompts')
+  assert.deepEqual(makeConfig({ 'tokenPace.dashboard.sections': ['prompts', 'quota'] }).dashboard.sections, ['prompts', 'quota'])
+  assert.equal(makeConfig().dashboard.sections.includes('prompts'), false)
+  assert.match(readFileSync(path.join(ROOT, 'src', 'dashboard.ts'), 'utf8'), /\n  prompts: \['prompts'\],\n/)
+  assert.deepEqual(SECTION_SETTINGS.prompts, ['tokenPace.dashboard.sections'])
+  const manifest = rawManifest as { contributes: { configuration: Array<{ properties?: Record<string, { default?: string[]; items?: { enum: string[]; enumDescriptions: string[] } }> }> } }
+  const p = manifest.contributes.configuration.map((g) => g.properties?.['tokenPace.dashboard.sections']).find((x) => x !== undefined)
+  assert.ok(p?.items)
+  const at = p.items.enum.indexOf('prompts')
+  assert.equal(at, p.items.enum.length - 1)
+  assert.equal(p.items.enumDescriptions[at], '%config.dashboard.sections.enum.prompts%')
+  assert.equal(p.default?.includes('prompts'), false)
+  // Claude Code and Codex alike: neither the page's nor the host's Claude-only list names it.
+  const page = readFileSync(path.join(ROOT, 'src', 'webview', 'main.ts'), 'utf8')
+  const host = readFileSync(path.join(ROOT, 'src', 'dashboard.ts'), 'utf8')
+  assert.match(page, /const CLAUDE_ONLY_SECTIONS = \['agents', 'context'\];/)
+  assert.match(host, /const CLAUDE_ONLY_KEYS: readonly string\[\] = \['agents', 'context'\]/)
+})
+
+test('vm.prompts is null while the section is not listed, whatever the host passed; listed, it is the list (1.10 §3 A7 test 2)', () => {
+  const input = { read: { state: 'absent' } as const, flash: null }
+  assert.equal(buildViewModel(makeInput()).prompts, null)
+  assert.equal(buildViewModel({ ...makeInput(), prompts: input }).prompts, null, 'a section not listed was built')
+  const listed = makeConfig({ 'tokenPace.dashboard.sections': ['prompts', 'quota'] })
+  assert.equal(buildViewModel(makeInput({ cfg: listed })).prompts, null, 'no input, no section — nothing was read')
+  const vm = buildViewModel({ ...makeInput({ cfg: listed }), prompts: input })
+  assert.deepEqual(vm.prompts, {
+    items: [
+      { id: 's-status', title: 'Status table', text: 'Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.', shipped: true, edited: false, command: false },
+      { id: 's-keepwarm', title: 'Keep the cache warm', text: 'Ignore this message. No action. No response.', shipped: true, edited: false, command: false },
+      { id: 's-stop', title: 'Stop after this task', text: 'Stop after the current task and do not start any new work.', shipped: true, edited: false, command: false },
+    ],
+    flash: null, canAdd: true, restorable: 0, readOnly: null, limits: { title: 80, text: 2000, max: 50 },
+  })
+})
+
+test('PromptsVm under English, German and a synthetic French bundle: the shipped words follow, an edited entry does not, the keep-warm text is English in all three; a command entry, the restore count, the full list (1.10 §3 A2 tests)', () => {
+  const { setBundle, setLocale } = require('../src/i18n') as typeof import('../src/i18n')
+  const german = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const french = { 'Status table': 'Tableau d’avancement', 'Stop after this task': 'Arrêter après cette tâche', 'Ignore this message. No action. No response.': 'NON' }
+  const cfgP = makeConfig({ 'tokenPace.dashboard.sections': ['prompts'] })
+  const read: PromptsRead = {
+    state: 'ok', file: {
+      v: 1, prompts: [
+        { id: 's-status' }, { id: 's-keepwarm', title: 'Keep warm (loop)', text: '/loop 30m Ignore this message. No action. No response.' },
+        { id: 'u-3k9x0a2b', title: 'Review', text: 'Review the last diff for correctness.' },
+      ],
+    },
+  }
+  const build = (bundle: Record<string, string> | undefined): any => {
+    try {
+      setBundle(bundle)
+      setLocale(bundle === undefined ? undefined : 'de')
+      return buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read, flash: null } }).prompts
+    } finally {
+      setBundle(undefined)
+      setLocale(undefined)
+    }
+  }
+  const rows = (vm: any): unknown[] => vm.items.map((i: any) => [i.id, i.title, i.text, i.shipped, i.edited, i.command])
+  const loop = ['s-keepwarm', 'Keep warm (loop)', '/loop 30m Ignore this message. No action. No response.', true, true, true]
+  const review = ['u-3k9x0a2b', 'Review', 'Review the last diff for correctness.', false, false, false]
+  assert.deepEqual(rows(build(undefined)), [['s-status', 'Status table', 'Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.', true, false, false], loop, review])
+  assert.deepEqual(rows(build(german)), [['s-status', 'Zwischenstand als Tabelle', 'Zeige den aktuellen Zwischenstand in einer übersichtlichen Tabelle an. Spalten: Schritt/Status | Beschreibung | Model | Dauer | voraussichtlich fertig.', true, false, false], loop, review])
+  assert.deepEqual(rows(build(french))[0], ['s-status', 'Tableau d’avancement', 'Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.', true, false, false])
+  // The keep-warm text, unedited, is the line in every language.
+  for (const bundle of [undefined, german, french]) {
+    try {
+      setBundle(bundle)
+      const vm = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: { state: 'absent' }, flash: null } }).prompts!
+      assert.equal(vm.items[1].text, 'Ignore this message. No action. No response.')
+    } finally {
+      setBundle(undefined)
+    }
+  }
+  assert.equal(build(undefined).restorable, 1)
+  // At 50 entries no new one; the list still shows.
+  const fifty: PromptsRead = { state: 'ok', file: { v: 1, prompts: Array.from({ length: 50 }, (_, i) => ({ id: `u-${String(i).padStart(8, '0')}`, title: 't', text: 'x' })) } }
+  const full = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: fifty, flash: null } }).prompts!
+  assert.equal(full.canAdd, false)
+  assert.equal(full.restorable, 3)
+})
+
+test('the read-only box and the flash of a refused change say why, in English and in German (1.10 §3 A1 rule 5, §3 A3 rule 9)', () => {
+  const { setBundle, setLocale } = require('../src/i18n') as typeof import('../src/i18n')
+  const german = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const cfgP = makeConfig({ 'tokenPace.dashboard.sections': ['prompts'] })
+  const vmOf = (prompts: any): any => buildViewModel({ ...makeInput({ cfg: cfgP }), prompts }).prompts
+  const unreadable = vmOf({ read: { state: 'unreadable', kind: 'json' }, flash: null })
+  assert.equal(unreadable.readOnly, 'prompts.json could not be read (json). The shipped prompts are shown, and nothing is saved until the file is fixed or deleted (Token Pace: Clear Stored Data…).')
+  assert.equal(unreadable.canAdd, false)
+  assert.equal(unreadable.restorable, 0)
+  assert.deepEqual(unreadable.items.map((i: any) => [i.id, i.edited]), [['s-status', false], ['s-keepwarm', false], ['s-stop', false]])
+  assert.equal(vmOf({ read: { state: 'newer', v: 2 }, flash: null }).readOnly, 'prompts.json was written by a newer version of Token Pace; the shipped prompts are shown and the file is not changed.')
+  const flashes: Array<[string, string | null, string, string]> = [
+    ['titleEmpty', null, 'Not saved: The title is empty.', 'Nicht gespeichert: Der Titel ist leer.'],
+    ['textEmpty', null, 'Not saved: The text is empty.', 'Nicht gespeichert: Der Text ist leer.'],
+    ['textBang', null, 'Not saved: A prompt that starts with an exclamation mark would run a shell command in Claude Code.',
+      'Nicht gespeichert: Ein Prompt, der mit einem Ausrufezeichen beginnt, würde in Claude Code einen Shell-Befehl ausführen.'],
+    ['full', null, 'Not saved: the list is full (at most 50 prompts)', 'Nicht gespeichert: die Liste ist voll (höchstens 50 Prompts)'],
+    ['notWritten', 'EACCES', 'Not saved: prompts.json could not be written (EACCES)', 'Nicht gespeichert: prompts.json konnte nicht geschrieben werden (EACCES)'],
+    ['readOnly', 'newer', 'Not saved: prompts.json was written by a newer version of Token Pace; the shipped prompts are shown and the file is not changed.',
+      'Nicht gespeichert: prompts.json wurde von einer neueren Version von Token Pace geschrieben; die mitgelieferten Prompts werden angezeigt, und die Datei wird nicht verändert.'],
+    ['readOnly', 'shape', 'Not saved: prompts.json could not be read (shape). The shipped prompts are shown, and nothing is saved until the file is fixed or deleted (Token Pace: Clear Stored Data…).',
+      'Nicht gespeichert: prompts.json konnte nicht gelesen werden (shape). Die mitgelieferten Prompts werden angezeigt, und nichts wird gespeichert, bis die Datei repariert oder gelöscht ist (Token Pace: Gespeicherte Daten löschen…).'],
+  ]
+  for (const [failure, error, en, de] of flashes) {
+    assert.deepEqual(vmOf({ read: { state: 'absent' }, flash: { failure, error } }).flash, { text: en, ok: false }, failure)
+    try {
+      setBundle(german)
+      setLocale('de')
+      assert.deepEqual(vmOf({ read: { state: 'absent' }, flash: { failure, error } }).flash, { text: de, ok: false }, `${failure} (de)`)
+    } finally {
+      setBundle(undefined)
+      setLocale(undefined)
+    }
+  }
+  // No word of the section contains an exclamation mark (the `!` rule is worded) — in either language.
+  for (const [, , en, de] of flashes) assert.equal(en.includes('!') || de.includes('!'), false)
+})
+
+test('the text views and the summary print nothing of the Prompts section: a title and a text stay on the page (1.10 §3.0 e, §0a.1)', () => {
+  const { quickPickItems } = require('../src/textViews') as typeof import('../src/textViews')
+  const { toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
+  const cfgP = makeConfig({ 'tokenPace.dashboard.sections': ['prompts', 'quota', 'summary', 'kpis', 'tokens', 'dataQuality'] })
+  const read: PromptsRead = { state: 'ok', file: { v: 1, prompts: [{ id: 'u-3k9x0a2b', title: 'synthetic-prompt-title-123', text: 'synthetic-prompt-text-456' }] } }
+  const vm = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read, flash: null } })
+  assert.equal(vm.prompts?.items[0].title, 'synthetic-prompt-title-123', 'the page\'s payload holds the words (expected)')
+  const outputs: Array<[string, string]> = [
+    ['markdown', markdownDocument(vm)],
+    ['quick pick', JSON.stringify(quickPickItems(vm))],
+    ['summary', toMarkdownSummary(vm)],
+  ]
+  // The status bar is built from the quotas and the aggregator, never from the view model (statusText.ts
+  // `StatusTextInput`), so it has no way to the list at all.
+  for (const [what, text] of outputs) {
+    for (const secret of ['synthetic-prompt-title-123', 'synthetic-prompt-text-456']) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+  }
 })

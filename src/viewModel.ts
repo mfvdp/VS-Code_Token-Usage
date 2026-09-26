@@ -39,6 +39,9 @@ import {
 } from './pace'
 import { explainWindow, WindowExplain } from './paceExplain'
 import { PRICES_AS_OF, PRICES_CHECKED_LATER, PricingOptions, isCustomPricing, normalizeModel } from './prices'
+import {
+  PROMPT_TEXT_MAX_CHARS, PROMPT_TITLE_MAX_CHARS, PROMPTS_MAX, PromptOpFailure, PromptsRead, isPromptId, promptEntries,
+} from './prompts'
 import { promptCacheText } from './promptCache'
 import { ageMinutes, compact, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
@@ -197,6 +200,9 @@ export const WEBVIEW_COMMANDS = [
   // The details panel's Copy ID button: it copies the id of the node whose details are open —
   // an identifier the panel already shows — and takes no argument the page could choose.
   'tokenPace.copyAgentId',
+  // 1.10 A1 rule 8 (§0a.2): the Prompts section's restore button — the palette's command, which brings back
+  // the shipped prompts missing from the list and takes no argument.
+  'tokenPace.restoreDefaultPrompts',
 ] as const
 export type WebviewCommandId = (typeof WEBVIEW_COMMANDS)[number]
 
@@ -227,6 +233,16 @@ export type WebviewMessage =
    * writes it into the user settings (`tokenPace.language`); it is no view state and changes no `UiState`.
    */
   | { type: 'setLanguage'; id: LanguageSetting }
+  /**
+   * 1.10 §0a.2: the Prompts section's four actions. Each names an entry by its id (PROMPT_ID_RE; a save's
+   * `null` is a new entry). A send never carries a text: the host types the text it reads from prompts.json
+   * (or the shipped words) for that id, so no page can make Token Pace type anything but an entry of the
+   * reader's own list. A save's title and text are cleaned again by the host before they are stored.
+   */
+  | { type: 'promptSend'; id: string }
+  | { type: 'promptSave'; id: string | null; title: string; text: string }
+  | { type: 'promptDelete'; id: string }
+  | { type: 'promptMove'; id: string; dir: 'up' | 'down' }
 
 /**
  * The sections that can be folded. Exactly the keys `dashboard.sections` knows: a fold is a
@@ -236,6 +252,8 @@ export type WebviewMessage =
 export const DASHBOARD_SECTION_KEYS = [
   'quota', 'agents', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap', 'hours',
   'records', 'tools', 'budget', 'history', 'projects', 'sessions', 'dataQuality',
+  // 1.10 A: the reader's prompts — offered, never in the default.
+  'prompts',
   // `satisfies`, so a key that is not a section of the config is a compile error here; the
   // other direction — a new section that nobody may fold — is asserted in the test.
 ] as const satisfies readonly DashboardSection[]
@@ -392,6 +410,21 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     // leads to a settings write, so it carries nothing but the id.
     case 'setLanguage':
       return m.id === 'auto' || isLanguageId(m.id) ? { type: 'setLanguage', id: m.id } : null
+    // 1.10 §0a.2: the four prompt messages, each built from its own fields only — never the raw message
+    // spread: a `text` on a send is dropped with everything else the shape does not name. A title or a text
+    // longer than the page's `maxlength` (in UTF-16 code units, as the page counts) drops the message whole.
+    case 'promptSend':
+      return isPromptId(m.id) ? { type: 'promptSend', id: m.id } : null
+    case 'promptSave': {
+      if (m.id !== null && !isPromptId(m.id)) return null
+      if (typeof m.title !== 'string' || m.title.length > PROMPT_TITLE_MAX_CHARS) return null
+      if (typeof m.text !== 'string' || m.text.length > PROMPT_TEXT_MAX_CHARS) return null
+      return { type: 'promptSave', id: m.id, title: m.title, text: m.text }
+    }
+    case 'promptDelete':
+      return isPromptId(m.id) ? { type: 'promptDelete', id: m.id } : null
+    case 'promptMove':
+      return isPromptId(m.id) && (m.dir === 'up' || m.dir === 'down') ? { type: 'promptMove', id: m.id, dir: m.dir } : null
     default:
       return null
   }
@@ -883,6 +916,48 @@ export interface VmInput {
    * explicit language, whose `resolved.auto` is null; absent → the resolved `auto`'s, else English.
    */
   language?: { resolved: ResolvedLanguage; available: readonly LanguageId[]; vscode?: string }
+  /**
+   * 1.10 A (P3): what the Prompts section is built from — `PromptsHost.vmInput(now)`. Given only while the
+   * section is listed in `tokenPace.dashboard.sections` (extension.ts): absent, nothing of prompts.json is
+   * read, and `ViewModel.prompts` is null.
+   */
+  prompts?: PromptsVmInput
+}
+
+/** 1.10 A (P3): the store as read at this build, and the last operation's refusal while it is shown. */
+export interface PromptsVmInput {
+  read: PromptsRead
+  /** Why the last operation was not saved, while PROMPT_FLASH_MS has not passed; `error` the write's error code. */
+  flash: { failure: PromptOpFailure; error: string | null } | null
+}
+
+/** 1.10 A2: one entry of the Prompts section. */
+export interface PromptItemVm {
+  id: string
+  title: string
+  text: string
+  shipped: boolean
+  /** A shipped entry whose words are the reader's own. */
+  edited: boolean
+  /** The text starts with `/` — a slash command, set in the editor font. */
+  command: boolean
+}
+
+/**
+ * 1.10 A (P3): the Prompts section — the list, the refused operation's flash, the read-only box and the
+ * limits the page's fields keep. P4 adds the intro and the target line (§2.6).
+ */
+export interface PromptsVm {
+  items: PromptItemVm[]
+  /** §3 A3 rule 9: the last operation's outcome — "Not saved: …" —, or null. */
+  flash: { text: string; ok: boolean } | null
+  /** A new entry may be added: the list can be changed and has fewer than PROMPTS_MAX entries. */
+  canAdd: boolean
+  /** Shipped entries missing from the list — the restore button shows when > 0. */
+  restorable: number
+  /** The unreadable or newer file's box, or null. */
+  readOnly: string | null
+  limits: { title: number; text: number; max: number }
 }
 
 /** 1.9 A3.3: one entry of the language picker's list. */
@@ -995,6 +1070,8 @@ export interface ViewModel {
   preview: boolean
   /** 1.9 A3: the language picker beside the provider switch. */
   language: LanguageVm
+  /** 1.10 A: the Prompts section — null while the section is not listed (nothing of prompts.json is read then). */
+  prompts: PromptsVm | null
 }
 
 // ---------------------------------------------------------------------------
@@ -2134,6 +2211,7 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     footnotes: [],
     preview: input.preview === true,
     language: languageVm(input.language),
+    prompts: input.prompts !== undefined && cfg.dashboard.sections.includes('prompts') ? promptsVm(input.prompts) : null,
   }
 
   vm.digest = digest(vm)
@@ -2311,6 +2389,51 @@ function calibrationText(c: Calibration | null): string {
  * *Automatic* line says what `auto` would show: VS Code's language by its own name, or that Token Pace has no
  * translation for it (its tag, held to `[a-z0-9-]{1,20}`), so English.
  */
+/**
+ * 1.10 A (P3): the Prompts section as the page draws it. An unedited shipped entry's words are built now, in
+ * the language of now (`promptEntries`); an edited one is the reader's; the keep-warm entry's text is
+ * KEEP_WARM_LINE in every language. Read-only (a file that cannot be read or a newer build's): the three
+ * shipped entries, no edit, the box that says why.
+ */
+function promptsVm(input: PromptsVmInput): PromptsVm {
+  const { entries, writable, restorable } = promptEntries(input.read)
+  const read = input.read
+  const readOnly = read.state === 'unreadable' ? readOnlyText(read.kind) : read.state === 'newer' ? readOnlyText('newer') : null
+  const f = input.flash
+  return {
+    items: entries.map((e) => ({
+      id: e.id, title: e.title, text: e.text, shipped: e.shipped !== null, edited: e.edited, command: e.text.startsWith('/'),
+    })),
+    flash: f === null ? null : { text: t('Not saved: {0}', promptFailureText(f.failure, f.error)), ok: false },
+    canAdd: writable && entries.length < PROMPTS_MAX,
+    restorable,
+    readOnly,
+    limits: { title: PROMPT_TITLE_MAX_CHARS, text: PROMPT_TEXT_MAX_CHARS, max: PROMPTS_MAX },
+  }
+}
+
+/** §3 A1 rule 5: the read-only box — a file of a newer build, or one that cannot be read (`kind` the reason's code). */
+function readOnlyText(kind: string): string {
+  return kind === 'newer'
+    ? t('prompts.json was written by a newer version of Token Pace; the shipped prompts are shown and the file is not changed.')
+    : t('prompts.json could not be read ({0}). The shipped prompts are shown, and nothing is saved until the file is fixed or deleted (Token Pace: Clear Stored Data…).', kind)
+}
+
+/**
+ * §3 A3 rule 9: why an operation was not saved, in words — the cleaning's, the full list's, the write's (with
+ * its error code), the read-only box's (with the file's state when the operation came).
+ */
+export function promptFailureText(failure: PromptOpFailure, error: string | null): string {
+  switch (failure) {
+    case 'titleEmpty': return t('The title is empty.')
+    case 'textEmpty': return t('The text is empty.')
+    case 'textBang': return t('A prompt that starts with an exclamation mark would run a shell command in Claude Code.')
+    case 'full': return t('the list is full (at most {0} prompts)', PROMPTS_MAX)
+    case 'notWritten': return t('prompts.json could not be written ({0})', error ?? 'error')
+    default: return readOnlyText(error ?? 'io')
+  }
+}
+
 function languageVm(input: VmInput['language']): LanguageVm {
   const resolved: ResolvedLanguage = input?.resolved ?? resolveLanguage('auto', 'en', ['en'])
   const listed = input?.available ?? ['en']

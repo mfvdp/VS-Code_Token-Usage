@@ -234,7 +234,8 @@ activation replaces with the shipped one while a copy is there, the copy of the 
 script, `statusline-bridge.js`, that *Connect Claude Status Line…* puts there and that activation
 replaces with the shipped one when the two differ, and the lines the hook script
 appends to `agent-hook.jsonl` while you have it installed, the keep-warm accounting `keepwarm.json`
-(above) once a keep-warm line was answered, and `quota.json`, which holds the
+(above) once a keep-warm line was answered, `prompts.json` when you change the dashboard's prompt list —
+your own titles and texts, nothing else (below) —, and `quota.json`, which holds the
 readings of the quota fetch and, per provider, its last failed attempt: when it was, its kind and
 the fetch's own words — a fixed phrase with at most an HTTP status, or the Codex app-server's error
 string —, never a token, a header or an exception's text; the entry goes with the next successful
@@ -252,6 +253,16 @@ string and only while the entry still holds the command Token Pace recorded; the
 Beside them stands the one write that is no file: the opt-in keep-warm line, typed into Claude
 Code's terminal (above) — off by default as well, and never in Restricted Mode. Those are the three
 opt-ins, each behind a consent dialog of its own.
+
+**Your prompts** ([Prompts](prompts.md), 1.10) are kept in `prompts.json` in the extension's storage,
+written only when you change the list (save, delete, move, *Restore Default Prompts*) — whole, a temp
+file and then a rename — and read while the dashboard lists the Prompts section and before every
+change. Token Pace reads it back by its shape only: `v` and `prompts`, and of each entry its `id` and,
+where you wrote them, its `title` and `text`; a file of any other shape is shown as unreadable and never
+written over. The titles and texts are your data: they are shown on the dashboard and typed into the
+terminal you send one to, and they never reach the log, the diagnostics report, an export, the summary,
+the usage document or Quick Pick or the status bar. The file is not synced by VS Code's Settings Sync;
+*Clear Stored Data…* deletes it.
 
 One further write exists and is not an opt-in setting: the *Run Token Pace locally* button of
 the remote hint puts `remote.extensionKind` into your user `settings.json` — see

@@ -247,6 +247,11 @@
         "command": "tokenPace.cancelKeepWarm",
         "title": "%command.cancelKeepWarm.title%",
         "category": "%command.category%"
+      },
+      {
+        "command": "tokenPace.restoreDefaultPrompts",
+        "title": "%command.restoreDefaultPrompts.title%",
+        "category": "%command.category%"
       }
     ],
     "menus": {
@@ -867,7 +872,8 @@
                 "history",
                 "projects",
                 "sessions",
-                "dataQuality"
+                "dataQuality",
+                "prompts"
               ],
               "enumDescriptions": [
                 "%config.dashboard.sections.enum.quota%",
@@ -886,7 +892,8 @@
                 "%config.dashboard.sections.enum.history%",
                 "%config.dashboard.sections.enum.projects%",
                 "%config.dashboard.sections.enum.sessions%",
-                "%config.dashboard.sections.enum.dataQuality%"
+                "%config.dashboard.sections.enum.dataQuality%",
+                "%config.dashboard.sections.enum.prompts%"
               ]
             },
             "markdownDescription": "%config.dashboard.sections.description%"

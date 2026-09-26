@@ -31,8 +31,9 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `projects` | Per-project breakdown — needs `tokenPace.attribution` |
 | `sessions` | Per-session breakdown — needs `tokenPace.attribution: session` |
 | `dataQuality` | Roots, file counts, coverage, bucket counts, the subagent tokens of the last seven days counted two ways — `Agent entries, last 7 days` (every agent of the tree at its whole usage, as its entry keeps it) against `Subagent tokens in the hour buckets, last 7 days` (the hour of each reply, `≈` once those hours reach below the roll-up), under them the note that *the two differ by construction: an agent entry keeps a whole agent, a bucket the hour of each reply* —, retention, quota history size, every source with its age or its failure, drift, calibration, bridge state, consent, role — plus buttons for the export and diagnostics commands. Under one provider the per-provider parts follow the switch — the sources, drift and calibration of that provider, the two subagent lines only under `Claude Code` and `All` — and the lines about the machine (roots, files, coverage, buckets, snapshot, retention, history, consent, role, bridge, version) stay whole |
+| `prompts` | Your own prompts for Claude Code and Codex — at first the three Token Pace ships, *Status table*, *Keep the cache warm* and *Stop after this task*: a double-click on one types its text into the terminal of this window that runs Claude Code or Codex and presses Enter, a click opens its title and text to edit. Off by default; not filtered by the range or a chip, and shown whatever the provider switch shows. The list lives in `prompts.json` in the extension's storage and nowhere else — see [Prompts](prompts.md) |
 
-Defaults omit `context`, `records`, `tools`, `budget`, `history`, `projects` and `sessions`; `projects` and `sessions` stay
+Defaults omit `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions` and `prompts`; `projects` and `sessions` stay
 empty until attribution is switched on and say so instead of showing an empty table, and
 `context` says how a reading could be had instead of inventing one.
 

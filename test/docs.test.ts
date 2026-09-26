@@ -141,6 +141,9 @@ const doc = {
   promptCache: readDoc('docs/prompt-cache.md'),
   // 1.9 P3 (§3 A7): the languages page — the picker, `auto`, what switches, the table, the notation, the statement.
   languages: readDoc('docs/languages.md'),
+  // 1.10 P3 (§3 A7): the prompts page — adding the section, the list, where the prompts are kept; P4 and P5 add
+  // sending and editing.
+  prompts: readDoc('docs/prompts.md'),
 } as const
 const DOCS = [README, STATES, ...Object.values(doc)].join('\n')
 
@@ -833,8 +836,9 @@ test('the pages list what Clear Stored Data offers — the agent hook\'s mirror 
   const para = exp.slice(exp.indexOf('**Clear Stored Data…**'), exp.indexOf('**Uninstalling**'))
   assert.ok(para.length > 100, 'docs/export.md has no Clear Stored Data paragraph')
   // Every file the list names by its file name is named on the page, in backticks.
-  // 1.8 P10 (§0a.7, pinned and changed): the keep-warm accounting joins the list.
-  const keys: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm']
+  // 1.8 P10 (§0a.7, pinned and changed): the keep-warm accounting joins the list. 1.10 P3 (§0a.1, pinned and
+  // changed): and the prompt list.
+  const keys: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts']
   for (const key of keys) {
     const file = /\(([^)]+)\)$/.exec(labelOf(key))?.[1]
     assert.ok(file, `the list's label of ${key} names no file`)
@@ -2703,8 +2707,12 @@ test('the pages say what 1.8 P11 checked against the code: the keep-warm focus r
   assert.equal(flatText(doc.windows).includes('the two opt-in writes are disabled'), false)
   assert.ok(flatText(README).includes('three opt-ins, each behind its own consent dialog, all three off by default and off in Restricted Mode'))
   assert.equal(flatText(README).includes('except the two opt-ins, each behind'), false)
-  assert.ok(nlsEn['capabilities.untrustedWorkspaces'].includes('All three are disabled in Restricted Mode.'))
-  assert.ok(nlsDe['capabilities.untrustedWorkspaces'].includes('Alle drei sind im eingeschränkten Modus abgeschaltet.'))
+  // 1.10 P3 (§3 A6, pinned and changed): the manifest's statement names the two things Token Pace types —
+  // the keep-warm line and a prompt you double-click — and that Restricted Mode disables all of them.
+  assert.ok(nlsEn['capabilities.untrustedWorkspaces'].includes('It types into a terminal in two cases only: the opt-in keep-warm line into Claude Code\'s terminal, and a prompt of the dashboard\'s Prompts section when you double-click it. All of these are disabled in Restricted Mode.'))
+  assert.ok(nlsDe['capabilities.untrustedWorkspaces'].includes('In ein Terminal tippt es nur in zwei Fällen: die optionale Warmhalte-Zeile in das Terminal von Claude Code und einen Prompt aus dem Abschnitt Prompts des Dashboards, wenn Sie ihn doppelt anklicken. All das ist im eingeschränkten Modus abgeschaltet.'))
+  assert.equal(nlsEn['capabilities.untrustedWorkspaces'].includes('the one thing it ever types'), false)
+  assert.equal(nlsDe['capabilities.untrustedWorkspaces'].includes('das Einzige, was es je tippt'), false)
   assert.ok(flatText(doc.privacy).includes('Those are the three opt-ins, each behind a consent dialog of its own.'))
   assert.ok(flatText(doc.quotaSources).includes('and so is the third opt-in, the [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)'))
   // The countdown item on the status-bar page, the notes in the dashboard's quota row.
@@ -3273,4 +3281,53 @@ test('the German counterpart of every interface text the pages quote for the lan
   assert.ok(lang.includes(`*${GERMAN['Automatic — as VS Code ({0})'].replace('{0}', 'Deutsch')}*`), 'docs/languages.md does not quote the German Automatic line')
   // The German manifest keeps the statement and names the display language as the glossary does.
   assert.ok(nlsDe['config.language.description'].includes('Anzeigesprache konfigurieren') && nlsDe['config.language.enum.auto'].startsWith('Der Anzeigesprache von VS Code folgen'))
+})
+
+/**
+ * 1.10 P3 (§3 A1, A7, §0a.1): the prompts page says what the code does — the three shipped prompts word for word
+ * as the code ships them (and their German titles as the German bundle has them), the limits, the ids, the
+ * file's shape and where it is never written to —, and the pages around it name the section, the command and
+ * the file.
+ */
+test('the prompts page quotes the shipped prompts, the limits and the file as the code has them, and says where a prompt never goes (1.10 P3)', () => {
+  const { PROMPT_TEXT_MAX_CHARS, PROMPT_TITLE_MAX_CHARS, PROMPTS_FILE_MAX_BYTES, PROMPTS_MAX, SHIPPED_PROMPTS, SHIPPED_PROMPT_KEY, shippedPromptText, shippedPromptTitle } =
+    require('../src/prompts') as typeof import('../src/prompts')
+  const page = doc.prompts
+  const flat = flatText(page)
+  assert.ok(page.startsWith('<!--') && page.includes('\n# Prompts\n'), 'docs/prompts.md does not open with its title')
+  assert.ok(flat.includes('The Prompts section of the dashboard is your own list of prompts for Claude Code and Codex. A double-click on a prompt types its text into the VS Code terminal that runs Claude Code or Codex and presses Enter — always on your click, never on its own.'))
+  for (const heading of ['## Adding the section', '## The list', '## Where the prompts are kept']) assert.ok(page.includes(`\n${heading}\n`), `docs/prompts.md has no ${heading}`)
+  // The three shipped prompts, in their order, word for word — the table escapes the status text's pipes.
+  const rows = page.split('\n').filter((l) => /^\| (Status table|Keep the cache warm|Stop after this task) \|/.test(l))
+  assert.deepEqual(rows, SHIPPED_PROMPTS.map((id) => `| ${shippedPromptTitle(id)} | \`${shippedPromptText(id).replace(/\|/g, '\\|')}\` |`))
+  // Their German titles, as the German bundle says them; the keep-warm text stays English.
+  for (const id of ['status', 'keepWarm', 'stop'] as const) assert.ok(flat.includes(`*${GERMAN[shippedPromptTitle(id)]}*`), `docs/prompts.md does not quote the German title of ${id}`)
+  // The limits, the ids and the file's size bound as the code has them.
+  assert.deepEqual([PROMPTS_MAX, PROMPT_TITLE_MAX_CHARS, PROMPT_TEXT_MAX_CHARS, PROMPTS_FILE_MAX_BYTES], [50, 80, 2000, 512 * 1024])
+  assert.ok(flat.includes('a title of 1 to 80 characters and a text of 1 to 2000 characters, and the list holds at most 50 prompts'))
+  assert.ok(flat.includes('larger than 512 KiB'))
+  for (const id of SHIPPED_PROMPTS) assert.ok(page.includes(`\`${SHIPPED_PROMPT_KEY[id]}\``), `docs/prompts.md does not name ${SHIPPED_PROMPT_KEY[id]}`)
+  // The words the section and the command say, as the code says them.
+  assert.ok(flat.includes(`*${'prompts.json could not be read ({0}). The shipped prompts are shown, and nothing is saved until the file is fixed or deleted (Token Pace: Clear Stored Data…).'.replace('{0}', 'json')}*`))
+  assert.ok(flat.includes('*A prompt that starts with an exclamation mark would run a shell command in Claude Code.*'))
+  for (const said of ['*Not saved: The title is empty.*', '*Not saved: the list is full (at most 50 prompts)*', '*Not saved: prompts.json could not be written (EACCES)*',
+    '*every default prompt is there already*', '*Prompts (prompts.json)*', '`Prompts: saved a user prompt.`']) {
+    assert.ok(flat.includes(said), `docs/prompts.md does not say: ${said}`)
+  }
+  // Where a prompt never goes, and what the file never holds.
+  for (const claim of ['never in the log, the diagnostics report (not even a count), the CSV or JSON export, *Copy Usage Summary*, the usage document, the usage Quick Pick or the status bar',
+    'no time, no session, no terminal, no path, no count of sends', '`prompts.json` is not part of VS Code\'s Settings Sync, and the list has no export and no import',
+    'It is written only when you change the list', 'until your first change there is no file', 'a temporary file, then a rename',
+    'When two windows save the same prompt, the later save wins', 'While `prompts` is not listed, Token Pace does not even look at that file']) {
+    assert.ok(flat.includes(claim), `docs/prompts.md does not say: ${claim}`)
+  }
+  // The pages around it: the section's row and the default's omissions, the settings row, the command, the privacy page's writes.
+  const row = doc.dashboard.split('\n').find((l) => l.startsWith('| `prompts` |')) ?? ''
+  assert.ok(row.includes('[Prompts](prompts.md)') && row.includes('Off by default'), row)
+  assert.ok(SETTINGS.includes('`prompts` (new in 1.10) is your own list of prompts for Claude Code\'s and Codex\'s terminals'))
+  const command = doc.commands.split('\n').find((l) => l.startsWith('| `Token Pace: Restore Default Prompts` |')) ?? ''
+  assert.ok(command.includes('a shipped prompt you edited is not missing and stays as you wrote it'), command)
+  assert.ok(doc.commands.includes('your prompt list `prompts.json` (deleting it brings back the three shipped prompts)'))
+  assert.ok(flatText(doc.privacy).includes('`prompts.json` when you change the dashboard\'s prompt list — your own titles and texts, nothing else'))
+  assert.ok(flatText(doc.export).includes('the titles and texts you wrote are in no export, no report and no log'))
 })

@@ -319,3 +319,23 @@ test('the language setting\'s words: what switches, what follows VS Code, what s
     }
   }
 })
+
+test('the Prompts section\'s four manifest rows: its enum value with its words, the restore command, the paragraph of the sections setting and the statement on what Token Pace types — in both languages (1.10 §3 A6)', () => {
+  const manifest = rawManifest as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } }
+  const restore = manifest.contributes.commands.find((c) => c.command === 'tokenPace.restoreDefaultPrompts')
+  assert.deepEqual(restore, { command: 'tokenPace.restoreDefaultPrompts', title: '%command.restoreDefaultPrompts.title%', category: '%command.category%' })
+  assert.equal(englishNls['command.restoreDefaultPrompts.title'], 'Restore Default Prompts')
+  assert.equal(germanNls['command.restoreDefaultPrompts.title'], 'Standard-Prompts wiederherstellen')
+  assert.equal(englishNls['config.dashboard.sections.enum.prompts'],
+    'Your own prompts, starting with three shipped ones — a double-click types one into the terminal that runs Claude Code or Codex and presses Enter. Not in the default')
+  assert.equal(germanNls['config.dashboard.sections.enum.prompts'],
+    'Ihre eigenen Prompts, zu Beginn drei mitgelieferte — ein Doppelklick tippt einen davon in das Terminal, in dem Claude Code oder Codex läuft, und drückt die Eingabetaste. Nicht in der Voreinstellung')
+  // The sections setting's last paragraph, added.
+  assert.ok(englishNls['config.dashboard.sections.description'].endsWith('\n\n`prompts` — your own prompts for Claude Code\'s and Codex\'s terminals — is not in the default either: add it where you want it, first for the quickest reach.'))
+  assert.ok(germanNls['config.dashboard.sections.description'].endsWith('\n\n`prompts` — Ihre eigenen Prompts für die Terminals von Claude Code und Codex — ist ebenfalls nicht in der Voreinstellung: Fügen Sie ihn dort ein, wo Sie ihn haben möchten, zuoberst für den schnellsten Zugriff.'))
+  // What Restricted Mode stops: both things Token Pace types.
+  assert.ok(englishNls['capabilities.untrustedWorkspaces'].endsWith('each behind its own consent dialog. It types into a terminal in two cases only: the opt-in keep-warm line into Claude Code\'s terminal, and a prompt of the dashboard\'s Prompts section when you double-click it. All of these are disabled in Restricted Mode.'))
+  assert.ok(germanNls['capabilities.untrustedWorkspaces'].endsWith('jede hinter einem eigenen Zustimmungsdialog. In ein Terminal tippt es nur in zwei Fällen: die optionale Warmhalte-Zeile in das Terminal von Claude Code und einen Prompt aus dem Abschnitt Prompts des Dashboards, wenn Sie ihn doppelt anklicken. All das ist im eingeschränkten Modus abgeschaltet.'))
+  // The German key names follow VS Code's (§6): Eingabetaste, never „Enter-Taste".
+  assert.equal(germanNls['config.dashboard.sections.enum.prompts'].includes('Enter'), false)
+})

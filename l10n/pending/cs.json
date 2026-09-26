@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 26,
+  "applied": 50,
   "bundle": {
     "{0} rolled-up bucket in this range has no hour left and is not in the profile": {
       "parts": [
@@ -101,6 +101,134 @@
       ],
       "state": "translate",
       "why": "the summary's cache sentence for two tools: {0} {1} ({2}) and {3} {4} ({5}) as in the one-tool sentence — your own list comma and brackets — 1.10 B2 D9"
+    },
+    "Status table": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the title of a prompt Token Pace ships (the Prompts section), a short name for the status prompt below — 1.10 A1"
+    },
+    "Keep the cache warm": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the title of the shipped keep-warm prompt (the Prompts section), whose text stays English — 1.10 A1"
+    },
+    "Stop after this task": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the title of the shipped stop prompt (the Prompts section) — 1.10 A1"
+    },
+    "Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a prompt typed into Claude Code or Codex, addressed to the AI and not to the reader — keep the four “ | ” and the “/” (the table's five columns, a test checks them) — 1.10 A1"
+    },
+    "Stop after the current task and do not start any new work.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a prompt typed into Claude Code or Codex, addressed to the AI — an instruction, not a sentence to the reader — 1.10 A1"
+    },
+    "prompts.json could not be read ({0}). The shipped prompts are shown, and nothing is saved until the file is fixed or deleted (Token Pace: Clear Stored Data…).": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the Prompts section's box for a list file it cannot read — {0} a code (json, shape, tooLarge, io), the command name as your manifest translates it — 1.10 A1"
+    },
+    "prompts.json was written by a newer version of Token Pace; the shipped prompts are shown and the file is not changed.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the Prompts section's box for a list file a newer build wrote — 1.10 A1"
+    },
+    "the list is full (at most {0} prompts)": {
+      "parts": [
+        "model",
+        "host"
+      ],
+      "state": "translate",
+      "why": "the reason after “Not saved: ” (a lower-case continuation), {0} the most prompts the list holds (50) — 1.10 A1; the same words after “Token Pace: ” when Restore Default Prompts finds no room — 1.10 A1"
+    },
+    "prompts.json could not be written ({0})": {
+      "parts": [
+        "model",
+        "host"
+      ],
+      "state": "translate",
+      "why": "the reason after “Not saved: ”, {0} an error code such as EACCES — 1.10 A1; the same words after “Token Pace: ” when Restore Default Prompts cannot write the file — 1.10 A1"
+    },
+    "Not saved: {0}": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the Prompts section's flash when a change was refused, {0} the reason (a sentence or a lower-case continuation) — 1.10 A3 rule 9"
+    },
+    "The title is empty.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "why a prompt was not saved (a prompt's title field) — 1.10 A1 rule 3"
+    },
+    "The text is empty.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "why a prompt was not saved (a prompt's text field) — 1.10 A1 rule 3"
+    },
+    "A prompt that starts with an exclamation mark would run a shell command in Claude Code.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "why a prompt was not saved — name the mark in words, never write the mark itself (no string holds one) — 1.10 A1 rule 3"
+    },
+    "Token Pace: {0} default prompt(s) restored.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer of the command Restore Default Prompts, {0} how many came back — 1.10 A1 rule 8"
+    },
+    "Token Pace: every default prompt is there already.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer of the command Restore Default Prompts when none is missing — 1.10 A1 rule 8"
+    },
+    "Token Pace: prompts.json cannot be read; nothing was restored.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer of the command Restore Default Prompts while the list file cannot be read — 1.10 A1 rule 8"
+    },
+    "{0} prompt(s)": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "Clear Stored Data’s line under the prompt list, {0} how many prompts the file holds — 1.10 §0a.1"
+    },
+    "Prompts (prompts.json)": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "Clear Stored Data’s name of the prompt list — the file name stays as it is on disk — 1.10 §0a.1"
     }
   },
   "nls": {
@@ -123,6 +251,22 @@
     "config.summary.period.enum.today": {
       "state": "review",
       "why": "the example now names the period as the bar does (· today) — write each example as your language's status bar prints it, with the bar's own word (T15 checks it) — 1.10 B3 D11"
+    },
+    "config.dashboard.sections.enum.prompts": {
+      "state": "translate",
+      "why": "the new value of the sections setting — the Prompts section, not in the default — 1.10 A"
+    },
+    "command.restoreDefaultPrompts.title": {
+      "state": "translate",
+      "why": "the new command Restore Default Prompts (Token Pace: … in the palette) — 1.10 A1 rule 8"
+    },
+    "config.dashboard.sections.description": {
+      "state": "review",
+      "why": "a paragraph added at the end: prompts, the reader's own prompts for Claude Code's and Codex's terminals, not in the default either — 1.10 A"
+    },
+    "capabilities.untrustedWorkspaces": {
+      "state": "review",
+      "why": "the last two sentences rewritten: Token Pace types into a terminal in two cases (the keep-warm line, a prompt you double-click), and Restricted Mode disables all of these — the sentence before them loses its clause about the one thing it types — 1.10 A"
     }
   }
 }

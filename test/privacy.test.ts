@@ -196,11 +196,14 @@ test('the read contract holds for the shipped sources: every reader names exactl
   const keepWarmRow = (what: string): boolean => what.startsWith('keep-warm: ')
   const promptsRow = (what: string): boolean => what.startsWith('prompts: ')
   const hostRow = (what: string): boolean => what === 'keep-warm: the line typed' || what.startsWith('keep-warm: the accounting') || what === 'keep-warm: a day of the accounting'
-  const watchRow = (what: string): boolean => (keepWarmRow(what) && !hostRow(what)) || promptsRow(what)
+  // 1.10 P3 (§0a.1, pinned and changed): the prompt list's two rows read src/prompts.ts, where the file's
+  // shape is checked.
+  const listRow = (what: string): boolean => what === 'prompts: the list file' || what === 'prompts: an entry of the list'
+  const watchRow = (what: string): boolean => (keepWarmRow(what) && !hostRow(what)) || (promptsRow(what) && !listRow(what))
   const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
     : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts'
-      : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : watchRow(what) ? 'src/terminalWatch.ts'
-        : keepWarmRow(what) ? 'src/keepWarmHost.ts' : 'src/agg.ts'
+      : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : listRow(what) ? 'src/prompts.ts'
+        : watchRow(what) ? 'src/terminalWatch.ts' : keepWarmRow(what) ? 'src/keepWarmHost.ts' : 'src/agg.ts'
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, fileOf(row.what), row.what)
   // 1.8 §0a.1 (P4): the mirror's reader, level by level — the envelope, the payload's top-level
   // fields with 1.8's `session_id`, and of each block what is taken, the prompt cache's
@@ -227,10 +230,11 @@ test('the read contract holds for the shipped sources: every reader names exactl
   ])
   // 1.9 P17 (pinned and changed): the time of a user line is held to the same two pages (§0a.1).
   // 1.10 P2 (§0a.3, pinned and changed): the prompt tool's rows are held to the privacy page — P3 adds
-  // the prompts page, which does not exist before it.
+  // the prompts page, which does not exist before it. 1.10 P3 (§0a.1, §0a.3, pinned and changed): every
+  // prompt row is held to both, the privacy page and the prompts page (PROMPTS_PAGES).
   const promptCacheRow = (what: string): boolean => mirrorRow(what) || keepWarmRow(what) || what === 'the time of a user line'
   for (const row of contract.READ_CONTRACT) {
-    assert.deepEqual(row.pages, promptCacheRow(row.what) ? ['privacy', 'promptCache'] : promptsRow(row.what) ? ['privacy'] : undefined, row.what)
+    assert.deepEqual(row.pages, promptCacheRow(row.what) ? ['privacy', 'promptCache'] : promptsRow(row.what) ? ['privacy', 'prompts'] : undefined, row.what)
     if (mirrorRow(row.what)) assert.equal(row.source, 'statusline-mirror.json', row.what)
   }
   // 1.8 P10 (§0a.6–§0a.8): the keep-warm host, reader by reader — the two shell-execution events, an
@@ -251,10 +255,14 @@ test('the read contract holds for the shipped sources: every reader names exactl
   ])
   // 1.10 §0a.3 (P2): the one new field of VS Code's terminal API — of a terminal its `shellIntegration`, of
   // that its `cwd`, of that the `fsPath` — in `reportedCwd` and nowhere else.
+  // 1.10 §0a.1 (P3): prompts.json read back by its shape — the version and the list, of an entry its id,
+  // title and text — in `cleanPromptsFile` and nowhere else.
   assert.deepEqual(contract.READ_CONTRACT.filter((row) => promptsRow(row.what)).map((row) => [row.what, row.source, row.kind, row.body, row.variable, row.fields]), [
     ['prompts: a terminal\'s shell integration', shell, 'fields', 'function reportedCwd(', 'terminal', ['shellIntegration']],
     ['prompts: the folder VS Code reports for a terminal', shell, 'fields', 'function reportedCwd(', 'si', ['cwd']],
     ['prompts: that folder\'s path', shell, 'fields', 'function reportedCwd(', 'dir', ['fsPath']],
+    ['prompts: the list file', 'prompts.json', 'fields', 'export function cleanPromptsFile(', 'o', ['v', 'prompts']],
+    ['prompts: an entry of the list', 'prompts.json', 'fields', 'export function cleanPromptsFile(', 'e', ['id', 'title', 'text']],
   ])
 })
 
@@ -445,6 +453,9 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     // 1.10 P2 (pinned and changed): the terminal watch's readers — moved out of the host — as well.
     const watchSrc = fromRepo('src/terminalWatch.ts')
     writeFileSync(join(dir, 'src', 'terminalWatch.ts'), watchSrc)
+    // 1.10 P3 (pinned and changed): the prompt list's reader as well.
+    const promptsSrc = fromRepo('src/prompts.ts')
+    writeFileSync(join(dir, 'src', 'prompts.ts'), promptsSrc)
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })
@@ -529,6 +540,16 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     assert.equal(named.status, 1, named.out)
     assert.match(named.out, /DIFF {2}prompts: a terminal's shell integration/)
     assert.match(named.out, /read but not listed: name/)
+    writeFileSync(join(dir, 'src', 'terminalWatch.ts'), watchSrc)
+    assert.equal(run().status, 0)
+    // 1.10 §0a.1 (P3): the prompt list's reader starts to take a time of the entry — the contract stops it.
+    const at5 = promptsSrc.indexOf('    const title = e.title')
+    assert.ok(at5 >= 0)
+    writeFileSync(join(dir, 'src', 'prompts.ts'), `${promptsSrc.slice(0, at5)}    void e.sentAt\n${promptsSrc.slice(at5)}`)
+    const timed = run()
+    assert.equal(timed.status, 1, timed.out)
+    assert.match(timed.out, /DIFF {2}prompts: an entry of the list/)
+    assert.match(timed.out, /read but not listed: sentAt/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

@@ -70,6 +70,9 @@ export const SECTION_FIELDS: Readonly<Record<string, SectionField[]>> = {
   projects: ['projects'],
   sessions: ['sessions'],
   dataQuality: ['dataQuality'],
+  // 1.10 A (P3): the reader's prompt list. The page draws nothing of it before P5 (its renderer skips a key
+  // it does not know), but a push already carries it where the section is listed.
+  prompts: ['prompts'],
   drill: ['drill'],
   // Chrome that is always present. `footer` carries the generated-at line, which changes on
   // every tick — keeping it in its own node is what stops a full re-render every minute.

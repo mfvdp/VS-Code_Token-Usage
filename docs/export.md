@@ -125,10 +125,13 @@ what you pick: the token snapshot (`state.json`), the quota cache (`quota.json` 
 Token Pace's own fetch, the time of its next attempt and, per provider, its last failed attempt), the quota
 history (`quotaHistory.json`), the status-line mirror (`statusline-mirror.json`), the
 [agent hook](agents.md#the-agent-hook)'s mirror (`agent-hook.jsonl`), the keep-warm accounting (`keepwarm.json`, the
-answered [keep-warm lines](prompt-cache.md#keep-warm-in-a-terminal-opt-in) per day and their tokens) — once you granted
+answered [keep-warm lines](prompt-cache.md#keep-warm-in-a-terminal-opt-in) per day and their tokens), your
+[prompt list](prompts.md) (`prompts.json`, with the number of prompts it holds) — once you granted
 `tokenPace.writeQuotaCache`, the shared quota cache files outside the extension's storage —, the
 consent decisions (the keep-warm consent among them), the alert state and the dashboard view state.
-Deleting `keepwarm.json` deletes the accounting and nothing else; no line depends on it. The confirmation says the part
+Deleting `keepwarm.json` deletes the accounting and nothing else; no line depends on it. Deleting `prompts.json`
+returns the Prompts section to the three prompts Token Pace ships; the titles and texts you wrote are in no export, no
+report and no log, so the file is the only place they are. The confirmation says the part
 that matters: the snapshot is rebuilt from the transcripts that are still on disk, and Claude Code
 deletes those after 30 days, so older history is gone for good. Deleting the agent hook's mirror
 is safe — its script writes the file again on the next hook call, and the markers it reported go

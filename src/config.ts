@@ -179,7 +179,7 @@ export type TooltipMode = 'full' | 'compact' | 'off'
 export type DashboardSection =
   | 'summary' | 'quota' | 'agents' | 'context' | 'kpis' | 'tokens' | 'chart' | 'models' | 'heatmap'
   | 'hours' | 'records' | 'tools' | 'budget' | 'history' | 'projects'
-  | 'sessions' | 'dataQuality'
+  | 'sessions' | 'dataQuality' | 'prompts'
 export type DefaultRange =
   | 'today' | '7d' | '30d' | '90d' | 'thisWeek' | 'thisMonth' | 'lastMonth' | 'year' | 'all'
 export type DashboardMode = 'webview' | 'quickPick' | 'markdown'
@@ -230,6 +230,9 @@ const DASHBOARD_SECTIONS: readonly DashboardSection[] = [
   'quota', 'agents', 'summary', 'context', 'kpis', 'tokens', 'chart', 'models', 'heatmap',
   'hours', 'records', 'tools', 'budget', 'history', 'projects', 'sessions',
   'dataQuality',
+  // 1.10 A: the reader's prompts — the one section that acts (it types into a terminal), offered and never
+  // in the default (§7a Q3), like `agents` in 1.6.
+  'prompts',
 ]
 const DEFAULT_RANGES: readonly DefaultRange[] = [
   'today', '7d', '30d', '90d', 'thisWeek', 'thisMonth', 'lastMonth', 'year', 'all',

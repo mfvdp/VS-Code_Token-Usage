@@ -25,8 +25,7 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![The language picker open at the top of the dashboard: Automatic — as VS Code (English) first, then English checked, Deutsch · German, Français · French and the other languages, each with its flag, its own name and its name in English; under the list the line on what switches at once and the line on who translated the languages](media/screenshot-languages.png)
 
-The pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States*
-and a synthetic snapshot), not from anybody's real usage.
+The pictures are rendered from **preview data** (*Token Pace: Preview Status Bar States* and a synthetic snapshot), not from anybody's real usage.
 
 **Requires VS Code 1.106 or newer.** The dashboard lives in the secondary sidebar, and
 `contributes.viewsContainers.secondarySidebar` only became a stable contribution point in
@@ -160,6 +159,7 @@ bundle that loads more than `child_process`, `fs` and `path`. The full account i
 | [Dashboard](docs/dashboard.md) | The provider switch and the language picker, the sections of the panel, the filter bar, the chart, the tables and the heatmap |
 | [Agents](docs/agents.md) | The running list, the 7-day block and the session → workflow → agent tree with its earlier sessions, state colours and guide lines: what is read, how every state is derived, the keyboard, the agent hook, what is kept and for how long |
 | [Quota sources](docs/quota-sources.md) | The cache file, consent, our own fetch — its user agent and a failed attempt beside an old figure —, the status-line bridge and where its script lives, extra usage |
+| [Prompts](docs/prompts.md) | The dashboard's Prompts section: your own prompts for Claude Code's and Codex's terminals, the three shipped ones, and where the list is kept |
 | [Prompt cache](docs/prompt-cache.md) | The cooling warning and what a cold start would cost, which figure is measured and which estimated, the Codex line, the opt-in keep-warm line with every check it makes and what it cannot see, and exactly which fields are read |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
 | [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |

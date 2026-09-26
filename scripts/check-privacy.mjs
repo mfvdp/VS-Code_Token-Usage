@@ -163,6 +163,8 @@ export function filesToScan() {
 const MIRROR_PAGES = ['privacy', 'promptCache']
 /** 1.8 §0a.6–§0a.8: the pages a row of the keep-warm host is held to. */
 const KEEPWARM_PAGES = ['privacy', 'promptCache']
+/** 1.10 §0a.1, §0a.3: the pages a row of the prompt tool is held to. */
+const PROMPTS_PAGES = ['privacy', 'prompts']
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
@@ -326,14 +328,22 @@ export const READ_CONTRACT = [
   // for a terminal whose shell is `claude` or `codex` and in which the watch saw no execution start (a
   // window reload), read at a send or a build of the Prompts section only, to compare its
   // project-directory name with the transcripts' folders; never kept, logged, shown or exported. Of the
-  // terminal its `shellIntegration`, of that its `cwd`, of that the `fsPath`. Held to the privacy page
-  // until P3 widens the rows to the prompts page as well (PROMPTS_PAGES).
+  // terminal its `shellIntegration`, of that its `cwd`, of that the `fsPath`. P3 widened the rows to the
+  // prompts page (PROMPTS_PAGES) when it created that page.
   { what: 'prompts: a terminal\'s shell integration', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function reportedCwd(', variable: 'terminal',
-    fields: ['shellIntegration'], pages: ['privacy'] },
+    fields: ['shellIntegration'], pages: PROMPTS_PAGES },
   { what: 'prompts: the folder VS Code reports for a terminal', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function reportedCwd(', variable: 'si',
-    fields: ['cwd'], pages: ['privacy'] },
+    fields: ['cwd'], pages: PROMPTS_PAGES },
   { what: 'prompts: that folder\'s path', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function reportedCwd(', variable: 'dir',
-    fields: ['fsPath'], pages: ['privacy'] },
+    fields: ['fsPath'], pages: PROMPTS_PAGES },
+  // 1.10 §0a.1 (P3): the reader's prompt list in the extension's storage, read back by its shape — the
+  // version and the list, of an entry its id and, where the reader wrote them, its title and text; any
+  // other key makes the file unreadable, never repaired. The titles and texts are the reader's own words:
+  // shown on the page and typed on the reader's click, never logged, exported or reported.
+  { what: 'prompts: the list file', source: 'prompts.json', file: 'src/prompts.ts', kind: 'fields', body: 'export function cleanPromptsFile(', variable: 'o',
+    fields: ['v', 'prompts'], pages: PROMPTS_PAGES },
+  { what: 'prompts: an entry of the list', source: 'prompts.json', file: 'src/prompts.ts', kind: 'fields', body: 'export function cleanPromptsFile(', variable: 'e',
+    fields: ['id', 'title', 'text'], pages: PROMPTS_PAGES },
 ]
 
 /**

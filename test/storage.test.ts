@@ -41,6 +41,7 @@ function pathsIn(dir: string): StoredPaths {
     mirror: path.join(dir, 'statusline-mirror.json'),
     hookMirror: path.join(dir, 'agent-hook.jsonl'),
     keepWarm: path.join(dir, 'keepwarm.json'),
+    prompts: path.join(dir, 'prompts.json'),
   }
 }
 
@@ -56,8 +57,9 @@ test('the inventory names size and presence of every item', () => {
   const items = inventory(paths, memento, { state: 'oldest day 2026-05-01' })
   const byKey = new Map(items.map((i) => [i.key, i]))
 
-  // 1.8 P10 (§0a.7, pinned and changed): the keep-warm accounting, after the agent hook's mirror.
-  assert.deepEqual(items.map((i) => i.key), ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'consent', 'alerts', 'ui'])
+  // 1.8 P10 (§0a.7, pinned and changed): the keep-warm accounting, after the agent hook's mirror. 1.10 P3
+  // (§0a.1, pinned and changed): the prompt list after it.
+  assert.deepEqual(items.map((i) => i.key), ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'consent', 'alerts', 'ui'])
   assert.equal(byKey.get('state')!.present, true)
   assert.equal(byKey.get('state')!.bytes, 13)
   assert.equal(byKey.get('state')!.detail, 'oldest day 2026-05-01')
@@ -240,10 +242,11 @@ test('the shared quota cache is listed only when its paths are supplied', () => 
   assert.equal(item.present, true)
   assert.equal(item.bytes, 20)
   assert.ok(item.detail!.includes(codex), 'the picker line does not name both files')
-  // It comes after the extension's own files and before the memento items.
+  // It comes after the extension's own files and before the memento items. 1.10 P3 (§0a.1, pinned and
+  // changed): the prompt list is one of those files.
   assert.deepEqual(
     items.map((i) => i.key),
-    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'externalQuota', 'consent', 'alerts', 'ui'],
+    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'externalQuota', 'consent', 'alerts', 'ui'],
   )
 })
 
@@ -313,4 +316,32 @@ test('the keep-warm accounting is in the list by its file name, and deleting it 
   // Gone: listed as absent, and deleting it again is no failure.
   assert.equal(inventory(paths, new FakeMemento()).find((i) => i.key === 'keepWarm')?.present, false)
   assert.deepEqual(await deleteItems(['keepWarm'], paths, new FakeMemento()), { deleted: ['keepWarm'], failed: [] })
+})
+
+test('the prompt list is in the list by its file name after the keep-warm accounting, and deleting it deletes it and its temp sibling alone (1.10 §0a.1)', async () => {
+  const dir = scratchDir('storage')
+  const paths = pathsIn(dir)
+  const text = JSON.stringify({ v: 1, prompts: [{ id: 's-status' }, { id: 'u-abcd1234', title: 'Review', text: 'Review the last diff.' }] })
+  fs.writeFileSync(paths.prompts, text)
+  fs.writeFileSync(`${paths.prompts}.tmp-4821`, text)
+  fs.writeFileSync(paths.keepWarm, '{}')
+  const items = inventory(paths, new FakeMemento(), { prompts: '2 prompt(s)' })
+  const keys = items.map((i) => i.key)
+  assert.equal(keys.indexOf('prompts'), keys.indexOf('keepWarm') + 1)
+  const item = items.find((i) => i.key === 'prompts')
+  assert.ok(item)
+  assert.equal(item.label, 'Prompts (prompts.json)')
+  assert.equal(item.detail, '2 prompt(s)')
+  assert.equal(item.present, true)
+  assert.equal(item.bytes, text.length)
+  assert.deepEqual(storedFiles('prompts', paths), [paths.prompts])
+  assert.equal(storedFile('prompts', paths), paths.prompts)
+  const log: string[] = []
+  assert.deepEqual(await deleteItems(['prompts'], paths, new FakeMemento(), (m) => log.push(m)), { deleted: ['prompts'], failed: [] })
+  assert.equal(fs.existsSync(paths.prompts), false)
+  assert.equal(fs.existsSync(`${paths.prompts}.tmp-4821`), false, 'the interrupted write of the list survived')
+  assert.equal(fs.existsSync(paths.keepWarm), true)
+  // The log names the item by its English label — never a title or a text of the list.
+  assert.deepEqual(log, ['Stored data removed: Prompts (prompts.json)'])
+  assert.equal(inventory(paths, new FakeMemento()).find((i) => i.key === 'prompts')?.present, false)
 })

@@ -4298,3 +4298,208 @@ test('1.10 P2: one terminal watch for the window, the keep-warm host\'s; a Codex
   assert.match(src, /const keepWarm = new KeepWarmHost\(\{\n(?:\s+\w+: [^\n]*\n){3}\s+watch: terminalWatch,\n\s*\}\)/)
   assert.match(src, /settled: !\(scanning \|\| replayRun !== null\),/)
 })
+
+// ---------------------------------------------------------------------------
+// 1.10 A (P3): the prompt list in the host
+// ---------------------------------------------------------------------------
+
+/** §0a.1's synthetic words: the reader's own, asserted absent from every output but the page. */
+const PROMPT_TITLE = 'synthetic-prompt-title-123'
+const PROMPT_TEXT = 'synthetic-prompt-text-456'
+
+/** The Prompts section as the page last received it — a whole page's `prompts`, or the section's own fragment. */
+function lastPrompts(sent: unknown[]): { items: Array<{ id: string; title: string; text: string }>; flash: { text: string } | null; restorable: number } | null | undefined {
+  for (let i = sent.length - 1; i >= 0; i--) {
+    const m = sent[i] as { type?: string; key?: string; payload?: Record<string, unknown> }
+    if (m.type === 'data' && m.payload && 'prompts' in m.payload) return m.payload.prompts as never
+    if (m.type === 'section' && m.key === 'prompts' && m.payload) return m.payload.prompts as never
+  }
+  return undefined
+}
+
+function writePrompts(fx: Fixture, file: unknown): string {
+  fs.mkdirSync(fx.storage, { recursive: true })
+  const p = path.join(fx.storage, 'prompts.json')
+  fs.writeFileSync(p, typeof file === 'string' ? file : JSON.stringify(file))
+  return p
+}
+
+test('1.10 P3: the Prompts section through the host — the page gets the list, its save, move and delete change prompts.json, a send is dropped, Restore Default Prompts answers; no title and no text reaches the log, the debug log file, the diagnostics, the summary, the exports, the markdown, the Quick Pick, the bar or the state (§0a.1 leak test, host side)', async () => {
+  const fx = makeFixture()
+  const file = writePrompts(fx, { v: 1, prompts: [{ id: 's-status' }, { id: 'u-3k9x0a2b', title: PROMPT_TITLE, text: PROMPT_TEXT }] })
+  const logFile = path.join(fx.data, 'token-pace-debug.log')
+  await activateHost(fx, REPO, {
+    settings: {
+      'tokenPace.dashboard.sections': ['prompts', 'quota', 'tokens', 'summary', 'kpis', 'dataQuality'],
+      'tokenPace.debugLogFile': logFile,
+      'tokenPace.statusBar.show': ['claudeQuota', 'tokens'],
+    },
+  })
+  const page = openDashboard()
+  await waitOwnColdStart(state)
+  await waitFor('the list on the page', () => lastPrompts(page.sent)?.items.some((i) => i.title === PROMPT_TITLE) === true)
+  // The page's payload holds the reader's words — the one place they are meant to be.
+  assert.deepEqual(lastPrompts(page.sent)?.items.map((i) => i.id), ['s-status', 'u-3k9x0a2b'])
+  assert.equal(lastPrompts(page.sent)?.restorable, 2)
+  const ids = (): string[] => (JSON.parse(fs.readFileSync(file, 'utf8')) as { prompts: Array<{ id: string }> }).prompts.map((p) => p.id)
+  // The page's four actions: a new entry, a move, a delete — each changes the file and is pushed.
+  page.post({ type: 'promptSave', id: null, title: `${PROMPT_TITLE}-2`, text: `${PROMPT_TEXT}-2` })
+  await waitFor('the new entry', () => ids().length === 3)
+  page.post({ type: 'promptMove', id: 'u-3k9x0a2b', dir: 'up' })
+  await waitFor('the move', () => ids()[0] === 'u-3k9x0a2b')
+  page.post({ type: 'promptDelete', id: 's-status' })
+  await waitFor('the delete', () => !ids().includes('s-status'))
+  await waitFor('the list pushed', () => lastPrompts(page.sent)?.items.length === 2)
+  // A refused save: nothing written, the section's flash says why.
+  const before = fs.readFileSync(file, 'utf8')
+  page.post({ type: 'promptSave', id: 'u-3k9x0a2b', title: ' ', text: PROMPT_TEXT })
+  await waitFor('the flash', () => lastPrompts(page.sent)?.flash?.text === 'Not saved: The title is empty.')
+  assert.equal(fs.readFileSync(file, 'utf8'), before)
+  // A send — with a text the page made up — types nothing in this build; the log says so without the words.
+  const terminal = state.openTerminal({ shell: 'claude' })
+  state.setActiveTerminal(terminal)
+  page.post({ type: 'promptSend', id: 'u-3k9x0a2b', text: 'rm -rf ~' })
+  await waitFor('the dropped send', () => state.logText().includes('Prompts: a send was dropped (this build does not send yet).'))
+  assert.deepEqual(state.sent, [], 'something was typed into a terminal')
+  // Restore Default Prompts: the three missing shipped entries at the end, then none missing — from the
+  // palette and from the section's button (a `command` message) alike.
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: 3 default prompt(s) restored.')
+  assert.deepEqual(ids().slice(-3), ['s-status', 's-keepwarm', 's-stop'])
+  page.post({ type: 'command', id: 'tokenPace.restoreDefaultPrompts' })
+  await waitFor('the button\'s answer', () => state.messages[state.messages.length - 1]?.text === 'Token Pace: every default prompt is there already.')
+  await waitFor('the restored list pushed', () => lastPrompts(page.sent)?.items.length === 5)
+  // Every output there is.
+  await state.execute('tokenPace.showUsageMarkdown')
+  const markdown = lastMarkdown()
+  await state.execute('tokenPace.showUsageQuickPick')
+  await state.execute('tokenPace.copySummary')
+  await state.execute('tokenPace.copyDiagnostics')
+  const uri = (HOST.api as { Uri: { file(p: string): unknown } }).Uri.file
+  state.answers.push(uri(path.join(fx.data, 'out', 'usage.csv')), undefined)
+  await state.execute('tokenPace.exportCsv')
+  state.answers.push(uri(path.join(fx.data, 'out', 'usage.json')), undefined)
+  await state.execute('tokenPace.exportJson')
+  assert.ok(state.writes.length >= 2, 'the exports wrote nothing')
+  assert.ok(JSON.stringify(page.sent).includes(PROMPT_TITLE) && JSON.stringify(page.sent).includes(PROMPT_TEXT), 'the page never got the words')
+  const outputs: Array<[string, string]> = [
+    ['markdown', markdown],
+    ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+    ['status bar', JSON.stringify(state.items.map((i) => ({ ...i })))],
+    ['clipboard (summary, diagnostics)', state.clipboard.join('\n')],
+    ['exports', JSON.stringify(state.writes)],
+    ['messages', JSON.stringify(state.messages)],
+    ['log', state.logText()],
+  ]
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  assert.ok(fs.existsSync(logFile), 'the debug log file was not written')
+  outputs.push(['debug log file', fs.readFileSync(logFile, 'utf8')])
+  outputs.push(['state', fs.readFileSync(fx.stateFile, 'utf8')])
+  assert.equal(fs.existsSync(path.join(fx.storage, 'keepwarm.json')), false)
+  assert.match(outputs[outputs.length - 2][1], /Prompts: added a user prompt\./)
+  assert.match(outputs[outputs.length - 2][1], /Prompts: deleted a shipped prompt\./)
+  for (const [what, text] of outputs) {
+    for (const secret of [PROMPT_TITLE, PROMPT_TEXT, 'rm -rf ~']) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+  }
+  // Diagnostics: not even a count of the prompts.
+  assert.equal(/prompt\(s\)|prompts\.json/i.test(state.clipboard.join('\n')), false)
+})
+
+test('1.10 P3: while the Prompts section is not listed prompts.json is not even looked at and the page gets no list; listing it reads the file (§3 A7 test 2)', async () => {
+  const fx = makeFixture()
+  const file = writePrompts(fx, { v: 1, prompts: [{ id: 'u-3k9x0a2b', title: PROMPT_TITLE, text: PROMPT_TEXT }] })
+  const nodeFs = require('fs') as { statSync: (...a: unknown[]) => unknown; readFileSync: (...a: unknown[]) => unknown }
+  const realStat = nodeFs.statSync
+  const realRead = nodeFs.readFileSync
+  let touched = 0
+  nodeFs.statSync = (...a: unknown[]) => { if (a[0] === file) touched++; return realStat(...a) }
+  nodeFs.readFileSync = (...a: unknown[]) => { if (a[0] === file) touched++; return realRead(...a) }
+  try {
+    await activateHost(fx, REPO)
+    const page = openDashboard()
+    await waitOwnColdStart(state)
+    await waitFor('a page', () => page.sent.some((m) => (m as { type?: string }).type === 'data'))
+    await sleep(1_200)
+    assert.equal(touched, 0, 'prompts.json was looked at while the section is not listed')
+    assert.equal(lastPrompts(page.sent), null)
+    // Listed at run time: the next build reads it, and the page gets the list.
+    state.set('tokenPace.dashboard.sections', ['quota', 'prompts'])
+    state.fireConfigChange(['tokenPace.dashboard.sections'])
+    await waitFor('the list on the page', () => lastPrompts(page.sent)?.items[0]?.title === PROMPT_TITLE)
+    assert.ok(touched > 0)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    nodeFs.statSync = realStat
+    nodeFs.readFileSync = realRead
+  }
+})
+
+test('1.10 P3: Clear Stored Data lists prompts.json after keepwarm.json with the number of prompts it holds and deletes it alone; the list is the shipped prompts again (§0a.1, §3 A1 rule 7)', async () => {
+  const fx = makeFixture()
+  const file = writePrompts(fx, { v: 1, prompts: [{ id: 's-stop' }, { id: 'u-3k9x0a2b', title: PROMPT_TITLE, text: PROMPT_TEXT }] })
+  await activateHost(fx, REPO, { settings: { 'tokenPace.dashboard.sections': ['prompts', 'quota'] } })
+  const page = openDashboard()
+  await waitOwnColdStart(state)
+  await waitFor('the list on the page', () => lastPrompts(page.sent)?.items.length === 2)
+  await state.execute('tokenPace.clearStoredData')
+  const offered = state.quickPicks[state.quickPicks.length - 1]
+  const item = offered.items.find((i) => i.key === 'prompts')
+  assert.ok(item, `prompts.json is not listed: ${offered.items.map((i) => i.label).join(' | ')}`)
+  assert.equal(item.label, 'Prompts (prompts.json)')
+  assert.equal(item.detail, '2 prompt(s)')
+  assert.equal(item.description, `${fs.statSync(file).size} B`)
+  const keys = offered.items.map((i) => i.key)
+  assert.equal(keys.indexOf('prompts'), keys.indexOf('keepWarm') + 1, 'not right after the keep-warm accounting')
+  // The offer names no title and no text.
+  assert.equal(JSON.stringify(offered).includes(PROMPT_TITLE) || JSON.stringify(offered).includes(PROMPT_TEXT), false)
+  await waitFor('the snapshot saved', () => fs.existsSync(fx.stateFile))
+  state.answers.push([item], 'Delete')
+  await state.execute('tokenPace.clearStoredData')
+  assert.equal(fs.existsSync(file), false, 'prompts.json survived')
+  assert.equal(fs.existsSync(fx.stateFile), true, 'an item that was not picked was deleted')
+  assert.match(state.logText(), /Stored data removed: Prompts \(prompts\.json\)/)
+  await waitFor('the shipped list pushed', () => lastPrompts(page.sent)?.items.map((i) => i.id).join() === 's-status,s-keepwarm,s-stop')
+  // Nothing is missing now: the command says so and writes nothing.
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: every default prompt is there already.')
+  assert.equal(fs.existsSync(file), false, 'a file was written although nothing changed')
+  // With no file the list offers its count as none.
+  await state.execute('tokenPace.clearStoredData')
+  assert.equal(state.quickPicks[state.quickPicks.length - 1].items.find((i) => i.key === 'prompts')?.detail, '0 prompt(s)')
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('1.10 P3: Restore Default Prompts is registered with its manifest title and answers in English and German — restored, none missing, a file it cannot read (§3 A1 rule 8, §3 A7 test 5)', async () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string }> } }
+  assert.deepEqual(manifest.contributes.commands.find((c) => c.command === 'tokenPace.restoreDefaultPrompts'),
+    { command: 'tokenPace.restoreDefaultPrompts', title: '%command.restoreDefaultPrompts.title%', category: '%command.category%' })
+  const fx = makeFixture()
+  const file = writePrompts(fx, { v: 1, prompts: [{ id: 's-status' }, { id: 's-keepwarm' }] })
+  await activateHost(fx, REPO)
+  assert.equal(state.registered.get('tokenPace.restoreDefaultPrompts'), 1)
+  await waitOwnColdStart(state)
+  const said = (): string | undefined => state.messages[state.messages.length - 1]?.text
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(said(), 'Token Pace: 1 default prompt(s) restored.')
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(said(), 'Token Pace: every default prompt is there already.')
+  fs.writeFileSync(file, '{ "v": 1, "prompts": [')
+  const bytes = fs.readFileSync(file, 'utf8')
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(said(), 'Token Pace: prompts.json cannot be read; nothing was restored.')
+  assert.equal(fs.readFileSync(file, 'utf8'), bytes, 'an unreadable file was written over')
+  assert.match(state.logText(), /Prompts: prompts\.json could not be read \(json\); nothing is written\./)
+  // In German, the same three answers.
+  state.set('tokenPace.language', 'de')
+  state.fireConfigChange(['tokenPace.language'])
+  await waitFor('the German bundle', () => /Language: de → de/.test(state.logText()))
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(said(), 'Token Pace: prompts.json kann nicht gelesen werden; nichts wurde wiederhergestellt.')
+  fs.writeFileSync(file, JSON.stringify({ v: 1, prompts: [{ id: 's-stop' }] }))
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(said(), 'Token Pace: 2 Standard-Prompt(s) wiederhergestellt.')
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(said(), 'Token Pace: Alle Standard-Prompts sind bereits vorhanden.')
+  assert.deepEqual((JSON.parse(fs.readFileSync(file, 'utf8')) as { prompts: unknown[] }).prompts, [{ id: 's-stop' }, { id: 's-status' }, { id: 's-keepwarm' }])
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})

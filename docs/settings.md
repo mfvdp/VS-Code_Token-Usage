@@ -64,7 +64,7 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `dashboard.sections` | `quota, agents, tokens, summary, kpis, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions`. A list you have set yourself is kept as it is, so `agents` (new in 1.6) appears there only once you add it. While the dashboard's provider switch shows Codex, `agents` and `context` are left out |
+| `dashboard.sections` | `quota, agents, tokens, summary, kpis, chart, models, heatmap, hours, dataQuality` | Which sections the panel shows **and in which order**. Also available: `context`, `records`, `tools`, `budget`, `history`, `projects`, `sessions`, `prompts`. A list you have set yourself is kept as it is, so `agents` (new in 1.6) appears there only once you add it. `prompts` (new in 1.10) is your own list of prompts for Claude Code's and Codex's terminals — add it where you want it, first for the quickest reach ([Prompts](prompts.md)). While the dashboard's provider switch shows Codex, `agents` and `context` are left out |
 | `dashboard.defaultRange` | `30d` | The range the dashboard opens with |
 | `dashboard.modelRows` | `12` | Rows in the model table before the rest is folded into “… n more” (0–500); `0` shows every model |
 | `dashboard.topN` | `5` | Rows per table in the `records` and `tools` sections (1–20). A cap on what is listed, never on what is counted |

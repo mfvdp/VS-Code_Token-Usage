@@ -73,6 +73,9 @@ export const SECTION_SETTINGS: Record<DashboardSectionKey, string[]> = {
     'tokenPace.retentionDays', 'tokenPace.hourRetentionDays', 'tokenPace.claudeDir',
     'tokenPace.codexDir', 'tokenPace.debug', 'tokenPace.dashboard.sections',
   ],
+  // 1.10 A: no setting of its own (§0b.3) — the list is the reader's, kept in prompts.json; what a setting
+  // decides is whether the section is there, and where.
+  prompts: ['tokenPace.dashboard.sections'],
 }
 
 /**

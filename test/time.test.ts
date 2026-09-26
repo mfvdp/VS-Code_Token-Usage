@@ -238,9 +238,10 @@ test('the weekday in front of a clock time is the language\'s own short name, se
     for (const { id, locale } of LANGUAGES) {
       setLocale(locale)
       // 1.11 P2 (pinned and changed: ' 14:20' in every locale): the clock as the language writes it — Danish, Finnish
-      // and Indonesian write 14.20 (ICU's pattern for da, fi and id), every language of 1.9 writes 14:20.
+      // and Indonesian write 14.20 (ICU's pattern for da, fi and id), every other language writes 14:20 (Review 1 F2:
+      // the full stop is allowed for those three only, so a wrong clock in any other language fails here, not only in T15).
       const clock = ` ${formatTime(WEEK[0], utc, false)}`
-      assert.match(clock, /^ 14[:.]20$/, `${locale}: ${clock}`)
+      assert.equal(clock, ['da', 'fi', 'id'].includes(id) ? ' 14.20' : ' 14:20', `${locale}: ${clock}`)
       const labels = WEEK.map((ms) => {
         const out = formatTime(ms, utc, true)
         assert.ok(out.endsWith(clock), `${locale}: ${out}`)

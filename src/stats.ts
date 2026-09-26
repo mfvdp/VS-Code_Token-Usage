@@ -21,7 +21,7 @@ import { Aggregator, BucketFilter, HourQuery, Metric, billable } from './agg'
 import { locale, t } from './i18n'
 // Type only: the chart carries the setting's value, not the module that reads settings.
 import type { ChartModelStyle } from './config'
-import { PRICES_AS_OF, PricingOptions, costOfBucket, priceOf } from './prices'
+import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing, priceOf } from './prices'
 import { Provenance, compact, decimalText, deltaBadge, estimate, full, percentOf, usd } from './render'
 import {
   DayRange, TimeConfig, Zone, addDays, calendarDayOf, clockStamp, dayCount, dayOf, dayOfHour, daysBetween, formatTime,
@@ -1256,7 +1256,10 @@ export function kpis(ctx: StatsCtx, range: DayRange, previous: DayRange | null):
       spark: costSpark,
       note: t('hypothetical: what this usage would have cost through the API'),
       explain: explainOf(
-        t('What the same tokens would have cost through the API at list prices'),
+        // 1.11 C3 (Review 2 F2): while custom rates apply the explanation says so — "list prices" would be false.
+        isCustomPricing(ctx.pricing)
+          ? t('What the same tokens would have cost through the API at your configured rates')
+          : t('What the same tokens would have cost through the API at list prices'),
         t('tokens × the price table in effect, per model'),
         'estimated',
         (f) => costText(f.cost),
@@ -2487,8 +2490,9 @@ function newRecords(
     })
 
   const notes: string[] = []
-  if (costDays.some((d) => d.floor)) {
-    notes.push(t('⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.'))
+  // Review 2 F4: the hours' ⚠ (an unpriced model in the hour) has the same legend — shown whenever a day or an hour is marked.
+  if (costDays.some((d) => d.floor) || cacheHours.some((h) => h.floor)) {
+    notes.push(t('⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.'))
   }
   if (longestSessions.length > 0 || largestSessions.length > 0) {
     notes.push(t("Claude Code sessions of the last {0} days that are no longer active — the Agents section keeps a session for {0} days after its last line. Time runs from its first counted line to its last, pauses included; usage is its own and its agents'.",
@@ -2501,7 +2505,7 @@ function newRecords(
   // Only where the range reaches back to the hours that are kept no longer (B3 rule 1).
   const kept = words ? Math.floor(words.hourRetentionDays) : NaN
   if (Number.isFinite(kept) && kept >= 0 && range.from <= addDays(sums.today, -kept)) {
-    notes.push(t('Hour buckets are kept for {0} days (tokenPace.hourRetentionDays); earlier hours are not ranked.', full(kept)))
+    notes.push(t('Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.', full(kept)))
   }
   if (!ctx.showCost) notes.push(t('The most expensive days need tokenPace.showCost.'))
   if (!claude && ctx.sources.length > 0) {

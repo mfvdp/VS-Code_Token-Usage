@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 64,
+  "applied": 67,
   "bundle": {
     "Dutch": {
       "parts": [
@@ -86,13 +86,6 @@
       "state": "translate",
       "why": "a new language of the picker, named in your language beside its own name Română (as German stands beside Deutsch) — 1.11 A1"
     },
-    "⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.": {
-      "parts": [
-        "model"
-      ],
-      "state": "translate",
-      "why": "the note under the Records section's new table of the most expensive days: what its ⚠ mark means — 1.11 B1"
-    },
     "Claude Code sessions of the last {0} days that are no longer active — the Agents section keeps a session for {0} days after its last line. Time runs from its first counted line to its last, pauses included; usage is its own and its agents'.": {
       "parts": [
         "model"
@@ -121,13 +114,6 @@
       "state": "translate",
       "why": "the Records section's line in place of the table of the hours with the most cache written when no hour of the range wrote any — 1.11 B3"
     },
-    "Hour buckets are kept for {0} days (tokenPace.hourRetentionDays); earlier hours are not ranked.": {
-      "parts": [
-        "model"
-      ],
-      "state": "translate",
-      "why": "a note of the Records section: the hours with the most cache written reach back only as far as the hour buckets are kept ({0} is the setting's number of days) — 1.11 B3"
-    },
     "The most expensive days need tokenPace.showCost.": {
       "parts": [
         "model"
@@ -147,7 +133,7 @@
         "text"
       ],
       "state": "translate",
-      "why": "a Quick Pick line of the Records: a session's name ({0}, e.g. Session Tue 14:20 · 9d0eb37a) and its time from first to last line ({1}) — 1.11 B6"
+      "why": "a Quick Pick line of the Records: a session's name ({0}, e.g. Tue 14:20 · 9d0eb37a — its start and the first eight characters of its id, without the word session, which this key says) and its time from first to last line ({1}) — 1.11 B6"
     },
     "Largest session {0}: {1}": {
       "parts": [
@@ -296,6 +282,27 @@
       ],
       "state": "translate",
       "why": "the status bar item with resetFormat both, CC 5h 25% · resets at 06:00 (in 2h14m), is one whole message now ({0} the clock time, {1} the countdown): it replaces your resets at {0} wrapped around the code's brackets and your in {0}, so the verb, the brackets and the order are yours (zh-tw can write 06:00 重設（2h14m 後）) — your manifest example of config.resetFormat.enum.both quotes what this prints — 1.11 D12"
+    },
+    "What the same tokens would have cost through the API at your configured rates": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the API equivalent KPI's explanation while custom rates (tokenPace.pricing) apply — the list-prices sentence would be false then: the same words as its neighbour with your configured rates in place of list prices — 1.11 C3, Review 2 F2"
+    },
+    "⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the Records' ⚠ legend now covers the hours table too (an hour with an unpriced model is a floor as well) and is shown whenever a day or an hour is marked — 1.11 B1/B3, Review 2 F4"
+    },
+    "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "day(s) as the other count keys write it — the setting's minimum is 1 and printed kept for 1 days — 1.11 B3, Review 2 F5"
     }
   },
   "nls": {

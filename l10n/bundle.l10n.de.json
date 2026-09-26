@@ -229,7 +229,7 @@
   "Hit": "Treffer",
   "Hit rate": "Trefferquote",
   "Hour": "Stunde",
-  "Hour buckets are kept for {0} days (tokenPace.hourRetentionDays); earlier hours are not ranked.": "Stunden-Buckets bleiben {0} Tage erhalten (tokenPace.hourRetentionDays); frühere Stunden werden nicht eingereiht.",
+  "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.": "Stunden-Buckets bleiben {0} Tag(e) erhalten (tokenPace.hourRetentionDays); frühere Stunden werden nicht eingereiht.",
   "Hours ({0}, {1} day(s)): peak {2} · {3}": "Stunden ({0}, {1} Tag(e)): Spitze {2} · {3}",
   "Hours with the most cache written": "Stunden mit dem meisten Cache-Schreiben",
   "How": "Wie",
@@ -713,6 +713,7 @@
   "What it does": "Was er tut",
   "What it needs": "Was er braucht",
   "What the same tokens would have cost through the API at list prices": "Was dieselben Token über die API zu Listenpreisen gekostet hätten",
+  "What the same tokens would have cost through the API at your configured rates": "Was dieselben Token über die API mit Ihren konfigurierten Sätzen gekostet hätten",
   "When the status line reports that the one-hour prompt cache of a Claude Code session running in a VS Code terminal of this window has three minutes or less left, Token Pace starts a one-minute countdown in the status bar that you can cancel. When it ends, Token Pace types “{0}” into that terminal and presses Enter — about two minutes before the cache expires, at most three times in a row, and never while a Claude quota window stands at 90 % or more.": "Meldet die Statuszeile, dass der Ein-Stunden-Prompt-Cache einer Claude-Code-Sitzung, die in einem VS-Code-Terminal dieses Fensters läuft, noch drei Minuten oder weniger warm ist, startet Token Pace in der Statusleiste einen einminütigen Countdown, den Sie abbrechen können. Wenn er endet, tippt Token Pace „{0}“ in dieses Terminal und drückt die Eingabetaste — etwa zwei Minuten vor dem Ablauf des Caches, höchstens dreimal hintereinander und nie, solange ein Fenster des Claude-Kontingents bei 90 % oder mehr steht.",
   "Why amber": "Warum orange",
   "Why green": "Warum grün",
@@ -1235,7 +1236,7 @@
   "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": "• Codex — der lokale „codex app-server“ wird gestartet und nach seinen Rate-Limits gefragt.\n  Dafür verlässt kein Datenverkehr von uns den Rechner.",
   "… {0} more": "… {0} weitere",
   "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ kennzeichnet eine Untergrenze: Die ältesten Stunden des Zeitraums sind bereits zu Tagessummen zusammengefasst",
-  "⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.": "⚠ = Untergrenze: Der Tag enthält Verbrauch ohne hinterlegten Preis, oder an ihm beginnen die Transkripte auf dem Datenträger.",
+  "⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.": "⚠ = Untergrenze: Der Tag oder die Stunde enthält Verbrauch ohne hinterlegten Preis, oder an dem Tag beginnen die Transkripte auf dem Datenträger.",
   "⚠ lower bound — {0} of {1} replies unfinished": "⚠ Untergrenze — {0} von {1} Antworten unvollständig",
   "⚠ marks a lower bound: some replies were never marked finished, and only the output written up to then is counted.": "⚠ kennzeichnet eine Untergrenze: Einige Antworten wurden nie als abgeschlossen markiert, gezählt wird nur die bis dahin geschriebene Ausgabe."
 }

@@ -2383,15 +2383,17 @@ test('1.11 B7: in German the four tables\' lines, header rows and notes are Germ
     setBundle(undefined)
     setLocale(undefined)
   }
-  for (const label of ['Teuerster Tag ', 'Längste Sitzung Sitzung ', 'Größte Sitzung Sitzung ', 'Meistes Cache-Schreiben ']) {
+  for (const label of ['Teuerster Tag ', 'Längste Sitzung ', 'Größte Sitzung ', 'Meistes Cache-Schreiben ']) {
     assert.ok(items.some((i) => i.label.startsWith(label)), label)
   }
+  // 1.11 pre-freeze fix (rewritten): the session's name no longer repeats the word the key says.
+  assert.equal(items.some((i) => i.label.includes('Sitzung Sitzung')), false)
   assert.ok(items.some((i) => (i.description ?? '').endsWith('⚠ Untergrenze')), 'the floor day in German')
   for (const header of ['| Teuerster Tag | API-Kosten | Verbrauch |', '| Längste Sitzung | Zeit | Verbrauch | Beginn |',
     '| Größte Sitzung | Verbrauch | Zeit | Beginn |', '| Stunde | Cache geschrieben | davon 1 h | API-Kosten | Modelle |']) {
     assert.ok(part.includes(header), `${header}\n${part.join('\n')}`)
   }
-  assert.ok(part.includes('_⚠ = Untergrenze: Der Tag enthält Verbrauch ohne hinterlegten Preis, oder an ihm beginnen die Transkripte auf dem Datenträger._'))
+  assert.ok(part.includes('_⚠ = Untergrenze: Der Tag oder die Stunde enthält Verbrauch ohne hinterlegten Preis, oder an dem Tag beginnen die Transkripte auf dem Datenträger._'))
   assert.ok(part.some((l) => l.startsWith('_Claude-Code-Sitzungen der letzten 7 Tage, die nicht mehr aktiv sind')), part.join('\n'))
   assert.ok(part.some((l) => l.startsWith('_Ein großes Cache-Schreiben ist meist ein Kaltstart')), part.join('\n'))
 })

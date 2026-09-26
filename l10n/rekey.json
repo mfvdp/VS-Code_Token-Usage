@@ -259,7 +259,7 @@
       "kind": "add",
       "part": "text",
       "key": "Longest session {0}: {1}",
-      "why": "a Quick Pick line of the Records: a session's name ({0}, e.g. Session Tue 14:20 · 9d0eb37a) and its time from first to last line ({1}) — 1.11 B6"
+      "why": "a Quick Pick line of the Records: a session's name ({0}, e.g. Tue 14:20 · 9d0eb37a — its start and the first eight characters of its id, without the word session, which this key says) and its time from first to last line ({1}) — 1.11 B6"
     },
     {
       "n": 35,
@@ -501,6 +501,34 @@
       "kind": "nls-reword",
       "key": "config.resetFormat.enum.both",
       "why": "the English value is unchanged, but the status bar now prints this example from the new whole key resets at {0} (in {1}) (entry 62) — once you have translated that key, your example quotes exactly what the bar prints with it, brackets and order included (T15) — 1.11 D12"
+    },
+    {
+      "n": 65,
+      "by": "lead",
+      "kind": "add",
+      "part": "model",
+      "key": "What the same tokens would have cost through the API at your configured rates",
+      "why": "the API equivalent KPI's explanation while custom rates (tokenPace.pricing) apply — the list-prices sentence would be false then: the same words as its neighbour with your configured rates in place of list prices — 1.11 C3, Review 2 F2"
+    },
+    {
+      "n": 66,
+      "by": "lead",
+      "kind": "reword",
+      "part": "model",
+      "old": "⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.",
+      "key": "⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.",
+      "carry": false,
+      "why": "the Records' ⚠ legend now covers the hours table too (an hour with an unpriced model is a floor as well) and is shown whenever a day or an hour is marked — 1.11 B1/B3, Review 2 F4"
+    },
+    {
+      "n": 67,
+      "by": "lead",
+      "kind": "reword",
+      "part": "model",
+      "old": "Hour buckets are kept for {0} days (tokenPace.hourRetentionDays); earlier hours are not ranked.",
+      "key": "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.",
+      "carry": false,
+      "why": "day(s) as the other count keys write it — the setting's minimum is 1 and printed kept for 1 days — 1.11 B3, Review 2 F5"
     }
   ]
 }

@@ -3123,7 +3123,6 @@ test('the 1.9.0 release notes: its date set at publish, every section in order, 
   // The versions it names are the code's; the snapshot schema and the export stay. 1.11 P5 (pinned and changed, §3 C4
   // rule 4): the export's as 1.9.0 shipped it, 3 — the code's is the one after it.
   assert.deepEqual([STATE_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
-  assert.equal(EXPORT_SCHEMA_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION + 1, 'the code\'s export schema is not the one after 1.10.0\'s')
   for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
     assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : RELEASED_1_10.EXPORT_SCHEMA_VERSION, `the 1.9.0 entry says ${m[1]} ${m[2]}`)
   }

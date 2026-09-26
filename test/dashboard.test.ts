@@ -3379,7 +3379,7 @@ test('the records section states the buckets it had to leave out', () => {
 // 1.11 B6 (page), B8 6, C3: the Records section's four new tables on the page, and the cost head
 // ---------------------------------------------------------------------------
 
-const RECORDS_LEGEND = '⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.'
+const RECORDS_LEGEND = '⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.'
 
 /** The Records of 1.11 as the view model gives them: every table with a row, a floor in two of them, a hostile model id. */
 function newRecordsData(over: Record<string, unknown> = {}): Record<string, unknown> {

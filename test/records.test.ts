@@ -376,7 +376,7 @@ test('1.11 B1: ⚠ on a day with an unpriced bucket and on the first day of cove
   assert.deepEqual(r.costDays.map((d) => [d.day, d.floor]), [['2026-09-03', false], ['2026-09-02', true], ['2026-08-20', true]])
   // The floor day's usage counts the unpriced bucket too; its cost only the priced one.
   assert.deepEqual([r.costDays[1].cost, r.costDays[1].usage], ['~$10.00', '2.5M'])
-  assert.equal(r.recordNotes[0], '⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.')
+  assert.equal(r.recordNotes[0], '⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.')
   assert.equal(r.note, '1 rolled-up month bucket in this range has no day left and is not in these records')
 })
 
@@ -546,7 +546,7 @@ test('1.11 B3: an hour with an unpriced write is a floor while its cost is shown
   // The horizon: a 30-day range lies inside 45 kept days, a range from July does not.
   assert.equal(r.recordNotes.some((n) => n.startsWith('Hour buckets are kept')), false)
   const july = records(ctxOf(agg, { sources: ['claude'] }), custom('2026-07-01', TODAY), 5, '2026-07-01', true, WORDS)
-  assert.ok(july.recordNotes.includes('Hour buckets are kept for 45 days (tokenPace.hourRetentionDays); earlier hours are not ranked.'))
+  assert.ok(july.recordNotes.includes('Hour buckets are kept for 45 day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.'))
 })
 
 test('1.11 B4: while the history is being read there is no record at all — the one sentence instead', () => {
@@ -612,4 +612,22 @@ test('1.11 §0a.2 leak test: the session is ranked by its name, and its path —
   const exportRange = { from: '2026-08-01', to: TODAY }
   assert.equal(toCsv(agg, exportRange, cfg, tcfg).includes(SECRET), false, 'the CSV')
   assert.equal(toJson(agg, exportRange, cfg, tcfg, NOW).includes(SECRET), false, 'the JSON')
+})
+
+test('1.11 B1/B3 (Review 2 F4): the ⚠ legend stands whenever an hour is a floor, even with no priced day to mark', () => {
+  // The hour with the unpriced write lies on a cheap day; with N = 1 the cost table shows only the expensive priced day,
+  // so no day carries the ⚠ — the hour still does, and the legend must explain it (Review 2 F4).
+  const agg = fromBuckets([
+    written(2, 100_000), written(2, 50_000, 0, 'claude-experimental-x'),
+    { ...emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, '2026-09-02'), input: 5_000_000, output: 100_000, requests: 1, outputFinal: 1 },
+  ])
+  const r = records(ctxOf(agg, { sources: ['claude'] }), range('30d'), 1, '2026-07-01', true, WORDS)
+  assert.deepEqual(r.costDays.map((d) => [d.day, d.floor]), [['2026-09-02', false]])
+  assert.equal(r.cacheHours.length, 1)
+  assert.equal(r.cacheHours[0].floor, true)
+  assert.equal(r.recordNotes[0], '⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.')
+  // Without a floor anywhere the legend is not written.
+  const plain = records(ctxOf(fromBuckets([written(2, 500_000)]), { sources: ['claude'] }), range('30d'), 5, '2026-07-01', true, WORDS)
+  assert.equal(plain.cacheHours[0].floor, false)
+  assert.equal(plain.recordNotes.some((n) => n.startsWith('⚠ = a lower bound')), false, plain.recordNotes.join('\n'))
 })

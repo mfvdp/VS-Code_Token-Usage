@@ -16,6 +16,7 @@ import { RUNNING_WINDOW_MS, RunningItem } from '../src/agentTree'
 import {
   AGENTS_TOOLTIP_ITEMS, AgentsReading, autoExplain, buildItems, footerLine, ItemModel, itemModel, makeContext, previewItems, problemText,
   problemTooltip, problemView, quotaTooltip, selectWindows, StatusTextInput, summaryTooltip, tokenTooltip, UsageSource,
+  budgetTooltip,
 } from '../src/statusText'
 import { CACHE_WATCH_MAX, CacheWatchEntry, cachePhase, watchCaches } from '../src/cacheWatch'
 import { addCacheSession, buildAgg } from './fixtures/viewFixtures'
@@ -1915,4 +1916,18 @@ test('the preview shows the prompt cache cooling, measured with a second session
     assert.ok(m.tooltipMarkdown.startsWith('**Prompt cache cooling**'), m.tooltipMarkdown)
     assert.doesNotMatch(`${m.tooltipMarkdown}${m.ariaLabel}`, /NaN|undefined/)
   }
+})
+
+test('1.11 C2 (Review 2 F3): the budgets tooltip prints the price line when a budget is in money, and not for token budgets alone', () => {
+  const row = (unit: BudgetRow['unit']): BudgetRow => ({
+    key: `total/month/${unit}`, identity: `total/month/${unit}/2026-09`, label: 'total · month', scope: 'total', period: 'month', unit,
+    from: '2026-09-01', to: '2026-09-30', last: '2026-09-03', limit: 50, limitText: unit === 'usd' ? '$50' : '50M', used: 12, usedText: unit === 'usd' ? '~$12.00' : '12M',
+    share: 0.24, shareText: '24 %', over: false, partial: false, covered: true, projected: null, projectedText: null, projectionBasis: null, projectedOver: false,
+    text: unit === 'usd' ? 'total · month: ~$12.00 of $50 (24 %)' : 'total · month: 12M of 50M (24 %)',
+  } as BudgetRow)
+  const ctx = makeContext(input({ cfg: cfg({ showCost: true }) }))
+  const money = budgetTooltip([row('usd')], ctx)
+  assert.ok(money.includes('Prices as of '), money)
+  const tokens = budgetTooltip([row('tokens')], ctx)
+  assert.equal(tokens.includes('Prices as of '), false, tokens)
 })

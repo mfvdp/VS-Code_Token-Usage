@@ -93,7 +93,7 @@
   "HTTP 403 — may mean a Team/Enterprise account without a usage endpoint; token counts keep working": "HTTP 403 — möglicherweise ein Team-/Enterprise-Konto ohne Verbrauchs-Endpunkt; die Token-Zahlen funktionieren weiter",
   "HTTP {0} — backing off before the next attempt": "HTTP {0} — Wartezeit vor dem nächsten Versuch",
   "Hindi": "Hindi",
-  "Hour buckets are kept for {0} days (tokenPace.hourRetentionDays); earlier hours are not ranked.": "Stunden-Buckets bleiben {0} Tage erhalten (tokenPace.hourRetentionDays); frühere Stunden werden nicht eingereiht.",
+  "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.": "Stunden-Buckets bleiben {0} Tag(e) erhalten (tokenPace.hourRetentionDays); frühere Stunden werden nicht eingereiht.",
   "Hungarian": "Ungarisch",
   "ID": "ID",
   "Idle — inferred: the session transcript has been silent since {0}.": "Ruht — abgeleitet: Das Sitzungstranskript hat sich seit {0} nicht mehr geändert.",
@@ -268,6 +268,7 @@
   "Vietnamese": "Vietnamesisch",
   "Wed": "Mi",
   "What the same tokens would have cost through the API at list prices": "Was dieselben Token über die API zu Listenpreisen gekostet hätten",
+  "What the same tokens would have cost through the API at your configured rates": "Was dieselben Token über die API mit Ihren konfigurierten Sätzen gekostet hätten",
   "Why amber": "Warum orange",
   "Why green": "Warum grün",
   "Why grey": "Warum grau",
@@ -483,6 +484,6 @@
   "~empty in {0} ({1}) · medium confidence": "~leer in {0} ({1}) · mittlere Sicherheit",
   "~ends at {0} when it resets": "~endet bei {0} beim Reset",
   "“Usage” = fresh input + cache write + output; cache reads are listed apart because they outnumber the rest by orders of magnitude.": "„Verbrauch“ = frische Eingabe + Cache-Schreiben + Ausgabe; Cache-Lesen wird gesondert aufgeführt, weil es den Rest um Größenordnungen übertrifft.",
-  "⚠ = a lower bound: the day holds usage without a price on file, or the transcripts on disk begin that day.": "⚠ = Untergrenze: Der Tag enthält Verbrauch ohne hinterlegten Preis, oder an ihm beginnen die Transkripte auf dem Datenträger.",
+  "⚠ = a lower bound: the day or the hour holds usage without a price on file, or the transcripts on disk begin that day.": "⚠ = Untergrenze: Der Tag oder die Stunde enthält Verbrauch ohne hinterlegten Preis, oder an dem Tag beginnen die Transkripte auf dem Datenträger.",
   "⚠ lower bound — {0} of {1} replies unfinished": "⚠ Untergrenze — {0} von {1} Antworten unvollständig"
 }

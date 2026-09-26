@@ -1260,6 +1260,8 @@ export function budgetTooltip(rows: BudgetRow[], ctx: RenderContext): string {
     out.push('')
     out.push(`_${t('measured: local buckets · limit: your own')}_`)
   }
+  // 1.11 C2 (Review 2 F3): a money budget is a cost figure — the same price line as the usage tables' tooltips.
+  if (rows.some((b) => b.unit === 'usd')) out.push(...priceLine(ctx, scopeSources(cfg)))
   out.push('')
   out.push(footerLine(ctx))
   return out.join('\n')

@@ -1333,3 +1333,11 @@ test('the plan factor, its bound and the heat map\'s variability are written in 
     }
   }
 })
+
+test('1.11 C3 (Review 2 F2): the API equivalent tile explains itself at list prices, or at your configured rates while custom rates apply', () => {
+  const at = (pricing: StatsCtx['pricing']): string => JSON.stringify(kpis(ctxOf(buildAgg(), { pricing }), range('30d'), null).find((k) => k.key === 'cost')?.explain ?? null)
+  const list = at({ overrides: {}, multiplier: 1, unknownModel: 'strict' })
+  assert.ok(list.includes('What the same tokens would have cost through the API at list prices') && !list.includes('your configured rates'), list)
+  const custom = at({ overrides: {}, multiplier: 0.9, unknownModel: 'strict' })
+  assert.ok(custom.includes('What the same tokens would have cost through the API at your configured rates') && !custom.includes('at list prices'), custom)
+})

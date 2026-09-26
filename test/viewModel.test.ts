@@ -1965,7 +1965,7 @@ test('1.11 B4 (§0a.4): VmInput.settled false — the Records say "Reading histo
   assert.equal(reading.firstRun, settled.firstRun)
 })
 
-test('1.11 B2: the Records name a session exactly as the Agents tree does, and follow dashboard.topN and hourRetentionDays', () => {
+test('1.11 B2: the Records name a session as the Agents tree does, without the word Session (the lead\'s pre-freeze fix), and follow dashboard.topN and hourRetentionDays', () => {
   const agg = buildAgg()
   addCacheSession(agg, { sessionId: 'aaaa1111-0000', at: NOW - 56 * 60_000 })
   addCacheSession(agg, { sessionId: 'bbbb2222-0000', at: NOW - 3 * 3_600_000, firstAt: NOW - 9 * 3_600_000 })
@@ -1983,10 +1983,11 @@ test('1.11 B2: the Records name a session exactly as the Agents tree does, and f
   const longest = vm.records.longestSessions
   // The fixture's own session (its first line in July), then the two added ones.
   assert.deepEqual(longest.map((s) => s.sessionId), ['s1', 'bbbb2222-0000', 'aaaa1111-0000'])
-  for (const s of [...longest, ...vm.records.largestSessions]) assert.equal(s.name, labels.get(`s:${s.sessionId}`), s.sessionId)
-  assert.equal(longest[1].name, 'Session Thu 03:00 · bbbb2222')
+  // 1.11 pre-freeze fix (rewritten): the tree's label less its first word — the column head and the Quick Pick key say it.
+  for (const s of [...longest, ...vm.records.largestSessions]) assert.equal(`Session ${s.name}`, labels.get(`s:${s.sessionId}`), s.sessionId)
+  assert.equal(longest[1].name, 'Thu 03:00 · bbbb2222')
   // The 30-day range reaches past ten days of hour buckets.
-  assert.ok(vm.records.recordNotes.includes('Hour buckets are kept for 10 days (tokenPace.hourRetentionDays); earlier hours are not ranked.'),
+  assert.ok(vm.records.recordNotes.includes('Hour buckets are kept for 10 day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.'),
     vm.records.recordNotes.join('\n'))
   // dashboard.topN caps every new table (B5).
   const one = buildViewModel(makeInput({ agg, cfg: makeConfig({ 'tokenPace.dashboard.topN': 1 }) }))

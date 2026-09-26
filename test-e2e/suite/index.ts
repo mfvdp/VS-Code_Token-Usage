@@ -302,6 +302,44 @@ check('the dashboard command opens the dashboard', async () => {
   }
 })
 
+// 1.10 P5 (§3 A7, Review 1b F7). The seam: two members of the exported API. `dashboardDrawn()` names the sections
+// the page drew in its last acknowledged whole render — a section whose body the page filled, which only its
+// renderer does; a key the page merely lists is not among them (the `rendered` count alone was not enough).
+// `promptSendCheck(id)` answers, as a code, what a send of that entry would do now — the steps the page's send
+// takes before its first question to the reader. It types nothing, asks nothing and shows nothing: no seam can
+// make Token Pace type into a terminal, which only the reader's own click on the page does.
+check('the Prompts section is drawn, and without a Claude Code or Codex terminal a send is refused', async () => {
+  const tp = extensionApi()
+  const listed = settings().inspect<string[]>('dashboard.sections')?.defaultValue ?? []
+  assert.equal(listed.includes('prompts'), false, 'prompts is in the default sections')
+  assert.equal(tp.promptSendCheck('s-status'), 'notListed')
+  // A plain shell beside: a terminal that runs neither program is never a candidate.
+  const shell = vscode.window.createTerminal({ name: 'token-pace-e2e plain shell' })
+  const terminals = vscode.window.terminals.length
+  await settings().update('dashboard.sections', ['prompts', ...listed], vscode.ConfigurationTarget.Global)
+  try {
+    await vscode.commands.executeCommand('tokenPace.showDashboard')
+    const drawn = await waitFor('the page to draw the Prompts section', () => (tp.dashboardDrawn().includes('prompts') ? tp.dashboardDrawn() : null))
+    // First, where dashboard.sections puts it.
+    assert.equal(drawn[0], 'prompts', `the section is not where dashboard.sections puts it: ${drawn.join(', ')}`)
+    // Listed, trusted (an empty window), no transcript to read: the check a send makes first.
+    const code = await waitFor('the send check to see the section listed and the transcripts read', () => {
+      const c = tp.promptSendCheck('s-status')
+      return c === 'notListed' || c === 'reading' ? null : c
+    })
+    assert.equal(code, 'noTerminal')
+    assert.equal(tp.promptSendCheck('u-00000000'), 'notFound')
+    console.log(`     prompts: drawn first of ${drawn.length} section(s); a send → ${code}`)
+    // Nothing was opened for it: the window holds the terminals it held.
+    assert.equal(vscode.window.terminals.length, terminals)
+  } finally {
+    await settings().update('dashboard.sections', undefined, vscode.ConfigurationTarget.Global)
+    shell.dispose()
+  }
+  await waitFor('the section to leave the page', () => !tp.dashboardDrawn().includes('prompts'))
+  assert.equal(tp.promptSendCheck('s-status'), 'notListed')
+})
+
 // ---------------------------------------------------------------------------
 // run()
 // ---------------------------------------------------------------------------

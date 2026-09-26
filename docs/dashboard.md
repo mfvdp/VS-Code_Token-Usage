@@ -10,7 +10,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 *Token Pace: Open Dashboard* (`ctrl+alt+shift+t`, `cmd+alt+shift+t` on macOS, unless
 `tokenPace.keybindings` is off) opens the panel in the secondary sidebar. It needs
 **VS Code 1.106 or newer**, for the reason given in the [README](../README.md).
-`tokenPace.dashboard.sections` is an ordered array — the array order is the render order. Every section is set off from the one above it by a rule and a fixed gap, whether it is folded or not, and its header carries a gear that opens the settings behind that section. The provider switch at the very top of the page — `Claude Code`, `Codex`, `All` — governs every section below it: under one provider the page shows only that provider's quota card, tokens, summary, key figures, chart, models, heatmap, hours, records, tools, projects, sessions, budgets, reset history and data quality, a footnote says so (*Showing Codex only — the provider switch at the top of the dashboard; ‘All’ shows every provider.*), and while Codex is selected the Claude Code–only `agents` and `context` sections are left out; `All` shows every provider, as the page always did, and a change of provider clears the model chips. The markdown view, the Quick Pick and *Copy Usage Summary* follow the switch too (the markdown's range line ends `· Codex only`, the Quick Pick's first line starts with the provider); the status bar, its tooltips, the alerts, the export and the diagnostics report follow no view. The range and model chips filter the statistics — not the quota cards, not the agent tree, which is always the last seven days, and not the `tokens` section, whose periods are fixed — so the filter bar sits below every `quota`, `agents`, `context` and `tokens` section that leads the list and above the first section the filter applies to; a filter-free section listed after a filtered one simply stays below the bar:
+`tokenPace.dashboard.sections` is an ordered array — the array order is the render order. Every section is set off from the one above it by a rule and a fixed gap, whether it is folded or not, and its header carries a gear that opens the settings behind that section. The provider switch at the very top of the page — `Claude Code`, `Codex`, `All` — governs every section below it: under one provider the page shows only that provider's quota card, tokens, summary, key figures, chart, models, heatmap, hours, records, tools, projects, sessions, budgets, reset history and data quality, a footnote says so (*Showing Codex only — the provider switch at the top of the dashboard; ‘All’ shows every provider.*), and while Codex is selected the Claude Code–only `agents` and `context` sections are left out; `All` shows every provider, as the page always did, and a change of provider clears the model chips. The markdown view, the Quick Pick and *Copy Usage Summary* follow the switch too (the markdown's range line ends `· Codex only`, the Quick Pick's first line starts with the provider); the status bar, its tooltips, the alerts, the export and the diagnostics report follow no view. The range and model chips filter the statistics — not the quota cards, not the agent tree, which is always the last seven days, not the `tokens` section, whose periods are fixed, and not your prompt list — so the filter bar sits below every `quota`, `agents`, `context`, `tokens` and `prompts` section that leads the list and above the first section the filter applies to; a filter-free section listed after a filtered one simply stays below the bar:
 
 | Section | Contents |
 |---|---|
@@ -125,6 +125,21 @@ settings, the models gear to the row cap and the price table, and so on; every l
 `tokenPace.dashboard.sections`. It never toggles the fold, with the mouse or with the
 keyboard, and it changes nothing on its own: it opens the settings you would otherwise have
 to find among all of them.
+
+**Prompts.** The `prompts` section — not in the default; add it to `tokenPace.dashboard.sections`, first
+for the quickest reach — is your own list of prompts for Claude Code and Codex. At its top a dim line
+says how it works and that text typed in the terminal and not sent yet goes with a prompt, a second
+one where a prompt would go now (*Sends to Claude Code in terminal 2 of 3 — ready*); then the
+prompts, each its title with up to two lines of its text under it (a slash command in the editor
+font; the whole text in its tooltip) and a send button beside it; at the end *New prompt*, and
+*Restore default prompts* while a shipped prompt is missing. A double-click on a prompt, its send
+button, or Ctrl+Enter (⌘+Enter on a Mac) on it types its text into the terminal that runs Claude Code
+or Codex and presses Enter; a click opens its title and text in its place after a third of a second,
+so that a double-click never leaves them open; Enter or leaving the fields saves, Escape leaves the
+prompt as it was, *Delete* asks in the page first, *Move up* and *Move down* reorder. Fields you have
+open keep what you typed through every update of the page, a language switch included. The editing
+rules, the keys and what a screen reader hears are in [Prompts](prompts.md#editing); where a prompt
+goes and when Token Pace asks first, in [Sending](prompts.md#sending).
 
 **Peak hours.** No fixed peak windows are built in. The profile is drawn from your own hour
 buckets and nothing else, and rolled-up days that no longer have an hour are named as excluded
@@ -251,10 +266,12 @@ and their hues — taken out, they are drawn as patterns in the theme's two colo
 above), and a subagents' band under 4 px tall is striped, where its ring would otherwise fill it and
 make it look like the main sessions' solid band. The focus
 stays on its row — the running list's button, or the tree's item — when the section is pushed
-again, on the provider switch's button you pressed when the switch is, and on the language picker's flag after a choice. The webview loads no external resource of any kind — its CSP
+again, on the provider switch's button you pressed when the switch is, and on the language picker's flag after a choice; in the Prompts section it stays in the open fields, with the selection you had, or on the control you pressed there. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
 range, a sort, a filter, a provider for the switch (`all` or one the registry knows), a language for the picker (`auto` or one of the fourteen ids — the one setting the page can have written, `tokenPace.language`, in your user settings), a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
 open, close, select or show more children of — at most 200 characters, and only ever matched against the nodes the tree
-was built with — or one of a fixed list of named commands; never a path and never another setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
+was built with —, the id of a prompt to send, delete or move, a prompt's title and text to save (at most 80 and 2000
+characters, cleaned once more before they are stored; a send carries the id alone, and Token Pace types the text it
+reads for that id), or one of a fixed list of named commands; never a path and never another setting. Where a webview is unavailable or unwanted, the QuickPick and markdown views
 carry the same figures.

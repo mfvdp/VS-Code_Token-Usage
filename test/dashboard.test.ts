@@ -2892,15 +2892,17 @@ test('the prompt-cache line is the last line of the Claude card, and only with a
   const empty = render('sQuota()', { quotas: [card({ promptCache: { text: '', note: 'n' } })] })
   assert.equal(empty.indexOf('prompt cache'), -1, empty)
   // Every word is the model's: a dash in the text stays a dash, and the line ticks on nothing
-  // of its own. The page has exactly one timer, and it moves the agent tree's live spans —
-  // this line carries none.
+  // of its own. The page has exactly one interval, and it moves the agent tree's live spans —
+  // this line carries none. 1.10 P5 (pinned and changed: no setTimeout at all): the Prompts section's
+  // own timeouts — the single click's delay, a draw after the focus moved or the pointer came up, the
+  // page's sentence in its flash line — each inside a prompt function, none of them near this line.
   const bare = render('sQuota()', {
     quotas: [card({ promptCache: { text: 'prompt cache – · expires in – (– TTL) · hit ratio –', note: 'n' } })],
   })
   assert.ok(bare.indexOf('prompt cache – · expires in – (– TTL) · hit ratio –') >= 0, bare)
   assert.equal(bare.indexOf('data-live'), -1, bare)
-  assert.equal(/setTimeout/.test(SCRIPT + SOURCE), false)
   assert.equal((SOURCE.match(/setInterval\(/g) ?? []).length, 1)
+  assert.deepEqual(timeoutsBy(), ['promptDrawLater', 'promptSay', 'promptEditClick', 'promptPointerUp'])
 })
 
 test('the prompt-cache line carries its own age, and an old reading is marked as one', () => {
@@ -5044,7 +5046,8 @@ test('one timer, started with the first payload, keeps the live spans current wi
   // Two clocks a second apart never make a negative time.
   assert.equal(tick(AG_NOW - 43_000), '0 s')
   assert.equal(a.root.innerHTML, html, 'a tick re-rendered the page')
-  assert.deepEqual(a.posted, [{ type: 'rendered', sections: 2 }], 'a tick posted a message')
+  // 1.10 P5 (pinned and changed: the acknowledgement names the sections the page drew — none in this fake document).
+  assert.deepEqual(a.posted, [{ type: 'rendered', sections: 2, drawn: [] }], 'a tick posted a message')
   // A second payload, and a push of the section itself, start no second timer.
   a.fire('window:message', { origin: '', data: { type: 'data', payload } })
   a.fire('window:message', {
@@ -5091,7 +5094,8 @@ test('a click on a toggle or a row posts what the host parses, and a second clic
   // Once the host has moved them under the running row, that row closes them and the tree row
   // takes them back.
   pageWith('now')
-  assert.deepEqual(a.posted.pop(), { type: 'rendered', sections: 1 })
+  // 1.10 P5 (pinned and changed: the acknowledgement names the sections the page drew — none in this fake document).
+  assert.deepEqual(a.posted.pop(), { type: 'rendered', sections: 1, drawn: [] })
   a.fire('document:click', event(button('agentSelect', AK.a1, 'now')))
   a.fire('document:click', event(button('agentSelect', AK.a1)))
   const expected = [
@@ -9207,4 +9211,1085 @@ test('after a switch the next whole push carries the words — German\'s diction
     setLocale(undefined)
     setLang(undefined)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 A2, A5: the Prompts section on the page
+// ---------------------------------------------------------------------------
+
+/**
+ * 1.10 P5: for every `setTimeout(` in src/webview/main.ts, the top-level function it stands in — the page's
+ * timeouts are the Prompts section's own (the single click's delay, a draw after the focus moved or the
+ * pointer came up, the page's sentence in the flash line).
+ */
+function timeoutsBy(): string[] {
+  const out: string[] = []
+  let fn = '(top level)'
+  for (const line of SOURCE.split('\n')) {
+    const m = /^(?:async )?function (\w+)/.exec(line)
+    if (m) fn = m[1]
+    else if (/^\S/.test(line) && !/^[}\])]/.test(line)) fn = '(top level)'
+    for (const _ of line.matchAll(/setTimeout\(/g)) out.push(fn)
+  }
+  return out
+}
+
+/** The three shipped entries, one user entry and the keep-warm entry edited to its /loop variant (§3 A7's world). */
+function promptsVm(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    items: [
+      { id: 's-status', title: 'Status table', text: 'Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.', shipped: true, edited: false, command: false },
+      { id: 's-keepwarm', title: 'Keep the cache warm', text: '/loop 30m Ignore this message. No action. No response.', shipped: true, edited: true, command: true },
+      { id: 's-stop', title: 'Stop after this task', text: 'Stop after the current task and do not start any new work.', shipped: true, edited: false, command: false },
+      { id: 'u-3k9x0a2b', title: 'Review', text: 'Review the last diff for correctness.', shipped: false, edited: false, command: false },
+    ],
+    intro: 'Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.',
+    target: { text: 'Sends to Claude Code in terminal 2 of 3 — ready', level: 'ready' },
+    flash: null,
+    canAdd: true,
+    restorable: 0,
+    readOnly: null,
+    limits: { title: 80, text: 2000, max: 50 },
+    ...over,
+  }
+}
+
+/** A node of the fake document below: an element, or a text. */
+type FNode = FEl | { text: string; parentNode: FEl | null }
+const HTML_ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' }
+const unEntity = (s: string): string => s.replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_m, e: string) => HTML_ENTITY[e])
+const VOID_TAGS = new Set(['br', 'img', 'input', 'hr', 'wbr', 'meta', 'link'])
+
+/**
+ * 1.10 P5: an element of a small document the page's script can work on — parsed from the markup the page writes,
+ * with the attributes, the dataset, the text, a field's value and selection, the focus, and the selectors the
+ * script asks for (tag, #id, .class, [attr], [attr="v"], :scope, the descendant and the child combinator). What a
+ * browser lays out is not here: every box is empty. The harness holds the layout.
+ */
+class FEl {
+  tagName: string
+  attrs: Record<string, string>
+  nodes: FNode[] = []
+  parentNode: FEl | null = null
+  value = ''
+  selectionStart = 0
+  selectionEnd = 0
+  hidden = false
+  style: Record<string, string> & { setProperty?: (k: string, v: string) => void } = { setProperty: () => undefined } as never
+  html = ''
+  doc: FakeDoc
+  constructor(doc: FakeDoc, tag: string, attrs: Record<string, string> = {}) {
+    this.doc = doc
+    this.tagName = tag.toUpperCase()
+    this.attrs = attrs
+    // Out of sight of util.inspect: a failed assert.equal between two elements inspects both at depth 1000 and diffs
+    // the two texts — through the document, the tree and the page's listeners that diff ran to gigabytes outside the
+    // heap cap (2026-09-26, the OOM kill of 04:57). An element inspects as its tag, attributes and field state.
+    for (const k of ['doc', 'nodes', 'parentNode', 'html', 'style']) {
+      Object.defineProperty(this, k, { enumerable: false, writable: true, configurable: true, value: (this as Record<string, unknown>)[k] })
+    }
+  }
+  get children(): FEl[] { return this.nodes.filter((n): n is FEl => n instanceof FEl) }
+  get firstElementChild(): FEl | null { return this.children[0] ?? null }
+  get parentElement(): FEl | null { return this.parentNode }
+  get nextElementSibling(): FEl | null {
+    const sib = this.parentNode ? this.parentNode.children : []
+    return sib[sib.indexOf(this) + 1] ?? null
+  }
+  get id(): string { return this.attrs.id ?? '' }
+  get dataset(): Record<string, string> {
+    const d: Record<string, string> = {}
+    for (const [k, v] of Object.entries(this.attrs)) {
+      if (k.startsWith('data-')) d[k.slice(5).replace(/-([a-z])/g, (_x, ch: string) => ch.toUpperCase())] = v
+    }
+    return d
+  }
+  get classList(): { contains: (c: string) => boolean; add: (c: string) => void; remove: (c: string) => void } {
+    const list = (): string[] => (this.attrs.class ?? '').split(/\s+/).filter(Boolean)
+    return {
+      contains: (c: string) => list().includes(c),
+      add: (c: string) => { if (!list().includes(c)) this.attrs.class = [...list(), c].join(' ') },
+      remove: (c: string) => { this.attrs.class = list().filter((x) => x !== c).join(' ') },
+    }
+  }
+  getAttribute(k: string): string | null { return k in this.attrs ? this.attrs[k] : null }
+  setAttribute(k: string, v: string): void { this.attrs[k] = String(v) }
+  hasAttribute(k: string): boolean { return k in this.attrs }
+  removeAttribute(k: string): void { delete this.attrs[k] }
+  get textContent(): string {
+    return this.nodes.map((n) => (n instanceof FEl ? n.textContent : n.text)).join('')
+  }
+  set textContent(v: string) {
+    this.detachAll()
+    this.nodes = v === '' ? [] : [{ text: String(v), parentNode: this }]
+  }
+  get innerHTML(): string { return this.html }
+  set innerHTML(h: string) {
+    this.detachAll()
+    this.html = h
+    if (++this.doc.writes > PROMPT_PAGE_MAX_WRITES) throw new Error('innerHTML: more than ' + PROMPT_PAGE_MAX_WRITES + ' writes')
+    this.nodes = parseFake(this.doc, h, this)
+    if (this.doc.active !== null && !this.doc.connected(this.doc.active)) this.doc.active = null
+  }
+  private detachAll(): void {
+    for (const n of this.nodes) n.parentNode = null
+  }
+  contains(el: unknown): boolean {
+    let depth = 0
+    for (let x = el as FEl | null; x; x = x.parentNode) {
+      if (++depth > PROMPT_PAGE_MAX_DEPTH) throw new Error('contains: a parent chain deeper than ' + PROMPT_PAGE_MAX_DEPTH)
+      if (x === this) return true
+    }
+    return false
+  }
+  replaceChild(next: FEl, old: FEl): FEl {
+    const i = this.nodes.indexOf(old)
+    if (i < 0) throw new Error('replaceChild: not a child')
+    if (next.parentNode) next.parentNode.nodes = next.parentNode.nodes.filter((n) => n !== next)
+    this.nodes[i] = next
+    next.parentNode = this
+    old.parentNode = null
+    return old
+  }
+  insertAdjacentHTML(): void { throw new Error('insertAdjacentHTML is not part of the fake document') }
+  getBoundingClientRect(): Record<string, number> { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 } }
+  get scrollWidth(): number { return 0 }
+  get clientWidth(): number { return 0 }
+  setSelectionRange(a: number, b: number): void { this.selectionStart = a; this.selectionEnd = b }
+  focus(): void { this.doc.focus(this) }
+  scrollIntoView(): void { /* nothing to scroll */ }
+  matches(sel: string, scope: FEl | null = null): boolean { return selectorMatches(this, sel, scope) }
+  closest(sel: string): FEl | null {
+    let depth = 0
+    for (let x: FEl | null = this; x; x = x.parentNode) {
+      if (++depth > PROMPT_PAGE_MAX_DEPTH) throw new Error('closest: a parent chain deeper than ' + PROMPT_PAGE_MAX_DEPTH)
+      if (x.matches(sel)) return x
+    }
+    return null
+  }
+  all(): FEl[] {
+    const out: FEl[] = []
+    const walk = (e: FEl): void => { for (const k of e.children) { out.push(k); walk(k) } }
+    walk(this)
+    return out
+  }
+  querySelectorAll(sel: string): FEl[] { return this.all().filter((e) => e.matches(sel, this)) }
+  querySelector(sel: string): FEl | null { return this.querySelectorAll(sel)[0] ?? null }
+}
+
+/** The markup the page writes, as elements and texts; `<x/>` closes itself (the send button's glyph). */
+function parseFake(doc: FakeDoc, html: string, parent: FEl): FNode[] {
+  const top: FEl[] = [parent]
+  const out: FNode[] = []
+  const add = (n: FNode): void => {
+    const p = top[top.length - 1]
+    n.parentNode = p
+    if (p === parent) out.push(n); else p.nodes.push(n)
+  }
+  const re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z_:][-a-zA-Z0-9_:.]*(?:="[^"]*")?)*)\s*(\/?)>|([^<]+)/g
+  for (const m of html.matchAll(re)) {
+    if (m[5] !== undefined) { add({ text: unEntity(m[5]), parentNode: null }); continue }
+    const tag = m[2].toLowerCase()
+    if (m[1] === '/') {
+      const at = top[top.length - 1]
+      assert.equal(at.tagName.toLowerCase(), tag, 'unbalanced </' + tag + '> in ' + html.slice(0, 200))
+      top.pop()
+      continue
+    }
+    const attrs: Record<string, string> = {}
+    for (const a of m[3].matchAll(/\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:="([^"]*)")?/g)) attrs[a[1]] = unEntity(a[2] ?? '')
+    const el = new FEl(doc, tag, attrs)
+    add(el)
+    if (!VOID_TAGS.has(tag) && m[4] !== '/') top.push(el)
+  }
+  assert.equal(top.length, 1, 'unclosed ' + top.map((e) => e.tagName).join(' > '))
+  return out
+}
+
+/** One compound selector (`li.pr[data-id="x"]`) against one element. */
+function compoundMatches(el: FEl, sel: string, scope: FEl | null): boolean {
+  const re = /^([a-zA-Z*][a-zA-Z0-9]*)|#([-\w]+)|\.([-\w]+)|\[([-\w]+)(?:="([^"]*)"|='([^']*)')?\]|:scope/g
+  let rest = sel
+  for (const m of sel.matchAll(re)) {
+    rest = rest.replace(m[0], '')
+    if (m[1] !== undefined && m[1] !== '*' && el.tagName.toLowerCase() !== m[1].toLowerCase()) return false
+    if (m[2] !== undefined && el.id !== m[2]) return false
+    if (m[3] !== undefined && !el.classList.contains(m[3])) return false
+    if (m[4] !== undefined) {
+      if (!el.hasAttribute(m[4])) return false
+      const want = m[5] ?? m[6]
+      if (want !== undefined && el.getAttribute(m[4]) !== want) return false
+    }
+    if (m[0] === ':scope' && el !== scope) return false
+  }
+  // A pseudo-class the fake does not know matches nothing.
+  return rest.trim() === ''
+}
+
+/** A selector list (`a, b`) with the descendant and the child combinator. */
+function selectorMatches(el: FEl, sel: string, scope: FEl | null): boolean {
+  return sel.split(/\s*,\s*(?![^[]*\])/).some((one) => {
+    const parts = one.trim().replace(/\s*>\s*/g, ' > ').split(/\s+(?![^[]*\])/)
+    const matchAt = (e: FEl | null, i: number): boolean => {
+      if (!e || !compoundMatches(e, parts[i], scope)) return false
+      if (i === 0) return true
+      if (parts[i - 1] === '>') return matchAt(e.parentNode, i - 2)
+      let depth = 0
+      for (let up = e.parentNode; up; up = up.parentNode) {
+        if (++depth > PROMPT_PAGE_MAX_DEPTH) throw new Error('selector: a parent chain deeper than ' + PROMPT_PAGE_MAX_DEPTH)
+        if (matchAt(up, i - 1)) return true
+      }
+      return false
+    }
+    return matchAt(el, parts.length - 1)
+  })
+}
+
+/** The document the Prompts tests hand the page: a body, the root, the focus, the listeners, a clock and its timers. */
+class FakeDoc {
+  body: FEl
+  root: FEl
+  active: FEl | null = null
+  writes = 0
+  listeners: Record<string, Array<(ev: unknown) => void>> = {}
+  constructor() {
+    this.body = new FEl(this, 'body')
+    this.root = new FEl(this, 'div', { id: 'root' })
+    this.root.parentNode = this.body
+    this.body.nodes = [this.root]
+  }
+  /** Events fired and focus moves over the page's life — bounded (PROMPT_PAGE_MAX_EVENTS). */
+  events = 0
+  connected(el: FEl): boolean {
+    let depth = 0
+    for (let x: FEl | null = el; x; x = x.parentNode) {
+      if (++depth > PROMPT_PAGE_MAX_DEPTH) throw new Error('connected: a parent chain deeper than ' + PROMPT_PAGE_MAX_DEPTH)
+      if (x === this.body) return true
+    }
+    return false
+  }
+  /** A focus change as the browser makes it: focusout on the element that had it (still in the document), then the new one. */
+  focus(el: FEl): void {
+    const from = this.active
+    if (from === el) return
+    if (++this.events > PROMPT_PAGE_MAX_EVENTS) throw new Error('focus: more than ' + PROMPT_PAGE_MAX_EVENTS + ' events and focus moves')
+    if (from && this.connected(from)) this.fire('focusout', { target: from, relatedTarget: el })
+    this.active = el
+  }
+  fire(type: string, ev: Record<string, unknown>): { prevented: boolean } {
+    if (++this.events > PROMPT_PAGE_MAX_EVENTS) throw new Error('fire(' + type + '): more than ' + PROMPT_PAGE_MAX_EVENTS + ' events and focus moves')
+    const r = { prevented: false }
+    const full = { key: '', repeat: false, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false, keyCode: 0,
+      detail: 0, relatedTarget: null, ...ev, type, preventDefault: () => { r.prevented = true }, stopPropagation: () => undefined }
+    for (const fn of [...(this.listeners['document:' + type + ':capture'] ?? []), ...(this.listeners['document:' + type] ?? [])]) fn(full)
+    return r
+  }
+}
+
+/** The bounds of the fake page's timers (every loop of a test helper has one): timers run by one `advance`, … */
+const PROMPT_PAGE_MAX_STEPS = 200
+/** … timers run one after another at one clock time (a timer re-arming itself at 0 ms), … */
+const PROMPT_PAGE_MAX_SAME_TIME = 20
+/** … and timers pending at once. */
+const PROMPT_PAGE_MAX_TIMERS = 32
+/** The fake document's own bounds: events fired and focus moves over one page's life, writes of a body, a parent chain. */
+const PROMPT_PAGE_MAX_EVENTS = 2000
+const PROMPT_PAGE_MAX_WRITES = 1000
+const PROMPT_PAGE_MAX_DEPTH = 100
+
+interface PromptPage {
+  c: nodeVm.Context
+  doc: FakeDoc
+  posted: Array<Record<string, unknown>>
+  clock: { t: number }
+  /** Runs every timer due by `ms` from now, in order. */
+  advance: (ms: number) => void
+  /** Every timer still set. */
+  timers: () => number
+  push: (prompts: Record<string, unknown>) => void
+  whole: (over?: Record<string, unknown>) => void
+  body: () => FEl
+  q: (sel: string) => FEl | null
+  entry: (id: string) => FEl
+  send: (id: string) => FEl
+  field: (role: 'prTitle' | 'prText') => FEl | null
+  click: (el: FEl, detail?: number) => void
+  dblclick: (el: FEl) => void
+  key: (el: FEl, key: string, mods?: Record<string, unknown>) => { prevented: boolean }
+  /** A key on a button as the browser gives it: the keydown, and — Enter and Space, not prevented — the button's own click. */
+  press: (el: FEl, key: string, mods?: Record<string, unknown>) => void
+  type: (el: FEl, text: string) => void
+  leave: (to: FEl | null) => void
+  tab: (back?: boolean) => FEl
+  sends: () => string[]
+  saves: () => Array<Record<string, unknown>>
+}
+
+/**
+ * 1.10 P5: a page drawn through the page's own `data` message into the fake document, with `prompts` (the view
+ * model's Prompts part) listed alone or where `sections` puts it; `post` records what the page sends the host,
+ * `setTimeout` runs on `clock` (the page's Date.now as well).
+ */
+function promptPage(prompts: Record<string, unknown> = promptsVm(), o: { sections?: string[]; mac?: boolean; script?: string; over?: Record<string, unknown> } = {}): PromptPage {
+  const doc = new FakeDoc()
+  const posted: Array<Record<string, unknown>> = []
+  const clock = { t: AG_NOW }
+  let seq = 0
+  const timers: Array<{ id: number; at: number; fn: () => void }> = []
+  const on = (scope: string) => (type: string, fn: (ev: unknown) => void, capture?: unknown): void => {
+    (doc.listeners[scope + type + (capture === true ? ':capture' : '')] ??= []).push(fn)
+  }
+  const c = nodeVm.createContext({
+    acquireVsCodeApi: () => ({ postMessage: (m: unknown) => { posted.push(JSON.parse(JSON.stringify(m))) } }),
+    document: {
+      addEventListener: on('document:'),
+      getElementById: (id: string) => (id === 'root' ? doc.root : doc.body.all().find((e) => e.id === id) ?? null),
+      querySelector: (sel: string) => doc.body.querySelector(sel),
+      querySelectorAll: (sel: string) => doc.body.querySelectorAll(sel),
+      get activeElement() { return doc.active ?? doc.body },
+      get body() { return doc.body },
+      documentElement: { lang: 'en' },
+    },
+    window: {
+      addEventListener: on('window:'),
+      setInterval: () => 1,
+      setTimeout: (fn: () => void, ms: number) => {
+        if (timers.length >= PROMPT_PAGE_MAX_TIMERS) throw new Error('setTimeout: more than ' + PROMPT_PAGE_MAX_TIMERS + ' timers pending')
+        const id = ++seq
+        timers.push({ id, at: clock.t + (ms || 0), fn })
+        return id
+      },
+      clearTimeout: (id: number) => { const i = timers.findIndex((x) => x.id === id); if (i >= 0) timers.splice(i, 1) },
+      innerWidth: 420,
+      origin: 'vscode-webview://x',
+    },
+    navigator: o.mac ? { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Code/1.139.1' } : undefined,
+    console,
+  })
+  nodeVm.runInContext(o.script ?? SCRIPT, c)
+  nodeVm.runInContext('Date.now = function () { return clock.t; };', Object.assign(c, { clock }))
+  const sections = o.sections ?? ['prompts']
+  let vmNow: Record<string, unknown> = model({ sections, prompts, ...(o.over ?? {}) })
+  const fire = (type: string, ev: Record<string, unknown>): void => {
+    for (const fn of [...(doc.listeners[type + ':capture'] ?? []), ...(doc.listeners[type] ?? [])]) fn(ev)
+  }
+  fire('window:message', { origin: '', data: { type: 'data', payload: vmNow } })
+  const p: PromptPage = {
+    c, doc, posted, clock,
+    advance: (ms: number) => {
+      // Bounded (the 2026-09-26 04:57 lesson: an unbounded loop here took the machine): at most
+      // PROMPT_PAGE_MAX_STEPS timers per call, and at most PROMPT_PAGE_MAX_SAME_TIME in a row at one clock time — a
+      // timer that re-arms itself at or before the current time (a setTimeout(fn, 0) inside fn) throws instead of
+      // spinning.
+      const until = clock.t + ms
+      let steps = 0
+      let sameTime = 0
+      let lastAt = Number.NaN
+      for (;;) {
+        timers.sort((a, b) => a.at - b.at || a.id - b.id)
+        const next = timers[0]
+        if (!next || next.at > until) break
+        if (++steps > PROMPT_PAGE_MAX_STEPS) throw new Error('advance: more than ' + PROMPT_PAGE_MAX_STEPS + ' timers in one call')
+        const at = Math.max(clock.t, next.at)
+        sameTime = at === lastAt ? sameTime + 1 : 1
+        lastAt = at
+        if (sameTime > PROMPT_PAGE_MAX_SAME_TIME) throw new Error('advance: a timer re-armed itself at ' + at + ' more than ' + PROMPT_PAGE_MAX_SAME_TIME + ' times')
+        timers.shift()
+        clock.t = at
+        next.fn()
+      }
+      clock.t = until
+    },
+    timers: () => timers.length,
+    push: (next: Record<string, unknown>) => {
+      vmNow = { ...vmNow, prompts: next }
+      fire('window:message', { origin: '', data: { type: 'section', key: 'prompts', payload: { prompts: next } } })
+    },
+    whole: (over: Record<string, unknown> = {}) => {
+      vmNow = { ...vmNow, ...over }
+      fire('window:message', { origin: '', data: { type: 'data', payload: vmNow } })
+    },
+    body: () => doc.root.querySelector('[data-body="prompts"]') as FEl,
+    q: (sel: string) => doc.root.querySelector(sel),
+    entry: (id: string) => doc.root.querySelector('[data-act="promptEdit"][data-id="' + id + '"]') as FEl,
+    send: (id: string) => doc.root.querySelector('[data-act="promptSend"][data-id="' + id + '"]') as FEl,
+    field: (role) => doc.root.querySelector('[data-role="' + role + '"]'),
+    click: (el: FEl, detail = 1) => {
+      doc.fire('pointerdown', { target: el })
+      if (el.tagName === 'BUTTON' || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.focus()
+      doc.fire('pointerup', { target: el })
+      doc.fire('click', { target: el, detail })
+    },
+    dblclick: (el: FEl) => { doc.fire('dblclick', { target: el, detail: 2 }) },
+    key: (el: FEl, key: string, mods: Record<string, unknown> = {}) => doc.fire('keydown', { target: el, key, ...mods }),
+    press: (el: FEl, key: string, mods: Record<string, unknown> = {}) => {
+      // A key goes to the focused element: the element is focused first (no event when it has the focus already).
+      if (el.tagName === 'BUTTON' || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.focus()
+      const r = doc.fire('keydown', { target: el, key, ...mods })
+      if (!r.prevented && el.tagName === 'BUTTON' && (key === 'Enter' || key === ' ')) doc.fire('click', { target: el, detail: 0 })
+    },
+    type: (el: FEl, text: string) => {
+      el.value = text
+      el.selectionStart = el.selectionEnd = text.length
+      doc.fire('input', { target: el })
+    },
+    leave: (to: FEl | null) => {
+      const from = doc.active
+      if (from && doc.connected(from)) doc.fire('focusout', { target: from, relatedTarget: to })
+      doc.active = to
+    },
+    tab: (back = false) => {
+      const stops = doc.root.all().filter((e) => ['BUTTON', 'INPUT', 'TEXTAREA', 'SUMMARY'].includes(e.tagName) || e.getAttribute('tabindex') === '0')
+      const at = doc.active ? stops.indexOf(doc.active) : -1
+      const to = stops[back ? (at <= 0 ? stops.length - 1 : at - 1) : (at + 1) % stops.length]
+      to.focus()
+      return to
+    },
+    sends: () => posted.filter((m) => m.type === 'promptSend').map((m) => String(m.id)),
+    saves: () => posted.filter((m) => m.type === 'promptSave'),
+  }
+  posted.length = 0
+  return p
+}
+
+test('the Prompts section is a section of the page: its renderer, its heading, free of the range and the models, never Claude-only (1.10 §3 A7 test 1, §3.0 a)', () => {
+  const r = JSON.parse(String(nodeVm.runInContext(
+    'JSON.stringify({ fn: renderer("prompts") === sPrompts, map: RENDER.get("prompts") === sPrompts, title: titleOf("prompts"), free: RANGE_FREE.indexOf("prompts") >= 0, claude: CLAUDE_ONLY_SECTIONS.indexOf("prompts") >= 0 })', ctx)))
+  assert.deepEqual(r, { fn: true, map: true, title: 'Prompts', free: true, claude: false })
+  // The filter bar stays below it, as below the quota cards: listed first, the bar comes after it.
+  const order = orderOf(renderPage({ sections: ['prompts', 'quota', 'history'], prompts: promptsVm() }))
+  assert.deepEqual(order, ['provider', 'notices', 'prompts', 'quota', 'controls', 'history', 'drill', 'footer'])
+  // Without its part of the view model (the section not listed) it draws nothing, and throws nothing.
+  assert.equal(render('sPrompts()', { prompts: null }), '')
+  assert.equal(render('sPrompts()', { prompts: undefined }), '')
+})
+
+test('the section\'s markup: the intro, the target line, the flash line, a list named Prompts of two buttons per entry, the footer and the help span (1.10 §3 A2 rules 1, 2)', () => {
+  const h = render('sPrompts()', { prompts: promptsVm() })
+  assert.ok(h.startsWith('<p class="meta pr-intro">Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.</p>'
+    + '<p class="meta pr-target pr-ready">Sends to Claude Code in terminal 2 of 3 — ready</p>'
+    + '<p class="meta pr-flash" role="status" aria-live="polite"></p>'
+    + '<ul class="pr-list" aria-label="Prompts"><li class="pr" data-id="s-status">'), h)
+  assert.ok(h.includes('<button class="pr-main" data-act="promptEdit" data-id="s-status" aria-labelledby="pr-n-s-status" aria-describedby="pr-t-s-status pr-help"'
+    + ' title="Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.">'
+    + '<span class="pr-title" id="pr-n-s-status">Status table</span>'
+    + '<span class="pr-text meta" id="pr-t-s-status">Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.</span></button>'
+    + '<button class="pr-send" data-act="promptSend" data-id="s-status" aria-label="Send “Status table”" title="Sends to Claude Code in terminal 2 of 3 — ready">'
+    + '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg></button></li>'), h)
+  // A slash command in the editor's font.
+  assert.ok(h.includes('<span class="pr-text meta pr-cmd" id="pr-t-s-keepwarm">/loop 30m Ignore this message. No action. No response.</span>'), h)
+  // Two tab stops per entry, no roving (§7a Q27): no tabindex anywhere in the list, no aria-activedescendant.
+  const list = h.slice(h.indexOf('<ul'), h.indexOf('</ul>'))
+  assert.equal(/tabindex|aria-activedescendant/.test(list), false, list)
+  assert.equal((list.match(/<button /g) ?? []).length, 8)
+  // The footer and the help span; no restore button while nothing is missing.
+  assert.ok(h.endsWith('</ul><div class="wrap pr-foot"><button data-act="promptNew">New prompt</button></div>'
+    + '<span class="sr" id="pr-help">Enter edits it, Ctrl+Enter sends it.</span>'), h)
+  // A missing shipped entry: the restore button, the palette's command.
+  const missing = render('sPrompts()', { prompts: promptsVm({ restorable: 1 }) })
+  assert.ok(missing.includes('<button data-act="cmd" data-id="tokenPace.restoreDefaultPrompts">Restore default prompts</button>'), missing)
+  assert.deepEqual(parseWebviewMessage({ type: 'command', id: 'tokenPace.restoreDefaultPrompts' }), { type: 'command', id: 'tokenPace.restoreDefaultPrompts' })
+  // A full list: New prompt does nothing and says why.
+  const full = render('sPrompts()', { prompts: promptsVm({ canAdd: false }) })
+  assert.ok(full.includes('<button data-act="promptNew" aria-disabled="true" title="At most 50 prompts.">New prompt</button>'), full)
+  // The level is a class and nothing else: the words say it.
+  for (const level of ['ready', 'asks', 'no']) {
+    const x = render('sPrompts()', { prompts: promptsVm({ target: { text: 'the words', level } }) })
+    assert.ok(x.includes('<p class="meta pr-target pr-' + level + '">the words</p>'), x)
+  }
+  assert.ok(render('sPrompts()', { prompts: promptsVm({ target: { text: 'w', level: 'x" onmouseover="y' } }) }).includes('pr-target pr-no">'))
+  // The flash, and the read-only box.
+  const f = render('sPrompts()', { prompts: promptsVm({ flash: { text: 'Sent to Claude Code in terminal 2 of 3.', ok: true }, readOnly: 'prompts.json could not be read (json).' }) })
+  assert.ok(f.includes('<div class="box pr-ro">prompts.json could not be read (json).</div><p class="meta pr-flash" role="status" aria-live="polite">Sent to Claude Code in terminal 2 of 3.</p>'), f)
+})
+
+test('a Mac\'s page names ⌘+Enter, every other page Ctrl+Enter (1.10 §3 A2 rule 1)', () => {
+  const mac = promptPage(promptsVm(), { mac: true })
+  assert.equal(mac.q('#pr-help')?.textContent, 'Enter edits it, ⌘+Enter sends it.')
+  const other = promptPage()
+  assert.equal(other.q('#pr-help')?.textContent, 'Enter edits it, Ctrl+Enter sends it.')
+})
+
+test('a title or a text with markup is text: in the title, the text, both names, the tooltip, the fields\' group and the delete question — and a field\'s value is never markup (1.10 §3 A2 rule 2)', () => {
+  const MARK = '<img src=x onerror=alert(1)>'
+  const vm = promptsVm({ items: [{ id: 'u-3k9x0a2b', title: MARK + '"\'&', text: MARK + ' text', shipped: false, edited: false, command: false }] })
+  const h = render('sPrompts()', { prompts: vm })
+  assert.equal(h.indexOf('<img'), -1, h)
+  assert.ok(h.includes('<span class="pr-title" id="pr-n-u-3k9x0a2b">&lt;img src=x onerror=alert(1)&gt;&quot;&#39;&amp;</span>'), h)
+  assert.ok(h.includes('aria-label="Send “&lt;img src=x onerror=alert(1)&gt;&quot;&#39;&amp;”"'), h)
+  assert.ok(h.includes('title="&lt;img src=x onerror=alert(1)&gt; text"'), h)
+  // Opened, and asked: the group's name and the question carry it as text; the values are set as properties.
+  const p = promptPage(vm)
+  p.press(p.entry('u-3k9x0a2b'), 'Enter')
+  const group = p.q('.pr-edit') as FEl
+  assert.equal(group.getAttribute('aria-label'), 'Edit “' + MARK + '"\'&”')
+  assert.equal(p.field('prTitle')?.value, MARK + '"\'&')
+  assert.equal(p.field('prText')?.value, MARK + ' text')
+  assert.equal(/value=/.test(p.body().innerHTML), false, 'a value was written into the markup')
+  assert.equal(p.body().innerHTML.indexOf('<img'), -1)
+  p.press(p.q('[data-act="promptDelete"]') as FEl, 'Enter')
+  const ask = p.q('.pr-ask') as FEl
+  assert.equal(ask.getAttribute('aria-label'), 'Delete “' + MARK + '"\'&”?')
+  assert.equal(ask.querySelector('span')?.textContent, 'Delete “' + MARK + '"\'&”?')
+  assert.equal(p.body().innerHTML.indexOf('<img'), -1)
+})
+
+test('a single click opens the entry\'s fields after 300 ms, the focus in the text with the caret at its end; nothing is posted (1.10 §3 A2 rules 3, 5)', () => {
+  const p = promptPage()
+  p.click(p.entry('s-stop'))
+  assert.equal(p.q('.pr-edit'), null, 'the fields opened on the first click')
+  p.advance(299)
+  assert.equal(p.q('.pr-edit'), null)
+  p.advance(1)
+  const text = p.field('prText') as FEl
+  assert.ok(text, 'no fields after 300 ms')
+  assert.equal(p.doc.active, text)
+  assert.equal(text.value, 'Stop after the current task and do not start any new work.')
+  assert.deepEqual([text.selectionStart, text.selectionEnd], [text.value.length, text.value.length])
+  assert.equal(p.field('prTitle')?.value, 'Stop after this task')
+  // The fields' markup (rule 5): a named group, two labelled fields with their limits, the counter, the error line, the bar.
+  const edit = p.q('li.pr.editing[data-id="s-stop"] > .pr-edit') as FEl
+  assert.deepEqual([edit.getAttribute('role'), edit.getAttribute('aria-label'), edit.getAttribute('tabindex')], ['group', 'Edit “Stop after this task”', '-1'])
+  assert.equal(edit.querySelectorAll('label').length, 2)
+  assert.equal(edit.querySelector('label > input[data-role="prTitle"]')?.getAttribute('maxlength'), '80')
+  assert.equal(edit.querySelector('label > textarea[data-role="prText"]')?.getAttribute('maxlength'), '2000')
+  assert.equal(edit.querySelector('.pr-count')?.textContent, '58 / 2000 characters')
+  assert.equal(edit.querySelector('.pr-err')?.getAttribute('role'), 'alert')
+  assert.deepEqual(edit.querySelectorAll('.pr-bar > button').map((b) => [b.dataset.act, b.textContent, b.getAttribute('aria-disabled')]),
+    [['promptSave', 'Save', null], ['promptCancel', 'Cancel', null], ['promptUp', 'Move up', null], ['promptDown', 'Move down', null], ['promptDelete', 'Delete', null]])
+  assert.deepEqual(p.posted, [])
+  // The counter follows the text as it is typed.
+  p.type(text, 'abc')
+  assert.equal(edit.querySelector('.pr-count')?.textContent, '3 / 2000 characters')
+})
+
+test('a double-click sends once and never leaves the fields open — two clicks 150 ms apart, the dblclick after them, a third click (1.10 §3 A2 rule 3; §7a Q25)', () => {
+  const p = promptPage()
+  p.click(p.entry('s-status'), 1)
+  p.advance(150)
+  p.click(p.entry('s-status'), 2)
+  p.dblclick(p.entry('s-status'))
+  p.click(p.entry('s-status'), 3)
+  p.advance(1000)
+  assert.deepEqual(p.sends(), ['s-status'])
+  assert.equal(p.q('.pr-edit'), null, 'the fields opened after a double-click')
+  assert.equal(p.saves().length, 0)
+  assert.equal(p.timers(), 0)
+  // The send names the entry and nothing else: the host types what it reads for that id.
+  assert.deepEqual(p.posted.filter((m) => m.type === 'promptSend'), [{ type: 'promptSend', id: 's-status' }])
+  assert.deepEqual(parseWebviewMessage(p.posted[0]), { type: 'promptSend', id: 's-status' })
+  // The next double-click is a new one: it sends again.
+  p.advance(2000)
+  p.click(p.entry('s-status'), 1)
+  p.click(p.entry('s-status'), 2)
+  assert.deepEqual(p.sends(), ['s-status', 's-status'])
+})
+
+test('a slow double-click: its second press held while the 300 ms pass opens nothing; its click sends (1.10 §3 A2 rule 3)', () => {
+  const p = promptPage()
+  const main = p.entry('s-status')
+  p.click(main, 1)
+  p.advance(250)
+  // The second press is down when the timer runs out: the element under it stays.
+  p.doc.fire('pointerdown', { target: main })
+  p.advance(100)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.equal(p.entry('s-status'), main, 'the entry was drawn again under the pressed pointer')
+  p.doc.fire('pointerup', { target: main })
+  p.doc.fire('click', { target: main, detail: 2 })
+  p.advance(10)
+  assert.deepEqual(p.sends(), ['s-status'])
+  assert.equal(p.q('.pr-edit'), null)
+  // A single click whose press outlasts the 300 ms opens the fields once it comes up.
+  p.advance(2000)
+  p.click(p.entry('s-stop'), 1)
+  p.doc.fire('pointerdown', { target: p.entry('s-stop') })
+  p.advance(400)
+  assert.equal(p.q('.pr-edit'), null)
+  p.doc.fire('pointerup', { target: p.entry('s-stop') })
+  p.advance(0)
+  assert.ok(p.q('li[data-id="s-stop"] .pr-edit'))
+  assert.deepEqual(p.sends(), ['s-status'])
+})
+
+test('the grace rule: a dblclick 50 ms after the first click opened the fields closes them unsaved and sends once; 900 ms after, or changed, it is the browser\'s (1.10 §3 A2 rule 3)', () => {
+  const p = promptPage()
+  p.click(p.entry('s-status'), 1)
+  p.advance(300)
+  const title = p.field('prTitle') as FEl
+  assert.ok(title)
+  // The second press lands on the fields (a double-click time longer than 300 ms): its click does nothing …
+  p.advance(50)
+  p.click(title, 2)
+  assert.deepEqual(p.posted, [])
+  // … its dblclick sends, and the fields close without a save, the focus on the entry.
+  p.dblclick(title)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.deepEqual(p.sends(), ['s-status'])
+  assert.equal(p.saves().length, 0)
+  assert.equal(p.doc.active, p.entry('s-status'))
+  // 900 ms after opening: the browser's (it selects a word) — nothing posted, the fields stay.
+  p.advance(2000)
+  p.posted.length = 0
+  p.click(p.entry('s-stop'), 1)
+  p.advance(300)
+  p.advance(900)
+  p.dblclick(p.field('prText') as FEl)
+  assert.deepEqual(p.posted, [])
+  assert.ok(p.q('.pr-edit'))
+  // Changed within the grace: the browser's too.
+  p.press(p.field('prText') as FEl, 'Escape')
+  p.advance(2000)
+  p.click(p.entry('s-stop'), 1)
+  p.advance(300)
+  p.type(p.field('prText') as FEl, 'Stop now.')
+  p.advance(100)
+  p.dblclick(p.field('prText') as FEl)
+  assert.deepEqual(p.posted, [])
+  assert.equal(p.field('prText')?.value, 'Stop now.')
+  // Fields opened by the keyboard have no grace: a dblclick in them is the browser's.
+  p.press(p.field('prText') as FEl, 'Escape')
+  p.press(p.entry('s-stop'), 'Enter')
+  p.dblclick(p.field('prText') as FEl)
+  assert.deepEqual(p.posted, [])
+  assert.ok(p.q('.pr-edit'))
+})
+
+test('the keys on an entry: Enter and Space open the fields at once, Ctrl+Enter and ⌘+Enter send; Enter on the send button sends; a key held down does nothing more (1.10 §3 A2 rule 4)', () => {
+  for (const k of ['Enter', ' ']) {
+    const p = promptPage()
+    const r = p.key(p.entry('s-stop'), k)
+    assert.equal(r.prevented, true, k)
+    assert.equal(p.doc.active, p.field('prText'), k)
+    assert.equal(p.timers(), 0, k)
+    assert.deepEqual(p.posted, [], k)
+  }
+  for (const mods of [{ ctrlKey: true }, { metaKey: true }]) {
+    const p = promptPage()
+    p.press(p.entry('s-stop'), 'Enter', mods)
+    assert.deepEqual(p.sends(), ['s-stop'], JSON.stringify(mods))
+    assert.equal(p.q('.pr-edit'), null)
+  }
+  const p = promptPage()
+  p.press(p.send('u-3k9x0a2b'), 'Enter')
+  assert.deepEqual(p.sends(), ['u-3k9x0a2b'])
+  // Held down: the repeats post nothing, open nothing — on the entry and on the send button.
+  p.posted.length = 0
+  for (const [el, mods] of [[p.entry('s-stop'), { ctrlKey: true }], [p.entry('s-stop'), {}], [p.send('s-stop'), {}]] as Array<[FEl, Record<string, unknown>]>) {
+    p.press(el, 'Enter', { repeat: true, ...mods })
+    p.press(el, ' ', { repeat: true, ...mods })
+  }
+  assert.deepEqual(p.posted, [])
+  assert.equal(p.q('.pr-edit'), null)
+  // A click without a pointer (a screen reader's) opens at once: no second click can follow it.
+  p.click(p.entry('s-status'), 0)
+  assert.ok(p.q('li[data-id="s-status"] .pr-edit'))
+  assert.equal(p.timers(), 0)
+  // The send button's own double-click sends once.
+  const q = promptPage()
+  q.click(q.send('s-stop'), 1)
+  q.click(q.send('s-stop'), 2)
+  assert.deepEqual(q.sends(), ['s-stop'])
+})
+
+test('Escape leaves the fields as they were: closed, nothing posted, the focus on the entry (1.10 §3 A2 rule 5)', () => {
+  const p = promptPage()
+  p.press(p.entry('s-status'), 'Enter')
+  p.type(p.field('prText') as FEl, 'changed')
+  const r = p.key(p.field('prText') as FEl, 'Escape')
+  assert.equal(r.prevented, true)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.deepEqual(p.posted, [])
+  assert.equal(p.doc.active, p.entry('s-status'))
+  // Opened again, the entry's own words.
+  p.press(p.entry('s-status'), 'Enter')
+  assert.equal(p.field('prText')?.value, 'Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.')
+})
+
+test('Enter saves once with the cleaned words; the fields close when a push shows them, and stay open with the flash when the host refused (1.10 §3 A2 rule 5)', () => {
+  const p = promptPage()
+  p.press(p.entry('u-3k9x0a2b'), 'Enter')
+  p.type(p.field('prTitle') as FEl, '  Review\tagain ')
+  p.type(p.field('prText') as FEl, 'Line one\r\nline two\u0007')
+  // Shift+Enter too — a prompt is one line; an input method's Enter is its own; a held key saves once.
+  assert.equal(p.key(p.field('prText') as FEl, 'Enter', { isComposing: true }).prevented, false)
+  assert.equal(p.saves().length, 0)
+  assert.equal(p.key(p.field('prText') as FEl, 'Enter', { shiftKey: true }).prevented, true)
+  p.key(p.field('prText') as FEl, 'Enter', { repeat: true })
+  p.key(p.field('prTitle') as FEl, 'Enter')
+  assert.deepEqual(p.saves(), [{ type: 'promptSave', id: 'u-3k9x0a2b', title: 'Review again', text: 'Line one line two' }])
+  assert.deepEqual(parseWebviewMessage(p.saves()[0]), p.saves()[0])
+  // Waiting for the push: still open.
+  assert.ok(p.q('.pr-edit'))
+  // A push that is not the answer (the target line moved) keeps them open, the values as typed.
+  p.push(promptsVm({ target: { text: 'No terminal of this window runs Claude Code or Codex.', level: 'no' } }))
+  assert.equal(p.field('prText')?.value, 'Line one\r\nline two\u0007')
+  // The answer: the entry with the saved words — closed, the focus on the entry.
+  const saved = promptsVm()
+  ;(saved.items as Array<Record<string, unknown>>)[3] = { id: 'u-3k9x0a2b', title: 'Review again', text: 'Line one line two', shipped: false, edited: false, command: false }
+  p.push(saved)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.equal(p.doc.active, p.entry('u-3k9x0a2b'))
+  // Refused by the host: the flash says why; the fields stay open for the reader.
+  p.posted.length = 0
+  p.press(p.entry('u-3k9x0a2b'), 'Enter')
+  p.type(p.field('prText') as FEl, 'Something else')
+  p.press(p.q('[data-act="promptSave"]') as FEl, 'Enter')
+  assert.equal(p.saves().length, 1)
+  p.push({ ...saved, flash: { text: 'Not saved: prompts.json could not be written (EACCES)', ok: false } })
+  assert.ok(p.q('.pr-edit'))
+  assert.equal(p.q('.pr-flash')?.textContent, 'Not saved: prompts.json could not be written (EACCES)')
+  assert.equal(p.field('prText')?.value, 'Something else')
+  // Saving again posts again.
+  p.key(p.field('prText') as FEl, 'Enter')
+  assert.equal(p.saves().length, 2)
+})
+
+test('leaving the fields: to a control of their own saves nothing; outside, changed, one save; unchanged, they close; the page\'s check failing keeps them open with its reason (1.10 §3 A2 rule 5)', () => {
+  const p = promptPage()
+  p.press(p.entry('s-status'), 'Enter')
+  p.type(p.field('prText') as FEl, 'Show the table.')
+  // To Delete, inside the group: nothing.
+  p.leave(p.q('[data-act="promptDelete"]'))
+  assert.deepEqual(p.posted, [])
+  assert.ok(p.q('.pr-edit'))
+  // Outside, changed: one save, and leaving once more while it is on its way saves nothing more.
+  p.field('prText')?.focus()
+  p.leave(p.entry('s-stop'))
+  assert.deepEqual(p.saves(), [{ type: 'promptSave', id: 's-status', title: 'Status table', text: 'Show the table.' }])
+  p.field('prText')?.focus()
+  p.leave(null)
+  assert.equal(p.saves().length, 1)
+  // Unchanged: the fields just close — once the focus has moved (drawn after it, on the control it went to).
+  const q = promptPage()
+  q.press(q.entry('s-stop'), 'Enter')
+  q.type(q.field('prText') as FEl, 'Stop after the current task and do not start any new work.  ')
+  // (The entry whose fields are open has no send button of its own meanwhile: the focus goes to the one above.)
+  assert.equal(q.send('s-stop'), null)
+  q.leave(q.send('s-keepwarm'))
+  assert.deepEqual(q.posted, [])
+  q.advance(0)
+  assert.equal(q.q('.pr-edit'), null)
+  assert.equal(q.doc.active, q.send('s-keepwarm'), 'the focus did not stay where it went')
+  // Invalid: an empty title — nothing posted, the fields open, the reason in the error line.
+  const r = promptPage()
+  r.press(r.entry('s-stop'), 'Enter')
+  r.type(r.field('prTitle') as FEl, '   ')
+  r.leave(null)
+  assert.deepEqual(r.posted, [])
+  assert.ok(r.q('.pr-edit'))
+  assert.equal(r.q('.pr-err')?.textContent, 'The title is empty.')
+  // Typing takes the reason away; the text's two reasons.
+  r.type(r.field('prTitle') as FEl, 'Stop')
+  assert.equal(r.q('.pr-err')?.textContent, '')
+  r.type(r.field('prText') as FEl, '')
+  r.key(r.field('prText') as FEl, 'Enter')
+  assert.equal(r.q('.pr-err')?.textContent, 'The text is empty.')
+  r.type(r.field('prText') as FEl, '  !rm -rf /')
+  r.key(r.field('prText') as FEl, 'Enter')
+  assert.equal(r.q('.pr-err')?.textContent, 'A prompt that starts with an exclamation mark would run a shell command in Claude Code.')
+  assert.deepEqual(r.posted, [])
+  // A slash command is a prompt like any other.
+  r.type(r.field('prText') as FEl, '/loop 30m Ignore this message. No action. No response.')
+  r.key(r.field('prText') as FEl, 'Enter')
+  assert.equal(r.saves().length, 1)
+})
+
+test('the delete question stands in the page: Delete asks, the focus on Keep; Keep or Escape goes back, the focus on Delete; Delete deletes, and the push closes the fields without a word (1.10 §3 A2 rule 6; §7a Q24)', () => {
+  const p = promptPage()
+  p.press(p.entry('s-stop'), 'Enter')
+  p.press(p.q('[data-act="promptDelete"]') as FEl, 'Enter')
+  const ask = p.q('li[data-id="s-stop"] .pr-edit > .pr-ask') as FEl
+  assert.deepEqual([ask.getAttribute('role'), ask.getAttribute('aria-label')], ['group', 'Delete “Stop after this task”?'])
+  assert.equal(ask.querySelector('span')?.textContent, 'Delete “Stop after this task”?')
+  assert.deepEqual(ask.querySelectorAll('button').map((b) => [b.dataset.act, b.textContent]), [['promptDeleteYes', 'Delete'], ['promptDeleteNo', 'Keep']])
+  assert.equal(p.q('.pr-bar'), null)
+  assert.equal(p.doc.active?.dataset.act, 'promptDeleteNo')
+  // Keep: the bar again, the focus on Delete.
+  p.press(p.doc.active as FEl, 'Enter')
+  assert.equal(p.q('.pr-ask'), null)
+  assert.equal(p.doc.active?.dataset.act, 'promptDelete')
+  // Escape in the question does the same; in the bar it closes the fields.
+  p.press(p.doc.active as FEl, 'Enter')
+  p.key(p.doc.active as FEl, 'Escape')
+  assert.equal(p.doc.active?.dataset.act, 'promptDelete')
+  assert.ok(p.q('.pr-edit'))
+  assert.deepEqual(p.posted, [])
+  // The values typed before the question survive it.
+  p.type(p.field('prText') as FEl, 'typed')
+  p.press(p.q('[data-act="promptDelete"]') as FEl, 'Enter')
+  p.press(p.doc.active as FEl, 'Enter')
+  assert.equal(p.field('prText')?.value, 'typed')
+  // Delete: one message; the push without the entry closes the fields, no sentence, the focus on the entry that took its place.
+  p.press(p.q('[data-act="promptDelete"]') as FEl, 'Enter')
+  p.press(p.q('[data-act="promptDeleteYes"]') as FEl, 'Enter')
+  p.press(p.q('[data-act="promptDeleteYes"]') as FEl, 'Enter')
+  assert.deepEqual(p.posted, [{ type: 'promptDelete', id: 's-stop' }])
+  assert.deepEqual(parseWebviewMessage(p.posted[0]), { type: 'promptDelete', id: 's-stop' })
+  const after = promptsVm()
+  after.items = (after.items as Array<Record<string, unknown>>).filter((x) => x.id !== 's-stop')
+  p.push(after)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.equal(p.q('.pr-flash')?.textContent, '')
+  assert.equal(p.doc.active, p.entry('u-3k9x0a2b'))
+})
+
+test('Move up and Move down: the fields stay open on the moved entry, the focus on the pressed button; at an end the button does nothing (1.10 §3 A2 rule 7)', () => {
+  const p = promptPage()
+  p.press(p.entry('s-status'), 'Enter')
+  const up = p.q('[data-act="promptUp"]') as FEl
+  assert.equal(up.getAttribute('aria-disabled'), 'true')
+  p.press(up, 'Enter')
+  p.click(up)
+  assert.deepEqual(p.posted, [])
+  p.type(p.field('prText') as FEl, 'kept')
+  const down = p.q('[data-act="promptDown"]') as FEl
+  p.press(down, 'Enter')
+  assert.deepEqual(p.posted, [{ type: 'promptMove', id: 's-status', dir: 'down' }])
+  assert.deepEqual(parseWebviewMessage(p.posted[0]), p.posted[0])
+  const moved = promptsVm()
+  const items = moved.items as Array<Record<string, unknown>>
+  moved.items = [items[1], items[0], items[2], items[3]]
+  p.push(moved)
+  const lis = p.body().querySelectorAll('.pr-list > li').map((li) => li.dataset.id)
+  assert.deepEqual(lis, ['s-keepwarm', 's-status', 's-stop', 'u-3k9x0a2b'])
+  assert.ok(p.q('li[data-id="s-status"] .pr-edit'))
+  assert.equal(p.doc.active?.dataset.act, 'promptDown')
+  assert.equal(p.field('prText')?.value, 'kept')
+  assert.equal(p.q('[data-act="promptUp"]')?.getAttribute('aria-disabled'), null)
+  // The last entry: Move down does nothing.
+  p.press(p.q('[data-act="promptCancel"]') as FEl, 'Enter')
+  p.press(p.entry('u-3k9x0a2b'), 'Enter')
+  p.posted.length = 0
+  p.press(p.q('[data-act="promptDown"]') as FEl, 'Enter')
+  assert.deepEqual(p.posted, [])
+})
+
+test('New prompt: empty fields at the end of the list, the title\'s placeholder its name; left empty they close without a post; saved, a promptSave without an id (1.10 §3 A2 rule 8)', () => {
+  const p = promptPage()
+  p.press(p.q('[data-act="promptNew"]') as FEl, 'Enter')
+  const li = p.body().querySelectorAll('.pr-list > li')
+  assert.equal(li[li.length - 1].dataset.id, '')
+  const edit = p.q('li.editing .pr-edit') as FEl
+  assert.equal(edit.getAttribute('aria-label'), 'New prompt')
+  assert.equal(p.field('prTitle')?.getAttribute('placeholder'), 'New prompt')
+  assert.equal(p.field('prTitle')?.value, '')
+  assert.equal(p.doc.active, p.field('prTitle'))
+  // No move and no delete for an entry that does not exist yet.
+  assert.deepEqual(edit.querySelectorAll('button').map((b) => b.dataset.act), ['promptSave', 'promptCancel'])
+  // Left empty and untouched: closed, nothing posted, the focus on New prompt when it was in the fields.
+  p.press(p.field('prTitle') as FEl, 'Enter')
+  assert.equal(p.q('.pr-edit'), null)
+  assert.deepEqual(p.posted, [])
+  assert.equal(p.doc.active?.dataset.act, 'promptNew')
+  // Filled and saved.
+  p.press(p.q('[data-act="promptNew"]') as FEl, 'Enter')
+  p.type(p.field('prTitle') as FEl, 'Summarise')
+  p.type(p.field('prText') as FEl, 'Summarise the conversation so far.')
+  p.key(p.field('prText') as FEl, 'Enter')
+  assert.deepEqual(p.saves(), [{ type: 'promptSave', id: null, title: 'Summarise', text: 'Summarise the conversation so far.' }])
+  assert.deepEqual(parseWebviewMessage(p.saves()[0]), p.saves()[0])
+  // The push with the new entry closes the fields, the focus on it.
+  const added = promptsVm()
+  ;(added.items as Array<Record<string, unknown>>).push({ id: 'u-00000001', title: 'Summarise', text: 'Summarise the conversation so far.', shipped: false, edited: false, command: false })
+  p.push(added)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.equal(p.doc.active, p.entry('u-00000001'))
+  // At 50: New prompt does nothing.
+  const full = promptPage(promptsVm({ canAdd: false }))
+  full.press(full.q('[data-act="promptNew"]') as FEl, 'Enter')
+  full.click(full.q('[data-act="promptNew"]') as FEl)
+  assert.equal(full.q('.pr-edit'), null)
+})
+
+test('the open fields survive pushes: a fragment keeps both values, the field and its selection; a whole render puts the focus back into the field (1.10 §3 A2 rule 9)', () => {
+  const p = promptPage()
+  p.press(p.entry('s-status'), 'Enter')
+  p.type(p.field('prTitle') as FEl, 'Table')
+  const text = p.field('prText') as FEl
+  p.type(text, 'Show the progress.')
+  text.focus()
+  text.setSelectionRange(5, 13)
+  const writes = p.doc.writes
+  p.push(promptsVm({ target: { text: 'Sends to Codex in terminal 1 of 1 — sending asks first: …', level: 'asks' } }))
+  assert.ok(p.doc.writes > writes, 'the fragment was not drawn')
+  assert.equal(p.field('prTitle')?.value, 'Table')
+  assert.equal(p.field('prText')?.value, 'Show the progress.')
+  assert.equal(p.doc.active, p.field('prText'))
+  assert.deepEqual([p.field('prText')?.selectionStart, p.field('prText')?.selectionEnd], [5, 13])
+  // In the title field, a whole render (a language switch, a layout change): the same, and the focus back in it.
+  const title = p.field('prTitle') as FEl
+  title.focus()
+  title.setSelectionRange(1, 3)
+  p.whole({ sections: ['quota', 'prompts'] })
+  assert.equal(p.field('prTitle')?.value, 'Table')
+  assert.equal(p.field('prText')?.value, 'Show the progress.')
+  assert.equal(p.doc.active, p.field('prTitle'))
+  assert.deepEqual([p.field('prTitle')?.selectionStart, p.field('prTitle')?.selectionEnd], [1, 3])
+  // A whole render after words: the language switch's focus rule does not take the focus out of the field.
+  const words = { lang: 'de', locale: 'de', dict: { Save: 'Speichern' } }
+  ;(p.doc.listeners['window:message'] ?? []).forEach((fn) => fn({ origin: '', data: { type: 'data', payload: model({ sections: ['prompts'], prompts: promptsVm() }), words } }))
+  assert.equal(p.doc.active, p.field('prTitle'))
+  assert.equal(p.q('[data-act="promptSave"]')?.textContent, 'Speichern')
+  // Nothing of the draft was ever posted.
+  assert.deepEqual(p.posted.filter((m) => m.type !== 'rendered'), [])
+})
+
+test('a push whose list no longer holds the open entry closes its fields and says so in the flash line — for as long as a flash stands (1.10 §3 A2 rule 9)', () => {
+  const p = promptPage()
+  p.press(p.entry('s-stop'), 'Enter')
+  p.type(p.field('prText') as FEl, 'mine')
+  const gone = promptsVm()
+  gone.items = (gone.items as Array<Record<string, unknown>>).filter((x) => x.id !== 's-stop')
+  p.push(gone)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.equal(p.q('.pr-flash')?.textContent, 'This prompt was deleted in another window; your changes were not saved.')
+  assert.deepEqual(p.posted, [])
+  // The focus goes to the entry that took its place.
+  assert.equal(p.doc.active, p.entry('u-3k9x0a2b'))
+  // The sentence stands through the next push, then goes after 10 s.
+  p.push(gone)
+  assert.equal(p.q('.pr-flash')?.textContent, 'This prompt was deleted in another window; your changes were not saved.')
+  p.advance(10_000)
+  assert.equal(p.q('.pr-flash')?.textContent, '')
+  // The section taken off the list: the fields go with it.
+  const q = promptPage(promptsVm(), { sections: ['quota', 'prompts'] })
+  q.press(q.entry('s-stop'), 'Enter')
+  q.whole({ sections: ['quota'], prompts: null })
+  assert.equal(nodeVm.runInContext('promptDraft', q.c), null)
+})
+
+test('the flash line is one live region for the page\'s life: a push changes its words, and only a new flash changes them (1.10 §3 A2 rule 1, A5)', () => {
+  const p = promptPage()
+  const line = p.q('.pr-flash') as FEl
+  p.push(promptsVm({ flash: { text: 'Sent to Claude Code in terminal 2 of 3.', ok: true } }))
+  assert.equal(p.q('.pr-flash'), line, 'the live region was replaced')
+  assert.equal(line.textContent, 'Sent to Claude Code in terminal 2 of 3.')
+  assert.deepEqual([line.getAttribute('role'), line.getAttribute('aria-live')], ['status', 'polite'])
+  p.push(promptsVm({ flash: null }))
+  assert.equal(p.q('.pr-flash'), line)
+  assert.equal(line.textContent, '')
+  p.whole({})
+  assert.equal(p.q('.pr-flash'), line, 'a whole render replaced the live region')
+})
+
+test('a push that comes while a pointer is pressed waits for its click: the element pressed is the element clicked (1.10 §3 A2 rule 3)', () => {
+  const p = promptPage()
+  const send = p.send('s-stop')
+  p.doc.fire('pointerdown', { target: send })
+  p.push(promptsVm({ target: { text: 'moved', level: 'no' } }))
+  assert.equal(p.send('s-stop'), send, 'drawn under the pressed pointer')
+  p.doc.fire('pointerup', { target: send })
+  p.doc.fire('click', { target: send, detail: 1 })
+  assert.deepEqual(p.sends(), ['s-stop'])
+  p.advance(0)
+  assert.notEqual(p.send('s-stop'), send)
+  assert.equal(p.q('.pr-target')?.textContent, 'moved')
+})
+
+test('a list that cannot be saved: no fields open, New prompt does nothing, every entry still sends (1.10 §3 A2 rule 10)', () => {
+  const ro = promptsVm({ readOnly: 'prompts.json was written by a newer version of Token Pace; the shipped prompts are shown and the file is not changed.', canAdd: false })
+  const p = promptPage(ro)
+  assert.equal(p.q('[data-act="promptNew"]')?.getAttribute('aria-disabled'), 'true')
+  assert.equal(p.q('[data-act="promptNew"]')?.getAttribute('title'), null, 'read-only is no full list')
+  p.click(p.entry('s-status'), 1)
+  p.advance(400)
+  p.press(p.entry('s-status'), 'Enter')
+  p.press(p.entry('s-status'), ' ')
+  p.click(p.q('[data-act="promptNew"]') as FEl)
+  assert.equal(p.q('.pr-edit'), null)
+  assert.deepEqual(p.posted, [])
+  p.press(p.entry('s-status'), 'Enter', { ctrlKey: true })
+  p.advance(2000)
+  p.click(p.entry('s-stop'), 1)
+  p.click(p.entry('s-stop'), 2)
+  p.press(p.send('u-3k9x0a2b'), 'Enter')
+  assert.deepEqual(p.sends(), ['s-status', 's-stop', 'u-3k9x0a2b'])
+  // Open fields when the file turns unreadable: they close.
+  const q = promptPage()
+  q.press(q.entry('s-stop'), 'Enter')
+  q.push(ro)
+  assert.equal(q.q('.pr-edit'), null)
+})
+
+test('the keyboard walk of §3 A5: Tab to the entry, Enter, x, Escape, Tab, Enter, Shift+Tab, Ctrl+Enter, Enter, Tab to Delete, Enter, Enter, Escape — two sends, no save (1.10 §3 A5)', () => {
+  const p = promptPage()
+  // From the section's heading (its settings gear is the heading's last stop): the first entry.
+  ;(p.q('[data-act="sectionSettings"][data-key="prompts"]') as FEl).focus()
+  assert.equal(p.tab(), p.entry('s-status'))
+  p.press(p.doc.active as FEl, 'Enter')
+  const text = p.field('prText') as FEl
+  assert.equal(p.doc.active, text)
+  assert.equal(text.selectionStart, text.value.length)
+  p.type(text, text.value + 'x')
+  p.key(text, 'Escape')
+  assert.equal(p.doc.active, p.entry('s-status'))
+  assert.equal(p.tab(), p.send('s-status'))
+  p.press(p.doc.active as FEl, 'Enter')
+  assert.equal(p.tab(true), p.entry('s-status'))
+  p.press(p.doc.active as FEl, 'Enter', { ctrlKey: true })
+  p.press(p.doc.active as FEl, 'Enter')
+  assert.equal(p.doc.active, p.field('prText'))
+  // Save, Cancel, Move up, Move down, Delete.
+  for (let i = 0; i < 5; i++) p.tab()
+  assert.equal(p.doc.active?.dataset.act, 'promptDelete')
+  p.press(p.doc.active as FEl, 'Enter')
+  assert.equal(p.doc.active?.dataset.act, 'promptDeleteNo')
+  p.press(p.doc.active as FEl, 'Enter')
+  assert.equal(p.doc.active?.dataset.act, 'promptDelete')
+  p.key(p.doc.active as FEl, 'Escape')
+  assert.equal(p.q('.pr-edit'), null)
+  assert.equal(p.doc.active, p.entry('s-status'))
+  assert.deepEqual(p.posted.map((m) => m.type), ['promptSend', 'promptSend'])
+})
+
+test('the acknowledgement of a whole render names the sections the page drew — not a listed key it has nothing for (1.10 P5, Review 1b F7)', () => {
+  const p = promptPage(promptsVm(), { sections: ['quota', 'prompts', 'forecast'] })
+  p.whole({})
+  const ack = p.posted.filter((m) => m.type === 'rendered').pop()
+  assert.deepEqual(ack, { type: 'rendered', sections: 3, drawn: ['quota', 'prompts'] })
+  assert.deepEqual(parseWebviewMessage(ack), ack)
+  // Without its view model the section draws nothing: it is not among them.
+  p.whole({ prompts: null })
+  assert.deepEqual(p.posted.filter((m) => m.type === 'rendered').pop(), { type: 'rendered', sections: 3, drawn: ['quota'] })
+})
+
+test('the German page: the words of the section through the dictionary, the send button named „„…“ senden" (1.10 §3 A5, A6)', () => {
+  const de = germanPage({
+    'Prompts': 'Prompts', 'Send “{0}”': '„{0}“ senden', 'Edit “{0}”': '„{0}“ bearbeiten', 'New prompt': 'Neuer Prompt',
+    'Enter edits it, Ctrl+Enter sends it.': 'Eingabe bearbeitet ihn, Strg+Eingabe sendet ihn.', 'Save': 'Speichern', 'Cancel': 'Abbrechen',
+    'Delete “{0}”?': '„{0}“ löschen?', 'Keep': 'Behalten', 'Delete': 'Löschen', 'Move up': 'Nach oben', 'Move down': 'Nach unten',
+    'Title': 'Titel', 'Text': 'Text', '{0} / {1} characters': '{0} / {1} Zeichen',
+  })
+  const script = between(de, /<script nonce="[A-Za-z0-9]+">/, '</script>')
+  const german = promptsVm({ items: [{ id: 's-status', title: 'Zwischenstand als Tabelle', text: 'Zeige den aktuellen Zwischenstand in einer übersichtlichen Tabelle an. Spalten: Schritt/Status | Beschreibung | Model | Dauer | voraussichtlich fertig.', shipped: true, edited: false, command: false }] })
+  const p = promptPage(german, { script })
+  assert.equal(p.send('s-status').getAttribute('aria-label'), '„Zwischenstand als Tabelle“ senden')
+  assert.equal(p.q('ul.pr-list')?.getAttribute('aria-label'), 'Prompts')
+  assert.equal(p.q('#pr-help')?.textContent, 'Eingabe bearbeitet ihn, Strg+Eingabe sendet ihn.')
+  p.press(p.entry('s-status'), 'Enter')
+  assert.equal(p.q('.pr-edit')?.getAttribute('aria-label'), '„Zwischenstand als Tabelle“ bearbeiten')
+  assert.equal(p.q('.pr-count')?.textContent, '151 / 2000 Zeichen')
+  assert.deepEqual(p.body().querySelectorAll('.pr-bar > button').map((b) => b.textContent), ['Speichern', 'Abbrechen', 'Nach oben', 'Nach unten', 'Löschen'])
+  p.press(p.q('[data-act="promptDelete"]') as FEl, 'Enter')
+  assert.equal(p.q('.pr-ask > span')?.textContent, '„Zwischenstand als Tabelle“ löschen?')
+})
+
+test('the section\'s styles: two lines of text at most, a slash command in the editor font, 24 px targets, the fields in the theme\'s field colours, a forced-colours palette of their own (1.10 §3 A2 rule 2, A5)', () => {
+  assert.match(STYLE, /\.pr-text \{ display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; \}/)
+  assert.match(STYLE, /\.pr-text\.pr-cmd \{ font-family: var\(--vscode-editor-font-family, monospace\); \}/)
+  assert.match(STYLE, /\.pr-main \{[^}]*min-height: 24px;/)
+  assert.match(STYLE, /\.pr-send \{[^}]*min-width: 24px; min-height: 24px;/)
+  assert.match(STYLE, /\.pr-bar button, \.pr-ask button, \.pr-foot button \{ min-height: 24px; \}/)
+  assert.match(STYLE, /\.pr-edit input, \.pr-edit textarea \{[^}]*background: var\(--vscode-input-background, transparent\);/)
+  // Nothing of the section moves.
+  const own = STYLE.split('\n').filter((l) => /\.pr[-.\s{]/.test(l)).join('\n')
+  assert.equal(/transition|animation/.test(own), false, own)
+  // Forced colours: buttons, fields, the disabled state, the focus ring — and nothing taken out of the adjustment.
+  const forced = STYLE.slice(STYLE.indexOf('@media (forced-colors: active)'))
+  assert.match(forced, /\.pr-main, \.pr-send, \.pr-bar button, \.pr-ask button, \.pr-foot button \{ background-color: ButtonFace; color: ButtonText; border-color: ButtonText; \}/)
+  assert.match(forced, /\.pr-edit input, \.pr-edit textarea \{ background-color: Field; color: FieldText; border: 1px solid CanvasText; \}/)
+  assert.match(forced, /\.pr button\[aria-disabled="true"\], \.pr-foot button\[aria-disabled="true"\] \{ color: GrayText;/)
+  assert.match(forced, /\.pr-edit input:focus-visible, \.pr-edit textarea:focus-visible \{ outline: 2px solid Highlight; outline-offset: 1px; \}/)
+  assert.equal(adjustedOut().some((s) => s.includes('.pr')), false)
 })

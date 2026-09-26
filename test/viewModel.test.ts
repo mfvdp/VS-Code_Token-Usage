@@ -624,12 +624,22 @@ test('the quota card carries the sparkline and its own gap count', () => {
 // message protocol
 // ---------------------------------------------------------------------------
 
-test('parseWebviewMessage accepts the rendered acknowledgement only with a sane count', () => {
-  assert.deepEqual(parseWebviewMessage({ type: 'rendered', sections: 3 }), { type: 'rendered', sections: 3 })
-  assert.deepEqual(parseWebviewMessage({ type: 'rendered', sections: 2.9 }), { type: 'rendered', sections: 2 })
+// 1.10 P5 (pinned and changed: the acknowledgement was the count alone): it also names the sections the page drew
+// (Review 1b F7) — known section keys, each once; anything else drops the message whole.
+test('parseWebviewMessage accepts the rendered acknowledgement only with a sane count and the drawn sections\' keys', () => {
+  assert.deepEqual(parseWebviewMessage({ type: 'rendered', sections: 3, drawn: [] }), { type: 'rendered', sections: 3, drawn: [] })
+  assert.deepEqual(parseWebviewMessage({ type: 'rendered', sections: 2.9, drawn: ['quota', 'prompts'] }),
+    { type: 'rendered', sections: 2, drawn: ['quota', 'prompts'] })
   for (const bad of ['3', -1, Number.NaN, Number.POSITIVE_INFINITY, undefined, null]) {
-    assert.equal(parseWebviewMessage({ type: 'rendered', sections: bad }), null, String(bad))
+    assert.equal(parseWebviewMessage({ type: 'rendered', sections: bad, drawn: [] }), null, String(bad))
   }
+  // No list, a list of something else, an unknown or a repeated key, a list longer than the keys there are.
+  for (const drawn of [undefined, null, 'quota', {}, [1], ['quota', 'quota'], ['forecast'], ['__proto__'],
+    Array.from({ length: DASHBOARD_SECTION_KEYS.length + 1 }, () => 'quota')]) {
+    assert.equal(parseWebviewMessage({ type: 'rendered', sections: 1, drawn }), null, JSON.stringify(drawn))
+  }
+  // Built from its own fields: nothing else of the message comes along.
+  assert.deepEqual(parseWebviewMessage({ type: 'rendered', sections: 1, drawn: ['quota'], extra: 'x' }), { type: 'rendered', sections: 1, drawn: ['quota'] })
 })
 
 test('parseWebviewMessage accepts exactly the documented shapes', () => {

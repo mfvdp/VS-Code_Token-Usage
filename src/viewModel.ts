@@ -228,7 +228,11 @@ export type WebviewMessage =
   | { type: 'setChartSplit'; split: ChartSplit }
   | { type: 'openSectionSettings'; key: DashboardSectionKey }
   | { type: 'refresh' }
-  | { type: 'rendered'; sections: number }
+  /**
+   * The page's acknowledgement of a whole render: how many sections `vm.sections` lists, and (1.10 P5, Review 1b
+   * F7) the keys of the sections it drew — a listed key it has no renderer for, or leaves out, is not among them.
+   */
+  | { type: 'rendered'; sections: number; drawn: DashboardSectionKey[] }
   | { type: 'command'; id: WebviewCommandId }
   /**
    * 1.9 A3 (§0a.3): the language picker's choice — `auto` or a registry id, never anything else. The host
@@ -332,7 +336,15 @@ export function parseWebviewMessage(raw: unknown): WebviewMessage | null {
     }
     case 'rendered': {
       if (typeof m.sections !== 'number' || !Number.isFinite(m.sections) || m.sections < 0) return null
-      return { type: 'rendered', sections: Math.floor(m.sections) }
+      // 1.10 P5: the drawn sections — known keys only, each once; anything else drops the message whole.
+      const drawn = m.drawn
+      if (!Array.isArray(drawn) || drawn.length > DASHBOARD_SECTION_KEYS.length) return null
+      const keys: DashboardSectionKey[] = []
+      for (const k of drawn) {
+        if (typeof k !== 'string' || !(DASHBOARD_SECTION_KEYS as readonly string[]).includes(k) || (keys as string[]).includes(k)) return null
+        keys.push(k as DashboardSectionKey)
+      }
+      return { type: 'rendered', sections: Math.floor(m.sections), drawn: keys }
     }
     case 'setSort': {
       if (typeof m.key !== 'string' || !(MODEL_SORT_KEYS as readonly string[]).includes(m.key)) return null

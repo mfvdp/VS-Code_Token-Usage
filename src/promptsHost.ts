@@ -235,6 +235,13 @@ const REAL_TIMERS: PromptTimers = {
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
 
+/**
+ * 1.10 P5 (§3 A7's smoke test): what a send of an entry would do now, as `PromptsHost.check` answers it — a hard or
+ * soft block of §3 A4 (a code, never its words), `pick` (the reader would be asked for a terminal), `send` (it would
+ * go without a question), or `notFound` (the list holds no such entry).
+ */
+export type PromptSendCheck = PromptSendBlock | 'pick' | 'send' | 'notFound'
+
 /** The keep-warm host's one method the send uses (§3 A3 rule 8). */
 export interface PromptsKeepWarm {
   yieldTo(terminal: vscode.Terminal): boolean
@@ -368,6 +375,21 @@ export class PromptsHost {
     }
   }
 
+  /**
+   * 1.10 P5 (§3 A7's smoke test): the decisions `send` takes before its first question to the reader, on the facts
+   * of now — Restricted Mode or a reading under way, no terminal, the terminal pick, the active terminal's verdict —
+   * and nothing else: nothing is typed, nothing is asked, shown or logged, no flash is set and the gap rule is not
+   * touched. A code, never a word of the entry. The one send there is stays the reader's click on the page.
+   */
+  check(id: string, f: PromptHostFacts): PromptSendCheck {
+    if (promptTextOf(this.store.read(), id) === null) return 'notFound'
+    const o = this.opening(f)
+    if ('block' in o) return o.block
+    if (o.active === null) return 'pick'
+    const v = this.verdictOf(o.active, f, this.clock())
+    return v.send ? 'send' : v.block
+  }
+
   /** *Clear Stored Data…* deleted the file. */
   forget(): void {
     this.store.forget()
@@ -386,19 +408,29 @@ export class PromptsHost {
 
   // ------------------------------------------------------------------ the send flow
 
+  /**
+   * The flow's first steps, shared with `check`: Restricted Mode and a reading under way are said before any
+   * terminal is offered (rules 1 and 2 of A4), then no candidate is `noTerminal`; otherwise the candidates and the
+   * active terminal when it is one of them (rule 3).
+   */
+  private opening(f: PromptHostFacts): { block: PromptSendBlock } | { candidates: AgentTerminal[]; active: AgentTerminal | null } {
+    const early = promptSendDecision({ trusted: f.trusted, settled: f.settled, target: null, sessions: [] }, this.clock())
+    if (!early.send && (early.block === 'restricted' || early.block === 'reading')) return { block: early.block }
+    const candidates = this.watch.agentTerminals()
+    if (candidates.length === 0) return { block: 'noTerminal' }
+    const active = this.window.activeTerminal
+    return { candidates, active: active === undefined ? null : candidates.find((c) => c.terminal === active) ?? null }
+  }
+
   /** §3 A3 rules 3–5: the terminal, the decision, the question, the write. */
   private async flow(id: string, title: string, facts: () => PromptHostFacts): Promise<void> {
-    // Restricted Mode and a reading under way are said before any terminal is offered (rules 1 and 2 of A4).
     const f = facts()
-    const early = promptSendDecision({ trusted: f.trusted, settled: f.settled, target: null, sessions: [] }, this.clock())
-    if (!early.send && (early.block === 'restricted' || early.block === 'reading')) return this.refuse(early.block)
-    const candidates = this.watch.agentTerminals()
-    if (candidates.length === 0) return this.refuse('noTerminal')
+    const o = this.opening(f)
+    if ('block' in o) return this.refuse(o.block)
     // Rule 3: the active terminal when it is a candidate — no question; otherwise the reader picks one.
-    const active = this.window.activeTerminal
-    let terminal: vscode.Terminal | null = active === undefined ? null : candidates.find((c) => c.terminal === active)?.terminal ?? null
+    let terminal: vscode.Terminal | null = o.active === null ? null : o.active.terminal
     if (terminal === null) {
-      terminal = await this.pick(title, candidates, f)
+      terminal = await this.pick(title, o.candidates, f)
       if (this.disposed) return
       if (terminal === null) {
         this.log.debug('Prompts: not sent (no terminal was picked)')

@@ -70,8 +70,8 @@ export const SECTION_FIELDS: Readonly<Record<string, SectionField[]>> = {
   projects: ['projects'],
   sessions: ['sessions'],
   dataQuality: ['dataQuality'],
-  // 1.10 A (P3): the reader's prompt list. The page draws nothing of it before P5 (its renderer skips a key
-  // it does not know), but a push already carries it where the section is listed.
+  // 1.10 A: the reader's prompt list — the intro, the target line, the flash, the entries (P3, P4); the page draws
+  // it since P5, and keeps its open fields across every push of it.
   prompts: ['prompts'],
   drill: ['drill'],
   // Chrome that is always present. `footer` carries the generated-at line, which changes on
@@ -247,6 +247,8 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
   private htmlLength = 0
   /** Pages the webview reported having rendered from a payload (see `renderedCount`). */
   private renders = 0
+  /** 1.10 P5: the sections the last acknowledged whole render drew (see `renderedSections`). */
+  private drawn: readonly string[] = []
   /** When each section with an interval of its own was last pushed, by `clock`. */
   private pushedAt = new Map<string, number>()
   /**
@@ -290,7 +292,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
     this.htmlLength = html.length
     view.webview.onDidReceiveMessage((raw: unknown) => {
       const m = parseWebviewMessage(raw)
-      if (m && m.type === 'rendered') { this.renders++; return }
+      if (m && m.type === 'rendered') { this.renders++; this.drawn = m.drawn; return }
       if (!m) {
         if (!this.warned) {
           this.warned = true
@@ -343,6 +345,15 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
    */
   renderedCount(): number {
     return this.renders
+  }
+
+  /**
+   * 1.10 P5 (Review 1b F7): the sections the page drew in its last acknowledged whole render — each a `<section>`
+   * with something in its body. Not the listed ones: a section the page has no renderer for is not drawn, so the
+   * smoke test can tell a section the page draws from one it only lists.
+   */
+  renderedSections(): readonly string[] {
+    return this.drawn
   }
 
   update(vm: ViewModel): void {
@@ -1358,6 +1369,54 @@ ul { margin: 6px 0; padding-left: 18px; }
 .ag-mix { display: flex; height: 8px; margin: 3px 0 2px; border-radius: 4px; overflow: hidden; background: var(--track); }
 .ag-mix > i { display: block; height: 100%; }
 .ag-mixtext { display: block; }
+/* 1.10 A2: the Prompts section. The intro and the target line in the dim tone (.meta, 4.5:1 on either theme); the
+   target line's level is a class and paints nothing — its words say it. The flash line is always there (a live region
+   has to exist before what it announces) and takes no room while it is empty. */
+.pr-intro, .pr-target { margin: 0 0 4px; }
+.pr-flash { margin: 4px 0 0; }
+.pr-flash:empty { margin: 0; }
+.pr-ro { margin: 6px 0 0; }
+/* The list: an entry per row — the entry's button across the row, its title and under it its text clamped to two
+   lines (the whole text is the button's tooltip; a slash command in the editor's font), and its send button beside
+   it. Every button at least 24 × 24 px (WCAG 2.5.8), a stop of the Tab key with the page's focus ring; nothing moves. */
+.pr-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.pr { display: flex; align-items: stretch; gap: 4px; margin: 0 0 4px; }
+.pr-main { flex: 1 1 auto; min-width: 0; min-height: 24px; display: block; box-sizing: border-box; padding: 3px 6px;
+           text-align: start; font-size: inherit; line-height: 1.35; background: none; }
+.pr-main:hover { background: var(--vscode-list-hoverBackground, var(--track)); }
+.pr-title { display: block; }
+.pr-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.pr-text.pr-cmd { font-family: var(--vscode-editor-font-family, monospace); }
+.pr-send { flex: none; display: flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px;
+           box-sizing: border-box; padding: 0 5px; }
+.pr-send svg { display: block; width: 12px; height: 12px; }
+/* The open fields in the entry's place: a named group, the two labelled fields as wide as the row (the field
+   colours of the theme), the counter and the error line, then the bar — or the delete question in its place, the
+   question on a line of its own above its two buttons. At 200 % zoom and at 260 px everything wraps; nothing is
+   wider than the row. */
+.pr.editing { display: block; }
+.pr-edit { display: flex; flex-direction: column; gap: 4px; min-width: 0; box-sizing: border-box; padding: 6px;
+           border: 1px solid var(--line); border-radius: 4px; }
+.pr-edit:focus { outline: none; }
+.pr-edit label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--dim); }
+.pr-edit input, .pr-edit textarea {
+  font-family: inherit; font-size: inherit; line-height: 1.35; width: 100%; min-height: 24px; box-sizing: border-box;
+  margin: 0; padding: 3px 6px; border-radius: 2px; cursor: text;
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  background: var(--vscode-input-background, transparent);
+  border: 1px solid var(--vscode-input-border, var(--line));
+}
+.pr-edit textarea { resize: vertical; }
+.pr-edit ::placeholder { color: var(--vscode-input-placeholderForeground, var(--dim)); opacity: 1; }
+.pr-edit input:focus-visible, .pr-edit textarea:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.pr-err { margin: 0; color: var(--ag-c-failed); }
+.pr-bar, .pr-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pr-ask > span { flex: 1 1 100%; }
+.pr-bar button, .pr-ask button, .pr-foot button { min-height: 24px; }
+.pr-foot { margin-top: 6px; }
+/* A control that does nothing now (a move at an end, New prompt at 50, every edit of a list that cannot be saved):
+   still a stop of the Tab key, and heard as unavailable — seen as faded. */
+.pr button[aria-disabled="true"], .pr-foot button[aria-disabled="true"] { opacity: .55; cursor: default; }
 @media (max-width: 320px) {
   .kpis { grid-template-columns: 1fr; }
   table, thead, tbody, th, td, tr { display: block; }
@@ -1440,6 +1499,16 @@ ul { margin: 6px 0; padding-left: 18px; }
   .flag:not(.flag-auto) { forced-color-adjust: none; outline: 1px solid CanvasText; }
   .lng-pop { border-color: CanvasText; }
   .lng-pop li:focus { outline: 2px solid Highlight; outline-offset: -2px; }
+  /* 1.10 A5: the Prompts section — every button in the theme's button colours (the entry's own face is none
+     without the mode), the fields in the field colours with a 1 px edge in the text colour, the send glyph in
+     currentColor (its button's text colour), a control that does nothing in the disabled text colour instead of a
+     fade, the focused control ringed 2 px in the highlight colour. The target line's level is a word, never a colour. */
+  .pr-main, .pr-send, .pr-bar button, .pr-ask button, .pr-foot button { background-color: ButtonFace; color: ButtonText; border-color: ButtonText; }
+  .pr-main .pr-text { color: ButtonText; }
+  .pr-edit input, .pr-edit textarea { background-color: Field; color: FieldText; border: 1px solid CanvasText; }
+  .pr button[aria-disabled="true"], .pr-foot button[aria-disabled="true"] { color: GrayText; border-color: GrayText; opacity: 1; }
+  .pr-main:focus-visible, .pr-send:focus-visible, .pr-edit button:focus-visible, .pr-foot button:focus-visible,
+  .pr-edit input:focus-visible, .pr-edit textarea:focus-visible { outline: 2px solid Highlight; outline-offset: 1px; }
   /* 1.7 D-B: the bands by model — the theme would paint them all away. Two system colours, the rank as
      the pattern style draws it, each band ringed 1 px inside by the page colour so two solid bands side
      by side stay two. Taken out of the theme's adjustment: a gradient is otherwise removed. 1.7 P7b: a
@@ -1548,6 +1617,9 @@ function webviewWords(): Record<string, string> {
   return {
     'A budget is your own number. USD is the hypothetical API equivalent, not a bill, and no budget is ever added to another.':
       t('A budget is your own number. USD is the hypothetical API equivalent, not a bill, and no budget is ever added to another.'),
+    // 1.10 A2: the Prompts section's words (§3 A6) — the page's own; the cleaning's three reasons are the model's too.
+    'A prompt that starts with an exclamation mark would run a shell command in Claude Code.':
+      t('A prompt that starts with an exclamation mark would run a shell command in Claude Code.'),
     'API cost': t('API cost'),
     'API cost (second axis)': t('API cost (second axis)'),
     'Active days': t('Active days'),
@@ -1556,6 +1628,7 @@ function webviewWords(): Record<string, string> {
     'Agents': t('Agents'),
     'All': t('All'),
     'All agents': t('All agents'),
+    'At most {0} prompts.': t('At most {0} prompts.'),
     'Avg turn time {0}': t('Avg turn time {0}'),
     'Avg turn time {0} · P90 {1}': t('Avg turn time {0} · P90 {1}'),
     'Avg/day': t('Avg/day'),
@@ -1569,6 +1642,7 @@ function webviewWords(): Record<string, string> {
     'Cache · last 30 days': t('Cache · last 30 days'),
     'Calibration {0} {1}: {2}': t('Calibration {0} {1}: {2}'),
     'Calls': t('Calls'),
+    'Cancel': t('Cancel'),
     'Chart': t('Chart'),
     'Compared with': t('Compared with'),
     'Connect the status line': t('Connect the status line'),
@@ -1579,8 +1653,13 @@ function webviewWords(): Record<string, string> {
       t('Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB'),
     'Data quality': t('Data quality'),
     'Day {0}': t('Day {0}'),
+    'Delete': t('Delete'),
+    'Delete “{0}”?': t('Delete “{0}”?'),
     'Details': t('Details'),
     'Duration': t('Duration'),
+    'Edit “{0}”': t('Edit “{0}”'),
+    'Enter edits it, Ctrl+Enter sends it.': t('Enter edits it, Ctrl+Enter sends it.'),
+    'Enter edits it, ⌘+Enter sends it.': t('Enter edits it, ⌘+Enter sends it.'),
     'Extra usage': t('Extra usage'),
     'Extra usage (billed)': t('Extra usage (billed)'),
     'Fetch quota now': t('Fetch quota now'),
@@ -1590,6 +1669,7 @@ function webviewWords(): Record<string, string> {
     'Hit': t('Hit'),
     'Hit rate': t('Hit rate'),
     'How': t('How'),
+    'Keep': t('Keep'),
     'Key figures': t('Key figures'),
     'Last 7 days': t('Last 7 days'),
     'Last 7 days · where the agent tokens went': t('Last 7 days · where the agent tokens went'),
@@ -1601,6 +1681,9 @@ function webviewWords(): Record<string, string> {
     'Lower bound share {0}': t('Lower bound share {0}'),
     'Model': t('Model'),
     'Models': t('Models'),
+    'Move down': t('Move down'),
+    'Move up': t('Move up'),
+    'New prompt': t('New prompt'),
     'No Claude Code session in the last 7 days.': t('No Claude Code session in the last 7 days.'),
     'No agent is running.': t('No agent is running.'),
     'No agent of the last 7 days has a counted request.': t('No agent of the last 7 days has a counted request.'),
@@ -1634,6 +1717,7 @@ function webviewWords(): Record<string, string> {
     'Project attribution is off (tokenPace.attribution).':
       t('Project attribution is off (tokenPace.attribution).'),
     'Projects': t('Projects'),
+    'Prompts': t('Prompts'),
     'Providers': t('Providers'),
     'Quota': t('Quota'),
     'Quota history {0} samples · {1} KB · oldest {2}': t('Quota history {0} samples · {1} KB · oldest {2}'),
@@ -1647,10 +1731,13 @@ function webviewWords(): Record<string, string> {
     'Refresh': t('Refresh'),
     'Req.': t('Req.'),
     'Reset history': t('Reset history'),
+    'Restore default prompts': t('Restore default prompts'),
     'Retention {0} d hourly · {1} d daily · {2} d quota history':
       t('Retention {0} d hourly · {1} d daily · {2} d quota history'),
     'Roots: {0} · {1} file(s)': t('Roots: {0} · {1} file(s)'),
     'Running now ({0})': t('Running now ({0})'),
+    'Save': t('Save'),
+    'Send “{0}”': t('Send “{0}”'),
     'Session': t('Session'),
     'Session attribution is off (tokenPace.attribution).':
       t('Session attribution is off (tokenPace.attribution).'),
@@ -1666,6 +1753,12 @@ function webviewWords(): Record<string, string> {
     'Subagent tokens in the hour buckets, last 7 days': t('Subagent tokens in the hour buckets, last 7 days'),
     'Summary': t('Summary'),
     'Time of day': t('Time of day'),
+    'Text': t('Text'),
+    'The text is empty.': t('The text is empty.'),
+    'The title is empty.': t('The title is empty.'),
+    'This prompt was deleted in another window; your changes were not saved.':
+      t('This prompt was deleted in another window; your changes were not saved.'),
+    'Title': t('Title'),
     'The largest agent': t('The largest agent'),
     'The {0} largest agents': t('The {0} largest agents'),
     'Tokens': t('Tokens'),
@@ -1784,6 +1877,7 @@ function webviewWords(): Record<string, string> {
     'year': t('year'),
     'yesterday': t('yesterday'),
     '{0} ago': t('{0} ago'),
+    '{0} / {1} characters': t('{0} / {1} characters'),
     '{0} call(s) · {1} distinct tool(s)': t('{0} call(s) · {1} distinct tool(s)'),
     '{0} composition · last 30 days': t('{0} composition · last 30 days'),
     '{0} more': t('{0} more'),

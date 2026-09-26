@@ -30,6 +30,7 @@
   "Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB": "Kapsam {0} → {1} · {2} saat / {3} gün / {4} ay kovası · anlık görüntü {5} KB",
   "Data quality": "Veri kalitesi",
   "Day {0}": "Gün {0}",
+  "Delete": "Sil",
   "Details": "Ayrıntılar",
   "Duration": "Süre",
   "Extra usage": "Ek kullanım",

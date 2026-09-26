@@ -30,6 +30,7 @@
   "Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB": "覆盖范围 {0} → {1} · {2} 个小时桶 / {3} 个日桶 / {4} 个月桶 · 快照 {5} KB",
   "Data quality": "数据质量",
   "Day {0}": "日期 {0}",
+  "Delete": "删除",
   "Details": "详情",
   "Duration": "时长",
   "Extra usage": "额外用量",

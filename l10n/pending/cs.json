@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 91,
+  "applied": 113,
   "bundle": {
     "{0} rolled-up bucket in this range has no hour left and is not in the profile": {
       "parts": [
@@ -174,24 +174,27 @@
     },
     "The title is empty.": {
       "parts": [
-        "model"
+        "model",
+        "dashboard"
       ],
       "state": "translate",
-      "why": "why a prompt was not saved (a prompt's title field) — 1.10 A1 rule 3"
+      "why": "why a prompt was not saved (a prompt's title field) — 1.10 A1 rule 3; the page says it before it saves, as the host says it after Not saved — 1.10 A2 rule 5"
     },
     "The text is empty.": {
       "parts": [
-        "model"
+        "model",
+        "dashboard"
       ],
       "state": "translate",
-      "why": "why a prompt was not saved (a prompt's text field) — 1.10 A1 rule 3"
+      "why": "why a prompt was not saved (a prompt's text field) — 1.10 A1 rule 3; the page says it before it saves, as the host says it after Not saved — 1.10 A2 rule 5"
     },
     "A prompt that starts with an exclamation mark would run a shell command in Claude Code.": {
       "parts": [
-        "model"
+        "model",
+        "dashboard"
       ],
       "state": "translate",
-      "why": "why a prompt was not saved — name the mark in words, never write the mark itself (no string holds one) — 1.10 A1 rule 3"
+      "why": "why a prompt was not saved — name the mark in words, never write the mark itself (no string holds one) — 1.10 A1 rule 3; the page says it before it saves, as the host says it after Not saved — 1.10 A2 rule 5"
     },
     "Token Pace: {0} default prompt(s) restored.": {
       "parts": [
@@ -486,6 +489,132 @@
       ],
       "state": "translate",
       "why": "the answer of Restore Default Prompts when the file cannot be written, {0} an error code such as EACCES — a whole sentence now — Review 1b F3"
+    },
+    "Prompts": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the Prompts section's heading and the name of its list (a prompt: a text the reader sends to Claude Code or Codex — keep your language's word for it as in the model part's shipped prompts) — 1.10 A2 rule 1"
+    },
+    "Send “{0}”": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the name of an entry's send button for a screen reader, {0} the prompt's title (the reader's own words) between your language's quotation marks — 1.10 A2 rule 2, A5"
+    },
+    "Edit “{0}”": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the name of the group of an entry's open fields, {0} the prompt's title between your language's quotation marks — 1.10 A2 rule 5"
+    },
+    "Title": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the label of the field that holds a prompt's title — 1.10 A2 rule 5"
+    },
+    "Text": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the label of the field that holds a prompt's text (what is typed into the terminal) — 1.10 A2 rule 5"
+    },
+    "Save": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the button that saves a prompt's changed title and text — 1.10 A2 rule 5"
+    },
+    "Cancel": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the button that closes a prompt's fields without saving — 1.10 A2 rule 5"
+    },
+    "Keep": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the answer to the delete question that keeps the prompt (the opposite of Delete) — 1.10 A2 rule 6"
+    },
+    "Move up": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the button that moves a prompt one place up in the list — 1.10 A2 rule 7"
+    },
+    "Move down": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the button that moves a prompt one place down in the list — 1.10 A2 rule 7"
+    },
+    "Delete “{0}”?": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the delete question in the page, {0} the prompt's title between your language's quotation marks — it asks whether to delete it, the answers are Delete and Keep — 1.10 A2 rule 6"
+    },
+    "New prompt": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the button that adds a prompt at the end of the list, also the new entry's title placeholder and its fields' name — 1.10 A2 rule 8"
+    },
+    "Restore default prompts": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the button that brings back the shipped prompts the reader deleted — the same words as the command Restore Default Prompts, in sentence case — 1.10 A1 rule 8"
+    },
+    "{0} / {1} characters": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the counter under a prompt's text field, {0} how many characters the text has, {1} the most it may have (2000) — 1.10 A2 rule 5"
+    },
+    "Enter edits it, Ctrl+Enter sends it.": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "heard by a screen reader after a prompt's text: the keys on an entry — Enter and Ctrl+Enter as your language names the keys (VS Code's own key names) — 1.10 A2 rule 1, A5"
+    },
+    "Enter edits it, ⌘+Enter sends it.": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the same sentence on a Mac, ⌘ the Command key as it is — 1.10 A2 rule 1, A5"
+    },
+    "At most {0} prompts.": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "the tooltip of New prompt when the list is full, {0} the most prompts the list holds (50) — 1.10 A2 rule 8"
+    },
+    "This prompt was deleted in another window; your changes were not saved.": {
+      "parts": [
+        "dashboard"
+      ],
+      "state": "translate",
+      "why": "said in the section when the prompt whose fields are open was deleted in another VS Code window meanwhile — 1.10 A2 rule 9"
     }
   },
   "nls": {

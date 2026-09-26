@@ -67,6 +67,45 @@ Pace is shown the same way and never changed. The file itself stays as it is, fo
 delete. When a change is refused, the section says why: *Not saved: The title is empty.*, *Not saved:
 the list is full (at most 50 prompts)*, *Not saved: prompts.json could not be written (EACCES)*.
 
+## Editing
+
+A click on a prompt opens its title and text in its place — after 300 milliseconds
+(`PROMPT_CLICK_DELAY_MS`), so that a double-click sends the prompt instead and never leaves it open.
+When your system's double-click time is longer than that, the first click of a double-click may already
+have opened the fields: a double-click on them within 800 milliseconds of their opening
+(`PROMPT_DBLCLICK_GRACE_MS`), with nothing changed in them, closes them without saving and sends the
+prompt. Later, or once you have changed something, a double-click in a field is the field's own — it
+selects a word.
+
+The open prompt shows *Title* and *Text* — the text field's caret at its end —, a counter under the
+text (*104 / 2000 characters*) and the buttons *Save*, *Cancel*, *Move up*, *Move down* and *Delete*.
+The fields take no more than 80 and 2000 characters.
+
+* **Enter** in either field saves — Shift+Enter too: a prompt is one line, so the text never takes a
+  line break (a pasted one becomes a space when the prompt is saved). **Leaving the fields** — a click
+  or Tab to anything outside them — saves as well; when nothing changed, they just close. **Escape**
+  closes them and leaves the prompt as it was; the keyboard is back on the prompt.
+* Before it saves, the dashboard checks what the host will check: an empty title (*The title is
+  empty.*), an empty text (*The text is empty.*) or a text that starts with an exclamation mark keeps
+  the fields open with the reason under them, and nothing is saved. Otherwise the fields close as soon
+  as the list shows the saved words; when Token Pace refuses the change — the list is full, the file
+  cannot be written —, they stay open and the section says why (*Not saved: …*).
+* **Delete** asks in the page first — *Delete “Status table”?* with *Delete* and *Keep*, the keyboard on
+  *Keep*. *Keep*, or Escape, goes back to the buttons.
+* **Move up** and **Move down** move the prompt one place; its fields stay open and the keyboard stays on
+  the button. At the top, *Move up* does nothing, at the bottom *Move down*.
+* **New prompt** opens empty fields at the end of the list, the title field hinting *New prompt*; left
+  empty, they close without adding anything. At 50 prompts it does nothing and says *At most 50
+  prompts.*
+
+Open fields keep what you typed through every update of the dashboard — the section is drawn again as
+terminals open and close, and a language switch or a wider panel draws the whole page again —, and the
+keyboard stays in the field it was in, with the selection you had. Nothing of what you type is sent
+anywhere before you save it. When another window deleted the prompt you are editing, its fields close
+and the section says *This prompt was deleted in another window; your changes were not saved.* While the
+list cannot be changed (the box above it says why), a click opens nothing and *New prompt* does nothing;
+sending still works.
+
 ## Where the prompts are kept
 
 In one file of the extension's storage — `prompts.json` in Token Pace's `globalStorage` folder — shared
@@ -228,3 +267,31 @@ first. What Claude Code does with a prompt that comes while it works is its own:
 during a turn — in a test a prompt typed while Claude Code ran a command was answered afterwards, with
 nothing lost and nothing interrupted. [Troubleshooting](troubleshooting.md#a-prompt-was-not-sent) says
 what to do about each check.
+
+## Keyboard and screen readers
+
+Every prompt is two buttons, and so two stops of the Tab key: the prompt itself and its send button
+(the triangle beside it). On the prompt, Enter or Space opens its fields at once, and Ctrl+Enter
+(⌘+Enter on a Mac) sends it; on the send button, Enter or Space sends it. A key held down acts once.
+There is no roving focus: a list of 50 prompts is 100 stops.
+
+A screen reader hears the list as *Prompts*; a prompt by its title, described by its text and *Enter
+edits it, Ctrl+Enter sends it.* — "Status table, button, Show the current progress in a clear table. …
+Enter edits it, Ctrl+Enter sends it." —, and its send button as *Send “Status table”* (in German
+*„Zwischenstand als Tabelle“ senden*). The open fields are a group named *Edit “Status table”* with the
+labelled fields *Title* and *Text*; a reason the dashboard gives before saving is announced at once, and
+the outcome of a send or of a refused change — *Sent to Claude Code in terminal 2 of 3.* — once,
+politely. The delete question is a group of its own, *Delete “Status table”?*. The second line of the
+section says in words where a prompt would go and whether it goes, asks first or not now; its state is
+never a colour alone.
+
+The walk: Tab to the first prompt (past the section's heading and its gear), Enter — the fields, the caret at the end of
+the text —, Escape — closed, the keyboard back on the prompt —, Tab to its send button, Enter — sent —,
+Shift+Tab back to the prompt, Ctrl+Enter — sent —, Enter, Tab to *Delete*, Enter — the question, the
+keyboard on *Keep* —, Enter — back, the keyboard on *Delete* —, Escape — closed.
+
+In a high-contrast theme the buttons wear the theme's button colours, the fields its field colours with a
+one-pixel edge, the send triangle the button's text colour, and the focused control the theme's highlight
+ring; a button that does nothing now (*Move up* at the top, *New prompt* at 50) is drawn in the disabled
+colour and heard as unavailable. Nothing in the section moves; at 200 % zoom and in the narrowest side
+bar the fields and the buttons wrap, and the page never scrolls sideways.

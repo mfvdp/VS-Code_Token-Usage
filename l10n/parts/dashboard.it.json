@@ -30,6 +30,7 @@
   "Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB": "Copertura {0} → {1} · bucket: {2} orari / {3} giornalieri / {4} mensili · snapshot {5} KB",
   "Data quality": "Qualità dei dati",
   "Day {0}": "Giorno {0}",
+  "Delete": "Elimina",
   "Details": "Dettagli",
   "Duration": "Durata",
   "Extra usage": "Utilizzo extra",

@@ -156,6 +156,8 @@ let log: Logger
  * a version string and what the status bar last rendered. Nothing here exposes a transcript,
  * a token, a path or an account — the item text is the same string the user can read off the
  * bar. Preview items (`tokenPace.preview.*`) live in their own id space and are not reported.
+ * 1.10 P5: nor a prompt's title or text — `promptSendCheck` answers a code, and nothing here can
+ * make Token Pace type into a terminal (any extension can call these).
  */
 export interface TokenPaceApi {
   /** The version of the manifest this bundle was built from. */
@@ -174,6 +176,18 @@ export interface TokenPaceApi {
    * rule, which the length alone cannot.
    */
   dashboardRendered(): number
+  /**
+   * 1.10 P5 (Review 1b F7): the sections the page drew in its last acknowledged whole render — a section is on it
+   * only when the page has a renderer for it and drew something into its body, whatever `dashboard.sections` lists.
+   */
+  dashboardDrawn(): readonly string[]
+  /**
+   * 1.10 P5 (§3 A7): what a send of the prompt `id` would do now — a code of §3 A4 (`noTerminal`, `restricted`, …),
+   * `pick`, `send`, `notFound`, or `notListed` while the Prompts section is not in `tokenPace.dashboard.sections` —
+   * computed as the page's send computes it before its first question (`PromptsHost.check`). It types nothing, asks
+   * nothing, shows nothing and returns no word of a prompt: sending stays the reader's click on the page.
+   */
+  promptSendCheck(id: string): string
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<TokenPaceApi> {
@@ -2047,6 +2061,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       : buildItems(lastStatusInput).map((m) => ({ id: m.id, text: m.text }))),
     dashboardHtmlLength: () => dashboard.renderedHtmlLength(),
     dashboardRendered: () => dashboard.renderedCount(),
+    dashboardDrawn: () => dashboard.renderedSections(),
+    promptSendCheck: (id: string) => (!cfg.dashboard.sections.includes('prompts') ? 'notListed'
+      : typeof id === 'string' ? prompts.check(id, promptFacts()) : 'notFound'),
   }
 
   async function bootstrap(): Promise<void> {

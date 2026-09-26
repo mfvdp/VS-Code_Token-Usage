@@ -802,6 +802,38 @@ test('the target line\'s facts: Restricted Mode, no terminal, a pick of one or m
   assert.equal(r.state.nameReads, 0)
 })
 
+// 1.10 P5 (§3 A7's smoke test, Review 1b F7): the extension-host smoke test asks the host, through the exported
+// API, what a send would do — the codes the send flow reaches before its first question, from the same steps.
+test('check: the code a send would reach before its first question — types nothing, asks nothing, shows nothing, logs nothing, sets no flash and leaves the gap rule alone (1.10 P5, §3 A7)', async () => {
+  const r = sendRig()
+  const check = (id: string, f: PromptHostFacts = factsWith([idle()])): string => r.host.check(id, f)
+  assert.equal(check('u-00000000'), 'notFound')
+  assert.equal(check('s-status', factsWith([idle()], { trusted: false })), 'restricted')
+  assert.equal(check('s-status', factsWith([idle()], { settled: false })), 'reading')
+  assert.equal(check('s-status'), 'noTerminal')
+  const b = r.bash()
+  const t = r.claude()
+  r.clock.now = T0 + 10 * MIN
+  r.state.setActiveTerminal(b)
+  assert.equal(check('s-status'), 'pick')
+  r.state.setActiveTerminal(t)
+  assert.equal(check('s-status'), 'send')
+  assert.equal(check('s-stop', factsWith([idle({ stop: 'tool_use' })])), 'openTool')
+  assert.equal(check('s-keepwarm', factsWith([idle({ hookWait: true })])), 'hookWait')
+  // Nothing of it reached the reader, the terminal, the log or the page.
+  assert.deepEqual(r.state.sent, [])
+  assert.deepEqual(r.state.messages, [])
+  assert.deepEqual(r.state.quickPicks, [])
+  assert.deepEqual(r.state.shown, [])
+  assert.deepEqual(r.log.lines, [])
+  assert.equal(r.host.vmInput(r.clock.now, r.facts()).sent, null)
+  assert.equal(r.state.nameReads, 0)
+  // The gap rule is untouched: the reader's own send right after goes.
+  await r.send('s-status')
+  await enter(r)
+  assert.deepEqual(typed(r), [[2, STATUS_EN, false], [2, '', true]])
+})
+
 test('static: exactly three `.sendText(` in src/ — the text and the Enter in typePrompt, the keep-warm line in keepWarmHost.ts —; typePrompt called only by the send flow; promptsHost.ts reads no terminal\'s name, output, environment or process (§3 A3 test 8, §0a.4)', () => {
   const code = (file: string): string => fs.readFileSync(path.join(ROOT, 'src', file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
   const counts: Record<string, number> = {}

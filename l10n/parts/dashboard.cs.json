@@ -30,6 +30,7 @@
   "Coverage {0} → {1} · {2} hour / {3} day / {4} month buckets · snapshot {5} KB": "Pokrytí {0} → {1} · přihrádky: hodinové {2} / denní {3} / měsíční {4} · snímek {5} KB",
   "Data quality": "Kvalita dat",
   "Day {0}": "Den {0}",
+  "Delete": "Odstranit",
   "Details": "Podrobnosti",
   "Duration": "Trvání",
   "Extra usage": "Dodatečná spotřeba",

@@ -3408,3 +3408,46 @@ test('the prompts page says how a prompt is sent, into which terminal, and every
   }
   assert.equal(pc.includes('stops Token Pace listening to the terminals at all'), false)
 })
+
+/**
+ * 1.10 P5 (§3 A2, A5, A7): the prompts page says how a prompt is edited — the click's delay and the double-click's
+ * grace as the page's constants have them, the keys, the checks before a save, the delete question, the moves, a new
+ * prompt, the fields surviving an update — and how the section reads with the keyboard and a screen reader, in the
+ * words the page says; the dashboard page has the section's paragraph and names it among the filter-free ones.
+ */
+test('the prompts page says how a prompt is edited and how the section reads with the keyboard and a screen reader, in the page\'s words (1.10 P5)', () => {
+  const page = doc.prompts
+  const flat = flatText(page)
+  const headings = ['## The list', '## Editing', '## Where the prompts are kept', '## Sending', '## Keyboard and screen readers']
+  const at = headings.map((h) => page.indexOf(`\n${h}\n`))
+  assert.ok(at.every((i) => i >= 0), `docs/prompts.md lacks one of ${headings.join(', ')}`)
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'docs/prompts.md has its sections in another order')
+  // The page's two timings, as src/webview/main.ts has them.
+  const main = readDoc('src/webview/main.ts')
+  const delay = /\nconst PROMPT_CLICK_DELAY_MS = (\d+);/.exec(main)?.[1]
+  const grace = /\nconst PROMPT_DBLCLICK_GRACE_MS = (\d+);/.exec(main)?.[1]
+  assert.deepEqual([delay, grace], ['300', '800'])
+  assert.ok(flat.includes(`after ${delay} milliseconds (\`PROMPT_CLICK_DELAY_MS\`)`))
+  assert.ok(flat.includes(`within ${grace} milliseconds of their opening (\`PROMPT_DBLCLICK_GRACE_MS\`)`))
+  // The page's words, as the English and the German bundle have them.
+  const title = 'Status table'
+  for (const said of ['*Title* and *Text*', '*104 / 2000 characters*', '*Save*, *Cancel*, *Move up*, *Move down* and *Delete*',
+    '*The title is empty.*', '*The text is empty.*', `*${'Delete “{0}”?'.replace('{0}', title)}*`, '*Delete* and *Keep*', '*New prompt*',
+    '*At most 50 prompts.*', '*This prompt was deleted in another window; your changes were not saved.*', '*Prompts*',
+    '*Enter edits it, Ctrl+Enter sends it.*', `*${'Send “{0}”'.replace('{0}', title)}*`, `*${'Edit “{0}”'.replace('{0}', title)}*`,
+    `*${GERMAN['Send “{0}”'].replace('{0}', GERMAN[title])}*`, '*Sent to Claude Code in terminal 2 of 3.*']) {
+    assert.ok(flat.includes(said), `docs/prompts.md does not say: ${said}`)
+  }
+  for (const claim of ['**Enter** in either field saves — Shift+Enter too', '**Leaving the fields**', '**Escape** closes them and leaves the prompt as it was',
+    'Open fields keep what you typed through every update of the dashboard', 'Nothing of what you type is sent anywhere before you save it',
+    'two stops of the Tab key', 'Ctrl+Enter (⌘+Enter on a Mac) sends it', 'A key held down acts once', 'There is no roving focus: a list of 50 prompts is 100 stops',
+    'the keyboard on *Keep*', 'never a colour alone', 'the page never scrolls sideways']) {
+    assert.ok(flat.includes(claim), `docs/prompts.md does not say: ${claim}`)
+  }
+  // The dashboard page: the section's paragraph, the filter-free list (the RANGE_FREE test holds its names).
+  const dash = flatText(doc.dashboard)
+  assert.ok(dash.includes('**Prompts.** The `prompts` section — not in the default;'), 'docs/dashboard.md has no Prompts paragraph')
+  assert.ok(dash.includes('[Prompts](prompts.md#editing)') && dash.includes('[Sending](prompts.md#sending)'))
+  assert.ok(dash.includes('and not your prompt list — so the filter bar sits below every'))
+  assert.ok(dash.includes('the id of a prompt to send, delete or move, a prompt\'s title and text to save'))
+})

@@ -2917,12 +2917,558 @@ function startLive(): void {
   if (liveTimer === null) liveTimer = window.setInterval(tickLive, 1000);
 }
 
+// -- 1.10 A2: the Prompts section -------------------------------------------
+//
+// The reader's own list of prompts (vm.prompts, built by the host from prompts.json and the shipped
+// words). Every entry is two native buttons: the entry itself — a single click opens its fields after
+// PROMPT_CLICK_DELAY_MS, a double-click sends it, Enter or Space opens the fields at once, Ctrl+Enter
+// (⌘+Enter on a Mac) sends it — and its send button. What is sent is never the page's: the page posts
+// the entry's id and nothing else, and the host types the text it reads for that id (§0a.2). The open
+// fields are the page's own state (`promptDraft`, never UiState, never posted); they survive every push,
+// a fragment of the section and a whole render alike, and the focus and the selection go back where they
+// were. No roving focus (§7a Q27): two stops of the Tab key per entry.
+
+/** §3 A2 rule 3: a single click opens the entry's fields after this — unless a second click came first. */
+const PROMPT_CLICK_DELAY_MS = 300;
+/**
+ * §3 A2 rule 3: a double-click whose first click already opened the fields (an operating system whose
+ * double-click time is longer than PROMPT_CLICK_DELAY_MS) still sends — this long after they opened.
+ */
+const PROMPT_DBLCLICK_GRACE_MS = 800;
+/** How long the page's own sentence (an entry deleted in another window) stands in the flash line — the host's flash time. */
+const PROMPT_NOTE_MS = 10000;
+
+/** Which of the two fields. */
+type PromptField = 'prTitle' | 'prText';
+
+/**
+ * §3 A2 rules 5–9: the open fields — the entry (`id`, null for a new one), both values as the reader left
+ * them, the words they opened with, the field the focus was in and its selection, when and how they opened
+ * (the grace rule reads both), and the delete question. `saved`: a save was posted with these words (and the
+ * list's ids then, for a new entry); the fields close when a push shows the entry with them. `deleting`: a
+ * delete was posted, so the push without the entry closes them without a word. `error`: the page's own
+ * check's reason, in the error line.
+ */
+interface PromptDraft {
+  id: string | null;
+  title: string;
+  text: string;
+  from: { title: string; text: string };
+  field: PromptField;
+  selStart: number;
+  selEnd: number;
+  openedAt: number;
+  openedBy: 'click' | 'key' | 'new';
+  confirming: boolean;
+  saved: { title: string; text: string; known: string[]; flash: string } | null;
+  deleting: boolean;
+  error: string;
+}
+let promptDraft: PromptDraft | null = null;
+/** The single click's timer, for the entry it would open. */
+let promptTimer: { id: string; handle: number } | null = null;
+/** The clicks of one double-click, on one entry: whether it has sent — a triple click or its dblclick sends nothing more. */
+let promptSeries: { id: string; sent: boolean } | null = null;
+/** The page's own sentence in the flash line, while it stands. */
+let promptNote: { text: string; handle: number } | null = null;
+/** Where the focus goes after the next draw of the section — the page moved it (opened, closed, asked). */
+let promptFocusNext: { act: string; id: string } | { field: true } | null = null;
+/** The section's body is being written: a focusout from a field it removes is no reader leaving the fields. */
+let promptWriting = false;
+/** A pointer is pressed: a draw of the section waits for its click (the element under it must stay the one pressed). */
+let promptPointer = false;
+/** A draw of the section waits for the pointer to come up — a push, or the fields closing. */
+let promptDeferred = false;
+/** The single click's timer ran out while a pointer was pressed: the fields open after its click, unless that click sent. */
+let promptOpenAfter: string | null = null;
+/** The ids the section last drew, in order — where the focus goes after an entry is deleted. */
+let promptShown: string[] = [];
+/** Whether the last whole render put the focus back into the open fields (the words push then takes it nowhere else). */
+let promptRefocused = false;
+
+/** §3 A2 rule 1: "⌘+Enter" where the page runs on a Mac, "Ctrl+Enter" elsewhere. */
+function promptMac(): boolean {
+  return typeof navigator !== 'undefined' && !!navigator && /Mac/.test(String(navigator.userAgent || ''));
+}
+
+/**
+ * §3 A1 rule 3, the page's half (src/prompts.ts `oneLine` is the host's): every line break and tab one
+ * space, every other control character gone, trimmed. The host cleans again before it stores anything.
+ */
+function promptClean(raw: unknown): string {
+  return String(raw === null || raw === undefined ? '' : raw)
+    .replace(/\r\n|[\r\n\u2028\u2029\t]/g, ' ')
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+    .trim();
+}
+
+/** §3 A1 rule 3: why the page does not post a save — the host's reasons, in its order — or '' when it may. */
+function promptProblem(title: string, text: string): string {
+  if (title === '') return tr('The title is empty.');
+  if (text === '') return tr('The text is empty.');
+  if (text.charAt(0) === '!') return tr('A prompt that starts with an exclamation mark would run a shell command in Claude Code.');
+  return '';
+}
+
+/** The entries the view model holds, each with a string id. */
+function promptItems(): Payload[] {
+  const p = vm ? vm.prompts : null;
+  return p && Array.isArray(p.items) ? p.items.filter((x: Payload) => !!x && typeof x.id === 'string') : [];
+}
+
+/** The limits the fields keep (the view model's; the host's constants). */
+function promptLimits(): { title: number; text: number; max: number } {
+  const l = vm && vm.prompts && vm.prompts.limits ? vm.prompts.limits : {};
+  const n = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : d);
+  return { title: n(l.title, 80), text: n(l.text, 2000), max: n(l.max, 50) };
+}
+
+/** The line under the target line: the page's own sentence while it stands, else the host's flash. */
+function promptFlashText(): string {
+  if (promptNote) return promptNote.text;
+  const f = vm && vm.prompts ? vm.prompts.flash : null;
+  return f && typeof f.text === 'string' ? f.text : '';
+}
+
+/** Whether the list cannot be changed (a file that cannot be read, or a newer build's) — the box says why. */
+function promptReadOnly(): boolean {
+  const p = vm ? vm.prompts : null;
+  return !!p && typeof p.readOnly === 'string' && p.readOnly !== '';
+}
+
+function sPrompts(): string {
+  const p = vm.prompts;
+  if (!p || typeof p !== 'object') return '';
+  const items = promptItems();
+  const ro = promptReadOnly();
+  const target = p.target && typeof p.target.text === 'string' ? p.target.text : '';
+  // The level is a class, never the only carrier: the words of the line say it (§3 A2 rule 1).
+  const level = p.target && (p.target.level === 'ready' || p.target.level === 'asks') ? p.target.level : 'no';
+  let h = '<p class="meta pr-intro">' + esc(p.intro) + '</p>'
+    + '<p class="meta pr-target pr-' + level + '">' + esc(target) + '</p>';
+  if (ro) h += '<div class="box pr-ro">' + esc(p.readOnly) + '</div>';
+  // Always there, empty without a flash: a live region has to exist before what it announces.
+  h += '<p class="meta pr-flash" role="status" aria-live="polite">' + esc(promptFlashText()) + '</p>';
+  h += '<ul class="pr-list" aria-label="' + tr('Prompts') + '">';
+  for (let i = 0; i < items.length; i++) h += promptRow(items[i], i, items.length, target, ro);
+  if (promptDraft && promptDraft.id === null) h += '<li class="pr editing" data-id="">' + promptFields(promptDraft, null, 0, 0) + '</li>';
+  h += '</ul>';
+  const lim = promptLimits();
+  const add = p.canAdd === true && !ro;
+  h += '<div class="wrap pr-foot"><button data-act="promptNew"'
+    + (add ? '' : ' aria-disabled="true"' + (ro ? '' : ' title="' + tr('At most {0} prompts.', lim.max) + '"'))
+    + '>' + tr('New prompt') + '</button>'
+    + (!ro && typeof p.restorable === 'number' && p.restorable > 0
+      ? '<button data-act="cmd" data-id="tokenPace.restoreDefaultPrompts">' + tr('Restore default prompts') + '</button>' : '')
+    + '</div>';
+  // The entry's description names the keys; one span for every entry, out of sight.
+  h += '<span class="sr" id="pr-help">'
+    + (promptMac() ? tr('Enter edits it, ⌘+Enter sends it.') : tr('Enter edits it, Ctrl+Enter sends it.')) + '</span>';
+  return h;
+}
+
+/**
+ * §3 A2 rule 2: one entry — the entry's button (named by its title, described by its text and the keys)
+ * and its send button (named "Send “title”", titled with the target line) — or its open fields.
+ */
+function promptRow(it: Payload, i: number, n: number, target: string, ro: boolean): string {
+  const id = String(it.id);
+  if (promptDraft && promptDraft.id === id && !ro) return '<li class="pr editing" data-id="' + esc(id) + '">' + promptFields(promptDraft, it, i, n) + '</li>';
+  const title = String(it.title === undefined || it.title === null ? '' : it.title);
+  const text = String(it.text === undefined || it.text === null ? '' : it.text);
+  return '<li class="pr" data-id="' + esc(id) + '">'
+    + '<button class="pr-main" data-act="promptEdit" data-id="' + esc(id) + '" aria-labelledby="pr-n-' + esc(id) + '"'
+    + ' aria-describedby="pr-t-' + esc(id) + ' pr-help" title="' + esc(text) + '">'
+    + '<span class="pr-title" id="pr-n-' + esc(id) + '">' + esc(title) + '</span>'
+    + '<span class="pr-text meta' + (it.command === true ? ' pr-cmd' : '') + '" id="pr-t-' + esc(id) + '">' + esc(text) + '</span></button>'
+    + '<button class="pr-send" data-act="promptSend" data-id="' + esc(id) + '" aria-label="' + tr('Send “{0}”', esc(title)) + '"'
+    + ' title="' + esc(target) + '">'
+    + '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg></button></li>';
+}
+
+/**
+ * §3 A2 rules 5–7: the open fields of an entry (or of a new one) — a named group of two labelled fields,
+ * the counter, the error line and the bar, or the delete question in the bar's place. The values are not in
+ * the markup: promptFill sets them through the fields' properties once they are in the document.
+ */
+function promptFields(d: PromptDraft, it: Payload | null, i: number, n: number): string {
+  const id = d.id === null ? '' : esc(d.id);
+  const title = it ? esc(it.title) : '';
+  const lim = promptLimits();
+  const off = (yes: boolean): string => (yes ? ' aria-disabled="true"' : '');
+  let bar: string;
+  if (d.confirming && it) {
+    const q = tr('Delete “{0}”?', title);
+    bar = '<div class="pr-ask" role="group" aria-label="' + q + '"><span>' + q + '</span>'
+      + '<button data-act="promptDeleteYes" data-id="' + id + '">' + tr('Delete') + '</button>'
+      + '<button data-act="promptDeleteNo" data-id="' + id + '">' + tr('Keep') + '</button></div>';
+  } else {
+    bar = '<div class="pr-bar">'
+      + '<button data-act="promptSave" data-id="' + id + '">' + tr('Save') + '</button>'
+      + '<button data-act="promptCancel" data-id="' + id + '">' + tr('Cancel') + '</button>'
+      + (d.id === null ? ''
+        : '<button data-act="promptUp" data-id="' + id + '"' + off(i <= 0) + '>' + tr('Move up') + '</button>'
+          + '<button data-act="promptDown" data-id="' + id + '"' + off(i >= n - 1) + '>' + tr('Move down') + '</button>'
+          + '<button data-act="promptDelete" data-id="' + id + '">' + tr('Delete') + '</button>')
+      + '</div>';
+  }
+  return '<div class="pr-edit" role="group" aria-label="' + (d.id === null ? tr('New prompt') : tr('Edit “{0}”', title)) + '" tabindex="-1">'
+    + '<label>' + tr('Title') + ' <input type="text" data-role="prTitle" maxlength="' + lim.title + '"'
+    + (d.id === null ? ' placeholder="' + tr('New prompt') + '"' : '') + '></label>'
+    + '<label>' + tr('Text') + ' <textarea data-role="prText" maxlength="' + lim.text + '" rows="3" aria-describedby="pr-count"></textarea></label>'
+    + '<span class="meta pr-count" id="pr-count">' + promptCount(d.text.length) + '</span>'
+    + '<p class="meta pr-err" role="alert"></p>'
+    + bar + '</div>';
+}
+
+/** The counter under the text field: "104 / 2000 characters". */
+function promptCount(len: number): string {
+  return tr('{0} / {1} characters', len, promptLimits().text);
+}
+
+/** The field of the open fields, or null. */
+function promptInput(scope: ParentNode | null, field: PromptField): HTMLInputElement | null {
+  return scope && typeof scope.querySelector === 'function' ? scope.querySelector<HTMLInputElement>('[data-role="' + field + '"]') : null;
+}
+
+/** The section's body on the page, or null while it is not drawn. */
+function promptBody(): Element | null {
+  return document.querySelector('[data-body="prompts"]');
+}
+
+/** Whether the focus is inside the open fields. */
+function promptFocusInside(): boolean {
+  const a = document.activeElement as Payload;
+  return !!(a && typeof a.closest === 'function' && a.closest('.pr-edit'));
+}
+
+/** The draft's values and the focused field's selection, read off the fields before they are written again. */
+function promptRead(d: PromptDraft, scope: ParentNode | null): void {
+  const t = promptInput(scope, 'prTitle'), x = promptInput(scope, 'prText');
+  if (t && typeof t.value === 'string') d.title = t.value;
+  if (x && typeof x.value === 'string') d.text = x.value;
+  const a = document.activeElement as Payload;
+  if (a && (a === t || a === x)) {
+    d.field = a === t ? 'prTitle' : 'prText';
+    if (typeof a.selectionStart === 'number') d.selStart = a.selectionStart;
+    if (typeof a.selectionEnd === 'number') d.selEnd = a.selectionEnd;
+  }
+}
+
+/** What the section keeps across a draw of its body: the live line, and where the focus was. */
+interface PromptKeep { flash: Element | null; field: boolean; control: { act: string; id: string } | null }
+
+/** Before the body is written: the flash line's node, and the focus — in a field, or on a control. */
+function promptKeep(body: Element | null): PromptKeep {
+  const keep: PromptKeep = { flash: null, field: false, control: null };
+  if (!body || typeof body.querySelector !== 'function') return keep;
+  keep.flash = body.querySelector('.pr-flash');
+  if (promptDraft) promptRead(promptDraft, body);
+  const a = document.activeElement as Payload;
+  if (!a || typeof body.contains !== 'function' || !body.contains(a)) return keep;
+  if (a.dataset && (a.dataset.role === 'prTitle' || a.dataset.role === 'prText')) keep.field = true;
+  else if (a.dataset && typeof a.dataset.act === 'string') keep.control = { act: a.dataset.act, id: a.dataset.id || '' };
+  return keep;
+}
+
+/**
+ * After the body was written: the same live node for the flash line — a region that announces the new text
+ * once, not a new one each push —, the draft's values through the fields' properties, and the focus back —
+ * where the page moved it, else into the field with its selection, else on the control that does the same.
+ */
+function promptAfter(body: Element | null, keep: PromptKeep): void {
+  promptShown = promptItems().map((x: Payload) => String(x.id));
+  if (!body || typeof body.querySelector !== 'function') { promptFocusNext = null; return; }
+  const fresh = body.querySelector('.pr-flash');
+  const text = promptFlashText();
+  if (keep.flash && fresh && fresh !== keep.flash && fresh.parentNode) {
+    fresh.parentNode.replaceChild(keep.flash, fresh);
+    if (keep.flash.textContent !== text) keep.flash.textContent = text;
+  }
+  const d = promptDraft;
+  if (d) {
+    const t = promptInput(body, 'prTitle'), x = promptInput(body, 'prText');
+    if (t) t.value = d.title;
+    if (x) x.value = d.text;
+    const err = body.querySelector('.pr-err');
+    if (err) err.textContent = d.error;
+  }
+  const next = promptFocusNext;
+  promptFocusNext = null;
+  if (next && 'field' in next) { promptFocusField(body); return; }
+  if (next) { promptFocusControl(body, next.act, next.id); return; }
+  if (keep.field && d) { promptFocusField(body); return; }
+  if (keep.control) promptFocusControl(body, keep.control.act, keep.control.id);
+}
+
+/** The focus into the draft's field, its selection put back. */
+function promptFocusField(body: Element): boolean {
+  const d = promptDraft;
+  const el = d ? promptInput(body, d.field) : null;
+  if (!d || !el || typeof el.focus !== 'function') return false;
+  el.focus();
+  const len = typeof el.value === 'string' ? el.value.length : 0;
+  if (typeof el.setSelectionRange === 'function') el.setSelectionRange(Math.min(d.selStart, len), Math.min(d.selEnd, len));
+  return true;
+}
+
+/** The focus onto the control that does `act` to the entry `id` (`promptNew` names none). */
+function promptFocusControl(body: Element, act: string, id: string): boolean {
+  const all = body.querySelectorAll<HTMLElement>('[data-act]');
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i];
+    if (el.dataset.act === act && (el.dataset.id || '') === id) { el.focus(); return true; }
+  }
+  return false;
+}
+
+/** Draws the section again — now, or once the pressed pointer has made its click. */
+function promptDraw(): void {
+  if (promptPointer) { promptDeferred = true; return; }
+  renderSection('prompts');
+}
+
+/** A draw after the focus has moved on: the element it moved to is found again by what it does (promptKeep). */
+function promptDrawLater(): void {
+  if (promptPointer) { promptDeferred = true; return; }
+  window.setTimeout(() => { if (vm) renderSection('prompts'); }, 0);
+}
+
+/** The page's own sentence in the flash line (§3 A2 rule 9), for as long as the host's flash would stand. */
+function promptSay(text: string): void {
+  if (promptNote) window.clearTimeout(promptNote.handle);
+  promptNote = { text: text, handle: window.setTimeout(() => {
+    promptNote = null;
+    const line = document.querySelector('[data-body="prompts"] .pr-flash');
+    if (line) line.textContent = promptFlashText();
+  }, PROMPT_NOTE_MS) };
+}
+
+/** The single click's timer, stopped. */
+function promptStopTimer(): void {
+  if (promptTimer) window.clearTimeout(promptTimer.handle);
+  promptTimer = null;
+  promptOpenAfter = null;
+}
+
+/** §0a.2: a send names the entry — the host types what it reads for that id, never anything the page says. */
+function promptPostSend(id: string): void {
+  if (!id) return;
+  post({ type: 'promptSend', id: id });
+}
+
+/** §3 A2 rule 3: a second click (or the dblclick) on an entry — one send per double-click, however many clicks. */
+function promptSecondClick(id: string): void {
+  promptStopTimer();
+  if (!(promptSeries && promptSeries.id === id && promptSeries.sent)) promptPostSend(id);
+  promptSeries = { id: id, sent: true };
+}
+
+/**
+ * §3 A2 rule 3: a click on an entry. The first click of a pointer starts the timer; the second (or a third)
+ * sends once. A click without a pointer (`detail` 0 — a screen reader's or a script's) opens the fields at
+ * once: no second click can follow it.
+ */
+function promptEditClick(id: string, detail: number): void {
+  if (detail >= 2) { promptSecondClick(id); return; }
+  promptStopTimer();
+  if (detail <= 0) { promptOpen(id, 'key'); return; }
+  promptSeries = { id: id, sent: false };
+  const handle = window.setTimeout(() => {
+    promptTimer = null;
+    // The second press of a slow double-click is down: its click decides (promptPointerUp).
+    if (promptPointer) { promptOpenAfter = id; return; }
+    promptOpen(id, 'click');
+  }, PROMPT_CLICK_DELAY_MS);
+  promptTimer = { id: id, handle: handle };
+}
+
+/** §3 A2 rules 3–5, 8: the fields of an entry (or empty ones for a new entry) — never while the list is read-only. */
+function promptOpen(id: string | null, by: 'click' | 'key' | 'new'): void {
+  const p = vm ? vm.prompts : null;
+  if (!p || promptReadOnly()) return;
+  if (id === null && p.canAdd !== true) return;
+  const it = id === null ? null : promptItems().find((x: Payload) => x.id === id);
+  if (id !== null && !it) return;
+  const title = it ? String(it.title) : '';
+  const text = it ? String(it.text) : '';
+  promptDraft = {
+    id: id, title: title, text: text, from: { title: title, text: text },
+    // An entry's caret at the end of its text; a new one starts with its title.
+    field: id === null ? 'prTitle' : 'prText', selStart: text.length, selEnd: text.length,
+    openedAt: Date.now(), openedBy: by, confirming: false, saved: null, deleting: false, error: '',
+  };
+  promptFocusNext = { field: true };
+  promptDraw();
+}
+
+/** The fields closed without a save; the focus on the entry's button (a new entry's: New prompt) when it was in them. */
+function promptClose(focus: boolean, later = false): void {
+  const d = promptDraft;
+  if (!d) return;
+  promptDraft = null;
+  if (focus) promptFocusNext = d.id === null ? { act: 'promptNew', id: '' } : { act: 'promptEdit', id: d.id };
+  if (later) promptDrawLater(); else promptDraw();
+}
+
+/** Whether the reader changed anything in the fields since they opened (the raw values, as typed). */
+function promptChanged(d: PromptDraft): boolean {
+  return d.title !== d.from.title || d.text !== d.from.text;
+}
+
+/** The grace rule's window: fields a click opened, less than PROMPT_DBLCLICK_GRACE_MS ago. */
+function promptInGrace(d: PromptDraft): boolean {
+  return d.openedBy === 'click' && Date.now() - d.openedAt < PROMPT_DBLCLICK_GRACE_MS;
+}
+
+/**
+ * §3 A2 rule 5: a save — by Enter, the Save button or leaving the fields. Nothing changed: the fields just
+ * close. The page's own check fails: they stay open, its reason in the error line. Otherwise one
+ * `promptSave` with the cleaned words; the fields close when a push shows the entry with them, or stay open
+ * with the flash's reason when the host refused.
+ */
+function promptCommit(how: 'enter' | 'leave' | 'button'): void {
+  const d = promptDraft;
+  if (!d) return;
+  promptRead(d, promptBody());
+  const title = promptClean(d.title), text = promptClean(d.text);
+  const same = d.id === null ? title === '' && text === ''
+    : title === promptClean(d.from.title) && text === promptClean(d.from.text);
+  if (same) { promptClose(how !== 'leave', how === 'leave'); return; }
+  // Posted already, and nothing changed since: the push that answers it is on its way.
+  if (d.saved && d.saved.title === title && d.saved.text === text) return;
+  const problem = promptProblem(title, text);
+  d.error = problem;
+  const err = document.querySelector('[data-body="prompts"] .pr-err');
+  if (err) err.textContent = problem;
+  if (problem) { d.saved = null; return; }
+  d.saved = { title: title, text: text, known: promptItems().map((x: Payload) => String(x.id)), flash: promptFlashText() };
+  post({ type: 'promptSave', id: d.id, title: title, text: text });
+}
+
+/** §3 A2 rule 7: Move up / Move down — the fields stay open on the moved entry, the focus on the pressed button. */
+function promptMove(dir: 'up' | 'down'): void {
+  const d = promptDraft;
+  if (!d || d.id === null) return;
+  const items = promptItems();
+  const i = items.findIndex((x: Payload) => x.id === d.id);
+  if (i < 0 || (dir === 'up' && i === 0) || (dir === 'down' && i === items.length - 1)) return;
+  post({ type: 'promptMove', id: d.id, dir: dir });
+}
+
+/** §3 A2 rule 6: the delete question in the bar's place (the focus on Keep), or the bar again (the focus on Delete). */
+function promptConfirm(on: boolean): void {
+  const d = promptDraft;
+  if (!d || d.id === null) return;
+  promptRead(d, promptBody());
+  d.confirming = on;
+  promptFocusNext = { act: on ? 'promptDeleteNo' : 'promptDelete', id: d.id };
+  promptDraw();
+}
+
+/**
+ * §3 A2 rules 3–8: what a click on one of the section's controls does. True when it was one of them — an
+ * `aria-disabled` control included, which does nothing (rules 7, 8, 10).
+ */
+function promptClick(el: HTMLElement, detail: number): boolean {
+  const a = el.dataset.act || '';
+  if (a.indexOf('prompt') !== 0) return false;
+  const id = el.dataset.id || '';
+  if (el.getAttribute('aria-disabled') === 'true') return true;
+  const d = promptDraft;
+  // The second press of a slow double-click that landed on the fields its first click opened: the dblclick that
+  // follows it decides (the grace rule), not a button under the pointer.
+  if (d && detail >= 2 && promptInGrace(d) && typeof el.closest === 'function' && el.closest('.pr-edit')) return true;
+  switch (a) {
+    case 'promptEdit': promptEditClick(id, detail); break;
+    // The send button sends on its click — once: the second click of a double-click on it is not a second send.
+    case 'promptSend': if (detail <= 1) promptPostSend(id); break;
+    case 'promptSave': promptCommit('button'); break;
+    case 'promptCancel': promptClose(true); break;
+    case 'promptUp': promptMove('up'); break;
+    case 'promptDown': promptMove('down'); break;
+    case 'promptDelete': promptConfirm(true); break;
+    case 'promptDeleteNo': promptConfirm(false); break;
+    case 'promptDeleteYes':
+      if (d && d.id !== null && !d.deleting) { d.deleting = true; post({ type: 'promptDelete', id: d.id }); }
+      break;
+    case 'promptNew': promptOpen(null, 'new'); break;
+    default: return false;
+  }
+  return true;
+}
+
+/**
+ * §3 A2 rules 5, 9: a push of the section, before it is drawn — the open fields close when the entry is gone
+ * (in another window: the flash line says so; by our own Delete: without a word), when a push shows the saved
+ * words, when the section went or the list turned read-only; they stay open when the host refused the save.
+ */
+function promptPush(): void {
+  const d = promptDraft;
+  if (!d) return;
+  const inside = promptFocusInside();
+  const p = vm ? vm.prompts : null;
+  if (!p || promptReadOnly()) { promptDraft = null; return; }
+  promptRead(d, promptBody());
+  const items = promptItems();
+  const done = (id: string): void => {
+    promptDraft = null;
+    if (inside) promptFocusNext = { act: 'promptEdit', id: id };
+  };
+  if (d.id !== null) {
+    const at = items.findIndex((x: Payload) => x.id === d.id);
+    if (at < 0) {
+      promptDraft = null;
+      if (!d.deleting) promptSay(tr('This prompt was deleted in another window; your changes were not saved.'));
+      if (inside) {
+        // The entry that took its place, else the one above it, else New prompt.
+        const was = promptShown.indexOf(d.id);
+        const next = items[Math.min(Math.max(was, 0), items.length - 1)];
+        promptFocusNext = next ? { act: 'promptEdit', id: String(next.id) } : { act: 'promptNew', id: '' };
+      }
+      return;
+    }
+    const it = items[at];
+    if (d.saved && it.title === d.saved.title && it.text === d.saved.text) {
+      if (promptClean(d.title) === d.saved.title && promptClean(d.text) === d.saved.text) { done(d.id); return; }
+      // Typed on after the save: the entry holds the saved words now, the fields what the reader has since.
+      d.from = { title: String(it.title), text: String(it.text) };
+      d.saved = null;
+    }
+  } else if (d.saved) {
+    const s = d.saved;
+    const it = items.find((x: Payload) => s.known.indexOf(String(x.id)) < 0 && x.title === s.title && x.text === s.text);
+    if (it && promptClean(d.title) === s.title && promptClean(d.text) === s.text) { done(String(it.id)); return; }
+  }
+  // The host refused the save: its reason is the flash; the fields stay open for the reader to change them.
+  if (d.saved && p.flash && p.flash.ok === false && String(p.flash.text) !== d.saved.flash) d.saved = null;
+}
+
+/** The pointer came up: a draw that waited, and the fields a slow double-click's first click would have opened. */
+function promptPointerUp(): void {
+  promptPointer = false;
+  const open = promptOpenAfter;
+  if (!promptDeferred && open === null) return;
+  window.setTimeout(() => {
+    // After the click of this pointer: had it sent (the second click of a double-click), nothing opens.
+    const id = promptOpenAfter;
+    promptOpenAfter = null;
+    if (id !== null && !(promptSeries && promptSeries.id === id && promptSeries.sent)) {
+      promptDeferred = false;
+      promptOpen(id, 'click');
+      return;
+    }
+    if (promptDeferred) { promptDeferred = false; if (vm) renderSection('prompts'); }
+  }, 0);
+}
+
 const RENDER = new Map<string, () => string>([
   ['provider', sProvider], ['notices', sNotices], ['controls', sControls], ['footer', sFooter], ['drill', sDrill],
   ['summary', sSummary], ['quota', sQuota], ['agents', sAgents], ['context', sContext], ['kpis', sKpis], ['tokens', sTokens],
   ['chart', sChart], ['models', sModels], ['heatmap', sHeatmap], ['hours', sHours], ['records', sRecords],
   ['tools', sTools], ['budget', sBudget],
   ['history', sHistory], ['projects', sProjects], ['sessions', sSessions], ['dataQuality', sDataQuality],
+  ['prompts', sPrompts],
 ]);
 /**
  * The renderer for a section key, or null. Chosen by comparing the key with each literal, not
@@ -2953,6 +3499,7 @@ function renderer(key: string): (() => string) | null {
     case 'projects': return sProjects;
     case 'sessions': return sSessions;
     case 'dataQuality': return sDataQuality;
+    case 'prompts': return sPrompts;
     default: return null;
   }
 }
@@ -2965,6 +3512,7 @@ function titleOf(key: string): string {
     hours: tr('Time of day'), records: tr('Records'), tools: tr('Tools'), budget: tr('Budgets'),
     history: tr('Reset history'),
     projects: tr('Projects'), sessions: tr('Sessions'), dataQuality: tr('Data quality'),
+    prompts: tr('Prompts'),
   };
   return word(titles, key) || key;
 }
@@ -2992,8 +3540,9 @@ function sControls(): string {
 // whichever week is selected, the agent tree is the sessions of the last seven days, the
 // context reading belongs to one live session, and the Tokens section is fixed periods — the
 // running windows, today, the last 7 and 30 days, this week and month — of every model. 1.7 F1:
-// the provider switch above the page reaches every one of them, these four included.
-const RANGE_FREE = ['quota', 'agents', 'context', 'tokens'];
+// the provider switch above the page reaches every one of them, these four included. 1.10 A (§3.0 a):
+// the Prompts section — the reader's own list, which no range, model or provider filters.
+const RANGE_FREE = ['quota', 'agents', 'context', 'tokens', 'prompts'];
 
 /** 1.7 F1: the sections that are Claude Code's alone — the agent tree and the context window. */
 const CLAUDE_ONLY_SECTIONS = ['agents', 'context'];
@@ -3066,10 +3615,20 @@ function renderAll(): void {
   if (!controlsPlaced) h += controlsBlock;
   h += '<div data-sec="drill" data-body="drill">' + sDrill() + '</div>';
   h += '<div class="foot" data-sec="footer" data-body="footer">' + sFooter() + '</div>';
+  // 1.10 A2 rule 9: the open prompt fields survive a whole render too — their values, and the focus and the
+  // selection when the focus was in them (a language switch, a layout change); the flash line keeps its node.
+  const prompts = promptKeep(promptBody());
   // The page's one mount point, written by the provider's own HTML; without it there is
   // nothing to render into and the throw is the honest outcome.
-  document.getElementById('root')!.innerHTML = h;
+  promptWriting = true;
+  try {
+    document.getElementById('root')!.innerHTML = h;
+  } finally {
+    promptWriting = false;
+  }
   applyStyles();
+  promptAfter(promptBody(), prompts);
+  promptRefocused = prompts.field && promptFocusInside();
   // The whole page was just written, drill panel included, so the day on screen is the day
   // in hand. Without this every full render leaves the marker empty and the next section
   // update mistakes a plain refresh for a new day — and scrolls away under the reader.
@@ -3104,15 +3663,21 @@ function renderSection(key: string): void {
   // send them back to the top of the page with every push. 1.7 F1: the provider switch likewise —
   // the button just pressed keeps the focus across the push that answers it.
   const focus = key === 'agents' || key === 'provider' ? keepFocus(body) : null;
+  // 1.10 A2 rule 9: the Prompts section keeps its open fields, the focus in them or on its controls, and its
+  // live line's node (promptKeep, promptAfter).
+  const prompts = key === 'prompts' ? promptKeep(body) : null;
   agentFocusInTree = !!(focus && focus.tree);
+  promptWriting = true;
   try {
     body.innerHTML = render();
   } finally {
     agentFocusInTree = false;
+    promptWriting = false;
   }
   applyStyles();
   restorePop(keep);
   if (focus) restoreFocus(body, focus);
+  if (prompts) promptAfter(body, prompts);
   // A day opened from the chart lands a whole page below it. Only on a new day, so a table
   // that merely refreshes cannot pull the page around under the reader.
   if (key === 'drill') {
@@ -3713,6 +4278,8 @@ function target<T extends Element = HTMLElement>(ev: Event, sel: string): T | nu
 document.addEventListener('click', (ev) => {
   const el = target(ev, '[data-act]');
   if (!el || !vm) return;
+  // 1.10 A2: the Prompts section's controls read the click's count (a single click, a double-click).
+  if (promptClick(el, typeof ev.detail === 'number' ? ev.detail : 0)) return;
   // The gear lives inside the <summary>, whose default action is the fold: without both of
   // these, opening the settings would close the section on the way out.
   if (el.dataset.act === 'sectionSettings') { ev.stopPropagation(); ev.preventDefault(); }
@@ -4043,6 +4610,102 @@ document.addEventListener('focusin', (ev) => {
   if (li) agentRove(li);
 });
 
+// -- 1.10 A2, A5: the Prompts section's keys, double-click, fields and pointer -------------
+//
+// On an entry: Enter or Space opens its fields at once, Ctrl+Enter (⌘+Enter) sends it; on its send button
+// Enter and Space are the button's own click. A key held down acts once (`repeat`). In the fields: Enter saves
+// (Shift+Enter too — a prompt is one line), Escape cancels (in the delete question: back to the bar); an
+// input method's Enter that ends a composition is the input method's.
+document.addEventListener('keydown', (ev) => {
+  if (!vm) return;
+  const t = ev.target as Payload;
+  if (!t || typeof t.closest !== 'function' || !t.dataset) return;
+  const enter = ev.key === 'Enter', space = ev.key === ' ';
+  if (t.dataset.act === 'promptEdit') {
+    if (!enter && !space) return;
+    // The page's own: the button makes no click of it.
+    ev.preventDefault();
+    if (ev.repeat) return;
+    const id = t.dataset.id || '';
+    if (enter && (ev.ctrlKey || ev.metaKey) && !ev.altKey) { promptSecondClickKey(id); return; }
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    promptStopTimer();
+    promptOpen(id, 'key');
+    return;
+  }
+  if (t.dataset.act === 'promptSend') {
+    // Held down, Enter would click the button again and again.
+    if ((enter || space) && ev.repeat) ev.preventDefault();
+    return;
+  }
+  if (!promptDraft || !t.closest('[data-body="prompts"] .pr-edit')) return;
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    if (promptDraft.confirming) promptConfirm(false); else promptClose(true);
+    return;
+  }
+  if (enter && (t.dataset.role === 'prTitle' || t.dataset.role === 'prText')) {
+    if (ev.isComposing || ev.keyCode === 229) return;
+    ev.preventDefault();
+    if (!ev.repeat) promptCommit('enter');
+  }
+});
+/** Ctrl+Enter (⌘+Enter) on an entry: one send — never a second one from the same key held down. */
+function promptSecondClickKey(id: string): void {
+  promptStopTimer();
+  promptPostSend(id);
+}
+// §3 A2 rule 3: the dblclick of a double-click on an entry (its second click sent already — nothing more); and on
+// fields that the first click of the same double-click opened, less than PROMPT_DBLCLICK_GRACE_MS ago and unchanged,
+// the send the reader meant: the fields close without a save. Anywhere else in the fields it is the browser's.
+document.addEventListener('dblclick', (ev) => {
+  if (!vm) return;
+  const t = ev.target as Payload;
+  if (!t || typeof t.closest !== 'function') return;
+  const main = t.closest('[data-act="promptEdit"]');
+  if (main && main.dataset) { promptSecondClick(main.dataset.id || ''); return; }
+  const d = promptDraft;
+  if (!d || d.id === null || !t.closest('[data-body="prompts"] .pr-edit')) return;
+  promptRead(d, promptBody());
+  if (!promptInGrace(d) || promptChanged(d)) return;
+  const id = d.id;
+  promptSeries = { id: id, sent: true };
+  promptClose(true);
+  promptPostSend(id);
+});
+// §3 A2 rule 5: leaving the fields — the focus goes outside their group — saves, unless nothing changed or the
+// page's check fails. Not while the page writes the section itself.
+document.addEventListener('focusout', (ev) => {
+  if (promptWriting || !promptDraft) return;
+  const t = ev.target as Payload;
+  const group = t && typeof t.closest === 'function' ? t.closest('[data-body="prompts"] .pr-edit') : null;
+  if (!group) return;
+  const to = (ev as FocusEvent).relatedTarget as Payload;
+  if (to && typeof to.closest === 'function' && to.closest('.pr-edit') === group) return;
+  promptCommit('leave');
+});
+// The fields' values as the reader types them; the counter follows the text; the page's reason goes with a change.
+document.addEventListener('input', (ev) => {
+  const d = promptDraft;
+  const t = ev.target as Payload;
+  if (!d || !t || !t.dataset || (t.dataset.role !== 'prTitle' && t.dataset.role !== 'prText')) return;
+  if (t.dataset.role === 'prTitle') d.title = String(t.value);
+  else d.text = String(t.value);
+  const scope = typeof t.closest === 'function' ? t.closest('.pr-edit') : null;
+  const count = scope ? scope.querySelector('.pr-count') : null;
+  if (count) count.textContent = promptCount(d.text.length);
+  if (d.error) {
+    d.error = '';
+    const err = scope ? scope.querySelector('.pr-err') : null;
+    if (err) err.textContent = '';
+  }
+});
+// A pointer pressed and released: while it is down the section is not drawn again — its click has to land on
+// the element it was pressed on.
+document.addEventListener('pointerdown', () => { promptPointer = true; }, true);
+document.addEventListener('pointerup', () => { promptPointerUp(); }, true);
+document.addEventListener('pointercancel', () => { promptPointerUp(); }, true);
+
 // Dragging the sidebar wider is exactly the case where more labels fit than did before.
 window.addEventListener('resize', () => { if (vm) applyFits(); });
 // 1.8 L-6: opening a section runs every fit again — the chart's labels, its bands (1.7 P7b), a table's
@@ -4054,6 +4717,21 @@ window.addEventListener('resize', () => { if (vm) applyFits(); });
 // a section opened after its render would keep what was fitted with no width and no height at all.
 // The toggle event does not bubble: the capture phase.
 document.addEventListener('toggle', () => { if (vm) applyFits(); }, true);
+
+/**
+ * 1.10 P5 (Review 1b F7): the sections this page has drawn — each `<section>` whose body holds at least one
+ * element, in page order —, for the acknowledgement of a whole render. Not `vm.sections`: a key the page draws
+ * nothing for is not on it.
+ */
+function drawnSections(): string[] {
+  const out: string[] = [];
+  document.querySelectorAll<HTMLElement>('#root > section[data-sec]').forEach((sec) => {
+    const key = sec.dataset ? sec.dataset.sec : undefined;
+    const body = typeof sec.querySelector === 'function' ? sec.querySelector('[data-body]') : null;
+    if (typeof key === 'string' && body && body.firstElementChild) out.push(key);
+  });
+  return out;
+}
 
 window.addEventListener('message', (ev) => {
   // Only the host drives the page. Measured in a real window: VS Code delivers the host's
@@ -4075,22 +4753,33 @@ window.addEventListener('message', (ev) => {
     vm = msg.payload;
     // 1.9 A3.6: a whole render closes the language list.
     langOpen = false;
+    // 1.10 A2 rules 5, 9: what the push means for open prompt fields (closed, or kept open), before it is drawn.
+    promptPush();
     renderAll();
     if (focusLanguageAfterRender) {
       focusLanguageAfterRender = false;
       const btn = document.querySelector<HTMLElement>('[data-sec="provider"] .lng-btn');
       if (btn) btn.focus();
-    } else if (back) {
+    } else if (back && !promptRefocused) {
+      // 1.10 A2 rule 9: the focus that was in the open prompt fields is back in them already.
       focusAfterWords(back);
     }
     // The acknowledgement the smoke test waits for: the page was built from a payload that
     // arrived, so the whole channel — host, frame, origin rule, renderer — is proven live.
-    post({ type: 'rendered', sections: vm && Array.isArray(vm.sections) ? vm.sections.length : 0 });
+    // 1.10 P5 (Review 1b F7): and which sections it drew — a section the page has no renderer for, or
+    // that it left out, is not among them, whatever `vm.sections` lists.
+    post({ type: 'rendered', sections: vm && Array.isArray(vm.sections) ? vm.sections.length : 0, drawn: drawnSections() });
     startLive();
     return;
   }
   if (msg.type === 'section' && vm) {
     Object.assign(vm, msg.payload);
+    if (msg.key === 'prompts') {
+      promptPush();
+      // A pointer is pressed: its click has to find the element it was pressed on (promptPointerUp draws).
+      promptDraw();
+      return;
+    }
     renderSection(msg.key);
   }
 });

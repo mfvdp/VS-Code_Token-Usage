@@ -252,6 +252,7 @@ test('--check: every entry well-formed and applied, no pending list for German o
   const broken: Array<[Entry, RegExp]> = [
     [{ kind: 'rename', key: 'x', why: 'y' }, /entry 10 has the kind "rename", none of add, reword/],
     [{ kind: 'add', part: 'model', key: 'x' }, /entry 10 \(add\): why must say why/],
+    [{ kind: 'add', part: 'model', key: 'x', why: 'one reason; another' }, /entry 10 \(add\): why must not contain "; " — a pending list joins the reasons of one key with it/],
     [{ kind: 'add', part: 'page', key: 'x', why: 'y' }, /entry 10 \(add\): part "page" names no part — l10n\/parts\/<part>\.de\.json exists for dashboard, host, model, text/],
     [{ kind: 'add', part: 'model', key: 'x', old: 'w', why: 'y' }, /entry 10 \(add\) has the field "old", which an entry of this kind does not have/],
     [{ kind: 'reword', part: 'model', old: 'w', key: 'x', why: 'y' }, /entry 10 \(reword\) lacks the field "carry"/],

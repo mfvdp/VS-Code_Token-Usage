@@ -188,6 +188,7 @@ function entryProblems(e, i, parts) {
   for (const k of fields) if (!own(e, k)) out.push(`${label} lacks the field ${J(k)}`)
   if (typeof e.by !== 'string' || !/^[^\u0000-\u001f]{1,40}$/.test(e.by)) out.push(`${label}: by must name the package that made the change ("P6")`)
   if (typeof e.why !== 'string' || e.why.trim().length === 0) out.push(`${label}: why must say why, in a few words`)
+  else if (e.why.includes('; ')) out.push(`${label}: why must not contain "; " — a pending list joins the reasons of one key with it`)
   for (const k of ['part', 'from']) {
     if (fields.includes(k) && !parts.includes(e[k])) out.push(`${label}: ${k} ${J(e[k])} names no part — l10n/parts/<part>.de.json exists for ${parts.join(', ')}`)
   }

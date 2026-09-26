@@ -17,11 +17,13 @@ it only answers “what would this have been through the API”. Every such numb
 [developers.openai.com/api/docs/pricing](https://developers.openai.com/api/docs/pricing); the
 legacy Anthropic rows (Claude 4.x and 3.x) come from an earlier check of the same table on
 13 August 2026, and the **Claude Opus 5.5** row from a check of Anthropic's pricing page on
-**24 September 2026**. Every rule carries the day it was read, so a rate never applies retroactively
-without saying so: a bucket from a day no rule covers is priced from the nearest known rule and
-marked `approximate`. The dashboard's footnote names both days — `Prices as of 2026-09-06; checked
-later: claude-opus-5-5 (2026-09-24).` —, under the provider switch's Codex view the table's alone, and
-the Models table's `list as of` date is the row's own.
+**24 September 2026** ([platform.claude.com](https://platform.claude.com/docs/en/about-claude/pricing)).
+Every rule carries the day it was read and names the page it was read from — `docs.claude.com`,
+`platform.claude.com` or `developers.openai.com`, the host names an export lists as its `sources` —,
+so a rate never applies retroactively without saying so: a bucket from a day no rule covers is
+priced from the nearest known rule and marked `approximate`. The dashboard's footnote names both
+days — `Prices as of 2026-09-06; checked later: claude-opus-5-5 (2026-09-24).` —, under the provider
+switch's Codex view the table's alone, and the Models table's `list as of` date is the row's own.
 
 **Claude Opus 5.5** (1.8): $4 per million input tokens, $5 for a 5-minute cache write, $8 for a
 1-hour cache write, $0.20 for a cache hit and $20 for output; fast mode $8 in and $40 out. Until 1.8
@@ -56,7 +58,12 @@ table, so you can correct a single rate and leave the rest alone; keys are norma
 `claude-opus-5[1m]` and `Anthropic/GPT-5` both find their model. Non-numeric or negative values
 are ignored, not guessed. As soon as either applies, the figures are labelled “at your
 configured rates”, and `tokenPace.pricing.showListPrice` adds the undiscounted figure as a second
-column, in the manner of the `amount` / `list_amount` pair of the provider analytics APIs.
+column, in the manner of the `amount` / `list_amount` pair of the provider analytics APIs. The CSV
+and JSON [exports](export.md) carry both amounts for every bucket, whatever `showListPrice` says —
+`costUsd` at your configured rates and `listCostUsd` at the list price — with the day of the rule
+each was priced by (`priceFrom`) and whether no rule covered its day (`priceApproximate`). Where a
+custom price alone prices a model the table does not know, the two amounts are the same: a discount
+against a price that was never published would be an invention.
 
 **Unknown models.** `tokenPace.unknownModelPricing: strict` (default) reports a lower bound and
 names the models rather than inventing a number. `family` opts in to borrowing the newest priced

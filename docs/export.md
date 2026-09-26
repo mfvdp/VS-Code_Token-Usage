@@ -12,13 +12,25 @@ Part of the [Token Pace documentation](../README.md#documentation).
 ```
 day, hour, source, model, isSub, tier, res,
 input, cacheWrite5m, cacheWrite1h, cacheRead, output, reasoning,
-requests, outputFinal, webSearch, costUsd, priced
+requests, outputFinal, webSearch, costUsd, priced,
+listCostUsd, priceFrom, priceApproximate
 ```
 
 `priced` is `exact`, `family`, `custom` or `none`; an unpriced bucket leaves `costUsd` empty
-rather than writing `0.00`, and the `TOTAL` row's last column reads `lowerBound` when the sum is
+rather than writing `0.00`, and the `TOTAL` row's `priced` column reads `lowerBound` when the sum is
 one. Days without data produce no row at all — a spreadsheet that fills gaps with zeros turns
 “we were not running” into “nothing was used”, and those are different statements.
+
+The last three columns (1.11) say what each figure was priced by. `listCostUsd` is the same usage
+at the published list price — multiplier 1, no custom price — beside `costUsd` at your configured
+rates, so a discount shows as the difference between the two; where a custom price alone prices a
+model the table does not know, it equals `costUsd`, because a discount against a price that was
+never published would be an invention. `priceFrom` is the day the price rule used was read — the
+`from` of the dated rule, the borrowed model's under the family fallback —, empty where a custom
+price alone priced the bucket. `priceApproximate` is `true` where no rule covered the bucket's day
+and the nearest one was used ([how the table is dated](cost.md)). An unpriced bucket leaves all three
+empty, as it leaves `costUsd`; the `TOTAL` row carries the list amounts of the priced buckets summed
+and leaves the other two empty. The eighteen columns before them keep their positions.
 
 The tool table cannot be a column on a bucket row — it is keyed by day and model, a bucket row
 by day, hour, model, tier and isSub, so any per-row tool number would be an invented split. It
@@ -76,8 +88,15 @@ one's —, never a description, a prompt, a result or any other text of a transc
 hold none of it. An empty cell is an absent value, never a zero.
 
 **Export JSON…** writes the same buckets with the range, the timezone configuration, the pricing
-provenance (`as_of`, `custom`, `multiplier`, `unknown_model`), the totals, and the notes that
-qualify them. `costUsd` is `null`, not `0`, where there is no price. With attribution on it also
+provenance (`as_of`, `custom`, `multiplier`, `unknown_model`, and since 1.11 `checked_later` — each
+row read after `as_of`, `model` with the day of its own check, `checked`; every provider's, whatever
+the dashboard shows — and `sources`, the pages the table was read from as host names:
+`docs.claude.com`, `platform.claude.com`, `developers.openai.com`), the totals, and the notes that
+qualify them. `costUsd` is `null`, not `0`, where there is no price. Each bucket carries the CSV's
+`listCostUsd`, `priceFrom` and `priceApproximate` — `null`, `null` and `false` where the CSV leaves
+them empty — and `totals` carries `listCostUsd`; the note says what they are: *listCostUsd is the same
+usage at the published list price (multiplier 1, no custom price); priceFrom is the day the price rule
+used was read; priceApproximate means no rule covered that day and the nearest one was used.* With attribution on it also
 carries a `sessions[]` array, and the note says the project labels are exactly as stored. It also
 carries `tools[]` (day, source, model, tool, calls) and `toolsTruncated`, and `agents[]` — the
 agents file's rows, with the same fields and Claude Code's report as one `report` object
@@ -85,8 +104,10 @@ agents file's rows, with the same fields and Claude Code's report as one `report
 install without agents exports an empty list. Its note says which agents and what of them:
 *agents[] holds the agent records whose activity overlaps the exported range's days, within the
 agent tables' 7-day retention; ids, names and counts only — never a path, a description or a
-prompt.* `schema_version` is `3` since `agents[]` was added (`2` added the tool table), and
-everything versions 1 and 2 wrote still means the same thing. The save dialog names what is
+prompt.* `schema_version` is `4` since 1.11 added `listCostUsd`, `priceFrom` and
+`priceApproximate` to `buckets[]`, `listCostUsd` to `totals`, and `checked_later` and `sources` to
+`pricing` (`3` added `agents[]`, `2` the tool table); everything versions 1–3 wrote is still there
+and still means the same thing. The save dialog names what is
 about to leave the machine — model names always, tool names and the agents' ids and types
 (*Agents are included as agents[].*), project labels (basenames or salted hashes) when
 attribution is on — because that is the last moment to say no. After the export one message

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Frederik Marx
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Bucket } from './types'
+import { Bucket, Source } from './types'
 
 /**
  * Provider list prices, in USD per 1M tokens, as dated rules.
@@ -24,8 +24,9 @@ export const PRICES_AS_OF = '2026-09-06'
  * Legacy Anthropic rows (Claude 4.x and 3.x) come from an older check of the same
  * table. Their `from` day is that check date, NOT the model's launch day — nobody
  * published a price history, so this is the earliest day for which the rate is proven.
+ * 1.11 C5: exported, so that the docs test holds docs/cost.md to it instead of to a literal.
  */
-const LEGACY_CHECKED = '2026-08-13'
+export const LEGACY_CHECKED = '2026-08-13'
 
 /**
  * 1.8: the day the Claude Opus 5.5 row was read from Anthropic's pricing table,
@@ -35,9 +36,22 @@ const LEGACY_CHECKED = '2026-08-13'
  */
 export const OPUS_5_5_CHECKED = '2026-09-24'
 
+/**
+ * 1.11 C2/C5: the pages each provider's rules were read from, as host names — never a URL (the
+ * privacy scan holds the bundle to its allow-list of `https://` literals, and an export carries these
+ * as they stand). Every rule's `source` starts with one of its provider's hosts (a test). Anthropic has
+ * two: the model table on docs.claude.com, and the pricing page on platform.claude.com the Claude
+ * Opus 5.5 row was read from (§7a Q9 of the 1.11 spec: the source names the page that was read). In
+ * the provider registry's order; frozen, because the footer, the tooltips and the JSON export read it.
+ */
+export const PRICE_SOURCE_PAGES: Readonly<Record<Source, readonly string[]>> = Object.freeze({
+  claude: Object.freeze(['docs.claude.com', 'platform.claude.com']),
+  codex: Object.freeze(['developers.openai.com']),
+})
+
 /** Human-readable provenance of the table (`priceTableSummary`). */
 export const PRICE_SOURCES = [
-  `Anthropic model and pricing table — docs.claude.com (checked ${PRICES_AS_OF}, legacy rows ${LEGACY_CHECKED}, Claude Opus 5.5 row ${OPUS_5_5_CHECKED})`,
+  `Anthropic model and pricing table — docs.claude.com (checked ${PRICES_AS_OF}, legacy rows ${LEGACY_CHECKED}; Claude Opus 5.5 row ${OPUS_5_5_CHECKED}, platform.claude.com)`,
   `OpenAI API pricing — developers.openai.com/api/docs/pricing (checked ${PRICES_AS_OF})`,
   `Anthropic web search — $10 per 1,000 searches, docs.claude.com (checked ${PRICES_AS_OF})`,
 ]
@@ -94,9 +108,13 @@ function openai(input: number, cachedInput: number, output: number): ModelPrice 
   return { input, output, cacheRead: cachedInput, cacheWrite5m: 0, cacheWrite1h: 0 }
 }
 
-/** One dated rule from the Anthropic table; `from` doubles as the check date. */
-function anthropicRule(from: string, price: ModelPrice): PriceRule {
-  return { ...price, from, source: `docs.claude.com model table (checked ${from})` }
+/**
+ * One dated rule from an Anthropic table; `from` doubles as the check date. `host` names the page
+ * the rule was read from — one of PRICE_SOURCE_PAGES.claude: the model table on docs.claude.com for
+ * every row but Claude Opus 5.5's, which was read from the pricing page on platform.claude.com.
+ */
+function anthropicRule(from: string, price: ModelPrice, host = 'docs.claude.com'): PriceRule {
+  return { ...price, from, source: `${host} model table (checked ${from})` }
 }
 
 /** One dated rule from the OpenAI pricing page. */
@@ -115,7 +133,9 @@ export const PRICES: Record<string, PriceRule[]> = {
   // (OPUS_5_5_CHECKED): $4 input, $5 5-minute write, $8 1-hour write, $0.20 cache hit ("Cache hits and
   // refreshes on Claude Opus 5.5 are priced at 0.05x the base input price"), $20 output; fast mode
   // $8 / $40 — twice the standard rate, as for Opus 5 and 4.8.
-  'claude-opus-5-5': [anthropicRule(OPUS_5_5_CHECKED, { ...anthropic(4, 20, 0.2), fast: { input: 8, output: 40 } })],
+  // 1.11 C5 (§7a Q9): its source names that page's host, platform.claude.com — until 1.10 it said
+  // "docs.claude.com model table", a page the row was not read from.
+  'claude-opus-5-5': [anthropicRule(OPUS_5_5_CHECKED, { ...anthropic(4, 20, 0.2), fast: { input: 8, output: 40 } }, 'platform.claude.com')],
   'claude-fable-5-1': [anthropicRule(PRICES_AS_OF, anthropic(10, 50, 0.25))],
   // Same tier and per-token price as Fable 5.1, including the 0.025x cache read the pricing
   // page states for both (confirmed 2026-09-06).
@@ -175,17 +195,29 @@ export const PRICES: Record<string, PriceRule[]> = {
 }
 
 /**
+ * 1.11 C5: the provider whose page a rule's `source` names — the one of PRICE_SOURCE_PAGES whose host
+ * the source starts with, followed by a space or a slash —, or null for a source that names none of
+ * them (the table test refuses such a rule).
+ */
+export function providerOfSource(source: string): Source | null {
+  for (const [provider, hosts] of Object.entries(PRICE_SOURCE_PAGES) as Array<[Source, readonly string[]]>) {
+    if (hosts.some((h) => source.startsWith(`${h} `) || source.startsWith(`${h}/`))) return provider
+  }
+  return null
+}
+
+/**
  * 1.8 (§7c wave 2 fact 13): the rows read after PRICES_AS_OF — today Claude Opus 5.5's, read on
  * OPUS_5_5_CHECKED — each with the day of its own check and the provider whose page it came from
- * (an OpenAI rule names developers.openai.com, every other one Anthropic's table), in the table's
+ * (1.11 C5: the provider whose PRICE_SOURCE_PAGES host the rule's source names), in the table's
  * order. The page's footnote names them beside PRICES_AS_OF, so no row's date is hidden behind the
  * table's — under the provider switch only the rows of the providers it shows.
  */
-export const PRICES_CHECKED_LATER: ReadonlyArray<{ readonly model: string; readonly checked: string; readonly source: 'claude' | 'codex' }> = Object.freeze(
+export const PRICES_CHECKED_LATER: ReadonlyArray<{ readonly model: string; readonly checked: string; readonly source: Source }> = Object.freeze(
   Object.entries(PRICES).flatMap(([model, rules]) => {
     const newest = rules.reduce((r, x) => (x.from > r.from ? x : r))
     if (!(newest.from > PRICES_AS_OF)) return []
-    const source: 'claude' | 'codex' = newest.source.startsWith('developers.openai.com') ? 'codex' : 'claude'
+    const source: Source = providerOfSource(newest.source) ?? 'claude'
     return [Object.freeze({ model, checked: newest.from, source })]
   }),
 )
@@ -601,6 +633,12 @@ export interface CostBreakdown {
   family?: string
   /** Set when no dated rule covered the bucket's day. */
   approximate?: boolean
+  /**
+   * 1.11 C4: the `from` of the dated rule the lookup used — the borrowed model's under the family
+   * rule, the list rule an override was merged over —; absent when an override alone priced the
+   * model (no published rule behind it). The export's `priceFrom`.
+   */
+  ruleFrom?: string
 }
 
 /**
@@ -624,6 +662,7 @@ export function costOfBucket(b: Bucket, opts?: PricingOptions): CostBreakdown | 
     }
     if (lookup.family) out.family = lookup.family
     if (lookup.approximate) out.approximate = true
+    if (lookup.rule) out.ruleFrom = lookup.rule.from
     return out
   }
   // The fast-mode cache rates are derived from the published input rate the fast rates
@@ -649,6 +688,7 @@ export function costOfBucket(b: Bucket, opts?: PricingOptions): CostBreakdown | 
   const out: CostBreakdown = { usd, listUsd, unpriced: false, confidence: lookup.confidence }
   if (lookup.family) out.family = lookup.family
   if (lookup.approximate) out.approximate = true
+  if (lookup.rule) out.ruleFrom = lookup.rule.from
   return out
 }
 

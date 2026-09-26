@@ -12,23 +12,27 @@
  * a spreadsheet and then argue with.
  */
 
+import { SOURCES } from './adapters'
 import { Aggregator, billable, cleanAgentId, cleanAgentName } from './agg'
 import { AGENT_RETENTION_DAYS } from './agentTree'
 import { AgentRecordView, agentRecordViews } from './agentTreeBuild'
 import { Config } from './config'
 import { t } from './i18n'
-import { PRICES_AS_OF, PricingOptions, costOfBucket, isCustomPricing } from './prices'
+import {
+  CostBreakdown, PRICES_AS_OF, PRICES_CHECKED_LATER, PRICE_SOURCE_PAGES, PricingOptions, costOfBucket, isCustomPricing,
+} from './prices'
 import { viewTitle } from './textViews'
 import { TimeConfig, dayOfHour, dayOf as dayOfInstant } from './time'
 import { Bucket, TOOL_NAME_CAP } from './types'
 import type { ViewModel } from './viewModel'
 
 /**
- * 2 added `tools[]` and `toolsTruncated`; 3 (1.6 O2) added `agents[]`. Everything an earlier
- * version carried is still there and still means the same thing, so a reader written for 1 or 2
- * keeps working.
+ * 2 added `tools[]` and `toolsTruncated`; 3 (1.6 O2) added `agents[]`; 4 (1.11) added `listCostUsd`,
+ * `priceFrom`, `priceApproximate` to `buckets[]`, `listCostUsd` to `totals`, `checked_later` and
+ * `sources` to `pricing` (and the CSV the same three columns after `priced`). Everything versions 1–3
+ * wrote is still there and still means the same thing, so a reader written for 1, 2 or 3 keeps working.
  */
-export const EXPORT_SCHEMA_VERSION = 3
+export const EXPORT_SCHEMA_VERSION = 4
 
 /**
  * The agents file's columns (1.6 O2) — the fields of a JSON `agents[]` row, in their order, with
@@ -70,7 +74,26 @@ export const CSV_COLUMNS = [
   'day', 'hour', 'source', 'model', 'isSub', 'tier', 'res',
   'input', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output', 'reasoning',
   'requests', 'outputFinal', 'webSearch', 'costUsd', 'priced',
+  // 1.11 C4 (schema 4): appended, so the eighteen columns before them keep their positions.
+  'listCostUsd', 'priceFrom', 'priceApproximate',
 ] as const
+
+/**
+ * 1.11 C4: what a bucket's cost breakdown says of its price, as both exports write it — each only for
+ * a priced bucket (an unpriced one has no price to qualify): the list amount (multiplier 1, no custom
+ * price; the configured amount itself where an override alone priced the model — a discount against a
+ * price never published would be an invention), the `from` of the dated rule it was priced by (none
+ * where an override alone priced it), and whether no rule covered its day.
+ */
+function priceFacts(c: CostBreakdown | null): { list: number | null; from: string | null; approximate: boolean } {
+  if (!c || c.unpriced) return { list: null, from: null, approximate: false }
+  return { list: c.listUsd, from: c.ruleFrom ?? null, approximate: c.approximate === true }
+}
+
+/** 1.11 C4: the price table's source pages as host names, every provider's, in the registry's order. */
+function sourcePages(): string[] {
+  return SOURCES.flatMap((s) => [...PRICE_SOURCE_PAGES[s]])
+}
 
 function pricingOf(cfg: Config): PricingOptions {
   return {
@@ -145,12 +168,13 @@ export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: Ti
   const lines: string[] = [CSV_COLUMNS.join(',')]
   const total = {
     input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, reasoning: 0,
-    requests: 0, outputFinal: 0, webSearch: 0, cost: 0, unpriced: false,
+    requests: 0, outputFinal: 0, webSearch: 0, cost: 0, listCost: 0, unpriced: false,
   }
   for (const b of rowsOf(agg, range.from, range.to, tcfg)) {
     const day = dayOf(b, tcfg)
     const c = costOfBucket(day === b.day ? b : { ...b, day }, pricing)
     const priced = !c ? 'none' : c.unpriced ? 'none' : c.confidence
+    const facts = priceFacts(c)
     const write5m = Math.max(0, b.cacheWrite - b.cacheWrite1h)
     lines.push([
       day,
@@ -160,6 +184,10 @@ export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: Ti
       b.requests, b.outputFinal, b.webSearch,
       c && !c.unpriced ? amount(c.usd) : '',
       priced,
+      // Empty, never 0, where there is no price — as costUsd.
+      facts.list === null ? '' : amount(facts.list),
+      facts.from ?? '',
+      facts.approximate ? 'true' : '',
     ].map(csvCell).join(','))
     total.input += b.input
     total.cacheWrite5m += write5m
@@ -172,6 +200,7 @@ export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: Ti
     total.webSearch += b.webSearch
     if (c && !c.unpriced) total.cost += c.usd
     else total.unpriced = true
+    if (facts.list !== null) total.listCost += facts.list
   }
   lines.push([
     'TOTAL', '', '', '', '', '', '',
@@ -180,6 +209,8 @@ export function toCsv(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: Ti
     amount(total.cost),
     // A total over partly unpriced buckets is a lower bound, and says so in its own column.
     total.unpriced ? 'lowerBound' : '',
+    // The list amount over the same priced buckets; a sum has no rule and no day of its own.
+    amount(total.listCost), '', '',
   ].map(csvCell).join(','))
   return lines.join('\n') + '\n'
 }
@@ -338,7 +369,13 @@ export interface JsonExport {
   writer: string
   range: { from: string; to: string; label: string | null; preset: string | null }
   timezone: { zone: string; day_boundary_hour: number; start_of_week: string }
-  pricing: { as_of: string; custom: boolean; multiplier: number; unknown_model: string }
+  pricing: {
+    as_of: string; custom: boolean; multiplier: number; unknown_model: string
+    /** 1.11 C4 (schema 4): the rows read after `as_of`, each with its own check day — every provider's. */
+    checked_later: Array<{ model: string; checked: string }>
+    /** 1.11 C4 (schema 4): the pages the price table was read from, as host names. */
+    sources: string[]
+  }
   totals: Record<string, number | boolean>
   buckets: Array<Record<string, string | number | boolean | null>>
   tools: Array<Record<string, string | number>>
@@ -357,12 +394,13 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
   const buckets: JsonExport['buckets'] = []
   const totals = {
     usage: 0, input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0,
-    reasoning: 0, requests: 0, outputFinal: 0, webSearch: 0, webFetch: 0, costUsd: 0,
+    reasoning: 0, requests: 0, outputFinal: 0, webSearch: 0, webFetch: 0, costUsd: 0, listCostUsd: 0,
     unpricedTokens: 0,
   }
   for (const b of rowsOf(agg, range.from, range.to, tcfg)) {
     const day = dayOf(b, tcfg)
     const c = costOfBucket(day === b.day ? b : { ...b, day }, pricing)
+    const facts = priceFacts(c)
     const write5m = Math.max(0, b.cacheWrite - b.cacheWrite1h)
     buckets.push({
       day,
@@ -385,6 +423,10 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
       // null, not 0: an unpriced bucket has no cost, it does not have a cost of nothing.
       costUsd: c && !c.unpriced ? Number(amount(c.usd)) : null,
       priced: !c ? 'none' : c.unpriced ? 'none' : c.confidence,
+      // 1.11 C4 (schema 4): null / false where the CSV's cell is empty.
+      listCostUsd: facts.list === null ? null : Number(amount(facts.list)),
+      priceFrom: facts.from,
+      priceApproximate: facts.approximate,
     })
     totals.usage += billable(b)
     totals.input += b.input
@@ -399,8 +441,10 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
     totals.webFetch += b.webFetch
     if (c && !c.unpriced) totals.costUsd += c.usd
     else totals.unpricedTokens += billable(b)
+    if (facts.list !== null) totals.listCostUsd += facts.list
   }
   totals.costUsd = Number(amount(totals.costUsd))
+  totals.listCostUsd = Number(amount(totals.listCostUsd))
 
   const out: JsonExport = {
     schema_version: EXPORT_SCHEMA_VERSION,
@@ -415,6 +459,9 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
       custom: isCustomPricing(pricing),
       multiplier: cfg.pricing.multiplier,
       unknown_model: cfg.unknownModelPricing,
+      // 1.11 C4 (§7a Q10): every provider's — the export follows no view.
+      checked_later: PRICES_CHECKED_LATER.map((r) => ({ model: r.model, checked: r.checked })),
+      sources: sourcePages(),
     },
     totals: { ...totals, lowerBound: totals.unpricedTokens > 0 },
     buckets,
@@ -435,6 +482,9 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
       'an agent row counts the agent whole: the same tokens the buckets with isSub true count hour by hour, so the two are '
         + 'never added; state is the Agents section\'s, inferred where derived is true; report is Claude Code\'s own '
         + 'figure for the agent, never part of a total',
+      // 1.11 C4 (schema 4): after the notes versions 1–3 wrote, so theirs keep their places.
+      'listCostUsd is the same usage at the published list price (multiplier 1, no custom price); priceFrom is the day '
+        + 'the price rule used was read; priceApproximate means no rule covered that day and the nearest one was used',
     ],
   }
 

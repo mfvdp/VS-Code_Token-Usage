@@ -19,6 +19,9 @@ import { toolAgg } from './helpers/toolAgg'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setBundle, setLang, setLocale } from '../src/i18n'
+import { SOURCES } from '../src/adapters'
+import { OPUS_5_5_CHECKED, PRICES_AS_OF, PRICES_CHECKED_LATER, PRICE_SOURCE_PAGES } from '../src/prices'
+import { Bucket, emptyBucket } from '../src/types'
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -31,7 +34,12 @@ function csvRows(text: string): string[][] {
 test('the CSV header is the documented column list', () => {
   const rows = csvRows(toCsv(buildAgg(), range, cfg, tcfg))
   assert.deepEqual(rows[0], [...CSV_COLUMNS])
-  assert.equal(rows[0].length, 18)
+  // 1.11 P5 (rewritten: 18 → 21 columns, §3 C4): the three price columns are appended after `priced`, so the
+  // eighteen of schema 1–3 keep their positions.
+  assert.equal(rows[0].length, 21)
+  assert.deepEqual(rows[0].slice(0, 18), ['day', 'hour', 'source', 'model', 'isSub', 'tier', 'res', 'input', 'cacheWrite5m',
+    'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'requests', 'outputFinal', 'webSearch', 'costUsd', 'priced'])
+  assert.deepEqual(rows[0].slice(18), ['listCostUsd', 'priceFrom', 'priceApproximate'])
 })
 
 test('every row is one stored bucket, in calendar order', () => {
@@ -327,11 +335,12 @@ const AGENT_KEYS = [
   'cacheWrite1h', 'cacheRead', 'output', 'reasoning', 'usage', 'toolCalls', 'toolErrors', 'spawnedBy', 'report',
 ]
 
-test('the JSON export is schema 3: agents[] of the documented fields, and the note that says what they are', () => {
-  assert.equal(EXPORT_SCHEMA_VERSION, 3)
+test('the JSON export carries agents[] (schema 3 on): the documented fields, and the note that says what they are', () => {
+  // 1.11 P5 (rewritten: schema 3 → 4, §3 C4): 1.11 added the price fields; agents[] is as schema 3 wrote it.
+  assert.equal(EXPORT_SCHEMA_VERSION, 4)
   const { agg } = agentWorld()
   const j = JSON.parse(toJson(agg, WORLD_DAY, cfg, tcfg, NOW))
-  assert.equal(j.schema_version, 3)
+  assert.equal(j.schema_version, 4)
   // Everything version 2 carried is still there.
   for (const k of ['range', 'timezone', 'pricing', 'totals', 'buckets', 'tools', 'toolsTruncated', 'notes']) assert.ok(k in j, k)
   assert.ok(Array.isArray(j.agents) && j.agents.length > 0)
@@ -513,5 +522,222 @@ test('the CSV and JSON exports are byte for byte the same under a German page (1
     setBundle(undefined)
     setLocale(undefined)
     setLang(undefined)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 1.11 C4 (§0a.5): both amounts, the dated rule and "approximate" per bucket — schema 4
+// ---------------------------------------------------------------------------
+
+/**
+ * A world of four buckets for the price fields and nothing else: a Claude day after the table's check
+ * (priced exact), a Claude hour before it (priced from the nearest rule: approximate), a model the table
+ * does not know (unpriced) and a Codex day — plus whatever a test adds.
+ */
+const PRICE_WORLD_RANGE = { from: '2026-09-01', to: '2026-09-10', label: 'Price world', preset: 'custom' }
+function priceWorld(extra: Bucket[] = []): Aggregator {
+  const agg = new Aggregator()
+  const counts = (b: Bucket, c: Partial<Bucket>): Bucket => Object.assign(b, c)
+  const hour = Date.UTC(2026, 8, 1, 10) / 3_600_000
+  const buckets = [
+    counts(emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, '2026-09-10'),
+      { input: 1_000_000, cacheWrite: 400_000, cacheWrite1h: 100_000, cacheRead: 2_000_000, output: 300_000, webSearch: 3, requests: 4, outputFinal: 4 }),
+    counts(emptyBucket('claude', 'claude-sonnet-4-6', false, 'standard', 'h', hour, '2026-09-01'),
+      { input: 500_000, output: 100_000, requests: 2, outputFinal: 2 }),
+    counts(emptyBucket('claude', 'claude-experimental-x', false, 'standard', 'd', null, '2026-09-02'),
+      { input: 200_000, output: 50_000, requests: 1, outputFinal: 1 }),
+    counts(emptyBucket('codex', 'gpt-5', false, 'standard', 'd', null, '2026-09-10'),
+      { input: 800_000, cacheRead: 300_000, output: 90_000, reasoning: 20_000, requests: 3, outputFinal: 3 }),
+    ...extra,
+  ]
+  agg.all = () => buckets.map((b) => ({ ...b }))
+  return agg
+}
+
+/** The price world's rows by model, the CSV's cells named by their column. */
+function csvByModel(text: string): Map<string, Record<string, string>> {
+  const [head, ...body] = csvRows(text)
+  const out = new Map<string, Record<string, string>>()
+  for (const r of body) out.set(r[3] === '' ? r[0] : r[3], Object.fromEntries(head.map((k, i) => [k, r[i]])))
+  return out
+}
+
+test('1.11 C4: the CSV carries the list amount, the rule\'s day and "approximate" after priced — by hand, at a multiplier of 0.9', () => {
+  const discount = makeConfig({ 'tokenPace.pricing.multiplier': 0.9 })
+  const text = toCsv(priceWorld(), PRICE_WORLD_RANGE, discount, timeConfig(discount))
+  // One whole row: Opus 4.6 on a day its rule covers — list $16.405 (5 + 1.875 + 1 + 1 + 7.5 for the tokens, $0.03 for three
+  // searches), 0.9 of it configured; the rule read on PRICES_AS_OF; not approximate.
+  assert.ok(text.split('\n').includes(
+    `2026-09-10,,claude,claude-opus-4-6,false,standard,d,1000000,300000,100000,2000000,300000,0,4,4,3,14.764500,exact,16.405000,${PRICES_AS_OF},`), text)
+  const rows = csvByModel(text)
+  // Sonnet 4.6's hour on 1 September, before its rule's day: priced from the nearest rule, and it says so.
+  assert.deepEqual([rows.get('claude-sonnet-4-6')?.costUsd, rows.get('claude-sonnet-4-6')?.listCostUsd, rows.get('claude-sonnet-4-6')?.priceFrom,
+    rows.get('claude-sonnet-4-6')?.priceApproximate], ['2.700000', '3.000000', PRICES_AS_OF, 'true'])
+  // Codex: the input holds the cached tokens (0.625 + 0.0375 + 0.9 at list).
+  assert.deepEqual([rows.get('gpt-5')?.costUsd, rows.get('gpt-5')?.listCostUsd, rows.get('gpt-5')?.priceFrom, rows.get('gpt-5')?.priceApproximate],
+    ['1.406250', '1.562500', PRICES_AS_OF, ''])
+  // Unpriced: every price cell empty — never 0, never a rule it did not have.
+  assert.deepEqual([rows.get('claude-experimental-x')?.costUsd, rows.get('claude-experimental-x')?.priced, rows.get('claude-experimental-x')?.listCostUsd,
+    rows.get('claude-experimental-x')?.priceFrom, rows.get('claude-experimental-x')?.priceApproximate], ['', 'none', '', '', ''])
+  // TOTAL: the list amounts of the priced buckets summed; a sum has no rule and no day.
+  const total = rows.get('TOTAL')
+  assert.deepEqual([total?.costUsd, total?.priced, total?.listCostUsd, total?.priceFrom, total?.priceApproximate],
+    ['18.870750', 'lowerBound', '20.967500', '', ''])
+  const body = [...rows.values()].filter((r) => r.day !== 'TOTAL' && r.listCostUsd !== '')
+  assert.equal(Number(total?.listCostUsd), Number(body.reduce((sum, r) => sum + Number(r.listCostUsd), 0).toFixed(6)))
+  // At list prices the two amounts are the same figure.
+  const list = csvByModel(toCsv(priceWorld(), PRICE_WORLD_RANGE, cfg, tcfg))
+  for (const [model, r] of list) if (r.costUsd !== '') assert.equal(r.listCostUsd, r.costUsd, model)
+})
+
+test('1.11 C4: a custom price — an override alone has no rule and no list amount of its own; one over a rule keeps the rule\'s day and the list amount', () => {
+  const custom = makeConfig({
+    'tokenPace.pricing.multiplier': 0.9,
+    'tokenPace.customPrices': { 'claude-experimental-x': { input: 2, output: 8 }, 'claude-opus-4-6': { input: 1 } },
+  })
+  const rows = csvByModel(toCsv(priceWorld(), PRICE_WORLD_RANGE, custom, timeConfig(custom)))
+  // Priced by the override alone ($0.40 + $0.40, 0.9 of it): no published rule, so no day and no discount against one.
+  const alone = rows.get('claude-experimental-x')
+  assert.deepEqual([alone?.priced, alone?.costUsd, alone?.listCostUsd, alone?.priceFrom, alone?.priceApproximate], ['custom', '0.720000', '0.720000', '', ''])
+  // An input override over Opus 4.6's rule: $1 instead of $5 for the million input tokens, at 0.9; the list amount is the rule's.
+  const over = rows.get('claude-opus-4-6')
+  assert.deepEqual([over?.priced, over?.costUsd, over?.listCostUsd, over?.priceFrom], ['custom', '11.164500', '16.405000', PRICES_AS_OF])
+  // JSON: the same, the absent rule as null.
+  const j = JSON.parse(toJson(priceWorld(), PRICE_WORLD_RANGE, custom, timeConfig(custom), NOW))
+  const b = j.buckets.find((x: { model: string }) => x.model === 'claude-experimental-x')
+  assert.deepEqual([b.costUsd, b.listCostUsd, b.priceFrom, b.priceApproximate], [0.72, 0.72, null, false])
+})
+
+test('1.11 C4: under the family rule the rule is the donor\'s — its day, and "approximate" before it', () => {
+  const family = makeConfig({ 'tokenPace.unknownModelPricing': 'family' })
+  const opus49 = Object.assign(emptyBucket('claude', 'claude-opus-4-9', false, 'standard', 'd', null, '2026-09-10'), { input: 1_000_000, requests: 1 })
+  const rows = csvByModel(toCsv(priceWorld([opus49]), PRICE_WORLD_RANGE, family, timeConfig(family)))
+  const r = rows.get('claude-opus-4-9')
+  // Opus 5.5's $4 input, read on OPUS_5_5_CHECKED — after 10 September, so the day is priced from the nearest rule.
+  assert.deepEqual([r?.priced, r?.costUsd, r?.listCostUsd, r?.priceFrom, r?.priceApproximate], ['family', '4.000000', '4.000000', OPUS_5_5_CHECKED, 'true'])
+})
+
+test('1.11 C4: the JSON buckets carry the same three fields — null and false where the CSV is empty — and the totals the list sum', () => {
+  const discount = makeConfig({ 'tokenPace.pricing.multiplier': 0.9 })
+  const j = JSON.parse(toJson(priceWorld(), PRICE_WORLD_RANGE, discount, timeConfig(discount), NOW))
+  assert.equal(j.schema_version, 4)
+  const by = new Map<string, Record<string, unknown>>(j.buckets.map((b: Record<string, unknown>) => [b.model as string, b]))
+  const facts = (m: string): unknown[] => ['costUsd', 'listCostUsd', 'priceFrom', 'priceApproximate'].map((k) => by.get(m)?.[k])
+  assert.deepEqual(facts('claude-opus-4-6'), [14.7645, 16.405, PRICES_AS_OF, false])
+  assert.deepEqual(facts('claude-sonnet-4-6'), [2.7, 3, PRICES_AS_OF, true])
+  assert.deepEqual(facts('gpt-5'), [1.40625, 1.5625, PRICES_AS_OF, false])
+  // Unpriced: null, never 0 — the list amount of a price that does not exist is no amount.
+  assert.deepEqual(facts('claude-experimental-x'), [null, null, null, false])
+  // The new keys follow `priced`, in the CSV's order.
+  assert.deepEqual(Object.keys(by.get('gpt-5') ?? {}).slice(-4), ['priced', 'listCostUsd', 'priceFrom', 'priceApproximate'])
+  assert.equal(j.totals.listCostUsd, 20.9675)
+  assert.equal(j.totals.costUsd, 18.87075)
+  // The CSV and the JSON say the same of every bucket.
+  const csv = csvByModel(toCsv(priceWorld(), PRICE_WORLD_RANGE, discount, timeConfig(discount)))
+  for (const [model, b] of by) {
+    const r = csv.get(model)
+    assert.equal(r?.listCostUsd, b.listCostUsd === null ? '' : (b.listCostUsd as number).toFixed(6), model)
+    assert.equal(r?.priceFrom, b.priceFrom ?? '', model)
+    assert.equal(r?.priceApproximate, b.priceApproximate ? 'true' : '', model)
+  }
+})
+
+test('1.11 C4: pricing names every provider\'s later-checked rows and the source pages by host, and a note says what the three fields mean', () => {
+  const j = JSON.parse(toJson(priceWorld(), PRICE_WORLD_RANGE, cfg, tcfg, NOW))
+  // Every provider's, whatever the dashboard shows (§7a Q10): the export follows no view.
+  assert.deepEqual(j.pricing.checked_later, PRICES_CHECKED_LATER.map((r) => ({ model: r.model, checked: r.checked })))
+  assert.deepEqual(j.pricing.checked_later, [{ model: 'claude-opus-5-5', checked: OPUS_5_5_CHECKED }])
+  assert.deepEqual(j.pricing.sources, SOURCES.flatMap((s) => [...PRICE_SOURCE_PAGES[s]]))
+  assert.deepEqual(j.pricing.sources, ['docs.claude.com', 'platform.claude.com', 'developers.openai.com'])
+  for (const host of j.pricing.sources) assert.match(host, /^[a-z0-9-]+(\.[a-z0-9-]+)+$/, 'a host name, never a URL or a path')
+  assert.deepEqual(Object.keys(j.pricing), ['as_of', 'custom', 'multiplier', 'unknown_model', 'checked_later', 'sources'])
+  assert.ok(j.notes.includes('listCostUsd is the same usage at the published list price (multiplier 1, no custom price); priceFrom is the day '
+    + 'the price rule used was read; priceApproximate means no rule covered that day and the nearest one was used'), j.notes.join(' | '))
+})
+
+/**
+ * 1.10.0's JSON export (schema 3) of the price world at a multiplier of 0.9 — written by the exporter at 0bff209, the tip
+ * before 1.11 P5, without `generated_at` and `writer` (a time and a build). What a reader of schema 3 read.
+ */
+const SCHEMA_3_PRICE_WORLD = {
+  schema_version: 3,
+  range: { from: '2026-09-01', to: '2026-09-10', label: 'Price world', preset: 'custom' },
+  timezone: { zone: 'utc', day_boundary_hour: 0, start_of_week: 'monday' },
+  pricing: { as_of: '2026-09-06', custom: true, multiplier: 0.9, unknown_model: 'strict' },
+  totals: { usage: 3140000, input: 2500000, cacheWrite5m: 300000, cacheWrite1h: 100000, cacheRead: 2300000, output: 540000, reasoning: 20000,
+    requests: 10, outputFinal: 10, webSearch: 3, webFetch: 0, costUsd: 18.87075, unpricedTokens: 250000, lowerBound: true },
+  buckets: [
+    { day: '2026-09-01', hour: 496738, source: 'claude', model: 'claude-sonnet-4-6', isSub: false, tier: 'standard', res: 'h', input: 500000, cacheWrite5m: 0,
+      cacheWrite1h: 0, cacheRead: 0, output: 100000, reasoning: 0, requests: 2, outputFinal: 2, webSearch: 0, webFetch: 0, costUsd: 2.7, priced: 'exact' },
+    { day: '2026-09-02', hour: null, source: 'claude', model: 'claude-experimental-x', isSub: false, tier: 'standard', res: 'd', input: 200000, cacheWrite5m: 0,
+      cacheWrite1h: 0, cacheRead: 0, output: 50000, reasoning: 0, requests: 1, outputFinal: 1, webSearch: 0, webFetch: 0, costUsd: null, priced: 'none' },
+    { day: '2026-09-10', hour: null, source: 'claude', model: 'claude-opus-4-6', isSub: false, tier: 'standard', res: 'd', input: 1000000, cacheWrite5m: 300000,
+      cacheWrite1h: 100000, cacheRead: 2000000, output: 300000, reasoning: 0, requests: 4, outputFinal: 4, webSearch: 3, webFetch: 0, costUsd: 14.7645, priced: 'exact' },
+    { day: '2026-09-10', hour: null, source: 'codex', model: 'gpt-5', isSub: false, tier: 'standard', res: 'd', input: 800000, cacheWrite5m: 0,
+      cacheWrite1h: 0, cacheRead: 300000, output: 90000, reasoning: 20000, requests: 3, outputFinal: 3, webSearch: 0, webFetch: 0, costUsd: 1.40625, priced: 'exact' },
+  ],
+  tools: [],
+  toolsTruncated: false,
+  agents: [],
+  notes: [
+    'usage = fresh input + cache write + output',
+    'costUsd is hypothetical API cost, not a bill; null means the model has no price on file',
+    'days without data have no row — gaps are gaps, not zeros',
+    'tools[] counts tool calls by name and day; names only, never inputs or results. toolsTruncated means a day had more than 100 distinct tools and the rarest were not counted',
+    'agents[] holds the agent records whose activity overlaps the exported range\'s days, within the agent tables\' 7-day retention; ids, names and counts only — never a path, a description or a prompt',
+    'an agent row counts the agent whole: the same tokens the buckets with isSub true count hour by hour, so the two are never added; state is the Agents section\'s, inferred where derived is true; report is Claude Code\'s own figure for the agent, never part of a total',
+  ],
+}
+
+test('1.11 C4: a reader of schema 3 reads the same values from a schema 4 file — every old field unchanged, deep-equal after dropping the new ones', () => {
+  const discount = makeConfig({ 'tokenPace.pricing.multiplier': 0.9 })
+  const j = JSON.parse(toJson(priceWorld(), PRICE_WORLD_RANGE, discount, timeConfig(discount), NOW))
+  assert.equal(typeof j.generated_at, 'string')
+  assert.match(j.writer, /^token-pace\//)
+  delete j.generated_at
+  delete j.writer
+  // Drop exactly what schema 4 added: three fields per bucket, one total, two pricing fields, one note — and the version.
+  for (const b of j.buckets) {
+    for (const k of ['listCostUsd', 'priceFrom', 'priceApproximate']) {
+      assert.ok(k in b, k)
+      delete b[k]
+    }
+  }
+  assert.ok('listCostUsd' in j.totals)
+  delete j.totals.listCostUsd
+  assert.ok('checked_later' in j.pricing && 'sources' in j.pricing)
+  delete j.pricing.checked_later
+  delete j.pricing.sources
+  assert.equal(j.notes.filter((n: string) => n.startsWith('listCostUsd is')).length, 1)
+  j.notes = j.notes.filter((n: string) => !n.startsWith('listCostUsd is'))
+  assert.equal(j.schema_version, 4)
+  // The table's day is today's constant, whatever a re-check makes it; everything else is 1.10.0's file as it was.
+  assert.deepEqual(j, { ...SCHEMA_3_PRICE_WORLD, schema_version: 4, pricing: { ...SCHEMA_3_PRICE_WORLD.pricing, as_of: PRICES_AS_OF } })
+})
+
+test('1.11 §0a.5: the new fields hold amounts, days, true and host names — neither export names a path or a URL', () => {
+  const onCfg = makeConfig({ 'tokenPace.attribution': 'session', 'tokenPace.pricing.multiplier': 0.9 })
+  const { agg: agents } = agentWorld('session')
+  const texts: Array<[string, string]> = [
+    ['price world json', toJson(priceWorld(), PRICE_WORLD_RANGE, onCfg, timeConfig(onCfg), NOW)],
+    ['price world csv', toCsv(priceWorld(), PRICE_WORLD_RANGE, onCfg, timeConfig(onCfg))],
+    ['fixture json', toJson(buildAgg('session'), range, onCfg, timeConfig(onCfg), NOW)],
+    ['fixture csv', toCsv(buildAgg('session'), range, onCfg, timeConfig(onCfg))],
+    ['agents json', toJson(agents, WORLD_DAY, onCfg, timeConfig(onCfg), NOW)],
+  ]
+  for (const [what, text] of texts) {
+    assert.equal(text.includes('/home/'), false, `${what} names a home directory`)
+    assert.equal(text.includes('://'), false, `${what} carries a URL`)
+  }
+  // Each new value is one of four shapes: a six-place amount, an ISO day, true, or nothing.
+  for (const [what, text] of texts.filter(([w]) => w.endsWith('csv'))) {
+    const rows = csvRows(text).slice(1)
+    assert.ok(rows.length >= 2, what)
+    for (const r of rows) {
+      assert.equal(r.length, CSV_COLUMNS.length, `${what}: ${r.join(',')}`)
+      assert.match(r[18], /^(\d+\.\d{6})?$/, `${what} listCostUsd`)
+      assert.match(r[19], /^(\d{4}-\d{2}-\d{2})?$/, `${what} priceFrom`)
+      assert.match(r[20], /^(true)?$/, `${what} priceApproximate`)
+    }
   }
 })

@@ -21,15 +21,15 @@ import {
   PER_MINUTE_FROM_MS, SILENT_AFTER_MS, SPAN_IN_DAYS_FROM_MS, TOP_AGENTS, WEEK_ROWS, WEEKDAY_NAMES_WITHIN_MS,
 } from '../src/agentTree'
 import {
-  AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, AGENT_TABLES_REVISION, JOURNAL_PARSE_MAX, outcomeOfStatus, PENDING_MODE_MAX,
+  AGENT_ID_MAX_CHARS, AGENT_MODEL_MAX_CHARS, AGENT_NAME_MAX_CHARS, AGENT_TABLES_REVISION, Aggregator, JOURNAL_PARSE_MAX, outcomeOfStatus, PENDING_MODE_MAX,
   STOP_REASONS, USER_LINE_LITERAL,
 } from '../src/agg'
 import { usedThresholds } from '../src/alerts'
 import { readPaceConfig, sanitize } from '../src/config'
 import { disclosure } from '../src/consent'
-import { AGENTS_CSV_COLUMNS, EXPORT_SCHEMA_VERSION } from '../src/exporter'
+import { AGENTS_CSV_COLUMNS, CSV_COLUMNS, EXPORT_SCHEMA_VERSION, toJson } from '../src/exporter'
 import { PaceConfig, paceVerdict } from '../src/pace'
-import { OPUS_5_5_CHECKED, PRICES, PRICES_AS_OF, priceOf } from '../src/prices'
+import { LEGACY_CHECKED, OPUS_5_5_CHECKED, PRICES, PRICES_AS_OF, PRICES_CHECKED_LATER, PRICE_SOURCE_PAGES, priceOf } from '../src/prices'
 import { BarGlyphs, BarStyle, renderBar } from '../src/render'
 import { RUN_RECORD_CHUNK_BYTES, RUN_RECORD_MAX_BYTES, RUN_RECORD_SCALAR_MAX } from '../src/runRecord'
 import { AGENT_META_MAX_BYTES } from '../src/scan'
@@ -1892,6 +1892,20 @@ test('docs/agents.md quotes durations as durationText writes them, rounded to th
     'docs/agents.md does not quote the durations as durationText writes them')
 })
 
+/**
+ * 1.11 P5 (§3 C4 rule 4): the export's schema version 1.6.0 … 1.10.0 shipped, where 1.11 moved on to 4 — the release
+ * notes of those versions say `3`, which is history now, pinned as a released constant (the pattern of RELEASED_1_7);
+ * defined before its first use.
+ */
+const RELEASED_1_10 = { EXPORT_SCHEMA_VERSION: 3 } as const
+
+/**
+ * 1.11 P5 (§3 C5 rule 3): a day of the price table as docs/cost.md writes it — `2026-09-06` → "6 September 2026" —, the
+ * one formatter the docs tests hold the page's dates to, so that the page is held to the constants, never to a literal.
+ */
+const longDay = (iso: string): string =>
+  new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`))
+
 test('the snapshot version and the agent tables\' revision are stated on the pages and in the release notes', () => {
   assert.ok(doc.agents.replace(/\s+/g, ' ').includes(`which revision of the agent tables it holds — revision **${AGENT_TABLES_REVISION}** in`),
     'docs/agents.md does not state the agent tables\' revision')
@@ -1907,10 +1921,11 @@ test('the snapshot version and the agent tables\' revision are stated on the pag
   assert.match(entry, /^\n## 1\.6\.0 — \d{4}-\d{2}-\d{2}\n/, 'the 1.6.0 heading lost its date')
   const flat = entry.replace(/\s+/g, ' ')
   // 1.8 P5 (pinned and changed): the 1.6.0 entry names the revision 1.6.0 wrote — 8 —, which is history
-  // now that the code's is 9.
+  // now that the code's is 9. 1.11 P5 (pinned and changed, §3 C4 rule 4): the schema version 1.6.0 wrote — 3 —
+  // likewise, now that the code's is 4.
   for (const claim of ['1.5.0 and 1.5.1 were committed but never published; their changes ship here.',
     `(\`STATE_VERSION\` ${STATE_VERSION})`, '(`AGENT_TABLES_REVISION` 8)',
-    'the first start after the upgrade replays the agent tables once', `\`agents[]\` (\`schema_version\` ${EXPORT_SCHEMA_VERSION})`,
+    'the first start after the upgrade replays the agent tables once', `\`agents[]\` (\`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION})`,
     '### Added', '### Changed', '### Fixed', '### Privacy']) {
     assert.ok(flat.includes(claim), `the 1.6.0 entry does not say: ${claim}`)
   }
@@ -2253,16 +2268,17 @@ test('the 1.7.0 release notes: in the order a store page reads, the versions unc
     '**The Agents and Context sections are left out while the switch shows Codex**',
     'The status bar, its tooltips, the `budget` and `agents` entries, the alerts, the CSV and JSON exports and *Copy Diagnostics* follow no view',
     '**`retry reset due`.**', 'it now reads `retry due`', '`12.3K lower bound, since 11:59`', 'one copy instead of 25, the same figures',
-    `\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${RELEASED_1_7.AGENT_TABLES_REVISION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are the values 1.6.0 wrote, unchanged`,
+    `\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${RELEASED_1_7.AGENT_TABLES_REVISION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are the values 1.6.0 wrote, unchanged`,
     'the update replays nothing and re-reads nothing',
     'Nothing new is read from any Claude Code or Codex file, and the read contract is unchanged.',
     'never a credential, a header or an exception\'s text',
   ]) assert.ok(flat.includes(claim), `the 1.7.0 entry does not say: ${claim}`)
   // Every version the entry names is the one 1.7.0 shipped: no bump is claimed. 1.8 P5 (pinned and
   // changed): the code's revision is 9 since, so the entry is held to 1.7.0's values, the two
-  // unchanged ones still read from the code.
+  // unchanged ones still read from the code. 1.11 P5 (pinned and changed, §3 C4 rule 4): the export's is 4 since, so
+  // the entry is held to 1.7.0's 3 as well.
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    const actual = { STATE_VERSION, AGENT_TABLES_REVISION: RELEASED_1_7.AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION }[m[1] as 'STATE_VERSION']
+    const actual = { STATE_VERSION, AGENT_TABLES_REVISION: RELEASED_1_7.AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION: RELEASED_1_10.EXPORT_SCHEMA_VERSION }[m[1] as 'STATE_VERSION']
     assert.equal(Number(m[2]), actual, `the 1.7.0 entry says ${m[1]} ${m[2]}`)
   }
   // P-A is one copy, not a speed-up (the lead's rule: nothing measured one).
@@ -2326,13 +2342,13 @@ test('the pages say what 1.8 P5 keeps: the newest cache request of a main sessio
   assert.equal(row.from, OPUS_5_5_CHECKED)
   const cost = flat(doc.cost)
   const usd = (n: number): string => `$${Number.isInteger(n) ? n : n.toFixed(2)}`
+  // 1.11 P5 (pinned and changed, §3 C5 rule 3): the two days written from the constants by longDay, no longer two
+  // literals beside a check that the constants equal them — a re-check of the table changes prices.ts and cost.md only.
   for (const claim of [`${usd(row.input)} per million input tokens, ${usd(row.cacheWrite5m)} for a 5-minute cache write, ${usd(row.cacheWrite1h)} for a 1-hour cache write, ${usd(row.cacheRead)} for a cache hit and ${usd(row.output)} for output; fast mode ${usd(row.fast!.input)} in and ${usd(row.fast!.output)} out`,
-    'the **Claude Opus 5.5** row from a check of Anthropic\'s pricing page on **24 September 2026**', 'priced from this row and marked `approximate`',
-    'Opus 5.5 reads it at $0.20/MTok (0.05×)', '**Prices as of 6 September 2026**']) {
+    `the **Claude Opus 5.5** row from a check of Anthropic's pricing page on **${longDay(OPUS_5_5_CHECKED)}**`, 'priced from this row and marked `approximate`',
+    'Opus 5.5 reads it at $0.20/MTok (0.05×)', `**Prices as of ${longDay(PRICES_AS_OF)}**`]) {
     assert.ok(cost.includes(claim), `docs/cost.md does not say: ${claim}`)
   }
-  assert.equal(PRICES_AS_OF, '2026-09-06', 'the page\'s "Prices as of" date is the table\'s')
-  assert.equal(OPUS_5_5_CHECKED, '2026-09-24', 'the page\'s Opus 5.5 check day is the row\'s')
   assert.ok(Math.abs(row.cacheRead / row.input - 0.05) < 1e-12, 'the page\'s 0.05× is the row\'s multiple')
   // The stale claims the row made wrong are gone.
   assert.equal(cost.includes('Opus 4.6** alone'), false, 'docs/cost.md still gives fast mode to Opus 4.6 alone')
@@ -2658,7 +2674,8 @@ test('the 1.8.0 release notes: the newest entry, every section in order, the ver
     '1.3 to 1.7 stored it so in `statusline-mirror.json`', '`session_id`', '`prompt_cache.recache_tokens_if_cold`',
     '**Nothing new is read from a transcript.**', 'never a terminal\'s name, its output or its environment', '**Three opt-ins now**',
     // Internal: the versions, the pushes, the measured build, L-6, the read contract.
-    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are unchanged`,
+    // 1.11 P5 (pinned and changed, §3 C4 rule 4): the schema version 1.8.0 shipped, 3 — the code's is 4 since.
+    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are unchanged`,
     `\`AGENT_TABLES_REVISION\` 8 → ${RELEASED_1_8.AGENT_TABLES_REVISION}`, 'rebuilds the agent tables once',
     'a median 36 ms instead of 53 in UTC and 55 instead of 73 in Europe/Berlin — a measurement, not a promise',
     'Opening a folded section of the dashboard runs every fit again', '(13 rows, the narrowing at activation among them)',
@@ -2674,9 +2691,9 @@ test('the 1.8.0 release notes: the newest entry, every section in order, the ver
   assert.ok(flatText(doc.development).includes('a build took a median 36 ms instead of 53 in UTC (55 instead of 73 in Europe/Berlin)'))
   // The Consumer Terms' passage is the dialog's; the entry names it and does not re-word it.
   assert.equal(flat.includes(KEEP_WARM_TERMS_PASSAGE), false, 'the entry quotes the terms passage — the page and the dialog do')
-  // Every version the entry names is the one 1.8.0 ships.
+  // Every version the entry names is the one 1.8.0 ships (1.11 P5, pinned and changed: the export's as released).
   for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : EXPORT_SCHEMA_VERSION, `the 1.8.0 entry says ${m[1]} ${m[2]}`)
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : RELEASED_1_10.EXPORT_SCHEMA_VERSION, `the 1.8.0 entry says ${m[1]} ${m[2]}`)
   }
   // Claims to avoid (the P11 input): B1 was struck; L-6 is no visible fix; no cooling, countdown or cost
   // for Codex; no "safe"; nothing it cannot see is claimed seen; Q19 superseded the spec's four and 55 minutes.
@@ -3092,7 +3109,8 @@ test('the 1.9.0 release notes: its date set at publish, every section in order, 
     'One more field of a Claude Code transcript is read**: the `timestamp` of a `user` line of a main transcript, matched on the raw line as the unescaped key `"timestamp":"…Z"` — the latest on the line; the line is never parsed for it. Kept: the newest such time, one number per main session, in the token snapshot for seven days, used only by the keep-warm line\'s check of the other sessions of a folder; never shown, logged or exported.',
     '**One setting is written for you**: `tokenPace.language`', '`l10n/bundle.l10n.<language>.json`',
     // Internal: the versions, Review 2's (e), L-7 with development.md's figures, L-8, the reset line, the frame, H-1, C-1, the contract.
-    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) are unchanged; \`AGENT_TABLES_REVISION\` ${RELEASED_1_8_REVISION} → ${AGENT_TABLES_REVISION}`,
+    // 1.11 P5 (pinned and changed, §3 C4 rule 4): the schema version 1.9.0 shipped, 3 — the code's is 4 since.
+    `\`STATE_VERSION\` ${STATE_VERSION} and the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) are unchanged; \`AGENT_TABLES_REVISION\` ${RELEASED_1_8_REVISION} → ${AGENT_TABLES_REVISION}`,
     `The first start of 1.9.0 rebuilds the agent tables once (revision ${AGENT_TABLES_REVISION}), so sessions already read have that time at once; nothing is counted again and the snapshot schema stays ${STATE_VERSION}.`,
     'a view-model build took a median 26 ms instead of 49 in Europe/Berlin and 26 instead of 31 in UTC, measured on the developer\'s machine — a measurement, not a promise',
     'A cost series asked for without pricing is priced through one shared empty options object.',
@@ -3102,10 +3120,12 @@ test('the 1.9.0 release notes: its date set at publish, every section in order, 
   // The figure is development.md's, measured there — not §7c's profiler run.
   assert.ok(flatText(doc.development).includes('a build now takes a median 26 ms instead of 49 in Europe/Berlin and 26 instead of 31 in UTC'))
   assert.equal(/46 ms|22 ms|46 → 22/.test(flat), false, 'the 1.9.0 entry quotes the profiler\'s figure, not development.md\'s')
-  // The versions it names are the code's; the snapshot schema and the export stay.
-  assert.deepEqual([STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
+  // The versions it names are the code's; the snapshot schema and the export stay. 1.11 P5 (pinned and changed, §3 C4
+  // rule 4): the export's as 1.9.0 shipped it, 3 — the code's is the one after it.
+  assert.deepEqual([STATE_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
+  assert.equal(EXPORT_SCHEMA_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION + 1, 'the code\'s export schema is not the one after 1.10.0\'s')
   for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
-    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : EXPORT_SCHEMA_VERSION, `the 1.9.0 entry says ${m[1]} ${m[2]}`)
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : RELEASED_1_10.EXPORT_SCHEMA_VERSION, `the 1.9.0 entry says ${m[1]} ${m[2]}`)
   }
   // The examples are what the code prints: the weekday of each language, the day label 1.9 writes and the one 1.8 wrote.
   const weekday = (tag: string, day = 0): string => underLocale(tag, () => formatTime(MONDAY_0600(day), UTC_TIME, true).split(' ')[0])
@@ -3557,11 +3577,12 @@ test('the 1.10.0 release notes: the newest entry, its date set at publish, every
   // The keep-warm line's fourteenth check, as the code numbers it.
   assert.equal(KEEPWARM_GUARD_OF.reading, 'G14')
   assert.ok(section('### Fixed').includes('(`reading`, check 14 of the keep-warm line)'))
-  // The versions it names are the code's; the snapshot schema and the export stay.
-  assert.deepEqual([STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
-  assert.ok(section('### Internal').includes(`\`STATE_VERSION\` ${STATE_VERSION}, the export's \`schema_version\` ${EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION}) and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
+  // The versions it names are the code's; the snapshot schema and the export stay. 1.11 P5 (pinned and changed, §3 C4
+  // rule 4): the export's as 1.10.0 shipped it, 3 — the code's is 4 since.
+  assert.deepEqual([STATE_VERSION, RELEASED_1_10.EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 3, 10])
+  assert.ok(section('### Internal').includes(`\`STATE_VERSION\` ${STATE_VERSION}, the export's \`schema_version\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} (\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION}) and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
   for (const m of flat.matchAll(/`(STATE_VERSION|EXPORT_SCHEMA_VERSION|AGENT_TABLES_REVISION)` (\d+)/g)) {
-    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : m[1] === 'EXPORT_SCHEMA_VERSION' ? EXPORT_SCHEMA_VERSION : AGENT_TABLES_REVISION, `the 1.10.0 entry says ${m[1]} ${m[2]}`)
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : m[1] === 'EXPORT_SCHEMA_VERSION' ? RELEASED_1_10.EXPORT_SCHEMA_VERSION : AGENT_TABLES_REVISION, `the 1.10.0 entry says ${m[1]} ${m[2]}`)
   }
   // The ledger's count and the contract's rows are what the files hold. 1.11 P1 (pinned and changed: the count read from
   // l10n/rekey.json): `l10n-rekey.mjs --start b89ff43` began 1.11's ledger and emptied the entries, so 1.10's count is
@@ -3693,4 +3714,67 @@ test('the pages carry the sentences of the documentation package, held to the co
   assert.ok(readme.includes('three opt-ins, each behind its own consent dialog, all three off by default and off in Restricted Mode'))
   assert.ok(README.includes('| [Prompts](docs/prompts.md) | The dashboard\'s Prompts section: your own prompts for Claude Code\'s and Codex\'s terminals, the three shipped ones, editing, how a prompt is sent and into which terminal, when Token Pace asks first or does not send, the `/loop` variant, and where the list is kept |'))
   assert.ok(readDoc('media/walkthrough/dashboard.md').split('\n').some((l) => l.startsWith('| prompts | Your own prompts for Claude Code and Codex — not in the default')), 'media/walkthrough/dashboard.md has no prompts row')
+})
+
+// ---------------------------------------------------------------------------
+// 1.11 P5 (§3 C4, C5; §0a.5): the exports' price fields and the price table's dates, from the code
+// ---------------------------------------------------------------------------
+
+test('1.11 C4: docs/export.md lists the bucket CSV\'s columns as the code writes them, says what the three price fields are and quotes their note, and states schema 4', () => {
+  const flat = flatText(doc.export)
+  const block = /```\n(day, hour,[\s\S]*?)```/.exec(doc.export)
+  assert.ok(block, 'docs/export.md has no column block for the bucket CSV')
+  assert.deepEqual(block[1].split(/[\s,]+/).filter(Boolean), [...CSV_COLUMNS])
+  assert.equal(CSV_COLUMNS.indexOf('listCostUsd'), 18, 'the three columns follow the eighteen of schema 1–3')
+  // The note and the hosts as the export writes them.
+  const utc: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+  const j = JSON.parse(toJson(new Aggregator(), { from: '2026-09-01', to: '2026-09-01' }, sanitize({}), utc)) as { notes: string[]; pricing: { sources: string[] } }
+  const note = j.notes.find((n) => n.startsWith('listCostUsd'))
+  assert.ok(note, 'the export writes no note on its price fields')
+  assert.ok(flat.includes(`*${note}.*`), 'docs/export.md does not quote the note on the price fields')
+  assert.ok(flat.includes(`as host names: ${j.pricing.sources.map((h) => `\`${h}\``).join(', ')})`), 'docs/export.md does not list the export\'s sources')
+  for (const claim of [
+    `\`schema_version\` is \`${EXPORT_SCHEMA_VERSION}\` since 1.11 added \`listCostUsd\`, \`priceFrom\` and \`priceApproximate\` to \`buckets[]\`, \`listCostUsd\` to \`totals\`, and \`checked_later\` and \`sources\` to \`pricing\` (\`3\` added \`agents[]\`, \`2\` the tool table); everything versions 1–3 wrote is still there and still means the same thing`,
+    'listCostUsd, priceFrom, priceApproximate', '`listCostUsd` is the same usage at the published list price — multiplier 1, no custom price —',
+    'a discount against a price that was never published would be an invention', '`priceFrom` is the day the price rule used was read',
+    'the borrowed model\'s under the family fallback', '`priceApproximate` is `true` where no rule covered the bucket\'s day and the nearest one was used',
+    'An unpriced bucket leaves all three empty', 'the `TOTAL` row carries the list amounts of the priced buckets summed and leaves the other two empty',
+    'The eighteen columns before them keep their positions', '`null`, `null` and `false` where the CSV leaves them empty', '`totals` carries `listCostUsd`',
+    'every provider\'s, whatever the dashboard shows', 'the `TOTAL` row\'s `priced` column reads `lowerBound`',
+  ]) assert.ok(flat.includes(claim), `docs/export.md does not say: ${claim}`)
+  assert.equal(flat.includes('everything versions 1 and 2 wrote'), false, 'docs/export.md still states schema 3\'s history')
+})
+
+test('1.11 C5: docs/cost.md writes the table\'s three days from the constants, builds its footnote example from them and names every source page; the README names no price date', () => {
+  const cost = flatText(doc.cost)
+  for (const claim of [`**Prices as of ${longDay(PRICES_AS_OF)}**`,
+    `come from an earlier check of the same table on ${longDay(LEGACY_CHECKED)}, and the **Claude Opus 5.5** row from a check of Anthropic's pricing page on **${longDay(OPUS_5_5_CHECKED)}**`,
+    `its usage from the days before ${longDay(OPUS_5_5_CHECKED)} is priced from this row`]) {
+    assert.ok(cost.includes(claim), `docs/cost.md does not say: ${claim}`)
+  }
+  // No other day in either form: a day the constants do not hold would be a stale one.
+  const long = [...new Set([...cost.matchAll(/\b\d{1,2} (?:January|February|March|April|May|June|July|August|September|October|November|December) \d{4}\b/g)].map((m) => m[0]))]
+  assert.deepEqual(long.sort(), [PRICES_AS_OF, LEGACY_CHECKED, OPUS_5_5_CHECKED].map(longDay).sort())
+  // The footnote example, built from the constants as the page's footnote is (viewModel.ts laterChecksText).
+  const later = PRICES_CHECKED_LATER.map((r) => `${r.model} (${r.checked})`).join(', ')
+  const footnote = later ? `\`Prices as of ${PRICES_AS_OF}; checked later: ${later}.\`` : `\`Prices as of ${PRICES_AS_OF}.\``
+  assert.ok(cost.includes(footnote), `docs/cost.md does not quote the footnote ${footnote}`)
+  const iso = [...new Set([...cost.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)].map((m) => m[0]))]
+  assert.deepEqual(iso.sort(), [PRICES_AS_OF, ...PRICES_CHECKED_LATER.map((r) => r.checked)].sort())
+  // The pages the rules were read from, by host, and the Opus 5.5 row's own.
+  for (const host of Object.values(PRICE_SOURCE_PAGES).flat()) assert.ok(cost.includes(`\`${host}\``), `docs/cost.md does not name ${host}`)
+  assert.ok(cost.includes('**Claude Opus 5.5** row from a check of Anthropic\'s pricing page') && cost.includes('([platform.claude.com](https://platform.claude.com/docs/en/about-claude/pricing))'))
+  assert.ok(PRICES['claude-opus-5-5'][0].source.startsWith('platform.claude.com '), 'the page names the host the row\'s source names')
+  // The exports carry both amounts (§3 C4).
+  for (const claim of ['The CSV and JSON [exports](export.md) carry both amounts for every bucket, whatever `showListPrice` says — `costUsd` at your configured rates and `listCostUsd` at the list price —',
+    'the day of the rule each was priced by (`priceFrom`)', 'whether no rule covered its day (`priceApproximate`)',
+    'Where a custom price alone prices a model the table does not know, the two amounts are the same']) {
+    assert.ok(cost.includes(claim), `docs/cost.md does not say: ${claim}`)
+  }
+  // The README carries no price date and no "Prices as of", so nothing there can drift from the table.
+  const readme = flatText(README)
+  for (const day of [PRICES_AS_OF, LEGACY_CHECKED, OPUS_5_5_CHECKED]) {
+    assert.equal(readme.includes(day) || readme.includes(longDay(day)), false, `README.md names the price day ${day}`)
+  }
+  assert.equal(/prices as of/i.test(readme), false, 'README.md dates the prices')
 })

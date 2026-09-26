@@ -4,7 +4,11 @@
 import { test } from 'node:test'
 import * as assert from 'node:assert/strict'
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { SOURCES } from '../src/adapters'
 import {
+  LEGACY_CHECKED,
   MODEL_MEMO_MAX,
   OPUS_5_5_CHECKED,
   PRICES,
@@ -12,6 +16,7 @@ import {
   PRICES_CHECKED_LATER,
   PRICE_MEMO_MAX,
   PRICE_SOURCES,
+  PRICE_SOURCE_PAGES,
   US_INFERENCE_MULTIPLIER,
   WEB_SEARCH_USD_PER_1K,
   PriceRule,
@@ -22,6 +27,7 @@ import {
   normalizeModel,
   priceOf,
   priceTableSummary,
+  providerOfSource,
   resetPriceMemos,
   ruleForDay,
 } from '../src/prices'
@@ -174,12 +180,14 @@ test('the models with published fast rates are Opus 5.5, Opus 5, Opus 4.8, Opus 
 })
 
 test('GPT-6 Astra is priced from the OpenAI page: 10 / 1 cached / 50, fast exactly double', () => {
-  const p = priceOf('gpt-6-astra', '2026-09-06')
+  // 1.11 P5 (rewritten: the table's day as its constant, not the literal '2026-09-06' — §3 C5 rule 3: a re-check changes
+  // prices.ts and docs/cost.md only).
+  const p = priceOf('gpt-6-astra', PRICES_AS_OF)
   assert.ok(p && p.rule, 'the rule exists')
   assert.equal(p!.confidence, 'exact')
   close(p!.price.input, 10); close(p!.price.cacheRead, 1); close(p!.price.output, 50)
   assert.deepEqual(p!.price.fast, { input: 20, output: 100 })
-  assert.equal(p!.rule!.from, '2026-09-06')
+  assert.equal(p!.rule!.from, PRICES_AS_OF)
   // Usage from the days before the page was read takes the nearest rule and says so.
   const earlier = priceOf('gpt-6-astra', '2026-09-01')
   close(earlier!.price.input, 10)
@@ -425,7 +433,8 @@ test('Claude Opus 5.5 is priced as the pricing page states it on its check day: 
   // The other Anthropic rows keep the table's check date.
   for (const [model, rules] of Object.entries(PRICES)) {
     if (model === 'claude-opus-5-5' || !model.startsWith('claude-')) continue
-    for (const r of rules) assert.ok(r.from === PRICES_AS_OF || r.from === '2026-08-13', `${model} moved: ${r.from}`)
+    // 1.11 P5 (rewritten: LEGACY_CHECKED, exported since, in place of its literal).
+    for (const r of rules) assert.ok(r.from === PRICES_AS_OF || r.from === LEGACY_CHECKED, `${model} moved: ${r.from}`)
   }
 })
 
@@ -490,8 +499,9 @@ test('unknown models stay unpriced', () => {
 test('priceTableSummary reports the table and its sources', () => {
   const s = priceTableSummary()
   assert.equal(s.models, Object.keys(PRICES).length)
+  // 1.11 P5 (rewritten: the literal '2026-09-06' beside the constant dropped — §3 C5 rule 3).
   assert.equal(s.asOf, PRICES_AS_OF)
-  assert.equal(s.asOf, '2026-09-06')
+  assert.match(s.asOf, /^\d{4}-\d{2}-\d{2}$/)
   assert.deepEqual(s.sources, PRICE_SOURCES)
   assert.ok(s.models >= 25, 'current and legacy rows')
   s.sources.push('mutation')
@@ -648,4 +658,142 @@ test('the name memo holds at most MODEL_MEMO_MAX names and the price memo PRICE_
   } finally {
     resetPriceMemos()
   }
+})
+
+// ---------------------------------------------------------------- 1.11 C4: the rule a bucket was priced by
+
+test('1.11 C4: a cost breakdown names the day of the rule it was priced by — the donor\'s under the family rule, none for an override alone', () => {
+  // The table's rows, the legacy rows and the row read later, each by its own check day.
+  assert.equal(costOfBucket(bucket({ model: 'claude-opus-4-6', input: M }))?.ruleFrom, PRICES_AS_OF)
+  assert.equal(costOfBucket(bucket({ model: 'claude-3-5-haiku', input: M }))?.ruleFrom, LEGACY_CHECKED)
+  assert.equal(costOfBucket(bucket({ model: 'claude-opus-5-5', day: OPUS_5_5_CHECKED, input: M }))?.ruleFrom, OPUS_5_5_CHECKED)
+  assert.equal(costOfBucket(bucket({ model: 'gpt-5', source: 'codex', input: M }))?.ruleFrom, PRICES_AS_OF)
+  // A day no rule covers: the nearest rule's day, and marked approximate.
+  const early = costOfBucket(bucket({ model: 'claude-opus-4-6', day: '2026-01-15', input: M }))
+  assert.deepEqual([early?.ruleFrom, early?.approximate], [PRICES_AS_OF, true])
+  // The family rule borrows Opus 5.5's rule — and its day.
+  assert.equal(costOfBucket(bucket({ model: 'claude-opus-4-9', input: M }), { unknownModel: 'family' })?.ruleFrom, OPUS_5_5_CHECKED)
+  // An override over a rule keeps the rule's day; an override alone has none.
+  assert.equal(costOfBucket(bucket({ model: 'claude-opus-4-6', input: M }), { overrides: { 'claude-opus-4-6': { input: 1 } } })?.ruleFrom, PRICES_AS_OF)
+  const alone = costOfBucket(bucket({ model: 'claude-mystery-9', input: M }), { overrides: { 'claude-mystery-9': { input: 2, output: 8 } } })
+  assert.ok(alone && alone.confidence === 'custom')
+  assert.equal(alone.ruleFrom, undefined)
+  assert.equal('ruleFrom' in alone, false)
+  // A multiplier changes the amount, never the rule.
+  assert.equal(costOfBucket(bucket({ model: 'claude-opus-4-6', input: M }), { multiplier: 0.9 })?.ruleFrom, PRICES_AS_OF)
+})
+
+// ---------------------------------------------------------------- 1.11 C5: the table's hygiene
+
+/**
+ * Models whose newest rule carries an `until` with no rule after it — a rate withdrawn without a successor, which
+ * ruleForDay then prices `approximate`. Allowed only when PRICES says why in a comment naming the model (checked below).
+ * None today.
+ */
+const CLOSED_ON_PURPOSE: readonly string[] = []
+
+/**
+ * What is wrong with a price table's windows and sources, one sentence per fault — empty for a sound table. Per model:
+ * newest first; every older rule closed by an `until` equal to the next newer rule's `from` (no gap, no overlap); every
+ * `until` after its own `from`; the newest rule open unless the model is in `closedOnPurpose`; every source naming one
+ * of PRICE_SOURCE_PAGES' hosts (`providerOfSource`) and never a URL.
+ */
+function tableProblems(table: Record<string, PriceRule[]>, closedOnPurpose: readonly string[] = CLOSED_ON_PURPOSE): string[] {
+  const out: string[] = []
+  for (const [model, rules] of Object.entries(table)) {
+    if (rules.length === 0) out.push(`${model}: no rule`)
+    for (let i = 0; i < rules.length; i++) {
+      const r = rules[i]
+      if (r.until !== undefined && !(r.until > r.from)) out.push(`${model}: the rule from ${r.from} ends on ${r.until}, not after it`)
+      if (i === 0) {
+        if (r.until !== undefined && !closedOnPurpose.includes(model)) out.push(`${model}: the newest rule ends on ${r.until} with no rule after it`)
+      } else {
+        const newer = rules[i - 1]
+        if (!(newer.from > r.from)) out.push(`${model}: not newest first (${newer.from} before ${r.from})`)
+        if (r.until === undefined) out.push(`${model}: overlap — the rule from ${r.from} never ends, though ${newer.from} follows it`)
+        else if (r.until < newer.from) out.push(`${model}: gap — ${r.until} to ${newer.from} has no rule`)
+        else if (r.until > newer.from) out.push(`${model}: overlap — the rule from ${r.from} runs to ${r.until}, past ${newer.from}`)
+      }
+      if (providerOfSource(r.source) === null) out.push(`${model}: the source "${r.source}" names none of the price source pages`)
+      if (r.source.includes('://')) out.push(`${model}: the source "${r.source}" is a URL`)
+    }
+  }
+  return out
+}
+
+/** A documented change: OLD until NEW's first day, then NEW — the pattern of the dated-rules tests above, with real hosts. */
+const CHANGED = (until: string | undefined): Record<string, PriceRule[]> => ({
+  'claude-changed': [
+    { ...NEW, source: `docs.claude.com model table (checked ${NEW.from})` },
+    { ...OLD, until, source: `docs.claude.com model table (checked ${OLD.from})` },
+  ],
+})
+
+test('1.11 C5: the table\'s windows neither leave a gap nor overlap, and every source names a known page — the table itself', () => {
+  assert.deepEqual(tableProblems(PRICES), [])
+  // Today no model has two rules: the windows are held on the fixture below as well, so the rule has been run once.
+  assert.deepEqual(Object.entries(PRICES).filter(([, rules]) => rules.length > 1).map(([m]) => m), [])
+  // A rule closed with no successor is allowed only with a comment in PRICES that names the model.
+  const src = readFileSync(join(__dirname, '..', 'src', 'prices.ts'), 'utf8')
+  const table = src.slice(src.indexOf('export const PRICES:'), src.indexOf('\n}\n', src.indexOf('export const PRICES:')))
+  for (const model of CLOSED_ON_PURPOSE) {
+    assert.ok(table.split('\n').some((l) => l.trim().startsWith('//') && l.includes(model)), `${model} ends with no successor and no comment says why`)
+  }
+})
+
+test('1.11 C5: a gap, an overlap, an until before its from and a closed newest rule are each refused (fixtures)', () => {
+  // The documented change as it should be: OLD ends the day NEW begins (until is exclusive).
+  assert.deepEqual(tableProblems(CHANGED(NEW.from)), [])
+  assert.equal(ruleForDay(CHANGED(NEW.from)['claude-changed'], '2026-05-31')?.rule.input, OLD.input)
+  // A gap: OLD ends a month early — May 2026 would be priced approximate with no reason.
+  assert.deepEqual(tableProblems(CHANGED('2026-05-01')), ['claude-changed: gap — 2026-05-01 to 2026-06-01 has no rule'])
+  // An overlap: OLD runs one day past NEW's first day.
+  assert.deepEqual(tableProblems(CHANGED('2026-06-02')), ['claude-changed: overlap — the rule from 2025-01-01 runs to 2026-06-02, past 2026-06-01'])
+  // An older rule that never ends overlaps every newer one.
+  assert.deepEqual(tableProblems(CHANGED(undefined)), ['claude-changed: overlap — the rule from 2025-01-01 never ends, though 2026-06-01 follows it'])
+  // An until that is not after its own from.
+  const inverted = { 'claude-x': [{ ...NEW, until: NEW.from, source: 'docs.claude.com model table (checked 2026-06-01)' }] }
+  assert.ok(tableProblems(inverted, ['claude-x']).includes('claude-x: the rule from 2026-06-01 ends on 2026-06-01, not after it'))
+  // Out of order.
+  const reversed = { 'claude-changed': [...CHANGED(NEW.from)['claude-changed']].reverse() }
+  assert.ok(tableProblems(reversed).some((p) => p.startsWith('claude-changed: not newest first')), tableProblems(reversed).join(' | '))
+  // The newest rule closed with no successor: refused, unless the model is named as closed on purpose.
+  const withdrawn = { 'claude-changed': [{ ...NEW, until: '2026-08-01', source: 'docs.claude.com model table (checked 2026-06-01)' }] }
+  assert.deepEqual(tableProblems(withdrawn), ['claude-changed: the newest rule ends on 2026-08-01 with no rule after it'])
+  assert.deepEqual(tableProblems(withdrawn, ['claude-changed']), [])
+})
+
+test('1.11 C5: a source naming another host, a host inside a longer name or a URL is refused; each provider\'s rows name its own pages', () => {
+  const sourced = (source: string): Record<string, PriceRule[]> => ({ 'claude-x': [{ ...NEW, source }] })
+  assert.deepEqual(tableProblems(sourced('docs.claude.com model table (checked 2026-06-01)')), [])
+  assert.deepEqual(tableProblems(sourced('developers.openai.com/api/docs/pricing (checked 2026-06-01)')), [])
+  assert.deepEqual(tableProblems(sourced('example.com pricing (checked 2026-06-01)')),
+    ['claude-x: the source "example.com pricing (checked 2026-06-01)" names none of the price source pages'])
+  assert.equal(providerOfSource('docs.claude.com.example.org model table'), null, 'a known host is a whole name, not a prefix')
+  assert.equal(providerOfSource('platform.claude.comics table'), null)
+  assert.deepEqual(tableProblems(sourced('https://docs.claude.com/en/docs/about-claude/pricing')), [
+    'claude-x: the source "https://docs.claude.com/en/docs/about-claude/pricing" names none of the price source pages',
+    'claude-x: the source "https://docs.claude.com/en/docs/about-claude/pricing" is a URL',
+  ])
+  // The pages: host names in the registry's order, frozen, each named by some rule — the footer never names a page no
+  // rule was read from.
+  assert.deepEqual(Object.keys(PRICE_SOURCE_PAGES), [...SOURCES])
+  assert.deepEqual(PRICE_SOURCE_PAGES, { claude: ['docs.claude.com', 'platform.claude.com'], codex: ['developers.openai.com'] })
+  assert.ok(Object.isFrozen(PRICE_SOURCE_PAGES) && Object.isFrozen(PRICE_SOURCE_PAGES.claude) && Object.isFrozen(PRICE_SOURCE_PAGES.codex))
+  const rules = Object.entries(PRICES).flatMap(([model, rs]) => rs.map((r) => ({ model, r })))
+  for (const [provider, hosts] of Object.entries(PRICE_SOURCE_PAGES)) {
+    for (const host of hosts) {
+      assert.match(host, /^[a-z0-9-]+(\.[a-z0-9-]+)+$/, `${host} is a host name`)
+      assert.ok(rules.some(({ r }) => r.source.startsWith(`${host} `) || r.source.startsWith(`${host}/`)), `no rule was read from ${host} (${provider})`)
+    }
+  }
+  // Each row names its own provider's page: an OpenAI model an OpenAI page, a Claude model Anthropic's.
+  for (const { model, r } of rules) assert.equal(providerOfSource(r.source), model.startsWith('gpt-') ? 'codex' : 'claude', `${model}: ${r.source}`)
+  // §7a Q9: the Opus 5.5 row names the page it was read from, platform.claude.com; every other Claude row the model table.
+  assert.equal(PRICES['claude-opus-5-5'][0].source, `platform.claude.com model table (checked ${OPUS_5_5_CHECKED})`)
+  for (const { model, r } of rules) {
+    if (model.startsWith('claude-') && model !== 'claude-opus-5-5') assert.ok(r.source.startsWith('docs.claude.com '), `${model}: ${r.source}`)
+  }
+  // The later-checked rows take their provider from the page their source names.
+  for (const later of PRICES_CHECKED_LATER) assert.equal(later.source, providerOfSource(PRICES[later.model][0].source))
 })

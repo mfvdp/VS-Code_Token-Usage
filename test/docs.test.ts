@@ -2460,7 +2460,9 @@ test('the prompt-cache page\'s keep-warm section states the checks and the const
   // The spec's older numbers are superseded by Q19.
   for (const stale of ['4 minutes', 'four minutes', '55 minutes']) assert.equal(text.includes(stale), false, `the keep-warm section still says ${stale}`)
   // The privacy page's §0a.5 facts point at the section; the estimate section links it.
-  assert.ok(flat(doc.privacy).includes('Those two facts serve only the checks of the opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)'))
+  // 1.10 P4 (pinned and changed — "serve only" the keep-warm line's checks): since 1.10 the Prompts section's too (§0a.5).
+  assert.ok(flat(doc.privacy).includes('Those two facts serve the checks of the opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) (1.8), which types nothing unless that reply ended its turn (`end_turn`) and the newest message line is not the user\'s, and — since 1.10 — the dashboard\'s [Prompts](prompts.md#when-token-pace-does-not-send-or-asks-first) section'))
+  assert.equal(flat(doc.privacy).includes('Those two facts serve only'), false)
   assert.ok(flat(page).includes('for the checks of the opt-in [keep-warm line](#keep-warm-in-a-terminal-opt-in)'))
 })
 
@@ -2578,7 +2580,10 @@ test('the pages describe the keep-warm line as the host builds it: the countdown
   assert.ok(flat(why).includes('`keep-warm: session 9d0eb37a not armed (typedSince)`') && flat(why).includes('`keep-warm: not sent (notIdle)`'))
   // The status-bar states and the id; the settings row; the commands row.
   for (const text of [item, '`$(watch) keep-warm line sent`', '`tokenPace.keepWarm`']) assert.ok(STATES.includes(text), `status-bar-states.md does not name ${text}`)
-  assert.ok(flat(STATES).includes('Keep-warm line for Session Tue 14:20 · 9d0eb37a in 42 seconds, activate to cancel'))
+  // 1.10 D8 (pinned and changed): "press to cancel", and the old verb nowhere.
+  assert.ok(flat(STATES).includes('Keep-warm line for Session Tue 14:20 · 9d0eb37a in 42 seconds, press to cancel'))
+  assert.ok(section.includes('Keep-warm line for Session Tue 14:20 · 9d0eb37a in 42 seconds, press to cancel'))
+  for (const text of [STATES, page, doc.privacy, doc.troubleshooting]) assert.equal(flat(text).includes('activate to cancel'), false)
   const row = SETTINGS.split('\n').find((l) => l.startsWith('| `cacheKeepWarm` | `false` |')) ?? ''
   for (const claim of ['three minutes or less left', 'about two minutes before the cache expires', 'withdraws it', 'Application scope',
     'text you typed but did not send is sent with it', 'not explicitly permit', 'own panel are out of reach']) {
@@ -2988,8 +2993,10 @@ test('the pages state the keep-warm G13 bound as src/keepWarm.ts has it, the tim
   }
   assert.ok(flatText(doc.privacy).includes('Since 1.9 the record also keeps the time of the newest line of the transcript that is yours or a tool\'s (a `user` line) — its `timestamp`, matched on the raw line'),
     'docs/privacy.md does not name the time of a user line')
+  // 1.10 P4 (pinned and changed): the two facts and the time of a user line serve the Prompts section's question too (§0a.5).
   for (const claim of ['nothing else of that line is read —, for the keep-warm line\'s check of other sessions of the same folder',
-    'Those two facts serve only the checks of the opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)']) {
+    'Those two facts serve the checks of the opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)',
+    'where one that has been left behind no longer holds the line back — and, since 1.10, for the same question of the Prompts section']) {
     assert.ok(flatText(doc.privacy).includes(claim), `docs/privacy.md does not say: ${claim}`)
   }
   // Troubleshooting: the otherSession entry says when a session stops holding the line back.
@@ -3330,4 +3337,74 @@ test('the prompts page quotes the shipped prompts, the limits and the file as th
   assert.ok(doc.commands.includes('your prompt list `prompts.json` (deleting it brings back the three shipped prompts)'))
   assert.ok(flatText(doc.privacy).includes('`prompts.json` when you change the dashboard\'s prompt list — your own titles and texts, nothing else'))
   assert.ok(flatText(doc.export).includes('the titles and texts you wrote are in no export, no report and no log'))
+})
+
+/**
+ * 1.10 P4 (§3 A3, A4, A7, §0a.4, §0a.5; §7a's probe): the prompts page says how a prompt is sent — the reader's
+ * action, the gap, the two writes with the delay the code has, the draft that goes with it —, into which terminal,
+ * and every check of the decision in the words the code says it, with never or asks first as the code has it; the
+ * troubleshooting page names every check; the privacy and prompt-cache pages say what the send types and reads.
+ */
+test('the prompts page says how a prompt is sent, into which terminal, and every check in the words the code has (1.10 P4)', () => {
+  const { PROMPT_SOFT_BLOCKS, promptBlockText } = require('../src/promptSend') as typeof import('../src/promptSend')
+  const { PROMPT_ENTER_DELAY_MS, PROMPT_SEND_MIN_GAP_MS } = require('../src/promptsHost') as typeof import('../src/promptsHost')
+  const { promptTargetVm, promptSentText } = require('../src/viewModel') as typeof import('../src/viewModel')
+  const page = doc.prompts
+  const flat = flatText(page)
+  for (const heading of ['## Sending', '## Which terminal', '## When Token Pace does not send, or asks first']) {
+    assert.ok(page.includes(`\n${heading}\n`), `docs/prompts.md has no ${heading}`)
+  }
+  // The constants as the code has them.
+  assert.deepEqual([PROMPT_SEND_MIN_GAP_MS, PROMPT_ENTER_DELAY_MS], [1000, 200])
+  assert.ok(flat.includes(`(\`PROMPT_SEND_MIN_GAP_MS\`, ${PROMPT_SEND_MIN_GAP_MS} ms)`))
+  assert.ok(flat.includes(`then, ${PROMPT_ENTER_DELAY_MS} milliseconds later (\`PROMPT_ENTER_DELAY_MS\`), the Enter alone`))
+  // Every check, in its row, with the code's hard or soft and its sentence word for word.
+  const blocks = ['restricted', 'reading', 'noTerminal', 'codex', 'unknownFolder', 'hookWait', 'unknownStart', 'noSession', 'openTool', 'notIdle', 'agentRunning', 'otherSession'] as const
+  const rows = page.split('\n').filter((l) => /^\| `\w+` \| (never|asks first) \|/.test(l))
+  assert.deepEqual(rows, blocks.map((b) => `| \`${b}\` | ${PROMPT_SOFT_BLOCKS.has(b) ? 'asks first' : 'never'} | *${promptBlockText(b)}* |`))
+  // The words the section, the pick, the question and the log say, as the code builds them.
+  const where = promptTargetVm({ state: 'active', kind: 'claude', index: 2, count: 3, verdict: { send: true } }).text
+  for (const said of [`*${where}*`, `*${promptTargetVm({ state: 'pick', candidates: 2 }).text}*`, `*${promptTargetVm({ state: 'none' }).text}*`,
+    `*${promptSentText({ ok: true, kind: 'claude', index: 2, count: 3 }).text}*`, `*${promptSentText({ ok: false, block: 'failed' }).text}*`,
+    '*Claude Code — terminal 2 of 3*', '*ready*, *sending asks first* or *not now*', '*Send “Status table” anyway?*',
+    '*If Claude Code is showing a permission dialog or a question there, the text and Enter would answer it. Text typed in that terminal and not sent yet goes with it.*',
+    '`Prompts: sent a prompt to Claude Code in terminal 2 of 3`', '`Prompts: not sent (hookWait)`', '`Prompts: a send was dropped (another one is under way)`']) {
+    assert.ok(flat.includes(said), `docs/prompts.md does not say: ${said}`)
+  }
+  // What the page promises, and what §7a's probe found.
+  for (const claim of ['**Anything you typed in that terminal and did not send goes with the prompt.**', 'The text and the Enter are two writes (`sendText`)',
+    'a 119-character prompt stayed in its input box that way, unsent', 'never Claude Code in the Claude Code extension\'s own panel',
+    'A terminal\'s name is never read', 'Nothing is read back from the terminal', 'is not counted in `keepwarm.json`',
+    'restart Claude Code in it after a reload for the full check', 'sending was tried with Claude Code only (2.1.282 and 2.1.283), not with Codex',
+    'the dashboard page only names the prompt and never hands over a text of its own', 'Nothing of your answer is kept: the next send asks again',
+    'with *No, exit* highlighted, so that Enter would end Claude Code', 'a text typed into an open dialog answers it and is lost',
+    'so a fresh `claude --resume` list standing in this terminal goes unseen then', 'became one scheduled task']) {
+    assert.ok(flat.includes(claim), `docs/prompts.md does not say: ${claim}`)
+  }
+  // Troubleshooting: every check by its code, under its own heading.
+  const trouble = doc.troubleshooting
+  const at = trouble.indexOf('\n## A prompt was not sent\n')
+  assert.ok(at >= 0, 'docs/troubleshooting.md has no section for a prompt that was not sent')
+  const why = trouble.slice(at, trouble.indexOf('\n## ', at + 10))
+  for (const b of blocks) assert.ok(why.includes(`\`${b}\``), `troubleshooting.md does not explain ${b}`)
+  assert.ok(flatText(why).includes('`Prompts: an operation was dropped (the section is not listed)`'))
+  // Privacy: the second write, always the reader's; the kept facts the decision reads; the watch's listening rule.
+  const privacy = flatText(doc.privacy)
+  for (const claim of ['**The prompt you send** ([Prompts](prompts.md#sending), 1.10) is the second thing Token Pace ever types into another program\'s input',
+    'never a text the dashboard page hands over', 'the text, then, 200 milliseconds later, the Enter alone', '`Prompts: not sent (openTool)`',
+    'The watch listens to the events while the keep-warm line may act, or while the dashboard lists the Prompts section and the workspace is trusted',
+    'in which the watch holds no open execution of that program — none seen, or the one it saw has ended']) {
+    assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  for (const stale of ['while the setting is on and allowed and from nothing else', 'where the watch saw no such start', 'saw no start of that program']) {
+    assert.equal(privacy.includes(stale), false, `docs/privacy.md still says: ${stale}`)
+  }
+  // The prompt-cache page: a countdown ends for a prompt, as the host logs it; the watch's second user.
+  const pc = flatText(doc.promptCache)
+  assert.ok(readDoc('src/keepWarmHost.ts').includes("this.log.info('keep-warm: not sent (a prompt was typed into its terminal)')"))
+  for (const claim of ['`keep-warm: not sent (a prompt was typed into its terminal)`', 'keep-warm stops for the rest of that session\'s idle phase, as a click on the countdown stops it',
+    'stops Token Pace listening to the terminals for it — the window listens on only while the dashboard lists the [Prompts](prompts.md#which-terminal) section in a trusted workspace']) {
+    assert.ok(pc.includes(claim), `docs/prompt-cache.md does not say: ${claim}`)
+  }
+  assert.equal(pc.includes('stops Token Pace listening to the terminals at all'), false)
 })

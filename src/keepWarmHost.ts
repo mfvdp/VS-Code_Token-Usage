@@ -38,7 +38,8 @@
  *
  * 1.10: while the transcripts are read — the cold scan, the agent tables' replay — no countdown starts
  * and none ends with a line (G14, `KeepWarmFrame.settled`); a prompt the reader types into the terminal
- * a countdown is armed for ends that countdown without its line (`yieldTo`, A3 rule 8).
+ * a countdown is armed for ends that countdown without its line, and keep-warm for the rest of the
+ * session's idle phase (`yieldTo`, A3 rule 8, Review 1a F2).
  *
  * Inert while it may not act: with the setting off, without consent or in Restricted Mode keep-warm
  * wants no terminal event (the watch listens only while another user — the prompt tool — wants it) and
@@ -456,12 +457,17 @@ export class KeepWarmHost {
    * 1.10 A3 rule 8 (§3.0 b): a prompt of the reader's is being typed into `terminal` — a countdown armed
    * for that very terminal ends without its line (a line on top of the prompt would be a second request
    * into a busy composer), its item goes, and the log says so; true when one did. A countdown for another
-   * terminal is not touched. The idle phase is not marked cancelled: the prompt's request starts a new one.
+   * terminal is not touched. Review 1a F2 (the lead's decision, over rule 8's "not marked cancelled"): the
+   * session's idle phase is cancelled as a click on the countdown cancels it (G12), so a prompt that writes
+   * no line and makes no request — one that answered a dialog, one Claude Code dropped — is not followed by a
+   * fresh countdown for the same session; the next counted request of the session starts a new idle phase
+   * (`verify`), the prompt's own reply among them.
    */
   yieldTo(terminal: vscode.Terminal): boolean {
     const c = this.countdown
     if (c === null || c.terminal !== terminal) return false
     this.countdown = null
+    this.phaseOf(c.sessionId, null).cancelled = true
     this.hideItem()
     this.log.info('keep-warm: not sent (a prompt was typed into its terminal)')
     return true
@@ -751,7 +757,8 @@ export class KeepWarmHost {
     item.text = `$(watch) ${t('keep warm in {0} s · cancel', secs)}`
     item.tooltip = t('Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.',
       KEEP_WARM_LINE, c.name)
-    item.accessibilityInformation = { label: t('Keep-warm line for {0} in {1} seconds, activate to cancel', c.name, secs) }
+    // 1.10 D8: the verb a person uses for a control — "press", never "activate".
+    item.accessibilityInformation = { label: t('Keep-warm line for {0} in {1} seconds, press to cancel', c.name, secs) }
     item.command = KEEPWARM_CANCEL_COMMAND
     item.color = undefined
     item.backgroundColor = undefined

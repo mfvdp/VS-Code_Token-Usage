@@ -31,12 +31,16 @@
  *
  * The predicates are keepWarm.ts's (`turnClosed`, `siblingLeftBehind`; `hookPermissionOpen` gives a
  * session's `hookWait`), never copied. Every fact is taken strictly, as keep-warm takes its facts: a flag
- * or a time of another shape never lets a prompt go where the exact value would have held it. Block
- * codes only — the words that say them are the host's.
+ * or a time of another shape never lets a prompt go where the exact value would have held it.
  *
- * Pure: no clock, no I/O, no `vscode`.
+ * 1.10 P4 (§3 A4's words): `promptBlockText` says a block in the reader's words — one sentence each, the
+ * same wherever a block is said (the section's target line, the terminal pick, the modal, the information
+ * message, the flash). The log names the code only.
+ *
+ * Pure: no clock, no I/O, no `vscode` — the words come from the bundle `t()` reads.
  */
 
+import { t } from './i18n'
 import { KeepWarmSibling, siblingLeftBehind, turnClosed } from './keepWarm'
 import type { AgentTerminal } from './terminalWatch'
 
@@ -159,4 +163,25 @@ export function promptSendDecision(f: PromptTargetFacts, now: number): PromptVer
   }
 
   return { send: true }
+}
+
+/**
+ * §3 A4: why a prompt does not go at once, in the reader's words — `t()` literals in a switch (the extract
+ * script reads literals). A reason is a whole sentence; the product names stay as they are in every language.
+ */
+export function promptBlockText(block: PromptSendBlock): string {
+  switch (block) {
+    case 'restricted': return t('Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.')
+    case 'reading': return t('Token Pace is reading the transcripts; try again in a moment.')
+    case 'noTerminal': return t('No terminal of this window runs Claude Code or Codex (VS Code\'s shell integration reports none).')
+    case 'codex': return t('Token Pace reads nothing of a Codex session\'s state: it cannot tell whether Codex is at work or waiting for an approval.')
+    case 'unknownFolder': return t('VS Code reports no folder for that terminal, so Token Pace cannot tell which session runs there.')
+    case 'hookWait': return t('Claude Code is asking for a permission in a session of that folder. Answer it first.')
+    case 'unknownStart': return t('Token Pace did not see Claude Code start in that terminal, so it cannot tell which session runs there.')
+    case 'noSession': return t('Claude Code in that terminal has not written a line since it started, so it may still show a dialog of its own (trusting the folder, signing in, the list of --resume). Send the first message by hand.')
+    case 'openTool': return t('Claude Code is at work there, or waiting for your answer in a dialog; its transcript cannot tell which.')
+    case 'notIdle': return t('Claude Code\'s last reply there did not end its turn.')
+    case 'agentRunning': return t('An agent of that session is running.')
+    default: return t('Another Claude Code session of the same folder is at work or waiting for an answer.')
+  }
 }

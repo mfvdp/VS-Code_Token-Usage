@@ -20,7 +20,6 @@
   "Fetch failed": "Не удалось получить данные",
   "For the four hook events below, Claude Code starts Token Pace's script with `node` and hands it the event as JSON. The script reads four fields of it — `hook_event_name`, `session_id`, `agent_id` and `notification_type` — and appends one line to `agent-hook.jsonl` in Token Pace's storage, with six fields: `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`. Nothing else of the event is read: no message, no prompt, no tool input or result, no path.": "При четырёх событиях хука, перечисленных ниже, Claude Code запускает скрипт Token Pace через `node` и передаёт ему событие в виде JSON. Скрипт читает из него четыре поля — `hook_event_name`, `session_id`, `agent_id` и `notification_type` — и дописывает одну строку в `agent-hook.jsonl` в хранилище Token Pace, с шестью полями: `v`, `ts`, `event`, `sessionId`, `agentId` и `wait`. Больше из события ничего не читается: ни сообщения, ни промпта, ни ввода или результата инструмента, ни пути.",
   "Keep it and chain Token Pace": "Оставить и добавить Token Pace в цепочку",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "Строка подогрева для {0} через {1} с, активируйте, чтобы отменить",
   "Last month": "Прошлый месяц",
   "Last {0} days": "Последние {0} дн.",
   "Later": "Позже",

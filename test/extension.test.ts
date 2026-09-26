@@ -246,6 +246,8 @@ interface ActivateOptions {
   answers?: unknown[]
   /** `vscode.env.language` and the bundle VS Code would have loaded for it — the i18n seam's input. */
   language?: { tag: string; bundle?: Record<string, string> }
+  /** 1.10 P4: `vscode.workspace.isTrusted` for this activation (the reset trusts it). */
+  trusted?: boolean
 }
 
 async function activateHost(
@@ -262,6 +264,7 @@ async function activateHost(
   // other recording.
   state.setRemoteName(opts.remoteName)
   if (opts.language) state.setLanguage(opts.language.tag, opts.language.bundle)
+  if (opts.trusted === false) state.setTrusted(false)
   state.answers.push(...(opts.answers ?? []))
   const ext = require('../src/extension') as Extension
   const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState })
@@ -4245,8 +4248,13 @@ test('1.8 review 3: keep-warm end to end in a fake HOME — switched on and allo
 
 test('1.10 P2: one terminal watch for the window, the keep-warm host\'s; a Codex terminal with a secret on its command line and in the folder its shell integration reports is held and reaches no output; G14 reads the scan and the replay (§0a.3 leak test, host side)', async () => {
   const fx = makeFixture()
+  // 1.10 P4 (pinned and changed): the Prompts section listed, so the view-model build asks the watch for the
+  // candidates (`agentTerminals`, `reportedCwd`) and a send goes through the pick, the modal and `sendText`.
   await activateHost(fx, REPO, {
-    settings: { 'tokenPace.cacheKeepWarm': true, 'tokenPace.statusBar.show': ['claudeQuota', 'tokens'] },
+    settings: {
+      'tokenPace.cacheKeepWarm': true, 'tokenPace.statusBar.show': ['claudeQuota', 'tokens'],
+      'tokenPace.dashboard.sections': ['prompts', 'quota', 'tokens', 'summary', 'kpis', 'dataQuality'],
+    },
     globalState: new Map<string, unknown>([['tokenPace.keepWarmConsent', 'granted']]),
   })
   const page = openDashboard()
@@ -4263,16 +4271,38 @@ test('1.10 P2: one terminal watch for the window, the keep-warm host\'s; a Codex
   state.setActiveTerminal(reported)
   await sleep(2_200)
   assert.equal(state.terminalListeners(), 4, 'a second watch subscribed')
+  // The section's target line: the active terminal runs Codex, which asks first (the page's payload is checked below).
+  await waitFor('the target line', () => (lastPrompts(page.sent) as { target?: { text: string } } | undefined)?.target?.text
+    === 'Sends to Codex in terminal 2 of 2 — sending asks first: Token Pace reads nothing of a Codex session\'s state: it cannot tell whether Codex is at work or waiting for an approval.')
+  // A send through the pick (a bash terminal active) and the modal: picked the first, *Send anyway*.
+  const bash = state.openTerminal({ shell: 'bash', cwd })
+  state.setActiveTerminal(bash)
+  state.answers.push((items: Array<Record<string, unknown>>) => items[0], 'Send anyway')
+  page.post({ type: 'promptSend', id: 's-stop' })
+  await waitFor('the send', () => state.sent.length === 2)
+  assert.deepEqual(state.sent.map((x) => [x.terminal === seen, x.text, x.execute]),
+    [[true, 'Stop after the current task and do not start any new work.', false], [true, '', true]])
+  assert.deepEqual(state.quickPicks[state.quickPicks.length - 1].items.map((i) => i.label), ['Codex — terminal 1 of 3', 'Codex — terminal 2 of 3'])
+  await waitFor('the flash', () => (lastPrompts(page.sent) as { flash?: { text: string } | null } | undefined)?.flash?.text === 'Sent to Codex in terminal 1 of 3.')
   await state.execute('tokenPace.showUsageMarkdown')
   const markdown = lastMarkdown()
   await state.execute('tokenPace.showUsageQuickPick')
+  await state.execute('tokenPace.copySummary')
   await state.execute('tokenPace.copyDiagnostics')
+  const uri = (HOST.api as { Uri: { file(p: string): unknown } }).Uri.file
+  state.answers.push(uri(path.join(fx.data, 'out', 'usage.csv')), undefined)
+  await state.execute('tokenPace.exportCsv')
+  state.answers.push(uri(path.join(fx.data, 'out', 'usage.json')), undefined)
+  await state.execute('tokenPace.exportJson')
+  assert.ok(state.writes.length >= 2, 'the exports wrote nothing')
   const outputs: Array<[string, string]> = [
     ['page', JSON.stringify(page.sent)],
     ['markdown', markdown],
     ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+    ['terminal pick', JSON.stringify(state.quickPicks)],
     ['status bar', JSON.stringify(state.items.map((i) => ({ ...i })))],
-    ['diagnostics', state.clipboard.join('\n')],
+    ['clipboard (summary, diagnostics)', state.clipboard.join('\n')],
+    ['exports', JSON.stringify(state.writes)],
     ['messages', JSON.stringify(state.messages)],
     ['log', state.logText()],
   ]
@@ -4288,7 +4318,7 @@ test('1.10 P2: one terminal watch for the window, the keep-warm host\'s; a Codex
       assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
     }
   }
-  assert.deepEqual(state.sent, [], 'something was typed into a terminal')
+  assert.equal(state.sent.length, 2, 'something else was typed into a terminal')
   assert.equal(state.nameReads, 0, 'a terminal\'s name was read')
   assert.equal(state.outputReads, 0, 'a terminal\'s output was read')
   assert.equal(state.creationReads, 0, 'a terminal\'s creation options or process were read')
@@ -4324,16 +4354,21 @@ function writePrompts(fx: Fixture, file: unknown): string {
   return p
 }
 
-test('1.10 P3: the Prompts section through the host — the page gets the list, its save, move and delete change prompts.json, a send is dropped, Restore Default Prompts answers; no title and no text reaches the log, the debug log file, the diagnostics, the summary, the exports, the markdown, the Quick Pick, the bar or the state (§0a.1 leak test, host side)', async () => {
+test('1.10 P3: the Prompts section through the host — the page gets the list, its save, move and delete change prompts.json, a send types the stored text, Restore Default Prompts answers; no title and no text reaches the log, the debug log file, the diagnostics, the summary, the exports, the markdown, the Quick Pick, the bar, the state, quota.json, quotaHistory.json, keepwarm.json or the memento (§0a.1 leak test, host side)', async () => {
   const fx = makeFixture()
   const file = writePrompts(fx, { v: 1, prompts: [{ id: 's-status' }, { id: 'u-3k9x0a2b', title: PROMPT_TITLE, text: PROMPT_TEXT }] })
   const logFile = path.join(fx.data, 'token-pace-debug.log')
-  await activateHost(fx, REPO, {
+  // Review 1b F6 (1.10 P4): keep-warm on and allowed beside the prompts, and its accounting file present, so the
+  // storage files read below are no vacuous check.
+  fs.writeFileSync(path.join(fx.storage, 'keepwarm.json'), JSON.stringify({ v: 1, days: { '2026-09-25': { requests: 1, tokens: 32 } } }))
+  const host = await activateHost(fx, REPO, {
     settings: {
       'tokenPace.dashboard.sections': ['prompts', 'quota', 'tokens', 'summary', 'kpis', 'dataQuality'],
       'tokenPace.debugLogFile': logFile,
       'tokenPace.statusBar.show': ['claudeQuota', 'tokens'],
+      'tokenPace.cacheKeepWarm': true,
     },
+    globalState: new Map<string, unknown>([['tokenPace.keepWarmConsent', 'granted']]),
   })
   const page = openDashboard()
   await waitOwnColdStart(state)
@@ -4355,12 +4390,21 @@ test('1.10 P3: the Prompts section through the host — the page gets the list, 
   page.post({ type: 'promptSave', id: 'u-3k9x0a2b', title: ' ', text: PROMPT_TEXT })
   await waitFor('the flash', () => lastPrompts(page.sent)?.flash?.text === 'Not saved: The title is empty.')
   assert.equal(fs.readFileSync(file, 'utf8'), before)
-  // A send — with a text the page made up — types nothing in this build; the log says so without the words.
+  // 1.10 P4 (pinned and changed — P3 dropped the send): a send with a text the page made up types the entry's
+  // stored text. The terminal runs Claude Code but VS Code reports no folder for it: the modal asks first, and
+  // *Send anyway* sends — the text, then the Enter alone.
   const terminal = state.openTerminal({ shell: 'claude' })
   state.setActiveTerminal(terminal)
+  state.answers.push('Send anyway')
   page.post({ type: 'promptSend', id: 'u-3k9x0a2b', text: 'rm -rf ~' })
-  await waitFor('the dropped send', () => state.logText().includes('Prompts: a send was dropped (this build does not send yet).'))
-  assert.deepEqual(state.sent, [], 'something was typed into a terminal')
+  await waitFor('the send', () => state.sent.length === 2)
+  assert.deepEqual(state.sent.map((x) => [x.terminal === terminal, x.text, x.execute]), [[true, PROMPT_TEXT, false], [true, '', true]])
+  assert.deepEqual(state.shown.map((x) => [x.terminal === terminal, x.preserveFocus]), [[true, true]])
+  assert.match(state.logText(), /Prompts: sent a prompt to Claude Code in terminal 1 of 1/)
+  await waitFor('the flash on the page', () => lastPrompts(page.sent)?.flash?.text === 'Sent to Claude Code in terminal 1 of 1.')
+  // The modal is the one place beside the page and the terminal a title is shown (§0a.1).
+  const modal = state.messages.find((m) => m.kind === 'warning')
+  assert.equal(modal?.text, `Send “${PROMPT_TITLE}” anyway?`)
   // Restore Default Prompts: the three missing shipped entries at the end, then none missing — from the
   // palette and from the section's button (a `command` message) alike.
   await state.execute('tokenPace.restoreDefaultPrompts')
@@ -4388,16 +4432,25 @@ test('1.10 P3: the Prompts section through the host — the page gets the list, 
     ['status bar', JSON.stringify(state.items.map((i) => ({ ...i })))],
     ['clipboard (summary, diagnostics)', state.clipboard.join('\n')],
     ['exports', JSON.stringify(state.writes)],
-    ['messages', JSON.stringify(state.messages)],
+    // The modal's title is where the reader's title belongs (§0a.1); every other message holds neither word.
+    ['messages', JSON.stringify(state.messages.filter((m) => m !== modal))],
     ['log', state.logText()],
   ]
+  // Review 1b F6: the memento after the operations and the send.
+  const memento = (): string => JSON.stringify(host.ctx.globalState.keys().map((k) => [k, host.ctx.globalState.get(k)]))
+  outputs.push(['globalState', memento()])
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
   assert.ok(fs.existsSync(logFile), 'the debug log file was not written')
   outputs.push(['debug log file', fs.readFileSync(logFile, 'utf8')])
+  assert.match(outputs[outputs.length - 1][1], /Prompts: added a user prompt\./)
+  assert.match(outputs[outputs.length - 1][1], /Prompts: deleted a shipped prompt\./)
   outputs.push(['state', fs.readFileSync(fx.stateFile, 'utf8')])
-  assert.equal(fs.existsSync(path.join(fx.storage, 'keepwarm.json')), false)
-  assert.match(outputs[outputs.length - 2][1], /Prompts: added a user prompt\./)
-  assert.match(outputs[outputs.length - 2][1], /Prompts: deleted a shipped prompt\./)
+  outputs.push(['globalState after the window', memento()])
+  // Every file of the storage but the reader's own list — quotaHistory.json and keepwarm.json among them, quota.json
+  // too where a poll wrote one (this host never polls: no network in a test).
+  const stored = fs.readdirSync(fx.storage).filter((f) => f !== 'prompts.json' && fs.statSync(path.join(fx.storage, f)).isFile())
+  for (const f of ['keepwarm.json', 'quotaHistory.json', 'state.json']) assert.ok(stored.includes(f), `${f} is not in the storage`)
+  for (const f of stored) outputs.push([`storage ${f}`, fs.readFileSync(path.join(fx.storage, f), 'utf8')])
   for (const [what, text] of outputs) {
     for (const secret of [PROMPT_TITLE, PROMPT_TEXT, 'rm -rf ~']) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
   }
@@ -4502,4 +4555,171 @@ test('1.10 P3: Restore Default Prompts is registered with its manifest title and
   assert.equal(said(), 'Token Pace: Alle Standard-Prompts sind bereits vorhanden.')
   assert.deepEqual((JSON.parse(fs.readFileSync(file, 'utf8')) as { prompts: unknown[] }).prompts, [{ id: 's-stop' }, { id: 's-status' }, { id: 's-keepwarm' }])
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+// ---------------------------------------------------------------------------
+// 1.10 A3 (P4): the send path in the host
+// ---------------------------------------------------------------------------
+
+test('1.10 P4: a page message of the Prompts section while the section is not listed is dropped — no change, nothing typed —; the palette\'s Restore Default Prompts is not gated (Review 1b F8)', async () => {
+  const fx = makeFixture()
+  const file = writePrompts(fx, { v: 1, prompts: [{ id: 's-status' }, { id: 'u-3k9x0a2b', title: PROMPT_TITLE, text: PROMPT_TEXT }] })
+  await activateHost(fx, REPO)
+  const page = openDashboard()
+  await waitOwnColdStart(state)
+  const terminal = state.openTerminal({ shell: 'claude', cwd: '/home/u/proj' })
+  state.setActiveTerminal(terminal)
+  const bytes = fs.readFileSync(file, 'utf8')
+  const dropped = (): number => state.log.filter((l) => l.message === 'Prompts: an operation was dropped (the section is not listed)').length
+  page.post({ type: 'promptSave', id: null, title: 'x', text: 'y' })
+  page.post({ type: 'promptDelete', id: 's-status' })
+  page.post({ type: 'promptMove', id: 'u-3k9x0a2b', dir: 'up' })
+  page.post({ type: 'promptSend', id: 'u-3k9x0a2b' })
+  await waitFor('four drops', () => dropped() === 4)
+  await sleep(400)
+  assert.equal(fs.readFileSync(file, 'utf8'), bytes, 'prompts.json was changed')
+  assert.equal(state.sent.length, 0, 'something was typed')
+  assert.equal(state.messages.length, 0, 'the send flow asked or answered')
+  assert.equal(state.terminalListeners(), 0, 'the watch listens for a section that is not listed')
+  // The command is the reader's own, from the palette: it runs.
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: 2 default prompt(s) restored.')
+  // Listed at run time: the watch listens, and a send goes.
+  state.set('tokenPace.dashboard.sections', ['prompts', 'quota'])
+  state.fireConfigChange(['tokenPace.dashboard.sections'])
+  await waitFor('the watch listening', () => state.terminalListeners() === 4)
+  await waitFor('the target line', () => (lastPrompts(page.sent) as { target?: { level: string } } | undefined)?.target?.level === 'asks')
+  state.answers.push('Send anyway')
+  page.post({ type: 'promptSend', id: 'u-3k9x0a2b' })
+  await waitFor('the send', () => state.sent.length === 2)
+  assert.deepEqual(state.sent.map((x) => x.text), [PROMPT_TEXT, ''])
+  // Taken out again: the watch lets go.
+  state.set('tokenPace.dashboard.sections', ['quota'])
+  state.fireConfigChange(['tokenPace.dashboard.sections'])
+  await waitFor('the watch deaf', () => state.terminalListeners() === 0)
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('1.10 P4: Restricted Mode — the list shows, nothing is typed and the target line says why; trusting the workspace makes the watch listen and a send go; the restore command\'s full and not-written answers are whole sentences in English and German (§3 A3 rule 10, A4 rule 1, Review 1b F3)', async () => {
+  const fx = makeFixture()
+  const full = { v: 1, prompts: Array.from({ length: 50 }, (_, i) => ({ id: `u-${String(i).padStart(8, '0')}`, title: 't', text: 'x' })) }
+  const file = writePrompts(fx, full)
+  await activateHost(fx, REPO, { settings: { 'tokenPace.dashboard.sections': ['prompts', 'quota'] }, trusted: false })
+  const page = openDashboard()
+  await waitOwnColdStart(state)
+  assert.equal(state.terminalListeners(), 0, 'the watch listens in Restricted Mode')
+  const terminal = state.openTerminal({ shell: 'claude', cwd: '/home/u/proj' })
+  state.setActiveTerminal(terminal)
+  await waitFor('the restricted target line', () => (lastPrompts(page.sent) as { target?: { text: string; level: string } } | undefined)?.target?.text
+    === 'Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.')
+  assert.equal(lastPrompts(page.sent)?.items.length, 50, 'the list does not show in Restricted Mode')
+  page.post({ type: 'promptSend', id: 'u-00000000' })
+  await waitFor('the refusal', () => state.messages.some((m) => m.text === 'Token Pace: the prompt was not sent. Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.'))
+  assert.equal(state.sent.length, 0)
+  // Trusted: the watch listens, the Claude Code started before it is a candidate by its shell (unknownStart asks first).
+  state.setTrusted(true)
+  await waitFor('the watch listening', () => state.terminalListeners() === 4)
+  await waitFor('the target line', () => (lastPrompts(page.sent) as { target?: { level: string } } | undefined)?.target?.level === 'asks')
+  await sleep(1_100)
+  state.answers.push('Send anyway')
+  page.post({ type: 'promptSend', id: 'u-00000000' })
+  await waitFor('the send', () => state.sent.length === 2)
+  // Review 1b F3: the restore command's two refusals as whole sentences — the list is full.
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.deepEqual(state.messages[state.messages.length - 1], { kind: 'warning', text: 'Token Pace: the list is full (at most 50 prompts), so nothing was restored.', actions: [] })
+  state.set('tokenPace.language', 'de')
+  state.fireConfigChange(['tokenPace.language'])
+  await waitFor('the German bundle', () => /Language: de → de/.test(state.logText()))
+  await state.execute('tokenPace.restoreDefaultPrompts')
+  assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: Die Liste ist voll (höchstens 50 Prompts), daher wurde nichts wiederhergestellt.')
+  // … and the file cannot be written (a read-only directory).
+  fs.writeFileSync(file, JSON.stringify({ v: 1, prompts: [{ id: 's-status' }] }))
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    fs.chmodSync(fx.storage, 0o555)
+    try {
+      await state.execute('tokenPace.restoreDefaultPrompts')
+      assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: prompts.json konnte nicht geschrieben werden (EACCES); nichts wurde wiederhergestellt.')
+      state.set('tokenPace.language', 'en')
+      state.fireConfigChange(['tokenPace.language'])
+      await waitFor('English again', () => /Language: en → en/.test(state.logText()))
+      await state.execute('tokenPace.restoreDefaultPrompts')
+      assert.equal(state.messages[state.messages.length - 1]?.text, 'Token Pace: prompts.json could not be written (EACCES); nothing was restored.')
+    } finally {
+      fs.chmodSync(fx.storage, 0o755)
+    }
+  }
+  assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('1.10 P4: a prompt sent through the terminal pick into the terminal a keep-warm countdown is armed for ends that countdown without its line, and keep-warm waits for the session\'s next request (§3 A3 rule 8, Review 1a F2)', async () => {
+  const fx = makeFixture()
+  const realNow = Date.now.bind(Date)
+  const crosses = new Date(realNow()).toDateString() !== new Date(realNow() + 75 * 60_000).toDateString()
+  let offset = crosses ? 3 * 3_600_000 : 0
+  Date.now = (): number => realNow() + offset
+  try {
+    await activateHost(fx, REPO, {
+      settings: { 'tokenPace.statusBar.show': ['claudeQuota', 'tokens'], 'tokenPace.cacheKeepWarm': true, 'tokenPace.dashboard.sections': ['prompts', 'quota'] },
+      globalState: new Map<string, unknown>([['tokenPace.keepWarmConsent', 'granted']]),
+    })
+    const page = openDashboard()
+    await waitOwnColdStart(state)
+    await waitFor('the watch listening', () => state.terminalListeners() === 4)
+    // Claude Code starts in a terminal of this window; the user leaves the window while it answers.
+    const cwd = '/home/u/synthetic-project'
+    const terminal = state.openTerminal({ shell: 'claude', name: 'SYNTHETIC-CONVERSATION-SUMMARY' })
+    state.setActiveTerminal(terminal)
+    state.startExecution(terminal, { commandLine: 'claude', confidence: 2, cwd })
+    await sleep(30)
+    state.fireWindowState(false)
+    await sleep(30)
+    const reply = Date.now()
+    const project = path.join(fx.claudeRoot, '-home-u-synthetic-project')
+    const transcript = path.join(project, `${LEAK_SESSION_ID}.jsonl`)
+    fs.mkdirSync(project, { recursive: true })
+    fs.writeFileSync(transcript, [
+      promptLine({ ts: reply - 2_000 }),
+      claudeLine({ id: 'msg_p4_yield_a', ts: reply, model: 'claude-opus-5-5', final: true, sessionId: LEAK_SESSION_ID, cwd,
+        usage: { input: 300, cacheWrite: 2000, cacheWrite1h: 2000, cacheRead: 150_000, output: 40 } }),
+    ].join('\n') + '\n')
+    await sleep(1_100)
+    const payload = leakyStatusPayload(reply)
+    fs.writeFileSync(path.join(fx.storage, 'statusline-mirror.json'), JSON.stringify({
+      schema_version: 1, written_at: Date.now(),
+      payload: { ...payload, prompt_cache: { ...(payload.prompt_cache as Record<string, unknown>), expires_at: Math.floor((reply + 3_600_000) / 1000) } },
+    }))
+    for (let i = 0; ; i++) {
+      await state.execute('tokenPace.showUsageMarkdown')
+      const line = lastMarkdown().split('\n').find((l) => l.includes('9d0eb37a · prompt cache warm'))
+      if (line !== undefined && !line.includes('~')) break
+      if (i > 60) throw new Error(`the session is not watched on the bridge's reading: ${line}`)
+      await sleep(300)
+    }
+    // 2 m 50 s of warmth left: the countdown starts.
+    offset += reply + 3_600_000 - 170_000 - Date.now()
+    await waitFor('the countdown', () => state.live().some((i) => i.id === 'tokenPace.keepWarm'))
+    // The reader switches to a bash terminal (the window still in the background) and double-clicks *Status table*:
+    // the pick offers the Claude terminal, and the prompt goes there.
+    const bash = state.openTerminal({ shell: 'bash', cwd })
+    state.setActiveTerminal(bash)
+    state.answers.push((items: Array<Record<string, unknown>>) => items[0])
+    page.post({ type: 'promptSend', id: 's-status' })
+    await waitFor('the prompt typed', () => state.sent.length === 2)
+    assert.deepEqual(state.quickPicks[state.quickPicks.length - 1].items.map((i) => [i.label, i.description]), [['Claude Code — terminal 1 of 2', 'ready']])
+    assert.deepEqual(state.sent.map((x) => [x.terminal === terminal, x.text, x.execute]), [
+      [true, 'Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.', false],
+      [true, '', true],
+    ])
+    assert.match(state.logText(), /keep-warm: not sent \(a prompt was typed into its terminal\)/)
+    assert.equal(state.live().some((i) => i.id === 'tokenPace.keepWarm'), false, 'the countdown item stayed')
+    // The countdown's minute passes, and more: no keep-warm line, no new countdown — the idle phase is cancelled.
+    offset += 90_000
+    await sleep(2_500)
+    assert.equal(state.sent.length, 2, 'the keep-warm line went after the prompt')
+    assert.equal(state.live().some((i) => i.id === 'tokenPace.keepWarm'), false, 'a fresh countdown for the same session')
+    assert.equal(state.nameReads, 0, 'a terminal\'s name was read')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    Date.now = realNow
+  }
 })

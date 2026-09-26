@@ -116,15 +116,17 @@ identifiers and counts, never content:
   tool result, told by the line's top-level `type`: on a line the count does not parse, by the
   unescaped literal `"type":"user"` on the raw line, which is never parsed for it; never the prompt,
   the tool result or anything else of the line, and bookkeeping lines (attachments, system lines,
-  file-history snapshots, titles, modes) do not count. Those two facts serve only the checks of the
+  file-history snapshots, titles, modes) do not count. Those two facts serve the checks of the
   opt-in [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) (1.8), which types nothing
-  unless that reply ended its turn (`end_turn`) and the newest message line is not the user's; the
-  checks compare them and nothing more. Since 1.9 the record also keeps the time of the newest line
+  unless that reply ended its turn (`end_turn`) and the newest message line is not the user's, and —
+  since 1.10 — the dashboard's [Prompts](prompts.md#when-token-pace-does-not-send-or-asks-first) section,
+  which sends a prompt you double-clicked at once only then and otherwise asks first; the checks compare
+  them and nothing more. Since 1.9 the record also keeps the time of the newest line
   of the transcript that is yours or a tool's (a `user` line) — its `timestamp`, matched on the raw
   line as the unescaped key `"timestamp":"…Z"`, the latest on the line (a time nested in a tool's
   result can only make it newer); nothing else of that line is read —, for the keep-warm line's check
   of other sessions of the same folder, where one that has been left behind no longer holds the line
-  back. What is kept of it is one number per main session, the newest such time — not the line's
+  back — and, since 1.10, for the same question of the Prompts section. What is kept of it is one number per main session, the newest such time — not the line's
   text, its id, or the object a nested time came from —, and it is never shown. Nothing of an
   agent's transcript is kept for it.
   The main session's record keeps these seven days in the token snapshot; none of the exports, the
@@ -191,8 +193,8 @@ Restricted Mode — and it is the one thing Token Pace ever does on its own: it 
 session and presses Enter (`sendText`, once per line), after a one-minute countdown you can cancel,
 so that Claude Code itself sends a request with its own login; Token Pace reads no credential for
 it and sends nothing over the network. Nothing is ever read back from the terminal — not its output,
-not what Claude Code shows. To find that terminal it reads, while the setting is on and allowed and
-from nothing else, what VS Code's shell integration reports: of its two events,
+not what Claude Code shows. To find that terminal it reads what VS Code's shell integration reports —
+for the keep-warm line only while the setting is on and allowed —: of its two events,
 `onDidStartTerminalShellExecution` and `onDidEndTerminalShellExecution`, the `terminal` and the
 `execution`; of an execution that has not ended its `commandLine` — the `value` and VS Code's
 `confidence` in it — and its `cwd` (the `fsPath`), tested when the check runs (does it run `claude`,
@@ -200,7 +202,9 @@ in the folder the session's transcript belongs to?) and kept by no one: never lo
 or exported; and of a terminal VS Code's `state`, its `shell` (`claude` while Claude Code runs).
 Never a terminal's name — Claude Code sets it to a summary of the conversation —, its output or its
 environment. Which terminal was active in a focused window, and when, is kept in memory only. With
-the setting off, without the consent or in Restricted Mode none of these events is listened to. While
+the setting off, without the consent or in Restricted Mode none of these events is listened to for the
+keep-warm line; the window then listens to them only while the dashboard lists the Prompts section in
+a trusted workspace (below), and otherwise to none of them. While
 the transcripts are being read — the first scan after the window opened, a re-read, the replay for the
 Agents tables — no countdown starts and none ends with its line (1.10). The
 line's answers are counted in `keepwarm.json` in the extension's storage (below): `v` and `days`,
@@ -212,21 +216,42 @@ extension's state; switching the setting off withdraws it.
 
 **The terminals, since 1.10.** One watch of the window's terminals holds these facts for the
 keep-warm line and for the dashboard's Prompts section (1.10) alike — the keep-warm line's use is the
-one above, unchanged. For the Prompts section the same facts say which terminal of this window runs
+one above, unchanged. The watch listens to the events while the keep-warm line may act, or while the
+dashboard lists the Prompts section and the workspace is trusted; otherwise it listens to none of them
+and holds nothing. For the Prompts section the same facts say which terminal of this window runs
 Claude Code or Codex, and in which folder, so that a prompt you double-click goes into such a terminal
 and nowhere else: an open execution whose `commandLine` starts with `claude` or `codex` (a path ending
 in it, `claude.exe` or `codex.exe`), reported with medium or high `confidence`, with its `cwd`; or,
-where the watch saw no such start, VS Code's `shell` for the terminal, `claude` or `codex`. For such a
+in a terminal in which the watch holds no open execution of that program — none seen, or the one it
+saw has ended —, VS Code's `shell` for the terminal, `claude` or `codex`. For such a
 terminal — Claude Code or Codex started before Token Pace began to listen, for example before a
 window reload — one more field of VS Code's shell integration is read: the terminal's
 `shellIntegration`, of it the `cwd`, of that the `fsPath` — the folder the shell reports for the
 terminal. It is read only for a terminal whose `shell` is `claude` or `codex` and in which the watch
-saw no start of that program, only when a prompt is sent or the Prompts section is built, and only to
+holds no open execution of that program — none seen, or the one it saw has ended —, only when a prompt
+is sent or the Prompts section is built, and only to
 compare the name Claude Code gives that folder's transcripts with the folders of the sessions; it is
 kept by no one, never logged, shown, stored or exported. That the shell's folder is the one the
 program started in is an inference: a shell cannot change its folder while a program runs in its
 foreground. A terminal is named on the page and in a pick list by its place in the window's list of
 terminals (“terminal 2 of 3”), never by its name; nothing of Codex's own state is read.
+
+**The prompt you send** ([Prompts](prompts.md#sending), 1.10) is the second thing Token Pace ever types
+into another program's input, beside the keep-warm line — and it is always your own: only when you
+double-click a prompt of the dashboard's Prompts section, press its send button or Ctrl+Enter (⌘+Enter)
+on it, and, where the section asks first, click *Send anyway*; never by a timer, a command, a link or a
+notification, at most one per second, and never in Restricted Mode. It types the prompt's text as your
+list holds it — never a text the dashboard page hands over — into one terminal of this window that runs
+Claude Code or Codex (the active one when it does, else the one you pick among exactly those), with
+`sendText`: the text, then, 200 milliseconds later, the Enter alone. It is a request Claude Code or Codex
+sends with its own login; Token Pace reads no credential for it and sends nothing over the network, and
+nothing is ever read back from the terminal. Whether the section sends at once, asks first or does not
+send is decided from facts Token Pace keeps anyway (1.10): for each main session of the terminal's folder
+the time of its first and newest counted reply, that reply's stop reason, whether the newest message line
+is yours and the time of your newest line (above), whether an agent of it runs (the Agents tree), and —
+with the agent hook installed — whether it holds a permission request newer than that reply; of a Codex
+session, nothing. They are compared at the send and never shown as figures, logged beyond a check's
+code (`Prompts: not sent (openTool)`), stored or exported.
 
 Nothing is written except the extension's own state in its `globalStorage` — among it the copy of
 the agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that
@@ -250,9 +275,10 @@ copy once, on the first activation of 1.8 in a trusted window: the write you con
 time, with a backup of the original bytes first, changing only the `statusLine` entry's `command`
 string and only while the entry still holds the command Token Pace recorded; the log says so.
 
-Beside them stands the one write that is no file: the opt-in keep-warm line, typed into Claude
-Code's terminal (above) — off by default as well, and never in Restricted Mode. Those are the three
-opt-ins, each behind a consent dialog of its own.
+Beside them stands the one write that is no file and no click of yours: the opt-in keep-warm line, typed
+into Claude Code's terminal (above) — off by default as well, and never in Restricted Mode. Those are the
+three opt-ins, each behind a consent dialog of its own. The other write into a terminal is a prompt of
+the dashboard's Prompts section (above), typed only on your click and never in Restricted Mode.
 
 **Your prompts** ([Prompts](prompts.md), 1.10) are kept in `prompts.json` in the extension's storage,
 written only when you change the list (save, delete, move, *Restore Default Prompts*) — whole, a temp

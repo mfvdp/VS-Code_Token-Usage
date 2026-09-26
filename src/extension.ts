@@ -24,7 +24,12 @@
  *  • 1.10 A (P3): the reader's prompt list lives in `prompts.json` in `globalStorage` (promptsHost.ts); this
  *    file reads it while the Prompts section is listed, for an operation and for the two commands that need it, applies the page's save / delete / move and the
  *    *Restore Default Prompts* command, and lists the file in *Clear Stored Data…*. A title or a text is
- *    never logged, exported or reported — the page shows it, and a send (P4) types it.
+ *    never logged, exported or reported — the page shows it, and a send types it.
+ *  • 1.10 A3 (P4): the page's `promptSend` starts the send flow of promptsHost.ts — the reader's own click on
+ *    that entry, never anything else. The terminal watch listens for the prompt tool while the section is
+ *    listed and the workspace is trusted (at activation, on a settings change, when trust is granted), and a
+ *    change of the window's terminals rebuilds the page for the section's target line. A page message of
+ *    the section while it is not listed is dropped.
  */
 
 import * as crypto from 'crypto'
@@ -37,7 +42,7 @@ import { ADAPTERS, SOURCES } from './adapters'
 import {
   HOOK_MIRROR_NAME, HOOK_SCRIPT_NAME, HookMirror, hookSetupDocument, installHookScript, refreshHookScript,
 } from './agentHook'
-import { AgentTreeVm, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
+import { AgentTreeVm, hookKey, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
 import { AGENT_TABLES_REVISION, Aggregator, cleanAgentId, IngestChanges } from './agg'
 import { Alerts } from './alerts'
 import {
@@ -58,15 +63,15 @@ import {
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
 import { DEFAULT_FORECAST_CONFIG, ForecastConfig } from './forecast'
 import { locale, setBundle, setLang, setLocale, t } from './i18n'
-import { KEEP_WARM_LINE } from './keepWarm'
-import { KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
+import { hookPermissionOpen, KEEP_WARM_LINE } from './keepWarm'
+import { folderSessions, KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
 import { availableLanguages, bundleFileName, readBundle } from './languageLoad'
 import { LanguageId, LanguageSetting, ResolvedLanguage, resolveLanguage, vscodeLanguageTag } from './languages'
 import { Lease } from './lease'
 import { NativeViews, registerNativeViews } from './nativeViews'
 import { effectivePace, paceVerdict, windowElapsed } from './pace'
 import { PROMPTS_MAX, PromptOp } from './prompts'
-import { PROMPTS_FILE_NAME, PromptsHost, PromptStore } from './promptsHost'
+import { PromptHostFacts, PROMPTS_FILE_NAME, PromptsHost, PromptStore } from './promptsHost'
 import { CLAUDE_QUOTA_FILE, CODEX_QUOTA_FILE, configureQuotaFiles } from './quota'
 import { QuotaHistory } from './quotaHistory'
 import { QuotaManager, QuotaOptions } from './quotaManager'
@@ -344,9 +349,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   /** A keep-warm consent the activation could not ask for yet: this window was not focused. */
   let keepWarmAskPending = false
   // 1.10 A (§0a.1): the reader's prompt list — read while the Prompts section is listed and before every
-  // operation, written only by one; nothing of it is read at activation.
-  const promptStore = new PromptStore(paths.prompts, { info: (m) => log.info(m), debug: (m) => log.debug(m), warn: (m) => log.warn(m) })
-  const prompts = new PromptsHost({ store: promptStore })
+  // operation, written only by one; nothing of it is read at activation. 1.10 A3 (§0a.4): the send types
+  // into a terminal of this window that the watch finds running Claude Code or Codex, on the reader's click.
+  const promptLog = { info: (m: string) => log.info(m), debug: (m: string) => log.debug(m), warn: (m: string) => log.warn(m) }
+  const promptStore = new PromptStore(paths.prompts, promptLog)
+  const prompts = new PromptsHost({ store: promptStore, window: vscode.window, watch: terminalWatch, keepWarm, log: promptLog })
+  context.subscriptions.push({ dispose: () => prompts.dispose() })
+  /**
+   * 1.10 A3 rule 10 (§0a.3 "Listening"): the watch listens for the prompt tool while the Prompts section is
+   * listed and the workspace is trusted — asked at activation, on every settings change and when trust is
+   * granted; keep-warm asks for itself.
+   */
+  const wantPromptTerminals = (now: number): void => {
+    terminalWatch.want('prompts', cfg.dashboard.sections.includes('prompts') && vscode.workspace.isTrusted, now)
+  }
+  wantPromptTerminals(Date.now())
 
   const alerts = new Alerts(context.globalState, readAlertConfig(cfg), say, undefined, {
     staleAfterMs: cfg.staleAfterMinutes * 60_000,
@@ -468,8 +485,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       // 1.9 A3: the dashboard's language picker — what is set and shown, what it may offer (the files on
       // disk, read once at activation) and VS Code's language for its Automatic line.
       language: { resolved: language, available: shippedLanguages, vscode: vscode.env.language },
-      // 1.10 A: the Prompts section — prompts.json is not even looked at while the section is not listed.
-      prompts: cfg.dashboard.sections.includes('prompts') ? prompts.vmInput(now) : undefined,
+      // 1.10 A: the Prompts section — prompts.json is not even looked at while the section is not listed, nor
+      // is a terminal for it (P4: the target line).
+      prompts: cfg.dashboard.sections.includes('prompts') ? prompts.vmInput(now, promptFacts()) : undefined,
     })
   }
 
@@ -513,6 +531,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   }
 
   const cadence = new LiveCadence({ full: rebuildVm, agents: rebuildAgents })
+  // 1.10 A3 rule 6: a terminal opened, closed or became active, or started or ended a program — the Prompts
+  // section's target line may say something else now. Only while the section is listed.
+  context.subscriptions.push(terminalWatch.onDidChange(() => {
+    if (!disposed && cfg.dashboard.sections.includes('prompts')) cadence.event(Date.now())
+  }))
+
+  /**
+   * 1.10 §0a.5: the facts a prompt's send decision reads besides the terminal, fresh at every call — the
+   * workspace's trust, whether the transcripts are being read (G14, as keep-warm's frame has it), and every
+   * main session of a folder with the agent hook's permission wait (G6). Times, a stop reason and flags;
+   * never a text of a session, and none of it logged.
+   */
+  function promptFacts(): PromptHostFacts {
+    const mains = agg.mainEntries()
+    const tree = latestVm?.agents ?? null
+    const hook = hookMirror.entries()
+    return {
+      trusted: vscode.workspace.isTrusted,
+      settled: !(scanning || replayRun !== null),
+      sessions: (projectDir) => folderSessions(projectDir, mains, tree)
+        .map((s) => ({ ...s, hookWait: hookPermissionOpen(hook.get(hookKey(s.sessionId, null)) ?? null, s.lastTs) })),
+    }
+  }
 
   /** The quota readings and their forecasts for this frame; false when they could not be read. */
   function readQuotas(now: number): boolean {
@@ -690,20 +731,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       void vscode.commands.executeCommand(m.id)
       return
     }
-    // 1.10 §0a.2: the Prompts section's operations — applied to prompts.json, answered by the next push (the
-    // list as it is now, or the flash that says why nothing was saved). No view state changes.
-    if (m.type === 'promptSave' || m.type === 'promptDelete' || m.type === 'promptMove') {
+    // 1.10 §0a.2: the Prompts section's four messages — only while the section is listed (Review 1b F8: a page
+    // drawn before the section was taken out cannot change the list or type anything); the palette's
+    // *Restore Default Prompts* is a command and not gated.
+    if (m.type === 'promptSave' || m.type === 'promptDelete' || m.type === 'promptMove' || m.type === 'promptSend') {
+      if (!cfg.dashboard.sections.includes('prompts')) {
+        log.info('Prompts: an operation was dropped (the section is not listed)')
+        return
+      }
+      // 1.10 A3: the send flow — the reader's click on that entry; the text is the entry's as read at the send,
+      // never the page's. Its outcome is the section's flash, pushed when the flow ends.
+      if (m.type === 'promptSend') {
+        void prompts.send(m.id, promptFacts).then(() => { if (!disposed) render(true) },
+          (err) => log.error(`Sending a prompt failed: ${errorKind(err)}`))
+        return
+      }
+      // Save, delete, move — applied to prompts.json, answered by the next push (the list as it is now, or the
+      // flash that says why nothing was saved). No view state changes.
       const op: PromptOp = m.type === 'promptSave' ? { op: 'save', id: m.id, title: m.title, text: m.text }
         : m.type === 'promptDelete' ? { op: 'delete', id: m.id }
           : { op: 'move', id: m.id, dir: m.dir }
       prompts.apply(op)
       render(true)
-      return
-    }
-    // The send path comes with P4 (§3 A3): until then a send the page asks for is dropped, and the log says
-    // so — without the entry's words.
-    if (m.type === 'promptSend') {
-      log.info('Prompts: a send was dropped (this build does not send yet).')
       return
     }
     // The gear of a section header: the settings editor, filtered to the settings that
@@ -1704,9 +1753,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     } else if (r.result === 'readOnly') {
       void vscode.window.showInformationMessage(t('Token Pace: prompts.json cannot be read; nothing was restored.'))
     } else if (r.result === 'full') {
-      void vscode.window.showWarningMessage(t('Token Pace: {0}', t('the list is full (at most {0} prompts)', PROMPTS_MAX)))
+      void vscode.window.showWarningMessage(t('Token Pace: the list is full (at most {0} prompts), so nothing was restored.', PROMPTS_MAX))
     } else {
-      void vscode.window.showWarningMessage(t('Token Pace: {0}', t('prompts.json could not be written ({0})', r.error ?? 'error')))
+      void vscode.window.showWarningMessage(t('Token Pace: prompts.json could not be written ({0}); nothing was restored.', r.error ?? 'error'))
     }
     render(true)
   }
@@ -1891,6 +1940,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         dashboard.languageChanged()
         hookDocs.refresh()
       }
+      // 1.10 A3 rule 10: the Prompts section listed or taken out — the watch listens for it, or no longer does.
+      wantPromptTerminals(Date.now())
+      render(true)
+    }),
+
+    // 1.10 A3 rule 10: a workspace trusted while the window is open — the prompt tool may now type, so the
+    // watch listens for it (keep-warm's frame asks for itself); the page's target line follows.
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      if (disposed) return
+      wantPromptTerminals(Date.now())
       render(true)
     }),
   )

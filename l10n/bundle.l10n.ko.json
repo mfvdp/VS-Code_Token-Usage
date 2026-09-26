@@ -218,7 +218,6 @@
   "Keep it and chain Token Pace": "유지하고 Token Pace 연결",
   "Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.": "웜 유지가 이 세션에 닿을 수 없습니다: 이 창의 VS Code 터미널에서 실행되고 있지 않습니다.",
   "Keep-warm line for this session in {0} s — cancel it in the status bar.": "이 세션의 웜 유지 문구가 {0} s 후 전송됩니다 — 상태 표시줄에서 취소할 수 있습니다.",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "{0}의 웜 유지 문구가 {1}초 후 전송됩니다. 활성화하면 취소됩니다",
   "Keep-warm requests (keepwarm.json)": "웜 유지 요청(keepwarm.json)",
   "Keep-warm requests today: {0} · {1} tokens": "오늘의 웜 유지 요청: {0} · {1} 토큰",
   "Keep-warm stopped for this session: the last line got no answer within two minutes.": "이 세션의 웜 유지가 중지되었습니다: 마지막 문구에 2분 안에 응답이 없었습니다.",

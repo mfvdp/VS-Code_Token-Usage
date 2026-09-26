@@ -20,7 +20,6 @@
   "Fetch failed": "Getirme başarısız",
   "For the four hook events below, Claude Code starts Token Pace's script with `node` and hands it the event as JSON. The script reads four fields of it — `hook_event_name`, `session_id`, `agent_id` and `notification_type` — and appends one line to `agent-hook.jsonl` in Token Pace's storage, with six fields: `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`. Nothing else of the event is read: no message, no prompt, no tool input or result, no path.": "Aşağıdaki dört kanca olayında Claude Code, Token Pace'in betiğini `node` ile başlatır ve olayı ona JSON olarak iletir. Betik olayın dört alanını okur — `hook_event_name`, `session_id`, `agent_id` ve `notification_type` — ve Token Pace'in depolamasındaki `agent-hook.jsonl` dosyasına altı alanlı bir satır ekler: `v`, `ts`, `event`, `sessionId`, `agentId` ve `wait`. Olayın başka hiçbir kısmı okunmaz: ne mesaj, ne istem, ne araç girdisi ya da sonucu, ne de bir yol.",
   "Keep it and chain Token Pace": "Koru ve Token Pace'i zincire ekle",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "{0} için sıcak tutma satırı {1} saniye sonra; iptal etmek için etkinleştirin",
   "Last month": "Geçen ay",
   "Last {0} days": "Son {0} gün",
   "Later": "Daha sonra",

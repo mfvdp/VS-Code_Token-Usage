@@ -336,6 +336,11 @@ export const READ_CONTRACT = [
     fields: ['cwd'], pages: PROMPTS_PAGES },
   { what: 'prompts: that folder\'s path', source: 'VS Code\'s shell integration', file: 'src/terminalWatch.ts', kind: 'fields', body: 'function reportedCwd(', variable: 'dir',
     fields: ['fsPath'], pages: PROMPTS_PAGES },
+  // 1.10 §0a.4 (P4): the second write into another program's input — of the terminal only `sendText`: the text of
+  // the prompt the reader double-clicked, then (§7a's probe) the Enter alone after PROMPT_ENTER_DELAY_MS. Nothing is
+  // read back.
+  { what: 'prompts: the prompt typed', source: 'VS Code\'s shell integration', file: 'src/promptsHost.ts', kind: 'fields', body: 'function typePrompt(', variable: 'terminal',
+    fields: ['sendText'], pages: PROMPTS_PAGES },
   // 1.10 §0a.1 (P3): the reader's prompt list in the extension's storage, read back by its shape — the
   // version and the list, of an entry its id and, where the reader wrote them, its title and text; any
   // other key makes the file unreadable, never repaired. The titles and texts are the reader's own words:

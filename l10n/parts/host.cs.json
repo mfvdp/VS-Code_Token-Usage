@@ -20,7 +20,6 @@
   "Fetch failed": "Načtení selhalo",
   "For the four hook events below, Claude Code starts Token Pace's script with `node` and hands it the event as JSON. The script reads four fields of it — `hook_event_name`, `session_id`, `agent_id` and `notification_type` — and appends one line to `agent-hook.jsonl` in Token Pace's storage, with six fields: `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`. Nothing else of the event is read: no message, no prompt, no tool input or result, no path.": "U čtyř událostí hooku níže spustí Claude Code skript Token Pace pomocí `node` a předá mu událost jako JSON. Skript z ní čte čtyři pole — `hook_event_name`, `session_id`, `agent_id` a `notification_type` — a připojí jeden řádek do `agent-hook.jsonl` v úložišti Token Pace, se šesti poli: `v`, `ts`, `event`, `sessionId`, `agentId` a `wait`. Nic jiného z události se nečte: žádná zpráva, žádný prompt, žádný vstup ani výsledek nástroje, žádná cesta.",
   "Keep it and chain Token Pace": "Ponechat a připojit Token Pace",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "Řádek udržování v teple pro {0}, zbývající sekundy: {1}, aktivací se zruší",
   "Last month": "Minulý měsíc",
   "Last {0} days": "Posledních {0} dní",
   "Later": "Později",

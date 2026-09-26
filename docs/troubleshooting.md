@@ -158,6 +158,57 @@ started —, in these words:
   is never left behind: it holds the line back until it has finished its turn or that terminal's
   `claude` is started again.
 
+## A prompt was not sent
+
+A double-click in the dashboard's [Prompts](prompts.md) section types a prompt only after its checks
+([When Token Pace does not send, or asks first](prompts.md#when-token-pace-does-not-send-or-asks-first)).
+A check that never lets it go shows a message, *Token Pace: the prompt was not sent. …*, and the section
+says *Not sent: …*; one that asks first shows *Send “…” anyway?* The log names the check —
+`Prompts: not sent (hookWait)` —, in these words:
+
+* **`restricted`** — the workspace is in Restricted Mode, where Token Pace types nothing into a terminal.
+  Trust the workspace (*Manage Workspace Trust*); the list itself can be edited either way.
+* **`reading`** — Token Pace is reading the transcripts: the first scan after the window opened (the
+  status bar says *Reading token history …*), a re-read, or the one-time replay for the Agents tables
+  after an update. Send again once it is done.
+* **`noTerminal`** — no terminal of this window runs Claude Code or Codex as VS Code's shell integration
+  reports it, or the terminal closed before the prompt went. Start `claude` (or `codex`) in a VS Code
+  terminal with shell integration. Claude Code in the Claude Code extension's own panel cannot be
+  reached, nor can a terminal of another window or one without shell integration.
+* **`codex`** — asks first, every time: Token Pace reads nothing of a Codex session, so it cannot tell
+  whether Codex waits for an approval. Look at the terminal; *Send anyway* when Codex is idle.
+* **`unknownFolder`** — asks first: VS Code reports no folder for that terminal, so no session can be tied
+  to it. *Send anyway* after a look at the terminal, or start Claude Code again in a terminal with shell
+  integration.
+* **`hookWait`** — the [agent hook](agents.md#the-agent-hook) reports a permission request open in a
+  session of that folder: the text and Enter would answer it. Answer it in Claude Code, then send again.
+* **`unknownStart`** — asks first: Token Pace did not see Claude Code start in that terminal — it was
+  started before the window was reloaded, or before the Prompts section was added. Restart Claude Code in
+  that terminal for the full check, or *Send anyway* after a look at it.
+* **`noSession`** — Claude Code in that terminal has not written a line since it started: it may still
+  show a dialog of its own — whether to trust the folder (Enter would pick the highlighted *No, exit*),
+  signing in, the list of `--resume` —, and a prompt would answer it and be lost. Type the first message
+  in the terminal yourself; once Claude Code has answered it, the section can send.
+* **`openTool`, `notIdle`** — ask first: Claude Code is at work there, or waits for your answer in a
+  permission dialog or a question — its transcript cannot tell which —, or its last reply was cut off or
+  paused. Look at the terminal: answer a dialog first; while it works, *Send anyway* hands the prompt to
+  Claude Code, which takes what is typed during a turn after it.
+* **`agentRunning`** — asks first: an agent of that session is running, and its end can wake the
+  conversation. *Send anyway*, or wait for the agent.
+* **`otherSession`** — asks first: another session of the same folder is at work or waits for an answer —
+  a terminal is known by its folder, not by its session, so the prompt could reach that one. It stops
+  asking once that session has finished its turn, or has been left behind: no agent of it running, and
+  its newest line at least 2 hours old and older than the moment this terminal's `claude` started.
+
+When nothing happened at all: a send while another is under way — its terminal pick or its question open,
+or less than a second after the last one — is dropped, and the log says `Prompts: a send was dropped
+(another one is under way)`; a page drawn before `prompts` was taken out of `tokenPace.dashboard.sections`
+changes nothing, and the log says `Prompts: an operation was dropped (the section is not listed)`. When
+the text stayed in Claude Code's input line without being sent, press Enter there: Token Pace types the
+Enter 200 milliseconds after the text, and not at all when the window closed in between. *Not sent: The
+terminal did not take the text.* means VS Code refused the text — the terminal had gone; the log names the
+error's kind.
+
 ## The language
 
 The language of Token Pace's own texts is the setting `tokenPace.language`, which the flag at the top

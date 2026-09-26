@@ -50,6 +50,8 @@ export interface RecordedMessage {
   kind: 'info' | 'warning' | 'error'
   text: string
   actions: string[]
+  /** 1.10 P4: the message's options where it had some — `modal` and `detail` of a modal dialog. */
+  options?: Record<string, unknown>
 }
 
 /** One `showQuickPick` call: what it offered, so a test can assert the list itself. */
@@ -64,6 +66,8 @@ export interface RecordedQuickPick {
  * the output of an execution (`read()`); `sendText` records every call in `FakeVscodeState.sent`.
  * 1.10 P2 (§0a.3): the folder the shell integration reports (`shellIntegration.cwd`, set by `openTerminal`'s
  * `cwd`), and a count of every read of `creationOptions` and `processId`, which Token Pace never reads.
+ * 1.10 P4: `show` records every call in `FakeVscodeState.shown`; a terminal made with `refuse` throws from
+ * `sendText`, as a terminal VS Code no longer takes text for would.
  */
 export interface FakeTerminal {
   readonly name: string
@@ -73,7 +77,7 @@ export interface FakeTerminal {
   readonly processId: Promise<number | undefined>
   readonly exitStatus: undefined
   sendText(text: string, shouldExecute?: boolean): void
-  show(): void
+  show(preserveFocus?: boolean): void
   hide(): void
   dispose(): void
   /** The fake's own handle on the state above, for a test to set what VS Code would report. */
@@ -121,7 +125,10 @@ export interface FakeVscodeState {
    * nothing is written to disk from a test.
    */
   writes: Array<{ path: string; text: string }>
-  /** Answers `showQuickPick` / `showInformationMessage` hand out, oldest first. */
+  /**
+   * Answers `showQuickPick` / `showInformationMessage` hand out, oldest first. 1.10 P4: an answer that is a
+   * function is called with the items a `showQuickPick` offers, and its result is the pick.
+   */
   answers: unknown[]
   settings: Map<string, unknown>
   webviewProviders: Map<string, unknown>
@@ -158,6 +165,13 @@ export interface FakeVscodeState {
   terminals: FakeTerminal[]
   /** 1.8 B2: every `sendText` call, in order — the spy of §3 B2 test 8. */
   sent: Array<{ terminal: FakeTerminal; text: string; execute: boolean | undefined }>
+  /** 1.10 P4: every terminal `show` call, in order — `preserveFocus` as it was passed. */
+  shown: Array<{ terminal: FakeTerminal; preserveFocus: boolean | undefined }>
+  /**
+   * 1.10 P4: `vscode.workspace.isTrusted` — true unless a test says otherwise; `true` after `false` fires
+   * `onDidGrantWorkspaceTrust`, as VS Code does when the reader trusts the workspace. `reset()` trusts it.
+   */
+  setTrusted(trusted: boolean): void
   /** 1.8 B2: how often a terminal's `name` was read (must stay 0), and an execution's output (`read()`). */
   nameReads: number
   outputReads: number
@@ -168,7 +182,7 @@ export interface FakeVscodeState {
    * `cwd` — the folder the shell integration reports for it; `integration: false` — a terminal without
    * shell integration (`shellIntegration` undefined).
    */
-  openTerminal(o?: { shell?: string; name?: string; cwd?: string | null; integration?: boolean }): FakeTerminal
+  openTerminal(o?: { shell?: string; name?: string; cwd?: string | null; integration?: boolean; refuse?: boolean }): FakeTerminal
   /** 1.8 B2: fires `onDidStartTerminalShellExecution` for a command in a terminal; the execution stays open. */
   startExecution(terminal: FakeTerminal, o: { commandLine: string; confidence?: number; cwd?: string | null }): FakeExecution
   /** 1.8 B2: fires `onDidEndTerminalShellExecution`. */
@@ -298,6 +312,9 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   // 1.8 B2 (P10): the window's terminals, its active terminal, its focus and the four terminal events.
   const terminals: FakeTerminal[] = []
   const sent: Array<{ terminal: FakeTerminal; text: string; execute: boolean | undefined }> = []
+  const shown: Array<{ terminal: FakeTerminal; preserveFocus: boolean | undefined }> = []
+  const trustListeners: Array<(e: void) => void> = []
+  let trusted = true
   const startListeners: Array<(e: { terminal: FakeTerminal; execution: FakeExecution; shellIntegration: unknown }) => void> = []
   const endListeners: Array<(e: { terminal: FakeTerminal; execution: FakeExecution; shellIntegration: unknown; exitCode: number | undefined }) => void> = []
   const closeListeners: Array<(t: FakeTerminal) => void> = []
@@ -330,7 +347,8 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   }
 
   function record(kind: RecordedMessage['kind'], text: string, actions: unknown[]): Promise<unknown> {
-    messages.push({ kind, text, actions: actions.filter((a): a is string => typeof a === 'string') })
+    const options = actions.find((a): a is Record<string, unknown> => typeof a === 'object' && a !== null && !Array.isArray(a))
+    messages.push({ kind, text, actions: actions.filter((a): a is string => typeof a === 'string'), ...(options ? { options } : {}) })
     return Promise.resolve(nextAnswer())
   }
 
@@ -506,11 +524,10 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       showErrorMessage: (text: string, ...rest: unknown[]): Promise<unknown> =>
         record('error', text, rest),
       showQuickPick: (items: unknown, options: unknown): Promise<unknown> => {
-        quickPicks.push({
-          items: Array.isArray(items) ? (items as Array<Record<string, unknown>>) : [],
-          options: (options ?? {}) as Record<string, unknown>,
-        })
-        return Promise.resolve(nextAnswer())
+        const offered = Array.isArray(items) ? (items as Array<Record<string, unknown>>) : []
+        quickPicks.push({ items: offered, options: (options ?? {}) as Record<string, unknown> })
+        const answer = nextAnswer()
+        return Promise.resolve(typeof answer === 'function' ? (answer as (i: unknown[]) => unknown)(offered) : answer)
       },
       showSaveDialog: (options: unknown): Promise<unknown> => {
         saveDialogs.push((options ?? {}) as Record<string, unknown>)
@@ -526,7 +543,11 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     },
 
     workspace: {
-      isTrusted: true,
+      get isTrusted(): boolean { return trusted },
+      // 1.10 P4: VS Code fires it once the reader trusts the workspace (`setTrusted(true)`).
+      onDidGrantWorkspaceTrust(listener: (e: void) => void): { dispose(): void } {
+        return subscribe(trustListeners, listener)
+      },
       getConfiguration: configuration,
       onDidChangeConfiguration(
         listener: (e: { affectsConfiguration(section: string): boolean }) => void,
@@ -635,6 +656,9 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       // 1.8 B2: no terminal, nothing sent, the window focused, as a fresh window.
       terminals.length = 0
       sent.length = 0
+      shown.length = 0
+      trusted = true
+      trustListeners.length = 0
       startListeners.length = 0
       endListeners.length = 0
       closeListeners.length = 0
@@ -664,10 +688,16 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     },
     terminals,
     sent,
+    shown,
+    setTrusted(value: boolean): void {
+      const granted = value && !trusted
+      trusted = value
+      if (granted) for (const l of [...trustListeners]) l()
+    },
     get nameReads(): number { return reads.name },
     get outputReads(): number { return reads.output },
     get creationReads(): number { return reads.creation },
-    openTerminal(o: { shell?: string; name?: string; cwd?: string | null; integration?: boolean } = {}): FakeTerminal {
+    openTerminal(o: { shell?: string; name?: string; cwd?: string | null; integration?: boolean; refuse?: boolean } = {}): FakeTerminal {
       const shellState = { isInteractedWith: false, shell: o.shell as string | undefined }
       const title = o.name ?? 'bash'
       const cwd = o.cwd === null || o.cwd === undefined ? undefined : { fsPath: o.cwd, scheme: 'file', path: o.cwd }
@@ -679,10 +709,11 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
         get processId(): Promise<number | undefined> { reads.creation++; return Promise.resolve(4242) },
         exitStatus: undefined,
         sendText(text: string, shouldExecute?: boolean): void {
+          if (o.refuse === true) throw Object.assign(new Error(`The terminal ${title} has been disposed`), { name: 'TerminalGone' })
           shellState.isInteractedWith = true
           sent.push({ terminal, text, execute: shouldExecute })
         },
-        show(): void { /* nothing to reveal */ },
+        show(preserveFocus?: boolean): void { shown.push({ terminal, preserveFocus }) },
         hide(): void { /* nothing to hide */ },
         dispose(): void { state.closeTerminal(terminal) },
         setShell(shell: string | undefined): void { shellState.shell = shell },

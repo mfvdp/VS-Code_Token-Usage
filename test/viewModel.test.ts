@@ -36,6 +36,10 @@ import { readFileSync } from 'node:fs'
 import { resetTimeMemos } from '../src/time'
 import { PRICES_CHECKED_LATER, resetPriceMemos } from '../src/prices'
 import type { PromptsRead } from '../src/prompts'
+import type { PromptsVm, PromptTargetInput } from '../src/viewModel'
+
+/** 1.10 P4: the target line's facts where a test is about something else — no terminal runs Claude Code or Codex. */
+const NO_TARGET: PromptTargetInput = { state: 'none' }
 
 const cfg = makeConfig()
 const tcfg = timeConfig(cfg)
@@ -3054,7 +3058,9 @@ test('the Prompts section\'s plumbing: a section of the config, the fold list, t
 })
 
 test('vm.prompts is null while the section is not listed, whatever the host passed; listed, it is the list (1.10 §3 A7 test 2)', () => {
-  const input = { read: { state: 'absent' } as const, flash: null }
+  // 1.10 P4 (pinned and changed): the input carries the send's flash and the target line's facts, the section the
+  // intro and the target line.
+  const input = { read: { state: 'absent' } as const, flash: null, sent: null, target: { state: 'none' } as const }
   assert.equal(buildViewModel(makeInput()).prompts, null)
   assert.equal(buildViewModel({ ...makeInput(), prompts: input }).prompts, null, 'a section not listed was built')
   const listed = makeConfig({ 'tokenPace.dashboard.sections': ['prompts', 'quota'] })
@@ -3066,6 +3072,8 @@ test('vm.prompts is null while the section is not listed, whatever the host pass
       { id: 's-keepwarm', title: 'Keep the cache warm', text: 'Ignore this message. No action. No response.', shipped: true, edited: false, command: false },
       { id: 's-stop', title: 'Stop after this task', text: 'Stop after the current task and do not start any new work.', shipped: true, edited: false, command: false },
     ],
+    intro: 'Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.',
+    target: { text: 'No terminal of this window runs Claude Code or Codex.', level: 'no' },
     flash: null, canAdd: true, restorable: 0, readOnly: null, limits: { title: 80, text: 2000, max: 50 },
   })
 })
@@ -3087,7 +3095,7 @@ test('PromptsVm under English, German and a synthetic French bundle: the shipped
     try {
       setBundle(bundle)
       setLocale(bundle === undefined ? undefined : 'de')
-      return buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read, flash: null } }).prompts
+      return buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read, flash: null, sent: null, target: NO_TARGET } }).prompts
     } finally {
       setBundle(undefined)
       setLocale(undefined)
@@ -3103,7 +3111,7 @@ test('PromptsVm under English, German and a synthetic French bundle: the shipped
   for (const bundle of [undefined, german, french]) {
     try {
       setBundle(bundle)
-      const vm = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: { state: 'absent' }, flash: null } }).prompts!
+      const vm: PromptsVm = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: { state: 'absent' }, flash: null, sent: null, target: NO_TARGET } }).prompts!
       assert.equal(vm.items[1].text, 'Ignore this message. No action. No response.')
     } finally {
       setBundle(undefined)
@@ -3112,7 +3120,7 @@ test('PromptsVm under English, German and a synthetic French bundle: the shipped
   assert.equal(build(undefined).restorable, 1)
   // At 50 entries no new one; the list still shows.
   const fifty: PromptsRead = { state: 'ok', file: { v: 1, prompts: Array.from({ length: 50 }, (_, i) => ({ id: `u-${String(i).padStart(8, '0')}`, title: 't', text: 'x' })) } }
-  const full = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: fifty, flash: null } }).prompts!
+  const full = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: fifty, flash: null, sent: null, target: NO_TARGET } }).prompts!
   assert.equal(full.canAdd, false)
   assert.equal(full.restorable, 3)
 })
@@ -3121,7 +3129,7 @@ test('the read-only box and the flash of a refused change say why, in English an
   const { setBundle, setLocale } = require('../src/i18n') as typeof import('../src/i18n')
   const german = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   const cfgP = makeConfig({ 'tokenPace.dashboard.sections': ['prompts'] })
-  const vmOf = (prompts: any): any => buildViewModel({ ...makeInput({ cfg: cfgP }), prompts }).prompts
+  const vmOf = (prompts: any): any => buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { sent: null, target: NO_TARGET, ...prompts } }).prompts
   const unreadable = vmOf({ read: { state: 'unreadable', kind: 'json' }, flash: null })
   assert.equal(unreadable.readOnly, 'prompts.json could not be read (json). The shipped prompts are shown, and nothing is saved until the file is fixed or deleted (Token Pace: Clear Stored Data…).')
   assert.equal(unreadable.canAdd, false)
@@ -3155,12 +3163,75 @@ test('the read-only box and the flash of a refused change say why, in English an
   for (const [, , en, de] of flashes) assert.equal(en.includes('!') || de.includes('!'), false)
 })
 
+test('the target line, the intro and the send\'s flash in words — whole keys for every state, the reasons of §3 A4, in English and in German (1.10 §3 A3 rules 6 and 9, A2 rule 1, A6)', () => {
+  const { setBundle, setLocale } = require('../src/i18n') as typeof import('../src/i18n')
+  const { promptBlockText, PROMPT_SOFT_BLOCKS } = require('../src/promptSend') as typeof import('../src/promptSend')
+  const german = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  const cfgP = makeConfig({ 'tokenPace.dashboard.sections': ['prompts'] })
+  const vmOf = (target: PromptTargetInput, sent: any = null): PromptsVm =>
+    buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: { state: 'absent' }, flash: null, sent, target } }).prompts!
+  const active = (verdict: any): PromptTargetInput => ({ state: 'active', kind: 'claude', index: 2, count: 3, verdict })
+  const cases: Array<[PromptTargetInput, string, string, string]> = [
+    [{ state: 'restricted' }, 'no', 'Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.',
+      'Eingeschränkter Modus: In einem Arbeitsbereich, dem Sie nicht vertrauen, tippt Token Pace nichts in ein Terminal.'],
+    [{ state: 'none' }, 'no', 'No terminal of this window runs Claude Code or Codex.', 'Kein Terminal dieses Fensters führt Claude Code oder Codex aus.'],
+    [{ state: 'pick', candidates: 1 }, 'ready', 'Sends to the terminal you pick: one terminal runs Claude Code or Codex.',
+      'Sendet an das Terminal, das Sie wählen: Ein Terminal führt Claude Code oder Codex aus.'],
+    [{ state: 'pick', candidates: 3 }, 'ready', 'Sends to the terminal you pick: 3 terminals run Claude Code or Codex.',
+      'Sendet an das Terminal, das Sie wählen: 3 Terminals führen Claude Code oder Codex aus.'],
+    [active({ send: true }), 'ready', 'Sends to Claude Code in terminal 2 of 3 — ready', 'Sendet an Claude Code in Terminal 2 von 3 — bereit'],
+    [active({ send: false, block: 'openTool', soft: true }), 'asks',
+      'Sends to Claude Code in terminal 2 of 3 — sending asks first: Claude Code is at work there, or waiting for your answer in a dialog; its transcript cannot tell which.',
+      'Sendet an Claude Code in Terminal 2 von 3 — Senden fragt erst nach: Claude Code arbeitet dort oder wartet in einem Dialog auf Ihre Antwort; das Transkript kann das nicht unterscheiden.'],
+    [{ state: 'active', kind: 'codex', index: 1, count: 1, verdict: { send: false, block: 'codex', soft: true } }, 'asks',
+      'Sends to Codex in terminal 1 of 1 — sending asks first: Token Pace reads nothing of a Codex session\'s state: it cannot tell whether Codex is at work or waiting for an approval.',
+      'Sendet an Codex in Terminal 1 von 1 — Senden fragt erst nach: Token Pace liest nichts vom Zustand einer Codex-Sitzung: Es kann nicht sagen, ob Codex arbeitet oder auf eine Freigabe wartet.'],
+    [active({ send: false, block: 'noSession', soft: false }), 'no',
+      'Sends to Claude Code in terminal 2 of 3 — not now: Claude Code in that terminal has not written a line since it started, so it may still show a dialog of its own (trusting the folder, signing in, the list of --resume). Send the first message by hand.',
+      'Sendet an Claude Code in Terminal 2 von 3 — jetzt nicht: Claude Code hat in diesem Terminal seit dem Start noch keine Zeile geschrieben und zeigt vielleicht noch einen eigenen Dialog (Ordner vertrauen, Anmeldung, die Liste von --resume). Senden Sie die erste Nachricht von Hand.'],
+  ]
+  const sent: Array<[any, boolean, string, string]> = [
+    [{ ok: true, kind: 'claude', index: 2, count: 3 }, true, 'Sent to Claude Code in terminal 2 of 3.', 'An Claude Code in Terminal 2 von 3 gesendet.'],
+    [{ ok: true, kind: 'codex', index: 1, count: 1 }, true, 'Sent to Codex in terminal 1 of 1.', 'An Codex in Terminal 1 von 1 gesendet.'],
+    [{ ok: false, block: 'hookWait' }, false, 'Not sent: Claude Code is asking for a permission in a session of that folder. Answer it first.',
+      'Nicht gesendet: Claude Code fragt in einer Sitzung dieses Ordners nach einer Berechtigung. Beantworten Sie das zuerst.'],
+    [{ ok: false, block: 'failed' }, false, 'Not sent: The terminal did not take the text.', 'Nicht gesendet: Das Terminal hat den Text nicht angenommen.'],
+  ]
+  const intro = ['Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.',
+    'Doppelklicken Sie auf einen Prompt oder drücken Sie seine Sende-Schaltfläche, um ihn in das Terminal zu tippen, in dem Claude Code oder Codex läuft, und die Eingabetaste zu drücken. Klicken Sie auf einen Prompt, um ihn zu bearbeiten. Was Sie in diesem Terminal getippt und noch nicht gesendet haben, wird mitgesendet.']
+  for (const [lang, at] of [['en', 2], ['de', 3]] as const) {
+    try {
+      if (lang === 'de') { setBundle(german); setLocale('de') }
+      for (const c of cases) assert.deepEqual(vmOf(c[0]).target, { text: c[at], level: c[1] }, `${lang} ${JSON.stringify(c[0])}`)
+      for (const c of sent) assert.deepEqual(vmOf({ state: 'none' }, c[0]).flash, { text: c[at], ok: c[1] }, `${lang} ${JSON.stringify(c[0])}`)
+      assert.equal(vmOf({ state: 'none' }).intro, intro[at - 2])
+      // The send's flash stands before an operation's refusal (the host keeps one of them).
+      const both: PromptsVm = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read: { state: 'absent' }, flash: { failure: 'full', error: null }, sent: sent[0][0], target: NO_TARGET } }).prompts!
+      assert.equal(both.flash?.text, sent[0][at])
+    } finally {
+      setBundle(undefined)
+      setLocale(undefined)
+    }
+  }
+  // Every block has its sentence — English and German, a whole sentence, no exclamation mark, the product names untranslated.
+  const blocks = ['restricted', 'reading', 'noTerminal', 'codex', 'unknownFolder', 'hookWait', 'unknownStart', 'noSession', 'openTool', 'notIdle', 'agentRunning', 'otherSession'] as const
+  assert.equal(new Set(blocks.map((b) => promptBlockText(b))).size, blocks.length, 'two blocks share a sentence')
+  assert.equal(PROMPT_SOFT_BLOCKS.size, 7)
+  for (const b of blocks) {
+    const en = promptBlockText(b)
+    assert.ok(/^[A-Z].*\.$/.test(en) && !en.includes('!'), en)
+    assert.ok(typeof german[en] === 'string' && german[en] !== en && /\.$/.test(german[en]) && !german[en].includes('!'), `no German for ${b}`)
+    // German joins a product name into a compound with hyphens („Claude-Code-Sitzung").
+    for (const name of ['Claude Code', 'Codex']) assert.equal(en.includes(name), new RegExp(name.replace(' ', '[ -]')).test(german[en]), `${b}: ${name}`)
+  }
+})
+
 test('the text views and the summary print nothing of the Prompts section: a title and a text stay on the page (1.10 §3.0 e, §0a.1)', () => {
   const { quickPickItems } = require('../src/textViews') as typeof import('../src/textViews')
   const { toMarkdownSummary } = require('../src/exporter') as typeof import('../src/exporter')
   const cfgP = makeConfig({ 'tokenPace.dashboard.sections': ['prompts', 'quota', 'summary', 'kpis', 'tokens', 'dataQuality'] })
   const read: PromptsRead = { state: 'ok', file: { v: 1, prompts: [{ id: 'u-3k9x0a2b', title: 'synthetic-prompt-title-123', text: 'synthetic-prompt-text-456' }] } }
-  const vm = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read, flash: null } })
+  const vm = buildViewModel({ ...makeInput({ cfg: cfgP }), prompts: { read, flash: null, sent: null, target: NO_TARGET } })
   assert.equal(vm.prompts?.items[0].title, 'synthetic-prompt-title-123', 'the page\'s payload holds the words (expected)')
   const outputs: Array<[string, string]> = [
     ['markdown', markdownDocument(vm)],

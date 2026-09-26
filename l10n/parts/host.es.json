@@ -20,7 +20,6 @@
   "Fetch failed": "Error en la consulta",
   "For the four hook events below, Claude Code starts Token Pace's script with `node` and hands it the event as JSON. The script reads four fields of it — `hook_event_name`, `session_id`, `agent_id` and `notification_type` — and appends one line to `agent-hook.jsonl` in Token Pace's storage, with six fields: `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`. Nothing else of the event is read: no message, no prompt, no tool input or result, no path.": "En los cuatro eventos de hook de abajo, Claude Code inicia el script de Token Pace con `node` y le pasa el evento como JSON. El script lee cuatro de sus campos — `hook_event_name`, `session_id`, `agent_id` y `notification_type` — y añade una línea a `agent-hook.jsonl` en el almacenamiento de Token Pace, con seis campos: `v`, `ts`, `event`, `sessionId`, `agentId` y `wait`. No se lee nada más del evento: ningún mensaje, ningún prompt, ninguna entrada ni resultado de herramienta, ninguna ruta.",
   "Keep it and chain Token Pace": "Conservarlo y encadenar Token Pace",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "Línea para mantener caliente {0} en {1} segundos; active para cancelar",
   "Last month": "Mes pasado",
   "Last {0} days": "Últimos {0} días",
   "Later": "Más tarde",

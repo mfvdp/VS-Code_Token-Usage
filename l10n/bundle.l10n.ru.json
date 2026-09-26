@@ -218,7 +218,6 @@
   "Keep it and chain Token Pace": "Оставить и добавить Token Pace в цепочку",
   "Keep-warm cannot reach this session: it does not run in a VS Code terminal of this window.": "Подогрев не может достичь этого сеанса: он не работает в терминале VS Code этого окна.",
   "Keep-warm line for this session in {0} s — cancel it in the status bar.": "Строка подогрева для этого сеанса через {0} s — отменить её можно в строке состояния.",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "Строка подогрева для {0} через {1} с, активируйте, чтобы отменить",
   "Keep-warm requests (keepwarm.json)": "Запросы подогрева (keepwarm.json)",
   "Keep-warm requests today: {0} · {1} tokens": "Запросы подогрева сегодня: {0} · токенов: {1}",
   "Keep-warm stopped for this session: the last line got no answer within two minutes.": "Подогрев для этого сеанса остановлен: на последнюю строку не было ответа в течение двух минут.",

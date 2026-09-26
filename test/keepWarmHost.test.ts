@@ -249,7 +249,8 @@ test('a due session arms a 60-second countdown of its own item, the line goes on
   assert.equal(item.name, 'Token Pace — keep-warm countdown')
   assert.equal(item.command, KEEPWARM_CANCEL_COMMAND)
   assert.equal(item.tooltip, `Token Pace will type “${KEEP_WARM_LINE}” into the terminal that runs Session Tue 13:57 · 9d0eb37a and press Enter, so that its prompt cache stays warm. Click to cancel.`)
-  assert.equal(item.accessibilityInformation?.label, 'Keep-warm line for Session Tue 13:57 · 9d0eb37a in 60 seconds, activate to cancel')
+  // 1.10 D8 (pinned and changed): "press to cancel" — the verb a person uses for a control.
+  assert.equal(item.accessibilityInformation?.label, 'Keep-warm line for Session Tue 13:57 · 9d0eb37a in 60 seconds, press to cancel')
   // No colour, no alarm: a countdown, not a warning.
   assert.equal(item.color, undefined)
   assert.equal(item.backgroundColor, undefined)
@@ -257,7 +258,7 @@ test('a due session arms a 60-second countdown of its own item, the line goes on
   // It counts down each second.
   r.tick(NOW + 18 * SEC)
   assert.equal(r.item()?.text, '$(watch) keep warm in 42 s · cancel')
-  assert.equal(r.item()?.accessibilityInformation?.label, 'Keep-warm line for Session Tue 13:57 · 9d0eb37a in 42 seconds, activate to cancel')
+  assert.equal(r.item()?.accessibilityInformation?.label, 'Keep-warm line for Session Tue 13:57 · 9d0eb37a in 42 seconds, press to cancel')
   assert.equal(r.state.sent.length, 0, 'a line before the countdown ended')
   // At zero: the line, once, into the terminal the countdown was armed for.
   run(r, NOW + 19 * SEC, NOW + KEEPWARM_COUNTDOWN_MS)
@@ -665,7 +666,8 @@ test('the countdown item speaks German with a German bundle', () => {
   assert.equal(item?.text, '$(watch) Warmhalten in 60 s · abbrechen')
   assert.equal(item?.name, 'Token Pace — Warmhalte-Countdown')
   assert.equal(item?.tooltip, `Token Pace tippt „${KEEP_WARM_LINE}“ in das Terminal, in dem Sitzung Di 13:57 · 9d0eb37a läuft, und drückt die Eingabetaste, damit der Prompt-Cache warm bleibt. Zum Abbrechen klicken.`)
-  assert.equal(item?.accessibilityInformation?.label, 'Warmhalte-Zeile für Sitzung Di 13:57 · 9d0eb37a in 60 Sekunden, zum Abbrechen aktivieren')
+  // 1.10 D8 (pinned and changed): „zum Abbrechen drücken".
+  assert.equal(item?.accessibilityInformation?.label, 'Warmhalte-Zeile für Sitzung Di 13:57 · 9d0eb37a in 60 Sekunden, zum Abbrechen drücken')
   run(r, NOW + SEC, NOW + KEEPWARM_COUNTDOWN_MS - SEC)
   inGerman(() => r.tick(NOW + KEEPWARM_COUNTDOWN_MS))
   assert.equal(r.item()?.text, '$(watch) Warmhalte-Zeile gesendet')
@@ -1083,7 +1085,7 @@ test('G14 at the send stage: a countdown armed, then a scan or a replay begins �
 // 1.10 A3 rule 8 · keep-warm yields to a prompt typed into its terminal
 // ---------------------------------------------------------------------------
 
-test('yieldTo: a countdown armed for that very terminal ends without its line, its item gone, the log says so; another terminal\'s countdown stays (1.10 §3 A3 rule 8)', () => {
+test('yieldTo: a countdown armed for that very terminal ends without its line, its item gone, the log says so; another terminal\'s countdown stays; keep-warm is cancelled for the idle phase until the session\'s next request (1.10 §3 A3 rule 8, Review 1a F2)', () => {
   const r = rig()
   assert.equal(r.host.yieldTo(terminalOf(r) as never), false, 'nothing to yield without a countdown')
   r.tick(NOW)
@@ -1098,12 +1100,22 @@ test('yieldTo: a countdown armed for that very terminal ends without its line, i
   assert.equal(r.host.view(NOW + SEC, tcfg).armed, null)
   assert.ok(r.logs.includes('info keep-warm: not sent (a prompt was typed into its terminal)'), r.logs.join(' | '))
   assert.equal(r.host.yieldTo(terminalOf(r) as never), false, 'yielded twice')
-  // The prompt's request lands in the transcript (the user's line newest): no line at the old zero.
-  r.w.line(promptLine({ ts: NOW + 2 * SEC }))
-  run(r, NOW + 2 * SEC, NOW + KEEPWARM_COUNTDOWN_MS + 5 * SEC)
-  assert.deepEqual(r.state.sent, [], 'the keep-warm line went on top of the prompt')
-  // The phase is not marked cancelled (§3.0 b): the log never names `cancelled`.
-  assert.doesNotMatch(r.logs.join('\n'), /\(cancelled\)|cancelled for session/)
+  // 1.10 Review 1a F2 (pinned and changed — rule 8 said the phase is not cancelled): the idle phase is cancelled.
+  // A prompt that wrote no line and made no request — it answered a dialog, or Claude Code dropped it — is not
+  // followed by a fresh countdown for the same session, however long the frames run.
+  run(r, NOW + SEC, NOW + KEEPWARM_COUNTDOWN_MS + 5 * SEC)
+  assert.deepEqual(r.state.sent, [], 'the keep-warm line went after the prompt')
+  assert.equal(r.item(), undefined, 'a fresh countdown started for the same session')
+  assert.match(r.logs.join('\n'), /debug keep-warm: session 9d0eb37a not armed \(cancelled\)/)
+  // The prompt's reply — a counted request of the session — starts a new idle phase: once due again, a countdown.
+  const reply = NOW + KEEPWARM_COUNTDOWN_MS + 10 * SEC
+  r.w.reply(reply)
+  r.w.readings[0] = { ...r.w.readings[0], expiresAt: reply + HOUR, readAt: Math.floor((reply + SEC) / 1000) }
+  run(r, reply + SEC, reply + 5 * SEC)
+  assert.match(r.logs.join('\n'), /debug keep-warm: a request of session 9d0eb37a starts a new idle phase/)
+  r.state.fireWindowState(false)
+  run(r, reply + HOUR - 170 * SEC, reply + HOUR - 168 * SEC)
+  assert.ok(r.item(), 'no countdown in the new idle phase')
 })
 
 // ---------------------------------------------------------------------------

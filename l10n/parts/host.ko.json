@@ -20,7 +20,6 @@
   "Fetch failed": "가져오기 실패",
   "For the four hook events below, Claude Code starts Token Pace's script with `node` and hands it the event as JSON. The script reads four fields of it — `hook_event_name`, `session_id`, `agent_id` and `notification_type` — and appends one line to `agent-hook.jsonl` in Token Pace's storage, with six fields: `v`, `ts`, `event`, `sessionId`, `agentId` and `wait`. Nothing else of the event is read: no message, no prompt, no tool input or result, no path.": "아래 네 가지 훅 이벤트가 발생하면 Claude Code가 Token Pace의 스크립트를 `node`로 시작하고 이벤트를 JSON으로 전달합니다. 스크립트는 그중 네 필드 — `hook_event_name`, `session_id`, `agent_id`, `notification_type` — 만 읽고, Token Pace 저장소의 `agent-hook.jsonl`에 여섯 필드 `v`, `ts`, `event`, `sessionId`, `agentId`, `wait`로 된 줄 하나를 추가합니다. 이벤트의 다른 내용은 읽지 않습니다. 메시지, 프롬프트, 도구 입력이나 결과, 경로 모두 읽지 않습니다.",
   "Keep it and chain Token Pace": "유지하고 Token Pace 연결",
-  "Keep-warm line for {0} in {1} seconds, activate to cancel": "{0}의 웜 유지 문구가 {1}초 후 전송됩니다. 활성화하면 취소됩니다",
   "Last month": "지난달",
   "Last {0} days": "최근 {0}일",
   "Later": "나중에",

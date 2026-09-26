@@ -100,8 +100,131 @@ prompt.` —, never its words. `prompts.json` is not part of VS Code's Settings 
 export and no import. *Clear Stored Data…* lists it as *Prompts (prompts.json)* with the number of
 prompts it holds; deleting it returns the list to the three shipped prompts.
 
-To find the terminal a prompt goes into, Token Pace reads what VS Code's shell integration reports about
-the terminals of the window — the facts the keep-warm line reads — and, for a terminal whose Claude Code
-or Codex started before Token Pace began to listen, the folder the shell reports: of the terminal its
-`shellIntegration`, of that the `cwd`, of that the `fsPath`, compared with the folders of the sessions
-and kept by no one. [Privacy](privacy.md) lists every field.
+## Sending
+
+A double-click on a prompt — or its send button, or Ctrl+Enter (⌘+Enter on a Mac) on it — sends it: Token
+Pace types the prompt's text into the terminal that runs Claude Code or Codex and presses Enter. It is
+always your action on that prompt at that moment: nothing is sent by a timer, a command, a link or a
+notification. At most one prompt goes per second (`PROMPT_SEND_MIN_GAP_MS`, 1000 ms), and never while the
+terminal pick or the question below is open — a key held down, a triple click or a second double-click
+while the first send is under way sends once; the log then says `Prompts: a send was dropped (another one
+is under way)`. The text is the prompt as the list holds it at that moment, read from `prompts.json` (or,
+for an unedited shipped prompt, its words in the language of now): the dashboard page only names the
+prompt and never hands over a text of its own.
+
+The text and the Enter are two writes (`sendText`): the text first, then, 200 milliseconds later
+(`PROMPT_ENTER_DELAY_MS`), the Enter alone. Typed in one piece with its Enter, a longer text does not go:
+Claude Code takes such a chunk as pasted text and keeps the Enter as a line break — a 119-character prompt
+stayed in its input box that way, unsent —, while the Enter typed on its own sends it. Should the window
+close between the two writes, the Enter is not typed: the text then waits in the input line.
+
+**Anything you typed in that terminal and did not send goes with the prompt.** Token Pace cannot read a
+terminal's input, so a half-typed line there and the prompt go out as one message. The section's first
+line says so, always, and so does the question below.
+
+After the send the terminal is shown and the keyboard stays on the dashboard; the section says *Sent to
+Claude Code in terminal 2 of 3.* for ten seconds, and a screen reader hears it once. The log says
+`Prompts: sent a prompt to Claude Code in terminal 2 of 3` — never a title or a text. Nothing is read back
+from the terminal: not its output, not what Claude Code or Codex shows. When VS Code does not take the
+text — the terminal has gone —, the section says *Not sent: The terminal did not take the text.*
+
+The *Keep the cache warm* prompt types the [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in)
+by hand: it is your own request and is not counted in `keepwarm.json`. A keep-warm countdown running for
+the terminal a prompt goes into ends without its line, and keep-warm waits for that session's next
+request, as after a click on the countdown — your prompt is already on its way.
+
+A prompt that starts with `/` is a slash command for Claude Code. Typed into an idle Claude Code in a test,
+`/loop 30m Ignore this message. No action. No response.` became one scheduled task that sends the line
+every 30 minutes for as long as that Claude Code session runs; Claude Code's `/exit` then asks whether to
+stop it. Every such line is a real request on your usage.
+
+## Which terminal
+
+A prompt goes into a terminal of this VS Code window that runs Claude Code or Codex — never another
+terminal, never a terminal of another window, and never Claude Code in the Claude Code extension's own
+panel, which no extension can type into. When the active terminal (the one that has the focus, or had it
+last) runs Claude Code or Codex, the prompt goes there. Otherwise Token Pace offers a pick of exactly the
+terminals that do, in their order, each named by its place in the window's list of terminals — *Claude
+Code — terminal 2 of 3* — with *ready*, *sending asks first* or *not now* beside it and the reason under
+it; Escape sends nothing. A terminal's name is never read: Claude Code sets it to a summary of the
+conversation.
+
+The section's second line says where a prompt would go now: *Sends to Claude Code in terminal 2 of 3 —
+ready*, *Sends to Claude Code in terminal 2 of 3 — sending asks first: …* or *… — not now: …* with the
+reason, *Sends to the terminal you pick: 2 terminals run Claude Code or Codex.*, or *No terminal of this
+window runs Claude Code or Codex.* It follows the terminals as they open, close, become active and start
+or end a program.
+
+Token Pace knows such a terminal from VS Code's shell integration only — the facts the keep-warm line
+reads: a command that started in the terminal and has not ended, whose command line starts with `claude`
+or `codex` (a path ending in either, `claude.exe`, `codex.exe`), reported with medium or high confidence,
+and VS Code's own word for what runs in the terminal, `claude` or `codex`; a terminal VS Code reports
+another program in (`bash`, `pwsh` …) never counts, whatever ran there before. It listens to those facts
+while the Prompts section is listed and the workspace is trusted (or while the keep-warm line may act),
+and to nothing otherwise. A terminal without shell integration is never offered. For a terminal whose
+Claude Code or Codex started before Token Pace began to listen — before a window reload, or before you
+added the section — there is no start to go by; VS Code still says what runs there, and for the folder
+Token Pace reads the one the shell reports: of the terminal its `shellIntegration`, of that the `cwd`, of
+that the `fsPath`, compared with the folders of the sessions and kept by no one. Such a terminal asks
+first, because Token Pace did not see Claude Code start there: restart Claude Code in it after a reload
+for the full check. [Privacy](privacy.md) lists every field.
+
+Codex is recognised by the same rule — VS Code names its shell `codex` as it names Claude Code's `claude`
+— but sending was tried with Claude Code only (2.1.282 and 2.1.283), not with Codex.
+
+## When Token Pace does not send, or asks first
+
+Before anything is typed, Token Pace checks the terminal and — for Claude Code — every session whose
+transcript lies in that terminal's folder, from facts it keeps anyway: a session's first and newest reply,
+how the newest ended, whether a line of yours came after it, whether an agent of it runs, and — with the
+[agent hook](agents.md#the-agent-hook) installed — whether a permission request is open. Of a Codex
+session it reads nothing. The first check that fails decides. Where Token Pace knows a send is unsafe it
+does not send and says why — a message, *Token Pace: the prompt was not sent. …*, and the section's
+*Not sent: …* —; the log names the check's code, `Prompts: not sent (hookWait)`. Where the transcript
+cannot tell Claude Code at work from Claude Code waiting in a dialog, it asks first: *Send “Status table”
+anyway?*, with the reason and *If Claude Code is showing a permission dialog or a question there, the text
+and Enter would answer it. Text typed in that terminal and not sent yet goes with it.* (for Codex: *If
+Codex is waiting for an approval there, the text and Enter would answer it. …*). *Send anyway* sends —
+after every check has run once more on the facts of that moment; a check that now says never still
+stops it. Nothing of your answer is kept: the next send asks again.
+
+| Check | Sends | What Token Pace says |
+|---|---|---|
+| `restricted` | never | *Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.* |
+| `reading` | never | *Token Pace is reading the transcripts; try again in a moment.* |
+| `noTerminal` | never | *No terminal of this window runs Claude Code or Codex (VS Code's shell integration reports none).* |
+| `codex` | asks first | *Token Pace reads nothing of a Codex session's state: it cannot tell whether Codex is at work or waiting for an approval.* |
+| `unknownFolder` | asks first | *VS Code reports no folder for that terminal, so Token Pace cannot tell which session runs there.* |
+| `hookWait` | never | *Claude Code is asking for a permission in a session of that folder. Answer it first.* |
+| `unknownStart` | asks first | *Token Pace did not see Claude Code start in that terminal, so it cannot tell which session runs there.* |
+| `noSession` | never | *Claude Code in that terminal has not written a line since it started, so it may still show a dialog of its own (trusting the folder, signing in, the list of --resume). Send the first message by hand.* |
+| `openTool` | asks first | *Claude Code is at work there, or waiting for your answer in a dialog; its transcript cannot tell which.* |
+| `notIdle` | asks first | *Claude Code's last reply there did not end its turn.* |
+| `agentRunning` | asks first | *An agent of that session is running.* |
+| `otherSession` | asks first | *Another Claude Code session of the same folder is at work or waiting for an answer.* |
+
+In words: in Restricted Mode nothing is typed (the list can still be edited); while Token Pace reads the
+transcripts — the first scan after the window opened, a re-read, the replay for the Agents tables — the
+sessions' records are being rebuilt and no check could be trusted; a permission request the agent hook
+saw open would be answered by the text and Enter. A Claude Code that has not written a line since it
+started may still show a dialog of its own, and a text typed into an open dialog answers it and is lost:
+a fresh `claude` showed three such dialogs before its prompt was empty — the question whether to trust
+the folder, with *No, exit* highlighted, so that Enter would end Claude Code, a notice about the terminal,
+a question about browser tools. So the first message after a start is yours to type. A session counts as
+the terminal's when it wrote a line after the terminal's `claude` started — its own, or one it resumed —;
+a Claude Code whose start Token Pace did not see, or whose folder VS Code does not report, cannot be tied
+to a session, and asks first. Then each of those sessions must have finished its turn — its newest reply
+ended it, and no line of yours came after it — with no agent of it running, and every other session of
+the folder must be idle the same way, unless it was left behind: no agent of it running, and its newest
+line at least 2 hours old and older than the moment the terminal's `claude` started (the
+[keep-warm line's](prompt-cache.md#keep-warm-in-a-terminal-opt-in) check 13 does the same). Unlike the
+keep-warm line, a prompt needs no minute of quiet after a reply: you are at the keyboard. A known limit:
+another Claude Code of the same folder that wrote after this terminal's `claude` started counts as the
+terminal's own, so a fresh `claude --resume` list standing in this terminal goes unseen then (the folder
+question cannot stand there: the folder has sessions, so it was trusted before).
+
+*Status table* and *Stop after this task* are meant for a Claude Code at work, so they will usually ask
+first. What Claude Code does with a prompt that comes while it works is its own: it queues what is typed
+during a turn — in a test a prompt typed while Claude Code ran a command was answered afterwards, with
+nothing lost and nothing interrupted. [Troubleshooting](troubleshooting.md#a-prompt-was-not-sent) says
+what to do about each check.

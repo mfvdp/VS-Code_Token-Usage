@@ -320,7 +320,7 @@ in 42 s · cancel`, counting down each second from 60, with no colour and no ala
 what will be typed where — `Token Pace will type “Ignore this message. No action. No response.” into
 the terminal that runs Session Tue 14:20 · 9d0eb37a and press Enter, so that its prompt cache stays
 warm. Click to cancel.` —, and a screen reader hears `Keep-warm line for Session Tue 14:20 · 9d0eb37a
-in 42 seconds, activate to cancel`. **A click cancels** the line and keep-warm for the rest of the
+in 42 seconds, press to cancel`. **A click cancels** the line and keep-warm for the rest of the
 session's idle phase, and so does *Token Pace: Cancel the Keep-Warm Line*. At zero every check runs
 again with the facts of that moment; only if all still hold does the line go, into the terminal the
 countdown was started for, and the item reads `$(watch) keep-warm line sent` for 10 seconds. Every
@@ -329,6 +329,17 @@ line is logged — `keep-warm: line sent to the terminal of session 9d0eb37a; th
 starts one only for the session its own Claude terminal began (checks 7 and 13): of two windows with
 a Claude terminal in the same folder, one whose `claude` started after the session's first reply
 never does.
+
+**A prompt of your own** (1.10). When you send a prompt from the dashboard's [Prompts](prompts.md)
+section into the terminal a countdown runs for, the countdown ends without its line — your request is on
+its way, and a line typed on top of it would be a second one into a busy input line — and keep-warm stops
+for the rest of that session's idle phase, as a click on the countdown stops it: a prompt that answered a
+dialog or never became a request is not followed by a fresh countdown. The log says `keep-warm: not sent
+(a prompt was typed into its terminal)`; the reply to your prompt, a request of the session, starts a new
+idle phase. A countdown for another terminal goes on. The Prompts section's *Keep the cache warm* prompt
+types this very line by hand, as your own request: it is not counted in `keepwarm.json`. The `/loop`
+variant — the line with `/loop 30m` in front, which Claude Code repeats every 30 minutes by itself — is
+a prompt you can make of it there ([Prompts](prompts.md#sending)).
 
 **On the Claude card**, under the session's lines: `Keep-warm line for this session in 42 s — cancel
 it in the status bar.` while a countdown runs; `Keep-warm cannot reach this session: it does not run
@@ -354,10 +365,12 @@ Switching it on asks for consent — a modal warning that names what is typed, w
 the draft that is sent with it, the panel out of reach and the terms passage below; only *Allow
 keep-warm* allows it. A refusal is kept: the question comes again only when you switch the setting
 off and on. Switching it off withdraws the consent, ends a countdown under way without its line, and
-stops Token Pace listening to the terminals at all. A window in the background asks when it is
+stops Token Pace listening to the terminals for it — the window listens on only while the dashboard
+lists the [Prompts](prompts.md#which-terminal) section in a trusted workspace. A window in the background asks when it is
 focused. A Claude Code session started before the setting was on — or before the window opened or
 was reloaded — is not seen until Claude Code is started again in its terminal: the shell integration
-reports a command when it starts. In Restricted Mode no terminal is listened to and no line goes; the
+reports a command when it starts (one started while the window already listened for the Prompts
+section is seen). In Restricted Mode no terminal is listened to and no line goes; the
 consent can still be asked there, and it acts only once the workspace is trusted.
 
 **The terms.** Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms), section
@@ -369,14 +382,16 @@ it; the consent dialog says so, and quotes the passage in English in every langu
 no legal advice: it is a grey zone, and only Anthropic can say otherwise. Every line is also a real
 request — on a subscription it counts against your usage limits.
 
-**What is read and typed.** While the setting is on and allowed, and never otherwise, Token Pace
-takes of VS Code's shell integration: of its events `onDidStartTerminalShellExecution` and
+**What is read and typed.** For the keep-warm line — while the setting is on and allowed, and never
+otherwise — Token Pace takes of VS Code's shell integration: of its events `onDidStartTerminalShellExecution` and
 `onDidEndTerminalShellExecution` the `terminal` and the `execution`; of an execution that has not
 ended its `commandLine` — `value` and `confidence` — and its `cwd` (`fsPath`), tested when a check
 runs and kept by no one; of a terminal its `state`, VS Code's `shell` for it. It writes one thing into
 a terminal: `sendText` with the fixed line and Enter. It reads back `keepwarm.json` by its shape — `v`,
 `days`, and per day `requests` and `tokens`. [Privacy](privacy.md) lists the same, and the read
-contract of `npm run check:privacy` holds both pages to it.
+contract of `npm run check:privacy` holds both pages to it. Since 1.10 one watch of the window's
+terminals holds these facts for the keep-warm line and for the Prompts section alike; it listens while
+either may use them, and to nothing otherwise.
 
 The limits are constants of the code, not settings:
 

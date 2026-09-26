@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 52,
+  "applied": 91,
   "bundle": {
     "{0} rolled-up bucket in this range has no hour left and is not in the profile": {
       "parts": [
@@ -153,16 +153,14 @@
     },
     "the list is full (at most {0} prompts)": {
       "parts": [
-        "model",
-        "host"
+        "model"
       ],
       "state": "translate",
       "why": "the reason after “Not saved: ” (a lower-case continuation), {0} the most prompts the list holds (50) — 1.10 A1; the same words after “Token Pace: ” when Restore Default Prompts finds no room — 1.10 A1"
     },
     "prompts.json could not be written ({0})": {
       "parts": [
-        "model",
-        "host"
+        "model"
       ],
       "state": "translate",
       "why": "the reason after “Not saved: ”, {0} an error code such as EACCES — 1.10 A1; the same words after “Token Pace: ” when Restore Default Prompts cannot write the file — 1.10 A1"
@@ -229,6 +227,265 @@
       ],
       "state": "translate",
       "why": "Clear Stored Data’s name of the prompt list — the file name stays as it is on disk — 1.10 §0a.1"
+    },
+    "Keep-warm line for {0} in {1} seconds, press to cancel": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the countdown item's screen-reader label says the verb a person uses for a control (press), never activate — write your language's own verb for pressing a status-bar item — 1.10 B2 D8"
+    },
+    "Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message (Restricted Mode as VS Code names it in your language) — 1.10 A4 rule 1"
+    },
+    "Token Pace is reading the transcripts; try again in a moment.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message — 1.10 A4 rule 2"
+    },
+    "No terminal of this window runs Claude Code or Codex (VS Code's shell integration reports none).": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message, the product names stay as they are — 1.10 A4 rule 3"
+    },
+    "Token Pace reads nothing of a Codex session's state: it cannot tell whether Codex is at work or waiting for an approval.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message (an approval: what Codex asks the user for before it runs something) — 1.10 A4 rule 4"
+    },
+    "VS Code reports no folder for that terminal, so Token Pace cannot tell which session runs there.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message — 1.10 A4 rule 5"
+    },
+    "Claude Code is asking for a permission in a session of that folder. Answer it first.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message (a permission dialog the agent hook saw open) — 1.10 A4 rule 6"
+    },
+    "Token Pace did not see Claude Code start in that terminal, so it cannot tell which session runs there.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message — 1.10 A4 rule 7"
+    },
+    "Claude Code in that terminal has not written a line since it started, so it may still show a dialog of its own (trusting the folder, signing in, the list of --resume). Send the first message by hand.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message — keep --resume as it is, a command-line option — 1.10 A4 rule 8"
+    },
+    "Claude Code is at work there, or waiting for your answer in a dialog; its transcript cannot tell which.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message — 1.10 A4 rule 9"
+    },
+    "Claude Code's last reply there did not end its turn.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message (a turn: one exchange of the conversation, the word the pages use) — 1.10 A4 rule 9"
+    },
+    "An agent of that session is running.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message — 1.10 A4 rule 10"
+    },
+    "Another Claude Code session of the same folder is at work or waiting for an answer.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "a reason the Prompts section gives for not sending a prompt at once — in the target line, the terminal pick, the modal and the message — 1.10 A4 rule 11"
+    },
+    "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the Prompts section's first line, always shown: how a prompt is sent and edited, and that a draft left in the terminal goes with it (the keep-warm consent's word for it) — 1.10 A2 rule 1"
+    },
+    "Sends to {0} in terminal {1} of {2}": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the start of the section's target line, {0} Claude Code or Codex (never translated), {1} the terminal's place in the window, {2} how many terminals it has — it fills {0} of the three lines below — 1.10 A3 rule 6"
+    },
+    "{0} — ready": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the target line when a prompt would go at once, {0} the line above — 1.10 A3 rule 6"
+    },
+    "{0} — sending asks first: {1}": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the target line when a prompt would go only after Send anyway, {0} the line above, {1} a reason (a whole sentence) — 1.10 A3 rule 6"
+    },
+    "{0} — not now: {1}": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the target line when a prompt would not go, {0} the line above, {1} a reason (a whole sentence) — 1.10 A3 rule 6"
+    },
+    "Sends to the terminal you pick: {0} terminals run Claude Code or Codex.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the target line when the active terminal is none of them, {0} two or more — 1.10 A3 rule 6"
+    },
+    "Sends to the terminal you pick: one terminal runs Claude Code or Codex.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the same line for exactly one such terminal (not the active one) — 1.10 A3 rule 6"
+    },
+    "No terminal of this window runs Claude Code or Codex.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the target line when no terminal of the window runs either — 1.10 A3 rule 6"
+    },
+    "Sent to {0} in terminal {1} of {2}.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the section's flash after a send, {0} Claude Code or Codex, {1} the terminal's place, {2} how many terminals the window has — 1.10 A3 rule 9"
+    },
+    "Not sent: {0}": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the section's flash when a prompt was not sent, {0} a reason (a whole sentence) — 1.10 A3 rule 9"
+    },
+    "The terminal did not take the text.": {
+      "parts": [
+        "model"
+      ],
+      "state": "translate",
+      "why": "the reason after Not sent when VS Code refused to type into the terminal — 1.10 A3 rule 5"
+    },
+    "Send “{0}” to …": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the terminal pick, {0} the prompt's title (the reader's own words) — 1.10 A3 rule 3"
+    },
+    "Pick the terminal that runs Claude Code or Codex": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the placeholder of the terminal pick — 1.10 A3 rule 3"
+    },
+    "{0} — terminal {1} of {2}": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "an item of the terminal pick, {0} Claude Code or Codex (never translated), {1} the terminal's place, {2} how many terminals the window has — 1.10 A3 rule 3"
+    },
+    "ready": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the terminal pick's word for a terminal a prompt would go to at once — 1.10 A3 rule 3"
+    },
+    "sending asks first": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the terminal pick's word for a terminal a prompt would go to only after Send anyway — 1.10 A3 rule 3"
+    },
+    "not now": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the terminal pick's word for a terminal a prompt would not go to now — 1.10 A3 rule 3"
+    },
+    "Send “{0}” anyway?": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the modal that asks before a prompt is sent, {0} the prompt's title — 1.10 A3 rule 4"
+    },
+    "Send anyway": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the modal's one button (VS Code adds Cancel) — 1.10 A3 rule 4"
+    },
+    "If Claude Code is showing a permission dialog or a question there, the text and Enter would answer it. Text typed in that terminal and not sent yet goes with it.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the modal's risk sentence for Claude Code, after the reason — Enter is the key — 1.10 A3 rule 4"
+    },
+    "If Codex is waiting for an approval there, the text and Enter would answer it. Text typed in that terminal and not sent yet goes with it.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the modal's risk sentence for Codex, after the reason — 1.10 A3 rule 4"
+    },
+    "Token Pace: the prompt was not sent. {0}": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the message when a prompt is not sent, {0} a reason (a whole sentence) — 1.10 A3 rule 4"
+    },
+    "Token Pace: the list is full (at most {0} prompts), so nothing was restored.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer of Restore Default Prompts when the list has no room, {0} the most prompts it holds (50) — a whole sentence now — Review 1b F3"
+    },
+    "Token Pace: prompts.json could not be written ({0}); nothing was restored.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer of Restore Default Prompts when the file cannot be written, {0} an error code such as EACCES — a whole sentence now — Review 1b F3"
     }
   },
   "nls": {

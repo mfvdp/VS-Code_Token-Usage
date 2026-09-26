@@ -199,10 +199,12 @@ test('the read contract holds for the shipped sources: every reader names exactl
   // 1.10 P3 (§0a.1, pinned and changed): the prompt list's two rows read src/prompts.ts, where the file's
   // shape is checked.
   const listRow = (what: string): boolean => what === 'prompts: the list file' || what === 'prompts: an entry of the list'
-  const watchRow = (what: string): boolean => (keepWarmRow(what) && !hostRow(what)) || (promptsRow(what) && !listRow(what))
+  // 1.10 P4 (§0a.4, pinned and changed): the prompt typed reads src/promptsHost.ts, where `typePrompt` writes it.
+  const typedRow = (what: string): boolean => what === 'prompts: the prompt typed'
+  const watchRow = (what: string): boolean => (keepWarmRow(what) && !hostRow(what)) || (promptsRow(what) && !listRow(what) && !typedRow(what))
   const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
     : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts'
-      : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : listRow(what) ? 'src/prompts.ts'
+      : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : listRow(what) ? 'src/prompts.ts' : typedRow(what) ? 'src/promptsHost.ts'
         : watchRow(what) ? 'src/terminalWatch.ts' : keepWarmRow(what) ? 'src/keepWarmHost.ts' : 'src/agg.ts'
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, fileOf(row.what), row.what)
   // 1.8 §0a.1 (P4): the mirror's reader, level by level — the envelope, the payload's top-level
@@ -257,10 +259,12 @@ test('the read contract holds for the shipped sources: every reader names exactl
   // that its `cwd`, of that the `fsPath` — in `reportedCwd` and nowhere else.
   // 1.10 §0a.1 (P3): prompts.json read back by its shape — the version and the list, of an entry its id,
   // title and text — in `cleanPromptsFile` and nowhere else.
+  // 1.10 §0a.4 (P4, pinned and changed): the prompt typed — of the terminal `sendText` alone, in `typePrompt`.
   assert.deepEqual(contract.READ_CONTRACT.filter((row) => promptsRow(row.what)).map((row) => [row.what, row.source, row.kind, row.body, row.variable, row.fields]), [
     ['prompts: a terminal\'s shell integration', shell, 'fields', 'function reportedCwd(', 'terminal', ['shellIntegration']],
     ['prompts: the folder VS Code reports for a terminal', shell, 'fields', 'function reportedCwd(', 'si', ['cwd']],
     ['prompts: that folder\'s path', shell, 'fields', 'function reportedCwd(', 'dir', ['fsPath']],
+    ['prompts: the prompt typed', shell, 'fields', 'function typePrompt(', 'terminal', ['sendText']],
     ['prompts: the list file', 'prompts.json', 'fields', 'export function cleanPromptsFile(', 'o', ['v', 'prompts']],
     ['prompts: an entry of the list', 'prompts.json', 'fields', 'export function cleanPromptsFile(', 'e', ['id', 'title', 'text']],
   ])
@@ -456,6 +460,8 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     // 1.10 P3 (pinned and changed): the prompt list's reader as well.
     const promptsSrc = fromRepo('src/prompts.ts')
     writeFileSync(join(dir, 'src', 'prompts.ts'), promptsSrc)
+    // 1.10 P4 (pinned and changed): and the prompt's one write into a terminal.
+    writeFileSync(join(dir, 'src', 'promptsHost.ts'), fromRepo('src/promptsHost.ts'))
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })

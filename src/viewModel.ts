@@ -43,11 +43,13 @@ import {
   PROMPT_TEXT_MAX_CHARS, PROMPT_TITLE_MAX_CHARS, PROMPTS_MAX, PromptOpFailure, PromptsRead, isPromptId, promptEntries,
 } from './prompts'
 import { promptCacheText } from './promptCache'
+import { PromptSendBlock, PromptVerdict, promptBlockText } from './promptSend'
 import { ageMinutes, compact, estimate, extraUsageText, full, originName, percentOf, percentText } from './render'
 import { QuotaHistory } from './quotaHistory'
 import { turnedOver } from './resetRule'
 // Type only: the view model must not pull the file readers of `quotaSources` into its bundle.
 import type { ContextReading, PromptCacheReading } from './quotaSources'
+import type { AgentKind } from './terminalWatch'
 import {
   CHART_SPLITS, CacheEconomyRow, CalendarRows, ChartData, ChartSeries, ChartSplit,
   CompositionEntry, DrillData, HeatmapData, HourSums, HoursData, Kpi, KpiExplain, LocalBlockRow, ModelRow,
@@ -917,19 +919,45 @@ export interface VmInput {
    */
   language?: { resolved: ResolvedLanguage; available: readonly LanguageId[]; vscode?: string }
   /**
-   * 1.10 A (P3): what the Prompts section is built from — `PromptsHost.vmInput(now)`. Given only while the
-   * section is listed in `tokenPace.dashboard.sections` (extension.ts): absent, nothing of prompts.json is
-   * read, and `ViewModel.prompts` is null.
+   * 1.10 A (P3, P4): what the Prompts section is built from — `PromptsHost.vmInput(now, facts)`. Given only
+   * while the section is listed in `tokenPace.dashboard.sections` (extension.ts): absent, nothing of
+   * prompts.json is read, no terminal is looked at for it, and `ViewModel.prompts` is null.
    */
   prompts?: PromptsVmInput
 }
 
-/** 1.10 A (P3): the store as read at this build, and the last operation's refusal while it is shown. */
+/**
+ * 1.10 A (P3, P4): the store as read at this build, where a prompt would go now, and the last operation's
+ * refusal or the last send's outcome while it is shown — at most one of the two.
+ */
 export interface PromptsVmInput {
   read: PromptsRead
   /** Why the last operation was not saved, while PROMPT_FLASH_MS has not passed; `error` the write's error code. */
   flash: { failure: PromptOpFailure; error: string | null } | null
+  /** 1.10 P4 (§3 A3 rule 9): the last send's outcome, while PROMPT_FLASH_MS has not passed. */
+  sent: PromptSentFlash | null
+  /** 1.10 P4 (§3 A3 rule 6): the target line's facts. */
+  target: PromptTargetInput
 }
+
+/**
+ * 1.10 P4 (§3 A3 rule 9): a send's outcome — typed into the terminal at `index` of `count` of the window,
+ * or not sent: a hard block, or `failed` (the terminal did not take the text).
+ */
+export type PromptSentFlash =
+  | { ok: true; kind: AgentKind; index: number; count: number }
+  | { ok: false; block: PromptSendBlock | 'failed' }
+
+/**
+ * 1.10 P4 (§3 A3 rule 6): where a prompt would go now — nowhere in Restricted Mode, no terminal of the
+ * window runs Claude Code or Codex, the active terminal (its place, its program and the decision's verdict
+ * for it), or the terminal the reader picks among `candidates`.
+ */
+export type PromptTargetInput =
+  | { state: 'restricted' }
+  | { state: 'none' }
+  | { state: 'pick'; candidates: number }
+  | { state: 'active'; kind: AgentKind; index: number; count: number; verdict: PromptVerdict }
 
 /** 1.10 A2: one entry of the Prompts section. */
 export interface PromptItemVm {
@@ -944,12 +972,16 @@ export interface PromptItemVm {
 }
 
 /**
- * 1.10 A (P3): the Prompts section — the list, the refused operation's flash, the read-only box and the
- * limits the page's fields keep. P4 adds the intro and the target line (§2.6).
+ * 1.10 A (P3, P4): the Prompts section — the intro, the target line, the list, the last outcome's flash, the
+ * read-only box and the limits the page's fields keep.
  */
 export interface PromptsVm {
   items: PromptItemVm[]
-  /** §3 A3 rule 9: the last operation's outcome — "Not saved: …" —, or null. */
+  /** §3 A2 rule 1: how it works, and that text typed in the terminal and not sent yet goes with a prompt. */
+  intro: string
+  /** §3 A3 rule 6: where a prompt goes and whether it goes, asks first or does not — `level` never alone, the words say it. */
+  target: { text: string; level: 'ready' | 'asks' | 'no' }
+  /** §3 A3 rule 9: the last send's or operation's outcome — "Sent to …", "Not sent: …", "Not saved: …" —, or null. */
   flash: { text: string; ok: boolean } | null
   /** A new entry may be added: the list can be changed and has fewer than PROMPTS_MAX entries. */
   canAdd: boolean
@@ -2381,35 +2413,64 @@ function calibrationText(c: Calibration | null): string {
 }
 
 /**
- * 1.9 A3, A4: the language picker — built here like every other text of the page (dashboard.ts: "no number is
- * computed here"), in the reader's language. The options are *Automatic* first, then every available language
- * in the registry's order, each by its own name in its own `lang` and — where it differs, case aside — by its
- * name in the reader's language (§7a Q9). Exactly one is checked: the setting's, or — for an explicit language
- * this build has no file for, which is shown in English — English's, the language the reader sees. The
- * *Automatic* line says what `auto` would show: VS Code's language by its own name, or that Token Pace has no
- * translation for it (its tag, held to `[a-z0-9-]{1,20}`), so English.
- */
-/**
- * 1.10 A (P3): the Prompts section as the page draws it. An unedited shipped entry's words are built now, in
+ * 1.10 A (P3, P4): the Prompts section as the page draws it. An unedited shipped entry's words are built now, in
  * the language of now (`promptEntries`); an edited one is the reader's; the keep-warm entry's text is
  * KEEP_WARM_LINE in every language. Read-only (a file that cannot be read or a newer build's): the three
- * shipped entries, no edit, the box that says why.
+ * shipped entries, no edit, the box that says why. The intro and the target line in words (§3 A2 rule 1, §3 A3
+ * rule 6); the flash says the last send's outcome or the last refused operation's reason.
  */
 function promptsVm(input: PromptsVmInput): PromptsVm {
   const { entries, writable, restorable } = promptEntries(input.read)
   const read = input.read
   const readOnly = read.state === 'unreadable' ? readOnlyText(read.kind) : read.state === 'newer' ? readOnlyText('newer') : null
   const f = input.flash
+  const sent = input.sent ?? null
   return {
     items: entries.map((e) => ({
       id: e.id, title: e.title, text: e.text, shipped: e.shipped !== null, edited: e.edited, command: e.text.startsWith('/'),
     })),
-    flash: f === null ? null : { text: t('Not saved: {0}', promptFailureText(f.failure, f.error)), ok: false },
+    intro: t('Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.'),
+    target: promptTargetVm(input.target),
+    flash: sent !== null ? promptSentText(sent)
+      : f === null ? null : { text: t('Not saved: {0}', promptFailureText(f.failure, f.error)), ok: false },
     canAdd: writable && entries.length < PROMPTS_MAX,
     restorable,
     readOnly,
     limits: { title: PROMPT_TITLE_MAX_CHARS, text: PROMPT_TEXT_MAX_CHARS, max: PROMPTS_MAX },
   }
+}
+
+/**
+ * 1.10 P4 (§3 A3 rule 6): the target line in words — whole keys for its three states, never a state word
+ * slotted into a sentence; the product name and the terminal's place in `{0}`…`{2}`, the reason of §3 A4 in
+ * `{1}`. `level` is a class for the page and never says anything the words do not.
+ */
+export function promptTargetVm(target: PromptTargetInput): { text: string; level: 'ready' | 'asks' | 'no' } {
+  switch (target.state) {
+    case 'restricted': return { text: promptBlockText('restricted'), level: 'no' }
+    case 'none': return { text: t('No terminal of this window runs Claude Code or Codex.'), level: 'no' }
+    case 'pick': return {
+      text: target.candidates === 1
+        ? t('Sends to the terminal you pick: one terminal runs Claude Code or Codex.')
+        : t('Sends to the terminal you pick: {0} terminals run Claude Code or Codex.', target.candidates),
+      level: 'ready',
+    }
+    default: {
+      const where = t('Sends to {0} in terminal {1} of {2}', SOURCE_TITLE[target.kind], target.index, target.count)
+      const v = target.verdict
+      if (v.send) return { text: t('{0} — ready', where), level: 'ready' }
+      return v.soft
+        ? { text: t('{0} — sending asks first: {1}', where, promptBlockText(v.block)), level: 'asks' }
+        : { text: t('{0} — not now: {1}', where, promptBlockText(v.block)), level: 'no' }
+    }
+  }
+}
+
+/** 1.10 P4 (§3 A3 rule 9): a send's outcome in words — where it went, or why it did not go. */
+export function promptSentText(sent: PromptSentFlash): { text: string; ok: boolean } {
+  if (sent.ok) return { text: t('Sent to {0} in terminal {1} of {2}.', SOURCE_TITLE[sent.kind], sent.index, sent.count), ok: true }
+  const why = sent.block === 'failed' ? t('The terminal did not take the text.') : promptBlockText(sent.block)
+  return { text: t('Not sent: {0}', why), ok: false }
 }
 
 /** §3 A1 rule 5: the read-only box — a file of a newer build, or one that cannot be read (`kind` the reason's code). */
@@ -2434,6 +2495,15 @@ export function promptFailureText(failure: PromptOpFailure, error: string | null
   }
 }
 
+/**
+ * 1.9 A3, A4: the language picker — built here like every other text of the page (dashboard.ts: "no number is
+ * computed here"), in the reader's language. The options are *Automatic* first, then every available language
+ * in the registry's order, each by its own name in its own `lang` and — where it differs, case aside — by its
+ * name in the reader's language (§7a Q9). Exactly one is checked: the setting's, or — for an explicit language
+ * this build has no file for, which is shown in English — English's, the language the reader sees. The
+ * *Automatic* line says what `auto` would show: VS Code's language by its own name, or that Token Pace has no
+ * translation for it (its tag, held to `[a-z0-9-]{1,20}`), so English.
+ */
 function languageVm(input: VmInput['language']): LanguageVm {
   const resolved: ResolvedLanguage = input?.resolved ?? resolveLanguage('auto', 'en', ['en'])
   const listed = input?.available ?? ['en']

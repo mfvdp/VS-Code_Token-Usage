@@ -258,13 +258,19 @@ test('every fact is taken strictly: a flag or a time of another shape never lets
 test('promptSend.ts is pure: no vscode, no clock, no I/O; the predicates are keepWarm.ts\'s, imported, never copied', () => {
   const src = readFileSync(join(ROOT, 'src', 'promptSend.ts'), 'utf8')
   const imports = src.split('\n').filter((l) => /^import\b/.test(l))
+  // 1.10 P4 (pinned and changed): the words of the blocks live here now (§4 P4, `promptBlockText`) — `t()` from
+  // i18n.ts, which reads the bundle it was given and nothing else.
   assert.deepEqual(imports, [
+    'import { t } from \'./i18n\'',
     'import { KeepWarmSibling, siblingLeftBehind, turnClosed } from \'./keepWarm\'',
     'import type { AgentTerminal } from \'./terminalWatch\'',
   ])
-  for (const bad of ["'vscode'", 'Date.now', 'new Date', 'require(', 'process.', "from 'fs'", "from 'node:", 't(\'']) {
+  for (const bad of ["'vscode'", 'Date.now', 'new Date', 'require(', 'process.', "from 'fs'", "from 'node:"]) {
     assert.equal(src.includes(bad), false, `promptSend.ts holds ${bad}`)
   }
+  // `t()` only in the block's words.
+  const words = src.slice(src.indexOf('export function promptBlockText('))
+  assert.equal(src.split('t(\'').length - 1, words.split('t(\'').length - 1, 'a t() call outside promptBlockText')
   // No copy of G4's or 1.9 D's tests: neither the stop reason nor the two-hour bound is spelled out here.
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
   for (const copy of ["'end_turn'", "'tool_use'", 'KEEPWARM_SIBLING_LEFT_MS', 'KEEPWARM_IDLE_MIN_MS', "'permission'"]) {

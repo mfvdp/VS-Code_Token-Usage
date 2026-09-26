@@ -141,7 +141,7 @@
   "config.showAgeInItem.enum.whenStale": "Only past tokenPace.staleAfterMinutes — “CC 5h 25% $(history) 24m”",
   "config.showAgeInItem.enum.always": "Always — “CC 5h 25% $(history) 2m”",
   "config.labels.description": "Custom prefixes and window labels. Keys are either a tool prefix (`claude`, `codex`) or a stable window id: Claude `session:300`, `weekly_all:10080`, `weekly_scoped:10080:<model>` (e.g. `weekly_scoped:10080:fable`); Codex `<limitId>:<minutes>` (e.g. `codex:10080`, `codex:300`). The ids are listed in docs/status-bar-states.md and in **Token Pace: Copy Diagnostics**. Values longer than 40 characters are cut.\n\n```json\n\"tokenPace.labels\": {\n  \"claude\": \"CC\",\n  \"weekly_all:10080\": \"week\"\n}\n```",
-  "config.summary.period.description": "Which period the token and cost entries sum up. Anything but `today` is named in the entry text so the number is never ambiguous.",
+  "config.summary.period.description": "Which period the token and cost entries sum up. The period is always named in the entry text, so the number is never ambiguous.",
   "config.summary.period.enum.today": "Today — “Σ 3.1M · today”",
   "config.summary.period.enum.7d": "Last 7 days — “Σ 12.3M · 7d”",
   "config.summary.period.enum.30d": "Last 30 days — “Σ 48.9M · 30d”",

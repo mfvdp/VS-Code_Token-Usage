@@ -51,6 +51,7 @@
     {"n":47,"by":"P3","kind":"nls-add","key":"config.dashboard.sections.enum.prompts","why":"the new value of the sections setting — the Prompts section, not in the default — 1.10 A"},
     {"n":48,"by":"P3","kind":"nls-add","key":"command.restoreDefaultPrompts.title","why":"the new command Restore Default Prompts (Token Pace: … in the palette) — 1.10 A1 rule 8"},
     {"n":49,"by":"P3","kind":"nls-reword","key":"config.dashboard.sections.description","why":"a paragraph added at the end: prompts, the reader's own prompts for Claude Code's and Codex's terminals, not in the default either — 1.10 A"},
-    {"n":50,"by":"P3","kind":"nls-reword","key":"capabilities.untrustedWorkspaces","why":"the last two sentences rewritten: Token Pace types into a terminal in two cases (the keep-warm line, a prompt you double-click), and Restricted Mode disables all of these — the sentence before them loses its clause about the one thing it types — 1.10 A"}
+    {"n":50,"by":"P3","kind":"nls-reword","key":"capabilities.untrustedWorkspaces","why":"the last two sentences rewritten: Token Pace types into a terminal in two cases (the keep-warm line, a prompt you double-click), and Restricted Mode disables all of these — the sentence before them loses its clause about the one thing it types — 1.10 A"},
+    {"n":51,"by":"lead","kind":"nls-reword","key":"config.summary.period.description","why":"the sentence about the period was false: the bar always prints the period next to the figure (statusText.ts, and the today example since P6) — Review 1a F1"}
   ]
 }

@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 50,
+  "applied": 51,
   "bundle": {
     "{0} rolled-up bucket in this range has no hour left and is not in the profile": {
       "parts": [
@@ -267,6 +267,10 @@
     "capabilities.untrustedWorkspaces": {
       "state": "review",
       "why": "the last two sentences rewritten: Token Pace types into a terminal in two cases (the keep-warm line, a prompt you double-click), and Restricted Mode disables all of these — the sentence before them loses its clause about the one thing it types — 1.10 A"
+    },
+    "config.summary.period.description": {
+      "state": "review",
+      "why": "the sentence about the period was false: the bar always prints the period next to the figure (statusText.ts, and the today example since P6) — Review 1a F1"
     }
   }
 }

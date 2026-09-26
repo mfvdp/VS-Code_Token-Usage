@@ -503,7 +503,7 @@ test('the reset history is dropped from the list only when no window has a cycle
       ? {
         ...r,
         retro: { ...r.retro, enough: true },
-        text: '50 % of the complete cycles hit the limit · Avg 12 % unused at the reset',
+        text: 'Share of complete cycles that hit the limit: 50 % · Avg unused at the reset: 12 %',
       }
       : r)),
   }

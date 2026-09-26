@@ -492,7 +492,8 @@ export const BAR_FIXTURE = {
 const DAY_MS = 86_400_000
 
 /** One way the bar is set up for an example: its settings, and the moment it is read. */
-interface BarVariant { settings: Record<string, unknown>; at?: number }
+/** `bare`: the example may quote the 5 h window's reset alone (the hour-cycle keys: “06:00 AM”), not a whole item text. */
+interface BarVariant { settings: Record<string, unknown>; at?: number; bare?: boolean }
 const NO_BAR = { 'tokenPace.barWidth': 0 }
 /**
  * The manifest keys whose values quote the bar (1.10 B3): each with the settings its examples show. Every example
@@ -511,8 +512,8 @@ export const BAR_EXAMPLE_KEYS: Readonly<Record<string, readonly BarVariant[]>> =
   'config.summary.period.enum.today': [{ settings: { 'tokenPace.summary.period': 'today' } }],
   'config.summary.period.enum.7d': [{ settings: { 'tokenPace.summary.period': '7d' } }],
   'config.summary.period.enum.30d': [{ settings: { 'tokenPace.summary.period': '30d' } }],
-  'config.resetHourCycle.enum.h12': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h12' } }],
-  'config.resetHourCycle.enum.h23': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h23' } }],
+  'config.resetHourCycle.enum.h12': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h12' }, bare: true }],
+  'config.resetHourCycle.enum.h23': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h23' }, bare: true }],
 }
 /** An example no fixture can produce, `<id>: <key>: <example>` with its reason — expected: none. */
 export const BAR_EXEMPT: ReadonlyArray<readonly [string, string]> = []
@@ -563,7 +564,9 @@ function barTexts(v: BarVariant): string[] {
     out.push(item.text)
     for (let at = item.text.indexOf('· '); at > 0; at = item.text.indexOf('· ', at + 1)) out.push(item.text.slice(at))
   }
-  out.push(formatReset(BAR_FIXTURE.reset, now, cfg.resetFormat, makeContext(input).tcfg))
+  // The bare reset only where the key's example quotes it alone (Review 1a F5): a relative or absolute example must
+  // be a whole item text, so “2h14m” or “06:00” alone would not pass for them.
+  if (v.bare) out.push(formatReset(BAR_FIXTURE.reset, now, cfg.resetFormat, makeContext(input).tcfg))
   return out
 }
 

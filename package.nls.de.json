@@ -141,7 +141,7 @@
   "config.showAgeInItem.enum.whenStale": "Nur jenseits von tokenPace.staleAfterMinutes — “CC 5h 25% $(history) 24m”",
   "config.showAgeInItem.enum.always": "Immer — “CC 5h 25% $(history) 2m”",
   "config.labels.description": "Eigene Präfixe und Fensterbezeichnungen. Schlüssel sind entweder ein Werkzeug-Präfix (`claude`, `codex`) oder eine feste Fenster-Id: Claude `session:300`, `weekly_all:10080`, `weekly_scoped:10080:<model>` (z. B. `weekly_scoped:10080:fable`); Codex `<limitId>:<minutes>` (z. B. `codex:10080`, `codex:300`). Die Ids stehen in docs/status-bar-states.md und in **Token Pace: Diagnose kopieren**. Werte über 40 Zeichen werden gekürzt.\n\n```json\n\"tokenPace.labels\": {\n  \"claude\": \"CC\",\n  \"weekly_all:10080\": \"week\"\n}\n```",
-  "config.summary.period.description": "Welchen Zeitraum die Token- und Kosteneinträge summieren. Alles außer `today` wird im Eintragstext genannt, damit die Zahl nie mehrdeutig ist.",
+  "config.summary.period.description": "Welchen Zeitraum die Token- und Kosteneinträge summieren. Der Zeitraum steht immer im Eintragstext, damit die Zahl nie mehrdeutig ist.",
   "config.summary.period.enum.today": "Heute — “Σ 3,1M · heute”",
   "config.summary.period.enum.7d": "Letzte 7 Tage — “Σ 12,3M · 7d”",
   "config.summary.period.enum.30d": "Letzte 30 Tage — “Σ 48,9M · 30d”",

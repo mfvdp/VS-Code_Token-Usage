@@ -25,7 +25,7 @@ first, then every language this build ships a translation for, in the order of t
 line shows the language's flag, its own name, and — where the two differ — its name in the language
 you read now (*Deutsch* · German). *Automatic* says what it would show: *Automatic — as VS Code
 (English)*, or, when Token Pace has no translation for VS Code's language, *Automatic — VS Code's
-language (hu) has no translation here, so English*. The chosen line carries a ✓. Under the list stand
+language (bg) has no translation here, so English*. The chosen line carries a ✓. Under the list stand
 two lines: what switches at once and what follows VS Code — *Token Pace's own texts switch at once. The
 settings, the command titles and the walkthrough follow VS Code's display language (Configure Display
 Language).* —, and who translated the languages — *The languages beyond English and German were

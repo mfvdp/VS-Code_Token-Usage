@@ -13,7 +13,7 @@
  *
  * The file name is built from a registry id only (`LanguageId`, languages.ts): the setting's text is
  * matched against the registry first (config.ts `sanitize`) and never put into a path, so no value a
- * settings file holds can make this read anything but one of the fourteen names below `l10nDir`.
+ * settings file holds can make this read anything but one of the registry's names below `l10nDir`.
  * English reads no file: its source text is the key.
  *
  * What is read is checked, not trusted: the value must be a plain object, and `setBundle` (i18n.ts)

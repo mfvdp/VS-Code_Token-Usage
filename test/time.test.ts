@@ -237,10 +237,14 @@ test('the weekday in front of a clock time is the language\'s own short name, se
   try {
     for (const { id, locale } of LANGUAGES) {
       setLocale(locale)
+      // 1.11 P2 (pinned and changed: ' 14:20' in every locale): the clock as the language writes it — Danish, Finnish
+      // and Indonesian write 14.20 (ICU's pattern for da, fi and id), every language of 1.9 writes 14:20.
+      const clock = ` ${formatTime(WEEK[0], utc, false)}`
+      assert.match(clock, /^ 14[:.]20$/, `${locale}: ${clock}`)
       const labels = WEEK.map((ms) => {
         const out = formatTime(ms, utc, true)
-        assert.ok(out.endsWith(' 14:20'), `${locale}: ${out}`)
-        return out.slice(0, -' 14:20'.length)
+        assert.ok(out.endsWith(clock), `${locale}: ${out}`)
+        return out.slice(0, -clock.length)
       })
       assert.equal(new Set(labels).size, 7, `${locale}: ${labels.join(' ')}`)
       // What the label must be, decided from this machine's Intl — never from a list of names.

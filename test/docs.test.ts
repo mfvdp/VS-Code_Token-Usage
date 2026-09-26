@@ -2777,9 +2777,17 @@ function underLocale<T>(tag: string | undefined, run: () => T): T {
 
 test('docs/languages.md: one row per registry entry — its id, its native name, its name in English, its flag — in the registry\'s order (1.9 A7)', () => {
   const rows = doc.languages.split('\n').filter((l) => /^\| `[a-z-]+` \|/.test(l))
-  const want = underLocale(undefined, () => LANGUAGES.map((e) => `| \`${e.id}\` | ${e.native} | ${languageName(e.id)} | ${FLAG_COUNTRY[e.flag]} (\`${e.flag}\`) |`))
-  assert.equal(rows.length, 14)
+  // 1.11 P2 (pinned and changed: fourteen rows, the whole registry): the registry has twenty-six languages before the
+  // twelve of tier 2 have a bundle. The table lists the registry from its start and only languages whose bundle ships —
+  // the picker offers no other (§4 P2: the docs never name a language the picker does not offer yet) —, the fourteen of
+  // 1.9 at least; P9 lists all twenty-six (§3 A6).
+  const { availableLanguages } = require('../src/languageLoad') as typeof import('../src/languageLoad')
+  const shipped = availableLanguages(join(ROOT, 'l10n'))
+  const listed = LANGUAGES.slice(0, rows.length)
+  const want = underLocale(undefined, () => listed.map((e) => `| \`${e.id}\` | ${e.native} | ${languageName(e.id)} | ${FLAG_COUNTRY[e.flag]} (\`${e.flag}\`) |`))
+  assert.ok(rows.length >= 14 && rows.length <= LANGUAGES.length, `${rows.length} rows`)
   assert.deepEqual(rows, want)
+  assert.deepEqual(listed.filter((e) => !shipped.includes(e.id)).map((e) => e.id), [], 'the table names a language the picker does not offer')
   assert.ok(doc.languages.includes('| Id | Language | In English | Flag |'))
   // The flags the page explains are the registry's.
   const flag = (id: string): string => LANGUAGES.find((e) => e.id === id)?.flag ?? '?'
@@ -2799,7 +2807,7 @@ test('docs/languages.md: the picker, the setting and `auto` as the code has them
     'at its end, a button with the flag of the language the texts are in now: the US flag for English',
     '*Automatic* first, then every language this build ships a translation for, in the order of the table below',
     'where the two differ — its name in the language you read now (*Deutsch* · German)',
-    '*Automatic — as VS Code (English)*', '*Automatic — VS Code\'s language (hu) has no translation here, so English*',
+    '*Automatic — as VS Code (English)*', '*Automatic — VS Code\'s language (bg) has no translation here, so English*',
     'In the list ↓ and ↑ move (from the last line to the first and back), Home and End go to the first and the last, Enter or Space chooses, Escape closes it and puts the focus back on the flag, Tab closes it without a choice. Nothing is chosen by moving.',
     'a menu button named "Language: English (automatic)" — "Language: English" once you chose English —',
     'A choice writes `tokenPace.language` into your user settings', 'the setting has application scope',
@@ -2811,11 +2819,13 @@ test('docs/languages.md: the picker, the setting and `auto` as the code has them
     // Swiss German window reaches the formatters as de-ch; the page says what VS Code reports instead.
     'Under `auto` the numbers and dates follow the tag VS Code reports, as they did before 1.9: a display language Token Pace has no translation for keeps its own number and date formats, with English words.',
   ]) assert.ok(page.includes(claim), `docs/languages.md does not say: ${claim}`)
-  // The examples are the rule's own answers.
+  // The examples are the rule's own answers. 1.11 lead fix after P2 (pinned and changed: the `hu` example): Hungarian is
+  // a language of the registry since 1.11, so the page's example of a display language without a translation is `bg`
+  // (Bulgarian — a VS Code language pack Token Pace has no translation for and does not plan one).
   assert.equal(autoLanguage('de-ch', LANGUAGE_IDS), 'de')
   assert.equal(autoLanguage('pt-pt', LANGUAGE_IDS), 'en')
-  const hu = resolveLanguage('auto', 'hu', LANGUAGE_IDS)
-  assert.deepEqual([hu.id, hu.intl, hu.auto?.shipped], ['en', 'hu', false])
+  const bg = resolveLanguage('auto', 'bg', LANGUAGE_IDS)
+  assert.deepEqual([bg.id, bg.intl, bg.auto?.shipped], ['en', 'bg', false])
   assert.equal(resolveLanguage('auto', 'de-ch', LANGUAGE_IDS).intl, 'de-ch')
   // The words the page quotes are the view model's keys.
   const vm = readDoc('src/viewModel.ts')
@@ -3051,8 +3061,10 @@ test('the 1.9.0 release notes: its date set at publish, every section in order, 
   const order = heads.map((h) => flat.indexOf(h))
   assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.9.0 entry\'s sections are missing or out of order')
   const section = (h: string): string => { const at = heads.indexOf(h); return flat.slice(order[at], at + 1 < heads.length ? order[at + 1] : undefined) }
-  // The twelve languages, named in their own names in the registry's order — in the summary and in Added.
-  const twelve = LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native)
+  // The twelve languages, named in their own names in the registry's order — in the summary and in Added. 1.11 P2
+  // (pinned and changed: every language of the registry but English and German): the twelve of 1.9 are the registry's
+  // first fourteen but English and German; 1.11's twelve follow them.
+  const twelve = LANGUAGES.slice(0, 14).filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native)
   assert.equal(twelve.length, 12)
   const named = `${twelve.slice(0, -1).join(', ')} and ${twelve[twelve.length - 1]}`
   assert.equal(flat.split(named).length - 1, 2, `the 1.9.0 entry does not name the twelve languages twice as the registry has them: ${named}`)
@@ -3066,7 +3078,7 @@ test('the 1.9.0 release notes: its date set at publish, every section in order, 
     'in a High Contrast theme they keep their colours and get an outline',
     '**They were translated by AI agents from the English text, with the German as a second reference, and checked by tests for completeness, placeholders and the marks `~`, `⚠`, `≈` and `–` — they were not reviewed by native speakers.**',
     'A wrong or clumsy word is a bug — please report it on the [issue tracker](https://github.com/mfvdp/VS-Code_Token-Usage/issues)',
-    `or one of ${LANGUAGE_IDS.map((id) => `\`${id}\``).join(', ')}, which the settings UI offers by each language's own name`,
+    `or one of ${LANGUAGE_IDS.slice(0, 14).map((id) => `\`${id}\``).join(', ')}, which the settings UI offers by each language's own name`,
     'It has the application scope: always your user settings, never a workspace\'s',
     'VS Code reports its display language only while that language\'s pack is installed',
     // Changed: the weekday, the diagnostics line.
@@ -3177,12 +3189,15 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   // settings.md: the row — application scope, the fifteen values, the one write and its warning.
   const row = doc.settings.split('\n').find((l) => l.startsWith('| `language` |')) ?? ''
   const warning = 'Token Pace: the language could not be written to your user settings.'
-  for (const claim of ['which VS Code reports only while its language pack is installed', 'The settings UI offers the fifteen values as a list, each language by its own name',
+  // 1.11 P2 (pinned and changed: "the fifteen values", fifteen in the enum): the enum has auto and the twenty-six ids of
+  // the registry now; the row's count is P9's to write (§3 A6).
+  for (const claim of ['which VS Code reports only while its language pack is installed', 'values as a list, each language by its own name',
     'that is the one write Token Pace makes to your user settings for it: only on a choice, only this key, *Automatic* removing the key again, the language already chosen writing nothing',
     `the warning *${warning}* says so and nothing changes`, 'Application scope: always your user settings, never a workspace\'s']) {
     assert.ok(row.includes(claim), `docs/settings.md's language row does not say: ${claim}`)
   }
-  assert.equal(properties['tokenPace.language'].enum?.length, 15)
+  assert.ok(row.includes(LANGUAGE_IDS.map((id) => `\`${id}\``).join(', ')), 'docs/settings.md\'s language row does not list the registry\'s ids in its order')
+  assert.equal(properties['tokenPace.language'].enum?.length, LANGUAGES.length + 1)
   assert.deepEqual(properties['tokenPace.language'].enumDescriptions?.slice(1), LANGUAGES.map((e) => e.native))
   const ext = readDoc('src/extension.ts')
   assert.ok(ext.includes(`t('${warning}')`) && ext.includes(".update('language', id === 'auto' ? undefined : id, vscode.ConfigurationTarget.Global)"))
@@ -3208,7 +3223,7 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     'keeping its scroll position and the keyboard focus',
     'After a choice the focus is back on the flag, which is then named in the new language; a switch made elsewhere — in the settings UI, or in another window — puts the focus back where it was on the page.',
     'A setting that names a language the installed build carries no translation file for shows English, and the list then checks no line.',
-    `the other twelve — ${LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native).slice(0, -1).join(', ')} and Čeština — are new in 1.9.0`,
+    `the other twelve — ${LANGUAGES.slice(0, 14).filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native).slice(0, -1).join(', ')} and Čeština — are new in 1.9.0`,
     'English and German keep their two letters (`Mo 06:00`, `Sa 14:20`)', '(`9月26日(土)`, `9月26日周六`, `so 26. 9.`)',
     'The calibration\'s figures take the language\'s decimal mark (`1,2` in German and French).',
     '*Token Pace\'s own texts switch at once. The settings, the command titles and the walkthrough follow VS Code\'s display language (Configure Display Language).*',
@@ -3554,8 +3569,10 @@ test('the 1.10.0 release notes: the newest entry, its date set at publish, every
   assert.ok(section('### Internal').includes('`l10n/rekey.json` (115 entries for this release)'), '1.10\'s ledger held 115 entries')
   const rows = (readDoc('scripts/check-privacy.mjs').match(/what: 'prompts: /g) ?? []).length
   assert.ok(section('### Internal').includes(`gains ${['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'][rows]} rows`), `the read contract has ${rows} prompts rows`)
-  // The twelve languages, named in their own names in the registry's order, and the plain statement.
-  const twelve = LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native)
+  // The twelve languages, named in their own names in the registry's order, and the plain statement. 1.11 P2 (pinned and
+  // changed: every language of the registry but English and German): the twelve of 1.10 are the registry's first fourteen
+  // but English and German.
+  const twelve = LANGUAGES.slice(0, 14).filter((e) => e.id !== 'en' && e.id !== 'de').map((e) => e.native)
   assert.ok(flat.includes(`${twelve.slice(0, -1).join(', ')} and ${twelve[twelve.length - 1]}`), 'the 1.10.0 entry does not name the twelve languages as the registry has them')
   assert.ok(flat.includes('**This work was again done by AI agents from the English text, with the German as a second reference, and checked by tests — not reviewed by native speakers.**'))
   assert.ok(flat.includes('translated by AI agents, as in 1.9, and not reviewed by native speakers'))

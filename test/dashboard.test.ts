@@ -8737,7 +8737,8 @@ test('the open list: Automatic first, then every language — its flag, its own 
   const { resolveLanguage, LANGUAGE_IDS, LANGUAGES } = require('../src/languages') as typeof import('../src/languages')
   const every = buildViewModel({ ...makeInput(), language: { resolved: resolveLanguage('auto', 'en', [...LANGUAGE_IDS]), available: [...LANGUAGE_IDS] } }).language
   const all = render('langOpen = true; var __h = sLanguage(); langOpen = false; __h', { language: JSON.parse(JSON.stringify(every)) })
-  assert.equal(all.split('role="menuitemradio"').length - 1, 15)
+  // 1.11 P2 (pinned and changed: the literal 15): Automatic and every language of the registry.
+  assert.equal(all.split('role="menuitemradio"').length - 1, LANGUAGE_IDS.length + 1)
   assert.equal(all.split('aria-checked="true"').length - 1, 1)
   assert.equal(all.split('lng-check').length - 1, 1)
   for (const e of LANGUAGES) assert.ok(all.includes('data-id="' + e.id + '">' + FLAG_SVG[e.flag] + '<span class="lng-text"><span lang="' + e.locale + '">' + e.native + '</span>'), e.id)

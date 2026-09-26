@@ -1044,9 +1044,12 @@ function fixture(kind: FixtureKind, id: string): string {
     const germanNls = readTable(join(ROOT, 'package.nls.de.json'))
     writeJson(join(base, 'package.nls.json'), s.english)
     const merged: Record<string, string> = {}
+    // 1.11 P2: a language name German writes as the English (LANGUAGE_NAME_AS_ENGLISH — Hindi) is German's alone; under
+    // another id the fixture writes it as a word of its own, as that language's translation would.
+    const germanWord = (k: string): string => (id !== 'de' && germanBundle[k] === k && LANGUAGE_NAME_AS_ENGLISH.some(([lang, name]) => lang === 'de' && name === k) ? `${k}-Sprache` : germanBundle[k])
     for (const part of PARTS) {
       const table: Record<string, string> = {}
-      for (const k of s.germanParts[part]) table[k] = kind === 'german' ? germanBundle[k] : pseudo(k, kind === 'deva' ? DEVA_WORD : '語')
+      for (const k of s.germanParts[part]) table[k] = kind === 'german' ? germanWord(k) : pseudo(k, kind === 'deva' ? DEVA_WORD : '語')
       writeJson(join(base, 'l10n', 'parts', `${part}.${id}.json`), table)
       Object.assign(merged, table)
     }
@@ -1903,9 +1906,11 @@ test('T4 counts the marks of the NFC form and names the Greek ano teleia — NFC
 })
 
 test('T10 lets a language name the ledger just added be absent while its list names it `translate` — never at the join, never unlisted (1.11 A3 rule 11 a)', () => {
-  const names = [...src().names, { id: 'nl', english: 'Dutch' }]
+  // 1.11 P2: Dutch is a name of the registry now, and German has it — the fixture drops it, as a 1.10 language lacks it.
+  const names = src().names.some((n) => n.english === 'Dutch') ? src().names : [...src().names, { id: 'nl', english: 'Dutch' }]
   const t10 = (dir: string, id: string, allowed: boolean): string[] => RULES.T10.rule({ ...src(), names }, loadLang(dir, id, allowed))
   const dir = fixture('german', 'fr')
+  editKey(dir, 'fr', 'Dutch', () => undefined)
   assert.deepEqual(t10(dir, 'fr', true), ['fr: l10n/bundle.l10n.fr.json: the language name "Dutch" is not translated'], 'an unlisted name passed')
   mkdirSync(join(dir, 'l10n', 'pending'), { recursive: true })
   writeFileSync(join(dir, PENDING_FILE('fr')), `${JSON.stringify({ v: 1, applied: 1, bundle: { Dutch: { parts: ['model'], state: 'translate', why: 'a new language' } }, nls: {} }, null, 2)}\n`)
@@ -1922,7 +1927,8 @@ test('T10 takes a name equal to the English only by LANGUAGE_NAME_AS_ENGLISH —
     assert.ok(isLanguageId(id) && id !== 'en', `${id} is no language that translates`)
     assert.ok(name.length > 0 && why.trim().length > 0 && !why.includes('; '), `${id} ${name}: no reason`)
   }
-  const names = [...src().names, { id: 'hi', english: 'Hindi' }, { id: 'nl', english: 'Dutch' }]
+  // 1.11 P2: Hindi and Dutch are names of the registry now — added only where it lacks them.
+  const names = [...src().names, ...[{ id: 'hi', english: 'Hindi' }, { id: 'nl', english: 'Dutch' }].filter((x) => !src().names.some((n) => n.english === x.english))]
   const t10 = (dir: string, id: string): string[] => RULES.T10.rule({ ...src(), names }, loadLang(dir, id))
   const de = fixture('german', 'de')
   edit(de, 'l10n/bundle.l10n.de.json', (t) => { t.Hindi = 'Hindi'; t.Dutch = 'Niederländisch' })

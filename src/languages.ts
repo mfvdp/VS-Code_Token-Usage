@@ -12,20 +12,27 @@
  * every Chinese system locale to one of the two). A file name is only ever built from an id of this
  * list, never from a setting's text (languageLoad.ts).
  *
- * No direction field: every language of 1.9 is written left to right (RTL is 1.13), and a test holds
- * that no entry carries one.
+ * No direction field: every language of 1.9 and 1.11 is written left to right (RTL is 1.13), and a test
+ * holds that no entry carries one.
  *
- * Pure: the one import is the localisation seam, for the fourteen names in the reader's language.
+ * Pure: the one import is the localisation seam, for the twenty-six names in the reader's language.
  */
 
 import { t } from './i18n'
 
-/** 1.9 A: the languages Token Pace ships — VS Code's display-language ids, lower-case as VS Code 1.138 spells them. */
-export type LanguageId = 'en' | 'de' | 'fr' | 'es' | 'pt-br' | 'it' | 'ja' | 'ko' | 'zh-cn' | 'zh-tw' | 'ru' | 'tr' | 'pl' | 'cs'
+/**
+ * 1.9 A: the languages Token Pace ships — VS Code's display-language ids, lower-case as VS Code 1.138 spells them.
+ * 1.11 A1: twelve more after `cs`; Norwegian is `nb` (Bokmål), the tag VS Code and ICU use for it.
+ */
+export type LanguageId =
+  | 'en' | 'de' | 'fr' | 'es' | 'pt-br' | 'it' | 'ja' | 'ko' | 'zh-cn' | 'zh-tw' | 'ru' | 'tr' | 'pl' | 'cs'
+  | 'nl' | 'uk' | 'sv' | 'nb' | 'da' | 'fi' | 'hi' | 'id' | 'vi' | 'el' | 'hu' | 'ro'
 /** `tokenPace.language`: `auto` follows VS Code's display language. */
 export type LanguageSetting = 'auto' | LanguageId
-/** The flag drawn beside a language — a country, not the language (§3 A3.2). */
-export type FlagId = 'us' | 'de' | 'fr' | 'es' | 'br' | 'it' | 'jp' | 'kr' | 'cn' | 'tw' | 'ru' | 'tr' | 'pl' | 'cz'
+/** The flag drawn beside a language — a country, not the language (§3 A3.2): Ukraine's for Ukrainian, India's for Hindi. */
+export type FlagId =
+  | 'us' | 'de' | 'fr' | 'es' | 'br' | 'it' | 'jp' | 'kr' | 'cn' | 'tw' | 'ru' | 'tr' | 'pl' | 'cz'
+  | 'nl' | 'ua' | 'se' | 'no' | 'dk' | 'fi' | 'in' | 'id' | 'vn' | 'gr' | 'hu' | 'ro'
 
 export interface LanguageEntry {
   /** The setting's value and the file tag: bundle.l10n.<id>.json, package.nls.<id>.json, l10n/parts/<part>.<id>.json. */
@@ -37,7 +44,11 @@ export interface LanguageEntry {
   flag: FlagId
 }
 
-/** The registry in the picker's order — the lead's list (collect "Vorschlag Sprachliste", tier 1). Written by P1; no translation package touches it. */
+/**
+ * The registry in the picker's order — the lead's list (collect "Vorschlag Sprachliste", tier 1), then 1.11's twelve
+ * (tier 2) in the collect row's order. Written by 1.9 P1 and 1.11 P2; no translation package touches it. A language is
+ * offered once its bundle exists (languageLoad.ts `availableLanguages`), so an entry without files is never chosen.
+ */
 export const LANGUAGES: readonly LanguageEntry[] = Object.freeze([
   { id: 'en', locale: 'en', native: 'English', flag: 'us' },
   { id: 'de', locale: 'de', native: 'Deutsch', flag: 'de' },
@@ -53,6 +64,19 @@ export const LANGUAGES: readonly LanguageEntry[] = Object.freeze([
   { id: 'tr', locale: 'tr', native: 'Türkçe', flag: 'tr' },
   { id: 'pl', locale: 'pl', native: 'Polski', flag: 'pl' },
   { id: 'cs', locale: 'cs', native: 'Čeština', flag: 'cz' },
+  { id: 'nl', locale: 'nl', native: 'Nederlands', flag: 'nl' },
+  { id: 'uk', locale: 'uk', native: 'Українська', flag: 'ua' },
+  { id: 'sv', locale: 'sv', native: 'Svenska', flag: 'se' },
+  // §7a Q12: "Norsk", Frederik's list; the variant is Bokmål (`nb`), which docs/languages.md says.
+  { id: 'nb', locale: 'nb', native: 'Norsk', flag: 'no' },
+  { id: 'da', locale: 'da', native: 'Dansk', flag: 'dk' },
+  { id: 'fi', locale: 'fi', native: 'Suomi', flag: 'fi' },
+  { id: 'hi', locale: 'hi', native: 'हिन्दी', flag: 'in' },
+  { id: 'id', locale: 'id', native: 'Bahasa Indonesia', flag: 'id' },
+  { id: 'vi', locale: 'vi', native: 'Tiếng Việt', flag: 'vn' },
+  { id: 'el', locale: 'el', native: 'Ελληνικά', flag: 'gr' },
+  { id: 'hu', locale: 'hu', native: 'Magyar', flag: 'hu' },
+  { id: 'ro', locale: 'ro', native: 'Română', flag: 'ro' },
 ].map((e) => Object.freeze(e as LanguageEntry)))
 
 /** Every id, in the registry's order — the manifest's enum after `auto`. */
@@ -71,7 +95,8 @@ export function languageEntry(id: LanguageId): LanguageEntry {
 /**
  * The language's name in the reader's language — one `t()` literal per id ('English', 'German', 'French', 'Spanish',
  * 'Portuguese (Brazil)', 'Italian', 'Japanese', 'Korean', 'Chinese (Simplified)', 'Chinese (Traditional)', 'Russian',
- * 'Turkish', 'Polish', 'Czech'): a switch, because the extract script reads literals only.
+ * 'Turkish', 'Polish', 'Czech'; since 1.11 'Dutch', 'Ukrainian', 'Swedish', 'Norwegian', 'Danish', 'Finnish', 'Hindi',
+ * 'Indonesian', 'Vietnamese', 'Greek', 'Hungarian', 'Romanian'): a switch, because the extract script reads literals only.
  */
 export function languageName(id: LanguageId): string {
   switch (id) {
@@ -89,6 +114,18 @@ export function languageName(id: LanguageId): string {
     case 'tr': return t('Turkish')
     case 'pl': return t('Polish')
     case 'cs': return t('Czech')
+    case 'nl': return t('Dutch')
+    case 'uk': return t('Ukrainian')
+    case 'sv': return t('Swedish')
+    case 'nb': return t('Norwegian')
+    case 'da': return t('Danish')
+    case 'fi': return t('Finnish')
+    case 'hi': return t('Hindi')
+    case 'id': return t('Indonesian')
+    case 'vi': return t('Vietnamese')
+    case 'el': return t('Greek')
+    case 'hu': return t('Hungarian')
+    case 'ro': return t('Romanian')
   }
 }
 
@@ -140,8 +177,9 @@ export interface ResolvedLanguage {
  * An explicit id whose bundle is not available resolves to English (a log line says why).
  *
  * Under `auto` the words follow `autoLanguage`, and the formats keep VS Code's own tag (`intl`), as
- * they did before 1.9: a `de-ch` window keeps Swiss number formats with German words, a `hu` window
- * Hungarian digits with English words. `setLocale` canonicalises the tag and falls back to en-US for
+ * they did before 1.9: a `de-ch` window keeps Swiss number formats with German words, a `pt-pt` window
+ * Portugal's formats with English words (Hungarian, 1.9's example, is a language of the registry since
+ * 1.11 and, once its bundle ships, `hu` shows Hungarian words). `setLocale` canonicalises the tag and falls back to en-US for
  * one ICU does not know. An empty tag counts as English, which is what VS Code reports by default.
  */
 export function resolveLanguage(

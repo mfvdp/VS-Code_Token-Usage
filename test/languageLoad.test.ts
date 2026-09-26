@@ -143,3 +143,58 @@ test('the repository\'s l10n/ offers English and exactly the registry ids whose 
   const de = readBundle(dir, 'de')
   assert.ok(de && Object.keys(de).length > 1000 && Object.values(de).every((v) => typeof v === 'string'))
 })
+
+// ---------------------------------------------------------------------------
+// 1.11 §0a.1: twelve more bundle names — the same one read, by a registry id only
+// ---------------------------------------------------------------------------
+
+test('the twenty-six ids of 1.11: each reads exactly <dir>/bundle.l10n.<id>.json, English none — and a 1.11 lookalike (a path, another case, a region, Norwegian\'s macrolanguage, a number) reads nothing at all (1.11 §0a.1)', () => {
+  assert.equal(LANGUAGE_IDS.length, 26)
+  const reads: string[] = []
+  for (const id of LANGUAGE_IDS) {
+    const fs = fakeFs({ [join(DIR, `bundle.l10n.${id}.json`)]: '{"Refresh":"R"}' })
+    readBundle(DIR, id, fs.read)
+    reads.push(...fs.paths)
+    assert.deepEqual(fs.paths, id === 'en' ? [] : [join(DIR, `bundle.l10n.${id}.json`)], id)
+  }
+  // Twenty-five files, each inside the directory, each once — the twelve of 1.11 among them.
+  assert.equal(reads.length, 25)
+  assert.equal(new Set(reads).size, 25)
+  assert.ok(reads.every(inside), reads.join(', '))
+  for (const id of ['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro']) {
+    assert.ok(reads.includes(join(DIR, `bundle.l10n.${id}.json`)), id)
+  }
+  // §7a Q11: no alias — `no` (Norwegian) and `nb-no` are no ids, nor is another case or a path through a new id.
+  for (const raw of ['nl/../../x', 'NL', 'nb-no', 'no', 'nn', 'Hi', 'el/', ' uk', 42]) {
+    const fs = fakeFs()
+    const failures: string[] = []
+    assert.equal(readBundle(DIR, raw as LanguageId, fs.read, (kind) => failures.push(kind)), null, JSON.stringify(raw))
+    assert.deepEqual(fs.paths, [], `${JSON.stringify(raw)} reached a path: ${fs.paths.join(', ')}`)
+    assert.deepEqual(failures, ['not a registry id'], JSON.stringify(raw))
+    // Through the setting, the same value is auto, and auto under an English window reads nothing.
+    assert.equal(languageSetting(raw), 'auto', JSON.stringify(raw))
+  }
+})
+
+test('availableLanguages over a temporary l10n/ holding the Dutch bundle alone offers English and Dutch — a language of 1.11 is offered once its file exists, and only then (1.11 A1)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'token-pace-l10n-111-'))
+  try {
+    assert.deepEqual(availableLanguages(dir), ['en'])
+    writeFileSync(join(dir, 'bundle.l10n.nl.json'), '{}')
+    assert.deepEqual(availableLanguages(dir), ['en', 'nl'])
+    // Another spelling of it is not the file: `no` and `nb-no` are no bundle of Norwegian's (§7a Q11).
+    writeFileSync(join(dir, 'bundle.l10n.no.json'), '{}')
+    writeFileSync(join(dir, 'bundle.l10n.nb-no.json'), '{}')
+    assert.deepEqual(availableLanguages(dir), ['en', 'nl'])
+    // In the registry's order, whatever order the files were written in.
+    writeFileSync(join(dir, 'bundle.l10n.ro.json'), '{}')
+    writeFileSync(join(dir, 'bundle.l10n.de.json'), '{}')
+    writeFileSync(join(dir, 'bundle.l10n.nb.json'), '{}')
+    assert.deepEqual(availableLanguages(dir), ['en', 'de', 'nl', 'nb', 'ro'])
+    // What the setting's value then shows: a new language without its file is English, with it its own words.
+    assert.equal(resolveLanguage('hu', 'en', availableLanguages(dir)).id, 'en')
+    assert.equal(resolveLanguage('nl', 'en', availableLanguages(dir)).id, 'nl')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

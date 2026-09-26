@@ -23,6 +23,16 @@
  *    and five), Korea's trigrams as bars, Brazil without its motto band and stars. Each is drawn
  *    from the flag's public construction — China's stars on its 30 × 20 grid, Turkey's crescent
  *    and star from the flag law's circles, the sun of 繁體中文's flag with its twelve rays and ring;
+ *  • 1.11 A1 rule 2, the twelve of tier 2 under the same rules: the tricolours (the Netherlands,
+ *    Hungary, Romania) and the bicolours (Ukraine, Indonesia) in equal bands; Greece's nine stripes
+ *    with the cross in a canton of five; India's three bands with the chakra as a ring and 24
+ *    spokes (a navy disc and a white one inside it, as 繁體中文's sun ring is drawn), three quarters
+ *    of the white band high; Vietnam's one star, its points on a circle of a
+ *    fifth of the length; the Nordic crosses in their own proportions — the arms as wide and the
+ *    hoist-side fields as the flag's units give them (Sweden 5:2 and 4:2:4, Norway 6:4 and 6:4:6
+ *    with its blue cross 2 inside the white, Denmark 12:4 and 12:4:12, Finland 5:3 and 4:3:4), the
+ *    unit set by the height, so the vertical bar stands off-centre toward the hoist and only the
+ *    fly is shorter or longer than the flag's own (a 3:2 box for flags of 16:10, 22:16, 37:28, 18:11);
  *  • `auto` is a globe drawn in `currentColor`, so forced colours repaint it; every country flag
  *    keeps its own colours (the page gives it `forced-color-adjust: none` and an outline, P2).
  *
@@ -72,5 +82,17 @@ export const FLAG_SVG: Readonly<Record<FlagId | 'auto', string>> = Object.freeze
   tr: svg('<rect width="30" height="20" fill="#E30A17"/><circle cx="10" cy="10" r="5" fill="#FFFFFF"/><circle cx="11.25" cy="10" r="4" fill="#E30A17"/><polygon points="13.92,10 18.44,8.53 15.65,12.38 15.65,7.62 18.44,11.47" fill="#FFFFFF"/>'),
   pl: svg('<rect width="30" height="20" fill="#DC143C"/><rect width="30" height="10" fill="#FFFFFF"/>'),
   cz: svg('<rect width="30" height="20" fill="#D7141A"/><rect width="30" height="10" fill="#FFFFFF"/><polygon points="0,0 15,10 0,20" fill="#11457E"/>'),
+  nl: svg('<rect width="30" height="20" fill="#21468B"/><rect width="30" height="13.33" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#AE1C28"/>'),
+  ua: svg('<rect width="30" height="20" fill="#FFD700"/><rect width="30" height="10" fill="#0057B7"/>'),
+  se: svg('<rect width="30" height="20" fill="#006AA7"/><path d="M12 0v20M0 10h30" stroke="#FECC00" stroke-width="4"/>'),
+  no: svg('<rect width="30" height="20" fill="#BA0C2F"/><path d="M10 0v20M0 10h30" stroke="#FFFFFF" stroke-width="5"/><path d="M10 0v20M0 10h30" stroke="#00205B" stroke-width="2.5"/>'),
+  dk: svg('<rect width="30" height="20" fill="#C8102E"/><path d="M10 0v20M0 10h30" stroke="#FFFFFF" stroke-width="2.86"/>'),
+  fi: svg('<rect width="30" height="20" fill="#FFFFFF"/><path d="M11.82 0v20M0 10h30" stroke="#002F6C" stroke-width="5.45"/>'),
+  in: svg('<rect width="30" height="20" fill="#138808"/><rect width="30" height="13.33" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#FF9933"/><circle cx="15" cy="10" r="2.5" fill="#000080"/><circle cx="15" cy="10" r="2" fill="#FFFFFF"/><circle cx="15" cy="10" r=".45" fill="#000080"/><path d="M17.25 10L12.75 10M17.17 10.58L12.83 9.42M16.95 11.12L13.05 8.88M16.59 11.59L13.41 8.41M16.13 11.95L13.87 8.05M15.58 12.17L14.42 7.83M15 12.25L15 7.75M14.42 12.17L15.58 7.83M13.87 11.95L16.13 8.05M13.41 11.59L16.59 8.41M13.05 11.12L16.95 8.88M12.83 10.58L17.17 9.42" stroke="#000080" stroke-width=".2"/>'),
+  id: svg('<rect width="30" height="20" fill="#FFFFFF"/><rect width="30" height="10" fill="#FF0000"/>'),
+  vn: svg('<rect width="30" height="20" fill="#DA251D"/><polygon points="15,4 18.53,14.85 9.29,8.15 20.71,8.15 11.47,14.85" fill="#FFFF00"/>'),
+  gr: svg('<rect width="30" height="20" fill="#0D5EAF"/><path d="M0 3.33h30M0 7.78h30M0 12.22h30M0 16.67h30" stroke="#FFFFFF" stroke-width="2.22"/><rect width="11.11" height="11.11" fill="#0D5EAF"/><path d="M5.56 0v11.11M0 5.56h11.11" stroke="#FFFFFF" stroke-width="2.22"/>'),
+  hu: svg('<rect width="30" height="20" fill="#477050"/><rect width="30" height="13.33" fill="#FFFFFF"/><rect width="30" height="6.67" fill="#CE2939"/>'),
+  ro: svg('<rect width="30" height="20" fill="#CE1126"/><rect width="20" height="20" fill="#FCD116"/><rect width="10" height="20" fill="#002B7F"/>'),
   auto: svg('<g fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="15" cy="10" r="8.4"/><path d="M6.6 10h16.8M7.9 5.5h14.2M7.9 14.5h14.2M15 1.6v16.8a4.2 8.4 0 0 1 0-16.8a4.2 8.4 0 0 1 0 16.8"/></g>'),
 })

@@ -15,7 +15,7 @@
 
 import { SOURCES, USAGE_PAGE } from './adapters'
 import { AGENT_RETENTION_DAYS, AgentTreeVm, HookEntry, MAX_AGENT_MORE, MAX_MORE_PAGES } from './agentTree'
-import { buildAgentTree, sessionName, spanText } from './agentTreeBuild'
+import { buildAgentTree, sessionShortName, spanText } from './agentTreeBuild'
 import { Aggregator, HourQuery, Metric, billable } from './agg'
 import { BudgetRow, budgetRows } from './budget'
 import {
@@ -2238,7 +2238,7 @@ export function buildViewModel(input: VmInput, opts: { shareBuckets?: boolean } 
     // 1.11 B: the Agents tree's own words for a session (agentTreeBuild.ts, see `RecordsWords`), and no
     // record at all while the history is still being read (B4).
     records: recordsOf(ctx, range, cfg.dashboard.topN, firstDay, input.settled !== false,
-      { sessionName, spanText, hourRetentionDays: cfg.hourRetentionDays }),
+      { sessionName: sessionShortName, spanText, hourRetentionDays: cfg.hourRetentionDays }),
     // The same cap the records tables use: two "top n" tables on one page that disagree
     // about n would look like two different measurements.
     tools: toolRows(ctx, range, cfg.dashboard.topN),

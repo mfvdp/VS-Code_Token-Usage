@@ -442,6 +442,16 @@ export function sessionName(sessionId: string, start: number | null, now: number
   return start === null ? sessionIdName(sessionId) : t('Session {0} · {1}', startName(start, now, tcfg), sessionId.slice(0, 8))
 }
 
+/**
+ * 1.11 (the lead's pre-freeze fix): the session's name without the word "Session" — "Tue 14:20 · 9d0eb37a", the id alone
+ * without a start — for the Records tables and their Quick Pick lines (§3 B2, B6), whose column head and key already say
+ * "session"; "Session: Session Tue 14:20 …" and "Longest session Session Tue 14:20 …" doubled the word. The tree keeps its
+ * full name. No t(): a time and an id.
+ */
+export function sessionShortName(sessionId: string, start: number | null, now: number, tcfg: TimeConfig): string {
+  return start === null ? sessionId.slice(0, 8) : `${startName(start, now, tcfg)} · ${sessionId.slice(0, 8)}`
+}
+
 function runId8(workflowId: string): string {
   return workflowId.replace(/^wf_/, '').slice(0, 8)
 }

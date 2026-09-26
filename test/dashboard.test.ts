@@ -3388,7 +3388,7 @@ function newRecordsData(over: Record<string, unknown> = {}): Record<string, unkn
       { day: '2026-09-02', cost: '~$12.30', usage: '1.2M', floor: true },
       { day: '2026-09-01', cost: '~$4.10', usage: '800K', floor: false },
     ],
-    longestSessions: [{ sessionId: 'aaaa1111-0000', name: 'Session Tue 14:20 · aaaa1111', start: '2026-09-01 14:20', time: '3 h 12 min', usage: '37K' }],
+    longestSessions: [{ sessionId: 'aaaa1111-0000', name: 'Tue 14:20 · aaaa1111', start: '2026-09-01 14:20', time: '3 h 12 min', usage: '37K' }],
     largestSessions: [{ sessionId: 'bbbb2222-0000', name: 'Session Wed 09:05 · bbbb2222', start: '09:05', time: '49 min 00 s', usage: '100K' }],
     cacheHours: [
       { hour: '2026-09-03 10:00', written: '1.2M', written1h: '200K', cost: '~$7.50', floor: true, models: '<img src=x onerror=alert(1)>, claude-sonnet-4-6 +1 more' },
@@ -3420,7 +3420,7 @@ test('1.11 B6, B8 6: the Records page draws the four new tables — heads, stack
   // The two session tables: their own column order, the time glued to its units, the start's day kept whole.
   const longest = cardOf(h, 'Longest sessions')
   assert.ok(longest.includes('<thead><tr><th>Session</th><th>Time</th><th>Usage</th><th>Started</th></tr></thead>'), longest)
-  assert.ok(longest.includes('<tr><td data-h="Session" data-hl="Session: ">Session Tue 14:20 · aaaa1111</td>'
+  assert.ok(longest.includes('<tr><td data-h="Session" data-hl="Session: ">Tue 14:20 · aaaa1111</td>'
     + '<td data-h="Time" data-hl="Time: ">3 h 12 min</td><td data-h="Usage" data-hl="Usage: ">37K</td>'
     + '<td data-h="Started" data-hl="Started: "><span class="nobr">2026-09-01</span> 14:20</td></tr>'), longest)
   const largest = cardOf(h, 'Largest sessions')

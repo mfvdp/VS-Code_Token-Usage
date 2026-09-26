@@ -2225,7 +2225,7 @@ test('the Quick Pick carries the card\'s lines — state as the label, cost as t
   // keeps its 1.3 line there. 1.11 B2 (rewritten, was: in no item at all): the Records group ranks the
   // sessions of the Agents section's index that are no longer active — this one among them, by its name.
   assert.deepEqual(items.filter((i) => i.label.includes('bbbb2222')).map((i) => i.label.replace(/: .*$/, '')),
-    ['Longest session Session Thu 10:30 · bbbb2222', 'Largest session Session Thu 10:30 · bbbb2222'])
+    ['Longest session Thu 10:30 · bbbb2222', 'Largest session Thu 10:30 · bbbb2222'])
   const oldLine = items.findIndex((i) => i.label.startsWith('prompt cache warm · expires in'))
   assert.ok(oldLine > at(block.lines[2].text) && oldLine < firstCodex)
   // The Codex line after the Codex windows.

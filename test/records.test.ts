@@ -12,7 +12,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Aggregator } from '../src/agg'
-import { sessionName, spanText } from '../src/agentTreeBuild'
+import { sessionShortName, spanText } from '../src/agentTreeBuild'
 import { toCsv, toJson, toMarkdownSummary } from '../src/exporter'
 import { costOfBucket } from '../src/prices'
 import { LOCAL_BLOCK_HOURS, RecordsWords, StatsCtx, localBlock, records } from '../src/stats'
@@ -325,7 +325,7 @@ test('each provider gets its own block, and a source without hours gets none', (
 // ---------------------------------------------------------------------------
 
 /** What the view model hands `records()`: the Agents tree's own words, and the hour buckets' horizon. */
-const WORDS: RecordsWords = { sessionName, spanText, hourRetentionDays: 45 }
+const WORDS: RecordsWords = { sessionName: sessionShortName, spanText, hourRetentionDays: 45 }
 const MS_MIN = 60_000
 
 /** One day bucket of `input` tokens and nothing else — its cost is `input` at the model's input rate. */
@@ -444,16 +444,18 @@ function sessionWorld(): Aggregator {
 test('1.11 B2: the longest and the largest sessions — only ended ones, named as the Agents tree names them, own usage plus the agents\', one row per id', () => {
   const r = records(ctxOf(sessionWorld(), { sources: ['claude'] }), custom('2026-08-31', TODAY), 5, '2026-07-01', true, WORDS)
   assert.deepEqual(r.longestSessions.map((s) => [s.name, s.time, s.usage, s.start]), [
-    ['Session Thu 08:00 · aaaa1111', '3 h 12 min', '37K', '08:00'],
-    ['Session Thu 09:00 · dddd4444', '1 h 00 min', '2K', '09:00'],
-    ['Session Tue 12:00 · bbbb2222', '49 min 00 s', '100K', '2026-09-01 12:00'],
+    ['Thu 08:00 · aaaa1111', '3 h 12 min', '37K', '08:00'],
+    ['Thu 09:00 · dddd4444', '1 h 00 min', '2K', '09:00'],
+    ['Tue 12:00 · bbbb2222', '49 min 00 s', '100K', '2026-09-01 12:00'],
   ])
   assert.deepEqual(r.largestSessions.map((s) => [s.sessionId, s.usage, s.time]), [
     ['bbbb2222-0000', '100K', '49 min 00 s'], ['aaaa1111-0000', '37K', '3 h 12 min'], ['dddd4444-0000', '2K', '1 h 00 min'],
   ])
-  // The name and the time are the tree's own (agentTreeBuild.ts), not a second form of them.
+  // The name and the time are the tree's own (agentTreeBuild.ts), not a second form of them — the name without the word
+  // "Session" (the lead's 1.11 pre-freeze fix: the column head and the Quick Pick key already say it).
   const a = r.longestSessions[0]
-  assert.equal(a.name, sessionName('aaaa1111-0000', NOW - 4 * H, NOW, tcfg))
+  assert.equal(a.name, sessionShortName('aaaa1111-0000', NOW - 4 * H, NOW, tcfg))
+  assert.equal(a.name, 'Thu 08:00 · aaaa1111')
   assert.equal(a.time, spanText(3 * H + 12 * MS_MIN))
   // The active one is not ranked, and the note counts it; the basis note stands with the rows.
   assert.equal([...r.longestSessions, ...r.largestSessions].some((s) => s.sessionId.startsWith('cccc')), false)
@@ -601,10 +603,10 @@ test('1.11 §0a.2 leak test: the session is ranked by its name, and its path —
   assert.ok(agg.agents().some((a) => a.sessionFile.includes(SECRET)))
   const cfg = makeConfig({ 'tokenPace.dashboard.sections': ['quota', 'records'] })
   const vm = buildViewModel(makeInput({ agg, cfg }))
-  assert.deepEqual(vm.records.longestSessions.map((s) => s.name), ['Session Thu 07:00 · 9d0eb37a'])
+  assert.deepEqual(vm.records.longestSessions.map((s) => s.name), ['Thu 07:00 · 9d0eb37a'])
   assert.equal(JSON.stringify(vm.records).includes(SECRET), false, 'vm.records')
   assert.equal(JSON.stringify(quickPickItems(vm)).includes(SECRET), false, 'the Quick Pick')
-  assert.ok(quickPickItems(vm).some((i) => i.label.startsWith('Longest session Session Thu 07:00 · 9d0eb37a')))
+  assert.ok(quickPickItems(vm).some((i) => i.label.startsWith('Longest session Thu 07:00 · 9d0eb37a')))
   assert.equal(markdownDocument(vm).includes(SECRET), false, 'the markdown document')
   assert.equal(toMarkdownSummary(vm).includes(SECRET), false, 'Copy Usage Summary')
   const exportRange = { from: '2026-08-01', to: TODAY }

@@ -250,3 +250,34 @@ test('the join: availableLanguages over the repository\'s l10n/ finds all fourte
     assert.deepEqual(l.options.filter((o) => o.checked).map((o) => o.id), [id], id)
   }
 })
+
+// ---------------------------------------------------------------------------
+// 1.10 P20: the join — every language has worked through the ledger, and the gates hold without tolerance
+// ---------------------------------------------------------------------------
+
+test('the join: no pending list is left, every ledger entry is applied to every language, and the manifest\'s records are fresh without any tolerance — l10n-rekey --check and nls-sources --check --strict exit 0 (1.10 B1, P20)', () => {
+  const { spawnSync } = require('node:child_process') as typeof import('node:child_process')
+  const { existsSync, readdirSync, readFileSync } = require('node:fs') as typeof import('node:fs')
+  const { join } = require('node:path') as typeof import('node:path')
+  const { ROOT } = require('./helpers/nls') as typeof import('./helpers/nls')
+  // The language packages delete their lists at the end; an empty folder may stay behind (git does not keep one).
+  const pendingDir = join(ROOT, 'l10n', 'pending')
+  const left = existsSync(pendingDir) ? readdirSync(pendingDir).filter((f) => !f.startsWith('.')) : []
+  assert.deepEqual(left, [], `pending lists left at the join: ${left.join(', ')}`)
+  // The ledger exists and has entries (1.10 changed the English), each applied: a language without a list is done.
+  const ledger = JSON.parse(readFileSync(join(ROOT, 'l10n', 'rekey.json'), 'utf8')) as { v: number; entries: unknown[] }
+  assert.equal(ledger.v, 1)
+  assert.ok(ledger.entries.length > 0, 'the ledger has no entry')
+  const run = (script: string, ...args: string[]): { status: number | null; out: string } => {
+    const r = spawnSync(process.execPath, [join(ROOT, 'scripts', script), ...args], { cwd: ROOT, encoding: 'utf8' })
+    return { status: r.status, out: `${r.stdout}${r.stderr}` }
+  }
+  const rekey = run('l10n-rekey.mjs', '--check')
+  assert.equal(rekey.status, 0, rekey.out)
+  assert.match(rekey.out, new RegExp(`every entry is applied \\(${ledger.entries.length} entries since \\w+; 0 language\\(s\\) with a pending list\\)`))
+  // --strict counts a pending manifest key as a problem; at the join there is none, in any of the thirteen languages.
+  const strict = run('nls-sources.mjs', '--check', '--strict')
+  assert.equal(strict.status, 0, strict.out)
+  assert.match(strict.out, /every record is fresh \(13 language\(s\)\)/)
+  assert.doesNotMatch(strict.out, /pending/)
+})

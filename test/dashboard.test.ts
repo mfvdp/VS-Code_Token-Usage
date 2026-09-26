@@ -1303,8 +1303,9 @@ test('a model\'s turn line names what its figures are — Avg turn time, Ø Turn
   const rows = (turnP90: string | null): Record<string, unknown> => ({
     models: { rows: [modelRow({ turnAvg: '42 s', turnP90 })], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
   })
-  assert.ok(render('sModels()', rows('1 min 10 s')).indexOf('<td colspan="99" class="meta">Avg turn time 42 s · P90 1 min 10 s</td>') >= 0)
-  assert.ok(render('sModels()', rows(null)).indexOf('<td colspan="99" class="meta">Avg turn time 42 s</td>') >= 0)
+  // 1.10 P20 (rewritten: the turn line is glued — §3 B5 rule 3; "42 s", "1 min", "10 s" kept with their units).
+  assert.ok(render('sModels()', rows('1 min 10 s')).indexOf('<td colspan="99" class="meta">' + glued('Avg turn time 42 s · P90 1 min 10 s') + '</td>') >= 0)
+  assert.ok(render('sModels()', rows(null)).indexOf('<td colspan="99" class="meta">' + glued('Avg turn time 42 s') + '</td>') >= 0)
   assert.equal(Object.keys(DICT).some((k) => k.startsWith('Avg turn {')), false)
   const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   assert.equal(bundle['Avg turn time {0}'], 'Ø Turn-Dauer {0}')
@@ -1314,7 +1315,16 @@ test('a model\'s turn line names what its figures are — Avg turn time, Ø Turn
     'Avg turn time {0}': bundle['Avg turn time {0}'], 'Avg turn time {0} · P90 {1}': bundle['Avg turn time {0} · P90 {1}'],
   }), /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
   ;(de as Record<string, unknown>).fixture = model(rows('1 min 10 s'))
-  assert.ok(String(nodeVm.runInContext('vm = fixture; sModels()', de)).indexOf('>Ø Turn-Dauer 42 s · P90 1 min 10 s</td>') >= 0)
+  assert.ok(String(nodeVm.runInContext('vm = fixture; sModels()', de)).indexOf('>' + glued('Ø Turn-Dauer 42 s · P90 1 min 10 s') + '</td>') >= 0)
+  // 1.10 P20: the durations the model writes ("~18 h 46 min") never break between a figure and its unit — the line a
+  // longer translation wraps at 260 px (it, pt-br, ja, ru in the harness) holds no plain space before a unit.
+  const long = String(render('sModels()', {
+    models: { rows: [modelRow({ turnAvg: '~12 h 05 min', turnP90: '~18 h 46 min' })], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  }))
+  const line = /<td colspan="99" class="meta">([^<]*)<\/td>/.exec(long)
+  assert.ok(line, long)
+  assert.equal(line[1], 'Avg turn time ~12\u00a0h 05\u00a0min · P90 ~18\u00a0h 46\u00a0min')
+  assert.equal(/\d (min|h|s)(?!\p{L})/u.test(line[1]), false, line[1])
 })
 
 test('the state is dropped when the verdict already says the same word', () => {

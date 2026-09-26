@@ -168,9 +168,11 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
 /**
  * 1.10 B1: whether a language may carry pending keys — the ones l10n/pending/<id>.json lists, which the English
  * changes of 1.10's code packages left for the language's own package (scripts/l10n-rekey.mjs). True from 1.10 P1
- * until the join; P20 sets it false, and from then on no pending file may exist (T14) and every rule holds every key.
+ * until the join; P20 set it false (the twelve language packages merged, every list deleted), and from then on no
+ * pending file may exist (T14) and every rule holds every key. The next version's first English change turns it true
+ * again together with `l10n-rekey.mjs --start`.
  */
-export const PENDING_ALLOWED: boolean = true
+export const PENDING_ALLOWED: boolean = false
 
 // ---------------------------------------------------------------------------
 // What a language is measured against: the English source and the German reference

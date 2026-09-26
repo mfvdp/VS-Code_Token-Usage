@@ -1404,9 +1404,11 @@ function sModels(): string {
       + '</td>' : '')
     + '<td' + dh(w.share) + '>' + esc(r.share) + '</td>'
     + '</tr>' + (r.turnAvg
+      // 1.10 P20 (§3 B5 rule 3): the turn line glued — at 260 px the longer translations of D5 (it, pt-br, ja, ru)
+      // wrap it, and "~18 h 46 min" broke between the figure and its unit.
       ? '<tr><td colspan="99" class="meta">'
-        + (r.turnP90 ? tr('Avg turn time {0} · P90 {1}', esc(r.turnAvg), esc(r.turnP90))
-                     : tr('Avg turn time {0}', esc(r.turnAvg)))
+        + glue(r.turnP90 ? tr('Avg turn time {0} · P90 {1}', esc(r.turnAvg), esc(r.turnP90))
+                         : tr('Avg turn time {0}', esc(r.turnAvg)))
         + '</td></tr>' : '')).join('');
   const more = m.hidden > 0
     ? '<tr class="more"><td colspan="99">'

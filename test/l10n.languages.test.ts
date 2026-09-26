@@ -1292,6 +1292,7 @@ function settle(dir: string, id: string, key: string, value: string): void {
   if (existsSync(pending)) {
     const p = JSON.parse(readFileSync(pending, 'utf8')) as Pending
     delete p.nls[key]
+    mkdirSync(join(pending, '..'), { recursive: true }) // the copy has no l10n/pending/ once the language's list is gone (P19's finding)
     writeFileSync(pending, `${JSON.stringify(p, null, 2)}\n`, 'utf8')
   }
 }
@@ -1344,6 +1345,7 @@ test('T15 catches an example the bar does not print — the English relative exa
   const pending = join(listed, PENDING_FILE('cs'))
   const p: Pending = existsSync(pending) ? JSON.parse(readFileSync(pending, 'utf8')) as Pending : { v: 1, applied: 0, bundle: {}, nls: {} }
   p.nls[key] = { state: 'review', why: 'the example now names the period' }
+  mkdirSync(join(pending, '..'), { recursive: true }) // the copy has no l10n/pending/ once the language's list is gone (P19's finding)
   writeFileSync(pending, `${JSON.stringify(p, null, 2)}\n`, 'utf8')
   assert.equal(run('T15', listed, 'cs', true).some((x) => x.includes(key)), false)
   assert.ok(run('T15', listed, 'cs', false).some((x) => x.includes(`${key} quotes "Σ 3,1M"`)))

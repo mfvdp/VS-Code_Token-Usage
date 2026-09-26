@@ -126,7 +126,7 @@
   "No transcripts found yet. Check that Claude Code or Codex has run on this machine, and that tokenPace.claudeDir / tokenPace.codexDir point at their directories.": "아직 대화 기록을 찾지 못했습니다. 이 컴퓨터에서 Claude Code 또는 Codex가 실행된 적이 있는지, tokenPace.claudeDir / tokenPace.codexDir이 해당 디렉터리를 가리키는지 확인하십시오.",
   "No {0}": "{0} 없음",
   "Not saved: {0}": "저장되지 않음: {0}",
-  "Not sent: {0}": "보내지 않음: {0}",
+  "Not sent: {0}": "전송되지 않음: {0}",
   "Open dashboard": "대시보드 열기",
   "Open settings": "설정 열기",
   "Output": "출력",

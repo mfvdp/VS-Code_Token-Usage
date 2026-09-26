@@ -223,7 +223,7 @@
   "Today's usage is {0} % below the {1}-day average ({2} vs {3} tokens per day).": "Bugünkü kullanım {1} günlük ortalamanın {0} % altında (günde {3} yerine {2} token).",
   "Token Pace did not see Claude Code start in that terminal, so it cannot tell which session runs there.": "Token Pace, Claude Code'un o terminalde başladığını görmedi; bu yüzden orada hangi oturumun çalıştığını anlayamaz.",
   "Token Pace is reading the transcripts; try again in a moment.": "Token Pace transkriptleri okuyor; biraz sonra yeniden deneyin.",
-  "Token Pace reads nothing of a Codex session's state: it cannot tell whether Codex is at work or waiting for an approval.": "Token Pace, bir Codex oturumunun durumundan hiçbir şey okumaz: Codex'in çalışıp çalışmadığını ya da bir izin bekleyip beklemediğini anlayamaz.",
+  "Token Pace reads nothing of a Codex session's state: it cannot tell whether Codex is at work or waiting for an approval.": "Token Pace, bir Codex oturumunun durumundan hiçbir şey okumaz: Codex'in bir iş üzerinde mi çalıştığını yoksa bir izin mi beklediğini anlayamaz.",
   "Token Pace's own texts switch at once. The settings, the command titles and the walkthrough follow VS Code's display language (Configure Display Language).": "Token Pace'in kendi metinleri hemen değişir. Ayarlar, komut başlıkları ve izlenecek yol VS Code'un görüntüleme dilini izler (Görüntüleme Dilini Yapılandır).",
   "Token mix": "Token karışımı",
   "Tokens processed since the day boundary, {0}": "Gün başlangıcından bu yana işlenen token'lar, {0}",

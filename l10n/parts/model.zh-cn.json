@@ -357,7 +357,7 @@
   "prompt cache – · expires in {0} ({1} TTL) · hit ratio {2}": "提示缓存 – · {0} 后过期（{1} TTL）· 命中率 {2}",
   "prompts.json could not be read ({0}). The shipped prompts are shown, and nothing is saved until the file is fixed or deleted (Token Pace: Clear Stored Data…).": "无法读取 prompts.json（{0}）。当前显示内置提示词；在修复或删除该文件之前不会保存任何内容（Token Pace: 清除已存储的数据…）。",
   "prompts.json could not be written ({0})": "无法写入 prompts.json（{0}）",
-  "prompts.json was written by a newer version of Token Pace; the shipped prompts are shown and the file is not changed.": "prompts.json 由更新版本的 Token Pace 写入；当前显示内置提示词，该文件不会被更改。",
+  "prompts.json was written by a newer version of Token Pace; the shipped prompts are shown and the file is not changed.": "prompts.json 由较新版本的 Token Pace 写入；当前显示内置提示词，该文件不会被更改。",
   "proxy requires authentication (HTTP 407)": "代理服务器要求身份验证（HTTP 407）",
   "quota sparkline, {0} days, no readings": "配额迷你图，{0} 天，无读数",
   "quota sparkline, {0} days, {1} reading, peak {2} %": "配额迷你图，{0} 天，{1} 个读数，峰值 {2} %",

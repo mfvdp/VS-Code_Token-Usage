@@ -22,7 +22,7 @@
   "If Claude Code is showing a permission dialog or a question there, the text and Enter would answer it. Text typed in that terminal and not sent yet goes with it.": "Jeśli Claude Code pokazuje tam okno dialogowe uprawnień lub pytanie, tekst i Enter odpowiedziałyby na nie. Wszystko, co wpisano w tym terminalu i jeszcze nie wysłano, zostanie wysłane razem z nim.",
   "If Codex is waiting for an approval there, the text and Enter would answer it. Text typed in that terminal and not sent yet goes with it.": "Jeśli Codex czeka tam na zatwierdzenie, tekst i Enter odpowiedziałyby na tę prośbę. Wszystko, co wpisano w tym terminalu i jeszcze nie wysłano, zostanie wysłane razem z nim.",
   "Keep it and chain Token Pace": "Zachowaj i dołącz Token Pace",
-  "Keep-warm line for {0} in {1} seconds, press to cancel": "Wiersz podtrzymujący dla sesji {0}, pozostało sekund: {1}, naciśnięcie anuluje",
+  "Keep-warm line for {0} in {1} seconds, press to cancel": "Wiersz podtrzymujący ({0}), pozostało sekund: {1}, naciśnięcie anuluje",
   "Last month": "Poprzedni miesiąc",
   "Last {0} days": "Ostatnie {0} dni",
   "Later": "Później",

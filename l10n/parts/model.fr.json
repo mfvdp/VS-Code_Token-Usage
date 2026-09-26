@@ -63,7 +63,7 @@
   "Depth": "Profondeur",
   "Done — every agent of this run has a recorded outcome, and at least one completed.": "Terminé — chaque agent de cette exécution a une issue enregistrée, et au moins un s’est achevé.",
   "Done — every one of these agents has a recorded outcome, and at least one completed.": "Terminé — chacun de ces agents a une issue enregistrée, et au moins un s’est achevé.",
-  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Double-cliquez sur un prompt, ou appuyez sur son bouton d’envoi, pour le taper dans le terminal où s’exécute Claude Code ou Codex et appuyer sur Entrée. Cliquez sur un prompt pour le modifier. Tout ce que vous avez tapé dans ce terminal sans l’envoyer part avec lui.",
+  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Double-cliquez sur un prompt, ou appuyez sur son bouton d’envoi, pour le taper dans le terminal où s’exécute Claude Code ou Codex et appuyer sur Entrée. Cliquez sur un prompt pour le modifier. Tout ce que vous avez tapé dans ce terminal sans l’envoyer part avec le prompt.",
   "Earlier sessions ({0})": "Sessions antérieures ({0})",
   "Effort": "Effort",
   "Empty response (fail_count {0})": "Réponse vide (fail_count {0})",

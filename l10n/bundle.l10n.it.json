@@ -464,7 +464,7 @@
   "Settings": "Impostazioni",
   "Settings for this section": "Impostazioni di questa sezione",
   "Share": "Percentuale",
-  "Share of complete cycles that hit the limit: {0} · Avg unused at the reset: {1}": "Percentuale dei cicli completi che hanno raggiunto il limite: {0} · Inutilizzato medio al reset: {1}",
+  "Share of complete cycles that hit the limit: {0} · Avg unused at the reset: {1}": "Percentuale dei cicli completi che hanno raggiunto il limite: {0} · Quota media inutilizzata al reset: {1}",
   "Share of input served from the prompt cache": "Parte dell'input servita dalla cache dei prompt",
   "Shared quota cache (outside the extension storage)": "Cache della quota condivisa (fuori dallo spazio di archiviazione dell'estensione)",
   "Show Log": "Mostra log",

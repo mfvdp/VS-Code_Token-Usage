@@ -169,7 +169,7 @@
   "Sent to {0} in terminal {1} of {2}.": "Inviato a {0} nel terminale {1} di {2}.",
   "Session {0}": "Sessione {0}",
   "Session {0} · {1}": "Sessione {0} · {1}",
-  "Share of complete cycles that hit the limit: {0} · Avg unused at the reset: {1}": "Percentuale dei cicli completi che hanno raggiunto il limite: {0} · Inutilizzato medio al reset: {1}",
+  "Share of complete cycles that hit the limit: {0} · Avg unused at the reset: {1}": "Percentuale dei cicli completi che hanno raggiunto il limite: {0} · Quota media inutilizzata al reset: {1}",
   "Share of input served from the prompt cache": "Parte dell'input servita dalla cache dei prompt",
   "Show log": "Mostra log",
   "Show the current progress in a clear table. Columns: step/status | description | model | duration | expected to finish.": "Mostrare lo stato di avanzamento attuale in una tabella chiara. Colonne: passo/stato | descrizione | modello | durata | fine prevista.",

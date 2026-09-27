@@ -55,9 +55,10 @@
  *
  * 1.12 E1 (P1): the English changes again while 1.12's code is written, for all twenty-four languages at once: the ledger
  * started at 1.11.0's release commit (l10n-rekey.mjs --start d39c2df) with a list at cursor 0 for each, and
- * PENDING_ALLOWED is true until 1.12's join (P10). Before a single 1.12 text is written, T9 learned the names those texts
- * carry (NAMES_OF_1_12) and to read a name of several words across a line break (D4), and SESSION_NAME_KEYS lists the keys
- * whose placeholder receives a session's name — held to the code by a scan of every t() call and named in the brief (D10).
+ * PENDING_ALLOWED was true until 1.12's join (P10 set it false). Before a single 1.12 text is written, T9 learned the
+ * names those texts carry (NAMES_OF_1_12) and to read a name of several words across a line break (D4), and
+ * SESSION_NAME_KEYS lists the keys whose placeholder receives a session's name — held to the code by a scan of every t()
+ * call and named in the brief (D10).
  *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
@@ -246,8 +247,10 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
  * 1.12 P1: true again — `l10n-rekey.mjs --start d39c2df` (the 1.11.0 release) started 1.12's ledger with a list at cursor
  * 0 for each of the twenty-four languages beyond English and German (every one has its files since 1.11's join); 1.12's
  * join (P10) sets it false. test/languages.test.ts's join test reads this line.
+ * 1.12 P10: false — group O (O1–O4, six languages each) worked the twenty-four lists to the ledger's end (121 entries) and
+ * deleted them; no list is left, and every rule holds every key of all twenty-four languages and German again.
  */
-export const PENDING_ALLOWED: boolean = true
+export const PENDING_ALLOWED: boolean = false
 
 /**
  * 1.11 A3 rule 11 (b): a language name a language writes as the English does — `[id, English name, reason]`. T10

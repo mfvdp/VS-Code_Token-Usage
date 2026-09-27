@@ -19,7 +19,8 @@
  *   T6  the page's words carry no markup character
  *   T7  the tone: no exclamation mark
  *   T8  the tables: a header row keeps its pipes
- *   T9  no English left, proper names and code excepted (SAME_IN_EVERY_LANGUAGE)
+ *   T9  no English left, proper names and code excepted (SAME_IN_EVERY_LANGUAGE), a key's own field ids too
+ *       (FIELD_IDS_OF_A_KEY)
  *   T10 the registry: every file names a shipped language; the language names translated (or written
  *       as the English where LANGUAGE_NAME_AS_ENGLISH says the language writes them so), the native
  *       names and the product's name as they are
@@ -128,6 +129,20 @@ export const NAMES_OF_1_12: ReadonlyArray<readonly [string, string]> = [
   ['BotFather', 'Telegram\'s bot that makes a bot and its token — a name (§3 C1)'],
   ['SMTP', 'a protocol\'s name — the e-mail channel (§3 C10)'],
   ['STARTTLS', 'a protocol command\'s name — the e-mail channel\'s security (§3 C10)'],
+]
+
+/**
+ * 1.12 O2 (the lead, at O2's merge — §0b.7: an exception is never a package's): a key that names a setting's fields by
+ * their ids keeps those ids in English in every language, as the ledger's why says (n=95, P9 — §3 C13) — a language of
+ * another script lists them between its own separators (ja 「host、user、from、to」, ru «host, user, from и to»), a run
+ * of Latin words T9's second rule read as English left: O2 reported it for ja, ko, zh-cn, zh-tw and ru, and O4's uk, el
+ * and hi would follow. Held per key — `[key, ids, reason]`: T9 takes the ids out of that key and its value alone, so
+ * that `host`, `user`, `from` and `to` stay English words it catches everywhere else (SAME_IN_EVERY_LANGUAGE would
+ * take them out of every text). The brief's T9 section names the key and the ids.
+ */
+export const FIELD_IDS_OF_A_KEY: ReadonlyArray<readonly [string, ReadonlyArray<string>, string]> = [
+  ['Set host, user, from and to in tokenPace.notifications.email first.', ['host', 'user', 'from', 'to'],
+    'the e-mail channel\'s setup check names the four fields of tokenPace.notifications.email by their ids (ledger n=95, P9 — §3 C13); O2 reported the false positive for the five languages of another script'],
 ]
 
 /**
@@ -595,6 +610,13 @@ function nonLatinLeft(value: string): string | null {
   return null
 }
 
+/** T9: a key of FIELD_IDS_OF_A_KEY, and its value, with the listed ids taken out — whole words, whatever stands around them. */
+const FIELD_IDS: ReadonlyMap<string, RegExp> = new Map(FIELD_IDS_OF_A_KEY.map(([k, ids]) => [k, new RegExp(`(?<![\\p{L}\\p{N}])(?:${ids.map(reEsc).join('|')})(?![\\p{L}\\p{N}])`, 'gu')]))
+function withoutFieldIds(key: string, value: string): [string, string] {
+  const re = FIELD_IDS.get(key)
+  return re ? [key.replace(re, ' '), value.replace(re, ' ')] : [key, value]
+}
+
 /**
  * The quotation marks a {n} may stand between (T11), and an example between (T15), in any language of the registry.
  * 1.11 A3 rule 3: ” opens too — Swedish and Finnish write ”…” (and »…», which 1.10's sets read already: » was an
@@ -945,7 +967,10 @@ const RULES: Record<string, { title: string; rule: Rule }> = {
     title: 'no English left — proper names and code excepted',
     rule: (s, l) => {
       const out: string[] = []
-      const left = (en: string, v: string): string | null => (NON_LATIN.has(l.id) ? nonLatinLeft(v) : latinLeft(en, v))
+      const left = (en: string, v: string): string | null => {
+        const [key, value] = withoutFieldIds(en, v)
+        return NON_LATIN.has(l.id) ? nonLatinLeft(value) : latinLeft(key, value)
+      }
       for (const [k, v] of entries(l.bundle)) {
         const why = left(k, v)
         if (why) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} ${why}`)
@@ -1369,6 +1394,35 @@ test('T9 catches a copied English sentence — in a French value (§3 B3\'s muta
   caught('T9', nls, 'fr', cleanFr, 'package.nls.fr.json: description')
 })
 
+test('T9 lets the field ids a key lists stand in a language of another script — O2\'s Japanese, Korean and Russian values —, and catches English beside them and the same four words in another key (1.12 O2, the lead at the merge)', () => {
+  assert.equal(FIELD_IDS_OF_A_KEY.length, 1)
+  const [key, ids, why] = FIELD_IDS_OF_A_KEY[0]
+  assert.equal(key, 'Set host, user, from and to in tokenPace.notifications.email first.')
+  assert.deepEqual([...ids], ['host', 'user', 'from', 'to'])
+  assert.ok(why.trim().length > 10, 'no reason')
+  for (const [k] of FIELD_IDS_OF_A_KEY) assert.ok(src().keys.includes(k), `${J(k)} is not a key of the bundle`)
+  // Whole words only: hosted, users and fromage are none of the ids; the ids of a key stay in every other key.
+  assert.deepEqual(wordsOf(withoutFieldIds(key, 'vor host nach hosted users fromage to')[1]), ['vor', 'nach', 'hosted', 'users', 'fromage'])
+  assert.deepEqual(withoutFieldIds('another key', 'host user from to'), ['another key', 'host user from to'])
+  const clean = fixture('pseudo', 'ja')
+  for (const value of [
+    '先に tokenPace.notifications.email で host、user、from、to を設定してください。',
+    '먼저 tokenPace.notifications.email에서 host, user, from, to를 설정하십시오.',
+    'Сначала задайте host, user, from и to в tokenPace.notifications.email.',
+  ]) {
+    const dir = fixture('pseudo', 'ja')
+    editKey(dir, 'ja', key, () => value)
+    assert.deepEqual(run('T9', dir, 'ja'), [], value)
+  }
+  const beside = fixture('pseudo', 'ja')
+  editKey(beside, 'ja', key, () => '先に host、user、from、to in the settings を設定してください。')
+  caught('T9', beside, 'ja', clean, J(key), 'three Latin words in a row: "in the settings"')
+  const other = keyWhere((k) => k === 'Not enough data for a summary yet.')
+  const elsewhere = fixture('pseudo', 'ja')
+  editKey(elsewhere, 'ja', other, (v) => `${v} host user from`)
+  caught('T9', elsewhere, 'ja', clean, J(other), 'three Latin words in a row: "host user from"')
+})
+
 test('T10 catches a file named after no shipped language, an untranslated language name, a translated native name and a translated product name', () => {
   const clean = fixture('german', 'fr')
   const xx = fixture('german', 'xx')
@@ -1476,6 +1530,11 @@ test('the brief names every rule of the frame, the files a package owns, the gat
   // 1.9 B5 (P19): every word added at the join, and every manifest span that is words, is named in the brief — a
   // translation of a later language must not meet an exception it cannot read about.
   for (const [w] of ADDED_AT_THE_JOIN) assert.ok(brief.includes(`\`${w}\``), `the brief does not name the join's ${w}`)
+  // 1.12 O2 (the lead, at the merge): the key whose field ids T9 lets stand is named in the brief, in quotation marks, with its ids.
+  for (const [k, ids] of FIELD_IDS_OF_A_KEY) {
+    assert.ok(brief.includes(`"${k}"`), `the brief does not name the key ${J(k)}`)
+    assert.ok(brief.includes(`\`${ids.join('\`, \`')}\``), `the brief does not name the ids of ${J(k)}`)
+  }
   for (const [w] of NLS_SPANS_READ_AS_WORDS) assert.ok(brief.includes(`\`${w}\``), `the brief does not name the span ${w}`)
   assert.ok(brief.replace(/\s+/g, ' ').includes(`There are ${['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'][NLS_SPANS_READ_AS_WORDS.length]}, and the test names them`),
     'the brief does not count the spans that are words')

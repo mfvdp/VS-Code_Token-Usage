@@ -414,7 +414,10 @@ each failure names the language, the file and the key:
   of them ends the run. Vietnamese is written in Latin letters and held by the first rule. No manifest entry
   of 40 characters or more is the English. A manifest key on your pending list is left out of T3, T4,
   T5, T7 and T9 until it is done: its value is the English, or your translation of the English before
-  the change.
+  the change. A key that names a setting's fields by their ids — 1.12: "Set host, user, from and to in tokenPace.notifications.email first." —
+  keeps `host`, `user`, `from`, `to` in English between your own separators: T9 takes those four out of that key and
+  its value alone (`FIELD_IDS_OF_A_KEY`, the key with its ids and the reason); everywhere else they are English words
+  it catches.
 * **T10 · Registry** — every file names a registry id; the registry's language names are translated
   (1.11: a name your list names `translate` may be missing until you translate it, and a name may be
   the English only where `LANGUAGE_NAME_AS_ENGLISH` says your language writes it so);

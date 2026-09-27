@@ -1922,7 +1922,10 @@ test('T10 lets a language name the ledger just added be absent while its list na
 })
 
 test('T10 takes a name equal to the English only by LANGUAGE_NAME_AS_ENGLISH — German\'s Hindi passes by its entry, a German Dutch or a French Hindi fails (1.11 A3 rule 11 b)', () => {
-  assert.deepEqual(LANGUAGE_NAME_AS_ENGLISH.map(([id, name]) => [id, name]), [['de', 'Hindi']])
+  // 1.11 L1 (pinned and changed: [['de', 'Hindi']]): the Latin-script languages of tier 2 write Hindi as the English does —
+  // the lead's entries at L1's merge, each with its dictionary; a new entry is a deliberate change of this line.
+  assert.deepEqual(LANGUAGE_NAME_AS_ENGLISH.map(([id, name]) => [id, name]),
+    [['de', 'Hindi'], ['nl', 'Hindi'], ['da', 'Hindi'], ['sv', 'Hindi'], ['nb', 'Hindi'], ['fi', 'Hindi'], ['hu', 'Hindi'], ['ro', 'Hindi'], ['id', 'Hindi']])
   for (const [id, name, why] of LANGUAGE_NAME_AS_ENGLISH) {
     assert.ok(isLanguageId(id) && id !== 'en', `${id} is no language that translates`)
     assert.ok(name.length > 0 && why.trim().length > 0 && !why.includes('; '), `${id} ${name}: no reason`)

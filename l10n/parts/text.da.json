@@ -141,7 +141,7 @@
   "Quota cache (quota.json)": "Kvotecache (quota.json)",
   "Quota history (quotaHistory.json)": "Kvotehistorik (quotaHistory.json)",
   "Quota history: {0} samples · {1} KB · oldest {2}": "Kvotehistorik: {0} målinger · {1} KB · ældste {2}",
-  "Quota readings have {0} gap(s) in the last 24 h; a hole with no reset inside it is bridged by a dashed line, a hole across a reset stays open.": "Kvotemålingerne har {0} hul(ler) i de seneste 24 h; et hul uden nulstilling i overbygges af en stiplet linje, et hul hen over en nulstilling forbliver åbent.",
+  "Quota readings have {0} gap(s) in the last 24 h; a hole with no reset inside it is bridged by a dashed line, a hole across a reset stays open.": "Kvotemålingerne har {0} hul(ler) i de seneste 24 h; et hul, der ikke rummer en nulstilling, forbindes med en stiplet linje, et hul hen over en nulstilling forbliver åbent.",
   "Quota sources {0}: {1}": "Kvotekilder {0}: {1}",
   "Re-read": "Genindlæs",
   "Re-read token history": "Genindlæs tokenhistorik",

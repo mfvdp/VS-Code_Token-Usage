@@ -229,7 +229,7 @@
   "Hit": "ヒット",
   "Hit rate": "ヒット率",
   "Hour": "時間帯",
-  "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.": "時間バケットは {0} 日間保持されます（tokenPace.hourRetentionDays）。それより前の時間帯は順位に含まれません。",
+  "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.": "時間バケットは {0} 日間保持されます (tokenPace.hourRetentionDays)。それより前の時間帯は順位に含まれません。",
   "Hours ({0}, {1} day(s)): peak {2} · {3}": "時間帯（{0}、{1} 日）: ピーク {2} · {3}",
   "Hours with the most cache written": "キャッシュ書き込みが最も多い時間帯",
   "How": "算出方法",

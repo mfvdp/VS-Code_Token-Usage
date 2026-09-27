@@ -152,7 +152,7 @@
   "Reset history": "重置回顾",
   "Reset history {0}": "重置回顾 {0}",
   "Retention: {0} d hourly · {1} d daily · {2} d quota history": "保留：{0} d 小时数据 · {1} d 日数据 · {2} d 配额历史",
-  "Risk: Token Pace cannot see Claude Code's input line. Anything you typed there and did not send is sent with it — type nothing into the Claude terminal while the countdown runs. Nor can Token Pace see a dialog the transcript does not show. A session in the Claude Code extension's own panel is out of reach and gets no line.": "风险：Token Pace 看不到 Claude Code 的输入行。在那里输入但尚未发送的任何内容都会随之一起发送——倒计时期间请勿在 Claude 终端中输入任何内容。Token Pace 也看不到对话记录中未显示的对话框。在 Claude Code 扩展自身面板中运行的会话无法触及，不会收到保温消息。",
+  "Risk: Token Pace cannot see Claude Code's input line. Anything you typed there and did not send is sent with it — type nothing into the Claude terminal while the countdown runs. Nor can Token Pace see a dialog the transcript does not show. A session in the Claude Code extension's own panel is out of reach and gets no line.": "风险：Token Pace 看不到 Claude Code 的输入行。在那里输入但尚未发送的任何内容都会与保温消息一起发送——倒计时期间请勿在 Claude 终端中输入任何内容。Token Pace 也看不到对话记录中未显示的对话框。在 Claude Code 扩展自身面板中运行的会话无法触及，不会收到保温消息。",
   "Roots: {0} · {1} file(s)": "根目录：{0} · {1} 个文件",
   "Run \"Token Pace: Disconnect Claude Status Line\" first — clearing files here does not restore Claude Code's settings.json.": "请先运行“Token Pace: 断开 Claude 状态行”——在此处清除文件不会恢复 Claude Code 的 settings.json。",
   "Running": "运行中",

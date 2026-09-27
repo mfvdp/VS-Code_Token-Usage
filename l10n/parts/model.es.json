@@ -66,7 +66,7 @@
   "Depth": "Profundidad",
   "Done — every agent of this run has a recorded outcome, and at least one completed.": "Terminado — cada agente de esta ejecución tiene un desenlace registrado, y al menos uno se completó.",
   "Done — every one of these agents has a recorded outcome, and at least one completed.": "Terminado — cada uno de estos agentes tiene un desenlace registrado, y al menos uno se completó.",
-  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Haga doble clic en un prompt, o pulse su botón de envío, para escribirlo en el terminal en el que se ejecuta Claude Code o Codex y pulsar Intro. Haga clic en un prompt para editarlo. Lo que haya escrito en ese terminal sin enviar se envía con él.",
+  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Haga doble clic en un prompt, o pulse su botón de envío, para escribirlo en el terminal en el que se ejecuta Claude Code o Codex y pulsar Intro. Haga clic en un prompt para editarlo. Lo que haya escrito en ese terminal sin enviar se envía junto con el prompt.",
   "Dutch": "Neerlandés",
   "Earlier sessions ({0})": "Sesiones anteriores ({0})",
   "Effort": "Esfuerzo",

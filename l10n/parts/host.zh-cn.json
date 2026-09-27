@@ -82,7 +82,7 @@
   "Token Pace found no Claude Code or Codex transcripts on this host (remote \"{0}\"). The extension runs on one side of the connection only. If your transcripts are on the local machine, Token Pace can be moved there (one click writes \"remote.extensionKind\" into your user settings and offers a reload); if they are on this host, point tokenPace.claudeDir / tokenPace.codexDir at them.": "Token Pace 在此主机（远程“{0}”）上未找到 Claude Code 或 Codex 的对话记录。扩展只在连接的一侧运行。如果对话记录位于本地计算机上，可将 Token Pace 移到本地运行（点击一次即可将“remote.extensionKind”写入用户设置，并提供重新加载）；如果对话记录位于此主机上，请将 tokenPace.claudeDir / tokenPace.codexDir 指向它们。",
   "Token Pace has not installed a status line.": "Token Pace 未安装状态行。",
   "Token Pace will run on the local machine after a window reload.": "重新加载窗口后，Token Pace 将在本地计算机上运行。",
-  "Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.": "Token Pace 将在运行 {1} 的终端中输入“{0}”并按 Enter 键，使其提示缓存保持温热。点击可取消。",
+  "Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.": "Token Pace 将在运行 {1} 的终端中输入“{0}”并按 Enter 键，使该会话的提示缓存保持温热。点击可取消。",
   "Token Pace writes nothing into `~/.claude`: you add the hook yourself, and you remove it yourself.": "Token Pace 不会向 `~/.claude` 写入任何内容：钩子需要自行添加，也需要自行删除。",
   "Token Pace — clear stored data": "Token Pace——清除已存储的数据",
   "Token Pace — keep-warm countdown": "Token Pace——保温倒计时",

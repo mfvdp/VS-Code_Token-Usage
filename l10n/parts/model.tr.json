@@ -66,7 +66,7 @@
   "Depth": "Derinlik",
   "Done — every agent of this run has a recorded outcome, and at least one completed.": "Bitti — bu çalıştırmanın her ajanı için kaydedilmiş bir son durum var ve en az biri tamamlandı.",
   "Done — every one of these agents has a recorded outcome, and at least one completed.": "Bitti — bu ajanların her biri için kaydedilmiş bir son durum var ve en az biri tamamlandı.",
-  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Bir isteme çift tıklarsanız ya da gönderme düğmesine basarsanız, Token Pace onu Claude Code'un veya Codex'in çalıştığı terminale yazar ve Enter'a basar. Bir istemi düzenlemek için ona tıklayın. O terminale yazdığınız ve henüz göndermediğiniz metin de onunla birlikte gönderilir.",
+  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Bir isteme çift tıklarsanız ya da gönderme düğmesine basarsanız, Token Pace onu Claude Code'un veya Codex'in çalıştığı terminale yazar ve Enter'a basar. Bir istemi düzenlemek için ona tıklayın. O terminale yazdığınız ve henüz göndermediğiniz metin de istemle birlikte gönderilir.",
   "Dutch": "Felemenkçe",
   "Earlier sessions ({0})": "Önceki oturumlar ({0})",
   "Effort": "Efor",

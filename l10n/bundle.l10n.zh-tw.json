@@ -617,7 +617,7 @@
   "Token Pace is reading the transcripts; try again in a moment.": "Token Pace 正在讀取對話記錄；請稍後再試。",
   "Token Pace reads nothing of a Codex session's state: it cannot tell whether Codex is at work or waiting for an approval.": "Token Pace 不讀取 Codex 工作階段的任何狀態：無法判斷 Codex 是正在工作，還是在等待核准。",
   "Token Pace will run on the local machine after a window reload.": "重新載入視窗後，Token Pace 將在本機執行。",
-  "Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.": "Token Pace 將在執行 {1} 的終端機中輸入「{0}」並按下 Enter，讓其提示快取保持溫熱。按一下即可取消。",
+  "Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.": "Token Pace 將在執行 {1} 的終端機中輸入「{0}」並按下 Enter，讓該工作階段的提示快取保持溫熱。按一下即可取消。",
   "Token Pace writes nothing into `~/.claude`: you add the hook yourself, and you remove it yourself.": "Token Pace 不會寫入 `~/.claude` 中的任何內容：掛鉤需自行加入，也需自行移除。",
   "Token Pace writes only into its own storage — with this one exception, if you allow it.": "Token Pace 只會寫入自己的儲存空間 — 唯一的例外就是這一項，且需經允許。",
   "Token Pace — API cost ({0})": "Token Pace — API 費用（{0}）",

@@ -211,7 +211,7 @@
   "config.dashboard.mode.enum.quickPick": "En Quick Pick-liste — tastatur først, ingen webview, samme tall",
   "config.dashboard.mode.enum.markdown": "Et skrivebeskyttet Markdown-dokument med tabeller og ASCII-linjer — kan kopieres",
   "config.chart.modelStyle.description": "Hvordan dagsdiagrammet skiller modellene til én leverandør fra hverandre. Hvert bånd har leverandørens fargetone — Claude blå, Codex lilla — og de fem største modellene til hver leverandør får en rangering; resten slås sammen til ett `andre`-bånd per leverandør. Forklaringsfeltene har samme fyll som båndene. Når diagrammets `underagenter`-bryter er trykket inn, får hovedøktene til en leverandør første rangering og underagentene den andre.",
-  "config.chart.modelStyle.enum.pattern": "Én fargetone per leverandør, rangeringen tegnet som et mønster: helfylt, striper, kryssskravering, linjer, prikker",
+  "config.chart.modelStyle.enum.pattern": "Én fargetone per leverandør, rangeringen tegnet som et mønster: helfylt, striper, kryss-skravering, linjer, prikker",
   "config.chart.modelStyle.enum.shade": "Én fargetone per leverandør, rangeringen tegnet som en lysere eller mørkere nyanse av den",
   "config.chart.modelStyle.enum.both": "Nyansen og mønsteret sammen",
   "config.startOfWeek.description": "Første dag i uken for varmekartet, ukedagsrutenettet og tidsrommet `thisWeek`.",

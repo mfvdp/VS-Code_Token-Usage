@@ -93,7 +93,7 @@
   "HTTP 403 — may mean a Team/Enterprise account without a usage endpoint; token counts keep working": "HTTP 403 — 使用量エンドポイントのない Team/Enterprise アカウントの可能性があります。トークン数の集計は引き続き機能します",
   "HTTP {0} — backing off before the next attempt": "HTTP {0} — 次の試行まで待機しています",
   "Hindi": "ヒンディー語",
-  "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.": "時間バケットは {0} 日間保持されます（tokenPace.hourRetentionDays）。それより前の時間帯は順位に含まれません。",
+  "Hour buckets are kept for {0} day(s) (tokenPace.hourRetentionDays); earlier hours are not ranked.": "時間バケットは {0} 日間保持されます (tokenPace.hourRetentionDays)。それより前の時間帯は順位に含まれません。",
   "Hungarian": "ハンガリー語",
   "ID": "ID",
   "Idle — inferred: the session transcript has been silent since {0}.": "アイドル — 推測: セッションのトランスクリプトは {0} 以降更新されていません。",

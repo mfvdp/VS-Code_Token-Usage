@@ -168,7 +168,7 @@
   "Days with any usage in the range": "Dager med forbruk i tidsrommet",
   "Delete": "Slett",
   "Delete the four entries from `hooks` in `~/.claude/settings.json`. `agent-hook.jsonl` then stops growing, and its lines stop counting after {0} minutes.": "Slett de fire oppføringene fra `hooks` i `~/.claude/settings.json`. `agent-hook.jsonl` slutter da å vokse, og linjene i den teller ikke lenger etter {0} minutter.",
-  "Delete {0} stored item(s)? This cannot be undone.": "Slette {0} lagrede element(er)? Dette kan ikke angres.",
+  "Delete {0} stored item(s)? This cannot be undone.": "Slette {0} element(er) som er lagret? Dette kan ikke angres.",
   "Delete “{0}”?": "Slette «{0}»?",
   "Depth": "Dybde",
   "Details": "Detaljer",

@@ -14,7 +14,7 @@
   "Cycle Status Bar Windows": "Växla fönster i statusfältet",
   "Delete": "Ta bort",
   "Delete the four entries from `hooks` in `~/.claude/settings.json`. `agent-hook.jsonl` then stops growing, and its lines stop counting after {0} minutes.": "Ta bort de fyra posterna från `hooks` i `~/.claude/settings.json`. `agent-hook.jsonl` växer då inte längre, och dess rader slutar räknas efter {0} minuter.",
-  "Delete {0} stored item(s)? This cannot be undone.": "Ta bort {0} sparade objekt? Det går inte att ångra.",
+  "Delete {0} stored item(s)? This cannot be undone.": "Ta bort {0} objekt från lagringen? Det går inte att ångra.",
   "Export CSV…": "Exportera CSV…",
   "Fetch Quota Now": "Hämta kvot nu",
   "Fetch failed": "Hämtningen misslyckades",

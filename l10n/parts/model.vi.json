@@ -10,7 +10,7 @@
   "A large cache write is usually a cold start — a conversation's prefix written to the cache again after it expired —, a new conversation or a compaction; one hour can hold several.": "Một lần ghi bộ nhớ đệm lớn thường là khởi động nguội — phần đầu của cuộc hội thoại được ghi lại vào bộ nhớ đệm sau khi hết hạn —, một cuộc hội thoại mới hoặc một lần thu gọn; một giờ có thể chứa nhiều lần như vậy.",
   "A prompt that starts with an exclamation mark would run a shell command in Claude Code.": "Lời nhắc bắt đầu bằng dấu chấm than sẽ chạy một lệnh shell trong Claude Code.",
   "API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}.": "Chi phí API là giả định: mức chi phí của lượng sử dụng này nếu dùng qua API của nhà cung cấp. Với gói thuê bao, khoản này không phải trả. Giá tính đến {0}.",
-  "API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}; checked later: {1}.": "Chi phí API là giả định: mức chi phí của lượng sử dụng này nếu dùng qua API của nhà cung cấp. Với gói thuê bao, khoản này không phải trả. Giá tính đến {0}; kiểm tra sau: {1}.",
+  "API cost is hypothetical: what this usage would have cost through the provider API. On a subscription you do not pay it. Prices as of {0}; checked later: {1}.": "Chi phí API là giả định: mức chi phí của lượng sử dụng này nếu dùng qua API của nhà cung cấp. Với gói thuê bao, khoản này không phải trả. Giá tính đến {0}; đã kiểm tra lại: {1}.",
   "API equivalent": "Tương đương API",
   "API requests the transcripts recorded": "Các yêu cầu API được ghi trong bản ghi hội thoại",
   "Active days": "Ngày hoạt động",

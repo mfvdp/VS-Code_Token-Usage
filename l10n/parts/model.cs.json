@@ -66,7 +66,7 @@
   "Depth": "Hloubka",
   "Done — every agent of this run has a recorded outcome, and at least one completed.": "Hotovo — každý agent tohoto běhu má zaznamenaný výsledek a alespoň jeden byl dokončen.",
   "Done — every one of these agents has a recorded outcome, and at least one completed.": "Hotovo — každý z těchto agentů má zaznamenaný výsledek a alespoň jeden byl dokončen.",
-  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Poklikáním na prompt nebo stisknutím jeho tlačítka pro odeslání se prompt napíše do terminálu, ve kterém běží Claude Code nebo Codex, a stiskne se Enter. Kliknutím na prompt se otevře k úpravám. Cokoli bylo v tomto terminálu napsáno a neodesláno, se odešle s ním.",
+  "Double-click a prompt, or press its send button, to type it into the terminal that runs Claude Code or Codex and press Enter. Click a prompt to edit it. Text typed in that terminal and not sent yet goes with it.": "Poklikáním na prompt nebo stisknutím jeho tlačítka pro odeslání se prompt napíše do terminálu, ve kterém běží Claude Code nebo Codex, a stiskne se Enter. Kliknutím na prompt se otevře k úpravám. Cokoli bylo v tomto terminálu napsáno a neodesláno, se odešle spolu s promptem.",
   "Dutch": "Nizozemština",
   "Earlier sessions ({0})": "Dřívější relace ({0})",
   "Effort": "Úsilí",

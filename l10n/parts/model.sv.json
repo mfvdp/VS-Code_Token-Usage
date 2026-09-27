@@ -423,7 +423,7 @@
   "{0} % used — over the limit; this window reports no reset time.": "{0} % förbrukat — över gränsen; det här fönstret rapporterar ingen återställningstid.",
   "{0} / {1} per 1M": "{0} / {1} per 1M",
   "{0} API equivalent this month ÷ {1} plan = {2}": "{0} API-motsvarighet den här månaden ÷ {1}-abonnemang = {2}",
-  "{0} active session(s) not ranked yet: their time and tokens are still growing.": "{0} aktiva session(er) ännu inte rangordnade: deras tid och tokens växer fortfarande.",
+  "{0} active session(s) not ranked yet: their time and tokens are still growing.": "Aktiva sessioner som ännu inte rangordnats: {0} — deras tid och tokens växer fortfarande.",
   "{0} agent(s) failed before their first reply": "{0} agent(er) misslyckades före sitt första svar",
   "{0} agent(s) without a counted reply": "{0} agent(er) utan räknat svar",
   "{0} at {1}": "{0} kl. {1}",

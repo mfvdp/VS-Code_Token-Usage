@@ -22,7 +22,7 @@
   "If Claude Code is showing a permission dialog or a question there, the text and Enter would answer it. Text typed in that terminal and not sent yet goes with it.": "Если Claude Code показывает там диалог разрешения или вопрос, текст и Enter ответят на него. Всё, что набрано в этом терминале и ещё не отправлено, будет отправлено вместе с промптом.",
   "If Codex is waiting for an approval there, the text and Enter would answer it. Text typed in that terminal and not sent yet goes with it.": "Если Codex ждёт там одобрения, текст и Enter ответят на этот запрос. Всё, что набрано в этом терминале и ещё не отправлено, будет отправлено вместе с промптом.",
   "Keep it and chain Token Pace": "Оставить и добавить Token Pace в цепочку",
-  "Keep-warm line for {0} in {1} seconds, press to cancel": "Строка подогрева для {0} через {1} сек., нажмите, чтобы отменить",
+  "Keep-warm line for {0} in {1} seconds, press to cancel": "Строка подогрева ({0}) через {1} сек., нажмите, чтобы отменить",
   "Last month": "Прошлый месяц",
   "Last {0} days": "Последние {0} дн.",
   "Later": "Позже",

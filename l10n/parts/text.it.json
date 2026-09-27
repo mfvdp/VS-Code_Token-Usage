@@ -103,7 +103,7 @@
   "Lower bound share: {0}": "Percentuale di limiti inferiori: {0}",
   "Models": "Modelli",
   "Month projection: {0} — {1}": "Proiezione mensile: {0} — {1}",
-  "Most cache written {0}: {1}": "Massima scrittura cache {0}: {1}",
+  "Most cache written {0}: {1}": "Ora con più scrittura cache {0}: {1}",
   "Most expensive day {0}: {1}": "Giorno più costoso {0}: {1}",
   "Network access has not been granted yet, so no request was made.": "L'accesso alla rete non è ancora stato consentito, quindi non è stata effettuata alcuna richiesta.",
   "Never": "Mai",

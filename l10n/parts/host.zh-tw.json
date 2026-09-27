@@ -82,7 +82,7 @@
   "Token Pace found no Claude Code or Codex transcripts on this host (remote \"{0}\"). The extension runs on one side of the connection only. If your transcripts are on the local machine, Token Pace can be moved there (one click writes \"remote.extensionKind\" into your user settings and offers a reload); if they are on this host, point tokenPace.claudeDir / tokenPace.codexDir at them.": "Token Pace 在此主機（遠端「{0}」）上找不到 Claude Code 或 Codex 的對話記錄。擴充功能只在連線的其中一端執行。如果對話記錄位於本機，可以將 Token Pace 移到本機執行（按一下即可將「remote.extensionKind」寫入使用者設定，並提供重新載入）；如果位於此主機，請將 tokenPace.claudeDir / tokenPace.codexDir 指向它們。",
   "Token Pace has not installed a status line.": "Token Pace 尚未安裝狀態行。",
   "Token Pace will run on the local machine after a window reload.": "重新載入視窗後，Token Pace 將在本機執行。",
-  "Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.": "Token Pace 將在執行 {1} 的終端機中輸入「{0}」並按下 Enter，讓其提示快取保持溫熱。按一下即可取消。",
+  "Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.": "Token Pace 將在執行 {1} 的終端機中輸入「{0}」並按下 Enter，讓該工作階段的提示快取保持溫熱。按一下即可取消。",
   "Token Pace writes nothing into `~/.claude`: you add the hook yourself, and you remove it yourself.": "Token Pace 不會寫入 `~/.claude` 中的任何內容：掛鉤需自行加入，也需自行移除。",
   "Token Pace — clear stored data": "Token Pace — 清除儲存的資料",
   "Token Pace — keep-warm countdown": "Token Pace — 保溫倒數計時",

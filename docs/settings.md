@@ -124,15 +124,32 @@ power-user settings sit at the end of their group.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `alerts.thresholds` | `[90]` | Percentages (1–100) at which a notification is shown. **An empty list means no notifications at all** |
+| `alerts.thresholds` | `[90]` | Percentages (1–100) at which an alert is shown. **An empty list means no alerts at all** |
 | `alerts.basis` | `used` | Whether the thresholds mean used or remaining |
 | `alerts.requireAhead` | `true` | Only alert when the window is also ahead of pace |
 | `alerts.minRemainingMinutes` | `60` | Do not alert when the window resets within this many minutes (0–10080) |
-| `alerts.useItLoseIt` | `false` | Also notify about capacity about to expire unused |
-| `alerts.forecastLeadMinutes` | `0` | Notify when the forecast expects exhaustion within *n* minutes (0–1440); `0` = off |
-| `alerts.onPaceFast` | `false` | Notify once per cycle when a window goes from on pace to ahead of pace |
+| `alerts.useItLoseIt` | `false` | Also show an alert about capacity about to expire unused |
+| `alerts.forecastLeadMinutes` | `0` | Show an alert when the forecast expects exhaustion within *n* minutes (0–1440); `0` = off |
+| `alerts.onPaceFast` | `false` | Show an alert once per cycle when a window goes from on pace to ahead of pace |
 | `alerts.windowCondition` | `any` | Which windows may alert: `any`, `sessionOnly`, `weeklyOnly` |
-| `alerts.budgetPercent` | `0` | Notify once per period when a `budgets` entry passes this share of its own limit (0–200); `0` = off |
+| `alerts.budgetPercent` | `0` | Show an alert once per period when a `budgets` entry passes this share of its own limit (0–200); `0` = off |
+
+## Notifications (phone, chat, e-mail)
+
+Messages Token Pace sends outside VS Code (1.12) — not the alerts above, which are VS Code popups. All eight
+settings are machine-scoped: a workspace sets none of them, and Settings Sync does not carry them. None of them holds
+a secret: a webhook's address, a bot's token, an ntfy topic and a password are kept in VS Code's secret storage.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `notifications.channels` | `[]` | The channels a notification may go to: `webhook`, `telegram`, `ntfy`, `email`. **Empty means nothing is ever sent.** A channel works once *Set Up a Notification Channel…* kept its address and secret in VS Code's secret storage and you allowed its host |
+| `notifications.events` | `[agentWaiting, agentDone, quotaThreshold, quotaExhausted, paceWarning]` | What a notification is sent about; `quotaReset` is the sixth event, off by default. `agentWaiting` needs the agent hook; `agentWaiting` and `agentDone` are Claude Code's and are sent only while the window is not focused |
+| `notifications.thresholds` | `{ session: 80, weekly: 80 }` | The percentage used at which `quotaThreshold` fires, per kind of window (0–100, `0` = off for that kind) — once per window and cycle, only upwards, never from a stale reading |
+| `notifications.cooldownMinutes` | `10` | The least time between two notifications of one kind of event (1–1440); one that comes sooner is dropped, not saved for later. At most 20 notifications an hour in all |
+| `notifications.webhook` | `{ format: generic, secretHeader: "" }` | `format`: `generic` (Token Pace's JSON), `slack`, `discord`, `teams`, `mattermost` or `rocketChat`; `secretHeader`: the name of a header that carries a secret, if your address expects one |
+| `notifications.telegram` | `{ chatId: "" }` | The chat your bot sends to — a number, or `@name` for a public channel |
+| `notifications.ntfy` | `{ server: "" }` | The `https://` address of your ntfy server — the public one or your own; there is no default |
+| `notifications.email` | `{ host: "", port: 587, security: starttls, user: "", from: "", to: "" }` | Your SMTP server and one recipient: `security` `starttls` (usually port 587) or `tls` (usually port 465). Nothing is sent without encryption |
 
 ## Diagnostics
 

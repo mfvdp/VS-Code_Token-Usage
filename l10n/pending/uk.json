@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 27,
+  "applied": 75,
   "bundle": {
     "week to date": {
       "parts": [
@@ -134,6 +134,125 @@
       ],
       "state": "translate",
       "why": "the no-token reason of a background fetch on macOS that skipped the Keychain (read in the background only after a fetch by hand proved that no macOS dialog waits) and found no token in the variable or the file — shown in the tooltip and on the card — quote the command title as your manifest has command.refreshQuota.title, with Token Pace: before it — 1.12 B2"
+    },
+    "Token Pace: {0} is waiting for you": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the notification agentWaiting, read on a phone’s lock screen: keep it short — {0} is the product name Claude Code, never translated, as the subject of the sentence — 1.12 C13"
+    },
+    "Token Pace: a long turn finished": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the notification agentDone, read on a phone’s lock screen: keep it short — a turn of a Claude Code session (your 1.11 word for turn) that ran at least two minutes has ended — 1.12 C13"
+    },
+    "Token Pace: quota threshold reached": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the notification quotaThreshold, read on a phone’s lock screen: keep it short — a quota window passed the reader’s threshold (your 1.11 words for quota and threshold) — 1.12 C13"
+    },
+    "Token Pace: quota exhausted": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the notification quotaExhausted, read on a phone’s lock screen: keep it short — your 1.11 word for exhausted — 1.12 C13"
+    },
+    "Token Pace: quota window reset": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the notification quotaReset, read on a phone’s lock screen: keep it short — a quota window was reset (your 1.11 words for quota window and reset) — 1.12 C13"
+    },
+    "Token Pace: quota runs out before its reset": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the notification paceWarning, read on a phone’s lock screen: keep it short — the forecast expects the quota to be used up before the window resets — 1.12 C13"
+    },
+    "{0} is waiting for your permission (since {1}).": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of agentWaiting for a permission dialog — {0} is the product name Claude Code, never translated, {1} a clock time (14:03) — 1.12 C13"
+    },
+    "{0} is waiting for your answer (since {1}).": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of agentWaiting for a question — {0} is the product name Claude Code, never translated, {1} a clock time (14:03) — 1.12 C13"
+    },
+    "{0} finished a turn at {1}, after at least {2}.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of agentDone — {0} is the product name Claude Code, never translated, {1} a clock time (14:03), {2} a duration as the Agents tree writes it (12 min 03 s), a lower bound: the turn ran at least that long — 1.12 C13"
+    },
+    "{0}, {1} window: {2} used — resets at {3}.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of quotaThreshold, one line per window — {0} is the provider’s name Claude or Codex, never translated, {1} the window’s label as your page shows it (5 h, 7 d · Fable), {2} the percentage as your status bar writes it (82%), {3} the clock time of the reset (Mo 14:05) — 1.12 C13"
+    },
+    "{0}, {1} window: {2} used.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of quotaThreshold for a window whose reset is not known — {0} is the provider’s name Claude or Codex, never translated, {1} the window’s label (5 h, 7 d · Fable), {2} the percentage as your status bar writes it (82%) — write it as the key with the reset, without that part — 1.12 C13"
+    },
+    "{0}, {1} window: exhausted — resets at {2}.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of quotaExhausted, one line per window — {0} is the provider’s name Claude or Codex, never translated, {1} the window’s label (5 h, 7 d · Fable), {2} the clock time of the reset (Mo 14:05) — 1.12 C13"
+    },
+    "{0}, {1} window: exhausted.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of quotaExhausted for a window whose reset is not known — {0} is the provider’s name Claude or Codex, never translated, {1} the window’s label (5 h, 7 d · Fable) — write it as the key with the reset, without that part — 1.12 C13"
+    },
+    "{0}, {1} window: reset at {2} — {3} used in the new window.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of quotaReset — {0} is the provider’s name Claude or Codex, never translated, {1} the window’s label (5 h, 7 d · Fable), {2} the clock time the old window reset at (14:00), {3} the percentage already used in the new window (3%) — 1.12 C13"
+    },
+    "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of paceWarning — {0} is the provider’s name Claude or Codex, never translated, {1} the window’s label (5 h, 7 d · Fable), {2} the percentage used (64%), {3} the forecast’s clock time with its ~ (an estimate: ~16:40), {4} the clock time of the reset (Mo 14:05) — 1.12 C13"
+    },
+    "Token Pace: test message": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the title of the test message Send a Test Notification… sends to one channel, read on a phone’s lock screen: keep it short — 1.12 C13"
+    },
+    "This channel works: Token Pace can reach it. Sent at {0}.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the text of the test message — a channel is the place a notification goes to (a webhook, a Telegram chat, an ntfy topic, an e-mail inbox), it for the channel — {0} a clock time (14:03) — 1.12 C13"
     }
   },
   "nls": {
@@ -164,6 +283,130 @@
     "config.quotaSource.description": {
       "state": "review",
       "why": "the poll paragraph now names every source of Claude Code’s access token — CLAUDE_CODE_OAUTH_TOKEN, the macOS Keychain or ~/.claude/.credentials.json, with a link to #tokenPace.credentials.keychain# (was: the access token from ~/.claude/.credentials.json goes to …) — the rest of the value is unchanged, keep the backtick names and the #…# link as they are — 1.12 B6"
+    },
+    "config.alerts.thresholds.description": {
+      "state": "review",
+      "why": "the in-editor alerts are called alerts now, not notifications: Percentages at which an alert is shown, and an empty list turns alerts off entirely (was a notification is shown … turns notifications off entirely) — use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.alerts.requireAhead.description": {
+      "state": "review",
+      "why": "the last sentence now says that an empty list switches alerts off entirely (was switches notifications off entirely) — use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.alerts.useItLoseIt.description": {
+      "state": "review",
+      "why": "the first sentence now says Also show an alert about capacity that is about to expire unused (was Also notify about capacity …) — use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category, the quoted alert text stays as your bundle has it — 1.12 C0"
+    },
+    "config.alerts.forecastLeadMinutes.description": {
+      "state": "review",
+      "why": "the first sentence now says Show an alert when the forecast expects the window to run out … (was Notify when the forecast expects …) — use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.alerts.onPaceFast.description": {
+      "state": "review",
+      "why": "the first sentence now says Show an alert once per cycle when a window changes from on pace to ahead of pace (was Notify once per cycle …) — use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.alerts.budgetPercent.description": {
+      "state": "review",
+      "why": "the first sentence now says Show an alert once per period when a budget passes this percentage (was Notify once per period …) — use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "configuration.alerts.title": {
+      "state": "review",
+      "why": "the English is unchanged (Alerts) — 1.12 adds a category Notifications (phone, chat, e-mail) for messages sent outside VS Code, and the Alerts category’s name must not read as the same thing: check that your name for this category and your name for the new one differ (German: Warnhinweise beside Benachrichtigungen), and that every sentence of this category uses this word for the in-editor popup — 1.12 C0"
+    },
+    "config.alerts.basis.description": {
+      "state": "review",
+      "why": "the English is unchanged (Alerts stay off while that list is empty) — listed with the Alerts category’s name so that its every sentence says your word for the in-editor popup: use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.alerts.minRemainingMinutes.description": {
+      "state": "review",
+      "why": "the English is unchanged (Do not alert when the window resets within this many minutes) — listed with the Alerts category’s name: use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.alerts.windowCondition.description": {
+      "state": "review",
+      "why": "the English is unchanged (Which windows may raise alerts at all) — listed with the Alerts category’s name: use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.alerts.windowCondition.enum.any": {
+      "state": "review",
+      "why": "the English is unchanged (Any window may alert) — listed with the Alerts category’s name: use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "config.staleAfterMinutes.description": {
+      "state": "review",
+      "why": "the English is unchanged (… and no alert may fire from it) — listed with the Alerts category’s name, since this sentence names an alert too: use your word for the in-editor popup — the one your Alerts category uses — never your word for the new Notifications category — 1.12 C0"
+    },
+    "configuration.notifications.title": {
+      "state": "translate",
+      "why": "the new settings category of 1.12, placed after Alerts: messages Token Pace sends outside VS Code — to a phone, a chat or an e-mail inbox — your word for notification here must differ from your Alerts category’s word, the three words in brackets are the kinds of channel, e-mail as your language writes it — 1.12 C0, C5"
+    },
+    "config.notifications.channels.description": {
+      "state": "translate",
+      "why": "the setting that lists the channels a notification may go to, empty by default — the bold sentence says that nothing is ever sent while it is empty — quote the command Set Up a Notification Channel… as you translate its title command.notifications.setUp.title, with Token Pace: before it, secret storage is VS Code’s secret storage, host the server’s name — 1.12 C5"
+    },
+    "config.notifications.channels.enum.webhook": {
+      "state": "translate",
+      "why": "the webhook channel in the channels list: your own https address that takes JSON, or one of five chat services — Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat stay as they stand, and the setting link #tokenPace.notifications.webhook# too — 1.12 C1, C5"
+    },
+    "config.notifications.channels.enum.telegram": {
+      "state": "translate",
+      "why": "the Telegram channel in the channels list: the chat a Telegram bot sends to — Telegram stays as it stands — 1.12 C1, C5"
+    },
+    "config.notifications.channels.enum.ntfy": {
+      "state": "translate",
+      "why": "the ntfy channel in the channels list: a topic (ntfy’s own word for the named stream a message is published to) on an ntfy server — ntfy stays as it stands, lower case — 1.12 C1, C5"
+    },
+    "config.notifications.channels.enum.email": {
+      "state": "translate",
+      "why": "the e-mail channel in the channels list: a message through the reader’s own SMTP server — SMTP stays as it stands — 1.12 C1, C5"
+    },
+    "config.notifications.events.description": {
+      "state": "translate",
+      "why": "the setting that lists what a notification is sent about — the first paragraph promises what a message holds and never holds, the second names two events: keep `agentWaiting` and `agentDone` in their backticks and quote the agent hook’s command as your manifest has command.showAgentHookSetup.title, with Token Pace: before it — 1.12 C2, §0a.10"
+    },
+    "config.notifications.events.enum.agentWaiting": {
+      "state": "translate",
+      "why": "the event agentWaiting in the events list: Claude Code has been waiting a minute for the reader’s permission (a permission dialog) or answer (a question) — 1.12 C2"
+    },
+    "config.notifications.events.enum.agentDone": {
+      "state": "translate",
+      "why": "the event agentDone in the events list: Claude Code finished a turn (your 1.11 word for a turn of a session) that ran at least two minutes — 1.12 C2"
+    },
+    "config.notifications.events.enum.quotaThreshold": {
+      "state": "translate",
+      "why": "the event quotaThreshold in the events list: a quota window passed the percentage the reader set — keep the setting link #tokenPace.notifications.thresholds# in its brackets — 1.12 C2"
+    },
+    "config.notifications.events.enum.quotaExhausted": {
+      "state": "translate",
+      "why": "the event quotaExhausted in the events list: a quota window is used up — your 1.11 word for exhausted — 1.12 C2"
+    },
+    "config.notifications.events.enum.quotaReset": {
+      "state": "translate",
+      "why": "the event quotaReset in the events list: a quota window was reset, a new one began — your 1.11 word for reset — 1.12 C2"
+    },
+    "config.notifications.events.enum.paceWarning": {
+      "state": "translate",
+      "why": "the event paceWarning in the events list: the forecast expects a quota window to run out (be used up) before its reset — 1.12 C2"
+    },
+    "config.notifications.thresholds.description": {
+      "state": "translate",
+      "why": "the threshold per kind of window for the event quotaThreshold — `quotaThreshold`, `session`, `weekly` and `0` stay in their backticks — 5-hour and weekly windows in your 1.11 words, a stale reading as your alerts’ sentences say it — 1.12 C2 rule 3"
+    },
+    "config.notifications.cooldownMinutes.description": {
+      "state": "translate",
+      "why": "the least time between two notifications of one kind of event (German: Mindestabstand) — an event that comes sooner is dropped, not kept for later, and 20 an hour is the cap over all events and channels — 1.12 C4"
+    },
+    "config.notifications.webhook.description": {
+      "state": "translate",
+      "why": "the webhook channel’s two fields — `format` and its six values, `secretHeader` stay in their backticks — Microsoft Teams stays as it stands, a header is an HTTP header (German: Kopfzeile), a secret a value that grants access (German: Geheimnis) — quote the command Set Up a Notification Channel… as you translate command.notifications.setUp.title, with Token Pace: before it — 1.12 C1, C5"
+    },
+    "config.notifications.telegram.description": {
+      "state": "translate",
+      "why": "the Telegram channel’s field `chatId` (in its backticks) — @name stays as it stands, it is how Telegram writes a public channel’s name — the bot’s token is its access secret — 1.12 C1, C5"
+    },
+    "config.notifications.ntfy.description": {
+      "state": "translate",
+      "why": "the ntfy channel’s field `server` (in its backticks) — the public ntfy server or the reader’s own, the topic is ntfy’s word (write it as for the channels list), an access token the server’s own — 1.12 C1, C5"
+    },
+    "config.notifications.email.description": {
+      "state": "translate",
+      "why": "the e-mail channel’s six fields — `host`, `port`, `security`, `starttls`, `tls`, `user`, `from`, `to` stay in their backticks, SMTP stays as it stands — the sentence promises that no password and no address ever travel unencrypted — 1.12 C1, C10"
     }
   }
 }

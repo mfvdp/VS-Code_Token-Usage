@@ -139,6 +139,15 @@ export const CONFIG_KEYS: string[] = [
   'tokenPace.alerts.onPaceFast',
   'tokenPace.alerts.windowCondition',
   'tokenPace.alerts.budgetPercent',
+  // Notifications (1.12 C5, §0b.3): the eight keys of the category after Alerts, every one machine-scoped.
+  'tokenPace.notifications.channels',
+  'tokenPace.notifications.events',
+  'tokenPace.notifications.thresholds',
+  'tokenPace.notifications.cooldownMinutes',
+  'tokenPace.notifications.webhook',
+  'tokenPace.notifications.telegram',
+  'tokenPace.notifications.ntfy',
+  'tokenPace.notifications.email',
   // Diagnostics
   'tokenPace.debug',
   'tokenPace.debugLogFile',
@@ -252,6 +261,23 @@ const ATTRIBUTIONS: readonly Attribution[] = ['none', 'project', 'session']
 const PROJECT_NAME_MODES: readonly ProjectNameMode[] = ['basename', 'hash']
 const ALERT_BASES: readonly AlertBasis[] = ['used', 'remaining']
 const ALERT_WINDOW_CONDITIONS: readonly AlertWindowCondition[] = ['any', 'sessionOnly', 'weeklyOnly']
+
+/**
+ * 1.12 C2/C5 (§2.3): the notifications' value domains. They live here, beside every other enum a setting
+ * holds, because `sanitize` filters against them; `notify.ts` re-exports them as the names §2.3 gives it.
+ * The order of `NOTIFY_EVENTS` is the order the messages of one evaluation go out in.
+ */
+export const NOTIFY_EVENTS = ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'quotaReset', 'paceWarning'] as const
+export type NotifyEventKind = typeof NOTIFY_EVENTS[number]
+export const NOTIFY_CHANNELS = ['webhook', 'telegram', 'ntfy', 'email'] as const
+export type ChannelKind = typeof NOTIFY_CHANNELS[number]
+/** Stage 1's generic JSON and stage 2's five presets: one channel, another body (C1 rule 2). */
+export const WEBHOOK_FORMATS = ['generic', 'slack', 'discord', 'teams', 'mattermost', 'rocketChat'] as const
+export type WebhookFormat = typeof WEBHOOK_FORMATS[number]
+export const SMTP_SECURITIES = ['starttls', 'tls'] as const
+export type SmtpSecurity = typeof SMTP_SECURITIES[number]
+/** The collect file's "an" — every event but `quotaReset`, which is "aus" (§0b.3). */
+const DEFAULT_NOTIFY_EVENTS: readonly NotifyEventKind[] = ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'paceWarning']
 
 const DEFAULT_STATUS_BAR: readonly StatusBarEntry[] = ['claudeQuota', 'codexQuota', 'tokens']
 /** The quota cards first — the reading a glance is for — and the statistics beneath them. */
@@ -394,9 +420,12 @@ export interface Config {
     forecastLeadMinutes: number
     onPaceFast: boolean
     windowCondition: AlertWindowCondition
-    /** Percentage of a budget at which one notification is shown; `0` is off. */
+    /** Percentage of a budget at which one alert is shown; `0` is off. */
     budgetPercent: number
   }
+
+  /** 1.12 C5: the eight notification settings, sanitised by `readNotifyConfig`. */
+  notifications: NotifyConfig
 
   debug: boolean
   debugLogFile: string
@@ -432,6 +461,30 @@ export interface AlertConfig {
   forecastLeadMinutes: number
   onPaceFast: boolean
   windowCondition: AlertWindowCondition
+}
+
+/**
+ * 1.12 C5 (§2.3): the notification settings as the notifier reads them. **No field holds a secret** — no
+ * webhook address (a Slack, Discord or Teams address is its credential), no bot token, no ntfy topic, no
+ * password: those live in VS Code's secret storage (§0a.8). What is here is where a message goes and when.
+ */
+export interface NotifyConfig {
+  /** The channels that may send; empty — the default — means nothing is ever sent (§0's amendment 1). */
+  channels: ChannelKind[]
+  /** The events the reader listed; an event not listed is never built (C2 rule 8). */
+  events: NotifyEventKind[]
+  /** `quotaThreshold`'s level per window kind, 0–100; `0` is off for that kind (§7a Q13). */
+  thresholds: { session: number; weekly: number }
+  /** The least time between two messages of one kind, 1–1440 minutes (C4 rule 2). */
+  cooldownMinutes: number
+  /** `secretHeader` is the header's name — not a secret; its value is (§0a.8). `''` when none is named. */
+  webhook: { format: WebhookFormat; secretHeader: string }
+  /** `''` unless it is a chat id Telegram accepts (`TELEGRAM_CHAT_ID_RE`). */
+  telegram: { chatId: string }
+  /** The ntfy server's `https:` address as typed, or `''` (no host by default, §7a Q21). */
+  ntfy: { server: string }
+  /** `host` a host name (or a bracketed IPv6 address) and nothing else; `from`/`to` an address or `''`. */
+  email: { host: string; port: number; security: SmtpSecurity; user: string; from: string; to: string }
 }
 
 // ---------------------------------------------------------------------------
@@ -599,6 +652,96 @@ export function languageSetting(raw: unknown): LanguageSetting {
 }
 
 // ---------------------------------------------------------------------------
+// Notifications (1.12 C5 rule 3)
+// ---------------------------------------------------------------------------
+
+/** C1 rule 3: a numeric chat id (a group's is negative) or a public channel's `@name`. */
+export const TELEGRAM_CHAT_ID_RE = /^-?\d{1,20}$|^@[A-Za-z0-9_]{5,64}$/
+/** C1 rule 1: the name of the header that carries the webhook's secret — letters, digits and `-`. */
+export const SECRET_HEADER_RE = /^[A-Za-z0-9-]{1,64}$/
+/** C5 rule 3: one address, no display name, no second address, no space. */
+export const EMAIL_ADDRESS_RE = /^[^\s@<>"]+@[^\s@<>"]+$/
+/**
+ * An SMTP host as a host name or an IPv4 or bracketed IPv6 address — never a URL, never `user:pass@host`
+ * (a setting holds no credential, §0a.8), never a port (that is `email.port`).
+ */
+const SMTP_HOST_RE = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$|^\[[0-9A-Fa-f:.]{2,45}\]$/
+
+/**
+ * 1.12 C1 rule 1, C5 rule 3: an `https:` address with a host and without credentials or a fragment in it,
+ * parsed — or null. `http:`, `user:pass@host`, `#…` and anything that is no URL are refused: an address
+ * with its credentials in it would put a secret where a setting or a log line could show it.
+ * notifyChannels.ts (P7) sends only to what this accepts.
+ */
+export function httpsOnly(url: string): URL | null {
+  if (typeof url !== 'string') return null
+  const raw = url.trim()
+  if (raw === '' || raw.includes('#') || /\s/.test(raw)) return null
+  let u: URL
+  try {
+    u = new URL(raw)
+  } catch {
+    return null
+  }
+  if (u.protocol !== 'https:' || u.hostname === '' || u.username !== '' || u.password !== '') return null
+  return u
+}
+
+/** A string setting's value through a pattern: trimmed, or `''` when it does not match (a `config` failure at send time). */
+function matching(raw: unknown, re: RegExp): string {
+  if (typeof raw !== 'string') return ''
+  const v = raw.trim()
+  return re.test(v) ? v : ''
+}
+
+/** 1.12 C5 rule 3: `0` is off; a value that is not a finite number is the default. */
+function thresholdOf(raw: unknown): number {
+  return Math.round(num(raw, 80, 0, 100))
+}
+
+/**
+ * 1.12 C5 rule 3: the eight notification settings, each value checked on its own — unknown `channels` and
+ * `events` dropped and duplicates removed (the user's order kept), the thresholds clamped to 0–100, the
+ * cooldown to 1–1440, the port to 1–65535, `security` one of two, the addresses to one plain address, the
+ * ntfy server through `httpsOnly`, the header's name through its pattern, the chat id through Telegram's.
+ * A value that fails is the default or `''`, never a half-usable one: an empty field is a `config` failure
+ * the diagnostics can name, a mangled one would be a message to the wrong place.
+ */
+export function readNotifyConfig(get: (key: string) => unknown): NotifyConfig {
+  const obj = (key: string): Record<string, unknown> => {
+    const v = get(key)
+    return isRecord(v) ? v : {}
+  }
+  const thresholds = obj('tokenPace.notifications.thresholds')
+  const webhook = obj('tokenPace.notifications.webhook')
+  const telegram = obj('tokenPace.notifications.telegram')
+  const ntfy = obj('tokenPace.notifications.ntfy')
+  const email = obj('tokenPace.notifications.email')
+  const server = typeof ntfy.server === 'string' && httpsOnly(ntfy.server) !== null ? ntfy.server.trim() : ''
+  const user = typeof email.user === 'string' ? oneLine(email.user).slice(0, 254) : ''
+  return {
+    channels: list(get('tokenPace.notifications.channels'), NOTIFY_CHANNELS, []),
+    events: list(get('tokenPace.notifications.events'), NOTIFY_EVENTS, DEFAULT_NOTIFY_EVENTS),
+    thresholds: { session: thresholdOf(thresholds.session), weekly: thresholdOf(thresholds.weekly) },
+    cooldownMinutes: num(get('tokenPace.notifications.cooldownMinutes'), 10, 1, 1440),
+    webhook: {
+      format: pick(webhook.format, WEBHOOK_FORMATS, 'generic'),
+      secretHeader: matching(webhook.secretHeader, SECRET_HEADER_RE),
+    },
+    telegram: { chatId: matching(telegram.chatId, TELEGRAM_CHAT_ID_RE) },
+    ntfy: { server },
+    email: {
+      host: matching(email.host, SMTP_HOST_RE),
+      port: Math.trunc(num(email.port, 587, 1, 65535)),
+      security: pick(email.security, SMTP_SECURITIES, 'starttls'),
+      user,
+      from: matching(email.from, EMAIL_ADDRESS_RE),
+      to: matching(email.to, EMAIL_ADDRESS_RE),
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // sanitize / readConfig
 // ---------------------------------------------------------------------------
 
@@ -719,6 +862,8 @@ export function sanitize(raw: Record<string, unknown>): Config {
       budgetPercent: num(get('tokenPace.alerts.budgetPercent'), 0, 0, 200),
     },
 
+    notifications: readNotifyConfig(get),
+
     debug: bool(get('tokenPace.debug'), false),
     debugLogFile: text(get('tokenPace.debugLogFile')),
     diagnostics: { includeNetworkSetup: bool(get('tokenPace.diagnostics.includeNetworkSetup'), true) },
@@ -755,6 +900,20 @@ export function affects(e: ConfigurationChangeLike, keys: string[]): boolean {
     if (e.affectsConfiguration(full)) return true
   }
   return false
+}
+
+/** 1.12 C5: the notification settings — every key of CONFIG_KEYS under `tokenPace.notifications.`. */
+export const NOTIFY_CONFIG_KEYS: readonly string[] = CONFIG_KEYS.filter((k) => k.startsWith('tokenPace.notifications.'))
+
+/**
+ * 1.12 C5 rule 3 (`affects()` routes them to the notifier only): true when a change touches a notification
+ * setting and no other key this module reads — the settings handler then hands the new configuration to the
+ * notifier and leaves everything else as it is (no frame, no quota options, no watcher). False for a change
+ * that touches nothing of the notifications, and for one that touches them and anything else too.
+ */
+export function notifyOnly(e: ConfigurationChangeLike): boolean {
+  if (!affects(e, [...NOTIFY_CONFIG_KEYS])) return false
+  return !affects(e, CONFIG_KEYS.filter((k) => !NOTIFY_CONFIG_KEYS.includes(k)))
 }
 
 // ---------------------------------------------------------------------------

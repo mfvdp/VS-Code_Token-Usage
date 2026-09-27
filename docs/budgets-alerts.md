@@ -49,15 +49,21 @@ quota window or a price list. Each entry names a scope (`total`, `claude`, `code
   provider's; the status bar's `budget` entry and the budget alerts keep every budget, whatever the
   switch shows.
 
-`tokenPace.alerts.budgetPercent` (default `0` = off) notifies **once per period** when a budget
+`tokenPace.alerts.budgetPercent` (default `0` = off) shows an alert **once per period** when a budget
 passes that percentage of its own limit — upwards only, and never while the first read of the
 transcript history is still running.
 
 ## Alerts
 
+An **alert** is the popup inside VS Code that the `tokenPace.alerts.*` settings control. A **notification** (1.12) is
+something else: a message Token Pace sends outside VS Code — to your phone, a chat or an e-mail inbox — with its own
+settings under `tokenPace.notifications.*` ([Settings](settings.md#notifications-phone-chat-e-mail)). The two are
+separate, each with its own settings and its own record of what it said, so the same threshold crossing may raise
+both — each once.
+
 **One threshold out of the box: `tokenPace.alerts.thresholds` is `[90]`.** A window that crosses
 90 % while it is also ahead of pace, more than an hour before its reset, and from a reading that
-is not stale, produces one notification. **Emptying the list switches notifications off
+is not stale, produces one alert. **Emptying the list switches alerts off
 entirely.** A quota warning is only worth anything if it is rare, so every rule is deliberately
 quiet:
 
@@ -80,7 +86,7 @@ Hygiene that applies to all of them:
 * **Nothing ever fires from a stale reading**, or from a reading of unknown age. An old
   percentage crossing a threshold is an artefact, not news.
 * Several thresholds broken at once become one message per provider.
-* The state is persisted *before* the notification is shown, so a window closed while the popup
+* The state is persisted *before* the alert is shown, so a window closed while the popup
   is open does not produce the popup again.
-* Every notification offers **Open Dashboard** and **Not today**; the latter silences everything
+* Every alert offers **Open Dashboard** and **Not today**; the latter silences everything
   until the next local midnight.

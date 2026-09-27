@@ -162,6 +162,19 @@ export function identityOf(source: Source, w: QuotaWindow): string {
 }
 
 /**
+ * Whether a reading may speak at all: a successful one, with a fetch time, not older than `staleAfterMs`.
+ * No fetch time means we cannot claim the reading is current, and a message from a reading of unknown age
+ * is exactly the kind of noise the hygiene rules exist to prevent. 1.12 C2 rule 7 (P6): exported — the
+ * notifications' quota events (notify.ts) are held to the same rule, so an alert and a notification can
+ * never disagree about which reading is fresh.
+ */
+export function freshReading(s: QuotaState, now: number, staleAfterMs: number): boolean {
+  if (!s.ok) return false
+  if (s.fetchedAt === null || !Number.isFinite(s.fetchedAt)) return false
+  return !(now - s.fetchedAt * 1000 > staleAfterMs)
+}
+
+/**
  * Configured thresholds as "used" percentages, ascending and deduplicated.
  *
  * With `basis: 'remaining'` a threshold of 20 means "20 % left", which is the
@@ -357,12 +370,7 @@ export class Alerts {
   ): Candidate[] {
     const out: Candidate[] = []
     for (const s of states) {
-      if (!s.ok) continue
-      // No fetch time means we cannot claim the reading is current, and an
-      // alert from a reading of unknown age is exactly the kind of noise the
-      // hygiene rules exist to prevent.
-      if (s.fetchedAt === null || !Number.isFinite(s.fetchedAt)) continue
-      if (now - s.fetchedAt * 1000 > this.staleAfterMs) continue
+      if (!freshReading(s, now, this.staleAfterMs)) continue
       for (const w of s.windows) {
         if (w.unlimited || !Number.isFinite(w.percent)) continue
         if (this.cfg.windowCondition === 'sessionOnly' && w.kind !== 'session') continue

@@ -6,7 +6,7 @@ import * as assert from 'node:assert/strict'
 
 import {
   CONFIG_KEYS, sanitize, affects, planNameOf, planText, readTimeConfig, readPaceConfig,
-  readAlertConfig,
+  readAlertConfig, readNotifyConfig, httpsOnly, notifyOnly, NOTIFY_CONFIG_KEYS,
 } from '../src/config'
 import type { Config } from '../src/config'
 import { englishNls, germanNls, readJson, readManifest } from './helpers/nls'
@@ -241,7 +241,7 @@ test('alert thresholds are finite, in range, deduplicated and ascending', () => 
   assert.deepEqual(cfg.alerts.thresholds, [80, 95, 120])
   // One threshold out of the box …
   assert.deepEqual(sanitize({}).alerts.thresholds, [90])
-  // … and an explicit empty list is still the way to switch notifications off entirely.
+  // … and an explicit empty list is still the way to switch alerts off entirely.
   assert.deepEqual(sanitize({ 'tokenPace.alerts.thresholds': [] }).alerts.thresholds, [])
   // A hand-edited non-array is not a choice, so it falls back to the default rather than off.
   assert.deepEqual(sanitize({ 'tokenPace.alerts.thresholds': '90' }).alerts.thresholds, [90])
@@ -533,4 +533,168 @@ test('the Codex app-server keeps a standing connection by default; oneShot stays
     assert.ok(nls['config.codexAppServer.mode.description'].includes('`persistent`'))
     assert.ok(nls['config.codexAppServer.mode.description'].includes('`oneShot`'))
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.12 C5, C14 item 7 (P6): the eight notification settings
+// ---------------------------------------------------------------------------
+
+const NOTIFY_KEYS = [
+  'tokenPace.notifications.channels', 'tokenPace.notifications.events', 'tokenPace.notifications.thresholds',
+  'tokenPace.notifications.cooldownMinutes', 'tokenPace.notifications.webhook', 'tokenPace.notifications.telegram',
+  'tokenPace.notifications.ntfy', 'tokenPace.notifications.email',
+]
+
+test('the eight notification settings: in CONFIG_KEYS, in their own category after Alerts, all machine-scoped (1.12 C5 rule 1, §0b.3)', () => {
+  assert.deepEqual([...NOTIFY_CONFIG_KEYS], NOTIFY_KEYS)
+  for (const key of NOTIFY_KEYS) assert.ok(CONFIG_KEYS.includes(key), key)
+  const raw = readJson('package.json') as {
+    contributes: { configuration: Array<{ id: string; title: string; order: number; properties: Record<string, Record<string, unknown>> }> }
+  }
+  const ids = raw.contributes.configuration.map((c) => c.id)
+  assert.equal(ids.indexOf('tokenPace.notifications'), ids.indexOf('tokenPace.alerts') + 1, 'the category does not follow Alerts')
+  const cat = raw.contributes.configuration.find((c) => c.id === 'tokenPace.notifications')
+  assert.ok(cat)
+  assert.equal(cat.title, '%configuration.notifications.title%')
+  assert.deepEqual(Object.keys(cat.properties), NOTIFY_KEYS, 'the category holds the eight keys and nothing else')
+  // Every category keeps its own place in the settings UI: the orders are one to n without a gap.
+  assert.deepEqual(raw.contributes.configuration.map((c) => c.order), raw.contributes.configuration.map((_, i) => i + 1))
+  // A workspace decides nothing about a channel, and Settings Sync carries no address (C5 rule 1).
+  for (const key of NOTIFY_KEYS) assert.equal(properties[key].scope, 'machine', `${key} must be machine-scoped`)
+  assert.equal(englishNls['configuration.notifications.title'], 'Notifications (phone, chat, e-mail)')
+  assert.equal(germanNls['configuration.notifications.title'], 'Benachrichtigungen (Telefon, Chat, E-Mail)')
+})
+
+test('no notification setting holds a secret: the schema has no field for an address that is a credential, a token, a topic or a password (1.12 C5 rule 2, §0a.8)', () => {
+  const names: string[] = []
+  const walk = (schema: Record<string, unknown>, at: string): void => {
+    const props = schema.properties as Record<string, Record<string, unknown>> | undefined
+    for (const [name, sub] of Object.entries(props ?? {})) {
+      names.push(`${at}.${name}`)
+      walk(sub, `${at}.${name}`)
+    }
+    if (schema.items && typeof schema.items === 'object') walk(schema.items as Record<string, unknown>, `${at}[]`)
+  }
+  for (const key of NOTIFY_KEYS) {
+    const property = properties[key] as unknown as Record<string, unknown>
+    names.push(key)
+    walk(property, key)
+    // An object's fields are exactly its properties: nothing a hand-edit could slip a secret into.
+    if (property.type === 'object') assert.equal(property.additionalProperties, false, `${key} accepts fields it does not name`)
+  }
+  assert.deepEqual(names.map((n) => n.replace(/^tokenPace\.notifications\./, '')), [
+    'channels', 'events', 'thresholds', 'thresholds.session', 'thresholds.weekly', 'cooldownMinutes',
+    'webhook', 'webhook.format', 'webhook.secretHeader', 'telegram', 'telegram.chatId', 'ntfy', 'ntfy.server',
+    'email', 'email.host', 'email.port', 'email.security', 'email.user', 'email.from', 'email.to',
+  ])
+  // secretHeader is the header's name; its value is the secret and has no field.
+  for (const n of names) {
+    const leaf = n.split('.').pop() as string
+    assert.doesNotMatch(leaf, /^(url|webhookUrl|address|token|botToken|topic|password|pass|secret|apiKey|key)$/i, `${n} would hold a secret`)
+  }
+})
+
+test('the notification defaults: no channel, the five events of the collect file, 80/80, ten minutes, no host (1.12 C14 item 7, §0b.3)', () => {
+  const n = sanitize({}).notifications
+  assert.deepEqual(n.channels, [])
+  assert.deepEqual(n.events, ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'paceWarning'])
+  assert.deepEqual(n.thresholds, { session: 80, weekly: 80 })
+  assert.equal(n.cooldownMinutes, 10)
+  assert.deepEqual(n.webhook, { format: 'generic', secretHeader: '' })
+  assert.deepEqual(n.telegram, { chatId: '' })
+  assert.deepEqual(n.ntfy, { server: '' })
+  assert.deepEqual(n.email, { host: '', port: 587, security: 'starttls', user: '', from: '', to: '' })
+  // The manifest says the same (the generic defaults test reads every key; these are named for the reader).
+  assert.deepEqual(properties['tokenPace.notifications.events'].default, n.events)
+  assert.deepEqual(properties['tokenPace.notifications.events'].items?.enum,
+    ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'quotaReset', 'paceWarning'])
+  assert.deepEqual(properties['tokenPace.notifications.channels'].items?.enum, ['webhook', 'telegram', 'ntfy', 'email'])
+})
+
+test('readNotifyConfig cleans every value on its own: unknowns and duplicates out, clamps, one plain address, https only, the patterns (1.12 C5 rule 3)', () => {
+  const read = (raw: Record<string, unknown>) => readNotifyConfig((k) => raw[k])
+  const n = read({
+    'tokenPace.notifications.channels': ['ntfy', 'sms', 'ntfy', 7, 'email'],
+    'tokenPace.notifications.events': ['quotaReset', 'dailySummary', 'quotaReset', 'agentDone'],
+    'tokenPace.notifications.thresholds': { session: 140, weekly: -5, other: 50 },
+    'tokenPace.notifications.cooldownMinutes': 0,
+    'tokenPace.notifications.webhook': { format: 'matrix', secretHeader: 'X-Token Pace' },
+    'tokenPace.notifications.telegram': { chatId: ' -1001234567890 ' },
+    'tokenPace.notifications.ntfy': { server: ' https://ntfy.example.org ' },
+    'tokenPace.notifications.email': { host: 'smtp.example.org', port: 70000, security: 'ssl', user: ' me@example.org ', from: 'Me <me@example.org>', to: 'you@example.org' },
+  })
+  assert.deepEqual(n.channels, ['ntfy', 'email'])
+  assert.deepEqual(n.events, ['quotaReset', 'agentDone'])
+  assert.deepEqual(n.thresholds, { session: 100, weekly: 0 })
+  assert.equal(n.cooldownMinutes, 1)
+  assert.deepEqual(n.webhook, { format: 'generic', secretHeader: '' })
+  assert.equal(n.telegram.chatId, '-1001234567890')
+  assert.equal(n.ntfy.server, 'https://ntfy.example.org')
+  assert.deepEqual(n.email, { host: 'smtp.example.org', port: 65535, security: 'starttls', user: 'me@example.org', from: '', to: 'you@example.org' })
+  // An empty list is a choice (nothing is sent, nothing is listened for); a non-list is the default.
+  assert.deepEqual(read({ 'tokenPace.notifications.events': [] }).events, [])
+  assert.deepEqual(read({ 'tokenPace.notifications.events': 'agentDone' }).events.length, 5)
+  // A threshold that is not a number is the default, `0` is off, fractions are whole percentages.
+  assert.deepEqual(read({ 'tokenPace.notifications.thresholds': { session: 'high', weekly: 0 } }).thresholds, { session: 80, weekly: 0 })
+  assert.deepEqual(read({ 'tokenPace.notifications.thresholds': { session: 79.6, weekly: 90 } }).thresholds, { session: 80, weekly: 90 })
+  assert.deepEqual(read({ 'tokenPace.notifications.thresholds': 'eighty' }).thresholds, { session: 80, weekly: 80 })
+  // The header's name, the chat and the SMTP host by their patterns.
+  assert.equal(read({ 'tokenPace.notifications.webhook': { format: 'slack', secretHeader: 'X-Hook-Secret' } }).webhook.secretHeader, 'X-Hook-Secret')
+  assert.equal(read({ 'tokenPace.notifications.webhook': { format: 'teams' } }).webhook.format, 'teams')
+  for (const chatId of ['@my_channel', '123456789']) assert.equal(read({ 'tokenPace.notifications.telegram': { chatId } }).telegram.chatId, chatId)
+  for (const chatId of ['@abc', 'my channel', 'https://t.me/x', 42]) assert.equal(read({ 'tokenPace.notifications.telegram': { chatId } }).telegram.chatId, '')
+  for (const host of ['smtp://smtp.example.org', 'user:pass@smtp.example.org', 'smtp.example.org:587', 'smtp example.org', '-bad.example']) {
+    assert.equal(read({ 'tokenPace.notifications.email': { host } }).email.host, '', host)
+  }
+  assert.equal(read({ 'tokenPace.notifications.email': { host: '[2001:db8::1]', port: 465, security: 'tls' } }).email.host, '[2001:db8::1]')
+  assert.equal(read({ 'tokenPace.notifications.email': { security: 'tls' } }).email.security, 'tls')
+  for (const bad of ['two@a.org, three@b.org', 'no-at-sign', 'a@b@c', '"quoted"@x.org']) {
+    assert.equal(read({ 'tokenPace.notifications.email': { to: bad } }).email.to, '', bad)
+  }
+  // A user name on one line, whatever the settings file holds.
+  assert.equal(read({ 'tokenPace.notifications.email': { user: 'me\n@example.org' } }).email.user, 'me @example.org')
+})
+
+test('httpsOnly: an https address with a host, without credentials or a fragment — nothing else (1.12 C1 rule 1, C5 rule 3)', () => {
+  assert.equal(httpsOnly('https://ntfy.sh')?.hostname, 'ntfy.sh')
+  assert.equal(httpsOnly(' https://hooks.example.org/services/T0/B0/x ')?.pathname, '/services/T0/B0/x')
+  assert.equal(httpsOnly('https://ntfy.example.org:8443/')?.port, '8443')
+  for (const bad of ['http://ntfy.sh', 'https://user:pass@ntfy.sh', 'https://user@ntfy.sh', 'https://ntfy.sh/#frag', 'ntfy.sh',
+    'ftp://ntfy.sh', '', '   ', 'https:// ntfy.sh', 'https://', 'javascript:alert(1)']) {
+    assert.equal(httpsOnly(bad), null, bad)
+  }
+  // A settings file's ntfy server that fails is no server at all.
+  assert.equal(readNotifyConfig((k) => k === 'tokenPace.notifications.ntfy' ? { server: 'http://ntfy.sh' } : undefined).ntfy.server, '')
+})
+
+test('a change of the notification settings alone is the notifier\'s: notifyOnly says so, and says no for any other key (1.12 C5 rule 3)', () => {
+  const change = (...keys: string[]) => ({
+    affectsConfiguration: (section: string) => keys.some((k) => k === section || k.startsWith(`${section}.`) || section === 'tokenPace'),
+  })
+  assert.equal(notifyOnly(change('tokenPace.notifications.channels')), true)
+  assert.equal(notifyOnly(change('tokenPace.notifications.email', 'tokenPace.notifications.events')), true)
+  assert.equal(notifyOnly(change('tokenPace.notifications.email', 'tokenPace.alerts.thresholds')), false)
+  assert.equal(notifyOnly(change('tokenPace.alerts.thresholds')), false)
+  assert.equal(notifyOnly(change('tokenPace.staleAfterMinutes')), false)
+  // The routing never hides a notifications change from `affects` itself.
+  assert.equal(affects(change('tokenPace.notifications.ntfy'), ['tokenPace']), true)
+})
+
+test('C0: the six Alerts sentences say alert, never notification; the German Alerts category is „Warnhinweise“ and its sentences say Warnhinweis (1.12 C0)', () => {
+  const six = ['thresholds', 'requireAhead', 'useItLoseIt', 'forecastLeadMinutes', 'onPaceFast', 'budgetPercent']
+    .map((k) => `config.alerts.${k}.description`)
+  for (const key of six) {
+    assert.doesNotMatch(englishNls[key], /notif/i, `${key} still says notification`)
+    assert.match(englishNls[key], /\balert/i, `${key} does not say alert`)
+  }
+  assert.equal(englishNls['configuration.alerts.title'], 'Alerts')
+  assert.equal(germanNls['configuration.alerts.title'], 'Warnhinweise')
+  // In German „Benachrichtigung“ means only the message sent outside VS Code — no sentence of the Alerts category says it.
+  const alertKeys = Object.keys(germanNls).filter((k) => k.startsWith('config.alerts.') || k === 'config.staleAfterMinutes.description')
+  assert.ok(alertKeys.length >= 14)
+  for (const key of alertKeys) assert.doesNotMatch(germanNls[key], /benachrichtig/i, `${key} says Benachrichtigung`)
+  for (const key of six) assert.match(germanNls[key], /Warnhinweis|warnen/, `${key} does not say Warnhinweis`)
+  // The two category names differ in both languages.
+  assert.notEqual(englishNls['configuration.alerts.title'], englishNls['configuration.notifications.title'])
+  assert.ok(!germanNls['configuration.notifications.title'].startsWith(germanNls['configuration.alerts.title']))
 })

@@ -24,6 +24,8 @@ import { toCsv, toJson } from '../src/exporter'
 import { setBundle, setLocale } from '../src/i18n'
 import { poll as realPoll, PollOptions } from '../src/poller'
 import { QuotaManager, QuotaOptions } from '../src/quotaManager'
+import { admit, emptyNotifyState, payloadOf, quotaEvents, testPayload } from '../src/notify'
+import { readNotifyConfig } from '../src/config'
 import { buildViewModel } from '../src/viewModel'
 import { scratchDir } from './fixtures/helpers'
 import { buildAgg, makeConfig, makeInput, timeConfig } from './fixtures/viewFixtures'
@@ -437,9 +439,11 @@ test('the watcher keeps no account name: a synthetic "acct" beside a changing "m
 // §0a.2 · the leak test through the manager and the real poll
 // ---------------------------------------------------------------------------
 
+// 1.12 P6 (pinned and changed): the resets lie ahead of the real clock the manager reads, so that the notifier's quota
+// events (below) judge the reading this fetch brought, as they would in the product.
 const USAGE_BODY = {
-  five_hour: { utilization: 42, resets_at: '2023-11-15T00:00:00.000Z' },
-  seven_day: { utilization: 20, resets_at: '2023-11-20T00:00:00.000Z' },
+  five_hour: { utilization: 42, resets_at: new Date(Date.now() + 3 * HOUR).toISOString() },
+  seven_day: { utilization: 20, resets_at: new Date(Date.now() + 5 * 24 * HOUR).toISOString() },
 }
 
 interface FetchCall { url: string; authorization: string | null }
@@ -493,7 +497,7 @@ function diagInput(mgr: QuotaManager, gate: KeychainGate): DiagnosticsInput {
   }
 }
 
-test('the Keychain\'s token goes into the one Authorization header and nowhere else — not the log, the diagnostics, quota.json, the readings, the exports (1.12 §0a.2 leak test)', async () => {
+test('the Keychain\'s token goes into the one Authorization header and nowhere else — not the log, the diagnostics, quota.json, the readings, the exports, the notification payloads (1.12 §0a.2 leak test)', async () => {
   await withCleanEnv(async () => {
     await withFetch(async (fetches) => {
       const dir = scratchDir('cred-leak')
@@ -543,6 +547,23 @@ test('the Keychain\'s token goes into the one Authorization header and nowhere e
       const range = { from: '2026-08-01', to: '2026-09-30' }
       const readings = mgr.current()
       assert.equal(readings.find((q) => q.source === 'claude')?.ok, true, 'the fetched reading is not the one shown')
+      // 1.12 P6 (P5-O1, §0a.2's "the notify payloads"): every payload the notifier builds from this reading — a threshold
+      // on each window, a forecast before the reset — and the test message; the token is in none of them.
+      const now = Date.now()
+      const notifyCfg = readNotifyConfig((k) => ({
+        'tokenPace.notifications.channels': ['webhook'],
+        'tokenPace.notifications.events': ['quotaThreshold', 'quotaExhausted', 'quotaReset', 'paceWarning'],
+        'tokenPace.notifications.thresholds': { session: 10, weekly: 10 },
+      } as Record<string, unknown>)[k])
+      const claudeWindow = readings.find((q) => q.source === 'claude')?.windows.find((w) => w.kind === 'session')
+      assert.ok(claudeWindow)
+      const forecasts = new Map([[`claude:${claudeWindow.id}`, {
+        state: 'eta' as const, ratePerHour: 30, etaMs: now + HOUR, endPercent: 130, sustainablePerHour: 20, confidence: 'high' as const,
+        basis: { samples: 8, spanMs: HOUR }, text: '',
+      }]])
+      const groups = admit(quotaEvents(readings, forecasts, notifyCfg, emptyNotifyState(), now, 20 * 60_000), notifyCfg, emptyNotifyState(), now).send
+      assert.deepEqual(groups.map((g) => [g[0].event, g.length]), [['quotaThreshold', 2], ['paceWarning', 1]])
+      const payloads = [...groups.map((g) => payloadOf(g, { tcfg: timeConfig(makeConfig()), now })), testPayload({ tcfg: timeConfig(makeConfig()), now })]
       const outputs: Array<[string, string]> = [
         ['log', logs.join('\n')],
         ['diagnostics', buildDiagnostics(diagInput(mgr, gate))],
@@ -552,6 +573,7 @@ test('the Keychain\'s token goes into the one Authorization header and nowhere e
         ['view model', JSON.stringify(buildViewModel(makeInput({ quotas: readings, agg, cfg })))],
         ['csv', toCsv(agg, range, cfg, tcfg)],
         ['json', toJson(agg, range, cfg, tcfg)],
+        ['notify payloads', JSON.stringify(payloads)],
       ]
       assert.match(outputs[1][1], /^credentials — source keychain · keychain allowed$/m)
       for (const [what, text] of outputs) {

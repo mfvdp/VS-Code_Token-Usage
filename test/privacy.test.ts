@@ -203,12 +203,14 @@ test('the read contract holds for the shipped sources: every reader names exactl
   const typedRow = (what: string): boolean => what === 'prompts: the prompt typed'
   // 1.12 P5 (§0a.4, pinned and changed): the credentials document's two rows read src/credentials.ts.
   const credentialsRow = (what: string): boolean => what === 'the credentials document' || what === 'the credentials document\'s token'
+  // 1.12 P6 (§0a.10, pinned and changed): the notification payload's row reads src/notify.ts, where `payloadOf` builds it.
+  const payloadRow = (what: string): boolean => what === 'the notification payload'
   const watchRow = (what: string): boolean => (keepWarmRow(what) && !hostRow(what)) || (promptsRow(what) && !listRow(what) && !typedRow(what))
   const fileOf = (what: string): string => what.startsWith('the run record') ? 'src/runRecord.ts'
     : what === 'the agent hook\'s input' ? 'src/agentHookScript.ts' : what === 'the agent hook\'s mirror' ? 'src/agentHook.ts'
       : what === NARROWED ? 'src/bridge.ts' : mirrorRow(what) ? 'src/quota.ts' : listRow(what) ? 'src/prompts.ts' : typedRow(what) ? 'src/promptsHost.ts'
         : watchRow(what) ? 'src/terminalWatch.ts' : keepWarmRow(what) ? 'src/keepWarmHost.ts'
-          : credentialsRow(what) ? 'src/credentials.ts' : 'src/agg.ts'
+          : credentialsRow(what) ? 'src/credentials.ts' : payloadRow(what) ? 'src/notify.ts' : 'src/agg.ts'
   for (const row of contract.READ_CONTRACT) assert.equal(row.file, fileOf(row.what), row.what)
   // 1.8 §0a.1 (P4): the mirror's reader, level by level — the envelope, the payload's top-level
   // fields with 1.8's `session_id`, and of each block what is taken, the prompt cache's
@@ -240,8 +242,10 @@ test('the read contract holds for the shipped sources: every reader names exactl
   const promptCacheRow = (what: string): boolean => mirrorRow(what) || keepWarmRow(what) || what === 'the time of a user line'
   for (const row of contract.READ_CONTRACT) {
     // 1.12 P5 (§0a.4, pinned and changed): the credentials rows are held to the privacy page and the quota-sources page.
+    // 1.12 P6 (§0a.10, pinned and changed): the payload's row to the privacy page — the notifications page joins it when
+    // it exists (P9 writes docs/notifications.md; 1.10 P2's precedent for the prompts page).
     assert.deepEqual(row.pages, promptCacheRow(row.what) ? ['privacy', 'promptCache'] : promptsRow(row.what) ? ['privacy', 'prompts']
-      : credentialsRow(row.what) ? ['privacy', 'quotaSources'] : undefined, row.what)
+      : credentialsRow(row.what) ? ['privacy', 'quotaSources'] : payloadRow(row.what) ? ['privacy'] : undefined, row.what)
     if (mirrorRow(row.what)) assert.equal(row.source, 'statusline-mirror.json', row.what)
   }
   // 1.8 P10 (§0a.6–§0a.8): the keep-warm host, reader by reader — the two shell-execution events, an
@@ -279,6 +283,12 @@ test('the read contract holds for the shipped sources: every reader names exactl
   assert.deepEqual(contract.READ_CONTRACT.filter((row) => credentialsRow(row.what)).map((row) => [row.what, row.source, row.kind, row.body, row.variable, row.fields]), [
     ['the credentials document', credentials, 'fields', 'function parseCredentials(', 'd', ['claudeAiOauth']],
     ['the credentials document\'s token', credentials, 'fields', 'function parseCredentials(', 'oauth', ['accessToken', 'expiresAt']],
+  ])
+  // 1.12 §0a.10 (P6): the notification payload — of an event its allow-list, twelve fields (§0a.10's eleven and the
+  // kind of `wait`, which the agentWaiting text and C1's JSON carry), in `payloadOf` and nowhere else; never `identity`.
+  assert.deepEqual(contract.READ_CONTRACT.filter((row) => payloadRow(row.what)).map((row) => [row.what, row.source, row.kind, row.body, row.variable, row.fields]), [
+    ['the notification payload', 'the notification payload', 'fields', 'export function payloadOf(', 'e',
+      ['event', 'provider', 'program', 'windowLabel', 'windowKind', 'percent', 'resetsAt', 'etaAt', 'since', 'atLeastMs', 'wait', 'at']],
   ])
 })
 
@@ -477,6 +487,9 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     // 1.12 P5 (§0a.4, pinned and changed): and the credentials document's parser.
     const credentialsSrc = fromRepo('src/credentials.ts')
     writeFileSync(join(dir, 'src', 'credentials.ts'), credentialsSrc)
+    // 1.12 P6 (§0a.10, pinned and changed): and the notification payload's builder.
+    const notifySrc = fromRepo('src/notify.ts')
+    writeFileSync(join(dir, 'src', 'notify.ts'), notifySrc)
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })
@@ -581,6 +594,16 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     assert.equal(refreshed.status, 1, refreshed.out)
     assert.match(refreshed.out, /DIFF {2}the credentials document's token/)
     assert.match(refreshed.out, /read but not listed: refreshToken/)
+    writeFileSync(join(dir, 'src', 'credentials.ts'), credentialsSrc)
+    assert.equal(run().status, 0)
+    // 1.12 §0a.10 (P6, C14's mutation): the payload's builder starts to take a plan name of the event — the contract stops it.
+    const at7 = notifySrc.indexOf('    at: e.at,\n  }))')
+    assert.ok(at7 >= 0)
+    writeFileSync(join(dir, 'src', 'notify.ts'), notifySrc.replace('    at: e.at,\n  }))', '    at: e.at, planType: e.planType,\n  }))'))
+    const planned = run()
+    assert.equal(planned.status, 1, planned.out)
+    assert.match(planned.out, /DIFF {2}the notification payload/)
+    assert.match(planned.out, /read but not listed: planType/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

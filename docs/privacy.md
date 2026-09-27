@@ -386,6 +386,25 @@ started only from a `claude.exe` found in a directory of the `PATH` — each dir
 that one file's existence, nothing is read from it — and without a shell: the npm shim
 `claude.cmd`, a `.bat` and a `.ps1` are never started. See [Quota sources](quota-sources.md).
 
+**Notifications, since 1.12.** A notification is a message Token Pace sends to a channel outside VS Code that you set
+up and list in `tokenPace.notifications.channels` — while that list is empty, its default, nothing is sent, and nothing
+of the notifications is read or kept. What a message holds is decided by one function from the notification payload's
+allow-list of an event: `event` (which of the six it is), `provider` (`claude` or `codex`, for a quota window),
+`program` (`claudeCode`, for Claude Code's waits and turns), the window's `windowLabel` ("5 h", "7 d · Fable") and
+`windowKind`, a whole `percent`, the kind of `wait` (`permission` or `input`) and the times `resetsAt`, `etaAt` (a
+forecast, marked `~`), `since`, `atLeastMs` (a lower bound) and `at`. Never a prompt, a title of the Prompts section, a
+line of a transcript, a path, a folder or project name, a session's id or name, an agent's id or type, a plan name, an
+account, a token count or a cost — the read contract (above) holds the builder to those twelve fields. The events read
+nothing new: `agentDone` whether a main session's newest reply ended its turn, and when (the facts the prompt-cache
+guards read), `agentWaiting` the agent hook's `wait`, `ts` and `sessionId`, the quota events the readings and forecasts
+the in-editor alerts read. A session's id is kept in memory only, as the key of the notifier's own table, and never goes
+into a message, the log or `tokenPace.notify` — the notifier's state in the extension's storage: which events were sent
+and when, the clocks of the cooldown and the hourly cap, and each quota window's last reset time. A leak test builds
+every event from a world with a project `synthetic-project-123`, a session `9d0eb37a-synthetic` in a file under that
+project, a prompt titled `Synthetic Prompt Title` and a plan `synthetic-plan`, and finds none of them in a payload, a
+text or the JSON, and the test that follows a synthetic access token from the Keychain through a real fetch finds it
+in no payload either.
+
 **Leak tests.** Each field the agent tables and the agent hook read has a leak test whose fixture
 puts synthetic text under the keys beside it — the prompt, the description, the result, the
 summary, the script, the error's text — and asserts that none of it reaches the outputs that field

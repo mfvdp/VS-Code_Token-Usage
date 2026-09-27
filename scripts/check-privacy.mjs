@@ -169,6 +169,13 @@ const PROMPTS_PAGES = ['privacy', 'prompts']
 const CREDENTIALS_PAGES = ['privacy', 'quotaSources']
 /** 1.12 §0a.4: the credentials document's two places — the file and, on macOS, the Keychain item holding the same JSON. */
 const CREDENTIALS_SOURCE = '~/.claude/.credentials.json or the Keychain item Claude Code-credentials'
+/**
+ * 1.12 §0a.10: the notification payload — not a file of another program but what Token Pace builds and sends, held to
+ * the same rule: of an event `payloadOf` reads these fields and no other. P9 adds the notifications page to its pages
+ * once docs/notifications.md exists (1.10 P2's precedent for a page that comes later).
+ */
+const PAYLOAD_PAGES = ['privacy']
+const PAYLOAD_SOURCE = 'the notification payload'
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
@@ -360,6 +367,12 @@ export const READ_CONTRACT = [
     fields: ['claudeAiOauth'], pages: CREDENTIALS_PAGES },
   { what: 'the credentials document\'s token', source: CREDENTIALS_SOURCE, file: 'src/credentials.ts', kind: 'fields', body: 'function parseCredentials(', variable: 'oauth',
     fields: ['accessToken', 'expiresAt'], pages: CREDENTIALS_PAGES },
+  // 1.12 §0a.10 (P6): the one builder of a notification's payload — of a `NotificationEvent` its allow-list, read by name
+  // into the facts the texts and the JSON are made of. Never `identity` (the once-rule's key), and no field an event does
+  // not have: a prompt, a path, a project, a session, an agent, a plan, an account, a token count or a cost.
+  { what: 'the notification payload', source: PAYLOAD_SOURCE, file: 'src/notify.ts', kind: 'fields', body: 'export function payloadOf(', variable: 'e',
+    fields: ['event', 'provider', 'program', 'windowLabel', 'windowKind', 'percent', 'resetsAt', 'etaAt', 'since', 'atLeastMs', 'wait', 'at'],
+    pages: PAYLOAD_PAGES },
 ]
 
 /**

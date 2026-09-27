@@ -1538,9 +1538,216 @@
         }
       },
       {
+        "id": "tokenPace.notifications",
+        "title": "%configuration.notifications.title%",
+        "order": 10,
+        "properties": {
+          "tokenPace.notifications.channels": {
+            "type": "array",
+            "order": 1,
+            "default": [],
+            "scope": "machine",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "webhook",
+                "telegram",
+                "ntfy",
+                "email"
+              ],
+              "enumDescriptions": [
+                "%config.notifications.channels.enum.webhook%",
+                "%config.notifications.channels.enum.telegram%",
+                "%config.notifications.channels.enum.ntfy%",
+                "%config.notifications.channels.enum.email%"
+              ],
+              "markdownEnumDescriptions": [
+                "%config.notifications.channels.enum.webhook%",
+                "%config.notifications.channels.enum.telegram%",
+                "%config.notifications.channels.enum.ntfy%",
+                "%config.notifications.channels.enum.email%"
+              ]
+            },
+            "markdownDescription": "%config.notifications.channels.description%"
+          },
+          "tokenPace.notifications.events": {
+            "type": "array",
+            "order": 2,
+            "default": [
+              "agentWaiting",
+              "agentDone",
+              "quotaThreshold",
+              "quotaExhausted",
+              "paceWarning"
+            ],
+            "scope": "machine",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "agentWaiting",
+                "agentDone",
+                "quotaThreshold",
+                "quotaExhausted",
+                "quotaReset",
+                "paceWarning"
+              ],
+              "enumDescriptions": [
+                "%config.notifications.events.enum.agentWaiting%",
+                "%config.notifications.events.enum.agentDone%",
+                "%config.notifications.events.enum.quotaThreshold%",
+                "%config.notifications.events.enum.quotaExhausted%",
+                "%config.notifications.events.enum.quotaReset%",
+                "%config.notifications.events.enum.paceWarning%"
+              ],
+              "markdownEnumDescriptions": [
+                "%config.notifications.events.enum.agentWaiting%",
+                "%config.notifications.events.enum.agentDone%",
+                "%config.notifications.events.enum.quotaThreshold%",
+                "%config.notifications.events.enum.quotaExhausted%",
+                "%config.notifications.events.enum.quotaReset%",
+                "%config.notifications.events.enum.paceWarning%"
+              ]
+            },
+            "markdownDescription": "%config.notifications.events.description%"
+          },
+          "tokenPace.notifications.thresholds": {
+            "type": "object",
+            "order": 3,
+            "default": {
+              "session": 80,
+              "weekly": 80
+            },
+            "scope": "machine",
+            "properties": {
+              "session": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "weekly": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "additionalProperties": false,
+            "markdownDescription": "%config.notifications.thresholds.description%"
+          },
+          "tokenPace.notifications.cooldownMinutes": {
+            "type": "number",
+            "order": 4,
+            "default": 10,
+            "minimum": 1,
+            "maximum": 1440,
+            "scope": "machine",
+            "markdownDescription": "%config.notifications.cooldownMinutes.description%"
+          },
+          "tokenPace.notifications.webhook": {
+            "type": "object",
+            "order": 5,
+            "default": {
+              "format": "generic",
+              "secretHeader": ""
+            },
+            "scope": "machine",
+            "properties": {
+              "format": {
+                "type": "string",
+                "enum": [
+                  "generic",
+                  "slack",
+                  "discord",
+                  "teams",
+                  "mattermost",
+                  "rocketChat"
+                ]
+              },
+              "secretHeader": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "markdownDescription": "%config.notifications.webhook.description%"
+          },
+          "tokenPace.notifications.telegram": {
+            "type": "object",
+            "order": 6,
+            "default": {
+              "chatId": ""
+            },
+            "scope": "machine",
+            "properties": {
+              "chatId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "markdownDescription": "%config.notifications.telegram.description%"
+          },
+          "tokenPace.notifications.ntfy": {
+            "type": "object",
+            "order": 7,
+            "default": {
+              "server": ""
+            },
+            "scope": "machine",
+            "properties": {
+              "server": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "markdownDescription": "%config.notifications.ntfy.description%"
+          },
+          "tokenPace.notifications.email": {
+            "type": "object",
+            "order": 8,
+            "default": {
+              "host": "",
+              "port": 587,
+              "security": "starttls",
+              "user": "",
+              "from": "",
+              "to": ""
+            },
+            "scope": "machine",
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "security": {
+                "type": "string",
+                "enum": [
+                  "starttls",
+                  "tls"
+                ]
+              },
+              "user": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "markdownDescription": "%config.notifications.email.description%"
+          }
+        }
+      },
+      {
         "id": "tokenPace.diagnostics",
         "title": "%configuration.diagnostics.title%",
-        "order": 10,
+        "order": 11,
         "properties": {
           "tokenPace.debug": {
             "type": "boolean",

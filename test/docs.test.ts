@@ -4090,3 +4090,27 @@ test('the Codex app-server section says what the standing connection does — th
   assert.ok(trouble.includes('## The Codex app-server') && trouble.includes('| `state budgetSpent` | The app-server restarted too often — five times within an hour; for the rest of the hour each fetch starts it once'), 'docs/troubleshooting.md has no budgetSpent row')
   assert.ok(flatText(doc.statusBar).includes('the Codex entry\'s figure may change between two fetches, when Codex pushes an update — nothing else of the entry changes'), 'docs/status-bar.md does not say a push may change the figure')
 })
+
+test('alerts and notifications are two words for two things on the pages: the Alerts section says so, the settings page has the Notifications table, the privacy page names the payload\'s allow-list (1.12 C0, C5, §0a.10)', () => {
+  const alerts = flatText(doc.budgetsAlerts.slice(doc.budgetsAlerts.indexOf('\n## Alerts')))
+  assert.ok(alerts.includes('An **alert** is the popup inside VS Code that the `tokenPace.alerts.*` settings control. A **notification** (1.12) is something else: a message Token Pace sends outside VS Code'),
+    'docs/budgets-alerts.md does not tell an alert from a notification')
+  assert.ok(alerts.includes('the same threshold crossing may raise both — each once'), 'docs/budgets-alerts.md does not say both may speak')
+  // The Alerts section's own sentences say alert: the only notifications there are the ones it tells apart.
+  const words = alerts.replace(/tokenPace\.notifications\.\*|settings\.md#notifications-phone-chat-e-mail/g, '')
+  assert.equal((words.match(/notification/gi) ?? []).length, 1, 'docs/budgets-alerts.md still calls an alert a notification')
+  // The settings page: its own section after Alerts, every key machine-scoped and none a secret.
+  const settings = doc.settings
+  const at = settings.indexOf('\n## Notifications (phone, chat, e-mail)')
+  assert.ok(at > settings.indexOf('\n## Alerts') && at < settings.indexOf('\n## Diagnostics'), 'docs/settings.md has no Notifications section between Alerts and Diagnostics')
+  const section = flatText(settings.slice(at, settings.indexOf('\n## Diagnostics')))
+  assert.ok(section.includes('All eight settings are machine-scoped') && section.includes('None of them holds a secret'))
+  assert.ok(section.includes('| `notifications.channels` | `[]` |') && section.includes('**Empty means nothing is ever sent.**'))
+  assert.ok(section.includes('| `notifications.events` | `[agentWaiting, agentDone, quotaThreshold, quotaExhausted, paceWarning]` |'))
+  // The privacy page: the source, the twelve fields the builder reads, and what never goes into a message.
+  const privacy = flatText(doc.privacy)
+  assert.ok(privacy.includes('**Notifications, since 1.12.**') && privacy.includes('the notification payload\'s allow-list'))
+  assert.ok(privacy.includes('Never a prompt, a title of the Prompts section, a line of a transcript, a path, a folder or project name, a session\'s id or name, an agent\'s id or type, a plan name, an account, a token count or a cost'),
+    'docs/privacy.md does not say what a notification never holds')
+  assert.ok(privacy.includes('A session\'s id is kept in memory only, as the key of the notifier\'s own table'))
+})

@@ -642,6 +642,14 @@ test('1.11 C4: the JSON buckets carry the same three fields — null and false w
   }
 })
 
+/**
+ * 1.12 D11 (1.11 Review 2 F9): the JSON's note on the three price fields, word for word — with the exception docs/export.md
+ * states for the CSV: a model only a custom price prices has no published list price, and its list amount is its cost.
+ */
+const LIST_COST_NOTE = 'listCostUsd is the same usage at the published list price (multiplier 1, no custom price); where a custom price '
+  + 'alone priced a model, it equals costUsd; priceFrom is the day the price rule used was read; priceApproximate means no rule covered '
+  + 'that day and the nearest one was used'
+
 test('1.11 C4: pricing names every provider\'s later-checked rows and the source pages by host, and a note says what the three fields mean', () => {
   const j = JSON.parse(toJson(priceWorld(), PRICE_WORLD_RANGE, cfg, tcfg, NOW))
   // Every provider's, whatever the dashboard shows (§7a Q10): the export follows no view.
@@ -651,8 +659,27 @@ test('1.11 C4: pricing names every provider\'s later-checked rows and the source
   assert.deepEqual(j.pricing.sources, ['docs.claude.com', 'platform.claude.com', 'developers.openai.com'])
   for (const host of j.pricing.sources) assert.match(host, /^[a-z0-9-]+(\.[a-z0-9-]+)+$/, 'a host name, never a URL or a path')
   assert.deepEqual(Object.keys(j.pricing), ['as_of', 'custom', 'multiplier', 'unknown_model', 'checked_later', 'sources'])
-  assert.ok(j.notes.includes('listCostUsd is the same usage at the published list price (multiplier 1, no custom price); priceFrom is the day '
-    + 'the price rule used was read; priceApproximate means no rule covered that day and the nearest one was used'), j.notes.join(' | '))
+  // 1.12 D11 (rewritten: the note gained the custom price's exception — the test below pins it and holds it to the export).
+  assert.ok(j.notes.includes(LIST_COST_NOTE), j.notes.join(' | '))
+})
+
+test('1.12 D11: the note on listCostUsd names the custom price\'s exception, and the export keeps it — a bucket a custom price alone priced carries listCostUsd = costUsd', () => {
+  const custom = makeConfig({
+    'tokenPace.pricing.multiplier': 0.9,
+    'tokenPace.customPrices': { 'claude-experimental-x': { input: 2, output: 8 }, 'claude-opus-4-6': { input: 1 } },
+  })
+  const j = JSON.parse(toJson(priceWorld(), PRICE_WORLD_RANGE, custom, timeConfig(custom), NOW))
+  // One note on the fields, this one, in the place 1.11 gave it (after the six of versions 1–3).
+  assert.deepEqual(j.notes.filter((n: string) => n.startsWith('listCostUsd')), [LIST_COST_NOTE])
+  assert.equal(j.notes.indexOf(LIST_COST_NOTE), 6, j.notes.join(' | '))
+  // What the sentence claims, held by the export: priced by the custom price alone (no rule, so no day), list = cost.
+  const alone = j.buckets.filter((b: { priced: string; priceFrom: string | null }) => b.priced === 'custom' && b.priceFrom === null)
+  assert.deepEqual(alone.map((b: { model: string }) => b.model), ['claude-experimental-x'])
+  for (const b of alone) assert.equal(b.listCostUsd, b.costUsd, b.model)
+  // A custom price over a published rule is no exception: the list amount stays the rule's, above the configured cost.
+  const over = j.buckets.find((b: { model: string }) => b.model === 'claude-opus-4-6')
+  assert.equal(over.priced, 'custom')
+  assert.ok(over.listCostUsd > over.costUsd, JSON.stringify(over))
 })
 
 /**

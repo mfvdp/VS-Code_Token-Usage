@@ -170,7 +170,7 @@
   "config.overflowDisplay.enum.clamp": "Limitte kes — “100%”",
   "config.overflowDisplay.enum.actual": "Ücretli taşma dahil gerçek değeri göster — “111%”",
   "config.resetHourCycle.description": "Mutlak sıfırlama zamanları için saat biçimi.",
-  "config.resetHourCycle.enum.auto": "Token Pace metinlerinin dilini değil, işletim sisteminin saat biçimini (uzantı ana bilgisayarının çalıştığı yerel ayarı) izle",
+  "config.resetHourCycle.enum.auto": "Token Pace metinlerinin dilini değil, işletim sisteminin saat biçimini (Uzantı Konağının çalıştığı yerel ayarı) izle",
   "config.resetHourCycle.enum.h12": "12 saatlik saat — “ÖÖ 06:00”",
   "config.resetHourCycle.enum.h23": "24 saatlik saat — “06:00”",
   "config.labelMaxChars.description": "Oluşturulan pencere etiketlerini bu kadar karaktere kısalt. `0` kısaltma yok demektir.",

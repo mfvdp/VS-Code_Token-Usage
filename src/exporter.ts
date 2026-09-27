@@ -482,9 +482,12 @@ export function toJson(agg: Aggregator, range: ExportRange, cfg: Config, tcfg: T
       'an agent row counts the agent whole: the same tokens the buckets with isSub true count hour by hour, so the two are '
         + 'never added; state is the Agents section\'s, inferred where derived is true; report is Claude Code\'s own '
         + 'figure for the agent, never part of a total',
-      // 1.11 C4 (schema 4): after the notes versions 1–3 wrote, so theirs keep their places.
-      'listCostUsd is the same usage at the published list price (multiplier 1, no custom price); priceFrom is the day '
-        + 'the price rule used was read; priceApproximate means no rule covered that day and the nearest one was used',
+      // 1.11 C4 (schema 4): after the notes versions 1–3 wrote, so theirs keep their places. 1.12 D11 (1.11 Review 2
+      // F9): the exception docs/export.md states for the CSV — a model only a custom price prices has no list price, and
+      // its list figure is the custom one (prices.ts costOfBucket) — in the note as well. Prose, no schema change.
+      'listCostUsd is the same usage at the published list price (multiplier 1, no custom price); where a custom price '
+        + 'alone priced a model, it equals costUsd; priceFrom is the day the price rule used was read; priceApproximate '
+        + 'means no rule covered that day and the nearest one was used',
     ],
   }
 

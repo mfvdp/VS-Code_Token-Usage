@@ -162,7 +162,7 @@
   "Requests": "要求",
   "Response contained no quota windows": "回應中沒有配額時段",
   "Response is not valid JSON": "回應不是有效的 JSON",
-  "Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.": "限制模式：在未受信任的工作區中，Token Pace 不會在終端機中輸入任何內容。",
+  "Restricted Mode: Token Pace types nothing into a terminal in a workspace you have not trusted.": "受限模式：在未受信任的工作區中，Token Pace 不會在終端機中輸入任何內容。",
   "Romanian": "羅馬尼亞文",
   "Running — inferred: a child agent of this agent is still running.": "執行中 — 推斷：此代理程式的下層代理程式仍在執行。",
   "Running — inferred: an agent of this run wrote on after the parent recorded its end at {0}.": "執行中 — 推斷：父層於 {0} 記錄此次執行結束後，其中的代理程式仍繼續寫入。",

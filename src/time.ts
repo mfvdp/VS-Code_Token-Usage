@@ -531,13 +531,20 @@ export function relativeTime(target: number, now = Date.now()): string {
  *
  * The result never contains the word "resets" — a countdown reads as a duration
  * ("2h14m"), and a reset that has come and gone reads "reset due" and nothing
- * else. The verb is attached in exactly one place, `WindowVm.resetLine`, which
- * also knows to leave "reset due" alone; a "resets" in here would come out of
- * that as "resets reset due".
+ * else. The verb stands in the callers' own whole messages, never here — in two
+ * places: the view model's `WindowVm.resetLine` (`resetLineOf`:
+ * `resets {0}` around a countdown, `resets at {0}` around a clock time, "reset
+ * due" left alone) and the status bar's `resetSuffix` (`resets {0}` around the
+ * `relative` form, `resets at {0}` around the `absolute` one, and for `both` its
+ * own `resets at {0} (in {1})`, built from `resetClock` and `relativeShort`, not
+ * from this function's text); a "resets" in here would come out of those as
+ * "resets reset due".
  *
- * 1.11 D12: `both` is one whole message — "06:00 (in 2h14m)", "06:00 (reset due)" —
- * never brackets written here around a translated piece: a language places its own
- * brackets (CJK writes `（…）`) and its own word order around the two figures.
+ * 1.11 D12: `both` is one whole message — "06:00 (in 2h14m)", "06:00 (reset due)",
+ * the keys `{0} (in {1})` and `{0} (reset due)` — never brackets written here around
+ * a translated piece: a language places its own brackets (CJK writes `（…）`) and its
+ * own word order around the two figures. `resetClock` is the one definition of the
+ * clock time and `relativeShort` of the countdown; every form here is built from them.
  */
 export function formatReset(
   resetsAt: number | null,

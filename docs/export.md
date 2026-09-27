@@ -95,8 +95,9 @@ the dashboard shows — and `sources`, the pages the table was read from as host
 qualify them. `costUsd` is `null`, not `0`, where there is no price. Each bucket carries the CSV's
 `listCostUsd`, `priceFrom` and `priceApproximate` — `null`, `null` and `false` where the CSV leaves
 them empty — and `totals` carries `listCostUsd`; the note says what they are: *listCostUsd is the same
-usage at the published list price (multiplier 1, no custom price); priceFrom is the day the price rule
-used was read; priceApproximate means no rule covered that day and the nearest one was used.* With attribution on it also
+usage at the published list price (multiplier 1, no custom price); where a custom price alone priced a
+model, it equals costUsd; priceFrom is the day the price rule used was read; priceApproximate means no
+rule covered that day and the nearest one was used.* With attribution on it also
 carries a `sessions[]` array, and the note says the project labels are exactly as stored. It also
 carries `tools[]` (day, source, model, tool, calls) and `toolsTruncated`, and `agents[]` — the
 agents file's rows, with the same fields and Claude Code's report as one `report` object

@@ -62,8 +62,18 @@ const post = (m: unknown): void => vscode.postMessage(m);
  * and never in a data-* value.
  */
 const GLUE_RE = /(\d) (%|min|h|d|s|m|K|M|G)(?!\p{L})/gu;
+/**
+ * 1.12 D2 (1.11 Review 1 F4): a duration's parts stay together. After GLUE_RE, the space between a glued `<n> d|h|min`
+ * and a following `<n> h|min|s` — the unit ending where no letter follows — becomes a no-break space too, so
+ * "~18 h 46 min", "3 d 4 h" and "49 min 00 s" are each one unbreakable run (at 260 px the ja models' turn line broke
+ * "~18 h" from "46 min"). A unit followed by a word ("5 h window") or a comma ("3 h, 4 min") is left alone. Only the
+ * notation units h, d, min and s: the code writes the page's durations the same in every language (stats.ts
+ * durationText, agentTreeBuild.ts spanText, time.ts relativeTime) and no bundle translates a duration's units. The
+ * prompt cache's countdown ("3 m 40 s", promptCache.ts countdownText) writes `m` and is not one of them.
+ */
+const DURATION_GLUE_RE = /(\d\u00a0(?:d|h|min)) (?=\d+\u00a0(?:h|min|s)(?!\p{L}))/gu;
 function glue(html: string): string {
-  return html.replace(GLUE_RE, '$1\u00a0$2');
+  return html.replace(GLUE_RE, '$1\u00a0$2').replace(DURATION_GLUE_RE, '$1\u00a0');
 }
 
 /**
@@ -1083,8 +1093,12 @@ function approxNote(): string {
  * 1.11 D1: the label carries its one gap before the value — a space after it, none when it ends in a full-width
  * character (FULL_WIDTH_END: `：` U+FF1A among them), whose glyph holds its own blank. The stylesheet added the space
  * to every label until 1.11, and a full-width colon and that space made a double gap.
+ * 1.12 D1 (1.11 Review 1 F3): full-width means the wide forms only — CJK symbols and punctuation (U+3000–U+303F), the
+ * full-width forms (U+FF01–U+FF60) and the full-width signs (U+FFE0–U+FFE6). The halfwidth forms (U+FF61–U+FFDC, `｡`
+ * `､` and halfwidth Hangul among them) and the halfwidth symbols (U+FFE8–U+FFEE) are narrow and take the space like an
+ * ASCII colon. No shipped `{0}:` ends in one; the rule says what 1.11 D1 meant.
  */
-const FULL_WIDTH_END = /[\u3000-\u303F\uFF00-\uFFEF]$/;
+const FULL_WIDTH_END = /[\u3000-\u303F\uFF01-\uFF60\uFFE0-\uFFE6]$/;
 function dh(name: string): string {
   const label = tr('{0}:', name);
   return ' data-h="' + name + '" data-hl="' + label + (FULL_WIDTH_END.test(label) ? '' : ' ') + '"';

@@ -151,8 +151,10 @@ function heading(...parts: string[]): string {
  * 1.10 B5 rule 3: a text as the page prints it on the quota card — each number kept with its unit by a no-break space.
  * The page's glue() restated for the pins of the prompt-cache block and the keep-warm notes below (rewritten for it:
  * they pinned the bare spaces); the rule itself is tested on the page's own function ("a number stays with its unit").
+ * 1.12 D2 (rewritten: glue() keeps a duration's parts together too — "1 min 10 s" is one run): the second step restated.
  */
 const glued = (s: string): string => s.replace(/(\d) (%|min|h|d|s|m|K|M|G)(?!\p{L})/gu, '$1\u00a0$2')
+  .replace(/(\d\u00a0(?:d|h|min)) (?=\d+\u00a0(?:h|min|s)(?!\p{L}))/gu, '$1\u00a0')
 
 /** Calls one renderer against a view model built from the defaults plus `over`. */
 function render(call: string, over: Record<string, unknown> = {}): string {
@@ -1326,7 +1328,9 @@ test('a model\'s turn line names what its figures are — Avg turn time, Ø Turn
   }))
   const line = /<td colspan="99" class="meta">([^<]*)<\/td>/.exec(long)
   assert.ok(line, long)
-  assert.equal(line[1], 'Avg turn time ~12\u00a0h 05\u00a0min · P90 ~18\u00a0h 46\u00a0min')
+  // 1.12 D2 (rewritten: it pinned the space between the parts, "~18\u00a0h 46\u00a0min" — the tear R1-F4 found at 260 px in ja):
+  // the parts are one run now.
+  assert.equal(line[1], 'Avg turn time ~12\u00a0h\u00a005\u00a0min · P90 ~18\u00a0h\u00a046\u00a0min')
   assert.equal(/\d (min|h|s)(?!\p{L})/u.test(line[1]), false, line[1])
 })
 
@@ -3418,14 +3422,15 @@ test('1.11 B6, B8 6: the Records page draws the four new tables — heads, stack
     + '<td data-h="Usage" data-hl="Usage: ">1.2M</td></tr>'), days)
   assert.ok(days.includes('<td data-h="API cost" data-hl="API cost: ">~$4.10</td>'), days)
   // The two session tables: their own column order, the time glued to its units, the start's day kept whole.
+  // 1.12 D2 (rewritten: the time's two parts were joined by a plain space): a duration's parts stay together.
   const longest = cardOf(h, 'Longest sessions')
   assert.ok(longest.includes('<thead><tr><th>Session</th><th>Time</th><th>Usage</th><th>Started</th></tr></thead>'), longest)
   assert.ok(longest.includes('<tr><td data-h="Session" data-hl="Session: ">Tue 14:20 · aaaa1111</td>'
-    + '<td data-h="Time" data-hl="Time: ">3 h 12 min</td><td data-h="Usage" data-hl="Usage: ">37K</td>'
+    + '<td data-h="Time" data-hl="Time: ">3 h 12 min</td><td data-h="Usage" data-hl="Usage: ">37K</td>'
     + '<td data-h="Started" data-hl="Started: "><span class="nobr">2026-09-01</span> 14:20</td></tr>'), longest)
   const largest = cardOf(h, 'Largest sessions')
   assert.ok(largest.includes('<thead><tr><th>Session</th><th>Usage</th><th>Time</th><th>Started</th></tr></thead>'), largest)
-  assert.ok(largest.includes('<td data-h="Usage" data-hl="Usage: ">100K</td><td data-h="Time" data-hl="Time: ">49 min 00 s</td>'), largest)
+  assert.ok(largest.includes('<td data-h="Usage" data-hl="Usage: ">100K</td><td data-h="Time" data-hl="Time: ">49 min 00 s</td>'), largest)
   // The hours: the hour's day whole, the 1-hour part (a dash where none), the cost of the writes (a floor titled
   // with why), the writers — a model id is text, never markup.
   const hours = cardOf(h, 'Hours with the most cache written')
@@ -10731,7 +10736,32 @@ test('a stacked cell\'s label carries its one gap before the value — a space a
   for (const [pattern, want] of cases) {
     assert.equal(period(renderIn(wordsPage({ '{0}:': pattern, 'Period': 'X' }), 'sTokens()', vm)), want, pattern)
   }
-  assert.ok(SOURCE.includes('const FULL_WIDTH_END = /[\\u3000-\\u303F\\uFF00-\\uFFEF]$/;'), 'the full-width range changed')
+  // 1.12 D1 (rewritten: it pinned U+FF00–U+FFEF): the wide forms only — the test below holds the halfwidth ones.
+  assert.ok(SOURCE.includes('const FULL_WIDTH_END = /[\\u3000-\\u303F\\uFF01-\\uFF60\\uFFE0-\\uFFE6]$/;'), 'the full-width range changed')
+})
+
+test('a stacked label that ends in a halfwidth form takes the space like an ASCII colon — full-width means the wide forms only (1.12 D1)', () => {
+  // 1.11 Review 1 F3: FULL_WIDTH_END took U+FF00–U+FFEF whole, and the halfwidth forms in it are narrow — a label ending
+  // in the halfwidth ideographic full stop ｡ (U+FF61) or the halfwidth forms light vertical ￨ (U+FFE8) lost its gap. No
+  // shipped „{0}:" ends in one; the rule says what 1.11 D1 meant.
+  const vm = tokensVm({ totals: [{ source: 'claude', title: 'Claude Code', rows: [{
+    label: 'Today', usage: '1.5K', freshInput: '1K', cacheWrite5m: '–', cacheWrite1h: '–', cacheRead: '–', output: '500',
+    reasoning: '–', requests: '1', cacheHit: '–', perRequest: '1.5K', cost: '~$0.01', costPartial: false, incomplete: false,
+    approx: false, spanText: '2026-09-03',
+  }] }] })
+  const period = (h: string): string | undefined => /<td data-h="[^"]*" data-hl="([^"]*)" title="2026-09-03">Today<\/td>/.exec(h)?.[1]
+  const label = (pattern: string, name = 'X'): string | undefined =>
+    period(renderIn(wordsPage({ '{0}:': pattern, 'Period': name }), 'sTokens()', vm))
+  // The full-width colon: its glyph holds its own blank — no space after it (Simplified Chinese's own label).
+  assert.equal(label('{0}：', '期间'), '期间：')
+  // The halfwidth forms are narrow: one space, as after an ASCII colon.
+  assert.equal(label('{0}\uff61'), 'X\uff61 ')
+  assert.equal(label('{0}\uffe8'), 'X\uffe8 ')
+  assert.equal(label('{0}\uff64'), 'X\uff64 ') // ､ halfwidth ideographic comma
+  assert.equal(label('{0}\uffdc'), 'X\uffdc ') // the last halfwidth Hangul letter
+  // The full-width signs stay wide: the yen sign ￥ (U+FFE5) takes no space, nor the full-width white parenthesis ｠ (U+FF60).
+  assert.equal(label('{0}\uffe5'), 'X\uffe5')
+  assert.equal(label('{0}\uff60'), 'X\uff60')
 })
 
 test('a number stays with its unit: the page\'s glue() keeps a figure and a following %, min, h, d, s, m, K, M or G on one line (1.10 B5 rule 3)', () => {
@@ -10768,6 +10798,34 @@ test('a number stays with its unit: the page\'s glue() keeps a figure and a foll
   }
 })
 
+test('a duration\'s parts stay together: glue() puts a no-break space between a glued d, h or min and a following figure with h, min or s (1.12 D2)', () => {
+  const g = (s: string): string => String(nodeVm.runInContext('glue(' + JSON.stringify(s) + ')', ctx))
+  const nb = '\u00a0'
+  // 1.11 Review 1 F4: at 260 px the ja models' turn line broke "~18 h" from "46 min". Each duration is one run now.
+  const cases: Array<[string, string]> = [
+    ['~18 h 46 min', `~18${nb}h${nb}46${nb}min`],
+    ['3 d 4 h', `3${nb}d${nb}4${nb}h`],
+    ['49 min 00 s', `49${nb}min${nb}00${nb}s`],
+    // A unit followed by a word, or a comma: each figure kept with its unit, the parts not joined.
+    ['5 h window', `5${nb}h window`],
+    ['3 h, 4 min', `3${nb}h, 4${nb}min`],
+    // Inside a sentence, beside another figure: only the duration's own space.
+    ['平均ターン時間 ~12 h 05 min · P90 ~18 h 46 min', `平均ターン時間 ~12${nb}h${nb}05${nb}min · P90 ~18${nb}h${nb}46${nb}min`],
+    // Three parts are one run too; the prompt cache's countdown writes `m`, which is not a duration part here.
+    ['1 d 2 h 3 min', `1${nb}d${nb}2${nb}h${nb}3${nb}min`],
+    ['cools in 4 m 10 s', `cools in 4${nb}m 10${nb}s`],
+    // The second part's unit ends where no letter follows: "2 hours" is a word, not a unit.
+    ['1 h 2 hours', `1${nb}h 2 hours`],
+  ]
+  for (const [raw, want] of cases) assert.equal(g(raw), want, raw)
+  // On the page: the models' turn line, the line where the tear was seen.
+  const h = render('sModels()', {
+    models: { rows: [modelRow({ turnAvg: '~12 h 05 min', turnP90: '~18 h 46 min' })], total: 1, hidden: 0, sort: { key: 'usage', dir: 'desc' } },
+  })
+  assert.ok(h.includes(`<td colspan="99" class="meta">Avg turn time ~12${nb}h${nb}05${nb}min · P90 ~18${nb}h${nb}46${nb}min</td>`), h)
+  assert.ok(SOURCE.includes('return html.replace(GLUE_RE, \'$1\\u00a0$2\').replace(DURATION_GLUE_RE, \'$1\\u00a0\');'), 'glue() changed')
+})
+
 test('an ISO day never breaks at its hyphen: every day the page prints stands in a .nobr span (1.10 B5 rule 2)', () => {
   const nb = (d: string): string => '<span class="nobr">' + d + '</span>'
   // The range line and the records are pinned above; the drill, the heat map, the sessions and the data quality here.
@@ -10782,8 +10840,9 @@ test('an ISO day never breaks at its hyphen: every day the page prints stands in
   ] } })
   // 1.11 D1 (rewritten: data-hl ends in its gap).
   assert.ok(sessions.includes('data-hl="Started: ">' + nb('2026-09-03') + ' 12:00</td>'), sessions)
-  // Its duration glued (1.10 B5 rule 3): a stacked cell wraps.
-  assert.ok(sessions.includes('data-hl="Duration: ">1\u00a0h 2\u00a0min</td>'), sessions)
+  // Its duration glued (1.10 B5 rule 3): a stacked cell wraps. 1.12 D2 (rewritten: the parts were joined by a plain
+  // space): the two parts are one run.
+  assert.ok(sessions.includes('data-hl="Duration: ">1\u00a0h\u00a02\u00a0min</td>'), sessions)
   const dq = render('sDataQuality()', { dataQuality: dataQualityOf() })
   assert.ok(dq.includes('Coverage ' + nb('2026-08-01') + ' → ' + nb('2026-09-03')), dq)
   // A day inside a sentence of the summary as well; nothing else of the text is wrapped.

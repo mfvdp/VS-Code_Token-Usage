@@ -133,14 +133,21 @@ the kind and the time of our own last failed attempt,
 `claude — next attempt 2026-09-24T12:52:00.000Z · last failed attempt 2026-09-24T11:40:00.000Z [retry]`,
 each `none` where there is none — never the failure's words, whatever the kind; the language line
 (1.9), `setting auto · shown de · VS Code de` — the setting, the language whose words are shown and
-VS Code's display language, each a tag or `–` —, while the report itself stays English; the status-line
-bridge state; the `http.proxy` settings with their origin and the six proxy
+VS Code's display language, each a tag or `–` —, while the report itself stays English; since 1.12 the Codex
+app-server's line, `codex connection — mode persistent · state ready · restarts 0 in the last hour · pushes 3 · last
+push 42 s ago` ([The Codex app-server](quota-sources.md#the-codex-app-server)), and the credentials' line,
+`credentials — source keychain · keychain allowed` — where the token came from, by a name, never the token; the
+status-line bridge state; a section `## Notifications` with one line per channel — whether it is listed, whether its
+secret is set, whether its consent stands, its last result — then the listed events and the messages of this hour,
+never a host, an address, a chat id or a secret ([Notifications](notifications.md#the-diagnostics-and-the-log)); the
+`http.proxy` settings with their origin and the six proxy
 environment variables (`tokenPace.diagnostics.includeNetworkSetup`, credentials inside proxy URLs
 replaced by `***`); and the current value of every `tokenPace.*` setting.
 
 It contains **no** token, **no** transcript content and **no** object dumps. Paths are shortened
 to `~`, and any key that even looks like a secret is redacted as a matter of defence in depth
-(there is no key or endpoint setting to begin with).
+(no setting holds a key or a secret to begin with). The notification settings' fields that name a host or an
+address — `host`, `user`, `from`, `to`, `chatId` and `server` — read `set` or `not set` (1.12).
 
 **Clear Stored Data…** lists what the extension has stored, each with its size, and deletes
 what you pick: the token snapshot (`state.json`), the quota cache (`quota.json` — the readings of
@@ -150,7 +157,9 @@ history (`quotaHistory.json`), the status-line mirror (`statusline-mirror.json`)
 answered [keep-warm lines](prompt-cache.md#keep-warm-in-a-terminal-opt-in) per day and their tokens), your
 [prompt list](prompts.md) (`prompts.json`, with the number of prompts it holds) — once you granted
 `tokenPace.writeQuotaCache`, the shared quota cache files outside the extension's storage —, the
-consent decisions (the keep-warm consent among them), the alert state and the dashboard view state.
+consent decisions (the keep-warm consent and, since 1.12, the macOS Keychain's among them), the alert state, the
+notification channels (1.12, with the number of channels set up — their secrets in VS Code's secret storage, your
+consents for their hosts and their last results, as one item) and the dashboard view state.
 Deleting `keepwarm.json` deletes the accounting and nothing else; no line depends on it. Deleting `prompts.json`
 returns the Prompts section to the three prompts Token Pace ships; the titles and texts you wrote are in no export, no
 report and no log, so the file is the only place they are. The confirmation says the part
@@ -171,4 +180,7 @@ extension's `globalStorage` directory, best effort, and only when the path ends 
 `User/globalStorage/frederik.token-pace`. The copies of the two scripts go with it — the agent hook's
 `agent-hook.js` and the status-line bridge's `statusline-bridge.js` —, so a hook still entered in
 Claude Code's settings, or a status line still connected, would then start a script that is gone:
-remove the hook's entries and run *Token Pace: Disconnect Claude Status Line* first.
+remove the hook's entries and run *Token Pace: Disconnect Claude Status Line* first. A notification channel's
+secrets are not in that directory but in VS Code's secret storage, and whether VS Code deletes an extension's
+secrets when it is uninstalled is not traced: remove your channels first (*Remove a Notification Channel…*, or
+*Clear Stored Data…*'s *Notification channels*).

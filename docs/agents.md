@@ -1018,6 +1018,10 @@ notification did not occur in them, so the permission request itself is what rep
 wait is seen answered when the agent writes its next line, so a long tool call you approved keeps
 the marker until the agent writes again.
 
+The hook's waits also feed the notification `agentWaiting` when you list it in `tokenPace.notifications.events`
+(1.12) — a permission wait of a session itself, or its wait for your answer while its turn is open, standing a minute
+while the window is not focused; an agent's wait is not sent ([Notifications](notifications.md#the-events)).
+
 ## Opening and selection
 
 A node with children has a toggle (▸ closed, ▾ open) in front of its row — a click on it, or `→` and

@@ -80,7 +80,9 @@ quiet:
 Hygiene that applies to all of them:
 
 * The identity of an alert is the window **and its reset time**, so a new cycle is a new subject
-  and the same cycle can never speak twice.
+  and the same cycle can never speak twice. Since 1.12 a reset time that moved by no more than 30 seconds
+  between two readings — Claude Code's usage cache writes it with sub-second jitter — is held to the cycle it
+  already names, so the readings of one cycle raise one alert, not one each.
 * Only an escalation speaks: a higher threshold than the one already announced, a pace that just
   flipped, a one-off notice.
 * **Nothing ever fires from a stale reading**, or from a reading of unknown age. An old

@@ -29,29 +29,38 @@ Run *Token Pace: Set Up a Notification Channel…* and pick one of nine entries.
 address and secrets in boxes that hide what you type, then asks whether it may send to the channel's host (below), and
 only then stores the secrets — in VS Code's secret storage, never in `settings.json`. It writes no setting: when it is
 done it tells you the channel's id to add to `tokenPace.notifications.channels`, and *Open Settings* takes you there.
-Where a secret is stored already, its box says *Leave empty to keep the stored one.* You can run *Set Up* again at any
-time — to change an address, or to allow a new host.
+You can run *Set Up* again at any time — to change an address, or to allow a new host. Where a secret is stored
+already for the host this setup allows, its box says *Leave empty to keep the stored one.* A stored secret belongs to
+the host you allowed it for: when *Set Up* allows another one — a webhook address on another host, another ntfy
+server, or another SMTP server or port — it offers none of the old secrets to keep, a secret the channel cannot do
+without has to be typed again, one it can do without (the webhook's secret header, the ntfy token) is deleted on
+*Allow* when you leave its box empty, and a preset never keeps the generic webhook's header value.
 
 | Entry | Channel id | What you need | Where it comes from |
 |---|---|---|---|
 | Webhook (JSON) | `webhook` | An `https://` address that accepts a JSON `POST`; optionally a secret header | Your own server or an automation service. Name the header in `tokenPace.notifications.webhook`'s `secretHeader` first; *Set Up* then asks for its value |
-| Slack | `webhook` | An incoming-webhook address | The Slack app's *Incoming Webhooks* page |
+| Slack | `webhook` | An incoming-webhook address | A Slack app of yours: its *Incoming Webhooks* page, *Activate Incoming Webhooks*, then *Add New Webhook to Workspace* and the channel; the address is under *Webhook URLs for Your Workspace* |
 | Discord | `webhook` | A channel webhook's address | The channel's settings, *Integrations → Webhooks* |
-| Microsoft Teams | `webhook` | A Workflows webhook's address | A Teams workflow "when a webhook request is received" (the old Office 365 connectors are retired) |
-| Mattermost | `webhook` | An incoming-webhook address | *Integrations → Incoming Webhooks* |
-| Rocket.Chat | `webhook` | An incoming-webhook address | *Administration → Integrations → Incoming* |
-| Telegram | `telegram` | A bot's token and the chat it sends to | The token from @BotFather; the chat id (a number, negative for a group, or `@name` for a public channel) in `tokenPace.notifications.telegram` first |
-| ntfy | `ntfy` | A server, a topic, and an access token if the server needs one | The server — ntfy.sh or your own — in `tokenPace.notifications.ntfy` first; the topic is a secret, because anyone who knows it can read its messages |
+| Microsoft Teams | `webhook` | A Workflows webhook's address | A workflow (Power Automate, or Workflows in Teams) with the trigger *When a Teams webhook request is received*; its address is shown when the flow is saved (the old Office 365 connectors are being retired) |
+| Mattermost | `webhook` | An incoming-webhook address | *Product menu → Integrations → Incoming Webhook*, *Add Incoming Webhook* — where *Integrations* is missing, a System Admin enables incoming webhooks under *System Console → Integrations → Integration Management* |
+| Rocket.Chat | `webhook` | An incoming-webhook address | *Manage → Workspace → Integrations*, *New*, the *Incoming* tab; the address is in the *Instructions* after saving |
+| Telegram | `telegram` | A bot's token and the chat it sends to | The token from @BotFather; the chat id (a number, negative for a group, or `@name` for a public Telegram channel) in `tokenPace.notifications.telegram` first |
+| ntfy | `ntfy` | A server, a topic, and an access token if the server needs one | The server's own address — `https://ntfy.sh` or your own server's — in `tokenPace.notifications.ntfy` first; the topic is a secret, because anyone who knows it can read its messages |
 | E-mail (SMTP) | `email` | An SMTP server, an account, a sender and one recipient | `host`, `port`, `security`, `user`, `from` and `to` in `tokenPace.notifications.email` first; many providers want an app password rather than your account's password |
+
+The paths in the last column are the ones the services' documentation gave on 2026-09-28 (Slack, Microsoft's Teams
+connector page, Mattermost, Rocket.Chat); Discord's help page could not be read that day, so its path is not checked —
+none of them was followed in the services' apps by the author.
 
 The five services' presets are the webhook channel with another body: the address is the same kind of secret, and
 `tokenPace.notifications.webhook`'s `format` picks the body (`generic`, `slack`, `discord`, `teams`, `mattermost`,
 `rocketChat`). There is one channel of each kind; *Set Up* after a preset says so when your `format` has to change.
 
-**Which channels were tried against the real service for 1.12**: none yet. Every channel was built from the service's
-documentation, read on 2026-09-27 (Slack, Discord, Microsoft Teams Workflows, Mattermost, Rocket.Chat, the Telegram Bot
-API, ntfy's JSON publishing), and tested against local servers — built from the service's documentation, not tried by
-the author.
+**Which channels were tried against the real service for 1.12**: none yet. Not yet tried live by the author: the
+generic webhook, Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy and e-mail over SMTP. Every
+channel was built from the service's documentation, read on 2026-09-27 (Slack, Discord, Microsoft Teams Workflows,
+Mattermost, Rocket.Chat, the Telegram Bot API, ntfy's JSON publishing), and tested against local servers — built from
+the service's documentation, not tried by the author.
 
 **Send a Test Notification…** sends a test message to one channel you set up — listed in `channels` or not — and
 tells you whether it went, or why not in one word: `HTTP 401` (the service's status), a timeout, a TLS error, a
@@ -101,7 +110,9 @@ A message is built from an event's allow-list and nothing else: `event` (which o
 `codex`, for a quota window), `program` (`claudeCode`, for a wait or a turn), the window's `windowLabel` ("5 h",
 "7 d · Fable") and `windowKind`, a whole `percent`, the kind of `wait` (`permission` or `input`) and the times
 `resetsAt`, `etaAt` (an estimate), `since`, `atLeastMs` (a lower bound) and `at`. The title and the sentences are in
-the language of `tokenPace.language`, with the clock times in your zone and hour cycle:
+the language of `tokenPace.language` — the services' names (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat,
+Telegram, ntfy), the event ids and the setting fields stay as they are in every language —, with the clock times in
+your zone and hour cycle:
 
 > **Token Pace: quota threshold reached**
 > Claude, 5 h window: 82% used — resets at 14:00.
@@ -137,9 +148,11 @@ a figure is absent (never `0`), `items` with one entry per window when a message
 }
 ```
 
-Slack, Mattermost and Rocket.Chat get `text` with the title in bold, Discord `content` with no mention that could
-ping anyone, Microsoft Teams an Adaptive Card, Telegram plain text, ntfy its JSON publish body (priority 4 for
-`quotaExhausted` and `agentWaiting`), and e-mail a plain-text message whose subject is the title. The request carries
+Slack, Mattermost and Rocket.Chat get `text` with the title in bold (Slack's `&`, `<` and `>` escaped), Discord
+`content` with no mention that could ping anyone, Microsoft Teams an Adaptive Card of version 1.2 with `contentUrl`
+null — as the Workflows trigger expects —, one text block per line, Telegram plain text without a link preview
+(`link_preview_options`, no `parse_mode`), ntfy its JSON publish body (priority 4 for `quotaExhausted` and
+`agentWaiting`, 3 otherwise), and e-mail a plain-text message whose subject is the title. The request carries
 `User-Agent: token-pace/<version>`.
 
 ## No storm
@@ -151,21 +164,23 @@ ping anyone, Microsoft Teams an Adaptive Card, Telegram plain text, ntfy its JSO
   once the cooldown is over; an `agentDone` or a `quotaReset` dropped by the cooldown or the cap is not sent later.
 * At most 20 messages an hour, all events and channels together.
 * A failed send is not tried again: it counts as sent, and the diagnostics show the failure.
-* A `429` answer pauses that channel until its `Retry-After`, at most an hour.
+* A `429` answer pauses that channel until its `Retry-After`, at most an hour; a `429` without a number of seconds
+  there pauses nothing.
 * Nothing is sent twice because a window closed during a send: the state is written before the message goes.
 
 ## Where the secrets are kept
 
 The secrets — a webhook's address (the address of a Slack, Discord or Teams webhook is its credential) and its secret
-header's value, the Telegram bot's token, the ntfy topic and its access token, the SMTP password — are kept in VS Code's
-secret storage on this machine: per machine, never in `settings.json` and never synced with Settings Sync. None of the
-eight settings holds one; `tokenPace.notifications.webhook`'s `secretHeader` is the header's name, not its value. On
-Linux VS Code's secret storage needs a keyring it can use (GNOME Keyring, KWallet or another Secret Service); which
-fallback VS Code applies without one is not traced here — VS Code's documentation of Settings Sync covers keychain
-issues on Linux. A secret is read at the moment of a send and dropped with it, and stands only in the one request that
-needs it — the Telegram token in the path of Telegram's address, the webhook's secret and the ntfy token in a header,
-the SMTP password in the `AUTH` exchange after TLS stands. It never reaches a log line, a message, *Copy Diagnostics*,
-an export or the extension's storage.
+header's value, the Telegram bot's token, the ntfy topic and its access token, the SMTP password — are kept in VS
+Code's secret storage on this machine: per machine, never in `settings.json` and never synced with Settings Sync. None
+of the eight settings holds one; `tokenPace.notifications.webhook`'s `secretHeader` is the header's name, not its
+value. On Linux VS Code's secret storage needs a keyring it can use (GNOME Keyring, KWallet or another Secret
+Service); which fallback VS Code applies without one is not traced here — VS Code's [Settings Sync
+documentation](https://code.visualstudio.com/docs/configure/settings-sync) covers it under *Troubleshoot
+credential-store issues*. A secret is read at the moment of a send and dropped with it, and stands only in the one
+request that needs it — the Telegram token in the path of Telegram's address, the webhook's secret and the ntfy token
+in a header, the SMTP password in the `AUTH` exchange after TLS stands. It never reaches a log line, a message, *Copy
+Diagnostics*, an export or the extension's storage.
 
 **Remove your channels before you uninstall Token Pace** (*Remove a Notification Channel…*, or *Clear Stored Data…*'s
 item *Notification channels*): whether VS Code deletes an extension's secrets when it is uninstalled is not traced.
@@ -180,13 +195,13 @@ JSON publish only at its root, and a topic's address would post the JSON as the 
 
 E-mail goes straight from the extension to your SMTP server, **encrypted before anything else is sent**: `security:
 tls` (usually port 465) speaks TLS from the first byte; `starttls` (usually port 587) sends `EHLO [127.0.0.1]` and
-`STARTTLS` in plain text and nothing else — a server that offers no `STARTTLS` gets no password and no address, and the
-send ends refused. Then `AUTH PLAIN` (or `LOGIN`), `MAIL FROM` your `from`, `RCPT TO` your one `to`, the message and
-`QUIT`. Certificates are always verified — against Node's certificate store, not the operating system's, whatever
-`NODE_TLS_REJECT_UNAUTHORIZED` says — so a server behind a private certificate authority fails with a TLS error. SMTP
-does not go through an HTTP proxy. `EHLO` names `[127.0.0.1]`, never your machine's name; the `Message-ID` ends in
-`@token-pace.invalid`; addresses must be ASCII. A refusal shows the server's reply code (`refused 535`), never its
-words; a send ends after 30 seconds.
+`STARTTLS` in plain text and nothing else — a server that offers no `STARTTLS` gets no password and no address, and
+the send ends refused. Then `AUTH PLAIN` (or `LOGIN`), `MAIL FROM` your `from`, `RCPT TO` your one `to`, the message
+and `QUIT`. The connection is TLS 1.2 or newer, and its certificates are always verified — against Node's certificate
+store, not the operating system's, whatever `NODE_TLS_REJECT_UNAUTHORIZED` says — so a server behind a private
+certificate authority fails with a TLS error. SMTP does not go through an HTTP proxy. `EHLO` names `[127.0.0.1]`,
+never your machine's name; the `Message-ID` ends in `@token-pace.invalid`; addresses must be ASCII. A refusal shows
+the server's reply code (`refused 535`), never its words; a send ends after 30 seconds.
 
 ## The diagnostics and the log
 

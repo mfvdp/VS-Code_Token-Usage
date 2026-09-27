@@ -16,7 +16,7 @@ npm run watch          # the same, rebuilt on change
 npm run typecheck      # tsc --noEmit
 npm test               # builds the tests, then node --test "out-test/*.test.js"
 npm run test:e2e       # the extension-host smoke test in a real window (needs a display)
-npm run check:privacy  # http(s) literals in dist/ against the allow-list, the read contract, and the hook bundle's fs/path-only rule
+npm run check:privacy  # http(s) literals in dist/ against the allow-list, the read contract, src/'s network call sites against NETWORK_SITES, and the hook bundle's fs/path-only rule
 npm run package        # build + privacy check + vsce package
 ```
 
@@ -45,6 +45,13 @@ view-model build copies the buckets once and hands that one copy to every table 
 of 25; the figures are the same, which a test compares with the copy-per-table path); a statistic
 called without that copy, as a test may call one, still takes its own.
 
+Since 1.12 two kinds of test reach beyond their own process, and each cleans up after itself: the Codex app-server's
+tests start a stand-in child (`process.execPath` with a small script the test writes) and end it in a `finally`,
+asserting its process gone; the notification channels' tests open servers on `127.0.0.1`, port 0 — HTTPS and SMTP
+with a throwaway certificate `openssl` makes in a temporary directory, skipped with the reason printed where `openssl`
+is not on the `PATH` — and close them. No test reaches the network: the fetch and the sockets are injected, and a
+static test holds `test/` free of a real service's host.
+
 A handful of questions a fake host cannot answer run in a real editor: `npm run test:e2e` downloads
 VS Code stable into `.vscode-test/`, starts it with this extension in development mode, every other
 extension disabled, a user-data directory of its own and a fresh `HOME` — so the smoke test never
@@ -56,7 +63,9 @@ back to English (1.9) —, and that the dashboard command opens its view. Since 
 the extension's exported API, `promptSendCheck(id)`, what a send would decide with no Claude Code or
 Codex terminal open — `noTerminal`, nothing typed. That seam answers a code, never a text, and only
 while the extension host runs in test mode; in a normal window it answers `notListed` before reading
-anything. The settings check is why it exists at all: from 1.0 to 1.2 every settings change quietly
+anything. Since 1.12 it finds the three notification commands registered and asks `notifyCheck()` — `noChannel`
+with no channel set up, no request made —, gated on the test mode the same way. The settings check is why it exists
+at all: from 1.0 to 1.2 every settings change quietly
 waited for a window reload, and ~800 unit tests against a fake host could not see it.
 
 CI runs type check, build, tests and the privacy check on **ubuntu, macOS and windows** — the
@@ -195,7 +204,10 @@ ledger. `--start` writes the new base and an empty ledger: the entries of the ve
 carried over — each is applied, no list of theirs is left, and they stay in the history (1.10's 115 at
 `b89ff43`, 1.11's 67 at `d39c2df`). 1.11's ledger started at `b89ff43`, before its first English change; 1.12's
 at `d39c2df` (`node scripts/l10n-rekey.mjs --start d39c2df`), with a list at cursor 0 for each of the twenty-four
-languages beyond English and German — every one has its files since 1.11.
+languages beyond English and German — every one has its files since 1.11. It holds 121 entries: the code packages'
+English changes, each with its German, until the English was frozen; the twenty-four languages then worked through
+their lists in four packages of six, and at the join `PENDING_ALLOWED` went back to false and
+`node scripts/nls-sources.mjs --check --strict` became the gate again.
 
 While lists exist (`PENDING_ALLOWED` in `test/l10n.languages.test.ts` is true), the frame reads them: T1
 and T2 let a key listed `translate` be absent, a manifest key on a list stays out of the rules that
@@ -234,7 +246,8 @@ language name the ledger has just added be missing while it is pending, and a na
 stand only where `LANGUAGE_NAME_AS_ENGLISH` says the language writes it so (German *Hindi*). A third
 synthetic language — the English with every word turned into शुक्र, under `hi` — runs every rule.
 
-In 1.12 the frame learned three things before a single 1.12 text was written. T9 takes the names those texts carry
+In 1.12 the frame learned three things before a single 1.12 text was written, and three more while the languages
+were made. T9 takes the names those texts carry
 out of a text as it takes the product names (`NAMES_OF_1_12` in `SAME_IN_EVERY_LANGUAGE`: `CLAUDE_CODE_OAUTH_TOKEN`,
 `Secret Service`, `secret-tool`, the notification channels' services and the protocols `SMTP` and `STARTTLS`), and a
 name of several words also where a line break splits it ("Claude" at a line's end and "Code" at the next line's start
@@ -243,7 +256,15 @@ whose placeholder receives a session's name — the full name ("Session Tue 14:2
 14:20 · 9d0eb37a") —, where a translation must mind gender and case in a way no rule can judge: a test scans every
 `t()` call of `src/` with the TypeScript parser for the expressions that carry a name (`SESSION_NAME_CARRIERS`) and
 asks for exactly the listed keys, pins the calls that make a name (`SESSION_NAME_SOURCES`), and holds the brief's
-section "Session names and product names in placeholders" to the list.
+section "Session names and product names in placeholders" to the list. While the languages were made:
+`FIELD_IDS_OF_A_KEY` — a key that names a setting's fields by their ids keeps them in English (`host`, `user`, `from`
+and `to` of the e-mail channel's setup check), and T9 takes them out of that key and its value alone, beside
+`SAME_IN_EVERY_LANGUAGE` and `ADDED_AT_THE_JOIN`, which take a name out of every text; the kept-names guard — every
+name of `NAMES_OF_1_12` and the word `security` (macOS's tool) stand in a value at least as often as in its key,
+repeated perhaps, never translated or dropped, and the seventeen notification texts carry no `*`, `_`, `~` or
+backtick their English lacks, since they go to chat services as they are; and the session-name scan over the page's
+own `tr()` calls too (`src/webview/main.ts` has its own `tr`), with `SESSION_NAME_PAGE_FIELDS`, the fields a session's
+name travels in on the page.
 
 ## The price table
 

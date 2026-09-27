@@ -140,6 +140,12 @@ Messages Token Pace sends outside VS Code (1.12) — not the alerts above, which
 settings are machine-scoped: a workspace sets none of them, and Settings Sync does not carry them. None of them holds
 a secret: a webhook's address, a bot's token, an ntfy topic and a password are kept in VS Code's secret storage.
 
+The Settings editor shows both categories, *Alerts* and *Notifications (phone, chat, e-mail)*, in VS Code's display
+language. In German („Warnhinweise“, before „Benachrichtigungen“) and in ten of the twenty-four other languages the
+Alerts category has a new name since 1.12, because its old name is now the notifications' word — look for the new one
+in the category list. The rows' titles, such as *Notifications: Channels*, are made by VS Code from the keys and stay
+English in every language.
+
 | Setting | Default | Meaning |
 |---|---|---|
 | `notifications.channels` | `[]` | The channels a notification may go to: `webhook`, `telegram`, `ntfy`, `email`. **Empty means nothing is ever sent.** A channel works once *Set Up a Notification Channel…* kept its address and secret in VS Code's secret storage and you allowed its host |
@@ -147,7 +153,7 @@ a secret: a webhook's address, a bot's token, an ntfy topic and a password are k
 | `notifications.thresholds` | `{ session: 80, weekly: 80 }` | The percentage used at which `quotaThreshold` fires, per kind of window (0–100, `0` = off for that kind) — once per window and cycle, only upwards, never from a stale reading |
 | `notifications.cooldownMinutes` | `10` | The least time between two notifications of one kind of event (1–1440); one that comes sooner is dropped, not saved for later. At most 20 notifications an hour in all |
 | `notifications.webhook` | `{ format: generic, secretHeader: "" }` | `format`: `generic` (Token Pace's JSON), `slack`, `discord`, `teams`, `mattermost` or `rocketChat`; `secretHeader`: the name of a header that carries a secret, if your address expects one |
-| `notifications.telegram` | `{ chatId: "" }` | The chat your bot sends to — a number, or `@name` for a public channel |
+| `notifications.telegram` | `{ chatId: "" }` | The chat your bot sends to — a number, or `@name` for a public Telegram channel |
 | `notifications.ntfy` | `{ server: "" }` | The `https://` address of your ntfy server itself — `https://ntfy.sh` for the public one, or your own — never a topic's address (ntfy takes the JSON publish only at its root); there is no default |
 | `notifications.email` | `{ host: "", port: 587, security: starttls, user: "", from: "", to: "" }` | Your SMTP server and one recipient: `security` `starttls` (usually port 587) or `tls` (usually port 465). Nothing is sent without encryption |
 

@@ -103,10 +103,29 @@ background only after a fetch by hand ([Credentials](quota-sources.md#what-the-f
 | `CC no token` with *No token without the macOS Keychain, which is read in the background only after you fetched by hand* | A fetch in the background skipped the Keychain (`keychain gateClosed`): no fetch by hand has read it in this window yet, or the last read took longer than a second, failed or timed out | Run *Fetch Quota Now*. A read that brings the token within a second lets the background fetches read it again |
 | *Fetch Quota Now* asks "Also read Claude Code's access token from the macOS Keychain?" | Fetching was allowed before 1.12, when the dialog did not name the Keychain (`keychain unasked`) | *Allow* to read it, *Never* to leave it out for good (the variable and the file still count). *Reset Network Access Decision* asks both questions again |
 | `keychain off` or `keychain denied` in the diagnostics | `tokenPace.credentials.keychain` is off, or the question was answered *Never* | Switch the setting on, or run *Reset Network Access Decision* and allow both |
+| A fetch by hand ended without the Keychain while macOS's question was still open | A fetch by hand waits 30 seconds for the Keychain's answer — a read in the background 5 | Answer macOS's question within thirty seconds; a later answer ends that fetch without the Keychain — fetch by hand again |
 
 The Keychain path is untested on macOS by the author; the log's lines (`claude: token from the
 Keychain`, `claude: the Keychain was not read (background, gate closed)`, `claude: Keychain read took
 … ms — background reads wait for the next fetch by hand`) name each step, never a value.
+
+## Notifications
+
+*Send a Test Notification…* answers with what came of the test, and *Copy Diagnostics* has a line per channel with its
+last result ([Notifications](notifications.md#the-diagnostics-and-the-log)). A failed send is never tried again and never
+becomes an alert; the log names its kind.
+
+| What you see | Why | What to do |
+|---|---|---|
+| `HTTP 401` or another status | The service answered, but did not take the message — a revoked or mistyped address or token, an ntfy server that wants an access token | Run *Set Up a Notification Channel…* again with the current address or token |
+| `paused until … (429)` in the diagnostics | The service answered `429` with a `Retry-After`: the channel sends nothing until then, at most an hour | Nothing; it sends again after the pause |
+| timeout | No answer within 15 seconds, for e-mail within 30 | Check the network; the HTTPS channels follow VS Code's proxy support, e-mail goes through no HTTP proxy |
+| network error | The host could not be reached — its name, the network | Check the address or the server setting |
+| TLS error | The encrypted connection failed — for e-mail the certificate is checked against Node's certificate store, so a server behind a private certificate authority fails | Use the server's public name and port, with a certificate a public authority issued |
+| refused by the server (`refused 535` in the diagnostics) | The address refused the connection or answered with a redirect, or the SMTP server refused a step — its reply code in the diagnostics (`535`: the login was refused); a server that offers no `STARTTLS` gets no password and no address | For e-mail check `user` and use an app password where your provider asks for one; `security: tls` for port 465, `starttls` for 587 |
+| incomplete setup | A setting the channel needs is missing or was not accepted — the chat id, the ntfy server, the SMTP `host`, `user`, `from` or `to` — or its secret is not stored | Fill in the channel's settings, then run *Set Up* again |
+| its host changed since you allowed it (`consent no (host changed)`) | The ntfy server or the SMTP host or port in the settings is not the one you allowed | Run *Set Up* again and allow the new host |
+| Nothing arrives, and the diagnostics show no `last` for the channel | The channel is not listed in `tokenPace.notifications.channels`, the event is not in `tokenPace.notifications.events`, this window was focused (the agent events), the reading was stale (the quota events), or the agent hook is not set up (`agentWaiting`) | List the channel and the event; *Send a Test Notification…* checks the channel alone |
 
 ## The agent hook
 
@@ -258,7 +277,7 @@ of the dashboard sets (see [Languages](languages.md)). When it does not do what 
   an extension no way to have them read again. *Configure Display Language* — which restarts VS Code —
   changes them. The walkthrough's titles follow VS Code the same way; its three step pages are English
   in every language.
-* **One text stayed in the old language.** A Quick Pick, a dialog or a notification that was open at
+* **One text stayed in the old language.** A Quick Pick, a dialog, an alert or another message that was open at
   the switch keeps its language until it closes. The words of Token Pace's last failed quota fetch
   stay in the language they were written in until the next attempt. The debug log, the diagnostics
   report and the CSV and JSON exports are English in every language, on purpose.

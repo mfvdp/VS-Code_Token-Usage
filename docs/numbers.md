@@ -17,7 +17,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | the same | our own fetch of `api.anthropic.com/api/oauth/usage` | exact | `pollIntervalMinutes` (default 30) — consent required |
 | Codex quota %, reset, credits | external cache file (default `~/.cache/codex-usage/state.json`) | exact | the writer's `fetched_at` |
 | the same | the `rate_limits` block Codex writes into its own transcripts | exact | as old as your last Codex turn — the age is always shown |
-| the same | the local `codex app-server` (`account/rateLimits/read`) | exact | poll interval — consent required |
+| the same | the local `codex app-server` (`account/rateLimits/read`, and since 1.12 its `account/rateLimits/updated` pushes over the standing connection) | exact | poll interval, or each update the app-server pushes (1.12, the default `persistent` mode) — consent required |
 | Tokens per hour / day / model | `~/.claude/projects/**/*.jsonl` | exact | on file change |
 | Tokens per hour / day / model | `~/.codex/sessions/**/rollout-*.jsonl` (and `archived_sessions/`) | exact | on file change |
 | Output of any response with no terminal line — in Claude subagent transcripts, most often a reply cut off at the tool call it made | the same transcripts | **lower bound** (⚠ in tooltip, tables, export, the agent tree's rows and its details, with how many of how many replies are unfinished) | – |

@@ -147,7 +147,7 @@ prompts it holds; deleting it returns the list to the three shipped prompts.
 A double-click on a prompt — or its send button, or Ctrl+Enter (⌘+Enter on a Mac) on it — sends it: Token
 Pace types the prompt's text into the terminal that runs Claude Code or Codex and presses Enter. It is
 always your action on that prompt at that moment: nothing is sent by a timer, a command, a link or a
-notification. At most one prompt goes per second (`PROMPT_SEND_MIN_GAP_MS`, 1000 ms), and never while the
+message's button. At most one prompt goes per second (`PROMPT_SEND_MIN_GAP_MS`, 1000 ms), and never while the
 terminal pick or the question below is open — a key held down, a triple click or a second double-click
 while the first send is under way sends once; the log then says `Prompts: a send was dropped (another one
 is under way)`. The text is the prompt as the list holds it at that moment, read from `prompts.json` (or,

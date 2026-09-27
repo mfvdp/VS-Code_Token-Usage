@@ -279,7 +279,7 @@ terminals (“terminal 2 of 3”), never by its name; nothing of Codex's own sta
 into another program's input, beside the keep-warm line — and it is always your own: only when you
 double-click a prompt of the dashboard's Prompts section, press its send button or Ctrl+Enter (⌘+Enter)
 on it, and, where the section asks first, click *Send anyway*; never by a timer, a command, a link or a
-notification, at most one per second, and never in Restricted Mode. It types the prompt's text as your
+message's button, at most one per second, and never in Restricted Mode. It types the prompt's text as your
 list holds it — never a text the dashboard page hands over — into one terminal of this window that runs
 Claude Code or Codex (the active one when it does, else the one you pick among exactly those), with
 `sendText`: the text, then, 200 milliseconds later, the Enter alone. It is a request Claude Code or Codex
@@ -292,27 +292,29 @@ with the agent hook installed — whether it holds a permission request newer th
 session, nothing. They are compared at the send and never shown as figures, logged beyond a check's
 code (`Prompts: not sent (openTool)`), stored or exported.
 
-Nothing is written except the extension's own state in its `globalStorage` — among it the copy of
-the agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that
-activation replaces with the shipped one while a copy is there, the copy of the status-line bridge's
-script, `statusline-bridge.js`, that *Connect Claude Status Line…* puts there and that activation
-replaces with the shipped one when the two differ, and the lines the hook script
-appends to `agent-hook.jsonl` while you have it installed, the keep-warm accounting `keepwarm.json`
-(above) once a keep-warm line was answered, `prompts.json` when you change the dashboard's prompt list —
-your own titles and texts, nothing else (below) —, and `quota.json`, which holds the
-readings of the quota fetch and, per provider, its last failed attempt: when it was, its kind and
-the fetch's own words — a fixed phrase with at most an HTTP status, or the Codex app-server's error
-string —, never a token, a header or an exception's text; the entry goes with the next successful
-fetch, with *Clear Stored Data…* and with the file, and it is what lets a restart during a backoff
-still say why the figure is old ([Quota sources](quota-sources.md#what-the-fetch-does)) —, with
-exactly two opt-in exceptions, each behind its own consent dialog and each with a backup or a
-never-overwrite rule: the external quota cache file (`tokenPace.writeQuotaCache`) and the
-status-line bridge. Both are off by default and both are disabled in Restricted Mode. The bridge's
-command names the script's copy in `globalStorage` since 1.8 — never the versioned extension folder,
-which an update removes. A command an install of 1.3 to 1.7 wrote into `settings.json` is moved to the
-copy once, on the first activation of 1.8 in a trusted window: the write you consented to at install
-time, with a backup of the original bytes first, changing only the `statusLine` entry's `command`
-string and only while the entry still holds the command Token Pace recorded; the log says so.
+Nothing is written except the extension's own state in its `globalStorage` — among it the copy of the
+agent hook's script, `agent-hook.js`, that *Set Up the Agent Hook…* puts there and that activation
+replaces with the shipped one while a copy is there, the copy of the status-line bridge's script,
+`statusline-bridge.js`, that *Connect Claude Status Line…* puts there and that activation replaces with
+the shipped one when the two differ, and the lines the hook script appends to `agent-hook.jsonl` while
+you have it installed, the keep-warm accounting `keepwarm.json` (above) once a keep-warm line was
+answered, `prompts.json` when you change the dashboard's prompt list — your own titles and texts,
+nothing else (below) —, and `quota.json`, which holds the readings of the quota fetch and, per provider,
+its last failed attempt: when it was, its kind and the fetch's own words — a fixed phrase with at most
+an HTTP status, or the Codex app-server's error string —, never a token, a header or an exception's
+text; the entry goes with the next successful fetch, with *Clear Stored Data…* and with the file, and it
+is what lets a restart during a backoff still say why the figure is old ([Quota
+sources](quota-sources.md#what-the-fetch-does)) —, with exactly two opt-in exceptions, each behind its
+own consent dialog and each with a backup or a never-overwrite rule: the external quota cache file
+(`tokenPace.writeQuotaCache`) and the status-line bridge. Beside the files, since 1.12, a notification
+channel's secrets are written into VS Code's secret storage on this machine — only by *Set Up a
+Notification Channel…*, after you allowed the channel's host (below). Both are off by default and both
+are disabled in Restricted Mode. The bridge's command names the script's copy in `globalStorage` since
+1.8 — never the versioned extension folder, which an update removes. A command an install of 1.3 to 1.7
+wrote into `settings.json` is moved to the copy once, on the first activation of 1.8 in a trusted
+window: the write you consented to at install time, with a backup of the original bytes first, changing
+only the `statusLine` entry's `command` string and only while the entry still holds the command Token
+Pace recorded; the log says so.
 
 Beside them stands the one write that is no file and no click of yours: the opt-in keep-warm line, typed
 into Claude Code's terminal (above) — off by default as well, and never in Restricted Mode. Those are the
@@ -366,7 +368,9 @@ else fails the build.
 The same command checks the **read contract**: a table in `scripts/check-privacy.mjs` names, for
 every reader of a Claude Code file, the fields it may take — the ones this page lists above — and
 the check fails when a reader takes a field the table does not list, or no longer takes one it
-does. The documentation tests hold this page and the agents page to the same table — this page and
+does. Since 1.12 two more readers are in it: the credentials document's parser, held to `claudeAiOauth`, its
+`accessToken` and its `expiresAt`, and the notification payload's builder, held to the twelve fields of an event
+(below). The documentation tests hold this page and the agents page to the same table — this page and
 the prompt-cache page for the status-line mirror's rows, and (1.8) for the keep-warm host's: what it
 takes of VS Code's shell integration, the one line it types, and `keepwarm.json` read back — since
 1.10 read by the terminal watch the keep-warm host and the Prompts section share, with the folder the

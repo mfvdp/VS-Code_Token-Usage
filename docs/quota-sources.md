@@ -129,21 +129,23 @@ extension says so and waits for Claude Code to renew it during normal use.
 its *Allow* covers both; if you allowed fetching before 1.12, *Fetch Quota Now* asks once more —
 *Allow*, *Never* (the Keychain is skipped for good; the variable and the file still count) or Escape
 (asked again at the next *Fetch Quota Now*). macOS itself may then ask whether `security` may use
-the item: choose *Always Allow* — with *Allow* alone it asks at every read, and Token Pace then reads
-the Keychain only when you fetch by hand. Because that question may appear, the first Keychain read
-of a window happens only at a fetch you started (*Fetch Quota Now*, or the *Allow* of a consent
+the item: choose *Always Allow* — with *Allow* alone it asks at every read, and Token Pace then
+reads the Keychain only when you fetch by hand. Because that question may appear, the first Keychain
+read of a window happens only at a fetch you started (*Fetch Quota Now*, or the *Allow* of a consent
 dialog). Fetches in the background — the interval, a reset's re-poll, the sign-in watchers, a window
 taking over the lease — read the Keychain only after such a read brought the token within a second,
 so no dialog stood in the way; a read that took longer, failed or timed out holds them back until
-the next fetch by hand. A background fetch that skipped the Keychain and found no token in the
-variable or the file says so in the tooltip and on the card: *No token without the macOS Keychain,
-which is read in the background only after you fetched by hand — run "Token Pace: Fetch Quota Now"*.
-The log names each step without a value: `claude: token from the Keychain`, `claude: the Keychain
-was not read (background, gate closed)`, `claude: Keychain read took 1840 ms — background reads wait
-for the next fetch by hand`. *Copy Diagnostics* carries the line `credentials — source keychain ·
-keychain allowed`: the source is `env`, `keychain`, `file`, `secretTool`, `none` (no token found) or
-`–` (no fetch yet), the Keychain `off` (the setting), `notDarwin`, `unasked`, `denied`, `gateClosed`
-(only a fetch by hand reads it now) or `allowed`.
+the next fetch by hand. A fetch by hand waits up to 30 seconds for the Keychain's answer — time to
+answer macOS's question —; a read in the background, and Linux's `secret-tool`, 5 seconds. A
+background fetch that skipped the Keychain and found no token in the variable or the file says so in
+the tooltip and on the card: *No token without the macOS Keychain, which is read in the background
+only after you fetched by hand — run "Token Pace: Fetch Quota Now"*. The log names each step without
+a value: `claude: token from the Keychain`, `claude: the Keychain was not read (background, gate
+closed)`, `claude: Keychain read took 1840 ms — background reads wait for the next fetch by hand`.
+*Copy Diagnostics* carries the line `credentials — source keychain · keychain allowed`: the source
+is `env`, `keychain`, `file`, `secretTool`, `none` (no token found) or `–` (no fetch yet), the
+Keychain `off` (the setting), `notDarwin`, `unasked`, `denied`, `gateClosed` (only a fetch by hand
+reads it now — also before the first one in this window) or `allowed`.
 
 **Sign-in and sign-out** are noticed within seconds, without reloading the window. The credentials
 file's folder is watched and the file compared by size and mtime, because the content is a secret
@@ -160,8 +162,12 @@ ends.
 > against a stand-in `security`: the item name (`Claude Code-credentials`, with the hash of
 > `CLAUDE_CONFIG_DIR` appended when that variable is set), the exit code of a missing item, that
 > reading an item's attributes raises no dialog, and how long a quiet read takes against one a
-> dialog was answered for are Apple's and Claude Code's facts, not verified here. The Linux
-> `secret-tool` lookup has not been independently verified against every Claude Code build either.
+> dialog was answered for are Apple's and Claude Code's facts, not verified here. One consequence of the
+> gate, as built: until a fetch by hand has read the Keychain in a window — and again after a slow read, as
+> after *Allow* instead of *Always Allow* — a fetch in the background skips the Keychain and takes the token of
+> `~/.claude/.credentials.json` if that file holds a current one, which on a Mac may be another setup's leftover
+> of another account: a fetch by hand may then show one account's quota and a fetch in the background another.
+> The Linux `secret-tool` lookup has not been independently verified against every Claude Code build either.
 > A missing helper is not treated as an error.
 
 **Errors** never quote the exception. They are classified into named states — `timeout`,
@@ -234,7 +240,7 @@ With `tokenPace.codexAppServer.mode: persistent` — the default since 1.12 — 
 `codex app-server --stdio` running instead of starting one for every fetch. It starts only where a
 fetch of our own may run: `quotaSource: poll`, after the consent, in the window that holds the lease,
 and when the executable is found. One child serves the whole editor — the rate limits are the
-account's, and the other windows show what the fetching window writes; with
+account's, and the other windows show what the fetching window writes. A window that follows keeps no child; with
 `tokenPace.leaderElection: false` every window fetches and keeps its own.
 
 * **The session.** Token Pace sends `initialize` and `initialized`, waits for the answer to
@@ -244,8 +250,9 @@ account's, and the other windows show what the fetching window writes; with
 * **Reads over the connection.** Every scheduled fetch, *Fetch Quota Now* and a first reading after
   each start ask `account/rateLimits/read` over that connection — the question the one-shot child is
   asked, read the same way. A fetch due while the child is starting waits for it; one due while it
-  is restarting starts one child of its own, once. The fetches follow `tokenPace.pollOnlyWhenFocused`
-  as before.
+  is restarting starts one child of its own, once — so for at most the 20 seconds such a question may take, that
+  child can run beside the restarted standing one: never two children for one read. The fetches follow
+  `tokenPace.pollOnlyWhenFocused` as before.
 * **Pushes, where Codex sends them.** An `account/rateLimits/updated` push is taken as a reading and
   moves the next scheduled fetch a whole interval on, so while pushes keep coming no fetch is made.
   Pushes are taken whatever the focus. Whether Codex sends them without being asked is not
@@ -277,12 +284,13 @@ the author.
 
 ## Writing the cache file (opt-in)
 
-`tokenPace.writeQuotaCache` writes each successful fetch of our own back to the cache file in
-the documented format, so a panel widget, a shell prompt and this extension share one request
-instead of three. This is one of exactly **two** writes Token Pace can make outside its own
-storage: it is off by default, enabling it asks for its own separate consent that names the
-file, an existing file with a newer `fetched_at` is never overwritten, and the write is atomic
-(temp file plus rename).
+`tokenPace.writeQuotaCache` writes each successful fetch of our own back to the cache file in the
+documented format, so a panel widget, a shell prompt and this extension share one request instead of
+three. This is one of exactly **two** writes Token Pace can make outside its own storage: it is off
+by default, enabling it asks for its own separate consent that names the file, an existing file with
+a newer `fetched_at` is never overwritten, and the write is atomic (temp file plus rename). In the
+default `persistent` mode each rate-limit update the app-server pushes is written the same way — the
+provider's answer verbatim, as for a fetch.
 
 ## Claude status-line bridge (opt-in)
 

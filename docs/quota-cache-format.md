@@ -24,7 +24,9 @@ Token Pace can be on either end of this file:
   containing `cacheFile`, which is the default; remove it there to switch the source off.
 * **Writer** (only with `tokenPace.writeQuotaCache` turned on, which asks for its own
   consent). After a successful fetch of its own it writes the same format back, so your
-  status line or panel widget gets the number without a second request.
+  status line or panel widget gets the number without a second request — and, in the default
+  `tokenPace.codexAppServer.mode: persistent` (1.12), after each rate-limit update the Codex
+  app-server pushes, its `body` then that push's parameters as the app-server sent them.
 
 ## Location
 
@@ -150,8 +152,8 @@ Notes for writers:
 
 ## Example: Codex
 
-`body` is the response of the local `codex app-server` rate-limit call. Fictional numbers
-again.
+`body` is the response of the local `codex app-server` rate-limit call — or, since 1.12, the parameters of a
+rate-limit update it pushed, which carry the same shape. Fictional numbers again.
 
 ```json
 {

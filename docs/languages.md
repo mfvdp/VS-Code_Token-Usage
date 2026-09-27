@@ -99,7 +99,7 @@ A language you choose formats as that language does.
 page's own words, its numbers and dates — keeping its scroll position and the keyboard focus; the
 status bar's texts, tooltips and accessible names, the keep-warm countdown among them; the markdown
 document and the agent hook's setup document while they are open; and from then on every Quick Pick,
-notification, dialog and consent text.
+alert, message, dialog and consent text, and every notification Token Pace sends to a channel (1.12).
 
 **Not with the picker:**
 
@@ -110,8 +110,8 @@ notification, dialog and consent text.
   Français, the settings are German and everything Token Pace draws is French. *Configure Display
   Language* — which restarts VS Code — changes them. The walkthrough's three step pages are English in
   every language.
-* **What is open at that moment.** A Quick Pick, a modal dialog or a notification keeps the language
-  it was opened in until it closes; VS Code gives no way to rewrite one.
+* **What is open at that moment.** A Quick Pick, a modal dialog, an alert or another message keeps the
+  language it was opened in until it closes; VS Code gives no way to rewrite one.
 * **The words of the last failed attempt.** When Token Pace's own quota fetch fails, the reason is
   written down in the language of that moment and kept; it stays in that language until the next
   attempt. Every reading that can be made again is made again at the switch.
@@ -175,21 +175,26 @@ font for.
 
 ## Numbers, dates and times
 
-Where Token Pace formats a figure, the language decides the digits, the decimal mark and the
-grouping — German writes `2,8M` and `1.234.567`, French groups thousands with a narrow space and writes
-a decimal comma, Japanese and Chinese write `2.8M` and `1,234,567` as English does, Hindi groups by
-lakh (`12,34,567`) and keeps the decimal point —, and the names of weekdays and months. The hour cycle
-of a clock time stays what `tokenPace.resetHourCycle` or your system says; the rest of the clock's
-form is the language's: Danish, Finnish and Indonesian write `06.00` with a full stop, Hungarian puts
-the 12-hour mark in front (`de. 06:00`). The weekday in front of a clock time is the language's own
-short name — `lun.`, `pon.`, `Pzt`, `seg.`, `月`, `周一`, `man.`, `ti`, `Thứ 2` —; English and German keep
-their two letters (`Mo 06:00`, `Sa 14:20`), which the settings' own examples quote. The day of a
-sparkline's hover label is weekday, day and month (`Sat 26 Sep`, `sam. 26 sept.`), and where a language
-writes the month as a number — Japanese, Chinese, Czech — it is that language's own short date
-(`9月26日(土)`, `9月26日周六`, `so 26. 9.`). The calibration's figures take the language's decimal mark
-(`1,2` in German and French). Since 1.10 so does every other decimal the dashboard, the tooltips and the
-text views print — a key figure's change (`▼ -0,7%`), the plan factor (`×0,4`), a span under ten hours
-(`2,5 h`); the exports and the diagnostics report keep the `.`.
+Where Token Pace formats a figure, the language decides the digits, the decimal mark and the grouping —
+German writes `2,8M` and `1.234.567`, French groups thousands with a narrow space and writes a decimal
+comma, Japanese and Chinese write `2.8M` and `1,234,567` as English does, Hindi groups by lakh
+(`12,34,567`) and keeps the decimal point —, and the names of weekdays and months. The hour cycle of a
+clock time stays what `tokenPace.resetHourCycle` or your system says; the rest of the clock's form is
+the language's: Danish, Finnish and Indonesian write `06.00` with a full stop, Hungarian puts the
+12-hour mark in front (`de. 06:00`). The weekday in front of a clock time is the language's own short
+name — `lun.`, `pon.`, `Pzt`, `seg.`, `月`, `周一`, `man.`, `ti`, `Thứ 2` —; English and German keep their
+two letters (`Mo 06:00`, `Sa 14:20`), which the settings' own examples quote. The heat map's weekday
+words are the translation's own, four characters at most; the weekday in front of a clock time is,
+English and German aside, the short form of the language's date format. In Danish, Vietnamese and Polish
+the two differ (`ti.` and `tirs.`, `T3` and `Thứ 3`, `Nd` and `niedz.`), because those forms do not fit
+the heat map's column — `tirs.` and `Thứ 3` are five characters, `niedz.` six; in the other languages
+they differ at most in case or a full stop. The day of a sparkline's hover label is weekday, day and
+month (`Sat 26 Sep`, `sam. 26 sept.`), and where a language writes the month as a number — Japanese,
+Chinese, Czech — it is that language's own short date (`9月26日(土)`, `9月26日周六`, `so 26. 9.`). The
+calibration's figures take the language's decimal mark (`1,2` in German and French). Since 1.10 so does
+every other decimal the dashboard, the tooltips and the text views print — a key figure's change
+(`▼ -0,7%`), the plan factor (`×0,4`), a span under ten hours (`2,5 h`); the exports and the diagnostics
+report keep the `.`.
 
 **The same in every language** — these are the bar's and the page's own notation, not words: the
 countdowns `45m`, `2h14m`, `3d 5h`, `<1m` and `4 m 10 s`; the units inside `2 h 14 min`, `3 d 5 h` and
@@ -204,11 +209,13 @@ and `≈` (a lower bound) and `–` (nothing known).
 page, the bar and the texts. A known limit, not an oversight. None of the twelve languages of 1.11
 puts the sign first; whether a sentence writes a space before it is the language's own choice.
 
-**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s`
-stay together in every language, and each figure of a model's turn line stays with its unit (`~12 h
-05 min`, `P90 ~18 h 46 min` — the line may wrap between the two) —, an ISO day never breaks at its
-hyphen, and a window's percentage never stands alone on a line: it wraps together with the verdict
-beside it.
+**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m`
+stay together in every language —, and since 1.12 a duration's parts stay together too: `~18 h 46 min`,
+`3 d 4 h` and `49 min 00 s` are one run each, so each figure of a model's turn line stays whole (`~12 h
+05 min`, `P90 ~18 h 46 min` — the line may wrap between the two, and between `P90` and its figure). The
+prompt cache's countdown (`4 m 10 s`), which writes `m`, is not one of them: it may still break between
+its parts. An ISO day never breaks at its hyphen, and a window's percentage never stands alone on a line:
+it wraps together with the verdict beside it.
 
 **A stacked table's label** (1.10). Where the side bar is too narrow for a table's columns and its rows
 stack, each cell prints its column's name in front of its value, with the colon the language writes:
@@ -250,6 +257,32 @@ as it was otherwise. The open questions the 1.10 readers left for native speaker
 1.11 either, and the twelve new languages leave questions of their own: a matter of usage or taste is
 not decided by an agent twice.
 
+**In 1.12** the twenty-four languages beyond English and German worked through 1.12's ledger of English changes
+(121 entries) in four packages of six, each by an AI agent (Claude Opus 5.5); a reading pass by further AI agents
+followed, one per package, none of them a native speaker, and what it found was applied where the reader named a
+fact of the language. Every language keeps two words apart — an **alert** is the popup inside VS Code, a
+**notification** a message sent to a phone, a chat or an inbox —, and ten of them (Polski, 日本語, 한국어,
+Nederlands, Svenska, Norsk, Suomi, Magyar, Українська, Ελληνικά) renamed their Alerts category for it, because its
+old name is now the notifications' word: a reader who knew the old name finds the new one in the settings UI's list
+of categories. The macOS Keychain's name and its buttons ("Always Allow", "Allow") are written as each agent believed
+macOS shows them in the language, not checked on a Mac; Magyar keeps the English labels in quotation marks.
+
+**Open questions.** Neither the questions the 1.10 readers left for native speakers nor those of 1.11 are answered in
+1.12 — one is closed by a fact: VS Code itself writes 受限模式 for Restricted Mode in Traditional Chinese —, and 1.12
+leaves questions of its own, per language family. In French, Spanish, Brazilian Portuguese, Italian and Romanian:
+whether *used* in the thresholds' sentence reads as consumed, the article or preposition before a clock time, a
+participle's agreement, and the words for a chat, a topic and VS Code's secret storage. In Polish, Czech, Russian and
+Ukrainian: the words for an alert beside a notification, for a topic and a webhook, the space before an ellipsis, and
+whether a failed test message reads as not sent or not delivered. In Dutch, Danish, Swedish and Norwegian: the
+notification word and the Alerts category's, the space before an ellipsis, and the verb for a server that accepts a
+message. In Finnish and Hungarian: an idiom for *without notice* that shares the notification word's root, the case
+for sending to a channel, the register of nominal and passive forms, and the article before a name or a placeholder.
+In Japanese, Korean and the two Chinese variants: the words for an alert, a channel, a webhook, a secret and VS Code's
+secret storage, and a formula for *without notice* beside the notification word. And in Turkish, Greek, Hindi,
+Indonesian and Vietnamese, each of a family of its own here: the words for a webhook, a host, a secret, a cooldown and
+a test message, what a pronoun refers to, and the form of a clock time with its weekday. None of them is decided by an
+agent.
+
 **Register.** Each language addresses you as its software does: Ukrainian *ви*, Hindi *आप*, Indonesian
 *Anda*, Greek the plural of politeness, Romanian the *dumneavoastră* forms, Hungarian the *Ön* forms
 or an impersonal one, Finnish passive and impersonal forms, Vietnamese no pronoun where a sentence can
@@ -266,7 +299,9 @@ Enter, Ctrl+Enter — is, in the twelve languages of 1.9, the language's prose w
 *Invio*, *Eingabe*), not a key label of VS Code's; the twelve languages of 1.11 write the label as VS
 Code shows it in every language — `Enter`, `Ctrl+Enter`, `⌘+Enter` —, with the language's word for
 "key" around it where a sentence needs one, so that no prose name is introduced that no native speaker
-has checked.
+has checked. VS Code's own terms are VS Code's words (1.12): Turkish writes *Uzantı Konağı* for the extension host
+and *Kısıtlı Mod* for Restricted Mode, Traditional Chinese 延伸模組 for an extension, 延伸主機 for the extension host
+and 受限模式 for Restricted Mode — as VS Code's language packs for them do.
 
 A wrong or clumsy word is a bug — please report it on the
 [issue tracker](https://github.com/mfvdp/VS-Code_Token-Usage/issues), with the language, the text you

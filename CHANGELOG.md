@@ -3,6 +3,144 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.12.0 — <date set at publish>
+
+**Notifications to your phone, a chat or your mail, a Codex app-server that stays connected, and the macOS Keychain
+asked for by name.** Token Pace can now send a short message when Claude Code waits for you, a long turn finished or
+a quota window passes your threshold, runs out, resets or is forecast to run out before its reset — to a webhook of
+your own or Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, to a Telegram bot, an ntfy topic or an e-mail
+address; nothing is sent until you set a channel up and allow its host, and a message never holds a prompt, a path, a
+project or a session. With quota fetching allowed, one `codex app-server` now keeps running for all your windows and
+Codex's rate limits arrive over that one connection, instead of a new process for every check. On a Mac, Claude Code's
+access token is looked for in its Keychain item before the credentials file — the consent now says so, and asks once
+more if you allowed fetching before —, and a sign-in or sign-out is noticed within seconds. Beside it the 1.11
+leftovers: the English page's range chips, a duration torn in a narrow sidebar, the budget entry's percent, the
+ellipsis, and VS Code's own words in Turkish and Traditional Chinese.
+
+### Added
+
+* **Notifications** — *Token Pace: Set Up a Notification Channel…* connects a channel: a webhook with Token Pace's own
+  JSON, or the same webhook in the format of Slack, Discord, Microsoft Teams (a Workflows webhook), Mattermost or
+  Rocket.Chat; a Telegram bot; an ntfy topic; or e-mail through your SMTP server, with STARTTLS or TLS and nothing sent
+  before the connection is encrypted. It asks for the address and its secret in boxes that hide what you type, asks
+  whether Token Pace may send to that host — the consent names it —, and keeps the secret in VS Code's secret storage,
+  never in your settings; it writes no setting, so you list the channel in `tokenPace.notifications.channels` yourself.
+  What you hear about is your list in `tokenPace.notifications.events`: `agentWaiting` (Claude Code has waited a minute
+  for your permission or answer — needs the agent hook), `agentDone` (a turn of at least two minutes finished — "after
+  at least", a lower bound), `quotaThreshold` (a 5-hour or weekly window past `tokenPace.notifications.thresholds`, 80
+  and 80), `quotaExhausted`, `quotaReset` (off by default, and only for a reset no more than 30 minutes ago) and
+  `paceWarning` (the forecast runs out before the reset, marked `~`); the agent events only while the window is not
+  focused, the quota events never from a stale reading. No storm: each event once, one message of a kind per
+  `tokenPace.notifications.cooldownMinutes` (10), at most 20 an hour in all, a failed send not tried again, a `429`
+  obeyed. The messages are in the language of `tokenPace.language`. **The channels were built from each service's
+  documentation and tested against local servers — none of them was tried against the real service by the author
+  yet.**
+* **Send a Test Notification…** sends a test message to one channel you set up and says whether it went, or why not
+  in one word; **Remove a Notification Channel…** deletes a channel's secrets, your consent and its last result.
+  *Clear Stored Data…* has an item *Notification channels*, and *Copy Diagnostics* a section `## Notifications` — per
+  channel whether it is listed, its secret set, its consent standing and its last result, never a host or an address.
+* **The sign-in watcher on macOS.** Beside the credentials file (watched by its size and time since 1.0.0), the
+  Keychain item is watched by its modification date — its attributes, never its secret —, so signing in or out of
+  Claude Code brings the new figures, or *no token*, within seconds and without a reload.
+* **Two more lines in *Copy Diagnostics***: `codex connection — mode … · state …` says which mode of the Codex
+  app-server is live, and `credentials — source … · keychain …` where the Claude token came from, by a name.
+
+### Changed
+
+* **The Codex app-server is one standing connection by default.** `tokenPace.codexAppServer.mode` defaults to
+  `persistent`: in `quotaSource: poll`, after your consent, the window that fetches keeps one `codex app-server`
+  running for the whole editor, waits for its answer to `initialize`, asks every fetch over that connection and takes
+  the rate-limit updates it pushes, so while pushes come no fetch is made. A child that exits is started again after a
+  growing wait; after five restarts within an hour each fetch starts one of its own until the hour has passed, and then
+  the standing one comes back. It ends when VS Code closes, when another window takes over fetching, when fetching is
+  switched off and when the mode or `tokenPace.codexBinary` changes. `oneShot` keeps the old way — a child per fetch.
+  The setting is machine-scoped now, so a workspace cannot choose it for you. A consent given before stays valid:
+  keeping the child running sends nothing anywhere. The standing connection was tested against a stand-in app-server,
+  not against a signed-in Codex, by the author.
+* **On macOS the Keychain comes before the credentials file.** The order is `CLAUDE_CODE_OAUTH_TOKEN`, the Keychain item
+  `Claude Code-credentials`, then `~/.claude/.credentials.json` — a file there may be another setup's leftover of
+  another account; Linux and Windows are unchanged. The Keychain is read only after you allowed it: the network dialog
+  names it now, and if you allowed fetching before, *Fetch Quota Now* asks once more. Its first read in a window happens
+  only when you fetch by hand, because macOS may ask whether `security` may use the item — choose *Always Allow* —, and
+  fetches in the background read it only after such a read brought the token within a second; a fetch by hand waits up
+  to 30 seconds for macOS's question. **The Keychain path is untested on macOS by the author.**
+* **Alerts are called alerts.** The in-editor popups of `tokenPace.alerts.*` are *alerts* in every settings sentence,
+  and a *notification* is only what leaves VS Code; the German Alerts category reads „Warnhinweise“, and ten of the
+  other languages renamed theirs too, because the old name is now the notifications' word — a reader who knew it finds
+  the new one in the settings' list of categories.
+* **The English page's words.** The range chips say *week to date*, *month to date* and *last month*, and the chart's
+  metric menu *cache read*, where the English page printed the internal names.
+* **The budget entry** writes its percentage as the quota entries do — `budget 63%`.
+* **The ellipsis.** English puts no space before it — *Loading…*, *Reading token history…* —, as VS Code does; every
+  other language follows its own typography.
+* **"Record" means a record.** Below three weeks the weekday grid's caption says *based on 1 week — a single
+  observation, not a habit* or *based on 2 weeks — observations, not yet a habit*, and the attribution setting deletes
+  the per-session *data*.
+* **Turkish and Traditional Chinese use VS Code's own terms** — *Uzantı Konağı* for the extension host, 延伸模組,
+  延伸主機 and 受限模式 for an extension, the extension host and Restricted Mode.
+* **The twenty-four languages beyond English and German carry every text 1.12 added or changed**, translated by AI
+  agents and read again by further AI agents — not by native speakers; the macOS Keychain's name and its buttons are
+  written as each agent believed macOS shows them, not checked on a Mac.
+* **The JSON export's note** on `listCostUsd` names its exception: where a custom price alone priced a model, it equals
+  `costUsd`.
+
+### Fixed
+
+* **A Codex app-server started for fetching kept running after fetching was switched off** — `quotaSource` no longer
+  `poll`, or *Reset Network Access Decision* — until the window closed; now it ends at once.
+* **In persistent mode every fetch started a second, one-shot child** beside the standing one; a fetch now asks the
+  connection, and starts a child of its own only while the standing one restarts or has restarted too often.
+* **After five restarts the standing app-server stayed off for the rest of the session**; it comes back once the hour
+  has passed.
+* **A duration broke between its parts in a narrow sidebar** — "~18 h" on one line and "46 min" on the next, in nine
+  languages; `~18 h 46 min`, `3 d 4 h` and `49 min 00 s` are one run each now.
+* **A label ending in a halfwidth form** (`｡`, `､`, halfwidth Hangul) got no space before its value; it is spaced like a
+  plain colon now, and only the full-width forms carry their own blank.
+* **The English page printed `thisWeek`, `thisMonth`, `lastMonth` and `cacheRead`** in its extra range chips and the
+  chart's metric menu.
+* **A threshold alert could come again within one quota window** when Claude Code's reset time jittered between
+  readings; a reset time within 30 seconds of the one an alert already named is the same cycle now.
+* **Without a `codex` executable** the search for it ran at every check of every window that fetches; a miss is kept
+  for five minutes, or until `tokenPace.codexBinary` changes.
+
+### Privacy
+
+* **The consent now names the Keychain.** Since 1.0.0 the macOS Keychain was read after a consent whose text named only
+  the credentials file; the dialog now names every place the token is read from on your platform, and on macOS a
+  consent given before 1.12 does not cover the Keychain — it is asked for once more, inside *Fetch Quota Now*, never
+  unprompted.
+* **The credentials' three fields under a contract row.** Of the credentials document only `claudeAiOauth`, its
+  `accessToken` and its `expiresAt` are read, and the privacy check fails a build that reads another; the token is
+  still read, used once and dropped — never refreshed, logged or written, not to the Keychain either.
+* **Notifications leave the machine only as you set them up.** A message is built from an allow-list of twelve fields —
+  the event, the provider or program, the window's label and kind, a percentage, the kind of wait and times — and the
+  privacy check holds its builder to them: never a prompt, a transcript line, a path, a project, a session's id or name,
+  an agent, a plan, an account, a token count or a cost. The hosts are the ones you configure, each named by its
+  consent and compared at every send — a changed host sends nothing until you allow it — plus one literal, Telegram's
+  `api.telegram.org`, on the privacy check's allow-list. The secrets stay in VS Code's secret storage under six fixed
+  keys; nothing is read back from a channel but whether it accepted the message.
+* **Every network call site is in a table.** The privacy check now holds every place in the source that can reach the
+  network — the quota fetch, the notification channels' one fetch, the SMTP connection — to a table with the kind of
+  host each reaches and why; a fetch, a socket or a network module anywhere else fails the build.
+
+### Internal
+
+* **Snapshot and export.** `STATE_VERSION` 8, `AGENT_TABLES_REVISION` 10 and `EXPORT_SCHEMA_VERSION` 4 are unchanged —
+  the first start of 1.12.0 rebuilds nothing, and every export field means what it did.
+* **The re-key ledger.** 1.12's holds 121 entries since the 1.11.0 release (`l10n/rekey.json`), which the twenty-four
+  languages worked through as pending lists, six at a time; `node scripts/nls-sources.mjs --check --strict` is the gate
+  again since the join. None of it ships.
+* **The frame learned 1.12's names before its texts were written** — the environment variable, the Secret Service,
+  the channels' services and the protocols —, reads a product name across a line break, lists the texts whose
+  placeholder is a session's name (the page's own `tr()` calls included), lets a key that names a setting's fields by
+  their ids keep them in English, and holds what a language keeps: a name never translated, no markdown mark in a
+  notification text that its English lacks.
+* **Tests with a real child and real sockets.** The app-server's tests start a stand-in `codex app-server` and assert
+  it gone after every end; the channels' tests post to local HTTPS and SMTP servers with throwaway certificates; no
+  test reaches the network.
+* **The dashboard harness** checks that a duration's parts stand on one line at the narrowest sidebar in every
+  language, and reads the English chip and metric words on every page.
+
 ## 1.11.0 — <date set at publish>
 
 **Twenty-six languages, the records the dashboard still lacked, and a price table you can audit.** Twelve

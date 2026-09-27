@@ -143,7 +143,7 @@ their problem card. The table below is that mapping — `PROBLEM_ACTION` in
 
 | Text | Kind | Cause | Click runs | Check |
 |---|---|---|---|---|
-| `$(key) CC no token` | `noToken` | no credentials found | Show log | Sign in to the CLI, or set `CLAUDE_CODE_OAUTH_TOKEN`. The log names the lookup that failed — never the token. |
+| `$(key) CC no token` | `noToken` | no credentials found — on macOS also when a fetch in the background skipped the Keychain, which it reads only after a fetch by hand (1.12) | Show log | Sign in to the CLI, or set `CLAUDE_CODE_OAUTH_TOKEN`; on macOS run *Fetch Quota Now* once. The log names the lookup that failed — never the token. |
 | `$(warning) CC token expired` | `tokenExpired` | stored credentials past their expiry | Show log | Sign in again; the next poll picks the new token up. Token Pace never refreshes a token itself. |
 | `$(shield) CC consent` | `consentPending` | network consent not granted yet | Fetch quota now | One dialog, one answer, remembered. Until then nothing leaves the machine. |
 | `$(circle-slash) CC quota off` | `modeCache` | `quotaSource: cache` — local files only, the network is never used | Open settings | Point `claudeQuotaFile` / `codexQuotaFile` at a cache file, or switch the mode back to `auto`. |

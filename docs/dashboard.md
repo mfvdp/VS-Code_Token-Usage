@@ -60,7 +60,9 @@ bar: the provider switch above the page picks them.
 **Ranges.** Chips for `today`, `7d` and `30d` are on the bar; `yesterday`, `90d`, `week to date`,
 `month to date`, `last month`, `year` and `all` are one `more ▾` chip away (`fewer ▴` puts them
 back, and a range you have selected stays visible whatever the fold says). `week to date`, `month to date`
-and `last month` are the values `thisWeek`, `thisMonth` and `lastMonth` of `dashboard.defaultRange`. Two date fields
+and `last month` are the values `thisWeek`, `thisMonth` and `lastMonth` of `dashboard.defaultRange`; the chip names
+the choice, and the span keeps its own name where it is shown — the Tokens section's rows *This week* and *This month*,
+and the range line of the Quick Pick and the markdown document (`This week · 2026-09-21 → 2026-09-27`). Two date fields
 give a custom range (capped at five years, and a reversed range is swapped rather than
 returned empty); they stay hidden until you open them with the `custom…` chip, or until the
 range actually is a custom one, so the common case is chips only. `dashboard.defaultRange` is
@@ -148,7 +150,8 @@ instead of being folded into the picture. The weekday × 4-hour grid draws every
 usage reached, however few days there are, and hatches the blocks no day reached — “hatched: no
 usage in that block”, said under the grid rather than left to be guessed. How thin the evidence
 is, is the caption: the days that carry usage, rounded up to whole weeks, as *based on 1 week — a
-record, not a habit* below three weeks and *based on 4 weeks* from three weeks on. The weeks are
+single observation, not a habit* and *based on 2 weeks — observations, not yet a habit* below three weeks and
+*based on 4 weeks* from three weeks on. The weeks are
 counted from your usage days, not from the length of the range: four working days inside a month
 are four days of evidence, not four weeks of them.
 
@@ -239,7 +242,7 @@ move, `Home` and `End` go to the first and the last line, `Enter` or `Space` cho
 it and puts the focus back on the flag, and `Tab` leaves it without a choice. A letter moves the focus to the next
 language whose own name or name in your language begins with it, round the list, and chooses nothing. A choice switches Token
 Pace's own texts at once, without a reload — the status bar and its tooltips, this page, the Quick
-Pick, the markdown document, and every notification and dialog from then on, with dates and numbers
+Pick, the markdown document, and every alert, message, dialog and notification from then on, with dates and numbers
 formatted for that language (German `2,8M`, `1.234.567`) —; the page keeps its scroll position, the
 focus goes back to the flag, and the choice is written to `tokenPace.language` in your user settings.
 Under the open menu two lines say what cannot follow — *Token Pace's own texts switch at once. The

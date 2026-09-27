@@ -2878,13 +2878,16 @@ test('docs/languages.md: what switches at once and what cannot — the manifest 
     '**At once, without a reload**: the dashboard — every section, the provider switch, the picker, the page\'s own words, its numbers and dates — keeping its scroll position',
     'the status bar\'s texts, tooltips and accessible names, the keep-warm countdown among them',
     'the markdown document and the agent hook\'s setup document while they are open',
-    'and from then on every Quick Pick, notification, dialog and consent text',
+    // 1.12 P11 (pinned and changed — R2-D1): VS Code's own popups are alerts and messages since 1.12 (C0), and the
+    // notifications Token Pace sends follow the language too.
+    'and from then on every Quick Pick, alert, message, dialog and consent text, and every notification Token Pace sends to a channel',
     'The settings UI, the command titles in the Command Palette, the view\'s and its container\'s names, the walkthrough\'s titles and the Extensions view\'s name and description follow VS Code\'s display language',
     'VS Code reads them from `package.nls.<language>.json` when it starts and offers an extension no way to have them read again',
     'So with VS Code in German and the picker on Français, the settings are German and everything Token Pace draws is French.',
     '*Configure Display Language* — which restarts VS Code — changes them',
     'The walkthrough\'s three step pages are English in every language.',
-    'A Quick Pick, a modal dialog or a notification keeps the language it was opened in until it closes',
+    // 1.12 P11 (pinned and changed — R2-D1): an open popup is an alert or another message, not a notification.
+    'A Quick Pick, a modal dialog, an alert or another message keeps the language it was opened in until it closes',
     'it stays in that language until the next attempt', 'Every reading that can be made again is made again at the switch.',
     'the debug log, the diagnostics report and the CSV and JSON exports',
     'the keep-warm line and the terms passage the keep-warm consent quotes',
@@ -3293,7 +3296,11 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     '**The percent follows the number in every language** — `25 %` in a sentence, `25%` in the status bar —, Turkish included, although Turkish typography and the Turkish number format put the sign first (`%25`): the Turkish translation keeps the English order in every string, for one style across the page, the bar and the texts. A known limit, not an oversight.',
     // 1.10 P21 (pinned and changed): the models' turn line joined the glued figures at the join. 1.11 P9 (pinned and
     // changed — Review 1 F4): glue() binds each figure to its unit, not the whole turn line, and the page says so.
-    '**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s` stay together in every language, and each figure of a model\'s turn line stays with its unit (`~12 h 05 min`, `P90 ~18 h 46 min` — the line may wrap between the two) —, an ISO day never breaks at its hyphen, and a window\'s percentage never stands alone on a line: it wraps together with the verdict beside it.',
+    // 1.12 P11 (pinned and changed — §3 D2 rule 4, P2-O1, P2-O2): a duration's parts stay together since 1.12 P2
+    // (DURATION_GLUE_RE), the countdown's `m` is not glued to its seconds — `4 m 10 s` never was one run, only `4 m` and
+    // `10 s` each —, and the turn line may also wrap between `P90` and its figure.
+    '**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m` stay together in every language —, and since 1.12 a duration\'s parts stay together too: `~18 h 46 min`, `3 d 4 h` and `49 min 00 s` are one run each, so each figure of a model\'s turn line stays whole (`~12 h 05 min`, `P90 ~18 h 46 min` — the line may wrap between the two, and between `P90` and its figure).',
+    'An ISO day never breaks at its hyphen, and a window\'s percentage never stands alone on a line: it wraps together with the verdict beside it.',
   ]) assert.ok(lang.includes(claim), `docs/languages.md does not say: ${claim}`)
   assert.ok(flatText(doc.numbers).includes('**Decimals** follow the language too (1.10), wherever the dashboard, the tooltips and the text views print one: a key figure\'s change against the period before (`▼ -0,7%` in German — the sign and the `%` are the badge\'s own and stay attached to the figure)'))
   assert.ok(flatText(doc.numbers).includes('The CSV and JSON exports and the diagnostics report keep the `.` in every language: they are read by programs, not by you.'))
@@ -3701,7 +3708,8 @@ test('the pages carry the sentences of the documentation package, held to the co
     'not a key label of VS Code\'s', '*Période :* with a no-break space in French, *范围：* and *範圍：* with the full-width colon in Simplified and Traditional Chinese, the plain `:` everywhere else, Japanese included',
     // 1.11 P9 (pinned and changed): the full-width colon's wider gap is gone (D1, P3), and the turn line keeps each figure
     // with its unit, not the whole line (Review 1 F4: glue() binds figure and unit).
-    'each figure of a model\'s turn line stays with its unit (`~12 h 05 min`, `P90 ~18 h 46 min` — the line may wrap between the two)', 'are new in 1.9.0', 'are new in 1.11.0']) {
+    // 1.12 P11 (pinned and changed — §3 D2 rule 4): since 1.12 a duration's parts stay together, so each figure stays whole.
+    'each figure of a model\'s turn line stays whole (`~12 h 05 min`, `P90 ~18 h 46 min` — the line may wrap between the two, and between `P90` and its figure)', 'are new in 1.9.0', 'are new in 1.11.0']) {
     assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
   }
   const bundle = (id: string): Record<string, string> => JSON.parse(readDoc(`l10n/bundle.l10n.${id}.json`)) as Record<string, string>
@@ -3847,11 +3855,13 @@ test('the 1.11.0 release notes: the newest entry, its date set at publish, every
   const { AGENT_TABLES_REVISION } = require('../src/agg') as typeof import('../src/agg')
   const { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } = require('../src/agentTree') as typeof import('../src/agentTree')
   const log = readDoc('CHANGELOG.md')
-  const first = log.indexOf('\n## ')
+  // 1.12 P11 (pinned and changed: "the newest entry"): 1.12.0's entry stands above it since, so 1.11.0's is found by its
+  // heading, as 1.10 P21 found 1.9.0's — its text as 1.11 P9 wrote it.
+  const first = log.indexOf('\n## 1.11.0 — ')
   const second = log.indexOf('\n## ', first + 4)
   const entry = log.slice(first, second)
   // The release cadence: the date is set on the release branch at publish, never before.
-  assert.match(entry, /^\n## 1\.11\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.11.0 with its date left for the publish, or does not open with its summary')
+  assert.match(entry, /^\n## 1\.11\.0 — <date set at publish>\n\n\*\*/, 'the 1.11.0 entry is not there with its date left for the publish, or does not open with its summary')
   assert.ok(log.includes('\n## 1.10.0 — <date set at publish>\n'), 'the 1.10.0 entry is gone or dated')
   const flat = flatText(entry)
   const heads = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal']
@@ -4208,4 +4218,426 @@ test('docs/privacy.md names the channels\' secrets under their six keys, the hos
   const { NETWORK_SITES } = require('../scripts/check-privacy.mjs') as { NETWORK_SITES: Array<{ file: string }> }
   for (const row of NETWORK_SITES) assert.ok(privacy.includes(`\`${row.file}\``), `docs/privacy.md does not name ${row.file}`)
   assert.ok(README.includes('| [Notifications](docs/notifications.md) |'), 'the README index has no row for the notifications page')
+})
+
+// ---------------------------------------------------------------------------
+// 1.12 P11 (§4 P11): the release notes of 1.12.0 and the documentation package's sentences, held to the code
+// ---------------------------------------------------------------------------
+
+/**
+ * The Alerts category's title in each manifest at the 1.11.0 release (`d39c2df`) — a literal of history: 1.12 C0 made
+ * "notification" the word for what leaves VS Code, and a language whose Alerts category carried that word renamed it
+ * (group O). The test below holds the rename to these, and the languages page and the settings page to the ten.
+ */
+const ALERTS_TITLE_1_11: Readonly<Record<string, string>> = {
+  de: 'Benachrichtigungen', fr: 'Alertes', es: 'Alertas', 'pt-br': 'Alertas', it: 'Avvisi', ja: '通知', ko: '알림', 'zh-cn': '提醒',
+  'zh-tw': '警示', ru: 'Оповещения', tr: 'Uyarılar', pl: 'Powiadomienia', cs: 'Upozornění', nl: 'Meldingen', uk: 'Сповіщення',
+  sv: 'Aviseringar', nb: 'Varsler', da: 'Advarsler', fi: 'Ilmoitukset', hi: 'अलर्ट', id: 'Peringatan', vi: 'Cảnh báo', el: 'Ειδοποιήσεις',
+  hu: 'Értesítések', ro: 'Alerte',
+}
+/** The ten of the twenty-four that renamed their Alerts category in 1.12 (group O's reports; the lead's §7c). */
+const RENAMED_ALERTS_1_12 = ['pl', 'ja', 'ko', 'nl', 'sv', 'nb', 'fi', 'hu', 'uk', 'el'] as const
+
+/** A constant of a source file that is not exported: `const NAME = <number literal>` read from the text. */
+function sourceConstant(file: string, name: string): number {
+  const m = new RegExp(`const ${name} = ([0-9_]+)\\b`).exec(readDoc(file))
+  assert.ok(m, `${file} no longer declares ${name}`)
+  return Number(m[1].replace(/_/g, ''))
+}
+
+test('the 1.12.0 release notes: the newest entry, its date set at publish, every section in order, the channels, events, limits and defaults the code has, the Codex connection and the Keychain as built, the versions, the ledger, nothing unverified (1.12 P11)', () => {
+  const notify = require('../src/notify') as typeof import('../src/notify')
+  const { KEYCHAIN_QUIET_MS, HELPER_TIMEOUT_USER_MS } = require('../src/credentials') as typeof import('../src/credentials')
+  const { RESET_JITTER_MS } = require('../src/resetRule') as typeof import('../src/resetRule')
+  const { CODEX_BINARY_MISS_MS } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  const { NOTIFY_SECRET_KEY_LIST } = require('../src/notifyHost') as typeof import('../src/notifyHost')
+  const { AGENT_TABLES_REVISION } = require('../src/agg') as typeof import('../src/agg')
+  const { NETWORK_SITES, DEFAULT_ALLOW } = require('../scripts/check-privacy.mjs') as { NETWORK_SITES: Array<{ file: string }>; DEFAULT_ALLOW: string[] }
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  // The release cadence: the date is set on the release branch at publish, never before; 1.11.0 and 1.10.0 untouched.
+  assert.match(entry, /^\n## 1\.12\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.12.0 with its date left for the publish, or does not open with its summary')
+  assert.ok(log.slice(second).startsWith('\n## 1.11.0 — <date set at publish>\n'), 'the 1.11.0 entry does not follow, undated')
+  assert.ok(log.includes('\n## 1.10.0 — <date set at publish>\n'), 'the 1.10.0 entry is gone or dated')
+  const flat = flatText(entry)
+  const heads = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal']
+  const order = heads.map((h) => flat.indexOf(h))
+  assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.12.0 entry\'s sections are missing or out of order')
+  const section = (h: string): string => { const at = heads.indexOf(h); return flat.slice(order[at], at + 1 < heads.length ? order[at + 1] : undefined) }
+
+  // Added: the channels, the three commands as the manifest titles them, the six events with their defaults and limits.
+  const added = section('### Added')
+  for (const key of ['command.notifications.setUp.title', 'command.notifications.sendTest.title', 'command.notifications.remove.title']) {
+    assert.ok(added.includes(nlsEn[key]), `the 1.12.0 entry does not name ${nlsEn[key]}`)
+  }
+  assert.deepEqual([...notify.NOTIFY_EVENTS], ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'quotaReset', 'paceWarning'])
+  for (const event of notify.NOTIFY_EVENTS) assert.ok(added.includes(`\`${event}\``), `the 1.12.0 entry does not name ${event}`)
+  assert.deepEqual([...notify.WEBHOOK_FORMATS], ['generic', 'slack', 'discord', 'teams', 'mattermost', 'rocketChat'])
+  assert.ok(added.includes('Slack, Discord, Microsoft Teams (a Workflows webhook), Mattermost or Rocket.Chat; a Telegram bot; an ntfy topic; or e-mail through your SMTP server, with STARTTLS or TLS'))
+  assert.equal(notify.AGENT_WAIT_AFTER_MS, 60_000)
+  assert.equal(notify.AGENT_DONE_MIN_MS, 2 * 60_000)
+  assert.equal(notify.QUOTA_RESET_RECENT_MS, 30 * 60_000)
+  assert.equal(notify.NOTIFY_HOURLY_CAP, 20)
+  assert.deepEqual(properties['tokenPace.notifications.thresholds'].default, { session: 80, weekly: 80 })
+  assert.equal(properties['tokenPace.notifications.cooldownMinutes'].default, 10)
+  assert.deepEqual(properties['tokenPace.notifications.events'].default, ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'paceWarning'])
+  assert.deepEqual(properties['tokenPace.notifications.channels'].default, [])
+  for (const claim of [
+    '`agentWaiting` (Claude Code has waited a minute for your permission or answer — needs the agent hook)',
+    '`agentDone` (a turn of at least two minutes finished — "after at least", a lower bound)',
+    '`quotaThreshold` (a 5-hour or weekly window past `tokenPace.notifications.thresholds`, 80 and 80)',
+    '`quotaReset` (off by default, and only for a reset no more than 30 minutes ago)',
+    '`paceWarning` (the forecast runs out before the reset, marked `~`)',
+    'one message of a kind per `tokenPace.notifications.cooldownMinutes` (10), at most 20 an hour in all, a failed send not tried again',
+    'keeps the secret in VS Code\'s secret storage, never in your settings; it writes no setting',
+    '**The channels were built from each service\'s documentation and tested against local servers — none of them was tried against the real service by the author yet.**',
+    'the Keychain item is watched by its modification date — its attributes, never its secret —',
+    '`codex connection — mode … · state …`', '`credentials — source … · keychain …`',
+  ]) assert.ok(added.includes(claim), `the 1.12.0 entry does not say: ${claim}`)
+
+  // Changed: the default the manifest ships, the restart budget, the Keychain's gate and wait, the words of the page.
+  const changed = section('### Changed')
+  assert.equal(properties['tokenPace.codexAppServer.mode'].default, 'persistent')
+  assert.equal(sourceConstant('src/appServer.ts', 'RESTART_BUDGET'), 5)
+  assert.equal(KEYCHAIN_QUIET_MS, 1_000)
+  assert.equal(HELPER_TIMEOUT_USER_MS, 30_000)
+  for (const claim of [
+    '`tokenPace.codexAppServer.mode` defaults to `persistent`', 'after five restarts within an hour each fetch starts one of its own until the hour has passed',
+    '`oneShot` keeps the old way — a child per fetch', 'The setting is machine-scoped now',
+    'The standing connection was tested against a stand-in app-server, not against a signed-in Codex, by the author.',
+    'The order is `CLAUDE_CODE_OAUTH_TOKEN`, the Keychain item `Claude Code-credentials`, then `~/.claude/.credentials.json`',
+    'fetches in the background read it only after such a read brought the token within a second; a fetch by hand waits up to 30 seconds for macOS\'s question',
+    '**The Keychain path is untested on macOS by the author.**',
+    'the German Alerts category reads „Warnhinweise“, and ten of the other languages renamed theirs too',
+    '*week to date*, *month to date* and *last month*, and the chart\'s metric menu *cache read*', '`budget 63%`',
+    '*Loading…*, *Reading token history…*', '*based on 1 week — a single observation, not a habit*', '*based on 2 weeks — observations, not yet a habit*',
+    '*Uzantı Konağı* for the extension host, 延伸模組, 延伸主機 and 受限模式',
+    'where a custom price alone priced a model, it equals `costUsd`',
+  ]) assert.ok(changed.includes(claim), `the 1.12.0 entry does not say: ${claim}`)
+  assert.equal(readManifest<{ contributes: { configuration: Array<{ properties: Record<string, { scope?: string }> }> } }>().contributes.configuration
+    .flatMap((s) => Object.entries(s.properties)).find(([k]) => k === 'tokenPace.codexAppServer.mode')?.[1].scope, 'machine')
+  assert.equal(nlsDe['configuration.alerts.title'], 'Warnhinweise')
+  for (const en of ['week to date', 'month to date', 'last month', 'cache read', 'Loading…', 'Reading token history…',
+    'based on {0} week — a single observation, not a habit', 'based on {0} weeks — observations, not yet a habit']) {
+    assert.equal(typeof GERMAN[en], 'string', `${en} is not a text of the code`)
+  }
+  assert.ok(nlsEn['config.statusBar.show.enum.budget'].includes('budget 63%'))
+
+  // Fixed: the jitter the alerts hold, the miss the binary search keeps, the glue of a duration.
+  const fixed = section('### Fixed')
+  assert.equal(RESET_JITTER_MS, 30_000)
+  assert.equal(CODEX_BINARY_MISS_MS, 5 * 60_000)
+  for (const claim of ['a reset time within 30 seconds of the one an alert already named is the same cycle now', 'a miss is kept for five minutes, or until `tokenPace.codexBinary` changes',
+    '`~18 h 46 min`, `3 d 4 h` and `49 min 00 s` are one run each now', 'in nine languages', '`thisWeek`, `thisMonth`, `lastMonth` and `cacheRead`',
+    'kept running after fetching was switched off', 'every fetch started a second, one-shot child']) {
+    assert.ok(fixed.includes(claim), `the 1.12.0 entry does not say: ${claim}`)
+  }
+  assert.ok(readDoc('src/alerts.ts').includes('export function heldIdentityOf('), 'the alerts no longer hold a jittering reset to its cycle')
+  assert.ok(readDoc('src/webview/main.ts').includes('const DURATION_GLUE_RE = '), 'the page no longer glues a duration\'s parts')
+
+  // Privacy: the contract rows, the payload's twelve fields, the six keys, the scan's table and its one new literal.
+  const privacy = section('### Privacy')
+  const credentialRows = READ_CONTRACT.filter((r) => r.file === 'src/credentials.ts').flatMap((r) => r.fields ?? [])
+  assert.deepEqual(credentialRows, ['claudeAiOauth', 'accessToken', 'expiresAt'])
+  const payloadRow = READ_CONTRACT.find((r) => r.file === 'src/notify.ts')
+  assert.equal(payloadRow?.fields?.length, 12)
+  assert.equal(NOTIFY_SECRET_KEY_LIST.length, 6)
+  assert.deepEqual(NETWORK_SITES.map((r) => r.file), ['src/poller.ts', 'src/notifyChannels.ts', 'src/notifySmtp.ts'])
+  assert.ok(DEFAULT_ALLOW.includes('api.telegram.org'))
+  for (const claim of ['Since 1.0.0 the macOS Keychain was read after a consent whose text named only the credentials file',
+    'only `claudeAiOauth`, its `accessToken` and its `expiresAt` are read', 'an allow-list of twelve fields', 'under six fixed keys',
+    'Telegram\'s `api.telegram.org`, on the privacy check\'s allow-list', 'the quota fetch, the notification channels\' one fetch, the SMTP connection']) {
+    assert.ok(privacy.includes(claim), `the 1.12.0 entry does not say: ${claim}`)
+  }
+
+  // Internal: the versions unchanged, the ledger's count read from the file.
+  const internal = section('### Internal')
+  assert.deepEqual([STATE_VERSION, AGENT_TABLES_REVISION, EXPORT_SCHEMA_VERSION], [8, 10, 4])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${STATE_VERSION}, \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} and \`EXPORT_SCHEMA_VERSION\` ${EXPORT_SCHEMA_VERSION} are unchanged`))
+  for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION|EXPORT_SCHEMA_VERSION)` (\d+)/g)) {
+    const want = m[1] === 'STATE_VERSION' ? STATE_VERSION : m[1] === 'AGENT_TABLES_REVISION' ? AGENT_TABLES_REVISION : EXPORT_SCHEMA_VERSION
+    assert.equal(Number(m[2]), want, `the 1.12.0 entry says ${m[1]} ${m[2]}`)
+  }
+  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { base: string; entries: unknown[] }
+  assert.equal(ledger.base, 'd39c2df')
+  assert.ok(internal.includes(`1.12's holds ${ledger.entries.length} entries since the 1.11.0 release`), `the 1.12.0 entry does not give the ledger's ${ledger.entries.length} entries`)
+  assert.equal(existsSync(join(ROOT, 'l10n/pending')), false, 'a pending list is on disk: the join is not done')
+
+  // Claims the notes must not make: nothing beyond an AI agent's reading, no live test of a channel or of Codex, no
+  // path, file, secret, review or date of the build.
+  for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i, /review/i, /tried with Codex/i, /tested with (a signed-in )?Codex/i,
+    /tried (live )?(with|on|against) (Slack|Discord|Telegram|ntfy|Mattermost|Rocket\.Chat|Microsoft Teams)/i, /(?<!un)tested on macOS/i, /on a Mac by the author/i]) {
+    assert.equal(never.test(entry), false, `the 1.12.0 entry says ${never}`)
+  }
+  for (const never of [/\/home\//, /plan-1\.\d+/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//, /package\.json/, /worktree/i, /Review [123L]\b/, /\d{4}-\d{2}-\d{2}/]) {
+    assert.equal(never.test(entry), false, `the 1.12.0 entry mentions ${never}`)
+  }
+})
+
+/**
+ * 1.12 P11: the sentences the documentation package added or corrected where a reader looks — notifications.md read
+ * against the code (the samples rendered by `payloadOf`, the bodies by the channels' own builders, the secrets bound to
+ * their host, the channels not tried live), quota-sources.md (the Keychain's waits, the gate's leftover-file case, the
+ * standing child's overlap, the push write-back, a follower), privacy.md, settings.md (the renamed Alerts categories),
+ * commands.md, troubleshooting.md, budgets-alerts.md, languages.md (the 1.12 paragraph, D2, D8, D9, D14), export.md,
+ * numbers.md, agents.md, development.md and the README — each held to the code where the code decides it.
+ */
+test('the pages carry the sentences of the 1.12 documentation package, held to the code (1.12 P11)', () => {
+  const notify = require('../src/notify') as typeof import('../src/notify')
+  const channels = require('../src/notifyChannels') as typeof import('../src/notifyChannels')
+  const { HELPER_TIMEOUT_MS, HELPER_TIMEOUT_USER_MS, KEYCHAIN_QUIET_MS } = require('../src/credentials') as typeof import('../src/credentials')
+  const { RESET_JITTER_MS } = require('../src/resetRule') as typeof import('../src/resetRule')
+  const { STORED_MEMENTO_KEYS } = require('../src/storage') as typeof import('../src/storage')
+
+  // notifications.md: the samples are what payloadOf builds — the English texts, the JSON key for key.
+  const page = flatText(doc.notifications)
+  const tcfg: TimeConfig = { zone: 'utc', dayBoundaryHour: 0, startOfWeek: 'monday', hourCycle: 'h23' }
+  const now = Date.UTC(2026, 8, 27, 11, 59)
+  const base: import('../src/notify').NotificationEvent = {
+    event: 'quotaThreshold', identity: 'quotaThreshold:claude:session:x', provider: 'claude', program: null, windowLabel: '5 h', windowKind: 'session',
+    percent: 82, resetsAt: Date.UTC(2026, 8, 27, 14, 0), etaAt: null, since: null, atLeastMs: null, wait: null, at: now,
+  }
+  const agent = { provider: null, program: 'claudeCode' as const, windowLabel: null, windowKind: null, percent: null, resetsAt: null }
+  const [threshold, waiting, done, pace] = underLocale(undefined, () => [
+    notify.payloadOf([base], { tcfg, now }),
+    notify.payloadOf([{ ...base, ...agent, event: 'agentWaiting', wait: 'permission', since: Date.UTC(2026, 8, 27, 11, 58) }], { tcfg, now }),
+    notify.payloadOf([{ ...base, ...agent, event: 'agentDone', atLeastMs: 14 * 60_000 + 20_000 }], { tcfg, now }),
+    notify.payloadOf([{ ...base, event: 'paceWarning', percent: 64, etaAt: Date.UTC(2026, 8, 27, 13, 30) }], { tcfg, now }),
+  ])
+  for (const quote of [`> **${threshold.title}**\n> ${threshold.text}`, `> **${waiting.title}**\n> ${waiting.text}`, `> ${done.text}`, `> ${pace.text}`]) {
+    assert.ok(doc.notifications.includes(quote), `docs/notifications.md does not quote the message as payloadOf builds it: ${quote}`)
+  }
+  const at = doc.notifications.indexOf('```json\n')
+  assert.deepEqual(JSON.parse(doc.notifications.slice(at + 8, doc.notifications.indexOf('\n```', at))), threshold.json, 'the sample JSON is not what payloadOf builds')
+  // The bodies the page names, as the channels build them.
+  const teams = JSON.parse(channels.webhookBody('teams', threshold)) as { attachments: Array<{ contentUrl: unknown; content: { version: string; body: unknown[] } }> }
+  assert.deepEqual([teams.attachments[0].contentUrl, teams.attachments[0].content.version, teams.attachments[0].content.body.length], [null, '1.2', 2])
+  const telegram = JSON.parse(channels.telegramBody('-100123', threshold)) as Record<string, unknown>
+  assert.deepEqual([telegram.link_preview_options, 'parse_mode' in telegram], [{ is_disabled: true }, false])
+  assert.deepEqual([channels.ntfyPriority(waiting), channels.ntfyPriority(threshold)], [4, 3])
+  assert.ok(readDoc('src/notifySmtp.ts').includes("minVersion: 'TLSv1.2'"), 'the SMTP connection no longer asks for TLS 1.2: say so in the docs')
+  const services = ['Slack', 'Discord', 'Microsoft Teams', 'Mattermost', 'Rocket.Chat']
+  assert.deepEqual(services.map((s) => readDoc('src/notifyHost.ts').includes(`'${s}'`)), services.map(() => true), 'the setup no longer names the five presets')
+  for (const claim of [
+    // The channels not tried live, named (§5 step 4(i)) — the page's older sentence stays beside it.
+    `Not yet tried live by the author: the generic webhook, ${services.join(', ')}, Telegram, ntfy and e-mail over SMTP.`,
+    'built from the service\'s documentation, not tried by the author',
+    // The services' UI paths as their pages gave them, and which one was not checked (P9-D1).
+    'Discord\'s help page could not be read that day, so its path is not checked — none of them was followed in the services\' apps by the author',
+    '*Activate Incoming Webhooks*, then *Add New Webhook to Workspace*', '*When a Teams webhook request is received*',
+    '*Product menu → Integrations → Incoming Webhook*, *Add Incoming Webhook*', '*Manage → Workspace → Integrations*, *New*, the *Incoming* tab',
+    '`@name` for a public Telegram channel',
+    // A stored secret is bound to its host (Review 3 F1, F2).
+    'Where a secret is stored already for the host this setup allows, its box says *Leave empty to keep the stored one.* A stored secret belongs to the host you allowed it for',
+    'a secret the channel cannot do without has to be typed again, one it can do without (the webhook\'s secret header, the ntfy token) is deleted on *Allow* when you leave its box empty, and a preset never keeps the generic webhook\'s header value',
+    // Review L's common part: what stays as it is in every language.
+    'the services\' names (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy), the event ids and the setting fields stay as they are in every language',
+    // The channels' facts of P7 and P8.
+    'Microsoft Teams an Adaptive Card of version 1.2 with `contentUrl` null', 'Telegram plain text without a link preview (`link_preview_options`, no `parse_mode`)',
+    '(priority 4 for `quotaExhausted` and `agentWaiting`, 3 otherwise)', 'a `429` without a number of seconds there pauses nothing',
+    'The connection is TLS 1.2 or newer, and its certificates are always verified',
+    '[Settings Sync documentation](https://code.visualstudio.com/docs/configure/settings-sync) covers it under *Troubleshoot credential-store issues*',
+  ]) assert.ok(page.includes(claim), `docs/notifications.md does not say: ${claim}`)
+  // The settings table's Telegram row says the same.
+  assert.ok(doc.settings.includes('| `notifications.telegram` | `{ chatId: "" }` | The chat your bot sends to — a number, or `@name` for a public Telegram channel |'))
+
+  // quota-sources.md: the Keychain's waits, the gate's leftover file (Review 2 F11), untried as gateClosed (P5-O3), the
+  // overlap (R2-F15), the push written back (R2-F8), a follower keeps no child — true since 1.0.0, and said again.
+  // The macOS box is a block quote: its markers are taken out before the words are compared.
+  const quota = flatText(doc.quotaSources.replace(/\n> ?/g, '\n'))
+  assert.deepEqual([HELPER_TIMEOUT_USER_MS, HELPER_TIMEOUT_MS, KEYCHAIN_QUIET_MS], [30_000, 5_000, 1_000])
+  assert.equal(sourceConstant('src/appServer.ts', 'APP_SERVER_TIMEOUT_MS'), 20_000)
+  for (const claim of [
+    'A fetch by hand waits up to 30 seconds for the Keychain\'s answer — time to answer macOS\'s question —; a read in the background, and Linux\'s `secret-tool`, 5 seconds.',
+    '`gateClosed` (only a fetch by hand reads it now — also before the first one in this window)',
+    'a fetch in the background skips the Keychain and takes the token of `~/.claude/.credentials.json` if that file holds a current one, which on a Mac may be another setup\'s leftover of another account: a fetch by hand may then show one account\'s quota and a fetch in the background another.',
+    'so for at most the 20 seconds such a question may take, that child can run beside the restarted standing one: never two children for one read',
+    'In the default `persistent` mode each rate-limit update the app-server pushes is written the same way — the provider\'s answer verbatim, as for a fetch.',
+    'A window that follows keeps no child',
+    '**The macOS Keychain path is untested on macOS by the author.**',
+  ]) assert.ok(quota.includes(claim), `docs/quota-sources.md does not say: ${claim}`)
+  const qm = readDoc('src/quotaManager.ts')
+  assert.ok(qm.includes("if (!this.leader) return 'follower'") && qm.includes('this.writeBack(\'codex\', params, state)'), 'a follower keeps a child, or a push is not written back: say so in the docs')
+  assert.equal(readDoc('src/credentials.ts').includes("const limit = occasion === 'userAction' ? HELPER_TIMEOUT_USER_MS : HELPER_TIMEOUT_MS"), true)
+
+  // privacy.md: the secret storage among the writes, the read contract's 1.12 rows, a prompt never sent from a message.
+  const privacy = flatText(doc.privacy)
+  for (const claim of [
+    'Beside the files, since 1.12, a notification channel\'s secrets are written into VS Code\'s secret storage on this machine — only by *Set Up a Notification Channel…*',
+    'Since 1.12 two more readers are in it: the credentials document\'s parser, held to `claudeAiOauth`, its `accessToken` and its `expiresAt`, and the notification payload\'s builder, held to the twelve fields of an event',
+    'never by a timer, a command, a link or a message\'s button',
+  ]) assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  assert.equal(READ_CONTRACT.find((r) => r.file === 'src/notify.ts')?.fields.length, 12)
+
+  // settings.md and languages.md: the ten renamed Alerts categories, against the manifests and 1.11's titles.
+  for (const l of LANGUAGES.filter((e) => e.id !== 'en')) {
+    const nls = JSON.parse(readDoc(`package.nls.${l.id}.json`)) as Record<string, string>
+    const [alerts, notifications] = [nls['configuration.alerts.title'], nls['configuration.notifications.title']]
+    assert.notEqual(alerts, notifications, `${l.id}: one name for the alerts and the notifications`)
+    const renamed = alerts !== ALERTS_TITLE_1_11[l.id]
+    assert.equal(renamed, l.id === 'de' || (RENAMED_ALERTS_1_12 as readonly string[]).includes(l.id), `${l.id}: the Alerts category ${renamed ? 'was' : 'was not'} renamed`)
+    if (renamed) assert.ok(notifications.startsWith(ALERTS_TITLE_1_11[l.id]), `${l.id}: the old Alerts name is not the notifications' word`)
+  }
+  assert.ok(flatText(doc.settings).includes('In German („Warnhinweise“, before „Benachrichtigungen“) and in ten of the twenty-four other languages the Alerts category has a new name since 1.12, because its old name is now the notifications\' word'))
+  assert.ok(flatText(doc.settings).includes('The rows\' titles, such as *Notifications: Channels*, are made by VS Code from the keys and stay English in every language.'))
+  const tenNames = RENAMED_ALERTS_1_12.map((id) => LANGUAGES.find((e) => e.id === id)?.native)
+  const languages = flatText(doc.languages)
+  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { entries: unknown[] }
+  for (const claim of [
+    `**In 1.12** the twenty-four languages beyond English and German worked through 1.12's ledger of English changes (${ledger.entries.length} entries) in four packages of six, each by an AI agent (Claude Opus 5.5); a reading pass by further AI agents followed, one per package, none of them a native speaker`,
+    `and ten of them (${tenNames.join(', ')}) renamed their Alerts category for it, because its old name is now the notifications' word: a reader who knew the old name finds the new one in the settings UI's list of categories`,
+    'The macOS Keychain\'s name and its buttons ("Always Allow", "Allow") are written as each agent believed macOS shows them in the language, not checked on a Mac; Magyar keeps the English labels in quotation marks.',
+    // D14: the open questions — 1.10's and 1.11's named, the one closed, 1.12's per family, none decided.
+    '**Open questions.** Neither the questions the 1.10 readers left for native speakers nor those of 1.11 are answered in 1.12 — one is closed by a fact: VS Code itself writes 受限模式 for Restricted Mode in Traditional Chinese —',
+    'In French, Spanish, Brazilian Portuguese, Italian and Romanian:', 'In Polish, Czech, Russian and Ukrainian:', 'In Dutch, Danish, Swedish and Norwegian:',
+    'In Finnish and Hungarian:', 'In Japanese, Korean and the two Chinese variants:', 'And in Turkish, Greek, Hindi, Indonesian and Vietnamese, each of a family of its own here:',
+    'None of them is decided by an agent.',
+    // D2 (with the countdown's `m` excepted — P2-O1), D8, D9.
+    '`2 min`, `54 %`, `4 m` stay together in every language —, and since 1.12 a duration\'s parts stay together too: `~18 h 46 min`, `3 d 4 h` and `49 min 00 s` are one run each',
+    'The prompt cache\'s countdown (`4 m 10 s`), which writes `m`, is not one of them: it may still break between its parts.',
+    'The heat map\'s weekday words are the translation\'s own, four characters at most; the weekday in front of a clock time is, English and German aside, the short form of the language\'s date format. In Danish, Vietnamese and Polish the two differ (`ti.` and `tirs.`, `T3` and `Thứ 3`, `Nd` and `niedz.`), because those forms do not fit the heat map\'s column — `tirs.` and `Thứ 3` are five characters, `niedz.` six; in the other languages they differ at most in case or a full stop.',
+    'Turkish writes *Uzantı Konağı* for the extension host and *Kısıtlı Mod* for Restricted Mode, Traditional Chinese 延伸模組 for an extension, 延伸主機 for the extension host and 受限模式 for Restricted Mode',
+    // What switches at once: the popups are alerts and messages, the notifications follow the language too.
+    'and from then on every Quick Pick, alert, message, dialog and consent text, and every notification Token Pace sends to a channel (1.12)',
+  ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
+  assert.equal(ledger.entries.length, 121)
+  // The facts under D2, D8 and D9: the glue rule and the countdown's `m`, the weekday forms per language, the terms.
+  const main = readDoc('src/webview/main.ts')
+  assert.ok(/const DURATION_GLUE_RE = \/\(\\d\\u00a0\(\?:d\|h\|min\)\)/.test(main), 'DURATION_GLUE_RE no longer glues d, h and min to a following part: say so in the docs')
+  assert.equal(countdownText(250_000), '4 m 10 s')
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const graphemes = (s: string): number => [...new Intl.Segmenter().segment(s)].length
+  const norm = (s: string): string => s.toLowerCase().replace(/\.$/, '')
+  const differ: string[] = []
+  for (const l of LANGUAGES.filter((e) => e.id !== 'en' && e.id !== 'de')) {
+    const b = JSON.parse(readDoc(`l10n/bundle.l10n.${l.id}.json`)) as Record<string, string>
+    const f = new Intl.DateTimeFormat(l.locale, { timeZone: 'UTC', weekday: 'short' })
+    const intl = days.map((_, d) => f.format(Date.UTC(2026, 8, 6 + d, 12)))
+    if (days.some((k, d) => norm(b[k]) !== norm(intl[d]))) {
+      differ.push(l.id)
+      assert.ok(intl.some((w) => graphemes(w) > 4), `${l.id}'s weekday forms differ though they would fit the heat map's column`)
+    }
+  }
+  assert.deepEqual(differ.sort(), ['da', 'pl', 'vi'])
+  const count = (id: string, word: string): number => [`l10n/bundle.l10n.${id}.json`, `package.nls.${id}.json`].map((f) => readDoc(f).split(word).length - 1).reduce((a, b) => a + b, 0)
+  assert.ok(count('tr', 'Uzantı Konağı') >= 1 && count('tr', 'Kısıtlı Mod') >= 1 && count('tr', 'uzantı ana bilgisayarı') === 0)
+  assert.ok(count('zh-tw', '延伸模組') >= 1 && count('zh-tw', '延伸主機') >= 1 && count('zh-tw', '受限模式') >= 1 && count('zh-tw', '擴充功能') === 0 && count('zh-tw', '限制模式') === 0)
+
+  // commands.md, troubleshooting.md, budgets-alerts.md, export.md, numbers.md, agents.md.
+  const commands = flatText(doc.commands)
+  assert.ok(commands.includes('the markdown report, the alerts, notifications and dialogs and the agent hook\'s setup document — follows that setting at once'))
+  assert.ok(commands.includes('the decisions (since 1.12 the macOS Keychain\'s among them), the notification channels'))
+  assert.ok(STORED_MEMENTO_KEYS.consent.includes('networkConsentKeychain') && STORED_MEMENTO_KEYS.notifications.includes('tokenPace.notifyConsent'))
+  const trouble = flatText(doc.troubleshooting)
+  assert.ok(doc.troubleshooting.includes('\n## Notifications\n'))
+  for (const claim of ['Answer macOS\'s question within thirty seconds; a later answer ends that fetch without the Keychain — fetch by hand again',
+    '| `paused until … (429)` in the diagnostics |', '| timeout | No answer within 15 seconds, for e-mail within 30 |', '| TLS error |', '| network error |',
+    '| refused by the server (`refused 535` in the diagnostics) |', '| incomplete setup |', '| its host changed since you allowed it (`consent no (host changed)`) |',
+    'A Quick Pick, a dialog, an alert or another message that was open at the switch keeps its language until it closes']) {
+    assert.ok(trouble.includes(claim), `docs/troubleshooting.md does not say: ${claim}`)
+  }
+  for (const en of ['timeout', 'TLS error', 'network error', 'refused by the server', 'incomplete setup', 'its host changed since you allowed it']) {
+    assert.equal(typeof GERMAN[en], 'string', `${en} is not a failure word of the code`)
+  }
+  assert.deepEqual([notify.NOTIFY_TIMEOUT_MS, sourceConstant('src/notifySmtp.ts', 'SMTP_SEND_TIMEOUT_MS')], [15_000, 30_000])
+  assert.equal(RESET_JITTER_MS, 30_000)
+  assert.ok(flatText(doc.budgetsAlerts).includes('Since 1.12 a reset time that moved by no more than 30 seconds between two readings — Claude Code\'s usage cache writes it with sub-second jitter — is held to the cycle it already names, so the readings of one cycle raise one alert, not one each.'))
+  const exp = flatText(doc.export)
+  for (const claim of ['since 1.12 the Codex app-server\'s line, `codex connection — mode persistent · state ready · restarts 0 in the last hour · pushes 3 · last push 42 s ago`',
+    'the credentials\' line, `credentials — source keychain · keychain allowed` — where the token came from, by a name, never the token',
+    'a section `## Notifications` with one line per channel', '(no setting holds a key or a secret to begin with)',
+    'The notification settings\' fields that name a host or an address — `host`, `user`, `from`, `to`, `chatId` and `server` — read `set` or `not set` (1.12).',
+    'the consent decisions (the keep-warm consent and, since 1.12, the macOS Keychain\'s among them)', 'the notification channels (1.12, with the number of channels set up',
+    'whether VS Code deletes an extension\'s secrets when it is uninstalled is not traced: remove your channels first']) {
+    assert.ok(exp.includes(claim), `docs/export.md does not say: ${claim}`)
+  }
+  assert.ok(readDoc('src/diagnostics.ts').includes("const NOTIFY_ADDRESS_FIELDS: readonly string[] = ['host', 'user', 'from', 'to', 'chatId', 'server']"))
+  assert.equal(exp.includes('there is no key or endpoint setting'), false)
+  assert.ok(flatText(doc.numbers).includes('poll interval, or each update the app-server pushes (1.12, the default `persistent` mode) — consent required'))
+  assert.ok(flatText(doc.agents).includes('The hook\'s waits also feed the notification `agentWaiting` when you list it in `tokenPace.notifications.events` (1.12) — a permission wait of a session itself, or its wait for your answer while its turn is open, standing a minute while the window is not focused; an agent\'s wait is not sent'))
+  assert.equal(notify.AGENT_WAIT_AFTER_MS, 60_000)
+  assert.ok(readDoc('src/notify.ts').includes("if (!h || h.agentId !== null || (h.wait !== 'permission' && h.wait !== 'input')) continue"), 'an agent\'s wait is sent: say so in the docs')
+
+  // development.md: the frame's 1.12 names, the ledger's count, the scan's table, the e2e's notification check.
+  const dev = flatText(doc.development)
+  const frame = readDoc('test/l10n.languages.test.ts')
+  for (const name of ['NAMES_OF_1_12', 'FIELD_IDS_OF_A_KEY', 'SESSION_NAME_PAGE_FIELDS', 'SESSION_NAME_KEYS']) {
+    assert.ok(frame.includes(`export const ${name}`), `the frame no longer has ${name}`)
+    assert.ok(dev.includes(`\`${name}\``), `docs/development.md does not name ${name}`)
+  }
+  for (const claim of ['In 1.12 the frame learned three things before a single 1.12 text was written, and three more while the languages were made.',
+    '`FIELD_IDS_OF_A_KEY` — a key that names a setting\'s fields by their ids keeps them in English', 'beside `SAME_IN_EVERY_LANGUAGE` and `ADDED_AT_THE_JOIN`',
+    'the kept-names guard — every name of `NAMES_OF_1_12` and the word `security` (macOS\'s tool) stand in a value at least as often as in its key',
+    'the seventeen notification texts carry no `*`, `_`, `~` or backtick their English lacks',
+    `It holds ${ledger.entries.length} entries`, 'at the join `PENDING_ALLOWED` went back to false and `node scripts/nls-sources.mjs --check --strict` became the gate again',
+    'src/\'s network call sites against NETWORK_SITES', 'asks `notifyCheck()` — `noChannel` with no channel set up, no request made —',
+    'No test reaches the network: the fetch and the sockets are injected, and a static test holds `test/` free of a real service\'s host.']) {
+    assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
+  }
+  assert.ok(/export const PENDING_ALLOWED: boolean = false/.test(frame), 'the join flag is not false')
+  assert.ok(readDoc('test-e2e/suite/index.ts').includes("assert.equal(await extensionApi().notifyCheck(), 'noChannel')"))
+
+  // The README: the bullet, the privacy line of §0a.9, the credentials' places (Review 3 D1), the index rows.
+  const readme = flatText(README)
+  for (const claim of ['* **Notifications to your phone, a chat or your mail, off by default**', '→ [Notifications](docs/notifications.md)',
+    'and, only if you set one up, the notification channel you chose',
+    'the access token is read only then — from `CLAUDE_CODE_OAUTH_TOKEN`, on macOS the Keychain item Claude Code keeps it in (after a question of its own), `~/.claude/.credentials.json`, on Linux the Secret Service —',
+    'and a notification channel\'s secrets into VS Code\'s secret storage', 'on a network call site outside its table',
+    '| [Privacy](docs/privacy.md) | Every file read, everything never touched, the quota fetch and the notification channels you set up |']) {
+    assert.ok(readme.includes(claim), `README.md does not say: ${claim}`)
+  }
+
+  // dashboard.md (collect R1-F4, the lead's decision: the chip names the choice, the caption and the rows the span),
+  // status-bar-states.md (the noToken row's Keychain case), quota-cache-format.md (the push written back, R2-F8).
+  assert.ok(flatText(doc.dashboard).includes('the chip names the choice, and the span keeps its own name where it is shown — the Tokens section\'s rows *This week* and *This month*, and the range line of the Quick Pick and the markdown document (`This week · 2026-09-21 → 2026-09-27`)'))
+  assert.ok(readDoc('src/textViews.ts').includes('${vm.range.label} · ${vm.range.from} → ${vm.range.to}') && readDoc('src/stats.ts').includes("periodRow(ctx, t('This week'), weekFrom, today)"))
+  assert.ok(flatText(STATES).includes('on macOS also when a fetch in the background skipped the Keychain, which it reads only after a fetch by hand (1.12)'))
+  assert.ok(flatText(readDoc('docs/quota-cache-format.md')).includes('after each rate-limit update the Codex app-server pushes, its `body` then that push\'s parameters as the app-server sent them'))
+
+  // The old claims stand nowhere a reader looks (§4 P11 item 4) — and "a follower keeps no child" stays true (above).
+  const log = readDoc('CHANGELOG.md')
+  const entry = log.slice(log.indexOf('\n## 1.12.0'), log.indexOf('\n## 1.11.0'))
+  const pages: Array<[string, string]> = [['CHANGELOG.md 1.12.0', entry], ['README.md', README], ['docs/status-bar-states.md', STATES],
+    ...Object.entries(doc).map(([k, v]): [string, string] => [`docs/${k}`, v]),
+    ...readdirSync(join(ROOT, 'media/walkthrough')).map((f): [string, string] => [`media/walkthrough/${f}`, readDoc(`media/walkthrough/${f}`)])]
+  for (const [name, text] of pages) {
+    for (const stale of ['The default `oneShot`', 'using the accessToken from ~/.claude/.credentials.json', 'a record, not a habit', 'only from `~/.claude/.credentials.json`',
+      'the one outbound call', '**Persistent app-server.**', 'there is no key or endpoint setting', 'a link or a notification', 'every notification and dialog',
+      'every Quick Pick, notification, dialog', 'or a notification keeps the language', 'Followers keep no child. The default']) {
+      assert.equal(flatText(text).includes(stale), false, `${name} still says: ${stale}`)
+    }
+  }
+})
+
+test('the German pass: every interface text the 1.12 pages quote has the German counterpart the glossary names (1.12 P11, §6)', () => {
+  // The words the pages quote of the interface — the settings' categories, the commands, the failure words, the setup's
+  // box, the chips — and the German the build carries for each, in §6's words.
+  for (const [key, de] of [['configuration.alerts.title', 'Warnhinweise'], ['configuration.notifications.title', 'Benachrichtigungen (Telefon, Chat, E-Mail)'],
+    ['command.notifications.setUp.title', 'Benachrichtigungskanal einrichten…'], ['command.notifications.sendTest.title', 'Testbenachrichtigung senden…'],
+    ['command.notifications.remove.title', 'Benachrichtigungskanal entfernen…'], ['command.refreshQuota.title', 'Kontingent jetzt abrufen']] as const) {
+    assert.equal(nlsDe[key], de, `package.nls.de.json's ${key}`)
+  }
+  for (const [en, de] of [['timeout', 'Zeitüberschreitung'], ['TLS error', 'TLS-Fehler'], ['network error', 'Netzwerkfehler'], ['refused by the server', 'vom Server abgelehnt'],
+    ['incomplete setup', 'unvollständige Einrichtung'], ['its host changed since you allowed it', 'sein Host hat sich geändert, seit Sie ihn erlaubt haben'],
+    ['Notification channels', 'Benachrichtigungskanäle'], ['Leave empty to keep the stored one.', 'Leer lassen, um den gespeicherten Wert zu behalten.'],
+    ['Token Pace: quota threshold reached', 'Token Pace: Kontingent-Schwelle erreicht'], ['Token Pace: {0} is waiting for you', 'Token Pace: {0} wartet auf Sie'],
+    ['{0} is waiting for your permission (since {1}).', '{0} wartet auf Ihre Erlaubnis (seit {1}).'],
+    ['{0} finished a turn at {1}, after at least {2}.', '{0} hat um {1} einen Turn beendet, nach mindestens {2}.'],
+    ['Allow Token Pace to send notifications to {0}?', 'Token Pace erlauben, Benachrichtigungen an {0} zu senden?'],
+    ['week to date', 'diese Woche'], ['month to date', 'dieser Monat'], ['last month', 'letzter Monat'], ['cache read', 'Cache-Lesen'], ['Loading…', 'Wird geladen …']] as const) {
+    assert.equal(GERMAN[en], de, `the German of ${en}`)
+  }
+})
+
+test('the five store pictures are the pages as 1.12 draws them — compared with fresh shots, none re-shot, each at its size (1.12 P11)', () => {
+  // P11 shot the harness's pages of the fix pass after Review L again (zoomshot, 420 px, 2×) and compared them pixel by
+  // pixel with these: 0 differing pixels in all five, so none was replaced. The sizes are the crops the README embeds.
+  for (const [file, w, h] of [['screenshot-dashboard.png', 840, 3200], ['screenshot-tokens.png', 840, 1660], ['screenshot-prompt-cache.png', 840, 912],
+    ['screenshot-prompts.png', 840, 800], ['screenshot-languages.png', 840, 1560]] as const) {
+    const png = readFileSync(join(ROOT, 'media', file))
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [w, h], `media/${file}`)
+    assert.ok(README.includes(`](media/${file})`), `the README does not embed media/${file}`)
+  }
 })

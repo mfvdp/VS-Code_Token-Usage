@@ -67,6 +67,16 @@ export function pendingNlsKeys(id: string, root: string = ROOT): Set<string> {
  */
 export const LANGUAGE_NAME_AS_ENGLISH: ReadonlyArray<readonly [string, string, string]> = [
   ['de', 'Hindi', 'the German name of the language is Hindi (Duden)'],
+  // 1.11 L1 (the lead, at the merge): the Latin-script languages of tier 2 write the name as the English does — the
+  // dictionaries below — capitalised as a list item where the language writes it in lower case in a sentence.
+  ['nl', 'Hindi', 'the Dutch name of the language is Hindi (Van Dale)'],
+  ['da', 'Hindi', 'the Danish name of the language is hindi (Den Danske Ordbog), capitalised as a list item'],
+  ['sv', 'Hindi', 'the Swedish name of the language is hindi (SAOL), capitalised as a list item'],
+  ['nb', 'Hindi', 'the Norwegian name of the language is hindi (Bokmålsordboka), capitalised as a list item'],
+  ['fi', 'Hindi', 'the Finnish name of the language is hindi (Kielitoimiston sanakirja), capitalised as a list item'],
+  ['hu', 'Hindi', 'the Hungarian name of the language is hindi (A magyar helyesírás szabályai), capitalised as a list item'],
+  ['ro', 'Hindi', 'the Romanian name of the language is hindi (DEX), capitalised as a list item'],
+  ['id', 'Hindi', 'the Indonesian name of the language is Hindi (KBBI)'],
 ]
 
 /** The raw manifest, placeholders and all — for the tests that check the placeholders. */

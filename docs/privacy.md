@@ -343,8 +343,9 @@ one warning says so, the log names the kind of error, and nothing changes. Switc
 reads Token Pace's own translation file for it (above) and nothing else — no transcript, no file of
 Claude Code or Codex, nothing over the network.
 
-The only outbound network access is the consent-gated quota fetch described under
-[Quota sources](quota-sources.md). For Codex the same consent starts the local `codex app-server`
+The outbound network access is the consent-gated quota fetch described under
+[Quota sources](quota-sources.md) and — only for a notification channel you set up and allowed, since 1.12 — the
+messages that channel gets (below). For Codex the same consent starts the local `codex app-server`
 and asks it for its rate limits — in the default `tokenPace.codexAppServer.mode: persistent` it is
 kept running while this window leads and fetches, and asked over that one connection; nothing of
 ours leaves the machine for it, and of its answers only the rate limits are kept — not the answer
@@ -353,9 +354,15 @@ to `initialize`, not its error output, no line of it in the log
 valid: keeping the child running sends nothing anywhere. That promise is checked mechanically:
 `npm run check:privacy` scans the shipped bundles for every `http(s)`
 literal and matches it against a small allow-list (`api.anthropic.com`, the two official usage
-pages, and documentation links that only ever appear as text). It runs in CI on all three
+pages, documentation links that only ever appear as text, and since 1.12 `api.telegram.org`, Telegram's Bot API, for a
+Telegram channel you set up and allowed). It runs in CI on all three
 platforms and in the release workflow, and it fails the build on anything else — a price feed, a
-status page or a CDN font would otherwise be a two-line change nobody notices in review.
+status page or a CDN font would otherwise be a two-line change nobody notices in review. A host you type yourself — a
+webhook's address, an ntfy server, an SMTP server — is no literal a scan could see, so since 1.12 the same command also
+holds every place in the source that can reach the network to a table, `NETWORK_SITES`: the quota fetch in
+`src/poller.ts`, the notification channels' one `fetch` in `src/notifyChannels.ts` and the SMTP connection in
+`src/notifySmtp.ts`, each with the kind of host it reaches and why. A `fetch(`, a socket or a network module anywhere
+else fails the build.
 The same command checks the **read contract**: a table in `scripts/check-privacy.mjs` names, for
 every reader of a Claude Code file, the fields it may take — the ones this page lists above — and
 the check fails when a reader takes a field the table does not list, or no longer takes one it
@@ -404,6 +411,27 @@ every event from a world with a project `synthetic-project-123`, a session `9d0e
 project, a prompt titled `Synthetic Prompt Title` and a plan `synthetic-plan`, and finds none of them in a payload, a
 text or the JSON, and the test that follows a synthetic access token from the Keychain through a real fetch finds it
 in no payload either.
+
+The channel's **secrets** — a webhook's address (the address of a Slack, Discord or Teams webhook is its credential)
+and the value of its secret header, a Telegram bot's token, an ntfy topic and its access token, an SMTP password — are
+kept only in VS Code's secret storage on this machine, under six fixed keys (`tokenPace.notify.webhook.url`,
+`tokenPace.notify.webhook.secret`, `tokenPace.notify.telegram.botToken`, `tokenPace.notify.ntfy.topic`,
+`tokenPace.notify.ntfy.token`, `tokenPace.notify.email.password`), written only by *Token Pace: Set Up a Notification
+Channel…* and read at the moment of a send, never in `settings.json`, a log line, a message, the diagnostics, an export
+or the extension's storage; a secret stands only in the one request that needs it — the Telegram token in the path of
+Telegram's address, the webhook's secret and the ntfy token in a header, the SMTP password in the `AUTH` exchange after
+TLS stands. The **hosts** are yours: the host of the webhook's address, `api.telegram.org`, the ntfy server's host, the
+SMTP server with its port — each named by the consent *Set Up* asks before it stores anything, kept per channel in
+`tokenPace.notifyConsent` (`host` and `at`), and compared at every send: a channel whose host changed since you allowed it
+sends nothing until you run *Set Up* again. Of an answer only its status is read (for a 429 the number in
+`Retry-After`, for SMTP the reply codes), never a body. `tokenPace.notify` also keeps each channel's **last result** —
+`last`: its time, the event, whether it was accepted and else the kind of failure with its status, and a 429's pause —
+which *Copy Diagnostics* shows; *Copy Diagnostics* says which notification settings are set, never the host, the
+addresses, the chat id or the ntfy server. *Token Pace: Remove a Notification Channel…* deletes a channel's secrets,
+its consent and its last result; *Clear Stored Data…* offers all of it as one item, *Notification channels*.
+Everything about setting a channel up is in [Notifications](notifications.md). A leak test plants six synthetic
+secrets and synthetic addresses and finds them only in the requests that need them — never in the log, the diagnostics,
+a message, the extension's storage or the settings.
 
 **Leak tests.** Each field the agent tables and the agent hook read has a leak test whose fixture
 puts synthetic text under the keys beside it — the prompt, the description, the result, the

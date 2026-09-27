@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   buildDiagnostics, codexConnectionDiag, collectHttpSettings, collectProxyEnv, collectSettings, credentialsDiag, DiagnosticsInput,
-  DIAGNOSTICS_FIELDS,
+  DIAGNOSTICS_FIELDS, NotificationsDiag, NotifyChannelDiag,
   InspectLike, maskProxyUrl, scrubHome, tildify, VscodeConfigApi,
 } from '../src/diagnostics'
 import { setBundle, setLang, setLocale } from '../src/i18n'
@@ -432,10 +432,11 @@ test('the credentials line says where the Claude token came from and where the m
     assert.ok(lines.indexOf(l) < lines.indexOf('## Status line bridge'))
     return l
   }
-  // The allow-list names the field once, after the codex connection (1.12 A) — 25 fields with it.
+  // The allow-list names the field once, after the codex connection (1.12 A) — 25 fields with it; 1.12 P9 (pinned
+  // and changed): 26 with the notifications (C12), which the test below holds.
   assert.equal(DIAGNOSTICS_FIELDS.filter((f) => f === 'credentials').length, 1)
   assert.equal(DIAGNOSTICS_FIELDS.indexOf('credentials'), DIAGNOSTICS_FIELDS.indexOf('codexConnection') + 1)
-  assert.equal(DIAGNOSTICS_FIELDS.length, 25)
+  assert.equal(DIAGNOSTICS_FIELDS.length, 26)
   const cases: Array<[Parameters<typeof credentialsDiag>[0], string]> = [
     [{ source: 'keychain', platform: 'darwin', setting: true, consent: 'granted', gate: 'open' }, 'credentials — source keychain · keychain allowed'],
     [{ source: 'file', platform: 'darwin', setting: true, consent: 'granted', gate: 'untried' }, 'credentials — source file · keychain gateClosed'],
@@ -453,4 +454,72 @@ test('the credentials line says where the Claude token came from and where the m
   const l = line(hostile)
   assert.equal(l, 'credentials — source ? · keychain ?')
   assert.equal(buildDiagnostics(input({ credentials: hostile })).includes('synthetic'), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.12 C12 (§0a.11): the notifications lines
+// ---------------------------------------------------------------------------
+
+function channel(over: Partial<NotifyChannelDiag> & { channel: string }): NotifyChannelDiag {
+  return { format: null, listed: false, secret: 'notSet', consent: 'no', last: null, pausedUntil: null, ...over }
+}
+
+test('the notifications lines: per channel listed, secret set or not, the consent, the last result with its age, a 429\'s pause — then the listed events and the hour\'s count; never a host, an address, a chat id, a URL or a secret (1.12 C12, C14 item 9)', () => {
+  // The allow-list names the field once, after the credentials.
+  assert.equal(DIAGNOSTICS_FIELDS.filter((f) => f === 'notifications').length, 1)
+  assert.equal(DIAGNOSTICS_FIELDS.indexOf('notifications'), DIAGNOSTICS_FIELDS.indexOf('credentials') + 1)
+  const n: NotificationsDiag = {
+    channels: [
+      channel({ channel: 'webhook', format: 'slack', listed: true, secret: 'set', consent: 'yes',
+        last: { event: 'quotaThreshold', ageSec: 12 * 60, ok: true, kind: null, status: null } }),
+      channel({ channel: 'telegram' }),
+      channel({ channel: 'ntfy', listed: true, secret: 'set', consent: 'yes',
+        last: { event: 'test', ageSec: 3 * 3600, ok: false, kind: 'http', status: 401 } }),
+      channel({ channel: 'email', listed: true, secret: 'set', consent: 'hostChanged',
+        last: { event: 'agentDone', ageSec: 30, ok: false, kind: 'refused', status: 535 } }),
+    ],
+    events: ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'paceWarning'],
+    sentThisHour: 3,
+    hourlyCap: 20,
+  }
+  const out = buildDiagnostics(input({ notifications: n }))
+  const lines = out.split('\n')
+  const at = lines.indexOf('## Notifications')
+  assert.ok(at > lines.indexOf('## Status line bridge') && at < lines.indexOf('## Network setup'), 'the section is not between the bridge and the network')
+  assert.deepEqual(lines.slice(at + 1, at + 7), [
+    'webhook (slack) · listed yes · secret set · consent yes · last quotaThreshold 12 min ago ok',
+    'telegram · listed no · secret not set',
+    'ntfy · listed yes · secret set · consent yes · last test 3 h ago HTTP 401',
+    'email · listed yes · secret set · consent no (host changed) · last agentDone 30 s ago refused 535',
+    'events: agentWaiting, agentDone, quotaThreshold, quotaExhausted, paceWarning',
+    'sent this hour: 3 of 20',
+  ])
+  // A pause, a consent without a secret, other failure kinds; no events listed.
+  const paused = buildDiagnostics(input({ notifications: {
+    channels: [
+      channel({ channel: 'ntfy', listed: true, secret: 'set', consent: 'yes', pausedUntil: Date.UTC(2026, 8, 27, 14, 5),
+        last: { event: 'quotaExhausted', ageSec: 5, ok: false, kind: 'http', status: 429 } }),
+      channel({ channel: 'telegram', consent: 'yes', last: { event: 'test', ageSec: 1, ok: false, kind: 'timeout', status: null } }),
+      channel({ channel: 'email', secret: 'unknown', last: { event: 'test', ageSec: 1, ok: false, kind: 'refused', status: null } }),
+    ],
+    events: [], sentThisHour: 0, hourlyCap: 20,
+  } }))
+  assert.ok(paused.includes('ntfy · listed yes · secret set · consent yes · last quotaExhausted 5 s ago HTTP 429 · paused until 2026-09-27T14:05:00.000Z (429)'), paused)
+  assert.ok(paused.includes('telegram · listed no · secret not set · consent yes · last test 1 s ago timeout'))
+  // Neither a secret nor a consent: no consent part.
+  assert.ok(paused.includes('email · listed no · secret ? · last test 1 s ago refused\n'), paused)
+  assert.ok(paused.includes('events: none\nsent this hour: 0 of 20'))
+  // Absent or null: said so, in the section.
+  assert.ok(buildDiagnostics(input()).includes('## Notifications\nnotifications — not reported'))
+  assert.ok(buildDiagnostics(input({ notifications: null })).includes('## Notifications\nnotifications — not reported'))
+  // Held to its words: a host, an address, a chat id, a URL or a secret handed in by mistake is a `?`, never repeated.
+  const hostile = {
+    channels: [{ channel: 'hooks.example.invalid', format: 'https://hooks.example.invalid/synthetic-url-secret-123', listed: true, secret: 'set',
+      consent: 'yes', pausedUntil: null,
+      last: { event: 'synthetic-bot-token-456', ageSec: 1, ok: false, kind: 'synthetic-topic-789', status: 'synthetic-password-000' } }],
+    events: ['me@example.invalid', '-100123456789'], sentThisHour: 1, hourlyCap: 20,
+  } as unknown as NotificationsDiag
+  const bad = buildDiagnostics(input({ notifications: hostile }))
+  assert.ok(bad.includes('? (?) · listed yes · secret set · consent yes · last ? 1 s ago ?'), bad)
+  for (const leak of ['hooks.example.invalid', 'synthetic', 'me@example.invalid', '-100123456789']) assert.equal(bad.includes(leak), false, leak)
 })

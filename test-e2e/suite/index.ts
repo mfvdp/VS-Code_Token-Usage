@@ -340,6 +340,19 @@ check('the Prompts section is drawn, and without a Claude Code or Codex terminal
   assert.equal(tp.promptSendCheck('s-status'), 'notListed')
 })
 
+// 1.12 P9 (§3 C9 rule 7): the notification channels. The three commands are the workbench's (a real registry, not the
+// fake's), and `notifyCheck()` — the smoke test's alone, as `promptSendCheck`: only in the test mode — says whether a
+// channel is set up. A fresh profile has none: `noChannel`. Nothing is set up, stored or sent here, and no network is
+// touched.
+check('the notification commands are registered, and with no channel set up the check says so', async () => {
+  const registered = new Set(await vscode.commands.getCommands(true))
+  const ids = ['tokenPace.notifications.setUp', 'tokenPace.notifications.sendTest', 'tokenPace.notifications.remove']
+  const missing = ids.filter((id) => !registered.has(id))
+  assert.deepEqual(missing, [], `not registered: ${missing.join(', ')}`)
+  assert.equal(await extensionApi().notifyCheck(), 'noChannel')
+  console.log(`     notifications: ${ids.length} commands registered, no channel set up`)
+})
+
 // ---------------------------------------------------------------------------
 // run()
 // ---------------------------------------------------------------------------

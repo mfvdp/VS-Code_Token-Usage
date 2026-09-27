@@ -120,6 +120,8 @@ export interface FakeVscodeState {
   documents: Array<{ uri: string; text: string }>
   /** The options of every `showSaveDialog` call — what the dialog said before anything was written. */
   saveDialogs: Array<Record<string, unknown>>
+  /** 1.12 P9: the options of every `showInputBox` call, in order. */
+  inputBoxes: Array<Record<string, unknown>>
   /**
    * Every `workspace.fs.writeFile`, in order: the path and the text. Recorded in memory only —
    * nothing is written to disk from a test.
@@ -302,6 +304,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
   const quickPickControls: FakeQuickPick[] = []
   const documents: Array<{ uri: string; text: string }> = []
   const saveDialogs: Array<Record<string, unknown>> = []
+  const inputBoxes: Array<Record<string, unknown>> = []
   const writes: Array<{ path: string; text: string }> = []
   const answers: unknown[] = []
   const values = new Map<string, unknown>(Object.entries(settings))
@@ -531,6 +534,11 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
         const answer = nextAnswer()
         return Promise.resolve(typeof answer === 'function' ? (answer as (i: unknown[]) => unknown)(offered) : answer)
       },
+      // 1.12 P9: an input box — its options recorded (a secret's box is `password`), answered from the queue.
+      showInputBox: (options: unknown): Promise<unknown> => {
+        inputBoxes.push((options ?? {}) as Record<string, unknown>)
+        return Promise.resolve(nextAnswer())
+      },
       showSaveDialog: (options: unknown): Promise<unknown> => {
         saveDialogs.push((options ?? {}) as Record<string, unknown>)
         return Promise.resolve(nextAnswer())
@@ -606,6 +614,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
     quickPickControls,
     documents,
     saveDialogs,
+    inputBoxes,
     writes,
     answers,
     settings: values,
@@ -648,6 +657,7 @@ export function createFakeVscode(settings: Record<string, unknown> = {}): {
       quickPickControls.length = 0
       documents.length = 0
       saveDialogs.length = 0
+      inputBoxes.length = 0
       writes.length = 0
       api.env.remoteName = undefined
       answers.length = 0
@@ -790,9 +800,28 @@ export function installVscodeStub(fake: unknown): void {
 // Extension context
 // ---------------------------------------------------------------------------
 
+/**
+ * 1.12 P9: `vscode.SecretStorage` in memory — the map a test reads back, and every call in order (a test that
+ * asserts "no secret read" looks at `calls`).
+ */
+export function fakeSecrets(initial: Record<string, string> = {}): { secrets: Record<string, unknown>; store: Map<string, string>; calls: string[] } {
+  const store = new Map<string, string>(Object.entries(initial))
+  const calls: string[] = []
+  const secrets = {
+    get: (key: string): Promise<string | undefined> => { calls.push(`get:${key}`); return Promise.resolve(store.get(key)) },
+    store: (key: string, value: string): Promise<void> => { calls.push(`store:${key}`); store.set(key, value); return Promise.resolve() },
+    delete: (key: string): Promise<void> => { calls.push(`delete:${key}`); store.delete(key); return Promise.resolve() },
+    keys: (): Promise<string[]> => { calls.push('keys'); return Promise.resolve([...store.keys()]) },
+    onDidChange: (): { dispose(): void } => ({ dispose: () => undefined }),
+  }
+  return { secrets, store, calls }
+}
+
 export interface FakeExtensionContext {
   subscriptions: Array<{ dispose(): void }>
   globalState: FakeMemento
+  /** 1.12 P9: VS Code's secret storage — `fakeSecrets()`'s, empty unless a test hands one in. */
+  secrets: Record<string, unknown>
   workspaceState: FakeMemento
   globalStorageUri: { fsPath: string }
   storageUri: { fsPath: string }
@@ -807,10 +836,12 @@ export function createFakeContext(opts: {
   storage: string
   extensionPath: string
   globalState?: Map<string, unknown>
+  secrets?: Record<string, unknown>
 }): FakeExtensionContext {
   return {
     subscriptions: [],
     globalState: memento(opts.globalState ?? new Map<string, unknown>()),
+    secrets: opts.secrets ?? fakeSecrets().secrets,
     workspaceState: memento(),
     globalStorageUri: { fsPath: opts.storage },
     storageUri: { fsPath: opts.storage },

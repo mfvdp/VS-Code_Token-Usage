@@ -12,7 +12,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  bridgeBlocksDelete, deleteItems, deleteWarningExternal, formatBytes, hookMirrorNote, inventory, MementoLike,
+  bridgeBlocksDelete, deleteItems, deleteWarningExternal, formatBytes, hookMirrorNote, inventory, MementoLike, STORED_MEMENTO_KEYS,
   StoredPaths, storedFile, storedFiles,
 } from '../src/storage'
 import { scratchDir } from './fixtures/helpers'
@@ -59,8 +59,10 @@ test('the inventory names size and presence of every item', () => {
   const byKey = new Map(items.map((i) => [i.key, i]))
 
   // 1.8 P10 (§0a.7, pinned and changed): the keep-warm accounting, after the agent hook's mirror. 1.10 P3
-  // (§0a.1, pinned and changed): the prompt list after it.
-  assert.deepEqual(items.map((i) => i.key), ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'consent', 'alerts', 'ui'])
+  // (§0a.1, pinned and changed): the prompt list after it. 1.12 P9 (C9 rule 5, pinned and changed): the notification
+  // channels after the alert state.
+  assert.deepEqual(items.map((i) => i.key),
+    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'consent', 'alerts', 'notifications', 'ui'])
   assert.equal(byKey.get('state')!.present, true)
   assert.equal(byKey.get('state')!.bytes, 13)
   assert.equal(byKey.get('state')!.detail, 'oldest day 2026-05-01')
@@ -148,6 +150,30 @@ test('deleting the consent item clears every consent key, including the write co
   assert.equal(memento.store.has('tokenPace.ui'), false)
   // The install record is the only way back from an edited settings.json.
   assert.equal(memento.store.has('tokenPace.bridge'), true)
+})
+
+test('the notification channels are one item: the notifier\'s state and the channels\' consents, with its English log label — the network decisions and Reset Network Access Decision\'s keys do not hold them (1.12 C6 rule 3, C9 rule 5, §0a.11)', async () => {
+  assert.deepEqual(STORED_MEMENTO_KEYS.notifications, ['tokenPace.notify', 'tokenPace.notifyConsent'])
+  // A separate decision with its own command (C6 rule 3): the consent item does not take the channels' consents.
+  assert.equal(STORED_MEMENTO_KEYS.consent.includes('tokenPace.notifyConsent'), false)
+  // No secret key is known here: notifyHost.ts deletes the six after the same confirmation.
+  assert.equal(Object.values(STORED_MEMENTO_KEYS).flat().some((k) => k.startsWith('tokenPace.notify.')), false)
+  const dir = scratchDir('storage')
+  const memento = new FakeMemento()
+  memento.store.set('tokenPace.notify', { sent: { 'quotaThreshold:claude:session:300:1': 1 } })
+  memento.store.set('tokenPace.notifyConsent', { ntfy: { host: 'ntfy.example.invalid', at: 1 } })
+  memento.store.set('networkConsent', 'granted')
+  const item = inventory(pathsIn(dir), memento, { notifications: 'Channels set up: 1' }).find((i) => i.key === 'notifications')
+  assert.ok(item)
+  assert.equal(item.label, 'Notification channels')
+  assert.equal(item.present, true)
+  assert.equal(item.detail, 'Channels set up: 1')
+  const lines: string[] = []
+  assert.deepEqual(await deleteItems(['notifications'], pathsIn(dir), memento, (m) => lines.push(m)), { deleted: ['notifications'], failed: [] })
+  assert.equal(memento.store.has('tokenPace.notify'), false)
+  assert.equal(memento.store.has('tokenPace.notifyConsent'), false)
+  assert.equal(memento.store.get('networkConsent'), 'granted', 'another item was deleted with it')
+  assert.deepEqual(lines, ['Stored data removed: Notification channels'])
 })
 
 test('a file that cannot be removed is reported, not swallowed', async () => {
@@ -254,10 +280,11 @@ test('the shared quota cache is listed only when its paths are supplied', () => 
   assert.equal(item.bytes, 20)
   assert.ok(item.detail!.includes(codex), 'the picker line does not name both files')
   // It comes after the extension's own files and before the memento items. 1.10 P3 (§0a.1, pinned and
-  // changed): the prompt list is one of those files.
+  // changed): the prompt list is one of those files. 1.12 P9 (C9 rule 5, pinned and changed): the notification
+  // channels are a memento item.
   assert.deepEqual(
     items.map((i) => i.key),
-    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'externalQuota', 'consent', 'alerts', 'ui'],
+    ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'externalQuota', 'consent', 'alerts', 'notifications', 'ui'],
   )
 })
 

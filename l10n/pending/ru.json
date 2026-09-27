@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 77,
+  "applied": 119,
   "bundle": {
     "week to date": {
       "parts": [
@@ -253,6 +253,279 @@
       ],
       "state": "translate",
       "why": "the network consent’s Claude paragraph on macOS as n=20 added it, with one clause more: after which may ask you once it now says — choose \"Always Allow\" (was: which may ask you once), else from …), and the lines after it re-wrapped — \"Always Allow\" is macOS’s button: write macOS’s own label in your language if you know it, else keep the English between your quotation marks, as n=24 says — {0} is the item’s name (Claude Code-credentials, with a suffix where CLAUDE_CONFIG_DIR is set) and stays between your quotation marks, use Apple’s name for the Keychain in your language as macOS shows it, keep security as it stands, keep the URL, CLAUDE_CODE_OAUTH_TOKEN and ~/.claude/.credentials.json as they stand, and your 1.x sentence about the Claude Code client and the permanent 429, the hard wraps after each line with the two-space indent, as your 1.x Claude paragraph has them — 1.12 Review 2 F5"
+    },
+    "Which channel should Token Pace send notifications to?": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the placeholder of Set Up’s list of the nine channels (Webhook (JSON), Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, E-mail (SMTP)) — your word for notification from the category Notifications (n=40) — 1.12 C8, C13"
+    },
+    "Webhook (JSON)": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the first entry of that list: a webhook address of the reader’s own that takes Token Pace’s JSON — Webhook is the services’ own loan word in most languages (German keeps Webhook), JSON stays — 1.12 C8, C13"
+    },
+    "any https address that accepts JSON": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the description beside Webhook (JSON) in that list, lower case as a description — https is the scheme and stays in lower case, JSON stays — 1.12 C13"
+    },
+    "E-mail (SMTP)": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the last entry of that list: a message through the reader’s own mail server — e-mail as your language writes it, SMTP stays — 1.12 C8, C13"
+    },
+    "The webhook's address (it begins with https://). It is kept in VS Code's secret storage, never in settings.json.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the prompt of the box the reader pastes the webhook’s address into — the address of a Slack, Discord or Teams webhook is its credential, so it is kept as a secret — secret storage is VS Code’s SecretStorage — a description, not a product name (German: der geschützte Speicher von VS Code) — use one phrase for it in every key of this setup — keep https:// and settings.json as they stand, https:// before a space or a closing bracket, never before a letter, a hyphen or an ellipsis (the privacy scan reads that as an address) — 1.12 C7, C13"
+    },
+    "Name the header in tokenPace.notifications.webhook's secretHeader first, if your address expects a secret.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a second sentence after the address box’s prompt, shown for the plain webhook while no header is named: secretHeader is a field of the setting tokenPace.notifications.webhook, keep both names as they stand — header is an HTTP header (German: Kopfzeile), a secret a token or password (German: Geheimnis) — 1.12 C7, C13"
+    },
+    "The value of the header {0}. It is kept in VS Code's secret storage.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the prompt of the box for the webhook’s secret — {0} is the header’s name as the reader set it in secretHeader (X-Token), never translated — secret storage is VS Code’s SecretStorage — a description, not a product name (German: der geschützte Speicher von VS Code) — use one phrase for it in every key of this setup — 1.12 C7, C13"
+    },
+    "Leave empty to keep the stored one.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the placeholder of a secret’s box when one is stored already: an empty box keeps the stored secret (an address, a token, a topic or a password) — 1.12 C7, C13"
+    },
+    "Only an https:// address without a user name or password in it is accepted.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the validation message under the address box: http:// and an address with user:password@ in it are refused — keep https:// as it stands, before a space, never before a letter or a hyphen (the privacy scan reads that as an address — German: eine Adresse mit https://) — 1.12 C1, C13"
+    },
+    "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a setup check with the button Open Settings: the chat is the Telegram chat the bot sends to (the setting’s chatId), keep tokenPace.notifications.telegram as it stands — 1.12 C13"
+    },
+    "The Telegram bot's token (from @BotFather). It is kept in VS Code's secret storage.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the prompt of the box for the Telegram bot’s token — BotFather is Telegram’s bot that makes bots, keep @BotFather — secret storage is VS Code’s SecretStorage — a description, not a product name (German: der geschützte Speicher von VS Code) — use one phrase for it in every key of this setup — 1.12 C7, C13"
+    },
+    "Set the server in tokenPace.notifications.ntfy first.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a setup check with the button Open Settings: the https address of an ntfy server — keep tokenPace.notifications.ntfy as it stands — 1.12 C13"
+    },
+    "The ntfy topic. Anyone who knows it can read its messages, so it is kept in VS Code's secret storage.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the prompt of the box for the ntfy topic — ntfy is a service’s name written in lower case, never capitalised or translated, and topic is ntfy’s own word (German keeps Topic) — secret storage is VS Code’s SecretStorage — a description, not a product name (German: der geschützte Speicher von VS Code) — use one phrase for it in every key of this setup — 1.12 C7, C13"
+    },
+    "An access token for the ntfy server, if it needs one — leave empty otherwise.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the prompt of the box for an ntfy access token, which only a server with access control needs — access token as your 1.x word for it — 1.12 C7, C13"
+    },
+    "Set host, user, from and to in tokenPace.notifications.email first.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a setup check with the button Open Settings: host, user, from and to are the names of the setting’s fields and stay in English, as tokenPace.notifications.email does — 1.12 C13"
+    },
+    "The password or app password of {0} on the SMTP server. It is kept in VS Code's secret storage.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the prompt of the box for the mail password — {0} is the SMTP user name as the reader set it (often an address such as name@example.com), an app password is one a mail provider makes for one program (German: App-Passwort), SMTP stays — secret storage is VS Code’s SecretStorage — a description, not a product name (German: der geschützte Speicher von VS Code) — use one phrase for it in every key of this setup — 1.12 C7, C13"
+    },
+    "Allow Token Pace to send notifications to {0}?": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the consent’s title, a modal question asked after the address and secrets were typed and before anything is stored — {0} is the host the messages go to (hooks.slack.com, api.telegram.org, ntfy.sh or smtp.example.com:587) — your word for notification from the category Notifications (n=40) — 1.12 C6, C13"
+    },
+    "Token Pace will send a short message to {0} over an encrypted connection when one of the events you list in tokenPace.notifications.events happens — at most once per event and quota window, and at most one message of a kind every tokenPace.notifications.cooldownMinutes minutes.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the consent’s first paragraph — {0} is the host as in n=97 — keep tokenPace.notifications.events and tokenPace.notifications.cooldownMinutes as they stand, an encrypted connection is TLS, quota window as your 1.x word for it — 1.12 C6, C13"
+    },
+    "A message holds only the event, the program or provider, the quota window, percentages and times — never a prompt, a line of a transcript, a path, a project, a session's name or id, or anything Claude Code or Codex wrote.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the consent’s second paragraph: what a notification holds and never holds — keep Claude Code and Codex, prompt and session as your 1.x words for them — 1.12 C6, C13"
+    },
+    "The address and its secret stay in VS Code's secret storage on this machine, never in settings.json. Token Pace reads nothing back from {0} except whether it accepted the message.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the consent’s third paragraph — {0} is the host as in n=97 — secret storage is VS Code’s SecretStorage — a description, not a product name (German: der geschützte Speicher von VS Code) — use one phrase for it in every key of this setup — keep settings.json as it stands — 1.12 C6, C13"
+    },
+    "You can take this back with \"Token Pace: Remove a Notification Channel…\".": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the consent’s fourth paragraph: it quotes the command’s title as your translation of command.notifications.remove.title (n=80) writes it, with Token Pace: before it, inside your quotation marks — 1.12 C6, C13"
+    },
+    "Notifications: {0} is set up. To use it, add \"{1}\" to tokenPace.notifications.channels.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer after Set Up — {0} is the channel’s name as Set Up’s list shows it (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, or your Webhook (JSON) and E-mail (SMTP)) — the pronouns after it follow your word for channel, not the service’s name (German: Kanal, ihn, seine) — {1} is the channel’s id in the setting (webhook, telegram, ntfy or email), English, inside your quotation marks — keep tokenPace.notifications.channels as it stands, Notifications: as your category’s word — 1.12 C8, C13"
+    },
+    "Notifications: {0} is set up. To use it, add \"{1}\" to tokenPace.notifications.channels and set the format in tokenPace.notifications.webhook to \"{2}\".": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the same answer for a webhook whose format setting differs from the one just set up — {0} is the channel’s name as Set Up’s list shows it (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, or your Webhook (JSON) and E-mail (SMTP)) — the pronouns after it follow your word for channel, not the service’s name (German: Kanal, ihn, seine) — {1} as in n=102, {2} the webhook’s format (slack, discord, teams, mattermost, rocketChat or generic), English, inside your quotation marks — keep both settings’ names as they stand — 1.12 C8, C13"
+    },
+    "No notification channel is set up yet. Run \"Token Pace: Set Up a Notification Channel…\" first.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer of Send a Test Notification and Remove a Notification Channel with no channel set up: it quotes the command’s title as your translation of command.notifications.setUp.title (n=78) writes it, with Token Pace: before it, inside your quotation marks — 1.12 C8, C13"
+    },
+    "Which channel should get the test message?": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the placeholder of Send a Test Notification’s list of the channels that are set up — test message as n=74 has it — 1.12 C8"
+    },
+    "Notifications: the test message went to {0}.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer after a test message was accepted — {0} is the channel’s name as Set Up’s list shows it (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, or your Webhook (JSON) and E-mail (SMTP)) — the pronouns after it follow your word for channel, not the service’s name (German: Kanal, ihn, seine) — 1.12 C8, C13"
+    },
+    "Notifications: the test message to {0} failed ({1}).": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer after a test message failed — {0} is the channel’s name as Set Up’s list shows it (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, or your Webhook (JSON) and E-mail (SMTP)) — the pronouns after it follow your word for channel, not the service’s name (German: Kanal, ihn, seine) — {1} is one of the failure words n=112–117, or HTTP and a status code (HTTP 401), which stays as it stands — 1.12 C8, C13"
+    },
+    "Which channel should Token Pace remove?": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the placeholder of Remove a Notification Channel’s list of the channels that are set up — 1.12 C8"
+    },
+    "Remove {0}? Its secrets and your consent are deleted, and nothing is sent to it any more.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the modal question before a channel is removed — {0} is the channel’s name as Set Up’s list shows it (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, or your Webhook (JSON) and E-mail (SMTP)) — the pronouns after it follow your word for channel, not the service’s name (German: Kanal, ihn, seine) — 1.12 C8, C13"
+    },
+    "Remove": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the button of that question (n=109): the channel is removed when it is clicked — a verb as your other dialog buttons write one (German: Entfernen) — 1.12 C13"
+    },
+    "Notifications: {0} was removed — its secrets and its consent are gone.": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the answer after a channel was removed — {0} is the channel’s name as Set Up’s list shows it (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, or your Webhook (JSON) and E-mail (SMTP)) — the pronouns after it follow your word for channel, not the service’s name (German: Kanal, ihn, seine) — 1.12 C8, C13"
+    },
+    "timeout": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a failure word inside the brackets of n=107, in lower case in the middle of a sentence: the channel did not answer in time (German: Zeitüberschreitung) — 1.12 C13"
+    },
+    "TLS error": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a failure word inside the brackets of n=107: the encrypted connection or its certificate failed — TLS stays — 1.12 C13"
+    },
+    "network error": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a failure word inside the brackets of n=107, in lower case: the host could not be reached — 1.12 C13"
+    },
+    "refused by the server": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a failure word inside the brackets of n=107, in lower case: the server answered with a refusal (for mail its reply code) — 1.12 C13"
+    },
+    "incomplete setup": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a failure word inside the brackets of n=107, in lower case: a setting or a secret the channel needs is missing or invalid — 1.12 C13"
+    },
+    "its host changed since you allowed it": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "a failure word inside the brackets of n=107, in lower case: its is the channel — the host its settings name now is not the one the consent allowed, so nothing was sent — the pronouns follow your word for channel (German: sein Host … ihn) — 1.12 C6, C13"
+    },
+    "Channels set up: {0}": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the line of Clear Stored Data… under the item Notification channels (n=119) — {0} a count — channel as your word for a notification channel — 1.12 C9, C13"
+    },
+    "Notification channels": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the item of Clear Stored Data… that deletes the notification channels’ secrets, consents and state — a label like Consent decisions and Alert state beside it, notification as your category Notifications has it — 1.12 C9, C13"
     }
   },
   "nls": {
@@ -411,6 +684,18 @@
     "config.language.description": {
       "state": "review",
       "why": "the first sentence names the in-editor alerts beside the notifications and dialogs — the markdown document, alerts, notifications and dialogs (was: the markdown document, notifications and dialogs) — since 1.12 an alert is the popup inside VS Code and a notification a message sent outside it (the new category Notifications): write the word your Alerts category uses for the popup and your word for a notification as the new category has it, and keep the two different — the rest of the value is unchanged — 1.12 Review 2 F7"
+    },
+    "command.notifications.setUp.title": {
+      "state": "translate",
+      "why": "the title of the command that sets up a channel for notifications — a webhook of your own, Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy or e-mail — a notification is a message Token Pace sends outside VS Code, your word from the category Notifications (n=40), never your Alerts category’s word, and a channel is the place it goes to — keep the ellipsis as your other command titles write it — 1.12 C8, C13"
+    },
+    "command.notifications.sendTest.title": {
+      "state": "translate",
+      "why": "the title of the command that sends one test notification to a channel that is set up — your word for notification as n=40 has it — keep the ellipsis as your other command titles write it — 1.12 C8, C13"
+    },
+    "command.notifications.remove.title": {
+      "state": "translate",
+      "why": "the title of the command that removes a notification channel: its secrets and its consent are deleted — your words for notification channel as n=78 has them — keep the ellipsis as your other command titles write it — 1.12 C8, C13"
     }
   }
 }

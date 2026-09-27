@@ -144,8 +144,7 @@ dashboard goes into your user settings. The agent tree reads identifiers, names,
 only — an agent's type, model, ids and outcome, its effort, a rejected request's status, error kind
 and limit, its last tool's name, its tool errors, cache misses, Claude Code version, permission mode
 and compactions, the seven fields of a run record, and, with the opt-in hook, four keys of a hook
-call — each field named in [Privacy](docs/privacy.md); never a prompt, a description, a result or a
-path.
+call — each field named in [Privacy](docs/privacy.md); never a prompt, a description, a result or a path.
 
 No telemetry of any kind is collected, the webview loads no external resource, and
 `npm run check:privacy` fails the build on any `http(s)` literal outside a small allow-list, on
@@ -170,6 +169,7 @@ bundle that loads more than `child_process`, `fs` and `path`. The full account i
 | [Counting](docs/counting.md) | How the transcripts are read, what a lower bound is, retention and the snapshot |
 | [History and forecasts](docs/history.md) | The stored quota history, burn rate, ETA and the reset retrospective |
 | [Budgets and alerts](docs/budgets-alerts.md) | Limits you state, the thresholds that can fire, and why a budget is not a bill |
+| [Notifications](docs/notifications.md) | Messages to your phone, a chat or your mail: setting up a channel, the consent per host, the six events, what a message holds, no storm, where the secrets are kept |
 | [Sessions and projects](docs/sessions.md) | What `attribution` stores, and the salted hash that keeps a screen share safe |
 | [Export and diagnostics](docs/export.md) | The CSV and JSON schemas, the clipboard summary, the diagnostics report |
 | [If the bar says …](docs/troubleshooting.md) | Every problem state with its cause and the repair its click performs, the agent hook's, and why no keep-warm line was sent |

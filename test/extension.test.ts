@@ -30,7 +30,7 @@ import {
   snakeRateLimits, tmpDir, workflowResultLine, workflowToolUseLine, writeLeakyMirror,
 } from './fixtures/helpers'
 import {
-  createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, FakeVscodeState, installVscodeStub,
+  createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, fakeSecrets, FakeVscodeState, installVscodeStub,
 } from './helpers/fakeVscode'
 // Shapes and constants only: agentTree.ts imports nothing, so loading it early reads no setting.
 import { AgentTreeVm, EARLIER_KEY, emptyAgentTree, TreeNode } from '../src/agentTree'
@@ -250,6 +250,8 @@ interface ActivateOptions {
   trusted?: boolean
   /** 1.10 Review 2 F1: `context.extensionMode` (the fake context's default is Development, 2). */
   extensionMode?: number
+  /** 1.12 P9: the context's secret storage (`fakeSecrets()`), empty unless a test hands one in. */
+  secrets?: Record<string, unknown>
 }
 
 async function activateHost(
@@ -269,7 +271,7 @@ async function activateHost(
   if (opts.trusted === false) state.setTrusted(false)
   state.answers.push(...(opts.answers ?? []))
   const ext = require('../src/extension') as Extension
-  const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState })
+  const ctx = createFakeContext({ storage: fx.storage, extensionPath, globalState: opts.globalState, secrets: opts.secrets })
   if (opts.extensionMode !== undefined) ctx.extensionMode = opts.extensionMode
   LIVE.push(ctx)
   const coldLinesAtStart = coldStartLines(state)
@@ -4114,6 +4116,114 @@ test('Clear Stored Data lists keepwarm.json and deletes it alone (1.8 §0a.7)', 
   assert.equal(fs.existsSync(fx.stateFile), true, 'an item that was not picked was deleted')
   assert.match(state.logText(), /Stored data removed: Keep-warm requests \(keepwarm\.json\)/)
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
+})
+
+test('the notification channels in the host: the three commands with their manifest titles; Send a Test with none set up; Set Up of ntfy keeps the topic in the context\'s secret storage and the consent in globalState and writes no setting; the test and a threshold message go through the channels\' one fetch; Copy Diagnostics names no host or secret; Clear Stored Data deletes the six secrets; notifyCheck only in the test mode (1.12 C8, C9, C12, §0a.8)', async () => {
+  const TOPIC = 'synthetic-topic-789'
+  const SERVER = 'https://ntfy.synthetic-host.example'
+  const { secrets, store, calls } = fakeSecrets({ 'unrelated.secret': 'another extension\'s' })
+  const kept = new Map<string, unknown>()
+  const g = globalThis as unknown as { fetch: unknown }
+  const realFetch = g.fetch
+  const sent: Array<{ url: string; body: string }> = []
+  g.fetch = async (url: unknown, init: { body: string }): Promise<unknown> => {
+    sent.push({ url: String(url), body: init.body })
+    return { status: 200, headers: { get: () => null }, body: { cancel: () => Promise.resolve() } }
+  }
+  try {
+    const host = await activateHost(makeFixture(), REPO, {
+      globalState: kept, secrets, settings: { 'tokenPace.notifications.ntfy': { server: SERVER } },
+    })
+    await waitOwnColdStart(state)
+    // The three commands, once each, with their manifest titles (§0b.3).
+    const manifest = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } }
+    for (const [id, key] of [['tokenPace.notifications.setUp', 'setUp'], ['tokenPace.notifications.sendTest', 'sendTest'], ['tokenPace.notifications.remove', 'remove']]) {
+      assert.equal(state.registered.get(id), 1, id)
+      assert.deepEqual(manifest.contributes.commands.find((c) => c.command === id),
+        { command: id, title: `%command.notifications.${key}.title%`, category: '%command.category%' })
+    }
+    // Outside the test mode the API reads nothing.
+    assert.equal(await host.api.notifyCheck(), 'notListed')
+    // With no channel listed nothing read a secret: not the activation, not the evaluations after the quota update.
+    assert.deepEqual([...calls], [])
+    await state.execute('tokenPace.notifications.sendTest')
+    assert.equal(state.messages[state.messages.length - 1].text, 'No notification channel is set up yet. Run "Token Pace: Set Up a Notification Channel…" first.')
+
+    // Set Up: ntfy, the topic, no token, Allow.
+    const settingsBefore = JSON.stringify([...state.settings])
+    state.answers.push((items: Array<{ label: string }>) => items.find((i) => i.label === 'ntfy'), TOPIC, '', 'Allow', undefined)
+    await state.execute('tokenPace.notifications.setUp')
+    assert.deepEqual([...store.keys()].sort(), ['tokenPace.notify.ntfy.topic', 'unrelated.secret'])
+    assert.equal(store.get('tokenPace.notify.ntfy.topic'), TOPIC)
+    assert.deepEqual(Object.keys(kept.get('tokenPace.notifyConsent') as object), ['ntfy'])
+    assert.equal((kept.get('tokenPace.notifyConsent') as { ntfy: { host: string } }).ntfy.host, 'ntfy.synthetic-host.example')
+    assert.deepEqual(state.inputBoxes.map((b) => [b.password, b.ignoreFocusOut]), [[true, true], [true, true]])
+    const consent = state.messages.find((m) => m.text === 'Allow Token Pace to send notifications to ntfy.synthetic-host.example?')
+    assert.ok(consent, 'the consent does not name the host')
+    assert.equal(consent.options?.modal, true)
+    assert.equal(JSON.stringify([...state.settings]), settingsBefore, 'Set Up wrote a setting')
+    assert.equal(sent.length, 0)
+
+    // Send a Test: the one real fetch of the channels, to the server, the topic in the body.
+    state.answers.push((items: Array<{ label: string }>) => items.find((i) => i.label === 'ntfy'))
+    await state.execute('tokenPace.notifications.sendTest')
+    assert.equal(sent.length, 1)
+    assert.equal(sent[0].url, `${SERVER}/`)
+    assert.equal((JSON.parse(sent[0].body) as { topic: string }).topic, TOPIC)
+    assert.equal(state.messages[state.messages.length - 1].text, 'Notifications: the test message went to ntfy.')
+
+    // Listed, with a threshold under the cached 37 %: the settings change alone reaches the notifier, which sends once.
+    state.set('tokenPace.notifications.channels', ['ntfy'])
+    state.set('tokenPace.notifications.events', ['quotaThreshold'])
+    state.set('tokenPace.notifications.thresholds', { session: 30, weekly: 0 })
+    state.fireConfigChange(['tokenPace.notifications.channels', 'tokenPace.notifications.events', 'tokenPace.notifications.thresholds'])
+    await waitFor('the threshold message', () => sent.length === 2)
+    assert.equal(JSON.parse(sent[1].body).title, 'Token Pace: quota threshold reached')
+    assert.match(JSON.parse(sent[1].body).message as string, /^Claude, 5 h window: 37% used — resets at /)
+    await sleep(300)
+    assert.equal(sent.length, 2, 'the message went twice')
+
+    // Copy Diagnostics: the channel's line — no host, no topic, the settings' server as set.
+    await state.execute('tokenPace.copyDiagnostics')
+    const report = state.clipboard[state.clipboard.length - 1]
+    assert.match(report, /^ntfy · listed yes · secret set · consent yes · last quotaThreshold \d+ s ago ok$/m)
+    assert.match(report, /^telegram · listed no · secret not set$/m)
+    assert.match(report, /^sent this hour: 1 of 20$/m)
+    assert.ok(report.includes('tokenPace.notifications.ntfy = {"server":"set"}'))
+
+    // Clear Stored Data: the item with its count, then the six secrets, the consent and the state gone.
+    await state.execute('tokenPace.clearStoredData')
+    const offered = state.quickPicks[state.quickPicks.length - 1]
+    const item = offered.items.find((i) => i.key === 'notifications')
+    assert.ok(item, `the notification channels are not listed: ${offered.items.map((i) => i.label).join(' | ')}`)
+    assert.equal(item.label, 'Notification channels')
+    assert.equal(item.detail, 'Channels set up: 1')
+    const keys = offered.items.map((i) => i.key)
+    assert.equal(keys.indexOf('notifications'), keys.indexOf('alerts') + 1)
+    state.answers.push([item], 'Delete')
+    await state.execute('tokenPace.clearStoredData')
+    assert.deepEqual([...store.keys()], ['unrelated.secret'])
+    const deleted = calls.filter((c) => c.startsWith('delete:')).map((c) => c.slice('delete:'.length))
+    assert.deepEqual(deleted, ['tokenPace.notify.webhook.url', 'tokenPace.notify.webhook.secret', 'tokenPace.notify.telegram.botToken',
+      'tokenPace.notify.ntfy.topic', 'tokenPace.notify.ntfy.token', 'tokenPace.notify.email.password'])
+    assert.equal(kept.has('tokenPace.notifyConsent'), false)
+    assert.equal(kept.has('tokenPace.notify'), false)
+    assert.match(state.logText(), /Stored data removed: Notification channels/)
+
+    // The topic reached nothing but its requests: not the log, a message, the clipboard, globalState or the settings.
+    const outputs = [state.logText(), JSON.stringify(state.messages), state.clipboard.join('\n'), JSON.stringify([...kept]), JSON.stringify([...state.settings])]
+    for (const out of outputs) assert.equal(out.includes(TOPIC), false, 'the ntfy topic leaked')
+    // The server's host: in the consent's question (the reader's own setting, named for the decision) and nowhere in the log.
+    assert.equal(state.logText().includes('ntfy.synthetic-host.example'), false, 'the log names the channel\'s host')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+    // In the test mode (the smoke test's), the check answers.
+    const test = await activateHost(makeFixture(), REPO, { extensionMode: 3, secrets })
+    assert.equal(await test.api.notifyCheck(), 'noChannel')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    g.fetch = realFetch
+  }
 })
 
 test('1.8 review 3: keep-warm end to end in a fake HOME — switched on and allowed, armed on the bridge\'s reading, one line at zero into the Claude terminal, answered and counted, and nothing of the terminal in any output (§3 B2, §0a.6–§0a.8)', async () => {

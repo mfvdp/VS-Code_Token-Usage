@@ -51,7 +51,7 @@ import {
 } from './bridge'
 import { CacheWatchEntry, watchCaches } from './cacheWatch'
 import {
-  affects, Config, CONFIG_KEYS, languageSetting, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
+  affects, Config, CONFIG_KEYS, languageSetting, notifyOnly, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
 } from './config'
 import { KeepWarmConsent, NetworkConsent, WriteConsent } from './consent'
 import { KeychainGate, watchCredentials, watchKeychain } from './credentials'
@@ -69,6 +69,10 @@ import { availableLanguages, bundleFileName, readBundle } from './languageLoad'
 import { LanguageId, LanguageSetting, ResolvedLanguage, resolveLanguage, vscodeLanguageTag } from './languages'
 import { Lease } from './lease'
 import { NativeViews, registerNativeViews } from './nativeViews'
+import { NotifyInput } from './notify'
+import { httpsFetch } from './notifyChannels'
+import { notifyHostFor } from './notifyHost'
+import { smtpTransport } from './notifySmtp'
 import { effectivePace, paceVerdict, windowElapsed } from './pace'
 import { PROMPTS_MAX, PromptOp } from './prompts'
 import { PromptHostFacts, PROMPTS_FILE_NAME, PromptsHost, PromptStore } from './promptsHost'
@@ -193,6 +197,12 @@ export interface TokenPaceApi {
    * mode it answers `notListed` and reads nothing — neither prompts.json nor a terminal nor a session.
    */
   promptSendCheck(id: string): string
+  /**
+   * 1.12 C9 rule 7: whether a notification channel is set up — `noChannel`, or the set-up channels' ids joined by a
+   * comma. Only for the smoke test, as `promptSendCheck`: in every mode but `vscode.ExtensionMode.Test` it answers
+   * `notListed` and reads nothing. It sends nothing and returns no host, address or secret — a channel's id only.
+   */
+  notifyCheck(): Promise<string>
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<TokenPaceApi> {
@@ -398,6 +408,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     staleAfterMs: cfg.staleAfterMinutes * 60_000,
   })
 
+  // 1.12 C9 rule 1: the notifications' host — the context's secret storage and global state (notifyHost.ts is the
+  // one module that reads the former), the channels' one real fetch, the real SMTP transport, the log, the clock.
+  // Inert while tokenPace.notifications.channels is empty (rule 3): no timer, no read.
+  const notifier = notifyHostFor(context, {
+    fetch: httpsFetch,
+    smtp: smtpTransport(),
+    log: { info: (m) => log.info(m), debug: (m) => log.debug(m) },
+    clock: () => Date.now(),
+    config: () => cfg.notifications,
+    timeConfig: () => readTimeConfig(cfg),
+    input: () => notifyInput(),
+    version: __EXT_VERSION__,
+  })
+  context.subscriptions.push({ dispose: () => notifier.dispose() })
+
   let ui = restoreUi(context.globalState.get<unknown>(UI_KEY), cfg)
 
   // --------------------------------------------------------------- mutable state
@@ -537,6 +562,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       built = true
       // The poll follows the newest tree there is, before a view could fail on it.
       updateAgentPoll()
+      // 1.12 C9 rule 2: the whole model holds the main sessions' turns too — the notifier looks at them.
+      notifier.request()
       dashboard.update(latestVm)
       views.refreshMarkdown()
     } catch (err) {
@@ -558,6 +585,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     try {
       latestVm = { ...vm, agents: agentTreeFor({ agg, cfg, ui, now, hook: hookMirror.entries() }, 'page') }
       updateAgentPoll()
+      // 1.12 C9 rule 2: the main sessions or the hook's waits changed — the notifier looks at them.
+      notifier.request()
       dashboard.update(latestVm)
       views.refreshMarkdown()
     } catch (err) {
@@ -1237,7 +1266,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     } catch (err) {
       log.debug(`Agent hook: the mirror could not be read (${errorKind(err)})`)
     }
-    if (changed) rebuildAgents(Date.now())
+    if (changed) {
+      rebuildAgents(Date.now())
+      // 1.12 C9 rule 2: a wait began or ended — also before the first whole model, which `rebuildAgents` needs.
+      notifier.request()
+    }
   }
 
   function watchHookFile(): void {
@@ -1389,6 +1422,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         }
       })
       .catch((err) => log.warn(`Alert evaluation failed: ${err}`))
+    // 1.12 C9 rule 2: after the alerts, with the same readings and forecasts and the same leader check — after every
+    // quota update and on the ALERT_MS tick.
+    notifier.request()
+  }
+
+  /**
+   * 1.12 C9 rules 2 and 4 (§0a.5–§0a.7): what one notification evaluation reads, at the moment it runs — the readings
+   * and forecasts the alerts read, the main sessions and the agent hook's waits the Agents section reads, this
+   * window's focus, whether the transcripts are being read, the role, and the status bar's staleness rule.
+   */
+  function notifyInput(): NotifyInput {
+    return {
+      states: quotas,
+      forecasts,
+      mains: agg.mains(),
+      hooks: [...hookMirror.entries().values()],
+      focused: vscode.window.state?.focused === true,
+      settled: !(scanning || replayRun !== null),
+      role,
+      staleAfterMs: cfg.staleAfterMinutes * 60_000,
+    }
   }
 
   /**
@@ -1657,6 +1711,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         consent: consent.keychainState(),
         gate: keychainGate.state(),
       }),
+      // 1.12 C12 (§0a.11): the channels — listed, secret set or not, consent, the last result; never a host or a secret.
+      notifications: await notifier.diagnostics(cfg.notifications, Date.now()),
       consent: consent.state(),
       role,
       bridge: bridgeDiag(),
@@ -1746,6 +1802,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       hookMirror: hookMirrorNote(),
       // 1.10 §0a.1: how many prompts the file holds — only a count, and only of a file this build can read.
       ...promptsDetail(),
+      // 1.12 C9 rule 5: how many notification channels are set up — a count, never a channel's host or secret.
+      notifications: t('Channels set up: {0}', await notifier.setUpCount()),
     })
     const picks: Array<vscode.QuickPickItem & { key?: StoredKey }> = items.map((i) => ({
       label: i.label,
@@ -1799,6 +1857,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     if (result.deleted.includes('consent')) {
       quotaMgr.enforceGates()
       ensureCredentialsWatcher()
+    }
+    // 1.12 C9 rule 5 (§0a.11): the notification channels' secrets go with their consents and state, after the same
+    // confirmation.
+    if (result.deleted.includes('notifications')) {
+      try {
+        await notifier.forgetAll()
+      } catch (err) {
+        log.warn(`Stored data could not be removed: the notification channels' secrets (${errorKind(err)})`)
+      }
     }
     if (result.failed.length > 0) {
       void vscode.window.showWarningMessage(t('Token Pace: could not delete {0}.', result.failed.join(', ')))
@@ -1920,6 +1987,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     vscode.commands.registerCommand('tokenPace.copyAgentId', copyAgentId),
     vscode.commands.registerCommand('tokenPace.showAgentHookSetup', showAgentHookSetup),
     vscode.commands.registerCommand('tokenPace.clearStoredData', clearStoredData),
+    // 1.12 C8 (§0b.3): the notification channels — set up, test, remove. They read nothing of the workspace, so they
+    // run in Restricted Mode too (C8 rule 5); each reads the settings as they are now.
+    vscode.commands.registerCommand('tokenPace.notifications.setUp', () => { cfg = readConfig(); return notifier.setUp() }),
+    vscode.commands.registerCommand('tokenPace.notifications.sendTest', () => { cfg = readConfig(); return notifier.sendTest() }),
+    vscode.commands.registerCommand('tokenPace.notifications.remove', () => { cfg = readConfig(); return notifier.remove() }),
     vscode.commands.registerCommand('tokenPace.previewStatusBar', () => {
       statusBar.preview(readConfig())
       render(true)
@@ -1943,6 +2015,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!affects(e, ['tokenPace'])) return
+      // 1.12 C5 rule 3: a change of the notification settings alone is the notifier's — no frame, no quota options,
+      // no watcher; the next evaluation reads them.
+      if (notifyOnly(e)) {
+        cfg = readConfig()
+        notifier.request()
+        return
+      }
       const before = cfg
       cfg = readConfig()
 
@@ -2136,6 +2215,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     promptSendCheck: (id: string) => (context.extensionMode !== vscode.ExtensionMode.Test
       || !cfg.dashboard.sections.includes('prompts') ? 'notListed'
       : typeof id === 'string' ? prompts.check(id, promptFacts()) : 'notFound'),
+    // 1.12 C9 rule 7: the smoke test's question alone — outside the test mode nothing is read.
+    notifyCheck: () => (context.extensionMode !== vscode.ExtensionMode.Test ? Promise.resolve('notListed') : notifier.check()),
   }
 
   async function bootstrap(): Promise<void> {

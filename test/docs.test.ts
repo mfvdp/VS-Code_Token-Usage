@@ -144,6 +144,9 @@ const doc = {
   // 1.10 P3 (§3 A7): the prompts page — adding the section, the list, where the prompts are kept; P4 and P5 add
   // sending and editing.
   prompts: readDoc('docs/prompts.md'),
+  // 1.12 P9 (§3 C15): the notifications page — the channels, the consent per host, the events, the payload, no storm,
+  // the secrets; P11 completes it.
+  notifications: readDoc('docs/notifications.md'),
 } as const
 const DOCS = [README, STATES, ...Object.values(doc)].join('\n')
 
@@ -4113,4 +4116,88 @@ test('alerts and notifications are two words for two things on the pages: the Al
   assert.ok(privacy.includes('Never a prompt, a title of the Prompts section, a line of a transcript, a path, a folder or project name, a session\'s id or name, an agent\'s id or type, a plan name, an account, a token count or a cost'),
     'docs/privacy.md does not say what a notification never holds')
   assert.ok(privacy.includes('A session\'s id is kept in memory only, as the key of the notifier\'s own table'))
+})
+
+// ---------------------------------------------------------------------------
+// 1.12 P9 (§3 C15): the notifications page, the privacy page's secrets and hosts, the three commands' rows
+// ---------------------------------------------------------------------------
+
+test('docs/notifications.md says what the package does and never does, how each channel is set up, the consent per host, the six events with what each can know, what a message holds, no storm, where the secrets are kept, and the connections (1.12 C15, §0a.8–§0a.10, R2-D2, R2fix-D1, P7-D1, P8-D1)', () => {
+  const page = flatText(doc.notifications)
+  for (const head of ['## Setting up a channel', '## The consent — per channel, naming its host', '## The events', '## What a message holds',
+    '## No storm', '## Where the secrets are kept', '## Connections', '## The diagnostics and the log']) {
+    assert.ok(doc.notifications.includes(`\n${head}\n`), `docs/notifications.md has no section ${head}`)
+  }
+  for (const claim of [
+    // Nothing by default; alert ≠ notification (C0).
+    '**Nothing is sent by default.** While `tokenPace.notifications.channels` is empty — its default — Token Pace sends nothing, reads no secret and keeps no state for notifications.',
+    'It is not an **alert**: the alerts of `tokenPace.alerts.*` are VS Code\'s own popups inside the editor',
+    // The setup writes no setting (§0b.5); the nine entries; the untried channels (§5 step 4(i)).
+    'It writes no setting',
+    'built from the service\'s documentation, not tried by the author',
+    // The consent per host, and a changed host (C6).
+    '`Notify: ntfy skipped — its host changed since you allowed it; run Set Up again`',
+    '*Copy Diagnostics* says `consent no (host changed)`',
+    // R2-D2 and R2fix-D1: the agent events' limits.
+    'A wait for your answer counts only while the turn is open',
+    'counted from the newest prompt this window saw the turn answer',
+    'An interruption during a tool call, or an API error line after a tool call, cannot be told from a tool still running, so "at least" can include a pause after such a turn.',
+    'an `agentDone` or a `quotaReset` dropped by the cooldown or the cap is not sent later',
+    '**Without leader election** (`tokenPace.leaderElection: false`) every window evaluates: the state they share stops most repeats, but two windows may both send one.',
+    'Needs the agent hook (*Token Pace: Set Up the Agent Hook…*)',
+    'A reset seen later — VS Code was closed — is stale news and is not sent',
+    'The run-out time is an estimate and carries `~`',
+    // No storm (C4).
+    'At most 20 messages an hour, all events and channels together.',
+    'A failed send is not tried again',
+    // The secrets (§0a.8) and uninstalling.
+    '**Remove your channels before you uninstall Token Pace**',
+    'never in `settings.json` and never synced with Settings Sync',
+    // The connections (P8-D1, C1 rule 6).
+    'SMTP does not go through an HTTP proxy.',
+    'against Node\'s certificate store, not the operating system\'s, whatever `NODE_TLS_REJECT_UNAUTHORIZED` says',
+    '`EHLO` names `[127.0.0.1]`, never your machine\'s name',
+    '`@token-pace.invalid`',
+    'addresses must be ASCII',
+    'A refusal shows the server\'s reply code (`refused 535`), never its words',
+    'a redirect is never followed',
+    // The diagnostics (C12, Review 2 F1).
+    'It says which notification settings are set, never the host, the addresses, the chat id or the ntfy server',
+  ]) assert.ok(page.includes(claim), `docs/notifications.md does not say: ${claim}`)
+  // The sample JSON is the generic format's keys, in its order.
+  const sample = doc.notifications.slice(doc.notifications.indexOf('```json\n') + 8, doc.notifications.indexOf('\n```', doc.notifications.indexOf('```json\n')))
+  assert.deepEqual(Object.keys(JSON.parse(sample) as Record<string, unknown>), ['v', 'source', 'event', 'title', 'text', 'provider', 'program', 'window',
+    'windowKind', 'percent', 'resetsAt', 'eta', 'since', 'atLeastMinutes', 'wait', 'at'])
+  // The six events, each with its default.
+  for (const [event, on] of [['agentWaiting', 'on'], ['agentDone', 'on'], ['quotaThreshold', 'on'], ['quotaExhausted', 'on'], ['quotaReset', 'off'], ['paceWarning', 'on']]) {
+    assert.ok(doc.notifications.includes(`| \`${event}\` | ${on} |`), `docs/notifications.md has no row for ${event}`)
+  }
+  // The three commands, as the palette titles them.
+  for (const title of ['Set Up a Notification Channel…', 'Send a Test Notification…', 'Remove a Notification Channel…']) {
+    assert.ok(page.includes(title), `docs/notifications.md does not name ${title}`)
+    assert.ok(doc.commands.includes(`| \`Token Pace: ${title}\` |`), `docs/commands.md has no row for ${title}`)
+  }
+  // No address of a real service is written as a link a reader could mistake for Token Pace's own.
+  assert.equal(/https:\/\/(?:hooks\.slack\.com|discord(?:app)?\.com|api\.telegram\.org|ntfy\.sh)/.test(doc.notifications), false)
+})
+
+test('docs/privacy.md names the channels\' secrets under their six keys, the hosts and the consent that names them, the last result, and the scan\'s table of network sites (1.12 §0a.8, §0a.9, §0a.11, P7-D1)', () => {
+  const privacy = flatText(doc.privacy)
+  const { NOTIFY_SECRET_KEY_LIST } = require('../src/notifyHost') as typeof import('../src/notifyHost')
+  for (const key of NOTIFY_SECRET_KEY_LIST) assert.ok(privacy.includes(`\`${key}\``), `docs/privacy.md does not name the secret key ${key}`)
+  for (const claim of [
+    'kept only in VS Code\'s secret storage on this machine, under six fixed keys',
+    'the Telegram token in the path of Telegram\'s address, the webhook\'s secret and the ntfy token in a header, the SMTP password in the `AUTH` exchange after TLS stands',
+    'kept per channel in `tokenPace.notifyConsent` (`host` and `at`)',
+    'a channel whose host changed since you allowed it sends nothing until you run *Set Up* again',
+    '`last`: its time, the event, whether it was accepted and else the kind of failure with its status, and a 429\'s pause',
+    '*Copy Diagnostics* says which notification settings are set, never the host, the addresses, the chat id or the ntfy server',
+    'since 1.12 `api.telegram.org`, Telegram\'s Bot API',
+    '`NETWORK_SITES`',
+    'A `fetch(`, a socket or a network module anywhere else fails the build.',
+  ]) assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  // The CLI's table is what the page names: each row's file.
+  const { NETWORK_SITES } = require('../scripts/check-privacy.mjs') as { NETWORK_SITES: Array<{ file: string }> }
+  for (const row of NETWORK_SITES) assert.ok(privacy.includes(`\`${row.file}\``), `docs/privacy.md does not name ${row.file}`)
+  assert.ok(README.includes('| [Notifications](docs/notifications.md) |'), 'the README index has no row for the notifications page')
 })

@@ -252,6 +252,21 @@
         "command": "tokenPace.restoreDefaultPrompts",
         "title": "%command.restoreDefaultPrompts.title%",
         "category": "%command.category%"
+      },
+      {
+        "command": "tokenPace.notifications.setUp",
+        "title": "%command.notifications.setUp.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "tokenPace.notifications.sendTest",
+        "title": "%command.notifications.sendTest.title%",
+        "category": "%command.category%"
+      },
+      {
+        "command": "tokenPace.notifications.remove",
+        "title": "%command.notifications.remove.title%",
+        "category": "%command.category%"
       }
     ],
     "menus": {

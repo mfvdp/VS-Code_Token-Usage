@@ -180,10 +180,10 @@ const CREDENTIALS_PAGES = ['privacy', 'quotaSources']
 const CREDENTIALS_SOURCE = '~/.claude/.credentials.json or the Keychain item Claude Code-credentials'
 /**
  * 1.12 §0a.10: the notification payload — not a file of another program but what Token Pace builds and sends, held to
- * the same rule: of an event `payloadOf` reads these fields and no other. P9 adds the notifications page to its pages
- * once docs/notifications.md exists (1.10 P2's precedent for a page that comes later).
+ * the same rule: of an event `payloadOf` reads these fields and no other. 1.12 P9: held to the notifications page too,
+ * since docs/notifications.md exists (1.10 P2's precedent for a page that comes later).
  */
-const PAYLOAD_PAGES = ['privacy']
+const PAYLOAD_PAGES = ['privacy', 'notifications']
 const PAYLOAD_SOURCE = 'the notification payload'
 
 /** @type {ReadContractRow[]} */

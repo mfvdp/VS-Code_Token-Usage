@@ -414,9 +414,10 @@ test('the read contract holds for the shipped sources: every reader names exactl
   for (const row of contract.READ_CONTRACT) {
     // 1.12 P5 (§0a.4, pinned and changed): the credentials rows are held to the privacy page and the quota-sources page.
     // 1.12 P6 (§0a.10, pinned and changed): the payload's row to the privacy page — the notifications page joins it when
-    // it exists (P9 writes docs/notifications.md; 1.10 P2's precedent for the prompts page).
+    // it exists (P9 writes docs/notifications.md; 1.10 P2's precedent for the prompts page). 1.12 P9 (pinned and changed):
+    // it exists — the payload's row is held to both.
     assert.deepEqual(row.pages, promptCacheRow(row.what) ? ['privacy', 'promptCache'] : promptsRow(row.what) ? ['privacy', 'prompts']
-      : credentialsRow(row.what) ? ['privacy', 'quotaSources'] : payloadRow(row.what) ? ['privacy'] : undefined, row.what)
+      : credentialsRow(row.what) ? ['privacy', 'quotaSources'] : payloadRow(row.what) ? ['privacy', 'notifications'] : undefined, row.what)
     if (mirrorRow(row.what)) assert.equal(row.source, 'statusline-mirror.json', row.what)
   }
   // 1.8 P10 (§0a.6–§0a.8): the keep-warm host, reader by reader — the two shell-execution events, an

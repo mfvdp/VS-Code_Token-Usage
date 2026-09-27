@@ -142,6 +142,38 @@ export function credentialsDiag(s: {
   return { source: s.source, keychain }
 }
 
+/**
+ * 1.12 C12 (§0a.11): one notification channel as the diagnostics see it — its name, whether it is listed,
+ * whether its secret is set (never the secret), whether its consent stands, its last result and a 429's pause.
+ * Never a host, an address, a chat id, a URL, a header's value or a topic: notifyHost.ts hands in words, flags,
+ * a status code and times.
+ */
+export interface NotifyChannelDiag {
+  channel: string
+  /** The webhook's `format`; null for the other channels. */
+  format: string | null
+  listed: boolean
+  secret: 'set' | 'notSet' | 'unknown'
+  consent: 'yes' | 'no' | 'hostChanged'
+  last: { event: string; ageSec: number; ok: boolean; kind: string | null; status: number | null } | null
+  /** Until when a 429 pauses the channel (ms), null when it does not. */
+  pausedUntil: number | null
+}
+
+/** 1.12 C12: the `notifications` lines — one per channel, the listed events, and the hour's count against its cap. */
+export interface NotificationsDiag {
+  channels: NotifyChannelDiag[]
+  events: string[]
+  sentThisHour: number
+  hourlyCap: number
+}
+
+/** 1.12 C12: the words the notifications lines may print — anything else is printed as `?`. */
+const NOTIFY_CHANNEL_WORDS: readonly string[] = ['webhook', 'telegram', 'ntfy', 'email']
+const NOTIFY_FORMAT_WORDS: readonly string[] = ['generic', 'slack', 'discord', 'teams', 'mattermost', 'rocketChat']
+const NOTIFY_EVENT_WORDS: readonly string[] = ['agentWaiting', 'agentDone', 'quotaThreshold', 'quotaExhausted', 'quotaReset', 'paceWarning']
+const NOTIFY_FAILURE_WORDS: readonly string[] = ['http', 'timeout', 'tls', 'network', 'refused', 'config']
+
 export interface DiagnosticsInput {
   extVersion: string
   vscodeVersion: string
@@ -161,6 +193,8 @@ export interface DiagnosticsInput {
   codexConnection: CodexConnectionDiag | null
   /** 1.12 B7: the credentials line; null where the caller has none to report. */
   credentials: CredentialsDiag | null
+  /** 1.12 C12: the notifications lines; absent or null where the caller has none to report. */
+  notifications?: NotificationsDiag | null
   consent: string
   role: 'leader' | 'follower' | 'single'
   bridge: BridgeDiag | null
@@ -187,8 +221,8 @@ export interface DiagnosticsInput {
  */
 export const DIAGNOSTICS_FIELDS: readonly string[] = [
   'extVersion', 'vscodeVersion', 'platform', 'arch', 'node', 'remoteName', 'extensionKind',
-  'roots', 'fileCount', 'snapshot', 'retention', 'historySize', 'quota', 'codexConnection', 'credentials', 'consent', 'role',
-  'bridge', 'http', 'proxyEnv', 'settings', 'partialData', 'attribution', 'language', 'home',
+  'roots', 'fileCount', 'snapshot', 'retention', 'historySize', 'quota', 'codexConnection', 'credentials', 'notifications', 'consent',
+  'role', 'bridge', 'http', 'proxyEnv', 'settings', 'partialData', 'attribution', 'language', 'home',
 ]
 
 /** Setting keys whose values are paths and are therefore shortened. */
@@ -442,6 +476,52 @@ function credentialsLine(c: CredentialsDiag | null): string {
   return `credentials — source ${source} · keychain ${keychain}`
 }
 
+/** A whole HTTP or SMTP status for the report, or nothing. */
+function statusOf(v: unknown): string | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 100 && v <= 999 ? String(v) : null
+}
+
+/** 1.12 C12: a channel's last result — `ok`, `HTTP 401`, `refused 535`, `timeout` … */
+function resultWord(last: NonNullable<NotifyChannelDiag['last']>): string {
+  if (last.ok === true) return 'ok'
+  const kind = typeof last.kind === 'string' && NOTIFY_FAILURE_WORDS.includes(last.kind) ? last.kind : '?'
+  const status = statusOf(last.status)
+  if (kind === 'http') return status === null ? 'HTTP ?' : `HTTP ${status}`
+  if (kind === 'refused' && status !== null) return `refused ${status}`
+  return kind
+}
+
+/**
+ * 1.12 C12: `webhook (slack) · listed yes · secret set · consent yes · last quotaThreshold 12 min ago ok` — one line
+ * per channel; the consent where a secret or a consent exists; a pause as its end in ISO time. Then the listed events
+ * and the hour's count. Every word held to its list.
+ */
+function notificationsLines(n: NotificationsDiag | null | undefined): string[] {
+  if (n === null || n === undefined) return ['notifications — not reported']
+  const lines: string[] = []
+  for (const c of n.channels) {
+    const name = NOTIFY_CHANNEL_WORDS.includes(c.channel) ? c.channel : '?'
+    const format = c.format === null ? '' : ` (${NOTIFY_FORMAT_WORDS.includes(c.format) ? c.format : '?'})`
+    const parts = [`${name}${format}`, `listed ${c.listed === true ? 'yes' : 'no'}`,
+      `secret ${c.secret === 'set' ? 'set' : c.secret === 'notSet' ? 'not set' : '?'}`]
+    if (c.secret === 'set' || c.consent !== 'no') {
+      parts.push(`consent ${c.consent === 'yes' ? 'yes' : c.consent === 'hostChanged' ? 'no (host changed)' : 'no'}`)
+    }
+    if (c.last !== null) {
+      const event = c.last.event === 'test' || NOTIFY_EVENT_WORDS.includes(c.last.event) ? c.last.event : '?'
+      parts.push(`last ${event} ${ageLabel(c.last.ageSec)} ago ${resultWord(c.last)}`)
+    }
+    if (typeof c.pausedUntil === 'number' && Number.isFinite(c.pausedUntil)) {
+      parts.push(`paused until ${new Date(c.pausedUntil).toISOString()} (429)`)
+    }
+    lines.push(parts.join(' · '))
+  }
+  const events = n.events.filter((e) => NOTIFY_EVENT_WORDS.includes(e))
+  lines.push(`events: ${events.length > 0 ? events.join(', ') : 'none'}`)
+  lines.push(`sent this hour: ${countOf(n.sentThisHour)} of ${countOf(n.hourlyCap)}`)
+  return lines
+}
+
 function httpLine(name: string, s: HttpSetting): string {
   const value = s.value === undefined || s.value === '' ? '–' : JSON.stringify(s.value)
   return `${name.padEnd(22)}(${s.origin}) ${value}`
@@ -460,8 +540,8 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
 
   const {
     extVersion, vscodeVersion, platform, arch, node, remoteName, extensionKind, roots, fileCount,
-    snapshot, retention, historySize, quota, codexConnection, credentials, consent, role, bridge, http, proxyEnv, settings,
-    partialData, attribution, language, home,
+    snapshot, retention, historySize, quota, codexConnection, credentials, notifications, consent, role, bridge, http, proxyEnv,
+    settings, partialData, attribution, language, home,
   } = input
 
   const lines: string[] = []
@@ -538,6 +618,11 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     const shadow = bridge.shadowed ? ' · configuration-shadowed' : ''
     lines.push(`${bridge.installed ? 'installed' : 'not installed'} · ${age}${shadow}`)
   }
+  lines.push('')
+
+  // 1.12 C12 (§0a.11): the channels — listed, secret set or not, consent, the last result; never a host or a secret.
+  lines.push('## Notifications')
+  lines.push(...notificationsLines(notifications))
   lines.push('')
 
   lines.push('## Network setup')

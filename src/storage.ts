@@ -33,7 +33,8 @@ export interface MementoLike {
 }
 
 export type StoredKey =
-  'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'ui' | 'mirror' | 'hookMirror' | 'keepWarm' | 'prompts' | 'externalQuota'
+  'state' | 'quota' | 'history' | 'consent' | 'alerts' | 'notifications' | 'ui' | 'mirror' | 'hookMirror' | 'keepWarm' | 'prompts'
+  | 'externalQuota'
 
 /** Absolute paths of the extension's files in `globalStorage`. */
 export interface StoredPaths {
@@ -80,13 +81,22 @@ export interface StoredItem {
   present: boolean
 }
 
-/** Memento keys per item. Everything the user can delete is listed here, once. */
-export const STORED_MEMENTO_KEYS: Readonly<Record<'consent' | 'alerts' | 'ui', readonly string[]>> = {
+/** The items whose data is in the memento rather than in a file. */
+export type MementoItem = 'consent' | 'alerts' | 'notifications' | 'ui'
+
+/**
+ * Memento keys per item. Everything the user can delete is listed here, once. 1.12 C9 rule 5 (§0a.11): the
+ * notification channels are one item — the notifier's state and the channels' consents, and, deleted by the
+ * caller after the same confirmation, the channels' secrets in VS Code's secret storage (notifyHost.ts
+ * `forgetAll`; this module knows no secret key).
+ */
+export const STORED_MEMENTO_KEYS: Readonly<Record<MementoItem, readonly string[]>> = {
   // 1.8 §0b.3: the keep-warm consent is a decision like the other three, and goes with them. 1.12 B3 rule 4
   // (§0a.11): so is the Keychain consent.
   consent: ['networkConsent', 'networkConsentOffered', 'writeConsent.writeQuotaCache', 'writeConsent.statusLine', 'tokenPace.keepWarmConsent',
     'networkConsentKeychain'],
   alerts: ['tokenPace.alerts'],
+  notifications: ['tokenPace.notify', 'tokenPace.notifyConsent'],
   ui: ['tokenPace.ui'],
 }
 
@@ -95,7 +105,7 @@ export const STORED_MEMENTO_KEYS: Readonly<Record<'consent' | 'alerts' | 'ui', r
  *
  * Deliberately not the translated one: a log line is pasted into an issue, and a maintainer
  * has to be able to read it whatever language the editor runs in. `labelOf` carries the same
- * eleven names for the pick list, translated at call time.
+ * twelve names for the pick list, translated at call time.
  */
 const LOG_LABELS: Record<StoredKey, string> = {
   state: 'Token snapshot (state.json)',
@@ -108,6 +118,7 @@ const LOG_LABELS: Record<StoredKey, string> = {
   externalQuota: 'Shared quota cache (outside the extension storage)',
   consent: 'Consent decisions',
   alerts: 'Alert state',
+  notifications: 'Notification channels',
   ui: 'Dashboard view state',
 }
 
@@ -127,6 +138,7 @@ export function labelOf(key: StoredKey): string {
     case 'externalQuota': return t('Shared quota cache (outside the extension storage)')
     case 'consent': return t('Consent decisions')
     case 'alerts': return t('Alert state')
+    case 'notifications': return t('Notification channels')
     default: return t('Dashboard view state')
   }
 }
@@ -205,7 +217,9 @@ export function inventory(
   memento: MementoLike,
   details: Partial<Record<StoredKey, string>> = {},
 ): StoredItem[] {
-  const order: StoredKey[] = ['state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'externalQuota', 'consent', 'alerts', 'ui']
+  const order: StoredKey[] = [
+    'state', 'quota', 'history', 'mirror', 'hookMirror', 'keepWarm', 'prompts', 'externalQuota', 'consent', 'alerts', 'notifications', 'ui',
+  ]
   const out: StoredItem[] = []
   for (const key of order) {
     const files = storedFiles(key, paths)
@@ -214,7 +228,7 @@ export function inventory(
     if (files === null && key === 'externalQuota') continue
     const size = files !== null
       ? sizeOf(files)
-      : mementoSize(STORED_MEMENTO_KEYS[key as 'consent' | 'alerts' | 'ui'], memento)
+      : mementoSize(STORED_MEMENTO_KEYS[key as MementoItem], memento)
     out.push({ key, label: labelOf(key), bytes: size.bytes, detail: details[key] ?? null, present: size.present })
   }
   return out
@@ -286,7 +300,7 @@ export async function deleteItems(
       if (files !== null) {
         for (const file of files) unlinkWithTemps(file)
       } else {
-        for (const k of STORED_MEMENTO_KEYS[key as 'consent' | 'alerts' | 'ui']) {
+        for (const k of STORED_MEMENTO_KEYS[key as MementoItem]) {
           await memento.update(k, undefined)
         }
       }

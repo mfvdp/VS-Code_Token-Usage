@@ -214,3 +214,159 @@ test('the Codex paragraph follows the app-server mode — persistent says it kee
     setLocale(undefined)
   }
 })
+
+// ---------------------------------------------------------------------------
+// 1.12 B3, B4: the Keychain in the consent (B8 tests 3 and 4)
+// ---------------------------------------------------------------------------
+
+const DARWIN_CLAUDE = '• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n'
+  + '  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item "Claude Code-credentials" (read with\n'
+  + '  macOS\'s security tool, which may ask you once), else from ~/.claude/.credentials.json. The\n'
+  + '  request identifies itself as the Claude Code client, because the endpoint rate-limits other\n'
+  + '  callers into a permanent 429.'
+const LINUX_CLAUDE = '• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n'
+  + '  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json, else from the\n'
+  + '  Secret Service through secret-tool. The request identifies itself as the Claude Code client,\n'
+  + '  because the endpoint rate-limits other callers into a permanent 429.'
+const OTHER_CLAUDE = '• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n'
+  + '  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json. The request\n'
+  + '  identifies itself as the Claude Code client, because the endpoint rate-limits other callers\n'
+  + '  into a permanent 429.'
+
+function withConfigDir<T>(value: string | undefined, fn: () => T): T {
+  const before = process.env.CLAUDE_CONFIG_DIR
+  try {
+    if (value === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = value
+    return fn()
+  } finally {
+    if (before === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = before
+  }
+}
+
+test('the Claude paragraph names every source of the token on the platform: macOS the Keychain item before the file, Linux the Secret Service after it, elsewhere the variable and the file — with the item\'s suffix where CLAUDE_CONFIG_DIR is set, in English and German (1.12 B4, B8 test 4)', () => {
+  withConfigDir(undefined, () => {
+    const cases: Array<[NodeJS.Platform, boolean, string]> = [
+      ['darwin', true, DARWIN_CLAUDE], ['linux', true, LINUX_CLAUDE], ['win32', true, OTHER_CLAUDE],
+      ['darwin', false, OTHER_CLAUDE], ['linux', false, OTHER_CLAUDE], ['win32', false, OTHER_CLAUDE],
+    ]
+    for (const [platform, keychain, paragraph] of cases) {
+      const text = disclosure(30, 'persistent', platform, keychain)
+      assert.ok(text.includes(paragraph), `${platform}, keychain ${keychain}: ${text}`)
+      // Exactly one Claude paragraph, and the 1.x words are gone.
+      assert.equal(text.split('• Claude').length, 2)
+      assert.equal(text.includes('using the accessToken from'), false)
+    }
+    // The Codex paragraph by mode stays beside it (A6 test 10).
+    assert.ok(disclosure(30, 'oneShot', 'darwin', true).includes('is started and asked for its rate limits'))
+  })
+  withConfigDir('/home/synthetic/.claude-work', () => {
+    const text = disclosure(30, 'persistent', 'darwin', true)
+    assert.match(text, /the macOS Keychain item "Claude Code-credentials-[0-9a-f]{8}" \(read with/)
+  })
+  // The dialog reads the platform and the setting it is given, when it is shown.
+  let keychain = true
+  const consent = new NetworkConsent(new FakeMemento(), () => {}, { platform: 'darwin', keychain: () => keychain })
+  withConfigDir(undefined, () => {
+    assert.ok(consent.disclosure().includes(DARWIN_CLAUDE))
+    keychain = false
+    assert.ok(consent.disclosure().includes(OTHER_CLAUDE))
+  })
+
+  const de = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(de)
+    setLocale('de')
+    withConfigDir(undefined, () => {
+      assert.ok(disclosure(30, 'persistent', 'darwin', true).includes('• Claude — GET https://api.anthropic.com/api/oauth/usage mit dem Zugriffstoken von Claude Code: aus\n'
+        + '  CLAUDE_CODE_OAUTH_TOKEN, wenn gesetzt, sonst aus dem macOS-Schlüsselbundeintrag „Claude Code-credentials“ (gelesen mit\n'
+        + '  dem security-Werkzeug von macOS, das Sie einmal fragen kann), sonst aus\n'
+        + '  ~/.claude/.credentials.json. Die Anfrage weist sich als Claude-Code-Client aus, weil der Endpunkt\n'
+        + '  andere Aufrufer dauerhaft mit 429 abweist.'))
+      assert.ok(disclosure(30, 'persistent', 'linux', true).includes('sonst aus dem\n  Secret Service über secret-tool. Die Anfrage weist sich als Claude-Code-Client aus, weil der\n'))
+      assert.ok(disclosure(30, 'persistent', 'win32', true).includes('aus\n  CLAUDE_CODE_OAUTH_TOKEN, wenn gesetzt, sonst aus ~/.claude/.credentials.json. Die Anfrage weist\n'))
+      // 1.x's German second sentence, word for word, in each of the three.
+      for (const platform of ['darwin', 'linux', 'win32'] as const) {
+        const flat = disclosure(30, 'persistent', platform, true).replace(/\s+/g, ' ')
+        assert.ok(flat.includes('Die Anfrage weist sich als Claude-Code-Client aus, weil der Endpunkt andere Aufrufer dauerhaft mit 429 abweist.'), platform)
+      }
+    })
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+})
+
+test('the network dialog\'s Allow on macOS with the Keychain setting on records the Keychain consent too — one question naming both; elsewhere, or with the setting off, only its own; Never records neither Keychain answer (1.12 B3 rule 1)', async () => {
+  const cases: Array<[NodeJS.Platform, boolean, string | undefined]> = [
+    ['darwin', true, 'granted'], ['darwin', false, undefined], ['linux', true, undefined], ['win32', true, undefined],
+  ]
+  for (const [platform, keychain, expected] of cases) {
+    const memento = new FakeMemento()
+    const host = ui(['Allow'])
+    const consent = new NetworkConsent(memento, () => {}, { ui: host, platform, keychain: () => keychain })
+    assert.equal(await consent.request(), true)
+    assert.equal(memento.store.get('networkConsent'), 'granted')
+    assert.equal(memento.store.get('networkConsentKeychain'), expected, `${platform}, keychain ${keychain}`)
+    assert.equal(host.shown[0].detail.includes('macOS Keychain item'), expected === 'granted')
+  }
+  const memento = new FakeMemento()
+  await new NetworkConsent(memento, () => {}, { ui: ui(['Never']), platform: 'darwin' }).request()
+  assert.equal(memento.store.get('networkConsent'), 'denied')
+  assert.equal(memento.store.has('networkConsentKeychain'), false)
+})
+
+test('the Keychain question: its title and detail name the item and macOS\'s own question; Allow records granted, Never denied, Escape nothing; Reset Network Access Decision clears it with the network\'s answer (1.12 B3 rules 2 and 4, B8 test 3)', async () => {
+  const logs: string[] = []
+  const memento = new FakeMemento()
+  memento.store.set('networkConsent', 'granted')
+  const host = ui([undefined, 'Allow'])
+  const consent = new NetworkConsent(memento, (m) => logs.push(m), { ui: host, platform: 'darwin' })
+  assert.equal(consent.keychainState(), 'unasked')
+  // Escape: not now — nothing recorded, asked again next time.
+  assert.equal(await withConfigDir(undefined, () => consent.requestKeychain()), false)
+  assert.equal(consent.keychainState(), 'unasked')
+  assert.equal(memento.store.has('networkConsentKeychain'), false)
+  assert.equal(await withConfigDir(undefined, () => consent.requestKeychain()), true)
+  assert.equal(consent.keychainState(), 'granted')
+  // Granted: not asked again.
+  assert.equal(await consent.requestKeychain(), true)
+  assert.equal(host.shown.length, 2)
+  assert.equal(host.shown[0].message, 'Also read Claude Code\'s access token from the macOS Keychain?')
+  assert.deepEqual(host.shown[0].items, ['Allow', 'Never'])
+  assert.equal(host.shown[0].detail, 'Claude Code keeps its access token in the Keychain item "Claude Code-credentials". Token Pace reads it with macOS\'s security tool only to send it to https://api.anthropic.com/api/oauth/usage — the fetch you allowed — and never writes, refreshes or logs it.\n\nmacOS may ask whether "security" may use that item. Choose "Always Allow"; with "Allow" only, Token Pace reads it only when you fetch by hand.')
+  assert.ok(logs.includes('Keychain access allowed by the user.'))
+  // Never: denied, kept.
+  const other = new FakeMemento()
+  const no = new NetworkConsent(other, () => {}, { ui: ui(['Never']), platform: 'darwin' })
+  assert.equal(await no.requestKeychain(), false)
+  assert.equal(no.keychainState(), 'denied')
+  // Kept for good: asked again, the answer is the stored one, and no dialog is shown.
+  const shownBefore = host.shown.length
+  assert.equal(await new NetworkConsent(other, () => {}, { ui: host, platform: 'darwin' }).requestKeychain(), false)
+  assert.equal(host.shown.length, shownBefore)
+  // A value that is no answer reads as unasked.
+  other.store.set('networkConsentKeychain', 'yes')
+  assert.equal(no.keychainState(), 'unasked')
+  // The reset clears both answers.
+  await consent.reset()
+  assert.equal(consent.state(), 'unasked')
+  assert.equal(consent.keychainState(), 'unasked')
+  assert.equal(memento.store.has('networkConsentKeychain'), false)
+
+  // German: the title and the detail as §3 B6 has them.
+  const de = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(de)
+    setLocale('de')
+    const shown = ui([undefined])
+    await withConfigDir(undefined, () => new NetworkConsent(new FakeMemento(), () => {}, { ui: shown, platform: 'darwin' }).requestKeychain())
+    assert.equal(shown.shown[0].message, 'Das Zugriffstoken von Claude Code auch aus dem macOS-Schlüsselbund lesen?')
+    assert.equal(shown.shown[0].detail, 'Claude Code bewahrt sein Zugriffstoken im Schlüsselbundeintrag „Claude Code-credentials“ auf. Token Pace liest es mit dem security-Werkzeug von macOS nur, um es an https://api.anthropic.com/api/oauth/usage zu senden — den Abruf, den Sie erlaubt haben —, und schreibt, erneuert oder protokolliert es nie.\n\nmacOS fragt womöglich, ob „security“ diesen Eintrag verwenden darf. Wählen Sie „Immer erlauben“; mit „Erlauben“ allein liest Token Pace ihn nur, wenn Sie von Hand abrufen.')
+    assert.deepEqual(shown.shown[0].items, ['Erlauben', 'Nie'])
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
+})

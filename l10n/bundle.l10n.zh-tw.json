@@ -1230,7 +1230,6 @@
   "“Elapsed” is how much of the window’s own time has passed. Usage above it means you are ahead of the clock; the verdict names the difference in percent of the window.": "「已經過」是時段本身的時間已經過多少。用量高於此值表示超前時間；判定會以時段百分比列出兩者的差距。",
   "“Usage” = fresh input + cache write + output; cache reads are listed apart because they outnumber the rest by orders of magnitude.": "「用量」= 新輸入 + 快取寫入 + 輸出；快取讀取另外列出，因為其數量比其餘部分高出好幾個數量級。",
   "“Usage” is fresh input + cache write + output; cache reads are listed separately because they outweigh everything else by orders of magnitude.": "「用量」是新輸入 + 快取寫入 + 輸出；快取讀取另外列出，因為其數量比其他所有部分高出好幾個數量級。",
-  "• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.": "• Claude — GET https://api.anthropic.com/api/oauth/usage，使用\n  ~/.claude/.credentials.json 中的 accessToken。此要求會自我標示為 Claude Code 用戶端，\n  因為該端點會對其他呼叫者施加速率限制，使其永久收到 429。",
   "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": "• Codex — 會啟動本機的「codex app-server」並詢問其速率限制。此過程中\n  Token Pace 不會有任何流量離開這台電腦。",
   "… {0} more": "… 另外 {0} 個",
   "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ 表示下限：此時間跨度中最早的幾個小時已彙整為每日總計",

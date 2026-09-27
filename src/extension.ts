@@ -54,10 +54,10 @@ import {
   affects, Config, CONFIG_KEYS, languageSetting, readAlertConfig, readConfig, readPaceConfig, readTimeConfig,
 } from './config'
 import { KeepWarmConsent, NetworkConsent, WriteConsent } from './consent'
-import { watchCredentials } from './credentials'
+import { KeychainGate, watchCredentials, watchKeychain } from './credentials'
 import { DashboardProvider } from './dashboard'
 import {
-  buildDiagnostics, codexConnectionDiag, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
+  buildDiagnostics, codexConnectionDiag, collectHttpSettings, collectProxyEnv, collectSettings, credentialsDiag, DiagnosticsInput,
   HttpSetting, QuotaDiag, tildify,
 } from './diagnostics'
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
@@ -320,11 +320,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   const history = new QuotaHistory(paths.history, cfg.quotaHistoryDays)
   history.load()
 
+  // 1.12 B1: the platform the credentials cascade, the consent's Claude paragraph, the Keychain question and
+  // the Keychain watcher run for — read once here and handed down, never asked again at a call site.
+  const platform: NodeJS.Platform = process.platform
   const consent = new NetworkConsent(context.globalState, say, {
     intervalMinutes: () => readConfig().pollIntervalMinutes,
     // 1.12 A5: the Codex paragraph says whether the app-server keeps running (the configured mode).
     appServerMode: () => readConfig().codexAppServer.mode,
+    // 1.12 B4: the Claude paragraph names every source of the token on this platform.
+    platform,
+    keychain: () => readConfig().credentials.keychain,
   })
+  // 1.12 B2: this window's Keychain gate — no Keychain read from the background before a quiet one by hand.
+  const keychainGate = new KeychainGate(say)
   // A function, not a value: both paths follow `tokenPace.claudeQuotaFile` /
   // `tokenPace.codexQuotaFile`, so the dialog must read them when it is shown and
   // not keep whatever they were at activation.
@@ -445,6 +453,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       writeQuotaCache: c.writeQuotaCache && writeConsent.granted(),
       appServerMode: c.codexAppServer.mode,
       pollOnlyWhenFocused: c.pollOnlyWhenFocused,
+      // 1.12 B1–B3: the cascade's platform, the window's gate and the Keychain consent, read at every poll.
+      platform,
+      keychainGate,
+      keychainConsent: () => consent.keychainState(),
     }
   }
 
@@ -1131,6 +1143,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
   let hookWatchers: fs.FSWatcher[] = []
   let hookFileTimer: ReturnType<typeof setTimeout> | undefined
   let credentialsWatcher: { dispose(): void } | null = null
+  /** 1.12 B5 rule 2: the Keychain item's watcher (macOS, under the Keychain consent and the setting). */
+  let keychainWatcher: { dispose(): void } | null = null
   let sweepTimer: ReturnType<typeof setInterval> | undefined
   let followerTimer: ReturnType<typeof setTimeout> | undefined
   let quotaFileTimer: ReturnType<typeof setTimeout> | undefined
@@ -1237,17 +1251,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     })
   }
 
+  /**
+   * The sign-in watchers (1.12 B5): the credentials file by its size and mtime (since 1.0.0) and — on macOS,
+   * under the Keychain consent and `tokenPace.credentials.keychain` — the Keychain item by its modification
+   * date. On the leader only, in `poll` mode after consent; both stop when that ends. A change of either is a
+   * background fetch (`forcePoll` without a user action): the gate decides whether it may read the Keychain.
+   */
   function ensureCredentialsWatcher(): void {
     // Only ever touched in `poll` mode after consent — the file holds the access token.
     const wanted = role !== 'follower' && cfg.quotaSource === 'poll' && consent.granted()
+    const recheck = (): void => {
+      log.info('Claude credentials changed — re-checking the quota.')
+      quotaMgr.forcePoll(onQuotaUpdate)
+    }
     if (wanted && !credentialsWatcher) {
-      credentialsWatcher = watchCredentials(cfg.claudeDir[0] || undefined, () => {
-        log.info('Claude credentials changed — re-checking the quota.')
-        quotaMgr.forcePoll(onQuotaUpdate)
-      })
+      credentialsWatcher = watchCredentials(cfg.claudeDir[0] || undefined, recheck)
     } else if (!wanted && credentialsWatcher) {
       credentialsWatcher.dispose()
       credentialsWatcher = null
+    }
+    const keychainWanted = wanted && platform === 'darwin' && cfg.credentials.keychain && consent.keychainState() === 'granted'
+    if (keychainWanted && !keychainWatcher) {
+      keychainWatcher = watchKeychain(recheck, { platform })
+    } else if (!keychainWanted && keychainWatcher) {
+      keychainWatcher.dispose()
+      keychainWatcher = null
     }
   }
 
@@ -1425,7 +1453,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     cfg = readConfig()
     quotaMgr.setOptions(quotaOptions(cfg))
     ensureCredentialsWatcher()
-    quotaMgr.forcePoll(onQuotaUpdate)
+    // 1.12 B2 rule 2: the consent's *Allow* is a user action — the fetch it starts may open the Keychain.
+    quotaMgr.forcePoll(onQuotaUpdate, { userAction: true })
   }
 
   async function fetchNow(): Promise<void> {
@@ -1445,6 +1474,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         return
       }
     }
+    // 1.12 B3 rule 2: a reader who allowed fetching before 1.12 is asked once more — here, inside the one
+    // command the reader runs by hand, never unprompted — whether the Keychain may be read too. Escape asks
+    // again next time; *Never* is kept, and the variable and the file still count.
+    if (platform === 'darwin' && cfg.credentials.keychain && quotaMgr.blocked() !== 'mode' && consent.granted()
+      && consent.keychainState() === 'unasked') {
+      await consent.requestKeychain()
+      if (disposed) return
+    }
+    // A consent just given starts the sign-in watchers (the leader's; a follower's lease is taken below).
+    ensureCredentialsWatcher()
     if (lease && role === 'follower') {
       if (lease.tryAcquire()) {
         log.info('Lease taken over for a manual fetch.')
@@ -1454,7 +1493,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         log.info('Another window holds the lease — fetching once anyway on explicit request.')
       }
     }
-    quotaMgr.forcePoll(onQuotaUpdate)
+    // 1.12 B2 rule 2: *Fetch Quota Now* is a user action — its Claude read may open the Keychain.
+    quotaMgr.forcePoll(onQuotaUpdate, { userAction: true })
   }
 
   // --------------------------------------------------------------- first run / remote
@@ -1609,6 +1649,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       quota,
       // 1.12 A (§0a.11): which Codex mode is live, and where the standing connection is.
       codexConnection: codexConnectionDiag(quotaMgr.appServerStatus(), Date.now()),
+      // 1.12 B7 (§0a.11): where the token came from and where the Keychain stands — names, never the token.
+      credentials: credentialsDiag({
+        source: quotaMgr.lastCredentialsFrom(),
+        platform,
+        setting: cfg.credentials.keychain,
+        consent: consent.keychainState(),
+        gate: keychainGate.state(),
+      }),
       consent: consent.state(),
       role,
       bridge: bridgeDiag(),
@@ -1746,6 +1794,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     // 1.10 §0a.1: the list is the three shipped prompts again.
     if (result.deleted.includes('prompts')) prompts.forget()
     if (result.deleted.includes('ui')) ui = defaultUiState(cfg)
+    // 1.12 B3 rule 4, B5 rule 4: the decisions gone, the gates close now, as after *Reset Network Access
+    // Decision* — the standing child ends, the Keychain gate is untried again and both sign-in watchers stop.
+    if (result.deleted.includes('consent')) {
+      quotaMgr.enforceGates()
+      ensureCredentialsWatcher()
+    }
     if (result.failed.length > 0) {
       void vscode.window.showWarningMessage(t('Token Pace: could not delete {0}.', result.failed.join(', ')))
     }
@@ -1848,7 +1902,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     vscode.commands.registerCommand('tokenPace.refreshQuota', fetchNow),
     vscode.commands.registerCommand('tokenPace.resetNetworkConsent', async () => {
       await consent.reset()
-      // 1.12 A4 rule 1: the consent gone, a standing app-server child ends now, not at the next tick.
+      // 1.12 A4 rule 1: the consent gone, a standing app-server child ends now, not at the next tick; 1.12 B2:
+      // the Keychain gate goes back to untried.
       quotaMgr.enforceGates()
       ensureCredentialsWatcher()
       void vscode.window.showInformationMessage(
@@ -2035,6 +2090,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       closeAll(quotaWatchers)
       credentialsWatcher?.dispose()
       credentialsWatcher = null
+      keychainWatcher?.dispose()
+      keychainWatcher = null
       try { lease?.release() } catch { /* the record expires on its own */ }
       quotaMgr.dispose()
       // 1.6 R3: a cold scan still reading stops here; `coldScan` sees `disposed` and falls back

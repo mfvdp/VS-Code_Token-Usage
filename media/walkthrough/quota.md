@@ -26,9 +26,10 @@ Token counts are read from local transcript files and need no network access. Qu
 
 If you allow it, then at most every 30 minutes (tokenPace.pollIntervalMinutes):
 
-• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from
-  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,
-  because the endpoint rate-limits other callers into a permanent 429.
+• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code's access token: from
+  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json. The request
+  identifies itself as the Claude Code client, because the endpoint rate-limits other callers
+  into a permanent 429.
 • Codex — the local "codex app-server" is started, kept running while this window fetches, and
   asked for its rate limits. No traffic of ours leaves the machine for this.
 
@@ -42,6 +43,11 @@ no usage data is collected by this extension.
 
 You can change this later with "Token Pace: Reset Network Access Decision".
 ```
+
+The Claude line is the one Windows shows. With `tokenPace.credentials.keychain` on — the default —
+it names one more place on macOS and on Linux: on macOS the Keychain item `Claude Code-credentials`,
+read before the file with macOS's `security` tool, which may ask you once; on Linux the Secret
+Service through `secret-tool`, after the file.
 
 The interval in the first line is your `tokenPace.pollIntervalMinutes`; with
 `tokenPace.codexAppServer.mode: oneShot` the Codex line says the app-server is started for each

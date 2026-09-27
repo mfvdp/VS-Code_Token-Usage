@@ -99,7 +99,7 @@ power-user settings sit at the end of their group.
 | `codexBinary` | `""` | Path to `codex`; empty = `CODEX_CLI_PATH`, then `PATH`, then the bundled IDE binary. Machine-scoped on purpose |
 | `userAgent` | `claudeCode` | `claudeCode` (`claude-code/<version>`: what `claude --version` prints — on Windows only from a `claude.exe` on the `PATH` —, else the version the newest Claude Code session wrote into its transcript, else a fixed one) or `honest`. **`honest` gets rate-limited into a permanent 429.** Machine-scoped |
 | `codexAppServer.mode` | `persistent` | `persistent` (one long-running `codex app-server` per editor, kept by the fetching window: every fetch asks it over the same connection, and its rate-limit pushes are taken as they arrive — [The Codex app-server](quota-sources.md#the-codex-app-server)) or `oneShot` (a child per fetch, ended once it answered) |
-| `credentials.keychain` | `true` | Also look in the OS keychain when the credentials file has no token. Machine-scoped |
+| `credentials.keychain` | `true` | On macOS look for the token in the Keychain item Claude Code keeps it in — before `~/.claude/.credentials.json`, only after you allowed the Keychain too, and in a window first only when you fetch by hand; on Linux after that file, with `secret-tool` ([Credentials](quota-sources.md#what-the-fetch-does)). Machine-scoped |
 | `pollOnlyWhenFocused` | `true` | Skip scheduled fetches after ten minutes in the background — the attempt then reads `waiting for focus`. A manual fetch always runs |
 | `leaderElection` | `true` | With several windows open, let one do the fetching and have the others follow its files |
 

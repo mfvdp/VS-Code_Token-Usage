@@ -108,6 +108,40 @@ export function codexConnectionDiag(
   }
 }
 
+/**
+ * 1.12 B7 (§0a.11): where the Claude token came from and where the macOS Keychain stands — a source's name and
+ * a state word, never a token, an account or an item's attribute. `source` is null before a Claude poll of
+ * this window, `none` when the last one found no token.
+ */
+export interface CredentialsDiag {
+  source: 'env' | 'keychain' | 'file' | 'secretTool' | 'none' | null
+  keychain: 'off' | 'notDarwin' | 'unasked' | 'denied' | 'gateClosed' | 'allowed'
+}
+
+/** 1.12 B7: the words the credentials line may print — anything else is printed as `?`. */
+const CREDENTIAL_SOURCES: readonly string[] = ['env', 'keychain', 'file', 'secretTool', 'none']
+const KEYCHAIN_STATES: readonly string[] = ['off', 'notDarwin', 'unasked', 'denied', 'gateClosed', 'allowed']
+
+/**
+ * 1.12 B7: the Keychain's state for the line — `off` with `tokenPace.credentials.keychain` off, `notDarwin`
+ * elsewhere than macOS, then the Keychain consent (`unasked`, `denied`), then the window's gate: `allowed`
+ * while background reads may read it, `gateClosed` while only a fetch by hand may (untried or closed).
+ */
+export function credentialsDiag(s: {
+  source: CredentialsDiag['source']
+  platform: string
+  setting: boolean
+  consent: 'granted' | 'denied' | 'unasked'
+  gate: 'untried' | 'open' | 'closed'
+}): CredentialsDiag {
+  const keychain: CredentialsDiag['keychain'] = !s.setting ? 'off'
+    : s.platform !== 'darwin' ? 'notDarwin'
+      : s.consent === 'unasked' ? 'unasked'
+        : s.consent === 'denied' ? 'denied'
+          : s.gate === 'open' ? 'allowed' : 'gateClosed'
+  return { source: s.source, keychain }
+}
+
 export interface DiagnosticsInput {
   extVersion: string
   vscodeVersion: string
@@ -125,6 +159,8 @@ export interface DiagnosticsInput {
   quota: QuotaDiag[]
   /** 1.12 A: the Codex app-server line; null where the caller has none to report. */
   codexConnection: CodexConnectionDiag | null
+  /** 1.12 B7: the credentials line; null where the caller has none to report. */
+  credentials: CredentialsDiag | null
   consent: string
   role: 'leader' | 'follower' | 'single'
   bridge: BridgeDiag | null
@@ -151,7 +187,7 @@ export interface DiagnosticsInput {
  */
 export const DIAGNOSTICS_FIELDS: readonly string[] = [
   'extVersion', 'vscodeVersion', 'platform', 'arch', 'node', 'remoteName', 'extensionKind',
-  'roots', 'fileCount', 'snapshot', 'retention', 'historySize', 'quota', 'codexConnection', 'consent', 'role',
+  'roots', 'fileCount', 'snapshot', 'retention', 'historySize', 'quota', 'codexConnection', 'credentials', 'consent', 'role',
   'bridge', 'http', 'proxyEnv', 'settings', 'partialData', 'attribution', 'language', 'home',
 ]
 
@@ -363,6 +399,17 @@ function codexConnectionLine(c: CodexConnectionDiag | null): string {
     + ` · pushes ${countOf(c.pushes)} · last push ${last}`
 }
 
+/**
+ * 1.12 B7: `credentials — source keychain · keychain allowed`. Both held to their words; the source `–` before
+ * a Claude poll of this window.
+ */
+function credentialsLine(c: CredentialsDiag | null): string {
+  if (c === null) return 'credentials — not reported'
+  const source = c.source === null ? '–' : CREDENTIAL_SOURCES.includes(c.source) ? c.source : '?'
+  const keychain = KEYCHAIN_STATES.includes(c.keychain) ? c.keychain : '?'
+  return `credentials — source ${source} · keychain ${keychain}`
+}
+
 function httpLine(name: string, s: HttpSetting): string {
   const value = s.value === undefined || s.value === '' ? '–' : JSON.stringify(s.value)
   return `${name.padEnd(22)}(${s.origin}) ${value}`
@@ -381,7 +428,7 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
 
   const {
     extVersion, vscodeVersion, platform, arch, node, remoteName, extensionKind, roots, fileCount,
-    snapshot, retention, historySize, quota, codexConnection, consent, role, bridge, http, proxyEnv, settings,
+    snapshot, retention, historySize, quota, codexConnection, credentials, consent, role, bridge, http, proxyEnv, settings,
     partialData, attribution, language, home,
   } = input
 
@@ -445,6 +492,8 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
   }
   // 1.12 A (§0a.11): which Codex mode is live — "the diagnostics line says which mode is live".
   lines.push(codexConnectionLine(codexConnection))
+  // 1.12 B7 (§0a.11): where the Claude token came from — a source's name, never the token.
+  lines.push(credentialsLine(credentials))
   lines.push('')
 
   lines.push('## Status line bridge')

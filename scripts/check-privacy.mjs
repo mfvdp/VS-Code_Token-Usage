@@ -165,6 +165,10 @@ const MIRROR_PAGES = ['privacy', 'promptCache']
 const KEEPWARM_PAGES = ['privacy', 'promptCache']
 /** 1.10 §0a.1, §0a.3: the pages a row of the prompt tool is held to. */
 const PROMPTS_PAGES = ['privacy', 'prompts']
+/** 1.12 §0a.4: the pages a row of the credentials document is held to. */
+const CREDENTIALS_PAGES = ['privacy', 'quotaSources']
+/** 1.12 §0a.4: the credentials document's two places — the file and, on macOS, the Keychain item holding the same JSON. */
+const CREDENTIALS_SOURCE = '~/.claude/.credentials.json or the Keychain item Claude Code-credentials'
 
 /** @type {ReadContractRow[]} */
 export const READ_CONTRACT = [
@@ -349,6 +353,13 @@ export const READ_CONTRACT = [
     fields: ['v', 'prompts'], pages: PROMPTS_PAGES },
   { what: 'prompts: an entry of the list', source: 'prompts.json', file: 'src/prompts.ts', kind: 'fields', body: 'export function cleanPromptsFile(', variable: 'e',
     fields: ['id', 'title', 'text'], pages: PROMPTS_PAGES },
+  // 1.12 §0a.4 (P5): the credentials document — the file, or the Keychain item that holds the same JSON on macOS
+  // (the Linux Secret Service's too) — read by one parser: of the document `claudeAiOauth`, of that the
+  // `accessToken` and its `expiresAt`. Never `refreshToken`, `scopes`, `subscriptionType` or any other field.
+  { what: 'the credentials document', source: CREDENTIALS_SOURCE, file: 'src/credentials.ts', kind: 'fields', body: 'function parseCredentials(', variable: 'd',
+    fields: ['claudeAiOauth'], pages: CREDENTIALS_PAGES },
+  { what: 'the credentials document\'s token', source: CREDENTIALS_SOURCE, file: 'src/credentials.ts', kind: 'fields', body: 'function parseCredentials(', variable: 'oauth',
+    fields: ['accessToken', 'expiresAt'], pages: CREDENTIALS_PAGES },
 ]
 
 /**

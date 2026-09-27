@@ -129,6 +129,8 @@ test('deleting the consent item clears every consent key, including the write co
   memento.store.set('writeConsent.writeQuotaCache', 'granted')
   memento.store.set('writeConsent.statusLine', 'denied')
   memento.store.set('tokenPace.keepWarmConsent', 'granted')
+  // 1.12 B3 rule 4 (§0a.11): the Keychain consent is one of the decisions.
+  memento.store.set('networkConsentKeychain', 'granted')
   memento.store.set('tokenPace.alerts', { entries: {} })
   memento.store.set('tokenPace.ui', { range: '7d' })
   memento.store.set('tokenPace.bridge', { installedCommand: 'x' })
@@ -141,6 +143,7 @@ test('deleting the consent item clears every consent key, including the write co
   assert.equal(memento.store.has('writeConsent.statusLine'), false)
   // 1.8 §0b.3: the keep-warm consent is a decision like the others, and goes with them.
   assert.equal(memento.store.has('tokenPace.keepWarmConsent'), false)
+  assert.equal(memento.store.has('networkConsentKeychain'), false)
   assert.equal(memento.store.has('tokenPace.alerts'), false)
   assert.equal(memento.store.has('tokenPace.ui'), false)
   // The install record is the only way back from an edited settings.json.

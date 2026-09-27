@@ -8,6 +8,7 @@ import * as path from 'node:path'
 import { test } from 'node:test'
 import { sanitize } from '../src/config'
 import { Aggregator } from '../src/agg'
+import { KeychainGate } from '../src/credentials'
 import { CLAUDE_VERSION_FALLBACK, PollOptions, PollResult, userAgentFor } from '../src/poller'
 import {
   CACHE_READING_KEEP_MS, CACHE_READINGS_MAX, HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
@@ -1470,4 +1471,133 @@ test('the version reaches the user agent from a main session, never from an agen
   assert.equal(userAgentFor(h.claudePolls()[0]), 'claude-code/2.1.257')
   // Nothing else of any transcript is in the request's options.
   assert.equal(/synthetic|rm|2\.1\.300/.test(JSON.stringify([...live.claudePolls(), ...h.claudePolls()])), false)
+})
+
+// ---------------------------------------------------------------------------
+// 1.12 B2: the occasion of every poll — the table the Keychain gate rests on
+// ---------------------------------------------------------------------------
+
+test('a fetch by hand is a user action, every other poll a background one: the timer, a plain forcePoll (the watchers), the reset re-poll; the gate, the consent and the platform travel with each (1.12 B2 rule 2, B8)', async () => {
+  const gate = new KeychainGate()
+  const h = harness({ platform: 'darwin', keychainGate: gate, keychainConsent: () => 'unasked', keychain: true })
+  // By source: Claude's poll asks for the CLI's version first, so Codex's may land before it.
+  const occasions = (): Array<[Source, string | undefined]> => h.polls.map((p): [Source, string | undefined] => [p.source, p.opts.occasion])
+    .sort((a, b) => a[0].localeCompare(b[0]))
+  // The timer.
+  h.mgr.tick(() => undefined)
+  await flush()
+  assert.deepEqual(occasions(), [['claude', 'background'], ['codex', 'background']])
+  for (const p of h.polls) {
+    assert.equal(p.opts.keychainGate, gate)
+    assert.equal(p.opts.keychainConsent, 'unasked')
+    assert.equal(p.opts.platform, 'darwin')
+    assert.equal(typeof p.opts.log, 'function')
+  }
+  // Fetch Quota Now, the consent's Allow, the Keychain question's Allow: a user action.
+  h.polls.length = 0
+  h.mgr.forcePoll(() => undefined, { userAction: true })
+  await flush()
+  assert.deepEqual(occasions(), [['claude', 'userAction'], ['codex', 'userAction']])
+  // The watchers' forcePoll: background.
+  h.polls.length = 0
+  h.mgr.forcePoll(() => undefined)
+  await flush()
+  assert.deepEqual(occasions(), [['claude', 'background'], ['codex', 'background']])
+  // The reset re-poll: background.
+  h.polls.length = 0
+  const resetMs = h.now() + 5 * MIN
+  // A cache reading newer than the poll's, with a reset ahead of it: the reading the display picks.
+  h.writeClaudeCache(h.now() / 1000 + 1, 80, new Date(resetMs).toISOString())
+  h.mgr.setOptions({ ...OPTIONS, claudeOrder: ['cacheFile', 'poll'], platform: 'darwin', keychainGate: gate, keychainConsent: () => 'unasked', keychain: true })
+  h.mgr.current(h.now())
+  assert.ok(h.scheduled.length >= 1)
+  h.setNow(resetMs + 6_000)
+  h.scheduled[h.scheduled.length - 1].fn()
+  await flush()
+  assert.ok(h.polls.length > 0)
+  assert.equal(h.polls.every((p) => p.opts.occasion === 'background'), true)
+})
+
+test('a fetch by hand asked while a Claude poll is under way stays a user action for the poll that starts next; one that ran is not reused (1.12 B2 rule 2)', async () => {
+  let release: (() => void) | null = null
+  const h = harness({}, {
+    poll: async (source, _f, opts) => {
+      h.polls.push({ source, opts })
+      if (source === 'claude' && release === null) await new Promise<void>((r) => { release = r })
+      return { state: null, retryAfterSeconds: null, problem: 'no token', problemKind: 'noToken' }
+    },
+  })
+  h.mgr.tick(() => undefined)
+  await flush()
+  assert.deepEqual(h.polls.map((p) => [p.source, p.opts.occasion]).sort(), [['claude', 'background'], ['codex', 'background']])
+  // Claude is still in flight: the user's forced fetch waits for it and keeps its occasion.
+  h.mgr.forcePoll(() => undefined, { userAction: true })
+  await flush()
+  assert.deepEqual(h.polls.slice(2).map((p) => [p.source, p.opts.occasion]), [['codex', 'userAction']])
+  release!()
+  await flush()
+  h.mgr.tick(() => undefined)
+  await flush()
+  assert.deepEqual(h.polls.slice(3).map((p) => [p.source, p.opts.occasion]), [['claude', 'userAction']])
+  // Used once: the next poll is a background one again.
+  h.mgr.forcePoll(() => undefined)
+  await flush()
+  assert.equal(h.polls.slice(4).every((p) => p.opts.occasion === 'background'), true)
+})
+
+test('where the last Claude token came from, for the diagnostics: a source name, none after no token, null before a poll; Codex polls leave it alone (1.12 B7)', async () => {
+  let next: PollResult = { state: claudeState(BASE / 1000), retryAfterSeconds: null, raw: {}, credentialsFrom: 'keychain' }
+  const h = harness({}, {}, () => true, (source) => (source === 'claude' ? next
+    : { state: null, retryAfterSeconds: null, problem: 'no binary', problemKind: 'noBinary' }))
+  assert.equal(h.mgr.lastCredentialsFrom(), null)
+  h.mgr.forcePoll(() => undefined, { userAction: true })
+  await flush()
+  assert.equal(h.mgr.lastCredentialsFrom(), 'keychain')
+  next = { state: null, retryAfterSeconds: null, problem: 'x', problemKind: 'noToken', credentialsFrom: 'none' }
+  h.mgr.forcePoll(() => undefined)
+  await flush()
+  assert.equal(h.mgr.lastCredentialsFrom(), 'none')
+  // A result without a source (an older poller, an exception) keeps the last one.
+  next = { state: null, retryAfterSeconds: null, problem: 'x', problemKind: 'offline' }
+  h.mgr.forcePoll(() => undefined)
+  await flush()
+  assert.equal(h.mgr.lastCredentialsFrom(), 'none')
+})
+
+test('Reset Network Access Decision sends the Keychain gate back to untried; a granted consent leaves it as it is (1.12 B2, B3 rule 4)', () => {
+  const gate = new KeychainGate()
+  gate.note({ ok: true, ms: 10, timedOut: false }, 'userAction')
+  let granted = true
+  const h = harness({ keychainGate: gate }, {}, () => granted)
+  h.mgr.enforceGates()
+  assert.equal(gate.state(), 'open')
+  granted = false
+  h.mgr.enforceGates()
+  assert.equal(gate.state(), 'untried')
+})
+
+test('a fetch by hand still pending when the consent is reset is no user action after a new grant (1.12 B2)', async () => {
+  let release: (() => void) | null = null
+  let granted = true
+  const h = harness({}, {
+    poll: async (source, _f, opts) => {
+      h.polls.push({ source, opts })
+      if (source === 'claude' && release === null) await new Promise<void>((r) => { release = r })
+      return { state: null, retryAfterSeconds: null, problem: 'no token', problemKind: 'noToken' }
+    },
+  }, () => granted)
+  h.mgr.tick(() => undefined)
+  await flush()
+  // Fetch Quota Now while Claude's background poll is under way: its user action waits for the next start.
+  h.mgr.forcePoll(() => undefined, { userAction: true })
+  await flush()
+  // Reset Network Access Decision, then the poll ends; a new grant later — the next start is the timer's.
+  granted = false
+  h.mgr.enforceGates()
+  release!()
+  await flush()
+  granted = true
+  h.mgr.tick(() => undefined)
+  await flush()
+  assert.deepEqual(h.polls.filter((p) => p.source === 'claude').map((p) => p.opts.occasion), ['background', 'background'])
 })

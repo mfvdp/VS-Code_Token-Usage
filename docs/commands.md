@@ -13,7 +13,7 @@ Part of the [Token Pace documentation](../README.md#documentation).
 | `Token Pace: Show Usage (Quick Pick)` | | The whole view model as a searchable flat list — following the dashboard's provider switch, its first line naming the provider while the switch shows one |
 | `Token Pace: Show Usage as Text` | | A read-only markdown document with the same figures — following the dashboard's provider switch, its range line ending `· Codex only` while the switch shows Codex |
 | `Token Pace: Show Actions Menu` | | The QuickPick behind a status bar click |
-| `Token Pace: Fetch Quota Now` | | Immediate fetch, asking for consent if needed. Disabled in `quotaSource: cache` |
+| `Token Pace: Fetch Quota Now` | | Immediate fetch, asking for consent if needed. On macOS, where fetching was allowed before 1.12, it asks once whether the Keychain may be read too; its fetch is the one that may read the Keychain first in a window ([Credentials](quota-sources.md#what-the-fetch-does)). Disabled in `quotaSource: cache` |
 | `Token Pace: Re-read Token History` | | Full re-scan of all transcripts |
 | `Token Pace: Cycle Status Bar Windows` | | Steps `windowSelect` through its values |
 | `Token Pace: Preview Status Bar States` | | Synthetic renderings of every state, for 60 seconds |

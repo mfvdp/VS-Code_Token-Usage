@@ -556,7 +556,8 @@ function diagInput(codexConnection: DiagnosticsInput['codexConnection'], quota: 
     snapshot: { buckets: {}, bytes: 0, oldestDay: null, newestDay: null, firstIngest: null },
     retention: { hourDays: 45, days: 400, historyDays: 30 },
     historySize: { samples: 0, bytes: 0, oldest: null },
-    quota, codexConnection, consent: 'granted', role: 'leader', bridge: null,
+    // 1.12 P5 (pinned and changed): DiagnosticsInput carries the credentials line (§0a.11), none reported here.
+    quota, codexConnection, credentials: null, consent: 'granted', role: 'leader', bridge: null,
     http: {
       proxy: { value: '', origin: 'default' }, proxySupport: { value: 'off', origin: 'default' },
       proxyStrictSSL: { value: true, origin: 'default' },

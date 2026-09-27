@@ -17,6 +17,7 @@ import { SOURCES } from './adapters'
 import {
   AppServerStatus, CodexConnection, PersistentAppServer, findCodexBinary as realFindCodexBinary,
 } from './appServer'
+import { ClaudeCredentials, KeychainConsentState, KeychainGate, KeychainOccasion } from './credentials'
 import { t } from './i18n'
 import {
   CLAUDE_VERSION_FALLBACK, detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, poll as realPoll,
@@ -43,6 +44,15 @@ export interface QuotaOptions {
   writeQuotaCache: boolean
   appServerMode: 'oneShot' | 'persistent'
   pollOnlyWhenFocused: boolean
+  /** 1.12 B1: the platform the credentials cascade runs for (the host's, once); absent = `process.platform`. */
+  platform?: NodeJS.Platform
+  /** 1.12 B2: the window's Keychain gate, handed to every Claude poll; absent = none. */
+  keychainGate?: KeychainGate
+  /**
+   * 1.12 B3: the Keychain consent, asked at every poll — a dialog answered between two option updates counts at
+   * once. Absent = granted (callers without one — the host passes it).
+   */
+  keychainConsent?: () => KeychainConsentState
 }
 
 export interface QuotaFiles {
@@ -224,6 +234,14 @@ export class QuotaManager {
   private inFlight: Partial<Record<Source, boolean>> = {}
   /** Sources with a forced fetch pending — skips the freshness check. */
   private forced = new Set<Source>()
+  /**
+   * 1.12 B2: sources whose pending forced fetch a user asked for (*Fetch Quota Now*, a consent's *Allow*) — the
+   * one occasion on which the Claude cascade may open the Keychain before the gate is open. Taken when the
+   * poll starts; every other poll is a background one.
+   */
+  private userAction = new Set<Source>()
+  /** 1.12 B7: where the last Claude poll's token came from — `none` when none was found; null before one. */
+  private credentialsFrom: ClaudeCredentials['from'] | 'none' | null = null
 
   private lastStates: Partial<Record<Source, QuotaState>> = {}
   private lastCandidates: Record<Source, Candidate[]> = { claude: [], codex: [] }
@@ -321,6 +339,13 @@ export class QuotaManager {
    */
   enforceGates(): void {
     this.stopWhenBlocked()
+    // 1.12 B2: the consent gone, the Keychain gate goes back to `untried` — after a new grant the first
+    // Keychain read is again a user action's, and a fetch by hand still pending from before the reset
+    // is no longer one.
+    if (!this.consented()) {
+      this.opts.keychainGate?.reset()
+      this.userAction.clear()
+    }
   }
 
   setLeader(isLeader: boolean): void {
@@ -505,8 +530,14 @@ export class QuotaManager {
     this.runPolls(now)
   }
 
-  /** Immediate fetch, regardless of the interval. Mode and consent still apply. */
-  forcePoll(onUpdate: () => void): void {
+  /**
+   * Immediate fetch, regardless of the interval. Mode and consent still apply.
+   *
+   * 1.12 B2: `userAction` — *Fetch Quota Now*, the network consent's *Allow*, the Keychain question's *Allow* —
+   * lets this fetch's Claude cascade open the Keychain before the gate is open; the watchers and every other
+   * caller pass nothing and fetch in the background.
+   */
+  forcePoll(onUpdate: () => void, opts: { userAction?: boolean } = {}): void {
     // After `dispose`: no fetch, and no report either — the caller's window is gone (1.6 R3).
     if (this.disposed) return
     const why = this.blocked()
@@ -523,7 +554,10 @@ export class QuotaManager {
     // Deliberately KEEP the previous state: if the forced fetch fails, a slightly
     // older value still beats an empty display.
     this.nextPollAt = { claude: 0, codex: 0 }
-    for (const src of SOURCES) this.forced.add(src)
+    for (const src of SOURCES) {
+      this.forced.add(src)
+      if (opts.userAction === true) this.userAction.add(src)
+    }
     this.runPolls(this.deps.now())
   }
 
@@ -563,6 +597,11 @@ export class QuotaManager {
       return f ? { kind: f.kind, at: f.at } : null
     }
     return { claude: of('claude'), codex: of('codex') }
+  }
+
+  /** 1.12 B7 (§0a.11): where the last Claude poll's token came from, for *Copy Diagnostics* — a name, never a token. */
+  lastCredentialsFrom(): ClaudeCredentials['from'] | 'none' | null {
+    return this.credentialsFrom
   }
 
   /**
@@ -710,6 +749,8 @@ export class QuotaManager {
     for (const src of SOURCES) {
       if (this.inFlight[src]) continue
       const forced = this.forced.delete(src)
+      // 1.12 B2: a user's forced fetch is a user action once it starts; an answered or skipped one is not.
+      const occasion: KeychainOccasion = forced && this.userAction.delete(src) ? 'userAction' : 'background'
       if (!forced) {
         if (now < this.nextPollAt[src]) continue
         const answered = this.answeredBy(src, this.lastStates[src], now)
@@ -720,7 +761,7 @@ export class QuotaManager {
           continue
         }
       }
-      void this.startPoll(src)
+      void this.startPoll(src, occasion)
     }
   }
 
@@ -766,7 +807,7 @@ export class QuotaManager {
     return typeof at === 'number' && Number.isFinite(at) ? now - at * 1000 : Infinity
   }
 
-  private async startPoll(src: Source): Promise<void> {
+  private async startPoll(src: Source, occasion: KeychainOccasion = 'background'): Promise<void> {
     this.inFlight[src] = true
     // The attempt is no longer held: a later hold in the same absence is a new one (1.7 W2).
     this.heldLogged[src] = false
@@ -786,6 +827,12 @@ export class QuotaManager {
         claudeVersion: src === 'claude' ? this.userAgentVersion() : this.claudeVersion,
         // 1.12 A2 rule 3: Codex is read over the standing connection when there is one.
         codexConnection: src === 'codex' ? this.codexConnection() : null,
+        // 1.12 B2, B3: the Keychain step's occasion, gate and consent (§3.0 (a): never a Codex read's business).
+        occasion,
+        keychainGate: this.opts.keychainGate ?? null,
+        keychainConsent: this.opts.keychainConsent?.(),
+        platform: this.opts.platform,
+        log: this.log,
       }
       const r = await this.deps.poll(src, this.failCount[src], opts)
       // 1.6 R3: disposed while the request was under way. The exit has written what there was,
@@ -794,6 +841,7 @@ export class QuotaManager {
       // reported — the one request it cost was already made.
       if (this.disposed) return
       const now = this.deps.now()
+      if (src === 'claude' && r.credentialsFrom !== undefined) this.credentialsFrom = r.credentialsFrom
       if (r.state) {
         this.polled[src] = r.state
         delete this.problem[src]

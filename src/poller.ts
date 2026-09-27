@@ -18,7 +18,9 @@ import { execFile as nodeExecFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import { CodexConnection, findCodexBinary, readRateLimitsOnce } from './appServer'
-import { isCredentialsError, loadCredentials } from './credentials'
+import {
+  ClaudeCredentials, HelperRun, isCredentialsError, KeychainConsentState, KeychainGate, KeychainOccasion, loadCredentials,
+} from './credentials'
 import { t } from './i18n'
 import { claudeStateFromBody, codexStateFromBody } from './quota'
 import { ProblemKind, QuotaState, Source } from './types'
@@ -52,6 +54,11 @@ export interface PollResult {
    * (`readRateLimitsOnce`). Absent for Claude.
    */
   via?: 'connection' | 'oneShot'
+  /**
+   * 1.12 B7: where the Claude token came from — a source name, never the token; `none` when no source held a
+   * usable one. Absent for Codex.
+   */
+  credentialsFrom?: ClaudeCredentials['from'] | 'none'
 }
 
 export interface PollOptions {
@@ -71,6 +78,22 @@ export interface PollOptions {
    * `persistent` mode on the leader); null or absent = a child per poll.
    */
   codexConnection?: CodexConnection | null
+  /**
+   * 1.12 B2: whether this poll is a user action (*Fetch Quota Now*, the consent's *Allow*, the Keychain
+   * question's *Allow*) or a background one (the timer, the reset re-poll, the watchers, the lease's takeover);
+   * absent = background. Only the Keychain step of the Claude cascade asks.
+   */
+  occasion?: KeychainOccasion
+  /** 1.12 B2: the window's Keychain gate; absent = none. */
+  keychainGate?: KeychainGate | null
+  /** 1.12 B3: the Keychain consent; absent = granted (callers without one — the host always passes it). */
+  keychainConsent?: KeychainConsentState
+  /** 1.12 B1: the platform the cascade runs for; absent = `process.platform`. */
+  platform?: NodeJS.Platform
+  /** Test seam: the helper runner of the cascade (`security`, `secret-tool`). Absent = `execFile` without a shell. */
+  keychainRun?: HelperRun
+  /** 1.12 B7: the value-free English log lines of the Keychain step. */
+  log?: (msg: string) => void
 }
 
 export type PollFn = (source: Source, failCount: number, opts: PollOptions) => Promise<PollResult>
@@ -243,12 +266,23 @@ function classify(err: unknown): NetworkFailure {
 }
 
 export async function pollClaude(failCount: number, opts: PollOptions): Promise<PollResult> {
-  const cred = await loadCredentials({ claudeDir: opts.claudeDir, keychain: opts.keychain })
+  const cred = await loadCredentials({
+    claudeDir: opts.claudeDir,
+    keychain: opts.keychain,
+    keychainConsent: opts.keychainConsent,
+    occasion: opts.occasion ?? 'background',
+    gate: opts.keychainGate ?? undefined,
+    platform: opts.platform,
+    run: opts.keychainRun,
+    log: opts.log,
+  })
   if (isCredentialsError(cred)) {
     // Deliberately NO refresh: rotating the token from here would lock Claude
     // Code itself out. The user renews it simply by using Claude Code.
-    return { state: null, retryAfterSeconds: null, problem: cred.error, problemKind: cred.kind }
+    return { state: null, retryAfterSeconds: null, problem: cred.error, problemKind: cred.kind, credentialsFrom: 'none' }
   }
+  // 1.12 B7: the source's name travels on; the token stays in this function and goes into the one header.
+  const from = cred.from
 
   let res: Response
   try {
@@ -265,6 +299,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
   } catch (err) {
     const f = classify(err)
     return {
+      credentialsFrom: from,
       state: null,
       retryAfterSeconds: backoff(failCount + 1, BACKOFF_NET_BASE_S, BACKOFF_NET_MAX_S),
       problem: f.problem,
@@ -274,6 +309,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
 
   if (res.status === 401) {
     return {
+      credentialsFrom: from,
       state: null,
       retryAfterSeconds: null,
       problem: t('credentials rejected — sign in to Claude Code again'),
@@ -284,6 +320,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     // A guess, and phrased as one: Team and Enterprise accounts answer this way,
     // and the token counting from the transcripts is unaffected either way.
     return {
+      credentialsFrom: from,
       state: null,
       retryAfterSeconds: null,
       problem: t('HTTP 403 — may mean a Team/Enterprise account without a usage endpoint; token counts keep working'),
@@ -292,6 +329,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
   }
   if (res.status === 407) {
     return {
+      credentialsFrom: from,
       state: null,
       retryAfterSeconds: backoff(failCount + 1, BACKOFF_NET_BASE_S, BACKOFF_NET_MAX_S),
       problem: t('proxy requires authentication (HTTP 407)'),
@@ -304,6 +342,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
       ? header
       : backoff(failCount + 1, BACKOFF_RATE_BASE_S, BACKOFF_RATE_MAX_S)
     return {
+      credentialsFrom: from,
       state: null,
       retryAfterSeconds: wait,
       problem: t('HTTP {0} — backing off before the next attempt', res.status),
@@ -312,6 +351,7 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
   }
   if (!res.ok) {
     return {
+      credentialsFrom: from,
       state: null,
       retryAfterSeconds: backoff(failCount + 1, BACKOFF_NET_BASE_S, BACKOFF_NET_MAX_S),
       problem: `HTTP ${res.status}`,
@@ -324,13 +364,14 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     body = await res.json()
   } catch {
     return {
-      state: null, retryAfterSeconds: null, problem: t('Response is not valid JSON'), problemKind: 'empty',
+      state: null, retryAfterSeconds: null, problem: t('Response is not valid JSON'), problemKind: 'empty', credentialsFrom: from,
     }
   }
   const state = claudeStateFromBody(body, Math.floor(Date.now() / 1000), 'poll')
   return state.ok
-    ? { state, retryAfterSeconds: null, raw: body }
+    ? { state, retryAfterSeconds: null, raw: body, credentialsFrom: from }
     : {
+      credentialsFrom: from,
       state: null,
       retryAfterSeconds: null,
       problem: t('Response contained no quota windows'),

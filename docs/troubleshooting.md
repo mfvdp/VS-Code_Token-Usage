@@ -15,7 +15,7 @@ this table.
 
 | The bar says | Kind | What happened | The click runs |
 |---|---|---|---|
-| `$(key) CC no token` | `noToken` | No credentials were found, so nothing could be fetched | **Show log** — it names the lookup that failed, never the token. Sign in to the CLI, or set `CLAUDE_CODE_OAUTH_TOKEN` |
+| `$(key) CC no token` | `noToken` | No credentials were found, so nothing could be fetched. On macOS also when a fetch in the background skipped the Keychain — it is read there only after a fetch by hand ([The macOS Keychain](#the-macos-keychain)) | **Show log** — it names the lookup that failed, never the token. Sign in to the CLI, or set `CLAUDE_CODE_OAUTH_TOKEN`; on macOS run *Fetch Quota Now* once |
 | `$(warning) CC token expired` | `tokenExpired` | The stored credentials are past their expiry. Token Pace never refreshes a token | **Show log**. Sign in again in the CLI; the next poll picks the new token up |
 | `$(shield) CC consent` | `consentPending` | Network access has not been granted yet, so no request was made | **Fetch quota now**, which asks first. One dialog, one answer, remembered |
 | `$(circle-slash) CC quota off` | `modeCache` | `quotaSource: cache`: local files only, the network is never used | **Open settings**. Point `claudeQuotaFile` / `codexQuotaFile` at a cache file, or switch back to `auto` |
@@ -89,6 +89,24 @@ stays a problem state.
 | `state restarting` | The child ended and a restart waits — 5 seconds, doubling up to 5 minutes | Nothing; the log says when |
 | `state off` with `mode persistent` | No child runs: fetching is not allowed in this window (`quotaSource`, the consent) or no `codex` executable was found | The Codex entry's own state names which — the table at the top of this page |
 | `state follower` | Another window holds the lease and keeps the one child for the editor | Nothing |
+
+## The macOS Keychain
+
+On macOS Claude Code keeps its access token in the Keychain item `Claude Code-credentials`, and Token
+Pace reads it there before `~/.claude/.credentials.json` — only after you allowed it, and from the
+background only after a fetch by hand ([Credentials](quota-sources.md#what-the-fetch-does)).
+*Copy Diagnostics* says where it stands: `credentials — source … · keychain …`.
+
+| What you see | Why | What to do |
+|---|---|---|
+| macOS asks every time whether `security` may use `Claude Code-credentials` | The item's access list lets `security` read it only for this once: *Allow* was chosen, not *Always Allow* | Choose *Always Allow* at the next question. Until then Token Pace reads the Keychain only when you fetch by hand, and the background fetches use the variable or the file |
+| `CC no token` with *No token without the macOS Keychain, which is read in the background only after you fetched by hand* | A fetch in the background skipped the Keychain (`keychain gateClosed`): no fetch by hand has read it in this window yet, or the last read took longer than a second, failed or timed out | Run *Fetch Quota Now*. A read that brings the token within a second lets the background fetches read it again |
+| *Fetch Quota Now* asks "Also read Claude Code's access token from the macOS Keychain?" | Fetching was allowed before 1.12, when the dialog did not name the Keychain (`keychain unasked`) | *Allow* to read it, *Never* to leave it out for good (the variable and the file still count). *Reset Network Access Decision* asks both questions again |
+| `keychain off` or `keychain denied` in the diagnostics | `tokenPace.credentials.keychain` is off, or the question was answered *Never* | Switch the setting on, or run *Reset Network Access Decision* and allow both |
+
+The Keychain path is untested on macOS by the author; the log's lines (`claude: token from the
+Keychain`, `claude: the Keychain was not read (background, gate closed)`, `claude: Keychain read took
+… ms — background reads wait for the next fetch by hand`) name each step, never a value.
 
 ## The agent hook
 

@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 18,
+  "applied": 27,
   "bundle": {
     "week to date": {
       "parts": [
@@ -92,6 +92,48 @@
       ],
       "state": "translate",
       "why": "the network consent’s Codex paragraph for the default mode persistent — the app-server is started, kept running while this window fetches, and asked for its rate limits — beside the 1.x paragraph, which stays for oneShot: write it as you wrote that one, the hard wrap after the first line with the two-space indent, and keep \"codex app-server\" as it stands — 1.12 A5"
+    },
+    "• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code's access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item \"{0}\" (read with\n  macOS's security tool, which may ask you once), else from ~/.claude/.credentials.json. The\n  request identifies itself as the Claude Code client, because the endpoint rate-limits other\n  callers into a permanent 429.": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the network consent’s Claude paragraph on macOS with tokenPace.credentials.keychain on — the token from CLAUDE_CODE_OAUTH_TOKEN, else from the macOS Keychain item {0}, read with macOS’s security tool that may ask once, else from the credentials file — {0} is the item’s name (Claude Code-credentials, with a suffix where CLAUDE_CONFIG_DIR is set) and stays between your quotation marks, use Apple’s name for the Keychain in your language as macOS shows it, keep security as it stands, keep the URL, CLAUDE_CODE_OAUTH_TOKEN and ~/.claude/.credentials.json as they stand, and your 1.x sentence about the Claude Code client and the permanent 429, the hard wraps after each line with the two-space indent, as your 1.x Claude paragraph has them — 1.12 B4"
+    },
+    "• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code's access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json, else from the\n  Secret Service through secret-tool. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the network consent’s Claude paragraph on Linux with tokenPace.credentials.keychain on — the token from CLAUDE_CODE_OAUTH_TOKEN, else from the credentials file, else from the Secret Service through secret-tool — Secret Service and secret-tool are names and stay as they are, keep the URL, CLAUDE_CODE_OAUTH_TOKEN and ~/.claude/.credentials.json as they stand, and your 1.x sentence about the Claude Code client and the permanent 429, the hard wraps after each line with the two-space indent, as your 1.x Claude paragraph has them — 1.12 B4"
+    },
+    "• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code's access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json. The request\n  identifies itself as the Claude Code client, because the endpoint rate-limits other callers\n  into a permanent 429.": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the network consent’s Claude paragraph everywhere else (Windows, or the Keychain setting off) — the token from CLAUDE_CODE_OAUTH_TOKEN, else from the credentials file — keep the URL, CLAUDE_CODE_OAUTH_TOKEN and ~/.claude/.credentials.json as they stand, and your 1.x sentence about the Claude Code client and the permanent 429, the hard wraps after each line with the two-space indent, as your 1.x Claude paragraph has them — 1.12 B4"
+    },
+    "Also read Claude Code's access token from the macOS Keychain?": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the title of the short question macOS readers who allowed fetching before 1.12 get once, inside Fetch Quota Now — whether Claude Code’s access token may be read from the macOS Keychain too — use Apple’s name for the Keychain in your language, the buttons are your Allow and Never — 1.12 B3"
+    },
+    "Claude Code keeps its access token in the Keychain item \"{0}\". Token Pace reads it with macOS's security tool only to send it to https://api.anthropic.com/api/oauth/usage — the fetch you allowed — and never writes, refreshes or logs it.\n\nmacOS may ask whether \"security\" may use that item. Choose \"Always Allow\"; with \"Allow\" only, Token Pace reads it only when you fetch by hand.": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the short question’s detail — {0} is the Keychain item’s name and stays between your quotation marks, security is macOS’s tool and stays as it is, keep the URL as it stands, the blank line between the two paragraphs stays — \"Always Allow\" and \"Allow\" are macOS’s buttons: write macOS’s own labels in your language if you know them, else keep the English between your quotation marks — 1.12 B3"
+    },
+    "No token without the macOS Keychain, which is read in the background only after you fetched by hand — run \"Token Pace: Fetch Quota Now\"": {
+      "parts": [
+        "host"
+      ],
+      "state": "translate",
+      "why": "the no-token reason of a background fetch on macOS that skipped the Keychain (read in the background only after a fetch by hand proved that no macOS dialog waits) and found no token in the variable or the file — shown in the tooltip and on the card — quote the command title as your manifest has command.refreshQuota.title, with Token Pace: before it — 1.12 B2"
     }
   },
   "nls": {
@@ -114,6 +156,14 @@
     "config.codexAppServer.mode.enum.persistent": {
       "state": "review",
       "why": "the persistent choice is the default now: keep one codex app-server running and take its rate-limit updates as they arrive — the default (was Keep one codex app-server open and apply its rate-limit pushes directly — fresher, one more process) — keep codex app-server as it stands — 1.12 A5"
+    },
+    "config.credentials.keychain.description": {
+      "state": "review",
+      "why": "the setting now says the order per platform — on macOS the Keychain item before ~/.claude/.credentials.json, on Linux secret-tool after that file — and that on macOS the Keychain is read only after it was allowed too, the first read of a window only when you fetch by hand (was: also look in the OS keychain when the credentials file has no token, only while fetching is enabled and consented) — keep the backtick names as they are — 1.12 B6"
+    },
+    "config.quotaSource.description": {
+      "state": "review",
+      "why": "the poll paragraph now names every source of Claude Code’s access token — CLAUDE_CODE_OAUTH_TOKEN, the macOS Keychain or ~/.claude/.credentials.json, with a link to #tokenPace.credentials.keychain# (was: the access token from ~/.claude/.credentials.json goes to …) — the rest of the value is unchanged, keep the backtick names and the #…# link as they are — 1.12 B6"
     }
   }
 }

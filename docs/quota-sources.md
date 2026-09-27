@@ -51,8 +51,10 @@ Fetching uses Claude Code's access token, so it never starts unasked. The first 
 happen, a modal dialog names, in concrete terms:
 
 * the interval you have actually configured (not a hard-coded “every 30 minutes”),
-* `GET https://api.anthropic.com/api/oauth/usage` and the `accessToken` in
-  `~/.claude/.credentials.json`,
+* `GET https://api.anthropic.com/api/oauth/usage` and every place Claude Code's access token is read
+  from on your platform (1.12) — `CLAUDE_CODE_OAUTH_TOKEN`, on macOS the Keychain item
+  `Claude Code-credentials`, `~/.claude/.credentials.json`, on Linux the Secret Service through
+  `secret-tool` — in the order they are asked ([Credentials](#what-the-fetch-does), below),
 * that the request identifies itself as the Claude Code client, and why,
 * that for Codex the local `codex app-server` is started — in the default mode kept running while this
   window fetches ([The Codex app-server](#the-codex-app-server)) — and nothing of ours leaves the machine,
@@ -102,21 +104,65 @@ older reading stays, and beside it the card, the tooltip and — once it is stal
 the last attempt failed and when the next one is (below). The endpoint is undocumented; this is an
 observation from the field, not a documented rule.
 
-**Credentials.** In order: `CLAUDE_CODE_OAUTH_TOKEN`, then
-`~/.claude/.credentials.json` (`CLAUDE_SECURESTORAGE_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` are
-honoured), then — with `tokenPace.credentials.keychain` on, which it is by default — the OS
-keychain: `security find-generic-password` on macOS, `secret-tool lookup` on Linux. An expired
-token found early does not end the search; only when every source is exhausted is the expiry
-reported. The credentials file is watched, so a re-login is noticed within seconds instead of at
-the next interval — by size and mtime, because the content is a secret and is not even hashed.
-The token is read, used once and dropped. It is **never refreshed**: rotating it from here would
-invalidate Claude Code's own session, so when it has expired the extension says so and waits for
-Claude Code to renew it during normal use.
+**Credentials.** The token is looked for in an order that depends on the platform (1.12):
 
-> The keychain paths are best effort and are documented as such: the macOS item name
-> (`Claude Code-credentials`, with a hash of `CLAUDE_CONFIG_DIR` appended when that variable is
-> set) and the Linux `secret-tool` lookup have not been independently verified against every
-> Claude Code build. A missing helper is not treated as an error.
+| Platform | Order |
+|---|---|
+| macOS | `CLAUDE_CODE_OAUTH_TOKEN` → the Keychain item `Claude Code-credentials` → `~/.claude/.credentials.json` |
+| Linux | `CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` → the Secret Service through `secret-tool lookup` |
+| Windows | `CLAUDE_CODE_OAUTH_TOKEN` → `~/.claude/.credentials.json` |
+
+On macOS Claude Code keeps its credentials in the Keychain, so a `.credentials.json` there is a
+leftover of another setup and may hold another account's token that has not expired yet — reading it
+first would fetch the wrong account's quota. The file's folder follows
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` and `CLAUDE_CONFIG_DIR`; the Keychain item's name gets `-` and eight
+hex digits of a hash of `CLAUDE_CONFIG_DIR` appended when that variable is set. The Keychain and the
+Secret Service are asked only with `tokenPace.credentials.keychain` on, which it is by default. An
+expired token found early does not end the search; only when every source is exhausted is the expiry
+reported. Of the credentials document —
+~/.claude/.credentials.json or the Keychain item Claude Code-credentials, the same JSON in both —
+only `claudeAiOauth`, its `accessToken` and its `expiresAt` are read ([Privacy](privacy.md)). The token is read, used once and dropped. It is **never refreshed**:
+rotating it from here would invalidate Claude Code's own session, so when it has expired the
+extension says so and waits for Claude Code to renew it during normal use.
+
+**The Keychain on macOS** is read only after you allowed it. The network dialog names the item, and
+its *Allow* covers both; if you allowed fetching before 1.12, *Fetch Quota Now* asks once more —
+*Allow*, *Never* (the Keychain is skipped for good; the variable and the file still count) or Escape
+(asked again at the next *Fetch Quota Now*). macOS itself may then ask whether `security` may use
+the item: choose *Always Allow* — with *Allow* alone it asks at every read, and Token Pace then reads
+the Keychain only when you fetch by hand. Because that question may appear, the first Keychain read
+of a window happens only at a fetch you started (*Fetch Quota Now*, or the *Allow* of a consent
+dialog). Fetches in the background — the interval, a reset's re-poll, the sign-in watchers, a window
+taking over the lease — read the Keychain only after such a read brought the token within a second,
+so no dialog stood in the way; a read that took longer, failed or timed out holds them back until
+the next fetch by hand. A background fetch that skipped the Keychain and found no token in the
+variable or the file says so in the tooltip and on the card: *No token without the macOS Keychain,
+which is read in the background only after you fetched by hand — run "Token Pace: Fetch Quota Now"*.
+The log names each step without a value: `claude: token from the Keychain`, `claude: the Keychain
+was not read (background, gate closed)`, `claude: Keychain read took 1840 ms — background reads wait
+for the next fetch by hand`. *Copy Diagnostics* carries the line `credentials — source keychain ·
+keychain allowed`: the source is `env`, `keychain`, `file`, `secretTool`, `none` (no token found) or
+`–` (no fetch yet), the Keychain `off` (the setting), `notDarwin`, `unasked`, `denied`, `gateClosed`
+(only a fetch by hand reads it now) or `allowed`.
+
+**Sign-in and sign-out** are noticed within seconds, without reloading the window. The credentials
+file's folder is watched and the file compared by size and mtime, because the content is a secret
+and is not even hashed. On macOS, with the Keychain allowed, the folder `~/Library/Keychains` is
+watched too: on a change of a `login.keychain` file, `security find-generic-password -s <item>` —
+without `-w` and without `-g` — prints the item's attributes, not its secret, and of them only the
+modification date `mdat` is kept and compared. A change of either starts a background fetch (above),
+so a sign-in brings the new figures where the Keychain may be read, and a sign-out ends in *no token*
+at once. The Secret Service on Linux has no such cheap probe: there the next fetch notices. Both
+watchers run in the window that fetches, in `quotaSource: poll` after consent, and stop when that
+ends.
+
+> **The macOS Keychain path is untested on macOS by the author.** It was built on Linux and tested
+> against a stand-in `security`: the item name (`Claude Code-credentials`, with the hash of
+> `CLAUDE_CONFIG_DIR` appended when that variable is set), the exit code of a missing item, that
+> reading an item's attributes raises no dialog, and how long a quiet read takes against one a
+> dialog was answered for are Apple's and Claude Code's facts, not verified here. The Linux
+> `secret-tool` lookup has not been independently verified against every Claude Code build either.
+> A missing helper is not treated as an error.
 
 **Errors** never quote the exception. They are classified into named states — `timeout`,
 `TLS error — possibly a proxy intercepting TLS`, `network error`, `proxy requires

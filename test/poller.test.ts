@@ -206,3 +206,54 @@ test('no start in this file was ever through a shell, and none of a .cmd, .bat o
     assert.deepEqual(call.args, ['--version'])
   }
 })
+
+test('1.12 B: pollClaude hands the cascade its occasion, gate, consent, platform and runner, and gives back the source\'s name — the token only in the one header, never in the result (§2.2, §0a.2)', async () => {
+  const { pollClaude } = await import('../src/poller')
+  const { KeychainGate } = await import('../src/credentials')
+  const token = 'synthetic-token-XYZ-poller'
+  const saved = { token: process.env.CLAUDE_CODE_OAUTH_TOKEN, config: process.env.CLAUDE_CONFIG_DIR, secure: process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR }
+  const g = globalThis as { fetch: typeof fetch }
+  const real = g.fetch
+  const headers: string[] = []
+  const calls: string[][] = []
+  try {
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+    delete process.env.CLAUDE_CONFIG_DIR
+    delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR
+    g.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      headers.push(String(((init?.headers ?? {}) as Record<string, string>).Authorization))
+      return new Response(JSON.stringify({ five_hour: { utilization: 7, resets_at: null } }), { status: 200 })
+    }) as typeof fetch
+    const gate = new KeychainGate()
+    const base: PollOptions = {
+      claudeDir: scratchDir('poll-cred'), keychain: true, userAgent: 'honest', extVersion: '1.12.0', claudeVersion: null,
+      platform: 'darwin', keychainGate: gate, keychainConsent: 'granted',
+      keychainRun: async (cmd, args) => {
+        calls.push([cmd, ...args])
+        return { out: JSON.stringify({ claudeAiOauth: { accessToken: token, expiresAt: Date.now() + 3_600_000 } }), ms: 20, timedOut: false, code: 0 }
+      },
+    }
+    // Background before any user action: no helper, no request, no token — the source is none.
+    const skipped = await pollClaude(0, { ...base, occasion: 'background' })
+    assert.equal(skipped.problemKind, 'noToken')
+    assert.equal(skipped.credentialsFrom, 'none')
+    assert.deepEqual([calls.length, headers.length], [0, 0])
+    // The user action: the helper, the header, the source's name.
+    const read = await pollClaude(0, { ...base, occasion: 'userAction' })
+    assert.equal(read.state?.ok, true)
+    assert.equal(read.credentialsFrom, 'keychain')
+    assert.deepEqual(calls, [['security', 'find-generic-password', '-s', 'Claude Code-credentials', '-w']])
+    assert.deepEqual(headers, [`Bearer ${token}`])
+    assert.equal(gate.state(), 'open')
+    // Absent occasion = background; the gate is open now, so it reads.
+    const again = await pollClaude(0, base)
+    assert.equal(again.credentialsFrom, 'keychain')
+    for (const r of [skipped, read, again]) assert.equal(JSON.stringify(r).includes(token), false)
+  } finally {
+    g.fetch = real
+    for (const [k, v] of [['CLAUDE_CODE_OAUTH_TOKEN', saved.token], ['CLAUDE_CONFIG_DIR', saved.config], ['CLAUDE_SECURESTORAGE_CONFIG_DIR', saved.secure]] as const) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+  }
+})

@@ -1597,9 +1597,15 @@ test('the quota step quotes the consent dialog, not a paraphrase of it', () => {
   // has to be the terms — including the sentence about identifying as the Claude Code
   // client, which src/consent.ts calls the part a user is least able to discover alone.
   const step = readDoc('media/walkthrough/quota.md')
-  for (const line of disclosure(30).split('\n')) {
+  // 1.12 P5 (pinned and changed): the Claude line depends on the platform (§3 B4) — the step quotes the one
+  // Windows shows, word for word, and names what macOS and Linux add.
+  for (const line of disclosure(30, 'persistent', 'win32').split('\n')) {
     if (line.trim() === '') continue
     assert.ok(step.includes(line), `media/walkthrough/quota.md no longer says: ${line}`)
+  }
+  const flatStep = step.replace(/\s+/g, ' ')
+  for (const claim of ['on macOS the Keychain item `Claude Code-credentials`, read before the file', 'on Linux the Secret Service through `secret-tool`, after the file']) {
+    assert.ok(flatStep.includes(claim), `media/walkthrough/quota.md does not say: ${claim}`)
   }
   // 30 minutes is the default the manifest declares; a different one would misquote it.
   assert.equal(properties['tokenPace.pollIntervalMinutes'].default, 30)

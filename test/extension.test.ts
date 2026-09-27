@@ -4884,3 +4884,214 @@ test('the Codex app-server in the host: the diagnostics name the mode, Reset Net
     proto.enforceGates = real
   }
 })
+
+// ---------------------------------------------------------------------------
+// 1.12 B: the macOS Keychain in the host (§3 B2–B5, B7; §0a.2, §0a.3 host side)
+// ---------------------------------------------------------------------------
+
+/** Never a real token or account: each is asserted absent from every output below. */
+const KEYCHAIN_TOKEN = 'synthetic-token-XYZ-host-0000000000'
+const KEYCHAIN_REFRESH = 'synthetic-refresh-token-host'
+const KEYCHAIN_ACCOUNT = 'synthetic-account-123'
+
+/**
+ * A stand-in for macOS's `security` (and for `claude --version`, so the user agent's probe starts nothing real),
+ * as shell scripts in a directory put first on the `PATH` for this test only. The stand-in records its
+ * arguments, answers `-w` with a credentials document and the attribute probe with an attribute block whose
+ * `mdat` comes from a file the test changes.
+ */
+function fakeSecurityDir(): { dir: string; calls(): string[]; setMdat(hex: string): void } {
+  const dir = tmpDir('tp-fake-security')
+  const q = (p: string): string => `'${p.replace(/'/g, `'\\''`)}'`
+  const log = path.join(dir, 'calls.log')
+  const mdat = path.join(dir, 'mdat')
+  fs.writeFileSync(mdat, '3130')
+  const credentials = JSON.stringify({ claudeAiOauth: { accessToken: KEYCHAIN_TOKEN, expiresAt: Date.now() + 3_600_000, refreshToken: KEYCHAIN_REFRESH, scopes: ['user:inference'] } })
+  fs.writeFileSync(path.join(dir, 'security'), [
+    '#!/bin/sh',
+    `printf '%s\\n' "$*" >> ${q(log)}`,
+    'case " $* " in',
+    `  *" -w "*) printf '%s\\n' ${q(credentials)}; exit 0 ;;`,
+    'esac',
+    `printf 'keychain: "/Users/synthetic/Library/Keychains/login.keychain-db"\\nclass: "genp"\\nattributes:\\n    "acct"<blob>="${KEYCHAIN_ACCOUNT}"\\n    "mdat"<timedate>=0x%s  "20260927120000Z\\\\000"\\n    "svce"<blob>="Claude Code-credentials"\\n' "$(cat ${q(mdat)})"`,
+    '',
+  ].join('\n'), { mode: 0o755 })
+  fs.writeFileSync(path.join(dir, 'claude'), '#!/bin/sh\necho "2.1.300 (Claude Code)"\n', { mode: 0o755 })
+  return {
+    dir,
+    calls: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter((l) => l !== '') : []),
+    setMdat: (hex) => fs.writeFileSync(mdat, hex),
+  }
+}
+
+test('1.12 B: the macOS Keychain in the host — a 1.x grant reads nothing of it from the background; Fetch Quota Now asks once, and Allow reads the item through security (a stand-in on a PATH of the test\'s own) into the one Authorization header and into no output; the watcher follows the item\'s date; the reset clears both answers; a new grant through the network dialog records both; Never is kept (§3 B2–B5, B7, §0a.2, §0a.3)', {
+  skip: process.platform === 'win32' ? 'the stand-in security is a shell script' : false,
+}, async () => {
+  const fake = fakeSecurityDir()
+  const withMinusW = (): string[] => fake.calls().filter((c) => / -w$/.test(c))
+  const probes = (): string[] => fake.calls().filter((c) => !/ -w$/.test(c))
+  const saved = { path: process.env.PATH, token: process.env.CLAUDE_CODE_OAUTH_TOKEN, platform: Object.getOwnPropertyDescriptor(process, 'platform')! }
+  const g = globalThis as { fetch: typeof fetch }
+  const realFetch = g.fetch
+  const fetches: Array<{ url: string; authorization: string | null }> = []
+  const question = 'Also read Claude Code\'s access token from the macOS Keychain?'
+  try {
+    process.env.PATH = `${fake.dir}${path.delimiter}${saved.path ?? ''}`
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+    // The host reads the platform once, at activation, and hands it down (B1): this test's macOS.
+    Object.defineProperty(process, 'platform', { ...saved.platform, value: 'darwin' })
+    g.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      fetches.push({ url: String(url), authorization: ((init?.headers ?? {}) as Record<string, string>).Authorization ?? null })
+      return new Response(JSON.stringify({ five_hour: { utilization: 42, resets_at: null }, seven_day: { utilization: 20, resets_at: null } }),
+        { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+
+    // --- A consent given before 1.12: the Keychain is not read, not even asked about, until Fetch Quota Now.
+    const fx = makeFixture()
+    fs.rmSync(path.join(fx.claudeDir, '.credentials.json'))
+    // The home the host sees is the suite's fake one (`before`); its Keychain folder exists for this test only.
+    const keychains = path.join(os.homedir(), 'Library', 'Keychains')
+    assert.equal(os.homedir(), fixture.home)
+    fs.mkdirSync(keychains, { recursive: true })
+    const login = path.join(keychains, 'login.keychain-db')
+    fs.writeFileSync(login, 'a')
+    // No cache file: a fresh foreign reading would answer the fetch, and the point here is the fetch.
+    const noCache = (): string => path.join(tmpDir('tp-no-cache'), 'claude-usage.json')
+    const host = await activateHost(fx, REPO, {
+      settings: { 'tokenPace.quotaSource': 'poll', 'tokenPace.statusBar.show': ['claudeQuota', 'tokens'], 'tokenPace.claudeQuotaFile': noCache() },
+      globalState: new Map<string, unknown>([['networkConsent', 'granted']]),
+    })
+    const page = openDashboard()
+    await waitOwnColdStart(state)
+    // The activation's fetch is a background one: no helper, no request, B2 rule 4's words.
+    await waitFor('the background fetch', () => state.logText().includes('claude: No token without the macOS Keychain, which is read in the background only after you fetched by hand'))
+    assert.deepEqual(fake.calls(), [])
+    assert.equal(fetches.length, 0)
+    assert.equal(state.messages.some((m) => m.text === question), false, 'the Keychain question was asked unprompted')
+    await state.execute('tokenPace.copyDiagnostics')
+    assert.match(state.clipboard[state.clipboard.length - 1], /^credentials — source none · keychain unasked$/m)
+
+    // Fetch Quota Now: the question, once; Allow — the one read by hand opens the gate.
+    state.answers.push('Allow')
+    await state.execute('tokenPace.refreshQuota')
+    const asked = state.messages.filter((m) => m.text === question)
+    assert.equal(asked.length, 1)
+    assert.deepEqual(asked[0].actions, ['Allow', 'Never'])
+    assert.ok(String(asked[0].options?.detail ?? '').includes('the Keychain item "Claude Code-credentials"'))
+    assert.equal(host.ctx.globalState.get('networkConsentKeychain'), 'granted')
+    await waitFor('the fetch', () => fetches.length === 1)
+    assert.deepEqual(fetches[0], { url: 'https://api.anthropic.com/api/oauth/usage', authorization: `Bearer ${KEYCHAIN_TOKEN}` })
+    assert.deepEqual(withMinusW(), ['find-generic-password -s Claude Code-credentials -w'])
+    await waitFor('the fetch\'s log line', () => state.logText().includes('claude: quota fetched'))
+    assert.ok(state.logText().includes('claude: token from the Keychain'))
+    await state.execute('tokenPace.copyDiagnostics')
+    assert.match(state.clipboard[state.clipboard.length - 1], /^credentials — source keychain · keychain allowed$/m)
+
+    // The sign-in watcher: the item's date changes — a background fetch that may read the Keychain now.
+    await waitFor('the watcher\'s first probe', () => probes().length >= 1)
+    for (const p of probes()) assert.equal(p, 'find-generic-password -s Claude Code-credentials', 'the probe asked for more than the attributes')
+    fake.setMdat('3131')
+    fs.writeFileSync(login, 'b')
+    await waitFor('the watcher\'s fetch', () => fetches.length === 2, 15_000)
+    assert.equal(fetches[1].authorization, `Bearer ${KEYCHAIN_TOKEN}`)
+    assert.ok(state.logText().includes('Claude credentials changed — re-checking the quota.'))
+    assert.equal(state.messages.filter((m) => m.text === question).length, 1, 'the watcher asked the question')
+
+    // Every output there is.
+    await state.execute('tokenPace.showUsageMarkdown')
+    const markdown = lastMarkdown()
+    await state.execute('tokenPace.showUsageQuickPick')
+    await state.execute('tokenPace.copySummary')
+    const uri = (HOST.api as { Uri: { file(p: string): unknown } }).Uri.file
+    state.answers.push(uri(path.join(fx.data, 'out', 'usage.csv')), undefined)
+    await state.execute('tokenPace.exportCsv')
+    state.answers.push(uri(path.join(fx.data, 'out', 'usage.json')), undefined)
+    await state.execute('tokenPace.exportJson')
+    await waitFor('the page\'s reading', () => JSON.stringify(page.sent).includes('42'))
+    const outputs: Array<[string, string]> = [
+      ['log', state.logText()],
+      ['markdown', markdown],
+      ['quick pick', JSON.stringify(state.quickPickControls.map((c) => c.items))],
+      ['status bar', JSON.stringify(state.items.map((i) => ({ ...i })))],
+      ['clipboard (diagnostics, summary)', state.clipboard.join('\n')],
+      ['exports', JSON.stringify(state.writes)],
+      ['messages', JSON.stringify(state.messages)],
+      ['the page\'s messages', JSON.stringify(page.sent)],
+    ]
+    // The reset: both answers go, and the diagnostics say so.
+    await state.execute('tokenPace.resetNetworkConsent')
+    assert.equal(host.ctx.globalState.get('networkConsent'), undefined)
+    assert.equal(host.ctx.globalState.get('networkConsentKeychain'), undefined)
+    outputs.push(['globalState', JSON.stringify(host.ctx.globalState.keys().map((k) => [k, host.ctx.globalState.get(k)]))])
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    for (const f of fs.readdirSync(fx.storage)) {
+      const file = path.join(fx.storage, f)
+      if (fs.statSync(file).isFile()) outputs.push([`storage ${f}`, fs.readFileSync(file, 'utf8')])
+    }
+    assert.ok(outputs.some(([what]) => what === 'storage quota.json'), 'no quota.json was written')
+    for (const [what, text] of outputs) {
+      for (const secret of [KEYCHAIN_TOKEN, KEYCHAIN_REFRESH, KEYCHAIN_ACCOUNT, 'Bearer ']) assert.equal(text.includes(secret), false, `the ${what} holds ${secret}`)
+    }
+
+    // --- A new grant through the network dialog on macOS names the item and records both: no second question.
+    const fx2 = makeFixture()
+    fs.rmSync(path.join(fx2.claudeDir, '.credentials.json'))
+    const probesBefore2 = probes().length
+    const second = await activateHost(fx2, REPO, { settings: { 'tokenPace.quotaSource': 'poll', 'tokenPace.claudeQuotaFile': noCache() } })
+    await waitOwnColdStart(state)
+    state.answers.push('Allow')
+    await state.execute('tokenPace.refreshQuota')
+    const dialog = state.messages.find((m) => m.text === 'Allow Token Pace to fetch quota figures?')
+    assert.ok(String(dialog?.options?.detail ?? '').includes('else from the macOS Keychain item "Claude Code-credentials" (read with'), String(dialog?.options?.detail))
+    assert.equal(state.messages.some((m) => m.text === question), false)
+    assert.equal(second.ctx.globalState.get('networkConsent'), 'granted')
+    assert.equal(second.ctx.globalState.get('networkConsentKeychain'), 'granted')
+    await waitFor('the fetch', () => fetches.length === 3)
+    assert.equal(fetches[2].authorization, `Bearer ${KEYCHAIN_TOKEN}`)
+    // Clear Stored Data's decisions: both answers go, and the Keychain watcher stops with them at once (B3 rule 4,
+    // B5 rule 4 — 1.x left the watchers running until the next settings change).
+    await waitFor('the second window\'s Keychain watcher', () => probes().length > probesBefore2)
+    await state.execute('tokenPace.clearStoredData')
+    const decisions = state.quickPicks[state.quickPicks.length - 1].items.find((i) => i.key === 'consent')
+    assert.ok(decisions, 'Clear Stored Data offers no decisions item')
+    state.answers.push([decisions], 'Delete')
+    await state.execute('tokenPace.clearStoredData')
+    assert.equal(second.ctx.globalState.get('networkConsent'), undefined)
+    assert.equal(second.ctx.globalState.get('networkConsentKeychain'), undefined)
+    const probesAtClear = probes().length
+    fake.setMdat('3232')
+    fs.writeFileSync(login, 'c')
+    await sleep(2_600)
+    assert.equal(probes().length, probesAtClear, 'the Keychain watcher outlived the decisions')
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+    // --- Never: kept, the Keychain skipped for good — the file's words, and no second question.
+    const fx3 = makeFixture()
+    fs.rmSync(path.join(fx3.claudeDir, '.credentials.json'))
+    const third = await activateHost(fx3, REPO, {
+      settings: { 'tokenPace.quotaSource': 'poll', 'tokenPace.claudeQuotaFile': noCache() },
+      globalState: new Map<string, unknown>([['networkConsent', 'granted']]),
+    })
+    await waitOwnColdStart(state)
+    const readsBefore = withMinusW().length
+    state.answers.push('Never')
+    await state.execute('tokenPace.refreshQuota')
+    assert.equal(third.ctx.globalState.get('networkConsentKeychain'), 'denied')
+    await waitFor('the fetch without the Keychain', () => /claude: No Claude Code credentials at /.test(state.logText()))
+    await state.execute('tokenPace.refreshQuota')
+    await sleep(200)
+    assert.equal(state.messages.filter((m) => m.text === question).length, 1, 'Never was asked again')
+    assert.equal(withMinusW().length, readsBefore)
+    assert.equal(fetches.length, 3)
+    await state.execute('tokenPace.copyDiagnostics')
+    assert.match(state.clipboard[state.clipboard.length - 1], /^credentials — source none · keychain denied$/m)
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    fs.rmSync(path.join(fixture.home, 'Library'), { recursive: true, force: true })
+    Object.defineProperty(process, 'platform', saved.platform)
+    process.env.PATH = saved.path
+    if (saved.token === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = saved.token
+    g.fetch = realFetch
+  }
+})

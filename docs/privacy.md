@@ -20,8 +20,47 @@ changes, its name built only from the list of shipped languages, never from the 
 reads none), Claude Code's `settings.json`, its `settings.local.json`
 and the platform's managed-settings file (to report whether the status-line bridge is installed
 and whether something shadows it) and — only in `quotaSource: poll`, only after consent —
-`~/.claude/.credentials.json`, for the access token that the poll sends to
-`https://api.anthropic.com/api/oauth/usage` and nowhere else.
+`~/.claude/.credentials.json` or, on macOS, the Keychain item that holds the same document, for the
+access token that the poll sends to `https://api.anthropic.com/api/oauth/usage` and nowhere else
+(the next paragraphs).
+
+**The access token.** Claude Code's access token is taken from the first place that holds a current
+one, in an order that depends on the platform (1.12): on **macOS** the variable
+`CLAUDE_CODE_OAUTH_TOKEN`, then the Keychain item `Claude Code-credentials` (with `-` and eight hex
+digits of a hash of `CLAUDE_CONFIG_DIR` appended when that variable is set), then
+`~/.claude/.credentials.json`; on **Linux** the variable, the file, then the Secret Service through
+`secret-tool`; on **Windows** the variable and the file. The Keychain and the Secret Service are
+asked only with `tokenPace.credentials.keychain` on (the default), and nothing at all is read before
+`quotaSource: poll` and your consent.
+
+On macOS the Keychain has a consent of its own: the network dialog names the item, and its *Allow*
+answers for both; a reader who allowed fetching before 1.12 is asked once more, inside *Fetch Quota
+Now* — never unprompted. The answer is kept per machine under `networkConsentKeychain`, never synced,
+and *Reset Network Access Decision* and *Clear Stored Data…* (Consent decisions) delete it with the
+network consent. Because macOS may ask whether `security` may use the item, a window reads the
+Keychain first only when you fetch by hand; its fetches in the background — the interval, a reset's
+re-poll, the sign-in watcher, a window taking over the lease — read it only after such a read
+brought the token within a second (no dialog stood in the way), and a slower, failed or timed-out
+read holds them back until the next fetch by hand.
+
+Of the credentials document — ~/.claude/.credentials.json or the Keychain item Claude Code-credentials
+(the same JSON in both places, and in the Secret Service's entry too) — only `claudeAiOauth`, of it
+the `accessToken` and its `expiresAt` are read: never `refreshToken`, `scopes`, `subscriptionType` or
+any other field — the read contract below holds the parser to those three. The helpers are
+`security find-generic-password -s <item> -w` and `secret-tool lookup service Claude Code-credentials`,
+started without a shell; their output is parsed and dropped. The token is used for the one request
+and dropped — never refreshed, never written anywhere, not to the Keychain, the Secret Service or the
+file either, never in a log line, an error message, the diagnostics, an export, the dashboard or
+`quota.json`.
+
+To notice a sign-in or a sign-out without a reload, the credentials file is compared by its size and
+mtime (its folder is watched), and on macOS the Keychain item by its modification date: the folder
+`~/Library/Keychains` is watched by name, and on a change of a `login.keychain` file
+`security find-generic-password -s <item>` — without `-w` and without `-g` — prints the item's
+attributes, not its secret; of them only `mdat` is kept, never the account name (`acct`), the service
+or the keychain's path. Neither watcher reads the token. *Copy Diagnostics* says where the last token
+came from by a name (`credentials — source keychain · keychain allowed`), never the token. The macOS
+path is untested on macOS by the author ([Quota sources](quota-sources.md#what-the-fetch-does)).
 
 Inside `~/.claude/projects/` three files beside the agent transcripts are read for the
 [Agents](agents.md) section: the `agent-<id>.meta.json` next to each agent transcript, for five

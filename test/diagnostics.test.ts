@@ -11,7 +11,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
-  buildDiagnostics, codexConnectionDiag, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
+  buildDiagnostics, codexConnectionDiag, collectHttpSettings, collectProxyEnv, collectSettings, credentialsDiag, DiagnosticsInput,
+  DIAGNOSTICS_FIELDS,
   InspectLike, maskProxyUrl, scrubHome, tildify, VscodeConfigApi,
 } from '../src/diagnostics'
 import { setBundle, setLang, setLocale } from '../src/i18n'
@@ -44,6 +45,8 @@ function input(over: Partial<DiagnosticsInput> = {}): DiagnosticsInput {
       drift: ['spend.used.amount_minor'],
     }],
     codexConnection: { mode: 'persistent', state: 'ready', restartsLastHour: 0, pushes: 3, lastPushAgeSec: 42 },
+    // 1.12 P5 (pinned and changed): the credentials line (§0a.11).
+    credentials: { source: 'keychain', keychain: 'allowed' },
     consent: 'granted',
     role: 'leader',
     bridge: { installed: true, shadowed: false, mirrorAgeMs: 180_000 },
@@ -372,4 +375,38 @@ test('the codex connection line says which mode is live and where the standing c
   // Held to its words and counts: a hostile value is a `?` or a dash, never text the report repeats.
   const hostile = { mode: 'x```y', state: '/home/tester/codex', restartsLastHour: Number.NaN, pushes: -1, lastPushAgeSec: null } as unknown as DiagnosticsInput['codexConnection']
   assert.equal(line(hostile), 'codex connection — mode ? · state ? · restarts – in the last hour · pushes – · last push –')
+})
+
+test('the credentials line says where the Claude token came from and where the macOS Keychain stands — every state, by name, never a token or an account (1.12 B7, §0a.11, B8 test 7)', () => {
+  const line = (c: DiagnosticsInput['credentials']): string => {
+    const out = buildDiagnostics(input({ credentials: c }))
+    const lines = out.split('\n')
+    const l = lines.find((x) => x.startsWith('credentials —'))
+    assert.ok(l, 'the report has no credentials line')
+    // In the quota sources section, right after the codex connection line.
+    assert.equal(lines.indexOf(l), lines.findIndex((x) => x.startsWith('codex connection')) + 1)
+    assert.ok(lines.indexOf(l) < lines.indexOf('## Status line bridge'))
+    return l
+  }
+  // The allow-list names the field once, after the codex connection (1.12 A) — 25 fields with it.
+  assert.equal(DIAGNOSTICS_FIELDS.filter((f) => f === 'credentials').length, 1)
+  assert.equal(DIAGNOSTICS_FIELDS.indexOf('credentials'), DIAGNOSTICS_FIELDS.indexOf('codexConnection') + 1)
+  assert.equal(DIAGNOSTICS_FIELDS.length, 25)
+  const cases: Array<[Parameters<typeof credentialsDiag>[0], string]> = [
+    [{ source: 'keychain', platform: 'darwin', setting: true, consent: 'granted', gate: 'open' }, 'credentials — source keychain · keychain allowed'],
+    [{ source: 'file', platform: 'darwin', setting: true, consent: 'granted', gate: 'untried' }, 'credentials — source file · keychain gateClosed'],
+    [{ source: 'none', platform: 'darwin', setting: true, consent: 'granted', gate: 'closed' }, 'credentials — source none · keychain gateClosed'],
+    [{ source: 'file', platform: 'darwin', setting: true, consent: 'unasked', gate: 'open' }, 'credentials — source file · keychain unasked'],
+    [{ source: 'env', platform: 'darwin', setting: true, consent: 'denied', gate: 'open' }, 'credentials — source env · keychain denied'],
+    [{ source: 'secretTool', platform: 'linux', setting: true, consent: 'unasked', gate: 'untried' }, 'credentials — source secretTool · keychain notDarwin'],
+    [{ source: null, platform: 'win32', setting: true, consent: 'unasked', gate: 'untried' }, 'credentials — source – · keychain notDarwin'],
+    [{ source: 'file', platform: 'darwin', setting: false, consent: 'granted', gate: 'open' }, 'credentials — source file · keychain off'],
+  ]
+  for (const [status, expected] of cases) assert.equal(line(credentialsDiag(status)), expected)
+  assert.equal(line(null), 'credentials — not reported')
+  // Held to its words: a token or an account name handed in by mistake is a `?`, never repeated.
+  const hostile = { source: 'sk-ant-oat01-synthetic', keychain: 'synthetic-account-123' } as unknown as DiagnosticsInput['credentials']
+  const l = line(hostile)
+  assert.equal(l, 'credentials — source ? · keychain ?')
+  assert.equal(buildDiagnostics(input({ credentials: hostile })).includes('synthetic'), false)
 })

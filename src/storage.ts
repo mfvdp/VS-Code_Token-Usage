@@ -82,8 +82,10 @@ export interface StoredItem {
 
 /** Memento keys per item. Everything the user can delete is listed here, once. */
 export const STORED_MEMENTO_KEYS: Readonly<Record<'consent' | 'alerts' | 'ui', readonly string[]>> = {
-  // 1.8 §0b.3: the keep-warm consent is a decision like the other three, and goes with them.
-  consent: ['networkConsent', 'networkConsentOffered', 'writeConsent.writeQuotaCache', 'writeConsent.statusLine', 'tokenPace.keepWarmConsent'],
+  // 1.8 §0b.3: the keep-warm consent is a decision like the other three, and goes with them. 1.12 B3 rule 4
+  // (§0a.11): so is the Keychain consent.
+  consent: ['networkConsent', 'networkConsentOffered', 'writeConsent.writeQuotaCache', 'writeConsent.statusLine', 'tokenPace.keepWarmConsent',
+    'networkConsentKeychain'],
   alerts: ['tokenPace.alerts'],
   ui: ['tokenPace.ui'],
 }

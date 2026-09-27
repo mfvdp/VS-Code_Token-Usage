@@ -393,7 +393,6 @@
   "~{0} running": "~{0} 実行中",
   "“Elapsed” is how much of the window’s own time has passed. Usage above it means you are ahead of the clock; the verdict names the difference in percent of the window.": "「経過」は、枠自体の時間がどれだけ過ぎたかを示します。使用量がそれを上回っていれば、時間より先行しています。判定は、その差を枠に対するパーセントで示します。",
   "“Usage” is fresh input + cache write + output; cache reads are listed separately because they outweigh everything else by orders of magnitude.": "「使用量」は新規入力 + キャッシュ書き込み + 出力です。キャッシュ読み取りは、ほかのすべてを桁違いに上回るため別に記載しています。",
-  "• Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.": "• Claude — ~/.claude/.credentials.json の accessToken を使って GET https://api.anthropic.com/api/oauth/usage を送信します。\n  エンドポイントが他の呼び出し元を恒久的な 429 でレート制限するため、リクエストは Claude Code クライアントとして名乗ります。",
   "• Codex — the local \"codex app-server\" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.": "• Codex — ローカルの「codex app-server」を起動し、レート制限を問い合わせます。\n  このために Token Pace の通信がマシンの外に出ることはありません。",
   "… {0} more": "… ほか {0} 件",
   "≈ marks a lower bound: the oldest hours of the span are already rolled up into day totals": "≈ は下限値を示します: 期間の最も古い時間帯は、すでに日単位の合計に集約されています",

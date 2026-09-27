@@ -16,11 +16,17 @@
  * action it unlocks is a formality, not a decision.
  */
 
+import { keychainService } from './credentials'
 import { t } from './i18n'
 import { MementoLike } from './storage'
 
 const CONSENT_KEY = 'networkConsent'
 const OFFERED_KEY = 'networkConsentOffered'
+/**
+ * 1.12 B3 (§0a.11): the Keychain consent — its own key beside the network consent's, per machine, never synced;
+ * `granted` or `denied`, absent = unasked. Cleared with the network consent.
+ */
+export const KEYCHAIN_CONSENT_KEY = 'networkConsentKeychain'
 
 export type ConsentState = 'granted' | 'denied' | 'unasked'
 
@@ -51,9 +57,19 @@ const DEFAULT_INTERVAL_MINUTES = 30
  * moved, and the whole point of this dialog is that its numbers are true. For the
  * same reason the Codex paragraph follows `tokenPace.codexAppServer.mode` (1.12 A5):
  * `persistent` — the default — keeps the app-server running while this window
- * fetches, and the text says so; `oneShot` keeps the 1.x sentence.
+ * fetches, and the text says so; `oneShot` keeps the 1.x sentence. And the Claude
+ * paragraph names every place the token is read from on this platform (1.12 B4):
+ * on macOS with `tokenPace.credentials.keychain` on the Keychain item — whose name is
+ * `keychainService()`, with its suffix where `CLAUDE_CONFIG_DIR` is set — before the
+ * file, on Linux with the setting on the Secret Service after it, else the variable
+ * and the file alone.
  */
-export function disclosure(intervalMinutes: number, appServerMode: 'oneShot' | 'persistent' = 'persistent'): string {
+export function disclosure(
+  intervalMinutes: number,
+  appServerMode: 'oneShot' | 'persistent' = 'persistent',
+  platform: NodeJS.Platform = process.platform,
+  keychain = true,
+): string {
   const minutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0
     ? Math.round(intervalMinutes)
     : DEFAULT_INTERVAL_MINUTES
@@ -64,7 +80,7 @@ export function disclosure(intervalMinutes: number, appServerMode: 'oneShot' | '
     '',
     cadenceLine(minutes),
     '',
-    t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using the accessToken from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.'),
+    claudeParagraph(platform, keychain),
     appServerMode === 'oneShot'
       ? t('\u2022 Codex \u2014 the local "codex app-server" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.')
       : t('\u2022 Codex \u2014 the local "codex app-server" is started, kept running while this window fetches, and\n  asked for its rate limits. No traffic of ours leaves the machine for this.'),
@@ -75,6 +91,34 @@ export function disclosure(intervalMinutes: number, appServerMode: 'oneShot' | '
     '',
     t('You can change this later with "Token Pace: Reset Network Access Decision".'),
   ].join('\n')
+}
+
+/**
+ * 1.12 B4: the Claude paragraph — three whole keys, one per case, never assembled from pieces: the order of the
+ * sources is part of each sentence.
+ */
+function claudeParagraph(platform: NodeJS.Platform, keychain: boolean): string {
+  if (keychain && platform === 'darwin') {
+    return t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item "{0}" (read with\n  macOS\'s security tool, which may ask you once), else from ~/.claude/.credentials.json. The\n  request identifies itself as the Claude Code client, because the endpoint rate-limits other\n  callers into a permanent 429.', keychainService())
+  }
+  if (keychain && platform === 'linux') {
+    return t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json, else from the\n  Secret Service through secret-tool. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.')
+  }
+  return t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json. The request\n  identifies itself as the Claude Code client, because the endpoint rate-limits other callers\n  into a permanent 429.')
+}
+
+/** 1.12 B3 rule 2: whether the network dialog on this platform with this setting names the Keychain. */
+export function namesKeychain(platform: NodeJS.Platform, keychain: boolean): boolean {
+  return keychain && platform === 'darwin'
+}
+
+/**
+ * 1.12 B3 rule 2 (B6): the short question's detail — the item by its name, what it is read for and with,
+ * that it is never written, refreshed or logged, and macOS's own question with the answer that lets
+ * background reads follow.
+ */
+export function keychainDisclosure(): string {
+  return t('Claude Code keeps its access token in the Keychain item "{0}". Token Pace reads it with macOS\'s security tool only to send it to https://api.anthropic.com/api/oauth/usage \u2014 the fetch you allowed \u2014 and never writes, refreshes or logs it.\n\nmacOS may ask whether "security" may use that item. Choose "Always Allow"; with "Allow" only, Token Pace reads it only when you fetch by hand.', keychainService())
 }
 
 /**
@@ -109,6 +153,8 @@ function cadenceLine(minutes: number): string {
 export class NetworkConsent {
   private asking: Promise<boolean> | null = null
 
+  private askingKeychain: Promise<boolean> | null = null
+
   constructor(
     private memento: MementoLike,
     private log: (msg: string) => void,
@@ -116,6 +162,10 @@ export class NetworkConsent {
       intervalMinutes?: () => number
       /** 1.12 A5: the configured `tokenPace.codexAppServer.mode`, read when the text is shown. */
       appServerMode?: () => 'oneShot' | 'persistent'
+      /** 1.12 B4: the platform the dialog describes (the host's, once); absent = `process.platform`. */
+      platform?: NodeJS.Platform
+      /** 1.12 B4: the configured `tokenPace.credentials.keychain`, read when the text is shown; absent = on. */
+      keychain?: () => boolean
       ui?: ConsentUi
     } = {},
   ) {}
@@ -130,7 +180,65 @@ export class NetworkConsent {
 
   /** The text the dialog would show right now — also used by the onboarding card. */
   disclosure(): string {
-    return disclosure(this.opts.intervalMinutes?.() ?? DEFAULT_INTERVAL_MINUTES, this.opts.appServerMode?.() ?? 'persistent')
+    return disclosure(
+      this.opts.intervalMinutes?.() ?? DEFAULT_INTERVAL_MINUTES,
+      this.opts.appServerMode?.() ?? 'persistent',
+      this.platform(),
+      this.keychainSetting(),
+    )
+  }
+
+  private platform(): NodeJS.Platform {
+    return this.opts.platform ?? process.platform
+  }
+
+  private keychainSetting(): boolean {
+    return this.opts.keychain?.() ?? true
+  }
+
+  /** 1.12 B3: the Keychain consent — `unasked` while the key is absent (or holds anything else). */
+  keychainState(): ConsentState {
+    const v = this.memento.get<unknown>(KEYCHAIN_CONSENT_KEY, undefined)
+    return v === 'granted' || v === 'denied' ? v : 'unasked'
+  }
+
+  /**
+   * 1.12 B3 rule 2: the short question for a reader who allowed fetching before 1.12 — asked by the caller only
+   * inside *Fetch Quota Now* (a user action, never unprompted), on macOS with the setting on and the key absent.
+   * *Allow* records `granted`, *Never* `denied` (the Keychain is skipped for good; the variable and the file
+   * still count), Escape nothing — asked again at the next *Fetch Quota Now*. Concurrent callers share the one
+   * dialog.
+   */
+  requestKeychain(): Promise<boolean> {
+    if (this.keychainState() === 'granted') return Promise.resolve(true)
+    // *Never* is kept for good: only *Reset Network Access Decision* or *Clear Stored Data…* asks again.
+    if (this.keychainState() === 'denied') return Promise.resolve(false)
+    if (this.askingKeychain) return this.askingKeychain
+    this.askingKeychain = this.askKeychain().finally(() => { this.askingKeychain = null })
+    return this.askingKeychain
+  }
+
+  private async askKeychain(): Promise<boolean> {
+    const ui = this.opts.ui ?? windowUi()
+    // One value, shown and compared — the network dialog's two buttons.
+    const allow = t('Allow')
+    const never = t('Never')
+    const choice = await ui.showInformationMessage(
+      t('Also read Claude Code\'s access token from the macOS Keychain?'),
+      { modal: true, detail: keychainDisclosure() },
+      allow,
+      never,
+    )
+    if (choice === allow) {
+      await this.memento.update(KEYCHAIN_CONSENT_KEY, 'granted')
+      this.log('Keychain access allowed by the user.')
+      return true
+    }
+    if (choice === never) {
+      await this.memento.update(KEYCHAIN_CONSENT_KEY, 'denied')
+      this.log('Keychain access declined by the user.')
+    }
+    return false
   }
 
   /**
@@ -160,6 +268,12 @@ export class NetworkConsent {
     if (choice === allow) {
       await this.memento.update(CONSENT_KEY, 'granted')
       this.log('Network access allowed by the user.')
+      // 1.12 B3 rule 1: a dialog that named the Keychain item was answered for it too — one question, one
+      // answer, both facts named in it.
+      if (namesKeychain(this.platform(), this.keychainSetting())) {
+        await this.memento.update(KEYCHAIN_CONSENT_KEY, 'granted')
+        this.log('Keychain access allowed by the user with network access.')
+      }
       return true
     }
     // Cancel means "not now" and stays askable; only "Never" is recorded.
@@ -182,6 +296,8 @@ export class NetworkConsent {
   async reset(): Promise<void> {
     await this.memento.update(CONSENT_KEY, undefined)
     await this.memento.update(OFFERED_KEY, undefined)
+    // 1.12 B3 rule 4: the Keychain's answer goes with the network's.
+    await this.memento.update(KEYCHAIN_CONSENT_KEY, undefined)
     this.log('Network access decision reset.')
   }
 }

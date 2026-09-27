@@ -132,6 +132,8 @@
   "this month": "este mês",
   "this week": "esta semana",
   "today": "hoje",
+  "{0} (in {1})": "{0} (em {1})",
+  "{0} (reset due)": "{0} (renovação pendente)",
   "{0} ago": "há {0}",
   "{0} at {1} (threshold {2})": "{0} em {1} (limiar {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "Não foi possível resolver {0} ({1}). Parece ser um link cujo destino não existe, por isso não foi alterado — corrija o link e tente novamente.",

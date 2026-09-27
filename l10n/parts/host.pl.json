@@ -132,6 +132,8 @@
   "this month": "ten miesiąc",
   "this week": "ten tydzień",
   "today": "dziś",
+  "{0} (in {1})": "{0} (za {1})",
+  "{0} (reset due)": "{0} (reset minął)",
   "{0} ago": "{0} temu",
   "{0} at {1} (threshold {2})": "{0} na poziomie {1} (próg {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "Nie można rozwiązać {0} ({1}). Wygląda to na dowiązanie bez celu, dlatego pozostawiono je bez zmian — należy naprawić dowiązanie i spróbować ponownie.",

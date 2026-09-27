@@ -1924,11 +1924,12 @@ test('T10 lets a language name the ledger just added be absent while its list na
   assert.deepEqual(t10(dir, 'fr', true), ['fr: l10n/bundle.l10n.fr.json: the language name "Dutch" is not translated'])
 })
 
-test('T10 takes a name equal to the English only by LANGUAGE_NAME_AS_ENGLISH — German\'s Hindi passes by its entry, a German Dutch or a French Hindi fails (1.11 A3 rule 11 b)', () => {
+test('T10 takes a name equal to the English only by LANGUAGE_NAME_AS_ENGLISH — German\'s Hindi passes by its entry, a German Dutch or a Czech Hindi fails (1.11 A3 rule 11 b)', () => {
   // 1.11 L1 (pinned and changed: [['de', 'Hindi']]): the Latin-script languages of tier 2 write Hindi as the English does —
   // the lead's entries at L1's merge, each with its dictionary; a new entry is a deliberate change of this line.
   assert.deepEqual(LANGUAGE_NAME_AS_ENGLISH.map(([id, name]) => [id, name]),
-    [['de', 'Hindi'], ['nl', 'Hindi'], ['da', 'Hindi'], ['sv', 'Hindi'], ['nb', 'Hindi'], ['fi', 'Hindi'], ['hu', 'Hindi'], ['ro', 'Hindi'], ['id', 'Hindi']])
+    [['de', 'Hindi'], ['nl', 'Hindi'], ['da', 'Hindi'], ['sv', 'Hindi'], ['nb', 'Hindi'], ['fi', 'Hindi'], ['hu', 'Hindi'], ['ro', 'Hindi'], ['id', 'Hindi'],
+      ['fr', 'Hindi'], ['es', 'Hindi'], ['pt-br', 'Hindi'], ['it', 'Hindi']])
   for (const [id, name, why] of LANGUAGE_NAME_AS_ENGLISH) {
     assert.ok(isLanguageId(id) && id !== 'en', `${id} is no language that translates`)
     assert.ok(name.length > 0 && why.trim().length > 0 && !why.includes('; '), `${id} ${name}: no reason`)
@@ -1941,9 +1942,11 @@ test('T10 takes a name equal to the English only by LANGUAGE_NAME_AS_ENGLISH —
   assert.deepEqual(t10(de, 'de'), [])
   edit(de, 'l10n/bundle.l10n.de.json', (t) => { t.Dutch = 'Dutch' })
   assert.deepEqual(t10(de, 'de'), ['de: l10n/bundle.l10n.de.json: the language name "Dutch" is not translated'])
-  const fr = fixture('german', 'fr')
-  edit(fr, 'l10n/bundle.l10n.fr.json', (t) => { t.Hindi = 'Hindi'; t.Dutch = 'Néerlandais' })
-  assert.deepEqual(t10(fr, 'fr'), ['fr: l10n/bundle.l10n.fr.json: the language name "Hindi" is not translated'])
+  // 1.11 L5 (pinned and changed: the French case): French is on the list since L5's merge, so the language without an
+  // entry is Czech (Hindština) — its "Hindi" must still fail.
+  const cs = fixture('german', 'cs')
+  edit(cs, 'l10n/bundle.l10n.cs.json', (t) => { t.Hindi = 'Hindi'; t.Dutch = 'Nizozemština' })
+  assert.deepEqual(t10(cs, 'cs'), ['cs: l10n/bundle.l10n.cs.json: the language name "Hindi" is not translated'])
 })
 
 test('the brief\'s 1.11 sections: a new language, whole — the files, the register per language, Enter, the weekday words in graphemes, the quotation marks, the plurals, the marks, T15\'s message, the gates; and your pending list (1.11 A3, P1)', () => {

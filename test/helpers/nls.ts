@@ -77,6 +77,11 @@ export const LANGUAGE_NAME_AS_ENGLISH: ReadonlyArray<readonly [string, string, s
   ['hu', 'Hindi', 'the Hungarian name of the language is hindi (A magyar helyesírás szabályai), capitalised as a list item'],
   ['ro', 'Hindi', 'the Romanian name of the language is hindi (DEX), capitalised as a list item'],
   ['id', 'Hindi', 'the Indonesian name of the language is Hindi (KBBI)'],
+  // 1.11 L5 (the lead, at the merge): four 1.10 languages write it as the English too, capitalised as a list item.
+  ['fr', 'Hindi', 'the French name of the language is hindi (Larousse), capitalised as a list item'],
+  ['es', 'Hindi', 'the Spanish name of the language is hindi (RAE), capitalised as a list item'],
+  ['pt-br', 'Hindi', 'the Brazilian Portuguese name of the language is hindi (Michaelis), capitalised as a list item'],
+  ['it', 'Hindi', 'the Italian name of the language is hindi (Treccani), capitalised as a list item'],
 ]
 
 /** The raw manifest, placeholders and all — for the tests that check the placeholders. */

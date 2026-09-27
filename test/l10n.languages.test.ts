@@ -49,7 +49,8 @@
  * a quotation, T4 counts the marks of the NFC form (the Greek ano teleia, U+0387, is the separator · there) and names
  * the ano teleia itself, and T10 lets a language name the ledger has just added be absent while it is pending and a
  * name equal to the English stand where LANGUAGE_NAME_AS_ENGLISH says the language writes it so. The ledger started
- * again at 1.10.0's release commit (l10n-rekey.mjs --start b89ff43), and PENDING_ALLOWED is true until 1.11's join.
+ * again at 1.10.0's release commit (l10n-rekey.mjs --start b89ff43), and PENDING_ALLOWED was true until 1.11's join
+ * (P8 set it false).
  *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
@@ -192,8 +193,10 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
  * again together with `l10n-rekey.mjs --start`.
  * 1.11 P1: true again — `l10n-rekey.mjs --start b89ff43` started 1.11's ledger with a list at cursor 0 for each of the
  * twelve 1.10 languages; 1.11's join (P8) sets it false. test/languages.test.ts's join test reads this line.
+ * 1.11 P8: false — group N wrote the twelve new languages whole, group O worked the twelve 1.10 lists to the ledger's end
+ * and deleted them; no list is left, and every rule holds every key of all twenty-four languages and German again.
  */
-export const PENDING_ALLOWED: boolean = true
+export const PENDING_ALLOWED: boolean = false
 
 /**
  * 1.11 A3 rule 11 (b): a language name a language writes as the English does — `[id, English name, reason]`. T10
@@ -960,6 +963,11 @@ const ON_DISK = languagesOnDisk()
 test('the frame runs over the languages on disk — German among them — and English has no file of its own (1.9 B3)', () => {
   assert.ok(ON_DISK.includes('de'), `no German files found: ${J(ON_DISK)}`)
   assert.equal(ON_DISK.includes('en'), false)
+  // 1.11 P8 (A8): at the join the frame measures every language of the registry but English — German and the twenty-four.
+  if (!PENDING_ALLOWED) {
+    assert.deepEqual(ON_DISK, LANGUAGE_IDS.filter((id) => id !== 'en'))
+    assert.equal(ON_DISK.length, 25)
+  }
   // 1.10 B1 (pinned and changed: thirteen rules): T14, the pending list, runs over every language too.
   // 1.10 B3 (pinned and changed: fourteen rules): T15, the bar's examples, too — and over the English (below).
   assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15'])

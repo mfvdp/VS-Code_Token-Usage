@@ -288,7 +288,9 @@ test('the join: availableLanguages over the repository\'s l10n/ finds every lang
     assert.deepEqual(available.slice(0, 14), LEADS_LIST.map(([id]) => id))
     assert.deepEqual(available.slice(14).filter((id) => !NEW_IN_1_11.includes(id)), [])
   } else {
+    // 1.11 P8 (A8): the join — English, German and the twenty-four, each found by its bundle.
     assert.deepEqual(available, [...LANGUAGE_IDS])
+    assert.equal(available.length, 26)
   }
   // What the extension hands the view model at activation, under auto in an English window.
   const picker = (setting: LanguageSetting) => buildViewModel({
@@ -296,6 +298,8 @@ test('the join: availableLanguages over the repository\'s l10n/ finds every lang
   }).language
   const auto = picker('auto')
   assert.equal(auto.options.length, available.length + 1)
+  // 1.11 P8 (A1 rule 3, A8): Automatic and the twenty-six at the join.
+  if (!pendingAllowed()) assert.equal(auto.options.length, 27)
   assert.deepEqual(auto.options.map((o) => o.id), ['auto', ...available])
   assert.deepEqual(auto.options.filter((o) => o.checked).map((o) => o.id), ['auto'])
   // Each language by its own name, in its own lang, with its flag; its name in the reader's language beside it. A

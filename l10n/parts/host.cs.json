@@ -132,6 +132,8 @@
   "this month": "tento měsíc",
   "this week": "tento týden",
   "today": "dnes",
+  "{0} (in {1})": "{0} (za {1})",
+  "{0} (reset due)": "{0} (obnovení na řadě)",
   "{0} ago": "před {0}",
   "{0} at {1} (threshold {2})": "{0} na {1} (práh {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "Cestu {0} nelze vyhodnotit ({1}). Vypadá jako odkaz, jehož cíl chybí, proto zůstala nedotčena — je třeba odkaz opravit a zkusit to znovu.",

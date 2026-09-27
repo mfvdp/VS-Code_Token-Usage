@@ -132,6 +132,8 @@
   "this month": "questo mese",
   "this week": "questa settimana",
   "today": "oggi",
+  "{0} (in {1})": "{0} (tra {1})",
+  "{0} (reset due)": "{0} (reset atteso)",
   "{0} ago": "{0} fa",
   "{0} at {1} (threshold {2})": "{0}: {1} (soglia {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "Impossibile risolvere {0} ({1}). Sembra un collegamento la cui destinazione manca, quindi non è stato toccato — riparare il collegamento e riprovare.",

@@ -14,7 +14,9 @@
 
 import * as fs from 'fs'
 import { SOURCES } from './adapters'
-import { PersistentAppServer, findCodexBinary as realFindCodexBinary } from './appServer'
+import {
+  AppServerStatus, CodexConnection, PersistentAppServer, findCodexBinary as realFindCodexBinary,
+} from './appServer'
 import { t } from './i18n'
 import {
   CLAUDE_VERSION_FALLBACK, detectClaudeVersion as realDetectClaudeVersion, PollFn, PollOptions, poll as realPoll,
@@ -88,6 +90,12 @@ export interface QuotaDeps {
 
 /** Why a fetch did not happen — so the caller can say something useful. */
 export type Blocked = 'mode' | 'consent' | 'follower' | null
+
+/** 1.12 A (§2.1): the standing connection's status for *Copy Diagnostics* — with the mode and this window's role. */
+export type AppServerReport = AppServerStatus & { mode: 'oneShot' | 'persistent'; role: 'leader' | 'follower' }
+
+/** The status of a connection that does not exist (the mode is `oneShot`, a gate is closed, no binary). */
+const NO_APP_SERVER: AppServerStatus = { state: 'off', restartsLastHour: 0, pushes: 0, lastPushAt: null, pid: null }
 
 const MINUTE_MS = 60_000
 const HOUR_MS = 3_600_000
@@ -242,7 +250,8 @@ export class QuotaManager {
   private resetTimers = new Set<Scheduled>()
 
   private appServer: PersistentAppServer | null = null
-  private pushSub: { dispose(): void } | null = null
+  /** The standing connection's two subscriptions: its pushes and its `ready`. */
+  private appServerSubs: Array<{ dispose(): void }> = []
   private claudeVersion: string | null = null
   private versionAsked = false
   /** 1.7 W3: the last user-agent version line logged — a line again only when the version or its source changes. */
@@ -301,6 +310,17 @@ export class QuotaManager {
     if (before.appServerMode !== opts.appServerMode || before.codexBinary !== opts.codexBinary) {
       this.stopAppServer()
     }
+    // 1.12 A4 rule 1: `quotaSource` no longer `poll` ends the standing child at once.
+    this.stopWhenBlocked()
+  }
+
+  /**
+   * 1.12 A4 rule 1: a gate may have closed without a setting changing — the network consent reset by
+   * *Reset Network Access Decision*. The caller says so here, and a standing child ends at once instead
+   * of at the next tick.
+   */
+  enforceGates(): void {
+    this.stopWhenBlocked()
   }
 
   setLeader(isLeader: boolean): void {
@@ -472,7 +492,11 @@ export class QuotaManager {
     // Re-reading the file sources is all a follower does — it renders whatever the
     // leader, or an external poller, has written.
     this.current(now)
-    if (this.blocked()) return
+    if (this.blocked()) {
+      // 1.12 A4 rule 1: a closed gate ends the standing child (1.0.0 left it running until the window closed).
+      this.stopWhenBlocked()
+      return
+    }
     this.ensureAppServer()
     if (this.focusSkips(now)) {
       this.logHeld(now)
@@ -539,6 +563,15 @@ export class QuotaManager {
       return f ? { kind: f.kind, at: f.at } : null
     }
     return { claude: of('claude'), codex: of('codex') }
+  }
+
+  /**
+   * 1.12 A (§2.1): the standing connection for *Copy Diagnostics* — its state, restarts, pushes — with
+   * the configured mode and this window's role. `off` where there is none.
+   */
+  appServerStatus(): AppServerReport {
+    const s = this.appServer?.status() ?? NO_APP_SERVER
+    return { ...s, mode: this.opts.appServerMode, role: this.leader ? 'leader' : 'follower' }
   }
 
   dispose(): void {
@@ -751,6 +784,8 @@ export class QuotaManager {
         userAgent: this.opts.userAgent,
         extVersion: this.deps.extVersion,
         claudeVersion: src === 'claude' ? this.userAgentVersion() : this.claudeVersion,
+        // 1.12 A2 rule 3: Codex is read over the standing connection when there is one.
+        codexConnection: src === 'codex' ? this.codexConnection() : null,
       }
       const r = await this.deps.poll(src, this.failCount[src], opts)
       // 1.6 R3: disposed while the request was under way. The exit has written what there was,
@@ -768,7 +803,7 @@ export class QuotaManager {
         this.addHistory(r.state, now)
         this.writeBack(src, r.raw, r.state)
         this.persist()
-        this.log(`${src}: quota fetched`)
+        this.log(r.via === 'connection' ? `${src}: quota fetched over the connection` : `${src}: quota fetched`)
       } else {
         // The poller's own words are what the display shows; only our fallback is translated,
         // and the log keeps the English so an issue report reads the same on every machine.
@@ -910,27 +945,65 @@ export class QuotaManager {
 
   // ------------------------------------------------------------- app-server
 
+  /**
+   * 1.12 A1: the standing connection — on the leader, in `poll` mode after consent (the caller, `tick`,
+   * asks `blocked()` first), in `persistent` mode, when the binary is found. One child per editor: a
+   * follower keeps none (`setLeader`). A connection already there is asked to start again — nothing
+   * while it runs or waits for a restart, the start past the budget's hour after `budgetSpent` (A3 rule 2).
+   */
   private ensureAppServer(): void {
     if (this.opts.appServerMode !== 'persistent') {
       this.stopAppServer()
       return
     }
-    if (this.appServer) return
+    if (this.appServer) {
+      this.appServer.start()
+      return
+    }
     const bin = this.deps.findCodexBinary(this.opts.codexBinary)
     if (!bin) return
     const srv = this.deps.createAppServer(bin, this.log)
     this.appServer = srv
-    this.pushSub = srv.onNotification((method, params) => {
-      if (method !== 'account/rateLimits/updated') return
-      this.applyPush(params)
-    })
+    this.appServerSubs = [
+      srv.onNotification((method, params) => {
+        if (method !== 'account/rateLimits/updated') return
+        this.applyPush(params)
+      }),
+      srv.onReady(() => this.firstReading()),
+    ]
     srv.start()
-    this.log('codex: app-server running as a persistent connection')
+    this.log('codex: app-server started as a standing connection')
+  }
+
+  /** The connection a Codex poll reads over, or null (1.12 A2 rule 3) — `usable()` decides the rest. */
+  private codexConnection(): CodexConnection | null {
+    return this.opts.appServerMode === 'persistent' ? this.appServer : null
+  }
+
+  /**
+   * 1.12 A2 rule 2: on every `ready` — the first and after each restart — one read over the connection,
+   * applied exactly as a poll's: pushes may have been missed while the child was down. Not while a
+   * Codex poll is under way (it reads over this connection, or brings its own answer), not past a closed
+   * gate, and not while the focus holds the polls (A2 rule 7 — a read is a poll).
+   */
+  private firstReading(): void {
+    if (this.disposed || this.blocked() !== null || this.inFlight.codex) return
+    if (this.focusSkips(this.deps.now())) return
+    void this.startPoll('codex')
+  }
+
+  /** 1.12 A4 rule 1: the standing child ends whenever a gate is closed — mode, consent, follower. */
+  private stopWhenBlocked(): void {
+    if (this.appServer === null) return
+    const why = this.blocked()
+    if (why === null) return
+    this.stopAppServer()
+    this.log(`codex: app-server stopped (${why})`)
   }
 
   private stopAppServer(): void {
-    this.pushSub?.dispose()
-    this.pushSub = null
+    for (const sub of this.appServerSubs) sub.dispose()
+    this.appServerSubs = []
     this.appServer?.stop()
     this.appServer = null
   }

@@ -4047,3 +4047,40 @@ test('the pages carry the sentences of the 1.11 documentation package, held to t
   assert.ok(doc.settings.includes('The settings UI offers the twenty-seven values as a list') && doc.settings.includes('The twenty-four languages beyond English and German were translated by AI agents'))
   assert.equal(properties['tokenPace.language'].enum?.length, 27)
 })
+
+test('the Codex app-server section says what the standing connection does — the default, the lease, the three methods, the reads, the pushes, the restarts and their hour, the ends, the diagnostics line — and the other pages point at it (1.12 A7)', () => {
+  const quota = flatText(doc.quotaSources)
+  const at = quota.indexOf('## The Codex app-server')
+  assert.ok(at >= 0, 'docs/quota-sources.md has no "The Codex app-server" section')
+  assert.equal(quota.includes('**Persistent app-server.**'), false, 'the 1.x opt-in paragraph is still there')
+  const section = quota.slice(at, quota.indexOf('## Writing the cache file', at))
+  for (const claim of [
+    '`tokenPace.codexAppServer.mode: persistent` — the default since 1.12',
+    'in the window that holds the lease', 'with `tokenPace.leaderElection: false` every window fetches and keeps its own',
+    'Three methods are sent and nothing else: `initialize`, `initialized` and `account/rateLimits/read`',
+    'Nothing of the answer to `initialize` is kept', 'no line of its output reaches the log',
+    'A fetch due while the child is starting waits for it; one due while it is restarting starts one child of its own, once',
+    'moves the next scheduled fetch a whole interval on', 'Pushes, where Codex sends them',
+    'started again after 5 seconds, the wait doubling up to 5 minutes', 'After five restarts within an hour',
+    'until the oldest of the five is an hour old', 'ended with `SIGKILL`', 'when another window takes over fetching',
+    '*Reset Network Access Decision*', 'the mode or `tokenPace.codexBinary` changes',
+    '`codex connection — mode persistent · state ready · restarts 0 in the last hour · pushes 3 · last push 42 s ago`',
+    '`codex: app-server ready`', '`codex: app-server exited — restart in 10 s`', '`codex: quota fetched over the connection`',
+    'A consent given before 1.12 stays valid',
+    'The standing connection was tested against a stand-in app-server, not against a signed-in Codex, by the author.',
+  ]) assert.ok(section.includes(claim), `docs/quota-sources.md's Codex app-server section does not say: ${claim}`)
+  // The states it names are the connection's, and a follower's.
+  const src = readDoc('src/appServer.ts')
+  const m = /export type AppServerState = ([^\n]+)/.exec(src)
+  assert.ok(m, 'src/appServer.ts no longer declares AppServerState')
+  const states = [...m[1].matchAll(/'([a-zA-Z]+)'/g)].map((x) => x[1])
+  assert.deepEqual(states, ['off', 'starting', 'ready', 'restarting', 'budgetSpent'])
+  for (const s of [...states, 'follower']) assert.ok(section.includes(`\`${s}\``), `the section does not name the state ${s}`)
+  // The pages beside it.
+  assert.ok(doc.settings.includes('| `codexAppServer.mode` | `persistent` |'), 'docs/settings.md does not show the new default')
+  assert.equal(properties['tokenPace.codexAppServer.mode'].default, 'persistent')
+  assert.ok(flatText(doc.privacy).includes('kept running while this window leads and fetches, and asked over that one connection'), 'docs/privacy.md has no Codex sentence')
+  const trouble = flatText(doc.troubleshooting)
+  assert.ok(trouble.includes('## The Codex app-server') && trouble.includes('| `state budgetSpent` | The app-server restarted too often — five times within an hour; for the rest of the hour each fetch starts it once'), 'docs/troubleshooting.md has no budgetSpent row')
+  assert.ok(flatText(doc.statusBar).includes('the Codex entry\'s figure may change between two fetches, when Codex pushes an update — nothing else of the entry changes'), 'docs/status-bar.md does not say a push may change the figure')
+})

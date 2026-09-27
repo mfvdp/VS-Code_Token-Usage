@@ -17,7 +17,7 @@
 import { execFile as nodeExecFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-import { findCodexBinary, readRateLimitsOnce } from './appServer'
+import { CodexConnection, findCodexBinary, readRateLimitsOnce } from './appServer'
 import { isCredentialsError, loadCredentials } from './credentials'
 import { t } from './i18n'
 import { claudeStateFromBody, codexStateFromBody } from './quota'
@@ -47,6 +47,11 @@ export interface PollResult {
   problemKind?: ProblemKind
   /** The parsed provider response — for the drift scan and the cache write-back. */
   raw?: unknown
+  /**
+   * 1.12 A2 rule 3: how Codex was asked — over the standing connection, or by a child of its own
+   * (`readRateLimitsOnce`). Absent for Claude.
+   */
+  via?: 'connection' | 'oneShot'
 }
 
 export interface PollOptions {
@@ -61,6 +66,11 @@ export interface PollOptions {
    * newest main session wrote into its transcript; null when neither is known (the fallback is sent).
    */
   claudeVersion: string | null
+  /**
+   * 1.12 A2 rule 3: the standing app-server connection, when there is one (the manager fills it in
+   * `persistent` mode on the leader); null or absent = a child per poll.
+   */
+  codexConnection?: CodexConnection | null
 }
 
 export type PollFn = (source: Source, failCount: number, opts: PollOptions) => Promise<PollResult>
@@ -329,33 +339,67 @@ export async function pollClaude(failCount: number, opts: PollOptions): Promise<
     }
 }
 
-export async function pollCodex(failCount: number, opts: { binary?: string }): Promise<PollResult> {
+/**
+ * The Codex read. 1.12 A2 rule 3: over the standing connection when it is usable (ready, or starting and
+ * ready within the read's wait) — the same method and the same parser as the one-shot path, `via:
+ * 'connection'`; otherwise, and when the connection was not there to ask after all, one child of its own
+ * (`readRateLimitsOnce`, `via: 'oneShot'`). Never two children for one read. `readOnce` is a test seam.
+ */
+export async function pollCodex(
+  failCount: number,
+  opts: {
+    binary?: string
+    connection?: CodexConnection | null
+    readOnce?: (bin: string) => Promise<unknown>
+  },
+): Promise<PollResult> {
+  const conn = opts.connection ?? null
+  if (conn !== null && conn.usable()) {
+    let body: unknown
+    let asked = true
+    try {
+      body = await conn.readRateLimits()
+    } catch {
+      // The connection did not become ready within the wait: this read starts its own child.
+      asked = false
+    }
+    if (asked) return codexResult(body, failCount, 'connection')
+  }
   const bin = findCodexBinary(opts.binary)
   if (!bin) {
     return {
       state: null, retryAfterSeconds: null, problem: t('codex executable not found'), problemKind: 'noBinary',
     }
   }
-  const body = await readRateLimitsOnce(bin)
+  const body = await (opts.readOnce ?? readRateLimitsOnce)(bin)
+  return codexResult(body, failCount, 'oneShot')
+}
+
+/** One app-server answer — the connection's or a one-shot child's — as a poll result. */
+function codexResult(body: unknown, failCount: number, via: 'connection' | 'oneShot'): PollResult {
   if (body && typeof body === 'object' && 'error' in body) {
     return {
       state: null,
       retryAfterSeconds: backoff(failCount + 1, BACKOFF_NET_BASE_S, BACKOFF_NET_MAX_S),
       problem: String((body as { error: string }).error),
       problemKind: 'retry',
+      via,
     }
   }
   const state = codexStateFromBody(body, Math.floor(Date.now() / 1000), 'poll')
   return state.ok
-    ? { state, retryAfterSeconds: null, raw: body }
+    ? { state, retryAfterSeconds: null, raw: body, via }
     : {
       state: null,
       retryAfterSeconds: null,
       problem: t('app-server returned no quota windows'),
       problemKind: 'empty',
       raw: body,
+      via,
     }
 }
 
 export const poll: PollFn = (source, failCount, opts) =>
-  source === 'claude' ? pollClaude(failCount, opts) : pollCodex(failCount, { binary: opts.codexBinary })
+  source === 'claude'
+    ? pollClaude(failCount, opts)
+    : pollCodex(failCount, { binary: opts.codexBinary, connection: opts.codexConnection ?? null })

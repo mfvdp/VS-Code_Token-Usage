@@ -93,6 +93,9 @@ Part of the [Token Pace documentation](../README.md#documentation).
   every redraw, so it never freezes at the value it had when it was fetched. A reading older
   than `staleAfterMinutes` (default 20) is greyed with `tokenPace.stale`, marked in the
   tooltip, loses its alarm background, and may not raise an alert.
+* **A push from Codex.** With the standing app-server connection (the default,
+  [The Codex app-server](quota-sources.md#the-codex-app-server)) the Codex entry's figure may change
+  between two fetches, when Codex pushes an update — nothing else of the entry changes.
 * **A failed fetch of our own.** When a reading is stale because of a transient failure of Token
   Pace's own fetch after it was taken (a `429` and its backoff, a server or network error), the item
   says so after the age:

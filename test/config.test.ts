@@ -517,3 +517,20 @@ test('the language setting: a string enum of auto and the twenty-six ids, auto b
   assert.equal(keys.indexOf('tokenPace.cacheKeepWarm'), keys.indexOf('tokenPace.planName') + 1)
   assert.equal(CONFIG_KEYS[0], 'tokenPace.language')
 })
+
+test('the Codex app-server keeps a standing connection by default; oneShot stays the opt-out (1.12 A1 rule 1, A6 test 9)', () => {
+  const p = properties['tokenPace.codexAppServer.mode']
+  assert.equal(p.default, 'persistent')
+  assert.deepEqual(p.enum, ['oneShot', 'persistent'])
+  // Unset, or a value that is not one of the two: the manifest's default.
+  assert.equal(sanitize({}).codexAppServer.mode, 'persistent')
+  assert.equal(sanitize({ 'tokenPace.codexAppServer.mode': 'always' }).codexAppServer.mode, 'persistent')
+  assert.equal(sanitize({ 'tokenPace.codexAppServer.mode': 'oneShot' }).codexAppServer.mode, 'oneShot')
+  // The words say so, in English and German (A5).
+  assert.match(englishNls['config.codexAppServer.mode.enum.persistent'], /— the default$/)
+  assert.match(germanNls['config.codexAppServer.mode.enum.persistent'], /— die Voreinstellung$/)
+  for (const nls of [englishNls, germanNls]) {
+    assert.ok(nls['config.codexAppServer.mode.description'].includes('`persistent`'))
+    assert.ok(nls['config.codexAppServer.mode.description'].includes('`oneShot`'))
+  }
+})

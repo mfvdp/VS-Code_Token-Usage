@@ -54,7 +54,8 @@ happen, a modal dialog names, in concrete terms:
 * `GET https://api.anthropic.com/api/oauth/usage` and the `accessToken` in
   `~/.claude/.credentials.json`,
 * that the request identifies itself as the Claude Code client, and why,
-* that for Codex the local `codex app-server` is started and nothing of ours leaves the machine,
+* that for Codex the local `codex app-server` is started — in the default mode kept running while this
+  window fetches ([The Codex app-server](#the-codex-app-server)) — and nothing of ours leaves the machine,
 * that the endpoint is undocumented, carries no stability promise, and may change or disappear
   — after which Token Pace shows no quota figures rather than guessing any,
 * that the token is only read, never refreshed, never logged, never in an error message or in
@@ -71,7 +72,9 @@ Decision** puts the question back.
   configurable.
 * **Codex** — `codex app-server --stdio` is started and asked for `account/rateLimits/read` over
   JSON-RPC. The executable is looked up via `tokenPace.codexBinary`, then `CODEX_CLI_PATH`, then
-  `PATH`, and finally inside the binary bundled with the official IDE extension.
+  `PATH`, and finally inside the binary bundled with the official IDE extension. By default it is
+  started once and kept running, and every fetch asks it over that one connection
+  ([The Codex app-server](#the-codex-app-server)).
 
 **User agent.** `tokenPace.userAgent: claudeCode` (default) sends the same string Claude Code
 itself sends, `claude-code/<version>`. The version comes from three sources, in this order:
@@ -179,12 +182,52 @@ once per hold `claude: a due fetch waits for this window to be focused (tokenPac
 That is said only of an attempt that would be made — a fresh reading from the status line or a cache
 file answers the fetch, and a background window showing one holds nothing back.
 
-**Persistent app-server.** `tokenPace.codexAppServer.mode: persistent` keeps one
-`codex app-server` child alive per editor instead of spawning one per poll, and then receives
-`account/rateLimits/updated` pushes as data. It is killed on deactivate and on process exit,
-restarts with exponential backoff (5 s up to 5 min), and gives up after five restarts in an hour
-rather than respawning a broken binary forever. Followers keep no child. The default `oneShot`
-spawns per poll and kills the child afterwards.
+## The Codex app-server
+
+With `tokenPace.codexAppServer.mode: persistent` — the default since 1.12 — Token Pace keeps one
+`codex app-server --stdio` running instead of starting one for every fetch. It starts only where a
+fetch of our own may run: `quotaSource: poll`, after the consent, in the window that holds the lease,
+and when the executable is found. One child serves the whole editor — the rate limits are the
+account's, and the other windows show what the fetching window writes; with
+`tokenPace.leaderElection: false` every window fetches and keeps its own.
+
+* **The session.** Token Pace sends `initialize` and `initialized`, waits for the answer to
+  `initialize`, and only then asks. Three methods are sent and nothing else: `initialize`,
+  `initialized` and `account/rateLimits/read`. Nothing of the answer to `initialize` is kept, the
+  child's error output is never read, and no line of its output reaches the log.
+* **Reads over the connection.** Every scheduled fetch, *Fetch Quota Now* and a first reading after
+  each start ask `account/rateLimits/read` over that connection — the question the one-shot child is
+  asked, read the same way. A fetch due while the child is starting waits for it; one due while it
+  is restarting starts one child of its own, once. The fetches follow `tokenPace.pollOnlyWhenFocused`
+  as before.
+* **Pushes, where Codex sends them.** An `account/rateLimits/updated` push is taken as a reading and
+  moves the next scheduled fetch a whole interval on, so while pushes keep coming no fetch is made.
+  Pushes are taken whatever the focus. Whether Codex sends them without being asked is not
+  documented; without them the interval fetch delivers as before.
+* **Restarts.** A child that exits, refuses `initialize` or leaves a question unanswered for 20
+  seconds is ended and started again after 5 seconds, the wait doubling up to 5 minutes. After five
+  restarts within an hour it is not restarted: each fetch then starts a child of its own, as in
+  `oneShot`, until the oldest of the five is an hour old — then the next check, within 30 seconds,
+  starts the standing child again.
+* **The ends.** The child is ended with `SIGKILL` when VS Code closes or the window is closed or
+  reloaded, when another window takes over fetching, when fetching is switched off — `quotaSource`
+  no longer `poll`, or *Reset Network Access Decision* — and when the mode or `tokenPace.codexBinary`
+  changes. Only an extension host killed outright runs no exit handler: the child's input then
+  closes, which a stdio server answers by ending — whether `codex app-server` does was not tested.
+
+*Copy Diagnostics* says which mode is live, in one line:
+`codex connection — mode persistent · state ready · restarts 0 in the last hour · pushes 3 · last push 42 s ago`.
+The states are `off` (no child: `oneShot`, fetching not allowed here, or no executable), `starting`,
+`ready`, `restarting`, `budgetSpent` (restarted too often — each fetch starts its own child until the
+hour has passed) and `follower` (another window keeps the child). The log says
+`codex: app-server ready`, `codex: app-server exited — restart in 10 s` and
+`codex: quota fetched over the connection`.
+
+`oneShot` starts one child per fetch and ends it once it has answered — no long-running process.
+A consent given before 1.12 stays valid: keeping the child running sends nothing anywhere.
+
+The standing connection was tested against a stand-in app-server, not against a signed-in Codex, by
+the author.
 
 ## Writing the cache file (opt-in)
 

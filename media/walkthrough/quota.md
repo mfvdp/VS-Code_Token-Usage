@@ -29,8 +29,8 @@ If you allow it, then at most every 30 minutes (tokenPace.pollIntervalMinutes):
 • Claude — GET https://api.anthropic.com/api/oauth/usage, using the accessToken from
   ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,
   because the endpoint rate-limits other callers into a permanent 429.
-• Codex — the local "codex app-server" is started and asked for its rate limits. No traffic
-  of ours leaves the machine for this.
+• Codex — the local "codex app-server" is started, kept running while this window fetches, and
+  asked for its rate limits. No traffic of ours leaves the machine for this.
 
 That endpoint is undocumented: it is what Claude Code itself calls, it carries no stability
 promise, and it may change or disappear at any time. Token Pace then shows no quota figures
@@ -43,5 +43,7 @@ no usage data is collected by this extension.
 You can change this later with "Token Pace: Reset Network Access Decision".
 ```
 
-The interval in the first line is your `tokenPace.pollIntervalMinutes`.
+The interval in the first line is your `tokenPace.pollIntervalMinutes`; with
+`tokenPace.codexAppServer.mode: oneShot` the Codex line says the app-server is started for each
+fetch instead of kept running.
 `tokenPace.quotaSource: cache` settles the question for good, without a dialog.

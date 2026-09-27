@@ -78,6 +78,18 @@ share of an invented denominator would be our number wearing the provider’s cl
 window arrives the line is gone, and the status bar is unchanged either way — a problem state
 stays a problem state.
 
+## The Codex app-server
+
+*Copy Diagnostics* has one line on it, `codex connection — mode … · state …`
+([The Codex app-server](quota-sources.md#the-codex-app-server)):
+
+| The line says | What it means | What to do |
+|---|---|---|
+| `state budgetSpent` | The app-server restarted too often — five times within an hour; for the rest of the hour each fetch starts it once, as `oneShot` does | Nothing: the figures keep coming. The log says why it ended each time (`codex: app-server exited — restart in …`); a `codex` that exits at once is worth updating, or `tokenPace.codexBinary` pointed at another |
+| `state restarting` | The child ended and a restart waits — 5 seconds, doubling up to 5 minutes | Nothing; the log says when |
+| `state off` with `mode persistent` | No child runs: fetching is not allowed in this window (`quotaSource`, the consent) or no `codex` executable was found | The Codex entry's own state names which — the table at the top of this page |
+| `state follower` | Another window holds the lease and keeps the one child for the editor | Nothing |
+
 ## The agent hook
 
 The [agent hook](agents.md#the-agent-hook) is optional, and nothing in the status bar depends on

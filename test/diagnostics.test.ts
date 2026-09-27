@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
-  buildDiagnostics, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
+  buildDiagnostics, codexConnectionDiag, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
   InspectLike, maskProxyUrl, scrubHome, tildify, VscodeConfigApi,
 } from '../src/diagnostics'
 import { setBundle, setLang, setLocale } from '../src/i18n'
@@ -43,6 +43,7 @@ function input(over: Partial<DiagnosticsInput> = {}): DiagnosticsInput {
       backoffEndsAt: null,
       drift: ['spend.used.amount_minor'],
     }],
+    codexConnection: { mode: 'persistent', state: 'ready', restartsLastHour: 0, pushes: 3, lastPushAgeSec: 42 },
     consent: 'granted',
     role: 'leader',
     bridge: { installed: true, shadowed: false, mirrorAgeMs: 180_000 },
@@ -337,4 +338,38 @@ test('the report is byte for byte the same under a German page: its figures keep
     setLocale(undefined)
     setLang(undefined)
   }
+})
+
+test('the codex connection line says which mode is live and where the standing connection is — every state, a follower\'s, and nothing but words and counts (1.12 A6 test 11, §0a.11)', () => {
+  const line = (c: DiagnosticsInput['codexConnection']): string => {
+    const out = buildDiagnostics(input({ codexConnection: c }))
+    const l = out.split('\n').find((x) => x.startsWith('codex connection'))
+    assert.ok(l, 'the report has no codex connection line')
+    // It closes the quota sources section.
+    const lines = out.split('\n')
+    assert.ok(lines.indexOf(l) > lines.indexOf('## Quota sources') && lines.indexOf(l) < lines.indexOf('## Status line bridge'))
+    return l
+  }
+  const now = 1_700_000_000_000
+  const base = { mode: 'persistent' as const, role: 'leader' as const, restartsLastHour: 0, pushes: 0, lastPushAt: null, pid: 4242 }
+  const cases: Array<[Parameters<typeof codexConnectionDiag>[0], string]> = [
+    [{ ...base, state: 'off' }, 'codex connection — mode persistent · state off · restarts 0 in the last hour · pushes 0 · last push –'],
+    [{ ...base, state: 'starting' }, 'codex connection — mode persistent · state starting · restarts 0 in the last hour · pushes 0 · last push –'],
+    [{ ...base, state: 'ready', pushes: 3, lastPushAt: now - 42_000 }, 'codex connection — mode persistent · state ready · restarts 0 in the last hour · pushes 3 · last push 42 s ago'],
+    [{ ...base, state: 'restarting', restartsLastHour: 2, pushes: 7, lastPushAt: now - 600_000 }, 'codex connection — mode persistent · state restarting · restarts 2 in the last hour · pushes 7 · last push 10 min ago'],
+    [{ ...base, state: 'budgetSpent', restartsLastHour: 5 }, 'codex connection — mode persistent · state budgetSpent · restarts 5 in the last hour · pushes 0 · last push –'],
+    [{ ...base, mode: 'oneShot', state: 'off' }, 'codex connection — mode oneShot · state off · restarts 0 in the last hour · pushes 0 · last push –'],
+    // A follower keeps no child — whatever its (absent) connection would say.
+    [{ ...base, role: 'follower', state: 'off' }, 'codex connection — mode persistent · state follower · restarts 0 in the last hour · pushes 0 · last push –'],
+  ]
+  for (const [status, expected] of cases) {
+    const l = line(codexConnectionDiag(status, now))
+    assert.equal(l, expected)
+    // The pid is for the tests only (§2.1): the report prints none.
+    assert.equal(l.includes('4242'), false)
+  }
+  assert.equal(line(null), 'codex connection — not reported')
+  // Held to its words and counts: a hostile value is a `?` or a dash, never text the report repeats.
+  const hostile = { mode: 'x```y', state: '/home/tester/codex', restartsLastHour: Number.NaN, pushes: -1, lastPushAgeSec: null } as unknown as DiagnosticsInput['codexConnection']
+  assert.equal(line(hostile), 'codex connection — mode ? · state ? · restarts – in the last hour · pushes – · last push –')
 })

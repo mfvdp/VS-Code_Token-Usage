@@ -444,6 +444,8 @@ test('a push from the persistent app-server is data, and resets the fallback tim
   // A holder rather than a bare variable: the callback is assigned inside a method,
   // which the type checker cannot follow.
   const sink: { cb: ((method: string, params: unknown) => void) | null } = { cb: null }
+  // 1.12 A2 rule 2 (pinned and changed): the manager also subscribes to the connection's `ready` for its
+  // first reading, so the stand-in answers onReady; this test never makes it ready.
   const fake = {
     start() { started++ },
     stop() { stopped++ },
@@ -451,6 +453,7 @@ test('a push from the persistent app-server is data, and resets the fallback tim
       sink.cb = cb
       return { dispose: () => { sink.cb = null } }
     },
+    onReady() { return { dispose: () => { /* nothing */ } } },
   }
   const h = harness({ appServerMode: 'persistent' }, {
     findCodexBinary: () => '/nowhere/codex',
@@ -485,10 +488,12 @@ test('a push from the persistent app-server is data, and resets the fallback tim
 
 test('leaving the persistent mode stops the child process', async () => {
   let stopped = 0
+  // 1.12 A2 rule 2 (pinned and changed): the stand-in answers onReady, which the manager subscribes to.
   const fake = {
     start() { /* nothing */ },
     stop() { stopped++ },
     onNotification() { return { dispose: () => { /* nothing */ } } },
+    onReady() { return { dispose: () => { /* nothing */ } } },
   }
   const h = harness({ appServerMode: 'persistent' }, {
     findCodexBinary: () => '/nowhere/codex',
@@ -498,6 +503,39 @@ test('leaving the persistent mode stops the child process', async () => {
   await flush()
   h.mgr.setOptions({ ...OPTIONS, appServerMode: 'oneShot' })
   assert.equal(stopped, 1)
+})
+
+test('appServerStatus: the mode, the role and "off" where no connection runs; a closed gate ends a running one and the log says why (1.12 A, A4 rule 1)', async () => {
+  const h = harness({ appServerMode: 'oneShot' })
+  assert.deepEqual(h.mgr.appServerStatus(), {
+    state: 'off', restartsLastHour: 0, pushes: 0, lastPushAt: null, pid: null, mode: 'oneShot', role: 'leader',
+  })
+  h.mgr.setLeader(false)
+  assert.equal(h.mgr.appServerStatus().role, 'follower')
+
+  let stopped = 0
+  const fake = {
+    start() { /* nothing */ },
+    stop() { stopped++ },
+    status() { return { state: 'ready', restartsLastHour: 1, pushes: 4, lastPushAt: BASE - MIN, pid: 99 } },
+    onNotification() { return { dispose: () => { /* nothing */ } } },
+    onReady() { return { dispose: () => { /* nothing */ } } },
+  }
+  let consent = true
+  const p = harness({ appServerMode: 'persistent' }, {
+    findCodexBinary: () => '/nowhere/codex',
+    createAppServer: () => fake as never,
+  }, () => consent)
+  p.mgr.tick(() => { /* nothing */ })
+  await flush()
+  assert.deepEqual(p.mgr.appServerStatus(), {
+    state: 'ready', restartsLastHour: 1, pushes: 4, lastPushAt: BASE - MIN, pid: 99, mode: 'persistent', role: 'leader',
+  })
+  consent = false
+  p.mgr.tick(() => { /* nothing */ })
+  assert.equal(stopped, 1)
+  assert.ok(p.logs.includes('codex: app-server stopped (consent)'), p.logs.join(' | '))
+  assert.equal(p.mgr.appServerStatus().state, 'off')
 })
 
 test('current() replays its answer for five seconds instead of re-reading the files', () => {

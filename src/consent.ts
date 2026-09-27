@@ -48,9 +48,12 @@ const DEFAULT_INTERVAL_MINUTES = 30
  * The network disclosure, with the interval the user has actually configured.
  *
  * A fixed "every 30 minutes" in the text was a small lie as soon as the setting
- * moved, and the whole point of this dialog is that its numbers are true.
+ * moved, and the whole point of this dialog is that its numbers are true. For the
+ * same reason the Codex paragraph follows `tokenPace.codexAppServer.mode` (1.12 A5):
+ * `persistent` — the default — keeps the app-server running while this window
+ * fetches, and the text says so; `oneShot` keeps the 1.x sentence.
  */
-export function disclosure(intervalMinutes: number): string {
+export function disclosure(intervalMinutes: number, appServerMode: 'oneShot' | 'persistent' = 'persistent'): string {
   const minutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0
     ? Math.round(intervalMinutes)
     : DEFAULT_INTERVAL_MINUTES
@@ -62,7 +65,9 @@ export function disclosure(intervalMinutes: number): string {
     cadenceLine(minutes),
     '',
     t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using the accessToken from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.'),
-    t('\u2022 Codex \u2014 the local "codex app-server" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.'),
+    appServerMode === 'oneShot'
+      ? t('\u2022 Codex \u2014 the local "codex app-server" is started and asked for its rate limits. No traffic\n  of ours leaves the machine for this.')
+      : t('\u2022 Codex \u2014 the local "codex app-server" is started, kept running while this window fetches, and\n  asked for its rate limits. No traffic of ours leaves the machine for this.'),
     '',
     t('That endpoint is undocumented: it is what Claude Code itself calls, it carries no stability\npromise, and it may change or disappear at any time. Token Pace then shows no quota figures\nrather than guessing any.'),
     '',
@@ -107,7 +112,12 @@ export class NetworkConsent {
   constructor(
     private memento: MementoLike,
     private log: (msg: string) => void,
-    private opts: { intervalMinutes?: () => number; ui?: ConsentUi } = {},
+    private opts: {
+      intervalMinutes?: () => number
+      /** 1.12 A5: the configured `tokenPace.codexAppServer.mode`, read when the text is shown. */
+      appServerMode?: () => 'oneShot' | 'persistent'
+      ui?: ConsentUi
+    } = {},
   ) {}
 
   state(): ConsentState {
@@ -120,7 +130,7 @@ export class NetworkConsent {
 
   /** The text the dialog would show right now — also used by the onboarding card. */
   disclosure(): string {
-    return disclosure(this.opts.intervalMinutes?.() ?? DEFAULT_INTERVAL_MINUTES)
+    return disclosure(this.opts.intervalMinutes?.() ?? DEFAULT_INTERVAL_MINUTES, this.opts.appServerMode?.() ?? 'persistent')
   }
 
   /**

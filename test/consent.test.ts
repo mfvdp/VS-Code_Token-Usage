@@ -11,11 +11,14 @@
  */
 
 import { strict as assert } from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   ConsentUi, DEFAULT_QUOTA_CACHE_FILES, disclosure, NetworkConsent, WriteConsent,
   writeConsentDisclosure,
 } from '../src/consent'
+import { setBundle, setLocale } from '../src/i18n'
 import { MementoLike } from '../src/storage'
 
 class FakeMemento implements MementoLike {
@@ -176,4 +179,38 @@ test('the network consent remembers exactly one answer per machine', async () =>
   await consent.reset()
   assert.equal(consent.state(), 'unasked')
   assert.equal(consent.offered(), false)
+})
+
+test('the Codex paragraph follows the app-server mode — persistent says it keeps running, oneShot keeps the 1.x words; in German too (1.12 A5, A6 test 10)', async () => {
+  const persistent = '\u2022 Codex \u2014 the local "codex app-server" is started, kept running while this window fetches, and\n'
+    + '  asked for its rate limits. No traffic of ours leaves the machine for this.'
+  const oneShot = '\u2022 Codex \u2014 the local "codex app-server" is started and asked for its rate limits. No traffic\n'
+    + '  of ours leaves the machine for this.'
+  assert.ok(disclosure(30, 'persistent').includes(persistent))
+  assert.equal(disclosure(30, 'persistent').includes(oneShot), false)
+  assert.ok(disclosure(30, 'oneShot').includes(oneShot))
+  assert.equal(disclosure(30, 'oneShot').includes(persistent), false)
+  // The default is the setting's default.
+  assert.equal(disclosure(30), disclosure(30, 'persistent'))
+  // The dialog reads the configured mode when it is shown.
+  let mode: 'oneShot' | 'persistent' = 'oneShot'
+  const consent = new NetworkConsent(new FakeMemento(), () => {}, { intervalMinutes: () => 30, appServerMode: () => mode })
+  assert.ok(consent.disclosure().includes(oneShot))
+  mode = 'persistent'
+  assert.ok(consent.disclosure().includes(persistent))
+  const host = ui([undefined])
+  await new NetworkConsent(new FakeMemento(), () => {}, { ui: host, intervalMinutes: () => 30, appServerMode: () => mode }).request()
+  assert.ok(host.shown[0].detail.includes(persistent))
+
+  const de = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(de)
+    setLocale('de')
+    assert.ok(disclosure(30, 'persistent').includes('\u2022 Codex \u2014 der lokale \u201ecodex app-server\u201c wird gestartet, l\u00e4uft weiter, solange dieses Fenster abruft,\n'
+      + '  und wird nach seinen Rate-Limits gefragt. Daf\u00fcr verl\u00e4sst kein Datenverkehr von uns den Rechner.'))
+    assert.ok(disclosure(30, 'oneShot').includes('\u2022 Codex \u2014 der lokale \u201ecodex app-server\u201c wird gestartet und nach seinen Rate-Limits gefragt.\n'))
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+  }
 })

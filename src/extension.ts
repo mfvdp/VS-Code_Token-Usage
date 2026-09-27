@@ -57,7 +57,7 @@ import { KeepWarmConsent, NetworkConsent, WriteConsent } from './consent'
 import { watchCredentials } from './credentials'
 import { DashboardProvider } from './dashboard'
 import {
-  buildDiagnostics, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
+  buildDiagnostics, codexConnectionDiag, collectHttpSettings, collectProxyEnv, collectSettings, DiagnosticsInput,
   HttpSetting, QuotaDiag, tildify,
 } from './diagnostics'
 import { CLAUDE_ROOTS, CODEX_ROOTS, configureRoots } from './discover'
@@ -322,6 +322,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   const consent = new NetworkConsent(context.globalState, say, {
     intervalMinutes: () => readConfig().pollIntervalMinutes,
+    // 1.12 A5: the Codex paragraph says whether the app-server keeps running (the configured mode).
+    appServerMode: () => readConfig().codexAppServer.mode,
   })
   // A function, not a value: both paths follow `tokenPace.claudeQuotaFile` /
   // `tokenPace.codexQuotaFile`, so the dialog must read them when it is shown and
@@ -1605,6 +1607,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
       retention: { hourDays: cfg.hourRetentionDays, days: cfg.retentionDays, historyDays: cfg.quotaHistoryDays },
       historySize: { samples: hist.samples, bytes: hist.bytes, oldest: hist.oldest === null ? null : dayOf(hist.oldest, tcfg) },
       quota,
+      // 1.12 A (§0a.11): which Codex mode is live, and where the standing connection is.
+      codexConnection: codexConnectionDiag(quotaMgr.appServerStatus(), Date.now()),
       consent: consent.state(),
       role,
       bridge: bridgeDiag(),
@@ -1844,6 +1848,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     vscode.commands.registerCommand('tokenPace.refreshQuota', fetchNow),
     vscode.commands.registerCommand('tokenPace.resetNetworkConsent', async () => {
       await consent.reset()
+      // 1.12 A4 rule 1: the consent gone, a standing app-server child ends now, not at the next tick.
+      quotaMgr.enforceGates()
       ensureCredentialsWatcher()
       void vscode.window.showInformationMessage(
         t('Token Pace: network access decision reset. The next quota fetch will ask again.'),

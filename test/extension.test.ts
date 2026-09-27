@@ -4843,3 +4843,44 @@ test('1.11 B4: while the cold scan reads, the page\'s Records say "Reading histo
   assert.ok(records.topModels.length > 0, JSON.stringify(records))
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
 })
+
+test('the Codex app-server in the host: the diagnostics name the mode, Reset Network Access Decision asks the manager to end the child at once, and the consent names the mode it will run (1.12 A4 rule 1, A5, §0a.11)', async () => {
+  const { QuotaManager } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  const proto = QuotaManager.prototype as unknown as { enforceGates: () => void }
+  const real = proto.enforceGates
+  let enforced = 0
+  proto.enforceGates = function (this: unknown): void {
+    enforced++
+    real.apply(this)
+  }
+  try {
+    // The default: persistent, no child in this window (no consent yet, no codex), and the line says so.
+    await activateHost(makeFixture(), REPO, { settings: { 'tokenPace.quotaSource': 'poll' } })
+    await waitOwnColdStart(state)
+    await state.execute('tokenPace.copyDiagnostics')
+    const report = state.clipboard[state.clipboard.length - 1]
+    assert.match(report, /^codex connection — mode persistent · state (off|follower) · restarts 0 in the last hour · pushes 0 · last push –$/m)
+    await state.execute('tokenPace.resetNetworkConsent')
+    assert.equal(enforced, 1, 'the consent reset did not ask the manager to end the standing child')
+    // The consent dialog of *Fetch Quota Now* under poll says the app-server keeps running.
+    state.answers.push(Promise.resolve(undefined))
+    await state.execute('tokenPace.refreshQuota')
+    const asked = state.messages.find((m) => m.text === 'Allow Token Pace to fetch quota figures?')
+    assert.ok(asked, 'no consent dialog')
+    assert.ok(String(asked.options?.detail ?? '').includes('is started, kept running while this window fetches, and'), String(asked.options?.detail))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+
+    // The opt-out: the line and the consent say oneShot.
+    await activateHost(makeFixture(), REPO, { settings: { 'tokenPace.quotaSource': 'poll', 'tokenPace.codexAppServer.mode': 'oneShot' } })
+    await waitOwnColdStart(state)
+    await state.execute('tokenPace.copyDiagnostics')
+    assert.match(state.clipboard[state.clipboard.length - 1], /^codex connection — mode oneShot · state (off|follower) · /m)
+    state.answers.push(Promise.resolve(undefined))
+    await state.execute('tokenPace.refreshQuota')
+    const again = state.messages.find((m) => m.text === 'Allow Token Pace to fetch quota figures?')
+    assert.ok(String(again?.options?.detail ?? '').includes('is started and asked for its rate limits. No traffic'))
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+  } finally {
+    proto.enforceGates = real
+  }
+})

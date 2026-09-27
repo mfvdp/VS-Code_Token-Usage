@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "applied": 14,
+  "applied": 18,
   "bundle": {
     "week to date": {
       "parts": [
@@ -85,6 +85,13 @@
       ],
       "state": "translate",
       "why": "the weekday grid’s basis of two weeks says observations, not yet a habit (was based on {0} weeks — a record, not a habit) — record is only the Records section’s personal best, so translate the new English — 1.12 D7"
+    },
+    "• Codex — the local \"codex app-server\" is started, kept running while this window fetches, and\n  asked for its rate limits. No traffic of ours leaves the machine for this.": {
+      "parts": [
+        "text"
+      ],
+      "state": "translate",
+      "why": "the network consent’s Codex paragraph for the default mode persistent — the app-server is started, kept running while this window fetches, and asked for its rate limits — beside the 1.x paragraph, which stays for oneShot: write it as you wrote that one, the hard wrap after the first line with the two-space indent, and keep \"codex app-server\" as it stands — 1.12 A5"
     }
   },
   "nls": {
@@ -95,6 +102,18 @@
     "config.attribution.description": {
       "state": "review",
       "why": "the last sentence says the collected per-session data (was per-session records) — record is only the Records section’s personal best, so where you wrote your word for a record there, write your word for data — 1.12 D7"
+    },
+    "config.codexAppServer.mode.description": {
+      "state": "review",
+      "why": "the description now says that the standing connection is the default — `persistent` keeps one codex app-server running while fetching is allowed, in the window that fetches for this editor, takes its rate-limit updates as they arrive and asks it over the same connection, ends when VS Code closes, another window takes over or fetching is switched off, and restarts after a growing wait (was: how it is used when Codex is polled, the persistent mode killed on deactivate and restarted with a backoff) — keep `codex app-server`, `persistent` and `oneShot` as they stand — 1.12 A5"
+    },
+    "config.codexAppServer.mode.enum.oneShot": {
+      "state": "review",
+      "why": "the oneShot choice says start codex app-server for each fetch and end it again — no long-running process (was Start codex app-server per fetch and stop it again — no long-lived child process) — the meaning is unchanged, keep codex app-server as it stands — 1.12 A5"
+    },
+    "config.codexAppServer.mode.enum.persistent": {
+      "state": "review",
+      "why": "the persistent choice is the default now: keep one codex app-server running and take its rate-limit updates as they arrive — the default (was Keep one codex app-server open and apply its rate-limit pushes directly — fresher, one more process) — keep codex app-server as it stands — 1.12 A5"
     }
   }
 }

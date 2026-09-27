@@ -305,7 +305,13 @@ reads Token Pace's own translation file for it (above) and nothing else — no t
 Claude Code or Codex, nothing over the network.
 
 The only outbound network access is the consent-gated quota fetch described under
-[Quota sources](quota-sources.md). That promise is checked mechanically:
+[Quota sources](quota-sources.md). For Codex the same consent starts the local `codex app-server`
+and asks it for its rate limits — in the default `tokenPace.codexAppServer.mode: persistent` it is
+kept running while this window leads and fetches, and asked over that one connection; nothing of
+ours leaves the machine for it, and of its answers only the rate limits are kept — not the answer
+to `initialize`, not its error output, no line of it in the log
+([The Codex app-server](quota-sources.md#the-codex-app-server)). A consent given before 1.12 stays
+valid: keeping the child running sends nothing anywhere. That promise is checked mechanically:
 `npm run check:privacy` scans the shipped bundles for every `http(s)`
 literal and matches it against a small allow-list (`api.anthropic.com`, the two official usage
 pages, and documentation links that only ever appear as text). It runs in CI on all three

@@ -1322,7 +1322,7 @@
               "oneShot",
               "persistent"
             ],
-            "default": "oneShot",
+            "default": "persistent",
             "enumDescriptions": [
               "%config.codexAppServer.mode.enum.oneShot%",
               "%config.codexAppServer.mode.enum.persistent%"

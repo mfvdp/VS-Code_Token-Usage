@@ -65,6 +65,49 @@ export interface BridgeDiag {
   mirrorAgeMs: number | null
 }
 
+/**
+ * 1.12 A (§2.1, §0a.11): the Codex app-server line — the configured mode and where the standing
+ * connection is. `follower` in a window that does not lead (it keeps no child); `off` where no child
+ * runs — `oneShot`, a closed gate, no binary. Counts and an age only: no pid, no path, no line of the
+ * server's.
+ */
+export interface CodexConnectionDiag {
+  mode: 'oneShot' | 'persistent'
+  state: 'off' | 'starting' | 'ready' | 'restarting' | 'budgetSpent' | 'follower'
+  restartsLastHour: number
+  pushes: number
+  lastPushAgeSec: number | null
+}
+
+/** 1.12 A: the modes and states the line may print — anything else is printed as `?`. */
+const CODEX_MODES: readonly string[] = ['oneShot', 'persistent']
+const CODEX_STATES: readonly string[] = ['off', 'starting', 'ready', 'restarting', 'budgetSpent', 'follower']
+
+/**
+ * 1.12 A: the manager's `appServerStatus()` as the diagnostics line takes it — a follower's state is
+ * `follower` whatever its (absent) connection says, the last push as an age at `now` (ms).
+ */
+export function codexConnectionDiag(
+  s: {
+    mode: 'oneShot' | 'persistent'
+    role: 'leader' | 'follower'
+    state: Exclude<CodexConnectionDiag['state'], 'follower'>
+    restartsLastHour: number
+    pushes: number
+    lastPushAt: number | null
+  },
+  now: number,
+): CodexConnectionDiag {
+  const age = s.lastPushAt === null || !Number.isFinite(s.lastPushAt) ? null : Math.max(0, (now - s.lastPushAt) / 1000)
+  return {
+    mode: s.mode,
+    state: s.role === 'follower' ? 'follower' : s.state,
+    restartsLastHour: s.restartsLastHour,
+    pushes: s.pushes,
+    lastPushAgeSec: age,
+  }
+}
+
 export interface DiagnosticsInput {
   extVersion: string
   vscodeVersion: string
@@ -80,6 +123,8 @@ export interface DiagnosticsInput {
   retention: { hourDays: number; days: number; historyDays: number }
   historySize: { samples: number; bytes: number; oldest: string | null }
   quota: QuotaDiag[]
+  /** 1.12 A: the Codex app-server line; null where the caller has none to report. */
+  codexConnection: CodexConnectionDiag | null
   consent: string
   role: 'leader' | 'follower' | 'single'
   bridge: BridgeDiag | null
@@ -106,7 +151,7 @@ export interface DiagnosticsInput {
  */
 export const DIAGNOSTICS_FIELDS: readonly string[] = [
   'extVersion', 'vscodeVersion', 'platform', 'arch', 'node', 'remoteName', 'extensionKind',
-  'roots', 'fileCount', 'snapshot', 'retention', 'historySize', 'quota', 'consent', 'role',
+  'roots', 'fileCount', 'snapshot', 'retention', 'historySize', 'quota', 'codexConnection', 'consent', 'role',
   'bridge', 'http', 'proxyEnv', 'settings', 'partialData', 'attribution', 'language', 'home',
 ]
 
@@ -300,6 +345,24 @@ function settingValue(key: string, value: unknown, home: string): string {
   }
 }
 
+/** A whole count as the report prints it; anything else is `–`. */
+function countOf(v: unknown): string {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? String(Math.round(v)) : '–'
+}
+
+/**
+ * 1.12 A: `codex connection — mode persistent · state ready · restarts 0 in the last hour · pushes 3 · last
+ * push 42 s ago`. The mode and the state are held to their words, the rest to counts and an age.
+ */
+function codexConnectionLine(c: CodexConnectionDiag | null): string {
+  if (c === null) return 'codex connection — not reported'
+  const mode = CODEX_MODES.includes(c.mode) ? c.mode : '?'
+  const state = CODEX_STATES.includes(c.state) ? c.state : '?'
+  const last = c.lastPushAgeSec === null ? '–' : `${ageLabel(c.lastPushAgeSec)} ago`
+  return `codex connection — mode ${mode} · state ${state} · restarts ${countOf(c.restartsLastHour)} in the last hour`
+    + ` · pushes ${countOf(c.pushes)} · last push ${last}`
+}
+
 function httpLine(name: string, s: HttpSetting): string {
   const value = s.value === undefined || s.value === '' ? '–' : JSON.stringify(s.value)
   return `${name.padEnd(22)}(${s.origin}) ${value}`
@@ -318,7 +381,7 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
 
   const {
     extVersion, vscodeVersion, platform, arch, node, remoteName, extensionKind, roots, fileCount,
-    snapshot, retention, historySize, quota, consent, role, bridge, http, proxyEnv, settings,
+    snapshot, retention, historySize, quota, codexConnection, consent, role, bridge, http, proxyEnv, settings,
     partialData, attribution, language, home,
   } = input
 
@@ -380,6 +443,8 @@ export function buildDiagnostics(input: DiagnosticsInput): string {
     }
     if (q.drift.length > 0) lines.push(`  drift: ${q.drift.map((d) => safe(scrubHome(d, home))).join(', ')}`)
   }
+  // 1.12 A (§0a.11): which Codex mode is live — "the diagnostics line says which mode is live".
+  lines.push(codexConnectionLine(codexConnection))
   lines.push('')
 
   lines.push('## Status line bridge')

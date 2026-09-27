@@ -690,7 +690,8 @@ export function sanitize(raw: Record<string, unknown>): Config {
     claudeQuotaFile: text(get('tokenPace.claudeQuotaFile')),
     codexQuotaFile: text(get('tokenPace.codexQuotaFile')),
     writeQuotaCache: bool(get('tokenPace.writeQuotaCache'), false),
-    codexAppServer: { mode: pick(get('tokenPace.codexAppServer.mode'), APP_SERVER_MODES, 'oneShot') },
+    // 1.12 A1 rule 1: the standing connection is the default; `oneShot` is the opt-out.
+    codexAppServer: { mode: pick(get('tokenPace.codexAppServer.mode'), APP_SERVER_MODES, 'persistent') },
     codexBinary: text(get('tokenPace.codexBinary')),
     userAgent: pick(get('tokenPace.userAgent'), USER_AGENT_MODES, 'claudeCode'),
     credentials: { keychain: bool(get('tokenPace.credentials.keychain'), true) },

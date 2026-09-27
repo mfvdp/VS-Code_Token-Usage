@@ -577,8 +577,8 @@ export function scanBridgeBundle(text) {
  * spells, which the URL scan above holds to `DEFAULT_ALLOW`; `userConfigured`: a host the reader typed,
  * which no scan of the code can see) and why. This is how the scan learns the user-configured class: not
  * from a literal, but from the table — a new call site anywhere else fails the CLI, and so does a row whose
- * file no longer has the site it names (a stale row, as the read contract's `unread`). 1.12 P8 adds the
- * SMTP sender's row when it exists.
+ * file no longer has the site it names (a stale row, as the read contract's `unread`). 1.12 P8 added the
+ * SMTP sender's row: its `net` and `tls` are the import of each module and `net.connect(` / `tls.connect(`.
  *
  * @typedef {{ file: string, sites: string[], hosts: 'literal' | 'userConfigured', reason: string }} NetworkSiteRow
  * @type {NetworkSiteRow[]}
@@ -586,6 +586,7 @@ export function scanBridgeBundle(text) {
 export const NETWORK_SITES = [
   { file: 'src/poller.ts', sites: ['fetch'], hosts: 'literal', reason: 'the one quota endpoint, api.anthropic.com (consent)' },
   { file: 'src/notifyChannels.ts', sites: ['fetch'], hosts: 'userConfigured', reason: 'a notification channel the reader set up and allowed per host; Telegram\'s host is the literal api.telegram.org' },
+  { file: 'src/notifySmtp.ts', sites: ['net', 'tls'], hosts: 'userConfigured', reason: 'the reader\'s SMTP server, allowed per host, TLS only — implicit TLS or STARTTLS before any AUTH or address, certificates verified' },
 ]
 
 /** The kinds of host a row may name. */

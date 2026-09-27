@@ -127,18 +127,27 @@ const sites = require('../scripts/check-privacy.mjs') as {
   codeOf: (src: string) => { code: string; bare: string }
 }
 const readRepo = (file: string): string => readFileSync(join(__dirname, '..', file), 'utf8')
+/** 1.12 P8: the SMTP sender's two kinds of site, as a fake tree's `src/notifySmtp.ts`. */
+const SMTP_FAKE = 'import * as net from \'net\'\nimport * as tls from \'tls\'\nexport const c = () => net.connect(587, h)\nexport const s = () => tls.connect({ host: h, port: 465 })\n'
 
-test('the network sites of the real tree: the quota fetch and the channels\' fetch, each with its row — and nothing else (1.12 C11 rules 2 and 4)', () => {
+test('the network sites of the real tree: the quota fetch, the channels\' fetch and the SMTP sender\'s sockets, each with its row — and nothing else (1.12 C11 rules 2 and 4)', () => {
   const files = sites.sourceFiles(join(__dirname, '..'))
-  assert.ok(files.includes('src/poller.ts') && files.includes('src/notifyChannels.ts') && files.includes('src/webview/main.ts'), files.join(' '))
+  assert.ok(files.includes('src/poller.ts') && files.includes('src/notifyChannels.ts') && files.includes('src/notifySmtp.ts') && files.includes('src/webview/main.ts'), files.join(' '))
   assert.ok(files.every((f) => f.startsWith('src/')))
   const scan = sites.scanNetworkSites(readRepo, files)
   assert.deepEqual(scan.offenders, [])
-  assert.deepEqual(scan.sites.map((x) => `${x.file}:${x.site}`), ['src/notifyChannels.ts:fetch', 'src/poller.ts:fetch'])
-  // The table as C11 gives it — P8 adds the SMTP sender's row.
+  // 1.12 P8 (pinned and changed): the SMTP sender's sites — the import of net and of tls, net.connect( once (the
+  // plain connection for STARTTLS), tls.connect( twice (implicit TLS and the upgrade), in the order they stand.
+  assert.deepEqual(scan.sites.map((x) => `${x.file}:${x.site}`), [
+    'src/notifyChannels.ts:fetch',
+    'src/notifySmtp.ts:net', 'src/notifySmtp.ts:tls', 'src/notifySmtp.ts:tls', 'src/notifySmtp.ts:net', 'src/notifySmtp.ts:tls',
+    'src/poller.ts:fetch',
+  ])
+  // The table as C11 gives it, P8's row after P7's.
   assert.deepEqual(sites.NETWORK_SITES.map((r) => [r.file, r.sites, r.hosts]), [
     ['src/poller.ts', ['fetch'], 'literal'],
     ['src/notifyChannels.ts', ['fetch'], 'userConfigured'],
+    ['src/notifySmtp.ts', ['net', 'tls'], 'userConfigured'],
   ])
   for (const row of sites.NETWORK_SITES) {
     assert.ok(row.reason.trim().length > 10, `${row.file}: a reason`)
@@ -146,12 +155,14 @@ test('the network sites of the real tree: the quota fetch and the channels\' fet
     assert.ok(row.sites.every((x) => sites.NETWORK_SITE_KINDS.includes(x)))
   }
   assert.match(sites.NETWORK_SITES[1].reason, /api\.telegram\.org/)
+  assert.match(sites.NETWORK_SITES[2].reason, /SMTP server, allowed per host, TLS only/)
   assert.deepEqual(sites.NETWORK_MODULES, ['http', 'https', 'http2', 'net', 'tls', 'dgram', 'undici'])
 })
 
 test('a call site outside the table fails: fetch( in src/other.ts, a network module imported anywhere, a socket, a browser request (1.12 C11 rule 4)', () => {
   const tree = (extra: Record<string, string>): SiteScan => {
-    const files = { 'src/poller.ts': 'res = await fetch(CLAUDE_USAGE_URL, {})\n', 'src/notifyChannels.ts': 'export const f = (u, i) => fetch(u, i)\n', ...extra }
+    // 1.12 P8 (pinned and changed): the tree carries the SMTP sender's file too — its row would be stale without it.
+    const files = { 'src/poller.ts': 'res = await fetch(CLAUDE_USAGE_URL, {})\n', 'src/notifyChannels.ts': 'export const f = (u, i) => fetch(u, i)\n', 'src/notifySmtp.ts': SMTP_FAKE, ...extra }
     return sites.scanNetworkSites((f) => { if (!(f in files)) throw new Error('ENOENT'); return (files as Record<string, string>)[f] }, Object.keys(files))
   }
   assert.deepEqual(tree({}).offenders, [])
@@ -183,13 +194,25 @@ test('a call site outside the table fails: fetch( in src/other.ts, a network mod
   // The same in a file that has a row, but not among the row's sites.
   const beside = tree({ 'src/notifyChannels.ts': 'import * as tls from \'tls\'\nexport const f = (u, i) => fetch(u, i)\n' })
   assert.deepEqual(beside.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifyChannels.ts', 'tls', 'not among its row\'s sites']])
+  // 1.12 P8: the SMTP sender may open sockets, never fetch — and a socket beside the channels' fetch is no channel's.
+  const smtpFetch = tree({ 'src/notifySmtp.ts': `${SMTP_FAKE}export const g = (u) => fetch(u)\n` })
+  assert.deepEqual(smtpFetch.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifySmtp.ts', 'fetch', 'not among its row\'s sites']])
+  const channelSocket = tree({ 'src/notifyChannels.ts': 'export const f = (u, i) => fetch(u, i)\nexport const s = () => net.connect(25, h)\n' })
+  assert.deepEqual(channelSocket.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifyChannels.ts', 'net', 'not among its row\'s sites']])
 })
 
 test('a row that no longer holds fails: its site gone, its file gone; a row without a reason or with an unknown kind fails (1.12 C11 rule 4)', () => {
-  const files: Record<string, string> = { 'src/poller.ts': 'res = await fetch(URL)\n', 'src/notifyChannels.ts': 'export const f = 1\n' }
+  const files: Record<string, string> = { 'src/poller.ts': 'res = await fetch(URL)\n', 'src/notifyChannels.ts': 'export const f = 1\n', 'src/notifySmtp.ts': SMTP_FAKE }
   const read = (f: string): string => { if (!(f in files)) throw new Error('ENOENT'); return files[f] }
   const stale = sites.scanNetworkSites(read, Object.keys(files))
   assert.deepEqual(stale.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifyChannels.ts', 'fetch', 'listed but not found (a stale row)']])
+  // 1.12 P8: the SMTP sender's row holds only while it has both kinds of socket.
+  files['src/notifyChannels.ts'] = 'export const f = (u, i) => fetch(u, i)\n'
+  files['src/notifySmtp.ts'] = 'import * as net from \'net\'\nexport const c = () => net.connect(587, h)\n'
+  const halfSmtp = sites.scanNetworkSites(read, Object.keys(files))
+  assert.deepEqual(halfSmtp.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifySmtp.ts', 'tls', 'listed but not found (a stale row)']])
+  files['src/notifySmtp.ts'] = SMTP_FAKE
+  files['src/notifyChannels.ts'] = 'export const f = 1\n'
   delete files['src/notifyChannels.ts']
   const gone = sites.scanNetworkSites(read, Object.keys(files))
   assert.deepEqual(gone.offenders.map((o) => [o.file, o.problem]), [['src/notifyChannels.ts', 'cannot read src/notifyChannels.ts']])
@@ -643,6 +666,9 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     writeFileSync(join(dir, 'src', 'poller.ts'), fromRepo('src/poller.ts'))
     const channelsSrc = fromRepo('src/notifyChannels.ts')
     writeFileSync(join(dir, 'src', 'notifyChannels.ts'), channelsSrc)
+    // 1.12 P8 (C11, pinned and changed): and the file of the third row — the SMTP sender's sockets.
+    const smtpSrc = fromRepo('src/notifySmtp.ts')
+    writeFileSync(join(dir, 'src', 'notifySmtp.ts'), smtpSrc)
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })
@@ -760,10 +786,11 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     writeFileSync(join(dir, 'src', 'notify.ts'), notifySrc)
     const netKept = run()
     assert.equal(netKept.status, 0, netKept.out)
-    assert.match(netKept.out, /network sites: 2 row\(s\)/)
+    assert.match(netKept.out, /network sites: 3 row\(s\)/)
     assert.match(netKept.out, /ok {4}src\/poller\.ts: fetch \(line \d+\) — a literal host: /)
     assert.match(netKept.out, /ok {4}src\/notifyChannels\.ts: fetch \(line \d+\) — hosts the reader configures: /)
-    assert.match(netKept.out, /user-configured hosts: notification channels \(src\/notifyChannels\.ts\) — none is contacted before its channel's consent/)
+    assert.match(netKept.out, /ok {4}src\/notifySmtp\.ts: net \(line \d+\), tls \(line \d+\), tls \(line \d+\), net \(line \d+\), tls \(line \d+\) — hosts the reader configures: the reader's SMTP server/)
+    assert.match(netKept.out, /user-configured hosts: notification channels \(src\/notifyChannels\.ts, src\/notifySmtp\.ts\) — none is contacted before its channel's consent/)
     // 1.12 C11 rule 4's mutation: the channels' `fetch(` moved into a helper file of its own — the new site has no
     // row and the channels' row no longer holds, and the gate stops both.
     const site = 'export const httpsFetch: FetchLike = (url, init) => fetch(url, init)'
@@ -785,6 +812,32 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     const imported = run()
     assert.equal(imported.status, 1, imported.out)
     assert.match(imported.out, /DENY {2}src\/quota\.ts:1 https — no row in NETWORK_SITES/)
+    writeFileSync(join(dir, 'src', 'quota.ts'), quota)
+    assert.equal(run().status, 0)
+    // 1.12 P8 (C11): a socket opened elsewhere — the SMTP sender's TLS connection moved into a helper file of its
+    // own — has no row, and the gate stops it; the sender keeps its row only while it still has both sites.
+    const secureCall = 'tls.connect({ ...tlsTarget(host), port, rejectUnauthorized: true'
+    assert.ok(smtpSrc.includes(secureCall))
+    writeFileSync(join(dir, 'src', 'mailSocket.ts'), 'import * as tls from \'tls\'\nexport const secureSocket = (o: tls.ConnectionOptions): tls.TLSSocket => tls.connect(o)\n')
+    writeFileSync(join(dir, 'src', 'notifySmtp.ts'), `import { secureSocket } from './mailSocket'\n${smtpSrc.replace(secureCall, 'secureSocket({ ...tlsTarget(host), port, rejectUnauthorized: true')}`)
+    const socketMoved = run()
+    assert.equal(socketMoved.status, 1, socketMoved.out)
+    assert.match(socketMoved.out, /DENY {2}src\/mailSocket\.ts:1 tls — no row in NETWORK_SITES/)
+    assert.match(socketMoved.out, /DENY {2}src\/mailSocket\.ts:2 tls — no row in NETWORK_SITES/)
+    assert.match(socketMoved.out, /ok {4}src\/notifySmtp\.ts: /)
+    rmSync(join(dir, 'src', 'mailSocket.ts'))
+    // Without a tls site of its own the sender's row is stale — the gate stops that as well.
+    writeFileSync(join(dir, 'src', 'notifySmtp.ts'), smtpSrc.replace('import * as tls from \'tls\'\n', '').replace(/tls\.connect\(/g, 'secureSocket('))
+    const smtpStale = run()
+    assert.equal(smtpStale.status, 1, smtpStale.out)
+    assert.match(smtpStale.out, /DIFF {2}src\/notifySmtp\.ts: net \(line \d+\), net \(line \d+\) — /)
+    assert.match(smtpStale.out, /tls: listed but not found \(a stale row\)/)
+    // And a net.connect( in a file of its own, beside a kept sender.
+    writeFileSync(join(dir, 'src', 'notifySmtp.ts'), smtpSrc)
+    writeFileSync(join(dir, 'src', 'quota.ts'), `${quota}\nimport * as net from 'net'\nexport const probe = (): net.Socket => net.connect(25, 'localhost')\n`)
+    const plainSocket = run()
+    assert.equal(plainSocket.status, 1, plainSocket.out)
+    assert.match(plainSocket.out, /DENY {2}src\/quota\.ts:\d+ net — no row in NETWORK_SITES/)
     writeFileSync(join(dir, 'src', 'quota.ts'), quota)
     assert.equal(run().status, 0)
   } finally {

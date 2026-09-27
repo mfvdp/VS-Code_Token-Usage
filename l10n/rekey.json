@@ -587,6 +587,23 @@
       "part": "host",
       "key": "This channel works: Token Pace can reach it. Sent at {0}.",
       "why": "the text of the test message — a channel is the place a notification goes to (a webhook, a Telegram chat, an ntfy topic, an e-mail inbox), it for the channel — {0} a clock time (14:03) — 1.12 C13"
+    },
+    {
+      "n": 76,
+      "by": "R2-fix",
+      "kind": "reword",
+      "part": "text",
+      "old": "• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code's access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item \"{0}\" (read with\n  macOS's security tool, which may ask you once), else from ~/.claude/.credentials.json. The\n  request identifies itself as the Claude Code client, because the endpoint rate-limits other\n  callers into a permanent 429.",
+      "key": "• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code's access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item \"{0}\" (read with\n  macOS's security tool, which may ask you once — choose \"Always Allow\"), else from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client, because\n  the endpoint rate-limits other callers into a permanent 429.",
+      "carry": false,
+      "why": "the network consent’s Claude paragraph on macOS as n=20 added it, with one clause more: after which may ask you once it now says — choose \"Always Allow\" (was: which may ask you once), else from …), and the lines after it re-wrapped — \"Always Allow\" is macOS’s button: write macOS’s own label in your language if you know it, else keep the English between your quotation marks, as n=24 says — {0} is the item’s name (Claude Code-credentials, with a suffix where CLAUDE_CONFIG_DIR is set) and stays between your quotation marks, use Apple’s name for the Keychain in your language as macOS shows it, keep security as it stands, keep the URL, CLAUDE_CODE_OAUTH_TOKEN and ~/.claude/.credentials.json as they stand, and your 1.x sentence about the Claude Code client and the permanent 429, the hard wraps after each line with the two-space indent, as your 1.x Claude paragraph has them — 1.12 Review 2 F5"
+    },
+    {
+      "n": 77,
+      "by": "R2-fix",
+      "kind": "nls-reword",
+      "key": "config.language.description",
+      "why": "the first sentence names the in-editor alerts beside the notifications and dialogs — the markdown document, alerts, notifications and dialogs (was: the markdown document, notifications and dialogs) — since 1.12 an alert is the popup inside VS Code and a notification a message sent outside it (the new category Notifications): write the word your Alerts category uses for the popup and your word for a notification as the new category has it, and keep the two different — the rest of the value is unchanged — 1.12 Review 2 F7"
     }
   ]
 }

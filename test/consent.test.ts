@@ -219,11 +219,13 @@ test('the Codex paragraph follows the app-server mode — persistent says it kee
 // 1.12 B3, B4: the Keychain in the consent (B8 tests 3 and 4)
 // ---------------------------------------------------------------------------
 
+// Review 2 F5 (pinned and changed): the macOS dialog itself says to choose "Always Allow" — the advice a reader who
+// clicks Allow once would otherwise find only in troubleshooting.md (a slow read closes the gate, B2 rule 3).
 const DARWIN_CLAUDE = '• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n'
   + '  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item "Claude Code-credentials" (read with\n'
-  + '  macOS\'s security tool, which may ask you once), else from ~/.claude/.credentials.json. The\n'
-  + '  request identifies itself as the Claude Code client, because the endpoint rate-limits other\n'
-  + '  callers into a permanent 429.'
+  + '  macOS\'s security tool, which may ask you once — choose "Always Allow"), else from\n'
+  + '  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client, because\n'
+  + '  the endpoint rate-limits other callers into a permanent 429.'
 const LINUX_CLAUDE = '• Claude — GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n'
   + '  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json, else from the\n'
   + '  Secret Service through secret-tool. The request identifies itself as the Claude Code client,\n'
@@ -281,9 +283,10 @@ test('the Claude paragraph names every source of the token on the platform: macO
     withConfigDir(undefined, () => {
       assert.ok(disclosure(30, 'persistent', 'darwin', true).includes('• Claude — GET https://api.anthropic.com/api/oauth/usage mit dem Zugriffstoken von Claude Code: aus\n'
         + '  CLAUDE_CODE_OAUTH_TOKEN, wenn gesetzt, sonst aus dem macOS-Schlüsselbundeintrag „Claude Code-credentials“ (gelesen mit\n'
-        + '  dem security-Werkzeug von macOS, das Sie einmal fragen kann), sonst aus\n'
-        + '  ~/.claude/.credentials.json. Die Anfrage weist sich als Claude-Code-Client aus, weil der Endpunkt\n'
-        + '  andere Aufrufer dauerhaft mit 429 abweist.'))
+        // Review 2 F5 (pinned and changed): „wählen Sie „Immer erlauben““, re-wrapped at 100.
+        + '  dem security-Werkzeug von macOS, das Sie einmal fragen kann — wählen Sie „Immer erlauben“), sonst\n'
+        + '  aus ~/.claude/.credentials.json. Die Anfrage weist sich als Claude-Code-Client aus, weil der\n'
+        + '  Endpunkt andere Aufrufer dauerhaft mit 429 abweist.'))
       assert.ok(disclosure(30, 'persistent', 'linux', true).includes('sonst aus dem\n  Secret Service über secret-tool. Die Anfrage weist sich als Claude-Code-Client aus, weil der\n'))
       assert.ok(disclosure(30, 'persistent', 'win32', true).includes('aus\n  CLAUDE_CODE_OAUTH_TOKEN, wenn gesetzt, sonst aus ~/.claude/.credentials.json. Die Anfrage weist\n'))
       // 1.x's German second sentence, word for word, in each of the three.

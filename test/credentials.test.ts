@@ -16,8 +16,8 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { test } from 'node:test'
 import {
-  HelperResult, HelperRun, isCredentialsError, KEYCHAIN_QUIET_MS, KeychainGate, keychainFingerprint, keychainService,
-  loadCredentials, watchKeychain,
+  HELPER_TIMEOUT_MS, HELPER_TIMEOUT_USER_MS, HelperResult, HelperRun, isCredentialsError, KEYCHAIN_QUIET_MS, KeychainGate,
+  keychainFingerprint, keychainService, loadCredentials, runHelper, watchKeychain,
 } from '../src/credentials'
 import { buildDiagnostics, credentialsDiag, DiagnosticsInput } from '../src/diagnostics'
 import { toCsv, toJson } from '../src/exporter'
@@ -223,6 +223,61 @@ test('the gate: a background read before any user action never starts security; 
     assert.equal(plain.calls.length, 1)
     // No log line carries the token.
     assert.equal(logs.some((l) => l.includes(KEYCHAIN_TOKEN) || l.includes(FILE_TOKEN)), false)
+  })
+})
+
+test('a user-action Keychain read waits 30 s for macOS\'s dialog, a background read 5 s: a stand-in answering after 7 s (scaled to 1.4 s) brings its token by hand and times out in the background; the quiet rule still measures the time taken (1.12 B2 rule 3, Review 2 F6)', async () => {
+  await withCleanEnv(async () => {
+    assert.equal(HELPER_TIMEOUT_MS, 5_000)
+    assert.equal(HELPER_TIMEOUT_USER_MS, 30_000)
+    // A stand-in of the test's own (never macOS's security): it writes its pid, then answers after 1 400 ms — 7 s at a
+    // fifth of the time. The test's runner hands the real runHelper the limit loadCredentials chose, divided by five
+    // (30 s → 6 s, 5 s → 1 s), so the real timeout of execFile decides — scaled, not replaced.
+    const dir = scratchDir('cred-timeout')
+    const script = path.join(dir, 'stand-in-helper.js')
+    const pidFile = path.join(dir, 'pid')
+    fs.writeFileSync(script, `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid))\n`
+      + `setTimeout(() => process.stdout.write(${JSON.stringify(doc(KEYCHAIN_TOKEN, NOW + HOUR))}), 1_400)\n`)
+    const limits: Array<number | undefined> = []
+    const results: HelperResult[] = []
+    const scaled: HelperRun = async (_cmd, _args, timeoutMs) => {
+      limits.push(timeoutMs)
+      const r = await runHelper(process.execPath, [script], (timeoutMs ?? HELPER_TIMEOUT_MS) / 5)
+      results.push(r)
+      return r
+    }
+    const gone = async (): Promise<boolean> => {
+      const pid = Number(fs.readFileSync(pidFile, 'utf8'))
+      for (let i = 0; i < 50; i++) {
+        try { process.kill(pid, 0) } catch { return true }
+        await new Promise((r) => setTimeout(r, 20))
+      }
+      return false
+    }
+    const without = claudeDirWith(null)
+    const opts = { keychain: true, platform: 'darwin' as const, claudeDir: without, run: scaled }
+    try {
+      const byHand = await loadCredentials({ ...opts, occasion: 'userAction' }, NOW)
+      assert.equal((byHand as { from: string }).from, 'keychain', JSON.stringify(byHand))
+      assert.equal(results[0].timedOut, false)
+      assert.ok(await gone(), 'the stand-in ended')
+      fs.rmSync(pidFile)
+      const background = await loadCredentials({ ...opts, occasion: 'background' }, NOW)
+      assert.equal(isCredentialsError(background), true, 'no Keychain token in the background')
+      assert.equal(results[1].timedOut, true)
+      assert.ok(await gone(), 'the timed-out stand-in was ended')
+      assert.deepEqual(limits, [HELPER_TIMEOUT_USER_MS, HELPER_TIMEOUT_MS])
+    } finally {
+      try { process.kill(Number(fs.readFileSync(pidFile, 'utf8')), 'SIGKILL') } catch { /* gone */ }
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+
+    // B2 rule 3 unchanged: a user action's read answered after a 7-s dialog brings its token and still closes the gate.
+    const gate = new KeychainGate()
+    const afterDialog = fakeRun({ security: { out: doc(KEYCHAIN_TOKEN, NOW + HOUR), ms: 7_000 } })
+    const d = await loadCredentials({ ...opts, run: afterDialog, gate, occasion: 'userAction' }, NOW)
+    assert.equal((d as { from: string }).from, 'keychain')
+    assert.equal(gate.state(), 'closed')
   })
 })
 

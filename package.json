@@ -1318,6 +1318,7 @@
           "tokenPace.codexAppServer.mode": {
             "type": "string",
             "order": 90,
+            "scope": "machine",
             "enum": [
               "oneShot",
               "persistent"

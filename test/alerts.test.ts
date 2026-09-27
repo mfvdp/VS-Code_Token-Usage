@@ -163,6 +163,28 @@ test('a new reset time is a new subject', async () => {
   assert.equal(nextCycle.length, 1)
 })
 
+test('a reset time that only jitters is the same cycle: four readings at 92 % one popup, a new cycle speaks again (1.12, Review 2 F3)', async () => {
+  const h = harness(cfg({ thresholds: [90] }))
+  const reset = NOW + 3 * HOUR
+  // Claude Code's usage cache writes the reset with sub-second jitter, and two origins round it differently.
+  const decisions: number[] = []
+  for (const [i, jitter] of [0, 412, -230, 870].entries()) {
+    const at = NOW + i * 60_000
+    const out = await h.alerts.evaluate([quotaAt(at, [win({ percent: 92, resetsAt: reset + jitter })])], noVerdicts, noForecasts, at)
+    decisions.push(out.length)
+  }
+  assert.deepEqual(decisions, [1, 0, 0, 0], 'one decision in one cycle')
+  assert.equal(h.messages.length, 1, 'one popup')
+  // The cycle keeps the name its first reading gave it.
+  const entries = (h.memento.store.get('tokenPace.alerts') as { entries: Record<string, unknown> }).entries
+  assert.deepEqual(Object.keys(entries), [`claude:session:300:${reset}`])
+  // A reset further away than the jitter is a new cycle and speaks again.
+  const next = NOW + 8 * HOUR
+  const later = await h.alerts.evaluate([quotaAt(NOW + 4 * HOUR, [win({ percent: 92, resetsAt: next })])], noVerdicts, noForecasts, NOW + 4 * HOUR)
+  assert.equal(later.length, 1)
+  assert.equal(h.messages.length, 2)
+})
+
 test('several breached thresholds become one message per provider', async () => {
   const h = harness(cfg({ thresholds: [80, 90] }))
   const out = await h.alerts.evaluate([

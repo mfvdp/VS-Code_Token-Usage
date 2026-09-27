@@ -62,3 +62,16 @@ export function resetPassed(prev: QuotaSample, s: QuotaSample): boolean {
 export function turnedOver(prev: QuotaSample, s: QuotaSample): boolean {
   return resetMoved(prev, s) || prev.p - s.p >= CYCLE_DROP_POINTS || resetPassed(prev, s)
 }
+
+/**
+ * 1.12 (Review 2 F3): the reset time that names a window's cycle. `stored` is the one a cycle was named by
+ * before, `current` the one a new reading announces: within `RESET_JITTER_MS` of each other they are the same
+ * reset, and the stored one stays the name — so an identity keyed on the reset (an alert's, a notification's)
+ * does not become a new subject each time Claude Code's cache jitters. Anything else — no stored cycle, a null
+ * on either side, a reset further away — names the cycle by `current`.
+ */
+export function heldReset(stored: number | null | undefined, current: number | null): number | null {
+  if (stored === null || stored === undefined || current === null) return current
+  if (!Number.isFinite(stored) || !Number.isFinite(current)) return current
+  return Math.abs(current - stored) <= RESET_JITTER_MS ? stored : current
+}

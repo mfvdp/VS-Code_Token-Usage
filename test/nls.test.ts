@@ -276,7 +276,8 @@ test('the language setting\'s words: what switches, what follows VS Code, what s
   const en = englishNls['config.language.description']
   const de = germanNls['config.language.description']
   for (const claim of [
-    'the status bar and its tooltips, the dashboard, the Quick Pick, the markdown document, notifications and dialogs',
+    // Review 2 F7 (pinned and changed): the in-editor popups are alerts since 1.12 (C0) — alerts, notifications and dialogs.
+    'the status bar and its tooltips, the dashboard, the Quick Pick, the markdown document, alerts, notifications and dialogs',
     '`auto` follows VS Code\'s display language (English where Token Pace has no translation for it)',
     'The flag at the top of the dashboard sets this setting too',
     'The settings, the command titles and the walkthrough always follow VS Code\'s display language (*Configure Display Language*)',
@@ -290,7 +291,8 @@ test('the language setting\'s words: what switches, what follows VS Code, what s
     assert.ok(en.includes(claim), `the setting's description does not say: ${claim}`)
   }
   for (const claim of [
-    'die Statusleiste und ihre Tooltips, das Dashboard, der Quick Pick, das Markdown-Dokument, Benachrichtigungen und Dialoge',
+    // Review 2 F7: „Benachrichtigung“ names only the outbound message since 1.12 (§6) — the in-editor ones are Warnhinweise.
+    'die Statusleiste und ihre Tooltips, das Dashboard, der Quick Pick, das Markdown-Dokument, Warnhinweise, Benachrichtigungen und Dialoge',
     '`auto` folgt der Anzeigesprache von VS Code (Englisch, wo Token Pace sie nicht übersetzt hat)',
     'Die Flagge oben im Dashboard stellt diese Einstellung ebenfalls ein',
     'Die Einstellungen, die Befehlstitel und die Einführung folgen immer der Anzeigesprache von VS Code (*Anzeigesprache konfigurieren*)',

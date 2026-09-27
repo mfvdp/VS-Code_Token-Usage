@@ -9,7 +9,9 @@
  * wrong somewhere:
  *
  *  • Identity is the window *and its reset time*, so a new cycle is a new
- *    subject and the same cycle can never speak twice.
+ *    subject and the same cycle can never speak twice — the reset held across
+ *    Claude Code's sub-second jitter, which would otherwise make each reading
+ *    of one cycle a new subject (`heldIdentityOf`).
  *  • Only an escalation speaks: a higher threshold than the one already
  *    announced, a pace that just flipped, a one-off notice.
  *  • The state is persisted *before* the notification is shown — a window that
@@ -32,6 +34,7 @@ import { PROVIDER_NAME } from './adapters'
 import { BudgetPeriod, BudgetRow } from './budget'
 import { AlertConfig } from './config'
 import { t } from './i18n'
+import { heldReset } from './resetRule'
 import { MementoLike } from './storage'
 import { relativeShort } from './time'
 import { Forecast, PaceLevel, PaceVerdict, QuotaState, QuotaWindow, Source } from './types'
@@ -159,6 +162,31 @@ function entryOf(state: AlertsState, identity: string): AlertEntry {
 /** Identity of one window in one cycle. A new reset time is a new subject. */
 export function identityOf(source: Source, w: QuotaWindow): string {
   return `${source}:${w.id}:${w.resetsAt ?? 'none'}`
+}
+
+/**
+ * 1.12 (Review 2 F3): the identity of a window's cycle with its reset held across Claude Code's sub-second
+ * jitter — the notifier's rule (resetRule.ts `heldReset`, `RESET_JITTER_MS`). The stored cycle is the entry this
+ * window already has: an entry whose reset lies within the jitter of the reading's names the cycle, so four
+ * readings of one cycle whose reset moved by 412, −230 and 870 ms are one subject and speak once. The nearest
+ * entry wins; with none, or a reset further away, the reading's own reset names a new cycle.
+ */
+export function heldIdentityOf(source: Source, w: QuotaWindow, entries: Readonly<Record<string, unknown>>): string {
+  const own = identityOf(source, w)
+  if (w.resetsAt === null || !Number.isFinite(w.resetsAt)) return own
+  if (Object.prototype.hasOwnProperty.call(entries, own)) return own
+  const prefix = `${source}:${w.id}:`
+  let best: { key: string; gap: number } | null = null
+  for (const key of Object.keys(entries)) {
+    if (!key.startsWith(prefix)) continue
+    const tail = key.slice(prefix.length)
+    const stored = Number(tail)
+    if (tail === '' || !Number.isFinite(stored)) continue
+    if (heldReset(stored, w.resetsAt) !== stored) continue
+    const gap = Math.abs(stored - w.resetsAt)
+    if (best === null || gap < best.gap) best = { key, gap }
+  }
+  return best?.key ?? own
 }
 
 /**
@@ -320,7 +348,7 @@ export class Alerts {
     const state = this.load()
     if (state.snoozedUntil !== undefined && state.snoozedUntil > now) return []
 
-    const candidates = this.candidatesOf(states, verdicts, forecasts, now)
+    const candidates = this.candidatesOf(states, verdicts, forecasts, now, state)
     if (candidates.length === 0 && budgets.length === 0) return []
 
     const pending: AlertDecision[] = []
@@ -367,6 +395,7 @@ export class Alerts {
     verdicts: Map<string, PaceVerdict>,
     forecasts: Map<string, Forecast>,
     now: number,
+    state: AlertsState,
   ): Candidate[] {
     const out: Candidate[] = []
     for (const s of states) {
@@ -379,7 +408,8 @@ export class Alerts {
         out.push({
           source: s.source,
           window: w,
-          identity: identityOf(s.source, w),
+          // Review 2 F3: the cycle's reset held across the jitter, as the notifications hold it.
+          identity: heldIdentityOf(s.source, w, state.entries),
           verdict: verdicts.get(key),
           forecast: forecasts.get(key),
         })

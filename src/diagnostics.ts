@@ -195,6 +195,13 @@ export const DIAGNOSTICS_FIELDS: readonly string[] = [
 const PATH_KEY_RE = /Dir|File|Binary|LogFile/
 /** Defence in depth: no current setting matches, and none ever should. */
 const SECRET_KEY_RE = /token|secret|password|apikey|api_key|bearer/i
+/**
+ * 1.12 §0a.11 (Review 2 F1): the fields of the `tokenPace.notifications.*` objects that hold a host, an address, a
+ * chat id or a URL — the SMTP server and account, the sender and the recipient, the Telegram chat, the ntfy
+ * server. The report says whether each is set, never what it is: "paste this anywhere" holds for a reader who
+ * set up a channel too. The port, the security mode, the webhook's format and the two lists stay as they are.
+ */
+const NOTIFY_ADDRESS_FIELDS: readonly string[] = ['host', 'user', 'from', 'to', 'chatId', 'server']
 
 /**
  * Replaces a home prefix with `~`. Comparison is byte-exact, so a path that
@@ -371,14 +378,39 @@ function settingValue(key: string, value: unknown, home: string): string {
   const short = key.startsWith('tokenPace.') ? key.slice('tokenPace.'.length) : key
   if (SECRET_KEY_RE.test(short)) return '<redacted>'
   if (value === undefined) return 'undefined'
+  // 1.12 §0a.11 (Review 2 F1): a channel's host, address, chat id or server as set / not set.
+  const shown = short.startsWith('notifications.') ? withoutAddresses(value) : value
   const isPath = PATH_KEY_RE.test(short)
   const replacer = (_k: string, v: unknown): unknown =>
     typeof v === 'string' ? scrubHome(isPath ? tildify(v, home) : v, home) : v
   try {
-    return JSON.stringify(value, replacer) ?? String(value)
+    return JSON.stringify(shown, replacer) ?? String(shown)
   } catch {
     return '<unserialisable>'
   }
+}
+
+/** `set` for a value that is there — a non-blank string or anything else but null —, `not set` otherwise. */
+function setOrNot(v: unknown): 'set' | 'not set' {
+  if (v === undefined || v === null) return 'not set'
+  if (typeof v === 'string') return v.trim().length > 0 ? 'set' : 'not set'
+  return 'set'
+}
+
+/**
+ * 1.12 §0a.11 (Review 2 F1): a notification setting as the report may print it — each of
+ * `NOTIFY_ADDRESS_FIELDS` of an object as `set` / `not set`, every other field and the lists as they are.
+ * No notification setting is a bare string, so one there was typed by hand where an object belongs (an
+ * address, a URL) and is printed as `set` too.
+ */
+function withoutAddresses(value: unknown): unknown {
+  if (typeof value === 'string') return setOrNot(value)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = NOTIFY_ADDRESS_FIELDS.includes(k) ? setOrNot(v) : v
+  }
+  return out
 }
 
 /** A whole count as the report prints it; anything else is `–`. */

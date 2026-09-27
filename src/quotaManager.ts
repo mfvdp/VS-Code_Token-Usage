@@ -118,6 +118,12 @@ const RESET_SKEW_MS = 60_000
 /** Below this the window stays quiet; beyond it a refocus triggers a freshness check. */
 const UNFOCUSED_GRACE_MS = 10 * MINUTE_MS
 /**
+ * 1.12 (Review 2 F10): a codex binary that was not found stays not found this long — or until
+ * `tokenPace.codexBinary` changes. The search is a PATH scan and two directory listings of the editors'
+ * extension folders; in `persistent` mode the 30-s tick asked it again and again for every Claude-only reader.
+ */
+export const CODEX_BINARY_MISS_MS = 5 * MINUTE_MS
+/**
  * How long a `current()` answer may be replayed before the files are read again.
  *
  * The status bar ticks every second and every tick asks for the current reading;
@@ -268,6 +274,8 @@ export class QuotaManager {
   private resetTimers = new Set<Scheduled>()
 
   private appServer: PersistentAppServer | null = null
+  /** F10: when the codex binary was last searched for in vain, and under which `codexBinary`. */
+  private codexBinaryMiss: { at: number; override: string | undefined } | null = null
   /** The standing connection's two subscriptions: its pushes and its `ready`. */
   private appServerSubs: Array<{ dispose(): void }> = []
   private claudeVersion: string | null = null
@@ -1008,8 +1016,16 @@ export class QuotaManager {
       this.appServer.start()
       return
     }
+    // F10: "not found" is kept for CODEX_BINARY_MISS_MS under the same `codexBinary`; a found one is used at once.
+    const now = this.deps.now()
+    const miss = this.codexBinaryMiss
+    if (miss !== null && miss.override === this.opts.codexBinary && now >= miss.at && now - miss.at < CODEX_BINARY_MISS_MS) return
     const bin = this.deps.findCodexBinary(this.opts.codexBinary)
-    if (!bin) return
+    if (!bin) {
+      this.codexBinaryMiss = { at: now, override: this.opts.codexBinary }
+      return
+    }
+    this.codexBinaryMiss = null
     const srv = this.deps.createAppServer(bin, this.log)
     this.appServer = srv
     this.appServerSubs = [

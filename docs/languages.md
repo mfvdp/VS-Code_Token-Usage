@@ -8,9 +8,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 Part of the [Token Pace documentation](../README.md#documentation).
 
 Token Pace's own texts — the status bar and its tooltips, the dashboard, the Quick Pick, the
-markdown document, notifications and dialogs — come in twenty-six languages: English and German, and
-since 1.9.0 twelve more — Français, Español, Português (Brasil), Italiano, 日本語, 한국어, 简体中文,
-繁體中文, Русский, Türkçe, Polski and Čeština —, and since 1.11.0 twelve more again — Nederlands,
+markdown document, alerts, notifications and dialogs — come in twenty-six languages: English and
+German, and since 1.9.0 twelve more — Français, Español, Português (Brasil), Italiano, 日本語, 한국어,
+简体中文, 繁體中文, Русский, Türkçe, Polski and Čeština —, and since 1.11.0 twelve more again — Nederlands,
 Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa Indonesia, Tiếng Việt, Ελληνικά, Magyar and
 Română. You choose one with the flag at the top of the dashboard or with the setting
 `tokenPace.language`; `auto`, the default, follows VS Code's display language.

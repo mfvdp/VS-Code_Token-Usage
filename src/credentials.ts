@@ -54,7 +54,8 @@ export interface HelperResult {
   code: number | null
 }
 
-export type HelperRun = (cmd: string, args: string[]) => Promise<HelperResult>
+/** A helper runner; `timeoutMs` is the run's own limit (absent = `HELPER_TIMEOUT_MS`). */
+export type HelperRun = (cmd: string, args: string[], timeoutMs?: number) => Promise<HelperResult>
 
 export interface CredentialsOptions {
   claudeDir?: string
@@ -82,6 +83,14 @@ export interface CredentialsOptions {
 const TOKEN_SLACK_MS = 60_000
 /** Keychain helpers are interactive processes; a hung one must not stall the poll. */
 export const HELPER_TIMEOUT_MS = 5_000
+/**
+ * 1.12 (Review 2 F6): the Keychain read of a user action waits this long. The reader started it and sits in front
+ * of macOS's dialog, which may ask for the login password — 5 s ended such a read as timed out before it was
+ * answered, the fetch got no token and the gate closed. Background reads keep `HELPER_TIMEOUT_MS`; the quiet-read
+ * rule (B2 rule 3) measures the time the read took, not this limit, so a read answered after a dialog still
+ * closes the gate for the background.
+ */
+export const HELPER_TIMEOUT_USER_MS = 30_000
 /**
  * 1.12 B2 rule 3: a user-action Keychain read that brings a token within this many milliseconds opened no
  * dialog, so background reads may follow; a slower one had a dialog waiting and closes the gate (not
@@ -132,11 +141,11 @@ export function keychainService(): string {
  * Runs a helper without a shell and returns its stdout (null on any failure), its time and whether the
  * timeout ended it. Output is never logged.
  */
-export function runHelper(cmd: string, args: string[]): Promise<HelperResult> {
+export function runHelper(cmd: string, args: string[], timeoutMs: number = HELPER_TIMEOUT_MS): Promise<HelperResult> {
   const started = Date.now()
   return new Promise((resolve) => {
     try {
-      execFile(cmd, args, { timeout: HELPER_TIMEOUT_MS, maxBuffer: 1 << 20, windowsHide: true, shell: false },
+      execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 1 << 20, windowsHide: true, shell: false },
         (err, stdout) => {
           const e = err as (Error & { killed?: boolean; code?: unknown }) | null
           resolve({
@@ -274,7 +283,9 @@ export async function loadCredentials(
         keychainSkipped = true
         log('claude: the Keychain was not read (background, gate closed)')
       } else {
-        const r = await run('security', ['find-generic-password', '-s', keychainService(), '-w'])
+        // Review 2 F6: a user action waits for macOS's dialog, a background read does not.
+        const limit = occasion === 'userAction' ? HELPER_TIMEOUT_USER_MS : HELPER_TIMEOUT_MS
+        const r = await run('security', ['find-generic-password', '-s', keychainService(), '-w'], limit)
         const c = r.out === null ? null : parseCredentials(r.out)
         opts.gate?.note({ ok: c !== null, ms: r.ms, timedOut: r.timedOut }, occasion)
         if (c) {

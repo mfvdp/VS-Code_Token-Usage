@@ -18,7 +18,7 @@ import {
   admit, AGENT_DONE_MIN_MS, AGENT_WAIT_AFTER_MS, cleanNotifyState, collectEvents, droppedLines, emptyNotifyState,
   loadNotifyState, newNotifyTables, NOTIFY_HOURLY_CAP, NOTIFY_STATE_KEY, NotificationEvent, NotificationPayload,
   NotifyInput, notifyRound, NotifyState, NotifyWords, payloadOf, pruneNotifyState, QUOTA_RESET_RECENT_MS, quotaEvents,
-  testPayload, turnEvents, waitEvents,
+  markToldWaits, testPayload, turnEvents, waitEvents,
 } from '../src/notify'
 import { MementoLike } from '../src/storage'
 import { TimeConfig } from '../src/time'
@@ -268,6 +268,12 @@ test('agentWaiting: a permission or input wait still standing after 60 s, not af
   const events = waitEvents([hook()], mains, seen, NOW + SEC, false)
   assert.deepEqual(events.map((e) => [e.event, e.program, e.wait, e.since]), [['agentWaiting', 'claudeCode', 'permission', NOW - 61 * SEC]])
   assert.equal(events[0].identity, `agentWaiting:permission:${NOW - 61 * SEC}`)
+  // Review 2 F2 (pinned and changed): building an event no longer marks the episode — it is told once `admit` sent
+  // its identity (`markToldWaits`), and only then does the same episode stay quiet.
+  assert.equal(waitEvents([hook()], mains, seen, NOW + 2 * SEC, false).length, 1, 'not marked before its admission')
+  const told = emptyNotifyState()
+  admit(events, cfg(), told, NOW + SEC)
+  markToldWaits([hook()], told, seen)
   assert.deepEqual(waitEvents([hook()], mains, seen, NOW + 2 * MIN, false), [], 'the same episode')
   // A new wait is a new episode.
   assert.equal(waitEvents([hook({ ts: NOW + MIN })], mains, seen, NOW + MIN + AGENT_WAIT_AFTER_MS, false).length, 1)
@@ -318,6 +324,42 @@ test('agentDone: a turn this window saw open for at least two minutes and now se
   assert.equal(focused.size, 0)
 })
 
+test('agentDone counts from the newest prompt: an interrupted turn and a short reply three hours later are no long turn; an ordinary long turn with tool activity still is (1.12 C2 rule 2, Review 2 F4)', () => {
+  const at = (h: number, m: number, sec = 0): number => Date.UTC(2026, 8, 27, h, m, sec)
+  const gate = { settled: true, focused: false }
+  const req = (atMs: number, over: Partial<LastRequest> = {}): LastRequest => lastRequest({ at: atMs, ...over })
+  const toolOpen = (atMs: number): LastRequest => req(atMs, { stop: 'tool_use', replyPending: true })
+
+  // Seen open at 12:00 — a tool's result is the newest line.
+  const seen = new Map()
+  assert.deepEqual(turnEvents([main({ lastTs: at(11, 59), lastRequest: toolOpen(at(11, 59)) })], seen, at(12, 0), gate), [])
+  // 12:05 — the next reply is cut off by an interruption: it states no stop, the user's line is the newest.
+  const cut = req(at(12, 4), { stop: null, replyPending: true })
+  assert.deepEqual(turnEvents([main({ lastTs: at(12, 5), lastRequest: cut })], seen, at(12, 6), gate), [])
+  // Three hours later the reader is back, writes a prompt, and a short reply closes the turn at 15:02 (window
+  // unfocused): the closing request answers a new prompt — its span is the reply alone, below two minutes.
+  const reply = req(at(15, 1, 30), { stop: 'end_turn', replyPending: false })
+  assert.deepEqual(turnEvents([main({ lastTs: at(15, 2), lastRequest: reply })], seen, at(15, 2, 5), gate), [], 'no "after at least 3 h"')
+
+  // The same, but the new prompt's turn runs a while: counted from its first request, not from 12:00.
+  const again = new Map()
+  turnEvents([main({ lastTs: at(11, 59), lastRequest: toolOpen(at(11, 59)) })], again, at(12, 0), gate)
+  turnEvents([main({ lastTs: at(12, 5), lastRequest: cut })], again, at(12, 6), gate)
+  turnEvents([main({ lastTs: at(15, 0, 20), lastRequest: toolOpen(at(15, 0, 10)) })], again, at(15, 1), gate)
+  turnEvents([main({ lastTs: at(15, 5), lastRequest: toolOpen(at(15, 4, 50)) })], again, at(15, 5), gate)
+  const back = turnEvents([main({ lastTs: at(15, 10), lastRequest: req(at(15, 9, 40)) })], again, at(15, 10, 5), gate)
+  assert.deepEqual(back.map((e) => e.atLeastMs), [at(15, 10) - at(15, 0, 10)])
+
+  // An ordinary long turn: open at 12:00, tool activity, closed at 12:40 — at least 40 min.
+  const long = new Map()
+  turnEvents([main({ lastTs: at(11, 59), lastRequest: toolOpen(at(11, 59)) })], long, at(12, 0), gate)
+  turnEvents([main({ lastTs: at(12, 20), lastRequest: toolOpen(at(12, 19)) })], long, at(12, 20), gate)
+  turnEvents([main({ lastTs: at(12, 30), lastRequest: toolOpen(at(12, 29, 30)) })], long, at(12, 30), gate)
+  const done = turnEvents([main({ lastTs: at(12, 40), lastRequest: req(at(12, 39, 30)) })], long, at(12, 40, 5), gate)
+  assert.equal(done.length, 1)
+  assert.ok((done[0].atLeastMs as number) >= 40 * MIN, `${done[0].atLeastMs}`)
+})
+
 // ---------------------------------------------------------------------------
 // C4 · no storm — C14 item 2
 // ---------------------------------------------------------------------------
@@ -340,6 +382,42 @@ test('the cooldown drops a second event of a kind — not marked sent, so it spe
   const exhausted = reading([win({ id: 'codex:10080', kind: 'weekly', label: '7 d', percent: 100, resetsAt: NOW + 2 * 24 * HOUR })],
     { source: 'codex', fetchedAt: Math.floor((NOW + 11 * MIN) / 1000) })
   assert.deepEqual(evaluate([exhausted], st, NOW + 12 * MIN, c).map(kinds), [['quotaExhausted']])
+})
+
+test('an agentWaiting the cooldown dropped speaks after it while the wait still stands, and not once it is answered — Review 2\'s case (1.12 C4 rule 2, Review 2 F2)', async () => {
+  const at = (h: number, m: number): number => Date.UTC(2026, 8, 27, h, m)
+  const A = 'a1b2c3d4-synthetic'
+  const B = 'b2c3d4e5-synthetic'
+  const memento = new FakeMemento()
+  const tables = newNotifyTables()
+  const sent: string[][] = []
+  const deps = { memento, words: WORDS, send: async (_p: NotificationPayload, events: readonly NotificationEvent[]) => { sent.push(events.map((e) => e.identity)) } }
+  // The window unfocused (CLI in an outside terminal), the cooldown the default ten minutes.
+  const c = cfg({ 'tokenPace.notifications.events': ['agentWaiting'] })
+  assert.equal(c.cooldownMinutes, 10)
+  const hookA = hook({ sessionId: A, ts: at(11, 59) })
+  const hookB = hook({ sessionId: B, ts: at(12, 2) })
+  const mainA = main({ sessionId: A, lastTs: at(11, 50), lastRequest: OPEN })
+  const mainB = main({ sessionId: B, lastTs: at(11, 50), lastRequest: OPEN })
+  const round = (now: number, mains: MainRec[], hooks: HookEntry[]) => notifyRound(input({ mains, hooks }), c, tables, deps, now)
+
+  // 12:00 — A has waited a minute: sent.
+  assert.deepEqual((await round(at(12, 0), [mainA, mainB], [hookA])).send.map((g) => g.map((e) => e.identity)), [[`agentWaiting:permission:${at(11, 59)}`]])
+  // 12:03 — B has waited a minute, three minutes after A's message: dropped by the cooldown, not marked sent.
+  const early = await round(at(12, 3), [mainA, mainB], [hookA, hookB])
+  assert.deepEqual(early.send, [])
+  assert.deepEqual(early.dropped, [{ event: 'agentWaiting', why: 'cooldown' }])
+  assert.equal(loadNotifyState(memento).sent[`agentWaiting:permission:${at(12, 2)}`], undefined)
+  // 12:07 — still inside the cooldown: dropped again, still standing.
+  assert.deepEqual((await round(at(12, 7), [mainA, mainB], [hookA, hookB])).dropped, [{ event: 'agentWaiting', why: 'cooldown' }])
+  // 12:11 — the cooldown is over and B still waits: B speaks now; A, already told, does not again.
+  assert.deepEqual((await round(at(12, 11), [mainA, mainB], [hookA, hookB])).send.map((g) => g.map((e) => e.identity)), [[`agentWaiting:permission:${at(12, 2)}`]])
+  // 12:25 — both told: nothing more while they stand.
+  assert.deepEqual((await round(at(12, 25), [mainA, mainB], [hookA, hookB])).send, [])
+  // 12:31 — B was answered at 12:30 (its newest reply after the wait), A's entry is past the hook's own age: nothing.
+  const answered = main({ sessionId: B, lastTs: at(12, 30), lastRequest: OPEN })
+  assert.deepEqual((await round(at(12, 31), [mainA, answered], [hookA, hookB])).send, [])
+  assert.deepEqual(sent, [[`agentWaiting:permission:${at(11, 59)}`], [`agentWaiting:permission:${at(12, 2)}`]], 'two messages in all — A at 12:00, B at 12:11')
 })
 
 test('the hourly cap stops the 21st message, over all kinds and channels together, and a new hour starts again (1.12 C4 rule 3)', () => {

@@ -99,7 +99,7 @@ export function disclosure(
  */
 function claudeParagraph(platform: NodeJS.Platform, keychain: boolean): string {
   if (keychain && platform === 'darwin') {
-    return t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item "{0}" (read with\n  macOS\'s security tool, which may ask you once), else from ~/.claude/.credentials.json. The\n  request identifies itself as the Claude Code client, because the endpoint rate-limits other\n  callers into a permanent 429.', keychainService())
+    return t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from the macOS Keychain item "{0}" (read with\n  macOS\'s security tool, which may ask you once \u2014 choose "Always Allow"), else from\n  ~/.claude/.credentials.json. The request identifies itself as the Claude Code client, because\n  the endpoint rate-limits other callers into a permanent 429.', keychainService())
   }
   if (keychain && platform === 'linux') {
     return t('\u2022 Claude \u2014 GET https://api.anthropic.com/api/oauth/usage, using Claude Code\'s access token: from\n  CLAUDE_CODE_OAUTH_TOKEN if it is set, else from ~/.claude/.credentials.json, else from the\n  Secret Service through secret-tool. The request identifies itself as the Claude Code client,\n  because the endpoint rate-limits other callers into a permanent 429.')

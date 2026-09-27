@@ -11,8 +11,10 @@ import { Aggregator } from '../src/agg'
 import { KeychainGate } from '../src/credentials'
 import { CLAUDE_VERSION_FALLBACK, PollOptions, PollResult, userAgentFor } from '../src/poller'
 import {
-  CACHE_READING_KEEP_MS, CACHE_READINGS_MAX, HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions, Scheduled,
+  CACHE_READING_KEEP_MS, CACHE_READINGS_MAX, CODEX_BINARY_MISS_MS, HistorySink, QuotaDeps, QuotaFiles, QuotaManager, QuotaOptions,
+  Scheduled,
 } from '../src/quotaManager'
+import { codexStateFromBody } from '../src/quota'
 import { buildItems, makeContext, quotaTooltip, StatusTextInput, UsageSource } from '../src/statusText'
 import { attemptWhen } from '../src/time'
 import {
@@ -485,6 +487,109 @@ test('a push from the persistent app-server is data, and resets the fallback tim
 
   h.mgr.dispose()
   assert.equal(stopped, 1)
+})
+
+test('with writeQuotaCache on, a push from the standing connection is written to the cache file as a fetch\'s read is — the provider\'s answer verbatim, neighbouring keys and all (1.12 §0a.1, Review 2 F8)', async () => {
+  const sink: { cb: ((method: string, params: unknown) => void) | null } = { cb: null }
+  const fake = {
+    start() { /* nothing */ },
+    stop() { /* nothing */ },
+    onNotification(cb: (method: string, params: unknown) => void) {
+      sink.cb = cb
+      return { dispose: () => { sink.cb = null } }
+    },
+    onReady() { return { dispose: () => { /* nothing */ } } },
+  }
+  // The same local binary answers both: a push's params and a read's result, each with a key the parser never reads.
+  const push = {
+    rateLimits: { planType: 'plus', synthetic_neighbour: 'kept as the provider wrote it' },
+    rateLimitsByLimitId: { codex: { limitId: 'codex', primary: { usedPercent: 61, windowDurationMins: 300, resetsAt: null } } },
+  }
+  const read = {
+    rateLimits: { planType: 'plus' },
+    rateLimitsByLimitId: { codex: { limitId: 'codex', primary: { usedPercent: 64, windowDurationMins: 300, resetsAt: null } } },
+    synthetic_extra: { note: 'a read result key the parser ignores' },
+  }
+  const readAt = (BASE + 2 * MIN) / 1000
+  // The first tick's fetch finds no Codex answer yet; the read comes with the fetch by hand after the push.
+  let readReady = false
+  const h = harness({ appServerMode: 'persistent', writeQuotaCache: true }, {
+    findCodexBinary: () => '/nowhere/codex',
+    createAppServer: () => fake as never,
+  }, () => true, (source) => (source === 'codex'
+    ? (readReady
+      ? { state: codexStateFromBody(read, readAt, 'poll'), retryAfterSeconds: null, raw: read, via: 'connection' }
+      : { state: null, retryAfterSeconds: null, problem: 'not ready', problemKind: 'unknown' })
+    : { state: claudeState(BASE / 1000), retryAfterSeconds: null, raw: { limits: [] } }))
+  h.mgr.tick(() => { /* nothing */ })
+  await flush()
+  assert.ok(sink.cb)
+  const cacheOf = (): Record<string, unknown> => JSON.parse(fs.readFileSync(h.files.codexCacheFile!, 'utf8')) as Record<string, unknown>
+
+  // The push: its params verbatim in the envelope a fetch writes.
+  h.setNow(BASE + MIN)
+  sink.cb!('account/rateLimits/updated', push)
+  const pushed = cacheOf()
+  assert.deepEqual(pushed.body, push)
+  assert.deepEqual([pushed.schema_version, pushed.source, pushed.fetched_at, pushed.writer], [1, 'codex', Math.floor((BASE + MIN) / 1000), 'token-pace/1.0.0'])
+
+  // A fetch's read after it: the read result verbatim, in the same envelope.
+  h.setNow(BASE + 2 * MIN)
+  readReady = true
+  h.mgr.forcePoll(() => { /* nothing */ })
+  await flush()
+  const fetched = cacheOf()
+  assert.ok(h.polls.some((p) => p.source === 'codex'))
+  assert.deepEqual(fetched.body, read)
+  assert.deepEqual(Object.keys(fetched).sort(), Object.keys(pushed).sort(), 'the same envelope')
+  assert.equal(fetched.fetched_at, readAt)
+
+  // Off, a push writes nothing (writeQuotaCache is the one consented opt-in for that file).
+  const off = harness({ appServerMode: 'persistent' }, { findCodexBinary: () => '/nowhere/codex', createAppServer: () => fake as never })
+  off.mgr.tick(() => { /* nothing */ })
+  await flush()
+  sink.cb!('account/rateLimits/updated', push)
+  assert.equal(fs.existsSync(off.files.codexCacheFile!), false)
+  h.mgr.dispose()
+  off.mgr.dispose()
+})
+
+test('a codex binary that is not there is searched for once in five minutes, again at once when tokenPace.codexBinary changes; a found one is used at once (1.12, Review 2 F10)', async () => {
+  const searched: Array<string | undefined> = []
+  let found: string | null = null
+  const created: string[] = []
+  const fake = {
+    start() { /* nothing */ },
+    stop() { /* nothing */ },
+    onNotification() { return { dispose: () => { /* nothing */ } } },
+    onReady() { return { dispose: () => { /* nothing */ } } },
+  }
+  const h = harness({ appServerMode: 'persistent' }, {
+    findCodexBinary: (override) => { searched.push(override); return found },
+    createAppServer: (bin) => { created.push(bin); return fake as never },
+  })
+  // The 30-s tick, twice within the window: one search.
+  h.mgr.tick(() => { /* nothing */ })
+  h.setNow(BASE + 30_000)
+  h.mgr.tick(() => { /* nothing */ })
+  h.setNow(BASE + 4 * MIN + 59_000)
+  h.mgr.tick(() => { /* nothing */ })
+  await flush()
+  assert.equal(searched.length, 1, 'ticks inside the five minutes do not search again')
+  assert.equal(CODEX_BINARY_MISS_MS, 5 * MIN)
+  // Five minutes on: the next tick searches again.
+  h.setNow(BASE + 5 * MIN)
+  h.mgr.tick(() => { /* nothing */ })
+  assert.equal(searched.length, 2)
+  // A changed tokenPace.codexBinary searches at once — and a binary found there is used at once.
+  found = '/opt/codex/bin/codex'
+  h.mgr.setOptions({ ...OPTIONS, appServerMode: 'persistent', codexBinary: '/opt/codex/bin/codex' })
+  h.setNow(BASE + 5 * MIN + 30_000)
+  h.mgr.tick(() => { /* nothing */ })
+  await flush()
+  assert.deepEqual(searched, [undefined, undefined, '/opt/codex/bin/codex'])
+  assert.deepEqual(created, ['/opt/codex/bin/codex'])
+  h.mgr.dispose()
 })
 
 test('leaving the persistent mode stops the child process', async () => {

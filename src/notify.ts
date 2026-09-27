@@ -37,10 +37,10 @@ import { ChannelKind, NOTIFY_CHANNELS, NOTIFY_EVENTS, NotifyConfig, NotifyEventK
 import { t } from './i18n'
 import { turnClosed } from './keepWarm'
 import { estimate, percentText } from './render'
-import { RESET_JITTER_MS } from './resetRule'
+import { heldReset, RESET_JITTER_MS } from './resetRule'
 import type { MementoLike } from './storage'
 import { formatTime, resetClock, TimeConfig } from './time'
-import { Forecast, MainRec, QuotaState, Source } from './types'
+import { Forecast, MainRec, QuotaState, Source, StopReason } from './types'
 
 export { NOTIFY_CHANNELS, NOTIFY_EVENTS, WEBHOOK_FORMATS } from './config'
 export type { ChannelKind, NotifyConfig, NotifyEventKind, WebhookFormat } from './config'
@@ -226,12 +226,25 @@ export async function saveNotifyState(memento: MementoLike, st: NotifyState, now
 // ---------------------------------------------------------------------------
 
 /**
- * C2 rule 2: per session id — the key and nothing else of the session —, when this window first saw its
- * current turn open (null while it is not open), and the newest reply time of a close already handled.
+ * C2 rule 2: per session id — the key and nothing else of the session —, since when this window counts its
+ * current turn open (null while it is not open), the newest reply time of a close already handled, and the
+ * newest request it saw of the session (`lastRequest`'s `at` and `stop`) — the one fact that tells a new prompt
+ * from a tool's result (Review 2 F4).
  */
-export interface TurnSeenEntry { openSince: number | null; closedTs: number | null }
+export interface TurnSeenEntry {
+  openSince: number | null
+  closedTs: number | null
+  reqAt: number | null
+  reqStop: StopReason | null
+}
 export type TurnSeen = Map<string, TurnSeenEntry>
-/** C2 rule 1: per session id, the hook entry's time of the wait episode already told (or consumed). */
+/**
+ * C2 rule 1: per session id, the hook entry's time of the wait episode already told. The once-rule is the
+ * persisted `sent[agentWaiting:<wait>:<ts>]` (C4 rule 1); this table only spares an episode that is in it the
+ * evaluations that would drop it again, and it marks one only after `admit` — `markToldWaits` — so that a wait
+ * the cooldown or the hourly cap dropped is built again while it stands and speaks once they let it (C4 rule 2,
+ * Review 2 F2).
+ */
 export type WaitSeen = Map<string, number>
 
 export interface NotifyTables { turns: TurnSeen; waits: WaitSeen }
@@ -281,10 +294,9 @@ export function quotaEvents(
       const key = `${s.source}:${w.id}`
       const cycle = st.cycles[key]
       const resetsAt = finite(w.resetsAt) ? w.resetsAt : null
-      // The same cycle when the reset time only jittered: the stored one stays the cycle's name.
-      const sameCycle = cycle !== undefined && cycle.resetsAt !== null && resetsAt !== null
-        && Math.abs(resetsAt - cycle.resetsAt) <= RESET_JITTER_MS
-      const cycleResetsAt = sameCycle ? (cycle as NotifyCycle).resetsAt : resetsAt
+      // The same cycle when the reset time only jittered: the stored one stays the cycle's name (the rule the
+      // in-editor alerts share — resetRule.ts heldReset).
+      const cycleResetsAt = heldReset(cycle?.resetsAt, resetsAt)
       const base = { provider: s.source, windowLabel: w.label, windowKind: w.kind, percent: Math.round(w.percent) }
 
       // C2 rule 5: a later reset for a window whose stored cycle has ended — no more than 30 min ago.
@@ -329,6 +341,15 @@ export function quotaEvents(
  * still being read (`settled` false: a cold scan's turns are history, not news — and nothing is observed then
  * either), nothing for a turn first seen already closed, and nothing while the window is focused (§7a Q16 —
  * the close is then taken as seen). Claude Code only: a Codex rollout's turn holds no end state Token Pace reads.
+ *
+ * Review 2 F4 (the lead's decision): the span restarts at the newest prompt. A new request (`lastRequest.at`
+ * changed) after a request that did not call a tool — one that ended its turn, was cut off by an interruption,
+ * or ended on an error or another stop — answers a prompt the user wrote after it, not a tool's result: a new
+ * turn, counted from that request's first line (the earliest time the transcript knows of the answer to the
+ * prompt, so the span stays a lower bound). Without this an interrupted or errored turn stayed "open" while the
+ * reader was away, and the first short reply after their return read "after at least 3 h". An interruption
+ * during a tool call looks like a tool still running (the newest request called a tool, the user's line is
+ * newest) and is not told apart: its span counts from the first sighting.
  */
 export function turnEvents(
   mains: readonly MainRec[],
@@ -343,18 +364,31 @@ export function turnEvents(
     if (!m || typeof m.sessionId !== 'string') continue
     alive.add(m.sessionId)
     const rec = seen.get(m.sessionId)
+    const reqAt = m.lastRequest && finite(m.lastRequest.at) ? m.lastRequest.at : null
+    const reqStop = m.lastRequest?.stop ?? null
+    // F4: a new request after one that called no tool answers a new prompt — the turn restarted at it.
+    const restarted = rec !== undefined && rec.reqAt !== null && reqAt !== null && reqAt !== rec.reqAt
+      && rec.reqStop !== 'tool_use'
     if (turnClosed(m.lastRequest) !== 'closed') {
-      if (rec === undefined) seen.set(m.sessionId, { openSince: now, closedTs: null })
-      else if (rec.openSince === null) rec.openSince = now
+      if (rec === undefined) seen.set(m.sessionId, { openSince: now, closedTs: null, reqAt, reqStop })
+      else {
+        if (restarted) rec.openSince = Math.min(reqAt as number, now)
+        else if (rec.openSince === null) rec.openSince = now
+        rec.reqAt = reqAt
+        rec.reqStop = reqStop
+      }
       continue
     }
     const closedTs = finite(m.lastTs) ? m.lastTs : null
     if (rec === undefined) {
-      seen.set(m.sessionId, { openSince: null, closedTs })
+      seen.set(m.sessionId, { openSince: null, closedTs, reqAt, reqStop })
       continue
     }
-    const since = rec.openSince
+    // The closing request answers a new prompt: the turn is that request alone, counted from its first line.
+    const since = rec.openSince !== null && restarted ? Math.min(reqAt as number, now) : rec.openSince
     rec.openSince = null
+    rec.reqAt = reqAt
+    rec.reqStop = reqStop
     if (since === null || closedTs === null || rec.closedTs === closedTs) {
       rec.closedTs = closedTs
       continue
@@ -401,12 +435,29 @@ export function waitEvents(
     if (h.wait === 'input' && m !== undefined && turnClosed(m.lastRequest) === 'closed') continue
     standing.add(h.sessionId)
     if (now - h.ts < AGENT_WAIT_AFTER_MS || seen.get(h.sessionId) === h.ts || focused) continue
-    seen.set(h.sessionId, h.ts)
-    out.push(eventOf('agentWaiting', `agentWaiting:${h.wait}:${h.ts}`, now, { program: 'claudeCode', wait: h.wait, since: h.ts }))
+    // Not marked here: an episode is told once its identity is sent (`markToldWaits`, after `admit`).
+    out.push(eventOf('agentWaiting', waitIdentity(h.wait, h.ts), now, { program: 'claudeCode', wait: h.wait, since: h.ts }))
   }
   // Bounded to the sessions with a wait standing.
   for (const id of [...seen.keys()]) if (!standing.has(id)) seen.delete(id)
   return out
+}
+
+/** C2 rule 1's once-rule: a wait episode's identity — its kind and the hook entry's time, never the session. */
+function waitIdentity(wait: 'permission' | 'input', ts: number): string {
+  return `agentWaiting:${wait}:${ts}`
+}
+
+/**
+ * C4 rules 1–2 (Review 2 F2): after `admit`, the wait episodes whose identity is in the persisted `sent` — admitted
+ * now or in an earlier life of the window — are marked told in `seen`, and only those: an episode the cooldown or
+ * the hourly cap dropped stays unmarked, so the next evaluation builds it again while the wait stands.
+ */
+export function markToldWaits(hooks: readonly HookEntry[], st: NotifyState, seen: WaitSeen): void {
+  for (const h of hooks) {
+    if (!h || h.agentId !== null || (h.wait !== 'permission' && h.wait !== 'input') || !finite(h.ts)) continue
+    if (st.sent[waitIdentity(h.wait, h.ts)] !== undefined) seen.set(h.sessionId, h.ts)
+  }
 }
 
 /** What one evaluation hands the notifier (C9 rule 2): the same readings, forecasts, sessions and waits the page has. */
@@ -509,8 +560,9 @@ export function droppedLines(dropped: Admission['dropped']): string[] {
 
 /**
  * One evaluation, end to end: nothing at all with no channel listed or in a follower window (not even the
- * state is read — C9 rule 3); otherwise the events, their admission, the state persisted (C4 rule 5 — only
- * when it changed), then one `send` per message. A send that throws changes nothing: its identities were
+ * state is read — C9 rule 3); otherwise the events, their admission, the wait episodes now sent marked told
+ * (`markToldWaits` — after the admission, never before it), the state persisted (C4 rule 5 — only when it
+ * changed), then one `send` per message. A send that throws changes nothing: its identities were
  * marked before it started (C4 rule 4 — an attempt counts, no retry).
  */
 export async function notifyRound(
@@ -529,6 +581,7 @@ export async function notifyRound(
   const before = JSON.stringify(st)
   const events = collectEvents(input, cfg, st, tables, now)
   const admission = admit(events, cfg, st, now)
+  if (cfg.events.includes('agentWaiting')) markToldWaits(input.hooks, st, tables.waits)
   if (JSON.stringify(st) !== before) await saveNotifyState(deps.memento, st, now)
   for (const group of admission.send) {
     try {

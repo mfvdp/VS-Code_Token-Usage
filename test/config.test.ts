@@ -98,9 +98,11 @@ test('path and binary settings are machine-scoped', () => {
 test('settings that can reach the credentials are machine-scoped too', () => {
   // A workspace must not be able to switch on fetching, redirect the cache write, change
   // the User-Agent or open the OS keychain — those decisions belong to the machine.
+  // Review 2 F9 (pinned and changed): nor keep a child running — with `persistent` the default, a workspace's
+  // settings could otherwise override a reader's `oneShot`.
   const machine = [
     'tokenPace.quotaSource', 'tokenPace.writeQuotaCache',
-    'tokenPace.userAgent', 'tokenPace.credentials.keychain',
+    'tokenPace.userAgent', 'tokenPace.credentials.keychain', 'tokenPace.codexAppServer.mode',
   ]
   for (const key of machine) assert.equal(properties[key].scope, 'machine', `${key} must be machine-scoped`)
 })

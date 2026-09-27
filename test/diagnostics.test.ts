@@ -133,6 +133,50 @@ test('settings are shown with paths shortened and anything secret-shaped redacte
   assert.ok(!out.includes(HOME), 'no unshortened home path may survive')
 })
 
+test('the notification settings print a channel\'s host, account, addresses, chat id and server as set / not set — never the value; the port, the security, the format and the lists as they are (1.12 §0a.11, Review 2 F1)', () => {
+  // Synthetic values under every field that holds a host, an address, a chat id or a URL.
+  const values = [
+    'smtp.synthetic-host.example', 'synthetic-user@example.invalid', 'synthetic-from@example.invalid',
+    'synthetic-to@example.invalid', '-1001234567890', 'https://ntfy.synthetic-host.example', 'ntfy.synthetic-host.example',
+  ]
+  const out = buildDiagnostics(input({
+    settings: {
+      'tokenPace.notifications.channels': ['webhook', 'telegram', 'ntfy', 'email'],
+      'tokenPace.notifications.events': ['agentWaiting', 'quotaThreshold'],
+      'tokenPace.notifications.thresholds': { session: 80, weekly: 90 },
+      'tokenPace.notifications.cooldownMinutes': 10,
+      'tokenPace.notifications.webhook': { format: 'slack', secretHeader: '' },
+      'tokenPace.notifications.telegram': { chatId: '-1001234567890' },
+      'tokenPace.notifications.ntfy': { server: 'https://ntfy.synthetic-host.example' },
+      'tokenPace.notifications.email': {
+        host: 'smtp.synthetic-host.example', port: 587, security: 'starttls',
+        user: 'synthetic-user@example.invalid', from: 'synthetic-from@example.invalid', to: '',
+      },
+    },
+  }))
+  for (const v of values) assert.equal(out.includes(v), false, `${v} reached the report`)
+  assert.ok(out.includes('tokenPace.notifications.email = {"host":"set","port":587,"security":"starttls","user":"set","from":"set","to":"not set"}'), out)
+  assert.ok(out.includes('tokenPace.notifications.telegram = {"chatId":"set"}'))
+  assert.ok(out.includes('tokenPace.notifications.ntfy = {"server":"set"}'))
+  assert.ok(out.includes('tokenPace.notifications.webhook = {"format":"slack","secretHeader":""}'))
+  assert.ok(out.includes('tokenPace.notifications.channels = ["webhook","telegram","ntfy","email"]'))
+  assert.ok(out.includes('tokenPace.notifications.events = ["agentWaiting","quotaThreshold"]'))
+  assert.ok(out.includes('tokenPace.notifications.thresholds = {"session":80,"weekly":90}'))
+  assert.ok(out.includes('tokenPace.notifications.cooldownMinutes = 10'))
+  // The defaults (every address empty) read not set; a value typed by hand where an object belongs is not printed either.
+  const defaults = buildDiagnostics(input({
+    settings: {
+      'tokenPace.notifications.telegram': { chatId: '' },
+      'tokenPace.notifications.ntfy': 'https://ntfy.synthetic-host.example',
+      'tokenPace.notifications.email': { host: '  ', port: 587, security: 'tls', user: '', from: '', to: '' },
+    },
+  }))
+  assert.ok(defaults.includes('tokenPace.notifications.telegram = {"chatId":"not set"}'))
+  assert.ok(defaults.includes('tokenPace.notifications.ntfy = "set"'))
+  assert.ok(defaults.includes('tokenPace.notifications.email = {"host":"not set","port":587,"security":"tls","user":"not set","from":"not set","to":"not set"}'))
+  assert.equal(defaults.includes('synthetic-host'), false)
+})
+
 test('a value can never break out of the fence', () => {
   const out = buildDiagnostics(input({ extVersion: '1.0.0```\n## Injected' }))
   assert.equal(out.split('```').length, 3)

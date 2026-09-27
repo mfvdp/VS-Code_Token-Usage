@@ -46,8 +46,8 @@ You can change this later with "Token Pace: Reset Network Access Decision".
 
 The Claude line is the one Windows shows. With `tokenPace.credentials.keychain` on — the default —
 it names one more place on macOS and on Linux: on macOS the Keychain item `Claude Code-credentials`,
-read before the file with macOS's `security` tool, which may ask you once; on Linux the Secret
-Service through `secret-tool`, after the file.
+read before the file with macOS's `security` tool, which may ask you once — choose *Always Allow*;
+on Linux the Secret Service through `secret-tool`, after the file.
 
 The interval in the first line is your `tokenPace.pollIntervalMinutes`; with
 `tokenPace.codexAppServer.mode: oneShot` the Codex line says the app-server is started for each

@@ -132,6 +132,8 @@
   "this month": "в этом месяце",
   "this week": "на этой неделе",
   "today": "сегодня",
+  "{0} (in {1})": "{0} (через {1})",
+  "{0} (reset due)": "{0} (сброс ожидается)",
   "{0} ago": "{0} назад",
   "{0} at {1} (threshold {2})": "{0}: {1} (порог {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "Не удалось разрешить путь {0} ({1}). Похоже, это ссылка, цель которой отсутствует, поэтому она не тронута — исправьте ссылку и повторите попытку.",

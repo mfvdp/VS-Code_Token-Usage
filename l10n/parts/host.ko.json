@@ -132,6 +132,8 @@
   "this month": "이번 달",
   "this week": "이번 주",
   "today": "오늘",
+  "{0} (in {1})": "{0}({1} 후)",
+  "{0} (reset due)": "{0}(초기화 예정)",
   "{0} ago": "{0} 전",
   "{0} at {1} (threshold {2})": "{0} {1} 도달(임계값 {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "{0}을(를) 확인할 수 없습니다({1}). 대상이 없는 링크로 보이므로 건드리지 않았습니다 — 링크를 복구한 후 다시 시도하십시오.",

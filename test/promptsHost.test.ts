@@ -500,7 +500,8 @@ test('the target: the active terminal when it runs Claude Code or Codex — no q
     ['Claude Code — terminal 2 of 3', 'ready', undefined],
     ['Codex — terminal 3 of 3', 'sending asks first', 'Token Pace reads nothing of a Codex session\'s state: it cannot tell whether Codex is at work or waiting for an approval.'],
   ])
-  assert.deepEqual([pick.options.title, pick.options.placeHolder], ['Send “Stop after this task” to …', 'Pick the terminal that runs Claude Code or Codex'])
+  // 1.12 D6 (pinned and changed: "to …"): no space before the English ellipsis.
+  assert.deepEqual([pick.options.title, pick.options.placeHolder], ['Send “Stop after this task” to…', 'Pick the terminal that runs Claude Code or Codex'])
   // Dismissed: nothing typed, no message.
   assert.deepEqual(r.state.sent, [])
   assert.deepEqual(r.state.messages, [])

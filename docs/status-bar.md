@@ -20,8 +20,9 @@ Part of the [Token Pace documentation](../README.md#documentation).
   list hides the status bar entirely. `context` is off by default and appears only while the
   Claude Code status line is connected — it is one session's context window, never an account
   figure. `budget` is off by default too and shows the configured budget closest to its own
-  limit (`budget 63 %`, `budget ~63 %` for a money budget, `budget 118 % over`); the tooltip
-  lists all of them. `agents` is off by default as well and counts the Claude Code agents running
+  limit (`budget 63%`, `budget ~63%` for a money budget, `budget 118% over` — the bar's notation, as in the
+  quota entries); the tooltip lists all of them, each share written as a sentence writes it
+  (`63 %`). `agents` is off by default as well and counts the Claude Code agents running
   right now — `~3 running`, `~1 running` — the same count as the heading of the
   [running list](agents.md#running-now), so inferred and marked `~`; it is hidden while none runs.
   It has no colour, no alarm and no word for a finished agent. Its tooltip says what running

@@ -2523,9 +2523,10 @@ function newRecords(
  *
  * The honest denominator is the days that actually carry usage, not the length of the range:
  * a 30-day range worked on four days is four days of evidence, and calling that "4 weeks"
- * would sell a record as a habit. Those days are rounded up to whole weeks because a grid
+ * would sell an observation as a habit. Those days are rounded up to whole weeks because a grid
  * row is a weekday — one Tuesday is one week's worth of Tuesday, whatever else the range
- * contains — and below three of them the sentence says outright what it is.
+ * contains — and below three of them the sentence says outright what it is (1.12 D7: "a single
+ * observation" and "observations" — "record" is only the Records section's personal best).
  */
 function gridBasis(days: number): HoursData['basis'] {
   const weeks = Math.ceil(days / 7)
@@ -2535,7 +2536,9 @@ function gridBasis(days: number): HoursData['basis'] {
   const thin = weeks < GRID_HABIT_WEEKS
   const one = weeks === 1
   const text = thin
-    ? (one ? t('based on {0} week — a record, not a habit', weeks) : t('based on {0} weeks — a record, not a habit', weeks))
+    ? (one
+      ? t('based on {0} week — a single observation, not a habit', weeks)
+      : t('based on {0} weeks — observations, not yet a habit', weeks))
     : (one ? t('based on {0} week', weeks) : t('based on {0} weeks', weeks))
   return { weeks, days, text }
 }

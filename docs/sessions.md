@@ -17,7 +17,7 @@ installation, so two people with the same checkout path do not share a pseudonym
 the grouping while making the panel safe to show in a screen share.
 
 Changing `attribution` triggers a full re-scan, because the information is not in the existing
-snapshot. Switching back to `none` deletes the collected per-session records.
+snapshot. Switching back to `none` deletes the collected per-session data.
 
 The dashboard's `projects` and `sessions` sections follow the range, the model chips and the
 provider switch at the top of the page: under `Codex` they list the Codex usage of the range alone,

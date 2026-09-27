@@ -478,7 +478,7 @@ export class PromptsHost {
       }
     })
     const chosen = await this.window.showQuickPick(items, {
-      title: t('Send “{0}” to …', title),
+      title: t('Send “{0}” to…', title),
       placeHolder: t('Pick the terminal that runs Claude Code or Codex'),
     })
     return chosen === undefined ? null : candidates[chosen.at]?.terminal ?? null

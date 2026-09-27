@@ -225,7 +225,7 @@ function model(over: Record<string, unknown> = {}): Record<string, unknown> {
       peakHour: 9,
       // One week of mornings: the cells that were worked in carry a value, the rest none.
       grid: Array.from({ length: 7 }, (_, weekday) => ({ weekday, block: 2, value: 11000, samples: 1 })),
-      basis: { weeks: 1, days: 7, text: 'based on 1 week — a record, not a habit' },
+      basis: { weeks: 1, days: 7, text: 'based on 1 week — a single observation, not a habit' },
       weekdayLabels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       zone: 'local', days: 7, note: null,
     },
@@ -678,7 +678,7 @@ function germanPage(extra: Record<string, string> = {}): string {
     setLocale('de')
     setLang('de')
     setBundle({
-      'Loading …': 'Wird geladen …',
+      'Loading…': 'Wird geladen …',
       'Range': 'Zeitraum',
       'Providers': 'Anbieter',
       'Models': 'Modelle',
@@ -726,6 +726,9 @@ test('a German bundle reaches the page, the script inside it and the language of
   assert.match(html, /<html lang="de">/)
   assert.match(PAGE, /<html lang="en">/)
   assert.ok(html.indexOf('Wird geladen …') >= 0, 'the loading line is still English')
+  // 1.12 D6 (pinned and changed: the key was 'Loading …'): the English sets no space before the ellipsis, German keeps
+  // Duden's.
+  assert.ok(PAGE.indexOf('<p class="empty">Loading…</p>') >= 0, 'the English loading line')
 
   const de = makeContext()
   nodeVm.runInContext(between(html, /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
@@ -2122,15 +2125,16 @@ test('the weekday grid draws the blocks it has, hatches the rest and says what i
   assert.equal(grid.split('<i class="none"').length - 1, 35, grid)
   assert.ok(grid.indexOf('title="no usage in this block"') >= 0, grid)
   assert.ok(grid.indexOf('11,000 tokens over 1 day(s)') >= 0, grid)
-  // The caption carries the basis, and the hatch is named in a legend of its own.
-  assert.ok(h.indexOf('by weekday and four-hour block · based on 1 week — a record, not a habit') >= 0, h)
+  // The caption carries the basis, and the hatch is named in a legend of its own. (1.12 D7, pinned and changed: "a
+  // record, not a habit" — "record" is only the Records section's personal best.)
+  assert.ok(h.indexOf('by weekday and four-hour block · based on 1 week — a single observation, not a habit') >= 0, h)
   assert.ok(h.indexOf('hatched: no usage in that block') >= 0, h)
   // Four weeks of days is a habit and drops the qualifier — the same one sentence, no glyphs.
   const long = render('sHours()', {
     hours: { ...(model().hours as Record<string, unknown>), basis: { weeks: 4, days: 26, text: 'based on 4 weeks' } },
   })
   assert.ok(long.indexOf('by weekday and four-hour block · based on 4 weeks') >= 0, long)
-  assert.equal(long.indexOf('a record, not a habit'), -1, long)
+  assert.equal(long.indexOf('not a habit'), -1, long)
 })
 
 test('a lone sparkline sample is a point, not a stretched dash', () => {
@@ -3146,6 +3150,67 @@ test('the filter bar is a labelled grid: one row per thing it filters', () => {
   assert.match(STYLE, /\.bar \.span2 \{ grid-column: 2 \/ 4; \}/)
   assert.match(STYLE, /\.bar \.full \{ grid-column: 1 \/ 4; \}/)
   assert.match(STYLE, /\.icon \{[^}]*justify-self: end/)
+})
+
+/**
+ * 1.12 D3: the words the page prints for the ids the extension parses — the range chips and the chart's metric menu. The
+ * English page has no bundle, so each word is an English word key; the id stays the value the page posts back.
+ */
+const PRESET_WORDS: ReadonlyArray<readonly [string, string]> = [
+  ['today', 'today'], ['yesterday', 'yesterday'], ['7d', '7d'], ['30d', '30d'], ['90d', '90d'],
+  ['thisWeek', 'week to date'], ['thisMonth', 'month to date'], ['lastMonth', 'last month'], ['year', 'year'], ['all', 'all'],
+]
+const METRIC_WORDS: ReadonlyArray<readonly [string, string]> = [
+  ['usage', 'usage'], ['output', 'output'], ['cacheRead', 'cache read'], ['requests', 'requests'], ['reasoning', 'reasoning'],
+  ['cost', 'cost'],
+]
+/** The text a sighted reader gets from a piece of markup: its tags and their attributes gone. */
+const visibleText = (h: string): string => h.replace(/<[^>]*>/g, ' ')
+
+test('1.12 D3: the English page says the range chips and the chart metric in words — "week to date", "month to date", "last month", "cache read" — and never prints an id', () => {
+  const presets = PRESET_WORDS.map(([id]) => id)
+  ;(ctx as Record<string, unknown>).fixture = model({
+    range: { from: '2026-09-01', to: '2026-09-03', label: 'This month', preset: 'thisMonth', presets },
+  })
+  const opened = String(nodeVm.runInContext('vm = fixture; (function () { allRanges = true;'
+    + ' var h = controls(); allRanges = false; return h; })()', ctx))
+  const chips = [...opened.matchAll(/<button data-act="range" data-preset="([^"]+)" aria-pressed="(?:true|false)">([^<]*)<\/button>/g)]
+    .map((m) => [m[1], m[2]])
+  assert.deepEqual(chips, PRESET_WORDS, opened)
+  // The chart's metric menu: every option its word, the value the id; the selected one too.
+  const chart = render('sChart()', { chart: { ...(model().chart as Record<string, unknown>), metric: 'cacheRead' } })
+  const options = [...chart.matchAll(/<option value="([^"]+)"(?: selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], m[2]])
+  assert.deepEqual(options, METRIC_WORDS, chart)
+  assert.ok(chart.indexOf('<option value="cacheRead" selected>cache read</option>') >= 0, chart)
+  // No id is text: the four stand only in attributes, the values the page posts back.
+  for (const id of ['thisWeek', 'thisMonth', 'lastMonth', 'cacheRead']) {
+    assert.equal(visibleText(opened + chart).includes(id), false, `${id} is printed on the English page`)
+    assert.equal(SOURCE.includes(`tr('${id}')`), false, `src/webview/main.ts looks up the id ${id} as a word`)
+    assert.equal(id in DICT, false, `webviewWords() has the id ${id} as a key`)
+  }
+  assert.ok(opened.indexOf('data-preset="thisWeek"') >= 0 && chart.indexOf('value="cacheRead"') >= 0)
+  // The folded row shows the selected preset in its word too.
+  const folded = render('controls()', { range: { from: '2026-09-01', to: '2026-09-03', label: 'This month', preset: 'thisMonth', presets } })
+  assert.ok(folded.indexOf('data-preset="thisMonth" aria-pressed="true">month to date</button>') >= 0, folded)
+})
+
+test('1.12 D3: the German page keeps its carried chip words — „diese Woche", „dieser Monat", „letzter Monat", „Cache-Lesen"', () => {
+  const bundle = JSON.parse(readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  assert.deepEqual(['week to date', 'month to date', 'last month', 'cache read'].map((k) => bundle[k]),
+    ['diese Woche', 'dieser Monat', 'letzter Monat', 'Cache-Lesen'])
+  const html = germanPage(Object.fromEntries(['week to date', 'month to date', 'last month', 'cache read'].map((k) => [k, bundle[k]])))
+  const de = makeContext()
+  nodeVm.runInContext(between(html, /<script nonce="[A-Za-z0-9]+">/, '</script>'), de)
+  ;(de as Record<string, unknown>).fixture = model({
+    range: { from: '2026-09-01', to: '2026-09-03', label: 'Dieser Monat', preset: 'thisMonth', presets: PRESET_WORDS.map(([id]) => id) },
+  })
+  const opened = String(nodeVm.runInContext('vm = fixture; (function () { allRanges = true;'
+    + ' var h = controls(); allRanges = false; return h; })()', de))
+  for (const [id, word] of [['thisWeek', 'diese Woche'], ['thisMonth', 'dieser Monat'], ['lastMonth', 'letzter Monat']]) {
+    assert.ok(opened.indexOf(`data-preset="${id}" aria-pressed="${id === 'thisMonth'}">${word}</button>`) >= 0, `${id}: ${opened}`)
+  }
+  const chart = String(nodeVm.runInContext('vm = fixture; sChart()', de))
+  assert.ok(chart.indexOf('<option value="cacheRead">Cache-Lesen</option>') >= 0, chart)
 })
 
 test('the range row keeps three presets and folds the rest away', () => {

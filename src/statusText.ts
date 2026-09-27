@@ -778,7 +778,7 @@ function followerNote(): string {
 }
 
 function scanningNote(): string {
-  return `$(sync~spin) ${t('reading history … the token figures below are still growing')}`
+  return `$(sync~spin) ${t('reading history… the token figures below are still growing')}`
 }
 
 /**
@@ -1229,10 +1229,15 @@ export function contextTooltip(c: ContextReading, ctx: RenderContext): string {
  * it is an estimate and says so — in the bar it stands alone, with no `~$12.34` beside it to
  * make that obvious. A period with no local data has no share at all and prints the dash the
  * row already carries.
+ *
+ * 1.12 D5: the figure is the bar's notation — `63%`, no space, in every language, as the quota
+ * items print theirs (`percentText`). `shareText` (`percentOf`'s `63 %`) keeps serving the tables,
+ * the tooltip and the alerts' sentence, which write a percent as the language does.
  */
 export function budgetValue(b: BudgetRow): string {
-  if (b.share === null || b.shareText === '–') return '–'
-  return b.unit === 'usd' ? estimate(b.shareText) : b.shareText
+  if (b.share === null || !Number.isFinite(b.share) || b.shareText === '–') return '–'
+  const figure = `${Math.round(b.share)}%`
+  return b.unit === 'usd' ? estimate(figure) : figure
 }
 
 /**
@@ -1649,7 +1654,7 @@ export function itemModel(spec: ItemSpec, ctx: RenderContext): ItemModel {
       const click = clickCommand(cfg, null)
       return {
         id: 'tokenPace.tokens',
-        text: ctx.scanning ? `$(sync~spin) ${t('reading history …')}` : `Σ ${tokenText(total)}${suffix}`,
+        text: ctx.scanning ? `$(sync~spin) ${t('reading history…')}` : `Σ ${tokenText(total)}${suffix}`,
         colorId: null,
         alarm: false,
         tooltipMarkdown: tokenTooltip(ctx, 'tokens'),

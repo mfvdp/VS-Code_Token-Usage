@@ -367,7 +367,8 @@ test('the hour profile states what the picture stands on, in the dashboard’s o
   const line = markdownDocument(vm).split('\n').find((l) => l.startsWith('Hours ('))
   assert.ok(line, 'the markdown has no hours line')
   assert.ok(line.includes(vm.hours.basis.text), line)
-  assert.match(line, / — a record, not a habit/)
+  // 1.12 D7 (pinned and changed: "a record, not a habit"): "record" is only the Records section's personal best.
+  assert.match(line, / — a single observation, not a habit/)
 })
 
 test('the data-quality lines are identical in both renderings', () => {

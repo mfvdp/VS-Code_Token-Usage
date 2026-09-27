@@ -1545,7 +1545,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
 
   async function rescan(): Promise<void> {
     await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: t('Token Pace: re-reading token history …') },
+      { location: vscode.ProgressLocation.Notification, title: t('Token Pace: re-reading token history…') },
       async () => {
         // A replay still at work belongs to the aggregator about to be dropped: it ends first,
         // so that the replay below is this re-read's own.
@@ -2081,7 +2081,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
         'tokenPace.scan', vscode.StatusBarAlignment.Left, 999,
       )
       context.subscriptions.push(progress)
-      progress.text = `$(sync~spin) ${t('Reading token history …')}`
+      progress.text = `$(sync~spin) ${t('Reading token history…')}`
       progress.show()
       try {
         await coldScan((done, total) => { progress.tooltip = t('{0} of {1} files', done, total) })

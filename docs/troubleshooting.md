@@ -111,7 +111,7 @@ started —, in these words:
   never given (a refusal is not asked about again until you switch the setting off and on); or the
   workspace is in Restricted Mode.
 * **`reading`** (1.10) — Token Pace was reading the transcripts: the first scan after the window
-  opened (the status bar says *Reading token history …*), a re-read, or the one-time replay for the
+  opened (the status bar says *Reading token history…*), a re-read, or the one-time replay for the
   Agents tables after an update. The records the other checks read are rebuilt then, so no countdown
   starts and none ends with its line until the reading is done; nothing to do but wait for it.
 * **`noBridge`** — no status-line reading describes the session's newest request: the
@@ -169,7 +169,7 @@ says *Not sent: …*; one that asks first shows *Send “…” anyway?* The log
 * **`restricted`** — the workspace is in Restricted Mode, where Token Pace types nothing into a terminal.
   Trust the workspace (*Manage Workspace Trust*); the list itself can be edited either way.
 * **`reading`** — Token Pace is reading the transcripts: the first scan after the window opened (the
-  status bar says *Reading token history …*), a re-read, or the one-time replay for the Agents tables
+  status bar says *Reading token history…*), a re-read, or the one-time replay for the Agents tables
   after an update. Send again once it is done.
 * **`noTerminal`** — no terminal of this window runs Claude Code or Codex as VS Code's shell integration
   reports it, or the terminal closed before the prompt went. Start `claude` (or `codex`) in a VS Code

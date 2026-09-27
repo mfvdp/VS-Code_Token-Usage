@@ -268,9 +268,13 @@ test('a weekday × 4-hour cell is drawn from the days it has, and hatched only w
   assert.equal(new Set(filled.map((c) => c.weekday)).size, 7)
 })
 
-test('the grid says how many weeks it stands on, and below three that it is a record', () => {
+test('the grid says how many weeks it stands on, and below three that it is no habit yet — an observation, never a record (1.12 D7)', () => {
   const week = hours(ctxOf(fromBuckets(daysOfHourBuckets(7))), range('7d'), 'local')
-  assert.deepEqual(week.basis, { weeks: 1, days: 7, text: 'based on 1 week — a record, not a habit' })
+  // 1.12 D7 (pinned and changed: "a record, not a habit", and the title's "that it is a record"): "record" is only the
+  // Records section's personal best.
+  assert.deepEqual(week.basis, { weeks: 1, days: 7, text: 'based on 1 week — a single observation, not a habit' })
+  const two = hours(ctxOf(fromBuckets(daysOfHourBuckets(10))), range('30d'), 'local')
+  assert.deepEqual(two.basis, { weeks: 2, days: 10, text: 'based on 2 weeks — observations, not yet a habit' })
 
   // Twenty-two days of usage round up to four weeks — past the point where the picture is
   // allowed to be called a habit, so the qualifier is gone.

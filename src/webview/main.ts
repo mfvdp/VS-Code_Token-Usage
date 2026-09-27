@@ -406,12 +406,14 @@ function gear(key: string): string {
  * A range preset as the chip says it. The ids that are already a figure — "7d", "30d" — read
  * the same in every language; the rest are words. An id this build does not know keeps its
  * own name: a chip nobody can read is still a range the reader can leave.
+ * 1.12 D3: every word is an English word key — the English page has no bundle, so a key that was
+ * the id itself ("thisWeek") was printed as the id. The ids stay the ids the extension parses.
  */
 function presetLabel(preset: Payload): string {
   const p = String(preset === null || preset === undefined ? '' : preset);
   const words: Record<string, string> = {
-    today: tr('today'), yesterday: tr('yesterday'), thisWeek: tr('thisWeek'),
-    thisMonth: tr('thisMonth'), lastMonth: tr('lastMonth'), year: tr('year'), all: tr('all'),
+    today: tr('today'), yesterday: tr('yesterday'), thisWeek: tr('week to date'),
+    thisMonth: tr('month to date'), lastMonth: tr('last month'), year: tr('year'), all: tr('all'),
   };
   return esc(word(words, p) || p);
 }
@@ -1299,12 +1301,13 @@ const COST_KEY = '<svg class="key" viewBox="0 0 22 10" aria-hidden="true">'
 
 /**
  * A metric as the dropdown and the heat map's chips say it. The value the page posts back
- * stays the id the extension parses; only the word beside it is the reader's.
+ * stays the id the extension parses; only the word beside it is the reader's (1.12 D3: an
+ * English word key for `cacheRead`, as for the range chips).
  */
 function metricLabel(metric: Payload): string {
   const m = String(metric === null || metric === undefined ? '' : metric);
   const words: Record<string, string> = {
-    usage: tr('usage'), output: tr('output'), cacheRead: tr('cacheRead'),
+    usage: tr('usage'), output: tr('output'), cacheRead: tr('cache read'),
     requests: tr('requests'), reasoning: tr('reasoning'), cost: tr('cost'),
   };
   return esc(word(words, m) || m);

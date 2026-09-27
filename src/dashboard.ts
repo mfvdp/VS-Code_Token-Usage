@@ -525,7 +525,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
 <style nonce="${nonce}">${CSS}</style>
 </head>
 <body>
-<div id="root"><p class="empty">${escHtml(t('Loading …'))}</p></div>
+<div id="root"><p class="empty">${escHtml(t('Loading…'))}</p></div>
 <script nonce="${nonce}">${scriptText()}</script>
 </body>
 </html>`
@@ -1808,7 +1808,7 @@ function webviewWords(): Record<string, string> {
     'apply': t('apply'),
     'by weekday and four-hour block · {0}': t('by weekday and four-hour block · {0}'),
     'cache': t('cache'),
-    'cacheRead': t('cacheRead'),
+    'cache read': t('cache read'),
     'chart metric': t('chart metric'),
     'clear': t('clear'),
     'clear stored data': t('clear stored data'),
@@ -1835,13 +1835,14 @@ function webviewWords(): Record<string, string> {
     'hatched: no usage in that block': t('hatched: no usage in that block'),
     'hidden': t('hidden'),
     'idle session': t('idle session'),
-    'lastMonth': t('lastMonth'),
+    'last month': t('last month'),
     'less': t('less'),
     'limit reached': t('limit reached'),
     'local': t('local'),
     'lower bound': t('lower bound'),
     'models ({0}) ▾': t('models ({0}) ▾'),
     'month projection {0} · {1}': t('month projection {0} · {1}'),
+    'month to date': t('month to date'),
     'more': t('more'),
     'more ▾': t('more ▾'),
     'no hour data · {0} day(s)': t('no hour data · {0} day(s)'),
@@ -1883,8 +1884,6 @@ function webviewWords(): Record<string, string> {
     'sub': t('sub'),
     'subagents': t('subagents'),
     'superseded by a later attempt': t('superseded by a later attempt'),
-    'thisMonth': t('thisMonth'),
-    'thisWeek': t('thisWeek'),
     'time elapsed': t('time elapsed'),
     'time elapsed in this window': t('time elapsed in this window'),
     'to': t('to'),
@@ -1898,6 +1897,7 @@ function webviewWords(): Record<string, string> {
     'used beyond the elapsed share': t('used beyond the elapsed share'),
     'utc': t('utc'),
     'waits for a child agent': t('waits for a child agent'),
+    'week to date': t('week to date'),
     'weekly bars · {0} columns': t('weekly bars · {0} columns'),
     'without cache · {0} tokens cache read and {1} cache write not shown':
       t('without cache · {0} tokens cache read and {1} cache write not shown'),

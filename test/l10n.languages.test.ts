@@ -75,11 +75,13 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
-import { sanitize } from '../src/config'
+import { budgetRows } from '../src/budget'
+import { readTimeConfig, sanitize } from '../src/config'
 import { KEEP_WARM_TERMS_PASSAGE, KeepWarmConsent } from '../src/consent'
 import { setBundle, setLang, setLocale } from '../src/i18n'
 import { KEEP_WARM_LINE } from '../src/keepWarm'
 import { isLanguageId, LANGUAGE_IDS, languageEntry, languageName, LANGUAGES } from '../src/languages'
+import type { StatsCtx } from '../src/stats'
 import { buildItems, makeContext, UsageSource } from '../src/statusText'
 import type { MementoLike } from '../src/storage'
 import { formatReset, weekdayWords } from '../src/time'
@@ -644,6 +646,8 @@ const noMemento: MementoLike = { get: <T>(_key: string, fallback: T): T => fallb
  * width 8 and no time marker (`timeProgressStyle` none), the `compact` density over both windows (`windowSelect` all);
  * the weekday example is the same reset read two days before it (Saturday 06:00), and the `minimal` example the 5 h
  * window alone (`windowSelect` session) read at 01:30 — a tenth of its clock gone, so 25 % runs ahead of the pace (▲).
+ * 1.12 D5: the `budget` example is one budget of the reader's own — Claude Code's tokens today against a daily limit of
+ * 4.92M (`tokenPace.budgets`), so the 3.1M of today are 63 %, the figure the bar prints as `63%`.
  */
 export const BAR_FIXTURE = {
   now: Date.UTC(2026, 8, 28, 3, 46),
@@ -651,6 +655,7 @@ export const BAR_FIXTURE = {
   weekdayAt: Date.UTC(2026, 8, 26, 6, 0),
   paceAt: Date.UTC(2026, 8, 28, 1, 30),
   tokens: { today: 3_100_000, '7d': 12_300_000, '30d': 48_900_000 },
+  budget: { scope: 'claude', period: 'day', unit: 'tokens', limit: 4_920_000 },
 } as const
 const DAY_MS = 86_400_000
 
@@ -677,6 +682,8 @@ export const BAR_EXAMPLE_KEYS: Readonly<Record<string, readonly BarVariant[]>> =
   'config.summary.period.enum.30d': [{ settings: { 'tokenPace.summary.period': '30d' } }],
   'config.resetHourCycle.enum.h12': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h12' }, bare: true }],
   'config.resetHourCycle.enum.h23': [{ settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute', 'tokenPace.resetHourCycle': 'h23' }, bare: true }],
+  // 1.12 D5: the budget entry's figure is the bar's notation, as the quota entries' is.
+  'config.statusBar.show.enum.budget': [{ settings: { 'tokenPace.statusBar.show': ['budget'], 'tokenPace.budgets': [BAR_FIXTURE.budget] } }],
 }
 /** An example no fixture can produce, `<id>: <key>: <example>` with its reason — expected: none. */
 export const BAR_EXEMPT: ReadonlyArray<readonly [string, string]> = []
@@ -714,6 +721,18 @@ function barUsage(): UsageSource {
 }
 
 /**
+ * 1.12 D5: the budget rows of the variant's `tokenPace.budgets`, as the view model builds them for the bar (`budgetRows`
+ * over every provider) — the fixture's tokens of today in one day bucket of 2026-09-28. None without a budget.
+ */
+function barBudgets(cfg: ReturnType<typeof sanitize>, now: number): ReturnType<typeof budgetRows> {
+  const today = emptyBucket('claude', 'claude-opus-4-6', false, 'standard', 'd', null, '2026-09-28')
+  today.input = BAR_FIXTURE.tokens.today
+  const agg = { ...barUsage(), all: () => [today] } as unknown as StatsCtx['agg']
+  const ctx: StatsCtx = { agg, tcfg: readTimeConfig(cfg), pricing: {}, now, sources: ['claude', 'codex'], models: [], showCost: cfg.showCost }
+  return budgetRows(ctx, cfg.budgets, now)
+}
+
+/**
  * The texts the bar builds for one variant: every item's text, the tail of each from a `· ` on (an example that
  * quotes the reset part alone, “· resets at Mo 06:00”), and the 5 h window's reset as the item prints it (“06:00 AM”).
  */
@@ -721,7 +740,8 @@ function barTexts(v: BarVariant): string[] {
   const now = v.at ?? BAR_FIXTURE.now
   const cfg = sanitize({ 'tokenPace.timezone': 'utc', 'tokenPace.resetHourCycle': 'h23', 'tokenPace.windowSelect': 'all',
     'tokenPace.statusBar.show': ['claudeQuota', 'tokens'], ...v.settings })
-  const input = { quotas: barQuotas(now), agg: barUsage(), cfg, now, forecasts: new Map(), role: 'single' as const, scanning: false, consent: 'granted' as const }
+  const input = { quotas: barQuotas(now), agg: barUsage(), cfg, now, forecasts: new Map(), role: 'single' as const, scanning: false, consent: 'granted' as const,
+    budgets: barBudgets(cfg, now) }
   const out: string[] = []
   for (const item of buildItems(input)) {
     out.push(item.text)
@@ -1504,6 +1524,8 @@ test('T15: the fixture builds the English examples of package.nls.json word for 
     'CC 5h 25% · resets 2h14m', 'CC 5h 25% · resets at 06:00', '· resets at Mo 06:00', 'CC 5h 25% · resets at 06:00 (in 2h14m)',
     'CC 5h ██▁▁▁▁▁▁ 25% · resets 2h14m', 'CC 25%·2h14m | 69%·6d', 'TP 25% ▲',
     'Σ 3.1M · today', 'Σ 12.3M · 7d', 'Σ 48.9M · 30d', '06:00 AM', '06:00',
+    // 1.12 D5 (pinned and changed: the budget key joined BAR_EXAMPLE_KEYS): the budget entry's own figure, no space.
+    'budget 63%',
   ])
   assert.deepEqual(BAR_EXEMPT, [])
   // The German bar's words (§3 B3): „Reset in 2h14m", „Reset um 06:00", „heute" — T15 over the German files holds them.
@@ -1512,6 +1534,7 @@ test('T15: the fixture builds the English examples of package.nls.json word for 
     'CC 5h 25% · Reset in 2h14m', 'CC 5h 25% · Reset um 06:00', '· Reset um Mo 06:00', 'CC 5h 25% · Reset um 06:00 (in 2h14m)',
     'CC 5h ██▁▁▁▁▁▁ 25% · Reset in 2h14m', 'CC 25%·2h14m | 69%·6d', 'TP 25% ▲',
     'Σ 3,1M · heute', 'Σ 12,3M · 7d', 'Σ 48,9M · 30d', '06:00 AM', '06:00',
+    'Budget 63%',
   ])
   assert.deepEqual(barExampleProblems('de', 'package.nls.de.json', de, readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))), [])
 })

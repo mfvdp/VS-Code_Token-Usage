@@ -57,9 +57,10 @@ paragraph of buttons. The range in words (`Last 30 days · 2026-08-06 → 2026-0
 row, and the refresh button sits at its right end as an icon. The providers are not chips of the
 bar: the provider switch above the page picks them.
 
-**Ranges.** Chips for `today`, `7d` and `30d` are on the bar; `yesterday`, `90d`, `thisWeek`,
-`thisMonth`, `lastMonth`, `year` and `all` are one `more ▾` chip away (`fewer ▴` puts them
-back, and a range you have selected stays visible whatever the fold says). Two date fields
+**Ranges.** Chips for `today`, `7d` and `30d` are on the bar; `yesterday`, `90d`, `week to date`,
+`month to date`, `last month`, `year` and `all` are one `more ▾` chip away (`fewer ▴` puts them
+back, and a range you have selected stays visible whatever the fold says). The three in words
+are the values `thisWeek`, `thisMonth` and `lastMonth` of `dashboard.defaultRange`. Two date fields
 give a custom range (capped at five years, and a reversed range is swapped rather than
 returned empty); they stay hidden until you open them with the `custom…` chip, or until the
 range actually is a custom one, so the common case is chips only. `dashboard.defaultRange` is
@@ -72,7 +73,7 @@ are filtering on stays on the bar either way — and a
 model table sortable by every column it shows (`model`, `usage`, `freshInput`, `cacheWrite5m`,
 `cacheWrite1h`, `cacheRead`, `output`, `reasoning`, `requests`, `cacheHit`, `perRequest`, `cost`,
 `share`, ascending or descending).
-Chart metrics: `usage`, `output`, `cacheRead`, `requests`, `reasoning`, `cost`. The chart is
+Chart metrics: `usage`, `output`, `cache read`, `requests`, `reasoning`, `cost`. The chart is
 stacked **by model** unless its `subagents` chip is pressed (below), one band per model under each provider: every band wears its
 provider's hue — Claude blue, Codex purple — and the five largest models of a provider are told
 apart by rank, drawn as a pattern (solid, 45° stripes, 135° stripes, cross-hatch, horizontal

@@ -178,7 +178,7 @@ check('a settings change reaches the status bar without a reload', async () => {
 
   // The starting point is written rather than assumed, so the check does not depend on what
   // the manifest currently defaults `summary.period` to. This wait also covers the cold scan:
-  // until it ends, the item says "reading history …" instead of a period.
+  // until it ends, the item says "reading history…" instead of a period.
   await settings().update('summary.period', 'today', vscode.ConfigurationTarget.Global)
   const before = await waitFor(
     `${TOKENS_ITEM} to show the "today" period`,

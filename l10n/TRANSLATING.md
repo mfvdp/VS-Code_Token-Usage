@@ -82,7 +82,7 @@ how the translations were made is in [Languages](../docs/languages.md).
   in the command palette. Quote a VS Code command (*Configure Display Language*) or term
   (*Restricted Mode*) as VS Code's own translation into the language has it, where you know it.
 * The other way round: a text of the status bar or the page that a setting's description quotes as
-  an example (“~22 running”, “budget 63 %”, “retry 1h12m”, the compact tooltip's header
+  an example (“~22 running”, “budget 63%”, “retry 1h12m”, the compact tooltip's header
   “Window | Used | Elapsed | Pace | Resets”) is quoted as your bundle translates it — the reader
   compares the example with what the bar shows.
 * A `{n}` the English puts between quotation marks (“{0}”, ‘{0}’) stays between quotation marks. For
@@ -236,7 +236,8 @@ writes one, and `scripts/l10n-rekey.mjs` passes over a language without files.
    Ukrainian): the en dash `–` is the absence mark.
 9. **Numbers**: the page's decimals and groupings come from your locale — Hindi's `12,34,567` and
    its decimal point included; none of the twelve writes the percent sign first. A sentence writes
-   `{0} %` as your language writes a percent; the status bar keeps `25%` (notation).
+   `{0} %` as your language writes a percent; the status bar keeps `25%` (notation) — the budget entry
+   too (1.12): “budget 63%”.
 10. **Terms**: return your 30 hardest terms, and name the word you chose for "prompt" (a loanword or
     not), "record" (a personal best), "entry" (an agent's data), "keep-warm" and "cold start".
 11. **Gates** — for each id of your package, in your worktree, the tests inside a memory scope (a
@@ -429,13 +430,15 @@ each failure names the language, the file and the key:
   has it in, a `review` key where your part holds a value; the ledger is applied to its end; German
   has no list; and once `PENDING_ALLOWED` is false (the join) no list is left.
 * **T15 · The bar's examples** (1.10) — every example quoted in `config.resetFormat.enum.*`,
-  `config.density.enum.*`, `config.summary.period.enum.*` and `config.resetHourCycle.enum.*` (the
+  `config.density.enum.*`, `config.summary.period.enum.*`, `config.resetHourCycle.enum.*` and (1.12)
+  `config.statusBar.show.enum.budget` (the
   text between two of T11's quotation marks; a no-break space reads as a space, and an apostrophe
   between two letters — aujourd’hui, dell’ora — is a letter of the word, not a mark) is a text your
   language's status bar prints — your bundle's words, your locale's decimals, weekday and 12-hour
   clock — for this fixture: Monday 2026-09-28, 03:46 UTC; Claude Code's 5 h window at 25 % with its
   reset 2 h 14 min away (06:00), its 7 d window at 69 % with 6 days left; 3.1M tokens today, 12.3M
-  in 7 days, 48.9M in 30. The reset formats and hour cycles show no bar, `full` a bar of width 8
+  in 7 days, 48.9M in 30; a budget of 4.92M Claude Code tokens a day, so today's 3.1M are 63 %
+  (“budget 63%”). The reset formats and hour cycles show no bar, `full` a bar of width 8
   without the time marker, `compact` both windows; the weekday example is the same reset read two
   days before it, and `minimal` the 5 h window alone at 01:30, where 25 % runs ahead of the pace
   (`▲`). So the English “CC 5h 25% · resets 2h14m” is “CC 5h 25% · Reset in 2h14m” in German, and

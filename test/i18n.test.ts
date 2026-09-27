@@ -411,3 +411,31 @@ test('the bare compaction triggers are retired keys: no part, no bundle and no t
     assert.equal(typeof bundle[key], 'string', `no German for ${JSON.stringify(key)}`)
   }
 })
+
+/**
+ * 1.12 D6: one ellipsis rule for the English — no space before `…`, VS Code's own style ("Loading…", "Export CSV…").
+ * An ellipsis between two placeholders (`{1} … {2}`, the snapshot's span of days *Clear Stored Data…* lists) stands
+ * for "to": a range, not an omission, and it keeps its spaces. Every other language sets the ellipsis as its own
+ * typography does — German keeps Duden's space before an ellipsis that stands for omitted words („Wird geladen …").
+ */
+function spacedEllipses(keys: string[]): string[] {
+  return keys.filter((k) => /\s…/.test(k.replace(/\} … \{/g, '}…{')))
+}
+
+test('1.12 D6: no English key has a space before its ellipsis — a range between two placeholders excepted', () => {
+  const keys = Object.keys(extractedKeys())
+  assert.deepEqual(spacedEllipses(keys), [], 'an English key sets a space before its ellipsis')
+  // The six keys 1.12 changed, and the one range.
+  for (const k of ['Loading…', 'Reading token history…', 'Send “{0}” to…', 'Token Pace: re-reading token history…',
+    'reading history…', 'reading history… the token figures below are still growing', '{0} file(s) · {1} … {2}']) {
+    assert.ok(keys.includes(k), `no t() key ${JSON.stringify(k)}`)
+  }
+  // The rule bites: the 1.11 keys fail it, the range and a closed ellipsis do not.
+  assert.deepEqual(spacedEllipses(['Loading …', 'reading history … the token figures below are still growing', 'Send “{0}” to …',
+    '{0} file(s) · {1} … {2}', 'Export CSV…', '… {0} more']),
+  ['Loading …', 'reading history … the token figures below are still growing', 'Send “{0}” to …'])
+  // German keeps its space (Duden), 'Reading history…' aligned to it in 1.12.
+  const bundle = readJson(BUNDLE) as Record<string, string>
+  assert.deepEqual(['Loading…', 'Reading history…', 'reading history…'].map((k) => bundle[k]),
+    ['Wird geladen …', 'Verlauf wird gelesen …', 'Verlauf wird gelesen …'])
+})

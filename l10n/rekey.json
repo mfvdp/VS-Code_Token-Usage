@@ -1,5 +1,140 @@
 {
   "v": 1,
   "base": "d39c2df",
-  "entries": []
+  "entries": [
+    {
+      "n": 1,
+      "by": "P3",
+      "kind": "reword",
+      "part": "dashboard",
+      "old": "thisWeek",
+      "key": "week to date",
+      "carry": true,
+      "why": "the range chip’s English word for the calendar week up to today (the key was the identifier thisWeek, which the English page printed as it stands) — your word carries over, keep it unless it is wrong — 1.12 D3"
+    },
+    {
+      "n": 2,
+      "by": "P3",
+      "kind": "reword",
+      "part": "dashboard",
+      "old": "thisMonth",
+      "key": "month to date",
+      "carry": true,
+      "why": "the range chip’s English word for the calendar month up to today (the key was the identifier thisMonth, which the English page printed as it stands) — your word carries over, keep it unless it is wrong — 1.12 D3"
+    },
+    {
+      "n": 3,
+      "by": "P3",
+      "kind": "reword",
+      "part": "dashboard",
+      "old": "lastMonth",
+      "key": "last month",
+      "carry": true,
+      "why": "the range chip’s English word for the whole previous calendar month (the key was the identifier lastMonth, which the English page printed as it stands) — your word carries over, keep it unless it is wrong — 1.12 D3"
+    },
+    {
+      "n": 4,
+      "by": "P3",
+      "kind": "reword",
+      "part": "dashboard",
+      "old": "cacheRead",
+      "key": "cache read",
+      "carry": true,
+      "why": "the chart metric menu’s English word for the tokens read from the prompt cache (the key was the identifier cacheRead, which the English page printed as it stands) — your word carries over, keep it unless it is wrong — 1.12 D3"
+    },
+    {
+      "n": 5,
+      "by": "P3",
+      "kind": "nls-reword",
+      "key": "config.statusBar.show.enum.budget",
+      "why": "the example writes the budget entry’s figure as the status bar now prints it, 63% with no space like the quota entries (was “budget 63 %”) — copy what your bar prints (T15) — 1.12 D5"
+    },
+    {
+      "n": 6,
+      "by": "P3",
+      "kind": "reword",
+      "part": "dashboard",
+      "old": "Loading …",
+      "key": "Loading…",
+      "carry": true,
+      "why": "the English drops the space before the ellipsis, VS Code’s own style (was Loading …) — the meaning is unchanged, set the ellipsis as your typography sets it — 1.12 D6"
+    },
+    {
+      "n": 7,
+      "by": "P3",
+      "kind": "reword",
+      "part": "host",
+      "old": "Reading token history …",
+      "key": "Reading token history…",
+      "carry": true,
+      "why": "the English drops the space before the ellipsis, VS Code’s own style (was Reading token history …) — the meaning is unchanged, set the ellipsis as your typography sets it — 1.12 D6"
+    },
+    {
+      "n": 8,
+      "by": "P3",
+      "kind": "reword",
+      "part": "host",
+      "old": "Send “{0}” to …",
+      "key": "Send “{0}” to…",
+      "carry": true,
+      "why": "the English drops the space before the ellipsis, VS Code’s own style (was Send “{0}” to …) — the meaning is unchanged, set the ellipsis as your typography sets it — 1.12 D6"
+    },
+    {
+      "n": 9,
+      "by": "P3",
+      "kind": "reword",
+      "part": "host",
+      "old": "Token Pace: re-reading token history …",
+      "key": "Token Pace: re-reading token history…",
+      "carry": true,
+      "why": "the English drops the space before the ellipsis, VS Code’s own style (was Token Pace: re-reading token history …) — the meaning is unchanged, set the ellipsis as your typography sets it — 1.12 D6"
+    },
+    {
+      "n": 10,
+      "by": "P3",
+      "kind": "reword",
+      "part": "text",
+      "old": "reading history …",
+      "key": "reading history…",
+      "carry": true,
+      "why": "the English drops the space before the ellipsis, VS Code’s own style (was reading history …) — the meaning is unchanged, set the ellipsis as your typography sets it — 1.12 D6"
+    },
+    {
+      "n": 11,
+      "by": "P3",
+      "kind": "reword",
+      "part": "text",
+      "old": "reading history … the token figures below are still growing",
+      "key": "reading history… the token figures below are still growing",
+      "carry": true,
+      "why": "the English drops the space before the ellipsis, VS Code’s own style (was reading history … the token figures below are still growing) — the meaning is unchanged, set the ellipsis as your typography sets it — 1.12 D6"
+    },
+    {
+      "n": 12,
+      "by": "P3",
+      "kind": "nls-reword",
+      "key": "config.attribution.description",
+      "why": "the last sentence says the collected per-session data (was per-session records) — record is only the Records section’s personal best, so where you wrote your word for a record there, write your word for data — 1.12 D7"
+    },
+    {
+      "n": 13,
+      "by": "P3",
+      "kind": "reword",
+      "part": "model",
+      "old": "based on {0} week — a record, not a habit",
+      "key": "based on {0} week — a single observation, not a habit",
+      "carry": false,
+      "why": "the weekday grid’s basis of one week says a single observation, not a habit (was based on {0} week — a record, not a habit) — record is only the Records section’s personal best, so translate the new English — 1.12 D7"
+    },
+    {
+      "n": 14,
+      "by": "P3",
+      "kind": "reword",
+      "part": "model",
+      "old": "based on {0} weeks — a record, not a habit",
+      "key": "based on {0} weeks — observations, not yet a habit",
+      "carry": false,
+      "why": "the weekday grid’s basis of two weeks says observations, not yet a habit (was based on {0} weeks — a record, not a habit) — record is only the Records section’s personal best, so translate the new English — 1.12 D7"
+    }
+  ]
 }

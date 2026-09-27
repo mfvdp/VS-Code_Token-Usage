@@ -635,7 +635,8 @@ test('a follower says who owns the data; a running scan says the figures are sti
   const follower = quotaTooltip(state(), makeContext(input({ role: 'follower' })))
   assert.ok(follower.includes('another window polls and writes the data'), follower)
   const scanning = buildItems(input({ scanning: true })).find((m) => m.id === 'tokenPace.tokens')
-  assert.equal(scanning?.text, '$(sync~spin) reading history …')
+  // 1.12 D6 (pinned and changed: "reading history …"): no space before the English ellipsis.
+  assert.equal(scanning?.text, '$(sync~spin) reading history…')
   assert.ok(scanning?.tooltipMarkdown.includes('reading history'))
 })
 
@@ -1156,9 +1157,11 @@ function budget(over: Partial<BudgetRow> = {}): BudgetRow {
   }
 }
 
+// 1.12 D5 (pinned and changed, the four tests below: `budget ~42 %`, `budget 8 %`, `budget ~118 % over` and the
+// preview's `~38 %`): the entry's own figure is the bar's notation, `42%` without a space, as the quota entries print theirs.
 test('the budget entry appears only when it is asked for and a budget exists', () => {
   const on = cfg({ 'tokenPace.statusBar.show': ['budget'] })
-  assert.deepEqual(textsOf({ cfg: on, budgets: [budget()] }), ['budget ~42 %'])
+  assert.deepEqual(textsOf({ cfg: on, budgets: [budget()] }), ['budget ~42%'])
   // Nobody stated a limit, so there is nothing to be a share of — and no entry at all.
   assert.deepEqual(textsOf({ cfg: on, budgets: [] }), [])
   assert.deepEqual(textsOf({ cfg: on }), [])
@@ -1176,16 +1179,16 @@ test('the bar shows the budget closest to its own limit, comparing shares and ne
     limit: 5_000_000, limitText: '5M', used: 400_000, usedText: '400K',
     share: 8, shareText: '8 %', text: 'Claude Code · today: 400K of 5M · 8 %',
   })
-  assert.deepEqual(textsOf({ cfg: on, budgets: [tokens, money] }), ['budget ~42 %'])
+  assert.deepEqual(textsOf({ cfg: on, budgets: [tokens, money] }), ['budget ~42%'])
   // A token budget keeps its plain share: only a hypothetical amount carries the marker.
-  assert.deepEqual(textsOf({ cfg: on, budgets: [tokens] }), ['budget 8 %'])
+  assert.deepEqual(textsOf({ cfg: on, budgets: [tokens] }), ['budget 8%'])
 })
 
 test('a budget over its own limit says so, and one with no data at all shows a dash', () => {
   const on = cfg({ 'tokenPace.statusBar.show': ['budget'] })
   assert.deepEqual(
     textsOf({ cfg: on, budgets: [budget({ share: 118, shareText: '118 %', over: true })] }),
-    ['budget ~118 % over'],
+    ['budget ~118% over'],
   )
   // Never "0 %": an unread period is not a quiet one, so a row without a share cannot win
   // the comparison — and a lone row without one prints the dash rather than a number.
@@ -1195,6 +1198,33 @@ test('a budget over its own limit says so, and one with no data at all shows a d
       makeContext(input({ cfg: on }))).text,
     'budget –',
   )
+})
+
+test('1.12 D5: the budget entry prints its share in the bar\'s notation — `budget 63%`, `Budget 63%`, `~63%` for money — while the tooltip\'s sentence keeps the language\'s `63 %`', () => {
+  const on = cfg({ 'tokenPace.statusBar.show': ['budget'] })
+  const tokens = budget({
+    key: 'claude:day:tokens', unit: 'tokens', label: 'Claude Code · today', limit: 4_920_000, limitText: '4.9M',
+    used: 3_100_000, usedText: '3.1M', share: 63.008, shareText: '63 %', text: 'Claude Code · today: 3.1M of 4.9M · 63 %',
+  })
+  const money = budget({ share: 63.2, shareText: '63 %', text: 'All providers · this month: ~$126.40 of $200.00 · 63 %' })
+  assert.deepEqual(textsOf({ cfg: on, budgets: [tokens] }), ['budget 63%'])
+  assert.deepEqual(textsOf({ cfg: on, budgets: [money] }), ['budget ~63%'])
+  assert.deepEqual(textsOf({ cfg: on, budgets: [budget({ share: 118.4, shareText: '118 %', over: true })] }), ['budget ~118% over'])
+  // The figure is the share rounded, never the table's text: a row whose text says otherwise does not reach the bar.
+  assert.deepEqual(textsOf({ cfg: on, budgets: [budget({ share: 63.2, shareText: '63,0 %' })] }), ['budget ~63%'])
+  // The tooltip lists the rows as the tables write them — the sentence's percent is the language's, `63 %`.
+  const tip = buildItems(input({ cfg: on, budgets: [tokens] }))[0].tooltipMarkdown
+  assert.ok(tip.includes('Claude Code · today: 3.1M of 4.9M · 63 %'), tip)
+  assert.equal(tip.includes('63%'), false, tip)
+  // German: the bar's word, the same notation.
+  const bundle = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
+  try {
+    setBundle(bundle)
+    assert.deepEqual(textsOf({ cfg: on, budgets: [tokens] }), ['Budget 63%'])
+    assert.deepEqual(textsOf({ cfg: on, budgets: [money] }), ['Budget ~63%'])
+  } finally {
+    setBundle(undefined)
+  }
 })
 
 test('the budget tooltip lists every budget and says what a dollar figure is not', () => {
@@ -1211,7 +1241,7 @@ test('the budget tooltip lists every budget and says what a dollar figure is not
 
 test('the preview shows a budget under and over its limit, and colours neither', () => {
   const items = previewItems(cfg({}), NOW).filter((m) => m.text.includes('budget '))
-  assert.deepEqual(items.map((m) => m.text), ['[preview] budget ~38 %', '[preview] budget ~118 % over'])
+  assert.deepEqual(items.map((m) => m.text), ['[preview] budget ~38%', '[preview] budget ~118% over'])
   for (const m of items) {
     assert.equal(m.colorId, null)
     assert.equal(m.alarm, false)

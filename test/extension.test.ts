@@ -327,7 +327,7 @@ function coldStartLines(s: FakeVscodeState): number {
  * whose scan it was: until 1.7's guard in `coldScan`, the scan of an activation disposed a moment
  * before could write its line late, into the next test's recording. `textOf` reads only items
  * that are not disposed, a disposed activation draws no frame (`render` returns after `dispose`),
- * and the tokens item says "reading history …" until its own scan has ended — so only this
+ * and the tokens item says "reading history…" until its own scan has ended — so only this
  * activation's scan can answer.
  */
 async function waitOwnColdStart(s: FakeVscodeState, what = 'the cold start'): Promise<void> {
@@ -513,7 +513,8 @@ test('activation reads the synthetic transcripts, fills the status bar and relea
   // --- activation does not wait for the scan -------------------------------
   assert.ok(host.elapsedMs < 2000, `activate() took ${host.elapsedMs} ms`)
   // Only microtasks have run since `void bootstrap()`, so the cold scan cannot be done.
-  assert.equal(state.textOf(TOKENS_ITEM), '$(sync~spin) reading history …')
+  // (1.12 D6, pinned and changed: "reading history …" — no space before the English ellipsis.)
+  assert.equal(state.textOf(TOKENS_ITEM), '$(sync~spin) reading history…')
   assert.equal(fs.existsSync(fixture.stateFile), false)
 
   await waitOwnColdStart(state, 'the cold scan')
@@ -1309,7 +1310,9 @@ test('a configured budget reaches the status bar and the markdown view from one 
   await waitFor('the budget entry', () => state.textOf(BUDGET_ITEM) !== undefined)
 
   const text = String(state.textOf(BUDGET_ITEM))
-  assert.match(text, /^budget \d+ %/, text)
+  // 1.12 D5 (pinned and changed, here and in the three budget-item pins below: `budget \d+ %`): the item's own figure is
+  // the bar's notation, `48%`; the tables and the markdown keep the language's `48 %`.
+  assert.match(text, /^budget \d+%/, text)
   // A token budget's share is measured, not hypothetical, so it carries no estimate marker.
   assert.equal(text.includes('~'), false, text)
 
@@ -1318,7 +1321,8 @@ test('a configured budget reaches the status bar and the markdown view from one 
   await state.execute('tokenPace.showUsageMarkdown')
   const md = lastMarkdown()
   assert.equal(md.split('## Budgets').length, 2, md)
-  const share = text.replace('budget ', '').replace(' over', '')
+  // The same figure: the bar's `48%` is the table's `48 %` (1.12 D5, pinned and changed: the two texts were one).
+  const share = `${(/^budget (\d+)%/.exec(text) ?? ['', '?'])[1]} %`
   assert.ok(md.includes(`| ${share} |`) || md.includes(`| ${share} ⚠ |`), md)
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
@@ -1448,7 +1452,7 @@ test('the provider switch governs the text views, never the status bar: a Claude
   await waitOwnColdStart(state, 'the cold scan')
   await waitFor('the budget entry', () => state.textOf(BUDGET_ITEM) !== undefined)
   const text = String(state.textOf(BUDGET_ITEM))
-  assert.match(text, /^budget \d+ %/, text)
+  assert.match(text, /^budget \d+%/, text)
 
   await state.execute('tokenPace.showUsageMarkdown')
   const md = lastMarkdown()
@@ -1570,7 +1574,7 @@ test('the page gets no copy of the host\'s budgets: under Codex no push carries 
     })
     await waitOwnColdStart(state, 'the cold scan')
     await waitFor('the budget entry', () => state.textOf(BUDGET_ITEM) !== undefined)
-    assert.match(String(state.textOf(BUDGET_ITEM)), /^budget \d+ %/, String(state.textOf(BUDGET_ITEM)))
+    assert.match(String(state.textOf(BUDGET_ITEM)), /^budget \d+%/, String(state.textOf(BUDGET_ITEM)))
     const page = openDashboard()
     await waitFor('the first payload', () => page.sent.some((m) => (m as { type?: unknown }).type === 'data'))
     const first = page.sent.find((m) => (m as { type?: unknown }).type === 'data') as { payload: ViewModel }
@@ -1593,7 +1597,7 @@ test('the page gets no copy of the host\'s budgets: under Codex no push carries 
     await sleep(300)
     assert.equal(JSON.stringify(page.sent).includes('"allBudgets"'), false, 'a push carried the host\'s budgets')
     // The bar kept its budget item through both switches.
-    assert.match(String(state.textOf(BUDGET_ITEM)), /^budget \d+ %/)
+    assert.match(String(state.textOf(BUDGET_ITEM)), /^budget \d+%/)
     assert.deepEqual(disposeAll(LIVE.pop()!), [])
   } finally {
     intervals.restore()
@@ -3818,7 +3822,7 @@ test('a wait for the cold start is answered by this activation\'s own scan, neve
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
   const second = await activateHost(makeFixture(), REPO)
   // Only microtasks have run since the second `bootstrap()` began, so its scan cannot be done.
-  assert.equal(state.textOf(TOKENS_ITEM), '$(sync~spin) reading history …')
+  assert.equal(state.textOf(TOKENS_ITEM), '$(sync~spin) reading history…')
   state.log.push({ level: 'info', message: 'Cold start done: 3 bucket(s), 2 file(s)' })
   await waitOwnColdStart(state, 'the second activation\'s cold start')
   assert.equal(state.textOf(TOKENS_ITEM), `Σ ${EXPECTED_BILLABLE} · 7d`,

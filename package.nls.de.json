@@ -71,7 +71,7 @@
   "config.statusBar.show.enum.tokens": "Im Übersichtszeitraum verbrauchte Token",
   "config.statusBar.show.enum.cost": "Hypothetische API-Kosten für den Übersichtszeitraum — braucht tokenPace.showCost",
   "config.statusBar.show.enum.forecast": "Prognose aus der Verbrauchsrate, z. B. “~leer in 40 min” — braucht tokenPace.quotaHistoryDays über 0",
-  "config.statusBar.show.enum.budget": "Das Budget, das seinem eigenen Limit am nächsten ist, z. B. “Budget 63 %” — braucht tokenPace.budgets",
+  "config.statusBar.show.enum.budget": "Das Budget, das seinem eigenen Limit am nächsten ist, z. B. “Budget 63%” — braucht tokenPace.budgets",
   "config.statusBar.show.enum.agents": "Laufende Agenten, z. B. “~22 laufen” — abgeleitet aus ihren Transkripten; ausgeblendet, solange keiner läuft",
   "config.statusBar.show.enum.cache": "Der Ein-Stunden-Prompt-Cache einer Claude-Code-Sitzung in seinen letzten fünf Minuten, z. B. “Cache 4m” — “Cache ~4m”, wenn aus dem Transkript geschätzt; ausgeblendet, solange keiner abkühlt",
   "config.windowSelect.description": "Welche Kontingentfenster in der Statusleiste erscheinen. Die Vorgabe `worstPace` gibt jedem Werkzeug **einen** Eintrag: das Fenster, das Aufmerksamkeit braucht — das schlechteste Tempo-Urteil, und innerhalb eines Urteils das am stärksten ausgelastete dieser Fenster.\n\n`all` bringt jedes Fenster in die Leiste und kann bis zu neun Einträge erzeugen. Der Befehl *Token Pace: Statusleisten-Fenster durchschalten* schaltet durch diese Werte, ohne die Einstellungen zu öffnen.",

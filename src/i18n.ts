@@ -32,7 +32,7 @@
  *
  * How to add a string
  *
- *  1. `import { t } from './i18n'` and wrap the literal: `t('Reading token history …')`.
+ *  1. `import { t } from './i18n'` and wrap the literal: `t('Reading token history…')`.
  *     The first argument MUST be a string literal — `scripts/l10n-extract.mjs` reads the
  *     source, not the runtime, and fails on a variable, a concatenation or a ternary.
  *     Dynamic parts go into `{0}`, `{1}`, … arguments, never into the key; a translator may

@@ -132,6 +132,8 @@
   "this month": "本月",
   "this week": "本周",
   "today": "今天",
+  "{0} (in {1})": "{0}（{1} 后）",
+  "{0} (reset due)": "{0}（待重置）",
   "{0} ago": "{0} 前",
   "{0} at {1} (threshold {2})": "{0} 为 {1}（阈值 {2}）",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "无法解析 {0}（{1}）。它看起来是一个目标缺失的链接，因此未做改动——请修复该链接后重试。",

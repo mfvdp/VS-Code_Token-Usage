@@ -132,6 +132,8 @@
   "this month": "bu ay",
   "this week": "bu hafta",
   "today": "bugün",
+  "{0} (in {1})": "{0} ({1} sonra)",
+  "{0} (reset due)": "{0} (sıfırlama bekleniyor)",
   "{0} ago": "{0} önce",
   "{0} at {1} (threshold {2})": "{0} şu an {1} (eşik {2})",
   "{0} could not be resolved ({1}). It looks like a link whose target is missing, so it was left untouched — repair the link and try again.": "{0} çözümlenemedi ({1}). Hedefi eksik bir bağlantıya benziyor, bu yüzden dokunulmadı — bağlantıyı onarıp yeniden deneyin.",

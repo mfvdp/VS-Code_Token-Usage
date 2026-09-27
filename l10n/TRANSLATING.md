@@ -320,7 +320,9 @@ the code packages' English changes filled it, and you work through it as
      `user`, `from`, `to`, `format`, `secretHeader`, and the event ids above.
    * **Names never translated** — T9 knows them since 1.12 (`SAME_IN_EVERY_LANGUAGE`): `CLAUDE_CODE_OAUTH_TOKEN`,
      `Secret Service`, `secret-tool`, `Slack`, `Discord`, `Microsoft Teams`, `Mattermost`, `Rocket.Chat`, `Telegram`,
-     `ntfy`, `BotFather`, `SMTP`, `STARTTLS`.
+     `ntfy`, `BotFather`, `SMTP`, `STARTTLS`. A test holds that every one of them, and the word `security` of the darwin
+     paragraphs, stands in your value at least as often as in the key (repeat a name if you must, never translate or drop
+     it), and that the notification texts (n=59–75) carry no `*`, `_`, `~` or backtick the key lacks (Review L 1.12).
    * **Your terms of 1.11 stay yours** — session, window, reset, quota, prompt, keep-warm, entry, record: a 1.12 key uses
      the word your language chose for the same concept in 1.11.
 4. The questions 1.10's and 1.11's readers left for native speakers stay open: where a key of your list is one of them,

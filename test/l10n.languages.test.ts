@@ -1443,6 +1443,93 @@ test('T9 lets the field ids a key lists stand in a language of another script �
   caught('T9', elsewhere, 'ja', clean, J(other), 'three Latin words in a row: "host user from"')
 })
 
+/**
+ * Review L 1.12, finding 1 (the lead, before the fix pass): no rule held what a language KEEPS — T9 takes the names of
+ * SAME_IN_EVERY_LANGUAGE out before it compares, so a translated "Telegram" or a « sécurité » for macOS's `security` tool
+ * passed (the common part's mutations M5 and M9), and nothing read the notification texts for a markdown mark (M10). The
+ * two tests below hold it over every language on disk: (1) a name of NAMES_OF_1_12 and the word `security` stand in a
+ * value at least as often as in its key — a name may be repeated, never lost; (2) the host part's notification texts (the
+ * ledger's n=59–75: the six titles, the nine event sentences, the test message and its answer — P7-D3: they go to chat
+ * services as they are) carry no `*`, `_`, `~` or backtick the key does not have. The brief's 1.12 section says so.
+ */
+const KEPT_NAMES: ReadonlyArray<string> = [...NAMES_OF_1_12.map(([w]) => w), 'security']
+const NOTIFY_TEXT_RANGE: readonly [number, number] = [59, 75]
+const MARKDOWN_MARKS: ReadonlyArray<string> = ['*', '_', '~', '`']
+/**
+ * How often a name stands in a text, whole: no Latin letter or digit joined to it (that would be another word), while a
+ * hyphen, a quotation mark or a particle of another script beside it is fine — Korean glues its particles (ntfy에서,
+ * BotFather에게), and the name is kept.
+ */
+function keptCount(text: string, name: string): number {
+  return (text.match(new RegExp(`(?<![${LATIN_LETTERS}0-9])${namePattern(name)}(?![${LATIN_LETTERS}0-9])`, 'gu')) ?? []).length
+}
+/** The notification texts' keys: the ledger's host-part additions n=59–75. */
+function notifyTextKeys(): string[] {
+  const ledger = JSON.parse(readFileSync(join(ROOT, 'l10n', 'rekey.json'), 'utf8')) as { entries: LedgerEntry[] }
+  return ledger.entries.filter((e) => e.kind === 'add' && e.part === 'host' && e.n >= NOTIFY_TEXT_RANGE[0] && e.n <= NOTIFY_TEXT_RANGE[1] && typeof e.key === 'string').map((e) => e.key as string)
+}
+/** One language's problems: a name lost from a bundle or manifest value, a markdown mark added to a notification text. */
+function keptNamesLeft(s: Source, l: LangFiles, notifyKeys: readonly string[]): string[] {
+  const out: string[] = []
+  for (const [k, v] of entries(l.bundle)) {
+    for (const name of KEPT_NAMES) {
+      const want = keptCount(k, name)
+      if (want > 0 && keptCount(v, name) < want) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} keeps ${name} ${keptCount(v, name)}× — the key ${want}×`)
+    }
+  }
+  for (const [k, en, v] of nlsEntries(s, l)) {
+    for (const name of KEPT_NAMES) {
+      const want = keptCount(en, name)
+      if (want > 0 && keptCount(v, name) < want) out.push(`${l.id}: ${NLS(l)}: ${k} keeps ${name} ${keptCount(v, name)}× — the English ${want}×`)
+    }
+  }
+  for (const k of notifyKeys) {
+    const v = l.bundle?.[k]
+    if (v === undefined) continue // T1 names a missing key or a missing bundle
+    for (const m of MARKDOWN_MARKS) if (v.includes(m) && !k.includes(m)) out.push(`${l.id}: ${BUNDLE(l)}: ${J(k)} carries ${J(m)}, which the key does not — the text goes to a chat service as it is (P7-D3)`)
+  }
+  return out
+}
+
+test('the names of 1.12 and `security` are kept in every language on disk, and the notification texts carry no markdown mark the key lacks (Review L 1.12 finding 1)', () => {
+  const s = src()
+  const keys = notifyTextKeys()
+  assert.equal(keys.length, 17, 'the ledger\'s n=59–75 are the seventeen notification texts')
+  for (const k of keys) assert.ok(s.keys.includes(k), `${J(k)} is not a bundle key`)
+  assert.equal(KEPT_NAMES.length, 14)
+  // Most names stand in the English (STARTTLS was listed before a text used it — P1, E1 rule 2); the check holds the ones that do.
+  const standing = KEPT_NAMES.filter((name) => s.keys.some((k) => keptCount(k, name) > 0) || Object.values(s.english).some((en) => keptCount(en, name) > 0))
+  assert.ok(standing.length >= 12, `only ${standing.length} of the names stand in an English text: ${J(standing)}`)
+  const problems: string[] = []
+  for (const id of ON_DISK) problems.push(...keptNamesLeft(s, loadLang(ROOT, id), keys))
+  assert.deepEqual(problems, [])
+})
+
+test('the kept-names guard catches a translated name, a translated `security` and a markdown mark in a notification text — and lets a repeated name and a hyphenated one pass (the common part\'s M5, M9, M10)', () => {
+  const s = src()
+  const keys = notifyTextKeys()
+  const clean = fixture('german', 'fr')
+  assert.deepEqual(keptNamesLeft(s, loadLang(clean, 'fr'), keys), [], 'the German under fr keeps every name')
+  const telegram = keyWhere((k) => keptCount(k, 'Telegram') > 0)
+  const m5 = fixture('german', 'fr')
+  editKey(m5, 'fr', telegram, (v) => v.replace(/Telegram/g, 'Télégram'))
+  assert.ok(keptNamesLeft(s, loadLang(m5, 'fr'), keys).some((p) => p.includes(J(telegram)) && p.includes('keeps Telegram 0×')), 'M5: a translated Telegram')
+  const security = keyWhere((k) => keptCount(k, 'security') > 0)
+  const m9 = fixture('german', 'fr')
+  editKey(m9, 'fr', security, (v) => v.replace(/security/g, 'sécurité'))
+  assert.ok(keptNamesLeft(s, loadLang(m9, 'fr'), keys).some((p) => p.includes(J(security)) && p.includes('keeps security')), 'M9: a translated security')
+  const waiting = keys.find((k) => k.startsWith('{0} is waiting for your permission')) ?? ''
+  assert.ok(waiting, 'the agentWaiting sentence is one of the notification texts')
+  const m10 = fixture('german', 'fr')
+  editKey(m10, 'fr', waiting, (v) => v.replace('{0}', '*{0}*'))
+  assert.ok(keptNamesLeft(s, loadLang(m10, 'fr'), keys).some((p) => p.includes(J(waiting)) && p.includes('carries "*"')), 'M10: a markdown mark')
+  // A name said twice, or joined by a hyphen (the German's "security-Werkzeug"), is kept.
+  const more = fixture('german', 'fr')
+  editKey(more, 'fr', telegram, (v) => `${v} Telegram`)
+  editKey(more, 'fr', security, (v) => v.replace(/security/, 'security-outil'))
+  assert.deepEqual(keptNamesLeft(s, loadLang(more, 'fr'), keys), [])
+})
+
 test('T10 catches a file named after no shipped language, an untranslated language name, a translated native name and a translated product name', () => {
   const clean = fixture('german', 'fr')
   const xx = fixture('german', 'xx')

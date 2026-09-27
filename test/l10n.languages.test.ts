@@ -299,7 +299,8 @@ export const SESSION_NAME_KEYS: ReadonlyArray<readonly [string, string, 'full' |
 /**
  * 1.12 D10 rule 2: where a session's name reaches a t() argument — `[file, expression, form, where the name comes from]`.
  * No t() call takes `sessionName(…)` or `sessionShortName(…)` itself: the name is made once and carried in a field, and
- * these are the expressions a call passes it by. The test scans every t() call of src/ with the TypeScript parser: a call
+ * these are the expressions a call passes it by. The test scans every t() call of src/ — and every tr() call of the page
+ * (1.12 R1-F5: SESSION_NAME_PAGE_FIELDS) — with the TypeScript parser: a call
  * whose argument holds one of these expressions (in its file), or a call of the three name functions, is a key of
  * SESSION_NAME_KEYS, and every key of the list is found so. The name functions' own call sites are pinned beside it
  * (SESSION_NAME_SOURCES): a new one is a name that may reach a t() argument by another expression.
@@ -326,6 +327,22 @@ export const SESSION_NAME_SOURCES: ReadonlyArray<readonly [string, string, numbe
   // A SessionRecord's `name` — the Records' tables (markup, no t()) and SESSION_NAME_CARRIERS' s.name.
   ['src/stats.ts', 'sessionName', 1],
   // The preview's entries (statusText.ts previewCache) name their sessions with t('Session {0}', …) — the full form.
+]
+
+/**
+ * 1.12 R1-F5 (the lead, after P10): the page's tr() calls are scanned like t() — src/webview/main.ts defines its own tr and
+ * imports no t. A session's name reaches the page as markup, never as a tr() argument today: the Agents tree's rows carry
+ * it in `label`, `fullLabel` and `idName` (agentTreeBuild.ts; the page's agentLabel/agentSpoken build markup from them),
+ * the Records' tables in their row cells (recordsTable — markup). These are the expressions by which a name would reach a
+ * tr() key — `[expression, where the name comes from]`; `label` alone is not one (a bar's, a budget's, a model's label are
+ * tr() arguments today), so the tree item's and the agent payload's are named with their object. The test holds that no
+ * tr() call passes one; a tr() key that takes one is a key of SESSION_NAME_KEYS with a carrier of its own (D10 rule 2).
+ */
+export const SESSION_NAME_PAGE_FIELDS: ReadonlyArray<readonly [string, string]> = [
+  ['fullLabel', 'a tree row\'s full name (agentTreeBuild.ts `fullLabel`; the page\'s agentLabel/agentSpoken read it)'],
+  ['idName', 'a tree row\'s id name (agentTreeBuild.ts `idName`)'],
+  ['it.label', 'a tree item\'s label — `it` in the page\'s tree renderers (agentLabel({ label: it.label, fullLabel: it.fullLabel, … }))'],
+  ['n.label', 'an agent payload\'s label — `n` in agentLabel(n, kind) and agentSpoken(n, …)'],
 ]
 
 // ---------------------------------------------------------------------------
@@ -2232,7 +2249,7 @@ test('T9: the names 1.12\'s texts carry are in SAME_IN_EVERY_LANGUAGE, each with
 
 /** 1.12 D10 rule 2: every t() call of src/ with its arguments' source, and the calls of the name functions — read by the TypeScript parser, as scripts/l10n-extract.mjs reads the keys. */
 interface SessionNameScan {
-  calls: Array<{ file: string; key: string; args: string[] }>
+  calls: Array<{ file: string; fn: 't' | 'tr'; key: string; args: string[] }>
   sources: Array<{ file: string; callee: string }>
 }
 const SESSION_NAME_SCAN = `
@@ -2252,13 +2269,14 @@ for (const file of walk(path.join(root, 'src'))) {
   const label = path.relative(root, file).split(path.sep).join('/')
   const sf = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const withT = importsT(sf)
+  const withTr = sf.statements.some((s) => ts.isFunctionDeclaration(s) && s.name && s.name.text === 'tr')
   const visit = (node) => {
     if (ts.isCallExpression(node)) {
       const c = node.expression
       const name = ts.isIdentifier(c) ? c.text : ts.isPropertyAccessExpression(c) ? c.name.text : ''
       const first = node.arguments[0]
-      if (withT && ts.isIdentifier(c) && c.text === 't' && first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) {
-        out.calls.push({ file: label, key: first.text, args: node.arguments.slice(1).map((a) => a.getText(sf)) })
+      if (ts.isIdentifier(c) && ((withT && c.text === 't') || (withTr && c.text === 'tr')) && first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) {
+        out.calls.push({ file: label, fn: c.text, key: first.text, args: node.arguments.slice(1).map((a) => a.getText(sf)) })
       }
       if (NAMES.has(name)) out.sources.push({ file: label, callee: name })
     }
@@ -2292,6 +2310,18 @@ function sessionNameKeysOf(scan: SessionNameScan, carriers: ReadonlyArray<readon
   return [...found].sort()
 }
 
+/** 1.12 R1-F5: the page's tr() calls whose argument holds a field a session's name travels in — `key\u0000{n}`. */
+function pageNameCallsOf(scan: SessionNameScan): string[] {
+  const found = new Set<string>()
+  for (const c of scan.calls) {
+    if (c.fn !== 'tr') continue
+    c.args.forEach((arg, i) => {
+      for (const [expr] of SESSION_NAME_PAGE_FIELDS) if (new RegExp(`(?<![\\w$])${reEsc(expr)}(?![\\w$])`).test(arg)) found.add(`${c.key}\u0000{${i}}`)
+    })
+  }
+  return [...found].sort()
+}
+
 test('SESSION_NAME_KEYS: every key a t() key of src/ that holds its placeholder, and exactly the keys whose placeholder a session\'s name reaches — found by a scan of every t() call of src/ for the expressions that carry a name; the name functions\' calls pinned (1.12 D10 rules 1, 2)', () => {
   const s = src()
   const keys = SESSION_NAME_KEYS.map(([k]) => k)
@@ -2315,6 +2345,13 @@ test('SESSION_NAME_KEYS: every key a t() key of src/ that holds its placeholder,
   }
   // No t() call passes a name function's result itself (the grep of D10 rule 2 finds none).
   assert.deepEqual(scan.calls.filter((c) => c.args.some((a) => /\bsession(?:Short|Id)?Name\s*\(/.test(a))).map((c) => c.key), [])
+  // 1.12 R1-F5: the page's tr() calls are in the scan — main.ts's, the one file that defines tr —, and none passes a field
+  // a session's name travels in (SESSION_NAME_PAGE_FIELDS); each field names its source.
+  const tr = scan.calls.filter((c) => c.fn === 'tr')
+  assert.ok(tr.length >= 300, `the scan read only ${tr.length} tr() calls of the page`)
+  assert.deepEqual([...new Set(tr.map((c) => c.file))], ['src/webview/main.ts'])
+  assert.deepEqual(pageNameCallsOf(scan), [])
+  for (const [expr, why] of SESSION_NAME_PAGE_FIELDS) assert.ok(why.length > 10, `${expr}: no source named`)
   // The name functions' calls: where a session's name is made. A new one is a name that may reach a t() argument by an
   // expression this test does not know — trace it, then add its carrier and its keys.
   const counts = new Map<string, number>()
@@ -2330,15 +2367,23 @@ test('SESSION_NAME_KEYS\' scan catches a key it does not list, a key it lists th
   assert.deepEqual(listed.filter((k) => !sessionNameKeysOf(scan, without).includes(k)).map((k) => k.split('\u0000')[0]), ['Largest session {0}: {1}', 'Longest session {0}: {1}'])
   // A t() call that passes a session's name by a carrier, or by a name function itself: the scan finds a key the list lacks.
   const extra: SessionNameScan = {
-    calls: [...scan.calls, { file: 'src/cacheWatch.ts', key: 'New line for {0}', args: ['e.name'] },
-      { file: 'src/stats.ts', key: 'Short {0} and {1}', args: ['n', 'sessionShortName(id, start, now, tcfg)'] }],
+    calls: [...scan.calls, { file: 'src/cacheWatch.ts', fn: 't', key: 'New line for {0}', args: ['e.name'] },
+      { file: 'src/stats.ts', fn: 't', key: 'Short {0} and {1}', args: ['n', 'sessionShortName(id, start, now, tcfg)'] }],
     sources: scan.sources,
   }
   const more = sessionNameKeysOf(extra, SESSION_NAME_CARRIERS).filter((k) => !listed.includes(k))
   assert.deepEqual(more, ['New line for {0}\u0000{0}\u0000full', 'Short {0} and {1}\u0000{1}\u0000short'])
   // The carrier is read in its own file only: `e.name` of another file is another thing.
-  const elsewhere: SessionNameScan = { calls: [{ file: 'src/alerts.ts', key: 'Rule {0}', args: ['e.name'] }], sources: [] }
+  const elsewhere: SessionNameScan = { calls: [{ file: 'src/alerts.ts', fn: 't', key: 'Rule {0}', args: ['e.name'] }], sources: [] }
   assert.deepEqual(sessionNameKeysOf(elsewhere, SESSION_NAME_CARRIERS), [])
+  // 1.12 R1-F5: a tr() call of the page that passes a tree row's name is caught — by its field, whole —; a bar's label is not.
+  const page: SessionNameScan = { calls: [
+    { file: 'src/webview/main.ts', fn: 'tr', key: 'Row {0} waits', args: ['esc(it.fullLabel)'] },
+    { file: 'src/webview/main.ts', fn: 'tr', key: 'Row {0}: {1}', args: ['kind', 'it.label'] },
+    { file: 'src/webview/main.ts', fn: 'tr', key: 'Bar {0}', args: ['esc(s.label)'] },
+    { file: 'src/webview/main.ts', fn: 'tr', key: 'Id {0}', args: ['idNames.length'] },
+  ], sources: [] }
+  assert.deepEqual(pageNameCallsOf(page), ['Row {0} waits\u0000{0}', 'Row {0}: {1}\u0000{1}'])
 })
 
 test('the brief\'s 1.12 sections: your pending list — the ledger\'s start, the gates, notifications on a lock screen, alert ≠ notification, the hard wraps, the Keychain and "Always Allow", the chips, the budget example, the ellipsis, "record", the backtick names, the names of 1.12, the terms of 1.11, the report; and the session names — every key of SESSION_NAME_KEYS, the two forms, the four rules (1.12 E1 rule 4, D10 rule 3)', () => {

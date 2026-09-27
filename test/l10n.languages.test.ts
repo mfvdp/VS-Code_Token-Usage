@@ -154,6 +154,9 @@ export const SAME_IN_EVERY_LANGUAGE: ReadonlyArray<readonly [string, string]> = 
   ['Plus', 'a plan\'s name as the providers write it (config.planName\'s examples)'],
   // 1.9 B5: the join's false positives (above).
   ...ADDED_AT_THE_JOIN,
+  // 1.11 L3 (the lead, at the merge — ADDED_AT_THE_JOIN): VS Code's command title, kept in English where VS Code has no
+  // language pack for the reader's language (uk, el; hi), so that the Command Palette shows the title the sentence names.
+  ['Configure Display Language', 'a command title of VS Code, kept in English where VS Code has no pack for the language'],
 ]
 
 /**

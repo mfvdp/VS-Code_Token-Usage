@@ -4163,7 +4163,14 @@ test('docs/notifications.md says what the package does and never does, how each 
     'a redirect is never followed',
     // The diagnostics (C12, Review 2 F1).
     'It says which notification settings are set, never the host, the addresses, the chat id or the ntfy server',
+    // The fix pass after Review 3 (its forDocs): ntfy's server is the server's root, never a topic's address; a second
+    // test inside ten seconds is answered, not sent (F8).
+    'ntfy\'s `server` is the server\'s own address with `https://` — `https://ntfy.sh` for the public one — never a topic\'s address: ntfy takes the JSON publish only at its root, and a topic\'s address would post the JSON as the message text.',
+    'One test per channel every ten seconds — a second one inside them is answered with a message and not sent.',
   ]) assert.ok(page.includes(claim), `docs/notifications.md does not say: ${claim}`)
+  // The same sentence, shortened, in the settings table's ntfy row.
+  assert.ok(flatText(doc.settings).includes('| `notifications.ntfy` | `{ server: "" }` | The `https://` address of your ntfy server itself — `https://ntfy.sh` for the public one, or your own — never a topic\'s address (ntfy takes the JSON publish only at its root); there is no default |'),
+    'docs/settings.md\'s ntfy row does not say that the server is its root address, never a topic\'s')
   // The sample JSON is the generic format's keys, in its order.
   const sample = doc.notifications.slice(doc.notifications.indexOf('```json\n') + 8, doc.notifications.indexOf('\n```', doc.notifications.indexOf('```json\n')))
   assert.deepEqual(Object.keys(JSON.parse(sample) as Record<string, unknown>), ['v', 'source', 'event', 'title', 'text', 'provider', 'program', 'window',
@@ -4177,8 +4184,9 @@ test('docs/notifications.md says what the package does and never does, how each 
     assert.ok(page.includes(title), `docs/notifications.md does not name ${title}`)
     assert.ok(doc.commands.includes(`| \`Token Pace: ${title}\` |`), `docs/commands.md has no row for ${title}`)
   }
-  // No address of a real service is written as a link a reader could mistake for Token Pace's own.
-  assert.equal(/https:\/\/(?:hooks\.slack\.com|discord(?:app)?\.com|api\.telegram\.org|ntfy\.sh)/.test(doc.notifications), false)
+  // No address of a real service is written as a link a reader could mistake for Token Pace's own — the fix pass after
+  // Review 3 (pinned and changed): the page names ntfy's public server as `https://ntfy.sh`, a code span, which is no link.
+  assert.equal(/https:\/\/(?:hooks\.slack\.com|discord(?:app)?\.com|api\.telegram\.org|ntfy\.sh)/.test(doc.notifications.replace(/`[^`\n]*`/g, '')), false)
 })
 
 test('docs/privacy.md names the channels\' secrets under their six keys, the hosts and the consent that names them, the last result, and the scan\'s table of network sites (1.12 §0a.8, §0a.9, §0a.11, P7-D1)', () => {

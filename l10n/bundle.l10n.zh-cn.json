@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "来自 `tokenPace.budgets` 的自定义限额，以本地统计的用量衡量。USD 是假设的 API 等价金额，不是账单。",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "自定义限额；USD 是假设的 API 等价金额，不是账单。",
   "[preview]": "[预览]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` 为 `cache`：只读取本地文件，从不使用网络。",
   "a Codex token_count event is not necessarily one turn": "Codex 的 token_count 事件不一定对应一轮",
   "a related model": "相关模型",
   "about {0} running": "约 {0} 个运行中",

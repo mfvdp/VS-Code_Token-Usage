@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Τα δικά σας όρια από το `tokenPace.budgets`, μετρημένα έναντι της χρήσης που καταμετρήθηκε τοπικά. Τα USD είναι το υποθετικό ισοδύναμο API, όχι λογαριασμός.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Τα δικά σας όρια. Τα USD είναι το υποθετικό ισοδύναμο API, όχι λογαριασμός.",
   "[preview]": "[προεπισκόπηση]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "Το `tokenPace.quotaSource` είναι `cache`: διαβάζεται μόνο ένα τοπικό αρχείο, το δίκτυο δεν χρησιμοποιείται ποτέ.",
   "a Codex token_count event is not necessarily one turn": "ένα συμβάν token_count του Codex δεν είναι απαραίτητα ένας γύρος",
   "a related model": "ένα συγγενές μοντέλο",
   "about {0} running": "εκτελούνται: περίπου {0}",

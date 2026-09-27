@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Własne limity z `tokenPace.budgets`, mierzone względem lokalnie zliczonego zużycia. USD to hipotetyczny ekwiwalent API, a nie rachunek.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Własne limity; USD to hipotetyczny ekwiwalent API, a nie rachunek.",
   "[preview]": "[podgląd]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` ma wartość `cache`: odczytywany jest tylko plik lokalny, sieć nigdy nie jest używana.",
   "agents {0}": "agenci {0}",
   "and {0} more": "i jeszcze {0}",
   "another window polls and writes the data; this one only displays it": "inne okno odpytuje i zapisuje dane; to okno tylko je wyświetla",

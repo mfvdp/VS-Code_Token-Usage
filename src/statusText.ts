@@ -591,7 +591,7 @@ export function problemView(q: QuotaState, cfg: Config, now: number): ProblemVie
     case 'modeCache':
       return {
         kind, icon: '$(circle-slash)', message: t('quota off'), command: 'tokenPace.openSettings',
-        explain: t('`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.'),
+        explain: t('`tokenPace.quotaSource` is `cache`: only a local file is read for the quota; the network is never used for it.'),
         check: t('Check: point `tokenPace.claudeQuotaFile` / `tokenPace.codexQuotaFile` at a cache file, or switch the mode to `auto`.'),
       }
     case 'forbidden':
@@ -788,9 +788,9 @@ function scanningNote(): string {
 export function footerLine(ctx: RenderContext): string {
   const blocked = ctx.consent === 'denied' || ctx.cfg.quotaSource === 'cache' || ctx.role === 'follower'
   const fetchNow = t('Fetch now')
-  const fetch = blocked ? `$(sync) ${fetchNow}` : `$(sync) [${fetchNow}](command:tokenPace.refreshQuota)`
+  const fetchLink = blocked ? `$(sync) ${fetchNow}` : `$(sync) [${fetchNow}](command:tokenPace.refreshQuota)`
   return [
-    fetch,
+    fetchLink,
     `$(history) [${t('Re-read')}](command:tokenPace.rescan)`,
     `$(output) [${t('Log')}](command:tokenPace.showOutput)`,
     `$(settings-gear) [${t('Settings')}](command:tokenPace.openSettings)`,

@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "`tokenPace.budgets` içindeki kendi limitleriniz, yerel olarak sayılan kullanımla ölçülür. USD varsayımsal API karşılığıdır, fatura değildir.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Kendi limitleriniz; USD varsayımsal API karşılığıdır, fatura değildir.",
   "[preview]": "[önizleme]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` değeri `cache`: yalnızca yerel bir dosya okunur, ağ asla kullanılmaz.",
   "a Codex token_count event is not necessarily one turn": "bir Codex token_count olayı her zaman tek bir tur değildir",
   "a related model": "ilgili bir model",
   "about {0} running": "yaklaşık {0} çalışıyor",

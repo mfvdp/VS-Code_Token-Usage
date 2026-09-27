@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "`tokenPace.budgets` içindeki kendi limitleriniz, yerel olarak sayılan kullanımla ölçülür. USD varsayımsal API karşılığıdır, fatura değildir.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Kendi limitleriniz; USD varsayımsal API karşılığıdır, fatura değildir.",
   "[preview]": "[önizleme]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` değeri `cache`: yalnızca yerel bir dosya okunur, ağ asla kullanılmaz.",
   "agents {0}": "ajanlar {0}",
   "and {0} more": "ve {0} tane daha",
   "another window polls and writes the data; this one only displays it": "verileri başka bir pencere yokluyor ve yazıyor; bu pencere yalnızca gösteriyor",

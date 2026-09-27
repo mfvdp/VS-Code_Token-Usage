@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Omat rajat asetuksesta `tokenPace.budgets` suhteessa paikallisesti laskettuun käyttöön. USD on hypoteettinen API-vastine, ei lasku.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Omat rajat; USD on hypoteettinen API-vastine, ei lasku.",
   "[preview]": "[esikatselu]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` on `cache`: vain paikallinen tiedosto luetaan, verkkoa ei koskaan käytetä.",
   "a Codex token_count event is not necessarily one turn": "Codexin token_count-tapahtuma ei välttämättä ole yksi vuoro",
   "a related model": "sukulaismalli",
   "about {0} running": "noin {0} käynnissä",

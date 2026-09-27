@@ -56,7 +56,7 @@ the author.
 **Send a Test Notification…** sends a test message to one channel you set up — listed in `channels` or not — and
 tells you whether it went, or why not in one word: `HTTP 401` (the service's status), a timeout, a TLS error, a
 network error, refused by the server, an incomplete setup, or that its host changed since you allowed it. One test per
-channel every ten seconds.
+channel every ten seconds — a second one inside them is answered with a message and not sent.
 
 **Remove a Notification Channel…** deletes a channel's secrets, your consent for its host and its last result, after
 a confirmation.
@@ -174,7 +174,9 @@ item *Notification channels*): whether VS Code deletes an extension's secrets wh
 
 The webhook channels, Telegram and ntfy use `https:` only — an `http:` address or one with a user name or password
 in it is refused, and a redirect is never followed — through the extension host's `fetch`, which follows VS Code's
-proxy support as the quota fetch does (how fully is not traced). A send ends after 15 seconds.
+proxy support as the quota fetch does (how fully is not traced). A send ends after 15 seconds. ntfy's `server` is the
+server's own address with `https://` — `https://ntfy.sh` for the public one — never a topic's address: ntfy takes the
+JSON publish only at its root, and a topic's address would post the JSON as the message text.
 
 E-mail goes straight from the extension to your SMTP server, **encrypted before anything else is sent**: `security:
 tls` (usually port 465) speaks TLS from the first byte; `starttls` (usually port 587) sends `EHLO [127.0.0.1]` and

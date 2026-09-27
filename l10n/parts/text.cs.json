@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Vlastní limity z `tokenPace.budgets`, měřené proti místně započítané spotřebě. USD je hypotetický ekvivalent API, ne faktura.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Vlastní limity; USD je hypotetický ekvivalent API, ne faktura.",
   "[preview]": "[náhled]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` je `cache`: čte se jen místní soubor, síť se nikdy nepoužívá.",
   "agents {0}": "agenti {0}",
   "and {0} more": "a další ({0})",
   "another window polls and writes the data; this one only displays it": "jiné okno načítá a zapisuje data; toto je jen zobrazuje",

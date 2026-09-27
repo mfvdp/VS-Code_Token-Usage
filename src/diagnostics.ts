@@ -343,7 +343,11 @@ function originOf<T>(i: InspectLike<T> | undefined): SettingOrigin {
   return 'default'
 }
 
-/** The three `http.*` settings that decide whether our one request can leave. */
+/**
+ * The three `http.*` settings that decide whether our HTTPS requests can leave — the quota request and, since 1.12,
+ * the notification channels' (the webhook, Telegram and ntfy go through the same proxy support; SMTP opens its own
+ * socket and does not).
+ */
 export function collectHttpSettings(api: VscodeConfigApi): DiagnosticsInput['http'] {
   const c = api.workspace.getConfiguration('http')
   const one = (key: string): HttpSetting => {

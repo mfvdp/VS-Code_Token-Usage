@@ -402,6 +402,181 @@ test('the webhook: the address box refuses http and an address with credentials 
     'Notifications: Discord is set up. To use it, add "webhook" to tokenPace.notifications.channels and set the format in tokenPace.notifications.webhook to "discord".')
 })
 
+/** The boxes a setup showed, each with its placeholder. */
+const boxes = (ui: FakeUi): Array<[string, unknown]> => ui.asked.filter((a) => a.kind === 'input').map((a) => [a.text, a.options?.placeHolder])
+const KEEP = 'Leave empty to keep the stored one.'
+
+test('Review 3 F1: a stored secret is bound to the host it was allowed for — the generic webhook with X-Token for one host, then Slack for another: the preset asks for no header and deletes the stored value on Allow, and the test to the new host carries no X-Token; the generic webhook set up again for that host with a value typed sends it there; another host with an empty answer deletes the value, the same host keeps it (1.12 §0a.8, C6, C7)', async () => {
+  const header = { 'tokenPace.notifications.webhook': { format: 'generic', secretHeader: 'X-Token' } }
+  const OTHER = 'https://hooks.elsewhere.example/services/synthetic-url-secret-123'
+  const w = world({ cfg: header })
+  // 1. The generic webhook with secretHeader X-Token for hooks.example.invalid:8443.
+  w.ui.picks.push('Webhook (JSON)')
+  w.ui.inputs.push(HOOK_URL, HOOK_SECRET)
+  w.ui.modals.push('Allow')
+  await w.host.setUp()
+  assert.equal(readConsents(w.memento).webhook?.host, 'hooks.example.invalid:8443')
+  assert.equal(mapOf(w.secrets).get(NOTIFY_SECRET_KEYS.webhookSecret), HOOK_SECRET)
+  // 2. Set Up → Slack with an address of another host: the pick, the address box, the consent and the answer — no header.
+  w.ui.asked.length = 0
+  w.ui.picks.push('Slack')
+  w.ui.inputs.push(OTHER)
+  w.ui.modals.push('Allow')
+  await w.host.setUp()
+  assert.deepEqual(w.ui.asked.map((a) => a.kind), ['pick', 'input', 'modal', 'info'])
+  assert.equal(w.ui.asked[2].text, 'Allow Token Pace to send notifications to hooks.elsewhere.example?')
+  assert.deepEqual(Object.fromEntries(mapOf(w.secrets)), { [NOTIFY_SECRET_KEYS.webhookUrl]: OTHER }, 'the old host\'s header value was kept')
+  // 3. Send a Test — with the settings as they were, and with the format the answer asked for: no X-Token either time.
+  for (const [format, label] of [['generic', 'Webhook (JSON)'], ['slack', 'Slack']]) {
+    w.cfg.now = cfgOf({ 'tokenPace.notifications.webhook': { format, secretHeader: 'X-Token' } })
+    w.clock.now += TEST_MIN_GAP_MS
+    w.ui.picks.push(label)
+    await w.host.sendTest()
+    assert.equal(w.ui.asked.at(-1)?.text, `Notifications: the test message went to ${label}.`)
+  }
+  assert.equal(w.spy.calls.length, 2)
+  for (const c of w.spy.calls) {
+    assert.equal(c.url, OTHER)
+    assert.equal('X-Token' in c.init.headers, false, 'the header set up for one host went to another')
+    assert.equal(`${JSON.stringify(c.init.headers)}${c.init.body}`.includes(HOOK_SECRET), false)
+  }
+  // The generic webhook set up again for the new host with a value typed in this setup: stored, and sent there.
+  w.cfg.now = cfgOf(header)
+  w.ui.asked.length = 0
+  w.ui.picks.push('Webhook (JSON)')
+  w.ui.inputs.push('', 'synthetic-header-typed-222')
+  w.ui.modals.push('Allow')
+  await w.host.setUp()
+  // The address is kept (it names the host allowed); no value is stored any more, so its box offers none to keep.
+  assert.deepEqual(boxes(w.ui).map(([, p]) => p), [KEEP, undefined])
+  w.clock.now += TEST_MIN_GAP_MS
+  w.ui.picks.push('Webhook (JSON)')
+  await w.host.sendTest()
+  assert.equal(w.spy.calls.at(-1)?.url, OTHER)
+  assert.equal(w.spy.calls.at(-1)?.init.headers['X-Token'], 'synthetic-header-typed-222')
+
+  // The generic webhook for another host with an empty header answer: no "keep" offered, the value deleted on Allow.
+  const v = world({ cfg: header })
+  v.ui.picks.push('Webhook (JSON)')
+  v.ui.inputs.push(HOOK_URL, HOOK_SECRET)
+  v.ui.modals.push('Allow')
+  await v.host.setUp()
+  // The same host again: both boxes offer to keep, the value stays.
+  v.ui.asked.length = 0
+  v.ui.picks.push('Webhook (JSON)')
+  v.ui.inputs.push('', '')
+  v.ui.modals.push('Allow')
+  await v.host.setUp()
+  assert.deepEqual(boxes(v.ui).map(([, p]) => p), [KEEP, KEEP])
+  assert.equal(mapOf(v.secrets).get(NOTIFY_SECRET_KEYS.webhookSecret), HOOK_SECRET)
+  // Another host: the value's box offers nothing to keep, and an empty answer deletes it — only after Allow.
+  v.ui.asked.length = 0
+  v.ui.picks.push('Webhook (JSON)')
+  v.ui.inputs.push(OTHER, '')
+  v.ui.modals.push('Never')
+  await v.host.setUp()
+  assert.deepEqual(boxes(v.ui).map(([, p]) => p), [KEEP, undefined])
+  assert.equal(mapOf(v.secrets).get(NOTIFY_SECRET_KEYS.webhookSecret), HOOK_SECRET, 'a secret was deleted without Allow')
+  v.ui.picks.push('Webhook (JSON)')
+  v.ui.inputs.push(OTHER, '')
+  v.ui.modals.push('Allow')
+  await v.host.setUp()
+  assert.deepEqual(Object.fromEntries(mapOf(v.secrets)), { [NOTIFY_SECRET_KEYS.webhookUrl]: OTHER })
+  assert.equal(readConsents(v.memento).webhook?.host, 'hooks.elsewhere.example')
+  // A preset for the same host keeps no header value either: it asks for none.
+  const p = world({ cfg: header })
+  p.ui.picks.push('Webhook (JSON)', 'Discord')
+  p.ui.inputs.push(HOOK_URL, HOOK_SECRET, '')
+  p.ui.modals.push('Allow', 'Allow')
+  await p.host.setUp()
+  await p.host.setUp()
+  assert.equal(readConsents(p.memento).webhook?.host, 'hooks.example.invalid:8443')
+  assert.deepEqual(Object.fromEntries(mapOf(p.secrets)), { [NOTIFY_SECRET_KEYS.webhookUrl]: HOOK_URL }, 'a preset kept the header value')
+  for (const s of SECRETS) assert.equal(`${w.ui.texts()}\n${v.ui.texts()}\n${w.log.join('\n')}`.includes(s), false, s)
+})
+
+test('Review 3 F2: ntfy\'s topic and token and the SMTP password are the server\'s they were allowed for — ntfy with a token on server one, the server changed to server two: the send is skipped, the next setup offers nothing to keep, an empty token deletes the stored one on Allow, and the test to server two carries no Authorization; the same server keeps both; a changed SMTP port asks for the password again (1.12 §0a.8, C6, C7)', async () => {
+  const ONE = 'https://ntfy.one.example'
+  const TWO = 'https://ntfy.two.example'
+  const w = world({ cfg: { 'tokenPace.notifications.ntfy': { server: ONE } } })
+  w.ui.picks.push('ntfy')
+  w.ui.inputs.push(TOPIC, NTFY_TOKEN)
+  w.ui.modals.push('Allow')
+  await w.host.setUp()
+  assert.equal(readConsents(w.memento).ntfy?.host, 'ntfy.one.example')
+  // The same server again: both boxes offer to keep ("Leave empty to keep the stored one."), empty answers keep both.
+  w.ui.asked.length = 0
+  w.ui.picks.push('ntfy')
+  w.ui.inputs.push('', '')
+  w.ui.modals.push('Allow')
+  await w.host.setUp()
+  assert.deepEqual(boxes(w.ui).map(([, p]) => p), [KEEP, KEEP])
+  assert.deepEqual(Object.fromEntries(mapOf(w.secrets)), { [NOTIFY_SECRET_KEYS.ntfyTopic]: TOPIC, [NOTIFY_SECRET_KEYS.ntfyToken]: NTFY_TOKEN })
+  // The server changed in the settings: the test is skipped, nothing reaches server two.
+  w.cfg.now = cfgOf({ 'tokenPace.notifications.ntfy': { server: TWO } })
+  w.ui.picks.push('ntfy')
+  await w.host.sendTest()
+  assert.equal(w.ui.asked.at(-1)?.text, 'Notifications: the test message to ntfy failed (its host changed since you allowed it).')
+  assert.equal(w.spy.calls.length, 0)
+  // Set Up for server two: neither box offers to keep a secret of server one; an empty topic ends the setup unchanged.
+  w.ui.asked.length = 0
+  w.ui.picks.push('ntfy')
+  w.ui.inputs.push('')
+  await w.host.setUp()
+  assert.deepEqual(boxes(w.ui), [['The ntfy topic. Anyone who knows it can read its messages, so it is kept in VS Code\'s secret storage.', undefined]])
+  assert.equal(w.ui.asked.some((a) => a.kind === 'modal'), false)
+  assert.equal(readConsents(w.memento).ntfy?.host, 'ntfy.one.example')
+  // A topic typed, the token box left empty: on Allow the token of server one is deleted.
+  w.ui.asked.length = 0
+  w.ui.picks.push('ntfy')
+  w.ui.inputs.push('synthetic-topic-two-987', '')
+  w.ui.modals.push('Allow')
+  await w.host.setUp()
+  assert.deepEqual(boxes(w.ui), [
+    ['The ntfy topic. Anyone who knows it can read its messages, so it is kept in VS Code\'s secret storage.', undefined],
+    ['An access token for the ntfy server, if it needs one — leave empty otherwise.', undefined],
+  ])
+  assert.equal(w.ui.asked.find((a) => a.kind === 'modal')?.text, 'Allow Token Pace to send notifications to ntfy.two.example?')
+  assert.deepEqual(Object.fromEntries(mapOf(w.secrets)), { [NOTIFY_SECRET_KEYS.ntfyTopic]: 'synthetic-topic-two-987' })
+  w.clock.now += TEST_MIN_GAP_MS
+  w.ui.picks.push('ntfy')
+  await w.host.sendTest()
+  assert.equal(w.spy.calls.length, 1)
+  assert.equal(w.spy.calls[0].url, `${TWO}/`)
+  assert.equal('Authorization' in w.spy.calls[0].init.headers, false, 'server one\'s token went to server two')
+  const text = `${w.spy.calls[0].url}\n${JSON.stringify(w.spy.calls[0].init.headers)}\n${w.spy.calls[0].init.body}`
+  assert.equal(text.includes(NTFY_TOKEN) || text.includes(TOPIC), false)
+
+  // E-mail: the port changed — the password box offers nothing to keep, an empty answer ends the setup unchanged,
+  // a typed one is stored and the consent names the new port; the same server offers to keep it.
+  const e = world()
+  e.ui.picks.push('E-mail (SMTP)')
+  e.ui.inputs.push(PASSWORD)
+  e.ui.modals.push('Allow')
+  await e.host.setUp()
+  e.ui.asked.length = 0
+  e.ui.picks.push('E-mail (SMTP)')
+  e.ui.inputs.push('')
+  e.ui.modals.push('Allow')
+  await e.host.setUp()
+  assert.deepEqual(boxes(e.ui).map(([, p]) => p), [KEEP])
+  assert.equal(mapOf(e.secrets).get(NOTIFY_SECRET_KEYS.emailPassword), PASSWORD)
+  e.cfg.now = cfgOf({ 'tokenPace.notifications.email': { host: SMTP_HOST, port: 465, security: 'tls', user: USER, from: FROM, to: TO } })
+  e.ui.asked.length = 0
+  e.ui.picks.push('E-mail (SMTP)')
+  e.ui.inputs.push('')
+  await e.host.setUp()
+  assert.deepEqual(boxes(e.ui).map(([, p]) => p), [undefined])
+  assert.equal(e.ui.asked.some((a) => a.kind === 'modal'), false)
+  assert.equal(readConsents(e.memento).email?.host, `${SMTP_HOST}:587`)
+  e.ui.picks.push('E-mail (SMTP)')
+  e.ui.inputs.push('synthetic-password-465')
+  e.ui.modals.push('Allow')
+  await e.host.setUp()
+  assert.equal(mapOf(e.secrets).get(NOTIFY_SECRET_KEYS.emailPassword), 'synthetic-password-465')
+  assert.equal(readConsents(e.memento).email?.host, `${SMTP_HOST}:465`)
+})
+
 // ---------------------------------------------------------------------------
 // The send: the consent's host, a changed host, the last result (C6 rule 2, C1 rule 6, C12)
 // ---------------------------------------------------------------------------
@@ -504,12 +679,14 @@ test('Send a Test: none set up says so; a set-up channel not listed is offered; 
   assert.deepEqual([body.topic, body.title, body.message], [TOPIC, 'Token Pace: test message', 'This channel works: Token Pace can reach it. Sent at 12:00.'])
   assert.equal(w.ui.asked.at(-1)?.text, 'Notifications: the test message went to ntfy.')
   assert.deepEqual(loadNotifyState(w.memento).last.ntfy, { at: NOW, event: 'test', ok: true })
-  // Within 10 s: not sent, said in the log only.
+  // Within 10 s: not sent — said in the log, and (Review 3 F8, pinned and changed) answered, not ended in silence.
   w.clock.now = NOW + TEST_MIN_GAP_MS - 1
   w.ui.picks.push('ntfy')
   await w.host.sendTest()
   assert.equal(w.spy.calls.length, 1)
   assert.ok(w.log.includes('Notify: a test message to ntfy went less than 10 s ago — this one is not sent'))
+  assert.deepEqual([w.ui.asked.at(-1)?.kind, w.ui.asked.at(-1)?.text],
+    ['info', 'Notifications: a test message to ntfy went out less than ten seconds ago — try again in a moment.'])
   // A failure in its fixed word, then another channel's timeout word.
   w.clock.now = NOW + TEST_MIN_GAP_MS
   w.spy.statuses.push({ status: 401 })
@@ -541,6 +718,22 @@ test('Send a Test: none set up says so; a set-up channel not listed is offered; 
     assert.equal(g.ui.asked[0].text, 'Welcher Kanal soll die Testnachricht bekommen?')
     assert.deepEqual(g.ui.asked[0].items, ['Webhook (JSON)', 'Telegram', 'ntfy', 'E-Mail (SMTP)'])
     assert.equal(g.ui.asked.at(-1)?.text, 'Benachrichtigungen: Die Testnachricht ging an E-Mail (SMTP).')
+    // Review 3 F8: a second one within 10 s, in German.
+    g.ui.picks.push('E-Mail (SMTP)')
+    await g.host.sendTest()
+    assert.equal(g.ui.asked.at(-1)?.text,
+      'Benachrichtigungen: Eine Testnachricht an E-Mail (SMTP) ging vor weniger als zehn Sekunden hinaus — versuchen Sie es gleich noch einmal.')
+    // Review 3 F3, F4: the comma before „außer“, and „Kanal“ written out where a pronoun follows the channel's name.
+    assert.ok(consentDetail('ntfy.synthetic-host.example').includes('Token Pace liest von ntfy.synthetic-host.example nichts zurück, außer ob die Nachricht angenommen wurde.'))
+    g.ui.picks.push('ntfy')
+    g.ui.modals.push('Entfernen')
+    await g.host.remove()
+    const confirm = g.ui.asked.find((a) => a.kind === 'modal')
+    assert.equal(confirm?.text, 'Kanal ntfy entfernen? Seine Geheimnisse und Ihre Zustimmung werden gelöscht, und es wird nichts mehr dorthin gesendet.')
+    assert.equal(g.ui.asked.at(-1)?.text, 'Benachrichtigungen: Der Kanal ntfy wurde entfernt — seine Geheimnisse und seine Zustimmung sind gelöscht.')
+    const none = world()
+    await none.host.sendTest()
+    assert.equal(none.ui.asked[0].text, 'Es ist noch kein Benachrichtigungskanal eingerichtet. Führen Sie zuerst „Token Pace: Benachrichtigungskanal einrichten…“ aus.')
   })
 })
 
@@ -820,7 +1013,7 @@ test('static: VS Code\'s secret storage is named only in src/notifyHost.ts; test
   // In the code — the privacy scan's own lexer blanks comments and strings (a comment may say where a secret is kept).
   const { codeOf, networkSitesIn } = require('../scripts/check-privacy.mjs') as {
     codeOf: (text: string) => { code: string; bare: string }
-    networkSitesIn: (text: string) => Array<{ site: string }>
+    networkSitesIn: (text: string, opts?: { references?: boolean }) => Array<{ site: string }>
   }
   const bare = (f: string): string => codeOf(readFileSync(f, 'utf8')).bare
   const naming = tsFiles(join(ROOT, 'src')).filter((f) => /\.secrets\b|\bSecretStorage\b/.test(bare(f))).map(rel)
@@ -837,8 +1030,9 @@ test('static: VS Code\'s secret storage is named only in src/notifyHost.ts; test
     'test/notifyChannels.test.ts': ['api.telegram.org'],
     // The scan's allow-list and the hosts it refuses (P7).
     'test/privacy.test.ts': ['api.telegram.org', 'hooks.slack.com', 'discord.com', 'ntfy.sh', 'logic.azure.com'],
-    // The privacy page's sentence naming the scan's allowed host (P9).
-    'test/docs.test.ts': ['api.telegram.org'],
+    // The privacy page's sentence naming the scan's allowed host (P9), and the notifications page's and the settings
+    // table's sentence naming ntfy's public server as the server's own address (the fix pass after Review 3).
+    'test/docs.test.ts': ['api.telegram.org', 'ntfy.sh'],
     // The consent's Telegram host and the request address of this file's fake fetch.
     'test/notifyHost.test.ts': ['api.telegram.org', 'hooks.slack.com', 'discord.com', 'ntfy.sh', 'logic.azure.com', 'webhook.office.com',
       'outlook.office.com', 'smtp.gmail.com', 'open.rocket.chat'],
@@ -850,9 +1044,10 @@ test('static: VS Code\'s secret storage is named only in src/notifyHost.ts; test
   }
   // A fetch( in the code of a test (the privacy scan's own lexer: comments and strings do not count) only where the
   // channels are tested against local HTTPS servers — the global dispatcher reached with fetch('data:,x'), then a fetch
-  // bound to 127.0.0.1; every other test hands in a fake.
+  // bound to 127.0.0.1; every other test hands in a fake. Calls only (Review 3 F7, pinned and changed): since the scan
+  // counts a reference to fetch as well, a test's fake named fetch or its 'fetch' as data would count — neither calls it.
   const fetching = [...tsFiles(join(ROOT, 'test')), ...tsFiles(join(ROOT, 'test-e2e'))]
-    .filter((f) => networkSitesIn(readFileSync(f, 'utf8')).some((s) => s.site === 'fetch')).map(rel)
+    .filter((f) => networkSitesIn(readFileSync(f, 'utf8'), { references: false }).some((s) => s.site === 'fetch')).map(rel)
   assert.deepEqual(fetching, ['test/notifyChannels.test.ts'])
   const own = readFileSync(join(ROOT, 'test', 'notifyChannels.test.ts'), 'utf8')
   assert.ok(own.includes('fetch(\'data:,x\')'), 'the channels\' test no longer reaches the dispatcher with fetch(\'data:,x\')')

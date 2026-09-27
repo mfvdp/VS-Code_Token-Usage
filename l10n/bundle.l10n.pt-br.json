@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Seus próprios limites de `tokenPace.budgets`, medidos em relação ao uso contabilizado localmente. USD é o equivalente hipotético em API, não uma fatura.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Seus próprios limites; USD é o equivalente hipotético em API, não uma fatura.",
   "[preview]": "[prévia]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` está em `cache`: apenas um arquivo local é lido, a rede nunca é usada.",
   "a Codex token_count event is not necessarily one turn": "um evento token_count do Codex não é necessariamente um turno",
   "a related model": "um modelo relacionado",
   "about {0} running": "cerca de {0} em execução",

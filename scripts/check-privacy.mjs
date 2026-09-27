@@ -22,6 +22,9 @@
  * the second table, `NETWORK_SITES` (below, 1.12 C11): every place in `src/` that can reach a host
  * at all — a `fetch(`, a socket, an import of a network module — with the kind of host it reaches
  * and why. A call site anywhere else fails the CLI, and so does a row whose file no longer has it.
+ * Since 1.12 Review 3 a reference to `fetch` counts as its call does, and the two exports that are a
+ * connection in themselves (`NETWORK_ENTRY_POINTS`: the channels' `httpsFetch`, the SMTP sender's
+ * `smtpTransport`) may be imported by src/extension.ts alone.
  *
  * Beside the URL scan, the read contract (`READ_CONTRACT`, below): which fields each reader of a
  * Claude Code file may name — the list docs/privacy.md and docs/agents.md are held to by
@@ -592,6 +595,19 @@ export const NETWORK_SITES = [
 /** The kinds of host a row may name. */
 export const NETWORK_HOST_KINDS = ['literal', 'userConfigured']
 /**
+ * 1.12 Review 3 F7: the two exports that are a real connection in themselves — the channels' one fetch and the SMTP
+ * sender's socket factory. Every other module is handed them (notifyHost.ts takes both as `deps`), so a module that
+ * names one reaches a host without a site of its own: outside its own file only the `importers` may name it — an
+ * import, a member of a namespace import, a string that is exactly its name.
+ *
+ * @typedef {{ name: string, file: string, importers: string[], reason: string }} NetworkEntryPoint
+ * @type {NetworkEntryPoint[]}
+ */
+export const NETWORK_ENTRY_POINTS = [
+  { name: 'httpsFetch', file: 'src/notifyChannels.ts', importers: ['src/extension.ts'], reason: 'the channels\' one real fetch — extension.ts hands it to the notifications\' host' },
+  { name: 'smtpTransport', file: 'src/notifySmtp.ts', importers: ['src/extension.ts'], reason: 'the SMTP sender\'s real sockets — extension.ts hands them to the notifications\' host' },
+]
+/**
  * Node's modules that open a connection (C11 rule 2's list, and `http2`, which does as well): an `import`,
  * a `require` or an `import(…)` of one — a `node:` prefix taken off — is a site of that module's name.
  */
@@ -614,6 +630,47 @@ const CALL_SITES = [
   { site: 'EventSource', re: /(?<![\w$])new\s+(?:[\w$]+\.)*EventSource\s*\(/g },
   { site: 'sendBeacon', re: /(?<![\w$])sendBeacon\s*\(/g },
 ]
+/**
+ * 1.12 Review 3 F7: `fetch` itself, not only its call, is a site `fetch` — a reference to the global binds it to
+ * another name or hands it on (`const f = fetch`, `Reflect.apply(fetch, …)`, `{ fetch }`, an import or export of a
+ * `fetch`), a member of a global object reaches it without a call (`globalThis.fetch`, `(globalThis as any).fetch`,
+ * `window.fetch`, `self.fetch`, `global.fetch`), and a string that is exactly its name looks it up
+ * (`globalThis['fetch']`, `Reflect.get(globalThis, 'fetch')`). Not a reference: a member of another object (an
+ * injected `deps.fetch`, whose call is a site of its own), and a name before a colon — a property's, a parameter's
+ * or a declaration's with its type (`fetch: FetchLike`, `{ fetch: f }`) — unless the colon is a conditional's —,
+ * and `typeof fetch`.
+ */
+const FETCH_REF_RE = /(?<![\w$.#])fetch(?![\w$])/g
+const GLOBAL_FETCH_RE = /(?<![\w$.#])(?:globalThis|window|self|global)(?:\s+as\s+[\w$.]+(?:<[^>\n]*>)?)?\s*\)*\s*(?:\?\.|!?\.)\s*fetch(?![\w$])/g
+
+/**
+ * The start of every string literal of a source — its `code` and `bare` as `codeOf` gives them — whose whole text
+ * is `text`: a quote in the code with exactly `text` inside, and the same quote where `bare` blanked the text (so the
+ * quotes are the literal's own, not two quote characters inside another string).
+ *
+ * @param {string} code
+ * @param {string} bare
+ * @param {string} text
+ * @returns {number[]}
+ */
+function exactStrings(code, bare, text) {
+  const out = []
+  const esc = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  for (const m of code.matchAll(new RegExp(`(['"\`])${esc}\\1`, 'g'))) {
+    const q = m[1]
+    const at = m.index
+    const end = at + text.length + 1
+    if (bare[at] === q && bare[end] === q && bare.slice(at + 1, end).trim() === '') out.push(at)
+  }
+  return out
+}
+
+/** Every place `bare` names the identifier `name` (a member too), and every string of `code` that is exactly it. */
+function namesOf(code, bare, name) {
+  const at = [...bare.matchAll(new RegExp(`(?<![\\w$#])${name}(?![\\w$])`, 'g'))].map((m) => m.index)
+  return [...at, ...exactStrings(code, bare, name)].sort((a, b) => a - b)
+}
+
 /** Every name a row's `sites` may hold. */
 export const NETWORK_SITE_KINDS = [...new Set([...CALL_SITES.map((c) => c.site), ...NETWORK_MODULES])]
 const IMPORT_RES = [
@@ -727,18 +784,32 @@ export function codeOf(src) {
 }
 
 /**
- * The network call sites of one source: each `{ site, line }` — a call of `CALL_SITES` in the code, or an
- * import of a module of `NETWORK_MODULES`. Pure, for the tests.
+ * The network call sites of one source: each `{ site, line }` — a call of `CALL_SITES` in the code, a reference
+ * to `fetch` (Review 3 F7, unless `references` is false — a test that asks only for calls), or an import of a
+ * module of `NETWORK_MODULES`. Pure, for the tests.
  *
  * @param {string} src
+ * @param {{ references?: boolean }} [opts]
  * @returns {Array<{ site: string, line: number }>}
  */
-export function networkSitesIn(src) {
+export function networkSitesIn(src, { references = true } = {}) {
   const { code, bare } = codeOf(src)
   const lineAt = (index) => src.slice(0, index).split('\n').length
   const found = []
   for (const { site, re } of CALL_SITES) {
     for (const m of bare.matchAll(re)) found.push({ site, line: lineAt(m.index) })
+  }
+  // Review 3 F7: `fetch` referred to, reached through a global object, or looked up by its name.
+  if (references) {
+    for (const m of bare.matchAll(FETCH_REF_RE)) {
+      const end = m.index + m[0].length
+      const before = bare.slice(Math.max(0, m.index - 40), m.index)
+      const nameOnly = /^\s*\??\s*:(?!:)/.test(bare.slice(end, end + 40)) && !/(?:\?|(?<![\w$])case)\s*$/.test(before)
+      // `typeof fetch` asks what it is, and hands nothing on.
+      if (!nameOnly && !/(?<![\w$])typeof\s*$/.test(before)) found.push({ site: 'fetch', line: lineAt(m.index) })
+    }
+    for (const m of bare.matchAll(GLOBAL_FETCH_RE)) found.push({ site: 'fetch', line: lineAt(m.index) })
+    for (const at of exactStrings(code, bare, 'fetch')) found.push({ site: 'fetch', line: lineAt(at) })
   }
   for (const re of IMPORT_RES) {
     for (const m of code.matchAll(re)) {
@@ -778,15 +849,17 @@ export function sourceFiles(root = '.') {
  * C11 rule 2: every network call site of `files` against `rows` — pure over the file reader, for the tests.
  * An offender is a site in a file without a row, a site its file's row does not list, a row whose file does not
  * have a site it lists or cannot be read (stale), and a row that is not well-formed (no reason, an unknown kind
- * of host or site).
+ * of host or site). Review 3 F7: and a file that names one of `entries` — the exports that are a connection in
+ * themselves — outside that export's own file and its importers.
  *
  * @param {(file: string) => string} [read]
  * @param {string[]} [files]
  * @param {NetworkSiteRow[]} [rows]
+ * @param {NetworkEntryPoint[]} [entries]
  * @returns {{ sites: Array<{ file: string, site: string, line: number }>,
  *             offenders: Array<{ file: string, site: string, line: number | null, problem: string }> }}
  */
-export function scanNetworkSites(read = (file) => readFileSync(file, 'utf8'), files = sourceFiles(), rows = NETWORK_SITES) {
+export function scanNetworkSites(read = (file) => readFileSync(file, 'utf8'), files = sourceFiles(), rows = NETWORK_SITES, entries = NETWORK_ENTRY_POINTS) {
   const sites = []
   const offenders = []
   const byFile = new Map()
@@ -821,6 +894,14 @@ export function scanNetworkSites(read = (file) => readFileSync(file, 'utf8'), fi
     if (row !== undefined) {
       for (const site of row.sites) {
         if (!found.some((f) => f.site === site)) offenders.push({ file, site, line: null, problem: 'listed but not found (a stale row)' })
+      }
+    }
+    const { code, bare } = codeOf(src)
+    for (const entry of entries) {
+      if (entry.file === file || entry.importers.includes(file)) continue
+      const lines = [...new Set(namesOf(code, bare, entry.name).map((at) => src.slice(0, at).split('\n').length))]
+      for (const line of lines) {
+        offenders.push({ file, site: entry.name, line, problem: `only ${entry.importers.join(', ')} may import it (${entry.file})` })
       }
     }
   }
@@ -897,6 +978,9 @@ function main() {
   for (const o of net.offenders.filter((x) => !NETWORK_SITES.some((r) => r.file === x.file))) {
     console.log(`  DENY  ${o.file}:${o.line} ${o.site} — ${o.problem}`)
   }
+  for (const e of NETWORK_ENTRY_POINTS) {
+    console.log(`  entry point  ${e.name} (${e.file}) — only ${e.importers.join(', ')} may import it: ${e.reason}`)
+  }
   const userFiles = NETWORK_SITES.filter((r) => r.hosts === 'userConfigured').map((r) => r.file)
   if (userFiles.length > 0) {
     console.log(`user-configured hosts: notification channels (${userFiles.join(', ')}) — none is contacted before its channel's consent`)
@@ -906,6 +990,7 @@ function main() {
   if (net.offenders.length > 0) {
     console.error(`\ncheck-privacy: ${net.offenders.length} network call site(s) or row(s) differ from NETWORK_SITES.`)
     console.error('Every place in src/ that can reach a host needs its row — the file, its sites, the kind of host it reaches and why.')
+    console.error(`${NETWORK_ENTRY_POINTS.map((e) => e.name).join(' and ')} are handed on by ${[...new Set(NETWORK_ENTRY_POINTS.flatMap((e) => e.importers))].join(', ')}, never imported anywhere else.`)
     failed = true
   }
   if (bridgeBad !== null) {

@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Omat rajat asetuksesta `tokenPace.budgets` suhteessa paikallisesti laskettuun käyttöön. USD on hypoteettinen API-vastine, ei lasku.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Omat rajat; USD on hypoteettinen API-vastine, ei lasku.",
   "[preview]": "[esikatselu]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` on `cache`: vain paikallinen tiedosto luetaan, verkkoa ei koskaan käytetä.",
   "agents {0}": "agentit {0}",
   "and {0} more": "ja {0} muuta",
   "another window polls and writes the data; this one only displays it": "toinen ikkuna kyselee ja kirjoittaa tiedot; tämä vain näyttää ne",

@@ -148,7 +148,7 @@ a secret: a webhook's address, a bot's token, an ntfy topic and a password are k
 | `notifications.cooldownMinutes` | `10` | The least time between two notifications of one kind of event (1–1440); one that comes sooner is dropped, not saved for later. At most 20 notifications an hour in all |
 | `notifications.webhook` | `{ format: generic, secretHeader: "" }` | `format`: `generic` (Token Pace's JSON), `slack`, `discord`, `teams`, `mattermost` or `rocketChat`; `secretHeader`: the name of a header that carries a secret, if your address expects one |
 | `notifications.telegram` | `{ chatId: "" }` | The chat your bot sends to — a number, or `@name` for a public channel |
-| `notifications.ntfy` | `{ server: "" }` | The `https://` address of your ntfy server — the public one or your own; there is no default |
+| `notifications.ntfy` | `{ server: "" }` | The `https://` address of your ntfy server itself — `https://ntfy.sh` for the public one, or your own — never a topic's address (ntfy takes the JSON publish only at its root); there is no default |
 | `notifications.email` | `{ host: "", port: 587, security: starttls, user: "", from: "", to: "" }` | Your SMTP server and one recipient: `security` `starttls` (usually port 587) or `tls` (usually port 465). Nothing is sent without encryption |
 
 ## Diagnostics

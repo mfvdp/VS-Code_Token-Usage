@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Ваші власні ліміти з `tokenPace.budgets`, виміряні відносно локально врахованого використання. USD — гіпотетичний еквівалент API, а не рахунок.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Ваші власні ліміти; USD — гіпотетичний еквівалент API, а не рахунок.",
   "[preview]": "[попередній перегляд]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` має значення `cache`: читається лише локальний файл, мережа ніколи не використовується.",
   "agents {0}": "агенти {0}",
   "and {0} more": "і ще {0}",
   "another window polls and writes the data; this one only displays it": "інше вікно опитує й записує дані; це лише показує їх",

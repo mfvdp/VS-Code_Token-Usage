@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "`tokenPace.budgets` で設定した独自の上限を、ローカルで集計した使用量と比較します。USD は API で換算した仮定上の金額で、請求額ではありません。",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "独自の上限です。USD は API で換算した仮定上の金額で、請求額ではありません。",
   "[preview]": "[プレビュー]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` は `cache` です: ローカルファイルのみを読み取り、ネットワークは一切使用しません。",
   "a Codex token_count event is not necessarily one turn": "Codex の token_count イベントは、必ずしも 1 ターンではありません",
   "a related model": "関連モデル",
   "about {0} running": "約 {0} 件が実行中",

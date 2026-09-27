@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Τα δικά σας όρια από το `tokenPace.budgets`, μετρημένα έναντι της χρήσης που καταμετρήθηκε τοπικά. Τα USD είναι το υποθετικό ισοδύναμο API, όχι λογαριασμός.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Τα δικά σας όρια. Τα USD είναι το υποθετικό ισοδύναμο API, όχι λογαριασμός.",
   "[preview]": "[προεπισκόπηση]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "Το `tokenPace.quotaSource` είναι `cache`: διαβάζεται μόνο ένα τοπικό αρχείο, το δίκτυο δεν χρησιμοποιείται ποτέ.",
   "agents {0}": "πράκτορες {0}",
   "and {0} more": "και {0} ακόμη",
   "another window polls and writes the data; this one only displays it": "άλλο παράθυρο κάνει τις λήψεις και γράφει τα δεδομένα. Αυτό εδώ απλώς τα εμφανίζει",

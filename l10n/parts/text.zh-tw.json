@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "來自 `tokenPace.budgets` 的自訂上限，以本機計數的用量衡量。USD 是假設性的 API 等值金額，並非帳單。",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "自訂上限；USD 是假設性的 API 等值金額，並非帳單。",
   "[preview]": "[預覽]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` 為 `cache`：只讀取本機檔案，絕不使用網路。",
   "agents {0}": "代理程式 {0}",
   "and {0} more": "以及另外 {0} 個",
   "another window polls and writes the data; this one only displays it": "另一個視窗輪詢並寫入資料；此視窗只負責顯示",

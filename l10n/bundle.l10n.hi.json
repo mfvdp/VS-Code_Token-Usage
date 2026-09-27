@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "`tokenPace.budgets` से आपकी अपनी सीमाएँ, स्थानीय रूप से गिने गए उपयोग के सापेक्ष मापी गईं। USD काल्पनिक API समतुल्य है, बिल नहीं।",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "आपकी अपनी सीमाएँ; USD काल्पनिक API समतुल्य है, बिल नहीं।",
   "[preview]": "[पूर्वावलोकन]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` `cache` है: केवल एक स्थानीय फ़ाइल पढ़ी जाती है, नेटवर्क का कभी उपयोग नहीं होता।",
   "a Codex token_count event is not necessarily one turn": "Codex का एक token_count इवेंट ज़रूरी नहीं कि एक टर्न हो",
   "a related model": "एक संबंधित मॉडल",
   "about {0} running": "लगभग {0} चल रहे",

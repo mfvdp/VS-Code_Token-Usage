@@ -5,11 +5,16 @@
  * The two questions the extension is allowed to ask, and the answers it keeps.
  *
  * Everything this tool does by default is local and read-only. The three
- * exceptions — one network call and two writes outside `globalStorage` — each
- * have their own dialog, their own memento key and their own revocation, so a
- * yes to one is never a yes to another. 1.8 B2 adds a fourth of the same kind:
- * the opt-in keep-warm line, the one thing the extension does on its own (§0c),
- * with a dialog that names its cost, its risk and the terms it falls under.
+ * exceptions of 1.x — the quota's network call and two writes outside
+ * `globalStorage` — each have their own dialog, their own memento key and their
+ * own revocation, so a yes to one is never a yes to another. 1.8 B2 adds a
+ * fourth of the same kind: the opt-in keep-warm line, the one thing the extension
+ * does on its own (§0c), with a dialog that names its cost, its risk and the
+ * terms it falls under. 1.12 adds a second consented use of the network: the
+ * notification channels, each with a consent of its own that names its host —
+ * asked by *Set Up a Notification Channel…* and kept per channel by notifyHost.ts
+ * (`tokenPace.notifyConsent`), not here; the network consent below does not
+ * cover them, nor they it.
  *
  * The dialogs state what happens in concrete terms (which address, which file,
  * which interval), because a consent dialog whose text is vaguer than the

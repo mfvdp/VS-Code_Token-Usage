@@ -937,6 +937,24 @@
       "part": "text",
       "key": "Notification channels",
       "why": "the item of Clear Stored Data… that deletes the notification channels’ secrets, consents and state — a label like Consent decisions and Alert state beside it, notification as your category Notifications has it — 1.12 C9, C13"
+    },
+    {
+      "n": 120,
+      "by": "R3-fix",
+      "kind": "reword",
+      "part": "text",
+      "old": "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.",
+      "key": "`tokenPace.quotaSource` is `cache`: only a local file is read for the quota; the network is never used for it.",
+      "carry": false,
+      "why": "the explanation of the status bar’s quota off in the cache mode, now scoped to the quota: for the quota only a local file is read and the network is never used for it (was: only a local file is read, the network is never used) — since 1.12 a notification channel the reader set up may still send, so the sentence no longer says that the network is never used at all — keep `tokenPace.quotaSource` and `cache` as they stand, quota as your 1.x word for it — 1.12 Review 3 F6"
+    },
+    {
+      "n": 121,
+      "by": "R3-fix",
+      "kind": "add",
+      "part": "host",
+      "key": "Notifications: a test message to {0} went out less than ten seconds ago — try again in a moment.",
+      "why": "the answer of Send a Test Notification when the reader asks for a second test message to the same channel within ten seconds, which is not sent — {0} is the channel’s name as Set Up’s list shows it (Slack, Discord, Microsoft Teams, Mattermost, Rocket.Chat, Telegram, ntfy, or your Webhook (JSON) and E-mail (SMTP)) — test message as in n=106, Notifications: as your category’s word — 1.12 C4 rule 7, Review 3 F8"
     }
   ]
 }

@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Các giới hạn tự đặt từ `tokenPace.budgets`, đo theo mức sử dụng đếm được cục bộ. USD là giá trị tương đương API giả định, không phải hóa đơn.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Giới hạn tự đặt; USD là giá trị tương đương API giả định, không phải hóa đơn.",
   "[preview]": "[xem trước]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` là `cache`: chỉ đọc một tệp cục bộ, không bao giờ dùng mạng.",
   "a Codex token_count event is not necessarily one turn": "một sự kiện token_count của Codex không nhất thiết là một lượt",
   "a related model": "một mô hình liên quan",
   "about {0} running": "khoảng {0} đang chạy",

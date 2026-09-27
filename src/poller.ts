@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The only place in this extension that touches the network.
+ * One of the three places in this extension that reach the network — the privacy scan's `NETWORK_SITES`
+ * table (scripts/check-privacy.mjs) names them: this file, the quota fetch to the one host it spells
+ * (api.anthropic.com, after the network consent); src/notifyChannels.ts and src/notifySmtp.ts, the
+ * notification channels (since 1.12), each only to the host its own consent named.
  *
  * Fetches the quota directly from the provider when no external poller supplies
  * a fresh cache file. Two rules are not negotiable:

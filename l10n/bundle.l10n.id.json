@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Batas Anda sendiri dari `tokenPace.budgets`, diukur terhadap penggunaan yang dihitung secara lokal. USD adalah padanan API hipotetis, bukan tagihan.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Batas Anda sendiri; USD adalah padanan API hipotetis, bukan tagihan.",
   "[preview]": "[pratinjau]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` bernilai `cache`: hanya berkas lokal yang dibaca, jaringan tidak pernah digunakan.",
   "a Codex token_count event is not necessarily one turn": "satu peristiwa token_count Codex belum tentu satu giliran",
   "a related model": "model terkait",
   "about {0} running": "sekitar {0} berjalan",

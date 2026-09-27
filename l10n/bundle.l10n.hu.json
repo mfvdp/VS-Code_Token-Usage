@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Az Ön saját korlátai a `tokenPace.budgets` beállításból, a helyben számolt felhasználáshoz mérve. Az USD a hipotetikus API-egyenérték, nem számla.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Az Ön saját korlátai; az USD a hipotetikus API-egyenérték, nem számla.",
   "[preview]": "[előnézet]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "A `tokenPace.quotaSource` értéke `cache`: csak egy helyi fájl olvasása történik, a hálózat soha nincs használatban.",
   "a Codex token_count event is not necessarily one turn": "egy Codex token_count-esemény nem feltétlenül egy forduló",
   "a related model": "egy rokon modell",
   "about {0} running": "kb. {0} fut",

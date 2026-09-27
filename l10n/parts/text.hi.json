@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "`tokenPace.budgets` से आपकी अपनी सीमाएँ, स्थानीय रूप से गिने गए उपयोग के सापेक्ष मापी गईं। USD काल्पनिक API समतुल्य है, बिल नहीं।",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "आपकी अपनी सीमाएँ; USD काल्पनिक API समतुल्य है, बिल नहीं।",
   "[preview]": "[पूर्वावलोकन]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` `cache` है: केवल एक स्थानीय फ़ाइल पढ़ी जाती है, नेटवर्क का कभी उपयोग नहीं होता।",
   "agents {0}": "एजेंट {0}",
   "and {0} more": "और {0} अन्य",
   "another window polls and writes the data; this one only displays it": "एक अन्य विंडो पोल करती है और डेटा लिखती है; यह विंडो केवल उसे दिखाती है",

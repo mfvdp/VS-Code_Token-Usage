@@ -27,7 +27,10 @@
  *  • A send that failed is not tried again (§7a Q24): its result is the channel's `last` entry, which the
  *    diagnostics show; a 429's `Retry-After` pauses the channel until then (C1 rule 6, C4 rule 6).
  *  • The test message (C4 rule 7) passes the once-rule, the cooldown and the hourly cap, not the consent's host
- *    or a pause, and goes to one channel at most once in `TEST_MIN_GAP_MS`.
+ *    or a pause, and goes to one channel at most once in `TEST_MIN_GAP_MS` — a second one inside it is answered,
+ *    not sent (Review 3 F8).
+ *  • A stored secret is bound to the host its consent named (Review 3 F1, F2): a setup that allows another host
+ *    keeps none of the old one's secrets unless the reader types them again, and a preset keeps no header value.
  *  • The words of the commands are the reader's language (C13); the log and the diagnostics stay English.
  */
 
@@ -240,10 +243,14 @@ function setupItems(): SetupItem[] {
 
 interface ChannelItem extends NotifyPickItem { channel: ChannelKind }
 
-/** What a setup collected before its consent: the host the consent names and the secrets to store on *Allow*. */
+/**
+ * What a setup collected before its consent: the host the consent names, the secrets to store on *Allow*, and the
+ * stored secrets to delete on *Allow* — each one bound to a host this setup no longer allows (Review 3 F1, F2).
+ */
 interface SetupPlan {
   host: string
   secrets: Record<string, string>
+  deletes: string[]
 }
 
 /**
@@ -493,6 +500,8 @@ export class NotifyHost {
     if (answer !== allow || this.disposed) return
     const now = this.deps.clock()
     for (const [key, value] of Object.entries(plan.secrets)) await this.deps.secrets.store(key, value)
+    // A secret kept for another host than the one just allowed is not kept for this one (§0a.8).
+    for (const key of plan.deletes) await this.deps.secrets.delete(key)
     const consents = readConsents(this.deps.memento)
     consents[choice.channel] = { host: plan.host, at: now }
     await this.deps.memento.update(NOTIFY_CONSENT_KEY, consents)
@@ -522,8 +531,15 @@ export class NotifyHost {
 
   /**
    * C7: one box per secret, `password` and `ignoreFocusOut`, never pre-filled — "Leave empty to keep the stored
-   * one" where one is stored; a validation message never echoes the value. Null when the reader went away, a
-   * setting the channel needs is missing, or nothing would be stored for a secret the channel cannot do without.
+   * one" where one is stored for the host this setup allows; a validation message never echoes the value. Null when
+   * the reader went away, a setting the channel needs is missing, or nothing would be stored for a secret the channel
+   * cannot do without.
+   *
+   * Review 3 F1, F2 (§0a.8, C6): a stored secret is bound to the host its consent named. Where this setup allows
+   * another host — the webhook's address, the ntfy server or the SMTP server with its port changed, or no consent
+   * stands — a secret of the old one is never offered to keep: the box shows no "keep", an empty answer to a
+   * secret the channel can do without deletes it on *Allow*, and one it cannot do without must be typed again. A
+   * preset never keeps the generic webhook's header value (it asks for none).
    */
   private async inputsFor(choice: SetupChoice, title: string, cfg: NotifyConfig): Promise<SetupPlan | null> {
     const ui = this.deps.ui
@@ -531,7 +547,13 @@ export class NotifyHost {
     const keep = t('Leave empty to keep the stored one.')
     const box = (prompt: string, stored: boolean, validateInput?: (v: string) => string | undefined): PromiseLike<string | undefined> =>
       ui.input({ title, prompt, placeHolder: stored ? keep : undefined, password: true, ignoreFocusOut: true, validateInput })
+    const consented = readConsents(this.deps.memento)[choice.channel]?.host
     const secrets: Record<string, string> = {}
+    const deletes: string[] = []
+    /** A secret that may stay only for the host allowed before: deleted on *Allow* when it is stored and not typed. */
+    const dropUnlessTyped = async (key: string): Promise<void> => {
+      if (secrets[key] === undefined && await this.has(key)) deletes.push(key)
+    }
     switch (choice.channel) {
       case 'webhook': {
         const stored = await s.get(NOTIFY_SECRET_KEYS.webhookUrl)
@@ -548,48 +570,58 @@ export class NotifyHost {
         const u = url === undefined ? null : httpsOnly(url)
         if (u === null) return null
         if (typed.trim() !== '') secrets[NOTIFY_SECRET_KEYS.webhookUrl] = typed.trim()
+        const sameHost = consented !== undefined && u.host === consented
         // C7: the header's value only when the reader named a header; a preset asks only the address (C8 rule 1).
         if (choice.format === 'generic' && cfg.webhook.secretHeader !== '') {
           const value = await box(t('The value of the header {0}. It is kept in VS Code\'s secret storage.', cfg.webhook.secretHeader),
-            await this.has(NOTIFY_SECRET_KEYS.webhookSecret))
+            sameHost && await this.has(NOTIFY_SECRET_KEYS.webhookSecret))
           if (value === undefined) return null
           if (value.trim() !== '') secrets[NOTIFY_SECRET_KEYS.webhookSecret] = value.trim()
         }
-        return { host: u.host, secrets }
+        // F1: a preset never keeps the header value; another host keeps it only when it was typed in this setup.
+        if (choice.format !== 'generic' || !sameHost) await dropUnlessTyped(NOTIFY_SECRET_KEYS.webhookSecret)
+        return { host: u.host, secrets, deletes }
       }
       case 'telegram': {
         if (cfg.telegram.chatId === '') {
           return this.missing(t('Set the chat in tokenPace.notifications.telegram first — the bot\'s token alone does not say where to send.'), 'tokenPace.notifications.telegram')
         }
+        // Telegram's host is fixed: its token is bound to api.telegram.org whatever the settings say.
         const stored = await this.has(NOTIFY_SECRET_KEYS.telegramBotToken)
         const token = await box(t('The Telegram bot\'s token (from @BotFather). It is kept in VS Code\'s secret storage.'), stored)
         if (token === undefined || (token.trim() === '' && !stored)) return null
         if (token.trim() !== '') secrets[NOTIFY_SECRET_KEYS.telegramBotToken] = token.trim()
-        return { host: TELEGRAM_API_HOST, secrets }
+        return { host: TELEGRAM_API_HOST, secrets, deletes }
       }
       case 'ntfy': {
         const server = httpsOnly(cfg.ntfy.server)
         if (server === null) return this.missing(t('Set the server in tokenPace.notifications.ntfy first.'), 'tokenPace.notifications.ntfy')
-        const stored = await this.has(NOTIFY_SECRET_KEYS.ntfyTopic)
+        // F2: the topic and the token are the server's they were allowed for; another server asks both afresh.
+        const sameHost = consented !== undefined && server.host === consented
+        const stored = sameHost && await this.has(NOTIFY_SECRET_KEYS.ntfyTopic)
         const topic = await box(t('The ntfy topic. Anyone who knows it can read its messages, so it is kept in VS Code\'s secret storage.'), stored)
         if (topic === undefined || (topic.trim() === '' && !stored)) return null
         if (topic.trim() !== '') secrets[NOTIFY_SECRET_KEYS.ntfyTopic] = topic.trim()
-        const token = await box(t('An access token for the ntfy server, if it needs one — leave empty otherwise.'), await this.has(NOTIFY_SECRET_KEYS.ntfyToken))
+        const token = await box(t('An access token for the ntfy server, if it needs one — leave empty otherwise.'),
+          sameHost && await this.has(NOTIFY_SECRET_KEYS.ntfyToken))
         if (token === undefined) return null
         if (token.trim() !== '') secrets[NOTIFY_SECRET_KEYS.ntfyToken] = token.trim()
-        return { host: server.host, secrets }
+        if (!sameHost) await dropUnlessTyped(NOTIFY_SECRET_KEYS.ntfyToken)
+        return { host: server.host, secrets, deletes }
       }
       default: {
         const e = cfg.email
         if (e.host === '' || e.user === '' || e.from === '' || e.to === '') {
           return this.missing(t('Set host, user, from and to in tokenPace.notifications.email first.'), 'tokenPace.notifications.email')
         }
-        const stored = await this.has(NOTIFY_SECRET_KEYS.emailPassword)
+        // F2: the password is the server's it was allowed for — host and port; another one asks it afresh.
+        const host = smtpHost(cfg)
+        const stored = consented !== undefined && host === consented && await this.has(NOTIFY_SECRET_KEYS.emailPassword)
         const password = await box(t('The password or app password of {0} on the SMTP server. It is kept in VS Code\'s secret storage.', e.user), stored)
         // A password is taken as typed: spaces may belong to it.
         if (password === undefined || (password === '' && !stored)) return null
         if (password !== '') secrets[NOTIFY_SECRET_KEYS.emailPassword] = password
-        return { host: smtpHost(cfg), secrets }
+        return { host, secrets, deletes }
       }
     }
   }
@@ -613,6 +645,8 @@ export class NotifyHost {
     const before = this.lastTest.get(channel)
     if (before !== undefined && now >= before && now - before < TEST_MIN_GAP_MS) {
       this.deps.log.info(`Notify: a test message to ${channel} went less than 10 s ago — this one is not sent`)
+      // Review 3 F8: the reader asked, so the command answers — it does not end in silence.
+      await ui.info(t('Notifications: a test message to {0} went out less than ten seconds ago — try again in a moment.', item.label))
       return
     }
     this.lastTest.set(channel, now)

@@ -121,8 +121,9 @@ const sites = require('../scripts/check-privacy.mjs') as {
   NETWORK_MODULES: string[]
   NETWORK_SITE_KINDS: string[]
   NETWORK_HOST_KINDS: string[]
-  scanNetworkSites: (read?: (file: string) => string, files?: string[], rows?: SiteRow[]) => SiteScan
-  networkSitesIn: (src: string) => Array<{ site: string; line: number }>
+  NETWORK_ENTRY_POINTS: Array<{ name: string; file: string; importers: string[]; reason: string }>
+  scanNetworkSites: (read?: (file: string) => string, files?: string[], rows?: SiteRow[], entries?: Array<{ name: string; file: string; importers: string[]; reason: string }>) => SiteScan
+  networkSitesIn: (src: string, opts?: { references?: boolean }) => Array<{ site: string; line: number }>
   sourceFiles: (root?: string) => string[]
   codeOf: (src: string) => { code: string; bare: string }
 }
@@ -166,7 +167,9 @@ test('a call site outside the table fails: fetch( in src/other.ts, a network mod
     return sites.scanNetworkSites((f) => { if (!(f in files)) throw new Error('ENOENT'); return (files as Record<string, string>)[f] }, Object.keys(files))
   }
   assert.deepEqual(tree({}).offenders, [])
-  const cases: Array<[string, string]> = [
+  // Review 3 F7 (pinned and changed): a case may name more than one site — the re-export of undici's fetch is a
+  // reference to fetch as well.
+  const cases: Array<[string, string | string[]]> = [
     ['const r = await fetch(url)', 'fetch'],
     ['const r = await globalThis.fetch (url)', 'fetch'],
     ['import * as https from \'https\'', 'https'],
@@ -174,7 +177,7 @@ test('a call site outside the table fails: fetch( in src/other.ts, a network mod
     ['import \'dgram\'', 'dgram'],
     ['const net = require(\'net\')', 'net'],
     ['const tls = await import(\'node:tls\')', 'tls'],
-    ['export { fetch } from \'undici\'', 'undici'],
+    ['export { fetch } from \'undici\'', ['fetch', 'undici']],
     ['import { Agent } from \'undici/lib/agent\'', 'undici'],
     ['import * as h2 from \'http2\'', 'http2'],
     ['tls.connect({ host, port })', 'tls'],
@@ -189,7 +192,8 @@ test('a call site outside the table fails: fetch( in src/other.ts, a network mod
   ]
   for (const [code, site] of cases) {
     const scan = tree({ 'src/other.ts': `// a file\n${code}\n` })
-    assert.deepEqual(scan.offenders.map((o) => [o.file, o.site, o.line, o.problem]), [['src/other.ts', site, 2, 'no row in NETWORK_SITES']], code)
+    assert.deepEqual(scan.offenders.map((o) => [o.file, o.site, o.line, o.problem]),
+      (Array.isArray(site) ? site : [site]).map((x) => ['src/other.ts', x, 2, 'no row in NETWORK_SITES']), code)
   }
   // The same in a file that has a row, but not among the row's sites.
   const beside = tree({ 'src/notifyChannels.ts': 'import * as tls from \'tls\'\nexport const f = (u, i) => fetch(u, i)\n' })
@@ -199,6 +203,82 @@ test('a call site outside the table fails: fetch( in src/other.ts, a network mod
   assert.deepEqual(smtpFetch.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifySmtp.ts', 'fetch', 'not among its row\'s sites']])
   const channelSocket = tree({ 'src/notifyChannels.ts': 'export const f = (u, i) => fetch(u, i)\nexport const s = () => net.connect(25, h)\n' })
   assert.deepEqual(channelSocket.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifyChannels.ts', 'net', 'not among its row\'s sites']])
+})
+
+/** A fake tree with the three rows' files, and `extra` beside them. */
+function siteTree(extra: Record<string, string>): SiteScan {
+  const files: Record<string, string> = {
+    'src/poller.ts': 'res = await fetch(CLAUDE_USAGE_URL, {})\n',
+    'src/notifyChannels.ts': 'export const httpsFetch = (u, i) => fetch(u, i)\n',
+    'src/notifySmtp.ts': `${SMTP_FAKE}export function smtpTransport() { return { c, s } }\n`,
+    ...extra,
+  }
+  return sites.scanNetworkSites((f) => { if (!(f in files)) throw new Error('ENOENT'); return files[f] }, Object.keys(files))
+}
+
+test('Review 3 F7 (a): fetch itself is a site, not only its call — bound to another name, handed on, reached through a global object or looked up by its name, in a file without a row, fails; a property\'s name, an injected deps.fetch and typeof fetch do not count (1.12 C11 rule 2)', () => {
+  assert.deepEqual(siteTree({}).offenders, [])
+  const bypasses = [
+    // Review 3's three forms.
+    '(globalThis as any)[\'fetch\'](u)',
+    'const f = fetch; f(u)',
+    'Reflect.apply(fetch, globalThis, [u])',
+    // And their kin.
+    'const g = globalThis.fetch',
+    'const g = (globalThis as any).fetch',
+    'const w = window?.fetch',
+    'const s = self.fetch',
+    'const f = Reflect.get(globalThis, "fetch")',
+    'const f = globalThis[`fetch`]',
+    'const d = { fetch }',
+    'const pick = online ? fetch : offline',
+    'run(fetch)',
+    'import { fetch } from \'node-fetch\'',
+  ]
+  for (const code of bypasses) {
+    const scan = siteTree({ 'src/other.ts': `// a file\n${code}\n` })
+    assert.deepEqual(scan.offenders.map((o) => [o.file, o.site, o.line, o.problem]), [['src/other.ts', 'fetch', 2, 'no row in NETWORK_SITES']], code)
+  }
+  const names = [
+    'interface Deps { fetch: FetchLike; fetch2?: F; fetch?: F }',
+    'const deps = { fetch: injected }',
+    'send(url, this.deps.fetch)',
+    'function send(url: string, fetch: FetchLike) { return url }',
+    'const ok = typeof fetch === \'function\'',
+    'const help = "it\'s \'fetch\' in a sentence"',
+    'const q = \'fetchy\'',
+    '// const f = fetch',
+  ]
+  for (const code of names) assert.deepEqual(siteTree({ 'src/other.ts': `${code}\n` }).offenders, [], code)
+  // The calls-only form, which the test tree's own static test asks for.
+  assert.deepEqual(sites.networkSitesIn('const f = fetch; f(u)', { references: false }), [])
+  assert.deepEqual(sites.networkSitesIn('const f = fetch; f(u)'), [{ site: 'fetch', line: 1 }])
+})
+
+test('Review 3 F7 (b): httpsFetch and smtpTransport are handed on by src/extension.ts alone — an import of either anywhere else fails, as a named import, a member of a namespace import, a require or a string; their own modules and src/extension.ts pass (1.12 C11 rule 2)', () => {
+  assert.deepEqual(sites.NETWORK_ENTRY_POINTS.map((e) => [e.name, e.file, e.importers]), [
+    ['httpsFetch', 'src/notifyChannels.ts', ['src/extension.ts']],
+    ['smtpTransport', 'src/notifySmtp.ts', ['src/extension.ts']],
+  ])
+  for (const e of sites.NETWORK_ENTRY_POINTS) assert.ok(e.reason.trim().length > 10, e.name)
+  const allowed = siteTree({ 'src/extension.ts': 'import { httpsFetch } from \'./notifyChannels\'\nimport { smtpTransport } from \'./notifySmtp\'\nhost({ fetch: httpsFetch, smtp: smtpTransport() })\n' })
+  assert.deepEqual(allowed.offenders, [])
+  const importers: Array<[string, string, string]> = [
+    ['src/notifyHost.ts', 'import { httpsFetch } from \'./notifyChannels\'', 'httpsFetch'],
+    ['src/notifyHost.ts', 'import { httpsFetch as f } from \'./notifyChannels\'', 'httpsFetch'],
+    ['src/quota.ts', 'import * as ch from \'./notifyChannels\'\nvoid ch.httpsFetch', 'httpsFetch'],
+    ['src/quota.ts', 'const t = require(\'./notifySmtp\').smtpTransport()', 'smtpTransport'],
+    ['src/quota.ts', 'import * as smtp from \'./notifySmtp\'\nconst t = (smtp as any)[\'smtpTransport\']()', 'smtpTransport'],
+    ['src/poller.ts', 'import { smtpTransport } from \'./notifySmtp\'\nres = await fetch(CLAUDE_USAGE_URL, {})', 'smtpTransport'],
+  ]
+  for (const [file, code, name] of importers) {
+    const scan = siteTree({ [file]: `${code}\n` })
+    const line = code.split('\n').findIndex((l) => l.includes(name)) + 1
+    const own = name === 'httpsFetch' ? 'src/notifyChannels.ts' : 'src/notifySmtp.ts'
+    assert.deepEqual(scan.offenders.map((o) => [o.file, o.site, o.line, o.problem]), [[file, name, line, `only src/extension.ts may import it (${own})`]], code)
+  }
+  // A comment or a longer name is no import.
+  assert.deepEqual(siteTree({ 'src/notifyHost.ts': '/** notifyChannels.ts `httpsFetch` — a test\'s fake. */\nconst httpsFetcher = 1\n' }).offenders, [])
 })
 
 test('a row that no longer holds fails: its site gone, its file gone; a row without a reason or with an unknown kind fails (1.12 C11 rule 4)', () => {
@@ -813,6 +893,21 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     const imported = run()
     assert.equal(imported.status, 1, imported.out)
     assert.match(imported.out, /DENY {2}src\/quota\.ts:1 https — no row in NETWORK_SITES/)
+    writeFileSync(join(dir, 'src', 'quota.ts'), quota)
+    assert.equal(run().status, 0)
+    // Review 3 F7 (pinned and changed): the channels' real fetch imported by another module than extension.ts, and
+    // fetch bound to another name — the gate stops both; the CLI names the two entry points.
+    assert.match(netKept.out, /entry point {2}httpsFetch \(src\/notifyChannels\.ts\) — only src\/extension\.ts may import it: /)
+    assert.match(netKept.out, /entry point {2}smtpTransport \(src\/notifySmtp\.ts\) — only src\/extension\.ts may import it: /)
+    writeFileSync(join(dir, 'src', 'quota.ts'), `import { httpsFetch } from './notifyChannels'\nvoid httpsFetch\n${quota}`)
+    const entry = run()
+    assert.equal(entry.status, 1, entry.out)
+    assert.match(entry.out, /DENY {2}src\/quota\.ts:1 httpsFetch — only src\/extension\.ts may import it \(src\/notifyChannels\.ts\)/)
+    assert.match(entry.out, /httpsFetch and smtpTransport are handed on by src\/extension\.ts, never imported anywhere else\./)
+    writeFileSync(join(dir, 'src', 'quota.ts'), `${quota}\nexport const bound = fetch\n`)
+    const bound = run()
+    assert.equal(bound.status, 1, bound.out)
+    assert.match(bound.out, /DENY {2}src\/quota\.ts:\d+ fetch — no row in NETWORK_SITES/)
     writeFileSync(join(dir, 'src', 'quota.ts'), quota)
     assert.equal(run().status, 0)
     // 1.12 P8 (C11): a socket opened elsewhere — the SMTP sender's TLS connection moved into a helper file of its

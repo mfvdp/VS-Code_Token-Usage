@@ -734,7 +734,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Propriile dumneavoastră limite din `tokenPace.budgets`, măsurate față de utilizarea numărată local. USD este echivalentul API ipotetic, nu o factură.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Propriile dumneavoastră limite; USD este echivalentul API ipotetic, nu o factură.",
   "[preview]": "[previzualizare]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` este `cache`: se citește doar un fișier local, rețeaua nu este folosită niciodată.",
   "a Codex token_count event is not necessarily one turn": "un eveniment token_count Codex nu este neapărat o rundă",
   "a related model": "un model înrudit",
   "about {0} running": "rulează: circa {0}",

@@ -236,7 +236,6 @@
   "Your own limits from `tokenPace.budgets`, measured against the locally counted usage. USD is the hypothetical API equivalent, not a bill.": "Các giới hạn tự đặt từ `tokenPace.budgets`, đo theo mức sử dụng đếm được cục bộ. USD là giá trị tương đương API giả định, không phải hóa đơn.",
   "Your own limits; USD is the hypothetical API equivalent, not a bill.": "Giới hạn tự đặt; USD là giá trị tương đương API giả định, không phải hóa đơn.",
   "[preview]": "[xem trước]",
-  "`tokenPace.quotaSource` is `cache`: only a local file is read, the network is never used.": "`tokenPace.quotaSource` là `cache`: chỉ đọc một tệp cục bộ, không bao giờ dùng mạng.",
   "agents {0}": "tác nhân {0}",
   "and {0} more": "và thêm {0}",
   "another window polls and writes the data; this one only displays it": "một cửa sổ khác thăm dò và ghi dữ liệu; cửa sổ này chỉ hiển thị",

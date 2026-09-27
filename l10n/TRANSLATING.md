@@ -124,7 +124,7 @@ German: `fr`, `es`, `pt-br`, `it`, `ja`, `ko`, `zh-cn`, `zh-tw`, `ru`, `tr`, `pl
 | `l10n/bundle.l10n.<id>.json` | generated: `node scripts/merge-l10n.mjs` |
 | `package.nls.<id>.json` | written by you: every key of `package.nls.json`, in its order |
 | `l10n/nls-sources/<id>.json` | generated: `node scripts/nls-sources.mjs <id>` — only once the manifest is translated: the record says your text translates today's English |
-| `l10n/pending/<id>.json` | 1.10: written by `scripts/l10n-rekey.mjs` whenever the English changed — your work list; you empty it and delete it (the next section). A language new in 1.11 never has one |
+| `l10n/pending/<id>.json` | 1.10: written by `scripts/l10n-rekey.mjs` whenever the English changed — your work list; you empty it and delete it (the next section). A language new in 1.11 had none in 1.11; from 1.12 on every language beyond English and German has one while the English changes |
 
 Nothing else: not `src/`, `test/`, `scripts/`, `docs/`, `media/`, `README.md`, `CHANGELOG.md`,
 `package.json`, `package.nls.json`, the German files, this brief, another language's files or the
@@ -283,6 +283,85 @@ work through it as [the 1.10 section](#working-through-your-pending-list-110) sa
 5. Your report: the first line as above, then how many keys of your list you translated, reviewed
    and did in the manifest.
 
+## 1.12: your pending list
+
+For the twenty-four languages beyond English and German — every one of the registry has its files since 1.11. 1.12's
+ledger started at the 1.11.0 release (`node scripts/l10n-rekey.mjs --start d39c2df`) with an empty list for each of you;
+the code packages' English changes filled it, and you work through it as
+[the 1.10 section](#working-through-your-pending-list-110) says. A package holds six languages, one worktree.
+
+1. `node scripts/l10n-rekey.mjs --print <id>`: translate every `translate` key into the parts it names, read every
+   `review` key against the new English — keep it, or write it again —, and do every manifest key on the list.
+2. Then `node scripts/merge-l10n.mjs`, `node scripts/nls-sources.mjs <id>` for each of your ids, and delete
+   `l10n/pending/<id>.json`. The gates are the ones of [1.11: a new language, whole](#111-a-new-language-whole) (its
+   item 11), for each of your six ids, ending in `test ! -e l10n/pending/<id>.json`.
+3. What is new in 1.12, and what it needs:
+   * **Notifications** are messages Token Pace sends to a phone, a chat or a mailbox, for the events the reader lists —
+     `agentWaiting`, `agentDone`, `quotaThreshold`, `quotaExhausted`, `quotaReset`, `paceWarning` (ids, never
+     translated). Their texts are read on a phone's lock screen: keep them short. A `{0}` in them is a product name —
+     Claude Code or Codex ([the next section](#session-names-and-product-names-in-placeholders-112)).
+   * **Alert ≠ notification.** An alert is the popup inside VS Code (`tokenPace.alerts.*`); a notification is a message
+     sent outside it. Your word for the Alerts category (`configuration.alerts.title`, on your list for `review` with its
+     English unchanged) and your word for the new category must differ, and the six alert sentences use your word for
+     the in-editor popup.
+   * **The consents' paragraphs keep the English's hard wraps** — a line break where the English has one —, as the 1.x
+     consents do.
+   * **The Keychain**: use Apple's name for it in your language as macOS shows it, if you know it, else your common word.
+     `Claude Code-credentials` is the item's name and stays. "Always Allow" is a button of macOS: write macOS's own label
+     in your language if you know it, else keep the English between your quotation marks.
+   * **The range chips** "week to date" and "month to date" as your chips read them — the word you carried stays unless
+     it is wrong.
+   * **The budget example** of `config.statusBar.show.enum.budget` as your status bar prints it (T15 — copy what it
+     prints).
+   * **The ellipsis** as your language's typography sets it: the English's spacing of `…` is not a rule for your language.
+   * **"record"** only for a personal best of the *Records* section.
+   * **Backtick names stay as they are** (T5): the settings' fields `chatId`, `server`, `host`, `port`, `security`,
+     `user`, `from`, `to`, `format`, `secretHeader`, and the event ids above.
+   * **Names never translated** — T9 knows them since 1.12 (`SAME_IN_EVERY_LANGUAGE`): `CLAUDE_CODE_OAUTH_TOKEN`,
+     `Secret Service`, `secret-tool`, `Slack`, `Discord`, `Microsoft Teams`, `Mattermost`, `Rocket.Chat`, `Telegram`,
+     `ntfy`, `BotFather`, `SMTP`, `STARTTLS`.
+   * **Your terms of 1.11 stay yours** — session, window, reset, quota, prompt, keep-warm, entry, record: a 1.12 key uses
+     the word your language chose for the same concept in 1.11.
+4. The questions 1.10's and 1.11's readers left for native speakers stay open: where a key of your list is one of them,
+   keep the value you have and say so.
+5. Your report opens with the line "Not a native speaker: the translations are an AI agent's." — then the branch and its
+   commit, the gates with their exit codes, and per language the counts (runtime keys translated and reviewed, manifest
+   keys), the words you chose for notification, alert, channel, Keychain, secret storage, webhook, cooldown and test
+   message, any false positive of the frame named with its key (not worked around), anything in the English that looked
+   wrong (reported, not changed), and the minutes it took.
+
+## Session names and product names in placeholders (1.12)
+
+Some placeholders receive a name, not a figure. The words around them are where 1.11's readers found the most defects —
+a gender, a case ending, a word read twice — and no test judges those, so this section names the keys (the test's list is
+`SESSION_NAME_KEYS` in `test/l10n.languages.test.ts`).
+
+A session's name comes in two forms:
+
+* **full** — "Session Tue 14:20 · 9d0eb37a" ("Session 9d0eb37a" where the session has no first line), your translation
+  of `Session {0} · {1}` and `Session {0}`: it begins with your word for session. The keys that receive it:
+  * `Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.`
+  * `Keep-warm line for {0} in {1} seconds, press to cancel`
+  * `Prompt cache of {0} cools in {1}`, `Prompt cache of {0} cools in {1}, and {2} more`,
+    `Prompt cache of {0} cools in about {1} (estimated)`, `Prompt cache of {0} cools in about {1} (estimated), and {2} more`
+  * `{0} · prompt cache warm · cools in {1} (1 h TTL)`, `{0} · prompt cache warm · cools in ~{1} (1 h TTL, estimated from the transcript)`,
+    `{0} · prompt cache cools in {1} (1 h TTL)`, `{0} · prompt cache cools in ~{1} (1 h TTL, estimated from the transcript)`,
+    `{0} · prompt cache cold since {1} (1 h TTL)`, `{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)`
+* **short** — "Tue 14:20 · 9d0eb37a", a time and an id without a word: the Records' lines, whose key names the session
+  itself — `Longest session {0}: {1}`, `Largest session {0}: {1}`.
+
+Each receives the name in its `{0}` — the keep-warm tooltip alone in its `{1}`.
+
+1. In a **full** key never write your word for session before the placeholder: the name brings it, and the word would
+   read twice ("Session Session Tue 14:20 …").
+2. An adjective, a pronoun or a verb that refers to the session agrees with **your word for session** — its gender and
+   its number (1.11: a Greek tooltip whose pronoun did not agree with the Greek word for session).
+3. **A case ending cannot attach to a placeholder.** Where your grammar would inflect the name, use a construction that
+   needs no case — the name in brackets, `({0})`, or as a label, `{0}:` (1.11: Russian, Czech, Polish, Ukrainian).
+4. **A product-name placeholder** — the notifications' `{0}`, which is Claude Code or Codex — is a name: never
+   translated, never inflected; rule 3's constructions where your grammar wants a case.
+5. Your list's `why` for such a key says which form its placeholder carries.
+
 ## The gates
 
 ```
@@ -324,7 +403,9 @@ each failure names the language, the file and the key:
 * **T9 · No English left** — once placeholders, code, paths, model ids and the words of
   `SAME_IN_EVERY_LANGUAGE` (the names above, the abbreviations `API`, `USD`, `CSV`, `JSON`, `TTL`,
   `ID`, `HTTP`, `TLS`, `OAuth`, `CLI`, `P90`, `CV`, `ctx`, the units, `Quick Pick`, the literal command
-  `codex app-server` and the colour ids `paceWarn` and `paceAhead`) are taken out:
+  `codex app-server`, the colour ids `paceWarn` and `paceAhead`, and from 1.12 on the names of
+  [1.12: your pending list](#112-your-pending-list)) are taken out — a name of several words also where a line break
+  splits it (1.12):
   in a Latin-script language a key of three words or more is never its own translation and no four
   words of the key stand in a row in the value; in Japanese, Korean, Chinese, Russian — and from 1.11
   on Ukrainian, Greek and Hindi — no value keeps three Latin words in a row — a `×` or `÷` between two

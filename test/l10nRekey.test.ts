@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
+import { LANGUAGE_IDS } from '../src/languages'
 import { pendingNlsKeys, ROOT } from './helpers/nls'
 
 const REKEY = join(ROOT, 'scripts', 'l10n-rekey.mjs')
@@ -375,22 +376,26 @@ test('the tests\' helper reads a language\'s pending manifest keys, and none whe
   assert.deepEqual([...pendingNlsKeys('ja', dir)], [])
 })
 
-test('the repository\'s ledger: 1.10\'s started at e72057a (1123 t() keys, 295 manifest keys), 1.11\'s at b89ff43 (1197, 297), one line each —, a list exists only for the twelve languages beyond English and German, each at the ledger\'s end, and none of these files ships (1.10 P1; 1.11 P1)', () => {
+test('the repository\'s ledger: 1.10\'s started at e72057a (1123 t() keys, 295 manifest keys), 1.11\'s at b89ff43 (1197, 297), 1.12\'s at d39c2df (1240, 309), one line each —, a list exists only for a language of the registry beyond English and German, each at the ledger\'s end, and none of these files ships (1.10 P1; 1.11 P1; 1.12 P1)', () => {
   const base = read<{ v: number; base: string; keys: Record<string, string[]>; nls: Table }>(ROOT, 'l10n/rekey-base.json')
   const ledger = read<{ v: number; base: string; entries: Entry[] }>(ROOT, 'l10n/rekey.json')
   assert.deepEqual([base.v, base.base], [1, ledger.base])
   // 1.10 P1 wrote the base from the 1.9.0 release commit, 1.11 P1 from the 1.10.0 one (--start b89ff43, which emptied the
-  // ledger: 1.10's 115 entries are in the history at b89ff43). A later version's --start writes its own, and its pin here.
-  const counts: Record<string, [number, number]> = { e72057a: [1123, 295], b89ff43: [1197, 297] }
+  // ledger: 1.10's 115 entries are in the history at b89ff43), 1.12 P1 from the 1.11.0 one (--start d39c2df: 1.11's 67
+  // entries are in the history at d39c2df). A later version's --start writes its own, and its pin here.
+  const counts: Record<string, [number, number]> = { e72057a: [1123, 295], b89ff43: [1197, 297], d39c2df: [1240, 309] }
   assert.ok(Object.prototype.hasOwnProperty.call(counts, base.base), `the base ${base.base} has no pin here — add its counts`)
   assert.deepEqual([Object.keys(base.keys).length, Object.keys(base.nls).length], counts[base.base])
   // The base file is what --start writes: one line per key and per manifest key.
   assert.equal(text(ROOT, 'l10n/rekey-base.json').split('\n').length, Object.keys(base.keys).length + Object.keys(base.nls).length + 9)
-  // A list for each language that has not finished its work (P1 wrote twelve at cursor 0; a language's package deletes its own).
-  const twelve = ['cs', 'es', 'fr', 'it', 'ja', 'ko', 'pl', 'pt-br', 'ru', 'tr', 'zh-cn', 'zh-tw']
+  // A list for each language that has not finished its work (a language's package deletes its own). 1.12 P1 (pinned and
+  // changed: the twelve 1.10 languages of 1.11's lists): --start d39c2df wrote one at cursor 0 for each of the twenty-four
+  // languages of the registry beyond English and German.
+  const languages: readonly string[] = LANGUAGE_IDS.filter((id) => id !== 'en' && id !== 'de')
+  assert.equal(languages.length, 24)
   const dir = join(ROOT, 'l10n', 'pending')
   const ids = existsSync(dir) ? readdirSync(dir).map((f) => f.replace(/\.json$/, '')).sort() : []
-  assert.deepEqual(ids.filter((id) => !twelve.includes(id)), [], 'a pending list for English, German or no language')
+  assert.deepEqual(ids.filter((id) => !languages.includes(id)), [], 'a pending list for English, German or no language')
   for (const id of ids) assert.equal(read<Pending>(ROOT, `l10n/pending/${id}.json`).applied, ledger.entries.length, id)
   // .vscodeignore ships nothing under l10n/ but the bundles.
   const negations = text(ROOT, '.vscodeignore').split('\n').filter((l) => l.startsWith('!l10n'))

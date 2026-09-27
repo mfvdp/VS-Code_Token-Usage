@@ -52,6 +52,12 @@
  * again at 1.10.0's release commit (l10n-rekey.mjs --start b89ff43), and PENDING_ALLOWED was true until 1.11's join
  * (P8 set it false).
  *
+ * 1.12 E1 (P1): the English changes again while 1.12's code is written, for all twenty-four languages at once: the ledger
+ * started at 1.11.0's release commit (l10n-rekey.mjs --start d39c2df) with a list at cursor 0 for each, and
+ * PENDING_ALLOWED is true until 1.12's join (P10). Before a single 1.12 text is written, T9 learned the names those texts
+ * carry (NAMES_OF_1_12) and to read a name of several words across a line break (D4), and SESSION_NAME_KEYS lists the keys
+ * whose placeholder receives a session's name — held to the code by a scan of every t() call and named in the brief (D10).
+ *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
  * temporary directory: a copy of the German under another id (a Latin-script language), a
@@ -97,6 +103,29 @@ export const ADDED_AT_THE_JOIN: ReadonlyArray<readonly [string, string]> = [
   ['codex app-server', 'the literal command Token Pace starts — the bundle key "• Codex — the local …codex app-server… is started …", config.codexQuotaSources.enum.poll, config.codexAppServer.mode.enum.oneShot and .persistent (ja, ko, zh-cn, zh-tw, ru)'],
   ['paceWarn', 'a contributed theme colour id — config.colorMode.enum.theme lists `tokenPace.paceOk / paceWarn / paceAhead / stale` (ja, ko, zh-cn, zh-tw, ru)'],
   ['paceAhead', 'a contributed theme colour id — config.colorMode.enum.theme, as paceWarn'],
+]
+
+/**
+ * 1.12 E1 rule 2 (P1): the names 1.12's texts carry — the credentials cascade's (B), the notifications' channels and
+ * protocols (C) —, added before a single one of those texts is written, each with its reason: without them T9 reads them as
+ * English left (in a language of another script a run of three Latin words — `Microsoft Teams` beside one more name is
+ * three; in a Latin one four of the key's words in a row). A package whose English names another adds it here, named,
+ * with its reason (§3 E1 rule 2); the brief's 1.12 section names every one.
+ */
+export const NAMES_OF_1_12: ReadonlyArray<readonly [string, string]> = [
+  ['CLAUDE_CODE_OAUTH_TOKEN', 'an environment variable\'s name — the credentials cascade\'s first source (§3 B1)'],
+  ['Secret Service', 'freedesktop\'s service, the store Linux\'s `secret-tool` reads (§3 B1, §7 Q8)'],
+  ['secret-tool', 'a command\'s name (libsecret\'s tool on Linux)'],
+  ['Slack', 'a service\'s name — a webhook preset (§3 C1)'],
+  ['Discord', 'a service\'s name — a webhook preset (§3 C1)'],
+  ['Microsoft Teams', 'a product\'s name — a webhook preset (§3 C1)'],
+  ['Mattermost', 'a service\'s name — a webhook preset (§3 C1)'],
+  ['Rocket.Chat', 'a service\'s name — a webhook preset (§3 C1)'],
+  ['Telegram', 'a service\'s name — a channel (§3 C1)'],
+  ['ntfy', 'a service\'s name, written in lower case — a channel (§3 C1)'],
+  ['BotFather', 'Telegram\'s bot that makes a bot and its token — a name (§3 C1)'],
+  ['SMTP', 'a protocol\'s name — the e-mail channel (§3 C10)'],
+  ['STARTTLS', 'a protocol command\'s name — the e-mail channel\'s security (§3 C10)'],
 ]
 
 /**
@@ -158,6 +187,8 @@ export const SAME_IN_EVERY_LANGUAGE: ReadonlyArray<readonly [string, string]> = 
   // 1.11 L3 (the lead, at the merge — ADDED_AT_THE_JOIN): VS Code's command title, kept in English where VS Code has no
   // language pack for the reader's language (uk, el; hi), so that the Command Palette shows the title the sentence names.
   ['Configure Display Language', 'a command title of VS Code, kept in English where VS Code has no pack for the language'],
+  // 1.12 P1 (§3 E1 rule 2): the names 1.12's texts carry (above).
+  ...NAMES_OF_1_12,
 ]
 
 /**
@@ -195,8 +226,11 @@ export const NLS_SPANS_READ_AS_WORDS: ReadonlyArray<readonly [string, string]> =
  * twelve 1.10 languages; 1.11's join (P8) sets it false. test/languages.test.ts's join test reads this line.
  * 1.11 P8: false — group N wrote the twelve new languages whole, group O worked the twelve 1.10 lists to the ledger's end
  * and deleted them; no list is left, and every rule holds every key of all twenty-four languages and German again.
+ * 1.12 P1: true again — `l10n-rekey.mjs --start d39c2df` (the 1.11.0 release) started 1.12's ledger with a list at cursor
+ * 0 for each of the twenty-four languages beyond English and German (every one has its files since 1.11's join); 1.12's
+ * join (P10) sets it false. test/languages.test.ts's join test reads this line.
  */
-export const PENDING_ALLOWED: boolean = false
+export const PENDING_ALLOWED: boolean = true
 
 /**
  * 1.11 A3 rule 11 (b): a language name a language writes as the English does — `[id, English name, reason]`. T10
@@ -206,6 +240,73 @@ export const PENDING_ALLOWED: boolean = false
  * run its tests twice).
  */
 export { LANGUAGE_NAME_AS_ENGLISH }
+
+/**
+ * 1.12 D10 (RL-brief-1, P1): the t() keys with a placeholder that receives a session's name — `[key, placeholder, form]`.
+ * `full` is the name the Agents tree gives a session, beginning with the word for session: `sessionName` ("Session Tue
+ * 14:20 · 9d0eb37a"), or `sessionIdName` ("Session 9d0eb37a") where the session has no first line; `short` is
+ * `sessionShortName` ("Tue 14:20 · 9d0eb37a", 1.11's pre-freeze fix), for the Records, whose key says "session" itself.
+ * 1.11's Review L found what a translation does wrong here — a word for session written before a full name (it reads
+ * twice), an adjective or a pronoun that does not agree with the language's word for session (el), a case ending that
+ * cannot attach to a placeholder (ru, cs, pl, uk) —, and no pattern judges gender or case (§7a Q27: no rule, a list): the
+ * brief names every key of this list ("Session names and product names in placeholders"), and a test finds the list's
+ * keys by the calls whose arguments carry a name (SESSION_NAME_CARRIERS). A package that adds such a key adds it here and
+ * says so in its ledger `why`.
+ */
+export const SESSION_NAME_KEYS: ReadonlyArray<readonly [string, string, 'full' | 'short']> = [
+  // keepWarmHost.ts, the keep-warm countdown: the tooltip and the screen reader's label (1.11 R4: el's gender; R8: the case
+  // after a placeholder, ru and cs).
+  ['Token Pace will type “{0}” into the terminal that runs {1} and press Enter, so that its prompt cache stays warm. Click to cancel.', '{1}', 'full'],
+  ['Keep-warm line for {0} in {1} seconds, press to cancel', '{0}', 'full'],
+  // statusText.ts, the prompt-cache entry's screen-reader label (1.11 R8: the case after a placeholder, ru and uk).
+  ['Prompt cache of {0} cools in {1}', '{0}', 'full'],
+  ['Prompt cache of {0} cools in {1}, and {2} more', '{0}', 'full'],
+  ['Prompt cache of {0} cools in about {1} (estimated)', '{0}', 'full'],
+  ['Prompt cache of {0} cools in about {1} (estimated), and {2} more', '{0}', 'full'],
+  // cacheWatch.ts, a session's prompt-cache line — the card and the entry's tooltip (found by P1's scan, beyond the six
+  // Review L named).
+  ['{0} · prompt cache warm · cools in {1} (1 h TTL)', '{0}', 'full'],
+  ['{0} · prompt cache warm · cools in ~{1} (1 h TTL, estimated from the transcript)', '{0}', 'full'],
+  ['{0} · prompt cache cools in {1} (1 h TTL)', '{0}', 'full'],
+  ['{0} · prompt cache cools in ~{1} (1 h TTL, estimated from the transcript)', '{0}', 'full'],
+  ['{0} · prompt cache cold since {1} (1 h TTL)', '{0}', 'full'],
+  ['{0} · prompt cache cold since ~{1} (1 h TTL, estimated from the transcript)', '{0}', 'full'],
+  // textViews.ts, the Records' Quick Pick lines (1.11 B2, the pre-freeze fix).
+  ['Longest session {0}: {1}', '{0}', 'short'],
+  ['Largest session {0}: {1}', '{0}', 'short'],
+]
+
+/**
+ * 1.12 D10 rule 2: where a session's name reaches a t() argument — `[file, expression, form, where the name comes from]`.
+ * No t() call takes `sessionName(…)` or `sessionShortName(…)` itself: the name is made once and carried in a field, and
+ * these are the expressions a call passes it by. The test scans every t() call of src/ with the TypeScript parser: a call
+ * whose argument holds one of these expressions (in its file), or a call of the three name functions, is a key of
+ * SESSION_NAME_KEYS, and every key of the list is found so. The name functions' own call sites are pinned beside it
+ * (SESSION_NAME_SOURCES): a new one is a name that may reach a t() argument by another expression.
+ */
+export const SESSION_NAME_CARRIERS: ReadonlyArray<readonly [string, string, 'full' | 'short', string]> = [
+  ['src/keepWarmHost.ts', 'c.name', 'full', 'the countdown\'s `name`, a CacheWatchEntry\'s (cacheWatch.ts)'],
+  ['src/statusText.ts', 'first.name', 'full', 'the first CacheWatchEntry\'s `name` (cacheWatch.ts)'],
+  ['src/cacheWatch.ts', 'e.name', 'full', 'a CacheWatchEntry\'s `name` — `sessionName`, or `sessionIdName` without a first line'],
+  ['src/textViews.ts', 's.name', 'short', 'a SessionRecord\'s `name` (stats.ts `words.sessionName`, which viewModel.ts binds to `sessionShortName`)'],
+]
+
+/**
+ * 1.12 D10 rule 2: the calls of the name functions in src/ — `[file, callee, count]`, the definitions and comments not
+ * counted. As a grep: grep -rnoE "\b(sessionName|sessionShortName|sessionIdName)\(" src --include=*.ts, less the three
+ * `function` lines and the comments. Each call's name goes where the comment says; a new call is a name to trace.
+ */
+export const SESSION_NAME_SOURCES: ReadonlyArray<readonly [string, string, number]> = [
+  // sessionName's own fallback, and the Agents tree's session row (`label`, `fullLabel`, `idName`: markup, no t()).
+  ['src/agentTreeBuild.ts', 'sessionIdName', 2],
+  ['src/agentTreeBuild.ts', 'sessionName', 1],
+  // A CacheWatchEntry's `name` — SESSION_NAME_CARRIERS' c.name, first.name and e.name.
+  ['src/cacheWatch.ts', 'sessionIdName', 1],
+  ['src/cacheWatch.ts', 'sessionName', 1],
+  // A SessionRecord's `name` — the Records' tables (markup, no t()) and SESSION_NAME_CARRIERS' s.name.
+  ['src/stats.ts', 'sessionName', 1],
+  // The preview's entries (statusText.ts previewCache) name their sessions with t('Session {0}', …) — the full form.
+]
 
 // ---------------------------------------------------------------------------
 // What a language is measured against: the English source and the German reference
@@ -420,13 +521,19 @@ const jsonBlocks = (s: string): string[] => [...s.matchAll(/```json\n([\s\S]*?)`
 const paragraphs = (s: string): number => s.split('\n\n').length
 
 const reEsc = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * 1.12 D4 (L1-O2): a name of SAME_IN_EVERY_LANGUAGE as a pattern that takes any run of whitespace for each of its spaces —
+ * a hard-wrapped text ("…as Claude\nCode's status line", the status-line consent's English) breaks a name where the
+ * line ends, and "Claude\nCode" is the name "Claude Code" still, never the name Claude and the English word Code.
+ */
+const namePattern = (name: string): string => reEsc(name).replace(/ /g, '\\s+')
 
 /**
  * What stands in a text as code or as a name, never as a word of its language: fences, backtick
  * spans, placeholders, addresses, command targets, setting ids and links, codicons, paths, file
  * names, model ids, the fixed forms that start with a digit (`2h14m`, `12.5K`, a hash) and the words
- * of SAME_IN_EVERY_LANGUAGE. T9 takes these out before it compares; the pseudo-translation keeps
- * them as they are.
+ * of SAME_IN_EVERY_LANGUAGE — a name of several words also across a line break (1.12 D4). T9 takes these out before it
+ * compares; the pseudo-translation keeps them as they are.
  */
 const PROTECTED = new RegExp([
   '```[\\s\\S]*?```',
@@ -441,7 +548,7 @@ const PROTECTED = new RegExp([
   '[\\w.<>-]*\\.(?:jsonl?|md|m?js|ts|lock|key|csv|toml|txt|log|vsix|sh|ps1|exe)\\b[\\w.<>-]*',
   '\\b(?:claude|gpt|codex|o\\d)-[\\w.-]+',
   '\\d[\\w.,:]*',
-  `(?<![\\p{L}\\p{N}])(?:${[...SAME_IN_EVERY_LANGUAGE.map(([w]) => w)].sort((a, b) => b.length - a.length).map(reEsc).join('|')})(?![\\p{L}\\p{N}])`,
+  `(?<![\\p{L}\\p{N}])(?:${[...SAME_IN_EVERY_LANGUAGE.map(([w]) => w)].sort((a, b) => b.length - a.length).map(namePattern).join('|')})(?![\\p{L}\\p{N}])`,
 ].join('|'), 'gu')
 
 /** The words of a text once its code and names are out: runs of letters, two or more. */
@@ -964,10 +1071,10 @@ test('the frame runs over the languages on disk — German among them — and En
   assert.ok(ON_DISK.includes('de'), `no German files found: ${J(ON_DISK)}`)
   assert.equal(ON_DISK.includes('en'), false)
   // 1.11 P8 (A8): at the join the frame measures every language of the registry but English — German and the twenty-four.
-  if (!PENDING_ALLOWED) {
-    assert.deepEqual(ON_DISK, LANGUAGE_IDS.filter((id) => id !== 'en'))
-    assert.equal(ON_DISK.length, 25)
-  }
+  // 1.12 P1 (pinned and changed: at the join only): every language has its files since 1.11's join, and 1.12's lists at
+  // cursor 0 take none away — the frame measures the twenty-five on the build branch too.
+  assert.deepEqual(ON_DISK, LANGUAGE_IDS.filter((id) => id !== 'en'))
+  assert.equal(ON_DISK.length, 25)
   // 1.10 B1 (pinned and changed: thirteen rules): T14, the pending list, runs over every language too.
   // 1.10 B3 (pinned and changed: fourteen rules): T15, the bar's examples, too — and over the English (below).
   assert.deepEqual(Object.keys(RULES), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12', 'T13', 'T14', 'T15'])
@@ -1991,4 +2098,212 @@ test('the brief\'s 1.11 sections: a new language, whole — the files, the regis
   }
   // The ids a package may own: the registry's twenty-six, the twelve new ones among them.
   for (const [id] of NEW_IN_1_11) assert.ok(flat.includes(`\`${id}\``), `the brief's file table does not name ${id}`)
+})
+
+// ---------------------------------------------------------------------------
+// 1.12 P1: the frame for 1.12's texts — the names they carry, a name across a line break, the session-name placeholders
+// ---------------------------------------------------------------------------
+
+test('T9 takes a name of several words across any run of whitespace — "Claude\\n  Code" is Claude Code, never the name Claude and the English word Code; every name of SAME_IN_EVERY_LANGUAGE so (1.12 D4, L1-O2)', () => {
+  assert.deepEqual(wordsOf('Der Claude\n  Code-Client'), ['Der', 'Client'])
+  assert.deepEqual(wordsOf('Der Claude Code-Client'), ['Der', 'Client'])
+  // The status-line consent's English breaks the name at a line's end: its words hold neither half of it.
+  const consent = keyWhere((k) => /Claude\nCode's status line/.test(k))
+  assert.equal(wordsOf(consent).some((w) => w === 'Code'), false, 'the consent\'s "Claude\\nCode" leaves the word Code')
+  // Every name of several words, split by a line break, an indented one, a no-break space: no word of it is left.
+  const spaced = SAME_IN_EVERY_LANGUAGE.map(([w]) => w).filter((w) => w.includes(' '))
+  assert.ok(spaced.length >= 10, `only ${spaced.length} names of several words`)
+  for (const name of spaced) {
+    for (const gap of ['\n', '\n  ', ' ', ' \n']) {
+      const text = `語 ${name.replace(/ /g, gap)} 語`
+      assert.deepEqual(wordsOf(text), [], `${J(text)} leaves a word`)
+      assert.equal(nonLatinLeft(`語 ${name.replace(/ /g, gap)} 語 x`), null, `${J(text)}: T9 reads the name as English`)
+    }
+  }
+  // The pseudo-translation keeps a name split by a line break as it is, the words around it turned (the `s` stays: a unit).
+  assert.equal(pseudo('as Claude\nCode\'s status line'), '語 Claude\nCode\'s 語 語')
+  assert.equal(pseudo('as Visual\n  Studio Code runs'), '語 Visual\n  Studio Code 語')
+  // A space is still no name: two words of a name, each in a text of its own, are what they are.
+  assert.deepEqual(wordsOf('Quick\n\nnotes, Pick up'), ['Quick', 'notes', 'Pick', 'up'])
+})
+
+test('T9: the names 1.12\'s texts carry are in SAME_IN_EVERY_LANGUAGE, each with its reason — the credentials\' environment variable, service and command, the channels\' services, the protocols (1.12 E1 rule 2)', () => {
+  assert.deepEqual(NAMES_OF_1_12.map(([w]) => w), ['CLAUDE_CODE_OAUTH_TOKEN', 'Secret Service', 'secret-tool', 'Slack', 'Discord',
+    'Microsoft Teams', 'Mattermost', 'Rocket.Chat', 'Telegram', 'ntfy', 'BotFather', 'SMTP', 'STARTTLS'])
+  const names = SAME_IN_EVERY_LANGUAGE.map(([w]) => w)
+  assert.equal(new Set(names).size, names.length, 'a name stands twice in SAME_IN_EVERY_LANGUAGE')
+  for (const [name, why] of NAMES_OF_1_12) {
+    assert.ok(names.includes(name), `${name} is not in SAME_IN_EVERY_LANGUAGE`)
+    assert.ok(why.trim().length > 10, `${name}: no reason`)
+    // Taken out whole, in a Latin text and in a text of another script, at a line's end too.
+    assert.deepEqual(wordsOf(`vor ${name} nach`), ['vor', 'nach'], name)
+    assert.equal(nonLatinLeft(`語 ${name} 語 ${name.replace(/ /g, '\n')} 語`), null, name)
+  }
+  // Three of them in a row are three names, not English left, in a language of another script; three words beside them
+  // that no list names still are.
+  assert.equal(nonLatinLeft('語 Slack、Discord、Microsoft Teams 語 SMTP STARTTLS 語'), null)
+  assert.match(nonLatinLeft('語 Slack or Signal and WhatsApp 語') ?? '', /three Latin words in a row: "or Signal and"/)
+})
+
+/** 1.12 D10 rule 2: every t() call of src/ with its arguments' source, and the calls of the name functions — read by the TypeScript parser, as scripts/l10n-extract.mjs reads the keys. */
+interface SessionNameScan {
+  calls: Array<{ file: string; key: string; args: string[] }>
+  sources: Array<{ file: string; callee: string }>
+}
+const SESSION_NAME_SCAN = `
+const ts = require('typescript')
+const fs = require('fs')
+const path = require('path')
+const root = process.cwd()
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name))
+  : e.name.endsWith('.ts') && !e.name.endsWith('.d.ts') ? [path.join(d, e.name)] : []).sort()
+const importsT = (sf) => sf.statements.some((s) => ts.isImportDeclaration(s) && ts.isStringLiteral(s.moduleSpecifier)
+  && /(^|\\/)i18n$/.test(s.moduleSpecifier.text) && s.importClause && s.importClause.namedBindings
+  && ts.isNamedImports(s.importClause.namedBindings)
+  && s.importClause.namedBindings.elements.some((el) => el.name.text === 't' && (!el.propertyName || el.propertyName.text === 't')))
+const NAMES = new Set(['sessionName', 'sessionShortName', 'sessionIdName'])
+const out = { calls: [], sources: [] }
+for (const file of walk(path.join(root, 'src'))) {
+  const label = path.relative(root, file).split(path.sep).join('/')
+  const sf = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const withT = importsT(sf)
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      const c = node.expression
+      const name = ts.isIdentifier(c) ? c.text : ts.isPropertyAccessExpression(c) ? c.name.text : ''
+      const first = node.arguments[0]
+      if (withT && ts.isIdentifier(c) && c.text === 't' && first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) {
+        out.calls.push({ file: label, key: first.text, args: node.arguments.slice(1).map((a) => a.getText(sf)) })
+      }
+      if (NAMES.has(name)) out.sources.push({ file: label, callee: name })
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+}
+process.stdout.write(JSON.stringify(out))
+`
+let sessionNameScanned: SessionNameScan | null = null
+function sessionNameScan(): SessionNameScan {
+  if (sessionNameScanned) return sessionNameScanned
+  const r = spawnSync(process.execPath, ['-e', SESSION_NAME_SCAN], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  assert.equal(r.status, 0, `the scan of src/ failed:\n${r.stderr}`)
+  sessionNameScanned = JSON.parse(r.stdout) as SessionNameScan
+  return sessionNameScanned
+}
+
+/** The keys a scan finds: a call whose argument holds a carrier of its file, or a call of a name function — `key\u0000{n}\u0000form`. */
+function sessionNameKeysOf(scan: SessionNameScan, carriers: ReadonlyArray<readonly [string, string, 'full' | 'short', string]>): string[] {
+  const found = new Set<string>()
+  for (const c of scan.calls) {
+    c.args.forEach((arg, i) => {
+      for (const [file, expr, form] of carriers) {
+        if (c.file === file && new RegExp(`(?<![\\w$.])${reEsc(expr)}(?![\\w$])`).test(arg)) found.add(`${c.key}\u0000{${i}}\u0000${form}`)
+      }
+      const direct = /\b(sessionName|sessionShortName|sessionIdName)\s*\(/.exec(arg)
+      if (direct) found.add(`${c.key}\u0000{${i}}\u0000${direct[1] === 'sessionShortName' ? 'short' : 'full'}`)
+    })
+  }
+  return [...found].sort()
+}
+
+test('SESSION_NAME_KEYS: every key a t() key of src/ that holds its placeholder, and exactly the keys whose placeholder a session\'s name reaches — found by a scan of every t() call of src/ for the expressions that carry a name; the name functions\' calls pinned (1.12 D10 rules 1, 2)', () => {
+  const s = src()
+  const keys = SESSION_NAME_KEYS.map(([k]) => k)
+  assert.equal(new Set(keys).size, keys.length, 'a key stands twice in SESSION_NAME_KEYS')
+  for (const [key, ph, form] of SESSION_NAME_KEYS) {
+    assert.ok(s.keys.includes(key), `${J(key)} is no t() key of src/ (any more)`)
+    assert.ok(/^\{\d\}$/.test(ph) && key.includes(ph), `${J(key)} does not hold ${ph}`)
+    assert.ok(form === 'full' || form === 'short', `${J(key)}: ${form}`)
+  }
+  // Review L named eight: the keep-warm tooltip's {1}, its screen-reader label's {0}, the four prompt-cache labels, the
+  // Records' two. The scan found six more — a session's prompt-cache line.
+  assert.deepEqual([SESSION_NAME_KEYS.length, SESSION_NAME_KEYS.filter(([, , f]) => f === 'short').length], [14, 2])
+  const scan = sessionNameScan()
+  assert.ok(scan.calls.length >= 1000, `the scan read only ${scan.calls.length} t() calls`)
+  // The scan and the list: the same keys, the same placeholders, the same forms.
+  assert.deepEqual(sessionNameKeysOf(scan, SESSION_NAME_CARRIERS), SESSION_NAME_KEYS.map(([k, ph, f]) => `${k}\u0000${ph}\u0000${f}`).sort())
+  // Every carrier carries: a carrier no call uses is stale, and one in a file that does not have it is a typo.
+  for (const carrier of SESSION_NAME_CARRIERS) {
+    assert.ok(sessionNameKeysOf(scan, [carrier]).length > 0, `no t() call of ${carrier[0]} passes ${carrier[1]}`)
+    assert.ok(carrier[3].length > 10, `${carrier[1]}: no source named`)
+  }
+  // No t() call passes a name function's result itself (the grep of D10 rule 2 finds none).
+  assert.deepEqual(scan.calls.filter((c) => c.args.some((a) => /\bsession(?:Short|Id)?Name\s*\(/.test(a))).map((c) => c.key), [])
+  // The name functions' calls: where a session's name is made. A new one is a name that may reach a t() argument by an
+  // expression this test does not know — trace it, then add its carrier and its keys.
+  const counts = new Map<string, number>()
+  for (const x of scan.sources) counts.set(`${x.file} ${x.callee}`, (counts.get(`${x.file} ${x.callee}`) ?? 0) + 1)
+  assert.deepEqual([...counts.entries()].sort(), SESSION_NAME_SOURCES.map(([f, c, n]): [string, number] => [`${f} ${c}`, n]).sort())
+})
+
+test('SESSION_NAME_KEYS\' scan catches a key it does not list, a key it lists that no name reaches, and a name passed by a new expression (1.12 D10 rule 2)', () => {
+  const scan = sessionNameScan()
+  const listed = SESSION_NAME_KEYS.map(([k, ph, f]) => `${k}\u0000${ph}\u0000${f}`).sort()
+  // A carrier gone: its keys are no longer found, and the list names more than the scan.
+  const without = SESSION_NAME_CARRIERS.filter(([, expr]) => expr !== 's.name')
+  assert.deepEqual(listed.filter((k) => !sessionNameKeysOf(scan, without).includes(k)).map((k) => k.split('\u0000')[0]), ['Largest session {0}: {1}', 'Longest session {0}: {1}'])
+  // A t() call that passes a session's name by a carrier, or by a name function itself: the scan finds a key the list lacks.
+  const extra: SessionNameScan = {
+    calls: [...scan.calls, { file: 'src/cacheWatch.ts', key: 'New line for {0}', args: ['e.name'] },
+      { file: 'src/stats.ts', key: 'Short {0} and {1}', args: ['n', 'sessionShortName(id, start, now, tcfg)'] }],
+    sources: scan.sources,
+  }
+  const more = sessionNameKeysOf(extra, SESSION_NAME_CARRIERS).filter((k) => !listed.includes(k))
+  assert.deepEqual(more, ['New line for {0}\u0000{0}\u0000full', 'Short {0} and {1}\u0000{1}\u0000short'])
+  // The carrier is read in its own file only: `e.name` of another file is another thing.
+  const elsewhere: SessionNameScan = { calls: [{ file: 'src/alerts.ts', key: 'Rule {0}', args: ['e.name'] }], sources: [] }
+  assert.deepEqual(sessionNameKeysOf(elsewhere, SESSION_NAME_CARRIERS), [])
+})
+
+test('the brief\'s 1.12 sections: your pending list — the ledger\'s start, the gates, notifications on a lock screen, alert ≠ notification, the hard wraps, the Keychain and "Always Allow", the chips, the budget example, the ellipsis, "record", the backtick names, the names of 1.12, the terms of 1.11, the report; and the session names — every key of SESSION_NAME_KEYS, the two forms, the four rules (1.12 E1 rule 4, D10 rule 3)', () => {
+  const brief = readFileSync(join(ROOT, 'l10n', 'TRANSLATING.md'), 'utf8')
+  const flat = brief.replace(/\s+/g, ' ')
+  const list = flat.indexOf('## 1.12: your pending list')
+  const names = flat.indexOf('## Session names and product names in placeholders (1.12)')
+  const gates = flat.indexOf('## The gates')
+  assert.ok(flat.indexOf('## 1.11: your pending list') < list && list < names && names < gates, 'the brief lacks its two 1.12 sections after 1.11\'s, before the gates')
+  const a = flat.slice(list, names)
+  for (const needed of [
+    // The ledger, the list, the gates.
+    'node scripts/l10n-rekey.mjs --start d39c2df', 'the twenty-four languages beyond English and German',
+    '[the 1.10 section](#working-through-your-pending-list-110)', 'node scripts/l10n-rekey.mjs --print <id>', '`translate`', '`review`',
+    'node scripts/merge-l10n.mjs', 'node scripts/nls-sources.mjs <id>', '[1.11: a new language, whole](#111-a-new-language-whole)',
+    'test ! -e l10n/pending/<id>.json',
+    // What is new (§3 E1 rule 4).
+    'a phone\'s lock screen: keep them short', 'product name', '(#session-names-and-product-names-in-placeholders-112)',
+    '**Alert ≠ notification.**', '`configuration.alerts.title`', 'must differ', 'in-editor popup',
+    'hard wraps', 'Apple\'s name', '`Claude Code-credentials`', '"Always Allow"', 'macOS\'s own label', 'keep the English between your quotation marks',
+    '"week to date" and "month to date"', 'the word you carried stays unless it is wrong',
+    '`config.statusBar.show.enum.budget`', 'T15', 'the English\'s spacing of `…` is not a rule for your language',
+    '**"record"** only for a personal best', '(T5)',
+    '`chatId`', '`server`', '`host`', '`port`', '`security`', '`user`', '`from`', '`to`', '`format`', '`secretHeader`',
+    '`agentWaiting`', '`agentDone`', '`quotaThreshold`', '`quotaExhausted`', '`quotaReset`', '`paceWarning`',
+    '`SAME_IN_EVERY_LANGUAGE`', 'session, window, reset, quota, prompt, keep-warm, entry, record',
+    'stay open', 'keep the value you have and say so',
+    // The report.
+    'Not a native speaker: the translations are an AI agent\'s.', 'exit codes',
+    'notification, alert, channel, Keychain, secret storage, webhook, cooldown and test message',
+    'false positive of the frame named with its key', 'reported, not changed', 'minutes',
+  ]) assert.ok(a.includes(needed), `the brief's "1.12: your pending list" does not say: ${needed}`)
+  for (const [name] of NAMES_OF_1_12) assert.ok(a.includes(`\`${name}\``), `the brief's 1.12 section does not name ${name}`)
+  const b = flat.slice(names, gates)
+  for (const needed of [
+    '`SESSION_NAME_KEYS`', '**full**', '**short**', '"Session Tue 14:20 · 9d0eb37a"', '"Session 9d0eb37a"', '"Tue 14:20 · 9d0eb37a"',
+    '`Session {0} · {1}`', '`Session {0}`', 'the keep-warm tooltip alone in its `{1}`',
+    'never write your word for session before the placeholder', 'read twice',
+    'agrees with **your word for session**', 'gender', 'Greek',
+    '**A case ending cannot attach to a placeholder.**', '`({0})`', '`{0}:`', 'Russian, Czech, Polish, Ukrainian',
+    '**A product-name placeholder**', 'Claude Code or Codex', 'never translated, never inflected',
+    'which form its placeholder carries',
+  ]) assert.ok(b.includes(needed), `the brief's session names section does not say: ${needed}`)
+  // Every key of the list, whole, in backticks — in its form's paragraph.
+  const full = b.slice(b.indexOf('**full**'), b.indexOf('**short**'))
+  const short = b.slice(b.indexOf('**short**'))
+  for (const [key, , form] of SESSION_NAME_KEYS) {
+    assert.ok((form === 'full' ? full : short).includes(`\`${key}\``), `the brief does not name the ${form} key ${J(key)}`)
+  }
+  // The T9 rule's paragraph points to the 1.12 names and says a name holds across a line break.
+  assert.ok(flat.includes('from 1.12 on the names of [1.12: your pending list](#112-your-pending-list)'))
+  assert.ok(flat.includes('a name of several words also where a line break splits it (1.12)'))
 })

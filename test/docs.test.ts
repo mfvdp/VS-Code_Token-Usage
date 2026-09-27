@@ -3703,10 +3703,12 @@ test('the pages carry the sentences of the documentation package, held to the co
   assert.equal(bundle('zh-tw').Prompts, '提示')
   for (const id of ['fr', 'es', 'pt-br', 'it', 'pl', 'cs']) assert.match(bundle(id).Prompts, /^Prompt/, `${id} does not keep the loanword`)
   assert.deepEqual([bundle('ja').Prompts, bundle('ko').Prompts, bundle('ru').Prompts], ['プロンプト', '프롬프트', 'Промпты'])
-  // No list of 1.10's ledger is left (1.11 P1, pinned and changed: no list at all) — from `--start b89ff43` on, the lists on
-  // disk are 1.11's, which its join empties (test/l10n.languages.test.ts T14 with PENDING_ALLOWED false).
+  // No list of an earlier version's ledger is left (1.11 P1, pinned and changed: no list at all; 1.12 P1, pinned and
+  // changed: 1.10's base e72057a alone) — from `--start b89ff43` on the lists on disk were 1.11's, which its join emptied,
+  // and from `--start d39c2df` on they are 1.12's, which its join empties (test/l10n.languages.test.ts T14 with
+  // PENDING_ALLOWED false).
   const ledgerBase = (JSON.parse(readDoc('l10n/rekey.json')) as { base: string }).base
-  assert.equal(ledgerBase === 'e72057a' && existsSync(join(ROOT, 'l10n/pending')) && readdirSync(join(ROOT, 'l10n/pending')).length > 0, false, 'a pending list of 1.10 is left')
+  assert.equal(['e72057a', 'b89ff43'].includes(ledgerBase) && existsSync(join(ROOT, 'l10n/pending')) && readdirSync(join(ROOT, 'l10n/pending')).length > 0, false, 'a pending list of 1.10 or 1.11 is left')
   // development.md: the ledger's `; ` rule as the script has it, the test seam as the code gates it.
   const dev = flatText(doc.development)
   assert.ok(dev.includes('A `why` never holds `; ` — the script joins the reasons of one key with it and splits on it again —, and `--check` refuses one.'))
@@ -3897,10 +3899,10 @@ test('the 1.11.0 release notes: the newest entry, its date set at publish, every
   for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION)` (\d+)/g)) {
     assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : AGENT_TABLES_REVISION, `the 1.11.0 entry says ${m[1]} ${m[2]}`)
   }
-  // The ledger's count is what the file holds, and its base is the 1.10.0 release.
-  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { base: string; entries: unknown[] }
-  assert.equal(ledger.base, 'b89ff43')
-  assert.ok(internal.includes(`1.11's holds ${ledger.entries.length} entries since the 1.10.0 release`), `the ledger holds ${ledger.entries.length} entries`)
+  // The ledger's count, and its base the 1.10.0 release. 1.12 P1 (pinned and changed: the count read from l10n/rekey.json,
+  // its base b89ff43): `l10n-rekey.mjs --start d39c2df` began 1.12's ledger and emptied the entries, so 1.11's count is
+  // history — the 67 entries of l10n/rekey.json at d39c2df (base b89ff43), a literal from here on.
+  assert.ok(internal.includes('1.11\'s holds 67 entries since the 1.10.0 release'), '1.11\'s ledger held 67 entries')
   assert.ok(internal.includes('197 values in 23 of the 24 languages'))
   // Claims the notes must not make: nothing beyond an AI agent's reading; no Codex send tried; no path, file, secret or date of the machine.
   for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i, /review/i, /tried with Codex/i, /tested with Codex/i]) {

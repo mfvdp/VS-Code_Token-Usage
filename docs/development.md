@@ -152,7 +152,8 @@ languages' files can follow it at once:
   why (`why`). One entry per line keeps a diff readable. A `why` never holds `; ` — the script joins the
   reasons of one key with it and splits on it again —, and `--check` refuses one.
 * `l10n/rekey-base.json` — the tree the ledger starts from (1.10's was `e72057a`, the 1.9.0 release: 1123
-  `t()` keys, 295 manifest keys; 1.11's is `b89ff43`, the 1.10.0 release: 1197 and 297): every `t()` key
+  `t()` keys, 295 manifest keys; 1.11's was `b89ff43`, the 1.10.0 release: 1197 and 297; 1.12's is `d39c2df`, the
+  1.11.0 release: 1240 and 309): every `t()` key
   with the German parts it stands in, and the first 16 hex digits of the SHA-256 of every `package.nls.json`
   value.
 * `l10n/pending/<id>.json` — per language beyond English and German: how many entries are applied to its
@@ -192,7 +193,9 @@ value: nothing is invented. A language without a pending list has done everythin
 records its manifest and deletes the list. The next version's first change of the English starts a new
 ledger. `--start` writes the new base and an empty ledger: the entries of the version before are not
 carried over — each is applied, no list of theirs is left, and they stay in the history (1.10's 115 at
-`b89ff43`). 1.11's ledger started at `b89ff43`, before its first English change.
+`b89ff43`, 1.11's 67 at `d39c2df`). 1.11's ledger started at `b89ff43`, before its first English change; 1.12's
+at `d39c2df` (`node scripts/l10n-rekey.mjs --start d39c2df`), with a list at cursor 0 for each of the twenty-four
+languages beyond English and German — every one has its files since 1.11.
 
 While lists exist (`PENDING_ALLOWED` in `test/l10n.languages.test.ts` is true), the frame reads them: T1
 and T2 let a key listed `translate` be absent, a manifest key on a list stays out of the rules that
@@ -230,6 +233,17 @@ marks of the NFC form, in which the Greek ano teleia is the separator `·`, and 
 language name the ledger has just added be missing while it is pending, and a name equal to the English
 stand only where `LANGUAGE_NAME_AS_ENGLISH` says the language writes it so (German *Hindi*). A third
 synthetic language — the English with every word turned into शुक्र, under `hi` — runs every rule.
+
+In 1.12 the frame learned three things before a single 1.12 text was written. T9 takes the names those texts carry
+out of a text as it takes the product names (`NAMES_OF_1_12` in `SAME_IN_EVERY_LANGUAGE`: `CLAUDE_CODE_OAUTH_TOKEN`,
+`Secret Service`, `secret-tool`, the notification channels' services and the protocols `SMTP` and `STARTTLS`), and a
+name of several words also where a line break splits it ("Claude" at a line's end and "Code" at the next line's start
+are the name Claude Code, not the name Claude and the English word Code). `SESSION_NAME_KEYS` lists the `t()` keys
+whose placeholder receives a session's name — the full name ("Session Tue 14:20 · 9d0eb37a") or the short one ("Tue
+14:20 · 9d0eb37a") —, where a translation must mind gender and case in a way no rule can judge: a test scans every
+`t()` call of `src/` with the TypeScript parser for the expressions that carry a name (`SESSION_NAME_CARRIERS`) and
+asks for exactly the listed keys, pins the calls that make a name (`SESSION_NAME_SOURCES`), and holds the brief's
+section "Session names and product names in placeholders" to the list.
 
 ## The price table
 

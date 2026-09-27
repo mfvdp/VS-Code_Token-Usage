@@ -95,6 +95,154 @@ test('a host planted in a translated string is reported', () => {
   assert.equal(offenders[0].host, 'price-feed.example')
 })
 
+test('api.telegram.org is allowed for its channel, a service\'s webhook host is not — no host of a webhook or of ntfy is ever a literal (1.12 C11 rules 1 and 4)', () => {
+  assert.ok(DEFAULT_ALLOW.includes('api.telegram.org'))
+  assert.deepEqual(scanBundle('"https://api.telegram.org/bot${token}/sendMessage"', DEFAULT_ALLOW).offenders, [])
+  for (const host of ['hooks.slack.com', 'discord.com', 'ntfy.sh', 'prod-00.westeurope.logic.azure.com', 'chat.example.org']) {
+    assert.equal(scanBundle(`"https://${host}/x"`, DEFAULT_ALLOW).offenders.length, 1, host)
+  }
+  // C11 rule 1: the public ntfy server is named in docs/ only — never in a manifest description or a bundle.
+  for (const f of filesToScan().filter((x) => !x.startsWith('dist'))) {
+    assert.equal(readFileSync(join(REPO, f), 'utf8').includes('https://ntfy.sh'), false, f)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The network's call sites (1.12 C11): every place in src/ that can reach a host, with its kind of host and why
+// ---------------------------------------------------------------------------
+
+interface SiteRow { file: string; sites: string[]; hosts: string; reason: string }
+interface SiteScan {
+  sites: Array<{ file: string; site: string; line: number }>
+  offenders: Array<{ file: string; site: string; line: number | null; problem: string }>
+}
+const sites = require('../scripts/check-privacy.mjs') as {
+  NETWORK_SITES: SiteRow[]
+  NETWORK_MODULES: string[]
+  NETWORK_SITE_KINDS: string[]
+  NETWORK_HOST_KINDS: string[]
+  scanNetworkSites: (read?: (file: string) => string, files?: string[], rows?: SiteRow[]) => SiteScan
+  networkSitesIn: (src: string) => Array<{ site: string; line: number }>
+  sourceFiles: (root?: string) => string[]
+  codeOf: (src: string) => { code: string; bare: string }
+}
+const readRepo = (file: string): string => readFileSync(join(__dirname, '..', file), 'utf8')
+
+test('the network sites of the real tree: the quota fetch and the channels\' fetch, each with its row — and nothing else (1.12 C11 rules 2 and 4)', () => {
+  const files = sites.sourceFiles(join(__dirname, '..'))
+  assert.ok(files.includes('src/poller.ts') && files.includes('src/notifyChannels.ts') && files.includes('src/webview/main.ts'), files.join(' '))
+  assert.ok(files.every((f) => f.startsWith('src/')))
+  const scan = sites.scanNetworkSites(readRepo, files)
+  assert.deepEqual(scan.offenders, [])
+  assert.deepEqual(scan.sites.map((x) => `${x.file}:${x.site}`), ['src/notifyChannels.ts:fetch', 'src/poller.ts:fetch'])
+  // The table as C11 gives it — P8 adds the SMTP sender's row.
+  assert.deepEqual(sites.NETWORK_SITES.map((r) => [r.file, r.sites, r.hosts]), [
+    ['src/poller.ts', ['fetch'], 'literal'],
+    ['src/notifyChannels.ts', ['fetch'], 'userConfigured'],
+  ])
+  for (const row of sites.NETWORK_SITES) {
+    assert.ok(row.reason.trim().length > 10, `${row.file}: a reason`)
+    assert.ok(sites.NETWORK_HOST_KINDS.includes(row.hosts))
+    assert.ok(row.sites.every((x) => sites.NETWORK_SITE_KINDS.includes(x)))
+  }
+  assert.match(sites.NETWORK_SITES[1].reason, /api\.telegram\.org/)
+  assert.deepEqual(sites.NETWORK_MODULES, ['http', 'https', 'http2', 'net', 'tls', 'dgram', 'undici'])
+})
+
+test('a call site outside the table fails: fetch( in src/other.ts, a network module imported anywhere, a socket, a browser request (1.12 C11 rule 4)', () => {
+  const tree = (extra: Record<string, string>): SiteScan => {
+    const files = { 'src/poller.ts': 'res = await fetch(CLAUDE_USAGE_URL, {})\n', 'src/notifyChannels.ts': 'export const f = (u, i) => fetch(u, i)\n', ...extra }
+    return sites.scanNetworkSites((f) => { if (!(f in files)) throw new Error('ENOENT'); return (files as Record<string, string>)[f] }, Object.keys(files))
+  }
+  assert.deepEqual(tree({}).offenders, [])
+  const cases: Array<[string, string]> = [
+    ['const r = await fetch(url)', 'fetch'],
+    ['const r = await globalThis.fetch (url)', 'fetch'],
+    ['import * as https from \'https\'', 'https'],
+    ['import { request } from "node:http"', 'http'],
+    ['import \'dgram\'', 'dgram'],
+    ['const net = require(\'net\')', 'net'],
+    ['const tls = await import(\'node:tls\')', 'tls'],
+    ['export { fetch } from \'undici\'', 'undici'],
+    ['import { Agent } from \'undici/lib/agent\'', 'undici'],
+    ['import * as h2 from \'http2\'', 'http2'],
+    ['tls.connect({ host, port })', 'tls'],
+    ['net.createConnection(port, host)', 'net'],
+    ['https.get(url, cb)', 'https'],
+    ['http.request(opts)', 'http'],
+    ['const ws = new WebSocket(url)', 'WebSocket'],
+    ['const x = new XMLHttpRequest()', 'XMLHttpRequest'],
+    ['navigator.sendBeacon(url, body)', 'sendBeacon'],
+    ['const es = new window.EventSource(url)', 'EventSource'],
+    ['const s = `${await fetch(url)}`', 'fetch'],
+  ]
+  for (const [code, site] of cases) {
+    const scan = tree({ 'src/other.ts': `// a file\n${code}\n` })
+    assert.deepEqual(scan.offenders.map((o) => [o.file, o.site, o.line, o.problem]), [['src/other.ts', site, 2, 'no row in NETWORK_SITES']], code)
+  }
+  // The same in a file that has a row, but not among the row's sites.
+  const beside = tree({ 'src/notifyChannels.ts': 'import * as tls from \'tls\'\nexport const f = (u, i) => fetch(u, i)\n' })
+  assert.deepEqual(beside.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifyChannels.ts', 'tls', 'not among its row\'s sites']])
+})
+
+test('a row that no longer holds fails: its site gone, its file gone; a row without a reason or with an unknown kind fails (1.12 C11 rule 4)', () => {
+  const files: Record<string, string> = { 'src/poller.ts': 'res = await fetch(URL)\n', 'src/notifyChannels.ts': 'export const f = 1\n' }
+  const read = (f: string): string => { if (!(f in files)) throw new Error('ENOENT'); return files[f] }
+  const stale = sites.scanNetworkSites(read, Object.keys(files))
+  assert.deepEqual(stale.offenders.map((o) => [o.file, o.site, o.problem]), [['src/notifyChannels.ts', 'fetch', 'listed but not found (a stale row)']])
+  delete files['src/notifyChannels.ts']
+  const gone = sites.scanNetworkSites(read, Object.keys(files))
+  assert.deepEqual(gone.offenders.map((o) => [o.file, o.problem]), [['src/notifyChannels.ts', 'cannot read src/notifyChannels.ts']])
+  const rows: SiteRow[] = [
+    { file: 'src/poller.ts', sites: ['fetch'], hosts: 'literal', reason: ' ' },
+    { file: 'src/a.ts', sites: ['fetch'], hosts: 'anywhere', reason: 'a reason' },
+    { file: 'src/b.ts', sites: ['smtp'], hosts: 'literal', reason: 'a reason' },
+    { file: 'src/c.ts', sites: [], hosts: 'literal', reason: 'a reason' },
+  ]
+  const own: Record<string, string> = { 'src/poller.ts': 'fetch(u)', 'src/a.ts': 'fetch(u)', 'src/b.ts': '', 'src/c.ts': '' }
+  const bad = sites.scanNetworkSites((f) => own[f], Object.keys(own), rows)
+  assert.deepEqual(bad.offenders.map((o) => [o.file, o.problem]), [
+    ['src/poller.ts', 'a row without its reason'],
+    ['src/a.ts', 'an unknown kind of host: anywhere'],
+    ['src/b.ts', 'an unknown site'],
+    ['src/c.ts', 'a row without a site'],
+    ['src/b.ts', 'listed but not found (a stale row)'],
+  ])
+})
+
+test('a comment or a string that names a call is no call; a template\'s ${…} is code (1.12 C11 rule 2)', () => {
+  const quiet = [
+    '// answers the fetch (`runPolls` then skips it)',
+    '/* tls.connect(host) and require(\'https\') */',
+    '/**\n * the fetch (and the net.connect( of old)\n */',
+    'const help = \'call fetch(url) yourself\'',
+    'const glob = "**/*.ts" // and a fetch( after it',
+    'const tpl = `fetch(${1 + 1}) is text`',
+    'const re = /fetch\\(|["\'`]/g',
+    'if (x) { y = a / b / c } // fetch(',
+    'const url = \'https://example.invalid\'; const n = 2 // fetch(',
+  ]
+  for (const line of quiet) assert.deepEqual(sites.networkSitesIn(line), [], line)
+  assert.deepEqual(sites.networkSitesIn('const tpl = `a ${await fetch(u)} b`'), [{ site: 'fetch', line: 1 }])
+  assert.deepEqual(sites.networkSitesIn('const u = \'https://x.invalid\'; void fetch(u)'), [{ site: 'fetch', line: 1 }])
+  assert.deepEqual(sites.networkSitesIn('const t = `x\n${`y${fetch(u)}`}\nz`\nfetch(v)'), [{ site: 'fetch', line: 2 }, { site: 'fetch', line: 4 }])
+  // Not a call: another name that ends or starts with the word.
+  assert.deepEqual(sites.networkSitesIn('prefetch(x); fetchNow(y); this.fetchQuota(z); const fetched = 1'), [])
+  // The lexer keeps the code of every source file: each line that starts with `import` or `export` is itself in
+  // the blanked text, up to a comment at its end — nothing of a file is lost to a misread string or pattern.
+  for (const f of sites.sourceFiles(join(__dirname, '..'))) {
+    const src = readRepo(f)
+    const { code, bare } = sites.codeOf(src)
+    assert.equal(code.length, src.length, f)
+    assert.equal(bare.length, src.length, f)
+    const lines = src.split('\n')
+    const kept = code.split('\n')
+    lines.forEach((l, i) => {
+      if (/^(import|export) /.test(l)) assert.ok(l.startsWith(kept[i].trimEnd()) && kept[i].trim().length > 6, `${f}:${i + 1}`)
+    })
+  }
+})
+
 // ---------------------------------------------------------------------------
 // The read contract (1.6 §0a): which fields each reader of a Claude Code file may name
 // ---------------------------------------------------------------------------
@@ -490,6 +638,11 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     // 1.12 P6 (§0a.10, pinned and changed): and the notification payload's builder.
     const notifySrc = fromRepo('src/notify.ts')
     writeFileSync(join(dir, 'src', 'notify.ts'), notifySrc)
+    // 1.12 P7 (C11, pinned and changed): the CLI holds every network call site of src/ to NETWORK_SITES, so the
+    // tree carries the two files its rows name — the quota fetch and the channels' fetch.
+    writeFileSync(join(dir, 'src', 'poller.ts'), fromRepo('src/poller.ts'))
+    const channelsSrc = fromRepo('src/notifyChannels.ts')
+    writeFileSync(join(dir, 'src', 'notifyChannels.ts'), channelsSrc)
     const agg = fromRepo('src/agg.ts')
     const run = (): { status: number | null; out: string } => {
       const r = spawnSync(process.execPath, [join(REPO, 'scripts', 'check-privacy.mjs')], { cwd: dir, encoding: 'utf8' })
@@ -604,6 +757,36 @@ test('the CLI fails on a broken read contract and passes on a kept one', () => {
     assert.equal(planned.status, 1, planned.out)
     assert.match(planned.out, /DIFF {2}the notification payload/)
     assert.match(planned.out, /read but not listed: planType/)
+    writeFileSync(join(dir, 'src', 'notify.ts'), notifySrc)
+    const netKept = run()
+    assert.equal(netKept.status, 0, netKept.out)
+    assert.match(netKept.out, /network sites: 2 row\(s\)/)
+    assert.match(netKept.out, /ok {4}src\/poller\.ts: fetch \(line \d+\) — a literal host: /)
+    assert.match(netKept.out, /ok {4}src\/notifyChannels\.ts: fetch \(line \d+\) — hosts the reader configures: /)
+    assert.match(netKept.out, /user-configured hosts: notification channels \(src\/notifyChannels\.ts\) — none is contacted before its channel's consent/)
+    // 1.12 C11 rule 4's mutation: the channels' `fetch(` moved into a helper file of its own — the new site has no
+    // row and the channels' row no longer holds, and the gate stops both.
+    const site = 'export const httpsFetch: FetchLike = (url, init) => fetch(url, init)'
+    assert.ok(channelsSrc.includes(site))
+    writeFileSync(join(dir, 'src', 'net.ts'), 'export const netFetch = (url: string, init: RequestInit): Promise<Response> => fetch(url, init)\n')
+    writeFileSync(join(dir, 'src', 'notifyChannels.ts'),
+      `import { netFetch } from './net'\n${channelsSrc.replace(site, 'export const httpsFetch: FetchLike = (url, init) => netFetch(url, init)')}`)
+    const moved = run()
+    assert.equal(moved.status, 1, moved.out)
+    assert.match(moved.out, /DENY {2}src\/net\.ts:1 fetch — no row in NETWORK_SITES/)
+    assert.match(moved.out, /DIFF {2}src\/notifyChannels\.ts: /)
+    assert.match(moved.out, /fetch: listed but not found \(a stale row\)/)
+    assert.match(moved.out, /network call site\(s\) or row\(s\) differ from NETWORK_SITES/)
+    rmSync(join(dir, 'src', 'net.ts'))
+    writeFileSync(join(dir, 'src', 'notifyChannels.ts'), channelsSrc)
+    assert.equal(run().status, 0)
+    // A network module imported anywhere else fails too.
+    writeFileSync(join(dir, 'src', 'quota.ts'), `import * as https from 'https'\nvoid https\n${quota}`)
+    const imported = run()
+    assert.equal(imported.status, 1, imported.out)
+    assert.match(imported.out, /DENY {2}src\/quota\.ts:1 https — no row in NETWORK_SITES/)
+    writeFileSync(join(dir, 'src', 'quota.ts'), quota)
+    assert.equal(run().status, 0)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

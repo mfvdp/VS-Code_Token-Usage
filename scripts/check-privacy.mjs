@@ -14,6 +14,14 @@
  *   chatgpt.com                the same for Codex
  *   docs.claude.com, developers.openai.com, support.claude.com, github.com/mfvdp
  *                              documentation links that only ever appear as text
+ *   api.telegram.org           Telegram's Bot API — only for a channel the reader set up and
+ *                              allowed (1.12)
+ *
+ * The notification channels' other hosts are the reader's own — a webhook address, an ntfy server,
+ * an SMTP server, typed by the reader — and so no literal this scan could see. They are named by
+ * the second table, `NETWORK_SITES` (below, 1.12 C11): every place in `src/` that can reach a host
+ * at all — a `fetch(`, a socket, an import of a network module — with the kind of host it reaches
+ * and why. A call site anywhere else fails the CLI, and so does a row whose file no longer has it.
  *
  * Beside the URL scan, the read contract (`READ_CONTRACT`, below): which fields each reader of a
  * Claude Code file may name — the list docs/privacy.md and docs/agents.md are held to by
@@ -42,6 +50,7 @@ export const DEFAULT_ALLOW = [
   'developers.openai.com',
   'support.claude.com',
   'github.com/mfvdp',
+  'api.telegram.org',
 ]
 
 // Stops at whitespace and at the characters that end a string literal or a JSX/HTML
@@ -558,6 +567,265 @@ export function scanBridgeBundle(text) {
   return scanHookBundle(text, BRIDGE_ALLOWED_MODULES, BRIDGE_FORBIDDEN_MODULES)
 }
 
+// ---------------------------------------------------------------------------
+// The network's call sites (1.12 C11)
+// ---------------------------------------------------------------------------
+
+/**
+ * 1.12 C11: every place in `src/` that can reach a host, one row per file — the call sites it may have
+ * (`sites`, the names of `NETWORK_SITE_KINDS`), the kind of host it reaches (`literal`: a host the code
+ * spells, which the URL scan above holds to `DEFAULT_ALLOW`; `userConfigured`: a host the reader typed,
+ * which no scan of the code can see) and why. This is how the scan learns the user-configured class: not
+ * from a literal, but from the table — a new call site anywhere else fails the CLI, and so does a row whose
+ * file no longer has the site it names (a stale row, as the read contract's `unread`). 1.12 P8 adds the
+ * SMTP sender's row when it exists.
+ *
+ * @typedef {{ file: string, sites: string[], hosts: 'literal' | 'userConfigured', reason: string }} NetworkSiteRow
+ * @type {NetworkSiteRow[]}
+ */
+export const NETWORK_SITES = [
+  { file: 'src/poller.ts', sites: ['fetch'], hosts: 'literal', reason: 'the one quota endpoint, api.anthropic.com (consent)' },
+  { file: 'src/notifyChannels.ts', sites: ['fetch'], hosts: 'userConfigured', reason: 'a notification channel the reader set up and allowed per host; Telegram\'s host is the literal api.telegram.org' },
+]
+
+/** The kinds of host a row may name. */
+export const NETWORK_HOST_KINDS = ['literal', 'userConfigured']
+/**
+ * Node's modules that open a connection (C11 rule 2's list, and `http2`, which does as well): an `import`,
+ * a `require` or an `import(…)` of one — a `node:` prefix taken off — is a site of that module's name.
+ */
+export const NETWORK_MODULES = ['http', 'https', 'http2', 'net', 'tls', 'dgram', 'undici']
+/**
+ * The calls that reach a host, by the name a row lists them under: `fetch(` (a member call such as
+ * `globalThis.fetch(` too), a module's connecting calls (C11 rule 2), and — for the dashboard's script,
+ * which runs in a browser — `new WebSocket(`, `XMLHttpRequest`, `new EventSource(` and `sendBeacon(`.
+ */
+const CALL_SITES = [
+  { site: 'fetch', re: /(?<![\w$])fetch\s*\(/g },
+  { site: 'http', re: /(?<![\w$])http\s*\.\s*(?:request|get)\s*\(/g },
+  { site: 'https', re: /(?<![\w$])https\s*\.\s*(?:request|get)\s*\(/g },
+  { site: 'http2', re: /(?<![\w$])http2\s*\.\s*connect\s*\(/g },
+  { site: 'net', re: /(?<![\w$])net\s*\.\s*(?:connect|createConnection)\s*\(/g },
+  { site: 'tls', re: /(?<![\w$])tls\s*\.\s*connect\s*\(/g },
+  { site: 'dgram', re: /(?<![\w$])dgram\s*\.\s*createSocket\s*\(/g },
+  { site: 'WebSocket', re: /(?<![\w$])new\s+(?:[\w$]+\.)*WebSocket\s*\(/g },
+  { site: 'XMLHttpRequest', re: /(?<![\w$])XMLHttpRequest(?![\w$])/g },
+  { site: 'EventSource', re: /(?<![\w$])new\s+(?:[\w$]+\.)*EventSource\s*\(/g },
+  { site: 'sendBeacon', re: /(?<![\w$])sendBeacon\s*\(/g },
+]
+/** Every name a row's `sites` may hold. */
+export const NETWORK_SITE_KINDS = [...new Set([...CALL_SITES.map((c) => c.site), ...NETWORK_MODULES])]
+const IMPORT_RES = [
+  /(?<![\w$])from\s*(['"])([^'"\n]+)\1/g,
+  /(?<![\w$.])import\s*(['"])([^'"\n]+)\1/g,
+  /(?<![\w$.])require\s*\(\s*(['"`])([^'"`\n]+)\1\s*\)/g,
+  /(?<![\w$.])import\s*\(\s*(['"`])([^'"`\n]+)\1\s*\)/g,
+]
+
+/** After these a `/` starts a regular expression, not a division. */
+const REGEX_AFTER_CHAR = new Set(['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^'])
+const REGEX_AFTER_WORD = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'yield', 'await', 'instanceof'])
+
+/**
+ * A TypeScript or JavaScript source with its comments blanked (`code`), and with its comments and the
+ * contents of its strings, template texts and regular expressions blanked as well (`bare`) — every blanked
+ * character a space, every line break kept, so an index is the same line in all three. A call site is looked
+ * for in `bare` (a comment that says "the fetch (…)" or a string that names one is no call); a module an
+ * import names is looked for in `code` (its name is a string). A template's `${…}` stays code. Pure.
+ *
+ * The lexer knows comments, the three kinds of string with `${…}` nested in templates, and regular
+ * expressions after the characters and words that can precede one; a quote or a regular expression it cannot
+ * close ends at its line's end, so a misreading costs one line, never the file.
+ *
+ * @param {string} src
+ * @returns {{ code: string, bare: string }}
+ */
+export function codeOf(src) {
+  const code = src.split('')
+  const bare = src.split('')
+  const n = src.length
+  const blank = (arr, i) => { if (arr[i] !== '\n' && arr[i] !== '\r') arr[i] = ' ' }
+  const blankBoth = (i) => { blank(code, i); blank(bare, i) }
+  /** Brace depths at which a template's `${` was opened. */
+  const opened = []
+  let depth = 0
+  let inTemplate = false
+  let prev = ''
+  let word = ''
+  let i = 0
+  while (i < n) {
+    const c = src[i]
+    if (inTemplate) {
+      if (c === '\\') { blank(bare, i); if (i + 1 < n) blank(bare, i + 1); i += 2; continue }
+      if (c === '`') { inTemplate = false; prev = '`'; word = ''; i++; continue }
+      if (c === '$' && src[i + 1] === '{') { opened.push(depth); depth++; inTemplate = false; prev = '{'; word = ''; i += 2; continue }
+      blank(bare, i)
+      i++
+      continue
+    }
+    const d = src[i + 1]
+    if (c === '/' && d === '/') {
+      while (i < n && src[i] !== '\n') { blankBoth(i); i++ }
+      continue
+    }
+    if (c === '/' && d === '*') {
+      const end = src.indexOf('*/', i + 2)
+      const stop = end === -1 ? n : end + 2
+      for (; i < stop; i++) blankBoth(i)
+      continue
+    }
+    if (c === '\'' || c === '"') {
+      i++
+      while (i < n && src[i] !== c && src[i] !== '\n') {
+        if (src[i] === '\\' && i + 1 < n && src[i + 1] !== '\n') { blank(bare, i); i++ }
+        blank(bare, i)
+        i++
+      }
+      if (i < n && src[i] === c) i++
+      prev = c
+      word = ''
+      continue
+    }
+    if (c === '`') { inTemplate = true; i++; continue }
+    if (c === '/' && (REGEX_AFTER_CHAR.has(prev) || (word !== '' && REGEX_AFTER_WORD.has(word)))) {
+      let j = i + 1
+      let inClass = false
+      while (j < n && src[j] !== '\n') {
+        if (src[j] === '\\') { j += 2; continue }
+        if (src[j] === '[') inClass = true
+        else if (src[j] === ']') inClass = false
+        else if (src[j] === '/' && !inClass) break
+        j++
+      }
+      if (j < n && src[j] === '/') {
+        for (let k = i + 1; k < j; k++) blank(bare, k)
+        i = j + 1
+        while (i < n && /[a-z]/i.test(src[i])) i++
+        prev = '/'
+        word = ''
+        continue
+      }
+    }
+    if (c === '{') depth++
+    if (c === '}') {
+      depth--
+      if (opened.length > 0 && opened[opened.length - 1] === depth) { opened.pop(); inTemplate = true; i++; continue }
+    }
+    if (/\s/.test(c)) { i++; continue }
+    if (/[\w$]/.test(c)) {
+      word = /[\w$]/.test(prev) ? word + c : c
+      prev = c
+      i++
+      continue
+    }
+    prev = c
+    word = ''
+    i++
+  }
+  return { code: code.join(''), bare: bare.join('') }
+}
+
+/**
+ * The network call sites of one source: each `{ site, line }` — a call of `CALL_SITES` in the code, or an
+ * import of a module of `NETWORK_MODULES`. Pure, for the tests.
+ *
+ * @param {string} src
+ * @returns {Array<{ site: string, line: number }>}
+ */
+export function networkSitesIn(src) {
+  const { code, bare } = codeOf(src)
+  const lineAt = (index) => src.slice(0, index).split('\n').length
+  const found = []
+  for (const { site, re } of CALL_SITES) {
+    for (const m of bare.matchAll(re)) found.push({ site, line: lineAt(m.index) })
+  }
+  for (const re of IMPORT_RES) {
+    for (const m of code.matchAll(re)) {
+      const mod = m[2].replace(/^node:/, '').split('/')[0]
+      if (NETWORK_MODULES.includes(mod)) found.push({ site: mod, line: lineAt(m.index) })
+    }
+  }
+  const seen = new Set()
+  return found
+    .filter((f) => { const k = `${f.site}:${f.line}`; if (seen.has(k)) return false; seen.add(k); return true })
+    .sort((a, b) => a.line - b.line || a.site.localeCompare(b.site))
+}
+
+/**
+ * Every source file under `<root>/src`, as the path a row names (`src/…`, forward slashes), sorted: the
+ * TypeScript the extension, its workers, its scripts for Claude Code and the dashboard's page are built from.
+ *
+ * @param {string} [root]
+ * @returns {string[]}
+ */
+export function sourceFiles(root = '.') {
+  const out = []
+  const walk = (rel) => {
+    const full = join(root, rel)
+    if (!existsSync(full)) return
+    for (const entry of readdirSync(full, { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`
+      if (entry.isDirectory()) walk(child)
+      else if (/\.[cm]?[jt]sx?$/.test(entry.name)) out.push(child)
+    }
+  }
+  walk('src')
+  return out.sort()
+}
+
+/**
+ * C11 rule 2: every network call site of `files` against `rows` — pure over the file reader, for the tests.
+ * An offender is a site in a file without a row, a site its file's row does not list, a row whose file does not
+ * have a site it lists or cannot be read (stale), and a row that is not well-formed (no reason, an unknown kind
+ * of host or site).
+ *
+ * @param {(file: string) => string} [read]
+ * @param {string[]} [files]
+ * @param {NetworkSiteRow[]} [rows]
+ * @returns {{ sites: Array<{ file: string, site: string, line: number }>,
+ *             offenders: Array<{ file: string, site: string, line: number | null, problem: string }> }}
+ */
+export function scanNetworkSites(read = (file) => readFileSync(file, 'utf8'), files = sourceFiles(), rows = NETWORK_SITES) {
+  const sites = []
+  const offenders = []
+  const byFile = new Map()
+  for (const row of rows) {
+    if (typeof row.reason !== 'string' || row.reason.trim() === '') offenders.push({ file: row.file, site: '', line: null, problem: 'a row without its reason' })
+    if (!NETWORK_HOST_KINDS.includes(row.hosts)) offenders.push({ file: row.file, site: '', line: null, problem: `an unknown kind of host: ${row.hosts}` })
+    for (const site of row.sites) {
+      if (!NETWORK_SITE_KINDS.includes(site)) offenders.push({ file: row.file, site, line: null, problem: 'an unknown site' })
+    }
+    if (row.sites.length === 0) offenders.push({ file: row.file, site: '', line: null, problem: 'a row without a site' })
+    byFile.set(row.file, row)
+  }
+  const all = [...new Set([...files, ...rows.map((r) => r.file)])].sort()
+  for (const file of all) {
+    let src
+    try {
+      src = read(file)
+    } catch {
+      src = null
+    }
+    const row = byFile.get(file)
+    if (src === null || typeof src !== 'string') {
+      if (row !== undefined) offenders.push({ file, site: row.sites.join(', '), line: null, problem: `cannot read ${file}` })
+      continue
+    }
+    const found = networkSitesIn(src)
+    for (const f of found) {
+      sites.push({ file, site: f.site, line: f.line })
+      if (row === undefined) offenders.push({ file, site: f.site, line: f.line, problem: 'no row in NETWORK_SITES' })
+      else if (!row.sites.includes(f.site)) offenders.push({ file, site: f.site, line: f.line, problem: 'not among its row\'s sites' })
+    }
+    if (row !== undefined) {
+      for (const site of row.sites) {
+        if (!found.some((f) => f.site === site)) offenders.push({ file, site, line: null, problem: 'listed but not found (a stale row)' })
+      }
+    }
+  }
+  return { sites, offenders }
+}
+
 function main() {
   if (!existsSync('dist')) {
     console.error('check-privacy: no dist/ — run `npm run build` first')
@@ -615,7 +883,30 @@ function main() {
     if (bridge.offenders.length > 0) bridgeBad = bridge.offenders
   }
 
+  // 1.12 C11: every network call site of src/ has its row in NETWORK_SITES, and every row still holds.
+  const net = scanNetworkSites()
+  console.log(`\nnetwork sites: ${NETWORK_SITES.length} row(s)`)
+  for (const row of NETWORK_SITES) {
+    const bad = net.offenders.filter((o) => o.file === row.file)
+    const at = net.sites.filter((x) => x.file === row.file).map((x) => `${x.site} (line ${x.line})`).join(', ')
+    const hosts = row.hosts === 'literal' ? 'a literal host' : 'hosts the reader configures'
+    console.log(`  ${bad.length > 0 ? 'DIFF' : 'ok  '}  ${row.file}: ${at || row.sites.join(', ')} — ${hosts}: ${row.reason}`)
+    for (const o of bad) console.log(`        ${o.site ? `${o.site}: ` : ''}${o.problem}`)
+  }
+  for (const o of net.offenders.filter((x) => !NETWORK_SITES.some((r) => r.file === x.file))) {
+    console.log(`  DENY  ${o.file}:${o.line} ${o.site} — ${o.problem}`)
+  }
+  const userFiles = NETWORK_SITES.filter((r) => r.hosts === 'userConfigured').map((r) => r.file)
+  if (userFiles.length > 0) {
+    console.log(`user-configured hosts: notification channels (${userFiles.join(', ')}) — none is contacted before its channel's consent`)
+  }
+
   let failed = false
+  if (net.offenders.length > 0) {
+    console.error(`\ncheck-privacy: ${net.offenders.length} network call site(s) or row(s) differ from NETWORK_SITES.`)
+    console.error('Every place in src/ that can reach a host needs its row — the file, its sites, the kind of host it reaches and why.')
+    failed = true
+  }
   if (bridgeBad !== null) {
     console.error(`\ncheck-privacy: the status-line bridge's bundle breaks its rule: ${bridgeBad.join('; ')}.`)
     console.error('It may load child_process, fs and path only — never a network module, a worker, never fetch(.')

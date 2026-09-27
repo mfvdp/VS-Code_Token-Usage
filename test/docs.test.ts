@@ -3305,8 +3305,10 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     'that a change of `tokenPace.language` does too — the status bar turns German and back to English (1.9) —']) {
     assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
   }
-  // The gates the page lists are the brief's.
-  assert.ok(flatText(readDoc('l10n/TRANSLATING.md')).includes('node build.mjs --tests && CI=true TZ=UTC LANG=en_US.UTF-8 HOME=$(mktemp -d) node --test \\ out-test/l10n.languages.test.js'))
+  // The gates the page lists are the brief's — in the memory scope of §0b.10 (1.12 lead fix after Review 1 F2: the block ran node --test
+  // unscoped; pinned and changed).
+  assert.ok(flatText(readDoc('l10n/TRANSLATING.md')).includes('node build.mjs --tests && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 env CI=true TZ=UTC \\ LANG=en_US.UTF-8 HOME=$(mktemp -d) NODE_OPTIONS=--max-old-space-size=6144 node --test \\ out-test/l10n.languages.test.js'))
+  assert.ok(!/node build\.mjs --tests && CI=true/.test(readDoc('l10n/TRANSLATING.md')), 'an unscoped test command is back in TRANSLATING.md')
   assert.ok(readDoc('test-e2e/suite/index.ts').includes("check('a language change reaches the status bar without a reload'"))
   assert.ok(flatText(doc.export).includes('the language line (1.9), `setting auto · shown de · VS Code de`'))
   // The walkthrough's dashboard page names the flag at the other end of the switch's row.

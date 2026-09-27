@@ -59,8 +59,8 @@ bar: the provider switch above the page picks them.
 
 **Ranges.** Chips for `today`, `7d` and `30d` are on the bar; `yesterday`, `90d`, `week to date`,
 `month to date`, `last month`, `year` and `all` are one `more ▾` chip away (`fewer ▴` puts them
-back, and a range you have selected stays visible whatever the fold says). The three in words
-are the values `thisWeek`, `thisMonth` and `lastMonth` of `dashboard.defaultRange`. Two date fields
+back, and a range you have selected stays visible whatever the fold says). `week to date`, `month to date`
+and `last month` are the values `thisWeek`, `thisMonth` and `lastMonth` of `dashboard.defaultRange`. Two date fields
 give a custom range (capped at five years, and a reversed range is swapped rather than
 returned empty); they stay hidden until you open them with the `custom…` chip, or until the
 range actually is a custom one, so the common case is chips only. `dashboard.defaultRange` is

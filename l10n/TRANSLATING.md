@@ -368,7 +368,8 @@ Each receives the name in its `{0}` — the keep-warm tooltip alone in its `{1}`
 ```
 npm run typecheck
 node build.mjs
-node build.mjs --tests && CI=true TZ=UTC LANG=en_US.UTF-8 HOME=$(mktemp -d) node --test \
+node build.mjs --tests && systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 env CI=true TZ=UTC \
+  LANG=en_US.UTF-8 HOME=$(mktemp -d) NODE_OPTIONS=--max-old-space-size=6144 node --test \
   out-test/l10n.languages.test.js out-test/nls.test.js out-test/languages.test.js out-test/i18n.test.js \
   out-test/i18n.model.test.js out-test/i18n.text.test.js out-test/dashboard.test.js out-test/prompts.test.js
 node scripts/check-privacy.mjs

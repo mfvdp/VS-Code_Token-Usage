@@ -32,7 +32,10 @@ twice changes nothing, but it is **irreversible**: the hour profile, the burn ra
 inside a running quota window need hour resolution. A month bucket is only counted when a range
 contains the whole month, because its days can no longer be told apart. Note that Claude Code
 deletes its own transcripts after about 30 days, so anything older than that exists only in this
-snapshot and cannot be rebuilt by a re-scan.
+snapshot and cannot be rebuilt by a re-scan. The Records section's *Hours with the most cache written*
+(1.11) ranks these UTC hour buckets — shown in the configured zone — by the tokens written to the prompt
+cache, hours rather than requests: the buckets keep no single request, an hour can hold several writes,
+and a large cache write is usually a cold start, a new conversation or a compaction.
 
 **Tiers.** Fast mode and US-only inference are independent surcharges, so every bucket is keyed
 by one of four tiers — `standard`, `fast`, `us`, `fast-us` — and the model table marks a

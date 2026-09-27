@@ -24,7 +24,7 @@ CDX 5h ███┃▁▁▁▁ 33% · resets 1h05m     CC Fable 7d █┃▁▁
 
 ![The Claude quota card with its prompt-cache block after the windows: one session measured by the status line, its one-hour cache cooling in 4 m 10 s, and what a cold start would re-write against a cache read; one session cold since ~11:40, estimated from its transcript and marked with ~](media/screenshot-prompt-cache.png)
 
-![The language picker open at the top of the dashboard: Automatic — as VS Code (English) first, then English checked, Deutsch · German, Français · French and the other languages, each with its flag, its own name and its name in English; under the list the line on what switches at once and the line on who translated the languages](media/screenshot-languages.png)
+![The language picker open at the top of the dashboard: Automatic — as VS Code (English) first, then English checked, Deutsch · German, Français · French and the other languages down to Română · Romanian — twenty-seven lines, each with its flag, its own name and its name in English; under the list the line on what switches at once and the line on who translated the languages](media/screenshot-languages.png)
 
 ![The Prompts section of the dashboard: the line on how it works and that unsent text goes with a prompt, the line naming where a prompt would go — Sends to Claude Code in terminal 2 of 3 — ready —, then the prompts, Status table, a keep-warm loop, Stop after this task and one of the reader's own, each with its send button, and New prompt](media/screenshot-prompts.png)
 
@@ -52,8 +52,8 @@ trademarks of their respective owners and are used here only to name the tools w
   `· $(clock) retry 1h12m` after the age of a stale entry. → [Quota sources](docs/quota-sources.md)
 * **A dashboard in the secondary sidebar**, a provider switch at the very top — `Claude Code ·
   Codex · All` — that shows the whole page for one provider or for both: quota cards that explain
-  their own colour, a seven-day sparkline, the key figures, the daily chart by model with the cost
-  line, and the fixed-period token totals. → [Dashboard](docs/dashboard.md)
+  their own colour, a seven-day sparkline, the key figures, the daily chart by model with the cost line, the fixed-period
+  token totals and, off by default, the Records — since 1.11 the most expensive days, the longest and largest Claude Code sessions and the hours with the most cache written. → [Dashboard](docs/dashboard.md)
 * **A prompt cache that says when it cools.** Five minutes before a Claude Code session's one-hour
   cache expires, the Claude card says so — `prompt cache cools in 4 m 10 s (1 h TTL)` — and what a
   cold start would re-write instead of reading it from the cache, measured by the status line or
@@ -97,10 +97,10 @@ trademarks of their respective owners and are used here only to name the tools w
 * **Nothing invented.** A missing figure is `–`, never `0 %`; a window without a stated length
   gets no pace rather than an invented denominator; estimates carry `~` and lower bounds `⚠`.
   → [Numbers, words and pace](docs/numbers.md)
-* **Fourteen languages.** A flag at the top of the dashboard switches the status bar, the dashboard,
-  the Quick Pick, the report and every dialog at once — to English, Deutsch, Français, Español,
-  Português (Brasil), Italiano, 日本語, 한국어, 简体中文, 繁體中文, Русский, Türkçe, Polski or Čeština, or to
-  VS Code's display language. The twelve beyond English and German were translated by AI agents and checked by tests, not by native speakers. → [Languages](docs/languages.md)
+* **Twenty-six languages.** A flag at the top of the dashboard switches the status bar, the dashboard, the Quick Pick,
+  the report and every dialog at once — to English, Deutsch, Français, Español, Português (Brasil), Italiano, 日本語, 한국어,
+  简体中文, 繁體中文, Русский, Türkçe, Polski, Čeština, Nederlands, Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa Indonesia,
+  Tiếng Việt, Ελληνικά, Magyar or Română, or to VS Code's display language. The twenty-four beyond English and German were translated by AI agents and checked by tests, not by native speakers. → [Languages](docs/languages.md)
 
 ## Install
 
@@ -166,7 +166,7 @@ bundle that loads more than `child_process`, `fs` and `path`. The full account i
 | [Prompts](docs/prompts.md) | The dashboard's Prompts section: your own prompts for Claude Code's and Codex's terminals, the three shipped ones, editing, how a prompt is sent and into which terminal, when Token Pace asks first or does not send, the `/loop` variant, and where the list is kept |
 | [Prompt cache](docs/prompt-cache.md) | The cooling warning and what a cold start would cost, which figure is measured and which estimated, the Codex line, the opt-in keep-warm line with every check it makes and what it cannot see, and exactly which fields are read |
 | [The quota cache file](docs/quota-cache-format.md) | The contract for that JSON file, so you can write one yourself |
-| [The “API cost” column](docs/cost.md) | The dated price table, the family fallback, and what the figure is not |
+| [The “API cost” column](docs/cost.md) | The dated price table and the pages it was read from, your own rates and the list price beside them, the family fallback, and what the figure is not |
 | [Counting](docs/counting.md) | How the transcripts are read, what a lower bound is, retention and the snapshot |
 | [History and forecasts](docs/history.md) | The stored quota history, burn rate, ETA and the reset retrospective |
 | [Budgets and alerts](docs/budgets-alerts.md) | Limits you state, the thresholds that can fire, and why a budget is not a bill |
@@ -177,7 +177,7 @@ bundle that loads more than `child_process`, `fs` and `path`. The full account i
 | [Windows, WSL and remote development](docs/windows-wsl-remote.md) | `extensionKind`, relocated directories, the Claude Code version on Windows, where the status-line bridge's script lives, restricted and virtual workspaces |
 | [Settings](docs/settings.md) | Every `tokenPace.*` key with its default and what it does |
 | [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language — a setting and a picker, not a command —, the walkthrough |
-| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the fourteen languages and their flags, the notation that stays the same, and how the translations were made |
+| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the twenty-six languages and their flags, the notation that stays the same, and how the translations were made |
 | [Building and testing](docs/development.md) | Build, tests, the smoke test in a real window, and what CI runs |
 | [Releasing](docs/release.md) | The tag-push recipe, the two store secrets, publisher verification |
 

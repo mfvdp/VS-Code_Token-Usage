@@ -236,7 +236,7 @@ of the dashboard sets (see [Languages](languages.md)). When it does not do what 
   user settings.* VS Code could not write your user `settings.json` — a file that is read-only, say,
   or one with an error in it. The log names the kind of error; the page stays in the language it had.
 * **The setting names a language, but the texts are not in it.** The value is not one of the ids of
-  [the table](languages.md#the-fourteen-languages) — another case (`FR`), a path, a typo — and counts
+  [the table](languages.md#the-twenty-six-languages) — another case (`FR`), a path, a typo — and counts
   as `auto`; or the installed build carries no translation file for it, or the file could not be
   read, and the texts are English. The log says which.
 

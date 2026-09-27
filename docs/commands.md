@@ -45,7 +45,7 @@ The dashboard's title bar carries *Fetch Quota Now*, *Re-read Token History*, *S
 *Open Settings* and *Export CSV…*.
 
 **Interface language.** There is no command for it. The language of Token Pace's own texts is the
-setting `tokenPace.language` — `auto`, the default, or one of fourteen languages —, and the flag at
+setting `tokenPace.language` — `auto`, the default, or one of twenty-six languages —, and the flag at
 the top of the dashboard sets it for you (see [Languages](languages.md)). What the extension
 *renders* — the status bar and its tooltips, the dashboard, the Quick Pick, the markdown report, the
 notifications and dialogs and the agent hook's setup document — follows that setting at once; the
@@ -53,8 +53,8 @@ debug log, the diagnostics report and the CSV and JSON exports stay English on p
 the *manifest* contributes — the command titles, the settings pages, the view's name and the
 walkthrough's titles — follows VS Code's display language (*Configure Display Language*) instead, and
 does not switch with the picker: `package.json` holds only `%key%` placeholders, the words live in
-`package.nls.json` (English) and one `package.nls.<id>.json` per language — German, and since 1.9 the
-twelve languages of [Languages](languages.md) —, and VS Code picks the file matching its display
+`package.nls.json` (English) and one `package.nls.<id>.json` per language — German, the twelve languages
+of 1.9 and the twelve of 1.11 ([Languages](languages.md)) —, and VS Code picks the file matching its display
 language when it starts, falling back to English for any key a translation lacks. Setting ids, enum
 values, paths and the JSON examples in the descriptions are identical in every language, because
 they are what you copy. `test/nls.test.ts` fails if a key is missing, unused, or if a translation

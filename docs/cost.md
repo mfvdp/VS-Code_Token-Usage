@@ -62,7 +62,10 @@ discount (`0.9` for 10 % off). `tokenPace.customPrices` merges **field-wise** ov
 table, so you can correct a single rate and leave the rest alone; keys are normalised, so
 `claude-opus-5[1m]` and `Anthropic/GPT-5` both find their model. Non-numeric or negative values
 are ignored, not guessed. As soon as either applies, the figures are labelled “at your
-configured rates”, the dashboard's *API cost* columns are headed *API cost (your rates)*, and `tokenPace.pricing.showListPrice` adds the undiscounted figure as a second
+configured rates”, the dashboard's *API cost* columns are headed *API cost (your rates)*, the key figures'
+*API equivalent* card explains itself as *what the same tokens would have cost through the API at your
+configured rates*, every status-bar tooltip with a cost — the budget entry's included — says *your
+configured rates* in its price line, and `tokenPace.pricing.showListPrice` adds the undiscounted figure as a second
 column, in the manner of the `amount` / `list_amount` pair of the provider analytics APIs. The CSV
 and JSON [exports](export.md) carry both amounts for every bucket, whatever `showListPrice` says —
 `costUsd` at your configured rates and `listCostUsd` at the list price — with the day of the rule

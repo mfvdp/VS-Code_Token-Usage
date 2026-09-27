@@ -156,7 +156,12 @@ for today / 7 days / 30 days, the composition and cache-hit line, a provenance l
 (`measured: quota, tokens · estimated: ~API cost`), the explanatory paragraphs, and the action
 footer. `tooltipExplanations` is **off** by default — the paragraphs are worth reading once,
 not on every hover; `true` brings them back. The uncertainty markers (`~`, `⚠`) and the
-provenance line are never hidden by it.
+provenance line are never hidden by it. Neither is the price line (1.11): under every token table with
+an *API cost* column — the quota entries', the tokens and cost entries', the budget entry's — one italic
+line names the day the price table was checked, the rows checked later, *your configured rates* while a
+multiplier or custom prices apply, and the pages the tooltip's own providers' prices were read from, by
+host name (*Prices as of …; checked later: … Price sources: docs.claude.com, platform.claude.com.*;
+a Codex tooltip names no Claude row) — see [The “API cost” column](cost.md).
 
 The Claude tooltip also lists the Claude Code sessions whose one-hour prompt cache is cooling or
 has gone cold within the hour — at most three, the most urgent first, then how many more — each as

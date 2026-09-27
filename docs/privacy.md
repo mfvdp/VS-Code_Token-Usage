@@ -14,8 +14,8 @@ mirror `statusline-mirror.json` inside its `globalStorage` (below) and the agent
 `agent-hook.jsonl` beside it —
 whenever that file exists: only the hook script you install writes it, and a line older than 30
 minutes no longer counts —, its own translation file for the language you chose
-(`l10n/bundle.l10n.<language>.json` inside the extension's folder — a file Token Pace ships, with the
-translations of its own texts and nothing of yours; read at activation and when `tokenPace.language`
+(`l10n/bundle.l10n.<language>.json` inside the extension's folder — one of the twenty-five translation files it
+ships, with the translations of its own texts and nothing of yours; read at activation and when `tokenPace.language`
 changes, its name built only from the list of shipped languages, never from the setting's text; English
 reads none), Claude Code's `settings.json`, its `settings.local.json`
 and the platform's managed-settings file (to report whether the status-line bridge is installed
@@ -360,10 +360,21 @@ So does the terminal watch (1.10): a Codex terminal running `codex --api-key syn
 whose shell integration reports `/home/u/synthetic-project-789`, is found as one — and neither string
 reaches the console, the log, the page, the markdown report, the diagnostics report, a message or a
 status-bar item; a terminal's name, its output, its creation options and its process are never read.
+So does the Records section (1.11): the Records' longest and largest sessions are named by a weekday, a
+time and the first eight characters of the session id — never a project or a path; a test puts a project
+name into the index's key and an agent's file and finds it in no record, no Quick Pick item, no markdown
+document and no export.
 Before the 1.6.0 release a
 review ran one more:
 a synthetic world with prompts, descriptions, results, summaries, scripts, error texts and account
 ids under every neighbouring key reaches none of the outputs.
+
+**What an export adds in 1.11.** Per bucket the list amount, the day of the price rule it was priced by and
+whether no rule covered its day (`listCostUsd`, `priceFrom`, `priceApproximate`), the list total, and in
+the JSON the price rows checked after the table's day and the pages the table was read from
+(`pricing.checked_later`, `pricing.sources`) — dollar amounts, ISO days, `true` or empty, and host names
+from a constant in the code; never a path, a URL with a path, or a session or project name the export did
+not already carry ([Export and diagnostics](export.md)).
 
 The webview loads no external resource at all, no telemetry of any kind is collected, and there
 is no endpoint setting to point somewhere else.

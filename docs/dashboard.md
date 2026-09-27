@@ -232,10 +232,11 @@ Codex, neither view has an agents part or a context line, as the page has neithe
 
 **Language.** The flag at the end of the top row is the language picker — the US flag while the
 texts are English. A click on it, or `Enter`, `Space`, `↓` or `↑`, opens a menu: *Automatic — as VS
-Code (English)* first, then the fourteen languages, each with its flag, its own name and its name in
+Code (English)* first, then the twenty-six languages, each with its flag, its own name and its name in
 the language you read now (*Deutsch* · German); the chosen line carries a ✓. In the menu `↓` and `↑`
 move, `Home` and `End` go to the first and the last line, `Enter` or `Space` chooses, `Escape` closes
-it and puts the focus back on the flag, and `Tab` leaves it without a choice. A choice switches Token
+it and puts the focus back on the flag, and `Tab` leaves it without a choice. A letter moves the focus to the next
+language whose own name or name in your language begins with it, round the list, and chooses nothing. A choice switches Token
 Pace's own texts at once, without a reload — the status bar and its tooltips, this page, the Quick
 Pick, the markdown document, and every notification and dialog from then on, with dates and numbers
 formatted for that language (German `2,8M`, `1.234.567`) —; the page keeps its scroll position, the
@@ -248,7 +249,7 @@ language where Token Pace has a translation for it, and English where it has non
 source text, so an untranslated string falls back to English rather than going blank. Three things
 stay English on purpose, because they are pasted into issues and have to be readable by a maintainer:
 the debug log, the diagnostics report, and the CSV and JSON exports. The whole account — `auto` and
-what VS Code reports, what switches at once and what cannot, the fourteen languages and their flags,
+what VS Code reports, what switches at once and what cannot, the twenty-six languages and their flags,
 the notation that stays the same in every language — is in [Languages](languages.md).
 
 **Accessibility.** Bars are `role="progressbar"` with `aria-valuenow` and a spoken
@@ -288,7 +289,7 @@ stays on its row — the running list's button, or the tree's item — when the 
 again, on the provider switch's button you pressed when the switch is, and on the language picker's flag after a choice; in the Prompts section it stays in the open fields, with the selection you had, or on the control you pressed there. The webview loads no external resource of any kind — its CSP
 allows exactly one nonced inline style and script, and the chart, heatmap and sparklines are
 CSS and inline SVG. Everything the webview sends back goes through an allow-list that accepts a
-range, a sort, a filter, a provider for the switch (`all` or one the registry knows), a language for the picker (`auto` or one of the fourteen ids — the one setting the page can have written, `tokenPace.language`, in your user settings), a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
+range, a sort, a filter, a provider for the switch (`all` or one the registry knows), a language for the picker (`auto` or one of the twenty-six ids — the one setting the page can have written, `tokenPace.language`, in your user settings), a metric, the chart's split (`model` or `agents`), a drill day, a section toggle, the 7-day block's disclosure, the key of an agent-tree node to
 open, close, select or show more children of — at most 200 characters, and only ever matched against the nodes the tree
 was built with —, the id of a prompt to send, delete or move, a prompt's title and text to save (at most 80 and 2000
 characters, cleaned once more before they are stored; a send carries the id alone, and Token Pace types the text it

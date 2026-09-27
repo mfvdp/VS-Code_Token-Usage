@@ -40,8 +40,8 @@ The three shipped prompts, in this order:
 
 Until you edit one, a shipped prompt's title and text follow the language of Token Pace's texts
 (`tokenPace.language`) — in German *Zwischenstand als Tabelle*, *Cache warmhalten* and *Nach dieser
-Aufgabe stoppen*, and likewise in each of the other twelve languages; the German status prompt keeps
-the author's own wording, the twelve translate the English —, except the keep-warm prompt's text, which
+Aufgabe stoppen*, and likewise in each of the other twenty-four languages; the German status prompt keeps
+the author's own wording, the twenty-four translate the English —, except the keep-warm prompt's text, which
 stays English in every language, as the
 [keep-warm line](prompt-cache.md#keep-warm-in-a-terminal-opt-in) does. A prompt you edited keeps your
 words whatever the language; saving a shipped prompt with exactly its shipped words in the current

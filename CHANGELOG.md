@@ -3,6 +3,133 @@
 All notable changes to **Token Pace** are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 1.11.0 — <date set at publish>
+
+**Twenty-six languages, the records the dashboard still lacked, and a price table you can audit.** Twelve
+more languages join the flag at the top of the dashboard — Nederlands, Українська, Svenska, Norsk, Dansk,
+Suomi, हिन्दी, Bahasa Indonesia, Tiếng Việt, Ελληνικά, Magyar and Română —, translated by AI agents from the
+English text and checked by tests, not by native speakers, as the twelve of 1.9 were; typing a letter in the
+open list jumps to the next language. The Records section gains four tables: the most expensive days, the
+longest and the largest Claude Code sessions, and the hours with the most cache written. Every figure of
+API cost now says where its price came from — the tooltips name the price table's check days and source
+pages beside every cost table, the cost column's head says *API cost (your rates)* while your own rates
+apply, and an export carries the list price beside your figure with the day of the rule each was priced by.
+Beside it the 1.10 leftovers: a Chinese stacked table's double gap, a forecast warning that could say
+"before it resets (reset due)", the "both" reset format in Japanese, Korean and Chinese, and what
+`resetHourCycle: auto` follows.
+
+### Added
+
+* **Twelve more languages.** Nederlands, Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa
+  Indonesia, Tiếng Việt, Ελληνικά, Magyar and Română — twenty-six languages, twenty-seven lines in the
+  list with *Automatic*. Each switches the status bar and its tooltips, the dashboard, the Quick Pick, the
+  markdown document and every dialog at once, as the flag or `tokenPace.language` chooses it; the settings
+  and the command titles follow VS Code's display language, and VS Code has a language pack for Hungarian
+  only (last updated for VS Code 1.48, 2020) — for the other eleven `auto` shows English and the flag picks
+  them, the settings staying in VS Code's language. Norwegian is Bokmål (`nb`). Devanagari and Greek are
+  drawn with your system's fonts; Token Pace ships none. **These translations were made by AI agents
+  (Claude Opus 5.5) from the English text, with the German as a second reference, and checked by tests for
+  completeness, placeholders, marks, the settings' status-bar examples and freshness — not by native
+  speakers**; their register was chosen from common usage, not verified against a style guide, and a wrong
+  or clumsy word is a bug to report. The twelve languages of 1.9 carry every text 1.11 added or changed,
+  through the ledger of English changes, by AI agents as well.
+* **Four Records tables.** The `records` section — off by default, `records` in
+  `tokenPace.dashboard.sections` — ranks, after the top models, projects and sessions: *Most expensive
+  days*, the range's days by their API cost at your configured rates, a day whose cost is a lower bound
+  marked `⚠` (it holds usage without a price on file, or the transcripts on disk begin that day); *Longest
+  sessions* and *Largest sessions*, the Claude Code sessions of the last 7 days that are no longer active
+  — no counted line for 10 minutes — by the time from their first counted line to their last, pauses
+  included, and by their usage, their own and their agents', each named by its start and the first eight
+  characters of its id (`Tue 14:20 · 9d0eb37a`), a session still active counted in a note and not ranked;
+  *Hours with the most cache written* — hours, not requests: the hour buckets by the tokens written to
+  the prompt cache, with the part written for one hour, what those writes cost and the models that wrote
+  them, since a large cache write is usually a cold start, a new conversation or a compaction and one hour
+  can hold several. `tokenPace.dashboard.topN` rows each (the setting that caps every Records table); the
+  Quick Pick and the markdown document carry the same rows; nothing is stored, so a rescan that reads fewer
+  transcripts shows fewer records, never an old one.
+* **Type-ahead in the language list.** In the open list a letter moves the focus to the next language
+  whose own name or name in your language begins with it, round the list — `h` reaches *हिन्दी*, then
+  *Magyar* —; nothing is chosen by it, Enter or Space still chooses.
+
+### Changed
+
+* **Every tooltip with an API cost names the price table's check days and sources**, whether or not
+  `tokenPace.tooltipExplanations` is on: under the cost tables of the quota entries, the tokens and cost
+  entries and the budget entry one line says *Prices as of …*, the rows checked later, *your configured
+  rates* whenever your multiplier or custom prices apply, and *Price sources: docs.claude.com,
+  platform.claude.com.* — the pages the tooltip's own providers' prices were read from, by host name; a
+  Codex tooltip names no Claude row. The dashboard's footer names the pages beside the days the same way
+  (*Price sources: docs.claude.com, platform.claude.com, developers.openai.com.*, under a provider view
+  that provider's own), and *Copy Usage Summary*, the Quick Pick and the markdown document print it.
+* **The cost column's head says whose rates.** While `tokenPace.pricing.multiplier` is not 1 or
+  `tokenPace.customPrices` applies, every *API cost* column of the dashboard is headed *API cost (your
+  rates)*, and the key figures' *API equivalent* explains itself as *what the same tokens would have cost
+  through the API at your configured rates*.
+* **The exports carry the list price beside your figure** — schema 4. After `priced` the CSV gains
+  `listCostUsd` (the same usage at the published list price: multiplier 1, no custom price), `priceFrom`
+  (the day the price rule used was read) and `priceApproximate` (`true` where no rule covered the bucket's
+  day and the nearest one was used); the JSON the same per bucket, `listCostUsd` in `totals`, and in
+  `pricing` the rows checked after the table's day (`checked_later`, every provider's) and the source pages
+  as host names (`sources`). An unpriced bucket leaves all three empty; where a custom price alone prices a
+  model the table does not know, the list amount equals your figure — a discount against a price never
+  published would be an invention. Everything versions 1–3 wrote is still there and still means the same
+  thing; a reader of schema 3 reads the same values from a schema 4 file.
+* **`tokenPace.resetHourCycle: auto` says what it does**: *Follow the operating system's clock format (the
+  locale the extension host runs under), not the language of Token Pace's texts* — it never followed the
+  display language, and the settings said so.
+* **The Records section waits for the history.** During the first scan, a re-read and the replay of the
+  agent tables it says *Reading history…* and shows no record at all — no peak day, no streak, no table —
+  so that no record is read from half a history.
+* **The settings' `records` and `dashboard.topN` sentences** name the four new tables.
+
+### Fixed
+
+* **A stacked table's label in Chinese** left a double gap after its full-width colon `：` at the
+  narrowest side bar; the page now writes one space after a plain colon and none after a full-width one,
+  whose glyph carries its own blank — one gap in every language.
+* **A forecast warning could say "before it resets (reset due)"** when a window's reset had already
+  come before the reading was judged; such a window raises no forecast warning now — the next reading
+  brings the new window.
+* **The "both" reset format in Japanese, Korean and Chinese** now places its own brackets and verb:
+  `06:00 にリセット（2h14m 後）`, `06:00 초기화(2h14m 후)`, `06:00 重置（2h14m 后）` and `06:00 重設（2h14m 後）`
+  — the countdown used to be joined with ASCII brackets in every language, and the settings' example of
+  each language quotes what its bar prints. English and German print what they printed.
+
+### Privacy
+
+* **Twelve more of Token Pace's own files** are read: the translation file of each new language,
+  `l10n/bundle.l10n.<id>.json` inside the extension's folder — twenty-five translation files in all, each
+  shipped with the extension, its name built from the registry's id only, never from the setting's text;
+  nothing of yours, nothing of another program, nothing over the network.
+* **The longest and largest sessions are named as the Agents section names them** — a weekday, a time
+  and the first eight characters of the session id; never a project or a path. A test puts a project name
+  into the session index's key and an agent's file and finds it in no record, no Quick Pick item, no
+  markdown document and no export.
+* **The exports' new fields** are dollar amounts, ISO days, `true` or empty, and host names from a
+  constant in the code — never a path, a URL with a path, or a session or project name the export did not
+  already carry.
+
+### Internal
+
+* **Snapshot and export.** `STATE_VERSION` 8 and `AGENT_TABLES_REVISION` 10 are unchanged — the first
+  start of 1.11.0 rebuilds nothing —; `EXPORT_SCHEMA_VERSION` 3 → 4 for the fields above.
+* **The re-key ledger.** `node scripts/l10n-rekey.mjs --start <sha>` begins a version's ledger at the tree
+  as it is; 1.11's holds 67 entries since the 1.10.0 release (`l10n/rekey.json`, its count read by a test),
+  which the twelve languages of 1.9 worked through as pending lists, while a new language is a whole
+  translation from the frozen English and never a pending list. `node scripts/nls-sources.mjs --check
+  --strict` is the gate from the join on. None of it ships.
+* **The frame learned the new scripts before a language was written.** Ukrainian, Greek and Hindi join
+  the languages of another script; the heat map's weekday words are counted in grapheme clusters, not code
+  points (`शुक्र` is two on the screen and five code points); `”` may open a quotation (Swedish, Finnish);
+  the Greek ano teleia is refused, since NFC turns it into the separator `·`; and a third synthetic
+  language — the English with every word turned into `शुक्र`, under `hi` — runs every rule.
+* **The reading pass after the translations** changed 197 values in 23 of the 24 languages beyond English
+  and German where an AI reader named a fact of the language — a gender, a case, what a pronoun refers to
+  — with the English frozen; the questions only a native speaker can settle stay open.
+* **The dashboard harness** probes every language's default page, Prompts page and Records page — 551
+  probe files —, measures every character of every page in another language than English against a
+  font's missing-glyph box, and holds the picker's flag to the registry's.
+
 ## 1.10.0 — <date set at publish>
 
 **A prompt list that types into Claude Code's and Codex's terminals, and the 1.9 leftovers in every

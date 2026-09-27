@@ -231,6 +231,21 @@ language name the ledger has just added be missing while it is pending, and a na
 stand only where `LANGUAGE_NAME_AS_ENGLISH` says the language writes it so (German *Hindi*). A third
 synthetic language — the English with every word turned into शुक्र, under `hi` — runs every rule.
 
+## The price table
+
+`src/prices.ts` is the price table: per model a list of dated rules, newest first — `from`, an optional
+`until`, the rates and a `source` naming the page the rule was read from, one of the hosts of
+`PRICE_SOURCE_PAGES`. `PRICES_AS_OF` is the day the table was checked whole, `LEGACY_CHECKED` the earlier check
+of the Claude 4.x and 3.x rows, `OPUS_5_5_CHECKED` the day of the Claude Opus 5.5 row; `PRICES_CHECKED_LATER`
+lists the rows read after `PRICES_AS_OF`, and the dashboard's footnote, the tooltips' price line and the JSON
+export's `pricing` print them from there. `test/prices.test.ts` holds the table's hygiene — every rule dated,
+sourced and newest first, a model's rules meeting without a gap or an overlap, a rule closed without a
+successor only when `CLOSED_ON_PURPOSE` names it with a comment, every source a known host —, and
+`test/docs.test.ts` holds the three days of [The “API cost” column](cost.md) to the constants, written by one
+formatter, and the README to no price date at all. **A re-check of the table, or a new row, is a CHANGELOG
+line**: the CHANGELOG is the table's ledger. Change the constant or the rule in `src/prices.ts` and the
+sentence in `docs/cost.md`, and say so under the next version; no other page carries a date of the table.
+
 ## Performance
 
 The dashboard is a webview: everything it draws reaches it as a message, which the editor serialises

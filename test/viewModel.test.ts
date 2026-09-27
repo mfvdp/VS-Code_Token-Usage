@@ -34,7 +34,7 @@ import { toolAgg } from './helpers/toolAgg'
 import { ROOT, rawManifest } from './helpers/nls'
 import { readFileSync } from 'node:fs'
 import { resetTimeMemos } from '../src/time'
-import { PRICES_CHECKED_LATER, resetPriceMemos } from '../src/prices'
+import { OPUS_5_5_CHECKED, PRICES_CHECKED_LATER, resetPriceMemos } from '../src/prices'
 import type { PromptsRead } from '../src/prompts'
 import type { PromptsVm, PromptTargetInput } from '../src/viewModel'
 
@@ -307,7 +307,8 @@ test('the price date is stated once, in the footnote that needs it', () => {
   const codex = buildViewModel(makeInput({ ui: { providers: ['codex'] } }))
   assert.equal(codex.pricing.later, null)
   assert.ok(codex.footnotes.some((f) => f.endsWith(`Prices as of ${codex.pricing.asOf}.`)), codex.footnotes.join('\n'))
-  assert.equal(vm.pricing.later, 'claude-opus-5-5 (2026-09-24)')
+  // 1.11 P9 (pinned and changed — P5's spec error 1: the day was a literal): the row's own check day from the constant.
+  assert.equal(vm.pricing.later, `claude-opus-5-5 (${OPUS_5_5_CHECKED})`)
   assert.ok(dated[0].endsWith(`Prices as of ${vm.pricing.asOf}; checked later: ${vm.pricing.later}.`), dated[0])
   // Configured rates are a separate statement and stay beside it.
   const custom = buildViewModel(makeInput({

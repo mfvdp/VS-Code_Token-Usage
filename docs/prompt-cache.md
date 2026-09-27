@@ -13,7 +13,10 @@ input price instead of writing it again. Its status line reports the state of th
 session it runs for: warm or cold, the time-to-live (5 minutes or 1 hour), when the cached prefix
 expires, how much of the input the cache served and — from Claude Code 2.1.251 on, as its
 [status-line documentation](https://code.claude.com/docs/en/statusline) states — how many tokens
-the next request re-caches if the cache has gone cold by then.
+the next request re-caches if the cache has gone cold by then. The dashboard's Records section ranks the
+hours with the most cache written — the hour buckets by the tokens written to that cache, hours rather than
+requests; a large write is usually a cold start, a new conversation or a compaction
+([Dashboard](dashboard.md)).
 
 Token Pace watches that cache for every Claude Code session on this machine whose cache has the
 one-hour lifetime, and says on the Claude quota card when one is about to go cold — five minutes

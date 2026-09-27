@@ -2755,7 +2755,11 @@ test('the pages say what 1.8 P11 checked against the code: the keep-warm focus r
   assert.ok(doc.commands.includes('and so does the status-line bridge\'s script `statusline-bridge.js` while the status line is connected'))
   assert.ok(flatText(doc.quotaSources).includes('What 1.8 does not move is a Token Pace command it has no record of'))
   // The Opus 5.5 row's own check day, where the numbers table dates the price table.
-  assert.ok(doc.numbers.split('\n').some((l) => l.startsWith('| API cost |') && l.includes(`table checked ${PRICES_AS_OF}, the Claude Opus 5.5 row ${OPUS_5_5_CHECKED}`)))
+  // 1.11 P9 (pinned and changed — P5's spec error 1: the row carried both ISO days, so a re-check of the table touched
+  // this page too): the row names no day and points to cost.md, where the days are held to the constants (C5 rule 3).
+  const costRow = doc.numbers.split('\n').find((l) => l.startsWith('| API cost |')) ?? ''
+  assert.ok(costRow.includes('[The “API cost” column](cost.md)') && costRow.includes('`Prices as of <day>; checked later: <model> (<day>).`'), costRow)
+  assert.equal(/\d{4}-\d{2}-\d{2}/.test(costRow), false, 'docs/numbers.md\'s API-cost row carries a date')
   // The README: the features 1.8 added, the index row, the fourth picture; the walkthrough's entry.
   const readme = flatText(README)
   for (const claim of ['**A prompt cache that says when it cools.**', '**Keep-warm, opt-in and off by default.**', '`$(watch) cache 4m`',
@@ -2778,6 +2782,9 @@ test('the pages say what 1.8 P11 checked against the code: the keep-warm focus r
 const FLAG_COUNTRY: Record<string, string> = {
   us: 'United States', de: 'Germany', fr: 'France', es: 'Spain', br: 'Brazil', it: 'Italy', jp: 'Japan', kr: 'South Korea',
   cn: 'China', tw: 'Taiwan', ru: 'Russia', tr: 'Türkiye', pl: 'Poland', cz: 'Czechia',
+  // 1.11 P9 (Review 1 F1): the twelve of tier 2.
+  nl: 'Netherlands', ua: 'Ukraine', se: 'Sweden', no: 'Norway', dk: 'Denmark', fi: 'Finland', in: 'India', id: 'Indonesia',
+  vn: 'Vietnam', gr: 'Greece', hu: 'Hungary', ro: 'Romania',
 }
 
 /** The seam is module state: a test that installs a locale or a bundle puts it back. */
@@ -2794,18 +2801,19 @@ function underLocale<T>(tag: string | undefined, run: () => T): T {
 
 test('docs/languages.md: one row per registry entry — its id, its native name, its name in English, its flag — in the registry\'s order (1.9 A7)', () => {
   const rows = doc.languages.split('\n').filter((l) => /^\| `[a-z-]+` \|/.test(l))
-  // 1.11 P2 (pinned and changed: fourteen rows, the whole registry): the registry has twenty-six languages before the
-  // twelve of tier 2 have a bundle. The table lists the registry from its start and only languages whose bundle ships —
-  // the picker offers no other (§4 P2: the docs never name a language the picker does not offer yet) —, the fourteen of
-  // 1.9 at least; P9 lists all twenty-six (§3 A6).
+  // 1.11 P9 (pinned and changed — Review 1 F1: the test tolerated 14–26 rows with every bundle present): the table lists
+  // the whole registry, one row per entry, strictly, and a fifth column says since when — English from the first release,
+  // German since 1.3.0 (every text; the settings since 1.2.0), the twelve of 1.9 and, marked as new, the twelve of 1.11
+  // (§3 A6). Every language listed ships its bundle: the picker offers no other.
   const { availableLanguages } = require('../src/languageLoad') as typeof import('../src/languageLoad')
   const shipped = availableLanguages(join(ROOT, 'l10n'))
-  const listed = LANGUAGES.slice(0, rows.length)
-  const want = underLocale(undefined, () => listed.map((e) => `| \`${e.id}\` | ${e.native} | ${languageName(e.id)} | ${FLAG_COUNTRY[e.flag]} (\`${e.flag}\`) |`))
-  assert.ok(rows.length >= 14 && rows.length <= LANGUAGES.length, `${rows.length} rows`)
+  const since = (i: number): string => (i === 0 ? '1.0.0' : i === 1 ? '1.3.0' : i < 14 ? '1.9.0' : '**new in 1.11.0**')
+  const want = underLocale(undefined, () => LANGUAGES.map((e, i) => `| \`${e.id}\` | ${e.native} | ${languageName(e.id)} | ${FLAG_COUNTRY[e.flag]} (\`${e.flag}\`) | ${since(i)} |`))
+  assert.equal(rows.length, LANGUAGES.length, `${rows.length} rows for ${LANGUAGES.length} languages`)
   assert.deepEqual(rows, want)
-  assert.deepEqual(listed.filter((e) => !shipped.includes(e.id)).map((e) => e.id), [], 'the table names a language the picker does not offer')
-  assert.ok(doc.languages.includes('| Id | Language | In English | Flag |'))
+  assert.deepEqual(LANGUAGES.filter((e) => !shipped.includes(e.id)).map((e) => e.id), [], 'the table names a language the picker does not offer')
+  assert.equal(rows.filter((r) => r.endsWith('| **new in 1.11.0** |')).length, 12)
+  assert.ok(doc.languages.includes('| Id | Language | In English | Flag | Since |'))
   // The flags the page explains are the registry's.
   const flag = (id: string): string => LANGUAGES.find((e) => e.id === id)?.flag ?? '?'
   assert.deepEqual(['en', 'es', 'pt-br', 'zh-cn', 'zh-tw'].map(flag), ['us', 'es', 'br', 'cn', 'tw'])
@@ -2909,7 +2917,8 @@ test('docs/languages.md: the notation that stays the same in every language is w
 test('docs/languages.md: the translation statement says who translated, from what, what was checked and that no native speaker reviewed it — and claims nothing more (1.9 B4)', () => {
   const page = flatText(doc.languages)
   for (const claim of [
-    'The twelve languages beyond English and German were translated by AI agents (Claude Opus 5.5) from the English text, with the German as a second reference',
+    // 1.11 P9 (pinned and changed: "The twelve languages beyond English and German"): the twelve of 1.9, named.
+    'The twelve languages of 1.9.0 — Français, Español, Português (Brasil), Italiano, 日本語, 한국어, 简体中文, 繁體中文, Русский, Türkçe, Polski and Čeština — were translated by AI agents (Claude Opus 5.5) from the English text, with the German as a second reference',
     'checked by tests for completeness, placeholders and the marks `~`, `⚠`, `≈` and `–` — they were **not reviewed by native speakers**',
     'they cannot tell a good word from a clumsy one',
     'A wrong or clumsy word is a bug — please report it on the [issue tracker](https://github.com/mfvdp/VS-Code_Token-Usage/issues), with the language, the text you saw and where you saw it',
@@ -2951,7 +2960,8 @@ test('docs/development.md says how a language is made and checked: the registry,
   for (const path of ['l10n/TRANSLATING.md', 'l10n/nls-sources/de.json', 'l10n/parts/host.de.json']) assert.equal(shipped(path), false, `${path} would be packaged`)
   for (const path of ['l10n/bundle.l10n.de.json', 'package.nls.de.json', 'docs/languages.md']) assert.equal(shipped(path), true, `${path} would not be packaged`)
   // The README's index row, in the order the pages are read.
-  assert.ok(README.includes('| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the fourteen languages and their flags, the notation that stays the same, and how the translations were made |'))
+  // 1.11 P9 (pinned and changed: "the fourteen languages"): twenty-six.
+  assert.ok(README.includes('| [Languages](docs/languages.md) | The language picker and `tokenPace.language`, what switches at once and what follows VS Code, the twenty-six languages and their flags, the notation that stays the same, and how the translations were made |'))
   assert.ok(doc.languages.includes('see [Building and testing](development.md#translating)'))
 })
 
@@ -3164,7 +3174,8 @@ test('the quality statement stands in its four places and in the picker, says wh
     assert.ok(text.includes(statement) && /not (reviewed )?by native speakers/.test(text), `${name} does not carry the quality statement`)
     for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i]) assert.equal(never.test(text), false, `${name} says ${never}`)
   }
-  assert.ok(flatText(README).includes('The twelve beyond English and German were translated by AI agents and checked by tests, not by native speakers.'))
+  // 1.11 P9 (pinned and changed: "The twelve beyond"): twenty-four.
+  assert.ok(flatText(README).includes('The twenty-four beyond English and German were translated by AI agents and checked by tests, not by native speakers.'))
   // The picker's line is the view model's, and the German says the same, as §3 A4 has it.
   const quality = 'The languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.'
   assert.ok(readDoc('src/viewModel.ts').includes(`t('${quality}')`))
@@ -3182,7 +3193,8 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     assert.equal(f.includes('German or English'), false, `${name} still says "German or English"`)
   }
   assert.equal(/^\* \*\*English and German\.\*\*/m.test(README), false, 'README.md still heads its languages bullet "English and German."')
-  assert.ok(README.includes('* **Fourteen languages.**') && flatText(README).includes('→ [Languages](docs/languages.md)'))
+  // 1.11 P9 (pinned and changed: "Fourteen languages"): twenty-six.
+  assert.ok(README.includes('* **Twenty-six languages.**') && flatText(README).includes('→ [Languages](docs/languages.md)'))
   assert.ok(README.includes('| [Dashboard](docs/dashboard.md) | The provider switch and the language picker,'))
   assert.ok(README.includes('| [Commands and keybindings](docs/commands.md) | The commands, the one chord, the interface language — a setting and a picker, not a command —, the walkthrough |'))
   // The README's privacy paragraph names the one write outside the storage 1.9 adds.
@@ -3194,7 +3206,7 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
     'In the menu `↓` and `↑` move, `Home` and `End` go to the first and the last line, `Enter` or `Space` chooses, `Escape` closes it and puts the focus back on the flag, and `Tab` leaves it without a choice.',
     'the page keeps its scroll position, the focus goes back to the flag, and the choice is written to `tokenPace.language` in your user settings',
     'The same row ends with the language picker\'s flag', 'and on the language picker\'s flag after a choice',
-    'a language for the picker (`auto` or one of the fourteen ids — the one setting the page can have written, `tokenPace.language`, in your user settings)',
+    'a language for the picker (`auto` or one of the twenty-six ids — the one setting the page can have written, `tokenPace.language`, in your user settings)',
     'never a path and never another setting',
   ]) assert.ok(dash.includes(claim), `docs/dashboard.md does not say: ${claim}`)
   // commands.md: no command; the setting and the picker; the manifest part kept.
@@ -3210,7 +3222,8 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   const warning = 'Token Pace: the language could not be written to your user settings.'
   // 1.11 P2 (pinned and changed: "the fifteen values", fifteen in the enum): the enum has auto and the twenty-six ids of
   // the registry now; the row's count is P9's to write (§3 A6).
-  for (const claim of ['which VS Code reports only while its language pack is installed', 'values as a list, each language by its own name',
+  for (const claim of ['which VS Code reports only while its language pack is installed', 'The settings UI offers the twenty-seven values as a list, each language by its own name',
+    'The twenty-four languages beyond English and German were translated by AI agents and checked by tests, not by native speakers.',
     'that is the one write Token Pace makes to your user settings for it: only on a choice, only this key, *Automatic* removing the key again, the language already chosen writing nothing',
     `the warning *${warning}* says so and nothing changes`, 'Application scope: always your user settings, never a workspace\'s']) {
     assert.ok(row.includes(claim), `docs/settings.md's language row does not say: ${claim}`)
@@ -3269,8 +3282,9 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   for (const claim of [
     'Since 1.10 so does every other decimal the dashboard, the tooltips and the text views print — a key figure\'s change (`▼ -0,7%`), the plan factor (`×0,4`), a span under ten hours (`2,5 h`); the exports and the diagnostics report keep the `.`.',
     '**The percent follows the number in every language** — `25 %` in a sentence, `25%` in the status bar —, Turkish included, although Turkish typography and the Turkish number format put the sign first (`%25`): the Turkish translation keeps the English order in every string, for one style across the page, the bar and the texts. A known limit, not an oversight.',
-    // 1.10 P21 (pinned and changed): the models' turn line joined the glued figures at the join.
-    '**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s` stay together in every language, and so do a model\'s average turn time and its P90 (`~12 h 05 min · P90 ~18 h 46 min`) —, an ISO day never breaks at its hyphen, and a window\'s percentage never stands alone on a line: it wraps together with the verdict beside it.',
+    // 1.10 P21 (pinned and changed): the models' turn line joined the glued figures at the join. 1.11 P9 (pinned and
+    // changed — Review 1 F4): glue() binds each figure to its unit, not the whole turn line, and the page says so.
+    '**At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m 10 s` stay together in every language, and each figure of a model\'s turn line stays with its unit (`~12 h 05 min`, `P90 ~18 h 46 min` — the line may wrap between the two) —, an ISO day never breaks at its hyphen, and a window\'s percentage never stands alone on a line: it wraps together with the verdict beside it.',
   ]) assert.ok(lang.includes(claim), `docs/languages.md does not say: ${claim}`)
   assert.ok(flatText(doc.numbers).includes('**Decimals** follow the language too (1.10), wherever the dashboard, the tooltips and the text views print one: a key figure\'s change against the period before (`▼ -0,7%` in German — the sign and the `%` are the badge\'s own and stay attached to the figure)'))
   assert.ok(flatText(doc.numbers).includes('The CSV and JSON exports and the diagnostics report keep the `.` in every language: they are read by programs, not by you.'))
@@ -3296,7 +3310,7 @@ test('the pages say what 1.9 shipped where a reader looks: the picker, the setti
   assert.ok(readDoc('test-e2e/suite/index.ts').includes("check('a language change reaches the status bar without a reload'"))
   assert.ok(flatText(doc.export).includes('the language line (1.9), `setting auto · shown de · VS Code de`'))
   // The walkthrough's dashboard page names the flag at the other end of the switch's row.
-  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('At the other end of that row a flag picks the language of Token Pace\'s own texts — fourteen of them, or *Automatic* for VS Code\'s display language (`tokenPace.language`)'))
+  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('At the other end of that row a flag picks the language of Token Pace\'s own texts — twenty-six of them, or *Automatic* for VS Code\'s display language (`tokenPace.language`)'))
 })
 
 test('Review 2\'s sentences stand where a reader looks: the terminal\'s own session is never left behind, and what no check can see (1.9 P20, Review 2 (a), (b))', () => {
@@ -3524,11 +3538,13 @@ test('the 1.10.0 release notes: the newest entry, its date set at publish, every
   const { AGENT_TABLES_REVISION } = require('../src/agg') as typeof import('../src/agg')
   const { KEEP_WARM_LINE, KEEPWARM_GUARD_OF } = require('../src/keepWarm') as typeof import('../src/keepWarm')
   const log = readDoc('CHANGELOG.md')
-  const first = log.indexOf('\n## ')
+  // 1.11 P9 (pinned and changed: the newest entry): 1.11.0 is the newest now — the 1.10.0 entry is found by its heading.
+  const first = log.indexOf('\n## 1.10.0 ')
+  assert.ok(first >= 0, 'the CHANGELOG has no 1.10.0 entry')
   const second = log.indexOf('\n## ', first + 4)
   const entry = log.slice(first, second)
   // The release cadence: the date is set on the release branch at publish, never before.
-  assert.match(entry, /^\n## 1\.10\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.10.0 with its date left for the publish, or does not open with its summary')
+  assert.match(entry, /^\n## 1\.10\.0 — <date set at publish>\n\n\*\*/, 'the 1.10.0 CHANGELOG entry does not keep its date for the publish, or does not open with its summary')
   assert.ok(log.includes('\n## 1.9.0 — <date set at publish>\n'), 'the 1.9.0 entry is gone or dated')
   const flat = flatText(entry)
   const heads = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal']
@@ -3646,7 +3662,8 @@ test('the picture of the Prompts section is in the repository, embedded in the R
  */
 test('the pages carry the sentences of the documentation package, held to the code (1.10 P21)', () => {
   const prompts = flatText(doc.prompts)
-  for (const claim of ['and likewise in each of the other twelve languages; the German status prompt keeps the author\'s own wording, the twelve translate the English',
+  // 1.11 P9 (pinned and changed: "the other twelve languages"): twenty-four translate the shipped prompts.
+  for (const claim of ['and likewise in each of the other twenty-four languages; the German status prompt keeps the author\'s own wording, the twenty-four translate the English',
     'the characters counted as the field counts them (an emoji counts two)', 'one whose command it saw end while VS Code still names the shell so']) {
     assert.ok(prompts.includes(claim), `docs/prompts.md does not say: ${claim}`)
   }
@@ -3668,9 +3685,12 @@ test('the pages carry the sentences of the documentation package, held to the co
   const languages = flatText(doc.languages)
   for (const claim of ['every change went into a ledger of English changes (the build\'s `l10n/rekey.json`) which each of the twelve languages worked through',
     'no pending list may exist at the join, and every settings translation must be fresh', 'was again done by AI agents (Claude Opus 5.5, with a wording pass by Claude Fable 5.1), not by native speakers',
-    'is said in the language\'s own word in Turkish (*istem*) and in the two Chinese variants (提示词 in Simplified, 提示 in Traditional Chinese); the other nine keep the loanword',
+    // 1.11 P9 (pinned and changed: "the other nine keep the loanword"): the nine of 1.9 — the twelve of 1.11 have their own sentence.
+    'is said in the language\'s own word in Turkish (*istem*) and in the two Chinese variants (提示词 in Simplified, 提示 in Traditional Chinese); the other nine of 1.9 keep the loanword',
     'not a key label of VS Code\'s', '*Période :* with a no-break space in French, *范围：* and *範圍：* with the full-width colon in Simplified and Traditional Chinese, the plain `:` everywhere else, Japanese included',
-    'a wider gap before the value than the plain one — a known limit of 1.10', 'a model\'s average turn time and its P90 (`~12 h 05 min · P90 ~18 h 46 min`)', 'are new in 1.9.0']) {
+    // 1.11 P9 (pinned and changed): the full-width colon's wider gap is gone (D1, P3), and the turn line keeps each figure
+    // with its unit, not the whole line (Review 1 F4: glue() binds figure and unit).
+    'each figure of a model\'s turn line stays with its unit (`~12 h 05 min`, `P90 ~18 h 46 min` — the line may wrap between the two)', 'are new in 1.9.0', 'are new in 1.11.0']) {
     assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
   }
   const bundle = (id: string): Record<string, string> => JSON.parse(readDoc(`l10n/bundle.l10n.${id}.json`)) as Record<string, string>
@@ -3798,4 +3818,228 @@ test('1.11 B6, C2, C3: docs/dashboard.md describes the Records section\'s four n
     'a Codex quota tooltip names no Claude row', 'the dashboard\'s *API cost* columns are headed *API cost (your rates)*']) {
     assert.ok(cost.includes(claim), `docs/cost.md does not say: ${claim}`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// 1.11 P9 — documentation, release notes, pictures (plan-1.11-build.md §4 P9).
+// ---------------------------------------------------------------------------
+
+/**
+ * 1.11 P9: the 1.11.0 release notes — the newest entry with its date left for the publish, every section in order,
+ * the twelve languages named as the registry has them, the pack fact and the plain statement, the four tables' titles
+ * and the words the page, the bar and the settings say, the export's columns, the versions, the ledger's count read
+ * from the file, and nothing the notes must not claim.
+ */
+test('the 1.11.0 release notes: the newest entry, its date set at publish, every section in order, the languages, the tables, the price words, the export, the versions, the ledger, nothing unverified (1.11 P9)', () => {
+  const { AGENT_TABLES_REVISION } = require('../src/agg') as typeof import('../src/agg')
+  const { AGENT_RETENTION_DAYS, SESSION_ACTIVE_MS } = require('../src/agentTree') as typeof import('../src/agentTree')
+  const log = readDoc('CHANGELOG.md')
+  const first = log.indexOf('\n## ')
+  const second = log.indexOf('\n## ', first + 4)
+  const entry = log.slice(first, second)
+  // The release cadence: the date is set on the release branch at publish, never before.
+  assert.match(entry, /^\n## 1\.11\.0 — <date set at publish>\n\n\*\*/, 'the newest CHANGELOG entry is not 1.11.0 with its date left for the publish, or does not open with its summary')
+  assert.ok(log.includes('\n## 1.10.0 — <date set at publish>\n'), 'the 1.10.0 entry is gone or dated')
+  const flat = flatText(entry)
+  const heads = ['### Added', '### Changed', '### Fixed', '### Privacy', '### Internal']
+  const order = heads.map((h) => flat.indexOf(h))
+  assert.ok(order.every((i) => i > 0) && order.every((i, k) => k === 0 || i > order[k - 1]), 'the 1.11.0 entry\'s sections are missing or out of order')
+  const section = (h: string): string => { const at = heads.indexOf(h); return flat.slice(order[at], at + 1 < heads.length ? order[at + 1] : undefined) }
+  // The twelve languages of 1.11, named in their own names in the registry's order — in the summary and in Added.
+  assert.equal(LANGUAGES.length, 26)
+  const twelve = LANGUAGES.slice(14).map((e) => e.native)
+  assert.equal(twelve.length, 12)
+  const named = `${twelve.slice(0, -1).join(', ')} and ${twelve[twelve.length - 1]}`
+  assert.equal(flat.split(named).length - 1, 2, `the 1.11.0 entry does not name the twelve languages twice as the registry has them: ${named}`)
+  for (const claim of ['twenty-six languages, twenty-seven lines in the list with *Automatic*', 'VS Code has a language pack for Hungarian only (last updated for VS Code 1.48, 2020)',
+    'Norwegian is Bokmål (`nb`)', 'Token Pace ships none',
+    '**These translations were made by AI agents (Claude Opus 5.5) from the English text, with the German as a second reference, and checked by tests for completeness, placeholders, marks, the settings\' status-bar examples and freshness — not by native speakers**',
+    'not verified against a style guide', 'a wrong or clumsy word is a bug to report']) {
+    assert.ok(section('### Added').includes(claim), `the 1.11.0 entry does not say: ${claim}`)
+  }
+  // The four tables' titles and the words of the page, as the code has them (a German for each: a key of the bundle).
+  for (const en of ['Most expensive days', 'Longest sessions', 'Largest sessions', 'Hours with the most cache written', 'API cost (your rates)', 'Price sources: {0}.',
+    'Reading history…', 'What the same tokens would have cost through the API at your configured rates', 'lower bound']) {
+    assert.equal(typeof GERMAN[en], 'string', `${en} is not a text of the code`)
+  }
+  const added = section('### Added')
+  assert.ok(added.includes('*Most expensive days*') && added.includes('*Longest sessions* and *Largest sessions*') && added.includes('*Hours with the most cache written*'))
+  assert.ok(added.includes(`the Claude Code sessions of the last ${AGENT_RETENTION_DAYS} days that are no longer active — no counted line for ${SESSION_ACTIVE_MS / 60_000} minutes`))
+  assert.ok(added.includes('`Tue 14:20 · 9d0eb37a`') && added.includes('`tokenPace.dashboard.topN` rows each'))
+  const changed = section('### Changed')
+  assert.ok(changed.includes('*API cost (your rates)*') && changed.includes('*what the same tokens would have cost through the API at your configured rates*') && changed.includes('*Reading history…*'))
+  // The price sources as the view model joins them: the hosts of the registry, in order — and the Claude hosts alone in a Claude tooltip.
+  const sources = SOURCES.flatMap((s) => PRICE_SOURCE_PAGES[s]).join(', ')
+  assert.ok(changed.includes(`*Price sources: ${sources}.*`) && changed.includes(`*Price sources: ${PRICE_SOURCE_PAGES.claude.join(', ')}.*`))
+  // The export's columns, as the code writes them, and the manifest's `auto` sentence.
+  assert.deepEqual(CSV_COLUMNS.slice(-3), ['listCostUsd', 'priceFrom', 'priceApproximate'])
+  for (const field of ['the CSV gains `listCostUsd`', '`priceFrom`', '`priceApproximate`', '`checked_later`', '`sources`', '`listCostUsd` in `totals`']) assert.ok(changed.includes(field), `the 1.11.0 entry does not name ${field}`)
+  assert.ok(changed.includes(`*${nlsEn['config.resetHourCycle.enum.auto']}*`), 'the 1.11.0 entry does not quote the manifest\'s auto sentence')
+  // The CJK "both" examples are what each language's manifest quotes of its bar.
+  const fixed = section('### Fixed')
+  for (const [id, example] of [['ja', '06:00 にリセット（2h14m 後）'], ['ko', '06:00 초기화(2h14m 후)'], ['zh-cn', '06:00 重置（2h14m 后）'], ['zh-tw', '06:00 重設（2h14m 後）']] as const) {
+    assert.ok((JSON.parse(readDoc(`package.nls.${id}.json`)) as Record<string, string>)['config.resetFormat.enum.both'].includes(example), `${id}'s manifest does not quote ${example}`)
+    assert.ok(fixed.includes(`\`${example}\``), `the 1.11.0 entry does not quote ${example}`)
+  }
+  assert.ok(fixed.includes('one space after a plain colon and none after a full-width one') && fixed.includes('"before it resets (reset due)"'))
+  assert.ok(readDoc('src/alerts.ts').includes('c.window.resetsAt <= now'), 'the reset-due guard is gone from alerts.ts')
+  // Privacy: the file count from the registry, the session name, the export's fields.
+  const privacy = section('### Privacy')
+  assert.equal(LANGUAGES.length - 1, 25)
+  assert.ok(privacy.includes('twenty-five translation files in all'))
+  assert.ok(privacy.includes('a weekday, a time and the first eight characters of the session id; never a project or a path'))
+  assert.ok(privacy.includes('never a path, a URL with a path, or a session or project name the export did not already carry'))
+  // The versions it names are the code's.
+  const internal = section('### Internal')
+  assert.deepEqual([STATE_VERSION, EXPORT_SCHEMA_VERSION, AGENT_TABLES_REVISION], [8, 4, 10])
+  assert.ok(internal.includes(`\`STATE_VERSION\` ${STATE_VERSION} and \`AGENT_TABLES_REVISION\` ${AGENT_TABLES_REVISION} are unchanged`))
+  assert.ok(internal.includes(`\`EXPORT_SCHEMA_VERSION\` ${RELEASED_1_10.EXPORT_SCHEMA_VERSION} → ${EXPORT_SCHEMA_VERSION}`))
+  for (const m of flat.matchAll(/`(STATE_VERSION|AGENT_TABLES_REVISION)` (\d+)/g)) {
+    assert.equal(Number(m[2]), m[1] === 'STATE_VERSION' ? STATE_VERSION : AGENT_TABLES_REVISION, `the 1.11.0 entry says ${m[1]} ${m[2]}`)
+  }
+  // The ledger's count is what the file holds, and its base is the 1.10.0 release.
+  const ledger = JSON.parse(readDoc('l10n/rekey.json')) as { base: string; entries: unknown[] }
+  assert.equal(ledger.base, 'b89ff43')
+  assert.ok(internal.includes(`1.11's holds ${ledger.entries.length} entries since the 1.10.0 release`), `the ledger holds ${ledger.entries.length} entries`)
+  assert.ok(internal.includes('197 values in 23 of the 24 languages'))
+  // Claims the notes must not make: nothing beyond an AI agent's reading; no Codex send tried; no path, file, secret or date of the machine.
+  for (const never of [/professional/i, /native[- ]quality/i, /proofread/i, /certified/i, /fluent/i, /review/i, /tried with Codex/i, /tested with Codex/i]) {
+    assert.equal(never.test(entry), false, `the 1.11.0 entry says ${never}`)
+  }
+  for (const never of [/\/home\//, /plan-1\.\d+/, /\.claude\/projects/, /VSCE_PAT|OVSX_PAT/, /research\//, /[A-Za-z]:\\/, /\/tmp\//, /package\.json/, /worktree/i, /Review [12L]\b/, /\d{4}-\d{2}-\d{2}/]) {
+    assert.equal(never.test(entry), false, `the 1.11.0 entry mentions ${never}`)
+  }
+  // The old counts and the old claims stand nowhere a reader looks (§4 P9 item 4).
+  for (const [name, text] of [['CHANGELOG.md 1.11.0', entry], ['docs/languages.md', doc.languages], ['docs/dashboard.md', doc.dashboard], ['docs/settings.md', doc.settings],
+    ['docs/commands.md', doc.commands], ['docs/troubleshooting.md', doc.troubleshooting], ['docs/privacy.md', doc.privacy], ['docs/prompts.md', doc.prompts], ['docs/status-bar.md', doc.statusBar],
+    ['docs/numbers.md', doc.numbers], ['docs/development.md', doc.development], ['README.md', README], ['media/walkthrough/dashboard.md', readDoc('media/walkthrough/dashboard.md')]] as const) {
+    for (const stale of ['fourteen languages', 'twelve languages beyond', 'a known limit of 1.10', 'Follow the display locale', 'the fifteen values', 'fourteen of them', 'the fourteen ids', 'one of fourteen languages', 'the-fourteen-languages']) {
+      assert.equal(flatText(text).includes(stale), false, `${name} still says: ${stale}`)
+    }
+  }
+  assert.equal(nlsEn['config.resetHourCycle.enum.auto'].includes('display locale'), false)
+})
+
+/**
+ * 1.11 P9: the sentences the documentation package added where a reader looks — the languages page (the twenty-six,
+ * the pack fact, the register, the three native "prompt" words, the key names, the fonts, the stacked label's one gap,
+ * the type-ahead), privacy.md (§0a.1, §0a.2, §0a.5), counting.md (§0a.3), prompt-cache.md (B10), status-bar.md (C2),
+ * development.md (C5 rule 4), cost.md (Review 2 F2, F3), the README, commands.md, troubleshooting.md, the walkthrough
+ * and the brief's pattern-key note — each held to the code where the code decides it — and the store picture of the
+ * picker at its release length.
+ */
+test('the pages carry the sentences of the 1.11 documentation package, held to the code (1.11 P9)', () => {
+  const languages = flatText(doc.languages)
+  const bundle = (id: string): Record<string, string> => JSON.parse(readDoc(`l10n/bundle.l10n.${id}.json`)) as Record<string, string>
+  for (const claim of [
+    // The twenty-six, the picker's length, the type-ahead as the page's own rule.
+    'come in twenty-six languages: English and German, and since 1.9.0 twelve more', 'and since 1.11.0 twelve more again — Nederlands, Українська, Svenska, Norsk, Dansk, Suomi, हिन्दी, Bahasa Indonesia, Tiếng Việt, Ελληνικά, Magyar and Română',
+    'in the order of the table below — twenty-seven lines', 'A list taller than the window scrolls inside its box, the two lines under it staying in view',
+    'Typing a letter — without Ctrl, Alt or ⌘ — moves the focus to the next line after the focused one whose own name or name in your language begins with it, round the list',
+    'on an English page `h` reaches *हिन्दी* (Hindi), then *Magyar* (Hungarian); a letter no name begins with moves nothing, and typing chooses nothing either — Enter or Space does',
+    // The pack fact (§3 A6, §7a Q20; Review L F2 and R3: hu HAS a pack, of 2020) and Bokmål (§7a Q12).
+    'VS Code has a language pack for Hungarian; for the other eleven — Dutch, Ukrainian, Swedish, Norwegian, Danish, Finnish, Hindi, Indonesian, Vietnamese, Greek and Romanian — it has none, so `auto` shows English there and the settings stay in VS Code\'s language',
+    'VS Code\'s Hungarian language pack was last updated for VS Code 1.48 (2020)', 'Norwegian is Bokmål — the id is `nb`, the list says *Norsk* —', 'Token Pace maps neither `no` nor `nn` onto it',
+    // The table's paragraph, the flags of the new languages, the fonts (§7a Q20).
+    'are new in 1.11.0. Norwegian (`nb`) is Bokmål.', 'Hindi carries India\'s, Greek Greece\'s, Ukrainian Ukraine\'s and Norwegian Norway\'s',
+    '**Fonts.** Token Pace ships no font', 'A system without a font for one of these scripts shows boxes in their place; the words are right, the font is missing. The flag switches back at once, or set `tokenPace.language`',
+    // Numbers: the clocks and the grouping the locales print (checked below).
+    'Hindi groups by lakh (`12,34,567`) and keeps the decimal point', 'Danish, Finnish and Indonesian write `06.00` with a full stop, Hungarian puts the 12-hour mark in front (`de. 06:00`)',
+    'None of the twelve languages of 1.11 puts the sign first',
+    // The stacked label's one gap (D1) — the old limit is gone.
+    'Since 1.11 the page puts one space after a plain colon and none after a full-width one, whose glyph carries its own blank, so the gap before the value is one gap in every language',
+    // How the translations were made: the twelve of 1.11, the twelve of 1.9 through the ledger, the reading pass, the open questions (D13), the register (§7a Q16), the terms, the key names (D5).
+    'were each translated whole by an AI agent (Claude Opus 5.5) from the English text as it stood when 1.11\'s English was frozen, with the German as a second reference, and checked by the same tests',
+    'every settings sentence — **not by native speakers**', 'The twelve languages of 1.9 worked through 1.11\'s ledger of English changes the same way (Claude Opus 5.5 and Claude Fable 5.1)',
+    'A reading pass by further AI agents followed, one per language, none of them a native speaker either; what it found was applied where the reader named a fact of the language — a gender, a case, what a pronoun refers to — and left as it was otherwise',
+    'The open questions the 1.10 readers left for native speakers are not answered in 1.11 either',
+    '**Register.** Each language addresses you as its software does: Ukrainian *ви*, Hindi *आप*, Indonesian *Anda*, Greek the plural of politeness, Romanian the *dumneavoastră* forms, Hungarian the *Ön* forms or an impersonal one, Finnish passive and impersonal forms, Vietnamese no pronoun where a sentence can do without one, and Dutch *je*, Swedish, Norwegian and Danish *du*',
+    'The register was chosen by the agents that translated, from common usage, not verified against a style guide',
+    'Of the twelve of 1.11 three say it in their own word — Finnish *kehote*, Greek *προτροπή*, Vietnamese *lời nhắc* —; the other nine keep the loanword',
+    'the twelve languages of 1.11 write the label as VS Code shows it in every language — `Enter`, `Ctrl+Enter`, `⌘+Enter` —, with the language\'s word for "key" around it where a sentence needs one',
+  ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
+  assert.ok(doc.languages.includes('\n## The twenty-six languages\n'))
+  // The facts behind them: the registry, the page's type-ahead rule, the locales, the bundles' words.
+  assert.deepEqual(LANGUAGES.slice(14).map((e) => e.id), ['nl', 'uk', 'sv', 'nb', 'da', 'fi', 'hi', 'id', 'vi', 'el', 'hu', 'ro'])
+  assert.deepEqual(['hi', 'el', 'uk', 'nb'].map((id) => LANGUAGES.find((e) => e.id === id)?.flag), ['in', 'gr', 'ua', 'no'])
+  assert.deepEqual([autoLanguage('no', LANGUAGE_IDS), autoLanguage('nn', LANGUAGE_IDS), autoLanguage('nb-no', LANGUAGE_IDS)], ['en', 'en', 'nb'])
+  const main = readDoc('src/webview/main.ts')
+  assert.ok(main.includes('function langKeyMove(') && main.includes('whose own name or name in the reader\'s language starts with it'), 'the type-ahead rule of main.ts changed: say so in the docs')
+  assert.ok(main.includes('const FULL_WIDTH_END = '), 'dh() no longer tells a full-width colon from a plain one: say so in the docs')
+  const clock = (tag: string, cycle: 'h12' | 'h23'): string => new Intl.DateTimeFormat(tag, { hour: '2-digit', minute: '2-digit', hourCycle: cycle, timeZone: 'UTC' }).format(new Date(Date.UTC(2026, 8, 1, 6, 0)))
+  assert.deepEqual(['da', 'fi', 'id'].map((tag) => clock(tag, 'h23')), ['06.00', '06.00', '06.00'])
+  assert.equal(clock('hu', 'h12'), 'de. 06:00')
+  assert.equal(underLocale('hi', () => full(1_234_567)), '12,34,567')
+  for (const id of LANGUAGES.slice(14).map((e) => e.id)) {
+    const b = bundle(id)
+    assert.deepEqual(Object.keys(b).filter((k) => /\{\d\} %/.test(k) && /%\s?\{\d\}/.test(b[k])), [], `${id} writes the percent first`)
+  }
+  assert.deepEqual([bundle('fi').Prompts, bundle('el').Prompts, bundle('vi').Prompts], ['Kehotteet', 'Προτροπές', 'Lời nhắc'])
+  for (const id of ['nl', 'sv', 'nb', 'da', 'id', 'hu', 'ro']) assert.match(bundle(id).Prompts, /^Prompt/, `${id} does not keep the loanword`)
+  assert.match(bundle('hi').Prompts, /^प्रॉम्प्ट/)
+  assert.match(bundle('uk').Prompts, /^Промпт/)
+  assert.equal(bundle('ja')['{0}:'], '{0}:')
+  // privacy.md: §0a.1 (the file count from the registry), §0a.2 (Review 2's sentence), §0a.5 (the export's fields).
+  const privacy = flatText(doc.privacy)
+  assert.equal(LANGUAGES.length - 1, 25)
+  for (const claim of ['one of the twenty-five translation files it ships, with the translations of its own texts and nothing of yours',
+    'the Records\' longest and largest sessions are named by a weekday, a time and the first eight characters of the session id — never a project or a path; a test puts a project name into the index\'s key and an agent\'s file and finds it in no record, no Quick Pick item, no markdown document and no export',
+    '**What an export adds in 1.11.** Per bucket the list amount, the day of the price rule it was priced by and whether no rule covered its day (`listCostUsd`, `priceFrom`, `priceApproximate`), the list total, and in the JSON the price rows checked after the table\'s day and the pages the table was read from (`pricing.checked_later`, `pricing.sources`)',
+    'never a path, a URL with a path, or a session or project name the export did not already carry']) {
+    assert.ok(privacy.includes(claim), `docs/privacy.md does not say: ${claim}`)
+  }
+  assert.ok(readDoc('test/records.test.ts').includes('synthetic-project-123'), 'the §0a.2 leak test is gone')
+  // counting.md (§0a.3), prompt-cache.md (B10), status-bar.md (C2), cost.md (Review 2 F2, F3).
+  assert.ok(flatText(doc.counting).includes('The Records section\'s *Hours with the most cache written* (1.11) ranks these UTC hour buckets — shown in the configured zone — by the tokens written to the prompt cache, hours rather than requests: the buckets keep no single request, an hour can hold several writes, and a large cache write is usually a cold start, a new conversation or a compaction'))
+  assert.ok(flatText(doc.promptCache).includes('The dashboard\'s Records section ranks the hours with the most cache written — the hour buckets by the tokens written to that cache, hours rather than requests; a large write is usually a cold start, a new conversation or a compaction ([Dashboard](dashboard.md))'))
+  assert.equal(typeof GERMAN['A large cache write is usually a cold start — a conversation\'s prefix written to the cache again after it expired —, a new conversation or a compaction; one hour can hold several.'], 'string')
+  const bar = flatText(doc.statusBar)
+  assert.ok(bar.includes('Neither is the price line (1.11): under every token table with an *API cost* column — the quota entries\', the tokens and cost entries\', the budget entry\'s — one italic line names the day the price table was checked, the rows checked later, *your configured rates* while a multiplier or custom prices apply, and the pages the tooltip\'s own providers\' prices were read from, by host name'))
+  assert.ok(bar.includes(`*Prices as of …; checked later: … Price sources: ${PRICE_SOURCE_PAGES.claude.join(', ')}.*`))
+  const statusText = readDoc('src/statusText.ts')
+  assert.equal((statusText.match(/priceLine\(ctx, /g) ?? []).length, 4, 'the tooltips print the price line in another number of places: say so in the docs')
+  assert.ok(statusText.includes("if (rows.some((b) => b.unit === 'usd')) out.push(...priceLine(ctx, scopeSources(cfg)))"), 'the budget tooltip no longer prints the price line for a money budget')
+  const cost = flatText(doc.cost)
+  assert.ok(cost.includes('the key figures\' *API equivalent* card explains itself as *what the same tokens would have cost through the API at your configured rates*, every status-bar tooltip with a cost — the budget entry\'s included — says *your configured rates* in its price line'))
+  assert.ok(readDoc('src/stats.ts').includes("t('What the same tokens would have cost through the API at your configured rates')"))
+  // development.md: the price table's ledger is the CHANGELOG (C5 rule 4), the constants named as exported.
+  const dev = flatText(doc.development)
+  assert.ok(doc.development.includes('\n## The price table\n'))
+  for (const claim of ['**A re-check of the table, or a new row, is a CHANGELOG line**: the CHANGELOG is the table\'s ledger',
+    '`PRICES_AS_OF` is the day the table was checked whole, `LEGACY_CHECKED` the earlier check of the Claude 4.x and 3.x rows, `OPUS_5_5_CHECKED` the day of the Claude Opus 5.5 row',
+    'a rule closed without a successor only when `CLOSED_ON_PURPOSE` names it with a comment']) {
+    assert.ok(dev.includes(claim), `docs/development.md does not say: ${claim}`)
+  }
+  const prices = readDoc('src/prices.ts')
+  for (const name of ['export const PRICES_AS_OF', 'export const LEGACY_CHECKED', 'export const OPUS_5_5_CHECKED', 'export const PRICES_CHECKED_LATER', 'export const PRICE_SOURCE_PAGES']) assert.ok(prices.includes(name), `${name} is gone from prices.ts`)
+  assert.ok(readDoc('test/prices.test.ts').includes('const CLOSED_ON_PURPOSE'))
+  // The README: the bullet with every native name in the registry's order, the Records bullet, the index rows, the picture's alt text.
+  const readme = flatText(README)
+  const natives = LANGUAGES.map((e) => e.native)
+  assert.ok(readme.includes(`— to ${natives.slice(0, -1).join(', ')} or ${natives[natives.length - 1]}, or to VS Code's display language`), 'the README bullet does not name the twenty-six as the registry has them')
+  for (const claim of ['* **Twenty-six languages.**', 'The twenty-four beyond English and German were translated by AI agents and checked by tests, not by native speakers',
+    'the fixed-period token totals and, off by default, the Records — since 1.11 the most expensive days, the longest and largest Claude Code sessions and the hours with the most cache written. → [Dashboard](docs/dashboard.md)',
+    'the twenty-six languages and their flags, the notation that stays the same, and how the translations were made |',
+    'The dated price table and the pages it was read from, your own rates and the list price beside them, the family fallback, and what the figure is not |',
+    'down to Română · Romanian — twenty-seven lines, each with its flag']) {
+    assert.ok(readme.includes(claim), `README.md does not say: ${claim}`)
+  }
+  // The store picture of the picker shows the whole list (§4 P9): 840 px wide, tall enough for twenty-seven lines.
+  const png = readFileSync(join(ROOT, 'media/screenshot-languages.png'))
+  assert.equal(png.readUInt32BE(16), 840)
+  assert.ok(png.readUInt32BE(20) >= 1500, `media/screenshot-languages.png is ${png.readUInt32BE(20)} px tall — the list of twenty-seven lines needs more`)
+  // commands.md, troubleshooting.md, the walkthrough, prompts.md — and every language translates the shipped prompt's title.
+  assert.ok(flatText(doc.commands).includes('`auto`, the default, or one of twenty-six languages') && flatText(doc.commands).includes('German, the twelve languages of 1.9 and the twelve of 1.11 ([Languages](languages.md))'))
+  assert.ok(doc.troubleshooting.includes('[the table](languages.md#the-twenty-six-languages)'))
+  assert.ok(flatText(readDoc('media/walkthrough/dashboard.md')).includes('twenty-six of them, or *Automatic*'))
+  assert.ok(flatText(doc.prompts).includes('and likewise in each of the other twenty-four languages; the German status prompt keeps the author\'s own wording, the twenty-four translate the English'))
+  for (const id of LANGUAGES.slice(1).map((e) => e.id)) assert.equal(typeof bundle(id)['Status table'], 'string', `${id} does not translate the shipped prompt's title`)
+  // The brief's pattern-key note says what the Japanese files do (L6: ja keeps the ASCII colon).
+  const brief = flatText(readDoc('l10n/TRANSLATING.md'))
+  assert.ok(brief.includes('`{0}：` in Chinese (Japanese writes the ASCII colon `{0}:`, as its sentences do), `（）` around a figure in Chinese and Japanese'))
+  assert.equal(brief.includes('`{0}：` in Chinese and Japanese'), false)
+  // dashboard.md and settings.md: the count words and the type-ahead.
+  assert.ok(flatText(doc.dashboard).includes('then the twenty-six languages, each with its flag') && flatText(doc.dashboard).includes('A letter moves the focus to the next language whose own name or name in your language begins with it, round the list, and chooses nothing'))
+  assert.ok(doc.settings.includes('The settings UI offers the twenty-seven values as a list') && doc.settings.includes('The twenty-four languages beyond English and German were translated by AI agents'))
+  assert.equal(properties['tokenPace.language'].enum?.length, 27)
 })

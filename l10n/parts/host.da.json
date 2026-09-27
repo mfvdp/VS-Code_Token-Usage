@@ -215,6 +215,6 @@
   "{0}, {1} window: exhausted.": "{0}, vindue {1}: opbrugt.",
   "{0}, {1} window: reset at {2} — {3} used in the new window.": "{0}, vindue {1}: nulstillet kl. {2} — {3} brugt i det nye vindue.",
   "{0}, {1} window: {2} used — resets at {3}.": "{0}, vindue {1}: {2} brugt — nulstilles {3}.",
-  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, vindue {1}: {2} brugt, løber tør kl. {3} — før det nulstilles {4}.",
+  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, vindue {1}: {2} brugt, løber tør {3} — før det nulstilles {4}.",
   "{0}, {1} window: {2} used.": "{0}, vindue {1}: {2} brugt."
 }

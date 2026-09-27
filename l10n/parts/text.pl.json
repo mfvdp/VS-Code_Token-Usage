@@ -294,7 +294,7 @@
   "polled": "odpytanie",
   "priced from a family fallback: {0}.": "wycenione zastępczo wg rodziny: {0}.",
   "projected": "prognoza",
-  "pushed": "powiadomienie",
+  "pushed": "doręczenie",
   "quota off": "przydział wył.",
   "raise tokenPace.dashboard.modelRows to see them": "aby je zobaczyć, należy zwiększyć tokenPace.dashboard.modelRows",
   "raise tokenPace.dashboard.topN to see them": "aby je zobaczyć, należy zwiększyć tokenPace.dashboard.topN",

@@ -94,7 +94,7 @@
   "config.clickAction.enum.refresh": "立即擷取配額（遵守退避等待）",
   "config.clickAction.enum.openWebsite": "在瀏覽器中開啟供應商的官方用量頁面",
   "config.usagePageLinks.description": "將工具提示標題設為供應商官方用量頁面的連結（`https://claude.ai/settings/usage`、`https://chatgpt.com/codex/settings/usage`），並在選單中提供 *開啟官方用量頁面*。\n\n延伸模組本身絕不會連線到這些頁面；連結會在瀏覽器中開啟。",
-  "config.alignment.description": "視窗變窄時，靠右對齊的項目會在**沒有任何通知**的情況下被隱藏。建議使用 `left`。",
+  "config.alignment.description": "視窗變窄時，靠右對齊的項目會在**沒有任何預告**的情況下被隱藏。建議使用 `left`。",
   "config.alignment.enum.left": "狀態列左半部 — 建議",
   "config.alignment.enum.right": "狀態列右半部",
   "config.staleAfterMinutes.description": "配額讀數被視為過時的時間門檻：過時的讀數會以 `tokenPace.stale` 顯示為灰色，並在工具提示中標示，且不會由它觸發警示。若在該讀數之後 Token Pace 自己的擷取失敗，項目會另外顯示下次嘗試的時間（「1h12m 後重試」）。",

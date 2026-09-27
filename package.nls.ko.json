@@ -94,7 +94,7 @@
   "config.clickAction.enum.refresh": "지금 할당량 가져오기(백오프 준수)",
   "config.clickAction.enum.openWebsite": "브라우저에서 공급자의 공식 사용량 페이지 열기",
   "config.usagePageLinks.description": "도구 설명 제목을 공급자의 공식 사용량 페이지(`https://claude.ai/settings/usage`, `https://chatgpt.com/codex/settings/usage`) 링크로 만들고 메뉴에 *공식 사용량 페이지 열기*를 표시합니다.\n\n확장 자체는 이 페이지에 접속하지 않으며, 링크는 브라우저에서 열립니다.",
-  "config.alignment.description": "오른쪽 정렬 항목은 창이 좁으면 **알림 없이** 숨겨집니다. `left`를 권장합니다.",
+  "config.alignment.description": "오른쪽 정렬 항목은 창이 좁으면 **예고 없이** 숨겨집니다. `left`를 권장합니다.",
   "config.alignment.enum.left": "상태 표시줄의 왼쪽 절반 — 권장",
   "config.alignment.enum.right": "상태 표시줄의 오른쪽 절반",
   "config.staleAfterMinutes.description": "할당량 측정값이 오래된 것으로 간주되는 경과 시간: 그 값은 `tokenPace.stale` 색으로 흐리게 표시되고 도구 설명에 표시되며, 그 값으로는 경고가 발생하지 않습니다. 그 측정값 이후 Token Pace 자체 가져오기가 실패했다면 항목에 다음 시도 시점이 추가됩니다(“1h12m 후 재시도”).",

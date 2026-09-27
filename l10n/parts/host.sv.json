@@ -90,7 +90,7 @@
   "The Agents section reads the file whenever it changes. A permission request inside a subagent names the agent, and its row says ‘waiting for approval’; one without an agent marks the session's row. The marker goes when the agent writes its next reply, when it stops, or after {0} minutes. In Claude Code's auto mode no permission dialog is shown, so no wait is reported.": "Avsnittet Agenter läser filen när den ändras. En behörighetsbegäran i en subagent namnger agenten, och dess rad visar ”väntar på godkännande”; en utan agent markerar sessionens rad. Markeringen försvinner när agenten skriver sitt nästa svar, när den stoppar eller efter {0} minuter. I Claude Codes automatiska läge visas ingen behörighetsdialog, så ingen väntan rapporteras.",
   "The Claude status line is still connected": "Claude-statusraden är fortfarande ansluten",
   "The Telegram bot's token (from @BotFather). It is kept in VS Code's secret storage.": "Telegram-botens token (från @BotFather). Den sparas i VS Codes säkra lagring.",
-  "The address and its secret stay in VS Code's secret storage on this machine, never in settings.json. Token Pace reads nothing back from {0} except whether it accepted the message.": "Adressen och dess hemlighet stannar i VS Codes säkra lagring på den här datorn, aldrig i settings.json. Token Pace läser inget tillbaka från {0} utom om meddelandet togs emot.",
+  "The address and its secret stay in VS Code's secret storage on this machine, never in settings.json. Token Pace reads nothing back from {0} except whether it accepted the message.": "Adressen och dess hemlighet stannar i VS Codes säkra lagring på den här datorn, aldrig i settings.json. Token Pace läser inget annat tillbaka från {0} än huruvida meddelandet togs emot.",
   "The first path is the script, which this command has just copied into Token Pace's storage; the second is the file it writes. The script accepts no other file.": "Den första sökvägen är skriptet, som det här kommandot just har kopierat till Token Paces lagring; den andra är filen som det skriver till. Skriptet godtar ingen annan fil.",
   "The install could not be recorded ({0}); settings.json was restored from {1}.": "Installationen kunde inte registreras ({0}); settings.json återställdes från {1}.",
   "The install could not be recorded ({0}); settings.json was restored.": "Installationen kunde inte registreras ({0}); settings.json återställdes.",
@@ -215,6 +215,6 @@
   "{0}, {1} window: exhausted.": "{0}, fönster {1}: uttömt.",
   "{0}, {1} window: reset at {2} — {3} used in the new window.": "{0}, fönster {1}: återställt kl. {2} — {3} förbrukat i det nya fönstret.",
   "{0}, {1} window: {2} used — resets at {3}.": "{0}, fönster {1}: {2} förbrukat — återställs {3}.",
-  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, fönster {1}: {2} förbrukat, tar slut kl. {3} — innan det återställs {4}.",
+  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, fönster {1}: {2} förbrukat, tar slut {3} — innan det återställs {4}.",
   "{0}, {1} window: {2} used.": "{0}, fönster {1}: {2} förbrukat."
 }

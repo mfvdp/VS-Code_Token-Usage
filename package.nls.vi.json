@@ -305,7 +305,7 @@
   "config.notifications.channels.enum.telegram": "Cuộc trò chuyện của một bot Telegram",
   "config.notifications.channels.enum.ntfy": "Một chủ đề trên máy chủ ntfy",
   "config.notifications.channels.enum.email": "Email qua máy chủ SMTP riêng",
-  "config.notifications.events.description": "Những gì Token Pace gửi thông báo. Một tin nhắn chỉ chứa sự kiện, chương trình hoặc nhà cung cấp, cửa sổ hạn mức, phần trăm và thời gian — không bao giờ chứa lời nhắc, đường dẫn, dự án hay phiên.\n\n`agentWaiting` cần hook tác nhân (*Token Pace: Thiết lập hook tác nhân…*); `agentWaiting` và `agentDone` thuộc về Claude Code và chỉ được gửi khi cửa sổ không có tiêu điểm.",
+  "config.notifications.events.description": "Những gì Token Pace thông báo. Một tin nhắn chỉ chứa sự kiện, chương trình hoặc nhà cung cấp, cửa sổ hạn mức, phần trăm và thời gian — không bao giờ chứa lời nhắc, đường dẫn, dự án hay phiên.\n\n`agentWaiting` cần hook tác nhân (*Token Pace: Thiết lập hook tác nhân…*); `agentWaiting` và `agentDone` thuộc về Claude Code và chỉ được gửi khi cửa sổ không có tiêu điểm.",
   "config.notifications.events.enum.agentWaiting": "Claude Code đã chờ cấp quyền hoặc câu trả lời được một phút",
   "config.notifications.events.enum.agentDone": "Claude Code đã kết thúc một lượt kéo dài ít nhất hai phút",
   "config.notifications.events.enum.quotaThreshold": "Một cửa sổ hạn mức đã vượt ngưỡng đã đặt (#tokenPace.notifications.thresholds#)",

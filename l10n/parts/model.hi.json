@@ -45,7 +45,7 @@
   "Claude Code only — not shown while {0} is selected.": "केवल Claude Code — जब तक {0} चुना है, नहीं दिखाया जाता।",
   "Claude Code sessions of the last {0} days that are no longer active — the Agents section keeps a session for {0} days after its last line. Time runs from its first counted line to its last, pauses included; usage is its own and its agents'.": "पिछले {0} दिनों के वे Claude Code सत्र जो अब सक्रिय नहीं हैं — एजेंट अनुभाग किसी सत्र को उसकी अंतिम पंक्ति के बाद {0} दिन तक रखता है। समय उसकी पहली गिनी गई पंक्ति से अंतिम पंक्ति तक चलता है, विराम सहित; उपयोग उसका अपना और उसके एजेंटों का है।",
   "Claude Code version": "Claude Code संस्करण",
-  "Claude Code's last reply there did not end its turn.": "वहाँ Claude Code के अंतिम उत्तर ने उसकी टर्न समाप्त नहीं की।",
+  "Claude Code's last reply there did not end its turn.": "वहाँ Claude Code के अंतिम उत्तर ने उसका टर्न समाप्त नहीं किया।",
   "Claude Code's own figure for this agent, never added to a total": "इस एजेंट के लिए Claude Code का अपना आँकड़ा, किसी योग में कभी नहीं जोड़ा जाता",
   "Claude Code's own figures, never added to a total": "Claude Code के अपने आँकड़े, किसी योग में कभी नहीं जोड़े जाते",
   "Claude Code's run record": "Claude Code का रन-विवरण",

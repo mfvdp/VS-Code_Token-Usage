@@ -215,6 +215,6 @@
   "{0}, {1} window: exhausted.": "{0}, ikkuna {1}: käytetty loppuun.",
   "{0}, {1} window: reset at {2} — {3} used in the new window.": "{0}, ikkuna {1}: nollautui klo {2} — uudesta ikkunasta käytetty {3}.",
   "{0}, {1} window: {2} used — resets at {3}.": "{0}, ikkuna {1}: {2} käytetty — nollautuu {3}.",
-  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, ikkuna {1}: {2} käytetty, loppuu klo {3} — ennen kuin se nollautuu {4}.",
+  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, ikkuna {1}: {2} käytetty, loppuu {3} — ennen kuin se nollautuu {4}.",
   "{0}, {1} window: {2} used.": "{0}, ikkuna {1}: {2} käytetty."
 }

@@ -94,7 +94,7 @@
   "config.clickAction.enum.refresh": "今すぐクォータを取得する（待機時間を守ります）",
   "config.clickAction.enum.openWebsite": "プロバイダーの公式の使用量ページをブラウザーで開く",
   "config.usagePageLinks.description": "ツールチップのタイトルを、プロバイダーの公式の使用量ページ (`https://claude.ai/settings/usage`、`https://chatgpt.com/codex/settings/usage`) へのリンクにし、メニューに *公式の使用量ページを開く* を表示します。\n\n拡張機能自体がこれらのページにアクセスすることはありません。リンクはブラウザーで開きます。",
-  "config.alignment.description": "右揃えの項目は、ウィンドウの幅が狭いと**通知なしに**非表示になります。`left` をお勧めします。",
+  "config.alignment.description": "右揃えの項目は、ウィンドウの幅が狭いと**予告なく**非表示になります。`left` をお勧めします。",
   "config.alignment.enum.left": "ステータスバーの左半分 — 推奨",
   "config.alignment.enum.right": "ステータスバーの右半分",
   "config.staleAfterMinutes.description": "クォータの測定値を古い値とみなすまでの経過時間: 古い値は `tokenPace.stale` でグレー表示され、ツールチップで示され、アラートの発生源にもなりません。その測定値の後に Token Pace 自身の取得が失敗した場合、項目には次の試行のタイミングが追加されます（「再試行 1h12m」）。",

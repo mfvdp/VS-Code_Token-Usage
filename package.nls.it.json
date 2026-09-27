@@ -300,7 +300,7 @@
   "config.alerts.windowCondition.enum.weeklyOnly": "Solo le finestre di 7 giorni",
   "config.alerts.budgetPercent.description": "Mostra un avviso una volta per periodo quando un budget di `#tokenPace.budgets#` supera questa percentuale del proprio limite. `0` lo disattiva.\n\nUn messaggio per periodo e solo verso l'alto, come ogni altro avviso qui. Viene valutato sull'utilizzo conteggiato localmente invece che su una rilevazione del provider, quindi resta silenzioso finché la prima lettura della cronologia è ancora in corso.",
   "configuration.notifications.title": "Notifiche (telefono, chat, e-mail)",
-  "config.notifications.channels.description": "I canali a cui Token Pace può inviare notifiche. **Vuoto — il valore predefinito — significa che non viene mai inviato nulla.**\n\nUn canale funziona dopo averlo configurato con *Token Pace: Configura un canale di notifica…*, che conserva il suo indirizzo e il suo segreto nell'archivio sicuro di VS Code e chiede di consentirne l'host.",
+  "config.notifications.channels.description": "I canali a cui Token Pace può inviare notifiche. **Vuoto — il valore predefinito — significa che non viene mai inviato nulla.**\n\nUn canale funziona una volta configurato con *Token Pace: Configura un canale di notifica…*, che conserva il suo indirizzo e il suo segreto nell'archivio sicuro di VS Code e chiede di consentirne l'host.",
   "config.notifications.channels.enum.webhook": "Un webhook: un indirizzo proprio con JSON, oppure Slack, Discord, Microsoft Teams, Mattermost o Rocket.Chat — vedere #tokenPace.notifications.webhook#",
   "config.notifications.channels.enum.telegram": "La chat di un bot Telegram",
   "config.notifications.channels.enum.ntfy": "Un topic su un server ntfy",

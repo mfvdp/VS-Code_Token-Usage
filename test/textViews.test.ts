@@ -81,6 +81,58 @@ test('1.13 A3 rule 10, Review 1 F1: the markdown document of a right-to-left lan
   assert.deepEqual([...new Set(ltr)], ['→'])
 })
 
+/**
+ * 1.13 lead fix after Review 2 (F2, F1): a hand-picked range in a right-to-left language — its label is data every
+ * outlet shares and keeps → (time.ts), so the markdown document's head line holds → twice and no ← (Review 2's probe
+ * printed "*2026-08-05 ← 2026-09-03 · 2026-08-05 → 2026-09-03 · …*"); the Quick Pick's "Open dashboard" description
+ * holds the label's → and its own ← (rangeArrow), and the door isolates it although it holds no letter (F1): RLI, the
+ * label one left-to-right unit, each day one, PDI.
+ */
+test('1.13 lead fix after Review 2 (F2, F1): a hand-picked range right to left — the markdown document\'s head line holds → twice and no ←; the "Open dashboard" description holds the label\'s → and its own ←, and the door isolates the letter-free line', () => {
+  const bidi = require('../src/bidi') as typeof import('../src/bidi')
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const { pickItems } = require('../src/hostUi') as typeof import('../src/hostUi')
+  const { rangeFor } = require('../src/time') as typeof import('../src/time')
+  const { timeConfig } = require('./fixtures/viewFixtures') as typeof import('./fixtures/viewFixtures')
+  const { pseudoRtlBundle } = require('./helpers/nls') as typeof import('./helpers/nls')
+  try {
+    i18n.setBundle(pseudoRtlBundle())
+    i18n.setLocale('ar-u-ca-gregory-nu-latn')
+    i18n.setLang('ar')
+    i18n.setDir('rtl')
+    const cfg = makeConfig()
+    const range = rangeFor({ from: '2026-08-05', to: '2026-09-03' }, NOW, timeConfig(cfg))
+    assert.equal(range.label, '2026-08-05 → 2026-09-03')
+    const history = makeHistory()
+    fillHistory(history)
+    const vm = buildViewModel(makeInput({ history, cfg, range }))
+    const md = markdownDocument(vm)
+    const head = md.split('\n').find((l) => l.startsWith('*')) ?? ''
+    assert.ok(head.startsWith('*2026-08-05 → 2026-09-03 · 2026-08-05 → 2026-09-03 · '), head)
+    assert.equal((head.match(/→/g) ?? []).length, 2, head)
+    assert.equal(head.includes('←'), false, head)
+    assert.equal(bidi.BIDI_CONTROLS.test(md), false)
+    assert.match(md, /كلمة/)
+    const open = quickPickItems(vm)[0]
+    assert.equal(open.command, 'tokenPace.showDashboard')
+    assert.equal(open.description, '2026-08-05 → 2026-09-03 · 2026-08-05 ← 2026-09-03')
+    const [shown] = pickItems([open], 'rtl')
+    assert.equal(shown.description,
+      `${bidi.RLI}${bidi.LRI}2026-08-05 → 2026-09-03${bidi.PDI} · ${bidi.LRI}2026-08-05${bidi.PDI} ← ${bidi.LRI}2026-09-03${bidi.PDI}${bidi.PDI}`)
+    assert.equal(bidi.stripBidi(shown.description ?? ''), open.description)
+  } finally {
+    i18n.setBundle(undefined)
+    i18n.setLocale(undefined)
+    i18n.setLang(undefined)
+    i18n.setDir(undefined)
+  }
+  // Left to right: the label the same, the Quick Pick's own arrow → as well, the door's very item.
+  const range = rangeFor({ from: '2026-08-05', to: '2026-09-03' }, NOW, timeConfig(makeConfig()))
+  const open = quickPickItems(buildViewModel(makeInput({ range })))[0]
+  assert.equal(open.description, '2026-08-05 → 2026-09-03 · 2026-08-05 → 2026-09-03')
+  assert.equal(pickItems([open], 'ltr')[0], open)
+})
+
 /** The fixture's aggregator after a roll-up that keeps no hour buckets at all. */
 function rolledUp(): Aggregator {
   const snap = buildAgg().toSnapshot()

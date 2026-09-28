@@ -115,13 +115,16 @@ test('rangeFor covers every preset', () => {
   assert.equal(rangeFor('all', NOW, utc).preset, 'all')
 })
 
-test('1.13 (Review 1 F1): a custom range\'s label takes its arrow from the words\' direction — ← right to left, → left to right, the days as they are', () => {
+test('1.13 lead fix after Review 2 (pinned and changed: Review 1 F1 gave a hand-picked range\'s label the words\' arrow, ← right to left; Review 2 F2 — the label is data every outlet shares and keeps → under rtl and ltr alike, the days as they are; a Quick Pick adds its own arrow)', () => {
   const i18n = require('../src/i18n') as typeof import('../src/i18n')
   try {
     i18n.setDir('rtl')
     const r = rangeFor({ from: '2026-01-01', to: '2026-01-31' }, NOW, utc)
-    assert.equal(r.label, '2026-01-01 ← 2026-01-31')
+    assert.equal(r.label, '2026-01-01 → 2026-01-31')
+    assert.equal(r.label.includes('←'), false)
     assert.deepEqual([r.from, r.to, r.preset], ['2026-01-01', '2026-01-31', 'custom'])
+    // The same label the page's range grammar takes as one unit: two ISO days with → and plain spaces between.
+    assert.match(r.label, /^\d{4}-\d{2}-\d{2} → \d{4}-\d{2}-\d{2}$/)
   } finally {
     i18n.setDir(undefined)
   }

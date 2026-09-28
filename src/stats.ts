@@ -1069,7 +1069,10 @@ function howUsage(): string {
   return t('fresh input + cache write + output')
 }
 
-/** The days of a range; its arrow the way the words read (1.13 Review 1 F1) — time.ts's custom label is written alike. */
+/**
+ * The days of a range; its arrow the way the words read (1.13 Review 1 F1). time.ts's custom label keeps → in every
+ * language (Review 2 F2: it is data every outlet shares), so periodOf knows a hand-picked range by that form.
+ */
 function spanOf(from: string, to: string): string {
   return from === to ? from : `${from}${rangeArrow()}${to}`
 }
@@ -1081,7 +1084,8 @@ function spanOf(from: string, to: string): string {
  */
 function periodOf(r: DayRange): string {
   const days = spanOf(r.from, r.to)
-  if (r.label === days) return days
+  // A hand-picked range's label is its days with → in every language (time.ts, Review 2 F2): the days once, the arrow theirs.
+  if (r.label === days || r.label === `${r.from} → ${r.to}`) return days
   return `${r.label.charAt(0).toLowerCase()}${r.label.slice(1)} · ${days}`
 }
 

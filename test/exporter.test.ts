@@ -117,6 +117,44 @@ test('the JSON export states its schema, its range, its zone and its prices', ()
   assert.ok(j.notes.length >= 3)
 })
 
+/**
+ * 1.13 lead fix after Review 2 (F2): a hand-picked range's label is data every outlet shares and keeps → in every
+ * language (time.ts) — the clipboard summary's heading (Review 2's probe read "# Token Pace — 2026-08-05 ← 2026-09-03
+ * (2026-08-05 → 2026-09-03)") and the JSON export's range.label hold → and no ← in a right-to-left language, and no
+ * bidi control (§0a.3).
+ */
+test('1.13 lead fix after Review 2 (F2): right to left, the clipboard summary\'s heading and the JSON export\'s range.label hold a hand-picked range\'s → and no ←, and no bidi control', () => {
+  const i18n = require('../src/i18n') as typeof import('../src/i18n')
+  const { rangeFor } = require('../src/time') as typeof import('../src/time')
+  const { BIDI_CONTROLS } = require('../src/bidi') as typeof import('../src/bidi')
+  const { pseudoRtlBundle } = require('./helpers/nls') as typeof import('./helpers/nls')
+  try {
+    setBundle(pseudoRtlBundle())
+    setLocale('ar-u-ca-gregory-nu-latn')
+    setLang('ar')
+    i18n.setDir('rtl')
+    const custom = rangeFor({ from: '2026-08-25', to: TODAY }, NOW, tcfg)
+    assert.equal(custom.label, `2026-08-25 → ${TODAY}`)
+    const j = JSON.parse(toJson(buildAgg(), custom, cfg, tcfg))
+    assert.deepEqual(j.range, { from: '2026-08-25', to: TODAY, label: `2026-08-25 → ${TODAY}`, preset: 'custom' })
+    assert.equal(BIDI_CONTROLS.test(j.range.label), false)
+    const history = makeHistory()
+    fillHistory(history)
+    const md = toMarkdownSummary(buildViewModel(makeInput({ history, range: custom })))
+    const heading = md.split('\n')[0]
+    assert.ok(heading.startsWith('# ') && heading.includes(`2026-08-25 → ${TODAY} (2026-08-25 → ${TODAY})`), heading)
+    assert.equal((heading.match(/→/g) ?? []).length, 2, heading)
+    assert.equal(heading.includes('←'), false, heading)
+    assert.equal(BIDI_CONTROLS.test(md), false)
+    assert.match(md, /كلمة/)
+  } finally {
+    setBundle(undefined)
+    setLocale(undefined)
+    setLang(undefined)
+    i18n.setDir(undefined)
+  }
+})
+
 test('the JSON buckets mirror the CSV rows and null out what has no price', () => {
   const j = JSON.parse(toJson(buildAgg(), range, cfg, tcfg))
   const csv = csvRows(toCsv(buildAgg(), range, cfg, tcfg)).slice(1, -1)

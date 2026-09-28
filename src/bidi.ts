@@ -87,6 +87,24 @@ const LEADING_CODICONS = /^(?:\$\([\w~-]+\)[ \u00A0]*)+/u
 /** A letter of a script written right to left (Hebrew, Arabic, Syriac, Thaana, N'Ko …, and their presentation forms). */
 const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u
 const LETTER = /\p{L}/u
+/** A range's arrow, either way: ← U+2190 (a right-to-left line's, rangeArrow) or → U+2192 (a hand-picked range's label). */
+const ARROW = /[\u2190\u2192]/u
+
+/**
+ * 1.13 (Review 2 F1): whether a text has something to lay out — a letter, a range's arrow, or a figure unit of FIGURE_RE
+ * (a letter-free line of two days, `2026-08-05 ← 2026-09-03`: a record streak's, a budget's period, a hand-picked range
+ * beside its days — left as it was, VS Code's left-to-right Quick Pick laid its arrow out from the last day back to the
+ * first). A text of punctuation alone, an empty one, a lone icon: nothing, and the line stays as it is.
+ */
+function laysOut(text: string): boolean {
+  if (LETTER.test(text) || ARROW.test(text)) return true
+  FIGURE_RE.lastIndex = 0
+  for (let m = FIGURE_RE.exec(text); m !== null; m = FIGURE_RE.exec(text)) {
+    if (m[0] === '') { FIGURE_RE.lastIndex++; continue }
+    return true
+  }
+  return false
+}
 
 /**
  * Each unit of FIGURE_RE in `text` wrapped in LRI … PDI — the same units the page makes elements of (a name only as
@@ -165,20 +183,20 @@ function wholeIsolate(text: string): boolean {
   return spans.length === 1 && spans[0][0] === 0 && spans[0][1] === text.length && text.endsWith(PDI)
 }
 
-/** One line: its leading icons, then RLI, its units, PDI — or the line as it is when there is no word to lay out. */
+/** One line: its leading icons, then RLI, its units, PDI — or the line as it is when there is nothing to lay out (laysOut). */
 function isolateLine(line: string): string {
   const icons = LEADING_CODICONS.exec(line)?.[0] ?? ''
   const rest = line.slice(icons.length)
-  if (!LETTER.test(rest.replace(CODICON, '')) || wholeIsolate(rest)) return line
+  if (!laysOut(rest.replace(CODICON, '')) || wholeIsolate(rest)) return line
   return icons + RLI + unitsAround(rest) + PDI
 }
 
 /**
  * 1.13 A3 rules 2–4: `s` as a right-to-left paragraph of its own on a left-to-right surface — its leading `$(icon)`
  * tokens outside at the start, then RLI, the text with each figure run inside LRI … PDI, PDI —, when `d` (the words'
- * language's direction) is 'rtl' and the text holds a letter; `s` unchanged otherwise. A text of several lines is
- * isolated line by line, as `isolateLines` does: a line break ends a bidi paragraph, and an isolate across one would
- * reach the first line only.
+ * language's direction) is 'rtl' and the text holds a letter, a figure unit or a range's arrow (Review 2 F1); `s`
+ * unchanged otherwise. A text of several lines is isolated line by line, as `isolateLines` does: a line break ends a
+ * bidi paragraph, and an isolate across one would reach the first line only.
  */
 export function isolate(s: string, d: TextDirection = dir()): string {
   if (d !== 'rtl' || typeof s !== 'string' || s === '') return s
@@ -262,10 +280,10 @@ function linksRow(text: string): boolean {
 function isolateInline(text: string): string {
   const icons = LEADING_CODICONS.exec(text)?.[0] ?? ''
   const rest = text.slice(icons.length)
-  if (!LETTER.test(rest.replace(CODICON, '').replace(LINK_DESTINATION, '').replace(HTML_TAG, '')) || wholeIsolate(rest)) return text
+  if (!laysOut(rest.replace(CODICON, '').replace(LINK_DESTINATION, '').replace(HTML_TAG, '')) || wholeIsolate(rest)) return text
   if (linksRow(rest)) {
     return icons + rest.replace(LINK, (all, label: string, dest: string) =>
-      (LETTER.test(label) && !wholeIsolate(label) ? `[${RLI}${unitsAround(label)}${PDI}](${dest})` : all))
+      (laysOut(label) && !wholeIsolate(label) ? `[${RLI}${unitsAround(label)}${PDI}](${dest})` : all))
   }
   // The opening run: emphasis marks and the `[` of a link that closes on the line.
   let open = 0
@@ -287,7 +305,7 @@ function isolateInline(text: string): string {
     break
   }
   const inner = rest.slice(open, close)
-  if (!LETTER.test(inner.replace(CODICON, '').replace(LINK_DESTINATION, '').replace(HTML_TAG, '')) || wholeIsolate(inner)) return text
+  if (!laysOut(inner.replace(CODICON, '').replace(LINK_DESTINATION, '').replace(HTML_TAG, '')) || wholeIsolate(inner)) return text
   return icons + rest.slice(0, open) + RLI + markdownUnits(inner) + PDI + rest.slice(close)
 }
 
@@ -352,11 +370,12 @@ export function stripBidi(s: string): string {
 }
 
 /**
- * 1.13 (Review 1 F1): the arrow between the two ends of a range the host builds — a custom range's label, the totals'
- * and a key figure's span, a Quick Pick's period —, pointing the way the line reads: ' → ' left to right, ' ← ' right
- * to left (the page's own ranges take theirs from the page's rangeArrow, src/webview/main.ts; a translation's from
- * its translator, T4). The markdown document, the exports and the log keep their own → (English data, or a text
- * editor's left-to-right line).
+ * 1.13 (Review 1 F1): the arrow between the two ends of a range the host builds for one surface — the totals' and a
+ * key figure's span, a Quick Pick's period —, pointing the way the line reads: ' → ' left to right, ' ← ' right to
+ * left (the page's own ranges take theirs from the page's rangeArrow, src/webview/main.ts; a translation's from its
+ * translator, T4). A hand-picked range's label (time.ts rangeFor) is data every outlet shares and keeps → (Review 2
+ * F2: the page prints it as one left-to-right unit, the Quick Picks add their own arrow); the markdown document, the
+ * exports and the log keep their own → (English data, or a text editor's left-to-right line).
  */
 export function rangeArrow(d: TextDirection = dir()): string {
   return d === 'rtl' ? ' ← ' : ' → '

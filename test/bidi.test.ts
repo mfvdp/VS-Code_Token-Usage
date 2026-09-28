@@ -436,7 +436,7 @@ test('1.13 A3 rule 3 (§7a Q5): the host\'s FIGURE_GRAMMAR is the page\'s, strin
 // The helpers
 // ---------------------------------------------------------------------------
 
-test('1.13 A3 rules 2–4 (§7a Q7, Q5, Q29): isolate — the leading icons outside, RLI … PDI around the words (never FSI, though the text begins with a Latin name), each figure run an LRI … PDI inside; one isolate per line; idempotent and lossless; nothing for a text without a word or for a left-to-right language', () => {
+test('1.13 A3 rules 2–4 (§7a Q7, Q5, Q29): isolate — the leading icons outside, RLI … PDI around the words (never FSI, though the text begins with a Latin name), each figure run an LRI … PDI inside; one isolate per line; idempotent and lossless; nothing for a text with nothing to lay out or for a left-to-right language', () => {
   const s = '$(pulse) Claude 5h 25% · كلمة 14:20'
   // Latin words next to each other are one unit, as they are one left-to-right run (the page's grammar: "Claude 5h").
   assert.equal(isolate(s, 'rtl'), `$(pulse) ${RLI}${LRI}Claude 5h${PDI} ${LRI}25%${PDI} · كلمة ${LRI}14:20${PDI}${PDI}`)
@@ -449,8 +449,10 @@ test('1.13 A3 rules 2–4 (§7a Q7, Q5, Q29): isolate — the leading icons outs
   // Lines: one isolate each; an empty line stays empty.
   assert.equal(isolate('كلمة 5 h\n\nكلمة', 'rtl'), `${RLI}كلمة ${LRI}5 h${PDI}${PDI}\n\n${RLI}كلمة${PDI}`)
   assert.equal(isolateLines('كلمة 5 h\n\nكلمة', 'rtl'), isolate('كلمة 5 h\n\nكلمة', 'rtl'))
-  // Nothing to lay out: a figure alone, an icon alone, the empty text.
-  for (const x of ['42 %', '$(watch) 42', '', '–', '·']) assert.equal(isolate(x, 'rtl'), x)
+  // Nothing to lay out: an icon alone, the empty text, punctuation alone. 1.13 lead fix after Review 2 (pinned and
+  // changed: a figure alone — '42 %', '$(watch) 42' — was left as it was; since Review 2 F1 a figure unit is laid out
+  // too, the test below).
+  for (const x of ['$(watch)', '', '–', '·', '…', '$(watch) ·']) assert.equal(isolate(x, 'rtl'), x)
   // A figure with its unit holds a letter: it is isolated too, harmlessly (one left-to-right unit inside).
   assert.equal(isolate('$(watch) 4m', 'rtl'), `$(watch) ${RLI}${LRI}4m${PDI}${PDI}`)
   // Idempotent, lossless, and left to right unchanged.
@@ -479,6 +481,56 @@ test('1.13 A3 rules 2–4 (§7a Q7, Q5, Q29): isolate — the leading icons outs
   // stripBidi takes exactly the controls (not ZWNJ, which Persian writes inside a word).
   const zwnj = String.fromCharCode(0x200c)
   assert.equal(stripBidi(`a${RLI}b${PDI}${RLM}${zwnj}c${String.fromCharCode(0x061c, 0x200e, 0x202b)}`), `ab${zwnj}c`)
+})
+
+test('1.13 lead fix after Review 2 (F1): a letter-free line with a figure unit or a range\'s arrow is laid out too — a record streak\'s or a budget\'s period `2026-08-05 ← 2026-09-03` through isolate and through the door\'s pickItems is RLI, two LRI … PDI day units, PDI; a hand-picked range\'s → label one unit; punctuation alone, an empty line and a lone icon unchanged; left to right the very texts', () => {
+  const streak = '2026-08-05 ← 2026-09-03'
+  const isolated = `${RLI}${LRI}2026-08-05${PDI} ← ${LRI}2026-09-03${PDI}${PDI}`
+  assert.equal(isolate(streak, 'rtl'), isolated)
+  assert.equal(isolateLines(streak, 'rtl'), isolated)
+  // The three Quick Pick descriptions Review 2 named, through the door: the record streak (textViews.ts), a budget's
+  // period when it is neither partial nor over, and "Open dashboard" for a hand-picked range — its label (→, one unit
+  // of the range grammar, Review 2 F2) beside the Quick Pick's own ← between the two day units.
+  const items = [
+    { label: 'كلمة 30', description: streak },
+    { label: 'كلمة · كلمة: ~$76 كلمة $200 · 38 %', description: '2026-09-01 ← 2026-09-30' },
+    { label: 'كلمة', description: '2026-08-05 → 2026-09-03 · 2026-08-05 ← 2026-09-03', detail: 'كلمة 14:20' },
+  ]
+  const shown = pickItems(items, 'rtl')
+  assert.equal(shown[0].description, isolated)
+  assert.equal(shown[1].description, `${RLI}${LRI}2026-09-01${PDI} ← ${LRI}2026-09-30${PDI}${PDI}`)
+  assert.equal(shown[2].description, `${RLI}${LRI}2026-08-05 → 2026-09-03${PDI} · ${LRI}2026-08-05${PDI} ← ${LRI}2026-09-03${PDI}${PDI}`)
+  for (const s of shown) {
+    const d = s.description ?? ''
+    assert.equal(d.codePointAt(0), 0x2067, d)
+    assert.ok(d.endsWith(PDI), d)
+    assert.ok((d.match(new RegExp(`${LRI}\\d{4}-\\d{2}-\\d{2}${PDI}`, 'g')) ?? []).length >= 2 || d.includes(`${LRI}2026-08-05 → 2026-09-03${PDI}`), d)
+  }
+  // A figure alone, an arrow alone: laid out (one unit inside an isolate of its own); the tooltip's markdown too — after
+  // a list marker and inside a table cell, a cell without anything to lay out left as it is.
+  assert.equal(isolate('42 %', 'rtl'), `${RLI}${LRI}42 %${PDI}${PDI}`)
+  assert.equal(isolate('$(watch) 42', 'rtl'), `$(watch) ${RLI}${LRI}42${PDI}${PDI}`)
+  assert.equal(isolate('←', 'rtl'), `${RLI}←${PDI}`)
+  assert.equal(isolateMarkdown(`- ${streak}\n| 42 % | ▰▰▱ |`, 'rtl'), `- ${isolated}\n| ${RLI}${LRI}42 %${PDI}${PDI} | ▰▰▱ |`)
+  // Nothing to lay out: punctuation alone, the empty line, a lone icon — on every surface.
+  for (const x of ['', '…', '·', '–', '( )', '$(watch)', '$(watch) …', '**…**', '| · | – |']) {
+    assert.equal(isolate(x, 'rtl'), x, J(x))
+    assert.equal(isolateLines(x, 'rtl'), x, J(x))
+    assert.equal(isolateMarkdown(x, 'rtl'), x, J(x))
+  }
+  // Balanced, idempotent, lossless (A3 rule 9 b) — and left to right the very texts, the door's very array.
+  for (const x of [streak, '42 %', '$(watch) 42', '←', items[2].description]) {
+    const once = isolate(x, 'rtl')
+    assert.ok(balance(once).ok && balance(once).depth <= 2, J(once))
+    assert.equal(isolate(once, 'rtl'), once, J(x))
+    assert.equal(stripBidi(once), x)
+    assert.equal(isolate(x, 'ltr'), x)
+    assert.equal(isolateLines(x, 'ltr'), x)
+    assert.equal(isolateMarkdown(x, 'ltr'), x)
+  }
+  assert.equal(pickItems(items, 'ltr'), items)
+  // The mutation this exists against: the old condition (a letter, or nothing) leaves the streak as it was.
+  assert.notEqual(isolate(streak, 'rtl'), streak)
 })
 
 /** A tooltip with every line kind isolateMarkdown knows (MARKDOWN_LINE_KINDS). */
@@ -511,8 +563,10 @@ test('1.13 A3 rule 5: isolateMarkdown isolates inside the markdown a tooltip is 
   assert.equal(lines[0], `**[${RLI}${LRI}Claude Code${PDI}](https://claude.ai/settings/usage)** · كلمة ${LRI}\`max20\`${PDI}${PDI}`)
   assert.equal(lines[2], `| ${RLI}كلمة${PDI} | ${RLI}كلمة${PDI} | ${RLI}كلمة${PDI} |`)
   assert.equal(lines[3], '|---|---|---|')
-  // A cell without a word (a bar and its figure) is left as it is: its own paragraph, left to right.
-  assert.equal(lines[4], `| ${RLI}${LRI}\`5h\`${PDI}${PDI} | <span style="color:var(--vscode-charts-red);">▰▰▱</span> 42 % | ${RLI}كلمة ${LRI}14:20${PDI}${PDI} |`)
+  // A cell without a word but with a figure (a bar and its figure) is laid out right to left like its neighbours, the
+  // figure one unit, the tag as it is. 1.13 lead fix after Review 2 (pinned and changed: P5 left such a cell as it was,
+  // its own paragraph left to right; since Review 2 F1 a figure unit is laid out too — as the page's table shows it).
+  assert.equal(lines[4], `| ${RLI}${LRI}\`5h\`${PDI}${PDI} | ${RLI}<span style="color:var(--vscode-charts-red);">▰▰▱</span> ${LRI}42 %${PDI}${PDI} | ${RLI}كلمة ${LRI}14:20${PDI}${PDI} |`)
   assert.equal(lines[6], `- ${RLI}كلمة **${LRI}~$5.33${PDI}** كلمة ${LRI}\`claude-haiku-3-5\`${PDI}${PDI}`)
   assert.equal(lines[9], `$(graph) ${RLI}${LRI}\`5h\`${PDI}: ~${LRI}empty in 2h${PDI} · كلمة ${LRI}6${PDI} كلمة ${LRI}1 h${PDI}${PDI}`)
   assert.equal(lines[11], `_${RLI}كلمة **كلمة** كلمة (P90).${PDI}_`)

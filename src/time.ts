@@ -11,7 +11,6 @@
  * move usage between days.
  */
 
-import { rangeArrow } from './bidi'
 import { locale, t } from './i18n'
 // The attempt sentence reads two fields of a state and asks the one classification record of its kind
 // (1.7 P4b); types.ts holds no reader, so this module stays free of any.
@@ -310,8 +309,10 @@ export function rangeFor(
     // A reversed range is a slip of the hand, not a request for an empty table.
     if (dayMs(from) > dayMs(to)) { const t = from; from = to; to = t }
     if (dayCount(from, to) > MAX_SPAN_DAYS) from = addDays(to, -(MAX_SPAN_DAYS - 1))
-    // 1.13 (Review 1 F1): the arrow the way the words read — ← in Arabic, Hebrew and Persian (bidi.ts rangeArrow).
-    return { from, to, label: `${from}${rangeArrow()}${to}`, preset: 'custom' }
+    // 1.13 (Review 2 F2): the label is data every outlet shares — the page's caption (one left-to-right unit there), the
+    // markdown document's head line, the clipboard summary's heading, the JSON export's range.label — and keeps → in
+    // every language; a Quick Pick adds its own arrow the way its line reads (bidi.ts rangeArrow).
+    return { from, to, label: `${from} → ${to}`, preset: 'custom' }
   }
   switch (preset) {
     case 'today':

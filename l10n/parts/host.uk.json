@@ -76,7 +76,6 @@
   "Send anyway": "Усе одно надіслати",
   "Send “{0}” anyway?": "Усе одно надіслати «{0}»?",
   "Send “{0}” to…": "Надіслати «{0}» до…",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Спершу вкажіть host, user, from і to в tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Спершу вкажіть чат у tokenPace.notifications.telegram — сам токен бота не каже, куди надсилати.",
   "Set the server in tokenPace.notifications.ntfy first.": "Спершу вкажіть сервер у tokenPace.notifications.ntfy.",
   "Settings": "Налаштування",

@@ -1709,14 +1709,15 @@ test('a clock time takes "resets at", a countdown "resets" — the two messages 
   assert.equal(resetLineOf('normal', 'reset due'), 'reset due')
   assert.equal(resetLineOf('normal', '06:00 (reset due)'), '06:00 (reset due)')
   assert.equal(resetLineOf('normal', ''), '')
-  // In German the two prepositions differ — „Reset in 2h14m", „Reset um 06:00" —, never „Reset in 06:00".
+  // In German the countdown and the clock differ — „Reset in 2h14m", „Reset: 06:00" —, never „Reset in 06:00".
+  // 1.13 P6 (pinned and changed: „Reset um 06:00", „Reset um Mo 06:00" → the label form „Reset: …" — §3 B5, §7a Q18).
   const bundle = JSON.parse(readFileSync(path.join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
   try {
     setBundle(bundle)
     assert.equal(resetLineOf('normal', '2h14m'), `${bundle['resets {0}'].replace('{0}', '2h14m')}`)
     assert.equal(resetLineOf('normal', '06:00'), `${bundle['resets at {0}'].replace('{0}', '06:00')}`)
-    assert.equal(resetLineOf('normal', '06:00'), 'Reset um 06:00')
-    assert.equal(resetLineOf('normal', 'Mo 06:00'), 'Reset um Mo 06:00')
+    assert.equal(resetLineOf('normal', '06:00'), 'Reset: 06:00')
+    assert.equal(resetLineOf('normal', 'Mo 06:00'), 'Reset: Mo 06:00')
     assert.equal(resetLineOf('resetDue', '06:00'), 'Reset fällig')
   } finally {
     setBundle(undefined)

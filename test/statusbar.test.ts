@@ -340,8 +340,11 @@ function d12Row(fmt: string, w: Partial<QuotaWindow>): string {
   return tip.split('\n').find((l) => l.startsWith('| `5 h` |')) ?? ''
 }
 
-test('the "both" reset is whole keys — the bar, the compact item and the tooltip print English and German byte for byte as 1.10 (b89ff43) did, every format, due and not; a language places its own verb and brackets (1.11 D12)', () => {
-  // What b89ff43 printed (resetSuffix wrapped formatReset's "06:00 (in 2h14m)" in `resets at {0}`), for the four windows.
+// 1.13 P6 (pinned and changed: the German `absolute` and `both` rows — „Reset um 06:00" → the label form „Reset: 06:00",
+// „Reset um Fr 06:00" → „Reset: Fr 06:00" — §3 B5, §7a Q18; the English byte for byte as b89ff43 printed it, the title with it).
+test('the "both" reset is whole keys — the bar, the compact item and the tooltip print English byte for byte as 1.10 (b89ff43) did and German as 1.10 did but for 1.13\'s label form before a clock, every format, due and not; a language places its own verb and brackets (1.11 D12; 1.13 B5)', () => {
+  // What b89ff43 printed (resetSuffix wrapped formatReset's "06:00 (in 2h14m)" in `resets at {0}`), for the four windows —
+  // the German rows with 1.13's „Reset: {0}" where b89ff43 wrote „Reset um {0}".
   const b89ff43: Record<'en' | 'de', Record<string, string[]>> = {
     en: {
       'bar relative': ['CC 5h 25% · resets 2h14m', 'CC 5h 25% ▲ · resets 4d 2h', '⛔ CC 5h 100% limit reached · reset due', '$(warning) CC 5h 100% exhausted · reset due'],
@@ -352,9 +355,9 @@ test('the "both" reset is whole keys — the bar, the compact item and the toolt
     },
     de: {
       'bar relative': ['CC 5h 25% · Reset in 2h14m', 'CC 5h 25% ▲ · Reset in 4d 2h', '⛔ CC 5h 100% Limit erreicht · Reset fällig', '$(warning) CC 5h 100% erschöpft · Reset fällig'],
-      'bar absolute': ['CC 5h 25% · Reset um 06:00', 'CC 5h 25% ▲ · Reset um Fr 06:00', '⛔ CC 5h 100% Limit erreicht · Reset um 03:45', '$(warning) CC 5h 100% erschöpft · Reset um 03:45'],
-      'bar both': ['CC 5h 25% · Reset um 06:00 (in 2h14m)', 'CC 5h 25% ▲ · Reset um Fr 06:00 (in 4d 2h)', '⛔ CC 5h 100% Limit erreicht · 03:45 (Reset fällig)', '$(warning) CC 5h 100% erschöpft · 03:45 (Reset fällig)'],
-      'bar both h12': ['CC 5h 25% · Reset um 06:00 AM (in 2h14m)', 'CC 5h 25% ▲ · Reset um Fr 06:00 AM (in 4d 2h)', '⛔ CC 5h 100% Limit erreicht · 03:45 AM (Reset fällig)', '$(warning) CC 5h 100% erschöpft · 03:45 AM (Reset fällig)'],
+      'bar absolute': ['CC 5h 25% · Reset: 06:00', 'CC 5h 25% ▲ · Reset: Fr 06:00', '⛔ CC 5h 100% Limit erreicht · Reset: 03:45', '$(warning) CC 5h 100% erschöpft · Reset: 03:45'],
+      'bar both': ['CC 5h 25% · Reset: 06:00 (in 2h14m)', 'CC 5h 25% ▲ · Reset: Fr 06:00 (in 4d 2h)', '⛔ CC 5h 100% Limit erreicht · 03:45 (Reset fällig)', '$(warning) CC 5h 100% erschöpft · 03:45 (Reset fällig)'],
+      'bar both h12': ['CC 5h 25% · Reset: 06:00 AM (in 2h14m)', 'CC 5h 25% ▲ · Reset: Fr 06:00 AM (in 4d 2h)', '⛔ CC 5h 100% Limit erreicht · 03:45 AM (Reset fällig)', '$(warning) CC 5h 100% erschöpft · 03:45 AM (Reset fällig)'],
       'compact both': ['CC 25%·06:00 (in 2h14m)', 'CC 25%·Fr 06:00 (in 4d 2h)', '⛔ CC 100% Limit erreicht·03:45 (Reset fällig)', '$(warning) CC 100% erschöpft·03:45 (Reset fällig)'],
     },
   }
@@ -366,7 +369,7 @@ test('the "both" reset is whole keys — the bar, the compact item and the toolt
     'compact both': { 'tokenPace.resetFormat': 'both', 'tokenPace.density': 'compact' },
   }
   const de = JSON.parse(readFileSync(join(ROOT, 'l10n', 'bundle.l10n.de.json'), 'utf8')) as Record<string, string>
-  assert.equal(de['resets at {0} (in {1})'], 'Reset um {0} (in {1})')
+  assert.equal(de['resets at {0} (in {1})'], 'Reset: {0} (in {1})')
   try {
     for (const lang of ['en', 'de'] as const) {
       setBundle(lang === 'de' ? de : undefined)

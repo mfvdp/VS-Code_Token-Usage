@@ -25,7 +25,15 @@ export interface LeaseRecord {
   expiresAt: number
 }
 
-const DEFAULT_TTL_MS = 90_000
+/**
+ * 1.13 B7 (L10, §0a.4): the lease's heartbeat is its expiry — no field of its own. Every window runs `tryAcquire`
+ * every LEASE_RENEW_MS (extension.ts `updateRole`): the leader's call renews its record for LEASE_TTL_MS, another
+ * window's takes over a record whose expiry has passed or whose process is gone. So a window that crashed frees the
+ * lease at once (the next window's check takes it, within one interval), and one that hangs — its pid alive, its
+ * record never renewed — within LEASE_TTL_MS of its last renewal: three intervals, the watchdog's N.
+ */
+export const LEASE_RENEW_MS = 30_000
+export const LEASE_TTL_MS = 3 * LEASE_RENEW_MS
 
 /** Whether a process is still around. EPERM means "alive but not ours to signal". */
 function processAlive(pid: number): boolean {
@@ -56,7 +64,7 @@ export class Lease {
 
   constructor(
     private readonly file: string,
-    private readonly ttlMs = DEFAULT_TTL_MS,
+    private readonly ttlMs = LEASE_TTL_MS,
     private readonly log: (m: string) => void = () => { /* silent by default */ },
   ) {}
 

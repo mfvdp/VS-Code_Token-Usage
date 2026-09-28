@@ -53,6 +53,37 @@
       "kind": "nls-reword",
       "key": "config.language.description",
       "why": "the third paragraph counts the languages beyond English and German as twenty-seven (was twenty-four), the rest is unchanged — 1.13 A1"
+    },
+    {
+      "n": 8,
+      "by": "P6",
+      "kind": "nls-reword",
+      "key": "config.credentials.keychain.description",
+      "why": "the second paragraph says the first read in a VS Code window (was: the first read of a window), the rest is unchanged — your value has said a VS Code window since 1.12, so review it and keep it — 1.13 B1 (L1)"
+    },
+    {
+      "n": 9,
+      "by": "P6",
+      "kind": "nls-reword",
+      "key": "config.notifications.telegram.description",
+      "why": "rewritten so that channel means Telegram's alone: it opens with sending through a Telegram bot (no longer \"the Telegram channel\", the notification channel) and ends the chatId sentence with the @name of a public Telegram channel, in your language's 1.12 word for a Telegram channel — your old value mixes the two senses of channel, so translate it anew, `chatId` in backticks — 1.13 B2 (L2)"
+    },
+    {
+      "n": 10,
+      "by": "P6",
+      "kind": "reword",
+      "part": "host",
+      "old": "Set host, user, from and to in tokenPace.notifications.email first.",
+      "key": "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.",
+      "carry": false,
+      "why": "the e-mail channel's setup hint writes the four field ids of tokenPace.notifications.email as code: `host`, `user`, `from` and `to` in backticks, each kept as it is (T5 holds every backtick span) — your old value, which wrote them bare, is dropped, so write the sentence again with the backticks — 1.13 B3 (L3)"
+    },
+    {
+      "n": 11,
+      "by": "P6",
+      "kind": "nls-reword",
+      "key": "config.codexAppServer.mode.description",
+      "why": "the sentence names its subject: the app-server ends when VS Code closes (was: it ends — the mode or the app-server), the rest is unchanged — where your value already makes the app-server the subject, keep it, and where its subject is the mode or left out (1.12's readers named Polish, Czech, Spanish and Hungarian), write it — 1.13 B4 (L4)"
     }
   ]
 }

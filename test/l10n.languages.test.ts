@@ -21,7 +21,7 @@
  *   T7  the tone: no exclamation mark
  *   T8  the tables: a header row keeps its pipes
  *   T9  no English left, proper names and code excepted (SAME_IN_EVERY_LANGUAGE), a key's own field ids too
- *       (FIELD_IDS_OF_A_KEY)
+ *       (FIELD_IDS_OF_A_KEY — empty since 1.13 B3: the one key it held writes its ids as code)
  *   T10 the registry: every file names a shipped language; the language names translated (or written
  *       as the English where LANGUAGE_NAME_AS_ENGLISH says the language writes them so), the native
  *       names and the product's name as they are
@@ -71,7 +71,8 @@
  * a reset clock that may carry a weekday, held to the code by a scan; the kept-names guard reads its seventeen
  * notification texts from a literal of history (NOTIFY_TEXT_KEYS_1_12). The ledger started at 1.12.0's release commit
  * (l10n-rekey.mjs --start a09a405) with a list at cursor 0 for each of the twenty-four, and PENDING_ALLOWED is true
- * until 1.13's join (P7).
+ * until 1.13's join (P7). 1.13 B3 (P6): the e-mail channel's setup hint writes its field ids in backticks, which
+ * PROTECTED takes out and T5 holds, so FIELD_IDS_OF_A_KEY is empty — the declaration, its guard and its history stay.
  *
  * Every rule is a function over the files of one language, so it runs over the repository's files
  * and — each once with the mutation it exists to catch — over a synthetic language written into a
@@ -156,13 +157,15 @@ export const NAMES_OF_1_12: ReadonlyArray<readonly [string, string]> = [
  * another script lists them between its own separators (ja 「host、user、from、to」, ru «host, user, from и to»), a run
  * of Latin words T9's second rule read as English left: O2 reported it for ja, ko, zh-cn, zh-tw and ru, and O4's uk, el
  * and hi would follow. Held per key — `[key, ids, reason]`: T9 takes the ids out of that key and its value alone, so
- * that `host`, `user`, `from` and `to` stay English words it catches everywhere else (SAME_IN_EVERY_LANGUAGE would
- * take them out of every text). The brief's T9 section names the key and the ids.
+ * that the ids stay English words it catches everywhere else (SAME_IN_EVERY_LANGUAGE would take them out of every text).
+ *
+ * History: 1.12 held one key here — "Set host, user, from and to in tokenPace.notifications.email first." with
+ * `host`, `user`, `from`, `to` (1.12's lead fix 685164b). Retired by 1.13 B3 (P6, §7a Q17): the key writes the ids as
+ * code — "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first." —, which PROTECTED takes out and
+ * T5 holds verbatim, so the list is empty. The declaration and its guard stay for a later key of the same kind; an entry
+ * is the lead's, at a merge, never a package's (§0b.14).
  */
-export const FIELD_IDS_OF_A_KEY: ReadonlyArray<readonly [string, ReadonlyArray<string>, string]> = [
-  ['Set host, user, from and to in tokenPace.notifications.email first.', ['host', 'user', 'from', 'to'],
-    'the e-mail channel\'s setup check names the four fields of tokenPace.notifications.email by their ids (ledger n=95, P9 — §3 C13); O2 reported the false positive for the five languages of another script'],
-]
+export const FIELD_IDS_OF_A_KEY: ReadonlyArray<readonly [string, ReadonlyArray<string>, string]> = []
 
 /**
  * T9's exceptions, each with its reason: a word of this list is taken out of the key and the value
@@ -708,10 +711,14 @@ function nonLatinLeft(value: string): string | null {
   return null
 }
 
+/** T9: the whole-word pattern of each listed key's ids (1.13 P6: a function of the list, so the guard runs it on a synthetic one). */
+function fieldIdPatterns(list: ReadonlyArray<readonly [string, ReadonlyArray<string>, string]>): ReadonlyMap<string, RegExp> {
+  return new Map(list.map(([k, ids]) => [k, new RegExp(`(?<![\\p{L}\\p{N}])(?:${ids.map(reEsc).join('|')})(?![\\p{L}\\p{N}])`, 'gu')]))
+}
+const FIELD_IDS: ReadonlyMap<string, RegExp> = fieldIdPatterns(FIELD_IDS_OF_A_KEY)
 /** T9: a key of FIELD_IDS_OF_A_KEY, and its value, with the listed ids taken out — whole words, whatever stands around them. */
-const FIELD_IDS: ReadonlyMap<string, RegExp> = new Map(FIELD_IDS_OF_A_KEY.map(([k, ids]) => [k, new RegExp(`(?<![\\p{L}\\p{N}])(?:${ids.map(reEsc).join('|')})(?![\\p{L}\\p{N}])`, 'gu')]))
-function withoutFieldIds(key: string, value: string): [string, string] {
-  const re = FIELD_IDS.get(key)
+function withoutFieldIds(key: string, value: string, patterns: ReadonlyMap<string, RegExp> = FIELD_IDS): [string, string] {
+  const re = patterns.get(key)
   return re ? [key.replace(re, ' '), value.replace(re, ' ')] : [key, value]
 }
 
@@ -1565,29 +1572,42 @@ test('T9 catches a copied English sentence — in a French value (§3 B3\'s muta
   caught('T9', nls, 'fr', cleanFr, 'package.nls.fr.json: description')
 })
 
-test('T9 lets the field ids a key lists stand in a language of another script — O2\'s Japanese, Korean and Russian values —, and catches English beside them and the same four words in another key (1.12 O2, the lead at the merge)', () => {
-  assert.equal(FIELD_IDS_OF_A_KEY.length, 1)
-  const [key, ids, why] = FIELD_IDS_OF_A_KEY[0]
-  assert.equal(key, 'Set host, user, from and to in tokenPace.notifications.email first.')
-  assert.deepEqual([...ids], ['host', 'user', 'from', 'to'])
-  assert.ok(why.trim().length > 10, 'no reason')
+// 1.13 P6 (pinned and changed: FIELD_IDS_OF_A_KEY is empty — §3 B3, §7a Q17): 1.12's key writes its ids as code, so
+// the list holds nothing and this guard's own cases run on a synthetic key and a synthetic list of the same shape; the
+// real key is held by T9 with no exception — its ids in backticks pass as code, the bare ids of 1.12 fail again.
+test('T9 lets the field ids a key lists stand in a language of another script — on a synthetic key since 1.13 B3 retired the one real entry —, catches English beside them and the same words in another key, and holds the SMTP hint whose ids are code now (1.12 O2; 1.13 B3)', () => {
+  // The list is empty, and "every key of the list is a bundle key" holds of it (as it will of a later entry).
+  assert.deepEqual([...FIELD_IDS_OF_A_KEY], [])
   for (const [k] of FIELD_IDS_OF_A_KEY) assert.ok(src().keys.includes(k), `${J(k)} is not a key of the bundle`)
-  // Whole words only: hosted, users and fromage are none of the ids; the ids of a key stay in every other key.
-  assert.deepEqual(wordsOf(withoutFieldIds(key, 'vor host nach hosted users fromage to')[1]), ['vor', 'nach', 'hosted', 'users', 'fromage'])
-  assert.deepEqual(withoutFieldIds('another key', 'host user from to'), ['another key', 'host user from to'])
+  // The mechanism, on a synthetic list: whole words only — alphabet, betas and gammas are none of the ids —, and the ids
+  // of a key stay English words in every other key.
+  const synthetic = fieldIdPatterns([['Set alpha, beta and gamma in tokenPace.synthetic first.', ['alpha', 'beta', 'gamma'], 'a synthetic key naming three field ids']])
+  const key = 'Set alpha, beta and gamma in tokenPace.synthetic first.'
+  assert.deepEqual(wordsOf(withoutFieldIds(key, 'vor alpha nach alphabet betas gammas beta', synthetic)[1]), ['vor', 'nach', 'alphabet', 'betas', 'gammas'])
+  assert.deepEqual(withoutFieldIds('another key', 'alpha beta gamma', synthetic), ['another key', 'alpha beta gamma'])
+  assert.deepEqual(withoutFieldIds(key, 'alpha beta gamma'), [key, 'alpha beta gamma'], 'the real (empty) list takes nothing out')
+  // The SMTP hint of 1.13: its ids are code spans, which T9's PROTECTED takes out — O2's Japanese, Korean and Russian
+  // values with the backticks pass without an exception.
+  const smtp = 'Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.'
+  assert.ok(src().keys.includes(smtp), 'the SMTP hint is not a key of the bundle')
+  assert.equal(src().keys.includes('Set host, user, from and to in tokenPace.notifications.email first.'), false, '1.12\'s key is still in src/')
   const clean = fixture('pseudo', 'ja')
   for (const value of [
-    '先に tokenPace.notifications.email で host、user、from、to を設定してください。',
-    '먼저 tokenPace.notifications.email에서 host, user, from, to를 설정하십시오.',
-    'Сначала задайте host, user, from и to в tokenPace.notifications.email.',
+    '先に tokenPace.notifications.email で `host`、`user`、`from`、`to` を設定してください。',
+    '먼저 tokenPace.notifications.email에서 `host`, `user`, `from`, `to`를 설정하십시오.',
+    'Сначала задайте `host`, `user`, `from` и `to` в tokenPace.notifications.email.',
   ]) {
     const dir = fixture('pseudo', 'ja')
-    editKey(dir, 'ja', key, () => value)
+    editKey(dir, 'ja', smtp, () => value)
     assert.deepEqual(run('T9', dir, 'ja'), [], value)
   }
+  // 1.13 B3's mutation, on the value: the ids bare again (1.12's form) read as three Latin words in a row — the list is empty.
+  const bare = fixture('pseudo', 'ja')
+  editKey(bare, 'ja', smtp, () => '先に tokenPace.notifications.email で host、user、from、to を設定してください。')
+  caught('T9', bare, 'ja', clean, J(smtp), 'three Latin words in a row: "host user from"')
   const beside = fixture('pseudo', 'ja')
-  editKey(beside, 'ja', key, () => '先に host、user、from、to in the settings を設定してください。')
-  caught('T9', beside, 'ja', clean, J(key), 'three Latin words in a row: "in the settings"')
+  editKey(beside, 'ja', smtp, () => '先に `host`、`user`、`from`、`to` in the settings を設定してください。')
+  caught('T9', beside, 'ja', clean, J(smtp), 'three Latin words in a row: "in the settings"')
   const other = keyWhere((k) => k === 'Not enough data for a summary yet.')
   const elsewhere = fixture('pseudo', 'ja')
   editKey(elsewhere, 'ja', other, (v) => `${v} host user from`)
@@ -1872,10 +1892,12 @@ test('T15: the fixture builds the English examples of package.nls.json word for 
     'budget 63%',
   ])
   assert.deepEqual(BAR_EXEMPT, [])
-  // The German bar's words (§3 B3): „Reset in 2h14m", „Reset um 06:00", „heute" — T15 over the German files holds them.
+  // The German bar's words (§3 B3): „Reset in 2h14m", „Reset: 06:00", „heute" — T15 over the German files holds them.
+  // 1.13 P6 (pinned and changed: „Reset um 06:00", „· Reset um Mo 06:00", „Reset um 06:00 (in 2h14m)" → the label form
+  // „Reset: …" — §3 B5 rule 2, §7a Q18): the examples follow the bar.
   const de = readTable(join(ROOT, 'package.nls.de.json'))
   assert.deepEqual(Object.keys(BAR_EXAMPLE_KEYS).flatMap((k) => quotedExamples(de[k])), [
-    'CC 5h 25% · Reset in 2h14m', 'CC 5h 25% · Reset um 06:00', '· Reset um Mo 06:00', 'CC 5h 25% · Reset um 06:00 (in 2h14m)',
+    'CC 5h 25% · Reset in 2h14m', 'CC 5h 25% · Reset: 06:00', '· Reset: Mo 06:00', 'CC 5h 25% · Reset: 06:00 (in 2h14m)',
     'CC 5h ██▁▁▁▁▁▁ 25% · Reset in 2h14m', 'CC 25%·2h14m | 69%·6d', 'TP 25% ▲',
     'Σ 3,1M · heute', 'Σ 12,3M · 7d', 'Σ 48,9M · 30d', '06:00 AM', '06:00',
     'Budget 63%',
@@ -3067,6 +3089,59 @@ test('RESET_CLOCK_KEYS: every key a t() key that holds its placeholder, and exac
   for (const [key] of RESET_CLOCK_KEYS) assert.equal(typeof german[key], 'string', `${J(key)}: no German`)
 })
 
+/**
+ * 1.13 B5 rule 2 (P6, §7a Q18): the German values of RESET_CLOCK_KEYS that write „um" before their slot — a preposition
+ * that takes a clock hour only, while the slot may hold „Mo 06:00" — each named with its key and placeholder.
+ */
+function germanResetClockProblems(bundle: Record<string, string>): string[] {
+  return RESET_CLOCK_KEYS.filter(([key, ph]) => typeof bundle[key] === 'string' && new RegExp(`(?<!\\p{L})um\\s+${reEsc(ph)}`, 'u').test(bundle[key]))
+    .map(([key, ph]) => `de: ${J(key)} writes „um ${ph}": ${J(bundle[key])}`)
+}
+
+test('the German reset clock: no German value of a RESET_CLOCK_KEYS key writes „um" before its slot — the label form „Reset: {0}" (and „leer: {3} — vor dem Reset ({4})") —, the bar two days before its reset reads „· Reset: Mo 06:00", and one „Reset um {0}" back is caught (1.13 B5 rules 2–3, §7a Q18)', () => {
+  const german = readTable(join(ROOT, 'l10n', 'bundle.l10n.de.json'))
+  assert.deepEqual(germanResetClockProblems(german), [])
+  // Every slot's German as 1.13 writes it — the label form where 1.12 wrote „um", the two formatReset keys unchanged.
+  assert.deepEqual(RESET_CLOCK_KEYS.map(([key, ph]) => [key, ph, german[key]]), [
+    ['resets at {0}', '{0}', 'Reset: {0}'],
+    ['resets at {0} (in {1})', '{0}', 'Reset: {0} (in {1})'],
+    ['{0} (in {1})', '{0}', '{0} (in {1})'],
+    ['{0} (reset due)', '{0}', '{0} (Reset fällig)'],
+    ['reset at {0}', '{0}', 'Reset: {0}'],
+    ['{0}, {1} window: {2} used — resets at {3}.', '{3}', '{0}, Fenster {1}: {2} verbraucht — Reset: {3}.'],
+    ['{0}, {1} window: exhausted — resets at {2}.', '{2}', '{0}, Fenster {1}: erschöpft — Reset: {2}.'],
+    ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{3}', '{0}, Fenster {1}: {2} verbraucht, leer: {3} — vor dem Reset ({4}).'],
+    ['{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.', '{4}', '{0}, Fenster {1}: {2} verbraucht, leer: {3} — vor dem Reset ({4}).'],
+  ])
+  // Keys outside the list keep their „um" — a clock of today, never a weekday.
+  assert.equal(german['This channel works: Token Pace can reach it. Sent at {0}.'], 'Dieser Kanal funktioniert: Token Pace erreicht ihn. Gesendet um {0}.')
+  assert.equal(german['{0}, {1} window: reset at {2} — {3} used in the new window.'], '{0}, Fenster {1}: Reset um {2} — im neuen Fenster {3} verbraucht.')
+  // The mutation: one „Reset um {0}" back, and the n=73 slots' „um" back — each caught, by key and slot.
+  assert.deepEqual(germanResetClockProblems({ ...german, 'resets at {0}': 'Reset um {0}' }), ['de: "resets at {0}" writes „um {0}": "Reset um {0}"'])
+  const n73 = '{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.'
+  assert.equal(germanResetClockProblems({ ...german, [n73]: '{0}, Fenster {1}: {2} verbraucht, leer um {3} — vor dem Reset um {4}.' }).length, 2)
+  // The bar, two days before its reset (BAR_FIXTURE.weekdayAt: Saturday 06:00, the reset Monday 06:00), in German.
+  const absolute: BarVariant = { settings: { ...NO_BAR, 'tokenPace.resetFormat': 'absolute' }, at: BAR_FIXTURE.weekdayAt }
+  const both: BarVariant = { settings: { ...NO_BAR, 'tokenPace.resetFormat': 'both' }, at: BAR_FIXTURE.weekdayAt }
+  const barIn = (bundle: Record<string, string>, v: BarVariant): string[] => {
+    try {
+      setBundle(bundle)
+      setLocale('de')
+      setLang('de')
+      return barTexts(v)
+    } finally {
+      pristine()
+    }
+  }
+  // (▲: two days before the reset a quarter spent is ahead of pace — the fixture's own verdict.)
+  assert.ok(barIn(german, absolute).includes('CC 5h 25% ▲ · Reset: Mo 06:00'), J(barIn(german, absolute)))
+  assert.ok(barIn(german, absolute).includes('· Reset: Mo 06:00'))
+  assert.ok(barIn(german, both).includes('CC 5h 25% ▲ · Reset: Mo 06:00 (in 2d)'), J(barIn(german, both)))
+  assert.equal(barIn(german, absolute).some((x) => /(?<!\p{L})um(?!\p{L})/u.test(x)), false)
+  // The mutation on the bar: „Reset um {0}" back prints „Reset um Mo 06:00" — the German the label form exists against.
+  assert.ok(barIn({ ...german, 'resets at {0}': 'Reset um {0}' }, absolute).includes('CC 5h 25% ▲ · Reset um Mo 06:00'))
+})
+
 test('RESET_CLOCK_KEYS\' scan follows a clock through a variable, a local function, a field, a wrapper and a template, stops at a t() call and at formatReset\'s relative form — and a new t(…, resetClock(…)) call beside src/ is a slot the list lacks (1.13 B5 rule 3\'s mutation)', () => {
   const dir = tempDir()
   mkdirSync(join(dir, 'x'), { recursive: true })
@@ -3146,9 +3221,13 @@ test('the brief\'s 1.13 sections: right to left — the isolates the code\'s, lo
   // Every reset-clock slot, whole, in backticks, with its placeholder.
   for (const [key, ph] of RESET_CLOCK_KEYS) assert.ok(c.includes(`\`${key}\` (${ph})`) || c.includes(`\`${key}\` (${ph} and`) || c.includes(`and ${ph})`) , `the brief does not name the slot ${ph} of ${J(key)}`)
   for (const [key] of RESET_CLOCK_KEYS) assert.ok(c.includes(`\`${key}\``), `the brief does not name the reset-clock key ${J(key)}`)
-  // T16 in the rules' list, the arrow in T4's, NON_LATIN's three in T9's, and the T9 sentence on FIELD_IDS_OF_A_KEY marked for 1.13's P6.
+  // T16 in the rules' list, the arrow in T4's, NON_LATIN's three in T9's, and the T9 sentence on a key's field ids.
+  // 1.13 P6 (pinned and changed: "(1.13: P6 empties this list with L3 — the key's ids in backticks" → the sentence P6
+  // wrote in its place — §3 B3): FIELD_IDS_OF_A_KEY is empty, the brief names the ids as code and no longer the list.
   assert.ok(flat.includes('**T16 · Direction** (1.13)'), 'the brief does not describe T16')
   assert.ok(flat.includes('in a language written right to left (Arabic, Hebrew, Persian) `→` and `←` count as one mark (1.13)'))
   assert.ok(flat.includes('and from 1.13 on Arabic, Hebrew and Persian'))
-  assert.ok(flat.includes('(1.13: P6 empties this list with L3 — the key\'s ids in backticks'))
+  assert.ok(flat.includes('A key that names a setting\'s fields by their ids writes them as code (1.13): the e-mail channel\'s setup hint has `host`, `user`, `from` and `to` in backticks — keep each in its backticks as it is (T5), and T9 takes the code out before it compares; bare, the four are English words it catches.'))
+  assert.equal(flat.includes('P6 empties this list'), false, 'the brief still announces P6')
+  assert.equal(flat.includes('FIELD_IDS_OF_A_KEY'), false, 'the brief still names the retired list')
 })

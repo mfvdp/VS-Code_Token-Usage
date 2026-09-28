@@ -76,7 +76,6 @@
   "Send anyway": "Toch versturen",
   "Send “{0}” anyway?": "“{0}” toch versturen?",
   "Send “{0}” to…": "“{0}” versturen naar…",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Stel eerst host, user, from en to in bij tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Stel eerst de chat in bij tokenPace.notifications.telegram — het token van de bot alleen zegt niet waarheen er moet worden verstuurd.",
   "Set the server in tokenPace.notifications.ntfy first.": "Stel eerst de server in bij tokenPace.notifications.ntfy.",
   "Settings": "Instellingen",

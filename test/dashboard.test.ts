@@ -153,9 +153,10 @@ function heading(...parts: string[]): string {
  * The page's glue() restated for the pins of the prompt-cache block and the keep-warm notes below (rewritten for it:
  * they pinned the bare spaces); the rule itself is tested on the page's own function ("a number stays with its unit").
  * 1.12 D2 (rewritten: glue() keeps a duration's parts together too — "1 min 10 s" is one run): the second step restated.
+ * 1.13 P6 (pinned and changed: the second step learns `m` — §3 B6): the countdown's "4 m 10 s" is one run too.
  */
 const glued = (s: string): string => s.replace(/(\d) (%|min|h|d|s|m|K|M|G)(?!\p{L})/gu, '$1\u00a0$2')
-  .replace(/(\d\u00a0(?:d|h|min)) (?=\d+\u00a0(?:h|min|s)(?!\p{L}))/gu, '$1\u00a0')
+  .replace(/(\d\u00a0(?:d|h|min|m)) (?=\d+\u00a0(?:h|min|m|s)(?!\p{L}))/gu, '$1\u00a0')
 
 /** Calls one renderer against a view model built from the defaults plus `over`. */
 function render(call: string, over: Record<string, unknown> = {}): string {
@@ -786,8 +787,10 @@ test('a German bundle reaches the page, the script inside it and the language of
   assert.ok(render('sSummary()').indexOf('Not enough data for a summary yet.') >= 0)
 })
 
-test('the German page keeps the two reset prepositions apart', () => {
-  // "in" for a countdown, "um" for a time of day: the card's fallback picks between two
+// 1.13 P6 (pinned and changed: „Reset um {0}" → the label form „Reset: {0}" — §3 B5, §7a Q18; the title with it): the
+// clock's slot may hold a weekday („Reset: Mo 06:00"), which „um" cannot take.
+test('the German page keeps the countdown and the clock apart — „Reset in 3h20m", the label form „Reset: 14:20"', () => {
+  // "in" for a countdown, the label form for a time of day: the card's fallback picks between two
   // messages precisely because one slot cannot carry both, and a page that shipped only the
   // relative one would word every window "Reset in 14:20". The strings come out of the
   // shipped bundle rather than being typed here, so what this asserts is the German a reader
@@ -795,7 +798,7 @@ test('the German page keeps the two reset prepositions apart', () => {
   const bundle = JSON.parse(
     readFileSync(join(__dirname, '..', 'l10n', 'bundle.l10n.de.json'), 'utf8'),
   ) as Record<string, string>
-  assert.equal(bundle['resets at {0}'], 'Reset um {0}')
+  assert.equal(bundle['resets at {0}'], 'Reset: {0}')
   assert.equal(bundle['resets {0}'], 'Reset in {0}')
 
   const de = makeContext()
@@ -807,14 +810,15 @@ test('the German page keeps the two reset prepositions apart', () => {
     ;(de as Record<string, unknown>).fixture = win({ reset })
     return String(nodeVm.runInContext('fbResetLine(fixture)', de))
   }
-  assert.equal(line('14:20'), 'Reset um 14:20')
+  assert.equal(line('14:20'), 'Reset: 14:20')
+  assert.equal(line('Mo 06:00'), 'Reset: Mo 06:00')
   assert.equal(line('3h20m'), 'Reset in 3h20m')
   // The word the card writes into the header row, in the language of the page.
   ;(de as Record<string, unknown>).fixture = model({
     quotas: [card({ windows: [win({ reset: '14:20', verdict: { text: 'on pace', level: 'ok' } })] })],
   })
   const card14 = String(nodeVm.runInContext('vm = fixture; sQuota()', de))
-  assert.ok(card14.indexOf('5 h · Reset um 14:20') >= 0, card14)
+  assert.ok(card14.indexOf('5 h · Reset: 14:20') >= 0, card14)
   assert.equal(card14.indexOf('Reset in 14:20'), -1, card14)
 })
 
@@ -926,7 +930,7 @@ test('a payload with no reset line reads a clock time as a time and a countdown 
   // The same fallback, asked the one question the view model's own wording never has to
   // answer: what kind of text it was handed. A countdown and a time of day take different
   // prepositions in most languages — "resets 3h20m" against "resets at 14:20", "Reset in
-  // 3h20m" against "Reset um 14:20" — so there are two messages, and a payload from a build
+  // 3h20m" against "Reset: 14:20" (1.13 B5) — so there are two messages, and a payload from a build
   // that sent a clock time in this field must reach the right one of them.
   const line = (over: Record<string, unknown>): string => {
     ;(ctx as Record<string, unknown>).fixture = win(over)
@@ -10865,7 +10869,8 @@ test('a number stays with its unit: the page\'s glue() keeps a figure and a foll
     ['2 min 前', '2 min 前'], // zh-cn
     ['占 API 等值的 54 %。', '占 API 等值的 54 %。'], // zh-tw's summary: `{2} %`
     ['Claude Code 96 % (doskonała)', 'Claude Code 96 % (doskonała)'], // pl
-    ['cools in 4 m 10 s (1 h TTL)', 'cools in 4 m 10 s (1 h TTL)'],
+    // 1.13 P6 (pinned and changed: the countdown's two parts glued too — §3 B6; DURATION_GLUE_RE learned `m`).
+    ['cools in 4 m 10 s (1 h TTL)', 'cools in 4\u00a0m\u00a010\u00a0s (1\u00a0h TTL)'],
     ['~empty in 3 h · 7 d · 12 K · 1.5 M · 2 G', '~empty in 3 h · 7 d · 12 K · 1.5 M · 2 G'],
     // A word that merely starts with a unit's letter is no unit: the unit ends where no letter follows.
     ['in 2 days, 3 hours, 5 models, 4 Mio., 3 GPT', 'in 2 days, 3 hours, 5 models, 4 Mio., 3 GPT'],
@@ -10892,7 +10897,9 @@ test('a number stays with its unit: the page\'s glue() keeps a figure and a foll
   }
 })
 
-test('a duration\'s parts stay together: glue() puts a no-break space between a glued d, h or min and a following figure with h, min or s (1.12 D2)', () => {
+// 1.13 P6 (pinned and changed: "cools in 4 m 10 s" → one run — §3 B6, the countdown's `m` joins both groups; the title's
+// units with it): the test of the countdown's forms and the rule's mutations follows this one.
+test('a duration\'s parts stay together: glue() puts a no-break space between a glued d, h, min or m and a following figure with h, min, m or s (1.12 D2; 1.13 B6)', () => {
   const g = (s: string): string => String(nodeVm.runInContext('glue(' + JSON.stringify(s) + ')', ctx))
   const nb = '\u00a0'
   // 1.11 Review 1 F4: at 260 px the ja models' turn line broke "~18 h" from "46 min". Each duration is one run now.
@@ -10905,9 +10912,9 @@ test('a duration\'s parts stay together: glue() puts a no-break space between a 
     ['3 h, 4 min', `3${nb}h, 4${nb}min`],
     // Inside a sentence, beside another figure: only the duration's own space.
     ['平均ターン時間 ~12 h 05 min · P90 ~18 h 46 min', `平均ターン時間 ~12${nb}h${nb}05${nb}min · P90 ~18${nb}h${nb}46${nb}min`],
-    // Three parts are one run too; the prompt cache's countdown writes `m`, which is not a duration part here.
+    // Three parts are one run too; since 1.13 B6 the prompt cache's countdown, which writes `m`, is one as well.
     ['1 d 2 h 3 min', `1${nb}d${nb}2${nb}h${nb}3${nb}min`],
-    ['cools in 4 m 10 s', `cools in 4${nb}m 10${nb}s`],
+    ['cools in 4 m 10 s', `cools in 4${nb}m${nb}10${nb}s`],
     // The second part's unit ends where no letter follows: "2 hours" is a word, not a unit.
     ['1 h 2 hours', `1${nb}h 2 hours`],
   ]
@@ -10918,6 +10925,42 @@ test('a duration\'s parts stay together: glue() puts a no-break space between a 
   })
   assert.ok(h.includes(`<td colspan="99" class="meta">Avg turn time ~12${nb}h${nb}05${nb}min · P90 ~18${nb}h${nb}46${nb}min</td>`), h)
   assert.ok(SOURCE.includes('return html.replace(GLUE_RE, \'$1\\u00a0$2\').replace(DURATION_GLUE_RE, \'$1\\u00a0\');'), 'glue() changed')
+})
+
+test('the prompt cache\'s countdown stays together: glue() makes "4 m 10 s" and "1 h 2 m" one run each, and leaves "5 m window" apart — the page\'s own rule and its two mutations, `m` out of either group (1.13 B6, L6, §7a Q19)', () => {
+  const nb = '\u00a0'
+  const { countdownText } = require('../src/promptCache') as typeof import('../src/promptCache')
+  // The countdown's three forms, as promptCache.ts writes them: minutes and seconds, hours and minutes, seconds alone.
+  assert.deepEqual([countdownText(250_000), countdownText(3_720_000), countdownText(42_000)], ['4 m 10 s', '1 h 2 m', '42 s'])
+  const cases: Array<[string, string]> = [
+    ['4 m 10 s', `4${nb}m${nb}10${nb}s`],
+    ['1 h 2 m', `1${nb}h${nb}2${nb}m`],
+    ['prompt cache cools in 4 m 10 s (1 h TTL)', `prompt cache cools in 4${nb}m${nb}10${nb}s (1${nb}h TTL)`],
+    ['Prompt-Cache kühlt in 2 m 42 s ab', `Prompt-Cache kühlt in 2${nb}m${nb}42${nb}s ab`],
+    // A unit followed by a word stays apart from what comes next — `m` as `h` since 1.12.
+    ['5 m window', `5${nb}m window`],
+    ['5 m 3 ms', `5${nb}m 3 ms`],
+    ['42 s', `42${nb}s`],
+  ]
+  /** glue() as the page defines it, with its duration rule replaced by `re` — the rule's own mutations. */
+  const glueWith = (re: RegExp) => (s: string): string => s.replace(/(\d) (%|min|h|d|s|m|K|M|G)(?!\p{L})/gu, '$1\u00a0$2').replace(re, '$1\u00a0')
+  const page = (s: string): string => String(nodeVm.runInContext('glue(' + JSON.stringify(s) + ')', ctx))
+  for (const [raw, want] of cases) assert.equal(page(raw), want, raw)
+  // The page's rule is the one restated here (the helper above builds the prompt-cache pins with it).
+  const rule = /const DURATION_GLUE_RE = (\/.*\/gu);/.exec(SOURCE)
+  assert.ok(rule, 'DURATION_GLUE_RE is gone')
+  assert.equal(rule[1], String.raw`/(\d\u00a0(?:d|h|min|m)) (?=\d+\u00a0(?:h|min|m|s)(?!\p{L}))/gu`)
+  for (const [raw] of cases) assert.equal(glued(raw), page(raw), raw)
+  // The mutations: `m` out of the first group tears "4 m 10 s"; out of the second, "1 h 2 m".
+  const firstOut = glueWith(/(\d\u00a0(?:d|h|min)) (?=\d+\u00a0(?:h|min|m|s)(?!\p{L}))/gu)
+  const secondOut = glueWith(/(\d\u00a0(?:d|h|min|m)) (?=\d+\u00a0(?:h|min|s)(?!\p{L}))/gu)
+  assert.notEqual(firstOut('4 m 10 s'), page('4 m 10 s'))
+  assert.equal(firstOut('4 m 10 s'), `4${nb}m 10${nb}s`)
+  assert.notEqual(secondOut('1 h 2 m'), page('1 h 2 m'))
+  assert.equal(secondOut('1 h 2 m'), `1${nb}h 2${nb}m`)
+  // On the page: the Claude card's prompt-cache line, where the countdown stands.
+  const h = render('sQuota()', { quotas: [card({ cacheWatch: cacheBlock({ lines: [{ shortId: '9d0eb37a', phase: 'cooling', source: 'bridge', text: PC_STATE, cost: null }] }) })] })
+  assert.ok(h.includes(`<div class="meta pc-line">Session Thu 11:05 · 9d0eb37a · prompt cache cools in 4${nb}m${nb}10${nb}s (1${nb}h TTL)</div>`), h)
 })
 
 test('an ISO day never breaks at its hyphen: every day the page prints stands in a .nobr span (1.10 B5 rule 2)', () => {

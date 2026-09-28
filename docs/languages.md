@@ -212,10 +212,10 @@ puts the sign first; whether a sentence writes a space before it is the language
 **At a narrow width** (1.10) a line never ends between a figure and its unit — `2 min`, `54 %`, `4 m`
 stay together in every language —, and since 1.12 a duration's parts stay together too: `~18 h 46 min`,
 `3 d 4 h` and `49 min 00 s` are one run each, so each figure of a model's turn line stays whole (`~12 h
-05 min`, `P90 ~18 h 46 min` — the line may wrap between the two, and between `P90` and its figure). The
-prompt cache's countdown (`4 m 10 s`), which writes `m`, is not one of them: it may still break between
-its parts. An ISO day never breaks at its hyphen, and a window's percentage never stands alone on a line:
-it wraps together with the verdict beside it.
+05 min`, `P90 ~18 h 46 min` — the line may wrap between the two, and between `P90` and its figure). Since
+1.13 so does the prompt cache's countdown: `4 m 10 s` and `1 h 2 m` are one run each. An ISO day never
+breaks at its hyphen, and a window's percentage never stands alone on a line: it wraps together with the
+verdict beside it.
 
 **A stacked table's label** (1.10). Where the side bar is too narrow for a table's columns and its rows
 stack, each cell prints its column's name in front of its value, with the colon the language writes:

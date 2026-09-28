@@ -76,7 +76,6 @@
   "Send anyway": "Lähetä silti",
   "Send “{0}” anyway?": "Lähetetäänkö ”{0}” silti?",
   "Send “{0}” to…": "Lähetä ”{0}” kohteeseen …",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Aseta ensin host, user, from ja to asetuksessa tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Aseta ensin chat asetuksessa tokenPace.notifications.telegram — botin tunnus ei yksin kerro, minne lähetetään.",
   "Set the server in tokenPace.notifications.ntfy first.": "Aseta ensin palvelin asetuksessa tokenPace.notifications.ntfy.",
   "Settings": "Asetukset",

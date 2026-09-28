@@ -509,7 +509,6 @@
   "Session {0}: {1}": "Sesi {0}: {1}",
   "Sessions": "Sesi",
   "Sessions and agents": "Sesi dan agen",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Atur host, user, from, dan to di tokenPace.notifications.email terlebih dahulu.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Atur chat di tokenPace.notifications.telegram terlebih dahulu — token bot saja tidak menunjukkan ke mana harus mengirim.",
   "Set the server in tokenPace.notifications.ntfy first.": "Atur server di tokenPace.notifications.ntfy terlebih dahulu.",
   "Settings": "Pengaturan",

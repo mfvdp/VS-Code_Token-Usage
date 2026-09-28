@@ -964,7 +964,10 @@ test('docs/status-bar.md quotes the settings\' own examples of the bar, word for
     assert.ok(examples.length > 0, key)
     for (const ex of examples) assert.ok(flat.includes(`\`${ex}\``), `docs/status-bar.md does not quote ${key}'s ${ex}`)
   }
-  assert.ok(flat.includes('a German bar says `· Reset in 2h14m`, `· Reset um 06:00`'))
+  // 1.13 P6 (pinned and changed: `· Reset um 06:00` → the label form `· Reset: 06:00`, and the weekday's form — §3 B5).
+  assert.ok(flat.includes('a German bar says `· Reset in 2h14m`, `· Reset: 06:00`, and `· Reset: Mo 06:00` a day or more ahead'))
+  const deNls = JSON.parse(readDoc('package.nls.de.json')) as Record<string, string>
+  assert.ok(deNls['config.resetFormat.enum.absolute'].includes('“CC 5h 25% · Reset: 06:00”, “· Reset: Mo 06:00”'), 'the German settings quote another reset form than the page')
 })
 
 test('docs/dashboard.md and docs/numbers.md name the subagent share of a window and the agent entries against the buckets, as the views write them', () => {
@@ -4551,8 +4554,10 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
     'In Finnish and Hungarian:', 'In Japanese, Korean and the two Chinese variants:', 'And in Turkish, Greek, Hindi, Indonesian and Vietnamese, each of a family of its own here:',
     'None of them is decided by an agent.',
     // D2 (with the countdown's `m` excepted — P2-O1), D8, D9.
+    // 1.13 P6 (pinned and changed: "The prompt cache's countdown (`4 m 10 s`), which writes `m`, is not one of them: it may
+    // still break between its parts." → the sentence of 1.13 B6 — the exception dropped, the countdown one run).
     '`2 min`, `54 %`, `4 m` stay together in every language —, and since 1.12 a duration\'s parts stay together too: `~18 h 46 min`, `3 d 4 h` and `49 min 00 s` are one run each',
-    'The prompt cache\'s countdown (`4 m 10 s`), which writes `m`, is not one of them: it may still break between its parts.',
+    'Since 1.13 so does the prompt cache\'s countdown: `4 m 10 s` and `1 h 2 m` are one run each.',
     'The heat map\'s weekday words are the translation\'s own, four characters at most; the weekday in front of a clock time is, English and German aside, the short form of the language\'s date format. In Danish, Vietnamese and Polish the two differ (`ti.` and `tirs.`, `T3` and `Thứ 3`, `Nd` and `niedz.`), because those forms do not fit the heat map\'s column — `tirs.` and `Thứ 3` are five characters, `niedz.` six; in the other languages they differ at most in case or a full stop.',
     'Turkish writes *Uzantı Konağı* for the extension host and *Kısıtlı Mod* for Restricted Mode, Traditional Chinese 延伸模組 for an extension, 延伸主機 for the extension host and 受限模式 for Restricted Mode',
     // What switches at once: the popups are alerts and messages, the notifications follow the language too.
@@ -4560,8 +4565,11 @@ test('the pages carry the sentences of the 1.12 documentation package, held to t
   ]) assert.ok(languages.includes(claim), `docs/languages.md does not say: ${claim}`)
   // The facts under D2, D8 and D9: the glue rule and the countdown's `m`, the weekday forms per language, the terms.
   const main = readDoc('src/webview/main.ts')
-  assert.ok(/const DURATION_GLUE_RE = \/\(\\d\\u00a0\(\?:d\|h\|min\)\)/.test(main), 'DURATION_GLUE_RE no longer glues d, h and min to a following part: say so in the docs')
+  // 1.13 P6 (pinned and changed: `(?:d|h|min)` → `(?:d|h|min|m)` in both groups — §3 B6): the countdown's parts glued.
+  assert.ok(main.includes(String.raw`const DURATION_GLUE_RE = /(\d\u00a0(?:d|h|min|m)) (?=\d+\u00a0(?:h|min|m|s)(?!\p{L}))/gu;`), 'DURATION_GLUE_RE no longer glues d, h, min and m to a following part: say so in the docs')
+  assert.equal(languages.includes('it may still break between its parts'), false, 'languages.md still excepts the countdown')
   assert.equal(countdownText(250_000), '4 m 10 s')
+  assert.equal(countdownText(3_720_000), '1 h 2 m')
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const graphemes = (s: string): number => [...new Intl.Segmenter().segment(s)].length
   const norm = (s: string): string => s.toLowerCase().replace(/\.$/, '')
@@ -4699,4 +4707,20 @@ test('the five store pictures are the pages as 1.12 draws them — compared with
     assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [w, h], `media/${file}`)
     assert.ok(README.includes(`](media/${file})`), `the README does not embed media/${file}`)
   }
+})
+
+test('the lease\'s heartbeat as quota-sources.md explains it — thirty seconds, ninety ahead, a crashed window at once, a hung one within ninety seconds —, from lease.ts\'s own constants; the Keychain\'s first read in a VS Code window (1.13 B7 rule 4, §0a.4; B1)', () => {
+  const { LEASE_RENEW_MS, LEASE_TTL_MS } = require('../src/lease') as typeof import('../src/lease')
+  assert.deepEqual([LEASE_RENEW_MS, LEASE_TTL_MS], [30_000, 90_000], 'the lease\'s interval or TTL moved: say so in quota-sources.md')
+  const q = flatText(doc.quotaSources)
+  for (const claim of [
+    'The lease is an advisory file in `globalStorage` holding a pid, a random id and an expiry. The expiry is its heartbeat: the leading window renews the lease every thirty seconds for ninety seconds ahead, and every other window checks it every thirty seconds and takes it over once its expiry has passed or its window\'s process is gone.',
+    // §0a.4's sentence, word for word.
+    'A window that crashed gives the lease up at once; one that hangs, within ninety seconds.',
+    // 1.12's sentence on the orphan app-server stays (§7a Q20: Token Pace kills no process by a pid it read).
+    'Only an extension host killed outright runs no exit handler: the child\'s input then closes, which a stdio server answers by ending — whether `codex app-server` does was not tested.',
+    // B1 (L1) in the docs: the Keychain's first read is per VS Code window.
+    'the first Keychain read in a VS Code window happens only at a fetch you started',
+  ]) assert.ok(q.includes(claim), `docs/quota-sources.md does not say: ${claim}`)
+  assert.ok(flatText(doc.settings).includes('and in a VS Code window first only when you fetch by hand'), 'docs/settings.md\'s Keychain row does not say "a VS Code window"')
 })

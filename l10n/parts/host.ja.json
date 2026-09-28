@@ -76,7 +76,6 @@
   "Send anyway": "このまま送信",
   "Send “{0}” anyway?": "「{0}」をこのまま送信しますか？",
   "Send “{0}” to…": "「{0}」の送信先…",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "先に tokenPace.notifications.email で host、user、from、to を設定してください。",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "先に tokenPace.notifications.telegram でチャットを設定してください — ボットのトークンだけでは送信先がわかりません。",
   "Set the server in tokenPace.notifications.ntfy first.": "先に tokenPace.notifications.ntfy でサーバーを設定してください。",
   "Settings": "設定",

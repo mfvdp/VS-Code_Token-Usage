@@ -613,7 +613,7 @@ export class NotifyHost {
       default: {
         const e = cfg.email
         if (e.host === '' || e.user === '' || e.from === '' || e.to === '') {
-          return this.missing(t('Set host, user, from and to in tokenPace.notifications.email first.'), 'tokenPace.notifications.email')
+          return this.missing(t('Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.'), 'tokenPace.notifications.email')
         }
         // F2: the password is the server's it was allowed for — host and port; another one asks it afresh.
         const host = smtpHost(cfg)

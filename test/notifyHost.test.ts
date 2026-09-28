@@ -331,14 +331,16 @@ test('the consent names the channel\'s host: the webhook address\'s with its por
   assert.equal(w.ui.asked[1].text, `The password or app password of ${USER} on the SMTP server. It is kept in VS Code's secret storage.`)
 })
 
-test('the setup checks: Telegram without a chat, ntfy without a server, e-mail without host, user, from or to — the check with Open Settings at its key, no box, nothing stored (1.12 C13)', async () => {
+// 1.13 P6 (pinned and changed: the e-mail check's message writes its field ids in backticks — §3 B3, §7a Q17; VS Code's
+// information message shows them as typed, the notation of the manifest's descriptions).
+test('the setup checks: Telegram without a chat, ntfy without a server, e-mail without host, user, from or to — the check with Open Settings at its key, no box, nothing stored (1.12 C13; 1.13 B3)', async () => {
   const cases: Array<[string, Record<string, unknown>, string, string]> = [
     ['Telegram', { 'tokenPace.notifications.telegram': { chatId: '' } },
       'Set the chat in tokenPace.notifications.telegram first — the bot\'s token alone does not say where to send.', '@id:tokenPace.notifications.telegram'],
     ['ntfy', { 'tokenPace.notifications.ntfy': { server: 'http://ntfy.synthetic-host.example' } },
       'Set the server in tokenPace.notifications.ntfy first.', '@id:tokenPace.notifications.ntfy'],
     ['E-mail (SMTP)', { 'tokenPace.notifications.email': { host: SMTP_HOST, port: 587, security: 'starttls', user: USER, from: FROM, to: '' } },
-      'Set host, user, from and to in tokenPace.notifications.email first.', '@id:tokenPace.notifications.email'],
+      'Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.', '@id:tokenPace.notifications.email'],
   ]
   for (const [label, cfg, text, query] of cases) {
     const w = world({ cfg })

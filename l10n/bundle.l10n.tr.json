@@ -509,7 +509,6 @@
   "Session {0}: {1}": "Oturum {0}: {1}",
   "Sessions": "Oturumlar",
   "Sessions and agents": "Oturumlar ve ajanlar",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Önce tokenPace.notifications.email içinde host, user, from ve to değerlerini ayarlayın.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Önce tokenPace.notifications.telegram içinde sohbeti ayarlayın — botun belirteci tek başına nereye gönderileceğini söylemez.",
   "Set the server in tokenPace.notifications.ntfy first.": "Önce tokenPace.notifications.ntfy içinde sunucuyu ayarlayın.",
   "Settings": "Ayarlar",

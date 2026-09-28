@@ -509,7 +509,6 @@
   "Session {0}: {1}": "セッション {0}: {1}",
   "Sessions": "セッション",
   "Sessions and agents": "セッションとエージェント",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "先に tokenPace.notifications.email で host、user、from、to を設定してください。",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "先に tokenPace.notifications.telegram でチャットを設定してください — ボットのトークンだけでは送信先がわかりません。",
   "Set the server in tokenPace.notifications.ntfy first.": "先に tokenPace.notifications.ntfy でサーバーを設定してください。",
   "Settings": "設定",

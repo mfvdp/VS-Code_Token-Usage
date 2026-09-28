@@ -509,7 +509,6 @@
   "Session {0}: {1}": "Sessione {0}: {1}",
   "Sessions": "Sessioni",
   "Sessions and agents": "Sessioni e agenti",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Impostare prima host, user, from e to in tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Impostare prima la chat in tokenPace.notifications.telegram — il token del bot da solo non dice dove inviare.",
   "Set the server in tokenPace.notifications.ntfy first.": "Impostare prima il server in tokenPace.notifications.ntfy.",
   "Settings": "Impostazioni",

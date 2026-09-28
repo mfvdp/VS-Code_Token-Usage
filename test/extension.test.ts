@@ -19,7 +19,7 @@
  */
 
 import { strict as assert } from 'node:assert'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { after, before, test } from 'node:test'
 import * as fs from 'fs'
 import * as os from 'os'
@@ -32,6 +32,7 @@ import {
 import {
   createFakeContext, createFakeVscode, disposeAll, FakeExtensionContext, fakeSecrets, FakeVscodeState, installVscodeStub,
 } from './helpers/fakeVscode'
+import { fakeAppServer, pgrepCount, pidAlive, pidGone } from './helpers/fakeAppServer'
 // Shapes and constants only: agentTree.ts imports nothing, so loading it early reads no setting.
 import { AgentTreeVm, EARLIER_KEY, emptyAgentTree, TreeNode } from '../src/agentTree'
 // Type-only, so the bundle still requires `../src/extension` lazily — see `activateHost`, and
@@ -717,6 +718,94 @@ test('a live foreign lease makes the window a follower: no cold scan, no snapsho
 
   assert.deepEqual(disposeAll(LIVE.pop()!), [])
   assert.equal(fs.existsSync(fx.stateFile), false, 'a follower wrote the snapshot on the way out')
+})
+
+test('1.13 B7 (c): a follower takes the lease over at its next check once the leader\'s process is gone, and its quota manager then starts its own standing connection — the fake app-server, one child, ended with the window (§0a.4, §7a Q20; 1.12 A1 rule 2)', async (t) => {
+  const { QuotaManager } = require('../src/quotaManager') as typeof import('../src/quotaManager')
+  const { PersistentAppServer } = require('../src/appServer') as typeof import('../src/appServer')
+  const { LEASE_RENEW_MS, LEASE_TTL_MS } = require('../src/lease') as typeof import('../src/lease')
+  const dir = tmpDir('tp-lease-takeover')
+  const fake = fakeAppServer(dir)
+  // The one seam: the extension's QuotaManager finds "codex" in the scratch folder and starts the stand-in through the
+  // fixture's spawner — never the real binary. Everything else is the extension's own.
+  const proto = QuotaManager.prototype as unknown as { ensureAppServer: () => void }
+  const realEnsure = proto.ensureAppServer
+  proto.ensureAppServer = function (this: { deps: Record<string, unknown> }): void {
+    this.deps.findCodexBinary = () => path.join(dir, 'codex')
+    this.deps.createAppServer = (bin: string, log: (m: string) => void) => new PersistentAppServer(bin, log, { spawnChild: fake.spawnChild })
+    realEnsure.apply(this)
+  }
+  // No request leaves the test: without a token the Claude side fetches nothing, and a fetch would be recorded here.
+  const g = globalThis as { fetch: typeof fetch }
+  const realFetch = g.fetch
+  const fetches: string[] = []
+  g.fetch = (async (url: string | URL | Request) => {
+    fetches.push(String(url))
+    throw new Error('synthetic: no network in this test')
+  }) as typeof fetch
+  const savedToken = process.env.CLAUDE_CODE_OAUTH_TOKEN
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+  const intervals = holdIntervals()
+  // The leading window's process: a child that runs until the test "crashes" it (§0b.10: killed in the finally too).
+  const leader = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' })
+  const started = Date.now()
+  try {
+    assert.ok(typeof leader.pid === 'number' && leader.pid > 0 && pidAlive(leader.pid))
+    const fx = makeFixture()
+    fs.rmSync(path.join(fx.claudeDir, '.credentials.json'), { force: true })
+    fs.mkdirSync(fx.storage, { recursive: true })
+    // Its last renewal a moment ago: the whole TTL ahead, another window's id.
+    fs.writeFileSync(fx.leaderFile, JSON.stringify({ pid: leader.pid, id: 'crashed-window-0123456789abcdef', expiresAt: Date.now() + LEASE_TTL_MS }))
+    await activateHost(fx, REPO, {
+      settings: { 'tokenPace.quotaSource': 'poll', 'tokenPace.credentials.keychain': false },
+      globalState: new Map<string, unknown>([['networkConsent', 'granted']]),
+    })
+    await waitFor('the follower role', () => state.logText().includes('Role: single → follower'))
+    // A follower never scans: give its first frame and its first quota tick every chance, then show that no child ran.
+    await sleep(300)
+    // A follower keeps no child: its quota tick — the same interval as the lease's — starts none.
+    assert.ok(intervals.fire(LEASE_RENEW_MS) >= 2, 'the lease\'s and the quota\'s intervals are not armed')
+    await sleep(100)
+    assert.equal(fake.children.length, 0, 'a follower started the app-server')
+    assert.doesNotMatch(state.logText(), /Role: follower → leader/)
+    // The leader's window crashes: its process ends (killed and reaped), its record stays as fresh as it was.
+    const exited = new Promise<void>((resolve) => leader.once('exit', () => resolve()))
+    leader.kill('SIGKILL')
+    await exited
+    assert.ok(await pidGone(leader.pid, 5000), 'the leader\'s process is still there')
+    // The next check — one interval later — takes the lease over.
+    intervals.fire(LEASE_RENEW_MS)
+    await waitFor('the leader role', () => state.logText().includes('Role: follower → leader'))
+    const held = JSON.parse(fs.readFileSync(fx.leaderFile, 'utf8')) as { pid: number; id: string }
+    assert.equal(held.pid, process.pid)
+    assert.notEqual(held.id, 'crashed-window-0123456789abcdef')
+    // The new leader's next quota tick starts its own standing connection — one child — and reads over it.
+    intervals.fire(LEASE_RENEW_MS)
+    await waitFor('the standing connection', () => state.logText().includes('codex: app-server started as a standing connection'))
+    await waitFor('a read over it', () => fake.reads() >= 1)
+    assert.equal(fake.children.length, 1)
+    assert.deepEqual(fake.argsSeen, [['app-server', '--stdio']])
+    const child = fake.children[0]
+    assert.ok(typeof child.pid === 'number' && pidAlive(child.pid))
+    await state.execute('tokenPace.copyDiagnostics')
+    assert.match(state.clipboard[state.clipboard.length - 1], /^codex connection — mode persistent · state ready · restarts 0 in the last hour · /m)
+    // Closed, the window ends its child (1.12 A4 rule 3).
+    assert.deepEqual(disposeAll(LIVE.pop()!), [])
+    assert.ok(await pidGone(child.pid, 5000), 'the standing child outlived its window')
+    assert.deepEqual(fetches, [])
+  } finally {
+    intervals.restore()
+    proto.ensureAppServer = realEnsure
+    g.fetch = realFetch
+    if (savedToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = savedToken
+    fake.killAll()
+    if (leader.exitCode === null && leader.signalCode === null) leader.kill('SIGKILL')
+  }
+  if (typeof leader.pid === 'number') assert.ok(await pidGone(leader.pid, 5000))
+  for (const c of fake.children) if (typeof c.pid === 'number') assert.ok(await pidGone(c.pid, 5000))
+  assert.equal(pgrepCount(fake.marker) ?? 0, 0, 'a fake app-server is left')
+  t.diagnostic(`1.13 B7 (c): activation, the takeover, the child and its end in ${Date.now() - started} ms`)
 })
 
 /** The same fixture with both transcript roots removed: nothing to read anywhere. */

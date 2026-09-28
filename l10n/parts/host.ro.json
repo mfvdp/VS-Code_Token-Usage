@@ -76,7 +76,6 @@
   "Send anyway": "Trimitere oricum",
   "Send “{0}” anyway?": "Trimiteți „{0}” oricum?",
   "Send “{0}” to…": "Trimitere „{0}” către…",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Setați mai întâi host, user, from și to în tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Setați mai întâi chatul în tokenPace.notifications.telegram — tokenul botului singur nu spune unde să se trimită.",
   "Set the server in tokenPace.notifications.ntfy first.": "Setați mai întâi serverul în tokenPace.notifications.ntfy.",
   "Settings": "Setări",

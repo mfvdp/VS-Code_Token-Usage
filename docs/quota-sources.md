@@ -131,12 +131,12 @@ its *Allow* covers both; if you allowed fetching before 1.12, *Fetch Quota Now* 
 (asked again at the next *Fetch Quota Now*). macOS itself may then ask whether `security` may use
 the item: choose *Always Allow* — with *Allow* alone it asks at every read, and Token Pace then
 reads the Keychain only when you fetch by hand. Because that question may appear, the first Keychain
-read of a window happens only at a fetch you started (*Fetch Quota Now*, or the *Allow* of a consent
-dialog). Fetches in the background — the interval, a reset's re-poll, the sign-in watchers, a window
-taking over the lease — read the Keychain only after such a read brought the token within a second,
-so no dialog stood in the way; a read that took longer, failed or timed out holds them back until
-the next fetch by hand. A fetch by hand waits up to 30 seconds for the Keychain's answer — time to
-answer macOS's question —; a read in the background, and Linux's `secret-tool`, 5 seconds. A
+read in a VS Code window happens only at a fetch you started (*Fetch Quota Now*, or the *Allow* of a
+consent dialog). Fetches in the background — the interval, a reset's re-poll, the sign-in watchers,
+a window taking over the lease — read the Keychain only after such a read brought the token within a
+second, so no dialog stood in the way; a read that took longer, failed or timed out holds them back
+until the next fetch by hand. A fetch by hand waits up to 30 seconds for the Keychain's answer —
+time to answer macOS's question —; a read in the background, and Linux's `secret-tool`, 5 seconds. A
 background fetch that skipped the Keychain and found no token in the variable or the file says so in
 the tooltip and on the card: *No token without the macOS Keychain, which is read in the background
 only after you fetched by hand — run "Token Pace: Fetch Quota Now"*. The log names each step without
@@ -216,13 +216,16 @@ zeroed by us.
 
 ## Several windows open
 
-`tokenPace.leaderElection` (on by default) lets one VS Code window do the reading and fetching
-while the others follow its files, so several windows do not hammer the same rate-limit bucket
-or fight over the stored history. The lease is an advisory file in `globalStorage` holding a pid,
-a random id and an expiry. The governing rule is **in doubt, poll yourself**: an unreadable or
-stale lease looks acquirable, because a window that wrongly believes it leads costs one extra
-request, while a window that wrongly believes it follows shows stale figures forever. A follower
-says so in the tooltip and still fetches on an explicit *Fetch Quota Now*.
+`tokenPace.leaderElection` (on by default) lets one VS Code window do the reading and fetching while
+the others follow its files, so several windows do not hammer the same rate-limit bucket or fight
+over the stored history. The lease is an advisory file in `globalStorage` holding a pid, a random id
+and an expiry. The expiry is its heartbeat: the leading window renews the lease every thirty seconds
+for ninety seconds ahead, and every other window checks it every thirty seconds and takes it over
+once its expiry has passed or its window's process is gone. A window that crashed gives the lease up
+at once; one that hangs, within ninety seconds. The governing rule is **in doubt, poll yourself**:
+an unreadable or stale lease looks acquirable, because a window that wrongly believes it leads costs
+one extra request, while a window that wrongly believes it follows shows stale figures forever. A
+follower says so in the tooltip and still fetches on an explicit *Fetch Quota Now*.
 
 **Focus gating.** With `tokenPace.pollOnlyWhenFocused` (default on) a window that has been in
 the background for more than ten minutes stops its scheduled fetches; regaining focus after that

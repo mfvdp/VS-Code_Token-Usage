@@ -76,7 +76,7 @@
   "Send anyway": "Trotzdem senden",
   "Send “{0}” anyway?": "„{0}“ trotzdem senden?",
   "Send “{0}” to…": "„{0}“ senden an …",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Legen Sie zuerst host, user, from und to in tokenPace.notifications.email fest.",
+  "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.": "Legen Sie zuerst `host`, `user`, `from` und `to` in tokenPace.notifications.email fest.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Legen Sie zuerst den Chat in tokenPace.notifications.telegram fest — das Token des Bots allein sagt nicht, wohin gesendet wird.",
   "Set the server in tokenPace.notifications.ntfy first.": "Legen Sie zuerst den Server in tokenPace.notifications.ntfy fest.",
   "Settings": "Einstellungen",
@@ -211,10 +211,10 @@
   "{0} — {1} ({2} used)": "{0} — {1} ({2} verbraucht)",
   "{0} — {1} of {2} ({3})": "{0} — {1} von {2} ({3})",
   "{0} — {1} of {2} ({3}, lower bound)": "{0} — {1} von {2} ({3}, Untergrenze)",
-  "{0}, {1} window: exhausted — resets at {2}.": "{0}, Fenster {1}: erschöpft — Reset um {2}.",
+  "{0}, {1} window: exhausted — resets at {2}.": "{0}, Fenster {1}: erschöpft — Reset: {2}.",
   "{0}, {1} window: exhausted.": "{0}, Fenster {1}: erschöpft.",
   "{0}, {1} window: reset at {2} — {3} used in the new window.": "{0}, Fenster {1}: Reset um {2} — im neuen Fenster {3} verbraucht.",
-  "{0}, {1} window: {2} used — resets at {3}.": "{0}, Fenster {1}: {2} verbraucht — Reset um {3}.",
-  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, Fenster {1}: {2} verbraucht, leer um {3} — vor dem Reset um {4}.",
+  "{0}, {1} window: {2} used — resets at {3}.": "{0}, Fenster {1}: {2} verbraucht — Reset: {3}.",
+  "{0}, {1} window: {2} used, runs out at {3} — before it resets at {4}.": "{0}, Fenster {1}: {2} verbraucht, leer: {3} — vor dem Reset ({4}).",
   "{0}, {1} window: {2} used.": "{0}, Fenster {1}: {2} verbraucht."
 }

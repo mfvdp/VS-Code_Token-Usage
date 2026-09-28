@@ -76,7 +76,6 @@
   "Send anyway": "Yine de gönder",
   "Send “{0}” anyway?": "“{0}” istemi yine de gönderilsin mi?",
   "Send “{0}” to…": "“{0}” istemini şuraya gönder…",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Önce tokenPace.notifications.email içinde host, user, from ve to değerlerini ayarlayın.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Önce tokenPace.notifications.telegram içinde sohbeti ayarlayın — botun belirteci tek başına nereye gönderileceğini söylemez.",
   "Set the server in tokenPace.notifications.ntfy first.": "Önce tokenPace.notifications.ntfy içinde sunucuyu ayarlayın.",
   "Settings": "Ayarlar",

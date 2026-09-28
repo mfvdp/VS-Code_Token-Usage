@@ -509,7 +509,6 @@
   "Session {0}: {1}": "세션 {0}: {1}",
   "Sessions": "세션",
   "Sessions and agents": "세션 및 에이전트",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "먼저 tokenPace.notifications.email에서 host, user, from, to를 설정하십시오.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "먼저 tokenPace.notifications.telegram에서 채팅을 설정하십시오 — 봇 토큰만으로는 어디로 보낼지 알 수 없습니다.",
   "Set the server in tokenPace.notifications.ntfy first.": "먼저 tokenPace.notifications.ntfy에서 서버를 설정하십시오.",
   "Settings": "설정",

@@ -509,7 +509,6 @@
   "Session {0}: {1}": "Session {0}: {1}",
   "Sessions": "Sessioner",
   "Sessions and agents": "Sessioner og agenter",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Angiv først host, user, from og to i tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Angiv først chatten i tokenPace.notifications.telegram — botens token alene siger ikke, hvor der skal sendes hen.",
   "Set the server in tokenPace.notifications.ntfy first.": "Angiv først serveren i tokenPace.notifications.ntfy.",
   "Settings": "Indstillinger",

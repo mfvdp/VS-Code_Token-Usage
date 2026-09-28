@@ -509,7 +509,6 @@
   "Session {0}: {1}": "Munkamenet {0}: {1}",
   "Sessions": "Munkamenetek",
   "Sessions and agents": "Munkamenetek és ügynökök",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Előbb állítsa be a host, user, from és to mezőt a tokenPace.notifications.email beállításban.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Előbb állítsa be a csevegést a tokenPace.notifications.telegram beállításban — a bot tokenje önmagában nem mondja meg, hová kell küldeni.",
   "Set the server in tokenPace.notifications.ntfy first.": "Előbb állítsa be a kiszolgálót a tokenPace.notifications.ntfy beállításban.",
   "Settings": "Beállítások",

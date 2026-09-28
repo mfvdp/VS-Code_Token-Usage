@@ -76,7 +76,6 @@
   "Send anyway": "Přesto odeslat",
   "Send “{0}” anyway?": "Přesto odeslat „{0}“?",
   "Send “{0}” to…": "Odeslat „{0}“ do …",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Nejprve nastavte host, user, from a to v tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Nejprve nastavte chat v tokenPace.notifications.telegram — samotný token bota neříká, kam posílat.",
   "Set the server in tokenPace.notifications.ntfy first.": "Nejprve nastavte server v tokenPace.notifications.ntfy.",
   "Settings": "Nastavení",

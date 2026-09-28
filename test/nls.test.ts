@@ -380,3 +380,25 @@ test('the auto hour cycle says what the code reads — the operating system\'s c
   assert.ok(readFileSync(join(ROOT, 'src', 'time.ts'), 'utf8').includes("new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle"),
     'the hour cycle of auto is read another way: say so in config.resetHourCycle.enum.auto')
 })
+
+test('the three 1.12 leftovers of the manifest, in both languages: the Keychain\'s first read in a VS Code window, Telegram\'s channel apart from the notification channel, the app-server as the subject of its end (1.13 B1, B2, B4 — L1, L2, L4)', () => {
+  const en = (k: string): string => englishNls[k]
+  const de = (k: string): string => germanNls[k]
+  // B1 (L1): "a VS Code window" — the Keychain is read per window, and a window of what is now said.
+  const keychain = 'config.credentials.keychain.description'
+  assert.ok(en(keychain).includes('The first read in a VS Code window happens only when you fetch by hand, because macOS may ask you once.'), en(keychain))
+  assert.ok(de(keychain).includes('Das erste Lesen in einem VS-Code-Fenster geschieht erst, wenn Sie von Hand abrufen, weil macOS einmal fragen kann.'), de(keychain))
+  // The mutation "of a window" back: neither 1.12 sentence is left.
+  assert.equal(en(keychain).includes('of a window'), false)
+  assert.equal(de(keychain).includes('eines Fensters'), false)
+  // B2 (L2): the setting is "sending through a Telegram bot"; "channel" is Telegram's alone.
+  const telegram = 'config.notifications.telegram.description'
+  assert.equal(en(telegram), 'Sending through a Telegram bot. `chatId`: the chat the bot sends to — a number, or the @name of a public Telegram channel. The bot\'s token is kept in VS Code\'s secret storage.')
+  assert.equal(de(telegram), 'Senden über einen Telegram-Bot. `chatId`: der Chat, an den der Bot sendet — eine Zahl oder der @Name eines öffentlichen Telegram-Kanals. Das Token des Bots bleibt im geschützten Speicher von VS Code.')
+  assert.equal(/a public channel|The Telegram channel/.test(en(telegram)), false, 'the 1.12 senses of "channel" are back')
+  // B4 (L4): the app-server ends, not the mode; the German „er endet" was unambiguous and stays.
+  const mode = 'config.codexAppServer.mode.description'
+  assert.ok(en(mode).includes('asks it over the same connection; the app-server ends when VS Code closes, when another window takes over fetching or fetching is switched off, and restarts after a growing wait if it exits.'), en(mode))
+  assert.equal(en(mode).includes('; it ends'), false)
+  assert.ok(de(mode).includes('und fragt ihn über dieselbe Verbindung; er endet, wenn VS Code schließt, ein anderes Fenster das Abrufen übernimmt oder der Abruf ausgeschaltet wird'), de(mode))
+})

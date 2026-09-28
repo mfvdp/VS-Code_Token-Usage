@@ -75,15 +75,16 @@ const post = (m: unknown): void => vscode.postMessage(m);
  */
 const GLUE_RE = /(\d) (%|min|h|d|s|m|K|M|G)(?!\p{L})/gu;
 /**
- * 1.12 D2 (1.11 Review 1 F4): a duration's parts stay together. After GLUE_RE, the space between a glued `<n> d|h|min`
- * and a following `<n> h|min|s` — the unit ending where no letter follows — becomes a no-break space too, so
+ * 1.12 D2 (1.11 Review 1 F4): a duration's parts stay together. After GLUE_RE, the space between a glued `<n> d|h|min|m`
+ * and a following `<n> h|min|m|s` — the unit ending where no letter follows — becomes a no-break space too, so
  * "~18 h 46 min", "3 d 4 h" and "49 min 00 s" are each one unbreakable run (at 260 px the ja models' turn line broke
- * "~18 h" from "46 min"). A unit followed by a word ("5 h window") or a comma ("3 h, 4 min") is left alone. Only the
- * notation units h, d, min and s: the code writes the page's durations the same in every language (stats.ts
- * durationText, agentTreeBuild.ts spanText, time.ts relativeTime) and no bundle translates a duration's units. The
- * prompt cache's countdown ("3 m 40 s", promptCache.ts countdownText) writes `m` and is not one of them.
+ * "~18 h" from "46 min"). A unit followed by a word ("5 h window", "5 m window") or a comma ("3 h, 4 min") is left
+ * alone. Only the notation units d, h, min, m and s: the code writes the page's durations the same in every language
+ * (stats.ts durationText, agentTreeBuild.ts spanText, time.ts relativeTime) and no bundle translates a duration's units.
+ * 1.13 B6 (L6, §7a Q19): the prompt cache's countdown (promptCache.ts countdownText — "4 m 10 s", "1 h 2 m") writes
+ * `m`, which joins both groups: its parts are one run too (1.12 left them apart).
  */
-const DURATION_GLUE_RE = /(\d\u00a0(?:d|h|min)) (?=\d+\u00a0(?:h|min|s)(?!\p{L}))/gu;
+const DURATION_GLUE_RE = /(\d\u00a0(?:d|h|min|m)) (?=\d+\u00a0(?:h|min|m|s)(?!\p{L}))/gu;
 function glue(html: string): string {
   return html.replace(GLUE_RE, '$1\u00a0$2').replace(DURATION_GLUE_RE, '$1\u00a0');
 }

@@ -509,7 +509,6 @@
   "Session {0}: {1}": "सत्र {0}: {1}",
   "Sessions": "सत्र",
   "Sessions and agents": "सत्र और एजेंट",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "पहले tokenPace.notifications.email में host, user, from और to सेट करें।",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "पहले tokenPace.notifications.telegram में चैट सेट करें — केवल बॉट का टोकन यह नहीं बताता कि कहाँ भेजना है।",
   "Set the server in tokenPace.notifications.ntfy first.": "पहले tokenPace.notifications.ntfy में सर्वर सेट करें।",
   "Settings": "सेटिंग्स",

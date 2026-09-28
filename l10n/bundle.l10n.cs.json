@@ -509,7 +509,6 @@
   "Session {0}: {1}": "Relace {0}: {1}",
   "Sessions": "Relace",
   "Sessions and agents": "Relace a agenti",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Nejprve nastavte host, user, from a to v tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Nejprve nastavte chat v tokenPace.notifications.telegram — samotný token bota neříká, kam posílat.",
   "Set the server in tokenPace.notifications.ntfy first.": "Nejprve nastavte server v tokenPace.notifications.ntfy.",
   "Settings": "Nastavení",

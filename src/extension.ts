@@ -69,7 +69,7 @@ import { hookPermissionOpen, KEEP_WARM_LINE } from './keepWarm'
 import { folderSessions, KEEPWARM_CANCEL_COMMAND, KEEPWARM_FILE_NAME, KeepWarmHost } from './keepWarmHost'
 import { availableLanguages, bundleFileName, readBundle } from './languageLoad'
 import { LanguageId, LanguageSetting, ResolvedLanguage, resolveLanguage, vscodeLanguageTag } from './languages'
-import { Lease } from './lease'
+import { Lease, LEASE_RENEW_MS } from './lease'
 import { NativeViews, registerNativeViews } from './nativeViews'
 import { NotifyInput } from './notify'
 import { httpsFetch } from './notifyChannels'
@@ -118,7 +118,6 @@ export const AGENT_SAVE_MS = 10_000
 const INGEST_DEBOUNCE_MS = 400
 const SWEEP_MS = 60_000
 const QUOTA_TICK_MS = 30_000
-const LEASE_MS = 30_000
 const ALERT_MS = 60_000
 const HISTORY_SAVE_MS = 5 * 60_000
 const ROLLUP_MS = 6 * 60 * 60_000
@@ -2141,7 +2140,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TokenP
     // a debug log sees which source answered while nothing at all was going on.
     logQuotaSources()
   })
-  every(LEASE_MS, updateRole)
+  every(LEASE_RENEW_MS, updateRole)
   every(ALERT_MS, () => runAlerts(Date.now()))
   every(SAVE_MS, () => {
     // A replay saves when it is done; half of one is not worth a write. A save still under way

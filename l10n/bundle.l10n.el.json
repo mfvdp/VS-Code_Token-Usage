@@ -509,7 +509,6 @@
   "Session {0}: {1}": "Συνεδρία {0}: {1}",
   "Sessions": "Συνεδρίες",
   "Sessions and agents": "Συνεδρίες και πράκτορες",
-  "Set host, user, from and to in tokenPace.notifications.email first.": "Ορίστε πρώτα host, user, from και to στο tokenPace.notifications.email.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Ορίστε πρώτα τη συνομιλία στο tokenPace.notifications.telegram — το διακριτικό του bot από μόνο του δεν λέει πού να σταλεί.",
   "Set the server in tokenPace.notifications.ntfy first.": "Ορίστε πρώτα τον διακομιστή στο tokenPace.notifications.ntfy.",
   "Settings": "Ρυθμίσεις",

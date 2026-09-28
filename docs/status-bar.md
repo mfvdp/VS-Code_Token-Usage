@@ -88,7 +88,8 @@ Part of the [Token Pace documentation](../README.md#documentation).
   `resets` (`resets at` before a clock time) — a bare `· 2h14m` would read like the age suffix,
   and the two move in opposite directions. A window whose provider states no reset time gets
   **no** countdown, ever. The settings quote these examples as the bar prints them, in each
-  language's own words (a German bar says `· Reset in 2h14m`, `· Reset um 06:00`).
+  language's own words (a German bar says `· Reset in 2h14m`, `· Reset: 06:00`, and
+  `· Reset: Mo 06:00` a day or more ahead).
 * **Age.** `showAgeInItem`: `never`, `whenStale` (default), `always`. The age is recomputed at
   every redraw, so it never freezes at the value it had when it was fetched. A reading older
   than `staleAfterMinutes` (default 20) is greyed with `tokenPace.stale`, marked in the

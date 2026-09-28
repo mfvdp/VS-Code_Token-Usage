@@ -576,17 +576,20 @@ test('every kind\'s payload: one title, the events\' sentences, the generic JSON
   assert.throws(() => payloadOf([], WORDS))
 })
 
-test('the texts in German: whole keys of the host part, the page\'s clock and percent (1.12 C3 rule 3, C13, §6)', () => {
+// 1.13 P6 (pinned and changed: the reset-clock slots' „Reset um Mi 12:00", „leer um ~13:30 — vor dem Reset um 14:00" → the
+// label form „Reset: Mi 12:00", „leer: ~13:30 — vor dem Reset (14:00)" — §3 B5, §7a Q18; the reset that happened keeps
+// its „Reset um 11:55", a clock of today, not a slot of RESET_CLOCK_KEYS).
+test('the texts in German: whole keys of the host part, the page\'s clock and percent (1.12 C3 rule 3, C13, §6; 1.13 B5)', () => {
   withGerman(() => {
     const byKind = new Map(everyKind().map((g) => [g[0].event, payloadOf(g, WORDS)]))
     const lines = [...byKind.values()].map((p) => `${p.title} | ${p.text}`)
     assert.deepEqual(lines, [
       'Token Pace: Claude Code wartet auf Sie | Claude Code wartet auf Ihre Erlaubnis (seit 11:58).\nClaude Code wartet auf Ihre Antwort (seit 11:58).',
       'Token Pace: ein langer Turn ist beendet | Claude Code hat um 11:59 einen Turn beendet, nach mindestens 13 min 30 s.',
-      'Token Pace: Kontingent-Schwelle erreicht | Claude, Fenster 7 d: 85% verbraucht — Reset um Mi 12:00.',
-      'Token Pace: Kontingent erschöpft | Claude, Fenster 7 d · Fable: erschöpft — Reset um Mi 12:00.',
+      'Token Pace: Kontingent-Schwelle erreicht | Claude, Fenster 7 d: 85% verbraucht — Reset: Mi 12:00.',
+      'Token Pace: Kontingent erschöpft | Claude, Fenster 7 d · Fable: erschöpft — Reset: Mi 12:00.',
       'Token Pace: Kontingentfenster zurückgesetzt | Claude, Fenster 5 h: Reset um 11:55 — im neuen Fenster 4% verbraucht.',
-      'Token Pace: Kontingent reicht nicht bis zum Reset | Codex, Fenster 5 h: 60% verbraucht, leer um ~13:30 — vor dem Reset um 14:00.',
+      'Token Pace: Kontingent reicht nicht bis zum Reset | Codex, Fenster 5 h: 60% verbraucht, leer: ~13:30 — vor dem Reset (14:00).',
     ])
     // The JSON stays English data.
     assert.equal(byKind.get('paceWarning')?.json.windowKind, 'session')

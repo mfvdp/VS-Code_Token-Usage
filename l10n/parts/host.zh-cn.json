@@ -76,6 +76,7 @@
   "Send anyway": "仍要发送",
   "Send “{0}” anyway?": "仍要发送“{0}”？",
   "Send “{0}” to…": "将“{0}”发送到…",
+  "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.": "请先在 tokenPace.notifications.email 中设置 `host`、`user`、`from` 和 `to`。",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "请先在 tokenPace.notifications.telegram 中设置聊天——仅凭机器人的令牌无法得知发送到哪里。",
   "Set the server in tokenPace.notifications.ntfy first.": "请先在 tokenPace.notifications.ntfy 中设置服务器。",
   "Settings": "设置",

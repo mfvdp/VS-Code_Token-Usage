@@ -76,6 +76,7 @@
   "Send anyway": "Küldés mégis",
   "Send “{0}” anyway?": "Mégis elküldi ezt: „{0}”?",
   "Send “{0}” to…": "„{0}” küldése ide…",
+  "Set `host`, `user`, `from` and `to` in tokenPace.notifications.email first.": "Előbb állítsa be a `host`, `user`, `from` és `to` mezőt a tokenPace.notifications.email beállításban.",
   "Set the chat in tokenPace.notifications.telegram first — the bot's token alone does not say where to send.": "Előbb állítsa be a csevegést a tokenPace.notifications.telegram beállításban — a bot tokenje önmagában nem mondja meg, hová kell küldeni.",
   "Set the server in tokenPace.notifications.ntfy first.": "Előbb állítsa be a kiszolgálót a tokenPace.notifications.ntfy beállításban.",
   "Settings": "Beállítások",
